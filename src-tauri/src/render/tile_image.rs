@@ -27,6 +27,7 @@ pub fn render_tile(tile: &TileData, layer: &str) -> Vec<u8> {
         "habitability" => render_habitability(tile, &mut rgba),
         "salinity" => render_salinity(tile, &mut rgba),
         "shark" => render_shark(tile, &mut rgba),
+        "shipworm" => render_shipworm(tile, &mut rgba),
         _ => render_land(tile, &mut rgba),
     }
 
@@ -409,6 +410,33 @@ fn render_shark(tile: &TileData, rgba: &mut [u8]) {
                 lerp_rgb((10, 40, 80), (210, 160, 40), v * 2.0)
             } else {
                 lerp_rgb((210, 160, 40), (200, 30, 30), (v - 0.5) * 2.0)
+            };
+            rgba[offset] = r;
+            rgba[offset + 1] = g;
+            rgba[offset + 2] = b;
+        }
+        rgba[offset + 3] = 255;
+    }
+}
+
+fn render_shipworm(tile: &TileData, rgba: &mut [u8]) {
+    for i in 0..PIXEL_COUNT {
+        let offset = i * 4;
+        if tile.terrain[i] == 1 {
+            rgba[offset + 3] = 0; // land transparent
+            continue;
+        }
+        let v = tile.shipworm_risk[i] as f32 / 255.0;
+        if v < 0.01 {
+            rgba[offset] = 8;
+            rgba[offset + 1] = 20;
+            rgba[offset + 2] = 50;
+        } else {
+            // Calm water → rotting-timber brown/orange as hazard climbs.
+            let (r, g, b) = if v < 0.5 {
+                lerp_rgb((10, 40, 80), (150, 110, 50), v * 2.0)
+            } else {
+                lerp_rgb((150, 110, 50), (140, 70, 30), (v - 0.5) * 2.0)
             };
             rgba[offset] = r;
             rgba[offset + 1] = g;

@@ -38,6 +38,7 @@ pub struct CellInfo {
     pub distance_to_ocean: f32,
     pub salinity: f32,    // PSU
     pub shark_risk: f32,  // 0..1
+    pub shipworm_risk: f32, // 0..1
     pub goods: Vec<GoodAmount>,
 }
 
@@ -104,6 +105,7 @@ pub fn get_cell_info(
         distance_to_ocean: tile.distance_to_ocean[idx],
         salinity: SAL_MIN_PSU + (tile.salinity[idx] as f32 / 255.0) * (SAL_MAX_PSU - SAL_MIN_PSU),
         shark_risk: tile.shark_risk[idx] as f32 / 255.0,
+        shipworm_risk: tile.shipworm_risk[idx] as f32 / 255.0,
         goods: (0..GOODS_COUNT)
             .filter_map(|g| {
                 let a = tile.goods[g][idx];

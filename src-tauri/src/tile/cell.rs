@@ -33,12 +33,14 @@ pub struct TileData {
     pub salinity: Vec<u8>,        // sea: 0..255 ↔ ~28-42 PSU
     pub shark_risk: Vec<u8>,      // sea: 0..255 shark-habitat danger
     pub goods: Vec<Vec<u8>>,      // [GOODS_COUNT] trade-good intensity fields (0..255)
+    pub shipworm_risk: Vec<u8>,   // sea: 0..255 shipworm (Teredo) hull-hazard. Serialized AFTER goods.
 }
 
 /// Number of trade-good sublayer fields stored per cell. See sim/biological.rs
-/// GOOD_NAMES for the ordered list. (pearls + whaling appended at indices 15,16
-/// — kept LAST so older 15-good saves still decompress, padding the new two to 0.)
-pub const GOODS_COUNT: usize = 17;
+/// GOOD_NAMES for the ordered list. New goods are appended LAST so older saves
+/// still decompress (the trailing reads pad missing goods to 0). 17 -> 21 added
+/// wheat(17), iron(18), cotton(19), gemstones(20).
+pub const GOODS_COUNT: usize = 21;
 
 impl TileData {
     pub fn new_sea() -> Self {
@@ -68,6 +70,7 @@ impl TileData {
             salinity: vec![0; N],
             shark_risk: vec![0; N],
             goods: vec![vec![0u8; N]; GOODS_COUNT],
+            shipworm_risk: vec![0; N],
         }
     }
 
@@ -107,6 +110,10 @@ impl TileData {
         for g in &self.goods {
             buf.extend_from_slice(g);
         }
+        // shipworm_risk serialized AFTER goods so it is the very last column —
+        // older saves (which end after their goods) simply pad it to zero, and a
+        // save with fewer goods pads the extra goods to zero before reaching here.
+        buf.extend_from_slice(&self.shipworm_risk);
 
         zstd::encode_all(buf.as_slice(), 3).unwrap_or(buf)
     }
@@ -144,6 +151,7 @@ impl TileData {
         for _ in 0..GOODS_COUNT {
             goods.push(read_u8(&buf, &mut offset));
         }
+        let shipworm_risk = read_u8(&buf, &mut offset);
 
         Self {
             terrain, elevation, sea_depth, is_shelf, is_shelf_edge,
@@ -152,7 +160,7 @@ impl TileData {
             fertility, fishery, current_type,
             wind_vx, wind_vy, current_vx, current_vy,
             distance_to_ocean, habitability,
-            salinity, shark_risk, goods,
+            salinity, shark_risk, goods, shipworm_risk,
         }
     }
 }

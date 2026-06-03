@@ -145,6 +145,7 @@ pub fn sim_soil_fertility(
 pub fn sim_biological(
     seed: u64,
     rivers_json: String,
+    gem_deposits: u32,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -154,9 +155,10 @@ pub fn sim_biological(
         .unwrap_or_default();
 
     biological::compute_shark_risk(&mut buf, &river_data);
-    biological::compute_trade_goods(&mut buf, &river_data, seed);
+    biological::compute_shipworm_risk(&mut buf, &river_data);
+    biological::compute_trade_goods(&mut buf, &river_data, seed, gem_deposits);
 
-    buf.save(&conn, "Biological (sharks & trade goods)")
+    buf.save(&conn, "Biological (sharks, shipworms & trade goods)")
 }
 
 /// Run all simulations in sequence (full world generation pipeline).
@@ -212,9 +214,10 @@ pub fn sim_run_all(
     let generated_settlements = settlements::generate_settlements(&buf, &habitability, seed);
     settlements::write_habitability(&mut buf, &habitability);
 
-    // Phase 8: Biological — shark waters + trade-good belts.
+    // Phase 8: Biological — shark + shipworm waters + trade-good belts.
     biological::compute_shark_risk(&mut buf, &extracted_rivers);
-    biological::compute_trade_goods(&mut buf, &extracted_rivers, seed);
+    biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
+    biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6);
 
     let modified = buf.save(&conn, "Full world generation")?;
 
@@ -301,9 +304,10 @@ pub fn sim_run_all_from_terrain(
     let generated_settlements = settlements::generate_settlements(&buf, &habitability, seed);
     settlements::write_habitability(&mut buf, &habitability);
 
-    // Phase 8: Biological — shark waters + trade-good belts.
+    // Phase 8: Biological — shark + shipworm waters + trade-good belts.
     biological::compute_shark_risk(&mut buf, &extracted_rivers);
-    biological::compute_trade_goods(&mut buf, &extracted_rivers, seed);
+    biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
+    biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6);
 
     let modified = buf.save(&conn, "Full generation from template")?;
 

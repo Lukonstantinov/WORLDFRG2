@@ -34,12 +34,16 @@ pub const GOOD_DYES: usize = 13;
 pub const GOOD_INCENSE: usize = 14;
 pub const GOOD_PEARLS: usize = 15;
 pub const GOOD_WHALING: usize = 16;
+pub const GOOD_WHEAT: usize = 17;
+pub const GOOD_IRON: usize = 18;
+pub const GOOD_COTTON: usize = 19;
+pub const GOOD_GEMSTONES: usize = 20;
 
 /// Ordered good identifiers (sent to the frontend for labels/emoji/matrix).
 pub const GOOD_NAMES: [&str; GOODS_COUNT] = [
     "silk", "wine", "oliveoil", "sugar", "frankincense", "stockfish",
     "spices", "tea", "coffee", "furs", "timber", "amber", "salt", "dyes", "incense",
-    "pearls", "whaling",
+    "pearls", "whaling", "wheat", "iron", "cotton", "gemstones",
 ];
 
 /// Domain of each good: true = its belt may sit on sea cells (marine/coastal),
@@ -50,10 +54,28 @@ pub const GOOD_MARINE: [bool; GOODS_COUNT] = [
     false, false, false, false, false, true,    // spices..amber (amber=coastal)
     false, true, false,                          // salt(land arid-coast), dyes(marine), incense(land)
     true, true,                                  // pearls, whaling (marine)
+    false, false, false, false,                  // wheat, iron, cotton, gemstones (all land)
+];
+
+/// Distribution model. true = UNLIMITED: the good fills *every* suitable area in
+/// the world (many producers). false = SEEDED: localized to one contiguous
+/// homeland (one main producer → clean trade monopolies). Gemstones use a
+/// separate deposit-placement path and ignore this flag.
+pub const GOOD_UNLIMITED: [bool; GOODS_COUNT] = [
+    false, false, false, false, false, true,    // ..stockfish (unlimited fisheries)
+    false, false, false, true, true, false,      // furs, timber unlimited
+    true, false, false,                           // salt unlimited
+    false, true,                                  // whaling unlimited
+    true, true, false, false,                     // wheat+iron unlimited; cotton seeded; gemstones special
 ];
 
 // Mountains ≥3000 m wall off a good's spread across a continent.
 const MOUNTAIN_NORM: f32 = 3000.0 / 8848.0; // ≈ 0.339
+
+// Gemstone deposits form in old highland/mountainous terrain (≥ montane).
+const GEM_MIN_ELEV: f32 = 0.40;
+/// Stone names cycled across gemstone deposits (for InfoPanel / region labels).
+pub const GEM_STONES: [&str; 5] = ["Ruby", "Sapphire", "Emerald", "Diamond", "Topaz"];
 
 // ── Small scoring helpers ──────────────────────────────────────────────────
 
@@ -175,6 +197,96 @@ pub fn compute_shark_risk(buf: &mut WorldBuffer, rivers: &[River]) {
     }
 }
 
+// ── Shipworms (Teredo) ───────────────────────────────────────────────────────
+
+/// Compute shipworm hull-hazard for sea cells. *Teredo navalis* riddles wooden
+/// ships in WARM, SHALLOW, COASTAL water and is worst where salinity is reduced
+/// (estuaries / brackish harbours) and where there is shore timber. Unlike
+/// sharks this is largely prey-independent and leans on warmth + low salinity.
+pub fn compute_shipworm_risk(buf: &mut WorldBuffer, rivers: &[River]) {
+    let w = buf.width;
+    let h = buf.height;
+    let n = buf.total();
+
+    // Coast distance for sea cells (BFS from land, bounded).
+    let max_coast = 7u32;
+    let mut coast_d = vec![u32::MAX; n];
+    let mut queue = VecDeque::new();
+    for i in 0..n {
+        if buf.terrain[i] == 1 {
+            let x = (i as u32) % w;
+            let y = (i as u32) / w;
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let nx = buf.wrap_x(x as i32 + dx);
+                let ny = buf.clamp_y(y as i32 + dy);
+                let ni = buf.idx(nx, ny);
+                if buf.terrain[ni] == 0 && coast_d[ni] > 1 {
+                    coast_d[ni] = 1;
+                    queue.push_back((nx, ny));
+                }
+            }
+        }
+    }
+    while let Some((x, y)) = queue.pop_front() {
+        let i = buf.idx(x, y);
+        let d = coast_d[i];
+        if d >= max_coast { continue; }
+        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+            let nx = buf.wrap_x(x as i32 + dx);
+            let ny = buf.clamp_y(y as i32 + dy);
+            let ni = buf.idx(nx, ny);
+            if buf.terrain[ni] == 0 && coast_d[ni] > d + 1 {
+                coast_d[ni] = d + 1;
+                queue.push_back((nx, ny));
+            }
+        }
+    }
+
+    // Estuary/river-mouth bonus (brackish water shipworms thrive in).
+    let mut river_mouth = vec![false; n];
+    for river in rivers {
+        if let Some(&(mx, my)) = river.points.last() {
+            for dy in -2i32..=2 {
+                for dx in -2i32..=2 {
+                    let nx = buf.wrap_x(mx as i32 + dx);
+                    let ny = buf.clamp_y(my as i32 + dy);
+                    river_mouth[buf.idx(nx, ny)] = true;
+                }
+            }
+        }
+    }
+
+    for y in 0..h {
+        for x in 0..w {
+            let i = buf.idx(x, y);
+            if buf.terrain[i] != 0 { buf.shipworm_risk[i] = 0; continue; }
+
+            // Warm water: shipworm activity rises sharply with temperature.
+            let warmth = smoothstep(13.0, 24.0, buf.temperature[i]);
+
+            // Shallow, coastal water where wooden ships actually sail/moor.
+            let shallow = if buf.is_shelf[i] == 1 {
+                1.0
+            } else {
+                (1.0 - (buf.sea_depth[i] - 0.10) / 0.12).clamp(0.0, 1.0)
+            };
+            let coast = if coast_d[i] == u32::MAX {
+                0.0
+            } else {
+                (1.0 - coast_d[i] as f32 / max_coast as f32).clamp(0.0, 1.0)
+            };
+
+            // Reduced salinity (estuary/brackish) is the shipworm's preferred
+            // habitat. salinity u8 0..255 ↔ 28..42 PSU, so low u8 = fresher.
+            let fresher = (1.0 - buf.salinity[i] as f32 / 255.0).clamp(0.0, 1.0);
+            let brackish = 0.45 + 0.55 * fresher + if river_mouth[i] { 0.35 } else { 0.0 };
+
+            let risk = (warmth * shallow * coast * brackish).clamp(0.0, 1.0);
+            buf.shipworm_risk[i] = q(risk);
+        }
+    }
+}
+
 // ── Trade goods ────────────────────────────────────────────────────────────
 
 /// Compute every trade-good belt. Each good's raw climate/terrain suitability is
@@ -187,12 +299,13 @@ pub fn compute_shark_risk(buf: &mut WorldBuffer, rivers: &[River]) {
 /// encoded in the score) makes it unviable. This gives each good one homeland
 /// (silk = one land, frankincense = one coast, pearls = one warm sea…) and a
 /// clear single producer for the trade matrix.
-pub fn compute_trade_goods(buf: &mut WorldBuffer, _rivers: &[River], seed: u64) {
+pub fn compute_trade_goods(buf: &mut WorldBuffer, _rivers: &[River], seed: u64, gem_deposits: u32) {
     let w = buf.width;
     let h = buf.height;
     let n = buf.total();
 
     for g in 0..GOODS_COUNT {
+        if g == GOOD_GEMSTONES { continue; } // placed separately (deposit-based)
         let mut score = vec![0.0f32; n];
         for y in 0..h {
             for x in 0..w {
@@ -201,6 +314,9 @@ pub fn compute_trade_goods(buf: &mut WorldBuffer, _rivers: &[River], seed: u64) 
         }
         buf.goods[g] = localize_good(buf, &score, g, seed);
     }
+
+    // Gemstones: global, highland-locked, multiple discrete deposits.
+    buf.goods[GOOD_GEMSTONES] = place_gem_deposits(buf, seed, gem_deposits);
 }
 
 /// Raw 0..1 suitability of good `g` at one cell (before localization).
@@ -283,6 +399,39 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
             let interior = 0.5 + 0.5 * smoothstep(0.06, 0.3, buf.distance_to_ocean[i]);
             clim * band(abs_lat, 18.0, 40.0, 10.0) * interior
         }
+        GOOD_WHEAT => {
+            // Bread-basket grain belts. Mainly Mediterranean dry-summer climates,
+            // then the broader temperate grasslands / humid-continental grain
+            // belts (steppe margins, oceanic, warm continental). Unlimited.
+            let clim = match k {
+                CSA | CSB => 1.0,                 // Mediterranean — prime wheat
+                BSK | CFA | CFB => 0.7,           // steppe margin / humid-subtropical / oceanic
+                DFA | DFB | DSA | DSB => 0.6,     // continental grain belt
+                BSH | CWA => 0.4,                 // hot steppe / dry-winter subtropical
+                _ => 0.0,
+            };
+            let warm = bell(t, 15.0, 9.0);
+            let dryish = band(p, 300.0, 900.0, 450.0); // grain likes semi-arid to subhumid
+            let low = 1.0 - smoothstep(0.45, 0.7, elev);
+            clim * warm * dryish * low * (0.5 + 0.5 * fert)
+        }
+        GOOD_IRON => {
+            // Ore in hill country and mountain margins (not the highest peaks, not
+            // the flats). Any non-frozen climate. Unlimited — many producers.
+            let relief = band(elev, 0.30, 0.68, 0.16);
+            let not_frozen = 1.0 - smoothstep(-6.0, 2.0, -t); // dampen tundra/ice
+            let volcanic = if buf.is_volcanic[i] != 0 { 1.0 } else { 0.85 };
+            relief * not_frozen.clamp(0.2, 1.0) * volcanic
+        }
+        GOOD_COTTON => {
+            // Warm subtropical river valleys / well-watered warm lowland. Seeded
+            // (one growing region).
+            let clim = match k { CFA | CWA => 1.0, BSH | AW | AS => 0.55, CSA => 0.4, _ => 0.0 };
+            let warm = smoothstep(17.0, 23.0, t);
+            let low = 1.0 - smoothstep(0.30, 0.55, elev);
+            let watered = 0.35 + 0.65 * fert; // fertility carries river/alluvial moisture
+            clim * warm * low * watered
+        }
         // ── Marine goods (no walls; the score envelope itself bounds the belt) ──
         GOOD_STOCKFISH => {
             if !sea_coastal { return 0.0; }
@@ -343,6 +492,17 @@ fn localize_good(buf: &WorldBuffer, score: &[f32], g: usize, seed: u64) -> Vec<u
         }
     };
 
+    // ── UNLIMITED goods: every suitable cell produces (many producers) ──
+    if GOOD_UNLIMITED[g] {
+        for i in 0..n {
+            if passable(i) && score[i] >= SPREAD_THRESH {
+                out[i] = q(score[i]);
+            }
+        }
+        return out;
+    }
+
+    // ── SEEDED goods: one contiguous homeland ──
     // Deterministic weighted-random seed selection.
     let gs = seed ^ (g as u64).wrapping_mul(0x9E3779B97F4A7C15);
     let mut best_seed = usize::MAX;
@@ -366,7 +526,13 @@ fn localize_good(buf: &WorldBuffer, score: &[f32], g: usize, seed: u64) -> Vec<u
         return out; // good's climate doesn't exist in this world
     };
 
-    // Flood-fill the contiguous region.
+    // Island-jump: a seeded belt may hop a narrow sea (or, for marine goods, a
+    // narrow land bridge) up to ~4% of the map width, so thin straits / island
+    // chains don't chop one homeland into several disconnected patches. We probe
+    // the 4 cardinal directions, skipping up to `jump` impassable cells to land
+    // on the next passable, in-envelope cell.
+    let jump = ((w as f32) * 0.04).round().clamp(2.0, 80.0) as i32;
+
     let mut visited = vec![false; n];
     let mut queue = VecDeque::new();
     visited[seed_cell] = true;
@@ -376,13 +542,85 @@ fn localize_good(buf: &WorldBuffer, score: &[f32], g: usize, seed: u64) -> Vec<u
         let cx = (ci as u32 % w) as i32;
         let cy = (ci as u32 / w) as i32;
         for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
-            let nx = buf.wrap_x(cx + dx);
-            let ny = cy + dy;
-            if ny < 0 || ny >= h as i32 { continue; }
-            let ni = buf.idx(nx, ny as u32);
-            if visited[ni] || !passable(ni) || score[ni] < SPREAD_THRESH { continue; }
-            visited[ni] = true;
-            queue.push_back(ni);
+            // Step 1 = ordinary neighbour; steps 2..=jump = water/land gap hops.
+            for k in 1..=jump {
+                let nx = buf.wrap_x(cx + dx * k);
+                let ny = cy + dy * k;
+                if ny < 0 || ny >= h as i32 { break; }
+                let ni = buf.idx(nx, ny as u32);
+                if !passable(ni) { continue; } // still in the gap — keep probing
+                if !visited[ni] && score[ni] >= SPREAD_THRESH {
+                    visited[ni] = true;
+                    queue.push_back(ni);
+                }
+                break; // first passable cell along this ray decides the ray
+            }
+        }
+    }
+    out
+}
+
+/// Place gemstones as a handful of discrete, highland-locked deposits scattered
+/// worldwide (global — not climate-bound). Deterministic from the world seed.
+/// `count` deposits are seeded on high (≥ montane) terrain, spaced apart, and
+/// each is grown into a small blob of nearby highland cells.
+fn place_gem_deposits(buf: &WorldBuffer, seed: u64, count: u32) -> Vec<u8> {
+    let w = buf.width as i32;
+    let h = buf.height as i32;
+    let n = buf.total();
+    let mut out = vec![0u8; n];
+    if count == 0 { return out; }
+
+    // Candidate highland cells, ranked by a deterministic weighted-random key so
+    // the same seed always picks the same deposits.
+    let gs = seed ^ 0xA1B2C3D4E5F60718u64;
+    let mut cands: Vec<(usize, f32)> = Vec::new();
+    for i in 0..n {
+        if buf.terrain[i] == 1 && buf.elevation[i] >= GEM_MIN_ELEV {
+            // Higher, more rugged ground is a touch more likely.
+            let weight = (buf.elevation[i] - GEM_MIN_ELEV) + 0.15;
+            let key = weight * hash01(gs ^ (i as u64).wrapping_mul(0x100000001B3));
+            cands.push((i, key));
+        }
+    }
+    if cands.is_empty() { return out; }
+    cands.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let min_sep = ((w as f32) * 0.06).max(6.0) as i32; // spread deposits out
+    let radius = ((w as f32) * 0.006).round().clamp(2.0, 14.0) as i32; // small blob
+    let wrap_dx = |a: i32, b: i32| -> i32 {
+        let mut d = (a - b).abs();
+        if d > w / 2 { d = w - d; }
+        d
+    };
+
+    let mut centers: Vec<(i32, i32)> = Vec::new();
+    for (i, _) in cands {
+        if centers.len() as u32 >= count { break; }
+        let cx = (i as i32) % w;
+        let cy = (i as i32) / w;
+        let far = centers.iter().all(|&(qx, qy)| {
+            let dx = wrap_dx(cx, qx);
+            let dy = cy - qy;
+            ((dx * dx + dy * dy) as f32).sqrt() >= min_sep as f32
+        });
+        if !far { continue; }
+        centers.push((cx, cy));
+
+        // Grow a small deposit blob of highland cells around the centre.
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                let d2 = (dx * dx + dy * dy) as f32;
+                if d2 > (radius * radius) as f32 { continue; }
+                let ny = cy + dy;
+                if ny < 0 || ny >= h { continue; }
+                let nx = buf.wrap_x(cx + dx);
+                let ni = buf.idx(nx, ny as u32);
+                if buf.terrain[ni] != 1 || buf.elevation[ni] < GEM_MIN_ELEV * 0.85 { continue; }
+                let falloff = 1.0 - (d2.sqrt() / (radius as f32 + 1.0));
+                let v = (0.55 + 0.45 * falloff).clamp(0.0, 1.0);
+                if q(v) > out[ni] { out[ni] = q(v); }
+            }
         }
     }
     out

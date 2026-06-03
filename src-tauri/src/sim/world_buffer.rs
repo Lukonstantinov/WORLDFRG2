@@ -39,6 +39,7 @@ pub struct WorldBuffer {
     pub salinity: Vec<u8>,         // sea: 0..255 ↔ ~28-42 PSU
     pub shark_risk: Vec<u8>,       // sea: 0..255 shark-habitat danger
     pub goods: Vec<Vec<u8>>,       // [GOODS_COUNT] trade-good intensity fields
+    pub shipworm_risk: Vec<u8>,    // sea: 0..255 shipworm hull-hazard
 }
 
 impl WorldBuffer {
@@ -85,6 +86,7 @@ impl WorldBuffer {
             salinity: vec![0; total],
             shark_risk: vec![0; total],
             goods: vec![vec![0u8; total]; GOODS_COUNT],
+            shipworm_risk: vec![0; total],
         };
 
         for ty in 0..tiles_y as i32 {
@@ -128,6 +130,7 @@ impl WorldBuffer {
                         for g in 0..GOODS_COUNT {
                             buf.goods[g][wi] = tile.goods[g][ti];
                         }
+                        buf.shipworm_risk[wi] = tile.shipworm_risk[ti];
                     }
                 }
             }
@@ -190,6 +193,7 @@ impl WorldBuffer {
                         for g in 0..GOODS_COUNT {
                             tile.goods[g][ti] = self.goods[g][wi];
                         }
+                        tile.shipworm_risk[ti] = self.shipworm_risk[wi];
                     }
                 }
 
