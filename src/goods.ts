@@ -29,6 +29,15 @@ export const GOOD_DEFS: GoodDef[] = [
   { name: "iron", label: "Iron / Ore", emoji: "⛏\u{FE0F}", color: "#9aa0a6" },
   { name: "cotton", label: "Cotton", emoji: "\u{1F9F6}", color: "#eef0e8" },
   { name: "gemstones", label: "Gemstones", emoji: "\u{1F48E}", color: "#56c8d8" },
+  { name: "hardwoods", label: "Tropical Hardwoods", emoji: "\u{1F333}", color: "#5b3a1e" },
+  { name: "horses", label: "Horses", emoji: "\u{1F40E}", color: "#b5793a" },
+  { name: "wool_fleece", label: "Fleece Wool", emoji: "\u{1F411}", color: "#e8e3d8" },
+  { name: "wool_llama", label: "Highland Wool", emoji: "\u{1F999}", color: "#c8a06a" },
+  { name: "ivory", label: "Ivory", emoji: "\u{1F418}", color: "#efe6d0" },
+  { name: "cacao", label: "Cacao", emoji: "\u{1F36B}", color: "#6b4226" },
+  { name: "copper", label: "Copper", emoji: "\u{1F7E4}", color: "#b06a3a" },
+  { name: "tin", label: "Tin", emoji: "\u{26AA}", color: "#b8bcc0" },
+  { name: "gold", label: "Gold", emoji: "\u{1F7E1}", color: "#d4af37" },
 ];
 
 /** Overlay-visibility key for a good's region toggle. */

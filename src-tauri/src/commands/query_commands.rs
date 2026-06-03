@@ -39,6 +39,8 @@ pub struct CellInfo {
     pub salinity: f32,    // PSU
     pub shark_risk: f32,  // 0..1
     pub shipworm_risk: f32, // 0..1
+    pub storm_risk: f32,  // 0..1 (annual storm potential)
+    pub reef_risk: f32,   // 0..1
     pub goods: Vec<GoodAmount>,
 }
 
@@ -106,6 +108,8 @@ pub fn get_cell_info(
         salinity: SAL_MIN_PSU + (tile.salinity[idx] as f32 / 255.0) * (SAL_MAX_PSU - SAL_MIN_PSU),
         shark_risk: tile.shark_risk[idx] as f32 / 255.0,
         shipworm_risk: tile.shipworm_risk[idx] as f32 / 255.0,
+        storm_risk: tile.storm_base[idx] as f32 / 255.0,
+        reef_risk: tile.reef_risk[idx] as f32 / 255.0,
         goods: (0..GOODS_COUNT)
             .filter_map(|g| {
                 let a = tile.goods[g][idx];
@@ -1172,6 +1176,112 @@ pub fn compute_shipworm_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, 
     Ok(zones)
 }
 
+/// Cluster the highest-risk annual storm water into danger zones (open-ocean
+/// cyclone belts; same overlay shape as shark/shipworm zones). Round 1 returns
+/// the annual (combined) field; the per-month seasonal variant arrives in Round 2.
+#[tauri::command]
+pub fn compute_storm_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+
+    let f = (grid_w / 300).max(1);
+    let cw = ((grid_w + f - 1) / f) as i32;
+    let ch = ((grid_h + f - 1) / f) as i32;
+    let mut risk = vec![0.0f32; (cw * ch) as usize];
+
+    let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
+    let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
+    for ty in 0..tiles_y as i32 {
+        for tx in 0..tiles_x as i32 {
+            let tile = tile_store::load_tile(&conn, tx, ty, 0)
+                .map_err(|e| e.to_string())?.unwrap_or_else(TileData::new_sea);
+            let base_x = tx as u32 * TILE_SIZE;
+            let base_y = ty as u32 * TILE_SIZE;
+            let max_lx = TILE_SIZE.min(grid_w - base_x);
+            let max_ly = TILE_SIZE.min(grid_h - base_y);
+            for ly in 0..max_ly {
+                for lx in 0..max_lx {
+                    let ti = (ly * TILE_SIZE + lx) as usize;
+                    let v = tile.storm_base[ti] as f32 / 255.0;
+                    if v <= 0.0 { continue; }
+                    let cx = ((base_x + lx) / f) as i32;
+                    let cy = ((base_y + ly) / f) as i32;
+                    let ci = (cy * cw + cx) as usize;
+                    if v > risk[ci] { risk[ci] = v; }
+                }
+            }
+        }
+    }
+
+    let mut zones: Vec<SharkZone> = cluster_cells(&risk, cw, ch, f, 0.50, 4)
+        .into_iter()
+        .map(|c| SharkZone { cells: c.cells, cell_size: f as f32, x: c.cx, y: c.cy, score: c.score })
+        .collect();
+    zones.sort_by(|a, b| {
+        (b.cells.len() as f32 * b.score)
+            .partial_cmp(&(a.cells.len() as f32 * a.score))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    zones.truncate(14);
+    Ok(zones)
+}
+
+/// Cluster the highest-risk reef/shoal wreck water into danger zones.
+#[tauri::command]
+pub fn compute_reef_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+
+    let f = (grid_w / 300).max(1);
+    let cw = ((grid_w + f - 1) / f) as i32;
+    let ch = ((grid_h + f - 1) / f) as i32;
+    let mut risk = vec![0.0f32; (cw * ch) as usize];
+
+    let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
+    let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
+    for ty in 0..tiles_y as i32 {
+        for tx in 0..tiles_x as i32 {
+            let tile = tile_store::load_tile(&conn, tx, ty, 0)
+                .map_err(|e| e.to_string())?.unwrap_or_else(TileData::new_sea);
+            let base_x = tx as u32 * TILE_SIZE;
+            let base_y = ty as u32 * TILE_SIZE;
+            let max_lx = TILE_SIZE.min(grid_w - base_x);
+            let max_ly = TILE_SIZE.min(grid_h - base_y);
+            for ly in 0..max_ly {
+                for lx in 0..max_lx {
+                    let ti = (ly * TILE_SIZE + lx) as usize;
+                    let v = tile.reef_risk[ti] as f32 / 255.0;
+                    if v <= 0.0 { continue; }
+                    let cx = ((base_x + lx) / f) as i32;
+                    let cy = ((base_y + ly) / f) as i32;
+                    let ci = (cy * cw + cx) as usize;
+                    if v > risk[ci] { risk[ci] = v; }
+                }
+            }
+        }
+    }
+
+    let mut zones: Vec<SharkZone> = cluster_cells(&risk, cw, ch, f, 0.55, 3)
+        .into_iter()
+        .map(|c| SharkZone { cells: c.cells, cell_size: f as f32, x: c.cx, y: c.cy, score: c.score })
+        .collect();
+    zones.sort_by(|a, b| {
+        (b.cells.len() as f32 * b.score)
+            .partial_cmp(&(a.cells.len() as f32 * a.score))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    zones.truncate(14);
+    Ok(zones)
+}
+
 #[derive(Serialize)]
 pub struct GoodRegion {
     pub good: String,
@@ -1467,6 +1577,8 @@ pub fn compute_trade_matrix(
         0.40, 0.40, 0.45, 0.35, 0.60, 0.25, // spices,tea,coffee,furs,timber,amber
         0.75, 0.30, 0.30, 0.30, 0.55,        // salt,dyes,incense,pearls,whaling
         0.85, 0.65, 0.45, 0.40,              // wheat(staple),iron,cotton,gemstones
+        0.55, 0.70, 0.50, 0.40, 0.35, 0.40,  // hardwoods,horses,wool_fleece,wool_llama,ivory,cacao
+        0.55, 0.55, 0.60,                    // copper,tin,gold
     ];
     let mut demand = vec![vec![0.0f32; GOODS_COUNT]; nr];
     for ri in 0..nr {

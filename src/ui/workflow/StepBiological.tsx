@@ -47,6 +47,8 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
       // Surface the new overlays.
       setOverlayVisible("sharkZones", true);
       setOverlayVisible("shipwormZones", true);
+      setOverlayVisible("stormZones", true);
+      setOverlayVisible("reefZones", true);
       setOverlayVisible("tradeRoutes", true);
       setOverlayVisible("tradeFlows", true);
       setStatus("Biological-Trade computed: sharks, shipworms, goods, routes & trade matrix");
@@ -105,6 +107,10 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
           style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>Shark</button>
         <button onClick={() => setLayer("shipworm")}
           style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>Shipworm</button>
+        <button onClick={() => setLayer("storm")}
+          style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>Storm</button>
+        <button onClick={() => setLayer("reef")}
+          style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>Reef</button>
         <button onClick={() => setLayer("salinity")}
           style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>Salinity</button>
       </div>

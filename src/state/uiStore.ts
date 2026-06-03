@@ -97,7 +97,7 @@ export const useUIStore = create<UIStore>((set) => ({
     rivers: true, lakes: true, settlements: true,
     markers: false, wind: false, currents: false, latLines: false,
     tradeRoutes: false, fisheryBanks: false,
-    sharkZones: false, shipwormZones: false, tradeFlows: false,
+    sharkZones: false, shipwormZones: false, stormZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false,
     ...Object.fromEntries(GOOD_DEFS.map((g) => [goodOverlayKey(g.name), false])),
   },

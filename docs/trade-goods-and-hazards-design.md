@@ -1,6 +1,18 @@
 # Trade Goods & Seasonal Hazards — Design Document
 
-Status: **DESIGN ONLY (no code yet)** · Branch: `claude/trade-goods-review-Ju0R1`
+Status: **Round 1 implemented** (Rounds 2–3 pending) · Branch: `claude/trade-goods-review-Ju0R1`
+
+> **Round 1 implementation note.** Shipped: tile-format **v2** self-describing
+> blobs + v1 migration (§4), the **8 new goods** + **3 metals** (§2, now 30
+> built-ins via generalized deposits), and **annual storm + reef** hazard fields,
+> render layers, zone overlays, and cell-inspector readouts (§3.1–3.2, §3.5).
+> **Deferred to Round 3 (with the editor that needs it):** the fully declarative
+> `GoodSpec` scorer (§1.1–1.2) and per-world/library storage (§1.6). Round 1 keeps
+> the existing const-array good model, extended to 30 and routed through a
+> generalized `place_deposits` for gemstones + metals — behavior-identical for the
+> original goods, lower-risk, and a clean base for the Round 3 refactor.
+> **Round 2 (pending):** the analytic monthly storm curve + month slider +
+> seasonal overlay + storm/reef cost feedback into routing/desire (§3.3–3.4).
 
 This document specifies three connected features for the Biological-Trade phase:
 

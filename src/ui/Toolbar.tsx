@@ -30,6 +30,8 @@ const layerGroups: { group: string; layers: { id: ActiveLayer; label: string }[]
       { id: "salinity", label: "Salinity" },
       { id: "shark", label: "Shark Waters" },
       { id: "shipworm", label: "Shipworm Waters" },
+      { id: "storm", label: "Storm Belts" },
+      { id: "reef", label: "Reef Hazards" },
     ],
   },
   {
@@ -69,6 +71,8 @@ const overlayTypes = [
 const bioOverlays = [
   { id: "sharkZones", label: "\u{1F988} Shark Zones" },
   { id: "shipwormZones", label: "\u{1FAB1} Shipworm Zones" },
+  { id: "stormZones", label: "\u{1F300} Storm Zones" },
+  { id: "reefZones", label: "\u{1FAA8} Reef Zones" },
   { id: "politicalInfluence", label: "\u{1F451} Political Influence" },
 ];
 

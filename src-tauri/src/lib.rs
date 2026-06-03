@@ -36,6 +36,8 @@ pub fn run() {
             query_commands::compute_fishery_banks,
             query_commands::compute_shark_zones,
             query_commands::compute_shipworm_zones,
+            query_commands::compute_storm_zones,
+            query_commands::compute_reef_zones,
             query_commands::compute_good_regions,
             query_commands::compute_trade_matrix,
             query_commands::compute_political,

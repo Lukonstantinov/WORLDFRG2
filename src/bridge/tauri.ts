@@ -202,6 +202,16 @@ export async function computeShipwormZones(): Promise<SharkZone[]> {
   return invoke("compute_shipworm_zones");
 }
 
+/** Cluster the highest-risk annual storm/cyclone water into danger zones. */
+export async function computeStormZones(): Promise<SharkZone[]> {
+  return invoke("compute_storm_zones");
+}
+
+/** Cluster the highest-risk reef/shoal wreck water into danger zones. */
+export async function computeReefZones(): Promise<SharkZone[]> {
+  return invoke("compute_reef_zones");
+}
+
 /** Cluster every trade-good belt into labelled regions. */
 export async function computeGoodRegions(): Promise<GoodRegion[]> {
   return invoke("compute_good_regions");

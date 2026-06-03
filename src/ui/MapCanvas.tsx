@@ -7,7 +7,7 @@ import { createPaintOverlay, drawCursorRing, paintStamp, clearPaintOverlay } fro
 import { useWorldStore } from "../state/worldStore";
 import { useViewportStore } from "../state/viewportStore";
 import { useUIStore } from "../state/uiStore";
-import { paintStroke, undoAction, redoAction, getOverlayVectors, getCurrentStreamlines, computeTradeRoutes, computeFisheryBanks, computeSharkZones, computeShipwormZones, computeGoodRegions, computeTradeMatrix, computePolitical } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, getOverlayVectors, getCurrentStreamlines, computeTradeRoutes, computeFisheryBanks, computeSharkZones, computeShipwormZones, computeStormZones, computeReefZones, computeGoodRegions, computeTradeMatrix, computePolitical } from "../bridge/tauri";
 import type { PaintValue } from "../types";
 
 /** Largest box with the world's aspect ratio that fits inside the pane. */
@@ -326,6 +326,14 @@ export function MapCanvas() {
     }).catch(() => {});
     computeShipwormZones().then((zones) => {
       om.drawShipwormZones(zones);
+      requestRender();
+    }).catch(() => {});
+    computeStormZones().then((zones) => {
+      om.drawStormZones(zones);
+      requestRender();
+    }).catch(() => {});
+    computeReefZones().then((zones) => {
+      om.drawReefZones(zones);
       requestRender();
     }).catch(() => {});
     computeGoodRegions().then((regions) => {

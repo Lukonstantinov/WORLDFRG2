@@ -40,6 +40,8 @@ export interface CellInfo {
   salinity: number;    // PSU
   shark_risk: number;  // 0..1
   shipworm_risk: number; // 0..1
+  storm_risk: number;  // 0..1
+  reef_risk: number;   // 0..1
   goods: { name: string; amount: number }[];
 }
 
@@ -54,7 +56,7 @@ export type ActiveLayer =
   | "land" | "elevation" | "climate" | "temperature" | "precipitation"
   | "soil" | "fertility" | "plates"
   | "biomes" | "fisheries" | "terrain" | "shelf" | "ridges" | "wind" | "currents"
-  | "habitability" | "salinity" | "shark" | "shipworm";
+  | "habitability" | "salinity" | "shark" | "shipworm" | "storm" | "reef";
 
 export interface VectorSample {
   x: number;
