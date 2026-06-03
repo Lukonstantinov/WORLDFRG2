@@ -1,0 +1,33 @@
+[package]
+name = "worldforge2"
+version = "0.1.0"
+edition = "2021"
+description = "WorldForge 2 - Fantasy World Map Editor"
+
+[lib]
+name = "worldforge2_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "worldforge2"
+path = "src/main.rs"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-build = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.31", features = ["bundled", "backup"] }
+zstd = "0.13"
+uuid = { version = "1", features = ["v4"] }
+rand = "0.8"
+rayon = "1.10"
+tokio = { version = "1", features = ["full"] }
+log = "0.4"
+env_logger = "0.11"
+base64 = "0.22"
+tauri-plugin-dialog = "2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "webp"] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

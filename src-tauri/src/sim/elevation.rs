@@ -1,0 +1,717 @@
+use rand::prelude::*;
+use std::collections::VecDeque;
+use super::world_buffer::WorldBuffer;
+
+// ── Seeded noise helpers ────────────────────────────────────────────────────
+
+/// Integer hash → pseudo-random float in 0..1
+fn hash_grid(x: i32, y: i32, seed: u64) -> f32 {
+    let mut h = seed as i32;
+    h = h.wrapping_mul(1).wrapping_add(x.wrapping_mul(374761393));
+    h ^= y.wrapping_mul(668265263);
+    h = h.wrapping_mul(1274126177);
+    h ^= h >> 16;
+    h = h.wrapping_mul(1911520717);
+    h ^= h >> 16;
+    (h as u32) as f32 / 4294967296.0
+}
+
+/// Value noise with cosine interpolation
+fn smooth_noise(x: f32, y: f32, seed: u64) -> f32 {
+    let ix = x.floor() as i32;
+    let iy = y.floor() as i32;
+    let fx = x - ix as f32;
+    let fy = y - iy as f32;
+    let sx = (1.0 - (fx * std::f32::consts::PI).cos()) * 0.5;
+    let sy = (1.0 - (fy * std::f32::consts::PI).cos()) * 0.5;
+    let v00 = hash_grid(ix, iy, seed);
+    let v10 = hash_grid(ix + 1, iy, seed);
+    let v01 = hash_grid(ix, iy + 1, seed);
+    let v11 = hash_grid(ix + 1, iy + 1, seed);
+    let top = v00 * (1.0 - sx) + v10 * sx;
+    let bottom = v01 * (1.0 - sx) + v11 * sx;
+    top * (1.0 - sy) + bottom * sy
+}
+
+/// Fractal Brownian Motion noise
+fn fbm_noise(x: f32, y: f32, seed: u64, octaves: u32, lacunarity: f32, persistence: f32) -> f32 {
+    let mut val = 0.0f32;
+    let mut amp = 1.0f32;
+    let mut freq = 1.0f32;
+    let mut max_amp = 0.0f32;
+    for i in 0..octaves {
+        val += smooth_noise(x * freq, y * freq, seed.wrapping_add(i as u64 * 7919)) * amp;
+        max_amp += amp;
+        amp *= persistence;
+        freq *= lacunarity;
+    }
+    val / max_amp
+}
+
+/// Ridged multifractal noise — creates sharp ridge lines naturally.
+/// 1 - |2*noise - 1| produces v-shaped valleys → peaks.
+/// Successive octaves weighted by previous value for sub-ridges.
+fn ridged_multifractal(x: f32, y: f32, seed: u64, octaves: u32, lacunarity: f32, gain: f32) -> f32 {
+    let mut val = 0.0f32;
+    let mut amp = 1.0f32;
+    let mut freq = 1.0f32;
+    let mut weight = 1.0f32;
+    for i in 0..octaves {
+        let mut signal = smooth_noise(x * freq, y * freq, seed.wrapping_add(i as u64 * 7919));
+        // Fold into ridges
+        signal = 1.0 - (signal * 2.0 - 1.0).abs();
+        // Cube for sharper, more defined ridge lines
+        signal = signal * signal * signal;
+        // Weight by previous octave
+        signal *= weight;
+        weight = (signal * gain).clamp(0.0, 1.0);
+        val += signal * amp;
+        amp *= 0.5;
+        freq *= lacunarity;
+    }
+    val / (octaves as f32 * 0.5)
+}
+
+/// Domain warping — distorts coordinates by noise for organic shapes
+fn warped_coords(x: f32, y: f32, seed: u64, strength: f32) -> (f32, f32) {
+    let wx = fbm_noise(x + 5.2, y + 1.3, seed.wrapping_add(11111), 3, 2.0, 0.5) - 0.5;
+    let wy = fbm_noise(x + 8.7, y + 2.9, seed.wrapping_add(22222), 3, 2.0, 0.5) - 0.5;
+    (x + wx * strength, y + wy * strength)
+}
+
+// ── Erosion ─────────────────────────────────────────────────────────────────
+
+/// Hydraulic erosion: droplet simulation for valleys and channels
+fn hydraulic_erosion(
+    elevation: &mut [f32], terrain: &[u8],
+    w: u32, h: u32, seed: u64, iterations: u32,
+) {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let wf = w as f32;
+    let hf = h as f32;
+
+    for _ in 0..iterations {
+        let mut px = rng.gen::<f32>() * wf;
+        let mut py = rng.gen::<f32>() * hf;
+        let start_idx = (py as u32 * w + px as u32) as usize;
+        if start_idx >= terrain.len() || terrain[start_idx] != 1 { continue; }
+
+        let mut dir_x = 0.0f32;
+        let mut dir_y = 0.0f32;
+        let mut water = 1.0f32;
+        let mut sediment = 0.0f32;
+        let mut speed = 0.5f32;
+
+        for _ in 0..120 {
+            let ix = px as i32;
+            let iy = py as i32;
+            if ix < 0 || ix >= w as i32 || iy < 0 || iy >= h as i32 { break; }
+            let idx = (iy as u32 * w + ix as u32) as usize;
+            if terrain[idx] != 1 { break; }
+
+            // Gradient
+            let x0 = ((ix - 1 + w as i32) % w as i32) as u32;
+            let x1 = ((ix + 1) % w as i32) as u32;
+            let y0 = (iy - 1).max(0) as u32;
+            let y1 = ((iy + 1) as u32).min(h - 1);
+            let gx = (elevation[(iy as u32 * w + x1) as usize] - elevation[(iy as u32 * w + x0) as usize]) * 0.5;
+            let gy = (elevation[(y1 * w + ix as u32) as usize] - elevation[(y0 * w + ix as u32) as usize]) * 0.5;
+
+            // Update direction with inertia
+            dir_x = dir_x * 0.3 - gx * 0.7;
+            dir_y = dir_y * 0.3 - gy * 0.7;
+            let dir_len = (dir_x * dir_x + dir_y * dir_y).sqrt();
+            if dir_len < 0.0001 {
+                let a = rng.gen::<f32>() * std::f32::consts::TAU;
+                dir_x = a.cos();
+                dir_y = a.sin();
+            } else {
+                dir_x /= dir_len;
+                dir_y /= dir_len;
+            }
+
+            let npx = px + dir_x;
+            let npy = py + dir_y;
+            let nix = npx as i32;
+            let niy = npy as i32;
+            if nix < 0 || nix >= w as i32 || niy < 0 || niy >= h as i32 { break; }
+            let nidx = (niy as u32 * w + nix as u32) as usize;
+            let height_diff = elevation[nidx] - elevation[idx];
+
+            let slope = (-height_diff).max(0.005);
+            let capacity = (slope * speed * water * 6.0).max(0.0);
+
+            if sediment > capacity || height_diff > 0.0 {
+                let deposit = if height_diff > 0.0 {
+                    sediment.min(height_diff)
+                } else {
+                    (sediment - capacity) * 0.02
+                };
+                elevation[idx] += deposit;
+                sediment -= deposit;
+            } else {
+                let erode = ((capacity - sediment) * 0.03).min(elevation[idx] - 0.01);
+                if erode > 0.0 {
+                    elevation[idx] -= erode;
+                    sediment += erode;
+                }
+            }
+
+            speed = (speed * speed + height_diff * 4.0).max(0.0).sqrt();
+            water *= 0.985;
+            if water < 0.01 { break; }
+            px = npx;
+            py = npy;
+        }
+    }
+}
+
+/// Thermal erosion: material slumps from steep slopes
+fn thermal_erosion(
+    elevation: &mut [f32], terrain: &[u8],
+    w: u32, h: u32, passes: u32,
+) {
+    let talus = 0.03f32;
+    let rate = 0.4f32;
+    let dirs: [(i32, i32); 8] = [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(1,-1),(-1,1),(1,1)];
+
+    for _ in 0..passes {
+        for y in 1..h - 1 {
+            for x in 0..w {
+                let idx = (y * w + x) as usize;
+                if terrain[idx] != 1 { continue; }
+                let el = elevation[idx];
+                let mut max_diff = 0.0f32;
+                let mut total_diff = 0.0f32;
+
+                for &(dx, dy) in &dirs {
+                    let nx = ((x as i32 + dx + w as i32) % w as i32) as u32;
+                    let ny = (y as i32 + dy) as u32;
+                    if ny >= h { continue; }
+                    let ni = (ny * w + nx) as usize;
+                    if terrain[ni] != 1 { continue; }
+                    let diff = el - elevation[ni];
+                    if diff > talus {
+                        total_diff += diff - talus;
+                        if diff > max_diff { max_diff = diff; }
+                    }
+                }
+                if total_diff <= 0.0 { continue; }
+
+                for &(dx, dy) in &dirs {
+                    let nx = ((x as i32 + dx + w as i32) % w as i32) as u32;
+                    let ny = (y as i32 + dy) as u32;
+                    if ny >= h { continue; }
+                    let ni = (ny * w + nx) as usize;
+                    if terrain[ni] != 1 { continue; }
+                    let diff = el - elevation[ni];
+                    if diff > talus {
+                        let transfer = (diff - talus) / total_diff * (max_diff - talus) * rate * 0.5;
+                        elevation[idx] -= transfer;
+                        elevation[ni] += transfer;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Public elevation generators ─────────────────────────────────────────────
+
+/// Generate elevation from plate tectonics stress.
+pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let w = buf.width;
+    let h = buf.height;
+
+    // Step 1: Compute stress at boundaries and create mountain seeds
+    let mut stress = vec![0.0f32; buf.total()];
+    for y in 0..h {
+        for x in 0..w {
+            let idx = buf.idx(x, y);
+            match buf.boundary_type[idx] {
+                1 => {
+                    stress[idx] = 0.4 + rng.gen::<f32>() * 0.4;
+                    if buf.terrain[idx] == 1 {
+                        buf.elevation[idx] = 0.3 + rng.gen::<f32>() * 0.4;
+                    }
+                }
+                2 => {
+                    stress[idx] = 0.1 + rng.gen::<f32>() * 0.2;
+                    if buf.terrain[idx] == 1 {
+                        buf.elevation[idx] = buf.elevation[idx].max(0.1 + rng.gen::<f32>() * 0.15);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Step 2: Spread mountain influence outward from boundaries
+    let max_spread = 15;
+    let mut mountain_dist = vec![u32::MAX; buf.total()];
+    let mut queue = VecDeque::new();
+    for y in 0..h {
+        for x in 0..w {
+            let idx = buf.idx(x, y);
+            if buf.boundary_type[idx] == 1 && buf.terrain[idx] == 1 {
+                mountain_dist[idx] = 0;
+                queue.push_back((x, y));
+            }
+        }
+    }
+    while let Some((x, y)) = queue.pop_front() {
+        let idx = buf.idx(x, y);
+        let d = mountain_dist[idx];
+        if d >= max_spread { continue; }
+        for &(dx, dy) in &[(-1i32, 0), (1, 0), (0, -1i32), (0, 1)] {
+            let nx = buf.wrap_x(x as i32 + dx);
+            let ny = (y as i32 + dy).clamp(0, h as i32 - 1) as u32;
+            let ni = buf.idx(nx, ny);
+            if buf.terrain[ni] == 1 && mountain_dist[ni] > d + 1 {
+                mountain_dist[ni] = d + 1;
+                queue.push_back((nx, ny));
+            }
+        }
+    }
+    for y in 0..h {
+        for x in 0..w {
+            let idx = buf.idx(x, y);
+            if buf.terrain[idx] == 1 && mountain_dist[idx] < u32::MAX && mountain_dist[idx] > 0 {
+                let d = mountain_dist[idx] as f32;
+                let decay = (-d / 6.0).exp();
+                let mountain_elev = 0.3 * decay + rng.gen::<f32>() * 0.05 * decay;
+                buf.elevation[idx] = buf.elevation[idx].max(mountain_elev);
+            }
+        }
+    }
+
+    // Step 3: Add gentle noise to flat areas
+    for y in 0..h {
+        for x in 0..w {
+            let idx = buf.idx(x, y);
+            if buf.terrain[idx] == 1 && buf.elevation[idx] < 0.1 {
+                let noise = fbm_noise(x as f32 / 20.0, y as f32 / 20.0, seed, 3, 2.0, 0.5);
+                buf.elevation[idx] = 0.02 + noise * 0.08;
+            }
+        }
+    }
+
+    // Step 4: Ensure all land has minimum elevation
+    for i in 0..buf.total() {
+        if buf.terrain[i] == 1 {
+            buf.elevation[i] = buf.elevation[i].max(0.01);
+        } else {
+            buf.elevation[i] = 0.0;
+        }
+    }
+}
+
+/// Compute sea depth for ocean cells.
+pub fn compute_sea_depth(buf: &mut WorldBuffer) {
+    let w = buf.width;
+    let h = buf.height;
+
+    let mut dist = vec![u32::MAX; buf.total()];
+    let mut queue = VecDeque::new();
+    for y in 0..h {
+        for x in 0..w {
+            let idx = buf.idx(x, y);
+            if buf.terrain[idx] == 1 {
+                dist[idx] = 0;
+                queue.push_back((x, y));
+            }
+        }
+    }
+    while let Some((x, y)) = queue.pop_front() {
+        let idx = buf.idx(x, y);
+        let d = dist[idx];
+        if d >= 100 { continue; }
+        for &(dx, dy) in &[(-1i32, 0), (1, 0), (0, -1i32), (0, 1)] {
+            let nx = buf.wrap_x(x as i32 + dx);
+            let ny = (y as i32 + dy).clamp(0, h as i32 - 1) as u32;
+            let ni = buf.idx(nx, ny);
+            if dist[ni] > d + 1 {
+                dist[ni] = d + 1;
+                queue.push_back((nx, ny));
+            }
+        }
+    }
+
+    let max_dist = 80.0f32;
+    for y in 0..h {
+        for x in 0..w {
+            let idx = buf.idx(x, y);
+            if buf.terrain[idx] == 0 {
+                let d = dist[idx].min(100) as f32;
+                let depth = if d <= 5.0 {
+                    d / 5.0 * 0.15
+                } else if d <= 20.0 {
+                    0.15 + (d - 5.0) / 15.0 * 0.50
+                } else {
+                    (0.65 + (d - 20.0) / max_dist * 0.35).min(1.0)
+                };
+                buf.sea_depth[idx] = depth;
+                buf.is_shelf[idx] = if depth < 0.15 { 1 } else { 0 };
+                buf.is_shelf_edge[idx] = if (0.12..0.18).contains(&depth) { 1 } else { 0 };
+            } else {
+                buf.sea_depth[idx] = 0.0;
+                buf.is_shelf[idx] = 0;
+                buf.is_shelf_edge[idx] = 0;
+            }
+        }
+    }
+}
+
+/// Generate continental shelves with configurable parameters.
+pub fn generate_shelves(
+    buf: &mut WorldBuffer, seed: u64,
+    shelf_width: f32, noise_amount: f32, depth_profile: f32, dropoff_width: f32,
+) {
+    let w = buf.width;
+    let h = buf.height;
+    let base_width = shelf_width.clamp(1.0, 20.0);
+    let drop_w = dropoff_width.clamp(1.0, 20.0);
+
+    let mut dist = vec![u32::MAX; buf.total()];
+    let mut queue = VecDeque::new();
+    for y in 0..h {
+        for x in 0..w {
+            let idx = buf.idx(x, y);
+            if buf.terrain[idx] == 1 {
+                dist[idx] = 0;
+                queue.push_back((x, y));
+            }
+        }
+    }
+    while let Some((x, y)) = queue.pop_front() {
+        let idx = buf.idx(x, y);
+        let d = dist[idx];
+        if d >= 100 { continue; }
+        for &(dx, dy) in &[(-1i32, 0), (1, 0), (0, -1i32), (0, 1)] {
+            let nx = buf.wrap_x(x as i32 + dx);
+            let ny = (y as i32 + dy).clamp(0, h as i32 - 1) as u32;
+            let ni = buf.idx(nx, ny);
+            if dist[ni] > d + 1 {
+                dist[ni] = d + 1;
+                queue.push_back((nx, ny));
+            }
+        }
+    }
+
+    let noise_scale = w.max(h) as f32 / 20.0;
+    for y in 0..h {
+        for x in 0..w {
+            let idx = buf.idx(x, y);
+            if buf.terrain[idx] != 0 {
+                buf.sea_depth[idx] = 0.0;
+                buf.is_shelf[idx] = 0;
+                buf.is_shelf_edge[idx] = 0;
+                continue;
+            }
+            let d = dist[idx].min(100) as f32;
+            if d < 1.0 {
+                buf.sea_depth[idx] = 0.0;
+                buf.is_shelf[idx] = 1;
+                buf.is_shelf_edge[idx] = 0;
+                continue;
+            }
+            let noise = fbm_noise(x as f32 / noise_scale, y as f32 / noise_scale, seed, 3, 2.0, 0.5);
+            let local_width = (base_width * (1.0 + (noise - 0.5) * 2.0 * noise_amount)).max(1.0);
+
+            let mut land_count = 0u32;
+            for dy in -3i32..=3 {
+                for dx in -3i32..=3 {
+                    let ni = buf.widx(x as i32 + dx, y as i32 + dy);
+                    if buf.terrain[ni] == 1 { land_count += 1; }
+                }
+            }
+            let gentle_factor = 1.0 + (land_count as f32 / 49.0) * 0.5;
+            let effective_width = local_width * gentle_factor;
+
+            let depth = if d <= effective_width {
+                let t = (d - 1.0) / (effective_width - 1.0).max(1.0);
+                let linear = t * 0.25;
+                let exponential = (1.0 - (-3.0 * t).exp()) * 0.25;
+                linear * (1.0 - depth_profile) + exponential * depth_profile
+            } else if d <= effective_width + drop_w {
+                0.25 + ((d - effective_width) / drop_w) * 0.40
+            } else {
+                (0.65 + (d - effective_width - drop_w) * 0.025).min(1.0)
+            };
+
+            buf.sea_depth[idx] = depth;
+            buf.is_shelf[idx] = if depth < 0.15 { 1 } else { 0 };
+            buf.is_shelf_edge[idx] = if (0.12..0.18).contains(&depth) { 1 } else { 0 };
+        }
+    }
+}
+
+/// Generate realistic elevation from terrain (land/sea) data alone.
+/// Port of WF1 random-elevation.ts: multi-octave noise + ridged multifractal
+/// + domain warping + hydraulic erosion + thermal erosion.
+/// Produces continuous mountain ridges like Earth's geography.
+pub fn generate_elevation_from_terrain(
+    buf: &mut WorldBuffer,
+    seed: u64,
+    mountain_density: f32,
+    mountain_height: f32,
+    mountain_spread: f32,
+    noise_roughness: f32,
+) {
+    let w = buf.width;
+    let h = buf.height;
+    let n = buf.total();
+
+    let density = mountain_density.clamp(0.0, 1.0);
+    let height = mountain_height.clamp(0.0, 1.0);
+    let spread = mountain_spread.clamp(0.0, 1.0);
+    let roughness = noise_roughness.clamp(0.0, 1.0);
+
+    let terrain = buf.terrain.clone();
+
+    // ── Step 1: Generate base heightmap from multi-layer noise ───────────
+    let scale = w.max(h) as f32 / 8.0;
+
+    // Noise weights — density/height/roughness control the mix
+    let w_large = 0.55;
+    let w_medium = 0.30;
+    let w_small = 0.10 + roughness * 0.10;   // 0.10-0.20
+    let w_ridge = 0.15 + density * 0.20;      // 0.15-0.35 (more density → more ridges)
+    let total_w = w_large + w_medium + w_small + w_ridge;
+    let n_large = w_large / total_w;
+    let n_medium = w_medium / total_w;
+    let n_small = w_small / total_w;
+    let n_ridge = w_ridge / total_w;
+
+    let warp_strength = 0.3 + roughness * 0.3; // 0.3-0.6
+    let med_scale = 2.5;
+    // Mountain spread → ridge frequency: narrow peaks (0) use a higher frequency
+    // (tight, isolated ranges), wide ranges (1) a lower frequency (broad, long
+    // cordillera). Spans roughly med_scale×1.7 … med_scale×0.6.
+    let ridge_scale = med_scale * (1.7 - spread * 1.1);
+
+    // ── Step 1a: distance-from-coast for every land cell ────────────────
+    // Computed up front so interior cells can be lifted into a broad
+    // continental rise — otherwise low-frequency noise leaves whole
+    // interiors near-flat and only the coasts show relief.
+    let mut coast_dist = vec![0u16; n];
+    {
+        let mut visited = vec![false; n];
+        let mut queue = VecDeque::new();
+        for i in 0..n {
+            if terrain[i] != 1 {
+                visited[i] = true;
+                queue.push_back(i);
+            }
+        }
+        while let Some(ci) = queue.pop_front() {
+            let cx = (ci % w as usize) as i32;
+            let cy = (ci / w as usize) as i32;
+            let d = coast_dist[ci];
+            // Full flood — no distance cap. The old `d >= 250` early-out left the
+            // deep interior of large continents unvisited (coast_dist stuck at 0),
+            // so Step-2's coastal falloff multiplied those cells by 0.15 and
+            // produced a flat low-elevation "green blob" with a sharp BFS-contour
+            // edge. Clamp the stored value so it stays within u16.
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let nx = ((cx + dx) % w as i32 + w as i32) % w as i32;
+                let ny = cy + dy;
+                if ny < 0 || ny >= h as i32 { continue; }
+                let ni = (ny as u32 * w + nx as u32) as usize;
+                if visited[ni] { continue; }
+                visited[ni] = true;
+                coast_dist[ni] = d.saturating_add(1);
+                queue.push_back(ni);
+            }
+        }
+    }
+
+    // Distance at which the continental rise saturates (scales with world size).
+    let inland_ref = (w.max(h) as f32 * 0.025).clamp(18.0, 60.0);
+
+    // `inland_ref` retained for API symmetry; the WF1 algorithm shapes interiors
+    // through histogram redistribution rather than a synthetic dome.
+    let _ = inland_ref;
+
+    let mut elevation = vec![0.0f32; n];
+
+    for y in 0..h {
+        for x in 0..w {
+            let idx = (y * w + x) as usize;
+            if terrain[idx] != 1 { continue; }
+
+            let nx = x as f32 / scale;
+            let ny = y as f32 / scale;
+
+            // Domain warping for organic shapes
+            let (wnx, wny) = warped_coords(nx, ny, seed.wrapping_add(99999), warp_strength);
+
+            // Large features (continental shapes)
+            let large = fbm_noise(wnx, wny, seed, 6, 2.0, 0.5);
+
+            // Medium features (mountain ranges)
+            let medium = fbm_noise(wnx * med_scale, wny * med_scale, seed.wrapping_add(31337), 4, 2.2, 0.45);
+
+            // Small features (hills)
+            let small = fbm_noise(wnx * 6.0, wny * 6.0, seed.wrapping_add(65521), 3, 2.0, 0.4);
+
+            // Ridged multifractal — elongated ridge lines (the key for mountain chains).
+            // Frequency set by mountain_spread (narrow peaks ↔ wide ranges).
+            let ridge = ridged_multifractal(wnx * ridge_scale, wny * ridge_scale, seed.wrapping_add(48271), 6, 2.1, 2.0);
+
+            // Combine with normalized weights (WF1 generateBaseHeightmap).
+            let combined = large * n_large + medium * n_medium + small * n_small + ridge * n_ridge;
+            elevation[idx] = combined.clamp(0.01, 1.0);
+        }
+    }
+
+    // ── Step 2: Coastal falloff — first COAST_DIST cells ramp down to the sea ─
+    // Matches WF1: factor 0.15→1.0 over the outer ring so coasts read as plains
+    // and the shoreline isn't a cliff. Interior shaping is handled by the
+    // histogram redistribution in Step 5 (this is why WF1 interiors are never flat).
+    const COAST_DIST: u16 = 5;
+    for i in 0..n {
+        if terrain[i] != 1 { continue; }
+        if coast_dist[i] < COAST_DIST {
+            let factor = 0.15 + 0.85 * (coast_dist[i] as f32 / COAST_DIST as f32);
+            elevation[i] *= factor;
+        }
+    }
+
+    // ── Step 3: Hydraulic erosion — droplet simulation ──────────────────
+    // Scale iterations with world size (small worlds ~15K, large ~100K)
+    let erosion_scale = 0.5 + roughness * 0.5; // rougher = more erosion detail
+    let hydro_iterations = ((n as f32 * 0.015 * erosion_scale) as u32).clamp(15_000, 100_000);
+    hydraulic_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations);
+
+    // ── Step 4: Thermal erosion — smooth sharp ridges ───────────────────
+    let thermal_passes = 3 + (roughness * 2.0) as u32; // 3-5 passes
+    thermal_erosion(&mut elevation, &terrain, w, h, thermal_passes);
+
+    // ── Step 5: Normalize with realistic altitude distribution ──────────
+    // Power curve pushes most land lower, percentile cap prevents every world
+    // from having an 8848m peak
+    let mut max_h = 0.0f32;
+    for i in 0..n {
+        if terrain[i] == 1 && elevation[i] > max_h { max_h = elevation[i]; }
+    }
+    if max_h > 0.0 {
+        // Normalize to 0-1
+        for i in 0..n {
+            if terrain[i] == 1 { elevation[i] /= max_h; }
+        }
+        // Power curve: exponent controlled by height parameter
+        // Low height (0.1) → exponent 2.0 (very flat), high (1.0) → exponent 1.0 (tall peaks)
+        let exponent = 2.0 - height;
+        for i in 0..n {
+            if terrain[i] == 1 { elevation[i] = elevation[i].powf(exponent); }
+        }
+        // Percentile cap: find 99.8th percentile and scale to target
+        // height parameter controls the target: 0.1 → cap at 0.4 (~3500m), 1.0 → cap at 0.95 (~8400m)
+        let target_cap = 0.35 + height * 0.60; // 0.35-0.95
+        let mut sorted: Vec<f32> = (0..n)
+            .filter(|&i| terrain[i] == 1)
+            .map(|i| elevation[i])
+            .collect();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        if !sorted.is_empty() {
+            let p998 = sorted[(sorted.len() as f32 * 0.998) as usize].max(0.01);
+            let cap_scale = target_cap / p998;
+            for i in 0..n {
+                if terrain[i] == 1 {
+                    elevation[i] = (elevation[i] * cap_scale).clamp(0.01, 1.0);
+                }
+            }
+        }
+
+        // ── Step 5b: Histogram redistribution (WF1 redistributeElevation) ───
+        // This is what gives WF1 its realistic, fully-differentiated terrain —
+        // it spreads land elevations across 1000 m bands to a target hypsometric
+        // curve (preserving relative order), so interiors are never a flat patch.
+        // The `height` slider interpolates the target between a low, coastal
+        // world and a dramatic alpine one; `density` biases toward more highland.
+        let target = build_target_histogram(height, density);
+        redistribute_elevation(&mut elevation, &terrain, n, &target);
+    }
+
+    // ── Step 6: Write back to buffer ────────────────────────────────────
+    for i in 0..n {
+        if terrain[i] == 1 {
+            buf.elevation[i] = elevation[i];
+        } else {
+            buf.elevation[i] = 0.0;
+        }
+    }
+}
+
+/// Scale every land cell's elevation by `scale` (0.5 = halve heights, 1.5 =
+/// raise 50%). If `lock_above` < 1.0, any cell at or above that normalized
+/// height keeps its value, so the highest peaks stay fixed while the rest of the
+/// relief is raised or lowered. Land/sea is untouched, so sea depth/shelves do
+/// not need recomputing.
+pub fn scale_elevation(buf: &mut WorldBuffer, scale: f32, lock_above: f32) {
+    let scale = scale.clamp(0.05, 4.0);
+    for i in 0..buf.total() {
+        if buf.terrain[i] != 1 { continue; }
+        if lock_above < 1.0 && buf.elevation[i] >= lock_above { continue; }
+        buf.elevation[i] = (buf.elevation[i] * scale).clamp(0.01, 1.0);
+    }
+}
+
+/// Build a 9-band target elevation histogram (% of land per 1000 m band).
+/// `height` interpolates between a low coastal world and a dramatic alpine one;
+/// `density` shifts a little extra mass into the highland bands.
+fn build_target_histogram(height: f32, density: f32) -> [f32; 9] {
+    // Anchors (must each sum to ~100). LOW = flat/coastal, HIGH = alpine.
+    const LOW:  [f32; 9] = [62.0, 20.0, 9.0, 4.0, 2.5, 1.5, 0.6, 0.3, 0.1];
+    const HIGH: [f32; 9] = [22.0, 14.0, 14.0, 13.0, 12.0, 10.0, 8.0, 4.5, 2.5];
+    let t = height.clamp(0.0, 1.0);
+    let mut out = [0.0f32; 9];
+    for b in 0..9 {
+        out[b] = LOW[b] * (1.0 - t) + HIGH[b] * t;
+    }
+    // Density nudges mass from the lowest band into the mid/high bands.
+    let shift = density.clamp(0.0, 1.0) * out[0] * 0.20;
+    out[0] -= shift;
+    for b in 2..6 { out[b] += shift / 4.0; }
+    out
+}
+
+/// Redistribute land elevations to match a target per-1000 m-band histogram,
+/// preserving relative ordering (peaks stay peaks). Port of WF1
+/// `redistributeElevation`.
+fn redistribute_elevation(elevation: &mut [f32], terrain: &[u8], n: usize, target_pcts: &[f32; 9]) {
+    const MAX_ELEV: f32 = 8848.0;
+
+    let mut land_indices: Vec<usize> = (0..n)
+        .filter(|&i| terrain[i] == 1 && elevation[i] > 0.0)
+        .collect();
+    if land_indices.is_empty() { return; }
+    land_indices.sort_by(|&a, &b| elevation[a].partial_cmp(&elevation[b]).unwrap());
+
+    let total_land = land_indices.len();
+    let total_pct: f32 = target_pcts.iter().sum();
+    if total_pct <= 0.0 { return; }
+
+    let mut cell_idx = 0usize;
+    for band in 0..9 {
+        let band_count = ((target_pcts[band] / total_pct) * total_land as f32).round() as usize;
+        let band_min = (band as f32 * 1000.0) / MAX_ELEV;
+        let band_max = ((band as f32 + 1.0) * 1000.0) / MAX_ELEV;
+        let mut j = 0usize;
+        while j < band_count && cell_idx < total_land {
+            let idx = land_indices[cell_idx];
+            let t = if band_count > 1 { j as f32 / (band_count - 1) as f32 } else { 0.5 };
+            elevation[idx] = (band_min + t * (band_max - band_min)).clamp(0.01, 1.0);
+            j += 1;
+            cell_idx += 1;
+        }
+    }
+    // Any leftover cells (rounding) → top band.
+    let last_min = (8.0 * 1000.0) / MAX_ELEV;
+    while cell_idx < total_land {
+        elevation[land_indices[cell_idx]] = (last_min + 0.01).min(1.0);
+        cell_idx += 1;
+    }
+}

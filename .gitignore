@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+src-tauri/target/
+
+# Logs / env
+*.log
+.env
+.env.*
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Unrelated files that live in this folder but are not part of the project
+20260301 Molodezh Project/
+*.kra-autosave.png
