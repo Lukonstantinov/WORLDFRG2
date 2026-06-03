@@ -1,6 +1,17 @@
 # Trade Goods & Seasonal Hazards — Design Document
 
-Status: **Round 1 implemented** (Rounds 2–3 pending) · Branch: `claude/trade-goods-review-Ju0R1`
+Status: **Rounds 1–2 implemented** (Round 3 pending) · Branch: `claude/trade-goods-review-Ju0R1`
+
+> **Round 2 implementation note.** Shipped: the analytic monthly storm curve
+> (`storm_season_phase`, hemisphere-offset, equator-smeared, §3.3); a configurable
+> calendar length (`bioParams.calendarMonths`, default 12) + a **storm month
+> slider** (`bioParams.stormMonth`, 0 = combined annual extent, 1..M scrubs the
+> season so zones fade in calm months); `compute_storm_zones(month, months)` drives
+> the seasonal overlay; a **maritime-hazard surcharge** on sea routing cost
+> (`build_coarse_cost`, storm∨reef → routes detour / goods scarcer, §3.4); and
+> **network-luxury demand scaling** (`GOOD_NETWORK_LUXURY` incl. both wool
+> subtypes — discounted in the homeland and in tighter/closed trade reaches, §3.4).
+> The static combined danger map remains the `storm` tile render layer.
 
 > **Round 1 implementation note.** Shipped: tile-format **v2** self-describing
 > blobs + v1 migration (§4), the **8 new goods** + **3 metals** (§2, now 30

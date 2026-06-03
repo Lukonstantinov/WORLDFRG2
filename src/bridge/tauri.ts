@@ -202,9 +202,10 @@ export async function computeShipwormZones(): Promise<SharkZone[]> {
   return invoke("compute_shipworm_zones");
 }
 
-/** Cluster the highest-risk annual storm/cyclone water into danger zones. */
-export async function computeStormZones(): Promise<SharkZone[]> {
-  return invoke("compute_storm_zones");
+/** Cluster the highest-risk storm/cyclone water into danger zones. `month <= 0`
+ *  is the combined annual extent; 1..months applies the seasonal phase. */
+export async function computeStormZones(month: number, months: number): Promise<SharkZone[]> {
+  return invoke("compute_storm_zones", { month, months });
 }
 
 /** Cluster the highest-risk reef/shoal wreck water into danger zones. */

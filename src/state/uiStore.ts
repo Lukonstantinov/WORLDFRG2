@@ -23,6 +23,8 @@ export interface BioParamsState {
   gemDeposits: number;   // number of highland gemstone deposits
   tradeReach: number;    // 0 = global, 1 = coastal+short, 2 = continental only
   maxCrossing: number;   // max open-water crossing as fraction of map width
+  calendarMonths: number; // length of the seasonal calendar ("moons"), default 12
+  stormMonth: number;    // storm overlay viewing month: 0 = combined, 1..months
 }
 
 interface UIStore {
@@ -106,7 +108,7 @@ export const useUIStore = create<UIStore>((set) => ({
   landmassSource: "none",
   terrainParams: { density: 0.5, height: 0.5, spread: 0.5, roughness: 0.4, seed: null },
   riverParams: { density: 0.5, width: 1.0, lakeFillDepth: 0.004, lakeMaxFraction: 0.0008 },
-  bioParams: { gemDeposits: 6, tradeReach: 1, maxCrossing: 0.08 },
+  bioParams: { gemDeposits: 6, tradeReach: 1, maxCrossing: 0.08, calendarMonths: 12, stormMonth: 0 },
   showTradeMatrix: false,
 
   setTool: (tool) => set({ activeTool: tool }),

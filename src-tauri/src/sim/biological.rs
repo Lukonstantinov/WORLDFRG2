@@ -85,6 +85,20 @@ pub const GOOD_UNLIMITED: [bool; GOODS_COUNT] = [
     false, false, false,                          // copper/tin/gold = deposit goods (flag unused)
 ];
 
+/// Goods whose demand is only realized in a large/open trade network: distant
+/// luxuries (incl. the two wool subtypes, which sit on different continents). In
+/// small or closed networks — and in the good's own producing homeland — desire
+/// for these is discounted (you can't trade for, or don't prize, what's far or
+/// local). Staples (wheat, salt, timber, iron…) keep flat, universal demand.
+pub const GOOD_NETWORK_LUXURY: [bool; GOODS_COUNT] = [
+    true,  false, false, false, true,  false, // silk, _, _, _, frankincense, _
+    true,  true,  true,  false, false, true,  // spices, tea, coffee, _, _, amber
+    false, true,  true,  true,  false,         // _, dyes, incense, pearls, _
+    false, false, false, true,                 // _, _, _, gemstones
+    true,  false, true,  true,  true,  true,   // hardwoods, _, wool_fleece, wool_llama, ivory, cacao
+    false, false, true,                         // _, _, gold
+];
+
 // Mountains ≥3000 m wall off a good's spread across a continent.
 const MOUNTAIN_NORM: f32 = 3000.0 / 8848.0; // ≈ 0.339
 
@@ -333,6 +347,23 @@ pub fn compute_shipworm_risk(buf: &mut WorldBuffer, rivers: &[River]) {
 /// tropical SST × a cyclogenesis latitude band (≈8–30°, ~0 on the equator).
 /// Seasonality is derived analytically at query time from this base + latitude
 /// (see `query_commands::compute_storm_zones`), so nothing per-month is stored.
+/// Seasonal multiplier (0..1) applied to `storm_base` at moon `month`
+/// (1..=`months`) for a cell at signed `lat` (north positive). Cyclone seasons
+/// are hemisphere-offset — the northern season peaks in late summer/autumn, the
+/// southern roughly half a year opposite — so there is always a calm hemisphere.
+/// Near the equator the season smears toward year-round. Derived analytically so
+/// nothing per-month is stored. `month <= 0` (or `months == 0`) → 1.0 (the
+/// annual/combined peak).
+pub fn storm_season_phase(month: i32, months: u32, lat: f32) -> f32 {
+    if months == 0 || month <= 0 { return 1.0; }
+    let m = ((month as u32).min(months) - 1) as f32 / months as f32; // 0..1 round the year
+    let peak = if lat >= 0.0 { 0.70 } else { 0.20 };                 // fraction of year
+    let theta = 2.0 * std::f32::consts::PI * (m - peak);
+    let season = theta.cos().max(0.0).powf(1.5);     // concentrate into ~half the year
+    let blend = smoothstep(0.0, 15.0, lat.abs());    // 0 at equator → 1 by 15°
+    (season * blend + 0.5 * (1.0 - blend)).clamp(0.0, 1.0)
+}
+
 pub fn compute_storm_base(buf: &mut WorldBuffer) {
     let w = buf.width;
     let h = buf.height;

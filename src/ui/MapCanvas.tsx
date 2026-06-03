@@ -58,6 +58,8 @@ export function MapCanvas() {
   // Trade routes/flows are a product of the Biological-Trade step (8), not an
   // automatic response to settlement changes.
   const step8Done = useUIStore((s) => s.stepCompleted[8]);
+  const stormMonth = useUIStore((s) => s.bioParams.stormMonth);
+  const calendarMonths = useUIStore((s) => s.bioParams.calendarMonths);
   const step9Done = useUIStore((s) => s.stepCompleted[9]);
   const bioParams = useUIStore((s) => s.bioParams);
 
@@ -328,10 +330,6 @@ export function MapCanvas() {
       om.drawShipwormZones(zones);
       requestRender();
     }).catch(() => {});
-    computeStormZones().then((zones) => {
-      om.drawStormZones(zones);
-      requestRender();
-    }).catch(() => {});
     computeReefZones().then((zones) => {
       om.drawReefZones(zones);
       requestRender();
@@ -341,6 +339,17 @@ export function MapCanvas() {
       requestRender();
     }).catch(() => {});
   }, [meta, tileVersion, requestRender]);
+
+  // Storm zones depend on the seasonal month slider, so recompute them on their
+  // own when the month (or calendar length) changes — month 0 = combined annual.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !meta) return;
+    computeStormZones(stormMonth, calendarMonths).then((zones) => {
+      om.drawStormZones(zones);
+      requestRender();
+    }).catch(() => {});
+  }, [meta, tileVersion, stormMonth, calendarMonths, requestRender]);
 
   // Region↔region trade flows (routed + bundled trunks) — a product of the
   // Biological-Trade step, gated by the chosen trade reach.

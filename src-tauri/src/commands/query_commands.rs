@@ -558,6 +558,9 @@ fn build_coarse_cost(
     let mut is_land = vec![false; cn];
     let mut elev = vec![0.0f32; cn];
     let mut koppen = vec![0u8; cn];
+    // Maritime-hazard exposure per coarse cell (annual storm peak + reef wreck
+    // risk), used to make stormy/reef-fouled sea more expensive to cross.
+    let mut sea_hazard = vec![0.0f32; cn];
     {
         let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
         let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
@@ -567,6 +570,7 @@ fn build_coarse_cost(
         let mut f_terrain = vec![0u8; fn_cells];
         let mut f_elev = vec![0.0f32; fn_cells];
         let mut f_koppen = vec![0u8; fn_cells];
+        let mut f_hazard = vec![0.0f32; fn_cells];
         for ty in 0..tiles_y as i32 {
             for tx in 0..tiles_x as i32 {
                 let tile = tile_store::load_tile(conn, tx, ty, 0)
@@ -583,6 +587,7 @@ fn build_coarse_cost(
                         f_terrain[gi] = tile.terrain[ti];
                         f_elev[gi] = tile.elevation[ti];
                         f_koppen[gi] = tile.koppen[ti];
+                        f_hazard[gi] = (tile.storm_base[ti].max(tile.reef_risk[ti])) as f32 / 255.0;
                     }
                 }
             }
@@ -596,6 +601,7 @@ fn build_coarse_cost(
                 is_land[ci] = f_terrain[gi] == 1;
                 elev[ci] = f_elev[gi];
                 koppen[ci] = f_koppen[gi];
+                sea_hazard[ci] = f_hazard[gi];
             }
         }
     }
@@ -680,6 +686,18 @@ fn build_coarse_cost(
                     base[(ny * cw + wrap_cx(cx + dx)) as usize]
                 });
                 if coastal { cost[ci] = 0.5; }
+            }
+        }
+    }
+
+    // Maritime-hazard surcharge: stormy / reef-fouled sea is dearer to cross, so
+    // routes detour around cyclone belts and reefs, and goods reachable only over
+    // hazardous water grow scarcer downstream. Applied only when sea is passable.
+    if !block_sea {
+        const HAZARD_W: f32 = 7.0; // max added cost on the worst sea cell
+        for ci in 0..cn {
+            if !is_land[ci] {
+                cost[ci] += sea_hazard[ci].clamp(0.0, 1.0) * HAZARD_W;
             }
         }
     }
@@ -1176,17 +1194,20 @@ pub fn compute_shipworm_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, 
     Ok(zones)
 }
 
-/// Cluster the highest-risk annual storm water into danger zones (open-ocean
-/// cyclone belts; same overlay shape as shark/shipworm zones). Round 1 returns
-/// the annual (combined) field; the per-month seasonal variant arrives in Round 2.
+/// Cluster the highest-risk storm water into danger zones (open-ocean cyclone
+/// belts; same overlay shape as shark/shipworm zones). `month <= 0` returns the
+/// combined annual extent; `month` in 1..=`months` applies the analytic seasonal
+/// phase (`biological::storm_season_phase`) so zones fade out in their calm
+/// season and the hemispheres peak ~half a year apart.
 #[tauri::command]
-pub fn compute_storm_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, String> {
+pub fn compute_storm_zones(month: i32, months: u32, db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+    let months = months.max(1);
 
     let f = (grid_w / 300).max(1);
     let cw = ((grid_w + f - 1) / f) as i32;
@@ -1206,7 +1227,11 @@ pub fn compute_storm_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, Str
             for ly in 0..max_ly {
                 for lx in 0..max_lx {
                     let ti = (ly * TILE_SIZE + lx) as usize;
-                    let v = tile.storm_base[ti] as f32 / 255.0;
+                    let base = tile.storm_base[ti] as f32 / 255.0;
+                    if base <= 0.0 { continue; }
+                    let wy = base_y + ly;
+                    let lat = 90.0 - (wy as f32 / grid_h as f32) * 180.0;
+                    let v = base * crate::sim::biological::storm_season_phase(month, months, lat);
                     if v <= 0.0 { continue; }
                     let cx = ((base_x + lx) / f) as i32;
                     let cy = ((base_y + ly) / f) as i32;
@@ -1580,11 +1605,21 @@ pub fn compute_trade_matrix(
         0.55, 0.70, 0.50, 0.40, 0.35, 0.40,  // hardwoods,horses,wool_fleece,wool_llama,ivory,cacao
         0.55, 0.55, 0.60,                    // copper,tin,gold
     ];
+    // Luxuries are only prized across a large/open trade network; tighter reaches
+    // (more closed networks) realize less of that demand.
+    let reach_factor = match reach { 0 => 1.0, 1 => 0.7, _ => 0.45 };
     let mut demand = vec![vec![0.0f32; GOODS_COUNT]; nr];
     for ri in 0..nr {
         let size = region_weight[ri] / max_rw; // 0..1
         for g in 0..GOODS_COUNT {
-            demand[ri][g] = size * demand_weight[g];
+            let mut d = size * demand_weight[g];
+            if crate::sim::biological::GOOD_NETWORK_LUXURY[g] {
+                // Discount in the good's own producing homeland (it's local/common
+                // there) and scale by how open the trade network is.
+                let homeland_discount = 1.0 - 0.6 * production[ri][g].clamp(0.0, 1.0);
+                d *= reach_factor * homeland_discount;
+            }
+            demand[ri][g] = d;
         }
     }
 
