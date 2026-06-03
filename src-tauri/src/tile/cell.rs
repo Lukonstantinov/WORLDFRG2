@@ -34,13 +34,28 @@ pub struct TileData {
     pub shark_risk: Vec<u8>,      // sea: 0..255 shark-habitat danger
     pub goods: Vec<Vec<u8>>,      // [GOODS_COUNT] trade-good intensity fields (0..255)
     pub shipworm_risk: Vec<u8>,   // sea: 0..255 shipworm (Teredo) hull-hazard. Serialized AFTER goods.
+    pub storm_base: Vec<u8>,      // sea: 0..255 annual cyclone/storm potential (open ocean).
+    pub reef_risk: Vec<u8>,       // sea: 0..255 reef/shoal wreck hazard (warm shallow coast).
 }
 
 /// Number of trade-good sublayer fields stored per cell. See sim/biological.rs
-/// GOOD_NAMES for the ordered list. New goods are appended LAST so older saves
-/// still decompress (the trailing reads pad missing goods to 0). 17 -> 21 added
-/// wheat(17), iron(18), cotton(19), gemstones(20).
-pub const GOODS_COUNT: usize = 21;
+/// GOOD_NAMES for the ordered list. 17 -> 21 added wheat/iron/cotton/gemstones;
+/// 21 -> 30 added hardwoods, horses, wool_fleece, wool_llama, ivory, cacao,
+/// copper, tin, gold.
+///
+/// Since this count can change between releases, tile blobs are now
+/// **self-describing**: a v2 blob carries `goods_count` in its header (see
+/// `compress`/`decompress`), so a save always reads back exactly the goods it
+/// stored regardless of the compile-time `GOODS_COUNT`.
+pub const GOODS_COUNT: usize = 30;
+
+/// First byte of a v2 (self-describing) tile blob. Chosen so it can never collide
+/// with a legacy v1 blob, whose first byte is `terrain[0]` ∈ {0, 1}.
+const TILE_MAGIC: u8 = 0xF2;
+/// Current tile binary format version.
+const TILE_VERSION: u8 = 2;
+/// Number of goods a legacy (headerless) v1 blob contained.
+const V1_GOODS_COUNT: usize = 21;
 
 impl TileData {
     pub fn new_sea() -> Self {
@@ -71,12 +86,24 @@ impl TileData {
             shark_risk: vec![0; N],
             goods: vec![vec![0u8; N]; GOODS_COUNT],
             shipworm_risk: vec![0; N],
+            storm_base: vec![0; N],
+            reef_risk: vec![0; N],
         }
     }
 
-    /// Serialize to a compact binary format, then zstd compress
+    /// Serialize to a compact binary format, then zstd compress.
+    ///
+    /// v2 layout (self-describing): `[MAGIC][VERSION][goods_count u16 LE]` then
+    /// the columns. `goods_count` lets a reader recover exactly the goods that
+    /// were written even if `GOODS_COUNT` changes in a later release.
     pub fn compress(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(N * 60);
+        let mut buf = Vec::with_capacity(N * 64);
+
+        // Self-describing header.
+        buf.push(TILE_MAGIC);
+        buf.push(TILE_VERSION);
+        let gc = self.goods.len() as u16;
+        buf.extend_from_slice(&gc.to_le_bytes());
 
         // Write each column as raw bytes
         buf.extend_from_slice(&self.terrain);
@@ -110,18 +137,37 @@ impl TileData {
         for g in &self.goods {
             buf.extend_from_slice(g);
         }
-        // shipworm_risk serialized AFTER goods so it is the very last column —
-        // older saves (which end after their goods) simply pad it to zero, and a
-        // save with fewer goods pads the extra goods to zero before reaching here.
+        // Hazard columns after goods, in a fixed versioned order. New hazards are
+        // appended here (after the previous last column) so older v2 blobs simply
+        // pad them to zero on read.
         buf.extend_from_slice(&self.shipworm_risk);
+        buf.extend_from_slice(&self.storm_base);
+        buf.extend_from_slice(&self.reef_risk);
 
         zstd::encode_all(buf.as_slice(), 3).unwrap_or(buf)
     }
 
-    /// Decompress and deserialize from binary format
+    /// Decompress and deserialize from binary format.
+    ///
+    /// Detects v2 (self-describing header) vs legacy v1 (headerless, 21 goods,
+    /// `shipworm_risk` as the last column, no storm/reef). Both load into the
+    /// current `GOODS_COUNT` layout; goods beyond what was stored pad to zero.
     pub fn decompress(data: &[u8]) -> Self {
         let buf = zstd::decode_all(data).unwrap_or_else(|_| data.to_vec());
         let mut offset = 0;
+
+        // Header detection. A v2 blob starts with MAGIC; a v1 blob starts with
+        // terrain[0] ∈ {0,1}, which can never equal MAGIC.
+        let stored_goods: usize = if buf.first() == Some(&TILE_MAGIC) {
+            let gc = u16::from_le_bytes([
+                *buf.get(2).unwrap_or(&0),
+                *buf.get(3).unwrap_or(&0),
+            ]) as usize;
+            offset = 4;
+            gc.min(256) // sanity clamp
+        } else {
+            V1_GOODS_COUNT
+        };
 
         let terrain = read_u8(&buf, &mut offset);
         let elevation = read_f32(&buf, &mut offset);
@@ -147,11 +193,23 @@ impl TileData {
         let habitability = read_f32(&buf, &mut offset);
         let salinity = read_u8(&buf, &mut offset);
         let shark_risk = read_u8(&buf, &mut offset);
-        let mut goods = Vec::with_capacity(GOODS_COUNT);
-        for _ in 0..GOODS_COUNT {
+        // Read exactly the goods that were stored, then normalize to GOODS_COUNT
+        // (truncate extras / pad missing with zeros) so the in-memory layout is
+        // stable regardless of how many goods the save held.
+        let mut goods: Vec<Vec<u8>> = Vec::with_capacity(GOODS_COUNT.max(stored_goods));
+        for _ in 0..stored_goods {
             goods.push(read_u8(&buf, &mut offset));
         }
         let shipworm_risk = read_u8(&buf, &mut offset);
+        // storm_base / reef_risk only exist in v2 blobs that were written after
+        // they were added; older blobs end above and these reads pad to zero.
+        let storm_base = read_u8(&buf, &mut offset);
+        let reef_risk = read_u8(&buf, &mut offset);
+
+        // Keep every stored good column (the count is variable and may exceed the
+        // built-in GOODS_COUNT); pad up to GOODS_COUNT so code that indexes the
+        // built-in slots on an old/short tile stays in range.
+        goods.resize(stored_goods.max(GOODS_COUNT), vec![0u8; N]);
 
         Self {
             terrain, elevation, sea_depth, is_shelf, is_shelf_edge,
@@ -161,6 +219,7 @@ impl TileData {
             wind_vx, wind_vy, current_vx, current_vy,
             distance_to_ocean, habitability,
             salinity, shark_risk, goods, shipworm_risk,
+            storm_base, reef_risk,
         }
     }
 }

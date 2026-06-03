@@ -40,6 +40,8 @@ pub struct WorldBuffer {
     pub shark_risk: Vec<u8>,       // sea: 0..255 shark-habitat danger
     pub goods: Vec<Vec<u8>>,       // [GOODS_COUNT] trade-good intensity fields
     pub shipworm_risk: Vec<u8>,    // sea: 0..255 shipworm hull-hazard
+    pub storm_base: Vec<u8>,       // sea: 0..255 annual storm/cyclone potential
+    pub reef_risk: Vec<u8>,        // sea: 0..255 reef/shoal wreck hazard
 }
 
 impl WorldBuffer {
@@ -87,6 +89,8 @@ impl WorldBuffer {
             shark_risk: vec![0; total],
             goods: vec![vec![0u8; total]; GOODS_COUNT],
             shipworm_risk: vec![0; total],
+            storm_base: vec![0; total],
+            reef_risk: vec![0; total],
         };
 
         for ty in 0..tiles_y as i32 {
@@ -94,6 +98,12 @@ impl WorldBuffer {
                 let tile = tile_store::load_tile(conn, tx, ty, 0)
                     .map_err(|e| e.to_string())?
                     .unwrap_or_else(TileData::new_sea);
+
+                // Grow the buffer's good count to fit this tile (a world may carry
+                // more than the built-in GOODS_COUNT goods).
+                if tile.goods.len() > buf.goods.len() {
+                    buf.goods.resize(tile.goods.len(), vec![0u8; total]);
+                }
 
                 let tile_w = TILE_SIZE.min(width - tx as u32 * TILE_SIZE);
                 let tile_h = TILE_SIZE.min(height - ty as u32 * TILE_SIZE);
@@ -127,10 +137,12 @@ impl WorldBuffer {
                         buf.habitability[wi] = tile.habitability[ti];
                         buf.salinity[wi] = tile.salinity[ti];
                         buf.shark_risk[wi] = tile.shark_risk[ti];
-                        for g in 0..GOODS_COUNT {
+                        for g in 0..tile.goods.len() {
                             buf.goods[g][wi] = tile.goods[g][ti];
                         }
                         buf.shipworm_risk[wi] = tile.shipworm_risk[ti];
+                        buf.storm_base[wi] = tile.storm_base[ti];
+                        buf.reef_risk[wi] = tile.reef_risk[ti];
                     }
                 }
             }
@@ -158,6 +170,11 @@ impl WorldBuffer {
         for ty in 0..self.tiles_y as i32 {
             for tx in 0..self.tiles_x as i32 {
                 let mut tile = TileData::new_sea();
+                // Match the tile's good column count to the buffer (may exceed the
+                // built-in GOODS_COUNT when the world defines custom goods).
+                if self.goods.len() != tile.goods.len() {
+                    tile.goods.resize(self.goods.len(), vec![0u8; (TILE_SIZE * TILE_SIZE) as usize]);
+                }
                 let tile_w = TILE_SIZE.min(self.width - tx as u32 * TILE_SIZE);
                 let tile_h = TILE_SIZE.min(self.height - ty as u32 * TILE_SIZE);
 
@@ -190,10 +207,12 @@ impl WorldBuffer {
                         tile.habitability[ti] = self.habitability[wi];
                         tile.salinity[ti] = self.salinity[wi];
                         tile.shark_risk[ti] = self.shark_risk[wi];
-                        for g in 0..GOODS_COUNT {
+                        for g in 0..self.goods.len() {
                             tile.goods[g][ti] = self.goods[g][wi];
                         }
                         tile.shipworm_risk[ti] = self.shipworm_risk[wi];
+                        tile.storm_base[ti] = self.storm_base[wi];
+                        tile.reef_risk[ti] = self.reef_risk[wi];
                     }
                 }
 

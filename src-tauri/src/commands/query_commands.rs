@@ -4,7 +4,7 @@ use std::collections::BinaryHeap;
 use tauri::State;
 use crate::db::{WorldDb, tile_store, metadata};
 use crate::tile::coords::{TileCoord, TILE_SIZE};
-use crate::tile::cell::{TileData, GOODS_COUNT};
+use crate::tile::cell::TileData;
 use crate::sim::biological::GOOD_NAMES;
 
 // Salinity u8 ↔ PSU mapping (mirror of sim/ocean.rs).
@@ -39,6 +39,8 @@ pub struct CellInfo {
     pub salinity: f32,    // PSU
     pub shark_risk: f32,  // 0..1
     pub shipworm_risk: f32, // 0..1
+    pub storm_risk: f32,  // 0..1 (annual storm potential)
+    pub reef_risk: f32,   // 0..1
     pub goods: Vec<GoodAmount>,
 }
 
@@ -106,12 +108,21 @@ pub fn get_cell_info(
         salinity: SAL_MIN_PSU + (tile.salinity[idx] as f32 / 255.0) * (SAL_MAX_PSU - SAL_MIN_PSU),
         shark_risk: tile.shark_risk[idx] as f32 / 255.0,
         shipworm_risk: tile.shipworm_risk[idx] as f32 / 255.0,
-        goods: (0..GOODS_COUNT)
-            .filter_map(|g| {
-                let a = tile.goods[g][idx];
-                if a > 0 { Some(GoodAmount { name: GOOD_NAMES[g].to_string(), amount: a }) } else { None }
-            })
-            .collect(),
+        storm_risk: tile.storm_base[idx] as f32 / 255.0,
+        reef_risk: tile.reef_risk[idx] as f32 / 255.0,
+        goods: {
+            let specs = crate::commands::goods_commands::load_world_goods(&conn);
+            (0..tile.goods.len())
+                .filter_map(|g| {
+                    let a = tile.goods[g][idx];
+                    if a == 0 { return None; }
+                    let name = specs.get(g).map(|s| s.id.clone())
+                        .or_else(|| GOOD_NAMES.get(g).map(|s| s.to_string()))
+                        .unwrap_or_else(|| format!("good_{g}"));
+                    Some(GoodAmount { name, amount: a })
+                })
+                .collect()
+        },
     })
 }
 
@@ -554,6 +565,9 @@ fn build_coarse_cost(
     let mut is_land = vec![false; cn];
     let mut elev = vec![0.0f32; cn];
     let mut koppen = vec![0u8; cn];
+    // Maritime-hazard exposure per coarse cell (annual storm peak + reef wreck
+    // risk), used to make stormy/reef-fouled sea more expensive to cross.
+    let mut sea_hazard = vec![0.0f32; cn];
     {
         let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
         let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
@@ -563,6 +577,7 @@ fn build_coarse_cost(
         let mut f_terrain = vec![0u8; fn_cells];
         let mut f_elev = vec![0.0f32; fn_cells];
         let mut f_koppen = vec![0u8; fn_cells];
+        let mut f_hazard = vec![0.0f32; fn_cells];
         for ty in 0..tiles_y as i32 {
             for tx in 0..tiles_x as i32 {
                 let tile = tile_store::load_tile(conn, tx, ty, 0)
@@ -579,6 +594,7 @@ fn build_coarse_cost(
                         f_terrain[gi] = tile.terrain[ti];
                         f_elev[gi] = tile.elevation[ti];
                         f_koppen[gi] = tile.koppen[ti];
+                        f_hazard[gi] = (tile.storm_base[ti].max(tile.reef_risk[ti])) as f32 / 255.0;
                     }
                 }
             }
@@ -592,6 +608,7 @@ fn build_coarse_cost(
                 is_land[ci] = f_terrain[gi] == 1;
                 elev[ci] = f_elev[gi];
                 koppen[ci] = f_koppen[gi];
+                sea_hazard[ci] = f_hazard[gi];
             }
         }
     }
@@ -676,6 +693,18 @@ fn build_coarse_cost(
                     base[(ny * cw + wrap_cx(cx + dx)) as usize]
                 });
                 if coastal { cost[ci] = 0.5; }
+            }
+        }
+    }
+
+    // Maritime-hazard surcharge: stormy / reef-fouled sea is dearer to cross, so
+    // routes detour around cyclone belts and reefs, and goods reachable only over
+    // hazardous water grow scarcer downstream. Applied only when sea is passable.
+    if !block_sea {
+        const HAZARD_W: f32 = 7.0; // max added cost on the worst sea cell
+        for ci in 0..cn {
+            if !is_land[ci] {
+                cost[ci] += sea_hazard[ci].clamp(0.0, 1.0) * HAZARD_W;
             }
         }
     }
@@ -1172,6 +1201,119 @@ pub fn compute_shipworm_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, 
     Ok(zones)
 }
 
+/// Cluster the highest-risk storm water into danger zones (open-ocean cyclone
+/// belts; same overlay shape as shark/shipworm zones). `month <= 0` returns the
+/// combined annual extent; `month` in 1..=`months` applies the analytic seasonal
+/// phase (`biological::storm_season_phase`) so zones fade out in their calm
+/// season and the hemispheres peak ~half a year apart.
+#[tauri::command]
+pub fn compute_storm_zones(month: i32, months: u32, db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+    let months = months.max(1);
+
+    let f = (grid_w / 300).max(1);
+    let cw = ((grid_w + f - 1) / f) as i32;
+    let ch = ((grid_h + f - 1) / f) as i32;
+    let mut risk = vec![0.0f32; (cw * ch) as usize];
+
+    let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
+    let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
+    for ty in 0..tiles_y as i32 {
+        for tx in 0..tiles_x as i32 {
+            let tile = tile_store::load_tile(&conn, tx, ty, 0)
+                .map_err(|e| e.to_string())?.unwrap_or_else(TileData::new_sea);
+            let base_x = tx as u32 * TILE_SIZE;
+            let base_y = ty as u32 * TILE_SIZE;
+            let max_lx = TILE_SIZE.min(grid_w - base_x);
+            let max_ly = TILE_SIZE.min(grid_h - base_y);
+            for ly in 0..max_ly {
+                for lx in 0..max_lx {
+                    let ti = (ly * TILE_SIZE + lx) as usize;
+                    let base = tile.storm_base[ti] as f32 / 255.0;
+                    if base <= 0.0 { continue; }
+                    let wy = base_y + ly;
+                    let lat = 90.0 - (wy as f32 / grid_h as f32) * 180.0;
+                    let v = base * crate::sim::biological::storm_season_phase(month, months, lat);
+                    if v <= 0.0 { continue; }
+                    let cx = ((base_x + lx) / f) as i32;
+                    let cy = ((base_y + ly) / f) as i32;
+                    let ci = (cy * cw + cx) as usize;
+                    if v > risk[ci] { risk[ci] = v; }
+                }
+            }
+        }
+    }
+
+    let mut zones: Vec<SharkZone> = cluster_cells(&risk, cw, ch, f, 0.50, 4)
+        .into_iter()
+        .map(|c| SharkZone { cells: c.cells, cell_size: f as f32, x: c.cx, y: c.cy, score: c.score })
+        .collect();
+    zones.sort_by(|a, b| {
+        (b.cells.len() as f32 * b.score)
+            .partial_cmp(&(a.cells.len() as f32 * a.score))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    zones.truncate(14);
+    Ok(zones)
+}
+
+/// Cluster the highest-risk reef/shoal wreck water into danger zones.
+#[tauri::command]
+pub fn compute_reef_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+
+    let f = (grid_w / 300).max(1);
+    let cw = ((grid_w + f - 1) / f) as i32;
+    let ch = ((grid_h + f - 1) / f) as i32;
+    let mut risk = vec![0.0f32; (cw * ch) as usize];
+
+    let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
+    let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
+    for ty in 0..tiles_y as i32 {
+        for tx in 0..tiles_x as i32 {
+            let tile = tile_store::load_tile(&conn, tx, ty, 0)
+                .map_err(|e| e.to_string())?.unwrap_or_else(TileData::new_sea);
+            let base_x = tx as u32 * TILE_SIZE;
+            let base_y = ty as u32 * TILE_SIZE;
+            let max_lx = TILE_SIZE.min(grid_w - base_x);
+            let max_ly = TILE_SIZE.min(grid_h - base_y);
+            for ly in 0..max_ly {
+                for lx in 0..max_lx {
+                    let ti = (ly * TILE_SIZE + lx) as usize;
+                    let v = tile.reef_risk[ti] as f32 / 255.0;
+                    if v <= 0.0 { continue; }
+                    let cx = ((base_x + lx) / f) as i32;
+                    let cy = ((base_y + ly) / f) as i32;
+                    let ci = (cy * cw + cx) as usize;
+                    if v > risk[ci] { risk[ci] = v; }
+                }
+            }
+        }
+    }
+
+    let mut zones: Vec<SharkZone> = cluster_cells(&risk, cw, ch, f, 0.55, 3)
+        .into_iter()
+        .map(|c| SharkZone { cells: c.cells, cell_size: f as f32, x: c.cx, y: c.cy, score: c.score })
+        .collect();
+    zones.sort_by(|a, b| {
+        (b.cells.len() as f32 * b.score)
+            .partial_cmp(&(a.cells.len() as f32 * a.score))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    zones.truncate(14);
+    Ok(zones)
+}
+
 #[derive(Serialize)]
 pub struct GoodRegion {
     pub good: String,
@@ -1199,7 +1341,9 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
     let cw = ((grid_w + f - 1) / f) as i32;
     let ch = ((grid_h + f - 1) / f) as i32;
     let cn = (cw * ch) as usize;
-    let mut grids: Vec<Vec<f32>> = vec![vec![0.0f32; cn]; GOODS_COUNT];
+    let specs = crate::commands::goods_commands::load_world_goods(&conn);
+    let gc = specs.len();
+    let mut grids: Vec<Vec<f32>> = vec![vec![0.0f32; cn]; gc];
 
     let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
     let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
@@ -1217,7 +1361,7 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
                     let cx = ((base_x + lx) / f) as i32;
                     let cy = ((base_y + ly) / f) as i32;
                     let ci = (cy * cw + cx) as usize;
-                    for g in 0..GOODS_COUNT {
+                    for g in 0..gc.min(tile.goods.len()) {
                         let v = tile.goods[g][ti] as f32 / 255.0;
                         if v > grids[g][ci] { grids[g][ci] = v; }
                     }
@@ -1226,32 +1370,34 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
         }
     }
 
-    use crate::sim::biological::{GOOD_GEMSTONES, GOOD_UNLIMITED, GEM_STONES};
+    use crate::sim::biological::GEM_STONES;
+    use crate::sim::goods_spec::Distribution;
     let mut out: Vec<GoodRegion> = Vec::new();
-    for g in 0..GOODS_COUNT {
-        // Gemstones are scattered deposits (keep every deposit, each named for a
-        // specific stone). Unlimited goods blanket the world, so show many
-        // patches. Seeded goods are one homeland (top few coarse patches).
-        let (max_keep, min_cells) = if g == GOOD_GEMSTONES {
-            (32usize, 1usize)
-        } else if GOOD_UNLIMITED[g] {
-            (14, 1)
-        } else {
-            (4, 1)
+    for g in 0..gc {
+        let spec = match specs.get(g) {
+            Some(s) if s.enabled => s,
+            _ => continue, // disabled goods produce nothing to map
+        };
+        // Deposit goods are scattered (keep every deposit). Global goods blanket
+        // the world (many patches). Local goods are one homeland (top few).
+        let (max_keep, min_cells) = match spec.distribution {
+            Distribution::Deposits => (32usize, 1usize),
+            Distribution::Global => (14, 1),
+            Distribution::Local => (4, 1),
         };
         let mut regions = cluster_cells(&grids[g], cw, ch, f, 0.30, min_cells);
         regions.sort_by(|a, b| b.cells.len().cmp(&a.cells.len()));
         regions.truncate(max_keep);
         for c in regions {
-            let sublabel = if g == GOOD_GEMSTONES {
-                // Deterministic stone type per deposit (by its centroid).
+            // Name each gemstone deposit for a specific stone (gemstones only).
+            let sublabel = if spec.id == "gemstones" {
                 let h = (c.cx as i64).wrapping_mul(73856093) ^ (c.cy as i64).wrapping_mul(19349663);
                 GEM_STONES[(h.unsigned_abs() as usize) % GEM_STONES.len()].to_string()
             } else {
                 String::new()
             };
             out.push(GoodRegion {
-                good: GOOD_NAMES[g].to_string(),
+                good: spec.id.clone(),
                 cells: c.cells,
                 cell_size: f as f32,
                 x: c.cx,
@@ -1321,7 +1467,11 @@ pub fn compute_trade_matrix(
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
-    let goods_names: Vec<String> = GOOD_NAMES.iter().map(|s| s.to_string()).collect();
+    // Active (editable) good specs drive names/desire/luxury so the matrix tracks
+    // the world's authored goods.
+    let specs = crate::commands::goods_commands::load_world_goods(&conn);
+    let gc = specs.len();
+    let goods_names: Vec<String> = specs.iter().map(|s| s.id.clone()).collect();
     if grid_w == 0 || grid_h == 0 {
         return Ok(TradeMatrix { regions: vec![], flows: vec![], trunks: vec![], goods: goods_names });
     }
@@ -1401,12 +1551,12 @@ pub fn compute_trade_matrix(
     let f = (grid_w / 220).max(1);
     let cw = ((grid_w + f - 1) / f) as i32;
     let ch = ((grid_h + f - 1) / f) as i32;
-    let mut production = vec![vec![0.0f32; GOODS_COUNT]; nr];
+    let mut production = vec![vec![0.0f32; gc]; nr];
 
     let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
     let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
     // Sum goods into a coarse grid first (cheap), then assign coarse cells.
-    let mut coarse = vec![[0.0f32; GOODS_COUNT]; (cw * ch) as usize];
+    let mut coarse = vec![vec![0.0f32; gc]; (cw * ch) as usize];
     for ty in 0..tiles_y as i32 {
         for tx in 0..tiles_x as i32 {
             let tile = tile_store::load_tile(&conn, tx, ty, 0)
@@ -1421,7 +1571,7 @@ pub fn compute_trade_matrix(
                     let cx = ((base_x + lx) / f) as i32;
                     let cy = ((base_y + ly) / f) as i32;
                     let ci = (cy * cw + cx) as usize;
-                    for g in 0..GOODS_COUNT {
+                    for g in 0..gc.min(tile.goods.len()) {
                         coarse[ci][g] += tile.goods[g][ti] as f32 / 255.0;
                     }
                 }
@@ -1445,41 +1595,52 @@ pub fn compute_trade_matrix(
                 if d < bd { bd = d; best = ri; }
             }
             if bd > max_reach * max_reach { continue; }
-            for g in 0..GOODS_COUNT {
+            for g in 0..gc {
                 production[best][g] += coarse[ci][g];
             }
         }
     }
 
     // Normalize production per good across regions to 0..1.
-    for g in 0..GOODS_COUNT {
+    for g in 0..gc {
         let mx = production.iter().map(|p| p[g]).fold(0.0f32, f32::max);
         if mx > 0.0 {
             for ri in 0..nr { production[ri][g] /= mx; }
         }
     }
 
-    // ── 3. Demand: economic size × per-good base demand ──────────────────────
+    // ── 3. Demand: economic size × per-good base demand (from the active spec) ──
     let max_rw = region_weight.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
-    // Food/utility goods are more universally demanded than luxuries.
-    let demand_weight: [f32; GOODS_COUNT] = [
-        0.35, 0.45, 0.45, 0.50, 0.30, 0.70, // silk,wine,oliveoil,sugar,frankincense,stockfish
-        0.40, 0.40, 0.45, 0.35, 0.60, 0.25, // spices,tea,coffee,furs,timber,amber
-        0.75, 0.30, 0.30, 0.30, 0.55,        // salt,dyes,incense,pearls,whaling
-        0.85, 0.65, 0.45, 0.40,              // wheat(staple),iron,cotton,gemstones
-    ];
-    let mut demand = vec![vec![0.0f32; GOODS_COUNT]; nr];
+    // Per-good desire / luxury flag come from the world's editable good spec, so
+    // disabled goods demand nothing and custom desires take effect.
+    let desire: Vec<f32> = (0..gc)
+        .map(|g| specs.get(g).filter(|s| s.enabled).map(|s| s.desire).unwrap_or(0.0))
+        .collect();
+    let is_luxury: Vec<bool> = (0..gc)
+        .map(|g| specs.get(g).map(|s| s.network_luxury).unwrap_or(false))
+        .collect();
+    // Luxuries are only prized across a large/open trade network; tighter reaches
+    // (more closed networks) realize less of that demand.
+    let reach_factor = match reach { 0 => 1.0, 1 => 0.7, _ => 0.45 };
+    let mut demand = vec![vec![0.0f32; gc]; nr];
     for ri in 0..nr {
         let size = region_weight[ri] / max_rw; // 0..1
-        for g in 0..GOODS_COUNT {
-            demand[ri][g] = size * demand_weight[g];
+        for g in 0..gc {
+            let mut d = size * desire[g];
+            if is_luxury[g] {
+                // Discount in the good's own producing homeland (it's local/common
+                // there) and scale by how open the trade network is.
+                let homeland_discount = 1.0 - 0.6 * production[ri][g].clamp(0.0, 1.0);
+                d *= reach_factor * homeland_discount;
+            }
+            demand[ri][g] = d;
         }
     }
 
     // Net = production − demand.
     let mut regions: Vec<TradeRegion> = Vec::with_capacity(nr);
     for ri in 0..nr {
-        let net: Vec<f32> = (0..GOODS_COUNT).map(|g| production[ri][g] - demand[ri][g]).collect();
+        let net: Vec<f32> = (0..gc).map(|g| production[ri][g] - demand[ri][g]).collect();
         regions.push(TradeRegion {
             id: ri as u32,
             name: format!("Region {}", ri + 1),
@@ -1510,7 +1671,7 @@ pub fn compute_trade_matrix(
         std::collections::HashMap::new();
 
     let mut flows: Vec<TradeFlow> = Vec::new();
-    for g in 0..GOODS_COUNT {
+    for g in 0..gc {
         let mut supply: Vec<(usize, f32)> = (0..nr)
             .filter_map(|ri| { let n = regions[ri].net[g]; if n > 0.05 { Some((ri, n)) } else { None } })
             .collect();
@@ -1668,10 +1829,12 @@ pub fn compute_political(
     let f = (grid_w / 220).max(1);
     let cw = ((grid_w + f - 1) / f) as i32;
     let ch = ((grid_h + f - 1) / f) as i32;
-    let mut prod = vec![vec![0.0f32; GOODS_COUNT]; nn];
+    let specs = crate::commands::goods_commands::load_world_goods(&conn);
+    let gc = specs.len();
+    let mut prod = vec![vec![0.0f32; gc]; nn];
     let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
     let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
-    let mut coarse = vec![[0.0f32; GOODS_COUNT]; (cw * ch) as usize];
+    let mut coarse = vec![vec![0.0f32; gc]; (cw * ch) as usize];
     for ty in 0..tiles_y as i32 {
         for tx in 0..tiles_x as i32 {
             let tile = tile_store::load_tile(&conn, tx, ty, 0)
@@ -1686,7 +1849,7 @@ pub fn compute_political(
                     let cx = ((base_x + lx) / f) as i32;
                     let cy = ((base_y + ly) / f) as i32;
                     let ci = (cy * cw + cx) as usize;
-                    for g in 0..GOODS_COUNT {
+                    for g in 0..gc.min(tile.goods.len()) {
                         coarse[ci][g] += tile.goods[g][ti] as f32 / 255.0;
                     }
                 }
@@ -1708,24 +1871,24 @@ pub fn compute_political(
                 if d < bd { bd = d; best = ni; }
             }
             if bd > max_reach * max_reach { continue; }
-            for g in 0..GOODS_COUNT {
+            for g in 0..gc {
                 prod[best][g] += coarse[ci][g];
             }
         }
     }
-    let mut good_total = vec![0.0f32; GOODS_COUNT];
-    for g in 0..GOODS_COUNT {
+    let mut good_total = vec![0.0f32; gc];
+    for g in 0..gc {
         for ni in 0..nn { good_total[g] += prod[ni][g]; }
     }
     let mut monopoly = vec![0.0f32; nn];
     let mut monopolies: Vec<Vec<String>> = vec![Vec::new(); nn];
     for ni in 0..nn {
-        for g in 0..GOODS_COUNT {
+        for g in 0..gc {
             if good_total[g] < 1e-4 || prod[ni][g] < 0.05 { continue; }
             let share = prod[ni][g] / good_total[g];
             monopoly[ni] += share * share; // squared → rewards true dominance
             if share > 0.55 {
-                monopolies[ni].push(GOOD_NAMES[g].to_string());
+                monopolies[ni].push(specs[g].id.clone());
             }
         }
     }

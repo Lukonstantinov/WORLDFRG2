@@ -28,6 +28,8 @@ pub fn render_tile(tile: &TileData, layer: &str) -> Vec<u8> {
         "salinity" => render_salinity(tile, &mut rgba),
         "shark" => render_shark(tile, &mut rgba),
         "shipworm" => render_shipworm(tile, &mut rgba),
+        "storm" => render_storm(tile, &mut rgba),
+        "reef" => render_reef(tile, &mut rgba),
         _ => render_land(tile, &mut rgba),
     }
 
@@ -437,6 +439,60 @@ fn render_shipworm(tile: &TileData, rgba: &mut [u8]) {
                 lerp_rgb((10, 40, 80), (150, 110, 50), v * 2.0)
             } else {
                 lerp_rgb((150, 110, 50), (140, 70, 30), (v - 0.5) * 2.0)
+            };
+            rgba[offset] = r;
+            rgba[offset + 1] = g;
+            rgba[offset + 2] = b;
+        }
+        rgba[offset + 3] = 255;
+    }
+}
+
+fn render_storm(tile: &TileData, rgba: &mut [u8]) {
+    // Annual (combined) storm danger: calm blue → violent purple/magenta.
+    for i in 0..PIXEL_COUNT {
+        let offset = i * 4;
+        if tile.terrain[i] == 1 {
+            rgba[offset + 3] = 0; // land transparent
+            continue;
+        }
+        let v = tile.storm_base[i] as f32 / 255.0;
+        if v < 0.01 {
+            rgba[offset] = 8;
+            rgba[offset + 1] = 20;
+            rgba[offset + 2] = 50;
+        } else {
+            let (r, g, b) = if v < 0.5 {
+                lerp_rgb((10, 40, 80), (120, 90, 180), v * 2.0)
+            } else {
+                lerp_rgb((120, 90, 180), (210, 50, 160), (v - 0.5) * 2.0)
+            };
+            rgba[offset] = r;
+            rgba[offset + 1] = g;
+            rgba[offset + 2] = b;
+        }
+        rgba[offset + 3] = 255;
+    }
+}
+
+fn render_reef(tile: &TileData, rgba: &mut [u8]) {
+    // Reef/shoal wreck hazard: deep blue → turquoise → warning yellow.
+    for i in 0..PIXEL_COUNT {
+        let offset = i * 4;
+        if tile.terrain[i] == 1 {
+            rgba[offset + 3] = 0; // land transparent
+            continue;
+        }
+        let v = tile.reef_risk[i] as f32 / 255.0;
+        if v < 0.01 {
+            rgba[offset] = 8;
+            rgba[offset + 1] = 20;
+            rgba[offset + 2] = 50;
+        } else {
+            let (r, g, b) = if v < 0.5 {
+                lerp_rgb((10, 40, 80), (40, 180, 170), v * 2.0)
+            } else {
+                lerp_rgb((40, 180, 170), (230, 210, 70), (v - 0.5) * 2.0)
             };
             rgba[offset] = r;
             rgba[offset + 1] = g;

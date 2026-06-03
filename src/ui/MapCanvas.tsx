@@ -7,7 +7,8 @@ import { createPaintOverlay, drawCursorRing, paintStamp, clearPaintOverlay } fro
 import { useWorldStore } from "../state/worldStore";
 import { useViewportStore } from "../state/viewportStore";
 import { useUIStore } from "../state/uiStore";
-import { paintStroke, undoAction, redoAction, getOverlayVectors, getCurrentStreamlines, computeTradeRoutes, computeFisheryBanks, computeSharkZones, computeShipwormZones, computeGoodRegions, computeTradeMatrix, computePolitical } from "../bridge/tauri";
+import { useGoodsStore } from "../state/goodsStore";
+import { paintStroke, undoAction, redoAction, getOverlayVectors, getCurrentStreamlines, computeTradeRoutes, computeFisheryBanks, computeSharkZones, computeShipwormZones, computeStormZones, computeReefZones, computeGoodRegions, computeTradeMatrix, computePolitical } from "../bridge/tauri";
 import type { PaintValue } from "../types";
 
 /** Largest box with the world's aspect ratio that fits inside the pane. */
@@ -58,6 +59,10 @@ export function MapCanvas() {
   // Trade routes/flows are a product of the Biological-Trade step (8), not an
   // automatic response to settlement changes.
   const step8Done = useUIStore((s) => s.stepCompleted[8]);
+  const stormMonth = useUIStore((s) => s.bioParams.stormMonth);
+  const calendarMonths = useUIStore((s) => s.bioParams.calendarMonths);
+  const goodsSpecs = useGoodsStore((s) => s.specs);
+  const loadGoodsFromWorld = useGoodsStore((s) => s.loadFromWorld);
   const step9Done = useUIStore((s) => s.stepCompleted[9]);
   const bioParams = useUIStore((s) => s.bioParams);
 
@@ -328,11 +333,38 @@ export function MapCanvas() {
       om.drawShipwormZones(zones);
       requestRender();
     }).catch(() => {});
+    computeReefZones().then((zones) => {
+      om.drawReefZones(zones);
+      requestRender();
+    }).catch(() => {});
     computeGoodRegions().then((regions) => {
       om.drawGoodRegions(regions);
       requestRender();
     }).catch(() => {});
   }, [meta, tileVersion, requestRender]);
+
+  // Storm zones depend on the seasonal month slider, so recompute them on their
+  // own when the month (or calendar length) changes — month 0 = combined annual.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !meta) return;
+    computeStormZones(stormMonth, calendarMonths).then((zones) => {
+      om.drawStormZones(zones);
+      requestRender();
+    }).catch(() => {});
+  }, [meta, tileVersion, stormMonth, calendarMonths, requestRender]);
+
+  // Load the world's editable good specs (default 30 or custom) so overlays/labels
+  // use the right icons/colors, including any custom goods.
+  useEffect(() => { if (meta) void loadGoodsFromWorld(); }, [meta, tileVersion, loadGoodsFromWorld]);
+
+  // Push per-good display metadata (icon/color) to the overlay manager.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setGoodMeta(new Map(goodsSpecs.map((g) => [g.id, { icon: g.icon, color: g.color }])));
+    requestRender();
+  }, [goodsSpecs, requestRender]);
 
   // Region↔region trade flows (routed + bundled trunks) — a product of the
   // Biological-Trade step, gated by the chosen trade reach.

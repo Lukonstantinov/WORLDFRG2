@@ -4,6 +4,8 @@ import { GOOD_DEFS, goodOverlayKey } from "../goods";
 const GOOD_BY_NAME = new Map(GOOD_DEFS.map((g) => [g.name, g]));
 const SHARK_COLOR = "#e04040";
 const SHIPWORM_COLOR = "#b98a4a";
+const STORM_COLOR = "#c050d0";
+const REEF_COLOR = "#30c0b0";
 const TRADE_TRUNK = "#e0c060"; // bundled commodity-flow trunk (amber)
 const POLITICAL_COLOR = "#d65fd0"; // influence disc (magenta)
 
@@ -44,7 +46,12 @@ export class OverlayManager {
   private fisheryBanks: FisheryBank[] = [];
   private sharkZones: SharkZone[] = [];
   private shipwormZones: SharkZone[] = [];
+  private stormZones: SharkZone[] = [];
+  private reefZones: SharkZone[] = [];
   private goodRegions: GoodRegion[] = [];
+  /** Per-good display metadata (icon/color) from the active editable spec; falls
+   *  back to the static GOOD_DEFS when absent. */
+  private goodMeta: Map<string, { icon: string; color: string }> | null = null;
   private tradeTrunks: TradeTrunk[] = [];
   private politicalCenters: PoliticalCenter[] = [];
   private latLinesData: { gridW: number; gridH: number } | null = null;
@@ -53,7 +60,7 @@ export class OverlayManager {
     rivers: true, lakes: true, settlements: true,
     markers: false, wind: false, currents: false, latLines: false,
     tradeRoutes: false, fisheryBanks: false,
-    sharkZones: false, shipwormZones: false, tradeFlows: false,
+    sharkZones: false, shipwormZones: false, stormZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false,
   };
 
@@ -88,8 +95,20 @@ export class OverlayManager {
     this.shipwormZones = zones;
   }
 
+  drawStormZones(zones: SharkZone[]) {
+    this.stormZones = zones;
+  }
+
+  drawReefZones(zones: SharkZone[]) {
+    this.reefZones = zones;
+  }
+
   drawGoodRegions(regions: GoodRegion[]) {
     this.goodRegions = regions;
+  }
+
+  setGoodMeta(meta: Map<string, { icon: string; color: string }>) {
+    this.goodMeta = meta;
   }
 
   drawTradeTrunks(trunks: TradeTrunk[], gridW: number) {
@@ -211,8 +230,9 @@ export class OverlayManager {
       for (const r of this.goodRegions) {
         if (!this.visibility[goodOverlayKey(r.good)]) continue;
         const def = GOOD_BY_NAME.get(r.good);
-        const color = def ? def.color : "#cccccc";
-        const emoji = def ? def.emoji : "";
+        const m = this.goodMeta?.get(r.good);
+        const color = m?.color ?? def?.color ?? "#cccccc";
+        const emoji = m?.icon ?? def?.emoji ?? "";
         this.renderRegionMask(ctx, r.cells, r.cell_size, color, emoji, r.x, r.y, 0.16 + 0.18 * Math.min(1, r.score), r.sublabel);
       }
     }
@@ -228,6 +248,20 @@ export class OverlayManager {
     if (this.visibility.shipwormZones && this.shipwormZones.length > 0) {
       for (const z of this.shipwormZones) {
         this.renderRegionMask(ctx, z.cells, z.cell_size, SHIPWORM_COLOR, "\u{1FAB1}", z.x, z.y, 0.16 + 0.22 * Math.min(1, z.score));
+      }
+    }
+
+    // Storm/cyclone belts: open-ocean danger water marked + a cyclone glyph.
+    if (this.visibility.stormZones && this.stormZones.length > 0) {
+      for (const z of this.stormZones) {
+        this.renderRegionMask(ctx, z.cells, z.cell_size, STORM_COLOR, "\u{1F300}", z.x, z.y, 0.16 + 0.22 * Math.min(1, z.score));
+      }
+    }
+
+    // Reef/shoal wreck hazards: warm shallow coastal water marked + a rock glyph.
+    if (this.visibility.reefZones && this.reefZones.length > 0) {
+      for (const z of this.reefZones) {
+        this.renderRegionMask(ctx, z.cells, z.cell_size, REEF_COLOR, "\u{1FAA8}", z.x, z.y, 0.16 + 0.22 * Math.min(1, z.score));
       }
     }
 
@@ -511,6 +545,8 @@ export class OverlayManager {
     this.fisheryBanks = [];
     this.sharkZones = [];
     this.shipwormZones = [];
+    this.stormZones = [];
+    this.reefZones = [];
     this.goodRegions = [];
     this.tradeTrunks = [];
     this.politicalCenters = [];

@@ -1,4 +1,5 @@
 import { useUIStore } from "../state/uiStore";
+import { useGoodsStore } from "../state/goodsStore";
 import type { ActiveTool, ActiveLayer } from "../types";
 import { GOOD_DEFS, goodOverlayKey } from "../goods";
 
@@ -30,6 +31,8 @@ const layerGroups: { group: string; layers: { id: ActiveLayer; label: string }[]
       { id: "salinity", label: "Salinity" },
       { id: "shark", label: "Shark Waters" },
       { id: "shipworm", label: "Shipworm Waters" },
+      { id: "storm", label: "Storm Belts" },
+      { id: "reef", label: "Reef Hazards" },
     ],
   },
   {
@@ -69,6 +72,8 @@ const overlayTypes = [
 const bioOverlays = [
   { id: "sharkZones", label: "\u{1F988} Shark Zones" },
   { id: "shipwormZones", label: "\u{1FAB1} Shipworm Zones" },
+  { id: "stormZones", label: "\u{1F300} Storm Zones" },
+  { id: "reefZones", label: "\u{1FAA8} Reef Zones" },
   { id: "politicalInfluence", label: "\u{1F451} Political Influence" },
 ];
 
@@ -84,6 +89,12 @@ export function Toolbar() {
   const setBrushRadius = useUIStore((s) => s.setBrushRadius);
   const setElevationValue = useUIStore((s) => s.setElevationValue);
   const toggleOverlay = useUIStore((s) => s.toggleOverlay);
+  const bioParams = useUIStore((s) => s.bioParams);
+  const setBioParams = useUIStore((s) => s.setBioParams);
+  const goodsSpecs = useGoodsStore((s) => s.specs);
+  const goodItems = goodsSpecs.length > 0
+    ? goodsSpecs.filter((g) => g.enabled).map((g) => ({ id: g.id, icon: g.icon, name: g.name }))
+    : GOOD_DEFS.map((g) => ({ id: g.name, icon: g.emoji, name: g.label }));
   const setLayerOpacity = useUIStore((s) => s.setLayerOpacity);
   const stretchToFit = useUIStore((s) => s.stretchToFit);
   const setStretchToFit = useUIStore((s) => s.setStretchToFit);
@@ -226,13 +237,33 @@ export function Toolbar() {
             </span>
           </label>
         ))}
+        {/* Seasonal storm month: 0 = combined annual extent, 1..months scrubs
+            the cyclone season (zones fade out in their calm months). */}
+        <div style={{ marginTop: 4, opacity: overlayVisibility.stormZones ? 1 : 0.5 }}>
+          <div style={{ fontSize: 10, color: "#8aa0b8", display: "flex", justifyContent: "space-between" }}>
+            <span>{"\u{1F300}"} Storm month</span>
+            <span style={{ color: "#b0c8e0" }}>
+              {bioParams.stormMonth === 0 ? "All year" : `Moon ${bioParams.stormMonth}`}
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={bioParams.calendarMonths}
+            step={1}
+            value={bioParams.stormMonth}
+            onChange={(e) => setBioParams({ stormMonth: parseInt(e.target.value, 10) })}
+            style={{ width: "100%", accentColor: "#c050d0" }}
+          />
+        </div>
       </div>
 
-      {/* Trade-good belts (each good is a separate sublayer toggle) */}
+      {/* Trade-good belts (each good is a separate sublayer toggle). Driven by the
+          world's editable spec list, falling back to the static defaults. */}
       <div style={section}>
         <div style={sectionHeader}>Trade Goods</div>
-        {GOOD_DEFS.map((g) => {
-          const key = goodOverlayKey(g.name);
+        {goodItems.map((g) => {
+          const key = goodOverlayKey(g.id);
           return (
             <label key={key} style={checkboxRow}>
               <input
@@ -242,7 +273,7 @@ export function Toolbar() {
                 style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
               />
               <span style={{ color: overlayVisibility[key] ? "#b0c8e0" : "#5a6a80" }}>
-                {g.emoji} {g.label}
+                {g.icon} {g.name}
               </span>
             </label>
           );

@@ -154,11 +154,14 @@ pub fn sim_biological(
     let river_data: Vec<rivers::River> = serde_json::from_str(&rivers_json)
         .unwrap_or_default();
 
+    let goods = crate::commands::goods_commands::load_world_goods(&conn);
     biological::compute_shark_risk(&mut buf, &river_data);
     biological::compute_shipworm_risk(&mut buf, &river_data);
-    biological::compute_trade_goods(&mut buf, &river_data, seed, gem_deposits);
+    biological::compute_storm_base(&mut buf);
+    biological::compute_reef_risk(&mut buf);
+    biological::compute_trade_goods(&mut buf, &river_data, seed, gem_deposits, &goods);
 
-    buf.save(&conn, "Biological (sharks, shipworms & trade goods)")
+    buf.save(&conn, "Biological (sharks, shipworms, storms, reefs & trade goods)")
 }
 
 /// Run all simulations in sequence (full world generation pipeline).
@@ -215,9 +218,12 @@ pub fn sim_run_all(
     settlements::write_habitability(&mut buf, &habitability);
 
     // Phase 8: Biological — shark + shipworm waters + trade-good belts.
+    let goods = crate::commands::goods_commands::load_world_goods(&conn);
     biological::compute_shark_risk(&mut buf, &extracted_rivers);
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
-    biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6);
+    biological::compute_storm_base(&mut buf);
+    biological::compute_reef_risk(&mut buf);
+    biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, &goods);
 
     let modified = buf.save(&conn, "Full world generation")?;
 
@@ -305,9 +311,12 @@ pub fn sim_run_all_from_terrain(
     settlements::write_habitability(&mut buf, &habitability);
 
     // Phase 8: Biological — shark + shipworm waters + trade-good belts.
+    let goods = crate::commands::goods_commands::load_world_goods(&conn);
     biological::compute_shark_risk(&mut buf, &extracted_rivers);
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
-    biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6);
+    biological::compute_storm_base(&mut buf);
+    biological::compute_reef_risk(&mut buf);
+    biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, &goods);
 
     let modified = buf.save(&conn, "Full generation from template")?;
 

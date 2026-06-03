@@ -40,7 +40,45 @@ export interface CellInfo {
   salinity: number;    // PSU
   shark_risk: number;  // 0..1
   shipworm_risk: number; // 0..1
+  storm_risk: number;  // 0..1
+  reef_risk: number;   // 0..1
   goods: { name: string; amount: number }[];
+}
+
+// ── Editable trade-good specs (mirror sim/goods_spec.rs) ──
+export type GoodDomain = "marine" | "coastal" | "continental" | "island";
+export type GoodDistribution = "global" | "local" | "deposits";
+
+export interface GoodEnvelope {
+  climate: [number, number][];        // (koppen code, weight)
+  temp?: [number, number] | null;     // bell center, width (°C)
+  precip?: [number, number, number] | null;     // band lo, hi, edge (mm/yr)
+  elevation?: [number, number, number] | null;  // band lo, hi, edge (0..1)
+  abs_lat?: [number, number, number] | null;    // band lo, hi, edge (deg)
+  fertility: number;
+  coast_bonus: number;
+}
+
+export interface GoodDepositSpec {
+  min_elev: number;
+  count_num: number;
+  count_den: number;
+}
+
+export interface GoodSpec {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  enabled: boolean;
+  domain: GoodDomain;
+  distribution: GoodDistribution;
+  rarity: number;
+  desire: number;
+  network_luxury: boolean;
+  builtin: boolean;
+  deposit?: GoodDepositSpec | null;
+  scoring?: GoodEnvelope | null;
 }
 
 export type PaintValue =
@@ -54,7 +92,7 @@ export type ActiveLayer =
   | "land" | "elevation" | "climate" | "temperature" | "precipitation"
   | "soil" | "fertility" | "plates"
   | "biomes" | "fisheries" | "terrain" | "shelf" | "ridges" | "wind" | "currents"
-  | "habitability" | "salinity" | "shark" | "shipworm";
+  | "habitability" | "salinity" | "shark" | "shipworm" | "storm" | "reef";
 
 export interface VectorSample {
   x: number;
