@@ -7,6 +7,7 @@ import { createPaintOverlay, drawCursorRing, paintStamp, clearPaintOverlay } fro
 import { useWorldStore } from "../state/worldStore";
 import { useViewportStore } from "../state/viewportStore";
 import { useUIStore } from "../state/uiStore";
+import { useGoodsStore } from "../state/goodsStore";
 import { paintStroke, undoAction, redoAction, getOverlayVectors, getCurrentStreamlines, computeTradeRoutes, computeFisheryBanks, computeSharkZones, computeShipwormZones, computeStormZones, computeReefZones, computeGoodRegions, computeTradeMatrix, computePolitical } from "../bridge/tauri";
 import type { PaintValue } from "../types";
 
@@ -60,6 +61,8 @@ export function MapCanvas() {
   const step8Done = useUIStore((s) => s.stepCompleted[8]);
   const stormMonth = useUIStore((s) => s.bioParams.stormMonth);
   const calendarMonths = useUIStore((s) => s.bioParams.calendarMonths);
+  const goodsSpecs = useGoodsStore((s) => s.specs);
+  const loadGoodsFromWorld = useGoodsStore((s) => s.loadFromWorld);
   const step9Done = useUIStore((s) => s.stepCompleted[9]);
   const bioParams = useUIStore((s) => s.bioParams);
 
@@ -350,6 +353,18 @@ export function MapCanvas() {
       requestRender();
     }).catch(() => {});
   }, [meta, tileVersion, stormMonth, calendarMonths, requestRender]);
+
+  // Load the world's editable good specs (default 30 or custom) so overlays/labels
+  // use the right icons/colors, including any custom goods.
+  useEffect(() => { if (meta) void loadGoodsFromWorld(); }, [meta, tileVersion, loadGoodsFromWorld]);
+
+  // Push per-good display metadata (icon/color) to the overlay manager.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setGoodMeta(new Map(goodsSpecs.map((g) => [g.id, { icon: g.icon, color: g.color }])));
+    requestRender();
+  }, [goodsSpecs, requestRender]);
 
   // Region↔region trade flows (routed + bundled trunks) — a product of the
   // Biological-Trade step, gated by the chosen trade reach.

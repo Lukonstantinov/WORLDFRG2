@@ -3,10 +3,7 @@ import { useUIStore } from "../state/uiStore";
 import { useWorldStore } from "../state/worldStore";
 import { computeTradeMatrix } from "../bridge/tauri";
 import type { TradeMatrix } from "../types";
-import { GOOD_DEFS } from "../goods";
-
-const emojiFor = (name: string) => GOOD_DEFS.find((g) => g.name === name)?.emoji ?? "";
-const labelFor = (name: string) => GOOD_DEFS.find((g) => g.name === name)?.label ?? name;
+import { useGoodsStore } from "../state/goodsStore";
 
 /** Color a net balance: green = surplus/export, red = deficit/import. */
 function netColor(v: number): string {
@@ -21,6 +18,9 @@ export function TradeMatrixPanel() {
   const bioParams = useUIStore((s) => s.bioParams);
   const settlements = useWorldStore((s) => s.settlements);
   const rivers = useWorldStore((s) => s.rivers);
+  const goodMeta = useGoodsStore((s) => s.meta);
+  const emojiFor = (id: string) => goodMeta(id).icon;
+  const labelFor = (id: string) => goodMeta(id).name;
   const [matrix, setMatrix] = useState<TradeMatrix | null>(null);
   const [loading, setLoading] = useState(false);
 

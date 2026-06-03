@@ -45,6 +45,42 @@ export interface CellInfo {
   goods: { name: string; amount: number }[];
 }
 
+// ── Editable trade-good specs (mirror sim/goods_spec.rs) ──
+export type GoodDomain = "marine" | "coastal" | "continental" | "island";
+export type GoodDistribution = "global" | "local" | "deposits";
+
+export interface GoodEnvelope {
+  climate: [number, number][];        // (koppen code, weight)
+  temp?: [number, number] | null;     // bell center, width (°C)
+  precip?: [number, number, number] | null;     // band lo, hi, edge (mm/yr)
+  elevation?: [number, number, number] | null;  // band lo, hi, edge (0..1)
+  abs_lat?: [number, number, number] | null;    // band lo, hi, edge (deg)
+  fertility: number;
+  coast_bonus: number;
+}
+
+export interface GoodDepositSpec {
+  min_elev: number;
+  count_num: number;
+  count_den: number;
+}
+
+export interface GoodSpec {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  enabled: boolean;
+  domain: GoodDomain;
+  distribution: GoodDistribution;
+  rarity: number;
+  desire: number;
+  network_luxury: boolean;
+  builtin: boolean;
+  deposit?: GoodDepositSpec | null;
+  scoring?: GoodEnvelope | null;
+}
+
 export type PaintValue =
   | { type: "terrain"; value: number }
   | { type: "elevation"; value: number }

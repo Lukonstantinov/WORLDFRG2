@@ -1,5 +1,6 @@
 import { useUIStore } from "../../state/uiStore";
 import { useWorldStore } from "../../state/worldStore";
+import { useGoodsStore } from "../../state/goodsStore";
 import { simBiological } from "../../bridge/tauri";
 import { GOOD_DEFS, goodOverlayKey } from "../../goods";
 import { genBtn } from "./WorkflowPanel";
@@ -24,6 +25,10 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
   const bioParams = useUIStore((s) => s.bioParams);
   const setBioParams = useUIStore((s) => s.setBioParams);
   const rivers = useWorldStore((s) => s.rivers);
+  const openGoodsEditor = useGoodsStore((s) => s.setOpen);
+  const loadGoodsFromWorld = useGoodsStore((s) => s.loadFromWorld);
+  const goodsSpecs = useGoodsStore((s) => s.specs);
+  const applyGoodsToWorld = useGoodsStore((s) => s.applyToWorld);
 
   const step6Done = stepCompleted[6] === true;
   const step7Done = stepCompleted[7] === true;
@@ -41,6 +46,8 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
     setSimRunning(true);
     setStatus("Computing shark/shipworm waters, trade goods, routes & matrix...");
     try {
+      // Snapshot any edited good specs into the world so generation uses them.
+      if (goodsSpecs.length > 0) await applyGoodsToWorld();
       await simBiological(seed, JSON.stringify(rivers), bioParams.gemDeposits);
       markStepCompleted(8); // gates the trade-route / flow computation in MapCanvas
       invalidateTiles();    // bumps tileVersion → refetches shark/goods/routes/flows
@@ -56,12 +63,10 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
     setSimRunning(false);
   };
 
-  const enableAllGoods = () => {
-    for (const g of GOOD_DEFS) setOverlayVisible(goodOverlayKey(g.name), true);
-  };
-  const disableAllGoods = () => {
-    for (const g of GOOD_DEFS) setOverlayVisible(goodOverlayKey(g.name), false);
-  };
+  const goodIds = goodsSpecs.length > 0 ? goodsSpecs.filter((g) => g.enabled).map((g) => g.id) : GOOD_DEFS.map((g) => g.name);
+  const enableAllGoods = () => { for (const id of goodIds) setOverlayVisible(goodOverlayKey(id), true); };
+  const disableAllGoods = () => { for (const id of goodIds) setOverlayVisible(goodOverlayKey(id), false); };
+  const openEditor = () => { void loadGoodsFromWorld(); openGoodsEditor(true); };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -121,6 +126,9 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
         <button onClick={disableAllGoods}
           style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>Hide goods</button>
       </div>
+
+      <button onClick={openEditor}
+        style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>{"\u{1F4DD}"} Edit Goods Library…</button>
 
       <button onClick={() => setShowTradeMatrix(true)} disabled={!stepCompleted[8]}
         style={{ ...genBtn, marginTop: 2 }}>

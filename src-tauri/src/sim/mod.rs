@@ -10,3 +10,4 @@ pub mod soil;
 pub mod fertility;
 pub mod settlements;
 pub mod biological;
+pub mod goods_spec;

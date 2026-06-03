@@ -1,6 +1,27 @@
 # Trade Goods & Seasonal Hazards — Design Document
 
-Status: **Rounds 1–2 implemented** (Round 3 pending) · Branch: `claude/trade-goods-review-Ju0R1`
+Status: **Rounds 1–3 implemented** · Branch: `claude/trade-goods-review-Ju0R1`
+
+> **Round 3 implementation note.** Shipped: the declarative `GoodSpec` engine
+> (`sim/goods_spec.rs`) + generic `envelope_score` for custom goods, with
+> `compute_trade_goods` now spec-driven (enable gate, per-spec domain /
+> distribution / rarity / deposit, built-in-or-envelope scoring). **Built-in goods
+> are byte-identical** — they keep the hardcoded scorer and their original
+> seed/deposit salts (default rarity 0.5 is neutral), so generation is unchanged
+> until a good is edited. **Storage:** per-world snapshot in DB metadata
+> (`goods_spec`) + a global `goods_library.json`; commands `get/set_goods_spec`,
+> `get/save_goods_library`, `default_goods`. **Editor:** `ui/GoodsEditor.tsx`
+> (opened from StepBiological) — toggle enable, edit name/icon/color/domain/
+> distribution/rarity/desire/network-luxury, add/duplicate/delete custom goods,
+> a basic envelope editor (climate presets + temp/precip/elevation/fertility/coast),
+> and apply-to-world / save-to-library / load-library / reset-to-defaults. Matrix,
+> regions, toolbar toggles and overlay icons/colors all read the active spec.
+>
+> Deviations from the original §1 sketch: custom goods beyond the **30 tile-column
+> cap** are not generated (editor warns; the v2 header still future-proofs growing
+> the count); built-in scoring envelopes are edited by *duplicating into a custom
+> good* rather than mutating the built-in in place; the `Island` domain uses a
+> near-coast proxy (no connected-component pass yet).
 
 > **Round 2 implementation note.** Shipped: the analytic monthly storm curve
 > (`storm_season_phase`, hemisphere-offset, equator-smeared, §3.3); a configurable

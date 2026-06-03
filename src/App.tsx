@@ -7,6 +7,7 @@ import { InfoPanel } from "./ui/InfoPanel";
 import { TradeMatrixPanel } from "./ui/TradeMatrixPanel";
 import { ElevationLegend } from "./ui/ElevationLegend";
 import { ElevationHistogram } from "./ui/ElevationHistogram";
+import { GoodsEditor } from "./ui/GoodsEditor";
 import { useWorldStore } from "./state/worldStore";
 import { useUIStore } from "./state/uiStore";
 import { useViewportStore } from "./state/viewportStore";
@@ -347,6 +348,7 @@ export default function App() {
 
       <StatusBar />
 
+      <GoodsEditor />
       {showDialog && <NewWorldDialog onCreated={() => setShowDialog(false)} />}
       {showExport && <ExportDialog name={meta?.name || "world"} onClose={() => setShowExport(false)} />}
     </div>

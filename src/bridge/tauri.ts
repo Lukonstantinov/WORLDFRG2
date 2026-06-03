@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { WorldMeta, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, TradeMatrix, PoliticalCenter } from "../types";
+import type { WorldMeta, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, TradeMatrix, PoliticalCenter, GoodSpec } from "../types";
 
 export async function newWorld(name: string, gridWidth: number, gridHeight: number): Promise<WorldMeta> {
   return invoke("new_world", { name, gridWidth, gridHeight });
@@ -211,6 +211,28 @@ export async function computeStormZones(month: number, months: number): Promise<
 /** Cluster the highest-risk reef/shoal wreck water into danger zones. */
 export async function computeReefZones(): Promise<SharkZone[]> {
   return invoke("compute_reef_zones");
+}
+
+// ── Trade-good library (editable specs; per-world + global) ──
+/** The shipped 30-good defaults (for "reset to default"). */
+export async function defaultGoods(): Promise<GoodSpec[]> {
+  return invoke("default_goods");
+}
+/** The current world's active good specs (per-world snapshot or defaults). */
+export async function getGoodsSpec(): Promise<GoodSpec[]> {
+  return invoke("get_goods_spec");
+}
+/** Snapshot a good-spec list into the current world (used before generation). */
+export async function setGoodsSpec(specs: GoodSpec[]): Promise<void> {
+  return invoke("set_goods_spec", { specs });
+}
+/** The global good library (editing template for new worlds). */
+export async function getGoodsLibrary(): Promise<GoodSpec[]> {
+  return invoke("get_goods_library");
+}
+/** Persist the global good library. */
+export async function saveGoodsLibrary(specs: GoodSpec[]): Promise<void> {
+  return invoke("save_goods_library", { specs });
 }
 
 /** Cluster every trade-good belt into labelled regions. */

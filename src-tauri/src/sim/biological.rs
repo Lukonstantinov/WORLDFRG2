@@ -14,7 +14,12 @@ use std::collections::VecDeque;
 use super::world_buffer::WorldBuffer;
 use super::rivers::River;
 use super::koppen::*;
+use super::goods_spec::{builtin_index_of, id_salt, Distribution, Domain, Envelope, GoodSpec};
 use crate::tile::cell::GOODS_COUNT;
+
+// Salt mixed into the per-good seeded-homeland RNG (preserves the original
+// built-in seed selection: built-ins pass `index * this`).
+const SEED_SALT_K: u64 = 0x9E3779B97F4A7C15;
 
 // ── Good indices (must match TileData.goods ordering + GOOD_NAMES) ──
 pub const GOOD_SILK: usize = 0;
@@ -57,6 +62,45 @@ pub const GOOD_NAMES: [&str; GOODS_COUNT] = [
     "hardwoods", "horses", "wool_fleece", "wool_llama", "ivory", "cacao",
     "copper", "tin", "gold",
 ];
+
+/// Default UI metadata for each built-in good (label, icon glyph, region tint).
+/// These mirror the frontend `GOOD_DEFS` and seed the editable `GoodSpec` library
+/// (see `sim/goods_spec.rs`). Order matches `GOOD_NAMES`.
+pub const GOOD_LABEL: [&str; GOODS_COUNT] = [
+    "Silk", "Wine", "Olive Oil", "Sugar", "Frankincense", "Stockfish & Salt-cod",
+    "Spices", "Tea", "Coffee", "Furs", "Timber", "Amber", "Salt", "Dyes", "Incense",
+    "Pearls", "Whaling Grounds", "Wheat", "Iron / Ore", "Cotton", "Gemstones",
+    "Tropical Hardwoods", "Horses", "Fleece Wool", "Highland Wool", "Ivory", "Cacao",
+    "Copper", "Tin", "Gold",
+];
+pub const GOOD_ICON: [&str; GOODS_COUNT] = [
+    "\u{1F9F5}", "\u{1F377}", "\u{1FAD2}", "\u{1F36C}", "\u{1FA94}", "\u{1F41F}",
+    "\u{1F336}\u{FE0F}", "\u{1F375}", "\u{2615}", "\u{1F98A}", "\u{1FAB5}", "\u{1F7E0}",
+    "\u{1F9C2}", "\u{1F41A}", "\u{1F4A8}", "\u{1F9AA}", "\u{1F40B}", "\u{1F33E}",
+    "\u{26CF}\u{FE0F}", "\u{1F9F6}", "\u{1F48E}", "\u{1F333}", "\u{1F40E}", "\u{1F411}",
+    "\u{1F999}", "\u{1F418}", "\u{1F36B}", "\u{1F7E4}", "\u{26AA}", "\u{1F7E1}",
+];
+pub const GOOD_COLOR: [&str; GOODS_COUNT] = [
+    "#d97fb0", "#9b2d4f", "#8ea33a", "#e8d8a0", "#c79a4b", "#6fb0c8",
+    "#d2622a", "#5fae6f", "#7a4a2a", "#a9763d", "#6b8f4e", "#e0962a",
+    "#cfd6dc", "#8a52c0", "#b0a0c0", "#d8e4ec", "#5878a0", "#d9b94a",
+    "#9aa0a6", "#eef0e8", "#56c8d8", "#5b3a1e", "#b5793a", "#e8e3d8",
+    "#c8a06a", "#efe6d0", "#6b4226", "#b06a3a", "#b8bcc0", "#d4af37",
+];
+/// Default base demand weight per good (matrix desire). Single source of truth,
+/// also used by the editable spec.
+pub const GOOD_DESIRE: [f32; GOODS_COUNT] = [
+    0.35, 0.45, 0.45, 0.50, 0.30, 0.70, // silk,wine,oliveoil,sugar,frankincense,stockfish
+    0.40, 0.40, 0.45, 0.35, 0.60, 0.25, // spices,tea,coffee,furs,timber,amber
+    0.75, 0.30, 0.30, 0.30, 0.55,        // salt,dyes,incense,pearls,whaling
+    0.85, 0.65, 0.45, 0.40,              // wheat,iron,cotton,gemstones
+    0.55, 0.70, 0.50, 0.40, 0.35, 0.40,  // hardwoods,horses,wool_fleece,wool_llama,ivory,cacao
+    0.55, 0.55, 0.60,                    // copper,tin,gold
+];
+/// Default scarcity per good (0..1). 0.5 is neutral (no change to belt size); the
+/// built-ins ship neutral so spec-driven generation is identical to before, and
+/// users can tune scarcity per good in the editor.
+pub const GOOD_RARITY: [f32; GOODS_COUNT] = [0.5; GOODS_COUNT];
 
 /// Domain of each good: true = its belt may sit on sea cells (marine/coastal),
 /// false = land-only. (Marine goods are still scored only near the shelf/coast,
@@ -111,16 +155,16 @@ pub const GEM_STONES: [&str; 5] = ["Ruby", "Sapphire", "Emerald", "Diamond", "To
 /// minimum normalized elevation it locks to, a deterministic seed-salt so each
 /// metal scatters independently, and a base count multiplier relative to the
 /// gemstone-deposit count chosen in the UI.
-struct DepositParams {
-    min_elev: f32,
-    salt: u64,
-    count_num: u32, // count = gem_deposits * count_num / count_den (min 1)
-    count_den: u32,
+pub struct DepositParams {
+    pub min_elev: f32,
+    pub salt: u64,
+    pub count_num: u32, // count = gem_deposits * count_num / count_den (min 1)
+    pub count_den: u32,
 }
 
 /// Deposit parameters for goods placed as scattered highland blobs, else None
 /// (the good uses climate scoring + flood-fill localization instead).
-fn deposit_params(g: usize) -> Option<DepositParams> {
+pub fn deposit_params(g: usize) -> Option<DepositParams> {
     match g {
         GOOD_GEMSTONES => Some(DepositParams { min_elev: GEM_MIN_ELEV, salt: 0xA1B2C3D4E5F60718, count_num: 1, count_den: 1 }),
         GOOD_COPPER    => Some(DepositParams { min_elev: 0.30, salt: 0xC0FFEE_1234_5678, count_num: 1, count_den: 1 }),
@@ -457,27 +501,110 @@ pub fn compute_reef_risk(buf: &mut WorldBuffer) {
 /// encoded in the score) makes it unviable. This gives each good one homeland
 /// (silk = one land, frankincense = one coast, pearls = one warm sea…) and a
 /// clear single producer for the trade matrix.
-pub fn compute_trade_goods(buf: &mut WorldBuffer, _rivers: &[River], seed: u64, gem_deposits: u32) {
+/// Generate every good's belt from the active (editable) spec list. Built-in
+/// goods (`builtin`, `scoring = None`) use the hardcoded scorer keyed by their id
+/// and reproduce the original behavior exactly; custom goods use their declarative
+/// `Envelope`. Disabled goods leave a zeroed column. Only the first `GOODS_COUNT`
+/// specs are stored (one per tile column).
+pub fn compute_trade_goods(
+    buf: &mut WorldBuffer, _rivers: &[River], seed: u64, gem_deposits: u32, specs: &[GoodSpec],
+) {
     let w = buf.width;
     let h = buf.height;
     let n = buf.total();
 
-    for g in 0..GOODS_COUNT {
-        // Deposit goods (gemstones + metals) are placed as discrete highland
-        // blobs rather than climate-scored belts.
-        if let Some(dp) = deposit_params(g) {
-            let count = (gem_deposits * dp.count_num / dp.count_den).max(1);
-            buf.goods[g] = place_deposits(buf, seed, count, dp.min_elev, dp.salt);
-            continue;
-        }
-        let mut score = vec![0.0f32; n];
-        for y in 0..h {
-            for x in 0..w {
-                score[buf.idx(x, y)] = good_score(buf, g, x, y);
+    for slot in 0..GOODS_COUNT {
+        let spec = match specs.get(slot) {
+            Some(s) if s.enabled => s,
+            _ => { buf.goods[slot] = vec![0u8; n]; continue; }
+        };
+        let builtin_idx = builtin_index_of(&spec.id);
+
+        match spec.distribution {
+            Distribution::Deposits => {
+                // Min-elevation / count are editable; the placement salt is derived
+                // (built-ins keep their original salt so output is unchanged).
+                let (min_elev, num, den) = spec.deposit
+                    .map(|d| (d.min_elev, d.count_num.max(1), d.count_den.max(1)))
+                    .unwrap_or((0.40, 1, 1));
+                let salt = builtin_idx.and_then(deposit_params).map(|d| d.salt)
+                    .unwrap_or_else(|| id_salt(&spec.id));
+                let count = (gem_deposits * num / den).max(1);
+                buf.goods[slot] = place_deposits(buf, seed, count, min_elev, salt);
+            }
+            _ => {
+                let marine = matches!(spec.domain, Domain::Marine);
+                let unlimited = matches!(spec.distribution, Distribution::Global);
+                let mut score = vec![0.0f32; n];
+                for y in 0..h {
+                    for x in 0..w {
+                        let s = if let Some(env) = &spec.scoring {
+                            envelope_score(buf, env, spec.domain, x, y)
+                        } else if let Some(idx) = builtin_idx {
+                            good_score(buf, idx, x, y)
+                        } else {
+                            0.0
+                        };
+                        score[buf.idx(x, y)] = s;
+                    }
+                }
+                // Built-ins reproduce their original seed by salting with index*K;
+                // custom goods get an id-derived salt.
+                let salt = match builtin_idx {
+                    Some(idx) if spec.scoring.is_none() => (idx as u64).wrapping_mul(SEED_SALT_K),
+                    _ => id_salt(&spec.id),
+                };
+                buf.goods[slot] = localize_good(buf, &score, marine, unlimited, spec.rarity, salt, seed);
             }
         }
-        buf.goods[g] = localize_good(buf, &score, g, seed);
     }
+}
+
+/// Declarative envelope scorer for custom (and overridden) goods. Reproduces the
+/// house scoring style: domain gate × climate × temp/precip/elevation/lat bands ×
+/// fertility × coast bonus. Absent terms contribute a neutral 1.0.
+fn envelope_score(buf: &WorldBuffer, env: &Envelope, domain: Domain, x: u32, y: u32) -> f32 {
+    let i = buf.idx(x, y);
+    let land = buf.terrain[i] == 1;
+    match domain {
+        Domain::Marine => {
+            if land { return 0.0; }
+            if !(buf.is_shelf[i] == 1 || has_land_within(buf, x, y, 3)) { return 0.0; }
+        }
+        Domain::Coastal => {
+            if !land || buf.distance_to_ocean[i] >= 0.12 { return 0.0; }
+        }
+        Domain::Continental => {
+            if !land { return 0.0; }
+        }
+        Domain::Island => {
+            // Approximation (no connected-component pass): near-coast land stands
+            // in for island / small-landmass placement.
+            if !land || buf.distance_to_ocean[i] >= 0.20 { return 0.0; }
+        }
+    }
+
+    let k = buf.koppen[i];
+    let t = buf.temperature[i];
+    let p = buf.precipitation[i];
+    let elev = buf.elevation[i];
+    let fert = buf.fertility[i].clamp(0.0, 1.0);
+    let abs_lat = buf.abs_latitude(y);
+
+    let mut s = 1.0f32;
+    if !env.climate.is_empty() {
+        s *= env.climate.iter().find(|(z, _)| *z == k).map(|(_, w)| *w).unwrap_or(0.0);
+    }
+    if let Some([c, wd]) = env.temp { s *= bell(t, c, wd); }
+    if let Some([lo, hi, e]) = env.precip { s *= band(p, lo, hi, e); }
+    if let Some([lo, hi, e]) = env.elevation { s *= band(elev, lo, hi, e); }
+    if let Some([lo, hi, e]) = env.abs_lat { s *= band(abs_lat, lo, hi, e); }
+    if env.fertility > 0.0 { s *= (1.0 - env.fertility) + env.fertility * fert; }
+    if env.coast_bonus > 0.0 {
+        let near = if land { buf.distance_to_ocean[i] < 0.08 } else { true };
+        if near { s *= 1.0 + env.coast_bonus; }
+    }
+    s.clamp(0.0, 1.0)
 }
 
 /// Raw 0..1 suitability of good `g` at one cell (before localization).
@@ -671,17 +798,25 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
 
 /// Pick one suitability-weighted random seed (deterministic from `seed`) and
 /// flood-fill the good outward through suitable cells, bounded by sea/mountains
-/// (land goods) or simply by the score envelope (marine goods). Returns the u8
-/// belt field (score inside the region, 0 elsewhere).
-fn localize_good(buf: &WorldBuffer, score: &[f32], g: usize, seed: u64) -> Vec<u8> {
+/// (land goods) or simply by the score envelope (marine goods).
+///
+/// Turn a per-cell suitability score into a placed belt. `marine` selects the
+/// passability rule, `unlimited` chooses the Global (every-cell) vs Local (one
+/// seeded homeland) model, `rarity` (0..1, 0.5 = neutral) tightens the seed/spread
+/// thresholds, and `salt` seeds the deterministic homeland pick.
+fn localize_good(
+    buf: &WorldBuffer, score: &[f32], marine: bool, unlimited: bool, rarity: f32, salt: u64, seed: u64,
+) -> Vec<u8> {
     let w = buf.width;
     let h = buf.height;
     let n = buf.total();
-    let marine = GOOD_MARINE[g];
     let mut out = vec![0u8; n];
 
-    const SEED_THRESH: f32 = 0.45;  // a cell strong enough to be a homeland seed
-    const SPREAD_THRESH: f32 = 0.22; // a cell the good can still spread into
+    // Rarity gently shifts the thresholds around the neutral 0.5 (rarer → harder
+    // to seed and spread, so a smaller belt). At 0.5 these are the legacy values.
+    let r = (rarity - 0.5).clamp(-0.5, 0.5);
+    let seed_thresh = (0.45 + r * 0.30).clamp(0.20, 0.75);
+    let spread_thresh = (0.22 + r * 0.20).clamp(0.10, 0.50);
 
     let passable = |i: usize| -> bool {
         if marine {
@@ -692,9 +827,9 @@ fn localize_good(buf: &WorldBuffer, score: &[f32], g: usize, seed: u64) -> Vec<u
     };
 
     // ── UNLIMITED goods: every suitable cell produces (many producers) ──
-    if GOOD_UNLIMITED[g] {
+    if unlimited {
         for i in 0..n {
-            if passable(i) && score[i] >= SPREAD_THRESH {
+            if passable(i) && score[i] >= spread_thresh {
                 out[i] = q(score[i]);
             }
         }
@@ -703,16 +838,16 @@ fn localize_good(buf: &WorldBuffer, score: &[f32], g: usize, seed: u64) -> Vec<u
 
     // ── SEEDED goods: one contiguous homeland ──
     // Deterministic weighted-random seed selection.
-    let gs = seed ^ (g as u64).wrapping_mul(0x9E3779B97F4A7C15);
+    let gs = seed ^ salt;
     let mut best_seed = usize::MAX;
     let mut best_key = -1.0f32;
     let mut fallback = usize::MAX;
-    let mut fallback_score = SPREAD_THRESH;
+    let mut fallback_score = spread_thresh;
     for i in 0..n {
         if !passable(i) { continue; }
         let s = score[i];
         if s > fallback_score { fallback_score = s; fallback = i; }
-        if s >= SEED_THRESH {
+        if s >= seed_thresh {
             let key = s * hash01(gs ^ (i as u64).wrapping_mul(0x100000001B3));
             if key > best_key { best_key = key; best_seed = i; }
         }
@@ -748,7 +883,7 @@ fn localize_good(buf: &WorldBuffer, score: &[f32], g: usize, seed: u64) -> Vec<u
                 if ny < 0 || ny >= h as i32 { break; }
                 let ni = buf.idx(nx, ny as u32);
                 if !passable(ni) { continue; } // still in the gap — keep probing
-                if !visited[ni] && score[ni] >= SPREAD_THRESH {
+                if !visited[ni] && score[ni] >= spread_thresh {
                     visited[ni] = true;
                     queue.push_back(ni);
                 }

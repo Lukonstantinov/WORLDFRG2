@@ -49,6 +49,9 @@ export class OverlayManager {
   private stormZones: SharkZone[] = [];
   private reefZones: SharkZone[] = [];
   private goodRegions: GoodRegion[] = [];
+  /** Per-good display metadata (icon/color) from the active editable spec; falls
+   *  back to the static GOOD_DEFS when absent. */
+  private goodMeta: Map<string, { icon: string; color: string }> | null = null;
   private tradeTrunks: TradeTrunk[] = [];
   private politicalCenters: PoliticalCenter[] = [];
   private latLinesData: { gridW: number; gridH: number } | null = null;
@@ -102,6 +105,10 @@ export class OverlayManager {
 
   drawGoodRegions(regions: GoodRegion[]) {
     this.goodRegions = regions;
+  }
+
+  setGoodMeta(meta: Map<string, { icon: string; color: string }>) {
+    this.goodMeta = meta;
   }
 
   drawTradeTrunks(trunks: TradeTrunk[], gridW: number) {
@@ -223,8 +230,9 @@ export class OverlayManager {
       for (const r of this.goodRegions) {
         if (!this.visibility[goodOverlayKey(r.good)]) continue;
         const def = GOOD_BY_NAME.get(r.good);
-        const color = def ? def.color : "#cccccc";
-        const emoji = def ? def.emoji : "";
+        const m = this.goodMeta?.get(r.good);
+        const color = m?.color ?? def?.color ?? "#cccccc";
+        const emoji = m?.icon ?? def?.emoji ?? "";
         this.renderRegionMask(ctx, r.cells, r.cell_size, color, emoji, r.x, r.y, 0.16 + 0.18 * Math.min(1, r.score), r.sublabel);
       }
     }

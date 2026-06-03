@@ -7,7 +7,7 @@ pub mod commands;
 pub mod sim;
 pub mod import;
 
-use commands::{world_commands, tile_commands, paint_commands, query_commands, template_commands, sim_commands, file_commands};
+use commands::{world_commands, tile_commands, paint_commands, query_commands, template_commands, sim_commands, file_commands, goods_commands};
 use db::WorldDb;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -42,6 +42,11 @@ pub fn run() {
             query_commands::compute_trade_matrix,
             query_commands::compute_political,
             query_commands::get_elevation_distribution,
+            goods_commands::default_goods,
+            goods_commands::get_goods_spec,
+            goods_commands::set_goods_spec,
+            goods_commands::get_goods_library,
+            goods_commands::save_goods_library,
             template_commands::load_image_template,
             sim_commands::sim_generate_plates,
             sim_commands::sim_invert_terrain,

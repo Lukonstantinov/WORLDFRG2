@@ -5,3 +5,4 @@ pub mod query_commands;
 pub mod template_commands;
 pub mod sim_commands;
 pub mod file_commands;
+pub mod goods_commands;

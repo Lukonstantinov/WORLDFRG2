@@ -1,4 +1,5 @@
 import { useUIStore } from "../state/uiStore";
+import { useGoodsStore } from "../state/goodsStore";
 import type { ActiveTool, ActiveLayer } from "../types";
 import { GOOD_DEFS, goodOverlayKey } from "../goods";
 
@@ -90,6 +91,10 @@ export function Toolbar() {
   const toggleOverlay = useUIStore((s) => s.toggleOverlay);
   const bioParams = useUIStore((s) => s.bioParams);
   const setBioParams = useUIStore((s) => s.setBioParams);
+  const goodsSpecs = useGoodsStore((s) => s.specs);
+  const goodItems = goodsSpecs.length > 0
+    ? goodsSpecs.filter((g) => g.enabled).map((g) => ({ id: g.id, icon: g.icon, name: g.name }))
+    : GOOD_DEFS.map((g) => ({ id: g.name, icon: g.emoji, name: g.label }));
   const setLayerOpacity = useUIStore((s) => s.setLayerOpacity);
   const stretchToFit = useUIStore((s) => s.stretchToFit);
   const setStretchToFit = useUIStore((s) => s.setStretchToFit);
@@ -253,11 +258,12 @@ export function Toolbar() {
         </div>
       </div>
 
-      {/* Trade-good belts (each good is a separate sublayer toggle) */}
+      {/* Trade-good belts (each good is a separate sublayer toggle). Driven by the
+          world's editable spec list, falling back to the static defaults. */}
       <div style={section}>
         <div style={sectionHeader}>Trade Goods</div>
-        {GOOD_DEFS.map((g) => {
-          const key = goodOverlayKey(g.name);
+        {goodItems.map((g) => {
+          const key = goodOverlayKey(g.id);
           return (
             <label key={key} style={checkboxRow}>
               <input
@@ -267,7 +273,7 @@ export function Toolbar() {
                 style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
               />
               <span style={{ color: overlayVisibility[key] ? "#b0c8e0" : "#5a6a80" }}>
-                {g.emoji} {g.label}
+                {g.icon} {g.name}
               </span>
             </label>
           );

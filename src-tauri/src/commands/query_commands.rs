@@ -1361,32 +1361,35 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
         }
     }
 
-    use crate::sim::biological::{GOOD_GEMSTONES, GOOD_UNLIMITED, GEM_STONES};
+    use crate::sim::biological::GEM_STONES;
+    use crate::sim::goods_spec::Distribution;
+    let specs = crate::commands::goods_commands::load_world_goods(&conn);
     let mut out: Vec<GoodRegion> = Vec::new();
     for g in 0..GOODS_COUNT {
-        // Gemstones are scattered deposits (keep every deposit, each named for a
-        // specific stone). Unlimited goods blanket the world, so show many
-        // patches. Seeded goods are one homeland (top few coarse patches).
-        let (max_keep, min_cells) = if g == GOOD_GEMSTONES {
-            (32usize, 1usize)
-        } else if GOOD_UNLIMITED[g] {
-            (14, 1)
-        } else {
-            (4, 1)
+        let spec = match specs.get(g) {
+            Some(s) if s.enabled => s,
+            _ => continue, // disabled goods produce nothing to map
+        };
+        // Deposit goods are scattered (keep every deposit). Global goods blanket
+        // the world (many patches). Local goods are one homeland (top few).
+        let (max_keep, min_cells) = match spec.distribution {
+            Distribution::Deposits => (32usize, 1usize),
+            Distribution::Global => (14, 1),
+            Distribution::Local => (4, 1),
         };
         let mut regions = cluster_cells(&grids[g], cw, ch, f, 0.30, min_cells);
         regions.sort_by(|a, b| b.cells.len().cmp(&a.cells.len()));
         regions.truncate(max_keep);
         for c in regions {
-            let sublabel = if g == GOOD_GEMSTONES {
-                // Deterministic stone type per deposit (by its centroid).
+            // Name each gemstone deposit for a specific stone (gemstones only).
+            let sublabel = if spec.id == "gemstones" {
                 let h = (c.cx as i64).wrapping_mul(73856093) ^ (c.cy as i64).wrapping_mul(19349663);
                 GEM_STONES[(h.unsigned_abs() as usize) % GEM_STONES.len()].to_string()
             } else {
                 String::new()
             };
             out.push(GoodRegion {
-                good: GOOD_NAMES[g].to_string(),
+                good: spec.id.clone(),
                 cells: c.cells,
                 cell_size: f as f32,
                 x: c.cx,
@@ -1456,7 +1459,12 @@ pub fn compute_trade_matrix(
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
-    let goods_names: Vec<String> = GOOD_NAMES.iter().map(|s| s.to_string()).collect();
+    // Active (editable) good specs drive names/desire/luxury so the matrix tracks
+    // the world's authored goods.
+    let specs = crate::commands::goods_commands::load_world_goods(&conn);
+    let goods_names: Vec<String> = (0..GOODS_COUNT)
+        .map(|g| specs.get(g).map(|s| s.id.clone()).unwrap_or_else(|| GOOD_NAMES[g].to_string()))
+        .collect();
     if grid_w == 0 || grid_h == 0 {
         return Ok(TradeMatrix { regions: vec![], flows: vec![], trunks: vec![], goods: goods_names });
     }
@@ -1594,17 +1602,16 @@ pub fn compute_trade_matrix(
         }
     }
 
-    // ── 3. Demand: economic size × per-good base demand ──────────────────────
+    // ── 3. Demand: economic size × per-good base demand (from the active spec) ──
     let max_rw = region_weight.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
-    // Food/utility goods are more universally demanded than luxuries.
-    let demand_weight: [f32; GOODS_COUNT] = [
-        0.35, 0.45, 0.45, 0.50, 0.30, 0.70, // silk,wine,oliveoil,sugar,frankincense,stockfish
-        0.40, 0.40, 0.45, 0.35, 0.60, 0.25, // spices,tea,coffee,furs,timber,amber
-        0.75, 0.30, 0.30, 0.30, 0.55,        // salt,dyes,incense,pearls,whaling
-        0.85, 0.65, 0.45, 0.40,              // wheat(staple),iron,cotton,gemstones
-        0.55, 0.70, 0.50, 0.40, 0.35, 0.40,  // hardwoods,horses,wool_fleece,wool_llama,ivory,cacao
-        0.55, 0.55, 0.60,                    // copper,tin,gold
-    ];
+    // Per-good desire / luxury flag come from the world's editable good spec, so
+    // disabled goods demand nothing and custom desires take effect.
+    let desire: Vec<f32> = (0..GOODS_COUNT)
+        .map(|g| specs.get(g).filter(|s| s.enabled).map(|s| s.desire).unwrap_or(0.0))
+        .collect();
+    let is_luxury: Vec<bool> = (0..GOODS_COUNT)
+        .map(|g| specs.get(g).map(|s| s.network_luxury).unwrap_or(false))
+        .collect();
     // Luxuries are only prized across a large/open trade network; tighter reaches
     // (more closed networks) realize less of that demand.
     let reach_factor = match reach { 0 => 1.0, 1 => 0.7, _ => 0.45 };
@@ -1612,8 +1619,8 @@ pub fn compute_trade_matrix(
     for ri in 0..nr {
         let size = region_weight[ri] / max_rw; // 0..1
         for g in 0..GOODS_COUNT {
-            let mut d = size * demand_weight[g];
-            if crate::sim::biological::GOOD_NETWORK_LUXURY[g] {
+            let mut d = size * desire[g];
+            if is_luxury[g] {
                 // Discount in the good's own producing homeland (it's local/common
                 // there) and scale by how open the trade network is.
                 let homeland_discount = 1.0 - 0.6 * production[ri][g].clamp(0.0, 1.0);
