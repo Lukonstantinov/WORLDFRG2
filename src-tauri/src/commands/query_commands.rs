@@ -506,60 +506,64 @@ pub struct TradeRoute {
     pub kind: u8,
 }
 
-/// Compute plausible trade routes between the major settlements.
-///
-/// Trade historically flowed along the cheapest path: sea travel (especially
-/// coast-hugging) is far cheaper than overland, and overland cost rises with
-/// relief and hostile climate (deserts, ice, dense jungle, high mountains). We
-/// build a coarse movement-cost grid over the whole world (land *and* sea),
-/// connect each major settlement to its few nearest neighbours, and trace a
-/// least-cost (Dijkstra) path for each link. Routes that cross significant open
-/// water are tagged maritime so the frontend can colour them differently.
-#[tauri::command]
-pub fn compute_trade_routes(
-    settlements_json: String,
-    rivers_json: String,
-    db: State<'_, WorldDb>,
-) -> Result<Vec<TradeRoute>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+// ── Shared coarse movement-cost grid ─────────────────────────────────────────
 
-    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
-        .map_err(|e| e.to_string())?
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
-        .map_err(|e| e.to_string())?
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-    if grid_w == 0 || grid_h == 0 {
-        return Ok(vec![]);
+/// A coarse (~700-wide) movement-cost grid shared by trade routes, the routed
+/// trade-flow trunks, and the political layer. Land cost rises with relief and
+/// climate hostility, but mountain **passes** (saddles) are discounted so
+/// caravans thread the gaps instead of detouring around whole ranges; navigable
+/// rivers are cheap inland highways; coastal sea is cheap coast-hugging
+/// shipping; open sea is moderate — or fully blocked when `block_sea` (used for
+/// continental-only trade so paths stay on one landmass).
+struct CoarseCost {
+    f: u32,
+    cw: i32,
+    ch: i32,
+    cost: Vec<f32>,
+    is_land: Vec<bool>,
+    is_open_sea: Vec<bool>, // sea cell not adjacent to land (true open water)
+    is_river: Vec<bool>,
+}
+
+const SEA_BLOCK_COST: f32 = 1.0e6;
+
+impl CoarseCost {
+    #[inline]
+    fn wrap_cx(&self, x: i32) -> i32 { ((x % self.cw) + self.cw) % self.cw }
+    #[inline]
+    fn cidx(&self, x: i32, y: i32) -> usize { (y * self.cw + self.wrap_cx(x)) as usize }
+    #[inline]
+    fn world_of(&self, c: usize) -> [f32; 2] {
+        let cx = (c as i32) % self.cw;
+        let cy = (c as i32) / self.cw;
+        [(cx as u32 * self.f + self.f / 2) as f32, (cy as u32 * self.f + self.f / 2) as f32]
     }
+}
 
-    let settlements: Vec<RouteSettlement> =
-        serde_json::from_str(&settlements_json).unwrap_or_default();
-    if settlements.len() < 2 {
-        return Ok(vec![]);
-    }
-
-    // ── Coarse cost grid (keep pathfinding cheap at any resolution) ──────────
-    // Aim for ~700 cells across regardless of the source grid size.
+fn build_coarse_cost(
+    conn: &rusqlite::Connection, grid_w: u32, grid_h: u32, rivers_json: &str, block_sea: bool,
+) -> Result<CoarseCost, String> {
     let f = (grid_w / 700).max(1);
     let cw = ((grid_w + f - 1) / f) as i32;
     let ch = ((grid_h + f - 1) / f) as i32;
     let cn = (cw * ch) as usize;
 
-    // Load the fine terrain / elevation / koppen fields once (one pass over the
-    // tiles), then down-sample each coarse cell from its centre fine cell.
-    let fn_cells = (grid_w * grid_h) as usize;
-    let mut f_terrain = vec![0u8; fn_cells];
-    let mut f_elev = vec![0.0f32; fn_cells];
-    let mut f_koppen = vec![0u8; fn_cells];
+    // Sample each coarse cell from its centre fine cell (one tile pass).
+    let mut is_land = vec![false; cn];
+    let mut elev = vec![0.0f32; cn];
+    let mut koppen = vec![0u8; cn];
     {
         let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
         let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
+        // Load fine fields, then resample. (We only need the centre cell of each
+        // coarse block, but a full load keeps the index math simple.)
+        let fn_cells = (grid_w * grid_h) as usize;
+        let mut f_terrain = vec![0u8; fn_cells];
+        let mut f_elev = vec![0.0f32; fn_cells];
+        let mut f_koppen = vec![0u8; fn_cells];
         for ty in 0..tiles_y as i32 {
             for tx in 0..tiles_x as i32 {
-                let tile = tile_store::load_tile(&conn, tx, ty, 0)
+                let tile = tile_store::load_tile(conn, tx, ty, 0)
                     .map_err(|e| e.to_string())?
                     .unwrap_or_else(TileData::new_sea);
                 let base_x = tx as u32 * TILE_SIZE;
@@ -577,14 +581,23 @@ pub fn compute_trade_routes(
                 }
             }
         }
+        for cy in 0..ch {
+            for cx in 0..cw {
+                let wx = (cx as u32 * f + f / 2).min(grid_w - 1);
+                let wy = (cy as u32 * f + f / 2).min(grid_h - 1);
+                let gi = (wy * grid_w + wx) as usize;
+                let ci = (cy * cw + cx) as usize;
+                is_land[ci] = f_terrain[gi] == 1;
+                elev[ci] = f_elev[gi];
+                koppen[ci] = f_koppen[gi];
+            }
+        }
     }
 
-    // Coarse river mask: a navigable river makes overland travel cheap (boats /
-    // valley routes), so inland routes naturally follow rivers. Rivers are
-    // overlay data (not stored in tiles), so they arrive as JSON from the store.
+    // Coarse river mask from overlay JSON (rivers aren't stored in tiles).
     let mut is_river = vec![false; cn];
     {
-        let rivers: Vec<RouteRiver> = serde_json::from_str(&rivers_json).unwrap_or_default();
+        let rivers: Vec<RouteRiver> = serde_json::from_str(rivers_json).unwrap_or_default();
         for r in &rivers {
             for &(rx, ry) in &r.points {
                 let cx = (rx / f).min(cw as u32 - 1) as i32;
@@ -594,44 +607,62 @@ pub fn compute_trade_routes(
         }
     }
 
-    // Build the coarse cost grid by sampling each coarse cell's centre.
-    let mut is_land = vec![false; cn];
+    let wrap_cx = |x: i32| -> i32 { ((x % cw) + cw) % cw };
+
+    // Base cost.
     let mut cost = vec![1.0f32; cn];
     for cy in 0..ch {
         for cx in 0..cw {
-            let wx = (cx as u32 * f + f / 2).min(grid_w - 1);
-            let wy = (cy as u32 * f + f / 2).min(grid_h - 1);
-            let gi = (wy * grid_w + wx) as usize;
             let ci = (cy * cw + cx) as usize;
-            let land = f_terrain[gi] == 1;
-            is_land[ci] = land;
-            cost[ci] = if land {
-                // Overland base + relief + climate hostility.
-                let mut c = 5.0 + f_elev[gi] * 22.0;
-                c += match f_koppen[gi] {
-                    4 | 5 => 9.0,        // BW desert
-                    6 | 7 => 2.5,        // BS steppe (passable but dry)
-                    21 => 12.0,          // ET tundra
-                    22 => 26.0,          // EF ice cap
-                    16 | 17 | 29 | 30 => 5.0, // taiga / boreal
-                    1 => 5.0,            // Af dense rainforest (hard to traverse)
-                    32 => 7.0,           // H highland
+            cost[ci] = if is_land[ci] {
+                // Lower relief multiplier than before (22 → 14) so interiors are
+                // traversable and inland trade actually happens.
+                let mut c = 4.0 + elev[ci] * 14.0;
+                c += match koppen[ci] {
+                    4 | 5 => 9.0,
+                    6 | 7 => 2.5,
+                    21 => 12.0,
+                    22 => 26.0,
+                    16 | 17 | 29 | 30 => 5.0,
+                    1 => 5.0,
+                    32 => 7.0,
                     _ => 0.0,
                 };
-                // A navigable river is a cheap inland highway (and a water
-                // source through hostile terrain), so collapse the cost to a
-                // small value — routes will hug rivers wherever they exist.
                 if is_river[ci] { c = c.min(1.2); }
                 c
+            } else if block_sea {
+                SEA_BLOCK_COST
             } else {
-                1.4 // open sea (coastal discount applied below)
+                1.4
             };
         }
     }
-    // Coastal sea is cheap (coast-hugging shipping); discount any sea cell that
-    // touches land in the coarse grid.
-    let wrap_cx = |x: i32| -> i32 { ((x % cw) + cw) % cw };
+
+    // Mountain-pass (saddle) discount: a moderately high land cell that is a
+    // local low along one axis (a gap between higher flanks) is a pass, so cut
+    // its cost — caravans thread passes rather than going over/around ranges.
     {
+        let base = elev.clone();
+        for cy in 0..ch {
+            for cx in 0..cw {
+                let ci = (cy * cw + cx) as usize;
+                if !is_land[ci] || base[ci] < 0.33 { continue; }
+                let e = base[ci];
+                let l = base[(cy * cw + wrap_cx(cx - 1)) as usize];
+                let r = base[(cy * cw + wrap_cx(cx + 1)) as usize];
+                let up = if cy > 0 { base[((cy - 1) * cw + cx) as usize] } else { e };
+                let dn = if cy < ch - 1 { base[((cy + 1) * cw + cx) as usize] } else { e };
+                let gap_ew = e < l && e < r && (l.min(r) - e) > 0.04;
+                let gap_ns = e < up && e < dn && (up.min(dn) - e) > 0.04;
+                if (gap_ew || gap_ns) && is_land[(cy * cw + wrap_cx(cx - 1)) as usize] {
+                    cost[ci] *= 0.45;
+                }
+            }
+        }
+    }
+
+    // Coastal sea is cheap shipping (unless sea is blocked entirely).
+    if !block_sea {
         let base = is_land.clone();
         for cy in 0..ch {
             for cx in 0..cw {
@@ -647,16 +678,122 @@ pub fn compute_trade_routes(
         }
     }
 
-    // ── Map settlements to coarse nodes (sorted by score, capped) ────────────
+    // Open-water mask (sea cell with no land neighbour) for crossing-length checks.
+    let mut is_open_sea = vec![false; cn];
+    {
+        let base = is_land.clone();
+        for cy in 0..ch {
+            for cx in 0..cw {
+                let ci = (cy * cw + cx) as usize;
+                if base[ci] { continue; }
+                let coastal = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
+                    let ny = cy + dy;
+                    if ny < 0 || ny >= ch { return false; }
+                    base[(ny * cw + wrap_cx(cx + dx)) as usize]
+                });
+                is_open_sea[ci] = !coastal;
+            }
+        }
+    }
+
+    Ok(CoarseCost { f, cw, ch, cost, is_land, is_open_sea, is_river })
+}
+
+const COARSE_DIRS: [(i32, i32, f32); 8] = [
+    (-1, 0, 1.0), (1, 0, 1.0), (0, -1, 1.0), (0, 1, 1.0),
+    (-1, -1, 1.4142), (1, -1, 1.4142), (-1, 1, 1.4142), (1, 1, 1.4142),
+];
+
+/// Least-cost path (coarse indices, start→goal) over a CoarseCost grid, or None.
+fn coarse_dijkstra(cc: &CoarseCost, start: usize, goal: usize) -> Option<Vec<usize>> {
+    let cw = cc.cw;
+    let ch = cc.ch;
+    let cn = (cw * ch) as usize;
+    let mut dist = vec![i64::MAX; cn];
+    let mut prev = vec![usize::MAX; cn];
+    let mut heap: BinaryHeap<Reverse<(i64, usize)>> = BinaryHeap::new();
+    dist[start] = 0;
+    heap.push(Reverse((0, start)));
+    while let Some(Reverse((d, u))) = heap.pop() {
+        if u == goal { break; }
+        if d > dist[u] { continue; }
+        let ux = (u as i32) % cw;
+        let uy = (u as i32) / cw;
+        for &(dx, dy, mult) in &COARSE_DIRS {
+            let ny = uy + dy;
+            if ny < 0 || ny >= ch { continue; }
+            let v = cc.cidx(ux + dx, ny);
+            let step = ((cc.cost[u] + cc.cost[v]) * 0.5 * mult * 100.0) as i64;
+            let nd = d.saturating_add(step.max(1));
+            if nd < dist[v] {
+                dist[v] = nd;
+                prev[v] = u;
+                heap.push(Reverse((nd, v)));
+            }
+        }
+    }
+    if dist[goal] == i64::MAX { return None; }
+    let mut path = Vec::new();
+    let mut cur = goal;
+    while cur != usize::MAX {
+        path.push(cur);
+        if cur == start { break; }
+        cur = prev[cur];
+    }
+    path.reverse();
+    if path.len() < 2 { None } else { Some(path) }
+}
+
+/// Is a path acceptable under the chosen trade reach?
+///   reach 0 = global (any crossing) · 1 = coastal+short crossings (open-water
+///   run capped at `max_crossing_frac` of the width) · 2 = continental (no sea).
+fn path_allowed(cc: &CoarseCost, path: &[usize], reach: u8, max_crossing_frac: f32, grid_w: u32) -> bool {
+    match reach {
+        2 => path.iter().all(|&c| cc.is_land[c]),
+        1 => {
+            let mut run = 0u32;
+            let mut best = 0u32;
+            for &c in path {
+                if cc.is_open_sea[c] { run += 1; best = best.max(run); } else { run = 0; }
+            }
+            (best * cc.f) as f32 <= max_crossing_frac.max(0.0) * grid_w as f32
+        }
+        _ => true,
+    }
+}
+
+/// Compute plausible trade routes between the major settlements over the shared
+/// coarse cost grid (mountain passes, rivers, coast-hugging all priced in), with
+/// the chosen trade reach limiting how far trade may cross open water.
+#[tauri::command]
+pub fn compute_trade_routes(
+    settlements_json: String,
+    rivers_json: String,
+    reach: u8,
+    max_crossing: f32,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<TradeRoute>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+
+    let settlements: Vec<RouteSettlement> =
+        serde_json::from_str(&settlements_json).unwrap_or_default();
+    if settlements.len() < 2 { return Ok(vec![]); }
+
+    let cc = build_coarse_cost(&conn, grid_w, grid_h, &rivers_json, reach == 2)?;
+    let (cw, f) = (cc.cw, cc.f);
+
+    // Map settlements to coarse nodes (top 80 by score).
     let mut nodes: Vec<(i32, i32, f32)> = settlements.iter()
-        .map(|s| {
-            let cx = (s.x / f).min(cw as u32 - 1) as i32;
-            let cy = (s.y / f).min(ch as u32 - 1) as i32;
-            (cx, cy, s.score)
-        })
+        .map(|s| ((s.x / f).min(cw as u32 - 1) as i32, (s.y / f).min(cc.ch as u32 - 1) as i32, s.score))
         .collect();
     nodes.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-    nodes.truncate(80); // major settlements only — keeps the route count legible
+    nodes.truncate(80);
     let nn = nodes.len();
     if nn < 2 { return Ok(vec![]); }
 
@@ -677,78 +814,27 @@ pub fn compute_trade_routes(
         }
     }
 
-    // ── Dijkstra per link over the coarse grid ───────────────────────────────
-    // 8-neighbour; X wraps, Y clamps. Costs scaled to integers for the heap.
-    const DIRS: [(i32, i32, f32); 8] = [
-        (-1, 0, 1.0), (1, 0, 1.0), (0, -1, 1.0), (0, 1, 1.0),
-        (-1, -1, 1.4142), (1, -1, 1.4142), (-1, 1, 1.4142), (1, 1, 1.4142),
-    ];
-    let cidx = |x: i32, y: i32| -> usize { (y * cw + wrap_cx(x)) as usize };
-
     let mut routes: Vec<TradeRoute> = Vec::new();
     for &(a, b) in &edges {
-        let (sx, sy, _) = nodes[a];
-        let (tx, ty, _) = nodes[b];
-        let start = cidx(sx, sy);
-        let goal = cidx(tx, ty);
-
-        let mut dist = vec![i64::MAX; cn];
-        let mut prev = vec![usize::MAX; cn];
-        let mut heap: BinaryHeap<Reverse<(i64, usize)>> = BinaryHeap::new();
-        dist[start] = 0;
-        heap.push(Reverse((0, start)));
-
-        while let Some(Reverse((d, u))) = heap.pop() {
-            if u == goal { break; }
-            if d > dist[u] { continue; }
-            let ux = (u as i32) % cw;
-            let uy = (u as i32) / cw;
-            for &(dx, dy, mult) in &DIRS {
-                let ny = uy + dy;
-                if ny < 0 || ny >= ch { continue; }
-                let v = cidx(ux + dx, ny);
-                // Edge cost = mean endpoint cost × diagonal length (×100 → int).
-                let step = ((cost[u] + cost[v]) * 0.5 * mult * 100.0) as i64;
-                let nd = d + step.max(1);
-                if nd < dist[v] {
-                    dist[v] = nd;
-                    prev[v] = u;
-                    heap.push(Reverse((nd, v)));
-                }
-            }
-        }
-
-        if dist[goal] == i64::MAX { continue; } // unreachable (shouldn't happen)
-
-        // Reconstruct path → world-cell polyline; tally land vs sea.
-        let mut path: Vec<usize> = Vec::new();
-        let mut cur = goal;
-        while cur != usize::MAX {
-            path.push(cur);
-            if cur == start { break; }
-            cur = prev[cur];
-        }
-        path.reverse();
-        if path.len() < 2 { continue; }
+        let start = cc.cidx(nodes[a].0, nodes[a].1);
+        let goal = cc.cidx(nodes[b].0, nodes[b].1);
+        let path = match coarse_dijkstra(&cc, start, goal) { Some(p) => p, None => continue };
+        if !path_allowed(&cc, &path, reach, max_crossing, grid_w) { continue; }
 
         let mut sea_cells = 0u32;
         let mut river_cells = 0u32;
         let pts: Vec<[f32; 2]> = path.iter().map(|&c| {
-            if !is_land[c] { sea_cells += 1; }
-            if is_land[c] && is_river[c] { river_cells += 1; }
-            let cx = (c as i32) % cw;
-            let cy = (c as i32) / cw;
-            [(cx as u32 * f + f / 2) as f32, (cy as u32 * f + f / 2) as f32]
+            if !cc.is_land[c] { sea_cells += 1; }
+            if cc.is_land[c] && cc.is_river[c] { river_cells += 1; }
+            cc.world_of(c)
         }).collect();
 
-        // Classify: sea-dominant → maritime; otherwise if a good share of the
-        // overland path runs along rivers → river route; else plain caravan.
         let kind = if sea_cells as usize * 3 >= path.len() {
-            1 // maritime
+            1
         } else if river_cells as usize * 4 >= path.len() {
-            2 // river-following inland route
+            2
         } else {
-            0 // overland caravan
+            0
         };
         routes.push(TradeRoute { points: pts, kind });
     }
@@ -1015,7 +1101,9 @@ pub fn compute_shark_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, Str
         }
     }
 
-    let mut zones: Vec<SharkZone> = cluster_cells(&risk, cw, ch, f, 0.40, 2)
+    // Only the highest-probability water reads as a "shark zone" — a high
+    // threshold + a higher min-cluster size so sharks aren't tagged everywhere.
+    let mut zones: Vec<SharkZone> = cluster_cells(&risk, cw, ch, f, 0.62, 3)
         .into_iter()
         .map(|c| SharkZone { cells: c.cells, cell_size: f as f32, x: c.cx, y: c.cy, score: c.score })
         .collect();
@@ -1025,7 +1113,60 @@ pub fn compute_shark_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, Str
             .partial_cmp(&(a.cells.len() as f32 * a.score))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    zones.truncate(40);
+    zones.truncate(14);
+    Ok(zones)
+}
+
+/// Cluster shipworm hull-hazard water into the highest-risk danger zones (same
+/// shape as shark zones — a Biological hazard sublayer for wooden shipping).
+#[tauri::command]
+pub fn compute_shipworm_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+
+    let f = (grid_w / 300).max(1);
+    let cw = ((grid_w + f - 1) / f) as i32;
+    let ch = ((grid_h + f - 1) / f) as i32;
+    let mut risk = vec![0.0f32; (cw * ch) as usize];
+
+    let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
+    let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
+    for ty in 0..tiles_y as i32 {
+        for tx in 0..tiles_x as i32 {
+            let tile = tile_store::load_tile(&conn, tx, ty, 0)
+                .map_err(|e| e.to_string())?.unwrap_or_else(TileData::new_sea);
+            let base_x = tx as u32 * TILE_SIZE;
+            let base_y = ty as u32 * TILE_SIZE;
+            let max_lx = TILE_SIZE.min(grid_w - base_x);
+            let max_ly = TILE_SIZE.min(grid_h - base_y);
+            for ly in 0..max_ly {
+                for lx in 0..max_lx {
+                    let ti = (ly * TILE_SIZE + lx) as usize;
+                    let v = tile.shipworm_risk[ti] as f32 / 255.0;
+                    if v <= 0.0 { continue; }
+                    let cx = ((base_x + lx) / f) as i32;
+                    let cy = ((base_y + ly) / f) as i32;
+                    let ci = (cy * cw + cx) as usize;
+                    if v > risk[ci] { risk[ci] = v; }
+                }
+            }
+        }
+    }
+
+    let mut zones: Vec<SharkZone> = cluster_cells(&risk, cw, ch, f, 0.58, 3)
+        .into_iter()
+        .map(|c| SharkZone { cells: c.cells, cell_size: f as f32, x: c.cx, y: c.cy, score: c.score })
+        .collect();
+    zones.sort_by(|a, b| {
+        (b.cells.len() as f32 * b.score)
+            .partial_cmp(&(a.cells.len() as f32 * a.score))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    zones.truncate(14);
     Ok(zones)
 }
 
@@ -1037,6 +1178,7 @@ pub struct GoodRegion {
     pub x: f32,               // label centroid
     pub y: f32,
     pub score: f32,
+    pub sublabel: String,     // e.g. the specific gemstone (Ruby/Sapphire/…); else ""
 }
 
 /// Mark every trade-good belt as a filled AREA (the actual physics-driven cells,
@@ -1082,14 +1224,24 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
         }
     }
 
+    use crate::sim::biological::{GOOD_GEMSTONES, GEM_STONES};
     let mut out: Vec<GoodRegion> = Vec::new();
     for g in 0..GOODS_COUNT {
-        let mut regions = cluster_cells(&grids[g], cw, ch, f, 0.30, 1);
-        // Largest area first (each good is already a single homeland, but a belt
-        // can split into a couple of patches at the coarse resolution).
+        // Gemstones are scattered deposits, not one homeland — keep every deposit
+        // (each named for a specific stone). Other goods: a homeland (top few
+        // patches at the coarse resolution).
+        let (max_keep, min_cells) = if g == GOOD_GEMSTONES { (32usize, 1usize) } else { (4, 1) };
+        let mut regions = cluster_cells(&grids[g], cw, ch, f, 0.30, min_cells);
         regions.sort_by(|a, b| b.cells.len().cmp(&a.cells.len()));
-        regions.truncate(4);
+        regions.truncate(max_keep);
         for c in regions {
+            let sublabel = if g == GOOD_GEMSTONES {
+                // Deterministic stone type per deposit (by its centroid).
+                let h = (c.cx as i64).wrapping_mul(73856093) ^ (c.cy as i64).wrapping_mul(19349663);
+                GEM_STONES[(h.unsigned_abs() as usize) % GEM_STONES.len()].to_string()
+            } else {
+                String::new()
+            };
             out.push(GoodRegion {
                 good: GOOD_NAMES[g].to_string(),
                 cells: c.cells,
@@ -1097,6 +1249,7 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
                 x: c.cx,
                 y: c.cy,
                 score: c.score,
+                sublabel,
             });
         }
     }
@@ -1126,10 +1279,20 @@ pub struct TradeFlow {
     pub points: Vec<[f32; 2]>, // [from_center, to_center]
 }
 
+/// A bundled trunk segment of the routed trade network: one coarse edge carrying
+/// the summed volume of every commodity flow that travels along it. The overlay
+/// draws these with width ∝ volume, so shared corridors read as thick trunks.
+#[derive(Serialize)]
+pub struct TradeTrunk {
+    pub points: Vec<[f32; 2]>, // [from, to] world coords of the coarse edge
+    pub volume: f32,
+}
+
 #[derive(Serialize)]
 pub struct TradeMatrix {
     pub regions: Vec<TradeRegion>,
     pub flows: Vec<TradeFlow>,
+    pub trunks: Vec<TradeTrunk>,
     pub goods: Vec<String>,
 }
 
@@ -1140,6 +1303,9 @@ pub struct TradeMatrix {
 #[tauri::command]
 pub fn compute_trade_matrix(
     settlements_json: String,
+    rivers_json: String,
+    reach: u8,
+    max_crossing: f32,
     db: State<'_, WorldDb>,
 ) -> Result<TradeMatrix, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -1149,13 +1315,13 @@ pub fn compute_trade_matrix(
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     let goods_names: Vec<String> = GOOD_NAMES.iter().map(|s| s.to_string()).collect();
     if grid_w == 0 || grid_h == 0 {
-        return Ok(TradeMatrix { regions: vec![], flows: vec![], goods: goods_names });
+        return Ok(TradeMatrix { regions: vec![], flows: vec![], trunks: vec![], goods: goods_names });
     }
 
     let settlements: Vec<RouteSettlement> =
         serde_json::from_str(&settlements_json).unwrap_or_default();
     if settlements.len() < 2 {
-        return Ok(TradeMatrix { regions: vec![], flows: vec![], goods: goods_names });
+        return Ok(TradeMatrix { regions: vec![], flows: vec![], trunks: vec![], goods: goods_names });
     }
 
     let wrap_dx = |a: i32, b: i32| -> i32 {
@@ -1180,7 +1346,7 @@ pub fn compute_trade_matrix(
         if seeds.len() >= 14 { break; }
     }
     if seeds.is_empty() {
-        return Ok(TradeMatrix { regions: vec![], flows: vec![], goods: goods_names });
+        return Ok(TradeMatrix { regions: vec![], flows: vec![], trunks: vec![], goods: goods_names });
     }
 
     // Assign every settlement to its nearest seed; accumulate weighted centers.
@@ -1292,6 +1458,7 @@ pub fn compute_trade_matrix(
         0.35, 0.45, 0.45, 0.50, 0.30, 0.70, // silk,wine,oliveoil,sugar,frankincense,stockfish
         0.40, 0.40, 0.45, 0.35, 0.60, 0.25, // spices,tea,coffee,furs,timber,amber
         0.75, 0.30, 0.30, 0.30, 0.55,        // salt,dyes,incense,pearls,whaling
+        0.85, 0.65, 0.45, 0.40,              // wheat(staple),iron,cotton,gemstones
     ];
     let mut demand = vec![vec![0.0f32; GOODS_COUNT]; nr];
     for ri in 0..nr {
