@@ -17,4 +17,4 @@ User answers (rounds 1-3):
 
 ## New persisted field: shipworm_risk u8 (serialized AFTER goods => truly last => old saves zero-pad).
 
-## Status: IN PROGRESS.
+## Status: IMPLEMENTED — `cargo check` exit 0 (1 pre-existing density warning) + `tsc --noEmit` clean. NOT visually verified.

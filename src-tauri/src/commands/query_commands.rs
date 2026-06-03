@@ -489,6 +489,8 @@ struct RouteSettlement {
     y: u32,
     #[serde(default)]
     score: f32,
+    #[serde(default)]
+    population: u32,
 }
 
 /// A river, as sent from the frontend store (only the cell path is needed).
@@ -1224,13 +1226,19 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
         }
     }
 
-    use crate::sim::biological::{GOOD_GEMSTONES, GEM_STONES};
+    use crate::sim::biological::{GOOD_GEMSTONES, GOOD_UNLIMITED, GEM_STONES};
     let mut out: Vec<GoodRegion> = Vec::new();
     for g in 0..GOODS_COUNT {
-        // Gemstones are scattered deposits, not one homeland — keep every deposit
-        // (each named for a specific stone). Other goods: a homeland (top few
-        // patches at the coarse resolution).
-        let (max_keep, min_cells) = if g == GOOD_GEMSTONES { (32usize, 1usize) } else { (4, 1) };
+        // Gemstones are scattered deposits (keep every deposit, each named for a
+        // specific stone). Unlimited goods blanket the world, so show many
+        // patches. Seeded goods are one homeland (top few coarse patches).
+        let (max_keep, min_cells) = if g == GOOD_GEMSTONES {
+            (32usize, 1usize)
+        } else if GOOD_UNLIMITED[g] {
+            (14, 1)
+        } else {
+            (4, 1)
+        };
         let mut regions = cluster_cells(&grids[g], cw, ch, f, 0.30, min_cells);
         regions.sort_by(|a, b| b.cells.len().cmp(&a.cells.len()));
         regions.truncate(max_keep);
@@ -1483,7 +1491,24 @@ pub fn compute_trade_matrix(
         });
     }
 
-    // ── 4. Flows: match surpluses to deficits per good (greedy nearest) ──────
+    // ── 4. Flows: match surpluses to deficits per good, routed over the trade
+    // network and bundled into trunks. A supplier can only serve an importer if
+    // a route between their regions exists under the chosen trade reach (so when
+    // continents are too far / the ocean too wide, trade stays within reach and
+    // no flow is drawn). Flows that share a corridor stack onto the same trunk.
+    let cc = build_coarse_cost(&conn, grid_w, grid_h, &rivers_json, reach == 2)?;
+    let region_node: Vec<usize> = centers.iter().map(|&(x, y)| {
+        let cx = (x.max(0) as u32 / cc.f).min(cc.cw as u32 - 1) as i32;
+        let cy = (y.max(0) as u32 / cc.f).min(cc.ch as u32 - 1) as i32;
+        cc.cidx(cx, cy)
+    }).collect();
+
+    // Lazily-computed least-cost path per region pair (None = unreachable).
+    let mut pair_path: std::collections::HashMap<(usize, usize), Option<Vec<usize>>> =
+        std::collections::HashMap::new();
+    let mut pair_volume: std::collections::HashMap<(usize, usize), f32> =
+        std::collections::HashMap::new();
+
     let mut flows: Vec<TradeFlow> = Vec::new();
     for g in 0..GOODS_COUNT {
         let mut supply: Vec<(usize, f32)> = (0..nr)
@@ -1493,11 +1518,9 @@ pub fn compute_trade_matrix(
             .filter_map(|ri| { let n = regions[ri].net[g]; if n < -0.05 { Some((ri, -n)) } else { None } })
             .collect();
         if supply.is_empty() || deficit.is_empty() { continue; }
-        // Largest deficits first.
         deficit.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         for &mut (di, mut need) in deficit.iter_mut() {
-            // sort suppliers by distance to this importer
             let (dx0, dy0) = centers[di];
             supply.sort_by_key(|&(si, _)| {
                 let (sx, sy) = centers[si];
@@ -1508,9 +1531,18 @@ pub fn compute_trade_matrix(
             for s in supply.iter_mut() {
                 if need <= 0.05 { break; }
                 if s.1 <= 0.05 { continue; }
+                if s.0 == di { continue; }
+                let key = (s.0.min(di), s.0.max(di));
+                if !pair_path.contains_key(&key) {
+                    let p = coarse_dijkstra(&cc, region_node[s.0], region_node[di])
+                        .filter(|p| path_allowed(&cc, p, reach, max_crossing, grid_w));
+                    pair_path.insert(key, p);
+                }
+                if pair_path[&key].is_none() { continue; } // unreachable under this reach
                 let amt = need.min(s.1);
                 s.1 -= amt;
                 need -= amt;
+                *pair_volume.entry(key).or_insert(0.0) += amt;
                 let (sx, sy) = centers[s.0];
                 flows.push(TradeFlow {
                     from: s.0 as u32,
@@ -1524,5 +1556,208 @@ pub fn compute_trade_matrix(
         }
     }
 
-    Ok(TradeMatrix { regions, flows, goods: goods_names })
+    // Bundle: sum every flow's volume onto the coarse edges of its routed path.
+    let mut edge_w: std::collections::HashMap<(usize, usize), f32> =
+        std::collections::HashMap::new();
+    for (key, vol) in &pair_volume {
+        if let Some(Some(path)) = pair_path.get(key) {
+            for w in path.windows(2) {
+                let e = (w[0].min(w[1]), w[0].max(w[1]));
+                *edge_w.entry(e).or_insert(0.0) += *vol;
+            }
+        }
+    }
+    let mut trunks: Vec<TradeTrunk> = Vec::new();
+    for ((a, b), vol) in edge_w {
+        if vol < 0.02 { continue; }
+        trunks.push(TradeTrunk { points: vec![cc.world_of(a), cc.world_of(b)], volume: vol });
+    }
+
+    Ok(TradeMatrix { regions, flows, trunks, goods: goods_names })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Political layer — settlement trade power + influence
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One politically significant settlement: re-ranked by trade power (route
+/// centrality + good monopoly, on top of base habitability), with an influence
+/// radius scaled by that power and the goods it monopolizes.
+#[derive(Serialize)]
+pub struct PoliticalCenter {
+    pub x: f32,
+    pub y: f32,
+    pub power: f32,              // 0..1 combined trade power
+    pub rank: u32,              // 0 = most powerful
+    pub radius: f32,            // influence radius in world cells
+    pub population: u32,
+    pub monopolies: Vec<String>, // goods this settlement dominates production of
+}
+
+/// Re-rank settlements by trade power and emit influence centers. Power blends
+/// base habitability (settlement score), route centrality (how many trade links
+/// a settlement anchors under the chosen reach) and trade monopoly (being the
+/// dominant producer of goods — strongest for the seeded one-homeland goods).
+/// The frontend draws translucent influence discs sized by power.
+#[tauri::command]
+pub fn compute_political(
+    settlements_json: String,
+    rivers_json: String,
+    reach: u8,
+    max_crossing: f32,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<PoliticalCenter>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+
+    let settlements: Vec<RouteSettlement> =
+        serde_json::from_str(&settlements_json).unwrap_or_default();
+    if settlements.is_empty() { return Ok(vec![]); }
+
+    // Top settlements by base score (the political contenders).
+    let mut idx: Vec<usize> = (0..settlements.len()).collect();
+    idx.sort_by(|&a, &b| settlements[b].score.partial_cmp(&settlements[a].score)
+        .unwrap_or(std::cmp::Ordering::Equal));
+    idx.truncate(80);
+    let nn = idx.len();
+    let nodes: Vec<&RouteSettlement> = idx.iter().map(|&i| &settlements[i]).collect();
+
+    let wrap_dx = |a: i32, b: i32| -> i32 {
+        let mut d = (a - b).abs();
+        if d > grid_w as i32 / 2 { d = grid_w as i32 - d; }
+        d
+    };
+
+    // Route centrality: count reachable nearest-neighbour links per node.
+    let cc = build_coarse_cost(&conn, grid_w, grid_h, &rivers_json, reach == 2)?;
+    let cnode: Vec<usize> = nodes.iter().map(|s| {
+        let cx = (s.x / cc.f).min(cc.cw as u32 - 1) as i32;
+        let cy = (s.y / cc.f).min(cc.ch as u32 - 1) as i32;
+        cc.cidx(cx, cy)
+    }).collect();
+    let mut edges: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    for i in 0..nn {
+        let mut dists: Vec<(usize, i64)> = Vec::new();
+        for j in 0..nn {
+            if i == j { continue; }
+            let dx = wrap_dx(nodes[i].x as i32, nodes[j].x as i32) as i64;
+            let dy = nodes[i].y as i64 - nodes[j].y as i64;
+            dists.push((j, dx * dx + dy * dy));
+        }
+        dists.sort_by_key(|&(_, d)| d);
+        for &(j, _) in dists.iter().take(3) {
+            edges.insert((i.min(j), i.max(j)));
+        }
+    }
+    let mut centrality = vec![0.0f32; nn];
+    for &(a, b) in &edges {
+        if let Some(path) = coarse_dijkstra(&cc, cnode[a], cnode[b]) {
+            if path_allowed(&cc, &path, reach, max_crossing, grid_w) {
+                centrality[a] += 1.0;
+                centrality[b] += 1.0;
+            }
+        }
+    }
+
+    // Monopoly: assign each good-bearing coarse cell to its nearest node, then
+    // measure how large a share of each goods total production a node holds.
+    let f = (grid_w / 220).max(1);
+    let cw = ((grid_w + f - 1) / f) as i32;
+    let ch = ((grid_h + f - 1) / f) as i32;
+    let mut prod = vec![vec![0.0f32; GOODS_COUNT]; nn];
+    let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
+    let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
+    let mut coarse = vec![[0.0f32; GOODS_COUNT]; (cw * ch) as usize];
+    for ty in 0..tiles_y as i32 {
+        for tx in 0..tiles_x as i32 {
+            let tile = tile_store::load_tile(&conn, tx, ty, 0)
+                .map_err(|e| e.to_string())?.unwrap_or_else(TileData::new_sea);
+            let base_x = tx as u32 * TILE_SIZE;
+            let base_y = ty as u32 * TILE_SIZE;
+            let max_lx = TILE_SIZE.min(grid_w - base_x);
+            let max_ly = TILE_SIZE.min(grid_h - base_y);
+            for ly in 0..max_ly {
+                for lx in 0..max_lx {
+                    let ti = (ly * TILE_SIZE + lx) as usize;
+                    let cx = ((base_x + lx) / f) as i32;
+                    let cy = ((base_y + ly) / f) as i32;
+                    let ci = (cy * cw + cx) as usize;
+                    for g in 0..GOODS_COUNT {
+                        coarse[ci][g] += tile.goods[g][ti] as f32 / 255.0;
+                    }
+                }
+            }
+        }
+    }
+    let max_reach = (grid_w / 4) as i64;
+    for cy in 0..ch {
+        for cx in 0..cw {
+            let ci = (cy * cw + cx) as usize;
+            let wx = (cx as u32 * f + f / 2).min(grid_w - 1) as i32;
+            let wy = (cy as u32 * f + f / 2).min(grid_h - 1) as i32;
+            let mut best = 0usize;
+            let mut bd = i64::MAX;
+            for (ni, s) in nodes.iter().enumerate() {
+                let dx = wrap_dx(wx, s.x as i32) as i64;
+                let dy = (wy - s.y as i32) as i64;
+                let d = dx * dx + dy * dy;
+                if d < bd { bd = d; best = ni; }
+            }
+            if bd > max_reach * max_reach { continue; }
+            for g in 0..GOODS_COUNT {
+                prod[best][g] += coarse[ci][g];
+            }
+        }
+    }
+    let mut good_total = vec![0.0f32; GOODS_COUNT];
+    for g in 0..GOODS_COUNT {
+        for ni in 0..nn { good_total[g] += prod[ni][g]; }
+    }
+    let mut monopoly = vec![0.0f32; nn];
+    let mut monopolies: Vec<Vec<String>> = vec![Vec::new(); nn];
+    for ni in 0..nn {
+        for g in 0..GOODS_COUNT {
+            if good_total[g] < 1e-4 || prod[ni][g] < 0.05 { continue; }
+            let share = prod[ni][g] / good_total[g];
+            monopoly[ni] += share * share; // squared → rewards true dominance
+            if share > 0.55 {
+                monopolies[ni].push(GOOD_NAMES[g].to_string());
+            }
+        }
+    }
+
+    // Combine into trade power and normalize.
+    let cmax = centrality.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
+    let mmax = monopoly.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
+    let mut power = vec![0.0f32; nn];
+    for ni in 0..nn {
+        power[ni] = 0.45 * nodes[ni].score.clamp(0.0, 1.0)
+            + 0.30 * (centrality[ni] / cmax)
+            + 0.25 * (monopoly[ni] / mmax);
+    }
+    let pmax = power.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
+
+    let mut order: Vec<usize> = (0..nn).collect();
+    order.sort_by(|&a, &b| power[b].partial_cmp(&power[a]).unwrap_or(std::cmp::Ordering::Equal));
+
+    let base_r = grid_w as f32 * 0.018;
+    let span_r = grid_w as f32 * 0.075;
+    let mut out: Vec<PoliticalCenter> = Vec::new();
+    for (rank, &ni) in order.iter().enumerate().take(40) {
+        let p = power[ni] / pmax;
+        out.push(PoliticalCenter {
+            x: nodes[ni].x as f32,
+            y: nodes[ni].y as f32,
+            power: p,
+            rank: rank as u32,
+            radius: base_r + span_r * p,
+            population: nodes[ni].population,
+            monopolies: monopolies[ni].clone(),
+        });
+    }
+    Ok(out)
 }

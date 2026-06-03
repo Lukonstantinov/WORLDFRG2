@@ -19,6 +19,12 @@ export interface RiverParamsState {
   lakeMaxFraction: number;
 }
 
+export interface BioParamsState {
+  gemDeposits: number;   // number of highland gemstone deposits
+  tradeReach: number;    // 0 = global, 1 = coastal+short, 2 = continental only
+  maxCrossing: number;   // max open-water crossing as fraction of map width
+}
+
 interface UIStore {
   activeTool: ActiveTool;
   activeLayer: ActiveLayer;
@@ -37,6 +43,7 @@ interface UIStore {
   landmassSource: LandmassSource;
   terrainParams: TerrainParams;
   riverParams: RiverParamsState;
+  bioParams: BioParamsState;
   showTradeMatrix: boolean;
 
   setTool: (tool: ActiveTool) => void;
@@ -56,6 +63,7 @@ interface UIStore {
   setStretchToFit: (v: boolean) => void;
   setTerrainParams: (p: Partial<TerrainParams>) => void;
   setRiverParams: (p: Partial<RiverParamsState>) => void;
+  setBioParams: (p: Partial<BioParamsState>) => void;
   setShowTradeMatrix: (v: boolean) => void;
 }
 
@@ -72,6 +80,7 @@ const STEP_DEFAULTS: Record<number, { layer: ActiveLayer; tool: ActiveTool }> = 
   6: { layer: "fertility", tool: "select" },
   7: { layer: "land", tool: "select" },
   8: { layer: "land", tool: "select" },
+  9: { layer: "land", tool: "select" },
 };
 
 export const useUIStore = create<UIStore>((set) => ({
@@ -88,7 +97,8 @@ export const useUIStore = create<UIStore>((set) => ({
     rivers: true, lakes: true, settlements: true,
     markers: false, wind: false, currents: false, latLines: false,
     tradeRoutes: false, fisheryBanks: false,
-    sharkZones: false, tradeFlows: false,
+    sharkZones: false, shipwormZones: false, tradeFlows: false,
+    politicalInfluence: false,
     ...Object.fromEntries(GOOD_DEFS.map((g) => [goodOverlayKey(g.name), false])),
   },
   layerOpacity: 1,
@@ -96,6 +106,7 @@ export const useUIStore = create<UIStore>((set) => ({
   landmassSource: "none",
   terrainParams: { density: 0.5, height: 0.5, spread: 0.5, roughness: 0.4, seed: null },
   riverParams: { density: 0.5, width: 1.0, lakeFillDepth: 0.004, lakeMaxFraction: 0.0008 },
+  bioParams: { gemDeposits: 6, tradeReach: 1, maxCrossing: 0.08 },
   showTradeMatrix: false,
 
   setTool: (tool) => set({ activeTool: tool }),
@@ -129,6 +140,9 @@ export const useUIStore = create<UIStore>((set) => ({
 
   setRiverParams: (p) =>
     set((state) => ({ riverParams: { ...state.riverParams, ...p } })),
+
+  setBioParams: (p) =>
+    set((state) => ({ bioParams: { ...state.bioParams, ...p } })),
 
   setShowTradeMatrix: (v) => set({ showTradeMatrix: v }),
 

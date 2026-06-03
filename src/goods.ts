@@ -25,6 +25,10 @@ export const GOOD_DEFS: GoodDef[] = [
   { name: "incense", label: "Incense", emoji: "\u{1F4A8}", color: "#b0a0c0" },
   { name: "pearls", label: "Pearls", emoji: "\u{1F9AA}", color: "#d8e4ec" },
   { name: "whaling", label: "Whaling Grounds", emoji: "\u{1F40B}", color: "#5878a0" },
+  { name: "wheat", label: "Wheat", emoji: "\u{1F33E}", color: "#d9b94a" },
+  { name: "iron", label: "Iron / Ore", emoji: "⛏\u{FE0F}", color: "#9aa0a6" },
+  { name: "cotton", label: "Cotton", emoji: "\u{1F9F6}", color: "#eef0e8" },
+  { name: "gemstones", label: "Gemstones", emoji: "\u{1F48E}", color: "#56c8d8" },
 ];
 
 /** Overlay-visibility key for a good's region toggle. */

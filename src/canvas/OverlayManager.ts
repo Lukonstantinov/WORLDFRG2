@@ -1,8 +1,11 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeFlow } from "../types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter } from "../types";
 import { GOOD_DEFS, goodOverlayKey } from "../goods";
 
 const GOOD_BY_NAME = new Map(GOOD_DEFS.map((g) => [g.name, g]));
 const SHARK_COLOR = "#e04040";
+const SHIPWORM_COLOR = "#b98a4a";
+const TRADE_TRUNK = "#e0c060"; // bundled commodity-flow trunk (amber)
+const POLITICAL_COLOR = "#d65fd0"; // influence disc (magenta)
 
 const RIVER_COLOR = "#2288cc";
 const LAKE_COLOR = "rgba(51, 153, 221, 0.7)";
@@ -40,15 +43,18 @@ export class OverlayManager {
   private tradeRoutes: TradeRoute[] = [];
   private fisheryBanks: FisheryBank[] = [];
   private sharkZones: SharkZone[] = [];
+  private shipwormZones: SharkZone[] = [];
   private goodRegions: GoodRegion[] = [];
-  private tradeFlows: TradeFlow[] = [];
+  private tradeTrunks: TradeTrunk[] = [];
+  private politicalCenters: PoliticalCenter[] = [];
   private latLinesData: { gridW: number; gridH: number } | null = null;
 
   private visibility: Record<string, boolean> = {
     rivers: true, lakes: true, settlements: true,
     markers: false, wind: false, currents: false, latLines: false,
     tradeRoutes: false, fisheryBanks: false,
-    sharkZones: false, tradeFlows: false,
+    sharkZones: false, shipwormZones: false, tradeFlows: false,
+    politicalInfluence: false,
   };
 
   private currentScale = 1;
@@ -78,13 +84,21 @@ export class OverlayManager {
     this.sharkZones = zones;
   }
 
+  drawShipwormZones(zones: SharkZone[]) {
+    this.shipwormZones = zones;
+  }
+
   drawGoodRegions(regions: GoodRegion[]) {
     this.goodRegions = regions;
   }
 
-  drawTradeFlows(flows: TradeFlow[], gridW: number) {
-    this.tradeFlows = flows;
+  drawTradeTrunks(trunks: TradeTrunk[], gridW: number) {
+    this.tradeTrunks = trunks;
     this.worldW = gridW;
+  }
+
+  drawPolitical(centers: PoliticalCenter[]) {
+    this.politicalCenters = centers;
   }
 
   drawLatLines(gridW: number, gridH: number) {
@@ -199,26 +213,39 @@ export class OverlayManager {
         const def = GOOD_BY_NAME.get(r.good);
         const color = def ? def.color : "#cccccc";
         const emoji = def ? def.emoji : "";
-        this.renderRegionMask(ctx, r.cells, r.cell_size, color, emoji, r.x, r.y, 0.16 + 0.18 * Math.min(1, r.score));
+        this.renderRegionMask(ctx, r.cells, r.cell_size, color, emoji, r.x, r.y, 0.16 + 0.18 * Math.min(1, r.score), r.sublabel);
       }
     }
 
-    // Shark-infested water: the actual habitat cells marked red + a shark glyph.
+    // Shark-infested water: the highest-risk habitat cells + a shark glyph.
     if (this.visibility.sharkZones && this.sharkZones.length > 0) {
       for (const z of this.sharkZones) {
         this.renderRegionMask(ctx, z.cells, z.cell_size, SHARK_COLOR, "\u{1F988}", z.x, z.y, 0.16 + 0.22 * Math.min(1, z.score));
       }
     }
 
-    // Trade flows: weighted commodity-flow lines between regions.
-    if (this.visibility.tradeFlows && this.tradeFlows.length > 0) {
-      for (const f of this.tradeFlows) this.renderTradeFlow(ctx, f);
+    // Shipworm hull-hazard water: warm brackish coasts marked + a worm glyph.
+    if (this.visibility.shipwormZones && this.shipwormZones.length > 0) {
+      for (const z of this.shipwormZones) {
+        this.renderRegionMask(ctx, z.cells, z.cell_size, SHIPWORM_COLOR, "\u{1FAB1}", z.x, z.y, 0.16 + 0.22 * Math.min(1, z.score));
+      }
+    }
+
+    // Trade flows: bundled commodity trunks routed over the trade network
+    // (width ∝ total volume on each corridor).
+    if (this.visibility.tradeFlows && this.tradeTrunks.length > 0) {
+      this.renderTradeTrunks(ctx);
     }
 
     if (this.visibility.tradeRoutes && this.tradeRoutes.length > 0) {
       for (const route of this.tradeRoutes) {
         this.renderTradeRoute(ctx, route);
       }
+    }
+
+    // Political influence: translucent discs sized by trade power.
+    if (this.visibility.politicalInfluence && this.politicalCenters.length > 0) {
+      for (const c of this.politicalCenters) this.renderPoliticalCenter(ctx, c);
     }
 
     if (this.visibility.settlements && this.settlements.length > 0) {
@@ -342,7 +369,7 @@ export class OverlayManager {
   private renderRegionMask(
     ctx: CanvasRenderingContext2D,
     cells: [number, number][], cellSize: number, color: string, emoji: string,
-    lx: number, ly: number, alpha: number,
+    lx: number, ly: number, alpha: number, sublabel: string = "",
   ) {
     if (cells.length === 0) return;
 
@@ -373,49 +400,63 @@ export class OverlayManager {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(emoji, lx, ly);
+      if (sublabel) {
+        const ss = Math.max(5, 9 / this.currentScale);
+        ctx.font = `${ss}px sans-serif`;
+        ctx.fillStyle = "#f0f0f0";
+        ctx.fillText(sublabel, lx, ly + fs * 0.85);
+      }
       ctx.textAlign = "start";
       ctx.textBaseline = "alphabetic";
     }
   }
 
-  /** One commodity flow as a weighted, arrow-tipped line between region centers. */
-  private renderTradeFlow(ctx: CanvasRenderingContext2D, f: TradeFlow) {
-    const pts = f.points;
-    if (pts.length < 2) return;
-    const a = pts[0];
-    const b = pts[1];
-    // Skip flows that span the cylindrical wrap seam (would streak across the map).
-    if (this.worldW > 0 && Math.abs(a[0] - b[0]) > this.worldW / 2) return;
+  /** Bundled commodity trunks: each routed coarse edge drawn with width ∝ the
+   *  total goods volume travelling along it, so shared corridors read as trunks. */
+  private renderTradeTrunks(ctx: CanvasRenderingContext2D) {
+    let maxVol = 0;
+    for (const t of this.tradeTrunks) maxVol = Math.max(maxVol, t.volume);
+    if (maxVol <= 0) return;
 
-    const def = GOOD_BY_NAME.get(f.good_name);
-    const color = def ? def.color : "#d0d0d0";
-    const lw = Math.max(0.4, (0.6 + f.weight * 3.0) / Math.sqrt(this.currentScale));
-
-    ctx.globalAlpha = 0.55;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = lw;
+    ctx.globalAlpha = 0.7;
+    ctx.strokeStyle = TRADE_TRUNK;
     ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(a[0] + 0.5, a[1] + 0.5);
-    ctx.lineTo(b[0] + 0.5, b[1] + 0.5);
-    ctx.stroke();
-
-    let dx = b[0] - a[0];
-    let dy = b[1] - a[1];
-    const m = Math.sqrt(dx * dx + dy * dy);
-    if (m > 0.001) {
-      dx /= m; dy /= m;
-      const hl = Math.max(2, 8 / Math.sqrt(this.currentScale));
-      const perpX = -dy, perpY = dx;
-      const bx = b[0] + 0.5, by = b[1] + 0.5;
+    ctx.lineJoin = "round";
+    for (const t of this.tradeTrunks) {
+      const pts = t.points;
+      if (pts.length < 2) continue;
+      const a = pts[0], b = pts[1];
+      // Skip edges spanning the cylindrical wrap seam.
+      if (this.worldW > 0 && Math.abs(a[0] - b[0]) > this.worldW / 2) continue;
+      const norm = t.volume / maxVol;
+      ctx.lineWidth = Math.max(0.5, (0.6 + norm * 5.0) / Math.sqrt(this.currentScale));
       ctx.beginPath();
-      ctx.moveTo(bx, by);
-      ctx.lineTo(bx - dx * hl + perpX * hl * 0.5, by - dy * hl + perpY * hl * 0.5);
-      ctx.lineTo(bx - dx * hl - perpX * hl * 0.5, by - dy * hl - perpY * hl * 0.5);
-      ctx.closePath();
-      ctx.fillStyle = color;
-      ctx.fill();
+      ctx.moveTo(a[0] + 0.5, a[1] + 0.5);
+      ctx.lineTo(b[0] + 0.5, b[1] + 0.5);
+      ctx.stroke();
     }
+    ctx.globalAlpha = 1;
+  }
+
+  /** A political influence disc: radius ∝ trade power, brightest for the rank-0
+   *  powers, with a centre dot. */
+  private renderPoliticalCenter(ctx: CanvasRenderingContext2D, c: PoliticalCenter) {
+    const alpha = 0.10 + 0.22 * Math.min(1, c.power);
+    ctx.beginPath();
+    ctx.arc(c.x + 0.5, c.y + 0.5, c.radius, 0, Math.PI * 2);
+    ctx.fillStyle = POLITICAL_COLOR;
+    ctx.globalAlpha = alpha;
+    ctx.fill();
+    ctx.globalAlpha = Math.min(0.85, alpha + 0.4);
+    ctx.strokeStyle = POLITICAL_COLOR;
+    ctx.lineWidth = Math.max(0.4, 1.0 / Math.sqrt(this.currentScale));
+    ctx.stroke();
+    // Centre marker.
+    ctx.beginPath();
+    ctx.arc(c.x + 0.5, c.y + 0.5, Math.max(0.8, 2.0 / Math.sqrt(this.currentScale)), 0, Math.PI * 2);
+    ctx.fillStyle = POLITICAL_COLOR;
+    ctx.globalAlpha = 0.95;
+    ctx.fill();
     ctx.globalAlpha = 1;
   }
 
@@ -469,8 +510,10 @@ export class OverlayManager {
     this.tradeRoutes = [];
     this.fisheryBanks = [];
     this.sharkZones = [];
+    this.shipwormZones = [];
     this.goodRegions = [];
-    this.tradeFlows = [];
+    this.tradeTrunks = [];
+    this.politicalCenters = [];
     this.latLinesData = null;
   }
 }

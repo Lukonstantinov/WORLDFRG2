@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { WorldMeta, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, TradeMatrix } from "../types";
+import type { WorldMeta, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, TradeMatrix, PoliticalCenter } from "../types";
 
 export async function newWorld(name: string, gridWidth: number, gridHeight: number): Promise<WorldMeta> {
   return invoke("new_world", { name, gridWidth, gridHeight });
@@ -103,8 +103,10 @@ export async function simGenerateSettlements(
   return invoke("sim_generate_settlements", { seed, riversJson });
 }
 
-export async function simBiological(seed: number, riversJson: string): Promise<[number, number][]> {
-  return invoke("sim_biological", { seed, riversJson });
+export async function simBiological(
+  seed: number, riversJson: string, gemDeposits: number,
+): Promise<[number, number][]> {
+  return invoke("sim_biological", { seed, riversJson, gemDeposits });
 }
 
 export async function simGenerateTerrainFromTemplate(
@@ -162,14 +164,19 @@ export interface TradeRoute {
 }
 
 /** Compute trade routes between the current settlements (pass the store list).
- *  Rivers are passed so inland routes can follow navigable rivers. */
+ *  Rivers feed inland routes; `reach`/`maxCrossing` cap open-water crossings
+ *  (reach: 0 = global, 1 = coastal+short, 2 = continental only). */
 export async function computeTradeRoutes(
   settlements: { x: number; y: number; score: number }[],
   rivers: { points: [number, number][] }[],
+  reach: number,
+  maxCrossing: number,
 ): Promise<TradeRoute[]> {
   return invoke("compute_trade_routes", {
     settlementsJson: JSON.stringify(settlements),
     riversJson: JSON.stringify(rivers),
+    reach,
+    maxCrossing,
   });
 }
 
@@ -185,21 +192,49 @@ export async function computeFisheryBanks(): Promise<FisheryBank[]> {
   return invoke("compute_fishery_banks");
 }
 
-/** Cluster shark-infested water into circular danger zones. */
+/** Cluster the highest-risk shark-infested water into danger zones. */
 export async function computeSharkZones(): Promise<SharkZone[]> {
   return invoke("compute_shark_zones");
 }
 
-/** Cluster every trade-good belt into labelled circular regions. */
+/** Cluster the highest-risk shipworm (Teredo) hull-hazard water into zones. */
+export async function computeShipwormZones(): Promise<SharkZone[]> {
+  return invoke("compute_shipworm_zones");
+}
+
+/** Cluster every trade-good belt into labelled regions. */
 export async function computeGoodRegions(): Promise<GoodRegion[]> {
   return invoke("compute_good_regions");
 }
 
-/** Build the region↔region trade matrix from the current settlements. */
+/** Build the region↔region trade matrix (routed + bundled flows). */
 export async function computeTradeMatrix(
   settlements: { x: number; y: number; score: number }[],
+  rivers: { points: [number, number][] }[],
+  reach: number,
+  maxCrossing: number,
 ): Promise<TradeMatrix> {
-  return invoke("compute_trade_matrix", { settlementsJson: JSON.stringify(settlements) });
+  return invoke("compute_trade_matrix", {
+    settlementsJson: JSON.stringify(settlements),
+    riversJson: JSON.stringify(rivers),
+    reach,
+    maxCrossing,
+  });
+}
+
+/** Re-rank settlements by trade power and return political influence centers. */
+export async function computePolitical(
+  settlements: { x: number; y: number; score: number; population: number }[],
+  rivers: { points: [number, number][] }[],
+  reach: number,
+  maxCrossing: number,
+): Promise<PoliticalCenter[]> {
+  return invoke("compute_political", {
+    settlementsJson: JSON.stringify(settlements),
+    riversJson: JSON.stringify(rivers),
+    reach,
+    maxCrossing,
+  });
 }
 
 export interface ElevationBand {

@@ -39,6 +39,7 @@ export interface CellInfo {
   distance_to_ocean: number;
   salinity: number;    // PSU
   shark_risk: number;  // 0..1
+  shipworm_risk: number; // 0..1
   goods: { name: string; amount: number }[];
 }
 
@@ -53,7 +54,7 @@ export type ActiveLayer =
   | "land" | "elevation" | "climate" | "temperature" | "precipitation"
   | "soil" | "fertility" | "plates"
   | "biomes" | "fisheries" | "terrain" | "shelf" | "ridges" | "wind" | "currents"
-  | "habitability" | "salinity" | "shark";
+  | "habitability" | "salinity" | "shark" | "shipworm";
 
 export interface VectorSample {
   x: number;
@@ -87,7 +88,7 @@ export interface RiverParams {
   lakeMaxFraction: number; // 0.000002-0.05: max lake size as fraction of grid (low = tiny lakes)
 }
 
-export type WorkflowStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+export type WorkflowStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 export interface SharkZone {
   cells: [number, number][]; // coarse-cell top-left world coords (marked area)
@@ -104,6 +105,17 @@ export interface GoodRegion {
   x: number;                 // label centroid
   y: number;
   score: number;
+  sublabel: string;          // specific gemstone (Ruby/Sapphire/…); else ""
+}
+
+export interface PoliticalCenter {
+  x: number;
+  y: number;
+  power: number;      // 0..1 combined trade power
+  rank: number;       // 0 = most powerful
+  radius: number;     // influence radius in world cells
+  population: number;
+  monopolies: string[];
 }
 
 export interface TradeRegion {
@@ -125,9 +137,15 @@ export interface TradeFlow {
   points: [number, number][];
 }
 
+export interface TradeTrunk {
+  points: [number, number][]; // [from, to] world coords of a routed coarse edge
+  volume: number;
+}
+
 export interface TradeMatrix {
   regions: TradeRegion[];
   flows: TradeFlow[];
+  trunks: TradeTrunk[];
   goods: string[];
 }
 

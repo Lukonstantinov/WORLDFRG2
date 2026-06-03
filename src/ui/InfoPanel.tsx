@@ -194,6 +194,7 @@ export function InfoPanel() {
           {section("Ocean Chemistry")}
           {row("Salinity", `${info.salinity.toFixed(1)} PSU`)}
           {bar("Shark Risk", info.shark_risk)}
+          {bar("Shipworm Risk", info.shipworm_risk)}
 
           {section("Resources")}
           {bar("Fishery", info.fishery)}

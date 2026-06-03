@@ -29,6 +29,7 @@ const layerGroups: { group: string; layers: { id: ActiveLayer; label: string }[]
       { id: "currents", label: "Currents" },
       { id: "salinity", label: "Salinity" },
       { id: "shark", label: "Shark Waters" },
+      { id: "shipworm", label: "Shipworm Waters" },
     ],
   },
   {
@@ -58,11 +59,17 @@ const overlayTypes = [
   { id: "tradeRoutes", label: "Trade Routes" },
   { id: "tradeFlows", label: "Trade Flows" },
   { id: "fisheryBanks", label: "Fishery Banks" },
-  { id: "sharkZones", label: "Shark Zones" },
   { id: "markers", label: "Volcanoes" },
   { id: "wind", label: "Wind" },
   { id: "currents", label: "Currents" },
   { id: "latLines", label: "Lat Lines" },
+];
+
+// Biological / political sublayer overlays (grouped separately).
+const bioOverlays = [
+  { id: "sharkZones", label: "\u{1F988} Shark Zones" },
+  { id: "shipwormZones", label: "\u{1FAB1} Shipworm Zones" },
+  { id: "politicalInfluence", label: "\u{1F451} Political Influence" },
 ];
 
 export function Toolbar() {
@@ -189,6 +196,24 @@ export function Toolbar() {
       <div style={section}>
         <div style={sectionHeader}>Overlays</div>
         {overlayTypes.map((o) => (
+          <label key={o.id} style={checkboxRow}>
+            <input
+              type="checkbox"
+              checked={!!overlayVisibility[o.id]}
+              onChange={() => toggleOverlay(o.id)}
+              style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
+            />
+            <span style={{ color: overlayVisibility[o.id] ? "#b0c8e0" : "#5a6a80" }}>
+              {o.label}
+            </span>
+          </label>
+        ))}
+      </div>
+
+      {/* Biological / political hazard + influence sublayers */}
+      <div style={section}>
+        <div style={sectionHeader}>Biological</div>
+        {bioOverlays.map((o) => (
           <label key={o.id} style={checkboxRow}>
             <input
               type="checkbox"

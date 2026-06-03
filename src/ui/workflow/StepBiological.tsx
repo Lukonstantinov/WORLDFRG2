@@ -10,6 +10,8 @@ interface Props {
   invalidateTiles: () => void;
 }
 
+const REACH_LABELS = ["Global (cross any ocean)", "Coastal + short crossings", "Continental only"];
+
 export function StepBiological({ seed, invalidateTiles }: Props) {
   const simRunning = useUIStore((s) => s.simRunning);
   const setSimRunning = useUIStore((s) => s.setSimRunning);
@@ -19,6 +21,8 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
   const stepCompleted = useUIStore((s) => s.stepCompleted);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
   const setShowTradeMatrix = useUIStore((s) => s.setShowTradeMatrix);
+  const bioParams = useUIStore((s) => s.bioParams);
+  const setBioParams = useUIStore((s) => s.setBioParams);
   const rivers = useWorldStore((s) => s.rivers);
 
   const step6Done = stepCompleted[6] === true;
@@ -35,16 +39,17 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
       return;
     }
     setSimRunning(true);
-    setStatus("Computing shark waters, trade goods, routes & matrix...");
+    setStatus("Computing shark/shipworm waters, trade goods, routes & matrix...");
     try {
-      await simBiological(seed, JSON.stringify(rivers));
+      await simBiological(seed, JSON.stringify(rivers), bioParams.gemDeposits);
       markStepCompleted(8); // gates the trade-route / flow computation in MapCanvas
       invalidateTiles();    // bumps tileVersion → refetches shark/goods/routes/flows
       // Surface the new overlays.
       setOverlayVisible("sharkZones", true);
+      setOverlayVisible("shipwormZones", true);
       setOverlayVisible("tradeRoutes", true);
       setOverlayVisible("tradeFlows", true);
-      setStatus("Biological-Trade computed: sharks, goods, routes & trade matrix");
+      setStatus("Biological-Trade computed: sharks, shipworms, goods, routes & trade matrix");
     } catch (err) { setStatus(`Error: ${err}`); }
     setSimRunning(false);
   };
@@ -65,13 +70,41 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
         <div style={warn}>Complete Step 7 first (the trade matrix needs settlements)</div>
       )}
 
-      <button onClick={handleGenerate} disabled={simRunning || !step6Done || !step7Done} style={genBtn}>
+      {/* Generation parameters */}
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#5a7090" }}>
+        <span>Gemstone deposits</span><span style={{ color: "#8aa0c0" }}>{bioParams.gemDeposits}</span>
+      </div>
+      <input type="range" min={0} max={16} value={bioParams.gemDeposits}
+        onChange={(e) => setBioParams({ gemDeposits: Number(e.target.value) })}
+        style={{ width: "100%" }} />
+
+      <div style={{ fontSize: 10, color: "#5a7090", marginTop: 2 }}>Trade reach</div>
+      <select value={bioParams.tradeReach}
+        onChange={(e) => setBioParams({ tradeReach: Number(e.target.value) })}
+        style={{ width: "100%", background: "#080c12", color: "#b0c0d0", border: "1px solid #1e2e42", borderRadius: 4, fontSize: 10, padding: "2px 4px" }}>
+        {REACH_LABELS.map((l, i) => <option key={i} value={i}>{l}</option>)}
+      </select>
+
+      {bioParams.tradeReach === 1 && (
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#5a7090", marginTop: 2 }}>
+            <span>Max sea crossing</span><span style={{ color: "#8aa0c0" }}>{Math.round(bioParams.maxCrossing * 100)}% width</span>
+          </div>
+          <input type="range" min={1} max={40} value={Math.round(bioParams.maxCrossing * 100)}
+            onChange={(e) => setBioParams({ maxCrossing: Number(e.target.value) / 100 })}
+            style={{ width: "100%" }} />
+        </>
+      )}
+
+      <button onClick={handleGenerate} disabled={simRunning || !step6Done || !step7Done} style={{ ...genBtn, marginTop: 2 }}>
         Generate Biological Layer
       </button>
 
-      <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
+      <div style={{ display: "flex", gap: 4, marginTop: 2, flexWrap: "wrap" }}>
         <button onClick={() => setLayer("shark")}
-          style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>Shark Waters</button>
+          style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>Shark</button>
+        <button onClick={() => setLayer("shipworm")}
+          style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>Shipworm</button>
         <button onClick={() => setLayer("salinity")}
           style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>Salinity</button>
       </div>

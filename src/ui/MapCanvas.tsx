@@ -7,7 +7,7 @@ import { createPaintOverlay, drawCursorRing, paintStamp, clearPaintOverlay } fro
 import { useWorldStore } from "../state/worldStore";
 import { useViewportStore } from "../state/viewportStore";
 import { useUIStore } from "../state/uiStore";
-import { paintStroke, undoAction, redoAction, getOverlayVectors, getCurrentStreamlines, computeTradeRoutes, computeFisheryBanks, computeSharkZones, computeGoodRegions, computeTradeMatrix } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, getOverlayVectors, getCurrentStreamlines, computeTradeRoutes, computeFisheryBanks, computeSharkZones, computeShipwormZones, computeGoodRegions, computeTradeMatrix, computePolitical } from "../bridge/tauri";
 import type { PaintValue } from "../types";
 
 /** Largest box with the world's aspect ratio that fits inside the pane. */
@@ -58,6 +58,8 @@ export function MapCanvas() {
   // Trade routes/flows are a product of the Biological-Trade step (8), not an
   // automatic response to settlement changes.
   const step8Done = useUIStore((s) => s.stepCompleted[8]);
+  const step9Done = useUIStore((s) => s.stepCompleted[9]);
+  const bioParams = useUIStore((s) => s.bioParams);
 
   const metaRef = useRef(meta);
   metaRef.current = meta;
@@ -296,11 +298,13 @@ export function MapCanvas() {
     computeTradeRoutes(
       settlements.map((s) => ({ x: s.x, y: s.y, score: s.score })),
       rivers.map((r) => ({ points: r.points })),
+      bioParams.tradeReach,
+      bioParams.maxCrossing,
     ).then((routes) => {
       om.drawTradeRoutes(routes);
       requestRender();
     }).catch(() => {});
-  }, [step8Done, settlements, rivers, tileVersion, requestRender]);
+  }, [step8Done, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, requestRender]);
 
   // Compute fishery grand-bank zones whenever the fishery data changes.
   useEffect(() => {
@@ -312,12 +316,16 @@ export function MapCanvas() {
     }).catch(() => {});
   }, [meta, tileVersion, requestRender]);
 
-  // Compute shark danger zones + trade-good belt regions when biology changes.
+  // Compute shark + shipworm danger zones + trade-good belt regions when biology changes.
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om || !meta) return;
     computeSharkZones().then((zones) => {
       om.drawSharkZones(zones);
+      requestRender();
+    }).catch(() => {});
+    computeShipwormZones().then((zones) => {
+      om.drawShipwormZones(zones);
       requestRender();
     }).catch(() => {});
     computeGoodRegions().then((regions) => {
@@ -326,21 +334,46 @@ export function MapCanvas() {
     }).catch(() => {});
   }, [meta, tileVersion, requestRender]);
 
-  // Region↔region trade flows — also a product of the Biological-Trade step.
+  // Region↔region trade flows (routed + bundled trunks) — a product of the
+  // Biological-Trade step, gated by the chosen trade reach.
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om || !meta) return;
     if (!step8Done || settlements.length < 2) {
-      om.drawTradeFlows([], meta.grid_width);
+      om.drawTradeTrunks([], meta.grid_width);
       requestRender();
       return;
     }
-    computeTradeMatrix(settlements.map((s) => ({ x: s.x, y: s.y, score: s.score })))
-      .then((matrix) => {
-        om.drawTradeFlows(matrix.flows, meta.grid_width);
-        requestRender();
-      }).catch(() => {});
-  }, [step8Done, meta, settlements, tileVersion, requestRender]);
+    computeTradeMatrix(
+      settlements.map((s) => ({ x: s.x, y: s.y, score: s.score })),
+      rivers.map((r) => ({ points: r.points })),
+      bioParams.tradeReach,
+      bioParams.maxCrossing,
+    ).then((matrix) => {
+      om.drawTradeTrunks(matrix.trunks, meta.grid_width);
+      requestRender();
+    }).catch(() => {});
+  }, [step8Done, meta, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, requestRender]);
+
+  // Political influence — product of the Political step (9).
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !meta) return;
+    if (!step9Done || settlements.length < 2) {
+      om.drawPolitical([]);
+      requestRender();
+      return;
+    }
+    computePolitical(
+      settlements.map((s) => ({ x: s.x, y: s.y, score: s.score, population: s.population })),
+      rivers.map((r) => ({ points: r.points })),
+      bioParams.tradeReach,
+      bioParams.maxCrossing,
+    ).then((centers) => {
+      om.drawPolitical(centers);
+      requestRender();
+    }).catch(() => {});
+  }, [step9Done, meta, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, requestRender]);
 
   // Sync overlay visibility
   useEffect(() => {

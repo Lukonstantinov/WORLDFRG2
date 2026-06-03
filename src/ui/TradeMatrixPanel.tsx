@@ -18,18 +18,25 @@ function netColor(v: number): string {
 export function TradeMatrixPanel() {
   const show = useUIStore((s) => s.showTradeMatrix);
   const setShow = useUIStore((s) => s.setShowTradeMatrix);
+  const bioParams = useUIStore((s) => s.bioParams);
   const settlements = useWorldStore((s) => s.settlements);
+  const rivers = useWorldStore((s) => s.rivers);
   const [matrix, setMatrix] = useState<TradeMatrix | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!show) return;
     setLoading(true);
-    computeTradeMatrix(settlements.map((s) => ({ x: s.x, y: s.y, score: s.score })))
+    computeTradeMatrix(
+      settlements.map((s) => ({ x: s.x, y: s.y, score: s.score })),
+      rivers.map((r) => ({ points: r.points })),
+      bioParams.tradeReach,
+      bioParams.maxCrossing,
+    )
       .then(setMatrix)
       .catch(() => setMatrix(null))
       .finally(() => setLoading(false));
-  }, [show, settlements]);
+  }, [show, settlements, rivers, bioParams.tradeReach, bioParams.maxCrossing]);
 
   if (!show) return null;
 
