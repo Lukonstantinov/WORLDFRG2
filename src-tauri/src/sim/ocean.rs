@@ -236,6 +236,8 @@ fn gyre_vector(
     _x: u32, y: u32,
     dw: u16, de: u16, dn: u16, ds: u16,
     grid_h: u32,
+    equator_offset: f32,
+    lat_scale: f32,
     circumpolar_active: bool,
     circumpolar_row: u32,
 ) -> (f32, f32) {
@@ -243,7 +245,7 @@ fn gyre_vector(
         return (SPEED_ACC, 0.0);
     }
 
-    let lat = 90.0 - (y as f32 / grid_h as f32) * 180.0;
+    let lat = super::world_buffer::lat_from_y(y as f32, grid_h as f32, equator_offset, lat_scale);
     let abs_lat = lat.abs();
     let nh = lat >= 0.0;
 
@@ -424,7 +426,8 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
 
             let (gvx, gvy) = gyre_vector(
                 x, y, dist_w[i], dist_e[i], dist_n[i], dist_s[i],
-                h, circumpolar_active, circumpolar_row,
+                h, buf.equator_offset, buf.lat_scale,
+                circumpolar_active, circumpolar_row,
             );
 
             // Bathymetry steering — rotate toward isobath direction
@@ -495,7 +498,7 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
     }
 
     // Phase 3: coastline deflection (20 passes)
-    let equator_row = h / 2;
+    let equator_row = buf.equator_row();
     for _pass in 0..DEFLECTION_PASSES {
         for cy in 0..h {
             if circumpolar_active && cy >= circumpolar_row { continue; }

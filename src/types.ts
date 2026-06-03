@@ -3,6 +3,10 @@ export interface WorldMeta {
   grid_width: number;
   grid_height: number;
   tile_size: number;
+  /** Equator position as a fraction of height from the top (0.5 = centered). */
+  equator_offset: number;
+  /** Latitude expansion factor (1 = default; >1 stretches bands, cropping poles). */
+  lat_scale: number;
 }
 
 export interface TileResponse {

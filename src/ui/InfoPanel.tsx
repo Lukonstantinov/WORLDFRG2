@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useUIStore } from "../state/uiStore";
+import { useWorldStore } from "../state/worldStore";
 import { getCellInfo } from "../bridge/tauri";
 import type { CellInfo } from "../types";
 import { GOOD_DEFS } from "../goods";
@@ -68,6 +69,7 @@ function vectorToCompass(vx: number, vy: number): string {
 export function InfoPanel() {
   const inspectedCell = useUIStore((s) => s.inspectedCell);
   const setInspectedCell = useUIStore((s) => s.setInspectedCell);
+  const meta = useWorldStore((s) => s.meta);
   const [info, setInfo] = useState<CellInfo | null>(null);
 
   useEffect(() => {
@@ -82,7 +84,12 @@ export function InfoPanel() {
 
   if (!info) return null;
 
-  const lat = 90 - (info.wy / info.grid_height) * 180;
+  // Latitude honours the configurable equator position + expansion (matches
+  // Rust lat_from_y), so the inspector agrees with what was generated.
+  const equatorOffset = meta?.equator_offset ?? 0.5;
+  const latScale = (meta?.lat_scale ?? 1) <= 1e-4 ? 1 : (meta?.lat_scale ?? 1);
+  const lat = Math.max(-90, Math.min(90,
+    (equatorOffset - info.wy / info.grid_height) * 180 / latScale));
   const lon = (info.wx / info.grid_width) * 360 - 180;
   const latDir = lat >= 0 ? "N" : "S";
   const lonDir = lon >= 0 ? "E" : "W";

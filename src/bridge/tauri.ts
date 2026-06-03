@@ -9,6 +9,15 @@ export async function getWorldMeta(): Promise<WorldMeta | null> {
   return invoke("get_world_meta");
 }
 
+/** Persist the latitude framing (equator position + expansion). The next run of
+ *  any simulation phase generates against these latitudes. */
+export async function setLatitudeConfig(
+  equatorOffset: number,
+  latScale: number,
+): Promise<WorldMeta> {
+  return invoke("set_latitude_config", { equatorOffset, latScale });
+}
+
 export async function getTiles(
   tiles: [number, number][],
   layers: string[],
