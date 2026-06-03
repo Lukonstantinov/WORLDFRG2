@@ -100,7 +100,8 @@ score = climate_lookup(koppen)            // 0 if zone not listed
   (`GOOD_MARINE`, `distance_to_ocean`, land).
 - **Island** is new: a one-time connected-component pass over land (cylindrical
   wrap, Y-clamp) labels each landmass with its cell count. A cell is "island" if
-  its component size ≤ `island_max_cells` (default ~0.5 % of total land). Cached
+  its component size ≤ `island_max_cells`. **Default ≈ 0.5 % of total land, and
+  exposed as an editable world/biological parameter** (`island_max_frac`). Cached
   per generation. Enables goods like spices/pearls/island-spice-isles to be
   island-locked.
 
@@ -168,10 +169,11 @@ on different continents (different climate centers — lowland oceanic vs highla
 dry-winter), with different `desire` and `network_luxury = true`, so each is a
 separate trade monopoly and they only become valuable across a large network (§3.4).
 
-**Optional metals follow-on** (your earlier "bronze-age" idea, parked behind a
-toggle): `copper` (Deposits, min_elev .30), `tin` (Deposits, min_elev .35,
-volcanic bonus), `gold` (Deposits, min_elev .45, very low count). All fall out of
-the generalized Deposits distribution with zero new code.
+**Metals batch — included in Round 1** (your "bronze-age" set): `copper`
+(Deposits, min_elev .30, desire .55), `tin` (Deposits, min_elev .35, volcanic
+bonus, rarity .7, desire .55), `gold` (Deposits, min_elev .45, very low count,
+desire .60). All fall out of the generalized Deposits distribution with zero new
+code. This brings the built-in count to **29** goods.
 
 ---
 
@@ -200,15 +202,19 @@ roam open water.
 
 ### 3.3 Analytic monthly curve
 
-12-month calendar (slider 1–12). A hemisphere-offset seasonal phase concentrates
-danger into roughly half the year, with N and S hemispheres ~6 months apart:
+**Configurable calendar length** `M` ("moons"), an editable world parameter,
+**default 12** (slider 1–`M`). A hemisphere-offset seasonal phase concentrates
+danger into roughly half the year, with N and S hemispheres ~`M/2` apart. The
+curve is written in terms of `M` so any calendar length works unchanged:
 
 ```
-peak(lat)   = if lat >= 0 { 8.5 } else { 2.5 }      // late-summer/autumn peak month
-phase(m,lat)= clamp(cos(2π·(m - peak(lat))/12), 0, 1)^p   // p≈1.5 → sharper season
-              · equator_blend(lat)                  // smear toward year-round near 0°
+peak(lat)   = if lat >= 0 { 0.70·M } else { 0.20·M } // late-summer/autumn peak moon
+phase(m,lat)= clamp(cos(2π·(m - peak(lat))/M), 0, 1)^p    // p≈1.5 → sharper season
+              · equator_blend(lat)                   // smear toward year-round near 0°
 storm_month(cell, m) = storm_base[cell] · phase(m, lat(cell))
 ```
+
+(At `M = 12` the N/S peaks land on ~moon 8.5 / 2.5, ~6 months apart, as before.)
 
 - **Per-month zone overlay:** `compute_storm_zones(month)` clusters
   `storm_month(·, month)` ≥ threshold; the overlay tints each zone by intensity
@@ -309,14 +315,17 @@ running Biological-Trade:
 - Validation: warn if a good's climate envelope doesn't exist in the current world
   (so the user knows it won't generate).
 
-This is the last round because it depends on §1 (the engine) and §3 (params) being
-in place.
+**Editing reach: fully custom.** Both built-in and custom goods are fully
+editable — every field, including the climate/temp/precip/elevation/lat envelope,
+can be changed. "Reset to default" restores a built-in's shipped spec from the
+defaults table; custom goods can be deleted outright. This is the last round
+because it depends on §1 (the engine) and §3 (params) being in place.
 
 ---
 
 ## 6. File-by-file impact
 
-### Round 1 — engine + new goods + hazard bases + versioning
+### Round 1 — engine + new goods (incl. copper/tin/gold) + hazard bases + versioning
 - `tile/cell.rs` — header magic/version/goods_count in `compress`/`decompress`;
   add `storm_base`, `reef_risk` columns; variable goods loop; v1 read path.
 - `sim/world_buffer.rs` — new fields + load/save copy lines.
@@ -363,14 +372,15 @@ in place.
 
 ---
 
-## 8. Open questions for sign-off
+## 8. Sign-off decisions (locked)
 
-1. **Calendar length** — fixed 12 months, or expose a world "moons" count
-   (8/10/12/13)? (Doc assumes 12; analytic curve trivially rescales.)
-2. **Island threshold** — what landmass size counts as "island" (proposed ≤0.5 %
-   of total land cells)?
-3. **Metals batch** — include copper/tin/gold defaults in Round 1, or keep parked?
-4. **Seasonality scope** — storms only, or also make reef/sea-ice seasonal later?
-5. **Editor reach** — also allow editing the *built-in* envelopes, or lock
-   built-ins and only allow enable/rename/recolor + fully-custom additions?
+1. **Calendar length** — *configurable* "moons" count, **default 12**; analytic
+   curve rescales to any `M` (§3.3).
+2. **Island threshold** — default ≈0.5 % of total land, **exposed as an editable
+   parameter** `island_max_frac` (§1.3).
+3. **Metals batch** — copper/tin/gold **included in Round 1** → 29 built-in goods
+   (§2).
+4. **Seasonality scope** — **storms only** for now; reef/sea-ice stay static.
+5. **Editor reach** — **fully custom**: built-in *and* custom envelopes editable,
+   with per-good "reset to default" (§5).
 ```
