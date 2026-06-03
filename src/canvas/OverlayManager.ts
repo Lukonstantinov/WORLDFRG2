@@ -54,7 +54,7 @@ export class OverlayManager {
   private goodMeta: Map<string, { icon: string; color: string }> | null = null;
   private tradeTrunks: TradeTrunk[] = [];
   private politicalCenters: PoliticalCenter[] = [];
-  private latLinesData: { gridW: number; gridH: number } | null = null;
+  private latLinesData: { gridW: number; gridH: number; equatorOffset: number; latScale: number } | null = null;
 
   private visibility: Record<string, boolean> = {
     rivers: true, lakes: true, settlements: true,
@@ -120,8 +120,8 @@ export class OverlayManager {
     this.politicalCenters = centers;
   }
 
-  drawLatLines(gridW: number, gridH: number) {
-    this.latLinesData = { gridW, gridH };
+  drawLatLines(gridW: number, gridH: number, equatorOffset = 0.5, latScale = 1) {
+    this.latLinesData = { gridW, gridH, equatorOffset, latScale };
   }
 
   setVisible(type: string, visible: boolean) {
@@ -173,7 +173,7 @@ export class OverlayManager {
     }
 
     if (this.visibility.latLines && this.latLinesData) {
-      const { gridW, gridH } = this.latLinesData;
+      const { gridW, gridH, equatorOffset, latScale } = this.latLinesData;
       ctx.globalAlpha = 0.5;
       ctx.strokeStyle = LAT_LINE_COLOR;
       ctx.lineWidth = 0.5;
@@ -181,16 +181,23 @@ export class OverlayManager {
       // where the prevailing winds actually change — trade winds (0–30°),
       // westerlies (30–60°), polar easterlies (60–90°) — rather than the
       // tropics/polar circles (23.5°/66.5°), which don't coincide with the
-      // belts.
+      // belts. The ±90° poles are included so the user can see where they fall
+      // (off-canvas when the latitude scale is expanded = cropped).
       const lines = [
         { lat: 0, label: "Equator (ITCZ)" },
         { lat: 30, label: "Trades / Westerlies" },
         { lat: -30, label: "Trades / Westerlies" },
         { lat: 60, label: "Westerlies / Polar" },
         { lat: -60, label: "Westerlies / Polar" },
+        { lat: 90, label: "N Pole" },
+        { lat: -90, label: "S Pole" },
       ];
+      const scale = latScale <= 1e-4 ? 1 : latScale;
       for (const { lat, label } of lines) {
-        const y = ((90 - lat) / 180) * gridH;
+        // Inverse of the Rust lat_from_y mapping.
+        const y = (equatorOffset - (lat * scale) / 180) * gridH;
+        // Crop: skip lines whose latitude falls outside the canvas.
+        if (y < 0 || y > gridH) continue;
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(gridW, y);

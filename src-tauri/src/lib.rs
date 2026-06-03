@@ -24,6 +24,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             world_commands::new_world,
             world_commands::get_world_meta,
+            world_commands::set_latitude_config,
             tile_commands::get_tiles,
             tile_commands::get_tile_range,
             paint_commands::paint_stroke,

@@ -56,11 +56,16 @@ pub fn open_world(
         .and_then(|s| s.parse().ok())
         .unwrap_or(180);
 
+    let (equator_offset, lat_scale) =
+        crate::commands::world_commands::read_lat_config(&conn);
+
     Ok(crate::commands::world_commands::WorldMeta {
         name,
         grid_width,
         grid_height,
         tile_size: 128,
+        equator_offset,
+        lat_scale,
     })
 }
 

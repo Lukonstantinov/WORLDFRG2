@@ -421,7 +421,7 @@ export function MapCanvas() {
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om || !meta) return;
-    om.drawLatLines(meta.grid_width, meta.grid_height);
+    om.drawLatLines(meta.grid_width, meta.grid_height, meta.equator_offset, meta.lat_scale);
     requestRender();
   }, [meta, requestRender]);
 

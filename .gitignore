@@ -4,6 +4,8 @@ node_modules/
 # Build artifacts
 dist/
 src-tauri/target/
+# Tauri schema generated when building on Linux (project targets Windows)
+src-tauri/gen/schemas/linux-schema.json
 
 # Logs / env
 *.log

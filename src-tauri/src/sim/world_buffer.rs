@@ -4,6 +4,32 @@ use crate::tile::coords::TILE_SIZE;
 use crate::tile::cell::{TileData, GOODS_COUNT};
 use crate::history::undo;
 
+/// Equator sits at the vertical centre of the canvas by default.
+pub const DEFAULT_EQUATOR_OFFSET: f32 = 0.5;
+/// No stretch by default: the full ±90° span maps exactly onto the canvas
+/// height when the equator is centred.
+pub const DEFAULT_LAT_SCALE: f32 = 1.0;
+
+/// Map a cell row `y` to latitude in degrees given a configurable equator
+/// position and latitude scale.
+///
+/// - `equator_offset`: where the 0° line sits, as a fraction of `height` from
+///   the top (0 = top edge, 0.5 = centre, 1 = bottom edge). Moving it shifts
+///   every latitude band with it.
+/// - `lat_scale`: expansion factor, like dragging Fibonacci levels apart.
+///   `1.0` keeps the default mapping; `>1` stretches the 0/30/60 bands further
+///   from the equator so the poles fall *off-canvas* (those rows simply don't
+///   exist and so are cropped); `<1` compresses them inward.
+///
+/// The result is clamped to `[-90, 90]`, so rows beyond a pole that happens to
+/// sit inside the canvas (only possible when `lat_scale < 1`) read as the pole
+/// value rather than an unphysical >90° latitude.
+#[inline]
+pub fn lat_from_y(y: f32, height: f32, equator_offset: f32, lat_scale: f32) -> f32 {
+    let scale = if lat_scale <= 1e-4 { 1.0 } else { lat_scale };
+    ((equator_offset - y / height) * 180.0 / scale).clamp(-90.0, 90.0)
+}
+
 /// Flat world-sized arrays for simulation.
 /// Loads all tiles into contiguous buffers, runs simulation, writes back.
 /// Index = wy * width + wx (row-major).
@@ -12,6 +38,11 @@ pub struct WorldBuffer {
     pub height: u32,
     pub tiles_x: u32,
     pub tiles_y: u32,
+    /// Latitude framing: equator position (fraction of height from top) and
+    /// expansion scale. See `lat_from_y`. Loaded from world metadata so every
+    /// simulation phase generates against the same configurable latitudes.
+    pub equator_offset: f32,
+    pub lat_scale: f32,
     // Per-cell data
     pub terrain: Vec<u8>,
     pub elevation: Vec<f32>,
@@ -54,6 +85,15 @@ impl WorldBuffer {
             .map_err(|e| e.to_string())?
             .parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
 
+        // Latitude framing (optional metadata; older saves default to a
+        // centred, unstretched equator so they load unchanged).
+        let equator_offset: f32 = metadata::get_meta(conn, "equator_offset")
+            .ok().flatten().and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_EQUATOR_OFFSET);
+        let lat_scale: f32 = metadata::get_meta(conn, "lat_scale")
+            .ok().flatten().and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_LAT_SCALE);
+
         let total = (width * height) as usize;
         let tiles_x = (width + TILE_SIZE - 1) / TILE_SIZE;
         let tiles_y = (height + TILE_SIZE - 1) / TILE_SIZE;
@@ -63,6 +103,8 @@ impl WorldBuffer {
             height,
             tiles_x,
             tiles_y,
+            equator_offset,
+            lat_scale,
             terrain: vec![0; total],
             elevation: vec![0.0; total],
             sea_depth: vec![0.0; total],
@@ -255,10 +297,18 @@ impl WorldBuffer {
         (self.width * self.height) as usize
     }
 
-    /// Get latitude in degrees (-90 to 90) from y coordinate
+    /// Get latitude in degrees (-90 to 90) from y coordinate, honouring the
+    /// configurable equator position and expansion scale.
     #[inline]
     pub fn latitude(&self, y: u32) -> f32 {
-        90.0 - (y as f32 / self.height as f32) * 180.0
+        lat_from_y(y as f32, self.height as f32, self.equator_offset, self.lat_scale)
+    }
+
+    /// Row of the equator (0° line), clamped to the canvas.
+    #[inline]
+    pub fn equator_row(&self) -> u32 {
+        ((self.equator_offset * self.height as f32).round() as i32)
+            .clamp(0, self.height as i32 - 1) as u32
     }
 
     /// Get absolute latitude (0 to 90)

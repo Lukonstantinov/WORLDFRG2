@@ -2,6 +2,7 @@ import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import type { ActiveTool, ActiveLayer } from "../types";
 import { GOOD_DEFS, goodOverlayKey } from "../goods";
+import { LatitudeControl } from "./LatitudeControl";
 
 const tools: { id: ActiveTool; label: string; icon: string; tip: string }[] = [
   { id: "pan", label: "Pan", icon: "\u270B", tip: "Click-drag to pan the map" },
@@ -220,6 +221,9 @@ export function Toolbar() {
           </label>
         ))}
       </div>
+
+      {/* Dynamic latitude framing (move equator / expand 0–60 bands) */}
+      <LatitudeControl />
 
       {/* Biological / political hazard + influence sublayers */}
       <div style={section}>
