@@ -17,10 +17,15 @@ Status: **Rounds 1–3 implemented** · Branch: `claude/trade-goods-review-Ju0R1
 > and apply-to-world / save-to-library / load-library / reset-to-defaults. Matrix,
 > regions, toolbar toggles and overlay icons/colors all read the active spec.
 >
-> Deviations from the original §1 sketch: custom goods beyond the **30 tile-column
-> cap** are not generated (editor warns; the v2 header still future-proofs growing
-> the count); built-in scoring envelopes are edited by *duplicating into a custom
-> good* rather than mutating the built-in in place; the `Island` domain uses a
+> **Unlimited good count:** the 30-good cap has been removed — generation, tile
+> storage (variable column count via the v2 header), the trade matrix, good
+> regions, the political layer and the cell inspector are all driven off the
+> runtime spec-list length, so a world may define any number of goods.
+> `GOODS_COUNT` (30) now only sizes the built-in defaults table and fresh tiles.
+>
+> Remaining deviations from the original §1 sketch: built-in scoring envelopes are
+> edited by *duplicating into a custom good* rather than mutating the built-in in
+> place (keeps default generation byte-identical); the `Island` domain uses a
 > near-coast proxy (no connected-component pass yet).
 
 > **Round 2 implementation note.** Shipped: the analytic monthly storm curve

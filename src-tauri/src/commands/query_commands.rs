@@ -4,7 +4,7 @@ use std::collections::BinaryHeap;
 use tauri::State;
 use crate::db::{WorldDb, tile_store, metadata};
 use crate::tile::coords::{TileCoord, TILE_SIZE};
-use crate::tile::cell::{TileData, GOODS_COUNT};
+use crate::tile::cell::TileData;
 use crate::sim::biological::GOOD_NAMES;
 
 // Salinity u8 ↔ PSU mapping (mirror of sim/ocean.rs).
@@ -110,12 +110,19 @@ pub fn get_cell_info(
         shipworm_risk: tile.shipworm_risk[idx] as f32 / 255.0,
         storm_risk: tile.storm_base[idx] as f32 / 255.0,
         reef_risk: tile.reef_risk[idx] as f32 / 255.0,
-        goods: (0..GOODS_COUNT)
-            .filter_map(|g| {
-                let a = tile.goods[g][idx];
-                if a > 0 { Some(GoodAmount { name: GOOD_NAMES[g].to_string(), amount: a }) } else { None }
-            })
-            .collect(),
+        goods: {
+            let specs = crate::commands::goods_commands::load_world_goods(&conn);
+            (0..tile.goods.len())
+                .filter_map(|g| {
+                    let a = tile.goods[g][idx];
+                    if a == 0 { return None; }
+                    let name = specs.get(g).map(|s| s.id.clone())
+                        .or_else(|| GOOD_NAMES.get(g).map(|s| s.to_string()))
+                        .unwrap_or_else(|| format!("good_{g}"));
+                    Some(GoodAmount { name, amount: a })
+                })
+                .collect()
+        },
     })
 }
 
@@ -1334,7 +1341,9 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
     let cw = ((grid_w + f - 1) / f) as i32;
     let ch = ((grid_h + f - 1) / f) as i32;
     let cn = (cw * ch) as usize;
-    let mut grids: Vec<Vec<f32>> = vec![vec![0.0f32; cn]; GOODS_COUNT];
+    let specs = crate::commands::goods_commands::load_world_goods(&conn);
+    let gc = specs.len();
+    let mut grids: Vec<Vec<f32>> = vec![vec![0.0f32; cn]; gc];
 
     let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
     let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
@@ -1352,7 +1361,7 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
                     let cx = ((base_x + lx) / f) as i32;
                     let cy = ((base_y + ly) / f) as i32;
                     let ci = (cy * cw + cx) as usize;
-                    for g in 0..GOODS_COUNT {
+                    for g in 0..gc.min(tile.goods.len()) {
                         let v = tile.goods[g][ti] as f32 / 255.0;
                         if v > grids[g][ci] { grids[g][ci] = v; }
                     }
@@ -1363,9 +1372,8 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
 
     use crate::sim::biological::GEM_STONES;
     use crate::sim::goods_spec::Distribution;
-    let specs = crate::commands::goods_commands::load_world_goods(&conn);
     let mut out: Vec<GoodRegion> = Vec::new();
-    for g in 0..GOODS_COUNT {
+    for g in 0..gc {
         let spec = match specs.get(g) {
             Some(s) if s.enabled => s,
             _ => continue, // disabled goods produce nothing to map
@@ -1462,9 +1470,8 @@ pub fn compute_trade_matrix(
     // Active (editable) good specs drive names/desire/luxury so the matrix tracks
     // the world's authored goods.
     let specs = crate::commands::goods_commands::load_world_goods(&conn);
-    let goods_names: Vec<String> = (0..GOODS_COUNT)
-        .map(|g| specs.get(g).map(|s| s.id.clone()).unwrap_or_else(|| GOOD_NAMES[g].to_string()))
-        .collect();
+    let gc = specs.len();
+    let goods_names: Vec<String> = specs.iter().map(|s| s.id.clone()).collect();
     if grid_w == 0 || grid_h == 0 {
         return Ok(TradeMatrix { regions: vec![], flows: vec![], trunks: vec![], goods: goods_names });
     }
@@ -1544,12 +1551,12 @@ pub fn compute_trade_matrix(
     let f = (grid_w / 220).max(1);
     let cw = ((grid_w + f - 1) / f) as i32;
     let ch = ((grid_h + f - 1) / f) as i32;
-    let mut production = vec![vec![0.0f32; GOODS_COUNT]; nr];
+    let mut production = vec![vec![0.0f32; gc]; nr];
 
     let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
     let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
     // Sum goods into a coarse grid first (cheap), then assign coarse cells.
-    let mut coarse = vec![[0.0f32; GOODS_COUNT]; (cw * ch) as usize];
+    let mut coarse = vec![vec![0.0f32; gc]; (cw * ch) as usize];
     for ty in 0..tiles_y as i32 {
         for tx in 0..tiles_x as i32 {
             let tile = tile_store::load_tile(&conn, tx, ty, 0)
@@ -1564,7 +1571,7 @@ pub fn compute_trade_matrix(
                     let cx = ((base_x + lx) / f) as i32;
                     let cy = ((base_y + ly) / f) as i32;
                     let ci = (cy * cw + cx) as usize;
-                    for g in 0..GOODS_COUNT {
+                    for g in 0..gc.min(tile.goods.len()) {
                         coarse[ci][g] += tile.goods[g][ti] as f32 / 255.0;
                     }
                 }
@@ -1588,14 +1595,14 @@ pub fn compute_trade_matrix(
                 if d < bd { bd = d; best = ri; }
             }
             if bd > max_reach * max_reach { continue; }
-            for g in 0..GOODS_COUNT {
+            for g in 0..gc {
                 production[best][g] += coarse[ci][g];
             }
         }
     }
 
     // Normalize production per good across regions to 0..1.
-    for g in 0..GOODS_COUNT {
+    for g in 0..gc {
         let mx = production.iter().map(|p| p[g]).fold(0.0f32, f32::max);
         if mx > 0.0 {
             for ri in 0..nr { production[ri][g] /= mx; }
@@ -1606,19 +1613,19 @@ pub fn compute_trade_matrix(
     let max_rw = region_weight.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
     // Per-good desire / luxury flag come from the world's editable good spec, so
     // disabled goods demand nothing and custom desires take effect.
-    let desire: Vec<f32> = (0..GOODS_COUNT)
+    let desire: Vec<f32> = (0..gc)
         .map(|g| specs.get(g).filter(|s| s.enabled).map(|s| s.desire).unwrap_or(0.0))
         .collect();
-    let is_luxury: Vec<bool> = (0..GOODS_COUNT)
+    let is_luxury: Vec<bool> = (0..gc)
         .map(|g| specs.get(g).map(|s| s.network_luxury).unwrap_or(false))
         .collect();
     // Luxuries are only prized across a large/open trade network; tighter reaches
     // (more closed networks) realize less of that demand.
     let reach_factor = match reach { 0 => 1.0, 1 => 0.7, _ => 0.45 };
-    let mut demand = vec![vec![0.0f32; GOODS_COUNT]; nr];
+    let mut demand = vec![vec![0.0f32; gc]; nr];
     for ri in 0..nr {
         let size = region_weight[ri] / max_rw; // 0..1
-        for g in 0..GOODS_COUNT {
+        for g in 0..gc {
             let mut d = size * desire[g];
             if is_luxury[g] {
                 // Discount in the good's own producing homeland (it's local/common
@@ -1633,7 +1640,7 @@ pub fn compute_trade_matrix(
     // Net = production − demand.
     let mut regions: Vec<TradeRegion> = Vec::with_capacity(nr);
     for ri in 0..nr {
-        let net: Vec<f32> = (0..GOODS_COUNT).map(|g| production[ri][g] - demand[ri][g]).collect();
+        let net: Vec<f32> = (0..gc).map(|g| production[ri][g] - demand[ri][g]).collect();
         regions.push(TradeRegion {
             id: ri as u32,
             name: format!("Region {}", ri + 1),
@@ -1664,7 +1671,7 @@ pub fn compute_trade_matrix(
         std::collections::HashMap::new();
 
     let mut flows: Vec<TradeFlow> = Vec::new();
-    for g in 0..GOODS_COUNT {
+    for g in 0..gc {
         let mut supply: Vec<(usize, f32)> = (0..nr)
             .filter_map(|ri| { let n = regions[ri].net[g]; if n > 0.05 { Some((ri, n)) } else { None } })
             .collect();
@@ -1822,10 +1829,12 @@ pub fn compute_political(
     let f = (grid_w / 220).max(1);
     let cw = ((grid_w + f - 1) / f) as i32;
     let ch = ((grid_h + f - 1) / f) as i32;
-    let mut prod = vec![vec![0.0f32; GOODS_COUNT]; nn];
+    let specs = crate::commands::goods_commands::load_world_goods(&conn);
+    let gc = specs.len();
+    let mut prod = vec![vec![0.0f32; gc]; nn];
     let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
     let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
-    let mut coarse = vec![[0.0f32; GOODS_COUNT]; (cw * ch) as usize];
+    let mut coarse = vec![vec![0.0f32; gc]; (cw * ch) as usize];
     for ty in 0..tiles_y as i32 {
         for tx in 0..tiles_x as i32 {
             let tile = tile_store::load_tile(&conn, tx, ty, 0)
@@ -1840,7 +1849,7 @@ pub fn compute_political(
                     let cx = ((base_x + lx) / f) as i32;
                     let cy = ((base_y + ly) / f) as i32;
                     let ci = (cy * cw + cx) as usize;
-                    for g in 0..GOODS_COUNT {
+                    for g in 0..gc.min(tile.goods.len()) {
                         coarse[ci][g] += tile.goods[g][ti] as f32 / 255.0;
                     }
                 }
@@ -1862,24 +1871,24 @@ pub fn compute_political(
                 if d < bd { bd = d; best = ni; }
             }
             if bd > max_reach * max_reach { continue; }
-            for g in 0..GOODS_COUNT {
+            for g in 0..gc {
                 prod[best][g] += coarse[ci][g];
             }
         }
     }
-    let mut good_total = vec![0.0f32; GOODS_COUNT];
-    for g in 0..GOODS_COUNT {
+    let mut good_total = vec![0.0f32; gc];
+    for g in 0..gc {
         for ni in 0..nn { good_total[g] += prod[ni][g]; }
     }
     let mut monopoly = vec![0.0f32; nn];
     let mut monopolies: Vec<Vec<String>> = vec![Vec::new(); nn];
     for ni in 0..nn {
-        for g in 0..GOODS_COUNT {
+        for g in 0..gc {
             if good_total[g] < 1e-4 || prod[ni][g] < 0.05 { continue; }
             let share = prod[ni][g] / good_total[g];
             monopoly[ni] += share * share; // squared → rewards true dominance
             if share > 0.55 {
-                monopolies[ni].push(GOOD_NAMES[g].to_string());
+                monopolies[ni].push(specs[g].id.clone());
             }
         }
     }

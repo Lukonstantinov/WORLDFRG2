@@ -206,7 +206,10 @@ impl TileData {
         let storm_base = read_u8(&buf, &mut offset);
         let reef_risk = read_u8(&buf, &mut offset);
 
-        goods.resize(GOODS_COUNT, vec![0u8; N]);
+        // Keep every stored good column (the count is variable and may exceed the
+        // built-in GOODS_COUNT); pad up to GOODS_COUNT so code that indexes the
+        // built-in slots on an old/short tile stays in range.
+        goods.resize(stored_goods.max(GOODS_COUNT), vec![0u8; N]);
 
         Self {
             terrain, elevation, sea_depth, is_shelf, is_shelf_edge,

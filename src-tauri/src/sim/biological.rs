@@ -504,8 +504,8 @@ pub fn compute_reef_risk(buf: &mut WorldBuffer) {
 /// Generate every good's belt from the active (editable) spec list. Built-in
 /// goods (`builtin`, `scoring = None`) use the hardcoded scorer keyed by their id
 /// and reproduce the original behavior exactly; custom goods use their declarative
-/// `Envelope`. Disabled goods leave a zeroed column. Only the first `GOODS_COUNT`
-/// specs are stored (one per tile column).
+/// `Envelope`. Disabled goods leave a zeroed column. One tile column is written
+/// per spec (the count is no longer capped at `GOODS_COUNT`).
 pub fn compute_trade_goods(
     buf: &mut WorldBuffer, _rivers: &[River], seed: u64, gem_deposits: u32, specs: &[GoodSpec],
 ) {
@@ -513,7 +513,11 @@ pub fn compute_trade_goods(
     let h = buf.height;
     let n = buf.total();
 
-    for slot in 0..GOODS_COUNT {
+    // Size the buffer's good columns to the active spec list (grow for custom
+    // goods, drop trailing columns that no longer exist).
+    buf.goods.resize(specs.len().max(1), vec![0u8; n]);
+
+    for slot in 0..specs.len() {
         let spec = match specs.get(slot) {
             Some(s) if s.enabled => s,
             _ => { buf.goods[slot] = vec![0u8; n]; continue; }

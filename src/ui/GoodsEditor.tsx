@@ -64,7 +64,7 @@ export function GoodsEditor() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <strong style={{ fontSize: 14 }}>Trade Goods Library</strong>
           <span style={{ color: "#7a8aa0" }}>
-            {enabledCount} enabled · {specs.length} total{specs.length > 30 ? " (only first 30 generate)" : ""}{dirty ? " · unsaved" : ""}
+            {enabledCount} enabled · {specs.length} total{dirty ? " · unsaved" : ""}
           </span>
         </div>
 
