@@ -32,11 +32,12 @@ export function TradeMatrixPanel() {
       rivers.map((r) => ({ points: r.points })),
       bioParams.tradeReach,
       bioParams.maxCrossing,
+      bioParams.desertRoutes,
     )
       .then(setMatrix)
       .catch(() => setMatrix(null))
       .finally(() => setLoading(false));
-  }, [show, settlements, rivers, bioParams.tradeReach, bioParams.maxCrossing]);
+  }, [show, settlements, rivers, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes]);
 
   if (!show) return null;
 

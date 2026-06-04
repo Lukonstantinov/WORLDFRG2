@@ -8,7 +8,7 @@ import { useWorldStore } from "../state/worldStore";
 import { useViewportStore } from "../state/viewportStore";
 import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
-import { paintStroke, undoAction, redoAction, getOverlayVectors, getCurrentStreamlines, computeTradeRoutes, computeFisheryBanks, computeSharkZones, computeShipwormZones, computeStormZones, computeReefZones, computeGoodRegions, computeTradeMatrix, computePolitical } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeTradeRoutes, computeTradeMatrix, computePolitical } from "../bridge/tauri";
 import type { PaintValue } from "../types";
 
 /** Largest box with the world's aspect ratio that fits inside the pane. */
@@ -36,7 +36,7 @@ export function MapCanvas() {
   const overlayManagerRef = useRef<OverlayManager | null>(null);
   const isPaintingRef = useRef(false);
   const isErasingRef = useRef(false);
-  const pendingCellsRef = useRef<Set<string>>(new Set());
+  const pendingCellsRef = useRef<Set<number>>(new Set());
   const initRef = useRef(false);
   const rafRef = useRef(0);
   const needsRenderRef = useRef(true);
@@ -44,6 +44,7 @@ export function MapCanvas() {
   const [initStatus, setInitStatus] = useState("waiting");
 
   const meta = useWorldStore((s) => s.meta);
+  const latConfig = useWorldStore((s) => s.latConfig);
   const rivers = useWorldStore((s) => s.rivers);
   const lakes = useWorldStore((s) => s.lakes);
   const settlements = useWorldStore((s) => s.settlements);
@@ -65,6 +66,12 @@ export function MapCanvas() {
   const loadGoodsFromWorld = useGoodsStore((s) => s.loadFromWorld);
   const step9Done = useUIStore((s) => s.stepCompleted[9]);
   const bioParams = useUIStore((s) => s.bioParams);
+
+  // Stable identity for the loaded world. Heavy effects (tile reloads + sim IPC)
+  // key off this string rather than the `meta` object, so latitude-slider edits
+  // — which no longer touch `meta` at all, but even a persisted change keeps the
+  // same dimensions/name — don't retrigger tile-cache rebuilds or sim queries.
+  const worldKey = meta ? `${meta.name}|${meta.grid_width}|${meta.grid_height}` : null;
 
   const metaRef = useRef(meta);
   metaRef.current = meta;
@@ -125,8 +132,8 @@ export function MapCanvas() {
       ctx.clip();
     }
 
-    // Draw tiles
-    tileManager.draw(ctx, viewport.x, viewport.y, viewport.scale);
+    // Draw tiles (only those within the visible tile range).
+    tileManager.draw(ctx, viewport.getVisibleTileRange(w, h));
 
     // Draw overlays
     if (overlayManager) {
@@ -188,20 +195,27 @@ export function MapCanvas() {
 
       // Resize handler for the (aspect-locked) canvas container: resize the
       // backing buffer and re-fit the world so it always fills the box exactly.
+      let resizeTimer: ReturnType<typeof setTimeout> | undefined;
       const resizeObserver = new ResizeObserver((entries) => {
         const entry = entries[0];
-        if (entry) {
-          const { width, height } = entry.contentRect;
-          if (width > 0 && height > 0) {
-            const dpr = window.devicePixelRatio || 1;
-            mapApp.canvas.width = width * dpr;
-            mapApp.canvas.height = height * dpr;
-            const m2 = metaRef.current;
-            if (m2) viewport.fitWorld(m2.grid_width, m2.grid_height, width, height, stretchToFitRef.current);
-            refreshTiles();
-            requestRender();
-          }
-        }
+        if (!entry) return;
+        const { width, height } = entry.contentRect;
+        if (width <= 0 || height <= 0) return;
+        // Resize the backing buffer immediately (cheap; avoids a blurry canvas)
+        // and redraw, but debounce the world-fit + tile refetch so dragging the
+        // window edge doesn't re-fit and refetch on every intermediate size.
+        const dpr = window.devicePixelRatio || 1;
+        mapApp.canvas.width = width * dpr;
+        mapApp.canvas.height = height * dpr;
+        requestRender();
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          if (destroyed) return;
+          const m2 = metaRef.current;
+          if (m2) viewport.fitWorld(m2.grid_width, m2.grid_height, width, height, stretchToFitRef.current);
+          refreshTiles();
+          requestRender();
+        }, 120);
       });
       resizeObserver.observe(el);
 
@@ -253,12 +267,20 @@ export function MapCanvas() {
     };
   }, [refreshTiles, renderFrame, requestRender]);
 
-  // Reload tiles when layer, world, or version changes
+  // Switching the active layer does NOT wipe the cache — tiles are keyed by
+  // (layer, tx, ty), so a previously viewed layer's tiles are still cached and
+  // switching back is instant. Just (re)load the now-active layer's visible tiles.
+  useEffect(() => {
+    refreshTiles();
+  }, [activeLayer, refreshTiles]);
+
+  // Wipe the cache only when the world changes or its data changes (a sim step
+  // bumps tileVersion) — every layer's rendered tiles are then stale.
   useEffect(() => {
     const tm = tileManagerRef.current;
     if (tm) tm.clear();
     refreshTiles();
-  }, [activeLayer, meta, tileVersion, refreshTiles]);
+  }, [worldKey, tileVersion, refreshTiles]);
 
   // Recompute the aspect-locked canvas box when the world (aspect) changes, so
   // a freshly imported template of a different shape re-proportions the canvas.
@@ -266,9 +288,9 @@ export function MapCanvas() {
     const pane = paneRef.current;
     if (!pane || !meta) return;
     setBox(fitBox(pane.clientWidth, pane.clientHeight, meta.grid_width, meta.grid_height));
-  }, [meta]);
+  }, [worldKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fit world when meta changes or the stretch-to-fit option is toggled.
+  // Fit world when the world (dimensions) changes or stretch-to-fit is toggled.
   useEffect(() => {
     const viewport = viewportRef.current;
     const el = containerRef.current;
@@ -278,7 +300,7 @@ export function MapCanvas() {
     if (tm) tm.clear();
     refreshTiles();
     requestRender();
-  }, [meta, stretchToFit, box, refreshTiles, requestRender]);
+  }, [worldKey, stretchToFit, box, refreshTiles, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Redraw overlays when data changes
   useEffect(() => {
@@ -305,46 +327,37 @@ export function MapCanvas() {
       rivers.map((r) => ({ points: r.points })),
       bioParams.tradeReach,
       bioParams.maxCrossing,
+      bioParams.desertRoutes,
     ).then((routes) => {
       om.drawTradeRoutes(routes);
       requestRender();
     }).catch(() => {});
-  }, [step8Done, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, requestRender]);
+  }, [step8Done, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, requestRender]);
 
-  // Compute fishery grand-bank zones whenever the fishery data changes.
+  // All map overlays in ONE IPC round-trip (see `compute_overlays`): wind/current
+  // vectors + streamlines, fishery banks, shark/shipworm/reef/storm danger zones
+  // and trade-good regions. They previously fired as ~8 separate calls that each
+  // re-locked the DB and re-read the tile cache; now they share one read. Storm
+  // zones are seasonal, so the month sliders are deps too.
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om || !meta) return;
-    computeFisheryBanks().then((banks) => {
-      om.drawFisheryBanks(banks);
+    const { grid_width, grid_height } = meta;
+    computeOverlays().then((o) => {
+      om.drawWindArrows(o.vectors.wind, grid_width, grid_height);
+      om.drawCurrentStreamlines(o.streamlines);
+      om.drawFisheryBanks(o.fishery_banks);
+      om.drawSharkZones(o.shark_zones);
+      om.drawShipwormZones(o.shipworm_zones);
+      om.drawReefZones(o.reef_zones);
+      om.drawGoodRegions(o.good_regions);
       requestRender();
     }).catch(() => {});
-  }, [meta, tileVersion, requestRender]);
+  }, [worldKey, tileVersion, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Compute shark + shipworm danger zones + trade-good belt regions when biology changes.
-  useEffect(() => {
-    const om = overlayManagerRef.current;
-    if (!om || !meta) return;
-    computeSharkZones().then((zones) => {
-      om.drawSharkZones(zones);
-      requestRender();
-    }).catch(() => {});
-    computeShipwormZones().then((zones) => {
-      om.drawShipwormZones(zones);
-      requestRender();
-    }).catch(() => {});
-    computeReefZones().then((zones) => {
-      om.drawReefZones(zones);
-      requestRender();
-    }).catch(() => {});
-    computeGoodRegions().then((regions) => {
-      om.drawGoodRegions(regions);
-      requestRender();
-    }).catch(() => {});
-  }, [meta, tileVersion, requestRender]);
-
-  // Storm zones depend on the seasonal month slider, so recompute them on their
-  // own when the month (or calendar length) changes — month 0 = combined annual.
+  // Storm zones depend on the seasonal month slider, so they get their OWN light
+  // effect (a single command). Scrubbing the month must not recompute every other
+  // overlay (that was the storm-slider lag).
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om || !meta) return;
@@ -352,11 +365,11 @@ export function MapCanvas() {
       om.drawStormZones(zones);
       requestRender();
     }).catch(() => {});
-  }, [meta, tileVersion, stormMonth, calendarMonths, requestRender]);
+  }, [worldKey, tileVersion, stormMonth, calendarMonths, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load the world's editable good specs (default 30 or custom) so overlays/labels
   // use the right icons/colors, including any custom goods.
-  useEffect(() => { if (meta) void loadGoodsFromWorld(); }, [meta, tileVersion, loadGoodsFromWorld]);
+  useEffect(() => { if (meta) void loadGoodsFromWorld(); }, [worldKey, tileVersion, loadGoodsFromWorld]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Push per-good display metadata (icon/color) to the overlay manager.
   useEffect(() => {
@@ -381,11 +394,12 @@ export function MapCanvas() {
       rivers.map((r) => ({ points: r.points })),
       bioParams.tradeReach,
       bioParams.maxCrossing,
+      bioParams.desertRoutes,
     ).then((matrix) => {
       om.drawTradeTrunks(matrix.trunks, meta.grid_width);
       requestRender();
     }).catch(() => {});
-  }, [step8Done, meta, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, requestRender]);
+  }, [step8Done, worldKey, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Political influence — product of the Political step (9).
   useEffect(() => {
@@ -401,11 +415,12 @@ export function MapCanvas() {
       rivers.map((r) => ({ points: r.points })),
       bioParams.tradeReach,
       bioParams.maxCrossing,
+      bioParams.desertRoutes,
     ).then((centers) => {
       om.drawPolitical(centers);
       requestRender();
     }).catch(() => {});
-  }, [step9Done, meta, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, requestRender]);
+  }, [step9Done, worldKey, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync overlay visibility
   useEffect(() => {
@@ -417,27 +432,15 @@ export function MapCanvas() {
     requestRender();
   }, [overlayVisibility, requestRender]);
 
-  // Draw latitude lines
+  // Draw latitude lines. Driven by the live `latConfig` slice (not `meta`) so
+  // dragging the Latitude Frame sliders repaints ONLY this overlay — no tile
+  // reloads, no sim IPC.
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om || !meta) return;
-    om.drawLatLines(meta.grid_width, meta.grid_height, meta.equator_offset, meta.lat_scale);
+    om.drawLatLines(meta.grid_width, meta.grid_height, latConfig.equatorOffset, latConfig.latScale);
     requestRender();
-  }, [meta, requestRender]);
-
-  // Fetch wind/current vectors
-  useEffect(() => {
-    const om = overlayManagerRef.current;
-    if (!om || !meta) return;
-    getOverlayVectors().then((data) => {
-      om.drawWindArrows(data.wind, meta.grid_width, meta.grid_height);
-      requestRender();
-    }).catch(() => {});
-    getCurrentStreamlines().then((lines) => {
-      om.drawCurrentStreamlines(lines);
-      requestRender();
-    }).catch(() => {});
-  }, [meta, tileVersion, requestRender]);
+  }, [worldKey, latConfig, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Center the camera when a focus target is requested (e.g. clicking a city).
   useEffect(() => {
@@ -507,7 +510,8 @@ export function MapCanvas() {
         const cy = wy + dy;
         if (cy < 0 || cy >= m.grid_height) continue;
         const wrappedX = ((cx % m.grid_width) + m.grid_width) % m.grid_width;
-        pendingCellsRef.current.add(`${wrappedX},${cy}`);
+        // Numeric key (y*width + x) avoids per-cell string alloc on dense strokes.
+        pendingCellsRef.current.add(cy * m.grid_width + wrappedX);
       }
     }
 
@@ -623,10 +627,10 @@ export function MapCanvas() {
     if (isPaintingRef.current && pendingCellsRef.current.size > 0) {
       isPaintingRef.current = false;
 
+      const gw = metaRef.current?.grid_width ?? 1;
       const cells: [number, number][] = [];
       for (const key of pendingCellsRef.current) {
-        const [x, y] = key.split(",").map(Number);
-        cells.push([x, y]);
+        cells.push([key % gw, Math.floor(key / gw)]);
       }
       pendingCellsRef.current.clear();
 

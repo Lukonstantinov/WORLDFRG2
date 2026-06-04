@@ -42,6 +42,7 @@ export function StepPolitical(_props: Props) {
         rivers.map((r) => ({ points: r.points })),
         bioParams.tradeReach,
         bioParams.maxCrossing,
+        bioParams.desertRoutes,
       );
       setCenters(result);
       markStepCompleted(9);

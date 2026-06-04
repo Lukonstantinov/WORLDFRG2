@@ -40,6 +40,7 @@ pub fn run() {
             query_commands::compute_storm_zones,
             query_commands::compute_reef_zones,
             query_commands::compute_good_regions,
+            query_commands::compute_overlays,
             query_commands::compute_trade_matrix,
             query_commands::compute_political,
             query_commands::get_elevation_distribution,

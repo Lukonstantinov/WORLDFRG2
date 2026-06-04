@@ -894,7 +894,7 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
     let n = buf.total();
     let base_type = buf.current_type.clone();
     let mut warm_add = vec![false; n];
-    let max_steps = (w as f32 * 0.55 * reach_mult) as usize;
+    let max_steps = (w as f32 * 0.75 * reach_mult) as usize;
     let step_len = 1.5f32;
 
     for sy in 0..h {
@@ -915,9 +915,12 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
                 let vmx = buf.current_vx[i];
                 let vmy = buf.current_vy[i];
                 let mag = (vmx * vmx + vmy * vmy).sqrt();
-                if mag < 0.12 { break; }
+                // The North Atlantic/Pacific Drift is a slow, broad flow; a 0.12
+                // floor cut the warm tag off mid-basin (the Gulf Stream went
+                // "grey" before reaching Europe). Carry warmth through weaker drift.
+                if mag < 0.05 { break; }
                 let alat = buf.latitude(yi as u32).abs();
-                if alat > 70.0 { break; }
+                if alat > 74.0 { break; }
 
                 warm_add[i] = true;
 

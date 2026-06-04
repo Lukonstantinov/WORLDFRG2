@@ -114,6 +114,7 @@ export interface Streamline {
 export interface TradeRoute {
   points: [number, number][];
   kind: number; // 0=overland caravan, 1=maritime, 2=river
+  minor: boolean; // lesser town's single connector road (drawn thinner)
 }
 
 export interface FisheryBank {
@@ -143,6 +144,8 @@ export interface SharkZone {
 export interface GoodRegion {
   good: string;
   cells: [number, number][]; // coarse-cell top-left world coords (marked area)
+  values: number[];          // per-cell abundance 0..255 (parallel to cells)
+  subtypes: number[];        // per-cell subtype id (grain/paper); [] if none
   cell_size: number;
   x: number;                 // label centroid
   y: number;
@@ -155,7 +158,8 @@ export interface PoliticalCenter {
   y: number;
   power: number;      // 0..1 combined trade power
   rank: number;       // 0 = most powerful
-  radius: number;     // influence radius in world cells
+  radius: number;     // (legacy) influence radius in world cells
+  stars: number;      // power tier 1..5 — major hubs get 5 (Venice/Genoa)
   population: number;
   monopolies: string[];
 }
@@ -180,8 +184,10 @@ export interface TradeFlow {
 }
 
 export interface TradeTrunk {
-  points: [number, number][]; // [from, to] world coords of a routed coarse edge
+  points: [number, number][]; // [from, to] world coords, ordered source -> consumer
   volume: number;
+  good: number;               // dominant good index, or -1
+  road: string;               // corridor name for major trunks ("Spice Road"); else ""
 }
 
 export interface TradeMatrix {

@@ -1,4 +1,3 @@
-import { useRef } from "react";
 import { useWorldStore } from "../state/worldStore";
 import { useUIStore } from "../state/uiStore";
 import { setLatitudeConfig } from "../bridge/tauri";
@@ -28,33 +27,31 @@ function latAt(yFrac: number, equatorOffset: number, latScale: number): number {
  */
 export function LatitudeControl() {
   const meta = useWorldStore((s) => s.meta);
+  const latConfig = useWorldStore((s) => s.latConfig);
   const setLatConfig = useWorldStore((s) => s.setLatConfig);
   const setMeta = useWorldStore((s) => s.setMeta);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   if (!meta) return null;
 
-  const equatorOffset = meta.equator_offset ?? 0.5;
-  const latScale = meta.lat_scale ?? 1;
+  const { equatorOffset, latScale } = latConfig;
 
-  // Persist to the backend, debounced so dragging a slider doesn't spam IPC.
-  const persist = (eq: number, scale: number) => {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      setLatitudeConfig(eq, scale).then(setMeta).catch(() => {});
-    }, 180);
+  // Live, drag-time update: only the lat-line overlay tracks this, no IPC.
+  const apply = (eq: number, scale: number) => {
+    setLatConfig(eq, scale);             // live overlay update
+    setOverlayVisible("latLines", true); // make the effect visible
   };
 
-  const apply = (eq: number, scale: number) => {
-    setLatConfig(eq, scale);            // live overlay update
-    setOverlayVisible("latLines", true); // make the effect visible
-    persist(eq, scale);
+  // Commit to the backend once on release (so the next sim run generates against
+  // the new latitudes). Reads the latest live values straight from the store.
+  const commit = () => {
+    const { equatorOffset: eq, latScale: scale } = useWorldStore.getState().latConfig;
+    setLatitudeConfig(eq, scale).then(setMeta).catch(() => {});
   };
 
   const onEquator = (v: number) => apply(v / 100, latScale);
   const onScale = (v: number) => apply(equatorOffset, v / 100);
-  const reset = () => apply(0.5, 1);
+  const reset = () => { apply(0.5, 1); setLatitudeConfig(0.5, 1).then(setMeta).catch(() => {}); };
 
   const topLat = latAt(0, equatorOffset, latScale);
   const botLat = latAt(1, equatorOffset, latScale);
@@ -70,6 +67,8 @@ export function LatitudeControl() {
       <input
         type="range" min={0} max={100} value={Math.round(equatorOffset * 100)}
         onChange={(e) => onEquator(Number(e.target.value))}
+        onPointerUp={commit}
+        onKeyUp={commit}
         style={range}
       />
 
@@ -80,6 +79,8 @@ export function LatitudeControl() {
       <input
         type="range" min={25} max={400} value={Math.round(latScale * 100)}
         onChange={(e) => onScale(Number(e.target.value))}
+        onPointerUp={commit}
+        onKeyUp={commit}
         style={range}
       />
 

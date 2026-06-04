@@ -13,7 +13,7 @@ pub fn save_tile(conn: &Connection, tx: i32, ty: i32, lod: i32, data: &TileData)
 }
 
 pub fn load_tile(conn: &Connection, tx: i32, ty: i32, lod: i32) -> rusqlite::Result<Option<TileData>> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT data FROM tiles WHERE tx = ?1 AND ty = ?2 AND lod = ?3"
     )?;
     let mut rows = stmt.query(params![tx, ty, lod])?;
@@ -22,6 +22,22 @@ pub fn load_tile(conn: &Connection, tx: i32, ty: i32, lod: i32) -> rusqlite::Res
             let blob: Vec<u8> = row.get(0)?;
             Ok(Some(TileData::decompress(&blob)))
         }
+        None => Ok(None),
+    }
+}
+
+/// Fetch a tile's compressed blob and version in a single (cached) query. Used by
+/// the tile-serving path so each tile costs one statement, not two. Returns the
+/// raw blob (decompression is deferred so callers can parallelize it off-lock).
+pub fn load_blob_with_version(
+    conn: &Connection, tx: i32, ty: i32, lod: i32,
+) -> rusqlite::Result<Option<(i64, Vec<u8>)>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT version, data FROM tiles WHERE tx = ?1 AND ty = ?2 AND lod = ?3"
+    )?;
+    let mut rows = stmt.query(params![tx, ty, lod])?;
+    match rows.next()? {
+        Some(row) => Ok(Some((row.get(0)?, row.get(1)?))),
         None => Ok(None),
     }
 }

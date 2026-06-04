@@ -53,6 +53,17 @@ pub const GOOD_CACAO: usize = 26;       // wet tropical lowland
 pub const GOOD_COPPER: usize = 27;      // hill-country ore deposits
 pub const GOOD_TIN: usize = 28;         // montane ore deposits (bronze pair)
 pub const GOOD_GOLD: usize = 29;        // rare highland precious-metal deposits
+// ── New goods (30..32) ──
+pub const GOOD_CLOVES: usize = 30;      // tropical spice-island clove
+pub const GOOD_PEPPER: usize = 31;      // tropical wet-coast peppercorn
+pub const GOOD_PAPER: usize = 32;       // multi-source (papyrus/bamboo/manufactured)
+// ── Curated additions (33..37): two manufactured goods, two tropical cash
+// crops, one desert good. All land goods, appended LAST for save back-compat. ──
+pub const GOOD_CERAMICS: usize = 33;    // porcelain/pottery — clay + skilled cities
+pub const GOOD_GLASSWARE: usize = 34;   // glass — silica (coast/arid) + skilled cities
+pub const GOOD_TOBACCO: usize = 35;     // warm humid-subtropical cash crop
+pub const GOOD_INDIGO: usize = 36;      // hot wet tropical/subtropical dye crop (land)
+pub const GOOD_DATES: usize = 37;       // hot-desert oasis fruit
 
 /// Ordered good identifiers (sent to the frontend for labels/emoji/matrix).
 pub const GOOD_NAMES: [&str; GOODS_COUNT] = [
@@ -61,6 +72,8 @@ pub const GOOD_NAMES: [&str; GOODS_COUNT] = [
     "pearls", "whaling", "wheat", "iron", "cotton", "gemstones",
     "hardwoods", "horses", "wool_fleece", "wool_llama", "ivory", "cacao",
     "copper", "tin", "gold",
+    "cloves", "pepper", "paper",
+    "ceramics", "glassware", "tobacco", "indigo", "dates",
 ];
 
 /// Default UI metadata for each built-in good (label, icon glyph, region tint).
@@ -72,13 +85,17 @@ pub const GOOD_LABEL: [&str; GOODS_COUNT] = [
     "Pearls", "Whaling Grounds", "Wheat", "Iron / Ore", "Cotton", "Gemstones",
     "Tropical Hardwoods", "Horses", "Fleece Wool", "Highland Wool", "Ivory", "Cacao",
     "Copper", "Tin", "Gold",
+    "Cloves", "Pepper", "Paper",
+    "Ceramics", "Glassware", "Tobacco", "Indigo", "Dates",
 ];
 pub const GOOD_ICON: [&str; GOODS_COUNT] = [
-    "\u{1F9F5}", "\u{1F377}", "\u{1FAD2}", "\u{1F36C}", "\u{1FA94}", "\u{1F41F}",
+    "\u{1F41B}", "\u{1F377}", "\u{1FAD2}", "\u{1F36C}", "\u{1FA94}", "\u{1F41F}",
     "\u{1F336}\u{FE0F}", "\u{1F375}", "\u{2615}", "\u{1F98A}", "\u{1FAB5}", "\u{1F7E0}",
     "\u{1F9C2}", "\u{1F41A}", "\u{1F4A8}", "\u{1F9AA}", "\u{1F40B}", "\u{1F33E}",
     "\u{26CF}\u{FE0F}", "\u{1F9F6}", "\u{1F48E}", "\u{1F333}", "\u{1F40E}", "\u{1F411}",
     "\u{1F999}", "\u{1F418}", "\u{1F36B}", "\u{1F7E4}", "\u{26AA}", "\u{1F7E1}",
+    "\u{1F33F}", "\u{26AB}", "\u{1F4DC}",
+    "\u{1F3FA}", "\u{1FA9F}", "\u{1F6AC}", "\u{1F7E6}", "\u{1F33D}",
 ];
 pub const GOOD_COLOR: [&str; GOODS_COUNT] = [
     "#d97fb0", "#9b2d4f", "#8ea33a", "#e8d8a0", "#c79a4b", "#6fb0c8",
@@ -86,6 +103,8 @@ pub const GOOD_COLOR: [&str; GOODS_COUNT] = [
     "#cfd6dc", "#8a52c0", "#b0a0c0", "#d8e4ec", "#5878a0", "#d9b94a",
     "#9aa0a6", "#eef0e8", "#56c8d8", "#5b3a1e", "#b5793a", "#e8e3d8",
     "#c8a06a", "#efe6d0", "#6b4226", "#b06a3a", "#b8bcc0", "#d4af37",
+    "#7a3b1e", "#2f2f33", "#e8e0c8",
+    "#5a86c8", "#9fd8d0", "#8a6a3a", "#3a4fb0", "#c08a3a",
 ];
 /// Default base demand weight per good (matrix desire). Single source of truth,
 /// also used by the editable spec.
@@ -96,11 +115,21 @@ pub const GOOD_DESIRE: [f32; GOODS_COUNT] = [
     0.85, 0.65, 0.45, 0.40,              // wheat,iron,cotton,gemstones
     0.55, 0.70, 0.50, 0.40, 0.35, 0.40,  // hardwoods,horses,wool_fleece,wool_llama,ivory,cacao
     0.55, 0.55, 0.60,                    // copper,tin,gold
+    0.55, 0.60, 0.40,                    // cloves,pepper,paper
+    0.60, 0.55, 0.55, 0.45, 0.40,        // ceramics,glassware,tobacco,indigo,dates
 ];
-/// Default scarcity per good (0..1). 0.5 is neutral (no change to belt size); the
-/// built-ins ship neutral so spec-driven generation is identical to before, and
-/// users can tune scarcity per good in the editor.
-pub const GOOD_RARITY: [f32; GOODS_COUNT] = [0.5; GOODS_COUNT];
+/// Default scarcity per good (0..1). 0.5 is neutral (no change to belt size).
+/// Higher = rarer (tighter seed/spread thresholds → a smaller belt). Most goods
+/// ship neutral; cloves and paper are deliberately rarer (user request), and the
+/// two manufactured goods (ceramics/glassware) are uncommon city crafts.
+pub const GOOD_RARITY: [f32; GOODS_COUNT] = {
+    let mut r = [0.5f32; GOODS_COUNT];
+    r[GOOD_CLOVES] = 0.80;   // a single fabled spice island
+    r[GOOD_PAPER] = 0.72;    // scarce; one or two papermaking homelands
+    r[GOOD_CERAMICS] = 0.62; // famed porcelain centres are few
+    r[GOOD_GLASSWARE] = 0.60;
+    r
+};
 
 /// Domain of each good: true = its belt may sit on sea cells (marine/coastal),
 /// false = land-only. (Marine goods are still scored only near the shelf/coast,
@@ -113,6 +142,8 @@ pub const GOOD_MARINE: [bool; GOODS_COUNT] = [
     false, false, false, false,                  // wheat, iron, cotton, gemstones (all land)
     false, false, false, false, false, false,    // hardwoods, horses, wool_fleece, wool_llama, ivory, cacao (land)
     false, false, false,                          // copper, tin, gold (land deposits)
+    false, false, false,                          // cloves, pepper, paper (land)
+    false, false, false, false, false,            // ceramics, glassware, tobacco, indigo, dates (land)
 ];
 
 /// Distribution model. true = UNLIMITED: the good fills *every* suitable area in
@@ -127,6 +158,8 @@ pub const GOOD_UNLIMITED: [bool; GOODS_COUNT] = [
     true, true, false, false,                     // wheat+iron unlimited; cotton seeded; gemstones special
     false, false, false, false, false, false,     // hardwoods/horses/wools/ivory/cacao seeded
     false, false, false,                          // copper/tin/gold = deposit goods (flag unused)
+    false, false, false,                          // cloves(seeded), pepper(seeded), paper(seeded → rarer)
+    false, false, false, false, false,            // ceramics, glassware, tobacco, indigo, dates (all seeded homelands)
 ];
 
 /// Goods whose demand is only realized in a large/open trade network: distant
@@ -141,6 +174,8 @@ pub const GOOD_NETWORK_LUXURY: [bool; GOODS_COUNT] = [
     false, false, false, true,                 // _, _, _, gemstones
     true,  false, true,  true,  true,  true,   // hardwoods, _, wool_fleece, wool_llama, ivory, cacao
     false, false, true,                         // _, _, gold
+    true,  true,  true,                         // cloves, pepper, paper (paper now rare → a prized export)
+    true,  true,  true,  true,  false,          // ceramics, glassware, tobacco, indigo (luxuries); dates (staple)
 ];
 
 // Mountains ≥3000 m wall off a good's spread across a continent.
@@ -155,21 +190,33 @@ pub const GEM_STONES: [&str; 5] = ["Ruby", "Sapphire", "Emerald", "Diamond", "To
 /// minimum normalized elevation it locks to, a deterministic seed-salt so each
 /// metal scatters independently, and a base count multiplier relative to the
 /// gemstone-deposit count chosen in the UI.
+#[derive(Clone, Copy)]
 pub struct DepositParams {
     pub min_elev: f32,
     pub salt: u64,
     pub count_num: u32, // count = gem_deposits * count_num / count_den (min 1)
     pub count_den: u32,
+    /// `false` = highland deposit (candidates ranked purely by elevation, e.g.
+    /// gems/metals). `true` = suitability deposit: candidates come from the good's
+    /// own climate/relief score (e.g. salt's arid coast, iron's hill country), so
+    /// the scatter follows where the good actually belongs rather than the peaks.
+    pub suitability: bool,
 }
 
-/// Deposit parameters for goods placed as scattered highland blobs, else None
-/// (the good uses climate scoring + flood-fill localization instead).
+/// Deposit parameters for goods placed as scattered sporadic deposits (mostly
+/// single-cell, occasionally a small rich cluster), else None (the good uses a
+/// continuous climate-scored belt instead). Highland deposits lock to elevation;
+/// suitability deposits (salt/iron) scatter through their climate/relief score.
 pub fn deposit_params(g: usize) -> Option<DepositParams> {
     match g {
-        GOOD_GEMSTONES => Some(DepositParams { min_elev: GEM_MIN_ELEV, salt: 0xA1B2C3D4E5F60718, count_num: 1, count_den: 1 }),
-        GOOD_COPPER    => Some(DepositParams { min_elev: 0.30, salt: 0xC0FFEE_1234_5678, count_num: 1, count_den: 1 }),
-        GOOD_TIN       => Some(DepositParams { min_elev: 0.35, salt: 0x7117_BEEF_D00D_F00D, count_num: 2, count_den: 3 }),
-        GOOD_GOLD      => Some(DepositParams { min_elev: 0.45, salt: 0x901D_901D_901D_901D, count_num: 1, count_den: 2 }),
+        GOOD_GEMSTONES => Some(DepositParams { min_elev: GEM_MIN_ELEV, salt: 0xA1B2C3D4E5F60718, count_num: 1, count_den: 1, suitability: false }),
+        GOOD_COPPER    => Some(DepositParams { min_elev: 0.30, salt: 0xC0FFEE_1234_5678, count_num: 1, count_den: 1, suitability: false }),
+        GOOD_TIN       => Some(DepositParams { min_elev: 0.35, salt: 0x7117_BEEF_D00D_F00D, count_num: 2, count_den: 3, suitability: false }),
+        GOOD_GOLD      => Some(DepositParams { min_elev: 0.45, salt: 0x901D_901D_901D_901D, count_num: 3, count_den: 2, suitability: false }),
+        // Salt (arid-coast pans) and iron (hill country) are now scattered sporadic
+        // deposits driven by their suitability score, not continuous belts.
+        GOOD_SALT      => Some(DepositParams { min_elev: 0.0, salt: 0x5A17_5A17_5A17_5A17, count_num: 6, count_den: 1, suitability: true }),
+        GOOD_IRON      => Some(DepositParams { min_elev: 0.0, salt: 0x1804_1804_1804_1804, count_num: 5, count_den: 1, suitability: true }),
         _ => None,
     }
 }
@@ -531,10 +578,36 @@ pub fn compute_trade_goods(
                 let (min_elev, num, den) = spec.deposit
                     .map(|d| (d.min_elev, d.count_num.max(1), d.count_den.max(1)))
                     .unwrap_or((0.40, 1, 1));
-                let salt = builtin_idx.and_then(deposit_params).map(|d| d.salt)
-                    .unwrap_or_else(|| id_salt(&spec.id));
+                let dp = builtin_idx.and_then(deposit_params);
+                let salt = dp.map(|d| d.salt).unwrap_or_else(|| id_salt(&spec.id));
+                // Suitability deposits (salt/iron, or any custom deposit good with a
+                // scoring envelope) scatter through the good's own climate/relief
+                // score; highland deposits (gems/metals) rank candidates by elevation.
+                let suitability = dp.map(|d| d.suitability).unwrap_or(spec.scoring.is_some());
                 let count = (gem_deposits * num / den).max(1);
-                buf.goods[slot] = place_deposits(buf, seed, count, min_elev, salt);
+
+                let mut cand = vec![0.0f32; n];
+                if suitability {
+                    for y in 0..h {
+                        for x in 0..w {
+                            let i = buf.idx(x, y);
+                            if buf.terrain[i] != 1 { continue; }
+                            cand[i] = if let Some(env) = &spec.scoring {
+                                envelope_score(buf, env, spec.domain, x, y)
+                            } else if let Some(idx) = builtin_idx {
+                                good_score(buf, idx, x, y)
+                            } else { 0.0 };
+                        }
+                    }
+                } else {
+                    for i in 0..n {
+                        if buf.terrain[i] == 1 && buf.elevation[i] >= min_elev {
+                            cand[i] = (buf.elevation[i] - min_elev + 0.15).min(1.0);
+                        }
+                    }
+                }
+                let thresh = if suitability { 0.30 } else { 1e-4 };
+                buf.goods[slot] = place_deposits(buf, seed, count, salt, &cand, thresh);
             }
             _ => {
                 let marine = matches!(spec.domain, Domain::Marine);
@@ -631,8 +704,13 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
 
     match g {
         GOOD_SILK => {
-            let clim = match k { CFA | CWA => 1.0, CFB | CSA => 0.6, DFA | DFB => 0.4, _ => 0.0 };
-            clim * bell(t, 18.0, 7.0) * band(p, 600.0, 1600.0, 500.0)
+            // Sericulture is warm-temperate / humid-subtropical mulberry country
+            // (China's Yangtze, Bengal, the Levant) — NOT the cold northern
+            // continental interior. Dropped DFA/DFB, warmed the temperature peak,
+            // and added a |lat| cap so silk stays out of the high north.
+            let clim = match k { CFA | CWA => 1.0, CSA | CWB => 0.5, CFB => 0.25, _ => 0.0 };
+            clim * bell(t, 21.0, 5.0) * band(p, 600.0, 1600.0, 500.0)
+                * band(abs_lat, 0.0, 38.0, 8.0)
                 * (0.4 + 0.6 * fert) * (1.0 - smoothstep(0.4, 0.7, elev))
         }
         GOOD_WINE => {
@@ -762,12 +840,94 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
             clim * smoothstep(22.0, 27.0, t) * band(p, 1500.0, 3000.0, 600.0)
                 * (1.0 - smoothstep(0.20, 0.45, elev)) * (0.5 + 0.5 * fert)
         }
+        GOOD_CLOVES => {
+            // Clove (Moluccas / Zanzibar): hot wet tropical, strongly coastal /
+            // island. Seeded → one fabled spice-island homeland.
+            let clim = match k { AF | AM => 1.0, AW => 0.45, _ => 0.0 };
+            let cst = if coast_near { 1.0 } else if coastland { 0.6 } else { 0.25 };
+            clim * smoothstep(22.0, 27.0, t) * band(p, 1500.0, 3200.0, 700.0) * cst
+        }
+        GOOD_PEPPER => {
+            // Black pepper (Malabar): hot, very wet monsoon coast. Seeded.
+            let clim = match k { AM | AF => 1.0, AW | CWA => 0.5, _ => 0.0 };
+            let cst = if coastland { 1.0 } else { 0.45 };
+            clim * smoothstep(21.0, 27.0, t) * band(p, 1500.0, 3500.0, 800.0) * cst
+        }
+        GOOD_PAPER => {
+            // Paper has THREE sources; the score is the strongest of them and the
+            // overlay classifies which one wins per cell (papyrus / bamboo /
+            // manufactured) for distinct icons. Unlimited (every viable cell).
+            let papyrus = {
+                // Warm freshwater delta / marsh reed (Nile papyrus): warm, very
+                // low-lying, well-watered (fertility proxies alluvial wetland).
+                let warm = smoothstep(16.0, 24.0, t);
+                let low = 1.0 - smoothstep(0.12, 0.32, elev);
+                warm * low * (0.25 + 0.75 * fert) * band(abs_lat, 0.0, 33.0, 8.0)
+                    * if coastland { 1.0 } else { 0.7 }
+            };
+            let bamboo = {
+                // Humid-subtropical bamboo / mulberry pulp (East-Asian paper).
+                let clim = match k { CFA | CWA => 1.0, CWB | CFB => 0.5, AM => 0.4, _ => 0.0 };
+                clim * smoothstep(12.0, 20.0, t) * band(p, 800.0, 2200.0, 500.0)
+            };
+            let manufactured = {
+                // Rag/wood paper milled where there is dense settlement (a
+                // "civilisation" good): keyed on habitability, climate-independent.
+                smoothstep(0.50, 0.80, buf.habitability[i]) * 0.95
+            };
+            papyrus.max(bamboo).max(manufactured)
+        }
+        GOOD_CERAMICS => {
+            // Porcelain / fine pottery — a *manufactured* good of skilled cities
+            // sitting on good potter's clay (alluvial, well-watered lowland).
+            // Climate-independent; driven by habitability (settlement skill) and
+            // a clay proxy (fertility on low ground).
+            let skill = smoothstep(0.45, 0.78, buf.habitability[i]);
+            let clay = (0.30 + 0.70 * fert) * (1.0 - smoothstep(0.35, 0.60, elev));
+            skill * clay
+        }
+        GOOD_GLASSWARE => {
+            // Glass — skilled cities working silica sand (coastal dunes / arid
+            // quartz sand) with ample fuel. Settlement-driven + a sand proxy
+            // (warm coast or desert margin).
+            let skill = smoothstep(0.45, 0.78, buf.habitability[i]);
+            let sand = if coast_near { 1.0 }
+                else { match k { BWH | BSH | BWK | BSK => 0.7, _ => 0.3 } };
+            skill * sand * (1.0 - smoothstep(0.45, 0.7, elev))
+        }
+        GOOD_TOBACCO => {
+            // Warm, humid-subtropical / tropical-savanna cash crop on fertile
+            // low ground. Seeded → one New-World-style plantation homeland.
+            let clim = match k { CFA | CWA => 1.0, AW | CSA => 0.5, BSH => 0.3, _ => 0.0 };
+            clim * smoothstep(16.0, 22.0, t) * band(p, 700.0, 1600.0, 500.0)
+                * (1.0 - smoothstep(0.35, 0.6, elev)) * (0.4 + 0.6 * fert)
+        }
+        GOOD_INDIGO => {
+            // Indigo dye plant — hot, wet tropical/subtropical lowland. A LAND dye
+            // distinct from the marine murex "dyes". Seeded.
+            let clim = match k { AW | CWA => 1.0, AM | AF | CFA => 0.5, BSH => 0.3, _ => 0.0 };
+            clim * smoothstep(19.0, 26.0, t) * band(p, 800.0, 2000.0, 600.0)
+                * (1.0 - smoothstep(0.35, 0.6, elev)) * (0.4 + 0.6 * fert)
+        }
+        GOOD_DATES => {
+            // Date palms — hot desert OASIS fruit: hot arid climate but locally
+            // watered (fertility = oasis/wadi). Seeded.
+            let clim = match k { BWH => 1.0, BSH => 0.7, BWK | BSK => 0.3, _ => 0.0 };
+            let oasis = 0.25 + 0.75 * fert;
+            clim * smoothstep(18.0, 26.0, t) * band(abs_lat, 12.0, 34.0, 8.0)
+                * oasis * (1.0 - smoothstep(0.4, 0.65, elev))
+        }
         // ── Marine goods (no walls; the score envelope itself bounds the belt) ──
         GOOD_STOCKFISH => {
+            // Stockfish (dried cod) comes off the rich NORTHERN fishing banks —
+            // it must track the actual fishery field, not blanket every cold
+            // shelf. The hard fishery gate (no 0.3 floor) confines it to genuine
+            // grounds (Lofoten / Grand Banks / North Sea style).
             if !sea_coastal { return 0.0; }
-            let shelf = if buf.is_shelf[i] == 1 { 1.0 } else { 0.4 };
-            shelf * (1.0 - smoothstep(2.0, 12.0, t)) * (0.3 + 0.7 * buf.fishery[i].clamp(0.0, 1.0))
-                * band(abs_lat, 45.0, 70.0, 12.0)
+            let shelf = if buf.is_shelf[i] == 1 { 1.0 } else { 0.35 };
+            let cold = 1.0 - smoothstep(2.0, 12.0, t);
+            let fish = smoothstep(0.20, 0.55, buf.fishery[i].clamp(0.0, 1.0));
+            shelf * cold * fish * band(abs_lat, 45.0, 72.0, 12.0)
         }
         GOOD_AMBER => {
             if !sea_coastal { return 0.0; }
@@ -898,35 +1058,34 @@ fn localize_good(
     out
 }
 
-/// Place a good as a handful of discrete, highland-locked deposits scattered
-/// worldwide (global — not climate-bound). Deterministic from the world seed.
-/// Used for gemstones and the metals (copper/tin/gold), each with its own
-/// `min_elev` and `salt`. `count` deposits are seeded on terrain ≥ `min_elev`,
-/// spaced apart, and each grown into a small blob of nearby highland cells.
-fn place_deposits(buf: &WorldBuffer, seed: u64, count: u32, min_elev: f32, salt: u64) -> Vec<u8> {
+/// Place a good as scattered **sporadic deposits**: `count` points seeded on the
+/// candidate field `cand` (where `cand[i] >= thresh`), spaced apart and ranked by
+/// a deterministic weighted-random key. Each deposit is **mostly a single cell**
+/// (the abundance = its candidate weight); only occasionally (~25%) does a point
+/// grow into a small 1–2-cell rich cluster. Used for gems/metals (highland `cand`)
+/// and the suitability deposits salt/iron (climate/relief `cand`).
+fn place_deposits(buf: &WorldBuffer, seed: u64, count: u32, salt: u64, cand: &[f32], thresh: f32) -> Vec<u8> {
     let w = buf.width as i32;
     let h = buf.height as i32;
     let n = buf.total();
     let mut out = vec![0u8; n];
     if count == 0 { return out; }
 
-    // Candidate highland cells, ranked by a deterministic weighted-random key so
-    // the same seed always picks the same deposits.
+    // Candidate cells (above threshold), ranked by a deterministic weighted-random
+    // key so the same seed always picks the same deposits.
     let gs = seed ^ salt;
     let mut cands: Vec<(usize, f32)> = Vec::new();
     for i in 0..n {
-        if buf.terrain[i] == 1 && buf.elevation[i] >= min_elev {
-            // Higher, more rugged ground is a touch more likely.
-            let weight = (buf.elevation[i] - min_elev) + 0.15;
-            let key = weight * hash01(gs ^ (i as u64).wrapping_mul(0x100000001B3));
+        if cand[i] >= thresh {
+            let key = (cand[i] + 0.05) * hash01(gs ^ (i as u64).wrapping_mul(0x100000001B3));
             cands.push((i, key));
         }
     }
     if cands.is_empty() { return out; }
     cands.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    let min_sep = ((w as f32) * 0.06).max(6.0) as i32; // spread deposits out
-    let radius = ((w as f32) * 0.006).round().clamp(2.0, 14.0) as i32; // small blob
+    // Sporadic but spaced, so deposits dot the map rather than clumping.
+    let min_sep = ((w as f32) * 0.025).max(3.0) as i32;
     let wrap_dx = |a: i32, b: i32| -> i32 {
         let mut d = (a - b).abs();
         if d > w / 2 { d = w - d; }
@@ -946,19 +1105,27 @@ fn place_deposits(buf: &WorldBuffer, seed: u64, count: u32, min_elev: f32, salt:
         if !far { continue; }
         centers.push((cx, cy));
 
-        // Grow a small deposit blob of highland cells around the centre.
-        for dy in -radius..=radius {
-            for dx in -radius..=radius {
-                let d2 = (dx * dx + dy * dy) as f32;
-                if d2 > (radius * radius) as f32 { continue; }
-                let ny = cy + dy;
-                if ny < 0 || ny >= h { continue; }
-                let nx = buf.wrap_x(cx + dx);
-                let ni = buf.idx(nx, ny as u32);
-                if buf.terrain[ni] != 1 || buf.elevation[ni] < min_elev * 0.85 { continue; }
-                let falloff = 1.0 - (d2.sqrt() / (radius as f32 + 1.0));
-                let v = (0.55 + 0.45 * falloff).clamp(0.0, 1.0);
-                if q(v) > out[ni] { out[ni] = q(v); }
+        // Single-cell deposit; richer candidates read brighter (abundance).
+        let base_v = (0.55 + 0.45 * cand[i].clamp(0.0, 1.0)).clamp(0.0, 1.0);
+        if q(base_v) > out[i] { out[i] = q(base_v); }
+
+        // Rarely, a sporadic point is a richer multi-cell deposit (a few cells).
+        let roll = hash01(gs ^ 0x0D15EA5E ^ (i as u64).wrapping_mul(0x2545F4914F6CDD1D));
+        if roll < 0.25 {
+            let radius = if roll < 0.08 { 2 } else { 1 };
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    if dx == 0 && dy == 0 { continue; }
+                    let d2 = (dx * dx + dy * dy) as f32;
+                    if d2 > (radius * radius) as f32 + 0.1 { continue; }
+                    let ny = cy + dy;
+                    if ny < 0 || ny >= h { continue; }
+                    let nx = buf.wrap_x(cx + dx);
+                    let ni = buf.idx(nx, ny as u32);
+                    if cand[ni] < thresh * 0.6 { continue; }
+                    let v = (0.45 + 0.4 * cand[ni].clamp(0.0, 1.0)).clamp(0.0, 1.0);
+                    if q(v) > out[ni] { out[ni] = q(v); }
+                }
             }
         }
     }

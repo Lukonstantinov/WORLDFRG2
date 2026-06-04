@@ -170,22 +170,27 @@ export async function getCurrentStreamlines(): Promise<Streamline[]> {
 export interface TradeRoute {
   points: [number, number][];
   kind: number; // 0 = overland caravan, 1 = maritime, 2 = river
+  minor: boolean; // lesser town's single connector road (drawn thinner)
 }
 
 /** Compute trade routes between the current settlements (pass the store list).
  *  Rivers feed inland routes; `reach`/`maxCrossing` cap open-water crossings
- *  (reach: 0 = global, 1 = coastal+short, 2 = continental only). */
+ *  (reach: 0 = global, 1 = coastal+short, 2 = continental only). `desertRoutes`
+ *  is the Silk-Road mode: caravans prefer overland steppe corridors & deserts
+ *  when seas are dangerous. */
 export async function computeTradeRoutes(
   settlements: { x: number; y: number; score: number }[],
   rivers: { points: [number, number][] }[],
   reach: number,
   maxCrossing: number,
+  desertRoutes: boolean,
 ): Promise<TradeRoute[]> {
   return invoke("compute_trade_routes", {
     settlementsJson: JSON.stringify(settlements),
     riversJson: JSON.stringify(rivers),
     reach,
     maxCrossing,
+    desertRoutes,
   });
 }
 
@@ -222,6 +227,24 @@ export async function computeReefZones(): Promise<SharkZone[]> {
   return invoke("compute_reef_zones");
 }
 
+export interface OverlaysResult {
+  vectors: OverlayVectors;
+  streamlines: Streamline[];
+  fishery_banks: FisheryBank[];
+  shark_zones: SharkZone[];
+  shipworm_zones: SharkZone[];
+  reef_zones: SharkZone[];
+  good_regions: GoodRegion[];
+}
+
+/** One-shot fetch of the *static* map overlays (wind/current vectors +
+ *  streamlines, fishery banks, shark/shipworm/reef zones, trade-good regions) in
+ *  a single IPC round-trip backed by one shared tile-cache read. Storm zones are
+ *  fetched separately (`computeStormZones`) because they depend on the month. */
+export async function computeOverlays(): Promise<OverlaysResult> {
+  return invoke("compute_overlays");
+}
+
 // ── Trade-good library (editable specs; per-world + global) ──
 /** The shipped 30-good defaults (for "reset to default"). */
 export async function defaultGoods(): Promise<GoodSpec[]> {
@@ -255,12 +278,14 @@ export async function computeTradeMatrix(
   rivers: { points: [number, number][] }[],
   reach: number,
   maxCrossing: number,
+  desertRoutes: boolean,
 ): Promise<TradeMatrix> {
   return invoke("compute_trade_matrix", {
     settlementsJson: JSON.stringify(settlements),
     riversJson: JSON.stringify(rivers),
     reach,
     maxCrossing,
+    desertRoutes,
   });
 }
 
@@ -270,12 +295,14 @@ export async function computePolitical(
   rivers: { points: [number, number][] }[],
   reach: number,
   maxCrossing: number,
+  desertRoutes: boolean,
 ): Promise<PoliticalCenter[]> {
   return invoke("compute_political", {
     settlementsJson: JSON.stringify(settlements),
     riversJson: JSON.stringify(rivers),
     reach,
     maxCrossing,
+    desertRoutes,
   });
 }
 

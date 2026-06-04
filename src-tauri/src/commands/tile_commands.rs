@@ -1,6 +1,7 @@
 use serde::Serialize;
 use tauri::State;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use rayon::prelude::*;
 use crate::db::{WorldDb, tile_store};
 use crate::render::tile_image;
 use crate::tile::cell::TileData;
@@ -21,28 +22,43 @@ pub fn get_tiles(
     lod: i32,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<TileResponse>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut results = Vec::new();
+    // Fetch the compressed blobs + versions under the lock (cheap memcpy), then
+    // release it so the CPU-bound decompress → render → base64 runs in parallel
+    // off-lock instead of serializing every tile behind the DB mutex.
+    let raw: Vec<(i32, i32, i64, Option<Vec<u8>>)> = {
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        tiles
+            .iter()
+            .map(|&(tx, ty)| {
+                let bv = tile_store::load_blob_with_version(&conn, tx, ty, lod)
+                    .map_err(|e| e.to_string())?;
+                Ok(match bv {
+                    Some((version, blob)) => (tx, ty, version, Some(blob)),
+                    None => (tx, ty, 0, None),
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?
+    };
 
-    for &(tx, ty) in &tiles {
-        let tile = tile_store::load_tile(&conn, tx, ty, lod)
-            .map_err(|e| e.to_string())?
-            .unwrap_or_else(TileData::new_sea);
-
-        let version = tile_store::get_tile_version(&conn, tx, ty, lod)
-            .map_err(|e| e.to_string())?;
-
-        for layer in &layers {
-            let rgba_bytes = tile_image::render_tile(&tile, layer);
-            results.push(TileResponse {
-                tx,
-                ty,
-                layer: layer.clone(),
-                version,
-                rgba: BASE64.encode(&rgba_bytes),
-            });
-        }
-    }
+    let results = raw
+        .par_iter()
+        .flat_map_iter(|(tx, ty, version, blob)| {
+            let tile = match blob {
+                Some(b) => TileData::decompress(b),
+                None => TileData::new_sea(),
+            };
+            layers.iter().map(move |layer| {
+                let rgba_bytes = tile_image::render_tile(&tile, layer);
+                TileResponse {
+                    tx: *tx,
+                    ty: *ty,
+                    layer: layer.clone(),
+                    version: *version,
+                    rgba: BASE64.encode(&rgba_bytes),
+                }
+            }).collect::<Vec<_>>()
+        })
+        .collect();
 
     Ok(results)
 }

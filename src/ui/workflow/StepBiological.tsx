@@ -103,6 +103,15 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
         </>
       )}
 
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "#8aa0c0", marginTop: 4, cursor: "pointer" }}>
+        <input type="checkbox" checked={bioParams.desertRoutes}
+          onChange={(e) => setBioParams({ desertRoutes: e.target.checked })} />
+        Silk Road caravans (overland steppe &amp; desert)
+      </label>
+      <div style={{ fontSize: 9, color: "#5a7090", marginTop: 1 }}>
+        Trade threads overland steppe corridors and deserts (Silk-Road style) when storms/reefs make the seas perilous.
+      </div>
+
       <button onClick={handleGenerate} disabled={simRunning || !step6Done || !step7Done} style={{ ...genBtn, marginTop: 2 }}>
         Generate Biological Layer
       </button>

@@ -8,7 +8,7 @@ export interface GoodDef {
 }
 
 export const GOOD_DEFS: GoodDef[] = [
-  { name: "silk", label: "Silk", emoji: "\u{1F9F5}", color: "#d97fb0" },
+  { name: "silk", label: "Silk", emoji: "\u{1F41B}", color: "#d97fb0" },
   { name: "wine", label: "Wine", emoji: "\u{1F377}", color: "#9b2d4f" },
   { name: "oliveoil", label: "Olive Oil", emoji: "\u{1FAD2}", color: "#8ea33a" },
   { name: "sugar", label: "Sugar", emoji: "\u{1F36C}", color: "#e8d8a0" },
@@ -38,9 +38,56 @@ export const GOOD_DEFS: GoodDef[] = [
   { name: "copper", label: "Copper", emoji: "\u{1F7E4}", color: "#b06a3a" },
   { name: "tin", label: "Tin", emoji: "\u{26AA}", color: "#b8bcc0" },
   { name: "gold", label: "Gold", emoji: "\u{1F7E1}", color: "#d4af37" },
+  { name: "cloves", label: "Cloves", emoji: "\u{1F33F}", color: "#7a3b1e" },
+  { name: "pepper", label: "Pepper", emoji: "\u{26AB}", color: "#2f2f33" },
+  { name: "paper", label: "Paper", emoji: "\u{1F4DC}", color: "#e8e0c8" },
+  { name: "ceramics", label: "Ceramics", emoji: "\u{1F3FA}", color: "#5a86c8" },
+  { name: "glassware", label: "Glassware", emoji: "\u{1FA9F}", color: "#9fd8d0" },
+  { name: "tobacco", label: "Tobacco", emoji: "\u{1F6AC}", color: "#8a6a3a" },
+  { name: "indigo", label: "Indigo", emoji: "\u{1F7E6}", color: "#3a4fb0" },
+  { name: "dates", label: "Dates", emoji: "\u{1F33D}", color: "#c08a3a" },
 ];
 
 /** Overlay-visibility key for a good's region toggle. */
 export function goodOverlayKey(name: string): string {
   return `good_${name}`;
+}
+
+/** A multi-type good's per-subtype display (label / colour / optional icon / a
+ *  relative trade `value` 0..1 used for InfoPanel and as a prestige hint).
+ *  Index = the backend subtype id returned in GoodRegion.subtypes. */
+export interface SubtypeDef { label: string; color: string; icon?: string; value: number; }
+
+/** Grain species — the "wheat" overlay is the world's staple-grain land, tinted
+ *  by which cereal wins each cell's climate. Because each species owns a distinct
+ *  temperature/moisture/altitude niche, they naturally fall on different
+ *  continents (cold north → rye/barley; hot wet equator → rice; hot dry →
+ *  millet/sorghum; temperate cores → wheat/maize/oats). `value` ≈ market price. */
+export const GRAIN_SUBTYPES: SubtypeDef[] = [
+  { label: "Wheat",   color: "#d9b94a", value: 0.85 }, // 0 temperate / Mediterranean (prime bread grain)
+  { label: "Rice",    color: "#7fcf6a", value: 0.80 }, // 1 hot & wet paddy (high-yield staple)
+  { label: "Maize",   color: "#e8c24a", value: 0.55 }, // 2 warm & moist
+  { label: "Millet",  color: "#c98a3a", value: 0.40 }, // 3 hot semi-arid
+  { label: "Barley",  color: "#bcae6a", value: 0.45 }, // 4 cool / high (also brewing)
+  { label: "Rye",     color: "#9c8a5a", value: 0.45 }, // 5 cold humid-continental
+  { label: "Oats",    color: "#cfc27a", value: 0.40 }, // 6 cool & wet oceanic (fodder)
+  { label: "Sorghum", color: "#b86a3a", value: 0.38 }, // 7 very hot & arid
+];
+
+/** Paper sources (distinct icons so each is distinguishable). `value` rises with
+ *  craft refinement — manufactured mill paper and parchment are dearer than reed
+ *  papyrus. */
+export const PAPER_SUBTYPES: SubtypeDef[] = [
+  { label: "Papyrus",      color: "#c9c089", icon: "\u{1F4DC}", value: 0.40 }, // 0 reed / delta
+  { label: "Bamboo paper", color: "#9bbf7a", icon: "\u{1F38B}", value: 0.55 }, // 1 subtropical pulp
+  { label: "Mill paper",   color: "#e8e0c8", icon: "\u{1F4C4}", value: 0.75 }, // 2 manufactured at cities
+  { label: "Parchment",    color: "#e2cfa6", icon: "\u{1F411}", value: 0.85 }, // 3 cold/high pastoral hide (prestige)
+  { label: "Rice paper",   color: "#cfe6b0", icon: "\u{1F35A}", value: 0.50 }, // 4 hot wet east-monsoon fibre
+];
+
+/** Per-good subtype palette, keyed by good name. */
+export function goodSubtypes(name: string): SubtypeDef[] | null {
+  if (name === "wheat") return GRAIN_SUBTYPES;
+  if (name === "paper") return PAPER_SUBTYPES;
+  return null;
 }

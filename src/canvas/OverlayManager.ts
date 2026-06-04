@@ -1,13 +1,21 @@
 import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter } from "../types";
-import { GOOD_DEFS, goodOverlayKey } from "../goods";
+import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "../goods";
+import { drawGoodIcon } from "./goodIcons";
+
+/** Per-cell abundance → one of 4 discrete quality tiers (1 negligible … 4 very
+ *  high). The cell's fill opacity steps with the tier so richer deposits read as
+ *  more solid and poor deposits as faint. */
+const TIER_ALPHA = [0, 0.32, 0.55, 0.78, 1.0]; // index 1..4
 
 const GOOD_BY_NAME = new Map(GOOD_DEFS.map((g) => [g.name, g]));
 const SHARK_COLOR = "#e04040";
 const SHIPWORM_COLOR = "#b98a4a";
 const STORM_COLOR = "#c050d0";
 const REEF_COLOR = "#30c0b0";
-const TRADE_TRUNK = "#e0c060"; // bundled commodity-flow trunk (amber)
-const POLITICAL_COLOR = "#d65fd0"; // influence disc (magenta)
+const TRADE_TRUNK = "#e0c060"; // major bundled commodity-flow trunk (amber)
+const TRADE_TRUNK_MINOR = "#b8a878"; // minor/low-volume trunk (muted amber)
+const POLITICAL_COLOR = "#d65fd0"; // trade-hub marker (magenta)
+const STAR_COLOR = "#ffd24a"; // power-tier stars on major hubs (gold)
 
 const RIVER_COLOR = "#2288cc";
 const LAKE_COLOR = "rgba(51, 153, 221, 0.7)";
@@ -66,6 +74,12 @@ export class OverlayManager {
 
   private currentScale = 1;
   private worldW = 0;
+  /** Cached region-mask boundary edges, keyed by the cell array of each region/
+   *  zone (replaced wholesale on each data fetch, so the WeakMap auto-evicts).
+   *  Each entry is a flat [x1,y1,x2,y2, …] list — built once, not per frame. */
+  private edgeCache = new WeakMap<object, number[]>();
+  /** Cached subtype-split edges, keyed by each region's `subtypes` array. */
+  private subtypeEdgeCache = new WeakMap<object, number[]>();
 
   drawRivers(rivers: RiverData[]) { this.rivers = rivers; }
   drawLakes(lakes: LakeData[]) { this.lakes = lakes; }
@@ -240,7 +254,10 @@ export class OverlayManager {
         const m = this.goodMeta?.get(r.good);
         const color = m?.color ?? def?.color ?? "#cccccc";
         const emoji = m?.icon ?? def?.emoji ?? "";
-        this.renderRegionMask(ctx, r.cells, r.cell_size, color, emoji, r.x, r.y, 0.16 + 0.18 * Math.min(1, r.score), r.sublabel);
+        // Multi-type goods (grain / paper) tint by per-cell subtype.
+        const sub = goodSubtypes(r.good);
+        const subtypes = sub && r.subtypes.length === r.cells.length ? r.subtypes : undefined;
+        this.renderRegionMask(ctx, r.cells, r.cell_size, color, emoji, r.x, r.y, 0.16 + 0.18 * Math.min(1, r.score), r.sublabel, r.values, subtypes, sub ?? undefined, r.good);
       }
     }
 
@@ -381,10 +398,13 @@ export class OverlayManager {
     if (pts.length < 2) return;
 
     const color = route.kind === 1 ? TRADE_SEA : route.kind === 2 ? TRADE_RIVER : TRADE_LAND;
-    const lineWidth = Math.max(0.5, 1.6 / Math.sqrt(this.currentScale));
+    // Minor connector roads (a lesser town's single link) are drawn thinner and
+    // fainter than the major inter-hub routes, so every settlement is on the
+    // network without the small roads overpowering the trunks.
+    const lineWidth = Math.max(0.4, (route.minor ? 0.8 : 1.6) / Math.sqrt(this.currentScale));
     const dash = Math.max(1.5, 4 / Math.sqrt(this.currentScale));
 
-    ctx.globalAlpha = 0.8;
+    ctx.globalAlpha = route.minor ? 0.5 : 0.8;
     ctx.strokeStyle = color;
     ctx.lineWidth = lineWidth;
     ctx.lineCap = "round";
@@ -405,51 +425,151 @@ export class OverlayManager {
     ctx.globalAlpha = 1;
   }
 
+  /** Boundary edges of a coarse-cell mask (only edges whose neighbour is outside
+   *  the set), as a flat [x1,y1,x2,y2,…] list. Computed once per region and cached
+   *  on the cell array (WeakMap), so the per-frame string-Set rebuild is gone. */
+  private maskEdges(cells: [number, number][], cellSize: number): number[] {
+    const cached = this.edgeCache.get(cells);
+    if (cached) return cached;
+    const set = new Set(cells.map(([cx, cy]) => `${cx},${cy}`));
+    const e: number[] = [];
+    for (const [cx, cy] of cells) {
+      if (!set.has(`${cx},${cy - cellSize}`)) e.push(cx, cy, cx + cellSize, cy);
+      if (!set.has(`${cx},${cy + cellSize}`)) e.push(cx, cy + cellSize, cx + cellSize, cy + cellSize);
+      if (!set.has(`${cx - cellSize},${cy}`)) e.push(cx, cy, cx, cy + cellSize);
+      if (!set.has(`${cx + cellSize},${cy}`)) e.push(cx + cellSize, cy, cx + cellSize, cy + cellSize);
+    }
+    this.edgeCache.set(cells, e);
+    return e;
+  }
+
   /** A filled cell-mask AREA (the real distribution shape) with a boundary
-   *  outline and a centered emoji glyph (shark / trade-good belt). */
+   *  outline and a centered emoji glyph (shark / trade-good belt). When `values`
+   *  is given (per-cell 0..255 abundance) each cell is shaded by its richness. When
+   *  `subtypes` + `subPalette` are given (grain species / paper sources), each cell
+   *  is tinted by its subtype, boundaries between differing subtypes are drawn (the
+   *  "split"), and per-subtype icons/labels are placed at each subtype's centroid. */
   private renderRegionMask(
     ctx: CanvasRenderingContext2D,
     cells: [number, number][], cellSize: number, color: string, emoji: string,
-    lx: number, ly: number, alpha: number, sublabel: string = "",
+    lx: number, ly: number, alpha: number, sublabel: string = "", values?: number[],
+    subtypes?: number[], subPalette?: SubtypeDef[], iconName?: string,
   ) {
     if (cells.length === 0) return;
+    const hasSub = !!(subtypes && subPalette && subtypes.length === cells.length);
+    const hasVals = !!(values && values.length === cells.length);
 
-    // Fill every coarse cell.
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = color;
-    for (const [cx, cy] of cells) ctx.fillRect(cx, cy, cellSize, cellSize);
+    // Fill every coarse cell — by subtype tint if present, else the good colour;
+    // opacity steps through 4 discrete quality tiers from per-cell abundance, so
+    // rich deposits read solid and negligible ones nearly transparent.
+    for (let i = 0; i < cells.length; i++) {
+      const [cx, cy] = cells[i];
+      ctx.fillStyle = hasSub ? (subPalette![subtypes![i]]?.color ?? color) : color;
+      if (hasVals) {
+        const tier = Math.min(4, Math.max(1, Math.ceil((values![i] / 255) * 4)));
+        ctx.globalAlpha = alpha * TIER_ALPHA[tier];
+      } else {
+        ctx.globalAlpha = alpha;
+      }
+      ctx.fillRect(cx, cy, cellSize, cellSize);
+    }
 
-    // Boundary outline: stroke only edges whose neighbour is outside the region.
-    const set = new Set(cells.map(([cx, cy]) => `${cx},${cy}`));
+    // Boundary outline from the precomputed edge list.
+    const edges = this.maskEdges(cells, cellSize);
     ctx.globalAlpha = Math.min(0.85, alpha + 0.4);
     ctx.strokeStyle = color;
     ctx.lineWidth = Math.max(0.4, 1.0 / Math.sqrt(this.currentScale));
     ctx.beginPath();
-    for (const [cx, cy] of cells) {
-      if (!set.has(`${cx},${cy - cellSize}`)) { ctx.moveTo(cx, cy); ctx.lineTo(cx + cellSize, cy); }
-      if (!set.has(`${cx},${cy + cellSize}`)) { ctx.moveTo(cx, cy + cellSize); ctx.lineTo(cx + cellSize, cy + cellSize); }
-      if (!set.has(`${cx - cellSize},${cy}`)) { ctx.moveTo(cx, cy); ctx.lineTo(cx, cy + cellSize); }
-      if (!set.has(`${cx + cellSize},${cy}`)) { ctx.moveTo(cx + cellSize, cy); ctx.lineTo(cx + cellSize, cy + cellSize); }
+    for (let i = 0; i < edges.length; i += 4) {
+      ctx.moveTo(edges[i], edges[i + 1]);
+      ctx.lineTo(edges[i + 2], edges[i + 3]);
     }
     ctx.stroke();
+
+    // Internal subtype splits: stroke edges between cells of differing subtype.
+    if (hasSub) {
+      const sEdges = this.subtypeEdges(cells, subtypes!, cellSize);
+      ctx.globalAlpha = 0.7;
+      ctx.strokeStyle = "rgba(20,16,10,0.8)";
+      ctx.lineWidth = Math.max(0.4, 1.2 / Math.sqrt(this.currentScale));
+      ctx.beginPath();
+      for (let i = 0; i < sEdges.length; i += 4) {
+        ctx.moveTo(sEdges[i], sEdges[i + 1]);
+        ctx.lineTo(sEdges[i + 2], sEdges[i + 3]);
+      }
+      ctx.stroke();
+    }
     ctx.globalAlpha = 1;
 
-    // Emoji at the label centroid (font in world space ⇒ ~constant screen px).
-    if (emoji) {
+    // Labels: per-subtype icons at each subtype's centroid (when the palette
+    // carries icons — paper), otherwise the single good emoji at the centroid.
+    if (hasSub && subPalette!.some((s) => s.icon)) {
+      const fs = Math.max(6, 14 / this.currentScale);
+      ctx.font = `${fs}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      // Centroid per present subtype.
+      const sums = new Map<number, { x: number; y: number; n: number }>();
+      for (let i = 0; i < cells.length; i++) {
+        const s = subtypes![i];
+        const e = sums.get(s) ?? { x: 0, y: 0, n: 0 };
+        e.x += cells[i][0]; e.y += cells[i][1]; e.n++;
+        sums.set(s, e);
+      }
+      for (const [s, e] of sums) {
+        const ic = subPalette![s]?.icon;
+        if (!ic || e.n < 2) continue;
+        ctx.fillText(ic, e.x / e.n + cellSize / 2, e.y / e.n + cellSize / 2);
+      }
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+    } else if (iconName) {
+      // Trade-good medallion (EU4-style vector roundel) at the region centroid.
+      const r = Math.max(4, 12 / this.currentScale);
+      drawGoodIcon(ctx, iconName, lx, ly, r, color, { sublabel });
+      if (sublabel) {
+        const ss = Math.max(5, 9 / this.currentScale);
+        ctx.font = `${ss}px serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineWidth = Math.max(0.6, 2 / this.currentScale);
+        ctx.strokeStyle = "rgba(0,0,0,0.7)";
+        ctx.strokeText(sublabel, lx, ly + r * 1.5);
+        ctx.fillStyle = "#f0e8d0";
+        ctx.fillText(sublabel, lx, ly + r * 1.5);
+        ctx.textAlign = "start";
+        ctx.textBaseline = "alphabetic";
+      }
+    } else if (emoji) {
+      // Hazard-zone glyph (shark / shipworm / storm / reef) — kept as an emoji.
       const fs = Math.max(6, 16 / this.currentScale);
       ctx.font = `${fs}px sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(emoji, lx, ly);
-      if (sublabel) {
-        const ss = Math.max(5, 9 / this.currentScale);
-        ctx.font = `${ss}px sans-serif`;
-        ctx.fillStyle = "#f0f0f0";
-        ctx.fillText(sublabel, lx, ly + fs * 0.85);
-      }
       ctx.textAlign = "start";
       ctx.textBaseline = "alphabetic";
     }
+  }
+
+  /** Edges between adjacent cells whose subtype differs (the species "split"
+   *  lines), cached per `subtypes` array. */
+  private subtypeEdges(cells: [number, number][], subtypes: number[], cellSize: number): number[] {
+    const cached = this.subtypeEdgeCache.get(subtypes);
+    if (cached) return cached;
+    const sub = new Map<string, number>();
+    for (let i = 0; i < cells.length; i++) sub.set(`${cells[i][0]},${cells[i][1]}`, subtypes[i]);
+    const e: number[] = [];
+    for (let i = 0; i < cells.length; i++) {
+      const [cx, cy] = cells[i];
+      const s = subtypes[i];
+      const right = sub.get(`${cx + cellSize},${cy}`);
+      const down = sub.get(`${cx},${cy + cellSize}`);
+      if (right !== undefined && right !== s) e.push(cx + cellSize, cy, cx + cellSize, cy + cellSize);
+      if (down !== undefined && down !== s) e.push(cx, cy + cellSize, cx + cellSize, cy + cellSize);
+    }
+    this.subtypeEdgeCache.set(subtypes, e);
+    return e;
   }
 
   /** Bundled commodity trunks: each routed coarse edge drawn with width ∝ the
@@ -459,10 +579,14 @@ export class OverlayManager {
     for (const t of this.tradeTrunks) maxVol = Math.max(maxVol, t.volume);
     if (maxVol <= 0) return;
 
-    ctx.globalAlpha = 0.7;
-    ctx.strokeStyle = TRADE_TRUNK;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
+    const dash = Math.max(1.5, 3.5 / Math.sqrt(this.currentScale));
+    // Two tiers so the main arteries stand out from the feeder routes: major
+    // corridors (high volume) are solid, bright and thick; minor ones are thin,
+    // muted and dashed. Each trunk carries a direction arrowhead (toward the
+    // consuming hub) and the major arteries are labelled (Spice Road / Silk Road).
+    const labels: { x: number; y: number; text: string }[] = [];
     for (const t of this.tradeTrunks) {
       const pts = t.points;
       if (pts.length < 2) continue;
@@ -470,34 +594,90 @@ export class OverlayManager {
       // Skip edges spanning the cylindrical wrap seam.
       if (this.worldW > 0 && Math.abs(a[0] - b[0]) > this.worldW / 2) continue;
       const norm = t.volume / maxVol;
-      ctx.lineWidth = Math.max(0.5, (0.6 + norm * 5.0) / Math.sqrt(this.currentScale));
+      const major = norm >= 0.45;
+      ctx.globalAlpha = major ? 0.85 : 0.5;
+      ctx.strokeStyle = major ? TRADE_TRUNK : TRADE_TRUNK_MINOR;
+      ctx.lineWidth = Math.max(
+        0.5,
+        (major ? 1.4 + norm * 5.0 : 0.5 + norm * 1.5) / Math.sqrt(this.currentScale),
+      );
+      ctx.setLineDash(major ? [] : [dash, dash]);
+      const ax = a[0] + 0.5, ay = a[1] + 0.5, bx = b[0] + 0.5, by = b[1] + 0.5;
       ctx.beginPath();
-      ctx.moveTo(a[0] + 0.5, a[1] + 0.5);
-      ctx.lineTo(b[0] + 0.5, b[1] + 0.5);
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
       ctx.stroke();
+
+      // Direction arrowhead at the consumer (b) end.
+      let dx = bx - ax, dy = by - ay;
+      const m = Math.hypot(dx, dy);
+      if (m > 0.001) {
+        dx /= m; dy /= m;
+        const hl = Math.max(2, (major ? 7 : 4) / Math.sqrt(this.currentScale));
+        const px = -dy, py = dx;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(bx, by);
+        ctx.lineTo(bx - dx * hl + px * hl * 0.5, by - dy * hl + py * hl * 0.5);
+        ctx.lineTo(bx - dx * hl - px * hl * 0.5, by - dy * hl - py * hl * 0.5);
+        ctx.closePath();
+        ctx.fillStyle = major ? TRADE_TRUNK : TRADE_TRUNK_MINOR;
+        ctx.fill();
+      }
+      if (t.road) labels.push({ x: (ax + bx) / 2, y: (ay + by) / 2, text: t.road });
+    }
+    ctx.setLineDash([]);
+
+    // Road names along the major arteries (drawn last so they sit on top).
+    if (labels.length > 0) {
+      const fs = Math.max(7, 13 / this.currentScale);
+      ctx.font = `${fs}px serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.globalAlpha = 0.95;
+      for (const l of labels) {
+        ctx.lineWidth = Math.max(1, 3 / this.currentScale);
+        ctx.strokeStyle = "rgba(0,0,0,0.75)";
+        ctx.strokeText(l.text, l.x, l.y);
+        ctx.fillStyle = "#f4e3b0";
+        ctx.fillText(l.text, l.x, l.y);
+      }
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
     }
     ctx.globalAlpha = 1;
   }
 
-  /** A political influence disc: radius ∝ trade power, brightest for the rank-0
-   *  powers, with a centre dot. */
+  /** A trade hub: a small marker dot plus a row of power-tier stars above it
+   *  (1..5 — major hubs like Venice/Genoa reach 5). No big influence disc. */
   private renderPoliticalCenter(ctx: CanvasRenderingContext2D, c: PoliticalCenter) {
-    const alpha = 0.10 + 0.22 * Math.min(1, c.power);
+    const x = c.x + 0.5;
+    const y = c.y + 0.5;
+    const r = Math.max(0.9, 2.4 / Math.sqrt(this.currentScale));
+
+    // Hub marker dot.
     ctx.beginPath();
-    ctx.arc(c.x + 0.5, c.y + 0.5, c.radius, 0, Math.PI * 2);
-    ctx.fillStyle = POLITICAL_COLOR;
-    ctx.globalAlpha = alpha;
-    ctx.fill();
-    ctx.globalAlpha = Math.min(0.85, alpha + 0.4);
-    ctx.strokeStyle = POLITICAL_COLOR;
-    ctx.lineWidth = Math.max(0.4, 1.0 / Math.sqrt(this.currentScale));
-    ctx.stroke();
-    // Centre marker.
-    ctx.beginPath();
-    ctx.arc(c.x + 0.5, c.y + 0.5, Math.max(0.8, 2.0 / Math.sqrt(this.currentScale)), 0, Math.PI * 2);
+    ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fillStyle = POLITICAL_COLOR;
     ctx.globalAlpha = 0.95;
     ctx.fill();
+    ctx.lineWidth = Math.max(0.3, 0.8 / Math.sqrt(this.currentScale));
+    ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    ctx.stroke();
+
+    // Power stars above the dot.
+    const stars = Math.max(0, Math.min(5, Math.round(c.stars)));
+    if (stars > 0) {
+      const fs = Math.max(5, 11 / this.currentScale);
+      ctx.font = `${fs}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      ctx.fillStyle = STAR_COLOR;
+      ctx.globalAlpha = 1;
+      ctx.fillText("★".repeat(stars), x, y - r - fs * 0.1);
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+    }
     ctx.globalAlpha = 1;
   }
 

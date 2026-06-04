@@ -38,20 +38,32 @@ export class TileManager {
   private cache = new Map<string, CachedTile>();
   private maxCached = 2000;
   private loading = new Set<string>();
+  /** Layer of the most recently requested tiles — what `draw` blits. */
+  private currentLayer = "";
 
-  private key(tx: number, ty: number): string {
-    return `${tx},${ty}`;
+  /** Cache key includes the layer, so switching layers (and back) reuses the
+   *  already-rendered tiles instead of refetching + re-rendering everything. */
+  private key(layer: string, tx: number, ty: number): string {
+    return `${layer}|${tx},${ty}`;
   }
 
-  /** Draw all cached tiles to a 2D context, applying viewport transform */
-  draw(ctx: CanvasRenderingContext2D, vpX: number, vpY: number, vpScale: number) {
+  /** Draw the cached tiles of the current layer overlapping the visible range.
+   *  Only the on-screen tiles are blitted (the cache may hold up to `maxCached`),
+   *  so pan/zoom cost scales with the viewport, not the whole cache. */
+  draw(
+    ctx: CanvasRenderingContext2D,
+    range: { txMin: number; txMax: number; tyMin: number; tyMax: number },
+  ) {
     ctx.imageSmoothingEnabled = false;
-    for (const tile of this.cache.values()) {
-      ctx.drawImage(
-        tile.img,
-        tile.tx * TILE_SIZE,
-        tile.ty * TILE_SIZE,
-      );
+    const now = Date.now();
+    const layer = this.currentLayer;
+    for (let ty = range.tyMin; ty <= range.tyMax; ty++) {
+      for (let tx = range.txMin; tx <= range.txMax; tx++) {
+        const tile = this.cache.get(this.key(layer, tx, ty));
+        if (!tile) continue;
+        ctx.drawImage(tile.img, tx * TILE_SIZE, ty * TILE_SIZE);
+        tile.lastUsed = now; // keep visible tiles hot for LRU eviction
+      }
     }
   }
 
@@ -71,10 +83,13 @@ export class TileManager {
 
     if (cTxMin > cTxMax || cTyMin > cTyMax) return;
 
+    // Tiles are cached per layer; record which layer `draw` should now show.
+    this.currentLayer = layer;
+
     const needed: [number, number][] = [];
     for (let ty = cTyMin; ty <= cTyMax; ty++) {
       for (let tx = cTxMin; tx <= cTxMax; tx++) {
-        const k = this.key(tx, ty);
+        const k = this.key(layer, tx, ty);
         if (!this.cache.has(k) && !this.loading.has(k)) {
           needed.push([tx, ty]);
           this.loading.add(k);
@@ -93,7 +108,7 @@ export class TileManager {
       );
 
       for (const resp of responses) {
-        const k = this.key(resp.tx, resp.ty);
+        const k = this.key(layer, resp.tx, resp.ty);
         this.loading.delete(k);
         this.cache.delete(k);
 
@@ -108,7 +123,7 @@ export class TileManager {
       }
     } catch (err) {
       for (const [tx, ty] of needed) {
-        this.loading.delete(this.key(tx, ty));
+        this.loading.delete(this.key(layer, tx, ty));
       }
       console.error("Failed to load tiles:", err);
     }
@@ -116,10 +131,14 @@ export class TileManager {
     this.evict();
   }
 
-  /** Invalidate specific tiles (e.g., after painting) */
+  /** Invalidate specific tiles (e.g., after painting) across ALL cached layers,
+   *  since the underlying cell data — not just the active layer's render —
+   *  changed. */
   invalidate(tiles: [number, number][]) {
-    for (const [tx, ty] of tiles) {
-      this.cache.delete(this.key(tx, ty));
+    const suffixes = new Set(tiles.map(([tx, ty]) => `|${tx},${ty}`));
+    for (const k of this.cache.keys()) {
+      const bar = k.indexOf("|");
+      if (bar >= 0 && suffixes.has(k.slice(bar))) this.cache.delete(k);
     }
   }
 

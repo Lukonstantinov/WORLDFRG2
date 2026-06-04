@@ -38,7 +38,7 @@ const BASE_PRECIPITATION: f32 = 800.0;
 
 // Per-packet heading fan-out (radians) so the discrete wind belts don't lay
 // down identical straight diagonal rays.
-const MEANDER_TURN: f32 = 0.6;
+const MEANDER_TURN: f32 = 0.85;
 
 // Earth's circumference (km) — used to translate moisture-decay distances
 // expressed in real km into a per-cell decay that is independent of grid
@@ -356,7 +356,11 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
             // decorrelates the rays while the straight path still carries
             // moisture deep inland (an accumulating per-step turn curved packets
             // back to sea and starved interiors → runaway deserts).
-            let off = fbm2(x as f32 / 9.0, y as f32 / 9.0, 5237) * MEANDER_TURN;
+            // High-frequency per-emitter offset: at a low frequency neighbouring
+            // ocean cells share an offset and lay down PARALLEL rays (the visible
+            // diagonal banding). Decorrelating it cell-to-cell makes adjacent rays
+            // fan apart so the multi-pass blur below evens them into a smooth field.
+            let off = fbm2(x as f32 / 3.5, y as f32 / 3.5, 5237) * MEANDER_TURN;
             let (so, co) = off.sin_cos();
             let adx = ndx * co - ndy * so;
             let ady = ndx * so + ndy * co;
@@ -406,9 +410,15 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
             // Orographic uplift / rain shadow.
             moisture *= orographic_multiplier(buf, x, y, buf.wind_vx[idx], buf.wind_vy[idx]);
 
-            // Coastal drying.
+            // Coastal drying. Cold-current "fog deserts" (Atacama / Namib / coastal
+            // Peru) are a SUBTROPICAL phenomenon: a cold current under the sinking
+            // subtropical high. Above ~38° a cold current instead gives a cool,
+            // WET maritime coast (Pacific NW, Patagonia), so fade the drying out
+            // between 30° and 40° rather than parching high-latitude coasts.
             if cold_coast[idx] {
-                moisture *= COLD_COAST_DRYING;
+                let subtrop = ((40.0 - abs_lat) / 10.0).clamp(0.0, 1.0); // 1 ≤30°, 0 ≥40°
+                let dry = COLD_COAST_DRYING + (1.0 - COLD_COAST_DRYING) * (1.0 - subtrop);
+                moisture *= dry;
             } else if buf.distance_to_ocean[idx] < 0.02 {
                 // Upwelling-adjacent coasts (cool shelf water) dry a little.
                 let shelf_adj = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
@@ -455,7 +465,7 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
     // left those stripes; several passes of an isotropic average dissolve the
     // directional banding while keeping the large-scale wet-coast / dry-interior
     // gradient and orographic contrasts.
-    const BLUR_PASSES: u32 = 7;
+    const BLUR_PASSES: u32 = 12;
     let mut a = precip;
     let mut b = vec![0.0f32; n];
     for _ in 0..BLUR_PASSES {

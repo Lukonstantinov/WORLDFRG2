@@ -1,4 +1,5 @@
 use rusqlite::Connection;
+use rayon::prelude::*;
 use crate::db::{tile_store, metadata};
 use crate::tile::coords::TILE_SIZE;
 use crate::tile::cell::{TileData, GOODS_COUNT};
@@ -135,11 +136,30 @@ impl WorldBuffer {
             reef_risk: vec![0; total],
         };
 
+        // Fetch every tile's compressed blob serially (cheap memcpy under the
+        // lock), decompress them in parallel with rayon (the actual cost), then
+        // scatter into the flat arrays serially.
+        let mut blobs: Vec<Option<Vec<u8>>> = Vec::with_capacity((tiles_x * tiles_y) as usize);
         for ty in 0..tiles_y as i32 {
             for tx in 0..tiles_x as i32 {
-                let tile = tile_store::load_tile(conn, tx, ty, 0)
-                    .map_err(|e| e.to_string())?
-                    .unwrap_or_else(TileData::new_sea);
+                let bv = tile_store::load_blob_with_version(conn, tx, ty, 0)
+                    .map_err(|e| e.to_string())?;
+                blobs.push(bv.map(|(_, b)| b));
+            }
+        }
+        let tiles: Vec<TileData> = blobs
+            .par_iter()
+            .map(|b| match b {
+                Some(blob) => TileData::decompress(blob),
+                None => TileData::new_sea(),
+            })
+            .collect();
+
+        let mut tile_idx = 0usize;
+        for ty in 0..tiles_y as i32 {
+            for tx in 0..tiles_x as i32 {
+                let tile = &tiles[tile_idx];
+                tile_idx += 1;
 
                 // Grow the buffer's good count to fit this tile (a world may carry
                 // more than the built-in GOODS_COUNT goods).
@@ -195,14 +215,17 @@ impl WorldBuffer {
 
     /// Save all tiles back to the database, with undo support.
     pub fn save(&self, conn: &Connection, label: &str) -> Result<Vec<(i32, i32)>, String> {
-        // Save old states for undo
+        // Save old states for undo. Snapshot the *already-compressed* blobs
+        // straight from the DB (undo stores compressed bytes anyway), avoiding a
+        // needless decompress→recompress of every tile on each sim step / stroke.
         let mut old_states: Vec<(i32, i32, Vec<u8>)> = Vec::new();
         for ty in 0..self.tiles_y as i32 {
             for tx in 0..self.tiles_x as i32 {
-                let old = tile_store::load_tile(conn, tx, ty, 0)
+                let blob = tile_store::load_blob_with_version(conn, tx, ty, 0)
                     .map_err(|e| e.to_string())?
-                    .unwrap_or_else(TileData::new_sea);
-                old_states.push((tx, ty, old.compress()));
+                    .map(|(_, b)| b)
+                    .unwrap_or_else(|| TileData::new_sea().compress());
+                old_states.push((tx, ty, blob));
             }
         }
         undo::push_undo(conn, label, &old_states)?;

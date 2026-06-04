@@ -1,8 +1,12 @@
 use serde::{Serialize, Deserialize};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 use tauri::State;
-use crate::db::{WorldDb, tile_store, metadata};
+use crate::db::{WorldDb, CostKey, tile_store, metadata};
+use crate::db::world_cache::WorldTiles;
 use crate::tile::coords::{TileCoord, TILE_SIZE};
 use crate::tile::cell::TileData;
 use crate::sim::biological::GOOD_NAMES;
@@ -197,6 +201,7 @@ pub fn get_overlay_vectors(
     if grid_w == 0 || grid_h == 0 {
         return Ok(OverlayVectors { wind: vec![], currents: vec![], current_step: 1 });
     }
+    let world = db.cached_tiles_with_conn(&conn)?;
 
     // Sparse sampling so currents read as a few large arrows / clear gyres
     // rather than a dense field of tiny ones. ~70 arrows across the map width.
@@ -210,9 +215,7 @@ pub fn get_overlay_vectors(
     // Load tiles and sample
     for ty in 0..tiles_y as i32 {
         for tx in 0..tiles_x as i32 {
-            let tile = tile_store::load_tile(&conn, tx, ty, 0)
-                .map_err(|e| e.to_string())?
-                .unwrap_or_else(TileData::new_sea);
+            let tile = world.tile(tx, ty);
 
             let base_x = tx as u32 * TILE_SIZE;
             let base_y = ty as u32 * TILE_SIZE;
@@ -291,6 +294,7 @@ pub fn get_current_streamlines(
     if grid_w == 0 || grid_h == 0 {
         return Ok(vec![]);
     }
+    let world = db.cached_tiles_with_conn(&conn)?;
 
     let w = grid_w as i32;
     let h = grid_h as i32;
@@ -306,9 +310,7 @@ pub fn get_current_streamlines(
     let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
     for ty in 0..tiles_y as i32 {
         for tx in 0..tiles_x as i32 {
-            let tile = tile_store::load_tile(&conn, tx, ty, 0)
-                .map_err(|e| e.to_string())?
-                .unwrap_or_else(TileData::new_sea);
+            let tile = world.tile(tx, ty);
             let base_x = tx as u32 * TILE_SIZE;
             let base_y = ty as u32 * TILE_SIZE;
             let max_lx = TILE_SIZE.min(grid_w - base_x);
@@ -445,6 +447,7 @@ pub fn get_elevation_distribution(
     if grid_w == 0 || grid_h == 0 {
         return Ok(vec![]);
     }
+    let world = db.cached_tiles_with_conn(&conn)?;
 
     let band_labels = [
         "0-1000m", "1000-2000m", "2000-3000m", "3000-4000m", "4000-5000m",
@@ -458,9 +461,7 @@ pub fn get_elevation_distribution(
 
     for ty in 0..tiles_y as i32 {
         for tx in 0..tiles_x as i32 {
-            let tile = tile_store::load_tile(&conn, tx, ty, 0)
-                .map_err(|e| e.to_string())?
-                .unwrap_or_else(TileData::new_sea);
+            let tile = world.tile(tx, ty);
 
             let max_lx = TILE_SIZE.min(grid_w - tx as u32 * TILE_SIZE);
             let max_ly = TILE_SIZE.min(grid_h - ty as u32 * TILE_SIZE);
@@ -517,6 +518,9 @@ struct RouteRiver {
 pub struct TradeRoute {
     pub points: Vec<[f32; 2]>,
     pub kind: u8,
+    /// True for a minor connector road (a lesser town's single link to the
+    /// network) so the overlay can draw it thinner than a major trunk route.
+    pub minor: bool,
 }
 
 // ── Shared coarse movement-cost grid ─────────────────────────────────────────
@@ -539,6 +543,10 @@ struct CoarseCost {
 }
 
 const SEA_BLOCK_COST: f32 = 1.0e6;
+/// Cost of an open-water (no land neighbour) coarse cell. Much higher than the
+/// coastal-sea cost (0.5) so least-cost routes/flows hug the coast and cross open
+/// ocean only at the narrowest point, rather than cutting straight across a basin.
+const OPEN_SEA_COST: f32 = 3.5;
 
 impl CoarseCost {
     #[inline]
@@ -554,7 +562,8 @@ impl CoarseCost {
 }
 
 fn build_coarse_cost(
-    conn: &rusqlite::Connection, grid_w: u32, grid_h: u32, rivers_json: &str, block_sea: bool,
+    world: &WorldTiles, grid_w: u32, grid_h: u32, rivers_json: &str, block_sea: bool,
+    desert_routes: bool,
 ) -> Result<CoarseCost, String> {
     let f = (grid_w / 700).max(1);
     let cw = ((grid_w + f - 1) / f) as i32;
@@ -580,9 +589,7 @@ fn build_coarse_cost(
         let mut f_hazard = vec![0.0f32; fn_cells];
         for ty in 0..tiles_y as i32 {
             for tx in 0..tiles_x as i32 {
-                let tile = tile_store::load_tile(conn, tx, ty, 0)
-                    .map_err(|e| e.to_string())?
-                    .unwrap_or_else(TileData::new_sea);
+                let tile = world.tile(tx, ty);
                 let base_x = tx as u32 * TILE_SIZE;
                 let base_y = ty as u32 * TILE_SIZE;
                 let max_lx = TILE_SIZE.min(grid_w - base_x);
@@ -637,14 +644,20 @@ fn build_coarse_cost(
                 // Lower relief multiplier than before (22 → 14) so interiors are
                 // traversable and inland trade actually happens.
                 let mut c = 4.0 + elev[ci] * 14.0;
+                // Desert/steppe surcharge. In "Silk Road" mode (overland caravans
+                // preferred over dangerous seas) the arid-land penalty is cut so
+                // STEPPE corridors (the Silk Road's main highway) and deserts
+                // become competitive overland routes. Steppe stays cheaper than
+                // desert, so caravans favour the grass corridors.
+                let (desert, steppe) = if desert_routes { (2.0, 0.5) } else { (9.0, 2.5) };
                 c += match koppen[ci] {
-                    4 | 5 => 9.0,
-                    6 | 7 => 2.5,
-                    21 => 12.0,
-                    22 => 26.0,
+                    4 | 5 => desert,        // BWh / BWk hot & cold desert
+                    6 | 7 => steppe,        // BSh / BSk steppe
+                    21 => 12.0,             // ET tundra
+                    22 => 26.0,             // EF ice cap
                     16 | 17 | 29 | 30 => 5.0,
-                    1 => 5.0,
-                    32 => 7.0,
+                    1 => 5.0,               // AF rainforest
+                    32 => 7.0,              // H highland
                     _ => 0.0,
                 };
                 if is_river[ci] { c = c.min(1.2); }
@@ -652,7 +665,12 @@ fn build_coarse_cost(
             } else if block_sea {
                 SEA_BLOCK_COST
             } else {
-                1.4
+                // Open water is now markedly dearer than coastal sea (set to 0.5
+                // below). Routes and the trade-flow trunks both least-cost over
+                // this grid, so a high open-sea base makes them hug the coast and
+                // take the SHORTEST crossing through straits/chokepoints instead
+                // of beelining straight across deep ocean between continents.
+                OPEN_SEA_COST
             };
         }
     }
@@ -701,10 +719,13 @@ fn build_coarse_cost(
     // routes detour around cyclone belts and reefs, and goods reachable only over
     // hazardous water grow scarcer downstream. Applied only when sea is passable.
     if !block_sea {
-        const HAZARD_W: f32 = 7.0; // max added cost on the worst sea cell
+        // Stormy / reef-fouled sea is dearer to cross. In "desert routes" mode the
+        // surcharge is large so caravans take the safe overland (desert) path when
+        // the waters are dangerous, rather than risking the crossing.
+        let hazard_w: f32 = if desert_routes { 20.0 } else { 7.0 };
         for ci in 0..cn {
             if !is_land[ci] {
-                cost[ci] += sea_hazard[ci].clamp(0.0, 1.0) * HAZARD_W;
+                cost[ci] += sea_hazard[ci].clamp(0.0, 1.0) * hazard_w;
             }
         }
     }
@@ -734,6 +755,35 @@ const COARSE_DIRS: [(i32, i32, f32); 8] = [
     (-1, 0, 1.0), (1, 0, 1.0), (0, -1, 1.0), (0, 1, 1.0),
     (-1, -1, 1.4142), (1, -1, 1.4142), (-1, 1, 1.4142), (1, 1, 1.4142),
 ];
+
+/// Memoized `build_coarse_cost`. The trade-route, trade-matrix and political
+/// commands all build the *same* coarse cost grid (same world + same rivers), so
+/// cache the last one on `WorldDb`, keyed by (tile fingerprint, block_sea, rivers
+/// hash). Within one overlay fan-out only the first call pays the build; a tile
+/// edit (fingerprint change) or a rivers change invalidates it.
+fn cached_coarse_cost(
+    db: &WorldDb,
+    world: &WorldTiles,
+    fingerprint: (i64, i64),
+    grid_w: u32,
+    grid_h: u32,
+    rivers_json: &str,
+    block_sea: bool,
+    desert_routes: bool,
+) -> Result<Arc<CoarseCost>, String> {
+    let mut hasher = DefaultHasher::new();
+    rivers_json.hash(&mut hasher);
+    desert_routes.hash(&mut hasher); // distinct grid when desert-routing is on
+    let key: CostKey = (fingerprint.0, fingerprint.1, block_sea, hasher.finish());
+    if let Some(any) = db.cost_cache_get(&key) {
+        if let Ok(cc) = any.downcast::<CoarseCost>() {
+            return Ok(cc);
+        }
+    }
+    let cc = Arc::new(build_coarse_cost(world, grid_w, grid_h, rivers_json, block_sea, desert_routes)?);
+    db.cost_cache_put(key, cc.clone());
+    Ok(cc)
+}
 
 /// Least-cost path (coarse indices, start→goal) over a CoarseCost grid, or None.
 fn coarse_dijkstra(cc: &CoarseCost, start: usize, goal: usize) -> Option<Vec<usize>> {
@@ -802,6 +852,7 @@ pub fn compute_trade_routes(
     rivers_json: String,
     reach: u8,
     max_crossing: f32,
+    desert_routes: bool,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<TradeRoute>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -816,21 +867,28 @@ pub fn compute_trade_routes(
         serde_json::from_str(&settlements_json).unwrap_or_default();
     if settlements.len() < 2 { return Ok(vec![]); }
 
-    let cc = build_coarse_cost(&conn, grid_w, grid_h, &rivers_json, reach == 2)?;
+    let world = db.cached_tiles_with_conn(&conn)?;
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes)?;
     let (cw, f) = (cc.cw, cc.f);
 
-    // Map settlements to coarse nodes (top 80 by score).
+    // Map EVERY settlement to a coarse node (sorted by score, strongest first).
+    // The major network is built among the top hubs (3 nearest neighbours each),
+    // but every remaining settlement still gets at least one minor road to its
+    // nearest neighbour, so no town is left unconnected.
     let mut nodes: Vec<(i32, i32, f32)> = settlements.iter()
         .map(|s| ((s.x / f).min(cw as u32 - 1) as i32, (s.y / f).min(cc.ch as u32 - 1) as i32, s.score))
         .collect();
     nodes.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-    nodes.truncate(80);
     let nn = nodes.len();
     if nn < 2 { return Ok(vec![]); }
+    let hubs = nn.min(80); // primary-network nodes (multi-link trunks)
 
-    // Candidate links: each node to its 3 nearest neighbours (wrapped X).
-    let mut edges: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
-    for i in 0..nn {
+    // Candidate links: top hubs link to their 3 nearest neighbours; every other
+    // settlement links to its single nearest neighbour (a minor road). Tracked
+    // separately so minor roads can be drawn thinner.
+    let mut major_edges: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    let mut minor_edges: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    let nearest_k = |i: usize, k: usize| -> Vec<usize> {
         let mut dists: Vec<(usize, i64)> = Vec::with_capacity(nn - 1);
         for j in 0..nn {
             if i == j { continue; }
@@ -840,13 +898,23 @@ pub fn compute_trade_routes(
             dists.push((j, (dx * dx + dy * dy) as i64));
         }
         dists.sort_by_key(|&(_, d)| d);
-        for &(j, _) in dists.iter().take(3) {
-            edges.insert((i.min(j), i.max(j)));
+        dists.iter().take(k).map(|&(j, _)| j).collect()
+    };
+    for i in 0..hubs {
+        for j in nearest_k(i, 3) { major_edges.insert((i.min(j), i.max(j))); }
+    }
+    for i in hubs..nn {
+        if let Some(&j) = nearest_k(i, 1).first() {
+            let e = (i.min(j), i.max(j));
+            if !major_edges.contains(&e) { minor_edges.insert(e); }
         }
     }
 
     let mut routes: Vec<TradeRoute> = Vec::new();
-    for &(a, b) in &edges {
+    let all_edges: Vec<((usize, usize), bool)> = major_edges.iter().map(|&e| (e, false))
+        .chain(minor_edges.iter().map(|&e| (e, true)))
+        .collect();
+    for &((a, b), minor) in &all_edges {
         let start = cc.cidx(nodes[a].0, nodes[a].1);
         let goal = cc.cidx(nodes[b].0, nodes[b].1);
         let path = match coarse_dijkstra(&cc, start, goal) { Some(p) => p, None => continue };
@@ -867,7 +935,7 @@ pub fn compute_trade_routes(
         } else {
             0
         };
-        routes.push(TradeRoute { points: pts, kind });
+        routes.push(TradeRoute { points: pts, kind, minor });
     }
 
     Ok(routes)
@@ -886,6 +954,40 @@ pub struct FisheryBank {
     pub y: f32,
     pub radius: f32,
     pub score: f32,
+}
+
+/// The *static* (non-seasonal) map overlays after a sim step, gathered in ONE
+/// command so the frontend makes a single IPC round-trip (and shares one
+/// decompressed-tile cache read across all of them) instead of separate calls
+/// each re-locking the connection. Storm zones are intentionally NOT here — they
+/// depend on the month slider, so bundling them made every month tick recompute
+/// all of these (the scrubbing lag). Storm has its own light command.
+#[derive(Serialize)]
+pub struct OverlaysResult {
+    pub vectors: OverlayVectors,
+    pub streamlines: Vec<Streamline>,
+    pub fishery_banks: Vec<FisheryBank>,
+    pub shark_zones: Vec<SharkZone>,
+    pub shipworm_zones: Vec<SharkZone>,
+    pub reef_zones: Vec<SharkZone>,
+    pub good_regions: Vec<GoodRegion>,
+}
+
+#[tauri::command]
+pub fn compute_overlays(
+    db: State<'_, WorldDb>,
+) -> Result<OverlaysResult, String> {
+    // `State` clones are cheap (just a wrapped reference); each query hits the
+    // same shared tile cache (first builds it, the rest reuse).
+    Ok(OverlaysResult {
+        vectors: get_overlay_vectors(db.clone())?,
+        streamlines: get_current_streamlines(db.clone())?,
+        fishery_banks: compute_fishery_banks(db.clone())?,
+        shark_zones: compute_shark_zones(db.clone())?,
+        shipworm_zones: compute_shipworm_zones(db.clone())?,
+        reef_zones: compute_reef_zones(db.clone())?,
+        good_regions: compute_good_regions(db)?,
+    })
 }
 
 /// Cluster the richest fishing grounds into a handful of circular "grand banks".
@@ -911,6 +1013,7 @@ pub fn compute_fishery_banks(
     if grid_w == 0 || grid_h == 0 {
         return Ok(vec![]);
     }
+    let world = db.cached_tiles_with_conn(&conn)?;
 
     // Coarse grid (~400 cells across) holding the *max* fishery in each block so
     // a strong but small ground isn't averaged away.
@@ -924,9 +1027,7 @@ pub fn compute_fishery_banks(
     let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
     for ty in 0..tiles_y as i32 {
         for tx in 0..tiles_x as i32 {
-            let tile = tile_store::load_tile(&conn, tx, ty, 0)
-                .map_err(|e| e.to_string())?
-                .unwrap_or_else(TileData::new_sea);
+            let tile = world.tile(tx, ty);
             let base_x = tx as u32 * TILE_SIZE;
             let base_y = ty as u32 * TILE_SIZE;
             let max_lx = TILE_SIZE.min(grid_w - base_x);
@@ -1021,6 +1122,7 @@ pub fn compute_fishery_banks(
 /// (filled cell mask) rather than an abstract circle.
 struct CoarseCluster {
     cells: Vec<[f32; 2]>,
+    values: Vec<f32>, // per-cell field value (parallel to `cells`), for abundance shading
     cx: f32,
     cy: f32,
     score: f32,
@@ -1060,10 +1162,12 @@ fn cluster_cells(
         let cx0 = (cells[0] as i32) % cw;
         let (mut sx, mut sy, mut ssc) = (0.0f64, 0.0f64, 0.0f32);
         let mut world: Vec<[f32; 2]> = Vec::with_capacity(cells.len());
+        let mut vals: Vec<f32> = Vec::with_capacity(cells.len());
         for &ci in &cells {
             let mut cx = (ci as i32) % cw;
             let cy = (ci as i32) / cw;
             world.push([(cx as u32 * f) as f32, (cy as u32 * f) as f32]);
+            vals.push(field[ci]);
             if cx - cx0 > cw / 2 { cx -= cw; } else if cx0 - cx > cw / 2 { cx += cw; }
             sx += cx as f64;
             sy += cy as f64;
@@ -1074,12 +1178,49 @@ fn cluster_cells(
         let mean_cy = (sy / nn).round() as i32;
         out.push(CoarseCluster {
             cells: world,
+            values: vals,
             cx: (mean_cx as u32 * f + f / 2) as f32,
             cy: (mean_cy as u32 * f + f / 2) as f32,
             score: ssc / cells.len() as f32,
         });
     }
     out
+}
+
+/// splitmix64-style u64 → [0,1) hash (for deterministic value noise).
+#[inline]
+fn hash01u(mut x: u64) -> f32 {
+    x ^= x >> 33; x = x.wrapping_mul(0xFF51AFD7ED558CCD);
+    x ^= x >> 33; x = x.wrapping_mul(0xC4CEB9FE1A85EC53); x ^= x >> 33;
+    ((x >> 40) as f32) / 16_777_216.0
+}
+
+/// Smooth deterministic value noise in [0,1] over coarse-cell coords, with the X
+/// lattice wrapped to `cw` so it is seamless across the date line. Used to break a
+/// smooth hazard band (e.g. the cyclone belt) into several discrete blobs.
+fn value_noise(cx: i32, cy: i32, cw: i32, period: f32, seed: u64) -> f32 {
+    let lc = ((cw as f32 / period).round() as i32).max(1); // lattice columns (wrap period)
+    let fx = cx as f32 / period;
+    let fy = cy as f32 / period;
+    let x0 = fx.floor() as i32;
+    let y0 = fy.floor() as i32;
+    let tx = fx - x0 as f32;
+    let ty = fy - y0 as f32;
+    let sx = tx * tx * (3.0 - 2.0 * tx);
+    let sy = ty * ty * (3.0 - 2.0 * ty);
+    let latt = |ix: i32, iy: i32| -> f32 {
+        let wx = ix.rem_euclid(lc);
+        hash01u((wx as u64).wrapping_mul(0x9E3779B97F4A7C15)
+            ^ (iy as u64).wrapping_mul(0xC2B2AE3D27D4EB4F)
+            ^ seed)
+    };
+    let n00 = latt(x0, y0);
+    let n10 = latt(x0 + 1, y0);
+    let n01 = latt(x0, y0 + 1);
+    let n11 = latt(x0 + 1, y0 + 1);
+    let a = n00 + (n10 - n00) * sx;
+    let b = n01 + (n11 - n01) * sx;
+    a + (b - a) * sy
 }
 
 #[derive(Serialize)]
@@ -1100,6 +1241,7 @@ pub fn compute_shark_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, Str
     let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+    let world = db.cached_tiles_with_conn(&conn)?;
 
     // Finer coarse grid than the circle version so the marked area follows the
     // actual physics-driven shark distribution shape.
@@ -1112,8 +1254,7 @@ pub fn compute_shark_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, Str
     let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
     for ty in 0..tiles_y as i32 {
         for tx in 0..tiles_x as i32 {
-            let tile = tile_store::load_tile(&conn, tx, ty, 0)
-                .map_err(|e| e.to_string())?.unwrap_or_else(TileData::new_sea);
+            let tile = world.tile(tx, ty);
             let base_x = tx as u32 * TILE_SIZE;
             let base_y = ty as u32 * TILE_SIZE;
             let max_lx = TILE_SIZE.min(grid_w - base_x);
@@ -1158,6 +1299,7 @@ pub fn compute_shipworm_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, 
     let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+    let world = db.cached_tiles_with_conn(&conn)?;
 
     let f = (grid_w / 300).max(1);
     let cw = ((grid_w + f - 1) / f) as i32;
@@ -1168,8 +1310,7 @@ pub fn compute_shipworm_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, 
     let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
     for ty in 0..tiles_y as i32 {
         for tx in 0..tiles_x as i32 {
-            let tile = tile_store::load_tile(&conn, tx, ty, 0)
-                .map_err(|e| e.to_string())?.unwrap_or_else(TileData::new_sea);
+            let tile = world.tile(tx, ty);
             let base_x = tx as u32 * TILE_SIZE;
             let base_y = ty as u32 * TILE_SIZE;
             let max_lx = TILE_SIZE.min(grid_w - base_x);
@@ -1214,6 +1355,7 @@ pub fn compute_storm_zones(month: i32, months: u32, db: State<'_, WorldDb>) -> R
     let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+    let world = db.cached_tiles_with_conn(&conn)?;
     let months = months.max(1);
 
     let f = (grid_w / 300).max(1);
@@ -1225,8 +1367,7 @@ pub fn compute_storm_zones(month: i32, months: u32, db: State<'_, WorldDb>) -> R
     let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
     for ty in 0..tiles_y as i32 {
         for tx in 0..tiles_x as i32 {
-            let tile = tile_store::load_tile(&conn, tx, ty, 0)
-                .map_err(|e| e.to_string())?.unwrap_or_else(TileData::new_sea);
+            let tile = world.tile(tx, ty);
             let base_x = tx as u32 * TILE_SIZE;
             let base_y = ty as u32 * TILE_SIZE;
             let max_lx = TILE_SIZE.min(grid_w - base_x);
@@ -1249,7 +1390,22 @@ pub fn compute_storm_zones(month: i32, months: u32, db: State<'_, WorldDb>) -> R
         }
     }
 
-    let mut zones: Vec<SharkZone> = cluster_cells(&risk, cw, ch, f, 0.50, 4)
+    // Real cyclone risk isn't a single smooth band — distinct basins (NW Pacific,
+    // N Atlantic, S Indian…) spawn storms semi-independently. Modulate the smooth
+    // cyclogenesis field with low-frequency value noise so it breaks into several
+    // discrete danger areas instead of one map-spanning blob.
+    let period = (cw as f32 / 7.0).max(4.0); // ~7 lumps across the map width
+    for cy in 0..ch {
+        for cx in 0..cw {
+            let ci = (cy * cw + cx) as usize;
+            if risk[ci] <= 0.0 { continue; }
+            let nz = value_noise(cx, cy, cw, period, 0x57014_C9C10_u64);
+            let lump = 0.30 + 1.05 * nz; // troughs fall under threshold → gaps
+            risk[ci] = (risk[ci] * lump).min(1.0);
+        }
+    }
+
+    let mut zones: Vec<SharkZone> = cluster_cells(&risk, cw, ch, f, 0.50, 3)
         .into_iter()
         .map(|c| SharkZone { cells: c.cells, cell_size: f as f32, x: c.cx, y: c.cy, score: c.score })
         .collect();
@@ -1258,7 +1414,7 @@ pub fn compute_storm_zones(month: i32, months: u32, db: State<'_, WorldDb>) -> R
             .partial_cmp(&(a.cells.len() as f32 * a.score))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    zones.truncate(14);
+    zones.truncate(30);
     Ok(zones)
 }
 
@@ -1271,6 +1427,7 @@ pub fn compute_reef_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, Stri
     let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+    let world = db.cached_tiles_with_conn(&conn)?;
 
     let f = (grid_w / 300).max(1);
     let cw = ((grid_w + f - 1) / f) as i32;
@@ -1281,8 +1438,7 @@ pub fn compute_reef_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, Stri
     let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
     for ty in 0..tiles_y as i32 {
         for tx in 0..tiles_x as i32 {
-            let tile = tile_store::load_tile(&conn, tx, ty, 0)
-                .map_err(|e| e.to_string())?.unwrap_or_else(TileData::new_sea);
+            let tile = world.tile(tx, ty);
             let base_x = tx as u32 * TILE_SIZE;
             let base_y = ty as u32 * TILE_SIZE;
             let max_lx = TILE_SIZE.min(grid_w - base_x);
@@ -1318,11 +1474,56 @@ pub fn compute_reef_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, Stri
 pub struct GoodRegion {
     pub good: String,
     pub cells: Vec<[f32; 2]>, // coarse cell top-left world coords (the marked area)
+    pub values: Vec<u8>,      // per-cell abundance 0..255 (parallel to `cells`) for shading
+    pub subtypes: Vec<u8>,    // per-cell subtype id (grain/paper); empty if the good has none
     pub cell_size: f32,
     pub x: f32,               // label centroid
     pub y: f32,
     pub score: f32,
     pub sublabel: String,     // e.g. the specific gemstone (Ruby/Sapphire/…); else ""
+}
+
+/// Grain species at a cell from its climate (0 wheat, 1 rice, 2 maize, 3 millet,
+/// 4 barley). The "wheat" belt is really the world's staple-grain land; which
+/// cereal grows depends on warmth/moisture/altitude, so neighbouring species meet
+/// along a visible boundary (the "split").
+fn grain_subtype(temp: f32, precip: f32, elev: f32) -> u8 {
+    // 8 staple cereals. Each keys off a distinct temperature/moisture/altitude
+    // niche, so neighbouring species meet along a visible "split" and — because
+    // the niches sit in different climate bands — they naturally land on
+    // different continents (cold north → rye/barley; hot wet equator → rice;
+    // hot dry → sorghum/millet; temperate cores → wheat/maize/oats).
+    if temp < 1.0 { 5 }                                // rye — cold humid-continental
+    else if temp < 7.0 || elev > 0.50 { 4 }            // barley — cool / high altitude
+    else if temp >= 22.0 && precip < 500.0 { 7 }       // sorghum — very hot & arid
+    else if temp >= 20.0 && precip >= 1100.0 { 1 }     // rice — hot & wet (paddy)
+    else if precip < 550.0 && temp >= 15.0 { 3 }       // millet — hot semi-arid
+    else if temp < 14.0 && precip >= 900.0 { 6 }       // oats — cool & wet (oceanic)
+    else if temp >= 16.0 && precip >= 700.0 { 2 }      // maize — warm & moist
+    else { 0 }                                          // wheat — temperate / Mediterranean
+}
+
+/// Paper source at a cell = whichever production driver is strongest there.
+/// 0 papyrus, 1 bamboo, 2 mill (manufactured), 3 parchment, 4 rice paper.
+fn paper_subtype(temp: f32, precip: f32, elev: f32, hab: f32) -> u8 {
+    let papyrus = if temp >= 15.0 && temp <= 30.0 && elev < 0.30 && precip >= 800.0 {
+        0.40 + 0.55 * (precip / 2000.0).min(1.0)         // warm freshwater delta reed
+    } else { 0.0 };
+    let bamboo = if temp >= 10.0 && temp <= 24.0 && (700.0..=2400.0).contains(&precip) {
+        0.58                                              // subtropical bamboo/mulberry pulp
+    } else { 0.0 };
+    let ricepaper = if temp >= 20.0 && precip >= 1200.0 && elev < 0.40 {
+        0.55                                              // hot wet east-monsoon rice fibre
+    } else { 0.0 };
+    let parchment = if temp < 9.0 || elev > 0.45 {
+        0.50                                              // cold/high pastoral animal hide
+    } else { 0.0 };
+    let mill = hab;                                       // dense-settlement rag/wood paper
+    // argmax → subtype id.
+    let cands = [papyrus, bamboo, mill, parchment, ricepaper];
+    let mut best = 0usize;
+    for i in 1..cands.len() { if cands[i] > cands[best] { best = i; } }
+    best as u8
 }
 
 /// Mark every trade-good belt as a filled AREA (the actual physics-driven cells,
@@ -1337,20 +1538,27 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
 
-    let f = (grid_w / 300).max(1);
+    // Finer coarse grid (smaller marked cells) so good belts read as detailed
+    // patches rather than coarse blocks.
+    let f = (grid_w / 450).max(1);
     let cw = ((grid_w + f - 1) / f) as i32;
     let ch = ((grid_h + f - 1) / f) as i32;
     let cn = (cw * ch) as usize;
+    let world = db.cached_tiles_with_conn(&conn)?;
     let specs = crate::commands::goods_commands::load_world_goods(&conn);
     let gc = specs.len();
     let mut grids: Vec<Vec<f32>> = vec![vec![0.0f32; cn]; gc];
+    // Coarse climate fields for per-cell subtype classification (grain / paper).
+    let mut c_temp = vec![0.0f32; cn];
+    let mut c_precip = vec![0.0f32; cn];
+    let mut c_elev = vec![0.0f32; cn];
+    let mut c_hab = vec![0.0f32; cn];
 
     let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
     let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
     for ty in 0..tiles_y as i32 {
         for tx in 0..tiles_x as i32 {
-            let tile = tile_store::load_tile(&conn, tx, ty, 0)
-                .map_err(|e| e.to_string())?.unwrap_or_else(TileData::new_sea);
+            let tile = world.tile(tx, ty);
             let base_x = tx as u32 * TILE_SIZE;
             let base_y = ty as u32 * TILE_SIZE;
             let max_lx = TILE_SIZE.min(grid_w - base_x);
@@ -1364,6 +1572,12 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
                     for g in 0..gc.min(tile.goods.len()) {
                         let v = tile.goods[g][ti] as f32 / 255.0;
                         if v > grids[g][ci] { grids[g][ci] = v; }
+                    }
+                    if tile.terrain[ti] == 1 {
+                        c_temp[ci] = tile.temperature[ti];
+                        c_precip[ci] = tile.precipitation[ti];
+                        c_elev[ci] = tile.elevation[ti];
+                        c_hab[ci] = tile.habitability[ti];
                     }
                 }
             }
@@ -1385,6 +1599,9 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
             Distribution::Global => (14, 1),
             Distribution::Local => (4, 1),
         };
+        // Multi-type goods: wheat splits into grain species, paper into its three
+        // sources — classified per cell from the coarse climate fields.
+        let subtype_kind = match spec.id.as_str() { "wheat" => 1u8, "paper" => 2u8, _ => 0u8 };
         let mut regions = cluster_cells(&grids[g], cw, ch, f, 0.30, min_cells);
         regions.sort_by(|a, b| b.cells.len().cmp(&a.cells.len()));
         regions.truncate(max_keep);
@@ -1396,9 +1613,26 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
             } else {
                 String::new()
             };
+            let values: Vec<u8> = c.values.iter().map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8).collect();
+            let subtypes: Vec<u8> = if subtype_kind == 0 {
+                Vec::new()
+            } else {
+                c.cells.iter().map(|&[wx, wy]| {
+                    let cx = (wx as u32 / f).min(cw as u32 - 1) as i32;
+                    let cy = (wy as u32 / f).min(ch as u32 - 1) as i32;
+                    let ci = (cy * cw + cx) as usize;
+                    if subtype_kind == 1 {
+                        grain_subtype(c_temp[ci], c_precip[ci], c_elev[ci])
+                    } else {
+                        paper_subtype(c_temp[ci], c_precip[ci], c_elev[ci], c_hab[ci])
+                    }
+                }).collect()
+            };
             out.push(GoodRegion {
                 good: spec.id.clone(),
                 cells: c.cells,
+                values,
+                subtypes,
                 cell_size: f as f32,
                 x: c.cx,
                 y: c.cy,
@@ -1434,12 +1668,39 @@ pub struct TradeFlow {
 }
 
 /// A bundled trunk segment of the routed trade network: one coarse edge carrying
-/// the summed volume of every commodity flow that travels along it. The overlay
-/// draws these with width ∝ volume, so shared corridors read as thick trunks.
+/// the summed volume of every commodity flow that travels along it. `points` are
+/// ordered **in the dominant flow direction** (source → consuming hub), so the
+/// overlay can draw an arrowhead showing which way the goods are pulled. Width ∝
+/// volume; `good`/`road` name the corridor by its dominant commodity ("Spice
+/// Road", "Silk Road", …) for the major trunks.
 #[derive(Serialize)]
 pub struct TradeTrunk {
-    pub points: Vec<[f32; 2]>, // [from, to] world coords of the coarse edge
+    pub points: Vec<[f32; 2]>, // [from, to] in flow direction (toward the consumer)
     pub volume: f32,
+    pub good: i32,             // dominant good index, or -1
+    pub road: String,          // corridor name for major trunks; "" otherwise
+}
+
+/// Evocative name for a trade corridor from its dominant commodity (the famous
+/// historical routes for the iconic goods, "<Good> Road" otherwise).
+fn road_name(good_id: &str) -> String {
+    match good_id {
+        "silk" => "Silk Road".to_string(),
+        "spices" | "cloves" | "pepper" | "frankincense" | "incense" => "Spice Road".to_string(),
+        "salt" => "Salt Road".to_string(),
+        "amber" => "Amber Road".to_string(),
+        "tea" => "Tea Road".to_string(),
+        "gold" => "Gold Road".to_string(),
+        "furs" => "Fur Road".to_string(),
+        "wine" => "Wine Road".to_string(),
+        other => {
+            let mut ch = other.chars();
+            let titled = ch.next()
+                .map(|f| f.to_uppercase().collect::<String>() + ch.as_str())
+                .unwrap_or_default();
+            format!("{} Road", titled)
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -1460,6 +1721,7 @@ pub fn compute_trade_matrix(
     rivers_json: String,
     reach: u8,
     max_crossing: f32,
+    desert_routes: bool,
     db: State<'_, WorldDb>,
 ) -> Result<TradeMatrix, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -1475,6 +1737,7 @@ pub fn compute_trade_matrix(
     if grid_w == 0 || grid_h == 0 {
         return Ok(TradeMatrix { regions: vec![], flows: vec![], trunks: vec![], goods: goods_names });
     }
+    let world = db.cached_tiles_with_conn(&conn)?;
 
     let settlements: Vec<RouteSettlement> =
         serde_json::from_str(&settlements_json).unwrap_or_default();
@@ -1559,8 +1822,7 @@ pub fn compute_trade_matrix(
     let mut coarse = vec![vec![0.0f32; gc]; (cw * ch) as usize];
     for ty in 0..tiles_y as i32 {
         for tx in 0..tiles_x as i32 {
-            let tile = tile_store::load_tile(&conn, tx, ty, 0)
-                .map_err(|e| e.to_string())?.unwrap_or_else(TileData::new_sea);
+            let tile = world.tile(tx, ty);
             let base_x = tx as u32 * TILE_SIZE;
             let base_y = ty as u32 * TILE_SIZE;
             let max_lx = TILE_SIZE.min(grid_w - base_x);
@@ -1657,7 +1919,7 @@ pub fn compute_trade_matrix(
     // a route between their regions exists under the chosen trade reach (so when
     // continents are too far / the ocean too wide, trade stays within reach and
     // no flow is drawn). Flows that share a corridor stack onto the same trunk.
-    let cc = build_coarse_cost(&conn, grid_w, grid_h, &rivers_json, reach == 2)?;
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes)?;
     let region_node: Vec<usize> = centers.iter().map(|&(x, y)| {
         let cx = (x.max(0) as u32 / cc.f).min(cc.cw as u32 - 1) as i32;
         let cy = (y.max(0) as u32 / cc.f).min(cc.ch as u32 - 1) as i32;
@@ -1667,7 +1929,17 @@ pub fn compute_trade_matrix(
     // Lazily-computed least-cost path per region pair (None = unreachable).
     let mut pair_path: std::collections::HashMap<(usize, usize), Option<Vec<usize>>> =
         std::collections::HashMap::new();
-    let mut pair_volume: std::collections::HashMap<(usize, usize), f32> =
+    // Per coarse-edge accumulation for the bundled trunks: total volume, volume
+    // by good (to name the corridor by its dominant commodity), and directional
+    // volume (which way the goods are pulled — toward the consuming hub).
+    #[derive(Default)]
+    struct EdgeAcc {
+        total: f32,
+        fwd: f32, // volume flowing min→max node
+        bwd: f32, // volume flowing max→min node
+        by_good: std::collections::HashMap<usize, f32>,
+    }
+    let mut edge_acc: std::collections::HashMap<(usize, usize), EdgeAcc> =
         std::collections::HashMap::new();
 
     let mut flows: Vec<TradeFlow> = Vec::new();
@@ -1703,13 +1975,25 @@ pub fn compute_trade_matrix(
                 let amt = need.min(s.1);
                 s.1 -= amt;
                 need -= amt;
-                *pair_volume.entry(key).or_insert(0.0) += amt;
+                // Accumulate this flow onto every coarse edge of its routed path,
+                // in the consumer-ward direction (supply s.0 → deficit di).
+                if let Some(Some(path)) = pair_path.get(&key) {
+                    let forward = path.first() == Some(&region_node[s.0]);
+                    for w in path.windows(2) {
+                        let (from, to) = if forward { (w[0], w[1]) } else { (w[1], w[0]) };
+                        let e = (from.min(to), from.max(to));
+                        let acc = edge_acc.entry(e).or_default();
+                        acc.total += amt;
+                        if from < to { acc.fwd += amt; } else { acc.bwd += amt; }
+                        *acc.by_good.entry(g).or_insert(0.0) += amt;
+                    }
+                }
                 let (sx, sy) = centers[s.0];
                 flows.push(TradeFlow {
                     from: s.0 as u32,
                     to: di as u32,
                     good: g,
-                    good_name: GOOD_NAMES[g].to_string(),
+                    good_name: goods_names.get(g).cloned().unwrap_or_default(),
                     weight: amt,
                     points: vec![[sx as f32, sy as f32], [dx0 as f32, dy0 as f32]],
                 });
@@ -1717,21 +2001,30 @@ pub fn compute_trade_matrix(
         }
     }
 
-    // Bundle: sum every flow's volume onto the coarse edges of its routed path.
-    let mut edge_w: std::collections::HashMap<(usize, usize), f32> =
-        std::collections::HashMap::new();
-    for (key, vol) in &pair_volume {
-        if let Some(Some(path)) = pair_path.get(key) {
-            for w in path.windows(2) {
-                let e = (w[0].min(w[1]), w[0].max(w[1]));
-                *edge_w.entry(e).or_insert(0.0) += *vol;
-            }
-        }
-    }
+    // Build bundled trunks from the per-edge accumulation: width ∝ volume, points
+    // ordered in the dominant flow direction (source→consumer), dominant good, and
+    // a corridor name for the major arteries.
+    let mut edges_v: Vec<((usize, usize), EdgeAcc)> = edge_acc.into_iter().collect();
+    edges_v.sort_by(|a, b| b.1.total.partial_cmp(&a.1.total).unwrap_or(std::cmp::Ordering::Equal));
+    let max_total = edges_v.first().map(|e| e.1.total).unwrap_or(1.0).max(1e-6);
     let mut trunks: Vec<TradeTrunk> = Vec::new();
-    for ((a, b), vol) in edge_w {
-        if vol < 0.02 { continue; }
-        trunks.push(TradeTrunk { points: vec![cc.world_of(a), cc.world_of(b)], volume: vol });
+    for (idx, ((a, b), acc)) in edges_v.into_iter().enumerate() {
+        if acc.total < 0.02 { continue; }
+        let good = acc.by_good.iter()
+            .max_by(|x, y| x.1.partial_cmp(y.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(g, _)| *g);
+        let (p_from, p_to) = if acc.fwd >= acc.bwd { (a, b) } else { (b, a) };
+        let road = if idx < 12 && acc.total >= 0.20 * max_total {
+            good.and_then(|g| goods_names.get(g)).map(|id| road_name(id)).unwrap_or_default()
+        } else {
+            String::new()
+        };
+        trunks.push(TradeTrunk {
+            points: vec![cc.world_of(p_from), cc.world_of(p_to)],
+            volume: acc.total,
+            good: good.map(|g| g as i32).unwrap_or(-1),
+            road,
+        });
     }
 
     Ok(TradeMatrix { regions, flows, trunks, goods: goods_names })
@@ -1750,9 +2043,61 @@ pub struct PoliticalCenter {
     pub y: f32,
     pub power: f32,              // 0..1 combined trade power
     pub rank: u32,              // 0 = most powerful
-    pub radius: f32,            // influence radius in world cells
+    pub radius: f32,            // (legacy) influence radius in world cells
+    pub stars: u8,              // power tier 1..5 — major trade hubs get 5 (Venice/Genoa)
     pub population: u32,
     pub monopolies: Vec<String>, // goods this settlement dominates production of
+    pub name: String,           // generated hub name
+    pub throughput: f32,        // total goods throughput handled (relative units)
+    pub ref_pct: f32,           // throughput as % of the strongest hub (≈ a 1450 Venice)
+    pub nearest_hub: String,    // closest-matching real 1450 trade hub
+    pub top_goods: Vec<HubGood>, // dominant traded goods + amounts (for the click panel)
+}
+
+#[derive(Serialize)]
+pub struct HubGood {
+    pub name: String,
+    pub amount: f32,
+}
+
+/// Real major trade hubs of ~1450 CE with relative throughput weights (Venice =
+/// 100), used to give each generated hub a "≈ X% of Venice / closest to <hub>"
+/// comparison.
+const REF_HUBS_1450: [(&str, f32); 14] = [
+    ("Venice", 100.0), ("Guangzhou", 95.0), ("Constantinople", 88.0), ("Calicut", 82.0),
+    ("Malacca", 78.0), ("Alexandria", 72.0), ("Cairo", 68.0), ("Bruges", 64.0),
+    ("Hangzhou", 60.0), ("Hormuz", 52.0), ("Samarkand", 46.0), ("Novgorod", 40.0),
+    ("Timbuktu", 36.0), ("Kilwa", 30.0),
+];
+
+/// Closest 1450 hub to a throughput percentage (of the world's top hub).
+fn nearest_ref_hub(pct: f32) -> &'static str {
+    REF_HUBS_1450.iter()
+        .min_by(|a, b| (a.1 - pct).abs().partial_cmp(&(b.1 - pct).abs()).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|h| h.0)
+        .unwrap_or("Venice")
+}
+
+/// Deterministic evocative hub name from a position hash.
+fn gen_hub_name(hx: i64, hy: i64) -> String {
+    const PRE: [&str; 24] = [
+        "Ar", "Bel", "Cor", "Dun", "Esk", "Far", "Gal", "Hal", "Ith", "Kor", "Lor", "Mar",
+        "Nor", "Os", "Pel", "Quor", "Rav", "Sar", "Tor", "Val", "Wend", "Yor", "Zan", "Mer",
+    ];
+    const MID: [&str; 8] = ["a", "e", "i", "o", "an", "en", "or", "ar"];
+    const SUF: [&str; 14] = [
+        "port", "gard", "mouth", "haven", "burg", "ton", "stad", "mar", "keep", "reach",
+        "fell", "wick", "ford", "holm",
+    ];
+    let h = (hx.wrapping_mul(73856093) ^ hy.wrapping_mul(19349663)).unsigned_abs();
+    let pre = PRE[(h % PRE.len() as u64) as usize];
+    let suf = SUF[((h / 23) % SUF.len() as u64) as usize];
+    if h & 4 != 0 {
+        let mid = MID[((h / 7) % MID.len() as u64) as usize];
+        format!("{}{}{}", pre, mid, suf)
+    } else {
+        format!("{}{}", pre, suf)
+    }
 }
 
 /// Re-rank settlements by trade power and emit influence centers. Power blends
@@ -1766,6 +2111,7 @@ pub fn compute_political(
     rivers_json: String,
     reach: u8,
     max_crossing: f32,
+    desert_routes: bool,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<PoliticalCenter>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -1774,6 +2120,7 @@ pub fn compute_political(
     let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+    let world = db.cached_tiles_with_conn(&conn)?;
 
     let settlements: Vec<RouteSettlement> =
         serde_json::from_str(&settlements_json).unwrap_or_default();
@@ -1794,7 +2141,7 @@ pub fn compute_political(
     };
 
     // Route centrality: count reachable nearest-neighbour links per node.
-    let cc = build_coarse_cost(&conn, grid_w, grid_h, &rivers_json, reach == 2)?;
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes)?;
     let cnode: Vec<usize> = nodes.iter().map(|s| {
         let cx = (s.x / cc.f).min(cc.cw as u32 - 1) as i32;
         let cy = (s.y / cc.f).min(cc.ch as u32 - 1) as i32;
@@ -1837,8 +2184,7 @@ pub fn compute_political(
     let mut coarse = vec![vec![0.0f32; gc]; (cw * ch) as usize];
     for ty in 0..tiles_y as i32 {
         for tx in 0..tiles_x as i32 {
-            let tile = tile_store::load_tile(&conn, tx, ty, 0)
-                .map_err(|e| e.to_string())?.unwrap_or_else(TileData::new_sea);
+            let tile = world.tile(tx, ty);
             let base_x = tx as u32 * TILE_SIZE;
             let base_y = ty as u32 * TILE_SIZE;
             let max_lx = TILE_SIZE.min(grid_w - base_x);
@@ -1907,19 +2253,47 @@ pub fn compute_political(
     let mut order: Vec<usize> = (0..nn).collect();
     order.sort_by(|&a, &b| power[b].partial_cmp(&power[a]).unwrap_or(std::cmp::Ordering::Equal));
 
+    // Throughput: total goods handled in the hub's hinterland, lifted by how many
+    // trade links it anchors (a central node moves more than its own production).
+    let mut throughput = vec![0.0f32; nn];
+    for ni in 0..nn {
+        let prod_sum: f32 = prod[ni].iter().sum();
+        throughput[ni] = prod_sum * (1.0 + 0.5 * centrality[ni] / cmax);
+    }
+    let tp_max = throughput.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
+
     let base_r = grid_w as f32 * 0.018;
     let span_r = grid_w as f32 * 0.075;
     let mut out: Vec<PoliticalCenter> = Vec::new();
     for (rank, &ni) in order.iter().enumerate().take(40) {
         let p = power[ni] / pmax;
+        // Power tier → 1..5 stars; only the dominant hubs reach 5 (Venice/Genoa).
+        let stars = if p >= 0.80 { 5 } else if p >= 0.60 { 4 }
+            else if p >= 0.42 { 3 } else if p >= 0.25 { 2 } else { 1 };
+        let ref_pct = (throughput[ni] / tp_max * 100.0).clamp(0.0, 100.0);
+        let mut gv: Vec<(usize, f32)> = (0..gc)
+            .map(|g| (g, prod[ni][g]))
+            .filter(|&(_, a)| a > 0.01)
+            .collect();
+        gv.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        gv.truncate(6);
+        let top_goods: Vec<HubGood> = gv.into_iter()
+            .map(|(g, a)| HubGood { name: specs[g].id.clone(), amount: a })
+            .collect();
         out.push(PoliticalCenter {
             x: nodes[ni].x as f32,
             y: nodes[ni].y as f32,
             power: p,
             rank: rank as u32,
             radius: base_r + span_r * p,
+            stars,
             population: nodes[ni].population,
             monopolies: monopolies[ni].clone(),
+            name: gen_hub_name(nodes[ni].x as i64, nodes[ni].y as i64),
+            throughput: throughput[ni],
+            ref_pct,
+            nearest_hub: nearest_ref_hub(ref_pct).to_string(),
+            top_goods,
         });
     }
     Ok(out)
