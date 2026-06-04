@@ -563,7 +563,7 @@ impl CoarseCost {
 
 fn build_coarse_cost(
     world: &WorldTiles, grid_w: u32, grid_h: u32, rivers_json: &str, block_sea: bool,
-    desert_routes: bool,
+    desert_routes: bool, piracy: f32,
 ) -> Result<CoarseCost, String> {
     let f = (grid_w / 700).max(1);
     let cw = ((grid_w + f - 1) / f) as i32;
@@ -748,6 +748,16 @@ fn build_coarse_cost(
         }
     }
 
+    // Piracy surcharge (#11): raiders haunt the busy coastal narrows / straits
+    // worst, the open sea less so. Higher piracy pushes trade to hug safer coasts,
+    // detour, or go overland — and makes goods that can only arrive by sea dearer.
+    if !block_sea && piracy > 0.0 {
+        for ci in 0..cn {
+            if is_land[ci] { continue; }
+            cost[ci] += piracy * if is_open_sea[ci] { 1.5 } else { 4.0 };
+        }
+    }
+
     Ok(CoarseCost { f, cw, ch, cost, is_land, is_open_sea, is_river })
 }
 
@@ -770,17 +780,19 @@ fn cached_coarse_cost(
     rivers_json: &str,
     block_sea: bool,
     desert_routes: bool,
+    piracy: f32,
 ) -> Result<Arc<CoarseCost>, String> {
     let mut hasher = DefaultHasher::new();
     rivers_json.hash(&mut hasher);
     desert_routes.hash(&mut hasher); // distinct grid when desert-routing is on
+    piracy.to_bits().hash(&mut hasher); // distinct grid per piracy level
     let key: CostKey = (fingerprint.0, fingerprint.1, block_sea, hasher.finish());
     if let Some(any) = db.cost_cache_get(&key) {
         if let Ok(cc) = any.downcast::<CoarseCost>() {
             return Ok(cc);
         }
     }
-    let cc = Arc::new(build_coarse_cost(world, grid_w, grid_h, rivers_json, block_sea, desert_routes)?);
+    let cc = Arc::new(build_coarse_cost(world, grid_w, grid_h, rivers_json, block_sea, desert_routes, piracy)?);
     db.cost_cache_put(key, cc.clone());
     Ok(cc)
 }
@@ -854,6 +866,7 @@ pub fn compute_trade_routes(
     max_crossing: f32,
     desert_routes: bool,
     economic_regions: u32,
+    piracy: f32,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<TradeRoute>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -869,7 +882,7 @@ pub fn compute_trade_routes(
     if settlements.len() < 2 { return Ok(vec![]); }
 
     let world = db.cached_tiles_with_conn(&conn)?;
-    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes)?;
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy)?;
     let (cw, f) = (cc.cw, cc.f);
 
     // Map EVERY settlement to a coarse node (sorted by score, strongest first).
@@ -1773,6 +1786,7 @@ pub fn compute_trade_matrix(
     desert_routes: bool,
     economic_regions: u32,
     luxury_bias: f32,
+    piracy: f32,
     db: State<'_, WorldDb>,
 ) -> Result<TradeMatrix, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -1998,7 +2012,7 @@ pub fn compute_trade_matrix(
     // a route between their regions exists under the chosen trade reach (so when
     // continents are too far / the ocean too wide, trade stays within reach and
     // no flow is drawn). Flows that share a corridor stack onto the same trunk.
-    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes)?;
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy)?;
     let region_node: Vec<usize> = centers.iter().map(|&(x, y)| {
         let cx = (x.max(0) as u32 / cc.f).min(cc.cw as u32 - 1) as i32;
         let cy = (y.max(0) as u32 / cc.f).min(cc.ch as u32 - 1) as i32;
@@ -2181,6 +2195,7 @@ pub fn compute_political(
     max_crossing: f32,
     desert_routes: bool,
     economic_regions: u32,
+    piracy: f32,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<PoliticalCenter>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -2215,7 +2230,7 @@ pub fn compute_political(
     };
 
     // Route centrality: count reachable nearest-neighbour links per node.
-    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes)?;
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy)?;
     let cnode: Vec<usize> = nodes.iter().map(|s| {
         let cx = (s.x / cc.f).min(cc.cw as u32 - 1) as i32;
         let cy = (s.y / cc.f).min(cc.ch as u32 - 1) as i32;
@@ -2515,6 +2530,7 @@ pub fn compute_economy(
     desert_routes: bool,
     economic_regions: u32,
     luxury_bias: f32,
+    piracy: f32,
     db: State<'_, WorldDb>,
 ) -> Result<EconomySnapshot, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -2557,7 +2573,7 @@ pub fn compute_economy(
         return Ok(empty);
     }
 
-    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes)?;
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy)?;
     let cnode: Vec<usize> = nodes.iter().map(|s| {
         let cx = (s.x / cc.f).min(cc.cw as u32 - 1) as i32;
         let cy = (s.y / cc.f).min(cc.ch as u32 - 1) as i32;

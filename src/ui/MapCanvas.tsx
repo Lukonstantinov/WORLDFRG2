@@ -335,11 +335,12 @@ export function MapCanvas() {
       bioParams.maxCrossing,
       bioParams.desertRoutes,
       bioParams.economicRegions,
+      bioParams.piracyLevel,
     ).then((routes) => {
       om.drawTradeRoutes(routes);
       requestRender();
     }).catch(() => {});
-  }, [step8Done, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, bioParams.economicRegions, requestRender]);
+  }, [step8Done, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, bioParams.economicRegions, bioParams.piracyLevel, requestRender]);
 
   // All map overlays in ONE IPC round-trip (see `compute_overlays`): wind/current
   // vectors + streamlines, fishery banks, shark/shipworm/reef/storm danger zones
@@ -404,11 +405,12 @@ export function MapCanvas() {
       bioParams.desertRoutes,
       bioParams.economicRegions,
       bioParams.luxuryBias,
+      bioParams.piracyLevel,
     ).then((matrix) => {
       om.drawTradeTrunks(matrix.trunks, meta.grid_width);
       requestRender();
     }).catch(() => {});
-  }, [step8Done, worldKey, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, bioParams.economicRegions, bioParams.luxuryBias, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [step8Done, worldKey, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, bioParams.economicRegions, bioParams.luxuryBias, bioParams.piracyLevel, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Political influence — product of the Political step (9).
   useEffect(() => {
@@ -426,11 +428,12 @@ export function MapCanvas() {
       bioParams.maxCrossing,
       bioParams.desertRoutes,
       bioParams.economicRegions,
+      bioParams.piracyLevel,
     ).then((centers) => {
       om.drawPolitical(centers);
       requestRender();
     }).catch(() => {});
-  }, [step9Done, worldKey, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, bioParams.economicRegions, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [step9Done, worldKey, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, bioParams.economicRegions, bioParams.piracyLevel, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Hydrate the persisted economy snapshot when a world loads (survives save/open).
   useEffect(() => {

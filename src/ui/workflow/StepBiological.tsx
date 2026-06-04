@@ -121,6 +121,19 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
         Subsistence worlds trade staples; mercantile worlds prize distant luxuries (silk, spices).
       </div>
 
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#5a7090", marginTop: 2 }}>
+        <span>Piracy</span>
+        <span style={{ color: "#8aa0c0" }}>
+          {bioParams.piracyLevel < 0.1 ? "safe seas" : bioParams.piracyLevel > 0.6 ? "infested" : "some raiders"}
+        </span>
+      </div>
+      <input type="range" min={0} max={100} value={Math.round(bioParams.piracyLevel * 100)}
+        onChange={(e) => setBioParams({ piracyLevel: Number(e.target.value) / 100 })}
+        style={{ width: "100%" }} />
+      <div style={{ fontSize: 9, color: "#5a7090" }}>
+        Raiders make coastal narrows &amp; straits costlier — trade hugs safe coasts, detours or goes overland.
+      </div>
+
       <div style={{ fontSize: 10, color: "#5a7090", marginTop: 2 }}>Trade reach</div>
       <select value={bioParams.tradeReach}
         onChange={(e) => setBioParams({ tradeReach: Number(e.target.value) })}

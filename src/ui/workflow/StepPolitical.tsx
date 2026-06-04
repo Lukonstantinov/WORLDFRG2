@@ -44,6 +44,7 @@ export function StepPolitical(_props: Props) {
         bioParams.maxCrossing,
         bioParams.desertRoutes,
         bioParams.economicRegions,
+        bioParams.piracyLevel,
       );
       setCenters(result);
       markStepCompleted(9);

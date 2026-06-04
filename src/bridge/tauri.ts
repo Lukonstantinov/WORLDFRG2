@@ -185,6 +185,7 @@ export async function computeTradeRoutes(
   maxCrossing: number,
   desertRoutes: boolean,
   economicRegions: number,
+  piracy: number,
 ): Promise<TradeRoute[]> {
   return invoke("compute_trade_routes", {
     settlementsJson: JSON.stringify(settlements),
@@ -193,6 +194,7 @@ export async function computeTradeRoutes(
     maxCrossing,
     desertRoutes,
     economicRegions,
+    piracy,
   });
 }
 
@@ -287,6 +289,7 @@ export async function computeTradeMatrix(
   desertRoutes: boolean,
   economicRegions: number,
   luxuryBias: number,
+  piracy: number,
 ): Promise<TradeMatrix> {
   return invoke("compute_trade_matrix", {
     settlementsJson: JSON.stringify(settlements),
@@ -296,6 +299,7 @@ export async function computeTradeMatrix(
     desertRoutes,
     economicRegions,
     luxuryBias,
+    piracy,
   });
 }
 
@@ -307,6 +311,7 @@ export async function computePolitical(
   maxCrossing: number,
   desertRoutes: boolean,
   economicRegions: number,
+  piracy: number,
 ): Promise<PoliticalCenter[]> {
   return invoke("compute_political", {
     settlementsJson: JSON.stringify(settlements),
@@ -315,6 +320,7 @@ export async function computePolitical(
     maxCrossing,
     desertRoutes,
     economicRegions,
+    piracy,
   });
 }
 
@@ -328,6 +334,7 @@ export async function computeEconomy(
   desertRoutes: boolean,
   economicRegions: number,
   luxuryBias: number,
+  piracy: number,
 ): Promise<EconomySnapshot> {
   return invoke("compute_economy", {
     settlementsJson: JSON.stringify(settlements),
@@ -337,6 +344,7 @@ export async function computeEconomy(
     desertRoutes,
     economicRegions,
     luxuryBias,
+    piracy,
   });
 }
 

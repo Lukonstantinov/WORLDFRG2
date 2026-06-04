@@ -41,6 +41,7 @@ export function StepEconomy(_props: Props) {
         bioParams.desertRoutes,
         bioParams.economicRegions,
         bioParams.luxuryBias,
+        bioParams.piracyLevel,
       );
       setEconomy(result);
       markStepCompleted(10);

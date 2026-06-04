@@ -41,11 +41,12 @@ export function TradeMatrixPanel() {
       bioParams.desertRoutes,
       bioParams.economicRegions,
       bioParams.luxuryBias,
+      bioParams.piracyLevel,
     )
       .then(setMatrix)
       .catch(() => setMatrix(null))
       .finally(() => setLoading(false));
-  }, [show, settlements, rivers, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, bioParams.economicRegions, bioParams.luxuryBias]);
+  }, [show, settlements, rivers, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, bioParams.economicRegions, bioParams.luxuryBias, bioParams.piracyLevel]);
 
   // Per-good price dynamics: cheapest origin → most expensive market + its hub.
   const priceRows = useMemo(() => {

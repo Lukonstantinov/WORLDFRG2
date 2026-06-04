@@ -29,6 +29,7 @@ export interface BioParamsState {
   economicRegions: number;   // number of economic regions / hub granularity (2..40)
   luxuryBias: number;        // 0 = subsistence (staples), 0.5 = neutral, 1 = mercantile (luxuries)
   climateStrictness: number; // 0 = diffuse belts, 0.5 = neutral, 1 = tight climate-locked belts
+  piracyLevel: number;       // 0 = safe seas, 1 = pirate-infested (raises maritime route cost)
 }
 
 interface UIStore {
@@ -118,7 +119,7 @@ export const useUIStore = create<UIStore>((set) => ({
   landmassSource: "none",
   terrainParams: { density: 0.5, height: 0.5, spread: 0.5, roughness: 0.4, seed: null },
   riverParams: { density: 0.5, width: 1.0, lakeFillDepth: 0.004, lakeMaxFraction: 0.0008 },
-  bioParams: { gemDeposits: 6, tradeReach: 1, maxCrossing: 0.18, desertRoutes: false, calendarMonths: 12, stormMonth: 0, economicRegions: 14, luxuryBias: 0.5, climateStrictness: 0.5 },
+  bioParams: { gemDeposits: 6, tradeReach: 1, maxCrossing: 0.18, desertRoutes: false, calendarMonths: 12, stormMonth: 0, economicRegions: 14, luxuryBias: 0.5, climateStrictness: 0.5, piracyLevel: 0 },
   showTradeMatrix: false,
   selectedHub: null,
   selectedChain: null,
