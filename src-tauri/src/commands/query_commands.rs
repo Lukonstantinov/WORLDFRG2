@@ -563,7 +563,7 @@ impl CoarseCost {
 
 fn build_coarse_cost(
     world: &WorldTiles, grid_w: u32, grid_h: u32, rivers_json: &str, block_sea: bool,
-    desert_routes: bool, piracy: f32,
+    desert_routes: bool, piracy: f32, season: i32, months: u32,
 ) -> Result<CoarseCost, String> {
     let f = (grid_w / 700).max(1);
     let cw = ((grid_w + f - 1) / f) as i32;
@@ -758,6 +758,36 @@ fn build_coarse_cost(
         }
     }
 
+    // Seasonal closures (#12): for a specific moon (season 1..=months) high
+    // mountain passes snow shut in the hemisphere's winter and monsoon/cyclone
+    // seas close their sailing windows, so routes detour or wait. season <= 0
+    // (or months == 0) leaves the annual grid untouched.
+    if season > 0 && months > 0 {
+        let m = (((season as u32).min(months) - 1) as f32 + 0.5) / months as f32; // 0..1 round the year
+        let smooth = |x: f32, a: f32, b: f32| -> f32 { let t = ((x - a) / (b - a)).clamp(0.0, 1.0); t * t * (3.0 - 2.0 * t) };
+        for cy in 0..ch {
+            let wy = (cy as u32 * f + f / 2).min(grid_h - 1);
+            let lat = 90.0 - (wy as f32 / grid_h as f32) * 180.0; // north positive
+            for cx in 0..cw {
+                let ci = (cy * cw + cx) as usize;
+                if is_land[ci] {
+                    // Snow-shut passes: high relief, mid/high latitude, deep winter.
+                    if elev[ci] >= 0.45 {
+                        let shift = if lat >= 0.0 { 0.0 } else { 0.5 };
+                        let winter = ((m - shift) * std::f32::consts::TAU).cos() * 0.5 + 0.5;
+                        let latw = smooth(lat.abs(), 22.0, 50.0);
+                        cost[ci] += winter * latw * 45.0;
+                    }
+                } else if !block_sea {
+                    // Monsoon / cyclone sailing window: stormy seas dearer in season.
+                    let monsoon = sea_hazard[ci].clamp(0.0, 1.0)
+                        * crate::sim::biological::storm_season_phase(season, months, lat);
+                    cost[ci] += monsoon * 16.0;
+                }
+            }
+        }
+    }
+
     Ok(CoarseCost { f, cw, ch, cost, is_land, is_open_sea, is_river })
 }
 
@@ -781,18 +811,22 @@ fn cached_coarse_cost(
     block_sea: bool,
     desert_routes: bool,
     piracy: f32,
+    season: i32,
+    months: u32,
 ) -> Result<Arc<CoarseCost>, String> {
     let mut hasher = DefaultHasher::new();
     rivers_json.hash(&mut hasher);
     desert_routes.hash(&mut hasher); // distinct grid when desert-routing is on
     piracy.to_bits().hash(&mut hasher); // distinct grid per piracy level
+    season.hash(&mut hasher);
+    months.hash(&mut hasher); // distinct grid per seasonal closure month
     let key: CostKey = (fingerprint.0, fingerprint.1, block_sea, hasher.finish());
     if let Some(any) = db.cost_cache_get(&key) {
         if let Ok(cc) = any.downcast::<CoarseCost>() {
             return Ok(cc);
         }
     }
-    let cc = Arc::new(build_coarse_cost(world, grid_w, grid_h, rivers_json, block_sea, desert_routes, piracy)?);
+    let cc = Arc::new(build_coarse_cost(world, grid_w, grid_h, rivers_json, block_sea, desert_routes, piracy, season, months)?);
     db.cost_cache_put(key, cc.clone());
     Ok(cc)
 }
@@ -867,6 +901,8 @@ pub fn compute_trade_routes(
     desert_routes: bool,
     economic_regions: u32,
     piracy: f32,
+    season: i32,
+    months: u32,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<TradeRoute>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -882,7 +918,7 @@ pub fn compute_trade_routes(
     if settlements.len() < 2 { return Ok(vec![]); }
 
     let world = db.cached_tiles_with_conn(&conn)?;
-    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy)?;
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy, season, months)?;
     let (cw, f) = (cc.cw, cc.f);
 
     // Map EVERY settlement to a coarse node (sorted by score, strongest first).
@@ -2012,7 +2048,7 @@ pub fn compute_trade_matrix(
     // a route between their regions exists under the chosen trade reach (so when
     // continents are too far / the ocean too wide, trade stays within reach and
     // no flow is drawn). Flows that share a corridor stack onto the same trunk.
-    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy)?;
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy, 0, 0)?;
     let region_node: Vec<usize> = centers.iter().map(|&(x, y)| {
         let cx = (x.max(0) as u32 / cc.f).min(cc.cw as u32 - 1) as i32;
         let cy = (y.max(0) as u32 / cc.f).min(cc.ch as u32 - 1) as i32;
@@ -2230,7 +2266,7 @@ pub fn compute_political(
     };
 
     // Route centrality: count reachable nearest-neighbour links per node.
-    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy)?;
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy, 0, 0)?;
     let cnode: Vec<usize> = nodes.iter().map(|s| {
         let cx = (s.x / cc.f).min(cc.cw as u32 - 1) as i32;
         let cy = (s.y / cc.f).min(cc.ch as u32 - 1) as i32;
@@ -2573,7 +2609,7 @@ pub fn compute_economy(
         return Ok(empty);
     }
 
-    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy)?;
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy, 0, 0)?;
     let cnode: Vec<usize> = nodes.iter().map(|s| {
         let cx = (s.x / cc.f).min(cc.cw as u32 - 1) as i32;
         let cy = (s.y / cc.f).min(cc.ch as u32 - 1) as i32;

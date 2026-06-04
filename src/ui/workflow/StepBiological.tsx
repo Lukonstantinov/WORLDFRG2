@@ -134,6 +134,19 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
         Raiders make coastal narrows &amp; straits costlier — trade hugs safe coasts, detours or goes overland.
       </div>
 
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#5a7090", marginTop: 2 }}>
+        <span>Trade season</span>
+        <span style={{ color: "#8aa0c0" }}>
+          {bioParams.tradeSeason === 0 ? "all year" : `moon ${bioParams.tradeSeason}/${bioParams.calendarMonths}`}
+        </span>
+      </div>
+      <input type="range" min={0} max={bioParams.calendarMonths} value={bioParams.tradeSeason}
+        onChange={(e) => setBioParams({ tradeSeason: Number(e.target.value) })}
+        style={{ width: "100%" }} />
+      <div style={{ fontSize: 9, color: "#5a7090" }}>
+        Seasonal closures: winter snows shut high mountain passes; monsoon/cyclone seas close their sailing windows, so routes detour. Routes redraw live as you slide.
+      </div>
+
       <div style={{ fontSize: 10, color: "#5a7090", marginTop: 2 }}>Trade reach</div>
       <select value={bioParams.tradeReach}
         onChange={(e) => setBioParams({ tradeReach: Number(e.target.value) })}

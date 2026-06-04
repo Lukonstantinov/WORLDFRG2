@@ -336,11 +336,13 @@ export function MapCanvas() {
       bioParams.desertRoutes,
       bioParams.economicRegions,
       bioParams.piracyLevel,
+      bioParams.tradeSeason,
+      bioParams.calendarMonths,
     ).then((routes) => {
       om.drawTradeRoutes(routes);
       requestRender();
     }).catch(() => {});
-  }, [step8Done, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, bioParams.economicRegions, bioParams.piracyLevel, requestRender]);
+  }, [step8Done, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, bioParams.economicRegions, bioParams.piracyLevel, bioParams.tradeSeason, bioParams.calendarMonths, requestRender]);
 
   // All map overlays in ONE IPC round-trip (see `compute_overlays`): wind/current
   // vectors + streamlines, fishery banks, shark/shipworm/reef/storm danger zones

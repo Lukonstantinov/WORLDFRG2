@@ -186,6 +186,8 @@ export async function computeTradeRoutes(
   desertRoutes: boolean,
   economicRegions: number,
   piracy: number,
+  season: number,
+  months: number,
 ): Promise<TradeRoute[]> {
   return invoke("compute_trade_routes", {
     settlementsJson: JSON.stringify(settlements),
@@ -195,6 +197,8 @@ export async function computeTradeRoutes(
     desertRoutes,
     economicRegions,
     piracy,
+    season,
+    months,
   });
 }
 
