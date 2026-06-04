@@ -68,6 +68,8 @@ export function MapCanvas() {
   const loadGoodsFromWorld = useGoodsStore((s) => s.loadFromWorld);
   const step9Done = useUIStore((s) => s.stepCompleted[9]);
   const bioParams = useUIStore((s) => s.bioParams);
+  const setSelectedHub = useUIStore((s) => s.setSelectedHub);
+  const selectedChain = useUIStore((s) => s.selectedChain);
 
   // Stable identity for the loaded world. Heavy effects (tile reloads + sim IPC)
   // key off this string rather than the `meta` object, so latitude-slider edits
@@ -85,6 +87,8 @@ export function MapCanvas() {
   activeToolRef.current = activeTool;
   const brushRadiusRef = useRef(brushRadius);
   brushRadiusRef.current = brushRadius;
+  const economyRef = useRef(economy);
+  economyRef.current = economy;
   const elevationValueRef = useRef(elevationValue);
   elevationValueRef.current = elevationValue;
 
@@ -442,6 +446,16 @@ export function MapCanvas() {
     requestRender();
   }, [economy, requestRender]);
 
+  // Highlighted supply-chain road for the selected good (Phase 3).
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    const chain = (economy && selectedChain !== null)
+      ? economy.chains.find((c) => c.id === selectedChain) ?? null : null;
+    om.setSupplyChain(chain);
+    requestRender();
+  }, [economy, selectedChain, requestRender]);
+
   // Sync overlay visibility
   useEffect(() => {
     const om = overlayManagerRef.current;
@@ -558,6 +572,28 @@ export function MapCanvas() {
       return;
     }
 
+    // Hub selection (Phase 3): a left-click on/near a trade hub opens its
+    // inspector. Only with the pan/select tools so painting is never hijacked.
+    if (e.button === 0 && (activeToolRef.current === "pan" || activeToolRef.current === "select")) {
+      const econ = economyRef.current;
+      if (econ && econ.hubs.length > 0) {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) {
+          const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+          const thresh = Math.max(6, m.grid_width * 0.012);
+          let best = -1; let bestD = thresh * thresh;
+          for (const h of econ.hubs) {
+            let dx = Math.abs(h.x - wx);
+            if (dx > m.grid_width / 2) dx = m.grid_width - dx;
+            const dy = h.y - wy;
+            const d = dx * dx + dy * dy;
+            if (d < bestD) { bestD = d; best = h.id; }
+          }
+          if (best >= 0) { setSelectedHub(best); return; }
+        }
+      }
+    }
+
     if (activeToolRef.current === "pan" || e.button === 1) {
       viewport.startPan(e.clientX, e.clientY);
       return;
@@ -595,7 +631,7 @@ export function MapCanvas() {
         }
       }
     }
-  }, [applyBrush, setInspectedCell, refreshTiles]);
+  }, [applyBrush, setInspectedCell, setSelectedHub, refreshTiles]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const viewport = viewportRef.current;

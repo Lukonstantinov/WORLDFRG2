@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter, EconChokepoint } from "../types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain } from "../types";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "../goods";
 import { drawGoodIcon } from "./goodIcons";
 
@@ -63,6 +63,7 @@ export class OverlayManager {
   private tradeTrunks: TradeTrunk[] = [];
   private politicalCenters: PoliticalCenter[] = [];
   private chokepoints: EconChokepoint[] = [];
+  private supplyChain: EconChain | null = null;
   private latLinesData: { gridW: number; gridH: number; equatorOffset: number; latScale: number } | null = null;
 
   private visibility: Record<string, boolean> = {
@@ -137,6 +138,12 @@ export class OverlayManager {
 
   drawChokepoints(chokepoints: EconChokepoint[]) {
     this.chokepoints = chokepoints;
+  }
+
+  /** Highlight one good's supply chain (origin → hub stops → consumer) with the
+   *  price at each stop. Pass null to clear. */
+  setSupplyChain(chain: EconChain | null) {
+    this.supplyChain = chain;
   }
 
   drawLatLines(gridW: number, gridH: number, equatorOffset = 0.5, latScale = 1) {
@@ -314,6 +321,11 @@ export class OverlayManager {
     // Strategic chokepoints: high-volume trade gateways (straits / passes).
     if (this.visibility.chokepoints && this.chokepoints.length > 0) {
       for (const cp of this.chokepoints) this.renderChokepoint(ctx, cp);
+    }
+
+    // Selected supply-chain road (origin → hub stops → here) with per-hop price.
+    if (this.supplyChain && this.supplyChain.stops.length > 0) {
+      this.renderSupplyChain(ctx, this.supplyChain);
     }
 
     if (this.visibility.settlements && this.settlements.length > 0) {
@@ -730,6 +742,51 @@ export class OverlayManager {
     ctx.globalAlpha = 1;
   }
 
+  /** A highlighted supply-chain road with a price label at every hop. */
+  private renderSupplyChain(ctx: CanvasRenderingContext2D, chain: EconChain) {
+    const pts = chain.points;
+    const half = (this.worldW || 1e9) / 2;
+    const inv = 1 / Math.sqrt(this.currentScale);
+
+    // Road line (skip the wrap-seam segment).
+    ctx.lineWidth = Math.max(1.2, 3.5 * inv);
+    ctx.strokeStyle = "rgba(255,220,120,0.9)";
+    ctx.lineCap = "round";
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i]; const b = pts[i + 1];
+      if (this.worldW && Math.abs(a[0] - b[0]) > half) continue;
+      ctx.beginPath();
+      ctx.moveTo(a[0] + 0.5, a[1] + 0.5);
+      ctx.lineTo(b[0] + 0.5, b[1] + 0.5);
+      ctx.stroke();
+    }
+    ctx.lineCap = "butt";
+
+    // Stop dots + price labels (origin green, consumer orange, hops gold).
+    const r = Math.max(0.9, 2.2 * inv);
+    const fs = Math.max(5, 10 / this.currentScale);
+    ctx.font = `${fs}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    for (let i = 0; i < pts.length; i++) {
+      const px = pts[i][0] + 0.5; const py = pts[i][1] + 0.5;
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fillStyle = i === 0 ? "rgba(120,220,140,0.95)"
+        : (i === pts.length - 1 ? "rgba(255,140,90,0.95)" : "rgba(255,220,120,0.95)");
+      ctx.fill();
+      ctx.lineWidth = Math.max(0.3, 0.7 * inv);
+      ctx.strokeStyle = "rgba(0,0,0,0.6)";
+      ctx.stroke();
+      const price = chain.stops[i]?.price ?? 0;
+      ctx.fillStyle = "rgba(255,240,200,0.97)";
+      ctx.fillText(`${price.toFixed(price < 10 ? 1 : 0)}×`, px, py - r - fs * 0.1);
+    }
+    ctx.textAlign = "start";
+    ctx.textBaseline = "alphabetic";
+    ctx.globalAlpha = 1;
+  }
+
   /** Small arrow for wind overlay */
   private renderArrow(ctx: CanvasRenderingContext2D, x: number, y: number, vx: number, vy: number, color: string, alpha: number) {
     const mag = Math.sqrt(vx * vx + vy * vy);
@@ -787,6 +844,7 @@ export class OverlayManager {
     this.tradeTrunks = [];
     this.politicalCenters = [];
     this.chokepoints = [];
+    this.supplyChain = null;
     this.latLinesData = null;
   }
 }

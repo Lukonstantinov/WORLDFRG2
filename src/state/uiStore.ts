@@ -51,6 +51,10 @@ interface UIStore {
   riverParams: RiverParamsState;
   bioParams: BioParamsState;
   showTradeMatrix: boolean;
+  /** Economy hub inspector (Phase 3): selected hub id, or null. */
+  selectedHub: number | null;
+  /** Highlighted supply-chain id (Phase 3): traced on the map, or null. */
+  selectedChain: number | null;
 
   setTool: (tool: ActiveTool) => void;
   setLayer: (layer: ActiveLayer) => void;
@@ -58,6 +62,8 @@ interface UIStore {
   setElevationValue: (v: number) => void;
   setStatus: (text: string) => void;
   setInspectedCell: (cell: { wx: number; wy: number } | null) => void;
+  setSelectedHub: (id: number | null) => void;
+  setSelectedChain: (id: number | null) => void;
   setWorkflowStep: (step: WorkflowStep) => void;
   markStepCompleted: (step: number) => void;
   setSimRunning: (running: boolean) => void;
@@ -114,6 +120,8 @@ export const useUIStore = create<UIStore>((set) => ({
   riverParams: { density: 0.5, width: 1.0, lakeFillDepth: 0.004, lakeMaxFraction: 0.0008 },
   bioParams: { gemDeposits: 6, tradeReach: 1, maxCrossing: 0.18, desertRoutes: false, calendarMonths: 12, stormMonth: 0, economicRegions: 14, luxuryBias: 0.5, climateStrictness: 0.5 },
   showTradeMatrix: false,
+  selectedHub: null,
+  selectedChain: null,
 
   setTool: (tool) => set({ activeTool: tool }),
   setLayer: (layer) => set({ activeLayer: layer }),
@@ -121,6 +129,8 @@ export const useUIStore = create<UIStore>((set) => ({
   setElevationValue: (v) => set({ elevationValue: v }),
   setStatus: (text) => set({ statusText: text }),
   setInspectedCell: (cell) => set({ inspectedCell: cell }),
+  setSelectedHub: (id) => set({ selectedHub: id, selectedChain: null }),
+  setSelectedChain: (id) => set({ selectedChain: id }),
   setSimRunning: (running) => set({ simRunning: running }),
   setLayerOpacity: (opacity) => set({ layerOpacity: opacity }),
 
