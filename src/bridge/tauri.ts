@@ -260,6 +260,10 @@ export async function getGoodsSpec(): Promise<GoodSpec[]> {
 export async function setGoodsSpec(specs: GoodSpec[]): Promise<void> {
   return invoke("set_goods_spec", { specs });
 }
+/** Live suitability heatmap for a good spec (Goods Editor preview). */
+export async function previewGoodScore(spec: GoodSpec): Promise<{ width: number; height: number; data: number[] }> {
+  return invoke("preview_good_score", { spec });
+}
 /** The global good library (editing template for new worlds). */
 export async function getGoodsLibrary(): Promise<GoodSpec[]> {
   return invoke("get_goods_library");

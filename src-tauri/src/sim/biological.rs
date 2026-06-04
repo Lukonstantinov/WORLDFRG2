@@ -1183,6 +1183,28 @@ fn hash01(mut x: u64) -> f32 {
     ((x >> 40) as f32) / 16_777_216.0
 }
 
+/// Downsampled suitability heatmap for one (possibly unsaved) good spec, used by
+/// the Goods Editor to preview where a good would place before a full regen.
+/// Returns a row-major `pw×ph` grid of u8 scores (0..255).
+pub fn preview_score_grid(buf: &WorldBuffer, spec: &GoodSpec, pw: u32, ph: u32) -> Vec<u8> {
+    let builtin_idx = builtin_index_of(&spec.id);
+    let mut out = vec![0u8; (pw * ph) as usize];
+    if buf.width == 0 || buf.height == 0 { return out; }
+    for py in 0..ph {
+        for px in 0..pw {
+            let x = (px * buf.width / pw).min(buf.width - 1);
+            let y = (py * buf.height / ph).min(buf.height - 1);
+            let s = if let Some(env) = &spec.scoring {
+                envelope_score(buf, env, spec.domain, x, y)
+            } else if let Some(idx) = builtin_idx {
+                good_score(buf, idx, x, y)
+            } else { 0.0 };
+            out[(py * pw + px) as usize] = q(s);
+        }
+    }
+    out
+}
+
 #[inline]
 fn has_land_within(buf: &WorldBuffer, x: u32, y: u32, r: i32) -> bool {
     for dy in -r..=r {
