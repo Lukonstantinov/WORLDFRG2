@@ -243,11 +243,16 @@ pub fn generate_settlements(
 
         let population = (base_pop as f32 * (0.5 + score)) as u32;
 
+        // Antique place name (Roman/Greek/Phoenician/Persian by region). Capitals
+        // and cities earn a grand epithet ("Aquentia Magna").
+        let tier = if size == "capital" { 2 } else if size == "city" { 1 } else { 0 };
+        let name = super::names::gen_name_epithet(sx, sy, w, buf.height, tier);
+
         settlements.push(Settlement {
             id: format!("s-{}", settlements.len()),
             x: sx,
             y: sy,
-            name: String::new(), // names removed by request — ranked dots only
+            name,
             size: size.to_string(),
             population,
             score: *score,

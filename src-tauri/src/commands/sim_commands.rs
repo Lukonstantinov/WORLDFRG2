@@ -146,6 +146,7 @@ pub fn sim_biological(
     seed: u64,
     rivers_json: String,
     gem_deposits: u32,
+    climate_strictness: f32,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -159,7 +160,7 @@ pub fn sim_biological(
     biological::compute_shipworm_risk(&mut buf, &river_data);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
-    biological::compute_trade_goods(&mut buf, &river_data, seed, gem_deposits, &goods);
+    biological::compute_trade_goods(&mut buf, &river_data, seed, gem_deposits, climate_strictness, &goods);
 
     buf.save(&conn, "Biological (sharks, shipworms, storms, reefs & trade goods)")
 }
@@ -223,7 +224,7 @@ pub fn sim_run_all(
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
-    biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, &goods);
+    biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
 
     let modified = buf.save(&conn, "Full world generation")?;
 
@@ -316,7 +317,7 @@ pub fn sim_run_all_from_terrain(
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
-    biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, &goods);
+    biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
 
     let modified = buf.save(&conn, "Full generation from template")?;
 

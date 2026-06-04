@@ -43,6 +43,7 @@ export function StepPolitical(_props: Props) {
         bioParams.tradeReach,
         bioParams.maxCrossing,
         bioParams.desertRoutes,
+        bioParams.economicRegions,
       );
       setCenters(result);
       markStepCompleted(9);

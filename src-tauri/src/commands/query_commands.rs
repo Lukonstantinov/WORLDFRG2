@@ -853,6 +853,7 @@ pub fn compute_trade_routes(
     reach: u8,
     max_crossing: f32,
     desert_routes: bool,
+    economic_regions: u32,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<TradeRoute>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -881,7 +882,9 @@ pub fn compute_trade_routes(
     nodes.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
     let nn = nodes.len();
     if nn < 2 { return Ok(vec![]); }
-    let hubs = nn.min(80); // primary-network nodes (multi-link trunks)
+    // Primary-network node count scales with the chosen economic granularity
+    // (default 14 regions ≈ 84 hubs, matching the legacy fixed 80).
+    let hubs = nn.min(((economic_regions.clamp(2, 40) as usize) * 6).clamp(10, 200));
 
     // Candidate links: top hubs link to their 3 nearest neighbours; every other
     // settlement links to its single nearest neighbour (a minor road). Tracked
@@ -1768,6 +1771,8 @@ pub fn compute_trade_matrix(
     reach: u8,
     max_crossing: f32,
     desert_routes: bool,
+    economic_regions: u32,
+    luxury_bias: f32,
     db: State<'_, WorldDb>,
 ) -> Result<TradeMatrix, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -1800,7 +1805,10 @@ pub fn compute_trade_matrix(
     // ── 1. Cluster settlements into regions (greedy seeds by score, spaced) ──
     let mut sorted: Vec<&RouteSettlement> = settlements.iter().collect();
     sorted.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-    let min_sep = (grid_w / 9).max(1) as i32;
+    // Region granularity is user-controlled (default 14). More regions → tighter
+    // spacing so they can all fit; fewer → wider, more spaced economic blocs.
+    let er = economic_regions.clamp(2, 40) as usize;
+    let min_sep = (grid_w / (er as u32 / 2 + 2)).max(1) as i32;
     let mut seeds: Vec<(i32, i32)> = Vec::new();
     for s in &sorted {
         let (sx, sy) = (s.x as i32, s.y as i32);
@@ -1810,7 +1818,7 @@ pub fn compute_trade_matrix(
             ((dx * dx + dy * dy) as f32).sqrt() >= min_sep as f32
         });
         if far { seeds.push((sx, sy)); }
-        if seeds.len() >= 14 { break; }
+        if seeds.len() >= er { break; }
     }
     if seeds.is_empty() {
         return Ok(TradeMatrix { regions: vec![], flows: vec![], trunks: vec![], goods: goods_names });
@@ -1909,11 +1917,31 @@ pub fn compute_trade_matrix(
         }
     }
 
-    // Normalize production per good across regions to 0..1.
+    // Per-good raw totals (absolute footprint) BEFORE normalization, so true
+    // scarcity survives: a good present in only a sliver of one region must not
+    // read as "plentiful" merely because it normalizes to 1.0 (#18). Deposit
+    // goods (gems/metals) are spatially tiny but high-value, so they earn an
+    // abundance floor to ensure they still drive trade (#19).
+    let raw_total: Vec<f32> = (0..gc)
+        .map(|g| production.iter().map(|p| p[g]).sum::<f32>())
+        .collect();
+    let raw_total_max = raw_total.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
+    let is_deposit: Vec<bool> = (0..gc)
+        .map(|g| specs.get(g)
+            .map(|s| matches!(s.distribution, crate::sim::goods_spec::Distribution::Deposits))
+            .unwrap_or(false))
+        .collect();
+    let abundance: Vec<f32> = (0..gc).map(|g| {
+        let a = (raw_total[g] / raw_total_max).sqrt(); // soft scarcity curve
+        if is_deposit[g] { a.max(0.6) } else { a }
+    }).collect();
+
+    // Normalize production per good across regions to 0..1 (relative pattern),
+    // then rescale by global abundance so absolute scarcity carries through to net.
     for g in 0..gc {
         let mx = production.iter().map(|p| p[g]).fold(0.0f32, f32::max);
         if mx > 0.0 {
-            for ri in 0..nr { production[ri][g] /= mx; }
+            for ri in 0..nr { production[ri][g] = production[ri][g] / mx * abundance[g]; }
         }
     }
 
@@ -1930,6 +1958,10 @@ pub fn compute_trade_matrix(
     // Luxuries are only prized across a large/open trade network; tighter reaches
     // (more closed networks) realize less of that demand.
     let reach_factor = match reach { 0 => 1.0, 1 => 0.7, _ => 0.45 };
+    // Mercantile ↔ subsistence bias (#4): >0.5 prizes distant luxuries
+    // (silk/spices), <0.5 makes the world care mostly about staples. Neutral 0.5
+    // leaves the legacy behaviour (lux_mult == 1.0). Staples are unaffected.
+    let lux_mult = (0.4 + luxury_bias.clamp(0.0, 1.0) * 1.2).clamp(0.2, 1.8);
     let mut demand = vec![vec![0.0f32; gc]; nr];
     for ri in 0..nr {
         let size = region_weight[ri] / max_rw; // 0..1
@@ -1937,9 +1969,10 @@ pub fn compute_trade_matrix(
             let mut d = size * desire[g];
             if is_luxury[g] {
                 // Discount in the good's own producing homeland (it's local/common
-                // there) and scale by how open the trade network is.
+                // there) and scale by how open the trade network is + the world's
+                // taste for luxuries.
                 let homeland_discount = 1.0 - 0.6 * production[ri][g].clamp(0.0, 1.0);
-                d *= reach_factor * homeland_discount;
+                d *= reach_factor * homeland_discount * lux_mult;
             }
             demand[ri][g] = d;
         }
@@ -2135,28 +2168,6 @@ fn nearest_ref_hub(pct: f32) -> &'static str {
         .unwrap_or("Venice")
 }
 
-/// Deterministic evocative hub name from a position hash.
-fn gen_hub_name(hx: i64, hy: i64) -> String {
-    const PRE: [&str; 24] = [
-        "Ar", "Bel", "Cor", "Dun", "Esk", "Far", "Gal", "Hal", "Ith", "Kor", "Lor", "Mar",
-        "Nor", "Os", "Pel", "Quor", "Rav", "Sar", "Tor", "Val", "Wend", "Yor", "Zan", "Mer",
-    ];
-    const MID: [&str; 8] = ["a", "e", "i", "o", "an", "en", "or", "ar"];
-    const SUF: [&str; 14] = [
-        "port", "gard", "mouth", "haven", "burg", "ton", "stad", "mar", "keep", "reach",
-        "fell", "wick", "ford", "holm",
-    ];
-    let h = (hx.wrapping_mul(73856093) ^ hy.wrapping_mul(19349663)).unsigned_abs();
-    let pre = PRE[(h % PRE.len() as u64) as usize];
-    let suf = SUF[((h / 23) % SUF.len() as u64) as usize];
-    if h & 4 != 0 {
-        let mid = MID[((h / 7) % MID.len() as u64) as usize];
-        format!("{}{}{}", pre, mid, suf)
-    } else {
-        format!("{}{}", pre, suf)
-    }
-}
-
 /// Re-rank settlements by trade power and emit influence centers. Power blends
 /// base habitability (settlement score), route centrality (how many trade links
 /// a settlement anchors under the chosen reach) and trade monopoly (being the
@@ -2169,6 +2180,7 @@ pub fn compute_political(
     reach: u8,
     max_crossing: f32,
     desert_routes: bool,
+    economic_regions: u32,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<PoliticalCenter>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -2183,11 +2195,16 @@ pub fn compute_political(
         serde_json::from_str(&settlements_json).unwrap_or_default();
     if settlements.is_empty() { return Ok(vec![]); }
 
-    // Top settlements by base score (the political contenders).
+    // Top settlements by base score (the political contenders). Both the
+    // contender pool and the emitted-hub count scale with economic granularity
+    // (default 14 → 84 contenders / 42 hubs, matching the legacy 80 / 40).
+    let er = economic_regions.clamp(2, 40) as usize;
+    let contenders = (er * 6).clamp(10, 200);
+    let hub_out = (er * 3).clamp(5, 120);
     let mut idx: Vec<usize> = (0..settlements.len()).collect();
     idx.sort_by(|&a, &b| settlements[b].score.partial_cmp(&settlements[a].score)
         .unwrap_or(std::cmp::Ordering::Equal));
-    idx.truncate(80);
+    idx.truncate(contenders);
     let nn = idx.len();
     let nodes: Vec<&RouteSettlement> = idx.iter().map(|&i| &settlements[i]).collect();
 
@@ -2322,7 +2339,7 @@ pub fn compute_political(
     let base_r = grid_w as f32 * 0.018;
     let span_r = grid_w as f32 * 0.075;
     let mut out: Vec<PoliticalCenter> = Vec::new();
-    for (rank, &ni) in order.iter().enumerate().take(40) {
+    for (rank, &ni) in order.iter().enumerate().take(hub_out) {
         let p = power[ni] / pmax;
         // Power tier → 1..5 stars; only the dominant hubs reach 5 (Venice/Genoa).
         let stars = if p >= 0.80 { 5 } else if p >= 0.60 { 4 }
@@ -2346,7 +2363,10 @@ pub fn compute_political(
             stars,
             population: nodes[ni].population,
             monopolies: monopolies[ni].clone(),
-            name: gen_hub_name(nodes[ni].x as i64, nodes[ni].y as i64),
+            name: crate::sim::names::gen_name_epithet(
+                nodes[ni].x, nodes[ni].y, grid_w, grid_h,
+                if stars >= 5 { 2 } else if stars >= 4 { 1 } else { 0 },
+            ),
             throughput: throughput[ni],
             ref_pct,
             nearest_hub: nearest_ref_hub(ref_pct).to_string(),

@@ -33,11 +33,13 @@ export function TradeMatrixPanel() {
       bioParams.tradeReach,
       bioParams.maxCrossing,
       bioParams.desertRoutes,
+      bioParams.economicRegions,
+      bioParams.luxuryBias,
     )
       .then(setMatrix)
       .catch(() => setMatrix(null))
       .finally(() => setLoading(false));
-  }, [show, settlements, rivers, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes]);
+  }, [show, settlements, rivers, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, bioParams.economicRegions, bioParams.luxuryBias]);
 
   if (!show) return null;
 

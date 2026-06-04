@@ -554,11 +554,18 @@ pub fn compute_reef_risk(buf: &mut WorldBuffer) {
 /// `Envelope`. Disabled goods leave a zeroed column. One tile column is written
 /// per spec (the count is no longer capped at `GOODS_COUNT`).
 pub fn compute_trade_goods(
-    buf: &mut WorldBuffer, _rivers: &[River], seed: u64, gem_deposits: u32, specs: &[GoodSpec],
+    buf: &mut WorldBuffer, _rivers: &[River], seed: u64, gem_deposits: u32,
+    climate_strictness: f32, specs: &[GoodSpec],
 ) {
     let w = buf.width;
     let h = buf.height;
     let n = buf.total();
+
+    // Climate strictness sharpens (or softens) every good's suitability score
+    // before placement: gamma > 1 tightens belts toward their ideal climate
+    // (more clustered, rarer), gamma < 1 lets them sprawl. 0.5 = neutral.
+    let gamma = (0.55 + climate_strictness.clamp(0.0, 1.0) * 0.90).clamp(0.30, 2.0);
+    let shape = |s: f32| -> f32 { if (gamma - 1.0).abs() < 1e-3 { s } else { s.clamp(0.0, 1.0).powf(gamma) } };
 
     // Size the buffer's good columns to the active spec list (grow for custom
     // goods, drop trailing columns that no longer exist).
@@ -592,11 +599,11 @@ pub fn compute_trade_goods(
                         for x in 0..w {
                             let i = buf.idx(x, y);
                             if buf.terrain[i] != 1 { continue; }
-                            cand[i] = if let Some(env) = &spec.scoring {
+                            cand[i] = shape(if let Some(env) = &spec.scoring {
                                 envelope_score(buf, env, spec.domain, x, y)
                             } else if let Some(idx) = builtin_idx {
                                 good_score(buf, idx, x, y)
-                            } else { 0.0 };
+                            } else { 0.0 });
                         }
                     }
                 } else {
@@ -622,7 +629,7 @@ pub fn compute_trade_goods(
                         } else {
                             0.0
                         };
-                        score[buf.idx(x, y)] = s;
+                        score[buf.idx(x, y)] = shape(s);
                     }
                 }
                 // Built-ins reproduce their original seed by salting with index*K;

@@ -113,9 +113,9 @@ export async function simGenerateSettlements(
 }
 
 export async function simBiological(
-  seed: number, riversJson: string, gemDeposits: number,
+  seed: number, riversJson: string, gemDeposits: number, climateStrictness: number,
 ): Promise<[number, number][]> {
-  return invoke("sim_biological", { seed, riversJson, gemDeposits });
+  return invoke("sim_biological", { seed, riversJson, gemDeposits, climateStrictness });
 }
 
 export async function simGenerateTerrainFromTemplate(
@@ -184,6 +184,7 @@ export async function computeTradeRoutes(
   reach: number,
   maxCrossing: number,
   desertRoutes: boolean,
+  economicRegions: number,
 ): Promise<TradeRoute[]> {
   return invoke("compute_trade_routes", {
     settlementsJson: JSON.stringify(settlements),
@@ -191,6 +192,7 @@ export async function computeTradeRoutes(
     reach,
     maxCrossing,
     desertRoutes,
+    economicRegions,
   });
 }
 
@@ -279,6 +281,8 @@ export async function computeTradeMatrix(
   reach: number,
   maxCrossing: number,
   desertRoutes: boolean,
+  economicRegions: number,
+  luxuryBias: number,
 ): Promise<TradeMatrix> {
   return invoke("compute_trade_matrix", {
     settlementsJson: JSON.stringify(settlements),
@@ -286,6 +290,8 @@ export async function computeTradeMatrix(
     reach,
     maxCrossing,
     desertRoutes,
+    economicRegions,
+    luxuryBias,
   });
 }
 
@@ -296,6 +302,7 @@ export async function computePolitical(
   reach: number,
   maxCrossing: number,
   desertRoutes: boolean,
+  economicRegions: number,
 ): Promise<PoliticalCenter[]> {
   return invoke("compute_political", {
     settlementsJson: JSON.stringify(settlements),
@@ -303,6 +310,7 @@ export async function computePolitical(
     reach,
     maxCrossing,
     desertRoutes,
+    economicRegions,
   });
 }
 
