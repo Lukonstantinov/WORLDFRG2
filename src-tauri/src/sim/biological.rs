@@ -631,7 +631,10 @@ pub fn compute_trade_goods(
                     Some(idx) if spec.scoring.is_none() => (idx as u64).wrapping_mul(SEED_SALT_K),
                     _ => id_salt(&spec.id),
                 };
-                buf.goods[slot] = localize_good(buf, &score, marine, unlimited, spec.rarity, salt, seed);
+                let mut belt = localize_good(buf, &score, marine, unlimited, spec.rarity, salt, seed);
+                // Extra reach: trade carries a good a bit past its core homeland.
+                dilate_belt(buf, &mut belt, marine, 2, 0.72);
+                buf.goods[slot] = belt;
             }
         }
     }
@@ -1130,6 +1133,37 @@ fn place_deposits(buf: &WorldBuffer, seed: u64, count: u32, salt: u64, cand: &[f
         }
     }
     out
+}
+
+/// Grow a placed belt outward by `rings` cells at decaying intensity, so the
+/// good's production reaches **a bit further** than its core homeland (trade lets
+/// a region's staple spread to its near hinterland / along the coast). Modest by
+/// design — a couple of rings — and bounded by the same passability rule as the
+/// belt (sea/mountains for land goods). Deposit goods are not dilated.
+fn dilate_belt(buf: &WorldBuffer, out: &mut [u8], marine: bool, rings: u32, decay: f32) {
+    let w = buf.width;
+    let h = buf.height;
+    let passable = |i: usize| -> bool {
+        if marine { buf.terrain[i] == 0 }
+        else { buf.terrain[i] == 1 && buf.elevation[i] < MOUNTAIN_NORM }
+    };
+    for _ in 0..rings {
+        let src = out.to_vec();
+        for y in 0..h {
+            for x in 0..w {
+                let i = buf.idx(x, y);
+                if src[i] == 0 { continue; }
+                let spread = (src[i] as f32 * decay) as u8;
+                if spread == 0 { continue; }
+                for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                    let nx = buf.wrap_x(x as i32 + dx);
+                    let ny = buf.clamp_y(y as i32 + dy);
+                    let ni = buf.idx(nx, ny);
+                    if passable(ni) && out[ni] < spread { out[ni] = spread; }
+                }
+            }
+        }
+    }
 }
 
 /// Deterministic hash → [0,1) (splitmix64-style finalizer).

@@ -387,6 +387,11 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
 
     // Build terrain bitmap for helper functions
     let terrain: Vec<u8> = buf.terrain.clone();
+    // Shelf mask — the continental shelf is treated as a current boundary like the
+    // coast: currents are steered along the shelf break and carry NO flow over the
+    // shelf itself (real boundary currents follow the continental slope, not the
+    // shallow shelf). Cloned so we can read it while writing current vectors.
+    let shelf: Vec<u8> = buf.is_shelf.clone();
 
     // Phase 1: basin distances
     let (dist_w, dist_e) = precompute_basin_dist(&terrain, w, h);
@@ -464,7 +469,16 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
             // continental slope). gx/gy point up the depth gradient ≈ toward the
             // shallower water / coastline.
             let dval = depth_field[i];
-            if dval >= 1 && dval <= 5 {
+            // Steer along the shore/shelf when within a few cells of land OR at the
+            // shelf break (this cell or a 4-neighbour is shelf), so currents turn to
+            // run along the continental slope instead of riding up onto the shelf.
+            let il = (y * w + (x + w - 1) % w) as usize;
+            let ir = (y * w + (x + 1) % w) as usize;
+            let iu = if y > 0 { ((y - 1) * w + x) as usize } else { i };
+            let idn = if y + 1 < h { ((y + 1) * w + x) as usize } else { i };
+            let near_shelf = shelf[i] == 1 || shelf[il] == 1 || shelf[ir] == 1
+                || shelf[iu] == 1 || shelf[idn] == 1;
+            if (dval >= 1 && dval <= 5) || near_shelf {
                 let glen = (gx * gx + gy * gy).sqrt();
                 if glen > 0.001 {
                     let nlx = gx / glen; // unit normal toward shore
@@ -645,6 +659,18 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
     for i in 0..n {
         if terrain[i] == 0 && comp[i] != u32::MAX && sizes[comp[i] as usize] < large_min {
             buf.current_type[i] = 0;
+        }
+    }
+
+    // ── Phase 7: clear flow over the continental shelf ────────────────────────
+    // Done LAST (after warm-tag advection has already carried warmth across the
+    // basin, so coastal climate is unaffected): the rendered current arrows /
+    // streamlines should stop at the shelf break and not draw over the shallow
+    // shelf. Boundary currents run along the continental slope, not the apron.
+    for i in 0..n {
+        if shelf[i] == 1 {
+            buf.current_vx[i] = 0.0;
+            buf.current_vy[i] = 0.0;
         }
     }
 }

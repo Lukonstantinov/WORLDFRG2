@@ -36,7 +36,7 @@ pub fn sim_generate_terrain(seed: u64, db: State<'_, WorldDb>) -> Result<Vec<(i3
     elevation::compute_sea_depth(&mut buf);
     // Proper continental shelf (not just compute_sea_depth's thin ~1px ring) so
     // the Shelf layer is populated after the per-step elevation phase.
-    elevation::generate_shelves(&mut buf, seed, 6.0, 0.4, 0.3, 8.0);
+    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
     buf.save(&conn, "Generate terrain & depth")
 }
 
@@ -185,7 +185,7 @@ pub fn sim_run_all(
     // shelf-tagged cells are the thin 1-shelf ring compute_sea_depth marks, so
     // the shelf layer looked empty and upwelling/fisheries had almost nothing to
     // work with.
-    elevation::generate_shelves(&mut buf, seed, 6.0, 0.4, 0.3, 8.0);
+    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
 
     // Phase 3: Ocean & atmosphere (salinity before currents for thermohaline coupling)
     ocean::compute_wind_belts(&mut buf);
@@ -254,7 +254,7 @@ pub fn sim_generate_terrain_from_template(
     // all-in-one "Complete from Landmass" ran generate_shelves; the per-step
     // path left just compute_sea_depth's ~4-cell ring (≈1px at 3600-wide → the
     // Shelf layer looked empty). This makes per-step match Run-All.
-    elevation::generate_shelves(&mut buf, seed, 6.0, 0.4, 0.3, 8.0);
+    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
     buf.save(&conn, "Generate elevation from template")
 }
 
@@ -278,7 +278,7 @@ pub fn sim_run_all_from_terrain(
     // Phase 2b: continental shelves (default params) — previously omitted here
     // despite the doc-comment claiming it ran, so template worlds had no visible
     // shelf and broken upwelling/fisheries.
-    elevation::generate_shelves(&mut buf, seed, 6.0, 0.4, 0.3, 8.0);
+    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
 
     // Phase 3: Ocean & atmosphere (salinity before currents for thermohaline coupling)
     ocean::compute_wind_belts(&mut buf);

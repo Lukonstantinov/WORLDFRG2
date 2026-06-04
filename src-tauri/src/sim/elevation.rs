@@ -441,8 +441,12 @@ pub fn generate_shelves(
             };
 
             buf.sea_depth[idx] = depth;
-            buf.is_shelf[idx] = if depth < 0.15 { 1 } else { 0 };
-            buf.is_shelf_edge[idx] = if (0.12..0.18).contains(&depth) { 1 } else { 0 };
+            // Wider shelf: tag the whole gentle-slope band (out to the start of
+            // the steep drop-off) as shelf, not just the very shallowest water,
+            // so the continental shelf reads as a broad apron rather than a thin
+            // coastal ring.
+            buf.is_shelf[idx] = if depth < 0.24 { 1 } else { 0 };
+            buf.is_shelf_edge[idx] = if (0.20..0.28).contains(&depth) { 1 } else { 0 };
         }
     }
 }

@@ -903,8 +903,25 @@ pub fn compute_trade_routes(
     for i in 0..hubs {
         for j in nearest_k(i, 3) { major_edges.insert((i.min(j), i.max(j))); }
     }
+    // Each lesser town links to its nearest HUB (a major-network node), not merely
+    // its nearest neighbour — otherwise small towns chain only to each other and
+    // never reach the trunk network. This guarantees every settlement is attached
+    // to the major trade routes.
+    let nearest_hub = |i: usize| -> Option<usize> {
+        let mut best = None;
+        let mut bd = i64::MAX;
+        for j in 0..hubs {
+            if i == j { continue; }
+            let mut dx = (nodes[i].0 - nodes[j].0).abs();
+            if dx > cw / 2 { dx = cw - dx; }
+            let dy = nodes[i].1 - nodes[j].1;
+            let d = (dx * dx + dy * dy) as i64;
+            if d < bd { bd = d; best = Some(j); }
+        }
+        best
+    };
     for i in hubs..nn {
-        if let Some(&j) = nearest_k(i, 1).first() {
+        if let Some(j) = nearest_hub(i) {
             let e = (i.min(j), i.max(j));
             if !major_edges.contains(&e) { minor_edges.insert(e); }
         }
@@ -1685,22 +1702,51 @@ pub struct TradeTrunk {
 /// historical routes for the iconic goods, "<Good> Road" otherwise).
 fn road_name(good_id: &str) -> String {
     match good_id {
-        "silk" => "Silk Road".to_string(),
-        "spices" | "cloves" | "pepper" | "frankincense" | "incense" => "Spice Road".to_string(),
-        "salt" => "Salt Road".to_string(),
-        "amber" => "Amber Road".to_string(),
-        "tea" => "Tea Road".to_string(),
-        "gold" => "Gold Road".to_string(),
-        "furs" => "Fur Road".to_string(),
-        "wine" => "Wine Road".to_string(),
+        "silk" => "Silk Road",
+        "spices" => "Spice Road",
+        "cloves" => "Clove Route",
+        "pepper" => "Pepper Way",
+        "frankincense" => "Incense Route",
+        "incense" => "Incense Road",
+        "salt" => "Salt Road",
+        "amber" => "Amber Road",
+        "tea" => "Tea Horse Road",
+        "coffee" => "Coffee Trail",
+        "cacao" => "Cacao Trail",
+        "sugar" => "Sugar Route",
+        "gold" => "Golden Road",
+        "copper" => "Copper Way",
+        "tin" => "Tin Route",
+        "iron" => "Iron Road",
+        "gemstones" => "Jewel Road",
+        "pearls" => "Pearl Route",
+        "furs" => "Fur Road",
+        "wine" => "Wine Road",
+        "oliveoil" => "Oil Route",
+        "wheat" => "Grain Road",
+        "timber" => "Timber Way",
+        "hardwoods" => "Ebony Route",
+        "horses" => "Horse Road",
+        "ivory" => "Ivory Road",
+        "dyes" => "Tyrian Route",
+        "indigo" => "Indigo Road",
+        "cotton" => "Cotton Road",
+        "wool_fleece" | "wool_llama" => "Wool Way",
+        "stockfish" | "whaling" => "Cod Route",
+        "ceramics" => "Porcelain Road",
+        "glassware" => "Glass Way",
+        "tobacco" => "Tobacco Trail",
+        "dates" => "Caravan Road",
+        "paper" => "Paper Road",
         other => {
             let mut ch = other.chars();
             let titled = ch.next()
                 .map(|f| f.to_uppercase().collect::<String>() + ch.as_str())
                 .unwrap_or_default();
-            format!("{} Road", titled)
+            return format!("{} Road", titled);
         }
     }
+    .to_string()
 }
 
 #[derive(Serialize)]
@@ -1967,8 +2013,14 @@ pub fn compute_trade_matrix(
                 if s.0 == di { continue; }
                 let key = (s.0.min(di), s.0.max(di));
                 if !pair_path.contains_key(&key) {
+                    // Trade flows must NEVER cross open ocean: reject any routed
+                    // path that touches an open-water (no-land-neighbour) cell.
+                    // Coastal-sea hugging is still allowed (is_open_sea is false
+                    // there), so island/coastal trade via short coastal hops works,
+                    // but no trunk beelines across a basin between continents.
                     let p = coarse_dijkstra(&cc, region_node[s.0], region_node[di])
-                        .filter(|p| path_allowed(&cc, p, reach, max_crossing, grid_w));
+                        .filter(|p| path_allowed(&cc, p, reach, max_crossing, grid_w))
+                        .filter(|p| !p.iter().any(|&c| cc.is_open_sea[c]));
                     pair_path.insert(key, p);
                 }
                 if pair_path[&key].is_none() { continue; } // unreachable under this reach
@@ -2008,16 +2060,21 @@ pub fn compute_trade_matrix(
     edges_v.sort_by(|a, b| b.1.total.partial_cmp(&a.1.total).unwrap_or(std::cmp::Ordering::Equal));
     let max_total = edges_v.first().map(|e| e.1.total).unwrap_or(1.0).max(1e-6);
     let mut trunks: Vec<TradeTrunk> = Vec::new();
-    for (idx, ((a, b), acc)) in edges_v.into_iter().enumerate() {
+    // Name ONE corridor per dominant commodity (its single highest-volume edge,
+    // since edges are volume-sorted), so many goods get a named road without the
+    // same name repeating along every segment of a corridor.
+    let mut named_goods: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    for ((a, b), acc) in edges_v.into_iter() {
         if acc.total < 0.02 { continue; }
         let good = acc.by_good.iter()
             .max_by(|x, y| x.1.partial_cmp(y.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(g, _)| *g);
         let (p_from, p_to) = if acc.fwd >= acc.bwd { (a, b) } else { (b, a) };
-        let road = if idx < 12 && acc.total >= 0.20 * max_total {
-            good.and_then(|g| goods_names.get(g)).map(|id| road_name(id)).unwrap_or_default()
-        } else {
-            String::new()
+        let road = match good {
+            Some(g) if acc.total >= 0.06 * max_total && named_goods.insert(g) => {
+                goods_names.get(g).map(|id| road_name(id)).unwrap_or_default()
+            }
+            _ => String::new(),
         };
         trunks.push(TradeTrunk {
             points: vec![cc.world_of(p_from), cc.world_of(p_to)],
