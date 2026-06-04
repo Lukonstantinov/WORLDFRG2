@@ -341,6 +341,11 @@ export async function getEconomy(): Promise<EconomySnapshot> {
   return invoke("get_economy");
 }
 
+/** Export the economy snapshot to a file (.json = raw snapshot, else CSV). */
+export async function exportTradeData(path: string): Promise<void> {
+  return invoke("export_trade_data", { path });
+}
+
 export interface ElevationBand {
   label: string;
   count: number;

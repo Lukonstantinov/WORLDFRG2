@@ -2874,6 +2874,50 @@ pub fn compute_economy(
     Ok(snapshot)
 }
 
+/// Export the economy snapshot to `path`. `.json` writes the raw snapshot;
+/// anything else writes a flat CSV (one row per hub × good, produce + receive).
+#[tauri::command]
+pub fn export_trade_data(path: String, db: State<'_, WorldDb>) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let json = metadata::get_meta(&conn, "economy").map_err(|e| e.to_string())?
+        .ok_or_else(|| "No economy snapshot — run the Economy step (10) first.".to_string())?;
+    if path.to_lowercase().ends_with(".json") {
+        return std::fs::write(&path, json).map_err(|e| e.to_string());
+    }
+    let snap: EconomySnapshot = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    let esc = |v: &str| -> String {
+        if v.contains(',') || v.contains('"') || v.contains('\n') {
+            format!("\"{}\"", v.replace('"', "\"\""))
+        } else { v.to_string() }
+    };
+    let mut s = String::from("hub,x,y,stars,wealth,population,good,role,amount,quality,grade,flavor,price,counterparty\n");
+    for h in &snap.hubs {
+        for p in &h.produces {
+            let row = [
+                esc(&h.name), h.x.to_string(), h.y.to_string(), h.stars.to_string(),
+                format!("{:.3}", h.wealth), h.population.to_string(),
+                esc(&p.good_name), "produce".to_string(), format!("{:.3}", p.amount),
+                format!("{:.3}", p.quality), esc(&p.grade), esc(&p.flavor),
+                format!("{:.3}", p.price), String::new(),
+            ];
+            s.push_str(&row.join(",")); s.push('\n');
+        }
+        for r in &h.receives {
+            let from = snap.hubs.iter().find(|x| x.id == r.from_hub)
+                .map(|x| x.name.clone()).unwrap_or_default();
+            let row = [
+                esc(&h.name), h.x.to_string(), h.y.to_string(), h.stars.to_string(),
+                format!("{:.3}", h.wealth), h.population.to_string(),
+                esc(&r.good_name), "receive".to_string(), format!("{:.3}", r.amount),
+                String::new(), String::new(), String::new(),
+                format!("{:.3}", r.price), esc(&from),
+            ];
+            s.push_str(&row.join(",")); s.push('\n');
+        }
+    }
+    std::fs::write(&path, s).map_err(|e| e.to_string())
+}
+
 /// Read the persisted economy snapshot (empty if none has been generated yet).
 #[tauri::command]
 pub fn get_economy(db: State<'_, WorldDb>) -> Result<EconomySnapshot, String> {

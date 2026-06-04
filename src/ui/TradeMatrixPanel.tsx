@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "../state/uiStore";
 import { useWorldStore } from "../state/worldStore";
-import { computeTradeMatrix } from "../bridge/tauri";
+import { computeTradeMatrix, exportTradeData } from "../bridge/tauri";
 import type { TradeMatrix } from "../types";
 import { useGoodsStore } from "../state/goodsStore";
 
@@ -17,6 +17,7 @@ type Tab = "regions" | "hubs" | "corridors" | "prices";
 export function TradeMatrixPanel() {
   const show = useUIStore((s) => s.showTradeMatrix);
   const setShow = useUIStore((s) => s.setShowTradeMatrix);
+  const setStatus = useUIStore((s) => s.setStatus);
   const bioParams = useUIStore((s) => s.bioParams);
   const setSelectedHub = useUIStore((s) => s.setSelectedHub);
   const settlements = useWorldStore((s) => s.settlements);
@@ -66,6 +67,19 @@ export function TradeMatrixPanel() {
     [economy],
   );
 
+  const handleExport = async () => {
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const path = await save({
+        defaultPath: "trade.csv",
+        filters: [{ name: "CSV", extensions: ["csv"] }, { name: "JSON", extensions: ["json"] }],
+      });
+      if (!path) return;
+      await exportTradeData(path);
+      setStatus(`Trade data exported to ${path}`);
+    } catch (e) { setStatus(`Export failed: ${e}`); }
+  };
+
   if (!show) return null;
 
   const hasEconomy = !!economy && economy.hubs.length > 0;
@@ -83,8 +97,14 @@ export function TradeMatrixPanel() {
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <h2 style={{ margin: 0, color: "#c0d8f0", fontSize: 16, fontWeight: 600 }}>Global Trade</h2>
-          <span onClick={() => setShow(false)}
-            style={{ color: "#7090b0", cursor: "pointer", fontSize: 18, lineHeight: 1 }} title="Close">×</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {hasEconomy && (
+              <button onClick={handleExport} style={{ ...tabBtn, background: "#16324a", color: "#9cc4e4" }}
+                title="Export the economy as CSV or JSON">⤓ Export</button>
+            )}
+            <span onClick={() => setShow(false)}
+              style={{ color: "#7090b0", cursor: "pointer", fontSize: 18, lineHeight: 1 }} title="Close">×</span>
+          </div>
         </div>
 
         {/* Tabs */}
