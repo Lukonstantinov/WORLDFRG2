@@ -140,6 +140,7 @@ export interface EconHubGood {
   amount: number;
   quality: number;
   grade: string;
+  flavor: string;
   price: number;
 }
 export interface EconReceive {

@@ -2391,6 +2391,7 @@ pub struct EconHubGood {
     pub amount: f32,
     pub quality: f32,   // 0..1 grade
     pub grade: String,  // grade label (Exquisite/Fine/Standard/Common/Coarse)
+    pub flavor: String, // evocative per-good variety name by quality (empty if none)
     pub price: f32,     // local origin price multiplier (× base)
 }
 
@@ -2455,6 +2456,37 @@ fn grade_name(q: f32) -> &'static str {
     else if q >= 0.50 { "Standard" }
     else if q >= 0.32 { "Common" }
     else { "Coarse" }
+}
+
+/// Evocative variety name for a good by quality tier (0..4). Empty for goods
+/// without a curated ladder (the generic grade label is shown instead).
+fn good_flavor(good_id: &str, q: f32) -> String {
+    let tier = if q >= 0.85 { 4 } else if q >= 0.68 { 3 } else if q >= 0.50 { 2 } else if q >= 0.32 { 1 } else { 0 };
+    let list: Option<[&str; 5]> = match good_id {
+        "wine" => Some(["Vin Ordinaire", "Village", "Estate", "Reserve", "Grand Cru"]),
+        "silk" => Some(["Raw Tussah", "Plain Weave", "Damask", "Brocade", "Imperial Sericea"]),
+        "spices" => Some(["Market Blend", "Garden", "Highland", "Monsoon", "Royal Stores"]),
+        "pepper" => Some(["Common", "Garbled", "Tellicherry", "Malabar Gold", "Royal Long"]),
+        "cloves" => Some(["Stem", "Whole Bud", "Hand-Picked", "Mother Clove", "Sultan's Reserve"]),
+        "tea" => Some(["Coarse Leaf", "Garden", "Spring Flush", "First Flush", "Imperial Tribute"]),
+        "coffee" => Some(["Common", "Plantation", "Highland", "Peaberry", "Heirloom Reserve"]),
+        "oliveoil" => Some(["Lampante", "Virgin", "Cold-Pressed", "Extra Virgin", "First Harvest"]),
+        "pearls" => Some(["Seed", "Baroque", "Round", "Fine Round", "Orient Lustre"]),
+        "gemstones" => Some(["Industrial", "Flawed", "Clean", "Brilliant", "Flawless"]),
+        "gold" => Some(["Placer", "Alloyed", "Refined", "Fine", "Crown Bullion"]),
+        "cotton" => Some(["Homespun", "Calico", "Muslin", "Fine Muslin", "Sea-Island"]),
+        "wool_fleece" | "wool_llama" => Some(["Coarse", "Carded", "Combed", "Fine Staple", "Vicuña-Soft"]),
+        "tobacco" => Some(["Field", "Cured", "Aged", "Prime Leaf", "Vintage Wrapper"]),
+        "frankincense" | "incense" => Some(["Common", "Temple", "Pure", "Select", "First Tears"]),
+        "cacao" => Some(["Bulk", "Trinitario", "Criollo", "Fine Criollo", "Ancient Cru"]),
+        "ceramics" => Some(["Earthenware", "Stoneware", "Glazed", "Porcelain", "Eggshell Porcelain"]),
+        "glassware" => Some(["Bottle", "Blown", "Cristallo", "Cut Crystal", "Millefiori"]),
+        "furs" => Some(["Pelt", "Winter Coat", "Prime", "Silver", "Imperial Sable"]),
+        "amber" => Some(["Cloudy", "Raw", "Clear", "Golden", "Sun-Stone"]),
+        "dyes" | "indigo" => Some(["Faded", "Common", "Fast", "Deep", "Royal Tyrian"]),
+        _ => None,
+    };
+    list.map(|l| l[tier].to_string()).unwrap_or_default()
 }
 
 /// splitmix-style hash → [0,1).
@@ -2810,9 +2842,11 @@ pub fn compute_economy(
             .filter(|&g| prod[hh][g] > 0.05)
             .map(|g| {
                 let q = quality[hh][g];
+                let id = goods_names.get(g).cloned().unwrap_or_default();
+                let flavor = good_flavor(&id, q);
                 EconHubGood {
-                    good: g, good_name: goods_names.get(g).cloned().unwrap_or_default(),
-                    amount: prod[hh][g], quality: q, grade: grade_name(q).to_string(),
+                    good: g, good_name: id, amount: prod[hh][g], quality: q,
+                    grade: grade_name(q).to_string(), flavor,
                     price: 0.7 + 0.6 * q,
                 }
             }).collect();

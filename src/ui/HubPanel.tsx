@@ -41,7 +41,10 @@ export function HubPanel() {
       {hub.produces.slice(0, 12).map((p) => (
         <div key={`p${p.good}`} style={row}>
           <span style={{ minWidth: 16 }}>{iconFor(p.good_name)}</span>
-          <span style={{ flex: 1, color: "#c0d0e0" }}>{labelFor(p.good_name)}</span>
+          <span style={{ flex: 1, color: "#c0d0e0" }}>
+            {labelFor(p.good_name)}
+            {p.flavor && <span style={{ color: "#8a7a5a", fontSize: 9, fontStyle: "italic" }}> · {p.flavor}</span>}
+          </span>
           <span style={{ color: "#9ab0c8", fontSize: 9 }}>{p.grade}</span>
           <span style={{ color: "#e0c060", minWidth: 34, textAlign: "right" }}>{p.price.toFixed(1)}×</span>
         </div>
