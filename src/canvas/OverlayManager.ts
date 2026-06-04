@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter } from "../types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain } from "../types";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "../goods";
 import { drawGoodIcon } from "./goodIcons";
 
@@ -62,6 +62,8 @@ export class OverlayManager {
   private goodMeta: Map<string, { icon: string; color: string }> | null = null;
   private tradeTrunks: TradeTrunk[] = [];
   private politicalCenters: PoliticalCenter[] = [];
+  private chokepoints: EconChokepoint[] = [];
+  private supplyChain: EconChain | null = null;
   private latLinesData: { gridW: number; gridH: number; equatorOffset: number; latScale: number } | null = null;
 
   private visibility: Record<string, boolean> = {
@@ -69,7 +71,7 @@ export class OverlayManager {
     markers: false, wind: false, currents: false, latLines: false,
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, reefZones: false, tradeFlows: false,
-    politicalInfluence: false,
+    politicalInfluence: false, chokepoints: false,
   };
 
   private currentScale = 1;
@@ -132,6 +134,16 @@ export class OverlayManager {
 
   drawPolitical(centers: PoliticalCenter[]) {
     this.politicalCenters = centers;
+  }
+
+  drawChokepoints(chokepoints: EconChokepoint[]) {
+    this.chokepoints = chokepoints;
+  }
+
+  /** Highlight one good's supply chain (origin → hub stops → consumer) with the
+   *  price at each stop. Pass null to clear. */
+  setSupplyChain(chain: EconChain | null) {
+    this.supplyChain = chain;
   }
 
   drawLatLines(gridW: number, gridH: number, equatorOffset = 0.5, latScale = 1) {
@@ -304,6 +316,16 @@ export class OverlayManager {
     // Political influence: translucent discs sized by trade power.
     if (this.visibility.politicalInfluence && this.politicalCenters.length > 0) {
       for (const c of this.politicalCenters) this.renderPoliticalCenter(ctx, c);
+    }
+
+    // Strategic chokepoints: high-volume trade gateways (straits / passes).
+    if (this.visibility.chokepoints && this.chokepoints.length > 0) {
+      for (const cp of this.chokepoints) this.renderChokepoint(ctx, cp);
+    }
+
+    // Selected supply-chain road (origin → hub stops → here) with per-hop price.
+    if (this.supplyChain && this.supplyChain.stops.length > 0) {
+      this.renderSupplyChain(ctx, this.supplyChain);
     }
 
     if (this.visibility.settlements && this.settlements.length > 0) {
@@ -681,6 +703,90 @@ export class OverlayManager {
     ctx.globalAlpha = 1;
   }
 
+  /** A strategic chokepoint: a pulsing ring + label at the gateway edge. */
+  private renderChokepoint(ctx: CanvasRenderingContext2D, cp: EconChokepoint) {
+    if (cp.points.length < 2) return;
+    const [a, b] = cp.points;
+    const mx = (a[0] + b[0]) / 2 + 0.5;
+    const my = (a[1] + b[1]) / 2 + 0.5;
+    const r = Math.max(1.5, (3 + 6 * cp.share) / Math.sqrt(this.currentScale));
+
+    // Gateway link.
+    ctx.beginPath();
+    ctx.moveTo(a[0] + 0.5, a[1] + 0.5);
+    ctx.lineTo(b[0] + 0.5, b[1] + 0.5);
+    ctx.lineWidth = Math.max(0.5, 1.6 / Math.sqrt(this.currentScale));
+    ctx.strokeStyle = "rgba(230,90,70,0.85)";
+    ctx.stroke();
+
+    // Marker ring.
+    ctx.beginPath();
+    ctx.arc(mx, my, r, 0, Math.PI * 2);
+    ctx.lineWidth = Math.max(0.4, 1.2 / Math.sqrt(this.currentScale));
+    ctx.strokeStyle = "rgba(255,140,90,0.95)";
+    ctx.fillStyle = "rgba(230,90,70,0.18)";
+    ctx.fill();
+    ctx.stroke();
+
+    // Label.
+    if (cp.name) {
+      const fs = Math.max(5, 10 / this.currentScale);
+      ctx.font = `${fs}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      ctx.fillStyle = "rgba(255,200,170,0.95)";
+      ctx.fillText(cp.name, mx, my - r - fs * 0.1);
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** A highlighted supply-chain road with a price label at every hop. */
+  private renderSupplyChain(ctx: CanvasRenderingContext2D, chain: EconChain) {
+    const pts = chain.points;
+    const half = (this.worldW || 1e9) / 2;
+    const inv = 1 / Math.sqrt(this.currentScale);
+
+    // Road line (skip the wrap-seam segment).
+    ctx.lineWidth = Math.max(1.2, 3.5 * inv);
+    ctx.strokeStyle = "rgba(255,220,120,0.9)";
+    ctx.lineCap = "round";
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i]; const b = pts[i + 1];
+      if (this.worldW && Math.abs(a[0] - b[0]) > half) continue;
+      ctx.beginPath();
+      ctx.moveTo(a[0] + 0.5, a[1] + 0.5);
+      ctx.lineTo(b[0] + 0.5, b[1] + 0.5);
+      ctx.stroke();
+    }
+    ctx.lineCap = "butt";
+
+    // Stop dots + price labels (origin green, consumer orange, hops gold).
+    const r = Math.max(0.9, 2.2 * inv);
+    const fs = Math.max(5, 10 / this.currentScale);
+    ctx.font = `${fs}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    for (let i = 0; i < pts.length; i++) {
+      const px = pts[i][0] + 0.5; const py = pts[i][1] + 0.5;
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fillStyle = i === 0 ? "rgba(120,220,140,0.95)"
+        : (i === pts.length - 1 ? "rgba(255,140,90,0.95)" : "rgba(255,220,120,0.95)");
+      ctx.fill();
+      ctx.lineWidth = Math.max(0.3, 0.7 * inv);
+      ctx.strokeStyle = "rgba(0,0,0,0.6)";
+      ctx.stroke();
+      const price = chain.stops[i]?.price ?? 0;
+      ctx.fillStyle = "rgba(255,240,200,0.97)";
+      ctx.fillText(`${price.toFixed(price < 10 ? 1 : 0)}×`, px, py - r - fs * 0.1);
+    }
+    ctx.textAlign = "start";
+    ctx.textBaseline = "alphabetic";
+    ctx.globalAlpha = 1;
+  }
+
   /** Small arrow for wind overlay */
   private renderArrow(ctx: CanvasRenderingContext2D, x: number, y: number, vx: number, vy: number, color: string, alpha: number) {
     const mag = Math.sqrt(vx * vx + vy * vy);
@@ -737,6 +843,8 @@ export class OverlayManager {
     this.goodRegions = [];
     this.tradeTrunks = [];
     this.politicalCenters = [];
+    this.chokepoints = [];
+    this.supplyChain = null;
     this.latLinesData = null;
   }
 }

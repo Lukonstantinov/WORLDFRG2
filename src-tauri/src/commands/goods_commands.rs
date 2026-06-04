@@ -45,6 +45,25 @@ pub fn set_goods_spec(db: State<'_, WorldDb>, specs: Vec<GoodSpec>) -> Result<()
     metadata::set_meta(&conn, "goods_spec", &json).map_err(|e| e.to_string())
 }
 
+/// A downsampled suitability heatmap for one good spec (Goods Editor preview).
+#[derive(serde::Serialize)]
+pub struct PreviewGrid {
+    pub width: u32,
+    pub height: u32,
+    pub data: Vec<u8>, // row-major 0..255 scores
+}
+
+/// Score where a (possibly unsaved) good spec would place across the current
+/// world — a live preview for the Goods Editor, no regeneration needed.
+#[tauri::command]
+pub fn preview_good_score(spec: GoodSpec, db: State<'_, WorldDb>) -> Result<PreviewGrid, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let buf = crate::sim::world_buffer::WorldBuffer::load(&conn)?;
+    let (pw, ph) = (140u32, 70u32);
+    let data = crate::sim::biological::preview_score_grid(&buf, &spec, pw, ph);
+    Ok(PreviewGrid { width: pw, height: ph, data })
+}
+
 fn library_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;

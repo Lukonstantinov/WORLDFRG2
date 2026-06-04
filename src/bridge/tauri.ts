@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { WorldMeta, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, TradeMatrix, PoliticalCenter, GoodSpec } from "../types";
+import type { WorldMeta, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, TradeMatrix, PoliticalCenter, GoodSpec, EconomySnapshot } from "../types";
 
 export async function newWorld(name: string, gridWidth: number, gridHeight: number): Promise<WorldMeta> {
   return invoke("new_world", { name, gridWidth, gridHeight });
@@ -113,9 +113,9 @@ export async function simGenerateSettlements(
 }
 
 export async function simBiological(
-  seed: number, riversJson: string, gemDeposits: number,
+  seed: number, riversJson: string, gemDeposits: number, climateStrictness: number,
 ): Promise<[number, number][]> {
-  return invoke("sim_biological", { seed, riversJson, gemDeposits });
+  return invoke("sim_biological", { seed, riversJson, gemDeposits, climateStrictness });
 }
 
 export async function simGenerateTerrainFromTemplate(
@@ -184,6 +184,10 @@ export async function computeTradeRoutes(
   reach: number,
   maxCrossing: number,
   desertRoutes: boolean,
+  economicRegions: number,
+  piracy: number,
+  season: number,
+  months: number,
 ): Promise<TradeRoute[]> {
   return invoke("compute_trade_routes", {
     settlementsJson: JSON.stringify(settlements),
@@ -191,6 +195,10 @@ export async function computeTradeRoutes(
     reach,
     maxCrossing,
     desertRoutes,
+    economicRegions,
+    piracy,
+    season,
+    months,
   });
 }
 
@@ -258,6 +266,10 @@ export async function getGoodsSpec(): Promise<GoodSpec[]> {
 export async function setGoodsSpec(specs: GoodSpec[]): Promise<void> {
   return invoke("set_goods_spec", { specs });
 }
+/** Live suitability heatmap for a good spec (Goods Editor preview). */
+export async function previewGoodScore(spec: GoodSpec): Promise<{ width: number; height: number; data: number[] }> {
+  return invoke("preview_good_score", { spec });
+}
 /** The global good library (editing template for new worlds). */
 export async function getGoodsLibrary(): Promise<GoodSpec[]> {
   return invoke("get_goods_library");
@@ -279,6 +291,9 @@ export async function computeTradeMatrix(
   reach: number,
   maxCrossing: number,
   desertRoutes: boolean,
+  economicRegions: number,
+  luxuryBias: number,
+  piracy: number,
 ): Promise<TradeMatrix> {
   return invoke("compute_trade_matrix", {
     settlementsJson: JSON.stringify(settlements),
@@ -286,6 +301,9 @@ export async function computeTradeMatrix(
     reach,
     maxCrossing,
     desertRoutes,
+    economicRegions,
+    luxuryBias,
+    piracy,
   });
 }
 
@@ -296,6 +314,8 @@ export async function computePolitical(
   reach: number,
   maxCrossing: number,
   desertRoutes: boolean,
+  economicRegions: number,
+  piracy: number,
 ): Promise<PoliticalCenter[]> {
   return invoke("compute_political", {
     settlementsJson: JSON.stringify(settlements),
@@ -303,7 +323,43 @@ export async function computePolitical(
     reach,
     maxCrossing,
     desertRoutes,
+    economicRegions,
+    piracy,
   });
+}
+
+/** Build + persist the economy snapshot (hubs, quality-graded production,
+ *  cost-aware flows with per-hop prices, wealth, chokepoints). */
+export async function computeEconomy(
+  settlements: { x: number; y: number; score: number; population: number }[],
+  rivers: { points: [number, number][] }[],
+  reach: number,
+  maxCrossing: number,
+  desertRoutes: boolean,
+  economicRegions: number,
+  luxuryBias: number,
+  piracy: number,
+): Promise<EconomySnapshot> {
+  return invoke("compute_economy", {
+    settlementsJson: JSON.stringify(settlements),
+    riversJson: JSON.stringify(rivers),
+    reach,
+    maxCrossing,
+    desertRoutes,
+    economicRegions,
+    luxuryBias,
+    piracy,
+  });
+}
+
+/** Read the persisted economy snapshot (empty if not yet generated). */
+export async function getEconomy(): Promise<EconomySnapshot> {
+  return invoke("get_economy");
+}
+
+/** Export the economy snapshot to a file (.json = raw snapshot, else CSV). */
+export async function exportTradeData(path: string): Promise<void> {
+  return invoke("export_trade_data", { path });
 }
 
 export interface ElevationBand {

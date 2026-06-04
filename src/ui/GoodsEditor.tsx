@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useGoodsStore } from "../state/goodsStore";
+import { previewGoodScore } from "../bridge/tauri";
 import type { GoodSpec, GoodDomain, GoodDistribution, GoodEnvelope } from "../types";
 
 const DOMAINS: GoodDomain[] = ["marine", "coastal", "continental", "island"];
@@ -141,6 +142,7 @@ function GoodRow({ g, i, expanded, onToggleExpand, update, duplicate, remove }: 
           {g.builtin
             ? <span style={{ color: "#7a8aa0", flexBasis: "100%" }}>Built-in scoring (duplicate to customize its climate/temperature envelope).</span>
             : <EnvelopeEditor i={i} env={g.scoring ?? null} update={update} />}
+          <PreviewCanvas spec={g} />
         </div>
       )}
     </>
@@ -236,6 +238,59 @@ function BandRow({ label, band, onChange, max, step }: {
       <Labeled label={`falloff ${num(edge)}`}>
         <input type="range" min={0} max={max} step={step} value={edge} onChange={(e) => onChange([lo, hi, parseFloat(e.target.value)])} />
       </Labeled>
+    </div>
+  );
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const h = hex.replace("#", "");
+  const n = h.length === 3
+    ? h.split("").map((c) => c + c).join("")
+    : h.padEnd(6, "0").slice(0, 6);
+  const v = parseInt(n, 16);
+  return { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255 };
+}
+
+/** Live suitability heatmap for a good spec (debounced; brighter = better fit). */
+function PreviewCanvas({ spec }: { spec: GoodSpec }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const key = JSON.stringify(spec);
+  useEffect(() => {
+    let cancelled = false;
+    const t = setTimeout(() => {
+      previewGoodScore(spec).then((grid) => {
+        if (cancelled) return;
+        const cv = ref.current;
+        if (!cv || grid.width === 0) return;
+        cv.width = grid.width;
+        cv.height = grid.height;
+        const ctx = cv.getContext("2d");
+        if (!ctx) return;
+        const img = ctx.createImageData(grid.width, grid.height);
+        const col = hexToRgb(spec.color);
+        for (let p = 0; p < grid.data.length; p++) {
+          const v = grid.data[p] / 255;
+          const o = p * 4;
+          img.data[o] = Math.round(8 + col.r * v);
+          img.data[o + 1] = Math.round(10 + col.g * v);
+          img.data[o + 2] = Math.round(14 + col.b * v);
+          img.data[o + 3] = 255;
+        }
+        ctx.putImageData(img, 0, 0);
+      }).catch(() => {});
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return (
+    <div style={{ flexBasis: "100%" }}>
+      <div style={{ fontSize: 10, color: "#7a8aa0", marginBottom: 3 }}>
+        Suitability preview (brighter = better fit) — updates as you edit
+      </div>
+      <canvas ref={ref} style={{
+        width: 280, height: 140, imageRendering: "pixelated",
+        border: "1px solid #2a3442", borderRadius: 4, background: "#06090d",
+      }} />
     </div>
   );
 }

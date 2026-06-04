@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { WorldMeta, RiverData, LakeData, Settlement } from "../types";
+import type { WorldMeta, RiverData, LakeData, Settlement, EconomySnapshot } from "../types";
 
 /** Live latitude framing, kept SEPARATE from `meta` on purpose. Dragging the
  *  Latitude Frame sliders mutates only this slice so the lat-line overlay tracks
@@ -19,6 +19,8 @@ interface WorldStore {
   rivers: RiverData[];
   lakes: LakeData[];
   settlements: Settlement[];
+  /** Persisted economy snapshot (Phase 2): hubs, chains, chokepoints. */
+  economy: EconomySnapshot | null;
   setMeta: (meta: WorldMeta) => void;
   /** Update only the live latitude framing while dragging the sliders. Does NOT
    *  touch `meta`, so heavy meta-keyed effects stay quiet during the drag. */
@@ -26,6 +28,7 @@ interface WorldStore {
   setRivers: (rivers: RiverData[]) => void;
   setLakes: (lakes: LakeData[]) => void;
   setSettlements: (settlements: Settlement[]) => void;
+  setEconomy: (economy: EconomySnapshot | null) => void;
   clear: () => void;
 }
 
@@ -43,6 +46,7 @@ export const useWorldStore = create<WorldStore>((set) => ({
   rivers: [],
   lakes: [],
   settlements: [],
+  economy: null,
   // Setting meta reseeds the live latitude framing so the two stay in sync on
   // world load and after a persisted slider change.
   setMeta: (meta) => set({ meta, isLoaded: true, latConfig: latFromMeta(meta) }),
@@ -50,6 +54,7 @@ export const useWorldStore = create<WorldStore>((set) => ({
   setRivers: (rivers) => set({ rivers }),
   setLakes: (lakes) => set({ lakes }),
   setSettlements: (settlements) => set({ settlements }),
+  setEconomy: (economy) => set({ economy }),
   clear: () =>
-    set({ meta: null, isLoaded: false, latConfig: DEFAULT_LAT, rivers: [], lakes: [], settlements: [] }),
+    set({ meta: null, isLoaded: false, latConfig: DEFAULT_LAT, rivers: [], lakes: [], settlements: [], economy: null }),
 }));

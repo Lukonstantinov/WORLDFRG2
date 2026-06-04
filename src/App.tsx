@@ -5,6 +5,7 @@ import { StatusBar } from "./ui/StatusBar";
 import { WorkflowPanel } from "./ui/workflow/WorkflowPanel";
 import { InfoPanel } from "./ui/InfoPanel";
 import { TradeMatrixPanel } from "./ui/TradeMatrixPanel";
+import { HubPanel } from "./ui/HubPanel";
 import { ElevationLegend } from "./ui/ElevationLegend";
 import { ElevationHistogram } from "./ui/ElevationHistogram";
 import { GoodsEditor } from "./ui/GoodsEditor";
@@ -337,6 +338,7 @@ export default function App() {
         <div style={{ flex: 1, position: "relative", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
           <MapCanvas />
           <InfoPanel />
+          <HubPanel />
           <TradeMatrixPanel />
           <ElevationLegend />
           <ElevationHistogram />

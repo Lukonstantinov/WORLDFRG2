@@ -131,7 +131,61 @@ export interface RiverParams {
   lakeMaxFraction: number; // 0.000002-0.05: max lake size as fraction of grid (low = tiny lakes)
 }
 
-export type WorkflowStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+export type WorkflowStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+
+// ── Economy snapshot (Phase 2) ──
+export interface EconHubGood {
+  good: number;
+  good_name: string;
+  amount: number;
+  quality: number;
+  grade: string;
+  flavor: string;
+  price: number;
+}
+export interface EconReceive {
+  good: number;
+  good_name: string;
+  amount: number;
+  price: number;
+  chain: number;
+  from_hub: number;
+}
+export interface EconHub {
+  id: number;
+  x: number;
+  y: number;
+  name: string;
+  power: number;
+  stars: number;
+  wealth: number;
+  population: number;
+  produces: EconHubGood[];
+  receives: EconReceive[];
+}
+export interface EconChainStop {
+  hub: number;
+  price: number;
+}
+export interface EconChain {
+  id: number;
+  good: number;
+  good_name: string;
+  stops: EconChainStop[];
+  points: [number, number][];
+}
+export interface EconChokepoint {
+  points: [number, number][];
+  volume: number;
+  share: number;
+  name: string;
+}
+export interface EconomySnapshot {
+  hubs: EconHub[];
+  chains: EconChain[];
+  chokepoints: EconChokepoint[];
+  goods: string[];
+}
 
 export interface SharkZone {
   cells: [number, number][]; // coarse-cell top-left world coords (marked area)

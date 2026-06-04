@@ -563,7 +563,7 @@ impl CoarseCost {
 
 fn build_coarse_cost(
     world: &WorldTiles, grid_w: u32, grid_h: u32, rivers_json: &str, block_sea: bool,
-    desert_routes: bool,
+    desert_routes: bool, piracy: f32, season: i32, months: u32,
 ) -> Result<CoarseCost, String> {
     let f = (grid_w / 700).max(1);
     let cw = ((grid_w + f - 1) / f) as i32;
@@ -748,6 +748,46 @@ fn build_coarse_cost(
         }
     }
 
+    // Piracy surcharge (#11): raiders haunt the busy coastal narrows / straits
+    // worst, the open sea less so. Higher piracy pushes trade to hug safer coasts,
+    // detour, or go overland — and makes goods that can only arrive by sea dearer.
+    if !block_sea && piracy > 0.0 {
+        for ci in 0..cn {
+            if is_land[ci] { continue; }
+            cost[ci] += piracy * if is_open_sea[ci] { 1.5 } else { 4.0 };
+        }
+    }
+
+    // Seasonal closures (#12): for a specific moon (season 1..=months) high
+    // mountain passes snow shut in the hemisphere's winter and monsoon/cyclone
+    // seas close their sailing windows, so routes detour or wait. season <= 0
+    // (or months == 0) leaves the annual grid untouched.
+    if season > 0 && months > 0 {
+        let m = (((season as u32).min(months) - 1) as f32 + 0.5) / months as f32; // 0..1 round the year
+        let smooth = |x: f32, a: f32, b: f32| -> f32 { let t = ((x - a) / (b - a)).clamp(0.0, 1.0); t * t * (3.0 - 2.0 * t) };
+        for cy in 0..ch {
+            let wy = (cy as u32 * f + f / 2).min(grid_h - 1);
+            let lat = 90.0 - (wy as f32 / grid_h as f32) * 180.0; // north positive
+            for cx in 0..cw {
+                let ci = (cy * cw + cx) as usize;
+                if is_land[ci] {
+                    // Snow-shut passes: high relief, mid/high latitude, deep winter.
+                    if elev[ci] >= 0.45 {
+                        let shift = if lat >= 0.0 { 0.0 } else { 0.5 };
+                        let winter = ((m - shift) * std::f32::consts::TAU).cos() * 0.5 + 0.5;
+                        let latw = smooth(lat.abs(), 22.0, 50.0);
+                        cost[ci] += winter * latw * 45.0;
+                    }
+                } else if !block_sea {
+                    // Monsoon / cyclone sailing window: stormy seas dearer in season.
+                    let monsoon = sea_hazard[ci].clamp(0.0, 1.0)
+                        * crate::sim::biological::storm_season_phase(season, months, lat);
+                    cost[ci] += monsoon * 16.0;
+                }
+            }
+        }
+    }
+
     Ok(CoarseCost { f, cw, ch, cost, is_land, is_open_sea, is_river })
 }
 
@@ -770,17 +810,23 @@ fn cached_coarse_cost(
     rivers_json: &str,
     block_sea: bool,
     desert_routes: bool,
+    piracy: f32,
+    season: i32,
+    months: u32,
 ) -> Result<Arc<CoarseCost>, String> {
     let mut hasher = DefaultHasher::new();
     rivers_json.hash(&mut hasher);
     desert_routes.hash(&mut hasher); // distinct grid when desert-routing is on
+    piracy.to_bits().hash(&mut hasher); // distinct grid per piracy level
+    season.hash(&mut hasher);
+    months.hash(&mut hasher); // distinct grid per seasonal closure month
     let key: CostKey = (fingerprint.0, fingerprint.1, block_sea, hasher.finish());
     if let Some(any) = db.cost_cache_get(&key) {
         if let Ok(cc) = any.downcast::<CoarseCost>() {
             return Ok(cc);
         }
     }
-    let cc = Arc::new(build_coarse_cost(world, grid_w, grid_h, rivers_json, block_sea, desert_routes)?);
+    let cc = Arc::new(build_coarse_cost(world, grid_w, grid_h, rivers_json, block_sea, desert_routes, piracy, season, months)?);
     db.cost_cache_put(key, cc.clone());
     Ok(cc)
 }
@@ -853,6 +899,10 @@ pub fn compute_trade_routes(
     reach: u8,
     max_crossing: f32,
     desert_routes: bool,
+    economic_regions: u32,
+    piracy: f32,
+    season: i32,
+    months: u32,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<TradeRoute>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -868,7 +918,7 @@ pub fn compute_trade_routes(
     if settlements.len() < 2 { return Ok(vec![]); }
 
     let world = db.cached_tiles_with_conn(&conn)?;
-    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes)?;
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy, season, months)?;
     let (cw, f) = (cc.cw, cc.f);
 
     // Map EVERY settlement to a coarse node (sorted by score, strongest first).
@@ -881,7 +931,9 @@ pub fn compute_trade_routes(
     nodes.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
     let nn = nodes.len();
     if nn < 2 { return Ok(vec![]); }
-    let hubs = nn.min(80); // primary-network nodes (multi-link trunks)
+    // Primary-network node count scales with the chosen economic granularity
+    // (default 14 regions ≈ 84 hubs, matching the legacy fixed 80).
+    let hubs = nn.min(((economic_regions.clamp(2, 40) as usize) * 6).clamp(10, 200));
 
     // Candidate links: top hubs link to their 3 nearest neighbours; every other
     // settlement links to its single nearest neighbour (a minor road). Tracked
@@ -1768,6 +1820,9 @@ pub fn compute_trade_matrix(
     reach: u8,
     max_crossing: f32,
     desert_routes: bool,
+    economic_regions: u32,
+    luxury_bias: f32,
+    piracy: f32,
     db: State<'_, WorldDb>,
 ) -> Result<TradeMatrix, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -1800,7 +1855,10 @@ pub fn compute_trade_matrix(
     // ── 1. Cluster settlements into regions (greedy seeds by score, spaced) ──
     let mut sorted: Vec<&RouteSettlement> = settlements.iter().collect();
     sorted.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-    let min_sep = (grid_w / 9).max(1) as i32;
+    // Region granularity is user-controlled (default 14). More regions → tighter
+    // spacing so they can all fit; fewer → wider, more spaced economic blocs.
+    let er = economic_regions.clamp(2, 40) as usize;
+    let min_sep = (grid_w / (er as u32 / 2 + 2)).max(1) as i32;
     let mut seeds: Vec<(i32, i32)> = Vec::new();
     for s in &sorted {
         let (sx, sy) = (s.x as i32, s.y as i32);
@@ -1810,7 +1868,7 @@ pub fn compute_trade_matrix(
             ((dx * dx + dy * dy) as f32).sqrt() >= min_sep as f32
         });
         if far { seeds.push((sx, sy)); }
-        if seeds.len() >= 14 { break; }
+        if seeds.len() >= er { break; }
     }
     if seeds.is_empty() {
         return Ok(TradeMatrix { regions: vec![], flows: vec![], trunks: vec![], goods: goods_names });
@@ -1909,11 +1967,31 @@ pub fn compute_trade_matrix(
         }
     }
 
-    // Normalize production per good across regions to 0..1.
+    // Per-good raw totals (absolute footprint) BEFORE normalization, so true
+    // scarcity survives: a good present in only a sliver of one region must not
+    // read as "plentiful" merely because it normalizes to 1.0 (#18). Deposit
+    // goods (gems/metals) are spatially tiny but high-value, so they earn an
+    // abundance floor to ensure they still drive trade (#19).
+    let raw_total: Vec<f32> = (0..gc)
+        .map(|g| production.iter().map(|p| p[g]).sum::<f32>())
+        .collect();
+    let raw_total_max = raw_total.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
+    let is_deposit: Vec<bool> = (0..gc)
+        .map(|g| specs.get(g)
+            .map(|s| matches!(s.distribution, crate::sim::goods_spec::Distribution::Deposits))
+            .unwrap_or(false))
+        .collect();
+    let abundance: Vec<f32> = (0..gc).map(|g| {
+        let a = (raw_total[g] / raw_total_max).sqrt(); // soft scarcity curve
+        if is_deposit[g] { a.max(0.6) } else { a }
+    }).collect();
+
+    // Normalize production per good across regions to 0..1 (relative pattern),
+    // then rescale by global abundance so absolute scarcity carries through to net.
     for g in 0..gc {
         let mx = production.iter().map(|p| p[g]).fold(0.0f32, f32::max);
         if mx > 0.0 {
-            for ri in 0..nr { production[ri][g] /= mx; }
+            for ri in 0..nr { production[ri][g] = production[ri][g] / mx * abundance[g]; }
         }
     }
 
@@ -1930,6 +2008,10 @@ pub fn compute_trade_matrix(
     // Luxuries are only prized across a large/open trade network; tighter reaches
     // (more closed networks) realize less of that demand.
     let reach_factor = match reach { 0 => 1.0, 1 => 0.7, _ => 0.45 };
+    // Mercantile ↔ subsistence bias (#4): >0.5 prizes distant luxuries
+    // (silk/spices), <0.5 makes the world care mostly about staples. Neutral 0.5
+    // leaves the legacy behaviour (lux_mult == 1.0). Staples are unaffected.
+    let lux_mult = (0.4 + luxury_bias.clamp(0.0, 1.0) * 1.2).clamp(0.2, 1.8);
     let mut demand = vec![vec![0.0f32; gc]; nr];
     for ri in 0..nr {
         let size = region_weight[ri] / max_rw; // 0..1
@@ -1937,9 +2019,10 @@ pub fn compute_trade_matrix(
             let mut d = size * desire[g];
             if is_luxury[g] {
                 // Discount in the good's own producing homeland (it's local/common
-                // there) and scale by how open the trade network is.
+                // there) and scale by how open the trade network is + the world's
+                // taste for luxuries.
                 let homeland_discount = 1.0 - 0.6 * production[ri][g].clamp(0.0, 1.0);
-                d *= reach_factor * homeland_discount;
+                d *= reach_factor * homeland_discount * lux_mult;
             }
             demand[ri][g] = d;
         }
@@ -1965,7 +2048,7 @@ pub fn compute_trade_matrix(
     // a route between their regions exists under the chosen trade reach (so when
     // continents are too far / the ocean too wide, trade stays within reach and
     // no flow is drawn). Flows that share a corridor stack onto the same trunk.
-    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes)?;
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy, 0, 0)?;
     let region_node: Vec<usize> = centers.iter().map(|&(x, y)| {
         let cx = (x.max(0) as u32 / cc.f).min(cc.cw as u32 - 1) as i32;
         let cy = (y.max(0) as u32 / cc.f).min(cc.ch as u32 - 1) as i32;
@@ -2135,28 +2218,6 @@ fn nearest_ref_hub(pct: f32) -> &'static str {
         .unwrap_or("Venice")
 }
 
-/// Deterministic evocative hub name from a position hash.
-fn gen_hub_name(hx: i64, hy: i64) -> String {
-    const PRE: [&str; 24] = [
-        "Ar", "Bel", "Cor", "Dun", "Esk", "Far", "Gal", "Hal", "Ith", "Kor", "Lor", "Mar",
-        "Nor", "Os", "Pel", "Quor", "Rav", "Sar", "Tor", "Val", "Wend", "Yor", "Zan", "Mer",
-    ];
-    const MID: [&str; 8] = ["a", "e", "i", "o", "an", "en", "or", "ar"];
-    const SUF: [&str; 14] = [
-        "port", "gard", "mouth", "haven", "burg", "ton", "stad", "mar", "keep", "reach",
-        "fell", "wick", "ford", "holm",
-    ];
-    let h = (hx.wrapping_mul(73856093) ^ hy.wrapping_mul(19349663)).unsigned_abs();
-    let pre = PRE[(h % PRE.len() as u64) as usize];
-    let suf = SUF[((h / 23) % SUF.len() as u64) as usize];
-    if h & 4 != 0 {
-        let mid = MID[((h / 7) % MID.len() as u64) as usize];
-        format!("{}{}{}", pre, mid, suf)
-    } else {
-        format!("{}{}", pre, suf)
-    }
-}
-
 /// Re-rank settlements by trade power and emit influence centers. Power blends
 /// base habitability (settlement score), route centrality (how many trade links
 /// a settlement anchors under the chosen reach) and trade monopoly (being the
@@ -2169,6 +2230,8 @@ pub fn compute_political(
     reach: u8,
     max_crossing: f32,
     desert_routes: bool,
+    economic_regions: u32,
+    piracy: f32,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<PoliticalCenter>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -2183,11 +2246,16 @@ pub fn compute_political(
         serde_json::from_str(&settlements_json).unwrap_or_default();
     if settlements.is_empty() { return Ok(vec![]); }
 
-    // Top settlements by base score (the political contenders).
+    // Top settlements by base score (the political contenders). Both the
+    // contender pool and the emitted-hub count scale with economic granularity
+    // (default 14 → 84 contenders / 42 hubs, matching the legacy 80 / 40).
+    let er = economic_regions.clamp(2, 40) as usize;
+    let contenders = (er * 6).clamp(10, 200);
+    let hub_out = (er * 3).clamp(5, 120);
     let mut idx: Vec<usize> = (0..settlements.len()).collect();
     idx.sort_by(|&a, &b| settlements[b].score.partial_cmp(&settlements[a].score)
         .unwrap_or(std::cmp::Ordering::Equal));
-    idx.truncate(80);
+    idx.truncate(contenders);
     let nn = idx.len();
     let nodes: Vec<&RouteSettlement> = idx.iter().map(|&i| &settlements[i]).collect();
 
@@ -2198,7 +2266,7 @@ pub fn compute_political(
     };
 
     // Route centrality: count reachable nearest-neighbour links per node.
-    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes)?;
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy, 0, 0)?;
     let cnode: Vec<usize> = nodes.iter().map(|s| {
         let cx = (s.x / cc.f).min(cc.cw as u32 - 1) as i32;
         let cy = (s.y / cc.f).min(cc.ch as u32 - 1) as i32;
@@ -2322,7 +2390,7 @@ pub fn compute_political(
     let base_r = grid_w as f32 * 0.018;
     let span_r = grid_w as f32 * 0.075;
     let mut out: Vec<PoliticalCenter> = Vec::new();
-    for (rank, &ni) in order.iter().enumerate().take(40) {
+    for (rank, &ni) in order.iter().enumerate().take(hub_out) {
         let p = power[ni] / pmax;
         // Power tier → 1..5 stars; only the dominant hubs reach 5 (Venice/Genoa).
         let stars = if p >= 0.80 { 5 } else if p >= 0.60 { 4 }
@@ -2346,7 +2414,10 @@ pub fn compute_political(
             stars,
             population: nodes[ni].population,
             monopolies: monopolies[ni].clone(),
-            name: gen_hub_name(nodes[ni].x as i64, nodes[ni].y as i64),
+            name: crate::sim::names::gen_name_epithet(
+                nodes[ni].x, nodes[ni].y, grid_w, grid_h,
+                if stars >= 5 { 2 } else if stars >= 4 { 1 } else { 0 },
+            ),
             throughput: throughput[ni],
             ref_pct,
             nearest_hub: nearest_ref_hub(ref_pct).to_string(),
@@ -2354,4 +2425,562 @@ pub fn compute_political(
         });
     }
     Ok(out)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Economy snapshot (Phase 2) — hub-anchored production, quality grades,
+// cost-aware flows with per-hop prices, wealth, and strategic chokepoints.
+// Built once and persisted as JSON in metadata (key "economy"); read instantly
+// when a hub is clicked. Hubs ARE the political/economic centers (one shared set,
+// unifying the matrix + political views).
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EconHubGood {
+    pub good: usize,
+    pub good_name: String,
+    pub amount: f32,
+    pub quality: f32,   // 0..1 grade
+    pub grade: String,  // grade label (Exquisite/Fine/Standard/Common/Coarse)
+    pub flavor: String, // evocative per-good variety name by quality (empty if none)
+    pub price: f32,     // local origin price multiplier (× base)
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EconReceive {
+    pub good: usize,
+    pub good_name: String,
+    pub amount: f32,
+    pub price: f32,     // delivered price multiplier at this hub
+    pub chain: u32,     // index into EconomySnapshot.chains
+    pub from_hub: u32,  // origin hub id
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EconHub {
+    pub id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub name: String,
+    pub power: f32,
+    pub stars: u8,
+    pub wealth: f32,        // 0..1 relative trade wealth
+    pub population: u32,
+    pub produces: Vec<EconHubGood>,
+    pub receives: Vec<EconReceive>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EconChainStop {
+    pub hub: u32,
+    pub price: f32, // price multiplier when the good reaches this stop
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EconChain {
+    pub id: u32,
+    pub good: usize,
+    pub good_name: String,
+    pub stops: Vec<EconChainStop>, // origin → … intermediate hubs … → consumer
+    pub points: Vec<[f32; 2]>,     // world coords of each stop (for the overlay)
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EconChokepoint {
+    pub points: Vec<[f32; 2]>, // the coarse edge [from, to]
+    pub volume: f32,
+    pub share: f32,            // share of total routed volume
+    pub name: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EconomySnapshot {
+    pub hubs: Vec<EconHub>,
+    pub chains: Vec<EconChain>,
+    pub chokepoints: Vec<EconChokepoint>,
+    pub goods: Vec<String>,
+}
+
+fn grade_name(q: f32) -> &'static str {
+    if q >= 0.85 { "Exquisite" }
+    else if q >= 0.68 { "Fine" }
+    else if q >= 0.50 { "Standard" }
+    else if q >= 0.32 { "Common" }
+    else { "Coarse" }
+}
+
+/// Evocative variety name for a good by quality tier (0..4). Empty for goods
+/// without a curated ladder (the generic grade label is shown instead).
+fn good_flavor(good_id: &str, q: f32) -> String {
+    let tier = if q >= 0.85 { 4 } else if q >= 0.68 { 3 } else if q >= 0.50 { 2 } else if q >= 0.32 { 1 } else { 0 };
+    let list: Option<[&str; 5]> = match good_id {
+        "wine" => Some(["Vin Ordinaire", "Village", "Estate", "Reserve", "Grand Cru"]),
+        "silk" => Some(["Raw Tussah", "Plain Weave", "Damask", "Brocade", "Imperial Sericea"]),
+        "spices" => Some(["Market Blend", "Garden", "Highland", "Monsoon", "Royal Stores"]),
+        "pepper" => Some(["Common", "Garbled", "Tellicherry", "Malabar Gold", "Royal Long"]),
+        "cloves" => Some(["Stem", "Whole Bud", "Hand-Picked", "Mother Clove", "Sultan's Reserve"]),
+        "tea" => Some(["Coarse Leaf", "Garden", "Spring Flush", "First Flush", "Imperial Tribute"]),
+        "coffee" => Some(["Common", "Plantation", "Highland", "Peaberry", "Heirloom Reserve"]),
+        "oliveoil" => Some(["Lampante", "Virgin", "Cold-Pressed", "Extra Virgin", "First Harvest"]),
+        "pearls" => Some(["Seed", "Baroque", "Round", "Fine Round", "Orient Lustre"]),
+        "gemstones" => Some(["Industrial", "Flawed", "Clean", "Brilliant", "Flawless"]),
+        "gold" => Some(["Placer", "Alloyed", "Refined", "Fine", "Crown Bullion"]),
+        "cotton" => Some(["Homespun", "Calico", "Muslin", "Fine Muslin", "Sea-Island"]),
+        "wool_fleece" | "wool_llama" => Some(["Coarse", "Carded", "Combed", "Fine Staple", "Vicuña-Soft"]),
+        "tobacco" => Some(["Field", "Cured", "Aged", "Prime Leaf", "Vintage Wrapper"]),
+        "frankincense" | "incense" => Some(["Common", "Temple", "Pure", "Select", "First Tears"]),
+        "cacao" => Some(["Bulk", "Trinitario", "Criollo", "Fine Criollo", "Ancient Cru"]),
+        "ceramics" => Some(["Earthenware", "Stoneware", "Glazed", "Porcelain", "Eggshell Porcelain"]),
+        "glassware" => Some(["Bottle", "Blown", "Cristallo", "Cut Crystal", "Millefiori"]),
+        "furs" => Some(["Pelt", "Winter Coat", "Prime", "Silver", "Imperial Sable"]),
+        "amber" => Some(["Cloudy", "Raw", "Clear", "Golden", "Sun-Stone"]),
+        "dyes" | "indigo" => Some(["Faded", "Common", "Fast", "Deep", "Royal Tyrian"]),
+        _ => None,
+    };
+    list.map(|l| l[tier].to_string()).unwrap_or_default()
+}
+
+/// splitmix-style hash → [0,1).
+fn hash01q(mut x: u64) -> f32 {
+    x ^= x >> 33;
+    x = x.wrapping_mul(0xFF51AFD7ED558CCD);
+    x ^= x >> 33;
+    ((x >> 40) as f32) / 16_777_216.0
+}
+
+/// Transport cost of a coarse path (sum of midpoint cell costs along its edges).
+fn coarse_path_cost(cc: &CoarseCost, path: &[usize]) -> f32 {
+    let mut c = 0.0;
+    for w in path.windows(2) { c += (cc.cost[w[0]] + cc.cost[w[1]]) * 0.5; }
+    c
+}
+
+/// Build the economy snapshot, persist it to metadata, and return it. Same
+/// inputs as the matrix/political commands so the hubs stay consistent.
+#[tauri::command]
+pub fn compute_economy(
+    settlements_json: String,
+    rivers_json: String,
+    reach: u8,
+    max_crossing: f32,
+    desert_routes: bool,
+    economic_regions: u32,
+    luxury_bias: f32,
+    piracy: f32,
+    db: State<'_, WorldDb>,
+) -> Result<EconomySnapshot, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let specs = crate::commands::goods_commands::load_world_goods(&conn);
+    let gc = specs.len();
+    let goods_names: Vec<String> = specs.iter().map(|s| s.id.clone()).collect();
+    let empty = EconomySnapshot { hubs: vec![], chains: vec![], chokepoints: vec![], goods: goods_names.clone() };
+    if grid_w == 0 || grid_h == 0 {
+        return Ok(empty);
+    }
+    let world = db.cached_tiles_with_conn(&conn)?;
+    let settlements: Vec<RouteSettlement> =
+        serde_json::from_str(&settlements_json).unwrap_or_default();
+    if settlements.len() < 2 {
+        let _ = metadata::set_meta(&conn, "economy", &serde_json::to_string(&empty).unwrap_or_default());
+        return Ok(empty);
+    }
+
+    let wrap_dx = |a: i32, b: i32| -> i32 {
+        let mut d = (a - b).abs();
+        if d > grid_w as i32 / 2 { d = grid_w as i32 - d; }
+        d
+    };
+
+    // ── Hub set: top settlements by score (the clickable economic centers) ──
+    let er = economic_regions.clamp(2, 40) as usize;
+    let hub_out = (er * 3).clamp(5, 60);
+    let mut idx: Vec<usize> = (0..settlements.len()).collect();
+    idx.sort_by(|&a, &b| settlements[b].score.partial_cmp(&settlements[a].score)
+        .unwrap_or(std::cmp::Ordering::Equal));
+    idx.truncate(hub_out);
+    let nodes: Vec<&RouteSettlement> = idx.iter().map(|&i| &settlements[i]).collect();
+    let nn = nodes.len();
+    if nn < 2 {
+        let _ = metadata::set_meta(&conn, "economy", &serde_json::to_string(&empty).unwrap_or_default());
+        return Ok(empty);
+    }
+
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy, 0, 0)?;
+    let cnode: Vec<usize> = nodes.iter().map(|s| {
+        let cx = (s.x / cc.f).min(cc.cw as u32 - 1) as i32;
+        let cy = (s.y / cc.f).min(cc.ch as u32 - 1) as i32;
+        cc.cidx(cx, cy)
+    }).collect();
+
+    // ── Route centrality: reachable nearest-neighbour links per hub ──
+    let mut edges: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    for i in 0..nn {
+        let mut dists: Vec<(usize, i64)> = Vec::new();
+        for j in 0..nn {
+            if i == j { continue; }
+            let dx = wrap_dx(nodes[i].x as i32, nodes[j].x as i32) as i64;
+            let dy = nodes[i].y as i64 - nodes[j].y as i64;
+            dists.push((j, dx * dx + dy * dy));
+        }
+        dists.sort_by_key(|&(_, d)| d);
+        for &(j, _) in dists.iter().take(3) { edges.insert((i.min(j), i.max(j))); }
+    }
+    let mut centrality = vec![0.0f32; nn];
+    for &(a, b) in &edges {
+        if let Some(path) = coarse_dijkstra(&cc, cnode[a], cnode[b]) {
+            if path_allowed(&cc, &path, reach, max_crossing, grid_w) {
+                centrality[a] += 1.0;
+                centrality[b] += 1.0;
+            }
+        }
+    }
+
+    // ── Production: assign each good-bearing coarse cell to its nearest hub ──
+    let f = (grid_w / 220).max(1);
+    let cw = ((grid_w + f - 1) / f) as i32;
+    let ch = ((grid_h + f - 1) / f) as i32;
+    let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
+    let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
+    let mut coarse = vec![vec![0.0f32; gc]; (cw * ch) as usize];
+    for ty in 0..tiles_y as i32 {
+        for tx in 0..tiles_x as i32 {
+            let tile = world.tile(tx, ty);
+            let base_x = tx as u32 * TILE_SIZE;
+            let base_y = ty as u32 * TILE_SIZE;
+            let max_lx = TILE_SIZE.min(grid_w - base_x);
+            let max_ly = TILE_SIZE.min(grid_h - base_y);
+            for ly in 0..max_ly {
+                for lx in 0..max_lx {
+                    let ti = (ly * TILE_SIZE + lx) as usize;
+                    let cx = ((base_x + lx) / f) as i32;
+                    let cy = ((base_y + ly) / f) as i32;
+                    let ci = (cy * cw + cx) as usize;
+                    for g in 0..gc.min(tile.goods.len()) {
+                        coarse[ci][g] += tile.goods[g][ti] as f32 / 255.0;
+                    }
+                }
+            }
+        }
+    }
+    let max_reach = (grid_w / 4) as i64;
+    let mut prod = vec![vec![0.0f32; gc]; nn];
+    for cy in 0..ch {
+        for cx in 0..cw {
+            let ci = (cy * cw + cx) as usize;
+            let wx = (cx as u32 * f + f / 2).min(grid_w - 1) as i32;
+            let wy = (cy as u32 * f + f / 2).min(grid_h - 1) as i32;
+            let mut best = 0usize;
+            let mut bd = i64::MAX;
+            for (ni, s) in nodes.iter().enumerate() {
+                let dx = wrap_dx(wx, s.x as i32) as i64;
+                let dy = (wy - s.y as i32) as i64;
+                let d = dx * dx + dy * dy;
+                if d < bd { bd = d; best = ni; }
+            }
+            if bd > max_reach * max_reach { continue; }
+            for g in 0..gc { prod[best][g] += coarse[ci][g]; }
+        }
+    }
+
+    // Absolute scarcity (#18) + deposit floor (#19): rescale by global abundance.
+    let raw_total: Vec<f32> = (0..gc).map(|g| prod.iter().map(|p| p[g]).sum::<f32>()).collect();
+    let raw_total_max = raw_total.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
+    let is_deposit: Vec<bool> = (0..gc)
+        .map(|g| specs.get(g)
+            .map(|s| matches!(s.distribution, crate::sim::goods_spec::Distribution::Deposits))
+            .unwrap_or(false))
+        .collect();
+    let abundance: Vec<f32> = (0..gc).map(|g| {
+        let a = (raw_total[g] / raw_total_max).sqrt();
+        if is_deposit[g] { a.max(0.6) } else { a }
+    }).collect();
+    let good_max: Vec<f32> = (0..gc).map(|g| prod.iter().map(|p| p[g]).fold(0.0f32, f32::max).max(1e-6)).collect();
+    // quality grade per hub/good: richer territory share → higher grade, with a
+    // small deterministic jitter so equal shares still differ between hubs/goods.
+    let mut quality = vec![vec![0.0f32; gc]; nn];
+    for hh in 0..nn {
+        for g in 0..gc {
+            let share = prod[hh][g] / good_max[g];
+            let jitter = hash01q((hh as u64).wrapping_mul(0x9E3779B1) ^ (g as u64).wrapping_mul(0x85EBCA77)) * 0.24 - 0.12;
+            quality[hh][g] = (0.30 + 0.62 * share + jitter).clamp(0.0, 1.0);
+            // apply abundance scaling to production AFTER quality is read off share
+            prod[hh][g] = prod[hh][g] / good_max[g] * abundance[g];
+        }
+    }
+
+    // ── Monopoly + trade power + stars ──
+    let mut good_total = vec![0.0f32; gc];
+    for g in 0..gc { for hh in 0..nn { good_total[g] += prod[hh][g]; } }
+    let mut monopoly = vec![0.0f32; nn];
+    for hh in 0..nn {
+        for g in 0..gc {
+            if good_total[g] < 1e-4 || prod[hh][g] < 0.05 { continue; }
+            let share = prod[hh][g] / good_total[g];
+            monopoly[hh] += share * share;
+        }
+    }
+    let cmax = centrality.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
+    let mmax = monopoly.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
+    let mut power = vec![0.0f32; nn];
+    for hh in 0..nn {
+        power[hh] = 0.45 * nodes[hh].score.clamp(0.0, 1.0)
+            + 0.30 * (centrality[hh] / cmax)
+            + 0.25 * (monopoly[hh] / mmax);
+    }
+    let pmax = power.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
+
+    // ── Demand: population-scaled per-good desire (+ mercantile/subsistence) ──
+    let max_pop = nodes.iter().map(|s| s.population).max().unwrap_or(1).max(1) as f32;
+    let desire: Vec<f32> = (0..gc)
+        .map(|g| specs.get(g).filter(|s| s.enabled).map(|s| s.desire).unwrap_or(0.0))
+        .collect();
+    let is_luxury: Vec<bool> = (0..gc)
+        .map(|g| specs.get(g).map(|s| s.network_luxury).unwrap_or(false))
+        .collect();
+    let reach_factor = match reach { 0 => 1.0, 1 => 0.7, _ => 0.45 };
+    let lux_mult = (0.4 + luxury_bias.clamp(0.0, 1.0) * 1.2).clamp(0.2, 1.8);
+    let mut net = vec![vec![0.0f32; gc]; nn];
+    for hh in 0..nn {
+        let size = (nodes[hh].population as f32 / max_pop).max(0.15);
+        for g in 0..gc {
+            let mut d = size * desire[g];
+            if is_luxury[g] {
+                let homeland_discount = 1.0 - 0.6 * prod[hh][g].clamp(0.0, 1.0);
+                d *= reach_factor * homeland_discount * lux_mult;
+            }
+            net[hh][g] = prod[hh][g] - d;
+        }
+    }
+
+    // ── Flows (cost-aware) → chains with per-hop prices + chokepoint volumes ──
+    let hubnode: std::collections::HashMap<usize, usize> =
+        (0..nn).map(|h| (cnode[h], h)).collect();
+    let mut pair: std::collections::HashMap<(usize, usize), Option<(Vec<usize>, f32)>> =
+        std::collections::HashMap::new();
+    let mut chains: Vec<EconChain> = Vec::new();
+    let mut receives: Vec<Vec<EconReceive>> = vec![Vec::new(); nn];
+    let mut exports = vec![0.0f32; nn];
+    let mut imports = vec![0.0f32; nn];
+    let mut edge_vol: std::collections::HashMap<(usize, usize), (f32, usize)> =
+        std::collections::HashMap::new(); // volume + dominant good
+
+    for g in 0..gc {
+        let mut supply: Vec<(usize, f32)> = (0..nn)
+            .filter_map(|h| { let v = net[h][g]; if v > 0.05 { Some((h, v)) } else { None } }).collect();
+        let mut deficit: Vec<(usize, f32)> = (0..nn)
+            .filter_map(|h| { let v = net[h][g]; if v < -0.05 { Some((h, -v)) } else { None } }).collect();
+        if supply.is_empty() || deficit.is_empty() { continue; }
+        deficit.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        for &mut (di, mut need) in deficit.iter_mut() {
+            let need0 = need;
+            // Order suppliers by ROUTE COST (cheapest corridor wins) — cost-aware.
+            let mut ord: Vec<(usize, f32, f32)> = Vec::new(); // (supplier, avail, cost)
+            for &(si, avail) in supply.iter() {
+                if si == di || avail <= 0.05 { continue; }
+                let key = (si.min(di), si.max(di));
+                if !pair.contains_key(&key) {
+                    let p = coarse_dijkstra(&cc, cnode[si], cnode[di])
+                        .filter(|p| path_allowed(&cc, p, reach, max_crossing, grid_w))
+                        .filter(|p| !p.iter().any(|&c| cc.is_open_sea[c]))
+                        .map(|p| { let c = coarse_path_cost(&cc, &p); (p, c) });
+                    pair.insert(key, p);
+                }
+                if let Some(Some((_, cost))) = pair.get(&key) { ord.push((si, avail, *cost)); }
+            }
+            ord.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+
+            for (si, _avail, _cost) in ord {
+                if need <= 0.05 { break; }
+                let pos = match supply.iter().position(|&(s, _)| s == si) { Some(p) => p, None => continue };
+                let savail = supply[pos].1;
+                if savail <= 0.05 { continue; }
+                let key = (si.min(di), si.max(di));
+                let (path, _cost) = match pair.get(&key) { Some(Some(pc)) => pc.clone(), _ => continue };
+                let amt = need.min(savail);
+                need -= amt;
+                supply[pos].1 -= amt;
+                exports[si] += amt;
+                imports[di] += amt;
+
+                // Orient origin(si) → consumer(di) and find intermediate hub stops.
+                let path_o = if path.first() == Some(&cnode[si]) { path.clone() }
+                    else { let mut p = path.clone(); p.reverse(); p };
+                let mut stops: Vec<(usize, f32)> = vec![(si, 0.0)];
+                let mut cum = 0.0;
+                for win in path_o.windows(2) {
+                    cum += (cc.cost[win[0]] + cc.cost[win[1]]) * 0.5;
+                    if let Some(&h) = hubnode.get(&win[1]) {
+                        if h != si && h != di && stops.last().map(|l| l.0) != Some(h) {
+                            stops.push((h, cum));
+                        }
+                    }
+                    // chokepoint volume per coarse edge
+                    let e = (win[0].min(win[1]), win[0].max(win[1]));
+                    let entry = edge_vol.entry(e).or_insert((0.0, g));
+                    entry.0 += amt;
+                }
+                stops.push((di, cum));
+
+                let q0 = quality[si][g];
+                let base_q = 0.7 + 0.6 * q0;
+                let scarcity = need0.clamp(0.0, 1.5);
+                let ns = stops.len();
+                let chain_id = chains.len() as u32;
+                let chain_stops: Vec<EconChainStop> = stops.iter().enumerate().map(|(k, &(h, cu))| {
+                    let progress = if ns > 1 { k as f32 / (ns - 1) as f32 } else { 0.0 };
+                    let transport = (cu / cc.cw as f32) * 1.5;
+                    let price = base_q * (1.0 + transport) * (1.0 + scarcity * 0.8 * progress);
+                    EconChainStop { hub: h as u32, price }
+                }).collect();
+                let delivered = chain_stops.last().map(|s| s.price).unwrap_or(base_q);
+                let points: Vec<[f32; 2]> = stops.iter()
+                    .map(|&(h, _)| [nodes[h].x as f32, nodes[h].y as f32]).collect();
+                receives[di].push(EconReceive {
+                    good: g, good_name: goods_names.get(g).cloned().unwrap_or_default(),
+                    amount: amt, price: delivered, chain: chain_id, from_hub: si as u32,
+                });
+                chains.push(EconChain {
+                    id: chain_id, good: g,
+                    good_name: goods_names.get(g).cloned().unwrap_or_default(),
+                    stops: chain_stops, points,
+                });
+            }
+        }
+    }
+
+    // ── Wealth per hub (production value + trade throughput balance) ──
+    let mut wealth = vec![0.0f32; nn];
+    for hh in 0..nn {
+        let prod_val: f32 = (0..gc).map(|g| prod[hh][g] * desire[g]).sum();
+        wealth[hh] = prod_val + 0.6 * exports[hh] + 0.3 * imports[hh] + 0.4 * (centrality[hh] / cmax);
+    }
+    let wmax = wealth.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
+
+    // ── Strategic chokepoints: highest-volume coarse edges ──
+    let total_vol: f32 = edge_vol.values().map(|v| v.0).sum::<f32>().max(1e-6);
+    let mut ev: Vec<((usize, usize), (f32, usize))> = edge_vol.into_iter().collect();
+    ev.sort_by(|a, b| b.1.0.partial_cmp(&a.1.0).unwrap_or(std::cmp::Ordering::Equal));
+    let max_edge = ev.first().map(|e| e.1.0).unwrap_or(1.0).max(1e-6);
+    let mut chokepoints: Vec<EconChokepoint> = Vec::new();
+    for ((a, b), (vol, gdom)) in ev.into_iter().take(10) {
+        if vol < 0.25 * max_edge { break; }
+        let oa = cc.is_open_sea.get(a).copied().unwrap_or(false);
+        let ob = cc.is_open_sea.get(b).copied().unwrap_or(false);
+        let kind = if oa || ob { "Strait" }
+            else if !cc.is_land.get(a).copied().unwrap_or(true) || !cc.is_land.get(b).copied().unwrap_or(true) { "Passage" }
+            else { "Pass" };
+        let road = goods_names.get(gdom).map(|id| road_name(id)).unwrap_or_default();
+        let nm = if road.is_empty() { kind.to_string() } else { format!("{} {}", road.replace(" Road", "").replace(" Route", "").replace(" Way", ""), kind) };
+        chokepoints.push(EconChokepoint {
+            points: vec![cc.world_of(a), cc.world_of(b)],
+            volume: vol,
+            share: vol / total_vol,
+            name: nm,
+        });
+    }
+
+    // ── Emit hubs ──
+    let mut hubs: Vec<EconHub> = Vec::with_capacity(nn);
+    for hh in 0..nn {
+        let p = power[hh] / pmax;
+        let stars = if p >= 0.80 { 5 } else if p >= 0.60 { 4 }
+            else if p >= 0.42 { 3 } else if p >= 0.25 { 2 } else { 1 };
+        let mut produces: Vec<EconHubGood> = (0..gc)
+            .filter(|&g| prod[hh][g] > 0.05)
+            .map(|g| {
+                let q = quality[hh][g];
+                let id = goods_names.get(g).cloned().unwrap_or_default();
+                let flavor = good_flavor(&id, q);
+                EconHubGood {
+                    good: g, good_name: id, amount: prod[hh][g], quality: q,
+                    grade: grade_name(q).to_string(), flavor,
+                    price: 0.7 + 0.6 * q,
+                }
+            }).collect();
+        produces.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
+        let mut recv = receives[hh].clone();
+        recv.sort_by(|a, b| b.price.partial_cmp(&a.price).unwrap_or(std::cmp::Ordering::Equal));
+        hubs.push(EconHub {
+            id: hh as u32,
+            x: nodes[hh].x as f32,
+            y: nodes[hh].y as f32,
+            name: crate::sim::names::gen_name_epithet(
+                nodes[hh].x, nodes[hh].y, grid_w, grid_h,
+                if stars >= 5 { 2 } else if stars >= 4 { 1 } else { 0 }),
+            power: p,
+            stars,
+            wealth: wealth[hh] / wmax,
+            population: nodes[hh].population,
+            produces,
+            receives: recv,
+        });
+    }
+
+    let snapshot = EconomySnapshot { hubs, chains, chokepoints, goods: goods_names };
+    let _ = metadata::set_meta(&conn, "economy", &serde_json::to_string(&snapshot).unwrap_or_default());
+    Ok(snapshot)
+}
+
+/// Export the economy snapshot to `path`. `.json` writes the raw snapshot;
+/// anything else writes a flat CSV (one row per hub × good, produce + receive).
+#[tauri::command]
+pub fn export_trade_data(path: String, db: State<'_, WorldDb>) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let json = metadata::get_meta(&conn, "economy").map_err(|e| e.to_string())?
+        .ok_or_else(|| "No economy snapshot — run the Economy step (10) first.".to_string())?;
+    if path.to_lowercase().ends_with(".json") {
+        return std::fs::write(&path, json).map_err(|e| e.to_string());
+    }
+    let snap: EconomySnapshot = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    let esc = |v: &str| -> String {
+        if v.contains(',') || v.contains('"') || v.contains('\n') {
+            format!("\"{}\"", v.replace('"', "\"\""))
+        } else { v.to_string() }
+    };
+    let mut s = String::from("hub,x,y,stars,wealth,population,good,role,amount,quality,grade,flavor,price,counterparty\n");
+    for h in &snap.hubs {
+        for p in &h.produces {
+            let row = [
+                esc(&h.name), h.x.to_string(), h.y.to_string(), h.stars.to_string(),
+                format!("{:.3}", h.wealth), h.population.to_string(),
+                esc(&p.good_name), "produce".to_string(), format!("{:.3}", p.amount),
+                format!("{:.3}", p.quality), esc(&p.grade), esc(&p.flavor),
+                format!("{:.3}", p.price), String::new(),
+            ];
+            s.push_str(&row.join(",")); s.push('\n');
+        }
+        for r in &h.receives {
+            let from = snap.hubs.iter().find(|x| x.id == r.from_hub)
+                .map(|x| x.name.clone()).unwrap_or_default();
+            let row = [
+                esc(&h.name), h.x.to_string(), h.y.to_string(), h.stars.to_string(),
+                format!("{:.3}", h.wealth), h.population.to_string(),
+                esc(&r.good_name), "receive".to_string(), format!("{:.3}", r.amount),
+                String::new(), String::new(), String::new(),
+                format!("{:.3}", r.price), esc(&from),
+            ];
+            s.push_str(&row.join(",")); s.push('\n');
+        }
+    }
+    std::fs::write(&path, s).map_err(|e| e.to_string())
+}
+
+/// Read the persisted economy snapshot (empty if none has been generated yet).
+#[tauri::command]
+pub fn get_economy(db: State<'_, WorldDb>) -> Result<EconomySnapshot, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let goods_names: Vec<String> = crate::commands::goods_commands::load_world_goods(&conn)
+        .iter().map(|s| s.id.clone()).collect();
+    match metadata::get_meta(&conn, "economy").map_err(|e| e.to_string())? {
+        Some(json) => serde_json::from_str(&json)
+            .map_err(|_| ()).or_else(|_| Ok::<_, String>(EconomySnapshot {
+                hubs: vec![], chains: vec![], chokepoints: vec![], goods: goods_names.clone(),
+            })),
+        None => Ok(EconomySnapshot { hubs: vec![], chains: vec![], chokepoints: vec![], goods: goods_names }),
+    }
 }
