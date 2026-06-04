@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { WorldMeta, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, TradeMatrix, PoliticalCenter, GoodSpec } from "../types";
+import type { WorldMeta, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, TradeMatrix, PoliticalCenter, GoodSpec, EconomySnapshot } from "../types";
 
 export async function newWorld(name: string, gridWidth: number, gridHeight: number): Promise<WorldMeta> {
   return invoke("new_world", { name, gridWidth, gridHeight });
@@ -312,6 +312,33 @@ export async function computePolitical(
     desertRoutes,
     economicRegions,
   });
+}
+
+/** Build + persist the economy snapshot (hubs, quality-graded production,
+ *  cost-aware flows with per-hop prices, wealth, chokepoints). */
+export async function computeEconomy(
+  settlements: { x: number; y: number; score: number; population: number }[],
+  rivers: { points: [number, number][] }[],
+  reach: number,
+  maxCrossing: number,
+  desertRoutes: boolean,
+  economicRegions: number,
+  luxuryBias: number,
+): Promise<EconomySnapshot> {
+  return invoke("compute_economy", {
+    settlementsJson: JSON.stringify(settlements),
+    riversJson: JSON.stringify(rivers),
+    reach,
+    maxCrossing,
+    desertRoutes,
+    economicRegions,
+    luxuryBias,
+  });
+}
+
+/** Read the persisted economy snapshot (empty if not yet generated). */
+export async function getEconomy(): Promise<EconomySnapshot> {
+  return invoke("get_economy");
 }
 
 export interface ElevationBand {

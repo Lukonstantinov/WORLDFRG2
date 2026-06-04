@@ -76,6 +76,7 @@ const bioOverlays = [
   { id: "stormZones", label: "\u{1F300} Storm Zones" },
   { id: "reefZones", label: "\u{1FAA8} Reef Zones" },
   { id: "politicalInfluence", label: "\u{1F451} Political Influence" },
+  { id: "chokepoints", label: "\u{2693} Chokepoints" },
 ];
 
 export function Toolbar() {

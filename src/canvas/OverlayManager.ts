@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter } from "../types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter, EconChokepoint } from "../types";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "../goods";
 import { drawGoodIcon } from "./goodIcons";
 
@@ -62,6 +62,7 @@ export class OverlayManager {
   private goodMeta: Map<string, { icon: string; color: string }> | null = null;
   private tradeTrunks: TradeTrunk[] = [];
   private politicalCenters: PoliticalCenter[] = [];
+  private chokepoints: EconChokepoint[] = [];
   private latLinesData: { gridW: number; gridH: number; equatorOffset: number; latScale: number } | null = null;
 
   private visibility: Record<string, boolean> = {
@@ -69,7 +70,7 @@ export class OverlayManager {
     markers: false, wind: false, currents: false, latLines: false,
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, reefZones: false, tradeFlows: false,
-    politicalInfluence: false,
+    politicalInfluence: false, chokepoints: false,
   };
 
   private currentScale = 1;
@@ -132,6 +133,10 @@ export class OverlayManager {
 
   drawPolitical(centers: PoliticalCenter[]) {
     this.politicalCenters = centers;
+  }
+
+  drawChokepoints(chokepoints: EconChokepoint[]) {
+    this.chokepoints = chokepoints;
   }
 
   drawLatLines(gridW: number, gridH: number, equatorOffset = 0.5, latScale = 1) {
@@ -304,6 +309,11 @@ export class OverlayManager {
     // Political influence: translucent discs sized by trade power.
     if (this.visibility.politicalInfluence && this.politicalCenters.length > 0) {
       for (const c of this.politicalCenters) this.renderPoliticalCenter(ctx, c);
+    }
+
+    // Strategic chokepoints: high-volume trade gateways (straits / passes).
+    if (this.visibility.chokepoints && this.chokepoints.length > 0) {
+      for (const cp of this.chokepoints) this.renderChokepoint(ctx, cp);
     }
 
     if (this.visibility.settlements && this.settlements.length > 0) {
@@ -681,6 +691,45 @@ export class OverlayManager {
     ctx.globalAlpha = 1;
   }
 
+  /** A strategic chokepoint: a pulsing ring + label at the gateway edge. */
+  private renderChokepoint(ctx: CanvasRenderingContext2D, cp: EconChokepoint) {
+    if (cp.points.length < 2) return;
+    const [a, b] = cp.points;
+    const mx = (a[0] + b[0]) / 2 + 0.5;
+    const my = (a[1] + b[1]) / 2 + 0.5;
+    const r = Math.max(1.5, (3 + 6 * cp.share) / Math.sqrt(this.currentScale));
+
+    // Gateway link.
+    ctx.beginPath();
+    ctx.moveTo(a[0] + 0.5, a[1] + 0.5);
+    ctx.lineTo(b[0] + 0.5, b[1] + 0.5);
+    ctx.lineWidth = Math.max(0.5, 1.6 / Math.sqrt(this.currentScale));
+    ctx.strokeStyle = "rgba(230,90,70,0.85)";
+    ctx.stroke();
+
+    // Marker ring.
+    ctx.beginPath();
+    ctx.arc(mx, my, r, 0, Math.PI * 2);
+    ctx.lineWidth = Math.max(0.4, 1.2 / Math.sqrt(this.currentScale));
+    ctx.strokeStyle = "rgba(255,140,90,0.95)";
+    ctx.fillStyle = "rgba(230,90,70,0.18)";
+    ctx.fill();
+    ctx.stroke();
+
+    // Label.
+    if (cp.name) {
+      const fs = Math.max(5, 10 / this.currentScale);
+      ctx.font = `${fs}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      ctx.fillStyle = "rgba(255,200,170,0.95)";
+      ctx.fillText(cp.name, mx, my - r - fs * 0.1);
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+    }
+    ctx.globalAlpha = 1;
+  }
+
   /** Small arrow for wind overlay */
   private renderArrow(ctx: CanvasRenderingContext2D, x: number, y: number, vx: number, vy: number, color: string, alpha: number) {
     const mag = Math.sqrt(vx * vx + vy * vy);
@@ -737,6 +786,7 @@ export class OverlayManager {
     this.goodRegions = [];
     this.tradeTrunks = [];
     this.politicalCenters = [];
+    this.chokepoints = [];
     this.latLinesData = null;
   }
 }

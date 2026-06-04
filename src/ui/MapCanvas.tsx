@@ -8,7 +8,7 @@ import { useWorldStore } from "../state/worldStore";
 import { useViewportStore } from "../state/viewportStore";
 import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeTradeRoutes, computeTradeMatrix, computePolitical } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy } from "../bridge/tauri";
 import type { PaintValue } from "../types";
 
 /** Largest box with the world's aspect ratio that fits inside the pane. */
@@ -48,6 +48,8 @@ export function MapCanvas() {
   const rivers = useWorldStore((s) => s.rivers);
   const lakes = useWorldStore((s) => s.lakes);
   const settlements = useWorldStore((s) => s.settlements);
+  const economy = useWorldStore((s) => s.economy);
+  const setEconomy = useWorldStore((s) => s.setEconomy);
   const activeLayer = useUIStore((s) => s.activeLayer);
   const activeTool = useUIStore((s) => s.activeTool);
   const brushRadius = useUIStore((s) => s.brushRadius);
@@ -425,6 +427,20 @@ export function MapCanvas() {
       requestRender();
     }).catch(() => {});
   }, [step9Done, worldKey, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, bioParams.economicRegions, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Hydrate the persisted economy snapshot when a world loads (survives save/open).
+  useEffect(() => {
+    if (!worldKey) return;
+    getEconomy().then((e) => setEconomy(e.hubs.length > 0 ? e : null)).catch(() => {});
+  }, [worldKey, setEconomy]);
+
+  // Economy chokepoints — product of the Economy step (10).
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.drawChokepoints(economy?.chokepoints ?? []);
+    requestRender();
+  }, [economy, requestRender]);
 
   // Sync overlay visibility
   useEffect(() => {

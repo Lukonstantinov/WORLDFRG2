@@ -12,6 +12,7 @@ import { StepSoilResources } from "./StepSoilResources";
 import { StepSettlements } from "./StepSettlements";
 import { StepBiological } from "./StepBiological";
 import { StepPolitical } from "./StepPolitical";
+import { StepEconomy } from "./StepEconomy";
 
 const STEP_INFO = [
   { step: 1, label: "Landmass", desc: "Paint your landmasses, load an image template, or generate from plates." },
@@ -23,6 +24,7 @@ const STEP_INFO = [
   { step: 7, label: "Settlements", desc: "Find optimal locations for cities, towns, and villages." },
   { step: 8, label: "Biological-Trade", desc: "Shark & shipworm waters, trade-good belts, trade routes, and the regional trade matrix." },
   { step: 9, label: "Political", desc: "Re-rank settlements by trade power (route centrality + good monopoly) and map their influence." },
+  { step: 10, label: "Economy", desc: "Build the trade economy: quality-graded production, per-hop prices, hub wealth, supply chains and strategic chokepoints." },
 ] as const;
 
 export function WorkflowPanel() {
@@ -45,7 +47,7 @@ export function WorkflowPanel() {
   const canAdvance = (step: number) => stepCompleted[step] === true;
 
   const goNext = () => {
-    if (workflowStep < 9) {
+    if (workflowStep < 10) {
       setWorkflowStep((workflowStep + 1) as any);
     }
   };
@@ -192,6 +194,7 @@ export function WorkflowPanel() {
                 {step === 7 && <StepSettlements {...stepProps} />}
                 {step === 8 && <StepBiological {...stepProps} />}
                 {step === 9 && <StepPolitical {...stepProps} />}
+                {step === 10 && <StepEconomy {...stepProps} />}
 
                 {/* Navigation */}
                 <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
@@ -201,7 +204,7 @@ export function WorkflowPanel() {
                     </button>
                   )}
                   <div style={{ flex: 1 }} />
-                  {step < 9 ? (
+                  {step < 10 ? (
                     <button onClick={goNext} disabled={!canAdvance(step) || simRunning}
                       style={{ ...navBtn, background: canAdvance(step) ? "#2a5080" : "#1a2a40",
                         color: canAdvance(step) ? "#fff" : "#405060" }}>
