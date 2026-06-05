@@ -218,7 +218,7 @@ pub fn sim_run_all(
     // Phase 7: Settlements
     biological::compute_disease_risk(&mut buf, &extracted_rivers);
     let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
-    let generated_settlements = settlements::generate_settlements(&buf, &habitability, seed);
+    let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed);
     settlements::write_habitability(&mut buf, &habitability);
 
     // Phase 8: Biological — shark + shipworm waters + trade-good belts.
@@ -332,7 +332,7 @@ pub fn sim_run_all_from_terrain(
     // Phase 7: Settlements
     biological::compute_disease_risk(&mut buf, &extracted_rivers);
     let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
-    let generated_settlements = settlements::generate_settlements(&buf, &habitability, seed);
+    let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed);
     settlements::write_habitability(&mut buf, &habitability);
 
     // Phase 8: Biological — shark + shipworm waters + trade-good belts.
@@ -408,7 +408,7 @@ pub fn sim_generate_settlements(
     // Malaria/fever (needed before habitability so disease suppresses settlement).
     biological::compute_disease_risk(&mut buf, &river_data);
     let habitability = settlements::compute_habitability(&buf, &river_data, &lakes);
-    let result = settlements::generate_settlements(&buf, &habitability, seed);
+    let result = settlements::generate_settlements(&buf, &habitability, &river_data, seed);
 
     // Persist the habitability field so the Habitability heatmap layer can render.
     settlements::write_habitability(&mut buf, &habitability);

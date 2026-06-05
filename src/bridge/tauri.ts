@@ -376,6 +376,16 @@ export async function getEconomy(): Promise<EconomySnapshot> {
   return invoke("get_economy");
 }
 
+/** Trade-development feedback: grow each settlement by its hub's trade wealth
+ *  (one-way, bounded). Returns the updated settlement list. */
+export async function computeSettlementDevelopment(
+  settlements: import("../types").Settlement[],
+): Promise<import("../types").Settlement[]> {
+  return invoke("compute_settlement_development", {
+    settlementsJson: JSON.stringify(settlements),
+  });
+}
+
 /** Export the economy snapshot to a file (.json = raw snapshot, else CSV). */
 export async function exportTradeData(path: string): Promise<void> {
   return invoke("export_trade_data", { path });

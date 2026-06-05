@@ -1,6 +1,6 @@
 import { useUIStore } from "../../state/uiStore";
 import { useWorldStore } from "../../state/worldStore";
-import { computeEconomy } from "../../bridge/tauri";
+import { computeEconomy, computeSettlementDevelopment } from "../../bridge/tauri";
 import { genBtn } from "./WorkflowPanel";
 
 interface Props {
@@ -25,6 +25,8 @@ export function StepEconomy(_props: Props) {
   const rivers = useWorldStore((s) => s.rivers);
   const economy = useWorldStore((s) => s.economy);
   const setEconomy = useWorldStore((s) => s.setEconomy);
+  const settlementsBaseline = useWorldStore((s) => s.settlementsBaseline);
+  const setSettlementsDeveloped = useWorldStore((s) => s.setSettlementsDeveloped);
 
   const step9Done = stepCompleted[9] === true;
 
@@ -50,10 +52,18 @@ export function StepEconomy(_props: Props) {
         bioParams.calendarMonths,
       );
       setEconomy(result);
+      // Trade-development feedback: grow settlements by their hub's trade wealth so
+      // emporia swell into metropolises (one-way; the economy is not re-run). Always
+      // develops from the as-generated baseline so rebuilding never compounds.
+      try {
+        const base = settlementsBaseline.length > 0 ? settlementsBaseline : settlements;
+        const developed = await computeSettlementDevelopment(base);
+        if (developed.length > 0) setSettlementsDeveloped(developed);
+      } catch { /* leave populations as generated if no snapshot */ }
       markStepCompleted(10);
       setOverlayVisible("chokepoints", true);
       setOverlayVisible("politicalInfluence", true); // show trade-hub circles
-      setStatus(`Economy built: ${result.hubs.length} hubs, ${result.chains.length} supply chains, ${result.regions.length} regions, ${result.chokepoints.length} chokepoints`);
+      setStatus(`Economy built: ${result.hubs.length} hubs, ${result.chains.length} supply chains, ${result.regions.length} regions, ${result.chokepoints.length} chokepoints — settlements developed by trade`);
     } catch (err) { setStatus(`Error: ${err}`); }
     setSimRunning(false);
   };

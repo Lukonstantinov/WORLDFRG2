@@ -65,7 +65,7 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
 
       {settlements.length > 0 && (
         <div style={{ maxHeight: 140, overflowY: "auto", display: "flex", flexDirection: "column", gap: 1 }}>
-          {settlements.slice(0, 60).map((s, i) => (
+          {[...settlements].sort((a, b) => b.population - a.population).slice(0, 60).map((s, i) => (
             <div key={s.id}
               onClick={() => focusOn(s.x, s.y)}
               title="Click to locate on the map"
@@ -76,8 +76,8 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
               <span style={{ color: "#8090b0", fontSize: 10 }}>
                 {dot(s.size)} #{i + 1} {s.size}
               </span>
-              <span style={{ color: "#506080", fontSize: 10 }}>
-                {(s.score * 100).toFixed(0)}%
+              <span style={{ color: "#7a8aa0", fontSize: 10 }}>
+                {s.population >= 1000 ? `${(s.population / 1000).toFixed(s.population >= 10000 ? 0 : 1)}k` : s.population}
               </span>
             </div>
           ))}
