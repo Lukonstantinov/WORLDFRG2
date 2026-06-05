@@ -105,7 +105,7 @@ pub fn builtin_index_of(id: &str) -> Option<usize> {
 /// The shipped 30-good library, seeded from the `biological.rs` const tables so
 /// that spec-driven generation is byte-identical to the pre-spec behavior.
 pub fn default_list() -> Vec<GoodSpec> {
-    (0..GOODS_COUNT)
+    let mut list: Vec<GoodSpec> = (0..GOODS_COUNT)
         .map(|g| {
             let dp = deposit_params(g);
             let distribution = if dp.is_some() {
@@ -140,7 +140,62 @@ pub fn default_list() -> Vec<GoodSpec> {
                 scoring: None,
             }
         })
-        .collect()
+        .collect();
+    list.extend(default_custom_goods());
+    list
+}
+
+/// Curated extra goods shipped on top of the 30+ built-ins: grain & paper & salt
+/// *types* (per the user's "types of wheat/paper", "bay vs rock salt") plus a set
+/// of regionally-distinct commodities and a few extreme-rare luxuries. All are
+/// declarative (`Envelope`-scored) custom goods, so they need no column/const
+/// changes and can be freely edited in the Goods Editor.
+fn default_custom_goods() -> Vec<GoodSpec> {
+    // Köppen codes used below: AF1 AM2 AW3 BWH4 BWK5 BSH6 BSK7 CSA8 CSB9 CFA11
+    // CFB12 DFA14 DFB15 DFC16 DSB19 AS23 CWA24.
+    #[allow(clippy::too_many_arguments)]
+    fn cg(
+        id: &str, name: &str, icon: &str, color: &str, domain: Domain, dist: Distribution,
+        rarity: f32, desire: f32, luxury: bool, deposit: Option<DepositSpec>, env: Envelope,
+    ) -> GoodSpec {
+        GoodSpec {
+            id: id.into(), name: name.into(), icon: icon.into(), color: color.into(),
+            enabled: true, domain, distribution: dist, rarity, desire, network_luxury: luxury,
+            builtin: false, deposit, scoring: Some(env),
+        }
+    }
+    let dep = |min_elev: f32, num: u32, den: u32| Some(DepositSpec { min_elev, count_num: num, count_den: den });
+    let env = |climate: Vec<(u8, f32)>, temp: Option<[f32; 2]>, precip: Option<[f32; 3]>,
+               elevation: Option<[f32; 3]>, abs_lat: Option<[f32; 3]>, fertility: f32, coast_bonus: f32| Envelope {
+        climate, temp, precip, elevation, abs_lat, fertility, coast_bonus,
+    };
+
+    vec![
+        // Note: grain & paper "types" already exist as per-cell SUBTYPES of the
+        // built-in "Grain"/"Paper" goods (GRAIN_SUBTYPES / PAPER_SUBTYPES in the
+        // frontend goods.ts), so they are NOT duplicated as separate goods here.
+        // ── Salt types — built-in "salt" is now Rock Salt; this is coastal bay salt ──
+        cg("bay_salt", "Bay Salt", "\u{1F9C2}", "#e8e0d0", Domain::Coastal, Distribution::Deposits, 0.45, 0.55, false,
+            dep(0.0, 2, 1), env(vec![(4,1.0),(5,0.9),(6,0.9),(7,0.8),(8,0.6),(9,0.6)], Some([24.0,14.0]), Some([0.0,500.0,300.0]), None, Some([8.0,45.0,12.0]), 0.0, 1.0)),
+        // ── Regionally-distinct commodities ──
+        cg("citrus", "Citrus", "\u{1F34A}", "#f4a33a", Domain::Coastal, Distribution::Local, 0.55, 0.45, false,
+            None, env(vec![(8,1.0),(9,1.0),(11,0.7)], Some([19.0,7.0]), Some([400.0,1100.0,300.0]), None, Some([25.0,40.0,8.0]), 0.4, 0.5)),
+        cg("flax", "Flax / Linen", "\u{1F9F5}", "#cfe0e8", Domain::Continental, Distribution::Local, 0.50, 0.40, false,
+            None, env(vec![(12,1.0),(11,0.7),(15,0.8),(14,0.7)], Some([14.0,7.0]), Some([500.0,1200.0,300.0]), None, None, 0.5, 0.0)),
+        cg("coral", "Red Coral", "\u{1FAB8}", "#ff6f61", Domain::Marine, Distribution::Local, 0.60, 0.40, true,
+            None, env(vec![], Some([26.0,5.0]), None, None, Some([0.0,30.0,8.0]), 0.0, 0.6)),
+        // ── Extreme-rare luxuries (harsh placement: tiny homelands / few deposits) ──
+        cg("cinnamon", "Cinnamon", "\u{1F33F}", "#a9603a", Domain::Coastal, Distribution::Local, 0.72, 0.50, true,
+            None, env(vec![(2,1.0),(1,0.8),(3,0.6)], Some([27.0,6.0]), Some([1200.0,3000.0,400.0]), None, Some([0.0,15.0,6.0]), 0.0, 0.5)),
+        cg("saffron", "Saffron", "\u{1F33C}", "#f4c430", Domain::Continental, Distribution::Local, 0.88, 0.55, true,
+            None, env(vec![(8,1.0),(9,0.9),(7,0.7),(19,0.6)], Some([18.0,7.0]), Some([300.0,700.0,200.0]), Some([0.12,0.45,0.15]), Some([30.0,42.0,7.0]), 0.0, 0.0)),
+        cg("tyrian_purple", "Tyrian Purple", "\u{1F7E3}", "#6a0dad", Domain::Coastal, Distribution::Deposits, 0.90, 0.55, true,
+            dep(0.0, 1, 3), env(vec![(8,1.0),(9,1.0),(11,0.7),(4,0.6)], Some([22.0,8.0]), None, None, Some([28.0,42.0,6.0]), 0.0, 1.0)),
+        cg("ambergris", "Ambergris", "\u{1F40B}", "#cfc0a0", Domain::Marine, Distribution::Deposits, 0.92, 0.60, true,
+            dep(0.0, 1, 4), env(vec![], Some([12.0,10.0]), None, None, Some([30.0,65.0,12.0]), 0.0, 0.0)),
+        cg("jade", "Jade", "\u{1F7E2}", "#00a86b", Domain::Continental, Distribution::Deposits, 0.90, 0.55, true,
+            dep(0.40, 1, 3), env(vec![], None, None, Some([0.40,1.0,0.12]), None, 0.0, 0.0)),
+    ]
 }
 
 /// A deterministic per-good salt for placement (seeded RNG), derived from the id
