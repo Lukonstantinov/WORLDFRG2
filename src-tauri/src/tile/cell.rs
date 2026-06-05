@@ -36,6 +36,7 @@ pub struct TileData {
     pub shipworm_risk: Vec<u8>,   // sea: 0..255 shipworm (Teredo) hull-hazard. Serialized AFTER goods.
     pub storm_base: Vec<u8>,      // sea: 0..255 annual cyclone/storm potential (open ocean).
     pub reef_risk: Vec<u8>,       // sea: 0..255 reef/shoal wreck hazard (warm shallow coast).
+    pub disease_risk: Vec<u8>,    // land: 0..255 malaria/fever risk (warm-wet lowland). Serialized LAST.
 }
 
 /// Number of trade-good sublayer fields stored per cell. See sim/biological.rs
@@ -88,6 +89,7 @@ impl TileData {
             shipworm_risk: vec![0; N],
             storm_base: vec![0; N],
             reef_risk: vec![0; N],
+            disease_risk: vec![0; N],
         }
     }
 
@@ -143,6 +145,7 @@ impl TileData {
         buf.extend_from_slice(&self.shipworm_risk);
         buf.extend_from_slice(&self.storm_base);
         buf.extend_from_slice(&self.reef_risk);
+        buf.extend_from_slice(&self.disease_risk);
 
         zstd::encode_all(buf.as_slice(), 3).unwrap_or(buf)
     }
@@ -205,6 +208,7 @@ impl TileData {
         // they were added; older blobs end above and these reads pad to zero.
         let storm_base = read_u8(&buf, &mut offset);
         let reef_risk = read_u8(&buf, &mut offset);
+        let disease_risk = read_u8(&buf, &mut offset);
 
         // Keep every stored good column (the count is variable and may exceed the
         // built-in GOODS_COUNT); pad up to GOODS_COUNT so code that indexes the
@@ -219,7 +223,7 @@ impl TileData {
             wind_vx, wind_vy, current_vx, current_vy,
             distance_to_ocean, habitability,
             salinity, shark_risk, goods, shipworm_risk,
-            storm_base, reef_risk,
+            storm_base, reef_risk, disease_risk,
         }
     }
 }

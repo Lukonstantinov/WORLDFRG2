@@ -431,6 +431,70 @@ pub fn compute_shipworm_risk(buf: &mut WorldBuffer, rivers: &[River]) {
     }
 }
 
+// ── Disease (malaria / fever) — land hazard ─────────────────────────────────
+
+/// Per-LAND-cell malaria/fever risk: warm, wet, low-lying ground near standing
+/// water (river floodplains, coastal lagoons, marshy lowlands) breeds the
+/// mosquito vector. Highest in wet tropics/subtropics, ~0 in deserts, cool
+/// highlands and cold latitudes. Stored u8 0..255 — suppresses settlement and is
+/// rendered as the Disease overlay. Depends only on climate/relief/water, so it
+/// is computed in the settlement phase (before habitability needs it).
+pub fn compute_disease_risk(buf: &mut WorldBuffer, rivers: &[River]) {
+    let w = buf.width;
+    let n = buf.total();
+
+    // Bounded BFS distance from standing/fresh water: river cells + low coastal
+    // ground (lagoon / mangrove). Closer water = stronger breeding habitat.
+    let max_d = 6u32;
+    let mut wd = vec![u32::MAX; n];
+    let mut queue = VecDeque::new();
+    for river in rivers {
+        for &(rx, ry) in &river.points {
+            let i = buf.idx(rx, ry);
+            if wd[i] != 0 { wd[i] = 0; queue.push_back((rx, ry)); }
+        }
+    }
+    for i in 0..n {
+        if buf.terrain[i] == 1 && buf.distance_to_ocean[i] < 0.02 && buf.elevation[i] < 0.10 && wd[i] != 0 {
+            wd[i] = 0;
+            queue.push_back(((i as u32) % w, (i as u32) / w));
+        }
+    }
+    while let Some((x, y)) = queue.pop_front() {
+        let d = wd[buf.idx(x, y)];
+        if d >= max_d { continue; }
+        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+            let nx = buf.wrap_x(x as i32 + dx);
+            let ny = buf.clamp_y(y as i32 + dy);
+            let ni = buf.idx(nx, ny);
+            if wd[ni] > d + 1 { wd[ni] = d + 1; queue.push_back((nx, ny)); }
+        }
+    }
+
+    for i in 0..n {
+        if buf.terrain[i] != 1 { buf.disease_risk[i] = 0; continue; }
+        let t = buf.temperature[i];
+        // Warm vector window: from ~15°C, fading out in extreme heat/aridity.
+        let warmth = smoothstep(15.0, 22.0, t) * (1.0 - smoothstep(33.0, 40.0, t));
+        // Standing water needs moisture; dry land breeds little.
+        let wet = band(buf.precipitation[i], 700.0, 3000.0, 500.0);
+        // Malaria fades with altitude (cooler, fewer pools).
+        let lowland = 1.0 - smoothstep(0.12, 0.40, buf.elevation[i]);
+        // Proximity to standing / fresh water.
+        let water = if wd[i] == u32::MAX { 0.0 } else { 1.0 - wd[i] as f32 / max_d as f32 };
+        // Köppen reinforcement: wet tropics & humid subtropics are worst.
+        let clim = match buf.koppen[i] {
+            1 | 2 => 1.0,        // Af / Am rainforest & monsoon
+            3 | 23 => 0.85,      // Aw / As savanna (seasonal pools)
+            11 | 24 => 0.75,     // Cfa / Cwa humid subtropical
+            8 | 9 | 12 => 0.35,  // Mediterranean / oceanic (marsh only)
+            _ => 0.15,
+        };
+        let risk = (warmth * wet * lowland * (0.35 + 0.65 * water) * clim).clamp(0.0, 1.0);
+        buf.disease_risk[i] = q(risk);
+    }
+}
+
 // ── Storms / cyclones (open ocean) ───────────────────────────────────────────
 
 /// Compute the **annual** storm/cyclone potential of every sea cell. Unlike the

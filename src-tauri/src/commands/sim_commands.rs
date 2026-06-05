@@ -216,6 +216,7 @@ pub fn sim_run_all(
     fertility::compute_fisheries(&mut buf, &extracted_rivers);
 
     // Phase 7: Settlements
+    biological::compute_disease_risk(&mut buf, &extracted_rivers);
     let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
     let generated_settlements = settlements::generate_settlements(&buf, &habitability, seed);
     settlements::write_habitability(&mut buf, &habitability);
@@ -310,6 +311,7 @@ pub fn sim_run_all_from_terrain(
     fertility::compute_fisheries(&mut buf, &extracted_rivers);
 
     // Phase 7: Settlements
+    biological::compute_disease_risk(&mut buf, &extracted_rivers);
     let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
     let generated_settlements = settlements::generate_settlements(&buf, &habitability, seed);
     settlements::write_habitability(&mut buf, &habitability);
@@ -384,6 +386,8 @@ pub fn sim_generate_settlements(
     let lake_max = (buf.total() / 2000).max(20);
     let lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
 
+    // Malaria/fever (needed before habitability so disease suppresses settlement).
+    biological::compute_disease_risk(&mut buf, &river_data);
     let habitability = settlements::compute_habitability(&buf, &river_data, &lakes);
     let result = settlements::generate_settlements(&buf, &habitability, seed);
 

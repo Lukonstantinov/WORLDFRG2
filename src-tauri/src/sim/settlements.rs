@@ -189,12 +189,16 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake])
                 else if has_river { 0.45 }
                 else { 0.1 };
 
+            // Disease suppression: malaria/fever lowlands are settled, but more
+            // sparsely and in smaller numbers (a multiplicative drag, not a wall).
+            let disease_gate = 1.0 - 0.55 * (buf.disease_risk[idx] as f32 / 255.0);
+
             // --- Final score (gated by temperature viability) ---
             hab[idx] = ((climate_score * 0.40
                 + fertility_score * 0.20
                 + water_score * 0.20
                 + terrain_score * 0.10
-                + trade_score * 0.10) * temp_gate * cryo_gate).clamp(0.0, 1.0);
+                + trade_score * 0.10) * temp_gate * cryo_gate * disease_gate).clamp(0.0, 1.0);
         }
     }
 
@@ -279,7 +283,10 @@ pub fn generate_settlements(
             ("village", 200)
         };
 
-        let population = (base_pop as f32 * (0.5 + score)) as u32;
+        // Endemic disease thins the population a town can sustain.
+        let disease = buf.disease_risk[*idx] as f32 / 255.0;
+        let disease_mult = 1.0 - 0.5 * disease;
+        let population = (base_pop as f32 * (0.5 + score) * disease_mult) as u32;
 
         // Antique place name (Roman/Greek/Phoenician/Persian by region). Capitals
         // and cities earn a grand epithet ("Aquentia Magna").

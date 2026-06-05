@@ -30,6 +30,7 @@ pub fn render_tile(tile: &TileData, layer: &str) -> Vec<u8> {
         "shipworm" => render_shipworm(tile, &mut rgba),
         "storm" => render_storm(tile, &mut rgba),
         "reef" => render_reef(tile, &mut rgba),
+        "disease" => render_disease(tile, &mut rgba),
         _ => render_land(tile, &mut rgba),
     }
 
@@ -501,6 +502,33 @@ fn render_reef(tile: &TileData, rgba: &mut [u8]) {
                 lerp_rgb((10, 40, 80), (40, 180, 170), v * 2.0)
             } else {
                 lerp_rgb((40, 180, 170), (230, 210, 70), (v - 0.5) * 2.0)
+            };
+            rgba[offset] = r;
+            rgba[offset + 1] = g;
+            rgba[offset + 2] = b;
+        }
+        rgba[offset + 3] = 255;
+    }
+}
+
+fn render_disease(tile: &TileData, rgba: &mut [u8]) {
+    // Malaria/fever risk on LAND: clear green → sickly yellow → fever red/purple.
+    for i in 0..PIXEL_COUNT {
+        let offset = i * 4;
+        if tile.terrain[i] == 0 {
+            rgba[offset + 3] = 0; // sea transparent
+            continue;
+        }
+        let v = tile.disease_risk[i] as f32 / 255.0;
+        if v < 0.01 {
+            rgba[offset] = 40;
+            rgba[offset + 1] = 70;
+            rgba[offset + 2] = 45;
+        } else {
+            let (r, g, b) = if v < 0.5 {
+                lerp_rgb((50, 150, 50), (200, 190, 60), v * 2.0)
+            } else {
+                lerp_rgb((200, 190, 60), (150, 30, 120), (v - 0.5) * 2.0)
             };
             rgba[offset] = r;
             rgba[offset + 1] = g;
