@@ -10,9 +10,10 @@ pub const SOIL_SPODOSOL: u8 = 5;  // Boreal/podzol
 pub const SOIL_ARIDISOL: u8 = 6;  // Desert/dry
 pub const SOIL_HISTOSOL: u8 = 7;  // Organic/peat
 pub const SOIL_ENTISOL: u8 = 8;   // Young/undeveloped
-pub const SOIL_ANDISOL: u8 = 9;   // Volcanic
+pub const SOIL_ANDISOL: u8 = 9;   // Volcanic (weathered ash apron — very fertile)
 pub const SOIL_GELISOL: u8 = 10;  // Permafrost
 pub const SOIL_ALLUVIAL: u8 = 11; // River-deposited
+pub const SOIL_VOLCANIC_ASH: u8 = 12; // Young volcanic ash at the vent — richest of all
 
 /// Classify soil types based on Köppen climate.
 /// Matches WF1 soil-types.ts algorithm.
@@ -23,9 +24,11 @@ pub fn classify_soil(buf: &mut WorldBuffer) {
             continue;
         }
 
-        // Volcanic override
+        // Volcanic override: the vent cell itself is young, mineral-rich ash.
+        // (The weathered Andisol apron around it is laid down by
+        // `apply_volcanic_apron`.)
         if buf.is_volcanic[i] == 1 {
-            buf.soil_type[i] = SOIL_ANDISOL;
+            buf.soil_type[i] = SOIL_VOLCANIC_ASH;
             continue;
         }
 
@@ -43,6 +46,36 @@ pub fn classify_soil(buf: &mut WorldBuffer) {
             ET | EF => SOIL_GELISOL,
             _ => SOIL_ENTISOL,
         };
+    }
+}
+
+/// Lay down a fertile Andisol apron of weathered volcanic ash around each vent.
+/// Cells within a short radius of a volcanic cell (but not volcanic themselves)
+/// get ash-fallout soil — unless they are already river alluvium or ice. Run
+/// after `classify_soil`, before `apply_alluvial_override` (rivers win over ash).
+pub fn apply_volcanic_apron(buf: &mut WorldBuffer) {
+    let w = buf.width as i32;
+    let h = buf.height as i32;
+    // Snapshot the vents so the apron doesn't chain outward through itself.
+    let vents: Vec<usize> = (0..buf.total())
+        .filter(|&i| buf.is_volcanic[i] == 1 && buf.terrain[i] == 1)
+        .collect();
+    for i in vents {
+        let cx = (i % w as usize) as i32;
+        let cy = (i / w as usize) as i32;
+        for dy in -2i32..=2 {
+            for dx in -2i32..=2 {
+                if dx * dx + dy * dy > 4 { continue; }
+                let nx = buf.wrap_x(cx + dx);
+                let ny = cy + dy;
+                if ny < 0 || ny >= h { continue; }
+                let ni = buf.idx(nx, ny as u32);
+                if buf.terrain[ni] != 1 { continue; }
+                if buf.is_volcanic[ni] == 1 { continue; } // keep ash vents
+                if buf.soil_type[ni] == SOIL_GELISOL { continue; } // frozen ground stays frozen
+                buf.soil_type[ni] = SOIL_ANDISOL;
+            }
+        }
     }
 }
 

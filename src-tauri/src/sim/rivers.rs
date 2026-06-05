@@ -128,9 +128,14 @@ pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
     // Flow accumulation: each land cell contributes itself, propagated
     // downstream. `order` is outlet-first, so iterating it in reverse visits
     // every cell before its (earlier-popped) downstream target.
+    // Ice-cap (Köppen EF) cells are permanent ice sheets: their precipitation is
+    // locked up as ice rather than liquid runoff, so they contribute nothing to
+    // flow accumulation. A drainage basin of pure ice therefore stays below the
+    // river threshold (no polar rivers); mixed basins are truncated at the ice
+    // margin by `extract_rivers`.
     let mut acc = vec![0u32; total];
     for i in 0..total {
-        if buf.terrain[i] == 1 { acc[i] = 1; }
+        if buf.terrain[i] == 1 && buf.koppen[i] != crate::sim::koppen::EF { acc[i] = 1; }
     }
     for &idx in order.iter().rev() {
         if buf.terrain[idx] != 1 { continue; }
@@ -173,6 +178,7 @@ pub fn extract_rivers(
         for x in 0..w {
             let idx = buf.idx(x, y);
             if buf.terrain[idx] != 1 { continue; }
+            if buf.koppen[idx] == crate::sim::koppen::EF { continue; } // no river off an ice cap
             if acc[idx] < threshold { continue; }
             if flow_dir[idx] != FLOW_SEA { continue; }
             mouths.push((idx, acc[idx]));
@@ -193,6 +199,9 @@ pub fn extract_rivers(
         // Trace upstream: find the upstream cell that flows into current
         loop {
             if claimed[current] { break; }
+            // Truncate at an ice sheet: rivers stop at the ice margin, never
+            // tracing up into a permanent ice cap.
+            if buf.koppen[current] == crate::sim::koppen::EF { break; }
             claimed[current] = true;
 
             let x = (current % w as usize) as u32;

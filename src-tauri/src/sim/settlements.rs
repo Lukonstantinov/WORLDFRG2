@@ -82,8 +82,8 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River]) -> Vec<f32> {
                 18 | 19 | 20 => -0.05,// Ds continental Mediterranean
                 4 | 5 => -0.40,       // BWh/BWk desert
                 16 | 17 => -0.30,     // Dfc/Dfd cold continental
-                21 => -0.60,          // ET tundra
-                22 => -0.80,          // EF ice cap
+                21 => -0.85,          // ET tundra — frozen ground, no farming
+                22 => -0.92,          // EF ice cap — uninhabitable
                 _ => 0.0,
             };
 
@@ -96,14 +96,22 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River]) -> Vec<f32> {
             // threshold was raised (from -2°C/8°C) because settlements were
             // creeping too far into the cold subpolar north; a 2-13°C ramp keeps
             // the dense settlement frontier in genuinely temperate latitudes.
-            let temp_gate = if temp <= 2.0 {
+            let temp_gate = if temp <= 3.0 {
                 0.0
-            } else if temp < 13.0 {
-                (temp - 2.0) / 11.0
+            } else if temp < 14.0 {
+                (temp - 3.0) / 11.0
             } else if temp <= 30.0 {
                 1.0
             } else {
                 (1.0 - (temp - 30.0) / 15.0).max(0.0)
+            };
+
+            // Explicit cryosphere penalty: tundra is barely habitable, ice caps
+            // never. Multiplicative so no bonus (coast/trade) can rescue them.
+            let cryo_gate = match buf.koppen[idx] {
+                21 => 0.30, // ET tundra
+                22 => 0.0,  // EF ice cap
+                _ => 1.0,
             };
 
             // --- Fertility score (20%) ---
@@ -156,7 +164,7 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River]) -> Vec<f32> {
                 + fertility_score * 0.20
                 + water_score * 0.20
                 + terrain_score * 0.10
-                + trade_score * 0.10) * temp_gate).clamp(0.0, 1.0);
+                + trade_score * 0.10) * temp_gate * cryo_gate).clamp(0.0, 1.0);
         }
     }
 

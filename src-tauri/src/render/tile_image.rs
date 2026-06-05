@@ -40,11 +40,18 @@ fn render_land(tile: &TileData, rgba: &mut [u8]) {
     for i in 0..PIXEL_COUNT {
         let offset = i * 4;
         if tile.terrain[i] == 1 {
-            // Land: earthy green with subtle elevation shading
             let e = tile.elevation[i].clamp(0.0, 1.0);
-            let r = (60.0 + e * 40.0) as u8;
-            let g = (100.0 + e * 30.0) as u8;
-            let b = (45.0 + e * 20.0) as u8;
+            let (r, g, b) = match tile.koppen[i] {
+                // Ice cap (EF): permanent ice sheet, near-white with faint relief.
+                22 => {
+                    let s = (220.0 + e * 35.0).min(255.0) as u8;
+                    (s, s, (235.0 + e * 20.0).min(255.0) as u8)
+                }
+                // Tundra (ET): frosted, pale grey-green.
+                21 => (150, 168, 158),
+                // Land: earthy green with subtle elevation shading.
+                _ => ((60.0 + e * 40.0) as u8, (100.0 + e * 30.0) as u8, (45.0 + e * 20.0) as u8),
+            };
             rgba[offset] = r;
             rgba[offset + 1] = g;
             rgba[offset + 2] = b;
@@ -223,6 +230,7 @@ fn soil_color(code: u8) -> (u8, u8, u8) {
         9 => (100, 80, 80),    // andisol
         10 => (200, 220, 240), // gelisol
         11 => (120, 100, 60),  // alluvial
+        12 => (40, 30, 35),     // young volcanic ash (near-black, very dark)
         _ => (160, 160, 160),
     }
 }
