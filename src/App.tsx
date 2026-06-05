@@ -6,6 +6,7 @@ import { WorkflowPanel } from "./ui/workflow/WorkflowPanel";
 import { InfoPanel } from "./ui/InfoPanel";
 import { TradeMatrixPanel } from "./ui/TradeMatrixPanel";
 import { HubPanel } from "./ui/HubPanel";
+import { GoodFlowPanel } from "./ui/GoodFlowPanel";
 import { ElevationLegend } from "./ui/ElevationLegend";
 import { ElevationHistogram } from "./ui/ElevationHistogram";
 import { GoodsEditor } from "./ui/GoodsEditor";
@@ -339,6 +340,7 @@ export default function App() {
           <MapCanvas />
           <InfoPanel />
           <HubPanel />
+          <GoodFlowPanel />
           <TradeMatrixPanel />
           <ElevationLegend />
           <ElevationHistogram />

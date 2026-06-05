@@ -542,6 +542,8 @@ struct CoarseCost {
     is_land: Vec<bool>,
     is_open_sea: Vec<bool>, // sea cell not adjacent to land (true open water)
     is_river: Vec<bool>,
+    elev: Vec<f32>,         // normalized elevation (relief → caravan slowdown)
+    sea_hazard: Vec<f32>,   // storm/reef exposure (ship slowdown)
 }
 
 const SEA_BLOCK_COST: f32 = 1.0e6;
@@ -549,6 +551,51 @@ const SEA_BLOCK_COST: f32 = 1.0e6;
 /// coastal-sea cost (0.5) so least-cost routes/flows hug the coast and cross open
 /// ocean only at the narrowest point, rather than cutting straight across a basin.
 const OPEN_SEA_COST: f32 = 3.5;
+
+// ── Physical travel scale ───────────────────────────────────────────────────
+// The sim treats the map width as one Earth circumference (mirrors
+// `sim/precipitation.rs::EARTH_CIRCUMFERENCE_KM`), so 1 fine cell ≈
+// 40075 / grid_width km. Travel time on a routed leg = km ÷ mode speed, with a
+// terrain multiplier (relief slows caravans; storm/reef hazard slows ships).
+const KM_EQUATOR: f32 = 40075.0;
+const SPEED_CARAVAN_KMD: f32 = 30.0;  // overland pack caravan
+const SPEED_SHIP_KMD: f32 = 120.0;    // coastal sailing ship
+const SPEED_RIVER_KMD: f32 = 40.0;    // river barge / boat
+
+/// Physical length (km), travel time (days) and dominant transport mode
+/// (0 land / 1 sea / 2 river) of a coarse routed path. Each coarse step spans `f`
+/// fine cells; diagonal steps are √2 longer. Mode + terrain set the per-leg speed.
+fn path_metrics(cc: &CoarseCost, path: &[usize], km_per_cell: f32) -> (f32, f32, u8) {
+    let mut km = 0.0f32;
+    let mut days = 0.0f32;
+    let (mut land, mut sea, mut river) = (0u32, 0u32, 0u32);
+    for w in path.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let ax = (a as i32) % cc.cw; let ay = (a as i32) / cc.cw;
+        let bx = (b as i32) % cc.cw; let by = (b as i32) / cc.cw;
+        let mut dx = (ax - bx).abs(); if dx > cc.cw / 2 { dx = cc.cw - dx; }
+        let dy = (ay - by).abs();
+        let diag = dx != 0 && dy != 0;
+        let seg_km = (if diag { std::f32::consts::SQRT_2 } else { 1.0 }) * cc.f as f32 * km_per_cell;
+        km += seg_km;
+        let (a_land, b_land) = (cc.is_land[a], cc.is_land[b]);
+        let (a_riv, b_riv) = (cc.is_river[a], cc.is_river[b]);
+        let (speed, factor) = if a_land && b_land && (a_riv || b_riv) {
+            river += 1;
+            (SPEED_RIVER_KMD, 1.0 + 0.4 * ((cc.elev[a] + cc.elev[b]) * 0.5))
+        } else if !a_land || !b_land {
+            sea += 1;
+            let hz = ((cc.sea_hazard[a] + cc.sea_hazard[b]) * 0.5).clamp(0.0, 1.0);
+            (SPEED_SHIP_KMD, 1.0 + 0.8 * hz)
+        } else {
+            land += 1;
+            (SPEED_CARAVAN_KMD, 1.0 + 1.6 * ((cc.elev[a] + cc.elev[b]) * 0.5))
+        };
+        days += seg_km / speed.max(1.0) * factor;
+    }
+    let mode = if sea >= land && sea >= river { 1u8 } else if river > land { 2 } else { 0 };
+    (km, days, mode)
+}
 
 impl CoarseCost {
     #[inline]
@@ -791,7 +838,7 @@ fn build_coarse_cost(
         }
     }
 
-    Ok(CoarseCost { f, cw, ch, cost, is_land, is_open_sea, is_river })
+    Ok(CoarseCost { f, cw, ch, cost, is_land, is_open_sea, is_river, elev, sea_hazard })
 }
 
 const COARSE_DIRS: [(i32, i32, f32); 8] = [
@@ -2481,6 +2528,10 @@ pub struct EconHub {
 pub struct EconChainStop {
     pub hub: u32,
     pub price: f32, // price multiplier when the good reaches this stop
+    #[serde(default)]
+    pub days: f32,  // cumulative travel days from the origin to this stop
+    #[serde(default)]
+    pub km: f32,    // cumulative distance from the origin to this stop
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -2490,6 +2541,41 @@ pub struct EconChain {
     pub good_name: String,
     pub stops: Vec<EconChainStop>, // origin → … intermediate hubs … → consumer
     pub points: Vec<[f32; 2]>,     // world coords of each stop (for the overlay)
+    #[serde(default)]
+    pub days: f32,                 // total travel days origin → consumer
+    #[serde(default)]
+    pub km: f32,                   // total distance origin → consumer
+    #[serde(default)]
+    pub value: f32,                // shipment value = amount × delivered price
+    #[serde(default)]
+    pub mode: u8,                  // dominant transport mode (0 land / 1 sea / 2 river)
+}
+
+/// One commodity's value moving across a corridor in one direction (for the
+/// cargo-diversity columns in the good-flow panel).
+#[derive(Serialize, Deserialize, Clone)]
+pub struct CorridorGood {
+    pub good: usize,
+    pub good_name: String,
+    pub value: f32,
+}
+
+/// A hub→hub corridor of the trade graph carrying goods in BOTH directions. The
+/// good-flow overlay draws one net-direction arrow per corridor (so direction only
+/// changes at hubs), and the cargo popup reads `fwd_goods` / `bwd_goods` into two
+/// side-by-side columns. `a` < `b` are hub ids; "forward" = a→b.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EconCorridor {
+    pub a: u32,
+    pub b: u32,
+    pub points: Vec<[f32; 2]>, // [hub a, hub b] world coords
+    pub fwd_value: f32,        // total value flowing a→b
+    pub bwd_value: f32,        // total value flowing b→a
+    pub fwd_goods: Vec<CorridorGood>, // a→b cargo, ranked by value
+    pub bwd_goods: Vec<CorridorGood>, // b→a cargo, ranked by value
+    pub days: f32,             // one-way travel days across this corridor
+    pub km: f32,
+    pub mode: u8,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -2516,6 +2602,8 @@ pub struct EconomySnapshot {
     pub chains: Vec<EconChain>,
     pub chokepoints: Vec<EconChokepoint>,
     pub regions: Vec<EconRegion>,
+    #[serde(default)]
+    pub corridors: Vec<EconCorridor>,
     pub goods: Vec<String>,
 }
 
@@ -2597,7 +2685,7 @@ pub fn compute_economy(
     let specs = crate::commands::goods_commands::load_world_goods(&conn);
     let gc = specs.len();
     let goods_names: Vec<String> = specs.iter().map(|s| s.id.clone()).collect();
-    let empty = EconomySnapshot { hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![], goods: goods_names.clone() };
+    let empty = EconomySnapshot { hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![], corridors: vec![], goods: goods_names.clone() };
     if grid_w == 0 || grid_h == 0 {
         return Ok(empty);
     }
@@ -2882,6 +2970,22 @@ pub fn compute_economy(
     let mut edge_vol: std::collections::HashMap<(usize, usize), (f32, usize)> =
         std::collections::HashMap::new(); // coarse-edge volume + dominant good
 
+    // Travel scale + directional corridor accumulation for the good-flow panel.
+    let km_per_cell = KM_EQUATOR / grid_w.max(1) as f32;
+    let mut transit = vec![0.0f32; nn]; // goods passing THROUGH a hub (emporium score)
+    #[derive(Default)]
+    struct CorridorAcc {
+        fwd_value: f32,
+        bwd_value: f32,
+        fwd_good: std::collections::HashMap<usize, f32>,
+        bwd_good: std::collections::HashMap<usize, f32>,
+        days: f32,
+        km: f32,
+        mode: u8,
+    }
+    let mut corridor_acc: std::collections::HashMap<(usize, usize), CorridorAcc> =
+        std::collections::HashMap::new();
+
     // Global scarcity multiplier per good: rarer goods (low world abundance) fetch
     // higher prices everywhere → multiplier 1.0 … ~3.3×.
     let scarcity_mult: Vec<f32> = (0..gc)
@@ -2939,13 +3043,20 @@ pub fn compute_economy(
                 let mut t = si;
                 while t != usize::MAX { path.push(t); if t == di { break; } t = gpar[di][t]; }
 
-                // Walk the path: accumulate per-edge route cost (for per-stop prices)
-                // and per coarse-edge volume (for chokepoints).
+                // Walk the path: accumulate per-edge route cost (for per-stop prices),
+                // per coarse-edge volume (for chokepoints), physical distance/time per
+                // leg, and directional corridor cargo (for the good-flow panel).
                 let chain_id = chains.len() as u32;
-                let mut cum = 0.0f32;
+                // Goods passing THROUGH intermediate hubs make those hubs emporia.
+                for k in 1..path.len().saturating_sub(1) { transit[path[k]] += amt; }
+                let mut cum = 0.0f32;       // route cost (drives price)
+                let mut cum_km = 0.0f32;    // physical distance from origin
+                let mut cum_days = 0.0f32;  // travel time from origin
+                let mut modes = [0u32; 3];
                 let mut chain_stops: Vec<EconChainStop> = Vec::with_capacity(path.len());
                 let mut points: Vec<[f32; 2]> = Vec::with_capacity(path.len());
                 for (k, &h) in path.iter().enumerate() {
+                    let (mut leg_km, mut leg_days, mut leg_mode) = (0.0f32, 0.0f32, 0u8);
                     if k > 0 {
                         let prev = path[k - 1];
                         if let Some(&(_, w, eid)) = adj[prev].iter().find(|&&(v, _, _)| v == h) {
@@ -2955,15 +3066,37 @@ pub fn compute_economy(
                                     let e = (win[0].min(win[1]), win[0].max(win[1]));
                                     edge_vol.entry(e).or_insert((0.0, g)).0 += amt;
                                 }
+                                let (lk, ld, lm) = path_metrics(&cc, p, km_per_cell);
+                                leg_km = lk; leg_days = ld; leg_mode = lm;
+                                cum_km += lk; cum_days += ld; modes[lm as usize] += 1;
                             }
                         }
                     }
                     let transport = (cum / cc.cw as f32) * 1.3;
                     let price = origin * sca * (1.0 + transport) * (1.0 + local_need);
-                    chain_stops.push(EconChainStop { hub: h as u32, price });
+                    chain_stops.push(EconChainStop { hub: h as u32, price, days: cum_days, km: cum_km });
                     points.push([nodes[h].x as f32, nodes[h].y as f32]);
+                    // Directional corridor cargo: value = amount × delivered-so-far price,
+                    // attributed to the hub→hub segment in the direction goods flow.
+                    if k > 0 {
+                        let prev = path[k - 1];
+                        let (na, nb) = (prev.min(h), prev.max(h));
+                        let value_here = amt * price;
+                        let acc = corridor_acc.entry((na, nb)).or_default();
+                        if prev < h {
+                            acc.fwd_value += value_here;
+                            *acc.fwd_good.entry(g).or_insert(0.0) += value_here;
+                        } else {
+                            acc.bwd_value += value_here;
+                            *acc.bwd_good.entry(g).or_insert(0.0) += value_here;
+                        }
+                        acc.days = leg_days; acc.km = leg_km; acc.mode = leg_mode;
+                    }
                 }
                 let delivered = chain_stops.last().map(|s| s.price).unwrap_or(origin * sca);
+                let total_days = chain_stops.last().map(|s| s.days).unwrap_or(0.0);
+                let total_km = chain_stops.last().map(|s| s.km).unwrap_or(0.0);
+                let dom_mode = (0..3usize).max_by_key(|&i| modes[i]).unwrap_or(0) as u8;
                 receives[di].push(EconReceive {
                     good: g, good_name: goods_names.get(g).cloned().unwrap_or_default(),
                     amount: amt, price: delivered, chain: chain_id, from_hub: si as u32,
@@ -2972,6 +3105,7 @@ pub fn compute_economy(
                     id: chain_id, good: g,
                     good_name: goods_names.get(g).cloned().unwrap_or_default(),
                     stops: chain_stops, points,
+                    days: total_days, km: total_km, value: amt * delivered, mode: dom_mode,
                 });
             }
         }
@@ -2985,58 +3119,25 @@ pub fn compute_economy(
     }
     let wmax = wealth.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
 
-    // ── Strategic chokepoints: CLUSTER the busiest coarse edges ──
-    // A single strait/pass spans many adjacent high-volume edges, so the old
-    // "top-10 edges" listed the same passage ten times. Greedily merge edges
-    // that fall within `min_sep` of an existing cluster, summing their volume —
-    // a chokepoint's strength is the TOTAL routed volume forced through that one
-    // narrow place (where many roads converge: Malacca / Venice / Bosphorus).
-    let mut ev: Vec<((usize, usize), (f32, usize))> = edge_vol.into_iter().collect();
-    ev.sort_by(|a, b| b.1.0.partial_cmp(&a.1.0).unwrap_or(std::cmp::Ordering::Equal));
-    let max_edge = ev.first().map(|e| e.1.0).unwrap_or(1.0).max(1e-6);
-    let min_sep = (grid_w as f32 * 0.045).max(8.0);
-    let min_sep2 = min_sep * min_sep;
-    struct Choke { x: f32, y: f32, vol: f32, a: usize, b: usize }
-    let mut clusters: Vec<Choke> = Vec::new();
-    for ((a, b), (vol, _gdom)) in ev.into_iter() {
-        if vol < 0.10 * max_edge { break; } // ignore faint feeder edges
-        let wa = cc.world_of(a);
-        let wb = cc.world_of(b);
-        let mx = (wa[0] + wb[0]) * 0.5;
-        let my = (wa[1] + wb[1]) * 0.5;
-        let mut merged = false;
-        for cl in clusters.iter_mut() {
-            let mut dx = (cl.x - mx).abs();
-            if dx > grid_w as f32 / 2.0 { dx = grid_w as f32 - dx; } // x wraps
-            let dy = cl.y - my;
-            if dx * dx + dy * dy <= min_sep2 {
-                cl.vol += vol;        // accumulate the corridor's throughput
-                merged = true;
-                break;
-            }
-        }
-        if !merged {
-            clusters.push(Choke { x: mx, y: my, vol, a, b });
-        }
-    }
-    clusters.sort_by(|a, b| b.vol.partial_cmp(&a.vol).unwrap_or(std::cmp::Ordering::Equal));
-    clusters.truncate(12);
-    // Share is relative to the busiest chokepoint so the Corridors list reads in
-    // meaningful percentages (the old denominator summed every edge → all ~0%).
-    let top_vol = clusters.first().map(|c| c.vol).unwrap_or(1.0).max(1e-6);
-    let mut chokepoints: Vec<EconChokepoint> = Vec::new();
-    for cl in clusters {
-        let oa = cc.is_open_sea.get(cl.a).copied().unwrap_or(false);
-        let ob = cc.is_open_sea.get(cl.b).copied().unwrap_or(false);
-        // Narrow water gap = Strait; mixed land/water = Passage; overland = Pass.
-        let kind = if oa || ob { "Strait" }
-            else if !cc.is_land.get(cl.a).copied().unwrap_or(true) || !cc.is_land.get(cl.b).copied().unwrap_or(true) { "Passage" }
-            else { "Pass" };
-        chokepoints.push(EconChokepoint {
-            points: vec![cc.world_of(cl.a), cc.world_of(cl.b)],
-            volume: cl.vol,
-            share: cl.vol / top_vol,
-            name: kind.to_string(),
+    // ── Directional corridors (hub↔hub) for the good-flow panel ──
+    // Each corridor carries goods both ways; the overlay draws ONE net-direction
+    // arrow per corridor (so direction only changes at hubs), and the cargo popup
+    // reads the two per-direction good lists into side-by-side columns.
+    let mut corridors: Vec<EconCorridor> = Vec::new();
+    for ((na, nb), acc) in corridor_acc.into_iter() {
+        let mut fwd_goods: Vec<CorridorGood> = acc.fwd_good.into_iter()
+            .map(|(g, v)| CorridorGood { good: g, good_name: goods_names.get(g).cloned().unwrap_or_default(), value: v })
+            .collect();
+        fwd_goods.sort_by(|a, b| b.value.partial_cmp(&a.value).unwrap_or(std::cmp::Ordering::Equal));
+        let mut bwd_goods: Vec<CorridorGood> = acc.bwd_good.into_iter()
+            .map(|(g, v)| CorridorGood { good: g, good_name: goods_names.get(g).cloned().unwrap_or_default(), value: v })
+            .collect();
+        bwd_goods.sort_by(|a, b| b.value.partial_cmp(&a.value).unwrap_or(std::cmp::Ordering::Equal));
+        corridors.push(EconCorridor {
+            a: na as u32, b: nb as u32,
+            points: vec![[nodes[na].x as f32, nodes[na].y as f32], [nodes[nb].x as f32, nodes[nb].y as f32]],
+            fwd_value: acc.fwd_value, bwd_value: acc.bwd_value,
+            fwd_goods, bwd_goods, days: acc.days, km: acc.km, mode: acc.mode,
         });
     }
 
@@ -3077,6 +3178,66 @@ pub fn compute_economy(
         });
     }
 
+    // ── Strategic chokepoints: geographic STRAITS + emporium CITIES ──
+    // Two clean categories instead of arbitrary busy edges. A strait is a narrow
+    // water cell with land close on two opposing sides that routed volume threads;
+    // an emporium is a hub city a large share of routed goods passes THROUGH.
+    let mut cell_vol = vec![0.0f32; (cc.cw * cc.ch) as usize];
+    for ((a, b), (vol, _)) in &edge_vol {
+        cell_vol[*a] += *vol;
+        cell_vol[*b] += *vol;
+    }
+    let strait_r = 6i32;
+    let land_within = |cx: i32, cy: i32, dirx: i32, diry: i32| -> bool {
+        for k in 1..=strait_r {
+            let nx = cx + dirx * k;
+            let ny = cy + diry * k;
+            if ny < 0 || ny >= cc.ch { return false; }
+            if cc.is_land[cc.cidx(nx, ny)] { return true; }
+        }
+        false
+    };
+    let mut straits: Vec<(f32, usize)> = Vec::new();
+    for cy in 0..cc.ch {
+        for cx in 0..cc.cw {
+            let ci = (cy * cc.cw + cx) as usize;
+            if cc.is_land[ci] { continue; }
+            let v = cell_vol[ci];
+            if v <= 0.0 { continue; }
+            let ew = land_within(cx, cy, -1, 0) && land_within(cx, cy, 1, 0);
+            let ns = land_within(cx, cy, 0, -1) && land_within(cx, cy, 0, 1);
+            if ew || ns { straits.push((v, ci)); }
+        }
+    }
+    straits.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    let sep = (grid_w as f32 * 0.04).max(8.0);
+    let sep2 = sep * sep;
+    let mut cps: Vec<(f32, [f32; 2], String)> = Vec::new();
+    for (v, ci) in straits {
+        let wpt = cc.world_of(ci);
+        let far = cps.iter().all(|(_, p, _)| {
+            let mut dx = (p[0] - wpt[0]).abs();
+            if dx > grid_w as f32 / 2.0 { dx = grid_w as f32 - dx; }
+            let dy = p[1] - wpt[1];
+            dx * dx + dy * dy >= sep2
+        });
+        if far { cps.push((v, wpt, "Strait".to_string())); }
+        if cps.len() >= 8 { break; }
+    }
+    // Emporium cities: hubs ranked by pass-through (transit) volume.
+    let mut emp: Vec<(f32, usize)> = (0..nn)
+        .map(|h| (transit[h], h)).filter(|&(v, _)| v > 0.0).collect();
+    emp.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    for (v, h) in emp.into_iter().take(8) {
+        cps.push((v, [nodes[h].x as f32, nodes[h].y as f32], hubs[h].name.clone()));
+    }
+    cps.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    cps.truncate(12);
+    let top_vol = cps.first().map(|c| c.0).unwrap_or(1.0).max(1e-6);
+    let chokepoints: Vec<EconChokepoint> = cps.into_iter().map(|(v, p, name)| EconChokepoint {
+        points: vec![p, p], volume: v, share: v / top_vol, name,
+    }).collect();
+
     // ── Trade-region territories: group owned coarse cells per hub ──
     let mut region_cells: Vec<Vec<[f32; 2]>> = vec![Vec::new(); nn];
     for cy in 0..ch {
@@ -3097,7 +3258,7 @@ pub fn compute_economy(
         });
     }
 
-    let snapshot = EconomySnapshot { hubs, chains, chokepoints, regions, goods: goods_names };
+    let snapshot = EconomySnapshot { hubs, chains, chokepoints, regions, corridors, goods: goods_names };
     let _ = metadata::set_meta(&conn, "economy", &serde_json::to_string(&snapshot).unwrap_or_default());
     Ok(snapshot)
 }
@@ -3155,9 +3316,9 @@ pub fn get_economy(db: State<'_, WorldDb>) -> Result<EconomySnapshot, String> {
     match metadata::get_meta(&conn, "economy").map_err(|e| e.to_string())? {
         Some(json) => serde_json::from_str(&json)
             .map_err(|_| ()).or_else(|_| Ok::<_, String>(EconomySnapshot {
-                hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![], goods: goods_names.clone(),
+                hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![], corridors: vec![], goods: goods_names.clone(),
             })),
-        None => Ok(EconomySnapshot { hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![], goods: goods_names }),
+        None => Ok(EconomySnapshot { hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![], corridors: vec![], goods: goods_names }),
     }
 }
 

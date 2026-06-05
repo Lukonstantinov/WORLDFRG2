@@ -169,6 +169,8 @@ export interface EconHub {
 export interface EconChainStop {
   hub: number;
   price: number;
+  days: number; // cumulative travel days from origin to this stop
+  km: number;   // cumulative distance from origin to this stop
 }
 export interface EconChain {
   id: number;
@@ -176,6 +178,27 @@ export interface EconChain {
   good_name: string;
   stops: EconChainStop[];
   points: [number, number][];
+  days: number;  // total travel days origin → consumer
+  km: number;    // total distance origin → consumer
+  value: number; // shipment value = amount × delivered price
+  mode: number;  // dominant transport mode (0 land / 1 sea / 2 river)
+}
+export interface CorridorGood {
+  good: number;
+  good_name: string;
+  value: number;
+}
+export interface EconCorridor {
+  a: number; // hub id (min)
+  b: number; // hub id (max)
+  points: [number, number][]; // [hub a, hub b] world coords
+  fwd_value: number;          // value flowing a→b
+  bwd_value: number;          // value flowing b→a
+  fwd_goods: CorridorGood[];  // a→b cargo, ranked by value
+  bwd_goods: CorridorGood[];  // b→a cargo, ranked by value
+  days: number;               // one-way travel days across the corridor
+  km: number;
+  mode: number;
 }
 export interface EconChokepoint {
   points: [number, number][];
@@ -194,6 +217,7 @@ export interface EconomySnapshot {
   chains: EconChain[];
   chokepoints: EconChokepoint[];
   regions: EconRegion[];
+  corridors: EconCorridor[];
   goods: string[];
 }
 

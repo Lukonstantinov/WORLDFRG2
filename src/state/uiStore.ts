@@ -59,6 +59,12 @@ interface UIStore {
   selectedChain: number | null;
   /** Per-good reach view: highlight which hubs a chosen good reaches, or null. */
   reachGood: string | null;
+  /** Good-flow panel: the good whose routes/price-graph is open, or null. */
+  selectedGood: string | null;
+  /** Good-flow panel: the highlighted route (chain id) on the map, or null. */
+  selectedRoad: number | null;
+  /** Adjustable trade-hub marker display (size multiplier + highlight intensity). */
+  hubDisplay: { size: number; intensity: number };
 
   setTool: (tool: ActiveTool) => void;
   setLayer: (layer: ActiveLayer) => void;
@@ -82,6 +88,9 @@ interface UIStore {
   setBioParams: (p: Partial<BioParamsState>) => void;
   setShowTradeMatrix: (v: boolean) => void;
   setReachGood: (g: string | null) => void;
+  setSelectedGood: (g: string | null) => void;
+  setSelectedRoad: (id: number | null) => void;
+  setHubDisplay: (p: Partial<{ size: number; intensity: number }>) => void;
 }
 
 // Default layer/tool for each step
@@ -115,7 +124,7 @@ export const useUIStore = create<UIStore>((set) => ({
     markers: false, wind: false, currents: false, latLines: false,
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, reefZones: false, tradeFlows: false,
-    politicalInfluence: false, chokepoints: false,
+    politicalInfluence: false, chokepoints: false, tradeCorridors: false,
     hubNames: false, settlementNames: false, tradeRegions: false,
     ...Object.fromEntries(GOOD_DEFS.map((g) => [goodOverlayKey(g.name), false])),
   },
@@ -129,6 +138,9 @@ export const useUIStore = create<UIStore>((set) => ({
   selectedHub: null,
   selectedChain: null,
   reachGood: null,
+  selectedGood: null,
+  selectedRoad: null,
+  hubDisplay: { size: 1, intensity: 1 },
 
   setTool: (tool) => set({ activeTool: tool }),
   setLayer: (layer) => set({ activeLayer: layer }),
@@ -170,6 +182,9 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowTradeMatrix: (v) => set({ showTradeMatrix: v }),
 
   setReachGood: (g) => set({ reachGood: g }),
+  setSelectedGood: (g) => set({ selectedGood: g, selectedRoad: null }),
+  setSelectedRoad: (id) => set({ selectedRoad: id }),
+  setHubDisplay: (p) => set((state) => ({ hubDisplay: { ...state.hubDisplay, ...p } })),
 
   setWorkflowStep: (step) => {
     const defaults = STEP_DEFAULTS[step] || { layer: "land", tool: "pan" };

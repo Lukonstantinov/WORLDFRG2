@@ -137,8 +137,10 @@ export function StepEconomy(_props: Props) {
       <div style={{ color: "#405060", fontSize: 10, marginTop: 2 }}>
         Builds the <b>trade economy</b> on the political hubs: quality-graded
         production, cost-aware flows with a price at every hop, per-hub wealth,
-        and the world&rsquo;s strategic chokepoints (the busiest straits &amp;
-        passes). Click a hub to inspect its goods &amp; supply chains.
+        and the world&rsquo;s strategic chokepoints (geographic <b>straits</b> &amp;
+        emporium <b>cities</b>). Click a hub to inspect its goods &amp; supply
+        chains, or click a <b>good belt</b> on the map to see its export routes,
+        travel days &amp; a price-along-the-journey graph.
       </div>
     </div>
   );
