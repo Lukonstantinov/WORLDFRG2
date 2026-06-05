@@ -194,17 +194,34 @@ export class OverlayManager {
     }
 
     if (this.visibility.rivers && this.rivers.length > 0) {
-      ctx.strokeStyle = RIVER_COLOR;
       ctx.globalAlpha = 0.85;
       for (const river of this.rivers) {
         if (river.points.length < 2) continue;
-        ctx.lineWidth = Math.max(0.5, river.width * 0.4);
+        // Navigable trade arteries read a touch brighter/wider than minor streams.
+        ctx.strokeStyle = river.navigable ? "#3aa6e6" : RIVER_COLOR;
+        ctx.lineWidth = Math.max(0.5, river.width * (river.navigable ? 0.55 : 0.4));
         ctx.beginPath();
         ctx.moveTo(river.points[0][0] + 0.5, river.points[0][1] + 0.5);
         for (let i = 1; i < river.points.length; i++) {
           ctx.lineTo(river.points[i][0] + 0.5, river.points[i][1] + 0.5);
         }
         ctx.stroke();
+        // Delta: braided distributary fan + marsh stipple over the shallow shelf.
+        if (river.mouth_kind === 1 && river.delta && river.delta.length > 0) {
+          const [mx, my] = river.points[river.points.length - 1];
+          ctx.fillStyle = "rgba(70,170,200,0.45)";
+          for (const [dx, dy] of river.delta) {
+            ctx.fillRect(dx, dy, 1, 1);
+          }
+          ctx.strokeStyle = "rgba(90,180,210,0.7)";
+          ctx.lineWidth = Math.max(0.4, river.width * 0.25);
+          for (const [dx, dy] of river.delta) {
+            ctx.beginPath();
+            ctx.moveTo(mx + 0.5, my + 0.5);
+            ctx.lineTo(dx + 0.5, dy + 0.5);
+            ctx.stroke();
+          }
+        }
       }
       ctx.globalAlpha = 1;
     }

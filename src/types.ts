@@ -265,6 +265,9 @@ export interface TradeMatrix {
 export interface RiverData {
   points: [number, number][];
   width: number;
+  navigable?: boolean;
+  mouth_kind?: number; // 0 plain, 1 delta, 2 estuary
+  delta?: [number, number][];
 }
 
 export interface LakeData {

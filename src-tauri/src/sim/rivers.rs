@@ -7,6 +7,17 @@ use std::cmp::Ordering;
 pub struct River {
     pub points: Vec<(u32, u32)>,
     pub width: f32,
+    /// Big enough to carry boats (a trade artery), set from discharge/width.
+    #[serde(default)]
+    pub navigable: bool,
+    /// Mouth landform: 0 = plain/inland, 1 = delta (depositional fan on a flat
+    /// shallow coast), 2 = estuary (drowned tidal mouth on a steeper/deeper coast).
+    #[serde(default)]
+    pub mouth_kind: u8,
+    /// Distributary / wetland cells of a delta fan (rendered as braided water +
+    /// marsh). Empty for non-delta rivers.
+    #[serde(default)]
+    pub delta: Vec<(u32, u32)>,
 }
 
 /// Lake data
@@ -236,7 +247,43 @@ pub fn extract_rivers(
                 .min(6.0 * width_scale)
                 .max(0.6);
             points.reverse(); // source to mouth
-            rivers.push(River { points, width });
+
+            // ── Mouth landform: delta vs estuary, + navigability ──
+            // A big river hits the sea as either a depositional DELTA (a fan of
+            // distributary channels + marsh on a flat, shallow coast) or a drowned
+            // ESTUARY (a single deeper tidal mouth on a steeper coast).
+            let navigable = width >= 2.2 * width_scale;
+            let mut mouth_kind = 0u8;
+            let mut delta: Vec<(u32, u32)> = Vec::new();
+            let big = mouth_acc >= threshold as f32 * 3.0;
+            if big {
+                let (mx, my) = (*mouth_idx % w as usize, *mouth_idx / w as usize);
+                let (mx, my) = (mx as i32, my as i32);
+                // Gather nearby shallow/shelf sea cells (the platform a delta builds
+                // on); count them to judge how flat & shallow the coast is.
+                let mut shelf_cnt = 0i32;
+                for dy in -3i32..=3 {
+                    for dx in -3i32..=3 {
+                        if dx * dx + dy * dy > 9 { continue; }
+                        let nx = buf.wrap_x(mx + dx);
+                        let ny = my + dy;
+                        if ny < 0 || ny >= h as i32 { continue; }
+                        let ni = buf.idx(nx, ny as u32);
+                        if buf.terrain[ni] == 0
+                            && (buf.is_shelf[ni] == 1 || buf.sea_depth[ni] < 0.12)
+                        {
+                            shelf_cnt += 1;
+                            if delta.len() < 24 { delta.push((nx, ny as u32)); }
+                        }
+                    }
+                }
+                // Flat shallow shelf around the mouth → delta; otherwise a deeper,
+                // narrower opening → estuary.
+                mouth_kind = if shelf_cnt >= 6 { 1 } else { 2 };
+                if mouth_kind == 2 { delta.clear(); } // estuaries aren't drawn as a fan
+            }
+
+            rivers.push(River { points, width, navigable, mouth_kind, delta });
         }
     }
 
