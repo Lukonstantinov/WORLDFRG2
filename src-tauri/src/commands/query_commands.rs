@@ -2854,8 +2854,10 @@ pub fn compute_economy(
         for g in 0..gc {
             let mut d = size * desire[g].max(BASKET_FLOOR);
             if is_luxury[g] {
-                let prod_share = (prod[hh][g] / good_max[g]).clamp(0.0, 1.0);
-                let homeland_discount = 1.0 - 0.6 * prod_share;
+                // `prod` is already rescaled to 0..abundance (max producer ≈ the
+                // good's abundance), so use it directly as the local-share input —
+                // identical to compute_trade_matrix's homeland discount.
+                let homeland_discount = 1.0 - 0.6 * prod[hh][g].clamp(0.0, 1.0);
                 let wealth_taste = 0.5 + 0.5 * (income[hh] / inc_max);
                 d *= reach_factor * lux_mult * homeland_discount * wealth_taste;
             }
