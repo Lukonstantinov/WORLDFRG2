@@ -262,6 +262,25 @@ pub fn sim_generate_terrain_from_template(
     buf.save(&conn, "Generate elevation from template")
 }
 
+/// Alternative elevation model: plate-free, world-size-aware ridged cordillera
+/// (mountain count scales with the map) + erosion. Keeps the existing landmass.
+#[tauri::command]
+pub fn sim_generate_terrain_ridged(
+    seed: u64,
+    mountain_density: f32,
+    mountain_height: f32,
+    mountain_spread: f32,
+    noise_roughness: f32,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<(i32, i32)>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut buf = WorldBuffer::load(&conn)?;
+    elevation::generate_elevation_ridged(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
+    elevation::compute_sea_depth(&mut buf);
+    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    buf.save(&conn, "Generate ridged elevation")
+}
+
 /// Run full simulation pipeline while preserving existing terrain.
 /// For template-based worlds: elevation → shelves → ocean/atmo → climate → rivers → soil → settlements.
 #[tauri::command]

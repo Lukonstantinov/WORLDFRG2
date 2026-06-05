@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useUIStore } from "../../state/uiStore";
-import { simGenerateShelves, simGenerateTerrainFromTemplate, simScaleElevation } from "../../bridge/tauri";
+import { simGenerateShelves, simGenerateTerrainFromTemplate, simGenerateTerrainRidged, simScaleElevation } from "../../bridge/tauri";
 import { genBtn } from "./WorkflowPanel";
 
 interface Props {
@@ -67,16 +67,22 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
   const step1Done = stepCompleted[1] === true;
   void landmassSource;
 
-  const runElevation = async (useSeed: number) => {
+  const runElevation = async (useSeed: number, ridged = false) => {
     if (simRunning) return;
     if (!step1Done) {
       setStatus("Step 1 required: Create landmass first");
       return;
     }
     setSimRunning(true);
-    setStatus("Generating elevation from terrain shape...");
+    setStatus(ridged
+      ? "Generating world-scale ridged cordillera..."
+      : "Generating elevation from terrain shape...");
     try {
-      await simGenerateTerrainFromTemplate(useSeed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness);
+      if (ridged) {
+        await simGenerateTerrainRidged(useSeed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness);
+      } else {
+        await simGenerateTerrainFromTemplate(useSeed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness);
+      }
       invalidateTiles();
       markStepCompleted(2);
       setStatus(`Elevation & sea depth generated (seed ${useSeed})`);
@@ -85,6 +91,7 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
   };
 
   const handleGenerateElevation = () => runElevation(terrainSeed);
+  const handleGenerateRidged = () => runElevation(terrainSeed, true);
 
   const handleRandomizeTerrain = () => {
     const newSeed = Math.floor(Math.random() * 0xffffffff);
@@ -175,6 +182,11 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
 
       <button onClick={handleGenerateElevation} disabled={simRunning || !step1Done} style={genBtn}>
         Generate Elevation (from terrain)
+      </button>
+      <button onClick={handleGenerateRidged} disabled={simRunning || !step1Done}
+        style={{ ...genBtn, background: "#221a2e", color: "#c8a8e0" }}
+        title="Plate-free, world-size-aware: many ridged ranges that scale with the map (best for large worlds)">
+        ⛰️ Generate Ridged Cordillera (world-scale)
       </button>
       <button onClick={handleRandomizeTerrain} disabled={simRunning || !step1Done}
         style={{ ...genBtn, background: "#1a2e1a", color: "#9cd09c" }}>
