@@ -88,6 +88,17 @@ fn months_above_10(t_coldest: f32, t_warmest: f32) -> f32 {
     (12.0 / std::f32::consts::PI) * ratio.acos()
 }
 
+/// Approximate number of months above 10 °C at a cell — a continuous
+/// growing-season proxy (0..12) reused by the settlement carrying-capacity model.
+/// Mirrors the t_coldest/t_warmest derivation in `classify_cell`.
+pub(crate) fn growing_season_months(buf: &WorldBuffer, x: u32, y: u32) -> f32 {
+    let idx = buf.idx(x, y);
+    let abs_lat = buf.latitude(y).abs();
+    let range = seasonal_range(abs_lat, buf.distance_to_ocean[idx]);
+    let t = buf.temperature[idx];
+    months_above_10(t - range * 0.55, t + range * 0.45)
+}
+
 /// Check if there is ocean in the upwind direction within 2 cells.
 fn is_windward_ocean(buf: &WorldBuffer, x: u32, y: u32) -> bool {
     let lat = buf.latitude(y);

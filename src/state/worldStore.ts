@@ -22,6 +22,9 @@ interface WorldStore {
   rivers: RiverData[];
   lakes: LakeData[];
   settlements: Settlement[];
+  /** As-generated settlements (carrying-capacity baseline) before any trade
+   *  development, so re-running the economy never compounds the growth. */
+  settlementsBaseline: Settlement[];
   /** Persisted economy snapshot (Phase 2): hubs, chains, chokepoints. */
   economy: EconomySnapshot | null;
   setMeta: (meta: WorldMeta) => void;
@@ -31,6 +34,8 @@ interface WorldStore {
   setRivers: (rivers: RiverData[]) => void;
   setLakes: (lakes: LakeData[]) => void;
   setSettlements: (settlements: Settlement[]) => void;
+  /** Apply trade-developed populations without disturbing the baseline. */
+  setSettlementsDeveloped: (settlements: Settlement[]) => void;
   setEconomy: (economy: EconomySnapshot | null) => void;
   clear: () => void;
 }
@@ -50,6 +55,7 @@ export const useWorldStore = create<WorldStore>((set) => ({
   rivers: [],
   lakes: [],
   settlements: [],
+  settlementsBaseline: [],
   economy: null,
   // Setting meta reseeds the live latitude framing so the two stay in sync on
   // world load and after a persisted slider change.
@@ -57,8 +63,9 @@ export const useWorldStore = create<WorldStore>((set) => ({
   setLatConfig: (equatorOffset, latScale, lineRatio) => set({ latConfig: { equatorOffset, latScale, lineRatio } }),
   setRivers: (rivers) => set({ rivers }),
   setLakes: (lakes) => set({ lakes }),
-  setSettlements: (settlements) => set({ settlements }),
+  setSettlements: (settlements) => set({ settlements, settlementsBaseline: settlements }),
+  setSettlementsDeveloped: (settlements) => set({ settlements }),
   setEconomy: (economy) => set({ economy }),
   clear: () =>
-    set({ meta: null, isLoaded: false, latConfig: DEFAULT_LAT, rivers: [], lakes: [], settlements: [], economy: null }),
+    set({ meta: null, isLoaded: false, latConfig: DEFAULT_LAT, rivers: [], lakes: [], settlements: [], settlementsBaseline: [], economy: null }),
 }));

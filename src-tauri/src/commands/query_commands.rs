@@ -3160,3 +3160,54 @@ pub fn get_economy(db: State<'_, WorldDb>) -> Result<EconomySnapshot, String> {
         None => Ok(EconomySnapshot { hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![], goods: goods_names }),
     }
 }
+
+/// Trade-development feedback: after the economy is solved, grow each settlement by
+/// the trade wealth of its matching economy hub, so real emporia / chokepoint
+/// cities swell into metropolises while inland subsistence towns stay put. One-way
+/// (does NOT re-run the economy) and bounded (≤ ×3). Returns the updated list.
+#[tauri::command]
+pub fn compute_settlement_development(
+    settlements_json: String,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<crate::sim::settlements::Settlement>, String> {
+    use crate::sim::settlements::Settlement;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut settlements: Vec<Settlement> =
+        serde_json::from_str(&settlements_json).unwrap_or_default();
+    if settlements.is_empty() { return Ok(settlements); }
+
+    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let snap: EconomySnapshot = match metadata::get_meta(&conn, "economy").map_err(|e| e.to_string())? {
+        Some(json) => match serde_json::from_str(&json) { Ok(s) => s, Err(_) => return Ok(settlements) },
+        None => return Ok(settlements),
+    };
+    if snap.hubs.is_empty() { return Ok(settlements); }
+
+    let wrap_dx = |a: f32, b: f32| -> f32 {
+        let mut d = (a - b).abs();
+        if grid_w > 0 && d > grid_w as f32 / 2.0 { d = grid_w as f32 - d; }
+        d
+    };
+    const DEV_GAIN: f32 = 2.0; // hub wealth 0..1 → up to ~×3 growth
+    for s in settlements.iter_mut() {
+        // Match to the nearest economy hub (settlements ARE the hubs, so this is
+        // essentially itself) and read its normalized trade wealth.
+        let mut best_w = 0.0f32;
+        let mut bd = f32::INFINITY;
+        for hub in &snap.hubs {
+            let dx = wrap_dx(s.x as f32, hub.x);
+            let dy = s.y as f32 - hub.y;
+            let d = dx * dx + dy * dy;
+            if d < bd { bd = d; best_w = hub.wealth; }
+        }
+        let grown = (s.population as f32 * (1.0 + DEV_GAIN * best_w.clamp(0.0, 1.0)))
+            .min(s.population as f32 * 3.0);
+        s.population = grown.round() as u32;
+        s.size = if s.population >= 100_000 { "capital" }
+            else if s.population >= 30_000 { "city" }
+            else if s.population >= 5_000 { "town" }
+            else { "village" }.to_string();
+    }
+    Ok(settlements)
+}

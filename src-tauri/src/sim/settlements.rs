@@ -212,31 +212,97 @@ pub fn write_habitability(buf: &mut WorldBuffer, hab: &[f32]) {
     }
 }
 
-/// Generate settlements at local maxima of habitability.
-/// Cities are placed in descending probability order (greedy with a minimum
-/// spacing), so the highest-habitability zones get the first/largest cities.
-/// Names are intentionally left blank — the map marks ranked dots only.
+/// Per-cell food potential — the basis of agricultural carrying capacity. Land
+/// only (0 on sea). Farmland = fertility × growing-season length × irrigation
+/// (arid land beside a wide river is a breadbasket) × disease drag; a coastal cell
+/// also eats from the neighbouring sea (the fishery field).
+pub fn compute_food_capacity(buf: &WorldBuffer, rivers: &[River]) -> Vec<f32> {
+    let w = buf.width;
+    let h = buf.height;
+    let total = buf.total();
+
+    // River-cell mask + local river width (irrigation strength).
+    let mut river_w = vec![0.0f32; total];
+    for r in rivers {
+        for &(rx, ry) in &r.points {
+            let i = buf.idx(rx, ry);
+            if r.width > river_w[i] { river_w[i] = r.width; }
+        }
+    }
+
+    let mut food = vec![0.0f32; total];
+    for y in 0..h {
+        for x in 0..w {
+            let i = buf.idx(x, y);
+            if buf.terrain[i] != 1 { continue; }
+
+            let fert = buf.fertility[i];
+            // Growing season (0..12 months above 10°C): long seasons double-crop.
+            let gs = super::koppen::growing_season_months(buf, x, y);
+            let season = 0.45 + 0.55 * (gs / 12.0);
+
+            // Irrigation: arid land next to a (wide) river is a breadbasket; dry
+            // farming on arid land with no water is poor.
+            let arid = matches!(buf.koppen[i], 4 | 5 | 6 | 7);
+            let irrig = if arid {
+                let mut rw = 0.0f32;
+                for dy in -2i32..=2 {
+                    for dx in -2i32..=2 {
+                        let ni = buf.widx(x as i32 + dx, y as i32 + dy);
+                        if river_w[ni] > rw { rw = river_w[ni]; }
+                    }
+                }
+                if rw > 0.0 { 2.5 + (rw / 4.0).min(1.5) } else { 0.5 }
+            } else {
+                1.0
+            };
+
+            let disease = 1.0 - 0.4 * (buf.disease_risk[i] as f32 / 255.0);
+            let mut f = fert * season * irrig * disease;
+
+            // Coastal fishery: a port feeds itself from the sea.
+            if buf.distance_to_ocean[i] < 0.05 {
+                let mut fish = 0.0f32;
+                let mut cnt = 0.0f32;
+                for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1), (-2, 0), (2, 0), (0, -2), (0, 2)] {
+                    let ni = buf.widx(x as i32 + dx, y as i32 + dy);
+                    if buf.terrain[ni] == 0 { fish += buf.fishery[ni]; cnt += 1.0; }
+                }
+                if cnt > 0.0 { f += 0.6 * (fish / cnt); }
+            }
+
+            food[i] = f.max(0.0);
+        }
+    }
+    food
+}
+
+/// Generate settlements at local maxima of habitability, then size each by
+/// EMERGENT carrying capacity: the food its catchment (farmland + fisheries) can
+/// feed, plus a trade-access premium (ports / navigable rivers / crossroads).
+/// Placement is unchanged; only population & tier are carrying-capacity-driven.
 pub fn generate_settlements(
     buf: &WorldBuffer,
     habitability: &[f32],
+    rivers: &[River],
     _seed: u64,
 ) -> Vec<Settlement> {
     let w = buf.width;
     let h = buf.height;
-    // Tighter spacing + higher cap so good regions can hold several settlements
-    // (a fertile river valley realistically supports more than one town).
+    let total = buf.total();
     let min_dist = (w / 110).max(3) as i32;
     let threshold = 0.28f32;
     let max_settlements = 600;
 
-    // Find local maxima
+    let food = compute_food_capacity(buf, rivers);
+
+    // ── Site selection: greedy local-maxima of habitability with spacing ──
     let mut candidates: Vec<(usize, f32)> = Vec::new();
     for y in 1..h - 1 {
         for x in 0..w {
             let idx = buf.idx(x, y);
             if buf.terrain[idx] != 1 { continue; }
             if habitability[idx] < threshold { continue; }
-
             let score = habitability[idx];
             let is_max = [(-1i32, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
                 .iter()
@@ -244,63 +310,133 @@ pub fn generate_settlements(
                     let ni = buf.widx(x as i32 + dx, y as i32 + dy);
                     score >= habitability[ni]
                 });
+            if is_max { candidates.push((idx, score)); }
+        }
+    }
+    candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-            if is_max {
-                candidates.push((idx, score));
+    // (idx, x, y, score)
+    let mut sites: Vec<(usize, u32, u32, f32)> = Vec::new();
+    'outer: for (idx, score) in &candidates {
+        if sites.len() >= max_settlements { break; }
+        let sx = (*idx % w as usize) as u32;
+        let sy = (*idx / w as usize) as u32;
+        for &(_, ex, ey, _) in &sites {
+            let mut dx = (sx as i32 - ex as i32).abs();
+            if dx > w as i32 / 2 { dx = w as i32 - dx; }
+            let dy = (sy as i32 - ey as i32).abs();
+            if dx * dx + dy * dy < min_dist * min_dist { continue 'outer; }
+        }
+        sites.push((*idx, sx, sy, *score));
+    }
+    if sites.is_empty() { return Vec::new(); }
+
+    // ── Carrying capacity: coarse-Voronoi catchment, capped to a real hinterland
+    // (a lone town can't claim a whole continent) so no double-counting of food. ──
+    let f = (w / 220).max(1);
+    let cw = ((w + f - 1) / f) as i32;
+    let ch = ((h + f - 1) / f) as i32;
+    let mut coarse_food = vec![0.0f32; (cw * ch) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let i = buf.idx(x, y);
+            if food[i] <= 0.0 { continue; }
+            let cx = (x / f) as i32;
+            let cy = (y / f) as i32;
+            coarse_food[(cy * cw + cx) as usize] += food[i];
+        }
+    }
+    let max_catch = min_dist as f32 * 2.5;
+    let max_catch2 = (max_catch * max_catch) as i64;
+    let mut k_food = vec![0.0f32; sites.len()];
+    for cy in 0..ch {
+        for cx in 0..cw {
+            let cf = coarse_food[(cy * cw + cx) as usize];
+            if cf <= 0.0 { continue; }
+            let wx = (cx as u32 * f + f / 2).min(w - 1) as i32;
+            let wy = (cy as u32 * f + f / 2).min(h - 1) as i32;
+            let mut best = usize::MAX;
+            let mut bd = i64::MAX;
+            for (si, &(_, sxx, syy, _)) in sites.iter().enumerate() {
+                let mut dx = (wx - sxx as i32).abs();
+                if dx > w as i32 / 2 { dx = w as i32 - dx; }
+                let dy = wy - syy as i32;
+                let d = (dx * dx + dy * dy) as i64;
+                if d < bd { bd = d; best = si; }
             }
+            if best != usize::MAX && bd <= max_catch2 { k_food[best] += cf; }
         }
     }
 
-    // Sort by score descending
-    candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Greedy selection with minimum distance
-    let mut settlements: Vec<Settlement> = Vec::new();
-
-    'outer: for (idx, score) in &candidates {
-        if settlements.len() >= max_settlements { break; }
-
-        let sx = (*idx % w as usize) as u32;
-        let sy = (*idx / w as usize) as u32;
-
-        // Check minimum distance from existing settlements
-        for existing in &settlements {
-            let mut dx = (sx as i32 - existing.x as i32).abs();
-            if dx > w as i32 / 2 { dx = w as i32 - dx; } // wrap
-            let dy = (sy as i32 - existing.y as i32).abs();
-            if dx * dx + dy * dy < min_dist * min_dist {
-                continue 'outer;
+    // ── Trade-access masks (ports / navigable rivers / river mouths & deltas) ──
+    let mut nav_mask = vec![false; total];
+    let mut mouth_mask = vec![false; total];
+    let mark = |mask: &mut Vec<bool>, cx: i32, cy: i32, r: i32| {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                let nx = ((cx + dx) % w as i32 + w as i32) % w as i32;
+                let ny = cy + dy;
+                if ny < 0 || ny >= h as i32 { continue; }
+                mask[(ny as u32 * w + nx as u32) as usize] = true;
             }
         }
+    };
+    for r in rivers {
+        if let Some(&(mx, my)) = r.points.last() {
+            mark(&mut mouth_mask, mx as i32, my as i32, 3);
+        }
+        for &(dx, dy) in &r.delta { mark(&mut mouth_mask, dx as i32, dy as i32, 1); }
+        if r.navigable {
+            for &(rx, ry) in &r.points { mark(&mut nav_mask, rx as i32, ry as i32, 1); }
+        }
+    }
 
-        let (size, base_pop) = if *score >= 0.80 {
-            ("capital", 50000u32)
-        } else if *score >= 0.65 {
-            ("city", 10000)
-        } else if *score >= 0.45 {
-            ("town", 2000)
-        } else {
-            ("village", 200)
-        };
+    // ── Population & tier from carrying capacity + trade access ──
+    // Calibration (resolution-dependent; tune per world size in verification). Kept
+    // modest so the agricultural baseline skews to villages/towns — the metropolises
+    // emerge afterward from the trade-development pass (compute_settlement_development).
+    const FOOD_TO_POP: f32 = 25.0;
+    const TRADE_ALPHA: f32 = 1.6;
+    let mid = (min_dist * 4) as i64;
+    let mid2 = mid * mid;
+    let mut settlements: Vec<Settlement> = Vec::with_capacity(sites.len());
+    for (si, &(idx, sx, sy, score)) in sites.iter().enumerate() {
+        let near_coast = buf.distance_to_ocean[idx] < 0.05;
+        let mouth = mouth_mask[idx];
+        let nav = nav_mask[idx];
+        // Crossroads: how many other towns lie within a mid-range radius.
+        let mut neigh = 0i32;
+        for (sj, &(_, ox, oy, _)) in sites.iter().enumerate() {
+            if sj == si { continue; }
+            let mut dx = (sx as i32 - ox as i32).abs();
+            if dx > w as i32 / 2 { dx = w as i32 - dx; }
+            let dy = sy as i32 - oy as i32;
+            if (dx * dx + dy * dy) as i64 <= mid2 { neigh += 1; }
+        }
+        let crossroads = (neigh as f32 / 6.0).min(1.0);
+        let access = ((if near_coast { 0.4 } else { 0.0 })
+            + (if mouth { 0.3 } else if nav { 0.2 } else { 0.0 })
+            + 0.3 * crossroads)
+            .clamp(0.0, 1.0);
 
-        // Endemic disease thins the population a town can sustain.
-        let disease = buf.disease_risk[*idx] as f32 / 255.0;
-        let disease_mult = 1.0 - 0.5 * disease;
-        let population = (base_pop as f32 * (0.5 + score) * disease_mult) as u32;
+        let pop_agri = k_food[si] * FOOD_TO_POP;
+        let population = (pop_agri * (1.0 + TRADE_ALPHA * access)).max(40.0) as u32;
 
-        // Antique place name (Roman/Greek/Phoenician/Persian by region). Capitals
-        // and cities earn a grand epithet ("Aquentia Magna").
+        let size = if population >= 100_000 { "capital" }
+            else if population >= 30_000 { "city" }
+            else if population >= 5_000 { "town" }
+            else { "village" };
         let tier = if size == "capital" { 2 } else if size == "city" { 1 } else { 0 };
-        let name = super::names::gen_name_epithet(sx, sy, w, buf.height, tier);
+        let name = super::names::gen_name_epithet(sx, sy, w, h, tier);
 
         settlements.push(Settlement {
-            id: format!("s-{}", settlements.len()),
+            id: format!("s-{}", si),
             x: sx,
             y: sy,
             name,
             size: size.to_string(),
             population,
-            score: *score,
+            score,
         });
     }
 

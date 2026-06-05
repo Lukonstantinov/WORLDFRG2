@@ -378,7 +378,10 @@ export class OverlayManager {
 
     if (this.visibility.settlements && this.settlements.length > 0) {
       for (const s of this.settlements) {
-        const radius = SETTLEMENT_SIZES[s.size] || 1;
+        // Dot scales continuously with population (log) on top of the tier base,
+        // so the emergent carrying-capacity / trade hierarchy reads on the map.
+        const popf = Math.min(1.7, 0.6 + Math.log10(Math.max(s.population, 100)) / 5);
+        const radius = (SETTLEMENT_SIZES[s.size] || 1) * popf;
         const color = SETTLEMENT_COLORS[s.size] || "#cccccc";
 
         ctx.beginPath();
