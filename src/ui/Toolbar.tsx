@@ -80,6 +80,7 @@ const bioOverlays = [
   { id: "reefZones", label: "\u{1FAA8} Reef Zones" },
   { id: "politicalInfluence", label: "\u{1F535} Trade Hubs" },
   { id: "tradeRegions", label: "\u{1F7E6} Trade Regions" },
+  { id: "tradeCorridors", label: "\u{2194} Trade Corridors" },
   { id: "chokepoints", label: "\u{2693} Chokepoints" },
 ];
 
@@ -97,6 +98,8 @@ export function Toolbar() {
   const toggleOverlay = useUIStore((s) => s.toggleOverlay);
   const bioParams = useUIStore((s) => s.bioParams);
   const setBioParams = useUIStore((s) => s.setBioParams);
+  const hubDisplay = useUIStore((s) => s.hubDisplay);
+  const setHubDisplay = useUIStore((s) => s.setHubDisplay);
   const goodsSpecs = useGoodsStore((s) => s.specs);
   const goodItems = goodsSpecs.length > 0
     ? goodsSpecs.filter((g) => g.enabled).map((g) => ({ id: g.id, icon: g.icon, name: g.name }))
@@ -264,6 +267,25 @@ export function Toolbar() {
             onChange={(e) => setBioParams({ stormMonth: parseInt(e.target.value, 10) })}
             style={{ width: "100%", accentColor: "#c050d0" }}
           />
+        </div>
+
+        {/* Trade-hub marker display: size + highlight intensity (affects the
+            "Trade Hubs" overlay markers across the map). */}
+        <div style={{ marginTop: 6, opacity: overlayVisibility.politicalInfluence ? 1 : 0.5 }}>
+          <div style={{ fontSize: 10, color: "#8aa0b8", display: "flex", justifyContent: "space-between" }}>
+            <span>{"\u{1F535}"} Hub size</span>
+            <span style={{ color: "#b0c8e0" }}>{hubDisplay.size.toFixed(1)}×</span>
+          </div>
+          <input type="range" min={0.5} max={4} step={0.1} value={hubDisplay.size}
+            onChange={(e) => setHubDisplay({ size: parseFloat(e.target.value) })}
+            style={{ width: "100%", accentColor: "#3a86d6" }} />
+          <div style={{ fontSize: 10, color: "#8aa0b8", display: "flex", justifyContent: "space-between" }}>
+            <span>Hub highlight</span>
+            <span style={{ color: "#b0c8e0" }}>{Math.round(hubDisplay.intensity * 100)}%</span>
+          </div>
+          <input type="range" min={0} max={1} step={0.05} value={hubDisplay.intensity}
+            onChange={(e) => setHubDisplay({ intensity: parseFloat(e.target.value) })}
+            style={{ width: "100%", accentColor: "#3a86d6" }} />
         </div>
       </div>
 

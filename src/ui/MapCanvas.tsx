@@ -9,6 +9,7 @@ import { useViewportStore } from "../state/viewportStore";
 import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy } from "../bridge/tauri";
+import { goodOverlayKey } from "../goods";
 import type { PaintValue } from "../types";
 
 /** Largest box with the world's aspect ratio that fits inside the pane. */
@@ -70,6 +71,9 @@ export function MapCanvas() {
   const bioParams = useUIStore((s) => s.bioParams);
   const setSelectedHub = useUIStore((s) => s.setSelectedHub);
   const selectedChain = useUIStore((s) => s.selectedChain);
+  const selectedRoad = useUIStore((s) => s.selectedRoad);
+  const setSelectedGood = useUIStore((s) => s.setSelectedGood);
+  const hubDisplay = useUIStore((s) => s.hubDisplay);
   const reachGood = useUIStore((s) => s.reachGood);
 
   // Stable identity for the loaded world. Heavy effects (tile reloads + sim IPC)
@@ -92,6 +96,10 @@ export function MapCanvas() {
   economyRef.current = economy;
   const elevationValueRef = useRef(elevationValue);
   elevationValueRef.current = elevationValue;
+  // Good regions kept for click hit-testing (click a good belt → good-flow panel).
+  const goodRegionsRef = useRef<import("../types").GoodRegion[]>([]);
+  const overlayVisibilityRef = useRef(overlayVisibility);
+  overlayVisibilityRef.current = overlayVisibility;
 
   /** Mark canvas as needing a repaint */
   const requestRender = useCallback(() => {
@@ -362,6 +370,7 @@ export function MapCanvas() {
       om.drawShipwormZones(o.shipworm_zones);
       om.drawReefZones(o.reef_zones);
       om.drawGoodRegions(o.good_regions);
+      goodRegionsRef.current = o.good_regions;
       requestRender();
     }).catch(() => {});
   }, [worldKey, tileVersion, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -450,8 +459,17 @@ export function MapCanvas() {
     if (!om) return;
     om.drawChokepoints(economy?.chokepoints ?? []);
     om.drawEconRegions(economy?.regions ?? []);
+    om.drawCorridors(economy?.corridors ?? [], meta?.grid_width ?? 0);
     requestRender();
-  }, [economy, requestRender]);
+  }, [economy, meta, requestRender]);
+
+  // Adjustable trade-hub marker display (size + highlight intensity).
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setHubDisplay(hubDisplay.size, hubDisplay.intensity);
+    requestRender();
+  }, [hubDisplay, requestRender]);
 
   // Per-good reach network: highlight every route + hub the selected good reaches.
   useEffect(() => {
@@ -478,15 +496,18 @@ export function MapCanvas() {
     requestRender();
   }, [economy, reachGood, requestRender]);
 
-  // Highlighted supply-chain road for the selected good (Phase 3).
+  // Highlighted supply-chain road on the map. Driven by the hub inspector
+  // (selectedChain) OR the good-flow panel (selectedRoad) — the latter wins when a
+  // road is picked there, so clicking a road highlights it with its hubs.
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om) return;
-    const chain = (economy && selectedChain !== null)
-      ? economy.chains.find((c) => c.id === selectedChain) ?? null : null;
+    const id = selectedRoad !== null ? selectedRoad : selectedChain;
+    const chain = (economy && id !== null)
+      ? economy.chains.find((c) => c.id === id) ?? null : null;
     om.setSupplyChain(chain);
     requestRender();
-  }, [economy, selectedChain, requestRender]);
+  }, [economy, selectedChain, selectedRoad, requestRender]);
 
   // Sync overlay visibility
   useEffect(() => {
@@ -624,6 +645,23 @@ export function MapCanvas() {
           if (best >= 0) { setSelectedHub(best); return; }
         }
       }
+
+      // Good-belt selection: a click inside a VISIBLE good region opens the
+      // good-flow panel (routes + price/days graph for that good).
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect && goodRegionsRef.current.length > 0) {
+        const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+        const vis = overlayVisibilityRef.current;
+        for (const r of goodRegionsRef.current) {
+          if (!vis[goodOverlayKey(r.good)]) continue;
+          const cs = r.cell_size;
+          let hit = false;
+          for (const [cx, cy] of r.cells) {
+            if (wx >= cx && wx < cx + cs && wy >= cy && wy < cy + cs) { hit = true; break; }
+          }
+          if (hit) { setSelectedGood(r.good); return; }
+        }
+      }
     }
 
     if (activeToolRef.current === "pan" || e.button === 1) {
@@ -663,7 +701,7 @@ export function MapCanvas() {
         }
       }
     }
-  }, [applyBrush, setInspectedCell, setSelectedHub, refreshTiles]);
+  }, [applyBrush, setInspectedCell, setSelectedHub, setSelectedGood, refreshTiles]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const viewport = viewportRef.current;

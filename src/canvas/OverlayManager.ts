@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain, EconRegion } from "../types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor } from "../types";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "../goods";
 import { drawGoodIcon } from "./goodIcons";
 import { latLineY } from "./projection";
@@ -65,8 +65,12 @@ export class OverlayManager {
   private tradeTrunks: TradeTrunk[] = [];
   private politicalCenters: PoliticalCenter[] = [];
   private chokepoints: EconChokepoint[] = [];
+  private corridors: EconCorridor[] = [];
   private econRegions: EconRegion[] = [];
   private supplyChain: EconChain | null = null;
+  /** Adjustable trade-hub marker display (size multiplier + highlight intensity). */
+  private hubSize = 1;
+  private hubIntensity = 1;
   /** Per-good reach: chains carrying the selected good + the hubs it reaches. */
   private reachChains: EconChain[] = [];
   private reachHubs: [number, number][] = [];
@@ -77,7 +81,7 @@ export class OverlayManager {
     markers: false, wind: false, currents: false, latLines: false,
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, reefZones: false, tradeFlows: false,
-    politicalInfluence: false, chokepoints: false,
+    politicalInfluence: false, chokepoints: false, tradeCorridors: false,
     hubNames: false, settlementNames: false, tradeRegions: false,
   };
 
@@ -145,6 +149,17 @@ export class OverlayManager {
 
   drawChokepoints(chokepoints: EconChokepoint[]) {
     this.chokepoints = chokepoints;
+  }
+
+  drawCorridors(corridors: EconCorridor[], gridW: number) {
+    this.corridors = corridors;
+    this.worldW = gridW;
+  }
+
+  /** Adjustable hub marker display: size multiplier and highlight intensity. */
+  setHubDisplay(size: number, intensity: number) {
+    this.hubSize = size;
+    this.hubIntensity = intensity;
   }
 
   drawEconRegions(regions: EconRegion[]) {
@@ -358,6 +373,12 @@ export class OverlayManager {
     // Political influence: translucent discs sized by trade power.
     if (this.visibility.politicalInfluence && this.politicalCenters.length > 0) {
       for (const c of this.politicalCenters) this.renderPoliticalCenter(ctx, c);
+    }
+
+    // Directional trade corridors: one net-direction arrow per hub→hub corridor
+    // (so direction only flips at hubs), width ∝ total value carried.
+    if (this.visibility.tradeCorridors && this.corridors.length > 0) {
+      this.renderCorridors(ctx);
     }
 
     // Strategic chokepoints: high-volume trade gateways (straits / passes).
@@ -761,8 +782,18 @@ export class OverlayManager {
     const y = c.y + 0.5;
     const stars = Math.max(0, Math.min(5, Math.round(c.stars)));
     const large = stars >= 4;
-    // Larger marker for the great hubs so they read at a glance.
-    const r = Math.max(1.0, (large ? 3.4 : 2.2) / Math.sqrt(this.currentScale));
+    // Larger marker for the great hubs so they read at a glance. The user-set hub
+    // size multiplier scales every marker; intensity sets a glow halo + opacity.
+    const r = Math.max(1.0, (large ? 3.4 : 2.2) * this.hubSize / Math.sqrt(this.currentScale));
+
+    // Highlight halo (intensity-driven): a translucent ring around the marker.
+    if (this.hubIntensity > 0.01) {
+      ctx.beginPath();
+      ctx.arc(x, y, r * (1.8 + this.hubIntensity), 0, Math.PI * 2);
+      ctx.fillStyle = HUB_BLUE;
+      ctx.globalAlpha = 0.10 + 0.30 * Math.min(1, this.hubIntensity);
+      ctx.fill();
+    }
 
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -821,6 +852,56 @@ export class OverlayManager {
     }
     ctx.textAlign = "start";
     ctx.textBaseline = "alphabetic";
+  }
+
+  /** Directional trade corridors: each hub→hub corridor drawn as one arrow in the
+   *  NET flow direction (the larger of the two directional values), width ∝ the
+   *  total value carried. Because corridors are hub-to-hub, the arrow direction can
+   *  only change at a hub. */
+  private renderCorridors(ctx: CanvasRenderingContext2D) {
+    const half = (this.worldW || 1e9) / 2;
+    let maxV = 0;
+    for (const c of this.corridors) maxV = Math.max(maxV, c.fwd_value + c.bwd_value);
+    if (maxV <= 0) return;
+    const inv = 1 / Math.sqrt(this.currentScale);
+    ctx.lineCap = "round";
+    for (const c of this.corridors) {
+      if (c.points.length < 2) continue;
+      const [pa, pb] = c.points;
+      if (this.worldW && Math.abs(pa[0] - pb[0]) > half) continue; // wrap seam
+      const total = c.fwd_value + c.bwd_value;
+      const norm = total / maxV;
+      // Net direction: forward (a→b) if fwd ≥ bwd, else reverse.
+      const fwd = c.fwd_value >= c.bwd_value;
+      const from = fwd ? pa : pb;
+      const to = fwd ? pb : pa;
+      const ax = from[0] + 0.5, ay = from[1] + 0.5, bx = to[0] + 0.5, by = to[1] + 0.5;
+      ctx.globalAlpha = 0.4 + 0.5 * norm;
+      ctx.strokeStyle = "#5fc8a8";
+      ctx.lineWidth = Math.max(0.5, (1.0 + norm * 5.0) * inv);
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+      // Arrowhead at the consumer end (net direction).
+      let dx = bx - ax, dy = by - ay;
+      const m = Math.hypot(dx, dy);
+      if (m > 0.001) {
+        dx /= m; dy /= m;
+        const hl = Math.max(2, 8 * inv);
+        const px = -dy, py = dx;
+        const mxp = (ax + bx) / 2, myp = (ay + by) / 2; // arrow at corridor midpoint
+        ctx.beginPath();
+        ctx.moveTo(mxp + dx * hl * 0.5, myp + dy * hl * 0.5);
+        ctx.lineTo(mxp - dx * hl * 0.5 + px * hl * 0.5, myp - dy * hl * 0.5 + py * hl * 0.5);
+        ctx.lineTo(mxp - dx * hl * 0.5 - px * hl * 0.5, myp - dy * hl * 0.5 - py * hl * 0.5);
+        ctx.closePath();
+        ctx.fillStyle = "#7fe0c0";
+        ctx.fill();
+      }
+    }
+    ctx.lineCap = "butt";
+    ctx.globalAlpha = 1;
   }
 
   /** A strategic chokepoint: a pulsing ring + label at the gateway edge. */
@@ -997,6 +1078,7 @@ export class OverlayManager {
     this.tradeTrunks = [];
     this.politicalCenters = [];
     this.chokepoints = [];
+    this.corridors = [];
     this.econRegions = [];
     this.reachChains = [];
     this.reachHubs = [];
