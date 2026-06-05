@@ -46,6 +46,8 @@ export function StepEconomy(_props: Props) {
         bioParams.economicRegions,
         bioParams.luxuryBias,
         bioParams.piracyLevel,
+        bioParams.tradeSeason,
+        bioParams.calendarMonths,
       );
       setEconomy(result);
       markStepCompleted(10);

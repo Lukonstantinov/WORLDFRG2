@@ -2012,11 +2012,15 @@ pub fn compute_trade_matrix(
     // (silk/spices), <0.5 makes the world care mostly about staples. Neutral 0.5
     // leaves the legacy behaviour (lux_mult == 1.0). Staples are unaffected.
     let lux_mult = (0.4 + luxury_bias.clamp(0.0, 1.0) * 1.2).clamp(0.2, 1.8);
+    // Full-basket floor, unified with compute_economy: every good is at least
+    // modestly desired so regions import what they don't produce (not only the
+    // few high-`desire` staples), and the two engines agree on who imports what.
+    const BASKET_FLOOR: f32 = 0.35;
     let mut demand = vec![vec![0.0f32; gc]; nr];
     for ri in 0..nr {
         let size = region_weight[ri] / max_rw; // 0..1
         for g in 0..gc {
-            let mut d = size * desire[g];
+            let mut d = size * desire[g].max(BASKET_FLOOR);
             if is_luxury[g] {
                 // Discount in the good's own producing homeland (it's local/common
                 // there) and scale by how open the trade network is + the world's
@@ -2578,6 +2582,8 @@ pub fn compute_economy(
     economic_regions: u32,
     luxury_bias: f32,
     piracy: f32,
+    season: i32,
+    months: u32,
     db: State<'_, WorldDb>,
 ) -> Result<EconomySnapshot, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -2606,46 +2612,109 @@ pub fn compute_economy(
         d
     };
 
-    // ── Hub set: top settlements by score (the clickable economic centers) ──
+    // ── Market nodes: EVERY settlement is an economic node (so any town is
+    // clickable and inspectable), sorted by score — strongest first — so the hub
+    // topology below mirrors compute_trade_routes exactly. ──
     let er = economic_regions.clamp(2, 40) as usize;
-    let hub_out = (er * 3).clamp(5, 60);
     let mut idx: Vec<usize> = (0..settlements.len()).collect();
     idx.sort_by(|&a, &b| settlements[b].score.partial_cmp(&settlements[a].score)
         .unwrap_or(std::cmp::Ordering::Equal));
-    idx.truncate(hub_out);
     let nodes: Vec<&RouteSettlement> = idx.iter().map(|&i| &settlements[i]).collect();
     let nn = nodes.len();
     if nn < 2 {
         let _ = metadata::set_meta(&conn, "economy", &serde_json::to_string(&empty).unwrap_or_default());
         return Ok(empty);
     }
+    // Major hubs carry the primary network; lesser towns hang off their nearest
+    // hub. `territory_n` bounds the (legible) trade-territory overlay.
+    let major_n = nn.min((er * 6).clamp(10, 200));
+    let territory_n = nn.min((er * 3).clamp(5, 60));
 
-    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy, 0, 0)?;
+    // Cost grid built WITH the chosen season + piracy so seasonal closures and
+    // raiders actually shape trade flows and prices (not just the drawn routes).
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy, season, months)?;
     let cnode: Vec<usize> = nodes.iter().map(|s| {
         let cx = (s.x / cc.f).min(cc.cw as u32 - 1) as i32;
         let cy = (s.y / cc.f).min(cc.ch as u32 - 1) as i32;
         cc.cidx(cx, cy)
     }).collect();
 
-    // ── Route centrality: reachable nearest-neighbour links per hub ──
-    let mut edges: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
-    for i in 0..nn {
-        let mut dists: Vec<(usize, i64)> = Vec::new();
-        for j in 0..nn {
+    // ── Trade-route GRAPH ────────────────────────────────────────────────────
+    // Every settlement is wired into the network exactly as compute_trade_routes
+    // draws it: each major hub links to its 3 nearest neighbours, and every lesser
+    // town links to its nearest major hub. An edge survives only if a real route
+    // exists under the chosen reach, so goods can flow ONLY where there is a road /
+    // sea-route — never beelining across an ocean that has no route. Each edge
+    // carries its routed coarse path (for chokepoints) and least-cost weight.
+    let nearest_k = |i: usize, k: usize, pool: usize| -> Vec<usize> {
+        let mut d: Vec<(usize, i64)> = Vec::new();
+        for j in 0..pool {
             if i == j { continue; }
             let dx = wrap_dx(nodes[i].x as i32, nodes[j].x as i32) as i64;
             let dy = nodes[i].y as i64 - nodes[j].y as i64;
-            dists.push((j, dx * dx + dy * dy));
+            d.push((j, dx * dx + dy * dy));
         }
-        dists.sort_by_key(|&(_, d)| d);
-        for &(j, _) in dists.iter().take(3) { edges.insert((i.min(j), i.max(j))); }
+        d.sort_by_key(|&(_, dd)| dd);
+        d.iter().take(k).map(|&(j, _)| j).collect()
+    };
+    let mut cand: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    for i in 0..major_n {
+        for j in nearest_k(i, 3, nn) { cand.insert((i.min(j), i.max(j))); }
     }
-    let mut centrality = vec![0.0f32; nn];
-    for &(a, b) in &edges {
-        if let Some(path) = coarse_dijkstra(&cc, cnode[a], cnode[b]) {
-            if path_allowed(&cc, &path, reach, max_crossing, grid_w) {
-                centrality[a] += 1.0;
-                centrality[b] += 1.0;
+    for i in major_n..nn {
+        if let Some(&j) = nearest_k(i, 1, major_n).first() { cand.insert((i.min(j), i.max(j))); }
+    }
+    // Materialise each candidate as a routed edge → adjacency + per-edge coarse path.
+    let mut adj: Vec<Vec<(usize, f32, usize)>> = vec![Vec::new(); nn]; // (to, cost, edge_id)
+    let mut edge_paths: Vec<Vec<usize>> = Vec::new();
+    for &(a, b) in &cand {
+        let path = match coarse_dijkstra(&cc, cnode[a], cnode[b]) { Some(p) => p, None => continue };
+        if !path_allowed(&cc, &path, reach, max_crossing, grid_w) { continue; }
+        let cost = coarse_path_cost(&cc, &path).max(0.01);
+        let eid = edge_paths.len();
+        edge_paths.push(path);
+        adj[a].push((b, cost, eid));
+        adj[b].push((a, cost, eid));
+    }
+    // Centrality = reachable degree in the trade graph.
+    let centrality: Vec<f32> = (0..nn).map(|i| adj[i].len() as f32).collect();
+    // Connected components: a flow may only run between settlements that share a
+    // trade-network component → no unreachable cross-ocean origins, ever.
+    let mut comp = vec![usize::MAX; nn];
+    {
+        let mut c = 0usize;
+        for s in 0..nn {
+            if comp[s] != usize::MAX { continue; }
+            comp[s] = c;
+            let mut stack = vec![s];
+            while let Some(u) = stack.pop() {
+                for &(v, _, _) in &adj[u] {
+                    if comp[v] == usize::MAX { comp[v] = c; stack.push(v); }
+                }
+            }
+            c += 1;
+        }
+    }
+    // All-pairs cheapest route over the (small) graph: cost + parent for rebuilding
+    // the actual road a shipment travels.
+    let mut gdist: Vec<Vec<f32>> = vec![vec![f32::INFINITY; nn]; nn];
+    let mut gpar: Vec<Vec<usize>> = vec![vec![usize::MAX; nn]; nn];
+    for s in 0..nn {
+        gdist[s][s] = 0.0;
+        let mut heap: BinaryHeap<Reverse<(i64, usize)>> = BinaryHeap::new();
+        heap.push(Reverse((0, s)));
+        let mut done = vec![false; nn];
+        while let Some(Reverse((_, u))) = heap.pop() {
+            if done[u] { continue; }
+            done[u] = true;
+            let du = gdist[s][u];
+            for &(v, w, _) in &adj[u] {
+                let nd = du + w;
+                if nd < gdist[s][v] {
+                    gdist[s][v] = nd;
+                    gpar[s][v] = u;
+                    heap.push(Reverse(((nd * 1000.0) as i64, v)));
+                }
             }
         }
     }
@@ -2677,33 +2746,37 @@ pub fn compute_economy(
             }
         }
     }
-    let max_reach = (grid_w / 4) as i64;
     let mut prod = vec![vec![0.0f32; gc]; nn];
-    // Territory: the LAND cell each hub controls (nearest-hub Voronoi). Emitted as
-    // a square cell-mask region per hub (like the goods overlay) so the user can
-    // see each trade region's area.
+    // Territory: the LAND cell each MAJOR hub controls (nearest-hub Voronoi over the
+    // top `territory_n`). Emitted as a cell-mask region per hub so the user can see
+    // each trade region's area — kept to the majors so the overlay stays legible.
     let mut owner = vec![u16::MAX; (cw * ch) as usize];
     for cy in 0..ch {
         for cx in 0..cw {
             let ci = (cy * cw + cx) as usize;
             let wx = (cx as u32 * f + f / 2).min(grid_w - 1) as i32;
             let wy = (cy as u32 * f + f / 2).min(grid_h - 1) as i32;
+            // Production goes to the nearest settlement (every node, no distance
+            // cutoff — far-flung goods are no longer silently dropped).
             let mut best = 0usize;
             let mut bd = i64::MAX;
+            // Territory ownership goes to the nearest MAJOR hub.
+            let mut best_t = 0usize;
+            let mut bd_t = i64::MAX;
             for (ni, s) in nodes.iter().enumerate() {
                 let dx = wrap_dx(wx, s.x as i32) as i64;
                 let dy = (wy - s.y as i32) as i64;
                 let d = dx * dx + dy * dy;
                 if d < bd { bd = d; best = ni; }
+                if ni < territory_n && d < bd_t { bd_t = d; best_t = ni; }
             }
-            if bd > max_reach * max_reach { continue; }
             for g in 0..gc { prod[best][g] += coarse[ci][g]; }
             // Record territory ownership on land only.
             let tx = (wx as u32 / TILE_SIZE) as i32;
             let ty = (wy as u32 / TILE_SIZE) as i32;
             let lt = world.tile(tx, ty);
             let ti = ((wy as u32 % TILE_SIZE) * TILE_SIZE + (wx as u32 % TILE_SIZE)) as usize;
-            if lt.terrain[ti] != 0 { owner[ci] = best as u16; }
+            if lt.terrain[ti] != 0 { owner[ci] = best_t as u16; }
         }
     }
 
@@ -2755,6 +2828,10 @@ pub fn compute_economy(
     let pmax = power.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
 
     // ── Demand: population-scaled per-good desire (+ mercantile/subsistence) ──
+    // Unified with compute_trade_matrix: a full-basket floor, a reach factor (how
+    // open the network is), a homeland discount (a good is common/cheap where it is
+    // produced, so its own region barely imports it) and a wealth feedback (richer
+    // markets crave luxuries more). Staples are unaffected by reach/luxury terms.
     let max_pop = nodes.iter().map(|s| s.population).max().unwrap_or(1).max(1) as f32;
     let desire: Vec<f32> = (0..gc)
         .map(|g| specs.get(g).filter(|s| s.enabled).map(|s| s.desire).unwrap_or(0.0))
@@ -2763,40 +2840,50 @@ pub fn compute_economy(
         .map(|g| specs.get(g).map(|s| s.network_luxury).unwrap_or(false))
         .collect();
     let lux_mult = (0.4 + luxury_bias.clamp(0.0, 1.0) * 1.2).clamp(0.2, 1.8);
-    // FULL-BASKET demand: every hub wants the whole basket of goods, not just the
-    // few with high `desire`. Each good has a floor demand so a hub imports
-    // anything it doesn't produce locally; staples (high desire) are wanted more,
-    // luxuries scale with the mercantile taste. A hub only imports the SHORTFALL
-    // (net = production − demand), so locally-abundant goods still export.
+    let reach_factor = match reach { 0 => 1.0, 1 => 0.7, _ => 0.45 };
+    // Income proxy (pre-flow): value of what a hub produces. Richer hubs demand more
+    // luxuries. Normalized 0..1.
+    let income: Vec<f32> = (0..nn)
+        .map(|hh| (0..gc).map(|g| prod[hh][g] * desire[g]).sum::<f32>())
+        .collect();
+    let inc_max = income.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
     const BASKET_FLOOR: f32 = 0.35; // every good is at least modestly desired
     let mut net = vec![vec![0.0f32; gc]; nn];
     for hh in 0..nn {
         let size = (nodes[hh].population as f32 / max_pop).max(0.25);
         for g in 0..gc {
             let mut d = size * desire[g].max(BASKET_FLOOR);
-            if is_luxury[g] { d *= lux_mult; }
+            if is_luxury[g] {
+                let prod_share = (prod[hh][g] / good_max[g]).clamp(0.0, 1.0);
+                let homeland_discount = 1.0 - 0.6 * prod_share;
+                let wealth_taste = 0.5 + 0.5 * (income[hh] / inc_max);
+                d *= reach_factor * lux_mult * homeland_discount * wealth_taste;
+            }
             net[hh][g] = prod[hh][g] - d;
         }
     }
 
-    // ── Flows (cost-aware) → chains with per-hop prices + chokepoint volumes ──
-    let hubnode: std::collections::HashMap<usize, usize> =
-        (0..nn).map(|h| (cnode[h], h)).collect();
-    let mut pair: std::collections::HashMap<(usize, usize), Option<(Vec<usize>, f32)>> =
-        std::collections::HashMap::new();
+    // ── Flows over the trade GRAPH → chains with per-hop prices + chokepoints ──
+    // A deficit buys a good from the cheapest-by-ROUTE supplier in the SAME network
+    // component (so the origin is always genuinely reachable over real roads). The
+    // goods ride the actual route network (settlement → hub → … → consumer); price
+    // rises per hop; and import demand is PRICE-ELASTIC — dear, far-hauled goods are
+    // bought in smaller volume, so a market only reaches overseas for what it truly
+    // cannot get nearer.
     let mut chains: Vec<EconChain> = Vec::new();
     let mut receives: Vec<Vec<EconReceive>> = vec![Vec::new(); nn];
     let mut exports = vec![0.0f32; nn];
     let mut imports = vec![0.0f32; nn];
     let mut edge_vol: std::collections::HashMap<(usize, usize), (f32, usize)> =
-        std::collections::HashMap::new(); // volume + dominant good
+        std::collections::HashMap::new(); // coarse-edge volume + dominant good
 
     // Global scarcity multiplier per good: rarer goods (low world abundance) fetch
-    // higher prices everywhere. `abundance` is 1 for the most-produced good and
-    // falls toward 0 for sparse ones → multiplier 1.0 … ~3.3×.
+    // higher prices everywhere → multiplier 1.0 … ~3.3×.
     let scarcity_mult: Vec<f32> = (0..gc)
         .map(|g| (1.0 / abundance[g].max(0.18)).clamp(1.0, 3.3))
         .collect();
+    const ELAST: f32 = 0.6;     // price elasticity of import demand
+    const MAX_SUPPLIERS: u8 = 4; // a deficit draws on at most a few origins per good
 
     for g in 0..gc {
         let mut supply: Vec<(usize, f32)> = (0..nn)
@@ -2808,74 +2895,70 @@ pub fn compute_economy(
 
         for &mut (di, mut need) in deficit.iter_mut() {
             let need0 = need;
-            // Order suppliers by ROUTE COST (cheapest corridor wins) — cost-aware.
-            let mut ord: Vec<(usize, f32, f32)> = Vec::new(); // (supplier, avail, cost)
-            for &(si, avail) in supply.iter() {
-                if si == di || avail <= 0.05 { continue; }
-                let key = (si.min(di), si.max(di));
-                if !pair.contains_key(&key) {
-                    // Overseas trade is allowed but must hug the coast / cross only
-                    // short gaps (per user): `path_allowed` caps the open-water run
-                    // length, and open sea is heavily surcharged in the cost grid,
-                    // so routes prefer coasts and never strike across open ocean.
-                    let p = coarse_dijkstra(&cc, cnode[si], cnode[di])
-                        .filter(|p| path_allowed(&cc, p, reach, max_crossing, grid_w))
-                        .map(|p| { let c = coarse_path_cost(&cc, &p); (p, c) });
-                    pair.insert(key, p);
-                }
-                if let Some(Some((_, cost))) = pair.get(&key) { ord.push((si, avail, *cost)); }
-            }
-            ord.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+            // Reachable suppliers (same component), cheapest route first.
+            let mut ord: Vec<(usize, f32)> = supply.iter()
+                .filter(|&&(si, av)| si != di && av > 0.05
+                    && comp[si] == comp[di] && gdist[di][si].is_finite())
+                .map(|&(si, _)| (si, gdist[di][si]))
+                .collect();
+            ord.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
-            for (si, _avail, _cost) in ord {
-                if need <= 0.05 { break; }
+            let mut used = 0u8;
+            for (si, route_cost) in ord {
+                if need <= 0.05 || used >= MAX_SUPPLIERS { break; }
                 let pos = match supply.iter().position(|&(s, _)| s == si) { Some(p) => p, None => continue };
                 let savail = supply[pos].1;
                 if savail <= 0.05 { continue; }
-                let key = (si.min(di), si.max(di));
-                let (path, _cost) = match pair.get(&key) { Some(Some(pc)) => pc.clone(), _ => continue };
-                let amt = need.min(savail);
+
+                // Quality/scarcity/transport price; demand is elastic in the
+                // delivered price so expensive long hauls move less volume.
+                let origin = 0.6 + 0.9 * quality[si][g];
+                let sca = scarcity_mult[g];
+                let local_need = (need0 * 0.25).clamp(0.0, 0.6); // mild local shortage premium
+                let transport_full = (route_cost / cc.cw as f32) * 1.3;
+                let delivered_preview = origin * sca * (1.0 + transport_full) * (1.0 + local_need);
+                let damp = 1.0 / (1.0 + ELAST * (delivered_preview - 1.0).max(0.0));
+                let want = need * damp;
+                let amt = want.min(savail);
+                if amt <= 0.02 { continue; }
                 need -= amt;
                 supply[pos].1 -= amt;
                 exports[si] += amt;
                 imports[di] += amt;
+                used += 1;
 
-                // Orient origin(si) → consumer(di) and find intermediate hub stops.
-                let path_o = if path.first() == Some(&cnode[si]) { path.clone() }
-                    else { let mut p = path.clone(); p.reverse(); p };
-                let mut stops: Vec<(usize, f32)> = vec![(si, 0.0)];
-                let mut cum = 0.0;
-                for win in path_o.windows(2) {
-                    cum += (cc.cost[win[0]] + cc.cost[win[1]]) * 0.5;
-                    if let Some(&h) = hubnode.get(&win[1]) {
-                        if h != si && h != di && stops.last().map(|l| l.0) != Some(h) {
-                            stops.push((h, cum));
+                // Rebuild the graph path si → di (the real road the goods travel).
+                // gpar[di] is the shortest-path tree rooted at di, so walking from
+                // si via gpar[di][·] yields si … di directly.
+                let mut path: Vec<usize> = Vec::new();
+                let mut t = si;
+                while t != usize::MAX { path.push(t); if t == di { break; } t = gpar[di][t]; }
+
+                // Walk the path: accumulate per-edge route cost (for per-stop prices)
+                // and per coarse-edge volume (for chokepoints).
+                let chain_id = chains.len() as u32;
+                let mut cum = 0.0f32;
+                let mut chain_stops: Vec<EconChainStop> = Vec::with_capacity(path.len());
+                let mut points: Vec<[f32; 2]> = Vec::with_capacity(path.len());
+                for (k, &h) in path.iter().enumerate() {
+                    if k > 0 {
+                        let prev = path[k - 1];
+                        if let Some(&(_, w, eid)) = adj[prev].iter().find(|&&(v, _, _)| v == h) {
+                            cum += w;
+                            if let Some(p) = edge_paths.get(eid) {
+                                for win in p.windows(2) {
+                                    let e = (win[0].min(win[1]), win[0].max(win[1]));
+                                    edge_vol.entry(e).or_insert((0.0, g)).0 += amt;
+                                }
+                            }
                         }
                     }
-                    // chokepoint volume per coarse edge
-                    let e = (win[0].min(win[1]), win[0].max(win[1]));
-                    let entry = edge_vol.entry(e).or_insert((0.0, g));
-                    entry.0 += amt;
-                }
-                stops.push((di, cum));
-
-                // Price model (reviewed): delivered = origin × scarcity × (1 +
-                // transport). Origin is quality-driven; scarcity lifts rare goods
-                // globally; transport is the cumulative route cost (so distant /
-                // hard-to-reach markets pay more, rising along each hop).
-                let q0 = quality[si][g];
-                let origin = 0.6 + 0.9 * q0;
-                let sca = scarcity_mult[g];
-                let local_need = (need0 * 0.25).clamp(0.0, 0.6); // mild local shortage premium
-                let chain_id = chains.len() as u32;
-                let chain_stops: Vec<EconChainStop> = stops.iter().map(|&(h, cu)| {
-                    let transport = (cu / cc.cw as f32) * 1.3;
+                    let transport = (cum / cc.cw as f32) * 1.3;
                     let price = origin * sca * (1.0 + transport) * (1.0 + local_need);
-                    EconChainStop { hub: h as u32, price }
-                }).collect();
+                    chain_stops.push(EconChainStop { hub: h as u32, price });
+                    points.push([nodes[h].x as f32, nodes[h].y as f32]);
+                }
                 let delivered = chain_stops.last().map(|s| s.price).unwrap_or(origin * sca);
-                let points: Vec<[f32; 2]> = stops.iter()
-                    .map(|&(h, _)| [nodes[h].x as f32, nodes[h].y as f32]).collect();
                 receives[di].push(EconReceive {
                     good: g, good_name: goods_names.get(g).cloned().unwrap_or_default(),
                     amount: amt, price: delivered, chain: chain_id, from_hub: si as u32,
