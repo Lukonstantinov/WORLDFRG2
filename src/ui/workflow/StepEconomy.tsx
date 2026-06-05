@@ -15,6 +15,10 @@ export function StepEconomy(_props: Props) {
   const setStatus = useUIStore((s) => s.setStatus);
   const markStepCompleted = useUIStore((s) => s.markStepCompleted);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
+  const setShowTradeMatrix = useUIStore((s) => s.setShowTradeMatrix);
+  const overlayVisibility = useUIStore((s) => s.overlayVisibility);
+  const reachGood = useUIStore((s) => s.reachGood);
+  const setReachGood = useUIStore((s) => s.setReachGood);
   const stepCompleted = useUIStore((s) => s.stepCompleted);
   const bioParams = useUIStore((s) => s.bioParams);
   const settlements = useWorldStore((s) => s.settlements);
@@ -46,7 +50,8 @@ export function StepEconomy(_props: Props) {
       setEconomy(result);
       markStepCompleted(10);
       setOverlayVisible("chokepoints", true);
-      setStatus(`Economy built: ${result.hubs.length} hubs, ${result.chains.length} supply chains, ${result.chokepoints.length} chokepoints`);
+      setOverlayVisible("politicalInfluence", true); // show trade-hub circles
+      setStatus(`Economy built: ${result.hubs.length} hubs, ${result.chains.length} supply chains, ${result.regions.length} regions, ${result.chokepoints.length} chokepoints`);
     } catch (err) { setStatus(`Error: ${err}`); }
     setSimRunning(false);
   };
@@ -63,12 +68,47 @@ export function StepEconomy(_props: Props) {
 
       {economy && economy.hubs.length > 0 && (
         <>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "#8aa0c0", marginTop: 4, cursor: "pointer" }}>
-            <input type="checkbox" defaultChecked
-              onChange={(e) => setOverlayVisible("chokepoints", e.target.checked)} />
-            Show strategic chokepoints
-          </label>
-          <div style={{ marginTop: 4, maxHeight: 200, overflowY: "auto" }}>
+          <button onClick={() => setShowTradeMatrix(true)} style={{ ...genBtn, marginTop: 4 }}>
+            📊 Open Trade Matrix
+          </button>
+
+          {/* Per-good reach: highlight which hubs a good reaches on the map. */}
+          <div style={{ marginTop: 5 }}>
+            <div style={{ fontSize: 10, color: "#8aa0c0", marginBottom: 2 }}>Good reach (highlight on map)</div>
+            <select
+              value={reachGood ?? ""}
+              onChange={(e) => setReachGood(e.target.value || null)}
+              style={{ width: "100%", fontSize: 10, padding: "2px 4px", background: "#0d1219", color: "#c0d8f0", border: "1px solid #1e2a38", borderRadius: 4 }}
+            >
+              <option value="">— none —</option>
+              {economy.goods.map((g) => (
+                <option key={g} value={g}>{g}</option>
+              ))}
+            </select>
+            {reachGood && (() => {
+              const chains = economy.chains.filter((c) => c.good_name === reachGood);
+              const hubs = new Set(chains.map((c) => { const p = c.points[c.points.length - 1]; return p ? `${p[0]},${p[1]}` : ""; }));
+              return (
+                <div style={{ fontSize: 10, color: "#c8b070", marginTop: 2 }}>
+                  {reachGood}: reaches {hubs.size} hub{hubs.size === 1 ? "" : "s"} via {chains.length} route{chains.length === 1 ? "" : "s"}
+                </div>
+              );
+            })()}
+          </div>
+
+          {([
+            { key: "tradeRegions", label: "Trade regions (territories)" },
+            { key: "chokepoints", label: "Strategic chokepoints" },
+            { key: "hubNames", label: "Hub names" },
+            { key: "settlementNames", label: "Settlement names" },
+          ] as const).map((o) => (
+            <label key={o.key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "#8aa0c0", marginTop: 3, cursor: "pointer" }}>
+              <input type="checkbox" checked={!!overlayVisibility[o.key]}
+                onChange={(e) => setOverlayVisible(o.key, e.target.checked)} />
+              {o.label}
+            </label>
+          ))}
+          <div style={{ marginTop: 4, maxHeight: 180, overflowY: "auto" }}>
             {economy.chokepoints.slice(0, 10).map((cp, i) => (
               <div key={i} style={{
                 display: "flex", justifyContent: "space-between",

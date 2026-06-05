@@ -57,6 +57,8 @@ interface UIStore {
   selectedHub: number | null;
   /** Highlighted supply-chain id (Phase 3): traced on the map, or null. */
   selectedChain: number | null;
+  /** Per-good reach view: highlight which hubs a chosen good reaches, or null. */
+  reachGood: string | null;
 
   setTool: (tool: ActiveTool) => void;
   setLayer: (layer: ActiveLayer) => void;
@@ -79,6 +81,7 @@ interface UIStore {
   setRiverParams: (p: Partial<RiverParamsState>) => void;
   setBioParams: (p: Partial<BioParamsState>) => void;
   setShowTradeMatrix: (v: boolean) => void;
+  setReachGood: (g: string | null) => void;
 }
 
 // Default layer/tool for each step
@@ -113,6 +116,7 @@ export const useUIStore = create<UIStore>((set) => ({
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false,
+    hubNames: false, settlementNames: false, tradeRegions: false,
     ...Object.fromEntries(GOOD_DEFS.map((g) => [goodOverlayKey(g.name), false])),
   },
   layerOpacity: 1,
@@ -124,6 +128,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showTradeMatrix: false,
   selectedHub: null,
   selectedChain: null,
+  reachGood: null,
 
   setTool: (tool) => set({ activeTool: tool }),
   setLayer: (layer) => set({ activeLayer: layer }),
@@ -163,6 +168,8 @@ export const useUIStore = create<UIStore>((set) => ({
     set((state) => ({ bioParams: { ...state.bioParams, ...p } })),
 
   setShowTradeMatrix: (v) => set({ showTradeMatrix: v }),
+
+  setReachGood: (g) => set({ reachGood: g }),
 
   setWorkflowStep: (step) => {
     const defaults = STEP_DEFAULTS[step] || { layer: "land", tool: "pan" };

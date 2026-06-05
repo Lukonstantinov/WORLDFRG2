@@ -14,8 +14,9 @@ export async function getWorldMeta(): Promise<WorldMeta | null> {
 export async function setLatitudeConfig(
   equatorOffset: number,
   latScale: number,
+  latRatio: number,
 ): Promise<WorldMeta> {
-  return invoke("set_latitude_config", { equatorOffset, latScale });
+  return invoke("set_latitude_config", { equatorOffset, latScale, latRatio });
 }
 
 export async function getTiles(

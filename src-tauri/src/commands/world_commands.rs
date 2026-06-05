@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use crate::db::{WorldDb, metadata, tile_store};
-use crate::sim::world_buffer::{DEFAULT_EQUATOR_OFFSET, DEFAULT_LAT_SCALE};
+use crate::sim::world_buffer::{DEFAULT_EQUATOR_OFFSET, DEFAULT_LAT_SCALE, DEFAULT_LAT_RATIO};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WorldMeta {
@@ -14,18 +14,25 @@ pub struct WorldMeta {
     /// Latitude expansion factor (1.0 = default; >1 stretches the bands so the
     /// poles fall off-canvas and are cropped).
     pub lat_scale: f32,
+    /// Latitude-line spacing ratio (gap 30→60 ÷ gap 0→30); the simulation uses
+    /// the SAME ratio as the drawn lines so every latitude-dependent layer lands
+    /// on the lines. 1.0 = even.
+    pub lat_ratio: f32,
 }
 
 /// Read the latitude framing from metadata, falling back to the defaults for
 /// worlds saved before the feature existed.
-pub fn read_lat_config(conn: &rusqlite::Connection) -> (f32, f32) {
+pub fn read_lat_config(conn: &rusqlite::Connection) -> (f32, f32, f32) {
     let equator_offset = metadata::get_meta(conn, "equator_offset")
         .ok().flatten().and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_EQUATOR_OFFSET);
     let lat_scale = metadata::get_meta(conn, "lat_scale")
         .ok().flatten().and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_LAT_SCALE);
-    (equator_offset, lat_scale)
+    let lat_ratio = metadata::get_meta(conn, "lat_ratio")
+        .ok().flatten().and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_LAT_RATIO);
+    (equator_offset, lat_scale, lat_ratio)
 }
 
 #[tauri::command]
@@ -54,6 +61,8 @@ pub fn new_world(
         .map_err(|e| e.to_string())?;
     metadata::set_meta(&conn, "lat_scale", &DEFAULT_LAT_SCALE.to_string())
         .map_err(|e| e.to_string())?;
+    metadata::set_meta(&conn, "lat_ratio", &DEFAULT_LAT_RATIO.to_string())
+        .map_err(|e| e.to_string())?;
 
     // Initialize tiles
     tile_store::init_tiles(&conn, grid_width, grid_height).map_err(|e| e.to_string())?;
@@ -65,6 +74,7 @@ pub fn new_world(
         tile_size: 128,
         equator_offset: DEFAULT_EQUATOR_OFFSET,
         lat_scale: DEFAULT_LAT_SCALE,
+        lat_ratio: DEFAULT_LAT_RATIO,
     })
 }
 
@@ -75,16 +85,20 @@ pub fn new_world(
 pub fn set_latitude_config(
     equator_offset: f32,
     lat_scale: f32,
+    lat_ratio: f32,
     db: State<'_, WorldDb>,
 ) -> Result<WorldMeta, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
     let equator_offset = equator_offset.clamp(0.0, 1.0);
     let lat_scale = lat_scale.clamp(0.25, 4.0);
+    let lat_ratio = lat_ratio.clamp(0.5, 5.0);
 
     metadata::set_meta(&conn, "equator_offset", &equator_offset.to_string())
         .map_err(|e| e.to_string())?;
     metadata::set_meta(&conn, "lat_scale", &lat_scale.to_string())
+        .map_err(|e| e.to_string())?;
+    metadata::set_meta(&conn, "lat_ratio", &lat_ratio.to_string())
         .map_err(|e| e.to_string())?;
 
     let name = metadata::get_meta(&conn, "name").map_err(|e| e.to_string())?
@@ -103,6 +117,7 @@ pub fn set_latitude_config(
         tile_size: 128,
         equator_offset,
         lat_scale,
+        lat_ratio,
     })
 }
 
@@ -125,7 +140,7 @@ pub fn get_world_meta(db: State<'_, WorldDb>) -> Result<Option<WorldMeta>, Strin
         .parse()
         .map_err(|e: std::num::ParseIntError| e.to_string())?;
 
-    let (equator_offset, lat_scale) = read_lat_config(&conn);
+    let (equator_offset, lat_scale, lat_ratio) = read_lat_config(&conn);
 
     Ok(Some(WorldMeta {
         name,
@@ -134,5 +149,6 @@ pub fn get_world_meta(db: State<'_, WorldDb>) -> Result<Option<WorldMeta>, Strin
         tile_size: 128,
         equator_offset,
         lat_scale,
+        lat_ratio,
     }))
 }

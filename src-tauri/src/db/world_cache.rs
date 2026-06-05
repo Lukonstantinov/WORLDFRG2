@@ -3,7 +3,7 @@ use rayon::prelude::*;
 use crate::db::{tile_store, metadata};
 use crate::tile::coords::TILE_SIZE;
 use crate::tile::cell::TileData;
-use crate::sim::world_buffer::{lat_from_y, DEFAULT_EQUATOR_OFFSET, DEFAULT_LAT_SCALE};
+use crate::sim::world_buffer::{lat_from_y, DEFAULT_EQUATOR_OFFSET, DEFAULT_LAT_SCALE, DEFAULT_LAT_RATIO};
 
 /// All of a world's tiles, decompressed once and shared (via `Arc`) by every
 /// read-only overlay/query command. Rebuilt only when the tile data changes (see
@@ -17,6 +17,7 @@ pub struct WorldTiles {
     pub tiles_y: u32,
     pub equator_offset: f32,
     pub lat_scale: f32,
+    pub lat_ratio: f32,
     pub tiles: Vec<TileData>, // row-major, len = tiles_x * tiles_y
     /// Tile-table fingerprint this snapshot was built from (set by
     /// `WorldDb::cached_tiles_with_conn`); used to key the coarse cost cache.
@@ -37,6 +38,8 @@ impl WorldTiles {
             .ok().flatten().and_then(|s| s.parse().ok()).unwrap_or(DEFAULT_EQUATOR_OFFSET);
         let lat_scale: f32 = metadata::get_meta(conn, "lat_scale")
             .ok().flatten().and_then(|s| s.parse().ok()).unwrap_or(DEFAULT_LAT_SCALE);
+        let lat_ratio: f32 = metadata::get_meta(conn, "lat_ratio")
+            .ok().flatten().and_then(|s| s.parse().ok()).unwrap_or(DEFAULT_LAT_RATIO);
 
         let tiles_x = (width + TILE_SIZE - 1) / TILE_SIZE;
         let tiles_y = (height + TILE_SIZE - 1) / TILE_SIZE;
@@ -58,7 +61,7 @@ impl WorldTiles {
             })
             .collect();
 
-        Ok(Self { width, height, tiles_x, tiles_y, equator_offset, lat_scale, tiles, fingerprint: (0, 0) })
+        Ok(Self { width, height, tiles_x, tiles_y, equator_offset, lat_scale, lat_ratio, tiles, fingerprint: (0, 0) })
     }
 
     /// Borrow the tile at coarse tile coords (tx, ty).
@@ -70,6 +73,6 @@ impl WorldTiles {
     /// Latitude (degrees) of a world row, honouring the world's equator framing.
     #[inline]
     pub fn latitude(&self, y: u32) -> f32 {
-        lat_from_y(y as f32, self.height as f32, self.equator_offset, self.lat_scale)
+        lat_from_y(y as f32, self.height as f32, self.equator_offset, self.lat_scale, self.lat_ratio)
     }
 }

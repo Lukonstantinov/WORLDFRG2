@@ -70,6 +70,7 @@ export function MapCanvas() {
   const bioParams = useUIStore((s) => s.bioParams);
   const setSelectedHub = useUIStore((s) => s.setSelectedHub);
   const selectedChain = useUIStore((s) => s.selectedChain);
+  const reachGood = useUIStore((s) => s.reachGood);
 
   // Stable identity for the loaded world. Heavy effects (tile reloads + sim IPC)
   // key off this string rather than the `meta` object, so latitude-slider edits
@@ -443,13 +444,39 @@ export function MapCanvas() {
     getEconomy().then((e) => setEconomy(e.hubs.length > 0 ? e : null)).catch(() => {});
   }, [worldKey, setEconomy]);
 
-  // Economy chokepoints — product of the Economy step (10).
+  // Economy chokepoints + trade-region territories — product of the Economy step.
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om) return;
     om.drawChokepoints(economy?.chokepoints ?? []);
+    om.drawEconRegions(economy?.regions ?? []);
     requestRender();
   }, [economy, requestRender]);
+
+  // Per-good reach network: highlight every route + hub the selected good reaches.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    if (!economy || !reachGood) {
+      om.setReachNetwork([], []);
+      requestRender();
+      return;
+    }
+    const chains = economy.chains.filter((c) => c.good_name === reachGood);
+    // Destination hub = last stop of each chain; dedupe by position.
+    const seen = new Set<string>();
+    const hubs: [number, number][] = [];
+    for (const c of chains) {
+      const last = c.points[c.points.length - 1];
+      if (!last) continue;
+      const key = `${last[0]},${last[1]}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      hubs.push([last[0], last[1]]);
+    }
+    om.setReachNetwork(chains, hubs);
+    requestRender();
+  }, [economy, reachGood, requestRender]);
 
   // Highlighted supply-chain road for the selected good (Phase 3).
   useEffect(() => {
@@ -477,7 +504,7 @@ export function MapCanvas() {
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om || !meta) return;
-    om.drawLatLines(meta.grid_width, meta.grid_height, latConfig.equatorOffset, latConfig.latScale);
+    om.drawLatLines(meta.grid_width, meta.grid_height, latConfig.equatorOffset, latConfig.latScale, latConfig.lineRatio);
     requestRender();
   }, [worldKey, latConfig, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 

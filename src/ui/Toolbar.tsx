@@ -60,6 +60,8 @@ const overlayTypes = [
   { id: "rivers", label: "Rivers" },
   { id: "lakes", label: "Lakes" },
   { id: "settlements", label: "Settlements" },
+  { id: "settlementNames", label: "Settlement Names" },
+  { id: "hubNames", label: "Hub Names" },
   { id: "tradeRoutes", label: "Trade Routes" },
   { id: "tradeFlows", label: "Trade Flows" },
   { id: "fisheryBanks", label: "Fishery Banks" },
@@ -75,7 +77,8 @@ const bioOverlays = [
   { id: "shipwormZones", label: "\u{1FAB1} Shipworm Zones" },
   { id: "stormZones", label: "\u{1F300} Storm Zones" },
   { id: "reefZones", label: "\u{1FAA8} Reef Zones" },
-  { id: "politicalInfluence", label: "\u{1F451} Political Influence" },
+  { id: "politicalInfluence", label: "\u{1F535} Trade Hubs" },
+  { id: "tradeRegions", label: "\u{1F7E6} Trade Regions" },
   { id: "chokepoints", label: "\u{2693} Chokepoints" },
 ];
 

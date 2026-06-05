@@ -9,6 +9,9 @@ import type { WorldMeta, RiverData, LakeData, Settlement, EconomySnapshot } from
 export interface LatConfig {
   equatorOffset: number;
   latScale: number;
+  /** Line-spacing ratio (gap 30→60 ÷ gap 0→30). Shared with the SIMULATION
+   *  (persisted as lat_ratio) so currents/climate land on the drawn lines. */
+  lineRatio: number;
 }
 
 interface WorldStore {
@@ -24,7 +27,7 @@ interface WorldStore {
   setMeta: (meta: WorldMeta) => void;
   /** Update only the live latitude framing while dragging the sliders. Does NOT
    *  touch `meta`, so heavy meta-keyed effects stay quiet during the drag. */
-  setLatConfig: (equatorOffset: number, latScale: number) => void;
+  setLatConfig: (equatorOffset: number, latScale: number, lineRatio: number) => void;
   setRivers: (rivers: RiverData[]) => void;
   setLakes: (lakes: LakeData[]) => void;
   setSettlements: (settlements: Settlement[]) => void;
@@ -32,11 +35,12 @@ interface WorldStore {
   clear: () => void;
 }
 
-const DEFAULT_LAT: LatConfig = { equatorOffset: 0.5, latScale: 1 };
+const DEFAULT_LAT: LatConfig = { equatorOffset: 0.5, latScale: 1, lineRatio: 1 };
 
 const latFromMeta = (meta: WorldMeta): LatConfig => ({
   equatorOffset: meta.equator_offset ?? 0.5,
   latScale: meta.lat_scale ?? 1,
+  lineRatio: meta.lat_ratio ?? 1,
 });
 
 export const useWorldStore = create<WorldStore>((set) => ({
@@ -50,7 +54,7 @@ export const useWorldStore = create<WorldStore>((set) => ({
   // Setting meta reseeds the live latitude framing so the two stay in sync on
   // world load and after a persisted slider change.
   setMeta: (meta) => set({ meta, isLoaded: true, latConfig: latFromMeta(meta) }),
-  setLatConfig: (equatorOffset, latScale) => set({ latConfig: { equatorOffset, latScale } }),
+  setLatConfig: (equatorOffset, latScale, lineRatio) => set({ latConfig: { equatorOffset, latScale, lineRatio } }),
   setRivers: (rivers) => set({ rivers }),
   setLakes: (lakes) => set({ lakes }),
   setSettlements: (settlements) => set({ settlements }),

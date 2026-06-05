@@ -10,6 +10,11 @@ pub const DEFAULT_EQUATOR_OFFSET: f32 = 0.5;
 /// No stretch by default: the full ±90° span maps exactly onto the canvas
 /// height when the equator is centred.
 pub const DEFAULT_LAT_SCALE: f32 = 1.0;
+/// Even latitude-line spacing by default (gap 30→60 ÷ gap 0→30 = 1). >1 fans the
+/// poleward bands apart (Mercator-like, ~2.4); the simulation uses the SAME ratio
+/// as the drawn latitude lines so every latitude-dependent layer lands exactly on
+/// the lines (see `lat_from_y`, frontend `latLineY`).
+pub const DEFAULT_LAT_RATIO: f32 = 1.0;
 
 /// Map a cell row `y` to latitude in degrees given a configurable equator
 /// position and latitude scale.
@@ -25,10 +30,29 @@ pub const DEFAULT_LAT_SCALE: f32 = 1.0;
 /// The result is clamped to `[-90, 90]`, so rows beyond a pole that happens to
 /// sit inside the canvas (only possible when `lat_scale < 1`) read as the pole
 /// value rather than an unphysical >90° latitude.
+/// - `lat_ratio`: spacing ratio between consecutive 30° latitude bands (gap
+///   30→60 ÷ gap 0→30). `1.0` is the even (linear) mapping; `>1` fans the
+///   poleward bands apart so a given canvas row reads a *lower* latitude
+///   (Mercator-like) — the exact inverse of the frontend `latLineY` geometric
+///   model, so the simulation and the drawn lines agree everywhere.
 #[inline]
-pub fn lat_from_y(y: f32, height: f32, equator_offset: f32, lat_scale: f32) -> f32 {
+pub fn lat_from_y(y: f32, height: f32, equator_offset: f32, lat_scale: f32, lat_ratio: f32) -> f32 {
     let scale = if lat_scale <= 1e-4 { 1.0 } else { lat_scale };
-    ((equator_offset - y / height) * 180.0 / scale).clamp(-90.0, 90.0)
+    let equator_row = equator_offset * height;
+    let dy = equator_row - y; // >0 = north of the equator
+    // Pixels for the first 30° band (equator→30°) — identical to the linear
+    // spacing so `lat_ratio == 1` reproduces the original mapping exactly.
+    let band = (height * scale / 6.0).max(1e-6);
+    let mag = dy.abs() / band; // bands away from the equator (continuous)
+    let r = lat_ratio;
+    let abs_lat = if (r - 1.0).abs() < 1e-4 {
+        30.0 * mag
+    } else {
+        // Invert the geometric sum cum = band·(rⁿ−1)/(r−1): n = ln(1+mag·(r−1))/ln r.
+        let inner = 1.0 + mag * (r - 1.0);
+        if inner <= 1e-6 { 90.0 } else { 30.0 * inner.ln() / r.ln() }
+    };
+    (dy.signum() * abs_lat).clamp(-90.0, 90.0)
 }
 
 /// Flat world-sized arrays for simulation.
@@ -44,6 +68,8 @@ pub struct WorldBuffer {
     /// simulation phase generates against the same configurable latitudes.
     pub equator_offset: f32,
     pub lat_scale: f32,
+    /// Latitude-line spacing ratio shared with the overlay (see `lat_from_y`).
+    pub lat_ratio: f32,
     // Per-cell data
     pub terrain: Vec<u8>,
     pub elevation: Vec<f32>,
@@ -94,6 +120,9 @@ impl WorldBuffer {
         let lat_scale: f32 = metadata::get_meta(conn, "lat_scale")
             .ok().flatten().and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_LAT_SCALE);
+        let lat_ratio: f32 = metadata::get_meta(conn, "lat_ratio")
+            .ok().flatten().and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_LAT_RATIO);
 
         let total = (width * height) as usize;
         let tiles_x = (width + TILE_SIZE - 1) / TILE_SIZE;
@@ -106,6 +135,7 @@ impl WorldBuffer {
             tiles_y,
             equator_offset,
             lat_scale,
+            lat_ratio,
             terrain: vec![0; total],
             elevation: vec![0.0; total],
             sea_depth: vec![0.0; total],
@@ -324,7 +354,7 @@ impl WorldBuffer {
     /// configurable equator position and expansion scale.
     #[inline]
     pub fn latitude(&self, y: u32) -> f32 {
-        lat_from_y(y as f32, self.height as f32, self.equator_offset, self.lat_scale)
+        lat_from_y(y as f32, self.height as f32, self.equator_offset, self.lat_scale, self.lat_ratio)
     }
 
     /// Row of the equator (0° line), clamped to the canvas.

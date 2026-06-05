@@ -1,6 +1,7 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain } from "../types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain, EconRegion } from "../types";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "../goods";
 import { drawGoodIcon } from "./goodIcons";
+import { latLineY } from "./projection";
 
 /** Per-cell abundance → one of 4 discrete quality tiers (1 negligible … 4 very
  *  high). The cell's fill opacity steps with the tier so richer deposits read as
@@ -14,8 +15,9 @@ const STORM_COLOR = "#c050d0";
 const REEF_COLOR = "#30c0b0";
 const TRADE_TRUNK = "#e0c060"; // major bundled commodity-flow trunk (amber)
 const TRADE_TRUNK_MINOR = "#b8a878"; // minor/low-volume trunk (muted amber)
-const POLITICAL_COLOR = "#d65fd0"; // trade-hub marker (magenta)
-const STAR_COLOR = "#ffd24a"; // power-tier stars on major hubs (gold)
+const POLITICAL_COLOR = "#d65fd0"; // trade-hub marker (magenta) — legacy
+const STAR_COLOR = "#ffd24a"; // power-tier stars on major hubs (gold) — legacy
+const HUB_BLUE = "#3a86d6"; // trade-hub circle
 
 const RIVER_COLOR = "#2288cc";
 const LAKE_COLOR = "rgba(51, 153, 221, 0.7)";
@@ -63,8 +65,12 @@ export class OverlayManager {
   private tradeTrunks: TradeTrunk[] = [];
   private politicalCenters: PoliticalCenter[] = [];
   private chokepoints: EconChokepoint[] = [];
+  private econRegions: EconRegion[] = [];
   private supplyChain: EconChain | null = null;
-  private latLinesData: { gridW: number; gridH: number; equatorOffset: number; latScale: number } | null = null;
+  /** Per-good reach: chains carrying the selected good + the hubs it reaches. */
+  private reachChains: EconChain[] = [];
+  private reachHubs: [number, number][] = [];
+  private latLinesData: { gridW: number; gridH: number; equatorOffset: number; latScale: number; lineRatio: number } | null = null;
 
   private visibility: Record<string, boolean> = {
     rivers: true, lakes: true, settlements: true,
@@ -72,6 +78,7 @@ export class OverlayManager {
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false,
+    hubNames: false, settlementNames: false, tradeRegions: false,
   };
 
   private currentScale = 1;
@@ -140,14 +147,25 @@ export class OverlayManager {
     this.chokepoints = chokepoints;
   }
 
+  drawEconRegions(regions: EconRegion[]) {
+    this.econRegions = regions;
+  }
+
+  /** Set the per-good reach network: the chains carrying one good and the hub
+   *  positions it reaches (drawn highlighted). Pass empty to clear. */
+  setReachNetwork(chains: EconChain[], hubs: [number, number][]) {
+    this.reachChains = chains;
+    this.reachHubs = hubs;
+  }
+
   /** Highlight one good's supply chain (origin → hub stops → consumer) with the
    *  price at each stop. Pass null to clear. */
   setSupplyChain(chain: EconChain | null) {
     this.supplyChain = chain;
   }
 
-  drawLatLines(gridW: number, gridH: number, equatorOffset = 0.5, latScale = 1) {
-    this.latLinesData = { gridW, gridH, equatorOffset, latScale };
+  drawLatLines(gridW: number, gridH: number, equatorOffset = 0.5, latScale = 1, lineRatio = 1) {
+    this.latLinesData = { gridW, gridH, equatorOffset, latScale, lineRatio };
   }
 
   setVisible(type: string, visible: boolean) {
@@ -160,6 +178,12 @@ export class OverlayManager {
 
   /** Render all overlays to a 2D context (called within viewport transform) */
   render(ctx: CanvasRenderingContext2D) {
+    // Trade-region territories first (under everything else) so markers/routes
+    // stay legible on top.
+    if (this.visibility.tradeRegions && this.econRegions.length > 0) {
+      this.renderEconRegions(ctx);
+    }
+
     if (this.visibility.lakes && this.lakes.length > 0) {
       ctx.fillStyle = LAKE_COLOR;
       for (const lake of this.lakes) {
@@ -199,7 +223,7 @@ export class OverlayManager {
     }
 
     if (this.visibility.latLines && this.latLinesData) {
-      const { gridW, gridH, equatorOffset, latScale } = this.latLinesData;
+      const { gridW, gridH, equatorOffset, latScale, lineRatio } = this.latLinesData;
       ctx.globalAlpha = 0.5;
       ctx.strokeStyle = LAT_LINE_COLOR;
       ctx.lineWidth = 0.5;
@@ -218,11 +242,12 @@ export class OverlayManager {
         { lat: 90, label: "N Pole" },
         { lat: -90, label: "S Pole" },
       ];
-      const scale = latScale <= 1e-4 ? 1 : latScale;
       for (const { lat, label } of lines) {
-        // Inverse of the Rust lat_from_y mapping.
-        const y = (equatorOffset - (lat * scale) / 180) * gridH;
-        // Crop: skip lines whose latitude falls outside the canvas.
+        // Line position from the spacing ratio (1 = even … higher = poles fan
+        // out). The map raster is never touched — only these reference lines move.
+        const y = latLineY(lat, gridH, equatorOffset, latScale, lineRatio);
+        // Crop: skip lines pushed off the canvas (a high ratio fans the polar
+        // lines past the edge — correct for a pole-stretched chart).
         if (y < 0 || y > gridH) continue;
         ctx.beginPath();
         ctx.moveTo(0, y);
@@ -328,6 +353,12 @@ export class OverlayManager {
       this.renderSupplyChain(ctx, this.supplyChain);
     }
 
+    // Per-good reach network: every route carrying the selected good + a ring on
+    // each hub it reaches.
+    if (this.reachChains.length > 0) {
+      this.renderReachNetwork(ctx);
+    }
+
     if (this.visibility.settlements && this.settlements.length > 0) {
       for (const s of this.settlements) {
         const radius = SETTLEMENT_SIZES[s.size] || 1;
@@ -342,8 +373,15 @@ export class OverlayManager {
         ctx.lineWidth = 0.3;
         ctx.stroke();
         ctx.globalAlpha = 1;
-        // City names intentionally not drawn — ranked dots only (size = rank).
       }
+    }
+
+    // Name labels (opt-in overlays). Drawn last so they sit on top of markers.
+    if (this.visibility.settlementNames && this.settlements.length > 0) {
+      this.renderSettlementNames(ctx);
+    }
+    if (this.visibility.hubNames && this.politicalCenters.length > 0) {
+      this.renderHubNames(ctx);
     }
   }
 
@@ -670,37 +708,99 @@ export class OverlayManager {
     ctx.globalAlpha = 1;
   }
 
-  /** A trade hub: a small marker dot plus a row of power-tier stars above it
-   *  (1..5 — major hubs like Venice/Genoa reach 5). No big influence disc. */
+  /** Trade-region territories: each hub's hinterland as a translucent square
+   *  cell-mask in a per-hub hue, with the hub name at the centroid. Mirrors the
+   *  goods overlay so the user sees each region's area. */
+  private renderEconRegions(ctx: CanvasRenderingContext2D) {
+    for (const r of this.econRegions) {
+      if (r.cells.length === 0) continue;
+      const hue = (r.hub * 47) % 360; // spread hub hues
+      ctx.fillStyle = `hsl(${hue}, 55%, 55%)`;
+      ctx.globalAlpha = 0.22;
+      for (const [cx, cy] of r.cells) ctx.fillRect(cx, cy, r.cell_size, r.cell_size);
+      // Boundary outline (only edges whose neighbour is outside the set).
+      const edges = this.maskEdges(r.cells, r.cell_size);
+      ctx.globalAlpha = 0.7;
+      ctx.strokeStyle = `hsl(${hue}, 70%, 72%)`;
+      ctx.lineWidth = Math.max(0.4, 1.0 / Math.sqrt(this.currentScale));
+      ctx.beginPath();
+      for (let i = 0; i < edges.length; i += 4) {
+        ctx.moveTo(edges[i], edges[i + 1]);
+        ctx.lineTo(edges[i + 2], edges[i + 3]);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** A trade hub: a blue circle. Large hubs (top power tier, ≥4 of 5) get a white
+   *  square inside to mark them as the great entrepôts. No stars, no disc. The
+   *  hub's name is drawn separately when the "Hub names" overlay is on. */
   private renderPoliticalCenter(ctx: CanvasRenderingContext2D, c: PoliticalCenter) {
     const x = c.x + 0.5;
     const y = c.y + 0.5;
-    const r = Math.max(0.9, 2.4 / Math.sqrt(this.currentScale));
+    const stars = Math.max(0, Math.min(5, Math.round(c.stars)));
+    const large = stars >= 4;
+    // Larger marker for the great hubs so they read at a glance.
+    const r = Math.max(1.0, (large ? 3.4 : 2.2) / Math.sqrt(this.currentScale));
 
-    // Hub marker dot.
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fillStyle = POLITICAL_COLOR;
+    ctx.fillStyle = HUB_BLUE;
     ctx.globalAlpha = 0.95;
     ctx.fill();
-    ctx.lineWidth = Math.max(0.3, 0.8 / Math.sqrt(this.currentScale));
-    ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    ctx.lineWidth = Math.max(0.3, 0.9 / Math.sqrt(this.currentScale));
+    ctx.strokeStyle = "rgba(8,20,40,0.85)";
     ctx.stroke();
 
-    // Power stars above the dot.
-    const stars = Math.max(0, Math.min(5, Math.round(c.stars)));
-    if (stars > 0) {
-      const fs = Math.max(5, 11 / this.currentScale);
-      ctx.font = `${fs}px sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "bottom";
-      ctx.fillStyle = STAR_COLOR;
+    // Great hubs: a white square inscribed in the circle (Venice/Malacca tier).
+    if (large) {
+      const s = r * 0.92; // square side spanning most of the disc
+      ctx.fillStyle = "#ffffff";
       ctx.globalAlpha = 1;
-      ctx.fillText("★".repeat(stars), x, y - r - fs * 0.1);
-      ctx.textAlign = "start";
-      ctx.textBaseline = "alphabetic";
+      ctx.fillRect(x - s / 2, y - s / 2, s, s);
     }
     ctx.globalAlpha = 1;
+  }
+
+  /** Hub-name labels (drawn when the "hubNames" overlay is on). Kept separate
+   *  from the markers so toggling names doesn't change the dots. */
+  private renderHubNames(ctx: CanvasRenderingContext2D) {
+    const fs = Math.max(5, 10 / this.currentScale);
+    ctx.font = `${fs}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.lineWidth = Math.max(0.6, 2 / this.currentScale);
+    for (const c of this.politicalCenters) {
+      if (!c.name) continue;
+      const x = c.x + 0.5;
+      const y = c.y + 0.5 - Math.max(1.4, 3.6 / Math.sqrt(this.currentScale));
+      ctx.strokeStyle = "rgba(0,0,0,0.8)";
+      ctx.strokeText(c.name, x, y);
+      ctx.fillStyle = "#dCEBFF";
+      ctx.fillText(c.name, x, y);
+    }
+    ctx.textAlign = "start";
+    ctx.textBaseline = "alphabetic";
+  }
+
+  /** Settlement-name labels (drawn when the "settlementNames" overlay is on). */
+  private renderSettlementNames(ctx: CanvasRenderingContext2D) {
+    const fs = Math.max(4, 8 / this.currentScale);
+    ctx.font = `${fs}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.lineWidth = Math.max(0.5, 1.6 / this.currentScale);
+    for (const s of this.settlements) {
+      if (!s.name) continue;
+      const radius = SETTLEMENT_SIZES[s.size] || 1;
+      ctx.strokeStyle = "rgba(0,0,0,0.75)";
+      ctx.strokeText(s.name, s.x + 0.5, s.y + 0.5 - radius - 0.6);
+      ctx.fillStyle = "#e8e8e0";
+      ctx.fillText(s.name, s.x + 0.5, s.y + 0.5 - radius - 0.6);
+    }
+    ctx.textAlign = "start";
+    ctx.textBaseline = "alphabetic";
   }
 
   /** A strategic chokepoint: a pulsing ring + label at the gateway edge. */
@@ -787,6 +887,39 @@ export class OverlayManager {
     ctx.globalAlpha = 1;
   }
 
+  /** Per-good reach: draw every route carrying the selected good (gold polylines,
+   *  wrap-seam aware) and ring each hub it reaches. */
+  private renderReachNetwork(ctx: CanvasRenderingContext2D) {
+    const half = (this.worldW || 1e9) / 2;
+    const inv = 1 / Math.sqrt(this.currentScale);
+    ctx.strokeStyle = "rgba(255,210,90,0.85)";
+    ctx.lineWidth = Math.max(0.6, 1.8 * inv);
+    ctx.lineCap = "round";
+    for (const ch of this.reachChains) {
+      const pts = ch.points;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i], b = pts[i + 1];
+        if (this.worldW && Math.abs(a[0] - b[0]) > half) continue; // seam
+        ctx.beginPath();
+        ctx.moveTo(a[0] + 0.5, a[1] + 0.5);
+        ctx.lineTo(b[0] + 0.5, b[1] + 0.5);
+        ctx.stroke();
+      }
+    }
+    ctx.lineCap = "butt";
+    // Ring every hub the good reaches.
+    const r = Math.max(1.2, 3.2 * inv);
+    ctx.lineWidth = Math.max(0.5, 1.4 * inv);
+    ctx.strokeStyle = "rgba(255,230,150,0.95)";
+    ctx.fillStyle = "rgba(255,210,90,0.25)";
+    for (const [hx, hy] of this.reachHubs) {
+      ctx.beginPath();
+      ctx.arc(hx + 0.5, hy + 0.5, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
   /** Small arrow for wind overlay */
   private renderArrow(ctx: CanvasRenderingContext2D, x: number, y: number, vx: number, vy: number, color: string, alpha: number) {
     const mag = Math.sqrt(vx * vx + vy * vy);
@@ -844,6 +977,9 @@ export class OverlayManager {
     this.tradeTrunks = [];
     this.politicalCenters = [];
     this.chokepoints = [];
+    this.econRegions = [];
+    this.reachChains = [];
+    this.reachHubs = [];
     this.supplyChain = null;
     this.latLinesData = null;
   }

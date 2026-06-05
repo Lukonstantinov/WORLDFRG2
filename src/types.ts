@@ -7,6 +7,8 @@ export interface WorldMeta {
   equator_offset: number;
   /** Latitude expansion factor (1 = default; >1 stretches bands, cropping poles). */
   lat_scale: number;
+  /** Line-spacing ratio (gap 30→60 ÷ gap 0→30); shared with the simulation. */
+  lat_ratio: number;
 }
 
 export interface TileResponse {
@@ -180,10 +182,17 @@ export interface EconChokepoint {
   share: number;
   name: string;
 }
+export interface EconRegion {
+  hub: number;
+  name: string;
+  cells: [number, number][]; // coarse-cell top-left world coords (square territory)
+  cell_size: number;
+}
 export interface EconomySnapshot {
   hubs: EconHub[];
   chains: EconChain[];
   chokepoints: EconChokepoint[];
+  regions: EconRegion[];
   goods: string[];
 }
 
@@ -216,6 +225,7 @@ export interface PoliticalCenter {
   stars: number;      // power tier 1..5 — major hubs get 5 (Venice/Genoa)
   population: number;
   monopolies: string[];
+  name: string;       // antique hub name (shown when the Hub-names overlay is on)
 }
 
 export interface TradeRegion {

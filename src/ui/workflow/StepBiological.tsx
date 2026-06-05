@@ -21,7 +21,6 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
   const setLayer = useUIStore((s) => s.setLayer);
   const stepCompleted = useUIStore((s) => s.stepCompleted);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
-  const setShowTradeMatrix = useUIStore((s) => s.setShowTradeMatrix);
   const bioParams = useUIStore((s) => s.bioParams);
   const setBioParams = useUIStore((s) => s.setBioParams);
   const rivers = useWorldStore((s) => s.rivers);
@@ -201,16 +200,11 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
       <button onClick={openEditor}
         style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>{"\u{1F4DD}"} Edit Goods Library…</button>
 
-      <button onClick={() => setShowTradeMatrix(true)} disabled={!stepCompleted[8]}
-        style={{ ...genBtn, marginTop: 2 }}>
-        Open Trade Matrix
-      </button>
-
       <div style={{ color: "#405060", fontSize: 10, marginTop: 2 }}>
         Shark waters: warm, shallow, frequented coasts (bull/tiger-shark habitat).
         Trade goods: {GOOD_DEFS.length} climate/terrain belts, each a toggle in the
-        Toolbar &rsaquo; Trade Goods. Trade matrix groups settlements into regions
-        and matches each good&rsquo;s surplus to demand as flows.
+        Toolbar &rsaquo; Trade Goods. The Trade Matrix &amp; economy now live in the
+        Economy step (10).
       </div>
     </div>
   );

@@ -238,6 +238,7 @@ fn gyre_vector(
     grid_h: u32,
     equator_offset: f32,
     lat_scale: f32,
+    lat_ratio: f32,
     circumpolar_active: bool,
     circumpolar_row: u32,
 ) -> (f32, f32) {
@@ -245,7 +246,7 @@ fn gyre_vector(
         return (SPEED_ACC, 0.0);
     }
 
-    let lat = super::world_buffer::lat_from_y(y as f32, grid_h as f32, equator_offset, lat_scale);
+    let lat = super::world_buffer::lat_from_y(y as f32, grid_h as f32, equator_offset, lat_scale, lat_ratio);
     let abs_lat = lat.abs();
     let nh = lat >= 0.0;
 
@@ -431,7 +432,7 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
 
             let (gvx, gvy) = gyre_vector(
                 x, y, dist_w[i], dist_e[i], dist_n[i], dist_s[i],
-                h, buf.equator_offset, buf.lat_scale,
+                h, buf.equator_offset, buf.lat_scale, buf.lat_ratio,
                 circumpolar_active, circumpolar_row,
             );
 

@@ -56,7 +56,7 @@ pub fn open_world(
         .and_then(|s| s.parse().ok())
         .unwrap_or(180);
 
-    let (equator_offset, lat_scale) =
+    let (equator_offset, lat_scale, lat_ratio) =
         crate::commands::world_commands::read_lat_config(&conn);
 
     Ok(crate::commands::world_commands::WorldMeta {
@@ -66,6 +66,7 @@ pub fn open_world(
         tile_size: 128,
         equator_offset,
         lat_scale,
+        lat_ratio,
     })
 }
 
