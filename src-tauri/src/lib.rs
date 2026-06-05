@@ -58,6 +58,7 @@ pub fn run() {
             sim_commands::sim_invert_terrain,
             sim_commands::sim_generate_terrain,
             sim_commands::sim_generate_terrain_from_template,
+            sim_commands::sim_generate_terrain_ridged,
             sim_commands::sim_run_all_from_terrain,
             sim_commands::sim_ocean_atmosphere,
             sim_commands::sim_classify_climate,

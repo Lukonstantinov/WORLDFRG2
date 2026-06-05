@@ -131,6 +131,20 @@ export async function simGenerateTerrainFromTemplate(
   });
 }
 
+/** Alternative elevation model: plate-free, world-size-aware ridged cordillera
+ *  (mountain count scales with the map) + erosion. Keeps the existing landmass. */
+export async function simGenerateTerrainRidged(
+  seed: number,
+  mountainDensity: number,
+  mountainHeight: number,
+  mountainSpread: number,
+  noiseRoughness: number,
+): Promise<[number, number][]> {
+  return invoke("sim_generate_terrain_ridged", {
+    seed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness,
+  });
+}
+
 export async function simRunAll(seed: number, plateCount: number): Promise<import("../types").SimRunAllResult> {
   return invoke("sim_run_all", { seed, plateCount });
 }

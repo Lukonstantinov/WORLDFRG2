@@ -100,6 +100,7 @@ pub struct WorldBuffer {
     pub shipworm_risk: Vec<u8>,    // sea: 0..255 shipworm hull-hazard
     pub storm_base: Vec<u8>,       // sea: 0..255 annual storm/cyclone potential
     pub reef_risk: Vec<u8>,        // sea: 0..255 reef/shoal wreck hazard
+    pub disease_risk: Vec<u8>,     // land: 0..255 malaria/fever risk
 }
 
 impl WorldBuffer {
@@ -164,6 +165,7 @@ impl WorldBuffer {
             shipworm_risk: vec![0; total],
             storm_base: vec![0; total],
             reef_risk: vec![0; total],
+            disease_risk: vec![0; total],
         };
 
         // Fetch every tile's compressed blob serially (cheap memcpy under the
@@ -235,6 +237,7 @@ impl WorldBuffer {
                         buf.shipworm_risk[wi] = tile.shipworm_risk[ti];
                         buf.storm_base[wi] = tile.storm_base[ti];
                         buf.reef_risk[wi] = tile.reef_risk[ti];
+                        buf.disease_risk[wi] = tile.disease_risk[ti];
                     }
                 }
             }
@@ -308,6 +311,7 @@ impl WorldBuffer {
                         tile.shipworm_risk[ti] = self.shipworm_risk[wi];
                         tile.storm_base[ti] = self.storm_base[wi];
                         tile.reef_risk[ti] = self.reef_risk[wi];
+                        tile.disease_risk[ti] = self.disease_risk[wi];
                     }
                 }
 

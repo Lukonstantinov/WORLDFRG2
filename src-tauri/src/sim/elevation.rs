@@ -649,6 +649,136 @@ pub fn generate_elevation_from_terrain(
     }
 }
 
+/// Plate-free, WORLD-SIZE-AWARE elevation model. Unlike
+/// `generate_elevation_from_terrain` (whose feature size scales with the map, so
+/// big worlds get only a few giant ranges and look best with the flat preset),
+/// this model uses ABSOLUTE feature wavelengths measured in cells — so the number
+/// of mountain ranges grows with the map and a world-size map gets many dispersed
+/// ridged cordillera. Ranges are concentrated into plausible orogenic BELTS by a
+/// low-frequency mask (no plates needed), then carved by the same hydraulic +
+/// thermal erosion and matched to a realistic hypsometric curve.
+pub fn generate_elevation_ridged(
+    buf: &mut WorldBuffer,
+    seed: u64,
+    mountain_density: f32,
+    mountain_height: f32,
+    mountain_spread: f32,
+    noise_roughness: f32,
+) {
+    let w = buf.width;
+    let h = buf.height;
+    let n = buf.total();
+    let density = mountain_density.clamp(0.0, 1.0);
+    let height = mountain_height.clamp(0.0, 1.0);
+    let spread = mountain_spread.clamp(0.0, 1.0);
+    let roughness = noise_roughness.clamp(0.0, 1.0);
+    let terrain = buf.terrain.clone();
+
+    // Absolute feature wavelengths (in cells) → feature COUNT scales with map size.
+    let f_base = 1.0 / 760.0;                       // broad continental swells
+    let f_belt = 1.0 / 540.0;                       // orogenic-belt spacing
+    let f_range = 1.0 / (120.0 + spread * 230.0);   // ridge wavelength (narrow↔broad)
+    let f_hill = 1.0 / 52.0;                         // fine hills
+    let warp = 1.4 + roughness * 1.4;
+    let ridge_amp = 0.35 + density * 0.55;
+    let hill_amp = 0.05 + roughness * 0.12;
+
+    // ── Distance-from-coast (full flood) for the coastal falloff below ──
+    let mut coast_dist = vec![0u16; n];
+    {
+        let mut visited = vec![false; n];
+        let mut queue = VecDeque::new();
+        for i in 0..n {
+            if terrain[i] != 1 { visited[i] = true; queue.push_back(i); }
+        }
+        while let Some(ci) = queue.pop_front() {
+            let cx = (ci % w as usize) as i32;
+            let cy = (ci / w as usize) as i32;
+            let d = coast_dist[ci];
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let nx = ((cx + dx) % w as i32 + w as i32) % w as i32;
+                let ny = cy + dy;
+                if ny < 0 || ny >= h as i32 { continue; }
+                let ni = (ny as u32 * w + nx as u32) as usize;
+                if visited[ni] { continue; }
+                visited[ni] = true;
+                coast_dist[ni] = d.saturating_add(1);
+                queue.push_back(ni);
+            }
+        }
+    }
+
+    // ── Compose: continental base + belt-masked ridged ranges + fine hills ──
+    let mut elevation = vec![0.0f32; n];
+    for y in 0..h {
+        for x in 0..w {
+            let idx = (y * w + x) as usize;
+            if terrain[idx] != 1 { continue; }
+            let ax = x as f32;
+            let ay = y as f32;
+            let base = fbm_noise(ax * f_base + 3.1, ay * f_base + 7.7, seed, 5, 2.0, 0.5);
+            // Orogenic belt mask: where mountain ranges concentrate.
+            let belt_raw = fbm_noise(ax * f_belt + 11.0, ay * f_belt + 4.0, seed.wrapping_add(0xB317), 4, 2.0, 0.5);
+            let mut belt = ((belt_raw - 0.46) / 0.26).clamp(0.0, 1.0);
+            belt = belt * belt * (3.0 - 2.0 * belt); // smoothstep
+            // Ridged ranges, domain-warped into organic curving chains.
+            let (rx, ry) = warped_coords(ax * f_range, ay * f_range, seed.wrapping_add(0x9E37), warp);
+            let ridge = ridged_multifractal(rx, ry, seed.wrapping_add(0x48271), 7, 2.1, 2.0);
+            let hill = fbm_noise(ax * f_hill, ay * f_hill, seed.wrapping_add(0xFEED), 3, 2.0, 0.45);
+            let e = base * 0.5 + ridge * belt * ridge_amp + hill * hill_amp;
+            elevation[idx] = e.clamp(0.01, 1.5);
+        }
+    }
+
+    // ── Coastal falloff so shores read as plains, not cliffs ──
+    const COAST_DIST: u16 = 5;
+    for i in 0..n {
+        if terrain[i] != 1 { continue; }
+        if coast_dist[i] < COAST_DIST {
+            let factor = 0.15 + 0.85 * (coast_dist[i] as f32 / COAST_DIST as f32);
+            elevation[i] *= factor;
+        }
+    }
+
+    // ── Erosion (hydraulic droplets + thermal slump) ──
+    let erosion_scale = 0.5 + roughness * 0.5;
+    let hydro_iterations = ((n as f32 * 0.015 * erosion_scale) as u32).clamp(15_000, 100_000);
+    hydraulic_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations);
+    let thermal_passes = 3 + (roughness * 2.0) as u32;
+    thermal_erosion(&mut elevation, &terrain, w, h, thermal_passes);
+
+    // ── Normalize + hypsometric redistribution (realistic altitude spread) ──
+    let mut max_h = 0.0f32;
+    for i in 0..n {
+        if terrain[i] == 1 && elevation[i] > max_h { max_h = elevation[i]; }
+    }
+    if max_h > 0.0 {
+        for i in 0..n {
+            if terrain[i] == 1 { elevation[i] /= max_h; }
+        }
+        let exponent = 2.0 - height;
+        for i in 0..n {
+            if terrain[i] == 1 { elevation[i] = elevation[i].powf(exponent); }
+        }
+        let target_cap = 0.35 + height * 0.60;
+        let mut sorted: Vec<f32> = (0..n).filter(|&i| terrain[i] == 1).map(|i| elevation[i]).collect();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        if !sorted.is_empty() {
+            let p998 = sorted[(sorted.len() as f32 * 0.998) as usize].max(0.01);
+            let cap_scale = target_cap / p998;
+            for i in 0..n {
+                if terrain[i] == 1 { elevation[i] = (elevation[i] * cap_scale).clamp(0.01, 1.0); }
+            }
+        }
+        let target = build_target_histogram(height, density);
+        redistribute_elevation(&mut elevation, &terrain, n, &target);
+    }
+
+    for i in 0..n {
+        buf.elevation[i] = if terrain[i] == 1 { elevation[i] } else { 0.0 };
+    }
+}
+
 /// Scale every land cell's elevation by `scale` (0.5 = halve heights, 1.5 =
 /// raise 50%). If `lock_above` < 1.0, any cell at or above that normalized
 /// height keeps its value, so the highest peaks stay fixed while the rest of the

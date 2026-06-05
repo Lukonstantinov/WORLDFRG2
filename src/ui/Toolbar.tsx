@@ -52,6 +52,7 @@ const layerGroups: { group: string; layers: { id: ActiveLayer; label: string }[]
       { id: "soil", label: "Soil" },
       { id: "fertility", label: "Fertility" },
       { id: "habitability", label: "Habitability" },
+      { id: "disease", label: "Disease (Malaria)" },
     ],
   },
 ];

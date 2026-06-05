@@ -182,6 +182,7 @@ export function InfoPanel() {
           {section("Soil & Resources")}
           {row("Soil", SOIL_NAMES[info.soil_type] || `Type ${info.soil_type}`)}
           {bar("Fertility", info.fertility)}
+          {info.disease_risk > 0.01 && bar("Disease (Malaria)", info.disease_risk)}
 
           {info.goods.length > 0 && section("Trade Goods")}
           {info.goods.map((g) => row(goodLabel(g.name), `${Math.round((g.amount / 255) * 100)}%`))}

@@ -45,6 +45,7 @@ pub struct CellInfo {
     pub shipworm_risk: f32, // 0..1
     pub storm_risk: f32,  // 0..1 (annual storm potential)
     pub reef_risk: f32,   // 0..1
+    pub disease_risk: f32, // 0..1 (malaria/fever, land)
     pub goods: Vec<GoodAmount>,
 }
 
@@ -114,6 +115,7 @@ pub fn get_cell_info(
         shipworm_risk: tile.shipworm_risk[idx] as f32 / 255.0,
         storm_risk: tile.storm_base[idx] as f32 / 255.0,
         reef_risk: tile.reef_risk[idx] as f32 / 255.0,
+        disease_risk: tile.disease_risk[idx] as f32 / 255.0,
         goods: {
             let specs = crate::commands::goods_commands::load_world_goods(&conn);
             (0..tile.goods.len())
@@ -656,7 +658,8 @@ fn build_coarse_cost(
                     21 => 12.0,             // ET tundra
                     22 => 26.0,             // EF ice cap
                     16 | 17 | 29 | 30 => 5.0,
-                    1 => 5.0,               // AF rainforest
+                    1 => 6.0,               // AF rainforest (+ tsetse: pack animals die)
+                    2 | 3 | 23 => 4.0,      // Am/Aw/As savanna-woodland tsetse belt: caravans shun it
                     32 => 7.0,              // H highland
                     _ => 0.0,
                 };
@@ -2854,8 +2857,10 @@ pub fn compute_economy(
         for g in 0..gc {
             let mut d = size * desire[g].max(BASKET_FLOOR);
             if is_luxury[g] {
-                let prod_share = (prod[hh][g] / good_max[g]).clamp(0.0, 1.0);
-                let homeland_discount = 1.0 - 0.6 * prod_share;
+                // `prod` is already rescaled to 0..abundance (max producer ≈ the
+                // good's abundance), so use it directly as the local-share input —
+                // identical to compute_trade_matrix's homeland discount.
+                let homeland_discount = 1.0 - 0.6 * prod[hh][g].clamp(0.0, 1.0);
                 let wealth_taste = 0.5 + 0.5 * (income[hh] / inc_max);
                 d *= reach_factor * lux_mult * homeland_discount * wealth_taste;
             }

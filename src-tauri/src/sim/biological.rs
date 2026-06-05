@@ -80,9 +80,9 @@ pub const GOOD_NAMES: [&str; GOODS_COUNT] = [
 /// These mirror the frontend `GOOD_DEFS` and seed the editable `GoodSpec` library
 /// (see `sim/goods_spec.rs`). Order matches `GOOD_NAMES`.
 pub const GOOD_LABEL: [&str; GOODS_COUNT] = [
-    "Silk", "Wine", "Olive Oil", "Sugar", "Frankincense", "Stockfish & Salt-cod",
-    "Spices", "Tea", "Coffee", "Furs", "Timber", "Amber", "Salt", "Dyes", "Incense",
-    "Pearls", "Whaling Grounds", "Wheat", "Iron / Ore", "Cotton", "Gemstones",
+    "Silk", "Wine", "Olive Oil", "Sugar Cane", "Frankincense", "Stockfish & Salt-cod",
+    "Spices", "Tea", "Coffee", "Furs", "Timber", "Amber", "Rock Salt", "Dyes", "Incense",
+    "Pearls", "Whaling Grounds", "Grain", "Iron / Ore", "Cotton", "Gemstones",
     "Tropical Hardwoods", "Horses", "Fleece Wool", "Highland Wool", "Ivory", "Cacao",
     "Copper", "Tin", "Gold",
     "Cloves", "Pepper", "Paper",
@@ -431,6 +431,70 @@ pub fn compute_shipworm_risk(buf: &mut WorldBuffer, rivers: &[River]) {
     }
 }
 
+// ── Disease (malaria / fever) — land hazard ─────────────────────────────────
+
+/// Per-LAND-cell malaria/fever risk: warm, wet, low-lying ground near standing
+/// water (river floodplains, coastal lagoons, marshy lowlands) breeds the
+/// mosquito vector. Highest in wet tropics/subtropics, ~0 in deserts, cool
+/// highlands and cold latitudes. Stored u8 0..255 — suppresses settlement and is
+/// rendered as the Disease overlay. Depends only on climate/relief/water, so it
+/// is computed in the settlement phase (before habitability needs it).
+pub fn compute_disease_risk(buf: &mut WorldBuffer, rivers: &[River]) {
+    let w = buf.width;
+    let n = buf.total();
+
+    // Bounded BFS distance from standing/fresh water: river cells + low coastal
+    // ground (lagoon / mangrove). Closer water = stronger breeding habitat.
+    let max_d = 6u32;
+    let mut wd = vec![u32::MAX; n];
+    let mut queue = VecDeque::new();
+    for river in rivers {
+        for &(rx, ry) in &river.points {
+            let i = buf.idx(rx, ry);
+            if wd[i] != 0 { wd[i] = 0; queue.push_back((rx, ry)); }
+        }
+    }
+    for i in 0..n {
+        if buf.terrain[i] == 1 && buf.distance_to_ocean[i] < 0.02 && buf.elevation[i] < 0.10 && wd[i] != 0 {
+            wd[i] = 0;
+            queue.push_back(((i as u32) % w, (i as u32) / w));
+        }
+    }
+    while let Some((x, y)) = queue.pop_front() {
+        let d = wd[buf.idx(x, y)];
+        if d >= max_d { continue; }
+        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+            let nx = buf.wrap_x(x as i32 + dx);
+            let ny = buf.clamp_y(y as i32 + dy);
+            let ni = buf.idx(nx, ny);
+            if wd[ni] > d + 1 { wd[ni] = d + 1; queue.push_back((nx, ny)); }
+        }
+    }
+
+    for i in 0..n {
+        if buf.terrain[i] != 1 { buf.disease_risk[i] = 0; continue; }
+        let t = buf.temperature[i];
+        // Warm vector window: from ~15°C, fading out in extreme heat/aridity.
+        let warmth = smoothstep(15.0, 22.0, t) * (1.0 - smoothstep(33.0, 40.0, t));
+        // Standing water needs moisture; dry land breeds little.
+        let wet = band(buf.precipitation[i], 700.0, 3000.0, 500.0);
+        // Malaria fades with altitude (cooler, fewer pools).
+        let lowland = 1.0 - smoothstep(0.12, 0.40, buf.elevation[i]);
+        // Proximity to standing / fresh water.
+        let water = if wd[i] == u32::MAX { 0.0 } else { 1.0 - wd[i] as f32 / max_d as f32 };
+        // Köppen reinforcement: wet tropics & humid subtropics are worst.
+        let clim = match buf.koppen[i] {
+            1 | 2 => 1.0,        // Af / Am rainforest & monsoon
+            3 | 23 => 0.85,      // Aw / As savanna (seasonal pools)
+            11 | 24 => 0.75,     // Cfa / Cwa humid subtropical
+            8 | 9 | 12 => 0.35,  // Mediterranean / oceanic (marsh only)
+            _ => 0.15,
+        };
+        let risk = (warmth * wet * lowland * (0.35 + 0.65 * water) * clim).clamp(0.0, 1.0);
+        buf.disease_risk[i] = q(risk);
+    }
+}
+
 // ── Storms / cyclones (open ocean) ───────────────────────────────────────────
 
 /// Compute the **annual** storm/cyclone potential of every sea cell. Unlike the
@@ -571,6 +635,10 @@ pub fn compute_trade_goods(
     // goods, drop trailing columns that no longer exist).
     buf.goods.resize(specs.len().max(1), vec![0u8; n]);
 
+    // Seed cells of the homelands placed so far, so each new Local good is pushed
+    // to a DIFFERENT part of the continent (plausible spread, not all clustered).
+    let mut placed_seeds: Vec<usize> = Vec::new();
+
     for slot in 0..specs.len() {
         let spec = match specs.get(slot) {
             Some(s) if s.enabled => s,
@@ -613,7 +681,10 @@ pub fn compute_trade_goods(
                         }
                     }
                 }
-                let thresh = if suitability { 0.30 } else { 1e-4 };
+                // Harsh rule for extreme-rare deposits: demand a stronger candidate
+                // (a stricter homeland) so prized stones/dyes stay scarce.
+                let rare_bump = if spec.rarity > 0.78 { (spec.rarity - 0.78) * 0.8 } else { 0.0 };
+                let thresh = if suitability { (0.30 + rare_bump).min(0.7) } else { 1e-4 };
                 buf.goods[slot] = place_deposits(buf, seed, count, salt, &cand, thresh);
             }
             _ => {
@@ -638,7 +709,10 @@ pub fn compute_trade_goods(
                     Some(idx) if spec.scoring.is_none() => (idx as u64).wrapping_mul(SEED_SALT_K),
                     _ => id_salt(&spec.id),
                 };
-                let mut belt = localize_good(buf, &score, marine, unlimited, spec.rarity, salt, seed);
+                let (mut belt, seed_cell) =
+                    localize_good(buf, &score, marine, unlimited, spec.rarity, salt, seed, &placed_seeds);
+                // Remember a Local homeland so the next good is seeded elsewhere.
+                if !unlimited { if let Some(sc) = seed_cell { placed_seeds.push(sc); } }
                 // Extra reach: trade carries a good a bit past its core homeland.
                 dilate_belt(buf, &mut belt, marine, 2, 0.72);
                 buf.goods[slot] = belt;
@@ -980,7 +1054,8 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
 /// thresholds, and `salt` seeds the deterministic homeland pick.
 fn localize_good(
     buf: &WorldBuffer, score: &[f32], marine: bool, unlimited: bool, rarity: f32, salt: u64, seed: u64,
-) -> Vec<u8> {
+    existing: &[usize],
+) -> (Vec<u8>, Option<usize>) {
     let w = buf.width;
     let h = buf.height;
     let n = buf.total();
@@ -991,6 +1066,12 @@ fn localize_good(
     let r = (rarity - 0.5).clamp(-0.5, 0.5);
     let seed_thresh = (0.45 + r * 0.30).clamp(0.20, 0.75);
     let spread_thresh = (0.22 + r * 0.20).clamp(0.10, 0.50);
+    // Harsh rule for extreme-rare goods: hard-cap the homeland to a small patch, so
+    // a prized luxury (saffron, Tyrian purple, jade…) stays genuinely scarce no
+    // matter how much suitable land exists.
+    let cap: usize = if rarity > 0.78 {
+        (((1.0 - rarity).max(0.05)) * 1800.0 + 30.0) as usize
+    } else { usize::MAX };
 
     let passable = |i: usize| -> bool {
         if marine {
@@ -1007,11 +1088,31 @@ fn localize_good(
                 out[i] = q(score[i]);
             }
         }
-        return out;
+        return (out, None);
     }
 
+    // Dispersion: push each good's homeland AWAY from the homelands already placed
+    // this run, so the world's goods spread plausibly across different parts of a
+    // continent instead of all piling into the single most-suitable region.
+    let disp_r = (w as f32 * 0.16).max(8.0);
+    let wrapdx = |a: i32, b: i32| -> i32 { let mut d = (a - b).abs(); if d > w as i32 / 2 { d = w as i32 - d; } d };
+    let dispersion = |i: usize| -> f32 {
+        if existing.is_empty() { return 1.0; }
+        let cx = (i as u32 % w) as i32;
+        let cy = (i as u32 / w) as i32;
+        let mut nd = f32::INFINITY;
+        for &e in existing {
+            let ex = (e as u32 % w) as i32;
+            let ey = (e as u32 / w) as i32;
+            let dx = wrapdx(cx, ex) as f32;
+            let dy = (cy - ey) as f32;
+            nd = nd.min((dx * dx + dy * dy).sqrt());
+        }
+        (nd / disp_r).clamp(0.15, 1.0) // ~0.15 right on a rival homeland → 1.0 far away
+    };
+
     // ── SEEDED goods: one contiguous homeland ──
-    // Deterministic weighted-random seed selection.
+    // Deterministic weighted-random seed selection (× dispersion penalty).
     let gs = seed ^ salt;
     let mut best_seed = usize::MAX;
     let mut best_key = -1.0f32;
@@ -1022,7 +1123,7 @@ fn localize_good(
         let s = score[i];
         if s > fallback_score { fallback_score = s; fallback = i; }
         if s >= seed_thresh {
-            let key = s * hash01(gs ^ (i as u64).wrapping_mul(0x100000001B3));
+            let key = s * dispersion(i) * hash01(gs ^ (i as u64).wrapping_mul(0x100000001B3));
             if key > best_key { best_key = key; best_seed = i; }
         }
     }
@@ -1031,22 +1132,23 @@ fn localize_good(
     } else if fallback != usize::MAX {
         fallback
     } else {
-        return out; // good's climate doesn't exist in this world
+        return (out, None); // good's climate doesn't exist in this world
     };
 
     // Island-jump: a seeded belt may hop a narrow sea (or, for marine goods, a
     // narrow land bridge) up to ~4% of the map width, so thin straits / island
-    // chains don't chop one homeland into several disconnected patches. We probe
-    // the 4 cardinal directions, skipping up to `jump` impassable cells to land
-    // on the next passable, in-envelope cell.
+    // chains don't chop one homeland into several disconnected patches.
     let jump = ((w as f32) * 0.04).round().clamp(2.0, 80.0) as i32;
 
     let mut visited = vec![false; n];
     let mut queue = VecDeque::new();
     visited[seed_cell] = true;
     queue.push_back(seed_cell);
+    let mut placed = 0usize;
     while let Some(ci) = queue.pop_front() {
         out[ci] = q(score[ci]);
+        placed += 1;
+        if placed >= cap { break; } // extreme-rare homeland stays tiny
         let cx = (ci as u32 % w) as i32;
         let cy = (ci as u32 / w) as i32;
         for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
@@ -1065,7 +1167,7 @@ fn localize_good(
             }
         }
     }
-    out
+    (out, Some(seed_cell))
 }
 
 /// Place a good as scattered **sporadic deposits**: `count` points seeded on the

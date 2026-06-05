@@ -216,7 +216,8 @@ pub fn sim_run_all(
     fertility::compute_fisheries(&mut buf, &extracted_rivers);
 
     // Phase 7: Settlements
-    let habitability = settlements::compute_habitability(&buf, &extracted_rivers);
+    biological::compute_disease_risk(&mut buf, &extracted_rivers);
+    let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
     let generated_settlements = settlements::generate_settlements(&buf, &habitability, seed);
     settlements::write_habitability(&mut buf, &habitability);
 
@@ -259,6 +260,25 @@ pub fn sim_generate_terrain_from_template(
     // Shelf layer looked empty). This makes per-step match Run-All.
     elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
     buf.save(&conn, "Generate elevation from template")
+}
+
+/// Alternative elevation model: plate-free, world-size-aware ridged cordillera
+/// (mountain count scales with the map) + erosion. Keeps the existing landmass.
+#[tauri::command]
+pub fn sim_generate_terrain_ridged(
+    seed: u64,
+    mountain_density: f32,
+    mountain_height: f32,
+    mountain_spread: f32,
+    noise_roughness: f32,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<(i32, i32)>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut buf = WorldBuffer::load(&conn)?;
+    elevation::generate_elevation_ridged(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
+    elevation::compute_sea_depth(&mut buf);
+    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    buf.save(&conn, "Generate ridged elevation")
 }
 
 /// Run full simulation pipeline while preserving existing terrain.
@@ -310,7 +330,8 @@ pub fn sim_run_all_from_terrain(
     fertility::compute_fisheries(&mut buf, &extracted_rivers);
 
     // Phase 7: Settlements
-    let habitability = settlements::compute_habitability(&buf, &extracted_rivers);
+    biological::compute_disease_risk(&mut buf, &extracted_rivers);
+    let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
     let generated_settlements = settlements::generate_settlements(&buf, &habitability, seed);
     settlements::write_habitability(&mut buf, &habitability);
 
@@ -378,7 +399,15 @@ pub fn sim_generate_settlements(
     let river_data: Vec<rivers::River> = serde_json::from_str(&rivers_json)
         .unwrap_or_default();
 
-    let habitability = settlements::compute_habitability(&buf, &river_data);
+    // Recompute lakes from the depression-filled surface (lakes are overlay data,
+    // not persisted in tiles) so lakeshore sites count in habitability.
+    let hydro = rivers::compute_hydrology(&buf);
+    let lake_max = (buf.total() / 2000).max(20);
+    let lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
+
+    // Malaria/fever (needed before habitability so disease suppresses settlement).
+    biological::compute_disease_risk(&mut buf, &river_data);
+    let habitability = settlements::compute_habitability(&buf, &river_data, &lakes);
     let result = settlements::generate_settlements(&buf, &habitability, seed);
 
     // Persist the habitability field so the Habitability heatmap layer can render.
