@@ -1,5 +1,5 @@
 use super::world_buffer::WorldBuffer;
-use super::rivers::River;
+use super::rivers::{River, Lake};
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Settlement {
@@ -14,7 +14,7 @@ pub struct Settlement {
 
 /// Compute habitability score for every land cell.
 /// score = climate(0.40) + fertility(0.20) + water(0.20) + terrain(0.10) + trade(0.10)
-pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River]) -> Vec<f32> {
+pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake]) -> Vec<f32> {
     let total = buf.total();
     let mut hab = vec![0.0f32; total];
 
@@ -30,6 +30,14 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River]) -> Vec<f32> {
         if let Some(&(mx, my)) = river.points.last() {
             let idx = buf.idx(mx, my);
             is_river_mouth[idx] = true;
+        }
+    }
+    // Lake cells — fresh inland water is a first-class settlement draw (lakeshore
+    // towns), previously computed but unused for habitability.
+    let mut is_lake_cell = vec![false; total];
+    for lake in lakes {
+        for &(lx, ly) in &lake.cells {
+            is_lake_cell[buf.idx(lx, ly)] = true;
         }
     }
 
@@ -129,20 +137,40 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River]) -> Vec<f32> {
             });
             if has_river { water_score += 0.5; }
 
-            // Coast nearby (within 3 cells)
+            // Coast nearby — a stronger draw now, so genuine PORTS form on rivers'
+            // absence (harbours, fishing towns), not only at river mouths.
             let near_coast = buf.distance_to_ocean[idx] < 0.05;
-            if near_coast { water_score += 0.3; }
+            if near_coast { water_score += 0.45; }
+
+            // Lakeshore (fresh inland water within 2 cells).
+            let has_lake = (-2i32..=2).any(|dy| {
+                (-2i32..=2).any(|dx| {
+                    let ni = buf.widx(x as i32 + dx, y as i32 + dy);
+                    is_lake_cell[ni]
+                })
+            });
+            if has_lake { water_score += 0.40; }
+
+            // Desert oasis: in arid land any reliable water (a river crossing the
+            // desert, a lake, or a fertile pocket) is precious — caravan oasis towns.
+            let arid = matches!(buf.koppen[idx], 4 | 5 | 6 | 7);
+            let oasis = arid && (has_river || has_lake || fertility_score > 0.40);
+            if oasis { water_score += 0.25; }
 
             water_score = water_score.min(1.0);
 
             // --- Terrain score (10%) ---
+            // Flat lowland is best for farming, but a commanding hill is a prized,
+            // defensible site (acropolis / hill-fort), so moderate relief gets a
+            // defensive premium instead of a pure penalty.
             let elev = buf.elevation[idx];
-            let terrain_score = if elev < 0.05 { 0.90 }
-                else if elev < 0.15 { 0.90 }
+            let farm: f32 = if elev < 0.15 { 0.90 }
                 else if elev < 0.30 { 0.70 }
                 else if elev < 0.50 { 0.40 }
                 else if elev < 0.70 { 0.15 }
                 else { 0.05 };
+            let defensive: f32 = if (0.22..0.50).contains(&elev) { 0.20 } else { 0.0 };
+            let terrain_score = (farm + defensive).min(1.0);
 
             // --- Trade score (10%) ---
             // River mouth nearby
@@ -154,9 +182,11 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River]) -> Vec<f32> {
             });
 
             let trade_score = if near_river_mouth { 1.0 }
-                else if near_coast && has_river { 0.8 }
-                else if near_coast { 0.5 }
-                else if has_river { 0.4 }
+                else if near_coast && has_river { 0.85 }
+                else if near_coast { 0.6 }   // natural harbour / port
+                else if oasis { 0.6 }        // caravan oasis on a desert route
+                else if has_lake { 0.5 }     // lake port
+                else if has_river { 0.45 }
                 else { 0.1 };
 
             // --- Final score (gated by temperature viability) ---
