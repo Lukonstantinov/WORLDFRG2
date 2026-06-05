@@ -132,6 +132,7 @@ pub fn sim_soil_fertility(
         .unwrap_or_default();
 
     soil::classify_soil(&mut buf);
+    soil::apply_volcanic_apron(&mut buf);
     soil::apply_alluvial_override(&mut buf, &river_data);
     fertility::compute_fertility(&mut buf, &river_data);
     fertility::compute_fisheries(&mut buf, &river_data);
@@ -209,6 +210,7 @@ pub fn sim_run_all(
 
     // Phase 6: Soil & fertility
     soil::classify_soil(&mut buf);
+    soil::apply_volcanic_apron(&mut buf);
     soil::apply_alluvial_override(&mut buf, &extracted_rivers);
     fertility::compute_fertility(&mut buf, &extracted_rivers);
     fertility::compute_fisheries(&mut buf, &extracted_rivers);
@@ -302,6 +304,7 @@ pub fn sim_run_all_from_terrain(
 
     // Phase 6: Soil & fertility
     soil::classify_soil(&mut buf);
+    soil::apply_volcanic_apron(&mut buf);
     soil::apply_alluvial_override(&mut buf, &extracted_rivers);
     fertility::compute_fertility(&mut buf, &extracted_rivers);
     fertility::compute_fisheries(&mut buf, &extracted_rivers);

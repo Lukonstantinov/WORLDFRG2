@@ -62,6 +62,7 @@ pub fn compute_fertility(buf: &mut WorldBuffer, rivers: &[River]) {
 
             // Soil base score
             let soil_base = match buf.soil_type[idx] {
+                SOIL_VOLCANIC_ASH => 0.97, // young ash — the richest soil of all
                 SOIL_ALLUVIAL => 0.92,
                 SOIL_ANDISOL => 0.85,
                 SOIL_MOLLISOL => 0.90,

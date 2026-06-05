@@ -103,9 +103,12 @@ fn is_windward_ocean(buf: &WorldBuffer, x: u32, y: u32) -> bool {
     let rwx = upwx.round() as i32;
     let rwy = upwy.round() as i32;
 
+    // Reach a few cells upwind: a windward coast just needs ocean to weather from,
+    // and on a coarse grid a 2-cell reach missed most genuine west coasts (this is
+    // a big reason Mediterranean climates were so rare). 4 cells is still local.
     for &(dx, dy) in &[(rwx, rwy), (rwx, 0i32)] {
         if dx == 0 && dy == 0 { continue; }
-        for s in 1..=2i32 {
+        for s in 1..=4i32 {
             let nx = buf.wrap_x(x as i32 + dx * s);
             let ny = y as i32 + dy * s;
             if ny < 0 || ny >= buf.height as i32 {
@@ -206,9 +209,12 @@ fn seasonal_split(
             // appeared. Ramp the dry-summer strength in quickly from 30° so Cs
             // covers its real ~30–45° band (Iberia, California, Chile, Cape, SW
             // Australia).
-            let med = ((abs_lat - 30.0) / 4.0).clamp(0.0, 1.0);
-            let summer = (0.55 - 0.35 * med).max(0.18);
-            let winter = (1.45 + 0.55 * med).max(0.18);
+            // Ramp the dry summer in from ~30° (was effectively ~32°) and dry it a
+            // touch harder, so the whole 30–45° windward band clears Köppen's
+            // summer<winter/3 test and reads Cs.
+            let med = ((abs_lat - 29.0) / 3.0).clamp(0.0, 1.0);
+            let summer = (0.52 - 0.36 * med).max(0.15);
+            let winter = (1.50 + 0.55 * med).max(0.18);
             return (summer, winter);
         }
 
@@ -299,9 +305,14 @@ fn classify_cell(buf: &WorldBuffer, x: u32, y: u32) -> u8 {
     let extreme_cold = t_coldest < -38.0;        // d
 
     // Highland (H): genuine high-elevation alpine climate, independent of the
-    // temperature/precip class. Treeline ≈ 0.40; reserve H for clearly alpine
-    // terrain so it doesn't swallow ordinary uplands.
-    if elevation > 0.55 { return H; }
+    // temperature/precip class. The treeline falls with latitude — tropical peaks
+    // stay forested/temperate much higher than polar ones — so use a
+    // latitude-adjusted threshold instead of a blanket 0.55. This frees temperate
+    // and Mediterranean UPLANDS (≈0.42–0.55) to read Cfb / CSb (highland-
+    // Mediterranean) instead of being swallowed by H, while tropical summits still
+    // need to be genuinely high before turning alpine.
+    let treeline = (0.62 - abs_lat * 0.0030).clamp(0.42, 0.62);
+    if elevation > treeline { return H; }
 
     // Polar (E)
     if t_warmest < 10.0 {

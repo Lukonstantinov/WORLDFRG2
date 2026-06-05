@@ -340,6 +340,8 @@ export async function computeEconomy(
   economicRegions: number,
   luxuryBias: number,
   piracy: number,
+  season: number,
+  months: number,
 ): Promise<EconomySnapshot> {
   return invoke("compute_economy", {
     settlementsJson: JSON.stringify(settlements),
@@ -350,6 +352,8 @@ export async function computeEconomy(
     economicRegions,
     luxuryBias,
     piracy,
+    season,
+    months,
   });
 }
 

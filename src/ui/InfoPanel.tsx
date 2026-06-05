@@ -46,9 +46,10 @@ const SOIL_NAMES: Record<number, string> = {
   6: "Aridisol",
   7: "Histosol",
   8: "Entisol",
-  9: "Andisol",
+  9: "Andisol (volcanic)",
   10: "Gelisol",
   11: "Alluvial",
+  12: "Volcanic ash",
 };
 
 const CURRENT_TYPE_NAMES: Record<number, string> = {
