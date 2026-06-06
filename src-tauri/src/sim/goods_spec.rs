@@ -195,6 +195,17 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             dep(0.0, 1, 4), env(vec![], Some([12.0,10.0]), None, None, Some([30.0,65.0,12.0]), 0.0, 0.0)),
         cg("jade", "Jade", "\u{1F7E2}", "#00a86b", Domain::Continental, Distribution::Deposits, 0.90, 0.55, true,
             dep(0.40, 1, 3), env(vec![], None, None, Some([0.40,1.0,0.12]), None, 0.0, 0.0)),
+        // ── Precious metals & quarried stone (high-desire deposit goods) ──
+        // Silver: a prized monetary metal, a touch commoner than gold. Hill/mountain
+        // deposits. High desire — every wealthy market wants coin metal.
+        cg("silver", "Silver", "\u{1FA99}", "#c8ccd6", Domain::Continental, Distribution::Deposits, 0.74, 0.65, true,
+            dep(0.30, 2, 1), env(vec![], None, None, Some([0.30,1.0,0.16]), None, 0.0, 0.0)),
+        // Marble: quarried building/sculpture stone of the uplands.
+        cg("marble", "Marble", "\u{1F3DB}\u{FE0F}", "#e8e6e0", Domain::Continental, Distribution::Deposits, 0.62, 0.45, false,
+            dep(0.28, 1, 1), env(vec![], None, None, Some([0.28,0.9,0.14]), None, 0.0, 0.0)),
+        // Lead / tin-grey base metal (pewter, pipes, shot): low hills.
+        cg("lead", "Lead", "\u{1F529}", "#8a8e96", Domain::Continental, Distribution::Deposits, 0.55, 0.40, false,
+            dep(0.26, 2, 1), env(vec![], None, None, Some([0.26,0.85,0.16]), None, 0.0, 0.0)),
     ]
 }
 

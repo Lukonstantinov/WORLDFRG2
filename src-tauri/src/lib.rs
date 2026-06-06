@@ -45,6 +45,8 @@ pub fn run() {
             query_commands::compute_political,
             query_commands::compute_economy,
             query_commands::get_economy,
+            query_commands::persist_overlays,
+            query_commands::get_overlays,
             query_commands::compute_settlement_development,
             query_commands::export_trade_data,
             query_commands::get_elevation_distribution,

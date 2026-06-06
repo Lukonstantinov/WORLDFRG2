@@ -218,7 +218,7 @@ pub fn sim_run_all(
     // Phase 7: Settlements
     biological::compute_disease_risk(&mut buf, &extracted_rivers);
     let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
-    let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed);
+    let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed, 0.55);
     settlements::write_habitability(&mut buf, &habitability);
 
     // Phase 8: Biological — shark + shipworm waters + trade-good belts.
@@ -332,7 +332,7 @@ pub fn sim_run_all_from_terrain(
     // Phase 7: Settlements
     biological::compute_disease_risk(&mut buf, &extracted_rivers);
     let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
-    let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed);
+    let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed, 0.55);
     settlements::write_habitability(&mut buf, &habitability);
 
     // Phase 8: Biological — shark + shipworm waters + trade-good belts.
@@ -391,6 +391,7 @@ pub fn sim_generate_shelves(
 pub fn sim_generate_settlements(
     seed: u64,
     rivers_json: String,
+    realism: Option<f32>,
     db: State<'_, WorldDb>,
 ) -> Result<SimSettlementsResult, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -408,7 +409,8 @@ pub fn sim_generate_settlements(
     // Malaria/fever (needed before habitability so disease suppresses settlement).
     biological::compute_disease_risk(&mut buf, &river_data);
     let habitability = settlements::compute_habitability(&buf, &river_data, &lakes);
-    let result = settlements::generate_settlements(&buf, &habitability, &river_data, seed);
+    let result = settlements::generate_settlements(
+        &buf, &habitability, &river_data, seed, realism.unwrap_or(0.55));
 
     // Persist the habitability field so the Habitability heatmap layer can render.
     settlements::write_habitability(&mut buf, &habitability);

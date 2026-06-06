@@ -241,6 +241,65 @@ fn monsoon_multiplier(abs_lat: f32, dist_ocean: f32, land_frac_tropical: f32) ->
     1.0 + (lat_weight * dist_weight * cont_weight)
 }
 
+/// Dedicated monsoon ADDITIVE bonus (mm/yr). The multiplicative `monsoon_multiplier`
+/// can only scale an existing base, so where the downwind-advection base is near
+/// zero (continental subtropics in the easterly trades — e.g. the Indian
+/// subcontinent) it left the land as desert. The summer monsoon instead draws a
+/// large, fresh moisture load off the warm seas onto the land, so it is modelled
+/// as an ADDITIVE term over the 5–45° coastal belt: strongest on/near the coast,
+/// reaching inland on big continents. This wets India, SE Asia, E China and the
+/// Japan / E-Asian seaboard; the dry-winter seasonal split (koppen.rs) then turns
+/// these into proper monsoon climates (Aw/Am, Cwa/Cwb, Dwa/Dwb).
+fn monsoon_bonus(abs_lat: f32, dist_ocean: f32, land_frac_tropical: f32) -> f32 {
+    if abs_lat < 5.0 || abs_lat > 45.0 { return 0.0; }
+    // Latitude weight: full across the core monsoon belt (12–28°), ramping in from
+    // 5° and fading out by 45° (so the E-Asian / Japan monsoon still reaches).
+    let lat_w = if abs_lat < 12.0 { (abs_lat - 5.0) / 7.0 }
+        else if abs_lat <= 28.0 { 1.0 }
+        else { (1.0 - (abs_lat - 28.0) / 17.0).max(0.0) };
+    // Proximity to the moisture source (the warm sea): strong near the coast,
+    // penetrating well inland on large continents but fading in deep interiors.
+    let prox = if dist_ocean < 0.03 { 0.75 }
+        else if dist_ocean < 0.28 { 1.0 }
+        else { (1.0 - (dist_ocean - 0.28) * 1.1).max(0.0) };
+    // Continentality: a big landmass drives a stronger monsoon (land–sea thermal
+    // contrast); small islands get only a mild boost.
+    let cont = (0.45 + land_frac_tropical * 2.4).min(1.25);
+    const MONSOON_BONUS_MAX: f32 = 850.0;
+    MONSOON_BONUS_MAX * lat_w * prox * cont
+}
+
+/// Onshore-monsoon GATE (0..1). A monsoon only fires where summer flow blows OFF a
+/// warm sea ONTO the land — i.e. there is a warm ocean on the cell's EQUATORWARD
+/// and/or EASTERN side within reach (the Indian/SE-Asian/E-Asian geometry). This
+/// excludes subtropical-high deserts (the Sahara, Arabia, the Atacama/Namib/W-Australia
+/// coasts) whose moisture source is blocked — so the monsoon term no longer turns
+/// dry land green. A cold current offshore (cold-upwelling desert coast) counts for
+/// little. Cheap: only the 5–45° belt calls it, scanning a few short rays.
+fn monsoon_onshore(buf: &WorldBuffer, x: u32, y: u32) -> f32 {
+    let lat = buf.latitude(y);
+    let h = buf.height as i32;
+    let eqdir = if lat >= 0.0 { 1i32 } else { -1 }; // equatorward = toward the equator
+    let range = 28i32;
+    let mut best = 0.0f32;
+    // Equatorward, equatorward-east, and due-east rays (the monsoon moisture fetch).
+    for &(dx, dy) in &[(0i32, eqdir), (1, eqdir), (1, 0)] {
+        for s in 1..=range {
+            let nx = buf.wrap_x(x as i32 + dx * s);
+            let ny = y as i32 + dy * s;
+            if ny < 0 || ny >= h { break; }
+            let ni = buf.idx(nx, ny as u32);
+            if buf.terrain[ni] == 0 {
+                // Warm/neutral sea is a good moisture source; a cold current is not.
+                let warm = if buf.current_type[ni] == 2 { 0.35 } else { 1.0 };
+                best = best.max((1.0 - s as f32 / range as f32) * warm);
+                break; // first sea cell along the ray decides it
+            }
+        }
+    }
+    best
+}
+
 /// Frontal precipitation bonus (mm/yr) at mid-latitude storm tracks (30-66°).
 ///
 /// Extratropical cyclones deliver year-round precipitation across the whole
@@ -442,8 +501,16 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
             p += itcz_bonus_shifted(lat, itcz_shift);
             // Subtropical high.
             p *= 1.0 - subtropical_penalty(abs_lat);
-            // Monsoon.
+            // Monsoon: multiplicative interior penetration + a large ADDITIVE
+            // coastal-belt load (the additive term is what actually wets the
+            // continental subtropics — India etc. — that the advection base misses).
             p *= monsoon_multiplier(abs_lat, buf.distance_to_ocean[idx], land_frac_tropical);
+            // Additive monsoon — GATED to genuine onshore-flow regions so it never
+            // wets subtropical-high deserts (Sahara etc.).
+            if (5.0..=45.0).contains(&abs_lat) {
+                p += monsoon_bonus(abs_lat, buf.distance_to_ocean[idx], land_frac_tropical)
+                    * monsoon_onshore(buf, x, y);
+            }
             // Frontal storm tracks.
             let near_ocean = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
                 let ny = y as i32 + dy;

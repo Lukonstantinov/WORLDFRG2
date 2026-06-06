@@ -7,13 +7,15 @@ import { InfoPanel } from "./ui/InfoPanel";
 import { TradeMatrixPanel } from "./ui/TradeMatrixPanel";
 import { HubPanel } from "./ui/HubPanel";
 import { GoodFlowPanel } from "./ui/GoodFlowPanel";
+import { GoodsBrowserPanel } from "./ui/GoodsBrowserPanel";
 import { ElevationLegend } from "./ui/ElevationLegend";
 import { ElevationHistogram } from "./ui/ElevationHistogram";
 import { GoodsEditor } from "./ui/GoodsEditor";
 import { useWorldStore } from "./state/worldStore";
 import { useUIStore } from "./state/uiStore";
 import { useViewportStore } from "./state/viewportStore";
-import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers } from "./bridge/tauri";
+import { useGoodsStore } from "./state/goodsStore";
+import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, persistOverlays, getOverlays } from "./bridge/tauri";
 
 const EXPORTABLE_LAYERS: { id: string; label: string }[] = [
   { id: "land", label: "Land / Sea" },
@@ -241,6 +243,12 @@ export default function App() {
   const meta = useWorldStore((s) => s.meta);
   const setMeta = useWorldStore((s) => s.setMeta);
   const clear = useWorldStore((s) => s.clear);
+  const setRivers = useWorldStore((s) => s.setRivers);
+  const setLakes = useWorldStore((s) => s.setLakes);
+  const setSettlements = useWorldStore((s) => s.setSettlements);
+  const setEconomy = useWorldStore((s) => s.setEconomy);
+  const markStepCompleted = useUIStore((s) => s.markStepCompleted);
+  const loadGoodsFromWorld = useGoodsStore((s) => s.loadFromWorld);
   const invalidateTiles = useViewportStore((s) => s.invalidateTiles);
   const setStatus = useUIStore((s) => s.setStatus);
   const [showDialog, setShowDialog] = useState(!isLoaded);
@@ -266,6 +274,23 @@ export default function App() {
       clear();
       setMeta(worldMeta);
       invalidateTiles();
+      // Re-hydrate the overlay layers persisted in the DB (settlements, rivers,
+      // lakes, the trade economy) + the world's goods, so an uploaded world comes
+      // back complete — not just the map tiles.
+      try {
+        await loadGoodsFromWorld();
+        const ov = await getOverlays();
+        if (ov.rivers?.length) setRivers(ov.rivers);
+        if (ov.lakes?.length) setLakes(ov.lakes);
+        if (ov.settlements?.length) setSettlements(ov.settlements);
+        if (ov.economy && ov.economy.hubs.length) setEconomy(ov.economy);
+        // Mark the steps whose data is present so their overlays are available.
+        if (ov.rivers?.length) [1, 2, 3, 4, 5, 6].forEach(markStepCompleted);
+        if (ov.settlements?.length) markStepCompleted(7);
+        if (ov.economy && ov.economy.hubs.length) [8, 9, 10].forEach(markStepCompleted);
+      } catch (e) {
+        console.warn("Overlay re-hydration skipped:", e);
+      }
       setShowDialog(false);
       setStatus("World loaded: " + worldMeta.name);
     } catch (err) {
@@ -291,6 +316,14 @@ export default function App() {
       if (!path) return;
 
       setStatus("Saving...");
+      // Persist the on-screen overlay layers into the DB first so the saved file is
+      // a COMPLETE world (the economy is already persisted by the Economy step).
+      try {
+        const w = useWorldStore.getState();
+        await persistOverlays(w.settlements, w.rivers, w.lakes);
+      } catch (e) {
+        console.warn("Overlay persist skipped:", e);
+      }
       await saveWorldAs(path);
       setStatus("Saved to " + path);
     } catch (err) {
@@ -341,6 +374,7 @@ export default function App() {
           <InfoPanel />
           <HubPanel />
           <GoodFlowPanel />
+          <GoodsBrowserPanel />
           <TradeMatrixPanel />
           <ElevationLegend />
           <ElevationHistogram />

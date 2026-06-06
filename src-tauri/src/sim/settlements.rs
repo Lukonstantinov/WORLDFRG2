@@ -78,8 +78,9 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake])
             // subtropics/savanna river valleys) and away from polar, desert
             // and dense-rainforest zones.
             let koppen_mod = match buf.koppen[idx] {
-                8 | 9 => 0.28,        // Csa/Csb Mediterranean — ideal (Sumer, Indus, Greece)
-                10 => 0.12,           // Csc Mediterranean cold-summer
+                8 | 9 => 0.42,        // Csa/Csb Mediterranean — ideal (Sumer, Indus, Greece); the
+                                      // cradle climate, biased the strongest so towns cluster here.
+                10 => 0.20,           // Csc Mediterranean cold-summer
                 11 | 12 => 0.15,      // Cfa humid subtropical / Cfb oceanic
                 13 => 0.0,            // Cfc subpolar oceanic
                 3 => 0.08,            // Aw savanna (Nile / Indus-type floodplains)
@@ -281,18 +282,27 @@ pub fn compute_food_capacity(buf: &WorldBuffer, rivers: &[River]) -> Vec<f32> {
 /// EMERGENT carrying capacity: the food its catchment (farmland + fisheries) can
 /// feed, plus a trade-access premium (ports / navigable rivers / crossroads).
 /// Placement is unchanged; only population & tier are carrying-capacity-driven.
+/// `realism` (0..1) is the single "settlement density / realism" lever. LOW =
+/// sparse and strict: only genuinely viable sites survive (high habitability
+/// threshold, wide spacing, low cap) so there are no marginal polar/desert
+/// specks. HIGH = dense and permissive (low threshold, tight spacing, high cap).
+/// ~0.55 reproduces the historical default.
 pub fn generate_settlements(
     buf: &WorldBuffer,
     habitability: &[f32],
     rivers: &[River],
     _seed: u64,
+    realism: f32,
 ) -> Vec<Settlement> {
     let w = buf.width;
     let h = buf.height;
     let total = buf.total();
-    let min_dist = (w / 110).max(3) as i32;
-    let threshold = 0.28f32;
-    let max_settlements = 600;
+    let d = realism.clamp(0.0, 1.0);
+    // Spacing widens, the habitability threshold rises, and the count cap drops as
+    // realism is lowered — pruning marginal sites and thinning the map together.
+    let min_dist = ((w as f32 / (95.0 + 90.0 * (1.0 - d))) as u32).max(3) as i32;
+    let threshold = 0.22 + 0.18 * (1.0 - d); // d=1 → 0.22 (permissive) · d=0 → 0.40 (strict)
+    let max_settlements = (150.0 + 700.0 * d) as usize; // d=1 → 850 · d=0 → 150
 
     let food = compute_food_capacity(buf, rivers);
 
@@ -396,7 +406,11 @@ pub fn generate_settlements(
     // modest so the agricultural baseline skews to villages/towns — the metropolises
     // emerge afterward from the trade-development pass (compute_settlement_development).
     const FOOD_TO_POP: f32 = 25.0;
-    const TRADE_ALPHA: f32 = 1.6;
+    // Trade access is the dominant driver of the LARGEST cities (history's great
+    // metropolises are nearly all ports / river-mouths / crossroads, not the most
+    // fertile inland valley). Raised so coastal & estuary sites outgrow a purely
+    // agricultural inland breadbasket.
+    const TRADE_ALPHA: f32 = 2.6;
     let mid = (min_dist * 4) as i64;
     let mid2 = mid * mid;
     let mut settlements: Vec<Settlement> = Vec::with_capacity(sites.len());
@@ -414,13 +428,35 @@ pub fn generate_settlements(
             if (dx * dx + dy * dy) as i64 <= mid2 { neigh += 1; }
         }
         let crossroads = (neigh as f32 / 6.0).min(1.0);
-        let access = ((if near_coast { 0.4 } else { 0.0 })
-            + (if mouth { 0.3 } else if nav { 0.2 } else { 0.0 })
+        let access = ((if near_coast { 0.55 } else { 0.0 })
+            + (if mouth { 0.45 } else if nav { 0.3 } else { 0.0 })
             + 0.3 * crossroads)
             .clamp(0.0, 1.0);
 
         let pop_agri = k_food[si] * FOOD_TO_POP;
-        let population = (pop_agri * (1.0 + TRADE_ALPHA * access)).max(40.0) as u32;
+        // Extra multiplicative port premium so a great natural harbour (coast +
+        // river mouth) can become a metropolis even on modest farmland, while a
+        // landlocked town stays capped by its hinterland's food.
+        let port_premium = 1.0
+            + (if near_coast { 0.5 } else { 0.0 })
+            + (if mouth { 0.3 } else { 0.0 });
+
+        // Latitude concentration of population: history's great metropolises cluster
+        // in the warm subtropics / Mediterranean belt (Sumer, Egypt, Greece, the
+        // Indus, China) — NOT the cold north. `civ_factor` gives a population bonus
+        // peaking ~32°, and `cold_factor` taxes high latitudes hard so there are far
+        // fewer huge cities above 45–50° (the user's main complaint).
+        let abs_lat = buf.latitude(sy).abs();
+        let civ_factor = 1.0 + 0.30 * (-((abs_lat - 30.0).powi(2)) / (2.0 * 12.0 * 12.0)).exp();
+        let cold_factor = if abs_lat <= 45.0 {
+            1.0
+        } else if abs_lat <= 62.0 {
+            1.0 - 0.55 * (abs_lat - 45.0) / 17.0  // 1.0 → 0.45 across 45–62°
+        } else {
+            (0.45 - 0.18 * (abs_lat - 62.0) / 13.0).max(0.22) // 0.45 → 0.27 across 62–75°+
+        };
+        let population = (pop_agri * (1.0 + TRADE_ALPHA * access) * port_premium
+            * civ_factor * cold_factor).max(40.0) as u32;
 
         let size = if population >= 100_000 { "capital" }
             else if population >= 30_000 { "city" }
@@ -438,6 +474,89 @@ pub fn generate_settlements(
             population,
             score,
         });
+    }
+
+    // ── Trading outposts ─────────────────────────────────────────────────────
+    // Small supply-settlements (same Settlement type, tiny population) in the
+    // HARSH zones where ordinary towns won't form — hot deserts and cold
+    // subarctic/tundra — but where a resource worth shipping downstream exists (a
+    // caravan oasis, a coastal whaling/fishing post, a mountain ore lode, a
+    // volcanic field). Far fewer than settlements, and NEVER on EF ice caps. They
+    // become low-power economy nodes that funnel their good to the nearest hubs.
+    {
+        let mut river_near = vec![false; total];
+        for r in rivers {
+            for &(rx, ry) in &r.points {
+                for dy in -1i32..=1 {
+                    for dx in -1i32..=1 {
+                        river_near[buf.widx(rx as i32 + dx, ry as i32 + dy)] = true;
+                    }
+                }
+            }
+        }
+        // Harsh climates only. EF (22) ice caps are excluded; the bitter ice-bound
+        // subarctic/tundra (DFd 17, DWd 30) are dropped too — the user forbids trade
+        // posts on ice sheets / ice caps, so we keep only the hot/cold deserts,
+        // steppe, mild tundra and the *milder* subarctic (DFc 16, DWc 29).
+        let harsh = |k: u8| matches!(k, 4 | 5 | 6 | 7 | 21 | 16 | 29);
+        let out_min_dist = (min_dist * 2).max(4);
+        let max_outposts = (sites.len() / 5).min(50);
+        let mut cand: Vec<(usize, f32)> = Vec::new();
+        for y in 1..h - 1 {
+            for x in 0..w {
+                let idx = buf.idx(x, y);
+                if buf.terrain[idx] != 1 { continue; }
+                if buf.koppen[idx] == 22 { continue; } // never on ice caps
+                // Hard temperature gate: nothing on perennially frozen ground,
+                // regardless of Köppen label (catches glaciated highland / ice shelf).
+                if buf.temperature[idx] < -8.0 { continue; }
+                if !harsh(buf.koppen[idx]) { continue; }
+                // A coastal post needs an UNFROZEN adjacent sea cell — no posts on a
+                // frozen, ice-locked shore (sea ice is rendered for ocean < 1°C).
+                let coast = buf.distance_to_ocean[idx] < 0.05
+                    && [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
+                        let ni = buf.widx(x as i32 + dx, y as i32 + dy);
+                        buf.terrain[ni] == 0 && buf.temperature[ni] >= 1.0
+                    });   // whaling / fishing / port
+                let oasis = river_near[idx];                      // desert caravan oasis
+                let ore = buf.elevation[idx] > 0.40;             // mountain mining lode
+                let volc = buf.is_volcanic[idx] != 0;            // volcanic minerals
+                let draw = (if coast { 0.6 } else { 0.0 })
+                    + (if oasis { 0.7 } else { 0.0 })
+                    + (if ore { 0.5 } else { 0.0 })
+                    + (if volc { 0.4 } else { 0.0 });
+                if draw <= 0.0 { continue; }
+                cand.push((idx, draw));
+            }
+        }
+        cand.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let mut placed: Vec<(u32, u32)> = settlements.iter().map(|s| (s.x, s.y)).collect();
+        let start_n = settlements.len();
+        for (idx, draw) in cand {
+            if settlements.len() - start_n >= max_outposts { break; }
+            let sx = (idx % w as usize) as u32;
+            let sy = (idx / w as usize) as u32;
+            let far = placed.iter().all(|&(ex, ey)| {
+                let mut dx = (sx as i32 - ex as i32).abs();
+                if dx > w as i32 / 2 { dx = w as i32 - dx; }
+                let dy = sy as i32 - ey as i32;
+                dx * dx + dy * dy >= out_min_dist * out_min_dist
+            });
+            if !far { continue; }
+            placed.push((sx, sy));
+            let population = (60.0 + 340.0 * draw.min(1.0)) as u32; // tiny: 60..400
+            let name = super::names::gen_name_epithet(sx, sy, w, h, 0);
+            let oi = settlements.len() - start_n;
+            settlements.push(Settlement {
+                id: format!("o-{}", oi),
+                x: sx,
+                y: sy,
+                name,
+                size: "outpost".to_string(),
+                population,
+                score: (draw.min(1.0) * 0.3).max(0.05),
+            });
+        }
     }
 
     settlements

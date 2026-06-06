@@ -27,6 +27,7 @@ const SETTLEMENT_COLORS: Record<string, string> = {
   city: "#ff8844",
   town: "#cccccc",
   village: "#88aa88",
+  outpost: "#111111", // trade posts: small black dots
 };
 
 const SETTLEMENT_SIZES: Record<string, number> = {
@@ -34,6 +35,7 @@ const SETTLEMENT_SIZES: Record<string, number> = {
   city: 2.2,
   town: 1.6,
   village: 1,
+  outpost: 0.8, // small
 };
 
 const WARM_CURRENT = "#ee5533";
@@ -68,6 +70,7 @@ export class OverlayManager {
   private corridors: EconCorridor[] = [];
   private econRegions: EconRegion[] = [];
   private supplyChain: EconChain | null = null;
+  private supplyChainImport = false; // true = inbound import (blue) vs export (red)
   /** Adjustable trade-hub marker display (size multiplier + highlight intensity). */
   private hubSize = 1;
   private hubIntensity = 1;
@@ -175,8 +178,9 @@ export class OverlayManager {
 
   /** Highlight one good's supply chain (origin → hub stops → consumer) with the
    *  price at each stop. Pass null to clear. */
-  setSupplyChain(chain: EconChain | null) {
+  setSupplyChain(chain: EconChain | null, isImport = false) {
     this.supplyChain = chain;
+    this.supplyChainImport = isImport;
   }
 
   drawLatLines(gridW: number, gridH: number, equatorOffset = 0.5, latScale = 1, lineRatio = 1) {
@@ -372,6 +376,16 @@ export class OverlayManager {
 
     // Political influence: translucent discs sized by trade power.
     if (this.visibility.politicalInfluence && this.politicalCenters.length > 0) {
+      // Trade posts (outposts) shown on the trade-hub layer as small black dots,
+      // a distinct class below the blue hubs / red emporia / golden capital.
+      const dotR = Math.max(0.6, 1.3 / Math.sqrt(this.currentScale));
+      ctx.fillStyle = "#0a0a0a";
+      for (const s of this.settlements) {
+        if (s.size !== "outpost") continue;
+        ctx.beginPath();
+        ctx.arc(s.x + 0.5, s.y + 0.5, dotR, 0, Math.PI * 2);
+        ctx.fill();
+      }
       for (const c of this.politicalCenters) this.renderPoliticalCenter(ctx, c);
     }
 
@@ -781,35 +795,62 @@ export class OverlayManager {
     const x = c.x + 0.5;
     const y = c.y + 0.5;
     const stars = Math.max(0, Math.min(5, Math.round(c.stars)));
-    const large = stars >= 4;
-    // Larger marker for the great hubs so they read at a glance. The user-set hub
-    // size multiplier scales every marker; intensity sets a glow halo + opacity.
-    const r = Math.max(1.0, (large ? 3.4 : 2.2) * this.hubSize / Math.sqrt(this.currentScale));
+    const emporium = !!c.emporium;
+    const greatest = c.rank === 0;            // the single largest trade hub
+    const large = emporium || greatest || stars >= 4;
+    // Marker types: the GREATEST hub is a GOLDEN square (the world's "Nobilium"),
+    // emporia are RED squares, everything else a blue circle. The user-set hub size
+    // multiplier scales every marker; intensity sets a glow halo.
+    const hubColor = greatest ? "#f4c430" : emporium ? "#e63030" : HUB_BLUE;
+    // The greatest hub is a golden square; emporia are RED TRIANGLES (user request);
+    // ordinary hubs stay blue circles.
+    const triangle = emporium && !greatest;
+    const square = greatest;
+    const r = Math.max(1.0, (greatest ? 4.8 : emporium ? 4.2 : large ? 3.4 : 2.2) * this.hubSize / Math.sqrt(this.currentScale));
 
     // Highlight halo (intensity-driven): a translucent ring around the marker.
-    if (this.hubIntensity > 0.01) {
+    if (this.hubIntensity > 0.01 || square || triangle) {
       ctx.beginPath();
       ctx.arc(x, y, r * (1.8 + this.hubIntensity), 0, Math.PI * 2);
-      ctx.fillStyle = HUB_BLUE;
-      ctx.globalAlpha = 0.10 + 0.30 * Math.min(1, this.hubIntensity);
+      ctx.fillStyle = hubColor;
+      ctx.globalAlpha = 0.10 + 0.30 * Math.min(1, this.hubIntensity + (square || triangle ? 0.45 : 0));
       ctx.fill();
     }
 
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fillStyle = HUB_BLUE;
-    ctx.globalAlpha = 0.95;
-    ctx.fill();
     ctx.lineWidth = Math.max(0.3, 0.9 / Math.sqrt(this.currentScale));
     ctx.strokeStyle = "rgba(8,20,40,0.85)";
-    ctx.stroke();
-
-    // Great hubs: a white square inscribed in the circle (Venice/Malacca tier).
-    if (large) {
-      const s = r * 0.92; // square side spanning most of the disc
-      ctx.fillStyle = "#ffffff";
-      ctx.globalAlpha = 1;
+    ctx.globalAlpha = 0.95;
+    if (square) {
+      // Golden filled square for the greatest hub (the world's "Nobilium").
+      const s = r * 1.9;
+      ctx.fillStyle = hubColor;
       ctx.fillRect(x - s / 2, y - s / 2, s, s);
+      ctx.strokeRect(x - s / 2, y - s / 2, s, s);
+    } else if (triangle) {
+      // Red upward triangle for emporia (the great pass-through entrepôts).
+      const s = r * 2.1;
+      const h2 = s * 0.866; // equilateral height
+      ctx.beginPath();
+      ctx.moveTo(x, y - h2 * 0.62);
+      ctx.lineTo(x - s / 2, y + h2 * 0.38);
+      ctx.lineTo(x + s / 2, y + h2 * 0.38);
+      ctx.closePath();
+      ctx.fillStyle = hubColor;
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = hubColor;
+      ctx.fill();
+      ctx.stroke();
+      // Great (but not top/emporium) hubs: a white inscribed square.
+      if (large) {
+        const s = r * 0.92;
+        ctx.fillStyle = "#ffffff";
+        ctx.globalAlpha = 1;
+        ctx.fillRect(x - s / 2, y - s / 2, s, s);
+      }
     }
     ctx.globalAlpha = 1;
   }
@@ -949,10 +990,18 @@ export class OverlayManager {
     const half = (this.worldW || 1e9) / 2;
     const inv = 1 / Math.sqrt(this.currentScale);
 
-    // Road line (skip the wrap-seam segment).
-    ctx.lineWidth = Math.max(1.2, 3.5 * inv);
-    ctx.strokeStyle = "rgba(255,220,120,0.9)";
+    // Road line: dashed with clear direction (origin → consumer). RED for an
+    // export/good-reach road, BLUE when it is an inbound IMPORT trace (clicked from
+    // a hub's Imports column), so the two directions read distinctly.
+    const imp = this.supplyChainImport;
+    const lineCol = imp ? "rgba(70,150,255,0.95)" : "rgba(255,45,45,0.95)";
+    const headCol = imp ? "rgba(90,165,255,0.98)" : "rgba(255,60,60,0.98)";
+    const dash = Math.max(2, 7 * inv);
+    const ah = Math.max(5.0, 11 * inv);
+    ctx.lineWidth = Math.max(1.2, 3.0 * inv);
+    ctx.strokeStyle = lineCol;
     ctx.lineCap = "round";
+    ctx.setLineDash([dash, dash * 0.7]);
     for (let i = 0; i < pts.length - 1; i++) {
       const a = pts[i]; const b = pts[i + 1];
       if (this.worldW && Math.abs(a[0] - b[0]) > half) continue;
@@ -960,6 +1009,24 @@ export class OverlayManager {
       ctx.moveTo(a[0] + 0.5, a[1] + 0.5);
       ctx.lineTo(b[0] + 0.5, b[1] + 0.5);
       ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    // Directional arrowheads (downstream) on each leg.
+    ctx.fillStyle = headCol;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i]; const b = pts[i + 1];
+      if (this.worldW && Math.abs(a[0] - b[0]) > half) continue;
+      const dx = b[0] - a[0], dy = b[1] - a[1];
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-3) continue;
+      const nx = dx / len, ny = dy / len, px = -ny, py = nx;
+      const cx = b[0] + 0.5 - nx * ah * 0.6, cy = b[1] + 0.5 - ny * ah * 0.6;
+      ctx.beginPath();
+      ctx.moveTo(cx + nx * ah * 0.6, cy + ny * ah * 0.6);
+      ctx.lineTo(cx - nx * ah * 0.4 + px * ah * 0.5, cy - ny * ah * 0.4 + py * ah * 0.5);
+      ctx.lineTo(cx - nx * ah * 0.4 - px * ah * 0.5, cy - ny * ah * 0.4 - py * ah * 0.5);
+      ctx.closePath();
+      ctx.fill();
     }
     ctx.lineCap = "butt";
 
@@ -993,9 +1060,15 @@ export class OverlayManager {
   private renderReachNetwork(ctx: CanvasRenderingContext2D) {
     const half = (this.worldW || 1e9) / 2;
     const inv = 1 / Math.sqrt(this.currentScale);
-    ctx.strokeStyle = "rgba(255,210,90,0.85)";
-    ctx.lineWidth = Math.max(0.6, 1.8 * inv);
+    ctx.save();
     ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    // Dashed bright-red corridors for the selected good.
+    const dash = Math.max(2, 7 * inv);
+    ctx.lineWidth = Math.max(0.8, 2.2 * inv);
+    ctx.strokeStyle = "rgba(255,45,45,0.95)";
+    ctx.setLineDash([dash, dash * 0.7]);
     for (const ch of this.reachChains) {
       const pts = ch.points;
       for (let i = 0; i < pts.length - 1; i++) {
@@ -1007,18 +1080,51 @@ export class OverlayManager {
         ctx.stroke();
       }
     }
-    ctx.lineCap = "butt";
-    // Ring every hub the good reaches.
-    const r = Math.max(1.2, 3.2 * inv);
-    ctx.lineWidth = Math.max(0.5, 1.4 * inv);
-    ctx.strokeStyle = "rgba(255,230,150,0.95)";
-    ctx.fillStyle = "rgba(255,210,90,0.25)";
+    ctx.setLineDash([]);
+
+    // Arrowheads pointing DOWNSTREAM (origin → terminal hub). Enlarged (user
+    // asked for clearly bigger direction arrows) and placed BOTH at the
+    // downstream hub and at the midpoint of each leg, so the flow direction reads
+    // at a glance even on long corridors.
+    const ah = Math.max(5.0, 11 * inv);
+    ctx.fillStyle = "rgba(255,60,60,0.98)";
+    const drawHead = (cx: number, cy: number, nx: number, ny: number) => {
+      const px = -ny, py = nx;
+      ctx.beginPath();
+      ctx.moveTo(cx + nx * ah * 0.6, cy + ny * ah * 0.6);
+      ctx.lineTo(cx - nx * ah * 0.4 + px * ah * 0.5, cy - ny * ah * 0.4 + py * ah * 0.5);
+      ctx.lineTo(cx - nx * ah * 0.4 - px * ah * 0.5, cy - ny * ah * 0.4 - py * ah * 0.5);
+      ctx.closePath();
+      ctx.fill();
+    };
+    for (const ch of this.reachChains) {
+      const pts = ch.points;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i], b = pts[i + 1];
+        if (this.worldW && Math.abs(a[0] - b[0]) > half) continue;
+        const dx = b[0] - a[0], dy = b[1] - a[1];
+        const len = Math.hypot(dx, dy);
+        if (len < 1e-3) continue;
+        const nx = dx / len, ny = dy / len;
+        // Head just shy of the downstream hub (points INTO it).
+        drawHead(b[0] + 0.5 - nx * ah * 0.6, b[1] + 0.5 - ny * ah * 0.6, nx, ny);
+        // Mid-leg head for long corridors.
+        if (len > ah * 3) drawHead(a[0] + 0.5 + nx * len * 0.5, a[1] + 0.5 + ny * len * 0.5, nx, ny);
+      }
+    }
+
+    // Ring every hub the good reaches (red, terminal markets brighter).
+    const r = Math.max(1.4, 3.4 * inv);
+    ctx.lineWidth = Math.max(0.6, 1.6 * inv);
+    ctx.strokeStyle = "rgba(255,120,120,0.98)";
+    ctx.fillStyle = "rgba(255,45,45,0.22)";
     for (const [hx, hy] of this.reachHubs) {
       ctx.beginPath();
       ctx.arc(hx + 0.5, hy + 0.5, r, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     }
+    ctx.restore();
   }
 
   /** Small arrow for wind overlay */

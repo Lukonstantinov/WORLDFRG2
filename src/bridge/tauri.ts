@@ -108,9 +108,9 @@ export async function simScaleElevation(
 }
 
 export async function simGenerateSettlements(
-  seed: number, riversJson: string
+  seed: number, riversJson: string, realism?: number
 ): Promise<import("../types").SimSettlementsResult> {
-  return invoke("sim_generate_settlements", { seed, riversJson });
+  return invoke("sim_generate_settlements", { seed, riversJson, realism });
 }
 
 export async function simBiological(
@@ -374,6 +374,33 @@ export async function computeEconomy(
 /** Read the persisted economy snapshot (empty if not yet generated). */
 export async function getEconomy(): Promise<EconomySnapshot> {
   return invoke("get_economy");
+}
+
+/** Persist the current overlay state (settlements/rivers/lakes) into the DB so a
+ *  saved world re-opens with its trade & settlement layers intact. The economy
+ *  snapshot is already persisted by computeEconomy. */
+export async function persistOverlays(
+  settlements: import("../types").Settlement[],
+  rivers: import("../types").RiverData[],
+  lakes: import("../types").LakeData[],
+): Promise<void> {
+  return invoke("persist_overlays", {
+    settlementsJson: JSON.stringify(settlements),
+    riversJson: JSON.stringify(rivers),
+    lakesJson: JSON.stringify(lakes),
+  });
+}
+
+export interface OverlaysState {
+  settlements: import("../types").Settlement[];
+  rivers: import("../types").RiverData[];
+  lakes: import("../types").LakeData[];
+  economy: EconomySnapshot;
+}
+
+/** Read all persisted overlay state when re-opening a world. */
+export async function getOverlays(): Promise<OverlaysState> {
+  return invoke("get_overlays");
 }
 
 /** Trade-development feedback: grow each settlement by its hub's trade wealth

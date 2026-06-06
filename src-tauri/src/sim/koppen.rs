@@ -597,6 +597,27 @@ fn apply_current_overrides(buf: &mut WorldBuffer) {
             if let Some(r) = replacement { buf.koppen[idx] = r; }
         }
     }
+
+    // ── Hard rule: kill Mediterranean (Cs) on warm-current / lee coasts ───────
+    // A real Mediterranean climate sits on a WINDWARD (west-facing) coast beside a
+    // COLD offshore current. Any Cs cell that carries ANY warm-current influence
+    // (even weak, below the override threshold) OR that is not a windward coast
+    // (i.e. an east / lee coast warmed by a western-boundary current) is demoted to
+    // humid-subtropical / oceanic. This catches the residual east-coast Med that
+    // slipped through both the seasonal split and the thresholded override above.
+    for y in 0..h {
+        for x in 0..w {
+            let idx = buf.idx(x, y);
+            if buf.terrain[idx] != 1 { continue; }
+            let k = buf.koppen[idx];
+            if k != CSA && k != CSB { continue; }
+            let warm_here = warm[idx] > 0.05;
+            let windward = is_windward_ocean(buf, x, y) && !warm_here;
+            if warm_here || !windward {
+                buf.koppen[idx] = if k == CSA { CFA } else { CFB };
+            }
+        }
+    }
 }
 
 /// Box-blur a land-masked f32 field in place (ocean cells held at 0).

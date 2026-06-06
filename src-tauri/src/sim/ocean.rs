@@ -5,26 +5,46 @@ use super::world_buffer::WorldBuffer;
 /// Trade winds (0-30), Westerlies (30-60), Polar easterlies (60-90).
 /// Matches WF1 wind-belts.ts exactly.
 pub fn compute_wind_belts(buf: &mut WorldBuffer) {
+    // Smoothstep helper (0 below a, 1 above b, S-curve between).
+    let smooth = |a: f32, b: f32, x: f32| -> f32 {
+        let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
     for y in 0..buf.height {
         let lat = buf.latitude(y);
         let abs_lat = lat.abs();
-        let sign = if lat >= 0.0 { 1.0 } else { -1.0 }; // NH=1, SH=-1
+        let sign = if lat >= 0.0 { 1.0f32 } else { -1.0 }; // NH=1, SH=-1
 
-        let (vx, vy) = if abs_lat <= 30.0 {
-            // Trade winds: blow toward equator and westward
-            (-0.707, sign * 0.707)
-        } else if abs_lat <= 60.0 {
-            // Westerlies: blow eastward and slightly poleward
-            (0.707, -sign * 0.707)
-        } else {
-            // Polar easterlies: blow westward and equatorward
-            (-0.707, sign * 0.707)
-        };
+        // The three belt vectors (y is down, so +y is southward).
+        let trade = (-0.707f32, sign * 0.707); // toward equator + west
+        let west = (0.707f32, -sign * 0.707);  // toward pole + east
+        let polar = (-0.707f32, sign * 0.707); // toward equator + west
+
+        // Blend with transitions centered EXACTLY on the 30° and 60° latitude
+        // lines (a ±4° smoothstep), so the wind-direction reversal lands on the
+        // drawn reference line rather than at a hard step that aliases between
+        // sampled arrow rows. The blend naturally dips to a calm wind in a thin
+        // band at each boundary — the real subtropical-high / subpolar-low calm
+        // belts — which is where the direction flips.
+        let to_west = smooth(26.0, 34.0, abs_lat);   // trades → westerlies @30°
+        let to_polar = smooth(56.0, 64.0, abs_lat);  // westerlies → polar @60°
+        let w_polar = to_polar;
+        let w_west = to_west * (1.0 - to_polar);
+        let w_trade = (1.0 - to_west).max(0.0);
+        let sumw = (w_trade + w_west + w_polar).max(1e-4);
+        let mut vx = (trade.0 * w_trade + west.0 * w_west + polar.0 * w_polar) / sumw;
+        let mut vy = (trade.1 * w_trade + west.1 * w_west + polar.1 * w_polar) / sumw;
+        // Renormalize to unit strength so moisture advection keeps full force right
+        // through the transition (no spurious dry/wet bands at 30°/60°). Only a
+        // sub-degree sliver at the exact boundary — where opposite belts cancel —
+        // stays calm; that razor edge is where the direction reverses, on the line.
+        let mag = (vx * vx + vy * vy).sqrt();
+        if mag > 0.2 { vx /= mag; vy /= mag; }
 
         for x in 0..buf.width {
             let idx = buf.idx(x, y);
-            buf.wind_vx[idx] = vx as f32;
-            buf.wind_vy[idx] = vy as f32;
+            buf.wind_vx[idx] = vx;
+            buf.wind_vy[idx] = vy;
         }
     }
 }
@@ -34,7 +54,8 @@ const SPEED_BOUNDARY_WEST: f32 = 2.2;    // Gulf Stream, Kuroshio, Agulhas
 const SPEED_BOUNDARY_EAST: f32 = 0.55;   // California, Canary, Benguela
 const SPEED_INTERIOR: f32 = 0.30;        // Sargasso Sea / mid-gyre return flow
 const SPEED_EQUATORIAL: f32 = 1.1;       // NEC, SEC (trade-wind driven)
-const SPEED_ECC: f32 = 0.75;             // Equatorial Counter-Current
+const SPEED_ECC: f32 = 1.3;              // Equatorial Counter-Current (raised so the
+                                         // eastward counter-current seeds a visible streamline)
 const SPEED_ACC: f32 = 1.6;              // Antarctic Circumpolar Current
 const SPEED_SUBPOLAR: f32 = 0.65;        // Labrador / Irminger gyre
 
@@ -309,6 +330,17 @@ fn gyre_vector(
         vy += poleward * interior_weight * subpol_env * 0.20 * width_factor;
     }
 
+    // Mid-latitude westerly DRIFT carries surface water poleward (Ekman + the
+    // North Atlantic / North Pacific Drift): the warm water that leaves the
+    // western boundary turns east and crosses the basin angling ~25-30° poleward
+    // rather than running purely horizontal. Apply only on the poleward limb of
+    // the gyre (≥38°, where the zonal flow is eastward) and away from the coastal
+    // boundary currents, so the Sverdrup interior (20-38°, equatorward) is kept.
+    if wb_profile < 0.05 && eb_profile < 0.05 && abs_lat >= 38.0 && abs_lat < 62.0 {
+        let env = (-((abs_lat - 46.0).powi(2)) / (2.0 * 12.0 * 12.0)).exp();
+        vy += poleward * (0.32 + 0.34 * env) * width_factor;
+    }
+
     // Equatorial vy suppression (Coriolis -> 0 near equator)
     if abs_lat < 8.0 {
         vy *= abs_lat / 8.0;
@@ -322,10 +354,13 @@ fn gyre_vector(
         // Equatorial Undercurrent — weak eastward
         vx = 0.3;
         band_speed = SPEED_ECC * 0.5;
-    } else if abs_lat <= 10.0 {
-        // Equatorial counter-current (NECC / SECC)
-        let ecc_str = if nh { 1.0 } else { 0.6 };
-        vx = ecc_str * ((std::f32::consts::PI * (abs_lat - 2.0) / 8.0).sin());
+    } else if abs_lat <= 12.0 {
+        // Equatorial counter-current (NECC / SECC) — a distinct EASTWARD band
+        // running against the trade-wind drift on either side of the equator.
+        // Strengthened and widened (≤12°) so it actually shows up as its own
+        // streamline between the two westward equatorial currents.
+        let ecc_str = if nh { 1.0 } else { 0.85 };
+        vx = ecc_str * ((std::f32::consts::PI * (abs_lat - 2.0) / 10.0).sin().max(0.0));
         band_speed = SPEED_ECC * ecc_str;
     } else if abs_lat < 20.0 {
         // Trade wind drift — westward
@@ -591,8 +626,9 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
                 2 // ACC (cold)
             } else if basin_pos < -0.5 && abs_lat > 18.0 && abs_lat < 55.0 && speed > 1.2 {
                 1 // warm western-boundary current
-            } else if basin_pos > 0.45 && abs_lat > 12.0 && abs_lat < 48.0 && speed > 0.35 {
-                2 // cold eastern-boundary current
+            } else if basin_pos > 0.45 && abs_lat > 18.0 && abs_lat < 48.0 && speed > 0.35 {
+                2 // cold eastern-boundary current (kept out of the tropics, which
+                  // should read neutral/grey — tropical currents are not cold)
             } else if abs_lat >= 50.0 && abs_lat < 68.0 && basin_pos < -0.3 && speed > 0.45 {
                 2 // cold subpolar boundary current
             } else {
@@ -621,6 +657,10 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
     // back to a temperature-only density and a ~1.0 reach.
     let reach_mult = apply_thermohaline(buf);
     extend_warm_tag(buf, reach_mult);
+    // Cold return limb: tag the equatorward-flowing currents cold (after warm, so
+    // warm is never overwritten). The neutral gap the warm tag leaves at the bend
+    // is the transition before warmth becomes cold.
+    extend_cold_tag(buf);
 
     // ── Phase 6: small-sea climate gate ──────────────────────────────────────
     // Currents in small / marginal seas (Mediterranean / Red Sea / Persian Gulf
@@ -921,8 +961,13 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
     let n = buf.total();
     let base_type = buf.current_type.clone();
     let mut warm_add = vec![false; n];
-    let max_steps = (w as f32 * 0.75 * reach_mult) as usize;
+    let max_steps = (w as f32 * 0.9 * reach_mult) as usize;
     let step_len = 1.5f32;
+    // Corridor half-width: the warm drift is tagged as a BAND, not a 1-cell trace,
+    // so the cross-basin flow reads warm instead of leaving grey streamlines
+    // threading between sparse warm rays (the user's "warm current becomes grey").
+    // Widened so the broad cross-basin drift stays one coherent warm stream.
+    let half_w = ((w as f32 / 150.0).round() as i32).clamp(1, 5);
 
     for sy in 0..h {
         for sx in 0..w {
@@ -946,16 +991,52 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
                 // floor cut the warm tag off mid-basin (the Gulf Stream went
                 // "grey" before reaching Europe). Carry warmth through weaker drift.
                 if mag < 0.05 { break; }
-                let alat = buf.latitude(yi as u32).abs();
-                if alat > 74.0 { break; }
+                let lat = buf.latitude(yi as u32);
+                let alat = lat.abs();
+                if alat > 78.0 { break; }
 
+                // STOP the warm tag once the flow has clearly BENT EQUATORWARD: the
+                // warm poleward/cross limb ends here, and the equatorward RETURN
+                // limb is a COLD current (handled by extend_cold_tag). poleward = up
+                // in the N hemisphere. The gap this leaves at the bend is the
+                // neutral transition the user wanted before warmth turns to cold.
+                //
+                // Previously this broke on ANY equatorward lean (>0.30·mag) above
+                // 18°, which severed the warm tag at the subtropical gyre bend so the
+                // cross-basin North Atlantic/Pacific Drift went grey before reaching
+                // the far coast. Now the tropical return limb still cuts off, but the
+                // broad mid-latitude eastward drift (which leans only gently) keeps
+                // its warmth all the way across — only a STRONG, sustained reversal
+                // (>0.60·mag) ends it at higher latitudes.
+                let nh = lat >= 0.0;
+                let equatorward_vy = if nh { vmy } else { -vmy }; // >0 = toward equator
+                let break_eq = if alat < 35.0 {
+                    equatorward_vy > 0.30 * mag && alat > 18.0
+                } else {
+                    equatorward_vy > 0.60 * mag
+                };
+                if break_eq { break; }
+
+                let hx0 = vmx / mag;
+                let hy0 = vmy / mag;
+                // Tag the cell plus a perpendicular corridor.
                 warm_add[i] = true;
+                let (perp_x, perp_y) = (-hy0, hx0);
+                for k in 1..=half_w {
+                    for sgn in [-1.0f32, 1.0] {
+                        let nx = (px + perp_x * k as f32 * sgn).floor() as i32;
+                        let ny = (py + perp_y * k as f32 * sgn).floor() as i32;
+                        if ny < 0 || ny >= h as i32 { continue; }
+                        let ni = buf.idx(buf.wrap_x(nx), ny as u32);
+                        if buf.terrain[ni] == 0 && base_type[ni] != 2 { warm_add[ni] = true; }
+                    }
+                }
 
-                let mut hx = vmx / mag;
-                let mut hy = vmy / mag;
-                if alat > 35.0 {
-                    let drift = ((alat - 35.0) / 18.0).clamp(0.0, 1.0);
-                    hx += drift * 1.1;
+                let mut hx = hx0;
+                let mut hy = hy0;
+                if alat > 32.0 {
+                    let drift = ((alat - 32.0) / 18.0).clamp(0.0, 1.0);
+                    hx += drift * 1.4;
                     hy *= 1.0 - 0.55 * drift;
                     let hl = (hx * hx + hy * hy).sqrt();
                     if hl > 0.001 { hx /= hl; hy /= hl; }
@@ -969,6 +1050,71 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
     for i in 0..n {
         if warm_add[i] && buf.terrain[i] == 0 {
             buf.current_type[i] = 1;
+        }
+    }
+}
+
+/// Cold return limb. A current is only COLD once it is flowing EQUATORWARD (the
+/// user's rule: cold appears when the flow is already moving back toward the
+/// equator). Seeds on the geometric cold currents (eastern-boundary / subpolar /
+/// ACC) and advects the cold tag downstream along the flow as a BAND, mirroring
+/// the warm corridor, so the cold current reads as one coherent stream rather than
+/// snapping on instantly. Runs AFTER extend_warm_tag so it never overwrites warm.
+fn extend_cold_tag(buf: &mut WorldBuffer) {
+    let w = buf.width;
+    let h = buf.height;
+    let n = buf.total();
+    let base_type = buf.current_type.clone();
+    let mut cold_add = vec![false; n];
+    // Shorter reach + a single-cell-wide band than the warm corridor: cold currents
+    // were over-tagged (too much blue), and tropical water must stay grey.
+    let max_steps = (w as f32 * 0.30) as usize;
+    let step_len = 1.5f32;
+    let half_w = 1i32;
+
+    for sy in 0..h {
+        for sx in 0..w {
+            let si = (sy * w + sx) as usize;
+            if base_type[si] != 2 { continue; } // seed on cold currents
+
+            let mut px = sx as f32 + 0.5;
+            let mut py = sy as f32 + 0.5;
+            for _ in 0..max_steps {
+                let xi = px.floor() as i32;
+                let yi = py.floor() as i32;
+                if yi < 0 || yi >= h as i32 { break; }
+                let i = buf.idx(buf.wrap_x(xi), yi as u32);
+                if buf.terrain[i] != 0 { break; }   // coast
+                if base_type[i] == 1 { break; }      // ran into a warm current
+
+                let vmx = buf.current_vx[i];
+                let vmy = buf.current_vy[i];
+                let mag = (vmx * vmx + vmy * vmy).sqrt();
+                if mag < 0.05 { break; }
+                let alat = buf.latitude(yi as u32).abs();
+                if alat < 16.0 { break; }           // stop before the tropics (kept grey)
+
+                cold_add[i] = true;
+                let (hx, hy) = (vmx / mag, vmy / mag);
+                let (perp_x, perp_y) = (-hy, hx);
+                for k in 1..=half_w {
+                    for sgn in [-1.0f32, 1.0] {
+                        let nx = (px + perp_x * k as f32 * sgn).floor() as i32;
+                        let ny = (py + perp_y * k as f32 * sgn).floor() as i32;
+                        if ny < 0 || ny >= h as i32 { continue; }
+                        let ni = buf.idx(buf.wrap_x(nx), ny as u32);
+                        if buf.terrain[ni] == 0 && base_type[ni] != 1 { cold_add[ni] = true; }
+                    }
+                }
+                px += hx * step_len;
+                py += hy * step_len;
+            }
+        }
+    }
+
+    for i in 0..n {
+        if cold_add[i] && buf.terrain[i] == 0 && buf.current_type[i] != 1 {
+            buf.current_type[i] = 2;
         }
     }
 }
@@ -991,8 +1137,8 @@ pub fn advect_salinity_and_recouple(buf: &mut WorldBuffer) {
     let base: Vec<f32> = buf.salinity.iter().map(|&s| s as f32).collect();
     let mut sal = base.clone();
 
-    let dt = 2.0f32;       // cells advected per iteration
-    let iters = 10;
+    let dt = 2.5f32;       // cells advected per iteration
+    let iters = 16;        // more iterations → salt reaches further poleward
     for _ in 0..iters {
         let src = sal.clone();
         for y in 0..h {
@@ -1013,9 +1159,28 @@ pub fn advect_salinity_and_recouple(buf: &mut WorldBuffer) {
                     let j = buf.idx(buf.wrap_x(xi), yi as u32);
                     if buf.terrain[j] != 0 { src[i] } else { src[j] }
                 };
-                // Blend advected value with a little relaxation to the E−P base.
-                sal[i] = 0.82 * up + 0.18 * base[i];
+                // Weak relaxation to the E−P base so the advected salty tongue
+                // persists much further up-current into the fresh north before it
+                // mixes back down (Gulf Stream salting the sub-polar North Atlantic).
+                sal[i] = 0.90 * up + 0.10 * base[i];
             }
+        }
+    }
+    // Warm-conveyor salt signature: where a warm boundary current pushes into the
+    // fresher mid/high latitudes (current_type==1, abs_lat>32°), raise salinity
+    // toward a salty subtropical-source value so the current reads as a visible
+    // salty corridor threading the fresher surrounding water — exactly the "salty
+    // water pulled into the northern latitudes by the current" the map should show.
+    let warm_psu = psu_to_u8(36.8) as f32;
+    for y in 0..h {
+        if buf.abs_latitude(y) < 32.0 { continue; }
+        for x in 0..w {
+            let i = buf.idx(x, y);
+            if buf.terrain[i] != 0 || buf.current_type[i] != 1 { continue; }
+            let alat = buf.abs_latitude(y);
+            // Stronger lift the further north the warm tongue has carried.
+            let lift = ((alat - 32.0) / 28.0).clamp(0.0, 1.0);
+            sal[i] = sal[i] * (1.0 - 0.45 * lift) + warm_psu * (0.45 * lift);
         }
     }
     for i in 0..n {

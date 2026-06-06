@@ -566,19 +566,34 @@ pub fn generate_elevation_from_terrain(
 
             // Combine with normalized weights (WF1 generateBaseHeightmap).
             let combined = large * n_large + medium * n_medium + small * n_small + ridge * n_ridge;
-            elevation[idx] = combined.clamp(0.01, 1.0);
+
+            // ── Valley incision ─────────────────────────────────────────────
+            // A second ridged field at higher frequency, INVERTED, carves
+            // dendritic valley networks between the ranges (the troughs the
+            // erosion alone left too shallow). Scaled by the local height so
+            // highlands get dissected into ridge-and-valley relief while
+            // lowlands stay broad. This is what was missing — "almost no valleys".
+            let vridge = ridged_multifractal(wnx * ridge_scale * 1.8, wny * ridge_scale * 1.8, seed.wrapping_add(0x5A1F), 5, 2.0, 2.0);
+            let carve = (1.0 - vridge).powi(2) * (0.12 + 0.20 * roughness) * combined;
+
+            elevation[idx] = (combined - carve).clamp(0.01, 1.0);
         }
     }
 
-    // ── Step 2: Coastal falloff — first COAST_DIST cells ramp down to the sea ─
-    // Matches WF1: factor 0.15→1.0 over the outer ring so coasts read as plains
-    // and the shoreline isn't a cliff. Interior shaping is handled by the
-    // histogram redistribution in Step 5 (this is why WF1 interiors are never flat).
-    const COAST_DIST: u16 = 5;
+    // ── Step 2: Coastal falloff — gentle shoreline taper that KEEPS coastal
+    // mountains. The old falloff multiplied the outer ring down to 0.15, which
+    // flattened every coast into a plain — even active margins where a cordillera
+    // meets the sea (Andes, Norway, BC). Now the taper only pulls DOWN the low /
+    // plain component: a genuine coastal ridge (high raw height) keeps most of its
+    // elevation, while flats still ramp gently from the shore so there's no cliff.
+    const COAST_DIST: u16 = 4;
     for i in 0..n {
         if terrain[i] != 1 { continue; }
         if coast_dist[i] < COAST_DIST {
-            let factor = 0.15 + 0.85 * (coast_dist[i] as f32 / COAST_DIST as f32);
+            let ratio = coast_dist[i] as f32 / COAST_DIST as f32; // 0 shore .. 1 inland
+            let taper = 0.45 + 0.55 * ratio;                      // shore keeps ≥45%
+            let ridge_keep = ((elevation[i] - 0.35) / 0.65).clamp(0.0, 1.0); // mountainous?
+            let factor = taper.max(ridge_keep);
             elevation[i] *= factor;
         }
     }
@@ -590,7 +605,10 @@ pub fn generate_elevation_from_terrain(
     hydraulic_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations);
 
     // ── Step 4: Thermal erosion — smooth sharp ridges ───────────────────
-    let thermal_passes = 3 + (roughness * 2.0) as u32; // 3-5 passes
+    // Fewer passes than before (2-4) so the carved valley networks aren't
+    // smoothed back out — thermal slump fills valleys, so over-applying it was a
+    // second reason interiors read as flat.
+    let thermal_passes = 2 + (roughness * 2.0) as u32; // 2-4 passes
     thermal_erosion(&mut elevation, &terrain, w, h, thermal_passes);
 
     // ── Step 5: Normalize with realistic altitude distribution ──────────
@@ -726,16 +744,27 @@ pub fn generate_elevation_ridged(
             let ridge = ridged_multifractal(rx, ry, seed.wrapping_add(0x48271), 7, 2.1, 2.0);
             let hill = fbm_noise(ax * f_hill, ay * f_hill, seed.wrapping_add(0xFEED), 3, 2.0, 0.45);
             let e = base * 0.5 + ridge * belt * ridge_amp + hill * hill_amp;
-            elevation[idx] = e.clamp(0.01, 1.5);
+
+            // Valley incision: a higher-frequency inverted ridged field carves
+            // dendritic valleys through the ranges so highlands read as proper
+            // ridge-and-valley relief instead of smooth domes.
+            let vridge = ridged_multifractal(rx * 2.1, ry * 2.1, seed.wrapping_add(0x5A1F), 5, 2.0, 2.0);
+            let carve = (1.0 - vridge).powi(2) * (0.14 + 0.20 * roughness) * e;
+
+            elevation[idx] = (e - carve).clamp(0.01, 1.5);
         }
     }
 
-    // ── Coastal falloff so shores read as plains, not cliffs ──
-    const COAST_DIST: u16 = 5;
+    // ── Coastal falloff that KEEPS coastal mountains (only the plain component is
+    // tapered toward the shore — see generate_elevation_from_terrain). ──
+    const COAST_DIST: u16 = 4;
     for i in 0..n {
         if terrain[i] != 1 { continue; }
         if coast_dist[i] < COAST_DIST {
-            let factor = 0.15 + 0.85 * (coast_dist[i] as f32 / COAST_DIST as f32);
+            let ratio = coast_dist[i] as f32 / COAST_DIST as f32;
+            let taper = 0.45 + 0.55 * ratio;
+            let ridge_keep = ((elevation[i] - 0.35) / 0.65).clamp(0.0, 1.0);
+            let factor = taper.max(ridge_keep);
             elevation[i] *= factor;
         }
     }
@@ -744,7 +773,7 @@ pub fn generate_elevation_ridged(
     let erosion_scale = 0.5 + roughness * 0.5;
     let hydro_iterations = ((n as f32 * 0.015 * erosion_scale) as u32).clamp(15_000, 100_000);
     hydraulic_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations);
-    let thermal_passes = 3 + (roughness * 2.0) as u32;
+    let thermal_passes = 2 + (roughness * 2.0) as u32; // fewer passes so valleys survive
     thermal_erosion(&mut elevation, &terrain, w, h, thermal_passes);
 
     // ── Normalize + hypsometric redistribution (realistic altitude spread) ──

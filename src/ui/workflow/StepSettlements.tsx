@@ -18,6 +18,8 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
   const stepCompleted = useUIStore((s) => s.stepCompleted);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
   const setLayer = useUIStore((s) => s.setLayer);
+  const settlementRealism = useUIStore((s) => s.settlementRealism);
+  const setSettlementRealism = useUIStore((s) => s.setSettlementRealism);
   const focusOn = useViewportStore((s) => s.focusOn);
   const { rivers, settlements, setSettlements } = useWorldStore();
 
@@ -32,7 +34,7 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
     setSimRunning(true);
     setStatus("Scoring habitability & placing cities...");
     try {
-      const result = await simGenerateSettlements(seed, JSON.stringify(rivers));
+      const result = await simGenerateSettlements(seed, JSON.stringify(rivers), settlementRealism);
       setSettlements(result.settlements);
       markStepCompleted(7);
       // Show the habitability heatmap + ranked city dots.
@@ -59,6 +61,19 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
           Complete Step 6 first (settlements need fertility & habitability data)
         </div>
       )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", color: "#8090b0", fontSize: 10 }}>
+          <span>Density / realism</span>
+          <span>{settlementRealism <= 0.33 ? "Sparse · strict" : settlementRealism >= 0.7 ? "Dense" : "Balanced"} ({Math.round(settlementRealism * 100)})</span>
+        </div>
+        <input type="range" min={0} max={1} step={0.05} value={settlementRealism}
+          onChange={(e) => setSettlementRealism(parseFloat(e.target.value))} />
+        <div style={{ color: "#405060", fontSize: 9 }}>
+          Low = fewer, only genuinely viable sites (no marginal polar/desert specks);
+          high = denser and more permissive.
+        </div>
+      </div>
+
       <button onClick={handleGenerate} disabled={simRunning || !step6Done} style={genBtn}>
         Find Settlements
       </button>

@@ -163,14 +163,61 @@ export interface EconHub {
   stars: number;
   wealth: number;
   population: number;
+  emporium?: boolean; // greatest pass-through entrepôt (rendered red)
+  throughput?: number;
+  exports?: number;
+  imports?: number;
+  partners?: number;
+  ref_pct?: number;      // throughput as % of the strongest hub
+  nearest_ref?: string;  // closest real 1450 trade hub
+  monopolies?: string[];
+  koppen?: number;       // climate at the hub cell
+  elevation?: number;    // normalized elevation
+  coastal?: boolean;     // on/near the coast
+  nobility?: number;     // wealthy/patrician class size
+  merchants?: number;    // merchant class size
+  commoners?: number;    // everyone else
+  elite_level?: number;  // 0..1 how large the wealthy class is
+  merchant_level?: number; // 0..1 how large the merchant class is
+  top_export?: string;   // most valuable good the merchants sell
+  luxuries?: HubLuxury[];
+  sea_access?: boolean;  // real sea port (not a closed lake)
+  exports_to?: EconExport[]; // where this hub's exports go (with %)
+  shortages?: ShortageNote[]; // goods it can't fully obtain + why
   produces: EconHubGood[];
   receives: EconReceive[];
+}
+export interface EconExport {
+  good: number;
+  good_name: string;
+  to_hub: number;
+  amount: number;
+  pct: number;   // 0..100 share of this good's exports leaving the hub
+  chain: number;
+}
+export interface ShortageNote {
+  good: number;
+  good_name: string;
+  reason: string; // "no_supplier" | "unreachable" | "deficit" | "no_port"
+  severity: number; // 0..1 fraction of demand unmet
+}
+export interface HubLuxury {
+  good: number;
+  good_name: string;
+  demand: number;
+  received: number;
+  price: number;
 }
 export interface EconChainStop {
   hub: number;
   price: number;
   days: number; // cumulative travel days from origin to this stop
   km: number;   // cumulative distance from origin to this stop
+  markup?: number;       // merchant resale margin applied at this stop
+  toll?: number;         // toll/tax fraction added entering this stop
+  demand_spike?: number; // transient premium from local unmet demand
+  koppen?: number;       // climate at this stop hub (for the narrative)
+  note?: string;         // short text reason for the price change here
 }
 export interface EconChain {
   id: number;
@@ -212,12 +259,29 @@ export interface EconRegion {
   cells: [number, number][]; // coarse-cell top-left world coords (square territory)
   cell_size: number;
 }
+export interface GoodStat {
+  good: number;
+  good_name: string;
+  top_importer: number;        // hub id (-1 = none)
+  top_exporter: number;        // hub id (-1 = none)
+  biggest_desire_hub: number;  // hub with greatest demand
+  biggest_desire_class: string; // "nobility" | "merchants" | "commoners"
+}
+export interface ClassStats {
+  label: string;     // "hubs" | "emporiums" | "outposts"
+  count: number;
+  population: number;
+  throughput: number;
+  avg_wealth: number;
+}
 export interface EconomySnapshot {
   hubs: EconHub[];
   chains: EconChain[];
   chokepoints: EconChokepoint[];
   regions: EconRegion[];
   corridors: EconCorridor[];
+  good_stats?: GoodStat[];
+  class_stats?: ClassStats[];
   goods: string[];
 }
 
@@ -251,6 +315,7 @@ export interface PoliticalCenter {
   population: number;
   monopolies: string[];
   name: string;       // antique hub name (shown when the Hub-names overlay is on)
+  emporium?: boolean; // one of the few greatest entrepôts — drawn RED
 }
 
 export interface TradeRegion {
@@ -304,7 +369,7 @@ export interface Settlement {
   x: number;
   y: number;
   name: string;
-  size: "capital" | "city" | "town" | "village";
+  size: "capital" | "city" | "town" | "village" | "outpost";
   population: number;
   score: number;
 }

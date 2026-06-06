@@ -56,6 +56,9 @@ export const GOOD_DEFS: GoodDef[] = [
   { name: "tyrian_purple", label: "Tyrian Purple", emoji: "\u{1F7E3}", color: "#6a0dad" },
   { name: "ambergris", label: "Ambergris", emoji: "\u{1F40B}", color: "#cfc0a0" },
   { name: "jade", label: "Jade", emoji: "\u{1F7E2}", color: "#00a86b" },
+  { name: "silver", label: "Silver", emoji: "\u{1FA99}", color: "#c8ccd6" },
+  { name: "marble", label: "Marble", emoji: "\u{1F3DB}\u{FE0F}", color: "#e8e6e0" },
+  { name: "lead", label: "Lead", emoji: "\u{1F529}", color: "#8a8e96" },
 ];
 
 /** Overlay-visibility key for a good's region toggle. */
@@ -100,4 +103,45 @@ export function goodSubtypes(name: string): SubtypeDef[] | null {
   if (name === "wheat") return GRAIN_SUBTYPES;
   if (name === "paper") return PAPER_SUBTYPES;
   return null;
+}
+
+// ── Categories ──────────────────────────────────────────────────────────────
+// Broad trade-good categories so the overlay list (and the goods browser) can
+// GROUP similar goods together — e.g. rock salt + bay salt and all the metals
+// sit side by side, the marine goods cluster, etc.
+export const CATEGORY_ORDER = [
+  "Staples", "Wine, Oil & Vine", "Cash Crops", "Spices & Aromatics",
+  "Textiles & Animal", "Forestry & Craft", "Minerals & Metals", "Marine", "Other",
+] as const;
+
+const GOOD_CATEGORY: Record<string, string> = {
+  // Staples
+  wheat: "Staples", dates: "Staples",
+  // Wine, oil & vine
+  wine: "Wine, Oil & Vine", oliveoil: "Wine, Oil & Vine", citrus: "Wine, Oil & Vine",
+  // Cash crops
+  sugar: "Cash Crops", cotton: "Cash Crops", tobacco: "Cash Crops", indigo: "Cash Crops",
+  coffee: "Cash Crops", tea: "Cash Crops", cacao: "Cash Crops", flax: "Cash Crops",
+  // Spices & aromatics
+  spices: "Spices & Aromatics", cloves: "Spices & Aromatics", pepper: "Spices & Aromatics",
+  cinnamon: "Spices & Aromatics", frankincense: "Spices & Aromatics", incense: "Spices & Aromatics",
+  saffron: "Spices & Aromatics",
+  // Textiles & animal products
+  silk: "Textiles & Animal", wool_fleece: "Textiles & Animal", wool_llama: "Textiles & Animal",
+  furs: "Textiles & Animal", horses: "Textiles & Animal", ivory: "Textiles & Animal",
+  // Forestry & manufactured craft
+  timber: "Forestry & Craft", hardwoods: "Forestry & Craft", paper: "Forestry & Craft",
+  ceramics: "Forestry & Craft", glassware: "Forestry & Craft",
+  // Minerals & metals (both salts here, adjacent, per request)
+  salt: "Minerals & Metals", bay_salt: "Minerals & Metals", iron: "Minerals & Metals",
+  copper: "Minerals & Metals", tin: "Minerals & Metals", gold: "Minerals & Metals",
+  gemstones: "Minerals & Metals", jade: "Minerals & Metals", silver: "Minerals & Metals",
+  marble: "Minerals & Metals", lead: "Minerals & Metals",
+  // Marine (incl. marine dyes)
+  stockfish: "Marine", pearls: "Marine", whaling: "Marine", amber: "Marine",
+  dyes: "Marine", tyrian_purple: "Marine", coral: "Marine", ambergris: "Marine",
+};
+
+export function goodCategory(name: string): string {
+  return GOOD_CATEGORY[name] ?? "Other";
 }

@@ -175,7 +175,8 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
           })}
         </div>
         {slider("Mountain Density", mountainDensity, 0.1, 1.0, 0.05, setMountainDensity, "Few ridges \u2194 Many ridges")}
-        {slider("Mountain Height", mountainHeight, 0.1, 1.0, 0.05, setMountainHeight, "Gentle hills \u2194 Himalayan peaks")}
+        {slider("Mountain Height", mountainHeight, 0.1, 1.0, 0.05, setMountainHeight,
+          `Tallest peaks \u2248 ${Math.round((0.35 + mountainHeight * 0.6) * 8848).toLocaleString()} m  (gentle hills \u2194 Himalaya)`)}
         {slider("Mountain Spread", mountainSpread, 0.0, 1.0, 0.05, setMountainSpread, "Narrow peaks \u2194 Wide ranges")}
         {slider("Noise Roughness", noiseRoughness, 0.0, 1.0, 0.05, setNoiseRoughness, "Smooth terrain \u2194 Rough terrain")}
       </div>

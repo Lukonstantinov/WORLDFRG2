@@ -10,7 +10,7 @@ import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy } from "../bridge/tauri";
 import { goodOverlayKey } from "../goods";
-import type { PaintValue } from "../types";
+import type { PaintValue, EconChain } from "../types";
 
 /** Largest box with the world's aspect ratio that fits inside the pane. */
 function fitBox(paneW: number, paneH: number, gridW: number, gridH: number) {
@@ -71,7 +71,9 @@ export function MapCanvas() {
   const bioParams = useUIStore((s) => s.bioParams);
   const setSelectedHub = useUIStore((s) => s.setSelectedHub);
   const selectedChain = useUIStore((s) => s.selectedChain);
-  const selectedRoad = useUIStore((s) => s.selectedRoad);
+  const selectedHub = useUIStore((s) => s.selectedHub);
+  const openRoads = useUIStore((s) => s.openRoads);
+  const selectedExport = useUIStore((s) => s.selectedExport);
   const setSelectedGood = useUIStore((s) => s.setSelectedGood);
   const hubDisplay = useUIStore((s) => s.hubDisplay);
   const reachGood = useUIStore((s) => s.reachGood);
@@ -471,16 +473,25 @@ export function MapCanvas() {
     requestRender();
   }, [hubDisplay, requestRender]);
 
-  // Per-good reach network: highlight every route + hub the selected good reaches.
+  // Reach-network highlight (red routes + hub rings). One source at a time, by
+  // priority: the route window's independently-opened roads > a hub's selected
+  // export good (its destinations) > the toolbar per-good reach view.
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om) return;
-    if (!economy || !reachGood) {
-      om.setReachNetwork([], []);
-      requestRender();
-      return;
+    let chains: EconChain[] = [];
+    if (economy) {
+      if (openRoads.length > 0) {
+        const set = new Set(openRoads);
+        chains = economy.chains.filter((c) => set.has(c.id));
+      } else if (selectedExport && selectedHub !== null) {
+        // Export flows leaving the selected hub for the chosen good (origin = stop 0).
+        chains = economy.chains.filter((c) =>
+          c.good_name === selectedExport && c.stops.length > 0 && c.stops[0].hub === selectedHub);
+      } else if (reachGood) {
+        chains = economy.chains.filter((c) => c.good_name === reachGood);
+      }
     }
-    const chains = economy.chains.filter((c) => c.good_name === reachGood);
     // Destination hub = last stop of each chain; dedupe by position.
     const seen = new Set<string>();
     const hubs: [number, number][] = [];
@@ -494,20 +505,17 @@ export function MapCanvas() {
     }
     om.setReachNetwork(chains, hubs);
     requestRender();
-  }, [economy, reachGood, requestRender]);
+  }, [economy, reachGood, openRoads, selectedExport, selectedHub, requestRender]);
 
-  // Highlighted supply-chain road on the map. Driven by the hub inspector
-  // (selectedChain) OR the good-flow panel (selectedRoad) — the latter wins when a
-  // road is picked there, so clicking a road highlights it with its hubs.
+  // Single import-trace road (hub inspector's Imports column) → drawn BLUE.
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om) return;
-    const id = selectedRoad !== null ? selectedRoad : selectedChain;
-    const chain = (economy && id !== null)
-      ? economy.chains.find((c) => c.id === id) ?? null : null;
-    om.setSupplyChain(chain);
+    const chain = (economy && selectedChain !== null)
+      ? economy.chains.find((c) => c.id === selectedChain) ?? null : null;
+    om.setSupplyChain(chain, true);
     requestRender();
-  }, [economy, selectedChain, selectedRoad, requestRender]);
+  }, [economy, selectedChain, requestRender]);
 
   // Sync overlay visibility
   useEffect(() => {

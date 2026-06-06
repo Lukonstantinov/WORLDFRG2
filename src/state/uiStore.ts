@@ -61,10 +61,16 @@ interface UIStore {
   reachGood: string | null;
   /** Good-flow panel: the good whose routes/price-graph is open, or null. */
   selectedGood: string | null;
-  /** Good-flow panel: the highlighted route (chain id) on the map, or null. */
-  selectedRoad: number | null;
+  /** Good-flow panel: chain ids opened/highlighted independently on the map. */
+  openRoads: number[];
+  /** Hub window: an export good whose destination flows are highlighted, or null. */
+  selectedExport: string | null;
   /** Adjustable trade-hub marker display (size multiplier + highlight intensity). */
   hubDisplay: { size: number; intensity: number };
+  /** Settlement density / realism (0..1): low = sparse & strict, high = dense. */
+  settlementRealism: number;
+  /** Goods-browser panel open (toolbar button → browse all goods by origin). */
+  showGoodsBrowser: boolean;
 
   setTool: (tool: ActiveTool) => void;
   setLayer: (layer: ActiveLayer) => void;
@@ -89,8 +95,12 @@ interface UIStore {
   setShowTradeMatrix: (v: boolean) => void;
   setReachGood: (g: string | null) => void;
   setSelectedGood: (g: string | null) => void;
-  setSelectedRoad: (id: number | null) => void;
+  toggleOpenRoad: (id: number) => void;
+  clearOpenRoads: () => void;
+  setSelectedExport: (g: string | null) => void;
   setHubDisplay: (p: Partial<{ size: number; intensity: number }>) => void;
+  setSettlementRealism: (v: number) => void;
+  setShowGoodsBrowser: (v: boolean) => void;
 }
 
 // Default layer/tool for each step
@@ -133,14 +143,17 @@ export const useUIStore = create<UIStore>((set) => ({
   landmassSource: "none",
   terrainParams: { density: 0.5, height: 0.5, spread: 0.5, roughness: 0.4, seed: null },
   riverParams: { density: 0.5, width: 1.0, lakeFillDepth: 0.004, lakeMaxFraction: 0.0008 },
-  bioParams: { gemDeposits: 6, tradeReach: 1, maxCrossing: 0.18, desertRoutes: false, calendarMonths: 12, stormMonth: 0, economicRegions: 14, luxuryBias: 0.5, climateStrictness: 0.5, piracyLevel: 0, tradeSeason: 0 },
+  bioParams: { gemDeposits: 6, tradeReach: 1, maxCrossing: 0.3, desertRoutes: false, calendarMonths: 12, stormMonth: 0, economicRegions: 14, luxuryBias: 0.5, climateStrictness: 0.5, piracyLevel: 0, tradeSeason: 0 },
   showTradeMatrix: false,
   selectedHub: null,
   selectedChain: null,
   reachGood: null,
   selectedGood: null,
-  selectedRoad: null,
+  openRoads: [],
+  selectedExport: null,
   hubDisplay: { size: 1, intensity: 1 },
+  settlementRealism: 0.55,
+  showGoodsBrowser: false,
 
   setTool: (tool) => set({ activeTool: tool }),
   setLayer: (layer) => set({ activeLayer: layer }),
@@ -148,7 +161,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setElevationValue: (v) => set({ elevationValue: v }),
   setStatus: (text) => set({ statusText: text }),
   setInspectedCell: (cell) => set({ inspectedCell: cell }),
-  setSelectedHub: (id) => set({ selectedHub: id, selectedChain: null }),
+  setSelectedHub: (id) => set({ selectedHub: id, selectedChain: null, selectedExport: null }),
   setSelectedChain: (id) => set({ selectedChain: id }),
   setSimRunning: (running) => set({ simRunning: running }),
   setLayerOpacity: (opacity) => set({ layerOpacity: opacity }),
@@ -182,9 +195,17 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowTradeMatrix: (v) => set({ showTradeMatrix: v }),
 
   setReachGood: (g) => set({ reachGood: g }),
-  setSelectedGood: (g) => set({ selectedGood: g, selectedRoad: null }),
-  setSelectedRoad: (id) => set({ selectedRoad: id }),
+  setSelectedGood: (g) => set({ selectedGood: g, openRoads: [] }),
+  toggleOpenRoad: (id) => set((state) => ({
+    openRoads: state.openRoads.includes(id)
+      ? state.openRoads.filter((r) => r !== id)
+      : [...state.openRoads, id],
+  })),
+  clearOpenRoads: () => set({ openRoads: [] }),
+  setSelectedExport: (g) => set({ selectedExport: g }),
   setHubDisplay: (p) => set((state) => ({ hubDisplay: { ...state.hubDisplay, ...p } })),
+  setSettlementRealism: (v) => set({ settlementRealism: v }),
+  setShowGoodsBrowser: (v) => set({ showGoodsBrowser: v }),
 
   setWorkflowStep: (step) => {
     const defaults = STEP_DEFAULTS[step] || { layer: "land", tool: "pan" };

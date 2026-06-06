@@ -1,7 +1,7 @@
 import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import type { ActiveTool, ActiveLayer } from "../types";
-import { GOOD_DEFS, goodOverlayKey } from "../goods";
+import { GOOD_DEFS, goodOverlayKey, goodCategory, CATEGORY_ORDER } from "../goods";
 import { LatitudeControl } from "./LatitudeControl";
 
 const tools: { id: ActiveTool; label: string; icon: string; tip: string }[] = [
@@ -107,6 +107,7 @@ export function Toolbar() {
   const setLayerOpacity = useUIStore((s) => s.setLayerOpacity);
   const stretchToFit = useUIStore((s) => s.stretchToFit);
   const setStretchToFit = useUIStore((s) => s.setStretchToFit);
+  const setShowGoodsBrowser = useUIStore((s) => s.setShowGoodsBrowser);
 
   const showBrush = activeTool === "paint" || activeTool === "elevation" || activeTool === "shelf";
 
@@ -293,20 +294,37 @@ export function Toolbar() {
           world's editable spec list, falling back to the static defaults. */}
       <div style={section}>
         <div style={sectionHeader}>Trade Goods</div>
-        {goodItems.map((g) => {
-          const key = goodOverlayKey(g.id);
+        <button
+          onClick={() => setShowGoodsBrowser(true)}
+          style={{ width: "100%", marginBottom: 6, padding: "4px 6px", fontSize: 10,
+            background: "#16243a", color: "#cfe0f4", border: "1px solid #2a3e58",
+            borderRadius: 4, cursor: "pointer" }}>
+          📖 Browse goods by origin
+        </button>
+        {CATEGORY_ORDER.map((cat) => {
+          const items = goodItems.filter((g) => goodCategory(g.id) === cat);
+          if (items.length === 0) return null;
           return (
-            <label key={key} style={checkboxRow}>
-              <input
-                type="checkbox"
-                checked={!!overlayVisibility[key]}
-                onChange={() => toggleOverlay(key)}
-                style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
-              />
-              <span style={{ color: overlayVisibility[key] ? "#b0c8e0" : "#5a6a80" }}>
-                {g.icon} {g.name}
-              </span>
-            </label>
+            <div key={cat} style={{ marginBottom: 3 }}>
+              <div style={{ color: "#5f7390", fontSize: 9, textTransform: "uppercase",
+                letterSpacing: 0.4, margin: "3px 0 1px" }}>{cat}</div>
+              {items.map((g) => {
+                const key = goodOverlayKey(g.id);
+                return (
+                  <label key={key} style={checkboxRow}>
+                    <input
+                      type="checkbox"
+                      checked={!!overlayVisibility[key]}
+                      onChange={() => toggleOverlay(key)}
+                      style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
+                    />
+                    <span style={{ color: overlayVisibility[key] ? "#b0c8e0" : "#5a6a80" }}>
+                      {g.icon} {g.name}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
           );
         })}
       </div>

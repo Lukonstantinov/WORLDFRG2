@@ -663,10 +663,21 @@ pub fn compute_trade_goods(
 
                 let mut cand = vec![0.0f32; n];
                 if suitability {
+                    // Land deposit goods (salt/iron) score on land; MARINE deposit
+                    // goods (e.g. ambergris) score on SEA cells. Previously this loop
+                    // skipped every non-land cell, so a marine deposit good — which
+                    // scores 0 on land — produced an all-zero candidate field and
+                    // placed nothing (ambergris was invisible). Score the domain that
+                    // the good actually lives in.
+                    let marine_dep = matches!(spec.domain, Domain::Marine);
                     for y in 0..h {
                         for x in 0..w {
                             let i = buf.idx(x, y);
-                            if buf.terrain[i] != 1 { continue; }
+                            if marine_dep {
+                                if buf.terrain[i] != 0 { continue; }
+                            } else if buf.terrain[i] != 1 {
+                                continue;
+                            }
                             cand[i] = shape(if let Some(env) = &spec.scoring {
                                 envelope_score(buf, env, spec.domain, x, y)
                             } else if let Some(idx) = builtin_idx {
@@ -798,15 +809,29 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
                 * (0.4 + 0.6 * fert) * (1.0 - smoothstep(0.4, 0.7, elev))
         }
         GOOD_WINE => {
-            let clim = match k { CSA | CSB => 1.0, CFA | CFB | DSA | DSB => 0.45, _ => 0.0 };
+            // Viticulture sits in a fairly narrow warm-temperate band (≈30–50°):
+            // Mediterranean cores, humid-subtropical (SE-US style) and the cooler
+            // oceanic margins (Bordeaux/Rhine = Cfb, but only the warm end). The old
+            // rule had a wide temperature bell and gave full oceanic weight, so a
+            // warm-current-warmed 55–60° coast still scored as wine country. Tightened
+            // the temperature bell, lowered the cool-oceanic weight, and added an
+            // explicit latitude band so wine stops creeping into the far north.
+            let clim = match k { CSA | CSB => 1.0, CFA => 0.55, CFB | DSA | DSB => 0.40, _ => 0.0 };
             let hill = 0.7 + 0.3 * band(elev, 0.05, 0.35, 0.2);
-            clim * bell(t, 16.0, 6.0) * band(p, 300.0, 950.0, 400.0) * hill
+            clim * bell(t, 15.0, 5.5) * band(p, 300.0, 950.0, 400.0)
+                * band(abs_lat, 28.0, 50.0, 7.0) * hill
         }
         GOOD_OLIVEOIL => {
-            let clim = match k { CSA => 1.0, CSB => 0.8, CFA => 0.3, _ => 0.0 };
-            let warm = smoothstep(13.0, 18.0, t);
+            // Olives are strictly Mediterranean (hot dry summers, mild winters,
+            // ≈30–45°). Humid-subtropical (Cfa) is too wet/humid for quality olives,
+            // so its weight is cut hard; added a latitude band and an upper-heat
+            // taper (olives drop off in true tropical heat). The old rule let olive
+            // oil sprawl into humid subtropics far outside the olive belt.
+            let clim = match k { CSA => 1.0, CSB => 0.85, CFA => 0.15, _ => 0.0 };
+            let warm = smoothstep(13.0, 18.0, t) * (1.0 - smoothstep(30.0, 38.0, t));
             let low = 1.0 - smoothstep(0.35, 0.6, elev);
-            clim * warm * low * (0.7 + 0.3 * if coastland { 1.0 } else { 0.0 })
+            clim * warm * low * band(abs_lat, 30.0, 46.0, 8.0)
+                * (0.7 + 0.3 * if coastland { 1.0 } else { 0.0 })
         }
         GOOD_SUGAR => {
             let clim = match k { AF | AM => 1.0, AW | AS => 0.6, CWA => 0.4, _ => 0.0 };

@@ -122,7 +122,21 @@ fn render_climate(tile: &TileData, rgba: &mut [u8]) {
     for i in 0..PIXEL_COUNT {
         let offset = i * 4;
         if tile.terrain[i] == 0 {
-            rgba[offset + 3] = 0; // transparent for sea
+            // Polar SEA ICE: frozen high-latitude ocean reads as a white ice cap
+            // at the climate stage (Köppen itself is land-only, so without this the
+            // poles looked open-water). Pack ice forms below roughly -1.8°C; we fade
+            // a pale ice tint in over a couple of degrees so the cap edge is soft.
+            let t = tile.temperature[i];
+            if t < 1.0 {
+                let ice = ((1.0 - t) / 4.0).clamp(0.0, 1.0); // 0 at +1°C → 1 by -3°C
+                let (r, g, b) = lerp_rgb((150, 180, 205), (238, 244, 250), ice);
+                rgba[offset] = r;
+                rgba[offset + 1] = g;
+                rgba[offset + 2] = b;
+                rgba[offset + 3] = (180.0 * ice) as u8; // transparent open water → opaque ice
+            } else {
+                rgba[offset + 3] = 0; // transparent for open sea
+            }
             continue;
         }
         let (r, g, b) = koppen_color(tile.koppen[i]);
@@ -155,8 +169,8 @@ fn koppen_color(code: u8) -> (u8, u8, u8) {
         18 => (255, 0, 255),    // Dsa - Med continental hot
         19 => (200, 0, 200),    // Dsb - Med continental warm
         20 => (150, 50, 150),   // Dsc - Med continental cold
-        21 => (178, 178, 178),  // ET - tundra
-        22 => (104, 104, 104),  // EF - ice cap
+        21 => (200, 205, 210),  // ET - tundra (pale grey, edges the ice)
+        22 => (240, 246, 252),  // EF - ice cap (bright white permanent ice)
         23 => (110, 200, 230),  // As - savanna, dry summer
         24 => (170, 235, 120),  // Cwa - monsoon humid subtropical
         25 => (120, 205, 120),  // Cwb - subtropical highland
