@@ -21,6 +21,18 @@ pub struct TileResponse {
     pub rgba: String, // base64-encoded RGBA pixels
 }
 
+/// One rendered tile image before response encoding (shared by the JSON and
+/// packed-binary commands).
+struct RawTileImage {
+    tx: i32,
+    ty: i32,
+    layer_idx: u8, // index into the request's `layers`
+    version: i64,
+    rgba: Vec<u8>,
+}
+
+/// JSON/base64 response (kept for compatibility and debugging; the frontend's
+/// hot path uses `get_tiles_packed`).
 #[tauri::command]
 pub fn get_tiles(
     tiles: Vec<(i32, i32)>,
@@ -28,22 +40,76 @@ pub fn get_tiles(
     lod: i32,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<TileResponse>, String> {
+    let raw = render_tiles_raw(tiles, &layers, lod, &db)?;
+    Ok(raw
+        .into_iter()
+        .map(|r| TileResponse {
+            tx: r.tx,
+            ty: r.ty,
+            layer: layers[r.layer_idx as usize].clone(),
+            version: r.version,
+            rgba: BASE64.encode(&r.rgba),
+        })
+        .collect())
+}
+
+/// Raw-bytes response: no base64 (+33 %), no `atob`, no multi-MB JSON parse on
+/// the frontend. Format (little-endian): `[u32 count]` then per record
+/// `[i32 tx][i32 ty][i64 version][u8 layer_idx][u8 lod][u16 size_px]
+///  [u32 byte_len][byte_len RGBA bytes]`.
+#[tauri::command]
+pub fn get_tiles_packed(
+    tiles: Vec<(i32, i32)>,
+    layers: Vec<String>,
+    lod: i32,
+    db: State<'_, WorldDb>,
+) -> Result<tauri::ipc::Response, String> {
+    let lod = lod.clamp(0, MAX_LOD);
+    let raw = render_tiles_raw(tiles, &layers, lod, &db)?;
+    Ok(tauri::ipc::Response::new(pack_tiles(&raw, lod)))
+}
+
+fn pack_tiles(raw: &[RawTileImage], lod: i32) -> Vec<u8> {
+    let total: usize = 4 + raw.iter().map(|r| 24 + r.rgba.len()).sum::<usize>();
+    let mut out = Vec::with_capacity(total);
+    out.extend_from_slice(&(raw.len() as u32).to_le_bytes());
+    for r in raw {
+        out.extend_from_slice(&r.tx.to_le_bytes());
+        out.extend_from_slice(&r.ty.to_le_bytes());
+        out.extend_from_slice(&r.version.to_le_bytes());
+        out.push(r.layer_idx);
+        out.push(lod as u8);
+        out.extend_from_slice(&(TILE_SIZE as u16).to_le_bytes());
+        out.extend_from_slice(&(r.rgba.len() as u32).to_le_bytes());
+        out.extend_from_slice(&r.rgba);
+    }
+    out
+}
+
+/// Render the requested tiles for every layer at the given LOD, as raw RGBA.
+fn render_tiles_raw(
+    tiles: Vec<(i32, i32)>,
+    layers: &[String],
+    lod: i32,
+    db: &State<'_, WorldDb>,
+) -> Result<Vec<RawTileImage>, String> {
     let lod = lod.clamp(0, MAX_LOD);
     if lod == 0 {
-        return get_tiles_full_res(tiles, layers, db);
+        render_full_res(tiles, layers, db)
+    } else {
+        render_supertiles(tiles, layers, lod, db)
     }
-    get_supertiles(tiles, layers, lod, db)
 }
 
 /// LOD 0 fast path: each (tx, ty) is a base tile, rendered as-is.
-fn get_tiles_full_res(
+fn render_full_res(
     tiles: Vec<(i32, i32)>,
-    layers: Vec<String>,
-    db: State<'_, WorldDb>,
-) -> Result<Vec<TileResponse>, String> {
+    layers: &[String],
+    db: &State<'_, WorldDb>,
+) -> Result<Vec<RawTileImage>, String> {
     // Fetch the compressed blobs + versions under the lock (cheap memcpy), then
-    // release it so the CPU-bound decompress → render → base64 runs in parallel
-    // off-lock instead of serializing every tile behind the DB mutex.
+    // release it so the CPU-bound decompress → render runs in parallel off-lock
+    // instead of serializing every tile behind the DB mutex.
     let raw: Vec<(i32, i32, i64, Option<Vec<u8>>)> = {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
         tiles
@@ -66,14 +132,13 @@ fn get_tiles_full_res(
                 Some(b) => TileData::decompress(b),
                 None => TileData::new_sea(),
             };
-            layers.iter().map(move |layer| {
-                let rgba_bytes = tile_image::render_tile(&tile, layer);
-                TileResponse {
+            layers.iter().enumerate().map(move |(li, layer)| {
+                RawTileImage {
                     tx: *tx,
                     ty: *ty,
-                    layer: layer.clone(),
+                    layer_idx: li as u8,
                     version: *version,
-                    rgba: BASE64.encode(&rgba_bytes),
+                    rgba: tile_image::render_tile(&tile, layer),
                 }
             }).collect::<Vec<_>>()
         })
@@ -87,12 +152,12 @@ fn get_tiles_full_res(
 /// 128×128 image per supertile per layer, built by sampling every S-th cell of
 /// the underlying region — so a fully zoomed-out world costs a handful of
 /// images instead of thousands.
-fn get_supertiles(
+fn render_supertiles(
     tiles: Vec<(i32, i32)>,
-    layers: Vec<String>,
+    layers: &[String],
     lod: i32,
-    db: State<'_, WorldDb>,
-) -> Result<Vec<TileResponse>, String> {
+    db: &State<'_, WorldDb>,
+) -> Result<Vec<RawTileImage>, String> {
     let s = 1i32 << lod;
 
     // Deduped set of base tiles needed across all requested supertiles.
@@ -140,14 +205,13 @@ fn get_supertiles(
         .par_iter()
         .flat_map_iter(|&(tx, ty)| {
             let (tile, version) = sample_supertile(tx, ty, s, &base);
-            layers.iter().map(move |layer| {
-                let rgba_bytes = tile_image::render_tile(&tile, layer);
-                TileResponse {
+            layers.iter().enumerate().map(move |(li, layer)| {
+                RawTileImage {
                     tx,
                     ty,
-                    layer: layer.clone(),
+                    layer_idx: li as u8,
                     version,
-                    rgba: BASE64.encode(&rgba_bytes),
+                    rgba: tile_image::render_tile(&tile, layer),
                 }
             }).collect::<Vec<_>>()
         })
@@ -257,4 +321,39 @@ pub fn get_tile_range(
         }
     }
     get_tiles(tile_coords, layers, lod, db)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The packed format must parse back exactly (mirrors the TS parser in
+    /// TileManager.ts — keep the two in sync).
+    #[test]
+    fn packed_format_round_trips() {
+        let raw = vec![
+            RawTileImage { tx: -3, ty: 7, layer_idx: 0, version: 42, rgba: vec![1, 2, 3, 4] },
+            RawTileImage { tx: 11, ty: 0, layer_idx: 2, version: i64::MAX, rgba: vec![9; 65536] },
+        ];
+        let buf = pack_tiles(&raw, 3);
+
+        let count = u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;
+        assert_eq!(count, 2);
+        let mut off = 4;
+        for r in &raw {
+            let tx = i32::from_le_bytes(buf[off..off + 4].try_into().unwrap());
+            let ty = i32::from_le_bytes(buf[off + 4..off + 8].try_into().unwrap());
+            let version = i64::from_le_bytes(buf[off + 8..off + 16].try_into().unwrap());
+            let layer_idx = buf[off + 16];
+            let lod = buf[off + 17];
+            let size_px = u16::from_le_bytes(buf[off + 18..off + 20].try_into().unwrap());
+            let len = u32::from_le_bytes(buf[off + 20..off + 24].try_into().unwrap()) as usize;
+            off += 24;
+            assert_eq!((tx, ty, version, layer_idx, lod), (r.tx, r.ty, r.version, r.layer_idx, 3));
+            assert_eq!(size_px as u32, TILE_SIZE);
+            assert_eq!(&buf[off..off + len], &r.rgba[..]);
+            off += len;
+        }
+        assert_eq!(off, buf.len());
+    }
 }

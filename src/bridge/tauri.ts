@@ -27,6 +27,16 @@ export async function getTiles(
   return invoke("get_tiles", { tiles, layers, lod });
 }
 
+/** Raw-bytes tile fetch (no base64/JSON overhead). See TileManager's
+ *  parsePackedTiles for the record layout. */
+export async function getTilesPacked(
+  tiles: [number, number][],
+  layers: string[],
+  lod: number = 0,
+): Promise<ArrayBuffer> {
+  return invoke("get_tiles_packed", { tiles, layers, lod });
+}
+
 export async function getTileRange(
   txMin: number, txMax: number,
   tyMin: number, tyMax: number,

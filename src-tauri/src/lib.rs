@@ -26,6 +26,7 @@ pub fn run() {
             world_commands::get_world_meta,
             world_commands::set_latitude_config,
             tile_commands::get_tiles,
+            tile_commands::get_tiles_packed,
             tile_commands::get_tile_range,
             paint_commands::paint_stroke,
             paint_commands::undo,

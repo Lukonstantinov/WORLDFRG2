@@ -1,5 +1,4 @@
-import { getTiles } from "../bridge/tauri";
-import type { TileResponse } from "../types";
+import { getTilesPacked } from "../bridge/tauri";
 
 const TILE_SIZE = 128;
 /** Max supertiles per `get_tiles` invoke — keeps each IPC payload bounded
@@ -29,28 +28,52 @@ function releaseTile(tile: CachedTile) {
   tile.img.height = 0;
 }
 
-/** Decode base64 string to Uint8Array */
-function decodeBase64(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) {
-    bytes[i] = bin.charCodeAt(i);
-  }
-  return bytes;
-}
-
-/** Create an offscreen canvas from base64-encoded RGBA pixel data */
-function canvasFromBase64RGBA(b64: string, width: number, height: number): HTMLCanvasElement {
-  const rgba = decodeBase64(b64);
+/** Create an offscreen canvas from RGBA pixel bytes. */
+function canvasFromRGBA(rgba: Uint8ClampedArray<ArrayBuffer>, width: number, height: number): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d")!;
-  const clamped = new Uint8ClampedArray(rgba.length);
-  clamped.set(rgba);
-  const imageData = new ImageData(clamped, width, height);
-  ctx.putImageData(imageData, 0, 0);
+  ctx.putImageData(new ImageData(rgba, width, height), 0, 0);
   return canvas;
+}
+
+interface PackedTile {
+  tx: number;
+  ty: number;
+  version: number;
+  layerIdx: number;
+  lod: number;
+  sizePx: number;
+  rgba: Uint8ClampedArray<ArrayBuffer>;
+}
+
+/** Parse a `get_tiles_packed` response. Layout (little-endian, mirrors the
+ *  Rust `pack_tiles` — keep the two in sync): `[u32 count]` then per record
+ *  `[i32 tx][i32 ty][i64 version][u8 layerIdx][u8 lod][u16 sizePx]
+ *   [u32 byteLen][RGBA bytes]`. */
+function parsePackedTiles(buf: ArrayBuffer): PackedTile[] {
+  const view = new DataView(buf);
+  let off = 0;
+  const count = view.getUint32(off, true);
+  off += 4;
+  const out: PackedTile[] = [];
+  for (let i = 0; i < count; i++) {
+    const tx = view.getInt32(off, true);
+    const ty = view.getInt32(off + 4, true);
+    const version = Number(view.getBigInt64(off + 8, true));
+    const layerIdx = view.getUint8(off + 16);
+    const lod = view.getUint8(off + 17);
+    const sizePx = view.getUint16(off + 18, true);
+    const byteLen = view.getUint32(off + 20, true);
+    off += 24;
+    // Copy out of the IPC buffer so each tile's pixels are independently
+    // collectable (a view would pin the whole response alive).
+    const rgba = new Uint8ClampedArray(buf.slice(off, off + byteLen));
+    off += byteLen;
+    out.push({ tx, ty, version, layerIdx, lod, sizePx, rgba });
+  }
+  return out;
 }
 
 export class TileManager {
@@ -183,9 +206,9 @@ export class TileManager {
       const keys = chunk.map(([stx, sty]) => this.key(layer, lod, stx, sty));
       for (const k of keys) this.loading.add(k);
 
-      let responses: TileResponse[] = [];
+      let responses: PackedTile[] = [];
       try {
-        responses = await getTiles(chunk, [layer], lod);
+        responses = parsePackedTiles(await getTilesPacked(chunk, [layer], lod));
       } catch (err) {
         console.error("Failed to load tiles:", err);
       } finally {
@@ -203,7 +226,7 @@ export class TileManager {
           this.cache.delete(k);
           releaseTile(old);
         }
-        const img = canvasFromBase64RGBA(resp.rgba, TILE_SIZE, TILE_SIZE);
+        const img = canvasFromRGBA(resp.rgba, resp.sizePx, resp.sizePx);
         this.cache.set(k, {
           img,
           tx: resp.tx,
