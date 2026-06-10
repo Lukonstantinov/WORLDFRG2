@@ -24,7 +24,7 @@ const STEP_INFO = [
   { step: 7, label: "Settlements", desc: "Find optimal locations for cities, towns, and villages." },
   { step: 8, label: "Biological-Trade", desc: "Shark & shipworm waters, trade-good belts, trade routes, and the regional trade matrix." },
   { step: 9, label: "Political", desc: "Re-rank settlements by trade power (route centrality + good monopoly) and map their influence." },
-  { step: 10, label: "Economy", desc: "Build the trade economy: quality-graded production, per-hop prices, hub wealth, supply chains and strategic chokepoints." },
+  { step: 10, label: "Economy", desc: "Solve the market equilibrium: stock-based prices in grain-equivalent, barter ratios, currency goods, grain & trade wealth, supply chains and chokepoints." },
 ] as const;
 
 export function WorkflowPanel() {

@@ -181,6 +181,32 @@ export interface EconReceive {
   chain: number;
   from_hub: number;
 }
+export interface ExchangeRate {
+  good_name: string;
+  /** Units of the counter-good one unit of this good buys here. */
+  ratio: number;
+}
+export interface HubMarketGood {
+  good: number;
+  good_name: string;
+  /** Local price in the grain-equivalent numeraire. */
+  price: number;
+  /** World-standard value (the good's base_value) for comparison. */
+  base_value: number;
+  in_flow: number;
+  out_flow: number;
+  exchanged_for: ExchangeRate[];
+}
+/** Per-hub market panel data from the equilibrium solver. */
+export interface HubMarket {
+  /** Food-stock value per capita (food security). */
+  grain_wealth: number;
+  /** Net market earnings per capita (commercial prosperity). */
+  trade_wealth: number;
+  /** Emergent currency goods at this hub. */
+  currency_goods: string[];
+  prices: HubMarketGood[];
+}
 export interface EconHub {
   id: number;
   x: number;
@@ -211,6 +237,8 @@ export interface EconHub {
   sea_access?: boolean;  // real sea port (not a closed lake)
   exports_to?: EconExport[]; // where this hub's exports go (with %)
   shortages?: ShortageNote[]; // goods it can't fully obtain + why
+  /** Market panel: equilibrium prices, barter ratios, currency goods. */
+  market?: HubMarket | null;
   produces: EconHubGood[];
   receives: EconReceive[];
 }

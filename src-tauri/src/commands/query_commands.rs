@@ -10,6 +10,7 @@ use crate::db::world_cache::WorldTiles;
 use crate::tile::coords::{TileCoord, TILE_SIZE};
 use crate::tile::cell::TileData;
 use crate::sim::biological::GOOD_NAMES;
+use crate::sim::market;
 
 // Salinity u8 ↔ PSU mapping (mirror of sim/ocean.rs).
 const SAL_MIN_PSU: f32 = 28.0;
@@ -2561,6 +2562,40 @@ pub struct EconReceive {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct ExchangeRate {
+    /// Counter-good name.
+    pub good_name: String,
+    /// Units of the counter-good one unit of this good buys here.
+    pub ratio: f32,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct HubMarketGood {
+    pub good: usize,
+    pub good_name: String,
+    /// Local price in the grain-equivalent numeraire.
+    pub price: f32,
+    /// World-standard value (the spec's base_value) for comparison.
+    pub base_value: f32,
+    pub in_flow: f32,
+    pub out_flow: f32,
+    /// What this good actually trades against here (top counter-goods).
+    pub exchanged_for: Vec<ExchangeRate>,
+}
+
+/// Per-hub market panel data from the equilibrium solver (Part III).
+#[derive(Serialize, Deserialize, Clone)]
+pub struct HubMarket {
+    /// Food-stock value per capita (food security).
+    pub grain_wealth: f32,
+    /// Net market earnings per capita (commercial prosperity).
+    pub trade_wealth: f32,
+    /// Emergent currency goods at this hub (most liquid + stable first).
+    pub currency_goods: Vec<String>,
+    pub prices: Vec<HubMarketGood>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct EconHub {
     pub id: u32,
     pub x: f32,
@@ -2601,6 +2636,10 @@ pub struct EconHub {
     #[serde(default)] pub exports_to: Vec<EconExport>,
     /// Goods the hub demands but can't fully get, each with a plain reason.
     #[serde(default)] pub shortages: Vec<ShortageNote>,
+    /// Market panel: equilibrium prices, barter ratios, currency goods,
+    /// grain/trade wealth (None for outposts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub market: Option<HubMarket>,
     pub produces: Vec<EconHubGood>,
     pub receives: Vec<EconReceive>,
 }
@@ -3157,10 +3196,76 @@ pub fn compute_economy(
         }
     }
 
-    // Per-good peak demand (for the demand-spike price premium at hungry markets).
-    let good_demand_max: Vec<f32> = (0..gc)
-        .map(|g| (0..nn).map(|h| demand_v[h][g]).fold(1e-6f32, f32::max))
+    // ── Market equilibrium (Part III): stock-based local prices in the GRAIN
+    // numeraire replace per-hop markup compounding. The solver runs over the
+    // SAME trade graph; freight is an additive cost per travel day, so
+    // remoteness becomes a decaying price gradient instead of a capped
+    // multiplier (the old ×9.6 plateau). ──
+    let km_per_cell = KM_EQUATOR / grid_w.max(1) as f32;
+    let edge_days: Vec<f32> = edge_paths
+        .iter()
+        .map(|p| path_metrics(&cc, p, km_per_cell).1)
         .collect();
+    // All-pairs travel DAYS over the graph (same Dijkstra as gdist, day weights).
+    let mut gdays: Vec<Vec<f32>> = vec![vec![f32::INFINITY; nn]; nn];
+    for src in 0..nn {
+        gdays[src][src] = 0.0;
+        let mut heap: BinaryHeap<Reverse<(i64, usize)>> = BinaryHeap::new();
+        heap.push(Reverse((0, src)));
+        let mut done = vec![false; nn];
+        while let Some(Reverse((_, u))) = heap.pop() {
+            if done[u] { continue; }
+            done[u] = true;
+            let du = gdays[src][u];
+            for &(v, _, eid) in &adj[u] {
+                let nd = du + edge_days[eid];
+                if nd < gdays[src][v] {
+                    gdays[src][v] = nd;
+                    heap.push(Reverse(((nd * 1000.0) as i64, v)));
+                }
+            }
+        }
+    }
+    // Intern good categories. The solver's food convention: ids 0..=3 are
+    // cereal/protein/oil/sweetener (they feed grain_wealth).
+    fn intern_cat(cat_ids: &mut Vec<String>, c: &str) -> usize {
+        if c.is_empty() {
+            return usize::MAX;
+        }
+        if let Some(i) = cat_ids.iter().position(|x| x == c) {
+            i
+        } else {
+            cat_ids.push(c.to_string());
+            cat_ids.len() - 1
+        }
+    }
+    let mut cat_ids: Vec<String> =
+        ["cereal", "protein", "oil", "sweetener"].iter().map(|s| s.to_string()).collect();
+    let mgoods: Vec<market::MarketGood> = (0..gc)
+        .map(|g| market::MarketGood {
+            category: intern_cat(&mut cat_ids, &specs[g].category),
+            need_tier: specs[g].need_tier,
+            base_value: specs[g].base_value.max(0.05),
+            desire: if specs[g].enabled { specs[g].desire.max(0.0) } else { 0.0 },
+        })
+        .collect();
+    let mhubs: Vec<market::MarketHub> = (0..nn)
+        .map(|hh| market::MarketHub {
+            population: nodes[hh].population.max(1) as f32,
+            production: prod[hh].clone(),
+        })
+        .collect();
+    let mut routes_m = market::RouteMatrix::new(nn);
+    for a in 0..nn {
+        for b in (a + 1)..nn {
+            if comp[a] == comp[b] && gdays[a][b].is_finite() {
+                routes_m.set(a, b, gdays[a][b], 0.0);
+            }
+        }
+    }
+    let mparams = market::MarketParams::default();
+    let mkt = market::solve(&mhubs, &mgoods, &routes_m, &mparams);
+
     // Climate at each hub cell (for the merchant-story narrative + price notes).
     let node_koppen: Vec<u8> = nodes.iter().map(|s| {
         let t = world.tile((s.x / TILE_SIZE) as i32, (s.y / TILE_SIZE) as i32);
@@ -3229,191 +3334,132 @@ pub fn compute_economy(
     let mut corridor_acc: std::collections::HashMap<(usize, usize), CorridorAcc> =
         std::collections::HashMap::new();
 
-    // Global scarcity multiplier per good: rarer goods (low world abundance) fetch
-    // higher prices everywhere → multiplier 1.0 … ~3.3×.
-    let scarcity_mult: Vec<f32> = (0..gc)
-        .map(|g| (1.0 / abundance[g].max(0.18)).clamp(1.0, 3.3))
-        .collect();
-    const ELAST: f32 = 0.3;     // gentler elasticity → dear far-hauled goods still reach distant markets
-    const MAX_SUPPLIERS: u8 = 2; // each deficit sources from its 1-2 cheapest reachable origins
+    // The solver's shipment lanes ARE the chains: each flow rides the real
+    // route graph; the per-stop price ladder is the ADDITIVE delivered cost
+    // (origin grain-eq price + freight per travel day, × tolls) shown as a
+    // multiplier vs the origin — replacing per-hop markup compounding.
+    let mut lanes: Vec<&market::MarketFlow> =
+        mkt.flows.iter().filter(|fl| fl.amount > 0.01).collect();
+    // Largest lanes first per good, capped so the snapshot stays legible.
+    lanes.sort_by(|a, b| {
+        a.good.cmp(&b.good).then(
+            b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    let mut lanes_per_good = vec![0u32; gc];
 
-    for g in 0..gc {
-        let mut supply: Vec<(usize, f32)> = (0..nn)
-            .filter_map(|h| { let v = net[h][g]; if v > 0.02 { Some((h, v)) } else { None } }).collect();
-        let mut deficit: Vec<(usize, f32)> = (0..nn)
-            .filter_map(|h| { let v = net[h][g]; if v < -0.02 { Some((h, -v)) } else { None } }).collect();
-        if deficit.is_empty() { continue; }
-        // Guarantee the producer of a good still exports even if the basket-floor
-        // demand technically "consumes" its whole modest output, so no good that is
-        // actually produced somewhere ends up with 0 hubs / 0 routes (#10).
-        if supply.is_empty() {
-            if let Some((h, p)) = (0..nn).map(|h| (h, prod[h][g]))
-                .filter(|&(_, p)| p > 0.02)
-                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)) {
-                supply.push((h, p.max(0.2)));
-            } else {
-                continue; // genuinely produced nowhere
-            }
+    for fl in lanes {
+        let (si, di, g, amt) = (fl.from, fl.to, fl.good, fl.amount);
+        if lanes_per_good[g] >= 220 {
+            continue;
         }
-        deficit.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        // Bound the number of importing markets per good (largest-need first) so a
-        // single homeland good doesn't spawn a chain to every one of up to 600
-        // settlements — the significant markets across the continent still import it.
-        deficit.truncate(220);
+        if !gdist[di][si].is_finite() {
+            continue;
+        }
+        // Rebuild the graph path si → di (the real road the goods travel).
+        // gpar[di] is the shortest-path tree rooted at di, so walking from
+        // si via gpar[di][·] yields si … di directly.
+        let mut path: Vec<usize> = Vec::new();
+        let mut t = si;
+        while t != usize::MAX {
+            path.push(t);
+            if t == di { break; }
+            t = gpar[di][t];
+        }
+        if path.last() != Some(&di) {
+            continue;
+        }
+        lanes_per_good[g] += 1;
+        exports[si] += amt;
+        imports[di] += amt;
+        recv_amt[di][g] += amt;
 
-        for &mut (di, mut need) in deficit.iter_mut() {
-            // Reachable suppliers (same component), cheapest route first.
-            let mut ord: Vec<(usize, f32)> = supply.iter()
-                .filter(|&&(si, av)| si != di && av > 0.05
-                    && comp[si] == comp[di] && gdist[di][si].is_finite())
-                .map(|&(si, _)| (si, gdist[di][si]))
-                .collect();
-            ord.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-
-            let mut used = 0u8;
-            for (si, route_cost) in ord {
-                if need <= 0.05 || used >= MAX_SUPPLIERS { break; }
-                let pos = match supply.iter().position(|&(s, _)| s == si) { Some(p) => p, None => continue };
-                let savail = supply[pos].1;
-                if savail <= 0.05 { continue; }
-
-                // Price is a MULTIPLIER on the origin wholesale that starts at 1.0× at
-                // the source and COMPOUNDS each hub handoff: a merchant from the origin
-                // sells in the next market, another merchant buys and resells onward, so
-                // the margin stacks (the user's "1×, 2×, 4× …" idea). It is kept
-                // believable by a per-good terminal ceiling driven by rarity — a bulk
-                // staple tops out at ~3–5× even after many hubs, a rare spice/gem can
-                // climb toward ~30× (nutmeg). Transport, strait/hub tolls and a hungry
-                // market's demand spike push it further along the road.
-                let sca = scarcity_mult[g];
-                let lux_bonus = if is_luxury[g] { sca * 2.0 } else { 0.0 };
-                let terminal_cap = (2.2 + 9.0 * (sca - 1.0) + lux_bonus).clamp(3.0, 32.0);
-                // Per-handoff merchant markup; rarer goods are marked up more aggressively.
-                let markup = 1.5 + 0.25 * (sca - 1.0); // ~1.5 .. ~2.05 per hub
-                // Elasticity: dampen the volume by how dear the good will be delivered
-                // (previewed from the route cost + a couple of markups), so far, costly
-                // hauls move in smaller quantity but still reach distant markets.
-                let transport_full = route_cost / cc.cw as f32;
-                let delivered_preview = (markup * markup * (1.0 + transport_full * 0.4)).min(terminal_cap);
-                let damp = 1.0 / (1.0 + ELAST * (delivered_preview - 1.0).max(0.0));
-                let want = need * damp;
-                let amt = want.min(savail);
-                if amt <= 0.006 { continue; }
-                need -= amt;
-                // Supply is intentionally NOT depleted: a producing region can serve
-                // the whole continent (one homeland of a good supplies every reachable
-                // market) so goods reach far and every hub that lacks a good imports
-                // it (#8/#12).
-                exports[si] += amt;
-                imports[di] += amt;
-                recv_amt[di][g] += amt;
-                used += 1;
-
-                // Rebuild the graph path si → di (the real road the goods travel).
-                // gpar[di] is the shortest-path tree rooted at di, so walking from
-                // si via gpar[di][·] yields si … di directly.
-                let mut path: Vec<usize> = Vec::new();
-                let mut t = si;
-                while t != usize::MAX { path.push(t); if t == di { break; } t = gpar[di][t]; }
-
-                // Walk the path: accumulate per-edge route cost (for per-stop prices),
-                // per coarse-edge volume (for chokepoints), physical distance/time per
-                // leg, and directional corridor cargo (for the good-flow panel).
-                let chain_id = chains.len() as u32;
-                // Goods passing THROUGH intermediate hubs make those hubs emporia.
-                for k in 1..path.len().saturating_sub(1) { transit[path[k]] += amt; }
-                let mut cum_km = 0.0f32;    // physical distance from origin
-                let mut cum_days = 0.0f32;  // travel time from origin
-                let mut modes = [0u32; 3];
-                let mut chain_stops: Vec<EconChainStop> = Vec::with_capacity(path.len());
-                let mut points: Vec<[f32; 2]> = Vec::with_capacity(path.len());
-                let mut price = 1.0f32;     // 1.0× at the origin wholesale
-                let last_k = path.len().saturating_sub(1);
-                for (k, &h) in path.iter().enumerate() {
-                    let (mut leg_km, mut leg_days, mut leg_mode) = (0.0f32, 0.0f32, 0u8);
-                    let (mut markup_k, mut toll_k, mut crossed_strait) = (0.0f32, 0.0f32, false);
-                    if k > 0 {
-                        let prev = path[k - 1];
-                        let mut leg_transport = 0.0f32;
-                        if let Some(&(_, w, eid)) = adj[prev].iter().find(|&&(v, _, _)| v == h) {
-                            leg_transport = w / cc.cw as f32;
-                            if let Some(p) = edge_paths.get(eid) {
-                                for win in p.windows(2) {
-                                    let e = (win[0].min(win[1]), win[0].max(win[1]));
-                                    edge_vol.entry(e).or_insert((0.0, g)).0 += amt;
-                                }
-                                if p.iter().any(|&c| strait_cell[c]) { crossed_strait = true; }
-                                let (lk, ld, lm) = path_metrics(&cc, p, km_per_cell);
-                                leg_km = lk; leg_days = ld; leg_mode = lm;
-                                cum_km += lk; cum_days += ld; modes[lm as usize] += 1;
-                            }
+        let chain_id = chains.len() as u32;
+        // Goods passing THROUGH intermediate hubs make those hubs emporia.
+        for k in 1..path.len().saturating_sub(1) { transit[path[k]] += amt; }
+        let mut cum_km = 0.0f32;
+        let mut cum_days = 0.0f32;
+        let mut modes = [0u32; 3];
+        let mut chain_stops: Vec<EconChainStop> = Vec::with_capacity(path.len());
+        let mut points: Vec<[f32; 2]> = Vec::with_capacity(path.len());
+        let origin_price = mkt.prices[si][g].max(1e-3);
+        let mut delivered = origin_price; // grain-eq, accrues freight + tolls
+        let last_k = path.len().saturating_sub(1);
+        for (k, &h) in path.iter().enumerate() {
+            let (mut leg_km, mut leg_days, mut leg_mode) = (0.0f32, 0.0f32, 0u8);
+            let (mut freight_k, mut toll_k, mut crossed_strait) = (0.0f32, 0.0f32, false);
+            if k > 0 {
+                let prev = path[k - 1];
+                if let Some(&(_, _, eid)) = adj[prev].iter().find(|&&(v, _, _)| v == h) {
+                    if let Some(p) = edge_paths.get(eid) {
+                        for win in p.windows(2) {
+                            let e = (win[0].min(win[1]), win[0].max(win[1]));
+                            edge_vol.entry(e).or_insert((0.0, g)).0 += amt;
                         }
-                        // Compound the price for this handoff: merchant resale markup ×
-                        // transport/risk premium, then add tolls and a demand spike.
-                        markup_k = markup;
-                        price *= markup_k;
-                        price *= 1.0 + leg_transport * 0.4;
-                        if crossed_strait { toll_k += 0.30; }                 // strait dues
-                        if k < last_k && is_toll_hub[h] { toll_k += 0.20; }   // great-hub transit toll
-                        price *= 1.0 + toll_k;
-                    }
-                    // Demand spike: a market that craves this good bids the price up
-                    // (deficit + desire → the price-history spikes the user described).
-                    let demand_spike = (0.45 * demand_v[h][g] / good_demand_max[g]).clamp(0.0, 0.9);
-                    if k > 0 { price *= 1.0 + demand_spike; }
-                    price = price.min(terminal_cap).max(1.0);
-                    // Short human reason for this stop's price move.
-                    let note = if k == 0 {
-                        "bought at source".to_string()
-                    } else {
-                        let mut parts: Vec<&str> = vec!["merchant markup"];
-                        if crossed_strait { parts.push("strait toll"); }
-                        if k < last_k && is_toll_hub[h] { parts.push("hub transit toll"); }
-                        if demand_spike > 0.25 { parts.push("high local demand"); }
-                        parts.join(" · ")
-                    };
-                    chain_stops.push(EconChainStop {
-                        hub: h as u32, price, days: cum_days, km: cum_km,
-                        markup: markup_k, toll: toll_k, demand_spike,
-                        koppen: node_koppen[h], note,
-                    });
-                    points.push([nodes[h].x as f32, nodes[h].y as f32]);
-                    // Directional corridor cargo: value = amount × delivered-so-far price,
-                    // attributed to the hub→hub segment in the direction goods flow.
-                    if k > 0 {
-                        let prev = path[k - 1];
-                        let (na, nb) = (prev.min(h), prev.max(h));
-                        let value_here = amt * price;
-                        let acc = corridor_acc.entry((na, nb)).or_default();
-                        if prev < h {
-                            acc.fwd_value += value_here;
-                            *acc.fwd_good.entry(g).or_insert(0.0) += value_here;
-                        } else {
-                            acc.bwd_value += value_here;
-                            *acc.bwd_good.entry(g).or_insert(0.0) += value_here;
-                        }
-                        acc.days = leg_days; acc.km = leg_km; acc.mode = leg_mode;
+                        if p.iter().any(|&c| strait_cell[c]) { crossed_strait = true; }
+                        let (lk, ld, lm) = path_metrics(&cc, p, km_per_cell);
+                        leg_km = lk; leg_days = ld; leg_mode = lm;
+                        cum_km += lk; cum_days += ld; modes[lm as usize] += 1;
                     }
                 }
-                let delivered = chain_stops.last().map(|s| s.price).unwrap_or(1.0);
-                let total_days = chain_stops.last().map(|s| s.days).unwrap_or(0.0);
-                let total_km = chain_stops.last().map(|s| s.km).unwrap_or(0.0);
-                let dom_mode = (0..3usize).max_by_key(|&i| modes[i]).unwrap_or(0) as u8;
-                receives[di].push(EconReceive {
-                    good: g, good_name: goods_names.get(g).cloned().unwrap_or_default(),
-                    amount: amt, price: delivered, chain: chain_id, from_hub: si as u32,
-                });
-                chains.push(EconChain {
-                    id: chain_id, good: g,
-                    good_name: goods_names.get(g).cloned().unwrap_or_default(),
-                    stops: chain_stops, points,
-                    days: total_days, km: total_km, value: amt * delivered, mode: dom_mode,
-                });
-                // Record the outbound leg from the ORIGIN hub to its consumer (drives
-                // the hub window's export list with destination shares).
-                export_acc[si].push((g, di, amt, chain_id));
+                // Additive freight for this leg, then tolls on the value so far.
+                freight_k = mparams.freight_per_day * leg_days;
+                delivered += freight_k;
+                if crossed_strait { toll_k += 0.30; }                 // strait dues
+                if k < last_k && is_toll_hub[h] { toll_k += 0.20; }   // great-hub transit toll
+                delivered *= 1.0 + toll_k;
+            }
+            // Unmet local need still reads as a "demand spike" in the story,
+            // but it no longer multiplies the price — cost does.
+            let demand_spike = if k > 0 { (mkt.unmet[h][g] * 0.45).clamp(0.0, 0.9) } else { 0.0 };
+            let note = if k == 0 {
+                "bought at source".to_string()
+            } else {
+                let mut parts: Vec<&str> = vec!["freight"];
+                if crossed_strait { parts.push("strait toll"); }
+                if k < last_k && is_toll_hub[h] { parts.push("hub transit toll"); }
+                if demand_spike > 0.25 { parts.push("high local demand"); }
+                parts.join(" · ")
+            };
+            chain_stops.push(EconChainStop {
+                hub: h as u32,
+                price: delivered / origin_price, // multiplier vs origin (UI compat)
+                days: cum_days, km: cum_km,
+                markup: freight_k / origin_price, // the leg's freight, as a fraction
+                toll: toll_k, demand_spike,
+                koppen: node_koppen[h], note,
+            });
+            points.push([nodes[h].x as f32, nodes[h].y as f32]);
+            // Directional corridor cargo, valued at the delivered grain-eq cost.
+            if k > 0 {
+                let prev = path[k - 1];
+                let (na, nb) = (prev.min(h), prev.max(h));
+                let value_here = amt * delivered;
+                let acc = corridor_acc.entry((na, nb)).or_default();
+                if prev < h {
+                    acc.fwd_value += value_here;
+                    *acc.fwd_good.entry(g).or_insert(0.0) += value_here;
+                } else {
+                    acc.bwd_value += value_here;
+                    *acc.bwd_good.entry(g).or_insert(0.0) += value_here;
+                }
+                acc.days = leg_days; acc.km = leg_km; acc.mode = leg_mode;
             }
         }
+        let mult = chain_stops.last().map(|st| st.price).unwrap_or(1.0);
+        let total_days = chain_stops.last().map(|st| st.days).unwrap_or(0.0);
+        let total_km = chain_stops.last().map(|st| st.km).unwrap_or(0.0);
+        let dom_mode = (0..3usize).max_by_key(|&i| modes[i]).unwrap_or(0) as u8;
+        receives[di].push(EconReceive {
+            good: g, good_name: goods_names.get(g).cloned().unwrap_or_default(),
+            amount: amt, price: mult, chain: chain_id, from_hub: si as u32,
+        });
+        chains.push(EconChain {
+            id: chain_id, good: g,
+            good_name: goods_names.get(g).cloned().unwrap_or_default(),
+            stops: chain_stops, points,
+            days: total_days, km: total_km, value: amt * delivered, mode: dom_mode,
+        });
+        export_acc[si].push((g, di, amt, chain_id));
     }
 
     // ── Export destinations + shares per hub ──
@@ -3489,11 +3535,15 @@ pub fn compute_economy(
         })
     }).collect();
 
-    // ── Wealth per hub (production value + trade throughput balance) ──
+    // ── Wealth per hub: grain wealth (food security) + trade wealth (market
+    // earnings) from the equilibrium, plus a small centrality term so pure
+    // crossroads towns don't read as paupers. Normalized for the UI. ──
     let mut wealth = vec![0.0f32; nn];
     for hh in 0..nn {
-        let prod_val: f32 = (0..gc).map(|g| prod[hh][g] * desire[g]).sum();
-        wealth[hh] = prod_val + 0.6 * exports[hh] + 0.3 * imports[hh] + 0.4 * (centrality[hh] / cmax);
+        let m = &mkt.hubs[hh];
+        wealth[hh] = m.grain_wealth.max(0.0)
+            + 1.5 * m.trade_wealth.max(0.0)
+            + 0.25 * (centrality[hh] / cmax);
     }
     let wmax = wealth.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
 
@@ -3560,9 +3610,9 @@ pub fn compute_economy(
                 EconHubGood {
                     good: g, good_name: id, amount: prod[hh][g], quality: q,
                     grade: grade_name(q).to_string(), flavor,
-                    // Local wholesale at the source ≈ 1× (the base the traded
-                    // multiplier climbs from), nudged a little by quality.
-                    price: 0.9 + 0.25 * q,
+                    // Local equilibrium price in grain-equivalent (quality
+                    // nudges the realized sale price a little).
+                    price: mkt.prices[hh][g] * (0.9 + 0.25 * q),
                 }
             }).collect();
         produces.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
@@ -3591,11 +3641,13 @@ pub fn compute_economy(
         let mut luxuries: Vec<HubLuxury> = (0..gc)
             .filter(|&g| is_luxury[g] && demand_v[hh][g] > 0.04)
             .map(|g| {
-                let price = receives[hh].iter().find(|r| r.good == g).map(|r| r.price).unwrap_or_else(|| {
-                    let dmd = demand_v[hh][g].max(1e-3);
-                    let shortfall = (1.0 - recv_amt[hh][g] / dmd).clamp(0.0, 1.0);
-                    1.0 + scarcity_mult[g] * (0.5 + 1.5 * shortfall)
-                });
+                // Delivered multiplier if it arrives by trade, else the local
+                // equilibrium price relative to the world standard (scarce here
+                // → well above 1×).
+                let price = receives[hh].iter().find(|r| r.good == g).map(|r| r.price)
+                    .unwrap_or_else(|| {
+                        (mkt.prices[hh][g] / specs[g].base_value.max(0.05)).max(1.0)
+                    });
                 HubLuxury {
                     good: g, good_name: goods_names.get(g).cloned().unwrap_or_default(),
                     demand: demand_v[hh][g], received: recv_amt[hh][g], price,
@@ -3603,6 +3655,59 @@ pub fn compute_economy(
             }).collect();
         luxuries.sort_by(|a, b| b.demand.partial_cmp(&a.demand).unwrap_or(std::cmp::Ordering::Equal));
         luxuries.truncate(8);
+
+        // ── Market panel: prices in grain-eq, barter ratios, currency goods ──
+        let market_panel = if is_outpost[hh] { None } else {
+            let m = &mkt.hubs[hh];
+            // This hub's top exports (by outbound value) are what imports are
+            // bartered against.
+            let mut top_exp: Vec<(usize, f32)> = (0..gc)
+                .filter(|&g| exp_by[hh][g] > 0.01 || prod[hh][g] > 0.2)
+                .map(|g| (g, exp_by[hh][g].max(prod[hh][g] * 0.2) * mkt.prices[hh][g]))
+                .collect();
+            top_exp.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            top_exp.truncate(3);
+            // The most market-relevant goods here: traded, produced, or notably
+            // mispriced vs the world standard.
+            let mut relevant: Vec<(usize, f32)> = (0..gc)
+                .filter(|&g| specs[g].enabled)
+                .map(|g| {
+                    let dev = (mkt.prices[hh][g] / specs[g].base_value.max(0.05) - 1.0).abs();
+                    let activity = (recv_amt[hh][g] + exp_by[hh][g]) * mkt.prices[hh][g];
+                    (g, activity + dev * specs[g].base_value.sqrt())
+                })
+                .filter(|&(_, score)| score > 0.02)
+                .collect();
+            relevant.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            relevant.truncate(16);
+            let prices_v: Vec<HubMarketGood> = relevant.iter().map(|&(g, _)| {
+                let exchanged_for: Vec<ExchangeRate> = top_exp.iter()
+                    .filter(|&&(eg, _)| eg != g)
+                    .map(|&(eg, _)| ExchangeRate {
+                        good_name: goods_names.get(eg).cloned().unwrap_or_default(),
+                        // Units of the counter-good one unit of g buys here.
+                        ratio: mkt.prices[hh][g] / mkt.prices[hh][eg].max(1e-3),
+                    })
+                    .collect();
+                HubMarketGood {
+                    good: g,
+                    good_name: goods_names.get(g).cloned().unwrap_or_default(),
+                    price: mkt.prices[hh][g],
+                    base_value: specs[g].base_value,
+                    in_flow: recv_amt[hh][g],
+                    out_flow: exp_by[hh][g],
+                    exchanged_for,
+                }
+            }).collect();
+            Some(HubMarket {
+                grain_wealth: m.grain_wealth,
+                trade_wealth: m.trade_wealth,
+                currency_goods: m.currency_goods.iter()
+                    .map(|&(g, _)| goods_names.get(g).cloned().unwrap_or_default())
+                    .collect(),
+                prices: prices_v,
+            })
+        };
 
         hubs.push(EconHub {
             id: hh as u32,
@@ -3651,6 +3756,7 @@ pub fn compute_economy(
             ref_pct: (throughput_v[hh] / tp_max * 100.0).clamp(0.0, 100.0),
             nearest_ref: nearest_ref_hub((throughput_v[hh] / tp_max * 100.0).clamp(0.0, 100.0)).to_string(),
             monopolies: monopolies_v[hh].clone(),
+            market: market_panel,
             produces,
             receives: recv,
         });

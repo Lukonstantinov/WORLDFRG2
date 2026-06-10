@@ -37,7 +37,7 @@ export function StepEconomy(_props: Props) {
       return;
     }
     setSimRunning(true);
-    setStatus("Building economy: production, quality grades, prices, wealth & chokepoints...");
+    setStatus("Solving market equilibrium: stocks, grain-standard prices, wealth & chokepoints...");
     try {
       const result = await computeEconomy(
         settlements.map((s) => ({ x: s.x, y: s.y, score: s.score, population: s.population })),
@@ -136,11 +136,11 @@ export function StepEconomy(_props: Props) {
 
       <div style={{ color: "#405060", fontSize: 10, marginTop: 2 }}>
         Builds the <b>trade economy</b> on the political hubs: quality-graded
-        production, cost-aware flows with a price at every hop, per-hub wealth,
+        production, a market equilibrium with grain-standard prices, per-hub wealth,
         and the world&rsquo;s strategic chokepoints (geographic <b>straits</b> &amp;
         emporium <b>cities</b>). Click a hub to inspect its goods &amp; supply
         chains, or click a <b>good belt</b> on the map to see its export routes,
-        travel days &amp; a price-along-the-journey graph.
+        travel days &amp; a delivered-cost ladder along the journey.
       </div>
     </div>
   );
