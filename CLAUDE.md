@@ -21,12 +21,19 @@ npx tsc --noEmit       # TypeScript type-check only
 - World grid divided into 128x128 cell tiles (`TILE_SIZE = 128` in `tile/coords.rs`)
 - Cylindrical topology: X wraps, Y clamps at poles
 - Each tile has columnar data fields (terrain, elevation, temperature, … plus
-  `salinity` u8, `shark_risk` u8, `goods: Vec<Vec<u8>>` of `GOODS_COUNT`=21
-  trade-good belts, and `shipworm_risk` u8 — serialized LAST, after goods). New fields are **appended last** in `compress`/`decompress`
-  so older `.worldforge` saves still load (trailing reads pad with zeros).
+  `salinity` u8, `shark_risk` u8, `goods: Vec<Vec<u8>>` of `GOODS_COUNT`=45
+  trade-good belts, then shipworm/storm/reef/disease u8). Blobs are v2
+  self-describing (`[0xF2][2][goods_count u16]`); new fields are **appended
+  last** so older `.worldforge` saves still load (trailing reads pad zeros).
+- **Column-masked sim loads**: each sim phase loads only the `WorldBuffer`
+  columns it touches (`ColumnSet` per-phase masks in `sim/world_buffer.rs`);
+  `save()` merges unmodified columns from the old blobs. Run-alls load ALL.
 - Tiles stored as zstd-compressed blobs in SQLite
-- Rendered server-side as RGBA → base64 → transferred to frontend as PixiJS textures
-- LRU cache of 2000 tiles on frontend
+- Rendered server-side as RGBA → packed binary IPC (`get_tiles_packed`) →
+  frontend canvas tiles (base64 `get_tiles` kept for compat)
+- **LOD pyramid**: lod 1-4 supertiles (one 128×128 image covers 2^L×2^L base
+  tiles), persisted in the `tiles` table, invalidated on base-tile writes
+- LRU cache of 2000 tiles on frontend (keys layer|lod|tx,ty; chunked fetches)
 
 ### Data Flow
 ```
@@ -38,6 +45,20 @@ UI action → bridge/tauri.ts (invoke) → commands/*.rs → sim/*.rs or paint/*
 ### WorldBuffer Pattern
 Simulation operates on flat world-sized arrays (`WorldBuffer` in `sim/world_buffer.rs`).
 Load all tiles → run simulation → write back. Never mutate tiles directly during sim.
+
+## World / Campaign split
+
+The WORLD (tiles + `metadata`: geography, climate, rivers/lakes, goods spec,
+lat config, `world_progress`) is frozen by **Finalize World**
+(`finalize_world` sets `frozen=1` + records `finalized_fp`). Everything human
+lives in the `campaign` table (settlements, economy, `campaign_progress`,
+`world_ref`) and saves to a separate **`.campaign`** file
+(`save_campaign_as`/`open_campaign`, fingerprint-checked). `save_world_as`
+strips campaign rows. Paint/template/sim phases 1-6 + run-alls call
+`ensure_unfrozen`. Legacy single-file saves migrate in-memory on open
+(`legacy=true` → the app offers to split). `import_world_layers` copies layer
+groups (terrain/climate/hydrology/soil/hazards/goods) from another world of
+the same grid size via `TileData::merge_columns`.
 
 ## Key Files
 
@@ -65,7 +86,10 @@ sim/fertility.rs                ← Phase 6b: fertility scoring, fisheries
 sim/settlements.rs              ← Phase 7: habitability → city placement
 sim/biological.rs               ← Phase 8: shark-habitat risk + trade-good belts
 sim/ocean.rs (compute_salinity) ← Phase 3 add-on: wind/E-P salinity + thermohaline coupling
-commands/sim_commands.rs        ← Tauri commands wrapping sim phases
+sim/market.rs                   ← Market equilibrium solver (stocks → grain-eq prices → arbitrage)
+commands/sim_commands.rs        ← Tauri commands wrapping sim phases (per-phase ColumnSet masks)
+commands/campaign_commands.rs   ← finalize/unfreeze, new/save/open campaign, set_progress
+commands/import_commands.rs     ← import_world_layers (layered world import)
 commands/template_commands.rs   ← Image → land/sea detection (4-bit quantization)
 commands/file_commands.rs       ← Save/open world, export heightmap
 history/undo.rs                 ← Tile-level undo/redo journal
@@ -111,6 +135,7 @@ Run in order. Each phase depends on previous phases' data.
 | 7 | `sim_generate_settlements` | Habitability scoring → city placement |
 | 8 | `sim_biological` | Shark + shipworm risk + trade-good belts (Biological-Trade step; takes seed + gem_deposits) |
 | 9 | `compute_political` | (query-only, no tile write) Re-rank settlements by trade power + influence discs |
+| 10 | `compute_economy` | (query-only) **Market equilibrium**: stock-based prices in grain-equivalent, barter ratios, currency goods, grain/trade wealth, chains & chokepoints |
 | All | `sim_run_all` | Phases 1-8 from plates |
 | All | `sim_run_all_from_terrain` | Phases 2alt-8 keeping existing landmass |
 
@@ -248,3 +273,25 @@ Pan, Paint Land (terrain 0/1), Elevation (f32 0-1), Paint Shelf (u8 0/1), Place 
 - **Save/Open:** SQLite backup API (`.worldforge` files)
 - **Export Heightmap:** 16-bit grayscale PNG from elevation data
 - **Import Template:** Image → land/sea auto-detection → terrain mask
+
+## Market economy (Part III, replaces per-hop markup pricing)
+
+`sim/market.rs::solve` — pure & deterministic: per-hub stocks (production),
+needs ladder (basic/comfort/luxury) with **category substitution** (15
+categories on `GoodSpec`: cereal/protein/oil/sweetener/fiber/drink/…; short of
+wheat → buys rice at a penalty), local price `base_value·(need/stock)^0.6` in
+the **grain-equivalent numeraire** (wheat=1, `GoodSpec.base_value`), arbitrage
+on live prices with freight as an additive cost/day and import caps at
+delivered-cost parity → decaying spatial price gradients, no terminal cap.
+`compute_economy` feeds it travel-days over its trade graph and emits
+`EconHub.market` (prices vs world standard, in/out flows, exchange ratios
+against the hub's top exports, currency goods, grain_wealth + trade_wealth).
+Hub `wealth` = normalized(grain + 1.5·trade + 0.25·centrality).
+
+Goods: 45 builtins (38 + rice, barley, millet, herring, honey, hides, beer) +
+12 declarative customs; tobacco/frankincense/indigo ship disabled (~1400
+curation). `backfill_market_fields` fills category/tier/base_value on specs
+from pre-market saves.
+
+Parts IV-V (tick simulation "Living Trade", merchant dynasties) are FUTURE
+DLC — see docs/REDESIGN_AND_DLC_PLAN.md Parts IV-V.
