@@ -1,4 +1,19 @@
 import { create } from "zustand";
+import { setProgress } from "../bridge/tauri";
+
+/** Persist step completion: steps 1-6 travel with the world file, 7-10 with
+ *  the campaign. Fire-and-forget — a failed write only loses the checkmarks. */
+function persistProgress(stepCompleted: Record<number, boolean>) {
+  const world: Record<number, boolean> = {};
+  const campaign: Record<number, boolean> = {};
+  for (const [k, v] of Object.entries(stepCompleted)) {
+    if (!v) continue;
+    const n = Number(k);
+    (n <= 6 ? world : campaign)[n] = true;
+  }
+  setProgress("world", JSON.stringify(world)).catch(() => {});
+  setProgress("campaign", JSON.stringify(campaign)).catch(() => {});
+}
 import type { ActiveTool, ActiveLayer, WorkflowStep } from "../types";
 import { GOOD_DEFS, goodOverlayKey } from "../goods";
 
@@ -82,6 +97,7 @@ interface UIStore {
   setSelectedChain: (id: number | null) => void;
   setWorkflowStep: (step: WorkflowStep) => void;
   markStepCompleted: (step: number) => void;
+  setStepsCompleted: (steps: number[]) => void;
   setSimRunning: (running: boolean) => void;
   resetWorkflow: () => void;
   setOverlayVisible: (type: string, visible: boolean) => void;
@@ -217,9 +233,20 @@ export const useUIStore = create<UIStore>((set) => ({
   },
 
   markStepCompleted: (step) =>
-    set((state) => ({
-      stepCompleted: { ...state.stepCompleted, [step]: true },
-    })),
+    set((state) => {
+      const stepCompleted = { ...state.stepCompleted, [step]: true };
+      persistProgress(stepCompleted);
+      return { stepCompleted };
+    }),
+
+  /** Restore completion state (e.g. from a re-opened world/campaign) without
+   *  writing it back to the DB. */
+  setStepsCompleted: (steps) =>
+    set(() => {
+      const stepCompleted: Record<number, boolean> = {};
+      for (const s of steps) stepCompleted[s] = true;
+      return { stepCompleted };
+    }),
 
   resetWorkflow: () =>
     set({

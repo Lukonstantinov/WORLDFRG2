@@ -7,7 +7,7 @@ pub mod commands;
 pub mod sim;
 pub mod import;
 
-use commands::{world_commands, tile_commands, paint_commands, query_commands, template_commands, sim_commands, file_commands, goods_commands};
+use commands::{world_commands, tile_commands, paint_commands, query_commands, template_commands, sim_commands, file_commands, goods_commands, campaign_commands};
 use db::WorldDb;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -74,6 +74,12 @@ pub fn run() {
             sim_commands::sim_biological,
             sim_commands::sim_run_all,
             file_commands::save_world_as,
+            campaign_commands::finalize_world,
+            campaign_commands::unfreeze_world,
+            campaign_commands::new_campaign,
+            campaign_commands::save_campaign_as,
+            campaign_commands::open_campaign,
+            campaign_commands::set_progress,
             file_commands::open_world,
             file_commands::export_heightmap,
             file_commands::export_layers,

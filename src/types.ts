@@ -9,6 +9,27 @@ export interface WorldMeta {
   lat_scale: number;
   /** Line-spacing ratio (gap 30→60 ÷ gap 0→30); shared with the simulation. */
   lat_ratio: number;
+  /** True once the world's geography is finalized (campaign steps unlocked). */
+  frozen: boolean;
+}
+
+/** What open_world returns: the world plus any campaign data the file carried. */
+export interface OpenWorldResult {
+  meta: WorldMeta;
+  /** Pre-split single-file save — offer to split it into world + campaign. */
+  legacy: boolean;
+  campaign_name: string | null;
+  /** JSON-encoded step-completion maps persisted by set_progress. */
+  world_progress: string | null;
+  campaign_progress: string | null;
+}
+
+export interface CampaignInfo {
+  name: string;
+  /** False when the campaign was saved against a different/refinalized world. */
+  world_match: boolean;
+  /** JSON step-completion map for the campaign wizard (steps 7-10). */
+  campaign_progress: string | null;
 }
 
 export interface TileResponse {

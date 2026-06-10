@@ -15,7 +15,7 @@ import { useWorldStore } from "./state/worldStore";
 import { useUIStore } from "./state/uiStore";
 import { useViewportStore } from "./state/viewportStore";
 import { useGoodsStore } from "./state/goodsStore";
-import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, persistOverlays, getOverlays } from "./bridge/tauri";
+import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, persistOverlays, getOverlays, saveCampaignAs, openCampaign, newCampaign, finalizeWorld } from "./bridge/tauri";
 
 const EXPORTABLE_LAYERS: { id: string; label: string }[] = [
   { id: "land", label: "Land / Sea" },
@@ -248,6 +248,7 @@ export default function App() {
   const setSettlements = useWorldStore((s) => s.setSettlements);
   const setEconomy = useWorldStore((s) => s.setEconomy);
   const markStepCompleted = useUIStore((s) => s.markStepCompleted);
+  const setStepsCompleted = useUIStore((s) => s.setStepsCompleted);
   const loadGoodsFromWorld = useGoodsStore((s) => s.loadFromWorld);
   const invalidateTiles = useViewportStore((s) => s.invalidateTiles);
   const setStatus = useUIStore((s) => s.setStatus);
@@ -270,9 +271,9 @@ export default function App() {
       if (!path) return;
 
       setStatus("Opening world...");
-      const worldMeta = await openWorld(path);
+      const res = await openWorld(path);
       clear();
-      setMeta(worldMeta);
+      setMeta(res.meta);
       invalidateTiles();
       // Re-hydrate the overlay layers persisted in the DB (settlements, rivers,
       // lakes, the trade economy) + the world's goods, so an uploaded world comes
@@ -284,18 +285,135 @@ export default function App() {
         if (ov.lakes?.length) setLakes(ov.lakes);
         if (ov.settlements?.length) setSettlements(ov.settlements);
         if (ov.economy && ov.economy.hubs.length) setEconomy(ov.economy);
-        // Mark the steps whose data is present so their overlays are available.
-        if (ov.rivers?.length) [1, 2, 3, 4, 5, 6].forEach(markStepCompleted);
-        if (ov.settlements?.length) markStepCompleted(7);
-        if (ov.economy && ov.economy.hubs.length) [8, 9, 10].forEach(markStepCompleted);
+        // Restore the persisted wizard progress; older saves never wrote it, so
+        // fall back to inferring completion from which data is present.
+        const restored = [
+          ...parseProgress(res.world_progress),
+          ...parseProgress(res.campaign_progress),
+        ];
+        if (restored.length > 0) {
+          setStepsCompleted(restored);
+        } else {
+          if (ov.rivers?.length) [1, 2, 3, 4, 5, 6].forEach(markStepCompleted);
+          if (ov.settlements?.length) markStepCompleted(7);
+          if (ov.economy && ov.economy.hubs.length) [8, 9, 10].forEach(markStepCompleted);
+        }
       } catch (e) {
         console.warn("Overlay re-hydration skipped:", e);
       }
       setShowDialog(false);
-      setStatus("World loaded: " + worldMeta.name);
+      setStatus("World loaded: " + res.meta.name);
+
+      // Pre-split single-file save: offer to split it into a frozen world file
+      // + a campaign file (the in-memory migration already happened on open).
+      if (res.legacy && confirm(
+        "This is a legacy single-file save. Split it into a frozen .worldforge world " +
+        "file and a .campaign file?\n\nThe original file is left untouched."
+      )) {
+        await finalizeWorld();
+        setMeta({ ...res.meta, frozen: true });
+        await handleSaveAs();
+        await handleSaveCampaign();
+      }
     } catch (err) {
       console.error("Failed to open world:", err);
       alert("Failed to open world: " + err);
+    }
+  };
+
+  const handleOpenCampaign = async () => {
+    if (!isLoaded) return;
+    try {
+      let path: string | null = null;
+      try {
+        const { open } = await import("@tauri-apps/plugin-dialog");
+        const result = await open({
+          filters: [{ name: "WorldForge Campaign", extensions: ["campaign"] }],
+        });
+        if (result) path = result as string;
+      } catch {
+        const input = prompt("Enter path to .campaign file:");
+        if (input) path = input;
+      }
+      if (!path) return;
+
+      const info = await openCampaign(path);
+      if (!info.world_match) {
+        alert(
+          "This campaign was saved against a different (or since-modified) world. " +
+          "Its settlements and economy may not line up with the current map."
+        );
+      }
+      const ov = await getOverlays();
+      setSettlements(ov.settlements ?? []);
+      setEconomy(ov.economy && ov.economy.hubs.length ? ov.economy : null);
+      const restored = parseProgress(info.campaign_progress);
+      const ui = useUIStore.getState();
+      const worldSteps = Object.entries(ui.stepCompleted)
+        .filter(([k, v]) => v && Number(k) <= 6)
+        .map(([k]) => Number(k));
+      setStepsCompleted([...worldSteps, ...restored]);
+      setStatus(`Campaign loaded: ${info.name}`);
+    } catch (err) {
+      console.error("Failed to open campaign:", err);
+      alert("Failed to open campaign: " + err);
+    }
+  };
+
+  const handleSaveCampaign = async () => {
+    try {
+      let path: string | null = null;
+      const def = (meta?.name || "world") + ".campaign";
+      try {
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        const result = await save({
+          filters: [{ name: "WorldForge Campaign", extensions: ["campaign"] }],
+          defaultPath: def,
+        });
+        if (result) path = result;
+      } catch {
+        const input = prompt("Enter campaign save path:", def);
+        if (input) path = input;
+      }
+      if (!path) return;
+
+      setStatus("Saving campaign...");
+      // Persist the on-screen settlements into the campaign table first.
+      try {
+        const w = useWorldStore.getState();
+        await persistOverlays(w.settlements, w.rivers, w.lakes);
+      } catch (e) {
+        console.warn("Overlay persist skipped:", e);
+      }
+      await saveCampaignAs(path);
+      setStatus("Campaign saved to " + path);
+    } catch (err) {
+      console.error("Campaign save failed:", err);
+      alert("Campaign save failed: " + err);
+    }
+  };
+
+  const handleNewCampaign = async () => {
+    if (!meta?.frozen) {
+      alert("Finalize the world first (World wizard, after step 6).");
+      return;
+    }
+    const name = prompt("Campaign name:", "New Campaign");
+    if (!name) return;
+    try {
+      await newCampaign(name);
+      // Fresh campaign: human data resets, world geography (steps 1-6) stays.
+      setSettlements([]);
+      setEconomy(null);
+      const ui = useUIStore.getState();
+      setStepsCompleted(
+        Object.entries(ui.stepCompleted)
+          .filter(([k, v]) => v && Number(k) <= 6)
+          .map(([k]) => Number(k)),
+      );
+      setStatus(`Campaign started: ${name}`);
+    } catch (err) {
+      alert("Failed to start campaign: " + err);
     }
   };
 
@@ -354,7 +472,10 @@ export default function App() {
           <button onClick={handleOpen} style={headerBtn}>Open</button>
           {isLoaded && (
             <>
-              <button onClick={handleSaveAs} style={headerBtn}>Save As</button>
+              <button onClick={handleSaveAs} style={headerBtn}>Save World</button>
+              <button onClick={handleNewCampaign} style={headerBtn} title="Start a fresh campaign on this finalized world">New Campaign</button>
+              <button onClick={handleOpenCampaign} style={headerBtn}>Open Campaign</button>
+              <button onClick={handleSaveCampaign} style={headerBtn}>Save Campaign</button>
               <button onClick={() => setShowExport(true)} style={headerBtn}>Export</button>
             </>
           )}
@@ -391,6 +512,19 @@ export default function App() {
       {showExport && <ExportDialog name={meta?.name || "world"} onClose={() => setShowExport(false)} />}
     </div>
   );
+}
+
+/** Parse a persisted step-completion map ({"3":true,…}) into step numbers. */
+function parseProgress(json: string | null): number[] {
+  if (!json) return [];
+  try {
+    return Object.entries(JSON.parse(json) as Record<string, boolean>)
+      .filter(([, v]) => v)
+      .map(([k]) => Number(k))
+      .filter((n) => Number.isFinite(n));
+  } catch {
+    return [];
+  }
 }
 
 const dialogLabel: React.CSSProperties = {

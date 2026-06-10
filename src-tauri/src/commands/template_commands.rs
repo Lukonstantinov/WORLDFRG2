@@ -13,6 +13,7 @@ pub fn load_image_template(
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
 
     // Get world dimensions
     let grid_width: u32 = metadata::get_meta_required(&conn, "grid_width")

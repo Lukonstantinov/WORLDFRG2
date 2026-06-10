@@ -29,6 +29,15 @@ pub fn create_tables(conn: &Connection) -> rusqlite::Result<()> {
             data BLOB NOT NULL
         );
 
+        -- Campaign-scoped key/value data (settlements, economy, progress…).
+        -- The WORLD (tiles + metadata) is frozen once a campaign starts; this
+        -- table is what `.campaign` files carry, and is stripped from saved
+        -- `.worldforge` files.
+        CREATE TABLE IF NOT EXISTS campaign (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS undo_journal (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             label      TEXT NOT NULL,

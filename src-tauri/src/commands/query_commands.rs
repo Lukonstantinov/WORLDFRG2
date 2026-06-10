@@ -2841,7 +2841,7 @@ pub fn compute_economy(
     let settlements: Vec<RouteSettlement> =
         serde_json::from_str(&settlements_json).unwrap_or_default();
     if settlements.len() < 2 {
-        let _ = metadata::set_meta(&conn, "economy", &serde_json::to_string(&empty).unwrap_or_default());
+        let _ = metadata::campaign_set(&conn, "economy", &serde_json::to_string(&empty).unwrap_or_default());
         return Ok(empty);
     }
 
@@ -2861,7 +2861,7 @@ pub fn compute_economy(
     let nodes: Vec<&RouteSettlement> = idx.iter().map(|&i| &settlements[i]).collect();
     let nn = nodes.len();
     if nn < 2 {
-        let _ = metadata::set_meta(&conn, "economy", &serde_json::to_string(&empty).unwrap_or_default());
+        let _ = metadata::campaign_set(&conn, "economy", &serde_json::to_string(&empty).unwrap_or_default());
         return Ok(empty);
     }
     // Major hubs carry the primary network; lesser towns hang off their nearest
@@ -3757,7 +3757,7 @@ pub fn compute_economy(
     };
 
     let snapshot = EconomySnapshot { hubs, chains, chokepoints, regions, corridors, good_stats, class_stats, goods: goods_names };
-    let _ = metadata::set_meta(&conn, "economy", &serde_json::to_string(&snapshot).unwrap_or_default());
+    let _ = metadata::campaign_set(&conn, "economy", &serde_json::to_string(&snapshot).unwrap_or_default());
     Ok(snapshot)
 }
 
@@ -3766,7 +3766,7 @@ pub fn compute_economy(
 #[tauri::command]
 pub fn export_trade_data(path: String, db: State<'_, WorldDb>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let json = metadata::get_meta(&conn, "economy").map_err(|e| e.to_string())?
+    let json = metadata::campaign_get_or_meta(&conn, "economy").map_err(|e| e.to_string())?
         .ok_or_else(|| "No economy snapshot — run the Economy step (10) first.".to_string())?;
     if path.to_lowercase().ends_with(".json") {
         return std::fs::write(&path, json).map_err(|e| e.to_string());
@@ -3811,7 +3811,7 @@ pub fn get_economy(db: State<'_, WorldDb>) -> Result<EconomySnapshot, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let goods_names: Vec<String> = crate::commands::goods_commands::load_world_goods(&conn)
         .iter().map(|s| s.id.clone()).collect();
-    match metadata::get_meta(&conn, "economy").map_err(|e| e.to_string())? {
+    match metadata::campaign_get_or_meta(&conn, "economy").map_err(|e| e.to_string())? {
         Some(json) => serde_json::from_str(&json)
             .map_err(|_| ()).or_else(|_| Ok::<_, String>(EconomySnapshot {
                 hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![], corridors: vec![], good_stats: vec![], class_stats: vec![], goods: goods_names.clone(),
@@ -3842,7 +3842,8 @@ pub fn persist_overlays(
     db: State<'_, WorldDb>,
 ) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    metadata::set_meta(&conn, "settlements", &settlements_json).map_err(|e| e.to_string())?;
+    // Settlements are campaign data; rivers/lakes are world geography.
+    metadata::campaign_set(&conn, "settlements", &settlements_json).map_err(|e| e.to_string())?;
     metadata::set_meta(&conn, "rivers", &rivers_json).map_err(|e| e.to_string())?;
     metadata::set_meta(&conn, "lakes", &lakes_json).map_err(|e| e.to_string())?;
     Ok(())
@@ -3856,12 +3857,15 @@ pub fn get_overlays(db: State<'_, WorldDb>) -> Result<OverlaysState, String> {
     let read = |key: &str| -> String {
         metadata::get_meta(&conn, key).ok().flatten().unwrap_or_default()
     };
-    let settlements = serde_json::from_str(&read("settlements")).unwrap_or_default();
+    let read_camp = |key: &str| -> String {
+        metadata::campaign_get_or_meta(&conn, key).ok().flatten().unwrap_or_default()
+    };
+    let settlements = serde_json::from_str(&read_camp("settlements")).unwrap_or_default();
     let rivers = serde_json::from_str(&read("rivers")).unwrap_or_default();
     let lakes = serde_json::from_str(&read("lakes")).unwrap_or_default();
     let goods_names: Vec<String> = crate::commands::goods_commands::load_world_goods(&conn)
         .iter().map(|s| s.id.clone()).collect();
-    let economy = serde_json::from_str(&read("economy")).unwrap_or(EconomySnapshot {
+    let economy = serde_json::from_str(&read_camp("economy")).unwrap_or(EconomySnapshot {
         hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![],
         corridors: vec![], good_stats: vec![], class_stats: vec![], goods: goods_names,
     });
@@ -3885,7 +3889,7 @@ pub fn compute_settlement_development(
 
     let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
-    let snap: EconomySnapshot = match metadata::get_meta(&conn, "economy").map_err(|e| e.to_string())? {
+    let snap: EconomySnapshot = match metadata::campaign_get_or_meta(&conn, "economy").map_err(|e| e.to_string())? {
         Some(json) => match serde_json::from_str(&json) { Ok(s) => s, Err(_) => return Ok(settlements) },
         None => return Ok(settlements),
     };
