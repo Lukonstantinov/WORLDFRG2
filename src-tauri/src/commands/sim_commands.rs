@@ -1,6 +1,6 @@
 use tauri::State;
 use crate::db::WorldDb;
-use crate::sim::world_buffer::WorldBuffer;
+use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
 use crate::sim::{plates, elevation, ocean, temperature, precipitation, koppen, rivers, soil, fertility, settlements, biological};
 
 /// Generate tectonic plates and derive landmass.
@@ -13,7 +13,7 @@ pub fn sim_generate_plates(
 ) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut buf = WorldBuffer::load(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PLATES)?;
     plates::generate_plates_and_landmass(&mut buf, seed, plate_count);
     buf.save(&conn, "Generate plates & landmass")
 }
@@ -23,7 +23,7 @@ pub fn sim_generate_plates(
 pub fn sim_invert_terrain(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut buf = WorldBuffer::load(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PLATES)?;
     plates::invert_terrain(&mut buf);
     buf.save(&conn, "Invert terrain")
 }
@@ -34,7 +34,7 @@ pub fn sim_invert_terrain(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, Str
 pub fn sim_generate_terrain(seed: u64, db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut buf = WorldBuffer::load(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
     elevation::generate_elevation(&mut buf, seed);
     elevation::compute_sea_depth(&mut buf);
     // Proper continental shelf (not just compute_sea_depth's thin ~1px ring) so
@@ -49,7 +49,7 @@ pub fn sim_generate_terrain(seed: u64, db: State<'_, WorldDb>) -> Result<Vec<(i3
 pub fn sim_ocean_atmosphere(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut buf = WorldBuffer::load(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_OCEAN_ATMOSPHERE)?;
 
     ocean::compute_wind_belts(&mut buf);
     // Salinity must be computed before the currents so the moderate-thermohaline
@@ -73,7 +73,7 @@ pub fn sim_ocean_atmosphere(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, S
 pub fn sim_classify_climate(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut buf = WorldBuffer::load(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_CLIMATE)?;
     koppen::classify_koppen(&mut buf);
     buf.save(&conn, "Climate classification")
 }
@@ -90,7 +90,7 @@ pub fn sim_rivers_hydrology(
 ) -> Result<SimRiversResult, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let buf = WorldBuffer::load(&conn)?;
+    let buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_RIVERS)?;
 
     let max_cells = ((buf.total() as f32) * lake_max_fraction.clamp(0.000002, 0.05)) as usize;
     let max_cells = max_cells.max(4);
@@ -132,7 +132,7 @@ pub fn sim_soil_fertility(
 ) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut buf = WorldBuffer::load(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_SOIL_FERTILITY)?;
 
     // Deserialize rivers from JSON
     let river_data: Vec<rivers::River> = serde_json::from_str(&rivers_json)
@@ -159,7 +159,7 @@ pub fn sim_biological(
 ) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut buf = WorldBuffer::load(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_BIOLOGICAL)?;
 
     let river_data: Vec<rivers::River> = serde_json::from_str(&rivers_json)
         .unwrap_or_default();
@@ -261,7 +261,7 @@ pub fn sim_generate_terrain_from_template(
 ) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut buf = WorldBuffer::load(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
     elevation::generate_elevation_from_terrain(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
     elevation::compute_sea_depth(&mut buf);
     // Generate a proper continental shelf here too. Previously only the
@@ -285,7 +285,7 @@ pub fn sim_generate_terrain_ridged(
 ) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut buf = WorldBuffer::load(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
     elevation::generate_elevation_ridged(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
     elevation::compute_sea_depth(&mut buf);
     elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
@@ -377,7 +377,7 @@ pub fn sim_scale_elevation(
 ) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut buf = WorldBuffer::load(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
     elevation::scale_elevation(&mut buf, scale, lock_peaks_above);
     buf.save(&conn, "Scale elevation")
 }
@@ -394,7 +394,7 @@ pub fn sim_generate_shelves(
 ) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut buf = WorldBuffer::load(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
     elevation::generate_shelves(&mut buf, seed, shelf_width, noise_amount, depth_profile, dropoff_width);
     buf.save(&conn, "Generate shelves")
 }
@@ -410,7 +410,7 @@ pub fn sim_generate_settlements(
 ) -> Result<SimSettlementsResult, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut buf = WorldBuffer::load(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_SETTLEMENTS)?;
 
     let river_data: Vec<rivers::River> = serde_json::from_str(&rivers_json)
         .unwrap_or_default();
