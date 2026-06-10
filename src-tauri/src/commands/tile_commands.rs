@@ -160,23 +160,33 @@ fn render_supertiles(
 ) -> Result<Vec<RawTileImage>, String> {
     let s = 1i32 << lod;
 
-    // Deduped set of base tiles needed across all requested supertiles.
-    let mut base_set: HashSet<(i32, i32)> = HashSet::new();
-    for &(tx, ty) in &tiles {
-        for by in (ty * s)..(ty * s + s) {
-            for bx in (tx * s)..(tx * s + s) {
-                base_set.insert((bx, by));
+    // Probe the persisted LOD pyramid first: supertiles already downsampled are
+    // one small blob each. Only misses need their base tiles fetched. (Pyramid
+    // entries are dropped whenever a covered base tile is written — see
+    // tile_store::save_tile_blob — so a hit is always current.)
+    let mut cached: Vec<((i32, i32), i64, Vec<u8>)> = Vec::new();
+    let mut misses: Vec<(i32, i32)> = Vec::new();
+    let base_raw: Vec<((i32, i32), i64, Option<Vec<u8>>)> = {
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        for &(tx, ty) in &tiles {
+            match tile_store::load_blob_with_version(&conn, tx, ty, lod).map_err(|e| e.to_string())? {
+                Some((version, blob)) => cached.push(((tx, ty), version, blob)),
+                None => misses.push((tx, ty)),
             }
         }
-    }
-    let base_coords: Vec<(i32, i32)> = base_set.into_iter().collect();
 
-    // Fetch ALL required base-tile blobs under the DB lock once, then release it.
-    let raw: Vec<((i32, i32), i64, Option<Vec<u8>>)> = {
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
-        base_coords
-            .iter()
-            .map(|&(bx, by)| {
+        // Deduped set of base tiles needed across the missing supertiles.
+        let mut base_set: HashSet<(i32, i32)> = HashSet::new();
+        for &(tx, ty) in &misses {
+            for by in (ty * s)..(ty * s + s) {
+                for bx in (tx * s)..(tx * s + s) {
+                    base_set.insert((bx, by));
+                }
+            }
+        }
+        base_set
+            .into_iter()
+            .map(|(bx, by)| {
                 let bv = tile_store::load_blob_with_version(&conn, bx, by, 0)
                     .map_err(|e| e.to_string())?;
                 Ok(match bv {
@@ -187,9 +197,13 @@ fn render_supertiles(
             .collect::<Result<Vec<_>, String>>()?
     };
 
-    // Decompress unique base tiles in parallel off-lock. Missing tiles (outside
+    // Decompress everything in parallel off-lock. Missing base tiles (outside
     // the world's tile grid) fall back to default sea, matching the LOD 0 path.
-    let base: HashMap<(i32, i32), (i64, TileData)> = raw
+    let cached_tiles: Vec<((i32, i32), i64, TileData)> = cached
+        .into_par_iter()
+        .map(|(coord, version, blob)| (coord, version, TileData::decompress(&blob)))
+        .collect();
+    let base: HashMap<(i32, i32), (i64, TileData)> = base_raw
         .into_par_iter()
         .map(|(coord, version, blob)| {
             let tile = match blob {
@@ -200,18 +214,41 @@ fn render_supertiles(
         })
         .collect();
 
-    // Build the synthetic downsampled tiles and render them in parallel.
-    let results = tiles
+    // Build the missing downsampled tiles (and their compressed form for the
+    // pyramid) in parallel.
+    let built: Vec<((i32, i32), i64, TileData, Vec<u8>)> = misses
         .par_iter()
-        .flat_map_iter(|&(tx, ty)| {
+        .map(|&(tx, ty)| {
             let (tile, version) = sample_supertile(tx, ty, s, &base);
+            let blob = tile.compress();
+            ((tx, ty), version, tile, blob)
+        })
+        .collect();
+    drop(base);
+
+    // Persist the freshly built supertiles (best-effort cache write).
+    if !built.is_empty() {
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        for ((tx, ty), version, _, blob) in &built {
+            let _ = tile_store::save_lod_blob(&conn, *tx, *ty, lod, *version, blob);
+        }
+    }
+
+    // Render cached + built supertiles for every layer in parallel.
+    let all: Vec<((i32, i32), i64, TileData)> = cached_tiles
+        .into_iter()
+        .chain(built.into_iter().map(|(c, v, t, _)| (c, v, t)))
+        .collect();
+    let results = all
+        .par_iter()
+        .flat_map_iter(|((tx, ty), version, tile)| {
             layers.iter().enumerate().map(move |(li, layer)| {
                 RawTileImage {
-                    tx,
-                    ty,
+                    tx: *tx,
+                    ty: *ty,
                     layer_idx: li as u8,
-                    version,
-                    rgba: tile_image::render_tile(&tile, layer),
+                    version: *version,
+                    rgba: tile_image::render_tile(tile, layer),
                 }
             }).collect::<Vec<_>>()
         })
