@@ -3,12 +3,18 @@ use crate::tile::cell::TileData;
 use crate::tile::coords::TILE_SIZE;
 
 pub fn save_tile(conn: &Connection, tx: i32, ty: i32, lod: i32, data: &TileData) -> rusqlite::Result<()> {
-    let blob = data.compress();
-    conn.execute(
+    save_tile_blob(conn, tx, ty, lod, &data.compress())
+}
+
+/// Write an already-compressed tile blob (compression can then run on worker
+/// threads, off the DB lock, and bulk writers can wrap many of these in one
+/// transaction).
+pub fn save_tile_blob(conn: &Connection, tx: i32, ty: i32, lod: i32, blob: &[u8]) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare_cached(
         "INSERT OR REPLACE INTO tiles (tx, ty, lod, version, data)
          VALUES (?1, ?2, ?3, COALESCE((SELECT version FROM tiles WHERE tx=?1 AND ty=?2 AND lod=?3), 0) + 1, ?4)",
-        params![tx, ty, lod, blob],
     )?;
+    stmt.execute(params![tx, ty, lod, blob])?;
     Ok(())
 }
 

@@ -11,6 +11,7 @@ pub fn sim_generate_plates(
     plate_count: u32,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut buf = WorldBuffer::load(&conn)?;
     plates::generate_plates_and_landmass(&mut buf, seed, plate_count);
@@ -20,6 +21,7 @@ pub fn sim_generate_plates(
 /// Invert land and sea
 #[tauri::command]
 pub fn sim_invert_terrain(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut buf = WorldBuffer::load(&conn)?;
     plates::invert_terrain(&mut buf);
@@ -30,6 +32,7 @@ pub fn sim_invert_terrain(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, Str
 /// Phase 2: Terrain → elevation + bathymetry
 #[tauri::command]
 pub fn sim_generate_terrain(seed: u64, db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut buf = WorldBuffer::load(&conn)?;
     elevation::generate_elevation(&mut buf, seed);
@@ -44,6 +47,7 @@ pub fn sim_generate_terrain(seed: u64, db: State<'_, WorldDb>) -> Result<Vec<(i3
 /// Phase 3: Winds → currents → upwelling → distance_to_ocean → temperature → precipitation
 #[tauri::command]
 pub fn sim_ocean_atmosphere(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut buf = WorldBuffer::load(&conn)?;
 
@@ -67,6 +71,7 @@ pub fn sim_ocean_atmosphere(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, S
 /// Phase 4: Köppen zones
 #[tauri::command]
 pub fn sim_classify_climate(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut buf = WorldBuffer::load(&conn)?;
     koppen::classify_koppen(&mut buf);
@@ -83,6 +88,7 @@ pub fn sim_rivers_hydrology(
     lake_max_fraction: f32,
     db: State<'_, WorldDb>,
 ) -> Result<SimRiversResult, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let buf = WorldBuffer::load(&conn)?;
 
@@ -124,6 +130,7 @@ pub fn sim_soil_fertility(
     rivers_json: String,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut buf = WorldBuffer::load(&conn)?;
 
@@ -150,6 +157,7 @@ pub fn sim_biological(
     climate_strictness: f32,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut buf = WorldBuffer::load(&conn)?;
 
@@ -174,6 +182,7 @@ pub fn sim_run_all(
     plate_count: u32,
     db: State<'_, WorldDb>,
 ) -> Result<SimRunAllResult, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut buf = WorldBuffer::load(&conn)?;
 
@@ -250,6 +259,7 @@ pub fn sim_generate_terrain_from_template(
     noise_roughness: f32,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut buf = WorldBuffer::load(&conn)?;
     elevation::generate_elevation_from_terrain(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
@@ -273,6 +283,7 @@ pub fn sim_generate_terrain_ridged(
     noise_roughness: f32,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut buf = WorldBuffer::load(&conn)?;
     elevation::generate_elevation_ridged(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
@@ -292,6 +303,7 @@ pub fn sim_run_all_from_terrain(
     noise_roughness: f32,
     db: State<'_, WorldDb>,
 ) -> Result<SimRunAllResult, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut buf = WorldBuffer::load(&conn)?;
 
@@ -363,6 +375,7 @@ pub fn sim_scale_elevation(
     lock_peaks_above: f32,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut buf = WorldBuffer::load(&conn)?;
     elevation::scale_elevation(&mut buf, scale, lock_peaks_above);
@@ -379,6 +392,7 @@ pub fn sim_generate_shelves(
     dropoff_width: f32,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut buf = WorldBuffer::load(&conn)?;
     elevation::generate_shelves(&mut buf, seed, shelf_width, noise_amount, depth_profile, dropoff_width);
@@ -394,6 +408,7 @@ pub fn sim_generate_settlements(
     realism: Option<f32>,
     db: State<'_, WorldDb>,
 ) -> Result<SimSettlementsResult, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut buf = WorldBuffer::load(&conn)?;
 

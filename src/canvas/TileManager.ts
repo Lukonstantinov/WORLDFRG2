@@ -1,6 +1,12 @@
-import { getTileRange } from "../bridge/tauri";
+import { getTiles } from "../bridge/tauri";
+import type { TileResponse } from "../types";
 
 const TILE_SIZE = 128;
+/** Max supertiles per `get_tiles` invoke — keeps each IPC payload bounded
+ *  (~64 × 64KB ≈ 4MB of base64 RGBA) instead of one giant response. */
+const CHUNK_SIZE = 64;
+/** Highest LOD the backend supports (one image covers 2^4 = 16×16 base tiles). */
+const MAX_LOD = 4;
 
 interface CachedTile {
   img: HTMLCanvasElement;
@@ -8,6 +14,19 @@ interface CachedTile {
   ty: number;
   version: number;
   lastUsed: number;
+}
+
+/** LOD for a viewport scale: at scale 1 every world cell is ≥1px (full res);
+ *  each halving of the scale steps one LOD up. Min zoom 0.05 → LOD 4. */
+function lodForScale(scale: number): number {
+  if (!(scale > 0)) return MAX_LOD;
+  return Math.max(0, Math.min(MAX_LOD, Math.floor(Math.log2(1 / scale))));
+}
+
+/** Free a cached tile's canvas memory promptly (don't wait for GC). */
+function releaseTile(tile: CachedTile) {
+  tile.img.width = 0;
+  tile.img.height = 0;
 }
 
 /** Decode base64 string to Uint8Array */
@@ -37,19 +56,32 @@ function canvasFromBase64RGBA(b64: string, width: number, height: number): HTMLC
 export class TileManager {
   private cache = new Map<string, CachedTile>();
   private maxCached = 2000;
+  /** Keys of the chunk currently in flight (dedupes against re-requests). */
   private loading = new Set<string>();
   /** Layer of the most recently requested tiles — what `draw` blits. */
   private currentLayer = "";
+  /** LOD of the most recently requested tiles — what `draw` blits. */
+  private currentLod = 0;
+  /** Supertile coords still to fetch for currentLayer/currentLod. REPLACED
+   *  wholesale by each loadVisibleTiles call, so a stale request's unfetched
+   *  remainder is abandoned the moment the viewport/layer/LOD changes. */
+  private queue: [number, number][] = [];
+  /** Single-flight pump draining `queue` one chunk at a time. */
+  private pumping: Promise<void> | null = null;
+  /** Bumped by clear() so in-flight responses for a wiped world are discarded. */
+  private epoch = 0;
+  /** Called after each chunk lands so the canvas can repaint progressively. */
+  onTilesLoaded?: () => void;
 
-  /** Cache key includes the layer, so switching layers (and back) reuses the
-   *  already-rendered tiles instead of refetching + re-rendering everything. */
-  private key(layer: string, tx: number, ty: number): string {
-    return `${layer}|${tx},${ty}`;
+  /** Cache key includes layer AND lod, so switching layers or zoom bands (and
+   *  back) reuses the already-rendered tiles instead of refetching everything. */
+  private key(layer: string, lod: number, tx: number, ty: number): string {
+    return `${layer}|${lod}|${tx},${ty}`;
   }
 
-  /** Draw the cached tiles of the current layer overlapping the visible range.
-   *  Only the on-screen tiles are blitted (the cache may hold up to `maxCached`),
-   *  so pan/zoom cost scales with the viewport, not the whole cache. */
+  /** Draw the cached tiles of the current layer/LOD overlapping the visible
+   *  range. `range` arrives in BASE-tile coords; at LOD L each cached image is
+   *  a supertile covering S=2^L base tiles per side, blitted scaled up. */
   draw(
     ctx: CanvasRenderingContext2D,
     range: { txMin: number; txMax: number; tyMin: number; tyMax: number },
@@ -57,23 +89,34 @@ export class TileManager {
     ctx.imageSmoothingEnabled = false;
     const now = Date.now();
     const layer = this.currentLayer;
-    for (let ty = range.tyMin; ty <= range.tyMax; ty++) {
-      for (let tx = range.txMin; tx <= range.txMax; tx++) {
-        const tile = this.cache.get(this.key(layer, tx, ty));
+    const lod = this.currentLod;
+    const S = 1 << lod;
+    const size = TILE_SIZE * S;
+    const stxMin = Math.floor(range.txMin / S);
+    const stxMax = Math.floor(range.txMax / S);
+    const styMin = Math.floor(range.tyMin / S);
+    const styMax = Math.floor(range.tyMax / S);
+    for (let sty = styMin; sty <= styMax; sty++) {
+      for (let stx = stxMin; stx <= stxMax; stx++) {
+        const tile = this.cache.get(this.key(layer, lod, stx, sty));
         if (!tile) continue;
-        ctx.drawImage(tile.img, tx * TILE_SIZE, ty * TILE_SIZE);
+        ctx.drawImage(tile.img, stx * size, sty * size, size, size);
         tile.lastUsed = now; // keep visible tiles hot for LRU eviction
       }
     }
   }
 
-  /** Request tiles for the visible range from the Rust backend */
+  /** Request the visible tiles from the Rust backend. The range arrives in
+   *  BASE-tile coords; `scale` (viewport zoom) picks the LOD, the range is
+   *  converted to supertile coords, and ONLY the missing supertiles are
+   *  fetched, in chunks of at most CHUNK_SIZE per invoke. */
   async loadVisibleTiles(
     txMin: number, txMax: number,
     tyMin: number, tyMax: number,
     layer: string,
     gridWidth: number, gridHeight: number,
-  ) {
+    scale = 1,
+  ): Promise<void> {
     const maxTx = Math.ceil(gridWidth / TILE_SIZE) - 1;
     const maxTy = Math.ceil(gridHeight / TILE_SIZE) - 1;
     const cTxMin = Math.max(0, txMin);
@@ -83,35 +126,83 @@ export class TileManager {
 
     if (cTxMin > cTxMax || cTyMin > cTyMax) return;
 
-    // Tiles are cached per layer; record which layer `draw` should now show.
-    this.currentLayer = layer;
+    const lod = lodForScale(scale);
+    const S = 1 << lod;
 
+    // Record which layer/LOD `draw` should now show (cache keys include both).
+    this.currentLayer = layer;
+    this.currentLod = lod;
+
+    // Convert the base-tile range to supertile coords.
+    const sTxMin = Math.floor(cTxMin / S);
+    const sTxMax = Math.floor(cTxMax / S);
+    const sTyMin = Math.floor(cTyMin / S);
+    const sTyMax = Math.floor(cTyMax / S);
+
+    // Only the supertiles that are neither cached nor currently in flight.
     const needed: [number, number][] = [];
-    for (let ty = cTyMin; ty <= cTyMax; ty++) {
-      for (let tx = cTxMin; tx <= cTxMax; tx++) {
-        const k = this.key(layer, tx, ty);
-        if (!this.cache.has(k) && !this.loading.has(k)) {
-          needed.push([tx, ty]);
-          this.loading.add(k);
-        } else if (this.cache.has(k)) {
-          this.cache.get(k)!.lastUsed = Date.now();
+    const now = Date.now();
+    for (let sty = sTyMin; sty <= sTyMax; sty++) {
+      for (let stx = sTxMin; stx <= sTxMax; stx++) {
+        const k = this.key(layer, lod, stx, sty);
+        const cached = this.cache.get(k);
+        if (cached) {
+          cached.lastUsed = now;
+        } else if (!this.loading.has(k)) {
+          needed.push([stx, sty]);
         }
       }
     }
 
-    if (needed.length === 0) return;
+    // Replace (not append) the fetch queue: anything a previous request still
+    // wanted but is no longer visible / at the current layer+LOD is dropped.
+    this.queue = needed;
 
-    try {
-      const responses = await getTileRange(
-        cTxMin, cTxMax, cTyMin, cTyMax,
-        [layer], 0
-      );
+    if (this.queue.length === 0 && !this.pumping) return;
+    if (!this.pumping) {
+      this.pumping = this.pump().finally(() => { this.pumping = null; });
+    }
+    return this.pumping;
+  }
+
+  /** Drain the queue with at most one `get_tiles` invoke in flight. Each chunk
+   *  is requested at the layer/LOD current at dequeue time (the queue is always
+   *  rebuilt alongside currentLayer/currentLod), and cached as it arrives so
+   *  tiles appear progressively. */
+  private async pump(): Promise<void> {
+    while (this.queue.length > 0) {
+      const layer = this.currentLayer;
+      const lod = this.currentLod;
+      const epoch = this.epoch;
+      // Each supertile makes the backend decompress S×S base tiles, so shrink
+      // the chunk as the LOD grows to bound the per-invoke working set
+      // (~256 base tiles ≈ a few hundred MB transient at most).
+      const S = 1 << lod;
+      const chunkSize = Math.max(1, Math.min(CHUNK_SIZE, Math.floor(256 / (S * S))));
+      const chunk = this.queue.splice(0, chunkSize);
+      const keys = chunk.map(([stx, sty]) => this.key(layer, lod, stx, sty));
+      for (const k of keys) this.loading.add(k);
+
+      let responses: TileResponse[] = [];
+      try {
+        responses = await getTiles(chunk, [layer], lod);
+      } catch (err) {
+        console.error("Failed to load tiles:", err);
+      } finally {
+        for (const k of keys) this.loading.delete(k);
+      }
+
+      // A clear() (world/data change) while this chunk was in flight makes the
+      // rendered images stale — drop them; the follow-up refresh refetches.
+      if (epoch !== this.epoch) continue;
 
       for (const resp of responses) {
-        const k = this.key(layer, resp.tx, resp.ty);
-        this.loading.delete(k);
-        this.cache.delete(k);
-
+        const k = this.key(layer, lod, resp.tx, resp.ty);
+        const old = this.cache.get(k);
+        if (old) {
+          this.cache.delete(k);
+          releaseTile(old);
+        }
         const img = canvasFromBase64RGBA(resp.rgba, TILE_SIZE, TILE_SIZE);
         this.cache.set(k, {
           img,
@@ -121,31 +212,34 @@ export class TileManager {
           lastUsed: Date.now(),
         });
       }
-    } catch (err) {
-      for (const [tx, ty] of needed) {
-        this.loading.delete(this.key(layer, tx, ty));
-      }
-      console.error("Failed to load tiles:", err);
-    }
 
-    this.evict();
+      this.evict();
+      if (responses.length > 0) this.onTilesLoaded?.();
+    }
   }
 
-  /** Invalidate specific tiles (e.g., after painting) across ALL cached layers,
-   *  since the underlying cell data — not just the active layer's render —
-   *  changed. */
+  /** Invalidate specific BASE tiles (e.g., after painting) across ALL cached
+   *  layers, since the underlying cell data — not just the active layer's
+   *  render — changed. LOD>0 entries aggregate many base tiles, so every
+   *  downsampled entry is dropped (cheap full sweep; they're few and small). */
   invalidate(tiles: [number, number][]) {
-    const suffixes = new Set(tiles.map(([tx, ty]) => `|${tx},${ty}`));
-    for (const k of this.cache.keys()) {
-      const bar = k.indexOf("|");
-      if (bar >= 0 && suffixes.has(k.slice(bar))) this.cache.delete(k);
+    const coords = new Set(tiles.map(([tx, ty]) => `${tx},${ty}`));
+    for (const [k, tile] of this.cache) {
+      const [, lodStr, coord] = k.split("|");
+      if (lodStr !== "0" || coords.has(coord)) {
+        this.cache.delete(k);
+        releaseTile(tile);
+      }
     }
   }
 
-  /** Remove all cached tiles */
+  /** Remove all cached tiles and abandon any in-flight fetches' results. */
   clear() {
+    for (const tile of this.cache.values()) releaseTile(tile);
     this.cache.clear();
     this.loading.clear();
+    this.queue = [];
+    this.epoch++;
   }
 
   private evict() {
@@ -154,8 +248,9 @@ export class TileManager {
       (a, b) => a[1].lastUsed - b[1].lastUsed
     );
     const toRemove = entries.slice(0, this.cache.size - this.maxCached);
-    for (const [key] of toRemove) {
+    for (const [key, tile] of toRemove) {
       this.cache.delete(key);
+      releaseTile(tile);
     }
   }
 }

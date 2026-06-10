@@ -173,9 +173,12 @@ export function MapCanvas() {
       el.clientWidth, el.clientHeight
     );
 
+    // viewport.scale picks the LOD: zoomed out → coarser supertiles, so the
+    // request size stays bounded no matter how much of the world is visible.
     tileManager.loadVisibleTiles(
       txMin, txMax, tyMin, tyMax,
-      activeLayerRef.current, m.grid_width, m.grid_height
+      activeLayerRef.current, m.grid_width, m.grid_height,
+      viewport.scale,
     ).then(() => requestRender());
   }, [requestRender]);
 
@@ -195,6 +198,9 @@ export function MapCanvas() {
       viewportRef.current = viewport;
 
       const tileManager = new TileManager();
+      // Repaint as each chunk of tiles arrives so large fetches fill in
+      // progressively instead of popping in all at once at the end.
+      tileManager.onTilesLoaded = () => requestRender();
       tileManagerRef.current = tileManager;
 
       const overlayManager = new OverlayManager();

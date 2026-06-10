@@ -1,6 +1,10 @@
 use rusqlite::{Connection, params};
 
 const MAX_UNDO: i64 = 50;
+/// Total bytes the journal may hold. Whole-world sim snapshots on the largest
+/// worlds run to hundreds of MB each, so a count cap alone could balloon the
+/// journal into tens of GB; the oldest entries are dropped first.
+const MAX_UNDO_BYTES: i64 = 512 * 1024 * 1024;
 
 /// Save the old state of modified tiles before a paint operation.
 /// `tile_diffs` contains (tx, ty, compressed_old_data) for each modified tile.
@@ -49,6 +53,21 @@ pub fn push_undo(conn: &Connection, label: &str, tile_diffs: &[(i32, i32, Vec<u8
         "DELETE FROM undo_journal WHERE id <= (SELECT MAX(id) FROM undo_journal) - ?1",
         params![MAX_UNDO],
     ).map_err(|e| e.to_string())?;
+
+    // Trim oldest entries while the journal exceeds the byte budget (always
+    // keeping the entry just pushed so the latest action stays undoable).
+    loop {
+        let (total, count, min_id): (i64, i64, i64) = conn.query_row(
+            "SELECT COALESCE(SUM(LENGTH(tile_diffs)), 0), COUNT(*), COALESCE(MIN(id), 0) FROM undo_journal",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).map_err(|e| e.to_string())?;
+        if total <= MAX_UNDO_BYTES || count <= 1 {
+            break;
+        }
+        conn.execute("DELETE FROM undo_journal WHERE id = ?1", params![min_id])
+            .map_err(|e| e.to_string())?;
+    }
 
     Ok(())
 }
