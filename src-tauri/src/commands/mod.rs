@@ -7,3 +7,4 @@ pub mod sim_commands;
 pub mod file_commands;
 pub mod goods_commands;
 pub mod campaign_commands;
+pub mod import_commands;

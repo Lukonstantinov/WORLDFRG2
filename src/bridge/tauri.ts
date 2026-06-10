@@ -485,3 +485,9 @@ export async function openCampaign(path: string): Promise<CampaignInfo> {
 export async function setProgress(scope: "world" | "campaign", progressJson: string): Promise<void> {
   return invoke("set_progress", { scope, progressJson });
 }
+
+/** Copy chosen layer groups from another .worldforge file into the current
+ *  world (grid sizes must match). Returns the modified tile coords. */
+export async function importWorldLayers(path: string, groups: string[]): Promise<[number, number][]> {
+  return invoke("import_world_layers", { path, groups });
+}

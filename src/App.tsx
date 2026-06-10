@@ -11,6 +11,7 @@ import { GoodsBrowserPanel } from "./ui/GoodsBrowserPanel";
 import { ElevationLegend } from "./ui/ElevationLegend";
 import { ElevationHistogram } from "./ui/ElevationHistogram";
 import { GoodsEditor } from "./ui/GoodsEditor";
+import { ImportWorldDialog } from "./ui/ImportWorldDialog";
 import { useWorldStore } from "./state/worldStore";
 import { useUIStore } from "./state/uiStore";
 import { useViewportStore } from "./state/viewportStore";
@@ -254,6 +255,7 @@ export default function App() {
   const setStatus = useUIStore((s) => s.setStatus);
   const [showDialog, setShowDialog] = useState(!isLoaded);
   const [showExport, setShowExport] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   const handleOpen = async () => {
     try {
@@ -476,6 +478,7 @@ export default function App() {
               <button onClick={handleNewCampaign} style={headerBtn} title="Start a fresh campaign on this finalized world">New Campaign</button>
               <button onClick={handleOpenCampaign} style={headerBtn}>Open Campaign</button>
               <button onClick={handleSaveCampaign} style={headerBtn}>Save Campaign</button>
+              <button onClick={() => setShowImport(true)} style={headerBtn} title="Copy layers from another world file">Import Layers</button>
               <button onClick={() => setShowExport(true)} style={headerBtn}>Export</button>
             </>
           )}
@@ -510,6 +513,7 @@ export default function App() {
       <GoodsEditor />
       {showDialog && <NewWorldDialog onCreated={() => setShowDialog(false)} />}
       {showExport && <ExportDialog name={meta?.name || "world"} onClose={() => setShowExport(false)} />}
+      {showImport && <ImportWorldDialog onClose={() => setShowImport(false)} />}
     </div>
   );
 }
