@@ -64,6 +64,16 @@ pub const GOOD_GLASSWARE: usize = 34;   // glass — silica (coast/arid) + skill
 pub const GOOD_TOBACCO: usize = 35;     // warm humid-subtropical cash crop
 pub const GOOD_INDIGO: usize = 36;      // hot wet tropical/subtropical dye crop (land)
 pub const GOOD_DATES: usize = 37;       // hot-desert oasis fruit
+// ── ~1400 curation additions (38..44): everyday staples so every climate has
+// an answer in each need category (cereal/protein/sweetener/livestock/drink).
+// Appended LAST for save back-compat. ──
+pub const GOOD_RICE: usize = 38;        // warm-wet paddy staple
+pub const GOOD_BARLEY: usize = 39;      // cool-belt grain (barley & rye)
+pub const GOOD_MILLET: usize = 40;      // steppe / arid-margin grain
+pub const GOOD_HERRING: usize = 41;     // everyday cold-temperate fishery
+pub const GOOD_HONEY: usize = 42;       // temperate forest honey & wax
+pub const GOOD_HIDES: usize = 43;       // pastoral hides & leather
+pub const GOOD_BEER: usize = 44;        // famed brewing towns in grain country
 
 /// Ordered good identifiers (sent to the frontend for labels/emoji/matrix).
 pub const GOOD_NAMES: [&str; GOODS_COUNT] = [
@@ -74,6 +84,7 @@ pub const GOOD_NAMES: [&str; GOODS_COUNT] = [
     "copper", "tin", "gold",
     "cloves", "pepper", "paper",
     "ceramics", "glassware", "tobacco", "indigo", "dates",
+    "rice", "barley", "millet", "herring", "honey", "hides", "beer",
 ];
 
 /// Default UI metadata for each built-in good (label, icon glyph, region tint).
@@ -87,6 +98,7 @@ pub const GOOD_LABEL: [&str; GOODS_COUNT] = [
     "Copper", "Tin", "Gold",
     "Cloves", "Pepper", "Paper",
     "Ceramics", "Glassware", "Tobacco", "Indigo", "Dates",
+    "Rice", "Barley & Rye", "Millet", "Herring", "Honey & Wax", "Hides & Leather", "Beer & Ale",
 ];
 pub const GOOD_ICON: [&str; GOODS_COUNT] = [
     "\u{1F41B}", "\u{1F377}", "\u{1FAD2}", "\u{1F36C}", "\u{1FA94}", "\u{1F41F}",
@@ -96,6 +108,7 @@ pub const GOOD_ICON: [&str; GOODS_COUNT] = [
     "\u{1F999}", "\u{1F418}", "\u{1F36B}", "\u{1F7E4}", "\u{26AA}", "\u{1F7E1}",
     "\u{1F33F}", "\u{26AB}", "\u{1F4DC}",
     "\u{1F3FA}", "\u{1FA9F}", "\u{1F6AC}", "\u{1F7E6}", "\u{1F33D}",
+    "\u{1F35A}", "\u{1F35E}", "\u{1F963}", "\u{1F420}", "\u{1F36F}", "\u{1F404}", "\u{1F37A}",
 ];
 pub const GOOD_COLOR: [&str; GOODS_COUNT] = [
     "#d97fb0", "#9b2d4f", "#8ea33a", "#e8d8a0", "#c79a4b", "#6fb0c8",
@@ -105,6 +118,7 @@ pub const GOOD_COLOR: [&str; GOODS_COUNT] = [
     "#c8a06a", "#efe6d0", "#6b4226", "#b06a3a", "#b8bcc0", "#d4af37",
     "#7a3b1e", "#2f2f33", "#e8e0c8",
     "#5a86c8", "#9fd8d0", "#8a6a3a", "#3a4fb0", "#c08a3a",
+    "#e6e2c8", "#c8a85a", "#d8c070", "#7ab8d0", "#e0a020", "#9a7a50", "#d09030",
 ];
 /// Default base demand weight per good (matrix desire). Single source of truth,
 /// also used by the editable spec.
@@ -117,6 +131,7 @@ pub const GOOD_DESIRE: [f32; GOODS_COUNT] = [
     0.55, 0.55, 0.60,                    // copper,tin,gold
     0.55, 0.60, 0.40,                    // cloves,pepper,paper
     0.60, 0.55, 0.55, 0.45, 0.40,        // ceramics,glassware,tobacco,indigo,dates
+    0.80, 0.70, 0.50, 0.65, 0.45, 0.55, 0.50, // rice,barley,millet,herring,honey,hides,beer
 ];
 /// Default scarcity per good (0..1). 0.5 is neutral (no change to belt size).
 /// Higher = rarer (tighter seed/spread thresholds → a smaller belt). Most goods
@@ -144,6 +159,7 @@ pub const GOOD_MARINE: [bool; GOODS_COUNT] = [
     false, false, false,                          // copper, tin, gold (land deposits)
     false, false, false,                          // cloves, pepper, paper (land)
     false, false, false, false, false,            // ceramics, glassware, tobacco, indigo, dates (land)
+    false, false, false, true, false, false, false, // rice..beer (only herring is marine)
 ];
 
 /// Distribution model. true = UNLIMITED: the good fills *every* suitable area in
@@ -160,6 +176,7 @@ pub const GOOD_UNLIMITED: [bool; GOODS_COUNT] = [
     false, false, false,                          // copper/tin/gold = deposit goods (flag unused)
     false, false, false,                          // cloves(seeded), pepper(seeded), paper(seeded → rarer)
     false, false, false, false, false,            // ceramics, glassware, tobacco, indigo, dates (all seeded homelands)
+    true, true, true, true, true, true, false,     // staples unlimited; beer = famed brewing homeland
 ];
 
 /// Goods whose demand is only realized in a large/open trade network: distant
@@ -176,6 +193,51 @@ pub const GOOD_NETWORK_LUXURY: [bool; GOODS_COUNT] = [
     false, false, true,                         // _, _, gold
     true,  true,  true,                         // cloves, pepper, paper (paper now rare → a prized export)
     true,  true,  true,  true,  false,          // ceramics, glassware, tobacco, indigo (luxuries); dates (staple)
+    false, false, false, false, false, false, false, // everyday staples, never network luxuries
+];
+
+/// Need category per good. Within a category, alternatives substitute for each
+/// other in the market's needs ladder (a city short of wheat buys rice or
+/// barley at a small penalty). 15 categories — see the redesign plan III.5.
+pub const GOOD_CATEGORY: [&str; GOODS_COUNT] = [
+    "fiber", "drink", "oil", "sweetener", "aromatic", "protein",      // silk..stockfish
+    "aromatic", "drink", "drink", "prestige", "construction", "prestige", // spices..amber
+    "preservative", "dye", "aromatic",                                 // salt, dyes, incense
+    "prestige", "oil",                                                 // pearls, whaling(oil)
+    "cereal", "metal", "fiber", "prestige",                            // wheat, iron, cotton, gemstones
+    "construction", "livestock", "fiber", "fiber", "prestige", "drink", // hardwoods..cacao
+    "metal", "metal", "metal",                                         // copper, tin, gold
+    "aromatic", "aromatic", "craft",                                   // cloves, pepper, paper
+    "craft", "craft", "prestige", "dye", "sweetener",                  // ceramics..dates
+    "cereal", "cereal", "cereal", "protein", "sweetener", "livestock", "drink", // rice..beer
+];
+/// Needs ladder tier: 0 = basic need (food, fuel, salt, cloth…) filled first,
+/// 1 = comfort, 2 = luxury (filled last; price-elastic).
+pub const GOOD_NEED_TIER: [u8; GOODS_COUNT] = [
+    2, 1, 1, 2, 2, 0,    // silk, wine, oliveoil, sugar, frankincense, stockfish
+    2, 2, 2, 2, 0, 2,    // spices, tea, coffee, furs, timber, amber
+    0, 2, 2,             // salt, dyes, incense
+    2, 1,                // pearls, whaling
+    0, 1, 1, 2,          // wheat, iron, cotton, gemstones
+    1, 1, 1, 1, 2, 2,    // hardwoods, horses, wool_fleece, wool_llama, ivory, cacao
+    1, 1, 2,             // copper, tin, gold
+    2, 2, 2,             // cloves, pepper, paper
+    1, 2, 2, 2, 0,       // ceramics, glassware, tobacco, indigo, dates
+    0, 0, 0, 0, 1, 0, 1, // rice, barley, millet, herring, honey, hides, beer
+];
+/// World-standard value per unit in the GRAIN-EQUIVALENT numeraire (wheat = 1.0
+/// by definition). The market quotes every price in this standard.
+pub const GOOD_BASE_VALUE: [f32; GOODS_COUNT] = [
+    20.0, 3.0, 3.0, 5.0, 12.0, 2.5,  // silk, wine, oliveoil, sugar, frankincense, stockfish
+    15.0, 6.0, 6.0, 8.0, 0.8, 15.0,  // spices, tea, coffee, furs, timber, amber
+    2.5, 10.0, 9.0,                  // salt, dyes, incense
+    30.0, 4.0,                       // pearls, whaling
+    1.0, 3.0, 3.5, 60.0,             // wheat, iron, cotton, gemstones
+    2.5, 12.0, 3.0, 3.0, 20.0, 8.0,  // hardwoods, horses, wool_fleece, wool_llama, ivory, cacao
+    4.0, 6.0, 50.0,                  // copper, tin, gold
+    25.0, 12.0, 8.0,                 // cloves, pepper, paper
+    7.0, 9.0, 6.0, 12.0, 1.5,        // ceramics, glassware, tobacco, indigo, dates
+    1.1, 0.9, 0.8, 1.8, 4.0, 2.0, 1.5, // rice, barley, millet, herring, honey, hides, beer
 ];
 
 // Mountains ≥3000 m wall off a good's spread across a continent.
@@ -1026,7 +1088,71 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
             clim * smoothstep(18.0, 26.0, t) * band(abs_lat, 12.0, 34.0, 8.0)
                 * oasis * (1.0 - smoothstep(0.4, 0.65, elev))
         }
+        GOOD_RICE => {
+            // Paddy rice: warm, wet, low alluvial land (monsoon river plains and
+            // wet tropics). The everyday cereal of the warm-wet world. Unlimited.
+            let clim = match k { CWA | CFA => 1.0, AF | AM => 0.8, AW => 0.6, _ => 0.0 };
+            let warm = smoothstep(18.0, 24.0, t);
+            let wet = smoothstep(900.0, 1500.0, p);
+            let low = 1.0 - smoothstep(0.18, 0.4, elev);
+            clim * warm * wet * low * (0.3 + 0.7 * fert)
+        }
+        GOOD_BARLEY => {
+            // Barley & rye: the cool-belt bread grains — they ripen where wheat
+            // struggles (short summers, oceanic damp, continental cold). Unlimited.
+            let clim = match k {
+                DFB | DFC => 1.0, CFB | DFA => 0.8, CSB | DSB | CFC => 0.5, ET => 0.15,
+                _ => 0.0,
+            };
+            let cool = bell(t, 7.0, 7.0);
+            clim * cool * band(p, 250.0, 900.0, 400.0)
+                * (1.0 - smoothstep(0.5, 0.75, elev)) * (0.4 + 0.6 * fert)
+        }
+        GOOD_MILLET => {
+            // Millet & sorghum: the drought grains of the steppe and savanna
+            // margins where neither wheat nor rice will carry a town. Unlimited.
+            let clim = match k { BSH | BSK => 1.0, AW | AS => 0.6, CWA => 0.5, BWH => 0.2, _ => 0.0 };
+            let warm = bell(t, 19.0, 8.0);
+            clim * warm * band(p, 200.0, 650.0, 300.0)
+                * (1.0 - smoothstep(0.45, 0.7, elev)) * (0.4 + 0.6 * fert)
+        }
+        GOOD_HONEY => {
+            // Forest honey & beeswax: temperate woodland and meadow with a real
+            // flowering season. Unlimited — every wooded province keeps bees.
+            let clim = match k {
+                CFB | DFA | DFB => 1.0, CFA | CWB => 0.7, CSA | CSB | DWB => 0.5,
+                DFC => 0.3, _ => 0.0,
+            };
+            clim * band(t, 6.0, 20.0, 7.0) * smoothstep(400.0, 750.0, p) * (0.4 + 0.6 * fert)
+        }
+        GOOD_HIDES => {
+            // Hides & leather: pastoral grassland and savanna herds (and the
+            // continental margins where ranching beats farming). Unlimited.
+            let clim = match k {
+                BSK | BSH => 1.0, AW | AS => 0.7, DFA | DFB | CFB => 0.4, CSA | CSB => 0.35,
+                _ => 0.0,
+            };
+            clim * band(p, 200.0, 750.0, 300.0) * (1.0 - smoothstep(0.5, 0.72, elev))
+                * band(t, 2.0, 24.0, 8.0)
+        }
+        GOOD_BEER => {
+            // Beer & ale: famed brewing towns in cool grain-and-water country
+            // (one renowned homeland — every village brews, only one exports).
+            let clim = match k { CFB | DFA | DFB => 1.0, CFA => 0.6, DSA | DSB => 0.4, _ => 0.0 };
+            clim * bell(t, 9.0, 8.0) * smoothstep(450.0, 800.0, p)
+                * (0.4 + 0.6 * fert) * (1.0 - smoothstep(0.45, 0.7, elev))
+        }
         // ── Marine goods (no walls; the score envelope itself bounds the belt) ──
+        GOOD_HERRING => {
+            // Everyday herring/sardine shoals: temperate shelf seas a step warmer
+            // and broader than the stockfish banks — the cheap fish of the
+            // common table. Unlimited.
+            if !sea_coastal { return 0.0; }
+            let shelf = if buf.is_shelf[i] == 1 { 1.0 } else { 0.3 };
+            let cool = bell(t, 10.0, 6.0);
+            let fish = 0.25 + 0.75 * smoothstep(0.10, 0.45, buf.fishery[i].clamp(0.0, 1.0));
+            shelf * cool * fish * band(abs_lat, 35.0, 62.0, 10.0)
+        }
         GOOD_STOCKFISH => {
             // Stockfish (dried cod) comes off the rich NORTHERN fishing banks —
             // it must track the actual fishery field, not blanket every cold

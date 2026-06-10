@@ -48,7 +48,7 @@ pub struct TileData {
 /// **self-describing**: a v2 blob carries `goods_count` in its header (see
 /// `compress`/`decompress`), so a save always reads back exactly the goods it
 /// stored regardless of the compile-time `GOODS_COUNT`.
-pub const GOODS_COUNT: usize = 38;
+pub const GOODS_COUNT: usize = 45;
 
 /// First byte of a v2 (self-describing) tile blob. Chosen so it can never collide
 /// with a legacy v1 blob, whose first byte is `terrain[0]` ∈ {0, 1}.

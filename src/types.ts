@@ -107,6 +107,12 @@ export interface GoodSpec {
   builtin: boolean;
   deposit?: GoodDepositSpec | null;
   scoring?: GoodEnvelope | null;
+  /** Need category — alternatives within a category substitute for each other. */
+  category: string;
+  /** Needs ladder tier: 0 basic, 1 comfort, 2 luxury. */
+  need_tier: number;
+  /** World-standard value per unit in grain-equivalent (wheat = 1). */
+  base_value: number;
 }
 
 export type PaintValue =
