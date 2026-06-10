@@ -18,10 +18,14 @@ use crate::sim::goods_spec::{default_list, GoodSpec};
 /// otherwise the shipped defaults. Used by generation and the trade matrix so a
 /// world always generates/reports the goods it was authored with.
 pub fn load_world_goods(conn: &rusqlite::Connection) -> Vec<GoodSpec> {
-    match metadata::get_meta(conn, "goods_spec") {
+    let mut specs: Vec<GoodSpec> = match metadata::get_meta(conn, "goods_spec") {
         Ok(Some(json)) => serde_json::from_str(&json).unwrap_or_else(|_| default_list()),
         _ => default_list(),
-    }
+    };
+    // Worlds snapshotted before the market fields existed load with empty
+    // categories — fill them so the economy solver always has real values.
+    crate::sim::goods_spec::backfill_market_fields(&mut specs);
+    specs
 }
 
 /// The shipped 30-good defaults (used for "reset to default" in the editor).

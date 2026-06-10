@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useUIStore } from "../../state/uiStore";
 import { useWorldStore } from "../../state/worldStore";
 import { useViewportStore } from "../../state/viewportStore";
-import { simRunAll, simRunAllFromTerrain } from "../../bridge/tauri";
+import { simRunAll, simRunAllFromTerrain, finalizeWorld, unfreezeWorld, getWorldMeta } from "../../bridge/tauri";
 import { StepLandmass } from "./StepLandmass";
 import { StepElevation } from "./StepElevation";
 import { StepOceanAtmo } from "./StepOceanAtmo";
@@ -24,7 +24,7 @@ const STEP_INFO = [
   { step: 7, label: "Settlements", desc: "Find optimal locations for cities, towns, and villages." },
   { step: 8, label: "Biological-Trade", desc: "Shark & shipworm waters, trade-good belts, trade routes, and the regional trade matrix." },
   { step: 9, label: "Political", desc: "Re-rank settlements by trade power (route centrality + good monopoly) and map their influence." },
-  { step: 10, label: "Economy", desc: "Build the trade economy: quality-graded production, per-hop prices, hub wealth, supply chains and strategic chokepoints." },
+  { step: 10, label: "Economy", desc: "Solve the market equilibrium: stock-based prices in grain-equivalent, barter ratios, currency goods, grain & trade wealth, supply chains and chokepoints." },
 ] as const;
 
 export function WorkflowPanel() {
@@ -40,11 +40,44 @@ export function WorkflowPanel() {
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
   const terrainParams = useUIStore((s) => s.terrainParams);
   const invalidateTiles = useViewportStore((s) => s.invalidateTiles);
-  const { setRivers, setLakes, setSettlements } = useWorldStore();
+  const { setRivers, setLakes, setSettlements, setMeta } = useWorldStore();
+  const meta = useWorldStore((s) => s.meta);
   const [seed, setSeed] = useState(() => Math.floor(Math.random() * 999999));
   const [plateCount, setPlateCount] = useState(16);
 
+  const frozen = meta?.frozen === true;
   const canAdvance = (step: number) => stepCompleted[step] === true;
+
+  const refreshMeta = async () => {
+    const m = await getWorldMeta();
+    if (m) setMeta(m);
+  };
+
+  const handleFinalize = async () => {
+    if (!confirm(
+      "Finalize the world? Geography (steps 1-6 and painting) becomes read-only, " +
+      "and campaigns can be started on it. You can unfreeze later, but campaigns " +
+      "made on the frozen world will then report a mismatch."
+    )) return;
+    try {
+      await finalizeWorld();
+      await refreshMeta();
+      setStatus("World finalized — campaign steps unlocked.");
+    } catch (err) {
+      setStatus(`Error: ${err}`);
+    }
+  };
+
+  const handleUnfreeze = async () => {
+    if (!confirm("Unfreeze the world? Existing campaigns will no longer match it.")) return;
+    try {
+      await unfreezeWorld();
+      await refreshMeta();
+      setStatus("World unfrozen — geography editable again.");
+    } catch (err) {
+      setStatus(`Error: ${err}`);
+    }
+  };
 
   const goNext = () => {
     if (workflowStep < 10) {
@@ -142,41 +175,82 @@ export function WorkflowPanel() {
           onChange={(e) => setPlateCount(Number(e.target.value))} style={inputStyle} />
       </div>
 
-      {/* Generate Full World (from plates) */}
-      <button onClick={handleRunAll} disabled={simRunning}
-        style={{ ...genBtn, background: "#1a5a2a", border: "1px solid #2a7040", color: "#a0e0b0", fontWeight: 600, textAlign: "center" }}>
+      {/* Generate Full World (from plates) — geography work, blocked once frozen */}
+      <button onClick={handleRunAll} disabled={simRunning || frozen}
+        title={frozen ? "World is finalized — unfreeze to regenerate geography" : undefined}
+        style={{ ...genBtn, background: "#1a5a2a", border: "1px solid #2a7040", color: "#a0e0b0", fontWeight: 600, textAlign: "center", opacity: frozen ? 0.5 : 1 }}>
         {simRunning ? "Generating..." : "Generate Full World"}
       </button>
 
       {/* Generate from existing template/painted landmass */}
       {(hasTemplate || stepCompleted[1]) && (
-        <button onClick={handleRunFromTemplate} disabled={simRunning}
-          style={{ ...genBtn, background: "#1a4a5a", border: "1px solid #2a6070", color: "#a0d0e0", fontWeight: 600, textAlign: "center" }}>
+        <button onClick={handleRunFromTemplate} disabled={simRunning || frozen}
+          title={frozen ? "World is finalized — unfreeze to regenerate geography" : undefined}
+          style={{ ...genBtn, background: "#1a4a5a", border: "1px solid #2a6070", color: "#a0d0e0", fontWeight: 600, textAlign: "center", opacity: frozen ? 0.5 : 1 }}>
           {simRunning ? "Generating..." : "Complete from Landmass"}
         </button>
       )}
 
       <div style={{ borderTop: "1px solid #1a2a40", margin: "2px 0" }} />
 
-      {/* Steps */}
+      {/* Steps \u2014 World group (1-6, geography) then Campaign group (7-10). */}
       {STEP_INFO.map(({ step, label, desc }) => {
         const isActive = workflowStep === step;
         const isDone = stepCompleted[step] === true;
+        // Campaign steps stay locked until the world's geography is finalized.
+        const locked = step >= 7 && !frozen;
 
         return (
-          <div key={step} style={{
+          <div key={step}>
+          {step === 7 && (
+            <div style={{ borderTop: "1px solid #1a2a40", margin: "6px 0 4px", paddingTop: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <span style={{ color: "#3a80c0", fontWeight: 700, fontSize: 12, flex: 1 }}>
+                  Campaign
+                </span>
+                {frozen ? (
+                  <button onClick={handleUnfreeze} disabled={simRunning}
+                    title="Geography is frozen. Unfreeze to edit it again (campaigns will desync)."
+                    style={{ ...smallBtn, padding: "2px 8px", color: "#c0a060", borderColor: "#4a3a20" }}>
+                    \ud83d\udd12 Frozen
+                  </button>
+                ) : (
+                  <button onClick={handleFinalize} disabled={simRunning || !canAdvance(6)}
+                    title={canAdvance(6)
+                      ? "Freeze the world's geography and unlock campaign steps"
+                      : "Finish the World steps (1-6) first"}
+                    style={{ ...smallBtn, padding: "2px 8px",
+                      color: canAdvance(6) ? "#a0e0b0" : "#405060",
+                      borderColor: canAdvance(6) ? "#2a7040" : "#1a2a40" }}>
+                    Finalize World
+                  </button>
+                )}
+              </div>
+              {!frozen && (
+                <div style={{ color: "#506080", fontSize: 10, marginBottom: 4 }}>
+                  Settlements, trade and economy live in a campaign on a finalized world.
+                </div>
+              )}
+            </div>
+          )}
+          <div style={{
             border: isActive ? "1px solid #1e3a58" : "1px solid transparent",
             borderRadius: 5, background: isActive ? "#0e1824" : "transparent",
             padding: isActive ? "6px" : "4px 6px",
+            opacity: locked ? 0.45 : 1,
           }}>
             {/* Step header */}
-            <div onClick={() => !simRunning && setWorkflowStep(step as any)}
+            <div onClick={() => {
+                if (simRunning) return;
+                if (locked) { setStatus("Finalize the world (after step 6) to unlock campaign steps."); return; }
+                setWorkflowStep(step as any);
+              }}
               style={{
-                cursor: "pointer", display: "flex", alignItems: "center", gap: 4,
+                cursor: locked ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 4,
                 color: isActive ? "#c0d8f0" : isDone ? "#60a060" : "#607090",
                 fontWeight: isActive ? 600 : 400, fontSize: 12,
               }}>
-              <span style={{ minWidth: 16 }}>{isDone ? "\u2713" : `${step}.`}</span>
+              <span style={{ minWidth: 16 }}>{isDone ? "\u2713" : locked ? "\ud83d\udd12" : `${step}.`}</span>
               <span>{label}</span>
             </div>
 
@@ -220,6 +294,7 @@ export function WorkflowPanel() {
                 </div>
               </div>
             )}
+          </div>
           </div>
         );
       })}

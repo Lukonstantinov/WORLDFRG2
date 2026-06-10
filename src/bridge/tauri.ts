@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { WorldMeta, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, TradeMatrix, PoliticalCenter, GoodSpec, EconomySnapshot } from "../types";
+import type { WorldMeta, OpenWorldResult, CampaignInfo, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, TradeMatrix, PoliticalCenter, GoodSpec, EconomySnapshot } from "../types";
 
 export async function newWorld(name: string, gridWidth: number, gridHeight: number): Promise<WorldMeta> {
   return invoke("new_world", { name, gridWidth, gridHeight });
@@ -25,6 +25,16 @@ export async function getTiles(
   lod: number = 0,
 ): Promise<TileResponse[]> {
   return invoke("get_tiles", { tiles, layers, lod });
+}
+
+/** Raw-bytes tile fetch (no base64/JSON overhead). See TileManager's
+ *  parsePackedTiles for the record layout. */
+export async function getTilesPacked(
+  tiles: [number, number][],
+  layers: string[],
+  lod: number = 0,
+): Promise<ArrayBuffer> {
+  return invoke("get_tiles_packed", { tiles, layers, lod });
 }
 
 export async function getTileRange(
@@ -434,7 +444,7 @@ export async function saveWorldAs(path: string): Promise<void> {
   return invoke("save_world_as", { path });
 }
 
-export async function openWorld(path: string): Promise<WorldMeta> {
+export async function openWorld(path: string): Promise<OpenWorldResult> {
   return invoke("open_world", { path });
 }
 
@@ -446,4 +456,38 @@ export async function exportLayers(
   dir: string, baseName: string, layers: string[]
 ): Promise<string[]> {
   return invoke("export_layers", { dir, baseName, layers });
+}
+
+// ── World/campaign split ──
+
+/** Freeze the world's geography; campaign steps unlock. */
+export async function finalizeWorld(): Promise<void> {
+  return invoke("finalize_world");
+}
+
+export async function unfreezeWorld(): Promise<void> {
+  return invoke("unfreeze_world");
+}
+
+export async function newCampaign(name: string): Promise<void> {
+  return invoke("new_campaign", { name });
+}
+
+export async function saveCampaignAs(path: string): Promise<void> {
+  return invoke("save_campaign_as", { path });
+}
+
+export async function openCampaign(path: string): Promise<CampaignInfo> {
+  return invoke("open_campaign", { path });
+}
+
+/** Persist wizard progress ("world" = steps 1-6, "campaign" = 7-10). */
+export async function setProgress(scope: "world" | "campaign", progressJson: string): Promise<void> {
+  return invoke("set_progress", { scope, progressJson });
+}
+
+/** Copy chosen layer groups from another .worldforge file into the current
+ *  world (grid sizes must match). Returns the modified tile coords. */
+export async function importWorldLayers(path: string, groups: string[]): Promise<[number, number][]> {
+  return invoke("import_world_layers", { path, groups });
 }

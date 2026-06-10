@@ -12,3 +12,4 @@ pub mod settlements;
 pub mod names;
 pub mod biological;
 pub mod goods_spec;
+pub mod market;

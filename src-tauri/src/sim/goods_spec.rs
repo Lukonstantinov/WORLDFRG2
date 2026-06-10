@@ -14,8 +14,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::biological::{
-    deposit_params, GOOD_COLOR, GOOD_DESIRE, GOOD_ICON, GOOD_LABEL, GOOD_MARINE, GOOD_NAMES,
-    GOOD_NETWORK_LUXURY, GOOD_RARITY, GOOD_UNLIMITED,
+    deposit_params, GOOD_BASE_VALUE, GOOD_CATEGORY, GOOD_COLOR, GOOD_DESIRE, GOOD_ICON,
+    GOOD_LABEL, GOOD_MARINE, GOOD_NAMES, GOOD_NEED_TIER, GOOD_NETWORK_LUXURY, GOOD_RARITY,
+    GOOD_UNLIMITED, GOOD_FRANKINCENSE, GOOD_INDIGO, GOOD_TOBACCO,
 };
 use crate::tile::cell::GOODS_COUNT;
 
@@ -94,6 +95,60 @@ pub struct GoodSpec {
     pub deposit: Option<DepositSpec>,
     #[serde(default)]
     pub scoring: Option<Envelope>,
+    // ── Market fields (serde defaults keep pre-market spec JSON loading) ──
+    /// Need category; alternatives within a category substitute for each other
+    /// in the market's needs ladder ("" = no substitution group).
+    #[serde(default)]
+    pub category: String,
+    /// Needs ladder tier: 0 basic, 1 comfort, 2 luxury.
+    #[serde(default)]
+    pub need_tier: u8,
+    /// World-standard value per unit in the grain-equivalent numeraire
+    /// (wheat = 1.0). Local prices are quoted as multiples of grain.
+    #[serde(default = "default_base_value")]
+    pub base_value: f32,
+}
+
+fn default_base_value() -> f32 {
+    1.0
+}
+
+/// Fill the market fields on specs saved before they existed (old world
+/// snapshots / library files): builtins backfill from the const tables, customs
+/// get a neutral category with their luxury flag mapped to a tier.
+pub fn backfill_market_fields(specs: &mut [GoodSpec]) {
+    for spec in specs.iter_mut() {
+        if !spec.category.is_empty() {
+            continue;
+        }
+        if let Some(g) = builtin_index_of(&spec.id) {
+            spec.category = GOOD_CATEGORY[g].to_string();
+            spec.need_tier = GOOD_NEED_TIER[g];
+            spec.base_value = GOOD_BASE_VALUE[g];
+        } else {
+            spec.category = custom_category(&spec.id).to_string();
+            spec.need_tier = if spec.network_luxury { 2 } else { 1 };
+            if spec.base_value <= 0.0 {
+                spec.base_value = 1.0;
+            }
+        }
+    }
+}
+
+/// Categories for the shipped declarative (non-builtin) goods; unknown custom
+/// ids fall back to "misc" (no substitution group).
+fn custom_category(id: &str) -> &'static str {
+    match id {
+        "bay_salt" => "preservative",
+        "citrus" => "sweetener",
+        "flax" => "fiber",
+        "coral" | "ambergris" | "jade" => "prestige",
+        "cinnamon" | "saffron" => "aromatic",
+        "tyrian_purple" => "dye",
+        "silver" | "lead" => "metal",
+        "marble" => "construction",
+        _ => "misc",
+    }
 }
 
 /// Index of a built-in good by id (its column / hardcoded-scorer index), or None
@@ -125,7 +180,10 @@ pub fn default_list() -> Vec<GoodSpec> {
                 name: GOOD_LABEL[g].to_string(),
                 icon: GOOD_ICON[g].to_string(),
                 color: GOOD_COLOR[g].to_string(),
-                enabled: true,
+                // ~1400 curation: tobacco is post-period flavor and frankincense/
+                // indigo fold into the incense/dyes categories — shipped disabled
+                // (still selectable in the editor, and old worlds keep them).
+                enabled: !matches!(g, GOOD_TOBACCO | GOOD_FRANKINCENSE | GOOD_INDIGO),
                 domain,
                 distribution,
                 rarity: GOOD_RARITY[g],
@@ -138,10 +196,15 @@ pub fn default_list() -> Vec<GoodSpec> {
                     count_den: d.count_den,
                 }),
                 scoring: None,
+                category: GOOD_CATEGORY[g].to_string(),
+                need_tier: GOOD_NEED_TIER[g],
+                base_value: GOOD_BASE_VALUE[g],
             }
         })
         .collect();
     list.extend(default_custom_goods());
+    // Customs are built with empty market fields; fill them from the id map.
+    backfill_market_fields(&mut list);
     list
 }
 
@@ -162,6 +225,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             id: id.into(), name: name.into(), icon: icon.into(), color: color.into(),
             enabled: true, domain, distribution: dist, rarity, desire, network_luxury: luxury,
             builtin: false, deposit, scoring: Some(env),
+            category: String::new(), need_tier: 0, base_value: 1.0,
         }
     }
     let dep = |min_elev: f32, num: u32, den: u32| Some(DepositSpec { min_elev, count_num: num, count_den: den });

@@ -4,6 +4,7 @@ import { previewGoodScore } from "../bridge/tauri";
 import type { GoodSpec, GoodDomain, GoodDistribution, GoodEnvelope } from "../types";
 
 const DOMAINS: GoodDomain[] = ["marine", "coastal", "continental", "island"];
+const CATEGORIES = ["cereal", "protein", "oil", "fiber", "drink", "sweetener", "preservative", "metal", "construction", "dye", "aromatic", "craft", "prestige", "livestock", "misc"] as const;
 const DISTRIBUTIONS: GoodDistribution[] = ["global", "local", "deposits"];
 
 // Climate presets → Köppen zone codes (see sim/koppen.rs).
@@ -137,6 +138,20 @@ function GoodRow({ g, i, expanded, onToggleExpand, update, duplicate, remove }: 
           </label>
           <label style={{ display: "flex", gap: 4, alignItems: "center" }}>
             <input type="checkbox" checked={g.network_luxury} onChange={(e) => update(i, { network_luxury: e.target.checked })} /> network luxury
+          </label>
+          <label style={{ display: "flex", gap: 4, alignItems: "center" }} title="Goods in the same category substitute for each other in city markets">
+            Category <select style={input} value={g.category} onChange={(e) => update(i, { category: e.target.value })}>
+              {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </label>
+          <label style={{ display: "flex", gap: 4, alignItems: "center" }} title="0 = basic need (filled first), 1 = comfort, 2 = luxury">
+            Need <select style={input} value={g.need_tier} onChange={(e) => update(i, { need_tier: Number(e.target.value) })}>
+              <option value={0}>basic</option><option value={1}>comfort</option><option value={2}>luxury</option>
+            </select>
+          </label>
+          <label style={{ display: "flex", gap: 4, alignItems: "center" }} title="World-standard value in grain-equivalent (wheat = 1)">
+            Value <input type="number" min={0.1} step={0.1} style={{ ...input, width: 56 }} value={g.base_value}
+              onChange={(e) => update(i, { base_value: Number(e.target.value) || 1 })} /> ×grain
           </label>
           <button style={btn} onClick={() => duplicate(i)}>Duplicate as custom</button>
           {g.builtin

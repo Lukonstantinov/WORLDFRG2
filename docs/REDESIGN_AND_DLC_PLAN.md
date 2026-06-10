@@ -1,5 +1,14 @@
 # WorldForge 2 — World/Trade Split, Performance Overhaul & DLC Plan
 
+> **STATUS (June 2026): Parts I–III are IMPLEMENTED** on branch
+> `claude/world-trade-simulation-redesign-z4ixxl`: perf safe-set (column-masked
+> WorldBuffer, binary tile IPC, persisted LOD pyramid), world/campaign split
+> (frozen worlds, `.campaign` files, layered import, wizard re-cut, legacy
+> split prompt), and the market economy (grain-numeraire equilibrium solver,
+> 1400-era goods curation, Market hub panel). **Parts IV–V remain future DLC.**
+> Remaining perf follow-ups (not implemented): f32→u16 quantization, banded
+> streaming, WorldTiles cache policy (I.3 items 4–6).
+
 Master plan for turning WorldForge from a one-shot world *generator* into a
 static-world + living-trade *simulator*. Decisions below were locked with the
 project owner (June 2026):

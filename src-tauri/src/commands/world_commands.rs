@@ -18,6 +18,9 @@ pub struct WorldMeta {
     /// the SAME ratio as the drawn lines so every latitude-dependent layer lands
     /// on the lines. 1.0 = even.
     pub lat_ratio: f32,
+    /// True once `finalize_world` froze the geography (campaign steps unlocked).
+    #[serde(default)]
+    pub frozen: bool,
 }
 
 /// Read the latitude framing from metadata, falling back to the defaults for
@@ -47,7 +50,7 @@ pub fn new_world(
     // Clear existing data
     conn.execute_batch(
         "DELETE FROM tiles; DELETE FROM metadata; DELETE FROM objects;
-         DELETE FROM sim_state; DELETE FROM undo_journal;"
+         DELETE FROM sim_state; DELETE FROM undo_journal; DELETE FROM campaign;"
     ).map_err(|e| e.to_string())?;
 
     // Set metadata
@@ -75,6 +78,7 @@ pub fn new_world(
         equator_offset: DEFAULT_EQUATOR_OFFSET,
         lat_scale: DEFAULT_LAT_SCALE,
         lat_ratio: DEFAULT_LAT_RATIO,
+        frozen: false,
     })
 }
 
@@ -118,6 +122,7 @@ pub fn set_latitude_config(
         equator_offset,
         lat_scale,
         lat_ratio,
+        frozen: crate::commands::campaign_commands::is_frozen(&conn),
     })
 }
 
@@ -150,5 +155,6 @@ pub fn get_world_meta(db: State<'_, WorldDb>) -> Result<Option<WorldMeta>, Strin
         equator_offset,
         lat_scale,
         lat_ratio,
+        frozen: crate::commands::campaign_commands::is_frozen(&conn),
     }))
 }

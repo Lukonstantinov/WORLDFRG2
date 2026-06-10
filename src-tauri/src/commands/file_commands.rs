@@ -5,6 +5,8 @@ use crate::tile::cell::TileData;
 use crate::render::tile_image::render_tile;
 use rusqlite::Connection;
 
+/// Save the WORLD file: full SQLite backup, then strip campaign data — the
+/// `.worldforge` file carries geography only; campaigns save separately.
 #[tauri::command]
 pub fn save_world_as(
     path: String,
@@ -14,18 +16,36 @@ pub fn save_world_as(
 
     // Use SQLite backup API to copy in-memory DB to file
     let mut dest = Connection::open(&path).map_err(|e| e.to_string())?;
-    let backup = rusqlite::backup::Backup::new(&conn, &mut dest).map_err(|e| e.to_string())?;
-    backup.run_to_completion(100, std::time::Duration::from_millis(10), None)
-        .map_err(|e| e.to_string())?;
-
+    {
+        let backup = rusqlite::backup::Backup::new(&conn, &mut dest).map_err(|e| e.to_string())?;
+        backup.run_to_completion(100, std::time::Duration::from_millis(10), None)
+            .map_err(|e| e.to_string())?;
+    }
+    // The backup copies every table; campaign rows don't belong in a world file.
+    dest.execute("DELETE FROM campaign", []).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// What `open_world` hands the frontend: the world meta, the campaign (if the
+/// file carried one — legacy single-file saves do, in-memory-migrated), and
+/// persisted wizard progress.
+#[derive(serde::Serialize)]
+pub struct OpenWorldResult {
+    pub meta: crate::commands::world_commands::WorldMeta,
+    /// True when the file was a pre-split save (its settlements/economy lived
+    /// in world metadata) — the frontend offers to split it into two files.
+    pub legacy: bool,
+    pub campaign_name: Option<String>,
+    /// JSON-encoded step-completion maps (empty when never persisted).
+    pub world_progress: Option<String>,
+    pub campaign_progress: Option<String>,
 }
 
 #[tauri::command]
 pub fn open_world(
     path: String,
     db: State<'_, WorldDb>,
-) -> Result<crate::commands::world_commands::WorldMeta, String> {
+) -> Result<OpenWorldResult, String> {
     // Copy file DB into the managed in-memory DB
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
@@ -34,14 +54,27 @@ pub fn open_world(
     conn.execute_batch(&format!(
         "ATTACH DATABASE '{}' AS src;
          DELETE FROM tiles; DELETE FROM metadata; DELETE FROM objects;
-         DELETE FROM sim_state; DELETE FROM undo_journal;
+         DELETE FROM sim_state; DELETE FROM undo_journal; DELETE FROM campaign;
          INSERT INTO metadata SELECT * FROM src.metadata;
          INSERT INTO tiles SELECT * FROM src.tiles;
          INSERT OR IGNORE INTO objects SELECT * FROM src.objects;
-         INSERT OR IGNORE INTO sim_state SELECT * FROM src.sim_state;
-         DETACH DATABASE src;",
+         INSERT OR IGNORE INTO sim_state SELECT * FROM src.sim_state;",
         src_path
     )).map_err(|e| e.to_string())?;
+    // Older files have no campaign table; copy it only when present.
+    let has_campaign: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM src.sqlite_master WHERE type = 'table' AND name = 'campaign'",
+        [], |r| r.get(0),
+    ).map_err(|e| e.to_string())?;
+    if has_campaign > 0 {
+        conn.execute_batch("INSERT INTO campaign SELECT * FROM src.campaign;")
+            .map_err(|e| e.to_string())?;
+    }
+    conn.execute_batch("DETACH DATABASE src;").map_err(|e| e.to_string())?;
+
+    // Pre-split saves keep settlements/economy in metadata → move them into the
+    // campaign table so the app always runs on the split model in memory.
+    let legacy = crate::commands::campaign_commands::migrate_legacy_campaign_keys(&conn)?;
 
     // Read meta from the loaded DB
     let name = metadata::get_meta(&conn, "name")
@@ -59,14 +92,21 @@ pub fn open_world(
     let (equator_offset, lat_scale, lat_ratio) =
         crate::commands::world_commands::read_lat_config(&conn);
 
-    Ok(crate::commands::world_commands::WorldMeta {
-        name,
-        grid_width,
-        grid_height,
-        tile_size: 128,
-        equator_offset,
-        lat_scale,
-        lat_ratio,
+    Ok(OpenWorldResult {
+        meta: crate::commands::world_commands::WorldMeta {
+            name,
+            grid_width,
+            grid_height,
+            tile_size: 128,
+            equator_offset,
+            lat_scale,
+            lat_ratio,
+            frozen: crate::commands::campaign_commands::is_frozen(&conn),
+        },
+        legacy,
+        campaign_name: metadata::campaign_get(&conn, "name").ok().flatten(),
+        world_progress: metadata::get_meta(&conn, "world_progress").ok().flatten(),
+        campaign_progress: metadata::campaign_get(&conn, "campaign_progress").ok().flatten(),
     })
 }
 

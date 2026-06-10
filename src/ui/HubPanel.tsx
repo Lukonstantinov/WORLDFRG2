@@ -113,6 +113,43 @@ export function HubPanel() {
         <ClassTile label="Commoners" value={hub.commoners ?? 0} level={1} color="#8aa0c0" />
       </div>
 
+      {/* Market: equilibrium prices in grain-equivalent + barter ratios */}
+      {hub.market && (
+        <>
+          <div style={{ ...sectionHdr, marginTop: 6 }}>
+            Market — prices in grain-equivalent (world standard in grey)
+          </div>
+          <div style={{ display: "flex", gap: 4, margin: "2px 0 4px" }}>
+            <Stat label="Grain wealth" value={hub.market.grain_wealth.toFixed(2)} />
+            <Stat label="Trade wealth" value={hub.market.trade_wealth.toFixed(2)} />
+          </div>
+          {hub.market.currency_goods.length > 0 && (
+            <div style={{ color: "#e0c060", fontSize: 10, margin: "0 0 4px" }}>
+              <span style={{ color: "#6a86a6" }}>Currency here: </span>
+              {hub.market.currency_goods.map((c) => `${iconFor(c)} ${labelFor(c)}`).join(", ")}
+            </div>
+          )}
+          {hub.market.prices.slice(0, 12).map((p) => (
+            <div key={p.good} style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 10, padding: "1px 0" }}>
+              <span style={{ minWidth: 92, color: "#9ab0c8", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                {iconFor(p.good_name)} {labelFor(p.good_name)}
+              </span>
+              <span style={{
+                minWidth: 44, textAlign: "right", fontWeight: 600,
+                color: p.price > p.base_value * 1.3 ? "#e08080"
+                  : p.price < p.base_value * 0.77 ? "#7fd0a0" : "#c0d0e0",
+              }}>
+                {p.price.toFixed(2)}
+              </span>
+              <span style={{ color: "#56708e", minWidth: 38, textAlign: "right" }}>{p.base_value.toFixed(1)}</span>
+              <span style={{ color: "#6a86a6", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {p.exchanged_for.slice(0, 2).map((x) => `1 ⇄ ${x.ratio.toFixed(1)} ${labelFor(x.good_name)}`).join(" · ")}
+              </span>
+            </div>
+          ))}
+        </>
+      )}
+
       {/* Luxury market: demand vs received + price + which class craves it */}
       {hub.luxuries && hub.luxuries.length > 0 && (
         <>

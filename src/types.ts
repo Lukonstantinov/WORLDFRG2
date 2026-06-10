@@ -9,6 +9,27 @@ export interface WorldMeta {
   lat_scale: number;
   /** Line-spacing ratio (gap 30→60 ÷ gap 0→30); shared with the simulation. */
   lat_ratio: number;
+  /** True once the world's geography is finalized (campaign steps unlocked). */
+  frozen: boolean;
+}
+
+/** What open_world returns: the world plus any campaign data the file carried. */
+export interface OpenWorldResult {
+  meta: WorldMeta;
+  /** Pre-split single-file save — offer to split it into world + campaign. */
+  legacy: boolean;
+  campaign_name: string | null;
+  /** JSON-encoded step-completion maps persisted by set_progress. */
+  world_progress: string | null;
+  campaign_progress: string | null;
+}
+
+export interface CampaignInfo {
+  name: string;
+  /** False when the campaign was saved against a different/refinalized world. */
+  world_match: boolean;
+  /** JSON step-completion map for the campaign wizard (steps 7-10). */
+  campaign_progress: string | null;
 }
 
 export interface TileResponse {
@@ -86,6 +107,12 @@ export interface GoodSpec {
   builtin: boolean;
   deposit?: GoodDepositSpec | null;
   scoring?: GoodEnvelope | null;
+  /** Need category — alternatives within a category substitute for each other. */
+  category: string;
+  /** Needs ladder tier: 0 basic, 1 comfort, 2 luxury. */
+  need_tier: number;
+  /** World-standard value per unit in grain-equivalent (wheat = 1). */
+  base_value: number;
 }
 
 export type PaintValue =
@@ -154,6 +181,32 @@ export interface EconReceive {
   chain: number;
   from_hub: number;
 }
+export interface ExchangeRate {
+  good_name: string;
+  /** Units of the counter-good one unit of this good buys here. */
+  ratio: number;
+}
+export interface HubMarketGood {
+  good: number;
+  good_name: string;
+  /** Local price in the grain-equivalent numeraire. */
+  price: number;
+  /** World-standard value (the good's base_value) for comparison. */
+  base_value: number;
+  in_flow: number;
+  out_flow: number;
+  exchanged_for: ExchangeRate[];
+}
+/** Per-hub market panel data from the equilibrium solver. */
+export interface HubMarket {
+  /** Food-stock value per capita (food security). */
+  grain_wealth: number;
+  /** Net market earnings per capita (commercial prosperity). */
+  trade_wealth: number;
+  /** Emergent currency goods at this hub. */
+  currency_goods: string[];
+  prices: HubMarketGood[];
+}
 export interface EconHub {
   id: number;
   x: number;
@@ -184,6 +237,8 @@ export interface EconHub {
   sea_access?: boolean;  // real sea port (not a closed lake)
   exports_to?: EconExport[]; // where this hub's exports go (with %)
   shortages?: ShortageNote[]; // goods it can't fully obtain + why
+  /** Market panel: equilibrium prices, barter ratios, currency goods. */
+  market?: HubMarket | null;
   produces: EconHubGood[];
   receives: EconReceive[];
 }

@@ -51,9 +51,11 @@ impl WorldDb {
         Ok(Self::new(conn))
     }
 
+    /// Only lod-0 rows count: the LOD pyramid (lod > 0) is a derived cache that
+    /// populates lazily, and must not look like a world edit.
     fn fingerprint(conn: &Connection) -> Result<TileFingerprint, String> {
         conn.query_row(
-            "SELECT COALESCE(SUM(version), 0), COUNT(*) FROM tiles",
+            "SELECT COALESCE(SUM(version), 0), COUNT(*) FROM tiles WHERE lod = 0",
             [],
             |r| Ok((r.get(0)?, r.get(1)?)),
         ).map_err(|e| e.to_string())

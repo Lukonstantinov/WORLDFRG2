@@ -48,7 +48,7 @@ pub struct TileData {
 /// **self-describing**: a v2 blob carries `goods_count` in its header (see
 /// `compress`/`decompress`), so a save always reads back exactly the goods it
 /// stored regardless of the compile-time `GOODS_COUNT`.
-pub const GOODS_COUNT: usize = 38;
+pub const GOODS_COUNT: usize = 45;
 
 /// First byte of a v2 (self-describing) tile blob. Chosen so it can never collide
 /// with a legacy v1 blob, whose first byte is `terrain[0]` ∈ {0, 1}.
@@ -224,6 +224,43 @@ impl TileData {
             distance_to_ocean, habitability,
             salinity, shark_risk, goods, shipworm_risk,
             storm_base, reef_risk, disease_risk,
+        }
+    }
+
+    /// Overwrite this tile's columns in `cols` with `src`'s (layered world
+    /// import). Columns outside the set keep their current data.
+    pub fn merge_columns(&mut self, src: &TileData, cols: crate::sim::world_buffer::ColumnSet) {
+        use crate::sim::world_buffer::ColumnSet as C;
+        macro_rules! merge {
+            ($c:expr => $($f:ident),* $(,)?) => {
+                if cols.has($c) { $( self.$f.clone_from(&src.$f); )* }
+            };
+        }
+        merge!(C::TERRAIN => terrain);
+        merge!(C::ELEVATION => elevation);
+        merge!(C::SEA_DEPTH => sea_depth);
+        merge!(C::SHELF => is_shelf, is_shelf_edge);
+        merge!(C::LOCKED => locked_bits);
+        merge!(C::PLATES => plate_index, boundary_type);
+        merge!(C::VOLCANIC => is_volcanic);
+        merge!(C::TEMPERATURE => temperature);
+        merge!(C::PRECIPITATION => precipitation);
+        merge!(C::KOPPEN => koppen);
+        merge!(C::SOIL => soil_type);
+        merge!(C::FERTILITY => fertility);
+        merge!(C::FISHERY => fishery);
+        merge!(C::WIND => wind_vx, wind_vy);
+        merge!(C::CURRENTS => current_type, current_vx, current_vy);
+        merge!(C::DIST_OCEAN => distance_to_ocean);
+        merge!(C::HABITABILITY => habitability);
+        merge!(C::SALINITY => salinity);
+        merge!(C::SHARK => shark_risk);
+        merge!(C::SHIPWORM => shipworm_risk);
+        merge!(C::STORM => storm_base);
+        merge!(C::REEF => reef_risk);
+        merge!(C::DISEASE => disease_risk);
+        if cols.has(C::GOODS) {
+            self.goods.clone_from(&src.goods);
         }
     }
 }
