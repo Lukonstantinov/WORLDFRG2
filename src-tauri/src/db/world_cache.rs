@@ -53,10 +53,12 @@ impl WorldTiles {
             }
         }
 
+        // `into_par_iter` consumes each compressed blob as it's decompressed, so
+        // the compressed copy of the world isn't held alongside the decompressed one.
         let tiles: Vec<TileData> = blobs
-            .par_iter()
+            .into_par_iter()
             .map(|b| match b {
-                Some(blob) => TileData::decompress(blob),
+                Some(blob) => TileData::decompress(&blob),
                 None => TileData::new_sea(),
             })
             .collect();

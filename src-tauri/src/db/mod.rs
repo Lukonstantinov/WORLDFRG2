@@ -93,4 +93,17 @@ impl WorldDb {
             *cache = Some((key, val));
         }
     }
+
+    /// Drop the decompressed-tile snapshot and cost grid. Sim phases call this
+    /// before allocating their own world-sized buffers: the snapshot (~GBs on the
+    /// largest worlds) is about to be stale anyway, and holding both at once is
+    /// what pushed peak RAM over the edge at 7200×3600.
+    pub fn clear_caches(&self) {
+        if let Ok(mut c) = self.tiles_cache.lock() {
+            *c = None;
+        }
+        if let Ok(mut c) = self.cost_cache.lock() {
+            *c = None;
+        }
+    }
 }

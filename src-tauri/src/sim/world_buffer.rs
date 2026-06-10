@@ -179,10 +179,12 @@ impl WorldBuffer {
                 blobs.push(bv.map(|(_, b)| b));
             }
         }
+        // `into_par_iter` consumes each compressed blob as it's decompressed, so
+        // the compressed copy of the world isn't held alongside the decompressed one.
         let tiles: Vec<TileData> = blobs
-            .par_iter()
+            .into_par_iter()
             .map(|b| match b {
-                Some(blob) => TileData::decompress(blob),
+                Some(blob) => TileData::decompress(&blob),
                 None => TileData::new_sea(),
             })
             .collect();
@@ -199,45 +201,30 @@ impl WorldBuffer {
                     buf.goods.resize(tile.goods.len(), vec![0u8; total]);
                 }
 
-                let tile_w = TILE_SIZE.min(width - tx as u32 * TILE_SIZE);
+                let tile_w = TILE_SIZE.min(width - tx as u32 * TILE_SIZE) as usize;
                 let tile_h = TILE_SIZE.min(height - ty as u32 * TILE_SIZE);
 
+                // Whole-row slice copies (one memcpy per column per row) instead
+                // of per-cell assignments — the goods inner loop alone made the
+                // old form ~40 scattered writes per cell on large worlds.
                 for ly in 0..tile_h {
-                    for lx in 0..tile_w {
-                        let wi = ((ty as u32 * TILE_SIZE + ly) * width + tx as u32 * TILE_SIZE + lx) as usize;
-                        let ti = (ly * TILE_SIZE + lx) as usize;
-
-                        buf.terrain[wi] = tile.terrain[ti];
-                        buf.elevation[wi] = tile.elevation[ti];
-                        buf.sea_depth[wi] = tile.sea_depth[ti];
-                        buf.is_shelf[wi] = tile.is_shelf[ti];
-                        buf.is_shelf_edge[wi] = tile.is_shelf_edge[ti];
-                        buf.locked_bits[wi] = tile.locked_bits[ti];
-                        buf.plate_index[wi] = tile.plate_index[ti];
-                        buf.boundary_type[wi] = tile.boundary_type[ti];
-                        buf.is_volcanic[wi] = tile.is_volcanic[ti];
-                        buf.temperature[wi] = tile.temperature[ti];
-                        buf.precipitation[wi] = tile.precipitation[ti];
-                        buf.koppen[wi] = tile.koppen[ti];
-                        buf.soil_type[wi] = tile.soil_type[ti];
-                        buf.fertility[wi] = tile.fertility[ti];
-                        buf.fishery[wi] = tile.fishery[ti];
-                        buf.current_type[wi] = tile.current_type[ti];
-                        buf.wind_vx[wi] = tile.wind_vx[ti];
-                        buf.wind_vy[wi] = tile.wind_vy[ti];
-                        buf.current_vx[wi] = tile.current_vx[ti];
-                        buf.current_vy[wi] = tile.current_vy[ti];
-                        buf.distance_to_ocean[wi] = tile.distance_to_ocean[ti];
-                        buf.habitability[wi] = tile.habitability[ti];
-                        buf.salinity[wi] = tile.salinity[ti];
-                        buf.shark_risk[wi] = tile.shark_risk[ti];
-                        for g in 0..tile.goods.len() {
-                            buf.goods[g][wi] = tile.goods[g][ti];
-                        }
-                        buf.shipworm_risk[wi] = tile.shipworm_risk[ti];
-                        buf.storm_base[wi] = tile.storm_base[ti];
-                        buf.reef_risk[wi] = tile.reef_risk[ti];
-                        buf.disease_risk[wi] = tile.disease_risk[ti];
+                    let wi0 = ((ty as u32 * TILE_SIZE + ly) * width + tx as u32 * TILE_SIZE) as usize;
+                    let ti0 = (ly * TILE_SIZE) as usize;
+                    macro_rules! copy_rows {
+                        ($($f:ident),* $(,)?) => { $(
+                            buf.$f[wi0..wi0 + tile_w].copy_from_slice(&tile.$f[ti0..ti0 + tile_w]);
+                        )* };
+                    }
+                    copy_rows!(
+                        terrain, elevation, sea_depth, is_shelf, is_shelf_edge,
+                        locked_bits, plate_index, boundary_type, is_volcanic,
+                        temperature, precipitation, koppen, soil_type, fertility,
+                        fishery, current_type, wind_vx, wind_vy, current_vx,
+                        current_vy, distance_to_ocean, habitability, salinity,
+                        shark_risk, shipworm_risk, storm_base, reef_risk, disease_risk,
+                    );
+                    for g in 0..tile.goods.len() {
+                        buf.goods[g][wi0..wi0 + tile_w].copy_from_slice(&tile.goods[g][ti0..ti0 + tile_w]);
                     }
                 }
             }
@@ -263,64 +250,62 @@ impl WorldBuffer {
         }
         undo::push_undo(conn, label, &old_states)?;
 
-        // Write new tiles
-        let mut modified = Vec::new();
-        for ty in 0..self.tiles_y as i32 {
-            for tx in 0..self.tiles_x as i32 {
-                let mut tile = TileData::new_sea();
-                // Match the tile's good column count to the buffer (may exceed the
-                // built-in GOODS_COUNT when the world defines custom goods).
-                if self.goods.len() != tile.goods.len() {
-                    tile.goods.resize(self.goods.len(), vec![0u8; (TILE_SIZE * TILE_SIZE) as usize]);
-                }
-                let tile_w = TILE_SIZE.min(self.width - tx as u32 * TILE_SIZE);
-                let tile_h = TILE_SIZE.min(self.height - ty as u32 * TILE_SIZE);
+        // Gather + compress every tile in parallel (reads `&self` only), in
+        // batches so peak memory stays bounded on the largest worlds, then write
+        // each batch of precompressed blobs inside one transaction instead of
+        // one implicit commit per tile.
+        let coords: Vec<(i32, i32)> = (0..self.tiles_y as i32)
+            .flat_map(|ty| (0..self.tiles_x as i32).map(move |tx| (tx, ty)))
+            .collect();
 
-                for ly in 0..tile_h {
-                    for lx in 0..tile_w {
-                        let wi = ((ty as u32 * TILE_SIZE + ly) * self.width + tx as u32 * TILE_SIZE + lx) as usize;
-                        let ti = (ly * TILE_SIZE + lx) as usize;
-
-                        tile.terrain[ti] = self.terrain[wi];
-                        tile.elevation[ti] = self.elevation[wi];
-                        tile.sea_depth[ti] = self.sea_depth[wi];
-                        tile.is_shelf[ti] = self.is_shelf[wi];
-                        tile.is_shelf_edge[ti] = self.is_shelf_edge[wi];
-                        tile.locked_bits[ti] = self.locked_bits[wi];
-                        tile.plate_index[ti] = self.plate_index[wi];
-                        tile.boundary_type[ti] = self.boundary_type[wi];
-                        tile.is_volcanic[ti] = self.is_volcanic[wi];
-                        tile.temperature[ti] = self.temperature[wi];
-                        tile.precipitation[ti] = self.precipitation[wi];
-                        tile.koppen[ti] = self.koppen[wi];
-                        tile.soil_type[ti] = self.soil_type[wi];
-                        tile.fertility[ti] = self.fertility[wi];
-                        tile.fishery[ti] = self.fishery[wi];
-                        tile.current_type[ti] = self.current_type[wi];
-                        tile.wind_vx[ti] = self.wind_vx[wi];
-                        tile.wind_vy[ti] = self.wind_vy[wi];
-                        tile.current_vx[ti] = self.current_vx[wi];
-                        tile.current_vy[ti] = self.current_vy[wi];
-                        tile.distance_to_ocean[ti] = self.distance_to_ocean[wi];
-                        tile.habitability[ti] = self.habitability[wi];
-                        tile.salinity[ti] = self.salinity[wi];
-                        tile.shark_risk[ti] = self.shark_risk[wi];
-                        for g in 0..self.goods.len() {
-                            tile.goods[g][ti] = self.goods[g][wi];
-                        }
-                        tile.shipworm_risk[ti] = self.shipworm_risk[wi];
-                        tile.storm_base[ti] = self.storm_base[wi];
-                        tile.reef_risk[ti] = self.reef_risk[wi];
-                        tile.disease_risk[ti] = self.disease_risk[wi];
-                    }
-                }
-
-                tile_store::save_tile(conn, tx, ty, 0, &tile).map_err(|e| e.to_string())?;
-                modified.push((tx, ty));
+        const SAVE_BATCH: usize = 256;
+        let txn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        for batch in coords.chunks(SAVE_BATCH) {
+            let blobs: Vec<(i32, i32, Vec<u8>)> = batch
+                .par_iter()
+                .map(|&(tx, ty)| (tx, ty, self.gather_tile(tx, ty).compress()))
+                .collect();
+            for (tx, ty, blob) in &blobs {
+                tile_store::save_tile_blob(&txn, *tx, *ty, 0, blob).map_err(|e| e.to_string())?;
             }
         }
+        txn.commit().map_err(|e| e.to_string())?;
 
-        Ok(modified)
+        Ok(coords)
+    }
+
+    /// Rebuild one tile's columnar data from the flat world arrays.
+    fn gather_tile(&self, tx: i32, ty: i32) -> TileData {
+        let mut tile = TileData::new_sea();
+        // Match the tile's good column count to the buffer (may exceed the
+        // built-in GOODS_COUNT when the world defines custom goods).
+        if self.goods.len() != tile.goods.len() {
+            tile.goods.resize(self.goods.len(), vec![0u8; (TILE_SIZE * TILE_SIZE) as usize]);
+        }
+        let tile_w = TILE_SIZE.min(self.width - tx as u32 * TILE_SIZE) as usize;
+        let tile_h = TILE_SIZE.min(self.height - ty as u32 * TILE_SIZE);
+
+        for ly in 0..tile_h {
+            let wi0 = ((ty as u32 * TILE_SIZE + ly) * self.width + tx as u32 * TILE_SIZE) as usize;
+            let ti0 = (ly * TILE_SIZE) as usize;
+            macro_rules! copy_rows {
+                ($($f:ident),* $(,)?) => { $(
+                    tile.$f[ti0..ti0 + tile_w].copy_from_slice(&self.$f[wi0..wi0 + tile_w]);
+                )* };
+            }
+            copy_rows!(
+                terrain, elevation, sea_depth, is_shelf, is_shelf_edge,
+                locked_bits, plate_index, boundary_type, is_volcanic,
+                temperature, precipitation, koppen, soil_type, fertility,
+                fishery, current_type, wind_vx, wind_vy, current_vx,
+                current_vy, distance_to_ocean, habitability, salinity,
+                shark_risk, shipworm_risk, storm_base, reef_risk, disease_risk,
+            );
+            for g in 0..self.goods.len() {
+                tile.goods[g][ti0..ti0 + tile_w].copy_from_slice(&self.goods[g][wi0..wi0 + tile_w]);
+            }
+        }
+        tile
     }
 
     #[inline]
