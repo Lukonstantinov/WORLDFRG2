@@ -86,6 +86,8 @@ interface UIStore {
   settlementRealism: number;
   /** Goods-browser panel open (toolbar button → browse all goods by origin). */
   showGoodsBrowser: boolean;
+  /** Merchant-houses panel open. */
+  showHouses: boolean;
 
   setTool: (tool: ActiveTool) => void;
   setLayer: (layer: ActiveLayer) => void;
@@ -117,6 +119,7 @@ interface UIStore {
   setHubDisplay: (p: Partial<{ size: number; intensity: number }>) => void;
   setSettlementRealism: (v: number) => void;
   setShowGoodsBrowser: (v: boolean) => void;
+  setShowHouses: (v: boolean) => void;
 }
 
 // Default layer/tool for each step
@@ -133,6 +136,8 @@ const STEP_DEFAULTS: Record<number, { layer: ActiveLayer; tool: ActiveTool }> = 
   7: { layer: "land", tool: "select" },
   8: { layer: "land", tool: "select" },
   9: { layer: "land", tool: "select" },
+  10: { layer: "land", tool: "select" },
+  11: { layer: "land", tool: "select" },
 };
 
 export const useUIStore = create<UIStore>((set) => ({
@@ -149,7 +154,7 @@ export const useUIStore = create<UIStore>((set) => ({
     rivers: true, lakes: true, settlements: true,
     markers: false, wind: false, currents: false, latLines: false,
     tradeRoutes: false, fisheryBanks: false,
-    sharkZones: false, shipwormZones: false, stormZones: false, reefZones: false, tradeFlows: false,
+    sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
     hubNames: false, settlementNames: false, tradeRegions: false,
     ...Object.fromEntries(GOOD_DEFS.map((g) => [goodOverlayKey(g.name), false])),
@@ -170,6 +175,7 @@ export const useUIStore = create<UIStore>((set) => ({
   hubDisplay: { size: 1, intensity: 1 },
   settlementRealism: 0.55,
   showGoodsBrowser: false,
+  showHouses: false,
 
   setTool: (tool) => set({ activeTool: tool }),
   setLayer: (layer) => set({ activeLayer: layer }),
@@ -222,6 +228,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setHubDisplay: (p) => set((state) => ({ hubDisplay: { ...state.hubDisplay, ...p } })),
   setSettlementRealism: (v) => set({ settlementRealism: v }),
   setShowGoodsBrowser: (v) => set({ showGoodsBrowser: v }),
+  setShowHouses: (v) => set({ showHouses: v }),
 
   setWorkflowStep: (step) => {
     const defaults = STEP_DEFAULTS[step] || { layer: "land", tool: "pan" };

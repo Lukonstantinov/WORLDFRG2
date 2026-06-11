@@ -31,3 +31,13 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+# ── Keep the debug `target/` directory small ──────────────────────────────────
+# A Tauri dev build's `target/` routinely balloons to 20-40 GB, almost all of it
+# debug-symbol tables for the (many) dependencies. These two settings cut that by
+# several times while keeping usable backtraces for our own code.
+[profile.dev]
+debug = "line-tables-only"        # backtraces, but drop the heavy full symbol tables
+
+[profile.dev.package."*"]
+debug = false                     # dependencies are rarely stepped into → no debuginfo

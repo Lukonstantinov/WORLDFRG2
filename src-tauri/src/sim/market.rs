@@ -98,14 +98,27 @@ pub struct MarketFlow {
     pub value: f32,
 }
 
+/// One emergent currency good at a hub, with the components that made it money:
+/// liquidity (how many distinct trades it appears in), value density (its grain-
+/// equivalent base value) and price stability. These drive the settlement
+/// window's explained currency card.
+#[derive(Clone, Debug, Default)]
+pub struct CurrencyInfo {
+    pub good: usize,
+    pub liquidity: f32,
+    pub value: f32,
+    pub stability: f32,
+    pub score: f32,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct HubMetrics {
     /// Food-stock value per capita (food security). Drives growth/starvation.
     pub grain_wealth: f32,
     /// (export earnings − import spend) per capita (commercial prosperity).
     pub trade_wealth: f32,
-    /// Top emergent currency goods at this hub: (good, score), best first.
-    pub currency_goods: Vec<(usize, f32)>,
+    /// Top emergent currency goods at this hub, best first.
+    pub currency_goods: Vec<CurrencyInfo>,
     pub export_value: f32,
     pub import_value: f32,
 }
@@ -362,7 +375,7 @@ pub fn solve(
                 / (pop * prod_per_good.max(EPS));
 
         // Emergent currency goods: liquidity × value density × price stability.
-        let mut scores: Vec<(usize, f32)> = (0..ng)
+        let mut scores: Vec<CurrencyInfo> = (0..ng)
             .filter_map(|g| {
                 let liq = partners.get(&(h, g)).map(|s| s.len()).unwrap_or(0) as f32;
                 if liq < 1.0 {
@@ -371,12 +384,19 @@ pub fn solve(
                 let stability = 1.0
                     / (1.0 + ((prices[h][g] - prev_prices[h][g]).abs()
                         / prices[h][g].max(EPS)));
-                Some((g, liq * goods[g].base_value.sqrt() * stability))
+                let value = goods[g].base_value;
+                Some(CurrencyInfo {
+                    good: g,
+                    liquidity: liq,
+                    value,
+                    stability,
+                    score: liq * value.sqrt() * stability,
+                })
             })
             .collect();
-        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-            .then(a.0.cmp(&b.0)));
-        scores.truncate(2);
+        scores.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.good.cmp(&b.good)));
+        scores.truncate(3);
         metrics[h].currency_goods = scores;
     }
 

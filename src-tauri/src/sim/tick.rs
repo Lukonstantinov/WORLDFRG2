@@ -1,0 +1,1276 @@
+//! DLC 1 "Living Trade" — the per-tick campaign simulation engine.
+//!
+//! A `CampaignSim` is seeded once at campaign start (from the static economy
+//! snapshot: hubs, per-good production, goods spec, connectivity) and then
+//! advanced one **day** at a time. Each tick runs, in order:
+//!
+//! 1. production    — stock += base_production · seasonal multiplier
+//! 2. consumption   — needs ladder (basic→comfort→luxury) w/ category substitution
+//! 3. price         — smoothed `base·(need/stock)^k` in the grain-eq numeraire
+//! 4. merchant dispatch — arbitrage surplus→deficit, emitting in-transit cargo
+//! 5. arrivals      — cargo whose ETA has passed lands as stock
+//! 6. events        — weighted/triggered shocks to stock/production/population
+//! 7. estates & starvation — food balance → found estates / population decline
+//! 8. houses        — profits, monopoly drift, feuds, periodic succession
+//! 9. journal       — sparse price samples + every event (the graph/log source)
+//!
+//! Pure & deterministic per `(seed, tick)` — no DB, no global RNG, no tile
+//! access (the perf rule: a tick is hub-level math only). The route-days matrix
+//! is DERIVED from hub positions + connectivity and rebuilt on load, so it is
+//! not part of the serialized blob.
+
+use serde::{Deserialize, Serialize};
+
+pub const TICKS_PER_YEAR: u32 = 365;
+pub const SEASONS: [&str; 4] = ["Spring", "Summer", "Autumn", "Winter"];
+
+const EPS: f32 = 1e-4;
+const TIER_WEIGHT: [f32; 3] = [1.0, 0.45, 0.22];
+const PRICE_FLOOR_MULT: f32 = 0.15;
+const PRICE_CEIL_MULT: f32 = 12.0;
+/// Per-capita appetite scale; multiplied by the seed-time balance factor so total
+/// need is comparable to total production (an average good ~ slight shortage).
+const DEMAND_PRESSURE: f32 = 1.15;
+/// A house with wealth below this and no trade dissolves (bankruptcy).
+const HOUSE_BANKRUPT: f32 = 0.15;
+/// A house this wealthy may split a cadet branch into another city on succession.
+const HOUSE_BRANCH_WEALTH: f32 = 12.0;
+
+/// One tradable good in the tick economy (mapped from the world's `GoodSpec`).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct TickGood {
+    pub name: String,
+    /// Substitution group; alternatives in the same group satisfy one need.
+    /// `i32::MAX` = no group.
+    pub category: i32,
+    /// 0 basic, 1 comfort, 2 luxury.
+    pub need_tier: u8,
+    /// World-standard value, grain-equivalent (wheat = 1.0).
+    pub base_value: f32,
+    pub desire: f32,
+    /// Counts toward a hub's food balance (cereal/protein/oil/sweetener).
+    pub food: bool,
+}
+
+/// One settlement participating in the living economy.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct TickHub {
+    pub id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub name: String,
+    pub population: f32,
+    pub founding_pop: f32,
+    pub stock: Vec<f32>,
+    pub price: Vec<f32>,
+    pub production: Vec<f32>,
+    pub grain_wealth: f32,
+    pub trade_wealth: f32,
+    /// Food produced+imported − population need this tick (per capita, smoothed).
+    pub food_balance: f32,
+    /// 0 = fed, 1 = severe sustained food deficit.
+    pub starving: f32,
+    pub is_estate: bool,
+    /// Parent hub INDEX for an estate (−1 otherwise).
+    pub parent: i32,
+    pub koppen: u8,
+    pub coastal: bool,
+    /// Connectivity component — goods move only within a component.
+    pub component: u32,
+    /// Cumulative export earnings (grain-eq) — for trade wealth & houses.
+    pub export_earn: f32,
+    pub import_spend: f32,
+    // ── Population sentiment (Phase 4) — 0..1, eased toward a target each tick. ──
+    /// Overall mood (0 = unrest, 1 = content): a blend of the three drivers below.
+    #[serde(default)] pub mood: f32,
+    /// Food security (1 = well fed, → 0 as starvation builds).
+    #[serde(default)] pub sent_food: f32,
+    /// Commercial prosperity (from grain + trade wealth).
+    #[serde(default)] pub sent_prosperity: f32,
+    /// Stability — freedom from recent disasters and market dearth.
+    #[serde(default)] pub sent_stability: f32,
+    /// Sparse per-hub time series for the settlement-window History charts.
+    #[serde(default)] pub history: Vec<HubSample>,
+}
+
+/// One sparse per-hub history sample (weekly) for the settlement-window charts.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct HubSample {
+    pub tick: u32,
+    pub population: f32,
+    pub wealth: f32,      // grain + trade wealth
+    pub mood: f32,
+    pub price_index: f32, // mean local price ÷ world-standard value
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct InTransit {
+    pub from: u32,
+    pub to: u32,
+    pub good: usize,
+    pub amount: f32,
+    pub eta_tick: u32,
+    /// Owning house index (−1 = independent).
+    pub owner: i32,
+}
+
+/// A merchant family / trading house, with a named head of family who ages, dies
+/// and is succeeded by an heir. Houses compete for trade, hold monopolies, feud
+/// with rivals, and wield political power in their home city.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct House {
+    pub name: String,  // "House Cassii"
+    pub hub: u32,      // home hub index
+    pub wealth: f32,
+    pub prestige: f32,
+    /// Goods this house specializes in.
+    pub spec: Vec<usize>,
+    /// good → monopoly share 0..1 (computed each month).
+    pub monopoly: Vec<(usize, f32)>,
+    /// House indices this house feuds with.
+    pub rivals: Vec<usize>,
+    pub generation: u32,
+    // ── Named head of family (serde default → old saves still load) ──
+    #[serde(default)] pub head_name: String,   // "Marcus Cassii"
+    #[serde(default)] pub head_since: u32,      // tick the current head took over
+    #[serde(default)] pub head_lifespan: u32,   // ticks until succession (≈ a lifetime)
+    #[serde(default)] pub founded_tick: u32,
+    /// Soft political power 0..1 (wealth + monopoly + prestige) — the great houses
+    /// dominate their home city's council.
+    #[serde(default)] pub political_power: f32,
+    /// Recent trade volume (decaying) — health + monopoly basis.
+    #[serde(default)] pub volume: f32,
+    /// Defunct (bankrupt / died out): kept for the record, not active.
+    #[serde(default)] pub defunct: bool,
+}
+
+/// A persisted shock currently modifying the world.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ActiveEvent {
+    pub kind: String,
+    /// Affected hub index (−1 = world / region by position).
+    pub hub: i32,
+    pub good: i32,
+    pub magnitude: f32,
+    pub until_tick: u32,
+}
+
+/// One append-only history row (events + sparse price samples).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct JournalEntry {
+    pub tick: u32,
+    pub kind: String, // "price" | "event" | "estate" | "starvation" | "succession"
+    pub hub: i32,     // −1 = world
+    pub good: i32,    // −1 = none
+    pub value: f32,
+    pub text: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CampaignSim {
+    pub seed: u64,
+    pub tick: u32,
+    pub goods: Vec<TickGood>,
+    pub hubs: Vec<TickHub>,
+    pub in_transit: Vec<InTransit>,
+    pub houses: Vec<House>,
+    pub active_events: Vec<ActiveEvent>,
+    pub journal: Vec<JournalEntry>,
+    /// Travel-days per cell of straight-line distance (set from grid scale).
+    pub days_per_cell: f32,
+    pub freight_per_day: f32,
+    pub k: f32,
+    pub margin: f32,
+    /// Seed-time balance factor making need comparable to production.
+    pub need_scale: f32,
+    /// World wrap width in cells (cylindrical X distance).
+    pub world_w: f32,
+    pub last_tick_ms: f32,
+    /// Total world population at the last monthly chronicle sample (for deltas).
+    #[serde(default)]
+    pub last_month_pop: f32,
+    /// World price index at the last monthly chronicle sample (for deltas).
+    #[serde(default)]
+    pub last_month_index: f32,
+    /// Derived route-days matrix (n·n, f32::INFINITY = unreachable). Not
+    /// serialized — rebuilt from positions + components after load.
+    #[serde(skip)]
+    pub days: Vec<f32>,
+}
+
+/// Deterministic 0..1 hash of three mixed inputs (splitmix64).
+fn hash01(a: u64, b: u64, c: u64) -> f32 {
+    let mut z = a
+        .wrapping_mul(0x9E3779B97F4A7C15)
+        .wrapping_add(b.wrapping_mul(0xBF58476D1CE4E5B9))
+        .wrapping_add(c.wrapping_mul(0x94D049BB133111EB));
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+    z ^= z >> 31;
+    (z >> 40) as f32 / (1u64 << 24) as f32
+}
+
+impl CampaignSim {
+    #[inline]
+    pub fn n(&self) -> usize {
+        self.hubs.len()
+    }
+
+    pub fn season(&self) -> &'static str {
+        let m = (self.tick % TICKS_PER_YEAR) as f32 / TICKS_PER_YEAR as f32;
+        SEASONS[((m * 4.0) as usize).min(3)]
+    }
+
+    pub fn year(&self) -> u32 {
+        self.tick / TICKS_PER_YEAR
+    }
+
+    pub fn day_of_year(&self) -> u32 {
+        self.tick % TICKS_PER_YEAR
+    }
+
+    /// Rebuild the route-days matrix from hub positions + components. Same
+    /// component → distance-based days; cross-component → unreachable.
+    pub fn rebuild_routes(&mut self) {
+        let n = self.hubs.len();
+        let mut days = vec![f32::INFINITY; n * n];
+        for a in 0..n {
+            days[a * n + a] = 0.0;
+            for b in (a + 1)..n {
+                if self.hubs[a].component != self.hubs[b].component {
+                    continue;
+                }
+                let mut dx = (self.hubs[a].x - self.hubs[b].x).abs();
+                if self.world_w > 1.0 {
+                    dx = dx.min(self.world_w - dx); // cylindrical wrap
+                }
+                let dy = self.hubs[a].y - self.hubs[b].y;
+                let dist = (dx * dx + dy * dy).sqrt();
+                let d = (dist * self.days_per_cell).max(1.0);
+                days[a * n + b] = d;
+                days[b * n + a] = d;
+            }
+        }
+        self.days = days;
+    }
+
+    #[inline]
+    fn live_price(&self, stock: f32, need: f32, base: f32) -> f32 {
+        (base * ((need + EPS) / (stock + EPS)).powf(self.k))
+            .clamp(base * PRICE_FLOOR_MULT, base * PRICE_CEIL_MULT)
+    }
+
+    /// Base (pre-substitution) per-capita need for a hub/good this tick.
+    #[inline]
+    fn base_need(&self, h: usize, g: usize) -> f32 {
+        let tg = &self.goods[g];
+        self.hubs[h].population
+            * TIER_WEIGHT[tg.need_tier.min(2) as usize]
+            * tg.desire.max(0.0)
+            * self.need_scale
+            * DEMAND_PRESSURE
+    }
+
+    /// Seasonal production multiplier (food crops peak at harvest).
+    fn seasonal_mult(&self, g: usize, day_of_year: u32) -> f32 {
+        if !self.goods[g].food {
+            return 1.0;
+        }
+        // Single harvest peak in late summer / early autumn (~day 230).
+        let phase = (day_of_year as f32 / TICKS_PER_YEAR as f32 - 0.63) * std::f32::consts::TAU;
+        1.0 + 0.45 * phase.cos()
+    }
+
+    /// Advance the simulation `n_ticks` days. Returns nothing; read state after.
+    pub fn advance(&mut self, n_ticks: u32) {
+        let ng = self.goods.len();
+        if self.days.len() != self.n() * self.n() {
+            self.rebuild_routes();
+        }
+        // Category membership for substitution.
+        let n_cats = self
+            .goods
+            .iter()
+            .filter(|g| g.category != i32::MAX)
+            .map(|g| g.category + 1)
+            .max()
+            .unwrap_or(0)
+            .max(0) as usize;
+        let mut cat_goods: Vec<Vec<usize>> = vec![Vec::new(); n_cats];
+        for (g, spec) in self.goods.iter().enumerate() {
+            if spec.category != i32::MAX && spec.category >= 0 {
+                cat_goods[spec.category as usize].push(g);
+            }
+        }
+
+        for _ in 0..n_ticks {
+            self.tick += 1;
+            let tick = self.tick;
+            let n = self.hubs.len();
+            let doy = self.day_of_year();
+
+            // Expire finished events.
+            self.active_events.retain(|e| e.until_tick > tick);
+            // Production multipliers from active events (per hub/good, default 1).
+            let prod_mult = self.event_production_mult();
+
+            // 1) Production.
+            for h in 0..n {
+                for g in 0..ng {
+                    let add = self.hubs[h].production[g]
+                        * self.seasonal_mult(g, doy)
+                        * prod_mult[h][g];
+                    self.hubs[h].stock[g] += add;
+                }
+            }
+
+            // 2) Consumption with per-category substitution toward cheaper goods.
+            let mut needs = vec![vec![0.0f32; ng]; n];
+            for h in 0..n {
+                for g in 0..ng {
+                    needs[h][g] = self.base_need(h, g);
+                }
+                for members in &cat_goods {
+                    if members.len() < 2 {
+                        continue;
+                    }
+                    let total: f32 = members.iter().map(|&g| self.base_need(h, g)).sum();
+                    if total <= EPS {
+                        continue;
+                    }
+                    let weights: Vec<f32> = members
+                        .iter()
+                        .map(|&g| {
+                            let rel = (self.hubs[h].price[g] / self.goods[g].base_value.max(EPS))
+                                .max(PRICE_FLOOR_MULT);
+                            let pref = self.base_need(h, g) / total;
+                            pref / rel
+                        })
+                        .collect();
+                    let wsum: f32 = weights.iter().sum::<f32>().max(EPS);
+                    for (mi, &g) in members.iter().enumerate() {
+                        needs[h][g] = total * weights[mi] / wsum;
+                    }
+                }
+                // Eat down stock; track unmet food for starvation.
+                for g in 0..ng {
+                    let eat = needs[h][g].min(self.hubs[h].stock[g]);
+                    self.hubs[h].stock[g] -= eat;
+                }
+            }
+
+            // 3) Local prices (smoothed scarcity in the grain-eq numeraire).
+            for h in 0..n {
+                for g in 0..ng {
+                    let base = self.goods[g].base_value;
+                    let target = self.live_price(self.hubs[h].stock[g], needs[h][g], base);
+                    self.hubs[h].price[g] = 0.6 * self.hubs[h].price[g] + 0.4 * target;
+                }
+            }
+
+            // 4) Merchant dispatch (arbitrage → in-transit cargo).
+            self.dispatch(&needs);
+
+            // 5) Arrivals.
+            let mut landed: Vec<(usize, usize, f32)> = Vec::new();
+            self.in_transit.retain(|c| {
+                if c.eta_tick <= tick {
+                    landed.push((c.to as usize, c.good, c.amount));
+                    false
+                } else {
+                    true
+                }
+            });
+            for (to, g, amt) in landed {
+                if to < self.hubs.len() {
+                    self.hubs[to].stock[g] += amt;
+                }
+            }
+
+            // 6) Events.
+            self.roll_events();
+
+            // 7) Food balance, estates & starvation.
+            self.update_food_and_starvation(&needs);
+
+            // 8) Houses.
+            self.update_houses();
+
+            // 8.5) Population sentiment (mood + drivers).
+            self.update_sentiment();
+
+            // 9) History — the "main" record is taken once per MONTH: a per-hub
+            //    snapshot (charts + growth movers), the world price-index point
+            //    (sparkline), and a rich world-summary chronicle row with numbers.
+            if tick % 30 == 0 {
+                self.sample_hub_history();
+                self.sample_journal();
+                self.sample_world_chronicle();
+            }
+        }
+    }
+
+    /// Update each hub's mood and its three drivers (food / prosperity /
+    /// stability), easing toward a target so the mood drifts rather than jumps.
+    fn update_sentiment(&mut self) {
+        let n = self.hubs.len();
+        let ng = self.goods.len();
+        const EASE: f32 = 0.12;
+        for h in 0..n {
+            // Food security — the inverse of accumulated starvation pressure.
+            let target_food = (1.0 - self.hubs[h].starving).clamp(0.0, 1.0);
+            // Prosperity — saturating curve over grain + trade wealth.
+            let w = (self.hubs[h].grain_wealth * 0.4 + self.hubs[h].trade_wealth * 0.8).max(0.0);
+            let target_prosp = (w / (w + 1.2)).clamp(0.0, 1.0);
+            // Stability — lowered by active shocks on this hub (or world-wide) and
+            // by widespread dearth (goods priced far above their world value).
+            let mut hostility = 0.0f32;
+            for e in &self.active_events {
+                if e.hub == h as i32 { hostility += e.magnitude.max(0.25) + 0.1; }
+                else if e.hub < 0 { hostility += 0.15; }
+            }
+            let mut dear = 0.0f32;
+            for g in 0..ng {
+                if self.hubs[h].price[g] > self.goods[g].base_value * 2.2 { dear += 1.0; }
+            }
+            let dear_frac = if ng > 0 { dear / ng as f32 } else { 0.0 };
+            let target_stab = (1.0 - hostility - 0.5 * dear_frac).clamp(0.1, 1.0);
+
+            let hb = &mut self.hubs[h];
+            hb.sent_food += (target_food - hb.sent_food) * EASE;
+            hb.sent_prosperity += (target_prosp - hb.sent_prosperity) * EASE;
+            hb.sent_stability += (target_stab - hb.sent_stability) * EASE;
+            let target_mood = 0.45 * hb.sent_food + 0.30 * hb.sent_prosperity + 0.25 * hb.sent_stability;
+            hb.mood += (target_mood - hb.mood) * EASE;
+        }
+    }
+
+    /// Push one weekly history sample per hub (capped to the last ~5 years) for the
+    /// settlement-window charts.
+    fn sample_hub_history(&mut self) {
+        let tick = self.tick;
+        let ng = self.goods.len();
+        for hb in &mut self.hubs {
+            let mut idx = 0.0f32;
+            if ng > 0 {
+                let mut s = 0.0f32;
+                for g in 0..ng {
+                    s += hb.price[g] / self.goods[g].base_value.max(EPS);
+                }
+                idx = s / ng as f32;
+            }
+            hb.history.push(HubSample {
+                tick,
+                population: hb.population,
+                wealth: hb.grain_wealth + hb.trade_wealth,
+                mood: hb.mood,
+                price_index: idx,
+            });
+            // Monthly samples → keep ~30 years of history.
+            if hb.history.len() > 360 {
+                let drop = hb.history.len() - 360;
+                hb.history.drain(0..drop);
+            }
+        }
+    }
+
+    /// Total world population and the population-weighted world price index
+    /// (1.0 = every good at its world-standard value). Single source of truth for
+    /// both the sparkline sample and the monthly chronicle.
+    fn world_totals(&self) -> (f32, f32) {
+        let total_pop: f32 = self.hubs.iter().map(|h| h.population).sum();
+        let mut idx = 0.0;
+        let mut wsum = 0.0;
+        for h in &self.hubs {
+            let mut hp = 0.0;
+            let mut hw = 0.0;
+            for g in 0..self.goods.len() {
+                let w = self.goods[g].base_value;
+                hp += (h.price[g] / self.goods[g].base_value.max(EPS)) * w;
+                hw += w;
+            }
+            if hw > 0.0 {
+                idx += (hp / hw) * h.population;
+                wsum += h.population;
+            }
+        }
+        (total_pop, if wsum > 0.0 { idx / wsum } else { 1.0 })
+    }
+
+    /// One rich monthly world-summary row (kind="world"): total population and
+    /// world price index WITH the month-over-month change, plus the fastest-
+    /// growing and fastest-shrinking city. This is the "main history" the player
+    /// reads in the Chronicle. Per-hub history must be sampled first (movers read
+    /// the last two per-hub samples).
+    fn sample_world_chronicle(&mut self) {
+        let (total_pop, index) = self.world_totals();
+        let dpop_pct = if self.last_month_pop > 0.0 {
+            (total_pop - self.last_month_pop) / self.last_month_pop * 100.0
+        } else { 0.0 };
+        let didx_pct = if self.last_month_index > 0.0 {
+            (index - self.last_month_index) / self.last_month_index * 100.0
+        } else { 0.0 };
+        // Fastest grower / shrinker from the per-hub monthly history.
+        let mut up: (&str, f32) = ("", 0.0);
+        let mut down: (&str, f32) = ("", 0.0);
+        for h in &self.hubs {
+            let n = h.history.len();
+            if n >= 2 {
+                let prev = h.history[n - 2].population;
+                let cur = h.history[n - 1].population;
+                if prev > 0.0 {
+                    let g = (cur - prev) / prev;
+                    if g > up.1 { up = (h.name.as_str(), g); }
+                    if g < down.1 { down = (h.name.as_str(), g); }
+                }
+            }
+        }
+        let mut text = format!(
+            "Pop {} ({:+.1}%) · prices {:.2}× standard ({:+.1}%)",
+            fmt_pop(total_pop), dpop_pct, index, didx_pct
+        );
+        if !up.0.is_empty() { text.push_str(&format!(" · ▲ {} {:+.0}%", up.0, up.1 * 100.0)); }
+        if !down.0.is_empty() { text.push_str(&format!(" · ▼ {} {:+.0}%", down.0, down.1 * 100.0)); }
+        self.journal.push(JournalEntry {
+            tick: self.tick,
+            kind: "world".into(),
+            hub: -1,
+            good: -1,
+            value: index,
+            text,
+        });
+        self.last_month_pop = total_pop;
+        self.last_month_index = index;
+    }
+
+    /// Per-hub per-good production multiplier from active events (drought/blight…).
+    fn event_production_mult(&self) -> Vec<Vec<f32>> {
+        let n = self.hubs.len();
+        let ng = self.goods.len();
+        let mut m = vec![vec![1.0f32; ng]; n];
+        for e in &self.active_events {
+            match e.kind.as_str() {
+                "drought" | "blight" | "fishery_collapse" => {
+                    // Regional: affect hubs within a radius of the event hub.
+                    let center = if e.hub >= 0 { e.hub as usize } else { continue };
+                    let (cx, cy) = (self.hubs[center].x, self.hubs[center].y);
+                    for h in 0..n {
+                        let mut dx = (self.hubs[h].x - cx).abs();
+                        if self.world_w > 1.0 {
+                            dx = dx.min(self.world_w - dx);
+                        }
+                        let dy = self.hubs[h].y - cy;
+                        if (dx * dx + dy * dy).sqrt() < self.world_w * 0.12 {
+                            for g in 0..ng {
+                                let hit = match e.kind.as_str() {
+                                    "drought" | "blight" => self.goods[g].food,
+                                    "fishery_collapse" => {
+                                        self.goods[g].name.contains("fish")
+                                            || self.goods[g].name.contains("herring")
+                                            || self.goods[g].name.contains("whal")
+                                    }
+                                    _ => false,
+                                };
+                                if hit {
+                                    m[h][g] *= 1.0 - e.magnitude;
+                                }
+                            }
+                        }
+                    }
+                }
+                "embargo" => {
+                    if e.hub >= 0 && e.good >= 0 {
+                        m[e.hub as usize][e.good as usize] *= 1.0 - e.magnitude;
+                    }
+                }
+                _ => {}
+            }
+        }
+        m
+    }
+
+    /// Arbitrage one round: each surplus hub ships toward the best reachable
+    /// deficit hubs, creating in-transit cargo with an ETA. Bounded per hub.
+    fn dispatch(&mut self, needs: &[Vec<f32>]) {
+        let n = self.hubs.len();
+        let ng = self.goods.len();
+        let tick = self.tick;
+        // Snapshot stocks so a single round's decisions use consistent prices.
+        for g in 0..ng {
+            let base = self.goods[g].base_value;
+            // Build (hub, surplus) and (hub, price) lists.
+            let mut sellers: Vec<(usize, f32)> = Vec::new();
+            for a in 0..n {
+                let surplus = self.hubs[a].stock[g] - needs[a][g] * 1.1;
+                if surplus > EPS {
+                    sellers.push((a, surplus));
+                }
+            }
+            if sellers.is_empty() {
+                continue;
+            }
+            for a_i in 0..sellers.len() {
+                let (a, mut surplus) = sellers[a_i];
+                if surplus <= EPS {
+                    continue;
+                }
+                let pa = self.live_price(self.hubs[a].stock[g], needs[a][g], base);
+                // Find the best deficit hubs reachable from a.
+                let mut targets: Vec<(usize, f32, f32)> = Vec::new(); // (b, gap, days)
+                for b in 0..n {
+                    if b == a {
+                        continue;
+                    }
+                    let days = self.days[a * n + b];
+                    if !days.is_finite() {
+                        continue;
+                    }
+                    let pb = self.live_price(self.hubs[b].stock[g], needs[b][g], base);
+                    let freight = self.freight_per_day * days;
+                    let gap = pb - (pa + freight) - self.margin * base;
+                    if gap > 0.0 {
+                        targets.push((b, gap, days));
+                    }
+                }
+                if targets.is_empty() {
+                    continue;
+                }
+                targets.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal));
+                targets.truncate(3); // ship to the 3 hungriest reachable markets
+                for (b, _gap, days) in targets {
+                    if surplus <= EPS {
+                        break;
+                    }
+                    // Don't overfill b past delivered-cost parity.
+                    let delivered = pa + self.freight_per_day * days;
+                    let max_stock =
+                        needs[b][g] * (base / delivered.max(EPS)).powf(1.0 / self.k);
+                    let room = (max_stock - self.hubs[b].stock[g]).max(0.0);
+                    let amount = surplus.min(room * 0.5);
+                    if amount <= EPS {
+                        continue;
+                    }
+                    surplus -= amount;
+                    self.hubs[a].stock[g] -= amount;
+                    let owner = self.house_for(a, g);
+                    let value = amount * delivered;
+                    self.hubs[a].export_earn += amount * pa;
+                    self.hubs[b].import_spend += value;
+                    if owner >= 0 {
+                        let oi = owner as usize;
+                        let margin = amount * (delivered - pa).max(0.0);
+                        // A house that holds a monopoly on this good extracts extra
+                        // rent (pricing power) on top of the plain margin.
+                        let mono = self.houses[oi].monopoly.iter()
+                            .find(|(mg, _)| *mg == g).map(|(_, s)| *s).unwrap_or(0.0);
+                        self.houses[oi].wealth += margin * (1.0 + 0.6 * mono);
+                        self.houses[oi].volume += amount;
+                    }
+                    self.in_transit.push(InTransit {
+                        from: a as u32,
+                        to: b as u32,
+                        good: g,
+                        amount,
+                        eta_tick: tick + (days.ceil() as u32).max(1),
+                        owner,
+                    });
+                }
+            }
+        }
+    }
+
+    /// Index helper so the borrow checker is happy reading b's stock in dispatch.
+    fn house_for(&self, hub: usize, good: usize) -> i32 {
+        self.houses
+            .iter()
+            .position(|h| h.hub as usize == hub && h.spec.contains(&good))
+            .or_else(|| self.houses.iter().position(|h| h.hub as usize == hub))
+            .map(|i| i as i32)
+            .unwrap_or(-1)
+    }
+
+    /// Roll low-probability events for this tick.
+    fn roll_events(&mut self) {
+        let n = self.hubs.len();
+        if n == 0 {
+            return;
+        }
+        let tick = self.tick;
+        let r = hash01(self.seed, tick as u64, 0xE7E7);
+        // ~ one event every ~12 ticks on average.
+        if r > 0.085 {
+            return;
+        }
+        let pick = hash01(self.seed, tick as u64, 0x1234);
+        let hub = (hash01(self.seed, tick as u64, 0x5678) * n as f32) as usize % n;
+        let (kind, mag, dur, good): (&str, f32, u32, i32) = if pick < 0.30 {
+            ("drought", 0.35 + 0.25 * pick, 40 + (pick * 60.0) as u32, -1)
+        } else if pick < 0.50 {
+            ("plague", 0.18, 30, -1)
+        } else if pick < 0.66 {
+            ("fire", 0.5, 1, -1)
+        } else if pick < 0.80 {
+            ("fishery_collapse", 0.5, 120, -1)
+        } else if pick < 0.90 {
+            ("festival", 0.0, 1, -1)
+        } else {
+            // House feud → embargo on a random good at this hub.
+            let g = (hash01(self.seed, tick as u64, 0x9999) * self.goods.len() as f32) as i32
+                % self.goods.len().max(1) as i32;
+            ("embargo", 0.8, 60, g)
+        };
+        let text = match kind {
+            "drought" => format!("Drought grips the lands around {}", self.hubs[hub].name),
+            "plague" => format!("Plague strikes {}", self.hubs[hub].name),
+            "fire" => format!("Fire ravages the warehouses of {}", self.hubs[hub].name),
+            "fishery_collapse" => format!("The fisheries off {} collapse", self.hubs[hub].name),
+            "festival" => format!("{} holds a great festival", self.hubs[hub].name),
+            _ => format!("A trade feud erupts at {}", self.hubs[hub].name),
+        };
+        // Immediate one-shot effects.
+        match kind {
+            "fire" => {
+                for g in 0..self.goods.len() {
+                    self.hubs[hub].stock[g] *= 1.0 - mag;
+                }
+            }
+            "plague" => {
+                self.hubs[hub].population *= 1.0 - mag;
+            }
+            "festival" => { /* demand spike handled implicitly by low stock */ }
+            _ => {}
+        }
+        if dur > 1 {
+            self.active_events.push(ActiveEvent {
+                kind: kind.to_string(),
+                hub: hub as i32,
+                good,
+                magnitude: mag,
+                until_tick: tick + dur,
+            });
+        }
+        self.journal.push(JournalEntry {
+            tick,
+            kind: "event".into(),
+            hub: hub as i32,
+            good,
+            value: mag,
+            text,
+        });
+    }
+
+    /// Food balance per hub → estates & starvation.
+    fn update_food_and_starvation(&mut self, needs: &[Vec<f32>]) {
+        let n = self.hubs.len();
+        let ng = self.goods.len();
+        for h in 0..n {
+            let mut food_need = 0.0;
+            let mut food_have = 0.0;
+            for g in 0..ng {
+                if self.goods[g].food {
+                    food_need += needs[h][g];
+                    food_have += self.hubs[h].stock[g] + self.hubs[h].production[g];
+                }
+            }
+            let bal = if food_need > EPS {
+                (food_have - food_need) / food_need
+            } else {
+                1.0
+            };
+            // Smooth.
+            self.hubs[h].food_balance = 0.85 * self.hubs[h].food_balance + 0.15 * bal;
+            let fb = self.hubs[h].food_balance;
+            // Starvation pressure builds when food balance is negative.
+            if fb < 0.0 {
+                self.hubs[h].starving = (self.hubs[h].starving + 0.02 * (-fb).min(1.0)).min(1.0);
+            } else {
+                self.hubs[h].starving = (self.hubs[h].starving - 0.02).max(0.0);
+            }
+            // Population: logistic growth toward a CARRYING CAPACITY set by both
+            // FOOD security and TRADE prosperity. Well-fed, well-connected trade
+            // hubs grow well above their founding size; food-poor or commercially
+            // isolated settlements stagnate or shrink back. Uses the eased
+            // sentiment drivers (already normalized 0..1) as the food/trade signal,
+            // so the capacity tracks the same numbers the settlement window shows.
+            let pop = self.hubs[h].population;
+            let food_sec = self.hubs[h].sent_food.clamp(0.0, 1.0); // 1 = well fed
+            let prosperity = self.hubs[h].sent_prosperity.clamp(0.0, 1.0); // trade+grain wealth
+            // Capacity in multiples of the founding population (≈0.25× when poor &
+            // hungry, up to ≈2.7× for a rich, well-fed entrepôt).
+            let cap_mult = (0.35 + 1.15 * food_sec) * (0.70 + 1.10 * prosperity);
+            let capacity = (self.hubs[h].founding_pop * cap_mult)
+                .max(self.hubs[h].founding_pop * 0.15);
+            // Logistic step: approach capacity from below, decline when above it.
+            let rate = if pop < capacity { 0.0006 } else { 0.0012 };
+            let mut new_pop = pop + rate * pop * (1.0 - pop / capacity);
+            // Famine empties a city faster than trade decline alone.
+            if self.hubs[h].starving > 0.5 {
+                new_pop *= 1.0 - 0.0016 * (self.hubs[h].starving - 0.5);
+                if self.tick % 90 == 0 {
+                    self.journal.push(JournalEntry {
+                        tick: self.tick,
+                        kind: "starvation".into(),
+                        hub: h as i32,
+                        good: -1,
+                        value: self.hubs[h].starving,
+                        text: format!("{} suffers famine; people leave", self.hubs[h].name),
+                    });
+                }
+            }
+            self.hubs[h].population = new_pop.max(self.hubs[h].founding_pop * 0.10);
+        }
+        // Estate founding: a big, rich, food-secure hub with a hungry neighbour
+        // founds a food estate. At most one per advance batch (cheap, rare).
+        if self.tick % 120 == 0 {
+            self.maybe_found_estate();
+        }
+    }
+
+    fn maybe_found_estate(&mut self) {
+        let n = self.hubs.len();
+        // Find the richest food-surplus, non-estate hub.
+        let mut best: Option<usize> = None;
+        let mut best_w = 0.6;
+        for h in 0..n {
+            if self.hubs[h].is_estate {
+                continue;
+            }
+            if self.hubs[h].food_balance > 0.4 && self.hubs[h].trade_wealth > best_w {
+                best_w = self.hubs[h].trade_wealth;
+                best = Some(h);
+            }
+        }
+        let Some(parent) = best else { return };
+        // Place the estate near the parent, slightly offset (deterministic).
+        let off = hash01(self.seed, self.tick as u64, parent as u64);
+        let ex = self.hubs[parent].x + (off - 0.5) * self.world_w * 0.03;
+        let ey = self.hubs[parent].y + (hash01(self.seed, parent as u64, self.tick as u64) - 0.5)
+            * self.world_w * 0.02;
+        let ng = self.goods.len();
+        let mut production = vec![0.0f32; ng];
+        // Estate produces the parent's strongest food good.
+        let mut bestg = (0usize, 0.0f32);
+        for g in 0..ng {
+            if self.goods[g].food && self.hubs[parent].production[g] > bestg.1 {
+                bestg = (g, self.hubs[parent].production[g]);
+            }
+        }
+        production[bestg.0] = bestg.1.max(0.5) * 1.5;
+        let id = 100_000 + self.hubs.len() as u32;
+        let name = format!("{} Estate", self.hubs[parent].name);
+        self.journal.push(JournalEntry {
+            tick: self.tick,
+            kind: "estate".into(),
+            hub: parent as i32,
+            good: bestg.0 as i32,
+            value: 0.0,
+            text: format!("{} founds {}", self.hubs[parent].name, name),
+        });
+        self.hubs.push(TickHub {
+            id,
+            x: ex,
+            y: ey,
+            name,
+            population: self.hubs[parent].founding_pop * 0.15,
+            founding_pop: self.hubs[parent].founding_pop * 0.15,
+            stock: vec![0.0; ng],
+            price: self.goods.iter().map(|g| g.base_value).collect(),
+            production,
+            grain_wealth: 0.0,
+            trade_wealth: 0.0,
+            food_balance: 1.0,
+            starving: 0.0,
+            is_estate: true,
+            parent: parent as i32,
+            koppen: self.hubs[parent].koppen,
+            coastal: self.hubs[parent].coastal,
+            component: self.hubs[parent].component,
+            export_earn: 0.0,
+            import_spend: 0.0,
+            mood: 0.6,
+            sent_food: 0.7,
+            sent_prosperity: 0.5,
+            sent_stability: 0.8,
+            history: Vec::new(),
+        });
+        self.rebuild_routes();
+    }
+
+    fn update_houses(&mut self) {
+        for h in 0..self.hubs.len() {
+            let pop = self.hubs[h].population.max(1.0);
+            // Food security = current food-stock value per capita.
+            self.hubs[h].grain_wealth = food_value(&self.hubs[h], &self.goods);
+            // Commercial prosperity = recent net trade earnings per capita. The
+            // accumulators decay so this tracks the last ~weeks, not all history.
+            self.hubs[h].trade_wealth =
+                (self.hubs[h].export_earn - self.hubs[h].import_spend) / pop;
+            self.hubs[h].export_earn *= 0.97;
+            self.hubs[h].import_spend *= 0.97;
+        }
+        self.update_house_dynamics();
+    }
+
+    fn world_h(&self) -> u32 { (self.world_w * 0.5).max(1.0) as u32 }
+
+    /// "House Cassii"-style family name for the home `hub`, varied by `salt`.
+    fn family_name_for(&self, hub: usize, salt: u64) -> String {
+        let (x, y) = (self.hubs[hub].x.max(0.0) as u32, self.hubs[hub].y.max(0.0) as u32);
+        format!(
+            "House {}",
+            crate::sim::names::gen_family_name(x, y, self.world_w as u32, self.world_h(), salt)
+        )
+    }
+
+    /// "Marcus Cassii"-style head name for `house_name` at `hub`, varied by `salt`.
+    fn head_name_for(&self, hub: usize, house_name: &str, salt: u64) -> String {
+        let surname = house_name.strip_prefix("House ").unwrap_or(house_name);
+        let (x, y) = (self.hubs[hub].x.max(0.0) as u32, self.hubs[hub].y.max(0.0) as u32);
+        crate::sim::names::gen_head_name(x, y, self.world_w as u32, self.world_h(), surname, salt)
+    }
+
+    /// A lifetime in ticks (≈45–75 years) from a hashed roll.
+    fn roll_lifespan(&self, salt: u64) -> u32 {
+        let r = hash01(self.seed, self.tick as u64 ^ 0x11FE, salt);
+        ((45.0 + r * 30.0) * TICKS_PER_YEAR as f32) as u32
+    }
+
+    /// The living merchant families: ageing heads, monopolies, feuds, founding,
+    /// extinction and political power.
+    fn update_house_dynamics(&mut self) {
+        let tick = self.tick;
+        // Decay recent-volume so monopoly tracks the last while, not all history.
+        for hh in &mut self.houses {
+            if !hh.defunct { hh.volume *= 0.98; }
+        }
+        // Succession: the head dies at the end of their lifespan; an heir takes over.
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct { continue; }
+            let h = &self.houses[hi];
+            if h.head_lifespan > 0 && tick.saturating_sub(h.head_since) >= h.head_lifespan {
+                self.succeed_house(hi);
+            }
+        }
+        // Monthly: monopolies, political power, founding, extinction, feuds.
+        if tick % 30 == 0 {
+            self.recompute_monopolies_and_power();
+            self.maybe_found_house();
+            for hi in 0..self.houses.len() {
+                if self.houses[hi].defunct { continue; }
+                if self.houses[hi].wealth < HOUSE_BANKRUPT && self.houses[hi].volume < 0.02 {
+                    self.dissolve_house(hi);
+                }
+            }
+        }
+        if tick % 180 == 0 { self.update_rivalries(); }
+    }
+
+    /// Heir succession: new generation, a freshly-named head, a new lifespan, and
+    /// occasionally the house splits a branch off into another city.
+    fn succeed_house(&mut self, hi: usize) {
+        let tick = self.tick;
+        let gen = self.houses[hi].generation + 1;
+        let hub = self.houses[hi].hub as usize;
+        let name = self.houses[hi].name.clone();
+        let heir = self.head_name_for(hub, &name, gen as u64 ^ 0x5151);
+        let lifespan = self.roll_lifespan(hi as u64 ^ gen as u64);
+        {
+            let h = &mut self.houses[hi];
+            h.generation = gen;
+            h.head_name = heir.clone();
+            h.head_since = tick;
+            h.head_lifespan = lifespan;
+            h.prestige += 0.05;
+        }
+        self.journal.push(JournalEntry {
+            tick, kind: "succession".into(), hub: hub as i32, good: -1,
+            value: self.houses[hi].generation as f32,
+            text: format!("{} succeeds as head of {}", heir, name),
+        });
+        // A wealthy, long-established house occasionally founds a cadet BRANCH in a
+        // different prosperous city it trades with.
+        let wealthy = self.houses[hi].wealth > HOUSE_BRANCH_WEALTH && gen >= 3;
+        if wealthy {
+            if let Some(dest) = self.pick_branch_hub(hub) {
+                let split = self.houses[hi].wealth * 0.35;
+                self.houses[hi].wealth -= split;
+                let spec = self.houses[hi].spec.clone();
+                let bname = self.family_name_for(dest, (tick as u64) ^ hi as u64 ^ 0xB7A);
+                let bhead = self.head_name_for(dest, &bname, gen as u64 ^ 0x9001);
+                let parent = name.clone();
+                self.houses.push(House {
+                    name: bname.clone(), hub: dest as u32, wealth: split, prestige: 0.1,
+                    spec, monopoly: vec![], rivals: vec![hi], generation: 1,
+                    head_name: bhead.clone(), head_since: tick,
+                    head_lifespan: self.roll_lifespan(dest as u64 ^ 0xCC),
+                    founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
+                });
+                self.journal.push(JournalEntry {
+                    tick, kind: "founding".into(), hub: dest as i32, good: -1, value: 0.0,
+                    text: format!("{} founds a branch of {} in a new city", bhead, parent),
+                });
+            }
+        }
+    }
+
+    /// A destination hub for a new branch: the house's strongest trade partner-ish
+    /// — here, the nearest reachable hub in the same component that isn't home.
+    fn pick_branch_hub(&self, home: usize) -> Option<usize> {
+        let n = self.hubs.len();
+        let comp = self.hubs[home].component;
+        let mut best = (usize::MAX, f32::INFINITY);
+        for b in 0..n {
+            if b == home || self.hubs[b].component != comp { continue; }
+            let d = self.days.get(home * n + b).copied().unwrap_or(f32::INFINITY);
+            if d.is_finite() && d > 1.0 && d < best.1 { best = (b, d); }
+        }
+        if best.0 == usize::MAX { None } else { Some(best.0) }
+    }
+
+    /// Recompute each house's per-good monopoly shares (volume among houses that
+    /// specialize in the good) and its political power (wealth + monopoly +
+    /// prestige). The dominant house concentrates a little wealth into its home
+    /// city's commercial prosperity.
+    fn recompute_monopolies_and_power(&mut self) {
+        let ng = self.goods.len();
+        // Total recent volume per good across the houses speccing it.
+        let mut good_vol = vec![0.0f32; ng];
+        for hh in &self.houses {
+            if hh.defunct { continue; }
+            for &g in &hh.spec {
+                if g < ng { good_vol[g] += hh.volume; }
+            }
+        }
+        let wmax = self.houses.iter().filter(|h| !h.defunct)
+            .map(|h| h.wealth).fold(1.0f32, f32::max);
+        let pmax = self.houses.iter().filter(|h| !h.defunct)
+            .map(|h| h.prestige).fold(0.5f32, f32::max);
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct { continue; }
+            let mut mono: Vec<(usize, f32)> = Vec::new();
+            let mut top_share = 0.0f32;
+            let (spec, vol) = (self.houses[hi].spec.clone(), self.houses[hi].volume);
+            for &g in &spec {
+                if g < ng && good_vol[g] > 1e-3 {
+                    let share = (vol / good_vol[g]).clamp(0.0, 1.0);
+                    if share > 0.25 { mono.push((g, share)); }
+                    top_share = top_share.max(share);
+                }
+            }
+            let wn = (self.houses[hi].wealth.max(0.0) / wmax).clamp(0.0, 1.0);
+            let pn = (self.houses[hi].prestige / pmax).clamp(0.0, 1.0);
+            let power = (0.45 * wn + 0.35 * top_share + 0.20 * pn).clamp(0.0, 1.0);
+            self.houses[hi].monopoly = mono;
+            self.houses[hi].political_power = power;
+        }
+    }
+
+    /// A booming merchant city with no strong resident house occasionally spawns a
+    /// new trading family.
+    fn maybe_found_house(&mut self) {
+        let tick = self.tick;
+        let ng = self.goods.len();
+        // Candidate: the richest-trade hub whose strongest resident house (if any)
+        // is weak — room for a new family.
+        let mut best = (usize::MAX, 0.0f32);
+        for h in 0..self.hubs.len() {
+            let tw = self.hubs[h].trade_wealth;
+            if tw <= 0.3 { continue; }
+            let resident = self.houses.iter()
+                .filter(|hs| !hs.defunct && hs.hub as usize == h)
+                .map(|hs| hs.wealth).fold(0.0f32, f32::max);
+            if resident > 2.0 { continue; } // already has a strong house
+            if tw > best.1 { best = (h, tw); }
+        }
+        let Some(hub) = (best.0 != usize::MAX).then_some(best.0) else { return };
+        // Specialty = the hub's top-2 produced goods.
+        let mut gi: Vec<usize> = (0..ng).collect();
+        gi.sort_by(|&a, &b| self.hubs[hub].production[b]
+            .partial_cmp(&self.hubs[hub].production[a]).unwrap_or(std::cmp::Ordering::Equal));
+        let spec: Vec<usize> = gi.into_iter().filter(|&g| self.hubs[hub].production[g] > 0.0)
+            .take(2).collect();
+        if spec.is_empty() { return; }
+        let name = self.family_name_for(hub, tick as u64 ^ 0xF00D);
+        let head = self.head_name_for(hub, &name, tick as u64 ^ 0x1234);
+        self.journal.push(JournalEntry {
+            tick, kind: "founding".into(), hub: hub as i32, good: spec[0] as i32, value: 0.0,
+            text: format!("{} establishes {} on the {} trade", head, name,
+                self.goods.get(spec[0]).map(|g| g.name.as_str()).unwrap_or("local")),
+        });
+        self.houses.push(House {
+            name, hub: hub as u32, wealth: 1.0, prestige: 0.0, spec,
+            monopoly: vec![], rivals: vec![], generation: 1,
+            head_name: head, head_since: tick,
+            head_lifespan: self.roll_lifespan(hub as u64 ^ 0x7E),
+            founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
+        });
+    }
+
+    fn dissolve_house(&mut self, hi: usize) {
+        let tick = self.tick;
+        let (name, hub) = (self.houses[hi].name.clone(), self.houses[hi].hub as i32);
+        self.houses[hi].defunct = true;
+        self.houses[hi].political_power = 0.0;
+        self.houses[hi].monopoly.clear();
+        self.journal.push(JournalEntry {
+            tick, kind: "extinction".into(), hub, good: -1, value: 0.0,
+            text: format!("{} falls into ruin and is dissolved", name),
+        });
+    }
+
+    /// Houses that specialize in the same good and sit in the same component become
+    /// rivals (competing for the same trade). A feud occasionally flares into a
+    /// Chronicle event with a mutual prestige/wealth cost.
+    fn update_rivalries(&mut self) {
+        let n = self.houses.len();
+        for a in 0..n {
+            if self.houses[a].defunct { continue; }
+            for b in (a + 1)..n {
+                if self.houses[b].defunct { continue; }
+                let shared = self.houses[a].spec.iter().any(|g| self.houses[b].spec.contains(g));
+                let same_region = self.houses[a].hub == self.houses[b].hub
+                    || self.hubs.get(self.houses[a].hub as usize).map(|h| h.component)
+                        == self.hubs.get(self.houses[b].hub as usize).map(|h| h.component);
+                if shared && same_region {
+                    if !self.houses[a].rivals.contains(&b) { self.houses[a].rivals.push(b); }
+                    if !self.houses[b].rivals.contains(&a) { self.houses[b].rivals.push(a); }
+                    // Feud flare: the weaker pays, occasionally logged.
+                    let roll = hash01(self.seed, self.tick as u64 ^ a as u64, b as u64);
+                    if roll < 0.15 {
+                        let (loser, winner) = if self.houses[a].wealth < self.houses[b].wealth {
+                            (a, b)
+                        } else { (b, a) };
+                        self.houses[loser].wealth *= 0.92;
+                        self.houses[winner].prestige += 0.03;
+                        if roll < 0.05 {
+                            let (ln, wn) = (self.houses[loser].name.clone(),
+                                self.houses[winner].name.clone());
+                            self.journal.push(JournalEntry {
+                                tick: self.tick, kind: "feud".into(),
+                                hub: self.houses[winner].hub as i32, good: -1, value: 0.0,
+                                text: format!("{} outmaneuvers {} in a bitter trade feud", wn, ln),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn sample_journal(&mut self) {
+        // World price index = population-weighted mean price / base_value.
+        let (_total_pop, index) = self.world_totals();
+        self.journal.push(JournalEntry {
+            tick: self.tick,
+            kind: "price".into(),
+            hub: -1,
+            good: -1,
+            value: index,
+            text: String::new(),
+        });
+        // Cap journal length so very long campaigns stay bounded.
+        if self.journal.len() > 20_000 {
+            let drop = self.journal.len() - 20_000;
+            self.journal.drain(0..drop);
+        }
+    }
+}
+
+/// Compact human-readable population (12,400 / 1.2M) for chronicle text.
+fn fmt_pop(p: f32) -> String {
+    let p = p.max(0.0);
+    if p >= 1_000_000.0 {
+        format!("{:.2}M", p / 1_000_000.0)
+    } else if p >= 10_000.0 {
+        format!("{:.0}k", p / 1_000.0)
+    } else {
+        // thousands separator for the small range
+        let n = p as u64;
+        let s = n.to_string();
+        let bytes = s.as_bytes();
+        let mut out = String::new();
+        for (i, b) in bytes.iter().enumerate() {
+            if i > 0 && (bytes.len() - i) % 3 == 0 { out.push(','); }
+            out.push(*b as char);
+        }
+        out
+    }
+}
+
+fn food_value(h: &TickHub, goods: &[TickGood]) -> f32 {
+    let mut v = 0.0;
+    for g in 0..goods.len() {
+        if goods[g].food {
+            v += h.stock[g] * goods[g].base_value;
+        }
+    }
+    v / h.population.max(1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn good(name: &str, cat: i32, tier: u8, val: f32, desire: f32, food: bool) -> TickGood {
+        TickGood { name: name.into(), category: cat, need_tier: tier, base_value: val, desire, food }
+    }
+
+    fn hub(id: u32, x: f32, y: f32, pop: f32, prod: Vec<f32>, comp: u32) -> TickHub {
+        let ng = prod.len();
+        TickHub {
+            id, x, y, name: format!("H{id}"), population: pop, founding_pop: pop,
+            stock: vec![0.0; ng], price: vec![1.0; ng], production: prod,
+            grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
+            is_estate: false, parent: -1, koppen: 0, coastal: false, component: comp,
+            export_earn: 0.0, import_spend: 0.0,
+            mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5, sent_stability: 0.8, history: Vec::new(),
+        }
+    }
+
+    fn sim(hubs: Vec<TickHub>, goods: Vec<TickGood>) -> CampaignSim {
+        let mut s = CampaignSim {
+            seed: 42, tick: 0, goods, hubs, in_transit: vec![], houses: vec![],
+            active_events: vec![], journal: vec![], days_per_cell: 0.2, freight_per_day: 0.01,
+            k: 0.6, margin: 0.05, need_scale: 1.0, world_w: 100.0, last_tick_ms: 0.0,
+            last_month_pop: 0.0, last_month_index: 0.0, days: vec![],
+        };
+        s.rebuild_routes();
+        s
+    }
+
+    #[test]
+    fn deterministic_and_finite() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let hubs = vec![
+            hub(0, 10.0, 10.0, 10000.0, vec![50.0, 5.0], 0),
+            hub(1, 40.0, 12.0, 8000.0, vec![40.0, 0.0], 0),
+        ];
+        let mut a = sim(hubs.clone(), goods.clone());
+        let mut b = sim(hubs, goods);
+        a.advance(365);
+        b.advance(365);
+        for h in 0..a.hubs.len() {
+            for g in 0..a.goods.len() {
+                assert!(a.hubs[h].price[g].is_finite() && a.hubs[h].price[g] > 0.0);
+                assert!((a.hubs[h].price[g] - b.hubs[h].price[g]).abs() < 1e-3, "determinism");
+            }
+        }
+    }
+
+    #[test]
+    fn cutting_food_starves_a_dependent_hub() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        // Hub 1 grows no food and is in a SEPARATE component (no route in).
+        let hubs = vec![
+            hub(0, 10.0, 10.0, 10000.0, vec![200.0], 0),
+            hub(1, 80.0, 50.0, 10000.0, vec![0.0], 1),
+        ];
+        let mut s = sim(hubs, goods);
+        s.advance(400);
+        assert!(s.hubs[1].starving > 0.5, "isolated foodless hub starves: {}", s.hubs[1].starving);
+        assert!(s.hubs[1].population < s.hubs[1].founding_pop, "population declines");
+    }
+}

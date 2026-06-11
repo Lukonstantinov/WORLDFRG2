@@ -624,13 +624,22 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
 
             buf.current_type[i] = if circumpolar_active && y >= circumpolar_row {
                 2 // ACC (cold)
-            } else if basin_pos < -0.5 && abs_lat > 18.0 && abs_lat < 55.0 && speed > 1.2 {
-                1 // warm western-boundary current
+            } else if basin_pos < -0.5 && abs_lat > 18.0 && abs_lat < 42.0 && speed > 1.2 {
+                1 // warm western-boundary current. Capped at ~42° — the SEPARATION
+                  // latitude: a western-boundary current (Kuroshio/Gulf Stream)
+                  // peels away from the coast here and crosses the basin as the
+                  // eastward drift (extend_warm_tag carries the warm tag across).
+                  // Poleward of this the western boundary is bathed by the COLD
+                  // subpolar return (Oyashio/Labrador) below — so Kamchatka,
+                  // Hokkaido and Labrador read cold, not warm.
             } else if basin_pos > 0.45 && abs_lat > 18.0 && abs_lat < 48.0 && speed > 0.35 {
                 2 // cold eastern-boundary current (kept out of the tropics, which
                   // should read neutral/grey — tropical currents are not cold)
-            } else if abs_lat >= 50.0 && abs_lat < 68.0 && basin_pos < -0.3 && speed > 0.45 {
-                2 // cold subpolar boundary current
+            } else if abs_lat >= 48.0 && abs_lat < 68.0 && basin_pos < -0.3 && speed > 0.45 {
+                2 // cold subpolar boundary current (Oyashio/Labrador). Onset at 48°
+                  // (Kamchatka ≈53° → cold ✓) leaves a NEUTRAL gap 42–48° on the W
+                  // boundary = the warm→cold transition after the warm current
+                  // separates at 42°, instead of snapping straight to cold blue.
             } else {
                 0 // neutral
             };
@@ -1041,6 +1050,36 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
                     let hl = (hx * hx + hy * hy).sqrt();
                     if hl > 0.001 { hx /= hl; hy /= hl; }
                 }
+                // Western-boundary SEPARATION: a warm boundary current hugging the
+                // east coast of a continent (land a few cells to its WEST, −x)
+                // must peel off and run EAST across the basin once it reaches the
+                // separation latitude (~40°). Otherwise the warm tag rides the coast
+                // all the way to the subpolar zone and warms Kamchatka / Labrador.
+                // The cross-basin drift then arrives at the FAR coast from open
+                // water (land to its EAST, not west), so this never fires there and
+                // the Norwegian-Current-style poleward warming of west coasts is
+                // preserved. Detect "land to the west" within a few cells.
+                if alat > 42.0 {
+                    let mut land_west = false;
+                    for d in 1..=5 {
+                        let wx = buf.wrap_x(xi - d);
+                        if buf.terrain[buf.idx(wx, yi as u32)] != 0 { land_west = true; break; }
+                    }
+                    if land_west {
+                        // Peel OFF the coast: cancel the poleward (coast-hugging)
+                        // component and push east into the basin so the current
+                        // separates instead of riding the coast to the subpolar
+                        // zone (Kamchatka). It does NOT force a fixed heading —
+                        // once off the coast (no land to the west) the natural
+                        // field resumes and can still carry the warm drift poleward
+                        // up the FAR (eastern) coast (the Norwegian Current → warm
+                        // Arctic approach), keeping that limb warm.
+                        hx = hx.abs().max(0.5);
+                        if nh { hy = hy.max(0.0); } else { hy = hy.min(0.0); }
+                        let hl = (hx * hx + hy * hy).sqrt();
+                        if hl > 0.001 { hx /= hl; hy /= hl; }
+                    }
+                }
                 px += hx * step_len;
                 py += hy * step_len;
             }
@@ -1092,7 +1131,10 @@ fn extend_cold_tag(buf: &mut WorldBuffer) {
                 let mag = (vmx * vmx + vmy * vmy).sqrt();
                 if mag < 0.05 { break; }
                 let alat = buf.latitude(yi as u32).abs();
-                if alat < 16.0 { break; }           // stop before the tropics (kept grey)
+                // Equatorial band stays NEUTRAL: a current only reads cold once it
+                // is at least ~15° from the equator (per the rule that equatorial
+                // currents are neither warm nor cold).
+                if alat < 15.0 { break; }
 
                 cold_add[i] = true;
                 let (hx, hy) = (vmx / mag, vmy / mag);

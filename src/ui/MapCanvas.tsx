@@ -8,7 +8,7 @@ import { useWorldStore } from "../state/worldStore";
 import { useViewportStore } from "../state/viewportStore";
 import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy } from "../bridge/tauri";
 import { goodOverlayKey } from "../goods";
 import type { PaintValue, EconChain } from "../types";
 
@@ -381,6 +381,12 @@ export function MapCanvas() {
       goodRegionsRef.current = o.good_regions;
       requestRender();
     }).catch(() => {});
+    // Monsoon-climate flood areas (Natural Disasters overlay) — koppen-derived, so
+    // they're fetched here (world/version), not in the seasonal storm-month effect.
+    computeMonsoonZones().then((zones) => {
+      om.drawMonsoonZones(zones);
+      requestRender();
+    }).catch(() => {});
   }, [worldKey, tileVersion, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Storm zones depend on the seasonal month slider, so they get their OWN light
@@ -695,6 +701,11 @@ export function MapCanvas() {
     }
 
     const tool = activeToolRef.current;
+    // A finalized (locked) map is read-only — geography edits are disabled in the
+    // UI (the backend also rejects them via ensure_unfrozen).
+    if (m.frozen && (tool === "paint" || tool === "elevation" || tool === "shelf" || tool === "volcano")) {
+      return;
+    }
     if (tool === "paint" || tool === "elevation" || tool === "shelf") {
       isPaintingRef.current = true;
       isErasingRef.current = e.shiftKey;

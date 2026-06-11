@@ -161,7 +161,124 @@ export interface RiverParams {
   lakeMaxFraction: number; // 0.000002-0.05: max lake size as fraction of grid (low = tiny lakes)
 }
 
-export type WorkflowStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+export type WorkflowStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+
+// ── DLC 1 "Living Trade" tick simulation ──
+export interface CampaignClock {
+  tick: number;
+  year: number;
+  day: number;
+  season: string;
+  last_tick_ms: number;
+}
+export interface CampaignHubBrief {
+  id: number;
+  x: number;
+  y: number;
+  name: string;
+  population: number;
+  grain_wealth: number;
+  trade_wealth: number;
+  starving: number;
+  is_estate: boolean;
+  mood: number;
+  /** Month-over-month population growth fraction (+0.05 = +5%). */
+  growth: number;
+}
+/** One weekly per-hub history sample (settlement-window charts). */
+export interface HubSample {
+  tick: number;
+  population: number;
+  wealth: number;
+  mood: number;
+  price_index: number;
+}
+/** One good's live state at a hub (settlement-window Market tab). */
+export interface HubGoodDetail {
+  good: number;
+  name: string;
+  price: number;
+  base_value: number;
+  stock: number;
+  need: number;
+  production: number;
+  world_min: number;
+  world_min_hub: string;
+  world_max: number;
+  world_max_hub: string;
+}
+/** Full live per-settlement detail (sentiment + market + history). */
+export interface HubDetail {
+  id: number;
+  name: string;
+  x: number;
+  y: number;
+  population: number;
+  koppen: number;
+  coastal: boolean;
+  is_estate: boolean;
+  mood: number;
+  sent_food: number;
+  sent_prosperity: number;
+  sent_stability: number;
+  grain_wealth: number;
+  trade_wealth: number;
+  food_balance: number;
+  starving: number;
+  goods: HubGoodDetail[];
+  history: HubSample[];
+  events: JournalEntry[];
+  houses?: HouseBrief[];
+}
+/** A merchant family (trading house) — for the Houses panel + settlement window. */
+export interface HouseBrief {
+  name: string;        // "House Cassii"
+  head_name: string;   // "Marcus Cassii"
+  home_hub: number;    // home hub id
+  home_name: string;
+  wealth: number;
+  prestige: number;
+  political_power: number;
+  generation: number;
+  head_age: number;    // years the current head has led
+  specialties: string[];
+  monopolies: [string, number][]; // good name + share 0..1
+  rivals: string[];
+  defunct: boolean;
+}
+export interface JournalEntry {
+  tick: number;
+  kind: string;
+  hub: number;
+  good: number;
+  value: number;
+  text: string;
+}
+export interface CampaignSnapshot {
+  active: boolean;
+  clock: CampaignClock;
+  hubs: CampaignHubBrief[];
+  recent_events: JournalEntry[];
+  price_index: number;
+  in_transit: number;
+  /** Total population across all hubs (shown as a number in the world pulse). */
+  total_population: number;
+  /** Population change since the last monthly chronicle sample. */
+  population_delta: number;
+  /** World price-index change since the last monthly chronicle sample. */
+  price_index_delta: number;
+}
+export interface WorldGoodPrice {
+  good: number;
+  name: string;
+  world_price: number;
+  producers: number;
+  top_hub: string;
+}
+export interface WorldEconomy {
+  goods: WorldGoodPrice[];
+  index_series: [number, number][];
+}
 
 // ── Economy snapshot (Phase 2) ──
 export interface EconHubGood {
@@ -197,6 +314,15 @@ export interface HubMarketGood {
   out_flow: number;
   exchanged_for: ExchangeRate[];
 }
+/** One emergent currency good + the components that made it money. */
+export interface HubCurrency {
+  good: number;
+  name: string;
+  liquidity: number;  // distinct trade counterparties
+  value: number;      // grain-equivalent base value
+  stability: number;  // 0..1, 1 = rock-steady price
+  price: number;      // local grain-equivalent price (for exchange ratios)
+}
 /** Per-hub market panel data from the equilibrium solver. */
 export interface HubMarket {
   /** Food-stock value per capita (food security). */
@@ -205,6 +331,8 @@ export interface HubMarket {
   trade_wealth: number;
   /** Emergent currency goods at this hub. */
   currency_goods: string[];
+  /** Explained currency goods (liquidity/value/stability + grain price). */
+  currencies?: HubCurrency[];
   prices: HubMarketGood[];
 }
 export interface EconHub {
@@ -232,7 +360,8 @@ export interface EconHub {
   commoners?: number;    // everyone else
   elite_level?: number;  // 0..1 how large the wealthy class is
   merchant_level?: number; // 0..1 how large the merchant class is
-  top_export?: string;   // most valuable good the merchants sell
+  top_export?: string;   // the good that brings the city the most wealth
+  top_export_share?: number; // its fraction of the hub's total export value
   luxuries?: HubLuxury[];
   sea_access?: boolean;  // real sea port (not a closed lake)
   exports_to?: EconExport[]; // where this hub's exports go (with %)

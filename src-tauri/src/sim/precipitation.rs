@@ -276,24 +276,39 @@ fn monsoon_bonus(abs_lat: f32, dist_ocean: f32, land_frac_tropical: f32) -> f32 
 /// coasts) whose moisture source is blocked — so the monsoon term no longer turns
 /// dry land green. A cold current offshore (cold-upwelling desert coast) counts for
 /// little. Cheap: only the 5–45° belt calls it, scanning a few short rays.
-fn monsoon_onshore(buf: &WorldBuffer, x: u32, y: u32) -> f32 {
+fn monsoon_onshore(buf: &WorldBuffer, x: u32, y: u32, sea_suppress: &[f32]) -> f32 {
     let lat = buf.latitude(y);
     let h = buf.height as i32;
     let eqdir = if lat >= 0.0 { 1i32 } else { -1 }; // equatorward = toward the equator
-    let range = 28i32;
+    // Resolution-aware moisture fetch: a summer monsoon draws on a warm sea up to
+    // ~MONSOON_FETCH_KM away. The old fixed 28-cell reach was only ~310 km on a
+    // 3600-wide grid, so a continental interior (the Indian Deccan, the N-China
+    // plain) never "saw" the ocean and stayed desert. ~800 km reaches India's
+    // interior while still leaving the Sahara dry — its nearest warm equatorward
+    // ocean (the Gulf of Guinea) is >1500 km away past the Sahel, and its west
+    // coast is the cold Canary upwelling (discounted below).
+    const MONSOON_FETCH_KM: f32 = 800.0;
+    let km_per_cell = EARTH_CIRCUMFERENCE_KM / buf.width as f32;
+    let range = ((MONSOON_FETCH_KM / km_per_cell) as i32).max(12);
     let mut best = 0.0f32;
-    // Equatorward, equatorward-east, and due-east rays (the monsoon moisture fetch).
-    for &(dx, dy) in &[(0i32, eqdir), (1, eqdir), (1, 0)] {
+    // Equatorward (S), equatorward-east (SE), equatorward-west (SW — the Indian /
+    // Western-Ghats summer monsoon blows from the south-west), and due-east rays.
+    for &(dx, dy) in &[(0i32, eqdir), (1, eqdir), (-1, eqdir), (1, 0)] {
         for s in 1..=range {
             let nx = buf.wrap_x(x as i32 + dx * s);
             let ny = y as i32 + dy * s;
             if ny < 0 || ny >= h { break; }
             let ni = buf.idx(nx, ny as u32);
             if buf.terrain[ni] == 0 {
+                // Enclosed/suppressed warm seas (Red Sea, Persian Gulf) sit under
+                // the Hadley subtropical-high inversion and supply NO monsoon — skip
+                // them as a source so East Sahara / Arabia stay dry, while India's
+                // open Arabian Sea / Bay of Bengal still fires the monsoon.
+                if sea_suppress[ni] > 0.4 { continue; }
                 // Warm/neutral sea is a good moisture source; a cold current is not.
-                let warm = if buf.current_type[ni] == 2 { 0.35 } else { 1.0 };
+                let warm = if buf.current_type[ni] == 2 { 0.30 } else { 1.0 };
                 best = best.max((1.0 - s as f32 / range as f32) * warm);
-                break; // first sea cell along the ray decides it
+                break; // first usable sea cell along the ray decides it
             }
         }
     }
@@ -509,7 +524,7 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
             // wets subtropical-high deserts (Sahara etc.).
             if (5.0..=45.0).contains(&abs_lat) {
                 p += monsoon_bonus(abs_lat, buf.distance_to_ocean[idx], land_frac_tropical)
-                    * monsoon_onshore(buf, x, y);
+                    * monsoon_onshore(buf, x, y, &sea_suppress);
             }
             // Frontal storm tracks.
             let near_ocean = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
@@ -532,7 +547,9 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
     // left those stripes; several passes of an isotropic average dissolve the
     // directional banding while keeping the large-scale wet-coast / dry-interior
     // gradient and orographic contrasts.
-    const BLUR_PASSES: u32 = 12;
+    // Raised 12→18 to further dissolve the residual diagonal precip banding that
+    // was reading through as stepped climate stripes.
+    const BLUR_PASSES: u32 = 18;
     let mut a = precip;
     let mut b = vec![0.0f32; n];
     for _ in 0..BLUR_PASSES {

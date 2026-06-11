@@ -12,6 +12,7 @@ const GOOD_BY_NAME = new Map(GOOD_DEFS.map((g) => [g.name, g]));
 const SHARK_COLOR = "#e04040";
 const SHIPWORM_COLOR = "#b98a4a";
 const STORM_COLOR = "#c050d0";
+const MONSOON_COLOR = "#3a9ad0";
 const REEF_COLOR = "#30c0b0";
 const TRADE_TRUNK = "#e0c060"; // major bundled commodity-flow trunk (amber)
 const TRADE_TRUNK_MINOR = "#b8a878"; // minor/low-volume trunk (muted amber)
@@ -20,6 +21,15 @@ const STAR_COLOR = "#ffd24a"; // power-tier stars on major hubs (gold) — legac
 const HUB_BLUE = "#3a86d6"; // trade-hub circle
 
 const RIVER_COLOR = "#2288cc";
+/** Blue shade by river discharge/width: pale thin streams → deep wide trunks. */
+function riverShade(width: number): string {
+  // width ranges ~0.5 (headwater) .. 8 (great river). Map to a lightness ramp.
+  const t = Math.min(1, Math.max(0, (width - 0.5) / 5.5));
+  const r = Math.round(120 - 96 * t);  // 120 → 24
+  const g = Math.round(190 - 80 * t);  // 190 → 110
+  const b = Math.round(225 - 50 * t);  // 225 → 175
+  return `rgb(${r},${g},${b})`;
+}
 const LAKE_COLOR = "rgba(51, 153, 221, 0.7)";
 
 const SETTLEMENT_COLORS: Record<string, string> = {
@@ -59,6 +69,7 @@ export class OverlayManager {
   private sharkZones: SharkZone[] = [];
   private shipwormZones: SharkZone[] = [];
   private stormZones: SharkZone[] = [];
+  private monsoonZones: SharkZone[] = [];
   private reefZones: SharkZone[] = [];
   private goodRegions: GoodRegion[] = [];
   /** Per-good display metadata (icon/color) from the active editable spec; falls
@@ -83,7 +94,7 @@ export class OverlayManager {
     rivers: true, lakes: true, settlements: true,
     markers: false, wind: false, currents: false, latLines: false,
     tradeRoutes: false, fisheryBanks: false,
-    sharkZones: false, shipwormZones: false, stormZones: false, reefZones: false, tradeFlows: false,
+    sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
     hubNames: false, settlementNames: false, tradeRegions: false,
   };
@@ -127,6 +138,10 @@ export class OverlayManager {
 
   drawStormZones(zones: SharkZone[]) {
     this.stormZones = zones;
+  }
+
+  drawMonsoonZones(zones: SharkZone[]) {
+    this.monsoonZones = zones;
   }
 
   drawReefZones(zones: SharkZone[]) {
@@ -214,11 +229,16 @@ export class OverlayManager {
 
     if (this.visibility.rivers && this.rivers.length > 0) {
       ctx.globalAlpha = 0.85;
+      // Width and COLOUR shade track the river's discharge (set physically in
+      // rivers.rs from precipitation × drainage area × climate): a small headwater
+      // stream is thin and pale, a great trunk river wide and deep blue. Width is
+      // zoom-compensated so even small streams stay visible.
+      const inv = 1 / Math.sqrt(this.currentScale);
       for (const river of this.rivers) {
         if (river.points.length < 2) continue;
-        // Navigable trade arteries read a touch brighter/wider than minor streams.
-        ctx.strokeStyle = river.navigable ? "#3aa6e6" : RIVER_COLOR;
-        ctx.lineWidth = Math.max(0.5, river.width * (river.navigable ? 0.55 : 0.4));
+        const riverW = Math.max(0.5, river.width * 0.6 * inv);
+        ctx.strokeStyle = riverShade(river.width);
+        ctx.lineWidth = riverW;
         ctx.beginPath();
         ctx.moveTo(river.points[0][0] + 0.5, river.points[0][1] + 0.5);
         for (let i = 1; i < river.points.length; i++) {
@@ -233,7 +253,7 @@ export class OverlayManager {
             ctx.fillRect(dx, dy, 1, 1);
           }
           ctx.strokeStyle = "rgba(90,180,210,0.7)";
-          ctx.lineWidth = Math.max(0.4, river.width * 0.25);
+          ctx.lineWidth = Math.max(0.4, river.width * 0.3 * inv);
           for (const [dx, dy] of river.delta) {
             ctx.beginPath();
             ctx.moveTo(mx + 0.5, my + 0.5);
@@ -352,6 +372,14 @@ export class OverlayManager {
     if (this.visibility.stormZones && this.stormZones.length > 0) {
       for (const z of this.stormZones) {
         this.renderRegionMask(ctx, z.cells, z.cell_size, STORM_COLOR, "\u{1F300}", z.x, z.y, 0.16 + 0.22 * Math.min(1, z.score));
+      }
+    }
+
+    // Monsoon-climate land: the seasonal wet-season flood belt marked + a rain
+    // glyph (a natural-disaster sibling of the cyclone zones, on land not sea).
+    if (this.visibility.monsoonZones && this.monsoonZones.length > 0) {
+      for (const z of this.monsoonZones) {
+        this.renderRegionMask(ctx, z.cells, z.cell_size, MONSOON_COLOR, "\u{1F327}", z.x, z.y, 0.14 + 0.20 * Math.min(1, z.score));
       }
     }
 
@@ -1179,6 +1207,7 @@ export class OverlayManager {
     this.sharkZones = [];
     this.shipwormZones = [];
     this.stormZones = [];
+    this.monsoonZones = [];
     this.reefZones = [];
     this.goodRegions = [];
     this.tradeTrunks = [];

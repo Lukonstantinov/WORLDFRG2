@@ -260,6 +260,12 @@ export async function computeReefZones(): Promise<SharkZone[]> {
   return invoke("compute_reef_zones");
 }
 
+/** Cluster the land under a monsoon-type climate into wet-season flood regions
+ *  (Natural Disasters overlay, alongside the hurricane/storm zones). */
+export async function computeMonsoonZones(): Promise<SharkZone[]> {
+  return invoke("compute_monsoon_zones");
+}
+
 export interface OverlaysResult {
   vectors: OverlayVectors;
   streamlines: Streamline[];
@@ -490,4 +496,43 @@ export async function setProgress(scope: "world" | "campaign", progressJson: str
  *  world (grid sizes must match). Returns the modified tile coords. */
 export async function importWorldLayers(path: string, groups: string[]): Promise<[number, number][]> {
   return invoke("import_world_layers", { path, groups });
+}
+
+// ── DLC 1 "Living Trade" tick simulation ──
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, HouseBrief } from "../types";
+
+/** Seed a fresh living-trade sim from the static economy snapshot (step 10). */
+export async function campaignStartSim(seed: number): Promise<CampaignSnapshot> {
+  return invoke("campaign_start_sim", { seed });
+}
+
+/** Advance the sim by N days (autosaves the new state). */
+export async function campaignAdvance(ticks: number): Promise<CampaignSnapshot> {
+  return invoke("campaign_advance", { ticks });
+}
+
+/** Current sim snapshot (inactive when no sim has been started). */
+export async function campaignGetState(): Promise<CampaignSnapshot> {
+  return invoke("campaign_get_state");
+}
+
+/** Journal rows, filtered by hub and/or good (-1 = any). */
+export async function campaignGetJournal(hub: number, good: number): Promise<JournalEntry[]> {
+  return invoke("campaign_get_journal", { hub, good });
+}
+
+/** Full live detail for one settlement (sentiment + market + history), or null
+ *  when no campaign sim is running / the hub isn't in it. */
+export async function campaignGetHub(id: number): Promise<HubDetail | null> {
+  return invoke("campaign_get_hub", { id });
+}
+
+/** World-economy panel data (per-good world prices + price-index series). */
+export async function campaignGetWorldEconomy(): Promise<WorldEconomy> {
+  return invoke("campaign_get_world_economy");
+}
+
+/** All merchant families (active first, richest first). */
+export async function campaignGetHouses(): Promise<HouseBrief[]> {
+  return invoke("campaign_get_houses");
 }

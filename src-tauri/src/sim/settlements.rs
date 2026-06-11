@@ -48,6 +48,10 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake])
 
             // --- Climate score (40%) ---
             let temp = buf.temperature[idx];
+            // Coldest-month temperature (continentality-aware) for the winter gate —
+            // so a brutal-winter lee/east coast (Vladivostok/Kamchatka/Hudson Bay)
+            // can't host a metropolis just because its annual MEAN looks mild.
+            let winter_temp = super::koppen::seasonal_temps(buf, x, y).0;
             let ts = if temp < -15.0 {
                 0.0
             } else if temp < -5.0 {
@@ -115,6 +119,16 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake])
                 (1.0 - (temp - 30.0) / 15.0).max(0.0)
             };
 
+            // Winter-severity gate: brutal coldest-month winters (continental east
+            // coasts, deep interiors) suppress large permanent cities — full above
+            // -10°C, tapering to a 0.30 floor by -32°C (Harbin/Moscow stay possible,
+            // megalopolises do not).
+            let winter_gate = if winter_temp >= -10.0 {
+                1.0
+            } else {
+                (1.0 + (winter_temp + 10.0) / 22.0).clamp(0.30, 1.0)
+            };
+
             // Explicit cryosphere penalty: tundra is barely habitable, ice caps
             // never. Multiplicative so no bonus (coast/trade) can rescue them.
             let cryo_gate = match buf.koppen[idx] {
@@ -129,14 +143,18 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake])
             // --- Water access score (20%) ---
             let mut water_score = 0.0f32;
 
-            // River nearby (within 2 cells)
-            let has_river = (-2i32..=2).any(|dy| {
+            // River nearby (within 2 cells). Rivers are the dominant pre-modern
+            // settlement magnet (water, transport, defence, fertile floodplain), so
+            // the draw is strong — a cell ON or right beside a river gets the full
+            // bonus, making river valleys line with towns.
+            let on_river = is_river_cell[idx];
+            let has_river = on_river || (-2i32..=2).any(|dy| {
                 (-2i32..=2).any(|dx| {
                     let ni = buf.widx(x as i32 + dx, y as i32 + dy);
                     is_river_cell[ni]
                 })
             });
-            if has_river { water_score += 0.5; }
+            if has_river { water_score += if on_river { 0.7 } else { 0.55 }; }
 
             // Coast nearby — a stronger draw now, so genuine PORTS form on rivers'
             // absence (harbours, fishing towns), not only at river mouths.
@@ -199,7 +217,7 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake])
                 + fertility_score * 0.20
                 + water_score * 0.20
                 + terrain_score * 0.10
-                + trade_score * 0.10) * temp_gate * cryo_gate * disease_gate).clamp(0.0, 1.0);
+                + trade_score * 0.10) * temp_gate * winter_gate * cryo_gate * disease_gate).clamp(0.0, 1.0);
         }
     }
 
@@ -302,9 +320,19 @@ pub fn generate_settlements(
     // realism is lowered — pruning marginal sites and thinning the map together.
     let min_dist = ((w as f32 / (95.0 + 90.0 * (1.0 - d))) as u32).max(3) as i32;
     let threshold = 0.22 + 0.18 * (1.0 - d); // d=1 → 0.22 (permissive) · d=0 → 0.40 (strict)
-    let max_settlements = (150.0 + 700.0 * d) as usize; // d=1 → 850 · d=0 → 150
+    let max_settlements = (180.0 + 820.0 * d) as usize; // d=1 → 1000 · d=0 → 180
 
     let food = compute_food_capacity(buf, rivers);
+
+    // River-cell mask: towns are allowed to pack MUCH closer along a river (a
+    // string of small river towns) than out in open country, so river valleys
+    // fill with settlements instead of one town per wide spacing radius.
+    let mut is_river_cell = vec![false; total];
+    for river in rivers {
+        for &(rx, ry) in &river.points {
+            is_river_cell[buf.idx(rx, ry)] = true;
+        }
+    }
 
     // ── Site selection: greedy local-maxima of habitability with spacing ──
     let mut candidates: Vec<(usize, f32)> = Vec::new();
@@ -327,15 +355,20 @@ pub fn generate_settlements(
 
     // (idx, x, y, score)
     let mut sites: Vec<(usize, u32, u32, f32)> = Vec::new();
+    let river_min_dist = (min_dist as f32 * 0.5).max(2.0) as i32; // pack river towns tighter
     'outer: for (idx, score) in &candidates {
         if sites.len() >= max_settlements { break; }
         let sx = (*idx % w as usize) as u32;
         let sy = (*idx / w as usize) as u32;
+        // A river-side candidate only needs the (much smaller) river spacing from
+        // existing sites, so many small towns line a valley.
+        let req = if is_river_cell[*idx] { river_min_dist } else { min_dist };
+        let req2 = req * req;
         for &(_, ex, ey, _) in &sites {
             let mut dx = (sx as i32 - ex as i32).abs();
             if dx > w as i32 / 2 { dx = w as i32 - dx; }
             let dy = (sy as i32 - ey as i32).abs();
-            if dx * dx + dy * dy < min_dist * min_dist { continue 'outer; }
+            if dx * dx + dy * dy < req2 { continue 'outer; }
         }
         sites.push((*idx, sx, sy, *score));
     }
@@ -455,8 +488,18 @@ pub fn generate_settlements(
         } else {
             (0.45 - 0.18 * (abs_lat - 62.0) / 13.0).max(0.22) // 0.45 → 0.27 across 62–75°+
         };
+        // Continental winter severity caps city size even at MID latitude — a
+        // brutal-winter east coast (Vladivostok ≈43°, Harbin) escapes the
+        // latitude-only `cold_factor` but is real, not a megacity. Full above
+        // -8°C coldest month, down to a 0.30 floor by -30°C.
+        let winter_t = super::koppen::seasonal_temps(buf, sx, sy).0;
+        let winter_factor = if winter_t >= -8.0 {
+            1.0
+        } else {
+            (1.0 + (winter_t + 8.0) / 22.0).clamp(0.30, 1.0)
+        };
         let population = (pop_agri * (1.0 + TRADE_ALPHA * access) * port_premium
-            * civ_factor * cold_factor).max(40.0) as u32;
+            * civ_factor * cold_factor * winter_factor).max(40.0) as u32;
 
         let size = if population >= 100_000 { "capital" }
             else if population >= 30_000 { "city" }

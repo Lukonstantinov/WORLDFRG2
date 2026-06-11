@@ -841,6 +841,22 @@ fn envelope_score(buf: &WorldBuffer, env: &Envelope, domain: Domain, x: u32, y: 
     s.clamp(0.0, 1.0)
 }
 
+/// Fold the dry-winter / dry-summer-continental Köppen variants onto their humid
+/// (f) equivalents for GOODS scoring. The crops/animals don't care about winter
+/// dryness — a dry-winter continental zone (Dwb) grows the same goods as humid
+/// continental (Dfb) — but most `good_score` arms only list the f variants, so
+/// the newly-introduced Cw*/Dw* zones came up empty. Mediterranean (Cs*) and
+/// tropical savanna (As) are climatically meaningful for their goods (olives,
+/// wine, etc.) and are deliberately NOT folded.
+fn clim_base(k: u8) -> u8 {
+    match k {
+        CWA => CFA, CWB => CFB, CWC => CFC,
+        DWA => DFA, DWB => DFB, DWC => DFC, DWD => DFD,
+        DSA => DFA, DSB => DFB, DSC => DFC, DSD => DFD,
+        other => other,
+    }
+}
+
 /// Raw 0..1 suitability of good `g` at one cell (before localization).
 fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
     let i = buf.idx(x, y);
@@ -849,7 +865,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
     if marine && land { return 0.0; }
     if !marine && !land { return 0.0; }
 
-    let k = buf.koppen[i];
+    let k = clim_base(buf.koppen[i]);
     let t = buf.temperature[i];
     let p = buf.precipitation[i];
     let elev = buf.elevation[i];

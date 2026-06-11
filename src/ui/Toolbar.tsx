@@ -76,8 +76,10 @@ const overlayTypes = [
 const bioOverlays = [
   { id: "sharkZones", label: "\u{1F988} Shark Zones" },
   { id: "shipwormZones", label: "\u{1FAB1} Shipworm Zones" },
-  { id: "stormZones", label: "\u{1F300} Storm Zones" },
   { id: "reefZones", label: "\u{1FAA8} Reef Zones" },
+  // Natural Disasters — hurricane belts (sea) + monsoon flood areas (land).
+  { id: "stormZones", label: "\u{1F300} Hurricanes" },
+  { id: "monsoonZones", label: "\u{1F327} Monsoon Areas" },
   { id: "politicalInfluence", label: "\u{1F535} Trade Hubs" },
   { id: "tradeRegions", label: "\u{1F7E6} Trade Regions" },
   { id: "tradeCorridors", label: "\u{2194} Trade Corridors" },

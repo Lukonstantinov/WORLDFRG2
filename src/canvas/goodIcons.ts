@@ -386,19 +386,149 @@ const shell: Sym = (ctx, x, y, s, ink, accent) => {
   }
 };
 
+const grapes: Sym = (ctx, x, y, s, ink, accent) => {
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = s * 0.12;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(x, y - s * 0.55);
+  ctx.lineTo(x + s * 0.12, y - s);
+  ctx.stroke();
+  ctx.fillStyle = accent;
+  ctx.beginPath();
+  ctx.ellipse(x + s * 0.42, y - s * 0.85, s * 0.3, s * 0.16, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = ink;
+  for (const [dx, dy] of [[-0.46, -0.45], [0, -0.5], [0.46, -0.45], [-0.26, -0.02], [0.26, -0.02], [0, 0.42]] as const) {
+    dot(ctx, x + dx * s, y + dy * s, s * 0.29);
+  }
+};
+
+const coral: Sym = (ctx, x, y, s, ink) => {
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = s * 0.2;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  const branch = (bx: number, by: number, ang: number, len: number, depth: number) => {
+    const ex = bx + Math.cos(ang) * len;
+    const ey = by + Math.sin(ang) * len;
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    if (depth > 0) {
+      branch(ex, ey, ang - 0.6, len * 0.72, depth - 1);
+      branch(ex, ey, ang + 0.5, len * 0.72, depth - 1);
+    }
+  };
+  branch(x, y + s * 0.95, -Math.PI / 2, s * 0.62, 2);
+};
+
+const cinnamon: Sym = (ctx, x, y, s, ink, accent) => {
+  ctx.fillStyle = ink;
+  for (const dx of [-0.42, 0.02]) {
+    ctx.save();
+    ctx.translate(x + dx * s, y);
+    ctx.rotate(0.12);
+    ctx.fillRect(-s * 0.18, -s * 0.92, s * 0.4, s * 1.84);
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = s * 0.09;
+    ctx.beginPath(); ctx.ellipse(s * 0.02, -s * 0.92, s * 0.2, s * 0.09, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(s * 0.02, s * 0.92, s * 0.2, s * 0.09, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+};
+
+const citrus: Sym = (ctx, x, y, s, ink, accent) => {
+  ctx.fillStyle = ink;
+  dot(ctx, x, y, s * 0.9);
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = s * 0.1;
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(a) * s * 0.82, y + Math.sin(a) * s * 0.82);
+    ctx.stroke();
+  }
+  ctx.fillStyle = accent;
+  dot(ctx, x, y, s * 0.13);
+};
+
+const column: Sym = (ctx, x, y, s, ink, accent) => {
+  ctx.fillStyle = ink;
+  ctx.fillRect(x - s * 0.42, y - s * 0.62, s * 0.84, s * 1.2); // shaft
+  ctx.fillStyle = accent;
+  ctx.fillRect(x - s * 0.72, y - s * 0.9, s * 1.44, s * 0.24); // capital
+  ctx.fillRect(x - s * 0.72, y + s * 0.6, s * 1.44, s * 0.28); // base
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = s * 0.07;
+  for (const dx of [-0.18, 0.18]) {
+    ctx.beginPath();
+    ctx.moveTo(x + dx * s, y - s * 0.55);
+    ctx.lineTo(x + dx * s, y + s * 0.55);
+    ctx.stroke();
+  }
+};
+
+const ring: Sym = (ctx, x, y, s, ink, accent) => {
+  // Carved jade disc (bì): solid rim with a hole, rendered as nested discs.
+  ctx.fillStyle = ink;
+  dot(ctx, x, y, s * 0.92);
+  ctx.fillStyle = accent;
+  dot(ctx, x, y, s * 0.58);
+  ctx.fillStyle = ink;
+  dot(ctx, x, y, s * 0.3);
+};
+
+const blob: Sym = (ctx, x, y, s, ink, accent) => {
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.moveTo(x - s * 0.8, y);
+  ctx.bezierCurveTo(x - s * 0.7, y - s * 0.9, x + s * 0.6, y - s * 0.85, x + s * 0.82, y - s * 0.1);
+  ctx.bezierCurveTo(x + s * 0.95, y + s * 0.7, x - s * 0.5, y + s * 0.92, x - s * 0.8, y);
+  ctx.fill();
+  ctx.fillStyle = accent;
+  dot(ctx, x - s * 0.18, y - s * 0.22, s * 0.18);
+  dot(ctx, x + s * 0.3, y + s * 0.2, s * 0.12);
+};
+
+const sheaf: Sym = (ctx, x, y, s, ink, accent) => {
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = s * 0.13;
+  ctx.lineCap = "round";
+  for (const dx of [-0.4, 0, 0.4]) {
+    ctx.beginPath();
+    ctx.moveTo(x + dx * s * 0.7, y + s);
+    ctx.lineTo(x + dx * s, y - s);
+    ctx.stroke();
+    ctx.fillStyle = ink;
+    dot(ctx, x + dx * s, y - s, s * 0.15);
+  }
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = s * 0.16;
+  ctx.beginPath();
+  ctx.moveTo(x - s * 0.5, y + s * 0.3);
+  ctx.lineTo(x + s * 0.5, y + s * 0.3);
+  ctx.stroke();
+};
+
 const SYMBOLS: Record<string, Sym> = {
-  silk: spool, cotton: bale, wool_fleece: bale, wool_llama: bale,
-  wine: goblet, oliveoil: amphora, ceramics: pot, glassware: goblet,
-  sugar: crystals, salt: crystals,
+  silk: spool, cotton: bale, wool_fleece: bale, wool_llama: bale, flax: sheaf,
+  wine: grapes, oliveoil: amphora, ceramics: pot, glassware: goblet,
+  sugar: crystals, salt: crystals, bay_salt: crystals,
   frankincense: smoke, incense: smoke,
-  stockfish: fish, dyes: drop, indigo: drop,
+  stockfish: fish, dyes: drop, indigo: drop, tyrian_purple: shell,
   spices: leaf, tea: leaf, cloves: leaf, pepper: berries, tobacco: leaf,
+  cinnamon: cinnamon, saffron: flower,
   coffee: bean, cacao: bean,
   furs: pelt, timber: log, hardwoods: log,
-  amber: drop, pearls: shell,
-  whaling: whale, wheat: grain, iron: pick, copper: ingot, tin: ingot, gold: coin,
-  gemstones: gem, horses: animal, ivory: tusk,
-  paper: scroll, dates: palm,
+  amber: drop, pearls: shell, coral: coral, ambergris: blob,
+  whaling: whale, wheat: grain, iron: pick, copper: ingot, tin: ingot,
+  gold: coin, silver: ingot, lead: ingot,
+  gemstones: gem, jade: ring, marble: column,
+  horses: animal, ivory: tusk,
+  paper: scroll, dates: palm, citrus: citrus,
 };
 const FALLBACK: Sym = (ctx, x, y, s, ink) => {
   ctx.fillStyle = ink;

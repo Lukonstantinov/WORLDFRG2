@@ -8,6 +8,7 @@ import { TradeMatrixPanel } from "./ui/TradeMatrixPanel";
 import { HubPanel } from "./ui/HubPanel";
 import { GoodFlowPanel } from "./ui/GoodFlowPanel";
 import { GoodsBrowserPanel } from "./ui/GoodsBrowserPanel";
+import { HousesPanel } from "./ui/HousesPanel";
 import { ElevationLegend } from "./ui/ElevationLegend";
 import { ElevationHistogram } from "./ui/ElevationHistogram";
 import { GoodsEditor } from "./ui/GoodsEditor";
@@ -250,6 +251,7 @@ export default function App() {
   const setEconomy = useWorldStore((s) => s.setEconomy);
   const markStepCompleted = useUIStore((s) => s.markStepCompleted);
   const setStepsCompleted = useUIStore((s) => s.setStepsCompleted);
+  const setWorkflowStep = useUIStore((s) => s.setWorkflowStep);
   const loadGoodsFromWorld = useGoodsStore((s) => s.loadFromWorld);
   const invalidateTiles = useViewportStore((s) => s.invalidateTiles);
   const setStatus = useUIStore((s) => s.setStatus);
@@ -299,6 +301,12 @@ export default function App() {
           if (ov.rivers?.length) [1, 2, 3, 4, 5, 6].forEach(markStepCompleted);
           if (ov.settlements?.length) markStepCompleted(7);
           if (ov.economy && ov.economy.hubs.length) [8, 9, 10].forEach(markStepCompleted);
+        }
+        // A finalized (locked) world is read-only — jump straight to the campaign
+        // side. If its economy is already built, land on the campaign step;
+        // otherwise the economy step so it can be (re)built on the locked map.
+        if (res.meta.frozen) {
+          setWorkflowStep((ov.economy && ov.economy.hubs.length ? 11 : 10) as never);
         }
       } catch (e) {
         console.warn("Overlay re-hydration skipped:", e);
@@ -499,6 +507,7 @@ export default function App() {
           <HubPanel />
           <GoodFlowPanel />
           <GoodsBrowserPanel />
+          <HousesPanel />
           <TradeMatrixPanel />
           <ElevationLegend />
           <ElevationHistogram />

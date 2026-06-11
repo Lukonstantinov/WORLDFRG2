@@ -42,17 +42,14 @@ const MED_LAT_MAX: f32 = 45.0;
 // Earth-scale reference width for current influence radius
 const EARTH_W: f32 = 3600.0;
 
-/// Smooth seasonal range — continuous interpolation instead of discrete bands.
-/// Prevents the "zebra pattern" caused by sharp latitude thresholds.
-fn seasonal_range(abs_lat: f32, distance_to_ocean: f32) -> f32 {
+/// Latitude base seasonal range (continental half-amplitude proxy). Continentality
+/// (maritime damping vs. lee/interior amplification) is applied separately by
+/// `seasonal_temps`, so that lee/east coasts keep their cold continental winters
+/// instead of being damped into mild oceanic types.
+fn seasonal_range_base(abs_lat: f32) -> f32 {
     // Smooth piecewise-linear ramp matching WF1 anchor points:
-    //   lat  0 → range  2
-    //   lat 10 → range  5
-    //   lat 25 → range 12
-    //   lat 40 → range 22
-    //   lat 55 → range 30
-    //   lat 75 → range 38
-    let base = if abs_lat < 10.0 {
+    //   lat 0→2  10→5  25→12  40→22  55→30  75→38
+    if abs_lat < 10.0 {
         2.0 + abs_lat * 0.3
     } else if abs_lat < 25.0 {
         5.0 + (abs_lat - 10.0) * 0.467
@@ -62,17 +59,126 @@ fn seasonal_range(abs_lat: f32, distance_to_ocean: f32) -> f32 {
         22.0 + (abs_lat - 40.0) * 0.533
     } else {
         30.0 + (abs_lat - 55.0) * 0.4
-    };
+    }
+}
 
-    // Ocean damping: smooth transition based on distance to ocean
-    // Very coastal (<0.05) → 45% of range, inland → full range
-    let ocean_damp = if distance_to_ocean < 0.15 {
-        0.45 + 0.55 * (distance_to_ocean / 0.15)
+/// Is the prevailing-wind UPWIND side ocean within `reach` cells? True windward
+/// (marine-exposed) coasts weather from the sea and stay mild; lee coasts have
+/// land upwind and stay continental. Wind belt: trades (<30°) and polar
+/// easterlies (≥60°) come from the east; westerlies (30-60°) come from the west.
+pub(crate) fn upwind_is_ocean(buf: &WorldBuffer, x: u32, y: u32, reach: i32) -> bool {
+    let lat = buf.latitude(y);
+    let abs_lat = lat.abs();
+    let sign = if lat >= 0.0 { 1.0f32 } else { -1.0 };
+    let (upwx, upwy) = if abs_lat < 30.0 || abs_lat >= 60.0 {
+        (0.707f32, -sign * 0.707) // against trades / polar easterlies
     } else {
-        1.0
+        (-0.707f32, sign * 0.707) // against westerlies
     };
+    let rwx = upwx.round() as i32;
+    let rwy = upwy.round() as i32;
+    for &(dx, dy) in &[(rwx, rwy), (rwx, 0i32)] {
+        if dx == 0 && dy == 0 { continue; }
+        for s in 1..=reach {
+            let nx = buf.wrap_x(x as i32 + dx * s);
+            let ny = y as i32 + dy * s;
+            if ny < 0 || ny >= buf.height as i32 {
+                return true;
+            }
+            let ni = buf.idx(nx, ny as u32);
+            if buf.terrain[ni] == 0 {
+                return true;
+            }
+        }
+    }
+    false
+}
 
-    base * ocean_damp
+/// Like `upwind_is_ocean`, but a continental-SHELF sea cell does NOT count as
+/// ocean — only deep/open water does. A broad shallow shelf is thermally sluggish
+/// and (in this model) carries no current, so it shouldn't moderate the climate of
+/// the land behind it: wide-shelf coasts stay continental instead of reading
+/// oceanic. Used only for temperature moderation / continentality (not for the
+/// windward-moisture or Mediterranean tests, which still want any sea). Falls back
+/// to counting all sea when the shelf column isn't loaded.
+pub(crate) fn upwind_is_open_ocean(buf: &WorldBuffer, x: u32, y: u32, reach: i32) -> bool {
+    let lat = buf.latitude(y);
+    let abs_lat = lat.abs();
+    let sign = if lat >= 0.0 { 1.0f32 } else { -1.0 };
+    let (upwx, upwy) = if abs_lat < 30.0 || abs_lat >= 60.0 {
+        (0.707f32, -sign * 0.707)
+    } else {
+        (-0.707f32, sign * 0.707)
+    };
+    let rwx = upwx.round() as i32;
+    let rwy = upwy.round() as i32;
+    let have_shelf = !buf.is_shelf.is_empty();
+    for &(dx, dy) in &[(rwx, rwy), (rwx, 0i32)] {
+        if dx == 0 && dy == 0 { continue; }
+        for s in 1..=reach {
+            let nx = buf.wrap_x(x as i32 + dx * s);
+            let ny = y as i32 + dy * s;
+            if ny < 0 || ny >= buf.height as i32 { return true; }
+            let ni = buf.idx(nx, ny as u32);
+            if buf.terrain[ni] == 0 {
+                // Open (non-shelf) water moderates; a shelf sea does not.
+                if !have_shelf || buf.is_shelf[ni] == 0 { return true; }
+            }
+        }
+    }
+    false
+}
+
+/// True if a cold ocean current runs within 2 cells (sharpens coastal winters —
+/// e.g. the Oyashio off Kamchatka, the Labrador off Hudson Bay).
+fn cold_current_near(buf: &WorldBuffer, x: u32, y: u32) -> bool {
+    // The currents column isn't loaded in every phase (e.g. settlements); without
+    // it there's nothing to test — skip rather than index an empty buffer (panic).
+    if buf.current_type.is_empty() { return false; }
+    for dy in -2i32..=2 {
+        for dx in -2i32..=2 {
+            let nx = buf.wrap_x(x as i32 + dx);
+            let ny = y as i32 + dy;
+            if ny < 0 || ny >= buf.height as i32 { continue; }
+            let ni = buf.idx(nx, ny as u32);
+            if buf.terrain[ni] == 0 && buf.current_type[ni] == 2 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Continentality multiplier on the latitude base range. Maritime-exposed coasts
+/// (ocean upwind) get a damped range → mild winters (oceanic Cfb). Lee coasts and
+/// interiors keep the full continental range → cold winters. This is the fix that
+/// lets Df/Dw climates form on mid-latitude EAST coasts (Vladivostok, Kamchatka,
+/// Hudson Bay) instead of reading as mild oceanic.
+fn continentality(buf: &WorldBuffer, x: u32, y: u32) -> f32 {
+    let idx = buf.idx(x, y);
+    let dist = buf.distance_to_ocean[idx];
+    let mut c = if upwind_is_open_ocean(buf, x, y, 6) {
+        // Marine-exposed to OPEN ocean: damp toward 0.5 at the coast, ramp to full
+        // inland. A wide continental shelf upwind does NOT count (open_ocean test),
+        // so broad-shelf coasts keep their full continental seasonal range.
+        if dist < 0.15 { 0.50 + 0.50 * (dist / 0.15) } else { 1.0 }
+    } else {
+        1.0 // lee coast / interior / wide-shelf coast: full continental range
+    };
+    if cold_current_near(buf, x, y) { c *= 1.12; }
+    c
+}
+
+/// Coldest- and warmest-month temperatures at a cell: annual mean ± a
+/// continentality-aware seasonal range (winter dips more than summer rises).
+/// The single source of truth for Köppen's C↔D split and the settlement winter
+/// gate, so they stay consistent.
+pub(crate) fn seasonal_temps(buf: &WorldBuffer, x: u32, y: u32) -> (f32, f32) {
+    let idx = buf.idx(x, y);
+    let abs_lat = buf.latitude(y).abs();
+    let range = seasonal_range_base(abs_lat) * continentality(buf, x, y);
+    let t = buf.temperature[idx];
+    (t - range * 0.55, t + range * 0.45)
 }
 
 /// Estimate months with temperature above 10°C from warmest/coldest month.
@@ -92,46 +198,14 @@ fn months_above_10(t_coldest: f32, t_warmest: f32) -> f32 {
 /// growing-season proxy (0..12) reused by the settlement carrying-capacity model.
 /// Mirrors the t_coldest/t_warmest derivation in `classify_cell`.
 pub(crate) fn growing_season_months(buf: &WorldBuffer, x: u32, y: u32) -> f32 {
-    let idx = buf.idx(x, y);
-    let abs_lat = buf.latitude(y).abs();
-    let range = seasonal_range(abs_lat, buf.distance_to_ocean[idx]);
-    let t = buf.temperature[idx];
-    months_above_10(t - range * 0.55, t + range * 0.45)
+    let (t_cold, t_warm) = seasonal_temps(buf, x, y);
+    months_above_10(t_cold, t_warm)
 }
 
-/// Check if there is ocean in the upwind direction within 2 cells.
+/// Check if there is ocean in the upwind direction within 4 cells (a windward,
+/// marine-weathered coast). Thin wrapper over the shared `upwind_is_ocean`.
 fn is_windward_ocean(buf: &WorldBuffer, x: u32, y: u32) -> bool {
-    let lat = buf.latitude(y);
-    let abs_lat = lat.abs();
-    let sign = if lat >= 0.0 { 1.0f32 } else { -1.0 };
-
-    let (upwx, upwy) = if abs_lat < 30.0 || abs_lat >= 60.0 {
-        (0.707f32, -sign * 0.707) // against trades/polar
-    } else {
-        (-0.707f32, sign * 0.707)  // against westerlies
-    };
-
-    let rwx = upwx.round() as i32;
-    let rwy = upwy.round() as i32;
-
-    // Reach a few cells upwind: a windward coast just needs ocean to weather from,
-    // and on a coarse grid a 2-cell reach missed most genuine west coasts (this is
-    // a big reason Mediterranean climates were so rare). 4 cells is still local.
-    for &(dx, dy) in &[(rwx, rwy), (rwx, 0i32)] {
-        if dx == 0 && dy == 0 { continue; }
-        for s in 1..=4i32 {
-            let nx = buf.wrap_x(x as i32 + dx * s);
-            let ny = y as i32 + dy * s;
-            if ny < 0 || ny >= buf.height as i32 {
-                return true;
-            }
-            let ni = buf.idx(nx, ny as u32);
-            if buf.terrain[ni] == 0 {
-                return true;
-            }
-        }
-    }
-    false
+    upwind_is_ocean(buf, x, y, 4)
 }
 
 /// Check if a warm ocean current is near enough to suppress the Mediterranean
@@ -179,6 +253,66 @@ fn is_upwind_warm_current(buf: &WorldBuffer, x: u32, y: u32) -> bool {
     false
 }
 
+/// East-Asian-style winter-dry monsoon detector. The continental winter monsoon
+/// (the Siberian High pumping cold, bone-dry air offshore) gives mid-latitude
+/// East Asia its arid winters, while the summer monsoon brings the year's rain —
+/// the only mechanism that produces Köppen's dry-winter `w` third letter at
+/// continental latitudes (Dwa/Dwb/Dwc/Dwd in Manchuria, Korea, NE China, SE
+/// Siberia). Fires on a lee/east coast or near-interior of a large continent (the
+/// prevailing westerlies arrive over LAND, not ocean) that still has a warm/
+/// neutral sea within reach to its EAST / SOUTH-EAST — the summer monsoon's
+/// moisture source. West coasts (westerlies off the ocean) and cold-current
+/// coasts never qualify.
+fn winter_dry_monsoon(buf: &WorldBuffer, x: u32, y: u32) -> bool {
+    let lat = buf.latitude(y);
+    let abs_lat = lat.abs();
+    if abs_lat < 25.0 || abs_lat > 55.0 { return false; }
+    // (1) DEEP continental interior on the windward (westerly) side. The Siberian-
+    //     High winter monsoon only builds over a giant landmass, so there must be
+    //     NO ocean upwind within a *continental* reach (~1700 km). This is the key
+    //     test that excludes small continents — Europe has the Atlantic close to
+    //     its west, and islands (Japan) have sea upwind, so they never qualify;
+    //     only a true east coast of a vast continent (NE Asia) passes.
+    let big = (buf.width / 24).max(20) as i32;
+    if upwind_is_ocean(buf, x, y, big) { return false; }
+    // (2) A LARGE OPEN OCEAN to the east / equatorward-east (the summer monsoon
+    //     source). Small / enclosed seas (Mediterranean, Black, Caspian) don't
+    //     count — they hit a far shore quickly, so the open-water run is short.
+    let eqdir = if lat >= 0.0 { 1i32 } else { -1 }; // toward the equator
+    let h = buf.height as i32;
+    let reach = (buf.width / 45).max(10) as i32;     // first-contact within ~800 km
+    let open_min = (buf.width / 30).max(12) as i32;  // ocean must stay open this far
+    for &(dx, dy) in &[(1i32, 0i32), (1, eqdir)] {
+        // First sea cell along the ray.
+        let mut s = 1;
+        while s <= reach {
+            let nx = buf.wrap_x(x as i32 + dx * s);
+            let ny = y as i32 + dy * s;
+            if ny < 0 || ny >= h { break; }
+            if buf.terrain[buf.idx(nx, ny as u32)] == 0 {
+                // A cold-current sea is a poor summer-monsoon source.
+                if !buf.current_type.is_empty()
+                    && buf.current_type[buf.idx(nx, ny as u32)] == 2 { s = reach + 1; }
+                break;
+            }
+            s += 1;
+        }
+        if s > reach { continue; }
+        // Is it a big ocean? Sample the next open_min cells along the ray.
+        let mut open = 0;
+        let mut total = 0;
+        for d in 0..open_min {
+            let nx = buf.wrap_x(x as i32 + dx * (s + d));
+            let ny = y as i32 + dy * (s + d);
+            if ny < 0 || ny >= h { break; }
+            total += 1;
+            if buf.terrain[buf.idx(nx, ny as u32)] == 0 { open += 1; }
+        }
+        if total > 0 && open as f32 / total as f32 >= 0.65 { return true; }
+    }
+    false
+}
+
 /// Smooth seasonal precipitation split factor.
 /// Returns (summer_fraction, winter_fraction) as multipliers on monthly precip.
 /// Uses smooth transitions instead of hard latitude thresholds.
@@ -187,7 +321,18 @@ fn seasonal_split(
     windward_ocean: bool,
     upwind_warm: bool,
     near_ocean: bool,
+    winter_monsoon: bool,
 ) -> (f32, f32) {
+    // East-Asian continental winter monsoon: bone-dry winters (Siberian High) +
+    // a wet summer monsoon. This is the ONLY split that clears Köppen's
+    // winter<summer/3 dry-winter test at continental latitudes, so it's what
+    // turns NE Asia into Cwa/Cwb and Dwa/Dwb/Dwc/Dwd instead of Cfa/Dfb. The
+    // contrast eases a touch at the cold poleward edge.
+    if winter_monsoon {
+        let (s, w) = if abs_lat < 45.0 { (1.75, 0.30) } else { (1.55, 0.42) };
+        return (s, w);
+    }
+
     // Equatorial: nearly even
     if abs_lat < 10.0 {
         let t = abs_lat / 10.0; // 0 at equator, 1 at 10°
@@ -267,7 +412,6 @@ fn classify_cell(buf: &WorldBuffer, x: u32, y: u32) -> u8 {
     let lat = buf.latitude(y);
     let abs_lat = lat.abs();
     let elevation = buf.elevation[idx];
-    let dist_ocean = buf.distance_to_ocean[idx];
 
     // Check if near ocean (within 2 cells in cardinal directions)
     let near_ocean = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1), (-2, 0), (2, 0), (0, -2), (0, 2)]
@@ -280,15 +424,16 @@ fn classify_cell(buf: &WorldBuffer, x: u32, y: u32) -> u8 {
 
     let windward_ocean = is_windward_ocean(buf, x, y);
     let upwind_warm = is_upwind_warm_current(buf, x, y);
+    let winter_monsoon = winter_dry_monsoon(buf, x, y);
 
-    // Smooth seasonal range
-    let range = seasonal_range(abs_lat, dist_ocean);
-    let t_coldest = temp - range * 0.55;
-    let t_warmest = temp + range * 0.45;
+    // Continentality-aware coldest/warmest month: lets Df/Dw climates form on
+    // mid-latitude lee (east) coasts instead of being damped into mild Cfb.
+    let (t_coldest, t_warmest) = seasonal_temps(buf, x, y);
     let p12 = precip / 12.0;
 
     // Smooth seasonal precipitation split
-    let (summer_mult, winter_mult) = seasonal_split(abs_lat, windward_ocean, upwind_warm, near_ocean);
+    let (summer_mult, winter_mult) =
+        seasonal_split(abs_lat, windward_ocean, upwind_warm, near_ocean, winter_monsoon);
     let summer_wet = p12 * summer_mult;
     let winter_wet = p12 * winter_mult;
 
@@ -478,8 +623,9 @@ pub fn classify_koppen(buf: &mut WorldBuffer) {
     apply_current_overrides(buf);
 
     // Pass 3: majority filter to dissolve thin "zebra" stripes that arise when
-    // the aridity threshold flips between adjacent latitude rows.
-    smooth_koppen(buf, 3);
+    // the aridity threshold flips between adjacent latitude rows (3→5 passes to
+    // clean up the diagonal climate banding the user flagged).
+    smooth_koppen(buf, 5);
 }
 
 /// Replace each land cell whose class is a small minority among its 3×3

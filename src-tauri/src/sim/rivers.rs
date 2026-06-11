@@ -243,16 +243,40 @@ pub fn extract_rivers(
 
         if points.len() >= 3 {
             let mouth_acc = acc[*mouth_idx] as f32;
-            let width = ((1.0 + (mouth_acc / threshold as f32).sqrt() * 0.8) * width_scale)
-                .min(6.0 * width_scale)
-                .max(0.6);
+            // ── Physical river width = DISCHARGE, not just drainage area ──
+            // Discharge ≈ drainage area × runoff, where runoff scales with the
+            // basin's precipitation and is cut back in arid climates (the river
+            // loses water to evaporation/infiltration — a desert river is a thin
+            // wadi even with a big catchment). River length adds a little (a long
+            // trunk has gathered more). The width_scale slider is no longer the
+            // driver (the user asked for physics, not a slider): it only trims the
+            // overall look.
+            let length = points.len() as f32;
+            let (mut psum, mut arid) = (0.0f32, 0.0f32);
+            for &(px, py) in &points {
+                let pi = buf.idx(px, py);
+                psum += buf.precipitation[pi];
+                if matches!(
+                    buf.koppen[pi],
+                    crate::sim::koppen::BWH | crate::sim::koppen::BWK
+                        | crate::sim::koppen::BSH | crate::sim::koppen::BSK
+                ) { arid += 1.0; }
+            }
+            let mean_p = psum / length.max(1.0);              // mm/yr along the stem
+            let runoff = (mean_p / 700.0).clamp(0.2, 2.2);    // wet basin → more flow
+            let arid_frac = arid / length.max(1.0);
+            let discharge = mouth_acc * runoff * (1.0 - 0.45 * arid_frac);
+            let len_term = (length / (220.0 * area_ratio.sqrt())).min(1.5) * 0.5;
+            let width = (((discharge / threshold as f32).sqrt() * 1.1 + len_term + 0.5)
+                * width_scale)
+                .clamp(0.5, 8.0);
             points.reverse(); // source to mouth
 
             // ── Mouth landform: delta vs estuary, + navigability ──
             // A big river hits the sea as either a depositional DELTA (a fan of
             // distributary channels + marsh on a flat, shallow coast) or a drowned
             // ESTUARY (a single deeper tidal mouth on a steeper coast).
-            let navigable = width >= 2.2 * width_scale;
+            let navigable = width >= 2.6;
             let mut mouth_kind = 0u8;
             let mut delta: Vec<(u32, u32)> = Vec::new();
             let big = mouth_acc >= threshold as f32 * 3.0;

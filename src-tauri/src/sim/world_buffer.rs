@@ -115,7 +115,8 @@ impl ColumnSet {
     /// koppen.rs
     pub const PHASE_CLIMATE: ColumnSet = ColumnSet(
         Self::TERRAIN.0 | Self::ELEVATION.0 | Self::TEMPERATURE.0 | Self::PRECIPITATION.0
-            | Self::DIST_OCEAN.0 | Self::CURRENTS.0 | Self::WIND.0 | Self::KOPPEN.0,
+            | Self::DIST_OCEAN.0 | Self::CURRENTS.0 | Self::WIND.0 | Self::KOPPEN.0
+            | Self::SHELF.0, // shelf seas don't count as open ocean for continentality
     );
     /// rivers.rs (hydrology/lakes — read-only, no tile write-back)
     pub const PHASE_RIVERS: ColumnSet = ColumnSet(

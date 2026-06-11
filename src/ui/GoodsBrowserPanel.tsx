@@ -116,6 +116,9 @@ export function GoodsBrowserPanel() {
                       <span style={{ flex: 1, color: origin === hub.id ? "#e8d8b0" : "#c0d0e0",
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {hub.emporium ? "🔴 " : ""}{hub.name}
+                        {hub.top_export === good && (
+                          <span title="This city's most valuable trade" style={{ marginLeft: 4 }}>💰</span>
+                        )}
                       </span>
                       <span style={{ color: "#9ab0c8", fontSize: 9 }}>{p!.grade}</span>
                       <span style={{ color: "#e0c060", fontSize: 10, minWidth: 36, textAlign: "right" }}

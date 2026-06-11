@@ -33,10 +33,13 @@ pub fn compute_temperature(buf: &mut WorldBuffer) {
                 let altitude_m = buf.elevation[idx] * 8848.0;
                 temp -= 5.0 * altitude_m / 1000.0;
 
-                // Coastal damping: reduce temperature extremes near ocean
+                // Coastal damping: only a coast exposed to OPEN ocean on the
+                // prevailing-wind upwind side is moderated toward 15°C. A lee /
+                // east coast — OR a coast fronted by a wide continental shelf
+                // (shelf water doesn't count as open ocean) — keeps its continental
+                // mean so it reads cold-winter Df/Dw instead of mild oceanic Cfb.
                 let ocean_dist = buf.distance_to_ocean[idx];
-                if ocean_dist < 0.1 {
-                    // Very close to ocean: moderate toward 15°C
+                if ocean_dist < 0.1 && super::koppen::upwind_is_open_ocean(buf, x, y, 6) {
                     let coastal_factor = 1.0 - ocean_dist / 0.1;
                     temp = temp + (15.0 - temp) * 0.45 * coastal_factor;
                 }

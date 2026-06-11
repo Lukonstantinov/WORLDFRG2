@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useUIStore } from "../../state/uiStore";
 import { useWorldStore } from "../../state/worldStore";
 import { useViewportStore } from "../../state/viewportStore";
-import { simRunAll, simRunAllFromTerrain, finalizeWorld, unfreezeWorld, getWorldMeta } from "../../bridge/tauri";
+import { simRunAll, simRunAllFromTerrain, finalizeWorld, saveWorldAs, persistOverlays, getWorldMeta } from "../../bridge/tauri";
 import { StepLandmass } from "./StepLandmass";
 import { StepElevation } from "./StepElevation";
 import { StepOceanAtmo } from "./StepOceanAtmo";
@@ -13,6 +13,7 @@ import { StepSettlements } from "./StepSettlements";
 import { StepBiological } from "./StepBiological";
 import { StepPolitical } from "./StepPolitical";
 import { StepEconomy } from "./StepEconomy";
+import { StepCampaign } from "./StepCampaign";
 
 const STEP_INFO = [
   { step: 1, label: "Landmass", desc: "Paint your landmasses, load an image template, or generate from plates." },
@@ -25,6 +26,7 @@ const STEP_INFO = [
   { step: 8, label: "Biological-Trade", desc: "Shark & shipworm waters, trade-good belts, trade routes, and the regional trade matrix." },
   { step: 9, label: "Political", desc: "Re-rank settlements by trade power (route centrality + good monopoly) and map their influence." },
   { step: 10, label: "Economy", desc: "Solve the market equilibrium: stock-based prices in grain-equivalent, barter ratios, currency goods, grain & trade wealth, supply chains and chokepoints." },
+  { step: 11, label: "Living Trade", desc: "DLC 1 — advance the campaign in time. Cities produce, consume and trade each day; prices drift, wealth shifts, food estates rise and famines fall. History accrues in the chronicle." },
 ] as const;
 
 export function WorkflowPanel() {
@@ -53,34 +55,50 @@ export function WorkflowPanel() {
     if (m) setMeta(m);
   };
 
-  const handleFinalize = async () => {
+  // Permanently lock the generated map (terrain/climate/rivers/biomes become
+  // read-only forever — there is no unfreeze) and save it to a .worldforge file,
+  // then the campaign is played on top of it. Confirm-gated, so cancelling keeps
+  // the world editable for further tuning. Returns true if the world was locked.
+  const lockAndSaveWorld = async (): Promise<boolean> => {
+    if (frozen) return true;
     if (!confirm(
-      "Finalize the world? Geography (steps 1-6 and painting) becomes read-only, " +
-      "and campaigns can be started on it. You can unfreeze later, but campaigns " +
-      "made on the frozen world will then report a mismatch."
-    )) return;
+      "Lock and save this map?\n\n" +
+      "The map — terrain, climate, rivers and biomes — becomes PERMANENTLY read-only. " +
+      "You will not be able to edit or regenerate its geography afterwards. Settlements, " +
+      "trade and the campaign are then played on top of the finished map.\n\n" +
+      "This cannot be undone. (Cancel to keep editing.)"
+    )) return false;
     try {
       await finalizeWorld();
       await refreshMeta();
-      setStatus("World finalized — campaign steps unlocked.");
+      // Persist the on-screen overlays into the world, then save it to a file.
+      const w = useWorldStore.getState();
+      try { await persistOverlays(w.settlements, w.rivers, w.lakes); } catch (e) { console.warn("persist skipped:", e); }
+      let path: string | null = null;
+      const def = (meta?.name || "world") + ".worldforge";
+      try {
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        const result = await save({ filters: [{ name: "WorldForge", extensions: ["worldforge"] }], defaultPath: def });
+        if (result) path = result;
+      } catch {
+        const input = prompt("Save the locked world to path:", def);
+        if (input) path = input;
+      }
+      if (path) {
+        await saveWorldAs(path);
+        setStatus("Map locked and saved to " + path + " — now play the campaign.");
+      } else {
+        setStatus("Map locked. Use Save World to write it to a file.");
+      }
+      return true;
     } catch (err) {
       setStatus(`Error: ${err}`);
-    }
-  };
-
-  const handleUnfreeze = async () => {
-    if (!confirm("Unfreeze the world? Existing campaigns will no longer match it.")) return;
-    try {
-      await unfreezeWorld();
-      await refreshMeta();
-      setStatus("World unfrozen — geography editable again.");
-    } catch (err) {
-      setStatus(`Error: ${err}`);
+      return false;
     }
   };
 
   const goNext = () => {
-    if (workflowStep < 10) {
+    if (workflowStep < 11) {
       setWorkflowStep((workflowStep + 1) as any);
     }
   };
@@ -106,6 +124,7 @@ export function WorkflowPanel() {
       setWorkflowStep(8);
       enableAllOverlays();
       setStatus(`World complete! ${result.rivers.length} rivers, ${result.settlements.length} settlements`);
+      await lockAndSaveWorld();
     } catch (err) {
       setStatus(`Error: ${err}`);
     }
@@ -132,6 +151,7 @@ export function WorkflowPanel() {
       setWorkflowStep(8);
       enableAllOverlays();
       setStatus(`World complete! ${result.rivers.length} rivers, ${result.settlements.length} settlements`);
+      await lockAndSaveWorld();
     } catch (err) {
       setStatus(`Error: ${err}`);
     }
@@ -209,26 +229,25 @@ export function WorkflowPanel() {
                   Campaign
                 </span>
                 {frozen ? (
-                  <button onClick={handleUnfreeze} disabled={simRunning}
-                    title="Geography is frozen. Unfreeze to edit it again (campaigns will desync)."
-                    style={{ ...smallBtn, padding: "2px 8px", color: "#c0a060", borderColor: "#4a3a20" }}>
-                    \ud83d\udd12 Frozen
-                  </button>
+                  <span title="The map is permanently locked (read-only). Geography can no longer be edited."
+                    style={{ ...smallBtn, padding: "2px 8px", color: "#c0a060", borderColor: "#4a3a20", cursor: "default" }}>
+                    \ud83d\udd12 Locked
+                  </span>
                 ) : (
-                  <button onClick={handleFinalize} disabled={simRunning || !canAdvance(6)}
+                  <button onClick={lockAndSaveWorld} disabled={simRunning || !canAdvance(6)}
                     title={canAdvance(6)
-                      ? "Freeze the world's geography and unlock campaign steps"
+                      ? "Permanently lock & save the map, then play the campaign on it"
                       : "Finish the World steps (1-6) first"}
                     style={{ ...smallBtn, padding: "2px 8px",
                       color: canAdvance(6) ? "#a0e0b0" : "#405060",
                       borderColor: canAdvance(6) ? "#2a7040" : "#1a2a40" }}>
-                    Finalize World
+                    Lock &amp; Save Map
                   </button>
                 )}
               </div>
               {!frozen && (
                 <div style={{ color: "#506080", fontSize: 10, marginBottom: 4 }}>
-                  Settlements, trade and economy live in a campaign on a finalized world.
+                  Locking the map is permanent \u2014 geography can't be edited afterwards. Settlements, trade and economy are then played on top.
                 </div>
               )}
             </div>
@@ -269,6 +288,7 @@ export function WorkflowPanel() {
                 {step === 8 && <StepBiological {...stepProps} />}
                 {step === 9 && <StepPolitical {...stepProps} />}
                 {step === 10 && <StepEconomy {...stepProps} />}
+                {step === 11 && <StepCampaign {...stepProps} />}
 
                 {/* Navigation */}
                 <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
@@ -278,7 +298,7 @@ export function WorkflowPanel() {
                     </button>
                   )}
                   <div style={{ flex: 1 }} />
-                  {step < 10 ? (
+                  {step < 11 ? (
                     <button onClick={goNext} disabled={!canAdvance(step) || simRunning}
                       style={{ ...navBtn, background: canAdvance(step) ? "#2a5080" : "#1a2a40",
                         color: canAdvance(step) ? "#fff" : "#405060" }}>

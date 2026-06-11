@@ -121,6 +121,72 @@ pub fn gen_name(x: u32, y: u32, w: u32, h: u32) -> String {
     name
 }
 
+// ── Merchant-family names (heads of trading houses) ─────────────────────────
+// Per-culture given names + gens/clan surnames, so a house's home city culture
+// flavours its family. Deterministic from a hashed seed.
+
+const ROMAN_GIVEN: [&str; 10] = [
+    "Marcus", "Lucius", "Gaius", "Titus", "Quintus", "Publius", "Aulus", "Gnaeus",
+    "Servius", "Decimus",
+];
+const ROMAN_FAMILY: [&str; 10] = [
+    "Cassii", "Valerii", "Aurelii", "Cornelii", "Fabii", "Julii", "Aemilii",
+    "Flavii", "Claudii", "Marcii",
+];
+const GREEK_GIVEN: [&str; 10] = [
+    "Alexios", "Theron", "Nikias", "Demetrios", "Leonidas", "Kallias", "Andronikos",
+    "Philon", "Lysandros", "Aristeas",
+];
+const GREEK_FAMILY: [&str; 10] = [
+    "Alkmaionidai", "Philaidai", "Bakchiadai", "Kypselidai", "Peisistratidai",
+    "Eumolpidai", "Pelopidai", "Neleidai", "Gephyraioi", "Kerykes",
+];
+const PUNIC_GIVEN: [&str; 10] = [
+    "Hanno", "Mago", "Hamilcar", "Bomilcar", "Adherbal", "Gisco", "Hasdrubal",
+    "Maharbal", "Bostar", "Himilco",
+];
+const PUNIC_FAMILY: [&str; 10] = [
+    "Barcids", "Magonids", "Hannids", "Gisconids", "Adherids", "Bomilcids",
+    "Melqartids", "Bostarids", "Tyrians", "Sidonites",
+];
+const PERSIAN_GIVEN: [&str; 10] = [
+    "Dariush", "Kourosh", "Bahram", "Artashir", "Kavus", "Farrokh", "Mithradat",
+    "Vahram", "Tiridat", "Spitama",
+];
+const PERSIAN_FAMILY: [&str; 10] = [
+    "Karen", "Suren", "Mihranids", "Spandiyads", "Varaz", "Kanarang", "Aspahbads",
+    "Zarmihr", "Achaemenids", "Sasanids",
+];
+
+fn given_family(culture: Culture) -> (&'static [&'static str], &'static [&'static str]) {
+    match culture {
+        Culture::Roman => (&ROMAN_GIVEN[..], &ROMAN_FAMILY[..]),
+        Culture::Greek => (&GREEK_GIVEN[..], &GREEK_FAMILY[..]),
+        Culture::Phoenician => (&PUNIC_GIVEN[..], &PUNIC_FAMILY[..]),
+        Culture::Persian => (&PERSIAN_GIVEN[..], &PERSIAN_FAMILY[..]),
+    }
+}
+
+/// A trading-house family surname (e.g. "Cassii", "Barcids") for the culture at
+/// `(x,y)`, varied by `salt` so several houses can sit in one region.
+pub fn gen_family_name(x: u32, y: u32, w: u32, h: u32, salt: u64) -> String {
+    let culture = culture_at(x, y, w, h);
+    let (_g, fam) = given_family(culture);
+    let hh = hash64(0xFA_u64 ^ salt.wrapping_mul(0x9E3779B97F4A7C15)
+        ^ (x as u64).wrapping_mul(40503) ^ (y as u64).wrapping_mul(20507));
+    pick(fam, hh).to_string()
+}
+
+/// A head-of-family personal name ("Marcus Cassii") for the house's home culture,
+/// varied by `salt` (a per-head counter so heirs get fresh given names).
+pub fn gen_head_name(x: u32, y: u32, w: u32, h: u32, family: &str, salt: u64) -> String {
+    let culture = culture_at(x, y, w, h);
+    let (given, _f) = given_family(culture);
+    let hh = hash64(0x4EAD_u64 ^ salt.wrapping_mul(0xBF58476D1CE4E5B9)
+        ^ (x as u64).wrapping_mul(73856093) ^ (y as u64).wrapping_mul(19349663));
+    format!("{} {}", pick(given, hh), family)
+}
+
 /// Generate a name plus an epithet for a major place (a capital / top hub), e.g.
 /// "Aquentia Magna". `tier` 0 = none, higher = grander.
 pub fn gen_name_epithet(x: u32, y: u32, w: u32, h: u32, tier: u8) -> String {

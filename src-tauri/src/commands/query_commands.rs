@@ -1549,6 +1549,86 @@ pub fn compute_storm_zones(month: i32, months: u32, db: State<'_, WorldDb>) -> R
     Ok(zones)
 }
 
+/// Monsoon-climate intensity (0..1) for a Köppen code: the tropical monsoon (Am)
+/// highest, then the wet/dry savanna (Aw/As) and the dry-winter "w" subtropical /
+/// continental types (Cw*/Dw*) that are driven by a seasonal monsoon reversal.
+fn monsoon_climate_intensity(k: u8) -> f32 {
+    use crate::sim::koppen::*;
+    // A "monsoon zone" is a region of MARKED seasonal rain reversal — the tropical
+    // monsoon (Am) and the dry-winter monsoon climates (Cw*/Dw*, driven by the
+    // winter continental high + summer onshore monsoon). Plain wet/dry savanna
+    // (Aw/As) is ITCZ-migration rainfall, not a true monsoon, and tagging it lit
+    // up the whole of sub-Saharan Africa — so it no longer counts here. The
+    // genuine West-African / Indian monsoon coasts still register through Am.
+    match k {
+        AM => 1.0,       // tropical monsoon (heaviest wet-season rains)
+        CWA => 0.85,     // monsoon-influenced humid subtropical
+        CWB => 0.7,      // monsoon subtropical highland
+        CWC => 0.55,
+        DWA => 0.8,      // monsoon-influenced continental (E-Asia winter monsoon)
+        DWB => 0.65,
+        DWC => 0.5,
+        DWD => 0.4,
+        _ => 0.0,        // Aw/As savanna excluded — not a true monsoon
+    }
+}
+
+/// Cluster the LAND areas under a monsoon-type climate (tropical monsoon Am,
+/// savanna Aw/As, and the dry-winter Cw*/Dw* types) into discrete regions — the
+/// seasonal wet-season flood belt. Shown on the Natural Disasters overlay
+/// alongside the cyclone (hurricane) zones. Mirrors `compute_storm_zones`.
+#[tauri::command]
+pub fn compute_monsoon_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+    let world = db.cached_tiles_with_conn(&conn)?;
+
+    let f = (grid_w / 300).max(1);
+    let cw = ((grid_w + f - 1) / f) as i32;
+    let ch = ((grid_h + f - 1) / f) as i32;
+    let mut risk = vec![0.0f32; (cw * ch) as usize];
+
+    let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
+    let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
+    for ty in 0..tiles_y as i32 {
+        for tx in 0..tiles_x as i32 {
+            let tile = world.tile(tx, ty);
+            let base_x = tx as u32 * TILE_SIZE;
+            let base_y = ty as u32 * TILE_SIZE;
+            let max_lx = TILE_SIZE.min(grid_w - base_x);
+            let max_ly = TILE_SIZE.min(grid_h - base_y);
+            for ly in 0..max_ly {
+                for lx in 0..max_lx {
+                    let ti = (ly * TILE_SIZE + lx) as usize;
+                    if tile.terrain[ti] != 1 { continue; }
+                    let v = monsoon_climate_intensity(tile.koppen[ti]);
+                    if v <= 0.0 { continue; }
+                    let cx = ((base_x + lx) / f) as i32;
+                    let cy = ((base_y + ly) / f) as i32;
+                    let ci = (cy * cw + cx) as usize;
+                    if v > risk[ci] { risk[ci] = v; }
+                }
+            }
+        }
+    }
+
+    let mut zones: Vec<SharkZone> = cluster_cells(&risk, cw, ch, f, 0.45, 4)
+        .into_iter()
+        .map(|c| SharkZone { cells: c.cells, cell_size: f as f32, x: c.cx, y: c.cy, score: c.score })
+        .collect();
+    zones.sort_by(|a, b| {
+        (b.cells.len() as f32 * b.score)
+            .partial_cmp(&(a.cells.len() as f32 * a.score))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    zones.truncate(24);
+    Ok(zones)
+}
+
 /// Cluster the highest-risk reef/shoal wreck water into danger zones.
 #[tauri::command]
 pub fn compute_reef_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, String> {
@@ -2583,6 +2663,23 @@ pub struct HubMarketGood {
     pub exchanged_for: Vec<ExchangeRate>,
 }
 
+/// One emergent currency good with the components that made it money — for the
+/// settlement window's explained currency card (liquidity/value/stability bars +
+/// grain-equivalent price for exchange ratios).
+#[derive(Serialize, Deserialize, Clone)]
+pub struct HubCurrency {
+    pub good: usize,
+    pub name: String,
+    /// Distinct trade counterparties (raw count → liquidity).
+    pub liquidity: f32,
+    /// World-standard value (grain-equivalent base value).
+    pub value: f32,
+    /// Price stability 0..1 (1 = rock-steady).
+    pub stability: f32,
+    /// Local price in grain-equivalent (the numeraire) → exchange ratios.
+    pub price: f32,
+}
+
 /// Per-hub market panel data from the equilibrium solver (Part III).
 #[derive(Serialize, Deserialize, Clone)]
 pub struct HubMarket {
@@ -2592,6 +2689,9 @@ pub struct HubMarket {
     pub trade_wealth: f32,
     /// Emergent currency goods at this hub (most liquid + stable first).
     pub currency_goods: Vec<String>,
+    /// Explained currency goods with liquidity/value/stability + grain price.
+    #[serde(default)]
+    pub currencies: Vec<HubCurrency>,
     pub prices: Vec<HubMarketGood>,
 }
 
@@ -2627,7 +2727,8 @@ pub struct EconHub {
     #[serde(default)] pub commoners: u32,    // everyone else
     #[serde(default)] pub elite_level: f32,  // 0..1 how large the wealthy class is (vs typical)
     #[serde(default)] pub merchant_level: f32, // 0..1 how large the merchant class is
-    #[serde(default)] pub top_export: String,  // the most valuable good the merchants sell
+    #[serde(default)] pub top_export: String,  // the good that brings the city the most wealth
+    #[serde(default)] pub top_export_share: f32, // its fraction of the hub's total export value
     #[serde(default)] pub luxuries: Vec<HubLuxury>, // luxury demand vs received + price
     /// True when the hub sits on (or beside) the open sea — a real port. A hub on a
     /// closed lake is NOT sea-accessible and can never be an emporium.
@@ -2967,6 +3068,28 @@ pub fn compute_economy(
     for i in major_n..nn {
         if let Some(&j) = nearest_k(i, 1, major_n).first() {
             if node_dist2(i, j) <= max_link2 { cand.insert((i.min(j), i.max(j))); }
+        }
+    }
+    // Direct maritime bypass legs: a ship can sail between two coastal hubs
+    // WITHOUT calling at every intermediate port. Without these the hub graph is
+    // only nearest-neighbour, so a long sea haul must chain A→B→C→D and the
+    // displayed price ladder stacks a transit toll at every pass-through city —
+    // the "price balloons jumping city to city" the user reported. Connect each
+    // coastal major hub to its nearest OTHER coastal hubs (even distant ones,
+    // within the link ceiling); the routed path between two ports is naturally
+    // sea-dominant, and `path_allowed` below still drops crossings the chosen
+    // trade reach forbids. The shortest-path tree then prefers the direct leg
+    // when it beats the tolled chain, so the rebuilt chain has no pass-through
+    // toll hubs to compound.
+    {
+        let coastal: Vec<usize> = (0..nn).filter(|&i| node_sea[i]).collect();
+        for &i in coastal.iter().filter(|&&i| i < major_n) {
+            let mut d: Vec<(usize, i64)> = coastal.iter().filter(|&&j| j != i)
+                .map(|&j| (j, node_dist2(i, j))).collect();
+            d.sort_by_key(|&(_, dd)| dd);
+            for &(j, dd) in d.iter().take(5) {
+                if dd <= max_link2 { cand.insert((i.min(j), i.max(j))); }
+            }
         }
     }
     // Materialise each candidate as a routed edge → adjacency + per-edge coarse path.
@@ -3631,11 +3754,21 @@ pub fn compute_economy(
         let nobility = (pop * f_nob) as u32;
         let merchants = (pop * f_mer) as u32;
         let commoners = nodes[hh].population.saturating_sub(nobility).saturating_sub(merchants);
-        // Most valuable good the merchants sell (production × base desire).
-        let top_export = (0..gc).filter(|&g| prod[hh][g] > 0.05)
-            .max_by(|&a, &b| (prod[hh][a] * desire[a]).partial_cmp(&(prod[hh][b] * desire[b]))
-                .unwrap_or(std::cmp::Ordering::Equal))
-            .map(|g| goods_names.get(g).cloned().unwrap_or_default()).unwrap_or_default();
+        // The good that brings the city the most WEALTH = production × local price
+        // (volume × value), plus its share of the hub's total export value.
+        let mut tv_best: (String, f32) = (String::new(), 0.0);
+        let mut tv_total = 0.0f32;
+        for g in 0..gc {
+            if prod[hh][g] > 0.05 {
+                let v = prod[hh][g] * mkt.prices[hh][g].max(0.01);
+                tv_total += v;
+                if v > tv_best.1 {
+                    tv_best = (goods_names.get(g).cloned().unwrap_or_default(), v);
+                }
+            }
+        }
+        let top_export = tv_best.0;
+        let top_export_share = if tv_total > 0.0 { tv_best.1 / tv_total } else { 0.0 };
         // Luxury market: demand vs what actually arrives + delivered price. Price
         // rises when little gets through (scarcity from hard-to-move routes).
         let mut luxuries: Vec<HubLuxury> = (0..gc)
@@ -3703,7 +3836,17 @@ pub fn compute_economy(
                 grain_wealth: m.grain_wealth,
                 trade_wealth: m.trade_wealth,
                 currency_goods: m.currency_goods.iter()
-                    .map(|&(g, _)| goods_names.get(g).cloned().unwrap_or_default())
+                    .map(|c| goods_names.get(c.good).cloned().unwrap_or_default())
+                    .collect(),
+                currencies: m.currency_goods.iter()
+                    .map(|c| HubCurrency {
+                        good: c.good,
+                        name: goods_names.get(c.good).cloned().unwrap_or_default(),
+                        liquidity: c.liquidity,
+                        value: c.value,
+                        stability: c.stability,
+                        price: mkt.prices[hh][c.good],
+                    })
                     .collect(),
                 prices: prices_v,
             })
@@ -3745,6 +3888,7 @@ pub fn compute_economy(
             elite_level: wealth_n,
             merchant_level: (cent_n * 0.5 + trade_n * 0.5),
             top_export,
+            top_export_share,
             luxuries,
             sea_access: node_sea[hh],
             exports_to: exports_to_v[hh].clone(),
