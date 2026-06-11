@@ -114,6 +114,16 @@ pub struct InTransit {
     pub owner: i32,
 }
 
+/// One milestone in a house's chronicle (its timeline view).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct HouseEvent {
+    pub tick: u32,
+    /// "founded" | "succession" | "monopoly" | "control_gained" | "control_lost"
+    /// | "branch" | "loss" | "dissolved"
+    pub kind: String,
+    pub text: String,
+}
+
 /// A merchant family / trading house, with a named head of family who ages, dies
 /// and is succeeded by an heir. Houses compete for trade, hold monopolies, feud
 /// with rivals, and wield political power in their home city.
@@ -130,6 +140,20 @@ pub struct House {
     /// House indices this house feuds with.
     pub rivals: Vec<usize>,
     pub generation: u32,
+    // ── House chronicle (serde default → old saves still load) ──
+    /// Milestone timeline for this family: founding, successions, new monopolies,
+    /// control of cities gained/lost, branches, the worst loss. NOT pruned by the
+    /// journal's 25-year window — these are the family's permanent record.
+    #[serde(default)] pub events: Vec<HouseEvent>,
+    /// Cumulative profit earned per good index — for "most profitable resources".
+    #[serde(default)] pub good_profit: Vec<f32>,
+    /// Goods currently held at >=50% share (to detect a NEW monopoly appearing).
+    #[serde(default)] pub mono50: Vec<usize>,
+    /// True when the house holds >=50% of its seat city's trade (control state).
+    #[serde(default)] pub dominant_seat: bool,
+    /// Wealth at the previous monthly check + the worst single-month loss so far.
+    #[serde(default)] pub prev_wealth: f32,
+    #[serde(default)] pub worst_loss: f32,
     // ── Named head of family (serde default → old saves still load) ──
     #[serde(default)] pub head_name: String,   // "Marcus Cassii"
     #[serde(default)] pub head_since: u32,      // tick the current head took over
@@ -663,8 +687,13 @@ impl CampaignSim {
                         // rent (pricing power) on top of the plain margin.
                         let mono = self.houses[oi].monopoly.iter()
                             .find(|(mg, _)| *mg == g).map(|(_, s)| *s).unwrap_or(0.0);
-                        self.houses[oi].wealth += margin * (1.0 + 0.6 * mono);
+                        let profit = margin * (1.0 + 0.6 * mono);
+                        self.houses[oi].wealth += profit;
                         self.houses[oi].volume += amount;
+                        // Track cumulative profit per good (for "most profitable resources").
+                        let gp = &mut self.houses[oi].good_profit;
+                        if gp.len() <= g { gp.resize(g + 1, 0.0); }
+                        gp[g] += profit;
                     }
                     self.in_transit.push(InTransit {
                         from: a as u32,
@@ -1005,6 +1034,10 @@ impl CampaignSim {
             h.head_since = tick;
             h.head_lifespan = lifespan;
             h.prestige += 0.05;
+            h.events.push(HouseEvent {
+                tick, kind: "succession".into(),
+                text: format!("{} succeeds as head (generation {})", heir, gen),
+            });
         }
         self.journal.push(JournalEntry {
             tick, kind: "succession".into(), hub: hub as i32, good: -1,
@@ -1048,9 +1081,15 @@ impl CampaignSim {
         self.houses[hi].wealth -= split;
         let spec = self.houses[hi].spec.clone();
         let bhead = self.head_name_for(dest, &bname, tick as u64 ^ hi as u64 ^ 0x9001);
+        let founded = HouseEvent {
+            tick, kind: "founded".into(),
+            text: format!("Founded by {} as a branch of {} in {}", bhead, parent, self.hubs[dest].name),
+        };
         self.houses.push(House {
             name: bname.clone(), hub: dest as u32, wealth: split, prestige: 0.1,
             spec, monopoly: vec![], rivals: vec![hi], generation: 1,
+            events: vec![founded], good_profit: Vec::new(), mono50: Vec::new(),
+            dominant_seat: false, prev_wealth: split, worst_loss: 0.0,
             head_name: bhead.clone(), head_since: tick,
             head_lifespan: self.roll_lifespan(dest as u64 ^ 0xCC),
             founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
@@ -1100,12 +1139,23 @@ impl CampaignSim {
     /// city's commercial prosperity.
     fn recompute_monopolies_and_power(&mut self) {
         let ng = self.goods.len();
-        // Total recent volume per good across the houses speccing it.
+        let tick = self.tick;
+        let nhubs = self.hubs.len();
+        // Volume per good (across speccing houses) + per-hub resident-house volume
+        // and the strongest resident (for >=50% city control).
         let mut good_vol = vec![0.0f32; ng];
-        for hh in &self.houses {
+        let mut hub_vol = vec![0.0f32; nhubs];
+        let mut hub_top = vec![(usize::MAX, 0.0f32); nhubs];
+        for (hi, hh) in self.houses.iter().enumerate() {
             if hh.defunct { continue; }
             for &g in &hh.spec {
                 if g < ng { good_vol[g] += hh.volume; }
+            }
+            let hub = hh.hub as usize;
+            if hub < nhubs {
+                let v = hh.volume.max(0.0001);
+                hub_vol[hub] += v;
+                if v > hub_top[hub].1 { hub_top[hub] = (hi, v); }
             }
         }
         let wmax = self.houses.iter().filter(|h| !h.defunct)
@@ -1116,19 +1166,60 @@ impl CampaignSim {
             if self.houses[hi].defunct { continue; }
             let mut mono: Vec<(usize, f32)> = Vec::new();
             let mut top_share = 0.0f32;
+            let mut new50: Vec<usize> = Vec::new();
             let (spec, vol) = (self.houses[hi].spec.clone(), self.houses[hi].volume);
             for &g in &spec {
                 if g < ng && good_vol[g] > 1e-3 {
                     let share = (vol / good_vol[g]).clamp(0.0, 1.0);
                     if share > 0.25 { mono.push((g, share)); }
+                    if share >= 0.5 { new50.push(g); }
                     top_share = top_share.max(share);
                 }
             }
+            // NEW monopoly milestones (a good crossing >=50% that wasn't before).
+            let old50 = std::mem::take(&mut self.houses[hi].mono50);
+            for &g in &new50 {
+                if !old50.contains(&g) {
+                    let gn = self.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
+                    self.houses[hi].events.push(HouseEvent {
+                        tick, kind: "monopoly".into(),
+                        text: format!("Won a monopoly on {}", gn),
+                    });
+                }
+            }
+            self.houses[hi].mono50 = new50;
             let wn = (self.houses[hi].wealth.max(0.0) / wmax).clamp(0.0, 1.0);
             let pn = (self.houses[hi].prestige / pmax).clamp(0.0, 1.0);
             let power = (0.45 * wn + 0.35 * top_share + 0.20 * pn).clamp(0.0, 1.0);
             self.houses[hi].monopoly = mono;
             self.houses[hi].political_power = power;
+
+            // Control of the seat city (>=50% of its resident-house trade).
+            let hub = self.houses[hi].hub as usize;
+            let now_dom = hub < nhubs && hub_top[hub].0 == hi
+                && (hub_top[hub].1 / hub_vol[hub].max(1e-6)) >= 0.5;
+            if now_dom != self.houses[hi].dominant_seat {
+                let cn = self.hubs.get(hub).map(|x| x.name.clone()).unwrap_or_default();
+                let (kind, text) = if now_dom {
+                    ("control_gained", format!("Gained control of {}", cn))
+                } else {
+                    ("control_lost", format!("Lost control of {}", cn))
+                };
+                self.houses[hi].events.push(HouseEvent { tick, kind: kind.into(), text });
+                self.houses[hi].dominant_seat = now_dom;
+            }
+
+            // Worst single-month loss (a sharp wealth fall — rivals, embargo, crash).
+            let prev = self.houses[hi].prev_wealth;
+            let drop = prev - self.houses[hi].wealth;
+            if drop > 2.0 && drop > self.houses[hi].worst_loss {
+                self.houses[hi].worst_loss = drop;
+                self.houses[hi].events.push(HouseEvent {
+                    tick, kind: "loss".into(),
+                    text: format!("Its most devastating loss — {:.0} wealth lost in a month", drop),
+                });
+            }
+            self.houses[hi].prev_wealth = self.houses[hi].wealth;
         }
     }
 
@@ -1164,9 +1255,16 @@ impl CampaignSim {
             text: format!("{} establishes {} on the {} trade", head, name,
                 self.goods.get(spec[0]).map(|g| g.name.as_str()).unwrap_or("local")),
         });
+        let founded = HouseEvent {
+            tick, kind: "founded".into(),
+            text: format!("Founded by {} in {} on the {} trade", head, self.hubs[hub].name,
+                self.goods.get(spec[0]).map(|g| g.name.as_str()).unwrap_or("local")),
+        };
         self.houses.push(House {
             name, hub: hub as u32, wealth: 1.0, prestige: 0.0, spec,
             monopoly: vec![], rivals: vec![], generation: 1,
+            events: vec![founded], good_profit: Vec::new(), mono50: Vec::new(),
+            dominant_seat: false, prev_wealth: 1.0, worst_loss: 0.0,
             head_name: head, head_since: tick,
             head_lifespan: self.roll_lifespan(hub as u64 ^ 0x7E),
             founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
@@ -1179,6 +1277,10 @@ impl CampaignSim {
         self.houses[hi].defunct = true;
         self.houses[hi].political_power = 0.0;
         self.houses[hi].monopoly.clear();
+        self.houses[hi].events.push(HouseEvent {
+            tick, kind: "dissolved".into(),
+            text: "Fell into ruin and was dissolved".into(),
+        });
         self.journal.push(JournalEntry {
             tick, kind: "extinction".into(), hub, good: -1, value: 0.0,
             text: format!("{} falls into ruin and is dissolved", name),

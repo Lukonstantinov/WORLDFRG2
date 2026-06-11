@@ -1,7 +1,10 @@
+import { useState } from "react";
 import { useCampaignStore } from "../state/campaignStore";
 import { useUIStore } from "../state/uiStore";
 import { CoatOfArms } from "./CoatOfArms";
 import { GOOD_DEFS } from "../goods";
+import { campaignGetHouseHistory } from "../bridge/tauri";
+import type { HouseHistory } from "../types";
 
 const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
 const goodIcon = (name: string) => GOOD_ICON.get(name) ?? "\u{1F4E6}"; // 📦 fallback
@@ -12,7 +15,11 @@ const goodIcon = (name: string) => GOOD_ICON.get(name) ?? "\u{1F4E6}"; // 📦 f
 export function HousesPanel() {
   const open = useUIStore((s) => s.showHouses);
   const houses = useCampaignStore((s) => s.houses);
+  const [history, setHistory] = useState<HouseHistory | null>(null);
   const close = () => useUIStore.getState().setShowHouses(false);
+  const openTimeline = (name: string) => {
+    campaignGetHouseHistory(name).then((h) => setHistory(h)).catch(() => setHistory(null));
+  };
   if (!open) return null;
 
   const active = houses.filter((h) => !h.defunct);
@@ -21,6 +28,7 @@ export function HousesPanel() {
 
   return (
     <div style={panel}>
+      {history && <HouseTimeline history={history} onClose={() => setHistory(null)} />}
       <div style={header}>
         <span>⚜️ Merchant Houses ({active.length})</span>
         <span style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
@@ -30,7 +38,7 @@ export function HousesPanel() {
           <div style={empty}>Begin the campaign (Step 11) — trading families rise as goods start to move.</div>
         )}
         {active.map((h, i) => (
-          <div key={h.name + i} style={card}>
+          <div key={h.name + i} style={{ ...card, cursor: "pointer" }} onClick={() => openTimeline(h.name)} title="View this family's timeline">
             <CoatOfArms name={h.name} size={30} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
@@ -87,7 +95,7 @@ export function HousesPanel() {
               Fallen houses ({gone.length})
             </div>
             {gone.map((h, i) => (
-              <div key={"d" + i} style={{ ...card, opacity: 0.45 }}>
+              <div key={"d" + i} style={{ ...card, opacity: 0.55, cursor: "pointer" }} onClick={() => openTimeline(h.name)} title="View this family's timeline">
                 <CoatOfArms name={h.name} size={22} />
                 <div style={{ flex: 1 }}>
                   <span style={{ color: "#9aa6b4", fontSize: 11, textDecoration: "line-through" }}>{h.name}</span>
@@ -118,3 +126,81 @@ const card: React.CSSProperties = {
   borderBottom: "1px solid #131e2a", cursor: "default",
 };
 const empty: React.CSSProperties = { color: "#506080", fontSize: 11, padding: "10px 4px" };
+
+const EVENT_ICON: Record<string, string> = {
+  founded: "🏛", succession: "👤", monopoly: "💰", control_gained: "⚖",
+  control_lost: "💔", branch: "🌿", loss: "⚠️", dissolved: "🪦",
+};
+const EVENT_COLOR: Record<string, string> = {
+  founded: "#cfe0f4", succession: "#9ab0c8", monopoly: "#e0b060",
+  control_gained: "#7fd0a0", control_lost: "#d88", loss: "#e08a5a",
+  branch: "#9fe07a", dissolved: "#8a93a0",
+};
+
+/** A house's chronicle as a vertical timeline: founding, successions, monopolies,
+ *  cities controlled (gained/lost + year), the worst loss — plus its most
+ *  profitable trade resources. */
+function HouseTimeline({ history, onClose }: { history: HouseHistory; onClose: () => void }) {
+  const ev = history.events;
+  const maxProfit = Math.max(1e-6, ...history.top_goods.map(([, p]) => p));
+  return (
+    <div style={timelinePanel}>
+      <div style={{ ...header, borderBottom: "1px solid #1a2a3e" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <span style={{ width: 11, height: 11, borderRadius: 2, background: history.color }} />
+          <CoatOfArms name={history.name} size={22} />
+          <span>{history.name}</span>
+        </span>
+        <span style={{ cursor: "pointer", color: "#7a90a8" }} onClick={onClose}>✕</span>
+      </div>
+      <div style={{ overflowY: "auto", padding: "8px 12px 12px" }}>
+        <div style={{ color: "#9ab0c8", fontSize: 10, marginBottom: 8 }}>
+          {history.founder || `Founded in year ${history.founded_year}`}
+          {history.defunct && <span style={{ color: "#d88" }}> · fallen</span>}
+        </div>
+
+        {/* Most profitable resources */}
+        {history.top_goods.length > 0 && (
+          <>
+            <div style={timelineHdr}>Most profitable trade resources</div>
+            {history.top_goods.map(([g, p]) => (
+              <div key={g} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                <span style={{ fontSize: 12, width: 16 }}>{goodIcon(g)}</span>
+                <span style={{ color: "#cdbb88", fontSize: 10, width: 78, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g}</span>
+                <div style={{ flex: 1, height: 4, background: "#0a1018", borderRadius: 2, overflow: "hidden" }}>
+                  <div style={{ width: `${(p / maxProfit) * 100}%`, height: "100%", background: "#c9a227" }} />
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+
+        {/* Timeline */}
+        <div style={{ ...timelineHdr, marginTop: 10 }}>Chronicle</div>
+        {ev.length === 0 && <div style={empty}>No recorded events yet.</div>}
+        <div style={{ position: "relative", paddingLeft: 14 }}>
+          {/* vertical rail */}
+          <div style={{ position: "absolute", left: 4, top: 4, bottom: 4, width: 2, background: "#1c2c40" }} />
+          {ev.map((e, i) => (
+            <div key={i} style={{ position: "relative", marginBottom: 8 }}>
+              <span style={{ position: "absolute", left: -14, top: 0, fontSize: 11 }}>{EVENT_ICON[e.kind] ?? "•"}</span>
+              <div style={{ color: "#6a86a6", fontSize: 9 }}>Year {e.year}</div>
+              <div style={{ color: EVENT_COLOR[e.kind] ?? "#c0d0e0", fontSize: 11 }}>{e.text}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const timelinePanel: React.CSSProperties = {
+  position: "absolute", top: 0, right: 326, width: 300, maxHeight: "78vh",
+  display: "flex", flexDirection: "column",
+  background: "#0a121c", border: "1px solid #1e3450", borderRadius: 8,
+  boxShadow: "0 8px 28px rgba(0,0,0,0.6)", zIndex: 41,
+};
+const timelineHdr: React.CSSProperties = {
+  color: "#7a90a8", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4,
+  margin: "4px 0 3px", borderBottom: "1px solid #16222e", paddingBottom: 2,
+};

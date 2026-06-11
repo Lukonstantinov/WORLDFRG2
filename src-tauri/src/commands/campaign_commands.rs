@@ -632,9 +632,21 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         });
         let spec: Vec<usize> = gi.into_iter().filter(|&g| hubs[h].production[g] > 0.0).take(2).collect();
         let (hx, hy) = (hubs[h].x.max(0.0) as u32, hubs[h].y.max(0.0) as u32);
-        let family = crate::sim::names::gen_family_name(hx, hy, gw, gh, h as u64);
-        let name = format!("House {family}");
-        let head = crate::sim::names::gen_head_name(hx, hy, gw, gh, &family, 0x100 ^ h as u64);
+        // Globally-unique seed name: re-salt the surname until it doesn't collide
+        // with an already-seeded house (expanded pools make this near-always 1 try).
+        let mut name = String::new();
+        for k in 0..32u64 {
+            let family = crate::sim::names::gen_family_name(hx, hy, gw, gh, (h as u64) ^ k.wrapping_mul(0x9E3779B1));
+            let cand = format!("House {family}");
+            if !houses.iter().any(|hh: &House| hh.name == cand) { name = cand; break; }
+        }
+        if name.is_empty() { name = format!("House of {}", hubs[h].name); }
+        let surname = name.strip_prefix("House ").unwrap_or(&name).to_string();
+        let head = crate::sim::names::gen_head_name(hx, hy, gw, gh, &surname, 0x100 ^ h as u64);
+        let founded = crate::sim::tick::HouseEvent {
+            tick: 0, kind: "founded".into(),
+            text: format!("Founded by {} in {}", head, hubs[h].name),
+        };
         houses.push(House {
             name,
             hub: h as u32,
@@ -644,6 +656,12 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
             monopoly: vec![],
             rivals: vec![],
             generation: 1,
+            events: vec![founded],
+            good_profit: Vec::new(),
+            mono50: Vec::new(),
+            dominant_seat: false,
+            prev_wealth: 1.0,
+            worst_loss: 0.0,
             head_name: head,
             head_since: 0,
             head_lifespan: seed_lifespan(seed, h as u64),
@@ -942,6 +960,56 @@ pub fn campaign_get_houses(db: State<'_, WorldDb>) -> Result<Vec<HouseBrief>, St
         Some(sim) => build_house_briefs(&sim),
         None => vec![],
     })
+}
+
+#[derive(Serialize)]
+pub struct HouseTimelineEvent {
+    pub year: u32,        // campaign year (tick / 365)
+    pub kind: String,     // founded | succession | monopoly | control_gained | control_lost | branch | loss | dissolved
+    pub text: String,
+}
+
+/// A house's full chronicle for the timeline view.
+#[derive(Serialize)]
+pub struct HouseHistory {
+    pub name: String,
+    pub color: String,
+    pub founder: String,       // founding head + circumstances
+    pub founded_year: u32,
+    pub events: Vec<HouseTimelineEvent>,
+    pub top_goods: Vec<(String, f32)>, // most profitable resources (name + cumulative profit)
+    pub defunct: bool,
+}
+
+/// The timeline / chronicle of one house, looked up by name.
+#[tauri::command]
+pub fn campaign_get_house_history(name: String, db: State<'_, WorldDb>) -> Result<Option<HouseHistory>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let Some(sim) = get_sim(&conn)? else { return Ok(None) };
+    let idx = sim.houses.iter().position(|h| h.name == name);
+    let Some(idx) = idx else { return Ok(None) };
+    let h = &sim.houses[idx];
+    let year = |t: u32| t / 365;
+    let events: Vec<HouseTimelineEvent> = h.events.iter().map(|e| HouseTimelineEvent {
+        year: year(e.tick), kind: e.kind.clone(), text: e.text.clone(),
+    }).collect();
+    let mut top_goods: Vec<(String, f32)> = h.good_profit.iter().enumerate()
+        .filter(|(_, &p)| p > 0.0)
+        .map(|(g, &p)| (sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_default(), p))
+        .collect();
+    top_goods.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    top_goods.truncate(5);
+    let founder = h.events.iter().find(|e| e.kind == "founded")
+        .map(|e| e.text.clone()).unwrap_or_default();
+    Ok(Some(HouseHistory {
+        name: h.name.clone(),
+        color: distinct_color(idx),
+        founder,
+        founded_year: year(h.founded_tick),
+        events,
+        top_goods,
+        defunct: h.defunct,
+    }))
 }
 
 /// World-economy panel (M6): per-good world prices + the price-index series.

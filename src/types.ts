@@ -252,6 +252,22 @@ export interface HouseBrief {
   partners?: [number, number][]; // trade-partner settlements (world coords)
   cities?: string[];             // names of cities it trades with (seat first)
 }
+
+export interface HouseTimelineEvent {
+  year: number;
+  kind: string; // founded | succession | monopoly | control_gained | control_lost | branch | loss | dissolved
+  text: string;
+}
+
+export interface HouseHistory {
+  name: string;
+  color: string;
+  founder: string;
+  founded_year: number;
+  events: HouseTimelineEvent[];
+  top_goods: [string, number][]; // most profitable resources (name + cumulative profit)
+  defunct: boolean;
+}
 export interface JournalEntry {
   tick: number;
   kind: string;
