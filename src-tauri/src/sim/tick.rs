@@ -147,8 +147,13 @@ pub struct House {
     #[serde(default)] pub events: Vec<HouseEvent>,
     /// Cumulative profit earned per good index — for "most profitable resources".
     #[serde(default)] pub good_profit: Vec<f32>,
-    /// Goods currently held at >=50% share (to detect a NEW monopoly appearing).
+    /// Goods the house currently HOLDS a monopoly on (hysteresis: entered at
+    /// >=50% share, only released when share falls below ~10%). Prevents the
+    /// "won a monopoly" spam from share oscillating around the 50% line.
     #[serde(default)] pub mono50: Vec<usize>,
+    /// Goods the house has EVER held a monopoly on — so a re-win reads "regained"
+    /// rather than "won", and the first win isn't repeated.
+    #[serde(default)] pub mono_ever: Vec<usize>,
     /// True when the house holds >=50% of its seat city's trade (control state).
     #[serde(default)] pub dominant_seat: bool,
     /// Wealth at the previous monthly check + the worst single-month loss so far.
@@ -1089,7 +1094,7 @@ impl CampaignSim {
             name: bname.clone(), hub: dest as u32, wealth: split, prestige: 0.1,
             spec, monopoly: vec![], rivals: vec![hi], generation: 1,
             events: vec![founded], good_profit: Vec::new(), mono50: Vec::new(),
-            dominant_seat: false, prev_wealth: split, worst_loss: 0.0,
+            mono_ever: Vec::new(), dominant_seat: false, prev_wealth: split, worst_loss: 0.0,
             head_name: bhead.clone(), head_since: tick,
             head_lifespan: self.roll_lifespan(dest as u64 ^ 0xCC),
             founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
@@ -1166,28 +1171,45 @@ impl CampaignSim {
             if self.houses[hi].defunct { continue; }
             let mut mono: Vec<(usize, f32)> = Vec::new();
             let mut top_share = 0.0f32;
-            let mut new50: Vec<usize> = Vec::new();
+            let mut shares: Vec<(usize, f32)> = Vec::new();
             let (spec, vol) = (self.houses[hi].spec.clone(), self.houses[hi].volume);
             for &g in &spec {
-                if g < ng && good_vol[g] > 1e-3 {
-                    let share = (vol / good_vol[g]).clamp(0.0, 1.0);
-                    if share > 0.25 { mono.push((g, share)); }
-                    if share >= 0.5 { new50.push(g); }
-                    top_share = top_share.max(share);
-                }
+                if g >= ng { continue; }
+                let share = if good_vol[g] > 1e-3 { (vol / good_vol[g]).clamp(0.0, 1.0) } else { 0.0 };
+                if share > 0.25 { mono.push((g, share)); }
+                top_share = top_share.max(share);
+                shares.push((g, share));
             }
-            // NEW monopoly milestones (a good crossing >=50% that wasn't before).
-            let old50 = std::mem::take(&mut self.houses[hi].mono50);
-            for &g in &new50 {
-                if !old50.contains(&g) {
+            // ── Monopoly milestones with HYSTERESIS ──────────────────────────
+            // A monopoly is WON when share first reaches >=50% (recorded once);
+            // it's only LOST when share falls below 10% (a genuine collapse, not
+            // noise around the 50% line); a later re-win reads "regained". This
+            // kills the per-month "won a monopoly" spam.
+            let mut held = std::mem::take(&mut self.houses[hi].mono50);
+            let mut ever = std::mem::take(&mut self.houses[hi].mono_ever);
+            for &(g, share) in &shares {
+                let is_held = held.contains(&g);
+                if share >= 0.5 && !is_held {
                     let gn = self.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
+                    let regained = ever.contains(&g);
                     self.houses[hi].events.push(HouseEvent {
                         tick, kind: "monopoly".into(),
-                        text: format!("Won a monopoly on {}", gn),
+                        text: if regained { format!("Regained the monopoly on {}", gn) }
+                              else { format!("Won a monopoly on {}", gn) },
                     });
+                    held.push(g);
+                    if !regained { ever.push(g); }
+                } else if share < 0.10 && is_held {
+                    let gn = self.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
+                    self.houses[hi].events.push(HouseEvent {
+                        tick, kind: "monopoly_lost".into(),
+                        text: format!("Lost the monopoly on {}", gn),
+                    });
+                    held.retain(|&x| x != g);
                 }
             }
-            self.houses[hi].mono50 = new50;
+            self.houses[hi].mono50 = held;
+            self.houses[hi].mono_ever = ever;
             let wn = (self.houses[hi].wealth.max(0.0) / wmax).clamp(0.0, 1.0);
             let pn = (self.houses[hi].prestige / pmax).clamp(0.0, 1.0);
             let power = (0.45 * wn + 0.35 * top_share + 0.20 * pn).clamp(0.0, 1.0);
@@ -1264,7 +1286,7 @@ impl CampaignSim {
             name, hub: hub as u32, wealth: 1.0, prestige: 0.0, spec,
             monopoly: vec![], rivals: vec![], generation: 1,
             events: vec![founded], good_profit: Vec::new(), mono50: Vec::new(),
-            dominant_seat: false, prev_wealth: 1.0, worst_loss: 0.0,
+            mono_ever: Vec::new(), dominant_seat: false, prev_wealth: 1.0, worst_loss: 0.0,
             head_name: head, head_since: tick,
             head_lifespan: self.roll_lifespan(hub as u64 ^ 0x7E),
             founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,

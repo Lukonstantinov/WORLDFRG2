@@ -11,14 +11,15 @@ import type { HouseBrief } from "../types";
 
 type Tab = "overview" | "market" | "society" | "history";
 
-const GUILD_COLOR = "#7f8a99"; // unaffiliated local merchants & guilds (slate grey)
+const LOCAL_COLOR = "#5d6675";  // unaffiliated local merchants (grey)
+const GUILD_COLOR = "#4a6a8a";  // organised merchant guilds (slate blue)
 
 /** Donut chart dividing a settlement's TRADE AMOUNT between the merchant houses
- *  and the unaffiliated local merchants & guilds — at a glance, who moves the
- *  trade here. Each house slice is its coat-of-arms colour; the guild slice is
- *  grey. */
-function HouseSharePie({ houses, guildVolume, merchants }:
-  { houses: HouseBrief[]; guildVolume: number; merchants: number }) {
+ *  and — always present — the unaffiliated local merchants and the merchant
+ *  guilds. EVERY settlement has one: with no houses it's just locals + guilds.
+ *  Each house slice is its unique colour. */
+function HouseSharePie({ houses, localVolume, guildVolume, merchants }:
+  { houses: HouseBrief[]; localVolume: number; guildVolume: number; merchants: number }) {
   const R = 30, r = 17, cx = 34, cy = 34; // outer/inner radius, center
   // Trade amount = recent trade volume; fall back to wealth before any trade has
   // flowed so the chart isn't empty on a fresh campaign.
@@ -27,7 +28,8 @@ function HouseSharePie({ houses, guildVolume, merchants }:
   const houseVal = (h: HouseBrief) => useVol ? Math.max(0, h.volume ?? 0) : Math.max(0, h.wealth);
   const raw: { name: string; value: number; color: string }[] = houses
     .map((h) => ({ name: h.name, value: houseVal(h), color: h.color ?? houseColor(h.name) }));
-  raw.push({ name: "Local merchants & guilds", value: Math.max(0, guildVolume), color: GUILD_COLOR });
+  raw.push({ name: "Merchant guilds", value: Math.max(0, guildVolume), color: GUILD_COLOR });
+  raw.push({ name: "Local merchants", value: Math.max(0, localVolume), color: LOCAL_COLOR });
   const total = Math.max(1e-6, raw.reduce((s, x) => s + x.value, 0));
   const slices = raw
     .map((x) => ({ ...x, frac: x.value / total }))
@@ -82,6 +84,9 @@ export function HubPanel() {
   const economy = useWorldStore((s) => s.economy);
   const goodMeta = useGoodsStore((s) => s.meta);
   const campActive = useCampaignStore((s) => s.snapshot?.active ?? false);
+  // The campaign tick — re-fetch the hub detail whenever it advances so the open
+  // settlement's prices/wealth/population update live alongside the campaign.
+  const campTick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
 
   const [tab, setTab] = useState<Tab>("overview");
   const [detail, setDetail] = useState<HubDetail | null>(null);
@@ -89,13 +94,14 @@ export function HubPanel() {
   // Reset to the Overview tab whenever a different hub is opened.
   useEffect(() => { setTab("overview"); }, [selectedHub]);
 
-  // Pull live per-hub detail (sentiment/market/history) while a campaign runs.
+  // Pull live per-hub detail (sentiment/market/history) while a campaign runs,
+  // refreshed every time the campaign tick changes.
   useEffect(() => {
     let alive = true;
     if (selectedHub === null || !campActive) { setDetail(null); return; }
     campaignGetHub(selectedHub).then((d) => { if (alive) setDetail(d); }).catch(() => { if (alive) setDetail(null); });
     return () => { alive = false; };
-  }, [selectedHub, campActive]);
+  }, [selectedHub, campActive, campTick]);
 
   if (selectedHub === null || !economy) return null;
   const hub = economy.hubs.find((h) => h.id === selectedHub);
@@ -386,20 +392,24 @@ export function HubPanel() {
             <ClassTile label="Commoners" value={hub.commoners ?? 0} level={1} color="#8aa0c0" />
           </div>
 
-          {/* Merchant houses resident here + their share of the city's house wealth */}
-          {detail && detail.houses && detail.houses.length > 0 && (() => {
-            const hs = detail.houses;
+          {/* Who controls the trade — ALWAYS shown. With no resident houses the
+              circle is just local merchants + guilds. */}
+          {(() => {
+            const hs = detail?.houses ?? [];
             const total = Math.max(1e-6, hs.reduce((s, h) => s + Math.max(0, h.wealth), 0));
-            // The unaffiliated local merchants & guilds also move trade. Their share
-            // scales with the size of the merchant class (merchant_level 0..1): a
-            // big mercantile city has strong guilds independent of the great houses.
+            // Local merchants & guilds always move some trade. The independent
+            // (non-house) volume scales with the merchant class (merchant_level
+            // 0..1); a base term keeps it present even with no houses. It splits
+            // into organised GUILDS (∝ merchant_level) and unaffiliated LOCALS.
             const mlev = hub.merchant_level ?? 0.3;
             const houseVol = hs.reduce((s, h) => s + Math.max(0, h.volume ?? h.wealth), 0);
-            const guildVolume = Math.max(0.0001, houseVol) * (0.25 + 1.1 * mlev);
+            const independent = houseVol * (0.25 + 0.7 * mlev) + 0.5;
+            const guildVolume = independent * mlev;
+            const localVolume = independent * (1 - mlev);
             return (
               <>
                 <div style={{ ...sectionHdr, marginTop: 6 }}>Who controls the trade (houses · merchants · guilds)</div>
-                <HouseSharePie houses={hs} guildVolume={guildVolume} merchants={hub.merchants ?? 0} />
+                <HouseSharePie houses={hs} localVolume={localVolume} guildVolume={guildVolume} merchants={hub.merchants ?? 0} />
                 {hs.map((h, i) => (
                   <div key={h.name + i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 3 }}>
                     <CoatOfArms name={h.name} size={20} />

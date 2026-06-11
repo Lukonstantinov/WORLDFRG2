@@ -128,11 +128,11 @@ const card: React.CSSProperties = {
 const empty: React.CSSProperties = { color: "#506080", fontSize: 11, padding: "10px 4px" };
 
 const EVENT_ICON: Record<string, string> = {
-  founded: "🏛", succession: "👤", monopoly: "💰", control_gained: "⚖",
-  control_lost: "💔", branch: "🌿", loss: "⚠️", dissolved: "🪦",
+  founded: "🏛", succession: "👤", monopoly: "💰", monopoly_lost: "💸",
+  control_gained: "⚖", control_lost: "💔", branch: "🌿", loss: "⚠️", dissolved: "🪦",
 };
 const EVENT_COLOR: Record<string, string> = {
-  founded: "#cfe0f4", succession: "#9ab0c8", monopoly: "#e0b060",
+  founded: "#cfe0f4", succession: "#9ab0c8", monopoly: "#e0b060", monopoly_lost: "#b08a5a",
   control_gained: "#7fd0a0", control_lost: "#d88", loss: "#e08a5a",
   branch: "#9fe07a", dissolved: "#8a93a0",
 };
