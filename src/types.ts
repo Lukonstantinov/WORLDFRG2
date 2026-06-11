@@ -250,9 +250,10 @@ export interface HouseBrief {
   defunct: boolean;
   color?: string;                // stable distinct colour (hex) for this house
   seat?: [number, number];       // home-seat position (world cell coords)
-  dominant?: boolean;            // holds >=50% of its seat city's trade → controls it
+  dominant?: boolean;            // controls at least one settlement (>=50% of its trade)
+  controls?: [number, number][]; // settlements it controls (seat or remote outposts)
   partners?: [number, number][]; // trade-partner settlements (world coords)
-  cities?: string[];             // names of cities it trades with (seat first)
+  cities?: string[];             // names of cities it trades with / controls (seat first)
 }
 
 export interface HouseTimelineEvent {

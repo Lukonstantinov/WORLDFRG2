@@ -865,11 +865,16 @@ pub struct HouseBrief {
     /// True when this house holds >=50% of its seat city's merchant trade — i.e.
     /// it controls that settlement. Only controlled seats are tinted on the map.
     #[serde(default)] pub dominant: bool,
-    /// Trade-partner settlements (world cell coords): the cities its seat exchanges
-    /// goods with (upstream + downstream). Used to colour the routes it controls.
+    /// Settlements this house CONTROLS (world cell coords): any city — its seat OR
+    /// a distant outpost — where it handles >=50% of the trade throughput. A
+    /// big-city family can completely control a remote outpost it supplies and
+    /// funnel its wealth home.
+    #[serde(default)] pub controls: Vec<[f32; 2]>,
+    /// Trade-partner / handled settlements (world cell coords) used to colour the
+    /// routes the house runs.
     #[serde(default)] pub partners: Vec<[f32; 2]>,
-    /// Names of the cities this house trades with (seat first, then partners) —
-    /// shown in the Houses menu.
+    /// Names of the cities this house trades with / controls (seat first) — shown
+    /// in the Houses menu.
     #[serde(default)] pub cities: Vec<String>,
 }
 
@@ -898,48 +903,55 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
         sim.hubs.get(hub).map(|x| [x.x, x.y]).unwrap_or([0.0, 0.0])
     };
 
-    // ── Per-seat dominance: a house controls its seat city iff it holds >=50% of
-    //    that city's merchant-house trade volume (its "trade influence"). ───────
+    // ── Throughput-based control ─────────────────────────────────────────────
+    // Every in-flight shipment touches two cities (its source and destination). A
+    // house that OWNS the shipment "handles" that trade at both ends. A house
+    // controls a settlement when it handles >=50% of that settlement's total trade
+    // throughput — its own seat OR a remote outpost it supplies. Guild/independent
+    // trade (owner -1) counts toward the total but controls nothing, so a city
+    // mostly served by guilds has no controlling house.
     let nhubs = sim.hubs.len();
-    let mut hub_house_vol: Vec<f32> = vec![0.0; nhubs];   // total resident house volume
-    let mut hub_top: Vec<(usize, f32)> = vec![(usize::MAX, 0.0); nhubs]; // (house, vol)
-    for (hi, h) in sim.houses.iter().enumerate() {
-        if h.defunct { continue; }
-        let hub = h.hub as usize;
-        if hub >= nhubs { continue; }
-        let v = h.volume.max(0.0001); // tiny floor so a lone house still "controls"
-        hub_house_vol[hub] += v;
-        if v > hub_top[hub].1 { hub_top[hub] = (hi, v); }
-    }
-    let dominant_of = |hi: usize| -> bool {
-        let hub = sim.houses[hi].hub as usize;
-        if hub >= nhubs || hub_top[hub].0 != hi { return false; }
-        let share = hub_top[hub].1 / hub_house_vol[hub].max(1e-6);
-        share >= 0.5
-    };
-
-    // ── Trade partners: cities the seat exchanges goods with (in-flight shipments
-    //    to/from the seat). Captures both upstream suppliers and downstream buyers.
-    let partners_of = |hub: usize| -> Vec<usize> {
-        let mut set: Vec<usize> = Vec::new();
-        for s in &sim.in_transit {
-            let other = if s.from as usize == hub { Some(s.to as usize) }
-                else if s.to as usize == hub { Some(s.from as usize) }
-                else { None };
-            if let Some(o) = other { if o != hub && o < nhubs && !set.contains(&o) { set.push(o); } }
+    let nh = sim.houses.len();
+    let mut hub_total: Vec<f32> = vec![0.0; nhubs];        // all throughput per hub
+    let mut hub_house: Vec<f32> = vec![0.0; nhubs * nh.max(1)]; // [hub*nh + house]
+    for s in &sim.in_transit {
+        let amt = s.amount.max(0.0);
+        for &h in &[s.from as usize, s.to as usize] {
+            if h < nhubs {
+                hub_total[h] += amt;
+                if s.owner >= 0 {
+                    let oi = s.owner as usize;
+                    if oi < nh { hub_house[h * nh + oi] += amt; }
+                }
+            }
         }
-        set
-    };
+    }
+    // Per house: the hubs it controls (>=50% throughput) and the hubs it trades at.
+    let mut controlled: Vec<Vec<usize>> = vec![Vec::new(); nh];
+    let mut handled: Vec<Vec<usize>> = vec![Vec::new(); nh];
+    for h in 0..nhubs {
+        if hub_total[h] <= 1e-6 { continue; }
+        for oi in 0..nh {
+            let v = hub_house[h * nh + oi];
+            if v <= 0.0 { continue; }
+            handled[oi].push(h);
+            if v / hub_total[h] >= 0.5 { controlled[oi].push(h); }
+        }
+    }
 
     let mut out: Vec<HouseBrief> = sim.houses.iter().enumerate().map(|(hi, h)| {
         let hub = h.hub as usize;
-        let dominant = dominant_of(hi);
-        // Only a controlling (dominant) house projects onto its trade routes.
-        let partner_hubs = if dominant { partners_of(hub) } else { Vec::new() };
-        let partners: Vec<[f32; 2]> = partner_hubs.iter().map(|&p| seat_pos(p)).collect();
+        // A house always counts its seat among the cities listed.
+        let ctrl_hubs = std::mem::take(&mut controlled[hi]);
+        let trade_hubs = std::mem::take(&mut handled[hi]);
+        let dominant = !ctrl_hubs.is_empty(); // controls at least one settlement
+        let controls: Vec<[f32; 2]> = ctrl_hubs.iter().map(|&p| seat_pos(p)).collect();
+        let partners: Vec<[f32; 2]> = trade_hubs.iter().filter(|&&p| p != hub)
+            .map(|&p| seat_pos(p)).collect();
         let mut cities: Vec<String> = Vec::new();
         if hub < nhubs { cities.push(hub_name(hub as u32)); }
-        for &p in &partner_hubs { cities.push(hub_name(p as u32)); }
+        for &p in &ctrl_hubs { if p != hub { cities.push(format!("{} (controlled)", hub_name(p as u32))); } }
+        for &p in &trade_hubs { if p != hub && !ctrl_hubs.contains(&p) { cities.push(hub_name(p as u32)); } }
         HouseBrief {
             name: h.name.clone(),
             head_name: h.head_name.clone(),
@@ -958,6 +970,7 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
             color: distinct_color(hi), // stable per-house index → stable colour
             seat: seat_pos(hub),
             dominant,
+            controls,
             partners,
             cities,
         }

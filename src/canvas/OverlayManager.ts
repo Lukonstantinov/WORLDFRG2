@@ -164,10 +164,10 @@ export class OverlayManager {
     this.politicalCenters = centers;
   }
 
-  /** Merchant-family control: the houses that DOMINATE their seat city (>=50% of
-   *  its trade). Pass the active houses (with colour/seat/partners) + wrap width. */
+  /** Merchant-family control: houses that control >=1 settlement (>=50% of its
+   *  trade) — its seat or a remote outpost. Pass the active houses + wrap width. */
   drawHouseControl(houses: HouseBrief[], gridW: number) {
-    this.houses = houses.filter((h) => !h.defunct && h.dominant && h.seat);
+    this.houses = houses.filter((h) => !h.defunct && h.controls && h.controls.length > 0);
     if (gridW > 0) this.worldW = gridW;
   }
 
@@ -849,11 +849,18 @@ export class OverlayManager {
     };
     const TOL = 9; // a route endpoint within 3 cells of a seat/partner counts as it.
 
-    // Seat → colour lookup (rounded position key).
+    // Controlled-settlement → colour lookup (rounded position key). A house
+    // colours every city it controls — its seat AND remote outposts it dominates.
     const key = (x: number, y: number) => `${Math.round(x)},${Math.round(y)}`;
     const seatColor = new Map<string, string>();
+    // Per house: the cities it handles (controls + partners + seat), for routes.
+    const handled: { color: string; pts: [number, number][] }[] = [];
     for (const h of this.houses) {
-      if (h.seat && h.color) seatColor.set(key(h.seat[0], h.seat[1]), h.color);
+      if (!h.color) continue;
+      for (const c of h.controls ?? []) seatColor.set(key(c[0], c[1]), h.color);
+      const pts: [number, number][] = [...(h.controls ?? []), ...(h.partners ?? [])];
+      if (h.seat) pts.push(h.seat);
+      handled.push({ color: h.color, pts });
     }
 
     // ── Trade routes (drawn first, under the dots) ──
@@ -869,20 +876,17 @@ export class OverlayManager {
       }
       ctx.stroke();
     };
+    const matches = (pt: [number, number], set: [number, number][]) =>
+      set.some((p) => d2(pt[0], pt[1], p[0], p[1]) <= TOL);
     for (const route of this.tradeRoutes) {
       const pts = route.points;
       if (pts.length < 2) continue;
       const a = pts[0], b = pts[pts.length - 1];
-      // Colour the route if it links a dominant house's seat to one of its partners.
+      // Colour the route if BOTH its endpoints are cities a single house handles
+      // (its trade network) — that's a route it runs.
       let col: string | null = null;
-      for (const h of this.houses) {
-        if (!h.seat) continue;
-        const aIsSeat = d2(a[0], a[1], h.seat[0], h.seat[1]) <= TOL;
-        const bIsSeat = d2(b[0], b[1], h.seat[0], h.seat[1]) <= TOL;
-        if (!aIsSeat && !bIsSeat) continue;
-        const other = aIsSeat ? b : a;
-        const isPartner = (h.partners ?? []).some((p) => d2(other[0], other[1], p[0], p[1]) <= TOL);
-        if (isPartner) { col = h.color!; break; }
+      for (const h of handled) {
+        if (matches(a, h.pts) && matches(b, h.pts)) { col = h.color; break; }
       }
       if (col) drawPath(pts, col, Math.max(0.8, 1.6 * inv), 0.95);
       else drawPath(pts, GREY_ROUTE, Math.max(0.4, 0.8 * inv), 1);
