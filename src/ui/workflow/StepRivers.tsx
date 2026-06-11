@@ -32,7 +32,7 @@ export function StepRivers({ invalidateTiles }: Props) {
     setStatus("Extracting rivers & hydrology...");
     try {
       const result = await simRiversHydrology(
-        riverParams.density, riverParams.width,
+        riverParams.density, 1.0, // width is now physical (precip × drainage × climate)
         riverParams.lakeFillDepth, riverParams.lakeMaxFraction,
       );
       setRivers(result.rivers);
@@ -75,15 +75,13 @@ export function StepRivers({ invalidateTiles }: Props) {
         {slider("River Density", riverParams.density, 0.1, 1.5, 0.05,
           (v) => setRiverParams({ density: v }), (v) => v.toFixed(2),
           "Few trunk rivers ↔ Very many tributaries")}
-        {slider("River Width", riverParams.width, 0.2, 2.0, 0.1,
-          (v) => setRiverParams({ width: v }), (v) => `${v.toFixed(1)}×`,
-          "Thin ↔ Wide")}
         {slider("Lake Depth Threshold", riverParams.lakeFillDepth, 0.001, 0.02, 0.001,
           (v) => setRiverParams({ lakeFillDepth: v }), (v) => `${Math.round(v * 8848)}m`,
           "More lakes ↔ Only deep basins")}
-        {slider("Max Lake Size", riverParams.lakeMaxFraction, 0.00002, 0.005, 0.00002,
-          (v) => setRiverParams({ lakeMaxFraction: v }), (v) => `${(v * 100).toFixed(3)}%`,
-          "Tiny lakes ↔ Allow large")}
+        <div style={{ color: "#405060", fontSize: 9, marginTop: 2 }}>
+          River width is derived from discharge (precipitation × drainage area ×
+          climate) — wider, deeper-blue downstream; arid rivers stay thin.
+        </div>
       </div>
 
       <button onClick={handleGenerate} disabled={simRunning || !step2Done} style={genBtn}>
@@ -96,8 +94,8 @@ export function StepRivers({ invalidateTiles }: Props) {
       )}
       <div style={{ color: "#405060", fontSize: 10 }}>
         Uses D8 steepest-descent flow routing over a depression-filled surface.
-        Adjust density/width for the river network and the lake thresholds to
-        control how many and how large lakes form.
+        Adjust density for the river network and the lake threshold for how
+        readily basins fill.
       </div>
     </div>
   );

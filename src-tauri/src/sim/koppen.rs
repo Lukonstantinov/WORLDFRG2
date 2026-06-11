@@ -274,7 +274,10 @@ fn winter_dry_monsoon(buf: &WorldBuffer, x: u32, y: u32) -> bool {
     //     its west, and islands (Japan) have sea upwind, so they never qualify;
     //     only a true east coast of a vast continent (NE Asia) passes.
     let big = (buf.width / 24).max(20) as i32;
-    if upwind_is_ocean(buf, x, y, big) { return false; }
+    // Use OPEN ocean: a shallow marginal/shelf sea on the windward side (e.g. the
+    // Yellow Sea west of Korea) must NOT disqualify a genuine monsoon east coast —
+    // only deep open ocean upwind (the Atlantic west of Europe) does.
+    if upwind_is_open_ocean(buf, x, y, big) { return false; }
     // (2) A LARGE OPEN OCEAN to the east / equatorward-east (the summer monsoon
     //     source). Small / enclosed seas (Mediterranean, Black, Caspian) don't
     //     count — they hit a far shore quickly, so the open-water run is short.
@@ -322,6 +325,7 @@ fn seasonal_split(
     upwind_warm: bool,
     near_ocean: bool,
     winter_monsoon: bool,
+    cold_near: bool,
 ) -> (f32, f32) {
     // East-Asian continental winter monsoon: bone-dry winters (Siberian High) +
     // a wet summer monsoon. This is the ONLY split that clears Köppen's
@@ -357,9 +361,13 @@ fn seasonal_split(
         let trade_influence = 1.0 - t;
         let westerly_influence = t;
 
-        if windward_ocean && !upwind_warm && abs_lat >= 30.0 {
+        if windward_ocean && !upwind_warm && cold_near && abs_lat >= 30.0 {
             // Mediterranean pattern: the subtropical high parks over west-facing
             // coasts in summer (dry) while the winter westerlies bring the rain.
+            // REQUIRES a cold offshore current — real Cs sits beside the cold
+            // eastern-boundary currents (California, Canary, Humboldt, Benguela,
+            // W-Australian). This keeps Mediterranean OFF warm/neutral marginal-sea
+            // east coasts like Korea (Yellow Sea), which were wrongly reading Csa.
             // The previous split only became dry enough to satisfy Köppen's
             // summer<winter/3 test within a sliver near 45°, so Cs almost never
             // appeared. Ramp the dry-summer strength in quickly from 30° so Cs
@@ -425,6 +433,7 @@ fn classify_cell(buf: &WorldBuffer, x: u32, y: u32) -> u8 {
     let windward_ocean = is_windward_ocean(buf, x, y);
     let upwind_warm = is_upwind_warm_current(buf, x, y);
     let winter_monsoon = winter_dry_monsoon(buf, x, y);
+    let cold_near = cold_current_near(buf, x, y);
 
     // Continentality-aware coldest/warmest month: lets Df/Dw climates form on
     // mid-latitude lee (east) coasts instead of being damped into mild Cfb.
@@ -433,7 +442,7 @@ fn classify_cell(buf: &WorldBuffer, x: u32, y: u32) -> u8 {
 
     // Smooth seasonal precipitation split
     let (summer_mult, winter_mult) =
-        seasonal_split(abs_lat, windward_ocean, upwind_warm, near_ocean, winter_monsoon);
+        seasonal_split(abs_lat, windward_ocean, upwind_warm, near_ocean, winter_monsoon, cold_near);
     let summer_wet = p12 * summer_mult;
     let winter_wet = p12 * winter_mult;
 

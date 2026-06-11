@@ -970,7 +970,10 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
     let n = buf.total();
     let base_type = buf.current_type.clone();
     let mut warm_add = vec![false; n];
-    let max_steps = (w as f32 * 0.9 * reach_mult) as usize;
+    // step_len 1.5 → this is ~0.9·w CELLS of reach (plenty to cross any basin),
+    // not 1.35·w. Capped down from 0.9 to bound pathological open-ocean traces
+    // (the Pacific / Southern Ocean) that made the ocean step slow.
+    let max_steps = (w as f32 * 0.6 * reach_mult) as usize;
     let step_len = 1.5f32;
     // Corridor half-width: the warm drift is tagged as a BAND, not a 1-cell trace,
     // so the cross-basin flow reads warm instead of leaving grey streamlines
@@ -1179,10 +1182,13 @@ pub fn advect_salinity_and_recouple(buf: &mut WorldBuffer) {
     let base: Vec<f32> = buf.salinity.iter().map(|&s| s as f32).collect();
     let mut sal = base.clone();
 
-    let dt = 2.5f32;       // cells advected per iteration
-    let iters = 16;        // more iterations → salt reaches further poleward
+    let dt = 3.3f32;       // cells advected per iteration (raised so fewer iters reach as far)
+    let iters = 11;        // more iterations → salt reaches further poleward
+    // Ping-pong between two buffers instead of cloning the whole grid every
+    // iteration (16 full-grid clones were a big chunk of the ocean step's cost).
+    let mut src = sal.clone();
     for _ in 0..iters {
-        let src = sal.clone();
+        std::mem::swap(&mut src, &mut sal); // read from `src`, write to `sal`
         for y in 0..h {
             for x in 0..w {
                 let i = buf.idx(x, y);

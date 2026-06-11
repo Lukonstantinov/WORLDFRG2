@@ -118,9 +118,11 @@ impl ColumnSet {
             | Self::DIST_OCEAN.0 | Self::CURRENTS.0 | Self::WIND.0 | Self::KOPPEN.0
             | Self::SHELF.0, // shelf seas don't count as open ocean for continentality
     );
-    /// rivers.rs (hydrology/lakes — read-only, no tile write-back)
+    /// rivers.rs (hydrology/lakes — read-only, no tile write-back).
+    /// PRECIPITATION is needed by `extract_rivers` to size channels by discharge.
     pub const PHASE_RIVERS: ColumnSet = ColumnSet(
-        Self::TERRAIN.0 | Self::ELEVATION.0 | Self::SEA_DEPTH.0 | Self::SHELF.0 | Self::KOPPEN.0,
+        Self::TERRAIN.0 | Self::ELEVATION.0 | Self::SEA_DEPTH.0 | Self::SHELF.0 | Self::KOPPEN.0
+            | Self::PRECIPITATION.0,
     );
     /// soil.rs + fertility.rs (phase 6 chain)
     pub const PHASE_SOIL_FERTILITY: ColumnSet = ColumnSet(
