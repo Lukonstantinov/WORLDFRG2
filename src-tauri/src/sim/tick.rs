@@ -36,6 +36,17 @@ const HOUSE_BANKRUPT: f32 = 0.15;
 /// A house this wealthy may split a cadet branch into another city on succession.
 const HOUSE_BRANCH_WEALTH: f32 = 12.0;
 
+// ── Merchant fleets & voyage risk ────────────────────────────────────────────
+/// Per-voyage chance a shipment is lost: storms at sea, ambush on the road,
+/// wreck on the river. River boats are the safest, the open sea the riskiest.
+const SEA_LOSS: f32 = 0.05;
+const CARAVAN_LOSS: f32 = 0.03;
+const RIVER_LOSS: f32 = 0.015;
+/// Wealth cost to build a new transport asset (sea ship / river boat / caravan).
+const SHIP_COST: f32 = 5.0;
+const RIVER_COST: f32 = 3.5;
+const CARAVAN_COST: f32 = 3.0;
+
 /// One tradable good in the tick economy (mapped from the world's `GoodSpec`).
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TickGood {
@@ -91,6 +102,10 @@ pub struct TickHub {
     #[serde(default)] pub sent_stability: f32,
     /// Sparse per-hub time series for the settlement-window History charts.
     #[serde(default)] pub history: Vec<HubSample>,
+    /// Recent goods arriving by SEA (ships) vs by LAND (caravans), a decaying
+    /// tally so the settlement view can show how this city is supplied.
+    #[serde(default)] pub in_by_sea: f32,
+    #[serde(default)] pub in_by_land: f32,
 }
 
 /// One sparse per-hub history sample (weekly) for the settlement-window charts.
@@ -110,8 +125,10 @@ pub struct InTransit {
     pub good: usize,
     pub amount: f32,
     pub eta_tick: u32,
-    /// Owning house index (−1 = independent).
+    /// Owning house index (−1 = independent local merchants / guilds).
     pub owner: i32,
+    /// True = a sea voyage (occupies a sea-ship slot); false = overland.
+    #[serde(default)] pub sea: bool,
 }
 
 /// One milestone in a house's chronicle (its timeline view).
@@ -159,6 +176,14 @@ pub struct House {
     /// Wealth at the previous monthly check + the worst single-month loss so far.
     #[serde(default)] pub prev_wealth: f32,
     #[serde(default)] pub worst_loss: f32,
+    // ── Fleet: the house's transport capital. Each asset = ONE concurrent
+    //    shipment slot on its route type (scale-independent). Sea ships serve
+    //    coastal↔coastal voyages; river boats + caravans serve overland routes.
+    //    Capital-constrained: houses buy them with wealth and can lose them to
+    //    storms / ambush. Bigger fleet → more trade carried → more market share.
+    #[serde(default)] pub fleet_sea: u32,
+    #[serde(default)] pub fleet_river: u32,
+    #[serde(default)] pub fleet_caravan: u32,
     // ── Named head of family (serde default → old saves still load) ──
     #[serde(default)] pub head_name: String,   // "Marcus Cassii"
     #[serde(default)] pub head_since: u32,      // tick the current head took over
@@ -221,6 +246,10 @@ pub struct CampaignSim {
     /// World price index at the last monthly chronicle sample (for deltas).
     #[serde(default)]
     pub last_month_index: f32,
+    /// Number of merchant houses seeded at campaign start — the baseline the
+    /// founding logic tries to keep the world stocked up to.
+    #[serde(default)]
+    pub seed_house_count: u32,
     /// Derived route-days matrix (n·n, f32::INFINITY = unreachable). Not
     /// serialized — rebuilt from positions + components after load.
     #[serde(skip)]
@@ -400,19 +429,25 @@ impl CampaignSim {
             // 4) Merchant dispatch (arbitrage → in-transit cargo).
             self.dispatch(&needs);
 
-            // 5) Arrivals.
-            let mut landed: Vec<(usize, usize, f32)> = Vec::new();
+            // 5) Arrivals. Decay each hub's by-sea/by-land supply tally, then add
+            //    today's landings tagged by how they travelled (ships vs caravans).
+            for hb in &mut self.hubs {
+                hb.in_by_sea *= 0.98;
+                hb.in_by_land *= 0.98;
+            }
+            let mut landed: Vec<(usize, usize, f32, bool)> = Vec::new();
             self.in_transit.retain(|c| {
                 if c.eta_tick <= tick {
-                    landed.push((c.to as usize, c.good, c.amount));
+                    landed.push((c.to as usize, c.good, c.amount, c.sea));
                     false
                 } else {
                     true
                 }
             });
-            for (to, g, amt) in landed {
+            for (to, g, amt, sea) in landed {
                 if to < self.hubs.len() {
                     self.hubs[to].stock[g] += amt;
+                    if sea { self.hubs[to].in_by_sea += amt; } else { self.hubs[to].in_by_land += amt; }
                 }
             }
 
@@ -624,6 +659,25 @@ impl CampaignSim {
         let n = self.hubs.len();
         let ng = self.goods.len();
         let tick = self.tick;
+        // ── Merchant fleet capacity (concurrent shipment slots) for this round ──
+        // Each house has fleet_sea sea-slots and (fleet_river + fleet_caravan)
+        // land-slots. Slots already busy with in-flight cargo are subtracted, so a
+        // house can only finance as many NEW shipments as it has free vessels. A
+        // trade it can't carry falls to the independent local merchants/guilds.
+        let nh = self.houses.len();
+        let mut cap_sea: Vec<i32> = vec![0; nh];
+        let mut cap_land: Vec<i32> = vec![0; nh];
+        for (i, h) in self.houses.iter().enumerate() {
+            if h.defunct { continue; }
+            cap_sea[i] = h.fleet_sea as i32;
+            cap_land[i] = (h.fleet_river + h.fleet_caravan) as i32;
+        }
+        for c in &self.in_transit {
+            if c.owner >= 0 {
+                let oi = c.owner as usize;
+                if oi < nh { if c.sea { cap_sea[oi] -= 1; } else { cap_land[oi] -= 1; } }
+            }
+        }
         // Snapshot stocks so a single round's decisions use consistent prices.
         for g in 0..ng {
             let base = self.goods[g].base_value;
@@ -675,15 +729,68 @@ impl CampaignSim {
                     let max_stock =
                         needs[b][g] * (base / delivered.max(EPS)).powf(1.0 / self.k);
                     let room = (max_stock - self.hubs[b].stock[g]).max(0.0);
-                    let amount = surplus.min(room * 0.5);
+                    let mut amount = surplus.min(room * 0.5);
                     if amount <= EPS {
                         continue;
                     }
+                    // Route mode: a sea voyage when both ends are coastal, else overland.
+                    let sea = self.hubs[a].coastal && self.hubs[b].coastal;
+                    let mut owner = self.house_for(a, g);
+                    // ── Fleet capacity + capital gate ──
+                    if owner >= 0 {
+                        let oi = owner as usize;
+                        let slots = if sea { cap_sea[oi] } else { cap_land[oi] };
+                        // Capital: a house can't finance cargo worth more than its wealth.
+                        let afford = if pa > EPS { self.houses[oi].wealth / pa } else { f32::MAX };
+                        if slots < 1 || afford <= EPS {
+                            owner = -1; // no vessel free / no capital → local merchants & guilds carry it
+                        } else {
+                            amount = amount.min(afford);
+                            if sea { cap_sea[oi] -= 1; } else { cap_land[oi] -= 1; }
+                        }
+                    }
                     surplus -= amount;
                     self.hubs[a].stock[g] -= amount;
-                    let owner = self.house_for(a, g);
-                    let value = amount * delivered;
                     self.hubs[a].export_earn += amount * pa;
+                    // ── Voyage loss: storms at sea, ambush/wreck overland ──
+                    let lost = if owner >= 0 {
+                        let oi = owner as usize;
+                        let p = if sea {
+                            SEA_LOSS
+                        } else {
+                            // River boats are safer than caravans — blend by fleet mix.
+                            let cv = self.houses[oi].fleet_caravan as f32;
+                            let rv = self.houses[oi].fleet_river as f32;
+                            let tot = (cv + rv).max(1.0);
+                            CARAVAN_LOSS * (cv / tot) + RIVER_LOSS * (rv / tot)
+                        };
+                        hash01(self.seed,
+                            (tick as u64) ^ 0x5EA10 ^ ((a as u64) << 8) ^ (b as u64),
+                            g as u64) < p
+                    } else { false };
+                    if lost {
+                        let oi = owner as usize;
+                        let invested = amount * pa;
+                        self.houses[oi].wealth = (self.houses[oi].wealth - invested).max(0.0);
+                        self.damage_fleet(oi, sea);
+                        let gn = self.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
+                        let hn = self.houses[oi].name.clone();
+                        let (etext, jtext) = if sea {
+                            (format!("A storm sank a ship carrying {}", gn),
+                             format!("A storm sinks a ship of {} ({})", hn, gn))
+                        } else {
+                            (format!("A caravan carrying {} was ambushed", gn),
+                             format!("A caravan of {} is ambushed ({})", hn, gn))
+                        };
+                        self.houses[oi].events.push(HouseEvent { tick, kind: "voyage_loss".into(), text: etext });
+                        self.journal.push(JournalEntry {
+                            tick, kind: "event".into(), hub: a as i32, good: g as i32,
+                            value: invested, text: jtext,
+                        });
+                        // Cargo is gone — never delivered (source already debited).
+                        continue;
+                    }
+                    let value = amount * delivered;
                     self.hubs[b].import_spend += value;
                     if owner >= 0 {
                         let oi = owner as usize;
@@ -707,6 +814,7 @@ impl CampaignSim {
                         amount,
                         eta_tick: tick + (days.ceil() as u32).max(1),
                         owner,
+                        sea,
                     });
                 }
             }
@@ -926,6 +1034,8 @@ impl CampaignSim {
             sent_prosperity: 0.5,
             sent_stability: 0.8,
             history: Vec::new(),
+            in_by_sea: 0.0,
+            in_by_land: 0.0,
         });
         self.rebuild_routes();
     }
@@ -1008,10 +1118,12 @@ impl CampaignSim {
                 self.succeed_house(hi);
             }
         }
-        // Monthly: monopolies, political power, founding, branching, extinction, feuds.
+        // Per tick: a new house may appear (probabilistic — see maybe_found_house).
+        self.maybe_found_house();
+        // Monthly: monopolies, political power, branching, extinction, feuds.
         if tick % 30 == 0 {
             self.recompute_monopolies_and_power();
-            self.maybe_found_house();
+            self.manage_fleets();
             self.maybe_branch_houses();
             for hi in 0..self.houses.len() {
                 if self.houses[hi].defunct { continue; }
@@ -1090,11 +1202,14 @@ impl CampaignSim {
             tick, kind: "founded".into(),
             text: format!("Founded by {} as a branch of {} in {}", bhead, parent, self.hubs[dest].name),
         };
+        let (fleet_sea, fleet_river, fleet_caravan) =
+            Self::initial_fleet(self.hubs[dest].coastal, false);
         self.houses.push(House {
             name: bname.clone(), hub: dest as u32, wealth: split, prestige: 0.1,
             spec, monopoly: vec![], rivals: vec![hi], generation: 1,
             events: vec![founded], good_profit: Vec::new(), mono50: Vec::new(),
             mono_ever: Vec::new(), dominant_seat: false, prev_wealth: split, worst_loss: 0.0,
+            fleet_sea, fleet_river, fleet_caravan,
             head_name: bhead.clone(), head_since: tick,
             head_lifespan: self.roll_lifespan(dest as u64 ^ 0xCC),
             founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
@@ -1136,6 +1251,85 @@ impl CampaignSim {
             if d.is_finite() && d > 1.0 && d < best.1 { best = (b, d); }
         }
         if best.0 == usize::MAX { None } else { Some(best.0) }
+    }
+
+    /// A starting fleet for a new house, sized to its home geography: coastal
+    /// seats are seafaring (ships + a caravan), inland ones overland (caravans +
+    /// a river boat). `big` gives the seeded great houses a slightly larger fleet.
+    fn initial_fleet(coastal: bool, big: bool) -> (u32, u32, u32) {
+        match (coastal, big) {
+            (true, true) => (2, 0, 1),
+            (true, false) => (1, 0, 1),
+            (false, true) => (0, 1, 2),
+            (false, false) => (0, 1, 1),
+        }
+    }
+
+    /// A lost voyage sometimes takes the vessel/caravan with it (~30%).
+    fn damage_fleet(&mut self, hi: usize, sea: bool) {
+        if hash01(self.seed, self.tick as u64 ^ 0xDEAD, hi as u64) > 0.30 { return; }
+        let h = &mut self.houses[hi];
+        if sea {
+            if h.fleet_sea > 0 { h.fleet_sea -= 1; }
+        } else if h.fleet_caravan > 0 {
+            h.fleet_caravan -= 1;
+        } else if h.fleet_river > 0 {
+            h.fleet_river -= 1;
+        }
+    }
+
+    /// Monthly fleet management: a profitable house whose vessels are all busy
+    /// buys another (more capacity → more trade carried → more market share); a
+    /// failing house with idle ships scraps one for a little cash. This capital
+    /// churn — build-up, over-extension, loss, recovery — keeps the trade network
+    /// perpetually shifting instead of settling into a static equilibrium.
+    fn manage_fleets(&mut self) {
+        let tick = self.tick;
+        let nh = self.houses.len();
+        let mut used_sea = vec![0i32; nh];
+        let mut used_land = vec![0i32; nh];
+        for c in &self.in_transit {
+            if c.owner >= 0 {
+                let oi = c.owner as usize;
+                if oi < nh { if c.sea { used_sea[oi] += 1; } else { used_land[oi] += 1; } }
+            }
+        }
+        for hi in 0..nh {
+            if self.houses[hi].defunct { continue; }
+            let coastal = self.hubs.get(self.houses[hi].hub as usize).map(|x| x.coastal).unwrap_or(false);
+            let w = self.houses[hi].wealth;
+            let sea_slots = self.houses[hi].fleet_sea as i32;
+            let land_slots = (self.houses[hi].fleet_river + self.houses[hi].fleet_caravan) as i32;
+            let sea_busy = used_sea[hi] >= sea_slots;
+            let land_busy = used_land[hi] >= land_slots;
+            // BUY: capital to spare and every vessel of the favoured kind is busy.
+            if coastal && sea_busy && w > SHIP_COST * 2.5 {
+                self.houses[hi].wealth -= SHIP_COST;
+                self.houses[hi].fleet_sea += 1;
+            } else if !coastal && land_busy && w > CARAVAN_COST * 2.5 {
+                if hash01(self.seed, tick as u64 ^ 0x21B0, hi as u64) < 0.30 {
+                    self.houses[hi].wealth -= RIVER_COST;
+                    self.houses[hi].fleet_river += 1;
+                } else {
+                    self.houses[hi].wealth -= CARAVAN_COST;
+                    self.houses[hi].fleet_caravan += 1;
+                }
+            } else if w < HOUSE_BRANCH_WEALTH * 0.15 {
+                // SELL: a struggling house with an idle vessel scraps it for cash.
+                if used_sea[hi] < sea_slots && self.houses[hi].fleet_sea > 0 {
+                    self.houses[hi].fleet_sea -= 1;
+                    self.houses[hi].wealth += SHIP_COST * 0.4;
+                } else if used_land[hi] < land_slots {
+                    if self.houses[hi].fleet_caravan > 0 {
+                        self.houses[hi].fleet_caravan -= 1;
+                        self.houses[hi].wealth += CARAVAN_COST * 0.4;
+                    } else if self.houses[hi].fleet_river > 0 {
+                        self.houses[hi].fleet_river -= 1;
+                        self.houses[hi].wealth += RIVER_COST * 0.4;
+                    }
+                }
+            }
+        }
     }
 
     /// Recompute each house's per-good monopoly shares (volume among houses that
@@ -1250,19 +1444,35 @@ impl CampaignSim {
     fn maybe_found_house(&mut self) {
         let tick = self.tick;
         let ng = self.goods.len();
-        // Candidate: the richest-trade hub whose strongest resident house (if any)
-        // is weak — room for a new family.
+        // Candidate: the richest-trade hub with ROOM for a new family (no strong
+        // resident house, and fewer than 2 nascent ones so we don't stack). Also
+        // track the world's max trade wealth to flag "large" hubs.
         let mut best = (usize::MAX, 0.0f32);
+        let mut max_tw = 1e-6f32;
         for h in 0..self.hubs.len() {
+            max_tw = max_tw.max(self.hubs[h].trade_wealth);
             let tw = self.hubs[h].trade_wealth;
             if tw <= 0.3 { continue; }
-            let resident = self.houses.iter()
-                .filter(|hs| !hs.defunct && hs.hub as usize == h)
-                .map(|hs| hs.wealth).fold(0.0f32, f32::max);
-            if resident > 2.0 { continue; } // already has a strong house
+            let mut strongest = 0.0f32;
+            let mut count = 0u32;
+            for hs in self.houses.iter().filter(|hs| !hs.defunct && hs.hub as usize == h) {
+                strongest = strongest.max(hs.wealth);
+                count += 1;
+            }
+            if strongest > 2.0 || count >= 2 { continue; } // already established / has competition
             if tw > best.1 { best = (h, tw); }
         }
         let Some(hub) = (best.0 != usize::MAX).then_some(best.0) else { return };
+        // ── Probabilistic founding (per tick) ────────────────────────────────
+        // A house does NOT auto-appear just because a city is guild-run. Per tick:
+        //   • below the seeded baseline → 10% (the world repopulates its houses)
+        //   • a large trade hub (>=50% of the richest hub's trade) → 5%
+        //   • otherwise → 2%
+        let active = self.houses.iter().filter(|h| !h.defunct).count() as u32;
+        let baseline = if self.seed_house_count > 0 { self.seed_house_count } else { 24 };
+        let large = best.1 >= 0.5 * max_tw;
+        let prob = if active < baseline { 0.10 } else if large { 0.05 } else { 0.02 };
+        if hash01(self.seed, tick as u64 ^ 0xF0F0, hub as u64) > prob { return; }
         // Specialty = the hub's top-2 produced goods.
         let mut gi: Vec<usize> = (0..ng).collect();
         gi.sort_by(|&a, &b| self.hubs[hub].production[b]
@@ -1282,11 +1492,14 @@ impl CampaignSim {
             text: format!("Founded by {} in {} on the {} trade", head, self.hubs[hub].name,
                 self.goods.get(spec[0]).map(|g| g.name.as_str()).unwrap_or("local")),
         };
+        let (fleet_sea, fleet_river, fleet_caravan) =
+            Self::initial_fleet(self.hubs[hub].coastal, false);
         self.houses.push(House {
             name, hub: hub as u32, wealth: 1.0, prestige: 0.0, spec,
             monopoly: vec![], rivals: vec![], generation: 1,
             events: vec![founded], good_profit: Vec::new(), mono50: Vec::new(),
             mono_ever: Vec::new(), dominant_seat: false, prev_wealth: 1.0, worst_loss: 0.0,
+            fleet_sea, fleet_river, fleet_caravan,
             head_name: head, head_since: tick,
             head_lifespan: self.roll_lifespan(hub as u64 ^ 0x7E),
             founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
@@ -1424,6 +1637,7 @@ mod tests {
             is_estate: false, parent: -1, koppen: 0, coastal: false, component: comp,
             export_earn: 0.0, import_spend: 0.0,
             mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5, sent_stability: 0.8, history: Vec::new(),
+            in_by_sea: 0.0, in_by_land: 0.0,
         }
     }
 

@@ -354,6 +354,9 @@ pub struct HubDetail {
     /// Merchant families resident in this city (richest first).
     #[serde(default)]
     pub houses: Vec<HouseBrief>,
+    /// Recent supply arriving by SEA (ships) vs LAND (caravans) — decaying tally.
+    #[serde(default)] pub in_by_sea: f32,
+    #[serde(default)] pub in_by_land: f32,
 }
 
 fn get_sim(conn: &Connection) -> Result<Option<CampaignSim>, String> {
@@ -581,6 +584,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 sent_prosperity: 0.5,
                 sent_stability: 0.8,
                 history: Vec::new(),
+                in_by_sea: 0.0,
+                in_by_land: 0.0,
             }
         })
         .collect();
@@ -647,6 +652,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
             tick: 0, kind: "founded".into(),
             text: format!("Founded by {} in {}", head, hubs[h].name),
         };
+        // Starting fleet by geography: coastal great houses are seafaring.
+        let (fleet_sea, fleet_river, fleet_caravan) =
+            if hubs[h].coastal { (2u32, 0u32, 1u32) } else { (0u32, 1u32, 2u32) };
         houses.push(House {
             name,
             hub: h as u32,
@@ -663,6 +671,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
             dominant_seat: false,
             prev_wealth: 1.0,
             worst_loss: 0.0,
+            fleet_sea,
+            fleet_river,
+            fleet_caravan,
             head_name: head,
             head_since: 0,
             head_lifespan: seed_lifespan(seed, h as u64),
@@ -673,6 +684,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         });
     }
 
+    let houses_len = houses.len() as u32; // baseline house count (before `houses` is moved)
     let days_per_cell = ((40075.0 / grid_w) / 55.0).max(0.02); // ~55 km/day blended
     let mut sim = CampaignSim {
         seed,
@@ -699,6 +711,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         last_tick_ms: 0.0,
         last_month_pop: 0.0,
         last_month_index: 0.0,
+        seed_house_count: houses_len,
         days: vec![],
     };
     sim.rebuild_routes();
@@ -822,6 +835,8 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         houses: build_house_briefs(&sim).into_iter()
             .filter(|hb| hb.home_hub == hub.id)
             .collect(),
+        in_by_sea: hub.in_by_sea,
+        in_by_land: hub.in_by_land,
     }))
 }
 

@@ -229,6 +229,8 @@ export interface HubDetail {
   history: HubSample[];
   events: JournalEntry[];
   houses?: HouseBrief[];
+  in_by_sea?: number;   // recent supply arriving by ship (sea)
+  in_by_land?: number;  // recent supply arriving by caravan (land)
 }
 /** A merchant family (trading house) — for the Houses panel + settlement window. */
 export interface HouseBrief {

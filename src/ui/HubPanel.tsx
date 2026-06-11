@@ -392,6 +392,34 @@ export function HubPanel() {
             <ClassTile label="Commoners" value={hub.commoners ?? 0} level={1} color="#8aa0c0" />
           </div>
 
+          {/* How goods reach this city — by ship (sea) vs caravan (land). Every
+              shipment, house or guild, is tagged by how it travelled. */}
+          {(() => {
+            const sea = detail?.in_by_sea ?? 0;
+            const land = detail?.in_by_land ?? 0;
+            const tot = sea + land;
+            const seaPct = tot > 1e-4 ? Math.round((sea / tot) * 100) : 0;
+            return (
+              <>
+                <div style={{ ...sectionHdr, marginTop: 6 }}>How goods arrive</div>
+                {tot < 1e-4 ? (
+                  <div style={{ color: "#7a90a8", fontSize: 10 }}>No trade arriving yet.</div>
+                ) : (
+                  <>
+                    <div style={{ display: "flex", height: 8, borderRadius: 3, overflow: "hidden", background: "#0a1018" }}>
+                      <div style={{ width: `${seaPct}%`, background: "#4a6a8a" }} title={`Ships (sea): ${seaPct}%`} />
+                      <div style={{ width: `${100 - seaPct}%`, background: "#b5894a" }} title={`Caravans (land): ${100 - seaPct}%`} />
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#9ab0c8", marginTop: 2 }}>
+                      <span>🚢 ships {seaPct}%</span>
+                      <span>{100 - seaPct}% caravans 🐫</span>
+                    </div>
+                  </>
+                )}
+              </>
+            );
+          })()}
+
           {/* Who controls the trade — ALWAYS shown. With no resident houses the
               circle is just local merchants + guilds. */}
           {(() => {
