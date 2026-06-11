@@ -823,64 +823,110 @@ pub struct HouseBrief {
     pub monopolies: Vec<(String, f32)>, // good name + share 0..1
     pub rivals: Vec<String>,            // rival house names
     pub defunct: bool,
+    /// Stable, maximally-distinct colour for this house (hex, golden-angle hue).
+    /// Same colour used everywhere: map overlay, houses panel, settlement pie.
+    #[serde(default)] pub color: String,
     /// Home-seat position (world cell coords) — where the family is based.
     #[serde(default)] pub seat: [f32; 2],
-    /// Settlements this house controls (world cell coords), for the map overlay.
-    /// A house controls its seat plus the hubs in its sphere of influence (a
-    /// power-weighted Voronoi assignment — wealthier families control more, and
-    /// reach farther). Recomputed each refresh, so it shifts as fortunes change.
-    #[serde(default)] pub controls: Vec<[f32; 2]>,
+    /// True when this house holds >=50% of its seat city's merchant trade — i.e.
+    /// it controls that settlement. Only controlled seats are tinted on the map.
+    #[serde(default)] pub dominant: bool,
+    /// Trade-partner settlements (world cell coords): the cities its seat exchanges
+    /// goods with (upstream + downstream). Used to colour the routes it controls.
+    #[serde(default)] pub partners: Vec<[f32; 2]>,
+    /// Names of the cities this house trades with (seat first, then partners) —
+    /// shown in the Houses menu.
+    #[serde(default)] pub cities: Vec<String>,
+}
+
+/// Golden-angle hue → a distinct, saturated hex colour. `i` is a stable index so
+/// each house keeps its colour across refreshes.
+fn distinct_color(i: usize) -> String {
+    let hue = (i as f32 * 137.508) % 360.0;
+    // Fixed S/L for vivid but readable colours on the green map.
+    let (s, l) = (0.68f32, 0.55f32);
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let hp = hue / 60.0;
+    let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+    let (r1, g1, b1) = match hp as i32 {
+        0 => (c, x, 0.0), 1 => (x, c, 0.0), 2 => (0.0, c, x),
+        3 => (0.0, x, c), 4 => (x, 0.0, c), _ => (c, 0.0, x),
+    };
+    let m = l - c / 2.0;
+    let to = |v: f32| ((v + m) * 255.0).round().clamp(0.0, 255.0) as u32;
+    format!("#{:02x}{:02x}{:02x}", to(r1), to(g1), to(b1))
 }
 
 fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
     let gname = |g: usize| sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
     let hub_name = |h: u32| sim.hubs.get(h as usize).map(|x| x.name.clone()).unwrap_or_default();
-    // ── Power-weighted Voronoi control assignment ────────────────────────────
-    // Each settlement (hub) is controlled by the active house that projects the
-    // most power onto it: score = power / (1 + dist), power = wealth scaled by
-    // political clout. Wealthier / more powerful families win more (and farther)
-    // settlements; a small house keeps just its seat. Cylindrical X wrap.
-    let seat_pos = |h: &crate::sim::tick::House| -> [f32; 2] {
-        sim.hubs.get(h.hub as usize).map(|x| [x.x, x.y]).unwrap_or([0.0, 0.0])
+    let seat_pos = |hub: usize| -> [f32; 2] {
+        sim.hubs.get(hub).map(|x| [x.x, x.y]).unwrap_or([0.0, 0.0])
     };
-    let mut controls: Vec<Vec<[f32; 2]>> = vec![Vec::new(); sim.houses.len()];
-    let active: Vec<usize> = (0..sim.houses.len()).filter(|&i| !sim.houses[i].defunct).collect();
-    if !active.is_empty() {
-        for hub in &sim.hubs {
-            let mut best = usize::MAX;
-            let mut best_score = f32::MIN;
-            for &hi in &active {
-                let h = &sim.houses[hi];
-                let s = seat_pos(h);
-                let mut dx = (hub.x - s[0]).abs();
-                if sim.world_w > 1.0 { dx = dx.min(sim.world_w - dx); }
-                let dy = hub.y - s[1];
-                let dist = (dx * dx + dy * dy).sqrt();
-                let power = h.wealth.max(1.0) * (0.5 + h.political_power);
-                let score = power / (1.0 + dist);
-                if score > best_score { best_score = score; best = hi; }
-            }
-            if best != usize::MAX { controls[best].push([hub.x, hub.y]); }
-        }
-    }
 
-    let mut out: Vec<HouseBrief> = sim.houses.iter().enumerate().map(|(hi, h)| HouseBrief {
-        name: h.name.clone(),
-        head_name: h.head_name.clone(),
-        home_hub: sim.hubs.get(h.hub as usize).map(|x| x.id).unwrap_or(0),
-        home_name: hub_name(h.hub),
-        wealth: h.wealth,
-        prestige: h.prestige,
-        political_power: h.political_power,
-        volume: h.volume,
-        generation: h.generation,
-        head_age: sim.tick.saturating_sub(h.head_since) / 365,
-        specialties: h.spec.iter().map(|&g| gname(g)).collect(),
-        monopolies: h.monopoly.iter().map(|&(g, s)| (gname(g), s)).collect(),
-        rivals: h.rivals.iter().filter_map(|&r| sim.houses.get(r).map(|x| x.name.clone())).collect(),
-        defunct: h.defunct,
-        seat: seat_pos(h),
-        controls: std::mem::take(&mut controls[hi]),
+    // ── Per-seat dominance: a house controls its seat city iff it holds >=50% of
+    //    that city's merchant-house trade volume (its "trade influence"). ───────
+    let nhubs = sim.hubs.len();
+    let mut hub_house_vol: Vec<f32> = vec![0.0; nhubs];   // total resident house volume
+    let mut hub_top: Vec<(usize, f32)> = vec![(usize::MAX, 0.0); nhubs]; // (house, vol)
+    for (hi, h) in sim.houses.iter().enumerate() {
+        if h.defunct { continue; }
+        let hub = h.hub as usize;
+        if hub >= nhubs { continue; }
+        let v = h.volume.max(0.0001); // tiny floor so a lone house still "controls"
+        hub_house_vol[hub] += v;
+        if v > hub_top[hub].1 { hub_top[hub] = (hi, v); }
+    }
+    let dominant_of = |hi: usize| -> bool {
+        let hub = sim.houses[hi].hub as usize;
+        if hub >= nhubs || hub_top[hub].0 != hi { return false; }
+        let share = hub_top[hub].1 / hub_house_vol[hub].max(1e-6);
+        share >= 0.5
+    };
+
+    // ── Trade partners: cities the seat exchanges goods with (in-flight shipments
+    //    to/from the seat). Captures both upstream suppliers and downstream buyers.
+    let partners_of = |hub: usize| -> Vec<usize> {
+        let mut set: Vec<usize> = Vec::new();
+        for s in &sim.in_transit {
+            let other = if s.from as usize == hub { Some(s.to as usize) }
+                else if s.to as usize == hub { Some(s.from as usize) }
+                else { None };
+            if let Some(o) = other { if o != hub && o < nhubs && !set.contains(&o) { set.push(o); } }
+        }
+        set
+    };
+
+    let mut out: Vec<HouseBrief> = sim.houses.iter().enumerate().map(|(hi, h)| {
+        let hub = h.hub as usize;
+        let dominant = dominant_of(hi);
+        // Only a controlling (dominant) house projects onto its trade routes.
+        let partner_hubs = if dominant { partners_of(hub) } else { Vec::new() };
+        let partners: Vec<[f32; 2]> = partner_hubs.iter().map(|&p| seat_pos(p)).collect();
+        let mut cities: Vec<String> = Vec::new();
+        if hub < nhubs { cities.push(hub_name(hub as u32)); }
+        for &p in &partner_hubs { cities.push(hub_name(p as u32)); }
+        HouseBrief {
+            name: h.name.clone(),
+            head_name: h.head_name.clone(),
+            home_hub: sim.hubs.get(hub).map(|x| x.id).unwrap_or(0),
+            home_name: hub_name(h.hub),
+            wealth: h.wealth,
+            prestige: h.prestige,
+            political_power: h.political_power,
+            volume: h.volume,
+            generation: h.generation,
+            head_age: sim.tick.saturating_sub(h.head_since) / 365,
+            specialties: h.spec.iter().map(|&g| gname(g)).collect(),
+            monopolies: h.monopoly.iter().map(|&(g, s)| (gname(g), s)).collect(),
+            rivals: h.rivals.iter().filter_map(|&r| sim.houses.get(r).map(|x| x.name.clone())).collect(),
+            defunct: h.defunct,
+            color: distinct_color(hi), // stable per-house index → stable colour
+            seat: seat_pos(hub),
+            dominant,
+            partners,
+            cities,
+        }
     }).collect();
     // Active first, then richest first.
     out.sort_by(|a, b| (a.defunct, -a.wealth).partial_cmp(&(b.defunct, -b.wealth))

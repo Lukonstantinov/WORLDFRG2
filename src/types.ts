@@ -246,8 +246,11 @@ export interface HouseBrief {
   monopolies: [string, number][]; // good name + share 0..1
   rivals: string[];
   defunct: boolean;
+  color?: string;                // stable distinct colour (hex) for this house
   seat?: [number, number];       // home-seat position (world cell coords)
-  controls?: [number, number][]; // settlements this house controls (world coords)
+  dominant?: boolean;            // holds >=50% of its seat city's trade → controls it
+  partners?: [number, number][]; // trade-partner settlements (world coords)
+  cities?: string[];             // names of cities it trades with (seat first)
 }
 export interface JournalEntry {
   tick: number;

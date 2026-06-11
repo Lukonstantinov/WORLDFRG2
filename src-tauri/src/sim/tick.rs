@@ -974,10 +974,11 @@ impl CampaignSim {
                 self.succeed_house(hi);
             }
         }
-        // Monthly: monopolies, political power, founding, extinction, feuds.
+        // Monthly: monopolies, political power, founding, branching, extinction, feuds.
         if tick % 30 == 0 {
             self.recompute_monopolies_and_power();
             self.maybe_found_house();
+            self.maybe_branch_houses();
             for hi in 0..self.houses.len() {
                 if self.houses[hi].defunct { continue; }
                 if self.houses[hi].wealth < HOUSE_BANKRUPT && self.houses[hi].volume < 0.02 {
@@ -1010,28 +1011,71 @@ impl CampaignSim {
             value: self.houses[hi].generation as f32,
             text: format!("{} succeeds as head of {}", heir, name),
         });
-        // A wealthy, long-established house occasionally founds a cadet BRANCH in a
-        // different prosperous city it trades with.
-        let wealthy = self.houses[hi].wealth > HOUSE_BRANCH_WEALTH && gen >= 3;
-        if wealthy {
+        // A wealthy house founds a cadet BRANCH in a city it trades with. Lowered
+        // to gen>=2 (was gen>=3 ≈ 150+ yrs, which essentially never happened in a
+        // normal playthrough). Periodic branching also runs monthly (see
+        // maybe_branch_houses), so expansion no longer depends solely on a death.
+        if self.houses[hi].wealth > HOUSE_BRANCH_WEALTH && gen >= 2 {
             if let Some(dest) = self.pick_branch_hub(hub) {
-                let split = self.houses[hi].wealth * 0.35;
-                self.houses[hi].wealth -= split;
-                let spec = self.houses[hi].spec.clone();
-                let bname = self.unique_family_name_for(dest, (tick as u64) ^ hi as u64 ^ 0xB7A);
-                let bhead = self.head_name_for(dest, &bname, gen as u64 ^ 0x9001);
                 let parent = name.clone();
-                self.houses.push(House {
-                    name: bname.clone(), hub: dest as u32, wealth: split, prestige: 0.1,
-                    spec, monopoly: vec![], rivals: vec![hi], generation: 1,
-                    head_name: bhead.clone(), head_since: tick,
-                    head_lifespan: self.roll_lifespan(dest as u64 ^ 0xCC),
-                    founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
-                });
-                self.journal.push(JournalEntry {
-                    tick, kind: "founding".into(), hub: dest as i32, good: -1, value: 0.0,
-                    text: format!("{} founds a branch of {} in a new city", bhead, parent),
-                });
+                self.found_branch(hi, dest, parent);
+            }
+        }
+    }
+
+    /// A branch name that KEEPS the family identity: "House Cassii of <City>", so
+    /// the same family visibly spreads across cities (instead of inventing an
+    /// unrelated surname). Unique per city.
+    fn branch_name_for(&self, parent_name: &str, dest: usize) -> String {
+        let surname = parent_name.strip_prefix("House ").unwrap_or(parent_name);
+        let base = surname.split(" of ").next().unwrap_or(surname).trim();
+        let city = self.hubs[dest].name.clone();
+        let cand = format!("House {} of {}", base, city);
+        if !self.houses.iter().any(|h| h.name == cand) { return cand; }
+        format!("House {} of {} [{}]", base, city, self.tick)
+    }
+
+    /// Split a cadet branch of house `hi` into hub `dest`, carrying ~30% of the
+    /// parent's wealth and its specialties, named to keep the family identity.
+    fn found_branch(&mut self, hi: usize, dest: usize, parent: String) {
+        let tick = self.tick;
+        let bname = self.branch_name_for(&parent, dest);
+        // Don't stack two branches of the same family in one city.
+        if self.houses.iter().any(|h| !h.defunct && h.hub as usize == dest && h.name == bname) {
+            return;
+        }
+        let split = self.houses[hi].wealth * 0.30;
+        self.houses[hi].wealth -= split;
+        let spec = self.houses[hi].spec.clone();
+        let bhead = self.head_name_for(dest, &bname, tick as u64 ^ hi as u64 ^ 0x9001);
+        self.houses.push(House {
+            name: bname.clone(), hub: dest as u32, wealth: split, prestige: 0.1,
+            spec, monopoly: vec![], rivals: vec![hi], generation: 1,
+            head_name: bhead.clone(), head_since: tick,
+            head_lifespan: self.roll_lifespan(dest as u64 ^ 0xCC),
+            founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
+        });
+        self.journal.push(JournalEntry {
+            tick, kind: "founding".into(), hub: dest as i32, good: -1, value: 0.0,
+            text: format!("{} founds a branch of {} in {}", bhead, parent, self.hubs[dest].name),
+        });
+    }
+
+    /// Monthly: wealthy, established houses occasionally branch into a city they
+    /// trade with — so a family network spreads across the map within a normal
+    /// playthrough, not only on the rare succession that meets the old gen-3 bar.
+    fn maybe_branch_houses(&mut self) {
+        let tick = self.tick;
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct { continue; }
+            if self.houses[hi].generation < 2 { continue; }
+            if self.houses[hi].wealth <= HOUSE_BRANCH_WEALTH { continue; }
+            // ~2.5%/month for an eligible house → a branch every few years.
+            if hash01(self.seed, tick as u64 ^ 0xBA11, hi as u64) > 0.025 { continue; }
+            let hub = self.houses[hi].hub as usize;
+            if let Some(dest) = self.pick_branch_hub(hub) {
+                let parent = self.houses[hi].name.clone();
+                self.found_branch(hi, dest, parent);
             }
         }
     }
@@ -1191,9 +1235,18 @@ impl CampaignSim {
             value: index,
             text: String::new(),
         });
-        // Cap journal length so very long campaigns stay bounded.
-        if self.journal.len() > 20_000 {
-            let drop = self.journal.len() - 20_000;
+        // ROLLING 25-YEAR WINDOW: drop journal entries older than 25 years. The
+        // journal is append-only and the WHOLE thing is (de)serialized on every
+        // state fetch — past ~25 years that accumulation is the source of the lag.
+        // Older ticks are simply discarded (overwritten by newer history). A hard
+        // count cap stays as a safety net for event-dense ticks.
+        const JOURNAL_WINDOW_TICKS: u32 = 25 * TICKS_PER_YEAR; // 25 years
+        let cutoff = self.tick.saturating_sub(JOURNAL_WINDOW_TICKS);
+        if self.journal.first().map_or(false, |e| e.tick < cutoff) {
+            self.journal.retain(|e| e.tick >= cutoff);
+        }
+        if self.journal.len() > 12_000 {
+            let drop = self.journal.len() - 12_000;
             self.journal.drain(0..drop);
         }
     }

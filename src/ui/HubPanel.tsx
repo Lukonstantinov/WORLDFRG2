@@ -26,7 +26,7 @@ function HouseSharePie({ houses, guildVolume, merchants }:
   const useVol = volTotal > 1e-4;
   const houseVal = (h: HouseBrief) => useVol ? Math.max(0, h.volume ?? 0) : Math.max(0, h.wealth);
   const raw: { name: string; value: number; color: string }[] = houses
-    .map((h) => ({ name: h.name, value: houseVal(h), color: houseColor(h.name) }));
+    .map((h) => ({ name: h.name, value: houseVal(h), color: h.color ?? houseColor(h.name) }));
   raw.push({ name: "Local merchants & guilds", value: Math.max(0, guildVolume), color: GUILD_COLOR });
   const total = Math.max(1e-6, raw.reduce((s, x) => s + x.value, 0));
   const slices = raw

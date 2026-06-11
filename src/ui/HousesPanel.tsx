@@ -1,6 +1,10 @@
 import { useCampaignStore } from "../state/campaignStore";
 import { useUIStore } from "../state/uiStore";
 import { CoatOfArms } from "./CoatOfArms";
+import { GOOD_DEFS } from "../goods";
+
+const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
+const goodIcon = (name: string) => GOOD_ICON.get(name) ?? "\u{1F4E6}"; // 📦 fallback
 
 /** Merchant Houses browser — every trading family, its coat of arms, head of
  *  family, home city, wealth, the trades it controls (monopolies) and rivals.
@@ -30,21 +34,36 @@ export function HousesPanel() {
             <CoatOfArms name={h.name} size={30} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                {/* Colour chip = this house's unique map colour */}
+                <span style={{ width: 9, height: 9, borderRadius: 2, background: h.color ?? "#888", flex: "0 0 auto", alignSelf: "center" }} />
                 <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12 }}>{h.name}</span>
                 <span style={{ color: "#6a86a6", fontSize: 9 }}>· {h.home_name}</span>
                 <span style={{ flex: 1 }} />
+                {h.dominant && <span title="Controls its seat city (>=50% of its trade)" style={{ fontSize: 10 }}>⚖</span>}
                 {h.political_power > 0.5 && <span title="A leading political power" style={{ fontSize: 10 }}>👑</span>}
               </div>
               <div style={{ color: "#9ab0c8", fontSize: 10 }}>
                 {h.head_name} · gen. {h.generation} · led {h.head_age}y
               </div>
-              {/* Trades the house controls */}
-              <div style={{ color: "#cdbb88", fontSize: 10, marginTop: 1 }}>
-                {h.specialties.length > 0 && <>Trades: {h.specialties.join(", ")}</>}
-              </div>
+              {/* Trades the house controls — with good icons */}
+              {h.specialties.length > 0 && (
+                <div style={{ color: "#cdbb88", fontSize: 10, marginTop: 1, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+                  {h.specialties.map((g) => (
+                    <span key={g} title={g} style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+                      <span style={{ fontSize: 11 }}>{goodIcon(g)}</span>{g}
+                    </span>
+                  ))}
+                </div>
+              )}
               {h.monopolies.length > 0 && (
                 <div style={{ color: "#e0b060", fontSize: 10 }}>
-                  {h.monopolies.map(([g, s]) => `${g} ${Math.round(s * 100)}%`).join(" · ")} of the trade
+                  {h.monopolies.map(([g, s]) => `${goodIcon(g)} ${g} ${Math.round(s * 100)}%`).join(" · ")} of the trade
+                </div>
+              )}
+              {/* Cities this house trades with (seat first) */}
+              {h.cities && h.cities.length > 0 && (
+                <div style={{ color: "#88a8c8", fontSize: 9, marginTop: 1 }}>
+                  🏙 {h.cities.slice(0, 6).join(", ")}{h.cities.length > 6 ? ` +${h.cities.length - 6}` : ""}
                 </div>
               )}
               {h.rivals.length > 0 && (

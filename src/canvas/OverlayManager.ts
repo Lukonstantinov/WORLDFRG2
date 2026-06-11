@@ -1,5 +1,4 @@
 import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief } from "../types";
-import { houseColor } from "../ui/CoatOfArms";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "../goods";
 import { drawGoodIcon } from "./goodIcons";
 import { latLineY } from "./projection";
@@ -165,10 +164,10 @@ export class OverlayManager {
     this.politicalCenters = centers;
   }
 
-  /** Merchant-family control: which settlements each house holds. Pass the active
-   *  houses (with seat + controls positions) and the world wrap width. */
+  /** Merchant-family control: the houses that DOMINATE their seat city (>=50% of
+   *  its trade). Pass the active houses (with colour/seat/partners) + wrap width. */
   drawHouseControl(houses: HouseBrief[], gridW: number) {
-    this.houses = houses.filter((h) => !h.defunct && h.controls && h.controls.length > 0);
+    this.houses = houses.filter((h) => !h.defunct && h.dominant && h.seat);
     if (gridW > 0) this.worldW = gridW;
   }
 
@@ -427,10 +426,11 @@ export class OverlayManager {
       for (const c of this.politicalCenters) this.renderPoliticalCenter(ctx, c);
     }
 
-    // Merchant-family control: each house's settlements tinted its arms colour,
-    // tied back to the family seat. Shows who controls which towns at a glance.
-    if (this.visibility.houseControl && this.houses.length > 0) {
-      for (const h of this.houses) this.renderHouseControl(ctx, h);
+    // Merchant-family control: settlements a house dominates (>=50% of local
+    // trade) and the trade routes it runs are tinted that house's unique colour;
+    // every other settlement is a small grey dot and every other route is grey.
+    if (this.visibility.houseControl && this.settlements.length > 0) {
+      this.renderHouseControlLayer(ctx);
     }
 
     // Directional trade corridors: one net-direction arrow per hub→hub corridor
@@ -832,44 +832,77 @@ export class OverlayManager {
     ctx.globalAlpha = 1;
   }
 
-  /** One merchant family's domain: its controlled settlements tinted the house's
-   *  arms colour, each tied back to the family seat by a thin line; the seat is a
-   *  bolder ringed dot. Lines that span the cylindrical wrap seam are skipped. */
-  private renderHouseControl(ctx: CanvasRenderingContext2D, h: HouseBrief) {
-    const col = houseColor(h.name);
+  /** The whole House Control layer: grey baseline (every settlement a small grey
+   *  dot, every trade route faint grey), then each dominant house's seat city and
+   *  the real trade-route paths it runs recoloured in that house's unique colour. */
+  private renderHouseControlLayer(ctx: CanvasRenderingContext2D) {
     const inv = 1 / Math.sqrt(this.currentScale);
-    const seam = this.worldW > 1 ? this.worldW * 0.5 : Infinity;
-    const seat = h.seat ?? [0, 0];
-    const sx = seat[0] + 0.5, sy = seat[1] + 0.5;
-    const dotR = Math.max(0.8, 1.6 * inv);
+    const worldW = this.worldW > 1 ? this.worldW : 0;
+    const GREY_DOT = "#69737f";
+    const GREY_ROUTE = "rgba(120,132,146,0.30)";
+    // Squared cylindrical distance with X-wrap.
+    const d2 = (ax: number, ay: number, bx: number, by: number) => {
+      let dx = Math.abs(ax - bx);
+      if (worldW) dx = Math.min(dx, worldW - dx);
+      const dy = ay - by;
+      return dx * dx + dy * dy;
+    };
+    const TOL = 9; // a route endpoint within 3 cells of a seat/partner counts as it.
 
-    // Tie-lines seat → each controlled town.
-    ctx.strokeStyle = col;
-    ctx.globalAlpha = 0.5;
-    ctx.lineWidth = Math.max(0.4, 0.8 * inv);
-    for (const [cx, cy] of h.controls ?? []) {
-      if (Math.abs(cx - seat[0]) > seam) continue; // wrap seam
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(cx + 0.5, cy + 0.5);
+    // Seat → colour lookup (rounded position key).
+    const key = (x: number, y: number) => `${Math.round(x)},${Math.round(y)}`;
+    const seatColor = new Map<string, string>();
+    for (const h of this.houses) {
+      if (h.seat && h.color) seatColor.set(key(h.seat[0], h.seat[1]), h.color);
+    }
+
+    // ── Trade routes (drawn first, under the dots) ──
+    const drawPath = (pts: [number, number][], stroke: string, width: number, alpha: number) => {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = width;
+      ctx.globalAlpha = alpha;
+      let started = false;
+      for (let i = 0; i < pts.length; i++) {
+        if (i > 0 && worldW && Math.abs(pts[i][0] - pts[i - 1][0]) > worldW * 0.5) started = false; // seam
+        if (!started) { ctx.beginPath(); ctx.moveTo(pts[i][0] + 0.5, pts[i][1] + 0.5); started = true; }
+        else ctx.lineTo(pts[i][0] + 0.5, pts[i][1] + 0.5);
+      }
       ctx.stroke();
+    };
+    for (const route of this.tradeRoutes) {
+      const pts = route.points;
+      if (pts.length < 2) continue;
+      const a = pts[0], b = pts[pts.length - 1];
+      // Colour the route if it links a dominant house's seat to one of its partners.
+      let col: string | null = null;
+      for (const h of this.houses) {
+        if (!h.seat) continue;
+        const aIsSeat = d2(a[0], a[1], h.seat[0], h.seat[1]) <= TOL;
+        const bIsSeat = d2(b[0], b[1], h.seat[0], h.seat[1]) <= TOL;
+        if (!aIsSeat && !bIsSeat) continue;
+        const other = aIsSeat ? b : a;
+        const isPartner = (h.partners ?? []).some((p) => d2(other[0], other[1], p[0], p[1]) <= TOL);
+        if (isPartner) { col = h.color!; break; }
+      }
+      if (col) drawPath(pts, col, Math.max(0.8, 1.6 * inv), 0.95);
+      else drawPath(pts, GREY_ROUTE, Math.max(0.4, 0.8 * inv), 1);
     }
-    // Controlled-town dots.
-    ctx.globalAlpha = 0.9;
-    ctx.fillStyle = col;
-    for (const [cx, cy] of h.controls ?? []) {
-      ctx.beginPath();
-      ctx.arc(cx + 0.5, cy + 0.5, dotR, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // Seat marker: larger ringed dot.
-    ctx.beginPath();
-    ctx.arc(sx, sy, dotR * 1.9, 0, Math.PI * 2);
-    ctx.fill();
     ctx.globalAlpha = 1;
-    ctx.lineWidth = Math.max(0.4, 1.0 * inv);
-    ctx.strokeStyle = "rgba(8,16,28,0.9)";
-    ctx.stroke();
+
+    // ── Settlement dots ──
+    const dotR = Math.max(0.7, 1.4 * inv);
+    for (const s of this.settlements) {
+      const c = seatColor.get(key(s.x, s.y));
+      ctx.beginPath();
+      ctx.fillStyle = c ?? GREY_DOT;
+      ctx.arc(s.x + 0.5, s.y + 0.5, c ? dotR * 1.7 : dotR, 0, Math.PI * 2);
+      ctx.fill();
+      if (c) {
+        ctx.lineWidth = Math.max(0.4, 0.9 * inv);
+        ctx.strokeStyle = "rgba(8,16,28,0.9)";
+        ctx.stroke();
+      }
+    }
   }
 
   /** A trade hub: a blue circle. Large hubs (top power tier, ≥4 of 5) get a white
