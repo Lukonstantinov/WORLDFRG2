@@ -6,9 +6,66 @@ import { useCampaignStore } from "../state/campaignStore";
 import { campaignGetHub } from "../bridge/tauri";
 import type { EconHub, HubCurrency, HubDetail } from "../types";
 import { climatePhrase } from "./climate";
-import { CoatOfArms } from "./CoatOfArms";
+import { CoatOfArms, houseColor } from "./CoatOfArms";
+import type { HouseBrief } from "../types";
 
 type Tab = "overview" | "market" | "society" | "history";
+
+const GUILD_COLOR = "#7f8a99"; // unaffiliated local merchants & guilds (slate grey)
+
+/** Donut chart dividing a settlement's TRADE AMOUNT between the merchant houses
+ *  and the unaffiliated local merchants & guilds — at a glance, who moves the
+ *  trade here. Each house slice is its coat-of-arms colour; the guild slice is
+ *  grey. */
+function HouseSharePie({ houses, guildVolume, merchants }:
+  { houses: HouseBrief[]; guildVolume: number; merchants: number }) {
+  const R = 30, r = 17, cx = 34, cy = 34; // outer/inner radius, center
+  // Trade amount = recent trade volume; fall back to wealth before any trade has
+  // flowed so the chart isn't empty on a fresh campaign.
+  const volTotal = houses.reduce((s, h) => s + Math.max(0, h.volume ?? 0), 0);
+  const useVol = volTotal > 1e-4;
+  const houseVal = (h: HouseBrief) => useVol ? Math.max(0, h.volume ?? 0) : Math.max(0, h.wealth);
+  const raw: { name: string; value: number; color: string }[] = houses
+    .map((h) => ({ name: h.name, value: houseVal(h), color: houseColor(h.name) }));
+  raw.push({ name: "Local merchants & guilds", value: Math.max(0, guildVolume), color: GUILD_COLOR });
+  const total = Math.max(1e-6, raw.reduce((s, x) => s + x.value, 0));
+  const slices = raw
+    .map((x) => ({ ...x, frac: x.value / total }))
+    .filter((s) => s.frac > 0.004)
+    .sort((a, b) => b.frac - a.frac);
+  let a0 = -Math.PI / 2; // start at 12 o'clock
+  const arc = (frac: number) => {
+    const a1 = a0 + Math.min(frac, 0.9999) * Math.PI * 2;
+    const large = frac > 0.5 ? 1 : 0;
+    const p = (rad: number, ang: number) => `${cx + rad * Math.cos(ang)},${cy + rad * Math.sin(ang)}`;
+    const d = `M ${p(R, a0)} A ${R} ${R} 0 ${large} 1 ${p(R, a1)} L ${p(r, a1)} A ${r} ${r} 0 ${large} 0 ${p(r, a0)} Z`;
+    a0 = a1;
+    return d;
+  };
+  const top = slices[0];
+  const nHouses = houses.length;
+  return (
+    <div style={{ display: "flex", gap: 10, alignItems: "center", margin: "2px 0 6px" }}>
+      <svg width={68} height={68} viewBox="0 0 68 68" style={{ flex: "0 0 auto" }}>
+        {slices.map((s) => (
+          <path key={s.name} d={arc(s.frac)} fill={s.color} stroke="#0c1118" strokeWidth={0.6}>
+            <title>{`${s.name}: ${Math.round(s.frac * 100)}%`}</title>
+          </path>
+        ))}
+        {slices.length === 0 && <circle cx={cx} cy={cy} r={R} fill="#16222e" />}
+      </svg>
+      <div style={{ fontSize: 10, color: "#9ab0c8", lineHeight: 1.5 }}>
+        <div style={{ color: "#cfe0f4", fontWeight: 600 }}>
+          {nHouses} {nHouses === 1 ? "house" : "houses"} · {Math.round(merchants)} merchants
+        </div>
+        {top && (
+          <div>Leads trade: <span style={{ color: top.color, fontWeight: 600 }}>{top.name}</span> ({Math.round(top.frac * 100)}%)</div>
+        )}
+        <div style={{ color: "#7f8a99" }}>by trade volume moved</div>
+      </div>
+    </div>
+  );
+}
 
 /** Hub inspector: click a trade hub → a tabbed settlement window. Overview holds
  *  the identity, population mood and character; Market the prices (× world value,
@@ -333,9 +390,16 @@ export function HubPanel() {
           {detail && detail.houses && detail.houses.length > 0 && (() => {
             const hs = detail.houses;
             const total = Math.max(1e-6, hs.reduce((s, h) => s + Math.max(0, h.wealth), 0));
+            // The unaffiliated local merchants & guilds also move trade. Their share
+            // scales with the size of the merchant class (merchant_level 0..1): a
+            // big mercantile city has strong guilds independent of the great houses.
+            const mlev = hub.merchant_level ?? 0.3;
+            const houseVol = hs.reduce((s, h) => s + Math.max(0, h.volume ?? h.wealth), 0);
+            const guildVolume = Math.max(0.0001, houseVol) * (0.25 + 1.1 * mlev);
             return (
               <>
-                <div style={{ ...sectionHdr, marginTop: 6 }}>Merchant houses (share of local trade wealth)</div>
+                <div style={{ ...sectionHdr, marginTop: 6 }}>Who controls the trade (houses · merchants · guilds)</div>
+                <HouseSharePie houses={hs} guildVolume={guildVolume} merchants={hub.merchants ?? 0} />
                 {hs.map((h, i) => (
                   <div key={h.name + i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 3 }}>
                     <CoatOfArms name={h.name} size={20} />

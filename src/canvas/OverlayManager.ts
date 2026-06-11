@@ -1,4 +1,5 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor } from "../types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief } from "../types";
+import { houseColor } from "../ui/CoatOfArms";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "../goods";
 import { drawGoodIcon } from "./goodIcons";
 import { latLineY } from "./projection";
@@ -21,14 +22,11 @@ const STAR_COLOR = "#ffd24a"; // power-tier stars on major hubs (gold) — legac
 const HUB_BLUE = "#3a86d6"; // trade-hub circle
 
 const RIVER_COLOR = "#2288cc";
-/** Blue shade by river discharge/width: pale thin streams → deep wide trunks. */
-function riverShade(width: number): string {
-  // width ranges ~0.5 (headwater) .. 8 (great river). Map to a lightness ramp.
-  const t = Math.min(1, Math.max(0, (width - 0.5) / 5.5));
-  const r = Math.round(120 - 96 * t);  // 120 → 24
-  const g = Math.round(190 - 80 * t);  // 190 → 110
-  const b = Math.round(225 - 50 * t);  // 225 → 175
-  return `rgb(${r},${g},${b})`;
+/** River shade: light blue for ordinary streams, a deeper blue once a river has
+ *  grown into a MAJOR trunk (flagged by length in rivers.rs). Two flat shades —
+ *  the colour change is the cue that "this is now a major river". */
+function riverShade(major: boolean | undefined): string {
+  return major ? "rgb(34,96,165)" : "rgb(120,190,225)";
 }
 const LAKE_COLOR = "rgba(51, 153, 221, 0.7)";
 
@@ -77,6 +75,7 @@ export class OverlayManager {
   private goodMeta: Map<string, { icon: string; color: string }> | null = null;
   private tradeTrunks: TradeTrunk[] = [];
   private politicalCenters: PoliticalCenter[] = [];
+  private houses: HouseBrief[] = [];
   private chokepoints: EconChokepoint[] = [];
   private corridors: EconCorridor[] = [];
   private econRegions: EconRegion[] = [];
@@ -96,6 +95,7 @@ export class OverlayManager {
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
+    houseControl: false,
     hubNames: false, settlementNames: false, tradeRegions: false,
   };
 
@@ -163,6 +163,13 @@ export class OverlayManager {
 
   drawPolitical(centers: PoliticalCenter[]) {
     this.politicalCenters = centers;
+  }
+
+  /** Merchant-family control: which settlements each house holds. Pass the active
+   *  houses (with seat + controls positions) and the world wrap width. */
+  drawHouseControl(houses: HouseBrief[], gridW: number) {
+    this.houses = houses.filter((h) => !h.defunct && h.controls && h.controls.length > 0);
+    if (gridW > 0) this.worldW = gridW;
   }
 
   drawChokepoints(chokepoints: EconChokepoint[]) {
@@ -236,8 +243,11 @@ export class OverlayManager {
       const inv = 1 / Math.sqrt(this.currentScale);
       for (const river of this.rivers) {
         if (river.points.length < 2) continue;
-        const riverW = Math.max(0.5, river.width * 0.6 * inv);
-        ctx.strokeStyle = riverShade(river.width);
+        // Every river renders thin: ordinary streams ~1 px, major trunks ~2.5 px,
+        // zoom-compensated. Width never balloons into a blob.
+        const baseW = river.major ? 2.5 : 1.1;
+        const riverW = Math.max(0.8, Math.min(3, baseW) * inv);
+        ctx.strokeStyle = riverShade(river.major);
         ctx.lineWidth = riverW;
         ctx.beginPath();
         ctx.moveTo(river.points[0][0] + 0.5, river.points[0][1] + 0.5);
@@ -415,6 +425,12 @@ export class OverlayManager {
         ctx.fill();
       }
       for (const c of this.politicalCenters) this.renderPoliticalCenter(ctx, c);
+    }
+
+    // Merchant-family control: each house's settlements tinted its arms colour,
+    // tied back to the family seat. Shows who controls which towns at a glance.
+    if (this.visibility.houseControl && this.houses.length > 0) {
+      for (const h of this.houses) this.renderHouseControl(ctx, h);
     }
 
     // Directional trade corridors: one net-direction arrow per hub→hub corridor
@@ -816,6 +832,46 @@ export class OverlayManager {
     ctx.globalAlpha = 1;
   }
 
+  /** One merchant family's domain: its controlled settlements tinted the house's
+   *  arms colour, each tied back to the family seat by a thin line; the seat is a
+   *  bolder ringed dot. Lines that span the cylindrical wrap seam are skipped. */
+  private renderHouseControl(ctx: CanvasRenderingContext2D, h: HouseBrief) {
+    const col = houseColor(h.name);
+    const inv = 1 / Math.sqrt(this.currentScale);
+    const seam = this.worldW > 1 ? this.worldW * 0.5 : Infinity;
+    const seat = h.seat ?? [0, 0];
+    const sx = seat[0] + 0.5, sy = seat[1] + 0.5;
+    const dotR = Math.max(0.8, 1.6 * inv);
+
+    // Tie-lines seat → each controlled town.
+    ctx.strokeStyle = col;
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = Math.max(0.4, 0.8 * inv);
+    for (const [cx, cy] of h.controls ?? []) {
+      if (Math.abs(cx - seat[0]) > seam) continue; // wrap seam
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(cx + 0.5, cy + 0.5);
+      ctx.stroke();
+    }
+    // Controlled-town dots.
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = col;
+    for (const [cx, cy] of h.controls ?? []) {
+      ctx.beginPath();
+      ctx.arc(cx + 0.5, cy + 0.5, dotR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Seat marker: larger ringed dot.
+    ctx.beginPath();
+    ctx.arc(sx, sy, dotR * 1.9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = Math.max(0.4, 1.0 * inv);
+    ctx.strokeStyle = "rgba(8,16,28,0.9)";
+    ctx.stroke();
+  }
+
   /** A trade hub: a blue circle. Large hubs (top power tier, ≥4 of 5) get a white
    *  square inside to mark them as the great entrepôts. No stars, no disc. The
    *  hub's name is drawn separately when the "Hub names" overlay is on. */
@@ -1212,6 +1268,7 @@ export class OverlayManager {
     this.goodRegions = [];
     this.tradeTrunks = [];
     this.politicalCenters = [];
+    this.houses = [];
     this.chokepoints = [];
     this.corridors = [];
     this.econRegions = [];

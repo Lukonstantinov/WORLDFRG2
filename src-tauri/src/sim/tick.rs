@@ -922,6 +922,29 @@ impl CampaignSim {
         )
     }
 
+    /// A GLOBALLY-UNIQUE "House X" name for `hub`. The culture surname pools are
+    /// finite, so naive generation repeats names — and because a house's coat of
+    /// arms is derived from its name, repeated names also mean repeated heraldry.
+    /// Retry with re-salted surnames; if the pool collides, distinguish the family
+    /// with its home city ("House Cassii of Aquentia") so every house is unique in
+    /// both name and arms. Checks against ALL houses (incl. defunct) so a fallen
+    /// family's name isn't silently reused.
+    fn unique_family_name_for(&self, hub: usize, salt: u64) -> String {
+        let taken = |name: &str, houses: &[House]| houses.iter().any(|h| h.name == name);
+        for k in 0..32u64 {
+            let cand = self.family_name_for(hub, salt ^ k.wrapping_mul(0x9E3779B1));
+            if !taken(&cand, &self.houses) { return cand; }
+        }
+        let city = self.hubs[hub].name.clone();
+        for k in 0..32u64 {
+            let base = self.family_name_for(hub, salt ^ k.wrapping_mul(0x85EBCA77));
+            let cand = format!("{} of {}", base, city);
+            if !taken(&cand, &self.houses) { return cand; }
+        }
+        // Last resort (vanishingly rare): tick-tag guarantees uniqueness.
+        format!("{} of {} [{}]", self.family_name_for(hub, salt), city, self.tick)
+    }
+
     /// "Marcus Cassii"-style head name for `house_name` at `hub`, varied by `salt`.
     fn head_name_for(&self, hub: usize, house_name: &str, salt: u64) -> String {
         let surname = house_name.strip_prefix("House ").unwrap_or(house_name);
@@ -995,7 +1018,7 @@ impl CampaignSim {
                 let split = self.houses[hi].wealth * 0.35;
                 self.houses[hi].wealth -= split;
                 let spec = self.houses[hi].spec.clone();
-                let bname = self.family_name_for(dest, (tick as u64) ^ hi as u64 ^ 0xB7A);
+                let bname = self.unique_family_name_for(dest, (tick as u64) ^ hi as u64 ^ 0xB7A);
                 let bhead = self.head_name_for(dest, &bname, gen as u64 ^ 0x9001);
                 let parent = name.clone();
                 self.houses.push(House {
@@ -1090,7 +1113,7 @@ impl CampaignSim {
         let spec: Vec<usize> = gi.into_iter().filter(|&g| self.hubs[hub].production[g] > 0.0)
             .take(2).collect();
         if spec.is_empty() { return; }
-        let name = self.family_name_for(hub, tick as u64 ^ 0xF00D);
+        let name = self.unique_family_name_for(hub, tick as u64 ^ 0xF00D);
         let head = self.head_name_for(hub, &name, tick as u64 ^ 0x1234);
         self.journal.push(JournalEntry {
             tick, kind: "founding".into(), hub: hub as i32, good: spec[0] as i32, value: 0.0,

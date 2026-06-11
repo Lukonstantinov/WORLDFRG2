@@ -7,6 +7,12 @@ use std::cmp::Ordering;
 pub struct River {
     pub points: Vec<(u32, u32)>,
     pub width: f32,
+    /// True once the river has run far enough to count as a MAJOR river (a long
+    /// continental trunk). Drives a darker render shade so the eye can pick out
+    /// the great rivers from the thin headwater streams. Set purely from length,
+    /// not discharge, so the colour change marks where a stream "becomes" a river.
+    #[serde(default)]
+    pub major: bool,
     /// Big enough to carry boats (a trade artery), set from discharge/width.
     #[serde(default)]
     pub navigable: bool,
@@ -267,9 +273,17 @@ pub fn extract_rivers(
             let arid_frac = arid / length.max(1.0);
             let discharge = mouth_acc * runoff * (1.0 - 0.45 * arid_frac);
             let len_term = (length / (220.0 * area_ratio.sqrt())).min(1.5) * 0.5;
-            let width = (((discharge / threshold as f32).sqrt() * 1.1 + len_term + 0.5)
-                * width_scale)
-                .clamp(0.5, 8.0);
+            // Width kept in a NARROW band: every river renders 1–3 px wide (per the
+            // user's rule). We still compute a physical discharge so the *relative*
+            // ordering is sane, but squash it into [0.8, 3.0] so no river ever
+            // renders as a fat blob.
+            let raw = (discharge / threshold as f32).sqrt() * 1.1 + len_term + 0.5;
+            let width = (raw * width_scale).clamp(0.8, 3.0);
+            // MAJOR river = a long trunk. Threshold scales with map size (~10% of
+            // the world width, floored) so it's resolution-independent: a great
+            // river that has gathered a long course flips to the darker shade.
+            let major_len = (w as f32 * 0.10).max(60.0);
+            let major = length >= major_len;
             points.reverse(); // source to mouth
 
             // ── Mouth landform: delta vs estuary, + navigability ──
@@ -307,7 +321,7 @@ pub fn extract_rivers(
                 if mouth_kind == 2 { delta.clear(); } // estuaries aren't drawn as a fan
             }
 
-            rivers.push(River { points, width, navigable, mouth_kind, delta });
+            rivers.push(River { points, width, major, navigable, mouth_kind, delta });
         }
     }
 

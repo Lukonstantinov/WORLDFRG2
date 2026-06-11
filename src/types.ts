@@ -239,12 +239,15 @@ export interface HouseBrief {
   wealth: number;
   prestige: number;
   political_power: number;
+  volume?: number;     // recent trade volume — the "trade amount" the house moves
   generation: number;
   head_age: number;    // years the current head has led
   specialties: string[];
   monopolies: [string, number][]; // good name + share 0..1
   rivals: string[];
   defunct: boolean;
+  seat?: [number, number];       // home-seat position (world cell coords)
+  controls?: [number, number][]; // settlements this house controls (world coords)
 }
 export interface JournalEntry {
   tick: number;
@@ -538,6 +541,7 @@ export interface TradeMatrix {
 export interface RiverData {
   points: [number, number][];
   width: number;
+  major?: boolean; // long trunk river → darker render shade
   navigable?: boolean;
   mouth_kind?: number; // 0 plain, 1 delta, 2 estuary
   delta?: [number, number][];

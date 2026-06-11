@@ -8,6 +8,7 @@ import { useWorldStore } from "../state/worldStore";
 import { useViewportStore } from "../state/viewportStore";
 import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
+import { useCampaignStore } from "../state/campaignStore";
 import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy } from "../bridge/tauri";
 import { goodOverlayKey } from "../goods";
 import type { PaintValue, EconChain } from "../types";
@@ -58,6 +59,7 @@ export function MapCanvas() {
   const tileVersion = useViewportStore((s) => s.tileVersion);
   const focusTarget = useViewportStore((s) => s.focusTarget);
   const overlayVisibility = useUIStore((s) => s.overlayVisibility);
+  const houses = useCampaignStore((s) => s.houses);
   const stretchToFit = useUIStore((s) => s.stretchToFit);
   const setStatus = useUIStore((s) => s.setStatus);
   // Trade routes/flows are a product of the Biological-Trade step (8), not an
@@ -538,6 +540,15 @@ export function MapCanvas() {
     }
     requestRender();
   }, [overlayVisibility, requestRender]);
+
+  // Merchant-family control overlay — which settlements each house holds. Driven
+  // by the live campaign houses (updates dynamically as the campaign advances).
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.drawHouseControl(houses, meta?.grid_width ?? 0);
+    requestRender();
+  }, [houses, meta, requestRender]);
 
   // Draw latitude lines. Driven by the live `latConfig` slice (not `meta`) so
   // dragging the Latitude Frame sliders repaints ONLY this overlay — no tile

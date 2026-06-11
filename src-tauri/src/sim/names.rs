@@ -129,33 +129,45 @@ const ROMAN_GIVEN: [&str; 10] = [
     "Marcus", "Lucius", "Gaius", "Titus", "Quintus", "Publius", "Aulus", "Gnaeus",
     "Servius", "Decimus",
 ];
-const ROMAN_FAMILY: [&str; 10] = [
+const ROMAN_FAMILY: [&str; 24] = [
     "Cassii", "Valerii", "Aurelii", "Cornelii", "Fabii", "Julii", "Aemilii",
-    "Flavii", "Claudii", "Marcii",
+    "Flavii", "Claudii", "Marcii", "Horatii", "Sempronii", "Licinii", "Calpurnii",
+    "Domitii", "Pompeii", "Tullii", "Manlii", "Postumii", "Sergii", "Antonii",
+    "Octavii", "Furii", "Quinctii",
 ];
-const GREEK_GIVEN: [&str; 10] = [
+const GREEK_GIVEN: [&str; 16] = [
     "Alexios", "Theron", "Nikias", "Demetrios", "Leonidas", "Kallias", "Andronikos",
-    "Philon", "Lysandros", "Aristeas",
+    "Philon", "Lysandros", "Aristeas", "Kleon", "Diodoros", "Menandros", "Theophilos",
+    "Xenon", "Polykrates",
 ];
-const GREEK_FAMILY: [&str; 10] = [
+const GREEK_FAMILY: [&str; 24] = [
     "Alkmaionidai", "Philaidai", "Bakchiadai", "Kypselidai", "Peisistratidai",
-    "Eumolpidai", "Pelopidai", "Neleidai", "Gephyraioi", "Kerykes",
+    "Eumolpidai", "Pelopidai", "Neleidai", "Gephyraioi", "Kerykes", "Aleuadai",
+    "Battiadai", "Penthilidai", "Oxylidai", "Eteoboutadai", "Praxiergidai",
+    "Salaminioi", "Eupatridai", "Medontidai", "Amythaonidai", "Branchidai",
+    "Asklepiadai", "Daidalidai", "Lykomidai",
 ];
-const PUNIC_GIVEN: [&str; 10] = [
+const PUNIC_GIVEN: [&str; 16] = [
     "Hanno", "Mago", "Hamilcar", "Bomilcar", "Adherbal", "Gisco", "Hasdrubal",
-    "Maharbal", "Bostar", "Himilco",
+    "Maharbal", "Bostar", "Himilco", "Carthalo", "Eshmun", "Abdmelqart", "Gerashtart",
+    "Yutpan", "Zakarbaal",
 ];
-const PUNIC_FAMILY: [&str; 10] = [
+const PUNIC_FAMILY: [&str; 24] = [
     "Barcids", "Magonids", "Hannids", "Gisconids", "Adherids", "Bomilcids",
-    "Melqartids", "Bostarids", "Tyrians", "Sidonites",
+    "Melqartids", "Bostarids", "Tyrians", "Sidonites", "Hasdrubids", "Maharbids",
+    "Himilcids", "Hannonids", "Carthalids", "Eshmunids", "Baalids", "Abdmelqarts",
+    "Gerids", "Safots", "Zakarbids", "Yutpanids", "Hampsicorids", "Mutumbids",
 ];
-const PERSIAN_GIVEN: [&str; 10] = [
+const PERSIAN_GIVEN: [&str; 16] = [
     "Dariush", "Kourosh", "Bahram", "Artashir", "Kavus", "Farrokh", "Mithradat",
-    "Vahram", "Tiridat", "Spitama",
+    "Vahram", "Tiridat", "Spitama", "Vologases", "Narseh", "Khosrow", "Peroz",
+    "Shapur", "Hormizd",
 ];
-const PERSIAN_FAMILY: [&str; 10] = [
+const PERSIAN_FAMILY: [&str; 24] = [
     "Karen", "Suren", "Mihranids", "Spandiyads", "Varaz", "Kanarang", "Aspahbads",
-    "Zarmihr", "Achaemenids", "Sasanids",
+    "Zarmihr", "Achaemenids", "Sasanids", "Arsacids", "Zik", "Mehran", "Ispahbudhan",
+    "Pahlavids", "Kavadids", "Bahramids", "Farrukhzads", "Gondofarids", "Tahmurids",
+    "Narseids", "Vistahmids", "Zarmihrids", "Dahae",
 ];
 
 fn given_family(culture: Culture) -> (&'static [&'static str], &'static [&'static str]) {

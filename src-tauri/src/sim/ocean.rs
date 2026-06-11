@@ -632,9 +632,11 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
                   // Poleward of this the western boundary is bathed by the COLD
                   // subpolar return (Oyashio/Labrador) below — so Kamchatka,
                   // Hokkaido and Labrador read cold, not warm.
-            } else if basin_pos > 0.45 && abs_lat > 18.0 && abs_lat < 48.0 && speed > 0.35 {
-                2 // cold eastern-boundary current (kept out of the tropics, which
-                  // should read neutral/grey — tropical currents are not cold)
+            } else if basin_pos > 0.45 && abs_lat > 23.0 && abs_lat < 48.0 && speed > 0.35 {
+                2 // cold eastern-boundary current. Floor raised to 23° (Tropic of
+                  // Cancer) so the whole tropical belt — e.g. the seas around the
+                  // Indian subcontinent — reads NEUTRAL/grey, never cold. Tropical
+                  // currents (monsoon drift, equatorial) are not cold.
             } else if abs_lat >= 48.0 && abs_lat < 68.0 && basin_pos < -0.3 && speed > 0.45 {
                 2 // cold subpolar boundary current (Oyashio/Labrador). Onset at 48°
                   // (Kamchatka ≈53° → cold ✓) leaves a NEUTRAL gap 42–48° on the W
@@ -1134,10 +1136,11 @@ fn extend_cold_tag(buf: &mut WorldBuffer) {
                 let mag = (vmx * vmx + vmy * vmy).sqrt();
                 if mag < 0.05 { break; }
                 let alat = buf.latitude(yi as u32).abs();
-                // Equatorial band stays NEUTRAL: a current only reads cold once it
-                // is at least ~15° from the equator (per the rule that equatorial
-                // currents are neither warm nor cold).
-                if alat < 15.0 { break; }
+                // Tropical band stays NEUTRAL: a current only reads cold once it is
+                // out of the tropics (~22°, just shy of the Tropic of Cancer). This
+                // keeps the seas around India / SE Asia grey rather than letting a
+                // cold tag advect down into the monsoon tropics.
+                if alat < 22.0 { break; }
 
                 cold_add[i] = true;
                 let (hx, hy) = (vmx / mag, vmy / mag);

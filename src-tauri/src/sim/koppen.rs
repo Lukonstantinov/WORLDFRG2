@@ -266,7 +266,11 @@ fn is_upwind_warm_current(buf: &WorldBuffer, x: u32, y: u32) -> bool {
 fn winter_dry_monsoon(buf: &WorldBuffer, x: u32, y: u32) -> bool {
     let lat = buf.latitude(y);
     let abs_lat = lat.abs();
-    if abs_lat < 25.0 || abs_lat > 55.0 { return false; }
+    // LOCKED to the subtropics (23–45°). The dry-winter monsoon climates (Cw*/Dw*)
+    // belong to the subtropical/warm-temperate east-coast band — NOT the cold
+    // high-mid latitudes. This hard cap keeps "Continental Forest (dry winter)"
+    // (Dwb) out of places like 52°N (which must read humid-continental Dfb).
+    if abs_lat < 23.0 || abs_lat > 45.0 { return false; }
     // (1) DEEP continental interior on the windward (westerly) side. The Siberian-
     //     High winter monsoon only builds over a giant landmass, so there must be
     //     NO ocean upwind within a *continental* reach (~1700 km). This is the key
@@ -548,6 +552,24 @@ fn classify_cell(buf: &WorldBuffer, x: u32, y: u32) -> u8 {
 fn latitude_guardrail(code: u8, abs_lat: f32, elevation: f32, precip: f32, temp: f32) -> u8 {
     // Above the treeline we don't second-guess the classifier.
     if elevation > 0.40 { return code; }
+
+    // MONSOON LATITUDE LOCK: the dry-winter monsoon climates (Cw*/Dw*) belong to
+    // the subtropical/warm-temperate east-coast band. They must NEVER appear in
+    // the cold high-mid latitudes (e.g. Dwb at 52°N over Europe). Above 45° demote
+    // any dry-winter class to its no-dry-season (f) equivalent. (winter_dry_monsoon
+    // is already capped at 45° upstream; this is a hard backstop on the output.)
+    if abs_lat > 45.0 {
+        match code {
+            CWA => return CFA,
+            CWB => return CFB,
+            CWC => return CFC,
+            DWA => return DFA,
+            DWB => return DFB,
+            DWC => return DFC,
+            DWD => return DFD,
+            _ => {}
+        }
+    }
 
     let is_tropical = matches!(code, AF | AM | AW | AS);
     let is_temperate = matches!(code,

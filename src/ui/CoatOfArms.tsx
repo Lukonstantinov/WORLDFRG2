@@ -22,6 +22,13 @@ function hash(s: string): number {
   return h >>> 0;
 }
 
+/** The house's primary (field) tincture — the same colour as its shield field.
+ *  Shared so the map control overlay and the settlement pie chart colour each
+ *  house identically to its coat of arms. */
+export function houseColor(name: string): string {
+  return TINCTURES[hash(name) % TINCTURES.length];
+}
+
 /** A charge (central symbol) drawn in the given color, centered in a ~32-wide field. */
 function charge(kind: number, color: string): JSX.Element {
   const c = color;
