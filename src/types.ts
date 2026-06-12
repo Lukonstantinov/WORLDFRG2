@@ -272,6 +272,9 @@ export interface HubDetail {
   /** Market flow: in-flight shipments arriving / departing (ranked by value). */
   arrivals?: ShipmentRow[];
   departures?: ShipmentRow[];
+  /** Recently completed deals (most recent first), by direction. */
+  recent_arrivals?: ShipmentRow[];
+  recent_departures?: ShipmentRow[];
   bought?: number;
   sold?: number;
   /** Estates & manufactories in this city's hinterland. */

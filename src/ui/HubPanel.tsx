@@ -292,9 +292,15 @@ export function HubPanel() {
               <div style={{ display: "flex", gap: 6 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={sectionHdr}>⇢ Arrivals</div>
-                  {(detail.arrivals ?? []).length === 0 && <div style={emptyTxt}>none inbound</div>}
-                  {(detail.arrivals ?? []).slice(0, 16).map((s, i) => (
+                  {(detail.arrivals ?? []).length === 0 && (detail.recent_arrivals ?? []).length === 0 && <div style={emptyTxt}>none inbound</div>}
+                  {(detail.arrivals ?? []).slice(0, 14).map((s, i) => (
                     <ShipRow key={"a" + i} s={s} side="in" icon={iconFor} label={labelFor} />
+                  ))}
+                  {(detail.recent_arrivals ?? []).length > 0 && (
+                    <div style={{ color: "#56708e", fontSize: 8, margin: "3px 0 1px", borderTop: "1px solid #131f2c", paddingTop: 2 }}>recent</div>
+                  )}
+                  {(detail.recent_arrivals ?? []).slice(0, 10).map((s, i) => (
+                    <ShipRow key={"ra" + i} s={s} side="in" icon={iconFor} label={labelFor} faded />
                   ))}
                 </div>
                 <div style={{ flex: 1.25, minWidth: 0, borderLeft: "1px solid #1e2e42", borderRight: "1px solid #1e2e42", padding: "0 6px" }}>
@@ -324,9 +330,15 @@ export function HubPanel() {
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ ...sectionHdr, textAlign: "right" }}>Departures ⇢</div>
-                  {(detail.departures ?? []).length === 0 && <div style={emptyTxt}>none outbound</div>}
-                  {(detail.departures ?? []).slice(0, 16).map((s, i) => (
+                  {(detail.departures ?? []).length === 0 && (detail.recent_departures ?? []).length === 0 && <div style={emptyTxt}>none outbound</div>}
+                  {(detail.departures ?? []).slice(0, 14).map((s, i) => (
                     <ShipRow key={"d" + i} s={s} side="out" icon={iconFor} label={labelFor} />
+                  ))}
+                  {(detail.recent_departures ?? []).length > 0 && (
+                    <div style={{ color: "#56708e", fontSize: 8, margin: "3px 0 1px", borderTop: "1px solid #131f2c", paddingTop: 2, textAlign: "right" }}>recent</div>
+                  )}
+                  {(detail.recent_departures ?? []).slice(0, 10).map((s, i) => (
+                    <ShipRow key={"rd" + i} s={s} side="out" icon={iconFor} label={labelFor} faded />
                   ))}
                 </div>
               </div>
@@ -1057,14 +1069,14 @@ const fmtN = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed
 /** One shipment row in the Market flow (arrivals / departures), tagged with its
  *  owner (house/guild/local), origin or destination, carrier, good, amount and
  *  price — ranked by value upstream. A round-trip return leg is marked ↩. */
-function ShipRow({ s, side, icon, label }: {
+function ShipRow({ s, side, icon, label, faded }: {
   s: import("../types").ShipmentRow; side: "in" | "out";
-  icon: (id: string) => string; label: (id: string) => string;
+  icon: (id: string) => string; label: (id: string) => string; faded?: boolean;
 }) {
   const carrier = s.sea ? "🚢" : "🐫";
   const arrow = <span style={{ color: "#5a7090" }}>─▶</span>;
   return (
-    <div style={{ fontSize: 8.5, marginBottom: 2, lineHeight: 1.25 }}
+    <div style={{ fontSize: 8.5, marginBottom: 2, lineHeight: 1.25, opacity: faded ? 0.6 : 1 }}
       title={`${s.owner}${s.is_guild ? " (guild)" : ""} · ${s.other} · ${label(s.good)} ${fmtN(s.amount)} · value ${fmtN(s.value)}`}>
       <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
         {side === "out" && arrow}

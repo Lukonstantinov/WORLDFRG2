@@ -345,6 +345,21 @@ pub struct InTransit {
     #[serde(default = "neg_one_i32")] pub home: i32,
 }
 
+/// One recently completed trade (for the Market tab "recent deals" rows). A small
+/// rolling log of dispatched shipments — captures the deal as it leaves, which
+/// serves both the source's recent-departures and the destination's recent-arrivals.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RecentTrade {
+    pub from: u32,
+    pub to: u32,
+    pub good: usize,
+    pub amount: f32,
+    pub owner: i32,
+    pub sea: bool,
+    pub price: f32,
+    pub tick: u32,
+}
+
 /// One milestone in a house's chronicle (its timeline view).
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct HouseEvent {
@@ -526,6 +541,8 @@ pub struct CampaignSim {
     #[serde(default)] pub diag_by_guild: u32,    // carried by local merchants/guilds
     #[serde(default)] pub diag_lost: u32,        // voyages lost (storm/ambush)
     #[serde(default)] pub diag_volume: f32,      // total goods volume shipped
+    /// Rolling log of recently dispatched trades (for the Market "recent deals").
+    #[serde(default)] pub recent_trades: Vec<RecentTrade>,
     /// Derived route-days matrix (n·n, f32::INFINITY = unreachable). Not
     /// serialized — rebuilt from positions + components after load.
     #[serde(skip)]
@@ -1300,6 +1317,7 @@ impl CampaignSim {
                         phase: 0,
                         home: if owner >= 0 { a as i32 } else { -1 },
                     });
+                    self.log_trade(a as u32, b as u32, g, amount, owner, sea, pa);
                 }
             }
         }
@@ -1401,6 +1419,7 @@ impl CampaignSim {
             phase: 1,
             home: -1,
         });
+        self.log_trade(b as u32, a as u32, g, amount, owner as i32, sea, pb_buy);
     }
 
     /// Index helper so the borrow checker is happy reading b's stock in dispatch.
@@ -1956,6 +1975,13 @@ impl CampaignSim {
 
     /// The living merchant families: ageing heads, monopolies, feuds, founding,
     /// extinction and political power.
+    /// Log a dispatched trade for the Market "recent deals" rows (rolling, capped).
+    fn log_trade(&mut self, from: u32, to: u32, good: usize, amount: f32, owner: i32, sea: bool, price: f32) {
+        self.recent_trades.push(RecentTrade { from, to, good, amount, owner, sea, price, tick: self.tick });
+        let n = self.recent_trades.len();
+        if n > 400 { self.recent_trades.drain(0..n - 400); }
+    }
+
     /// Record trade VOLUME a holder moved through a hub (for office ties).
     fn bump_trade_at(&mut self, holder: usize, hub: usize, amount: f32) {
         if holder >= self.houses.len() { return; }
@@ -2724,6 +2750,7 @@ mod tests {
             fleets_migrated: true, tech_factor: 1.0, percap_migrated: true,
             colonizable: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
+            recent_trades: vec![],
             days: vec![],
         };
         s.rebuild_routes();

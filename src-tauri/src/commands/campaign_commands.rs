@@ -409,6 +409,9 @@ pub struct HubDetail {
     /// Market flow: in-flight shipments arriving / departing (ranked by value).
     #[serde(default)] pub arrivals: Vec<ShipmentRow>,
     #[serde(default)] pub departures: Vec<ShipmentRow>,
+    /// Recently COMPLETED deals (most recent first), by direction.
+    #[serde(default)] pub recent_arrivals: Vec<ShipmentRow>,
+    #[serde(default)] pub recent_departures: Vec<ShipmentRow>,
     /// Recent trade value bought (imports) vs sold (exports), decaying tallies.
     #[serde(default)] pub bought: f32,
     #[serde(default)] pub sold: f32,
@@ -858,6 +861,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         diag_by_guild: 0,
         diag_lost: 0,
         diag_volume: 0.0,
+        recent_trades: vec![],
         days: vec![],
     };
     sim.rebuild_routes();
@@ -986,6 +990,24 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         b.value.partial_cmp(&a.value).unwrap_or(std::cmp::Ordering::Equal);
     arrivals.sort_by(by_value); arrivals.truncate(40);
     departures.sort_by(by_value); departures.truncate(40);
+    // Recently completed deals (most recent first), split by direction at this hub.
+    let mk_recent = |r: &crate::sim::tick::RecentTrade, other: u32| -> ShipmentRow {
+        let g = r.good.min(ng.saturating_sub(1));
+        let base = sim.goods[g].base_value.max(1e-3);
+        ShipmentRow {
+            owner: owner_name(r.owner), color: owner_color(r.owner), is_guild: owner_is_guild(r.owner),
+            other: cname(other), good: sim.goods[g].name.clone(), amount: r.amount,
+            price: r.price / base, value: r.amount * r.price, sea: r.sea, returning_home: false,
+        }
+    };
+    let mut recent_arrivals: Vec<ShipmentRow> = Vec::new();
+    let mut recent_departures: Vec<ShipmentRow> = Vec::new();
+    for r in sim.recent_trades.iter().rev() {
+        if r.good >= ng { continue; }
+        if r.to as usize == hi && recent_arrivals.len() < 12 { recent_arrivals.push(mk_recent(r, r.from)); }
+        if r.from as usize == hi && recent_departures.len() < 12 { recent_departures.push(mk_recent(r, r.to)); }
+        if recent_arrivals.len() >= 12 && recent_departures.len() >= 12 { break; }
+    }
     let bought = hub.import_spend;
     let sold = hub.export_earn;
     // ── Estates & manufactories in this city's hinterland ──
@@ -1101,6 +1123,8 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         offices_here,
         arrivals,
         departures,
+        recent_arrivals,
+        recent_departures,
         bought,
         sold,
         estates_here,
