@@ -82,6 +82,20 @@ const ESTATE_OWNER_CUT: f32 = 0.5;
 const ESTATE_HOUSE_OWNER_WEALTH: f32 = 6.0;
 /// A house must be at least this wealthy to lead a colonization of new land.
 const COLONIZE_HOUSE_WEALTH: f32 = 18.0;
+/// A house with at least this wealth invests its surplus capital into building an
+/// estate (raw production) or a manufactory (a luxury good) — the main wealth sink
+/// that turns hoarded profit into expansion and more production.
+const INVEST_WEALTH: f32 = 12.0;
+/// Base capital to found an estate/manufactory, scaled by the host city's size and
+/// discounted where the house already holds an office.
+const INVEST_COST_BASE: f32 = 5.0;
+/// A house won't keep building once it owns this many estates/manufactories.
+const MAX_HOUSE_ESTATES: usize = 6;
+/// A single settlement won't host more than this many estates/manufactories, so a
+/// city's hinterland isn't overrun (houses AND guilds both build there).
+const MAX_ESTATES_PER_CITY: usize = 4;
+/// Per-capita output rate of a house-built manufactory's luxury good.
+const MANUFACTORY_PERCAP: f32 = 0.2;
 
 // ── Merchant guilds & offices (C3) ───────────────────────────────────────────
 /// A settlement gets a civic Merchant Guild once it reaches this population.
@@ -89,11 +103,13 @@ const GUILD_MIN_POP: f32 = 50_000.0;
 /// Monthly civic subsidy into a guild's treasury, per 1,000 home-city people
 /// (scaled by the city's prosperity). The city funds its guild.
 const GUILD_SUBSIDY_PER_1K: f32 = 0.02;
-/// Recent trade volume a holder must have moved through a non-home city before it
-/// will open an office there (a real working relationship).
-const OFFICE_OPEN_VOLUME: f32 = 60.0;
+/// Small absolute floor of accumulated trade volume before a holder will open an
+/// office in a non-home city. The real trigger is RELATIVE (a top trade partner —
+/// see `update_guilds_and_offices`); this floor just stops a barely-trading holder
+/// from opening offices. Kept low so offices actually emerge at real trade scales.
+const OFFICE_OPEN_VOLUME: f32 = 4.0;
 /// Below this tie volume an existing office is abandoned (hysteresis vs OPEN).
-const OFFICE_CLOSE_VOLUME: f32 = 6.0;
+const OFFICE_CLOSE_VOLUME: f32 = 0.5;
 /// Base wealth cost to open an office, SCALED UP by the host city's importance
 /// (population) — a counting-house in a great hub costs more.
 const OFFICE_COST_BASE: f32 = 4.0;
@@ -155,7 +171,10 @@ fn estate_kind_for_good(name: &str, food: bool) -> u8 {
 
 /// Short label for an estate kind (for journal text + the inspector).
 fn estate_kind_label(kind: u8) -> &'static str {
-    match kind { 1 => "Farm", 2 => "Mine", 3 => "Plantation", 4 => "Fishery", 5 => "Vineyard", _ => "Estate" }
+    match kind {
+        1 => "Farm", 2 => "Mine", 3 => "Plantation", 4 => "Fishery", 5 => "Vineyard",
+        6 => "Manufactory", _ => "Estate",
+    }
 }
 
 // ── Structures (per-settlement buildings) ───────────────────────────────────
@@ -1384,12 +1403,14 @@ impl CampaignSim {
 
     /// Index helper so the borrow checker is happy reading b's stock in dispatch.
     fn house_for(&self, hub: usize, good: usize) -> i32 {
-        // Prefer a holder SEATED at the hub specializing in the good, then any
-        // holder seated there, then any holder with an OFFICE there (a second base
-        // it can originate trade from — how offices grow a family's reach).
+        // A civic GUILD seated here runs its own city's trade first — it acts in the
+        // city's interest, carrying its imports (filling the city's deficits) and
+        // shipping its surplus to fund them. Then a specialist house seated here,
+        // then any seated house, then any holder with an OFFICE here (a second base).
         self.houses
             .iter()
-            .position(|h| !h.defunct && h.hub as usize == hub && h.spec.contains(&good))
+            .position(|h| !h.defunct && h.is_guild && h.hub as usize == hub)
+            .or_else(|| self.houses.iter().position(|h| !h.defunct && h.hub as usize == hub && h.spec.contains(&good)))
             .or_else(|| self.houses.iter().position(|h| !h.defunct && h.hub as usize == hub))
             .or_else(|| self.houses.iter().position(|h| !h.defunct && h.offices.contains(&(hub as u32))))
             .map(|i| i as i32)
@@ -1703,6 +1724,94 @@ impl CampaignSim {
             (self.hubs[parent].koppen, self.hubs[parent].coastal, self.hubs[parent].component);
         self.create_estate(parent as i32, ex, ey, g0, kind, owner_house, koppen, coastal,
             component, est_pop, percap);
+    }
+
+    /// Monthly: a wealthy house invests its surplus capital into a new estate (raw
+    /// production) or a manufactory (a luxury good), in a city it trades with —
+    /// cheaper where it already holds an office. This is the wealth sink that turns
+    /// hoarded profit into expansion and more production (estate income flows back
+    /// to the owning house, so it compounds).
+    fn maybe_house_invests(&mut self) {
+        let tick = self.tick;
+        let n = self.hubs.len();
+        let ng = self.goods.len();
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct { continue; }
+            if self.houses[hi].wealth < INVEST_WEALTH { continue; }
+            // Soft cap so one rich house doesn't blanket the map with estates.
+            let owned = self.hubs.iter().filter(|h| h.is_estate && h.owner_house == hi as i32).count();
+            if owned >= MAX_HOUSE_ESTATES { continue; }
+            // ~4%/month for an eligible house → invests roughly every couple of years.
+            if hash01(self.seed, tick as u64 ^ 0xE57A7E, hi as u64) > 0.04 { continue; }
+            // Build in the house's strongest trade partner (a city it actually works),
+            // else at home. Skip estates themselves.
+            let home = self.houses[hi].hub as usize;
+            let target = self.houses[hi].trade_at.iter()
+                .filter(|(hb, _)| (*hb as usize) < n && !self.hubs[*hb as usize].is_estate)
+                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(hb, _)| *hb as usize)
+                .unwrap_or(home);
+            if target >= n || self.hubs[target].is_estate { continue; }
+            // Per-settlement cap: don't overrun one city's hinterland with estates.
+            let on_city = self.hubs.iter()
+                .filter(|h| h.is_estate && h.parent == target as i32).count();
+            if on_city >= MAX_ESTATES_PER_CITY { continue; }
+            // Cost scales with the host city's size; an office there makes it cheaper.
+            let has_office = self.houses[hi].offices.contains(&(target as u32));
+            let cost = INVEST_COST_BASE
+                * (self.hubs[target].population / 30_000.0).clamp(0.5, 3.0)
+                * if has_office { 0.6 } else { 1.0 };
+            if self.houses[hi].wealth < cost * 1.5 { continue; }
+            // A manufactory for a LUXURY (one the house specializes in, or — for a
+            // guild / spec-less holder — the target city's strongest-produced luxury),
+            // else a raw estate of the city's strongest good. Mix the two so cities
+            // get both raw output and value-added luxuries.
+            let house_lux = self.houses[hi].spec.iter().cloned()
+                .find(|&g| g < ng && !self.goods[g].food && self.goods[g].base_value >= 4.0);
+            let city_lux = (0..ng)
+                .filter(|&g| !self.goods[g].food && self.goods[g].base_value >= 4.0)
+                .map(|g| (g, self.hubs[target].base_per_capita.get(g).copied().unwrap_or(0.0)))
+                .filter(|(_, pc)| *pc > 0.0)
+                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(g, _)| g);
+            let want_manu = house_lux.is_some()
+                || (city_lux.is_some() && hash01(self.seed, tick as u64 ^ 0xFAC7, hi as u64) < 0.5);
+            let manu_good = house_lux.or(city_lux);
+            let (g0, kind, percap) = if want_manu && manu_good.is_some() {
+                (manu_good.unwrap(), 6u8, MANUFACTORY_PERCAP)
+            } else {
+                let mut bg = (usize::MAX, 0.0f32);
+                for g in 0..ng {
+                    let pc = self.hubs[target].base_per_capita.get(g).copied().unwrap_or(0.0);
+                    if pc > bg.1 { bg = (g, pc); }
+                }
+                if bg.0 == usize::MAX { continue; }
+                let k = estate_kind_for_good(&self.goods[bg.0].name, self.goods[bg.0].food);
+                (bg.0, k, self.hubs[target].base_per_capita.get(bg.0).copied().unwrap_or(0.05).max(0.05) * 1.5)
+            };
+            // A fishery needs a coast; inland fall back to a farm of the city's good.
+            let (kind, g0, percap) = if kind == 4 && !self.hubs[target].coastal {
+                let mut bf = (usize::MAX, 0.0f32);
+                for g in 0..ng {
+                    if self.goods[g].food {
+                        let pc = self.hubs[target].base_per_capita.get(g).copied().unwrap_or(0.0);
+                        if pc > bf.1 { bf = (g, pc); }
+                    }
+                }
+                if bf.0 == usize::MAX { continue; }
+                (1u8, bf.0, (bf.1 * 1.5).max(0.05))
+            } else { (kind, g0, percap) };
+            self.houses[hi].wealth -= cost;
+            let off = hash01(self.seed, tick as u64 ^ 0x12E5, target as u64);
+            let ex = self.hubs[target].x + (off - 0.5) * self.world_w * 0.03;
+            let ey = self.hubs[target].y
+                + (hash01(self.seed, target as u64, tick as u64 ^ 0x77) - 0.5) * self.world_w * 0.02;
+            let est_pop = self.hubs[target].founding_pop * 0.12;
+            let (koppen, coastal, component) =
+                (self.hubs[target].koppen, self.hubs[target].coastal, self.hubs[target].component);
+            self.create_estate(target as i32, ex, ey, g0, kind, hi as i32, koppen, coastal,
+                component, est_pop, percap);
+        }
     }
 
     /// A very wealthy house (or, failing that, the largest city) plants an estate on
@@ -2029,6 +2138,7 @@ impl CampaignSim {
             self.manage_fleets();
             self.update_structures();
             self.maybe_branch_houses();
+            self.maybe_house_invests();
             self.update_guilds_and_offices();
             for hi in 0..self.houses.len() {
                 if self.houses[hi].defunct || self.houses[hi].is_guild { continue; } // guilds are civic — never bankrupt
@@ -2809,5 +2919,24 @@ mod tests {
         s.advance(800);
         assert!(s.houses[0].offices.contains(&1),
             "house opens an office in its trade partner B: {:?}", s.houses[0].offices);
+    }
+
+    #[test]
+    fn rich_house_invests_in_estates() {
+        // A profitable house should spend its hoarded capital building estates /
+        // manufactories instead of letting wealth pile up forever.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", i32::MAX, 2, 20.0, 0.5, false),
+            good("wine", i32::MAX, 1, 8.0, 0.5, false),
+        ];
+        let fp = 5000.0 * 0.85 * DEMAND_PRESSURE * 1.5;
+        let mut ha = hub(0, 10.0, 10.0, 5000.0, vec![fp, 3000.0, 0.0], 0); ha.coastal = true;
+        let mut hb = hub(1, 16.0, 10.0, 5000.0, vec![fp, 0.0, 3000.0], 0); hb.coastal = true;
+        let mut s = sim(vec![ha, hb], goods);
+        s.houses = vec![house_at(0, vec![1], 4)];
+        s.advance(365 * 4);
+        let owned = s.hubs.iter().filter(|h| h.is_estate && h.owner_house == 0).count();
+        assert!(owned >= 1, "a profitable house builds at least one estate/manufactory (owned={owned})");
     }
 }
