@@ -195,6 +195,32 @@ export function StepCampaign({ seed }: { seed: number; plateCount: number; inval
             </div>
           )}
 
+          {/* ── World shortage + merchant population (rollup) ── */}
+          {worldEconomy && (worldEconomy.lack_series?.length ?? 0) > 1 && (
+            <div style={card}>
+              <div style={hdr}>People lacking goods (world)</div>
+              <WorldLines
+                rows={worldEconomy.lack_series!} min={0} max={1}
+                fmt={(v) => `${Math.round(v * 100)}%`}
+                legend={[
+                  { label: "Basic", color: "#ff8a6a" },
+                  { label: "Comfort", color: "#e0c060" },
+                  { label: "Luxury", color: "#9ab0c8" },
+                ]}
+              />
+              <div style={{ ...hdr, marginTop: 8 }}>Merchant population (world)</div>
+              <WorldLines
+                rows={worldEconomy.merchant_series ?? []} min={0}
+                fmt={(v) => Math.round(v).toLocaleString()}
+                legend={[
+                  { label: "🧺 Local", color: "#7fd0a0" },
+                  { label: "🏛 Houses", color: "#e0c060" },
+                  { label: "⚖ Guilds", color: "#8aa0c0" },
+                ]}
+              />
+            </div>
+          )}
+
           {/* ── Costliest goods worldwide ── */}
           {worldEconomy && worldEconomy.goods.length > 0 && (
             <div style={card}>
@@ -280,6 +306,46 @@ function Sparkline({ series }: { series: [number, number][] }) {
     <svg width={w} height={h} style={{ display: "block" }}>
       <polyline points={pts} fill="none" stroke="#4a90c0" strokeWidth={1.5} />
     </svg>
+  );
+}
+
+/** Three overlaid series (cols 1-3 of each row) + a legend with current values.
+ *  Used for the world shortage-by-tier and merchant-population-by-class rollups. */
+function WorldLines({ rows, legend, min, max, fmt }: {
+  rows: [number, number, number, number][];
+  legend: { label: string; color: string }[];
+  min?: number; max?: number; fmt: (v: number) => string;
+}) {
+  const w = 200, h = 40;
+  if (rows.length < 2) return <div style={{ color: "#506080", fontSize: 10 }}>—</div>;
+  const vals = rows.flatMap((r) => [r[1], r[2], r[3]]);
+  const lo = min ?? Math.min(...vals);
+  const hi = max ?? Math.max(...vals, lo + 1e-6);
+  const span = Math.max(1e-6, hi - lo);
+  const line = (col: 1 | 2 | 3) =>
+    rows.map((r, i) => {
+      const x = (i / (rows.length - 1)) * w;
+      const y = h - ((r[col] - lo) / span) * (h - 4) - 2;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+  const last = rows[rows.length - 1];
+  return (
+    <>
+      <svg width={w} height={h} style={{ display: "block", background: "#0b1622", borderRadius: 3 }}>
+        {[1, 2, 3].map((c) => (
+          <polyline key={c} points={line(c as 1 | 2 | 3)} fill="none"
+            stroke={legend[c - 1]?.color ?? "#888"} strokeWidth={1.5} />
+        ))}
+      </svg>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
+        {legend.map((l, i) => (
+          <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9, color: "#9ab0c8" }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: l.color }} />
+            {l.label} <span style={{ color: l.color, fontWeight: 700 }}>{fmt(last[(i + 1) as 1 | 2 | 3])}</span>
+          </span>
+        ))}
+      </div>
+    </>
   );
 }
 

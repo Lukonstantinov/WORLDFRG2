@@ -13,6 +13,11 @@ type Tab = "overview" | "market" | "society" | "history";
 
 const LOCAL_COLOR = "#5d6675";  // unaffiliated local merchants (grey)
 const GUILD_COLOR = "#4a6a8a";  // organised merchant guilds (slate blue)
+const ESTATE_EMOJI: Record<number, string> = { 1: "🌾", 2: "⛏️", 3: "🌿", 4: "🎣", 5: "🍇" };
+const ESTATE_LABEL: Record<number, string> = { 1: "Farm", 2: "Mine", 3: "Plantation", 4: "Fishery", 5: "Vineyard" };
+const STRUCT_EMOJI: Record<string, string> = {
+  Granary: "🌾", Warehouse: "📦", Shipyard: "⚓", Guildhall: "🏛️", Workshop: "🔨",
+};
 
 /** Donut chart dividing a settlement's TRADE AMOUNT between the merchant houses
  *  and — always present — the unaffiliated local merchants and the merchant
@@ -201,6 +206,22 @@ export function HubPanel() {
             <Stat label="Wealth" value={`${Math.round(hub.wealth * 100)}%`} />
             <Stat label="Population" value={(detail?.population ?? hub.population).toLocaleString()} />
           </div>
+          {detail && (detail.estate_kind ?? 0) > 0 && (
+            <div style={estateBox}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                <span style={{ fontSize: 13 }}>{ESTATE_EMOJI[detail.estate_kind ?? 0] ?? "🏡"}</span>
+                <span style={{ color: "#cdbb88", fontWeight: 700, fontSize: 12 }}>
+                  {ESTATE_LABEL[detail.estate_kind ?? 0] ?? "Estate"}
+                </span>
+                <span style={{ flex: 1 }} />
+                <span style={{ color: "#7fd0a0", fontSize: 9 }}>income → owner</span>
+              </div>
+              <div style={{ color: "#9ab0c8", fontSize: 10, marginTop: 2 }}>
+                Owned by <span style={{ color: "#e8dcc0" }}>{detail.estate_owner || "—"}</span>
+                {detail.estate_good && <> · works {iconFor(detail.estate_good)} {labelFor(detail.estate_good)}</>}
+              </div>
+            </div>
+          )}
           {hub.top_export && (
             <div style={{ color: "#e0c060", fontSize: 11, margin: "5px 0 2px", display: "flex", gap: 6, alignItems: "baseline" }}>
               <span style={{ color: "#6a86a6", fontSize: 10 }}>Richest trade:</span>
@@ -217,6 +238,21 @@ export function HubPanel() {
               <span style={{ color: "#6a86a6" }}>Monopolies: </span>
               {hub.monopolies.map((m) => `${iconFor(m)} ${labelFor(m)}`).join(", ")}
             </div>
+          )}
+
+          {/* Buildings (structures) the city has erected */}
+          {detail && (detail.structures?.length ?? 0) > 0 && (
+            <>
+              <div style={{ ...sectionHdr, marginTop: 6 }}>Buildings</div>
+              {detail.structures!.map(([nm, eff], i) => (
+                <div key={i} style={{ display: "flex", gap: 6, alignItems: "baseline", fontSize: 10, padding: "1px 2px" }}>
+                  <span style={{ fontSize: 12 }}>{STRUCT_EMOJI[nm] ?? "🏗️"}</span>
+                  <span style={{ color: "#cdbb88", fontWeight: 700 }}>{nm}</span>
+                  <span style={{ flex: 1 }} />
+                  <span style={{ color: "#7fbf9a" }}>{eff}</span>
+                </div>
+              ))}
+            </>
           )}
 
           {/* Population mood + drivers */}
@@ -244,6 +280,50 @@ export function HubPanel() {
               <Stat label="Trade wealth" value={(detail?.trade_wealth ?? hub.market.trade_wealth).toFixed(2)} />
             </div>
           )}
+          {/* Production per day — what this city MAKES, with the actual amount and
+              how much of its own daily demand that covers. Production scales with
+              live population × world tech × season, so these numbers rise year on
+              year (and dip in the lean season for food). Live during a campaign. */}
+          {detail && (() => {
+            const prod = [...detail.goods]
+              .filter((g) => g.production > 0.001)
+              .sort((a, b) => b.production - a.production);
+            if (prod.length === 0) return null;
+            const maxP = Math.max(1e-6, ...prod.map((g) => g.production));
+            return (
+              <>
+                <div style={{ ...sectionHdr, marginTop: 4 }}>
+                  Production / day — amount &amp; % of local demand
+                </div>
+                {prod.slice(0, 16).map((g) => {
+                  const pct = g.need > 1e-6 ? (g.production / g.need) * 100 : 999;
+                  const surplus = pct >= 100;
+                  return (
+                    <div key={`prod${g.good}`} style={{ marginBottom: 2 }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 5, fontSize: 10 }}>
+                        <span style={{ minWidth: 92, color: "#9ab0c8", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                          {iconFor(g.name)} {labelFor(g.name)}
+                        </span>
+                        <span style={{ minWidth: 46, textAlign: "right", color: "#cfe0f4", fontWeight: 600 }}>
+                          {fmt(g.production)}
+                        </span>
+                        <span style={{ minWidth: 50, textAlign: "right", fontSize: 9,
+                          color: surplus ? "#7fd0a0" : "#e0b070" }}
+                          title={`produces ${fmt(g.production)}/day vs local need ${fmt(g.need)}/day`}>
+                          {pct > 998 ? "export" : `${Math.round(pct)}% need`}
+                        </span>
+                      </div>
+                      <div style={{ height: 4, background: "#13202e", borderRadius: 2 }}>
+                        <div style={{ height: 4, width: `${(g.production / maxP) * 100}%`,
+                          background: surplus ? "#5fc8a8" : "#c89a4a", borderRadius: 2 }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
+            );
+          })()}
+
           {hub.market?.currencies && hub.market.currencies.length > 0 ? (
             <CurrencyCard currencies={hub.market.currencies} iconFor={iconFor} labelFor={labelFor} />
           ) : hub.market && hub.market.currency_goods.length > 0 ? (
@@ -577,6 +657,26 @@ export function HubPanel() {
                 <SeriesStat label="Mood" values={detail.history.map((s) => s.mood)}
                   color="#9ab0c8" fmt={(v) => `${Math.round(v * 100)}%`} mt />
                 <Sparkline values={detail.history.map((s) => s.mood)} color="#9ab0c8" min={0} max={1} />
+
+                <div style={{ ...sectionHdr, marginTop: 8 }}>People lacking goods (% of demand unmet)</div>
+                <MultiSeriesChart
+                  min={0} max={1} fmt={(v) => `${Math.round(v * 100)}%`}
+                  series={[
+                    { label: "Basic", color: "#ff8a6a", values: detail.history.map((s) => s.lack_basic ?? 0) },
+                    { label: "Comfort", color: "#e0c060", values: detail.history.map((s) => s.lack_comfort ?? 0) },
+                    { label: "Luxury", color: "#9ab0c8", values: detail.history.map((s) => s.lack_luxury ?? 0) },
+                  ]}
+                />
+
+                <div style={{ ...sectionHdr, marginTop: 8 }}>Merchant population by class</div>
+                <MultiSeriesChart
+                  min={0} fmt={(v) => Math.round(v).toLocaleString()}
+                  series={[
+                    { label: "🧺 Local", color: "#7fd0a0", values: detail.history.map((s) => s.pop_local ?? 0) },
+                    { label: "🏛 Houses", color: "#e0c060", values: detail.history.map((s) => s.pop_house ?? 0) },
+                    { label: "⚖ Guilds", color: "#8aa0c0", values: detail.history.map((s) => s.pop_guild ?? 0) },
+                  ]}
+                />
               </>
             ) : (
               <div style={emptyTxt}>Advance the campaign a few weeks to chart this city's history.</div>
@@ -685,6 +785,44 @@ function Sparkline({ values, color, min, max, baseline }: {
       )}
       <polyline points={pts} fill="none" stroke={color} strokeWidth={1.6} />
     </svg>
+  );
+}
+
+/** Several series overlaid on one tiny chart, with a legend showing each series'
+ *  current value. Used for the per-tier shortage and the merchant-class charts. */
+function MultiSeriesChart({ series, min, max, fmt }: {
+  series: { label: string; color: string; values: number[] }[];
+  min?: number; max?: number; fmt: (v: number) => string;
+}) {
+  const len = Math.max(0, ...series.map((s) => s.values.length));
+  if (len < 2) return <div style={emptyTxt}>—</div>;
+  const all = series.flatMap((s) => s.values);
+  const lo = min ?? Math.min(...all);
+  const hi = max ?? Math.max(...all, lo + 1e-6);
+  const span = Math.max(1e-6, hi - lo);
+  const W = 320, H = 48;
+  return (
+    <>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+        style={{ display: "block", background: "#0b1622", borderRadius: 3 }}>
+        {series.map((s, si) => {
+          const pts = s.values.map((v, i) => {
+            const x = (i / (s.values.length - 1)) * W;
+            const y = H - ((v - lo) / span) * (H - 4) - 2;
+            return `${x.toFixed(1)},${y.toFixed(1)}`;
+          }).join(" ");
+          return <polyline key={si} points={pts} fill="none" stroke={s.color} strokeWidth={1.6} />;
+        })}
+      </svg>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
+        {series.map((s, si) => (
+          <span key={si} style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9, color: "#9ab0c8" }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color }} />
+            {s.label} <span style={{ color: s.color, fontWeight: 700 }}>{fmt(s.values[s.values.length - 1] ?? 0)}</span>
+          </span>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -836,6 +974,10 @@ const sectionHdr: React.CSSProperties = {
 const currencyBox: React.CSSProperties = {
   margin: "2px 0 6px", padding: "5px 7px", background: "#0d1a14",
   border: "1px solid #2a4838", borderRadius: 5,
+};
+const estateBox: React.CSSProperties = {
+  margin: "5px 0 3px", padding: "5px 7px", background: "#161208",
+  border: "1px solid #4a3f1e", borderRadius: 5,
 };
 const row: React.CSSProperties = { display: "flex", alignItems: "center", gap: 4, fontSize: 11, padding: "1px 2px" };
 const emptyTxt: React.CSSProperties = { color: "#506680", fontSize: 10, fontStyle: "italic", padding: "2px 3px" };

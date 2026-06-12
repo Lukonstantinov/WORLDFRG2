@@ -4,10 +4,51 @@ import { useUIStore } from "../state/uiStore";
 import { CoatOfArms } from "./CoatOfArms";
 import { GOOD_DEFS } from "../goods";
 import { campaignGetHouseHistory } from "../bridge/tauri";
-import type { HouseHistory } from "../types";
+import type { HouseHistory, CampaignDiagnostics } from "../types";
 
 const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
 const goodIcon = (name: string) => GOOD_ICON.get(name) ?? "\u{1F4E6}"; // 📦 fallback
+
+/** "Is trade actually moving?" — a compact health strip above the houses list.
+ *  Answers the core merchant-house question: are shipments flowing, how many are
+ *  financed by houses vs. local guilds, are voyages being lost, and how much of
+ *  the world do houses actually control. */
+function TradeDiagnostics({ diag }: { diag: CampaignDiagnostics }) {
+  const fleet = diag.fleet_sea + diag.fleet_river + diag.fleet_caravan;
+  const moving = diag.shipments_last > 0;
+  const housePct = diag.shipments_last > 0
+    ? Math.round((diag.by_house / diag.shipments_last) * 100) : 0;
+  const stat = (label: string, value: string, color = "#cfe0f4", title?: string) => (
+    <div style={diagCell} title={title}>
+      <div style={{ color, fontWeight: 700, fontSize: 12 }}>{value}</div>
+      <div style={{ color: "#6a86a6", fontSize: 9 }}>{label}</div>
+    </div>
+  );
+  return (
+    <div style={diagBar}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+        <span style={{ width: 7, height: 7, borderRadius: "50%", background: moving ? "#5fd08a" : "#d06a5f" }} />
+        <span style={{ color: moving ? "#9fe0b8" : "#e0a09a", fontSize: 10, fontWeight: 600 }}>
+          {moving ? "Trade is flowing" : "No shipments last advance"}
+        </span>
+        <span style={{ flex: 1 }} />
+        <span style={{ color: "#6a86a6", fontSize: 9 }}>year {diag.year}</span>
+      </div>
+      <div style={{ display: "flex", gap: 4 }}>
+        {stat("shipped", String(diag.shipments_last), "#cfe0f4", "Shipments dispatched last advance")}
+        {stat("by houses", `${housePct}%`, housePct > 0 ? "#e0c060" : "#7a90a8", `${diag.by_house} financed by a house, ${diag.by_guild} by local guilds`)}
+        {stat("lost", String(diag.lost_last), diag.lost_last > 0 ? "#e0a09a" : "#7a90a8", "Voyages lost to storm/ambush last advance")}
+        {stat("in transit", String(diag.in_transit), "#9ab0c8", "Shipments currently in flight")}
+      </div>
+      <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+        {stat("controls", String(diag.controlled_settlements), diag.controlled_settlements > 0 ? "#9fe0b8" : "#d06a5f", "Settlements a house controls (>=50% of trade throughput)")}
+        {stat("ships", String(fleet), "#9ab0c8", `${diag.fleet_sea} sea · ${diag.fleet_river} river · ${diag.fleet_caravan} caravan`)}
+        {stat("houses", `${diag.houses_active}`, "#cfe0f4", `${diag.houses_active} active · ${diag.houses_defunct} ruined`)}
+        {stat("wealth", diag.total_house_wealth >= 100 ? `${Math.round(diag.total_house_wealth)}` : diag.total_house_wealth.toFixed(1), "#e0c060", "Combined wealth of all active houses")}
+      </div>
+    </div>
+  );
+}
 
 /** Merchant Houses browser — every trading family, its coat of arms, head of
  *  family, home city, wealth, the trades it controls (monopolies) and rivals.
@@ -15,6 +56,7 @@ const goodIcon = (name: string) => GOOD_ICON.get(name) ?? "\u{1F4E6}"; // 📦 f
 export function HousesPanel() {
   const open = useUIStore((s) => s.showHouses);
   const houses = useCampaignStore((s) => s.houses);
+  const diag = useCampaignStore((s) => s.diagnostics);
   const [history, setHistory] = useState<HouseHistory | null>(null);
   const close = () => useUIStore.getState().setShowHouses(false);
   const openTimeline = (name: string) => {
@@ -33,6 +75,7 @@ export function HousesPanel() {
         <span>⚜️ Merchant Houses ({active.length})</span>
         <span style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
       </div>
+      {diag && <TradeDiagnostics diag={diag} />}
       <div style={{ overflowY: "auto", padding: "4px 8px 10px" }}>
         {houses.length === 0 && (
           <div style={empty}>Begin the campaign (Step 11) — trading families rise as goods start to move.</div>
@@ -126,6 +169,13 @@ const card: React.CSSProperties = {
   borderBottom: "1px solid #131e2a", cursor: "default",
 };
 const empty: React.CSSProperties = { color: "#506080", fontSize: 11, padding: "10px 4px" };
+const diagBar: React.CSSProperties = {
+  padding: "6px 10px", borderBottom: "1px solid #1a2a3e", background: "#0a1119",
+};
+const diagCell: React.CSSProperties = {
+  flex: 1, textAlign: "center", padding: "3px 2px", borderRadius: 4,
+  background: "#101c28",
+};
 
 const EVENT_ICON: Record<string, string> = {
   founded: "🏛", succession: "👤", monopoly: "💰", monopoly_lost: "💸",

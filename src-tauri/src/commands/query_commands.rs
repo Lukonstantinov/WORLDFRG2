@@ -2893,6 +2893,10 @@ pub struct EconomySnapshot {
     #[serde(default)]
     pub class_stats: Vec<ClassStats>,
     pub goods: Vec<String>,
+    /// Empty-land sites a wealthy house / large city can colonize with an estate
+    /// during the campaign (precomputed here while tile data is available).
+    #[serde(default)]
+    pub colonizable_sites: Vec<crate::sim::tick::ColonizeSite>,
 }
 
 fn grade_name(q: f32) -> &'static str {
@@ -2949,6 +2953,96 @@ fn coarse_path_cost(cc: &CoarseCost, path: &[usize]) -> f32 {
     c
 }
 
+/// Precompute empty-land sites a wealthy house / large city can colonize with an
+/// estate during the campaign. A coarse single pass over tiles picks productive land
+/// a good distance from every settlement, spread out, tagged with a suggested estate
+/// kind. Stored in the economy snapshot so the tick sim (which has no WorldBuffer)
+/// can plant colonies. See `CampaignSim::maybe_colonize`.
+fn compute_colonizable_sites(
+    world: &crate::db::world_cache::WorldTiles,
+    grid_w: u32, grid_h: u32,
+    settlements: &[RouteSettlement],
+) -> Vec<crate::sim::tick::ColonizeSite> {
+    use crate::sim::tick::ColonizeSite;
+    if grid_w == 0 || grid_h == 0 { return vec![]; }
+    let f = (grid_w / 120).max(2);
+    let cw = ((grid_w + f - 1) / f) as i32;
+    let ch = ((grid_h + f - 1) / f) as i32;
+    let cn = (cw * ch) as usize;
+    let (mut is_land, mut fert, mut koppen, mut elev) =
+        (vec![false; cn], vec![0.0f32; cn], vec![0u8; cn], vec![0.0f32; cn]);
+    for cy in 0..ch {
+        for cx in 0..cw {
+            let wx = (cx as u32 * f + f / 2).min(grid_w - 1);
+            let wy = (cy as u32 * f + f / 2).min(grid_h - 1);
+            let tile = world.tile((wx / TILE_SIZE) as i32, (wy / TILE_SIZE) as i32);
+            let ti = ((wy % TILE_SIZE) * TILE_SIZE + (wx % TILE_SIZE)) as usize;
+            let ci = (cy * cw + cx) as usize;
+            is_land[ci] = tile.terrain[ti] == 1;
+            fert[ci] = tile.fertility[ti];
+            koppen[ci] = tile.koppen[ti];
+            elev[ci] = tile.elevation[ti];
+        }
+    }
+    let wrap = |x: i32| ((x % cw) + cw) % cw;
+    let coastal = |cx: i32, cy: i32| -> bool {
+        [(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
+            let (nx, ny) = (wrap(cx + dx), cy + dy);
+            ny >= 0 && ny < ch && !is_land[(ny * cw + nx) as usize]
+        })
+    };
+    let scoords: Vec<(i32, i32)> = settlements.iter()
+        .map(|s| ((s.x / f) as i32, (s.y / f) as i32)).collect();
+    let min_settle_dist = |cx: i32, cy: i32| -> f32 {
+        scoords.iter().map(|&(sx, sy)| {
+            let mut dx = (cx - sx).abs();
+            if dx > cw / 2 { dx = cw - dx; }
+            let dy = cy - sy;
+            ((dx * dx + dy * dy) as f32).sqrt()
+        }).fold(f32::MAX, f32::min)
+    };
+    let min_dist = (cw as f32 * 0.05).max(5.0);
+    let mut cands: Vec<(f32, ColonizeSite)> = Vec::new();
+    for cy in 0..ch {
+        for cx in 0..cw {
+            let ci = (cy * cw + cx) as usize;
+            if !is_land[ci] { continue; }
+            // Skip unproductive flatland, but allow highlands (mines).
+            if fert[ci] < 0.30 && elev[ci] < 0.45 { continue; }
+            if min_settle_dist(cx, cy) < min_dist { continue; }
+            let cst = coastal(cx, cy);
+            let kind_hint = if cst && fert[ci] < 0.40 { 4 }
+                else if elev[ci] > 0.45 { 2 }
+                else if fert[ci] > 0.55 { 1 }
+                else { 3 };
+            let score = fert[ci]
+                + if elev[ci] > 0.45 { 0.2 } else { 0.0 }
+                + if cst { 0.1 } else { 0.0 };
+            let wx = (cx as u32 * f + f / 2).min(grid_w - 1) as f32;
+            let wy = (cy as u32 * f + f / 2).min(grid_h - 1) as f32;
+            cands.push((score, ColonizeSite {
+                x: wx, y: wy, koppen: koppen[ci], elevation: elev[ci],
+                fertility: fert[ci], coastal: cst, kind_hint,
+            }));
+        }
+    }
+    cands.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    // Greedy spatial spread so colonies don't all cluster in one fertile belt.
+    let spacing = (cw as f32 * 0.06).max(4.0) * f as f32; // world cells
+    let mut picked: Vec<ColonizeSite> = Vec::new();
+    for (_, s) in cands {
+        if picked.len() >= 60 { break; }
+        let ok = picked.iter().all(|p| {
+            let mut dx = (p.x - s.x).abs();
+            if grid_w > 1 { dx = dx.min(grid_w as f32 - dx); }
+            let dy = p.y - s.y;
+            (dx * dx + dy * dy).sqrt() >= spacing
+        });
+        if ok { picked.push(s); }
+    }
+    picked
+}
+
 /// Build the economy snapshot, persist it to metadata, and return it. Same
 /// inputs as the matrix/political commands so the hubs stay consistent.
 #[tauri::command]
@@ -2973,7 +3067,7 @@ pub fn compute_economy(
     let specs = crate::commands::goods_commands::load_world_goods(&conn);
     let gc = specs.len();
     let goods_names: Vec<String> = specs.iter().map(|s| s.id.clone()).collect();
-    let empty = EconomySnapshot { hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![], corridors: vec![], good_stats: vec![], class_stats: vec![], goods: goods_names.clone() };
+    let empty = EconomySnapshot { hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![], corridors: vec![], good_stats: vec![], class_stats: vec![], goods: goods_names.clone(), colonizable_sites: vec![] };
     if grid_w == 0 || grid_h == 0 {
         return Ok(empty);
     }
@@ -2984,6 +3078,8 @@ pub fn compute_economy(
         let _ = metadata::campaign_set(&conn, "economy", &serde_json::to_string(&empty).unwrap_or_default());
         return Ok(empty);
     }
+    // Empty-land colonization candidates for the campaign (uses tile data here).
+    let colonizable_sites = compute_colonizable_sites(&world, grid_w, grid_h, &settlements);
 
     let wrap_dx = |a: i32, b: i32| -> i32 {
         let mut d = (a - b).abs();
@@ -4006,7 +4102,7 @@ pub fn compute_economy(
         ]
     };
 
-    let snapshot = EconomySnapshot { hubs, chains, chokepoints, regions, corridors, good_stats, class_stats, goods: goods_names };
+    let snapshot = EconomySnapshot { hubs, chains, chokepoints, regions, corridors, good_stats, class_stats, goods: goods_names, colonizable_sites };
     let _ = metadata::campaign_set(&conn, "economy", &serde_json::to_string(&snapshot).unwrap_or_default());
     Ok(snapshot)
 }
@@ -4064,9 +4160,9 @@ pub fn get_economy(db: State<'_, WorldDb>) -> Result<EconomySnapshot, String> {
     match metadata::campaign_get_or_meta(&conn, "economy").map_err(|e| e.to_string())? {
         Some(json) => serde_json::from_str(&json)
             .map_err(|_| ()).or_else(|_| Ok::<_, String>(EconomySnapshot {
-                hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![], corridors: vec![], good_stats: vec![], class_stats: vec![], goods: goods_names.clone(),
+                hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![], corridors: vec![], good_stats: vec![], class_stats: vec![], goods: goods_names.clone(), colonizable_sites: vec![],
             })),
-        None => Ok(EconomySnapshot { hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![], corridors: vec![], good_stats: vec![], class_stats: vec![], goods: goods_names }),
+        None => Ok(EconomySnapshot { hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![], corridors: vec![], good_stats: vec![], class_stats: vec![], goods: goods_names, colonizable_sites: vec![] }),
     }
 }
 
@@ -4118,6 +4214,7 @@ pub fn get_overlays(db: State<'_, WorldDb>) -> Result<OverlaysState, String> {
     let economy = serde_json::from_str(&read_camp("economy")).unwrap_or(EconomySnapshot {
         hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![],
         corridors: vec![], good_stats: vec![], class_stats: vec![], goods: goods_names,
+        colonizable_sites: vec![],
     });
     Ok(OverlaysState { settlements, rivers, lakes, economy })
 }

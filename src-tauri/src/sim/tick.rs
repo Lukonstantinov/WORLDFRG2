@@ -30,9 +30,19 @@ const PRICE_FLOOR_MULT: f32 = 0.15;
 const PRICE_CEIL_MULT: f32 = 12.0;
 /// Per-capita appetite scale; multiplied by the seed-time balance factor so total
 /// need is comparable to total production (an average good ~ slight shortage).
-const DEMAND_PRESSURE: f32 = 1.15;
+pub const DEMAND_PRESSURE: f32 = 1.15;
 /// A house with wealth below this and no trade dissolves (bankruptcy).
 const HOUSE_BANKRUPT: f32 = 0.15;
+/// Export reserves: a hub only ships stock ABOVE a kept reserve. Ordinary goods
+/// keep a thin day's buffer, but FOOD keeps a granary — roughly this many days of
+/// local consumption — so the autumn harvest is held back to feed the city through
+/// winter, droughts and lean years instead of being traded away (which otherwise
+/// strips the seasonal buffer and triggers a famine death-spiral).
+const TRADE_RESERVE_MULT: f32 = 1.1;
+const FOOD_RESERVE_DAYS: f32 = 45.0;
+/// Lower bound on a hub's production multiplier from STACKED active events. Stops
+/// overlapping regional shocks from multiplying output down to near zero.
+const EVENT_PROD_FLOOR: f32 = 0.5;
 /// A house this wealthy may split a cadet branch into another city on succession.
 const HOUSE_BRANCH_WEALTH: f32 = 12.0;
 
@@ -42,6 +52,130 @@ const HOUSE_BRANCH_WEALTH: f32 = 12.0;
 const SEA_LOSS: f32 = 0.05;
 const CARAVAN_LOSS: f32 = 0.03;
 const RIVER_LOSS: f32 = 0.015;
+/// Independent trade shorter than this (travel-days) is "local merchants";
+/// anything longer is organized "guild" long-haul. Splits the non-house carry.
+const LOCAL_HAUL_DAYS: f32 = 8.0;
+/// Share of a settlement's population engaged in merchant trade — split across
+/// houses / local merchants / guilds by their recent throughput at the hub.
+const MERCHANT_POP_FRACTION: f32 = 0.12;
+/// Global productivity drift: technology/agronomy improve output ~1.5%/yr,
+/// applied as COMPOUND growth — each year multiplies the running index by
+/// (1 + rate), so year 1 = ×1.015, year 2 = ×1.015² ≈ ×1.030225, etc. Event
+/// setbacks below are also multiplicative (compound decline off the live index).
+const PROD_GROWTH_PER_YEAR: f32 = 0.015;
+/// One-time global production setbacks applied when adverse events fire. These are
+/// a SLIGHT, recoverable nudge to the world production index — the real impact of a
+/// drought/plague is the LOCAL, temporary hit in `event_production_mult`. They must
+/// stay far below the +1.5%/yr growth drift: with ~30 events/yr a 1% setback each
+/// would erode the index ~35%/yr and spiral the whole world into permanent famine
+/// (the 8M→1M collapse). Kept ~10× smaller so productivity still trends upward.
+const PROD_EVENT_SETBACK: f32 = 0.001;
+const PROD_FIRE_SETBACK: f32 = 0.006;
+/// The global production index can never fall below this fraction — insurance
+/// against any future event storm ratcheting the world into a death-spiral.
+const TECH_FACTOR_FLOOR: f32 = 0.85;
+/// Share of an estate's gross export sales that flows to its OWNER (a house, or the
+/// parent city). The estate's per-capita output is its scale; this is the rent.
+const ESTATE_OWNER_CUT: f32 = 0.5;
+/// A resident house this wealthy (or richer) takes ownership of a new estate its
+/// city founds; below it, the city owns the estate.
+const ESTATE_HOUSE_OWNER_WEALTH: f32 = 6.0;
+/// A house must be at least this wealthy to lead a colonization of new land.
+const COLONIZE_HOUSE_WEALTH: f32 = 18.0;
+
+// ── House archetypes ────────────────────────────────────────────────────────
+const ARCH_SPECIALTY: u8 = 0; // cheaper freight + fatter margin on specialty goods
+const ARCH_FLEET: u8 = 1;     // safer voyages, cheaper ships, longer reach
+const ARCH_BANKING: u8 = 2;   // wealth earns interest; can trade on credit
+const ARCH_POLITICAL: u8 = 3; // more political power; wins city charters
+/// Pick a deterministic archetype for a new house from the founding context.
+pub fn pick_archetype(seed: u64, salt: u64) -> u8 {
+    (hash01(seed, salt ^ 0xA3C7, 0x5151) * 4.0) as u8 % 4
+}
+pub fn archetype_label(a: u8) -> &'static str {
+    match a {
+        ARCH_SPECIALTY => "Specialist traders",
+        ARCH_FLEET => "Shipping dynasty",
+        ARCH_BANKING => "Merchant bankers",
+        ARCH_POLITICAL => "Political house",
+        _ => "Merchant house",
+    }
+}
+/// One-line description of an archetype's standing bonus (for the Houses panel).
+pub fn archetype_perk(a: u8) -> &'static str {
+    match a {
+        ARCH_SPECIALTY => "+25% profit on specialty goods",
+        ARCH_FLEET => "safer voyages · cheaper ships",
+        ARCH_BANKING => "trades on credit · wealth earns interest",
+        ARCH_POLITICAL => "more power · wins city charters",
+        _ => "",
+    }
+}
+const SPECIALTY_MARGIN: f32 = 1.25; // extra profit on specialty goods
+const CHARTER_RENT: f32 = 1.30;     // extra profit on chartered goods
+const BANK_CREDIT_MULT: f32 = 1.6;  // financing reach beyond cash
+const BANK_INTEREST: f32 = 0.01;    // monthly interest on wealth
+const FLEET_LOSS_MULT: f32 = 0.6;   // voyage-loss reduction
+const FLEET_SHIP_DISCOUNT: f32 = 0.8;
+const POLITICAL_POWER_BONUS: f32 = 0.15;
+
+/// Estate-kind id for a produced good, from its name + food flag (0 = unsuited).
+/// 1 farm · 2 mine · 3 plantation · 4 fishery · 5 vineyard.
+fn estate_kind_for_good(name: &str, food: bool) -> u8 {
+    let n = name.to_ascii_lowercase();
+    if n.contains("wine") || n.contains("grape") { return 5; }
+    if n.contains("fish") || n.contains("pearl") || n.contains("whal")
+        || n.contains("herring") || n.contains("stockfish") { return 4; }
+    if n.contains("iron") || n.contains("gem") || n.contains("salt") || n.contains("amber")
+        || n.contains("ore") || n.contains("stone") || n.contains("copper") || n.contains("silver")
+        || n.contains("gold") || n.contains("coal") { return 2; }
+    if food { return 1; }
+    // Any other cultivated trade good (silk, spices, cotton, sugar, tea, coffee, …).
+    3
+}
+
+/// Short label for an estate kind (for journal text + the inspector).
+fn estate_kind_label(kind: u8) -> &'static str {
+    match kind { 1 => "Farm", 2 => "Mine", 3 => "Plantation", 4 => "Fishery", 5 => "Vineyard", _ => "Estate" }
+}
+
+// ── Structures (per-settlement buildings) ───────────────────────────────────
+const STRUCT_GRANARY: u8 = 1;
+const STRUCT_WAREHOUSE: u8 = 2;
+const STRUCT_SHIPYARD: u8 = 3;
+const STRUCT_GUILDHALL: u8 = 4;
+const STRUCT_WORKSHOP: u8 = 5;
+/// A hub needs at least this commercial prosperity to fund a new building.
+const STRUCT_BUILD_WEALTH: f32 = 0.5;
+/// Production multipliers granted by structures.
+const WORKSHOP_PROD: f32 = 1.12;   // all goods
+const WAREHOUSE_PROD: f32 = 1.05;  // all goods (supply smoothing)
+const GRANARY_FOOD_PROD: f32 = 1.12; // food goods only
+/// Guildhall lowers freight on trades leaving its hub.
+const GUILDHALL_FREIGHT: f32 = 0.85;
+
+pub fn structure_label(id: u8) -> &'static str {
+    match id {
+        STRUCT_GRANARY => "Granary",
+        STRUCT_WAREHOUSE => "Warehouse",
+        STRUCT_SHIPYARD => "Shipyard",
+        STRUCT_GUILDHALL => "Guildhall",
+        STRUCT_WORKSHOP => "Workshop",
+        _ => "Building",
+    }
+}
+
+/// One-line effect description for a structure (for the inspector).
+pub fn structure_effect(id: u8) -> &'static str {
+    match id {
+        STRUCT_GRANARY => "+12% food output",
+        STRUCT_WAREHOUSE => "+5% output (storage)",
+        STRUCT_SHIPYARD => "+1 sea ship for the resident house",
+        STRUCT_GUILDHALL => "−15% freight on exports",
+        STRUCT_WORKSHOP => "+12% production",
+        _ => "",
+    }
+}
 /// Wealth cost to build a new transport asset (sea ship / river boat / caravan).
 const SHIP_COST: f32 = 5.0;
 const RIVER_COST: f32 = 3.5;
@@ -106,7 +240,35 @@ pub struct TickHub {
     /// tally so the settlement view can show how this city is supplied.
     #[serde(default)] pub in_by_sea: f32,
     #[serde(default)] pub in_by_land: f32,
+    /// Per-capita production at founding — production scales with LIVE population
+    /// (`production[g] = base_per_capita[g] · population · tech · …`). Seeded from
+    /// the static economy; back-filled once for pre-existing saves (see `advance`).
+    #[serde(default)] pub base_per_capita: Vec<f32>,
+    // ── Shortage: smoothed fraction of demand left UNMET this tick, by need tier
+    //    (0 = fully supplied, 1 = nothing met). Drives the "% lacking goods" graph.
+    #[serde(default)] pub lack_basic: f32,
+    #[serde(default)] pub lack_comfort: f32,
+    #[serde(default)] pub lack_luxury: f32,
+    // ── Trade throughput touching this hub in the last while, split by who carried
+    //    it (decaying tallies). Used to estimate the merchant population by class.
+    #[serde(default)] pub tw_house: f32,
+    #[serde(default)] pub tw_local: f32,
+    #[serde(default)] pub tw_guild: f32,
+    /// Estate type (0 none / 1 farm / 2 mine / 3 plantation / 4 fishery / 5 vineyard).
+    /// Non-zero only when `is_estate`; drives its produced good + the inspector label.
+    #[serde(default)] pub estate_kind: u8,
+    /// Owning house index for an estate (−1 = owned by the parent city). Estate
+    /// export income flows to this owner — a core engine of house growth.
+    #[serde(default = "neg_one_i32")] pub owner_house: i32,
+    /// Buildings this settlement has erected (ids: 1 Granary / 2 Warehouse /
+    /// 3 Shipyard / 4 Guildhall / 5 Workshop). Each grants a standing bonus; at
+    /// most one of each. Auto-built as a city/house prospers.
+    #[serde(default)] pub structures: Vec<u8>,
 }
+
+/// Serde default for `owner_house` so old saves / non-estate hubs read −1, not 0
+/// (which would point at house index 0).
+fn neg_one_i32() -> i32 { -1 }
 
 /// One sparse per-hub history sample (weekly) for the settlement-window charts.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -116,6 +278,14 @@ pub struct HubSample {
     pub wealth: f32,      // grain + trade wealth
     pub mood: f32,
     pub price_index: f32, // mean local price ÷ world-standard value
+    // ── Shortage by tier (fraction of demand unmet) + merchant population by
+    //    class, sampled monthly for the settlement-window charts. ──
+    #[serde(default)] pub lack_basic: f32,
+    #[serde(default)] pub lack_comfort: f32,
+    #[serde(default)] pub lack_luxury: f32,
+    #[serde(default)] pub pop_house: f32,
+    #[serde(default)] pub pop_local: f32,
+    #[serde(default)] pub pop_guild: f32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -196,6 +366,28 @@ pub struct House {
     #[serde(default)] pub volume: f32,
     /// Defunct (bankrupt / died out): kept for the record, not active.
     #[serde(default)] pub defunct: bool,
+    /// House archetype / specialization (0 trade-specialty · 1 fleet & logistics ·
+    /// 2 banking & capital · 3 political & charters). Each grants standing bonuses.
+    #[serde(default)] pub archetype: u8,
+    /// Goods this house holds a CHARTER on at its seat (granted by the city it
+    /// dominates) — extra monopoly rent + prestige. Political archetype only.
+    #[serde(default)] pub charters: Vec<usize>,
+}
+
+/// A candidate empty-land site a wealthy house / large city can colonize with an
+/// estate. Precomputed from world tiles at the Economy step (the tick sim has no
+/// WorldBuffer) and carried into the campaign.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ColonizeSite {
+    pub x: f32,
+    pub y: f32,
+    pub koppen: u8,
+    pub elevation: f32,
+    pub fertility: f32,
+    pub coastal: bool,
+    /// Suggested estate kind for the site (1 farm / 2 mine / 3 plantation /
+    /// 4 fishery / 5 vineyard), from its climate / elevation / coast / fertility.
+    pub kind_hint: u8,
 }
 
 /// A persisted shock currently modifying the world.
@@ -239,6 +431,12 @@ pub struct CampaignSim {
     pub need_scale: f32,
     /// World wrap width in cells (cylindrical X distance).
     pub world_w: f32,
+    /// World height in cells — lets a hub's `y` map to a latitude (and so a
+    /// hemisphere) for seasonal harvests. `serde(default)` → 0 on pre-existing
+    /// saves, which `seasonal_mult` treats as "no hemisphere data" (a single
+    /// global harvest season, the old behaviour).
+    #[serde(default)]
+    pub world_h: f32,
     pub last_tick_ms: f32,
     /// Total world population at the last monthly chronicle sample (for deltas).
     #[serde(default)]
@@ -250,6 +448,28 @@ pub struct CampaignSim {
     /// founding logic tries to keep the world stocked up to.
     #[serde(default)]
     pub seed_house_count: u32,
+    /// One-time migration flag: pre-fleet saves get a starting fleet seeded once.
+    #[serde(default)]
+    pub fleets_migrated: bool,
+    /// Global productivity multiplier — slow technological / agronomic improvement.
+    /// Grows ~1.5%/yr (bumper events lift production further, locally + temporarily).
+    /// `serde(default)` yields 0.0 on old saves → treated as 1.0 in `advance`.
+    #[serde(default)]
+    pub tech_factor: f32,
+    /// One-time migration flag: derive `base_per_capita` for pre-existing saves whose
+    /// hubs were seeded with absolute (population-independent) production.
+    #[serde(default)]
+    pub percap_migrated: bool,
+    /// Empty-land sites a wealthy founder may colonize with an estate (precomputed at
+    /// the Economy step). Consumed as colonies are founded; empty on old saves.
+    #[serde(default)]
+    pub colonizable: Vec<ColonizeSite>,
+    // ── Diagnostics (last advance), for the trade analysis log ──
+    #[serde(default)] pub diag_shipments: u32,   // shipments dispatched
+    #[serde(default)] pub diag_by_house: u32,    // of those, financed by a house
+    #[serde(default)] pub diag_by_guild: u32,    // carried by local merchants/guilds
+    #[serde(default)] pub diag_lost: u32,        // voyages lost (storm/ambush)
+    #[serde(default)] pub diag_volume: f32,      // total goods volume shipped
     /// Derived route-days matrix (n·n, f32::INFINITY = unreachable). Not
     /// serialized — rebuilt from positions + components after load.
     #[serde(skip)]
@@ -329,14 +549,53 @@ impl CampaignSim {
             * DEMAND_PRESSURE
     }
 
-    /// Seasonal production multiplier (food crops peak at harvest).
-    fn seasonal_mult(&self, g: usize, day_of_year: u32) -> f32 {
+    /// Hub latitude as a signed fraction: +1 = north pole, 0 = equator, −1 =
+    /// south pole. In the equirectangular world `y=0` is the north edge and
+    /// `y=world_h` the south edge. Returns 0 when world height is unknown
+    /// (old saves) so seasonality degrades to a single global hemisphere.
+    #[inline]
+    fn hub_lat_frac(&self, h: usize) -> f32 {
+        if self.world_h > 1.0 {
+            (1.0 - 2.0 * self.hubs[h].y / self.world_h).clamp(-1.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Multi-year "fertile vs lean" yield factor for a hemisphere — a slow cycle
+    /// of good and bad harvest years (deterministic per seed/year/hemisphere).
+    /// Ranges ~0.86 (lean) .. ~1.16 (bountiful); interpolated across the year so
+    /// it drifts rather than snapping on New Year's Day.
+    fn fertile_year_factor(&self, north: bool, day_of_year: u32) -> f32 {
+        let year = self.tick / TICKS_PER_YEAR;
+        let hemi = if north { 0u64 } else { 1u64 };
+        let yf = |yr: u32| 0.86 + 0.30 * hash01(self.seed, yr as u64 ^ 0x5E450, hemi ^ 0xFE27);
+        let f = day_of_year as f32 / TICKS_PER_YEAR as f32;
+        yf(year) * (1.0 - f) + yf(year + 1) * f
+    }
+
+    /// Seasonal production multiplier for a hub's good this tick. Food crops peak
+    /// at harvest; the harvest is offset by HALF A YEAR between the northern and
+    /// southern hemisphere (so the world is never short everywhere at once — when
+    /// the north troughs the south is at peak, and trade can balance it). Seasonal
+    /// amplitude grows with latitude (the tropics crop year-round, high latitudes
+    /// have one sharp harvest), and a slow multi-year fertile/lean cycle rides on
+    /// top. Non-food goods are aseasonal (1.0).
+    fn seasonal_mult(&self, h: usize, g: usize, day_of_year: u32) -> f32 {
         if !self.goods[g].food {
             return 1.0;
         }
-        // Single harvest peak in late summer / early autumn (~day 230).
-        let phase = (day_of_year as f32 / TICKS_PER_YEAR as f32 - 0.63) * std::f32::consts::TAU;
-        1.0 + 0.45 * phase.cos()
+        let lat = self.hub_lat_frac(h);
+        let north = lat >= 0.0;
+        // Tropics (|lat| small) barely swing; temperate/high latitudes swing hard.
+        let amp = 0.10 + 0.32 * lat.abs();
+        // Northern harvest peaks in late summer (~day 230 ⇒ phase 0.63); the
+        // southern hemisphere is shifted half a year so its peak falls opposite.
+        let hemi_shift = if north { 0.0 } else { 0.5 };
+        let phase = (day_of_year as f32 / TICKS_PER_YEAR as f32 - 0.63 + hemi_shift)
+            * std::f32::consts::TAU;
+        let seasonal = 1.0 + amp * phase.cos();
+        seasonal * self.fertile_year_factor(north, day_of_year)
     }
 
     /// Advance the simulation `n_ticks` days. Returns nothing; read state after.
@@ -345,6 +604,49 @@ impl CampaignSim {
         if self.days.len() != self.n() * self.n() {
             self.rebuild_routes();
         }
+        // One-time migration: a campaign started before fleets existed has houses
+        // with no ships, so ALL their trade falls through to guilds and no house
+        // can control anything. Seed each fleetless house a starting fleet once.
+        if !self.fleets_migrated {
+            for hi in 0..self.houses.len() {
+                if self.houses[hi].defunct { continue; }
+                if self.houses[hi].fleet_sea + self.houses[hi].fleet_river + self.houses[hi].fleet_caravan > 0 {
+                    continue;
+                }
+                let coastal = self.hubs.get(self.houses[hi].hub as usize).map(|x| x.coastal).unwrap_or(false);
+                let (s, r, c) = Self::initial_fleet(coastal, true);
+                self.houses[hi].fleet_sea = s;
+                self.houses[hi].fleet_river = r;
+                self.houses[hi].fleet_caravan = c;
+            }
+            self.fleets_migrated = true;
+        }
+        // Tech factor defaults to 0.0 on pre-existing saves (serde) → treat as 1.0.
+        if self.tech_factor <= 0.0 {
+            self.tech_factor = 1.0;
+        }
+        // One-time migration: pre-existing saves seeded hubs with ABSOLUTE production
+        // (population-independent). Derive each hub's per-capita rate so production now
+        // tracks live population. New campaigns seed base_per_capita directly.
+        if !self.percap_migrated {
+            for h in 0..self.hubs.len() {
+                if self.hubs[h].base_per_capita.len() == ng {
+                    continue; // already seeded (new campaign)
+                }
+                let pop = self.hubs[h].founding_pop.max(1.0);
+                self.hubs[h].base_per_capita =
+                    self.hubs[h].production.iter().map(|&p| p / pop).collect();
+            }
+            self.percap_migrated = true;
+        }
+        // Per-day compounding growth equivalent to the yearly baseline drift.
+        let tech_daily = (1.0 + PROD_GROWTH_PER_YEAR).powf(1.0 / TICKS_PER_YEAR as f32);
+        // Reset per-advance diagnostics.
+        self.diag_shipments = 0;
+        self.diag_by_house = 0;
+        self.diag_by_guild = 0;
+        self.diag_lost = 0;
+        self.diag_volume = 0.0;
         // Category membership for substitution.
         let n_cats = self
             .goods
@@ -371,14 +673,29 @@ impl CampaignSim {
             self.active_events.retain(|e| e.until_tick > tick);
             // Production multipliers from active events (per hub/good, default 1).
             let prod_mult = self.event_production_mult();
+            // Slow global productivity growth (~0.5%/yr baseline); bumper events add
+            // more locally, adverse events dent the index (see roll_events).
+            self.tech_factor *= tech_daily;
 
-            // 1) Production.
+            // 1) Production — scales with LIVE population × per-capita output ×
+            //    season × event shocks × global tech. A city that grows produces
+            //    proportionally more; a shrinking outpost produces proportionally
+            //    less (so tiny hubs can no longer flood the world with surplus).
+            //    `production[g]` is kept as the realized output for downstream
+            //    readers (estates, briefs, "strongest good").
+            let tech = self.tech_factor;
             for h in 0..n {
+                let pop = self.hubs[h].population.max(0.0);
+                // Standing structure bonuses (Workshop/Warehouse = all goods,
+                // Granary = food only); `struct_bonus` was the A1 placeholder hook.
+                let (struct_all, struct_food) = self.hub_struct_prod(h);
                 for g in 0..ng {
-                    let add = self.hubs[h].production[g]
-                        * self.seasonal_mult(g, doy)
-                        * prod_mult[h][g];
-                    self.hubs[h].stock[g] += add;
+                    let percap = self.hubs[h].base_per_capita.get(g).copied().unwrap_or(0.0);
+                    let struct_bonus = struct_all * if self.goods[g].food { struct_food } else { 1.0 };
+                    let realized = percap * pop * self.seasonal_mult(h, g, doy)
+                        * prod_mult[h][g] * tech * struct_bonus;
+                    self.hubs[h].production[g] = realized;
+                    self.hubs[h].stock[g] += realized;
                 }
             }
 
@@ -410,11 +727,23 @@ impl CampaignSim {
                         needs[h][g] = total * weights[mi] / wsum;
                     }
                 }
-                // Eat down stock; track unmet food for starvation.
+                // Eat down stock; track unmet demand per need-tier for the
+                // "% population lacking goods" graph (basic / comfort / luxury).
+                let mut tier_need = [0.0f32; 3];
+                let mut tier_unmet = [0.0f32; 3];
                 for g in 0..ng {
-                    let eat = needs[h][g].min(self.hubs[h].stock[g]);
+                    let need = needs[h][g];
+                    let eat = need.min(self.hubs[h].stock[g]);
                     self.hubs[h].stock[g] -= eat;
+                    let t = self.goods[g].need_tier.min(2) as usize;
+                    tier_need[t] += need;
+                    tier_unmet[t] += (need - eat).max(0.0);
                 }
+                let frac = |t: usize| if tier_need[t] > EPS { tier_unmet[t] / tier_need[t] } else { 0.0 };
+                // Smooth so the graph drifts rather than flickers tick-to-tick.
+                self.hubs[h].lack_basic = 0.9 * self.hubs[h].lack_basic + 0.1 * frac(0);
+                self.hubs[h].lack_comfort = 0.9 * self.hubs[h].lack_comfort + 0.1 * frac(1);
+                self.hubs[h].lack_luxury = 0.9 * self.hubs[h].lack_luxury + 0.1 * frac(2);
             }
 
             // 3) Local prices (smoothed scarcity in the grain-eq numeraire).
@@ -523,12 +852,19 @@ impl CampaignSim {
                 }
                 idx = s / ng as f32;
             }
+            let (pop_house, pop_local, pop_guild) = merchant_pops(hb);
             hb.history.push(HubSample {
                 tick,
                 population: hb.population,
                 wealth: hb.grain_wealth + hb.trade_wealth,
                 mood: hb.mood,
                 price_index: idx,
+                lack_basic: hb.lack_basic,
+                lack_comfort: hb.lack_comfort,
+                lack_luxury: hb.lack_luxury,
+                pop_house,
+                pop_local,
+                pop_guild,
             });
             // Monthly samples → keep ~30 years of history.
             if hb.history.len() > 360 {
@@ -647,7 +983,28 @@ impl CampaignSim {
                         m[e.hub as usize][e.good as usize] *= 1.0 - e.magnitude;
                     }
                 }
+                "bumper" => {
+                    // Exceptional harvest: production surges at the hub (+mag), so
+                    // its goods grow plentiful and cheap.
+                    if let Some(center) = (e.hub >= 0).then_some(e.hub as usize) {
+                        for g in 0..ng {
+                            if self.goods[g].food || self.goods[g].name.contains("wine")
+                                || self.goods[g].name.contains("oil") {
+                                m[center][g] *= 1.0 + e.magnitude;
+                            }
+                        }
+                    }
+                }
                 _ => {}
+            }
+        }
+        // Floor the cumulative penalty: overlapping shocks (e.g. several droughts
+        // covering one clustered region) used to stack multiplicatively to near
+        // zero, draining even a full granary and triggering a famine death-spiral.
+        // A bad season is a bad season — never a total production wipeout.
+        for row in m.iter_mut() {
+            for v in row.iter_mut() {
+                if *v < EVENT_PROD_FLOOR { *v = EVENT_PROD_FLOOR; }
             }
         }
         m
@@ -682,9 +1039,11 @@ impl CampaignSim {
         for g in 0..ng {
             let base = self.goods[g].base_value;
             // Build (hub, surplus) and (hub, price) lists.
+            let reserve_mult = if self.goods[g].food { FOOD_RESERVE_DAYS } else { TRADE_RESERVE_MULT };
             let mut sellers: Vec<(usize, f32)> = Vec::new();
             for a in 0..n {
-                let surplus = self.hubs[a].stock[g] - needs[a][g] * 1.1;
+                // Keep a reserve (a granary for food) before exporting the rest.
+                let surplus = self.hubs[a].stock[g] - needs[a][g] * reserve_mult;
                 if surplus > EPS {
                     sellers.push((a, surplus));
                 }
@@ -698,6 +1057,9 @@ impl CampaignSim {
                     continue;
                 }
                 let pa = self.live_price(self.hubs[a].stock[g], needs[a][g], base);
+                // A Guildhall at the SELLER's hub lowers freight on its exports.
+                let freight_rate = self.freight_per_day
+                    * if self.hub_has_struct(a, STRUCT_GUILDHALL) { GUILDHALL_FREIGHT } else { 1.0 };
                 // Find the best deficit hubs reachable from a.
                 let mut targets: Vec<(usize, f32, f32)> = Vec::new(); // (b, gap, days)
                 for b in 0..n {
@@ -709,7 +1071,7 @@ impl CampaignSim {
                         continue;
                     }
                     let pb = self.live_price(self.hubs[b].stock[g], needs[b][g], base);
-                    let freight = self.freight_per_day * days;
+                    let freight = freight_rate * days;
                     let gap = pb - (pa + freight) - self.margin * base;
                     if gap > 0.0 {
                         targets.push((b, gap, days));
@@ -725,7 +1087,7 @@ impl CampaignSim {
                         break;
                     }
                     // Don't overfill b past delivered-cost parity.
-                    let delivered = pa + self.freight_per_day * days;
+                    let delivered = pa + freight_rate * days;
                     let max_stock =
                         needs[b][g] * (base / delivered.max(EPS)).powf(1.0 / self.k);
                     let room = (max_stock - self.hubs[b].stock[g]).max(0.0);
@@ -735,27 +1097,53 @@ impl CampaignSim {
                     }
                     // Route mode: a sea voyage when both ends are coastal, else overland.
                     let sea = self.hubs[a].coastal && self.hubs[b].coastal;
-                    let mut owner = self.house_for(a, g);
-                    // ── Fleet capacity + capital gate ──
-                    if owner >= 0 {
-                        let oi = owner as usize;
+                    // ── Who carries it ──────────────────────────────────────────
+                    // Prefer the SELLER's house (the exporter organizes the sale);
+                    // if it has no free vessel / no capital, fall back to the
+                    // BUYER's house (the importing city sends its own ships to fetch
+                    // the goods). This lets houses in big IMPORTER cities earn — the
+                    // old code only ever credited the exporter, so houses clustered
+                    // in importing capitals never grew. Only if NEITHER can carry it
+                    // does it fall to independent local merchants & guilds.
+                    let mut owner = -1i32;
+                    for cand in [self.house_for(a, g), self.house_for(b, g)] {
+                        if cand < 0 { continue; }
+                        let oi = cand as usize;
                         let slots = if sea { cap_sea[oi] } else { cap_land[oi] };
-                        // Capital: a house can't finance cargo worth more than its wealth.
-                        let afford = if pa > EPS { self.houses[oi].wealth / pa } else { f32::MAX };
-                        if slots < 1 || afford <= EPS {
-                            owner = -1; // no vessel free / no capital → local merchants & guilds carry it
-                        } else {
+                        // Merchant-banker houses can finance cargo beyond their cash.
+                        let credit = if self.houses[oi].archetype == ARCH_BANKING { BANK_CREDIT_MULT } else { 1.0 };
+                        let afford = if pa > EPS { self.houses[oi].wealth * credit / pa } else { f32::MAX };
+                        if slots >= 1 && afford > EPS {
                             amount = amount.min(afford);
                             if sea { cap_sea[oi] -= 1; } else { cap_land[oi] -= 1; }
+                            owner = cand;
+                            break;
                         }
                     }
                     surplus -= amount;
                     self.hubs[a].stock[g] -= amount;
-                    self.hubs[a].export_earn += amount * pa;
+                    let sale = amount * pa;
+                    self.hubs[a].export_earn += sale;
+                    // An ESTATE's sales pay rent to its OWNER: a share to the owning
+                    // house's wealth (the engine of house growth), or to the parent
+                    // city's prosperity if the estate is city-owned.
+                    if self.hubs[a].is_estate {
+                        let cut = sale * ESTATE_OWNER_CUT;
+                        let owner = self.hubs[a].owner_house;
+                        if owner >= 0 && (owner as usize) < self.houses.len()
+                            && !self.houses[owner as usize].defunct {
+                            self.houses[owner as usize].wealth += cut;
+                        } else {
+                            let p = self.hubs[a].parent;
+                            if p >= 0 && (p as usize) < self.hubs.len() {
+                                self.hubs[p as usize].export_earn += cut;
+                            }
+                        }
+                    }
                     // ── Voyage loss: storms at sea, ambush/wreck overland ──
                     let lost = if owner >= 0 {
                         let oi = owner as usize;
-                        let p = if sea {
+                        let mut p = if sea {
                             SEA_LOSS
                         } else {
                             // River boats are safer than caravans — blend by fleet mix.
@@ -764,6 +1152,8 @@ impl CampaignSim {
                             let tot = (cv + rv).max(1.0);
                             CARAVAN_LOSS * (cv / tot) + RIVER_LOSS * (rv / tot)
                         };
+                        // A shipping dynasty loses fewer cargoes (skilled crews).
+                        if self.houses[oi].archetype == ARCH_FLEET { p *= FLEET_LOSS_MULT; }
                         hash01(self.seed,
                             (tick as u64) ^ 0x5EA10 ^ ((a as u64) << 8) ^ (b as u64),
                             g as u64) < p
@@ -787,8 +1177,23 @@ impl CampaignSim {
                             tick, kind: "event".into(), hub: a as i32, good: g as i32,
                             value: invested, text: jtext,
                         });
+                        self.diag_lost += 1;
                         // Cargo is gone — never delivered (source already debited).
                         continue;
+                    }
+                    self.diag_shipments += 1;
+                    self.diag_volume += amount;
+                    if owner >= 0 { self.diag_by_house += 1; } else { self.diag_by_guild += 1; }
+                    // Attribute throughput to a merchant CLASS at both endpoints for
+                    // the population estimate: a house-owned voyage → houses; an
+                    // independent short haul → local merchants; a long haul → guilds.
+                    let cls = if owner >= 0 { 0u8 } else if days <= LOCAL_HAUL_DAYS { 1 } else { 2 };
+                    for &hh in &[a, b] {
+                        match cls {
+                            0 => self.hubs[hh].tw_house += amount,
+                            1 => self.hubs[hh].tw_local += amount,
+                            _ => self.hubs[hh].tw_guild += amount,
+                        }
                     }
                     let value = amount * delivered;
                     self.hubs[b].import_spend += value;
@@ -799,7 +1204,13 @@ impl CampaignSim {
                         // rent (pricing power) on top of the plain margin.
                         let mono = self.houses[oi].monopoly.iter()
                             .find(|(mg, _)| *mg == g).map(|(_, s)| *s).unwrap_or(0.0);
-                        let profit = margin * (1.0 + 0.6 * mono);
+                        let mut mult = 1.0 + 0.6 * mono;
+                        // Specialist houses earn fatter margins on their trade; a city
+                        // charter (political houses) adds further rent on that good.
+                        if self.houses[oi].archetype == ARCH_SPECIALTY
+                            && self.houses[oi].spec.contains(&g) { mult *= SPECIALTY_MARGIN; }
+                        if self.houses[oi].charters.contains(&g) { mult *= CHARTER_RENT; }
+                        let profit = margin * mult;
                         self.houses[oi].wealth += profit;
                         self.houses[oi].volume += amount;
                         // Track cumulative profit per good (for "most profitable resources").
@@ -845,14 +1256,22 @@ impl CampaignSim {
         }
         let pick = hash01(self.seed, tick as u64, 0x1234);
         let hub = (hash01(self.seed, tick as u64, 0x5678) * n as f32) as usize % n;
-        let (kind, mag, dur, good): (&str, f32, u32, i32) = if pick < 0.30 {
-            ("drought", 0.35 + 0.25 * pick, 40 + (pick * 60.0) as u32, -1)
-        } else if pick < 0.50 {
+        let (kind, mag, dur, good): (&str, f32, u32, i32) = if pick < 0.26 {
+            // A drought trims food for a season. Kept moderate so a hub's granary
+            // reserve + the baseline food surplus can ride it out — a bad year, not
+            // an automatic famine (deep deficits used to spiral into collapse).
+            ("drought", 0.20 + 0.15 * pick, 30 + (pick * 40.0) as u32, -1)
+        } else if pick < 0.42 {
             ("plague", 0.18, 30, -1)
-        } else if pick < 0.66 {
+        } else if pick < 0.54 {
             ("fire", 0.5, 1, -1)
-        } else if pick < 0.80 {
+        } else if pick < 0.66 {
             ("fishery_collapse", 0.5, 120, -1)
+        } else if pick < 0.82 {
+            // EXCEPTIONAL YEAR — a bumper harvest: production surges for a season,
+            // stocks build and prices fall, so this settlement's goods turn cheap
+            // and flood out to its trade partners.
+            ("bumper", 0.55 + 0.35 * pick, 120 + (pick * 60.0) as u32, -1)
         } else if pick < 0.90 {
             ("festival", 0.0, 1, -1)
         } else {
@@ -866,6 +1285,7 @@ impl CampaignSim {
             "plague" => format!("Plague strikes {}", self.hubs[hub].name),
             "fire" => format!("Fire ravages the warehouses of {}", self.hubs[hub].name),
             "fishery_collapse" => format!("The fisheries off {} collapse", self.hubs[hub].name),
+            "bumper" => format!("An exceptional harvest at {} — goods turn cheap", self.hubs[hub].name),
             "festival" => format!("{} holds a great festival", self.hubs[hub].name),
             _ => format!("A trade feud erupts at {}", self.hubs[hub].name),
         };
@@ -882,6 +1302,17 @@ impl CampaignSim {
             "festival" => { /* demand spike handled implicitly by low stock */ }
             _ => {}
         }
+        // Adverse events also dent the GLOBAL production index: an ordinary shock
+        // trims ~1%, a rare catastrophic fire ~4.5% (on top of the local hit). The
+        // slow +0.5%/yr drift recovers it over the following years.
+        match kind {
+            "fire" => self.tech_factor *= 1.0 - PROD_FIRE_SETBACK,
+            "drought" | "plague" | "fishery_collapse" | "embargo" => {
+                self.tech_factor *= 1.0 - PROD_EVENT_SETBACK;
+            }
+            _ => {}
+        }
+        self.tech_factor = self.tech_factor.max(TECH_FACTOR_FLOOR);
         if dur > 1 {
             self.active_events.push(ActiveEvent {
                 kind: kind.to_string(),
@@ -966,83 +1397,234 @@ impl CampaignSim {
         if self.tick % 120 == 0 {
             self.maybe_found_estate();
         }
+        // Colonization of new land: rarer (yearly) — the settled map fills in.
+        if self.tick % 365 == 0 {
+            self.maybe_colonize();
+        }
     }
 
-    fn maybe_found_estate(&mut self) {
-        let n = self.hubs.len();
-        // Find the richest food-surplus, non-estate hub.
-        let mut best: Option<usize> = None;
-        let mut best_w = 0.6;
-        for h in 0..n {
-            if self.hubs[h].is_estate {
-                continue;
-            }
-            if self.hubs[h].food_balance > 0.4 && self.hubs[h].trade_wealth > best_w {
-                best_w = self.hubs[h].trade_wealth;
-                best = Some(h);
+    fn hub_has_struct(&self, h: usize, id: u8) -> bool {
+        self.hubs[h].structures.contains(&id)
+    }
+
+    /// Standing production multipliers from a hub's structures: `(all_goods, food_only)`.
+    fn hub_struct_prod(&self, h: usize) -> (f32, f32) {
+        let (mut all, mut food) = (1.0f32, 1.0f32);
+        for &s in &self.hubs[h].structures {
+            match s {
+                STRUCT_WORKSHOP => all *= WORKSHOP_PROD,
+                STRUCT_WAREHOUSE => all *= WAREHOUSE_PROD,
+                STRUCT_GRANARY => food *= GRANARY_FOOD_PROD,
+                _ => {}
             }
         }
-        let Some(parent) = best else { return };
-        // Place the estate near the parent, slightly offset (deterministic).
-        let off = hash01(self.seed, self.tick as u64, parent as u64);
-        let ex = self.hubs[parent].x + (off - 0.5) * self.world_w * 0.03;
-        let ey = self.hubs[parent].y + (hash01(self.seed, parent as u64, self.tick as u64) - 0.5)
-            * self.world_w * 0.02;
+        (all, food)
+    }
+
+    /// Monthly: a prosperous settlement erects the most useful building it lacks.
+    /// A Shipyard grants the resident house an extra sea ship on completion.
+    fn update_structures(&mut self) {
+        let tick = self.tick;
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate { continue; }
+            if self.hubs[h].trade_wealth < STRUCT_BUILD_WEALTH { continue; }
+            // Gradual: ~8%/month for an eligible hub → about one building a year.
+            if hash01(self.seed, tick as u64 ^ 0x57D0C7, h as u64) > 0.08 { continue; }
+            let has = |id: u8| self.hubs[h].structures.contains(&id);
+            let coastal = self.hubs[h].coastal;
+            let resident = self.strongest_house_at(h);
+            let pick = if !has(STRUCT_WORKSHOP) { STRUCT_WORKSHOP }
+                else if !has(STRUCT_GRANARY) { STRUCT_GRANARY }
+                else if coastal && resident.is_some() && !has(STRUCT_SHIPYARD) { STRUCT_SHIPYARD }
+                else if !has(STRUCT_GUILDHALL) { STRUCT_GUILDHALL }
+                else if !has(STRUCT_WAREHOUSE) { STRUCT_WAREHOUSE }
+                else { continue; };
+            self.hubs[h].structures.push(pick);
+            if pick == STRUCT_SHIPYARD {
+                if let Some(hi) = resident { self.houses[hi].fleet_sea += 1; }
+            }
+            let hn = self.hubs[h].name.clone();
+            self.journal.push(JournalEntry {
+                tick, kind: "structure".into(), hub: h as i32, good: -1, value: 0.0,
+                text: format!("{} builds a {}", hn, structure_label(pick)),
+            });
+        }
+    }
+
+    /// The strongest resident house at `hub` (richest, non-defunct), if any.
+    fn strongest_house_at(&self, hub: usize) -> Option<usize> {
+        let mut best = (usize::MAX, 0.0f32);
+        for (hi, hh) in self.houses.iter().enumerate() {
+            if hh.defunct || hh.hub as usize != hub { continue; }
+            if hh.wealth >= best.1 { best = (hi, hh.wealth); }
+        }
+        (best.0 != usize::MAX).then_some(best.0)
+    }
+
+    /// Push a new estate hub working good `g0` (kind `kind`) at `(x,y)`, owned by
+    /// `owner_house` (−1 = the parent city). `percap` is the estate's dedicated
+    /// per-capita output rate. Shared by neighbour-estates and new-land colonies.
+    #[allow(clippy::too_many_arguments)]
+    fn create_estate(&mut self, parent: i32, x: f32, y: f32, g0: usize, kind: u8,
+                     owner_house: i32, koppen: u8, coastal: bool, component: u32,
+                     base_pop: f32, percap: f32) {
         let ng = self.goods.len();
+        let est_pop = base_pop.max(1.0);
+        let mut base_per_capita = vec![0.0f32; ng];
+        base_per_capita[g0] = percap.max(0.05);
         let mut production = vec![0.0f32; ng];
-        // Estate produces the parent's strongest food good.
-        let mut bestg = (0usize, 0.0f32);
-        for g in 0..ng {
-            if self.goods[g].food && self.hubs[parent].production[g] > bestg.1 {
-                bestg = (g, self.hubs[parent].production[g]);
-            }
-        }
-        production[bestg.0] = bestg.1.max(0.5) * 1.5;
+        production[g0] = base_per_capita[g0] * est_pop;
         let id = 100_000 + self.hubs.len() as u32;
-        let name = format!("{} Estate", self.hubs[parent].name);
+        let owner_label = if owner_house >= 0 && (owner_house as usize) < self.houses.len() {
+            self.houses[owner_house as usize].name.clone()
+        } else if parent >= 0 && (parent as usize) < self.hubs.len() {
+            self.hubs[parent as usize].name.clone()
+        } else { "New".into() };
+        let name = format!("{} {}", owner_label, estate_kind_label(kind));
         self.journal.push(JournalEntry {
-            tick: self.tick,
-            kind: "estate".into(),
-            hub: parent as i32,
-            good: bestg.0 as i32,
-            value: 0.0,
-            text: format!("{} founds {}", self.hubs[parent].name, name),
+            tick: self.tick, kind: "estate".into(), hub: parent, good: g0 as i32, value: 0.0,
+            text: format!("{} establishes {} ({})", owner_label, name, self.goods[g0].name),
         });
         self.hubs.push(TickHub {
-            id,
-            x: ex,
-            y: ey,
-            name,
-            population: self.hubs[parent].founding_pop * 0.15,
-            founding_pop: self.hubs[parent].founding_pop * 0.15,
-            stock: vec![0.0; ng],
-            price: self.goods.iter().map(|g| g.base_value).collect(),
-            production,
-            grain_wealth: 0.0,
-            trade_wealth: 0.0,
-            food_balance: 1.0,
-            starving: 0.0,
-            is_estate: true,
-            parent: parent as i32,
-            koppen: self.hubs[parent].koppen,
-            coastal: self.hubs[parent].coastal,
-            component: self.hubs[parent].component,
-            export_earn: 0.0,
-            import_spend: 0.0,
-            mood: 0.6,
-            sent_food: 0.7,
-            sent_prosperity: 0.5,
-            sent_stability: 0.8,
-            history: Vec::new(),
-            in_by_sea: 0.0,
-            in_by_land: 0.0,
+            id, x, y, name, population: est_pop, founding_pop: est_pop,
+            stock: vec![0.0; ng], price: self.goods.iter().map(|g| g.base_value).collect(),
+            production, grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
+            is_estate: true, parent, koppen, coastal, component,
+            export_earn: 0.0, import_spend: 0.0, mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5,
+            sent_stability: 0.8, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
+            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
+            tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
+            estate_kind: kind, owner_house, structures: vec![],
         });
         self.rebuild_routes();
     }
 
+    fn maybe_found_estate(&mut self) {
+        let n = self.hubs.len();
+        let ng = self.goods.len();
+        // Founder: a LARGE, commercially successful, non-estate city (rank by
+        // population × trade wealth) — big entrepôts plant estates, not tiny hubs.
+        let mut best: Option<usize> = None;
+        let mut best_score = 0.0f32;
+        for h in 0..n {
+            if self.hubs[h].is_estate { continue; }
+            if self.hubs[h].trade_wealth <= 0.15 { continue; }
+            if self.hubs[h].food_balance < -0.1 { continue; } // a hungry city doesn't expand
+            let score = self.hubs[h].population * self.hubs[h].trade_wealth.max(0.0);
+            if score > best_score { best_score = score; best = Some(h); }
+        }
+        let Some(parent) = best else { return };
+        // The estate works the parent's strongest export (highest per-capita output);
+        // its kind follows that good (farm / mine / plantation / vineyard / fishery).
+        let mut bestg = (usize::MAX, 0.0f32);
+        for g in 0..ng {
+            let pc = self.hubs[parent].base_per_capita.get(g).copied().unwrap_or(0.0);
+            if pc > bestg.1 { bestg = (g, pc); }
+        }
+        let Some(mut g0) = (bestg.0 != usize::MAX).then_some(bestg.0) else { return };
+        let mut kind = estate_kind_for_good(&self.goods[g0].name, self.goods[g0].food);
+        // A fishery needs a coast; inland, fall back to the strongest food good (a farm).
+        if kind == 4 && !self.hubs[parent].coastal {
+            let mut bf = (g0, 0.0f32);
+            for g in 0..ng {
+                if self.goods[g].food {
+                    let pc = self.hubs[parent].base_per_capita.get(g).copied().unwrap_or(0.0);
+                    if pc > bf.1 { bf = (g, pc); }
+                }
+            }
+            g0 = bf.0;
+            kind = 1;
+        }
+        let owner_house = self.strongest_house_at(parent)
+            .filter(|&hi| self.houses[hi].wealth >= ESTATE_HOUSE_OWNER_WEALTH)
+            .map(|hi| hi as i32).unwrap_or(-1);
+        // Place near the parent (deterministic small offset).
+        let off = hash01(self.seed, self.tick as u64, parent as u64);
+        let ex = self.hubs[parent].x + (off - 0.5) * self.world_w * 0.03;
+        let ey = self.hubs[parent].y + (hash01(self.seed, parent as u64, self.tick as u64) - 0.5)
+            * self.world_w * 0.02;
+        let est_pop = self.hubs[parent].founding_pop * 0.15;
+        let percap = self.hubs[parent].base_per_capita.get(g0).copied().unwrap_or(0.05).max(0.05) * 1.5;
+        let (koppen, coastal, component) =
+            (self.hubs[parent].koppen, self.hubs[parent].coastal, self.hubs[parent].component);
+        self.create_estate(parent as i32, ex, ey, g0, kind, owner_house, koppen, coastal,
+            component, est_pop, percap);
+    }
+
+    /// A very wealthy house (or, failing that, the largest city) plants an estate on
+    /// the best reachable empty-land site — the world's settled map fills in over the
+    /// campaign. Sites are precomputed at the Economy step and consumed as used.
+    fn maybe_colonize(&mut self) {
+        if self.colonizable.is_empty() || self.hubs.is_empty() { return; }
+        // Founder: the richest house (if wealthy enough) else the largest city.
+        let mut founder_house = -1i32;
+        let mut hw = COLONIZE_HOUSE_WEALTH;
+        for (hi, hh) in self.houses.iter().enumerate() {
+            if hh.defunct { continue; }
+            if hh.wealth > hw { hw = hh.wealth; founder_house = hi as i32; }
+        }
+        let founder_hub = if founder_house >= 0 {
+            self.houses[founder_house as usize].hub as usize
+        } else {
+            let mut best = (usize::MAX, 0.0f32);
+            for h in 0..self.hubs.len() {
+                if self.hubs[h].is_estate { continue; }
+                let s = self.hubs[h].population * self.hubs[h].trade_wealth.max(0.0);
+                if s > best.1 { best = (h, s); }
+            }
+            match (best.0 != usize::MAX).then_some(best.0) { Some(h) => h, None => return }
+        };
+        if founder_hub >= self.hubs.len() { return; }
+        // Only a commercially strong city colonizes when no rich house leads.
+        if founder_house < 0 && self.hubs[founder_hub].trade_wealth < 0.25 { return; }
+        // Best reachable unused site (fertility-weighted, nearer is better).
+        let (fx, fy) = (self.hubs[founder_hub].x, self.hubs[founder_hub].y);
+        let max_reach = self.world_w * 0.30;
+        let mut bi = (usize::MAX, 0.0f32);
+        for (i, s) in self.colonizable.iter().enumerate() {
+            let mut dx = (s.x - fx).abs();
+            if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
+            let dy = s.y - fy;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist > max_reach { continue; }
+            let score = (0.4 + s.fertility) * (1.0 - dist / max_reach);
+            if score > bi.1 { bi = (i, score); }
+        }
+        let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return };
+        let site = self.colonizable.swap_remove(si);
+        // Pick a good matching the site's hint (prefer one the founder already makes).
+        let ng = self.goods.len();
+        let (mut g0, mut gbest) = (usize::MAX, 0.0f32);
+        for g in 0..ng {
+            if estate_kind_for_good(&self.goods[g].name, self.goods[g].food) == site.kind_hint {
+                let s = self.hubs[founder_hub].base_per_capita.get(g).copied().unwrap_or(0.0) + 0.001;
+                if s > gbest { gbest = s; g0 = g; }
+            }
+        }
+        if g0 == usize::MAX {
+            for g in 0..ng {
+                let pc = self.hubs[founder_hub].base_per_capita.get(g).copied().unwrap_or(0.0);
+                if pc > gbest { gbest = pc; g0 = g; }
+            }
+        }
+        if g0 == usize::MAX { return; }
+        let kind = estate_kind_for_good(&self.goods[g0].name, self.goods[g0].food);
+        let founder_max_pc = self.hubs[founder_hub].base_per_capita.iter().cloned()
+            .fold(0.0f32, f32::max).max(0.1);
+        let percap = founder_max_pc * (0.5 + site.fertility);
+        let est_pop = self.hubs[founder_hub].founding_pop * 0.12;
+        let component = self.hubs[founder_hub].component;
+        self.create_estate(founder_hub as i32, site.x, site.y, g0, kind, founder_house,
+            site.koppen, site.coastal, component, est_pop, percap);
+    }
+
     fn update_houses(&mut self) {
         for h in 0..self.hubs.len() {
-            let pop = self.hubs[h].population.max(1.0);
+            // Per-capita denominator floored at half the FOUNDING size so a hub that
+            // loses population can't have its per-capita wealth spike to absurd
+            // values (the old "millionaire outpost" bug). Estates inherit a small
+            // founding size, so their wealth stays bounded too.
+            let pop = self.hubs[h].population.max(self.hubs[h].founding_pop * 0.5).max(1.0);
             // Food security = current food-stock value per capita.
             self.hubs[h].grain_wealth = food_value(&self.hubs[h], &self.goods);
             // Commercial prosperity = recent net trade earnings per capita. The
@@ -1051,6 +1633,11 @@ impl CampaignSim {
                 (self.hubs[h].export_earn - self.hubs[h].import_spend) / pop;
             self.hubs[h].export_earn *= 0.97;
             self.hubs[h].import_spend *= 0.97;
+            // Decay the per-class throughput tallies so the merchant-population
+            // estimate tracks the last while, not all history.
+            self.hubs[h].tw_house *= 0.97;
+            self.hubs[h].tw_local *= 0.97;
+            self.hubs[h].tw_guild *= 0.97;
         }
         self.update_house_dynamics();
     }
@@ -1122,8 +1709,15 @@ impl CampaignSim {
         self.maybe_found_house();
         // Monthly: monopolies, political power, branching, extinction, feuds.
         if tick % 30 == 0 {
+            // Merchant bankers' capital earns interest each month.
+            for hh in &mut self.houses {
+                if !hh.defunct && hh.archetype == ARCH_BANKING && hh.wealth > 0.0 {
+                    hh.wealth *= 1.0 + BANK_INTEREST;
+                }
+            }
             self.recompute_monopolies_and_power();
             self.manage_fleets();
+            self.update_structures();
             self.maybe_branch_houses();
             for hi in 0..self.houses.len() {
                 if self.houses[hi].defunct { continue; }
@@ -1213,6 +1807,8 @@ impl CampaignSim {
             head_name: bhead.clone(), head_since: tick,
             head_lifespan: self.roll_lifespan(dest as u64 ^ 0xCC),
             founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
+            archetype: self.houses[hi].archetype, // a cadet branch keeps the family trade
+            charters: Vec::new(),
         });
         self.journal.push(JournalEntry {
             tick, kind: "founding".into(), hub: dest as i32, good: -1, value: 0.0,
@@ -1302,16 +1898,18 @@ impl CampaignSim {
             let land_slots = (self.houses[hi].fleet_river + self.houses[hi].fleet_caravan) as i32;
             let sea_busy = used_sea[hi] >= sea_slots;
             let land_busy = used_land[hi] >= land_slots;
+            // Shipping dynasties build vessels at a discount.
+            let disc = if self.houses[hi].archetype == ARCH_FLEET { FLEET_SHIP_DISCOUNT } else { 1.0 };
             // BUY: capital to spare and every vessel of the favoured kind is busy.
             if coastal && sea_busy && w > SHIP_COST * 2.5 {
-                self.houses[hi].wealth -= SHIP_COST;
+                self.houses[hi].wealth -= SHIP_COST * disc;
                 self.houses[hi].fleet_sea += 1;
             } else if !coastal && land_busy && w > CARAVAN_COST * 2.5 {
                 if hash01(self.seed, tick as u64 ^ 0x21B0, hi as u64) < 0.30 {
-                    self.houses[hi].wealth -= RIVER_COST;
+                    self.houses[hi].wealth -= RIVER_COST * disc;
                     self.houses[hi].fleet_river += 1;
                 } else {
-                    self.houses[hi].wealth -= CARAVAN_COST;
+                    self.houses[hi].wealth -= CARAVAN_COST * disc;
                     self.houses[hi].fleet_caravan += 1;
                 }
             } else if w < HOUSE_BRANCH_WEALTH * 0.15 {
@@ -1406,7 +2004,9 @@ impl CampaignSim {
             self.houses[hi].mono_ever = ever;
             let wn = (self.houses[hi].wealth.max(0.0) / wmax).clamp(0.0, 1.0);
             let pn = (self.houses[hi].prestige / pmax).clamp(0.0, 1.0);
-            let power = (0.45 * wn + 0.35 * top_share + 0.20 * pn).clamp(0.0, 1.0);
+            // Political houses wield extra influence in their city's council.
+            let arch_bonus = if self.houses[hi].archetype == ARCH_POLITICAL { POLITICAL_POWER_BONUS } else { 0.0 };
+            let power = (0.45 * wn + 0.35 * top_share + 0.20 * pn + arch_bonus).clamp(0.0, 1.0);
             self.houses[hi].monopoly = mono;
             self.houses[hi].political_power = power;
 
@@ -1423,6 +2023,22 @@ impl CampaignSim {
                 };
                 self.houses[hi].events.push(HouseEvent { tick, kind: kind.into(), text });
                 self.houses[hi].dominant_seat = now_dom;
+            }
+            // Settlement grant: a POLITICAL house that controls its seat is granted a
+            // city CHARTER on its specialty goods — a standing rent monopoly.
+            if now_dom && self.houses[hi].archetype == ARCH_POLITICAL {
+                let spec = self.houses[hi].spec.clone();
+                let cn = self.hubs.get(hub).map(|x| x.name.clone()).unwrap_or_default();
+                for g in spec {
+                    if !self.houses[hi].charters.contains(&g) {
+                        self.houses[hi].charters.push(g);
+                        let gn = self.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
+                        self.houses[hi].events.push(HouseEvent {
+                            tick, kind: "charter".into(),
+                            text: format!("{} grants a charter on {}", cn, gn),
+                        });
+                    }
+                }
             }
 
             // Worst single-month loss (a sharp wealth fall — rivals, embargo, crash).
@@ -1452,14 +2068,17 @@ impl CampaignSim {
         for h in 0..self.hubs.len() {
             max_tw = max_tw.max(self.hubs[h].trade_wealth);
             let tw = self.hubs[h].trade_wealth;
-            if tw <= 0.3 { continue; }
+            if tw <= 0.05 { continue; } // any hub with a little trade can seed a family
             let mut strongest = 0.0f32;
             let mut count = 0u32;
             for hs in self.houses.iter().filter(|hs| !hs.defunct && hs.hub as usize == h) {
                 strongest = strongest.max(hs.wealth);
                 count += 1;
             }
-            if strongest > 2.0 || count >= 2 { continue; } // already established / has competition
+            // Room for a new family: no overwhelmingly dominant house yet, and a
+            // big hub can host a couple of rivals (small ones just one).
+            let cap = if tw >= 0.5 * max_tw { 3 } else { 2 };
+            if strongest > 8.0 || count >= cap { continue; }
             if tw > best.1 { best = (h, tw); }
         }
         let Some(hub) = (best.0 != usize::MAX).then_some(best.0) else { return };
@@ -1503,6 +2122,8 @@ impl CampaignSim {
             head_name: head, head_since: tick,
             head_lifespan: self.roll_lifespan(hub as u64 ^ 0x7E),
             founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
+            archetype: pick_archetype(self.seed, tick as u64 ^ hub as u64),
+            charters: Vec::new(),
         });
     }
 
@@ -1620,6 +2241,18 @@ fn food_value(h: &TickHub, goods: &[TickGood]) -> f32 {
     v / h.population.max(1.0)
 }
 
+/// Estimated merchant population at a hub, split by class (houses / local
+/// merchants / guilds). A fixed fraction of the population trades for a living;
+/// it is divided by each class's recent throughput share at the hub.
+pub fn merchant_pops(h: &TickHub) -> (f32, f32, f32) {
+    let total = h.tw_house + h.tw_local + h.tw_guild;
+    let pop = h.population.max(0.0) * MERCHANT_POP_FRACTION;
+    if total <= EPS {
+        return (0.0, 0.0, 0.0);
+    }
+    (pop * h.tw_house / total, pop * h.tw_local / total, pop * h.tw_guild / total)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1630,6 +2263,7 @@ mod tests {
 
     fn hub(id: u32, x: f32, y: f32, pop: f32, prod: Vec<f32>, comp: u32) -> TickHub {
         let ng = prod.len();
+        let base_per_capita: Vec<f32> = prod.iter().map(|&p| p / pop.max(1.0)).collect();
         TickHub {
             id, x, y, name: format!("H{id}"), population: pop, founding_pop: pop,
             stock: vec![0.0; ng], price: vec![1.0; ng], production: prod,
@@ -1638,6 +2272,9 @@ mod tests {
             export_earn: 0.0, import_spend: 0.0,
             mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5, sent_stability: 0.8, history: Vec::new(),
             in_by_sea: 0.0, in_by_land: 0.0,
+            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
+            tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
+            estate_kind: 0, owner_house: -1, structures: vec![],
         }
     }
 
@@ -1645,8 +2282,12 @@ mod tests {
         let mut s = CampaignSim {
             seed: 42, tick: 0, goods, hubs, in_transit: vec![], houses: vec![],
             active_events: vec![], journal: vec![], days_per_cell: 0.2, freight_per_day: 0.01,
-            k: 0.6, margin: 0.05, need_scale: 1.0, world_w: 100.0, last_tick_ms: 0.0,
-            last_month_pop: 0.0, last_month_index: 0.0, days: vec![],
+            k: 0.6, margin: 0.05, need_scale: 1.0, world_w: 100.0, world_h: 100.0, last_tick_ms: 0.0,
+            last_month_pop: 0.0, last_month_index: 0.0, seed_house_count: 0,
+            fleets_migrated: true, tech_factor: 1.0, percap_migrated: true,
+            colonizable: vec![],
+            diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
+            days: vec![],
         };
         s.rebuild_routes();
         s
@@ -1686,5 +2327,106 @@ mod tests {
         s.advance(400);
         assert!(s.hubs[1].starving > 0.5, "isolated foodless hub starves: {}", s.hubs[1].starving);
         assert!(s.hubs[1].population < s.hubs[1].founding_pop, "population declines");
+    }
+
+    #[test]
+    fn production_scales_with_population() {
+        // Two hubs with the SAME per-capita rate but 2× population: the bigger one
+        // must produce ~2× as much (the core fix — output tracks live population).
+        let goods = vec![good("iron", i32::MAX, 1, 5.0, 0.4, false)]; // non-food → no season
+        let mut s = sim(vec![
+            hub(0, 10.0, 10.0, 1000.0, vec![10.0], 0), // percap 0.01
+            hub(1, 12.0, 10.0, 2000.0, vec![20.0], 0), // percap 0.01
+        ], goods);
+        s.advance(1);
+        let (p0, p1) = (s.hubs[0].production[0], s.hubs[1].production[0]);
+        assert!(p0 > 0.0 && (p1 / p0 - 2.0).abs() < 0.05, "double pop ⇒ ~double output: {p0} {p1}");
+    }
+
+    #[test]
+    fn big_city_is_a_net_importer() {
+        // A populous, food-poor city wired to a small food-rich one must IMPORT food
+        // (regression for "large cities show 0 trade"): production no longer keeps
+        // pace with a grown population, so the metropolis pulls in food.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut s = sim(vec![
+            hub(0, 10.0, 10.0, 20000.0, vec![100.0], 0),  // huge pop, tiny per-capita food
+            hub(1, 14.0, 10.0, 2000.0, vec![4000.0], 0),  // small pop, big surplus
+        ], goods);
+        s.advance(120);
+        assert!(s.hubs[0].import_spend > 0.0, "big city imports food: {}", s.hubs[0].import_spend);
+    }
+
+    #[test]
+    fn tiny_hub_wealth_stays_bounded() {
+        // Regression for the "millionaire outpost": a tiny-population luxury exporter
+        // can no longer accumulate absurd per-capita trade wealth, because its output
+        // scales with its small population and the wealth denominator is floored.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true), good("silk", 1, 2, 20.0, 0.35, false)];
+        let mut s = sim(vec![
+            hub(0, 10.0, 10.0, 8000.0, vec![60.0, 0.0], 0),
+            hub(1, 13.0, 10.0, 60.0, vec![0.0, 30.0], 0), // tiny pop, makes luxury
+        ], goods);
+        s.advance(365 * 3);
+        assert!(s.hubs[1].trade_wealth < 1000.0, "tiny hub wealth bounded: {}", s.hubs[1].trade_wealth);
+    }
+
+    #[test]
+    fn hemispheres_harvest_opposite_seasons() {
+        // North and south hubs harvest half a year apart, so the world is never
+        // short everywhere at once. At the northern harvest peak (~day 230) the
+        // north out-produces the (then-troughing) south, and the seasonal swing is
+        // strong at high latitude. (Seasonal ratio ~2× dominates the ±15% fertile-
+        // year noise, so the inequality is robust.)
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let s = sim(vec![
+            hub(0, 10.0, 10.0, 10000.0, vec![100.0], 0), // y=10 of 100 → far north
+            hub(1, 14.0, 90.0, 10000.0, vec![100.0], 0), // y=90 of 100 → far south
+        ], goods);
+        let north_peak = s.seasonal_mult(0, 0, 230);
+        let south_then = s.seasonal_mult(1, 0, 230);
+        assert!(north_peak > south_then,
+            "north harvests while south troughs: {north_peak} vs {south_then}");
+        // Same hub, half a year apart: a strong seasonal swing at high latitude.
+        let peak = s.seasonal_mult(0, 0, 230);
+        let trough = s.seasonal_mult(0, 0, 230 - 182);
+        assert!(peak > trough * 1.25, "high-latitude harvest swings hard: {peak} vs {trough}");
+    }
+
+    #[test]
+    fn food_surplus_prevents_famine_collapse() {
+        // Regression for the 8M→1M famine collapse. A connected world whose hubs are
+        // each seeded with ~1.5× their food need (the seed-time food-surplus
+        // guarantee) must NOT slide into world-wide famine over 5 years, even with
+        // seasonal harvest troughs. Many hubs spread over latitudes both dilute
+        // plague (which strikes one random hub) and let opposite hemispheres trade
+        // across each other's lean seasons. We assert on the famine signals (no
+        // sustained world-wide starvation) plus a soft population floor — plague
+        // attrition is allowed, a food death-spiral is not.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let pop = 10000.0f32;
+        let need = pop * 0.85 * DEMAND_PRESSURE; // tier_w[0]=1, need_scale=1 in test sim
+        let prod = need * 1.5; // mirror the seed-time food surplus
+        // 10 hubs in ONE component, spread across the whole map (x 5..95) and fanned
+        // north→south (y 8..84, both hemispheres) — like a real world where a
+        // regional drought (radius = 12% of width) hits a neighbour or two, not the
+        // entire civilisation at once.
+        let mut hubs = Vec::new();
+        for i in 0..10u32 {
+            let x = 5.0 + i as f32 * 10.0;
+            let y = 8.0 + i as f32 * 8.4;
+            hubs.push(hub(i, x, y, pop, vec![prod, 2.0], 0));
+        }
+        let mut s = sim(hubs, goods);
+        let start: f32 = s.hubs.iter().map(|h| h.population).sum();
+        s.advance(365 * 5);
+        let end: f32 = s.hubs.iter().map(|h| h.population).sum();
+        let mean_starving: f32 =
+            s.hubs.iter().map(|h| h.starving).sum::<f32>() / s.hubs.len() as f32;
+        assert!(mean_starving < 0.25, "world is not in famine: mean starving {mean_starving}");
+        assert!(end > start * 0.6, "no famine collapse: {start:.0} → {end:.0}");
     }
 }

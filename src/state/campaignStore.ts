@@ -1,17 +1,19 @@
 import { create } from "zustand";
-import type { CampaignSnapshot, WorldEconomy, HouseBrief } from "../types";
+import type { CampaignSnapshot, WorldEconomy, HouseBrief, CampaignDiagnostics } from "../types";
 import {
   campaignStartSim,
   campaignAdvance,
   campaignGetState,
   campaignGetWorldEconomy,
   campaignGetHouses,
+  campaignDiagnostics,
 } from "../bridge/tauri";
 
 interface CampaignStore {
   snapshot: CampaignSnapshot | null;
   worldEconomy: WorldEconomy | null;
   houses: HouseBrief[];
+  diagnostics: CampaignDiagnostics | null;
   busy: boolean;
   error: string | null;
 
@@ -27,13 +29,16 @@ export const useCampaignStore = create<CampaignStore>((set, get) => ({
   snapshot: null,
   worldEconomy: null,
   houses: [],
+  diagnostics: null,
   busy: false,
   error: null,
 
   refresh: async () => {
     try {
-      const [snap, houses] = await Promise.all([campaignGetState(), campaignGetHouses()]);
-      set({ snapshot: snap, houses, error: null });
+      const [snap, houses, diag] = await Promise.all([
+        campaignGetState(), campaignGetHouses(), campaignDiagnostics(),
+      ]);
+      set({ snapshot: snap, houses, diagnostics: diag, error: null });
     } catch (e) {
       set({ error: String(e) });
     }
@@ -44,8 +49,10 @@ export const useCampaignStore = create<CampaignStore>((set, get) => ({
     set({ busy: true, error: null });
     try {
       const snap = await campaignStartSim(seed);
-      const [we, houses] = await Promise.all([campaignGetWorldEconomy(), campaignGetHouses()]);
-      set({ snapshot: snap, worldEconomy: we, houses });
+      const [we, houses, diag] = await Promise.all([
+        campaignGetWorldEconomy(), campaignGetHouses(), campaignDiagnostics(),
+      ]);
+      set({ snapshot: snap, worldEconomy: we, houses, diagnostics: diag });
     } catch (e) {
       set({ error: String(e) });
     } finally {
@@ -58,8 +65,10 @@ export const useCampaignStore = create<CampaignStore>((set, get) => ({
     set({ busy: true, error: null });
     try {
       const snap = await campaignAdvance(ticks);
-      const [we, houses] = await Promise.all([campaignGetWorldEconomy(), campaignGetHouses()]);
-      set({ snapshot: snap, worldEconomy: we, houses });
+      const [we, houses, diag] = await Promise.all([
+        campaignGetWorldEconomy(), campaignGetHouses(), campaignDiagnostics(),
+      ]);
+      set({ snapshot: snap, worldEconomy: we, houses, diagnostics: diag });
     } catch (e) {
       set({ error: String(e) });
     } finally {

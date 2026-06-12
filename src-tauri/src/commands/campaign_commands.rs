@@ -307,6 +307,18 @@ pub struct WorldEconomy {
     pub goods: Vec<WorldGoodPrice>,
     /// World price-index time series (tick, value) from the journal.
     pub index_series: Vec<[f32; 2]>,
+    /// Current population-weighted fraction of demand unmet, by need tier.
+    #[serde(default)] pub lack_basic: f32,
+    #[serde(default)] pub lack_comfort: f32,
+    #[serde(default)] pub lack_luxury: f32,
+    /// Current world merchant population totals by class.
+    #[serde(default)] pub pop_house: f32,
+    #[serde(default)] pub pop_local: f32,
+    #[serde(default)] pub pop_guild: f32,
+    /// World time series `[tick, basic, comfort, luxury]` (population-weighted unmet).
+    #[serde(default)] pub lack_series: Vec<[f32; 4]>,
+    /// World time series `[tick, houses, local, guild]` merchant population totals.
+    #[serde(default)] pub merchant_series: Vec<[f32; 4]>,
 }
 
 /// One good's live state at a hub, for the settlement-window Market tab.
@@ -357,6 +369,21 @@ pub struct HubDetail {
     /// Recent supply arriving by SEA (ships) vs LAND (caravans) — decaying tally.
     #[serde(default)] pub in_by_sea: f32,
     #[serde(default)] pub in_by_land: f32,
+    /// Current fraction of demand UNMET, by need tier (0 = supplied, 1 = none met).
+    #[serde(default)] pub lack_basic: f32,
+    #[serde(default)] pub lack_comfort: f32,
+    #[serde(default)] pub lack_luxury: f32,
+    /// Estimated merchant population in this city by class.
+    #[serde(default)] pub pop_house: f32,
+    #[serde(default)] pub pop_local: f32,
+    #[serde(default)] pub pop_guild: f32,
+    /// For an estate: its kind (0 none / 1 farm / 2 mine / 3 plantation / 4 fishery /
+    /// 5 vineyard), who owns it, and the good it works — for the inspector.
+    #[serde(default)] pub estate_kind: u8,
+    #[serde(default)] pub estate_owner: String,
+    #[serde(default)] pub estate_good: String,
+    /// Buildings erected here: (name, one-line effect) — for the inspector.
+    #[serde(default)] pub structures: Vec<(String, String)>,
 }
 
 fn get_sim(conn: &Connection) -> Result<Option<CampaignSim>, String> {
@@ -558,13 +585,17 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                     }
                 }
             }
+            let founding = (eh.population.max(1)) as f32;
+            // Per-capita production: the static economy's output is for the founding
+            // population, so production = base_per_capita · population thereafter.
+            let base_per_capita: Vec<f32> = production.iter().map(|&p| p / founding).collect();
             TickHub {
                 id: eh.id,
                 x: eh.x,
                 y: eh.y,
                 name: eh.name.clone(),
-                population: (eh.population.max(1)) as f32,
-                founding_pop: (eh.population.max(1)) as f32,
+                population: founding,
+                founding_pop: founding,
                 stock: production.clone(), // seed one tick of stock so prices start sane
                 price,
                 production,
@@ -586,6 +617,16 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 history: Vec::new(),
                 in_by_sea: 0.0,
                 in_by_land: 0.0,
+                base_per_capita,
+                lack_basic: 0.0,
+                lack_comfort: 0.0,
+                lack_luxury: 0.0,
+                tw_house: 0.0,
+                tw_local: 0.0,
+                tw_guild: 0.0,
+                estate_kind: 0,
+                owner_house: -1,
+                structures: vec![],
             }
         })
         .collect();
@@ -620,6 +661,46 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         .sum::<f32>()
         .max(1e-3);
     let need_scale = total_prod / (total_pop * sum_tw_desire);
+
+    // ── Guarantee a FOOD surplus ──────────────────────────────────────────────
+    // `need_scale` balances *total* production against *total* need, but FOOD is
+    // only a fraction of all goods. A world rich in luxuries but modest in cereal
+    // would seed a chronic food deficit → world-wide famine → population collapse
+    // (the 8M→1M crash). So measure the actual food need (with the same demand
+    // pressure the tick uses) vs food production and, if food is short, scale every
+    // hub's food output up to a healthy surplus. Production scales with live
+    // population thereafter, so this ratio is population-invariant; tech growth then
+    // makes food steadily MORE abundant over the campaign. We only ever raise food
+    // (`max(1.0)`), never cut a world that already grows plenty.
+    const FOOD_SURPLUS: f32 = 1.5; // ~50% headroom for seasons, lean years, growth
+    let mut total_food_need = 0.0f32;
+    let mut total_food_prod = 0.0f32;
+    for h in &hubs {
+        for (g, tg) in goods.iter().enumerate() {
+            if tg.food {
+                total_food_need += h.population
+                    * tier_w[tg.need_tier.min(2) as usize]
+                    * tg.desire.max(0.0)
+                    * need_scale
+                    * crate::sim::tick::DEMAND_PRESSURE;
+                total_food_prod += h.production[g];
+            }
+        }
+    }
+    if total_food_prod > 1e-3 {
+        let food_scale = (total_food_need * FOOD_SURPLUS / total_food_prod).max(1.0);
+        if food_scale > 1.0 {
+            for h in hubs.iter_mut() {
+                for (g, tg) in goods.iter().enumerate() {
+                    if tg.food {
+                        h.base_per_capita[g] *= food_scale;
+                        h.production[g] *= food_scale;
+                        h.stock[g] *= food_scale;
+                    }
+                }
+            }
+        }
+    }
 
     // ── Merchant houses: the strongest hubs get a named trading FAMILY
     //    specializing in their top goods, with a head of family who will age,
@@ -681,6 +762,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
             political_power: 0.0,
             volume: 0.0,
             defunct: false,
+            archetype: crate::sim::tick::pick_archetype(seed, h as u64),
+            charters: Vec::new(),
         });
     }
 
@@ -708,10 +791,20 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         margin: 0.05,
         need_scale,
         world_w: grid_w,
+        world_h: world_ref.grid_height.max(1) as f32,
         last_tick_ms: 0.0,
         last_month_pop: 0.0,
         last_month_index: 0.0,
         seed_house_count: houses_len,
+        fleets_migrated: true, // new campaigns already seed fleets
+        tech_factor: 1.0,
+        percap_migrated: true, // hubs seeded with base_per_capita directly
+        colonizable: econ.colonizable_sites.clone(),
+        diag_shipments: 0,
+        diag_by_house: 0,
+        diag_by_guild: 0,
+        diag_lost: 0,
+        diag_volume: 0.0,
         days: vec![],
     };
     sim.rebuild_routes();
@@ -812,6 +905,20 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         .filter(|e| e.hub == hi as i32 && e.kind != "price")
         .cloned()
         .collect();
+    let (pop_house, pop_local, pop_guild) = crate::sim::tick::merchant_pops(hub);
+    // Estate descriptors for the inspector (kind, owner, worked good).
+    let (estate_owner, estate_good) = if hub.is_estate {
+        let owner = if hub.owner_house >= 0 {
+            sim.houses.get(hub.owner_house as usize).map(|h| h.name.clone()).unwrap_or_default()
+        } else if hub.parent >= 0 {
+            sim.hubs.get(hub.parent as usize).map(|h| format!("City of {}", h.name)).unwrap_or_default()
+        } else { String::new() };
+        // The worked good = the one this estate actually produces (max per-capita).
+        let g = hub.base_per_capita.iter().enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(i, _)| i).unwrap_or(0);
+        (owner, sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_default())
+    } else { (String::new(), String::new()) };
     Ok(Some(HubDetail {
         id: hub.id,
         name: hub.name.clone(),
@@ -837,6 +944,19 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             .collect(),
         in_by_sea: hub.in_by_sea,
         in_by_land: hub.in_by_land,
+        lack_basic: hub.lack_basic,
+        lack_comfort: hub.lack_comfort,
+        lack_luxury: hub.lack_luxury,
+        pop_house,
+        pop_local,
+        pop_guild,
+        estate_kind: hub.estate_kind,
+        estate_owner,
+        estate_good,
+        structures: hub.structures.iter().map(|&s| (
+            crate::sim::tick::structure_label(s).to_string(),
+            crate::sim::tick::structure_effect(s).to_string(),
+        )).collect(),
     }))
 }
 
@@ -876,6 +996,11 @@ pub struct HouseBrief {
     /// Names of the cities this house trades with / controls (seat first) — shown
     /// in the Houses menu.
     #[serde(default)] pub cities: Vec<String>,
+    /// Archetype + its label/perk and any goods it holds city charters on.
+    #[serde(default)] pub archetype: u8,
+    #[serde(default)] pub archetype_label: String,
+    #[serde(default)] pub archetype_perk: String,
+    #[serde(default)] pub charters: Vec<String>,
 }
 
 /// Golden-angle hue → a distinct, saturated hex colour. `i` is a stable index so
@@ -935,14 +1060,23 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
             let v = hub_house[h * nh + oi];
             if v <= 0.0 { continue; }
             handled[oi].push(h);
-            if v / hub_total[h] >= 0.5 { controlled[oi].push(h); }
+            // A house controls a city when it handles >=40% of the city's trade
+            // throughput (lowered from 50% so dominance actually emerges now that
+            // importer-side houses also carry trade).
+            if v / hub_total[h] >= 0.4 { controlled[oi].push(h); }
         }
     }
 
     let mut out: Vec<HouseBrief> = sim.houses.iter().enumerate().map(|(hi, h)| {
         let hub = h.hub as usize;
         // A house always counts its seat among the cities listed.
-        let ctrl_hubs = std::mem::take(&mut controlled[hi]);
+        let mut ctrl_hubs = std::mem::take(&mut controlled[hi]);
+        // A house that DOMINATES its seat by trade volume (>=50% of resident-house
+        // trade, the `dominant_seat` signal) also colours its home city — even when
+        // in-flight throughput is momentarily sparse, so the map isn't all grey.
+        if h.dominant_seat && hub < nhubs && !ctrl_hubs.contains(&hub) {
+            ctrl_hubs.push(hub);
+        }
         let trade_hubs = std::mem::take(&mut handled[hi]);
         let dominant = !ctrl_hubs.is_empty(); // controls at least one settlement
         let controls: Vec<[f32; 2]> = ctrl_hubs.iter().map(|&p| seat_pos(p)).collect();
@@ -973,12 +1107,64 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
             controls,
             partners,
             cities,
+            archetype: h.archetype,
+            archetype_label: crate::sim::tick::archetype_label(h.archetype).to_string(),
+            archetype_perk: crate::sim::tick::archetype_perk(h.archetype).to_string(),
+            charters: h.charters.iter().map(|&g| gname(g)).collect(),
         }
     }).collect();
     // Active first, then richest first.
     out.sort_by(|a, b| (a.defunct, -a.wealth).partial_cmp(&(b.defunct, -b.wealth))
         .unwrap_or(std::cmp::Ordering::Equal));
     out
+}
+
+/// Trade diagnostics — a snapshot to answer "is trade actually moving?".
+#[derive(Serialize)]
+pub struct CampaignDiagnostics {
+    pub tick: u32,
+    pub year: u32,
+    pub in_transit: u32,          // shipments currently in flight
+    pub shipments_last: u32,      // shipments dispatched over the last advance
+    pub by_house: u32,            // ...financed by a merchant house
+    pub by_guild: u32,            // ...carried by local merchants/guilds
+    pub lost_last: u32,           // voyages lost (storm/ambush) last advance
+    pub volume_last: f32,         // goods volume shipped last advance
+    pub houses_active: u32,
+    pub houses_defunct: u32,
+    pub fleet_sea: u32,
+    pub fleet_river: u32,
+    pub fleet_caravan: u32,
+    pub controlled_settlements: u32, // cities a house controls (>=50% throughput)
+    pub total_house_wealth: f32,
+}
+
+#[tauri::command]
+pub fn campaign_diagnostics(db: State<'_, WorldDb>) -> Result<Option<CampaignDiagnostics>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let Some(sim) = get_sim(&conn)? else { return Ok(None) };
+    let active: Vec<&crate::sim::tick::House> = sim.houses.iter().filter(|h| !h.defunct).collect();
+    let (mut fs, mut fr, mut fc, mut wealth) = (0u32, 0u32, 0u32, 0.0f32);
+    for h in &active {
+        fs += h.fleet_sea; fr += h.fleet_river; fc += h.fleet_caravan; wealth += h.wealth;
+    }
+    let controlled = build_house_briefs(&sim).iter()
+        .filter(|h| !h.defunct).map(|h| h.controls.len() as u32).sum();
+    Ok(Some(CampaignDiagnostics {
+        tick: sim.tick,
+        year: sim.tick / 365,
+        in_transit: sim.in_transit.len() as u32,
+        shipments_last: sim.diag_shipments,
+        by_house: sim.diag_by_house,
+        by_guild: sim.diag_by_guild,
+        lost_last: sim.diag_lost,
+        volume_last: sim.diag_volume,
+        houses_active: active.len() as u32,
+        houses_defunct: (sim.houses.len() - active.len()) as u32,
+        fleet_sea: fs, fleet_river: fr, fleet_caravan: fc,
+        controlled_settlements: controlled,
+        total_house_wealth: wealth,
+    }))
 }
 
 /// All merchant families (active first, richest first) for the Houses panel.
@@ -1047,7 +1233,12 @@ pub fn campaign_get_world_economy(db: State<'_, WorldDb>) -> Result<WorldEconomy
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let sim = match get_sim(&conn)? {
         Some(s) => s,
-        None => return Ok(WorldEconomy { goods: vec![], index_series: vec![] }),
+        None => return Ok(WorldEconomy {
+            goods: vec![], index_series: vec![],
+            lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
+            pop_house: 0.0, pop_local: 0.0, pop_guild: 0.0,
+            lack_series: vec![], merchant_series: vec![],
+        }),
     };
     let ng = sim.goods.len();
     let mut goods: Vec<WorldGoodPrice> = (0..ng)
@@ -1081,7 +1272,52 @@ pub fn campaign_get_world_economy(db: State<'_, WorldDb>) -> Result<WorldEconomy
         .filter(|e| e.kind == "price" && e.hub == -1)
         .map(|e| [e.tick as f32, e.value])
         .collect();
-    Ok(WorldEconomy { goods, index_series })
+
+    // ── World rollups: current population-weighted shortage + merchant totals ──
+    let mut wpop = 0.0f32;
+    let (mut lb, mut lc, mut ll) = (0.0f32, 0.0f32, 0.0f32);
+    let (mut ph, mut pl, mut pg) = (0.0f32, 0.0f32, 0.0f32);
+    for h in &sim.hubs {
+        let p = h.population.max(0.0);
+        wpop += p;
+        lb += h.lack_basic * p;
+        lc += h.lack_comfort * p;
+        ll += h.lack_luxury * p;
+        let (a, b, c) = crate::sim::tick::merchant_pops(h);
+        ph += a; pl += b; pg += c;
+    }
+    let wp = wpop.max(1.0);
+
+    // World time series, aggregated across hub histories (all sampled on the same
+    // monthly ticks): population-weighted shortage + merchant-class totals.
+    use std::collections::BTreeMap;
+    let mut acc: BTreeMap<u32, [f32; 8]> = BTreeMap::new(); // [pop, lb, lc, ll, ph, pl, pg, _]
+    for h in &sim.hubs {
+        for s in &h.history {
+            let e = acc.entry(s.tick).or_insert([0.0; 8]);
+            let p = s.population.max(0.0);
+            e[0] += p;
+            e[1] += s.lack_basic * p;
+            e[2] += s.lack_comfort * p;
+            e[3] += s.lack_luxury * p;
+            e[4] += s.pop_house;
+            e[5] += s.pop_local;
+            e[6] += s.pop_guild;
+        }
+    }
+    let lack_series: Vec<[f32; 4]> = acc.iter()
+        .map(|(&t, e)| { let p = e[0].max(1.0); [t as f32, e[1] / p, e[2] / p, e[3] / p] })
+        .collect();
+    let merchant_series: Vec<[f32; 4]> = acc.iter()
+        .map(|(&t, e)| [t as f32, e[4], e[5], e[6]])
+        .collect();
+
+    Ok(WorldEconomy {
+        goods, index_series,
+        lack_basic: lb / wp, lack_comfort: lc / wp, lack_luxury: ll / wp,
+        pop_house: ph, pop_local: pl, pop_guild: pg,
+        lack_series, merchant_series,
+    })
 }
 
 /// Migrate pre-split keys living in `metadata` into the campaign table (runs on

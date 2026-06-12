@@ -499,7 +499,7 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 }
 
 // ── DLC 1 "Living Trade" tick simulation ──
-import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, HouseBrief, HouseHistory } from "../types";
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, HouseBrief, HouseHistory, CampaignDiagnostics } from "../types";
 
 /** Seed a fresh living-trade sim from the static economy snapshot (step 10). */
 export async function campaignStartSim(seed: number): Promise<CampaignSnapshot> {
@@ -540,4 +540,9 @@ export async function campaignGetHouses(): Promise<HouseBrief[]> {
 /** One house's full chronicle (timeline) by name. */
 export async function campaignGetHouseHistory(name: string): Promise<HouseHistory | null> {
   return invoke("campaign_get_house_history", { name });
+}
+
+/** "Is trade actually moving?" snapshot — null when no sim is running. */
+export async function campaignDiagnostics(): Promise<CampaignDiagnostics | null> {
+  return invoke("campaign_diagnostics");
 }

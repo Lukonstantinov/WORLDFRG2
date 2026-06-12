@@ -192,6 +192,14 @@ export interface HubSample {
   wealth: number;
   mood: number;
   price_index: number;
+  /** Fraction of demand unmet by need tier (0 = supplied, 1 = none met). */
+  lack_basic?: number;
+  lack_comfort?: number;
+  lack_luxury?: number;
+  /** Merchant population by class. */
+  pop_house?: number;
+  pop_local?: number;
+  pop_guild?: number;
 }
 /** One good's live state at a hub (settlement-window Market tab). */
 export interface HubGoodDetail {
@@ -231,6 +239,20 @@ export interface HubDetail {
   houses?: HouseBrief[];
   in_by_sea?: number;   // recent supply arriving by ship (sea)
   in_by_land?: number;  // recent supply arriving by caravan (land)
+  /** Current fraction of demand unmet by need tier (0 = supplied, 1 = none met). */
+  lack_basic?: number;
+  lack_comfort?: number;
+  lack_luxury?: number;
+  /** Estimated merchant population by class. */
+  pop_house?: number;
+  pop_local?: number;
+  pop_guild?: number;
+  /** Estate descriptors (kind 1 farm/2 mine/3 plantation/4 fishery/5 vineyard). */
+  estate_kind?: number;
+  estate_owner?: string;
+  estate_good?: string;
+  /** Buildings erected here: [name, one-line effect]. */
+  structures?: [string, string][];
 }
 /** A merchant family (trading house) — for the Houses panel + settlement window. */
 export interface HouseBrief {
@@ -279,6 +301,24 @@ export interface JournalEntry {
   value: number;
   text: string;
 }
+/** "Is trade actually moving?" snapshot for the last advance. */
+export interface CampaignDiagnostics {
+  tick: number;
+  year: number;
+  in_transit: number;
+  shipments_last: number;
+  by_house: number;
+  by_guild: number;
+  lost_last: number;
+  volume_last: number;
+  houses_active: number;
+  houses_defunct: number;
+  fleet_sea: number;
+  fleet_river: number;
+  fleet_caravan: number;
+  controlled_settlements: number;
+  total_house_wealth: number;
+}
 export interface CampaignSnapshot {
   active: boolean;
   clock: CampaignClock;
@@ -303,6 +343,18 @@ export interface WorldGoodPrice {
 export interface WorldEconomy {
   goods: WorldGoodPrice[];
   index_series: [number, number][];
+  /** Current population-weighted fraction of demand unmet by need tier. */
+  lack_basic?: number;
+  lack_comfort?: number;
+  lack_luxury?: number;
+  /** Current world merchant-population totals by class. */
+  pop_house?: number;
+  pop_local?: number;
+  pop_guild?: number;
+  /** World time series [tick, basic, comfort, luxury] (population-weighted unmet). */
+  lack_series?: [number, number, number, number][];
+  /** World time series [tick, houses, local, guild] merchant population totals. */
+  merchant_series?: [number, number, number, number][];
 }
 
 // ── Economy snapshot (Phase 2) ──
