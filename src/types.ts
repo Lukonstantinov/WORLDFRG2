@@ -214,6 +214,20 @@ export interface HubGoodDetail {
   world_min_hub: string;
   world_max: number;
   world_max_hub: string;
+  world_avg?: number; // mean ×-world price across all settlements right now
+}
+/** One shipment touching a settlement (Market tab arrivals/departures). */
+export interface ShipmentRow {
+  owner: string;
+  color: string;
+  is_guild: boolean;
+  other: string;          // origin (arrivals) or destination (departures) city
+  good: string;
+  amount: number;
+  price: number;          // ×-world price
+  value: number;          // amount × local price (ranking key)
+  sea: boolean;
+  returning_home: boolean;
 }
 /** Full live per-settlement detail (sentiment + market + history). */
 export interface HubDetail {
@@ -255,6 +269,11 @@ export interface HubDetail {
   structures?: [string, string][];
   /** Foreign merchant offices hosted in this settlement. */
   offices_here?: OfficeHere[];
+  /** Market flow: in-flight shipments arriving / departing (ranked by value). */
+  arrivals?: ShipmentRow[];
+  departures?: ShipmentRow[];
+  bought?: number;
+  sold?: number;
 }
 /** One active merchant route for the campaign merchant map layer. */
 export interface MerchantRoute {

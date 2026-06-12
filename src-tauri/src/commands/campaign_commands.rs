@@ -336,6 +336,25 @@ pub struct HubGoodDetail {
     pub world_min_hub: String,
     pub world_max: f32,
     pub world_max_hub: String,
+    /// Mean ×-world price across all settlements right now (the "world average"
+    /// reference line on the Market price graphs).
+    #[serde(default)] pub world_avg: f32,
+}
+
+/// One shipment touching a settlement (Market tab arrivals/departures), with its
+/// owner so houses/guilds and round-trip return legs are identifiable.
+#[derive(Serialize, Clone)]
+pub struct ShipmentRow {
+    pub owner: String,          // house / guild name, or "Local merchants"
+    pub color: String,
+    pub is_guild: bool,
+    pub other: String,          // origin city (arrivals) or destination (departures)
+    pub good: String,
+    pub amount: f32,
+    pub price: f32,             // ×-world price
+    pub value: f32,             // amount × local price (the ranking key)
+    pub sea: bool,
+    pub returning_home: bool,   // a round-trip RETURN leg (goods bought abroad, coming home)
 }
 
 /// Full per-settlement detail for the redesigned settlement window (live campaign
@@ -387,6 +406,12 @@ pub struct HubDetail {
     /// FOREIGN merchant offices hosted in this settlement (houses/guilds based
     /// elsewhere who have opened a counting-house here).
     #[serde(default)] pub offices_here: Vec<OfficeHere>,
+    /// Market flow: in-flight shipments arriving / departing (ranked by value).
+    #[serde(default)] pub arrivals: Vec<ShipmentRow>,
+    #[serde(default)] pub departures: Vec<ShipmentRow>,
+    /// Recent trade value bought (imports) vs sold (exports), decaying tallies.
+    #[serde(default)] pub bought: f32,
+    #[serde(default)] pub sold: f32,
 }
 
 /// One foreign merchant's office hosted in a settlement (host-side view).
@@ -894,11 +919,14 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             let base = sim.goods[g].base_value.max(1e-3);
             let mut wmin = (f32::INFINITY, "");
             let mut wmax = (f32::NEG_INFINITY, "");
+            let mut wsum = 0.0f32;
             for h in &sim.hubs {
                 let xw = h.price[g] / base;
                 if xw < wmin.0 { wmin = (xw, h.name.as_str()); }
                 if xw > wmax.0 { wmax = (xw, h.name.as_str()); }
+                wsum += xw;
             }
+            let world_avg = if !sim.hubs.is_empty() { wsum / sim.hubs.len() as f32 } else { 1.0 };
             HubGoodDetail {
                 good: g,
                 name: sim.goods[g].name.clone(),
@@ -911,9 +939,42 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                 world_min_hub: wmin.1.to_string(),
                 world_max: if wmax.0.is_finite() { wmax.0 } else { 0.0 },
                 world_max_hub: wmax.1.to_string(),
+                world_avg,
             }
         })
         .collect();
+    // ── Market flow: in-flight shipments arriving at / departing this hub, each
+    //    tagged with its owner (house/guild/local) and round-trip return legs,
+    //    ranked by value (highest first). ──
+    let owner_name = |o: i32| if o >= 0 {
+        sim.houses.get(o as usize).map(|h| h.name.clone()).unwrap_or_else(|| "—".into())
+    } else { "Local merchants".into() };
+    let owner_color = |o: i32| if o >= 0 { distinct_color(o as usize) } else { "#7a8aa0".to_string() };
+    let owner_is_guild = |o: i32| o >= 0 && sim.houses.get(o as usize).map(|h| h.is_guild).unwrap_or(false);
+    let cname = |h: u32| sim.hubs.get(h as usize).map(|x| x.name.clone()).unwrap_or_default();
+    let mk_row = |s: &crate::sim::tick::InTransit, other: u32| -> ShipmentRow {
+        let g = s.good.min(ng.saturating_sub(1));
+        let base = sim.goods[g].base_value.max(1e-3);
+        ShipmentRow {
+            owner: owner_name(s.owner), color: owner_color(s.owner), is_guild: owner_is_guild(s.owner),
+            other: cname(other), good: sim.goods[g].name.clone(), amount: s.amount,
+            price: hub.price[g] / base, value: s.amount * hub.price[g], sea: s.sea,
+            returning_home: s.phase == 1,
+        }
+    };
+    let mut arrivals: Vec<ShipmentRow> = Vec::new();
+    let mut departures: Vec<ShipmentRow> = Vec::new();
+    for s in &sim.in_transit {
+        if s.good >= ng { continue; }
+        if s.to as usize == hi { arrivals.push(mk_row(s, s.from)); }
+        if s.from as usize == hi { departures.push(mk_row(s, s.to)); }
+    }
+    let by_value = |a: &ShipmentRow, b: &ShipmentRow|
+        b.value.partial_cmp(&a.value).unwrap_or(std::cmp::Ordering::Equal);
+    arrivals.sort_by(by_value); arrivals.truncate(40);
+    departures.sort_by(by_value); departures.truncate(40);
+    let bought = hub.import_spend;
+    let sold = hub.export_earn;
     // Journal stores the hub INDEX (not id), so filter by the resolved index.
     let events: Vec<JournalEntry> = sim
         .journal
@@ -1002,6 +1063,10 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         estate_owner,
         estate_good,
         offices_here,
+        arrivals,
+        departures,
+        bought,
+        sold,
         structures: hub.structures.iter().map(|&s| (
             crate::sim::tick::structure_label(s).to_string(),
             crate::sim::tick::structure_effect(s).to_string(),

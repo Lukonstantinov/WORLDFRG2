@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useUIStore } from "../state/uiStore";
 import { useWorldStore } from "../state/worldStore";
 import { useGoodsStore } from "../state/goodsStore";
@@ -108,6 +108,21 @@ export function HubPanel() {
     return () => { alive = false; };
   }, [selectedHub, campActive, campTick]);
 
+  // Accumulate per-good local price (and the world average) over ticks for the
+  // Market price graphs — reset whenever a different city is opened.
+  const priceHist = useRef<{ hub: number | null; data: Record<string, { local: number[]; world: number[] }> }>({ hub: null, data: {} });
+  useEffect(() => {
+    if (!detail) return;
+    const ph = priceHist.current;
+    if (ph.hub !== detail.id) { ph.hub = detail.id; ph.data = {}; }
+    for (const g of detail.goods) {
+      const xw = g.price / Math.max(1e-6, g.base_value);
+      const e = ph.data[g.name] ?? (ph.data[g.name] = { local: [], world: [] });
+      e.local.push(xw); e.world.push(g.world_avg ?? 1);
+      if (e.local.length > 80) { e.local.shift(); e.world.shift(); }
+    }
+  }, [detail]);
+
   if (selectedHub === null || !economy) return null;
   const hub = economy.hubs.find((h) => h.id === selectedHub);
   if (!hub) return null;
@@ -161,7 +176,7 @@ export function HubPanel() {
   ];
 
   return (
-    <div style={panel}>
+    <div style={{ ...panel, width: tab === "market" ? 600 : 360 }}>
       {/* ── Title + stats header (always visible) ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
         <div>
@@ -271,119 +286,80 @@ export function HubPanel() {
       {/* ════════════ MARKET ════════════ */}
       {tab === "market" && (
         <>
-          <div style={{ ...sectionHdr }}>
-            Market — price × world standard (green cheap · red dear)
-          </div>
-          {hub.market && (
-            <div style={{ display: "flex", gap: 4, margin: "2px 0 4px" }}>
-              <Stat label="Grain wealth" value={(detail?.grain_wealth ?? hub.market.grain_wealth).toFixed(2)} />
-              <Stat label="Trade wealth" value={(detail?.trade_wealth ?? hub.market.trade_wealth).toFixed(2)} />
-            </div>
-          )}
-          {/* Production per day — what this city MAKES, with the actual amount and
-              how much of its own daily demand that covers. Production scales with
-              live population × world tech × season, so these numbers rise year on
-              year (and dip in the lean season for food). Live during a campaign. */}
-          {detail && (() => {
-            const prod = [...detail.goods]
-              .filter((g) => g.production > 0.001)
-              .sort((a, b) => b.production - a.production);
-            if (prod.length === 0) return null;
-            const maxP = Math.max(1e-6, ...prod.map((g) => g.production));
-            return (
-              <>
-                <div style={{ ...sectionHdr, marginTop: 4 }}>
-                  Production / day — amount &amp; % of local demand
-                </div>
-                {prod.slice(0, 16).map((g) => {
-                  const pct = g.need > 1e-6 ? (g.production / g.need) * 100 : 999;
-                  const surplus = pct >= 100;
-                  return (
-                    <div key={`prod${g.good}`} style={{ marginBottom: 2 }}>
-                      <div style={{ display: "flex", alignItems: "baseline", gap: 5, fontSize: 10 }}>
-                        <span style={{ minWidth: 92, color: "#9ab0c8", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-                          {iconFor(g.name)} {labelFor(g.name)}
-                        </span>
-                        <span style={{ minWidth: 46, textAlign: "right", color: "#cfe0f4", fontWeight: 600 }}>
-                          {fmt(g.production)}
-                        </span>
-                        <span style={{ minWidth: 50, textAlign: "right", fontSize: 9,
-                          color: surplus ? "#7fd0a0" : "#e0b070" }}
-                          title={`produces ${fmt(g.production)}/day vs local need ${fmt(g.need)}/day`}>
-                          {pct > 998 ? "export" : `${Math.round(pct)}% need`}
-                        </span>
-                      </div>
-                      <div style={{ height: 4, background: "#13202e", borderRadius: 2 }}>
-                        <div style={{ height: 4, width: `${(g.production / maxP) * 100}%`,
-                          background: surplus ? "#5fc8a8" : "#c89a4a", borderRadius: 2 }} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </>
-            );
-          })()}
-
-          {hub.market?.currencies && hub.market.currencies.length > 0 ? (
-            <CurrencyCard currencies={hub.market.currencies} iconFor={iconFor} labelFor={labelFor} />
-          ) : hub.market && hub.market.currency_goods.length > 0 ? (
-            <div style={{ color: "#e0c060", fontSize: 10, margin: "0 0 4px" }}>
-              <span style={{ color: "#6a86a6" }}>Currency here: </span>
-              {hub.market.currency_goods.map((c) => `${iconFor(c)} ${labelFor(c)}`).join(", ")}
-            </div>
-          ) : null}
-
-          {/* Live market (campaign): supply/demand + cheapest/dearest */}
+          {/* Live market FLOW: arrivals ⇢ market ⇢ departures (campaign only) */}
           {detail ? (
             <>
-              {detail.history.length > 1 && (
-                <div style={{ margin: "2px 0 6px" }}>
-                  <div style={{ color: "#6a86a6", fontSize: 9 }}>Local price index over time</div>
-                  <Sparkline values={detail.history.map((s) => s.price_index)} color="#e0c060" baseline={1} />
+              <div style={{ display: "flex", gap: 6 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={sectionHdr}>⇢ Arrivals</div>
+                  {(detail.arrivals ?? []).length === 0 && <div style={emptyTxt}>none inbound</div>}
+                  {(detail.arrivals ?? []).slice(0, 16).map((s, i) => (
+                    <ShipRow key={"a" + i} s={s} side="in" icon={iconFor} label={labelFor} />
+                  ))}
                 </div>
-              )}
-              {[...detail.goods]
-                .filter((g) => g.production > 0 || g.stock > 0.01 || g.price > g.base_value * 1.05)
-                .sort((a, b) => (b.price / b.base_value) - (a.price / a.base_value))
-                .slice(0, 16)
-                .map((g) => {
-                  const xw = g.price / Math.max(1e-6, g.base_value);
-                  const supply = g.stock; const demand = Math.max(1e-6, g.need);
-                  const ratio = Math.min(1, supply / (demand * 6));
+                <div style={{ flex: 1.25, minWidth: 0, borderLeft: "1px solid #1e2e42", borderRight: "1px solid #1e2e42", padding: "0 6px" }}>
+                  <div style={{ textAlign: "center", color: "#e8d8b0", fontSize: 11, fontWeight: 700 }}>Market</div>
+                  <div style={{ textAlign: "center", color: "#9ab0c8", fontSize: 9, marginBottom: 3 }}>
+                    💰 bought {fmt(detail.bought ?? 0)} · sold {fmt(detail.sold ?? 0)}
+                  </div>
+                  <div style={{ display: "flex", fontSize: 8, color: "#56708e" }}>
+                    <span style={{ flex: 1 }}>good</span>
+                    <span style={{ minWidth: 34, textAlign: "right" }}>prod</span>
+                    <span style={{ minWidth: 30, textAlign: "right" }}>need</span>
+                    <span style={{ minWidth: 28, textAlign: "right" }}>price</span>
+                  </div>
+                  {[...detail.goods].filter((g) => g.production > 0.01 || g.stock > 0.01)
+                    .sort((a, b) => b.production - a.production).slice(0, 14).map((g) => {
+                    const xw = g.price / Math.max(1e-6, g.base_value);
+                    const pct = g.need > 1e-6 ? (g.production / g.need) * 100 : 999;
+                    return (
+                      <div key={g.good} style={{ display: "flex", gap: 3, fontSize: 9, alignItems: "baseline" }}>
+                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#c0d0e0" }}>{iconFor(g.name)} {labelFor(g.name)}</span>
+                        <span style={{ minWidth: 34, textAlign: "right", color: "#9ab0c8" }}>{g.production > 0.01 ? fmt(g.production) : "—"}</span>
+                        <span style={{ minWidth: 30, textAlign: "right", color: pct >= 100 ? "#7fd0a0" : "#e0b070" }}>{pct > 998 ? "exp" : Math.round(pct) + "%"}</span>
+                        <span style={{ minWidth: 28, textAlign: "right", fontWeight: 600, color: xw > 1.3 ? "#e08080" : xw < 0.77 ? "#7fd0a0" : "#c0d0e0" }}>{xw.toFixed(1)}×</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ ...sectionHdr, textAlign: "right" }}>Departures ⇢</div>
+                  {(detail.departures ?? []).length === 0 && <div style={emptyTxt}>none outbound</div>}
+                  {(detail.departures ?? []).slice(0, 16).map((s, i) => (
+                    <ShipRow key={"d" + i} s={s} side="out" icon={iconFor} label={labelFor} />
+                  ))}
+                </div>
+              </div>
+              <div style={{ ...sectionHdr, marginTop: 8 }}>Prices — local vs world average (live)</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 10px" }}>
+                {[...detail.goods].filter((g) => g.production > 0.01 || g.stock > 0.01)
+                  .sort((a, b) => b.production - a.production).slice(0, 6).map((g) => {
+                  const e = priceHist.current.data[g.name];
                   return (
-                    <div key={g.good} style={{ marginBottom: 3 }}>
-                      <div style={{ display: "flex", alignItems: "baseline", gap: 5, fontSize: 10 }}>
-                        <span style={{ minWidth: 92, color: "#9ab0c8", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-                          {iconFor(g.name)} {labelFor(g.name)}
-                        </span>
-                        <span style={{ minWidth: 40, textAlign: "right", fontWeight: 600,
-                          color: xw > 1.3 ? "#e08080" : xw < 0.77 ? "#7fd0a0" : "#c0d0e0" }}>{xw.toFixed(2)}×</span>
-                        <span style={{ color: "#6a86a6", flex: 1, fontSize: 9, textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                          title={`cheapest ${g.world_min.toFixed(1)}× at ${g.world_min_hub} · dearest ${g.world_max.toFixed(1)}× at ${g.world_max_hub}`}>
-                          ▼{g.world_min_hub.slice(0, 7)} ▲{g.world_max_hub.slice(0, 7)}
-                        </span>
+                    <div key={g.good}>
+                      <div style={{ fontSize: 9, color: "#9ab0c8", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                        {iconFor(g.name)} {labelFor(g.name)}
+                        <span style={{ color: "#e0c060" }}> {(g.price / Math.max(1e-6, g.base_value)).toFixed(2)}×</span>
+                        <span style={{ color: "#8aa0c0" }}> · w {(g.world_avg ?? 1).toFixed(2)}×</span>
                       </div>
-                      {/* supply vs demand bar */}
-                      <div style={{ position: "relative", height: 4, background: "#3a1e1e", borderRadius: 2 }} title={`stock ${supply.toFixed(1)} vs need ${demand.toFixed(1)}`}>
-                        <div style={{ position: "absolute", inset: 0, width: `${ratio * 100}%`, background: ratio > 0.5 ? "#5fc8a8" : "#c89a4a", borderRadius: 2 }} />
-                      </div>
+                      {e && e.local.length > 1 ? <DualSpark local={e.local} world={e.world} /> : <div style={{ fontSize: 8, color: "#56708e" }}>gathering…</div>}
                     </div>
                   );
                 })}
+              </div>
+              <div style={{ fontSize: 8, color: "#56708e", marginTop: 2 }}>
+                <span style={{ color: "#e0c060" }}>━ local price</span> · <span style={{ color: "#8aa0c0" }}>┈ world average</span>
+              </div>
             </>
           ) : hub.market ? (
-            hub.market.prices.slice(0, 14).map((p) => (
+            hub.market.prices.slice(0, 16).map((p) => (
               <div key={p.good} style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 10, padding: "1px 0" }}>
-                <span style={{ minWidth: 92, color: "#9ab0c8", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                <span style={{ minWidth: 110, color: "#9ab0c8", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
                   {iconFor(p.good_name)} {labelFor(p.good_name)}
                 </span>
                 <span style={{ minWidth: 44, textAlign: "right", fontWeight: 600,
                   color: p.price > p.base_value * 1.3 ? "#e08080" : p.price < p.base_value * 0.77 ? "#7fd0a0" : "#c0d0e0" }}>
-                  {p.price.toFixed(2)}
-                </span>
-                <span style={{ color: "#56708e", minWidth: 38, textAlign: "right" }}>{p.base_value.toFixed(1)}</span>
-                <span style={{ color: "#6a86a6", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {p.exchanged_for.slice(0, 2).map((x) => `1 ⇄ ${x.ratio.toFixed(1)} ${labelFor(x.good_name)}`).join(" · ")}
+                  {(p.price / Math.max(1e-6, p.base_value)).toFixed(2)}×
                 </span>
               </div>
             ))
@@ -1030,6 +1006,57 @@ function CurBar({ label, frac, color, hint }: { label: string; frac: number; col
         <div style={{ height: 4, width: `${Math.max(4, Math.min(100, frac * 100))}%`, background: color, borderRadius: 2 }} />
       </div>
     </div>
+  );
+}
+
+const fmtN = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
+
+/** One shipment row in the Market flow (arrivals / departures), tagged with its
+ *  owner (house/guild/local), origin or destination, carrier, good, amount and
+ *  price — ranked by value upstream. A round-trip return leg is marked ↩. */
+function ShipRow({ s, side, icon, label }: {
+  s: import("../types").ShipmentRow; side: "in" | "out";
+  icon: (id: string) => string; label: (id: string) => string;
+}) {
+  const carrier = s.sea ? "🚢" : "🐫";
+  const arrow = <span style={{ color: "#5a7090" }}>─▶</span>;
+  return (
+    <div style={{ fontSize: 8.5, marginBottom: 2, lineHeight: 1.25 }}
+      title={`${s.owner}${s.is_guild ? " (guild)" : ""} · ${s.other} · ${label(s.good)} ${fmtN(s.amount)} · value ${fmtN(s.value)}`}>
+      <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+        {side === "out" && arrow}
+        <span style={{ width: 7, height: 7, borderRadius: 2, background: s.color, flex: "0 0 auto" }} />
+        <span style={{ flex: 1, color: s.is_guild ? "#9ab0c8" : "#cfe0f4", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {s.returning_home ? "↩ " : ""}{s.owner}
+        </span>
+        {side === "in" && arrow}
+      </div>
+      <div style={{ display: "flex", gap: 3, color: "#9ab0c8" }}>
+        <span>{carrier}</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 52 }}>{s.other}</span>
+        <span style={{ flex: 1, textAlign: "right", color: "#c0d0e0" }}>{icon(s.good)} {fmtN(s.amount)}</span>
+        <span style={{ color: "#e0c060" }}>{s.price.toFixed(1)}×</span>
+      </div>
+    </div>
+  );
+}
+
+/** Two-line price spark: local price (solid gold) vs the world average (dashed
+ *  slate), sharing a y-scale, with the 1.0× world-standard line dotted. */
+function DualSpark({ local, world }: { local: number[]; world: number[] }) {
+  const all = [...local, ...world, 1];
+  const lo = Math.min(...all), hi = Math.max(...all);
+  const span = Math.max(1e-6, hi - lo);
+  const W = 220, H = 30;
+  const path = (arr: number[]) => arr.map((v, i) =>
+    `${((i / Math.max(1, arr.length - 1)) * W).toFixed(1)},${(H - ((v - lo) / span) * (H - 4) - 2).toFixed(1)}`).join(" ");
+  const oneY = H - ((1 - lo) / span) * (H - 4) - 2;
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: "block", background: "#0b1622", borderRadius: 3 }}>
+      <line x1={0} y1={oneY} x2={W} y2={oneY} stroke="#2a3a50" strokeWidth={0.5} strokeDasharray="2 2" />
+      <polyline points={path(world)} fill="none" stroke="#8aa0c0" strokeWidth={1} strokeDasharray="3 2" />
+      <polyline points={path(local)} fill="none" stroke="#e0c060" strokeWidth={1.4} />
+    </svg>
   );
 }
 

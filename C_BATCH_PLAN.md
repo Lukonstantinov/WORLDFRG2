@@ -104,6 +104,24 @@ event. For game balance later:
 - Should interact with the population/recovery model so the world can rebuild
   between pandemics (and with the famine fixes so it is survivable in aggregate).
 
+## Settlement "Trade" tab = Market flow view (user-designed)
+
+Three columns, left→right flow: **Arrivals ⇢ | MARKET | ⇢ Departures**.
+- **Arrivals (left):** each incoming shipment as its OWN row — carrier (🚢 ship /
+  🛶 boat / 🐫 caravan), origin city, good icon + amount, price (×world). Row ends
+  `──▶` into the market. IN-FLIGHT cargo up top + RECENT arrivals below.
+- **Market (centre):** city wealth bought vs sold (`import_spend`/`export_earn`),
+  who runs the trade, and the per-good table (icon · production/day + % need or
+  "short" · local price).
+- **Departures (right):** each outgoing shipment as its own row — good + amount,
+  destination city, carrier, sale price. Row starts `──▶` out of the market.
+  IN-FLIGHT up top + RECENT departures below.
+- Data: in-flight from `in_transit` (`to==hub` / `from==hub`); the centre from the
+  existing per-good production/price detail + earn/spend. **Backend addition
+  needed:** a small per-hub RECENT-trade log (ring buffer of last ~12 landings &
+  dispatches: good, amount, other-hub, carrier, price, tick) since per-shipment
+  "recent" isn't currently retained. Window likely widens for this tab (3 cols).
+
 ## Build order
 1. **C2** round-trip trade (+ tests) — foundation, riskiest.
 2. **C3** guild entities (50k threshold, names, civic behavior, treasury) + offices
