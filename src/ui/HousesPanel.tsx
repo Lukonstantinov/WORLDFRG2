@@ -1,13 +1,24 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useCampaignStore } from "../state/campaignStore";
 import { useUIStore } from "../state/uiStore";
 import { CoatOfArms } from "./CoatOfArms";
 import { GOOD_DEFS } from "../goods";
-import { campaignGetHouseHistory } from "../bridge/tauri";
-import type { HouseHistory, CampaignDiagnostics } from "../types";
+import { campaignGetHouseHistory, campaignMerchantRoutes } from "../bridge/tauri";
+import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute } from "../types";
 
 const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
 const goodIcon = (name: string) => GOOD_ICON.get(name) ?? "\u{1F4E6}"; // 📦 fallback
+
+/** Desaturate a house colour toward grey — guilds read DULL vs the vivid private
+ *  houses, so the civic bodies are visually distinct. */
+function dull(hex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+  if (!m) return "#7a8694";
+  const n = parseInt(m[1], 16);
+  const mix = (c: number) => Math.round(c * 0.45 + 0x86 * 0.55);
+  const r = mix((n >> 16) & 255), g = mix((n >> 8) & 255), b = mix(n & 255);
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
+}
 
 /** "Is trade actually moving?" — a compact health strip above the houses list.
  *  Answers the core merchant-house question: are shipments flowing, how many are
@@ -58,6 +69,8 @@ export function HousesPanel() {
   const houses = useCampaignStore((s) => s.houses);
   const diag = useCampaignStore((s) => s.diagnostics);
   const [history, setHistory] = useState<HouseHistory | null>(null);
+  const [tab, setTab] = useState<"houses" | "guilds">("houses");
+  const [selected, setSelected] = useState<HouseBrief | null>(null);
   const close = () => useUIStore.getState().setShowHouses(false);
   const openTimeline = (name: string) => {
     campaignGetHouseHistory(name).then((h) => setHistory(h)).catch(() => setHistory(null));
@@ -66,27 +79,45 @@ export function HousesPanel() {
 
   const active = houses.filter((h) => !h.defunct);
   const gone = houses.filter((h) => h.defunct);
-  const maxWealth = Math.max(1, ...active.map((h) => h.wealth));
+  const inTab = active.filter((h) => (tab === "guilds") === !!h.is_guild);
+  const maxWealth = Math.max(1, ...inTab.map((h) => h.wealth));
+  const nHouses = active.filter((h) => !h.is_guild).length;
+  const nGuilds = active.filter((h) => h.is_guild).length;
 
   return (
     <div style={panel}>
       {history && <HouseTimeline history={history} onClose={() => setHistory(null)} />}
+      {selected && <HouseDetail h={selected} onClose={() => setSelected(null)} onChronicle={openTimeline} />}
       <div style={header}>
-        <span>⚜️ Merchant Houses ({active.length})</span>
+        <span>⚜️ Trading Families</span>
         <span style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
+      </div>
+      {/* Houses vs Guilds tabs */}
+      <div style={{ display: "flex", gap: 2, padding: "0 8px", borderBottom: "1px solid #1e2e42" }}>
+        {([["houses", `👑 Houses (${nHouses})`], ["guilds", `🏛 Guilds (${nGuilds})`]] as const).map(([id, lbl]) => (
+          <div key={id} onClick={() => setTab(id)}
+            style={{ padding: "4px 9px", cursor: "pointer", fontSize: 11, fontWeight: tab === id ? 700 : 400,
+              color: tab === id ? "#cfe2f6" : "#6a86a6",
+              borderBottom: tab === id ? "2px solid #3a80c0" : "2px solid transparent" }}>
+            {lbl}
+          </div>
+        ))}
       </div>
       {diag && <TradeDiagnostics diag={diag} />}
       <div style={{ overflowY: "auto", padding: "4px 8px 10px" }}>
         {houses.length === 0 && (
           <div style={empty}>Begin the campaign (Step 11) — trading families rise as goods start to move.</div>
         )}
-        {active.map((h, i) => (
-          <div key={h.name + i} style={{ ...card, cursor: "pointer" }} onClick={() => openTimeline(h.name)} title="View this family's timeline">
+        {houses.length > 0 && inTab.length === 0 && (
+          <div style={empty}>{tab === "guilds" ? "No civic guilds yet (cities form a guild at 50,000 people)." : "No private houses yet."}</div>
+        )}
+        {inTab.map((h, i) => (
+          <div key={h.name + i} style={{ ...card, cursor: "pointer" }} onClick={() => setSelected(h)} title="Open this family's detail">
             <CoatOfArms name={h.name} size={30} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                {/* Colour chip = this house's unique map colour */}
-                <span style={{ width: 9, height: 9, borderRadius: 2, background: h.color ?? "#888", flex: "0 0 auto", alignSelf: "center" }} />
+                {/* Colour chip — vivid for private houses, dull for civic guilds */}
+                <span style={{ width: 9, height: 9, borderRadius: 2, background: h.is_guild ? dull(h.color ?? "") : (h.color ?? "#888"), flex: "0 0 auto", alignSelf: "center" }} />
                 <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12 }}>{h.name}</span>
                 {h.is_guild && <span title="A civic Merchant Guild — acts in its home city's interest" style={{ fontSize: 9, color: "#7fd0c0", border: "1px solid #2e5a52", borderRadius: 3, padding: "0 3px" }}>GUILD</span>}
                 <span style={{ color: "#6a86a6", fontSize: 9 }}>· {h.home_name}</span>
@@ -176,6 +207,64 @@ export function HousesPanel() {
     </div>
   );
 }
+
+/** Click-through detail for one house/guild: where it's active, its offices and
+ *  estates, its fleet, and its TOP 5 routes (back & forth) with the goods it moves
+ *  each way and the volume. */
+function HouseDetail({ h, onClose, onChronicle }:
+  { h: HouseBrief; onClose: () => void; onChronicle: (name: string) => void }) {
+  const [routes, setRoutes] = useState<MerchantRoute[]>([]);
+  const tick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
+  useEffect(() => {
+    let alive = true;
+    campaignMerchantRoutes().then((rs) => {
+      if (alive) setRoutes(rs.filter((r) => r.holder === h.name).sort((a, b) => b.volume - a.volume).slice(0, 5));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [h.name, tick]);
+  const fmt = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
+  const goodsStr = (gs: [string, number][]) => gs.slice(0, 3).map(([g, v]) => `${goodIcon(g)}${fmt(v)}`).join(" ") || "—";
+  const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div style={{ fontSize: 9, marginTop: 3 }}>
+      <span style={{ color: "#6a86a6", textTransform: "uppercase", letterSpacing: 0.4 }}>{label}</span>
+      <div style={{ color: "#bcd0e4" }}>{children}</div>
+    </div>
+  );
+  return (
+    <div style={detailPanel}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 3 }}>
+        <span style={{ width: 10, height: 10, borderRadius: 2, background: h.is_guild ? dull(h.color ?? "") : (h.color ?? "#888"), alignSelf: "center" }} />
+        <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 13 }}>{h.name}</span>
+        {h.is_guild && <span style={{ fontSize: 8, color: "#7fd0c0" }}>GUILD</span>}
+        <span style={{ flex: 1 }} />
+        <span onClick={onClose} style={{ color: "#7090b0", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</span>
+      </div>
+      <div style={{ color: "#9ab0c8", fontSize: 10 }}>{h.head_name} · of {h.home_name} · gen {h.generation}</div>
+      <div style={{ color: "#c9a227", fontSize: 11, fontWeight: 700 }}>wealth {fmt(h.wealth)}</div>
+      {h.cities && h.cities.length > 0 && <Row label="Active in">{h.cities.slice(0, 10).join(" · ")}</Row>}
+      {h.offices && h.offices.length > 0 && <Row label="Offices">🏢 {h.offices.map(([nm]) => nm).join(" · ")}</Row>}
+      {h.estates && h.estates.length > 0 && <Row label="Estates">{h.estates.map(([g, c]) => `${goodIcon(g)} ${g} (${c})`).join(" · ")}</Row>}
+      <Row label="Fleet">🚢 {h.fleet_sea ?? 0} · 🛶 {h.fleet_river ?? 0} · 🐫 {h.fleet_caravan ?? 0}</Row>
+      <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 6 }}>Top routes (back &amp; forth)</div>
+      {routes.length === 0 && <div style={{ color: "#56708e", fontSize: 9 }}>no active routes right now</div>}
+      {routes.map((r, i) => (
+        <div key={i} style={{ fontSize: 9, marginBottom: 3, borderBottom: "1px solid #131f2c", paddingBottom: 2 }}>
+          <div style={{ color: "#cfe0f4" }}>{r.sea ? "🚢" : "🐫"} {r.a_name} ⇄ {r.b_name} <span style={{ color: "#6a86a6" }}>· vol {fmt(r.volume)}</span></div>
+          <div style={{ color: "#9ab0c8" }}>→ {goodsStr(r.out_goods)} · ← {goodsStr(r.ret_goods)}</div>
+        </div>
+      ))}
+      <div onClick={() => onChronicle(h.name)} style={{ color: "#88a8c8", fontSize: 9, cursor: "pointer", marginTop: 5, textDecoration: "underline" }}>
+        View family chronicle →
+      </div>
+    </div>
+  );
+}
+
+const detailPanel: React.CSSProperties = {
+  position: "absolute", top: 60, right: 690, width: 290, maxHeight: "78vh", overflowY: "auto",
+  background: "#0c141e", border: "1px solid #24364e", borderRadius: 8,
+  padding: "9px 11px", boxShadow: "0 8px 28px rgba(0,0,0,0.55)", zIndex: 45,
+};
 
 const panel: React.CSSProperties = {
   position: "absolute", top: 60, right: 360, width: 320, maxHeight: "78vh",
