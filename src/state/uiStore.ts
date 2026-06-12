@@ -91,6 +91,7 @@ interface UIStore {
   showGoodsBrowser: boolean;
   /** Merchant-houses panel open. */
   showHouses: boolean;
+  showCityRanking: boolean;
 
   setTool: (tool: ActiveTool) => void;
   setLayer: (layer: ActiveLayer) => void;
@@ -124,6 +125,7 @@ interface UIStore {
   setSettlementRealism: (v: number) => void;
   setShowGoodsBrowser: (v: boolean) => void;
   setShowHouses: (v: boolean) => void;
+  setShowCityRanking: (v: boolean) => void;
 }
 
 // Default layer/tool for each step
@@ -182,6 +184,7 @@ export const useUIStore = create<UIStore>((set) => ({
   settlementRealism: 0.55,
   showGoodsBrowser: false,
   showHouses: false,
+  showCityRanking: false,
 
   setTool: (tool) => set({ activeTool: tool }),
   setLayer: (layer) => set({ activeLayer: layer }),
@@ -236,6 +239,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setSettlementRealism: (v) => set({ settlementRealism: v }),
   setShowGoodsBrowser: (v) => set({ showGoodsBrowser: v }),
   setShowHouses: (v) => set({ showHouses: v }),
+  setShowCityRanking: (v) => set({ showCityRanking: v }),
 
   setWorkflowStep: (step) => {
     const defaults = STEP_DEFAULTS[step] || { layer: "land", tool: "pan" };

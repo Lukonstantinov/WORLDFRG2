@@ -139,6 +139,9 @@ export function StepCampaign({ seed }: { seed: number; plateCount: number; inval
           <button onClick={() => setShowHouses(true)} style={housesBtn}>
             ⚜️ Merchant Houses
           </button>
+          <button onClick={() => useUIStore.getState().setShowCityRanking(true)} style={housesBtn}>
+            🏆 Richest Cities
+          </button>
 
           {/* ── World pulse: population + prices in NUMBERS, with monthly Δ ── */}
           <div style={statRow}>
