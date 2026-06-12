@@ -9,12 +9,12 @@ import { climatePhrase } from "./climate";
 import { CoatOfArms, houseColor } from "./CoatOfArms";
 import type { HouseBrief } from "../types";
 
-type Tab = "overview" | "market" | "society" | "history";
+type Tab = "summary" | "trade" | "estates" | "people";
 
 const LOCAL_COLOR = "#5d6675";  // unaffiliated local merchants (grey)
 const GUILD_COLOR = "#4a6a8a";  // organised merchant guilds (slate blue)
-const ESTATE_EMOJI: Record<number, string> = { 1: "🌾", 2: "⛏️", 3: "🌿", 4: "🎣", 5: "🍇" };
-const ESTATE_LABEL: Record<number, string> = { 1: "Farm", 2: "Mine", 3: "Plantation", 4: "Fishery", 5: "Vineyard" };
+const ESTATE_EMOJI: Record<number, string> = { 1: "🌾", 2: "⛏️", 3: "🌿", 4: "🎣", 5: "🍇", 6: "🏭" };
+const ESTATE_LABEL: Record<number, string> = { 1: "Farm", 2: "Mine", 3: "Plantation", 4: "Fishery", 5: "Vineyard", 6: "Manufactory" };
 const STRUCT_EMOJI: Record<string, string> = {
   Granary: "🌾", Warehouse: "📦", Shipyard: "⚓", Guildhall: "🏛️", Workshop: "🔨",
 };
@@ -93,11 +93,11 @@ export function HubPanel() {
   // settlement's prices/wealth/population update live alongside the campaign.
   const campTick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
 
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>("summary");
   const [detail, setDetail] = useState<HubDetail | null>(null);
 
   // Reset to the Overview tab whenever a different hub is opened.
-  useEffect(() => { setTab("overview"); }, [selectedHub]);
+  useEffect(() => { setTab("summary"); }, [selectedHub]);
 
   // Pull live per-hub detail (sentiment/market/history) while a campaign runs,
   // refreshed every time the campaign tick changes.
@@ -169,14 +169,14 @@ export function HubPanel() {
   const cargoMax = Math.max(1e-6, ...outCargo.map((g) => g.value), ...inCargo.map((g) => g.value));
 
   const TABS: { id: Tab; label: string }[] = [
-    { id: "overview", label: "Overview" },
-    { id: "market", label: "Market" },
-    { id: "society", label: "Society" },
-    { id: "history", label: "History" },
+    { id: "summary", label: "Summary" },
+    { id: "trade", label: "Trade" },
+    { id: "estates", label: "Estates" },
+    { id: "people", label: "People" },
   ];
 
   return (
-    <div style={{ ...panel, width: tab === "market" ? 600 : 360 }}>
+    <div style={{ ...panel, width: tab === "trade" ? 600 : 360 }}>
       {/* ── Title + stats header (always visible) ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
         <div>
@@ -211,7 +211,7 @@ export function HubPanel() {
       </div>
 
       {/* ════════════ OVERVIEW ════════════ */}
-      {tab === "overview" && (
+      {tab === "summary" && (
         <>
           <div style={statGrid}>
             <Stat label="Throughput" value={fmt(hub.throughput ?? 0)} />
@@ -283,8 +283,8 @@ export function HubPanel() {
         </>
       )}
 
-      {/* ════════════ MARKET ════════════ */}
-      {tab === "market" && (
+      {/* ════════════ TRADE (market flow) ════════════ */}
+      {tab === "trade" && (
         <>
           {/* Live market FLOW: arrivals ⇢ market ⇢ departures (campaign only) */}
           {detail ? (
@@ -438,8 +438,51 @@ export function HubPanel() {
         </>
       )}
 
-      {/* ════════════ SOCIETY ════════════ */}
-      {tab === "society" && (
+      {/* ════════════ ESTATES & BUILDINGS ════════════ */}
+      {tab === "estates" && (
+        <>
+          <div style={sectionHdr}>Estates &amp; manufactories</div>
+          {(detail?.estates_here?.length ?? 0) === 0 && (
+            <div style={emptyTxt}>
+              {detail ? "No estates yet — wealthy houses & guilds build them over time." : "Begin the campaign (Step 11) to see this city's estates."}
+            </div>
+          )}
+          {[...(detail?.estates_here ?? [])]
+            .sort((a, b) => b.output - a.output)
+            .map((e, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 10, padding: "2px 2px", borderBottom: "1px solid #131f2c" }}>
+                <span style={{ fontSize: 13 }}>{ESTATE_EMOJI[e.kind] ?? "🏡"}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: "#cdbb88", fontWeight: 600 }}>
+                    {ESTATE_LABEL[e.kind] ?? "Estate"} · {iconFor(e.good)} {labelFor(e.good)}
+                  </div>
+                  <div style={{ color: "#7a90a8", fontSize: 9 }}>
+                    owner: <span style={{ color: e.owner_is_guild ? "#7fd0c0" : "#e8dcc0" }}>{e.owner}</span>
+                  </div>
+                </div>
+                <span style={{ color: "#7fd0a0", fontSize: 10 }}>▲ {fmt(e.output)}/day</span>
+              </div>
+            ))}
+
+          {/* Buildings in the city itself (granary, warehouse, …) with effects */}
+          <div style={{ ...sectionHdr, marginTop: 8 }}>Buildings</div>
+          {(detail?.structures?.length ?? 0) === 0 ? (
+            <div style={emptyTxt}>{detail ? "No civic buildings yet." : "—"}</div>
+          ) : (
+            detail!.structures!.map(([nm, eff], i) => (
+              <div key={i} style={{ display: "flex", gap: 6, alignItems: "baseline", fontSize: 10, padding: "1px 2px" }}>
+                <span style={{ fontSize: 12 }}>{STRUCT_EMOJI[nm] ?? "🏗️"}</span>
+                <span style={{ color: "#cdbb88", fontWeight: 700, minWidth: 72 }}>{nm}</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ color: "#7fbf9a" }}>{eff}</span>
+              </div>
+            ))
+          )}
+        </>
+      )}
+
+      {/* ════════════ PEOPLE (society + history) ════════════ */}
+      {tab === "people" && (
         <>
           <div style={sectionHdr}>Society</div>
           <div style={{ display: "flex", gap: 4 }}>
@@ -699,8 +742,8 @@ export function HubPanel() {
         </>
       )}
 
-      {/* ════════════ HISTORY ════════════ */}
-      {tab === "history" && (
+      {/* ════════════ PEOPLE — history charts + chronicle ════════════ */}
+      {tab === "people" && (
         detail ? (
           <>
             {detail.history.length > 1 ? (

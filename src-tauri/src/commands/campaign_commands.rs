@@ -412,6 +412,19 @@ pub struct HubDetail {
     /// Recent trade value bought (imports) vs sold (exports), decaying tallies.
     #[serde(default)] pub bought: f32,
     #[serde(default)] pub sold: f32,
+    /// Estates & manufactories in this city's hinterland.
+    #[serde(default)] pub estates_here: Vec<EstateRow>,
+}
+
+/// One estate / manufactory in a settlement's hinterland (host-side view).
+#[derive(Serialize)]
+pub struct EstateRow {
+    pub name: String,
+    pub kind: u8,            // 1 farm/2 mine/3 plantation/4 fishery/5 vineyard/6 manufactory
+    pub good: String,
+    pub output: f32,         // current production/day of its good
+    pub owner: String,       // owning house/guild, or "City of …"
+    pub owner_is_guild: bool,
 }
 
 /// One foreign merchant's office hosted in a settlement (host-side view).
@@ -975,6 +988,29 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
     departures.sort_by(by_value); departures.truncate(40);
     let bought = hub.import_spend;
     let sold = hub.export_earn;
+    // ── Estates & manufactories in this city's hinterland ──
+    let estates_here: Vec<EstateRow> = sim.hubs.iter()
+        .filter(|e| e.is_estate && e.parent == hi as i32)
+        .map(|e| {
+            let g = e.base_per_capita.iter().enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(i, _)| i).unwrap_or(0);
+            let (owner, owner_is_guild) = if e.owner_house >= 0 {
+                let h = sim.houses.get(e.owner_house as usize);
+                (h.map(|x| x.name.clone()).unwrap_or_default(), h.map(|x| x.is_guild).unwrap_or(false))
+            } else {
+                (format!("City of {}", hub.name), false)
+            };
+            EstateRow {
+                name: e.name.clone(),
+                kind: e.estate_kind,
+                good: sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_default(),
+                output: e.production.get(g).copied().unwrap_or(0.0),
+                owner,
+                owner_is_guild,
+            }
+        })
+        .collect();
     // Journal stores the hub INDEX (not id), so filter by the resolved index.
     let events: Vec<JournalEntry> = sim
         .journal
@@ -1067,6 +1103,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         departures,
         bought,
         sold,
+        estates_here,
         structures: hub.structures.iter().map(|&s| (
             crate::sim::tick::structure_label(s).to_string(),
             crate::sim::tick::structure_effect(s).to_string(),
@@ -1123,6 +1160,8 @@ pub struct HouseBrief {
     #[serde(default)] pub is_guild: bool,
     /// Foreign cities where this holder has opened an OFFICE: `(name, [x,y])`.
     #[serde(default)] pub offices: Vec<(String, [f32; 2])>,
+    /// Estates/manufactories this holder owns: `(good, host-city)`.
+    #[serde(default)] pub estates: Vec<(String, String)>,
 }
 
 /// Golden-angle hue → a distinct, saturated hex colour. `i` is a stable index so
@@ -1240,6 +1279,18 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
             offices: h.offices.iter()
                 .map(|&oh| (hub_name(oh), seat_pos(oh as usize)))
                 .collect(),
+            estates: sim.hubs.iter()
+                .filter(|e| e.is_estate && e.owner_house == hi as i32)
+                .map(|e| {
+                    let g = e.base_per_capita.iter().enumerate()
+                        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                        .map(|(i, _)| i).unwrap_or(0);
+                    let city = if e.parent >= 0 {
+                        sim.hubs.get(e.parent as usize).map(|p| p.name.clone()).unwrap_or_default()
+                    } else { String::new() };
+                    (gname(g), city)
+                })
+                .collect(),
         }
     }).collect();
     // Active first, then richest first.
@@ -1308,6 +1359,37 @@ pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRo
     }).collect();
     out.sort_by(|x, y| y.volume.partial_cmp(&x.volume).unwrap_or(std::cmp::Ordering::Equal));
     out.truncate(150);
+    Ok(out)
+}
+
+/// One city in the live "richest cities" ranking.
+#[derive(Serialize)]
+pub struct CityRank {
+    pub id: u32,
+    pub name: String,
+    pub population: u32,
+    pub wealth: f32,      // grain + trade wealth
+    pub trade: f32,       // throughput (value bought + sold)
+    pub pct_world: f32,   // share of all world trade (%)
+}
+
+/// Live ranking of the wealthiest / busiest trading cities, with each city's share
+/// of all world trade — top to bottom.
+#[tauri::command]
+pub fn campaign_city_ranking(db: State<'_, WorldDb>) -> Result<Vec<CityRank>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let trade_of = |h: &TickHub| (h.export_earn + h.import_spend).max(0.0);
+    let total: f32 = sim.hubs.iter().filter(|h| !h.is_estate).map(trade_of).sum::<f32>().max(1e-6);
+    let mut out: Vec<CityRank> = sim.hubs.iter().filter(|h| !h.is_estate).map(|h| {
+        let trade = trade_of(h);
+        CityRank {
+            id: h.id, name: h.name.clone(), population: h.population.max(0.0) as u32,
+            wealth: h.grain_wealth + h.trade_wealth, trade, pct_world: trade / total * 100.0,
+        }
+    }).collect();
+    out.sort_by(|a, b| b.trade.partial_cmp(&a.trade).unwrap_or(std::cmp::Ordering::Equal));
+    out.truncate(40);
     Ok(out)
 }
 

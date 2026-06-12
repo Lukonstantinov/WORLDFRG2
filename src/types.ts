@@ -274,6 +274,26 @@ export interface HubDetail {
   departures?: ShipmentRow[];
   bought?: number;
   sold?: number;
+  /** Estates & manufactories in this city's hinterland. */
+  estates_here?: EstateRow[];
+}
+/** One estate / manufactory in a settlement's hinterland. */
+export interface EstateRow {
+  name: string;
+  kind: number;       // 1 farm/2 mine/3 plantation/4 fishery/5 vineyard/6 manufactory
+  good: string;
+  output: number;
+  owner: string;
+  owner_is_guild: boolean;
+}
+/** One city in the live richest-cities ranking. */
+export interface CityRank {
+  id: number;
+  name: string;
+  population: number;
+  wealth: number;
+  trade: number;
+  pct_world: number;
 }
 /** One active merchant route for the campaign merchant map layer. */
 export interface MerchantRoute {
@@ -329,6 +349,7 @@ export interface HouseBrief {
   fleet_caravan?: number;
   is_guild?: boolean;            // a civic Merchant Guild (acts for its home city)
   offices?: [string, [number, number]][]; // foreign cities where it has an office
+  estates?: [string, string][];  // estates/manufactories it owns: [good, city]
 }
 
 export interface HouseTimelineEvent {
