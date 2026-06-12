@@ -1001,6 +1001,10 @@ pub struct HouseBrief {
     #[serde(default)] pub archetype_label: String,
     #[serde(default)] pub archetype_perk: String,
     #[serde(default)] pub charters: Vec<String>,
+    /// The house's transport capital — each vessel is one concurrent shipment slot.
+    #[serde(default)] pub fleet_sea: u32,
+    #[serde(default)] pub fleet_river: u32,
+    #[serde(default)] pub fleet_caravan: u32,
 }
 
 /// Golden-angle hue → a distinct, saturated hex colour. `i` is a stable index so
@@ -1111,6 +1115,9 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
             archetype_label: crate::sim::tick::archetype_label(h.archetype).to_string(),
             archetype_perk: crate::sim::tick::archetype_perk(h.archetype).to_string(),
             charters: h.charters.iter().map(|&g| gname(g)).collect(),
+            fleet_sea: h.fleet_sea,
+            fleet_river: h.fleet_river,
+            fleet_caravan: h.fleet_caravan,
         }
     }).collect();
     // Active first, then richest first.

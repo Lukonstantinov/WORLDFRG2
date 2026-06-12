@@ -117,6 +117,21 @@ export function HousesPanel() {
                   🏙 {h.cities.slice(0, 6).join(", ")}{h.cities.length > 6 ? ` +${h.cities.length - 6}` : ""}
                 </div>
               )}
+              {/* Fleet — each vessel is one concurrent shipment the house can run */}
+              {(() => {
+                const sea = h.fleet_sea ?? 0, river = h.fleet_river ?? 0, car = h.fleet_caravan ?? 0;
+                if (sea + river + car === 0) return null;
+                const parts: string[] = [];
+                if (sea) parts.push(`🚢 ${sea} ship${sea > 1 ? "s" : ""}`);
+                if (river) parts.push(`🛶 ${river} boat${river > 1 ? "s" : ""}`);
+                if (car) parts.push(`🐫 ${car} caravan${car > 1 ? "s" : ""}`);
+                return (
+                  <div style={{ color: "#a0b8c8", fontSize: 9, marginTop: 1 }}
+                    title="Transport capital — each vessel carries one shipment at a time">
+                    {parts.join(" · ")}
+                  </div>
+                );
+              })()}
               {h.rivals.length > 0 && (
                 <div style={{ color: "#c98", fontSize: 9 }}>⚔ rivals: {h.rivals.slice(0, 3).join(", ")}</div>
               )}

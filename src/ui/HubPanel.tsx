@@ -500,6 +500,60 @@ export function HubPanel() {
             );
           })()}
 
+          {/* Merchant fleets at this settlement — resident houses' real ships/boats/
+              caravans, plus an estimate of the independent local-merchant and guild
+              vessels (scaled from their trade share at the same throughput-per-vessel
+              as the houses). Answers "how many ships & caravans work this port". */}
+          {(() => {
+            const hs = detail?.houses ?? [];
+            const hSea = hs.reduce((s, h) => s + (h.fleet_sea ?? 0), 0);
+            const hRiver = hs.reduce((s, h) => s + (h.fleet_river ?? 0), 0);
+            const hCar = hs.reduce((s, h) => s + (h.fleet_caravan ?? 0), 0);
+            const hVessels = hSea + hRiver + hCar;
+            const houseVol = hs.reduce((s, h) => s + Math.max(0, h.volume ?? h.wealth), 0);
+            const mlev = hub.merchant_level ?? 0.3;
+            const independent = houseVol * (0.25 + 0.7 * mlev) + 0.5;
+            const guildVol = independent * mlev;
+            const localVol = independent * (1 - mlev);
+            // Vessels per unit of trade volume, inferred from the houses (fallback: a
+            // light rate off the merchant population when no house fleet exists yet).
+            const perVol = houseVol > 1e-4 && hVessels > 0 ? hVessels / houseVol : 0;
+            const estLocal = perVol > 0 ? localVol * perVol : (hub.merchants ?? 0) * 0.0008 * (1 - mlev);
+            const estGuild = perVol > 0 ? guildVol * perVol : (hub.merchants ?? 0) * 0.0008 * mlev;
+            const seaPctOfHub = (() => {
+              const sea = detail?.in_by_sea ?? 0, land = detail?.in_by_land ?? 0;
+              return sea + land > 1e-4 ? sea / (sea + land) : (hub.coastal ? 0.5 : 0);
+            })();
+            const splitVessels = (n: number) => {
+              const ships = Math.round(n * seaPctOfHub);
+              const land = Math.max(0, Math.round(n) - ships);
+              return { ships, land };
+            };
+            const loc = splitVessels(estLocal), gld = splitVessels(estGuild);
+            return (
+              <>
+                <div style={{ ...sectionHdr, marginTop: 6 }}>Ships &amp; caravans working this port</div>
+                <div style={{ fontSize: 10, color: "#9ab0c8", lineHeight: 1.6 }}>
+                  <div>
+                    <span style={{ color: "#cdbb88", fontWeight: 600 }}>Houses</span>
+                    {hVessels > 0
+                      ? <> · 🚢 {hSea} · 🛶 {hRiver} · 🐫 {hCar}</>
+                      : <span style={{ color: "#6a86a6" }}> · no resident house fleet</span>}
+                  </div>
+                  <div style={{ color: LOCAL_COLOR }}>
+                    <span style={{ fontWeight: 600 }}>Local merchants</span>
+                    <span style={{ color: "#7a90a8" }}> ≈ 🚢 {loc.ships} · 🐫 {loc.land}</span>
+                  </div>
+                  <div style={{ color: GUILD_COLOR }}>
+                    <span style={{ fontWeight: 600 }}>Merchant guilds</span>
+                    <span style={{ color: "#7a90a8" }}> ≈ 🚢 {gld.ships} · 🐫 {gld.land}</span>
+                  </div>
+                  <div style={{ color: "#56708e", fontSize: 8 }}>house counts exact · local/guild estimated from trade share</div>
+                </div>
+              </>
+            );
+          })()}
+
           {/* Who controls the trade — ALWAYS shown. With no resident houses the
               circle is just local merchants + guilds. */}
           {(() => {

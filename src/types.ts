@@ -276,6 +276,13 @@ export interface HouseBrief {
   controls?: [number, number][]; // settlements it controls (seat or remote outposts)
   partners?: [number, number][]; // trade-partner settlements (world coords)
   cities?: string[];             // names of cities it trades with / controls (seat first)
+  archetype?: number;
+  archetype_label?: string;
+  archetype_perk?: string;
+  charters?: string[];
+  fleet_sea?: number;            // ships / river boats / caravans = concurrent cargo slots
+  fleet_river?: number;
+  fleet_caravan?: number;
 }
 
 export interface HouseTimelineEvent {
