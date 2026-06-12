@@ -299,6 +299,12 @@ pub struct InTransit {
     pub owner: i32,
     /// True = a sea voyage (occupies a sea-ship slot); false = overland.
     #[serde(default)] pub sea: bool,
+    /// Round-trip phase: 0 = OUTBOUND (on arrival it may spawn a return leg that
+    /// buys the destination's surplus and carries it home), 1 = RETURN / terminal.
+    #[serde(default)] pub phase: u8,
+    /// Round-trip origin hub the return leg sells at (−1 = a plain one-way trip
+    /// that spawns no return). Only house-owned outbound voyages set this.
+    #[serde(default = "neg_one_i32")] pub home: i32,
 }
 
 /// One milestone in a house's chronicle (its timeline view).
@@ -764,19 +770,26 @@ impl CampaignSim {
                 hb.in_by_sea *= 0.98;
                 hb.in_by_land *= 0.98;
             }
-            let mut landed: Vec<(usize, usize, f32, bool)> = Vec::new();
+            // (to, good, amount, sea, phase, home, owner) — phase/home/owner let an
+            // arriving OUTBOUND house cargo spawn its return leg from the dest hub.
+            let mut landed: Vec<(usize, usize, f32, bool, u8, i32, i32)> = Vec::new();
             self.in_transit.retain(|c| {
                 if c.eta_tick <= tick {
-                    landed.push((c.to as usize, c.good, c.amount, c.sea));
+                    landed.push((c.to as usize, c.good, c.amount, c.sea, c.phase, c.home, c.owner));
                     false
                 } else {
                     true
                 }
             });
-            for (to, g, amt, sea) in landed {
+            for (to, g, amt, sea, phase, home, owner) in landed {
                 if to < self.hubs.len() {
                     self.hubs[to].stock[g] += amt;
                     if sea { self.hubs[to].in_by_sea += amt; } else { self.hubs[to].in_by_land += amt; }
+                }
+                // Round trip: an OUTBOUND (phase 0) house cargo that just sold at `to`
+                // now buys `to`'s surplus and carries it home for a second profit.
+                if phase == 0 && owner >= 0 && home >= 0 {
+                    self.deploy_return_leg(owner as usize, to, home as usize, &needs);
                 }
             }
 
@@ -1226,10 +1239,109 @@ impl CampaignSim {
                         eta_tick: tick + (days.ceil() as u32).max(1),
                         owner,
                         sea,
+                        // A house voyage is a ROUND TRIP: on arrival at b it tries to
+                        // buy b's surplus and carry it home to a (sold there for a
+                        // second profit). Guild/local one-way trips spawn no return.
+                        phase: 0,
+                        home: if owner >= 0 { a as i32 } else { -1 },
                     });
                 }
             }
         }
+    }
+
+    /// The RETURN leg of a house round trip. A house vessel that just sold its
+    /// outbound cargo at `b` buys `b`'s most profitable surplus good and carries it
+    /// home to `a`, where it sells for a SECOND profit. The buy is usually at `b`'s
+    /// market price, but an over-supplied (glutted) source yields an occasional
+    /// ~25% bargain (a windfall that voyage). Profit here is true arbitrage
+    /// (sell − buy − freight), so source discounts actually raise the take — the
+    /// hook the office −5% discount (C3) plugs into. Respects the same food granary
+    /// reserve and the buyer-side import cap, so it never strips `b`'s supply.
+    fn deploy_return_leg(&mut self, owner: usize, b: usize, a: usize, needs: &[Vec<f32>]) {
+        let n = self.hubs.len();
+        let ng = self.goods.len();
+        if b >= n || a >= n || owner >= self.houses.len() || self.houses[owner].defunct {
+            return;
+        }
+        let days = self.days[b * n + a];
+        if !days.is_finite() {
+            return;
+        }
+        // Freight home (a Guildhall at b lowers it).
+        let freight = self.freight_per_day
+            * if self.hub_has_struct(b, STRUCT_GUILDHALL) { GUILDHALL_FREIGHT } else { 1.0 }
+            * days;
+        // Pick b's surplus good that earns the most carried home to a.
+        let mut best: Option<(usize, f32, f32, f32)> = None; // (good, amount, buy_price, sell_price)
+        let mut best_score = 0.0f32;
+        for g in 0..ng {
+            let base = self.goods[g].base_value;
+            let reserve_mult = if self.goods[g].food { FOOD_RESERVE_DAYS } else { TRADE_RESERVE_MULT };
+            let surplus = self.hubs[b].stock[g] - needs[b][g] * reserve_mult;
+            if surplus <= EPS { continue; }
+            let pb = self.live_price(self.hubs[b].stock[g], needs[b][g], base);
+            // Occasional bargain when b is heavily oversupplied in this good.
+            let glut = self.hubs[b].stock[g] > (needs[b][g] * reserve_mult * 2.0).max(20.0);
+            let bargain = glut && hash01(self.seed,
+                (self.tick as u64) ^ 0x0BA46A1 ^ ((b as u64) << 8) ^ a as u64, g as u64) < 0.25;
+            // Discount on the SOURCE buy (C3 office −5% will stack here, total cap 0.30).
+            let discount: f32 = if bargain { 0.25 } else { 0.0 };
+            let pb_buy = pb * (1.0 - discount.min(0.30));
+            let pa_sell = self.live_price(self.hubs[a].stock[g], needs[a][g], base);
+            let gap = pa_sell - pb_buy - freight - self.margin * base;
+            if gap <= 0.0 { continue; }
+            // Don't overfill a past delivered-cost parity.
+            let delivered = pb_buy + freight;
+            let max_stock = needs[a][g] * (base / delivered.max(EPS)).powf(1.0 / self.k);
+            let room = (max_stock - self.hubs[a].stock[g]).max(0.0);
+            let amount = surplus.min(room * 0.5);
+            if amount <= EPS { continue; }
+            let score = gap * amount;
+            if score > best_score {
+                best_score = score;
+                best = Some((g, amount, pb_buy, pa_sell));
+            }
+        }
+        let Some((g, amount, pb_buy, pa_sell)) = best else { return };
+        let sea = self.hubs[b].coastal && self.hubs[a].coastal;
+        // Buy at b (goods leave b's stock), sell on arrival at a.
+        self.hubs[b].stock[g] -= amount;
+        self.hubs[b].export_earn += amount * pb_buy;
+        self.hubs[a].import_spend += amount * (pb_buy + freight);
+        // True-arbitrage profit (so the source discount actually pays).
+        let mono = self.houses[owner].monopoly.iter()
+            .find(|(mg, _)| *mg == g).map(|(_, s)| *s).unwrap_or(0.0);
+        let mut mult = 1.0 + 0.6 * mono;
+        if self.houses[owner].archetype == ARCH_SPECIALTY && self.houses[owner].spec.contains(&g) {
+            mult *= SPECIALTY_MARGIN;
+        }
+        if self.houses[owner].charters.contains(&g) { mult *= CHARTER_RENT; }
+        let profit = amount * (pa_sell - pb_buy - freight).max(0.0) * mult;
+        self.houses[owner].wealth += profit;
+        self.houses[owner].volume += amount;
+        let gp = &mut self.houses[owner].good_profit;
+        if gp.len() <= g { gp.resize(g + 1, 0.0); }
+        gp[g] += profit;
+        // Diagnostics + throughput at both ends (house class).
+        self.diag_shipments += 1;
+        self.diag_by_house += 1;
+        self.diag_volume += amount;
+        self.hubs[b].tw_house += amount;
+        self.hubs[a].tw_house += amount;
+        // The same vessel carries it home (occupies the owner's slot until it lands).
+        // No fresh voyage-loss roll here — the return is the trip's bonus leg.
+        self.in_transit.push(InTransit {
+            from: b as u32,
+            to: a as u32,
+            good: g,
+            amount,
+            eta_tick: self.tick + (days.ceil() as u32).max(1),
+            owner: owner as i32,
+            sea,
+            phase: 1,
+            home: -1,
+        });
     }
 
     /// Index helper so the borrow checker is happy reading b's stock in dispatch.
@@ -2278,6 +2390,17 @@ mod tests {
         }
     }
 
+    fn house_at(hub: u32, spec: Vec<usize>, fleet_sea: u32) -> House {
+        House {
+            name: format!("House{hub}"), hub, wealth: 50.0, prestige: 0.0, spec,
+            monopoly: vec![], rivals: vec![], generation: 1, events: vec![],
+            good_profit: vec![], mono50: vec![], mono_ever: vec![], dominant_seat: false,
+            prev_wealth: 50.0, worst_loss: 0.0, fleet_sea, fleet_river: 0, fleet_caravan: 0,
+            head_name: "Head".into(), head_since: 0, head_lifespan: 100_000, founded_tick: 0,
+            political_power: 0.0, volume: 0.0, defunct: false, archetype: 1, charters: vec![],
+        }
+    }
+
     fn sim(hubs: Vec<TickHub>, goods: Vec<TickGood>) -> CampaignSim {
         let mut s = CampaignSim {
             seed: 42, tick: 0, goods, hubs, in_transit: vec![], houses: vec![],
@@ -2428,5 +2551,30 @@ mod tests {
             s.hubs.iter().map(|h| h.starving).sum::<f32>() / s.hubs.len() as f32;
         assert!(mean_starving < 0.25, "world is not in famine: mean starving {mean_starving}");
         assert!(end > start * 0.6, "no famine collapse: {start:.0} → {end:.0}");
+    }
+
+    #[test]
+    fn round_trip_earns_on_both_legs() {
+        // A house at coastal hub A exports silk to coastal hub B, then carries B's
+        // wine home and sells it — profit on BOTH goods proves the round trip:
+        // outbound silk (A→B) AND a return cargo of wine (B→A).
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", i32::MAX, 2, 20.0, 0.5, false),
+            good("wine", i32::MAX, 1, 8.0, 0.5, false),
+        ];
+        let fp = 5000.0 * 0.85 * DEMAND_PRESSURE * 1.5; // food at a healthy surplus
+        let mut ha = hub(0, 10.0, 10.0, 5000.0, vec![fp, 3000.0, 0.0], 0); // silk surplus
+        ha.coastal = true;
+        let mut hb = hub(1, 16.0, 10.0, 5000.0, vec![fp, 0.0, 3000.0], 0); // wine surplus
+        hb.coastal = true;
+        let mut s = sim(vec![ha, hb], goods);
+        s.houses = vec![house_at(0, vec![1], 4)];
+        s.advance(400);
+        let prof = &s.houses[0].good_profit;
+        assert!(prof.get(1).copied().unwrap_or(0.0) > 0.0,
+            "house earns on the outbound silk leg: {prof:?}");
+        assert!(prof.get(2).copied().unwrap_or(0.0) > 0.0,
+            "house earns on the return wine leg (round trip): {prof:?}");
     }
 }
