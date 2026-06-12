@@ -918,7 +918,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
     let events: Vec<JournalEntry> = sim
         .journal
         .iter()
-        .filter(|e| e.hub == hi as i32 && e.kind != "price")
+        .filter(|e| e.hub == hi as i32 && e.kind != "price" && e.kind != "voyage_loss")
         .cloned()
         .collect();
     let (pop_house, pop_local, pop_guild) = crate::sim::tick::merchant_pops(hub);
@@ -1332,9 +1332,11 @@ pub fn campaign_get_house_history(name: String, db: State<'_, WorldDb>) -> Resul
     let Some(idx) = idx else { return Ok(None) };
     let h = &sim.houses[idx];
     let year = |t: u32| t / 365;
-    let events: Vec<HouseTimelineEvent> = h.events.iter().map(|e| HouseTimelineEvent {
-        year: year(e.tick), kind: e.kind.clone(), text: e.text.clone(),
-    }).collect();
+    let events: Vec<HouseTimelineEvent> = h.events.iter()
+        .filter(|e| e.kind != "voyage_loss") // hide shipwreck/ambush noise from the family chronicle
+        .map(|e| HouseTimelineEvent {
+            year: year(e.tick), kind: e.kind.clone(), text: e.text.clone(),
+        }).collect();
     let mut top_goods: Vec<(String, f32)> = h.good_profit.iter().enumerate()
         .filter(|(_, &p)| p > 0.0)
         .map(|(g, &p)| (sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_default(), p))

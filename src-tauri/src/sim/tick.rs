@@ -1236,8 +1236,10 @@ impl CampaignSim {
                              format!("A caravan of {} is ambushed ({})", hn, gn))
                         };
                         self.houses[oi].events.push(HouseEvent { tick, kind: "voyage_loss".into(), text: etext });
+                        // Tagged "voyage_loss" (not "event") so the settlement chronicle
+                        // can hide the shipwreck/ambush spam — it's noise, not history.
                         self.journal.push(JournalEntry {
-                            tick, kind: "event".into(), hub: a as i32, good: g as i32,
+                            tick, kind: "voyage_loss".into(), hub: a as i32, good: g as i32,
                             value: invested, text: jtext,
                         });
                         self.diag_lost += 1;
