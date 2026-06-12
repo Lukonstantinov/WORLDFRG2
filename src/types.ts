@@ -283,6 +283,8 @@ export interface HouseBrief {
   fleet_sea?: number;            // ships / river boats / caravans = concurrent cargo slots
   fleet_river?: number;
   fleet_caravan?: number;
+  is_guild?: boolean;            // a civic Merchant Guild (acts for its home city)
+  offices?: [string, [number, number]][]; // foreign cities where it has an office
 }
 
 export interface HouseTimelineEvent {

@@ -88,6 +88,7 @@ export function HousesPanel() {
                 {/* Colour chip = this house's unique map colour */}
                 <span style={{ width: 9, height: 9, borderRadius: 2, background: h.color ?? "#888", flex: "0 0 auto", alignSelf: "center" }} />
                 <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12 }}>{h.name}</span>
+                {h.is_guild && <span title="A civic Merchant Guild — acts in its home city's interest" style={{ fontSize: 9, color: "#7fd0c0", border: "1px solid #2e5a52", borderRadius: 3, padding: "0 3px" }}>GUILD</span>}
                 <span style={{ color: "#6a86a6", fontSize: 9 }}>· {h.home_name}</span>
                 <span style={{ flex: 1 }} />
                 {h.dominant && <span title="Controls its seat city (>=50% of its trade)" style={{ fontSize: 10 }}>⚖</span>}
@@ -132,6 +133,14 @@ export function HousesPanel() {
                   </div>
                 );
               })()}
+              {/* Foreign offices — footholds in other cities (−5% on goods bought there) */}
+              {h.offices && h.offices.length > 0 && (
+                <div style={{ color: "#c8a8e0", fontSize: 9, marginTop: 1 }}
+                  title="Offices abroad — each gives −5% on goods bought there and a base to trade from">
+                  🏢 offices: {h.offices.map(([nm]) => nm).slice(0, 6).join(", ")}
+                  {h.offices.length > 6 ? ` +${h.offices.length - 6}` : ""}
+                </div>
+              )}
               {h.rivals.length > 0 && (
                 <div style={{ color: "#c98", fontSize: 9 }}>⚔ rivals: {h.rivals.slice(0, 3).join(", ")}</div>
               )}

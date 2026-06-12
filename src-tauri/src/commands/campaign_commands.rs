@@ -764,6 +764,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
             defunct: false,
             archetype: crate::sim::tick::pick_archetype(seed, h as u64),
             charters: Vec::new(),
+            is_guild: false, offices: Vec::new(), trade_at: Vec::new(),
         });
     }
 
@@ -808,6 +809,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         days: vec![],
     };
     sim.rebuild_routes();
+    sim.seed_initial_guilds(); // civic guilds for cities already ≥ 50k people
     set_sim(&conn, &sim)?;
     Ok(build_snapshot(&sim))
 }
@@ -1005,6 +1007,10 @@ pub struct HouseBrief {
     #[serde(default)] pub fleet_sea: u32,
     #[serde(default)] pub fleet_river: u32,
     #[serde(default)] pub fleet_caravan: u32,
+    /// True = a civic Merchant Guild (acts for its home city), not a private house.
+    #[serde(default)] pub is_guild: bool,
+    /// Foreign cities where this holder has opened an OFFICE: `(name, [x,y])`.
+    #[serde(default)] pub offices: Vec<(String, [f32; 2])>,
 }
 
 /// Golden-angle hue → a distinct, saturated hex colour. `i` is a stable index so
@@ -1118,6 +1124,10 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
             fleet_sea: h.fleet_sea,
             fleet_river: h.fleet_river,
             fleet_caravan: h.fleet_caravan,
+            is_guild: h.is_guild,
+            offices: h.offices.iter()
+                .map(|&oh| (hub_name(oh), seat_pos(oh as usize)))
+                .collect(),
         }
     }).collect();
     // Active first, then richest first.

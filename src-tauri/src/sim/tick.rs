@@ -83,6 +83,25 @@ const ESTATE_HOUSE_OWNER_WEALTH: f32 = 6.0;
 /// A house must be at least this wealthy to lead a colonization of new land.
 const COLONIZE_HOUSE_WEALTH: f32 = 18.0;
 
+// ── Merchant guilds & offices (C3) ───────────────────────────────────────────
+/// A settlement gets a civic Merchant Guild once it reaches this population.
+const GUILD_MIN_POP: f32 = 50_000.0;
+/// Monthly civic subsidy into a guild's treasury, per 1,000 home-city people
+/// (scaled by the city's prosperity). The city funds its guild.
+const GUILD_SUBSIDY_PER_1K: f32 = 0.02;
+/// Recent trade volume a holder must have moved through a non-home city before it
+/// will open an office there (a real working relationship).
+const OFFICE_OPEN_VOLUME: f32 = 60.0;
+/// Below this tie volume an existing office is abandoned (hysteresis vs OPEN).
+const OFFICE_CLOSE_VOLUME: f32 = 6.0;
+/// Base wealth cost to open an office, SCALED UP by the host city's importance
+/// (population) — a counting-house in a great hub costs more.
+const OFFICE_COST_BASE: f32 = 4.0;
+/// Standing discount on goods a holder BUYS in a city where it has an office.
+const OFFICE_BUY_DISCOUNT: f32 = 0.05;
+/// Total source-buy discount is capped here (office + glut bargain).
+const MAX_BUY_DISCOUNT: f32 = 0.30;
+
 // ── House archetypes ────────────────────────────────────────────────────────
 const ARCH_SPECIALTY: u8 = 0; // cheaper freight + fatter margin on specialty goods
 const ARCH_FLEET: u8 = 1;     // safer voyages, cheaper ships, longer reach
@@ -378,6 +397,18 @@ pub struct House {
     /// Goods this house holds a CHARTER on at its seat (granted by the city it
     /// dominates) — extra monopoly rent + prestige. Political archetype only.
     #[serde(default)] pub charters: Vec<usize>,
+    /// A civic MERCHANT GUILD rather than a private house: it acts in its home
+    /// city's interest (fills the city's needs, secures supply), is funded by a
+    /// civic subsidy, and never goes bankrupt. Same machinery (fleet, offices,
+    /// trade) otherwise. Default false → old saves load as private houses.
+    #[serde(default)] pub is_guild: bool,
+    /// Host hubs where this holder has opened an OFFICE — a foreign foothold that
+    /// gives −5% on goods it BUYS there and lets it originate trade from there.
+    #[serde(default)] pub offices: Vec<u32>,
+    /// Sparse decaying tally of recent trade VOLUME through each hub this holder
+    /// touches `(hub, volume)`. Drives office opening (sustained tie) and closing
+    /// (tie withers). Not all hubs — only ones traded through.
+    #[serde(default)] pub trade_at: Vec<(u32, f32)>,
 }
 
 /// A candidate empty-land site a wealthy house / large city can colonize with an
@@ -1230,6 +1261,9 @@ impl CampaignSim {
                         let gp = &mut self.houses[oi].good_profit;
                         if gp.len() <= g { gp.resize(g + 1, 0.0); }
                         gp[g] += profit;
+                        // Build the holder's trade ties at both ends (for offices).
+                        self.bump_trade_at(oi, a, amount);
+                        self.bump_trade_at(oi, b, amount);
                     }
                     self.in_transit.push(InTransit {
                         from: a as u32,
@@ -1272,6 +1306,8 @@ impl CampaignSim {
         let freight = self.freight_per_day
             * if self.hub_has_struct(b, STRUCT_GUILDHALL) { GUILDHALL_FREIGHT } else { 1.0 }
             * days;
+        // An office at b gives the holder a standing −5% on what it buys there.
+        let office_disc = if self.houses[owner].offices.contains(&(b as u32)) { OFFICE_BUY_DISCOUNT } else { 0.0 };
         // Pick b's surplus good that earns the most carried home to a.
         let mut best: Option<(usize, f32, f32, f32)> = None; // (good, amount, buy_price, sell_price)
         let mut best_score = 0.0f32;
@@ -1285,9 +1321,9 @@ impl CampaignSim {
             let glut = self.hubs[b].stock[g] > (needs[b][g] * reserve_mult * 2.0).max(20.0);
             let bargain = glut && hash01(self.seed,
                 (self.tick as u64) ^ 0x0BA46A1 ^ ((b as u64) << 8) ^ a as u64, g as u64) < 0.25;
-            // Discount on the SOURCE buy (C3 office −5% will stack here, total cap 0.30).
-            let discount: f32 = if bargain { 0.25 } else { 0.0 };
-            let pb_buy = pb * (1.0 - discount.min(0.30));
+            // Source-buy discount: an occasional glut bargain + any office −5%, capped.
+            let discount = (if bargain { 0.25 } else { 0.0 } + office_disc).min(MAX_BUY_DISCOUNT);
+            let pb_buy = pb * (1.0 - discount);
             let pa_sell = self.live_price(self.hubs[a].stock[g], needs[a][g], base);
             let gap = pa_sell - pb_buy - freight - self.margin * base;
             if gap <= 0.0 { continue; }
@@ -1329,6 +1365,8 @@ impl CampaignSim {
         self.diag_volume += amount;
         self.hubs[b].tw_house += amount;
         self.hubs[a].tw_house += amount;
+        self.bump_trade_at(owner, a, amount);
+        self.bump_trade_at(owner, b, amount);
         // The same vessel carries it home (occupies the owner's slot until it lands).
         // No fresh voyage-loss roll here — the return is the trip's bonus leg.
         self.in_transit.push(InTransit {
@@ -1346,10 +1384,14 @@ impl CampaignSim {
 
     /// Index helper so the borrow checker is happy reading b's stock in dispatch.
     fn house_for(&self, hub: usize, good: usize) -> i32 {
+        // Prefer a holder SEATED at the hub specializing in the good, then any
+        // holder seated there, then any holder with an OFFICE there (a second base
+        // it can originate trade from — how offices grow a family's reach).
         self.houses
             .iter()
-            .position(|h| h.hub as usize == hub && h.spec.contains(&good))
-            .or_else(|| self.houses.iter().position(|h| h.hub as usize == hub))
+            .position(|h| !h.defunct && h.hub as usize == hub && h.spec.contains(&good))
+            .or_else(|| self.houses.iter().position(|h| !h.defunct && h.hub as usize == hub))
+            .or_else(|| self.houses.iter().position(|h| !h.defunct && h.offices.contains(&(hub as u32))))
             .map(|i| i as i32)
             .unwrap_or(-1)
     }
@@ -1803,11 +1845,167 @@ impl CampaignSim {
 
     /// The living merchant families: ageing heads, monopolies, feuds, founding,
     /// extinction and political power.
+    /// Record trade VOLUME a holder moved through a hub (for office ties).
+    fn bump_trade_at(&mut self, holder: usize, hub: usize, amount: f32) {
+        if holder >= self.houses.len() { return; }
+        let t = &mut self.houses[holder].trade_at;
+        if let Some(e) = t.iter_mut().find(|(hb, _)| *hb == hub as u32) {
+            e.1 += amount;
+        } else {
+            t.push((hub as u32, amount));
+        }
+    }
+
+    /// Monthly: found guilds for cities that have grown past the threshold, pay the
+    /// civic subsidy into guild treasuries, and open/close offices for every holder.
+    fn update_guilds_and_offices(&mut self) {
+        let tick = self.tick;
+        let n = self.hubs.len();
+        // 1) A city that has grown to GUILD_MIN_POP and has no guild founds one.
+        for h in 0..n {
+            if self.hubs[h].is_estate { continue; }
+            if self.hubs[h].population < GUILD_MIN_POP { continue; }
+            let has_guild = self.houses.iter()
+                .any(|g| !g.defunct && g.is_guild && g.hub as usize == h);
+            if !has_guild {
+                self.found_guild(h);
+            }
+        }
+        // 2) Civic subsidy: the home city funds its guild (scaled by size + prosperity).
+        for gi in 0..self.houses.len() {
+            if self.houses[gi].defunct || !self.houses[gi].is_guild { continue; }
+            let hub = self.houses[gi].hub as usize;
+            if hub >= n { continue; }
+            let pop = self.hubs[hub].population.max(0.0);
+            let prosp = self.hubs[hub].sent_prosperity.clamp(0.1, 1.0);
+            self.houses[gi].wealth += (pop / 1000.0) * GUILD_SUBSIDY_PER_1K * prosp;
+        }
+        // 3) Open / close offices for every active holder.
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct { continue; }
+            let home = self.houses[hi].hub as usize;
+            // Strongest partner volume (scale-invariant trigger).
+            let max_vol = self.houses[hi].trade_at.iter().map(|(_, v)| *v).fold(0.0f32, f32::max);
+            // CLOSE: an office whose tie has withered, or a (private house) gone broke.
+            let close_floor = (max_vol * 0.1).max(OFFICE_CLOSE_VOLUME);
+            let broke = !self.houses[hi].is_guild && self.houses[hi].wealth < HOUSE_BANKRUPT;
+            let offices = self.houses[hi].offices.clone();
+            for &ohub in &offices {
+                let vol = self.houses[hi].trade_at.iter()
+                    .find(|(hb, _)| *hb == ohub).map(|(_, v)| *v).unwrap_or(0.0);
+                if broke || vol < close_floor {
+                    self.houses[hi].offices.retain(|&x| x != ohub);
+                    let cn = self.houses[hi].name.clone();
+                    let city = self.hubs.get(ohub as usize).map(|x| x.name.clone()).unwrap_or_default();
+                    self.houses[hi].events.push(HouseEvent {
+                        tick, kind: "office_closed".into(),
+                        text: format!("{} abandons its office in {}", cn, city),
+                    });
+                    self.journal.push(JournalEntry {
+                        tick, kind: "office_closed".into(), hub: ohub as i32, good: -1, value: 0.0,
+                        text: format!("{} closes its office in {}", cn, city),
+                    });
+                }
+            }
+            // OPEN: the strongest non-home partner with a real tie the holder can afford.
+            if max_vol <= 0.0 { continue; }
+            let mut cand: Option<(usize, f32)> = None;
+            for &(hb, v) in &self.houses[hi].trade_at {
+                let hb = hb as usize;
+                if hb == home || hb >= n { continue; }
+                if self.houses[hi].offices.contains(&(hb as u32)) { continue; }
+                if v < OFFICE_OPEN_VOLUME || v < max_vol * 0.5 { continue; }
+                if cand.map_or(true, |(_, bv)| v > bv) { cand = Some((hb, v)); }
+            }
+            if let Some((hb, _)) = cand {
+                // Cost scales with the host city's importance (population).
+                let cost = OFFICE_COST_BASE * (1.0 + self.hubs[hb].population / 50_000.0);
+                if self.houses[hi].wealth >= cost * 1.5 {
+                    self.houses[hi].wealth -= cost;
+                    self.houses[hi].offices.push(hb as u32);
+                    let cn = self.houses[hi].name.clone();
+                    let city = self.hubs[hb].name.clone();
+                    let verb = if self.houses[hi].is_guild { "establishes a factory" } else { "opens a counting-house" };
+                    self.houses[hi].events.push(HouseEvent {
+                        tick, kind: "branch".into(),
+                        text: format!("{} {} in {}", cn, verb, city),
+                    });
+                    self.journal.push(JournalEntry {
+                        tick, kind: "office".into(), hub: hb as i32, good: -1, value: 0.0,
+                        text: format!("{} {} in {}", cn, verb, city),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Seed civic guilds for every city already at/above the population threshold
+    /// when the campaign begins (more emerge later as cities grow — see
+    /// `update_guilds_and_offices`).
+    pub fn seed_initial_guilds(&mut self) {
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate { continue; }
+            if self.hubs[h].population >= GUILD_MIN_POP {
+                self.found_guild(h);
+            }
+        }
+    }
+
+    /// Found a civic Merchant Guild for city `h` (≥ GUILD_MIN_POP). Distinct name,
+    /// a starting treasury and fleet sized to the city; acts in the city's interest.
+    fn found_guild(&mut self, h: usize) {
+        let tick = self.tick;
+        let coastal = self.hubs[h].coastal;
+        let pop = self.hubs[h].population.max(1.0);
+        let name = self.guild_name_for(h);
+        let (fleet_sea, fleet_river, fleet_caravan) = Self::initial_fleet(coastal, true);
+        let founded = HouseEvent {
+            tick, kind: "founded".into(),
+            text: format!("Chartered by the merchants of {}", self.hubs[h].name),
+        };
+        self.journal.push(JournalEntry {
+            tick, kind: "founding".into(), hub: h as i32, good: -1, value: 0.0,
+            text: format!("{} is chartered in {}", name, self.hubs[h].name),
+        });
+        self.houses.push(House {
+            name, hub: h as u32, wealth: (pop / 1000.0).max(1.0), prestige: 0.2,
+            spec: vec![], monopoly: vec![], rivals: vec![], generation: 1,
+            events: vec![founded], good_profit: Vec::new(), mono50: Vec::new(),
+            mono_ever: Vec::new(), dominant_seat: false, prev_wealth: 0.0, worst_loss: 0.0,
+            fleet_sea, fleet_river, fleet_caravan,
+            head_name: format!("Guildmaster of {}", self.hubs[h].name),
+            head_since: tick, head_lifespan: self.roll_lifespan(h as u64 ^ 0x6111),
+            founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
+            archetype: ARCH_SPECIALTY, charters: Vec::new(),
+            is_guild: true, offices: Vec::new(), trade_at: Vec::new(),
+        });
+    }
+
+    /// A distinct guild name for a city — its own name woven into a trade-guild
+    /// style, so every settlement's guild reads uniquely.
+    fn guild_name_for(&self, h: usize) -> String {
+        const STYLES: [&str; 8] = [
+            "Mercers' Guild", "Staplers' Hanse", "Merchant Adventurers",
+            "Drapers' Company", "Mariners' League", "Factors' Guild",
+            "Company of Traders", "Vintners' Hanse",
+        ];
+        let city = self.hubs[h].name.clone();
+        let pick = (hash01(self.seed, h as u64 ^ 0x6111, 0x9ED1) * STYLES.len() as f32) as usize
+            % STYLES.len();
+        format!("{} {}", city, STYLES[pick])
+    }
+
     fn update_house_dynamics(&mut self) {
         let tick = self.tick;
         // Decay recent-volume so monopoly tracks the last while, not all history.
+        // Per-hub trade ties decay more slowly (an office relationship is built and
+        // lost over months, not days).
         for hh in &mut self.houses {
-            if !hh.defunct { hh.volume *= 0.98; }
+            if !hh.defunct {
+                hh.volume *= 0.98;
+                for e in &mut hh.trade_at { e.1 *= 0.997; }
+                hh.trade_at.retain(|(_, v)| *v > 0.01);
+            }
         }
         // Succession: the head dies at the end of their lifespan; an heir takes over.
         for hi in 0..self.houses.len() {
@@ -1831,8 +2029,9 @@ impl CampaignSim {
             self.manage_fleets();
             self.update_structures();
             self.maybe_branch_houses();
+            self.update_guilds_and_offices();
             for hi in 0..self.houses.len() {
-                if self.houses[hi].defunct { continue; }
+                if self.houses[hi].defunct || self.houses[hi].is_guild { continue; } // guilds are civic — never bankrupt
                 if self.houses[hi].wealth < HOUSE_BANKRUPT && self.houses[hi].volume < 0.02 {
                     self.dissolve_house(hi);
                 }
@@ -1921,6 +2120,7 @@ impl CampaignSim {
             founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
             archetype: self.houses[hi].archetype, // a cadet branch keeps the family trade
             charters: Vec::new(),
+            is_guild: false, offices: Vec::new(), trade_at: Vec::new(),
         });
         self.journal.push(JournalEntry {
             tick, kind: "founding".into(), hub: dest as i32, good: -1, value: 0.0,
@@ -1934,7 +2134,7 @@ impl CampaignSim {
     fn maybe_branch_houses(&mut self) {
         let tick = self.tick;
         for hi in 0..self.houses.len() {
-            if self.houses[hi].defunct { continue; }
+            if self.houses[hi].defunct || self.houses[hi].is_guild { continue; } // guilds expand via offices, not cadet branches
             if self.houses[hi].generation < 2 { continue; }
             if self.houses[hi].wealth <= HOUSE_BRANCH_WEALTH { continue; }
             // ~2.5%/month for an eligible house → a branch every few years.
@@ -2236,6 +2436,7 @@ impl CampaignSim {
             founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
             archetype: pick_archetype(self.seed, tick as u64 ^ hub as u64),
             charters: Vec::new(),
+            is_guild: false, offices: Vec::new(), trade_at: Vec::new(),
         });
     }
 
@@ -2398,6 +2599,7 @@ mod tests {
             prev_wealth: 50.0, worst_loss: 0.0, fleet_sea, fleet_river: 0, fleet_caravan: 0,
             head_name: "Head".into(), head_since: 0, head_lifespan: 100_000, founded_tick: 0,
             political_power: 0.0, volume: 0.0, defunct: false, archetype: 1, charters: vec![],
+            is_guild: false, offices: vec![], trade_at: vec![],
         }
     }
 
@@ -2576,5 +2778,36 @@ mod tests {
             "house earns on the outbound silk leg: {prof:?}");
         assert!(prof.get(2).copied().unwrap_or(0.0) > 0.0,
             "house earns on the return wine leg (round trip): {prof:?}");
+    }
+
+    #[test]
+    fn guild_appears_only_in_large_cities() {
+        // A city ≥ 50k people charters a civic Merchant Guild; a small town doesn't.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let big = hub(0, 10.0, 10.0, 60_000.0, vec![60_000.0 * 0.85 * DEMAND_PRESSURE * 1.5], 0);
+        let small = hub(1, 40.0, 12.0, 9_000.0, vec![9_000.0 * 0.85 * DEMAND_PRESSURE * 1.5], 0);
+        let mut s = sim(vec![big, small], goods);
+        s.seed_initial_guilds();
+        assert!(s.houses.iter().any(|h| h.is_guild && h.hub == 0), "big city charters a guild");
+        assert!(!s.houses.iter().any(|h| h.is_guild && h.hub == 1), "small town has no guild");
+    }
+
+    #[test]
+    fn house_opens_office_at_a_trade_partner() {
+        // A house that trades steadily between its home A and partner B eventually
+        // opens an office in B (its expansion mechanism).
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", i32::MAX, 2, 20.0, 0.5, false),
+            good("wine", i32::MAX, 1, 8.0, 0.5, false),
+        ];
+        let fp = 5000.0 * 0.85 * DEMAND_PRESSURE * 1.5;
+        let mut ha = hub(0, 10.0, 10.0, 5000.0, vec![fp, 3000.0, 0.0], 0); ha.coastal = true;
+        let mut hb = hub(1, 16.0, 10.0, 5000.0, vec![fp, 0.0, 3000.0], 0); hb.coastal = true;
+        let mut s = sim(vec![ha, hb], goods);
+        s.houses = vec![house_at(0, vec![1], 4)];
+        s.advance(800);
+        assert!(s.houses[0].offices.contains(&1),
+            "house opens an office in its trade partner B: {:?}", s.houses[0].offices);
     }
 }
