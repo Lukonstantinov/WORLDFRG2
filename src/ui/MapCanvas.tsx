@@ -9,7 +9,8 @@ import { useViewportStore } from "../state/viewportStore";
 import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes } from "../bridge/tauri";
+import type { MerchantRoute } from "../types";
 import { goodOverlayKey } from "../goods";
 import type { PaintValue, EconChain, Settlement } from "../types";
 
@@ -73,6 +74,8 @@ export function MapCanvas() {
   const step9Done = useUIStore((s) => s.stepCompleted[9]);
   const bioParams = useUIStore((s) => s.bioParams);
   const setSelectedHub = useUIStore((s) => s.setSelectedHub);
+  const setSelectedMerchantRoute = useUIStore((s) => s.setSelectedMerchantRoute);
+  const merchantRoutesRef = useRef<MerchantRoute[]>([]);
   const selectedChain = useUIStore((s) => s.selectedChain);
   const selectedHub = useUIStore((s) => s.selectedHub);
   const openRoads = useUIStore((s) => s.openRoads);
@@ -472,6 +475,23 @@ export function MapCanvas() {
     }).catch(() => {});
   }, [step8Done, worldKey, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, bioParams.economicRegions, bioParams.luxuryBias, bioParams.piracyLevel, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Merchant layer — live family/guild routes from the running campaign.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !meta) return;
+    if (!overlayVisibility.merchantRoutes || !campaignSnapshot?.active) {
+      om.drawMerchantRoutes([], meta.grid_width);
+      merchantRoutesRef.current = [];
+      requestRender();
+      return;
+    }
+    campaignMerchantRoutes().then((routes) => {
+      om.drawMerchantRoutes(routes, meta.grid_width);
+      merchantRoutesRef.current = routes;
+      requestRender();
+    }).catch(() => {});
+  }, [overlayVisibility.merchantRoutes, campaignSnapshot?.active, campaignSnapshot?.clock.tick, meta, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Political influence — product of the Political step (9).
   useEffect(() => {
     const om = overlayManagerRef.current;
@@ -706,6 +726,12 @@ export function MapCanvas() {
             if (d < bestD) { bestD = d; best = h.id; }
           }
           if (best >= 0) { setSelectedHub(best); return; }
+          // No hub hit — if the merchant layer is on, try to pick a route.
+          const om = overlayManagerRef.current;
+          if (om && merchantRoutesRef.current.length > 0) {
+            const route = om.pickMerchantRoute(wx, wy, Math.max(4, m.grid_width * 0.008));
+            if (route) { setSelectedMerchantRoute(route); return; }
+          }
         }
       }
 

@@ -89,6 +89,7 @@ pub fn run() {
             campaign_commands::campaign_get_world_economy,
             campaign_commands::campaign_get_houses,
             campaign_commands::campaign_get_house_history,
+            campaign_commands::campaign_merchant_routes,
             campaign_commands::campaign_diagnostics,
             import_commands::import_world_layers,
             file_commands::open_world,

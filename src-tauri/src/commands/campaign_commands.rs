@@ -1183,6 +1183,69 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
     out
 }
 
+/// One ACTIVE merchant route for the campaign merchant overlay: a holder's live
+/// shipments between two cities, aggregated, with the goods carried each way.
+#[derive(Serialize)]
+pub struct MerchantRoute {
+    pub a: [f32; 2],
+    pub b: [f32; 2],
+    pub a_name: String,
+    pub b_name: String,
+    pub holder: String,
+    pub color: String,
+    pub is_guild: bool,
+    pub sea: bool,
+    pub volume: f32,
+    /// Goods flowing a→b and b→a (name, volume), each sorted by volume.
+    pub out_goods: Vec<(String, f32)>,
+    pub ret_goods: Vec<(String, f32)>,
+}
+
+/// Aggregate the live in-transit cargo into per-holder, per-city-pair routes for
+/// the merchant map layer — so the player can see which families/guilds are
+/// running which corridors and what they carry each way (round-trip info).
+#[tauri::command]
+pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRoute>, String> {
+    use std::collections::HashMap;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&conn)? { Some(s) => s, None => return Ok(vec![]) };
+    struct Agg { vol: f32, sea: bool, out: HashMap<usize, f32>, ret: HashMap<usize, f32> }
+    let mut groups: HashMap<(usize, u32, u32), Agg> = HashMap::new();
+    for s in &sim.in_transit {
+        if s.owner < 0 { continue; }
+        let (lo, hi) = (s.from.min(s.to), s.from.max(s.to));
+        let e = groups.entry((s.owner as usize, lo, hi))
+            .or_insert_with(|| Agg { vol: 0.0, sea: false, out: HashMap::new(), ret: HashMap::new() });
+        let amt = s.amount.max(0.0);
+        e.vol += amt;
+        e.sea |= s.sea;
+        if s.from == lo { *e.out.entry(s.good).or_insert(0.0) += amt; }
+        else { *e.ret.entry(s.good).or_insert(0.0) += amt; }
+    }
+    let gname = |g: usize| sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
+    let hname = |h: u32| sim.hubs.get(h as usize).map(|x| x.name.clone()).unwrap_or_default();
+    let pos = |h: u32| sim.hubs.get(h as usize).map(|x| [x.x, x.y]).unwrap_or([0.0, 0.0]);
+    let sort_goods = |m: HashMap<usize, f32>| {
+        let mut v: Vec<(String, f32)> = m.into_iter().map(|(g, vol)| (gname(g), vol)).collect();
+        v.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal));
+        v
+    };
+    let mut out: Vec<MerchantRoute> = groups.into_iter().map(|((owner, lo, hi), a)| {
+        let h = sim.houses.get(owner);
+        MerchantRoute {
+            a: pos(lo), b: pos(hi), a_name: hname(lo), b_name: hname(hi),
+            holder: h.map(|x| x.name.clone()).unwrap_or_default(),
+            color: distinct_color(owner),
+            is_guild: h.map(|x| x.is_guild).unwrap_or(false),
+            sea: a.sea, volume: a.vol,
+            out_goods: sort_goods(a.out), ret_goods: sort_goods(a.ret),
+        }
+    }).collect();
+    out.sort_by(|x, y| y.volume.partial_cmp(&x.volume).unwrap_or(std::cmp::Ordering::Equal));
+    out.truncate(150);
+    Ok(out)
+}
+
 /// Trade diagnostics — a snapshot to answer "is trade actually moving?".
 #[derive(Serialize)]
 pub struct CampaignDiagnostics {

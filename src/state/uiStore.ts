@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { setProgress } from "../bridge/tauri";
+import type { MerchantRoute } from "../types";
 
 /** Persist step completion: steps 1-6 travel with the world file, 7-10 with
  *  the campaign. Fire-and-forget — a failed write only loses the checkmarks. */
@@ -70,6 +71,8 @@ interface UIStore {
   showTradeMatrix: boolean;
   /** Economy hub inspector (Phase 3): selected hub id, or null. */
   selectedHub: number | null;
+  /** Merchant layer: a clicked active route whose round-trip details are shown. */
+  selectedMerchantRoute: MerchantRoute | null;
   /** Highlighted supply-chain id (Phase 3): traced on the map, or null. */
   selectedChain: number | null;
   /** Per-good reach view: highlight which hubs a chosen good reaches, or null. */
@@ -96,6 +99,7 @@ interface UIStore {
   setStatus: (text: string) => void;
   setInspectedCell: (cell: { wx: number; wy: number } | null) => void;
   setSelectedHub: (id: number | null) => void;
+  setSelectedMerchantRoute: (r: MerchantRoute | null) => void;
   setSelectedChain: (id: number | null) => void;
   setWorkflowStep: (step: WorkflowStep) => void;
   markStepCompleted: (step: number) => void;
@@ -156,7 +160,7 @@ export const useUIStore = create<UIStore>((set) => ({
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
-    houseControl: false,
+    houseControl: false, merchantRoutes: false,
     hubNames: false, settlementNames: false, tradeRegions: false,
     ...Object.fromEntries(GOOD_DEFS.map((g) => [goodOverlayKey(g.name), false])),
   },
@@ -168,6 +172,7 @@ export const useUIStore = create<UIStore>((set) => ({
   bioParams: { gemDeposits: 6, tradeReach: 1, maxCrossing: 0.3, desertRoutes: false, calendarMonths: 12, stormMonth: 0, economicRegions: 14, luxuryBias: 0.5, climateStrictness: 0.5, piracyLevel: 0, tradeSeason: 0 },
   showTradeMatrix: false,
   selectedHub: null,
+  selectedMerchantRoute: null,
   selectedChain: null,
   reachGood: null,
   selectedGood: null,
@@ -185,6 +190,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setStatus: (text) => set({ statusText: text }),
   setInspectedCell: (cell) => set({ inspectedCell: cell }),
   setSelectedHub: (id) => set({ selectedHub: id, selectedChain: null, selectedExport: null }),
+  setSelectedMerchantRoute: (r) => set({ selectedMerchantRoute: r }),
   setSelectedChain: (id) => set({ selectedChain: id }),
   setSimRunning: (running) => set({ simRunning: running }),
   setLayerOpacity: (opacity) => set({ layerOpacity: opacity }),

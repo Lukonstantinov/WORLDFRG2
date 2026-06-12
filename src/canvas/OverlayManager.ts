@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief } from "../types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute } from "../types";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "../goods";
 import { drawGoodIcon } from "./goodIcons";
 import { latLineY } from "./projection";
@@ -73,6 +73,7 @@ export class OverlayManager {
    *  back to the static GOOD_DEFS when absent. */
   private goodMeta: Map<string, { icon: string; color: string }> | null = null;
   private tradeTrunks: TradeTrunk[] = [];
+  private merchantRoutes: MerchantRoute[] = [];
   private politicalCenters: PoliticalCenter[] = [];
   private houses: HouseBrief[] = [];
   private chokepoints: EconChokepoint[] = [];
@@ -94,7 +95,7 @@ export class OverlayManager {
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
-    houseControl: false,
+    houseControl: false, merchantRoutes: false,
     hubNames: false, settlementNames: false, tradeRegions: false,
   };
 
@@ -158,6 +159,29 @@ export class OverlayManager {
   drawTradeTrunks(trunks: TradeTrunk[], gridW: number) {
     this.tradeTrunks = trunks;
     this.worldW = gridW;
+  }
+
+  drawMerchantRoutes(routes: MerchantRoute[], gridW: number) {
+    this.merchantRoutes = routes;
+    if (gridW > 0) this.worldW = gridW;
+  }
+
+  /** Nearest active merchant route to a world point, within `thresh` cells (for
+   *  click-to-inspect). Returns null if none close. */
+  pickMerchantRoute(wx: number, wy: number, thresh: number): MerchantRoute | null {
+    let best: MerchantRoute | null = null;
+    let bestD = thresh * thresh;
+    for (const r of this.merchantRoutes) {
+      const ax = r.a[0] + 0.5, ay = r.a[1] + 0.5, bx = r.b[0] + 0.5, by = r.b[1] + 0.5;
+      if (this.worldW > 0 && Math.abs(ax - bx) > this.worldW / 2) continue;
+      const dx = bx - ax, dy = by - ay;
+      const len2 = dx * dx + dy * dy;
+      const t = len2 > 1e-6 ? Math.max(0, Math.min(1, ((wx - ax) * dx + (wy - ay) * dy) / len2)) : 0;
+      const px = ax + t * dx, py = ay + t * dy;
+      const d = (wx - px) * (wx - px) + (wy - py) * (wy - py);
+      if (d < bestD) { bestD = d; best = r; }
+    }
+    return best;
   }
 
   drawPolitical(centers: PoliticalCenter[]) {
@@ -409,6 +433,11 @@ export class OverlayManager {
       for (const route of this.tradeRoutes) {
         this.renderTradeRoute(ctx, route);
       }
+    }
+
+    // Merchant layer: live family/guild routes coloured by the owning house.
+    if (this.visibility.merchantRoutes && this.merchantRoutes.length > 0) {
+      this.renderMerchantRoutes(ctx);
     }
 
     // Political influence: translucent discs sized by trade power.
@@ -733,6 +762,39 @@ export class OverlayManager {
 
   /** Bundled commodity trunks: each routed coarse edge drawn with width ∝ the
    *  total goods volume travelling along it, so shared corridors read as trunks. */
+  /** The live merchant layer: each active family/guild route as a line coloured by
+   *  the owning house (width ∝ volume, dashed overland / solid by sea), with a dot
+   *  at each end to read as a round-trip corridor. */
+  private renderMerchantRoutes(ctx: CanvasRenderingContext2D) {
+    let maxVol = 0;
+    for (const r of this.merchantRoutes) maxVol = Math.max(maxVol, r.volume);
+    if (maxVol <= 0) return;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    const dash = Math.max(1.5, 3 / Math.sqrt(this.currentScale));
+    for (const r of this.merchantRoutes) {
+      const ax = r.a[0] + 0.5, ay = r.a[1] + 0.5, bx = r.b[0] + 0.5, by = r.b[1] + 0.5;
+      if (this.worldW > 0 && Math.abs(ax - bx) > this.worldW / 2) continue; // wrap seam
+      const norm = r.volume / maxVol;
+      ctx.globalAlpha = 0.5 + 0.4 * norm;
+      ctx.strokeStyle = r.color || "#cccccc";
+      ctx.lineWidth = Math.max(0.5, (0.8 + norm * 4.0) / Math.sqrt(this.currentScale));
+      ctx.setLineDash(r.sea ? [] : [dash, dash]);
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const dotR = Math.max(0.8, 1.6 / Math.sqrt(this.currentScale));
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = r.color || "#cccccc";
+      ctx.beginPath(); ctx.arc(ax, ay, dotR, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(bx, by, dotR, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
+  }
+
   private renderTradeTrunks(ctx: CanvasRenderingContext2D) {
     let maxVol = 0;
     for (const t of this.tradeTrunks) maxVol = Math.max(maxVol, t.volume);

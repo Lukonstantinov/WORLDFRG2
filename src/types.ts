@@ -256,6 +256,20 @@ export interface HubDetail {
   /** Foreign merchant offices hosted in this settlement. */
   offices_here?: OfficeHere[];
 }
+/** One active merchant route for the campaign merchant map layer. */
+export interface MerchantRoute {
+  a: [number, number];
+  b: [number, number];
+  a_name: string;
+  b_name: string;
+  holder: string;
+  color: string;
+  is_guild: boolean;
+  sea: boolean;
+  volume: number;
+  out_goods: [string, number][]; // goods a→b
+  ret_goods: [string, number][]; // goods b→a
+}
 /** A foreign merchant's office hosted in a settlement (host-side view). */
 export interface OfficeHere {
   holder: string;          // house / guild name
