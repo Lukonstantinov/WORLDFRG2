@@ -253,6 +253,17 @@ export interface HubDetail {
   estate_good?: string;
   /** Buildings erected here: [name, one-line effect]. */
   structures?: [string, string][];
+  /** Foreign merchant offices hosted in this settlement. */
+  offices_here?: OfficeHere[];
+}
+/** A foreign merchant's office hosted in a settlement (host-side view). */
+export interface OfficeHere {
+  holder: string;          // house / guild name
+  color: string;
+  is_guild: boolean;
+  origin: string;          // city the holder is based in
+  throughput_pct: number;  // % of this settlement's live trade it handles
+  goods: string[];
 }
 /** A merchant family (trading house) — for the Houses panel + settlement window. */
 export interface HouseBrief {

@@ -554,6 +554,33 @@ export function HubPanel() {
             );
           })()}
 
+          {/* Foreign offices hosted here — houses/guilds based elsewhere who have
+              opened a counting-house in this city (origin, % of trade, goods). */}
+          {detail && (detail.offices_here?.length ?? 0) > 0 && (
+            <>
+              <div style={{ ...sectionHdr, marginTop: 6 }}>Foreign offices here ({detail.offices_here!.length})</div>
+              {[...detail.offices_here!]
+                .sort((a, b) => b.throughput_pct - a.throughput_pct)
+                .map((o, i) => (
+                  <div key={o.holder + i} style={{ marginBottom: 4 }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 5, fontSize: 10 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: o.color, flex: "0 0 auto", alignSelf: "center" }} />
+                      <span style={{ color: "#e8dcc0", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.holder}</span>
+                      {o.is_guild && <span style={{ fontSize: 8, color: "#7fd0c0" }}>GUILD</span>}
+                      <span style={{ flex: 1 }} />
+                      <span style={{ color: "#9ab0c8", fontSize: 9 }} title="share of this city's live trade throughput">
+                        {o.throughput_pct >= 0.5 ? `${Math.round(o.throughput_pct)}%` : "—"}
+                      </span>
+                    </div>
+                    <div style={{ color: "#7a90a8", fontSize: 9, paddingLeft: 13 }}>
+                      from {o.origin || "—"}
+                      {o.goods.length > 0 && <> · {o.goods.slice(0, 5).map((g) => `${iconFor(g)} ${labelFor(g)}`).join(", ")}</>}
+                    </div>
+                  </div>
+                ))}
+            </>
+          )}
+
           {/* Who controls the trade — ALWAYS shown. With no resident houses the
               circle is just local merchants + guilds. */}
           {(() => {

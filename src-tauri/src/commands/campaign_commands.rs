@@ -384,6 +384,20 @@ pub struct HubDetail {
     #[serde(default)] pub estate_good: String,
     /// Buildings erected here: (name, one-line effect) — for the inspector.
     #[serde(default)] pub structures: Vec<(String, String)>,
+    /// FOREIGN merchant offices hosted in this settlement (houses/guilds based
+    /// elsewhere who have opened a counting-house here).
+    #[serde(default)] pub offices_here: Vec<OfficeHere>,
+}
+
+/// One foreign merchant's office hosted in a settlement (host-side view).
+#[derive(Serialize)]
+pub struct OfficeHere {
+    pub holder: String,        // house / guild name
+    pub color: String,         // its stable map colour
+    pub is_guild: bool,
+    pub origin: String,        // the city the holder is based in
+    pub throughput_pct: f32,   // % of THIS settlement's live trade it handles
+    pub goods: Vec<String>,    // goods it currently moves through here
 }
 
 fn get_sim(conn: &Connection) -> Result<Option<CampaignSim>, String> {
@@ -921,6 +935,38 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             .map(|(i, _)| i).unwrap_or(0);
         (owner, sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_default())
     } else { (String::new(), String::new()) };
+    // ── Foreign offices hosted here ──────────────────────────────────────────
+    // Live throughput touching this hub, split by the owning holder, + the goods
+    // each currently moves through here. Only holders with an OFFICE here listed.
+    let mut hub_total = 0.0f32;
+    let mut per_holder: std::collections::HashMap<usize, (f32, std::collections::HashSet<usize>)> =
+        std::collections::HashMap::new();
+    for s in &sim.in_transit {
+        if s.from as usize == hi || s.to as usize == hi {
+            hub_total += s.amount.max(0.0);
+            if s.owner >= 0 {
+                let e = per_holder.entry(s.owner as usize).or_default();
+                e.0 += s.amount.max(0.0);
+                e.1.insert(s.good);
+            }
+        }
+    }
+    let offices_here: Vec<OfficeHere> = sim.houses.iter().enumerate()
+        .filter(|(_, h)| !h.defunct && h.offices.contains(&(hi as u32)))
+        .map(|(idx, h)| {
+            let (vol, gset) = per_holder.get(&idx).cloned().unwrap_or((0.0, Default::default()));
+            OfficeHere {
+                holder: h.name.clone(),
+                color: distinct_color(idx),
+                is_guild: h.is_guild,
+                origin: sim.hubs.get(h.hub as usize).map(|x| x.name.clone()).unwrap_or_default(),
+                throughput_pct: if hub_total > 1e-6 { vol / hub_total * 100.0 } else { 0.0 },
+                goods: gset.iter()
+                    .filter_map(|&g| sim.goods.get(g).map(|x| x.name.clone()))
+                    .collect(),
+            }
+        })
+        .collect();
     Ok(Some(HubDetail {
         id: hub.id,
         name: hub.name.clone(),
@@ -955,6 +1001,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         estate_kind: hub.estate_kind,
         estate_owner,
         estate_good,
+        offices_here,
         structures: hub.structures.iter().map(|&s| (
             crate::sim::tick::structure_label(s).to_string(),
             crate::sim::tick::structure_effect(s).to_string(),
