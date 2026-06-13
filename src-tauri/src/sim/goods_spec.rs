@@ -203,6 +203,15 @@ fn custom_category(id: &str) -> &'static str {
         "metalware" => "metal",
         "refined_sugar" => "sweetener",
         "citrus_liqueur" => "drink",
+        // ── Ported richer manufactured catalog (+ Clay raw) ──
+        "linen" | "cotton_cloth" | "silk_brocade" | "carpets" => "fiber",
+        "leather_goods" => "leather",
+        "bronzeware" => "metal",
+        "jewelry" | "ivory_carvings" => "prestige",
+        "brandy" | "mead" => "drink",
+        "perfume" => "aromatic",
+        "soap" | "candles" | "books" | "furniture" => "craft",
+        "statuary" | "clay" => "construction",
         _ => "misc",
     }
 }
@@ -266,6 +275,28 @@ pub fn default_list() -> Vec<GoodSpec> {
     list.extend(default_custom_goods());
     // Customs are built with empty market fields; fill them from the id map.
     backfill_market_fields(&mut list);
+    // Convert the two unambiguous CITY crafts from raw belts to true manufactures
+    // (made from imported clay/soda + kiln fuel, not dug from a cell). Paper & beer
+    // stay raw belts (paper's per-cell subtypes + the brewing homeland need a belt).
+    for spec in list.iter_mut() {
+        match spec.id.as_str() {
+            "ceramics" => {
+                spec.distribution = Distribution::Manufactured;
+                spec.inputs = vec![
+                    RecipeInput { good: "clay".into(), qty: 1.0 },
+                    RecipeInput { good: "timber".into(), qty: 0.2 },
+                ];
+            }
+            "glassware" => {
+                spec.distribution = Distribution::Manufactured;
+                spec.inputs = vec![
+                    RecipeInput { good: "bay_salt".into(), qty: 0.1 },
+                    RecipeInput { good: "timber".into(), qty: 0.3 },
+                ];
+            }
+            _ => {}
+        }
+    }
     list
 }
 
@@ -365,6 +396,57 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         // belt of its own; distilled in cities).
         mg("citrus_liqueur", "Citrus Liqueur", "\u{1F378}", "#e8b24a", 14.0, 2.0, 0.02, true, 1.1,
             vec![("citrus", 1.0), ("sugar", 0.5)]),
+
+        // ── Clay: a common low-elevation raw, the literal input to ceramics. Cheap
+        //    and heavy/wet (high bulk → stays near its kiln cities). Category set
+        //    explicitly so backfill leaves its value/bulk alone. ──
+        GoodSpec {
+            id: "clay".into(), name: "Clay".into(), icon: "\u{1F9F1}".into(), color: "#b07a52".into(),
+            enabled: true, domain: Domain::Continental, distribution: Distribution::Global,
+            rarity: 0.40, desire: 0.35, network_luxury: false, builtin: false, deposit: None,
+            scoring: Some(env(vec![], None, None, Some([0.0, 0.30, 0.20]), None, 0.5, 0.0)),
+            category: "construction".into(), need_tier: 1, base_value: 0.5,
+            bulk: 2.0, perishable: 0.0, inputs: Vec::new(), labor: 1.0,
+        },
+
+        // ── Ported richer manufactured library (on top of the PR's cloth / metalware
+        //    / refined_sugar / citrus_liqueur). All hub-made, no map belt. ──
+        // Textiles
+        mg("linen", "Linen", "\u{1F9FA}", "#cfe0e8", 5.0, 0.7, 0.0, false, 1.1,
+            vec![("flax", 1.0)]),
+        mg("cotton_cloth", "Cotton Cloth", "\u{1F455}", "#eef0e8", 5.0, 0.7, 0.0, false, 1.1,
+            vec![("cotton", 1.0), ("flax", 0.2)]),
+        mg("silk_brocade", "Fine Silk Brocade", "\u{1F9E3}", "#d96fb0", 28.0, 0.25, 0.0, true, 1.0,
+            vec![("silk", 1.0), ("dyes", 0.2), ("gold", 0.02)]),
+        mg("carpets", "Carpets & Tapestry", "\u{1F7EB}", "#9b4f2f", 11.0, 1.0, 0.0, true, 1.0,
+            vec![("wool_fleece", 1.2), ("dyes", 0.3)]),
+        mg("leather_goods", "Leather Goods", "\u{1F45E}", "#7a4a2a", 4.0, 0.9, 0.0, false, 1.0,
+            vec![("hides", 1.0), ("salt", 0.1)]),
+        // Metalwork
+        mg("bronzeware", "Bronzeware", "\u{1F514}", "#b06a3a", 6.0, 1.4, 0.0, false, 1.0,
+            vec![("copper", 0.9), ("tin", 0.1)]),
+        mg("jewelry", "Fine Jewelry", "\u{1F48D}", "#d4af37", 45.0, 0.1, 0.0, true, 1.0,
+            vec![("gold", 0.3), ("silver", 0.3), ("gemstones", 0.1)]),
+        // Refined drink
+        mg("brandy", "Brandy & Spirits", "\u{1F943}", "#a9603a", 10.0, 0.5, 0.0, true, 1.0,
+            vec![("wine", 1.0)]),
+        mg("mead", "Mead", "\u{1F36F}", "#e0a020", 4.0, 1.2, 0.05, false, 1.0,
+            vec![("honey", 1.0)]),
+        // Aromatics, cosmetics & craft luxuries
+        mg("perfume", "Perfume & Attar", "\u{1F9F4}", "#c79a4b", 30.0, 0.15, 0.0, true, 1.0,
+            vec![("frankincense", 0.3), ("saffron", 0.05), ("oliveoil", 0.2)]),
+        mg("soap", "Soap", "\u{1F9FC}", "#cfe0d8", 3.0, 0.9, 0.0, false, 1.0,
+            vec![("oliveoil", 0.6), ("salt", 0.2)]),
+        mg("candles", "Candles & Wax Goods", "\u{1F56F}\u{FE0F}", "#e8d8a0", 3.0, 0.8, 0.0, false, 1.0,
+            vec![("honey", 0.8)]),
+        mg("books", "Books & Manuscripts", "\u{1F4DA}", "#8a6a3a", 20.0, 0.5, 0.0, true, 1.0,
+            vec![("paper", 0.8), ("dyes", 0.1)]),
+        mg("furniture", "Fine Furniture", "\u{1FA91}", "#6b4226", 5.0, 2.0, 0.0, false, 1.0,
+            vec![("hardwoods", 1.0), ("iron", 0.1)]),
+        mg("ivory_carvings", "Ivory Carvings", "\u{265F}\u{FE0F}", "#efe6d0", 25.0, 0.5, 0.0, true, 1.0,
+            vec![("ivory", 1.0)]),
+        mg("statuary", "Statuary", "\u{1F5FF}", "#e8e6e0", 8.0, 3.0, 0.0, false, 1.0,
+            vec![("marble", 1.0)]),
     ]
 }
 
