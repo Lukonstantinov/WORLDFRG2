@@ -92,6 +92,11 @@ interface UIStore {
   /** Merchant-houses panel open. */
   showHouses: boolean;
   showCityRanking: boolean;
+  /** Goods & Chains review window open (always shown before goods generation). */
+  chainReviewOpen: boolean;
+  /** Action run when the user confirms "Generate" in the chain-review window
+   *  (set by StepBiological); null when the window is opened just to inspect. */
+  chainReviewConfirm: (() => void) | null;
 
   setTool: (tool: ActiveTool) => void;
   setLayer: (layer: ActiveLayer) => void;
@@ -126,6 +131,8 @@ interface UIStore {
   setShowGoodsBrowser: (v: boolean) => void;
   setShowHouses: (v: boolean) => void;
   setShowCityRanking: (v: boolean) => void;
+  openChainReview: (onConfirm?: () => void) => void;
+  closeChainReview: () => void;
 }
 
 // Default layer/tool for each step
@@ -185,6 +192,8 @@ export const useUIStore = create<UIStore>((set) => ({
   showGoodsBrowser: false,
   showHouses: false,
   showCityRanking: false,
+  chainReviewOpen: false,
+  chainReviewConfirm: null,
 
   setTool: (tool) => set({ activeTool: tool }),
   setLayer: (layer) => set({ activeLayer: layer }),
@@ -240,6 +249,8 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowGoodsBrowser: (v) => set({ showGoodsBrowser: v }),
   setShowHouses: (v) => set({ showHouses: v }),
   setShowCityRanking: (v) => set({ showCityRanking: v }),
+  openChainReview: (onConfirm) => set({ chainReviewOpen: true, chainReviewConfirm: onConfirm ?? null }),
+  closeChainReview: () => set({ chainReviewOpen: false, chainReviewConfirm: null }),
 
   setWorkflowStep: (step) => {
     const defaults = STEP_DEFAULTS[step] || { layer: "land", tool: "pan" };

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useGoodsStore } from "../state/goodsStore";
+import { useUIStore } from "../state/uiStore";
 import { previewGoodScore } from "../bridge/tauri";
-import type { GoodSpec, GoodDomain, GoodDistribution, GoodEnvelope } from "../types";
+import type { GoodSpec, GoodDomain, GoodDistribution, GoodEnvelope, RecipeInput } from "../types";
 
 const DOMAINS: GoodDomain[] = ["marine", "coastal", "continental", "island"];
-const CATEGORIES = ["cereal", "protein", "oil", "fiber", "drink", "sweetener", "preservative", "metal", "construction", "dye", "aromatic", "craft", "prestige", "livestock", "misc"] as const;
-const DISTRIBUTIONS: GoodDistribution[] = ["global", "local", "deposits"];
+const CATEGORIES = ["cereal", "protein", "oil", "fiber", "drink", "sweetener", "preservative", "metal", "construction", "dye", "aromatic", "craft", "prestige", "livestock", "manufacture", "misc"] as const;
+const DISTRIBUTIONS: GoodDistribution[] = ["global", "local", "deposits", "manufactured"];
 
 // Climate presets → Köppen zone codes (see sim/koppen.rs).
 const CLIMATE_PRESETS: { label: string; codes: number[] }[] = [
@@ -74,6 +75,7 @@ export function GoodsEditor() {
           <button style={btn} onClick={addCustom}>+ Add custom</button>
           <button style={btn} onClick={act("Loaded global library", loadFromLibrary)}>Load library</button>
           <button style={btn} onClick={act("Reset to defaults", resetDefaults)}>Reset to defaults</button>
+          <button style={btn} title="Review planted vs manufactured goods + the recipe schematic" onClick={() => useUIStore.getState().openChainReview()}>⚙ Review chains</button>
           <div style={{ flex: 1 }} />
           <button style={btn} onClick={act("Saved to global library", saveToLibrary)}>Save to library</button>
           <button style={primaryBtn} onClick={act("Applied to this world", applyToWorld)}>Apply to world</button>
@@ -89,7 +91,7 @@ export function GoodsEditor() {
           <GoodRow
             key={`${g.id}_${i}`} g={g} i={i} expanded={expanded === i}
             onToggleExpand={() => setExpanded(expanded === i ? null : i)}
-            update={update} duplicate={duplicate} remove={remove}
+            update={update} duplicate={duplicate} remove={remove} allSpecs={specs}
           />
         ))}
 
@@ -103,11 +105,12 @@ export function GoodsEditor() {
   );
 }
 
-function GoodRow({ g, i, expanded, onToggleExpand, update, duplicate, remove }: {
+function GoodRow({ g, i, expanded, onToggleExpand, update, duplicate, remove, allSpecs }: {
   g: GoodSpec; i: number; expanded: boolean; onToggleExpand: () => void;
   update: (i: number, patch: Partial<GoodSpec>) => void;
-  duplicate: (i: number) => void; remove: (i: number) => void;
+  duplicate: (i: number) => void; remove: (i: number) => void; allSpecs: GoodSpec[];
 }) {
+  const manufactured = g.distribution === "manufactured";
   return (
     <>
       <div style={row}>
@@ -153,14 +156,79 @@ function GoodRow({ g, i, expanded, onToggleExpand, update, duplicate, remove }: 
             Value <input type="number" min={0.1} step={0.1} style={{ ...input, width: 56 }} value={g.base_value}
               onChange={(e) => update(i, { base_value: Number(e.target.value) || 1 })} /> ×grain
           </label>
+          <label style={{ display: "flex", gap: 4, alignItems: "center" }} title="Freight weight/volume — 1 = silk-light; 3-4 = bulky (timber, grain, ore) so it stays regional">
+            Bulk <input type="number" min={0.1} step={0.1} style={{ ...input, width: 50 }} value={g.bulk ?? 1}
+              onChange={(e) => update(i, { bulk: Number(e.target.value) || 1 })} />
+          </label>
+          <label style={{ display: "flex", gap: 4, alignItems: "center" }} title="Spoilage: extra freight per travel-day. 0 = durable; high for fresh fish/fruit (can't travel far)">
+            Perish <input type="number" min={0} step={0.01} style={{ ...input, width: 50 }} value={g.perishable ?? 0}
+              onChange={(e) => update(i, { perishable: Math.max(0, Number(e.target.value) || 0) })} />
+          </label>
           <button style={btn} onClick={() => duplicate(i)}>Duplicate as custom</button>
-          {g.builtin
-            ? <span style={{ color: "#7a8aa0", flexBasis: "100%" }}>Built-in scoring (duplicate to customize its climate/temperature envelope).</span>
-            : <EnvelopeEditor i={i} env={g.scoring ?? null} update={update} />}
-          <PreviewCanvas spec={g} />
+          {manufactured
+            ? <RecipeEditor i={i} g={g} allSpecs={allSpecs} update={update} />
+            : g.builtin
+              ? <span style={{ color: "#7a8aa0", flexBasis: "100%" }}>Built-in scoring (duplicate to customize its climate/temperature envelope).</span>
+              : <EnvelopeEditor i={i} env={g.scoring ?? null} update={update} />}
+          {!manufactured && <PreviewCanvas spec={g} />}
         </div>
       )}
     </>
+  );
+}
+
+/** Recipe rows for a Manufactured good: inputs (good × qty) + a labor slider.
+ *  Highlights inputs that reference an unknown/disabled good or itself (a cycle). */
+function RecipeEditor({ i, g, allSpecs, update }: {
+  i: number; g: GoodSpec; allSpecs: GoodSpec[];
+  update: (i: number, patch: Partial<GoodSpec>) => void;
+}) {
+  const inputs: RecipeInput[] = g.inputs ?? [];
+  const setInputs = (next: RecipeInput[]) => update(i, { inputs: next });
+  const byId = new Map(allSpecs.map((s) => [s.id, s]));
+  const options = allSpecs.filter((s) => s.id !== g.id && s.enabled);
+  const problem = (inp: RecipeInput): string | null => {
+    if (inp.good === g.id) return "self-reference (cycle)";
+    const s = byId.get(inp.good);
+    if (!s) return "unknown good";
+    if (!s.enabled) return "disabled good";
+    return null;
+  };
+  const summary = inputs.length === 0
+    ? "no recipe — add inputs below"
+    : "needs " + inputs.map((inp) => `${num(inp.qty)}× ${byId.get(inp.good)?.name ?? inp.good}`).join(" + ");
+
+  return (
+    <div style={{ flexBasis: "100%", display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ color: "#8aa0b8" }}>
+        Recipe — made in cities from these raws (no map belt). <span style={{ color: "#7a8aa0" }}>{summary}</span>
+      </div>
+      {inputs.map((inp, k) => {
+        const prob = problem(inp);
+        return (
+          <div key={k} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <select style={{ ...input, width: 180, borderColor: prob ? "#c06060" : "#2c3442" }} value={inp.good}
+              onChange={(e) => setInputs(inputs.map((x, j) => j === k ? { ...x, good: e.target.value } : x))}>
+              {!byId.has(inp.good) && <option value={inp.good}>{inp.good} (?)</option>}
+              {options.map((s) => <option key={s.id} value={s.id}>{s.icon} {s.name}</option>)}
+            </select>
+            <span style={{ color: "#7a8aa0" }}>×</span>
+            <input type="number" min={0} step={0.1} style={{ ...input, width: 56 }} value={inp.qty}
+              onChange={(e) => setInputs(inputs.map((x, j) => j === k ? { ...x, qty: Math.max(0, Number(e.target.value) || 0) } : x))} />
+            {prob && <span style={{ color: "#e08080", fontSize: 10 }}>{prob}</span>}
+            <button style={{ ...btn, padding: "2px 6px", color: "#e08080" }} onClick={() => setInputs(inputs.filter((_, j) => j !== k))}>✕</button>
+          </div>
+        );
+      })}
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <button style={btn} onClick={() => setInputs([...inputs, { good: options[0]?.id ?? "", qty: 1 }])}>+ Add input</button>
+        <label style={{ display: "flex", gap: 6, alignItems: "center", color: "#8aa0b8" }} title="Output rate ∝ city population × this. Higher = a major manufacturing centre.">
+          Labor {num(g.labor ?? 1)}
+          <input type="range" min={0.2} max={3} step={0.1} value={g.labor ?? 1}
+            onChange={(e) => update(i, { labor: parseFloat(e.target.value) })} />
+        </label>
+      </div>
+    </div>
   );
 }
 

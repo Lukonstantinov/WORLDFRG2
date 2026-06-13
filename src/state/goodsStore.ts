@@ -49,6 +49,10 @@ function newCustom(n: number): GoodSpec {
     network_luxury: false,
     builtin: false,
     deposit: null,
+    bulk: 1,
+    perishable: 0,
+    inputs: [],
+    labor: 1,
     scoring: {
       climate: [],
       temp: [18, 8],

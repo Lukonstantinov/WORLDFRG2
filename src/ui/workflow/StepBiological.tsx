@@ -29,19 +29,14 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
   const goodsSpecs = useGoodsStore((s) => s.specs);
   const applyGoodsToWorld = useGoodsStore((s) => s.applyToWorld);
 
+  const openChainReview = useUIStore((s) => s.openChainReview);
+
   const step6Done = stepCompleted[6] === true;
   const step7Done = stepCompleted[7] === true;
 
-  const handleGenerate = async () => {
+  // The actual generation, run only after the user confirms in the Chain Review.
+  const runGeneration = async () => {
     if (simRunning) return;
-    if (!step6Done) {
-      setStatus("Step 6 required: compute Soil & Fertility first (fisheries drive shark/fish goods)");
-      return;
-    }
-    if (!step7Done) {
-      setStatus("Step 7 required: place Settlements first (the trade matrix groups them into regions)");
-      return;
-    }
     setSimRunning(true);
     setStatus("Computing shark/shipworm waters, trade goods, routes & matrix...");
     try {
@@ -60,6 +55,22 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
       setStatus("Biological-Trade computed: sharks, shipworms, goods, routes & trade matrix");
     } catch (err) { setStatus(`Error: ${err}`); }
     setSimRunning(false);
+  };
+
+  // Goods generation ALWAYS routes through the Goods & Chains review window first
+  // (planted vs manufactured + the recipe schematic), then runs on confirm.
+  const handleGenerate = async () => {
+    if (simRunning) return;
+    if (!step6Done) {
+      setStatus("Step 6 required: compute Soil & Fertility first (fisheries drive shark/fish goods)");
+      return;
+    }
+    if (!step7Done) {
+      setStatus("Step 7 required: place Settlements first (the trade matrix groups them into regions)");
+      return;
+    }
+    if (goodsSpecs.length === 0) await loadGoodsFromWorld();
+    openChainReview(() => { void runGeneration(); });
   };
 
   const goodIds = goodsSpecs.length > 0 ? goodsSpecs.filter((g) => g.enabled).map((g) => g.id) : GOOD_DEFS.map((g) => g.name);

@@ -99,7 +99,7 @@ const MANUFACTORY_PERCAP: f32 = 0.2;
 /// Each estate/manufactory upgrade tier multiplies its output by this (5 tiers).
 const ESTATE_UPGRADE_MULT: f32 = 1.4;
 
-// ── Merchant guilds & offices (C3) ───────────────────────────────────────────
+// ── Merchant fleets & voyage risk ────────────────────────────────────────────
 /// A settlement gets a civic Merchant Guild once it reaches this population.
 const GUILD_MIN_POP: f32 = 50_000.0;
 /// Monthly civic subsidy into a guild's treasury, per 1,000 home-city people
@@ -235,6 +235,16 @@ pub struct TickGood {
     pub desire: f32,
     /// Counts toward a hub's food balance (cereal/protein/oil/sweetener).
     pub food: bool,
+    /// Freight weight/volume multiplier (1.0 = silk; 3-4 = bulky staple). Old
+    /// saves predate this → `serde(default)` gives 0.0, treated as 1.0 in freight.
+    #[serde(default)] pub bulk: f32,
+    /// Extra freight per travel-day from spoilage (additive). 0 = durable.
+    #[serde(default)] pub perishable: f32,
+    /// Recipe inputs (column index, qty) for a Manufactured good — made in cities
+    /// from these raws, not produced per-capita. Empty = extracted/raw.
+    #[serde(default)] pub inputs: Vec<(usize, f32)>,
+    /// Labor output-rate factor for manufacture (∝ population × this).
+    #[serde(default)] pub labor: f32,
 }
 
 /// One settlement participating in the living economy.
@@ -616,6 +626,84 @@ impl CampaignSim {
             .clamp(base * PRICE_FLOOR_MULT, base * PRICE_CEIL_MULT)
     }
 
+    /// Freight to haul one unit of good `g` over `days` at an already-discounted
+    /// per-day `rate`: bulky goods cost more, perishable goods accrue spoilage.
+    /// A 0 bulk (old saves) is treated as 1.0, so freight is unchanged for them.
+    #[inline]
+    fn good_freight(&self, g: usize, rate: f32, days: f32) -> f32 {
+        let bulk = { let b = self.goods[g].bulk; if b <= 0.0 { 1.0 } else { b } };
+        rate * days * bulk + self.goods[g].perishable.max(0.0) * days
+    }
+
+    /// Turn each hub's input STOCK into finished `Manufactured` goods, scaled by
+    /// labor capacity (∝ population). Mirrors the worldgen `apply_manufacturing`
+    /// pass so the living economy and the static trade map agree. Manufactured
+    /// goods are ordered raws-first so multi-stage chains resolve; cycles are
+    /// skipped (a good that never reaches depth is left unmade).
+    fn manufacture_pass(&mut self) {
+        let ng = self.goods.len();
+        // Manufactured goods = those carrying a recipe.
+        let recipe_goods: Vec<usize> = (0..ng).filter(|&g| !self.goods[g].inputs.is_empty()).collect();
+        if recipe_goods.is_empty() {
+            return;
+        }
+        // Depth = longest chain of manufactured inputs feeding this good; raws-first
+        // order. Iterative relaxation (ng is small); leftover at -1 = a cycle, skip.
+        let is_recipe = |g: usize| !self.goods[g].inputs.is_empty();
+        let mut depth: Vec<i32> = vec![-1; ng];
+        for _pass in 0..recipe_goods.len() + 1 {
+            let mut changed = false;
+            for &g in &recipe_goods {
+                let mut d = 0;
+                let mut ready = true;
+                for &(idx, _) in &self.goods[g].inputs {
+                    if idx < ng && is_recipe(idx) {
+                        if depth[idx] < 0 { ready = false; break; }
+                        d = d.max(depth[idx] + 1);
+                    }
+                }
+                if ready && depth[g] != d {
+                    depth[g] = d;
+                    changed = true;
+                }
+            }
+            if !changed { break; }
+        }
+        let mut order: Vec<usize> = recipe_goods.iter().copied().filter(|&g| depth[g] >= 0).collect();
+        order.sort_by_key(|&g| (depth[g], g));
+
+        // Median population → labor scale (big cities out-make villages).
+        let mut pops: Vec<f32> = self.hubs.iter().map(|h| h.population.max(0.0)).collect();
+        pops.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let median_pop = if pops.is_empty() { 1.0 } else { pops[pops.len() / 2].max(1.0) };
+
+        for h in 0..self.hubs.len() {
+            let pop = self.hubs[h].population.max(0.0);
+            for &g in &order {
+                let labor = { let l = self.goods[g].labor; if l <= 0.0 { 1.0 } else { l } };
+                let labor_cap = (pop / median_pop) * labor;
+                if labor_cap <= 0.0 { continue; }
+                let mut by_inputs = f32::INFINITY;
+                for &(idx, qty) in &self.goods[g].inputs {
+                    if qty <= 0.0 || idx >= ng { continue; }
+                    by_inputs = by_inputs.min(self.hubs[h].stock[idx] / qty);
+                }
+                if !by_inputs.is_finite() || by_inputs <= 0.0 { continue; }
+                let made = by_inputs.min(labor_cap);
+                if made <= 0.0 { continue; }
+                // Clone inputs to avoid borrow conflict while mutating stock.
+                let inputs = self.goods[g].inputs.clone();
+                for (idx, qty) in inputs {
+                    if idx < ng {
+                        self.hubs[h].stock[idx] = (self.hubs[h].stock[idx] - made * qty).max(0.0);
+                    }
+                }
+                self.hubs[h].stock[g] += made;
+                self.hubs[h].production[g] += made;
+            }
+        }
+    }
+
     /// Base (pre-substitution) per-capita need for a hub/good this tick.
     #[inline]
     fn base_need(&self, h: usize, g: usize) -> f32 {
@@ -768,6 +856,12 @@ impl CampaignSim {
                 // Granary = food only); `struct_bonus` was the A1 placeholder hook.
                 let (struct_all, struct_food) = self.hub_struct_prod(h);
                 for g in 0..ng {
+                    // Manufactured (recipe) goods aren't extracted per-capita — they're
+                    // made from imported raws in the manufacturing pass below.
+                    if !self.goods[g].inputs.is_empty() {
+                        self.hubs[h].production[g] = 0.0;
+                        continue;
+                    }
                     let percap = self.hubs[h].base_per_capita.get(g).copied().unwrap_or(0.0);
                     let struct_bonus = struct_all * if self.goods[g].food { struct_food } else { 1.0 };
                     let realized = percap * pop * self.seasonal_mult(h, g, doy)
@@ -776,6 +870,10 @@ impl CampaignSim {
                     self.hubs[h].stock[g] += realized;
                 }
             }
+
+            // 1b) Manufacturing — cities transform imported raws into finished goods
+            //     (wool→cloth, ore→arms), concentrated in big cities (labor ∝ pop).
+            self.manufacture_pass();
 
             // 2) Consumption with per-category substitution toward cheaper goods.
             let mut needs = vec![vec![0.0f32; ng]; n];
@@ -1156,7 +1254,7 @@ impl CampaignSim {
                         continue;
                     }
                     let pb = self.live_price(self.hubs[b].stock[g], needs[b][g], base);
-                    let freight = freight_rate * days;
+                    let freight = self.good_freight(g, freight_rate, days);
                     let gap = pb - (pa + freight) - self.margin * base;
                     if gap > 0.0 {
                         targets.push((b, gap, days));
@@ -1172,7 +1270,7 @@ impl CampaignSim {
                         break;
                     }
                     // Don't overfill b past delivered-cost parity.
-                    let delivered = pa + freight_rate * days;
+                    let delivered = pa + self.good_freight(g, freight_rate, days);
                     let max_stock =
                         needs[b][g] * (base / delivered.max(EPS)).powf(1.0 / self.k);
                     let room = (max_stock - self.hubs[b].stock[g]).max(0.0);
@@ -1346,10 +1444,10 @@ impl CampaignSim {
         if !days.is_finite() {
             return;
         }
-        // Freight home (a Guildhall at b lowers it).
-        let freight = self.freight_per_day
-            * if self.hub_has_struct(b, STRUCT_GUILDHALL) { GUILDHALL_FREIGHT } else { 1.0 }
-            * days;
+        // Freight home (a Guildhall at b lowers it); per-good weight/spoilage is
+        // folded in per candidate good below via `good_freight`.
+        let freight_rate = self.freight_per_day
+            * if self.hub_has_struct(b, STRUCT_GUILDHALL) { GUILDHALL_FREIGHT } else { 1.0 };
         // An office at b gives the holder a standing −5% on what it buys there.
         let office_disc = if self.houses[owner].offices.contains(&(b as u32)) { OFFICE_BUY_DISCOUNT } else { 0.0 };
         // Pick b's surplus good that earns the most carried home to a.
@@ -1369,6 +1467,7 @@ impl CampaignSim {
             let discount = (if bargain { 0.25 } else { 0.0 } + office_disc).min(MAX_BUY_DISCOUNT);
             let pb_buy = pb * (1.0 - discount);
             let pa_sell = self.live_price(self.hubs[a].stock[g], needs[a][g], base);
+            let freight = self.good_freight(g, freight_rate, days);
             let gap = pa_sell - pb_buy - freight - self.margin * base;
             if gap <= 0.0 { continue; }
             // Don't overfill a past delivered-cost parity.
@@ -1384,6 +1483,7 @@ impl CampaignSim {
             }
         }
         let Some((g, amount, pb_buy, pa_sell)) = best else { return };
+        let freight = self.good_freight(g, freight_rate, days);
         let sea = self.hubs[b].coastal && self.hubs[a].coastal;
         // Buy at b (goods leave b's stock), sell on arrival at a.
         self.hubs[b].stock[g] -= amount;
@@ -2738,7 +2838,8 @@ mod tests {
     use super::*;
 
     fn good(name: &str, cat: i32, tier: u8, val: f32, desire: f32, food: bool) -> TickGood {
-        TickGood { name: name.into(), category: cat, need_tier: tier, base_value: val, desire, food }
+        TickGood { name: name.into(), category: cat, need_tier: tier, base_value: val, desire, food,
+            bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0 }
     }
 
     fn hub(id: u32, x: f32, y: f32, pop: f32, prod: Vec<f32>, comp: u32) -> TickHub {

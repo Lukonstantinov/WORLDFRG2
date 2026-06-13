@@ -14,9 +14,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::biological::{
-    deposit_params, GOOD_BASE_VALUE, GOOD_CATEGORY, GOOD_COLOR, GOOD_DESIRE, GOOD_ICON,
-    GOOD_LABEL, GOOD_MARINE, GOOD_NAMES, GOOD_NEED_TIER, GOOD_NETWORK_LUXURY, GOOD_RARITY,
-    GOOD_UNLIMITED, GOOD_FRANKINCENSE, GOOD_INDIGO, GOOD_TOBACCO,
+    deposit_params, GOOD_BASE_VALUE, GOOD_BULK, GOOD_CATEGORY, GOOD_COLOR, GOOD_DESIRE, GOOD_ICON,
+    GOOD_LABEL, GOOD_MARINE, GOOD_NAMES, GOOD_NEED_TIER, GOOD_NETWORK_LUXURY, GOOD_PERISH,
+    GOOD_RARITY, GOOD_UNLIMITED, GOOD_FRANKINCENSE, GOOD_INDIGO, GOOD_TOBACCO,
 };
 use crate::tile::cell::GOODS_COUNT;
 
@@ -38,6 +38,21 @@ pub enum Distribution {
     Local,
     /// Discrete highland-locked blobs scattered worldwide (gems / metals).
     Deposits,
+    /// Made in cities from a recipe (`inputs`), not extracted from any cell — has
+    /// NO per-cell belt. Placed by `apply_manufacturing`, not the worldgen placer.
+    Manufactured,
+}
+
+/// One input line of a `Manufactured` good's recipe: `qty` units of `good`
+/// (referenced by its spec `id`) are consumed per 1 unit of output.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RecipeInput {
+    pub good: String,
+    pub qty: f32,
+}
+
+fn default_province_scale() -> f32 {
+    0.06
 }
 
 /// Parameters for a `Deposits`-distributed good.
@@ -46,6 +61,11 @@ pub struct DepositSpec {
     pub min_elev: f32,
     pub count_num: u32,
     pub count_den: u32,
+    /// Low-frequency noise frequency for this mineral's ore-province field, so each
+    /// deposit good lights up its OWN mountain ranges instead of all clustering on
+    /// the single tallest one. Larger = smaller, more scattered provinces.
+    #[serde(default = "default_province_scale")]
+    pub province_scale: f32,
 }
 
 /// Declarative scoring envelope for custom (and overridden) goods. Every term is
@@ -107,9 +127,35 @@ pub struct GoodSpec {
     /// (wheat = 1.0). Local prices are quoted as multiples of grain.
     #[serde(default = "default_base_value")]
     pub base_value: f32,
+    // ── Transport + production fields (serde defaults keep older spec JSON loading) ──
+    /// Freight weight/volume multiplier on per-day haulage cost. 1.0 = a compact
+    /// luxury (silk); 3-4 = a bulky low-value staple (timber, grain, ore) that
+    /// stays regional because hauling it eats its value.
+    #[serde(default = "default_bulk")]
+    pub bulk: f32,
+    /// Extra freight cost per travel-day from spoilage (additive). 0 = durable
+    /// (metals, salt-cod); high for fresh fish / fruit so they can't travel far.
+    #[serde(default)]
+    pub perishable: f32,
+    /// Recipe inputs for a `Manufactured` good (empty = raw/extracted). Each line
+    /// consumes `qty` units of the referenced good per 1 unit produced.
+    #[serde(default)]
+    pub inputs: Vec<RecipeInput>,
+    /// Output-rate factor for manufacture: a hub's labor capacity (∝ population) is
+    /// multiplied by this (a city makes more cloth than a village).
+    #[serde(default = "default_labor")]
+    pub labor: f32,
 }
 
 fn default_base_value() -> f32 {
+    1.0
+}
+
+fn default_bulk() -> f32 {
+    1.0
+}
+
+fn default_labor() -> f32 {
     1.0
 }
 
@@ -125,6 +171,10 @@ pub fn backfill_market_fields(specs: &mut [GoodSpec]) {
             spec.category = GOOD_CATEGORY[g].to_string();
             spec.need_tier = GOOD_NEED_TIER[g];
             spec.base_value = GOOD_BASE_VALUE[g];
+            // Transport facts share the same "filled before?" guard: a pre-market
+            // save predates bulk/perish too, so seed them from the const tables.
+            spec.bulk = GOOD_BULK[g];
+            spec.perishable = GOOD_PERISH[g];
         } else {
             spec.category = custom_category(&spec.id).to_string();
             spec.need_tier = if spec.network_luxury { 2 } else { 1 };
@@ -147,6 +197,12 @@ fn custom_category(id: &str) -> &'static str {
         "tyrian_purple" => "dye",
         "silver" | "lead" => "metal",
         "marble" => "construction",
+        // Manufactured chain goods satisfy the same NEED as their finished form, so
+        // they substitute against the matching raws in the market's needs ladder.
+        "cloth" => "fiber",
+        "metalware" => "metal",
+        "refined_sugar" => "sweetener",
+        "citrus_liqueur" => "drink",
         _ => "misc",
     }
 }
@@ -194,11 +250,16 @@ pub fn default_list() -> Vec<GoodSpec> {
                     min_elev: d.min_elev,
                     count_num: d.count_num,
                     count_den: d.count_den,
+                    province_scale: default_province_scale(),
                 }),
                 scoring: None,
                 category: GOOD_CATEGORY[g].to_string(),
                 need_tier: GOOD_NEED_TIER[g],
                 base_value: GOOD_BASE_VALUE[g],
+                bulk: GOOD_BULK[g],
+                perishable: GOOD_PERISH[g],
+                inputs: Vec::new(),
+                labor: 1.0,
             }
         })
         .collect();
@@ -226,9 +287,25 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             enabled: true, domain, distribution: dist, rarity, desire, network_luxury: luxury,
             builtin: false, deposit, scoring: Some(env),
             category: String::new(), need_tier: 0, base_value: 1.0,
+            bulk: 1.0, perishable: 0.0, inputs: Vec::new(), labor: 1.0,
         }
     }
-    let dep = |min_elev: f32, num: u32, den: u32| Some(DepositSpec { min_elev, count_num: num, count_den: den });
+    // A Manufactured chain good: made in cities from `inputs`, no per-cell belt.
+    #[allow(clippy::too_many_arguments)]
+    fn mg(
+        id: &str, name: &str, icon: &str, color: &str, base_value: f32, bulk: f32, perish: f32,
+        luxury: bool, labor: f32, inputs: Vec<(&str, f32)>,
+    ) -> GoodSpec {
+        GoodSpec {
+            id: id.into(), name: name.into(), icon: icon.into(), color: color.into(),
+            enabled: true, domain: Domain::Continental, distribution: Distribution::Manufactured,
+            rarity: 0.5, desire: 0.55, network_luxury: luxury, builtin: false, deposit: None,
+            scoring: None, category: String::new(), need_tier: 0, base_value,
+            bulk, perishable: perish, labor,
+            inputs: inputs.into_iter().map(|(g, q)| RecipeInput { good: g.into(), qty: q }).collect(),
+        }
+    }
+    let dep = |min_elev: f32, num: u32, den: u32| Some(DepositSpec { min_elev, count_num: num, count_den: den, province_scale: default_province_scale() });
     let env = |climate: Vec<(u8, f32)>, temp: Option<[f32; 2]>, precip: Option<[f32; 3]>,
                elevation: Option<[f32; 3]>, abs_lat: Option<[f32; 3]>, fertility: f32, coast_bonus: f32| Envelope {
         climate, temp, precip, elevation, abs_lat, fertility, coast_bonus,
@@ -270,6 +347,24 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         // Lead / tin-grey base metal (pewter, pipes, shot): low hills.
         cg("lead", "Lead", "\u{1F529}", "#8a8e96", Domain::Continental, Distribution::Deposits, 0.55, 0.40, false,
             dep(0.26, 2, 1), env(vec![], None, None, Some([0.26,0.85,0.16]), None, 0.0, 0.0)),
+        // ── Manufactured chain goods (the shipped recipe LIBRARY) — made in cities
+        // from imported raws, no per-cell belt. The placement engine skips them; the
+        // shared `apply_manufacturing` pass produces them at populous hubs that hold
+        // the inputs. Edit these (or add your own) in the Goods Editor recipe rows. ──
+        // Cloth ← fleece wool + a touch of dye. The classic "import raw wool, export
+        // finished cloth" trade that made wool-poor weaving towns rich.
+        mg("cloth", "Cloth", "\u{1F9F6}", "#d8c8b0", 8.0, 1.4, 0.0, true, 1.2,
+            vec![("wool_fleece", 1.0), ("dyes", 0.2)]),
+        // Metalware & Arms ← iron + a little copper (tools, fittings, weapons).
+        mg("metalware", "Metalware & Arms", "\u{2694}\u{FE0F}", "#9099a8", 9.0, 2.0, 0.0, false, 1.0,
+            vec![("iron", 1.0), ("copper", 0.3)]),
+        // Refined Sugar ← raw sugar cane (boiled & refined in port cities).
+        mg("refined_sugar", "Refined Sugar", "\u{1F367}", "#f0e8d8", 7.0, 1.6, 0.0, true, 1.0,
+            vec![("sugar", 1.2)]),
+        // Citrus Liqueur ← citrus + sugar (a multi-stage chain: both raws, no map
+        // belt of its own; distilled in cities).
+        mg("citrus_liqueur", "Citrus Liqueur", "\u{1F378}", "#e8b24a", 14.0, 2.0, 0.02, true, 1.1,
+            vec![("citrus", 1.0), ("sugar", 0.5)]),
     ]
 }
 

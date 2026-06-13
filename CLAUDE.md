@@ -86,7 +86,8 @@ sim/fertility.rs                ← Phase 6b: fertility scoring, fisheries
 sim/settlements.rs              ← Phase 7: habitability → city placement
 sim/biological.rs               ← Phase 8: shark-habitat risk + trade-good belts
 sim/ocean.rs (compute_salinity) ← Phase 3 add-on: wind/E-P salinity + thermohaline coupling
-sim/market.rs                   ← Market equilibrium solver (stocks → grain-eq prices → arbitrage)
+sim/market.rs                   ← Market equilibrium solver (stocks → grain-eq prices → arbitrage; bulk/perish freight)
+sim/manufacture.rs              ← Shared production-chain resolver (apply_manufacturing: DAG topo, labor∝pop)
 commands/sim_commands.rs        ← Tauri commands wrapping sim phases (per-phase ColumnSet masks)
 commands/campaign_commands.rs   ← finalize/unfreeze, new/save/open campaign, set_progress
 commands/import_commands.rs     ← import_world_layers (layered world import)
@@ -110,6 +111,8 @@ canvas/PaintOverlay.ts          ← Brush preview, paint stamps
 canvas/PixiApp.ts               ← PixiJS 8 application init
 ui/workflow/WorkflowPanel.tsx   ← 7-step generation wizard + "Run All" buttons
 ui/workflow/Step*.tsx            ← Individual step UIs with prerequisite checks
+ui/GoodsEditor.tsx              ← Goods builder: distribution/value/bulk/perish + Manufactured recipe rows
+ui/GoodsChainReview.tsx         ← Always-on pre-generation review: planted vs manufactured + SVG recipe DAG
 ui/Toolbar.tsx                  ← Tools, layer selector, overlays (RIGHT side)
 ui/MapCanvas.tsx                ← PixiJS canvas, pointer events, painting
 ui/InfoPanel.tsx                ← Right-click cell inspector
@@ -244,12 +247,38 @@ warmth: 0 ≤10°C → 1 ≥23°C (bull/tiger-shark warm habitat)
   width so thin straits / island chains don't chop the belt apart. Land goods
   stop at mountains ≥3000 m (`MOUNTAIN_NORM`≈0.339); marine goods stop where the
   score envelope drops below threshold.
-- **GEMSTONES** — special: `place_gem_deposits` scatters `gem_deposits` discrete
-  **highland-locked** blobs (elev ≥ 0.40) worldwide (global, not climate-bound);
-  `compute_good_regions` names each deposit a stone (Ruby/Sapphire/Emerald/…).
+- **GEMSTONES / metals (`Deposits`)** — discrete blobs placed by `place_deposits`.
+  Each deposit good now has its **own ore-province noise field** (per-mineral
+  `salt`-seeded `fbm_noise`, frequency = `DepositSpec.province_scale`), gated by an
+  elevation floor — so tin/copper/gold light up *different* ranges instead of all
+  clustering on the single tallest peak (the old pure-elevation candidate bug).
+- **MANUFACTURED** (`Distribution::Manufactured`) — finished goods made in cities
+  from a recipe (`GoodSpec.inputs`), **no per-cell belt** (placement engine skips
+  them). See "Production chains" below. Overlay = the input-belt supply zone.
 Goods (`GOOD_NAMES`; `GOOD_MARINE` flags sea goods): silk, wine, oliveoil, sugar,
 frankincense, stockfish, spices, tea, coffee, furs, timber, amber, salt, dyes,
 incense, pearls, whaling, **wheat, iron, cotton, gemstones**.
+
+### Production chains + transport (`GoodSpec` recipe/transport fields)
+Both worldgen (`compute_economy`/`market.rs`) and the campaign tick (`tick.rs`)
+read ONE set of fields on `GoodSpec` (all serde-defaulted → old saves load):
+- **Transport**: `bulk` (freight weight mult; 1=silk, 3-4=bulky staple) and
+  `perishable` (extra freight/day from spoilage). `market.rs::freight_of(good,
+  per_day, days) = per_day·days·bulk + perishable·days`; `tick.rs::good_freight`
+  mirrors it. Heavy/perishable goods stay regional; silk crosses the world.
+- **Chains**: `inputs: Vec<RecipeInput{good, qty}>` + `labor`. The shared
+  `sim/manufacture.rs::apply_manufacturing(prod, specs, hub_pop)` topo-orders
+  manufactured goods (raws first, cycles/missing inputs disabled with a warning)
+  and, per hub, turns input stock into finished output scaled by labor capacity
+  (∝ population), so manufacture concentrates in big cities. Worldgen calls it on
+  per-hub production before the market solves; the tick runs `manufacture_pass`
+  each day (recipe goods are skipped by the per-capita extractor).
+- **Builder UI + always-on review**: bulk/perish/recipe/labor are edited in
+  `ui/GoodsEditor.tsx` (Manufactured distribution → recipe rows). Goods generation
+  **always** routes through `ui/GoodsChainReview.tsx` (a standing convention, not
+  optional): a planted-vs-manufactured split + an SVG layered recipe DAG, shown by
+  `StepBiological` before `sim_biological` runs (confirm → generate). Shipped chain
+  library (`default_custom_goods`): cloth, metalware, refined_sugar, citrus_liqueur.
 
 ### Shipworm risk (`sim/biological.rs::compute_shipworm_risk`)
 ```
@@ -281,17 +310,19 @@ needs ladder (basic/comfort/luxury) with **category substitution** (15
 categories on `GoodSpec`: cereal/protein/oil/sweetener/fiber/drink/…; short of
 wheat → buys rice at a penalty), local price `base_value·(need/stock)^0.6` in
 the **grain-equivalent numeraire** (wheat=1, `GoodSpec.base_value`), arbitrage
-on live prices with freight as an additive cost/day and import caps at
-delivered-cost parity → decaying spatial price gradients, no terminal cap.
+on live prices with freight (`freight_of` = `per_day·days·bulk + perishable·days`,
+so bulky/perishable goods stay regional) and import caps at delivered-cost parity
+→ decaying spatial price gradients, no terminal cap.
 `compute_economy` feeds it travel-days over its trade graph and emits
 `EconHub.market` (prices vs world standard, in/out flows, exchange ratios
 against the hub's top exports, currency goods, grain_wealth + trade_wealth).
 Hub `wealth` = normalized(grain + 1.5·trade + 0.25·centrality).
 
 Goods: 45 builtins (38 + rice, barley, millet, herring, honey, hides, beer) +
-12 declarative customs; tobacco/frankincense/indigo ship disabled (~1400
-curation). `backfill_market_fields` fills category/tier/base_value on specs
-from pre-market saves.
+declarative customs incl. 4 **Manufactured** chain goods (cloth, metalware,
+refined_sugar, citrus_liqueur); tobacco/frankincense/indigo ship disabled (~1400
+curation). `backfill_market_fields` fills category/tier/base_value **and
+bulk/perishable** on specs from pre-market/pre-transport saves.
 
 Parts IV-V (tick simulation "Living Trade", merchant dynasties) are FUTURE
 DLC — see docs/REDESIGN_AND_DLC_PLAN.md Parts IV-V.

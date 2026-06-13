@@ -30,6 +30,19 @@ pub struct MarketGood {
     pub base_value: f32,
     /// Base demand weight (the spec's `desire`).
     pub desire: f32,
+    /// Freight weight/volume multiplier (1.0 = silk; 3-4 = bulky staple).
+    pub bulk: f32,
+    /// Extra freight per travel-day from spoilage (additive).
+    pub perishable: f32,
+}
+
+/// Freight cost to move one unit of good `g` over `days` travel-days at the base
+/// per-day rate: bulky goods cost more to haul, perishable goods accrue spoilage
+/// on top. With `bulk = 1.0, perishable = 0.0` this is exactly `per_day · days`
+/// (the old flat model), so a neutral good is unchanged.
+#[inline]
+pub fn freight_of(g: &MarketGood, per_day: f32, days: f32) -> f32 {
+    per_day * days * g.bulk + g.perishable * days
 }
 
 /// One trading settlement-cluster.
@@ -275,7 +288,7 @@ pub fn solve(
                     }
                     let pa = live(stocks[a][g], needs[a][g], base);
                     let pb = live(stocks[b][g], needs[b][g], base);
-                    let freight = params.freight_per_day * days;
+                    let freight = freight_of(&goods[g], params.freight_per_day, days);
                     let toll = routes.toll[routes.idx(a, b)];
                     let delivered = pa + freight + toll;
                     let gap = pb - delivered - params.margin * base;
@@ -326,7 +339,7 @@ pub fn solve(
     // price gradient: a distant consumer pays the freight, a near one barely.
     for f in &flows {
         let delivered = prices[f.from][f.good]
-            + params.freight_per_day * routes.days[routes.idx(f.from, f.to)]
+            + freight_of(&goods[f.good], params.freight_per_day, routes.days[routes.idx(f.from, f.to)])
             + routes.toll[routes.idx(f.from, f.to)];
         let cap = goods[f.good].base_value * PRICE_CEIL_MULT;
         if prices[f.to][f.good] < delivered {
@@ -411,10 +424,10 @@ mod tests {
     ///        2 silk (fiber/luxury/20), 3 iron (metal/comfort/3)
     fn goods() -> Vec<MarketGood> {
         vec![
-            MarketGood { category: 0, need_tier: 0, base_value: 1.0, desire: 0.85 },
-            MarketGood { category: 0, need_tier: 0, base_value: 1.1, desire: 0.8 },
-            MarketGood { category: 4, need_tier: 2, base_value: 20.0, desire: 0.35 },
-            MarketGood { category: 7, need_tier: 1, base_value: 3.0, desire: 0.65 },
+            MarketGood { category: 0, need_tier: 0, base_value: 1.0, desire: 0.85, bulk: 1.0, perishable: 0.0 },
+            MarketGood { category: 0, need_tier: 0, base_value: 1.1, desire: 0.8, bulk: 1.0, perishable: 0.0 },
+            MarketGood { category: 4, need_tier: 2, base_value: 20.0, desire: 0.35, bulk: 1.0, perishable: 0.0 },
+            MarketGood { category: 7, need_tier: 1, base_value: 3.0, desire: 0.65, bulk: 1.0, perishable: 0.0 },
         ]
     }
 
@@ -510,5 +523,35 @@ mod tests {
             "fed {} vs starving {}", fed.hubs[1].grain_wealth, starving.hubs[1].grain_wealth);
         // The cut-off hub's unmet basic cereal need is severe.
         assert!(starving.unmet[1][0].max(starving.unmet[1][1]) > 0.8);
+    }
+
+    #[test]
+    fn bulk_makes_a_heavy_good_ship_less_and_stay_dearer_than_a_light_one() {
+        // Two luxuries IDENTICAL except for bulk: good 0 is light (silk-like),
+        // good 1 is heavy (marble-like). Both produced only at hub 0; hub 2 is far.
+        let goods = vec![
+            MarketGood { category: usize::MAX, need_tier: 2, base_value: 10.0, desire: 0.6, bulk: 1.0, perishable: 0.0 },
+            MarketGood { category: usize::MAX, need_tier: 2, base_value: 10.0, desire: 0.6, bulk: 6.0, perishable: 0.0 },
+        ];
+        let hubs = vec![
+            hub(10_000.0, vec![60.0, 60.0]),
+            hub(10_000.0, vec![0.0, 0.0]),
+            hub(10_000.0, vec![0.0, 0.0]),
+        ];
+        let mut routes = RouteMatrix::new(3);
+        routes.set(0, 1, 10.0, 0.0);
+        routes.set(0, 2, 45.0, 0.0);
+        routes.set(1, 2, 38.0, 0.0);
+        let res = solve(&hubs, &goods, &routes, &MarketParams::default());
+        let (light, heavy) = (0usize, 1usize);
+        // The heavy good costs more to haul, so the far hub pays MORE for it…
+        assert!(res.prices[2][heavy] > res.prices[2][light],
+            "heavy {} vs light {} at far hub", res.prices[2][heavy], res.prices[2][light]);
+        // …and less of it actually reaches the far hub (freight eats the arbitrage).
+        let shipped = |g: usize| -> f32 {
+            res.flows.iter().filter(|f| f.good == g && f.to == 2).map(|f| f.amount).sum()
+        };
+        assert!(shipped(heavy) < shipped(light),
+            "heavy shipped {} vs light {}", shipped(heavy), shipped(light));
     }
 }
