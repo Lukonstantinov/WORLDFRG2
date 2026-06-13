@@ -591,6 +591,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
     let gc = econ.goods.len();
     let food_cats = ["cereal", "protein", "oil", "sweetener"];
     let mut cat_ids: Vec<String> = food_cats.iter().map(|s| s.to_string()).collect();
+    // good id → column index, for resolving Manufactured recipe inputs to columns.
+    let id_to_col: std::collections::HashMap<&str, usize> =
+        econ.goods.iter().enumerate().map(|(i, n)| (n.as_str(), i)).collect();
     let goods: Vec<TickGood> = (0..gc)
         .map(|g| {
             let spec = specs.get(g);
@@ -604,6 +607,12 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 (cat_ids.len() - 1) as i32
             };
             let food = category != i32::MAX && (category as usize) < food_cats.len();
+            // Resolve recipe inputs (by good id) to (column, qty); drop unknowns.
+            let inputs: Vec<(usize, f32)> = spec
+                .map(|s| s.inputs.iter()
+                    .filter_map(|inp| id_to_col.get(inp.good.as_str()).map(|&c| (c, inp.qty.max(0.0))))
+                    .collect())
+                .unwrap_or_default();
             TickGood {
                 name: econ.goods[g].clone(),
                 category,
@@ -611,6 +620,10 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 base_value: spec.map(|s| s.base_value).filter(|v| *v > 0.0).unwrap_or(1.0),
                 desire: spec.map(|s| s.desire).unwrap_or(0.4),
                 food,
+                bulk: spec.map(|s| s.bulk).filter(|v| *v > 0.0).unwrap_or(1.0),
+                perishable: spec.map(|s| s.perishable.max(0.0)).unwrap_or(0.0),
+                inputs,
+                labor: spec.map(|s| s.labor).filter(|v| *v > 0.0).unwrap_or(1.0),
             }
         })
         .collect();

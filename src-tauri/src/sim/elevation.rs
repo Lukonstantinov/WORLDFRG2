@@ -33,8 +33,9 @@ fn smooth_noise(x: f32, y: f32, seed: u64) -> f32 {
     top * (1.0 - sy) + bottom * sy
 }
 
-/// Fractal Brownian Motion noise
-fn fbm_noise(x: f32, y: f32, seed: u64, octaves: u32, lacunarity: f32, persistence: f32) -> f32 {
+/// Fractal Brownian Motion noise. Output ~0..1. Reused by the biological layer's
+/// per-mineral ore-province field (deposit placement).
+pub(crate) fn fbm_noise(x: f32, y: f32, seed: u64, octaves: u32, lacunarity: f32, persistence: f32) -> f32 {
     let mut val = 0.0f32;
     let mut amp = 1.0f32;
     let mut freq = 1.0f32;

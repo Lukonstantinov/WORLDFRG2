@@ -1797,6 +1797,9 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
 
     use crate::sim::biological::GEM_STONES;
     use crate::sim::goods_spec::Distribution;
+    // id → column index, for resolving a manufactured good's recipe inputs to belts.
+    let id_index: std::collections::HashMap<&str, usize> =
+        specs.iter().enumerate().map(|(i, s)| (s.id.as_str(), i)).collect();
     let mut out: Vec<GoodRegion> = Vec::new();
     for g in 0..gc {
         let spec = match specs.get(g) {
@@ -1805,15 +1808,47 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
         };
         // Deposit goods are scattered (keep every deposit). Global goods blanket
         // the world (many patches). Local goods are one homeland (top few).
+        // Manufactured goods have NO belt of their own — they're made in cities from
+        // imported raws; their overlay is the SUPPLY ZONE where all recipe inputs
+        // co-occur (the natural manufacturing hinterland).
         let (max_keep, min_cells) = match spec.distribution {
             Distribution::Deposits => (32usize, 1usize),
             Distribution::Global => (14, 1),
             Distribution::Local => (4, 1),
+            Distribution::Manufactured => (8, 1),
+        };
+        // For a manufactured good, synthesize a candidate grid = the co-occurrence
+        // (min) of its input belts; inputs that are themselves manufactured (or
+        // unknown) are treated as ubiquitous (1.0). Empty recipe → nothing to map.
+        let synth: Vec<f32>;
+        let source_grid: &Vec<f32> = if matches!(spec.distribution, Distribution::Manufactured) {
+            if spec.inputs.is_empty() {
+                continue;
+            }
+            let in_cols: Vec<Option<usize>> =
+                spec.inputs.iter().map(|inp| id_index.get(inp.good.as_str()).copied()).collect();
+            synth = (0..cn)
+                .map(|ci| {
+                    in_cols.iter().fold(1.0f32, |acc, col| {
+                        let v = match col {
+                            Some(c) if matches!(
+                                specs[*c].distribution,
+                                Distribution::Global | Distribution::Local | Distribution::Deposits
+                            ) => grids[*c][ci],
+                            _ => 1.0, // manufactured/unknown input assumed available
+                        };
+                        acc.min(v)
+                    })
+                })
+                .collect();
+            &synth
+        } else {
+            &grids[g]
         };
         // Multi-type goods: wheat splits into grain species, paper into its three
         // sources — classified per cell from the coarse climate fields.
         let subtype_kind = match spec.id.as_str() { "wheat" => 1u8, "paper" => 2u8, _ => 0u8 };
-        let mut regions = cluster_cells(&grids[g], cw, ch, f, 0.30, min_cells);
+        let mut regions = cluster_cells(source_grid, cw, ch, f, 0.30, min_cells);
         regions.sort_by(|a, b| b.cells.len().cmp(&a.cells.len()));
         regions.truncate(max_keep);
         for c in regions {
@@ -3466,11 +3501,20 @@ pub fn compute_economy(
             need_tier: specs[g].need_tier,
             base_value: specs[g].base_value.max(0.05),
             desire: if specs[g].enabled { specs[g].desire.max(0.0) } else { 0.0 },
+            bulk: specs[g].bulk.max(0.0),
+            perishable: specs[g].perishable.max(0.0),
         })
         .collect();
+    // Production chains: cities transform imported raws into finished exports
+    // (wool→cloth, ore→arms). Run the shared resolver on the static per-hub
+    // production BEFORE the market solves, so manufactured goods flow as exports
+    // from populous hubs that hold the inputs.
+    let hub_pop: Vec<f32> = (0..nn).map(|hh| nodes[hh].population.max(1) as f32).collect();
+    let _manu_warnings =
+        crate::sim::manufacture::apply_manufacturing(&mut prod, &specs, &hub_pop);
     let mhubs: Vec<market::MarketHub> = (0..nn)
         .map(|hh| market::MarketHub {
-            population: nodes[hh].population.max(1) as f32,
+            population: hub_pop[hh],
             production: prod[hh].clone(),
         })
         .collect();

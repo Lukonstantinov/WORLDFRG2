@@ -240,6 +240,37 @@ pub const GOOD_BASE_VALUE: [f32; GOODS_COUNT] = [
     1.1, 0.9, 0.8, 1.8, 4.0, 2.0, 1.5, // rice, barley, millet, herring, honey, hides, beer
 ];
 
+/// Freight weight/volume multiplier per good (1.0 = a compact luxury like silk;
+/// 3-4 = a bulky low-value staple — timber, grain, ore — whose haulage eats its
+/// value so it stays regional). Multiplies the per-day freight cost.
+pub const GOOD_BULK: [f32; GOODS_COUNT] = [
+    1.0, 2.5, 2.2, 2.0, 1.0, 1.8,    // silk, wine, oliveoil, sugar, frankincense, stockfish
+    1.0, 1.2, 1.3, 1.2, 4.0, 1.0,    // spices, tea, coffee, furs, timber, amber
+    3.0, 1.2, 1.0,                   // salt, dyes, incense
+    1.0, 2.0,                        // pearls, whaling(oil)
+    3.0, 3.5, 1.8, 1.0,              // wheat, iron, cotton, gemstones
+    3.5, 2.0, 1.6, 1.6, 1.2, 1.4,    // hardwoods, horses, wool_fleece, wool_llama, ivory, cacao
+    3.0, 3.0, 1.0,                   // copper, tin, gold
+    1.0, 1.0, 1.5,                   // cloves, pepper, paper
+    2.5, 2.2, 1.4, 1.2, 1.8,         // ceramics, glassware, tobacco, indigo, dates
+    3.0, 3.0, 3.0, 2.0, 1.6, 2.0, 3.0, // rice, barley, millet, herring, honey, hides, beer
+];
+/// Extra freight cost per travel-day from spoilage (additive). 0 = durable
+/// (metals, salt-cod, dried/preserved); high for fresh fish & fruit so they
+/// can't sail across the world.
+pub const GOOD_PERISH: [f32; GOODS_COUNT] = [
+    0.0, 0.02, 0.01, 0.0, 0.0, 0.0,  // silk, wine, oliveoil, sugar, frankincense, stockfish(salted)
+    0.0, 0.0, 0.0, 0.01, 0.0, 0.0,   // spices, tea, coffee, furs, timber, amber
+    0.0, 0.0, 0.0,                   // salt, dyes, incense
+    0.0, 0.02,                       // pearls, whaling
+    0.02, 0.0, 0.0, 0.0,             // wheat, iron, cotton, gemstones
+    0.0, 0.05, 0.0, 0.0, 0.0, 0.01,  // hardwoods, horses(livestock), wool_fleece, wool_llama, ivory, cacao
+    0.0, 0.0, 0.0,                   // copper, tin, gold
+    0.0, 0.0, 0.01,                  // cloves, pepper, paper
+    0.0, 0.0, 0.01, 0.0, 0.04,       // ceramics, glassware, tobacco, indigo, dates(fruit)
+    0.02, 0.02, 0.02, 0.06, 0.0, 0.02, 0.04, // rice, barley, millet, herring(fresh), honey, hides, beer
+];
+
 // Mountains ≥3000 m wall off a good's spread across a continent.
 const MOUNTAIN_NORM: f32 = 3000.0 / 8848.0; // ≈ 0.339
 
@@ -748,17 +779,40 @@ pub fn compute_trade_goods(
                         }
                     }
                 } else {
-                    for i in 0..n {
-                        if buf.terrain[i] == 1 && buf.elevation[i] >= min_elev {
-                            cand[i] = (buf.elevation[i] - min_elev + 0.15).min(1.0);
+                    // Ore-province field: each deposit good lights up its OWN highland
+                    // ranges via a per-good low-frequency noise field (seed = the good's
+                    // salt), gated by the elevation floor. Previously `cand` was pure
+                    // elevation for every metal, so they all ranked highest on the single
+                    // tallest range and coincided. A mild elevation term keeps deposits
+                    // favouring uplands, but the *which range* is the good's own noise.
+                    let province_scale = spec.deposit.map(|d| d.province_scale).unwrap_or(0.06);
+                    for y in 0..h {
+                        for x in 0..w {
+                            let i = buf.idx(x, y);
+                            if buf.terrain[i] == 1 && buf.elevation[i] >= min_elev {
+                                let p = crate::sim::elevation::fbm_noise(
+                                    x as f32 * province_scale, y as f32 * province_scale,
+                                    salt, 4, 2.0, 0.5,
+                                );
+                                cand[i] = (p * 0.85 + 0.15 * (buf.elevation[i] - min_elev)).clamp(0.0, 1.0);
+                            }
                         }
                     }
                 }
                 // Harsh rule for extreme-rare deposits: demand a stronger candidate
                 // (a stricter homeland) so prized stones/dyes stay scarce.
                 let rare_bump = if spec.rarity > 0.78 { (spec.rarity - 0.78) * 0.8 } else { 0.0 };
-                let thresh = if suitability { (0.30 + rare_bump).min(0.7) } else { 1e-4 };
+                // Highland deposits now qualify only in the upper band of the good's
+                // ore-province field, so each mineral's deposits sit inside its own few
+                // provinces rather than scattering across every peak.
+                let thresh = if suitability { (0.30 + rare_bump).min(0.7) } else { 0.45 };
                 buf.goods[slot] = place_deposits(buf, seed, count, salt, &cand, thresh);
+            }
+            Distribution::Manufactured => {
+                // Made in cities from a recipe, not extracted from the land: no belt.
+                // `apply_manufacturing` produces it at hubs holding the inputs; the
+                // overlay (compute_good_regions) shows the producing cities.
+                buf.goods[slot] = vec![0u8; n];
             }
             _ => {
                 let marine = matches!(spec.domain, Domain::Marine);
@@ -1484,4 +1538,40 @@ fn has_land_within(buf: &WorldBuffer, x: u32, y: u32, r: i32) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::sim::elevation::fbm_noise;
+    use std::collections::HashSet;
+
+    /// The ore-province fix: each deposit good's candidate field is its OWN
+    /// salt-seeded low-frequency noise, so two minerals rank DIFFERENT highland
+    /// cells highest — their deposits no longer all coincide on the tallest range
+    /// (the old pure-elevation candidate bug).
+    #[test]
+    fn ore_provinces_differ_by_salt() {
+        let (w, h) = (64u32, 48u32);
+        let scale = 0.06f32;
+        let field = |salt: u64| -> Vec<f32> {
+            (0..(w * h))
+                .map(|i| {
+                    let (x, y) = ((i % w) as f32, (i / w) as f32);
+                    fbm_noise(x * scale, y * scale, salt, 4, 2.0, 0.5)
+                })
+                .collect()
+        };
+        let a = field(0xC0FFEE_1234_5678); // copper-like salt
+        let b = field(0x901D_901D_901D_901D); // gold-like salt
+        // Richest 10% of cells in each mineral's province field.
+        let topk = |f: &[f32]| -> HashSet<usize> {
+            let mut idx: Vec<usize> = (0..f.len()).collect();
+            idx.sort_by(|&i, &j| f[j].partial_cmp(&f[i]).unwrap());
+            idx.into_iter().take(f.len() / 10).collect()
+        };
+        let (ta, tb) = (topk(&a), topk(&b));
+        let overlap = ta.intersection(&tb).count();
+        // Largely disjoint: the two minerals' richest provinces mostly don't coincide.
+        assert!(overlap < ta.len() / 2, "provinces overlap too much: {overlap}/{}", ta.len());
+    }
 }

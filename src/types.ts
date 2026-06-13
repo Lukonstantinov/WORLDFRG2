@@ -75,7 +75,13 @@ export interface CellInfo {
 
 // ── Editable trade-good specs (mirror sim/goods_spec.rs) ──
 export type GoodDomain = "marine" | "coastal" | "continental" | "island";
-export type GoodDistribution = "global" | "local" | "deposits";
+export type GoodDistribution = "global" | "local" | "deposits" | "manufactured";
+
+/** One recipe input of a Manufactured good: `qty` units of `good` per 1 output. */
+export interface RecipeInput {
+  good: string;
+  qty: number;
+}
 
 export interface GoodEnvelope {
   climate: [number, number][];        // (koppen code, weight)
@@ -91,6 +97,8 @@ export interface GoodDepositSpec {
   min_elev: number;
   count_num: number;
   count_den: number;
+  /** Per-mineral ore-province noise frequency (each metal lights up its own ranges). */
+  province_scale?: number;
 }
 
 export interface GoodSpec {
@@ -113,6 +121,14 @@ export interface GoodSpec {
   need_tier: number;
   /** World-standard value per unit in grain-equivalent (wheat = 1). */
   base_value: number;
+  /** Freight weight/volume multiplier (1 = silk-light; 3-4 = bulky staple). */
+  bulk?: number;
+  /** Extra freight per travel-day from spoilage (0 = durable). */
+  perishable?: number;
+  /** Recipe inputs for a Manufactured good (empty/absent = raw/extracted). */
+  inputs?: RecipeInput[];
+  /** Output-rate factor for manufacture (∝ population × this). */
+  labor?: number;
 }
 
 export type PaintValue =

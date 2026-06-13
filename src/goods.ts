@@ -111,7 +111,7 @@ export function goodSubtypes(name: string): SubtypeDef[] | null {
 // sit side by side, the marine goods cluster, etc.
 export const CATEGORY_ORDER = [
   "Staples", "Wine, Oil & Vine", "Cash Crops", "Spices & Aromatics",
-  "Textiles & Animal", "Forestry & Craft", "Minerals & Metals", "Marine", "Other",
+  "Textiles & Animal", "Forestry & Craft", "Manufactures", "Minerals & Metals", "Marine", "Other",
 ] as const;
 
 const GOOD_CATEGORY: Record<string, string> = {
@@ -140,6 +140,9 @@ const GOOD_CATEGORY: Record<string, string> = {
   // Marine (incl. marine dyes)
   stockfish: "Marine", pearls: "Marine", whaling: "Marine", amber: "Marine",
   dyes: "Marine", tyrian_purple: "Marine", coral: "Marine", ambergris: "Marine",
+  // Manufactures — finished goods made in cities from imported raws (no map belt)
+  cloth: "Manufactures", metalware: "Manufactures", refined_sugar: "Manufactures",
+  citrus_liqueur: "Manufactures",
 };
 
 export function goodCategory(name: string): string {
