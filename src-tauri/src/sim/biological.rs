@@ -728,6 +728,16 @@ pub fn compute_trade_goods(
     // goods, drop trailing columns that no longer exist).
     buf.goods.resize(specs.len().max(1), vec![0u8; n]);
 
+    // Adaptive highland floor for ore/gem deposits. Their configured `min_elev`
+    // values are ABSOLUTE normalized heights (1.0 = 8848 m), so copper 0.30 ≈
+    // 2650 m, gold 0.45 ≈ 3980 m. On any world whose mountains don't reach those
+    // heights, the elevation gate produced ZERO candidates and the metals/gems
+    // silently vanished from the map. Clamp each deposit floor to no higher than
+    // the 72nd percentile of this world's land elevation, so the top ~28% of land
+    // is always eligible regardless of how tall the ranges are (the per-good
+    // province noise still scatters each mineral onto different uplands).
+    let highland_cap = land_elev_percentile(buf, 0.72);
+
     // Seed cells of the homelands placed so far, so each new Local good is pushed
     // to a DIFFERENT part of the continent (plausible spread, not all clustered).
     let mut placed_seeds: Vec<usize> = Vec::new();
@@ -786,15 +796,16 @@ pub fn compute_trade_goods(
                     // tallest range and coincided. A mild elevation term keeps deposits
                     // favouring uplands, but the *which range* is the good's own noise.
                     let province_scale = spec.deposit.map(|d| d.province_scale).unwrap_or(0.06);
+                    let eff_min = min_elev.min(highland_cap);
                     for y in 0..h {
                         for x in 0..w {
                             let i = buf.idx(x, y);
-                            if buf.terrain[i] == 1 && buf.elevation[i] >= min_elev {
+                            if buf.terrain[i] == 1 && buf.elevation[i] >= eff_min {
                                 let p = crate::sim::elevation::fbm_noise(
                                     x as f32 * province_scale, y as f32 * province_scale,
                                     salt, 4, 2.0, 0.5,
                                 );
-                                cand[i] = (p * 0.85 + 0.15 * (buf.elevation[i] - min_elev)).clamp(0.0, 1.0);
+                                cand[i] = (p * 0.85 + 0.15 * (buf.elevation[i] - eff_min)).clamp(0.0, 1.0);
                             }
                         }
                     }
@@ -805,7 +816,15 @@ pub fn compute_trade_goods(
                 // Highland deposits now qualify only in the upper band of the good's
                 // ore-province field, so each mineral's deposits sit inside its own few
                 // provinces rather than scattering across every peak.
-                let thresh = if suitability { (0.30 + rare_bump).min(0.7) } else { 0.45 };
+                let mut thresh = if suitability { (0.30 + rare_bump).min(0.7) } else { 0.45 };
+                // Guarantee enough candidates to actually place `count` spaced
+                // deposits: if the noise threshold is too strict for this world,
+                // loosen it until at least ~4× the deposit count of cells qualify
+                // (otherwise a sparse field placed nothing and the good vanished).
+                let want = (count as usize * 4).max(8);
+                while thresh > 0.12 && cand.iter().filter(|&&v| v >= thresh).count() < want {
+                    thresh -= 0.05;
+                }
                 buf.goods[slot] = place_deposits(buf, seed, count, salt, &cand, thresh);
             }
             Distribution::Manufactured => {
@@ -1397,6 +1416,21 @@ fn localize_good(
 /// (the abundance = its candidate weight); only occasionally (~25%) does a point
 /// grow into a small 1–2-cell rich cluster. Used for gems/metals (highland `cand`)
 /// and the suitability deposits salt/iron (climate/relief `cand`).
+/// Elevation value at percentile `p` (0..1) across LAND cells — e.g. p=0.72 ≈
+/// the height only the upper quarter of land exceeds. Used to make ore/gem
+/// deposit elevation floors adapt to how mountainous a given world is, so
+/// metals/gems never disappear on a low-relief world. Returns 0.0 if no land.
+fn land_elev_percentile(buf: &WorldBuffer, p: f32) -> f32 {
+    let mut e: Vec<f32> = (0..buf.total())
+        .filter(|&i| buf.terrain[i] == 1)
+        .map(|i| buf.elevation[i])
+        .collect();
+    if e.is_empty() { return 0.0; }
+    let k = (((e.len() - 1) as f32) * p.clamp(0.0, 1.0)) as usize;
+    e.select_nth_unstable_by(k, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    e[k]
+}
+
 fn place_deposits(buf: &WorldBuffer, seed: u64, count: u32, salt: u64, cand: &[f32], thresh: f32) -> Vec<u8> {
     let w = buf.width as i32;
     let h = buf.height as i32;

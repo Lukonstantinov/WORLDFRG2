@@ -113,6 +113,7 @@ interface UIStore {
   setSimRunning: (running: boolean) => void;
   resetWorkflow: () => void;
   setOverlayVisible: (type: string, visible: boolean) => void;
+  setOverlaysVisible: (types: string[], visible: boolean) => void;
   toggleOverlay: (type: string) => void;
   setLayerOpacity: (opacity: number) => void;
   setLandmassSource: (source: LandmassSource) => void;
@@ -211,6 +212,15 @@ export const useUIStore = create<UIStore>((set) => ({
     set((state) => ({
       overlayVisibility: { ...state.overlayVisibility, [type]: visible },
     })),
+
+  // Bulk-set many overlay keys at once (e.g. a whole good category toggled from
+  // its master checkbox).
+  setOverlaysVisible: (types, visible) =>
+    set((state) => {
+      const next = { ...state.overlayVisibility };
+      for (const t of types) next[t] = visible;
+      return { overlayVisibility: next };
+    }),
 
   toggleOverlay: (type) =>
     set((state) => ({

@@ -276,6 +276,10 @@ pub struct TickGood {
     #[serde(default)] pub inputs: Vec<(usize, f32)>,
     /// Labor output-rate factor for manufacture (∝ population × this).
     #[serde(default)] pub labor: f32,
+    /// Demand cadence in days (how often a person consumes a unit). Long cadence →
+    /// weak daily local demand → the good sits cheaper and is mostly traded
+    /// merchant-to-merchant. 0 on old saves → treated as the neutral 30 in base_need.
+    #[serde(default)] pub consumption_interval: f32,
 }
 
 /// One settlement participating in the living economy.
@@ -784,9 +788,15 @@ impl CampaignSim {
     #[inline]
     fn base_need(&self, h: usize, g: usize) -> f32 {
         let tg = &self.goods[g];
+        // Demand cadence: a good consumed every N days exerts ~30/N of the daily
+        // pull of a monthly good. Clamped so it modulates (not dominates) — long
+        // cadence goods (furs, luxuries) sit cheaper locally and skew to wholesale.
+        let interval = if tg.consumption_interval > 0.0 { tg.consumption_interval } else { 30.0 };
+        let cadence = (30.0 / interval).clamp(0.30, 1.8);
         self.hubs[h].population
             * TIER_WEIGHT[tg.need_tier.min(2) as usize]
             * tg.desire.max(0.0)
+            * cadence
             * self.need_scale
             * DEMAND_PRESSURE
     }
@@ -3055,7 +3065,7 @@ mod tests {
 
     fn good(name: &str, cat: i32, tier: u8, val: f32, desire: f32, food: bool) -> TickGood {
         TickGood { name: name.into(), category: cat, need_tier: tier, base_value: val, desire, food,
-            bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0 }
+            bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0, consumption_interval: 30.0 }
     }
 
     fn hub(id: u32, x: f32, y: f32, pop: f32, prod: Vec<f32>, comp: u32) -> TickHub {

@@ -628,6 +628,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 perishable: spec.map(|s| s.perishable.max(0.0)).unwrap_or(0.0),
                 inputs,
                 labor: spec.map(|s| s.labor).filter(|v| *v > 0.0).unwrap_or(1.0),
+                consumption_interval: spec.map(|s| s.consumption_interval).filter(|v| *v > 0.0).unwrap_or(30.0),
             }
         })
         .collect();
