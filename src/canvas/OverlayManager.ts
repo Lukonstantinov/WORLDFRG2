@@ -108,6 +108,8 @@ export class OverlayManager {
   private merchantRoutes: MerchantRoute[] = [];
   private politicalCenters: PoliticalCenter[] = [];
   private houses: HouseBrief[] = [];
+  private allHouses: HouseBrief[] = [];
+  private selectedHouseIdx: number | null = null;
   private chokepoints: EconChokepoint[] = [];
   private corridors: EconCorridor[] = [];
   private econRegions: EconRegion[] = [];
@@ -234,8 +236,12 @@ export class OverlayManager {
 
   /** Merchant-family control: houses that control >=1 settlement (>=50% of its
    *  trade) — its seat or a remote outpost. Pass the active houses + wrap width. */
-  drawHouseControl(houses: HouseBrief[], gridW: number) {
+  drawHouseControl(houses: HouseBrief[], gridW: number, selectedIdx?: number | null) {
     this.houses = houses.filter((h) => !h.defunct && h.controls && h.controls.length > 0);
+    // Keep ALL houses (even ones controlling nothing) so a selected house can still
+    // show its sphere/routes/offices.
+    this.allHouses = houses.filter((h) => !h.defunct);
+    this.selectedHouseIdx = selectedIdx ?? null;
     if (gridW > 0) this.worldW = gridW;
   }
 
@@ -1010,9 +1016,20 @@ export class OverlayManager {
       handled.push({ color: h.color, pts });
     }
 
-    // ── Sphere of business: a translucent convex hull around each house's cities,
-    //    partners and seat, tinted its colour (drawn first, under everything). ──
-    for (const h of handled) {
+    // A FOCUSED house (clicked in the Houses panel): show only ITS sphere, routes
+    // and offices, brightly; everything else dims to context grey.
+    const sel = this.selectedHouseIdx != null
+      ? this.allHouses.find((h) => h.idx === this.selectedHouseIdx) ?? null
+      : null;
+    const selPts: [number, number][] = sel
+      ? [...(sel.controls ?? []), ...(sel.partners ?? []), ...(sel.seat ? [sel.seat] : [])]
+      : [];
+    const selColor = sel?.color || "#e8c84a";
+
+    // ── Sphere of business: a translucent convex hull around the relevant house(s)'
+    //    cities, partners and seat, tinted their colour (drawn first, under all). ──
+    const hullSrc = sel ? [{ color: selColor, pts: selPts }] : handled;
+    for (const h of hullSrc) {
       const hull = convexHull(h.pts);
       if (hull.length < 3) continue;
       let spansSeam = false;
@@ -1026,10 +1043,10 @@ export class OverlayManager {
       for (let i = 1; i < hull.length; i++) ctx.lineTo(hull[i][0] + 0.5, hull[i][1] + 0.5);
       ctx.closePath();
       ctx.fillStyle = h.color;
-      ctx.globalAlpha = 0.10;
+      ctx.globalAlpha = sel ? 0.16 : 0.10;
       ctx.fill();
-      ctx.globalAlpha = 0.34;
-      ctx.lineWidth = Math.max(0.6, 1.2 * inv);
+      ctx.globalAlpha = sel ? 0.6 : 0.34;
+      ctx.lineWidth = Math.max(0.7, (sel ? 1.6 : 1.2) * inv);
       ctx.strokeStyle = h.color;
       ctx.stroke();
     }
@@ -1050,6 +1067,22 @@ export class OverlayManager {
     };
     const matches = (pt: [number, number], set: [number, number][]) =>
       set.some((p) => d2(pt[0], pt[1], p[0], p[1]) <= TOL);
+    // Focused house: only ITS routes draw, as BRIGHT DASHED lines; the rest go faint.
+    if (sel) {
+      for (const route of this.tradeRoutes) {
+        const pts = route.points;
+        if (pts.length < 2) continue;
+        const a = pts[0], b = pts[pts.length - 1];
+        if (matches(a, selPts) && matches(b, selPts)) {
+          ctx.setLineDash([Math.max(3, 4 * inv), Math.max(2, 3 * inv)]);
+          drawPath(pts, selColor, Math.max(1.3, 2.4 * inv), 1);
+          ctx.setLineDash([]);
+        } else {
+          drawPath(pts, GREY_ROUTE, Math.max(0.3, 0.6 * inv), 0.4);
+        }
+      }
+      ctx.globalAlpha = 1;
+    } else
     for (const route of this.tradeRoutes) {
       const pts = route.points;
       if (pts.length < 2) continue;
@@ -1077,6 +1110,32 @@ export class OverlayManager {
         ctx.lineWidth = Math.max(0.4, 0.9 * inv);
         ctx.strokeStyle = "rgba(8,16,28,0.9)";
         ctx.stroke();
+      }
+    }
+
+    // ── Focused house: OFFICE pins (squares) + a bold SEAT ring ──
+    if (sel) {
+      const offR = Math.max(1.3, 2.2 * inv);
+      for (const office of sel.offices ?? []) {
+        const pos = office[1];
+        if (!pos) continue;
+        ctx.fillStyle = selColor;
+        ctx.strokeStyle = "rgba(8,16,28,0.95)";
+        ctx.lineWidth = Math.max(0.5, 1.0 * inv);
+        ctx.fillRect(pos[0] + 0.5 - offR, pos[1] + 0.5 - offR, offR * 2, offR * 2);
+        ctx.strokeRect(pos[0] + 0.5 - offR, pos[1] + 0.5 - offR, offR * 2, offR * 2);
+      }
+      if (sel.seat) {
+        const sr = Math.max(1.8, 3.0 * inv);
+        ctx.beginPath();
+        ctx.arc(sel.seat[0] + 0.5, sel.seat[1] + 0.5, sr, 0, Math.PI * 2);
+        ctx.strokeStyle = selColor;
+        ctx.lineWidth = Math.max(0.9, 1.8 * inv);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.fillStyle = selColor;
+        ctx.arc(sel.seat[0] + 0.5, sel.seat[1] + 0.5, Math.max(0.9, 1.5 * inv), 0, Math.PI * 2);
+        ctx.fill();
       }
     }
   }

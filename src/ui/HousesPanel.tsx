@@ -71,6 +71,14 @@ export function HousesPanel() {
   const [history, setHistory] = useState<HouseHistory | null>(null);
   const [tab, setTab] = useState<"houses" | "guilds">("houses");
   const [selected, setSelected] = useState<HouseBrief | null>(null);
+  const setSelectedHouse = useCampaignStore((s) => s.setSelectedHouse);
+  // Focus a house: open its detail AND tell the map to highlight only it.
+  const selectHouse = (h: HouseBrief | null) => {
+    setSelected(h);
+    setSelectedHouse(h?.idx ?? null);
+    // Auto-show the House Control map layer so the focused house's sphere is visible.
+    if (h) useUIStore.getState().setOverlayVisible("houseControl", true);
+  };
   const close = () => useUIStore.getState().setShowHouses(false);
   const openTimeline = (name: string) => {
     campaignGetHouseHistory(name).then((h) => setHistory(h)).catch(() => setHistory(null));
@@ -87,7 +95,7 @@ export function HousesPanel() {
   return (
     <div style={panel}>
       {history && <HouseTimeline history={history} onClose={() => setHistory(null)} />}
-      {selected && <HouseDetail h={selected} onClose={() => setSelected(null)} onChronicle={openTimeline} />}
+      {selected && <HouseDetail h={selected} onClose={() => selectHouse(null)} onChronicle={openTimeline} />}
       <div style={header}>
         <span>⚜️ Trading Families</span>
         <span style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
@@ -112,7 +120,7 @@ export function HousesPanel() {
           <div style={empty}>{tab === "guilds" ? "No civic guilds yet (cities form a guild at 50,000 people)." : "No private houses yet."}</div>
         )}
         {inTab.map((h, i) => (
-          <div key={h.name + i} style={{ ...card, cursor: "pointer" }} onClick={() => setSelected(h)} title="Open this family's detail">
+          <div key={h.name + i} style={{ ...card, cursor: "pointer" }} onClick={() => selectHouse(h)} title="Open this family's detail">
             <CoatOfArms name={h.name} size={30} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>

@@ -16,6 +16,10 @@ interface CampaignStore {
   diagnostics: CampaignDiagnostics | null;
   busy: boolean;
   error: string | null;
+  /** Index of the house focused in the Houses panel — the map highlights only it
+   *  (its sphere, routes, offices). null = show all houses. */
+  selectedHouseIdx: number | null;
+  setSelectedHouse: (idx: number | null) => void;
 
   /** Load the current sim state (called when the campaign step opens). */
   refresh: () => Promise<void>;
@@ -32,6 +36,8 @@ export const useCampaignStore = create<CampaignStore>((set, get) => ({
   diagnostics: null,
   busy: false,
   error: null,
+  selectedHouseIdx: null,
+  setSelectedHouse: (idx) => set({ selectedHouseIdx: idx }),
 
   refresh: async () => {
     try {

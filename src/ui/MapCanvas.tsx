@@ -62,6 +62,7 @@ export function MapCanvas() {
   const searchPin = useViewportStore((s) => s.searchPin);
   const overlayVisibility = useUIStore((s) => s.overlayVisibility);
   const houses = useCampaignStore((s) => s.houses);
+  const selectedHouseIdx = useCampaignStore((s) => s.selectedHouseIdx);
   const campaignSnapshot = useCampaignStore((s) => s.snapshot);
   const stretchToFit = useUIStore((s) => s.stretchToFit);
   const setStatus = useUIStore((s) => s.setStatus);
@@ -606,9 +607,9 @@ export function MapCanvas() {
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om) return;
-    om.drawHouseControl(houses, meta?.grid_width ?? 0);
+    om.drawHouseControl(houses, meta?.grid_width ?? 0, selectedHouseIdx);
     requestRender();
-  }, [houses, meta, requestRender]);
+  }, [houses, meta, selectedHouseIdx, requestRender]);
 
   // Draw latitude lines. Driven by the live `latConfig` slice (not `meta`) so
   // dragging the Latitude Frame sliders repaints ONLY this overlay — no tile
