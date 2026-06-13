@@ -166,6 +166,12 @@ const HOUSE_CONSUMPTION_RATE: f32 = 0.006;
 const GUILD_CIVIC_RATE: f32 = 0.012;
 /// How fast a hub's accumulated civic spending (the `civic_pool`) is used up.
 const CIVIC_DECAY: f32 = 0.97;
+/// Monthly fleet upkeep as a fraction of a vessel's value (crew, repairs, berthing)
+/// — a steady sink that scales with how big a fleet the house runs.
+const FLEET_UPKEEP_FRAC: f32 = 0.02;
+/// Per-vessel monthly chance of being lost to wear (rot, storms, breakdown) — the
+/// slow decay of ships & caravans, so fleets must be continually replaced.
+const FLEET_DECAY_CHANCE: f32 = 0.012;
 const FLEET_LOSS_MULT: f32 = 0.6;   // voyage-loss reduction
 const FLEET_SHIP_DISCOUNT: f32 = 0.8;
 const POLITICAL_POWER_BONUS: f32 = 0.15;
@@ -2532,6 +2538,25 @@ impl CampaignSim {
         }
         for hi in 0..nh {
             if self.houses[hi].defunct { continue; }
+            // Phase G: fleet upkeep (a steady sink scaling with fleet size) + slow
+            // decay (an occasional vessel lost to wear), so a big fleet costs money
+            // to keep and must be continually rebuilt.
+            let fleet_total =
+                self.houses[hi].fleet_sea + self.houses[hi].fleet_river + self.houses[hi].fleet_caravan;
+            if fleet_total > 0 {
+                self.houses[hi].wealth -= fleet_total as f32 * SHIP_COST * FLEET_UPKEEP_FRAC;
+                if hash01(self.seed, tick as u64 ^ 0x5EA1, hi as u64)
+                    < FLEET_DECAY_CHANCE * fleet_total as f32
+                {
+                    if self.houses[hi].fleet_sea > 0 {
+                        self.houses[hi].fleet_sea -= 1;
+                    } else if self.houses[hi].fleet_caravan > 0 {
+                        self.houses[hi].fleet_caravan -= 1;
+                    } else if self.houses[hi].fleet_river > 0 {
+                        self.houses[hi].fleet_river -= 1;
+                    }
+                }
+            }
             let coastal = self.hubs.get(self.houses[hi].hub as usize).map(|x| x.coastal).unwrap_or(false);
             let w = self.houses[hi].wealth;
             let sea_slots = self.houses[hi].fleet_sea as i32;
