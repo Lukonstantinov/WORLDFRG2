@@ -250,6 +250,11 @@ function HouseDetail({ h, onClose, onChronicle }:
       {h.offices && h.offices.length > 0 && <Row label="Offices">🏢 {h.offices.map(([nm]) => nm).join(" · ")}</Row>}
       {h.estates && h.estates.length > 0 && <Row label="Estates">{h.estates.map(([g, c]) => `${goodIcon(g)} ${g} (${c})`).join(" · ")}</Row>}
       <Row label="Fleet">🚢 {h.fleet_sea ?? 0} · 🛶 {h.fleet_river ?? 0} · 🐫 {h.fleet_caravan ?? 0}</Row>
+      {h.barred && h.barred.length > 0 && (
+        <div style={{ fontSize: 9, marginTop: 3, color: "#e08a8a" }}>
+          ⚔ Barred from (trade war): {h.barred.join(" · ")}
+        </div>
+      )}
       {ledger && (ledger.income_total > 0 || ledger.expense_total > 0) && (
         <>
           <div onClick={() => setShowLedger(!showLedger)}

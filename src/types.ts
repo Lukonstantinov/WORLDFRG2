@@ -344,6 +344,7 @@ export interface OfficeHere {
 /** A merchant family (trading house) — for the Houses panel + settlement window. */
 export interface HouseBrief {
   idx?: number;        // index into sim.houses — key for the ledger query
+  barred?: string[];   // cities this house is barred from (active trade wars)
   name: string;        // "House Cassii"
   head_name: string;   // "Marcus Cassii"
   home_hub: number;    // home hub id

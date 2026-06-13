@@ -1177,6 +1177,8 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
 pub struct HouseBrief {
     /// Index into `sim.houses` — the key for per-house detail queries (the ledger).
     #[serde(default)] pub idx: u32,
+    /// Phase G — city names this house is currently BARRED from (active trade wars).
+    #[serde(default)] pub barred: Vec<String>,
     pub name: String,        // "House Cassii"
     pub head_name: String,   // "Marcus Cassii"
     pub home_hub: u32,       // home hub id
@@ -1332,6 +1334,7 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
             controls,
             partners,
             cities,
+            barred: sim.house_barred.get(hi).map(|v| v.iter().map(|&c| hub_name(c)).collect()).unwrap_or_default(),
             archetype: h.archetype,
             archetype_label: crate::sim::tick::archetype_label(h.archetype).to_string(),
             archetype_perk: crate::sim::tick::archetype_perk(h.archetype).to_string(),
