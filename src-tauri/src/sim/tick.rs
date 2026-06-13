@@ -152,6 +152,20 @@ const SPECIALTY_MARGIN: f32 = 1.25; // extra profit on specialty goods
 const CHARTER_RENT: f32 = 1.30;     // extra profit on chartered goods
 const BANK_CREDIT_MULT: f32 = 1.6;  // financing reach beyond cash
 const BANK_INTEREST: f32 = 0.01;    // monthly interest on wealth
+
+// ── Phase G: wealth sinks (monthly, multiplicative → wealth PLATEAUS instead of
+//    compounding forever). Money is hard-won and steadily bleeds, the way a
+//    medieval merchant fortune did. Sinks are a fraction of wealth, so a poor
+//    house barely pays them and a rich one bleeds a lot (a stabilizing feedback). ──
+/// Maintenance / retainers / storage — pure depreciation that counters BANK_INTEREST.
+const UPKEEP_RATE: f32 = 0.010;
+/// Conspicuous consumption (feasts, weddings, charity, building): spent INTO the
+/// home city, lifting its people's prosperity — the main "wealth reaches people" lever.
+const HOUSE_CONSUMPTION_RATE: f32 = 0.006;
+/// Guilds are civic — they spend more of their wealth on their own citizens.
+const GUILD_CIVIC_RATE: f32 = 0.012;
+/// How fast a hub's accumulated civic spending (the `civic_pool`) is used up.
+const CIVIC_DECAY: f32 = 0.97;
 const FLEET_LOSS_MULT: f32 = 0.6;   // voyage-loss reduction
 const FLEET_SHIP_DISCOUNT: f32 = 0.8;
 const POLITICAL_POWER_BONUS: f32 = 0.15;
@@ -284,6 +298,10 @@ pub struct TickHub {
     #[serde(default)] pub sent_prosperity: f32,
     /// Stability — freedom from recent disasters and market dearth.
     #[serde(default)] pub sent_stability: f32,
+    /// Phase G: accumulated merchant-house spending (conspicuous consumption +
+    /// civic tax) circulating in this city. Decays as it is used; feeds the
+    /// populace's prosperity — this is how trade wealth REACHES the people.
+    #[serde(default)] pub civic_pool: f32,
     /// Sparse per-hub time series for the settlement-window History charts.
     #[serde(default)] pub history: Vec<HubSample>,
     /// Recent goods arriving by SEA (ships) vs by LAND (caravans), a decaying
@@ -995,8 +1013,14 @@ impl CampaignSim {
         for h in 0..n {
             // Food security — the inverse of accumulated starvation pressure.
             let target_food = (1.0 - self.hubs[h].starving).clamp(0.0, 1.0);
-            // Prosperity — saturating curve over grain + trade wealth.
-            let w = (self.hubs[h].grain_wealth * 0.4 + self.hubs[h].trade_wealth * 0.8).max(0.0);
+            // Prosperity — saturating curve over grain + trade wealth + the civic
+            // money the resident merchant houses spend locally (Phase G: trade
+            // wealth reaching the populace). Per-capita so a feast lifts a town more
+            // than a metropolis. The pool then decays (the money is spent through).
+            let civic_pc = self.hubs[h].civic_pool / self.hubs[h].population.max(1.0) * 100.0;
+            let w = (self.hubs[h].grain_wealth * 0.4 + self.hubs[h].trade_wealth * 0.8
+                + civic_pc * 0.6).max(0.0);
+            self.hubs[h].civic_pool *= CIVIC_DECAY;
             let target_prosp = (w / (w + 1.2)).clamp(0.0, 1.0);
             // Stability — lowered by active shocks on this hub (or world-wide) and
             // by widespread dearth (goods priced far above their world value).
@@ -1018,6 +1042,35 @@ impl CampaignSim {
             hb.sent_stability += (target_stab - hb.sent_stability) * EASE;
             let target_mood = 0.45 * hb.sent_food + 0.30 * hb.sent_prosperity + 0.25 * hb.sent_stability;
             hb.mood += (target_mood - hb.mood) * EASE;
+        }
+    }
+
+    /// Phase G monthly wealth sinks: every house/guild pays UPKEEP (depreciation
+    /// that counters BANK_INTEREST) and spends a slice on CONSUMPTION that flows
+    /// into its home city's `civic_pool` (reaching the people). Both are a fraction
+    /// of wealth, so a fortune bleeds proportionally and wealth PLATEAUS where trade
+    /// income balances the sinks instead of compounding without end.
+    fn apply_wealth_sinks(&mut self) {
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct {
+                continue;
+            }
+            let wealth = self.houses[hi].wealth.max(0.0);
+            if wealth <= 0.0 {
+                continue;
+            }
+            let consume_rate = if self.houses[hi].is_guild {
+                GUILD_CIVIC_RATE
+            } else {
+                HOUSE_CONSUMPTION_RATE
+            };
+            let upkeep = wealth * UPKEEP_RATE;
+            let consumption = wealth * consume_rate;
+            self.houses[hi].wealth -= upkeep + consumption;
+            let home = self.houses[hi].hub as usize;
+            if home < self.hubs.len() {
+                self.hubs[home].civic_pool += consumption;
+            }
         }
     }
 
@@ -1792,7 +1845,7 @@ impl CampaignSim {
             production, grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
             is_estate: true, parent, koppen, coastal, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5,
-            sent_stability: 0.8, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
+            sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: kind, estate_tier: 1, owner_house, structures: vec![],
@@ -2296,6 +2349,9 @@ impl CampaignSim {
                     hh.wealth *= 1.0 + BANK_INTEREST;
                 }
             }
+            // Phase G: wealth bleeds (upkeep + consumption) so it plateaus and some
+            // flows to the people — runs right after interest so it offsets it.
+            self.apply_wealth_sinks();
             self.recompute_monopolies_and_power();
             self.manage_fleets();
             self.update_structures();
@@ -2856,7 +2912,7 @@ mod tests {
             grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
             is_estate: false, parent: -1, koppen: 0, coastal: false, component: comp,
             export_earn: 0.0, import_spend: 0.0,
-            mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5, sent_stability: 0.8, history: Vec::new(),
+            mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5, sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(),
             in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,

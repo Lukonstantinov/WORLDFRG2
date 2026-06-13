@@ -692,6 +692,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 sent_food: 0.7,
                 sent_prosperity: 0.5,
                 sent_stability: 0.8,
+                civic_pool: 0.0,
                 history: Vec::new(),
                 in_by_sea: 0.0,
                 in_by_land: 0.0,

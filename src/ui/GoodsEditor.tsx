@@ -164,6 +164,10 @@ function GoodRow({ g, i, expanded, onToggleExpand, update, duplicate, remove, al
             Perish <input type="number" min={0} step={0.01} style={{ ...input, width: 50 }} value={g.perishable ?? 0}
               onChange={(e) => update(i, { perishable: Math.max(0, Number(e.target.value) || 0) })} />
           </label>
+          <label style={{ display: "flex", gap: 4, alignItems: "center" }} title="Demand cadence (days between a person consuming a unit). Food ~7, comfort ~45, durables/luxuries ~180. Long cadence = weak local pull → mostly sold wholesale to merchants">
+            Cadence <input type="number" min={1} step={1} style={{ ...input, width: 50 }} value={g.consumption_interval ?? 30}
+              onChange={(e) => update(i, { consumption_interval: Math.max(1, Number(e.target.value) || 30) })} /> d
+          </label>
           <button style={btn} onClick={() => duplicate(i)}>Duplicate as custom</button>
           {manufactured
             ? <RecipeEditor i={i} g={g} allSpecs={allSpecs} update={update} />

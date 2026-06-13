@@ -145,6 +145,12 @@ pub struct GoodSpec {
     /// multiplied by this (a city makes more cloth than a village).
     #[serde(default = "default_labor")]
     pub labor: f32,
+    /// Demand CADENCE in days — how often a person consumes a unit. Food ≈ 1
+    /// (constant), cloth ≈ 30, durables like furs/furniture ≈ 90, luxuries ≈ 365.
+    /// A long interval means weak daily local pull → the good sits cheaper and is
+    /// mostly bought by merchants for resale rather than citizens for use.
+    #[serde(default = "default_consumption_interval")]
+    pub consumption_interval: f32,
 }
 
 fn default_base_value() -> f32 {
@@ -153,6 +159,10 @@ fn default_base_value() -> f32 {
 
 fn default_bulk() -> f32 {
     1.0
+}
+
+fn default_consumption_interval() -> f32 {
+    30.0 // a month — a sensible neutral cadence
 }
 
 fn default_labor() -> f32 {
@@ -269,6 +279,9 @@ pub fn default_list() -> Vec<GoodSpec> {
                 perishable: GOOD_PERISH[g],
                 inputs: Vec::new(),
                 labor: 1.0,
+                // Cadence by need: staples eaten ~weekly, comfort monthly-ish,
+                // luxuries/durables seasonally → weak daily pull (wholesale skew).
+                consumption_interval: match GOOD_NEED_TIER[g] { 0 => 7.0, 1 => 45.0, _ => 180.0 },
             }
         })
         .collect();
@@ -319,6 +332,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             builtin: false, deposit, scoring: Some(env),
             category: String::new(), need_tier: 0, base_value: 1.0,
             bulk: 1.0, perishable: 0.0, inputs: Vec::new(), labor: 1.0,
+            consumption_interval: 45.0,
         }
     }
     // A Manufactured chain good: made in cities from `inputs`, no per-cell belt.
@@ -334,6 +348,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             scoring: None, category: String::new(), need_tier: 0, base_value,
             bulk, perishable: perish, labor,
             inputs: inputs.into_iter().map(|(g, q)| RecipeInput { good: g.into(), qty: q }).collect(),
+            consumption_interval: if luxury { 180.0 } else { 60.0 },
         }
     }
     let dep = |min_elev: f32, num: u32, den: u32| Some(DepositSpec { min_elev, count_num: num, count_den: den, province_scale: default_province_scale() });
@@ -407,6 +422,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             scoring: Some(env(vec![], None, None, Some([0.0, 0.30, 0.20]), None, 0.5, 0.0)),
             category: "construction".into(), need_tier: 1, base_value: 0.5,
             bulk: 2.0, perishable: 0.0, inputs: Vec::new(), labor: 1.0,
+            consumption_interval: 90.0,
         },
 
         // ── Ported richer manufactured library (on top of the PR's cloth / metalware

@@ -129,6 +129,9 @@ export interface GoodSpec {
   inputs?: RecipeInput[];
   /** Output-rate factor for manufacture (∝ population × this). */
   labor?: number;
+  /** Demand cadence in days — how often a person consumes a unit (food ~7,
+   *  comfort ~45, durables/luxuries ~180). Long = weak local pull → wholesale. */
+  consumption_interval?: number;
 }
 
 export type PaintValue =
