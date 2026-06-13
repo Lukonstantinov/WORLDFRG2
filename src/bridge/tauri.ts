@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { WorldMeta, OpenWorldResult, CampaignInfo, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, TradeMatrix, PoliticalCenter, GoodSpec, EconomySnapshot } from "../types";
+import type { WorldMeta, OpenWorldResult, CampaignInfo, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, CultureRegion, TradeMatrix, PoliticalCenter, GoodSpec, EconomySnapshot } from "../types";
 
 export async function newWorld(name: string, gridWidth: number, gridHeight: number): Promise<WorldMeta> {
   return invoke("new_world", { name, gridWidth, gridHeight });
@@ -313,6 +313,11 @@ export async function saveGoodsLibrary(specs: GoodSpec[]): Promise<void> {
 /** Cluster every trade-good belt into labelled regions. */
 export async function computeGoodRegions(): Promise<GoodRegion[]> {
   return invoke("compute_good_regions");
+}
+
+/** The organic culture territories of the active world (Peoples overlay). */
+export async function computeCultureRegions(): Promise<CultureRegion[]> {
+  return invoke("compute_culture_regions");
 }
 
 /** Build the region↔region trade matrix (routed + bundled flows). */

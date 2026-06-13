@@ -1,218 +1,81 @@
-//! Antique place-name generator — Roman, Greek, Phoenician/Punic and Persian
-//! styles. Names are a deterministic function of cell position + world size only
-//! (no external seed), so a settlement and the trade hub that sits on the same
-//! cell always resolve to the SAME name across the settlement, political and
-//! economy layers.
+//! Place- and family-name generation.
 //!
-//! Culture is assigned by coarse spatial "province" so neighbouring settlements
-//! share a regional naming style (a Greek coast here, a Persian interior there),
-//! rather than each town reading from a random culture.
+//! Names are a deterministic function of cell position + world size, so a
+//! settlement and the trade hub on the same cell always resolve to the SAME name
+//! across the settlement, political and economy layers.
+//!
+//! The CULTURE of a cell comes from the organic hearth map in [`super::cultures`]
+//! when one is active (see `cultures::ensure_active`). When none is active (old
+//! saves, or before the Settlements step has run), we fall back to a legacy coarse
+//! 4-culture province grid so naming still works and old worlds are unchanged.
 
-/// The four antique naming cultures.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Culture {
-    Roman,
-    Greek,
-    Phoenician,
-    Persian,
-}
+use super::cultures;
 
-impl Culture {
-    pub fn label(self) -> &'static str {
-        match self {
-            Culture::Roman => "Roman",
-            Culture::Greek => "Greek",
-            Culture::Phoenician => "Phoenician",
-            Culture::Persian => "Persian",
-        }
-    }
-}
-
-// ── Syllable banks ───────────────────────────────────────────────────────────
-// Each culture has onsets (name starts), optional mid joins, and endings.
-
-const ROMAN_ON: [&str; 16] = [
-    "Aqu", "Por", "Nov", "Ver", "Cas", "Lav", "Tarr", "Bened", "Aug", "Salt",
-    "Ostia", "Vol", "Arr", "Pomp", "Luc", "Mar",
-];
-const ROMAN_MID: [&str; 6] = ["", "i", "e", "en", "el", "ar"];
-const ROMAN_END: [&str; 12] = [
-    "ium", "a", "entia", "onium", "aria", "anum", "ona", "ina", "etia", "olum",
-    "estum", "icum",
-];
-
-const GREEK_ON: [&str; 16] = [
-    "Meg", "Thess", "Korin", "Pyr", "Hali", "Eph", "Mil", "Delph", "Olymp", "Argos",
-    "Naxa", "Therm", "Knoss", "Pell", "Syrak", "Mykon",
-];
-const GREEK_MID: [&str; 6] = ["", "a", "i", "o", "ar", "is"];
-const GREEK_END: [&str; 12] = [
-    "os", "on", "aia", "polis", "andros", "ia", "ene", "yssa", "kos", "thea",
-    "nthos", "kleia",
-];
-
-const PUNIC_ON: [&str; 16] = [
-    "Qart", "Gad", "Tyr", "Sid", "Byr", "Mel", "Utix", "Lep", "Mot", "Pan",
-    "Sab", "Mag", "Tharr", "Hadr", "Bos", "Kart",
-];
-const PUNIC_MID: [&str; 6] = ["", "a", "i", "o", "ad", "as"];
-const PUNIC_END: [&str; 12] = [
-    "ada", "on", "ath", "qart", "im", "tis", "uba", "esh", "ar", "anto",
-    "umet", "shama",
-];
-
-const PERSIAN_ON: [&str; 16] = [
-    "Pasar", "Ekba", "Susa", "Persa", "Zara", "Bakh", "Ragha", "Hyrka", "Nisa", "Kuru",
-    "Asha", "Dara", "Anshan", "Gaba", "Tushpa", "Mithra",
-];
-const PERSIAN_MID: [&str; 6] = ["", "a", "i", "an", "ar", "o"];
-const PERSIAN_END: [&str; 12] = [
-    "gard", "kana", "dana", "shahr", "abad", "stan", "kert", "vana", "thra", "spa",
-    "drava", "mada",
-];
-
-/// splitmix64-style finalizer → u64 (deterministic, well-mixed).
-fn hash64(mut x: u64) -> u64 {
-    x ^= x >> 30;
-    x = x.wrapping_mul(0xBF58476D1CE4E5B9);
-    x ^= x >> 27;
-    x = x.wrapping_mul(0x94D049BB133111EB);
-    x ^= x >> 31;
-    x
-}
-
-/// Culture of the province containing `(x, y)` in a `w×h` world. Provinces are a
-/// coarse grid (~5 across, ~4 down) so neighbouring places share a style.
-pub fn culture_at(x: u32, y: u32, w: u32, h: u32) -> Culture {
+/// Legacy province culture → kit index (0 Roman · 1 Hellene · 2 Punic · 3 Persian),
+/// used only as a fallback when no organic culture map is active.
+fn legacy_kit(x: u32, y: u32, w: u32, h: u32) -> usize {
     let pw = (w / 5).max(1);
     let ph = (h / 4).max(1);
     let px = (x / pw) as u64;
     let py = (y / ph) as u64;
-    let v = hash64(0x501E_C0DE_u64 ^ px.wrapping_mul(0x9E3779B1) ^ py.wrapping_mul(0x85EBCA77));
-    match v % 4 {
-        0 => Culture::Roman,
-        1 => Culture::Greek,
-        2 => Culture::Phoenician,
-        _ => Culture::Persian,
+    let v = cultures::hash64(0x501E_C0DE_u64 ^ px.wrapping_mul(0x9E3779B1) ^ py.wrapping_mul(0x85EBCA77));
+    (v % 4) as usize
+}
+
+/// Resolve the (kit index, per-world mutation seed) governing cell `(x,y)`.
+pub fn resolve_kit(x: u32, y: u32, w: u32, h: u32) -> (usize, u64) {
+    if let Some(map) = cultures::active() {
+        if let Some(k) = map.kit_at(x, y) {
+            return k;
+        }
     }
+    (legacy_kit(x, y, w, h), 0)
 }
 
-fn pick<'a>(bank: &[&'a str], h: u64) -> &'a str {
-    bank[(h % bank.len() as u64) as usize]
+/// The culture/people label governing a cell ("Norse", "Sinitic", …).
+pub fn culture_label(x: u32, y: u32, w: u32, h: u32) -> &'static str {
+    let (kit, _) = resolve_kit(x, y, w, h);
+    cultures::KITS[kit.min(cultures::KITS.len() - 1)].name
 }
 
-/// Generate an antique place name for the settlement / hub at `(x, y)` in a
-/// `w×h` world. Deterministic; the same cell always yields the same name.
+/// The region / people homeland name governing a cell (e.g. "Vexillia"). Falls
+/// back to the culture label when no organic map is active.
+pub fn region_name(x: u32, y: u32, w: u32, h: u32) -> String {
+    if let Some(map) = cultures::active() {
+        if let Some(hh) = map.hearth_at(x, y) {
+            return hh.people.clone();
+        }
+    }
+    culture_label(x, y, w, h).to_string()
+}
+
+/// Generate an antique place name for the settlement / hub at `(x, y)`.
 pub fn gen_name(x: u32, y: u32, w: u32, h: u32) -> String {
-    let culture = culture_at(x, y, w, h);
-    let base = hash64((x as u64).wrapping_mul(73856093) ^ (y as u64).wrapping_mul(19349663));
-    let (on, mid, end) = match culture {
-        Culture::Roman => (&ROMAN_ON[..], &ROMAN_MID[..], &ROMAN_END[..]),
-        Culture::Greek => (&GREEK_ON[..], &GREEK_MID[..], &GREEK_END[..]),
-        Culture::Phoenician => (&PUNIC_ON[..], &PUNIC_MID[..], &PUNIC_END[..]),
-        Culture::Persian => (&PERSIAN_ON[..], &PERSIAN_MID[..], &PERSIAN_END[..]),
-    };
-    let o = pick(on, base);
-    let m = pick(mid, base >> 8);
-    let e = pick(end, base >> 16);
-    let raw = format!("{}{}{}", o, m, e);
-    // Collapse any stray double spaces / trim (a couple of endings carry a space).
-    let name: String = raw.split_whitespace().collect::<Vec<_>>().join(" ");
-    name
+    let (kit, ms) = resolve_kit(x, y, w, h);
+    cultures::place_name(kit, ms, x, y)
 }
 
-// ── Merchant-family names (heads of trading houses) ─────────────────────────
-// Per-culture given names + gens/clan surnames, so a house's home city culture
-// flavours its family. Deterministic from a hashed seed.
-
-const ROMAN_GIVEN: [&str; 10] = [
-    "Marcus", "Lucius", "Gaius", "Titus", "Quintus", "Publius", "Aulus", "Gnaeus",
-    "Servius", "Decimus",
-];
-const ROMAN_FAMILY: [&str; 24] = [
-    "Cassii", "Valerii", "Aurelii", "Cornelii", "Fabii", "Julii", "Aemilii",
-    "Flavii", "Claudii", "Marcii", "Horatii", "Sempronii", "Licinii", "Calpurnii",
-    "Domitii", "Pompeii", "Tullii", "Manlii", "Postumii", "Sergii", "Antonii",
-    "Octavii", "Furii", "Quinctii",
-];
-const GREEK_GIVEN: [&str; 16] = [
-    "Alexios", "Theron", "Nikias", "Demetrios", "Leonidas", "Kallias", "Andronikos",
-    "Philon", "Lysandros", "Aristeas", "Kleon", "Diodoros", "Menandros", "Theophilos",
-    "Xenon", "Polykrates",
-];
-const GREEK_FAMILY: [&str; 24] = [
-    "Alkmaionidai", "Philaidai", "Bakchiadai", "Kypselidai", "Peisistratidai",
-    "Eumolpidai", "Pelopidai", "Neleidai", "Gephyraioi", "Kerykes", "Aleuadai",
-    "Battiadai", "Penthilidai", "Oxylidai", "Eteoboutadai", "Praxiergidai",
-    "Salaminioi", "Eupatridai", "Medontidai", "Amythaonidai", "Branchidai",
-    "Asklepiadai", "Daidalidai", "Lykomidai",
-];
-const PUNIC_GIVEN: [&str; 16] = [
-    "Hanno", "Mago", "Hamilcar", "Bomilcar", "Adherbal", "Gisco", "Hasdrubal",
-    "Maharbal", "Bostar", "Himilco", "Carthalo", "Eshmun", "Abdmelqart", "Gerashtart",
-    "Yutpan", "Zakarbaal",
-];
-const PUNIC_FAMILY: [&str; 24] = [
-    "Barcids", "Magonids", "Hannids", "Gisconids", "Adherids", "Bomilcids",
-    "Melqartids", "Bostarids", "Tyrians", "Sidonites", "Hasdrubids", "Maharbids",
-    "Himilcids", "Hannonids", "Carthalids", "Eshmunids", "Baalids", "Abdmelqarts",
-    "Gerids", "Safots", "Zakarbids", "Yutpanids", "Hampsicorids", "Mutumbids",
-];
-const PERSIAN_GIVEN: [&str; 16] = [
-    "Dariush", "Kourosh", "Bahram", "Artashir", "Kavus", "Farrokh", "Mithradat",
-    "Vahram", "Tiridat", "Spitama", "Vologases", "Narseh", "Khosrow", "Peroz",
-    "Shapur", "Hormizd",
-];
-const PERSIAN_FAMILY: [&str; 24] = [
-    "Karen", "Suren", "Mihranids", "Spandiyads", "Varaz", "Kanarang", "Aspahbads",
-    "Zarmihr", "Achaemenids", "Sasanids", "Arsacids", "Zik", "Mehran", "Ispahbudhan",
-    "Pahlavids", "Kavadids", "Bahramids", "Farrukhzads", "Gondofarids", "Tahmurids",
-    "Narseids", "Vistahmids", "Zarmihrids", "Dahae",
-];
-
-fn given_family(culture: Culture) -> (&'static [&'static str], &'static [&'static str]) {
-    match culture {
-        Culture::Roman => (&ROMAN_GIVEN[..], &ROMAN_FAMILY[..]),
-        Culture::Greek => (&GREEK_GIVEN[..], &GREEK_FAMILY[..]),
-        Culture::Phoenician => (&PUNIC_GIVEN[..], &PUNIC_FAMILY[..]),
-        Culture::Persian => (&PERSIAN_GIVEN[..], &PERSIAN_FAMILY[..]),
-    }
-}
-
-/// A trading-house family surname (e.g. "Cassii", "Barcids") for the culture at
-/// `(x,y)`, varied by `salt` so several houses can sit in one region.
+/// A trading-house family surname for the culture at `(x,y)`, varied by `salt`.
 pub fn gen_family_name(x: u32, y: u32, w: u32, h: u32, salt: u64) -> String {
-    let culture = culture_at(x, y, w, h);
-    let (_g, fam) = given_family(culture);
-    let hh = hash64(0xFA_u64 ^ salt.wrapping_mul(0x9E3779B97F4A7C15)
-        ^ (x as u64).wrapping_mul(40503) ^ (y as u64).wrapping_mul(20507));
-    pick(fam, hh).to_string()
+    let (kit, ms) = resolve_kit(x, y, w, h);
+    cultures::family_name(kit, ms, salt, x, y)
 }
 
-/// A head-of-family personal name ("Marcus Cassii") for the house's home culture,
-/// varied by `salt` (a per-head counter so heirs get fresh given names).
+/// A head-of-family personal name ("Marcus Cassii") for the local culture.
 pub fn gen_head_name(x: u32, y: u32, w: u32, h: u32, family: &str, salt: u64) -> String {
-    let culture = culture_at(x, y, w, h);
-    let (given, _f) = given_family(culture);
-    let hh = hash64(0x4EAD_u64 ^ salt.wrapping_mul(0xBF58476D1CE4E5B9)
-        ^ (x as u64).wrapping_mul(73856093) ^ (y as u64).wrapping_mul(19349663));
-    format!("{} {}", pick(given, hh), family)
+    let (kit, ms) = resolve_kit(x, y, w, h);
+    cultures::head_name(kit, ms, family, salt, x, y)
 }
 
-/// Generate a name plus an epithet for a major place (a capital / top hub), e.g.
-/// "Aquentia Magna". `tier` 0 = none, higher = grander.
+/// A culture-styled guild name for the city at `(x,y)` (e.g. "Collegium of
+/// Aquentia", "Suq of Madinah"), optionally tagged with its chief trade.
+pub fn gen_guild_name(x: u32, y: u32, w: u32, h: u32, city: &str, specialty: Option<&str>, salt: u64) -> String {
+    let (kit, ms) = resolve_kit(x, y, w, h);
+    cultures::guild_name(kit, ms, city, specialty, salt)
+}
+
+/// Generate a name plus an epithet for a major place. `tier` 0 = none, higher = grander.
 pub fn gen_name_epithet(x: u32, y: u32, w: u32, h: u32, tier: u8) -> String {
-    let name = gen_name(x, y, w, h);
-    if tier == 0 {
-        return name;
-    }
-    let culture = culture_at(x, y, w, h);
-    let epithets: &[&str] = match culture {
-        Culture::Roman => &["Magna", "Augusta", "Maior"],
-        Culture::Greek => &["Megale", "Hypsele", "Akra"],
-        Culture::Phoenician => &["Rabba", "the Great Harbour", "Adir"],
-        Culture::Persian => &["the Great", "Shahanshah", "Buzurg"],
-    };
-    let h2 = hash64((x as u64) ^ (y as u64).wrapping_mul(0xABCD));
-    format!("{} {}", name, epithets[(h2 as usize) % epithets.len()])
+    let (kit, ms) = resolve_kit(x, y, w, h);
+    cultures::place_epithet(kit, ms, x, y, tier)
 }

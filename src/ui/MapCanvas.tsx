@@ -9,7 +9,7 @@ import { useViewportStore } from "../state/viewportStore";
 import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes } from "../bridge/tauri";
 import type { MerchantRoute } from "../types";
 import { goodOverlayKey } from "../goods";
 import type { PaintValue, EconChain, Settlement } from "../types";
@@ -59,6 +59,7 @@ export function MapCanvas() {
   const elevationValue = useUIStore((s) => s.elevationValue);
   const tileVersion = useViewportStore((s) => s.tileVersion);
   const focusTarget = useViewportStore((s) => s.focusTarget);
+  const searchPin = useViewportStore((s) => s.searchPin);
   const overlayVisibility = useUIStore((s) => s.overlayVisibility);
   const houses = useCampaignStore((s) => s.houses);
   const campaignSnapshot = useCampaignStore((s) => s.snapshot);
@@ -426,6 +427,11 @@ export function MapCanvas() {
       om.drawMonsoonZones(zones);
       requestRender();
     }).catch(() => {});
+    // Peoples / culture territories (organic hearth map) for the Peoples overlay.
+    computeCultureRegions().then((regions) => {
+      om.drawCultureRegions(regions);
+      requestRender();
+    }).catch(() => {});
   }, [worldKey, tileVersion, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Storm zones depend on the seasonal month slider, so they get their OWN light
@@ -625,6 +631,16 @@ export function MapCanvas() {
     refreshTiles();
     requestRender();
   }, [focusTarget, refreshTiles, requestRender]);
+
+  // Drop a transient highlight pin on the searched settlement, then clear it.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !searchPin) return;
+    om.setSearchPin(searchPin.wx, searchPin.wy);
+    requestRender();
+    const t = setTimeout(() => { om.clearSearchPin(); requestRender(); }, 5000);
+    return () => clearTimeout(t);
+  }, [searchPin, requestRender]);
 
   // Keyboard shortcuts
   useEffect(() => {

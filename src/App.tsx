@@ -11,6 +11,7 @@ import { CityRankingPanel } from "./ui/CityRankingPanel";
 import { GoodFlowPanel } from "./ui/GoodFlowPanel";
 import { GoodsBrowserPanel } from "./ui/GoodsBrowserPanel";
 import { HousesPanel } from "./ui/HousesPanel";
+import { SettlementSearch } from "./ui/SettlementSearch";
 import { ElevationLegend } from "./ui/ElevationLegend";
 import { ElevationHistogram } from "./ui/ElevationHistogram";
 import { GoodsEditor } from "./ui/GoodsEditor";
@@ -496,6 +497,7 @@ export default function App() {
         </div>
 
         <div style={{ flex: 1 }} />
+        {isLoaded && <SettlementSearch />}
       </div>
 
       {/* Main layout: workflow | map | toolbar */}

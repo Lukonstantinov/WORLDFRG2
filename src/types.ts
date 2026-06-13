@@ -728,6 +728,20 @@ export interface Settlement {
   size: "capital" | "city" | "town" | "village" | "outpost";
   population: number;
   score: number;
+  culture?: string; // people/culture governing the site ("Norse", …)
+  region?: string;  // region / homeland name ("Vexillia")
+  site?: string;    // "coast" | "river" | "hills" | "plain"
+}
+
+/** One people's territory for the Peoples overlay (compute_culture_regions). */
+export interface CultureRegion {
+  cells: [number, number][]; // coarse cell top-left world coords
+  cell_size: number;
+  x: number;                 // label centroid
+  y: number;
+  color: [number, number, number];
+  label: string;             // people / region name
+  culture: string;           // kit name
 }
 
 export interface ShelfParams {

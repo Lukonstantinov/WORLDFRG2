@@ -42,6 +42,7 @@ pub fn run() {
             query_commands::compute_monsoon_zones,
             query_commands::compute_reef_zones,
             query_commands::compute_good_regions,
+            query_commands::compute_culture_regions,
             query_commands::compute_overlays,
             query_commands::compute_trade_matrix,
             query_commands::compute_political,

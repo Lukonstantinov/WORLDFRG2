@@ -76,6 +76,9 @@ pub fn open_world(
     // campaign table so the app always runs on the split model in memory.
     let legacy = crate::commands::campaign_commands::migrate_legacy_campaign_keys(&conn)?;
 
+    // Activate this world's organic culture map (if any) so names resolve correctly.
+    crate::sim::cultures::ensure_active(&conn);
+
     // Read meta from the loaded DB
     let name = metadata::get_meta(&conn, "name")
         .map_err(|e| e.to_string())?

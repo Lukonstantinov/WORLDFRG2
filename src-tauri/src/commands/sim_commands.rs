@@ -234,6 +234,9 @@ pub fn sim_run_all(
 
     // Phase 7: Settlements
     biological::compute_disease_risk(&mut buf, &extracted_rivers);
+    // Organic culture map first, so settlements are named in their region's culture.
+    let cmap = crate::sim::cultures::compute_culture_map(&buf, seed);
+    crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
     let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
     let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed, 0.55);
     settlements::write_habitability(&mut buf, &habitability);
@@ -354,6 +357,9 @@ pub fn sim_run_all_from_terrain(
 
     // Phase 7: Settlements
     biological::compute_disease_risk(&mut buf, &extracted_rivers);
+    // Organic culture map first, so settlements are named in their region's culture.
+    let cmap = crate::sim::cultures::compute_culture_map(&buf, seed);
+    crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
     let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
     let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed, 0.55);
     settlements::write_habitability(&mut buf, &habitability);
@@ -436,6 +442,10 @@ pub fn sim_generate_settlements(
 
     // Malaria/fever (needed before habitability so disease suppresses settlement).
     biological::compute_disease_risk(&mut buf, &river_data);
+    // Organic culture map — compute + store + activate BEFORE naming settlements so
+    // each town is named in its region's (mutated) culture.
+    let cmap = crate::sim::cultures::compute_culture_map(&buf, seed);
+    crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
     let habitability = settlements::compute_habitability(&buf, &river_data, &lakes);
     let result = settlements::generate_settlements(
         &buf, &habitability, &river_data, seed, realism.unwrap_or(0.55));

@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute } from "../types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, CultureRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute } from "../types";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "../goods";
 import { drawGoodIcon } from "./goodIcons";
 import { latLineY } from "./projection";
@@ -69,6 +69,9 @@ export class OverlayManager {
   private monsoonZones: SharkZone[] = [];
   private reefZones: SharkZone[] = [];
   private goodRegions: GoodRegion[] = [];
+  private cultureRegions: CultureRegion[] = [];
+  /** Transient highlight pin (searched settlement) in world coords. */
+  private searchPin: { wx: number; wy: number } | null = null;
   /** Per-good display metadata (icon/color) from the active editable spec; falls
    *  back to the static GOOD_DEFS when absent. */
   private goodMeta: Map<string, { icon: string; color: string }> | null = null;
@@ -96,7 +99,7 @@ export class OverlayManager {
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
     houseControl: false, merchantRoutes: false,
-    hubNames: false, settlementNames: false, tradeRegions: false,
+    hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
   };
 
   private currentScale = 1;
@@ -150,6 +153,18 @@ export class OverlayManager {
 
   drawGoodRegions(regions: GoodRegion[]) {
     this.goodRegions = regions;
+  }
+
+  drawCultureRegions(regions: CultureRegion[]) {
+    this.cultureRegions = regions;
+  }
+
+  /** Drop a transient highlight pin at a world cell (searched settlement). */
+  setSearchPin(wx: number, wy: number) {
+    this.searchPin = { wx, wy };
+  }
+  clearSearchPin() {
+    this.searchPin = null;
   }
 
   setGoodMeta(meta: Map<string, { icon: string; color: string }>) {
@@ -371,6 +386,30 @@ export class OverlayManager {
       ctx.globalAlpha = 1;
     }
 
+    // Peoples / culture territories: each hearth's land tinted in its colour with
+    // the people name at the centroid. Drawn first so belts/hazards sit on top.
+    if (this.visibility.cultures && this.cultureRegions.length > 0) {
+      for (const r of this.cultureRegions) {
+        const [cr, cg, cb] = r.color;
+        this.renderRegionMask(ctx, r.cells, r.cell_size, `rgb(${cr},${cg},${cb})`, "", r.x, r.y, 0.22);
+      }
+      // People names at each territory's centroid (drawn after fills so labels
+      // aren't covered by a neighbouring region's tint).
+      const fs = Math.max(7, 13 / this.currentScale);
+      ctx.font = `${fs}px serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      for (const r of this.cultureRegions) {
+        ctx.lineWidth = Math.max(0.6, 2.4 / this.currentScale);
+        ctx.strokeStyle = "rgba(0,0,0,0.75)";
+        ctx.strokeText(r.label, r.x, r.y);
+        ctx.fillStyle = "#f4ecd6";
+        ctx.fillText(r.label, r.x, r.y);
+      }
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+    }
+
     // Trade-good belts: the actual physics-driven cells, filled + outlined, with
     // the good's emoji at the centroid (per-good toggle).
     if (this.goodRegions.length > 0) {
@@ -510,6 +549,23 @@ export class OverlayManager {
     }
     if (this.visibility.hubNames && this.politicalCenters.length > 0) {
       this.renderHubNames(ctx);
+    }
+
+    // Search highlight pin: a bright double ring + dot on the searched settlement,
+    // drawn on top of everything (cleared by MapCanvas after a few seconds).
+    if (this.searchPin) {
+      const inv = 1 / Math.sqrt(this.currentScale);
+      const cx = this.searchPin.wx + 0.5, cy = this.searchPin.wy + 0.5;
+      ctx.save();
+      ctx.strokeStyle = "#ffd86a";
+      ctx.lineWidth = Math.max(0.7, 2 * inv);
+      ctx.beginPath(); ctx.arc(cx, cy, 7 * inv, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 0.55;
+      ctx.beginPath(); ctx.arc(cx, cy, 11 * inv, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#ffd86a";
+      ctx.beginPath(); ctx.arc(cx, cy, Math.max(1, 1.6 * inv), 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
     }
   }
 

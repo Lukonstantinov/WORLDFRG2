@@ -20,10 +20,16 @@ interface ViewportStore {
   // `nonce` bumps so re-selecting the same cell still re-triggers a focus.
   focusTarget: { wx: number; wy: number; nonce: number } | null;
 
+  // A transient highlight pin (e.g. the searched settlement). `nonce` lets the
+  // overlay restart its pulse animation each time a new pin is dropped.
+  searchPin: { wx: number; wy: number; nonce: number } | null;
+
   setScreen: (w: number, h: number) => void;
   setCamera: (x: number, y: number, scale: number) => void;
   invalidateTiles: () => void;
   focusOn: (wx: number, wy: number) => void;
+  setSearchPin: (wx: number, wy: number) => void;
+  clearSearchPin: () => void;
 }
 
 export const useViewportStore = create<ViewportStore>((set, get) => ({
@@ -35,6 +41,7 @@ export const useViewportStore = create<ViewportStore>((set, get) => ({
   tileRange: null,
   tileVersion: 0,
   focusTarget: null,
+  searchPin: null,
 
   setScreen: (w, h) => set({ screenWidth: w, screenHeight: h }),
 
@@ -46,4 +53,8 @@ export const useViewportStore = create<ViewportStore>((set, get) => ({
 
   focusOn: (wx, wy) =>
     set((s) => ({ focusTarget: { wx, wy, nonce: (s.focusTarget?.nonce ?? 0) + 1 } })),
+
+  setSearchPin: (wx, wy) =>
+    set((s) => ({ searchPin: { wx, wy, nonce: (s.searchPin?.nonce ?? 0) + 1 } })),
+  clearSearchPin: () => set({ searchPin: null }),
 }));

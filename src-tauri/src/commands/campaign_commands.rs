@@ -443,6 +443,9 @@ pub struct OfficeHere {
 }
 
 fn get_sim(conn: &Connection) -> Result<Option<CampaignSim>, String> {
+    // Make the organic culture map active so houses/guilds founded this tick are
+    // named in their home city's culture (no-op when none is stored).
+    crate::sim::cultures::ensure_active(conn);
     let raw = metadata::campaign_get(conn, "campaign_sim").map_err(|e| e.to_string())?;
     match raw {
         Some(s) if !s.is_empty() => {
@@ -574,6 +577,7 @@ fn uf_union(parent: &mut [usize], a: usize, b: usize) {
 #[tauri::command]
 pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignSnapshot, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::sim::cultures::ensure_active(&conn); // seed house names in their local culture
     let econ_json = metadata::campaign_get(&conn, "economy")
         .map_err(|e| e.to_string())?
         .filter(|s| !s.is_empty())

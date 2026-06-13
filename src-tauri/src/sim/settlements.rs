@@ -10,6 +10,21 @@ pub struct Settlement {
     pub size: String,       // "capital" | "city" | "town" | "village"
     pub population: u32,
     pub score: f32,
+    // ── Culture / geography labels (serde default → old saves still load) ──
+    /// The people/culture governing this site ("Norse", "Sinitic", …).
+    #[serde(default)] pub culture: String,
+    /// The region / homeland name (e.g. "Vexillia").
+    #[serde(default)] pub region: String,
+    /// The site type: "coast" | "river" | "hills" | "plain".
+    #[serde(default)] pub site: String,
+}
+
+/// Classify a cell's site type from terrain (for settlement labels / search rows).
+fn site_label(buf: &WorldBuffer, idx: usize, is_river: bool) -> &'static str {
+    if buf.distance_to_ocean[idx] < 0.05 { "coast" }
+    else if is_river { "river" }
+    else if buf.elevation[idx] > 0.40 { "hills" }
+    else { "plain" }
 }
 
 /// Compute habitability score for every land cell.
@@ -516,6 +531,9 @@ pub fn generate_settlements(
             size: size.to_string(),
             population,
             score,
+            culture: super::names::culture_label(sx, sy, w, h).to_string(),
+            region: super::names::region_name(sx, sy, w, h),
+            site: site_label(buf, idx, is_river_cell[idx]).to_string(),
         });
     }
 
@@ -598,6 +616,9 @@ pub fn generate_settlements(
                 size: "outpost".to_string(),
                 population,
                 score: (draw.min(1.0) * 0.3).max(0.05),
+                culture: super::names::culture_label(sx, sy, w, h).to_string(),
+                region: super::names::region_name(sx, sy, w, h),
+                site: site_label(buf, idx, river_near[idx]).to_string(),
             });
         }
     }

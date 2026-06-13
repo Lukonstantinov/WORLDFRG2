@@ -10,6 +10,7 @@ pub mod soil;
 pub mod fertility;
 pub mod settlements;
 pub mod names;
+pub mod cultures;
 pub mod biological;
 pub mod goods_spec;
 pub mod manufacture;

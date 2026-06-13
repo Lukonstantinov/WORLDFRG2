@@ -1681,6 +1681,59 @@ pub fn compute_reef_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, Stri
     Ok(zones)
 }
 
+/// One people's territory for the "Peoples" overlay — the coarse cells the hearth
+/// governs, plus its colour and labels. Built straight from the in-memory culture
+/// map (no WorldBuffer load).
+#[derive(Serialize)]
+pub struct CultureRegion {
+    pub cells: Vec<[f32; 2]>, // coarse cell top-left world coords (the marked area)
+    pub cell_size: f32,
+    pub x: f32,               // label centroid
+    pub y: f32,
+    pub color: [u8; 3],
+    pub label: String,        // people / region name (e.g. "Vexillia")
+    pub culture: String,      // kit name (e.g. "Norse")
+}
+
+/// The organic culture territories of the active world, one region per hearth.
+#[tauri::command]
+pub fn compute_culture_regions(db: State<'_, WorldDb>) -> Result<Vec<CultureRegion>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::sim::cultures::ensure_active(&conn);
+    let Some(map) = crate::sim::cultures::active() else { return Ok(vec![]); };
+    let (cw, ch) = (map.cw, map.ch);
+    if cw == 0 || ch == 0 || map.hearths.is_empty() { return Ok(vec![]); }
+    let csx = map.world_w as f32 / cw as f32;
+    let csy = map.world_h as f32 / ch as f32;
+    let mut by_hearth: Vec<Vec<[f32; 2]>> = vec![Vec::new(); map.hearths.len()];
+    for cy in 0..ch {
+        for cx in 0..cw {
+            let id = map.ids[(cy * cw + cx) as usize];
+            if (id as usize) < map.hearths.len() {
+                by_hearth[id as usize].push([cx as f32 * csx, cy as f32 * csy]);
+            }
+        }
+    }
+    let mut out: Vec<CultureRegion> = Vec::new();
+    for (i, hh) in map.hearths.iter().enumerate() {
+        let cells = std::mem::take(&mut by_hearth[i]);
+        if cells.is_empty() { continue; }
+        let n = cells.len() as f32;
+        let (sx, sy) = cells.iter().fold((0.0f32, 0.0f32), |(ax, ay), c| (ax + c[0], ay + c[1]));
+        let kit = crate::sim::cultures::KITS[(hh.kit as usize).min(crate::sim::cultures::KITS.len() - 1)].name;
+        out.push(CultureRegion {
+            cell_size: csx.max(csy),
+            x: sx / n + csx * 0.5,
+            y: sy / n + csy * 0.5,
+            color: hh.color,
+            label: hh.people.clone(),
+            culture: kit.to_string(),
+            cells,
+        });
+    }
+    Ok(out)
+}
+
 #[derive(Serialize)]
 pub struct GoodRegion {
     pub good: String,

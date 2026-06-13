@@ -2247,18 +2247,23 @@ impl CampaignSim {
         });
     }
 
-    /// A distinct guild name for a city — its own name woven into a trade-guild
-    /// style, so every settlement's guild reads uniquely.
+    /// A distinct guild name for a city, styled by its CULTURE (e.g. "Collegium of
+    /// Aquentia (wine)", "Suq of Madinah", "Hang of Linzhou") — so a guild reads in
+    /// its home people's idiom and tags the city's chief trade.
     fn guild_name_for(&self, h: usize) -> String {
-        const STYLES: [&str; 8] = [
-            "Mercers' Guild", "Staplers' Hanse", "Merchant Adventurers",
-            "Drapers' Company", "Mariners' League", "Factors' Guild",
-            "Company of Traders", "Vintners' Hanse",
-        ];
         let city = self.hubs[h].name.clone();
-        let pick = (hash01(self.seed, h as u64 ^ 0x6111, 0x9ED1) * STYLES.len() as f32) as usize
-            % STYLES.len();
-        format!("{} {}", city, STYLES[pick])
+        let (x, y) = (self.hubs[h].x.max(0.0) as u32, self.hubs[h].y.max(0.0) as u32);
+        // The city's strongest-produced good flavours the guild ("of wine").
+        let specialty = {
+            let mut bg = (usize::MAX, 0.0f32);
+            for g in 0..self.goods.len() {
+                let p = self.hubs[h].production.get(g).copied().unwrap_or(0.0);
+                if p > bg.1 { bg = (g, p); }
+            }
+            if bg.0 != usize::MAX { self.goods.get(bg.0).map(|x| x.name.clone()) } else { None }
+        };
+        crate::sim::names::gen_guild_name(
+            x, y, self.world_w as u32, self.world_h(), &city, specialty.as_deref(), h as u64 ^ 0x6111)
     }
 
     fn update_house_dynamics(&mut self) {
