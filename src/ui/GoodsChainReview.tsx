@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useGoodsStore } from "../state/goodsStore";
 import { useUIStore } from "../state/uiStore";
+import { goodCategory, CATEGORY_ORDER } from "../goods";
 import type { GoodSpec } from "../types";
 
 const panel: React.CSSProperties = {
@@ -29,9 +30,15 @@ export function GoodsChainReview() {
   const confirm = useUIStore((s) => s.chainReviewConfirm);
   const closeReview = useUIStore((s) => s.closeChainReview);
   const openEditor = useGoodsStore((s) => s.setOpen);
-  const specs = useGoodsStore((s) => s.specs).filter((g) => g.enabled);
+  const allSpecs = useGoodsStore((s) => s.specs);
+  const specs = allSpecs.filter((g) => g.enabled);
 
-  const planted = specs.filter((g) => g.distribution !== "manufactured");
+  // Every enabled good is classified by HOW it reaches the market:
+  //  • Planted/Grown   — climate-belt crops (global/local distribution)
+  //  • Extracted       — deposit goods dug from the ground (ores, gems, salt)
+  //  • Manufactured    — finished goods made in cities from a recipe (no belt)
+  const planted = specs.filter((g) => g.distribution === "global" || g.distribution === "local");
+  const extracted = specs.filter((g) => g.distribution === "deposits");
   const manufactured = specs.filter((g) => g.distribution === "manufactured");
 
   if (!open) return null;
@@ -41,12 +48,16 @@ export function GoodsChainReview() {
       <div style={sheet} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <strong style={{ fontSize: 15 }}>Goods &amp; Chains — review before generating</strong>
-          <span style={{ color: "#7a8aa0" }}>{planted.length} planted · {manufactured.length} manufactured</span>
+          <span style={{ color: "#7a8aa0" }}>
+            {planted.length} planted · {extracted.length} extracted · {manufactured.length} manufactured
+            <span style={{ color: "#5a6a80" }}> · {specs.length}/{allSpecs.length} enabled</span>
+          </span>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
-          <Column title="🌾 Planted / Extracted (from the land)" note="climate-belt & deposit goods" goods={planted} />
-          <Column title="🏭 Manufactured (in cities)" note="recipe goods — no map belt" goods={manufactured} />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 14 }}>
+          <Column title="🌾 Planted / Grown" note="climate-belt crops, seeded independently" goods={planted} />
+          <Column title="🪨 Extracted" note="ore / gem / salt deposits" goods={extracted} />
+          <Column title="🏭 Manufactured" note="made in cities — no map belt" goods={manufactured} />
         </div>
 
         <div style={{ fontWeight: 600, color: "#8aa0b8", marginBottom: 6 }}>Schematic — production chains (DAG)</div>
@@ -67,19 +78,34 @@ export function GoodsChainReview() {
   );
 }
 
+/** A production-type column, with its goods sub-grouped by trade category
+ *  (category-within-type), each good shown as a distinctly-coloured chip. */
 function Column({ title, note, goods }: { title: string; note: string; goods: GoodSpec[] }) {
+  const byCat = CATEGORY_ORDER
+    .map((cat) => ({ cat, items: goods.filter((g) => goodCategory(g.id) === cat) }))
+    .filter((g) => g.items.length > 0);
   return (
     <div style={{ background: "#0e1218", border: "1px solid #232b36", borderRadius: 6, padding: 10 }}>
-      <div style={{ color: "#aeb9c8", marginBottom: 2 }}>{title}</div>
-      <div style={{ color: "#5a6a80", fontSize: 10, marginBottom: 6 }}>{note}</div>
-      <div>
-        {goods.length === 0 && <span style={{ color: "#5a6a80" }}>none</span>}
-        {goods.map((g) => (
-          <span key={g.id} style={chip(g.color)} title={`${g.id} · value ${g.base_value} · bulk ${g.bulk ?? 1}`}>
-            <span>{g.icon}</span><span>{g.name}</span>
-          </span>
-        ))}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <span style={{ color: "#aeb9c8" }}>{title}</span>
+        <span style={{ color: "#5a6a80", fontSize: 11 }}>{goods.length}</span>
       </div>
+      <div style={{ color: "#5a6a80", fontSize: 10, marginBottom: 6 }}>{note}</div>
+      {goods.length === 0 && <span style={{ color: "#5a6a80" }}>none</span>}
+      {byCat.map(({ cat, items }) => (
+        <div key={cat} style={{ marginBottom: 5 }}>
+          <div style={{ color: "#5f7390", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 1 }}>
+            {cat} · {items.length}
+          </div>
+          <div>
+            {items.map((g) => (
+              <span key={g.id} style={chip(g.color)} title={`${g.id} · value ${g.base_value} · bulk ${g.bulk ?? 1}`}>
+                <span>{g.icon}</span><span>{g.name}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

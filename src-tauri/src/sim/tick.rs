@@ -626,6 +626,11 @@ pub struct CampaignSim {
     pub house_ledger: Vec<LedgerAcc>,
     #[serde(default)]
     pub house_ledger_prev: Vec<LedgerAcc>,
+    /// Phase G — trade wars: hubs each house is BARRED from trading at (a rival that
+    /// dominates a city closes its market to a defeated competitor). The house must
+    /// pay the city to regain access. Indexed to match `houses`. Guilds are immune.
+    #[serde(default)]
+    pub house_barred: Vec<Vec<u32>>,
     /// Empty-land sites a wealthy founder may colonize with an estate (precomputed at
     /// the Economy step). Consumed as colonies are founded; empty on old saves.
     #[serde(default)]
@@ -925,6 +930,7 @@ impl CampaignSim {
             // the year over on the New Year — the just-finished year becomes the
             // Accountant's displayed `_prev`, and a fresh current year starts.
             self.house_ledger.resize(self.houses.len(), LedgerAcc::default());
+            self.house_barred.resize(self.houses.len(), Vec::new());
             if tick % TICKS_PER_YEAR == 0 {
                 // Yearly inflation erodes every fortune's real value, recorded in the
                 // year that is now closing — then archive it for the Accountant.
@@ -1134,6 +1140,39 @@ impl CampaignSim {
             hb.sent_stability += (target_stab - hb.sent_stability) * EASE;
             let target_mood = 0.45 * hb.sent_food + 0.30 * hb.sent_prosperity + 0.25 * hb.sent_stability;
             hb.mood += (target_mood - hb.mood) * EASE;
+        }
+    }
+
+    /// Phase G: a house barred from a market PAYS the city to regain its trading
+    /// rights (one market a month, when it can afford the fee). The fee scales with
+    /// the city's size, flows into the city's civic_pool (reaching the people), and
+    /// is recorded on the Accountant's misfortune line.
+    fn pay_to_regain_markets(&mut self) {
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct {
+                continue;
+            }
+            let city = match self.house_barred.get(hi).and_then(|v| v.first().copied()) {
+                Some(c) => c,
+                None => continue,
+            };
+            let fee = self
+                .hubs
+                .get(city as usize)
+                .map(|h| (h.population / 5000.0).clamp(2.0, 40.0))
+                .unwrap_or(5.0);
+            if self.houses[hi].wealth > fee * 2.0 {
+                self.houses[hi].wealth -= fee;
+                if let Some(hb) = self.hubs.get_mut(city as usize) {
+                    hb.civic_pool += fee;
+                }
+                if let Some(v) = self.house_barred.get_mut(hi) {
+                    v.retain(|&c| c != city);
+                }
+                if hi < self.house_ledger.len() {
+                    self.house_ledger[hi].events += fee;
+                }
+            }
         }
     }
 
@@ -1441,6 +1480,11 @@ impl CampaignSim {
                     for cand in [self.house_for(a, g), self.house_for(b, g)] {
                         if cand < 0 { continue; }
                         let oi = cand as usize;
+                        // Trade war: a house barred from either market cannot run this
+                        // leg — the trade falls to a rival or independent merchants.
+                        if self.house_barred.get(oi).is_some_and(|v| v.contains(&(a as u32)) || v.contains(&(b as u32))) {
+                            continue;
+                        }
                         let slots = if sea { cap_sea[oi] } else { cap_land[oi] };
                         // Merchant-banker houses can finance cargo beyond their cash.
                         let credit = if self.houses[oi].archetype == ARCH_BANKING { BANK_CREDIT_MULT } else { 1.0 };
@@ -2494,6 +2538,7 @@ impl CampaignSim {
             // Phase G: wealth bleeds (upkeep + consumption) so it plateaus and some
             // flows to the people — runs right after interest so it offsets it.
             self.apply_wealth_sinks();
+            self.pay_to_regain_markets();
             self.recompute_monopolies_and_power();
             self.manage_fleets();
             self.update_structures();
@@ -2981,6 +3026,22 @@ impl CampaignSim {
                                 hub: self.houses[winner].hub as i32, good: -1, value: 0.0,
                                 text: format!("{} outmaneuvers {} in a bitter trade feud", wn, ln),
                             });
+                            // Trade war: if the winner dominates its seat city and the
+                            // loser is not an embargo-immune guild, CLOSE that market to
+                            // the loser until it pays to regain its rights.
+                            if self.houses[winner].dominant_seat && !self.houses[loser].is_guild {
+                                let city = self.houses[winner].hub;
+                                let already = self.house_barred.get(loser).is_some_and(|v| v.contains(&city));
+                                if !already {
+                                    let cn = self.hubs.get(city as usize).map(|h| h.name.clone()).unwrap_or_default();
+                                    if let Some(v) = self.house_barred.get_mut(loser) { v.push(city); }
+                                    self.journal.push(JournalEntry {
+                                        tick: self.tick, kind: "trade_war".into(),
+                                        hub: city as i32, good: -1, value: 0.0,
+                                        text: format!("{} bars {} from the market of {}", wn, ln, cn),
+                                    });
+                                }
+                            }
                         }
                     }
                 }
@@ -3104,7 +3165,7 @@ mod tests {
             k: 0.6, margin: 0.05, need_scale: 1.0, world_w: 100.0, world_h: 100.0, last_tick_ms: 0.0,
             last_month_pop: 0.0, last_month_index: 0.0, seed_house_count: 0,
             fleets_migrated: true, tech_factor: 1.0, percap_migrated: true,
-            house_ledger: Vec::new(), house_ledger_prev: Vec::new(),
+            house_ledger: Vec::new(), house_ledger_prev: Vec::new(), house_barred: Vec::new(),
             colonizable: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
             recent_trades: vec![],
