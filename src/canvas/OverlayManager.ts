@@ -3,6 +3,35 @@ import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "../goo
 import { drawGoodIcon } from "./goodIcons";
 import { latLineY } from "./projection";
 
+/** Convex hull (Andrew's monotone chain) of a set of points — used to draw a
+ *  merchant house's translucent "sphere of business" around its cities. Returns
+ *  the hull vertices in order (fewer than 3 if the points are collinear). */
+function convexHull(pts: [number, number][]): [number, number][] {
+  const ps = pts.map((p) => [p[0], p[1]] as [number, number]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const uniq: [number, number][] = [];
+  for (const p of ps) {
+    const last = uniq[uniq.length - 1];
+    if (!last || last[0] !== p[0] || last[1] !== p[1]) uniq.push(p);
+  }
+  if (uniq.length < 3) return uniq;
+  const cross = (o: [number, number], a: [number, number], b: [number, number]) =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower: [number, number][] = [];
+  for (const p of uniq) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper: [number, number][] = [];
+  for (let i = uniq.length - 1; i >= 0; i--) {
+    const p = uniq[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}
+
 /** Per-cell abundance → one of 4 discrete quality tiers (1 negligible … 4 very
  *  high). The cell's fill opacity steps with the tier so richer deposits read as
  *  more solid and poor deposits as faint. */
@@ -980,6 +1009,31 @@ export class OverlayManager {
       if (h.seat) pts.push(h.seat);
       handled.push({ color: h.color, pts });
     }
+
+    // ── Sphere of business: a translucent convex hull around each house's cities,
+    //    partners and seat, tinted its colour (drawn first, under everything). ──
+    for (const h of handled) {
+      const hull = convexHull(h.pts);
+      if (hull.length < 3) continue;
+      let spansSeam = false;
+      for (let i = 0; i < hull.length && !spansSeam; i++) {
+        const a = hull[i], b = hull[(i + 1) % hull.length];
+        if (worldW && Math.abs(a[0] - b[0]) > worldW * 0.5) spansSeam = true;
+      }
+      if (spansSeam) continue; // skip seam-spanning hulls (rare; avoids wrap artifacts)
+      ctx.beginPath();
+      ctx.moveTo(hull[0][0] + 0.5, hull[0][1] + 0.5);
+      for (let i = 1; i < hull.length; i++) ctx.lineTo(hull[i][0] + 0.5, hull[i][1] + 0.5);
+      ctx.closePath();
+      ctx.fillStyle = h.color;
+      ctx.globalAlpha = 0.10;
+      ctx.fill();
+      ctx.globalAlpha = 0.34;
+      ctx.lineWidth = Math.max(0.6, 1.2 * inv);
+      ctx.strokeStyle = h.color;
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
 
     // ── Trade routes (drawn first, under the dots) ──
     const drawPath = (pts: [number, number][], stroke: string, width: number, alpha: number) => {
