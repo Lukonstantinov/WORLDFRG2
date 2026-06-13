@@ -1557,6 +1557,8 @@ pub struct HouseLedger {
     pub inflation: f32,
     pub expense_total: f32,
     pub net: f32,
+    /// Monthly wealth samples through the year (for the Accountant's wealth graph).
+    pub wealth_graph: Vec<f32>,
     // Warehouse stock held at the home city (what a fire/spoilage destroys).
     pub warehouse_city: String,
     pub warehouse: Vec<LedgerLine>,
@@ -1643,6 +1645,7 @@ pub fn campaign_house_ledger(db: State<'_, WorldDb>, house: usize) -> Result<Opt
         inflation: led.inflation,
         expense_total,
         net: income_total - expense_total,
+        wealth_graph: led.wealth_samples.clone(),
         warehouse_city,
         warehouse,
     }))

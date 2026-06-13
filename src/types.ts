@@ -412,6 +412,7 @@ export interface HouseLedger {
   inflation: number;
   expense_total: number;
   net: number;
+  wealth_graph: number[];
   // Warehouse stock at the home city
   warehouse_city: string;
   warehouse: LedgerLine[];

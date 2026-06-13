@@ -215,7 +215,7 @@ function HouseDetail({ h, onClose, onChronicle }:
   { h: HouseBrief; onClose: () => void; onChronicle: (name: string) => void }) {
   const [routes, setRoutes] = useState<MerchantRoute[]>([]);
   const [ledger, setLedger] = useState<HouseLedger | null>(null);
-  const [showLedger, setShowLedger] = useState(false);
+  const [view, setView] = useState<"summary" | "ledger">("summary");
   const tick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
   useEffect(() => {
     let alive = true;
@@ -246,82 +246,127 @@ function HouseDetail({ h, onClose, onChronicle }:
       </div>
       <div style={{ color: "#9ab0c8", fontSize: 10 }}>{h.head_name} · of {h.home_name} · gen {h.generation}</div>
       <div style={{ color: "#c9a227", fontSize: 11, fontWeight: 700 }}>wealth {fmt(h.wealth)}</div>
-      {h.cities && h.cities.length > 0 && <Row label="Active in">{h.cities.slice(0, 10).join(" · ")}</Row>}
-      {h.offices && h.offices.length > 0 && <Row label="Offices">🏢 {h.offices.map(([nm]) => nm).join(" · ")}</Row>}
-      {h.estates && h.estates.length > 0 && <Row label="Estates">{h.estates.map(([g, c]) => `${goodIcon(g)} ${g} (${c})`).join(" · ")}</Row>}
-      <Row label="Fleet">🚢 {h.fleet_sea ?? 0} · 🛶 {h.fleet_river ?? 0} · 🐫 {h.fleet_caravan ?? 0}</Row>
-      {h.barred && h.barred.length > 0 && (
-        <div style={{ fontSize: 9, marginTop: 3, color: "#e08a8a" }}>
-          ⚔ Barred from (trade war): {h.barred.join(" · ")}
-        </div>
-      )}
-      {ledger && (ledger.income_total > 0 || ledger.expense_total > 0) && (
-        <>
-          <div onClick={() => setShowLedger(!showLedger)}
-            style={{ color: "#c9a227", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 6, cursor: "pointer" }}>
-            📒 Accountant{ledger.year > 0 ? ` · year ${ledger.year}` : ""} {showLedger ? "▾" : "▸"}
-          </div>
-          {showLedger && <LedgerView l={ledger} fmt={fmt} />}
-        </>
-      )}
-      <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 6 }}>Top routes (back &amp; forth)</div>
-      {routes.length === 0 && <div style={{ color: "#56708e", fontSize: 9 }}>no active routes right now</div>}
-      {routes.map((r, i) => (
-        <div key={i} style={{ fontSize: 9, marginBottom: 3, borderBottom: "1px solid #131f2c", paddingBottom: 2 }}>
-          <div style={{ color: "#cfe0f4" }}>{r.sea ? "🚢" : "🐫"} {r.a_name} ⇄ {r.b_name} <span style={{ color: "#6a86a6" }}>· vol {fmt(r.volume)}</span></div>
-          <div style={{ color: "#9ab0c8" }}>→ {goodsStr(r.out_goods)} · ← {goodsStr(r.ret_goods)}</div>
-        </div>
-      ))}
-      <div onClick={() => onChronicle(h.name)} style={{ color: "#88a8c8", fontSize: 9, cursor: "pointer", marginTop: 5, textDecoration: "underline" }}>
-        View family chronicle →
+
+      {/* Subtabs — Accountant gets its own roomy view so expenses aren't clipped. */}
+      <div style={{ display: "flex", gap: 4, margin: "7px 0 5px", borderBottom: "1px solid #1a2a3e" }}>
+        {(["summary", "ledger"] as const).map((t) => (
+          <div key={t} onClick={() => setView(t)} style={{
+            fontSize: 10, padding: "3px 9px", cursor: "pointer",
+            color: view === t ? "#e8dcc0" : "#7090b0", fontWeight: view === t ? 700 : 400,
+            borderBottom: view === t ? "2px solid #c9a227" : "2px solid transparent",
+          }}>{t === "summary" ? "Summary" : `📒 Accountant${ledger && ledger.year > 0 ? ` · yr ${ledger.year}` : ""}`}</div>
+        ))}
       </div>
+
+      {view === "summary" ? (
+        <>
+          {h.cities && h.cities.length > 0 && <Row label="Active in">{h.cities.slice(0, 10).join(" · ")}</Row>}
+          {h.offices && h.offices.length > 0 && <Row label="Offices">🏢 {h.offices.map(([nm]) => nm).join(" · ")}</Row>}
+          {h.estates && h.estates.length > 0 && <Row label="Estates">{h.estates.map(([g, c]) => `${goodIcon(g)} ${g} (${c})`).join(" · ")}</Row>}
+          <Row label="Fleet">🚢 {h.fleet_sea ?? 0} · 🛶 {h.fleet_river ?? 0} · 🐫 {h.fleet_caravan ?? 0}</Row>
+          {h.barred && h.barred.length > 0 && (
+            <div style={{ fontSize: 9, marginTop: 3, color: "#e08a8a" }}>⚔ Barred from (trade war): {h.barred.join(" · ")}</div>
+          )}
+          <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 6 }}>Top routes (back &amp; forth)</div>
+          {routes.length === 0 && <div style={{ color: "#56708e", fontSize: 9 }}>no active routes right now</div>}
+          {routes.map((r, i) => (
+            <div key={i} style={{ fontSize: 9, marginBottom: 3, borderBottom: "1px solid #131f2c", paddingBottom: 2 }}>
+              <div style={{ color: "#cfe0f4" }}>{r.sea ? "🚢" : "🐫"} {r.a_name} ⇄ {r.b_name} <span style={{ color: "#6a86a6" }}>· vol {fmt(r.volume)}</span></div>
+              <div style={{ color: "#9ab0c8" }}>→ {goodsStr(r.out_goods)} · ← {goodsStr(r.ret_goods)}</div>
+            </div>
+          ))}
+          <div onClick={() => onChronicle(h.name)} style={{ color: "#88a8c8", fontSize: 9, cursor: "pointer", marginTop: 5, textDecoration: "underline" }}>
+            View family chronicle →
+          </div>
+        </>
+      ) : ledger ? (
+        <LedgerView l={ledger} fmt={fmt} />
+      ) : (
+        <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>No completed year yet — the first year's books appear after a full year passes.</div>
+      )}
     </div>
   );
 }
 
-/** The yearly T-account ledger (Accountant view): income | expenditure + net +
- *  warehouse stock. Per-city tax/profit lines arrive sorted largest → lowest. */
+/** The yearly ledger (Accountant view): Income then Expenditure stacked FULL-WIDTH
+ *  (so nothing is clipped in the narrow panel) + NET + warehouse stock. Per-city
+ *  tax/profit lines arrive sorted largest → lowest. */
 function LedgerView({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string }) {
-  const head: React.CSSProperties = { color: "#6a86a6", fontSize: 8, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 2 };
-  const sub: React.CSSProperties = { borderTop: "1px solid #1b2a3c", marginTop: 2, paddingTop: 2, fontSize: 9, fontWeight: 700, textAlign: "right" };
+  const head: React.CSSProperties = { color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 7, marginBottom: 2 };
   const Line = ({ label, amt, neg }: { label: string; amt: number; neg?: boolean }) => (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 4, fontSize: 9 }}>
-      <span style={{ color: "#8ca4bc", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
-      <span style={{ color: neg ? "#e0a0a0" : "#7fcf8f" }}>{neg ? "−" : "+"}{fmt(Math.abs(amt))}</span>
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 10, padding: "1px 0" }}>
+      <span style={{ color: "#9ab0c8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+      <span style={{ color: neg ? "#e0a0a0" : "#7fcf8f", flexShrink: 0 }}>{neg ? "−" : "+"}{fmt(Math.abs(amt))}</span>
     </div>
   );
+  const Sub = ({ label, amt, color }: { label: string; amt: number; color: string }) => (
+    <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #1b2a3c", marginTop: 2, paddingTop: 2, fontSize: 10, fontWeight: 700 }}>
+      <span style={{ color: "#8ca4bc" }}>{label}</span>
+      <span style={{ color }}>{amt >= 0 ? "+" : "−"}{fmt(Math.abs(amt))}</span>
+    </div>
+  );
+  const anyExp = l.import_tax.length || l.export_tax.length || l.estate_tax || l.upkeep
+    || l.fleet_cost || l.lost_cargo || l.events || l.consumption || l.inflation;
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 4, padding: 6, border: "1px solid #1b2a3c", borderRadius: 4, background: "#0a1119" }}>
-      <div>
-        <div style={head}>Income</div>
-        {l.trade_profit.map((c, i) => <Line key={i} label={`Trade · ${c.label}`} amt={c.amount} />)}
-        {l.office_income > 0 && <Line label="Offices" amt={l.office_income} />}
-        {l.estate_income > 0 && <Line label="Estates" amt={l.estate_income} />}
-        <div style={{ ...sub, color: "#7fcf8f" }}>+{fmt(l.income_total)}</div>
+    <div style={{ padding: "2px 4px 6px", border: "1px solid #1b2a3c", borderRadius: 4, background: "#0a1119" }}>
+      <div style={head}>Income</div>
+      {l.trade_profit.length === 0 && l.office_income === 0 && l.estate_income === 0 &&
+        <div style={{ color: "#56708e", fontSize: 9 }}>none recorded yet</div>}
+      {l.trade_profit.map((c, i) => <Line key={i} label={`Trade · ${c.label}`} amt={c.amount} />)}
+      {l.office_income > 0 && <Line label="Office income" amt={l.office_income} />}
+      {l.estate_income > 0 && <Line label="Estate income" amt={l.estate_income} />}
+      <Sub label="Total income" amt={l.income_total} color="#7fcf8f" />
+
+      <div style={head}>Expenditure</div>
+      {!anyExp && <div style={{ color: "#56708e", fontSize: 9 }}>none recorded yet</div>}
+      {l.import_tax.map((c, i) => <Line key={`i${i}`} label={`Import tax · ${c.label}`} amt={c.amount} neg />)}
+      {l.export_tax.map((c, i) => <Line key={`e${i}`} label={`Export tax · ${c.label}`} amt={c.amount} neg />)}
+      {l.estate_tax > 0 && <Line label="Estate tax" amt={l.estate_tax} neg />}
+      {l.upkeep > 0 && <Line label="Upkeep & retainers" amt={l.upkeep} neg />}
+      {l.fleet_cost > 0 && <Line label="Fleet upkeep & decay" amt={l.fleet_cost} neg />}
+      {l.lost_cargo > 0 && <Line label="Lost cargo" amt={l.lost_cargo} neg />}
+      {l.events > 0 && <Line label="Misfortune & fees" amt={l.events} neg />}
+      {l.consumption > 0 && <Line label="Feasts & consumption" amt={l.consumption} neg />}
+      {l.inflation > 0 && <Line label="Inflation" amt={l.inflation} neg />}
+      <Sub label="Total spent" amt={-l.expense_total} color="#e0a0a0" />
+
+      <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #24364e", marginTop: 5, paddingTop: 4 }}>
+        <span style={{ color: "#cfe0f4", fontWeight: 700, fontSize: 11 }}>NET</span>
+        <span style={{ color: l.net >= 0 ? "#9fe0a8" : "#e88", fontWeight: 700, fontSize: 11 }}>{l.net >= 0 ? "+" : "−"}{fmt(Math.abs(l.net))}</span>
       </div>
-      <div>
-        <div style={head}>Expenditure</div>
-        {l.import_tax.map((c, i) => <Line key={`i${i}`} label={`Import tax · ${c.label}`} amt={c.amount} neg />)}
-        {l.export_tax.map((c, i) => <Line key={`e${i}`} label={`Export tax · ${c.label}`} amt={c.amount} neg />)}
-        {l.estate_tax > 0 && <Line label="Estate tax" amt={l.estate_tax} neg />}
-        {l.upkeep > 0 && <Line label="Upkeep" amt={l.upkeep} neg />}
-        {l.fleet_cost > 0 && <Line label="Fleet decay" amt={l.fleet_cost} neg />}
-        {l.lost_cargo > 0 && <Line label="Lost cargo" amt={l.lost_cargo} neg />}
-        {l.events > 0 && <Line label="Misfortune" amt={l.events} neg />}
-        {l.consumption > 0 && <Line label="Feasts & consumption" amt={l.consumption} neg />}
-        {l.inflation > 0 && <Line label="Inflation" amt={l.inflation} neg />}
-        <div style={{ ...sub, color: "#e0a0a0" }}>−{fmt(l.expense_total)}</div>
-      </div>
-      <div style={{ gridColumn: "1 / -1", borderTop: "1px solid #24364e", paddingTop: 3, display: "flex", justifyContent: "space-between" }}>
-        <span style={{ color: "#cfe0f4", fontWeight: 700, fontSize: 10 }}>NET</span>
-        <span style={{ color: l.net >= 0 ? "#9fe0a8" : "#e88", fontWeight: 700, fontSize: 10 }}>{l.net >= 0 ? "+" : "−"}{fmt(Math.abs(l.net))}</span>
-      </div>
+      {l.wealth_graph.length >= 2 && <WealthGraph data={l.wealth_graph} fmt={fmt} />}
       {l.warehouse.length > 0 && (
-        <div style={{ gridColumn: "1 / -1" }}>
+        <div>
           <div style={head}>Warehouse · {l.warehouse_city}</div>
-          <div style={{ fontSize: 10, color: "#bcd0e4" }}>{l.warehouse.map((w) => `${goodIcon(w.label)}${fmt(w.amount)}`).join("  ")}</div>
+          <div style={{ fontSize: 11, color: "#bcd0e4", lineHeight: 1.6 }}>{l.warehouse.map((w) => `${goodIcon(w.label)}${fmt(w.amount)}`).join("  ")}</div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Wealth-through-the-year sparkline (monthly samples) for the Accountant. */
+function WealthGraph({ data, fmt }: { data: number[]; fmt: (v: number) => string }) {
+  const W = 244, H = 46, pad = 3;
+  const max = Math.max(...data), min = Math.min(...data);
+  const span = max - min || 1;
+  const pts = data.map((v, i) => {
+    const x = pad + (i / (data.length - 1)) * (W - 2 * pad);
+    const y = pad + (1 - (v - min) / span) * (H - 2 * pad);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const up = data[data.length - 1] >= data[0];
+  const stroke = up ? "#9fe0a8" : "#e8a0a0";
+  return (
+    <div style={{ marginTop: 7 }}>
+      <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 2 }}>Wealth through the year</div>
+      <svg width={W} height={H} style={{ display: "block", background: "#0a1119", border: "1px solid #1b2a3c", borderRadius: 3 }}>
+        <polyline points={pts} fill="none" stroke={stroke} strokeWidth={1.5} strokeLinejoin="round" />
+      </svg>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#7a8aa0", marginTop: 1 }}>
+        <span>start {fmt(data[0])}</span>
+        <span style={{ color: stroke }}>end {fmt(data[data.length - 1])}</span>
+      </div>
     </div>
   );
 }

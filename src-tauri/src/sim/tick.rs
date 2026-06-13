@@ -158,12 +158,14 @@ const BANK_INTEREST: f32 = 0.01;    // monthly interest on wealth
 //    medieval merchant fortune did. Sinks are a fraction of wealth, so a poor
 //    house barely pays them and a rich one bleeds a lot (a stabilizing feedback). ──
 /// Maintenance / retainers / storage — pure depreciation that counters BANK_INTEREST.
-const UPKEEP_RATE: f32 = 0.010;
+/// Kept modest (fleet/office/estate upkeep is charged separately) so wealth
+/// PLATEAUS toward its income-supported level rather than crashing a rich house.
+const UPKEEP_RATE: f32 = 0.005;
 /// Conspicuous consumption (feasts, weddings, charity, building): spent INTO the
 /// home city, lifting its people's prosperity — the main "wealth reaches people" lever.
-const HOUSE_CONSUMPTION_RATE: f32 = 0.006;
+const HOUSE_CONSUMPTION_RATE: f32 = 0.004;
 /// Guilds are civic — they spend more of their wealth on their own citizens.
-const GUILD_CIVIC_RATE: f32 = 0.012;
+const GUILD_CIVIC_RATE: f32 = 0.008;
 /// How fast a hub's accumulated civic spending (the `civic_pool`) is used up.
 const CIVIC_DECAY: f32 = 0.97;
 /// Monthly fleet upkeep as a fraction of a vessel's value (crew, repairs, berthing)
@@ -182,7 +184,7 @@ const GUILD_TAX_MULT: f32 = 1.6;
 const ESTATE_TAX_RATE: f32 = 0.10;
 /// Yearly inflation — coin debasement + rising prices steadily eat the real value
 /// of a hoarded fortune (applied once a year to every house's wealth).
-const INFLATION_PER_YEAR: f32 = 0.025;
+const INFLATION_PER_YEAR: f32 = 0.015;
 const FLEET_LOSS_MULT: f32 = 0.6;   // voyage-loss reduction
 const FLEET_SHIP_DISCOUNT: f32 = 0.8;
 const POLITICAL_POWER_BONUS: f32 = 0.15;
@@ -557,6 +559,8 @@ pub struct LedgerAcc {
     pub events: f32,
     pub consumption: f32,
     pub inflation: f32,
+    /// Monthly wealth samples through the year — drives the Accountant's wealth graph.
+    pub wealth_samples: Vec<f32>,
 }
 
 impl LedgerAcc {
@@ -1205,6 +1209,8 @@ impl CampaignSim {
             if hi < self.house_ledger.len() {
                 self.house_ledger[hi].upkeep += upkeep;
                 self.house_ledger[hi].consumption += consumption;
+                // Sample wealth each month for the Accountant's year graph.
+                self.house_ledger[hi].wealth_samples.push(self.houses[hi].wealth.max(0.0));
             }
         }
     }
