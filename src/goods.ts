@@ -59,6 +59,28 @@ export const GOOD_DEFS: GoodDef[] = [
   { name: "silver", label: "Silver", emoji: "\u{1FA99}", color: "#c8ccd6" },
   { name: "marble", label: "Marble", emoji: "\u{1F3DB}\u{FE0F}", color: "#e8e6e0" },
   { name: "lead", label: "Lead", emoji: "\u{1F529}", color: "#8a8e96" },
+  // ── Clay (raw input) + manufactured chain goods (mirror goods_spec.rs) ──
+  { name: "clay", label: "Clay", emoji: "\u{1F9F1}", color: "#b07a52" },
+  { name: "cloth", label: "Cloth", emoji: "\u{1F9F6}", color: "#d8c8b0" },
+  { name: "metalware", label: "Metalware & Arms", emoji: "\u{2694}\u{FE0F}", color: "#9099a8" },
+  { name: "refined_sugar", label: "Refined Sugar", emoji: "\u{1F367}", color: "#f0e8d8" },
+  { name: "citrus_liqueur", label: "Citrus Liqueur", emoji: "\u{1F378}", color: "#e8b24a" },
+  { name: "linen", label: "Linen", emoji: "\u{1F9FA}", color: "#cfe0e8" },
+  { name: "cotton_cloth", label: "Cotton Cloth", emoji: "\u{1F455}", color: "#eef0e8" },
+  { name: "silk_brocade", label: "Fine Silk Brocade", emoji: "\u{1F9E3}", color: "#d96fb0" },
+  { name: "carpets", label: "Carpets & Tapestry", emoji: "\u{1F7EB}", color: "#9b4f2f" },
+  { name: "leather_goods", label: "Leather Goods", emoji: "\u{1F45E}", color: "#7a4a2a" },
+  { name: "bronzeware", label: "Bronzeware", emoji: "\u{1F514}", color: "#b06a3a" },
+  { name: "jewelry", label: "Fine Jewelry", emoji: "\u{1F48D}", color: "#d4af37" },
+  { name: "brandy", label: "Brandy & Spirits", emoji: "\u{1F943}", color: "#a9603a" },
+  { name: "mead", label: "Mead", emoji: "\u{1F36F}", color: "#e0a020" },
+  { name: "perfume", label: "Perfume & Attar", emoji: "\u{1F9F4}", color: "#c79a4b" },
+  { name: "soap", label: "Soap", emoji: "\u{1F9FC}", color: "#cfe0d8" },
+  { name: "candles", label: "Candles & Wax", emoji: "\u{1F56F}\u{FE0F}", color: "#e8d8a0" },
+  { name: "books", label: "Books & Manuscripts", emoji: "\u{1F4DA}", color: "#8a6a3a" },
+  { name: "furniture", label: "Fine Furniture", emoji: "\u{1FA91}", color: "#6b4226" },
+  { name: "ivory_carvings", label: "Ivory Carvings", emoji: "\u{265F}\u{FE0F}", color: "#efe6d0" },
+  { name: "statuary", label: "Statuary", emoji: "\u{1F5FF}", color: "#e8e6e0" },
 ];
 
 /** Overlay-visibility key for a good's region toggle. */
@@ -129,20 +151,25 @@ const GOOD_CATEGORY: Record<string, string> = {
   // Textiles & animal products
   silk: "Textiles & Animal", wool_fleece: "Textiles & Animal", wool_llama: "Textiles & Animal",
   furs: "Textiles & Animal", horses: "Textiles & Animal", ivory: "Textiles & Animal",
-  // Forestry & manufactured craft
+  // Forestry & raw craft inputs
   timber: "Forestry & Craft", hardwoods: "Forestry & Craft", paper: "Forestry & Craft",
-  ceramics: "Forestry & Craft", glassware: "Forestry & Craft",
-  // Minerals & metals (both salts here, adjacent, per request)
+  // Minerals & metals (both salts here, adjacent, per request; clay = construction raw)
   salt: "Minerals & Metals", bay_salt: "Minerals & Metals", iron: "Minerals & Metals",
   copper: "Minerals & Metals", tin: "Minerals & Metals", gold: "Minerals & Metals",
   gemstones: "Minerals & Metals", jade: "Minerals & Metals", silver: "Minerals & Metals",
-  marble: "Minerals & Metals", lead: "Minerals & Metals",
+  marble: "Minerals & Metals", lead: "Minerals & Metals", clay: "Minerals & Metals",
   // Marine (incl. marine dyes)
   stockfish: "Marine", pearls: "Marine", whaling: "Marine", amber: "Marine",
   dyes: "Marine", tyrian_purple: "Marine", coral: "Marine", ambergris: "Marine",
   // Manufactures — finished goods made in cities from imported raws (no map belt)
   cloth: "Manufactures", metalware: "Manufactures", refined_sugar: "Manufactures",
-  citrus_liqueur: "Manufactures",
+  citrus_liqueur: "Manufactures", ceramics: "Manufactures", glassware: "Manufactures",
+  linen: "Manufactures", cotton_cloth: "Manufactures", silk_brocade: "Manufactures",
+  carpets: "Manufactures", leather_goods: "Manufactures", bronzeware: "Manufactures",
+  jewelry: "Manufactures", brandy: "Manufactures", mead: "Manufactures",
+  perfume: "Manufactures", soap: "Manufactures", candles: "Manufactures",
+  books: "Manufactures", furniture: "Manufactures", ivory_carvings: "Manufactures",
+  statuary: "Manufactures",
 };
 
 export function goodCategory(name: string): string {
