@@ -467,9 +467,12 @@ export function HubPanel() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: "#cdbb88", fontWeight: 600 }}>
                     {ESTATE_LABEL[e.kind] ?? "Estate"} · {iconFor(e.good)} {labelFor(e.good)}
+                    <span style={{ color: "#e0c060", fontSize: 9, marginLeft: 4 }} title="upgrade tier (owners invest to raise output)">
+                      {"★".repeat(e.tier ?? 1)}<span style={{ color: "#3a4a5e" }}>{"★".repeat(Math.max(0, 5 - (e.tier ?? 1)))}</span>
+                    </span>
                   </div>
                   <div style={{ color: "#7a90a8", fontSize: 9 }}>
-                    owner: <span style={{ color: e.owner_is_guild ? "#7fd0c0" : "#e8dcc0" }}>{e.owner}</span>
+                    owner: <span style={{ color: e.owner_is_guild ? "#7fd0c0" : "#e8dcc0" }}>{e.owner}</span> · tier {e.tier ?? 1}/5
                   </div>
                 </div>
                 <span style={{ color: "#7fd0a0", fontSize: 10 }}>▲ {fmt(e.output)}/day</span>

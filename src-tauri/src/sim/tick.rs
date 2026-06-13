@@ -96,6 +96,8 @@ const MAX_HOUSE_ESTATES: usize = 6;
 const MAX_ESTATES_PER_CITY: usize = 4;
 /// Per-capita output rate of a house-built manufactory's luxury good.
 const MANUFACTORY_PERCAP: f32 = 0.2;
+/// Each estate/manufactory upgrade tier multiplies its output by this (5 tiers).
+const ESTATE_UPGRADE_MULT: f32 = 1.4;
 
 // ── Merchant guilds & offices (C3) ───────────────────────────────────────────
 /// A settlement gets a civic Merchant Guild once it reaches this population.
@@ -295,6 +297,9 @@ pub struct TickHub {
     /// Estate type (0 none / 1 farm / 2 mine / 3 plantation / 4 fishery / 5 vineyard).
     /// Non-zero only when `is_estate`; drives its produced good + the inspector label.
     #[serde(default)] pub estate_kind: u8,
+    /// Estate upgrade tier 1..5 — higher tiers produce more (owners invest to
+    /// upgrade). 0 on non-estates / old saves (treated as tier 1 for estates).
+    #[serde(default)] pub estate_tier: u8,
     /// Owning house index for an estate (−1 = owned by the parent city). Estate
     /// export income flows to this owner — a core engine of house growth.
     #[serde(default = "neg_one_i32")] pub owner_house: i32,
@@ -1690,7 +1695,7 @@ impl CampaignSim {
             sent_stability: 0.8, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
-            estate_kind: kind, owner_house, structures: vec![],
+            estate_kind: kind, estate_tier: 1, owner_house, structures: vec![],
         });
         self.rebuild_routes();
     }
@@ -1764,6 +1769,30 @@ impl CampaignSim {
             if owned >= MAX_HOUSE_ESTATES { continue; }
             // ~4%/month for an eligible house → invests roughly every couple of years.
             if hash01(self.seed, tick as u64 ^ 0xE57A7E, hi as u64) > 0.04 { continue; }
+            // Prefer UPGRADING an existing estate/manufactory it owns (tier < 5) ~half
+            // the time — cheaper than building new and compounds its output.
+            if let Some(ei) = self.hubs.iter().enumerate()
+                .filter(|(_, e)| e.is_estate && e.owner_house == hi as i32
+                    && e.estate_tier > 0 && e.estate_tier < 5)
+                .min_by_key(|(_, e)| e.estate_tier)
+                .map(|(idx, _)| idx)
+            {
+                let tier = self.hubs[ei].estate_tier.max(1);
+                let cost = INVEST_COST_BASE * tier as f32 * 0.8; // rises with tier
+                if self.houses[hi].wealth >= cost * 1.5
+                    && hash01(self.seed, tick as u64 ^ 0x09A7, hi as u64) < 0.5
+                {
+                    self.houses[hi].wealth -= cost;
+                    self.hubs[ei].estate_tier = tier + 1;
+                    for v in self.hubs[ei].base_per_capita.iter_mut() { *v *= ESTATE_UPGRADE_MULT; }
+                    let (en, ep) = (self.hubs[ei].name.clone(), self.hubs[ei].parent);
+                    self.journal.push(JournalEntry {
+                        tick, kind: "estate".into(), hub: ep, good: -1, value: (tier + 1) as f32,
+                        text: format!("{} upgrades to tier {}", en, tier + 1),
+                    });
+                    continue;
+                }
+            }
             // Build in the house's strongest trade partner (a city it actually works),
             // else at home. Skip estates themselves.
             let home = self.houses[hi].hub as usize;
@@ -2725,7 +2754,7 @@ mod tests {
             in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
-            estate_kind: 0, owner_house: -1, structures: vec![],
+            estate_kind: 0, estate_tier: 0, owner_house: -1, structures: vec![],
         }
     }
 

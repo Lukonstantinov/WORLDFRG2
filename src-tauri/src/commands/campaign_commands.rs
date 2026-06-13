@@ -428,6 +428,7 @@ pub struct EstateRow {
     pub output: f32,         // current production/day of its good
     pub owner: String,       // owning house/guild, or "City of …"
     pub owner_is_guild: bool,
+    pub tier: u8,            // upgrade tier 1..5
 }
 
 /// One foreign merchant's office hosted in a settlement (host-side view).
@@ -685,6 +686,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 tw_local: 0.0,
                 tw_guild: 0.0,
                 estate_kind: 0,
+                estate_tier: 0,
                 owner_house: -1,
                 structures: vec![],
             }
@@ -1042,6 +1044,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                 output: e.production.get(g).copied().unwrap_or(0.0),
                 owner,
                 owner_is_guild,
+                tier: e.estate_tier.max(1),
             }
         })
         .collect();
@@ -1375,8 +1378,16 @@ pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRo
         else { *e.ret.entry(s.good).or_insert(0.0) += amt; }
     }
     let gname = |g: usize| sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
-    let hname = |h: u32| sim.hubs.get(h as usize).map(|x| x.name.clone()).unwrap_or_default();
-    let pos = |h: u32| sim.hubs.get(h as usize).map(|x| [x.x, x.y]).unwrap_or([0.0, 0.0]);
+    // Estates are INTERNAL to their parent city — collapse an estate endpoint to
+    // its parent so the map draws routes between cities, never to estate dots.
+    let city_of = |h: u32| -> u32 {
+        match sim.hubs.get(h as usize) {
+            Some(x) if x.is_estate && x.parent >= 0 => x.parent as u32,
+            _ => h,
+        }
+    };
+    let hname = |h: u32| sim.hubs.get(city_of(h) as usize).map(|x| x.name.clone()).unwrap_or_default();
+    let pos = |h: u32| sim.hubs.get(city_of(h) as usize).map(|x| [x.x, x.y]).unwrap_or([0.0, 0.0]);
     let sort_goods = |m: HashMap<usize, f32>| {
         let mut v: Vec<(String, f32)> = m.into_iter().map(|(g, vol)| (gname(g), vol)).collect();
         v.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal));

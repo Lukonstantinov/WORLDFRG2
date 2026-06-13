@@ -336,7 +336,9 @@ export function MapCanvas() {
   // by its share of the largest city's population; otherwise show the static
   // Phase-7 list. This makes a dot's size track the LIVE population (#5).
   const liveSettlements = useMemo<Settlement[]>(() => {
-    const hubs = campaignSnapshot?.active ? campaignSnapshot.hubs : null;
+    // Estates (ids >= 100000) are INTERNAL to their parent city — never drawn as
+    // their own map dots.
+    const hubs = campaignSnapshot?.active ? campaignSnapshot.hubs.filter((h) => h.id < 100000) : null;
     if (!hubs || hubs.length === 0) return settlements;
     let maxPop = 1;
     for (const h of hubs) maxPop = Math.max(maxPop, h.population);

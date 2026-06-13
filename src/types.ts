@@ -288,6 +288,7 @@ export interface EstateRow {
   output: number;
   owner: string;
   owner_is_guild: boolean;
+  tier: number;       // upgrade tier 1..5
 }
 /** One city in the live richest-cities ranking. */
 export interface CityRank {
