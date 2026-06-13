@@ -3,8 +3,8 @@ import { useCampaignStore } from "../state/campaignStore";
 import { useUIStore } from "../state/uiStore";
 import { CoatOfArms } from "./CoatOfArms";
 import { GOOD_DEFS } from "../goods";
-import { campaignGetHouseHistory, campaignMerchantRoutes } from "../bridge/tauri";
-import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute } from "../types";
+import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger } from "../bridge/tauri";
+import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger } from "../types";
 
 const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
 const goodIcon = (name: string) => GOOD_ICON.get(name) ?? "\u{1F4E6}"; // 📦 fallback
@@ -214,14 +214,19 @@ export function HousesPanel() {
 function HouseDetail({ h, onClose, onChronicle }:
   { h: HouseBrief; onClose: () => void; onChronicle: (name: string) => void }) {
   const [routes, setRoutes] = useState<MerchantRoute[]>([]);
+  const [ledger, setLedger] = useState<HouseLedger | null>(null);
+  const [showLedger, setShowLedger] = useState(false);
   const tick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
   useEffect(() => {
     let alive = true;
     campaignMerchantRoutes().then((rs) => {
       if (alive) setRoutes(rs.filter((r) => r.holder === h.name).sort((a, b) => b.volume - a.volume).slice(0, 5));
     }).catch(() => {});
+    if (h.idx !== undefined) {
+      campaignHouseLedger(h.idx).then((l) => { if (alive) setLedger(l); }).catch(() => {});
+    }
     return () => { alive = false; };
-  }, [h.name, tick]);
+  }, [h.name, h.idx, tick]);
   const fmt = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
   const goodsStr = (gs: [string, number][]) => gs.slice(0, 3).map(([g, v]) => `${goodIcon(g)}${fmt(v)}`).join(" ") || "—";
   const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
@@ -245,6 +250,15 @@ function HouseDetail({ h, onClose, onChronicle }:
       {h.offices && h.offices.length > 0 && <Row label="Offices">🏢 {h.offices.map(([nm]) => nm).join(" · ")}</Row>}
       {h.estates && h.estates.length > 0 && <Row label="Estates">{h.estates.map(([g, c]) => `${goodIcon(g)} ${g} (${c})`).join(" · ")}</Row>}
       <Row label="Fleet">🚢 {h.fleet_sea ?? 0} · 🛶 {h.fleet_river ?? 0} · 🐫 {h.fleet_caravan ?? 0}</Row>
+      {ledger && (ledger.income_total > 0 || ledger.expense_total > 0) && (
+        <>
+          <div onClick={() => setShowLedger(!showLedger)}
+            style={{ color: "#c9a227", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 6, cursor: "pointer" }}>
+            📒 Accountant{ledger.year > 0 ? ` · year ${ledger.year}` : ""} {showLedger ? "▾" : "▸"}
+          </div>
+          {showLedger && <LedgerView l={ledger} fmt={fmt} />}
+        </>
+      )}
       <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 6 }}>Top routes (back &amp; forth)</div>
       {routes.length === 0 && <div style={{ color: "#56708e", fontSize: 9 }}>no active routes right now</div>}
       {routes.map((r, i) => (
@@ -256,6 +270,52 @@ function HouseDetail({ h, onClose, onChronicle }:
       <div onClick={() => onChronicle(h.name)} style={{ color: "#88a8c8", fontSize: 9, cursor: "pointer", marginTop: 5, textDecoration: "underline" }}>
         View family chronicle →
       </div>
+    </div>
+  );
+}
+
+/** The yearly T-account ledger (Accountant view): income | expenditure + net +
+ *  warehouse stock. Per-city tax/profit lines arrive sorted largest → lowest. */
+function LedgerView({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string }) {
+  const head: React.CSSProperties = { color: "#6a86a6", fontSize: 8, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 2 };
+  const sub: React.CSSProperties = { borderTop: "1px solid #1b2a3c", marginTop: 2, paddingTop: 2, fontSize: 9, fontWeight: 700, textAlign: "right" };
+  const Line = ({ label, amt, neg }: { label: string; amt: number; neg?: boolean }) => (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 4, fontSize: 9 }}>
+      <span style={{ color: "#8ca4bc", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+      <span style={{ color: neg ? "#e0a0a0" : "#7fcf8f" }}>{neg ? "−" : "+"}{fmt(Math.abs(amt))}</span>
+    </div>
+  );
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 4, padding: 6, border: "1px solid #1b2a3c", borderRadius: 4, background: "#0a1119" }}>
+      <div>
+        <div style={head}>Income</div>
+        {l.trade_profit.map((c, i) => <Line key={i} label={`Trade · ${c.label}`} amt={c.amount} />)}
+        {l.office_income > 0 && <Line label="Offices" amt={l.office_income} />}
+        {l.estate_income > 0 && <Line label="Estates" amt={l.estate_income} />}
+        <div style={{ ...sub, color: "#7fcf8f" }}>+{fmt(l.income_total)}</div>
+      </div>
+      <div>
+        <div style={head}>Expenditure</div>
+        {l.import_tax.map((c, i) => <Line key={`i${i}`} label={`Import tax · ${c.label}`} amt={c.amount} neg />)}
+        {l.export_tax.map((c, i) => <Line key={`e${i}`} label={`Export tax · ${c.label}`} amt={c.amount} neg />)}
+        {l.estate_tax > 0 && <Line label="Estate tax" amt={l.estate_tax} neg />}
+        {l.upkeep > 0 && <Line label="Upkeep" amt={l.upkeep} neg />}
+        {l.fleet_cost > 0 && <Line label="Fleet decay" amt={l.fleet_cost} neg />}
+        {l.lost_cargo > 0 && <Line label="Lost cargo" amt={l.lost_cargo} neg />}
+        {l.events > 0 && <Line label="Misfortune" amt={l.events} neg />}
+        {l.consumption > 0 && <Line label="Feasts & consumption" amt={l.consumption} neg />}
+        <div style={{ ...sub, color: "#e0a0a0" }}>−{fmt(l.expense_total)}</div>
+      </div>
+      <div style={{ gridColumn: "1 / -1", borderTop: "1px solid #24364e", paddingTop: 3, display: "flex", justifyContent: "space-between" }}>
+        <span style={{ color: "#cfe0f4", fontWeight: 700, fontSize: 10 }}>NET</span>
+        <span style={{ color: l.net >= 0 ? "#9fe0a8" : "#e88", fontWeight: 700, fontSize: 10 }}>{l.net >= 0 ? "+" : "−"}{fmt(Math.abs(l.net))}</span>
+      </div>
+      {l.warehouse.length > 0 && (
+        <div style={{ gridColumn: "1 / -1" }}>
+          <div style={head}>Warehouse · {l.warehouse_city}</div>
+          <div style={{ fontSize: 10, color: "#bcd0e4" }}>{l.warehouse.map((w) => `${goodIcon(w.label)}${fmt(w.amount)}`).join("  ")}</div>
+        </div>
+      )}
     </div>
   );
 }

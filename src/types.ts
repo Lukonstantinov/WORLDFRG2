@@ -343,6 +343,7 @@ export interface OfficeHere {
 }
 /** A merchant family (trading house) — for the Houses panel + settlement window. */
 export interface HouseBrief {
+  idx?: number;        // index into sim.houses — key for the ledger query
   name: string;        // "House Cassii"
   head_name: string;   // "Marcus Cassii"
   home_hub: number;    // home hub id
@@ -379,6 +380,39 @@ export interface HouseTimelineEvent {
   year: number;
   kind: string; // founded | succession | monopoly | control_gained | control_lost | branch | loss | dissolved
   text: string;
+}
+
+/** One labelled money line in the Accountant view (per-city tax/profit or a
+ *  warehouse good); per-city lists arrive sorted largest → lowest. */
+export interface LedgerLine {
+  label: string;
+  amount: number;
+}
+
+/** A house/guild's yearly T-account ledger (the last completed year). */
+export interface HouseLedger {
+  name: string;
+  is_guild: boolean;
+  year: number;
+  // Income
+  trade_profit: LedgerLine[];
+  office_income: number;
+  estate_income: number;
+  income_total: number;
+  // Expenditure
+  import_tax: LedgerLine[];
+  export_tax: LedgerLine[];
+  estate_tax: number;
+  upkeep: number;
+  fleet_cost: number;
+  lost_cargo: number;
+  events: number;
+  consumption: number;
+  expense_total: number;
+  net: number;
+  // Warehouse stock at the home city
+  warehouse_city: string;
+  warehouse: LedgerLine[];
 }
 
 export interface HouseHistory {
