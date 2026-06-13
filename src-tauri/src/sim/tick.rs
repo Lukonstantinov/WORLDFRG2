@@ -172,6 +172,14 @@ const FLEET_UPKEEP_FRAC: f32 = 0.02;
 /// Per-vessel monthly chance of being lost to wear (rot, storms, breakdown) — the
 /// slow decay of ships & caravans, so fleets must be continually replaced.
 const FLEET_DECAY_CHANCE: f32 = 0.012;
+/// Civic taxes a city levies on a house's trade — export on goods leaving the
+/// origin, import on goods arriving at the destination. Paid by the house, funding
+/// the city (into its civic_pool → people). Guilds pay HEAVIER taxes (civic duty).
+const EXPORT_TAX_RATE: f32 = 0.02;
+const IMPORT_TAX_RATE: f32 = 0.03;
+const GUILD_TAX_MULT: f32 = 1.6;
+/// Tax a city takes on an estate's rent paid to its owning house.
+const ESTATE_TAX_RATE: f32 = 0.10;
 const FLEET_LOSS_MULT: f32 = 0.6;   // voyage-loss reduction
 const FLEET_SHIP_DISCOUNT: f32 = 0.8;
 const POLITICAL_POWER_BONUS: f32 = 0.15;
@@ -522,6 +530,38 @@ pub struct JournalEntry {
     pub text: String,
 }
 
+/// Phase G — one year of a merchant house's books (the Accountant view). All
+/// amounts in grain-equivalent; the per-city Vecs are `(hub_index, amount)` and
+/// are shown largest→lowest in the UI. Serde-default so old campaigns load empty.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct LedgerAcc {
+    pub year: u32,
+    // ── Income ──
+    pub trade_profit_by_city: Vec<(u32, f32)>,
+    pub office_income: f32,
+    pub estate_income: f32,
+    // ── Expenditure ──
+    pub import_tax_by_city: Vec<(u32, f32)>,
+    pub export_tax_by_city: Vec<(u32, f32)>,
+    pub estate_tax: f32,
+    pub upkeep: f32,
+    pub fleet_cost: f32,
+    pub lost_cargo: f32,
+    pub events: f32,
+    pub consumption: f32,
+}
+
+impl LedgerAcc {
+    /// Add `amt` to the running total for `city` in a per-city accumulator.
+    pub fn add_city(v: &mut Vec<(u32, f32)>, city: u32, amt: f32) {
+        if let Some(e) = v.iter_mut().find(|e| e.0 == city) {
+            e.1 += amt;
+        } else {
+            v.push((city, amt));
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CampaignSim {
     pub seed: u64,
@@ -570,6 +610,14 @@ pub struct CampaignSim {
     /// hubs were seeded with absolute (population-independent) production.
     #[serde(default)]
     pub percap_migrated: bool,
+    /// Phase G — per-house yearly ledgers (Accountant view), indexed to match
+    /// `houses`. `house_ledger` = the running current year; `house_ledger_prev` =
+    /// the last COMPLETED year (the one the Accountant displays). Resized to the
+    /// house count each advance; serde-default → empty on old saves.
+    #[serde(default)]
+    pub house_ledger: Vec<LedgerAcc>,
+    #[serde(default)]
+    pub house_ledger_prev: Vec<LedgerAcc>,
     /// Empty-land sites a wealthy founder may colonize with an estate (precomputed at
     /// the Economy step). Consumed as colonies are founded; empty on old saves.
     #[serde(default)]
@@ -859,6 +907,18 @@ impl CampaignSim {
             let n = self.hubs.len();
             let doy = self.day_of_year();
 
+            // Phase G: keep the per-house ledgers aligned to the house list, and roll
+            // the year over on the New Year — the just-finished year becomes the
+            // Accountant's displayed `_prev`, and a fresh current year starts.
+            self.house_ledger.resize(self.houses.len(), LedgerAcc::default());
+            if tick % TICKS_PER_YEAR == 0 {
+                self.house_ledger_prev = self.house_ledger.clone();
+                let yr = tick / TICKS_PER_YEAR;
+                for l in self.house_ledger.iter_mut() {
+                    *l = LedgerAcc { year: yr, ..Default::default() };
+                }
+            }
+
             // Expire finished events.
             self.active_events.retain(|e| e.until_tick > tick);
             // Production multipliers from active events (per hub/good, default 1).
@@ -1076,6 +1136,10 @@ impl CampaignSim {
             let home = self.houses[hi].hub as usize;
             if home < self.hubs.len() {
                 self.hubs[home].civic_pool += consumption;
+            }
+            if hi < self.house_ledger.len() {
+                self.house_ledger[hi].upkeep += upkeep;
+                self.house_ledger[hi].consumption += consumption;
             }
         }
     }
@@ -1375,6 +1439,17 @@ impl CampaignSim {
                         if owner >= 0 && (owner as usize) < self.houses.len()
                             && !self.houses[owner as usize].defunct {
                             self.houses[owner as usize].wealth += cut;
+                            // Phase G: estate income, taxed by the parent city.
+                            let etax = cut * ESTATE_TAX_RATE;
+                            self.houses[owner as usize].wealth -= etax;
+                            let parent = self.hubs[a].parent;
+                            if parent >= 0 && (parent as usize) < self.hubs.len() {
+                                self.hubs[parent as usize].civic_pool += etax;
+                            }
+                            if (owner as usize) < self.house_ledger.len() {
+                                self.house_ledger[owner as usize].estate_income += cut;
+                                self.house_ledger[owner as usize].estate_tax += etax;
+                            }
                         } else {
                             let p = self.hubs[a].parent;
                             if p >= 0 && (p as usize) < self.hubs.len() {
@@ -1457,6 +1532,20 @@ impl CampaignSim {
                         let profit = margin * mult;
                         self.houses[oi].wealth += profit;
                         self.houses[oi].volume += amount;
+                        // Phase G: civic taxes on this trade (export at origin a,
+                        // import at destination b) — paid by the house, funding the
+                        // cities (civic_pool → people). Guilds pay heavier taxes.
+                        let tax_mult = if self.houses[oi].is_guild { GUILD_TAX_MULT } else { 1.0 };
+                        let export_tax = value * EXPORT_TAX_RATE * tax_mult;
+                        let import_tax = value * IMPORT_TAX_RATE * tax_mult;
+                        self.houses[oi].wealth -= export_tax + import_tax;
+                        self.hubs[a].civic_pool += export_tax;
+                        self.hubs[b].civic_pool += import_tax;
+                        if oi < self.house_ledger.len() {
+                            LedgerAcc::add_city(&mut self.house_ledger[oi].trade_profit_by_city, b as u32, profit);
+                            LedgerAcc::add_city(&mut self.house_ledger[oi].export_tax_by_city, a as u32, export_tax);
+                            LedgerAcc::add_city(&mut self.house_ledger[oi].import_tax_by_city, b as u32, import_tax);
+                        }
                         // Track cumulative profit per good (for "most profitable resources").
                         let gp = &mut self.houses[oi].good_profit;
                         if gp.len() <= g { gp.resize(g + 1, 0.0); }
@@ -1558,6 +1647,10 @@ impl CampaignSim {
         if self.houses[owner].charters.contains(&g) { mult *= CHARTER_RENT; }
         let profit = amount * (pa_sell - pb_buy - freight).max(0.0) * mult;
         self.houses[owner].wealth += profit;
+        if owner < self.house_ledger.len() {
+            // Round-trip arbitrage profit, realised selling at the home hub `a`.
+            LedgerAcc::add_city(&mut self.house_ledger[owner].trade_profit_by_city, a as u32, profit);
+        }
         self.houses[owner].volume += amount;
         let gp = &mut self.houses[owner].good_profit;
         if gp.len() <= g { gp.resize(g + 1, 0.0); }
@@ -2544,7 +2637,11 @@ impl CampaignSim {
             let fleet_total =
                 self.houses[hi].fleet_sea + self.houses[hi].fleet_river + self.houses[hi].fleet_caravan;
             if fleet_total > 0 {
-                self.houses[hi].wealth -= fleet_total as f32 * SHIP_COST * FLEET_UPKEEP_FRAC;
+                let fleet_cost = fleet_total as f32 * SHIP_COST * FLEET_UPKEEP_FRAC;
+                self.houses[hi].wealth -= fleet_cost;
+                if hi < self.house_ledger.len() {
+                    self.house_ledger[hi].fleet_cost += fleet_cost;
+                }
                 if hash01(self.seed, tick as u64 ^ 0x5EA1, hi as u64)
                     < FLEET_DECAY_CHANCE * fleet_total as f32
                 {
@@ -2964,6 +3061,7 @@ mod tests {
             k: 0.6, margin: 0.05, need_scale: 1.0, world_w: 100.0, world_h: 100.0, last_tick_ms: 0.0,
             last_month_pop: 0.0, last_month_index: 0.0, seed_house_count: 0,
             fleets_migrated: true, tech_factor: 1.0, percap_migrated: true,
+            house_ledger: Vec::new(), house_ledger_prev: Vec::new(),
             colonizable: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
             recent_trades: vec![],

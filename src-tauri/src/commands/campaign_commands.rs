@@ -880,6 +880,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         fleets_migrated: true, // new campaigns already seed fleets
         tech_factor: 1.0,
         percap_migrated: true, // hubs seeded with base_per_capita directly
+        house_ledger: Vec::new(),
+        house_ledger_prev: Vec::new(),
         colonizable: econ.colonizable_sites.clone(),
         diag_shipments: 0,
         diag_by_house: 0,
