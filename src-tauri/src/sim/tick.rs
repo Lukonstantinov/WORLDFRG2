@@ -1479,6 +1479,9 @@ impl CampaignSim {
                         let oi = owner as usize;
                         let invested = amount * pa;
                         self.houses[oi].wealth = (self.houses[oi].wealth - invested).max(0.0);
+                        if oi < self.house_ledger.len() {
+                            self.house_ledger[oi].lost_cargo += invested;
+                        }
                         self.damage_fleet(oi, sea);
                         let gn = self.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
                         let hn = self.houses[oi].name.clone();
@@ -1747,6 +1750,20 @@ impl CampaignSim {
             "fire" => {
                 for g in 0..self.goods.len() {
                     self.hubs[hub].stock[g] *= 1.0 - mag;
+                }
+                // The warehouses that burn belong to the city's merchant houses:
+                // every resident house loses a slice of its wealth (stored stock
+                // value), the heavier the richer it is — a stabilizing loss that
+                // scales with prosperity. Recorded in the Accountant's misfortune line.
+                for hi in 0..self.houses.len() {
+                    if self.houses[hi].defunct || self.houses[hi].hub as usize != hub {
+                        continue;
+                    }
+                    let loss = self.houses[hi].wealth * mag * 0.5;
+                    self.houses[hi].wealth -= loss;
+                    if hi < self.house_ledger.len() {
+                        self.house_ledger[hi].events += loss;
+                    }
                 }
             }
             "plague" => {
