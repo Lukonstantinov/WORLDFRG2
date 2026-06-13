@@ -408,6 +408,7 @@ export interface HouseLedger {
   lost_cargo: number;
   events: number;
   consumption: number;
+  inflation: number;
   expense_total: number;
   net: number;
   // Warehouse stock at the home city

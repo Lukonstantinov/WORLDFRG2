@@ -304,6 +304,7 @@ function LedgerView({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string }) 
         {l.lost_cargo > 0 && <Line label="Lost cargo" amt={l.lost_cargo} neg />}
         {l.events > 0 && <Line label="Misfortune" amt={l.events} neg />}
         {l.consumption > 0 && <Line label="Feasts & consumption" amt={l.consumption} neg />}
+        {l.inflation > 0 && <Line label="Inflation" amt={l.inflation} neg />}
         <div style={{ ...sub, color: "#e0a0a0" }}>−{fmt(l.expense_total)}</div>
       </div>
       <div style={{ gridColumn: "1 / -1", borderTop: "1px solid #24364e", paddingTop: 3, display: "flex", justifyContent: "space-between" }}>

@@ -146,9 +146,15 @@ function layout(specs: GoodSpec[]) {
     for (const id of inGraph) {
       const s = byId.get(id);
       if (!isRecipe(s)) continue;
-      let d = 0;
+      // A manufactured good sits one column to the RIGHT of every input it
+      // consumes — raw inputs (depth 0) push the product to depth 1, a product
+      // built from another product lands at depth 2, etc. (Previously depth only
+      // advanced for inputs that were themselves recipes, so a plain
+      // raw→product chain left both nodes at depth 0 and the whole graph
+      // collapsed into a single tangled column.)
+      let d = 1;
       for (const inp of s!.inputs ?? []) {
-        if (isRecipe(byId.get(inp.good))) d = Math.max(d, (depth.get(inp.good) ?? 0) + 1);
+        if (inGraph.has(inp.good)) d = Math.max(d, (depth.get(inp.good) ?? 0) + 1);
       }
       if (depth.get(id) !== d) { depth.set(id, d); changed = true; }
     }

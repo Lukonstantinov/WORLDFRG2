@@ -1549,6 +1549,7 @@ pub struct HouseLedger {
     pub lost_cargo: f32,
     pub events: f32,
     pub consumption: f32,
+    pub inflation: f32,
     pub expense_total: f32,
     pub net: f32,
     // Warehouse stock held at the home city (what a fire/spoilage destroys).
@@ -1591,8 +1592,14 @@ pub fn campaign_house_ledger(db: State<'_, WorldDb>, house: usize) -> Result<Opt
     let export_tax = to_lines(&led.export_tax_by_city);
     let income_total = trade_profit.iter().map(|l| l.amount).sum::<f32>() + led.office_income + led.estate_income;
     let tax_total = import_tax.iter().map(|l| l.amount).sum::<f32>() + export_tax.iter().map(|l| l.amount).sum::<f32>();
-    let expense_total =
-        tax_total + led.estate_tax + led.upkeep + led.fleet_cost + led.lost_cargo + led.events + led.consumption;
+    let expense_total = tax_total
+        + led.estate_tax
+        + led.upkeep
+        + led.fleet_cost
+        + led.lost_cargo
+        + led.events
+        + led.consumption
+        + led.inflation;
     // Warehouse = the home city's stored goods (what a warehouse fire destroys).
     let (warehouse, warehouse_city) = match sim.hubs.get(h.hub as usize) {
         Some(hb) => {
@@ -1628,6 +1635,7 @@ pub fn campaign_house_ledger(db: State<'_, WorldDb>, house: usize) -> Result<Opt
         lost_cargo: led.lost_cargo,
         events: led.events,
         consumption: led.consumption,
+        inflation: led.inflation,
         expense_total,
         net: income_total - expense_total,
         warehouse_city,

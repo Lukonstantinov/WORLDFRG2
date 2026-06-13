@@ -180,6 +180,9 @@ const IMPORT_TAX_RATE: f32 = 0.03;
 const GUILD_TAX_MULT: f32 = 1.6;
 /// Tax a city takes on an estate's rent paid to its owning house.
 const ESTATE_TAX_RATE: f32 = 0.10;
+/// Yearly inflation — coin debasement + rising prices steadily eat the real value
+/// of a hoarded fortune (applied once a year to every house's wealth).
+const INFLATION_PER_YEAR: f32 = 0.025;
 const FLEET_LOSS_MULT: f32 = 0.6;   // voyage-loss reduction
 const FLEET_SHIP_DISCOUNT: f32 = 0.8;
 const POLITICAL_POWER_BONUS: f32 = 0.15;
@@ -549,6 +552,7 @@ pub struct LedgerAcc {
     pub lost_cargo: f32,
     pub events: f32,
     pub consumption: f32,
+    pub inflation: f32,
 }
 
 impl LedgerAcc {
@@ -912,6 +916,18 @@ impl CampaignSim {
             // Accountant's displayed `_prev`, and a fresh current year starts.
             self.house_ledger.resize(self.houses.len(), LedgerAcc::default());
             if tick % TICKS_PER_YEAR == 0 {
+                // Yearly inflation erodes every fortune's real value, recorded in the
+                // year that is now closing — then archive it for the Accountant.
+                for hi in 0..self.houses.len() {
+                    if self.houses[hi].defunct {
+                        continue;
+                    }
+                    let infl = self.houses[hi].wealth.max(0.0) * INFLATION_PER_YEAR;
+                    self.houses[hi].wealth -= infl;
+                    if hi < self.house_ledger.len() {
+                        self.house_ledger[hi].inflation += infl;
+                    }
+                }
                 self.house_ledger_prev = self.house_ledger.clone();
                 let yr = tick / TICKS_PER_YEAR;
                 for l in self.house_ledger.iter_mut() {
