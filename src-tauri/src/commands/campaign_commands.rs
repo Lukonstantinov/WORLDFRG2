@@ -632,6 +632,11 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                     production[p.good] += p.amount;
                 }
             }
+            // The static economy emits NORMALISED [0,1] outputs; lift them into
+            // readable per-day quantities. Uniform & balance-neutral: need_scale,
+            // stock and prices all scale with it, so only the displayed magnitudes
+            // change (trade stops looking like "≈0").
+            for v in production.iter_mut() { *v *= 1000.0; }
             let mut price: Vec<f32> = goods.iter().map(|g| g.base_value).collect();
             if let Some(m) = &eh.market {
                 for mg in &m.prices {
@@ -950,7 +955,14 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                 price: hub.price[g],
                 base_value: sim.goods[g].base_value,
                 stock: hub.stock[g],
-                need: sim.goods[g].desire * hub.population,
+                // The REAL per-tick demand the sim consumes (matches base_need in
+                // tick.rs): pop × tier-weight × desire × need_scale × demand pressure.
+                // Showing raw desire×pop made every good read "0% of need".
+                need: hub.population
+                    * [1.0f32, 0.45, 0.22][sim.goods[g].need_tier.min(2) as usize]
+                    * sim.goods[g].desire.max(0.0)
+                    * sim.need_scale
+                    * crate::sim::tick::DEMAND_PRESSURE,
                 production: hub.production[g],
                 world_min: if wmin.0.is_finite() { wmin.0 } else { 0.0 },
                 world_min_hub: wmin.1.to_string(),
