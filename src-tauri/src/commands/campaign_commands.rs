@@ -624,10 +624,12 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 base_value: spec.map(|s| s.base_value).filter(|v| *v > 0.0).unwrap_or(1.0),
                 desire: spec.map(|s| s.desire).unwrap_or(0.4),
                 food,
+                fungible_input: crate::sim::manufacture::is_fungible_input_category(&cat),
                 bulk: spec.map(|s| s.bulk).filter(|v| *v > 0.0).unwrap_or(1.0),
                 perishable: spec.map(|s| s.perishable.max(0.0)).unwrap_or(0.0),
                 inputs,
                 labor: spec.map(|s| s.labor).filter(|v| *v > 0.0).unwrap_or(1.0),
+                consumption_interval: spec.map(|s| s.consumption_interval).filter(|v| *v > 0.0).unwrap_or(30.0),
             }
         })
         .collect();
@@ -692,6 +694,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 sent_food: 0.7,
                 sent_prosperity: 0.5,
                 sent_stability: 0.8,
+                civic_pool: 0.0,
                 history: Vec::new(),
                 in_by_sea: 0.0,
                 in_by_land: 0.0,
@@ -879,6 +882,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         fleets_migrated: true, // new campaigns already seed fleets
         tech_factor: 1.0,
         percap_migrated: true, // hubs seeded with base_per_capita directly
+        house_ledger: Vec::new(),
+        house_ledger_prev: Vec::new(),
+        house_barred: Vec::new(),
         colonizable: econ.colonizable_sites.clone(),
         diag_shipments: 0,
         diag_by_house: 0,
@@ -1170,6 +1176,10 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
 /// One merchant family for the Houses panel / settlement window.
 #[derive(Serialize)]
 pub struct HouseBrief {
+    /// Index into `sim.houses` — the key for per-house detail queries (the ledger).
+    #[serde(default)] pub idx: u32,
+    /// Phase G — city names this house is currently BARRED from (active trade wars).
+    #[serde(default)] pub barred: Vec<String>,
     pub name: String,        // "House Cassii"
     pub head_name: String,   // "Marcus Cassii"
     pub home_hub: u32,       // home hub id
@@ -1304,6 +1314,7 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
         for &p in &ctrl_hubs { if p != hub { cities.push(format!("{} (controlled)", hub_name(p as u32))); } }
         for &p in &trade_hubs { if p != hub && !ctrl_hubs.contains(&p) { cities.push(hub_name(p as u32)); } }
         HouseBrief {
+            idx: hi as u32,
             name: h.name.clone(),
             head_name: h.head_name.clone(),
             home_hub: sim.hubs.get(hub).map(|x| x.id).unwrap_or(0),
@@ -1324,6 +1335,7 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
             controls,
             partners,
             cities,
+            barred: sim.house_barred.get(hi).map(|v| v.iter().map(|&c| hub_name(c)).collect()).unwrap_or_default(),
             archetype: h.archetype,
             archetype_label: crate::sim::tick::archetype_label(h.archetype).to_string(),
             archetype_perk: crate::sim::tick::archetype_perk(h.archetype).to_string(),
@@ -1513,6 +1525,131 @@ pub fn campaign_get_houses(db: State<'_, WorldDb>) -> Result<Vec<HouseBrief>, St
         Some(sim) => build_house_briefs(&sim),
         None => vec![],
     })
+}
+
+/// One labelled money line in the Accountant view (a city's tax/profit, or a
+/// warehouse good). Per-city lists are sorted largest → lowest.
+#[derive(Serialize)]
+pub struct LedgerLine {
+    pub label: String,
+    pub amount: f32,
+}
+
+/// A house/guild's yearly books for the Accountant tab (the last COMPLETED year).
+#[derive(Serialize)]
+pub struct HouseLedger {
+    pub name: String,
+    pub is_guild: bool,
+    pub year: u32,
+    // ── Income ──
+    pub trade_profit: Vec<LedgerLine>, // per city, largest first
+    pub office_income: f32,
+    pub estate_income: f32,
+    pub income_total: f32,
+    // ── Expenditure ──
+    pub import_tax: Vec<LedgerLine>,
+    pub export_tax: Vec<LedgerLine>,
+    pub estate_tax: f32,
+    pub upkeep: f32,
+    pub fleet_cost: f32,
+    pub lost_cargo: f32,
+    pub events: f32,
+    pub consumption: f32,
+    pub inflation: f32,
+    pub expense_total: f32,
+    pub net: f32,
+    /// Monthly wealth samples through the year (for the Accountant's wealth graph).
+    pub wealth_graph: Vec<f32>,
+    // Warehouse stock held at the home city (what a fire/spoilage destroys).
+    pub warehouse_city: String,
+    pub warehouse: Vec<LedgerLine>,
+}
+
+/// The yearly T-account ledger for one house/guild (Accountant view).
+#[tauri::command]
+pub fn campaign_house_ledger(db: State<'_, WorldDb>, house: usize) -> Result<Option<HouseLedger>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let Some(sim) = get_sim(&conn)? else { return Ok(None); };
+    if house >= sim.houses.len() {
+        return Ok(None);
+    }
+    let h = &sim.houses[house];
+    // Prefer the last COMPLETED year; fall back to the running year early on.
+    let prev_ok = sim
+        .house_ledger_prev
+        .get(house)
+        .map(|l| l.year > 0 || !l.trade_profit_by_city.is_empty());
+    let led = if prev_ok == Some(true) {
+        &sim.house_ledger_prev[house]
+    } else if let Some(l) = sim.house_ledger.get(house) {
+        l
+    } else {
+        return Ok(None);
+    };
+    let city_name = |idx: u32| sim.hubs.get(idx as usize).map(|hb| hb.name.clone()).unwrap_or_default();
+    let to_lines = |v: &Vec<(u32, f32)>| -> Vec<LedgerLine> {
+        let mut out: Vec<LedgerLine> = v
+            .iter()
+            .map(|&(c, a)| LedgerLine { label: city_name(c), amount: a })
+            .collect();
+        out.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
+        out
+    };
+    let trade_profit = to_lines(&led.trade_profit_by_city);
+    let import_tax = to_lines(&led.import_tax_by_city);
+    let export_tax = to_lines(&led.export_tax_by_city);
+    let income_total = trade_profit.iter().map(|l| l.amount).sum::<f32>() + led.office_income + led.estate_income;
+    let tax_total = import_tax.iter().map(|l| l.amount).sum::<f32>() + export_tax.iter().map(|l| l.amount).sum::<f32>();
+    let expense_total = tax_total
+        + led.estate_tax
+        + led.upkeep
+        + led.fleet_cost
+        + led.lost_cargo
+        + led.events
+        + led.consumption
+        + led.inflation;
+    // Warehouse = the home city's stored goods (what a warehouse fire destroys).
+    let (warehouse, warehouse_city) = match sim.hubs.get(h.hub as usize) {
+        Some(hb) => {
+            let mut w: Vec<LedgerLine> = hb
+                .stock
+                .iter()
+                .enumerate()
+                .filter(|(_, &s)| s > 0.5)
+                .map(|(g, &s)| LedgerLine {
+                    label: sim.goods.get(g).map(|gg| gg.name.clone()).unwrap_or_default(),
+                    amount: s,
+                })
+                .collect();
+            w.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
+            w.truncate(10);
+            (w, hb.name.clone())
+        }
+        None => (vec![], String::new()),
+    };
+    Ok(Some(HouseLedger {
+        name: h.name.clone(),
+        is_guild: h.is_guild,
+        year: led.year,
+        trade_profit,
+        office_income: led.office_income,
+        estate_income: led.estate_income,
+        income_total,
+        import_tax,
+        export_tax,
+        estate_tax: led.estate_tax,
+        upkeep: led.upkeep,
+        fleet_cost: led.fleet_cost,
+        lost_cargo: led.lost_cargo,
+        events: led.events,
+        consumption: led.consumption,
+        inflation: led.inflation,
+        expense_total,
+        net: income_total - expense_total,
+        wealth_graph: led.wealth_samples.clone(),
+        warehouse_city,
+        warehouse,
+    }))
 }
 
 #[derive(Serialize)]

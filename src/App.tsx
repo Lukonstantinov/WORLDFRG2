@@ -16,6 +16,7 @@ import { ElevationLegend } from "./ui/ElevationLegend";
 import { ElevationHistogram } from "./ui/ElevationHistogram";
 import { GoodsEditor } from "./ui/GoodsEditor";
 import { GoodsChainReview } from "./ui/GoodsChainReview";
+import { GoodDetailPanel } from "./ui/GoodDetailPanel";
 import { ImportWorldDialog } from "./ui/ImportWorldDialog";
 import { useWorldStore } from "./state/worldStore";
 import { useUIStore } from "./state/uiStore";
@@ -528,6 +529,7 @@ export default function App() {
 
       <GoodsEditor />
       <GoodsChainReview />
+      <GoodDetailPanel />
       {showDialog && <NewWorldDialog onCreated={() => setShowDialog(false)} />}
       {showExport && <ExportDialog name={meta?.name || "world"} onClose={() => setShowExport(false)} />}
       {showImport && <ImportWorldDialog onClose={() => setShowImport(false)} />}

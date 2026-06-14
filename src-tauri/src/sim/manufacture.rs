@@ -89,6 +89,12 @@ pub fn apply_manufacturing(
     // Median population → labor scale, so big cities out-manufacture villages.
     let median_pop = median(hub_pop).max(1.0);
 
+    // Fungible input substitutes: for each input good in a FUNGIBLE category
+    // (interchangeable as an ingredient — e.g. bay salt vs rock salt both cure
+    // fish), the other enabled goods of that category can stand in when the named
+    // input is short. NOT applied to structural inputs like metals (gold ≠ iron).
+    let subs = fungible_substitutes(specs);
+
     for (h, pv) in prod.iter_mut().enumerate() {
         if pv.len() < ng {
             pv.resize(ng, 0.0);
@@ -104,13 +110,20 @@ pub fn apply_manufacturing(
             if labor_cap <= 0.0 {
                 continue;
             }
-            // How many output units the on-hand inputs can support.
+            // How many output units the on-hand inputs can support (named good +
+            // any fungible substitutes for it).
             let mut by_inputs = f32::INFINITY;
             for &(idx, qty) in inputs {
                 if qty <= 0.0 {
                     continue;
                 }
-                by_inputs = by_inputs.min(pv[idx] / qty);
+                let mut avail = pv[idx];
+                if let Some(sibs) = subs.get(&idx) {
+                    for &s in sibs {
+                        avail += pv[s];
+                    }
+                }
+                by_inputs = by_inputs.min(avail / qty);
             }
             if !by_inputs.is_finite() || by_inputs <= 0.0 {
                 continue;
@@ -120,13 +133,57 @@ pub fn apply_manufacturing(
                 continue;
             }
             for &(idx, qty) in inputs {
-                pv[idx] = (pv[idx] - made * qty).max(0.0);
+                let mut need = made * qty;
+                // Spend the named good first, then its fungible substitutes.
+                let take = pv[idx].min(need);
+                pv[idx] -= take;
+                need -= take;
+                if need > 0.0 {
+                    if let Some(sibs) = subs.get(&idx) {
+                        for &s in sibs {
+                            if need <= 0.0 {
+                                break;
+                            }
+                            let t = pv[s].min(need);
+                            pv[s] -= t;
+                            need -= t;
+                        }
+                    }
+                }
             }
             pv[g] += made;
         }
     }
 
     warnings
+}
+
+/// Input categories whose members substitute freely as an ingredient. Salt types
+/// (rock/bay) are interchangeable as a preservative cure; this list is
+/// deliberately narrow so structural inputs (metals, fibres) are NOT swapped.
+pub fn is_fungible_input_category(cat: &str) -> bool {
+    matches!(cat, "preservative")
+}
+
+/// Map each good index in a fungible input category → the OTHER enabled goods of
+/// that category that may substitute for it as a recipe input.
+fn fungible_substitutes(specs: &[GoodSpec]) -> HashMap<usize, Vec<usize>> {
+    let mut out: HashMap<usize, Vec<usize>> = HashMap::new();
+    for (g, spec) in specs.iter().enumerate() {
+        if spec.category.is_empty() || !is_fungible_input_category(&spec.category) {
+            continue;
+        }
+        let sibs: Vec<usize> = specs
+            .iter()
+            .enumerate()
+            .filter(|(j, s)| *j != g && s.enabled && s.category == spec.category)
+            .map(|(j, _)| j)
+            .collect();
+        if !sibs.is_empty() {
+            out.insert(g, sibs);
+        }
+    }
+    out
 }
 
 /// Kahn topological sort over the manufactured-good dependency subgraph. An edge
@@ -197,7 +254,7 @@ mod tests {
             enabled: true, domain: Domain::Continental, distribution: Distribution::Local,
             rarity: 0.5, desire: 0.5, network_luxury: false, builtin: false, deposit: None,
             scoring: None, category: "x".into(), need_tier: 1, base_value: 1.0,
-            bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0,
+            bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0, consumption_interval: 30.0,
         }
     }
     fn made(id: &str, inputs: Vec<(&str, f32)>) -> GoodSpec {
@@ -245,6 +302,36 @@ mod tests {
         let pops = vec![1000.0];
         let warnings = apply_manufacturing(&mut prod, &specs, &pops);
         assert!(warnings.iter().any(|w| w.contains("cycle")), "cycle reported: {warnings:?}");
+    }
+
+    #[test]
+    fn salt_substitutes_within_preservative_category() {
+        // salted_herring ← herring + salt; the hub holds herring + BAY salt only
+        // (no rock salt). Bay salt must stand in (both are "preservative").
+        let mut salt = raw("salt"); salt.category = "preservative".into();
+        let mut bay = raw("bay_salt"); bay.category = "preservative".into();
+        let herring = raw("herring");
+        let cure = made("salted_herring", vec![("herring", 1.0), ("salt", 0.3)]);
+        let specs = vec![salt, bay, herring, cure]; // idx 0 salt,1 bay,2 herring,3 cure
+        let mut prod = vec![vec![0.0, 10.0, 10.0, 0.0]]; // no rock salt, has bay salt
+        let pops = vec![1000.0];
+        apply_manufacturing(&mut prod, &specs, &pops);
+        assert!(prod[0][3] > 0.0, "herring cured using bay salt as the preservative");
+        assert!(prod[0][1] < 10.0, "bay salt was consumed as the substitute cure");
+    }
+
+    #[test]
+    fn metals_do_not_substitute_as_inputs() {
+        // metalware ← iron; the hub has only GOLD (also category 'metal'). Gold must
+        // NOT stand in for structural iron.
+        let mut iron = raw("iron"); iron.category = "metal".into();
+        let mut gold = raw("gold"); gold.category = "metal".into();
+        let arms = made("metalware", vec![("iron", 1.0)]);
+        let specs = vec![iron, gold, arms];
+        let mut prod = vec![vec![0.0, 10.0, 0.0]]; // only gold
+        let pops = vec![1000.0];
+        apply_manufacturing(&mut prod, &specs, &pops);
+        assert_eq!(prod[0][2], 0.0, "no iron → no metalware (gold does not substitute)");
     }
 
     #[test]

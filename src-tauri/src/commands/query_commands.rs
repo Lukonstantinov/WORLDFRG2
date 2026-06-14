@@ -3580,7 +3580,39 @@ pub fn compute_economy(
         }
     }
     let mparams = market::MarketParams::default();
-    let mkt = market::solve(&mhubs, &mgoods, &routes_m, &mparams);
+    let mut mkt = market::solve(&mhubs, &mgoods, &routes_m, &mparams);
+
+    // GUILD manufacture from IMPORTS (the demand→production→raw-demand loop).
+    // The first `apply_manufacturing` only consumed each hub's LOCAL production.
+    // Now that the market has delivered raws, a hub's post-trade STOCK holds the
+    // wool / salt / ore it imported, so its manufacture guilds can turn those into
+    // finished exports too — e.g. a herring port that imports SALT now cures
+    // SALTED HERRING, and the demand for it pulls more salt + herring in. We
+    // manufacture from post-trade stock, credit the extra finished output to
+    // production, and re-solve ONCE so the new goods flow out.
+    {
+        let mut avail: Vec<Vec<f32>> = mkt.stocks.clone();
+        let before: Vec<Vec<f32>> = avail.clone();
+        crate::sim::manufacture::apply_manufacturing(&mut avail, &specs, &hub_pop);
+        let mut changed = false;
+        for hh in 0..nn {
+            for g in 0..gc {
+                if matches!(specs[g].distribution, crate::sim::goods_spec::Distribution::Manufactured) {
+                    let extra = avail[hh][g] - before[hh].get(g).copied().unwrap_or(0.0);
+                    if extra > 1e-3 {
+                        prod[hh][g] += extra;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if changed {
+            let mhubs2: Vec<market::MarketHub> = (0..nn)
+                .map(|hh| market::MarketHub { population: hub_pop[hh], production: prod[hh].clone() })
+                .collect();
+            mkt = market::solve(&mhubs2, &mgoods, &routes_m, &mparams);
+        }
+    }
 
     // Climate at each hub cell (for the merchant-story narrative + price notes).
     let node_koppen: Vec<u8> = nodes.iter().map(|s| {

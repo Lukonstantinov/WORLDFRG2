@@ -152,6 +152,39 @@ const SPECIALTY_MARGIN: f32 = 1.25; // extra profit on specialty goods
 const CHARTER_RENT: f32 = 1.30;     // extra profit on chartered goods
 const BANK_CREDIT_MULT: f32 = 1.6;  // financing reach beyond cash
 const BANK_INTEREST: f32 = 0.01;    // monthly interest on wealth
+
+// ── Phase G: wealth sinks (monthly, multiplicative → wealth PLATEAUS instead of
+//    compounding forever). Money is hard-won and steadily bleeds, the way a
+//    medieval merchant fortune did. Sinks are a fraction of wealth, so a poor
+//    house barely pays them and a rich one bleeds a lot (a stabilizing feedback). ──
+/// Maintenance / retainers / storage — pure depreciation that counters BANK_INTEREST.
+/// Kept modest (fleet/office/estate upkeep is charged separately) so wealth
+/// PLATEAUS toward its income-supported level rather than crashing a rich house.
+const UPKEEP_RATE: f32 = 0.005;
+/// Conspicuous consumption (feasts, weddings, charity, building): spent INTO the
+/// home city, lifting its people's prosperity — the main "wealth reaches people" lever.
+const HOUSE_CONSUMPTION_RATE: f32 = 0.004;
+/// Guilds are civic — they spend more of their wealth on their own citizens.
+const GUILD_CIVIC_RATE: f32 = 0.008;
+/// How fast a hub's accumulated civic spending (the `civic_pool`) is used up.
+const CIVIC_DECAY: f32 = 0.97;
+/// Monthly fleet upkeep as a fraction of a vessel's value (crew, repairs, berthing)
+/// — a steady sink that scales with how big a fleet the house runs.
+const FLEET_UPKEEP_FRAC: f32 = 0.02;
+/// Per-vessel monthly chance of being lost to wear (rot, storms, breakdown) — the
+/// slow decay of ships & caravans, so fleets must be continually replaced.
+const FLEET_DECAY_CHANCE: f32 = 0.012;
+/// Civic taxes a city levies on a house's trade — export on goods leaving the
+/// origin, import on goods arriving at the destination. Paid by the house, funding
+/// the city (into its civic_pool → people). Guilds pay HEAVIER taxes (civic duty).
+const EXPORT_TAX_RATE: f32 = 0.02;
+const IMPORT_TAX_RATE: f32 = 0.03;
+const GUILD_TAX_MULT: f32 = 1.6;
+/// Tax a city takes on an estate's rent paid to its owning house.
+const ESTATE_TAX_RATE: f32 = 0.10;
+/// Yearly inflation — coin debasement + rising prices steadily eat the real value
+/// of a hoarded fortune (applied once a year to every house's wealth).
+const INFLATION_PER_YEAR: f32 = 0.015;
 const FLEET_LOSS_MULT: f32 = 0.6;   // voyage-loss reduction
 const FLEET_SHIP_DISCOUNT: f32 = 0.8;
 const POLITICAL_POWER_BONUS: f32 = 0.15;
@@ -235,6 +268,11 @@ pub struct TickGood {
     pub desire: f32,
     /// Counts toward a hub's food balance (cereal/protein/oil/sweetener).
     pub food: bool,
+    /// This good's category is a FUNGIBLE recipe input — members of its
+    /// `category` group stand in for each other as an ingredient (e.g. bay salt ↔
+    /// rock salt curing fish). Narrow: NOT set for metals/fibres. Serde-default
+    /// false so old campaign saves load.
+    #[serde(default)] pub fungible_input: bool,
     /// Freight weight/volume multiplier (1.0 = silk; 3-4 = bulky staple). Old
     /// saves predate this → `serde(default)` gives 0.0, treated as 1.0 in freight.
     #[serde(default)] pub bulk: f32,
@@ -245,6 +283,10 @@ pub struct TickGood {
     #[serde(default)] pub inputs: Vec<(usize, f32)>,
     /// Labor output-rate factor for manufacture (∝ population × this).
     #[serde(default)] pub labor: f32,
+    /// Demand cadence in days (how often a person consumes a unit). Long cadence →
+    /// weak daily local demand → the good sits cheaper and is mostly traded
+    /// merchant-to-merchant. 0 on old saves → treated as the neutral 30 in base_need.
+    #[serde(default)] pub consumption_interval: f32,
 }
 
 /// One settlement participating in the living economy.
@@ -284,6 +326,10 @@ pub struct TickHub {
     #[serde(default)] pub sent_prosperity: f32,
     /// Stability — freedom from recent disasters and market dearth.
     #[serde(default)] pub sent_stability: f32,
+    /// Phase G: accumulated merchant-house spending (conspicuous consumption +
+    /// civic tax) circulating in this city. Decays as it is used; feeds the
+    /// populace's prosperity — this is how trade wealth REACHES the people.
+    #[serde(default)] pub civic_pool: f32,
     /// Sparse per-hub time series for the settlement-window History charts.
     #[serde(default)] pub history: Vec<HubSample>,
     /// Recent goods arriving by SEA (ships) vs by LAND (caravans), a decaying
@@ -498,6 +544,41 @@ pub struct JournalEntry {
     pub text: String,
 }
 
+/// Phase G — one year of a merchant house's books (the Accountant view). All
+/// amounts in grain-equivalent; the per-city Vecs are `(hub_index, amount)` and
+/// are shown largest→lowest in the UI. Serde-default so old campaigns load empty.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct LedgerAcc {
+    pub year: u32,
+    // ── Income ──
+    pub trade_profit_by_city: Vec<(u32, f32)>,
+    pub office_income: f32,
+    pub estate_income: f32,
+    // ── Expenditure ──
+    pub import_tax_by_city: Vec<(u32, f32)>,
+    pub export_tax_by_city: Vec<(u32, f32)>,
+    pub estate_tax: f32,
+    pub upkeep: f32,
+    pub fleet_cost: f32,
+    pub lost_cargo: f32,
+    pub events: f32,
+    pub consumption: f32,
+    pub inflation: f32,
+    /// Monthly wealth samples through the year — drives the Accountant's wealth graph.
+    pub wealth_samples: Vec<f32>,
+}
+
+impl LedgerAcc {
+    /// Add `amt` to the running total for `city` in a per-city accumulator.
+    pub fn add_city(v: &mut Vec<(u32, f32)>, city: u32, amt: f32) {
+        if let Some(e) = v.iter_mut().find(|e| e.0 == city) {
+            e.1 += amt;
+        } else {
+            v.push((city, amt));
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CampaignSim {
     pub seed: u64,
@@ -546,6 +627,19 @@ pub struct CampaignSim {
     /// hubs were seeded with absolute (population-independent) production.
     #[serde(default)]
     pub percap_migrated: bool,
+    /// Phase G — per-house yearly ledgers (Accountant view), indexed to match
+    /// `houses`. `house_ledger` = the running current year; `house_ledger_prev` =
+    /// the last COMPLETED year (the one the Accountant displays). Resized to the
+    /// house count each advance; serde-default → empty on old saves.
+    #[serde(default)]
+    pub house_ledger: Vec<LedgerAcc>,
+    #[serde(default)]
+    pub house_ledger_prev: Vec<LedgerAcc>,
+    /// Phase G — trade wars: hubs each house is BARRED from trading at (a rival that
+    /// dominates a city closes its market to a defeated competitor). The house must
+    /// pay the city to regain access. Indexed to match `houses`. Guilds are immune.
+    #[serde(default)]
+    pub house_barred: Vec<Vec<u32>>,
     /// Empty-land sites a wealthy founder may colonize with an estate (precomputed at
     /// the Economy step). Consumed as colonies are founded; empty on old saves.
     #[serde(default)]
@@ -677,6 +771,22 @@ impl CampaignSim {
         pops.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let median_pop = if pops.is_empty() { 1.0 } else { pops[pops.len() / 2].max(1.0) };
 
+        // Fungible input substitutes (bay salt ↔ rock salt as a preservative cure).
+        // Mirrors worldgen `manufacture::apply_manufacturing`; narrow by design so
+        // metals/fibres never swap as structural inputs.
+        let subs: std::collections::HashMap<usize, Vec<usize>> = {
+            let mut m: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+            for g in 0..ng {
+                if !self.goods[g].fungible_input || self.goods[g].category == i32::MAX { continue; }
+                let cat = self.goods[g].category;
+                let sibs: Vec<usize> = (0..ng)
+                    .filter(|&j| j != g && self.goods[j].fungible_input && self.goods[j].category == cat)
+                    .collect();
+                if !sibs.is_empty() { m.insert(g, sibs); }
+            }
+            m
+        };
+
         for h in 0..self.hubs.len() {
             let pop = self.hubs[h].population.max(0.0);
             for &g in &order {
@@ -686,7 +796,9 @@ impl CampaignSim {
                 let mut by_inputs = f32::INFINITY;
                 for &(idx, qty) in &self.goods[g].inputs {
                     if qty <= 0.0 || idx >= ng { continue; }
-                    by_inputs = by_inputs.min(self.hubs[h].stock[idx] / qty);
+                    let mut avail = self.hubs[h].stock[idx];
+                    if let Some(sl) = subs.get(&idx) { for &s in sl { avail += self.hubs[h].stock[s]; } }
+                    by_inputs = by_inputs.min(avail / qty);
                 }
                 if !by_inputs.is_finite() || by_inputs <= 0.0 { continue; }
                 let made = by_inputs.min(labor_cap);
@@ -694,8 +806,20 @@ impl CampaignSim {
                 // Clone inputs to avoid borrow conflict while mutating stock.
                 let inputs = self.goods[g].inputs.clone();
                 for (idx, qty) in inputs {
-                    if idx < ng {
-                        self.hubs[h].stock[idx] = (self.hubs[h].stock[idx] - made * qty).max(0.0);
+                    if idx >= ng { continue; }
+                    let mut need = made * qty;
+                    let take = self.hubs[h].stock[idx].min(need);
+                    self.hubs[h].stock[idx] -= take;
+                    need -= take;
+                    if need > 0.0 {
+                        if let Some(sl) = subs.get(&idx) {
+                            for &s in sl {
+                                if need <= 0.0 { break; }
+                                let t = self.hubs[h].stock[s].min(need);
+                                self.hubs[h].stock[s] -= t;
+                                need -= t;
+                            }
+                        }
                     }
                 }
                 self.hubs[h].stock[g] += made;
@@ -708,9 +832,15 @@ impl CampaignSim {
     #[inline]
     fn base_need(&self, h: usize, g: usize) -> f32 {
         let tg = &self.goods[g];
+        // Demand cadence: a good consumed every N days exerts ~30/N of the daily
+        // pull of a monthly good. Clamped so it modulates (not dominates) — long
+        // cadence goods (furs, luxuries) sit cheaper locally and skew to wholesale.
+        let interval = if tg.consumption_interval > 0.0 { tg.consumption_interval } else { 30.0 };
+        let cadence = (30.0 / interval).clamp(0.30, 1.8);
         self.hubs[h].population
             * TIER_WEIGHT[tg.need_tier.min(2) as usize]
             * tg.desire.max(0.0)
+            * cadence
             * self.need_scale
             * DEMAND_PRESSURE
     }
@@ -834,6 +964,31 @@ impl CampaignSim {
             let tick = self.tick;
             let n = self.hubs.len();
             let doy = self.day_of_year();
+
+            // Phase G: keep the per-house ledgers aligned to the house list, and roll
+            // the year over on the New Year — the just-finished year becomes the
+            // Accountant's displayed `_prev`, and a fresh current year starts.
+            self.house_ledger.resize(self.houses.len(), LedgerAcc::default());
+            self.house_barred.resize(self.houses.len(), Vec::new());
+            if tick % TICKS_PER_YEAR == 0 {
+                // Yearly inflation erodes every fortune's real value, recorded in the
+                // year that is now closing — then archive it for the Accountant.
+                for hi in 0..self.houses.len() {
+                    if self.houses[hi].defunct {
+                        continue;
+                    }
+                    let infl = self.houses[hi].wealth.max(0.0) * INFLATION_PER_YEAR;
+                    self.houses[hi].wealth -= infl;
+                    if hi < self.house_ledger.len() {
+                        self.house_ledger[hi].inflation += infl;
+                    }
+                }
+                self.house_ledger_prev = self.house_ledger.clone();
+                let yr = tick / TICKS_PER_YEAR;
+                for l in self.house_ledger.iter_mut() {
+                    *l = LedgerAcc { year: yr, ..Default::default() };
+                }
+            }
 
             // Expire finished events.
             self.active_events.retain(|e| e.until_tick > tick);
@@ -995,8 +1150,14 @@ impl CampaignSim {
         for h in 0..n {
             // Food security — the inverse of accumulated starvation pressure.
             let target_food = (1.0 - self.hubs[h].starving).clamp(0.0, 1.0);
-            // Prosperity — saturating curve over grain + trade wealth.
-            let w = (self.hubs[h].grain_wealth * 0.4 + self.hubs[h].trade_wealth * 0.8).max(0.0);
+            // Prosperity — saturating curve over grain + trade wealth + the civic
+            // money the resident merchant houses spend locally (Phase G: trade
+            // wealth reaching the populace). Per-capita so a feast lifts a town more
+            // than a metropolis. The pool then decays (the money is spent through).
+            let civic_pc = self.hubs[h].civic_pool / self.hubs[h].population.max(1.0) * 100.0;
+            let w = (self.hubs[h].grain_wealth * 0.4 + self.hubs[h].trade_wealth * 0.8
+                + civic_pc * 0.6).max(0.0);
+            self.hubs[h].civic_pool *= CIVIC_DECAY;
             let target_prosp = (w / (w + 1.2)).clamp(0.0, 1.0);
             // Stability — lowered by active shocks on this hub (or world-wide) and
             // by widespread dearth (goods priced far above their world value).
@@ -1018,6 +1179,74 @@ impl CampaignSim {
             hb.sent_stability += (target_stab - hb.sent_stability) * EASE;
             let target_mood = 0.45 * hb.sent_food + 0.30 * hb.sent_prosperity + 0.25 * hb.sent_stability;
             hb.mood += (target_mood - hb.mood) * EASE;
+        }
+    }
+
+    /// Phase G: a house barred from a market PAYS the city to regain its trading
+    /// rights (one market a month, when it can afford the fee). The fee scales with
+    /// the city's size, flows into the city's civic_pool (reaching the people), and
+    /// is recorded on the Accountant's misfortune line.
+    fn pay_to_regain_markets(&mut self) {
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct {
+                continue;
+            }
+            let city = match self.house_barred.get(hi).and_then(|v| v.first().copied()) {
+                Some(c) => c,
+                None => continue,
+            };
+            let fee = self
+                .hubs
+                .get(city as usize)
+                .map(|h| (h.population / 5000.0).clamp(2.0, 40.0))
+                .unwrap_or(5.0);
+            if self.houses[hi].wealth > fee * 2.0 {
+                self.houses[hi].wealth -= fee;
+                if let Some(hb) = self.hubs.get_mut(city as usize) {
+                    hb.civic_pool += fee;
+                }
+                if let Some(v) = self.house_barred.get_mut(hi) {
+                    v.retain(|&c| c != city);
+                }
+                if hi < self.house_ledger.len() {
+                    self.house_ledger[hi].events += fee;
+                }
+            }
+        }
+    }
+
+    /// Phase G monthly wealth sinks: every house/guild pays UPKEEP (depreciation
+    /// that counters BANK_INTEREST) and spends a slice on CONSUMPTION that flows
+    /// into its home city's `civic_pool` (reaching the people). Both are a fraction
+    /// of wealth, so a fortune bleeds proportionally and wealth PLATEAUS where trade
+    /// income balances the sinks instead of compounding without end.
+    fn apply_wealth_sinks(&mut self) {
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct {
+                continue;
+            }
+            let wealth = self.houses[hi].wealth.max(0.0);
+            if wealth <= 0.0 {
+                continue;
+            }
+            let consume_rate = if self.houses[hi].is_guild {
+                GUILD_CIVIC_RATE
+            } else {
+                HOUSE_CONSUMPTION_RATE
+            };
+            let upkeep = wealth * UPKEEP_RATE;
+            let consumption = wealth * consume_rate;
+            self.houses[hi].wealth -= upkeep + consumption;
+            let home = self.houses[hi].hub as usize;
+            if home < self.hubs.len() {
+                self.hubs[home].civic_pool += consumption;
+            }
+            if hi < self.house_ledger.len() {
+                self.house_ledger[hi].upkeep += upkeep;
+                self.house_ledger[hi].consumption += consumption;
+                // Sample wealth each month for the Accountant's year graph.
+                self.house_ledger[hi].wealth_samples.push(self.houses[hi].wealth.max(0.0));
+            }
         }
     }
 
@@ -1292,6 +1521,11 @@ impl CampaignSim {
                     for cand in [self.house_for(a, g), self.house_for(b, g)] {
                         if cand < 0 { continue; }
                         let oi = cand as usize;
+                        // Trade war: a house barred from either market cannot run this
+                        // leg — the trade falls to a rival or independent merchants.
+                        if self.house_barred.get(oi).is_some_and(|v| v.contains(&(a as u32)) || v.contains(&(b as u32))) {
+                            continue;
+                        }
                         let slots = if sea { cap_sea[oi] } else { cap_land[oi] };
                         // Merchant-banker houses can finance cargo beyond their cash.
                         let credit = if self.houses[oi].archetype == ARCH_BANKING { BANK_CREDIT_MULT } else { 1.0 };
@@ -1316,6 +1550,17 @@ impl CampaignSim {
                         if owner >= 0 && (owner as usize) < self.houses.len()
                             && !self.houses[owner as usize].defunct {
                             self.houses[owner as usize].wealth += cut;
+                            // Phase G: estate income, taxed by the parent city.
+                            let etax = cut * ESTATE_TAX_RATE;
+                            self.houses[owner as usize].wealth -= etax;
+                            let parent = self.hubs[a].parent;
+                            if parent >= 0 && (parent as usize) < self.hubs.len() {
+                                self.hubs[parent as usize].civic_pool += etax;
+                            }
+                            if (owner as usize) < self.house_ledger.len() {
+                                self.house_ledger[owner as usize].estate_income += cut;
+                                self.house_ledger[owner as usize].estate_tax += etax;
+                            }
                         } else {
                             let p = self.hubs[a].parent;
                             if p >= 0 && (p as usize) < self.hubs.len() {
@@ -1345,6 +1590,9 @@ impl CampaignSim {
                         let oi = owner as usize;
                         let invested = amount * pa;
                         self.houses[oi].wealth = (self.houses[oi].wealth - invested).max(0.0);
+                        if oi < self.house_ledger.len() {
+                            self.house_ledger[oi].lost_cargo += invested;
+                        }
                         self.damage_fleet(oi, sea);
                         let gn = self.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
                         let hn = self.houses[oi].name.clone();
@@ -1398,6 +1646,20 @@ impl CampaignSim {
                         let profit = margin * mult;
                         self.houses[oi].wealth += profit;
                         self.houses[oi].volume += amount;
+                        // Phase G: civic taxes on this trade (export at origin a,
+                        // import at destination b) — paid by the house, funding the
+                        // cities (civic_pool → people). Guilds pay heavier taxes.
+                        let tax_mult = if self.houses[oi].is_guild { GUILD_TAX_MULT } else { 1.0 };
+                        let export_tax = value * EXPORT_TAX_RATE * tax_mult;
+                        let import_tax = value * IMPORT_TAX_RATE * tax_mult;
+                        self.houses[oi].wealth -= export_tax + import_tax;
+                        self.hubs[a].civic_pool += export_tax;
+                        self.hubs[b].civic_pool += import_tax;
+                        if oi < self.house_ledger.len() {
+                            LedgerAcc::add_city(&mut self.house_ledger[oi].trade_profit_by_city, b as u32, profit);
+                            LedgerAcc::add_city(&mut self.house_ledger[oi].export_tax_by_city, a as u32, export_tax);
+                            LedgerAcc::add_city(&mut self.house_ledger[oi].import_tax_by_city, b as u32, import_tax);
+                        }
                         // Track cumulative profit per good (for "most profitable resources").
                         let gp = &mut self.houses[oi].good_profit;
                         if gp.len() <= g { gp.resize(g + 1, 0.0); }
@@ -1499,6 +1761,10 @@ impl CampaignSim {
         if self.houses[owner].charters.contains(&g) { mult *= CHARTER_RENT; }
         let profit = amount * (pa_sell - pb_buy - freight).max(0.0) * mult;
         self.houses[owner].wealth += profit;
+        if owner < self.house_ledger.len() {
+            // Round-trip arbitrage profit, realised selling at the home hub `a`.
+            LedgerAcc::add_city(&mut self.house_ledger[owner].trade_profit_by_city, a as u32, profit);
+        }
         self.houses[owner].volume += amount;
         let gp = &mut self.houses[owner].good_profit;
         if gp.len() <= g { gp.resize(g + 1, 0.0); }
@@ -1595,6 +1861,20 @@ impl CampaignSim {
             "fire" => {
                 for g in 0..self.goods.len() {
                     self.hubs[hub].stock[g] *= 1.0 - mag;
+                }
+                // The warehouses that burn belong to the city's merchant houses:
+                // every resident house loses a slice of its wealth (stored stock
+                // value), the heavier the richer it is — a stabilizing loss that
+                // scales with prosperity. Recorded in the Accountant's misfortune line.
+                for hi in 0..self.houses.len() {
+                    if self.houses[hi].defunct || self.houses[hi].hub as usize != hub {
+                        continue;
+                    }
+                    let loss = self.houses[hi].wealth * mag * 0.5;
+                    self.houses[hi].wealth -= loss;
+                    if hi < self.house_ledger.len() {
+                        self.house_ledger[hi].events += loss;
+                    }
                 }
             }
             "plague" => {
@@ -1792,7 +2072,7 @@ impl CampaignSim {
             production, grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
             is_estate: true, parent, koppen, coastal, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5,
-            sent_stability: 0.8, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
+            sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: kind, estate_tier: 1, owner_house, structures: vec![],
@@ -2296,6 +2576,10 @@ impl CampaignSim {
                     hh.wealth *= 1.0 + BANK_INTEREST;
                 }
             }
+            // Phase G: wealth bleeds (upkeep + consumption) so it plateaus and some
+            // flows to the people — runs right after interest so it offsets it.
+            self.apply_wealth_sinks();
+            self.pay_to_regain_markets();
             self.recompute_monopolies_and_power();
             self.manage_fleets();
             self.update_structures();
@@ -2476,6 +2760,29 @@ impl CampaignSim {
         }
         for hi in 0..nh {
             if self.houses[hi].defunct { continue; }
+            // Phase G: fleet upkeep (a steady sink scaling with fleet size) + slow
+            // decay (an occasional vessel lost to wear), so a big fleet costs money
+            // to keep and must be continually rebuilt.
+            let fleet_total =
+                self.houses[hi].fleet_sea + self.houses[hi].fleet_river + self.houses[hi].fleet_caravan;
+            if fleet_total > 0 {
+                let fleet_cost = fleet_total as f32 * SHIP_COST * FLEET_UPKEEP_FRAC;
+                self.houses[hi].wealth -= fleet_cost;
+                if hi < self.house_ledger.len() {
+                    self.house_ledger[hi].fleet_cost += fleet_cost;
+                }
+                if hash01(self.seed, tick as u64 ^ 0x5EA1, hi as u64)
+                    < FLEET_DECAY_CHANCE * fleet_total as f32
+                {
+                    if self.houses[hi].fleet_sea > 0 {
+                        self.houses[hi].fleet_sea -= 1;
+                    } else if self.houses[hi].fleet_caravan > 0 {
+                        self.houses[hi].fleet_caravan -= 1;
+                    } else if self.houses[hi].fleet_river > 0 {
+                        self.houses[hi].fleet_river -= 1;
+                    }
+                }
+            }
             let coastal = self.hubs.get(self.houses[hi].hub as usize).map(|x| x.coastal).unwrap_or(false);
             let w = self.houses[hi].wealth;
             let sea_slots = self.houses[hi].fleet_sea as i32;
@@ -2760,6 +3067,22 @@ impl CampaignSim {
                                 hub: self.houses[winner].hub as i32, good: -1, value: 0.0,
                                 text: format!("{} outmaneuvers {} in a bitter trade feud", wn, ln),
                             });
+                            // Trade war: if the winner dominates its seat city and the
+                            // loser is not an embargo-immune guild, CLOSE that market to
+                            // the loser until it pays to regain its rights.
+                            if self.houses[winner].dominant_seat && !self.houses[loser].is_guild {
+                                let city = self.houses[winner].hub;
+                                let already = self.house_barred.get(loser).is_some_and(|v| v.contains(&city));
+                                if !already {
+                                    let cn = self.hubs.get(city as usize).map(|h| h.name.clone()).unwrap_or_default();
+                                    if let Some(v) = self.house_barred.get_mut(loser) { v.push(city); }
+                                    self.journal.push(JournalEntry {
+                                        tick: self.tick, kind: "trade_war".into(),
+                                        hub: city as i32, good: -1, value: 0.0,
+                                        text: format!("{} bars {} from the market of {}", wn, ln, cn),
+                                    });
+                                }
+                            }
                         }
                     }
                 }
@@ -2844,7 +3167,8 @@ mod tests {
 
     fn good(name: &str, cat: i32, tier: u8, val: f32, desire: f32, food: bool) -> TickGood {
         TickGood { name: name.into(), category: cat, need_tier: tier, base_value: val, desire, food,
-            bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0 }
+            fungible_input: false,
+            bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0, consumption_interval: 30.0 }
     }
 
     fn hub(id: u32, x: f32, y: f32, pop: f32, prod: Vec<f32>, comp: u32) -> TickHub {
@@ -2856,7 +3180,7 @@ mod tests {
             grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
             is_estate: false, parent: -1, koppen: 0, coastal: false, component: comp,
             export_earn: 0.0, import_spend: 0.0,
-            mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5, sent_stability: 0.8, history: Vec::new(),
+            mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5, sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(),
             in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
@@ -2883,6 +3207,7 @@ mod tests {
             k: 0.6, margin: 0.05, need_scale: 1.0, world_w: 100.0, world_h: 100.0, last_tick_ms: 0.0,
             last_month_pop: 0.0, last_month_index: 0.0, seed_house_count: 0,
             fleets_migrated: true, tech_factor: 1.0, percap_migrated: true,
+            house_ledger: Vec::new(), house_ledger_prev: Vec::new(), house_barred: Vec::new(),
             colonizable: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
             recent_trades: vec![],

@@ -145,6 +145,12 @@ pub struct GoodSpec {
     /// multiplied by this (a city makes more cloth than a village).
     #[serde(default = "default_labor")]
     pub labor: f32,
+    /// Demand CADENCE in days — how often a person consumes a unit. Food ≈ 1
+    /// (constant), cloth ≈ 30, durables like furs/furniture ≈ 90, luxuries ≈ 365.
+    /// A long interval means weak daily local pull → the good sits cheaper and is
+    /// mostly bought by merchants for resale rather than citizens for use.
+    #[serde(default = "default_consumption_interval")]
+    pub consumption_interval: f32,
 }
 
 fn default_base_value() -> f32 {
@@ -153,6 +159,10 @@ fn default_base_value() -> f32 {
 
 fn default_bulk() -> f32 {
     1.0
+}
+
+fn default_consumption_interval() -> f32 {
+    30.0 // a month — a sensible neutral cadence
 }
 
 fn default_labor() -> f32 {
@@ -269,6 +279,9 @@ pub fn default_list() -> Vec<GoodSpec> {
                 perishable: GOOD_PERISH[g],
                 inputs: Vec::new(),
                 labor: 1.0,
+                // Cadence by need: staples eaten ~weekly, comfort monthly-ish,
+                // luxuries/durables seasonally → weak daily pull (wholesale skew).
+                consumption_interval: match GOOD_NEED_TIER[g] { 0 => 7.0, 1 => 45.0, _ => 180.0 },
             }
         })
         .collect();
@@ -319,6 +332,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             builtin: false, deposit, scoring: Some(env),
             category: String::new(), need_tier: 0, base_value: 1.0,
             bulk: 1.0, perishable: 0.0, inputs: Vec::new(), labor: 1.0,
+            consumption_interval: 45.0,
         }
     }
     // A Manufactured chain good: made in cities from `inputs`, no per-cell belt.
@@ -334,6 +348,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             scoring: None, category: String::new(), need_tier: 0, base_value,
             bulk, perishable: perish, labor,
             inputs: inputs.into_iter().map(|(g, q)| RecipeInput { good: g.into(), qty: q }).collect(),
+            consumption_interval: if luxury { 180.0 } else { 60.0 },
         }
     }
     let dep = |min_elev: f32, num: u32, den: u32| Some(DepositSpec { min_elev, count_num: num, count_den: den, province_scale: default_province_scale() });
@@ -384,7 +399,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         // the inputs. Edit these (or add your own) in the Goods Editor recipe rows. ──
         // Cloth ← fleece wool + a touch of dye. The classic "import raw wool, export
         // finished cloth" trade that made wool-poor weaving towns rich.
-        mg("cloth", "Cloth", "\u{1F9F6}", "#d8c8b0", 8.0, 1.4, 0.0, true, 1.2,
+        mg("cloth", "Woolen Cloth", "\u{1F9F6}", "#d8c8b0", 8.0, 1.4, 0.0, true, 1.2,
             vec![("wool_fleece", 1.0), ("dyes", 0.2)]),
         // Metalware & Arms ← iron + a little copper (tools, fittings, weapons).
         mg("metalware", "Metalware & Arms", "\u{2694}\u{FE0F}", "#9099a8", 9.0, 2.0, 0.0, false, 1.0,
@@ -407,6 +422,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             scoring: Some(env(vec![], None, None, Some([0.0, 0.30, 0.20]), None, 0.5, 0.0)),
             category: "construction".into(), need_tier: 1, base_value: 0.5,
             bulk: 2.0, perishable: 0.0, inputs: Vec::new(), labor: 1.0,
+            consumption_interval: 90.0,
         },
 
         // ── Ported richer manufactured library (on top of the PR's cloth / metalware
@@ -414,14 +430,25 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         // Textiles
         mg("linen", "Linen", "\u{1F9FA}", "#cfe0e8", 5.0, 0.7, 0.0, false, 1.1,
             vec![("flax", 1.0)]),
+        // Each cloth is woven from ONE fibre (cotton→cotton cloth, flax→linen,
+        // wool→woolen cloth, silk→brocade); they are a "Cloth family" of distinct
+        // goods, not a blend.
         mg("cotton_cloth", "Cotton Cloth", "\u{1F455}", "#eef0e8", 5.0, 0.7, 0.0, false, 1.1,
-            vec![("cotton", 1.0), ("flax", 0.2)]),
+            vec![("cotton", 1.0)]),
         mg("silk_brocade", "Fine Silk Brocade", "\u{1F9E3}", "#d96fb0", 28.0, 0.25, 0.0, true, 1.0,
             vec![("silk", 1.0), ("dyes", 0.2), ("gold", 0.02)]),
         mg("carpets", "Carpets & Tapestry", "\u{1F7EB}", "#9b4f2f", 11.0, 1.0, 0.0, true, 1.0,
             vec![("wool_fleece", 1.2), ("dyes", 0.3)]),
         mg("leather_goods", "Leather Goods", "\u{1F45E}", "#7a4a2a", 4.0, 0.9, 0.0, false, 1.0,
             vec![("hides", 1.0), ("salt", 0.1)]),
+        // Salted Herring ← fresh herring + salt (the preservative). Fresh herring
+        // (built-in "herring") is highly perishable and eaten at its origin port;
+        // ONLY once salted in a curing town does it keep long enough to be shipped
+        // across the network. Salt (rock salt) is the cure — bay salt is an
+        // interchangeable preservative once category-substitution covers inputs.
+        // Cheap bulk protein, no luxury, low labor (the great Hanseatic staple).
+        mg("salted_herring", "Salted Herring", "\u{1F9C2}", "#88b8c0", 3.0, 1.5, 0.0, false, 0.9,
+            vec![("herring", 1.0), ("salt", 0.3)]),
         // Metalwork
         mg("bronzeware", "Bronzeware", "\u{1F514}", "#b06a3a", 6.0, 1.4, 0.0, false, 1.0,
             vec![("copper", 0.9), ("tin", 0.1)]),
