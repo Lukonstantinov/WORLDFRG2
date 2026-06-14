@@ -399,7 +399,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         // the inputs. Edit these (or add your own) in the Goods Editor recipe rows. ──
         // Cloth ← fleece wool + a touch of dye. The classic "import raw wool, export
         // finished cloth" trade that made wool-poor weaving towns rich.
-        mg("cloth", "Cloth", "\u{1F9F6}", "#d8c8b0", 8.0, 1.4, 0.0, true, 1.2,
+        mg("cloth", "Woolen Cloth", "\u{1F9F6}", "#d8c8b0", 8.0, 1.4, 0.0, true, 1.2,
             vec![("wool_fleece", 1.0), ("dyes", 0.2)]),
         // Metalware & Arms ← iron + a little copper (tools, fittings, weapons).
         mg("metalware", "Metalware & Arms", "\u{2694}\u{FE0F}", "#9099a8", 9.0, 2.0, 0.0, false, 1.0,
@@ -430,14 +430,25 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         // Textiles
         mg("linen", "Linen", "\u{1F9FA}", "#cfe0e8", 5.0, 0.7, 0.0, false, 1.1,
             vec![("flax", 1.0)]),
+        // Each cloth is woven from ONE fibre (cotton→cotton cloth, flax→linen,
+        // wool→woolen cloth, silk→brocade); they are a "Cloth family" of distinct
+        // goods, not a blend.
         mg("cotton_cloth", "Cotton Cloth", "\u{1F455}", "#eef0e8", 5.0, 0.7, 0.0, false, 1.1,
-            vec![("cotton", 1.0), ("flax", 0.2)]),
+            vec![("cotton", 1.0)]),
         mg("silk_brocade", "Fine Silk Brocade", "\u{1F9E3}", "#d96fb0", 28.0, 0.25, 0.0, true, 1.0,
             vec![("silk", 1.0), ("dyes", 0.2), ("gold", 0.02)]),
         mg("carpets", "Carpets & Tapestry", "\u{1F7EB}", "#9b4f2f", 11.0, 1.0, 0.0, true, 1.0,
             vec![("wool_fleece", 1.2), ("dyes", 0.3)]),
         mg("leather_goods", "Leather Goods", "\u{1F45E}", "#7a4a2a", 4.0, 0.9, 0.0, false, 1.0,
             vec![("hides", 1.0), ("salt", 0.1)]),
+        // Salted Herring ← fresh herring + salt (the preservative). Fresh herring
+        // (built-in "herring") is highly perishable and eaten at its origin port;
+        // ONLY once salted in a curing town does it keep long enough to be shipped
+        // across the network. Salt (rock salt) is the cure — bay salt is an
+        // interchangeable preservative once category-substitution covers inputs.
+        // Cheap bulk protein, no luxury, low labor (the great Hanseatic staple).
+        mg("salted_herring", "Salted Herring", "\u{1F9C2}", "#88b8c0", 3.0, 1.5, 0.0, false, 0.9,
+            vec![("herring", 1.0), ("salt", 0.3)]),
         // Metalwork
         mg("bronzeware", "Bronzeware", "\u{1F514}", "#b06a3a", 6.0, 1.4, 0.0, false, 1.0,
             vec![("copper", 0.9), ("tin", 0.1)]),

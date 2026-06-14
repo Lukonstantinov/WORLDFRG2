@@ -624,6 +624,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 base_value: spec.map(|s| s.base_value).filter(|v| *v > 0.0).unwrap_or(1.0),
                 desire: spec.map(|s| s.desire).unwrap_or(0.4),
                 food,
+                fungible_input: crate::sim::manufacture::is_fungible_input_category(&cat),
                 bulk: spec.map(|s| s.bulk).filter(|v| *v > 0.0).unwrap_or(1.0),
                 perishable: spec.map(|s| s.perishable.max(0.0)).unwrap_or(0.0),
                 inputs,

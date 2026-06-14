@@ -46,6 +46,14 @@ export const GOOD_DEFS: GoodDef[] = [
   { name: "tobacco", label: "Tobacco", emoji: "\u{1F6AC}", color: "#8a6a3a" },
   { name: "indigo", label: "Indigo", emoji: "\u{1F7E6}", color: "#3a4fb0" },
   { name: "dates", label: "Dates", emoji: "\u{1F33D}", color: "#c08a3a" },
+  // ── Market builtins (mirror backend GOOD_NAMES 38..44) ──
+  { name: "rice", label: "Rice", emoji: "\u{1F35A}", color: "#e6e2c8" },
+  { name: "barley", label: "Barley & Rye", emoji: "\u{1F35E}", color: "#c8a85a" },
+  { name: "millet", label: "Millet", emoji: "\u{1F963}", color: "#d8c070" },
+  { name: "herring", label: "Herring", emoji: "\u{1F420}", color: "#7ab8d0" },
+  { name: "honey", label: "Honey & Wax", emoji: "\u{1F36F}", color: "#e0a020" },
+  { name: "hides", label: "Hides & Leather", emoji: "\u{1F404}", color: "#9a7a50" },
+  { name: "beer", label: "Beer & Ale", emoji: "\u{1F37A}", color: "#d09030" },
   // ── Custom shipped goods (mirror sim/goods_spec.rs default_custom_goods) ──
   { name: "bay_salt", label: "Bay Salt", emoji: "\u{1F9C2}", color: "#e8e0d0" },
   { name: "citrus", label: "Citrus", emoji: "\u{1F34A}", color: "#f4a33a" },
@@ -61,7 +69,8 @@ export const GOOD_DEFS: GoodDef[] = [
   { name: "lead", label: "Lead", emoji: "\u{1F529}", color: "#8a8e96" },
   // ── Clay (raw input) + manufactured chain goods (mirror goods_spec.rs) ──
   { name: "clay", label: "Clay", emoji: "\u{1F9F1}", color: "#b07a52" },
-  { name: "cloth", label: "Cloth", emoji: "\u{1F9F6}", color: "#d8c8b0" },
+  { name: "cloth", label: "Woolen Cloth", emoji: "\u{1F9F6}", color: "#d8c8b0" },
+  { name: "salted_herring", label: "Salted Herring", emoji: "\u{1F9C2}", color: "#88b8c0" },
   { name: "metalware", label: "Metalware & Arms", emoji: "\u{2694}\u{FE0F}", color: "#9099a8" },
   { name: "refined_sugar", label: "Refined Sugar", emoji: "\u{1F367}", color: "#f0e8d8" },
   { name: "citrus_liqueur", label: "Citrus Liqueur", emoji: "\u{1F378}", color: "#e8b24a" },
@@ -131,47 +140,57 @@ export function goodSubtypes(name: string): SubtypeDef[] | null {
 // Broad trade-good categories so the overlay list (and the goods browser) can
 // GROUP similar goods together — e.g. rock salt + bay salt and all the metals
 // sit side by side, the marine goods cluster, etc.
+// Every good belongs to a THEMATIC category that holds both its raw and its
+// manufactured members (e.g. Textiles = wool/cotton/flax raws AND cloth/linen/
+// carpets). The review screen then splits each category by production type
+// (Planted / Extracted / Manufactured). There is no "Other" or lump
+// "Manufactures" bucket — each finished good sits with its raw family.
 export const CATEGORY_ORDER = [
   "Staples", "Wine, Oil & Vine", "Cash Crops", "Spices & Aromatics",
-  "Textiles & Animal", "Forestry & Craft", "Manufactures", "Minerals & Metals", "Marine", "Other",
+  "Textiles & Animal", "Forestry & Craft", "Minerals & Metals", "Marine", "Other",
 ] as const;
 
 const GOOD_CATEGORY: Record<string, string> = {
-  // Staples
-  wheat: "Staples", dates: "Staples",
-  // Wine, oil & vine
+  // Staples — grains + the everyday sweeteners/larder
+  wheat: "Staples", rice: "Staples", barley: "Staples", millet: "Staples",
+  dates: "Staples", honey: "Staples",
+  // Wine, oil & vine — pressed/fermented drinks & oils (raw + distilled/brewed)
   wine: "Wine, Oil & Vine", oliveoil: "Wine, Oil & Vine", citrus: "Wine, Oil & Vine",
-  // Cash crops
-  sugar: "Cash Crops", cotton: "Cash Crops", tobacco: "Cash Crops", indigo: "Cash Crops",
-  coffee: "Cash Crops", tea: "Cash Crops", cacao: "Cash Crops", flax: "Cash Crops",
-  // Spices & aromatics
+  brandy: "Wine, Oil & Vine", mead: "Wine, Oil & Vine", beer: "Wine, Oil & Vine",
+  citrus_liqueur: "Wine, Oil & Vine",
+  // Cash crops — colonial/plantation crops + their first refinement
+  sugar: "Cash Crops", tobacco: "Cash Crops", indigo: "Cash Crops",
+  coffee: "Cash Crops", tea: "Cash Crops", cacao: "Cash Crops",
+  refined_sugar: "Cash Crops",
+  // Spices & aromatics — seasonings, resins, and the perfumes distilled from them
   spices: "Spices & Aromatics", cloves: "Spices & Aromatics", pepper: "Spices & Aromatics",
   cinnamon: "Spices & Aromatics", frankincense: "Spices & Aromatics", incense: "Spices & Aromatics",
-  saffron: "Spices & Aromatics",
-  // Textiles & animal products
-  silk: "Textiles & Animal", wool_fleece: "Textiles & Animal", wool_llama: "Textiles & Animal",
-  furs: "Textiles & Animal", horses: "Textiles & Animal", ivory: "Textiles & Animal",
-  // Forestry & raw craft inputs
+  saffron: "Spices & Aromatics", perfume: "Spices & Aromatics",
+  // Textiles & animal — fibres/hides/animals AND the cloth/leather woven from them
+  silk: "Textiles & Animal", cotton: "Textiles & Animal", flax: "Textiles & Animal",
+  wool_fleece: "Textiles & Animal", wool_llama: "Textiles & Animal", furs: "Textiles & Animal",
+  hides: "Textiles & Animal", horses: "Textiles & Animal", ivory: "Textiles & Animal",
+  cloth: "Textiles & Animal", linen: "Textiles & Animal", cotton_cloth: "Textiles & Animal",
+  silk_brocade: "Textiles & Animal", carpets: "Textiles & Animal", leather_goods: "Textiles & Animal",
+  // Forestry & craft — wood/clay/paper raws AND the workshop crafts made from them
   timber: "Forestry & Craft", hardwoods: "Forestry & Craft", paper: "Forestry & Craft",
-  // Minerals & metals (both salts here, adjacent, per request; clay = construction raw)
+  clay: "Forestry & Craft", ceramics: "Forestry & Craft", glassware: "Forestry & Craft",
+  books: "Forestry & Craft", furniture: "Forestry & Craft", candles: "Forestry & Craft",
+  soap: "Forestry & Craft", statuary: "Forestry & Craft", ivory_carvings: "Forestry & Craft",
+  // Minerals & metals — both salts, ores, gems, stone AND the metalwork forged from them
   salt: "Minerals & Metals", bay_salt: "Minerals & Metals", iron: "Minerals & Metals",
   copper: "Minerals & Metals", tin: "Minerals & Metals", gold: "Minerals & Metals",
   gemstones: "Minerals & Metals", jade: "Minerals & Metals", silver: "Minerals & Metals",
-  marble: "Minerals & Metals", lead: "Minerals & Metals", clay: "Minerals & Metals",
-  // Marine (incl. marine dyes)
-  stockfish: "Marine", pearls: "Marine", whaling: "Marine", amber: "Marine",
-  dyes: "Marine", tyrian_purple: "Marine", coral: "Marine", ambergris: "Marine",
-  // Manufactures — finished goods made in cities from imported raws (no map belt)
-  cloth: "Manufactures", metalware: "Manufactures", refined_sugar: "Manufactures",
-  citrus_liqueur: "Manufactures", ceramics: "Manufactures", glassware: "Manufactures",
-  linen: "Manufactures", cotton_cloth: "Manufactures", silk_brocade: "Manufactures",
-  carpets: "Manufactures", leather_goods: "Manufactures", bronzeware: "Manufactures",
-  jewelry: "Manufactures", brandy: "Manufactures", mead: "Manufactures",
-  perfume: "Manufactures", soap: "Manufactures", candles: "Manufactures",
-  books: "Manufactures", furniture: "Manufactures", ivory_carvings: "Manufactures",
-  statuary: "Manufactures",
+  marble: "Minerals & Metals", lead: "Minerals & Metals",
+  metalware: "Minerals & Metals", bronzeware: "Minerals & Metals", jewelry: "Minerals & Metals",
+  // Marine — sea catch/harvest AND the salted fish preserved for transport
+  stockfish: "Marine", herring: "Marine", salted_herring: "Marine", pearls: "Marine",
+  whaling: "Marine", amber: "Marine", dyes: "Marine", tyrian_purple: "Marine",
+  coral: "Marine", ambergris: "Marine",
 };
 
 export function goodCategory(name: string): string {
+  // Every shipped good is mapped above; only user-added custom goods fall through
+  // to "Other" (the trailing catch-all group).
   return GOOD_CATEGORY[name] ?? "Other";
 }

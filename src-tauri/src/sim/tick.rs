@@ -268,6 +268,11 @@ pub struct TickGood {
     pub desire: f32,
     /// Counts toward a hub's food balance (cereal/protein/oil/sweetener).
     pub food: bool,
+    /// This good's category is a FUNGIBLE recipe input — members of its
+    /// `category` group stand in for each other as an ingredient (e.g. bay salt ↔
+    /// rock salt curing fish). Narrow: NOT set for metals/fibres. Serde-default
+    /// false so old campaign saves load.
+    #[serde(default)] pub fungible_input: bool,
     /// Freight weight/volume multiplier (1.0 = silk; 3-4 = bulky staple). Old
     /// saves predate this → `serde(default)` gives 0.0, treated as 1.0 in freight.
     #[serde(default)] pub bulk: f32,
@@ -766,6 +771,22 @@ impl CampaignSim {
         pops.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let median_pop = if pops.is_empty() { 1.0 } else { pops[pops.len() / 2].max(1.0) };
 
+        // Fungible input substitutes (bay salt ↔ rock salt as a preservative cure).
+        // Mirrors worldgen `manufacture::apply_manufacturing`; narrow by design so
+        // metals/fibres never swap as structural inputs.
+        let subs: std::collections::HashMap<usize, Vec<usize>> = {
+            let mut m: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+            for g in 0..ng {
+                if !self.goods[g].fungible_input || self.goods[g].category == i32::MAX { continue; }
+                let cat = self.goods[g].category;
+                let sibs: Vec<usize> = (0..ng)
+                    .filter(|&j| j != g && self.goods[j].fungible_input && self.goods[j].category == cat)
+                    .collect();
+                if !sibs.is_empty() { m.insert(g, sibs); }
+            }
+            m
+        };
+
         for h in 0..self.hubs.len() {
             let pop = self.hubs[h].population.max(0.0);
             for &g in &order {
@@ -775,7 +796,9 @@ impl CampaignSim {
                 let mut by_inputs = f32::INFINITY;
                 for &(idx, qty) in &self.goods[g].inputs {
                     if qty <= 0.0 || idx >= ng { continue; }
-                    by_inputs = by_inputs.min(self.hubs[h].stock[idx] / qty);
+                    let mut avail = self.hubs[h].stock[idx];
+                    if let Some(sl) = subs.get(&idx) { for &s in sl { avail += self.hubs[h].stock[s]; } }
+                    by_inputs = by_inputs.min(avail / qty);
                 }
                 if !by_inputs.is_finite() || by_inputs <= 0.0 { continue; }
                 let made = by_inputs.min(labor_cap);
@@ -783,8 +806,20 @@ impl CampaignSim {
                 // Clone inputs to avoid borrow conflict while mutating stock.
                 let inputs = self.goods[g].inputs.clone();
                 for (idx, qty) in inputs {
-                    if idx < ng {
-                        self.hubs[h].stock[idx] = (self.hubs[h].stock[idx] - made * qty).max(0.0);
+                    if idx >= ng { continue; }
+                    let mut need = made * qty;
+                    let take = self.hubs[h].stock[idx].min(need);
+                    self.hubs[h].stock[idx] -= take;
+                    need -= take;
+                    if need > 0.0 {
+                        if let Some(sl) = subs.get(&idx) {
+                            for &s in sl {
+                                if need <= 0.0 { break; }
+                                let t = self.hubs[h].stock[s].min(need);
+                                self.hubs[h].stock[s] -= t;
+                                need -= t;
+                            }
+                        }
                     }
                 }
                 self.hubs[h].stock[g] += made;
@@ -3132,6 +3167,7 @@ mod tests {
 
     fn good(name: &str, cat: i32, tier: u8, val: f32, desire: f32, food: bool) -> TickGood {
         TickGood { name: name.into(), category: cat, need_tier: tier, base_value: val, desire, food,
+            fungible_input: false,
             bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0, consumption_interval: 30.0 }
     }
 

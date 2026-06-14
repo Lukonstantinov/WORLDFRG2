@@ -89,6 +89,8 @@ interface UIStore {
   settlementRealism: number;
   /** Goods-browser panel open (toolbar button → browse all goods by origin). */
   showGoodsBrowser: boolean;
+  /** Id of the good whose seeding/climate detail panel is open (null = closed). */
+  goodDetailId: string | null;
   /** Merchant-houses panel open. */
   showHouses: boolean;
   showCityRanking: boolean;
@@ -130,6 +132,7 @@ interface UIStore {
   setHubDisplay: (p: Partial<{ size: number; intensity: number }>) => void;
   setSettlementRealism: (v: number) => void;
   setShowGoodsBrowser: (v: boolean) => void;
+  setGoodDetail: (id: string | null) => void;
   setShowHouses: (v: boolean) => void;
   setShowCityRanking: (v: boolean) => void;
   openChainReview: (onConfirm?: () => void) => void;
@@ -191,6 +194,7 @@ export const useUIStore = create<UIStore>((set) => ({
   hubDisplay: { size: 1, intensity: 1 },
   settlementRealism: 0.55,
   showGoodsBrowser: false,
+  goodDetailId: null,
   showHouses: false,
   showCityRanking: false,
   chainReviewOpen: false,
@@ -257,6 +261,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setHubDisplay: (p) => set((state) => ({ hubDisplay: { ...state.hubDisplay, ...p } })),
   setSettlementRealism: (v) => set({ settlementRealism: v }),
   setShowGoodsBrowser: (v) => set({ showGoodsBrowser: v }),
+  setGoodDetail: (id) => set({ goodDetailId: id }),
   setShowHouses: (v) => set({ showHouses: v }),
   setShowCityRanking: (v) => set({ showCityRanking: v }),
   openChainReview: (onConfirm) => set({ chainReviewOpen: true, chainReviewConfirm: onConfirm ?? null }),

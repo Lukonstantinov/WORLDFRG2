@@ -103,6 +103,7 @@ export function Toolbar() {
   const setElevationValue = useUIStore((s) => s.setElevationValue);
   const toggleOverlay = useUIStore((s) => s.toggleOverlay);
   const setOverlaysVisible = useUIStore((s) => s.setOverlaysVisible);
+  const setGoodDetail = useUIStore((s) => s.setGoodDetail);
   const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({});
   const bioParams = useUIStore((s) => s.bioParams);
   const setBioParams = useUIStore((s) => s.setBioParams);
@@ -345,17 +346,21 @@ export function Toolbar() {
               {expanded && items.map((g) => {
                 const key = goodOverlayKey(g.id);
                 return (
-                  <label key={key} style={{ ...checkboxRow, paddingLeft: 15 }}>
+                  <div key={key} style={{ ...checkboxRow, paddingLeft: 15 }}>
                     <input
                       type="checkbox"
                       checked={!!overlayVisibility[key]}
                       onChange={() => toggleOverlay(key)}
                       style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
                     />
-                    <span style={{ color: overlayVisibility[key] ? "#b0c8e0" : "#5a6a80" }}>
+                    <span
+                      onClick={() => setGoodDetail(g.id)}
+                      title="Show seeding climates & heatmap"
+                      style={{ color: overlayVisibility[key] ? "#b0c8e0" : "#5a6a80", cursor: "pointer", flex: 1 }}
+                    >
                       {g.icon} {g.name}
                     </span>
-                  </label>
+                  </div>
                 );
               })}
             </div>

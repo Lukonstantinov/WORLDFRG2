@@ -99,7 +99,9 @@ function Column({ title, note, goods }: { title: string; note: string; goods: Go
           </div>
           <div>
             {items.map((g) => (
-              <span key={g.id} style={chip(g.color)} title={`${g.id} · value ${g.base_value} · bulk ${g.bulk ?? 1}`}>
+              <span key={g.id} onClick={() => useUIStore.getState().setGoodDetail(g.id)}
+                style={{ ...chip(g.color), cursor: "pointer" }}
+                title={`${g.id} · value ${g.base_value} · bulk ${g.bulk ?? 1} — click for climates & heatmap`}>
                 <span>{g.icon}</span><span>{g.name}</span>
               </span>
             ))}
@@ -110,123 +112,63 @@ function Column({ title, note, goods }: { title: string; note: string; goods: Go
   );
 }
 
-interface Node { id: string; depth: number; spec: GoodSpec; }
-
-/** Lightweight layered DAG: depth = recipe level (raws at 0), columns left→right. */
+/** Production chains as plain recipe EQUATIONS — one row per manufactured good,
+ *  `input (+ input) → product · tier`, grouped by the product's category. This
+ *  replaced an SVG bipartite DAG that always tangled into one unreadable column
+ *  (every product pulled from one shared pool of raws). */
 function ChainGraph({ specs }: { specs: GoodSpec[] }) {
-  const { nodes, edges, width, height } = useMemo(() => layout(specs), [specs]);
-  if (nodes.length === 0) {
-    return <div style={{ color: "#5a6a80", padding: "8px 0" }}>No production chains defined — every good is extracted from the land.</div>;
+  const byId = useMemo(() => new Map(specs.map((s) => [s.id, s])), [specs]);
+  const recipes = useMemo(
+    () => specs.filter((s) => s.distribution === "manufactured" && (s.inputs?.length ?? 0) > 0),
+    [specs],
+  );
+  if (recipes.length === 0) {
+    return <div style={{ color: "#5a6a80", padding: "8px 0" }}>No production chains defined — every good is extracted or grown from the land.</div>;
   }
+  const cats = CATEGORY_ORDER.filter((c) => recipes.some((r) => goodCategory(r.id) === c));
   return (
-    <div style={{ overflowX: "auto", background: "#0b0e13", border: "1px solid #232b36", borderRadius: 6, padding: 8 }}>
-      <svg width={width} height={height} style={{ display: "block" }}>
-        {edges.map((e, k) => {
-          const x1 = e.from.x + NODE_W / 2, y1 = e.from.y;
-          const x2 = e.to.x - NODE_W / 2, y2 = e.to.y;
-          const mx = (x1 + x2) / 2;
-          return (
-            <g key={k}>
-              <path d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`}
-                fill="none" stroke={e.bad ? "#c06060" : "#4a5a72"} strokeWidth={1.5} />
-              <text x={mx} y={(y1 + y2) / 2 - 3} fill={e.bad ? "#e08080" : "#8aa0b8"} fontSize={9} textAnchor="middle">
-                {e.bad ? "?" : `×${round(e.qty)}`}
-              </text>
-            </g>
-          );
-        })}
-        {nodes.map((n) => (
-          <g key={n.id}>
-            <rect x={n.x - NODE_W / 2} y={n.y - NODE_H / 2} width={NODE_W} height={NODE_H} rx={6}
-              fill="#161d28" stroke={n.spec.color} strokeWidth={1.5} />
-            <text x={n.x} y={n.y - 2} fill="#e3e9f0" fontSize={11} textAnchor="middle">
-              {n.spec.icon} {trim(n.spec.name)}
-            </text>
-            <text x={n.x} y={n.y + 11} fill="#7a8aa0" fontSize={8} textAnchor="middle">
-              v{round(n.spec.base_value)} · b{round(n.spec.bulk ?? 1)}{(n.spec.perishable ?? 0) > 0 ? ` · p${round(n.spec.perishable ?? 0)}` : ""}
-            </text>
-          </g>
-        ))}
-      </svg>
+    <div style={{ background: "#0b0e13", border: "1px solid #232b36", borderRadius: 6, padding: "8px 10px" }}>
+      {cats.map((cat) => (
+        <div key={cat} style={{ marginBottom: 7 }}>
+          <div style={{ color: "#5f7390", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 }}>{cat}</div>
+          {recipes.filter((r) => goodCategory(r.id) === cat).map((r) => (
+            <RecipeRow key={r.id} product={r} byId={byId} />
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
 
-const NODE_W = 116, NODE_H = 34, COL_GAP = 70, ROW_GAP = 14, PAD = 16;
-
-function layout(specs: GoodSpec[]) {
-  const byId = new Map(specs.map((s) => [s.id, s]));
-  const isRecipe = (s?: GoodSpec) => !!s && s.distribution === "manufactured" && (s.inputs?.length ?? 0) > 0;
-  // Depth via relaxation; nodes in the graph = manufactured goods ∪ their inputs.
-  const inGraph = new Set<string>();
-  for (const s of specs) {
-    if (isRecipe(s)) {
-      inGraph.add(s.id);
-      for (const inp of s.inputs ?? []) inGraph.add(inp.good);
-    }
-  }
-  const depth = new Map<string, number>();
-  for (const id of inGraph) depth.set(id, 0);
-  for (let pass = 0; pass < inGraph.size + 1; pass++) {
-    let changed = false;
-    for (const id of inGraph) {
-      const s = byId.get(id);
-      if (!isRecipe(s)) continue;
-      // A manufactured good sits one column to the RIGHT of every input it
-      // consumes — raw inputs (depth 0) push the product to depth 1, a product
-      // built from another product lands at depth 2, etc. (Previously depth only
-      // advanced for inputs that were themselves recipes, so a plain
-      // raw→product chain left both nodes at depth 0 and the whole graph
-      // collapsed into a single tangled column.)
-      let d = 1;
-      for (const inp of s!.inputs ?? []) {
-        if (inGraph.has(inp.good)) d = Math.max(d, (depth.get(inp.good) ?? 0) + 1);
-      }
-      if (depth.get(id) !== d) { depth.set(id, d); changed = true; }
-    }
-    if (!changed) break;
-  }
-  // Columns by depth.
-  const maxDepth = Math.max(0, ...[...depth.values()]);
-  const cols: string[][] = Array.from({ length: maxDepth + 1 }, () => []);
-  for (const id of inGraph) cols[depth.get(id) ?? 0].push(id);
-  cols.forEach((c) => c.sort());
-
-  const nodes: (Node & { x: number; y: number })[] = [];
-  const pos = new Map<string, { x: number; y: number }>();
-  cols.forEach((col, d) => {
-    col.forEach((id, r) => {
-      const x = PAD + NODE_W / 2 + d * (NODE_W + COL_GAP);
-      const y = PAD + NODE_H / 2 + r * (NODE_H + ROW_GAP);
-      const spec = byId.get(id) ?? fallbackSpec(id);
-      pos.set(id, { x, y });
-      nodes.push({ id, depth: d, spec, x, y });
-    });
-  });
-
-  const edges: { from: { x: number; y: number }; to: { x: number; y: number }; qty: number; bad: boolean }[] = [];
-  for (const id of inGraph) {
-    const s = byId.get(id);
-    if (!isRecipe(s)) continue;
-    const to = pos.get(id)!;
-    for (const inp of s!.inputs ?? []) {
-      const from = pos.get(inp.good);
-      const bad = !byId.get(inp.good)?.enabled;
-      if (from) edges.push({ from, to, qty: inp.qty, bad });
-    }
-  }
-
-  const width = PAD * 2 + (maxDepth + 1) * NODE_W + maxDepth * COL_GAP;
-  const tallest = Math.max(1, ...cols.map((c) => c.length));
-  const height = PAD * 2 + tallest * NODE_H + (tallest - 1) * ROW_GAP;
-  return { nodes, edges, width, height };
-}
-
-function fallbackSpec(id: string): GoodSpec {
-  return { id, name: id, icon: "❔", color: "#c06060", enabled: false, domain: "continental",
-    distribution: "local", rarity: 0.5, desire: 0.4, network_luxury: false, builtin: false,
-    category: "misc", need_tier: 1, base_value: 1 };
+/** One recipe equation: `🐑 Wool + 🐚 Dyes → 🧶 Woolen Cloth · luxury`. */
+function RecipeRow({ product, byId }: { product: GoodSpec; byId: Map<string, GoodSpec> }) {
+  const inputs = product.inputs ?? [];
+  const tier = product.network_luxury ? "luxury" : ((product.need_tier ?? 0) >= 1 ? "comfort" : "common");
+  const tierColor = product.network_luxury ? "#d9b06a" : "#6a7a90";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 3, flexWrap: "wrap", padding: "3px 0", borderBottom: "1px solid #161d27" }}>
+      {inputs.map((inp, k) => {
+        const s = byId.get(inp.good);
+        const bad = !s?.enabled;
+        return (
+          <span key={inp.good} style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+            {k > 0 && <span style={{ color: "#5a6a80", margin: "0 1px" }}>+</span>}
+            <span style={chip(s?.color ?? "#c06060")} title={bad ? `${inp.good} — disabled or missing!` : inp.good}>
+              <span>{s?.icon ?? "❔"}</span>
+              <span style={{ color: bad ? "#e08080" : undefined }}>{trim(s?.name ?? inp.good)}</span>
+              {inp.qty !== 1 && <span style={{ color: "#6a7a90", fontSize: 10 }}>×{round(inp.qty)}</span>}
+            </span>
+          </span>
+        );
+      })}
+      <span style={{ color: "#7a8aa0", margin: "0 4px", fontWeight: 700 }}>→</span>
+      <span style={chip(product.color)} title={`${product.id} · value ${round(product.base_value)} · bulk ${round(product.bulk ?? 1)}`}>
+        <span>{product.icon}</span><span style={{ fontWeight: 600 }}>{trim(product.name)}</span>
+      </span>
+      <span style={{ color: tierColor, fontSize: 10, marginLeft: 2 }}>· {tier}</span>
+    </div>
+  );
 }
 
 function round(v: number) { return Math.round(v * 10) / 10; }
-function trim(s: string) { return s.length > 13 ? s.slice(0, 12) + "…" : s; }
+function trim(s: string) { return s.length > 15 ? s.slice(0, 14) + "…" : s; }

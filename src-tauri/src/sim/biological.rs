@@ -268,7 +268,7 @@ pub const GOOD_PERISH: [f32; GOODS_COUNT] = [
     0.0, 0.0, 0.0,                   // copper, tin, gold
     0.0, 0.0, 0.01,                  // cloves, pepper, paper
     0.0, 0.0, 0.01, 0.0, 0.04,       // ceramics, glassware, tobacco, indigo, dates(fruit)
-    0.02, 0.02, 0.02, 0.06, 0.0, 0.02, 0.04, // rice, barley, millet, herring(fresh), honey, hides, beer
+    0.02, 0.02, 0.02, 0.55, 0.0, 0.02, 0.04, // rice, barley, millet, herring(fresh-VERY perishable, eaten at origin; salt it to ship), honey, hides, beer
 ];
 
 // Mountains ≥3000 m wall off a good's spread across a continent.
