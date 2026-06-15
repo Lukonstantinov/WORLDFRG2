@@ -180,7 +180,7 @@ const BANK_INTEREST: f32 = 0.01;    // monthly interest on wealth
 /// sits in (`city_size_factor`). This is the floor that pushes an idle or
 /// over-extended house into DEBT — and, if unpaid for a year, into bankruptcy.
 /// (Fleet upkeep is still charged separately in `manage_fleets`.)
-const UPKEEP_WAREHOUSE_BASE: f32 = 0.15;
+const UPKEEP_WAREHOUSE_BASE: f32 = 0.30;
 /// An estate depot is cheaper to keep than a city warehouse (small rural store).
 const UPKEEP_ESTATE_FRAC: f32 = 0.5;
 // ── House-warehouse capacity tiers (single TOTAL capacity bands). A warehouse's
@@ -198,8 +198,8 @@ const WH_MAX_CAP: f32 = 12_000.0;   // Tier 5 Grand Entrepôt ceiling
 //    proportional family overhead caps cash-hoarding and pushes capital into trade /
 //    depots / contracts. A new depot starts at Tier 1 and an AI house enlarges it
 //    when it stays full. ──
-const CAP_UPKEEP: f32 = 0.0005;        // monthly upkeep per unit capacity (× city size)
-const WEALTH_UPKEEP_RATE: f32 = 0.01;  // monthly overhead on wealth above the allowance
+const CAP_UPKEEP: f32 = 0.001;         // monthly upkeep per unit capacity (× city size)
+const WEALTH_UPKEEP_RATE: f32 = 0.02;  // monthly overhead on wealth above the allowance
 const WEALTH_UPKEEP_FREE: f32 = 30.0;  // wealth free of the family overhead
 const WH_START_CAP: f32 = 600.0;       // a fresh depot starts a Tier-1 store
 const WH_EXPAND_MULT: f32 = 1.6;       // capacity grows ×this per expansion
@@ -248,16 +248,16 @@ const GUILD_ENDOW_MAX: f32 = 0.5;
 const CIVIC_DECAY: f32 = 0.97;
 /// Monthly fleet upkeep as a fraction of a vessel's value (crew, repairs, berthing)
 /// — a steady sink that scales with how big a fleet the house runs.
-const FLEET_UPKEEP_FRAC: f32 = 0.02;
+const FLEET_UPKEEP_FRAC: f32 = 0.035;
 /// Per-vessel monthly chance of being lost to wear (rot, storms, breakdown) — the
 /// slow decay of ships & caravans, so fleets must be continually replaced.
 const FLEET_DECAY_CHANCE: f32 = 0.012;
 /// Civic taxes a city levies on a house's trade — export on goods leaving the
 /// origin, import on goods arriving at the destination. Paid by the house, funding
 /// the city (into its civic_pool → people). Guilds pay HEAVIER taxes (civic duty).
-const EXPORT_TAX_RATE: f32 = 0.02;
-const IMPORT_TAX_RATE: f32 = 0.03;
-const GUILD_TAX_MULT: f32 = 1.6;
+const EXPORT_TAX_RATE: f32 = 0.04;
+const IMPORT_TAX_RATE: f32 = 0.05;
+const GUILD_TAX_MULT: f32 = 2.0;
 /// Guild trade taxes are PROGRESSIVE in trade volume: a dominant guild moving a
 /// great deal of cargo pays proportionally more on every shipment than a small
 /// one. The extra multiplier ramps with the guild's recent decaying `volume`
@@ -284,7 +284,7 @@ const INFLATION_PER_YEAR: f32 = 0.015;
 /// scale as the `civic_pc` used for prosperity); costs scale with city size.
 const PUBLIC_WORKS_PC: f32 = 1.5;
 const PUBLIC_WORKS_BUILD_COST: f32 = 6.0; // × city_size_factor, to erect a structure
-const FESTIVAL_COST: f32 = 4.0;           // × city_size_factor, to hold a festival
+const FESTIVAL_COST: f32 = 1.5;           // × city_size_factor — feasts are cheap relief
 const FESTIVAL_PROSPERITY: f32 = 0.18;    // one-off bump to sent_prosperity
 const FESTIVAL_STABILITY: f32 = 0.12;     // one-off bump to sent_stability
 const FLEET_LOSS_MULT: f32 = 0.6;   // voyage-loss reduction
@@ -1965,9 +1965,15 @@ impl CampaignSim {
             }
             // A significant shortfall (heavy losses OR too few vessels to carry the
             // contracted amount) counts as a missed delivery; minor storm losses don't.
+            // A GOOD delivery CLEARS the strike count, so only 3 CONSECUTIVE failures
+            // void the contract — otherwise a multi-year contract inevitably accrues 3
+            // scattered misses and voids before it can ever reach term (the "no
+            // contracts ever finish" bug).
             if delivered_qty < qty * 0.5 {
                 self.contracts[ci].defaults += 1;
                 if self.contracts[ci].defaults >= 3 { remove.push(ci); }
+            } else {
+                self.contracts[ci].defaults = 0;
             }
             if delivered_qty <= EPS { continue; } // total loss — nothing ships/sells
             // Paid price drifts toward spot but stays within the band around the strike.
@@ -4785,5 +4791,52 @@ mod tests {
         assert!(formed, "contract sourced from the silk-making node (1) to the importer office (2)");
         // Signing leased the buyer office, so it can't auto-close under the contract.
         assert!(s.office_leased(0, 2), "the contract leases the buyer office");
+    }
+
+    #[test]
+    fn a_supplied_contract_survives_to_term_and_is_retired() {
+        // The fix for "no contracts ever finish": a seller that meets its monthly
+        // deliveries has its strike count reset each time, so it NEVER accrues the 3
+        // strikes that void a contract — and at term end it is RETIRED (finished), not
+        // voided. Deliveries are driven directly so the test isolates the contract
+        // lifecycle from the campaign's random fire / plague events (which can burn a
+        // depot or quarantine a city in a full `advance`).
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", i32::MAX, 2, 20.0, 0.5, false),
+        ];
+        let mut ha = hub(0, 10.0, 10.0, 5000.0, vec![100.0, 50.0], 0); ha.coastal = true;
+        let mut hb = hub(1, 14.0, 10.0, 5000.0, vec![100.0, 0.0], 0); hb.coastal = true;
+        let mut s = sim(vec![ha, hb], goods);
+        let mut h = house_at(0, vec![1], 20); // 20 ships → ample carry for a small qty
+        h.wealth = 100_000.0;
+        s.houses = vec![h];
+        s.warehouses.push(Warehouse { owner: 0, hub: 0, capacity: 12000.0,
+            stock: vec![0.0, 12000.0], tier: 5, damage: 0.0 });
+        let term = 1u8; // a 1-year contract → end_tick = 365
+        s.contracts.push(Contract {
+            seller_house: 0, buyer_hub: 1, source_hub: 0, good: 1, monthly_qty: 30.0,
+            strike_price: 25.0, term_years: term, start_tick: 0,
+            end_tick: term as u32 * TICKS_PER_YEAR, delivered: 0.0,
+            last_fulfilled: 0, suspended_until: 0, defaults: 0,
+        });
+        s.rebuild_routes();
+        let needs = vec![vec![0.0, 0.0], vec![0.0, 5.0]]; // hub 1 needs silk
+        // Step one delivery per month across the whole term, restocking the depot each
+        // month as the source city would. The contract must stay alive (not void) right
+        // up to the final month, then be retired when the tick crosses its end.
+        let mut last_delivered = 0.0;
+        for month in 1..=13u32 {
+            s.tick = month * CONTRACT_DELIVER_DAYS; // 30, 60, … 390
+            s.warehouses[0].stock[1] = 12000.0;     // source keeps the depot supplied
+            s.fulfill_contracts(&needs);
+            if s.tick < term as u32 * TICKS_PER_YEAR {
+                assert_eq!(s.contracts.len(), 1, "still alive in month {month} (not voided)");
+                assert!(s.contracts[0].defaults < 3, "strikes keep clearing (month {month})");
+                last_delivered = s.contracts[0].delivered;
+            }
+        }
+        assert!(last_delivered > 30.0 * 8.0, "delivered most months: {last_delivered}");
+        assert!(s.contracts.is_empty(), "the contract reached term end and was retired (finished)");
     }
 }

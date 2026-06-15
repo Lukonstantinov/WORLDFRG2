@@ -364,6 +364,7 @@ export function MapCanvas() {
       size: tier(h.population),
       population: h.population,
       score: h.population,
+      dead: h.population < 100, // collapsed city → black cross marker (still shown)
     }));
   }, [campaignSnapshot, settlements]);
 

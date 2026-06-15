@@ -803,6 +803,7 @@ export interface Settlement {
   culture?: string; // people/culture governing the site ("Norse", …)
   region?: string;  // region / homeland name ("Vexillia")
   site?: string;    // "coast" | "river" | "hills" | "plain"
+  dead?: boolean;   // population collapsed → drawn as a black cross, not a dot
 }
 
 /** One people's territory for the Peoples overlay (compute_culture_regions). */

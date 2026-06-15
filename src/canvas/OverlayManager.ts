@@ -750,6 +750,19 @@ export class OverlayManager {
 
     if (this.visibility.settlements && this.settlements.length > 0) {
       for (const s of this.settlements) {
+        // A DEAD (collapsed) city is marked with a small black cross in place, still
+        // shown on the map so the player sees where a settlement was lost.
+        if (s.dead) {
+          const dinv = 1 / Math.sqrt(this.currentScale);
+          const r = Math.max(0.9, 1.6 * dinv);
+          ctx.strokeStyle = "#000000";
+          ctx.lineWidth = Math.max(0.5, 1.0 * dinv);
+          ctx.beginPath();
+          ctx.moveTo(s.x + 0.5 - r, s.y + 0.5 - r); ctx.lineTo(s.x + 0.5 + r, s.y + 0.5 + r);
+          ctx.moveTo(s.x + 0.5 + r, s.y + 0.5 - r); ctx.lineTo(s.x + 0.5 - r, s.y + 0.5 + r);
+          ctx.stroke();
+          continue;
+        }
         // Dot scales continuously with population (log) on top of the tier base,
         // so the emergent carrying-capacity / trade hierarchy reads on the map.
         const popf = Math.min(1.7, 0.6 + Math.log10(Math.max(s.population, 100)) / 5);
@@ -1325,34 +1338,23 @@ export class OverlayManager {
       return m ? `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},${a})` : `rgba(200,180,80,${a})`;
     };
 
-    // ── Territory polygon: a CONVEX HULL around the focused house's cities (faint
-    //    fill + dashed outline in its colour). Cities are unwrapped relative to the
-    //    seat first so the hull doesn't tear across the cylindrical X seam. This
-    //    replaces the old soft influence discs. ──
-    if (sel && selPts.length >= 3) {
-      const ref = sel.seat ?? selPts[0];
-      const unwrapped: [number, number][] = selPts.map(([x, y]) => {
-        let dx = x - ref[0];
-        if (worldW && Math.abs(dx) > worldW / 2) dx -= Math.sign(dx) * worldW;
-        return [ref[0] + dx, y];
-      });
-      const hull = convexHull(unwrapped);
-      if (hull.length >= 3) {
-        ctx.beginPath();
-        ctx.moveTo(hull[0][0] + 0.5, hull[0][1] + 0.5);
-        for (let i = 1; i < hull.length; i++) ctx.lineTo(hull[i][0] + 0.5, hull[i][1] + 0.5);
-        ctx.closePath();
-        ctx.fillStyle = rgba(selColor, 0.10);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = rgba(selColor, 0.7);
-        ctx.lineWidth = Math.max(0.6, 1.2 * inv);
-        ctx.setLineDash([Math.max(3, 5 * inv), Math.max(2, 3 * inv)]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
+    // ── Territory = a BLURRY influence area: a soft radial disc around the seat and
+    //    each city the house holds, tinted its colour. Overlapping discs blend into an
+    //    organic cloud (no hard polygon edge). ──
+    if (sel) {
+      const baseR = (worldW > 1 ? worldW : 360) * 0.05; // ~town hinterland
+      const disc = (x: number, y: number, r: number, a: number) => {
+        const grd = ctx.createRadialGradient(x + 0.5, y + 0.5, r * 0.15, x + 0.5, y + 0.5, r);
+        grd.addColorStop(0, rgba(selColor, a));
+        grd.addColorStop(1, rgba(selColor, 0));
+        ctx.fillStyle = grd;
+        ctx.beginPath(); ctx.arc(x + 0.5, y + 0.5, r, 0, Math.PI * 2); ctx.fill();
+      };
+      for (const p of selPts) disc(p[0], p[1], baseR, 0.16);
+      if (sel.seat) disc(sel.seat[0], sel.seat[1], baseR * 1.5, 0.20); // seat = strongest
     }
     ctx.globalAlpha = 1;
+    void convexHull;
 
     // ── Trade routes (drawn first, under the dots) ──
     const drawPath = (pts: [number, number][], stroke: string, width: number, alpha: number) => {
@@ -1420,21 +1422,39 @@ export class OverlayManager {
     //    `recomputeHouseNetwork` over the drawn road graph). Each entry already falls
     //    back to a straight seat→city line when no road path exists. Under the pins. ──
     if (sel && sel.seat) {
+      const dash = Math.max(2, 5 * inv);
+      const RED = "rgba(235,70,70,0.95)";
       const drawRedPath = (pts: [number, number][]) => {
-        for (const [stroke, base, w] of [
-          ["rgba(255,60,60,0.22)", 1.5, 4.0],   // glow underlay
-          ["rgba(255,95,95,0.9)", 0.6, 1.4],    // bright core
-        ] as const) {
-          ctx.strokeStyle = stroke;
-          ctx.lineWidth = Math.max(base, w * inv);
-          let started = false;
-          for (let i = 0; i < pts.length; i++) {
-            if (i > 0 && worldW && Math.abs(pts[i][0] - pts[i - 1][0]) > worldW * 0.5) started = false; // seam
-            if (!started) { ctx.beginPath(); ctx.moveTo(pts[i][0] + 0.5, pts[i][1] + 0.5); started = true; }
-            else ctx.lineTo(pts[i][0] + 0.5, pts[i][1] + 0.5);
-          }
-          ctx.stroke();
+        ctx.strokeStyle = RED;
+        ctx.lineWidth = Math.max(0.7, 1.6 * inv);
+        ctx.setLineDash([dash, dash]);
+        let started = false;
+        for (let i = 0; i < pts.length; i++) {
+          if (i > 0 && worldW && Math.abs(pts[i][0] - pts[i - 1][0]) > worldW * 0.5) started = false; // seam
+          if (!started) { ctx.beginPath(); ctx.moveTo(pts[i][0] + 0.5, pts[i][1] + 0.5); started = true; }
+          else ctx.lineTo(pts[i][0] + 0.5, pts[i][1] + 0.5);
         }
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // Solid arrowhead at the destination CITY (the end of the path), pointing
+        // along the final leg, so the line reads as flowing seat → city of trade.
+        const n = pts.length;
+        const a = pts[n - 2], b = pts[n - 1];
+        if (worldW && Math.abs(b[0] - a[0]) > worldW * 0.5) return; // final leg crosses the seam
+        let dx = b[0] - a[0], dy = b[1] - a[1];
+        const m = Math.hypot(dx, dy);
+        if (m < 1e-3) return;
+        dx /= m; dy /= m;
+        const hl = Math.max(2.5, 4.5 * inv);
+        const px = -dy, py = dx;
+        const tx = b[0] + 0.5, ty = b[1] + 0.5;
+        ctx.fillStyle = RED;
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(tx - dx * hl + px * hl * 0.5, ty - dy * hl + py * hl * 0.5);
+        ctx.lineTo(tx - dx * hl - px * hl * 0.5, ty - dy * hl - py * hl * 0.5);
+        ctx.closePath();
+        ctx.fill();
       };
       if (this.houseNetwork.length > 0) {
         for (const path of this.houseNetwork) { if (path.length >= 2) drawRedPath(path); }
@@ -1461,16 +1481,18 @@ export class OverlayManager {
         ctx.strokeRect(pos[0] + 0.5 - offR, pos[1] + 0.5 - offR, offR * 2, offR * 2);
       }
       if (sel.seat) {
-        const sr = Math.max(1.8, 3.0 * inv);
-        ctx.beginPath();
-        ctx.arc(sel.seat[0] + 0.5, sel.seat[1] + 0.5, sr, 0, Math.PI * 2);
-        ctx.strokeStyle = selColor;
-        ctx.lineWidth = Math.max(0.9, 1.8 * inv);
-        ctx.stroke();
-        ctx.beginPath();
+        // HOME settlement = a bold SQUARE (larger than the office squares) with a
+        // white pip, so the house's seat reads distinctly from its office footholds.
+        const sr = Math.max(2.0, 3.2 * inv);
+        const sx = sel.seat[0] + 0.5, sy = sel.seat[1] + 0.5;
         ctx.fillStyle = selColor;
-        ctx.arc(sel.seat[0] + 0.5, sel.seat[1] + 0.5, Math.max(0.9, 1.5 * inv), 0, Math.PI * 2);
-        ctx.fill();
+        ctx.strokeStyle = "rgba(8,16,28,0.95)";
+        ctx.lineWidth = Math.max(0.7, 1.4 * inv);
+        ctx.fillRect(sx - sr, sy - sr, sr * 2, sr * 2);
+        ctx.strokeRect(sx - sr, sy - sr, sr * 2, sr * 2);
+        const ir = sr * 0.42;
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(sx - ir, sy - ir, ir * 2, ir * 2);
       }
     }
   }
