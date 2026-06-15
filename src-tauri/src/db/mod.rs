@@ -96,6 +96,20 @@ impl WorldDb {
         }
     }
 
+    /// Run `f` with the connection locked for exactly the duration of the call,
+    /// dropping the guard before returning. Long CPU-bound work (the sim compute
+    /// phases) must run BETWEEN such calls — never inside one — so the global
+    /// connection lock isn't held across a multi-second generation and concurrent
+    /// tile fetches (`get_tiles_packed` from pan/zoom) stay live. Mirrors the
+    /// off-lock pattern `render_full_res` already uses on the tile path.
+    pub fn with_conn<T>(
+        &self,
+        f: impl FnOnce(&Connection) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        f(&conn)
+    }
+
     /// Drop the decompressed-tile snapshot and cost grid. Sim phases call this
     /// before allocating their own world-sized buffers: the snapshot (~GBs on the
     /// largest worlds) is about to be stale anyway, and holding both at once is

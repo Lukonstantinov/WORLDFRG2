@@ -1,4 +1,5 @@
 use super::world_buffer::WorldBuffer;
+use rayon::prelude::*;
 
 /// Köppen climate classification codes (1-based, 0=none)
 pub const AF: u8 = 1;   // Tropical rainforest
@@ -632,23 +633,31 @@ fn latitude_guardrail(code: u8, abs_lat: f32, elevation: f32, precip: f32, temp:
 /// Classify Köppen climate zones for all land cells, then apply current overrides.
 pub fn classify_koppen(buf: &mut WorldBuffer) {
     let w = buf.width;
-    let h = buf.height;
 
-    // Pass 1: classify all land cells (with latitude guardrails)
-    for y in 0..h {
-        let abs_lat = buf.latitude(y).abs();
-        for x in 0..w {
-            let idx = buf.idx(x, y);
-            if buf.terrain[idx] != 1 {
-                buf.koppen[idx] = 0;
-                continue;
+    // Pass 1: classify all land cells (with latitude guardrails). Pure per-cell
+    // map — `classify_cell` reads temperature/precip/elevation/terrain (incl.
+    // neighbours) but never `koppen`, so writing into a fresh buffer parallelizes
+    // by row band with bit-identical output.
+    let mut new_koppen = vec![0u8; buf.total()];
+    new_koppen
+        .par_chunks_mut(w as usize)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let y = y as u32;
+            let abs_lat = buf.latitude(y).abs();
+            for x in 0..w {
+                let idx = buf.idx(x, y);
+                if buf.terrain[idx] != 1 {
+                    row[x as usize] = 0;
+                    continue;
+                }
+                let raw = classify_cell(buf, x, y);
+                row[x as usize] = latitude_guardrail(
+                    raw, abs_lat, buf.elevation[idx], buf.precipitation[idx], buf.temperature[idx],
+                );
             }
-            let raw = classify_cell(buf, x, y);
-            buf.koppen[idx] = latitude_guardrail(
-                raw, abs_lat, buf.elevation[idx], buf.precipitation[idx], buf.temperature[idx],
-            );
-        }
-    }
+        });
+    buf.koppen = new_koppen;
 
     // Pass 2: apply current-driven overrides (can extend a zone past its band)
     apply_current_overrides(buf);

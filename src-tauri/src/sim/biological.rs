@@ -11,6 +11,7 @@
 //! All outputs are u8 (0..255). Tuning is expected to need a visual pass.
 
 use std::collections::VecDeque;
+use rayon::prelude::*;
 use super::world_buffer::WorldBuffer;
 use super::rivers::River;
 use super::koppen::*;
@@ -715,7 +716,6 @@ pub fn compute_trade_goods(
     climate_strictness: f32, specs: &[GoodSpec],
 ) {
     let w = buf.width;
-    let h = buf.height;
     let n = buf.total();
 
     // Climate strictness sharpens (or softens) every good's suitability score
@@ -773,21 +773,23 @@ pub fn compute_trade_goods(
                     // placed nothing (ambergris was invisible). Score the domain that
                     // the good actually lives in.
                     let marine_dep = matches!(spec.domain, Domain::Marine);
-                    for y in 0..h {
+                    let buf_ref: &WorldBuffer = buf;
+                    cand.par_chunks_mut(w as usize).enumerate().for_each(|(y, row)| {
+                        let y = y as u32;
                         for x in 0..w {
-                            let i = buf.idx(x, y);
+                            let i = buf_ref.idx(x, y);
                             if marine_dep {
-                                if buf.terrain[i] != 0 { continue; }
-                            } else if buf.terrain[i] != 1 {
+                                if buf_ref.terrain[i] != 0 { continue; }
+                            } else if buf_ref.terrain[i] != 1 {
                                 continue;
                             }
-                            cand[i] = shape(if let Some(env) = &spec.scoring {
-                                envelope_score(buf, env, spec.domain, x, y)
+                            row[x as usize] = shape(if let Some(env) = &spec.scoring {
+                                envelope_score(buf_ref, env, spec.domain, x, y)
                             } else if let Some(idx) = builtin_idx {
-                                good_score(buf, idx, x, y)
+                                good_score(buf_ref, idx, x, y)
                             } else { 0.0 });
                         }
-                    }
+                    });
                 } else {
                     // Ore-province field: each deposit good lights up its OWN highland
                     // ranges via a per-good low-frequency noise field (seed = the good's
@@ -797,18 +799,20 @@ pub fn compute_trade_goods(
                     // favouring uplands, but the *which range* is the good's own noise.
                     let province_scale = spec.deposit.map(|d| d.province_scale).unwrap_or(0.06);
                     let eff_min = min_elev.min(highland_cap);
-                    for y in 0..h {
+                    let buf_ref: &WorldBuffer = buf;
+                    cand.par_chunks_mut(w as usize).enumerate().for_each(|(y, row)| {
+                        let y = y as u32;
                         for x in 0..w {
-                            let i = buf.idx(x, y);
-                            if buf.terrain[i] == 1 && buf.elevation[i] >= eff_min {
+                            let i = buf_ref.idx(x, y);
+                            if buf_ref.terrain[i] == 1 && buf_ref.elevation[i] >= eff_min {
                                 let p = crate::sim::elevation::fbm_noise(
                                     x as f32 * province_scale, y as f32 * province_scale,
                                     salt, 4, 2.0, 0.5,
                                 );
-                                cand[i] = (p * 0.85 + 0.15 * (buf.elevation[i] - eff_min)).clamp(0.0, 1.0);
+                                row[x as usize] = (p * 0.85 + 0.15 * (buf_ref.elevation[i] - eff_min)).clamp(0.0, 1.0);
                             }
                         }
-                    }
+                    });
                 }
                 // Harsh rule for extreme-rare deposits: demand a stronger candidate
                 // (a stricter homeland) so prized stones/dyes stay scarce.
@@ -837,18 +841,20 @@ pub fn compute_trade_goods(
                 let marine = matches!(spec.domain, Domain::Marine);
                 let unlimited = matches!(spec.distribution, Distribution::Global);
                 let mut score = vec![0.0f32; n];
-                for y in 0..h {
+                let buf_ref: &WorldBuffer = buf;
+                score.par_chunks_mut(w as usize).enumerate().for_each(|(y, row)| {
+                    let y = y as u32;
                     for x in 0..w {
                         let s = if let Some(env) = &spec.scoring {
-                            envelope_score(buf, env, spec.domain, x, y)
+                            envelope_score(buf_ref, env, spec.domain, x, y)
                         } else if let Some(idx) = builtin_idx {
-                            good_score(buf, idx, x, y)
+                            good_score(buf_ref, idx, x, y)
                         } else {
                             0.0
                         };
-                        score[buf.idx(x, y)] = shape(s);
+                        row[x as usize] = shape(s);
                     }
-                }
+                });
                 // Built-ins reproduce their original seed by salting with index*K;
                 // custom goods get an id-derived salt.
                 let salt = match builtin_idx {

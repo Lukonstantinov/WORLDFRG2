@@ -1,6 +1,7 @@
 use super::world_buffer::WorldBuffer;
 use super::rivers::River;
 use super::soil::*;
+use rayon::prelude::*;
 
 /// Compute fertility score for all land cells.
 /// score = 0.30×SOIL_BASE + 0.20×precipScore + 0.15×tempScore
@@ -8,7 +9,6 @@ use super::soil::*;
 /// Matches WF1 fertility-score.ts algorithm.
 pub fn compute_fertility(buf: &mut WorldBuffer, rivers: &[River]) {
     let w = buf.width;
-    let h = buf.height;
 
     // Step 1: Compute river proximity via BFS
     let mut river_prox = vec![0.0f32; buf.total()];
@@ -51,12 +51,17 @@ pub fn compute_fertility(buf: &mut WorldBuffer, rivers: &[River]) {
         }
     }
 
-    // Step 2: Compute fertility for each land cell
-    for y in 0..h {
+    // Step 2: Compute fertility for each land cell. Pure per-cell map — every
+    // input is read at the cell's own index (soil/precip/temp/coast/volcanic/
+    // koppen) plus the precomputed `river_prox`, so it parallelizes by row band
+    // into a fresh buffer with bit-identical output.
+    let mut new_fert = vec![0.0f32; buf.total()];
+    new_fert.par_chunks_mut(w as usize).enumerate().for_each(|(y, row)| {
+        let y = y as u32;
         for x in 0..w {
             let idx = buf.idx(x, y);
             if buf.terrain[idx] != 1 {
-                buf.fertility[idx] = 0.0;
+                row[x as usize] = 0.0;
                 continue;
             }
 
@@ -151,9 +156,10 @@ pub fn compute_fertility(buf: &mut WorldBuffer, rivers: &[River]) {
                 1.0
             };
 
-            buf.fertility[idx] = (score * temp_gate).clamp(0.0, 1.0);
+            row[x as usize] = (score * temp_gate).clamp(0.0, 1.0);
         }
-    }
+    });
+    buf.fertility = new_fert;
 }
 
 /// Compute fishery productivity for sea cells from four real-world drivers:

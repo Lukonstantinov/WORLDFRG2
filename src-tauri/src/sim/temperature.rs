@@ -1,4 +1,5 @@
 use super::world_buffer::WorldBuffer;
+use rayon::prelude::*;
 
 /// Compute temperature for all cells.
 /// Base from latitude bands + altitude lapse + current influence + coastal damping.
@@ -7,47 +8,57 @@ pub fn compute_temperature(buf: &mut WorldBuffer) {
     let w = buf.width;
     let h = buf.height;
 
-    for y in 0..h {
-        let lat = buf.latitude(y);
-        let abs_lat = lat.abs();
+    // Base + lapse + coastal damping is a pure per-cell map (reads neighbours via
+    // `upwind_is_open_ocean` but writes only its own cell), so it parallelizes by
+    // row band with no cross-cell writes — output is bit-for-bit identical to the
+    // serial sweep. Write into a fresh buffer so `buf` is borrowed immutably.
+    let mut new_temp = vec![0.0f32; buf.total()];
+    new_temp
+        .par_chunks_mut(w as usize)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let y = y as u32;
+            let lat = buf.latitude(y);
+            let abs_lat = lat.abs();
 
-        // Base annual-mean temperature from latitude bands. Tuned to real Earth
-        // anchors so the mid-latitudes are warm enough to host temperate climates
-        // (the old curve put 50° at +4°C, ~7°C too cold, which forced oceanic /
-        // Mediterranean / temperate zones into continental, polar or arid types):
-        //   0° → 30,  30° → 20,  45° → 12.5,  60° → 5,  75° → -12,  90° → -29.
-        let base_temp = if abs_lat < 30.0 {
-            30.0 - 0.333 * abs_lat
-        } else if abs_lat < 60.0 {
-            20.0 - 0.5 * (abs_lat - 30.0)
-        } else {
-            5.0 - 1.15 * (abs_lat - 60.0)
-        };
+            // Base annual-mean temperature from latitude bands. Tuned to real Earth
+            // anchors so the mid-latitudes are warm enough to host temperate climates
+            // (the old curve put 50° at +4°C, ~7°C too cold, which forced oceanic /
+            // Mediterranean / temperate zones into continental, polar or arid types):
+            //   0° → 30,  30° → 20,  45° → 12.5,  60° → 5,  75° → -12,  90° → -29.
+            let base_temp = if abs_lat < 30.0 {
+                30.0 - 0.333 * abs_lat
+            } else if abs_lat < 60.0 {
+                20.0 - 0.5 * (abs_lat - 30.0)
+            } else {
+                5.0 - 1.15 * (abs_lat - 60.0)
+            };
 
-        for x in 0..w {
-            let idx = buf.idx(x, y);
-            let mut temp = base_temp;
+            for x in 0..w {
+                let idx = buf.idx(x, y);
+                let mut temp = base_temp;
 
-            if buf.terrain[idx] == 1 {
-                // Altitude lapse rate: -5°C per 1000m (elevation is 0-1, max 8848m)
-                let altitude_m = buf.elevation[idx] * 8848.0;
-                temp -= 5.0 * altitude_m / 1000.0;
+                if buf.terrain[idx] == 1 {
+                    // Altitude lapse rate: -5°C per 1000m (elevation is 0-1, max 8848m)
+                    let altitude_m = buf.elevation[idx] * 8848.0;
+                    temp -= 5.0 * altitude_m / 1000.0;
 
-                // Coastal damping: only a coast exposed to OPEN ocean on the
-                // prevailing-wind upwind side is moderated toward 15°C. A lee /
-                // east coast — OR a coast fronted by a wide continental shelf
-                // (shelf water doesn't count as open ocean) — keeps its continental
-                // mean so it reads cold-winter Df/Dw instead of mild oceanic Cfb.
-                let ocean_dist = buf.distance_to_ocean[idx];
-                if ocean_dist < 0.1 && super::koppen::upwind_is_open_ocean(buf, x, y, 6) {
-                    let coastal_factor = 1.0 - ocean_dist / 0.1;
-                    temp = temp + (15.0 - temp) * 0.45 * coastal_factor;
+                    // Coastal damping: only a coast exposed to OPEN ocean on the
+                    // prevailing-wind upwind side is moderated toward 15°C. A lee /
+                    // east coast — OR a coast fronted by a wide continental shelf
+                    // (shelf water doesn't count as open ocean) — keeps its continental
+                    // mean so it reads cold-winter Df/Dw instead of mild oceanic Cfb.
+                    let ocean_dist = buf.distance_to_ocean[idx];
+                    if ocean_dist < 0.1 && super::koppen::upwind_is_open_ocean(buf, x, y, 6) {
+                        let coastal_factor = 1.0 - ocean_dist / 0.1;
+                        temp = temp + (15.0 - temp) * 0.45 * coastal_factor;
+                    }
                 }
-            }
 
-            buf.temperature[idx] = temp;
-        }
-    }
+                row[x as usize] = temp;
+            }
+        });
+    buf.temperature = new_temp;
 
     // Current temperature influence: warm/cold currents affect nearby land.
     // Accumulate into a separate delta buffer so a coastal cell that sits

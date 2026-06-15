@@ -903,13 +903,18 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
 /// Advance the living-trade sim by `ticks` days (autosaving the new state).
 #[tauri::command]
 pub fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<CampaignSnapshot, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut sim = get_sim(&conn)?
-        .ok_or_else(|| "No active campaign sim — start it first.".to_string())?;
+    // Load the sim under a short lock, then DROP it so the advance — which is
+    // pure in-memory compute and can run hundreds of ticks ("advance a year" /
+    // auto-play) — does not hold the global connection lock. Concurrent tile
+    // fetches (pan/zoom) stay live instead of freezing for the whole simulation.
+    let mut sim = db.with_conn(|conn| {
+        get_sim(conn)?.ok_or_else(|| "No active campaign sim — start it first.".to_string())
+    })?;
     let t0 = std::time::Instant::now();
     sim.advance(ticks.clamp(1, 3650));
     sim.last_tick_ms = t0.elapsed().as_secs_f32() * 1000.0 / ticks.max(1) as f32;
-    set_sim(&conn, &sim)?; // append-only journal → incremental autosave
+    // Re-lock only for the write (append-only journal → incremental autosave).
+    db.with_conn(|conn| set_sim(conn, &sim))?;
     Ok(build_snapshot(&sim))
 }
 
