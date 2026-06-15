@@ -3217,6 +3217,47 @@ mod tests {
         s
     }
 
+    /// Manual benchmark for the per-day campaign tick. Run explicitly:
+    ///   `cargo test --release --lib bench_campaign_tick -- --ignored --nocapture`
+    /// Reports total + per-tick ms for a year on a mid-size campaign so the tick
+    /// cost (and how it scales with hub/good count) can be measured.
+    #[test]
+    #[ignore]
+    fn bench_campaign_tick() {
+        use std::time::Instant;
+        let ng = 24usize;
+        let goods: Vec<TickGood> = (0..ng)
+            .map(|g| good(&format!("g{g}"), (g % 12) as i32, (g % 3) as u8,
+                          1.0 + g as f32, 0.30 + 0.5 * ((g % 5) as f32 / 5.0), g < 6))
+            .collect();
+
+        let nhubs = 160u32;
+        let mut hubs = Vec::new();
+        for i in 0..nhubs {
+            let x = (i % 16) as f32 * 6.0;
+            let y = (i / 16) as f32 * 6.0;
+            let pop = 2000.0 + (i as f32 * 137.0) % 9000.0;
+            let prod: Vec<f32> = (0..ng)
+                .map(|g| if (g + i as usize) % 7 == 0 { pop * 0.02 } else { pop * 0.002 })
+                .collect();
+            hubs.push(hub(i, x, y, pop, prod, 0)); // one component → trade flows
+        }
+        let mut s = sim(hubs, goods);
+        for i in (0..nhubs).step_by(8) {
+            s.houses.push(house_at(i, vec![i as usize % ng], 2));
+        }
+        s.rebuild_routes();
+
+        let days = 365u32;
+        let t0 = Instant::now();
+        s.advance(days);
+        let total = t0.elapsed().as_secs_f64() * 1000.0;
+        println!(
+            "[campaign-bench hubs={nhubs} goods={ng}] {days} ticks: {total:.1}ms total, {:.3}ms/tick",
+            total / days as f64
+        );
+    }
+
     #[test]
     fn deterministic_and_finite() {
         let goods = vec![
