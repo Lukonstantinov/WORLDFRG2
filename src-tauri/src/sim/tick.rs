@@ -207,6 +207,7 @@ const WH_EXPAND_COST: f32 = 6.0;       // base wealth cost to enlarge (× curren
 const WH_FULL_FRAC: f32 = 0.85;        // enlarge once fill ≥ this fraction
 const WH_STOCK_FRAC: f32 = 0.25;       // share of a good's local surplus a house stocks/mo
 const WEALTH_HISTORY_CAP: usize = 80;  // years of wealth samples kept per house
+const HOUSE_EVENTS_CAP: usize = 60;    // most-recent chronicle entries kept per house
 // ── Futures contracts (Phase 3). A contract is a thin, two-sided stability layer
 //    ON TOP of the spot market: it covers only a slice of a city's need (so the
 //    price signal survives), at a struck price allowed to drift within a band, for
@@ -938,10 +939,13 @@ impl CampaignSim {
                 let d = self.days[a * n + b];
                 if d.is_finite() { scratch.push((b as u32, d)); }
             }
-            // Partial-select the K nearest (full sort is fine at these sizes too,
-            // but only keep K so dispatch's inner loop stays small).
+            // Partial-select the K nearest in O(n) (avoids an O(n log n) full sort of
+            // every hub against every other on each estate add), then sort just those K.
+            if scratch.len() > NEIGHBOR_K {
+                scratch.select_nth_unstable_by(NEIGHBOR_K, |x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
+                scratch.truncate(NEIGHBOR_K);
+            }
             scratch.sort_by(|x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
-            scratch.truncate(NEIGHBOR_K);
             neighbors[a] = scratch.iter().map(|&(b, _)| b).collect();
         }
         self.neighbors = neighbors;
@@ -1286,6 +1290,11 @@ impl CampaignSim {
                     let wh = &mut self.houses[hi].wealth_history;
                     wh.push(w);
                     if wh.len() > WEALTH_HISTORY_CAP { let drop = wh.len() - WEALTH_HISTORY_CAP; wh.drain(0..drop); }
+                    // Bound the family chronicle so a long campaign doesn't accumulate
+                    // an unbounded event list per house (memory + save size). Keep the
+                    // most recent — the timeline UI only shows a recent window anyway.
+                    let ev = &mut self.houses[hi].events;
+                    if ev.len() > HOUSE_EVENTS_CAP { let drop = ev.len() - HOUSE_EVENTS_CAP; ev.drain(0..drop); }
                 }
                 self.house_ledger_prev = self.house_ledger.clone();
                 let yr = tick / TICKS_PER_YEAR;
@@ -2074,11 +2083,38 @@ impl CampaignSim {
                         .min_by(|&a, &b| self.days[a as usize * n + buyer]
                             .partial_cmp(&self.days[b as usize * n + buyer]).unwrap_or(std::cmp::Ordering::Equal));
                     let src = match src { Some(s) => s as usize, None => continue };
+                    // Size the monthly quantity to what the seller can REALISTICALLY
+                    // SUPPLY and CARRY, not just to the buyer's need — otherwise the
+                    // depot/fleet can't meet it and the contract defaults every month
+                    // until it voids (the "contracts cancel a month later" bug).
+                    //   supply = depot stock already at src + the sustainable rate the
+                    //            depot restocks from the source city's monthly surplus.
+                    let depot_stock: f32 = self.warehouses.iter()
+                        .filter(|w| w.owner == hi as i32 && w.hub == src as u32)
+                        .map(|w| w.stock.get(g).copied().unwrap_or(0.0)).sum();
+                    let src_surplus = (self.hubs[src].production.get(g).copied().unwrap_or(0.0)
+                        - needs[src][g]).max(0.0);
+                    let supply_cap = depot_stock + src_surplus * 30.0 * WH_STOCK_FRAC;
+                    //   carry = the seller's fleet capacity on this route's binding leg
+                    //   (coast↔coast = sea; any inland end needs a land leg).
+                    let (sc, bc) = (self.hubs[src].coastal, self.hubs[buyer].coastal);
+                    let need_sea = sc || bc;
+                    let need_land = !(sc && bc);
+                    let rv = self.houses[hi].fleet_river as f32;
+                    let cv = self.houses[hi].fleet_caravan as f32;
+                    let land_per = if rv + cv > 0.0 {
+                        (rv * BOAT_CAPACITY + cv * CARAVAN_CAPACITY) / (rv + cv)
+                    } else { CARAVAN_CAPACITY };
+                    let sea_carry = if need_sea { self.houses[hi].fleet_sea as f32 * SHIP_CAPACITY } else { f32::INFINITY };
+                    let land_carry = if need_land { (rv + cv) * land_per } else { f32::INFINITY };
+                    let carry_cap = sea_carry.min(land_carry);
+                    let monthly_qty = room.min(supply_cap).min(carry_cap);
+                    if monthly_qty <= EPS { continue; } // can't sustain a real delivery → don't sign
                     let strike = self.live_price(self.hub_stock(buyer, g), needs[buyer][g],
                         self.goods[g].base_value) * TERM_STRIKE_FACTOR[ti];
                     self.contracts.push(Contract {
                         seller_house: hi as u32, buyer_hub: buyer as u32, source_hub: src as u32,
-                        good: g, monthly_qty: room, strike_price: strike, term_years: term,
+                        good: g, monthly_qty, strike_price: strike, term_years: term,
                         start_tick: tick, end_tick: tick + term as u32 * TICKS_PER_YEAR,
                         delivered: 0.0, last_fulfilled: 0, suspended_until: 0, defaults: 0,
                     });
@@ -4736,6 +4772,7 @@ mod tests {
         let mut h = house_at(0, vec![1], 4); // specializes in silk, home = hub 0
         h.offices = vec![1, 2];
         h.wealth = 1000.0;
+        h.fleet_caravan = 4; // overland carry capacity (contracts are now sized to the fleet)
         s.houses = vec![h];
         let needs = vec![vec![0.0, 0.0], vec![0.0, 0.0], vec![0.0, 5.0]]; // hub 2 needs silk
         let mut formed = false;

@@ -143,6 +143,9 @@ pub fn new_campaign(name: String, db: State<'_, WorldDb>) -> Result<(), String> 
 #[tauri::command]
 pub fn save_campaign_as(path: String, db: State<'_, WorldDb>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    // Flush any resident in-memory ticks to the DB row first, so the file we copy
+    // out reflects the latest simulated state.
+    persist_campaign(&db, &conn)?;
     // Refresh the world reference so the file always names the world it was
     // saved against.
     let world_ref = current_world_ref(&conn)?;
@@ -212,6 +215,9 @@ pub fn open_campaign(path: String, db: State<'_, WorldDb>) -> Result<CampaignInf
     for (k, v) in &rows {
         metadata::campaign_set(&conn, k, v).map_err(|e| e.to_string())?;
     }
+    // The resident sim now belongs to the old campaign — drop it so the next read
+    // reloads from the freshly imported rows.
+    db.invalidate_campaign();
 
     let name = rows
         .iter()
@@ -442,25 +448,70 @@ pub struct OfficeHere {
     pub goods: Vec<String>,    // goods it currently moves through here
 }
 
-fn get_sim(conn: &Connection) -> Result<Option<CampaignSim>, String> {
-    // Make the organic culture map active so houses/guilds founded this tick are
+/// Parse the campaign sim from the DB into the resident cache ONCE. After this the
+/// query commands read the live object instead of re-parsing JSON every call.
+fn ensure_campaign_loaded(cache: &mut crate::db::CampaignCache, conn: &Connection) -> Result<(), String> {
+    if cache.loaded {
+        return Ok(());
+    }
+    // Make the organic culture map active so houses/guilds founded this campaign are
     // named in their home city's culture (no-op when none is stored).
     crate::sim::cultures::ensure_active(conn);
     let raw = metadata::campaign_get(conn, "campaign_sim").map_err(|e| e.to_string())?;
-    match raw {
+    cache.sim = match raw {
         Some(s) if !s.is_empty() => {
             let mut sim: CampaignSim =
                 serde_json::from_str(&s).map_err(|e| format!("campaign_sim parse: {e}"))?;
-            sim.rebuild_routes(); // `days` is not serialized
-            Ok(Some(sim))
+            sim.rebuild_routes(); // `days` / `neighbors` are not serialized
+            Some(sim)
         }
-        _ => Ok(None),
-    }
+        _ => None,
+    };
+    cache.loaded = true;
+    cache.dirty = false;
+    Ok(())
 }
 
-fn set_sim(conn: &Connection, sim: &CampaignSim) -> Result<(), String> {
-    let json = serde_json::to_string(sim).map_err(|e| e.to_string())?;
-    metadata::campaign_set(conn, "campaign_sim", &json).map_err(|e| e.to_string())
+/// A CLONE of the resident sim (loading it from the DB once if needed). Read-only
+/// commands use this; it never re-parses JSON after the first load.
+fn get_sim(db: &WorldDb, conn: &Connection) -> Result<Option<CampaignSim>, String> {
+    let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
+    ensure_campaign_loaded(&mut cache, conn)?;
+    Ok(cache.sim.clone())
+}
+
+/// Replace the resident sim and mark it dirty (the DB row is flushed later by
+/// `persist_campaign` / the advance cadence). Used by commands that build or rewrite
+/// the whole sim.
+fn set_sim(db: &WorldDb, sim: &CampaignSim) -> Result<(), String> {
+    let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
+    cache.sim = Some(sim.clone());
+    cache.loaded = true;
+    cache.dirty = true;
+    Ok(())
+}
+
+/// Flush the resident sim to the DB metadata row if it has unsaved changes. Called on
+/// pause/save/close and periodically from `campaign_advance`. Caller holds `conn`.
+fn persist_campaign(db: &WorldDb, conn: &Connection) -> Result<(), String> {
+    let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
+    if cache.dirty {
+        if let Some(sim) = &cache.sim {
+            let json = serde_json::to_string(sim).map_err(|e| e.to_string())?;
+            metadata::campaign_set(conn, "campaign_sim", &json).map_err(|e| e.to_string())?;
+        }
+        cache.dirty = false;
+        cache.last_persist = Some(std::time::Instant::now());
+    }
+    Ok(())
+}
+
+/// Frontend-invokable flush — called when the Play loop pauses and before the app
+/// closes, so unsaved in-memory ticks reach the DB.
+#[tauri::command]
+pub fn campaign_persist(db: State<'_, WorldDb>) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    persist_campaign(&db, &conn)
 }
 
 fn build_snapshot(sim: &CampaignSim) -> CampaignSnapshot {
@@ -901,28 +952,55 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
     };
     sim.rebuild_routes();
     sim.seed_initial_guilds(); // civic guilds for cities already ≥ 50k people
-    set_sim(&conn, &sim)?;
+    set_sim(&db, &sim)?;
+    persist_campaign(&db, &conn)?; // write the fresh campaign to the DB immediately
     Ok(build_snapshot(&sim))
 }
 
-/// Advance the living-trade sim by `ticks` days (autosaving the new state).
+/// Advance the living-trade sim by `ticks` days. The sim is mutated in place in the
+/// resident cache (no JSON round-trip per call) and flushed to the DB only on a year
+/// boundary or every few seconds of wall time — see `CampaignCache`.
 #[tauri::command]
 pub fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<CampaignSnapshot, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut sim = get_sim(&conn)?
-        .ok_or_else(|| "No active campaign sim — start it first.".to_string())?;
-    let t0 = std::time::Instant::now();
-    sim.advance(ticks.clamp(1, 3650));
-    sim.last_tick_ms = t0.elapsed().as_secs_f32() * 1000.0 / ticks.max(1) as f32;
-    set_sim(&conn, &sim)?; // append-only journal → incremental autosave
-    Ok(build_snapshot(&sim))
+    let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
+    ensure_campaign_loaded(&mut cache, &conn)?;
+    // Whether enough wall time has passed to warrant a flush (read before borrowing
+    // `sim`, which borrows the cache).
+    let stale = cache.last_persist.map(|t| t.elapsed().as_secs_f32() > 5.0).unwrap_or(true);
+    let (snap, json) = {
+        let sim = cache.sim.as_mut()
+            .ok_or_else(|| "No active campaign sim — start it first.".to_string())?;
+        let year_before = sim.year();
+        let t0 = std::time::Instant::now();
+        sim.advance(ticks.clamp(1, 3650));
+        sim.last_tick_ms = t0.elapsed().as_secs_f32() * 1000.0 / ticks.max(1) as f32;
+        let snap = build_snapshot(sim);
+        // Serialize ONLY when it's time to autosave (year rolled over or wall-clock
+        // cadence); otherwise the change just stays resident and dirty.
+        let json = if sim.year() != year_before || stale {
+            Some(serde_json::to_string(sim).map_err(|e| e.to_string())?)
+        } else {
+            None
+        };
+        (snap, json)
+    };
+    match json {
+        Some(j) => {
+            metadata::campaign_set(&conn, "campaign_sim", &j).map_err(|e| e.to_string())?;
+            cache.dirty = false;
+            cache.last_persist = Some(std::time::Instant::now());
+        }
+        None => cache.dirty = true,
+    }
+    Ok(snap)
 }
 
 /// Current sim state (inactive snapshot when no campaign sim has been started).
 #[tauri::command]
 pub fn campaign_get_state(db: State<'_, WorldDb>) -> Result<CampaignSnapshot, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    Ok(match get_sim(&conn)? {
+    Ok(match get_sim(&db, &conn)? {
         Some(sim) => build_snapshot(&sim),
         None => inactive_snapshot(),
     })
@@ -937,7 +1015,7 @@ pub fn campaign_get_journal(
     db: State<'_, WorldDb>,
 ) -> Result<Vec<JournalEntry>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let sim = match get_sim(&conn)? {
+    let sim = match get_sim(&db, &conn)? {
         Some(s) => s,
         None => return Ok(vec![]),
     };
@@ -955,7 +1033,7 @@ pub fn campaign_get_journal(
 #[tauri::command]
 pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDetail>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let sim = match get_sim(&conn)? {
+    let sim = match get_sim(&db, &conn)? {
         Some(s) => s,
         None => return Ok(None),
     };
@@ -1397,7 +1475,7 @@ pub struct MerchantRoute {
 pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRoute>, String> {
     use std::collections::HashMap;
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let sim = match get_sim(&conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
     struct Agg { vol: f32, sea: bool, out: HashMap<usize, f32>, ret: HashMap<usize, f32> }
     let mut groups: HashMap<(usize, u32, u32), Agg> = HashMap::new();
     for s in &sim.in_transit {
@@ -1469,7 +1547,7 @@ pub struct FuturesLane {
 pub fn campaign_futures_lanes(db: State<'_, WorldDb>) -> Result<Vec<FuturesLane>, String> {
     use crate::sim::tick::TICKS_PER_YEAR;
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let sim = match get_sim(&conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
     // Estate endpoints collapse to their parent city so lanes connect cities.
     let city_of = |h: u32| -> u32 {
         match sim.hubs.get(h as usize) {
@@ -1526,7 +1604,7 @@ pub struct WarehouseInfo {
 #[tauri::command]
 pub fn campaign_warehouses(db: State<'_, WorldDb>) -> Result<Vec<WarehouseInfo>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let sim = match get_sim(&conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
     let gname = |g: usize| sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
     let mut out: Vec<WarehouseInfo> = sim.warehouses.iter().filter(|w| w.owner >= 0).map(|w| {
         let h = sim.houses.get(w.owner as usize);
@@ -1605,7 +1683,7 @@ pub struct CityRank {
 #[tauri::command]
 pub fn campaign_city_ranking(db: State<'_, WorldDb>) -> Result<Vec<CityRank>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let sim = match get_sim(&conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
     let trade_of = |h: &TickHub| (h.export_earn + h.import_spend).max(0.0);
     let total: f32 = sim.hubs.iter().filter(|h| !h.is_estate).map(trade_of).sum::<f32>().max(1e-6);
     let mut out: Vec<CityRank> = sim.hubs.iter().filter(|h| !h.is_estate).map(|h| {
@@ -1643,7 +1721,7 @@ pub struct CampaignDiagnostics {
 #[tauri::command]
 pub fn campaign_diagnostics(db: State<'_, WorldDb>) -> Result<Option<CampaignDiagnostics>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let Some(sim) = get_sim(&conn)? else { return Ok(None) };
+    let Some(sim) = get_sim(&db, &conn)? else { return Ok(None) };
     let active: Vec<&crate::sim::tick::House> = sim.houses.iter().filter(|h| !h.defunct).collect();
     let (mut fs, mut fr, mut fc, mut wealth) = (0u32, 0u32, 0u32, 0.0f32);
     for h in &active {
@@ -1672,7 +1750,7 @@ pub fn campaign_diagnostics(db: State<'_, WorldDb>) -> Result<Option<CampaignDia
 #[tauri::command]
 pub fn campaign_get_houses(db: State<'_, WorldDb>) -> Result<Vec<HouseBrief>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    Ok(match get_sim(&conn)? {
+    Ok(match get_sim(&db, &conn)? {
         Some(sim) => build_house_briefs(&sim),
         None => vec![],
     })
@@ -1720,7 +1798,7 @@ pub struct HouseLedger {
 #[tauri::command]
 pub fn campaign_house_ledger(db: State<'_, WorldDb>, house: usize) -> Result<Option<HouseLedger>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let Some(sim) = get_sim(&conn)? else { return Ok(None); };
+    let Some(sim) = get_sim(&db, &conn)? else { return Ok(None); };
     if house >= sim.houses.len() {
         return Ok(None);
     }
@@ -1826,7 +1904,7 @@ pub struct HouseHistory {
 #[tauri::command]
 pub fn campaign_get_house_history(name: String, db: State<'_, WorldDb>) -> Result<Option<HouseHistory>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let Some(sim) = get_sim(&conn)? else { return Ok(None) };
+    let Some(sim) = get_sim(&db, &conn)? else { return Ok(None) };
     let idx = sim.houses.iter().position(|h| h.name == name);
     let Some(idx) = idx else { return Ok(None) };
     let h = &sim.houses[idx];
@@ -1859,7 +1937,7 @@ pub fn campaign_get_house_history(name: String, db: State<'_, WorldDb>) -> Resul
 #[tauri::command]
 pub fn campaign_get_world_economy(db: State<'_, WorldDb>) -> Result<WorldEconomy, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let sim = match get_sim(&conn)? {
+    let sim = match get_sim(&db, &conn)? {
         Some(s) => s,
         None => return Ok(WorldEconomy {
             goods: vec![], index_series: vec![],

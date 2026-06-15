@@ -61,9 +61,9 @@ const LAKE_COLOR = "rgba(51, 153, 221, 0.7)";
 const SETTLEMENT_COLORS: Record<string, string> = {
   capital: "#ffd700",
   city: "#ff8844",
-  town: "#cccccc",
-  village: "#88aa88",
-  outpost: "#111111", // trade posts: small black dots
+  town: "#e8e8e8",
+  village: "#e6cf9a", // warm cream — reads on both green land and blue sea
+  outpost: "#c9a96a", // tan — visible (was near-black #111111, invisible on terrain)
 };
 
 const SETTLEMENT_SIZES: Record<string, number> = {
@@ -113,6 +113,15 @@ export class OverlayManager {
   private houses: HouseBrief[] = [];
   private allHouses: HouseBrief[] = [];
   private selectedHouseIdx: number | null = null;
+  /** Seat→city polylines for the focused house, snapped onto the EXISTING trade
+   *  routes (`routeAlongTradeRoutes`). Empty inner paths are skipped. */
+  private houseNetwork: [number, number][][] = [];
+  // ── Trade-route graph (lazily built from `this.tradeRoutes`) so house-network and
+  //    futures lanes can ride the roads ALREADY drawn on the map instead of straight
+  //    or independently-routed lines. Rebuilt only when the routes array changes. ──
+  private tgRef: TradeRoute[] | null = null;     // identity of the built graph's source
+  private tgNodes: [number, number][] = [];      // settlement junctions (route endpoints)
+  private tgAdj: { to: number; pts: [number, number][]; len: number }[][] = [];
   private chokepoints: EconChokepoint[] = [];
   private corridors: EconCorridor[] = [];
   private econRegions: EconRegion[] = [];
@@ -159,6 +168,150 @@ export class OverlayManager {
 
   drawTradeRoutes(routes: TradeRoute[]) {
     this.tradeRoutes = routes;
+    // The road network changed → re-snap any already-loaded house web / futures
+    // lanes onto the new routes so they keep following what's drawn.
+    this.recomputeHouseNetwork();
+    this.routeFuturesLanes();
+  }
+
+  /** Build (once per routes array) an undirected graph whose nodes are settlement
+   *  junctions (trade-route endpoints) and whose edges are the route polylines, so a
+   *  path between two cities is literally a chain of EXISTING routes. */
+  private ensureTradeGraph() {
+    if (this.tgRef === this.tradeRoutes) return;
+    this.tgRef = this.tradeRoutes;
+    const nodes: [number, number][] = [];
+    const adj: { to: number; pts: [number, number][]; len: number }[][] = [];
+    const idOf = new Map<string, number>();
+    const W = this.worldW;
+    const key = (p: [number, number]) => `${Math.round(p[0])},${Math.round(p[1])}`;
+    const getNode = (p: [number, number]) => {
+      const k = key(p);
+      let id = idOf.get(k);
+      if (id === undefined) { id = nodes.length; nodes.push(p); idOf.set(k, id); adj.push([]); }
+      return id;
+    };
+    const plen = (pts: [number, number][]) => {
+      let L = 0;
+      for (let i = 1; i < pts.length; i++) {
+        let dx = pts[i][0] - pts[i - 1][0];
+        if (W && Math.abs(dx) > W / 2) dx -= Math.sign(dx) * W;
+        L += Math.hypot(dx, pts[i][1] - pts[i - 1][1]);
+      }
+      return L;
+    };
+    for (const r of this.tradeRoutes) {
+      const pts = r.points;
+      if (pts.length < 2) continue;
+      const a = getNode(pts[0]);
+      const b = getNode(pts[pts.length - 1]);
+      if (a === b) continue;
+      const len = plen(pts);
+      adj[a].push({ to: b, pts, len });
+      adj[b].push({ to: a, pts: [...pts].slice().reverse(), len });
+    }
+    this.tgNodes = nodes;
+    this.tgAdj = adj;
+  }
+
+  /** Shortest path from `a` to `b` ALONG the existing trade-route graph (Dijkstra by
+   *  road length), returned as one concatenated world-cell polyline. Null if either
+   *  end can't be attached to the network or no road path exists. */
+  private routeAlongTradeRoutes(a: [number, number], b: [number, number]): [number, number][] | null {
+    this.ensureTradeGraph();
+    const n = this.tgNodes.length;
+    if (n === 0) return null;
+    const W = this.worldW;
+    const nearest = (p: [number, number]) => {
+      let best = -1, bd = Infinity;
+      for (let i = 0; i < n; i++) {
+        let dx = this.tgNodes[i][0] - p[0];
+        if (W && Math.abs(dx) > W / 2) dx -= Math.sign(dx) * W;
+        const dy = this.tgNodes[i][1] - p[1];
+        const d = dx * dx + dy * dy;
+        if (d < bd) { bd = d; best = i; }
+      }
+      return best;
+    };
+    const s = nearest(a), t = nearest(b);
+    if (s < 0 || t < 0 || s === t) return null;
+    // Dijkstra with a binary min-heap (graph is sparse: ~3 edges/node).
+    const dist = new Float64Array(n).fill(Infinity);
+    const prev = new Int32Array(n).fill(-1);
+    const prevPts: ([number, number][] | null)[] = new Array(n).fill(null);
+    dist[s] = 0;
+    const heap: number[] = [s];        // node ids, ordered by dist
+    const hpush = (node: number) => {
+      heap.push(node);
+      let i = heap.length - 1;
+      while (i > 0) {
+        const par = (i - 1) >> 1;
+        if (dist[heap[par]] <= dist[heap[i]]) break;
+        [heap[par], heap[i]] = [heap[i], heap[par]]; i = par;
+      }
+    };
+    const hpop = () => {
+      const top = heap[0], last = heap.pop()!;
+      if (heap.length) {
+        heap[0] = last;
+        let i = 0;
+        for (;;) {
+          const l = 2 * i + 1, r = 2 * i + 2; let m = i;
+          if (l < heap.length && dist[heap[l]] < dist[heap[m]]) m = l;
+          if (r < heap.length && dist[heap[r]] < dist[heap[m]]) m = r;
+          if (m === i) break;
+          [heap[m], heap[i]] = [heap[i], heap[m]]; i = m;
+        }
+      }
+      return top;
+    };
+    const done = new Uint8Array(n);
+    while (heap.length) {
+      const u = hpop();
+      if (done[u]) continue;
+      done[u] = 1;
+      if (u === t) break;
+      for (const e of this.tgAdj[u]) {
+        const nd = dist[u] + e.len;
+        if (nd < dist[e.to]) { dist[e.to] = nd; prev[e.to] = u; prevPts[e.to] = e.pts; hpush(e.to); }
+      }
+    }
+    if (!isFinite(dist[t])) return null;
+    const segs: [number, number][][] = [];
+    let cur = t;
+    while (cur !== s && prev[cur] >= 0) { segs.push(prevPts[cur]!); cur = prev[cur]; }
+    segs.reverse();
+    const out: [number, number][] = [a];
+    for (const seg of segs) for (const p of seg) out.push(p);
+    out.push(b);
+    return out;
+  }
+
+  /** Re-snap the focused house's seat→city web onto the current trade routes. */
+  private recomputeHouseNetwork() {
+    const sel = this.selectedHouseIdx != null
+      ? this.allHouses.find((h) => h.idx === this.selectedHouseIdx) ?? null
+      : null;
+    if (!sel || !sel.seat) { this.houseNetwork = []; return; }
+    const cities: [number, number][] = [
+      ...(sel.controls ?? []), ...(sel.partners ?? []),
+      ...((sel.offices ?? []).map((o) => o[1]).filter(Boolean) as [number, number][]),
+    ];
+    const net: [number, number][][] = [];
+    for (const c of cities) {
+      if (c[0] === sel.seat[0] && c[1] === sel.seat[1]) continue;
+      const path = this.routeAlongTradeRoutes(sel.seat, c);
+      net.push(path && path.length >= 2 ? path : [sel.seat, c]); // straight fallback
+    }
+    this.houseNetwork = net;
+  }
+
+  /** Snap every futures lane onto the existing trade routes (source→buyer). */
+  private routeFuturesLanes() {
+    for (const r of this.futuresLanes) {
+      const path = this.routeAlongTradeRoutes(r.a, r.b);
+      r.path = path && path.length >= 2 ? path : undefined;
+    }
   }
 
   drawFisheryBanks(banks: FisheryBank[]) {
@@ -239,6 +392,8 @@ export class OverlayManager {
     this.selectedFuturesLane = selected;
     this.futuresFocus = focus;
     if (gridW > 0) this.worldW = gridW;
+    // Snap each lane onto the existing trade routes (source→buyer).
+    this.routeFuturesLanes();
   }
 
   /** Nearest futures lane to a world point, within `thresh` cells (click-to-inspect). */
@@ -271,6 +426,8 @@ export class OverlayManager {
     this.allHouses = houses.filter((h) => !h.defunct);
     this.selectedHouseIdx = selectedIdx ?? null;
     if (gridW > 0) this.worldW = gridW;
+    // Snap the focused house's web onto the existing trade routes.
+    this.recomputeHouseNetwork();
   }
 
   drawChokepoints(chokepoints: EconChokepoint[]) {
@@ -940,9 +1097,23 @@ export class OverlayManager {
       || ((!focus.city || r.a_name === focus.city || r.b_name === focus.city)
         && (!focus.holder || r.holder === focus.holder)
         && (!focus.good || r.good === focus.good));
+    // Stroke a lane as its ROUTED polyline (roads/sea) when present, else a straight
+    // a→b line. Breaks the path at the cylindrical X seam.
+    const strokeLane = (r: FuturesLane) => {
+      const pts = r.path && r.path.length >= 2 ? r.path : [r.a, r.b];
+      let started = false;
+      for (let i = 0; i < pts.length; i++) {
+        if (i > 0 && this.worldW > 0 && Math.abs(pts[i][0] - pts[i - 1][0]) > this.worldW / 2) started = false; // seam
+        if (!started) { ctx.beginPath(); ctx.moveTo(pts[i][0] + 0.5, pts[i][1] + 0.5); started = true; }
+        else ctx.lineTo(pts[i][0] + 0.5, pts[i][1] + 0.5);
+      }
+      ctx.stroke();
+    };
     for (const r of this.futuresLanes) {
       const ax = r.a[0] + 0.5, ay = r.a[1] + 0.5, bx = r.b[0] + 0.5, by = r.b[1] + 0.5;
-      if (this.worldW > 0 && Math.abs(ax - bx) > this.worldW / 2) continue; // wrap seam
+      // Only skip a straight (unrouted) lane that spans the seam; a routed path
+      // handles its own seam breaks in strokeLane.
+      if (!(r.path && r.path.length >= 2) && this.worldW > 0 && Math.abs(ax - bx) > this.worldW / 2) continue;
       const isSel = sel != null && sel.a_name === r.a_name && sel.b_name === r.b_name
         && sel.holder === r.holder && sel.good === r.good;
       // A single selection isolates ONE road; otherwise a focus filter (city /
@@ -956,7 +1127,7 @@ export class OverlayManager {
         ctx.strokeStyle = col;
         ctx.lineWidth = Math.max(0.4, 0.7 / Math.sqrt(this.currentScale));
         ctx.setLineDash([dash, dash]);
-        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+        strokeLane(r);
         ctx.setLineDash([]);
         continue;
       }
@@ -967,17 +1138,19 @@ export class OverlayManager {
         ctx.globalAlpha = 0.35;
         ctx.lineWidth = Math.max(2, (5 + r.term + norm * 6) / Math.sqrt(this.currentScale));
         ctx.setLineDash([]);
-        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+        strokeLane(r);
         ctx.globalAlpha = 1.0;
       }
       ctx.strokeStyle = col;
       ctx.lineWidth = Math.max(0.6, (0.8 + r.term * 0.4 + norm * 2.5) / Math.sqrt(this.currentScale));
       ctx.setLineDash([dash, dash]);
-      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      strokeLane(r);
       ctx.setLineDash([]);
 
-      // Direction arrowhead toward the buyer (b).
-      let dx = bx - ax, dy = by - ay;
+      // Direction arrowhead toward the buyer (b). For a routed lane the heading is
+      // taken from the last leg so the arrow aligns with the road, not the chord.
+      const tail = r.path && r.path.length >= 2 ? r.path[r.path.length - 2] : r.a;
+      let dx = bx - (tail[0] + 0.5), dy = by - (tail[1] + 0.5);
       const m = Math.hypot(dx, dy);
       if (m > 0.001) {
         dx /= m; dy /= m;
@@ -1147,32 +1320,39 @@ export class OverlayManager {
       : [];
     const selColor = sel?.color || "#e8c84a";
 
-    // ── Sphere of business: a SOFT influence cloud — a translucent radial disc
-    //    around every city the house holds (its seat largest), tinted its colour.
-    //    Overlapping discs blend into an organic presence blob, far more natural
-    //    than the old hard convex-hull polygon spanning distant cities. ──
     const rgba = (hex: string, a: number) => {
       const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || "");
       return m ? `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},${a})` : `rgba(200,180,80,${a})`;
     };
-    const disc = (x: number, y: number, r: number, color: string, a: number) => {
-      const grd = ctx.createRadialGradient(x + 0.5, y + 0.5, r * 0.2, x + 0.5, y + 0.5, r);
-      grd.addColorStop(0, rgba(color, a));
-      grd.addColorStop(1, rgba(color, 0));
-      ctx.fillStyle = grd;
-      ctx.beginPath(); ctx.arc(x + 0.5, y + 0.5, r, 0, Math.PI * 2); ctx.fill();
-    };
-    const cloudSrc = sel
-      ? [{ color: selColor, pts: selPts, seat: sel.seat ?? null }]
-      : handled.map((h) => ({ color: h.color, pts: h.pts, seat: null as [number, number] | null }));
-    const baseR = (this.worldW > 1 ? this.worldW : 360) * 0.045; // ~natural town hinterland
-    for (const h of cloudSrc) {
-      const a = sel ? 0.16 : 0.08;
-      for (const p of h.pts) disc(p[0], p[1], baseR, h.color, a);
-      if (h.seat) disc(h.seat[0], h.seat[1], baseR * 1.5, h.color, a * 1.2); // seat = strongest
+
+    // ── Territory polygon: a CONVEX HULL around the focused house's cities (faint
+    //    fill + dashed outline in its colour). Cities are unwrapped relative to the
+    //    seat first so the hull doesn't tear across the cylindrical X seam. This
+    //    replaces the old soft influence discs. ──
+    if (sel && selPts.length >= 3) {
+      const ref = sel.seat ?? selPts[0];
+      const unwrapped: [number, number][] = selPts.map(([x, y]) => {
+        let dx = x - ref[0];
+        if (worldW && Math.abs(dx) > worldW / 2) dx -= Math.sign(dx) * worldW;
+        return [ref[0] + dx, y];
+      });
+      const hull = convexHull(unwrapped);
+      if (hull.length >= 3) {
+        ctx.beginPath();
+        ctx.moveTo(hull[0][0] + 0.5, hull[0][1] + 0.5);
+        for (let i = 1; i < hull.length; i++) ctx.lineTo(hull[i][0] + 0.5, hull[i][1] + 0.5);
+        ctx.closePath();
+        ctx.fillStyle = rgba(selColor, 0.10);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = rgba(selColor, 0.7);
+        ctx.lineWidth = Math.max(0.6, 1.2 * inv);
+        ctx.setLineDash([Math.max(3, 5 * inv), Math.max(2, 3 * inv)]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
     }
     ctx.globalAlpha = 1;
-    void convexHull;
 
     // ── Trade routes (drawn first, under the dots) ──
     const drawPath = (pts: [number, number][], stroke: string, width: number, alpha: number) => {
@@ -1236,19 +1416,35 @@ export class OverlayManager {
     }
 
     // ── Focused house: a glowing RED network web from the seat to every city it
-    //    works, so its whole trade network reads at a glance (drawn UNDER the pins). ──
+    //    works, snapped onto the EXISTING trade routes (`houseNetwork`, built by
+    //    `recomputeHouseNetwork` over the drawn road graph). Each entry already falls
+    //    back to a straight seat→city line when no road path exists. Under the pins. ──
     if (sel && sel.seat) {
-      const sx = sel.seat[0] + 0.5, sy = sel.seat[1] + 0.5;
-      for (const p of selPts) {
-        const px = p[0] + 0.5, py = p[1] + 0.5;
-        if (this.worldW > 0 && Math.abs(px - sx) > this.worldW / 2) continue; // wrap seam
-        if (px === sx && py === sy) continue;
-        ctx.strokeStyle = "rgba(255,60,60,0.22)"; // glow underlay
-        ctx.lineWidth = Math.max(1.5, 4.0 * inv);
-        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(px, py); ctx.stroke();
-        ctx.strokeStyle = "rgba(255,95,95,0.9)"; // bright core
-        ctx.lineWidth = Math.max(0.6, 1.4 * inv);
-        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(px, py); ctx.stroke();
+      const drawRedPath = (pts: [number, number][]) => {
+        for (const [stroke, base, w] of [
+          ["rgba(255,60,60,0.22)", 1.5, 4.0],   // glow underlay
+          ["rgba(255,95,95,0.9)", 0.6, 1.4],    // bright core
+        ] as const) {
+          ctx.strokeStyle = stroke;
+          ctx.lineWidth = Math.max(base, w * inv);
+          let started = false;
+          for (let i = 0; i < pts.length; i++) {
+            if (i > 0 && worldW && Math.abs(pts[i][0] - pts[i - 1][0]) > worldW * 0.5) started = false; // seam
+            if (!started) { ctx.beginPath(); ctx.moveTo(pts[i][0] + 0.5, pts[i][1] + 0.5); started = true; }
+            else ctx.lineTo(pts[i][0] + 0.5, pts[i][1] + 0.5);
+          }
+          ctx.stroke();
+        }
+      };
+      if (this.houseNetwork.length > 0) {
+        for (const path of this.houseNetwork) { if (path.length >= 2) drawRedPath(path); }
+      } else {
+        // Fallback: straight web until the routed paths load.
+        for (const p of selPts) {
+          if (this.worldW > 0 && Math.abs(p[0] - sel.seat[0]) > this.worldW / 2) continue; // wrap seam
+          if (p[0] === sel.seat[0] && p[1] === sel.seat[1]) continue;
+          drawRedPath([sel.seat, p]);
+        }
       }
     }
 

@@ -346,6 +346,7 @@ export interface FuturesLane {
   term: number;          // 1 / 3 / 5 / 7 years
   end_year: number;      // campaign year the contract expires
   suspended: boolean;    // force-majeure (plague lockup) right now
+  path?: [number, number][]; // routed source→buyer polyline (roads/sea); straight a→b if absent
 }
 /** One house/guild asset for the Warehouses & Estates infographic. */
 export interface WarehouseInfo {

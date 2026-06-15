@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useCampaignStore } from "../../state/campaignStore";
 import { useUIStore } from "../../state/uiStore";
+import { campaignPersist } from "../../bridge/tauri";
 
 type Speed = "week" | "month" | "year";
 const SPEED_TICKS: Record<Speed, number> = { week: 7, month: 30, year: 365 };
@@ -37,18 +38,29 @@ export function StepCampaign({ seed }: { seed: number; plateCount: number; inval
     if (!playing || !active) return;
     let cancelled = false;
     const run = async () => {
+      let i = 0;
       while (!cancelled && playingRef.current) {
-        await advance(SPEED_TICKS[speed]);
+        i++;
+        // Heavy panel refresh (economy / houses / diagnostics) only every 6th step;
+        // the other steps update just the snapshot (clock + live map markers), so
+        // fast Play doesn't fire the costlier panel queries every single tick.
+        await advance(SPEED_TICKS[speed], i % 6 === 0);
         if (useCampaignStore.getState().error) { setPlaying(false); break; }
         await new Promise((r) => setTimeout(r, 450));
+      }
+      if (!cancelled) {
+        // Paused by the user: bring the panels current and flush the resident sim.
+        await refresh();
+        campaignPersist().catch(() => {});
       }
     };
     run();
     return () => { cancelled = true; };
-  }, [playing, speed, active, advance]);
+  }, [playing, speed, active, advance, refresh]);
 
-  // Stop playing if the step is left / campaign restarts.
-  useEffect(() => () => { playingRef.current = false; }, []);
+  // Stop playing if the step is left / campaign restarts — and flush to disk so no
+  // in-memory ticks are lost when leaving the campaign.
+  useEffect(() => () => { playingRef.current = false; campaignPersist().catch(() => {}); }, []);
 
   const doAdvance = async (ticks: number, label: string) => {
     setStatus(`Advancing ${label}…`);

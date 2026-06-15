@@ -25,8 +25,10 @@ interface CampaignStore {
   refresh: () => Promise<void>;
   /** Seed a brand-new living-trade simulation. */
   start: (seed: number) => Promise<void>;
-  /** Advance N days and refresh the world-economy + houses data. */
-  advance: (ticks: number) => Promise<void>;
+  /** Advance N days. `heavy` (default true) also refreshes the world-economy +
+   *  houses + diagnostics; pass false during fast Play to update only the snapshot
+   *  (clock + map markers) and skip the costlier panel queries. */
+  advance: (ticks: number, heavy?: boolean) => Promise<void>;
 }
 
 export const useCampaignStore = create<CampaignStore>((set, get) => ({
@@ -66,15 +68,20 @@ export const useCampaignStore = create<CampaignStore>((set, get) => ({
     }
   },
 
-  advance: async (ticks) => {
+  advance: async (ticks, heavy = true) => {
     if (get().busy) return;
     set({ busy: true, error: null });
     try {
       const snap = await campaignAdvance(ticks);
-      const [we, houses, diag] = await Promise.all([
-        campaignGetWorldEconomy(), campaignGetHouses(), campaignDiagnostics(),
-      ]);
-      set({ snapshot: snap, worldEconomy: we, houses, diagnostics: diag });
+      if (heavy) {
+        const [we, houses, diag] = await Promise.all([
+          campaignGetWorldEconomy(), campaignGetHouses(), campaignDiagnostics(),
+        ]);
+        set({ snapshot: snap, worldEconomy: we, houses, diagnostics: diag });
+      } else {
+        // Fast Play tick: update only the snapshot (clock + live map markers).
+        set({ snapshot: snap });
+      }
     } catch (e) {
       set({ error: String(e) });
     } finally {

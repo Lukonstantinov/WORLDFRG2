@@ -3,10 +3,31 @@ pub mod tile_store;
 pub mod metadata;
 pub mod world_cache;
 
+use crate::sim::tick::CampaignSim;
 use rusqlite::Connection;
 use std::any::Any;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use world_cache::WorldTiles;
+
+/// In-memory resident campaign sim. The whole `CampaignSim` used to be JSON
+/// round-tripped through the `campaign_sim` metadata row on EVERY command (parsed on
+/// each read, stringified on each write) — several times per simulated day — so the
+/// cost grew with campaign age and the Play loop crawled by year ~3. We now keep the
+/// sim live in memory: parsed from the DB once (lazily), mutated in place by
+/// `campaign_advance`, read by the query commands without re-parsing, and flushed
+/// back to the DB only periodically (year boundary / wall-clock) and on save/close.
+#[derive(Default)]
+pub struct CampaignCache {
+    /// True once we've tried to load from the DB, so a genuinely empty campaign is
+    /// distinguished from "not yet loaded".
+    pub loaded: bool,
+    pub sim: Option<CampaignSim>,
+    /// Unsaved in-memory changes not yet written to the DB metadata row.
+    pub dirty: bool,
+    /// Wall-clock time of the last DB flush (drives the autosave cadence).
+    pub last_persist: Option<Instant>,
+}
 
 /// Cheap fingerprint of the tile table: (sum of versions, row count). Every tile
 /// write does `INSERT OR REPLACE … version+1`, so this value changes on any edit
@@ -26,6 +47,9 @@ pub struct WorldDb {
     /// Last coarse cost grid (for trade routes / matrix / political), kept opaque
     /// (`dyn Any`) so the three commands that share it don't each rebuild it.
     cost_cache: Mutex<Option<(CostKey, Arc<dyn Any + Send + Sync>)>>,
+    /// Resident campaign sim — see `CampaignCache`. Always lock `conn` BEFORE this
+    /// to keep a single lock order.
+    pub campaign: Mutex<CampaignCache>,
 }
 
 impl WorldDb {
@@ -34,6 +58,16 @@ impl WorldDb {
             conn: Mutex::new(conn),
             tiles_cache: Mutex::new(None),
             cost_cache: Mutex::new(None),
+            campaign: Mutex::new(CampaignCache::default()),
+        }
+    }
+
+    /// Drop the resident campaign sim — called when the underlying campaign data is
+    /// replaced (opening a campaign or world, creating a new world). The next
+    /// `get_sim` / `campaign_advance` reloads it from the DB.
+    pub fn invalidate_campaign(&self) {
+        if let Ok(mut c) = self.campaign.lock() {
+            *c = CampaignCache::default();
         }
     }
 

@@ -346,14 +346,14 @@ export function MapCanvas() {
     // their own map dots.
     const hubs = campaignSnapshot?.active ? campaignSnapshot.hubs.filter((h) => h.id < 100000) : null;
     if (!hubs || hubs.length === 0) return settlements;
-    let maxPop = 1;
-    for (const h of hubs) maxPop = Math.max(maxPop, h.population);
+    // Tier by ABSOLUTE population, not as a ratio to the single largest city — a
+    // metropolis used to push every other city below 8% of its pop, collapsing real
+    // 30k cities to the tiny near-invisible "outpost" tier even though they're alive.
     const tier = (pop: number): Settlement["size"] => {
-      const r = pop / maxPop;
-      if (r >= 0.66) return "capital";
-      if (r >= 0.40) return "city";
-      if (r >= 0.20) return "town";
-      if (r >= 0.08) return "village";
+      if (pop >= 120_000) return "capital";
+      if (pop >= 50_000) return "city";
+      if (pop >= 18_000) return "town";
+      if (pop >= 5_000) return "village";
       return "outpost";
     };
     return hubs.map((h) => ({

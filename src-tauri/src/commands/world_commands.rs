@@ -52,6 +52,8 @@ pub fn new_world(
         "DELETE FROM tiles; DELETE FROM metadata; DELETE FROM objects;
          DELETE FROM sim_state; DELETE FROM undo_journal; DELETE FROM campaign;"
     ).map_err(|e| e.to_string())?;
+    // Fresh world → no campaign; drop any resident sim from the previous one.
+    db.invalidate_campaign();
 
     // Set metadata
     metadata::set_meta(&conn, "name", &name).map_err(|e| e.to_string())?;

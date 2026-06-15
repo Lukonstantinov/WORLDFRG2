@@ -511,9 +511,15 @@ export async function campaignStartSim(seed: number): Promise<CampaignSnapshot> 
   return invoke("campaign_start_sim", { seed });
 }
 
-/** Advance the sim by N days (autosaves the new state). */
+/** Advance the sim by N days. The backend keeps the sim resident in memory and
+ *  autosaves on a year/wall-clock cadence — call `campaignPersist` to force a flush. */
 export async function campaignAdvance(ticks: number): Promise<CampaignSnapshot> {
   return invoke("campaign_advance", { ticks });
+}
+
+/** Force-flush the resident sim to disk (call on pause / before close). */
+export async function campaignPersist(): Promise<void> {
+  return invoke("campaign_persist");
 }
 
 /** Current sim snapshot (inactive when no sim has been started). */

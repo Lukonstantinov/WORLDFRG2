@@ -84,6 +84,7 @@ pub fn run() {
             campaign_commands::set_progress,
             campaign_commands::campaign_start_sim,
             campaign_commands::campaign_advance,
+            campaign_commands::campaign_persist,
             campaign_commands::campaign_get_state,
             campaign_commands::campaign_get_journal,
             campaign_commands::campaign_get_hub,

@@ -71,6 +71,8 @@ pub fn open_world(
             .map_err(|e| e.to_string())?;
     }
     conn.execute_batch("DETACH DATABASE src;").map_err(|e| e.to_string())?;
+    // A different world/campaign is now loaded — drop any resident campaign sim.
+    db.invalidate_campaign();
 
     // Pre-split saves keep settlements/economy in metadata → move them into the
     // campaign table so the app always runs on the split model in memory.
