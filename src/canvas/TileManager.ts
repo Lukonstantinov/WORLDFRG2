@@ -12,7 +12,6 @@ interface CachedTile {
   tx: number;
   ty: number;
   version: number;
-  lastUsed: number;
 }
 
 /** LOD for a viewport scale: at scale 1 every world cell is ≥1px (full res);
@@ -110,7 +109,6 @@ export class TileManager {
     range: { txMin: number; txMax: number; tyMin: number; tyMax: number },
   ) {
     ctx.imageSmoothingEnabled = false;
-    const now = Date.now();
     const layer = this.currentLayer;
     const lod = this.currentLod;
     const S = 1 << lod;
@@ -124,7 +122,6 @@ export class TileManager {
         const tile = this.cache.get(this.key(layer, lod, stx, sty));
         if (!tile) continue;
         ctx.drawImage(tile.img, stx * size, sty * size, size, size);
-        tile.lastUsed = now; // keep visible tiles hot for LRU eviction
       }
     }
   }
@@ -164,13 +161,16 @@ export class TileManager {
 
     // Only the supertiles that are neither cached nor currently in flight.
     const needed: [number, number][] = [];
-    const now = Date.now();
     for (let sty = sTyMin; sty <= sTyMax; sty++) {
       for (let stx = sTxMin; stx <= sTxMax; stx++) {
         const k = this.key(layer, lod, stx, sty);
         const cached = this.cache.get(k);
         if (cached) {
-          cached.lastUsed = now;
+          // Move-to-front for LRU: a Map preserves insertion order, so
+          // re-inserting a touched tile keeps the visible set at the newest end
+          // and eviction can drop the oldest (front) in O(1) — no sort.
+          this.cache.delete(k);
+          this.cache.set(k, cached);
         } else if (!this.loading.has(k)) {
           needed.push([stx, sty]);
         }
@@ -232,7 +232,6 @@ export class TileManager {
           tx: resp.tx,
           ty: resp.ty,
           version: resp.version,
-          lastUsed: Date.now(),
         });
       }
 
@@ -267,11 +266,12 @@ export class TileManager {
 
   private evict() {
     if (this.cache.size <= this.maxCached) return;
-    const entries = [...this.cache.entries()].sort(
-      (a, b) => a[1].lastUsed - b[1].lastUsed
-    );
-    const toRemove = entries.slice(0, this.cache.size - this.maxCached);
-    for (const [key, tile] of toRemove) {
+    // The cache is an insertion-order LRU (touched tiles are re-inserted at the
+    // back), so the oldest entries are simply the first keys — drop them in O(1)
+    // each, no full-cache sort on every overflow during a streaming pan.
+    let toRemove = this.cache.size - this.maxCached;
+    for (const [key, tile] of this.cache) {
+      if (toRemove-- <= 0) break;
       this.cache.delete(key);
       releaseTile(tile);
     }

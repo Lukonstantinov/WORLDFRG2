@@ -380,20 +380,46 @@ impl WorldBuffer {
 
     /// Save all tiles back to the database, with undo support.
     pub fn save(&self, conn: &Connection, label: &str) -> Result<Vec<(i32, i32)>, String> {
-        // Save old states for undo. Snapshot the *already-compressed* blobs
-        // straight from the DB (undo stores compressed bytes anyway), avoiding a
-        // needless decompress→recompress of every tile on each sim step / stroke.
-        let mut old_states: Vec<(i32, i32, Vec<u8>)> = Vec::new();
-        for ty in 0..self.tiles_y as i32 {
-            for tx in 0..self.tiles_x as i32 {
-                let blob = tile_store::load_blob_with_version(conn, tx, ty, 0)
-                    .map_err(|e| e.to_string())?
-                    .map(|(_, b)| b)
-                    .unwrap_or_else(|| TileData::new_sea().compress());
-                old_states.push((tx, ty, blob));
+        self.save_inner(conn, label, true)
+    }
+
+    /// Like [`save`] but WITHOUT journaling undo. For whole-world regeneration
+    /// (`sim_run_all`) the output is exactly reproducible from the seed, so
+    /// snapshotting the entire pre-gen world into the undo journal — a full-world
+    /// zstd of hundreds of MB on the largest maps — buys nothing. On a full
+    /// buffer this also skips the redundant full-world blob re-fetch entirely
+    /// (the fully-loaded buffer rebuilds each tile from scratch).
+    pub fn save_no_undo(&self, conn: &Connection, label: &str) -> Result<Vec<(i32, i32)>, String> {
+        self.save_inner(conn, label, false)
+    }
+
+    fn save_inner(&self, conn: &Connection, label: &str, undo: bool) -> Result<Vec<(i32, i32)>, String> {
+        let full = self.cols == ColumnSet::ALL;
+
+        // The previous blobs are needed to (a) journal undo, and (b) merge the
+        // unchanged columns of a PARTIAL save. A full save with undo disabled
+        // needs neither, so it skips the whole-world re-fetch. Snapshot the
+        // *already-compressed* blobs straight from the DB (undo stores compressed
+        // bytes anyway), avoiding a needless decompress→recompress per tile.
+        let need_old = undo || !full;
+        let old_states: Vec<(i32, i32, Vec<u8>)> = if need_old {
+            let mut v = Vec::new();
+            for ty in 0..self.tiles_y as i32 {
+                for tx in 0..self.tiles_x as i32 {
+                    let blob = tile_store::load_blob_with_version(conn, tx, ty, 0)
+                        .map_err(|e| e.to_string())?
+                        .map(|(_, b)| b)
+                        .unwrap_or_else(|| TileData::new_sea().compress());
+                    v.push((tx, ty, blob));
+                }
             }
+            v
+        } else {
+            Vec::new()
+        };
+        if undo {
+            undo::push_undo(conn, label, &old_states)?;
         }
-        undo::push_undo(conn, label, &old_states)?;
 
         // Gather + compress every tile in parallel (reads `&self` only), in
         // batches so peak memory stays bounded on the largest worlds, then write
@@ -408,7 +434,6 @@ impl WorldBuffer {
         let coords: Vec<(i32, i32)> = (0..self.tiles_y as i32)
             .flat_map(|ty| (0..self.tiles_x as i32).map(move |tx| (tx, ty)))
             .collect();
-        let full = self.cols == ColumnSet::ALL;
 
         const SAVE_BATCH: usize = 256;
         let txn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
@@ -717,5 +742,36 @@ mod tests {
     fn phase_masks_run_clean() {
         let conn = test_world(160, 140);
         run_full_pipeline(&conn);
+    }
+
+    /// `save_no_undo` must write identical tile data to `save` on a full buffer,
+    /// but must NOT push an undo entry (so the run-all that uses it leaves the
+    /// undo journal empty — there is nothing to undo a whole regeneration to).
+    #[test]
+    fn save_no_undo_writes_data_but_skips_journal() {
+        let conn = test_world(200, 150);
+        let mut full = WorldBuffer::load(&conn).unwrap();
+        let total = full.total();
+        for i in 0..total {
+            full.terrain[i] = (i % 2) as u8;
+            full.temperature[i] = i as f32 * 0.5;
+            full.koppen[i] = (i % 30) as u8;
+            full.goods[3][i] = (i % 255) as u8;
+        }
+        full.save_no_undo(&conn, "regen").unwrap();
+
+        // Data round-trips exactly.
+        let back = WorldBuffer::load(&conn).unwrap();
+        for i in 0..total {
+            assert_eq!(back.terrain[i], (i % 2) as u8);
+            assert_eq!(back.temperature[i], i as f32 * 0.5);
+            assert_eq!(back.koppen[i], (i % 30) as u8);
+            assert_eq!(back.goods[3][i], (i % 255) as u8);
+        }
+        // Nothing was journaled: undo is a no-op.
+        assert!(
+            crate::history::undo::undo(&conn).unwrap().is_none(),
+            "save_no_undo must not push an undo entry"
+        );
     }
 }

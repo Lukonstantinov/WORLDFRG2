@@ -320,9 +320,11 @@ pub fn sim_run_all(
     biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
     pt.lap("biological");
 
+    // A full regeneration is exactly reproducible from the seed, so skip the
+    // (hundreds-of-MB) whole-world undo journal — see WorldBuffer::save_no_undo.
     let modified = db.with_conn(|conn| {
         crate::commands::campaign_commands::ensure_unfrozen(conn)?;
-        buf.save(conn, "Full world generation")
+        buf.save_no_undo(conn, "Full world generation")
     })?;
     pt.lap("save");
 
@@ -461,9 +463,10 @@ pub fn sim_run_all_from_terrain(
     biological::compute_reef_risk(&mut buf);
     biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
 
+    // Full regeneration is reproducible from seed → skip whole-world undo.
     let modified = db.with_conn(|conn| {
         crate::commands::campaign_commands::ensure_unfrozen(conn)?;
-        buf.save(conn, "Full generation from template")
+        buf.save_no_undo(conn, "Full generation from template")
     })?;
 
     Ok(SimRunAllResult {

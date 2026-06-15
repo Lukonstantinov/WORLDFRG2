@@ -14,6 +14,18 @@ import type { MerchantRoute } from "../types";
 import { goodOverlayKey } from "../goods";
 import type { PaintValue, EconChain, Settlement } from "../types";
 
+/** Debounce a value: returns the latest `value` only after it has stopped
+ *  changing for `delay` ms. Used to collapse rapid slider drags into a single
+ *  expensive trade-route / matrix / political recompute. */
+function useDebounced<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return debounced;
+}
+
 /** Largest box with the world's aspect ratio that fits inside the pane. */
 function fitBox(paneW: number, paneH: number, gridW: number, gridH: number) {
   if (paneW <= 0 || paneH <= 0 || gridW <= 0 || gridH <= 0) {
@@ -75,6 +87,10 @@ export function MapCanvas() {
   const loadGoodsFromWorld = useGoodsStore((s) => s.loadFromWorld);
   const step9Done = useUIStore((s) => s.stepCompleted[9]);
   const bioParams = useUIStore((s) => s.bioParams);
+  // Slider-driven params, debounced: the trade-route / matrix / political
+  // overlays each run an expensive least-cost routing pass, so mid-drag changes
+  // collapse into one recompute ~180ms after the slider settles.
+  const dbio = useDebounced(bioParams, 180);
   const setSelectedHub = useUIStore((s) => s.setSelectedHub);
   const setSelectedMerchantRoute = useUIStore((s) => s.setSelectedMerchantRoute);
   const merchantRoutesRef = useRef<MerchantRoute[]>([]);
@@ -190,6 +206,18 @@ export function MapCanvas() {
     ).then(() => requestRender());
   }, [requestRender]);
 
+  // RAF-coalesced refresh for high-frequency input (pan mousemove, wheel zoom):
+  // many events per frame collapse into a single loadVisibleTiles per frame
+  // instead of rebuilding the needed-set dozens of times between paints.
+  const refreshRafRef = useRef(0);
+  const scheduleRefresh = useCallback(() => {
+    if (refreshRafRef.current) return;
+    refreshRafRef.current = requestAnimationFrame(() => {
+      refreshRafRef.current = 0;
+      refreshTiles();
+    });
+  }, [refreshTiles]);
+
   // Initialize Canvas 2D
   useEffect(() => {
     const el = containerRef.current;
@@ -220,7 +248,7 @@ export function MapCanvas() {
         e.preventDefault();
         viewport.onWheel(e);
         overlayManager.updateScale(viewport.scale);
-        refreshTiles();
+        scheduleRefresh();
         requestRender();
       }, { passive: false });
 
@@ -295,6 +323,7 @@ export function MapCanvas() {
     return () => {
       destroyed = true;
       cancelAnimationFrame(rafRef.current);
+      cancelAnimationFrame(refreshRafRef.current);
     };
   }, [refreshTiles, renderFrame, requestRender]);
 
@@ -389,18 +418,18 @@ export function MapCanvas() {
     computeTradeRoutes(
       settlements.map((s) => ({ x: s.x, y: s.y, score: s.score })),
       rivers.map((r) => ({ points: r.points })),
-      bioParams.tradeReach,
-      bioParams.maxCrossing,
-      bioParams.desertRoutes,
-      bioParams.economicRegions,
-      bioParams.piracyLevel,
-      bioParams.tradeSeason,
-      bioParams.calendarMonths,
+      dbio.tradeReach,
+      dbio.maxCrossing,
+      dbio.desertRoutes,
+      dbio.economicRegions,
+      dbio.piracyLevel,
+      dbio.tradeSeason,
+      dbio.calendarMonths,
     ).then((routes) => {
       om.drawTradeRoutes(routes);
       requestRender();
     }).catch(() => {});
-  }, [step8Done, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, bioParams.economicRegions, bioParams.piracyLevel, bioParams.tradeSeason, bioParams.calendarMonths, requestRender]);
+  }, [step8Done, settlements, rivers, tileVersion, dbio.tradeReach, dbio.maxCrossing, dbio.desertRoutes, dbio.economicRegions, dbio.piracyLevel, dbio.tradeSeason, dbio.calendarMonths, requestRender]);
 
   // All map overlays in ONE IPC round-trip (see `compute_overlays`): wind/current
   // vectors + streamlines, fishery banks, shark/shipworm/reef/storm danger zones
@@ -472,17 +501,17 @@ export function MapCanvas() {
     computeTradeMatrix(
       settlements.map((s) => ({ x: s.x, y: s.y, score: s.score })),
       rivers.map((r) => ({ points: r.points })),
-      bioParams.tradeReach,
-      bioParams.maxCrossing,
-      bioParams.desertRoutes,
-      bioParams.economicRegions,
-      bioParams.luxuryBias,
-      bioParams.piracyLevel,
+      dbio.tradeReach,
+      dbio.maxCrossing,
+      dbio.desertRoutes,
+      dbio.economicRegions,
+      dbio.luxuryBias,
+      dbio.piracyLevel,
     ).then((matrix) => {
       om.drawTradeTrunks(matrix.trunks, meta.grid_width);
       requestRender();
     }).catch(() => {});
-  }, [step8Done, worldKey, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, bioParams.economicRegions, bioParams.luxuryBias, bioParams.piracyLevel, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [step8Done, worldKey, settlements, rivers, tileVersion, dbio.tradeReach, dbio.maxCrossing, dbio.desertRoutes, dbio.economicRegions, dbio.luxuryBias, dbio.piracyLevel, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Merchant layer — live family/guild routes from the running campaign.
   useEffect(() => {
@@ -513,16 +542,16 @@ export function MapCanvas() {
     computePolitical(
       settlements.map((s) => ({ x: s.x, y: s.y, score: s.score, population: s.population })),
       rivers.map((r) => ({ points: r.points })),
-      bioParams.tradeReach,
-      bioParams.maxCrossing,
-      bioParams.desertRoutes,
-      bioParams.economicRegions,
-      bioParams.piracyLevel,
+      dbio.tradeReach,
+      dbio.maxCrossing,
+      dbio.desertRoutes,
+      dbio.economicRegions,
+      dbio.piracyLevel,
     ).then((centers) => {
       om.drawPolitical(centers);
       requestRender();
     }).catch(() => {});
-  }, [step9Done, worldKey, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, bioParams.economicRegions, bioParams.piracyLevel, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [step9Done, worldKey, settlements, rivers, tileVersion, dbio.tradeReach, dbio.maxCrossing, dbio.desertRoutes, dbio.economicRegions, dbio.piracyLevel, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Hydrate the persisted economy snapshot when a world loads (survives save/open).
   useEffect(() => {
@@ -848,7 +877,7 @@ export function MapCanvas() {
 
     if (activeToolRef.current === "pan" || e.buttons === 4) {
       viewport.updatePan(e.clientX, e.clientY);
-      refreshTiles();
+      scheduleRefresh();
       requestRender();
       return;
     }
@@ -856,7 +885,7 @@ export function MapCanvas() {
     if (isPaintingRef.current) {
       applyBrush(e);
     }
-  }, [applyBrush, refreshTiles, setStatus, getBrushScreenRadius, getPaintMode, requestRender]);
+  }, [applyBrush, scheduleRefresh, setStatus, getBrushScreenRadius, getPaintMode, requestRender]);
 
   const onPointerUp = useCallback(async () => {
     const viewport = viewportRef.current;

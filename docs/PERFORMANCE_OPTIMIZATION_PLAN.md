@@ -15,15 +15,14 @@ the test suite + saved worlds depend on that).
 |---|---|
 | **Determinism + golden-hash harness** (§7) | ✅ Landed — `full_pipeline_is_deterministic_and_stable` in `sim/world_buffer.rs` runs the whole pipeline twice (catches races) and pins a golden output hash (`0xe9e0_77af_8e08_ddb5`) so any output drift fails CI. |
 | **W2 — release DB lock during compute** | ✅ Landed — `WorldDb::with_conn` helper (`db/mod.rs`); all 14 sim commands restructured to lock→load→**drop**→compute→re-lock→save. |
-| **W1 class A — parallelize per-cell passes** | ✅ Landed (4 passes) — `temperature` (base/lapse/coastal map), `koppen` (pass 1 classify), `soil` (classify), `fertility` (step-2 scoring) now use `rayon` `par_chunks_mut`/`par_iter_mut`. Golden hash unchanged. |
+| **W1 class A — parallelize per-cell passes** | ✅ Landed (5 passes) — `temperature` (base/lapse/coastal map), `koppen` (pass-1 classify), `soil` (classify), `fertility` (step-2 scoring), and `biological::compute_trade_goods` (the 3 per-good `good_score`/candidate fields) use `rayon`. Golden hash unchanged. The per-tile render loop is already parallel **across** tiles (`render_full_res`); intra-tile parallelism isn't worth the overhead. |
+| **W3 — skip undo for whole-world regen** | ✅ Landed — `WorldBuffer::save_no_undo` / `save_inner(undo)`; `sim_run_all` + `sim_run_all_from_terrain` use it (regen is reproducible from seed). Skips the full-world undo zstd **and**, on a full buffer, the redundant whole-world blob re-fetch. Test `save_no_undo_writes_data_but_skips_journal`. |
+| **W5 — frontend churn** | ✅ Landed — O(1) insertion-order LRU in `TileManager` (no per-overflow sort); RAF-coalesced `scheduleRefresh` for pan/wheel in `MapCanvas`; 180 ms `useDebounced` on the slider-driven trade-route/matrix/political recomputes. `tsc --noEmit` clean. |
 | **Per-phase profiling** (`WF_PROFILE`) | ✅ Landed — `PhaseTimer` in `sim_commands.rs` instruments `sim_run_all`. |
-| W1 class A — remaining (render loop, biological `good_score`) | ⏳ Pending |
-| W3 — cut redundant `save` work | ⏳ Pending |
-| W4 — supertile column trim | ⏳ Pending |
-| W5 — frontend churn | ⏳ Pending |
-| W1 class B — stencil/advection passes | ⏳ Pending |
+| **W4 — supertile column trim** | ❌ Won't do — the persisted LOD pyramid (`tiles` table) is keyed by `(tx,ty,lod)` only and is **layer-agnostic**; a built supertile serves every layer. Trimming to the requested layer's columns would make a later request for a different layer read an incomplete blob (blank render). The per-supertile copy is already amortized by the persisted cache + parallel build, so there is no safe win here. |
+| W1 class B — stencil/advection passes (`precipitation`/`ocean`) | ⏳ Deferred (stretch) — neighbor-writing passes in 1364-line `ocean.rs` / 587-line `precipitation.rs`; parallelizing needs double-buffering and risks subtle races for modest gain. Left for after profiling justifies it. |
 
-The sections below are the full spec (the pending items still apply as written).
+The sections below are the full spec (the deferred items still apply as written).
 
 ---
 
