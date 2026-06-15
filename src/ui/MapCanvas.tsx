@@ -356,16 +356,41 @@ export function MapCanvas() {
       if (pop >= 5_000) return "village";
       return "outpost";
     };
-    return hubs.map((h) => ({
-      id: String(h.id),
-      x: h.x,
-      y: h.y,
-      name: h.name,
-      size: tier(h.population),
-      population: h.population,
-      score: h.population,
-      dead: h.population < 100, // collapsed city → black cross marker (still shown)
-    }));
+    // The campaign sim only keeps the strongest ~150 settlements as live economic
+    // hubs (to bound tick cost). The REST are still real places, so we MERGE: start
+    // from the full static settlement list and overlay live population/tier where a
+    // hub exists, keeping every other settlement on the map (it just isn't simulated).
+    // Without this, every settlement past the top 150 vanished the moment a campaign
+    // started.
+    // NOTE: static `Settlement.id` is "s-N"/"o-N" but a live hub's id is the plain
+    // index, so we match by POSITION (both use the same cell coords), not id.
+    const posKey = (x: number, y: number) => `${Math.round(x)},${Math.round(y)}`;
+    const liveByPos = new Map(hubs.map((h) => [posKey(h.x, h.y), h]));
+    const matched = new Set<string>();
+    const merged: Settlement[] = settlements.map((s) => {
+      const k = posKey(s.x, s.y);
+      const h = liveByPos.get(k);
+      if (!h) return s; // outside the sim → keep the static marker as-is
+      matched.add(k);
+      return {
+        ...s,
+        size: tier(h.population),
+        population: h.population,
+        score: h.population,
+        dead: h.population < 100, // collapsed city → black cross (still shown)
+      };
+    });
+    // Add any live hubs with no static counterpart (e.g. colonies founded in-campaign).
+    for (const h of hubs) {
+      const k = posKey(h.x, h.y);
+      if (matched.has(k)) continue;
+      merged.push({
+        id: String(h.id), x: h.x, y: h.y, name: h.name,
+        size: tier(h.population), population: h.population, score: h.population,
+        dead: h.population < 100,
+      });
+    }
+    return merged;
   }, [campaignSnapshot, settlements]);
 
   // Redraw overlays when data changes
