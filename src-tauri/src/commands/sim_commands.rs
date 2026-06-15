@@ -3,6 +3,26 @@ use crate::db::WorldDb;
 use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
 use crate::sim::{plates, elevation, ocean, temperature, precipitation, koppen, rivers, soil, fertility, settlements, biological};
 
+/// Per-phase wall-clock timer, active only when the `WF_PROFILE` env var is set.
+/// Prints `[wf-profile] <phase>: <ms>` to stderr at each `lap`, so a full
+/// generation reveals which passes dominate (guides further parallelization and
+/// proves the off-lock / rayon wins). Zero overhead when disabled.
+struct PhaseTimer {
+    on: bool,
+    last: std::time::Instant,
+}
+impl PhaseTimer {
+    fn new() -> Self {
+        Self { on: std::env::var_os("WF_PROFILE").is_some(), last: std::time::Instant::now() }
+    }
+    fn lap(&mut self, phase: &str) {
+        if self.on {
+            eprintln!("[wf-profile] {phase}: {:.1}ms", self.last.elapsed().as_secs_f64() * 1000.0);
+        }
+        self.last = std::time::Instant::now();
+    }
+}
+
 /// Generate tectonic plates and derive landmass.
 /// Phase 1: Plate tectonics → terrain
 #[tauri::command]
@@ -12,22 +32,30 @@ pub fn sim_generate_plates(
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
-    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PLATES)?;
+    let mut buf = db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?; // geography is frozen once a campaign starts
+        WorldBuffer::load_with(conn, ColumnSet::PHASE_PLATES)
+    })?;
     plates::generate_plates_and_landmass(&mut buf, seed, plate_count);
-    buf.save(&conn, "Generate plates & landmass")
+    db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?;
+        buf.save(conn, "Generate plates & landmass")
+    })
 }
 
 /// Invert land and sea
 #[tauri::command]
 pub fn sim_invert_terrain(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
-    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PLATES)?;
+    let mut buf = db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?; // geography is frozen once a campaign starts
+        WorldBuffer::load_with(conn, ColumnSet::PHASE_PLATES)
+    })?;
     plates::invert_terrain(&mut buf);
-    buf.save(&conn, "Invert terrain")
+    db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?;
+        buf.save(conn, "Invert terrain")
+    })
 }
 
 /// Generate elevation from plate tectonics + sea depth.
@@ -35,15 +63,19 @@ pub fn sim_invert_terrain(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, Str
 #[tauri::command]
 pub fn sim_generate_terrain(seed: u64, db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
-    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
+    let mut buf = db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?; // geography is frozen once a campaign starts
+        WorldBuffer::load_with(conn, ColumnSet::PHASE_ELEVATION)
+    })?;
     elevation::generate_elevation(&mut buf, seed);
     elevation::compute_sea_depth(&mut buf);
     // Proper continental shelf (not just compute_sea_depth's thin ~1px ring) so
     // the Shelf layer is populated after the per-step elevation phase.
     elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
-    buf.save(&conn, "Generate terrain & depth")
+    db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?;
+        buf.save(conn, "Generate terrain & depth")
+    })
 }
 
 /// Run ocean & atmosphere simulation.
@@ -51,9 +83,10 @@ pub fn sim_generate_terrain(seed: u64, db: State<'_, WorldDb>) -> Result<Vec<(i3
 #[tauri::command]
 pub fn sim_ocean_atmosphere(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
-    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_OCEAN_ATMOSPHERE)?;
+    let mut buf = db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?; // geography is frozen once a campaign starts
+        WorldBuffer::load_with(conn, ColumnSet::PHASE_OCEAN_ATMOSPHERE)
+    })?;
 
     ocean::compute_wind_belts(&mut buf);
     // Salinity must be computed before the currents so the moderate-thermohaline
@@ -68,7 +101,10 @@ pub fn sim_ocean_atmosphere(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, S
     ocean::compute_upwelling_zones(&mut buf);
     precipitation::compute_precipitation(&mut buf);
 
-    buf.save(&conn, "Ocean & atmosphere simulation")
+    db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?;
+        buf.save(conn, "Ocean & atmosphere simulation")
+    })
 }
 
 /// Run climate classification.
@@ -76,11 +112,15 @@ pub fn sim_ocean_atmosphere(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, S
 #[tauri::command]
 pub fn sim_classify_climate(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
-    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_CLIMATE)?;
+    let mut buf = db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?; // geography is frozen once a campaign starts
+        WorldBuffer::load_with(conn, ColumnSet::PHASE_CLIMATE)
+    })?;
     koppen::classify_koppen(&mut buf);
-    buf.save(&conn, "Climate classification")
+    db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?;
+        buf.save(conn, "Climate classification")
+    })
 }
 
 /// Run river extraction and hydrology.
@@ -94,9 +134,10 @@ pub fn sim_rivers_hydrology(
     db: State<'_, WorldDb>,
 ) -> Result<SimRiversResult, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
-    let buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_RIVERS)?;
+    let buf = db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?; // geography is frozen once a campaign starts
+        WorldBuffer::load_with(conn, ColumnSet::PHASE_RIVERS)
+    })?; // lock dropped — the D8 hydrology below runs off-lock
 
     let max_cells = ((buf.total() as f32) * lake_max_fraction.clamp(0.000002, 0.05)) as usize;
     let max_cells = max_cells.max(4);
@@ -137,9 +178,10 @@ pub fn sim_soil_fertility(
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
-    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_SOIL_FERTILITY)?;
+    let mut buf = db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?; // geography is frozen once a campaign starts
+        WorldBuffer::load_with(conn, ColumnSet::PHASE_SOIL_FERTILITY)
+    })?;
 
     // Deserialize rivers from JSON
     let river_data: Vec<rivers::River> = serde_json::from_str(&rivers_json)
@@ -151,7 +193,10 @@ pub fn sim_soil_fertility(
     fertility::compute_fertility(&mut buf, &river_data);
     fertility::compute_fisheries(&mut buf, &river_data);
 
-    buf.save(&conn, "Soil & fertility")
+    db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?;
+        buf.save(conn, "Soil & fertility")
+    })
 }
 
 /// Run the biological phase: shark-habitat danger + trade-good belts.
@@ -165,20 +210,26 @@ pub fn sim_biological(
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_BIOLOGICAL)?;
+    // Load the buffer AND the world goods spec up front under one short lock, so
+    // the goods-belt compute below runs off-lock.
+    let (mut buf, goods) = db.with_conn(|conn| {
+        let buf = WorldBuffer::load_with(conn, ColumnSet::PHASE_BIOLOGICAL)?;
+        let goods = crate::commands::goods_commands::load_world_goods(conn);
+        Ok((buf, goods))
+    })?;
 
     let river_data: Vec<rivers::River> = serde_json::from_str(&rivers_json)
         .unwrap_or_default();
 
-    let goods = crate::commands::goods_commands::load_world_goods(&conn);
     biological::compute_shark_risk(&mut buf, &river_data);
     biological::compute_shipworm_risk(&mut buf, &river_data);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
     biological::compute_trade_goods(&mut buf, &river_data, seed, gem_deposits, climate_strictness, &goods);
 
-    buf.save(&conn, "Biological (sharks, shipworms, storms, reefs & trade goods)")
+    db.with_conn(|conn| {
+        buf.save(conn, "Biological (sharks, shipworms, storms, reefs & trade goods)")
+    })
 }
 
 /// Run all simulations in sequence (full world generation pipeline).
@@ -190,12 +241,21 @@ pub fn sim_run_all(
     db: State<'_, WorldDb>,
 ) -> Result<SimRunAllResult, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
-    let mut buf = WorldBuffer::load(&conn)?;
+    // Load the world buffer + goods spec up front under one short lock; all the
+    // multi-second compute below runs OFF-lock so tile fetches stay live, with
+    // only brief re-locks for the mid-run culture store and the final save.
+    let (mut buf, goods) = db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?; // geography is frozen once a campaign starts
+        let buf = WorldBuffer::load(conn)?;
+        let goods = crate::commands::goods_commands::load_world_goods(conn);
+        Ok((buf, goods))
+    })?;
+    let mut pt = PhaseTimer::new();
+    pt.lap("load");
 
     // Phase 1: Plates & landmass
     plates::generate_plates_and_landmass(&mut buf, seed, plate_count);
+    pt.lap("plates");
 
     // Phase 2: Elevation & depth
     elevation::generate_elevation(&mut buf, seed);
@@ -205,6 +265,7 @@ pub fn sim_run_all(
     // the shelf layer looked empty and upwelling/fisheries had almost nothing to
     // work with.
     elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    pt.lap("elevation");
 
     // Phase 3: Ocean & atmosphere (salinity before currents for thermohaline coupling)
     ocean::compute_wind_belts(&mut buf);
@@ -215,15 +276,18 @@ pub fn sim_run_all(
     temperature::compute_temperature(&mut buf);
     ocean::compute_upwelling_zones(&mut buf);
     precipitation::compute_precipitation(&mut buf);
+    pt.lap("ocean_atmosphere");
 
     // Phase 4: Climate
     koppen::classify_koppen(&mut buf);
+    pt.lap("climate");
 
     // Phase 5: Rivers (default river/lake parameters)
     let hydro = rivers::compute_hydrology(&buf);
     let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0);
     let lake_max = (buf.total() / 2000).max(20);
     let lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
+    pt.lap("rivers");
 
     // Phase 6: Soil & fertility
     soil::classify_soil(&mut buf);
@@ -231,25 +295,36 @@ pub fn sim_run_all(
     soil::apply_alluvial_override(&mut buf, &extracted_rivers);
     fertility::compute_fertility(&mut buf, &extracted_rivers);
     fertility::compute_fisheries(&mut buf, &extracted_rivers);
+    pt.lap("soil_fertility");
 
     // Phase 7: Settlements
     biological::compute_disease_risk(&mut buf, &extracted_rivers);
-    // Organic culture map first, so settlements are named in their region's culture.
+    // Organic culture map first, so settlements are named in their region's
+    // culture. `store_and_activate` both persists the map and sets the
+    // process-global that settlement naming reads, so it must run BEFORE
+    // generate_settlements — a brief re-lock just for that metadata write.
     let cmap = crate::sim::cultures::compute_culture_map(&buf, seed);
-    crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
+    db.with_conn(|conn| {
+        crate::sim::cultures::store_and_activate(conn, cmap).map_err(|e| e.to_string())
+    })?;
     let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
     let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed, 0.55);
     settlements::write_habitability(&mut buf, &habitability);
+    pt.lap("settlements");
 
     // Phase 8: Biological — shark + shipworm waters + trade-good belts.
-    let goods = crate::commands::goods_commands::load_world_goods(&conn);
     biological::compute_shark_risk(&mut buf, &extracted_rivers);
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
     biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
+    pt.lap("biological");
 
-    let modified = buf.save(&conn, "Full world generation")?;
+    let modified = db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?;
+        buf.save(conn, "Full world generation")
+    })?;
+    pt.lap("save");
 
     Ok(SimRunAllResult {
         modified,
@@ -271,9 +346,10 @@ pub fn sim_generate_terrain_from_template(
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
-    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
+    let mut buf = db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?; // geography is frozen once a campaign starts
+        WorldBuffer::load_with(conn, ColumnSet::PHASE_ELEVATION)
+    })?;
     elevation::generate_elevation_from_terrain(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
     elevation::compute_sea_depth(&mut buf);
     // Generate a proper continental shelf here too. Previously only the
@@ -281,7 +357,10 @@ pub fn sim_generate_terrain_from_template(
     // path left just compute_sea_depth's ~4-cell ring (≈1px at 3600-wide → the
     // Shelf layer looked empty). This makes per-step match Run-All.
     elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
-    buf.save(&conn, "Generate elevation from template")
+    db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?;
+        buf.save(conn, "Generate elevation from template")
+    })
 }
 
 /// Alternative elevation model: plate-free, world-size-aware ridged cordillera
@@ -296,13 +375,17 @@ pub fn sim_generate_terrain_ridged(
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
-    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
+    let mut buf = db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?; // geography is frozen once a campaign starts
+        WorldBuffer::load_with(conn, ColumnSet::PHASE_ELEVATION)
+    })?;
     elevation::generate_elevation_ridged(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
     elevation::compute_sea_depth(&mut buf);
     elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
-    buf.save(&conn, "Generate ridged elevation")
+    db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?;
+        buf.save(conn, "Generate ridged elevation")
+    })
 }
 
 /// Run full simulation pipeline while preserving existing terrain.
@@ -317,9 +400,13 @@ pub fn sim_run_all_from_terrain(
     db: State<'_, WorldDb>,
 ) -> Result<SimRunAllResult, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
-    let mut buf = WorldBuffer::load(&conn)?;
+    // Load buffer + goods up front; compute phases run off-lock (see sim_run_all).
+    let (mut buf, goods) = db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?; // geography is frozen once a campaign starts
+        let buf = WorldBuffer::load(conn)?;
+        let goods = crate::commands::goods_commands::load_world_goods(conn);
+        Ok((buf, goods))
+    })?;
 
     // Phase 2: Elevation from terrain (no plates)
     elevation::generate_elevation_from_terrain(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
@@ -357,22 +444,27 @@ pub fn sim_run_all_from_terrain(
 
     // Phase 7: Settlements
     biological::compute_disease_risk(&mut buf, &extracted_rivers);
-    // Organic culture map first, so settlements are named in their region's culture.
+    // Organic culture map first (brief re-lock for the metadata write — see
+    // sim_run_all); must precede generate_settlements for in-culture naming.
     let cmap = crate::sim::cultures::compute_culture_map(&buf, seed);
-    crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
+    db.with_conn(|conn| {
+        crate::sim::cultures::store_and_activate(conn, cmap).map_err(|e| e.to_string())
+    })?;
     let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
     let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed, 0.55);
     settlements::write_habitability(&mut buf, &habitability);
 
     // Phase 8: Biological — shark + shipworm waters + trade-good belts.
-    let goods = crate::commands::goods_commands::load_world_goods(&conn);
     biological::compute_shark_risk(&mut buf, &extracted_rivers);
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
     biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
 
-    let modified = buf.save(&conn, "Full generation from template")?;
+    let modified = db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?;
+        buf.save(conn, "Full generation from template")
+    })?;
 
     Ok(SimRunAllResult {
         modified,
@@ -393,11 +485,15 @@ pub fn sim_scale_elevation(
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
-    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
+    let mut buf = db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?; // geography is frozen once a campaign starts
+        WorldBuffer::load_with(conn, ColumnSet::PHASE_ELEVATION)
+    })?;
     elevation::scale_elevation(&mut buf, scale, lock_peaks_above);
-    buf.save(&conn, "Scale elevation")
+    db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?;
+        buf.save(conn, "Scale elevation")
+    })
 }
 
 /// Generate continental shelves with configurable parameters.
@@ -411,11 +507,15 @@ pub fn sim_generate_shelves(
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
-    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
+    let mut buf = db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?; // geography is frozen once a campaign starts
+        WorldBuffer::load_with(conn, ColumnSet::PHASE_ELEVATION)
+    })?;
     elevation::generate_shelves(&mut buf, seed, shelf_width, noise_amount, depth_profile, dropoff_width);
-    buf.save(&conn, "Generate shelves")
+    db.with_conn(|conn| {
+        crate::commands::campaign_commands::ensure_unfrozen(conn)?;
+        buf.save(conn, "Generate shelves")
+    })
 }
 
 /// Generate optimal settlement locations based on habitability scoring.

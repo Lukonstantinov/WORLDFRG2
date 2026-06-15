@@ -9,6 +9,22 @@ separately) and any change to simulation *output* — every optimization here mu
 be **bit-for-bit output-preserving** (the sim is deterministic from `seed`, and
 the test suite + saved worlds depend on that).
 
+## Implementation status
+
+| Item | Status |
+|---|---|
+| **Determinism + golden-hash harness** (§7) | ✅ Landed — `full_pipeline_is_deterministic_and_stable` in `sim/world_buffer.rs` runs the whole pipeline twice (catches races) and pins a golden output hash (`0xe9e0_77af_8e08_ddb5`) so any output drift fails CI. |
+| **W2 — release DB lock during compute** | ✅ Landed — `WorldDb::with_conn` helper (`db/mod.rs`); all 14 sim commands restructured to lock→load→**drop**→compute→re-lock→save. |
+| **W1 class A — parallelize per-cell passes** | ✅ Landed (4 passes) — `temperature` (base/lapse/coastal map), `koppen` (pass 1 classify), `soil` (classify), `fertility` (step-2 scoring) now use `rayon` `par_chunks_mut`/`par_iter_mut`. Golden hash unchanged. |
+| **Per-phase profiling** (`WF_PROFILE`) | ✅ Landed — `PhaseTimer` in `sim_commands.rs` instruments `sim_run_all`. |
+| W1 class A — remaining (render loop, biological `good_score`) | ⏳ Pending |
+| W3 — cut redundant `save` work | ⏳ Pending |
+| W4 — supertile column trim | ⏳ Pending |
+| W5 — frontend churn | ⏳ Pending |
+| W1 class B — stencil/advection passes | ⏳ Pending |
+
+The sections below are the full spec (the pending items still apply as written).
+
 ---
 
 ## 0. Guiding constraints

@@ -1,5 +1,6 @@
 use super::world_buffer::WorldBuffer;
 use super::koppen::*;
+use rayon::prelude::*;
 
 /// Soil type codes (1-based, 0=none)
 pub const SOIL_OXISOL: u8 = 1;    // Tropical weathered
@@ -18,22 +19,25 @@ pub const SOIL_VOLCANIC_ASH: u8 = 12; // Young volcanic ash at the vent — rich
 /// Classify soil types based on Köppen climate.
 /// Matches WF1 soil-types.ts algorithm.
 pub fn classify_soil(buf: &mut WorldBuffer) {
-    for i in 0..buf.total() {
+    // Pure per-cell map (reads terrain/is_volcanic/koppen, writes soil) —
+    // parallelizes over a fresh buffer with bit-identical output.
+    let mut new_soil = vec![0u8; buf.total()];
+    new_soil.par_iter_mut().enumerate().for_each(|(i, s)| {
         if buf.terrain[i] != 1 {
-            buf.soil_type[i] = 0;
-            continue;
+            *s = 0;
+            return;
         }
 
         // Volcanic override: the vent cell itself is young, mineral-rich ash.
         // (The weathered Andisol apron around it is laid down by
         // `apply_volcanic_apron`.)
         if buf.is_volcanic[i] == 1 {
-            buf.soil_type[i] = SOIL_VOLCANIC_ASH;
-            continue;
+            *s = SOIL_VOLCANIC_ASH;
+            return;
         }
 
         // Köppen-based classification
-        buf.soil_type[i] = match buf.koppen[i] {
+        *s = match buf.koppen[i] {
             AF | AM => SOIL_OXISOL,
             AW => SOIL_ULTISOL,
             BWH | BWK => SOIL_ARIDISOL,
@@ -46,7 +50,8 @@ pub fn classify_soil(buf: &mut WorldBuffer) {
             ET | EF => SOIL_GELISOL,
             _ => SOIL_ENTISOL,
         };
-    }
+    });
+    buf.soil_type = new_soil;
 }
 
 /// Lay down a fertile Andisol apron of weathered volcanic ash around each vent.

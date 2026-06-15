@@ -603,23 +603,21 @@ mod tests {
         }
     }
 
-    /// Phase masks must cover every column their phase actually touches —
-    /// regression guard for the mask table (an unloaded-but-touched column
-    /// panics on the empty Vec, so running a phase on a tiny world catches it).
-    #[test]
-    fn phase_masks_run_clean() {
-        let conn = test_world(160, 140);
-        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PLATES).unwrap();
+    /// Run the entire generation pipeline (plates → biological) on `conn`,
+    /// phase by phase through the same per-phase column masks the commands use.
+    /// Shared by the mask-coverage and determinism guards below.
+    fn run_full_pipeline(conn: &Connection) {
+        let mut buf = WorldBuffer::load_with(conn, ColumnSet::PHASE_PLATES).unwrap();
         crate::sim::plates::generate_plates_and_landmass(&mut buf, 7, 5);
-        buf.save(&conn, "plates").unwrap();
+        buf.save(conn, "plates").unwrap();
 
-        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION).unwrap();
+        let mut buf = WorldBuffer::load_with(conn, ColumnSet::PHASE_ELEVATION).unwrap();
         crate::sim::elevation::generate_elevation(&mut buf, 7);
         crate::sim::elevation::compute_sea_depth(&mut buf);
         crate::sim::elevation::generate_shelves(&mut buf, 7, 12.0, 0.4, 0.3, 8.0);
-        buf.save(&conn, "elev").unwrap();
+        buf.save(conn, "elev").unwrap();
 
-        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_OCEAN_ATMOSPHERE).unwrap();
+        let mut buf = WorldBuffer::load_with(conn, ColumnSet::PHASE_OCEAN_ATMOSPHERE).unwrap();
         crate::sim::ocean::compute_wind_belts(&mut buf);
         crate::sim::ocean::compute_salinity(&mut buf);
         crate::sim::ocean::generate_ocean_currents(&mut buf);
@@ -628,39 +626,96 @@ mod tests {
         crate::sim::temperature::compute_temperature(&mut buf);
         crate::sim::ocean::compute_upwelling_zones(&mut buf);
         crate::sim::precipitation::compute_precipitation(&mut buf);
-        buf.save(&conn, "ocean").unwrap();
+        buf.save(conn, "ocean").unwrap();
 
-        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_CLIMATE).unwrap();
+        let mut buf = WorldBuffer::load_with(conn, ColumnSet::PHASE_CLIMATE).unwrap();
         crate::sim::koppen::classify_koppen(&mut buf);
-        buf.save(&conn, "climate").unwrap();
+        buf.save(conn, "climate").unwrap();
 
-        let buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_RIVERS).unwrap();
+        let buf = WorldBuffer::load_with(conn, ColumnSet::PHASE_RIVERS).unwrap();
         let hydro = crate::sim::rivers::compute_hydrology(&buf);
         let rivers = crate::sim::rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0);
         let lakes = crate::sim::rivers::detect_lakes(&buf, &hydro.filled, 0.004, 20);
 
-        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_SOIL_FERTILITY).unwrap();
+        let mut buf = WorldBuffer::load_with(conn, ColumnSet::PHASE_SOIL_FERTILITY).unwrap();
         crate::sim::soil::classify_soil(&mut buf);
         crate::sim::soil::apply_volcanic_apron(&mut buf);
         crate::sim::soil::apply_alluvial_override(&mut buf, &rivers);
         crate::sim::fertility::compute_fertility(&mut buf, &rivers);
         crate::sim::fertility::compute_fisheries(&mut buf, &rivers);
-        buf.save(&conn, "soil").unwrap();
+        buf.save(conn, "soil").unwrap();
 
-        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_SETTLEMENTS).unwrap();
+        let mut buf = WorldBuffer::load_with(conn, ColumnSet::PHASE_SETTLEMENTS).unwrap();
         crate::sim::biological::compute_disease_risk(&mut buf, &rivers);
         let hab = crate::sim::settlements::compute_habitability(&buf, &rivers, &lakes);
         let _ = crate::sim::settlements::generate_settlements(&buf, &hab, &rivers, 7, 0.55);
         crate::sim::settlements::write_habitability(&mut buf, &hab);
-        buf.save(&conn, "settlements").unwrap();
+        buf.save(conn, "settlements").unwrap();
 
-        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_BIOLOGICAL).unwrap();
+        let mut buf = WorldBuffer::load_with(conn, ColumnSet::PHASE_BIOLOGICAL).unwrap();
         let goods = crate::sim::goods_spec::default_list();
         crate::sim::biological::compute_shark_risk(&mut buf, &rivers);
         crate::sim::biological::compute_shipworm_risk(&mut buf, &rivers);
         crate::sim::biological::compute_storm_base(&mut buf);
         crate::sim::biological::compute_reef_risk(&mut buf);
         crate::sim::biological::compute_trade_goods(&mut buf, &rivers, 7, 2, 0.5, &goods);
-        buf.save(&conn, "bio").unwrap();
+        buf.save(conn, "bio").unwrap();
+    }
+
+    // ── FNV-1a hash over a buffer's output columns (deterministic, order-fixed) ──
+    fn fnv_u8(h: &mut u64, s: &[u8]) {
+        for &x in s { *h ^= x as u64; *h = h.wrapping_mul(0x0000_0100_0000_01b3); }
+    }
+    fn fnv_f32(h: &mut u64, s: &[f32]) {
+        for &x in s { fnv_u8(h, &x.to_bits().to_le_bytes()); }
+    }
+    fn hash_world(b: &WorldBuffer) -> u64 {
+        let mut h = 0xcbf2_9ce4_8422_2325u64;
+        fnv_u8(&mut h, &b.terrain);
+        fnv_f32(&mut h, &b.elevation);
+        fnv_f32(&mut h, &b.temperature);
+        fnv_f32(&mut h, &b.precipitation);
+        fnv_u8(&mut h, &b.koppen);
+        fnv_u8(&mut h, &b.soil_type);
+        fnv_f32(&mut h, &b.fertility);
+        fnv_f32(&mut h, &b.fishery);
+        fnv_f32(&mut h, &b.habitability);
+        fnv_u8(&mut h, &b.salinity);
+        fnv_u8(&mut h, &b.shark_risk);
+        fnv_u8(&mut h, &b.shipworm_risk);
+        fnv_u8(&mut h, &b.storm_base);
+        fnv_u8(&mut h, &b.reef_risk);
+        fnv_u8(&mut h, &b.disease_risk);
+        for g in &b.goods { fnv_u8(&mut h, g); }
+        h
+    }
+
+    /// Generation must be deterministic (run-to-run identical) AND output-stable
+    /// across refactors. This is the safety net for the parallelization work:
+    /// any rayon data race shows up as a run-to-run mismatch, and any change to
+    /// a per-cell formula or reduction order shows up as a golden-hash mismatch.
+    #[test]
+    fn full_pipeline_is_deterministic_and_stable() {
+        let conn = test_world(160, 140);
+        run_full_pipeline(&conn);
+        let h1 = hash_world(&WorldBuffer::load(&conn).unwrap());
+
+        let conn2 = test_world(160, 140);
+        run_full_pipeline(&conn2);
+        let h2 = hash_world(&WorldBuffer::load(&conn2).unwrap());
+        assert_eq!(h1, h2, "generation is nondeterministic (race?) — {h1:#018x} vs {h2:#018x}");
+
+        // Pinned golden hash: bump ONLY for an intentional output change.
+        const GOLDEN: u64 = 0xe9e0_77af_8e08_ddb5;
+        assert_eq!(h1, GOLDEN, "pipeline output changed — new hash {h1:#018x}");
+    }
+
+    /// Phase masks must cover every column their phase actually touches —
+    /// regression guard for the mask table (an unloaded-but-touched column
+    /// panics on the empty Vec, so running a phase on a tiny world catches it).
+    #[test]
+    fn phase_masks_run_clean() {
+        let conn = test_world(160, 140);
+        run_full_pipeline(&conn);
     }
 }
