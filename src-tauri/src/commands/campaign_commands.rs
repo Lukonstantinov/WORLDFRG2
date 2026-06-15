@@ -846,7 +846,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
             defunct: false,
             archetype: crate::sim::tick::pick_archetype(seed, h as u64),
             charters: Vec::new(),
-            is_guild: false, offices: Vec::new(), trade_at: Vec::new(),
+            is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
+            wealth_history: Vec::new(), office_leases: Vec::new(),
         });
     }
 
@@ -893,6 +894,10 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         diag_volume: 0.0,
         recent_trades: vec![],
         days: vec![],
+        neighbors: vec![],
+        routes_dirty: false,
+        warehouses: vec![],
+        contracts: vec![],
     };
     sim.rebuild_routes();
     sim.seed_initial_guilds(); // civic guilds for cities already ≥ 50k people
@@ -1435,6 +1440,152 @@ pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRo
     }).collect();
     out.sort_by(|x, y| y.volume.partial_cmp(&x.volume).unwrap_or(std::cmp::Ordering::Equal));
     out.truncate(150);
+    Ok(out)
+}
+
+/// One active FUTURES CONTRACT as a directional supply lane for the Futures map
+/// layer: the seller's source city → the buyer city, with the good, monthly volume,
+/// term and end year. Distinct from `MerchantRoute` (live spot voyages) — these are
+/// standing contractual obligations.
+#[derive(Serialize)]
+pub struct FuturesLane {
+    pub a: [f32; 2],      // source (producer/warehouse) city
+    pub b: [f32; 2],      // buyer (receiver) city
+    pub a_name: String,
+    pub b_name: String,
+    pub holder: String,   // seller house/guild
+    pub color: String,
+    pub is_guild: bool,
+    pub good: String,
+    pub qty: f32,         // monthly delivered quantity
+    pub term: u8,         // 1 / 3 / 5 / 7 years
+    pub end_year: u32,    // campaign year the contract expires
+    pub suspended: bool,  // force-majeure (plague lockup) right now
+}
+
+/// Expose the active futures contracts as directional supply lanes for the map's
+/// Futures overlay (source city → buyer city).
+#[tauri::command]
+pub fn campaign_futures_lanes(db: State<'_, WorldDb>) -> Result<Vec<FuturesLane>, String> {
+    use crate::sim::tick::TICKS_PER_YEAR;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&conn)? { Some(s) => s, None => return Ok(vec![]) };
+    // Estate endpoints collapse to their parent city so lanes connect cities.
+    let city_of = |h: u32| -> u32 {
+        match sim.hubs.get(h as usize) {
+            Some(x) if x.is_estate && x.parent >= 0 => x.parent as u32,
+            _ => h,
+        }
+    };
+    let hname = |h: u32| sim.hubs.get(city_of(h) as usize).map(|x| x.name.clone()).unwrap_or_default();
+    let pos = |h: u32| sim.hubs.get(city_of(h) as usize).map(|x| [x.x, x.y]).unwrap_or([0.0, 0.0]);
+    let tick = sim.tick;
+    let mut out: Vec<FuturesLane> = sim.contracts.iter().map(|c| {
+        let h = sim.houses.get(c.seller_house as usize);
+        FuturesLane {
+            a: pos(c.source_hub), b: pos(c.buyer_hub),
+            a_name: hname(c.source_hub), b_name: hname(c.buyer_hub),
+            holder: h.map(|x| x.name.clone()).unwrap_or_default(),
+            color: distinct_color(c.seller_house as usize),
+            is_guild: h.map(|x| x.is_guild).unwrap_or(false),
+            good: sim.goods.get(c.good).map(|x| x.name.clone()).unwrap_or_default(),
+            qty: c.monthly_qty, term: c.term_years,
+            end_year: c.end_tick / TICKS_PER_YEAR,
+            suspended: c.suspended_until > tick,
+        }
+    }).collect();
+    out.sort_by(|x, y| y.qty.partial_cmp(&x.qty).unwrap_or(std::cmp::Ordering::Equal));
+    out.truncate(200);
+    Ok(out)
+}
+
+/// One house/guild warehouse for the Warehouses infographic: where it sits, its
+/// tier/capacity/fill, the goods it holds, and how many futures contracts it supplies.
+#[derive(Serialize)]
+pub struct WarehouseInfo {
+    /// "warehouse" for a depot, else the estate kind (farm/mine/plantation/fishery/
+    /// vineyard/manufactory).
+    pub kind: String,
+    pub owner: String,
+    pub color: String,
+    pub is_guild: bool,
+    pub city: String,
+    pub x: f32,
+    pub y: f32,
+    pub tier: u8,
+    pub capacity: f32,
+    pub used: f32,
+    /// (good name, amount): a warehouse's stock, or an estate's production — largest first.
+    pub goods: Vec<(String, f32)>,
+    /// Active futures contracts this depot is the SOURCE of.
+    pub contracts: u32,
+    pub damage: f32,
+}
+
+/// All house/guild warehouses (largest stock first) for the Warehouses panel.
+#[tauri::command]
+pub fn campaign_warehouses(db: State<'_, WorldDb>) -> Result<Vec<WarehouseInfo>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let gname = |g: usize| sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
+    let mut out: Vec<WarehouseInfo> = sim.warehouses.iter().filter(|w| w.owner >= 0).map(|w| {
+        let h = sim.houses.get(w.owner as usize);
+        let hub = sim.hubs.get(w.hub as usize);
+        let mut goods: Vec<(String, f32)> = w.stock.iter().enumerate()
+            .filter(|(_, &s)| s > 0.01)
+            .map(|(g, &s)| (gname(g), s)).collect();
+        goods.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        goods.truncate(8);
+        let contracts = sim.contracts.iter()
+            .filter(|c| c.seller_house == w.owner as u32 && c.source_hub == w.hub).count() as u32;
+        WarehouseInfo {
+            kind: "warehouse".into(),
+            owner: h.map(|x| x.name.clone()).unwrap_or_default(),
+            color: distinct_color(w.owner as usize),
+            is_guild: h.map(|x| x.is_guild).unwrap_or(false),
+            city: hub.map(|x| x.name.clone()).unwrap_or_default(),
+            x: hub.map(|x| x.x).unwrap_or(0.0),
+            y: hub.map(|x| x.y).unwrap_or(0.0),
+            tier: w.tier,
+            capacity: w.capacity,
+            used: w.stock.iter().sum(),
+            goods,
+            contracts,
+            damage: w.damage,
+        }
+    }).collect();
+    // Estates & manufactories — the production sites that FEED the warehouses. Listed
+    // alongside the depots so the player sees the whole asset chain in one place.
+    let kind_label = |k: u8| -> &'static str {
+        match k { 1 => "farm", 2 => "mine", 3 => "plantation", 4 => "fishery",
+                  5 => "vineyard", 6 => "manufactory", _ => "estate" }
+    };
+    for hub in sim.hubs.iter().filter(|h| h.is_estate && h.owner_house >= 0) {
+        let oi = hub.owner_house as usize;
+        let h = sim.houses.get(oi);
+        let mut goods: Vec<(String, f32)> = hub.production.iter().enumerate()
+            .filter(|(_, &p)| p > 0.01)
+            .map(|(g, &p)| (gname(g), p)).collect();
+        goods.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        goods.truncate(8);
+        let parent = sim.hubs.get(hub.parent.max(0) as usize).map(|x| x.name.clone()).unwrap_or_default();
+        out.push(WarehouseInfo {
+            kind: kind_label(hub.estate_kind).into(),
+            owner: h.map(|x| x.name.clone()).unwrap_or_default(),
+            color: distinct_color(oi),
+            is_guild: h.map(|x| x.is_guild).unwrap_or(false),
+            city: if parent.is_empty() { hub.name.clone() } else { format!("{} (by {})", hub.name, parent) },
+            x: hub.x, y: hub.y,
+            tier: hub.estate_tier,
+            capacity: 0.0, // estates produce rather than store
+            used: hub.production.iter().sum(),
+            goods,
+            contracts: 0,
+            damage: 0.0,
+        });
+    }
+    out.sort_by(|a, b| b.used.partial_cmp(&a.used).unwrap_or(std::cmp::Ordering::Equal));
+    out.truncate(400);
     Ok(out)
 }
 

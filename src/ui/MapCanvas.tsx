@@ -9,8 +9,8 @@ import { useViewportStore } from "../state/viewportStore";
 import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes } from "../bridge/tauri";
-import type { MerchantRoute } from "../types";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes } from "../bridge/tauri";
+import type { MerchantRoute, FuturesLane } from "../types";
 import { goodOverlayKey } from "../goods";
 import type { PaintValue, EconChain, Settlement } from "../types";
 
@@ -78,6 +78,10 @@ export function MapCanvas() {
   const setSelectedHub = useUIStore((s) => s.setSelectedHub);
   const setSelectedMerchantRoute = useUIStore((s) => s.setSelectedMerchantRoute);
   const merchantRoutesRef = useRef<MerchantRoute[]>([]);
+  const setSelectedFuturesLane = useUIStore((s) => s.setSelectedFuturesLane);
+  const selectedFuturesLane = useUIStore((s) => s.selectedFuturesLane);
+  const futuresFocus = useUIStore((s) => s.futuresFocus);
+  const futuresLanesRef = useRef<FuturesLane[]>([]);
   const selectedChain = useUIStore((s) => s.selectedChain);
   const selectedHub = useUIStore((s) => s.selectedHub);
   const openRoads = useUIStore((s) => s.openRoads);
@@ -501,6 +505,23 @@ export function MapCanvas() {
     }).catch(() => {});
   }, [overlayVisibility.merchantRoutes, campaignSnapshot?.active, campaignSnapshot?.clock.tick, meta, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Futures layer — contractual supply lanes from the running campaign.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !meta) return;
+    if (!overlayVisibility.futures || !campaignSnapshot?.active) {
+      om.drawFutures([], meta.grid_width, null, null);
+      futuresLanesRef.current = [];
+      requestRender();
+      return;
+    }
+    campaignFuturesLanes().then((lanes) => {
+      om.drawFutures(lanes, meta.grid_width, selectedFuturesLane, futuresFocus);
+      futuresLanesRef.current = lanes;
+      requestRender();
+    }).catch(() => {});
+  }, [overlayVisibility.futures, campaignSnapshot?.active, campaignSnapshot?.clock.tick, meta, selectedFuturesLane, futuresFocus, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Political influence — product of the Political step (9).
   useEffect(() => {
     const om = overlayManagerRef.current;
@@ -750,6 +771,11 @@ export function MapCanvas() {
           if (om && merchantRoutesRef.current.length > 0) {
             const route = om.pickMerchantRoute(wx, wy, Math.max(4, m.grid_width * 0.008));
             if (route) { setSelectedMerchantRoute(route); return; }
+          }
+          // …or, if the futures layer is on, pick a contract lane.
+          if (om && futuresLanesRef.current.length > 0) {
+            const lane = om.pickFuturesLane(wx, wy, Math.max(4, m.grid_width * 0.008));
+            if (lane) { setSelectedFuturesLane(lane); return; }
           }
         }
       }

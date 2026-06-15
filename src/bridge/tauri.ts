@@ -298,7 +298,7 @@ export async function setGoodsSpec(specs: GoodSpec[]): Promise<void> {
   return invoke("set_goods_spec", { specs });
 }
 /** Live suitability heatmap for a good spec (Goods Editor preview). */
-export async function previewGoodScore(spec: GoodSpec): Promise<{ width: number; height: number; data: number[] }> {
+export async function previewGoodScore(spec: GoodSpec): Promise<{ width: number; height: number; data: number[]; land: number[] }> {
   return invoke("preview_good_score", { spec });
 }
 /** The global good library (editing template for new worlds). */
@@ -504,7 +504,7 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 }
 
 // ── DLC 1 "Living Trade" tick simulation ──
-import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, CityRank } from "../types";
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank } from "../types";
 
 /** Seed a fresh living-trade sim from the static economy snapshot (step 10). */
 export async function campaignStartSim(seed: number): Promise<CampaignSnapshot> {
@@ -550,6 +550,16 @@ export async function campaignHouseLedger(house: number): Promise<HouseLedger | 
 /** Active merchant routes (per family/guild, aggregated) for the map layer. */
 export async function campaignMerchantRoutes(): Promise<MerchantRoute[]> {
   return invoke("campaign_merchant_routes");
+}
+
+/** Active futures contracts as directional supply lanes for the Futures map layer. */
+export async function campaignFuturesLanes(): Promise<FuturesLane[]> {
+  return invoke("campaign_futures_lanes");
+}
+
+/** All house/guild warehouses (largest stock first) for the Warehouses panel. */
+export async function campaignWarehouses(): Promise<WarehouseInfo[]> {
+  return invoke("campaign_warehouses");
 }
 
 /** Live richest-cities ranking with each city's share of world trade. */

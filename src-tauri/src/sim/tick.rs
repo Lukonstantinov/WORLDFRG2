@@ -96,6 +96,11 @@ const MAX_HOUSE_ESTATES: usize = 6;
 const MAX_ESTATES_PER_CITY: usize = 4;
 /// Per-capita output rate of a house-built manufactory's luxury good.
 const MANUFACTORY_PERCAP: f32 = 0.2;
+/// Derived manufacturing demand: per unit of a city's labour capacity, how much
+/// raw INPUT stock it wants buffered so its workshops can keep producing. This is
+/// what pulls wool/iron/sugar into the weaving/forge/refining cities so the
+/// finished goods actually accumulate in their warehouses.
+const MANUFACTURE_PULL: f32 = 12.0;
 /// Each estate/manufactory upgrade tier multiplies its output by this (5 tiers).
 const ESTATE_UPGRADE_MULT: f32 = 1.4;
 
@@ -117,6 +122,17 @@ const OFFICE_CLOSE_VOLUME: f32 = 0.5;
 const OFFICE_COST_BASE: f32 = 4.0;
 /// Standing discount on goods a holder BUYS in a city where it has an office.
 const OFFICE_BUY_DISCOUNT: f32 = 0.05;
+// ── Office leases (Phase 5: trade network reach). A house signing a futures contract
+//    LEASES the cities at both ends for a guaranteed term, so its bases stay put for
+//    the life of the contract: a leased office never auto-closes, pays the city a rent
+//    each month, and lapses when the term ends. The chain of leased offices is the
+//    house's NETWORK — a distant settlement can contract for a good the house sources
+//    at ANY of its nodes, and goods moving between the house's OWN cities pay reduced
+//    tolls (it passes its own gates). ──
+const OFFICE_LEASE_YEARS: u32 = 10;
+const OFFICE_LEASE_FEE: f32 = 6.0;   // upfront, scaled by host city size
+const OFFICE_LEASE_RENT: f32 = 0.05; // monthly, scaled by host city size
+const NETWORK_TOLL_DISCOUNT: f32 = 0.5; // tax multiplier when both ends are own nodes
 /// Total source-buy discount is capped here (office + glut bargain).
 const MAX_BUY_DISCOUNT: f32 = 0.30;
 
@@ -157,15 +173,76 @@ const BANK_INTEREST: f32 = 0.01;    // monthly interest on wealth
 //    compounding forever). Money is hard-won and steadily bleeds, the way a
 //    medieval merchant fortune did. Sinks are a fraction of wealth, so a poor
 //    house barely pays them and a rich one bleeds a lot (a stabilizing feedback). ──
-/// Maintenance / retainers / storage — pure depreciation that counters BANK_INTEREST.
-/// Kept modest (fleet/office/estate upkeep is charged separately) so wealth
-/// PLATEAUS toward its income-supported level rather than crashing a rich house.
-const UPKEEP_RATE: f32 = 0.005;
+/// Monthly WAREHOUSE upkeep — a SIZE-based maintenance cost paid EVERY month
+/// regardless of wealth or whether the house trades at all. A house keeps a
+/// warehouse at home, a counting-house in each foreign office, and a depot at
+/// each estate it owns; each costs this much, scaled by the size of the city it
+/// sits in (`city_size_factor`). This is the floor that pushes an idle or
+/// over-extended house into DEBT — and, if unpaid for a year, into bankruptcy.
+/// (Fleet upkeep is still charged separately in `manage_fleets`.)
+const UPKEEP_WAREHOUSE_BASE: f32 = 0.15;
+/// An estate depot is cheaper to keep than a city warehouse (small rural store).
+const UPKEEP_ESTATE_FRAC: f32 = 0.5;
+// ── House-warehouse capacity tiers (single TOTAL capacity bands). A warehouse's
+//    tier is derived from its capacity by `capacity_tier`: Depot / Storehouse /
+//    Warehouse / Entrepôt / Grand Entrepôt. AI expansion raises capacity (promote);
+//    damage lowers it below a floor (demote). Used from Phase 2 on; defined now so
+//    the scaffolding (struct + accessor) is self-contained. ──
+const WH_TIER1_CAP: f32 = 600.0;    // Depot (wood)
+const WH_TIER2_CAP: f32 = 1_500.0;  // Storehouse (wood)
+const WH_TIER3_CAP: f32 = 3_000.0;  // Warehouse (timber+tile)
+const WH_TIER4_CAP: f32 = 6_000.0;  // Entrepôt (stone)
+const WH_MAX_CAP: f32 = 12_000.0;   // Tier 5 Grand Entrepôt ceiling
+// ── Warehouse economics (Phase 2). Capacity-scaled upkeep makes a big hoard in one
+//    city expensive (pushing a house to spread out via offices); a wealth-
+//    proportional family overhead caps cash-hoarding and pushes capital into trade /
+//    depots / contracts. A new depot starts at Tier 1 and an AI house enlarges it
+//    when it stays full. ──
+const CAP_UPKEEP: f32 = 0.0005;        // monthly upkeep per unit capacity (× city size)
+const WEALTH_UPKEEP_RATE: f32 = 0.01;  // monthly overhead on wealth above the allowance
+const WEALTH_UPKEEP_FREE: f32 = 30.0;  // wealth free of the family overhead
+const WH_START_CAP: f32 = 600.0;       // a fresh depot starts a Tier-1 store
+const WH_EXPAND_MULT: f32 = 1.6;       // capacity grows ×this per expansion
+const WH_EXPAND_COST: f32 = 6.0;       // base wealth cost to enlarge (× current tier)
+const WH_FULL_FRAC: f32 = 0.85;        // enlarge once fill ≥ this fraction
+const WH_STOCK_FRAC: f32 = 0.25;       // share of a good's local surplus a house stocks/mo
+const WEALTH_HISTORY_CAP: usize = 80;  // years of wealth samples kept per house
+// ── Futures contracts (Phase 3). A contract is a thin, two-sided stability layer
+//    ON TOP of the spot market: it covers only a slice of a city's need (so the
+//    price signal survives), at a struck price allowed to drift within a band, for
+//    a term gated by the seller's record of stable growth. ──
+const CONTRACT_COVERAGE_CAP: f32 = 0.25; // max share of a city's need under contract per good
+const CONTRACT_PRICE_BAND: f32 = 0.12;   // paid price drifts ≤ ±this around the strike
+const CONTRACT_DELIVER_DAYS: u32 = 30;   // a delivery every ~month
+const CONTRACT_FORM_CHANCE: f32 = 0.10;  // monthly chance an eligible house offers one
+const MAX_CONTRACTS: usize = 400;        // global cap (bounds the per-tick fulfil loop)
+// Term → strike factor (longer term = cheaper unit for the buyer) and break penalty
+// multiplier (longer = stiffer). Indexed 0:1yr 1:3yr 2:5yr 3:7yr.
+const TERM_YEARS: [u8; 4] = [1, 3, 5, 7];
+const TERM_STRIKE_FACTOR: [f32; 4] = [1.02, 1.00, 0.97, 0.95];
+const TERM_PENALTY_MULT: [f32; 4] = [0.5, 1.0, 1.6, 2.4];
+// Per-vessel cargo capacity, by mode. A big contract fans out across MANY vessels
+// (e.g. 12 ships); each rolls its own storm/ambush loss, so a delivery can arrive
+// PARTIALLY (10 of 12 ships make port). Ships carry the most (the viable bulk
+// carrier); river boats less; caravans least. Sea vessels and land vessels (boats +
+// caravans, pooled) are tracked separately so a MIXED coast↔inland route must
+// reserve BOTH a sea leg and a land leg. `LAND_CAPACITY` blends boat/caravan size.
+const SHIP_CAPACITY: f32 = 120.0;   // sea — the viable bulk carrier
+const BOAT_CAPACITY: f32 = 70.0;    // river boat — mid
+const CARAVAN_CAPACITY: f32 = 40.0; // overland caravan — least
 /// Conspicuous consumption (feasts, weddings, charity, building): spent INTO the
 /// home city, lifting its people's prosperity — the main "wealth reaches people" lever.
 const HOUSE_CONSUMPTION_RATE: f32 = 0.004;
 /// Guilds are civic — they spend more of their wealth on their own citizens.
 const GUILD_CIVIC_RATE: f32 = 0.008;
+/// Soft wealth ceiling for a guild in a baseline (~30k) city, scaled by
+/// `city_size_factor`. Beyond it a guild is pressed to endow its city; the drain
+/// grows with the overshoot (see `apply_wealth_sinks`), so guild fortunes
+/// PLATEAU instead of climbing forever and the surplus flows to the settlement.
+const GUILD_WEALTH_SOFTCAP: f32 = 200.0;
+/// Maximum fraction of the over-cap wealth a guild endows in one month (reached
+/// when it holds roughly twice its cap).
+const GUILD_ENDOW_MAX: f32 = 0.5;
 /// How fast a hub's accumulated civic spending (the `civic_pool`) is used up.
 const CIVIC_DECAY: f32 = 0.97;
 /// Monthly fleet upkeep as a fraction of a vessel's value (crew, repairs, berthing)
@@ -180,11 +257,35 @@ const FLEET_DECAY_CHANCE: f32 = 0.012;
 const EXPORT_TAX_RATE: f32 = 0.02;
 const IMPORT_TAX_RATE: f32 = 0.03;
 const GUILD_TAX_MULT: f32 = 1.6;
+/// Guild trade taxes are PROGRESSIVE in trade volume: a dominant guild moving a
+/// great deal of cargo pays proportionally more on every shipment than a small
+/// one. The extra multiplier ramps with the guild's recent decaying `volume`
+/// toward `GUILD_TAX_VOLUME_REF`, capped by `GUILD_TAX_PROGRESSIVE`. This is the
+/// "tax proportional to trade amount" lever that bleeds big guilds into cities.
+const GUILD_TAX_VOLUME_REF: f32 = 2000.0;
+const GUILD_TAX_PROGRESSIVE: f32 = 3.0;
+/// Per-city tax BRACKET: a city's trade-tax rate rises with its own prosperity, so
+/// rich entrepôts tax harder while poorer hubs stay cheap to trade through — a
+/// soft pressure that spreads trade & growth toward the have-nots. A city at full
+/// prosperity taxes (1 + CITY_TAX_BRACKET)× the base rate. See `city_tax_factor`.
+const CITY_TAX_BRACKET: f32 = 1.0;
 /// Tax a city takes on an estate's rent paid to its owning house.
 const ESTATE_TAX_RATE: f32 = 0.10;
 /// Yearly inflation — coin debasement + rising prices steadily eat the real value
 /// of a hoarded fortune (applied once a year to every house's wealth).
 const INFLATION_PER_YEAR: f32 = 0.015;
+/// PUBLIC WORKS: a city whose civic treasury (`civic_pool`, fed by trade taxes,
+/// guild dues and endowments) has grown past a per-capita threshold spends it on
+/// the common good — erecting a useful building outright, or, once well-built,
+/// throwing a festival that lifts the people's prosperity & stability. This is the
+/// visible payoff that turns the guild-endowment sink into something the city
+/// (and player) feels. `PUBLIC_WORKS_PC` is the civic-per-capita trigger (same
+/// scale as the `civic_pc` used for prosperity); costs scale with city size.
+const PUBLIC_WORKS_PC: f32 = 1.5;
+const PUBLIC_WORKS_BUILD_COST: f32 = 6.0; // × city_size_factor, to erect a structure
+const FESTIVAL_COST: f32 = 4.0;           // × city_size_factor, to hold a festival
+const FESTIVAL_PROSPERITY: f32 = 0.18;    // one-off bump to sent_prosperity
+const FESTIVAL_STABILITY: f32 = 0.12;     // one-off bump to sent_stability
 const FLEET_LOSS_MULT: f32 = 0.6;   // voyage-loss reduction
 const FLEET_SHIP_DISCOUNT: f32 = 0.8;
 const POLITICAL_POWER_BONUS: f32 = 0.15;
@@ -250,6 +351,15 @@ pub fn structure_effect(id: u8) -> &'static str {
     }
 }
 /// Wealth cost to build a new transport asset (sea ship / river boat / caravan).
+/// Dispatch only considers each seller's nearest few markets as targets (it then
+/// keeps the 3 hungriest of those). Scanning all `n` hubs per seller was the
+/// dominant late-campaign cost as estates inflated `n`; capping to the nearest K
+/// keeps a Month step roughly flat regardless of total hub count.
+const NEIGHBOR_K: usize = 32;
+/// Global ceiling on satellite production sites (estates + colonies). Estates are
+/// real hubs in `self.hubs`, so an uncapped count quadratically slows every tick.
+const MAX_TOTAL_ESTATES: usize = 220;
+
 const SHIP_COST: f32 = 5.0;
 const RIVER_COST: f32 = 3.5;
 const CARAVAN_COST: f32 = 3.0;
@@ -504,6 +614,21 @@ pub struct House {
     /// touches `(hub, volume)`. Drives office opening (sustained tie) and closing
     /// (tie withers). Not all hubs — only ones traded through.
     #[serde(default)] pub trade_at: Vec<(u32, f32)>,
+    /// Tick at which this house's balance first went NEGATIVE (0 = solvent). A
+    /// private house insolvent for a full year is declared bankrupt; reset to 0
+    /// the moment it claws back to a non-negative balance. Guilds get a civic
+    /// bailout instead, so this stays 0 for them.
+    #[serde(default)] pub debt_since: u32,
+    /// Yearly wealth samples (most recent last, capped to `WEALTH_HISTORY_CAP`).
+    /// Drives `stable_growth_years` → the futures-contract term a house may offer
+    /// (only a long, unbroken record of growth unlocks 5- and 7-year contracts).
+    #[serde(default)] pub wealth_history: Vec<f32>,
+    /// LEASED offices `(hub, lease_end_tick)`: a durable base the house pays the
+    /// city a monthly rent for. A leased office is never auto-closed before its term
+    /// (offices backing a live contract are also held open) — the foundation of the
+    /// house's standing trade NETWORK, which lets distant settlements contract for
+    /// goods the house sources from any of its nodes.
+    #[serde(default)] pub office_leases: Vec<(u32, u32)>,
 }
 
 /// A candidate empty-land site a wealthy house / large city can colonize with an
@@ -577,6 +702,65 @@ impl LedgerAcc {
             v.push((city, amt));
         }
     }
+}
+
+/// A merchant warehouse: a finite, OWNED store of goods sited in a city. Owner
+/// `−1` is the "local merchants" pool (the city's open market — what used to be
+/// the only inventory); a non-negative owner is a house/guild index. The aggregate
+/// hub inventory that prices & needs read is `hub.stock` (the local-merchant pool,
+/// stored inline on the hub) PLUS the stock of every house warehouse sited here —
+/// see `CampaignSim::hub_stock`. In Phase 1 `warehouses` holds only house depots
+/// (empty by default → behaviour identical to the pre-warehouse model). Futures
+/// contracts (later phase) reserve and ship out of a specific warehouse's `stock`.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Warehouse {
+    /// House/guild index that owns this depot, or −1 = local merchants (city pool).
+    pub owner: i32,
+    /// Hub (city) this warehouse sits in.
+    pub hub: u32,
+    /// Single TOTAL capacity: Σ stock across goods may not exceed this. The −1 pool
+    /// is effectively uncapped (capacity ignored for owner −1).
+    pub capacity: f32,
+    /// Per-good stock OWNED by this warehouse (length = goods count).
+    pub stock: Vec<f32>,
+    /// Capacity tier 1..5 (Depot/Storehouse/Warehouse/Entrepôt/Grand Entrepôt),
+    /// derived from `capacity`. 0 = the uncapped local-merchant pool.
+    #[serde(default)] pub tier: u8,
+    /// Structural damage 0..1 (storms/fire/riots); repairs over time. 0 = sound.
+    #[serde(default)] pub damage: f32,
+}
+
+/// A FUTURES CONTRACT: a seated house/guild guarantees a settlement a fixed
+/// monthly quantity of one good, at a struck price (allowed to drift within a
+/// band), for a 1/3/5/7-year term. The supply is reserved from the seller's
+/// warehouse at `source_hub` BEFORE the spot market runs, so the buyer has forward
+/// security the reactive market can't give. Longer terms are only offered by houses
+/// with a long record of stable growth (`stable_growth_years`) and carry stiffer
+/// break penalties. A plague quarantine SUSPENDS a contract (force majeure, no
+/// penalty); a seller that simply can't deliver DEFAULTS (penalty to the buyer).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Contract {
+    pub seller_house: u32,
+    pub buyer_hub: u32,
+    /// Hub the goods are shipped FROM (the seller's source depot sits here).
+    pub source_hub: u32,
+    pub good: usize,
+    /// Quantity delivered each month (a SMALL, coverage-capped slice of buyer need).
+    pub monthly_qty: f32,
+    /// Struck reference price at signing (grain-equivalent); paid price drifts within
+    /// a band around it.
+    pub strike_price: f32,
+    pub term_years: u8,
+    pub start_tick: u32,
+    pub end_tick: u32,
+    /// Running total delivered (for the UI / penalty scale).
+    #[serde(default)] pub delivered: f32,
+    /// Tick the last monthly delivery happened (paces deliveries).
+    #[serde(default)] pub last_fulfilled: u32,
+    /// While > current tick the contract is force-majeure suspended (plague lockup).
+    #[serde(default)] pub suspended_until: u32,
+    /// Count of seller defaults; at 3 the contract is voided.
+    #[serde(default)] pub defaults: u8,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -656,6 +840,29 @@ pub struct CampaignSim {
     /// serialized — rebuilt from positions + components after load.
     #[serde(skip)]
     pub days: Vec<f32>,
+    /// Per-hub nearest reachable trade partners (hub indices), sorted nearest
+    /// first, capped to `NEIGHBOR_K`. Dispatch only ever ships to the few
+    /// hungriest of these, so scanning the full `n` per seller is pure waste —
+    /// this keeps dispatch ~O(hubs·K) instead of O(hubs²) as estates accumulate.
+    /// Not serialized — rebuilt alongside `days`.
+    #[serde(skip)]
+    pub neighbors: Vec<Vec<u32>>,
+    /// Set when a hub is added/removed (estate/colony) so the route matrix +
+    /// neighbour lists are rebuilt at most ONCE per tick instead of once per
+    /// estate creation (the old per-estate `rebuild_routes` was O(n²) each).
+    #[serde(skip)]
+    pub routes_dirty: bool,
+    /// House/guild-owned warehouses (the local-merchant `−1` pool stays inline on
+    /// each hub's `stock`, so this holds only house depots). Appended LAST →
+    /// `#[serde(default)]` makes old `.campaign` saves load with no house depots,
+    /// i.e. the pre-warehouse behaviour. Goods owned here are still counted into the
+    /// hub aggregate by `hub_stock`, so prices/needs/famine see the full inventory.
+    #[serde(default)]
+    pub warehouses: Vec<Warehouse>,
+    /// Active futures contracts (house → settlement forward supply). Appended LAST,
+    /// `#[serde(default)]` → old saves load with none.
+    #[serde(default)]
+    pub contracts: Vec<Contract>,
 }
 
 /// Deterministic 0..1 hash of three mixed inputs (splitmix64).
@@ -712,12 +919,64 @@ impl CampaignSim {
             }
         }
         self.days = days;
+        self.rebuild_neighbors();
+        self.routes_dirty = false;
+    }
+
+    /// Build each hub's nearest reachable trade partners (sorted nearest first,
+    /// capped to `NEIGHBOR_K`). Estates are kept as candidates (they have a
+    /// population that must still import food); the cap simply means dispatch
+    /// never scans far-flung hubs, which is where the late-campaign cost went.
+    fn rebuild_neighbors(&mut self) {
+        let n = self.hubs.len();
+        let mut neighbors: Vec<Vec<u32>> = vec![Vec::new(); n];
+        let mut scratch: Vec<(u32, f32)> = Vec::with_capacity(n);
+        for a in 0..n {
+            scratch.clear();
+            for b in 0..n {
+                if b == a { continue; }
+                let d = self.days[a * n + b];
+                if d.is_finite() { scratch.push((b as u32, d)); }
+            }
+            // Partial-select the K nearest (full sort is fine at these sizes too,
+            // but only keep K so dispatch's inner loop stays small).
+            scratch.sort_by(|x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
+            scratch.truncate(NEIGHBOR_K);
+            neighbors[a] = scratch.iter().map(|&(b, _)| b).collect();
+        }
+        self.neighbors = neighbors;
     }
 
     #[inline]
     fn live_price(&self, stock: f32, need: f32, base: f32) -> f32 {
         (base * ((need + EPS) / (stock + EPS)).powf(self.k))
             .clamp(base * PRICE_FLOOR_MULT, base * PRICE_CEIL_MULT)
+    }
+
+    /// Aggregate inventory of good `g` available AT hub `h` for pricing & needs:
+    /// the local-merchant pool (stored inline on the hub) PLUS every house/guild
+    /// warehouse sited here. While `warehouses` is empty this equals the old
+    /// `hubs[h].stock[g]`, so behaviour is unchanged until house depots exist.
+    #[inline]
+    pub fn hub_stock(&self, h: usize, g: usize) -> f32 {
+        let mut s = self.hubs[h].stock.get(g).copied().unwrap_or(0.0);
+        for w in &self.warehouses {
+            if w.hub as usize == h {
+                s += w.stock.get(g).copied().unwrap_or(0.0);
+            }
+        }
+        s
+    }
+
+    /// Capacity tier (1..5) for a warehouse `capacity`; 0 = the uncapped −1 pool.
+    #[inline]
+    pub fn capacity_tier(capacity: f32) -> u8 {
+        if capacity <= 0.0 { 0 }
+        else if capacity <= WH_TIER1_CAP { 1 }
+        else if capacity <= WH_TIER2_CAP { 2 }
+        else if capacity <= WH_TIER3_CAP { 3 }
+        else if capacity <= WH_TIER4_CAP { 4 }
+        else { 5 }
     }
 
     /// Freight to haul one unit of good `g` over `days` at an already-discounted
@@ -824,6 +1083,30 @@ impl CampaignSim {
                 }
                 self.hubs[h].stock[g] += made;
                 self.hubs[h].production[g] += made;
+            }
+        }
+    }
+
+    /// Add manufacturing (derived) demand for recipe INPUTS onto the needs table,
+    /// so dispatch carries raw wool/iron/sugar into the cities able to work them.
+    /// Demand scales with each city's labour capacity (∝ population) — big cities
+    /// pull more inputs and so become the manufacturing centres.
+    fn add_manufacturing_demand(&mut self, needs: &mut [Vec<f32>]) {
+        let ng = self.goods.len();
+        let recipe_goods: Vec<usize> = (0..ng).filter(|&g| !self.goods[g].inputs.is_empty()).collect();
+        if recipe_goods.is_empty() { return; }
+        let mut pops: Vec<f32> = self.hubs.iter().map(|h| h.population.max(0.0)).collect();
+        pops.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let median = pops.get(pops.len() / 2).copied().unwrap_or(1.0).max(1.0);
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate { continue; } // manufacturing happens in cities
+            let cap = (self.hubs[h].population.max(0.0) / median).min(8.0);
+            if cap <= 0.0 { continue; }
+            for &g in &recipe_goods {
+                let labor = { let l = self.goods[g].labor; if l <= 0.0 { 1.0 } else { l } };
+                for &(idx, qty) in &self.goods[g].inputs {
+                    if idx < ng && qty > 0.0 { needs[h][idx] += cap * labor * qty * MANUFACTURE_PULL; }
+                }
             }
         }
     }
@@ -959,9 +1242,24 @@ impl CampaignSim {
             }
         }
 
+        // Opt-in per-phase profiler (set env WF2_PROFILE): prints a per-in-game-year
+        // ms breakdown + the growth counters to the dev console, so late-campaign lag
+        // can be attributed to a specific phase instead of guessed. Off → ~zero cost.
+        let profile = std::env::var("WF2_PROFILE").is_ok();
+        let (mut t_rebuild, mut t_trade, mut t_events, mut t_houses) = (0f32, 0f32, 0f32, 0f32);
+
         for _ in 0..n_ticks {
             self.tick += 1;
             let tick = self.tick;
+            // Rebuild the route matrix + neighbour lists at most once per tick if a
+            // hub was added/removed last tick (estate/colony). Batching this keeps
+            // the O(n²) rebuild from running once per estate creation, and ensures
+            // `self.neighbors` is always sized to `self.hubs` before dispatch reads it.
+            if self.routes_dirty {
+                let _s = std::time::Instant::now();
+                self.rebuild_routes();
+                t_rebuild += _s.elapsed().as_secs_f32() * 1000.0;
+            }
             let n = self.hubs.len();
             let doy = self.day_of_year();
 
@@ -982,6 +1280,12 @@ impl CampaignSim {
                     if hi < self.house_ledger.len() {
                         self.house_ledger[hi].inflation += infl;
                     }
+                    // Sample the year's closing wealth — the multi-year record that
+                    // `stable_growth_years` reads to gate futures-contract terms.
+                    let w = self.houses[hi].wealth;
+                    let wh = &mut self.houses[hi].wealth_history;
+                    wh.push(w);
+                    if wh.len() > WEALTH_HISTORY_CAP { let drop = wh.len() - WEALTH_HISTORY_CAP; wh.drain(0..drop); }
                 }
                 self.house_ledger_prev = self.house_ledger.clone();
                 let yr = tick / TICKS_PER_YEAR;
@@ -1077,6 +1381,13 @@ impl CampaignSim {
                 self.hubs[h].lack_luxury = 0.9 * self.hubs[h].lack_luxury + 0.1 * frac(2);
             }
 
+            // 2c) DERIVED (manufacturing) demand. A city that can weave/forge wants
+            //     the RAW inputs — without this nothing pulls wool to weaving towns or
+            //     iron to forges, so finished goods never formed. We add an input
+            //     demand ∝ the city's labour capacity so dispatch carries the raws in
+            //     (then `manufacture_pass` turns them into cloth/metalware/etc.).
+            self.add_manufacturing_demand(&mut needs);
+
             // 3) Local prices (smoothed scarcity in the grain-eq numeraire).
             for h in 0..n {
                 for g in 0..ng {
@@ -1086,8 +1397,14 @@ impl CampaignSim {
                 }
             }
 
+            // 3.5) Futures contracts deliver FIRST — the contracted quantity is
+            //      reserved from each seller's source depot before the spot market
+            //      runs, giving the buyer city forward supply security.
+            let _s_trade = std::time::Instant::now();
+            self.fulfill_contracts(&needs);
             // 4) Merchant dispatch (arbitrage → in-transit cargo).
             self.dispatch(&needs);
+            t_trade += _s_trade.elapsed().as_secs_f32() * 1000.0;
 
             // 5) Arrivals. Decay each hub's by-sea/by-land supply tally, then add
             //    today's landings tagged by how they travelled (ships vs caravans).
@@ -1119,13 +1436,17 @@ impl CampaignSim {
             }
 
             // 6) Events.
+            let _s_ev = std::time::Instant::now();
             self.roll_events();
+            t_events += _s_ev.elapsed().as_secs_f32() * 1000.0;
 
             // 7) Food balance, estates & starvation.
             self.update_food_and_starvation(&needs);
 
             // 8) Houses.
-            self.update_houses();
+            let _s_h = std::time::Instant::now();
+            self.update_houses(&needs);
+            t_houses += _s_h.elapsed().as_secs_f32() * 1000.0;
 
             // 8.5) Population sentiment (mood + drivers).
             self.update_sentiment();
@@ -1137,6 +1458,19 @@ impl CampaignSim {
                 self.sample_hub_history();
                 self.sample_journal();
                 self.sample_world_chronicle();
+            }
+
+            // Per-year profiler dump (opt-in). Counters reveal what is GROWING
+            // (hubs/houses/warehouses/contracts) alongside where the ms go.
+            if profile && tick % TICKS_PER_YEAR == 0 {
+                eprintln!(
+                    "[WF2 yr {:>3}] hubs={:>4} houses={:>3} wh={:>4} contracts={:>4} intransit={:>5} | \
+                     trade={:>5.0} houses={:>5.0} events={:>4.0} rebuild={:>5.0} ms/yr",
+                    tick / TICKS_PER_YEAR, self.hubs.len(), self.houses.len(),
+                    self.warehouses.len(), self.contracts.len(), self.in_transit.len(),
+                    t_trade, t_houses, t_events, t_rebuild,
+                );
+                t_rebuild = 0.0; t_trade = 0.0; t_events = 0.0; t_houses = 0.0;
             }
         }
     }
@@ -1220,32 +1554,588 @@ impl CampaignSim {
     /// into its home city's `civic_pool` (reaching the people). Both are a fraction
     /// of wealth, so a fortune bleeds proportionally and wealth PLATEAUS where trade
     /// income balances the sinks instead of compounding without end.
+    /// A city-size multiplier on a warehouse's keep — a depot in a great entrepôt
+    /// costs far more (rents, wages, guards) than one in a market town.
+    fn city_size_factor(&self, hub: usize) -> f32 {
+        let pop = self.hubs.get(hub).map(|h| h.population).unwrap_or(30_000.0);
+        (pop / 30_000.0).clamp(0.3, 4.0)
+    }
+
+    /// Per-city trade-tax bracket: the rate scales up with the city's prosperity, so
+    /// a wealthy hub taxes trade harder than a struggling one (`CITY_TAX_BRACKET`).
+    fn city_tax_factor(&self, hub: usize) -> f32 {
+        let prosp = self.hubs.get(hub).map(|h| h.sent_prosperity).unwrap_or(0.5).clamp(0.0, 1.0);
+        1.0 + CITY_TAX_BRACKET * prosp
+    }
+
     fn apply_wealth_sinks(&mut self) {
+        // Per-house warehouse upkeep + estate-depot counts, each accumulated in ONE
+        // pass (were inner scans per house → O(houses·warehouses) and O(houses·hubs);
+        // now O(warehouses)+O(hubs)). Late-campaign this is the bulk of the win.
+        let nh0 = self.houses.len();
+        let mut wh_upkeep = vec![0.0f32; nh0];
+        for w in &self.warehouses {
+            if w.owner >= 0 && (w.owner as usize) < nh0 {
+                wh_upkeep[w.owner as usize] += CAP_UPKEEP * w.capacity * self.city_size_factor(w.hub as usize);
+            }
+        }
+        let mut est_count = vec![0u32; nh0];
+        for h in &self.hubs {
+            if h.is_estate && h.owner_house >= 0 && (h.owner_house as usize) < nh0 {
+                est_count[h.owner_house as usize] += 1;
+            }
+        }
         for hi in 0..self.houses.len() {
             if self.houses[hi].defunct {
                 continue;
             }
-            let wealth = self.houses[hi].wealth.max(0.0);
-            if wealth <= 0.0 {
-                continue;
-            }
-            let consume_rate = if self.houses[hi].is_guild {
-                GUILD_CIVIC_RATE
-            } else {
-                HOUSE_CONSUMPTION_RATE
-            };
-            let upkeep = wealth * UPKEEP_RATE;
-            let consumption = wealth * consume_rate;
-            self.houses[hi].wealth -= upkeep + consumption;
             let home = self.houses[hi].hub as usize;
+            let is_guild = self.houses[hi].is_guild;
+            // ── Warehouse upkeep (CAPACITY-scaled, paid every month, trade or not) ──
+            // Each of the house's depots costs `CAP_UPKEEP · capacity · city_size`,
+            // so a bigger hoard in one city is dearer — pushing the house to spread
+            // its stock across office cities rather than pile it up at home. A depot
+            // at each owned estate keeps its cheaper flat rate. Charged even at
+            // zero/negative wealth, so an idle or over-extended house slides into DEBT.
+            let mut upkeep = wh_upkeep[hi];
+            upkeep += est_count[hi] as f32 * UPKEEP_WAREHOUSE_BASE * UPKEEP_ESTATE_FRAC;
+
+            // ── Conspicuous consumption (spent INTO the home city's people) ──
+            // Only a slice of POSITIVE wealth — a house in debt buys no feasts.
+            let pos = self.houses[hi].wealth.max(0.0);
+            let consume_rate = if is_guild { GUILD_CIVIC_RATE } else { HOUSE_CONSUMPTION_RATE };
+            let consumption = pos * consume_rate;
+
+            // ── Progressive civic endowment (the GUILD wealth ceiling) ──────────
+            // A guild that hoards beyond a soft cap (scaled to its home city's size)
+            // is pressed to endow that city — the fraction drained RISES with how
+            // far it overshoots, so guild fortunes plateau and the surplus visibly
+            // enriches the settlement (the home city's civic_pool → its people).
+            let mut endowment = 0.0f32;
+            if is_guild && pos > 0.0 {
+                let cap = GUILD_WEALTH_SOFTCAP * self.city_size_factor(home);
+                if pos > cap {
+                    let over = pos - cap;
+                    // Drain grows with overshoot: 0 at the cap → up to GUILD_ENDOW_MAX.
+                    let frac = (over / cap).clamp(0.0, 1.0) * GUILD_ENDOW_MAX;
+                    endowment = over * frac;
+                }
+            }
+
+            // ── Family overhead: a progressive, WEALTH-proportional drag (retainers,
+            // mansions, patronage) on top of warehouse upkeep — it bites harder the
+            // richer the family, so hoarding cash is costly and capital is pushed into
+            // trade, depots and contracts. Private houses only; guilds are already
+            // ceilinged by the progressive endowment above. Spent INTO the home city
+            // (patronage → its people), like conspicuous consumption.
+            let wealth_overhead = if is_guild { 0.0 }
+                else { WEALTH_UPKEEP_RATE * (pos - WEALTH_UPKEEP_FREE).max(0.0) };
+
+            self.houses[hi].wealth -= upkeep + consumption + endowment + wealth_overhead;
+
             if home < self.hubs.len() {
-                self.hubs[home].civic_pool += consumption;
+                // Consumption + the family overhead + the guild's civic dues (upkeep)
+                // + the endowment all flow to the home city's people. A PRIVATE house's
+                // upkeep leaves the economy (paid to landlords / abroad), so it isn't
+                // credited; its wealth overhead IS (it's patronage spent in town).
+                self.hubs[home].civic_pool += consumption + endowment + wealth_overhead;
+                if is_guild {
+                    self.hubs[home].civic_pool += upkeep;
+                }
             }
             if hi < self.house_ledger.len() {
                 self.house_ledger[hi].upkeep += upkeep;
-                self.house_ledger[hi].consumption += consumption;
-                // Sample wealth each month for the Accountant's year graph.
-                self.house_ledger[hi].wealth_samples.push(self.houses[hi].wealth.max(0.0));
+                self.house_ledger[hi].consumption += consumption + endowment + wealth_overhead;
+                // Sample wealth each month for the Accountant's year graph — now
+                // signed, so a debt-ridden year shows the balance going negative.
+                self.house_ledger[hi].wealth_samples.push(self.houses[hi].wealth);
+            }
+        }
+    }
+
+    /// Monthly warehouse pass (Phase 2): (1) ensure every live house has a home depot
+    /// and one in each office city; (2) STOCK — each house draws a slice of its
+    /// specialty goods' LOCAL SURPLUS (never food, never below the city's trade
+    /// reserve) into its depot, paying the market (the cost circulates into the
+    /// city's civic pool) — this is the inventory a futures contract later ships out
+    /// of; (3) EXPAND — a profitable house enlarges a depot that stays nearly full.
+    /// Stocking only MOVES goods within a hub (pool → house depot), so the aggregate
+    /// `hub_stock` — and thus prices, needs and the famine balance — is unchanged.
+    fn sync_and_stock_warehouses(&mut self, needs: &[Vec<f32>]) {
+        let ng = self.goods.len();
+        let nh = self.houses.len();
+        // Slowly heal cosmetic damage on standing depots.
+        for w in &mut self.warehouses { w.damage *= 0.98; }
+        // (1) Ensure home + office depots exist. A single membership set of existing
+        //     (owner, hub) pairs replaces the old per-call linear scan, so this is
+        //     O(houses + offices) rather than O(houses · warehouses).
+        let nhub = self.hubs.len();
+        let mut have: std::collections::HashSet<(i32, u32)> =
+            self.warehouses.iter().map(|w| (w.owner, w.hub)).collect();
+        let mut new_depots: Vec<(i32, u32)> = Vec::new();
+        for hi in 0..nh {
+            if self.houses[hi].defunct { continue; }
+            let home = self.houses[hi].hub;
+            if (home as usize) < nhub && have.insert((hi as i32, home)) {
+                new_depots.push((hi as i32, home));
+            }
+            for off in self.houses[hi].offices.clone() {
+                if (off as usize) < nhub && have.insert((hi as i32, off)) {
+                    new_depots.push((hi as i32, off));
+                }
+            }
+        }
+        for (owner, hub) in new_depots {
+            self.warehouses.push(Warehouse {
+                owner, hub, capacity: WH_START_CAP,
+                stock: vec![0.0; ng], tier: Self::capacity_tier(WH_START_CAP), damage: 0.0,
+            });
+        }
+        // (2) Stocking.
+        for wi in 0..self.warehouses.len() {
+            let owner = self.warehouses[wi].owner;
+            if owner < 0 { continue; }
+            let oi = owner as usize;
+            if oi >= nh || self.houses[oi].defunct { continue; }
+            let hub = self.warehouses[wi].hub as usize;
+            if hub >= self.hubs.len() { continue; }
+            let used: f32 = self.warehouses[wi].stock.iter().sum();
+            let mut room = (self.warehouses[wi].capacity - used).max(0.0);
+            if room <= EPS { continue; }
+            for g in self.houses[oi].spec.clone() {
+                if room <= EPS { break; }
+                if g >= ng || self.goods[g].food { continue; }
+                let reserve = needs[hub][g] * TRADE_RESERVE_MULT;
+                let surplus = (self.hubs[hub].stock[g] - reserve).max(0.0);
+                if surplus <= EPS { continue; }
+                let price = self.live_price(self.hub_stock(hub, g), needs[hub][g], self.goods[g].base_value);
+                let afford = if price > EPS { (self.houses[oi].wealth * 0.25).max(0.0) / price } else { 0.0 };
+                let take = (surplus * WH_STOCK_FRAC).min(room).min(afford);
+                if take <= EPS { continue; }
+                self.hubs[hub].stock[g] -= take;
+                self.warehouses[wi].stock[g] += take;
+                let cost = take * price;
+                self.houses[oi].wealth -= cost;
+                self.hubs[hub].civic_pool += cost;
+                room -= take;
+            }
+        }
+        // (3) Expansion.
+        let tick = self.tick;
+        for wi in 0..self.warehouses.len() {
+            let owner = self.warehouses[wi].owner;
+            if owner < 0 { continue; }
+            let oi = owner as usize;
+            if oi >= nh || self.houses[oi].defunct { continue; }
+            let cap = self.warehouses[wi].capacity;
+            if cap >= WH_MAX_CAP { continue; }
+            let used: f32 = self.warehouses[wi].stock.iter().sum();
+            if used < cap * WH_FULL_FRAC { continue; }
+            let cost = WH_EXPAND_COST * self.warehouses[wi].tier.max(1) as f32;
+            if self.houses[oi].wealth < cost * 1.5 { continue; }
+            if hash01(self.seed, tick as u64 ^ 0x3A5E, wi as u64) > 0.25 { continue; }
+            self.houses[oi].wealth -= cost;
+            let newcap = (cap * WH_EXPAND_MULT).min(WH_MAX_CAP);
+            self.warehouses[wi].capacity = newcap;
+            self.warehouses[wi].tier = Self::capacity_tier(newcap);
+        }
+    }
+
+    /// Latest tick a plague quarantine at `hub` runs to (0 = none active). The hot
+    /// paths (dispatch/fulfill) inline this into a per-tick lookup table; this
+    /// single-hub form is kept for queries (UI / network routing).
+    #[allow(dead_code)]
+    fn quarantine_until(&self, hub: usize) -> u32 {
+        self.active_events.iter()
+            .filter(|e| e.kind == "plague_lockup" && e.hub == hub as i32 && e.until_tick > self.tick)
+            .map(|e| e.until_tick).max().unwrap_or(0)
+    }
+    /// True while `hub` is locked up by plague (no trade in or out).
+    #[allow(dead_code)]
+    fn is_quarantined(&self, hub: usize) -> bool { self.quarantine_until(hub) > self.tick }
+
+    /// Map a contract term (years) to its index into the TERM_* tables.
+    fn term_index(years: u8) -> usize { TERM_YEARS.iter().position(|&y| y == years).unwrap_or(0) }
+
+    /// Years of unbroken wealth growth on record — the seller's track record that
+    /// gates the futures-contract term it may offer. A civic guild is inherently
+    /// stable, so its "record" is simply its age in years.
+    fn stable_growth_years(&self, hi: usize) -> u32 {
+        let h = &self.houses[hi];
+        if h.is_guild {
+            return self.tick.saturating_sub(h.founded_tick) / TICKS_PER_YEAR;
+        }
+        let wh = &h.wealth_history;
+        if wh.len() < 2 { return 0; }
+        let mut run = 0u32;
+        for i in (1..wh.len()).rev() {
+            if wh[i] >= wh[i - 1] * 0.98 { run += 1; } else { break; }
+        }
+        run
+    }
+
+    /// The highest contract-term INDEX (into TERM_*) a house qualifies to offer:
+    /// 1yr always · 3yr ≥4 stable yrs · 5yr ≥7 · 7yr >10.
+    fn max_term_index(&self, hi: usize) -> usize {
+        let y = self.stable_growth_years(hi);
+        if y > 10 { 3 } else if y >= 7 { 2 } else if y >= 4 { 1 } else { 0 }
+    }
+
+    /// Deliver every DUE futures contract — runs BEFORE the spot `dispatch`, so the
+    /// contracted quantity is reserved from the seller's source depot before the
+    /// open market can compete for it (the buyer's forward security). A quarantine
+    /// at either end suspends the contract (force majeure, no penalty); a seller that
+    /// can't supply DEFAULTS and pays the buyer a term-scaled penalty.
+    fn fulfill_contracts(&mut self, needs: &[Vec<f32>]) {
+        if self.contracts.is_empty() { return; }
+        let n = self.hubs.len();
+        let ng = self.goods.len();
+        let tick = self.tick;
+        // Built ONCE per pass: quarantine end-tick per hub, and a (owner,hub)→depot
+        // index — so the per-contract loop avoids re-scanning events and warehouses.
+        let mut q_until = vec![0u32; n];
+        for e in &self.active_events {
+            if e.kind == "plague_lockup" && e.until_tick > tick && e.hub >= 0 && (e.hub as usize) < n {
+                let h = e.hub as usize;
+                if e.until_tick > q_until[h] { q_until[h] = e.until_tick; }
+            }
+        }
+        let mut whidx: std::collections::HashMap<(i32, u32), usize> =
+            std::collections::HashMap::with_capacity(self.warehouses.len());
+        for (i, w) in self.warehouses.iter().enumerate() { whidx.insert((w.owner, w.hub), i); }
+        // Fleet slots free THIS tick per house (fleet minus cargo already in flight).
+        // Contracts run before `dispatch`, so they get first call on the vessels; a
+        // house with no free ship/caravan for a due delivery is in logistics breach.
+        let nh = self.houses.len();
+        let mut cap_sea: Vec<i32> = vec![0; nh];
+        let mut cap_land: Vec<i32> = vec![0; nh];
+        for (i, h) in self.houses.iter().enumerate() {
+            if h.defunct { continue; }
+            cap_sea[i] = h.fleet_sea as i32;
+            cap_land[i] = (h.fleet_river + h.fleet_caravan) as i32;
+        }
+        for c in &self.in_transit {
+            if c.owner >= 0 { let oi = c.owner as usize;
+                if oi < nh { if c.sea { cap_sea[oi] -= 1; } else { cap_land[oi] -= 1; } } }
+        }
+        let mut remove: Vec<usize> = Vec::new();
+        for ci in 0..self.contracts.len() {
+            let c = self.contracts[ci].clone();
+            if tick >= c.end_tick { remove.push(ci); continue; }
+            let (buyer, src, seller, g) =
+                (c.buyer_hub as usize, c.source_hub as usize, c.seller_house as usize, c.good);
+            if buyer >= n || src >= n || g >= ng
+                || seller >= self.houses.len() || self.houses[seller].defunct {
+                remove.push(ci); continue;
+            }
+            // Force majeure: a quarantine at either end suspends deliveries (no penalty).
+            if q_until[buyer] > tick || q_until[src] > tick {
+                self.contracts[ci].suspended_until = q_until[buyer].max(q_until[src]).max(tick + 1);
+                continue;
+            }
+            if c.suspended_until > tick { continue; }
+            // Monthly cadence (and a first delivery no sooner than one period after signing).
+            if tick.saturating_sub(c.start_tick) < CONTRACT_DELIVER_DAYS { continue; }
+            if c.last_fulfilled != 0 && tick.saturating_sub(c.last_fulfilled) < CONTRACT_DELIVER_DAYS { continue; }
+            let days = self.days[src * n + buyer];
+            if !days.is_finite() {
+                self.contracts[ci].suspended_until = tick + CONTRACT_DELIVER_DAYS; // route gone
+                continue;
+            }
+            let spot = self.live_price(self.hub_stock(buyer, g), needs[buyer][g], self.goods[g].base_value);
+            let wi = whidx.get(&(seller as i32, src as u32)).copied();
+            let have = wi.map(|i| self.warehouses[i].stock.get(g).copied().unwrap_or(0.0)).unwrap_or(0.0);
+            if wi.is_none() || have < c.monthly_qty {
+                // SELLER DEFAULT — can't deliver. Compensate the buyer above its spot
+                // fallback, scaled by term (longer commitments hurt more to break).
+                let ti = Self::term_index(c.term_years);
+                let penalty = c.monthly_qty * spot * TERM_PENALTY_MULT[ti];
+                self.houses[seller].wealth -= penalty;
+                self.hubs[buyer].civic_pool += penalty;
+                self.houses[seller].prestige = (self.houses[seller].prestige - 0.02).max(0.0);
+                self.contracts[ci].defaults += 1;
+                self.contracts[ci].last_fulfilled = tick;
+                let (hn, cn, gn) = (self.houses[seller].name.clone(),
+                    self.hubs[buyer].name.clone(), self.goods[g].name.clone());
+                let txt = format!("{} defaults on its {} supply contract to {} (forfeits {:.0})", hn, gn, cn, penalty);
+                self.houses[seller].events.push(HouseEvent { tick, kind: "disaster".into(), text: txt.clone() });
+                self.journal.push(JournalEntry {
+                    tick, kind: "disaster".into(), hub: buyer as i32, good: g as i32, value: penalty, text: txt });
+                if self.contracts[ci].defaults >= 3 { remove.push(ci); }
+                continue;
+            }
+            // ── Multimodal convoy ────────────────────────────────────────────────
+            // The route's legs come from the endpoints: a SEA leg if either end is
+            // coastal, a LAND leg if either is inland — so a coast↔inland route is
+            // MIXED and must reserve BOTH a ship and a land vessel. A big delivery
+            // fans out over MANY vessels (qty ÷ per-vessel capacity); each rolls its
+            // own loss, so the cargo can arrive PARTIALLY (e.g. 10 of 12 ships).
+            let qty = c.monthly_qty;
+            let (src_coastal, buyer_coastal) = (self.hubs[src].coastal, self.hubs[buyer].coastal);
+            let need_sea = src_coastal || buyer_coastal;     // ≥1 coastal → a sea leg
+            let need_land = !(src_coastal && buyer_coastal);  // ≥1 inland → a land leg
+            // Each required leg's monthly carrying capacity (free vessels × per-vessel
+            // hold). The journey is limited by its TIGHTEST leg. A land vessel's hold
+            // is the house's boat/caravan mix average (river boats carry more than
+            // caravans), so a riverine house moves more overland per slot.
+            let rv = self.houses[seller].fleet_river as f32;
+            let cv = self.houses[seller].fleet_caravan as f32;
+            let land_per = if rv + cv > 0.0 {
+                (rv * BOAT_CAPACITY + cv * CARAVAN_CAPACITY) / (rv + cv)
+            } else { CARAVAN_CAPACITY };
+            let sea_cap = if need_sea { cap_sea[seller].max(0) as f32 * SHIP_CAPACITY } else { f32::INFINITY };
+            let land_cap = if need_land { cap_land[seller].max(0) as f32 * land_per } else { f32::INFINITY };
+            let leg_cap = sea_cap.min(land_cap);
+            if leg_cap <= 0.0 {
+                // A required leg has NO vessel free → LOGISTICS BREACH (penalty + strike).
+                let ti = Self::term_index(c.term_years);
+                let penalty = qty * spot * TERM_PENALTY_MULT[ti];
+                self.houses[seller].wealth -= penalty;
+                self.hubs[buyer].civic_pool += penalty;
+                self.houses[seller].prestige = (self.houses[seller].prestige - 0.02).max(0.0);
+                self.contracts[ci].defaults += 1;
+                self.contracts[ci].last_fulfilled = tick;
+                let (hn, cn, gn) = (self.houses[seller].name.clone(),
+                    self.hubs[buyer].name.clone(), self.goods[g].name.clone());
+                let txt = format!("{} has no vessel free for its {} contract to {} — breach (forfeits {:.0})", hn, gn, cn, penalty);
+                self.houses[seller].events.push(HouseEvent { tick, kind: "disaster".into(), text: txt.clone() });
+                self.journal.push(JournalEntry {
+                    tick, kind: "disaster".into(), hub: buyer as i32, good: g as i32, value: penalty, text: txt });
+                if self.contracts[ci].defaults >= 3 { remove.push(ci); }
+                continue;
+            }
+            let loadable = qty.min(leg_cap); // can't ship more than the fleet can carry
+            let ships_used = if need_sea { (loadable / SHIP_CAPACITY).ceil() as i32 } else { 0 };
+            let landv_used = if need_land { (loadable / land_per).ceil() as i32 } else { 0 };
+            cap_sea[seller] -= ships_used;
+            cap_land[seller] -= landv_used;
+            // Reserve the loaded goods from the source depot (sunk cargo is lost).
+            let wi = wi.unwrap();
+            self.warehouses[wi].stock[g] -= loadable;
+            // Per-vessel loss. On a mixed route a unit must survive BOTH legs, so the
+            // combined risk is 1−(1−p_sea)(1−p_land). The convoy = its binding leg's
+            // vessels, each carrying an equal share of the load.
+            let sea_p = if need_sea {
+                if self.houses[seller].archetype == ARCH_FLEET { SEA_LOSS * FLEET_LOSS_MULT } else { SEA_LOSS }
+            } else { 0.0 };
+            let land_p = if need_land {
+                let cv = self.houses[seller].fleet_caravan as f32;
+                let rv = self.houses[seller].fleet_river as f32;
+                let tot = (cv + rv).max(1.0);
+                let base = CARAVAN_LOSS * (cv / tot) + RIVER_LOSS * (rv / tot);
+                if self.houses[seller].archetype == ARCH_FLEET { base * FLEET_LOSS_MULT } else { base }
+            } else { 0.0 };
+            let route_loss = 1.0 - (1.0 - sea_p) * (1.0 - land_p);
+            let vessels = ships_used.max(landv_used).max(1);
+            let per = loadable / vessels as f32;
+            let mut delivered_qty = 0.0;
+            let mut sunk = 0;
+            for k in 0..vessels {
+                let lost = hash01(self.seed,
+                    (tick as u64) ^ 0xC0117 ^ ((src as u64) << 8) ^ (buyer as u64),
+                    (g as u64) ^ ((k as u64) << 24)) < route_loss;
+                if lost {
+                    sunk += 1;
+                    if need_sea { self.damage_fleet(seller, true); }
+                    if need_land { self.damage_fleet(seller, false); }
+                    self.diag_lost += 1;
+                } else {
+                    delivered_qty += per;
+                }
+            }
+            self.contracts[ci].last_fulfilled = tick;
+            let sea = need_sea; // tag the in-transit leg as a sea voyage when one exists
+            if sunk > 0 {
+                let gn = self.goods[g].name.clone();
+                let txt = format!("{} of {} {} convoys carrying {} are lost en route to {}",
+                    sunk, vessels, if need_sea { "ship" } else { "caravan" }, gn,
+                    self.hubs[buyer].name.clone());
+                self.houses[seller].events.push(HouseEvent { tick, kind: "disaster".into(), text: txt.clone() });
+                self.journal.push(JournalEntry {
+                    tick, kind: "disaster".into(), hub: buyer as i32, good: g as i32, value: 0.0, text: txt });
+            }
+            // A significant shortfall (heavy losses OR too few vessels to carry the
+            // contracted amount) counts as a missed delivery; minor storm losses don't.
+            if delivered_qty < qty * 0.5 {
+                self.contracts[ci].defaults += 1;
+                if self.contracts[ci].defaults >= 3 { remove.push(ci); }
+            }
+            if delivered_qty <= EPS { continue; } // total loss — nothing ships/sells
+            // Paid price drifts toward spot but stays within the band around the strike.
+            let pt = (0.7 * c.strike_price + 0.3 * spot).clamp(
+                c.strike_price * (1.0 - CONTRACT_PRICE_BAND),
+                c.strike_price * (1.0 + CONTRACT_PRICE_BAND));
+            let value = delivered_qty * pt;
+            let freight = delivered_qty * self.good_freight(g, self.freight_per_day, days);
+            self.houses[seller].wealth += value - freight;
+            // Toll-free network transit: when the cargo moves between the house's OWN
+            // cities (its gates), it pays reduced civic tolls at both ends.
+            let toll = if self.is_house_node(seller, src as u32) && self.is_house_node(seller, buyer as u32) {
+                NETWORK_TOLL_DISCOUNT
+            } else { 1.0 };
+            let export_tax = value * EXPORT_TAX_RATE * self.city_tax_factor(src) * toll;
+            let import_tax = value * IMPORT_TAX_RATE * self.city_tax_factor(buyer) * toll;
+            self.houses[seller].wealth -= export_tax + import_tax;
+            self.hubs[src].civic_pool += export_tax;
+            self.hubs[buyer].civic_pool += import_tax;
+            self.hubs[src].export_earn += value;
+            self.hubs[buyer].import_spend += value;
+            self.houses[seller].volume += delivered_qty;
+            self.in_transit.push(InTransit {
+                from: src as u32, to: buyer as u32, good: g, amount: delivered_qty,
+                eta_tick: tick + (days.ceil() as u32).max(1),
+                owner: seller as i32, sea, phase: 1, home: -1, // one-way: no return leg
+            });
+            self.bump_trade_at(seller, src, delivered_qty);
+            self.bump_trade_at(seller, buyer, delivered_qty);
+            self.log_trade(src as u32, buyer as u32, g, delivered_qty, seller as i32, sea, pt);
+            self.contracts[ci].delivered += delivered_qty;
+        }
+        for &ci in remove.iter().rev() { self.contracts.remove(ci); }
+    }
+
+    /// Monthly: a seated house with an office in a city that is a STRUCTURAL importer
+    /// of one of its specialty goods — and which the house can source from its home
+    /// depot — offers that city a futures contract, for the longest term its record
+    /// allows, covering only the spare slice under the per-good coverage cap (so the
+    /// spot market keeps the rest and prices still form).
+    /// A city the house operates from — its home or any office.
+    fn is_house_node(&self, hi: usize, hub: u32) -> bool {
+        self.houses[hi].hub == hub || self.houses[hi].offices.contains(&hub)
+    }
+    /// True while the house holds a live lease on `hub`.
+    fn office_leased(&self, hi: usize, hub: u32) -> bool {
+        self.houses[hi].office_leases.iter().any(|&(h, until)| h == hub && until > self.tick)
+    }
+    /// True while an active contract relies on the house's base at `hub` (as buyer or
+    /// source) — such an office must stay open for the life of the contract.
+    fn backs_active_contract(&self, hi: usize, hub: u32) -> bool {
+        self.contracts.iter().any(|c| c.seller_house as usize == hi
+            && (c.buyer_hub == hub || c.source_hub == hub) && self.tick < c.end_tick)
+    }
+    /// Lease `hub` as a durable office for `years`: ensures it's an office, pays the
+    /// city an upfront fee (once), and records/extends the lease end-tick.
+    fn lease_office(&mut self, hi: usize, hub: u32, years: u32) {
+        let until = self.tick + years * TICKS_PER_YEAR;
+        if let Some(e) = self.houses[hi].office_leases.iter_mut().find(|(h, _)| *h == hub) {
+            if until > e.1 { e.1 = until; }
+        } else {
+            self.houses[hi].office_leases.push((hub, until));
+            let fee = OFFICE_LEASE_FEE * self.city_size_factor(hub as usize);
+            self.houses[hi].wealth -= fee;
+            if (hub as usize) < self.hubs.len() { self.hubs[hub as usize].civic_pool += fee; }
+        }
+        if !self.houses[hi].offices.contains(&hub) { self.houses[hi].offices.push(hub); }
+    }
+
+    fn form_contracts(&mut self, needs: &[Vec<f32>]) {
+        if self.contracts.len() >= MAX_CONTRACTS { return; }
+        let n = self.hubs.len();
+        let ng = self.goods.len();
+        let tick = self.tick;
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct || self.houses[hi].offices.is_empty() { continue; }
+            if hash01(self.seed, tick as u64 ^ 0xC047, hi as u64) > CONTRACT_FORM_CHANCE { continue; }
+            let ti = self.max_term_index(hi);
+            let term = TERM_YEARS[ti];
+            let offices = self.houses[hi].offices.clone();
+            let specs = self.houses[hi].spec.clone();
+            // The house's NETWORK nodes (home + offices) — any can SOURCE a contract,
+            // letting a distant office-city be supplied a good the house makes far away.
+            let nodes: Vec<u32> = std::iter::once(self.houses[hi].hub)
+                .chain(offices.iter().copied()).collect();
+            'outer: for &off in &offices {
+                let buyer = off as usize;
+                if buyer >= n { continue; }
+                for &g in &specs {
+                    if g >= ng || self.goods[g].food { continue; }
+                    // Structural deficit: the city produces well under its own need.
+                    if self.hubs[buyer].production.get(g).copied().unwrap_or(0.0) >= needs[buyer][g] * 0.8 { continue; }
+                    let cap = CONTRACT_COVERAGE_CAP * needs[buyer][g] * 30.0;
+                    if cap <= EPS { continue; }
+                    let existing: f32 = self.contracts.iter()
+                        .filter(|c| c.buyer_hub as usize == buyer && c.good == g)
+                        .map(|c| c.monthly_qty).sum();
+                    let room = (cap - existing).max(0.0);
+                    if room <= EPS { continue; }
+                    if self.contracts.iter().any(|c|
+                        c.seller_house as usize == hi && c.buyer_hub as usize == buyer && c.good == g) { continue; }
+                    // Pick the NEAREST reachable network node that can supply g (a depot
+                    // holding it, or a city producing it) — the goods can come from
+                    // anywhere on the house's network, not just home.
+                    let src = nodes.iter().copied()
+                        .filter(|&nd| nd as usize != buyer && (nd as usize) < n
+                            && self.days[nd as usize * n + buyer].is_finite())
+                        .filter(|&nd| {
+                            self.warehouses.iter().any(|w| w.owner == hi as i32 && w.hub == nd
+                                && w.stock.get(g).copied().unwrap_or(0.0) > 0.0)
+                            || self.hubs.get(nd as usize).and_then(|h| h.production.get(g)).copied().unwrap_or(0.0) > 0.0
+                        })
+                        .min_by(|&a, &b| self.days[a as usize * n + buyer]
+                            .partial_cmp(&self.days[b as usize * n + buyer]).unwrap_or(std::cmp::Ordering::Equal));
+                    let src = match src { Some(s) => s as usize, None => continue };
+                    let strike = self.live_price(self.hub_stock(buyer, g), needs[buyer][g],
+                        self.goods[g].base_value) * TERM_STRIKE_FACTOR[ti];
+                    self.contracts.push(Contract {
+                        seller_house: hi as u32, buyer_hub: buyer as u32, source_hub: src as u32,
+                        good: g, monthly_qty: room, strike_price: strike, term_years: term,
+                        start_tick: tick, end_tick: tick + term as u32 * TICKS_PER_YEAR,
+                        delivered: 0.0, last_fulfilled: 0, suspended_until: 0, defaults: 0,
+                    });
+                    // Lease BOTH ends for the contract's life (≥ its term) so the bases
+                    // can't lapse under it — the durable spine of the trade network.
+                    let lease_years = (term as u32).max(OFFICE_LEASE_YEARS);
+                    self.lease_office(hi, buyer as u32, lease_years);
+                    if src != self.houses[hi].hub as usize { self.lease_office(hi, src as u32, lease_years); }
+                    let (hn, cn, sn, gn) = (self.houses[hi].name.clone(), self.hubs[buyer].name.clone(),
+                        self.hubs[src].name.clone(), self.goods[g].name.clone());
+                    self.journal.push(JournalEntry {
+                        tick, kind: "charter".into(), hub: buyer as i32, good: g as i32, value: term as f32,
+                        text: format!("{} signs a {}-year {} supply contract: {} → {}", hn, term, gn, sn, cn) });
+                    break 'outer; // at most one new contract per house per pass
+                }
+            }
+        }
+    }
+
+    /// Monthly solvency check. A balance is allowed to go NEGATIVE (debt, shown
+    /// in the Accountant); a PRIVATE house that stays in the red for a full year
+    /// is declared bankrupt and dissolved. A GUILD never dissolves — its home city
+    /// bails it out from the civic pool (and, failing that, simply carries the debt
+    /// until its subsidy recovers it), because a city won't let its guild fail.
+    fn update_solvency(&mut self) {
+        let tick = self.tick;
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct { continue; }
+            let w = self.houses[hi].wealth;
+            if self.houses[hi].is_guild {
+                if w < 0.0 {
+                    let home = self.houses[hi].hub as usize;
+                    if home < self.hubs.len() {
+                        let bail = (-w).min(self.hubs[home].civic_pool.max(0.0));
+                        self.hubs[home].civic_pool -= bail;
+                        self.houses[hi].wealth += bail;
+                    }
+                }
+                self.houses[hi].debt_since = 0; // guilds never accrue toward bankruptcy
+                continue;
+            }
+            // Private house: stamp when debt begins, clear on recovery.
+            if w < 0.0 {
+                if self.houses[hi].debt_since == 0 {
+                    self.houses[hi].debt_since = tick.max(1);
+                }
+            } else {
+                self.houses[hi].debt_since = 0;
+            }
+            // Insolvent for a full year → bankrupt.
+            let since = self.houses[hi].debt_since;
+            if since > 0 && tick.saturating_sub(since) >= TICKS_PER_YEAR {
+                self.houses[hi].events.push(HouseEvent {
+                    tick, kind: "bankruptcy".into(),
+                    text: "Ruined — a year in debt forces the house into bankruptcy".into(),
+                });
+                self.dissolve_house(hi);
             }
         }
     }
@@ -1428,6 +2318,15 @@ impl CampaignSim {
         let n = self.hubs.len();
         let ng = self.goods.len();
         let tick = self.tick;
+        // Quarantine lookup, built ONCE per dispatch (O(events)) instead of scanning
+        // every active event inside the hot seller×target×good loop. A locked-down
+        // city neither ships nor receives.
+        let mut quarantined = vec![false; n];
+        for e in &self.active_events {
+            if e.kind == "plague_lockup" && e.until_tick > tick && e.hub >= 0 && (e.hub as usize) < n {
+                quarantined[e.hub as usize] = true;
+            }
+        }
         // ── Merchant fleet capacity (concurrent shipment slots) for this round ──
         // Each house has fleet_sea sea-slots and (fleet_river + fleet_caravan)
         // land-slots. Slots already busy with in-flight cargo are subtracted, so a
@@ -1468,16 +2367,23 @@ impl CampaignSim {
                 if surplus <= EPS {
                     continue;
                 }
+                // A city under plague quarantine ships nothing out.
+                if quarantined[a] { continue; }
                 let pa = self.live_price(self.hubs[a].stock[g], needs[a][g], base);
                 // A Guildhall at the SELLER's hub lowers freight on its exports.
                 let freight_rate = self.freight_per_day
                     * if self.hub_has_struct(a, STRUCT_GUILDHALL) { GUILDHALL_FREIGHT } else { 1.0 };
-                // Find the best deficit hubs reachable from a.
+                // Find the best deficit hubs among a's NEAREST reachable markets.
+                // (Capping to the K nearest keeps this O(K) rather than O(n); the
+                // 3 hungriest are kept below, so far-flung hubs never mattered.)
                 let mut targets: Vec<(usize, f32, f32)> = Vec::new(); // (b, gap, days)
-                for b in 0..n {
+                for ti in 0..self.neighbors[a].len() {
+                    let b = self.neighbors[a][ti] as usize;
                     if b == a {
                         continue;
                     }
+                    // A quarantined city takes no imports either.
+                    if quarantined[b] { continue; }
                     let days = self.days[a * n + b];
                     if !days.is_finite() {
                         continue;
@@ -1649,9 +2555,18 @@ impl CampaignSim {
                         // Phase G: civic taxes on this trade (export at origin a,
                         // import at destination b) — paid by the house, funding the
                         // cities (civic_pool → people). Guilds pay heavier taxes.
-                        let tax_mult = if self.houses[oi].is_guild { GUILD_TAX_MULT } else { 1.0 };
-                        let export_tax = value * EXPORT_TAX_RATE * tax_mult;
-                        let import_tax = value * IMPORT_TAX_RATE * tax_mult;
+                        // Guilds pay heavier, PROGRESSIVE taxes — the more a guild
+                        // trades, the higher the rate on each shipment.
+                        let tax_mult = if self.houses[oi].is_guild {
+                            let vol = self.houses[oi].volume.max(0.0);
+                            GUILD_TAX_MULT
+                                + GUILD_TAX_PROGRESSIVE * (vol / GUILD_TAX_VOLUME_REF).clamp(0.0, 1.0)
+                        } else { 1.0 };
+                        // Per-city bracket: the export rate follows origin a's
+                        // prosperity, the import rate follows destination b's — rich
+                        // cities tax harder, poor ones stay cheap to trade through.
+                        let export_tax = value * EXPORT_TAX_RATE * tax_mult * self.city_tax_factor(a);
+                        let import_tax = value * IMPORT_TAX_RATE * tax_mult * self.city_tax_factor(b);
                         self.houses[oi].wealth -= export_tax + import_tax;
                         self.hubs[a].civic_pool += export_tax;
                         self.hubs[b].civic_pool += import_tax;
@@ -1795,16 +2710,19 @@ impl CampaignSim {
 
     /// Index helper so the borrow checker is happy reading b's stock in dispatch.
     fn house_for(&self, hub: usize, good: usize) -> i32 {
-        // A civic GUILD seated here runs its own city's trade first — it acts in the
-        // city's interest, carrying its imports (filling the city's deficits) and
-        // shipping its surplus to fund them. Then a specialist house seated here,
-        // then any seated house, then any holder with an OFFICE here (a second base).
-        self.houses
-            .iter()
-            .position(|h| !h.defunct && h.is_guild && h.hub as usize == hub)
-            .or_else(|| self.houses.iter().position(|h| !h.defunct && h.hub as usize == hub && h.spec.contains(&good)))
-            .or_else(|| self.houses.iter().position(|h| !h.defunct && h.hub as usize == hub))
-            .or_else(|| self.houses.iter().position(|h| !h.defunct && h.offices.contains(&(hub as u32))))
+        // Private merchant houses TAKE OVER a city's trade in their specialty: a
+        // seated specialist wins its own good first, then a specialist that holds an
+        // OFFICE here (offices project real trading power into the city). Only then
+        // does the civic GUILD carry the rest (the city's general/needs trade), then
+        // any seated house, then any office-holder. This lets dynamic houses grow
+        // dominant instead of the guild monopolising everything at home.
+        let off = hub as u32;
+        self.houses.iter()
+            .position(|h| !h.defunct && !h.is_guild && h.hub as usize == hub && h.spec.contains(&good))
+            .or_else(|| self.houses.iter().position(|h| !h.defunct && !h.is_guild && h.offices.contains(&off) && h.spec.contains(&good)))
+            .or_else(|| self.houses.iter().position(|h| !h.defunct && h.is_guild && h.hub as usize == hub))
+            .or_else(|| self.houses.iter().position(|h| !h.defunct && !h.is_guild && h.hub as usize == hub))
+            .or_else(|| self.houses.iter().position(|h| !h.defunct && h.offices.contains(&off)))
             .map(|i| i as i32)
             .unwrap_or(-1)
     }
@@ -1876,9 +2794,94 @@ impl CampaignSim {
                         self.house_ledger[hi].events += loss;
                     }
                 }
+                // Phase 2: the fire also strikes ONE house depot in the city —
+                // BURNING it out (all stock lost, gutted to a Tier-1 building) or
+                // DAMAGING it (up to 80% of stock AND capacity, which may demote a
+                // tier). A burned depot that can't meet a futures contract will later
+                // trigger a seller default (Phase 3). Tagged "disaster" so it is kept
+                // in the chronicle (unlike routine voyage losses).
+                let wis: Vec<usize> = (0..self.warehouses.len())
+                    .filter(|&i| self.warehouses[i].hub as usize == hub
+                        && self.warehouses[i].owner >= 0
+                        && !self.houses.get(self.warehouses[i].owner as usize)
+                            .map(|h| h.defunct).unwrap_or(true))
+                    .collect();
+                if !wis.is_empty() {
+                    let wi = wis[(hash01(self.seed, tick as u64 ^ 0xB175, 0) * wis.len() as f32)
+                        as usize % wis.len()];
+                    let oi = self.warehouses[wi].owner as usize;
+                    let hname = self.houses[oi].name.clone();
+                    let cname = self.hubs[hub].name.clone();
+                    let old_t = self.warehouses[wi].tier;
+                    let sev_roll = hash01(self.seed, tick as u64 ^ 0xF13E, wi as u64);
+                    let txt = if sev_roll < 0.4 {
+                        // BURN: total stock loss, building gutted to a Tier-1 depot.
+                        for s in self.warehouses[wi].stock.iter_mut() { *s = 0.0; }
+                        self.warehouses[wi].capacity = WH_TIER1_CAP;
+                        self.warehouses[wi].tier = 1;
+                        self.warehouses[wi].damage = 1.0;
+                        format!("Fire guts the {} warehouse of {} — all stock lost", cname, hname)
+                    } else {
+                        // DAMAGE: up to 80% of stock AND capacity; capacity loss may demote.
+                        let sev = 0.2 + 0.6 * sev_roll; // 0.2 .. 0.8
+                        for s in self.warehouses[wi].stock.iter_mut() { *s *= 1.0 - sev; }
+                        let newcap = (self.warehouses[wi].capacity * (1.0 - sev)).max(WH_TIER1_CAP * 0.5);
+                        self.warehouses[wi].capacity = newcap;
+                        self.warehouses[wi].tier = Self::capacity_tier(newcap);
+                        self.warehouses[wi].damage = (self.warehouses[wi].damage + sev).min(1.0);
+                        let note = if self.warehouses[wi].tier < old_t {
+                            format!(", dropped to tier {}", self.warehouses[wi].tier)
+                        } else { String::new() };
+                        format!("Fire damages the {} warehouse of {} (−{:.0}% stock{})",
+                            cname, hname, sev * 100.0, note)
+                    };
+                    self.houses[oi].events.push(HouseEvent {
+                        tick, kind: "disaster".into(), text: txt.clone() });
+                    self.journal.push(JournalEntry {
+                        tick, kind: "disaster".into(), hub: hub as i32, good: -1, value: 0.0, text: txt });
+                }
+                // Estates around the city are struck too — a fire/blight cripples a
+                // farm, mine or manufactory; a SEVERE one ABANDONS it (its people
+                // scatter, production stops). The estate hub is kept (no index churn)
+                // but goes dormant — its population falls toward zero.
+                let ests: Vec<usize> = (0..self.hubs.len())
+                    .filter(|&i| self.hubs[i].is_estate && self.hubs[i].parent == hub as i32).collect();
+                if !ests.is_empty() {
+                    let ei = ests[(hash01(self.seed, tick as u64 ^ 0xE57A, hub as u64) * ests.len() as f32) as usize % ests.len()];
+                    let sev = hash01(self.seed, tick as u64 ^ 0xDEAD, ei as u64);
+                    let ename = self.hubs[ei].name.clone();
+                    let parent = self.hubs[ei].parent;
+                    let txt = if sev < 0.18 {
+                        self.hubs[ei].population = (self.hubs[ei].population * 0.02).max(1.0);
+                        for v in self.hubs[ei].base_per_capita.iter_mut() { *v = 0.0; }
+                        self.hubs[ei].estate_tier = 0;
+                        format!("{} is abandoned after disaster — its lands fall silent", ename)
+                    } else {
+                        let s = 0.3 + 0.4 * sev;
+                        self.hubs[ei].population *= 1.0 - s * 0.5;
+                        for v in self.hubs[ei].base_per_capita.iter_mut() { *v *= 1.0 - s; }
+                        self.hubs[ei].estate_tier = self.hubs[ei].estate_tier.saturating_sub(1).max(1);
+                        format!("Disaster cripples {} (−{:.0}% output)", ename, s * 100.0)
+                    };
+                    self.journal.push(JournalEntry {
+                        tick, kind: "disaster".into(), hub: parent, good: -1, value: 0.0, text: txt });
+                }
             }
             "plague" => {
                 self.hubs[hub].population *= 1.0 - mag;
+                // Quarantine: the stricken city is LOCKED UP — no trade in or out —
+                // for a spell longer than the mortality window. The spot market routes
+                // around it; futures contracts touching it are force-majeure suspended
+                // (no default). Tagged "disaster" so the lockup shows in the chronicle.
+                let lock = 60 + (hash01(self.seed, tick as u64 ^ 0x10CC, hub as u64) * 120.0) as u32;
+                self.active_events.push(ActiveEvent {
+                    kind: "plague_lockup".into(), hub: hub as i32, good: -1,
+                    magnitude: 1.0, until_tick: tick + lock,
+                });
+                self.journal.push(JournalEntry {
+                    tick, kind: "disaster".into(), hub: hub as i32, good: -1, value: lock as f32,
+                    text: format!("{} is locked down under quarantine", self.hubs[hub].name),
+                });
             }
             "festival" => { /* demand spike handled implicitly by low stock */ }
             _ => {}
@@ -2032,6 +3035,59 @@ impl CampaignSim {
         }
     }
 
+    /// Monthly: a city spends its civic treasury (`civic_pool` — fed by trade
+    /// taxes, guild dues and endowments) on PUBLIC WORKS. While it still lacks a
+    /// useful civic building it erects one outright; once well-built it instead
+    /// throws an occasional festival that lifts the people's prosperity and
+    /// stability. This is the visible return of the guild-endowment sink to the
+    /// settlement, distinct from the slower trade-wealth-funded `update_structures`.
+    fn fund_public_works(&mut self) {
+        let tick = self.tick;
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate { continue; }
+            let pop = self.hubs[h].population.max(1.0);
+            let civic_pc = self.hubs[h].civic_pool / pop * 100.0;
+            if civic_pc < PUBLIC_WORKS_PC { continue; }
+            let size = self.city_size_factor(h);
+            let has = |id: u8| self.hubs[h].structures.contains(&id);
+            // 1) Erect the next civic building it lacks (workshop → granary →
+            //    guildhall → warehouse), if the treasury covers the cost.
+            let pick = if !has(STRUCT_WORKSHOP) { Some(STRUCT_WORKSHOP) }
+                else if !has(STRUCT_GRANARY) { Some(STRUCT_GRANARY) }
+                else if !has(STRUCT_GUILDHALL) { Some(STRUCT_GUILDHALL) }
+                else if !has(STRUCT_WAREHOUSE) { Some(STRUCT_WAREHOUSE) }
+                else { None };
+            let build_cost = PUBLIC_WORKS_BUILD_COST * size;
+            if let Some(pick) = pick {
+                if self.hubs[h].civic_pool >= build_cost {
+                    self.hubs[h].civic_pool -= build_cost;
+                    self.hubs[h].structures.push(pick);
+                    let hn = self.hubs[h].name.clone();
+                    self.journal.push(JournalEntry {
+                        tick, kind: "structure".into(), hub: h as i32, good: -1, value: 0.0,
+                        text: format!("{} funds public works — a {}", hn, structure_label(pick)),
+                    });
+                    continue;
+                }
+            }
+            // 2) Well-built already → an occasional festival (a one-off lift to the
+            //    populace), if the treasury can spare it.
+            let fest_cost = FESTIVAL_COST * size;
+            if self.hubs[h].civic_pool >= fest_cost
+                && hash01(self.seed, tick as u64 ^ 0xFE57, h as u64) < 0.35
+            {
+                self.hubs[h].civic_pool -= fest_cost;
+                self.hubs[h].sent_prosperity = (self.hubs[h].sent_prosperity + FESTIVAL_PROSPERITY).min(1.0);
+                self.hubs[h].sent_stability = (self.hubs[h].sent_stability + FESTIVAL_STABILITY).min(1.0);
+                let hn = self.hubs[h].name.clone();
+                self.journal.push(JournalEntry {
+                    tick, kind: "festival".into(), hub: h as i32, good: -1, value: 0.0,
+                    text: format!("{} holds a public festival", hn),
+                });
+            }
+        }
+    }
+
     /// The strongest resident house at `hub` (richest, non-defunct), if any.
     fn strongest_house_at(&self, hub: usize) -> Option<usize> {
         let mut best = (usize::MAX, 0.0f32);
@@ -2077,10 +3133,18 @@ impl CampaignSim {
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: kind, estate_tier: 1, owner_house, structures: vec![],
         });
-        self.rebuild_routes();
+        // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
+        self.routes_dirty = true;
+    }
+
+    /// Count satellite production sites (estates + colonies). Used to keep the hub
+    /// list — and therefore every per-tick loop — bounded over a long campaign.
+    fn estate_count(&self) -> usize {
+        self.hubs.iter().filter(|h| h.is_estate).count()
     }
 
     fn maybe_found_estate(&mut self) {
+        if self.estate_count() >= MAX_TOTAL_ESTATES { return; }
         let n = self.hubs.len();
         let ng = self.goods.len();
         // Founder: a LARGE, commercially successful, non-estate city (rank by
@@ -2173,6 +3237,10 @@ impl CampaignSim {
                     continue;
                 }
             }
+            // Global cap: upgrades (above) are always allowed (no new hub), but
+            // building a NEW estate is blocked once the world is saturated — keeps
+            // the hub list (and every per-tick loop) bounded late-campaign.
+            if self.estate_count() >= MAX_TOTAL_ESTATES { continue; }
             // Build in the house's strongest trade partner (a city it actually works),
             // else at home. Skip estates themselves.
             let home = self.houses[hi].hub as usize;
@@ -2249,6 +3317,7 @@ impl CampaignSim {
     /// campaign. Sites are precomputed at the Economy step and consumed as used.
     fn maybe_colonize(&mut self) {
         if self.colonizable.is_empty() || self.hubs.is_empty() { return; }
+        if self.estate_count() >= MAX_TOTAL_ESTATES { return; }
         // Founder: the richest house (if wealthy enough) else the largest city.
         let mut founder_house = -1i32;
         let mut hw = COLONIZE_HOUSE_WEALTH;
@@ -2311,7 +3380,7 @@ impl CampaignSim {
             site.koppen, site.coastal, component, est_pop, percap);
     }
 
-    fn update_houses(&mut self) {
+    fn update_houses(&mut self, needs: &[Vec<f32>]) {
         for h in 0..self.hubs.len() {
             // Per-capita denominator floored at half the FOUNDING size so a hub that
             // loses population can't have its per-capita wealth spike to absurd
@@ -2332,7 +3401,7 @@ impl CampaignSim {
             self.hubs[h].tw_local *= 0.97;
             self.hubs[h].tw_guild *= 0.97;
         }
-        self.update_house_dynamics();
+        self.update_house_dynamics(needs);
     }
 
     fn world_h(&self) -> u32 { (self.world_w * 0.5).max(1.0) as u32 }
@@ -2430,6 +3499,15 @@ impl CampaignSim {
         for hi in 0..self.houses.len() {
             if self.houses[hi].defunct { continue; }
             let home = self.houses[hi].hub as usize;
+            // Expired leases lapse; surviving leases each cost a monthly rent paid to
+            // the host city (the durable-base running cost).
+            self.houses[hi].office_leases.retain(|&(_, until)| until > tick);
+            let leases = self.houses[hi].office_leases.clone();
+            for &(lh, _) in &leases {
+                let rent = OFFICE_LEASE_RENT * self.city_size_factor(lh as usize);
+                self.houses[hi].wealth -= rent;
+                if (lh as usize) < n { self.hubs[lh as usize].civic_pool += rent; }
+            }
             // Strongest partner volume (scale-invariant trigger).
             let max_vol = self.houses[hi].trade_at.iter().map(|(_, v)| *v).fold(0.0f32, f32::max);
             // CLOSE: an office whose tie has withered, or a (private house) gone broke.
@@ -2437,6 +3515,9 @@ impl CampaignSim {
             let broke = !self.houses[hi].is_guild && self.houses[hi].wealth < HOUSE_BANKRUPT;
             let offices = self.houses[hi].offices.clone();
             for &ohub in &offices {
+                // A LEASED office, or one a live contract relies on, never auto-closes —
+                // the network base is guaranteed for the contract's life.
+                if self.office_leased(hi, ohub) || self.backs_active_contract(hi, ohub) { continue; }
                 let vol = self.houses[hi].trade_at.iter()
                     .find(|(hb, _)| *hb == ohub).map(|(_, v)| *v).unwrap_or(0.0);
                 if broke || vol < close_floor {
@@ -2523,7 +3604,8 @@ impl CampaignSim {
             head_since: tick, head_lifespan: self.roll_lifespan(h as u64 ^ 0x6111),
             founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
             archetype: ARCH_SPECIALTY, charters: Vec::new(),
-            is_guild: true, offices: Vec::new(), trade_at: Vec::new(),
+            is_guild: true, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
+            wealth_history: Vec::new(), office_leases: Vec::new(),
         });
     }
 
@@ -2546,7 +3628,7 @@ impl CampaignSim {
             x, y, self.world_w as u32, self.world_h(), &city, specialty.as_deref(), h as u64 ^ 0x6111)
     }
 
-    fn update_house_dynamics(&mut self) {
+    fn update_house_dynamics(&mut self, needs: &[Vec<f32>]) {
         let tick = self.tick;
         // Decay recent-volume so monopoly tracks the last while, not all history.
         // Per-hub trade ties decay more slowly (an office relationship is built and
@@ -2576,6 +3658,9 @@ impl CampaignSim {
                     hh.wealth *= 1.0 + BANK_INTEREST;
                 }
             }
+            // Phase 2: ensure/stock/expand house warehouses BEFORE upkeep, so the
+            // capacity-scaled upkeep below sees each house's current depots.
+            self.sync_and_stock_warehouses(needs);
             // Phase G: wealth bleeds (upkeep + consumption) so it plateaus and some
             // flows to the people — runs right after interest so it offsets it.
             self.apply_wealth_sinks();
@@ -2583,15 +3668,13 @@ impl CampaignSim {
             self.recompute_monopolies_and_power();
             self.manage_fleets();
             self.update_structures();
+            self.fund_public_works();
             self.maybe_branch_houses();
             self.maybe_house_invests();
             self.update_guilds_and_offices();
-            for hi in 0..self.houses.len() {
-                if self.houses[hi].defunct || self.houses[hi].is_guild { continue; } // guilds are civic — never bankrupt
-                if self.houses[hi].wealth < HOUSE_BANKRUPT && self.houses[hi].volume < 0.02 {
-                    self.dissolve_house(hi);
-                }
-            }
+            // Offices are (re)settled above → now offer futures contracts from them.
+            self.form_contracts(needs);
+            self.update_solvency();
         }
         if tick % 180 == 0 { self.update_rivalries(); }
     }
@@ -2676,7 +3759,8 @@ impl CampaignSim {
             founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
             archetype: self.houses[hi].archetype, // a cadet branch keeps the family trade
             charters: Vec::new(),
-            is_guild: false, offices: Vec::new(), trade_at: Vec::new(),
+            is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
+            wealth_history: Vec::new(), office_leases: Vec::new(),
         });
         self.journal.push(JournalEntry {
             tick, kind: "founding".into(), hub: dest as i32, good: -1, value: 0.0,
@@ -3015,7 +4099,8 @@ impl CampaignSim {
             founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
             archetype: pick_archetype(self.seed, tick as u64 ^ hub as u64),
             charters: Vec::new(),
-            is_guild: false, offices: Vec::new(), trade_at: Vec::new(),
+            is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
+            wealth_history: Vec::new(), office_leases: Vec::new(),
         });
     }
 
@@ -3025,6 +4110,17 @@ impl CampaignSim {
         self.houses[hi].defunct = true;
         self.houses[hi].political_power = 0.0;
         self.houses[hi].monopoly.clear();
+        // A ruined house's depots are wound up: their stock spills back onto the
+        // local market (the −1 pool, stored on the hub) and the buildings are dropped.
+        for w in &self.warehouses {
+            if w.owner == hi as i32 && (w.hub as usize) < self.hubs.len() {
+                let h = w.hub as usize;
+                for g in 0..self.hubs[h].stock.len().min(w.stock.len()) {
+                    self.hubs[h].stock[g] += w.stock[g];
+                }
+            }
+        }
+        self.warehouses.retain(|w| w.owner != hi as i32);
         self.houses[hi].events.push(HouseEvent {
             tick, kind: "dissolved".into(),
             text: "Fell into ruin and was dissolved".into(),
@@ -3196,7 +4292,8 @@ mod tests {
             prev_wealth: 50.0, worst_loss: 0.0, fleet_sea, fleet_river: 0, fleet_caravan: 0,
             head_name: "Head".into(), head_since: 0, head_lifespan: 100_000, founded_tick: 0,
             political_power: 0.0, volume: 0.0, defunct: false, archetype: 1, charters: vec![],
-            is_guild: false, offices: vec![], trade_at: vec![],
+            is_guild: false, offices: vec![], trade_at: vec![], debt_since: 0,
+            wealth_history: vec![], office_leases: vec![],
         }
     }
 
@@ -3212,6 +4309,10 @@ mod tests {
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
             recent_trades: vec![],
             days: vec![],
+            neighbors: vec![],
+            routes_dirty: false,
+            warehouses: vec![],
+            contracts: vec![],
         };
         s.rebuild_routes();
         s
@@ -3251,6 +4352,32 @@ mod tests {
         s.advance(400);
         assert!(s.hubs[1].starving > 0.5, "isolated foodless hub starves: {}", s.hubs[1].starving);
         assert!(s.hubs[1].population < s.hubs[1].founding_pop, "population declines");
+    }
+
+    #[test]
+    fn idle_house_pays_upkeep_and_goes_bankrupt() {
+        // Hub 1 is isolated (its own component) so a house there can NEVER trade or
+        // earn — it must still pay warehouse upkeep every month, slide into debt,
+        // and after a year in the red be dissolved.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 10.0, 10.0, 10000.0, vec![100.0], 0),
+            hub(1, 80.0, 50.0, 10000.0, vec![100.0], 1),
+        ];
+        let mut s = sim(hubs, goods);
+        let mut h = house_at(1, vec![0], 0); // fleetless, isolated
+        h.wealth = 0.5;
+        h.prev_wealth = 0.5;
+        s.houses.push(h);
+        // One month: upkeep is charged even though no trade happened.
+        s.advance(30);
+        assert!(s.houses[0].wealth < 0.5,
+            "an idle house still pays upkeep (wealth {})", s.houses[0].wealth);
+        // Years on: it falls into debt and a full year in the red bankrupts it.
+        s.advance(30 * 40);
+        assert!(s.houses[0].defunct,
+            "a house a year in debt is dissolved (wealth {}, debt_since {})",
+            s.houses[0].wealth, s.houses[0].debt_since);
     }
 
     #[test]
@@ -3427,5 +4554,199 @@ mod tests {
         s.advance(365 * 4);
         let owned = s.hubs.iter().filter(|h| h.is_estate && h.owner_house == 0).count();
         assert!(owned >= 1, "a profitable house builds at least one estate/manufactory (owned={owned})");
+    }
+
+    #[test]
+    fn warehouses_aggregate_into_hub_stock() {
+        // Phase 1 scaffolding: with no house warehouses, hub_stock equals the
+        // inline local-merchant pool (behaviour-preserving). A house depot's stock
+        // then adds into the aggregate that prices & needs read.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let mut s = sim(vec![hub(0, 10.0, 10.0, 10000.0, vec![50.0, 5.0], 0)], goods);
+        s.hubs[0].stock = vec![100.0, 0.0];
+        // Empty warehouses → aggregate == the pool.
+        assert_eq!(s.hub_stock(0, 0), 100.0);
+        assert_eq!(s.hub_stock(0, 1), 0.0);
+        // A house depot sited here adds its owned stock into the aggregate.
+        s.warehouses.push(Warehouse {
+            owner: 0, hub: 0, capacity: 1_000.0,
+            stock: vec![50.0, 20.0], tier: CampaignSim::capacity_tier(1_000.0), damage: 0.0,
+        });
+        assert_eq!(s.hub_stock(0, 0), 150.0);
+        assert_eq!(s.hub_stock(0, 1), 20.0);
+        // Tier bands.
+        assert_eq!(CampaignSim::capacity_tier(0.0), 0);   // uncapped −1 pool
+        assert_eq!(CampaignSim::capacity_tier(500.0), 1); // Depot
+        assert_eq!(CampaignSim::capacity_tier(1_000.0), 2); // Storehouse
+        assert_eq!(CampaignSim::capacity_tier(6_000.0), 4); // Entrepôt
+        assert_eq!(CampaignSim::capacity_tier(12_000.0), 5); // Grand Entrepôt
+    }
+
+    #[test]
+    fn house_auto_builds_and_stocks_a_home_depot() {
+        // Phase 2: a live house auto-builds a home warehouse and draws a slice of its
+        // specialty good's local surplus into it (inventory it can later contract out).
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", i32::MAX, 2, 20.0, 0.5, false),
+            good("wine", i32::MAX, 1, 8.0, 0.5, false),
+        ];
+        let fp = 5000.0 * 0.85 * DEMAND_PRESSURE * 1.5;
+        let mut ha = hub(0, 10.0, 10.0, 5000.0, vec![fp, 3000.0, 0.0], 0); ha.coastal = true;
+        let mut hb = hub(1, 16.0, 10.0, 5000.0, vec![fp, 0.0, 3000.0], 0); hb.coastal = true;
+        let mut s = sim(vec![ha, hb], goods);
+        s.houses = vec![house_at(0, vec![1], 4)]; // specializes in silk
+        s.advance(365 * 2);
+        assert!(s.warehouses.iter().any(|w| w.owner == 0 && w.hub == 0 && w.tier >= 1),
+            "house auto-builds a home depot: {:?}",
+            s.warehouses.iter().map(|w| (w.owner, w.hub, w.tier, w.capacity)).collect::<Vec<_>>());
+        let owned_silk: f32 = s.warehouses.iter().filter(|w| w.owner == 0).map(|w| w.stock[1]).sum();
+        assert!(owned_silk > 0.0, "house stocks its specialty silk into the depot: {owned_silk}");
+    }
+
+    #[test]
+    fn contract_term_gate_scales_with_record() {
+        // Phase 3: the term a house may offer is gated by its unbroken growth record:
+        // 1yr always · 3yr ≥4 stable yrs · 5yr ≥7 · 7yr >10.
+        let mut s = sim(vec![hub(0, 10.0, 10.0, 5000.0, vec![1.0], 0)],
+            vec![good("wheat", 0, 0, 1.0, 0.85, true)]);
+        s.houses = vec![house_at(0, vec![0], 0)];
+        s.houses[0].wealth_history = vec![]; // young → 1yr
+        assert_eq!(s.max_term_index(0), 0);
+        s.houses[0].wealth_history = vec![1.0, 2.0, 3.0, 4.0, 5.0]; // 4 growth yrs → 3yr
+        assert_eq!(s.max_term_index(0), 1);
+        s.houses[0].wealth_history = (1..=9).map(|i| i as f32).collect(); // 8 → 5yr
+        assert_eq!(s.max_term_index(0), 2);
+        s.houses[0].wealth_history = (1..=12).map(|i| i as f32).collect(); // 11 → 7yr
+        assert_eq!(s.max_term_index(0), 3);
+        // A decline breaks the run.
+        s.houses[0].wealth_history = vec![1.0, 2.0, 3.0, 0.5, 1.0]; // only 1 trailing growth yr
+        assert_eq!(s.max_term_index(0), 0);
+    }
+
+    #[test]
+    fn seated_house_forms_a_supply_contract() {
+        // Phase 3: a house with an office in a city that STRUCTURALLY imports its
+        // specialty good offers that city a futures contract (sourced from its home
+        // depot), covering a capped slice of the city's need.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", i32::MAX, 2, 20.0, 0.5, false),
+        ];
+        let mut ha = hub(0, 10.0, 10.0, 5000.0, vec![100.0, 3000.0], 0); ha.coastal = true;
+        let mut hb = hub(1, 16.0, 10.0, 5000.0, vec![100.0, 0.0], 0); hb.coastal = true; // no silk
+        let mut s = sim(vec![ha, hb], goods);
+        let mut h = house_at(0, vec![1], 4); // specializes in silk
+        h.offices = vec![1];                 // seated in the importer city
+        h.wealth = 1000.0;
+        s.houses = vec![h];
+        s.warehouses.push(Warehouse { owner: 0, hub: 0, capacity: 3000.0,
+            stock: vec![0.0, 1000.0], tier: 3, damage: 0.0 }); // home silk depot
+        // hub 1 needs silk; hub 0 doesn't (it produces it).
+        let needs = vec![vec![0.0, 0.0], vec![0.0, 5.0]];
+        // Step past the 10%/month formation throttle.
+        let mut formed = false;
+        for t in 1..400u32 { s.tick = t; s.form_contracts(&needs);
+            if s.contracts.iter().any(|c| c.seller_house == 0 && c.buyer_hub == 1 && c.good == 1) { formed = true; break; } }
+        assert!(formed, "seated house forms a silk supply contract to the importer city");
+        let c = s.contracts.iter().find(|c| c.buyer_hub == 1).unwrap();
+        assert!(c.monthly_qty > 0.0 && c.monthly_qty <= CONTRACT_COVERAGE_CAP * 5.0 * 30.0 + 1.0,
+            "contract volume is within the coverage cap: {}", c.monthly_qty);
+    }
+
+    #[test]
+    fn a_contract_delivers_from_the_source_depot() {
+        // Phase 3: an active contract reserves its monthly quantity from the seller's
+        // source depot and ships it to the buyer — over months `delivered` grows and
+        // the depot drains.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", i32::MAX, 2, 20.0, 0.5, false),
+        ];
+        let fp = 5000.0 * 0.85 * DEMAND_PRESSURE * 1.5;
+        let mut ha = hub(0, 10.0, 10.0, 5000.0, vec![fp, 3000.0], 0); ha.coastal = true;
+        let mut hb = hub(1, 16.0, 10.0, 5000.0, vec![fp, 0.0], 0); hb.coastal = true;
+        let mut s = sim(vec![ha, hb], goods);
+        let mut h = house_at(0, vec![1], 4);
+        h.wealth = 10_000.0;
+        s.houses = vec![h];
+        s.warehouses.push(Warehouse { owner: 0, hub: 0, capacity: 6000.0,
+            stock: vec![0.0, 5000.0], tier: 4, damage: 0.0 });
+        let term = 3u8;
+        s.contracts.push(Contract {
+            seller_house: 0, buyer_hub: 1, source_hub: 0, good: 1, monthly_qty: 50.0,
+            strike_price: 25.0, term_years: term, start_tick: 0,
+            end_tick: term as u32 * TICKS_PER_YEAR, delivered: 0.0,
+            last_fulfilled: 0, suspended_until: 0, defaults: 0,
+        });
+        s.advance(150);
+        let c = &s.contracts[0];
+        assert!(c.delivered > 0.0, "the contract delivers silk over the months: {}", c.delivered);
+        // A well-stocked depot with a fleet meets most deliveries; the rare storm
+        // loss is allowed (≤ a couple over the run), it just isn't the norm.
+        assert!(c.defaults <= 2, "deliveries mostly succeed (defaults={})", c.defaults);
+    }
+
+    #[test]
+    fn a_contract_without_a_ship_breaches() {
+        // A house with no free vessel for a due contract delivery is in logistics
+        // breach — it delivers nothing and the contract takes a default strike.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", i32::MAX, 2, 20.0, 0.5, false),
+        ];
+        let mut ha = hub(0, 10.0, 10.0, 5000.0, vec![100.0, 3000.0], 0); ha.coastal = true;
+        let mut hb = hub(1, 16.0, 10.0, 5000.0, vec![100.0, 0.0], 0); hb.coastal = true;
+        let mut s = sim(vec![ha, hb], goods);
+        let mut h = house_at(0, vec![1], 0); // NO sea ships
+        h.fleet_river = 0; h.fleet_caravan = 0; h.wealth = 100.0;
+        s.houses = vec![h];
+        s.warehouses.push(Warehouse { owner: 0, hub: 0, capacity: 6000.0,
+            stock: vec![0.0, 5000.0], tier: 4, damage: 0.0 });
+        s.contracts.push(Contract {
+            seller_house: 0, buyer_hub: 1, source_hub: 0, good: 1, monthly_qty: 50.0,
+            strike_price: 25.0, term_years: 3, start_tick: 0,
+            end_tick: 3 * TICKS_PER_YEAR, delivered: 0.0,
+            last_fulfilled: 0, suspended_until: 0, defaults: 0,
+        });
+        // Drive one DUE delivery directly (no advance → no random plague quarantine,
+        // which would force-majeure-suspend the contract instead of breaching it).
+        s.tick = CONTRACT_DELIVER_DAYS;
+        let needs = vec![vec![0.0, 0.0], vec![0.0, 5.0]];
+        s.fulfill_contracts(&needs);
+        assert_eq!(s.contracts[0].delivered, 0.0, "a shipless house delivers nothing");
+        assert!(s.contracts[0].defaults >= 1, "a shipless house breaches the contract");
+    }
+
+    #[test]
+    fn network_sources_a_contract_from_a_distant_node() {
+        // Phase 5: a house with offices in several cities supplies a deficit office
+        // from the NEAREST network node that produces the good — not just its home.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", i32::MAX, 2, 20.0, 0.5, false),
+        ];
+        let h0 = hub(0, 10.0, 10.0, 5000.0, vec![100.0, 0.0], 0); // home, no silk
+        let h1 = hub(1, 16.0, 10.0, 5000.0, vec![100.0, 3000.0], 0); // office, makes silk
+        let h2 = hub(2, 22.0, 10.0, 5000.0, vec![100.0, 0.0], 0); // office, imports silk
+        let mut s = sim(vec![h0, h1, h2], goods);
+        let mut h = house_at(0, vec![1], 4); // specializes in silk, home = hub 0
+        h.offices = vec![1, 2];
+        h.wealth = 1000.0;
+        s.houses = vec![h];
+        let needs = vec![vec![0.0, 0.0], vec![0.0, 0.0], vec![0.0, 5.0]]; // hub 2 needs silk
+        let mut formed = false;
+        for t in 1..400u32 {
+            s.tick = t;
+            s.form_contracts(&needs);
+            if s.contracts.iter().any(|c| c.seller_house == 0 && c.buyer_hub == 2
+                && c.source_hub == 1 && c.good == 1) { formed = true; break; }
+        }
+        assert!(formed, "contract sourced from the silk-making node (1) to the importer office (2)");
+        // Signing leased the buyer office, so it can't auto-close under the contract.
+        assert!(s.office_leased(0, 2), "the contract leases the buyer office");
     }
 }

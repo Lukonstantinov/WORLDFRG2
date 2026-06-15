@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, CultureRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute } from "../types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, CultureRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane } from "../types";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "../goods";
 import { drawGoodIcon } from "./goodIcons";
 import { latLineY } from "./projection";
@@ -106,6 +106,9 @@ export class OverlayManager {
   private goodMeta: Map<string, { icon: string; color: string }> | null = null;
   private tradeTrunks: TradeTrunk[] = [];
   private merchantRoutes: MerchantRoute[] = [];
+  private futuresLanes: FuturesLane[] = [];
+  private selectedFuturesLane: FuturesLane | null = null;
+  private futuresFocus: { city?: string; holder?: string; good?: string } | null = null;
   private politicalCenters: PoliticalCenter[] = [];
   private houses: HouseBrief[] = [];
   private allHouses: HouseBrief[] = [];
@@ -129,7 +132,7 @@ export class OverlayManager {
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
-    houseControl: false, merchantRoutes: false,
+    houseControl: false, merchantRoutes: false, futures: false,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
   };
 
@@ -218,6 +221,31 @@ export class OverlayManager {
     let best: MerchantRoute | null = null;
     let bestD = thresh * thresh;
     for (const r of this.merchantRoutes) {
+      const ax = r.a[0] + 0.5, ay = r.a[1] + 0.5, bx = r.b[0] + 0.5, by = r.b[1] + 0.5;
+      if (this.worldW > 0 && Math.abs(ax - bx) > this.worldW / 2) continue;
+      const dx = bx - ax, dy = by - ay;
+      const len2 = dx * dx + dy * dy;
+      const t = len2 > 1e-6 ? Math.max(0, Math.min(1, ((wx - ax) * dx + (wy - ay) * dy) / len2)) : 0;
+      const px = ax + t * dx, py = ay + t * dy;
+      const d = (wx - px) * (wx - px) + (wy - py) * (wy - py);
+      if (d < bestD) { bestD = d; best = r; }
+    }
+    return best;
+  }
+
+  drawFutures(lanes: FuturesLane[], gridW: number, selected: FuturesLane | null,
+              focus: { city?: string; holder?: string; good?: string } | null) {
+    this.futuresLanes = lanes;
+    this.selectedFuturesLane = selected;
+    this.futuresFocus = focus;
+    if (gridW > 0) this.worldW = gridW;
+  }
+
+  /** Nearest futures lane to a world point, within `thresh` cells (click-to-inspect). */
+  pickFuturesLane(wx: number, wy: number, thresh: number): FuturesLane | null {
+    let best: FuturesLane | null = null;
+    let bestD = thresh * thresh;
+    for (const r of this.futuresLanes) {
       const ax = r.a[0] + 0.5, ay = r.a[1] + 0.5, bx = r.b[0] + 0.5, by = r.b[1] + 0.5;
       if (this.worldW > 0 && Math.abs(ax - bx) > this.worldW / 2) continue;
       const dx = bx - ax, dy = by - ay;
@@ -512,6 +540,11 @@ export class OverlayManager {
     // Merchant layer: live family/guild routes coloured by the owning house.
     if (this.visibility.merchantRoutes && this.merchantRoutes.length > 0) {
       this.renderMerchantRoutes(ctx);
+    }
+
+    // Futures layer: contractual supply lanes (source → buyer), dashed + directed.
+    if (this.visibility.futures && this.futuresLanes.length > 0) {
+      this.renderFutures(ctx);
     }
 
     // Political influence: translucent discs sized by trade power.
@@ -886,6 +919,94 @@ export class OverlayManager {
     ctx.setLineDash([]);
   }
 
+  /** The futures layer: each active contract as a DASHED, DIRECTED lane from the
+   *  producer/warehouse city (square) to the buyer city (ring). Colour & weight rise
+   *  with term (1yr faint → 7yr bold gold); a suspended (quarantined) lane greys out;
+   *  the selected lane glows. This is the contractual network, distinct from the
+   *  live spot voyages of the merchant layer. */
+  private renderFutures(ctx: CanvasRenderingContext2D) {
+    // Term → colour (gold gradient) and a base weight factor.
+    const termColor = (t: number): string =>
+      t >= 7 ? "#ffcf3f" : t >= 5 ? "#f0b54a" : t >= 3 ? "#d8a05a" : "#c8b486";
+    let maxQty = 0;
+    for (const r of this.futuresLanes) maxQty = Math.max(maxQty, r.qty);
+    if (maxQty <= 0) maxQty = 1;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    const dash = Math.max(2, 5 / Math.sqrt(this.currentScale));
+    const sel = this.selectedFuturesLane;
+    const focus = this.futuresFocus;
+    const matchesFocus = (r: FuturesLane): boolean => !focus
+      || ((!focus.city || r.a_name === focus.city || r.b_name === focus.city)
+        && (!focus.holder || r.holder === focus.holder)
+        && (!focus.good || r.good === focus.good));
+    for (const r of this.futuresLanes) {
+      const ax = r.a[0] + 0.5, ay = r.a[1] + 0.5, bx = r.b[0] + 0.5, by = r.b[1] + 0.5;
+      if (this.worldW > 0 && Math.abs(ax - bx) > this.worldW / 2) continue; // wrap seam
+      const isSel = sel != null && sel.a_name === r.a_name && sel.b_name === r.b_name
+        && sel.holder === r.holder && sel.good === r.good;
+      // A single selection isolates ONE road; otherwise a focus filter (city /
+      // warehouse / good) keeps the matching lanes and fades all the others.
+      const active = sel != null ? isSel : matchesFocus(r);
+      const norm = r.qty / maxQty;
+      const col = r.suspended ? "#7a8088" : termColor(r.term);
+      if (!active) {
+        // Faded context lane: thin, very translucent, no markers/arrow.
+        ctx.globalAlpha = 0.1;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = Math.max(0.4, 0.7 / Math.sqrt(this.currentScale));
+        ctx.setLineDash([dash, dash]);
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+        ctx.setLineDash([]);
+        continue;
+      }
+      ctx.globalAlpha = r.suspended ? 0.35 : (isSel ? 1.0 : 0.6 + 0.35 * norm);
+      // Selected lane gets a soft glow underlay.
+      if (isSel) {
+        ctx.strokeStyle = "#fff2b0";
+        ctx.globalAlpha = 0.35;
+        ctx.lineWidth = Math.max(2, (5 + r.term + norm * 6) / Math.sqrt(this.currentScale));
+        ctx.setLineDash([]);
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+        ctx.globalAlpha = 1.0;
+      }
+      ctx.strokeStyle = col;
+      ctx.lineWidth = Math.max(0.6, (0.8 + r.term * 0.4 + norm * 2.5) / Math.sqrt(this.currentScale));
+      ctx.setLineDash([dash, dash]);
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Direction arrowhead toward the buyer (b).
+      let dx = bx - ax, dy = by - ay;
+      const m = Math.hypot(dx, dy);
+      if (m > 0.001) {
+        dx /= m; dy /= m;
+        const hl = Math.max(2.5, (5 + r.term) / Math.sqrt(this.currentScale));
+        const px = -dy, py = dx;
+        const tipx = bx - dx * hl * 0.6, tipy = by - dy * hl * 0.6;
+        ctx.globalAlpha = r.suspended ? 0.5 : 0.95;
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(tipx + dx * hl, tipy + dy * hl);
+        ctx.lineTo(tipx + px * hl * 0.5, tipy + py * hl * 0.5);
+        ctx.lineTo(tipx - px * hl * 0.5, tipy - py * hl * 0.5);
+        ctx.closePath(); ctx.fill();
+      }
+
+      // Source end = filled SQUARE in the holder's colour (the producer/warehouse);
+      // buyer end = a RING (the receiving city).
+      const r0 = Math.max(0.9, 1.8 / Math.sqrt(this.currentScale));
+      ctx.globalAlpha = r.suspended ? 0.5 : 0.95;
+      ctx.fillStyle = r.color || "#cccccc";
+      ctx.fillRect(ax - r0, ay - r0, r0 * 2, r0 * 2);
+      ctx.strokeStyle = r.color || "#cccccc";
+      ctx.lineWidth = Math.max(0.5, 1.2 / Math.sqrt(this.currentScale));
+      ctx.beginPath(); ctx.arc(bx, by, r0 * 1.3, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
+  }
+
   private renderTradeTrunks(ctx: CanvasRenderingContext2D) {
     let maxVol = 0;
     for (const t of this.tradeTrunks) maxVol = Math.max(maxVol, t.volume);
@@ -1026,31 +1147,32 @@ export class OverlayManager {
       : [];
     const selColor = sel?.color || "#e8c84a";
 
-    // ── Sphere of business: a translucent convex hull around the relevant house(s)'
-    //    cities, partners and seat, tinted their colour (drawn first, under all). ──
-    const hullSrc = sel ? [{ color: selColor, pts: selPts }] : handled;
-    for (const h of hullSrc) {
-      const hull = convexHull(h.pts);
-      if (hull.length < 3) continue;
-      let spansSeam = false;
-      for (let i = 0; i < hull.length && !spansSeam; i++) {
-        const a = hull[i], b = hull[(i + 1) % hull.length];
-        if (worldW && Math.abs(a[0] - b[0]) > worldW * 0.5) spansSeam = true;
-      }
-      if (spansSeam) continue; // skip seam-spanning hulls (rare; avoids wrap artifacts)
-      ctx.beginPath();
-      ctx.moveTo(hull[0][0] + 0.5, hull[0][1] + 0.5);
-      for (let i = 1; i < hull.length; i++) ctx.lineTo(hull[i][0] + 0.5, hull[i][1] + 0.5);
-      ctx.closePath();
-      ctx.fillStyle = h.color;
-      ctx.globalAlpha = sel ? 0.16 : 0.10;
-      ctx.fill();
-      ctx.globalAlpha = sel ? 0.6 : 0.34;
-      ctx.lineWidth = Math.max(0.7, (sel ? 1.6 : 1.2) * inv);
-      ctx.strokeStyle = h.color;
-      ctx.stroke();
+    // ── Sphere of business: a SOFT influence cloud — a translucent radial disc
+    //    around every city the house holds (its seat largest), tinted its colour.
+    //    Overlapping discs blend into an organic presence blob, far more natural
+    //    than the old hard convex-hull polygon spanning distant cities. ──
+    const rgba = (hex: string, a: number) => {
+      const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || "");
+      return m ? `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},${a})` : `rgba(200,180,80,${a})`;
+    };
+    const disc = (x: number, y: number, r: number, color: string, a: number) => {
+      const grd = ctx.createRadialGradient(x + 0.5, y + 0.5, r * 0.2, x + 0.5, y + 0.5, r);
+      grd.addColorStop(0, rgba(color, a));
+      grd.addColorStop(1, rgba(color, 0));
+      ctx.fillStyle = grd;
+      ctx.beginPath(); ctx.arc(x + 0.5, y + 0.5, r, 0, Math.PI * 2); ctx.fill();
+    };
+    const cloudSrc = sel
+      ? [{ color: selColor, pts: selPts, seat: sel.seat ?? null }]
+      : handled.map((h) => ({ color: h.color, pts: h.pts, seat: null as [number, number] | null }));
+    const baseR = (this.worldW > 1 ? this.worldW : 360) * 0.045; // ~natural town hinterland
+    for (const h of cloudSrc) {
+      const a = sel ? 0.16 : 0.08;
+      for (const p of h.pts) disc(p[0], p[1], baseR, h.color, a);
+      if (h.seat) disc(h.seat[0], h.seat[1], baseR * 1.5, h.color, a * 1.2); // seat = strongest
     }
     ctx.globalAlpha = 1;
+    void convexHull;
 
     // ── Trade routes (drawn first, under the dots) ──
     const drawPath = (pts: [number, number][], stroke: string, width: number, alpha: number) => {
@@ -1110,6 +1232,23 @@ export class OverlayManager {
         ctx.lineWidth = Math.max(0.4, 0.9 * inv);
         ctx.strokeStyle = "rgba(8,16,28,0.9)";
         ctx.stroke();
+      }
+    }
+
+    // ── Focused house: a glowing RED network web from the seat to every city it
+    //    works, so its whole trade network reads at a glance (drawn UNDER the pins). ──
+    if (sel && sel.seat) {
+      const sx = sel.seat[0] + 0.5, sy = sel.seat[1] + 0.5;
+      for (const p of selPts) {
+        const px = p[0] + 0.5, py = p[1] + 0.5;
+        if (this.worldW > 0 && Math.abs(px - sx) > this.worldW / 2) continue; // wrap seam
+        if (px === sx && py === sy) continue;
+        ctx.strokeStyle = "rgba(255,60,60,0.22)"; // glow underlay
+        ctx.lineWidth = Math.max(1.5, 4.0 * inv);
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(px, py); ctx.stroke();
+        ctx.strokeStyle = "rgba(255,95,95,0.9)"; // bright core
+        ctx.lineWidth = Math.max(0.6, 1.4 * inv);
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(px, py); ctx.stroke();
       }
     }
 

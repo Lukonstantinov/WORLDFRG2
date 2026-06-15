@@ -3,13 +3,14 @@ import { useUIStore } from "../state/uiStore";
 import { useWorldStore } from "../state/worldStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
-import { campaignGetHub } from "../bridge/tauri";
-import type { EconHub, HubCurrency, HubDetail } from "../types";
+import { campaignGetHub, campaignWarehouses, campaignFuturesLanes } from "../bridge/tauri";
+import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane } from "../types";
 import { climatePhrase } from "./climate";
 import { CoatOfArms, houseColor } from "./CoatOfArms";
 import type { HouseBrief } from "../types";
+import { SettlementScene } from "./SettlementScene";
 
-type Tab = "summary" | "trade" | "estates" | "people";
+type Tab = "summary" | "city" | "trade" | "estates" | "depots" | "people";
 
 const LOCAL_COLOR = "#5d6675";  // unaffiliated local merchants (grey)
 const GUILD_COLOR = "#4a6a8a";  // organised merchant guilds (slate blue)
@@ -95,9 +96,22 @@ export function HubPanel() {
 
   const [tab, setTab] = useState<Tab>("summary");
   const [detail, setDetail] = useState<HubDetail | null>(null);
+  const [depots, setDepots] = useState<WarehouseInfo[]>([]);
+  const [lanes, setLanes] = useState<FuturesLane[]>([]);
+  const setFuturesFocus = useUIStore((s) => s.setFuturesFocus);
+  const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
 
   // Reset to the Overview tab whenever a different hub is opened.
   useEffect(() => { setTab("summary"); }, [selectedHub]);
+
+  // Warehouses sited in this city + the futures lanes touching it (for the Depots tab).
+  useEffect(() => {
+    if (tab !== "depots" || !campActive) return;
+    let alive = true;
+    campaignWarehouses().then((w) => { if (alive) setDepots(w); }).catch(() => {});
+    campaignFuturesLanes().then((l) => { if (alive) setLanes(l); }).catch(() => {});
+    return () => { alive = false; };
+  }, [tab, campActive, campTick]);
 
   // Pull live per-hub detail (sentiment/market/history) while a campaign runs,
   // refreshed every time the campaign tick changes.
@@ -170,8 +184,10 @@ export function HubPanel() {
 
   const TABS: { id: Tab; label: string }[] = [
     { id: "summary", label: "Summary" },
+    ...(detail ? [{ id: "city" as Tab, label: detail.is_estate ? "Estate" : "City" }] : []),
     { id: "trade", label: "Trade" },
     { id: "estates", label: "Estates" },
+    ...(campActive ? [{ id: "depots" as Tab, label: "Depots" }] : []),
     { id: "people", label: "People" },
   ];
 
@@ -209,6 +225,16 @@ export function HubPanel() {
           </div>
         ))}
       </div>
+
+      {/* ════════════ CITY / ESTATE SCHEMATIC ════════════ */}
+      {tab === "city" && detail && (
+        <SettlementScene detail={detail} />
+      )}
+      {tab === "city" && !detail && (
+        <div style={{ color: "#7a8aa0", fontSize: 11, padding: "8px 2px" }}>
+          The building schematic appears once a campaign is running.
+        </div>
+      )}
 
       {/* ════════════ OVERVIEW ════════════ */}
       {tab === "summary" && (
@@ -308,25 +334,44 @@ export function HubPanel() {
                   <div style={{ textAlign: "center", color: "#9ab0c8", fontSize: 9, marginBottom: 3 }}>
                     💰 bought {fmt(detail.bought ?? 0)} · sold {fmt(detail.sold ?? 0)}
                   </div>
-                  <div style={{ display: "flex", fontSize: 8, color: "#56708e" }}>
-                    <span style={{ flex: 1 }}>good</span>
-                    <span style={{ minWidth: 34, textAlign: "right" }}>prod</span>
-                    <span style={{ minWidth: 30, textAlign: "right" }}>need</span>
-                    <span style={{ minWidth: 28, textAlign: "right" }}>price</span>
-                  </div>
-                  {[...detail.goods].filter((g) => g.production > 0.01 || g.stock > 0.01)
-                    .sort((a, b) => b.production - a.production).slice(0, 14).map((g) => {
-                    const xw = g.price / Math.max(1e-6, g.base_value);
-                    const pct = g.need > 1e-6 ? (g.production / g.need) * 100 : 999;
-                    return (
-                      <div key={g.good} style={{ display: "flex", gap: 3, fontSize: 9, alignItems: "baseline" }}>
-                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#c0d0e0" }}>{iconFor(g.name)} {labelFor(g.name)}</span>
-                        <span style={{ minWidth: 34, textAlign: "right", color: "#9ab0c8" }}>{g.production > 0.01 ? fmt(g.production) : "—"}</span>
-                        <span style={{ minWidth: 30, textAlign: "right", color: pct >= 100 ? "#7fd0a0" : "#e0b070" }}>{pct > 998 ? "exp" : Math.round(pct) + "%"}</span>
-                        <span style={{ minWidth: 28, textAlign: "right", fontWeight: 600, color: xw > 1.3 ? "#e08080" : xw < 0.77 ? "#7fd0a0" : "#c0d0e0" }}>{xw.toFixed(1)}×</span>
+                  {(() => {
+                    // Per-good import / export amounts reaching THIS market, summed
+                    // from the in-flight + recent shipments (whoever carried them).
+                    const sumBy = (rows?: typeof detail.arrivals) => {
+                      const m: Record<string, number> = {};
+                      for (const s of rows ?? []) m[s.good] = (m[s.good] ?? 0) + s.amount;
+                      return m;
+                    };
+                    const imp = sumBy([...(detail.arrivals ?? []), ...(detail.recent_arrivals ?? [])]);
+                    const exp = sumBy([...(detail.departures ?? []), ...(detail.recent_departures ?? [])]);
+                    const traded = new Set([...Object.keys(imp), ...Object.keys(exp)]);
+                    const rows = [...detail.goods]
+                      .filter((g) => g.production > 0.01 || g.stock > 0.01 || traded.has(g.name))
+                      .sort((a, b) => (b.production + (imp[b.name] ?? 0)) - (a.production + (imp[a.name] ?? 0)))
+                      .slice(0, 16);
+                    return (<>
+                      <div style={{ display: "flex", gap: 3, fontSize: 8, color: "#56708e" }}>
+                        <span style={{ flex: 1 }}>good</span>
+                        <span style={{ minWidth: 30, textAlign: "right" }}>made</span>
+                        <span style={{ minWidth: 26, textAlign: "right", color: "#7fd0a0" }}>in</span>
+                        <span style={{ minWidth: 26, textAlign: "right", color: "#e0a080" }}>out</span>
+                        <span style={{ minWidth: 26, textAlign: "right" }}>×</span>
                       </div>
-                    );
-                  })}
+                      {rows.map((g) => {
+                        const xw = g.price / Math.max(1e-6, g.base_value);
+                        const gi = imp[g.name] ?? 0, go = exp[g.name] ?? 0;
+                        return (
+                          <div key={g.good} style={{ display: "flex", gap: 3, fontSize: 9, alignItems: "baseline" }}>
+                            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#c0d0e0" }}>{iconFor(g.name)} {labelFor(g.name)}</span>
+                            <span style={{ minWidth: 30, textAlign: "right", color: "#9ab0c8" }}>{g.production > 0.01 ? fmt(g.production) : "—"}</span>
+                            <span style={{ minWidth: 26, textAlign: "right", color: "#7fd0a0" }}>{gi > 0.01 ? fmt(gi) : "·"}</span>
+                            <span style={{ minWidth: 26, textAlign: "right", color: "#e0a080" }}>{go > 0.01 ? fmt(go) : "·"}</span>
+                            <span style={{ minWidth: 26, textAlign: "right", fontWeight: 600, color: xw > 1.3 ? "#e08080" : xw < 0.77 ? "#7fd0a0" : "#c0d0e0" }}>{xw.toFixed(1)}×</span>
+                          </div>
+                        );
+                      })}
+                    </>);
+                  })()}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ ...sectionHdr, textAlign: "right" }}>Departures ⇢</div>
@@ -495,6 +540,57 @@ export function HubPanel() {
           )}
         </>
       )}
+
+      {/* ════════════ DEPOTS (warehouses sited here + futures links) ════════════ */}
+      {tab === "depots" && (() => {
+        const here = depots.filter((w) => w.city === hub.name || w.city.includes(`(by ${hub.name})`));
+        const inbound = lanes.filter((l) => l.b_name === hub.name);
+        const outbound = lanes.filter((l) => l.a_name === hub.name);
+        const cityList = (ls: FuturesLane[], pick: (l: FuturesLane) => string) =>
+          Array.from(new Set(ls.map(pick))).slice(0, 8).join(", ") || "—";
+        const fmt = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
+        const focusCity = () => { setFuturesFocus({ city: hub.name }); setOverlayVisible("futures", true); };
+        return (
+          <>
+            <div style={sectionHdr}>Warehouses & estates here ({here.length})</div>
+            {here.length === 0 && <div style={{ color: "#506080", fontSize: 11, padding: "4px 2px" }}>No house depots in this city yet.</div>}
+            {here.map((w, i) => {
+              const fill = w.capacity > 0 ? Math.min(1, w.used / w.capacity) : 0;
+              return (
+                <div key={i} style={{ padding: "3px 2px", borderBottom: "1px solid #131e2a" }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 2, background: w.color, alignSelf: "center" }} />
+                    <span style={{ color: "#e8d8b0", fontSize: 11, fontWeight: 600 }}>{w.owner}</span>
+                    {w.is_guild && <span style={{ fontSize: 8, color: "#7fd0c0" }}>GUILD</span>}
+                    <span style={{ flex: 1 }} />
+                    {w.contracts > 0 && <span style={{ color: "#ffcf3f", fontSize: 9 }}>📜 {w.contracts}</span>}
+                    <span style={{ color: "#6a86a6", fontSize: 9 }}>{w.kind === "warehouse" ? `T${w.tier}` : w.kind}</span>
+                  </div>
+                  {w.capacity > 0 && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                      <div style={{ flex: 1, height: 4, background: "#0a1018", borderRadius: 3, overflow: "hidden" }}>
+                        <div style={{ width: `${fill * 100}%`, height: "100%", background: fill > 0.85 ? "#e0a020" : "#5a9bd0" }} />
+                      </div>
+                      <span style={{ color: "#7a90a8", fontSize: 9 }}>{fmt(w.used)}/{fmt(w.capacity)}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <div style={{ ...sectionHdr, marginTop: 8 }}>Futures supply links</div>
+            <div style={{ fontSize: 10, color: "#9ab0c8", padding: "2px 2px" }}>
+              <span style={{ color: "#7fd0a0" }}>Imports ←</span> {cityList(inbound, (l) => l.a_name)}
+            </div>
+            <div style={{ fontSize: 10, color: "#9ab0c8", padding: "2px 2px" }}>
+              <span style={{ color: "#e0a060" }}>Exports →</span> {cityList(outbound, (l) => l.b_name)}
+            </div>
+            <div onClick={focusCity} style={{ marginTop: 6, cursor: "pointer", color: "#ffcf3f", fontSize: 10 }}
+              title="Highlight this city's futures network on the map">
+              📜 Show this city's futures network on the map
+            </div>
+          </>
+        );
+      })()}
 
       {/* ════════════ PEOPLE (society + history) ════════════ */}
       {tab === "people" && (

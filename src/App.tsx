@@ -7,6 +7,9 @@ import { InfoPanel } from "./ui/InfoPanel";
 import { TradeMatrixPanel } from "./ui/TradeMatrixPanel";
 import { HubPanel } from "./ui/HubPanel";
 import { MerchantRoutePanel } from "./ui/MerchantRoutePanel";
+import { FuturesLanePanel } from "./ui/FuturesLanePanel";
+import { FuturesPanel } from "./ui/FuturesPanel";
+import { WarehousesPanel } from "./ui/WarehousesPanel";
 import { CityRankingPanel } from "./ui/CityRankingPanel";
 import { GoodFlowPanel } from "./ui/GoodFlowPanel";
 import { GoodsBrowserPanel } from "./ui/GoodsBrowserPanel";
@@ -516,6 +519,9 @@ export default function App() {
           <HousesPanel />
           <CityRankingPanel />
           <MerchantRoutePanel />
+          <FuturesLanePanel />
+          <FuturesPanel />
+          <WarehousesPanel />
           <TradeMatrixPanel />
           <ElevationLegend />
           <ElevationHistogram />

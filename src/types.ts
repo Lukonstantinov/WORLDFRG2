@@ -332,6 +332,37 @@ export interface MerchantRoute {
   out_goods: [string, number][]; // goods a→b
   ret_goods: [string, number][]; // goods b→a
 }
+/** One active futures contract as a directional supply lane (source → buyer). */
+export interface FuturesLane {
+  a: [number, number];   // source (producer/warehouse) city
+  b: [number, number];   // buyer (receiver) city
+  a_name: string;
+  b_name: string;
+  holder: string;        // seller house / guild
+  color: string;
+  is_guild: boolean;
+  good: string;
+  qty: number;           // monthly delivered quantity
+  term: number;          // 1 / 3 / 5 / 7 years
+  end_year: number;      // campaign year the contract expires
+  suspended: boolean;    // force-majeure (plague lockup) right now
+}
+/** One house/guild asset for the Warehouses & Estates infographic. */
+export interface WarehouseInfo {
+  kind: string; // "warehouse" or estate kind (farm/mine/manufactory/…)
+  owner: string;
+  color: string;
+  is_guild: boolean;
+  city: string;
+  x: number;
+  y: number;
+  tier: number;
+  capacity: number;
+  used: number;
+  goods: [string, number][]; // (good, stock), largest first
+  contracts: number;         // futures contracts this depot supplies
+  damage: number;
+}
 /** A foreign merchant's office hosted in a settlement (host-side view). */
 export interface OfficeHere {
   holder: string;          // house / guild name

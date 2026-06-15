@@ -559,6 +559,15 @@ const SEA_BLOCK_COST: f32 = 1.0e6;
 /// wired into one trade network whenever a reasonable crossing exists (the user
 /// wants sea paths preferred and routes connected where possible). Was 3.5.
 const OPEN_SEA_COST: f32 = 2.2;
+/// Seawater freezes near −2 °C; a sea cell at or below this carries pack/sea ice
+/// for much of the year and is impassable to ships (no route crosses it).
+const SEA_FREEZE_C: f32 = -2.0;
+/// Land this cold (deep ice-sheet / EF ice-cap interior) is near-impassable to
+/// caravans — crossed only if there is no alternative at all.
+const ICE_LAND_C: f32 = -8.0;
+/// Near-blocking cost for ice-sheet land (huge, but below `SEA_BLOCK_COST` so a
+/// route with literally no other option can still thread it).
+const ICE_LAND_COST: f32 = 5.0e4;
 
 // ── Physical travel scale ───────────────────────────────────────────────────
 // The sim treats the map width as one Earth circumference (mirrors
@@ -631,6 +640,9 @@ fn build_coarse_cost(
     let mut is_land = vec![false; cn];
     let mut elev = vec![0.0f32; cn];
     let mut koppen = vec![0u8; cn];
+    // Surface temperature per coarse cell — used to freeze impassable sea ice and
+    // near-block ice-sheet land so routes can't cross frozen ocean / ice caps.
+    let mut temp = vec![0.0f32; cn];
     // Maritime-hazard exposure per coarse cell (annual storm peak + reef wreck
     // risk), used to make stormy/reef-fouled sea more expensive to cross.
     let mut sea_hazard = vec![0.0f32; cn];
@@ -644,6 +656,7 @@ fn build_coarse_cost(
         let mut f_elev = vec![0.0f32; fn_cells];
         let mut f_koppen = vec![0u8; fn_cells];
         let mut f_hazard = vec![0.0f32; fn_cells];
+        let mut f_temp = vec![0.0f32; fn_cells];
         for ty in 0..tiles_y as i32 {
             for tx in 0..tiles_x as i32 {
                 let tile = world.tile(tx, ty);
@@ -659,6 +672,7 @@ fn build_coarse_cost(
                         f_elev[gi] = tile.elevation[ti];
                         f_koppen[gi] = tile.koppen[ti];
                         f_hazard[gi] = (tile.storm_base[ti].max(tile.reef_risk[ti])) as f32 / 255.0;
+                        f_temp[gi] = tile.temperature[ti];
                     }
                 }
             }
@@ -673,6 +687,7 @@ fn build_coarse_cost(
                 elev[ci] = f_elev[gi];
                 koppen[ci] = f_koppen[gi];
                 sea_hazard[ci] = f_hazard[gi];
+                temp[ci] = f_temp[gi];
             }
         }
     }
@@ -719,7 +734,16 @@ fn build_coarse_cost(
                     _ => 0.0,
                 };
                 if is_river[ci] { c = c.min(1.2); }
+                // Ice-sheet land (EF ice cap or a deeply frozen interior) is
+                // near-impassable — caravans don't road across a glacier.
+                if koppen[ci] == 22 || temp[ci] <= ICE_LAND_C {
+                    c = c.max(ICE_LAND_COST);
+                }
                 c
+            } else if temp[ci] <= SEA_FREEZE_C {
+                // Frozen ocean (sea ice) — ships cannot cross, even in an
+                // otherwise-open sea. This also covers ice shelves over water.
+                SEA_BLOCK_COST
             } else if block_sea {
                 SEA_BLOCK_COST
             } else {
@@ -768,7 +792,8 @@ fn build_coarse_cost(
                     if ny < 0 || ny >= ch { return false; }
                     base[(ny * cw + wrap_cx(cx + dx)) as usize]
                 });
-                if coastal { cost[ci] = 0.5; }
+                // …but never re-open frozen coastal water (sea ice stays blocked).
+                if coastal && temp[ci] > SEA_FREEZE_C { cost[ci] = 0.5; }
             }
         }
     }

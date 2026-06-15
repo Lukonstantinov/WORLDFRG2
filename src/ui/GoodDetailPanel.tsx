@@ -35,7 +35,7 @@ export function GoodDetailPanel() {
   const spec = useMemo(() => specs.find((s) => s.id === id) ?? null, [specs, id]);
   const byId = useMemo(() => new Map(specs.map((s) => [s.id, s])), [specs]);
 
-  const [grid, setGrid] = useState<{ width: number; height: number; data: number[] } | null>(null);
+  const [grid, setGrid] = useState<{ width: number; height: number; data: number[]; land: number[] } | null>(null);
   const [err, setErr] = useState<string>("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -76,13 +76,30 @@ export function GoodDetailPanel() {
     if (!ctx) return;
     const img = ctx.createImageData(w, h);
     const [tr, tg, tb] = tintRgb;
+    const land = grid.land ?? [];
+    // A land cell that touches sea (or the map edge) is a coastline pixel — we
+    // brighten it so the world's landmass shape reads behind the heatmap.
+    const isLand = (x: number, y: number) =>
+      x >= 0 && x < w && y >= 0 && y < h ? land[y * w + x] === 1 : false;
     for (let i = 0; i < w * h; i++) {
       const v = Math.min(255, data[i]) / 255;
       const k = Math.pow(v, 0.7); // gamma so faint suitability still reads
       const o = i * 4;
-      img.data[o] = Math.round(11 + (tr - 11) * k);
-      img.data[o + 1] = Math.round(14 + (tg - 14) * k);
-      img.data[o + 2] = Math.round(19 + (tb - 19) * k);
+      let r = 11 + (tr - 11) * k;
+      let g = 14 + (tg - 14) * k;
+      let b = 19 + (tb - 19) * k;
+      const x = i % w, y = (i / w) | 0;
+      if (land[i] === 1) {
+        // Faint land fill so even zero-suitability land is distinguishable from sea.
+        r = Math.max(r, 26); g = Math.max(g, 31); b = Math.max(b, 38);
+        // Thin, DIM coastline (one pixel where land meets sea) — just enough to
+        // read the landmass without competing with the suitability heatmap.
+        const coast = !isLand(x - 1, y) || !isLand(x + 1, y) || !isLand(x, y - 1) || !isLand(x, y + 1);
+        if (coast && k < 0.25) { r = 70; g = 84; b = 98; }
+      }
+      img.data[o] = Math.round(r);
+      img.data[o + 1] = Math.round(g);
+      img.data[o + 2] = Math.round(b);
       img.data[o + 3] = 255;
     }
     ctx.putImageData(img, 0, 0);

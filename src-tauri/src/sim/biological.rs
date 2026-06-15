@@ -960,29 +960,29 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
                 * (0.4 + 0.6 * fert) * (1.0 - smoothstep(0.4, 0.7, elev))
         }
         GOOD_WINE => {
-            // Viticulture sits in a fairly narrow warm-temperate band (≈30–50°):
-            // Mediterranean cores, humid-subtropical (SE-US style) and the cooler
-            // oceanic margins (Bordeaux/Rhine = Cfb, but only the warm end). The old
-            // rule had a wide temperature bell and gave full oceanic weight, so a
-            // warm-current-warmed 55–60° coast still scored as wine country. Tightened
-            // the temperature bell, lowered the cool-oceanic weight, and added an
-            // explicit latitude band so wine stops creeping into the far north.
-            let clim = match k { CSA | CSB => 1.0, CFA => 0.55, CFB | DSA | DSB => 0.40, _ => 0.0 };
+            // Viticulture sits in a warm-temperate band (≈30–50°): Mediterranean
+            // cores, humid-subtropical and the warm oceanic margins. We score from
+            // Köppen WHERE it tags those zones, but also from the underlying
+            // CONDITIONS (warm-temperate, mid-latitude, sub-humid) so grapes still
+            // appear on a world whose Köppen classifier produced little explicit Cs.
+            let clim: f32 = match k { CSA | CSB => 1.0, CFA => 0.55, CFB | DSA | DSB => 0.40, _ => 0.0 };
+            let med_like = bell(t, 15.0, 6.5) * band(p, 300.0, 1000.0, 500.0) * band(abs_lat, 30.0, 50.0, 9.0);
+            let suit = clim.max(0.75 * med_like);
             let hill = 0.7 + 0.3 * band(elev, 0.05, 0.35, 0.2);
-            clim * bell(t, 15.0, 5.5) * band(p, 300.0, 950.0, 400.0)
-                * band(abs_lat, 28.0, 50.0, 7.0) * hill
+            suit * (1.0 - smoothstep(0.55, 0.8, elev)) * hill
         }
         GOOD_OLIVEOIL => {
-            // Olives are strictly Mediterranean (hot dry summers, mild winters,
-            // ≈30–45°). Humid-subtropical (Cfa) is too wet/humid for quality olives,
-            // so its weight is cut hard; added a latitude band and an upper-heat
-            // taper (olives drop off in true tropical heat). The old rule let olive
-            // oil sprawl into humid subtropics far outside the olive belt.
-            let clim = match k { CSA => 1.0, CSB => 0.85, CFA => 0.15, _ => 0.0 };
-            let warm = smoothstep(13.0, 18.0, t) * (1.0 - smoothstep(30.0, 38.0, t));
-            let low = 1.0 - smoothstep(0.35, 0.6, elev);
-            clim * warm * low * band(abs_lat, 30.0, 46.0, 8.0)
-                * (0.7 + 0.3 * if coastland { 1.0 } else { 0.0 })
+            // Olives = hot dry summers, mild winters, ≈30–45°. Peaks in Köppen
+            // Mediterranean; elsewhere fall back to the CONDITIONS (warm, dry-summer,
+            // mid-latitude, low elevation, coastal preference) so olive country
+            // still shows where the classifier didn't stamp an explicit Cs zone.
+            let clim: f32 = match k { CSA => 1.0, CSB => 0.85, CFA => 0.2, BSH | BSK => 0.3, _ => 0.0 };
+            // dry-summer warm-temperate signature
+            let med_like = smoothstep(15.0, 19.0, t) * (1.0 - smoothstep(30.0, 38.0, t))
+                * (1.0 - smoothstep(800.0, 1200.0, p)) * band(abs_lat, 30.0, 45.0, 8.0);
+            let suit = clim.max(0.8 * med_like);
+            let low = 1.0 - smoothstep(0.40, 0.65, elev);
+            suit * low * (0.75 + 0.25 * if coastland { 1.0 } else { 0.0 })
         }
         GOOD_SUGAR => {
             let clim = match k { AF | AM => 1.0, AW | AS => 0.6, CWA => 0.4, _ => 0.0 };

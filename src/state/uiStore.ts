@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { setProgress } from "../bridge/tauri";
-import type { MerchantRoute } from "../types";
+import type { MerchantRoute, FuturesLane } from "../types";
 
 /** Persist step completion: steps 1-6 travel with the world file, 7-10 with
  *  the campaign. Fire-and-forget — a failed write only loses the checkmarks. */
@@ -73,6 +73,16 @@ interface UIStore {
   selectedHub: number | null;
   /** Merchant layer: a clicked active route whose round-trip details are shown. */
   selectedMerchantRoute: MerchantRoute | null;
+  /** Futures layer: a clicked contract lane whose detail is shown. */
+  selectedFuturesLane: FuturesLane | null;
+  /** Futures contracts list panel open. */
+  showFutures: boolean;
+  /** Warehouses infographic panel open. */
+  showWarehouses: boolean;
+  /** Futures focus filter: when set, lanes matching (city at either end, and/or
+   *  holder, and/or good) stay bold on the map and all others fade — used by the
+   *  list panel's filter and by city/warehouse selection. */
+  futuresFocus: { city?: string; holder?: string; good?: string } | null;
   /** Highlighted supply-chain id (Phase 3): traced on the map, or null. */
   selectedChain: number | null;
   /** Per-good reach view: highlight which hubs a chosen good reaches, or null. */
@@ -108,6 +118,10 @@ interface UIStore {
   setInspectedCell: (cell: { wx: number; wy: number } | null) => void;
   setSelectedHub: (id: number | null) => void;
   setSelectedMerchantRoute: (r: MerchantRoute | null) => void;
+  setSelectedFuturesLane: (r: FuturesLane | null) => void;
+  setShowFutures: (open: boolean) => void;
+  setShowWarehouses: (open: boolean) => void;
+  setFuturesFocus: (f: { city?: string; holder?: string; good?: string } | null) => void;
   setSelectedChain: (id: number | null) => void;
   setWorkflowStep: (step: WorkflowStep) => void;
   markStepCompleted: (step: number) => void;
@@ -173,7 +187,7 @@ export const useUIStore = create<UIStore>((set) => ({
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
-    houseControl: false, merchantRoutes: false,
+    houseControl: false, merchantRoutes: false, futures: false,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
     ...Object.fromEntries(GOOD_DEFS.map((g) => [goodOverlayKey(g.name), false])),
   },
@@ -186,6 +200,10 @@ export const useUIStore = create<UIStore>((set) => ({
   showTradeMatrix: false,
   selectedHub: null,
   selectedMerchantRoute: null,
+  selectedFuturesLane: null,
+  showFutures: false,
+  showWarehouses: false,
+  futuresFocus: null,
   selectedChain: null,
   reachGood: null,
   selectedGood: null,
@@ -208,6 +226,10 @@ export const useUIStore = create<UIStore>((set) => ({
   setInspectedCell: (cell) => set({ inspectedCell: cell }),
   setSelectedHub: (id) => set({ selectedHub: id, selectedChain: null, selectedExport: null }),
   setSelectedMerchantRoute: (r) => set({ selectedMerchantRoute: r }),
+  setSelectedFuturesLane: (r) => set({ selectedFuturesLane: r }),
+  setShowFutures: (open) => set({ showFutures: open }),
+  setShowWarehouses: (open) => set({ showWarehouses: open }),
+  setFuturesFocus: (f) => set({ futuresFocus: f }),
   setSelectedChain: (id) => set({ selectedChain: id }),
   setSimRunning: (running) => set({ simRunning: running }),
   setLayerOpacity: (opacity) => set({ layerOpacity: opacity }),

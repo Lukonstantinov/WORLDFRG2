@@ -55,6 +55,9 @@ pub struct PreviewGrid {
     pub width: u32,
     pub height: u32,
     pub data: Vec<u8>, // row-major 0..255 scores
+    /// Row-major land mask (1 = land, 0 = sea) at the same resolution, so the
+    /// preview can draw the world's coastline outline behind the heatmap.
+    pub land: Vec<u8>,
 }
 
 /// Score where a (possibly unsaved) good spec would place across the current
@@ -63,9 +66,21 @@ pub struct PreviewGrid {
 pub fn preview_good_score(spec: GoodSpec, db: State<'_, WorldDb>) -> Result<PreviewGrid, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let buf = crate::sim::world_buffer::WorldBuffer::load(&conn)?;
-    let (pw, ph) = (140u32, 70u32);
+    let (pw, ph) = (220u32, 110u32);
     let data = crate::sim::biological::preview_score_grid(&buf, &spec, pw, ph);
-    Ok(PreviewGrid { width: pw, height: ph, data })
+    // Coarse land mask at the same resolution (same nearest-sample mapping as
+    // preview_score_grid) so the UI can outline the landmass behind the heatmap.
+    let mut land = vec![0u8; (pw * ph) as usize];
+    if buf.width > 0 && buf.height > 0 {
+        for py in 0..ph {
+            for px in 0..pw {
+                let x = (px * buf.width / pw).min(buf.width - 1);
+                let y = (py * buf.height / ph).min(buf.height - 1);
+                land[(py * pw + px) as usize] = if buf.terrain[buf.idx(x, y)] == 1 { 1 } else { 0 };
+            }
+        }
+    }
+    Ok(PreviewGrid { width: pw, height: ph, data, land })
 }
 
 fn library_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
