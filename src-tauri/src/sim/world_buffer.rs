@@ -744,6 +744,41 @@ mod tests {
         run_full_pipeline(&conn);
     }
 
+    /// Manual benchmark for the parallelized per-cell passes. Run explicitly:
+    ///   `cargo test --release --lib bench_parallel_passes -- --ignored --nocapture`
+    /// then re-run with `RAYON_NUM_THREADS=1` to compare serial vs all-cores.
+    #[test]
+    #[ignore]
+    fn bench_parallel_passes() {
+        use std::time::Instant;
+        let (w, h) = (2048u32, 1024u32);
+        let conn = test_world(w, h);
+        run_full_pipeline(&conn); // populate every column once
+        let mut buf = WorldBuffer::load(&conn).unwrap();
+        let rivers: Vec<crate::sim::rivers::River> = Vec::new();
+        let goods = crate::sim::goods_spec::default_list();
+        let threads = rayon::current_num_threads();
+
+        macro_rules! timeit {
+            ($name:expr, $runs:expr, $body:block) => {{
+                $body // warm
+                let mut best = f64::INFINITY;
+                for _ in 0..$runs {
+                    let t = Instant::now();
+                    $body
+                    best = best.min(t.elapsed().as_secs_f64() * 1000.0);
+                }
+                println!("[bench threads={} {}x{}] {}: {:.1}ms", threads, w, h, $name, best);
+            }};
+        }
+
+        timeit!("temperature", 3, { crate::sim::temperature::compute_temperature(&mut buf); });
+        timeit!("koppen", 3, { crate::sim::koppen::classify_koppen(&mut buf); });
+        timeit!("soil", 3, { crate::sim::soil::classify_soil(&mut buf); });
+        timeit!("fertility", 3, { crate::sim::fertility::compute_fertility(&mut buf, &rivers); });
+        timeit!("trade_goods", 2, { crate::sim::biological::compute_trade_goods(&mut buf, &rivers, 7, 2, 0.5, &goods); });
+    }
+
     /// `save_no_undo` must write identical tile data to `save` on a full buffer,
     /// but must NOT push an undo entry (so the run-all that uses it leaves the
     /// undo journal empty — there is nothing to undo a whole regeneration to).
