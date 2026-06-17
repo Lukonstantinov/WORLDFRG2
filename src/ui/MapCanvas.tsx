@@ -81,6 +81,7 @@ export function MapCanvas() {
   const setSelectedFuturesLane = useUIStore((s) => s.setSelectedFuturesLane);
   const selectedFuturesLane = useUIStore((s) => s.selectedFuturesLane);
   const futuresFocus = useUIStore((s) => s.futuresFocus);
+  const flowHighlight = useUIStore((s) => s.flowHighlight);
   const futuresLanesRef = useRef<FuturesLane[]>([]);
   const selectedChain = useUIStore((s) => s.selectedChain);
   const selectedHub = useUIStore((s) => s.selectedHub);
@@ -530,6 +531,15 @@ export function MapCanvas() {
       requestRender();
     }).catch(() => {});
   }, [overlayVisibility.merchantRoutes, campaignSnapshot?.active, campaignSnapshot?.clock.tick, meta, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Trade ▸ Flows highlight — glowing arrows from a settlement to its partners,
+  // set by the Flows subtab (purely frontend, redraws when the selection changes).
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !meta) return;
+    om.setFlowHighlight(flowHighlight, meta.grid_width);
+    requestRender();
+  }, [flowHighlight, meta, requestRender]);
 
   // Futures layer — contractual supply lanes from the running campaign.
   useEffect(() => {

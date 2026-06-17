@@ -9,6 +9,7 @@ import { climatePhrase } from "./climate";
 import { CoatOfArms, houseColor } from "./CoatOfArms";
 import type { HouseBrief } from "../types";
 import { SettlementScene } from "./SettlementScene";
+import { FlowsView } from "./FlowsView";
 
 type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "depots" | "people";
 
@@ -95,14 +96,21 @@ export function HubPanel() {
   const campTick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
 
   const [tab, setTab] = useState<Tab>("summary");
+  const [tradeView, setTradeView] = useState<"market" | "flows">("market");
   const [detail, setDetail] = useState<HubDetail | null>(null);
   const [depots, setDepots] = useState<WarehouseInfo[]>([]);
   const [lanes, setLanes] = useState<FuturesLane[]>([]);
   const setFuturesFocus = useUIStore((s) => s.setFuturesFocus);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
+  const setFlowHighlight = useUIStore((s) => s.setFlowHighlight);
 
   // Reset to the Overview tab whenever a different hub is opened.
-  useEffect(() => { setTab("summary"); }, [selectedHub]);
+  useEffect(() => { setTab("summary"); setTradeView("market"); }, [selectedHub]);
+  // Clear any map flow-highlight when leaving the Flows view (or the panel).
+  useEffect(() => {
+    if (!(tab === "trade" && tradeView === "flows")) setFlowHighlight([]);
+    return () => setFlowHighlight([]);
+  }, [tab, tradeView, selectedHub, setFlowHighlight]);
 
   // Warehouses sited in this city + the futures lanes touching it (for the Depots tab).
   useEffect(() => {
@@ -393,6 +401,21 @@ export function HubPanel() {
       {/* ════════════ TRADE (market flow) ════════════ */}
       {tab === "trade" && (
         <>
+          {/* Sub-toggle: live Market view vs realized-trade Flows view */}
+          <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
+            {(["market", "flows"] as const).map((v) => (
+              <div key={v} onClick={() => setTradeView(v)} style={{
+                padding: "2px 10px", cursor: "pointer", fontSize: 10, borderRadius: 4,
+                background: tradeView === v ? "#21344a" : "#16202c",
+                color: tradeView === v ? "#cfe2f6" : "#6a86a6",
+                border: tradeView === v ? "1px solid #3a80c0" : "1px solid #1e2e42",
+              }}>{v === "market" ? "Market" : "Flows"}</div>
+            ))}
+          </div>
+          {tradeView === "flows" && (
+            <FlowsView hubId={hub.id} active={campActive} tick={campTick} setFlowHighlight={setFlowHighlight} />
+          )}
+          {tradeView === "market" && (<>
           {/* Live market FLOW: arrivals ⇢ market ⇢ departures (campaign only) */}
           {detail ? (
             <>
@@ -573,6 +596,7 @@ export function HubPanel() {
               </div>
             </div>
           )}
+          </>)}
         </>
       )}
 

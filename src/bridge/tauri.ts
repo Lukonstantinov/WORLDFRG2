@@ -504,7 +504,7 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 }
 
 // ── DLC 1 "Living Trade" tick simulation ──
-import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief } from "../types";
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows } from "../types";
 
 /** Seed a fresh living-trade sim from the static economy snapshot (step 10). */
 export async function campaignStartSim(seed: number): Promise<CampaignSnapshot> {
@@ -556,6 +556,12 @@ export async function campaignGetSpeculation(): Promise<SpecCenter[]> {
 /** DLC 3 · the poleis as actors (treasury / tariff / mint / council). */
 export async function campaignGetPoleis(): Promise<PolisBrief[]> {
   return invoke("campaign_get_poleis");
+}
+
+/** Realized trade flows at a settlement (per-good volumes + history, routes,
+ *  top partner cities) for the Trade ▸ Flows subtab. Null if no campaign. */
+export async function campaignTradeFlows(id: number): Promise<TradeFlows | null> {
+  return invoke("campaign_trade_flows", { id });
 }
 
 /** A house/guild's yearly T-account ledger (Accountant view). */

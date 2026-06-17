@@ -83,6 +83,9 @@ interface UIStore {
    *  holder, and/or good) stay bold on the map and all others fade — used by the
    *  list panel's filter and by city/warehouse selection. */
   futuresFocus: { city?: string; holder?: string; good?: string } | null;
+  /** Trade ▸ Flows highlight: glowing arrows from a settlement to its partners on
+   *  the map (set by the Flows subtab; [] clears it). dir 0 = inbound, 1 = outbound. */
+  flowHighlight: { ax: number; ay: number; bx: number; by: number; dir: number; w: number }[];
   /** Highlighted supply-chain id (Phase 3): traced on the map, or null. */
   selectedChain: number | null;
   /** Per-good reach view: highlight which hubs a chosen good reaches, or null. */
@@ -121,6 +124,7 @@ interface UIStore {
   setSelectedHub: (id: number | null) => void;
   setSelectedMerchantRoute: (r: MerchantRoute | null) => void;
   setSelectedFuturesLane: (r: FuturesLane | null) => void;
+  setFlowHighlight: (segs: { ax: number; ay: number; bx: number; by: number; dir: number; w: number }[]) => void;
   setShowFutures: (open: boolean) => void;
   setShowWarehouses: (open: boolean) => void;
   setFuturesFocus: (f: { city?: string; holder?: string; good?: string } | null) => void;
@@ -208,6 +212,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showFutures: false,
   showWarehouses: false,
   futuresFocus: null,
+  flowHighlight: [],
   selectedChain: null,
   reachGood: null,
   selectedGood: null,
@@ -232,6 +237,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setSelectedHub: (id) => set({ selectedHub: id, selectedChain: null, selectedExport: null }),
   setSelectedMerchantRoute: (r) => set({ selectedMerchantRoute: r }),
   setSelectedFuturesLane: (r) => set({ selectedFuturesLane: r }),
+  setFlowHighlight: (segs) => set({ flowHighlight: segs }),
   setShowFutures: (open) => set({ showFutures: open }),
   setShowWarehouses: (open) => set({ showWarehouses: open }),
   setFuturesFocus: (f) => set({ futuresFocus: f }),

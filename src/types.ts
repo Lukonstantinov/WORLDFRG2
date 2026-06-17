@@ -321,6 +321,48 @@ export interface Government {
   spec_drivers: string[];
   spec_watch: string[];
 }
+/** Trade Flows subtab — one traded good at a settlement (avg + last-year volume,
+ *  route count, and a yearly volume series for the trend graph). */
+export interface TradeFlowGood {
+  good: number;
+  name: string;
+  avg_volume: number;
+  last_volume: number;
+  in_volume: number;
+  out_volume: number;
+  route_count: number;
+  history: number[];
+}
+/** One good's flow along one partner route (per-good route list + map highlight). */
+export interface TradeRouteFlow {
+  good: number;
+  partner: number;
+  partner_name: string;
+  px: number;
+  py: number;
+  dir: number;   // 0 inbound, 1 outbound
+  amount: number;
+  pct: number;
+}
+/** A top partner city: share of all this city's trade + goods exchanged. */
+export interface TradePartner {
+  hub: number;
+  name: string;
+  px: number;
+  py: number;
+  volume: number;
+  pct: number;
+  goods: string[];
+}
+/** The settlement Trade-Flows payload. */
+export interface TradeFlows {
+  hub: number;
+  hub_x: number;
+  hub_y: number;
+  goods: TradeFlowGood[];
+  routes: TradeRouteFlow[];
+  partners: TradePartner[];
+}
 /** One estate / manufactory in a settlement's hinterland. */
 export interface EstateRow {
   name: string;

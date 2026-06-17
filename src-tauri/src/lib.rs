@@ -92,6 +92,7 @@ pub fn run() {
             campaign_commands::campaign_get_houses,
             campaign_commands::campaign_get_speculation,
             campaign_commands::campaign_get_poleis,
+            campaign_commands::campaign_trade_flows,
             campaign_commands::campaign_house_ledger,
             campaign_commands::campaign_get_house_history,
             campaign_commands::campaign_merchant_routes,

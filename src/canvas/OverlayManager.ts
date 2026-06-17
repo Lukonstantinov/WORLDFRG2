@@ -370,6 +370,15 @@ export class OverlayManager {
     if (gridW > 0) this.worldW = gridW;
   }
 
+  /** Transient highlight of one settlement's trade flows (Trade ▸ Flows subtab):
+   *  glowing arrows between the city and its partners. dir 0 = inbound (arrow → city),
+   *  1 = outbound (arrow → partner). Drawn whenever set; cleared with []. */
+  flowHighlight: { ax: number; ay: number; bx: number; by: number; dir: number; w: number }[] = [];
+  setFlowHighlight(segs: { ax: number; ay: number; bx: number; by: number; dir: number; w: number }[], gridW: number) {
+    this.flowHighlight = segs;
+    if (gridW > 0) this.worldW = gridW;
+  }
+
   /** Nearest active merchant route to a world point, within `thresh` cells (for
    *  click-to-inspect). Returns null if none close. */
   pickMerchantRoute(wx: number, wy: number, thresh: number): MerchantRoute | null {
@@ -739,6 +748,11 @@ export class OverlayManager {
       this.renderHouseControlLayer(ctx);
     }
 
+    // Trade ▸ Flows highlight (always on top when set by the settlement panel).
+    if (this.flowHighlight.length > 0) {
+      this.renderFlowHighlight(ctx);
+    }
+
     // Directional trade corridors: one net-direction arrow per hub→hub corridor
     // (so direction only flips at hubs), width ∝ total value carried.
     if (this.visibility.tradeCorridors && this.corridors.length > 0) {
@@ -1072,6 +1086,41 @@ export class OverlayManager {
   /** The live merchant layer: each active family/guild route as a line coloured by
    *  the owning house (width ∝ volume, dashed overland / solid by sea), with a dot
    *  at each end to read as a round-trip corridor. */
+  private renderFlowHighlight(ctx: CanvasRenderingContext2D) {
+    const inv = 1 / Math.sqrt(this.currentScale);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (const s of this.flowHighlight) {
+      let bx = s.bx;
+      // Draw across the nearest cylindrical wrap (avoid a line across the whole map).
+      if (this.worldW > 0) {
+        if (bx - s.ax > this.worldW / 2) bx -= this.worldW;
+        else if (s.ax - bx > this.worldW / 2) bx += this.worldW;
+      }
+      const ax = s.ax, ay = s.ay, by = s.by;
+      const inbound = s.dir === 0;
+      const color = inbound ? "#5fd0ff" : "#ffce5f"; // cyan in · gold out
+      const w = Math.max(1.2, s.w * inv);
+      // Glow underlay + solid line.
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.25; ctx.lineWidth = w * 3;
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      ctx.globalAlpha = 0.95; ctx.lineWidth = w;
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      // Arrowhead at the receiving end (city for inbound, partner for outbound).
+      const [hx, hy, tx, ty] = inbound ? [bx, by, ax, ay] : [ax, ay, bx, by];
+      const ang = Math.atan2(ty - hy, tx - hx);
+      const ah = Math.max(3, 5 * inv);
+      ctx.fillStyle = color; ctx.globalAlpha = 0.95;
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(tx - ah * Math.cos(ang - 0.4), ty - ah * Math.sin(ang - 0.4));
+      ctx.lineTo(tx - ah * Math.cos(ang + 0.4), ty - ah * Math.sin(ang + 0.4));
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   private renderMerchantRoutes(ctx: CanvasRenderingContext2D) {
     let maxVol = 0;
     for (const r of this.merchantRoutes) maxVol = Math.max(maxVol, r.volume);

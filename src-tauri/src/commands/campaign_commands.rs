@@ -991,6 +991,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         routes_dirty: false,
         warehouses: vec![],
         contracts: vec![],
+        trade_cur: Default::default(),
+        trade_last: vec![],
+        trade_hist: vec![],
     };
     sim.rebuild_routes();
     sim.seed_initial_guilds(); // civic guilds for cities already ≥ 50k people
@@ -1888,6 +1891,130 @@ pub fn campaign_get_poleis(db: State<'_, WorldDb>) -> Result<Vec<PolisBrief>, St
         .collect();
     out.sort_by(|a, b| b.treasury.partial_cmp(&a.treasury).unwrap_or(std::cmp::Ordering::Equal));
     Ok(out)
+}
+
+// ── Trade Flows subtab (per-settlement realized-trade breakdown) ──────────────
+/// One traded good at a settlement: its average + last-year volume, how many
+/// partner routes carried it, and its yearly volume series (the trend graph).
+#[derive(Serialize, Clone)]
+pub struct TradeFlowGood {
+    pub good: u32,
+    pub name: String,
+    pub avg_volume: f32,
+    pub last_volume: f32,
+    pub in_volume: f32,
+    pub out_volume: f32,
+    pub route_count: u32,
+    pub history: Vec<f32>,
+}
+/// One good's flow along one partner route (for the per-good route list + map).
+#[derive(Serialize, Clone)]
+pub struct TradeRouteFlow {
+    pub good: u32,
+    pub partner: u32,
+    pub partner_name: String,
+    pub px: f32,
+    pub py: f32,
+    pub dir: u8,        // 0 = inbound to this city, 1 = outbound
+    pub amount: f32,
+    pub pct: f32,       // share of this good's flow at this city
+}
+/// A top partner city: its share of ALL this city's trade + the goods exchanged.
+#[derive(Serialize, Clone)]
+pub struct TradePartner {
+    pub hub: u32,
+    pub name: String,
+    pub px: f32,
+    pub py: f32,
+    pub volume: f32,
+    pub pct: f32,
+    pub goods: Vec<String>,
+}
+/// The settlement Flows subtab payload (last completed year + history).
+#[derive(Serialize, Clone, Default)]
+pub struct TradeFlows {
+    pub hub: u32,
+    pub hub_x: f32,
+    pub hub_y: f32,
+    pub goods: Vec<TradeFlowGood>,
+    pub routes: Vec<TradeRouteFlow>,
+    pub partners: Vec<TradePartner>,
+}
+
+#[tauri::command]
+pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<TradeFlows>, String> {
+    use std::collections::HashMap;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let Some(sim) = get_sim(&db, &conn)? else { return Ok(None) };
+    let Some(hub) = sim.hubs.iter().find(|h| h.id == id) else { return Ok(None) };
+    let (hub_x, hub_y) = (hub.x, hub.y);
+    let pos = |hid: u32| sim.hubs.iter().find(|h| h.id == hid).map(|h| (h.name.clone(), h.x, h.y));
+
+    // ── Per-good last-year in/out + per-(good,partner,dir) route amounts ──
+    let mut g_in: HashMap<u32, f32> = HashMap::new();
+    let mut g_out: HashMap<u32, f32> = HashMap::new();
+    let mut g_partners: HashMap<u32, std::collections::HashSet<u32>> = HashMap::new();
+    let mut route_amt: HashMap<(u32, u32, u8), f32> = HashMap::new(); // (good,partner,dir)→amt
+    let mut partner_vol: HashMap<u32, f32> = HashMap::new();
+    let mut partner_goods: HashMap<u32, HashMap<u32, f32>> = HashMap::new(); // partner→good→amt
+    for f in sim.trade_last.iter().filter(|f| f.hub == id) {
+        if f.dir == 0 { *g_in.entry(f.good).or_insert(0.0) += f.amount; }
+        else { *g_out.entry(f.good).or_insert(0.0) += f.amount; }
+        g_partners.entry(f.good).or_default().insert(f.partner);
+        *route_amt.entry((f.good, f.partner, f.dir)).or_insert(0.0) += f.amount;
+        *partner_vol.entry(f.partner).or_insert(0.0) += f.amount;
+        *partner_goods.entry(f.partner).or_default().entry(f.good).or_insert(0.0) += f.amount;
+    }
+
+    // ── Goods list: union of last-year flows + historical series ──
+    let mut hist_by_good: HashMap<u32, &Vec<f32>> = HashMap::new();
+    for h in sim.trade_hist.iter().filter(|h| h.hub == id) { hist_by_good.insert(h.good, &h.vols); }
+    let mut good_ids: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    for &g in g_in.keys().chain(g_out.keys()) { good_ids.insert(g); }
+    for &g in hist_by_good.keys() { good_ids.insert(g); }
+    let mut goods: Vec<TradeFlowGood> = good_ids.into_iter().map(|g| {
+        let history: Vec<f32> = hist_by_good.get(&g).map(|v| (*v).clone()).unwrap_or_default();
+        let avg = if history.is_empty() { 0.0 } else { history.iter().sum::<f32>() / history.len() as f32 };
+        let iv = g_in.get(&g).copied().unwrap_or(0.0);
+        let ov = g_out.get(&g).copied().unwrap_or(0.0);
+        TradeFlowGood {
+            good: g,
+            name: sim.goods.get(g as usize).map(|x| x.name.clone()).unwrap_or_default(),
+            avg_volume: avg,
+            last_volume: iv + ov,
+            in_volume: iv, out_volume: ov,
+            route_count: g_partners.get(&g).map(|s| s.len() as u32).unwrap_or(0),
+            history,
+        }
+    }).collect();
+    goods.sort_by(|a, b| b.avg_volume.partial_cmp(&a.avg_volume).unwrap_or(std::cmp::Ordering::Equal));
+
+    // ── Routes (per good, ranked; pct of that good's total flow) ──
+    let mut good_total: HashMap<u32, f32> = HashMap::new();
+    for (&(g, _, _), &amt) in &route_amt { *good_total.entry(g).or_insert(0.0) += amt; }
+    let mut routes: Vec<TradeRouteFlow> = route_amt.iter().filter_map(|(&(g, partner, dir), &amount)| {
+        let (pname, px, py) = pos(partner)?;
+        let tot = good_total.get(&g).copied().unwrap_or(0.0).max(1e-6);
+        Some(TradeRouteFlow {
+            good: g, partner, partner_name: pname, px, py, dir, amount,
+            pct: amount / tot * 100.0,
+        })
+    }).collect();
+    routes.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
+
+    // ── Top partner cities (share of all this city's trade) ──
+    let total_vol: f32 = partner_vol.values().sum::<f32>().max(1e-6);
+    let mut partners: Vec<TradePartner> = partner_vol.iter().filter_map(|(&p, &vol)| {
+        let (pname, px, py) = pos(p)?;
+        let mut gs: Vec<(u32, f32)> = partner_goods.get(&p).map(|m| m.iter().map(|(&g, &a)| (g, a)).collect()).unwrap_or_default();
+        gs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let goods = gs.iter().take(4).filter_map(|(g, _)| sim.goods.get(*g as usize).map(|x| x.name.clone())).collect();
+        Some(TradePartner { hub: p, name: pname, px, py, volume: vol, pct: vol / total_vol * 100.0, goods })
+    }).collect();
+    partners.sort_by(|a, b| b.volume.partial_cmp(&a.volume).unwrap_or(std::cmp::Ordering::Equal));
+    partners.truncate(12);
+
+    Ok(Some(TradeFlows { hub: id, hub_x, hub_y, goods, routes, partners }))
 }
 
 /// One labelled money line in the Accountant view (a city's tax/profit, or a

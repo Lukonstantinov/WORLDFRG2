@@ -222,6 +222,10 @@ const MAX_CONTRACTS: usize = 400;        // global cap (bounds the per-tick fulf
 /// — i.e. it must hold ≥20% more transport than the deal needs, so a due delivery
 /// always has a spare vessel and the contract doesn't breach for want of a ship.
 const CONTRACT_TRANSPORT_MARGIN: f32 = 1.2;
+/// How many years of per-(hub,good) trade volume the Flows trend graph keeps.
+const TRADE_HIST_CAP: usize = 40;
+/// Global cap on tracked (hub,good) history rows (sparse; drops dead trades first).
+const TRADE_HIST_ROWS: usize = 8000;
 // Term → strike factor (longer term = cheaper unit for the buyer) and break penalty
 // multiplier (longer = stiffer). Indexed 0:1yr 1:3yr 2:5yr 3:7yr.
 const TERM_YEARS: [u8; 4] = [1, 3, 5, 7];
@@ -963,6 +967,20 @@ pub struct CampaignSim {
     /// `#[serde(default)]` → old saves load with none.
     #[serde(default)]
     pub contracts: Vec<Contract>,
+    /// THIS year's trade-flow accumulator for the settlement Flows subtab, keyed by
+    /// (hub, good, partner, dir). In-memory only (`skip`) — a mid-year save/reload
+    /// loses just the partial current year; completed years live in `trade_last`/
+    /// `trade_hist`. Observability only; never feeds back into the simulation, so it
+    /// has no bearing on determinism.
+    #[serde(skip)]
+    pub trade_cur: std::collections::HashMap<(u32, u32, u32, u8), f32>,
+    /// The LAST completed year's flows (detailed per-partner), the routes/partners
+    /// breakdown the Flows subtab reads. Appended LAST → `#[serde(default)]`.
+    #[serde(default)]
+    pub trade_last: Vec<TradeFlowAgg>,
+    /// Per-(hub, good) yearly trade-volume history (the trend graphs).
+    #[serde(default)]
+    pub trade_hist: Vec<TradeHist>,
 }
 
 /// Deterministic 0..1 hash of three mixed inputs (splitmix64).
@@ -1614,6 +1632,8 @@ impl CampaignSim {
                 // closed (uses `house_ledger_prev` before the books are reset).
                 self.decide_polis_policy(yr);
                 self.compute_speculation(yr);
+                // Fold the year's trade flows into the Flows-subtab detail + trend graphs.
+                self.fold_trade_year();
                 for l in self.house_ledger.iter_mut() {
                     *l = LedgerAcc { year: yr, ..Default::default() };
                 }
@@ -3856,6 +3876,51 @@ impl CampaignSim {
         self.recent_trades.push(RecentTrade { from, to, good, amount, owner, sea, price, tick: self.tick });
         let n = self.recent_trades.len();
         if n > 400 { self.recent_trades.drain(0..n - 400); }
+        // Accumulate the year's trade flows for the Flows subtab: this shipment is an
+        // INBOUND flow at `to` (from `from`) and an OUTBOUND flow at `from` (to `to`).
+        if amount > 0.0 {
+            let g = good as u32;
+            *self.trade_cur.entry((to, g, from, 0)).or_insert(0.0) += amount;
+            *self.trade_cur.entry((from, g, to, 1)).or_insert(0.0) += amount;
+        }
+    }
+
+    /// At each New Year: snapshot the year's trade flows as `trade_last` (the Flows
+    /// subtab's per-partner detail), append the per-(hub,good) yearly volume to the
+    /// trend history (goods that DIDN'T trade get a 0, so a fallen trade shows its
+    /// decline), then clear the accumulator for the new year.
+    fn fold_trade_year(&mut self) {
+        let mut last: Vec<TradeFlowAgg> = self.trade_cur.iter()
+            .map(|(&(hub, good, partner, dir), &amount)| TradeFlowAgg { hub, good, partner, dir, amount })
+            .collect();
+        // Deterministic order (the panel re-sorts by volume anyway).
+        last.sort_by(|a, b| (a.hub, a.good, a.dir, a.partner).cmp(&(b.hub, b.good, b.dir, b.partner)));
+        // Per-(hub,good) total volume this year.
+        let mut vol: std::collections::HashMap<(u32, u32), f32> = std::collections::HashMap::new();
+        for f in &last { *vol.entry((f.hub, f.good)).or_insert(0.0) += f.amount; }
+        // Extend existing series (0 for goods not traded this year → visible decline).
+        let mut seen: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
+        for h in self.trade_hist.iter_mut() {
+            let v = vol.get(&(h.hub, h.good)).copied().unwrap_or(0.0);
+            h.vols.push(v);
+            if h.vols.len() > TRADE_HIST_CAP { let d = h.vols.len() - TRADE_HIST_CAP; h.vols.drain(0..d); }
+            seen.insert((h.hub, h.good));
+        }
+        // Brand-new (hub,good) trades start a fresh series.
+        for (&(hub, good), &v) in &vol {
+            if !seen.contains(&(hub, good)) { self.trade_hist.push(TradeHist { hub, good, vols: vec![v] }); }
+        }
+        // Bound memory: if over the row cap, drop the deadest trades (lowest peak).
+        if self.trade_hist.len() > TRADE_HIST_ROWS {
+            self.trade_hist.sort_by(|a, b| {
+                let pa = a.vols.iter().cloned().fold(0.0f32, f32::max);
+                let pb = b.vols.iter().cloned().fold(0.0f32, f32::max);
+                pb.partial_cmp(&pa).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            self.trade_hist.truncate(TRADE_HIST_ROWS);
+        }
+        self.trade_last = last;
+        self.trade_cur.clear();
     }
 
     /// Record trade VOLUME a holder moved through a hub (for office ties).
@@ -4717,6 +4782,9 @@ mod tests {
             routes_dirty: false,
             warehouses: vec![],
             contracts: vec![],
+            trade_cur: Default::default(),
+            trade_last: vec![],
+            trade_hist: vec![],
         };
         s.rebuild_routes();
         s
