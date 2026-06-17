@@ -89,6 +89,7 @@ const bioOverlays = [
   { id: "tradeRegions", label: "\u{1F7E6} Trade Regions" },
   { id: "tradeCorridors", label: "\u{2194} Trade Corridors" },
   { id: "chokepoints", label: "\u{2693} Chokepoints" },
+  { id: "speculation", label: "\u{1FAE7} Speculation Risk" },
 ];
 
 export function Toolbar() {

@@ -90,6 +90,8 @@ pub fn run() {
             campaign_commands::campaign_get_hub,
             campaign_commands::campaign_get_world_economy,
             campaign_commands::campaign_get_houses,
+            campaign_commands::campaign_get_speculation,
+            campaign_commands::campaign_get_poleis,
             campaign_commands::campaign_house_ledger,
             campaign_commands::campaign_get_house_history,
             campaign_commands::campaign_merchant_routes,

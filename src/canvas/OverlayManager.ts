@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, CultureRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane } from "../types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, CultureRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter } from "../types";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "../goods";
 import { drawGoodIcon } from "./goodIcons";
 import { latLineY } from "./projection";
@@ -110,6 +110,7 @@ export class OverlayManager {
   private selectedFuturesLane: FuturesLane | null = null;
   private futuresFocus: { city?: string; holder?: string; good?: string } | null = null;
   private politicalCenters: PoliticalCenter[] = [];
+  private specCenters: SpecCenter[] = [];
   private houses: HouseBrief[] = [];
   private allHouses: HouseBrief[] = [];
   private selectedHouseIdx: number | null = null;
@@ -141,6 +142,7 @@ export class OverlayManager {
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
+    speculation: false,
     houseControl: false, merchantRoutes: false, futures: false,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
   };
@@ -415,6 +417,11 @@ export class OverlayManager {
 
   drawPolitical(centers: PoliticalCenter[]) {
     this.politicalCenters = centers;
+  }
+
+  /** DLC 3 · per-polis speculation-risk discs (green→amber→red by tier). */
+  drawSpeculation(centers: SpecCenter[]) {
+    this.specCenters = centers;
   }
 
   /** Merchant-family control: houses that control >=1 settlement (>=50% of its
@@ -717,6 +724,12 @@ export class OverlayManager {
         ctx.fill();
       }
       for (const c of this.politicalCenters) this.renderPoliticalCenter(ctx, c);
+    }
+
+    // DLC 3 · speculation risk: translucent discs sized by bubble risk, coloured
+    // green→amber→red by tier (rendered above the trade-hub markers).
+    if (this.visibility.speculation && this.specCenters.length > 0) {
+      for (const c of this.specCenters) this.renderSpecCenter(ctx, c);
     }
 
     // Merchant-family control: settlements a house dominates (>=50% of local
@@ -1564,6 +1577,46 @@ export class OverlayManager {
     ctx.globalAlpha = 1;
   }
 
+  /** DLC 3 · one speculation-risk disc. Radius ∝ risk; colour by tier; a pulsing
+   *  ring on HIGH-tier (mania-watch) poleis. */
+  private renderSpecCenter(ctx: CanvasRenderingContext2D, c: SpecCenter) {
+    const x = c.x + 0.5;
+    const y = c.y + 0.5;
+    const risk = Math.max(0, Math.min(1, c.risk));
+    // green (low) → amber (med) → red (high)
+    const color = c.tier === "HIGH" ? "#e6303a" : c.tier === "MED" ? "#e0a020" : "#37a05a";
+    const baseR = (3 + 16 * risk) / Math.sqrt(this.currentScale);
+
+    // Soft risk disc.
+    ctx.beginPath();
+    ctx.arc(x, y, baseR, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.12 + 0.22 * risk;
+    ctx.fill();
+
+    // HIGH-tier mania watch: a brighter outer ring.
+    if (c.tier === "HIGH") {
+      ctx.beginPath();
+      ctx.arc(x, y, baseR * 1.25, 0, Math.PI * 2);
+      ctx.lineWidth = Math.max(0.4, 1.2 / Math.sqrt(this.currentScale));
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.85;
+      ctx.stroke();
+    }
+
+    // Core dot.
+    const dot = Math.max(0.8, 2.0 / Math.sqrt(this.currentScale));
+    ctx.beginPath();
+    ctx.arc(x, y, dot, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 1;
+    ctx.fill();
+    ctx.lineWidth = Math.max(0.3, 0.8 / Math.sqrt(this.currentScale));
+    ctx.strokeStyle = "rgba(8,20,40,0.85)";
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
   /** Hub-name labels (drawn when the "hubNames" overlay is on). Kept separate
    *  from the markers so toggling names doesn't change the dots. */
   private renderHubNames(ctx: CanvasRenderingContext2D) {
@@ -1893,6 +1946,7 @@ export class OverlayManager {
     this.goodRegions = [];
     this.tradeTrunks = [];
     this.politicalCenters = [];
+    this.specCenters = [];
     this.houses = [];
     this.chokepoints = [];
     this.corridors = [];
