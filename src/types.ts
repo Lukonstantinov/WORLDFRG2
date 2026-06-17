@@ -744,6 +744,47 @@ export interface PoliticalCenter {
   emporium?: boolean; // one of the few greatest entrepôts — drawn RED
 }
 
+// ── DLC 3 · Finance, the Polis & Speculation ──────────────────────────────────
+
+/** One ranked bubble driver in a polis's speculation reason-chain. */
+export interface SpecDriver {
+  key: string;     // "thin_float" | "cheap_money" | "leverage" | …
+  label: string;   // "Thin float"
+  weight: number;  // weighted contribution to the risk score (0..1)
+  detail: string;  // generated clause naming the real house/good
+}
+
+/** The once-a-year speculation read for one polis (mirrors PoliticalCenter). */
+export interface SpecCenter {
+  hub: number;
+  x: number;
+  y: number;
+  name: string;
+  risk: number;          // 0..1 bubble risk
+  stars: number;         // 1..5 tier
+  tier: string;          // "LOW" | "MED" | "HIGH"
+  pattern_tag: string;   // "tulip-like" | "company-bubble" | …
+  drivers: SpecDriver[]; // ranked, largest weight first
+  watch_goods: string[];
+  year: number;
+}
+
+/** A polis as a politico-economic actor (treasury / tariffs / mint / council). */
+export interface PolisBrief {
+  hub: number;
+  name: string;
+  x: number;
+  y: number;
+  population: number;
+  treasury: number;
+  tariff_export: number;
+  tariff_import: number;
+  mint_fineness: number;       // 1.0 = full coin, < 1 = debased
+  council: string;             // governing house ("—" if none)
+  council_archetype: string;
+  council_color: string;
+}
+
 export interface TradeRegion {
   id: number;
   name: string;

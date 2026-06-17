@@ -88,6 +88,7 @@ sim/biological.rs               ← Phase 8: shark-habitat risk + trade-good bel
 sim/ocean.rs (compute_salinity) ← Phase 3 add-on: wind/E-P salinity + thermohaline coupling
 sim/market.rs                   ← Market equilibrium solver (stocks → grain-eq prices → arbitrage; bulk/perish freight)
 sim/manufacture.rs              ← Shared production-chain resolver (apply_manufacturing: DAG topo, labor∝pop)
+sim/tick.rs (DLC 3)             ← Polis agent (decide_polis_policy: council/tariff/mint/treasury) + Speculation why-engine (compute_speculation: yearly per-polis SpecCenter risk + ranked SpecDriver reason-chain), both at the yearly hook
 commands/sim_commands.rs        ← Tauri commands wrapping sim phases (per-phase ColumnSet masks)
 commands/campaign_commands.rs   ← finalize/unfreeze, new/save/open campaign, set_progress
 commands/import_commands.rs     ← import_world_layers (layered world import)
@@ -99,6 +100,7 @@ history/undo.rs                 ← Tile-level undo/redo journal
 ### React Frontend (`src/`)
 ```
 App.tsx                         ← Layout, header, file dialogs, NewWorldDialog
+ui/SpeculationPanel.tsx         ← DLC 3 Finance panel: Speculation (per-polis bubble risk + why-chain) / Poleis (treasury/tariff/mint/council) tabs
 types.ts                        ← All shared types (WorldMeta, PaintValue, etc.)
 bridge/tauri.ts                 ← All IPC invoke wrappers
 state/worldStore.ts             ← Zustand: meta, rivers, lakes, settlements

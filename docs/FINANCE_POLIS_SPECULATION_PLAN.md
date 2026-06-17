@@ -1,10 +1,29 @@
 # DLC 3 — Finance, the Polis & Speculation
 
-> **STATUS (June 2026): PLAN / not implemented.** Builds on Parts I–V of
-> `REDESIGN_AND_DLC_PLAN.md`. This plan was reconsidered against the *actual*
-> `tick.rs` campaign sim, which already simulates merchant houses, charters,
-> civic taxes, a banking archetype and succession — so most steps **extend
-> existing systems** rather than build from scratch.
+> **STATUS (June 2026): Phase 0 + Phase 3 IMPLEMENTED.** The Polis agent
+> (treasury / council-set tariffs / mint fineness) and the centerpiece
+> Speculation "Why-Engine" (yearly per-polis bubble risk + generated causal
+> reason-chain + map overlay + Finance panel) now ship. Phases 1–2 and 4–5
+> remain planned. Builds on Parts I–V of `REDESIGN_AND_DLC_PLAN.md`. This plan
+> was reconsidered against the *actual* `tick.rs` campaign sim, which already
+> simulates merchant houses, charters, civic taxes, a banking archetype and
+> succession — so most steps **extend existing systems** rather than build from
+> scratch.
+>
+> **What shipped (Phase 0 + 3):**
+> - `TickHub` gained `treasury`, `tariff_export`, `tariff_import`,
+>   `mint_fineness`, `council_house` (all serde-default). The yearly hook runs
+>   `decide_polis_policy` (dominant house = council; archetype sets the tariff
+>   stance; a prosperous banking council debases the mint for cheap money; a
+>   treasury skim) — per-polis tariffs are now charged on trade in `advance`.
+> - `compute_speculation` runs once a year at the same hook, scoring each polis's
+>   `SpecCenter` risk from nine existing-data drivers, building a ranked
+>   `SpecDriver` reason-chain, classifying a `pattern_tag`, and journaling the
+>   HIGH-tier poleis (`JournalEntry{kind:"speculation"}`). Cached on `CampaignSim`
+>   (`spec_centers`/`spec_year`/`spec_prev_profit`).
+> - Commands: `campaign_get_speculation`, `campaign_get_poleis`. Frontend:
+>   `🫧 Speculation Risk` Toolbar overlay (discs in `OverlayManager`) + the
+>   `SpeculationPanel` (Speculation / Poleis tabs), opened from StepCampaign.
 
 The campaign already plays like a world of **independent city-states (poleis)**:
 `compute_political` ranks each settlement on its own trade power and draws
@@ -162,10 +181,10 @@ their trigger.
 
 | Phase | Content | Effort | Status of inputs |
 |---|---|---|---|
-| **0** | Formalize **Polis agent** (treasury/tariff/mint/council) on `civic_pool`+`dominant_seat` | M | ~60% implicit |
+| **0** ✅ | Formalize **Polis agent** (treasury/tariff/mint/council) on `civic_pool`+`dominant_seat` | M | **DONE** |
 | **1** | **#1** valuation view · **#10** author tolls · **#9** import cap in `solve` | S | mostly reuse |
-| **2** | **#4** mint/debasement as council decision · **#3** bills-of-exchange on `ARCH_BANKING` | M | partial |
-| **3** | **Speculation why-engine + yearly heatmap** (predictor) | M | inputs exist |
+| **2** | **#4** mint/debasement as council decision · **#3** bills-of-exchange on `ARCH_BANKING` | M | partial (mint lever shipped in P0) |
+| **3** ✅ | **Speculation why-engine + yearly heatmap** (predictor) | M | **DONE** |
 | **4** | **L3** companies → **L4** polis bourses → **L5** manias (consume Phase 3) | L | new + grounded |
 | **5** | **#18** diaspora capital flight · **#15** dynasty trees (DLC 2) | L | new / roadmapped |
 

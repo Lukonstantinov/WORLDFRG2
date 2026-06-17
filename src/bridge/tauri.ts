@@ -504,7 +504,7 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 }
 
 // ── DLC 1 "Living Trade" tick simulation ──
-import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, CityRank, ContractRow } from "../types";
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, CityRank, ContractRow, SpecCenter, PolisBrief } from "../types";
 
 /** Seed a fresh living-trade sim from the static economy snapshot (step 10). */
 export async function campaignStartSim(seed: number): Promise<CampaignSnapshot> {
@@ -540,6 +540,16 @@ export async function campaignGetWorldEconomy(): Promise<WorldEconomy> {
 /** All merchant families (active first, richest first). */
 export async function campaignGetHouses(): Promise<HouseBrief[]> {
   return invoke("campaign_get_houses");
+}
+
+/** DLC 3 · the cached yearly speculation read (per-polis bubble risk + why). */
+export async function campaignGetSpeculation(): Promise<SpecCenter[]> {
+  return invoke("campaign_get_speculation");
+}
+
+/** DLC 3 · the poleis as actors (treasury / tariff / mint / council). */
+export async function campaignGetPoleis(): Promise<PolisBrief[]> {
+  return invoke("campaign_get_poleis");
 }
 
 /** All futures contracts (active + archived ≤5y) for the Contracts tab. */
