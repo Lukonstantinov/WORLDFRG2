@@ -241,7 +241,7 @@ pub fn set_progress(scope: String, progress_json: String, db: State<'_, WorldDb>
 // DLC 1 "Living Trade" — tick simulation commands.
 // ═══════════════════════════════════════════════════════════════════════════
 
-use crate::sim::tick::{CampaignSim, House, JournalEntry, TickGood, TickHub};
+use crate::sim::tick::{CampaignSim, House, JournalEntry, SpecCenter, TickGood, TickHub};
 use crate::commands::query_commands::EconomySnapshot;
 
 /// Compact clock for the Campaign Clock UI.
@@ -721,6 +721,11 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 structures: vec![],
                 founded_tick: 0,
                 founder_house: -1,
+                treasury: 0.0,
+                tariff_export: 0.0,
+                tariff_import: 0.0,
+                mint_fineness: 1.0,
+                council_house: -1,
             }
         })
         .collect();
@@ -907,6 +912,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         contracts: vec![],
         contract_archive: vec![],
         next_contract_id: 0,
+        spec_centers: vec![],
+        spec_year: 0,
+        spec_prev_profit: vec![],
         days: vec![],
     };
     sim.rebuild_routes();
@@ -1578,6 +1586,66 @@ pub fn campaign_get_houses(db: State<'_, WorldDb>) -> Result<Vec<HouseBrief>, St
         Some(sim) => build_house_briefs(&sim),
         None => vec![],
     })
+}
+
+/// DLC 3 · the cached yearly speculation read (per-polis bubble risk + the
+/// generated causal reason-chain). Empty until the campaign passes its first
+/// New Year. Mirrors the `compute_political` overlay payload.
+#[tauri::command]
+pub fn campaign_get_speculation(db: State<'_, WorldDb>) -> Result<Vec<SpecCenter>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    Ok(match get_sim(&conn)? {
+        Some(sim) => sim.spec_centers.clone(),
+        None => vec![],
+    })
+}
+
+/// DLC 3 · the POLEIS as actors — each seat city's treasury, council-set tariff /
+/// mint policy, and the house that governs it. For the Polis panel.
+#[derive(Serialize, Clone)]
+pub struct PolisBrief {
+    pub hub: u32,
+    pub name: String,
+    pub x: f32,
+    pub y: f32,
+    pub population: u32,
+    pub treasury: f32,
+    /// Effective export / import tariff fractions in force.
+    pub tariff_export: f32,
+    pub tariff_import: f32,
+    /// Mint fineness (1.0 = full coin, < 1 = debased "cheap money").
+    pub mint_fineness: f32,
+    /// Governing house ("—" if none) + its archetype label.
+    pub council: String,
+    pub council_archetype: String,
+    pub council_color: String,
+}
+
+#[tauri::command]
+pub fn campaign_get_poleis(db: State<'_, WorldDb>) -> Result<Vec<PolisBrief>, String> {
+    use crate::sim::tick::{archetype_label};
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let mut out: Vec<PolisBrief> = sim.hubs.iter()
+        .filter(|h| !h.is_estate && h.population >= 1.0)
+        .map(|h| {
+            let ci = h.council_house;
+            let (council, arch, color) = if ci >= 0 {
+                if let Some(house) = sim.houses.get(ci as usize) {
+                    (house.name.clone(), archetype_label(house.archetype).to_string(), distinct_color(ci as usize))
+                } else { ("—".into(), String::new(), "#7a8aa0".into()) }
+            } else { ("—".into(), String::new(), "#7a8aa0".into()) };
+            PolisBrief {
+                hub: h.id, name: h.name.clone(), x: h.x, y: h.y,
+                population: h.population as u32, treasury: h.treasury,
+                tariff_export: h.tariff_export, tariff_import: h.tariff_import,
+                mint_fineness: if h.mint_fineness <= 0.0 { 1.0 } else { h.mint_fineness },
+                council, council_archetype: arch, council_color: color,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| b.treasury.partial_cmp(&a.treasury).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(out)
 }
 
 /// One futures contract, flattened for the Houses panel "Contracts" subtab and the

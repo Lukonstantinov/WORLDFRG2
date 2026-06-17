@@ -9,7 +9,7 @@ import { useViewportStore } from "../state/viewportStore";
 import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignGetSpeculation } from "../bridge/tauri";
 import type { MerchantRoute } from "../types";
 import { goodOverlayKey } from "../goods";
 import type { PaintValue, EconChain, Settlement } from "../types";
@@ -552,6 +552,22 @@ export function MapCanvas() {
       requestRender();
     }).catch(() => {});
   }, [step9Done, worldKey, settlements, rivers, tileVersion, dbio.tradeReach, dbio.maxCrossing, dbio.desertRoutes, dbio.economicRegions, dbio.piracyLevel, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // DLC 3 · speculation risk — the cached yearly read from the live campaign sim.
+  // Refetched when the overlay turns on or the campaign clock advances a year.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !meta) return;
+    if (!overlayVisibility.speculation || !campaignSnapshot?.active) {
+      om.drawSpeculation([]);
+      requestRender();
+      return;
+    }
+    campaignGetSpeculation().then((centers) => {
+      om.drawSpeculation(centers);
+      requestRender();
+    }).catch(() => {});
+  }, [overlayVisibility.speculation, campaignSnapshot?.active, campaignSnapshot?.clock.tick, meta, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Hydrate the persisted economy snapshot when a world loads (survives save/open).
   useEffect(() => {

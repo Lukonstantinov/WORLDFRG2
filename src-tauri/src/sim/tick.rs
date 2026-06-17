@@ -407,6 +407,25 @@ pub struct TickHub {
     /// 3 Shipyard / 4 Guildhall / 5 Workshop). Each grants a standing bonus; at
     /// most one of each. Auto-built as a city/house prospers.
     #[serde(default)] pub structures: Vec<u8>,
+    // ── DLC 3 · the Polis as an actor (set yearly by `decide_polis_policy`) ──
+    /// Formal civic TREASURY — a persistent war-chest the council accumulates from
+    /// a skim of the city's tax take. Unlike `civic_pool` (which decays back to the
+    /// people each tick), the treasury is retained capital the polis can field.
+    /// 0 on old saves / non-seat hubs.
+    #[serde(default)] pub treasury: f32,
+    /// Council-set EXPORT tariff on goods leaving this polis (fraction of value).
+    /// 0 = no council policy yet → the global `EXPORT_TAX_RATE` default applies.
+    #[serde(default)] pub tariff_export: f32,
+    /// Council-set IMPORT tariff on goods arriving here. 0 → global `IMPORT_TAX_RATE`.
+    #[serde(default)] pub tariff_import: f32,
+    /// Mint FINENESS the council maintains: 1.0 = full-bodied coin, < 1.0 = debased
+    /// ("cut the coin fine") which is how a council floods cheap money into its
+    /// market. 0 on old saves → read as 1.0 (no debasement). Drives the speculation
+    /// engine's "cheap money" bubble driver.
+    #[serde(default)] pub mint_fineness: f32,
+    /// House index of the family/faction whose council governs this polis (−1 = no
+    /// dominant council). The decision-maker behind tariff / mint / charter policy.
+    #[serde(default = "neg_one_i32")] pub council_house: i32,
 }
 
 /// Serde default for `owner_house` so old saves / non-estate hubs read −1, not 0
@@ -647,6 +666,47 @@ pub struct JournalEntry {
     pub text: String,
 }
 
+/// DLC 3 · one ranked bubble DRIVER in a polis's speculation reason-chain. The UI
+/// renders these largest-weight first as the generated causal "why".
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SpecDriver {
+    /// Stable key ("thin_float" | "cheap_money" | "leverage" | "dividend_surge" |
+    /// "price_runup" | "supply_shock" | "hot_capital" | "political_shock" |
+    /// "animal_spirits").
+    pub key: String,
+    /// Human label ("Thin float").
+    pub label: String,
+    /// Weighted contribution to the risk score (already coefficient-scaled, 0..1).
+    pub weight: f32,
+    /// Generated clause naming the real entities ("House Verani corners amber (87%)").
+    pub detail: String,
+}
+
+/// DLC 3 · the once-a-year speculation read for one polis (mirrors `PoliticalCenter`).
+/// Computed at the yearly hook, cached on the sim, surfaced as an overlay + panel
+/// and (for HIGH tiers) a `JournalEntry{kind:"speculation"}`.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SpecCenter {
+    pub hub: u32,
+    pub x: f32,
+    pub y: f32,
+    pub name: String,
+    /// Bubble risk 0..1.
+    pub risk: f32,
+    /// Tier stars 1..5 (≥4 = a mania watch).
+    pub stars: u8,
+    /// "LOW" | "MED" | "HIGH".
+    pub tier: String,
+    /// Narrative classification ("tulip-like" | "company-bubble" | "credit-fueled"
+    /// | "speculative froth" | "calm").
+    pub pattern_tag: String,
+    /// Ranked drivers (largest weight first) — the causal reason-chain.
+    pub drivers: Vec<SpecDriver>,
+    /// The goods most exposed at this polis ("amber", …).
+    pub watch_goods: Vec<String>,
+    pub year: u32,
+}
+
 /// Phase G — one year of a merchant house's books (the Accountant view). All
 /// amounts in grain-equivalent; the per-city Vecs are `(hub_index, amount)` and
 /// are shown largest→lowest in the UI. Serde-default so old campaigns load empty.
@@ -762,6 +822,14 @@ pub struct CampaignSim {
     #[serde(default)] pub contract_archive: Vec<Contract>,
     /// Monotonic id source for contracts.
     #[serde(default)] pub next_contract_id: u32,
+    /// DLC 3 · cached speculation read, recomputed once per year at the yearly
+    /// hook (`compute_speculation`). Empty until the first New Year of a campaign.
+    #[serde(default)] pub spec_centers: Vec<SpecCenter>,
+    /// The year `spec_centers` was computed for (so the UI can label it).
+    #[serde(default)] pub spec_year: u32,
+    /// Per-hub trade profit booked in the PREVIOUS year, kept so the speculation
+    /// engine can read a year-on-year dividend surge. Indexed to match `hubs`.
+    #[serde(default)] pub spec_prev_profit: Vec<f32>,
     /// Derived route-days matrix (n·n, f32::INFINITY = unreachable). Not
     /// serialized — rebuilt from positions + components after load.
     #[serde(skip)]
@@ -797,6 +865,218 @@ impl CampaignSim {
 
     pub fn day_of_year(&self) -> u32 {
         self.tick % TICKS_PER_YEAR
+    }
+
+    /// DLC 3 · Phase 0 — the POLIS as an actor. Once a year each seat city's
+    /// council (its dominant house) sets the coming year's tariff schedule and mint
+    /// policy, and skims a slice of civic taxes into a retained treasury. These
+    /// levers feed both the live sim (tariffs are charged on trade) and the
+    /// speculation engine (a debased mint = cheap money). Conservative + additive:
+    /// hubs with no dominant house keep the global default rates.
+    fn decide_polis_policy(&mut self, _year: u32) {
+        let n = self.hubs.len();
+        // Dominant council house per hub: the richest non-guild house that holds
+        // its seat (`dominant_seat`) and is homed there.
+        let mut council: Vec<i32> = vec![-1; n];
+        let mut council_wealth: Vec<f32> = vec![0.0; n];
+        for (hi, h) in self.houses.iter().enumerate() {
+            if h.defunct || h.is_guild { continue; }
+            let hub = h.hub as usize;
+            if hub >= n { continue; }
+            if h.dominant_seat && h.wealth > council_wealth[hub] {
+                council[hub] = hi as i32;
+                council_wealth[hub] = h.wealth;
+            }
+        }
+        for h in 0..n {
+            if self.hubs[h].is_estate { continue; }
+            self.hubs[h].council_house = council[h];
+            if self.hubs[h].mint_fineness <= 0.0 { self.hubs[h].mint_fineness = 1.0; }
+            let arch = if council[h] >= 0 { self.houses[council[h] as usize].archetype } else { 255 };
+            // Tariff stance by the council's character: political houses turn
+            // protectionist; bankers/shippers keep trade cheap to move volume.
+            let (exp, imp) = match arch {
+                ARCH_POLITICAL => (EXPORT_TAX_RATE * 1.6, IMPORT_TAX_RATE * 1.6),
+                ARCH_BANKING => (EXPORT_TAX_RATE * 0.8, IMPORT_TAX_RATE * 0.8),
+                ARCH_FLEET => (EXPORT_TAX_RATE * 0.7, IMPORT_TAX_RATE * 0.9),
+                ARCH_SPECIALTY => (EXPORT_TAX_RATE * 1.1, IMPORT_TAX_RATE * 1.1),
+                _ => (EXPORT_TAX_RATE, IMPORT_TAX_RATE),
+            };
+            self.hubs[h].tariff_export = exp;
+            self.hubs[h].tariff_import = imp;
+            // Mint: a prosperous, banking-led council "cuts the coin fine" to lend
+            // cheap (fineness eases down); others slowly restore full-bodied coin.
+            let prosperous = self.hubs[h].trade_wealth > 0.5;
+            let target = if arch == ARCH_BANKING && prosperous { 0.88 }
+                else if prosperous { 0.96 } else { 1.0 };
+            let f = self.hubs[h].mint_fineness;
+            self.hubs[h].mint_fineness = f + (target - f) * 0.5;
+            // Retained treasury: skim ~8% of the circulating civic pool.
+            self.hubs[h].treasury += self.hubs[h].civic_pool * 0.08;
+        }
+    }
+
+    /// DLC 3 · Phase 3 — the Speculation "Why-Engine". Once a year, score each
+    /// polis's bubble risk from drivers that ALL already exist in the sim, build a
+    /// ranked causal reason-chain naming the real houses/goods, classify the
+    /// pattern, and journal the high-risk poleis. Deterministic; cached on the sim.
+    fn compute_speculation(&mut self, year: u32) {
+        let n = self.hubs.len();
+        let tick = self.tick;
+        // This year's trade profit booked at each city (from the just-closed books).
+        let mut cur_profit = vec![0.0f32; n];
+        for l in &self.house_ledger_prev {
+            for (c, amt) in &l.trade_profit_by_city {
+                if (*c as usize) < n { cur_profit[*c as usize] += *amt; }
+            }
+        }
+        if self.spec_prev_profit.len() != n { self.spec_prev_profit = vec![0.0; n]; }
+
+        // Weighted blend of normalized drivers (∑ coefficients ≈ 1).
+        const W_FLOAT: f32 = 0.22; const W_MONEY: f32 = 0.16; const W_LEV: f32 = 0.12;
+        const W_DIV: f32 = 0.14; const W_RUN: f32 = 0.14; const W_SHOCK: f32 = 0.08;
+        const W_HOT: f32 = 0.05; const W_POL: f32 = 0.04; const W_SPIRIT: f32 = 0.05;
+
+        let mut centers: Vec<SpecCenter> = Vec::new();
+        for h in 0..n {
+            if self.hubs[h].is_estate || self.hubs[h].population < 1.0 { continue; }
+
+            // ── Thin float / corner — the largest monopoly held by a house homed
+            //    here (or with an office here). ──
+            let mut corner = 0.0f32; let mut corner_good = -1i32; let mut corner_house = String::new();
+            for hh in &self.houses {
+                if hh.defunct { continue; }
+                let here = hh.hub as usize == h || hh.offices.contains(&(h as u32));
+                if !here { continue; }
+                for (g, share) in &hh.monopoly {
+                    if *share > corner { corner = *share; corner_good = *g as i32; corner_house = hh.name.clone(); }
+                }
+            }
+
+            // ── Cheap money — coin debasement at this polis + banking presence. ──
+            let fineness = if self.hubs[h].mint_fineness <= 0.0 { 1.0 } else { self.hubs[h].mint_fineness };
+            let debase = (1.0 - fineness).clamp(0.0, 1.0);
+            let mut bank_seats = 0u32;
+            for hh in &self.houses {
+                if hh.defunct || hh.archetype != ARCH_BANKING { continue; }
+                if hh.hub as usize == h || hh.offices.contains(&(h as u32)) { bank_seats += 1; }
+            }
+            let cheap_money = (debase / 0.12 * 0.6 + (bank_seats as f32 / 3.0) * 0.4).clamp(0.0, 1.0);
+            // ── Leverage — banking credit multiplier scaled by the number of seats. ──
+            let leverage = ((bank_seats as f32) * (BANK_CREDIT_MULT - 1.0) / 2.0).clamp(0.0, 1.0);
+
+            // ── Dividend surge — YoY growth of trade profit booked at this city. ──
+            let prev = self.spec_prev_profit[h];
+            let div_growth = if prev > 1.0 { (cur_profit[h] - prev) / prev } else { 0.0 };
+            let dividend = div_growth.clamp(0.0, 1.0);
+
+            // ── Price run-up — dearest recent price sample vs world-standard value. ──
+            let mut runup = 0.0f32; let mut runup_good = -1i32;
+            for e in self.journal.iter().rev() {
+                if e.tick + TICKS_PER_YEAR < tick { break; }
+                if e.kind != "price" || e.hub != h as i32 || e.good < 0 { continue; }
+                let base = self.goods.get(e.good as usize).map(|x| x.base_value).unwrap_or(1.0).max(1e-3);
+                let ratio = (e.value / base - 1.0) / 2.0; // 3× base → 1.0
+                if ratio > runup { runup = ratio.clamp(0.0, 1.0); runup_good = e.good; }
+            }
+
+            // ── Supply shock — an active embargo / drought / fishery collapse. ──
+            let mut shock = 0.0f32; let mut shock_kind = String::new(); let mut shock_good = -1i32;
+            for ev in &self.active_events {
+                if ev.hub == h as i32 || ev.hub < 0 {
+                    let s = (ev.magnitude.abs()).clamp(0.0, 1.0);
+                    if s > shock { shock = s; shock_kind = ev.kind.clone(); shock_good = ev.good; }
+                }
+            }
+
+            // ── Hot capital — foreign offices opened here (imported speculation). ──
+            let mut foreign = 0u32;
+            for hh in &self.houses {
+                if hh.defunct { continue; }
+                if hh.hub as usize != h && hh.offices.contains(&(h as u32)) { foreign += 1; }
+            }
+            let hot = (foreign as f32 / 4.0).clamp(0.0, 1.0);
+
+            // ── Political shock — recent succession / control change at this seat. ──
+            let mut pol = 0.0f32;
+            for hh in &self.houses {
+                for ev in hh.events.iter().rev() {
+                    if ev.tick + TICKS_PER_YEAR < tick { break; }
+                    let relevant = matches!(ev.kind.as_str(), "succession" | "control_gained" | "control_lost");
+                    if relevant && (hh.hub as usize == h) { pol = pol.max(0.7); }
+                }
+            }
+
+            // ── Animal spirits — the irrational deterministic residual. ──
+            let spirits = hash01(self.seed, year as u64, h as u64);
+
+            let drivers_raw = [
+                ("thin_float", "Thin float", W_FLOAT * corner,
+                    if corner_good >= 0 { format!("{} corners {} ({:.0}% share)", corner_house, self.goods[corner_good as usize].name, corner * 100.0) } else { String::new() }),
+                ("cheap_money", "Cheap money", W_MONEY * cheap_money,
+                    if debase > 0.01 { format!("council cut the coin fine ({:.0}% debased), {} banking seat(s)", debase * 100.0, bank_seats) } else if bank_seats > 0 { format!("{} banking seat(s) lending freely", bank_seats) } else { String::new() }),
+                ("leverage", "Leverage", W_LEV * leverage,
+                    if bank_seats > 0 { format!("borrowed money ({:.1}× credit) chasing assets", BANK_CREDIT_MULT) } else { String::new() }),
+                ("dividend_surge", "Dividend surge", W_DIV * dividend,
+                    if dividend > 0.05 { format!("trade profit up {:.0}% on the year", div_growth * 100.0) } else { String::new() }),
+                ("price_runup", "Price run-up", W_RUN * runup,
+                    if runup_good >= 0 { format!("{} trading well above its standard value", self.goods[runup_good as usize].name) } else { String::new() }),
+                ("supply_shock", "Supply shock", W_SHOCK * shock,
+                    if !shock_kind.is_empty() { let g = if shock_good >= 0 { format!(" on {}", self.goods[shock_good as usize].name) } else { String::new() }; format!("a {}{} is spiking prices", shock_kind, g) } else { String::new() }),
+                ("hot_capital", "Hot capital", W_HOT * hot,
+                    if foreign > 0 { format!("{} foreign house office(s) pouring capital in", foreign) } else { String::new() }),
+                ("political_shock", "Political shock", W_POL * pol,
+                    if pol > 0.0 { "a recent succession / regime change unsettles the seat".to_string() } else { String::new() }),
+                ("animal_spirits", "Animal spirits", W_SPIRIT * spirits, "the irrational froth of the crowd".to_string()),
+            ];
+
+            let risk: f32 = drivers_raw.iter().map(|d| d.2).sum::<f32>().clamp(0.0, 1.0);
+            // Skip near-silent poleis to keep the overlay legible.
+            if risk < 0.15 { continue; }
+
+            let mut drivers: Vec<SpecDriver> = drivers_raw.iter()
+                .filter(|d| d.2 > 0.001 && !d.3.is_empty())
+                .map(|d| SpecDriver { key: d.0.into(), label: d.1.into(), weight: d.2, detail: d.3.clone() })
+                .collect();
+            drivers.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
+
+            let stars = if risk >= 0.8 { 5 } else if risk >= 0.65 { 4 } else if risk >= 0.5 { 3 } else if risk >= 0.35 { 2 } else { 1 };
+            let tier = if risk >= 0.6 { "HIGH" } else if risk >= 0.4 { "MED" } else { "LOW" };
+            // Pattern from the dominant driver.
+            let pattern_tag = match drivers.first().map(|d| d.key.as_str()) {
+                Some("thin_float") => "tulip-like",
+                Some("dividend_surge") | Some("leverage") => "company-bubble",
+                Some("cheap_money") => "credit-fueled",
+                Some("supply_shock") => "shortage-driven",
+                Some("animal_spirits") => "speculative froth",
+                _ => "speculative froth",
+            }.to_string();
+
+            let mut watch_goods: Vec<String> = Vec::new();
+            for g in [corner_good, runup_good, shock_good] {
+                if g >= 0 { let nm = self.goods[g as usize].name.clone(); if !watch_goods.contains(&nm) { watch_goods.push(nm); } }
+            }
+
+            centers.push(SpecCenter {
+                hub: self.hubs[h].id, x: self.hubs[h].x, y: self.hubs[h].y,
+                name: self.hubs[h].name.clone(), risk, stars, tier: tier.into(),
+                pattern_tag, drivers, watch_goods, year,
+            });
+        }
+
+        centers.sort_by(|a, b| b.risk.partial_cmp(&a.risk).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Journal the high-risk poleis with the generated causal narrative.
+        for c in centers.iter().filter(|c| c.tier == "HIGH") {
+            let why = c.drivers.iter().take(3).map(|d| d.detail.clone()).collect::<Vec<_>>().join("; ");
+            let watch = if c.watch_goods.is_empty() { String::new() } else { format!(" Watch: {}.", c.watch_goods.join(", ")) };
+            let text = format!("{} — speculation {} ({:.2}). {}. Pattern: {}.{}", c.name, c.tier, c.risk, why, c.pattern_tag, watch);
+            self.journal.push(JournalEntry { tick, kind: "speculation".into(), hub: c.hub as i32, good: -1, value: c.risk, text });
+        }
+
+        self.spec_prev_profit = cur_profit;
+        self.spec_centers = centers;
+        self.spec_year = year;
     }
 
     /// Rebuild the route-days matrix from hub positions + components. Same
@@ -1106,6 +1386,11 @@ impl CampaignSim {
                 }
                 self.house_ledger_prev = self.house_ledger.clone();
                 let yr = tick / TICKS_PER_YEAR;
+                // DLC 3 · the polis council sets the coming year's tariff / mint
+                // policy, then the speculation why-engine reads the year that just
+                // closed (uses `house_ledger_prev` before the books are reset).
+                self.decide_polis_policy(yr);
+                self.compute_speculation(yr);
                 for l in self.house_ledger.iter_mut() {
                     *l = LedgerAcc { year: yr, ..Default::default() };
                 }
@@ -1804,8 +2089,12 @@ impl CampaignSim {
                         // import at destination b) — paid by the house, funding the
                         // cities (civic_pool → people). Guilds pay heavier taxes.
                         let tax_mult = if self.houses[oi].is_guild { GUILD_TAX_MULT } else { 1.0 };
-                        let export_tax = value * EXPORT_TAX_RATE * tax_mult;
-                        let import_tax = value * IMPORT_TAX_RATE * tax_mult;
+                        // DLC 3 · the origin/destination poleis levy their COUNCIL-set
+                        // tariff (0 = no policy yet → the global default rate).
+                        let exp_rate = if self.hubs[a].tariff_export > 0.0 { self.hubs[a].tariff_export } else { EXPORT_TAX_RATE };
+                        let imp_rate = if self.hubs[b].tariff_import > 0.0 { self.hubs[b].tariff_import } else { IMPORT_TAX_RATE };
+                        let export_tax = value * exp_rate * tax_mult;
+                        let import_tax = value * imp_rate * tax_mult;
                         self.houses[oi].wealth -= export_tax + import_tax;
                         self.hubs[a].civic_pool += export_tax;
                         self.hubs[b].civic_pool += import_tax;
@@ -2496,6 +2785,7 @@ impl CampaignSim {
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: kind, estate_tier: 1, owner_house, structures: vec![],
             founded_tick: self.tick, founder_house: owner_house,
+            treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
         });
         self.rebuild_routes();
     }
@@ -3622,6 +3912,7 @@ mod tests {
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: 0, estate_tier: 0, owner_house: -1, structures: vec![],
             founded_tick: 0, founder_house: -1,
+            treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
         }
     }
 
@@ -3649,6 +3940,7 @@ mod tests {
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
             recent_trades: vec![],
             contracts: vec![], contract_archive: vec![], next_contract_id: 0,
+            spec_centers: vec![], spec_year: 0, spec_prev_profit: vec![],
             days: vec![],
         };
         s.rebuild_routes();
@@ -3716,6 +4008,44 @@ mod tests {
                 assert!((a.hubs[h].price[g] - b.hubs[h].price[g]).abs() < 1e-3, "determinism");
             }
         }
+    }
+
+    #[test]
+    fn speculation_runs_yearly_and_is_deterministic() {
+        // DLC 3 · the yearly polis-policy + speculation passes must run inside
+        // `advance`, stay finite/in-range, and be reproducible across two runs.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+            good("amber", 1, 2, 14.0, 0.30, false),
+        ];
+        let mk = || {
+            let hubs = vec![
+                hub(0, 10.0, 10.0, 12000.0, vec![60.0, 6.0, 4.0], 0),
+                hub(1, 40.0, 12.0, 9000.0, vec![45.0, 1.0, 0.5], 0),
+                hub(2, 18.0, 38.0, 7000.0, vec![30.0, 0.5, 3.0], 0),
+            ];
+            let mut s = sim(hubs, goods.clone());
+            for i in 0..3u32 { s.houses.push(house_at(i, vec![(i as usize) % 3], 2)); }
+            s.rebuild_routes();
+            s
+        };
+        let mut a = mk();
+        let mut b = mk();
+        a.advance(800); // > 2 years → at least two yearly speculation passes
+        b.advance(800);
+        assert_eq!(a.spec_year, b.spec_year, "speculation year reproducible");
+        assert!(a.spec_year >= 2, "at least two yearly passes ran");
+        assert_eq!(a.spec_centers.len(), b.spec_centers.len(), "centers reproducible");
+        for c in &a.spec_centers {
+            assert!(c.risk.is_finite() && (0.0..=1.0).contains(&c.risk), "risk in range");
+            assert!((1..=5).contains(&c.stars));
+            assert!(!c.drivers.is_empty(), "a scored polis has a reason-chain");
+            // drivers are ranked largest-weight first
+            for w in c.drivers.windows(2) { assert!(w[0].weight >= w[1].weight - 1e-6); }
+        }
+        // The polis agent set per-city tariffs (council policy ran).
+        assert!(a.hubs.iter().any(|h| h.tariff_export > 0.0), "a council set a tariff");
     }
 
     #[test]

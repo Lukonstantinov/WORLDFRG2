@@ -94,6 +94,8 @@ interface UIStore {
   /** Merchant-houses panel open. */
   showHouses: boolean;
   showCityRanking: boolean;
+  /** DLC 3 · the Speculation & Poleis (finance) panel open. */
+  showSpeculation: boolean;
   /** Goods & Chains review window open (always shown before goods generation). */
   chainReviewOpen: boolean;
   /** Action run when the user confirms "Generate" in the chain-review window
@@ -135,6 +137,7 @@ interface UIStore {
   setGoodDetail: (id: string | null) => void;
   setShowHouses: (v: boolean) => void;
   setShowCityRanking: (v: boolean) => void;
+  setShowSpeculation: (v: boolean) => void;
   openChainReview: (onConfirm?: () => void) => void;
   closeChainReview: () => void;
 }
@@ -173,6 +176,7 @@ export const useUIStore = create<UIStore>((set) => ({
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
+    speculation: false,
     houseControl: false, merchantRoutes: false,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
     ...Object.fromEntries(GOOD_DEFS.map((g) => [goodOverlayKey(g.name), false])),
@@ -197,6 +201,7 @@ export const useUIStore = create<UIStore>((set) => ({
   goodDetailId: null,
   showHouses: false,
   showCityRanking: false,
+  showSpeculation: false,
   chainReviewOpen: false,
   chainReviewConfirm: null,
 
@@ -264,6 +269,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setGoodDetail: (id) => set({ goodDetailId: id }),
   setShowHouses: (v) => set({ showHouses: v }),
   setShowCityRanking: (v) => set({ showCityRanking: v }),
+  setShowSpeculation: (v) => set({ showSpeculation: v }),
   openChainReview: (onConfirm) => set({ chainReviewOpen: true, chainReviewConfirm: onConfirm ?? null }),
   closeChainReview: () => set({ chainReviewOpen: false, chainReviewConfirm: null }),
 
