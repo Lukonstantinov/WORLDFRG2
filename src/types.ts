@@ -298,6 +298,28 @@ export interface HubDetail {
   sold?: number;
   /** Estates & manufactories in this city's hinterland. */
   estates_here?: EstateRow[];
+  /** DLC 3 · the polis government of this seat (null for estates). */
+  government?: Government | null;
+}
+/** DLC 3 · a polis seat's government: council house + fiscal policy + speculation. */
+export interface Government {
+  council: string;
+  council_color: string;
+  council_archetype: string;
+  council_is_guild: boolean;
+  council_power: number;
+  tariff_export: number;
+  tariff_import: number;
+  tariff_default: boolean;
+  mint_fineness: number;
+  treasury: number;
+  civic_pool: number;
+  spec_risk: number;
+  spec_tier: string;   // "" | LOW | MED | HIGH
+  spec_stars: number;
+  spec_pattern: string;
+  spec_drivers: string[];
+  spec_watch: string[];
 }
 /** One estate / manufactory in a settlement's hinterland. */
 export interface EstateRow {

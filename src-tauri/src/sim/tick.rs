@@ -260,8 +260,8 @@ const FLEET_DECAY_CHANCE: f32 = 0.012;
 /// Civic taxes a city levies on a house's trade — export on goods leaving the
 /// origin, import on goods arriving at the destination. Paid by the house, funding
 /// the city (into its civic_pool → people). Guilds pay HEAVIER taxes (civic duty).
-const EXPORT_TAX_RATE: f32 = 0.04;
-const IMPORT_TAX_RATE: f32 = 0.05;
+pub const EXPORT_TAX_RATE: f32 = 0.04;
+pub const IMPORT_TAX_RATE: f32 = 0.05;
 const GUILD_TAX_MULT: f32 = 2.0;
 /// Guild trade taxes are PROGRESSIVE in trade volume: a dominant guild moving a
 /// great deal of cargo pays proportionally more on every shipment than a small
@@ -558,6 +558,28 @@ pub struct RecentTrade {
     pub sea: bool,
     pub price: f32,
     pub tick: u32,
+}
+
+/// One aggregated trade flow for the settlement "Flows" subtab: how much of `good`
+/// moved between `hub` and `partner` in a direction (`dir` 0 = inbound to `hub`,
+/// 1 = outbound from `hub`) over a year. Sparse — only pairs that actually traded.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct TradeFlowAgg {
+    pub hub: u32,
+    pub good: u32,
+    pub partner: u32,
+    pub dir: u8,
+    pub amount: f32,
+}
+
+/// Per-(hub, good) yearly trade-volume series (in + out), so the Flows subtab can
+/// graph trade DYNAMICS over the campaign and show which trades have fallen.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct TradeHist {
+    pub hub: u32,
+    pub good: u32,
+    /// Total volume traded each year (most recent last), capped to `TRADE_HIST_CAP`.
+    pub vols: Vec<f32>,
 }
 
 /// One milestone in a house's chronicle (its timeline view).

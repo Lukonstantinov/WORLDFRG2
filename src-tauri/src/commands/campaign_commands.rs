@@ -363,6 +363,37 @@ pub struct ShipmentRow {
     pub returning_home: bool,   // a round-trip RETURN leg (goods bought abroad, coming home)
 }
 
+/// DLC 3 · a polis seat's government, for the settlement Government subtab: the
+/// council house and the fiscal policy it sets, plus this seat's speculation read.
+#[derive(Serialize, Clone, Default)]
+pub struct Government {
+    /// Governing (dominant, non-guild) house name, or "—" if none holds the seat.
+    pub council: String,
+    pub council_color: String,
+    pub council_archetype: String,
+    pub council_is_guild: bool,
+    /// The council house's soft political power 0..1.
+    pub council_power: f32,
+    /// Effective export / import tariff fractions in force (council policy, or the
+    /// global default until a council sets one).
+    pub tariff_export: f32,
+    pub tariff_import: f32,
+    /// True when these are the global defaults (no council policy set yet).
+    pub tariff_default: bool,
+    /// Mint fineness (1.0 = full-bodied coin, < 1 = debased "cheap money").
+    pub mint_fineness: f32,
+    pub treasury: f32,
+    pub civic_pool: f32,
+    /// This seat's speculation read (empty tier = none / below the noise floor).
+    pub spec_risk: f32,
+    pub spec_tier: String,
+    pub spec_stars: u8,
+    pub spec_pattern: String,
+    /// The ranked causal "why" clauses (largest driver first).
+    pub spec_drivers: Vec<String>,
+    pub spec_watch: Vec<String>,
+}
+
 /// Full per-settlement detail for the redesigned settlement window (live campaign
 /// state): sentiment, market, and history.
 #[derive(Serialize)]
@@ -409,6 +440,9 @@ pub struct HubDetail {
     #[serde(default)] pub estate_good: String,
     /// Buildings erected here: (name, one-line effect) — for the inspector.
     #[serde(default)] pub structures: Vec<(String, String)>,
+    /// DLC 3 · the polis government of this seat (council + fiscal policy + this
+    /// city's speculation read). None for estates / unsettled hubs.
+    #[serde(default)] pub government: Option<Government>,
     /// FOREIGN merchant offices hosted in this settlement (houses/guilds based
     /// elsewhere who have opened a counting-house here).
     #[serde(default)] pub offices_here: Vec<OfficeHere>,
@@ -1215,6 +1249,37 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             }
         })
         .collect();
+    // ── DLC 3 · the polis government of this seat (non-estate settlements only) ──
+    let government = if hub.is_estate {
+        None
+    } else {
+        use crate::sim::tick::{archetype_label, EXPORT_TAX_RATE, IMPORT_TAX_RATE};
+        let ci = hub.council_house;
+        let (council, council_color, council_archetype, council_is_guild, council_power) =
+            if ci >= 0 {
+                if let Some(house) = sim.houses.get(ci as usize) {
+                    (house.name.clone(), distinct_color(ci as usize),
+                     archetype_label(house.archetype).to_string(), house.is_guild, house.political_power)
+                } else { ("—".into(), "#7a8aa0".into(), String::new(), false, 0.0) }
+            } else { ("—".into(), "#7a8aa0".into(), String::new(), false, 0.0) };
+        let tariff_default = hub.tariff_export <= 0.0 && hub.tariff_import <= 0.0;
+        let tariff_export = if hub.tariff_export > 0.0 { hub.tariff_export } else { EXPORT_TAX_RATE };
+        let tariff_import = if hub.tariff_import > 0.0 { hub.tariff_import } else { IMPORT_TAX_RATE };
+        let spec = sim.spec_centers.iter().find(|c| c.hub == hub.id);
+        let (spec_risk, spec_tier, spec_stars, spec_pattern, spec_drivers, spec_watch) = match spec {
+            Some(c) => (c.risk, c.tier.clone(), c.stars, c.pattern_tag.clone(),
+                c.drivers.iter().map(|d| d.detail.clone()).filter(|s| !s.is_empty()).collect::<Vec<_>>(),
+                c.watch_goods.clone()),
+            None => (0.0, String::new(), 0, String::new(), vec![], vec![]),
+        };
+        Some(Government {
+            council, council_color, council_archetype, council_is_guild, council_power,
+            tariff_export, tariff_import, tariff_default,
+            mint_fineness: if hub.mint_fineness <= 0.0 { 1.0 } else { hub.mint_fineness },
+            treasury: hub.treasury, civic_pool: hub.civic_pool,
+            spec_risk, spec_tier, spec_stars, spec_pattern, spec_drivers, spec_watch,
+        })
+    };
     Ok(Some(HubDetail {
         id: hub.id,
         name: hub.name.clone(),
@@ -1261,6 +1326,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             crate::sim::tick::structure_label(s).to_string(),
             crate::sim::tick::structure_effect(s).to_string(),
         )).collect(),
+        government,
     }))
 }
 

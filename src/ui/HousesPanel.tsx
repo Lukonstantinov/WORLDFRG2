@@ -121,7 +121,7 @@ export function HousesPanel() {
         )}
         {inTab.map((h, i) => (
           <div key={h.name + i} style={{ ...card, cursor: "pointer" }} onClick={() => selectHouse(h)} title="Open this family's detail">
-            <CoatOfArms name={h.name} size={30} />
+            <CoatOfArms name={h.name} size={30} guild={h.is_guild} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                 {/* Colour chip — vivid for private houses, dull for civic guilds */}
@@ -202,7 +202,7 @@ export function HousesPanel() {
             </div>
             {gone.map((h, i) => (
               <div key={"d" + i} style={{ ...card, opacity: 0.55, cursor: "pointer" }} onClick={() => openTimeline(h.name)} title="View this family's timeline">
-                <CoatOfArms name={h.name} size={22} />
+                <CoatOfArms name={h.name} size={22} guild={h.is_guild} />
                 <div style={{ flex: 1 }}>
                   <span style={{ color: "#9aa6b4", fontSize: 11, textDecoration: "line-through" }}>{h.name}</span>
                   <span style={{ color: "#566", fontSize: 9 }}> · once of {h.home_name}</span>

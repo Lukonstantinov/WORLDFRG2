@@ -10,7 +10,7 @@ import { CoatOfArms, houseColor } from "./CoatOfArms";
 import type { HouseBrief } from "../types";
 import { SettlementScene } from "./SettlementScene";
 
-type Tab = "summary" | "city" | "trade" | "estates" | "depots" | "people";
+type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "depots" | "people";
 
 const LOCAL_COLOR = "#5d6675";  // unaffiliated local merchants (grey)
 const GUILD_COLOR = "#4a6a8a";  // organised merchant guilds (slate blue)
@@ -185,6 +185,7 @@ export function HubPanel() {
   const TABS: { id: Tab; label: string }[] = [
     { id: "summary", label: "Summary" },
     ...(detail ? [{ id: "city" as Tab, label: detail.is_estate ? "Estate" : "City" }] : []),
+    ...(detail && !detail.is_estate ? [{ id: "govt" as Tab, label: "Government" }] : []),
     { id: "trade", label: "Trade" },
     { id: "estates", label: "Estates" },
     ...(campActive ? [{ id: "depots" as Tab, label: "Depots" }] : []),
@@ -235,6 +236,86 @@ export function HubPanel() {
           The building schematic appears once a campaign is running.
         </div>
       )}
+
+      {/* ════════════ GOVERNMENT (DLC 3 polis) ════════════ */}
+      {tab === "govt" && (() => {
+        const g = detail?.government;
+        if (!g) return (
+          <div style={{ color: "#7a8aa0", fontSize: 11, padding: "8px 2px" }}>
+            The city government appears once a campaign is running.
+          </div>
+        );
+        const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+        const tierColor = g.spec_tier === "HIGH" ? "#ff6a4a" : g.spec_tier === "MED" ? "#f4c430" : "#6fae6f";
+        const govRow = (label: string, val: string, warn = false) => (
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 11 }}>
+            <span style={{ color: "#8aa0c0" }}>{label}</span>
+            <span style={{ color: warn ? "#ff8a6a" : "#e8dcc0", fontWeight: 600 }}>{val}</span>
+          </div>
+        );
+        return (
+          <div style={{ fontSize: 11, color: "#c7d6e8" }}>
+            <div style={sectionHdr}>Council</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              {g.council !== "—"
+                ? <CoatOfArms name={g.council} size={32} guild={g.council_is_guild} />
+                : <span style={{ fontSize: 24 }}>🏛️</span>}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: "#e8dcc0", fontWeight: 600 }}>{g.council}</div>
+                <div style={{ color: "#8aa0c0", fontSize: 10 }}>
+                  {g.council_archetype || (g.council === "—" ? "no governing house" : "")}
+                  {g.council_is_guild ? " · civic guild" : ""}
+                </div>
+              </div>
+              {g.council !== "—" && (
+                <div style={{ textAlign: "right", minWidth: 60 }}>
+                  <div style={{ fontSize: 9, color: "#6a86a6" }}>power</div>
+                  <div style={{ height: 6, background: "#1e2e42", borderRadius: 3, overflow: "hidden" }}>
+                    <div style={{ width: `${Math.round(Math.min(1, g.council_power) * 100)}%`, height: "100%", background: "#c9a227" }} />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={sectionHdr}>
+              Fiscal policy{" "}
+              {g.tariff_default && <span style={{ color: "#6a86a6", fontWeight: 400, fontSize: 9 }}>(default — no council yet)</span>}
+            </div>
+            {govRow("Export tariff", pct(g.tariff_export))}
+            {govRow("Import tariff", pct(g.tariff_import))}
+            {govRow("Mint fineness", g.mint_fineness.toFixed(2), g.mint_fineness < 0.97)}
+            {g.mint_fineness < 0.97 && (
+              <div style={{ color: "#ff8a6a", fontSize: 9, marginTop: 1 }}>⚠ debased coin — "cheap money"</div>
+            )}
+
+            <div style={sectionHdr}>Treasury</div>
+            {govRow("City treasury", fmt(g.treasury))}
+            {govRow("Circulating civic pool", fmt(g.civic_pool))}
+
+            <div style={sectionHdr}>🫧 Speculation</div>
+            {g.spec_tier ? (
+              <>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 3, flexWrap: "wrap" }}>
+                  <span style={{ color: tierColor, fontWeight: 700 }}>{g.spec_tier}</span>
+                  <span style={{ color: "#ffd24a" }}>
+                    {"●".repeat(g.spec_stars)}<span style={{ color: "#33404f" }}>{"○".repeat(Math.max(0, 5 - g.spec_stars))}</span>
+                  </span>
+                  <span style={{ color: "#8aa0c0" }}>({g.spec_risk.toFixed(2)})</span>
+                  <span style={{ color: "#7a8aa0", fontStyle: "italic" }}>{g.spec_pattern}</span>
+                </div>
+                {g.spec_drivers.slice(0, 4).map((d, i) => (
+                  <div key={i} style={{ color: "#9fb4cc", fontSize: 10, marginLeft: 4 }}>• {d}</div>
+                ))}
+                {g.spec_watch.length > 0 && (
+                  <div style={{ color: "#c9a227", fontSize: 10, marginTop: 3 }}>Watch goods: {g.spec_watch.join(", ")}</div>
+                )}
+              </>
+            ) : (
+              <div style={{ color: "#6fae6f", fontSize: 10 }}>Calm — no speculative pressure detected this year.</div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ════════════ OVERVIEW ════════════ */}
       {tab === "summary" && (
@@ -731,7 +812,7 @@ export function HubPanel() {
                 <HouseSharePie houses={hs} localVolume={localVolume} guildVolume={guildVolume} merchants={hub.merchants ?? 0} />
                 {hs.map((h, i) => (
                   <div key={h.name + i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 3 }}>
-                    <CoatOfArms name={h.name} size={20} />
+                    <CoatOfArms name={h.name} size={20} guild={h.is_guild} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
                         <span style={{ color: "#e8dcc0", fontSize: 11, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</span>
