@@ -429,6 +429,16 @@ pub struct EstateRow {
     pub owner: String,       // owning house/guild, or "City of …"
     pub owner_is_guild: bool,
     pub tier: u8,            // upgrade tier 1..5
+    /// Year this estate/manufactory was opened.
+    #[serde(default)] pub year_opened: u32,
+    /// The house/guild that originally founded it (may differ from current owner).
+    #[serde(default)] pub founder: String,
+    /// Goods manufactured/extracted per month (≈ output × 30).
+    #[serde(default)] pub monthly_output: f32,
+    /// Of the monthly output, how much is committed to futures contracts.
+    #[serde(default)] pub reserved_for_contracts: f32,
+    /// Futures contracts this estate supplies (active + recent).
+    #[serde(default)] pub contracts: Vec<ContractRow>,
 }
 
 /// One foreign merchant's office hosted in a settlement (host-side view).
@@ -709,6 +719,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 estate_tier: 0,
                 owner_house: -1,
                 structures: vec![],
+                founded_tick: 0,
+                founder_house: -1,
             }
         })
         .collect();
@@ -892,6 +904,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         diag_lost: 0,
         diag_volume: 0.0,
         recent_trades: vec![],
+        contracts: vec![],
+        contract_archive: vec![],
+        next_contract_id: 0,
         days: vec![],
     };
     sim.rebuild_routes();
@@ -1053,9 +1068,9 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
     let bought = hub.import_spend;
     let sold = hub.export_earn;
     // ── Estates & manufactories in this city's hinterland ──
-    let estates_here: Vec<EstateRow> = sim.hubs.iter()
-        .filter(|e| e.is_estate && e.parent == hi as i32)
-        .map(|e| {
+    let estates_here: Vec<EstateRow> = sim.hubs.iter().enumerate()
+        .filter(|(_, e)| e.is_estate && e.parent == hi as i32)
+        .map(|(ei, e)| {
             let g = e.base_per_capita.iter().enumerate()
                 .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(i, _)| i).unwrap_or(0);
@@ -1065,14 +1080,35 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             } else {
                 (format!("City of {}", hub.name), false)
             };
+            let founder = if e.founder_house >= 0 {
+                sim.houses.get(e.founder_house as usize).map(|x| x.name.clone()).unwrap_or_default()
+            } else {
+                format!("City of {}", hub.name)
+            };
+            let output = e.production.get(g).copied().unwrap_or(0.0);
+            // Futures contracts this estate supplies (active first, then archived).
+            let mut contracts: Vec<ContractRow> = sim.contracts.iter()
+                .filter(|c| c.supplier_estate as usize == ei)
+                .map(|c| contract_row(&sim, c)).collect();
+            contracts.extend(sim.contract_archive.iter()
+                .filter(|c| c.supplier_estate as usize == ei)
+                .map(|c| contract_row(&sim, c)));
+            let reserved_for_contracts: f32 = sim.contracts.iter()
+                .filter(|c| c.supplier_estate as usize == ei)
+                .map(|c| c.qty_per_period).sum();
             EstateRow {
                 name: e.name.clone(),
                 kind: e.estate_kind,
                 good: sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_default(),
-                output: e.production.get(g).copied().unwrap_or(0.0),
+                output,
                 owner,
                 owner_is_guild,
                 tier: e.estate_tier.max(1),
+                year_opened: e.founded_tick / 365,
+                founder,
+                monthly_output: output * 30.0,
+                reserved_for_contracts,
+                contracts,
             }
         })
         .collect();
@@ -1427,15 +1463,27 @@ pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRo
         v.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal));
         v
     };
-    let mut out: Vec<MerchantRoute> = groups.into_iter().map(|((owner, lo, hi), a)| {
+    let mut out: Vec<MerchantRoute> = groups.into_iter().map(|((owner, lo, hi), agg)| {
         let h = sim.houses.get(owner);
+        // Orient the route so `a` is the FOUNDER side: if the holder's home city is
+        // one endpoint, that is `a`; otherwise keep the dominant flow direction
+        // (more goods travel a→b than b→a). Direction arrows are drawn a→b, so this
+        // makes them point away from the founder city.
+        let home = h.map(|x| city_of(x.hub)).unwrap_or(lo);
+        let out_vol: f32 = agg.out.values().sum();
+        let ret_vol: f32 = agg.ret.values().sum();
+        let flip = if home == hi { true }
+            else if home == lo { false }
+            else { ret_vol > out_vol };
+        let (sa, sb) = if flip { (hi, lo) } else { (lo, hi) };
+        let (oa, ob) = if flip { (agg.ret, agg.out) } else { (agg.out, agg.ret) };
         MerchantRoute {
-            a: pos(lo), b: pos(hi), a_name: hname(lo), b_name: hname(hi),
+            a: pos(sa), b: pos(sb), a_name: hname(sa), b_name: hname(sb),
             holder: h.map(|x| x.name.clone()).unwrap_or_default(),
             color: distinct_color(owner),
             is_guild: h.map(|x| x.is_guild).unwrap_or(false),
-            sea: a.sea, volume: a.vol,
-            out_goods: sort_goods(a.out), ret_goods: sort_goods(a.ret),
+            sea: agg.sea, volume: agg.vol,
+            out_goods: sort_goods(oa), ret_goods: sort_goods(ob),
         }
     }).collect();
     out.sort_by(|x, y| y.volume.partial_cmp(&x.volume).unwrap_or(std::cmp::Ordering::Equal));
@@ -1530,6 +1578,94 @@ pub fn campaign_get_houses(db: State<'_, WorldDb>) -> Result<Vec<HouseBrief>, St
         Some(sim) => build_house_briefs(&sim),
         None => vec![],
     })
+}
+
+/// One futures contract, flattened for the Houses panel "Contracts" subtab and the
+/// settlement Estates view. Covers both active and archived (resolved) agreements.
+#[derive(Serialize, Clone)]
+pub struct ContractRow {
+    pub id: u32,
+    /// House/guild index that owns the agreement (carrier + supplier owner).
+    pub owner_idx: i32,
+    pub owner: String,
+    pub owner_is_guild: bool,
+    pub color: String,
+    pub good: String,
+    /// Producing estate/manufactory + the city it sits in.
+    pub supplier: String,
+    pub supplier_city: String,
+    /// Buyer city (the polis).
+    pub buyer: String,
+    pub qty_per_period: f32,
+    pub price_per_unit: f32,
+    /// 0 sea / 1 river / 2 caravan.
+    pub transport_kind: u8,
+    pub reserved_slots: u32,
+    pub start_year: u32,
+    pub term_years: u32,
+    pub periods_total: u32,
+    pub periods_done: u32,
+    pub fulfilled_pct: f32,
+    pub last_period_delivered: f32,
+    pub penalties_paid: f32,
+    pub revenue_total: f32,
+    /// "active" | "fulfilled" | "cancelled".
+    pub status: String,
+    pub cancel_reason: String,
+}
+
+fn contract_row(sim: &CampaignSim, c: &crate::sim::tick::Contract) -> ContractRow {
+    use crate::sim::tick::ContractStatus;
+    let gname = sim.goods.get(c.good).map(|x| x.name.clone()).unwrap_or_default();
+    let est = sim.hubs.get(c.supplier_estate as usize);
+    let supplier = est.map(|x| x.name.clone()).unwrap_or_default();
+    let supplier_city = est
+        .and_then(|x| if x.parent >= 0 { sim.hubs.get(x.parent as usize) } else { Some(x) })
+        .map(|x| x.name.clone()).unwrap_or_default();
+    let buyer = sim.hubs.get(c.buyer_polis as usize).map(|x| x.name.clone()).unwrap_or_default();
+    let owner = sim.houses.get(c.owner_house.max(0) as usize);
+    let (status, reason) = match c.status {
+        ContractStatus::Active => ("active", String::new()),
+        ContractStatus::Fulfilled => ("fulfilled", String::new()),
+        ContractStatus::Cancelled => ("cancelled", c.cancel_reason.clone()),
+    };
+    ContractRow {
+        id: c.id,
+        owner_idx: c.owner_house,
+        owner: owner.map(|x| x.name.clone()).unwrap_or_default(),
+        owner_is_guild: owner.map(|x| x.is_guild).unwrap_or(false),
+        color: if c.owner_house >= 0 { distinct_color(c.owner_house as usize) } else { "#888".into() },
+        good: gname,
+        supplier,
+        supplier_city,
+        buyer,
+        qty_per_period: c.qty_per_period,
+        price_per_unit: c.price_per_unit,
+        transport_kind: c.transport_kind,
+        reserved_slots: c.reserved_slots,
+        start_year: c.start_tick / 365,
+        term_years: c.term_ticks / 365,
+        periods_total: c.periods_total,
+        periods_done: c.periods_done,
+        fulfilled_pct: if c.periods_total > 0 {
+            c.periods_done as f32 / c.periods_total as f32 * 100.0
+        } else { 0.0 },
+        last_period_delivered: c.last_period_delivered,
+        penalties_paid: c.penalties_paid,
+        revenue_total: c.revenue_total,
+        status: status.to_string(),
+        cancel_reason: reason,
+    }
+}
+
+/// Active + archived (≤5-year) futures contracts for the Houses panel Contracts tab.
+#[tauri::command]
+pub fn campaign_get_contracts(db: State<'_, WorldDb>) -> Result<Vec<ContractRow>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let Some(sim) = get_sim(&conn)? else { return Ok(vec![]) };
+    let mut out: Vec<ContractRow> = sim.contracts.iter().map(|c| contract_row(&sim, c)).collect();
+    out.extend(sim.contract_archive.iter().map(|c| contract_row(&sim, c)));
+    Ok(out)
 }
 
 /// One labelled money line in the Accountant view (a city's tax/profit, or a

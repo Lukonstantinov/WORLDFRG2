@@ -876,11 +876,33 @@ export class OverlayManager {
       ctx.lineTo(bx, by);
       ctx.stroke();
       ctx.setLineDash([]);
+      // Origin dot at the FOUNDER city (a); destination gets an arrowhead so the
+      // route reads directionally — goods flow FROM the founder's seat outward.
       const dotR = Math.max(0.8, 1.6 / Math.sqrt(this.currentScale));
       ctx.globalAlpha = 0.85;
       ctx.fillStyle = r.color || "#cccccc";
       ctx.beginPath(); ctx.arc(ax, ay, dotR, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(bx, by, dotR, 0, Math.PI * 2); ctx.fill();
+      // Direction arrowheads sitting ON the route line, pointing a → b. Several are
+      // spaced along the segment so the direction is legible even when zoomed out.
+      let dx = bx - ax, dy = by - ay;
+      const len = Math.hypot(dx, dy);
+      if (len > 0.001) {
+        dx /= len; dy /= len;
+        const px = -dy, py = dx;
+        const hl = Math.max(2.2, (3.5 + norm * 4.0) / Math.sqrt(this.currentScale));
+        const heads = Math.max(1, Math.min(4, Math.floor(len / (hl * 3))));
+        ctx.fillStyle = r.color || "#cccccc";
+        for (let i = 1; i <= heads; i++) {
+          const t = i / (heads + 1);
+          const hx = ax + dx * len * t, hy = ay + dy * len * t;
+          ctx.beginPath();
+          ctx.moveTo(hx, hy);
+          ctx.lineTo(hx - dx * hl + px * hl * 0.5, hy - dy * hl + py * hl * 0.5);
+          ctx.lineTo(hx - dx * hl - px * hl * 0.5, hy - dy * hl - py * hl * 0.5);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
     }
     ctx.globalAlpha = 1;
     ctx.setLineDash([]);

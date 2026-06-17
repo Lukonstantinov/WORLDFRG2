@@ -45,6 +45,11 @@ const FOOD_RESERVE_DAYS: f32 = 45.0;
 const EVENT_PROD_FLOOR: f32 = 0.5;
 /// A house this wealthy may split a cadet branch into another city on succession.
 const HOUSE_BRANCH_WEALTH: f32 = 12.0;
+/// Trade rebalance: big, prosperous cities crave imported COMFORT/LUXURY goods far
+/// more than a subsistence town does. This gain scales non-food luxury demand by a
+/// city's prosperity × size, so spices, silk, gems and wine actually find buyers
+/// (and clear freight) instead of staples — wheat & salt — dominating every route.
+const LUX_DEMAND_GAIN: f32 = 1.2;
 
 // ── Merchant fleets & voyage risk ────────────────────────────────────────────
 /// Per-voyage chance a shipment is lost: storms at sea, ambush on the road,
@@ -98,6 +103,39 @@ const MAX_ESTATES_PER_CITY: usize = 4;
 const MANUFACTORY_PERCAP: f32 = 0.2;
 /// Each estate/manufactory upgrade tier multiplies its output by this (5 tiers).
 const ESTATE_UPGRADE_MULT: f32 = 1.4;
+
+// ── World caps on merchant bodies ────────────────────────────────────────────
+/// The world supports at most this many private merchant houses and this many
+/// civic guilds. Founding/branching stop once the cap is reached (existing ones
+/// must die out before new ones appear). Keeps the merchant world bounded.
+const MAX_HOUSES: usize = 100;
+const MAX_GUILDS: usize = 130;
+
+// ── Futures contracts (forward supply agreements) ────────────────────────────
+/// A contract settles (delivers a period's quota) every this many ticks (monthly).
+const CONTRACT_PERIOD: u32 = 30;
+/// The locked price a polis pays = the spot price at signing × (1 + premium). The
+/// premium is the buyer's cost of guaranteeing supply — it's why a house earns
+/// MORE on a contract than on opportunistic spot trade.
+const CONTRACT_PREMIUM: f32 = 0.12;
+/// Liquidated-damages penalty on an under-delivered period: the shortfall's value
+/// × this rate, then capped (below) so a run of bad-luck losses can't instantly
+/// ruin a house. The house bears the delivery risk; the polis bears price risk.
+const CONTRACT_PENALTY_RATE: f32 = 0.5;
+/// Per-period penalty cap, as a fraction of a full period's contract value.
+const CONTRACT_PENALTY_CAP: f32 = 0.6;
+/// Nominal cargo one reserved vessel hauls per period — used to size how many
+/// vessels (fleet slots) a contract dedicates (e.g. 100 units ≈ 3 boats).
+const CONTRACT_VESSEL_LOAD: f32 = 40.0;
+/// A contract reserves at most this many of a house's vessels.
+const CONTRACT_MAX_SLOTS: u32 = 4;
+/// Contract term bounds (years). The full quota is delivered monthly across it.
+const CONTRACT_MIN_TERM_YEARS: u32 = 2;
+const CONTRACT_MAX_TERM_YEARS: u32 = 5;
+/// Resolved (fulfilled/cancelled) contracts are kept for this long for the record.
+const CONTRACT_ARCHIVE_TICKS: u32 = 5 * TICKS_PER_YEAR;
+/// A house won't run more than this many active contracts at once.
+const MAX_HOUSE_CONTRACTS: usize = 8;
 
 // ── Merchant fleets & voyage risk ────────────────────────────────────────────
 /// A settlement gets a civic Merchant Guild once it reaches this population.
@@ -359,6 +397,12 @@ pub struct TickHub {
     /// Owning house index for an estate (−1 = owned by the parent city). Estate
     /// export income flows to this owner — a core engine of house growth.
     #[serde(default = "neg_one_i32")] pub owner_house: i32,
+    /// Tick this estate was founded (→ "year opened" in the settlement view). 0 on
+    /// non-estates / pre-existing saves (reads as year 0).
+    #[serde(default)] pub founded_tick: u32,
+    /// The house/guild that ORIGINALLY founded this estate (immutable; `owner_house`
+    /// is the CURRENT owner and may change hands). −1 = city-founded / old saves.
+    #[serde(default = "neg_one_i32")] pub founder_house: i32,
     /// Buildings this settlement has erected (ids: 1 Granary / 2 Warehouse /
     /// 3 Shipyard / 4 Guildhall / 5 Workshop). Each grants a standing bonus; at
     /// most one of each. Auto-built as a city/house prospers.
@@ -404,6 +448,65 @@ pub struct InTransit {
     /// Round-trip origin hub the return leg sells at (−1 = a plain one-way trip
     /// that spawns no return). Only house-owned outbound voyages set this.
     #[serde(default = "neg_one_i32")] pub home: i32,
+    /// True = a FUTURES-CONTRACT delivery. Its vessel is already accounted for by
+    /// the contract's standing reservation, so it isn't re-counted against the
+    /// house's free fleet during opportunistic dispatch.
+    #[serde(default)] pub contract: bool,
+}
+
+/// A futures contract's lifecycle state.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContractStatus {
+    /// Running — delivering its quota each period.
+    Active,
+    /// Completed every period of its term.
+    Fulfilled,
+    /// Ended early — see `cancel_reason`.
+    Cancelled,
+}
+
+/// A FUTURES / forward supply contract. A house or guild commits one of its
+/// estates/manufactories to deliver a fixed quota of a good each period to a polis
+/// (buyer city) at a price LOCKED at signing. The buyer pre-commits and bears the
+/// price risk; the house bears the delivery risk (storms/ambush → partial delivery
+/// → a penalty, never a cancellation). The house alone may walk away, and only
+/// after half the term has run — so the polis's guaranteed supply is protected.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Contract {
+    pub id: u32,
+    pub good: usize,
+    /// Producing estate/manufactory (hub index).
+    pub supplier_estate: u32,
+    /// House/guild that controls the supplier and provides the logistics.
+    pub owner_house: i32,
+    /// Buyer city (hub index).
+    pub buyer_polis: u32,
+    /// Units delivered per settlement period (monthly quota).
+    pub qty_per_period: f32,
+    /// Price per unit, LOCKED at signing (spot × (1 + premium)).
+    pub price_per_unit: f32,
+    /// 0 sea / 1 river / 2 caravan — which fleet the reserved vessels come from.
+    pub transport_kind: u8,
+    /// Vessels (fleet slots) dedicated to this contract — withheld from the
+    /// house's opportunistic arbitrage so a contract is never starved of ships.
+    pub reserved_slots: u32,
+    pub start_tick: u32,
+    pub term_ticks: u32,
+    pub period_ticks: u32,
+    /// Tick the next period delivery is due.
+    pub next_delivery_tick: u32,
+    pub periods_total: u32,
+    pub periods_done: u32,
+    pub delivered_total: f32,
+    /// Units actually delivered in the most recent period (e.g. 66 of a 100 quota).
+    pub last_period_delivered: f32,
+    pub penalties_paid: f32,
+    pub revenue_total: f32,
+    pub status: ContractStatus,
+    /// Populated only when `status == Cancelled`.
+    pub cancel_reason: String,
+    /// Tick the contract was fulfilled/cancelled (for archive pruning).
+    pub resolved_tick: u32,
 }
 
 /// One recently completed trade (for the Market tab "recent deals" rows). A small
@@ -652,6 +755,13 @@ pub struct CampaignSim {
     #[serde(default)] pub diag_volume: f32,      // total goods volume shipped
     /// Rolling log of recently dispatched trades (for the Market "recent deals").
     #[serde(default)] pub recent_trades: Vec<RecentTrade>,
+    // ── Futures contracts (forward supply agreements) ──
+    /// Active contracts currently being delivered.
+    #[serde(default)] pub contracts: Vec<Contract>,
+    /// Resolved (fulfilled/cancelled) contracts, pruned to the last 5 years.
+    #[serde(default)] pub contract_archive: Vec<Contract>,
+    /// Monotonic id source for contracts.
+    #[serde(default)] pub next_contract_id: u32,
     /// Derived route-days matrix (n·n, f32::INFINITY = unreachable). Not
     /// serialized — rebuilt from positions + components after load.
     #[serde(skip)]
@@ -837,10 +947,21 @@ impl CampaignSim {
         // cadence goods (furs, luxuries) sit cheaper locally and skew to wholesale.
         let interval = if tg.consumption_interval > 0.0 { tg.consumption_interval } else { 30.0 };
         let cadence = (30.0 / interval).clamp(0.30, 1.8);
+        // Wealth/size appetite for non-food comfort & luxury goods: a rich, large
+        // entrepôt demands far more imported silk/spice/gems than a poor village,
+        // widening luxury arbitrage gaps so those goods actually trade.
+        let lux = if !tg.food && tg.need_tier >= 1 {
+            let prosp = self.hubs[h].sent_prosperity.clamp(0.0, 1.0);
+            let size = (self.hubs[h].population / 50_000.0).clamp(0.0, 3.0);
+            (1.0 + LUX_DEMAND_GAIN * prosp * (0.5 + 0.5 * size)).min(3.0)
+        } else {
+            1.0
+        };
         self.hubs[h].population
             * TIER_WEIGHT[tg.need_tier.min(2) as usize]
             * tg.desire.max(0.0)
             * cadence
+            * lux
             * self.need_scale
             * DEMAND_PRESSURE
     }
@@ -1085,6 +1206,14 @@ impl CampaignSim {
                     self.hubs[h].price[g] = 0.6 * self.hubs[h].price[g] + 0.4 * target;
                 }
             }
+
+            // 3.5) Futures contracts: sign new forward agreements (monthly) and
+            //      settle any deliveries that have come due. Contract vessels are
+            //      reserved inside `dispatch`, so this runs first.
+            if tick % CONTRACT_PERIOD == 0 {
+                self.maybe_sign_contracts(&needs);
+            }
+            self.dispatch_contracts(&needs);
 
             // 4) Merchant dispatch (arbitrage → in-transit cargo).
             self.dispatch(&needs);
@@ -1442,13 +1571,38 @@ impl CampaignSim {
             cap_land[i] = (h.fleet_river + h.fleet_caravan) as i32;
         }
         for c in &self.in_transit {
-            if c.owner >= 0 {
+            // A contract delivery's vessel is covered by the standing reservation
+            // below — don't subtract it twice.
+            if c.owner >= 0 && !c.contract {
                 let oi = c.owner as usize;
                 if oi < nh { if c.sea { cap_sea[oi] -= 1; } else { cap_land[oi] -= 1; } }
             }
         }
+        // Futures contracts reserve dedicated vessels up front, so opportunistic
+        // arbitrage can never steal the ships a signed agreement depends on. This is
+        // why allocating transport to spot trades no longer cancels contracts.
+        for ct in &self.contracts {
+            if ct.status != ContractStatus::Active || ct.owner_house < 0 { continue; }
+            let oi = ct.owner_house as usize;
+            if oi >= nh { continue; }
+            if ct.transport_kind == 0 { cap_sea[oi] -= ct.reserved_slots as i32; }
+            else { cap_land[oi] -= ct.reserved_slots as i32; }
+        }
+        // Trade rebalance — VALUE-WEIGHTED ordering: dispatch high-value goods first
+        // so a small, lucrative gem/spice shipment claims a scarce fleet slot before
+        // yet another bulk load of cheap wheat or salt. Food keeps priority among the
+        // staples (it must still move), but luxuries are no longer crowded out.
+        let mut order: Vec<usize> = (0..ng).collect();
+        order.sort_by(|&a, &b| {
+            let key = |g: usize| {
+                let food_rank = if self.goods[g].food { 1.0f32 } else { 0.0 };
+                // Food first within its band, then by world value (luxuries lead).
+                food_rank * 1e6 + self.goods[g].base_value
+            };
+            key(b).partial_cmp(&key(a)).unwrap_or(std::cmp::Ordering::Equal)
+        });
         // Snapshot stocks so a single round's decisions use consistent prices.
-        for g in 0..ng {
+        for &g in &order {
             let base = self.goods[g].base_value;
             // Build (hub, surplus) and (hub, price) lists.
             let reserve_mult = if self.goods[g].food { FOOD_RESERVE_DAYS } else { TRADE_RESERVE_MULT };
@@ -1681,11 +1835,275 @@ impl CampaignSim {
                         // second profit). Guild/local one-way trips spawn no return.
                         phase: 0,
                         home: if owner >= 0 { a as i32 } else { -1 },
+                        contract: false,
                     });
                     self.log_trade(a as u32, b as u32, g, amount, owner, sea, pa);
                 }
             }
         }
+    }
+
+    /// Monthly: a house/guild that controls an estate or manufactory with spare
+    /// output may sign a FUTURES contract to supply a polis that wants the good. The
+    /// price is locked at the buyer's current spot × (1 + premium) — the buyer pays
+    /// a premium for guaranteed supply, which is why the house earns more than on
+    /// plain spot trade. Dedicated vessels are reserved up front.
+    fn maybe_sign_contracts(&mut self, needs: &[Vec<f32>]) {
+        let tick = self.tick;
+        let n = self.hubs.len();
+        let nh = self.houses.len();
+        // Standing commitments already in force, per house (fleet) and per estate
+        // (output) — so one signing pass never oversubscribes either.
+        let mut res_sea = vec![0u32; nh];
+        let mut res_land = vec![0u32; nh];
+        let mut active_by_house = vec![0usize; nh];
+        let mut booked_output = vec![0f32; n];
+        let mut has_contract = vec![false; n];
+        for c in &self.contracts {
+            if c.status != ContractStatus::Active { continue; }
+            if c.owner_house >= 0 && (c.owner_house as usize) < nh {
+                let oi = c.owner_house as usize;
+                if c.transport_kind == 0 { res_sea[oi] += c.reserved_slots; }
+                else { res_land[oi] += c.reserved_slots; }
+                active_by_house[oi] += 1;
+            }
+            if (c.supplier_estate as usize) < n {
+                booked_output[c.supplier_estate as usize] += c.qty_per_period;
+                has_contract[c.supplier_estate as usize] = true;
+            }
+        }
+        for est in 0..n {
+            if !self.hubs[est].is_estate { continue; }
+            // Only HOUSE/GUILD-owned estates can sign (a city-owned estate cannot).
+            let owner = self.hubs[est].owner_house;
+            if owner < 0 || (owner as usize) >= nh || self.houses[owner as usize].defunct { continue; }
+            let oi = owner as usize;
+            if active_by_house[oi] >= MAX_HOUSE_CONTRACTS { continue; }
+            // One contract per estate keeps the book legible.
+            if has_contract[est] { continue; }
+            // The good this estate works (its highest per-capita output).
+            let g = self.hubs[est].base_per_capita.iter().enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(i, _)| i).unwrap_or(0);
+            let monthly = self.hubs[est].production.get(g).copied().unwrap_or(0.0)
+                * CONTRACT_PERIOD as f32;
+            let free_output = monthly - booked_output[est];
+            if free_output <= 1.0 { continue; }
+            // Throttle: ~6%/month for an eligible estate.
+            if hash01(self.seed, tick as u64 ^ 0xC0117, est as u64) > 0.06 { continue; }
+            let base = self.goods[g].base_value;
+            // Buyer: the reachable city with the strongest demand (highest price) for g.
+            let mut best = (usize::MAX, 0.0f32);
+            for b in 0..n {
+                if b == est || self.hubs[b].is_estate { continue; }
+                let days = self.days[est * n + b];
+                if !days.is_finite() { continue; }
+                if needs[b][g] <= EPS { continue; }
+                let pb = self.live_price(self.hubs[b].stock[g], needs[b][g], base);
+                if pb > best.1 { best = (b, pb); }
+            }
+            let polis = best.0;
+            if polis == usize::MAX { continue; }
+            let demand_month = needs[polis][g] * CONTRACT_PERIOD as f32;
+            let qty = free_output.min(demand_month);
+            if qty < 1.0 { continue; }
+            let sea = self.hubs[est].coastal && self.hubs[polis].coastal;
+            let kind: u8 = if sea { 0 }
+                else if self.houses[oi].fleet_river >= self.houses[oi].fleet_caravan { 1 } else { 2 };
+            let free_slots = if sea {
+                self.houses[oi].fleet_sea as i32 - res_sea[oi] as i32
+            } else {
+                (self.houses[oi].fleet_river + self.houses[oi].fleet_caravan) as i32 - res_land[oi] as i32
+            };
+            if free_slots < 1 { continue; }
+            let want = ((qty / CONTRACT_VESSEL_LOAD).round() as u32).clamp(1, CONTRACT_MAX_SLOTS);
+            let slots = want.min(free_slots as u32).max(1);
+            let price = best.1 * (1.0 + CONTRACT_PREMIUM);
+            let span = (CONTRACT_MAX_TERM_YEARS - CONTRACT_MIN_TERM_YEARS + 1) as f32;
+            let term_years = CONTRACT_MIN_TERM_YEARS
+                + (hash01(self.seed, tick as u64 ^ 0x7E47, est as u64) * span) as u32;
+            let term_ticks = term_years.max(CONTRACT_MIN_TERM_YEARS) * TICKS_PER_YEAR;
+            let periods_total = (term_ticks / CONTRACT_PERIOD).max(1);
+            let id = self.next_contract_id;
+            self.next_contract_id += 1;
+            self.contracts.push(Contract {
+                id, good: g, supplier_estate: est as u32, owner_house: owner,
+                buyer_polis: polis as u32, qty_per_period: qty, price_per_unit: price,
+                transport_kind: kind, reserved_slots: slots,
+                start_tick: tick, term_ticks, period_ticks: CONTRACT_PERIOD,
+                next_delivery_tick: tick + CONTRACT_PERIOD,
+                periods_total, periods_done: 0, delivered_total: 0.0,
+                last_period_delivered: 0.0, penalties_paid: 0.0, revenue_total: 0.0,
+                status: ContractStatus::Active, cancel_reason: String::new(), resolved_tick: 0,
+            });
+            // Update local trackers so this pass can't oversubscribe the same house.
+            if sea { res_sea[oi] += slots; } else { res_land[oi] += slots; }
+            active_by_house[oi] += 1;
+            booked_output[est] += qty;
+            has_contract[est] = true;
+            let gn = self.goods[g].name.clone();
+            let hn = self.houses[oi].name.clone();
+            let pn = self.hubs[polis].name.clone();
+            self.journal.push(JournalEntry {
+                tick, kind: "contract".into(), hub: polis as i32, good: g as i32, value: qty,
+                text: format!("{} signs a {}-year contract to supply {} with {} {}/mo",
+                    hn, term_years.max(CONTRACT_MIN_TERM_YEARS), pn, qty.round(), gn),
+            });
+        }
+    }
+
+    /// Settle every contract whose period delivery has come due: ship the quota over
+    /// its reserved vessels (each may be lost to storm/ambush → partial delivery),
+    /// pay the house for what arrived, and charge a capped shortfall penalty. The
+    /// contract stays ACTIVE through partial deliveries; it ends only on completion,
+    /// loss of the supplier/owner, or the house withdrawing after half the term.
+    fn dispatch_contracts(&mut self, _needs: &[Vec<f32>]) {
+        let tick = self.tick;
+        let n = self.hubs.len();
+        for ci in 0..self.contracts.len() {
+            if self.contracts[ci].status != ContractStatus::Active { continue; }
+            let est = self.contracts[ci].supplier_estate as usize;
+            let polis = self.contracts[ci].buyer_polis as usize;
+            let owner = self.contracts[ci].owner_house;
+            let good = self.contracts[ci].good;
+            // Auto-cancellation: the supplying estate or controlling house is gone.
+            let supplier_ok = est < n && self.hubs[est].is_estate;
+            let owner_ok = owner >= 0 && (owner as usize) < self.houses.len()
+                && !self.houses[owner as usize].defunct;
+            if !supplier_ok || !owner_ok || polis >= n {
+                let reason = if !owner_ok { "the controlling house dissolved" }
+                    else { "the supplying estate was lost" };
+                self.resolve_contract(ci, ContractStatus::Cancelled, reason.to_string());
+                continue;
+            }
+            if tick < self.contracts[ci].next_delivery_tick { continue; }
+            // ── Deliver one period over the reserved vessels ──
+            let oi = owner as usize;
+            let qty = self.contracts[ci].qty_per_period;
+            let price = self.contracts[ci].price_per_unit;
+            let slots = self.contracts[ci].reserved_slots.max(1);
+            let kind = self.contracts[ci].transport_kind;
+            let sea = kind == 0;
+            let avail = self.hubs[est].stock[good].max(0.0);
+            let intended = qty.min(avail);
+            let per_vessel = intended / slots as f32;
+            let days = self.days[est * n + polis];
+            let eta = if days.is_finite() { tick + (days.ceil() as u32).max(1) } else { tick + 1 };
+            let mut delivered = 0.0f32;
+            let mut consumed = 0.0f32;
+            if per_vessel > EPS {
+                let base_loss = if sea { SEA_LOSS } else if kind == 1 { RIVER_LOSS } else { CARAVAN_LOSS };
+                let mut p = base_loss;
+                if self.houses[oi].archetype == ARCH_FLEET { p *= FLEET_LOSS_MULT; }
+                for v in 0..slots {
+                    consumed += per_vessel;
+                    let lost = hash01(self.seed,
+                        (tick as u64) ^ 0xC0A12 ^ ((ci as u64) << 8) ^ v as u64, good as u64) < p;
+                    if lost {
+                        self.damage_fleet(oi, sea);
+                    } else {
+                        delivered += per_vessel;
+                        if days.is_finite() {
+                            self.in_transit.push(InTransit {
+                                from: est as u32, to: polis as u32, good, amount: per_vessel,
+                                eta_tick: eta, owner, sea, phase: 1, home: -1, contract: true,
+                            });
+                        } else {
+                            self.hubs[polis].stock[good] += per_vessel;
+                        }
+                    }
+                }
+            }
+            self.hubs[est].stock[good] = (self.hubs[est].stock[good] - consumed).max(0.0);
+            // Payment for delivered units at the LOCKED price → the house earns.
+            let revenue = delivered * price;
+            self.houses[oi].wealth += revenue;
+            self.hubs[polis].import_spend += revenue;
+            // Liquidated-damages penalty on the shortfall, capped per period.
+            let shortfall = (qty - delivered).max(0.0);
+            let mut penalty = shortfall * price * CONTRACT_PENALTY_RATE;
+            penalty = penalty.min(qty * price * CONTRACT_PENALTY_CAP);
+            self.houses[oi].wealth -= penalty;
+            self.hubs[polis].civic_pool += penalty; // compensation to the buyer city
+            {
+                let c = &mut self.contracts[ci];
+                c.delivered_total += delivered;
+                c.last_period_delivered = delivered;
+                c.penalties_paid += penalty;
+                c.revenue_total += revenue;
+                c.periods_done += 1;
+                c.next_delivery_tick = tick + c.period_ticks;
+            }
+            if shortfall > EPS {
+                let gn = self.goods[good].name.clone();
+                let hn = self.houses[oi].name.clone();
+                self.journal.push(JournalEntry {
+                    tick, kind: "contract".into(), hub: polis as i32, good: good as i32,
+                    value: delivered,
+                    text: format!("{} delivers only {}/{} {} on its contract — penalty paid",
+                        hn, delivered.round(), qty.round(), gn),
+                });
+            }
+            // Completed every period → fulfilled.
+            if self.contracts[ci].periods_done >= self.contracts[ci].periods_total {
+                self.resolve_contract(ci, ContractStatus::Fulfilled, String::new());
+                continue;
+            }
+            // The HOUSE may withdraw, but only after half the term, and only when the
+            // contract is bleeding it (penalties outweigh revenue). The polis never can.
+            let c = &self.contracts[ci];
+            let half = c.start_tick + c.term_ticks / 2;
+            if tick >= half && c.penalties_paid > c.revenue_total * 0.6
+                && hash01(self.seed, tick as u64 ^ 0xBA1101, ci as u64) < 0.25 {
+                self.resolve_contract(ci, ContractStatus::Cancelled,
+                    "the house withdrew after sustained losses (past half-term)".to_string());
+            }
+        }
+        self.archive_resolved_contracts();
+    }
+
+    /// Mark a contract resolved (fulfilled or cancelled) and journal it. Removal to
+    /// the archive happens in `archive_resolved_contracts` after the settle pass.
+    fn resolve_contract(&mut self, ci: usize, status: ContractStatus, reason: String) {
+        let tick = self.tick;
+        let (good, polis, qty) = {
+            let c = &self.contracts[ci];
+            (c.good, c.buyer_polis as usize, c.qty_per_period)
+        };
+        {
+            let c = &mut self.contracts[ci];
+            c.status = status;
+            c.cancel_reason = reason.clone();
+            c.resolved_tick = tick;
+        }
+        let gn = self.goods.get(good).map(|g| g.name.clone()).unwrap_or_default();
+        let pn = self.hubs.get(polis).map(|h| h.name.clone()).unwrap_or_default();
+        let text = match status {
+            ContractStatus::Fulfilled =>
+                format!("A {} supply contract to {} is fulfilled", gn, pn),
+            ContractStatus::Cancelled =>
+                format!("A {} supply contract to {} is cancelled: {}", gn, pn, reason),
+            ContractStatus::Active => return,
+        };
+        let _ = qty;
+        self.journal.push(JournalEntry {
+            tick, kind: "contract".into(), hub: polis as i32, good: good as i32, value: 0.0, text,
+        });
+    }
+
+    /// Move resolved contracts to the archive and prune the archive to 5 years.
+    fn archive_resolved_contracts(&mut self) {
+        let tick = self.tick;
+        let mut i = 0;
+        while i < self.contracts.len() {
+            if self.contracts[i].status != ContractStatus::Active {
+                let c = self.contracts.remove(i);
+                self.contract_archive.push(c);
+            } else {
+                i += 1;
+            }
+        }
+        self.contract_archive.retain(|c| tick.saturating_sub(c.resolved_tick) <= CONTRACT_ARCHIVE_TICKS);
     }
 
     /// The RETURN leg of a house round trip. A house vessel that just sold its
@@ -1789,6 +2207,7 @@ impl CampaignSim {
             sea,
             phase: 1,
             home: -1,
+            contract: false,
         });
         self.log_trade(b as u32, a as u32, g, amount, owner as i32, sea, pb_buy);
     }
@@ -2076,6 +2495,7 @@ impl CampaignSim {
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: kind, estate_tier: 1, owner_house, structures: vec![],
+            founded_tick: self.tick, founder_house: owner_house,
         });
         self.rebuild_routes();
     }
@@ -2407,14 +2827,18 @@ impl CampaignSim {
     fn update_guilds_and_offices(&mut self) {
         let tick = self.tick;
         let n = self.hubs.len();
-        // 1) A city that has grown to GUILD_MIN_POP and has no guild founds one.
+        // 1) A city that has grown to GUILD_MIN_POP and has no guild founds one,
+        //    until the world guild cap is reached.
+        let mut guild_count = self.houses.iter().filter(|g| !g.defunct && g.is_guild).count();
         for h in 0..n {
+            if guild_count >= MAX_GUILDS { break; }
             if self.hubs[h].is_estate { continue; }
             if self.hubs[h].population < GUILD_MIN_POP { continue; }
             let has_guild = self.houses.iter()
                 .any(|g| !g.defunct && g.is_guild && g.hub as usize == h);
             if !has_guild {
                 self.found_guild(h);
+                guild_count += 1;
             }
         }
         // 2) Civic subsidy: the home city funds its guild (scaled by size + prosperity).
@@ -2489,10 +2913,13 @@ impl CampaignSim {
     /// when the campaign begins (more emerge later as cities grow — see
     /// `update_guilds_and_offices`).
     pub fn seed_initial_guilds(&mut self) {
+        let mut guild_count = self.houses.iter().filter(|g| !g.defunct && g.is_guild).count();
         for h in 0..self.hubs.len() {
+            if guild_count >= MAX_GUILDS { break; }
             if self.hubs[h].is_estate { continue; }
             if self.hubs[h].population >= GUILD_MIN_POP {
                 self.found_guild(h);
+                guild_count += 1;
             }
         }
     }
@@ -2689,6 +3116,9 @@ impl CampaignSim {
     /// playthrough, not only on the rare succession that meets the old gen-3 bar.
     fn maybe_branch_houses(&mut self) {
         let tick = self.tick;
+        // World cap: a cadet branch is a NEW house — stop at the ceiling.
+        let active_houses = self.houses.iter().filter(|h| !h.defunct && !h.is_guild).count();
+        if active_houses >= MAX_HOUSES { return; }
         for hi in 0..self.houses.len() {
             if self.houses[hi].defunct || self.houses[hi].is_guild { continue; } // guilds expand via offices, not cadet branches
             if self.houses[hi].generation < 2 { continue; }
@@ -2711,6 +3141,7 @@ impl CampaignSim {
         let mut best = (usize::MAX, f32::INFINITY);
         for b in 0..n {
             if b == home || self.hubs[b].component != comp { continue; }
+            if self.hubs[b].is_estate { continue; } // a branch settles in a city, not an estate
             let d = self.days.get(home * n + b).copied().unwrap_or(f32::INFINITY);
             if d.is_finite() && d > 1.0 && d < best.1 { best = (b, d); }
         }
@@ -2951,12 +3382,17 @@ impl CampaignSim {
     fn maybe_found_house(&mut self) {
         let tick = self.tick;
         let ng = self.goods.len();
+        // World cap: no new private houses once the ceiling is reached.
+        let active_houses = self.houses.iter().filter(|h| !h.defunct && !h.is_guild).count();
+        if active_houses >= MAX_HOUSES { return; }
         // Candidate: the richest-trade hub with ROOM for a new family (no strong
         // resident house, and fewer than 2 nascent ones so we don't stack). Also
         // track the world's max trade wealth to flag "large" hubs.
         let mut best = (usize::MAX, 0.0f32);
         let mut max_tw = 1e-6f32;
         for h in 0..self.hubs.len() {
+            // Houses never nucleate on an estate/manufactory — only in real cities.
+            if self.hubs[h].is_estate { continue; }
             max_tw = max_tw.max(self.hubs[h].trade_wealth);
             let tw = self.hubs[h].trade_wealth;
             if tw <= 0.05 { continue; } // any hub with a little trade can seed a family
@@ -3185,6 +3621,7 @@ mod tests {
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: 0, estate_tier: 0, owner_house: -1, structures: vec![],
+            founded_tick: 0, founder_house: -1,
         }
     }
 
@@ -3211,6 +3648,7 @@ mod tests {
             colonizable: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
             recent_trades: vec![],
+            contracts: vec![], contract_archive: vec![], next_contract_id: 0,
             days: vec![],
         };
         s.rebuild_routes();
@@ -3468,5 +3906,44 @@ mod tests {
         s.advance(365 * 4);
         let owned = s.hubs.iter().filter(|h| h.is_estate && h.owner_house == 0).count();
         assert!(owned >= 1, "a profitable house builds at least one estate/manufactory (owned={owned})");
+    }
+
+    #[test]
+    fn houses_sign_and_run_futures_contracts() {
+        // A house that owns an estate should sign forward supply contracts with a
+        // buyer polis, reserve transport for them, and deliver over time.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", i32::MAX, 2, 20.0, 0.5, false),
+            good("wine", i32::MAX, 1, 8.0, 0.5, false),
+        ];
+        let fp = 5000.0 * 0.85 * DEMAND_PRESSURE * 1.5;
+        let mut ha = hub(0, 10.0, 10.0, 5000.0, vec![fp, 3000.0, 0.0], 0); ha.coastal = true;
+        let mut hb = hub(1, 16.0, 10.0, 5000.0, vec![fp, 0.0, 3000.0], 0); hb.coastal = true;
+        let mut s = sim(vec![ha, hb], goods);
+        s.houses = vec![house_at(0, vec![1], 4)];
+        s.advance(365 * 8);
+        let total = s.contracts.len() + s.contract_archive.len();
+        assert!(total >= 1, "a house-owned estate signs at least one futures contract (got {total})");
+        for c in &s.contracts {
+            assert_eq!(c.status, ContractStatus::Active);
+            assert!(c.reserved_slots >= 1, "an active contract reserves transport");
+            assert_ne!(c.buyer_polis, c.supplier_estate, "buyer and supplier differ");
+            assert!(c.price_per_unit > 0.0);
+        }
+        // Determinism: an identical run produces the same number of contracts.
+        let goods2 = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", i32::MAX, 2, 20.0, 0.5, false),
+            good("wine", i32::MAX, 1, 8.0, 0.5, false),
+        ];
+        let mut ha2 = hub(0, 10.0, 10.0, 5000.0, vec![fp, 3000.0, 0.0], 0); ha2.coastal = true;
+        let mut hb2 = hub(1, 16.0, 10.0, 5000.0, vec![fp, 0.0, 3000.0], 0); hb2.coastal = true;
+        let mut s2 = sim(vec![ha2, hb2], goods2);
+        s2.houses = vec![house_at(0, vec![1], 4)];
+        s2.advance(365 * 8);
+        assert_eq!(s.contracts.len() + s.contract_archive.len(),
+                   s2.contracts.len() + s2.contract_archive.len(),
+                   "contract simulation is deterministic");
     }
 }

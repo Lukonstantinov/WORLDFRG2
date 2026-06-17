@@ -4,10 +4,12 @@ import { useUIStore } from "../state/uiStore";
 import { CoatOfArms } from "./CoatOfArms";
 import { GOOD_DEFS } from "../goods";
 import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger } from "../bridge/tauri";
-import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger } from "../types";
+import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, ContractRow } from "../types";
 
 const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
 const goodIcon = (name: string) => GOOD_ICON.get(name) ?? "\u{1F4E6}"; // 📦 fallback
+/** Compact amount formatter (shared by the Contracts subtab). */
+const fmt = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
 
 /** Desaturate a house colour toward grey — guilds read DULL vs the vivid private
  *  houses, so the civic bodies are visually distinct. */
@@ -67,9 +69,10 @@ function TradeDiagnostics({ diag }: { diag: CampaignDiagnostics }) {
 export function HousesPanel() {
   const open = useUIStore((s) => s.showHouses);
   const houses = useCampaignStore((s) => s.houses);
+  const contracts = useCampaignStore((s) => s.contracts);
   const diag = useCampaignStore((s) => s.diagnostics);
   const [history, setHistory] = useState<HouseHistory | null>(null);
-  const [tab, setTab] = useState<"houses" | "guilds">("houses");
+  const [tab, setTab] = useState<"houses" | "guilds" | "contracts">("houses");
   const [selected, setSelected] = useState<HouseBrief | null>(null);
   const setSelectedHouse = useCampaignStore((s) => s.setSelectedHouse);
   // Focus a house: open its detail AND tell the map to highlight only it.
@@ -100,9 +103,9 @@ export function HousesPanel() {
         <span>⚜️ Trading Families</span>
         <span style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
       </div>
-      {/* Houses vs Guilds tabs */}
+      {/* Houses vs Guilds vs Contracts tabs */}
       <div style={{ display: "flex", gap: 2, padding: "0 8px", borderBottom: "1px solid #1e2e42" }}>
-        {([["houses", `👑 Houses (${nHouses})`], ["guilds", `🏛 Guilds (${nGuilds})`]] as const).map(([id, lbl]) => (
+        {([["houses", `👑 Houses (${nHouses})`], ["guilds", `🏛 Guilds (${nGuilds})`], ["contracts", `📜 Contracts (${contracts.filter((c) => c.status === "active").length})`]] as const).map(([id, lbl]) => (
           <div key={id} onClick={() => setTab(id)}
             style={{ padding: "4px 9px", cursor: "pointer", fontSize: 11, fontWeight: tab === id ? 700 : 400,
               color: tab === id ? "#cfe2f6" : "#6a86a6",
@@ -112,6 +115,9 @@ export function HousesPanel() {
         ))}
       </div>
       {diag && <TradeDiagnostics diag={diag} />}
+      {tab === "contracts" ? (
+        <ContractsTab contracts={contracts} />
+      ) : (
       <div style={{ overflowY: "auto", padding: "4px 8px 10px" }}>
         {houses.length === 0 && (
           <div style={empty}>Begin the campaign (Step 11) — trading families rise as goods start to move.</div>
@@ -212,6 +218,84 @@ export function HousesPanel() {
           </>
         )}
       </div>
+      )}
+    </div>
+  );
+}
+
+/** The Contracts subtab: every futures supply agreement a house/guild runs. Active
+ *  agreements first (with reserved transport + fulfilment), then the 5-year archive
+ *  of resolved ones (fulfilled / cancelled-with-reason). */
+function ContractsTab({ contracts }: { contracts: ContractRow[] }) {
+  const active = contracts.filter((c) => c.status === "active");
+  const archived = contracts.filter((c) => c.status !== "active");
+  // Reserved transport totals, by owner, for the active book.
+  const carrier = (k: number) => (k === 0 ? "🚢" : k === 1 ? "🛶" : "🐫");
+  const reservedTotal = active.reduce((s, c) => s + c.reserved_slots, 0);
+  return (
+    <div style={{ overflowY: "auto", padding: "4px 8px 10px" }}>
+      <div style={{ color: "#9ab0c8", fontSize: 10, margin: "2px 0 6px" }}>
+        {active.length} active agreement{active.length === 1 ? "" : "s"} · {reservedTotal} vessel{reservedTotal === 1 ? "" : "s"} reserved
+      </div>
+      {active.length === 0 && (
+        <div style={empty}>No futures contracts yet — house/guild estates sign forward supply deals with polises over time.</div>
+      )}
+      {active.map((c) => {
+        const short = c.last_period_delivered > 0 && c.last_period_delivered < c.qty_per_period - 0.01;
+        return (
+          <div key={c.id} style={{ ...card, display: "block" }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+              <span style={{ width: 9, height: 9, borderRadius: 2, background: c.color, flex: "0 0 auto", alignSelf: "center" }} />
+              <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12 }}>{goodIcon(c.good)} {c.good}</span>
+              <span style={{ flex: 1 }} />
+              <span style={{ color: "#7fd0a0", fontSize: 10 }}>{Math.round(c.fulfilled_pct)}%</span>
+            </div>
+            <div style={{ color: "#9ab0c8", fontSize: 10, marginTop: 1 }}>
+              {c.owner}{c.owner_is_guild ? " (guild)" : ""} · {c.supplier_city} → <span style={{ color: "#cfe0f4" }}>{c.buyer}</span>
+            </div>
+            <div style={{ color: "#88a8c8", fontSize: 9, marginTop: 1 }}>
+              {fmt(c.qty_per_period)} {c.good}/mo @ {c.price_per_unit.toFixed(2)} · {carrier(c.transport_kind)} {c.reserved_slots} reserved · {c.term_years}y term ({c.periods_done}/{c.periods_total} mo)
+            </div>
+            {/* Fulfilment bar */}
+            <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3 }}>
+              <div style={{ flex: 1, height: 4, background: "#0a1018", borderRadius: 3, overflow: "hidden" }}>
+                <div style={{ width: `${Math.min(100, c.fulfilled_pct)}%`, height: "100%", background: "#3a80c0" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 2, fontSize: 9 }}>
+              <span style={{ color: short ? "#e0a09a" : "#7a90a8" }}>
+                last delivery: {fmt(c.last_period_delivered)}/{fmt(c.qty_per_period)}{short ? " ⚠ partial" : ""}
+              </span>
+              {c.penalties_paid > 0 && <span style={{ color: "#e0a09a" }}>penalties {fmt(c.penalties_paid)}</span>}
+              {c.revenue_total > 0 && <span style={{ color: "#c9a227" }}>earned {fmt(c.revenue_total)}</span>}
+            </div>
+          </div>
+        );
+      })}
+      {archived.length > 0 && (
+        <>
+          <div style={{ color: "#5a6a7e", fontSize: 9, margin: "8px 0 2px", textTransform: "uppercase" }}>
+            Resolved (last 5 years) — {archived.length}
+          </div>
+          {archived.map((c) => (
+            <div key={c.id} style={{ ...card, display: "block", opacity: 0.7 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                <span style={{ color: "#9aa6b4", fontSize: 11 }}>{goodIcon(c.good)} {c.good}</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ fontSize: 9, color: c.status === "fulfilled" ? "#7fd0a0" : "#e0a09a" }}>
+                  {c.status === "fulfilled" ? "✓ fulfilled" : "✕ cancelled"}
+                </span>
+              </div>
+              <div style={{ color: "#88a8c8", fontSize: 9 }}>
+                {c.owner} · {c.supplier_city} → {c.buyer} · {c.periods_done}/{c.periods_total} mo delivered
+              </div>
+              {c.status === "cancelled" && c.cancel_reason && (
+                <div style={{ color: "#c98", fontSize: 9, marginTop: 1 }}>reason: {c.cancel_reason}</div>
+              )}
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }

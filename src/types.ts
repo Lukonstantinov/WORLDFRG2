@@ -308,6 +308,37 @@ export interface EstateRow {
   owner: string;
   owner_is_guild: boolean;
   tier: number;       // upgrade tier 1..5
+  year_opened?: number;
+  founder?: string;
+  monthly_output?: number;
+  reserved_for_contracts?: number;
+  contracts?: ContractRow[];
+}
+/** A futures contract (Houses panel Contracts tab + estate view). */
+export interface ContractRow {
+  id: number;
+  owner_idx: number;
+  owner: string;
+  owner_is_guild: boolean;
+  color: string;
+  good: string;
+  supplier: string;
+  supplier_city: string;
+  buyer: string;
+  qty_per_period: number;
+  price_per_unit: number;
+  transport_kind: number;     // 0 sea / 1 river / 2 caravan
+  reserved_slots: number;
+  start_year: number;
+  term_years: number;
+  periods_total: number;
+  periods_done: number;
+  fulfilled_pct: number;
+  last_period_delivered: number;
+  penalties_paid: number;
+  revenue_total: number;
+  status: string;             // "active" | "fulfilled" | "cancelled"
+  cancel_reason: string;
 }
 /** One city in the live richest-cities ranking. */
 export interface CityRank {
