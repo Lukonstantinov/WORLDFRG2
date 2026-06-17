@@ -217,6 +217,11 @@ const CONTRACT_PRICE_BAND: f32 = 0.12;   // paid price drifts ≤ ±this around 
 const CONTRACT_DELIVER_DAYS: u32 = 30;   // a delivery every ~month
 const CONTRACT_FORM_CHANCE: f32 = 0.10;  // monthly chance an eligible house offers one
 const MAX_CONTRACTS: usize = 400;        // global cap (bounds the per-tick fulfil loop)
+/// A house may only sign a contract if its FREE carrying capacity (fleet minus what
+/// its existing contracts already claim) exceeds the new monthly quota by this factor
+/// — i.e. it must hold ≥20% more transport than the deal needs, so a due delivery
+/// always has a spare vessel and the contract doesn't breach for want of a ship.
+const CONTRACT_TRANSPORT_MARGIN: f32 = 1.2;
 // Term → strike factor (longer term = cheaper unit for the buyer) and break penalty
 // multiplier (longer = stiffer). Indexed 0:1yr 1:3yr 2:5yr 3:7yr.
 const TERM_YEARS: [u8; 4] = [1, 3, 5, 7];
@@ -534,6 +539,10 @@ pub struct InTransit {
     /// Round-trip origin hub the return leg sells at (−1 = a plain one-way trip
     /// that spawns no return). Only house-owned outbound voyages set this.
     #[serde(default = "neg_one_i32")] pub home: i32,
+    /// True = this leg is a FUTURES-CONTRACT delivery. Its vessel is held by the
+    /// standing per-contract reservation in `dispatch`, so the spot-trade capacity
+    /// pass must NOT subtract it again (that would double-count the same ship).
+    #[serde(default)] pub contract: bool,
 }
 
 /// One recently completed trade (for the Market tab "recent deals" rows). A small
@@ -2285,6 +2294,7 @@ impl CampaignSim {
                 from: src as u32, to: buyer as u32, good: g, amount: delivered_qty,
                 eta_tick: tick + (days.ceil() as u32).max(1),
                 owner: seller as i32, sea, phase: 1, home: -1, // one-way: no return leg
+                contract: true, // its vessel is held by the standing contract reservation
             });
             self.bump_trade_at(seller, src, delivered_qty);
             self.bump_trade_at(seller, buyer, delivered_qty);
@@ -2399,8 +2409,17 @@ impl CampaignSim {
                     let sea_carry = if need_sea { self.houses[hi].fleet_sea as f32 * SHIP_CAPACITY } else { f32::INFINITY };
                     let land_carry = if need_land { (rv + cv) * land_per } else { f32::INFINITY };
                     let carry_cap = sea_carry.min(land_carry);
-                    let monthly_qty = room.min(supply_cap).min(carry_cap);
-                    if monthly_qty <= EPS { continue; } // can't sustain a real delivery → don't sign
+                    // Transport must be SPARE: subtract what this house's existing
+                    // contracts already claim, and require a 20% headroom on top of the
+                    // new quota. A house without the right vessels for this route
+                    // (carry_cap 0) — or already fully committed — simply can't sign.
+                    let committed: f32 = self.contracts.iter()
+                        .filter(|c| c.seller_house as usize == hi)
+                        .map(|c| c.monthly_qty)
+                        .sum();
+                    let spare_carry = (carry_cap - committed).max(0.0);
+                    let monthly_qty = room.min(supply_cap).min(spare_carry / CONTRACT_TRANSPORT_MARGIN);
+                    if monthly_qty <= EPS { continue; } // not enough spare transport → don't sign
                     let strike = self.live_price(self.hub_stock(buyer, g), needs[buyer][g],
                         self.goods[g].base_value) * TERM_STRIKE_FACTOR[ti];
                     self.contracts.push(Contract {
@@ -2668,9 +2687,33 @@ impl CampaignSim {
             cap_land[i] = (h.fleet_river + h.fleet_caravan) as i32;
         }
         for c in &self.in_transit {
-            if c.owner >= 0 {
+            // Contract deliveries are covered by the standing reservation below — don't
+            // subtract them here too, or the same ship is counted busy twice.
+            if c.owner >= 0 && !c.contract {
                 let oi = c.owner as usize;
                 if oi < nh { if c.sea { cap_sea[oi] -= 1; } else { cap_land[oi] -= 1; } }
+            }
+        }
+        // Futures contracts reserve dedicated vessels up front: hold back the ships /
+        // caravans each ACTIVE contract needs for its monthly delivery, so opportunistic
+        // spot arbitrage can never strand a signed contract without transport (this is
+        // the reservation that makes the contract carry first call on the fleet).
+        for c in &self.contracts {
+            if self.tick >= c.end_tick || c.suspended_until > self.tick { continue; }
+            let oi = c.seller_house as usize;
+            let (src, buyer) = (c.source_hub as usize, c.buyer_hub as usize);
+            if oi >= nh || src >= n || buyer >= n { continue; }
+            let (sc, bc) = (self.hubs[src].coastal, self.hubs[buyer].coastal);
+            if sc || bc { // sea leg
+                cap_sea[oi] -= (c.monthly_qty / SHIP_CAPACITY).ceil() as i32;
+            }
+            if !(sc && bc) { // land leg
+                let rv = self.houses[oi].fleet_river as f32;
+                let cv = self.houses[oi].fleet_caravan as f32;
+                let land_per = if rv + cv > 0.0 {
+                    (rv * BOAT_CAPACITY + cv * CARAVAN_CAPACITY) / (rv + cv)
+                } else { CARAVAN_CAPACITY };
+                cap_land[oi] -= (c.monthly_qty / land_per).ceil() as i32;
             }
         }
         // Snapshot stocks so a single round's decisions use consistent prices.
@@ -2926,6 +2969,7 @@ impl CampaignSim {
                         // second profit). Guild/local one-way trips spawn no return.
                         phase: 0,
                         home: if owner >= 0 { a as i32 } else { -1 },
+                        contract: false,
                     });
                     self.log_trade(a as u32, b as u32, g, amount, owner, sea, pa);
                 }
@@ -3034,6 +3078,7 @@ impl CampaignSim {
             sea,
             phase: 1,
             home: -1,
+            contract: false,
         });
         self.log_trade(b as u32, a as u32, g, amount, owner as i32, sea, pb_buy);
     }
@@ -4126,6 +4171,7 @@ impl CampaignSim {
         let mut best = (usize::MAX, f32::INFINITY);
         for b in 0..n {
             if b == home || self.hubs[b].component != comp { continue; }
+            if self.hubs[b].is_estate { continue; } // branch into a real city, not an estate
             let d = self.days.get(home * n + b).copied().unwrap_or(f32::INFINITY);
             if d.is_finite() && d > 1.0 && d < best.1 { best = (b, d); }
         }
@@ -4372,6 +4418,9 @@ impl CampaignSim {
         let mut best = (usize::MAX, 0.0f32);
         let mut max_tw = 1e-6f32;
         for h in 0..self.hubs.len() {
+            // Estates / manufactories are production satellites, not market cities —
+            // a merchant family never seats itself there (they belong in poleis).
+            if self.hubs[h].is_estate { continue; }
             max_tw = max_tw.max(self.hubs[h].trade_wealth);
             let tw = self.hubs[h].trade_wealth;
             if tw <= 0.05 { continue; } // any hub with a little trade can seed a family
