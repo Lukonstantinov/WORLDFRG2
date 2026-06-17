@@ -1,11 +1,12 @@
 import { create } from "zustand";
-import type { CampaignSnapshot, WorldEconomy, HouseBrief, CampaignDiagnostics } from "../types";
+import type { CampaignSnapshot, WorldEconomy, HouseBrief, CampaignDiagnostics, ContractRow } from "../types";
 import {
   campaignStartSim,
   campaignAdvance,
   campaignGetState,
   campaignGetWorldEconomy,
   campaignGetHouses,
+  campaignGetContracts,
   campaignDiagnostics,
 } from "../bridge/tauri";
 
@@ -13,6 +14,7 @@ interface CampaignStore {
   snapshot: CampaignSnapshot | null;
   worldEconomy: WorldEconomy | null;
   houses: HouseBrief[];
+  contracts: ContractRow[];
   diagnostics: CampaignDiagnostics | null;
   busy: boolean;
   error: string | null;
@@ -33,6 +35,7 @@ export const useCampaignStore = create<CampaignStore>((set, get) => ({
   snapshot: null,
   worldEconomy: null,
   houses: [],
+  contracts: [],
   diagnostics: null,
   busy: false,
   error: null,
@@ -41,10 +44,10 @@ export const useCampaignStore = create<CampaignStore>((set, get) => ({
 
   refresh: async () => {
     try {
-      const [snap, houses, diag] = await Promise.all([
-        campaignGetState(), campaignGetHouses(), campaignDiagnostics(),
+      const [snap, houses, contracts, diag] = await Promise.all([
+        campaignGetState(), campaignGetHouses(), campaignGetContracts(), campaignDiagnostics(),
       ]);
-      set({ snapshot: snap, houses, diagnostics: diag, error: null });
+      set({ snapshot: snap, houses, contracts, diagnostics: diag, error: null });
     } catch (e) {
       set({ error: String(e) });
     }
@@ -55,10 +58,10 @@ export const useCampaignStore = create<CampaignStore>((set, get) => ({
     set({ busy: true, error: null });
     try {
       const snap = await campaignStartSim(seed);
-      const [we, houses, diag] = await Promise.all([
-        campaignGetWorldEconomy(), campaignGetHouses(), campaignDiagnostics(),
+      const [we, houses, contracts, diag] = await Promise.all([
+        campaignGetWorldEconomy(), campaignGetHouses(), campaignGetContracts(), campaignDiagnostics(),
       ]);
-      set({ snapshot: snap, worldEconomy: we, houses, diagnostics: diag });
+      set({ snapshot: snap, worldEconomy: we, houses, contracts, diagnostics: diag });
     } catch (e) {
       set({ error: String(e) });
     } finally {
@@ -71,10 +74,10 @@ export const useCampaignStore = create<CampaignStore>((set, get) => ({
     set({ busy: true, error: null });
     try {
       const snap = await campaignAdvance(ticks);
-      const [we, houses, diag] = await Promise.all([
-        campaignGetWorldEconomy(), campaignGetHouses(), campaignDiagnostics(),
+      const [we, houses, contracts, diag] = await Promise.all([
+        campaignGetWorldEconomy(), campaignGetHouses(), campaignGetContracts(), campaignDiagnostics(),
       ]);
-      set({ snapshot: snap, worldEconomy: we, houses, diagnostics: diag });
+      set({ snapshot: snap, worldEconomy: we, houses, contracts, diagnostics: diag });
     } catch (e) {
       set({ error: String(e) });
     } finally {

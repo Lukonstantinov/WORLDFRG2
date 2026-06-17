@@ -461,23 +461,47 @@ export function HubPanel() {
           )}
           {[...(detail?.estates_here ?? [])]
             .sort((a, b) => b.output - a.output)
-            .map((e, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 10, padding: "2px 2px", borderBottom: "1px solid #131f2c" }}>
-                <span style={{ fontSize: 13 }}>{ESTATE_EMOJI[e.kind] ?? "🏡"}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: "#cdbb88", fontWeight: 600 }}>
-                    {ESTATE_LABEL[e.kind] ?? "Estate"} · {iconFor(e.good)} {labelFor(e.good)}
-                    <span style={{ color: "#e0c060", fontSize: 9, marginLeft: 4 }} title="upgrade tier (owners invest to raise output)">
-                      {"★".repeat(e.tier ?? 1)}<span style={{ color: "#3a4a5e" }}>{"★".repeat(Math.max(0, 5 - (e.tier ?? 1)))}</span>
-                    </span>
+            .map((e, i) => {
+              const reserved = e.reserved_for_contracts ?? 0;
+              const monthly = e.monthly_output ?? e.output * 30;
+              const activeContracts = (e.contracts ?? []).filter((c) => c.status === "active");
+              return (
+              <div key={i} style={{ fontSize: 10, padding: "3px 2px", borderBottom: "1px solid #131f2c" }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                  <span style={{ fontSize: 13 }}>{ESTATE_EMOJI[e.kind] ?? "🏡"}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: "#cdbb88", fontWeight: 600 }}>
+                      {ESTATE_LABEL[e.kind] ?? "Estate"} · {iconFor(e.good)} {labelFor(e.good)}
+                      <span style={{ color: "#e0c060", fontSize: 9, marginLeft: 4 }} title="upgrade tier (owners invest to raise output)">
+                        {"★".repeat(e.tier ?? 1)}<span style={{ color: "#3a4a5e" }}>{"★".repeat(Math.max(0, 5 - (e.tier ?? 1)))}</span>
+                      </span>
+                    </div>
+                    <div style={{ color: "#7a90a8", fontSize: 9 }}>
+                      owner: <span style={{ color: e.owner_is_guild ? "#7fd0c0" : "#e8dcc0" }}>{e.owner}</span>
+                      {e.founder && e.founder !== e.owner && <> · founded by {e.founder}</>}
+                      {(e.year_opened ?? 0) > 0 && <> · opened year {e.year_opened}</>}
+                    </div>
                   </div>
-                  <div style={{ color: "#7a90a8", fontSize: 9 }}>
-                    owner: <span style={{ color: e.owner_is_guild ? "#7fd0c0" : "#e8dcc0" }}>{e.owner}</span> · tier {e.tier ?? 1}/5
-                  </div>
+                  <span style={{ color: "#7fd0a0", fontSize: 10 }}>▲ {fmt(e.output)}/day</span>
                 </div>
-                <span style={{ color: "#7fd0a0", fontSize: 10 }}>▲ {fmt(e.output)}/day</span>
+                <div style={{ color: "#8aa0bc", fontSize: 9, marginLeft: 19, marginTop: 1 }}>
+                  produces <span style={{ color: "#cfe0f4" }}>{fmt(monthly)}/mo</span>
+                  {reserved > 0 && (
+                    <> · <span style={{ color: "#e0b060" }}>{fmt(reserved)}/mo reserved for contracts</span></>
+                  )}
+                </div>
+                {activeContracts.length > 0 && (
+                  <div style={{ marginLeft: 19, marginTop: 2 }}>
+                    {activeContracts.map((c) => (
+                      <div key={c.id} style={{ color: "#9ab0c8", fontSize: 9 }}>
+                        📜 {fmt(c.qty_per_period)} {labelFor(c.good)}/mo → {c.buyer} · {Math.round(c.fulfilled_pct)}% done
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            ))}
+              );
+            })}
 
           {/* Buildings in the city itself (granary, warehouse, …) with effects */}
           <div style={{ ...sectionHdr, marginTop: 8 }}>Buildings</div>
