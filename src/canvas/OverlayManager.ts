@@ -1576,31 +1576,49 @@ export class OverlayManager {
       }
     }
 
-    // ── Focused house: OFFICE pins (squares) + a bold SEAT ring ──
+    // ── Focused house markers: offices = small SQUARES, BAILOS = circle+triangle
+    //    (a governing HQ), the seat (MAIN city) = a large CIRCLE with a white pip. ──
     if (sel) {
+      const bailoSet = new Set(
+        (sel.active ?? []).filter((c) => c.role === "bailo")
+          .map((c) => `${Math.round(c.x)},${Math.round(c.y)}`));
       const offR = Math.max(1.3, 2.2 * inv);
       for (const office of sel.offices ?? []) {
         const pos = office[1];
         if (!pos) continue;
+        if (bailoSet.has(`${Math.round(pos[0])},${Math.round(pos[1])}`)) continue; // a Bailo, not a plain office
         ctx.fillStyle = selColor;
         ctx.strokeStyle = "rgba(8,16,28,0.95)";
         ctx.lineWidth = Math.max(0.5, 1.0 * inv);
         ctx.fillRect(pos[0] + 0.5 - offR, pos[1] + 0.5 - offR, offR * 2, offR * 2);
         ctx.strokeRect(pos[0] + 0.5 - offR, pos[1] + 0.5 - offR, offR * 2, offR * 2);
       }
+      // BAILOS — a filled circle with a white triangle inside (the HQ glyph).
+      const br = Math.max(2.0, 3.0 * inv);
+      for (const c of (sel.active ?? []).filter((c) => c.role === "bailo")) {
+        const bx = c.x + 0.5, by = c.y + 0.5;
+        ctx.fillStyle = selColor;
+        ctx.strokeStyle = "rgba(8,16,28,0.95)";
+        ctx.lineWidth = Math.max(0.6, 1.2 * inv);
+        ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        const t = br * 0.72;
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath();
+        ctx.moveTo(bx, by - t);
+        ctx.lineTo(bx + t * 0.87, by + t * 0.5);
+        ctx.lineTo(bx - t * 0.87, by + t * 0.5);
+        ctx.closePath(); ctx.fill();
+      }
+      // SEAT (main city) — a large CIRCLE with a white pip.
       if (sel.seat) {
-        // HOME settlement = a bold SQUARE (larger than the office squares) with a
-        // white pip, so the house's seat reads distinctly from its office footholds.
-        const sr = Math.max(2.0, 3.2 * inv);
+        const sr = Math.max(2.4, 3.8 * inv);
         const sx = sel.seat[0] + 0.5, sy = sel.seat[1] + 0.5;
         ctx.fillStyle = selColor;
         ctx.strokeStyle = "rgba(8,16,28,0.95)";
         ctx.lineWidth = Math.max(0.7, 1.4 * inv);
-        ctx.fillRect(sx - sr, sy - sr, sr * 2, sr * 2);
-        ctx.strokeRect(sx - sr, sy - sr, sr * 2, sr * 2);
-        const ir = sr * 0.42;
+        ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
         ctx.fillStyle = "#ffffff";
-        ctx.fillRect(sx - ir, sy - ir, ir * 2, ir * 2);
+        ctx.beginPath(); ctx.arc(sx, sy, sr * 0.4, 0, Math.PI * 2); ctx.fill();
       }
     }
   }

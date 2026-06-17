@@ -136,6 +136,40 @@ const NETWORK_TOLL_DISCOUNT: f32 = 0.5; // tax multiplier when both ends are own
 /// Total source-buy discount is capped here (office + glut bargain).
 const MAX_BUY_DISCOUNT: f32 = 0.30;
 
+// ── Commercial influence, trade dominance & the Bailo (HQ) tier ──────────────
+/// Monthly influence a house gains in a city = its share of that city's house-trade
+/// ÷ resistance, ×this rate (then clamped 0..1). Decays by INFLUENCE_DECAY/mo.
+const INFLUENCE_GAIN: f32 = 0.20;
+const INFLUENCE_DECAY: f32 = 0.015;
+/// An OFFICE guarantees at least this much standing influence (a permanent foothold).
+const OFFICE_INFLUENCE_FLOOR: f32 = 0.18;
+/// City RESISTANCE to outside takeover = 1 + pop/REF + guild bonus. Small, un-guilded
+/// towns have low resistance (fall fast); a great guilded metropolis resists all but a Bailo.
+const INFLUENCE_POP_REF: f32 = 12_000.0;
+const INFLUENCE_GUILD_RESIST: f32 = 1.5; // a resident civic guild adds this to resistance
+/// A house DOMINATES a city's trade when its influence ≥ threshold AND leads the
+/// runner-up by the margin. Dominance is TRADE-only (no government — see the Bailo).
+const DOMINANCE_THRESHOLD: f32 = 0.45;
+const DOMINANCE_MARGIN: f32 = 0.08;
+/// Two houses both above this in one city are CONTESTING it → rising rivalry/trade war.
+const CONTEST_INFLUENCE: f32 = 0.30;
+/// Trade-tax edge of dominance: the dominator pays ×this at its dominated cities,
+/// non-dominators pay ×that (a modest sway, not a stranglehold).
+const DOMINATOR_TAX_MULT: f32 = 0.75;
+const RIVAL_TAX_MULT: f32 = 1.15;
+// ── Bailo (governing headquarters) ──
+/// An office may rise to a Bailo only after sustained dominance at/above this influence,
+/// with the wealth to sustain it. The home seat is always a "Bailo-equivalent" capital.
+const BAILO_MIN_INFLUENCE: f32 = 0.70;
+const BAILO_MIN_WEALTH: f32 = 400.0;
+/// Soft cap on a house's foreign Bailos = floor(power·SCALE) + wealth/PER. Each Bailo
+/// adds a monthly upkeep (so a house only keeps as many HQs as it can bankroll).
+const BAILO_CAP_POWER_SCALE: f32 = 3.0;
+const BAILO_CAP_WEALTH_PER: f32 = 30_000.0;
+const BAILO_UPKEEP: f32 = 0.6; // monthly, ×city size
+/// The concession lane home from a Bailo pays only a token toll (extremely low, not free).
+const BAILO_CONCESSION_TOLL: f32 = 0.10; // ×the normal tax rate
+
 // ── House archetypes ────────────────────────────────────────────────────────
 const ARCH_SPECIALTY: u8 = 0; // cheaper freight + fatter margin on specialty goods
 const ARCH_FLEET: u8 = 1;     // safer voyages, cheaper ships, longer reach
@@ -684,6 +718,15 @@ pub struct House {
     /// house's standing trade NETWORK, which lets distant settlements contract for
     /// goods the house sources from any of its nodes.
     #[serde(default)] pub office_leases: Vec<(u32, u32)>,
+    /// Sparse per-city commercial INFLUENCE `(hub, 0..1)` this house has built up
+    /// through sustained trade. Rises with the house's share of a city's commerce
+    /// ÷ the city's resistance (population + local guild), decays without presence.
+    /// Drives trade DOMINANCE (top influence over a threshold) and Bailo upgrades.
+    #[serde(default)] pub influence: Vec<(u32, f32)>,
+    /// Cities where this house has raised its office to a BAILO (a governing
+    /// headquarters): it seats that city's council and runs a near-toll-free
+    /// concession lane home. Soft-capped by the house's wealth/power.
+    #[serde(default)] pub bailos: Vec<u32>,
 }
 
 /// A candidate empty-land site a wealthy house / large city can colonize with an
@@ -974,6 +1017,10 @@ pub struct CampaignSim {
     /// has no bearing on determinism.
     #[serde(skip)]
     pub trade_cur: std::collections::HashMap<(u32, u32, u32, u8), f32>,
+    /// Per-hub trade DOMINATOR (house index, −1 = none), recomputed monthly from
+    /// `House.influence`. Derived → not serialized. Drives the dominance trade edge.
+    #[serde(skip)]
+    pub city_dominator: Vec<i32>,
     /// The LAST completed year's flows (detailed per-partner), the routes/partners
     /// breakdown the Flows subtab reads. Appended LAST → `#[serde(default)]`.
     #[serde(default)]
@@ -1033,6 +1080,15 @@ impl CampaignSim {
             if h.dominant_seat && h.wealth > council_wealth[hub] {
                 council[hub] = hi as i32;
                 council_wealth[hub] = h.wealth;
+            }
+            // A BAILO is a governing headquarters: the house also sits the council of
+            // each city where it has raised one (the only way besides the home seat).
+            for &c in &h.bailos {
+                let c = c as usize;
+                if c < n && h.wealth > council_wealth[c] {
+                    council[c] = hi as i32;
+                    council_wealth[c] = h.wealth;
+                }
             }
         }
         for h in 0..n {
@@ -2324,8 +2380,8 @@ impl CampaignSim {
             let toll = if self.is_house_node(seller, src as u32) && self.is_house_node(seller, buyer as u32) {
                 NETWORK_TOLL_DISCOUNT
             } else { 1.0 };
-            let export_tax = value * EXPORT_TAX_RATE * self.city_tax_factor(src) * toll;
-            let import_tax = value * IMPORT_TAX_RATE * self.city_tax_factor(buyer) * toll;
+            let export_tax = value * EXPORT_TAX_RATE * self.city_tax_factor(src) * toll * self.house_city_tax_mult(seller, src);
+            let import_tax = value * IMPORT_TAX_RATE * self.city_tax_factor(buyer) * toll * self.house_city_tax_mult(seller, buyer);
             self.houses[seller].wealth -= export_tax + import_tax;
             self.hubs[src].civic_pool += export_tax;
             self.hubs[buyer].civic_pool += import_tax;
@@ -2980,8 +3036,9 @@ impl CampaignSim {
                         // harder, poor ones stay cheap to trade through.
                         let exp_rate = if self.hubs[a].tariff_export > 0.0 { self.hubs[a].tariff_export } else { EXPORT_TAX_RATE };
                         let imp_rate = if self.hubs[b].tariff_import > 0.0 { self.hubs[b].tariff_import } else { IMPORT_TAX_RATE };
-                        let export_tax = value * exp_rate * tax_mult * self.city_tax_factor(a);
-                        let import_tax = value * imp_rate * tax_mult * self.city_tax_factor(b);
+                        // Bailo concession / dominance edge for the carrying house at each end.
+                        let export_tax = value * exp_rate * tax_mult * self.city_tax_factor(a) * self.house_city_tax_mult(oi, a);
+                        let import_tax = value * imp_rate * tax_mult * self.city_tax_factor(b) * self.house_city_tax_mult(oi, b);
                         self.houses[oi].wealth -= export_tax + import_tax;
                         self.hubs[a].civic_pool += export_tax;
                         self.hubs[b].civic_pool += import_tax;
@@ -3822,6 +3879,151 @@ impl CampaignSim {
         self.update_house_dynamics(needs);
     }
 
+    /// Trade-tax multiplier for house `hi` trading AT `city`: a BAILO concession pays
+    /// only a token toll; otherwise the city's trade DOMINATOR pays less and rival
+    /// houses pay a little more than the base rate (a modest sway, not a stranglehold).
+    fn house_city_tax_mult(&self, hi: usize, city: usize) -> f32 {
+        if self.houses[hi].bailos.contains(&(city as u32)) { return BAILO_CONCESSION_TOLL; }
+        match self.city_dominator.get(city).copied().unwrap_or(-1) {
+            d if d == hi as i32 => DOMINATOR_TAX_MULT,
+            d if d >= 0 => RIVAL_TAX_MULT,
+            _ => 1.0,
+        }
+    }
+
+    /// Monthly: build each house's per-city commercial INFLUENCE from its share of
+    /// that city's trade ÷ the city's resistance (population + a resident guild),
+    /// decaying elsewhere; recompute the per-city trade DOMINATOR; seed rivalries in
+    /// contested cities; then consider Bailo (HQ) upgrades.
+    fn update_influence_and_bailos(&mut self) {
+        let tick = self.tick;
+        let n = self.hubs.len();
+        let nh = self.houses.len();
+        if self.city_dominator.len() != n { self.city_dominator = vec![-1; n]; }
+        // Per-city total house-trade volume + which cities host a civic guild.
+        let mut city_total = vec![0.0f32; n];
+        let mut has_guild = vec![false; n];
+        for h in &self.houses {
+            if h.defunct { continue; }
+            if h.is_guild { let hb = h.hub as usize; if hb < n { has_guild[hb] = true; } }
+            for &(hb, v) in &h.trade_at { if (hb as usize) < n { city_total[hb as usize] += v.max(0.0); } }
+        }
+        // 1) Accrue / decay influence per house.
+        for hi in 0..nh {
+            if self.houses[hi].defunct { self.houses[hi].influence.clear(); continue; }
+            let mut infl: std::collections::HashMap<u32, f32> =
+                self.houses[hi].influence.iter().copied().collect();
+            for v in infl.values_mut() { *v = (*v - INFLUENCE_DECAY).max(0.0); }
+            let trade_at = self.houses[hi].trade_at.clone();
+            for &(hb, v) in &trade_at {
+                let c = hb as usize; if c >= n { continue; }
+                let share = if city_total[c] > 1e-6 { v.max(0.0) / city_total[c] } else { 0.0 };
+                let resist = 1.0 + self.hubs[c].population.max(0.0) / INFLUENCE_POP_REF
+                    + if has_guild[c] { INFLUENCE_GUILD_RESIST } else { 0.0 };
+                let e = infl.entry(hb).or_insert(0.0);
+                *e = (*e + INFLUENCE_GAIN * share / resist).clamp(0.0, 1.0);
+            }
+            // Seat + offices guarantee a standing foothold of influence.
+            let home = self.houses[hi].hub;
+            infl.entry(home).and_modify(|x| *x = x.max(OFFICE_INFLUENCE_FLOOR)).or_insert(OFFICE_INFLUENCE_FLOOR);
+            for &o in &self.houses[hi].offices.clone() {
+                infl.entry(o).and_modify(|x| *x = x.max(OFFICE_INFLUENCE_FLOOR)).or_insert(OFFICE_INFLUENCE_FLOOR);
+            }
+            let mut v: Vec<(u32, f32)> = infl.into_iter().filter(|&(_, x)| x > 0.02).collect();
+            v.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            self.houses[hi].influence = v;
+        }
+        // 2) Per-city dominator + runner-up (for the margin test + friction).
+        let mut top = vec![(-1i32, 0.0f32); n];
+        let mut second = vec![(-1i32, 0.0f32); n];
+        for hi in 0..nh {
+            if self.houses[hi].defunct { continue; }
+            for &(hb, x) in &self.houses[hi].influence {
+                let c = hb as usize; if c >= n { continue; }
+                if x > top[c].1 { second[c] = top[c]; top[c] = (hi as i32, x); }
+                else if x > second[c].1 { second[c] = (hi as i32, x); }
+            }
+        }
+        let mut dom = vec![-1i32; n];
+        for c in 0..n {
+            if top[c].0 >= 0 && top[c].1 >= DOMINANCE_THRESHOLD && top[c].1 - second[c].1 >= DOMINANCE_MARGIN {
+                dom[c] = top[c].0;
+            }
+        }
+        // 3) New-dominance events (skip the house's own seat — already "controlled").
+        for c in 0..n {
+            if dom[c] >= 0 && self.city_dominator[c] != dom[c] && !self.hubs[c].is_estate {
+                let hi = dom[c] as usize;
+                if self.houses[hi].hub as usize != c {
+                    let (hn, cn) = (self.houses[hi].name.clone(), self.hubs[c].name.clone());
+                    self.houses[hi].events.push(HouseEvent { tick, kind: "dominance".into(),
+                        text: format!("{} comes to dominate the trade of {}", hn, cn) });
+                    self.journal.push(JournalEntry { tick, kind: "dominance".into(), hub: c as i32,
+                        good: -1, value: top[c].1, text: format!("{} dominates the trade of {}", hn, cn) });
+                }
+            }
+        }
+        self.city_dominator = dom;
+        // 4) Friction: a city contested by the top two houses can spark a rivalry.
+        for c in 0..n {
+            if top[c].0 >= 0 && second[c].0 >= 0
+                && top[c].1 >= CONTEST_INFLUENCE && second[c].1 >= CONTEST_INFLUENCE {
+                let (ai, bi) = (top[c].0 as usize, second[c].0 as usize);
+                if ai != bi && !self.houses[ai].rivals.contains(&bi)
+                    && hash01(self.seed, tick as u64 ^ 0x1F1C, (ai * 131 + bi) as u64) < 0.12 {
+                    self.houses[ai].rivals.push(bi);
+                    if !self.houses[bi].rivals.contains(&ai) { self.houses[bi].rivals.push(ai); }
+                }
+            }
+        }
+        // 5) Bailo (HQ) upgrades + upkeep.
+        self.update_bailos();
+    }
+
+    /// Promote a house's strongest dominated office to a BAILO (a governing HQ), within
+    /// a soft cap set by its wealth/power; charge upkeep; drop Bailos that have decayed.
+    fn update_bailos(&mut self) {
+        let tick = self.tick;
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct || self.houses[hi].is_guild { continue; }
+            // Snapshot this house's influence (avoids borrowing self inside `retain`).
+            let infl: std::collections::HashMap<u32, f32> =
+                self.houses[hi].influence.iter().copied().collect();
+            let at = |c: u32| infl.get(&c).copied().unwrap_or(0.0);
+            // Drop Bailos whose grip has slipped well below the threshold.
+            self.houses[hi].bailos.retain(|&c| at(c) >= BAILO_MIN_INFLUENCE * 0.6);
+            // Upkeep per surviving Bailo (scaled by city size).
+            for &c in &self.houses[hi].bailos.clone() {
+                let up = BAILO_UPKEEP * self.city_size_factor(c as usize);
+                self.houses[hi].wealth -= up;
+            }
+            // Soft cap on foreign Bailos = floor(power·scale) + wealth/per.
+            let power = self.houses[hi].political_power;
+            let wealth = self.houses[hi].wealth;
+            let cap = (power * BAILO_CAP_POWER_SCALE) as usize
+                + (wealth / BAILO_CAP_WEALTH_PER).max(0.0) as usize;
+            if self.houses[hi].bailos.len() >= cap || wealth < BAILO_MIN_WEALTH { continue; }
+            // Promote the strongest eligible (dominated, non-Bailo) office.
+            let offices = self.houses[hi].offices.clone();
+            let mut best: Option<(u32, f32)> = None;
+            for &o in &offices {
+                if self.houses[hi].bailos.contains(&o) { continue; }
+                let x = at(o);
+                if x >= BAILO_MIN_INFLUENCE && best.map_or(true, |(_, bv)| x > bv) { best = Some((o, x)); }
+            }
+            if let Some((o, _)) = best {
+                self.houses[hi].bailos.push(o);
+                self.lease_office(hi, o, OFFICE_LEASE_YEARS); // keep the base for the HQ
+                let (hn, cn) = (self.houses[hi].name.clone(),
+                    self.hubs.get(o as usize).map(|x| x.name.clone()).unwrap_or_default());
+                self.houses[hi].events.push(HouseEvent { tick, kind: "bailo".into(),
+                    text: format!("{} raises a Bailo — a governing headquarters — in {}", hn, cn) });
+                self.journal.push(JournalEntry { tick, kind: "bailo".into(), hub: o as i32,
+                    good: -1, value: 0.0, text: format!("{} establishes a Bailo in {}", hn, cn) });
+            }
+        }
+    }
+
     fn world_h(&self) -> u32 { (self.world_w * 0.5).max(1.0) as u32 }
 
     /// "House Cassii"-style family name for the home `hub`, varied by `salt`.
@@ -4069,6 +4271,7 @@ impl CampaignSim {
             archetype: ARCH_SPECIALTY, charters: Vec::new(),
             is_guild: true, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
+            influence: Vec::new(), bailos: Vec::new(),
         });
     }
 
@@ -4135,6 +4338,8 @@ impl CampaignSim {
             self.maybe_branch_houses();
             self.maybe_house_invests();
             self.update_guilds_and_offices();
+            // Offices (re)settled → update commercial influence, dominance & Bailos.
+            self.update_influence_and_bailos();
             // Offices are (re)settled above → now offer futures contracts from them.
             self.form_contracts(needs);
             self.update_solvency();
@@ -4224,6 +4429,7 @@ impl CampaignSim {
             charters: Vec::new(),
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
+            influence: Vec::new(), bailos: Vec::new(),
         });
         self.journal.push(JournalEntry {
             tick, kind: "founding".into(), hub: dest as i32, good: -1, value: 0.0,
@@ -4568,6 +4774,7 @@ impl CampaignSim {
             charters: Vec::new(),
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
+            influence: Vec::new(), bailos: Vec::new(),
         });
     }
 
@@ -4762,6 +4969,7 @@ mod tests {
             political_power: 0.0, volume: 0.0, defunct: false, archetype: 1, charters: vec![],
             is_guild: false, offices: vec![], trade_at: vec![], debt_since: 0,
             wealth_history: vec![], office_leases: vec![],
+            influence: vec![], bailos: vec![],
         }
     }
 
@@ -4783,6 +4991,7 @@ mod tests {
             warehouses: vec![],
             contracts: vec![],
             trade_cur: Default::default(),
+            city_dominator: vec![],
             trade_last: vec![],
             trade_hist: vec![],
         };

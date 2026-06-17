@@ -471,6 +471,16 @@ export interface HouseBrief {
   is_guild?: boolean;            // a civic Merchant Guild (acts for its home city)
   offices?: [string, [number, number]][]; // foreign cities where it has an office
   estates?: [string, string][];  // estates/manufactories it owns: [good, city]
+  active?: HouseCity[];          // cities ranked most→least influential, with role
+}
+/** One city a house operates in, for the influence-ranked "Active in" list. */
+export interface HouseCity {
+  name: string;
+  x: number;
+  y: number;
+  influence: number;             // 0..1
+  role: string;                  // "seat" | "bailo" | "dominant" | "office" | "trade"
+  contested: boolean;            // a rival also holds significant influence here
 }
 
 export interface HouseTimelineEvent {

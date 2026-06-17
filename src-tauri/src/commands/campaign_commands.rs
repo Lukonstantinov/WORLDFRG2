@@ -938,6 +938,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
             charters: Vec::new(),
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
+            influence: Vec::new(), bailos: Vec::new(),
         });
     }
 
@@ -992,6 +993,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         warehouses: vec![],
         contracts: vec![],
         trade_cur: Default::default(),
+        city_dominator: vec![],
         trade_last: vec![],
         trade_hist: vec![],
     };
@@ -1388,6 +1390,22 @@ pub struct HouseBrief {
     #[serde(default)] pub offices: Vec<(String, [f32; 2])>,
     /// Estates/manufactories this holder owns: `(good, host-city)`.
     #[serde(default)] pub estates: Vec<(String, String)>,
+    /// Cities this house is active in, ranked MOST → LEAST influential, each tagged
+    /// with its role (seat / bailo / dominant / office / trade) + contested flag.
+    #[serde(default)] pub active: Vec<HouseCity>,
+}
+
+/// One city a house operates in, for the influence-ranked "Active in" list.
+#[derive(Serialize, Clone)]
+pub struct HouseCity {
+    pub name: String,
+    pub x: f32,
+    pub y: f32,
+    pub influence: f32,
+    /// "seat" | "bailo" | "dominant" | "office" | "trade".
+    pub role: String,
+    /// A rival also holds significant influence here.
+    pub contested: bool,
 }
 
 /// Golden-angle hue → a distinct, saturated hex colour. `i` is a stable index so
@@ -1454,8 +1472,31 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
         }
     }
 
+    // Per-hub second-highest influence → the "contested" flag for the Active-in list.
+    let mut hub_top2 = vec![(0.0f32, 0.0f32); nhubs]; // (top, second)
+    for h in &sim.houses {
+        if h.defunct { continue; }
+        for &(hb, x) in &h.influence {
+            let c = hb as usize; if c >= nhubs { continue; }
+            if x > hub_top2[c].0 { hub_top2[c].1 = hub_top2[c].0; hub_top2[c].0 = x; }
+            else if x > hub_top2[c].1 { hub_top2[c].1 = x; }
+        }
+    }
+
     let mut out: Vec<HouseBrief> = sim.houses.iter().enumerate().map(|(hi, h)| {
         let hub = h.hub as usize;
+        // Influence-ranked "Active in" list (h.influence is kept sorted desc).
+        let active: Vec<HouseCity> = h.influence.iter().map(|&(hb, infl)| {
+            let c = hb as usize;
+            let role = if hb == h.hub { "seat" }
+                else if h.bailos.contains(&hb) { "bailo" }
+                else if sim.city_dominator.get(c).copied().unwrap_or(-1) == hi as i32 { "dominant" }
+                else if h.offices.contains(&hb) { "office" }
+                else { "trade" };
+            let contested = c < nhubs && hub_top2[c].1 >= 0.30;
+            let p = seat_pos(c);
+            HouseCity { name: hub_name(hb), x: p[0], y: p[1], influence: infl, role: role.into(), contested }
+        }).collect();
         // A house always counts its seat among the cities listed.
         let mut ctrl_hubs = std::mem::take(&mut controlled[hi]);
         // A house that DOMINATES its seat by trade volume (>=50% of resident-house
@@ -1519,6 +1560,7 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
                     (gname(g), city)
                 })
                 .collect(),
+            active,
         }
     }).collect();
     // Active first, then richest first.

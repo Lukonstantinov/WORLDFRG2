@@ -268,7 +268,34 @@ function HouseDetail({ h, onClose, onChronicle }:
 
       {view === "summary" ? (
         <>
-          {h.cities && h.cities.length > 0 && <Row label="Active in">{h.cities.slice(0, 10).join(" · ")}</Row>}
+          {h.active && h.active.length > 0 ? (
+            <div style={{ margin: "2px 0 5px" }}>
+              <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4 }}>
+                Active in ({h.active.length}) — most influential first
+              </div>
+              {h.active.slice(0, 12).map((c, i) => {
+                const mark = c.role === "seat" ? "👑" : c.role === "bailo" ? "🏛️"
+                  : c.role === "dominant" ? "◆" : c.role === "office" ? "◇" : "·";
+                const roleColor = c.role === "seat" ? "#f4c430" : c.role === "bailo" ? "#e0863a"
+                  : c.role === "dominant" ? "#cfe2f6" : "#9fb4cc";
+                return (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, padding: "1px 0" }}>
+                    <span style={{ width: 16, textAlign: "center" }}>{mark}</span>
+                    <span style={{ flex: 1, minWidth: 0, color: roleColor, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11 }}>
+                      {c.name}{c.role === "bailo" ? " · BAILO" : c.role === "dominant" ? " · dominates" : ""}
+                      {c.contested && <span style={{ color: "#e08a8a" }}> ⚔</span>}
+                    </span>
+                    <div style={{ width: 54, height: 6, background: "#16202c", borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ width: `${Math.round(Math.min(1, c.influence) * 100)}%`, height: "100%", background: roleColor }} />
+                    </div>
+                    <span style={{ width: 30, textAlign: "right", color: "#7a90a8", fontSize: 9 }}>{c.influence.toFixed(2)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            h.cities && h.cities.length > 0 && <Row label="Active in">{h.cities.slice(0, 10).join(" · ")}</Row>
+          )}
           {h.offices && h.offices.length > 0 && <Row label="Offices">🏢 {h.offices.map(([nm]) => nm).join(" · ")}</Row>}
           {h.estates && h.estates.length > 0 && <Row label="Estates">{h.estates.map(([g, c]) => `${goodIcon(g)} ${g} (${c})`).join(" · ")}</Row>}
           <Row label="Fleet">🚢 {h.fleet_sea ?? 0} · 🛶 {h.fleet_river ?? 0} · 🐫 {h.fleet_caravan ?? 0}</Row>
