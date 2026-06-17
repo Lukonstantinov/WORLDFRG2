@@ -1088,35 +1088,49 @@ export class OverlayManager {
    *  at each end to read as a round-trip corridor. */
   private renderFlowHighlight(ctx: CanvasRenderingContext2D) {
     const inv = 1 / Math.sqrt(this.currentScale);
+    const W = this.worldW;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     for (const s of this.flowHighlight) {
-      let bx = s.bx;
-      // Draw across the nearest cylindrical wrap (avoid a line across the whole map).
-      if (this.worldW > 0) {
-        if (bx - s.ax > this.worldW / 2) bx -= this.worldW;
-        else if (s.ax - bx > this.worldW / 2) bx += this.worldW;
-      }
-      const ax = s.ax, ay = s.ay, by = s.by;
       const inbound = s.dir === 0;
       const color = inbound ? "#5fd0ff" : "#ffce5f"; // cyan in · gold out
       const w = Math.max(1.2, s.w * inv);
-      // Glow underlay + solid line.
+      // Trace the ACTUAL merchant path: snap to the drawn trade-routes layer (so the
+      // line follows the roads/sea-lanes goods really took). Straight line only if no
+      // routed path exists (e.g. the trade-routes overlay hasn't been computed).
+      const path = this.routeAlongTradeRoutes([s.ax, s.ay], [s.bx, s.by]);
+      const pts: [number, number][] = path && path.length >= 2 ? path : [[s.ax, s.ay], [s.bx, s.by]];
+      const drawPolyline = () => {
+        ctx.beginPath();
+        let started = false;
+        for (let i = 0; i < pts.length; i++) {
+          let [px, py] = pts[i];
+          if (i > 0 && W > 0 && Math.abs(px - pts[i - 1][0]) > W / 2) {
+            // Seam crossing — break the stroke rather than slash across the map.
+            ctx.stroke(); ctx.beginPath(); started = false;
+          }
+          if (!started) { ctx.moveTo(px, py); started = true; } else { ctx.lineTo(px, py); }
+        }
+        ctx.stroke();
+      };
       ctx.strokeStyle = color;
-      ctx.globalAlpha = 0.25; ctx.lineWidth = w * 3;
-      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
-      ctx.globalAlpha = 0.95; ctx.lineWidth = w;
-      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
-      // Arrowhead at the receiving end (city for inbound, partner for outbound).
-      const [hx, hy, tx, ty] = inbound ? [bx, by, ax, ay] : [ax, ay, bx, by];
-      const ang = Math.atan2(ty - hy, tx - hx);
-      const ah = Math.max(3, 5 * inv);
-      ctx.fillStyle = color; ctx.globalAlpha = 0.95;
-      ctx.beginPath();
-      ctx.moveTo(tx, ty);
-      ctx.lineTo(tx - ah * Math.cos(ang - 0.4), ty - ah * Math.sin(ang - 0.4));
-      ctx.lineTo(tx - ah * Math.cos(ang + 0.4), ty - ah * Math.sin(ang + 0.4));
-      ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 0.22; ctx.lineWidth = w * 3; drawPolyline();
+      ctx.globalAlpha = 0.95; ctx.lineWidth = w; drawPolyline();
+      // Arrowhead at the receiving end (city for inbound = path start, partner for
+      // outbound = path end), aligned to that final leg.
+      const [tx, ty, fx, fy] = inbound
+        ? [pts[0][0], pts[0][1], pts[1][0], pts[1][1]]
+        : [pts[pts.length - 1][0], pts[pts.length - 1][1], pts[pts.length - 2][0], pts[pts.length - 2][1]];
+      if (!(W > 0 && Math.abs(tx - fx) > W / 2)) {
+        const ang = Math.atan2(ty - fy, tx - fx);
+        const ah = Math.max(3, 5 * inv);
+        ctx.fillStyle = color; ctx.globalAlpha = 0.95;
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(tx - ah * Math.cos(ang - 0.4), ty - ah * Math.sin(ang - 0.4));
+        ctx.lineTo(tx - ah * Math.cos(ang + 0.4), ty - ah * Math.sin(ang + 0.4));
+        ctx.closePath(); ctx.fill();
+      }
     }
     ctx.globalAlpha = 1;
   }
@@ -1498,6 +1512,38 @@ export class OverlayManager {
         }
         ctx.stroke();
         ctx.setLineDash([]);
+        // Bold directional chevron at the path MIDPOINT, pointing seat → city, so the
+        // web reads clearly as MAIN city ──▶── city of trade (not just a faint line,
+        // and not hidden under the destination pin / influence cloud).
+        {
+          let total = 0;
+          const segs: { a: [number, number]; b: [number, number]; len: number }[] = [];
+          for (let i = 1; i < pts.length; i++) {
+            const a = pts[i - 1], b = pts[i];
+            if (worldW && Math.abs(b[0] - a[0]) > worldW * 0.5) continue; // skip seam legs
+            const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+            if (len > 1e-3) { segs.push({ a, b, len }); total += len; }
+          }
+          let acc = 0; const half = total / 2;
+          for (const sg of segs) {
+            if (acc + sg.len >= half) {
+              const t = (half - acc) / sg.len;
+              const mx = sg.a[0] + (sg.b[0] - sg.a[0]) * t + 0.5;
+              const my = sg.a[1] + (sg.b[1] - sg.a[1]) * t + 0.5;
+              let dx = sg.b[0] - sg.a[0], dy = sg.b[1] - sg.a[1];
+              const m = Math.hypot(dx, dy) || 1; dx /= m; dy /= m;
+              const hl = Math.max(3.5, 6 * inv); const px = -dy, py = dx;
+              ctx.fillStyle = RED;
+              ctx.beginPath();
+              ctx.moveTo(mx + dx * hl, my + dy * hl);
+              ctx.lineTo(mx - dx * hl * 0.35 + px * hl * 0.75, my - dy * hl * 0.35 + py * hl * 0.75);
+              ctx.lineTo(mx - dx * hl * 0.35 - px * hl * 0.75, my - dy * hl * 0.35 - py * hl * 0.75);
+              ctx.closePath(); ctx.fill();
+              break;
+            }
+            acc += sg.len;
+          }
+        }
         // Solid arrowhead at the destination CITY (the end of the path), pointing
         // along the final leg, so the line reads as flowing seat → city of trade.
         const n = pts.length;

@@ -1946,9 +1946,14 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
     use std::collections::HashMap;
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let Some(sim) = get_sim(&db, &conn)? else { return Ok(None) };
-    let Some(hub) = sim.hubs.iter().find(|h| h.id == id) else { return Ok(None) };
-    let (hub_x, hub_y) = (hub.x, hub.y);
-    let pos = |hid: u32| sim.hubs.iter().find(|h| h.id == hid).map(|h| (h.name.clone(), h.x, h.y));
+    // `log_trade` records flows by ARRAY INDEX (the sim's internal hub key), not by
+    // the external settlement `id` the UI passes — so resolve the index here and work
+    // in index space throughout. (Mismatching the two showed the wrong, cross-ocean
+    // partner and made most cities look like they had no trade at all.)
+    let Some(hi) = sim.hubs.iter().position(|h| h.id == id) else { return Ok(None) };
+    let hidx = hi as u32;
+    let (hub_x, hub_y) = (sim.hubs[hi].x, sim.hubs[hi].y);
+    let pos = |idx: u32| sim.hubs.get(idx as usize).map(|h| (h.name.clone(), h.x, h.y));
 
     // ── Per-good last-year in/out + per-(good,partner,dir) route amounts ──
     let mut g_in: HashMap<u32, f32> = HashMap::new();
@@ -1957,7 +1962,7 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
     let mut route_amt: HashMap<(u32, u32, u8), f32> = HashMap::new(); // (good,partner,dir)→amt
     let mut partner_vol: HashMap<u32, f32> = HashMap::new();
     let mut partner_goods: HashMap<u32, HashMap<u32, f32>> = HashMap::new(); // partner→good→amt
-    for f in sim.trade_last.iter().filter(|f| f.hub == id) {
+    for f in sim.trade_last.iter().filter(|f| f.hub == hidx) {
         if f.dir == 0 { *g_in.entry(f.good).or_insert(0.0) += f.amount; }
         else { *g_out.entry(f.good).or_insert(0.0) += f.amount; }
         g_partners.entry(f.good).or_default().insert(f.partner);
