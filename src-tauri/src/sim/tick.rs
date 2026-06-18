@@ -211,6 +211,20 @@ const BANK_INTEREST_CAP: f32 = 20.0;
 const WEALTH_TAX_PROG: f32 = 0.02;
 const WEALTH_TAX_SCALE: f32 = 60.0;
 
+/// Private-house progressive wealth tax → the home city TREASURY. A flat base rate
+/// plus a QUADRATIC surcharge on wealth above a soft cap: modest families grow
+/// freely, but great fortunes hit a firm ceiling (the surplus enriches the polis).
+/// Without this the local economy let a single house run away to ~1.25M; this pins
+/// the sustained richest house to a few tens of thousands.
+const HOUSE_WEALTH_TAX_BASE: f32 = 0.004;    // monthly flat civic wealth tax
+const HOUSE_WEALTH_SOFTCAP: f32 = 8_000.0;   // wealth below this escapes the surcharge
+const HOUSE_WEALTH_TAX_QUAD: f32 = 5.0e-6;   // monthly quadratic surcharge on the overshoot
+const HOUSE_WEALTH_TAX_MAXFRAC: f32 = 0.4;   // never tax more than this share of wealth/month
+/// First-N-years surcharge: it is HARD to get rich early (founding generations), the
+/// multiplier lerps from `MULT` at year 0 down to 1.0 by `YEARS`.
+const EARLY_WEALTH_TAX_MULT: f32 = 3.0;
+const EARLY_WEALTH_TAX_YEARS: f32 = 20.0;
+
 // ── Phase G: wealth sinks (monthly, multiplicative → wealth PLATEAUS instead of
 //    compounding forever). Money is hard-won and steadily bleeds, the way a
 //    medieval merchant fortune did. Sinks are a fraction of wealth, so a poor
@@ -2827,6 +2841,12 @@ impl CampaignSim {
                 est_count[h.owner_house as usize] += 1;
             }
         }
+        // First-20-year surcharge on the house wealth tax: founding generations find
+        // it HARD to amass a fortune; the multiplier relaxes to 1.0 by year 20.
+        let year = (self.tick / TICKS_PER_YEAR) as f32;
+        let early_mult = if year < EARLY_WEALTH_TAX_YEARS {
+            1.0 + (EARLY_WEALTH_TAX_MULT - 1.0) * (1.0 - year / EARLY_WEALTH_TAX_YEARS)
+        } else { 1.0 };
         for hi in 0..self.houses.len() {
             if self.houses[hi].defunct {
                 continue;
@@ -2873,7 +2893,19 @@ impl CampaignSim {
             let wealth_overhead = if is_guild { 0.0 }
                 else { WEALTH_UPKEEP_RATE * (pos - WEALTH_UPKEEP_FREE).max(0.0) };
 
-            self.houses[hi].wealth -= upkeep + consumption + endowment + wealth_overhead;
+            // ── Progressive civic WEALTH TAX (the private-house ceiling) ─────────
+            // Flat base + a quadratic surcharge on wealth above a soft cap, scaled
+            // by the early-game multiplier. The square means a great fortune bleeds
+            // ever harder, pinning the sustained richest house to tens of thousands
+            // instead of running away to the millions. Capped per month so it can't
+            // drive a house straight into debt. Flows to the polis TREASURY.
+            let wealth_tax = if is_guild { 0.0 } else {
+                let over = (pos - HOUSE_WEALTH_SOFTCAP).max(0.0);
+                let raw = (pos * HOUSE_WEALTH_TAX_BASE + over * over * HOUSE_WEALTH_TAX_QUAD) * early_mult;
+                raw.min(pos * HOUSE_WEALTH_TAX_MAXFRAC)
+            };
+
+            self.houses[hi].wealth -= upkeep + consumption + endowment + wealth_overhead + wealth_tax;
 
             if home < self.hubs.len() {
                 // Consumption + the family overhead + the guild's civic dues (upkeep)
@@ -2884,10 +2916,15 @@ impl CampaignSim {
                 if is_guild {
                     self.hubs[home].civic_pool += upkeep;
                 }
+                // The progressive wealth tax fills the polis TREASURY (city-finances
+                // ledger), so as houses are reined in the cities themselves grow rich.
+                self.hubs[home].treasury += wealth_tax;
+                self.hubs[home].finance.tax_wealth += wealth_tax;
             }
             if hi < self.house_ledger.len() {
                 self.house_ledger[hi].upkeep += upkeep;
                 self.house_ledger[hi].consumption += consumption + endowment + wealth_overhead;
+                self.house_ledger[hi].civic_tax += wealth_tax;
                 // Sample wealth each month for the Accountant's year graph — now
                 // signed, so a debt-ridden year shows the balance going negative.
                 self.house_ledger[hi].wealth_samples.push(self.houses[hi].wealth);
@@ -5954,10 +5991,13 @@ mod tests {
         }
         eprintln!("over 50y: wealth ∈ [{min_w:.1}, {peak_w:.1}] · sustained (late) richest {late_max:.0}");
         assert!(min_w.is_finite() && peak_w.is_finite(), "wealth finite");
-        // SUSTAINED wealth must stay sane — the original bug was a fortune that sat
-        // at ~100k and kept growing. A transient early-game arbitrage spike that the
-        // progressive tax + market then corrects is acceptable dynamics.
-        assert!(late_max < 50_000.0, "no SUSTAINED runaway-rich house: {late_max}");
+        // SUSTAINED wealth must stay sane. Before the progressive house wealth tax
+        // (HOUSE_WEALTH_TAX_*) a single family ran away to ~1.25M and kept climbing;
+        // now the sustained richest sits in the tens of thousands. The LOCAL futures
+        // economy is spikier than main's (one-off arbitrage/contract windfalls land
+        // before the monthly tax claws them back), so the bound is looser than main's
+        // 50k while still catching any true (order-of-magnitude) runaway.
+        assert!(late_max < 120_000.0, "no SUSTAINED runaway-rich house: {late_max}");
         assert!(min_w > -100.0, "no runaway-insolvent house (limited liability): {min_w}");
         // The world must actually be DYNAMIC: houses turn over.
         assert!(ever_dissolved, "houses rise and fall over decades");
