@@ -726,6 +726,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 tariff_import: 0.0,
                 mint_fineness: 1.0,
                 council_house: -1,
+                coin_name: String::new(),
+                coin_trust: 0.0,
+                mint_fineness_prev: 0.0,
             }
         })
         .collect();
@@ -915,6 +918,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         spec_centers: vec![],
         spec_year: 0,
         spec_prev_profit: vec![],
+        banks: vec![],
+        crashes: vec![],
         days: vec![],
     };
     sim.rebuild_routes();
@@ -1619,6 +1624,9 @@ pub struct PolisBrief {
     pub council: String,
     pub council_archetype: String,
     pub council_color: String,
+    /// DLC 3.5 · the polis's named coin ("" = none) + its acceptance/trust 0..1.
+    pub coin_name: String,
+    pub coin_trust: f32,
 }
 
 #[tauri::command]
@@ -1641,10 +1649,201 @@ pub fn campaign_get_poleis(db: State<'_, WorldDb>) -> Result<Vec<PolisBrief>, St
                 tariff_export: h.tariff_export, tariff_import: h.tariff_import,
                 mint_fineness: if h.mint_fineness <= 0.0 { 1.0 } else { h.mint_fineness },
                 council, council_archetype: arch, council_color: color,
+                coin_name: h.coin_name.clone(), coin_trust: h.coin_trust,
             }
         })
         .collect();
     out.sort_by(|a, b| b.treasury.partial_cmp(&a.treasury).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(out)
+}
+
+/// DLC 3.5 · one currency in the world reserve-currency ranking. Surfaced in the
+/// Coin & Credit panel's "Currencies" tab.
+#[derive(Serialize, Clone)]
+pub struct CurrencyBrief {
+    pub hub: u32,
+    pub city: String,
+    pub coin_name: String,
+    /// Acceptance / trust 0..1.
+    pub trust: f32,
+    /// Mint fineness (1 = full coin, < 1 = debased).
+    pub fineness: f32,
+    /// Recent trade throughput at the issuing city (the reserve weight).
+    pub throughput: f32,
+    /// True once trust clears the reserve-currency floor (accepted abroad).
+    pub is_reserve: bool,
+    pub color: String,
+}
+
+/// DLC 3.5 · the world's coinage, ranked by reserve strength (trust × throughput).
+#[tauri::command]
+pub fn campaign_get_currencies(db: State<'_, WorldDb>) -> Result<Vec<CurrencyBrief>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let mut out: Vec<CurrencyBrief> = sim.hubs.iter().enumerate()
+        .filter(|(_, h)| !h.is_estate && !h.coin_name.is_empty())
+        .map(|(i, h)| {
+            let throughput = h.tw_house + h.tw_local + h.tw_guild;
+            CurrencyBrief {
+                hub: h.id, city: h.name.clone(), coin_name: h.coin_name.clone(),
+                trust: h.coin_trust,
+                fineness: if h.mint_fineness <= 0.0 { 1.0 } else { h.mint_fineness },
+                throughput,
+                is_reserve: h.coin_trust >= 0.55,
+                color: distinct_color(i),
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| (b.trust * (b.throughput + 1.0))
+        .partial_cmp(&(a.trust * (a.throughput + 1.0)))
+        .unwrap_or(std::cmp::Ordering::Equal));
+    Ok(out)
+}
+
+/// DLC 3.5 · one bank's balance sheet + reach, for the Coin & Credit panel.
+#[derive(Serialize, Clone)]
+pub struct BankBrief {
+    pub name: String,
+    pub seat: String,
+    pub owner: String,
+    pub color: String,
+    pub founded_year: u32,
+    pub defunct: bool,
+    // ── Balance sheet (grain-eq) ──
+    pub reserves: f32,
+    pub loans_out: f32,
+    pub real_estate: f32,
+    pub deposits: f32,
+    pub notes_issued: f32,
+    pub equity: f32,
+    pub reserve_ratio: f32,
+    pub n_loans: u32,
+    pub interest_earned: f32,
+    pub losses: f32,
+    /// Cities hosting a counting-house branch.
+    pub branches: Vec<String>,
+    /// Recent chronicle lines (founding, branches, defaults, failure).
+    pub events: Vec<String>,
+}
+
+/// DLC 3.5 · all chartered banks, richest (by equity) first.
+#[tauri::command]
+pub fn campaign_get_banks(db: State<'_, WorldDb>) -> Result<Vec<BankBrief>, String> {
+    use crate::sim::tick::TICKS_PER_YEAR;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let mut out: Vec<BankBrief> = sim.banks.iter().map(|b| {
+        let seat = sim.hubs.get(b.seat as usize).map(|h| h.name.clone()).unwrap_or_default();
+        let owner = sim.houses.get(b.house as usize).map(|h| h.name.clone()).unwrap_or_default();
+        let branches = b.branches.iter()
+            .filter_map(|&hb| sim.hubs.get(hb as usize).map(|h| h.name.clone()))
+            .collect();
+        let events = b.events.iter().rev().take(8)
+            .map(|e| e.text.clone()).collect();
+        BankBrief {
+            name: b.name.clone(), seat, owner,
+            color: distinct_color(b.house as usize),
+            founded_year: b.founded_tick / TICKS_PER_YEAR,
+            defunct: b.defunct,
+            reserves: b.reserves, loans_out: b.loans_outstanding(), real_estate: b.real_estate,
+            deposits: b.deposits, notes_issued: b.notes_issued,
+            equity: b.equity(), reserve_ratio: b.reserve_ratio(),
+            n_loans: b.loans.iter().filter(|l| l.outstanding > 0.01).count() as u32,
+            interest_earned: b.interest_earned, losses: b.losses,
+            branches, events,
+        }
+    }).collect();
+    out.sort_by(|a, b| {
+        a.defunct.cmp(&b.defunct).then(
+            b.equity.partial_cmp(&a.equity).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    Ok(out)
+}
+
+/// DLC 3.5 · the log of regional financial crashes (newest first).
+#[tauri::command]
+pub fn campaign_get_crashes(db: State<'_, WorldDb>)
+    -> Result<Vec<crate::sim::tick::CrashRecord>, String>
+{
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let mut out = sim.crashes.clone();
+    out.reverse();
+    Ok(out)
+}
+
+/// DLC 3.5 · one city's "schematic" — its standing buildings, estates, bank
+/// presence and coin, for the Schematics (blueprint) view.
+#[derive(Serialize, Clone)]
+pub struct SchematicBuilding { pub label: String, pub effect: String }
+#[derive(Serialize, Clone)]
+pub struct SchematicEstate { pub label: String, pub tier: u8, pub owner: String, pub good: String }
+#[derive(Serialize, Clone)]
+pub struct CitySchematic {
+    pub hub: u32,
+    pub name: String,
+    pub x: f32,
+    pub y: f32,
+    pub population: u32,
+    pub coin_name: String,
+    pub coin_trust: f32,
+    pub council: String,
+    pub buildings: Vec<SchematicBuilding>,
+    pub estates: Vec<SchematicEstate>,
+    /// Banks seated in this city.
+    pub banks_seated: Vec<String>,
+    /// Banks with a counting-house branch here.
+    pub bank_branches: Vec<String>,
+}
+
+/// DLC 3.5 · per-city schematics for every real city (non-estate), largest first.
+#[tauri::command]
+pub fn campaign_get_schematics(db: State<'_, WorldDb>) -> Result<Vec<CitySchematic>, String> {
+    use crate::sim::tick::{structure_label, structure_effect};
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let estate_label = |k: u8| match k {
+        1 => "Farm", 2 => "Mine", 3 => "Plantation", 4 => "Fishery", 5 => "Vineyard", 6 => "Manufactory",
+        _ => "Estate",
+    };
+    let mut out: Vec<CitySchematic> = Vec::new();
+    for (i, h) in sim.hubs.iter().enumerate() {
+        if h.is_estate || h.population < 1.0 { continue; }
+        let buildings = h.structures.iter().map(|&s| SchematicBuilding {
+            label: structure_label(s).to_string(), effect: structure_effect(s).to_string(),
+        }).collect();
+        // Estates parented to this city.
+        let estates = sim.hubs.iter()
+            .filter(|e| e.is_estate && e.parent == i as i32)
+            .map(|e| {
+                let owner = if e.owner_house >= 0 {
+                    sim.houses.get(e.owner_house as usize).map(|x| x.name.clone()).unwrap_or_default()
+                } else { "City".into() };
+                let good = e.base_per_capita.iter().enumerate()
+                    .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                    .and_then(|(g, _)| sim.goods.get(g)).map(|x| x.name.clone()).unwrap_or_default();
+                SchematicEstate {
+                    label: estate_label(e.estate_kind).to_string(),
+                    tier: e.estate_tier.max(1), owner, good,
+                }
+            }).collect();
+        let banks_seated = sim.banks.iter()
+            .filter(|b| !b.defunct && b.seat as usize == i)
+            .map(|b| b.name.clone()).collect();
+        let bank_branches = sim.banks.iter()
+            .filter(|b| !b.defunct && b.seat as usize != i && b.branches.contains(&(i as u32)))
+            .map(|b| b.name.clone()).collect();
+        let council = if h.council_house >= 0 {
+            sim.houses.get(h.council_house as usize).map(|x| x.name.clone()).unwrap_or_default()
+        } else { String::new() };
+        out.push(CitySchematic {
+            hub: h.id, name: h.name.clone(), x: h.x, y: h.y,
+            population: h.population as u32,
+            coin_name: h.coin_name.clone(), coin_trust: h.coin_trust,
+            council, buildings, estates, banks_seated, bank_branches,
+        });
+    }
+    out.sort_by(|a, b| b.population.cmp(&a.population));
     Ok(out)
 }
 

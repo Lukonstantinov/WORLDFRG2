@@ -504,7 +504,7 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 }
 
 // ── DLC 1 "Living Trade" tick simulation ──
-import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, CityRank, ContractRow, SpecCenter, PolisBrief } from "../types";
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, CityRank, ContractRow, SpecCenter, PolisBrief, CurrencyBrief, BankBrief, CrashRecord, CitySchematic } from "../types";
 
 /** Seed a fresh living-trade sim from the static economy snapshot (step 10). */
 export async function campaignStartSim(seed: number): Promise<CampaignSnapshot> {
@@ -550,6 +550,26 @@ export async function campaignGetSpeculation(): Promise<SpecCenter[]> {
 /** DLC 3 · the poleis as actors (treasury / tariff / mint / council). */
 export async function campaignGetPoleis(): Promise<PolisBrief[]> {
   return invoke("campaign_get_poleis");
+}
+
+/** DLC 3.5 · the world's coinage ranked by reserve strength (trust × throughput). */
+export async function campaignGetCurrencies(): Promise<CurrencyBrief[]> {
+  return invoke("campaign_get_currencies");
+}
+
+/** DLC 3.5 · all chartered banks with their balance sheets. */
+export async function campaignGetBanks(): Promise<BankBrief[]> {
+  return invoke("campaign_get_banks");
+}
+
+/** DLC 3.5 · the log of regional financial crashes (newest first). */
+export async function campaignGetCrashes(): Promise<CrashRecord[]> {
+  return invoke("campaign_get_crashes");
+}
+
+/** DLC 3.5 · per-city schematics (buildings / estates / banks / coin). */
+export async function campaignGetSchematics(): Promise<CitySchematic[]> {
+  return invoke("campaign_get_schematics");
 }
 
 /** All futures contracts (active + archived ≤5y) for the Contracts tab. */

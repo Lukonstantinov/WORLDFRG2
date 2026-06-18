@@ -292,6 +292,53 @@ const SHIP_COST: f32 = 5.0;
 const RIVER_COST: f32 = 3.5;
 const CARAVAN_COST: f32 = 3.0;
 
+// ── DLC 3.5 · Coinage (the "Venice ducat") ──────────────────────────────────
+// A council-led polis issues a NAMED coin whose acceptance ("trust") is sticky
+// reputation: it rises with full-bodied minting, a deep treasury, trade wealth
+// and civic stability, and falls when the council debases. The strongest coins
+// become reserve currencies accepted abroad — a small import-freight discount
+// that turns strong-money cities into entrepôts.
+/// How fast coin trust eases toward its yearly target (reputation is sticky).
+const COIN_TRUST_EASE: f32 = 0.20;
+/// Extra trust hit per point of debasement vs last year (sudden cuts spook holders).
+const COIN_DEBASE_PENALTY: f32 = 1.5;
+/// Seigniorage skimmed into the treasury = throughput · (1−fineness) · this.
+/// Debasing raises immediate mint profit but erodes trust (and feeds bubbles).
+const COIN_SEIGNIORAGE: f32 = 0.04;
+/// Max import-freight discount a fully-trusted reserve coin grants its market.
+const COIN_FREIGHT_DISCOUNT: f32 = 0.10;
+/// A coin must clear this trust to count as a reserve currency abroad.
+const RESERVE_TRUST_MIN: f32 = 0.55;
+
+// ── DLC 3.5 · Banks (merchant bankers as institutions) ──────────────────────
+/// A banking house needs at least this wealth (and the prestige/coin floors) to
+/// charter a bank.
+const BANK_FOUND_WEALTH: f32 = 10.0;
+const BANK_FOUND_PRESTIGE: f32 = 0.30;
+/// The bank's seat city coin must be trusted at least this much (you bank in good money).
+const BANK_FOUND_COIN_TRUST: f32 = 0.45;
+/// Founding capital moved from the house into the new bank's specie reserves.
+const BANK_FOUND_CAPITAL: f32 = 6.0;
+/// Monthly interest a bank charges on loans / pays on deposits.
+const BANK_LOAN_RATE: f32 = 0.012;
+const BANK_DEPOSIT_RATE: f32 = 0.006;
+/// Fractional reserve: notes/credit may run up to this multiple of specie reserves.
+const BANK_RESERVE_MULT: f32 = 3.0;
+/// Below this reserve ratio (reserves ÷ liabilities) a bank is fragile → run risk.
+const BANK_RUN_RATIO: f32 = 0.22;
+/// Book value a counting-house branch adds to a bank's real-estate assets.
+const BANK_BRANCH_VALUE: f32 = 2.0;
+
+// ── DLC 3.5 · Regional financial crashes (contagion) ────────────────────────
+/// Fraction of wealth houses in the stricken region lose when the crash hits.
+const CRASH_WEALTH_HAIRCUT: f32 = 0.28;
+/// Coin-trust collapse applied to every polis in the stricken region.
+const CRASH_TRUST_HIT: f32 = 0.30;
+/// Duration (ticks) of the regional panic event (frozen credit + low morale).
+const CRASH_PANIC_TICKS: u32 = 240;
+/// Yearly chance a HIGH-tier (≥4★) speculative bubble actually POPS into a crash.
+const CRASH_BUBBLE_POP_CHANCE: f32 = 0.35;
+
 /// One tradable good in the tick economy (mapped from the world's `GoodSpec`).
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TickGood {
@@ -426,6 +473,15 @@ pub struct TickHub {
     /// House index of the family/faction whose council governs this polis (−1 = no
     /// dominant council). The decision-maker behind tariff / mint / charter policy.
     #[serde(default = "neg_one_i32")] pub council_house: i32,
+    // ── DLC 3.5 · Coinage (the "Venice ducat") ──
+    /// The NAMED coin this polis mints ("" = it issues none — only council seats do).
+    #[serde(default)] pub coin_name: String,
+    /// Acceptance / trust in this coin, 0..1 — sticky reputation eased yearly. The
+    /// strongest become reserve currencies accepted abroad. 0 = no/untrusted coin.
+    #[serde(default)] pub coin_trust: f32,
+    /// Last year's mint fineness — so the coinage pass can read a sudden DEBASEMENT
+    /// (a cut vs last year) and dock trust accordingly. 0 on old saves → no penalty.
+    #[serde(default)] pub mint_fineness_prev: f32,
 }
 
 /// Serde default for `owner_house` so old saves / non-estate hubs read −1, not 0
@@ -626,6 +682,96 @@ pub struct House {
     /// touches `(hub, volume)`. Drives office opening (sustained tie) and closing
     /// (tie withers). Not all hubs — only ones traded through.
     #[serde(default)] pub trade_at: Vec<(u32, f32)>,
+}
+
+/// DLC 3.5 · one loan on a bank's books. An asset to the bank (interest income);
+/// a liability to the borrower (a house, or a city treasury). `outstanding` is
+/// written down as the loan amortizes or when the borrower defaults.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Loan {
+    /// Borrowing house index (−1 = a polis treasury borrowed instead).
+    pub borrower_house: i32,
+    /// Borrowing polis hub index (−1 = a house borrowed instead).
+    pub borrower_polis: i32,
+    pub principal: f32,
+    pub outstanding: f32,
+    /// Monthly interest rate locked at origination.
+    pub rate: f32,
+    pub start_tick: u32,
+    pub term_ticks: u32,
+    /// "estate" | "structure" | "treasury" | "trade".
+    pub purpose: String,
+}
+
+/// DLC 3.5 · a BANK — a great merchant-banking house's chartered institution,
+/// with a real balance sheet. Assets = specie `reserves` + loans outstanding +
+/// `real_estate` (branches / foreclosed property); Liabilities = `deposits`
+/// (capital placed by other houses) + `notes_issued` (bank-notes circulating).
+/// Equity = assets − liabilities. A bank that runs its reserve ratio too thin is
+/// vulnerable to a run; a failed bank can ignite a regional crash.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Bank {
+    pub name: String,        // "Banco di Vethra"
+    /// Owning house index.
+    pub house: u32,
+    /// Home (seat) hub index.
+    pub seat: u32,
+    pub founded_tick: u32,
+    pub defunct: bool,
+    // ── Assets ──
+    pub reserves: f32,
+    pub loans: Vec<Loan>,
+    pub real_estate: f32,
+    // ── Liabilities ──
+    pub deposits: f32,
+    pub notes_issued: f32,
+    // ── Reach + record ──
+    /// Hubs hosting a counting-house branch (extends the home coin's reach).
+    pub branches: Vec<u32>,
+    pub prestige: f32,
+    /// Cumulative interest earned (income) and written-off losses (for the ledger).
+    pub interest_earned: f32,
+    pub losses: f32,
+    pub events: Vec<HouseEvent>,
+}
+
+impl Bank {
+    /// Loans outstanding (an asset).
+    pub fn loans_outstanding(&self) -> f32 {
+        self.loans.iter().map(|l| l.outstanding.max(0.0)).sum()
+    }
+    pub fn assets(&self) -> f32 {
+        self.reserves + self.loans_outstanding() + self.real_estate
+    }
+    pub fn liabilities(&self) -> f32 {
+        self.deposits + self.notes_issued
+    }
+    pub fn equity(&self) -> f32 {
+        self.assets() - self.liabilities()
+    }
+    /// Reserves ÷ liabilities (∞ when it owes nothing). Below `BANK_RUN_RATIO` the
+    /// bank is fragile.
+    pub fn reserve_ratio(&self) -> f32 {
+        let liab = self.liabilities();
+        if liab <= EPS { 99.0 } else { self.reserves / liab }
+    }
+}
+
+/// DLC 3.5 · a regional financial crash — credit froze across a trade-connected
+/// region (one connectivity `component`). Recorded for the Coin & Credit panel.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CrashRecord {
+    pub year: u32,
+    /// Hub where the panic started (a failed bank / popped bubble).
+    pub origin_hub: u32,
+    pub origin_name: String,
+    /// Connectivity component hit (the affected region/continent).
+    pub component: u32,
+    pub cities_hit: u32,
+    pub banks_failed: u32,
+    /// "bank failure" | "bubble burst".
+    pub cause: String,
+    pub text: String,
 }
 
 /// A candidate empty-land site a wealthy house / large city can colonize with an
@@ -830,6 +976,12 @@ pub struct CampaignSim {
     /// Per-hub trade profit booked in the PREVIOUS year, kept so the speculation
     /// engine can read a year-on-year dividend surge. Indexed to match `hubs`.
     #[serde(default)] pub spec_prev_profit: Vec<f32>,
+    /// DLC 3.5 · chartered banks (great banking houses' institutions). Empty until
+    /// a banking house qualifies to found one; serde-default → old saves load none.
+    #[serde(default)] pub banks: Vec<Bank>,
+    /// DLC 3.5 · log of regional financial crashes (origin region + year + cause),
+    /// newest last. Surfaced in the Coin & Credit panel.
+    #[serde(default)] pub crashes: Vec<CrashRecord>,
     /// Derived route-days matrix (n·n, f32::INFINITY = unreachable). Not
     /// serialized — rebuilt from positions + components after load.
     #[serde(skip)]
@@ -913,6 +1065,407 @@ impl CampaignSim {
             self.hubs[h].mint_fineness = f + (target - f) * 0.5;
             // Retained treasury: skim ~8% of the circulating civic pool.
             self.hubs[h].treasury += self.hubs[h].civic_pool * 0.08;
+        }
+    }
+
+    // ───────────────────────── DLC 3.5 · Coin, Credit & Crashes ──────────────
+
+    /// Recent trade volume touching a hub (the decaying per-class tallies) — used
+    /// as the coinage "throughput" weight and the seigniorage base.
+    fn hub_throughput(&self, h: usize) -> f32 {
+        let hb = &self.hubs[h];
+        hb.tw_house + hb.tw_local + hb.tw_guild
+    }
+
+    /// Whether a hub is currently inside a regional financial panic.
+    fn hub_in_panic(&self, h: usize) -> bool {
+        let tick = self.tick;
+        self.active_events.iter()
+            .any(|e| e.kind == "panic" && e.hub == h as i32 && e.until_tick > tick)
+    }
+
+    /// Deterministic coin denomination for a polis (Venice → ducat, Florence →
+    /// florin, …). Stable per seed/hub.
+    fn coin_denomination(&self, hub: usize) -> &'static str {
+        const DENOMS: [&str; 10] = [
+            "Ducat", "Florin", "Mark", "Dinar", "Solidus",
+            "Crown", "Sequin", "Thaler", "Bezant", "Stater",
+        ];
+        let i = (hash01(self.seed, hub as u64 ^ 0xC0114, 0xDEED) * DENOMS.len() as f32) as usize
+            % DENOMS.len();
+        DENOMS[i]
+    }
+
+    /// DLC 3.5 · Coinage — once a year each council seat mints a NAMED coin and
+    /// updates its acceptance ("trust"): sticky reputation built from full-bodied
+    /// minting, a deep treasury, trade wealth, civic stability and throughput, and
+    /// docked when the council debases. Debasement also skims seigniorage into the
+    /// treasury (mint profit now, at trust's expense later). The strongest coins
+    /// become reserve currencies (see `coin_discount`).
+    fn decide_coinage(&mut self, _year: u32) {
+        let n = self.hubs.len();
+        // Normalizers across all council seats.
+        let mut max_treasury = 1.0f32;
+        let mut max_through = 1.0f32;
+        for h in 0..n {
+            if self.hubs[h].is_estate { continue; }
+            max_treasury = max_treasury.max(self.hubs[h].treasury);
+            max_through = max_through.max(self.hub_throughput(h));
+        }
+        let tick = self.tick;
+        for h in 0..n {
+            if self.hubs[h].is_estate { continue; }
+            let fineness = if self.hubs[h].mint_fineness <= 0.0 { 1.0 } else { self.hubs[h].mint_fineness };
+            let council = self.hubs[h].council_house;
+            // A council seat with no coin yet starts minting one.
+            if council >= 0 && self.hubs[h].coin_name.is_empty() {
+                let denom = self.coin_denomination(h);
+                let city = self.hubs[h].name.clone();
+                self.hubs[h].coin_name = format!("{} of {}", denom, city);
+                self.hubs[h].coin_trust = 0.35;
+                let cn = self.hubs[h].coin_name.clone();
+                self.journal.push(JournalEntry {
+                    tick, kind: "coinage".into(), hub: h as i32, good: -1, value: 0.0,
+                    text: format!("{} mints the {}", city, cn),
+                });
+            }
+            if self.hubs[h].coin_name.is_empty() {
+                // No mint → any residual trust slowly bleeds away.
+                self.hubs[h].coin_trust *= 0.9;
+                self.hubs[h].mint_fineness_prev = fineness;
+                continue;
+            }
+            // Trust target — each term in 0..1.
+            let through = self.hub_throughput(h);
+            let t_fine = fineness.clamp(0.0, 1.0);
+            let t_treas = (self.hubs[h].treasury / max_treasury).clamp(0.0, 1.0);
+            let tw = self.hubs[h].trade_wealth;
+            let t_trade = (tw / (tw.abs() + 1.0)).clamp(0.0, 1.0);
+            let t_stab = self.hubs[h].sent_stability.clamp(0.0, 1.0);
+            let t_through = (through / max_through).clamp(0.0, 1.0);
+            let mut target =
+                0.34 * t_fine + 0.20 * t_treas + 0.16 * t_trade + 0.14 * t_stab + 0.16 * t_through;
+            // A fresh debasement (a cut vs last year) spooks holders extra.
+            let prev = if self.hubs[h].mint_fineness_prev <= 0.0 { fineness } else { self.hubs[h].mint_fineness_prev };
+            let debase = (prev - fineness).max(0.0);
+            target = (target - debase * COIN_DEBASE_PENALTY).clamp(0.0, 1.0);
+            let tr = self.hubs[h].coin_trust;
+            self.hubs[h].coin_trust = (tr + (target - tr) * COIN_TRUST_EASE).clamp(0.0, 1.0);
+            // Seigniorage from minting (esp. from debasement), scaled by throughput.
+            let seign = through * (1.0 - fineness).max(0.0) * COIN_SEIGNIORAGE;
+            self.hubs[h].treasury += seign;
+            self.hubs[h].mint_fineness_prev = fineness;
+        }
+    }
+
+    /// Import-freight multiplier (≤ 1.0) a destination's money earns: a trusted
+    /// reserve coin — or a bank-note from a branch of a strong-coin bank — shaves
+    /// transaction cost, making strong-money cities natural entrepôts.
+    fn coin_discount(&self, dest: usize) -> f32 {
+        if dest >= self.hubs.len() { return 1.0; }
+        let mut trust = self.hubs[dest].coin_trust;
+        if trust < RESERVE_TRUST_MIN {
+            // Bank notes: a branch of a bank seated in a strong-coin city brings
+            // that coin's credit here.
+            for b in &self.banks {
+                if b.defunct { continue; }
+                if b.seat as usize == dest || b.branches.contains(&(dest as u32)) {
+                    let st = self.hubs.get(b.seat as usize).map(|x| x.coin_trust).unwrap_or(0.0);
+                    if st > trust { trust = st; }
+                }
+            }
+        }
+        if trust < RESERVE_TRUST_MIN { return 1.0; }
+        1.0 - COIN_FREIGHT_DISCOUNT * trust.clamp(0.0, 1.0)
+    }
+
+    /// "Banco di <City>" name for a bank seated at `seat`.
+    fn bank_name_for(&self, seat: usize) -> String {
+        format!("Banco di {}", self.hubs[seat].name)
+    }
+
+    /// DLC 3.5 · once a year: qualifying banking houses charter banks, and existing
+    /// banks open counting-house branches wherever their owner has trade offices
+    /// (extending the home coin's reach and booking real estate).
+    fn update_banks(&mut self, _year: u32) {
+        let tick = self.tick;
+        // 1) Charter new banks.
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct || self.houses[hi].is_guild { continue; }
+            if self.houses[hi].archetype != ARCH_BANKING { continue; }
+            if self.banks.iter().any(|b| !b.defunct && b.house == hi as u32) { continue; }
+            let seat = self.houses[hi].hub as usize;
+            if seat >= self.hubs.len() { continue; }
+            if self.houses[hi].wealth < BANK_FOUND_WEALTH { continue; }
+            if self.houses[hi].prestige < BANK_FOUND_PRESTIGE { continue; }
+            if self.hubs[seat].coin_trust < BANK_FOUND_COIN_TRUST { continue; }
+            let capital = BANK_FOUND_CAPITAL.min(self.houses[hi].wealth * 0.5);
+            if capital < 1.0 { continue; }
+            self.houses[hi].wealth -= capital;
+            let bname = self.bank_name_for(seat);
+            let mut bank = Bank {
+                name: bname.clone(), house: hi as u32, seat: seat as u32,
+                founded_tick: tick, defunct: false,
+                reserves: capital, loans: Vec::new(), real_estate: BANK_BRANCH_VALUE,
+                deposits: 0.0, notes_issued: 0.0,
+                branches: vec![seat as u32], prestige: self.houses[hi].prestige,
+                interest_earned: 0.0, losses: 0.0, events: Vec::new(),
+            };
+            bank.events.push(HouseEvent { tick, kind: "founded".into(),
+                text: format!("{} chartered in {}", bname, self.hubs[seat].name) });
+            let house_name = self.houses[hi].name.clone();
+            self.journal.push(JournalEntry { tick, kind: "bank".into(), hub: seat as i32, good: -1,
+                value: 0.0, text: format!("{} founds the {}", house_name, bname) });
+            self.houses[hi].events.push(HouseEvent { tick, kind: "bank".into(),
+                text: format!("charters the {}", bname) });
+            self.banks.push(bank);
+        }
+        // 2) Grow branches to follow the owner's trade offices.
+        for bi in 0..self.banks.len() {
+            if self.banks[bi].defunct { continue; }
+            let owner = self.banks[bi].house as usize;
+            if owner >= self.houses.len() { continue; }
+            let offices = self.houses[owner].offices.clone();
+            for off in offices {
+                if (off as usize) >= self.hubs.len() { continue; }
+                if !self.banks[bi].branches.contains(&off) {
+                    self.banks[bi].branches.push(off);
+                    self.banks[bi].real_estate += BANK_BRANCH_VALUE;
+                    let cn = self.hubs[off as usize].name.clone();
+                    self.banks[bi].events.push(HouseEvent { tick, kind: "branch".into(),
+                        text: format!("opens a counting-house in {}", cn) });
+                }
+            }
+        }
+    }
+
+    /// DLC 3.5 · monthly bank dynamics: service loans (borrowers pay interest +
+    /// amortize, or default), pay depositors, dividend the owner, take new deposits,
+    /// originate loans (frozen during a panic), and fail when equity turns negative.
+    fn bank_pass(&mut self) {
+        let tick = self.tick;
+        for bi in 0..self.banks.len() {
+            if self.banks[bi].defunct { continue; }
+            let seat = self.banks[bi].seat as usize;
+            let panicked = self.hub_in_panic(seat);
+            // 1) Service loans.
+            let nloans = self.banks[bi].loans.len();
+            let mut interest_income = 0.0f32;
+            let mut writeoff = 0.0f32;
+            let mut keep = vec![true; nloans];
+            for li in 0..nloans {
+                let (bh, bp, outstanding, principal, rate, term) = {
+                    let l = &self.banks[bi].loans[li];
+                    (l.borrower_house, l.borrower_polis, l.outstanding, l.principal, l.rate, l.term_ticks)
+                };
+                if outstanding <= EPS { keep[li] = false; continue; }
+                let due = outstanding * rate;
+                let amort = (principal / (term.max(30) as f32 / 30.0)).min(outstanding);
+                let pay = due + amort;
+                let paid = if bh >= 0 && (bh as usize) < self.houses.len() && !self.houses[bh as usize].defunct {
+                    if self.houses[bh as usize].wealth > pay * 1.2 {
+                        self.houses[bh as usize].wealth -= pay; true
+                    } else { false }
+                } else if bp >= 0 && (bp as usize) < self.hubs.len() {
+                    if self.hubs[bp as usize].treasury > pay * 1.2 {
+                        self.hubs[bp as usize].treasury -= pay; true
+                    } else { false }
+                } else { false };
+                if paid {
+                    interest_income += due;
+                    let rem = (outstanding - amort).max(0.0);
+                    self.banks[bi].loans[li].outstanding = rem;
+                    if rem <= EPS { keep[li] = false; }
+                } else {
+                    // Default: write off the balance; the bank seizes property worth a
+                    // fraction of the loan (a foreclosed asset on its books).
+                    writeoff += outstanding;
+                    self.banks[bi].real_estate += outstanding * 0.4;
+                    self.banks[bi].loans[li].outstanding = 0.0;
+                    keep[li] = false;
+                    self.banks[bi].events.push(HouseEvent { tick, kind: "default".into(),
+                        text: format!("writes off a loan of {:.0} in default", outstanding) });
+                }
+            }
+            self.banks[bi].reserves += interest_income;
+            self.banks[bi].interest_earned += interest_income;
+            self.banks[bi].losses += writeoff;
+            let mut idx = 0;
+            self.banks[bi].loans.retain(|_| { let k = keep[idx]; idx += 1; k });
+            // 2) Depositor interest (a cost paid from reserves).
+            let dep_cost = self.banks[bi].deposits * BANK_DEPOSIT_RATE;
+            self.banks[bi].reserves -= dep_cost;
+            // 3) Dividend the bank's net spread to the owning house.
+            let owner = self.banks[bi].house as usize;
+            let profit = interest_income - dep_cost;
+            if profit > 0.0 && owner < self.houses.len() && !self.houses[owner].defunct {
+                let dividend = (profit * 0.5).min(self.banks[bi].reserves.max(0.0));
+                self.banks[bi].reserves -= dividend;
+                self.houses[owner].wealth += dividend;
+            }
+            // 4) New lending (only in calm times).
+            if !panicked { self.bank_maybe_lend(bi); }
+            // 5) Attract deposits.
+            self.bank_maybe_take_deposits(bi);
+            // 6) Failure.
+            if self.banks[bi].equity() < 0.0 || self.banks[bi].reserves < 0.0 {
+                self.fail_bank(bi);
+            }
+        }
+    }
+
+    /// A wealthy house at a bank's seat parks idle capital as an interest-bearing
+    /// deposit (a liability that funds the bank's lending). Capped by the
+    /// fractional-reserve limit so the bank stays sound.
+    fn bank_maybe_take_deposits(&mut self, bi: usize) {
+        let tick = self.tick;
+        let cap = self.banks[bi].reserves * BANK_RESERVE_MULT;
+        if self.banks[bi].liabilities() >= cap { return; }
+        if hash01(self.seed, tick as u64 ^ 0xDEED0, bi as u64) > 0.25 { return; }
+        let seat = self.banks[bi].seat as usize;
+        let owner = self.banks[bi].house;
+        let mut best = (usize::MAX, 0.0f32);
+        for (hi, h) in self.houses.iter().enumerate() {
+            if h.defunct || hi as u32 == owner { continue; }
+            if h.hub as usize != seat { continue; }
+            if h.wealth > best.1 { best = (hi, h.wealth); }
+        }
+        if best.0 == usize::MAX || best.1 < 3.0 { return; }
+        let amt = (best.1 * 0.1).min(cap - self.banks[bi].liabilities());
+        if amt < 0.5 { return; }
+        self.houses[best.0].wealth -= amt;
+        self.banks[bi].deposits += amt;
+        self.banks[bi].reserves += amt;
+    }
+
+    /// A sound bank with headroom originates a loan: usually to a promising resident
+    /// house (financing its ventures), sometimes to the seat city's treasury (public
+    /// works). It issues notes/credit (a liability) and disburses to the borrower.
+    fn bank_maybe_lend(&mut self, bi: usize) {
+        let tick = self.tick;
+        let headroom = self.banks[bi].reserves * BANK_RESERVE_MULT - self.banks[bi].liabilities();
+        if headroom < 1.0 { return; }
+        if hash01(self.seed, tick as u64 ^ 0x10A40, bi as u64) > 0.3 { return; }
+        let seat = self.banks[bi].seat as usize;
+        let amt = headroom.min(self.banks[bi].reserves * 0.5).max(1.0);
+        let to_house = hash01(self.seed, tick as u64 ^ 0x77B10, bi as u64) < 0.6;
+        let owner = self.banks[bi].house;
+        let (bh, bp, purpose) = if to_house {
+            let mut best = (usize::MAX, 0.0f32);
+            for (hi, h) in self.houses.iter().enumerate() {
+                if h.defunct || h.is_guild || hi as u32 == owner { continue; }
+                if h.hub as usize != seat { continue; }
+                if h.wealth > best.1 { best = (hi, h.wealth); }
+            }
+            if best.0 == usize::MAX { return; }
+            (best.0 as i32, -1i32, "trade")
+        } else {
+            (-1i32, seat as i32, "treasury")
+        };
+        self.banks[bi].loans.push(Loan {
+            borrower_house: bh, borrower_polis: bp,
+            principal: amt, outstanding: amt, rate: BANK_LOAN_RATE,
+            start_tick: tick, term_ticks: 1825, purpose: purpose.into(),
+        });
+        self.banks[bi].notes_issued += amt;
+        if bh >= 0 { self.houses[bh as usize].wealth += amt; }
+        else if bp >= 0 { self.hubs[bp as usize].treasury += amt; }
+    }
+
+    /// A bank fails: depositors are wiped, its notes go worthless, the owning house
+    /// is battered, and the failure ignites a regional crash.
+    fn fail_bank(&mut self, bi: usize) {
+        let tick = self.tick;
+        if self.banks[bi].defunct { return; }
+        self.banks[bi].defunct = true;
+        let seat = self.banks[bi].seat as usize;
+        let name = self.banks[bi].name.clone();
+        let lost = self.banks[bi].deposits;
+        self.banks[bi].events.push(HouseEvent { tick, kind: "failed".into(),
+            text: format!("fails — {:.0} in deposits wiped out", lost) });
+        self.journal.push(JournalEntry { tick, kind: "bank".into(), hub: seat as i32, good: -1,
+            value: lost, text: format!("The {} collapses", name) });
+        let owner = self.banks[bi].house as usize;
+        if owner < self.houses.len() {
+            self.houses[owner].wealth *= 0.6;
+            self.houses[owner].prestige *= 0.7;
+        }
+        self.trigger_regional_crash(seat, 1, "bank failure");
+    }
+
+    /// DLC 3.5 · a regional financial crash. Credit freezes across the origin's
+    /// whole trade-connected region (one connectivity `component`): coin trust
+    /// collapses, house fortunes are haircut, a region-wide panic event tanks
+    /// morale + stability (via the existing sentiment loop), and thinly-reserved
+    /// banks in the region are swept away (contagion). Recorded for the panel.
+    fn trigger_regional_crash(&mut self, origin: usize, origin_is_bank: u32, cause: &str) {
+        if origin >= self.hubs.len() { return; }
+        let tick = self.tick;
+        let year = self.year();
+        let region = self.hubs[origin].component;
+        let origin_name = self.hubs[origin].name.clone();
+        let until = tick + CRASH_PANIC_TICKS;
+        let region_hubs: Vec<usize> = (0..self.hubs.len())
+            .filter(|&h| !self.hubs[h].is_estate && self.hubs[h].component == region)
+            .collect();
+        // 1) Poleis: trust collapse + panic event (sentiment loop does the morale hit).
+        for &h in &region_hubs {
+            self.hubs[h].coin_trust = (self.hubs[h].coin_trust - CRASH_TRUST_HIT).max(0.0);
+            self.hubs[h].trade_wealth *= 0.5;
+            self.active_events.push(ActiveEvent {
+                kind: "panic".into(), hub: h as i32, good: -1,
+                magnitude: 0.5, until_tick: until,
+            });
+        }
+        // 2) Houses homed in the region take a wealth haircut (margin calls).
+        for hh in self.houses.iter_mut() {
+            if hh.defunct { continue; }
+            if region_hubs.contains(&(hh.hub as usize)) {
+                hh.wealth *= 1.0 - CRASH_WEALTH_HAIRCUT;
+                hh.volume *= 0.7;
+            }
+        }
+        // 3) Contagion: banks in the region face a run; the fragile ones fall.
+        let mut banks_failed = origin_is_bank.min(1);
+        for bi in 0..self.banks.len() {
+            if self.banks[bi].defunct { continue; }
+            if !region_hubs.contains(&(self.banks[bi].seat as usize)) { continue; }
+            let run = self.banks[bi].deposits * 0.5;
+            self.banks[bi].reserves -= run;
+            self.banks[bi].deposits = (self.banks[bi].deposits - run).max(0.0);
+            if self.banks[bi].reserve_ratio() < BANK_RUN_RATIO || self.banks[bi].equity() < 0.0 {
+                self.banks[bi].defunct = true;
+                self.banks[bi].events.push(HouseEvent { tick, kind: "failed".into(),
+                    text: "swept away in the panic".into() });
+                banks_failed += 1;
+            }
+        }
+        let cities_hit = region_hubs.len() as u32;
+        let text = format!(
+            "The Crash of {}: credit froze across the {} region — {} cities struck, {} banks failed ({}).",
+            year, origin_name, cities_hit, banks_failed, cause
+        );
+        self.journal.push(JournalEntry {
+            tick, kind: "crash".into(), hub: origin as i32, good: -1,
+            value: cities_hit as f32, text: text.clone(),
+        });
+        self.crashes.push(CrashRecord {
+            year, origin_hub: origin as u32, origin_name, component: region,
+            cities_hit, banks_failed, cause: cause.into(), text,
+        });
+    }
+
+    /// DLC 3.5 · after the yearly speculation read, a HIGH-tier (≥4★) bubble may
+    /// burst into a regional crash.
+    fn maybe_pop_bubbles(&mut self, year: u32) {
+        let pops: Vec<usize> = self.spec_centers.iter()
+            .filter(|c| c.stars >= 4)
+            .filter(|c| hash01(self.seed, c.hub as u64 ^ 0xB0BB1E, year as u64) < CRASH_BUBBLE_POP_CHANCE)
+            .map(|c| c.hub as usize)
+            .collect();
+        for h in pops {
+            if h >= self.hubs.len() || self.hub_in_panic(h) { continue; }
+            self.trigger_regional_crash(h, 0, "bubble burst");
         }
     }
 
@@ -1390,7 +1943,14 @@ impl CampaignSim {
                 // policy, then the speculation why-engine reads the year that just
                 // closed (uses `house_ledger_prev` before the books are reset).
                 self.decide_polis_policy(yr);
+                // DLC 3.5 · the council then sets its coinage (named coin + trust +
+                // seigniorage), banking houses charter/grow banks, the speculation
+                // engine reads the closed year, and HIGH-tier bubbles may POP into a
+                // regional crash.
+                self.decide_coinage(yr);
+                self.update_banks(yr);
                 self.compute_speculation(yr);
+                self.maybe_pop_bubbles(yr);
                 for l in self.house_ledger.iter_mut() {
                     *l = LedgerAcc { year: yr, ..Default::default() };
                 }
@@ -1842,6 +2402,9 @@ impl CampaignSim {
         let n = self.hubs.len();
         let ng = self.goods.len();
         let tick = self.tick;
+        // DLC 3.5 · per-destination reserve-coin freight discount, precomputed once
+        // (it's constant across this dispatch round and read in the hot inner loop).
+        let coin_disc: Vec<f32> = (0..n).map(|d| self.coin_discount(d)).collect();
         // ── Merchant fleet capacity (concurrent shipment slots) for this round ──
         // Each house has fleet_sea sea-slots and (fleet_river + fleet_caravan)
         // land-slots. Slots already busy with in-flight cargo are subtracted, so a
@@ -1922,7 +2485,8 @@ impl CampaignSim {
                         continue;
                     }
                     let pb = self.live_price(self.hubs[b].stock[g], needs[b][g], base);
-                    let freight = self.good_freight(g, freight_rate, days);
+                    // A trusted reserve coin at the buyer `b` shaves freight (DLC 3.5).
+                    let freight = self.good_freight(g, freight_rate * coin_disc[b], days);
                     let gap = pb - (pa + freight) - self.margin * base;
                     if gap > 0.0 {
                         targets.push((b, gap, days));
@@ -2414,9 +2978,11 @@ impl CampaignSim {
             return;
         }
         // Freight home (a Guildhall at b lowers it); per-good weight/spoilage is
-        // folded in per candidate good below via `good_freight`.
+        // folded in per candidate good below via `good_freight`. A trusted reserve
+        // coin at the destination `a` shaves transaction cost (DLC 3.5 coinage).
         let freight_rate = self.freight_per_day
-            * if self.hub_has_struct(b, STRUCT_GUILDHALL) { GUILDHALL_FREIGHT } else { 1.0 };
+            * if self.hub_has_struct(b, STRUCT_GUILDHALL) { GUILDHALL_FREIGHT } else { 1.0 }
+            * self.coin_discount(a);
         // An office at b gives the holder a standing −5% on what it buys there.
         let office_disc = if self.houses[owner].offices.contains(&(b as u32)) { OFFICE_BUY_DISCOUNT } else { 0.0 };
         // Pick b's surplus good that earns the most carried home to a.
@@ -2786,6 +3352,7 @@ impl CampaignSim {
             estate_kind: kind, estate_tier: 1, owner_house, structures: vec![],
             founded_tick: self.tick, founder_house: owner_house,
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
+            coin_name: String::new(), coin_trust: 0.0, mint_fineness_prev: 0.0,
         });
         self.rebuild_routes();
     }
@@ -3303,6 +3870,8 @@ impl CampaignSim {
             self.maybe_branch_houses();
             self.maybe_house_invests();
             self.update_guilds_and_offices();
+            // DLC 3.5 · banks service loans, take deposits, lend, and may fail.
+            self.bank_pass();
             for hi in 0..self.houses.len() {
                 if self.houses[hi].defunct || self.houses[hi].is_guild { continue; } // guilds are civic — never bankrupt
                 if self.houses[hi].wealth < HOUSE_BANKRUPT && self.houses[hi].volume < 0.02 {
@@ -3913,6 +4482,7 @@ mod tests {
             estate_kind: 0, estate_tier: 0, owner_house: -1, structures: vec![],
             founded_tick: 0, founder_house: -1,
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
+            coin_name: String::new(), coin_trust: 0.0, mint_fineness_prev: 0.0,
         }
     }
 
@@ -3941,6 +4511,7 @@ mod tests {
             recent_trades: vec![],
             contracts: vec![], contract_archive: vec![], next_contract_id: 0,
             spec_centers: vec![], spec_year: 0, spec_prev_profit: vec![],
+            banks: vec![], crashes: vec![],
             days: vec![],
         };
         s.rebuild_routes();
@@ -4046,6 +4617,74 @@ mod tests {
         }
         // The polis agent set per-city tariffs (council policy ran).
         assert!(a.hubs.iter().any(|h| h.tariff_export > 0.0), "a council set a tariff");
+    }
+
+    #[test]
+    fn coinage_runs_yearly_finite_and_deterministic() {
+        // DLC 3.5 · council seats mint named coins with a bounded trust score, and
+        // the whole coin/bank pass stays finite + reproducible across two runs.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let mk = || {
+            let hubs = vec![
+                hub(0, 10.0, 10.0, 30000.0, vec![160.0, 16.0], 0),
+                hub(1, 40.0, 12.0, 20000.0, vec![120.0, 2.0], 0),
+            ];
+            let mut s = sim(hubs, goods.clone());
+            // A dominant banking house at each seat → a council that mints coin.
+            for i in 0..2u32 {
+                let mut h = house_at(i, vec![1], 3);
+                h.archetype = 2;            // banking
+                h.wealth = 60.0;
+                h.prestige = 0.6;
+                h.dominant_seat = true;     // controls its seat → becomes the council
+                s.houses.push(h);
+            }
+            s.rebuild_routes();
+            s
+        };
+        let mut a = mk();
+        let mut b = mk();
+        a.advance(800);
+        b.advance(800);
+        // Coins were minted, with trust kept in range, and reproducibly.
+        assert!(a.hubs.iter().any(|h| !h.coin_name.is_empty()), "a council minted a coin");
+        for (ha, hb) in a.hubs.iter().zip(b.hubs.iter()) {
+            assert!(ha.coin_trust.is_finite() && (0.0..=1.0).contains(&ha.coin_trust));
+            assert!((ha.coin_trust - hb.coin_trust).abs() < 1e-4, "coin trust reproducible");
+            assert_eq!(ha.coin_name, hb.coin_name, "coin name reproducible");
+        }
+        // Banks (if any chartered) keep a sound, finite balance sheet.
+        assert_eq!(a.banks.len(), b.banks.len(), "bank count reproducible");
+        for bank in &a.banks {
+            assert!(bank.equity().is_finite() && bank.reserves.is_finite());
+        }
+    }
+
+    #[test]
+    fn regional_crash_is_confined_to_its_region() {
+        // DLC 3.5 · a crash hits every city in the origin's connectivity component
+        // and haircuts houses there, but leaves a separate region untouched.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 10.0, 10.0, 10000.0, vec![100.0], 0), // region 0
+            hub(1, 14.0, 10.0, 9000.0, vec![90.0], 0),   // region 0
+            hub(2, 80.0, 50.0, 8000.0, vec![80.0], 1),   // region 1 (separate)
+        ];
+        let mut s = sim(hubs, goods);
+        for i in 0..3u32 { s.houses.push(house_at(i, vec![0], 2)); }
+        let w_before: Vec<f32> = s.houses.iter().map(|h| h.wealth).collect();
+        s.trigger_regional_crash(0, 0, "test");
+        // Region-0 cities are in panic; region-1 city is not.
+        assert!(s.hub_in_panic(0) && s.hub_in_panic(1), "origin region panics");
+        assert!(!s.hub_in_panic(2), "other region is spared");
+        // Houses homed in region 0 took a haircut; the region-1 house did not.
+        assert!(s.houses[0].wealth < w_before[0] && s.houses[1].wealth < w_before[1]);
+        assert!((s.houses[2].wealth - w_before[2]).abs() < 1e-4, "other region's house untouched");
+        assert_eq!(s.crashes.len(), 1, "the crash was recorded");
+        assert_eq!(s.crashes[0].cities_hit, 2);
     }
 
     #[test]

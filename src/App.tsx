@@ -12,6 +12,7 @@ import { GoodFlowPanel } from "./ui/GoodFlowPanel";
 import { GoodsBrowserPanel } from "./ui/GoodsBrowserPanel";
 import { HousesPanel } from "./ui/HousesPanel";
 import { SpeculationPanel } from "./ui/SpeculationPanel";
+import { CoinCreditPanel } from "./ui/CoinCreditPanel";
 import { SettlementSearch } from "./ui/SettlementSearch";
 import { ElevationLegend } from "./ui/ElevationLegend";
 import { ElevationHistogram } from "./ui/ElevationHistogram";
@@ -516,6 +517,7 @@ export default function App() {
           <GoodsBrowserPanel />
           <HousesPanel />
           <SpeculationPanel />
+          <CoinCreditPanel />
           <CityRankingPanel />
           <MerchantRoutePanel />
           <TradeMatrixPanel />
