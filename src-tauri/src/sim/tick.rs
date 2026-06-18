@@ -1246,6 +1246,13 @@ pub struct CampaignSim {
     #[serde(default)] pub wars: Vec<War>,
     /// DLC 3.5 · concluded wars, newest last (the Wars log).
     #[serde(default)] pub war_log: Vec<WarRecord>,
+    /// DLC 3.5 · the last YEAR's bundled trade volume per hub-pair (by hub id,
+    /// ordered low→high): `(a_id, b_id, volume)`. Snapshotted at New Year and drawn
+    /// as the "Dynamic Trade Flow" overlay (routed + width ∝ volume).
+    #[serde(default)] pub flow_year: Vec<(u32, u32, f32)>,
+    /// Running per-pair flow tally for the CURRENT year (by hub id). Not persisted —
+    /// rebuilt as trade flows; snapshotted into `flow_year` each New Year.
+    #[serde(skip)] pub flow_accum: std::collections::HashMap<(u32, u32), f32>,
     /// Derived route-days matrix (n·n, f32::INFINITY = unreachable). Not
     /// serialized — rebuilt from positions + components after load.
     #[serde(skip)]
@@ -1383,6 +1390,16 @@ impl CampaignSim {
     }
 
     // ───────────────────────── DLC 3.5 · Coin, Credit & Crashes ──────────────
+
+    /// DLC 3.5 · accrue shipped volume on a hub-pair for the yearly Dynamic Trade
+    /// Flow snapshot (keyed by stable hub IDs, ordered low→high; direction-agnostic).
+    #[inline]
+    fn accrue_flow(&mut self, from: usize, to: usize, amount: f32) {
+        if amount <= 0.0 || from >= self.hubs.len() || to >= self.hubs.len() || from == to { return; }
+        let (ia, ib) = (self.hubs[from].id, self.hubs[to].id);
+        let key = if ia <= ib { (ia, ib) } else { (ib, ia) };
+        *self.flow_accum.entry(key).or_insert(0.0) += amount;
+    }
 
     /// Recent trade volume touching a hub (the decaying per-class tallies) — used
     /// as the coinage "throughput" weight and the seigniorage base.
@@ -1785,7 +1802,8 @@ impl CampaignSim {
     }
 
     /// DLC 3.5 · at New Year, snapshot each city's treasury books (for the City
-    /// Finances panel) and open a fresh year.
+    /// Finances panel) and the year's bundled trade flows (for the Dynamic Trade
+    /// Flow overlay), then open a fresh year.
     fn roll_city_finances(&mut self, yr: u32) {
         for h in 0..self.hubs.len() {
             if self.hubs[h].is_estate { continue; }
@@ -1793,6 +1811,11 @@ impl CampaignSim {
             done.year = yr.saturating_sub(1);
             done.prev = None; // don't nest histories
             self.hubs[h].finance = CityFinance { year: yr, prev: Some(Box::new(done)), ..Default::default() };
+        }
+        // Snapshot the year's per-pair trade volume, then reset the accumulator.
+        if !self.flow_accum.is_empty() {
+            self.flow_year = self.flow_accum.iter().map(|(&(a, b), &v)| (a, b, v)).collect();
+            self.flow_accum.clear();
         }
     }
 
@@ -3897,6 +3920,7 @@ impl CampaignSim {
                         self.bump_trade_at(oi, a, amount);
                         self.bump_trade_at(oi, b, amount);
                     }
+                    self.accrue_flow(a, b, amount);
                     self.in_transit.push(InTransit {
                         from: a as u32,
                         to: b as u32,
@@ -4011,6 +4035,7 @@ impl CampaignSim {
         self.bump_trade_at(owner, b, amount);
         // The same vessel carries it home (occupies the owner's slot until it lands).
         // No fresh voyage-loss roll here — the return is the trip's bonus leg.
+        self.accrue_flow(b, a, amount);
         self.in_transit.push(InTransit {
             from: b as u32,
             to: a as u32,
@@ -5842,6 +5867,7 @@ mod tests {
             recent_trades: vec![],
             spec_centers: vec![], spec_year: 0, spec_prev_profit: vec![],
             banks: vec![], crashes: vec![], wars: vec![], war_log: vec![],
+            flow_year: vec![], flow_accum: std::collections::HashMap::new(),
             days: vec![],
             neighbors: vec![],
             routes_dirty: false,

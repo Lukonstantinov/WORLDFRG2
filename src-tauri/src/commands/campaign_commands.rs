@@ -541,7 +541,7 @@ fn ensure_campaign_loaded(cache: &mut crate::db::CampaignCache, conn: &Connectio
 
 /// A CLONE of the resident sim (loading it from the DB once if needed). Read-only
 /// commands use this; it never re-parses JSON after the first load.
-fn get_sim(db: &WorldDb, conn: &Connection) -> Result<Option<CampaignSim>, String> {
+pub(crate) fn get_sim(db: &WorldDb, conn: &Connection) -> Result<Option<CampaignSim>, String> {
     let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
     ensure_campaign_loaded(&mut cache, conn)?;
     Ok(cache.sim.clone())
@@ -1031,6 +1031,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         crashes: vec![],
         wars: vec![],
         war_log: vec![],
+        flow_year: vec![],
+        flow_accum: std::collections::HashMap::new(),
         days: vec![],
         neighbors: vec![],
         routes_dirty: false,

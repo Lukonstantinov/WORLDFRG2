@@ -9,7 +9,7 @@ import { useViewportStore } from "../state/viewportStore";
 import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow } from "../bridge/tauri";
 import type { MerchantRoute, FuturesLane } from "../types";
 import { goodOverlayKey } from "../goods";
 import type { PaintValue, EconChain, Settlement } from "../types";
@@ -557,6 +557,24 @@ export function MapCanvas() {
       requestRender();
     }).catch(() => {});
   }, [overlayVisibility.futures, campaignSnapshot?.active, campaignSnapshot?.clock.tick, meta, selectedFuturesLane, futuresFocus, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // DLC 3.5 · Dynamic Trade Flow — last year's actual shipped volume, routed over
+  // the cost grid + bundled (busiest arteries thickest). Recomputed yearly in the
+  // tick, so this only re-fetches when the year ticks over.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !meta) return;
+    if (!overlayVisibility.dynamicFlow || !campaignSnapshot?.active) {
+      om.drawDynamicFlow([], meta.grid_width);
+      requestRender();
+      return;
+    }
+    campaignGetTradeFlow(rivers.map((r) => ({ points: r.points })), bioParams.tradeReach, bioParams.maxCrossing)
+      .then((trunks) => {
+        om.drawDynamicFlow(trunks, meta.grid_width);
+        requestRender();
+      }).catch(() => {});
+  }, [overlayVisibility.dynamicFlow, campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365), meta, rivers, bioParams.tradeReach, bioParams.maxCrossing, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Political influence — product of the Political step (9).
   useEffect(() => {

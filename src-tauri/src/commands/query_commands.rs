@@ -2429,6 +2429,66 @@ pub fn compute_trade_matrix(
     Ok(TradeMatrix { regions, flows, trunks, goods: goods_names })
 }
 
+/// DLC 3.5 · the live campaign's DYNAMIC TRADE FLOW: last year's actual shipped
+/// volume per hub-pair, routed over the SAME coarse cost grid as the static trunks
+/// (so flows follow real roads/sea-lanes, not straight lines) and bundled per
+/// coarse edge — width ∝ the year's volume on that segment, so the busiest arteries
+/// read thickest. Recomputed once a year inside the tick; this just routes + bundles
+/// the snapshot. Returns the same `TradeTrunk` shape the trunk overlay renders.
+#[tauri::command]
+pub fn campaign_get_trade_flow(
+    rivers_json: String,
+    reach: u8,
+    max_crossing: f32,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<TradeTrunk>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+    let sim = match crate::commands::campaign_commands::get_sim(&db, &conn)? {
+        Some(s) => s, None => return Ok(vec![]),
+    };
+    if sim.flow_year.is_empty() { return Ok(vec![]); }
+    let world = db.cached_tiles_with_conn(&conn)?;
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h,
+        &rivers_json, reach == 2, true, 0.0, -1, 12)?;
+
+    // Map each real hub (by stable id) to its coarse node.
+    let mut node_of: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    for h in &sim.hubs {
+        if h.is_estate { continue; }
+        let cx = ((h.x.max(0.0) as u32) / cc.f).min(cc.cw as u32 - 1) as i32;
+        let cy = ((h.y.max(0.0) as u32) / cc.f).min(cc.ch as u32 - 1) as i32;
+        node_of.insert(h.id, cc.cidx(cx, cy));
+    }
+    // Route each pair and bundle its volume onto every coarse edge it traverses.
+    let mut edge: std::collections::HashMap<(usize, usize), f32> = std::collections::HashMap::new();
+    for &(a_id, b_id, vol) in &sim.flow_year {
+        if vol <= 0.0 { continue; }
+        let (s, g) = match (node_of.get(&a_id), node_of.get(&b_id)) {
+            (Some(&s), Some(&g)) if s != g => (s, g),
+            _ => continue,
+        };
+        let path = match coarse_dijkstra(&cc, s, g) { Some(p) => p, None => continue };
+        if !path_allowed(&cc, &path, reach, max_crossing, grid_w) { continue; }
+        for w in path.windows(2) {
+            let e = (w[0].min(w[1]), w[0].max(w[1]));
+            *edge.entry(e).or_insert(0.0) += vol;
+        }
+    }
+    let mut trunks: Vec<TradeTrunk> = edge.into_iter()
+        .filter(|(_, v)| *v > 0.0)
+        .map(|((a, b), v)| TradeTrunk {
+            points: vec![cc.world_of(a), cc.world_of(b)], volume: v, good: -1, road: String::new(),
+        })
+        .collect();
+    trunks.sort_by(|x, y| y.volume.partial_cmp(&x.volume).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(trunks)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Political layer — settlement trade power + influence
 // ─────────────────────────────────────────────────────────────────────────────
