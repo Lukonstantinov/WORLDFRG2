@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { useCampaignStore } from "../state/campaignStore";
 import { useUIStore } from "../state/uiStore";
 import {
-  campaignGetCurrencies, campaignGetBanks, campaignGetCrashes, campaignGetSchematics,
+  campaignGetCurrencies, campaignGetBanks, campaignGetCrashes, campaignGetSchematics, campaignGetWars,
 } from "../bridge/tauri";
-import type { CurrencyBrief, BankBrief, CrashRecord, CitySchematic } from "../types";
+import type { CurrencyBrief, BankBrief, CrashRecord, CitySchematic, WarsPayload } from "../types";
+import { CoinIcon } from "./CoinIcon";
 
 /** DLC 3.5 · Coin, Credit & Crashes. Four tabs:
  *   • Currencies — the world reserve-currency ranking (the "Venice ducat"): each
@@ -21,11 +22,12 @@ export function CoinCreditPanel() {
   const snapshot = useCampaignStore((s) => s.snapshot);
   const tick = snapshot?.clock?.tick ?? 0;
   const active = !!snapshot?.active;
-  const [tab, setTab] = useState<"coins" | "banks" | "crashes" | "schem">("coins");
+  const [tab, setTab] = useState<"coins" | "banks" | "wars" | "crashes" | "schem">("coins");
   const [coins, setCoins] = useState<CurrencyBrief[]>([]);
   const [banks, setBanks] = useState<BankBrief[]>([]);
   const [crashes, setCrashes] = useState<CrashRecord[]>([]);
   const [schem, setSchem] = useState<CitySchematic[]>([]);
+  const [wars, setWars] = useState<WarsPayload>({ active: [], log: [] });
 
   useEffect(() => {
     if (!open || !active) return;
@@ -33,6 +35,7 @@ export function CoinCreditPanel() {
     campaignGetBanks().then(setBanks).catch(() => setBanks([]));
     campaignGetCrashes().then(setCrashes).catch(() => setCrashes([]));
     campaignGetSchematics().then(setSchem).catch(() => setSchem([]));
+    campaignGetWars().then(setWars).catch(() => setWars({ active: [], log: [] }));
   }, [open, active, tick]);
 
   if (!open) return null;
@@ -41,6 +44,7 @@ export function CoinCreditPanel() {
   const tabs = [
     ["coins", "🪙 Currencies"],
     ["banks", "🏦 Banks"],
+    ["wars", `⚔ Wars${wars.active.length ? ` (${wars.active.length})` : ""}`],
     ["crashes", "📉 Crashes"],
     ["schem", "🏛 Schematics"],
   ] as const;
@@ -78,6 +82,43 @@ export function CoinCreditPanel() {
         <div style={scroll}>
           {banks.length === 0 && <div style={empty}>No banks chartered yet — a wealthy banking house in a trusted-coin city founds the first.</div>}
           {banks.map((b, i) => <BankCard key={`${b.name}-${i}`} b={b} />)}
+        </div>
+      )}
+
+      {active && tab === "wars" && (
+        <div style={scroll}>
+          {wars.active.length === 0 && wars.log.length === 0 &&
+            <div style={empty}>No wars — the poleis are at peace. (Rival councils spark economic wars: forced levies, blockades, reparations.)</div>}
+          {wars.active.length > 0 && <div style={hint}>Active wars — levies bleed resident houses into the war chest.</div>}
+          {wars.active.map((w, i) => (
+            <div key={`a${i}`} style={card}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                <span style={{ color: "#e88", fontWeight: 700, fontSize: 12 }}>⚔ {w.a} vs {w.b}</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ color: "#8aa0b8", fontSize: 9 }}>{w.years}y · {w.cause}</span>
+              </div>
+              <div style={{ display: "flex", gap: 10, fontSize: 9, color: "#8aa8c8", marginTop: 2 }}>
+                <span title="War chest spent by each side">chest {fmtk(w.chest_a)} / {fmtk(w.chest_b)}</span>
+                <span style={{ color: "#e0b080" }} title="Total levied from resident houses">levied {fmtk(w.levies)}</span>
+              </div>
+            </div>
+          ))}
+          {wars.log.length > 0 && (
+            <div style={{ color: "#5a6a7e", fontSize: 9, margin: "8px 0 2px", textTransform: "uppercase" }}>Concluded</div>
+          )}
+          {wars.log.map((w, i) => (
+            <div key={`l${i}`} style={card}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                <span style={{ color: "#cfe0f4", fontWeight: 700, fontSize: 11 }}>{w.winner}</span>
+                <span style={{ color: "#7a90a8", fontSize: 9 }}>beat {w.loser} · yr {w.end_year}</span>
+              </div>
+              <div style={{ color: "#c0d0e0", fontSize: 9.5, marginTop: 1 }}>{w.text}</div>
+              <div style={{ display: "flex", gap: 10, fontSize: 9, color: "#8aa8c8", marginTop: 1 }}>
+                <span style={{ color: "#c9a227" }}>reparations {fmtk(w.reparations)}</span>
+                <span>levied {fmtk(w.levies_total)}</span>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -121,15 +162,20 @@ function CurrencyCard({ c, rank }: { c: CurrencyBrief; rank: number }) {
   const debased = c.fineness < 0.999;
   return (
     <div style={card}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span style={{ color: "#6a86a6", fontSize: 9, width: 16, flex: "0 0 auto" }}>#{rank}</span>
-        <span style={{ width: 9, height: 9, borderRadius: 2, background: c.color, alignSelf: "center", flex: "0 0 auto" }} />
+        <CoinIcon issuer={c.issuer || c.city} value={c.value} size={22}
+          title={`${c.coin_name} · value ${c.value.toFixed(2)}× · trust ${(c.trust * 100).toFixed(0)}%`} />
         <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12 }}>{c.coin_name}</span>
         <span style={{ flex: 1 }} />
         {c.is_reserve && <span style={{ color: "#37a05a", fontSize: 9, fontWeight: 700 }}>RESERVE</span>}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3, flexWrap: "wrap" }}>
         <TrustBar trust={c.trust} reserve={c.is_reserve} />
+        <span style={{ color: c.value >= 1.05 ? "#e0c060" : "#9ab0c8", fontSize: 9, fontWeight: 700 }}
+          title="Coin value index — agio above 1.0 = a premium 'hard' currency">
+          value {c.value.toFixed(2)}×
+        </span>
         <span title="Mint fineness" style={{ color: debased ? "#e0a020" : "#8aa8c8", fontSize: 9 }}>
           🪙 {(c.fineness * 100).toFixed(0)}%{debased ? " debased" : ""}
         </span>
@@ -238,7 +284,11 @@ function SchematicCard({ s }: { s: CitySchematic }) {
         <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12 }}>{s.name}</span>
         <span style={{ color: "#6a86a6", fontSize: 9 }}>· {s.population.toLocaleString()}</span>
         <span style={{ flex: 1 }} />
-        {s.coin_name ? <span style={{ color: "#d8c878", fontSize: 9 }}>🪙 {s.coin_name}</span> : null}
+        {s.coin_name ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#d8c878", fontSize: 9 }}>
+            <CoinIcon issuer={s.council || s.name} size={16} /> {s.coin_name}
+          </span>
+        ) : null}
       </div>
       {s.council ? <div style={{ color: "#9ab0c8", fontSize: 9, marginTop: 1 }}>Council: {s.council}</div> : null}
 

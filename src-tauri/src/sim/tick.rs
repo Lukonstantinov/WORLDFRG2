@@ -277,6 +277,14 @@ const GRANARY_FOOD_PROD: f32 = 1.12; // food goods only
 /// Guildhall lowers freight on trades leaving its hub.
 const GUILDHALL_FREIGHT: f32 = 0.85;
 
+/// DLC 3.5 · a coin's headline VALUE index: full-bodied, fully-trusted coin trades
+/// at a premium (~1.2× "agio"); a debased / distrusted coin sits below 1.0. Pure
+/// display metric derived from fineness × acceptance.
+pub fn coin_value(fineness: f32, trust: f32) -> f32 {
+    let f = if fineness <= 0.0 { 1.0 } else { fineness };
+    f * (0.7 + 0.5 * trust.clamp(0.0, 1.0))
+}
+
 pub fn structure_label(id: u8) -> &'static str {
     match id {
         STRUCT_GRANARY => "Granary",

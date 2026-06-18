@@ -417,6 +417,39 @@ pub struct HubDetail {
     #[serde(default)] pub sold: f32,
     /// Estates & manufactories in this city's hinterland.
     #[serde(default)] pub estates_here: Vec<EstateRow>,
+    // ── DLC 3.5 · treasury, finances, war, and the carrying trade ──
+    /// Retained civic treasury (grain-eq).
+    #[serde(default)] pub treasury: f32,
+    /// The city's treasury books (current running year + last completed in `prev`).
+    #[serde(default)] pub finance: Option<crate::sim::tick::CityFinance>,
+    /// Name of the polis this city is at war with ("" = at peace).
+    #[serde(default)] pub war_with: String,
+    /// Its coin, if it mints one.
+    #[serde(default)] pub coin_name: String,
+    #[serde(default)] pub coin_trust: f32,
+    #[serde(default)] pub coin_value: f32,
+    /// Carrying trade: in-flight shipments THIS city's merchants run between OTHER
+    /// cities (the entrepôt "transit" — goods that pass through its houses' hands).
+    #[serde(default)] pub transit: Vec<TransitRow>,
+}
+
+/// DLC 3.5 · one leg of a city's carrying trade (a merchant of this city hauling
+/// goods between two OTHER cities), for the settlement "Transit" section.
+#[derive(Serialize, Clone)]
+pub struct TransitRow {
+    pub merchant: String,
+    pub is_guild: bool,
+    pub color: String,
+    pub good: String,
+    pub amount: f32,
+    pub value: f32,
+    pub from_name: String,
+    pub to_name: String,
+    pub sea: bool,
+    /// Coin the deal settles in ("" → barter).
+    pub coin: String,
+    /// Barter ratio when no reserve coin applies (e.g. "~3.2 wheat/unit").
+    pub barter: String,
 }
 
 /// One estate / manufactory in a settlement's hinterland (host-side view).
@@ -1184,6 +1217,41 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             }
         })
         .collect();
+    // ── DLC 3.5 · Carrying trade ("transit"): in-flight shipments run by THIS
+    //    city's resident merchants (or via an office here) between two OTHER
+    //    cities — the entrepôt handling-trade. Settled in a reserve coin if either
+    //    endpoint mints one, else barter (priced in wheat-equivalent). ──
+    let reserve_coin = |idx: usize| -> Option<String> {
+        sim.hubs.get(idx).filter(|c| !c.coin_name.is_empty() && c.coin_trust >= 0.55)
+            .map(|c| c.coin_name.clone())
+    };
+    let mut transit: Vec<TransitRow> = sim.in_transit.iter().filter_map(|s| {
+        if s.owner < 0 { return None; }
+        let oi = s.owner as usize;
+        let house = sim.houses.get(oi)?;
+        let resident = house.hub as usize == hi || house.offices.contains(&(hi as u32));
+        let (from, to) = (s.from as usize, s.to as usize);
+        if !resident || from == hi || to == hi { return None; }
+        let price = sim.hubs.get(to).map(|c| c.price.get(s.good).copied().unwrap_or(0.0)).unwrap_or(0.0);
+        let coin = reserve_coin(to).or_else(|| reserve_coin(from)).unwrap_or_default();
+        let barter = if coin.is_empty() { format!("~{:.1} wheat/unit", price.max(0.0)) } else { String::new() };
+        Some(TransitRow {
+            merchant: house.name.clone(), is_guild: house.is_guild, color: distinct_color(oi),
+            good: sim.goods.get(s.good).map(|g| g.name.clone()).unwrap_or_default(),
+            amount: s.amount, value: s.amount * price,
+            from_name: sim.hubs.get(from).map(|c| c.name.clone()).unwrap_or_default(),
+            to_name: sim.hubs.get(to).map(|c| c.name.clone()).unwrap_or_default(),
+            sea: s.sea, coin, barter,
+        })
+    }).collect();
+    transit.sort_by(|a, b| b.value.partial_cmp(&a.value).unwrap_or(std::cmp::Ordering::Equal));
+    transit.truncate(20);
+    let war_with = if hub.war_with >= 0 {
+        sim.hubs.get(hub.war_with as usize).map(|c| c.name.clone()).unwrap_or_default()
+    } else { String::new() };
+    let coin_value = if hub.coin_name.is_empty() { 0.0 }
+        else { crate::sim::tick::coin_value(hub.mint_fineness, hub.coin_trust) };
+
     Ok(Some(HubDetail {
         id: hub.id,
         name: hub.name.clone(),
@@ -1230,6 +1298,13 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             crate::sim::tick::structure_label(s).to_string(),
             crate::sim::tick::structure_effect(s).to_string(),
         )).collect(),
+        treasury: hub.treasury,
+        finance: Some(hub.finance.clone()),
+        war_with,
+        coin_name: hub.coin_name.clone(),
+        coin_trust: hub.coin_trust,
+        coin_value,
+        transit,
     }))
 }
 
@@ -1288,6 +1363,19 @@ pub struct HouseBrief {
     #[serde(default)] pub offices: Vec<(String, [f32; 2])>,
     /// Estates/manufactories this holder owns: `(good, host-city)`.
     #[serde(default)] pub estates: Vec<(String, String)>,
+    // ── DLC 3.5 · richer individual stats + bank/coin links ──
+    /// This family owns a chartered bank (→ 🏦 badge + underline + Bank subtab).
+    #[serde(default)] pub owns_bank: bool,
+    /// Year the house was founded (→ "est. 71 · 88y old").
+    #[serde(default)] pub founded_year: u32,
+    /// The worst single-month loss the family ever took (grain-eq).
+    #[serde(default)] pub worst_loss: f32,
+    /// Count of goods the house has EVER monopolised (all-time).
+    #[serde(default)] pub mono_ever_count: u32,
+    /// If this family's council governs a minting city, the coin it issues (else "").
+    #[serde(default)] pub coin_name: String,
+    #[serde(default)] pub coin_value: f32,
+    #[serde(default)] pub coin_trust: f32,
 }
 
 /// Golden-angle hue → a distinct, saturated hex colour. `i` is a stable index so
@@ -1373,6 +1461,13 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
         if hub < nhubs { cities.push(hub_name(hub as u32)); }
         for &p in &ctrl_hubs { if p != hub { cities.push(format!("{} (controlled)", hub_name(p as u32))); } }
         for &p in &trade_hubs { if p != hub && !ctrl_hubs.contains(&p) { cities.push(hub_name(p as u32)); } }
+        // The coin this family mints: if it is the council of a city with a coin.
+        let minting = sim.hubs.iter()
+            .find(|c| !c.is_estate && c.council_house == hi as i32 && !c.coin_name.is_empty());
+        let (coin_for_house, coin_val_house, coin_trust_house) = match minting {
+            Some(c) => (c.coin_name.clone(), crate::sim::tick::coin_value(c.mint_fineness, c.coin_trust), c.coin_trust),
+            None => (String::new(), 0.0, 0.0),
+        };
         HouseBrief {
             idx: hi as u32,
             name: h.name.clone(),
@@ -1419,6 +1514,14 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
                     (gname(g), city)
                 })
                 .collect(),
+            owns_bank: sim.banks.iter().any(|b| !b.defunct && b.house as usize == hi),
+            founded_year: h.founded_tick / crate::sim::tick::TICKS_PER_YEAR,
+            worst_loss: h.worst_loss,
+            mono_ever_count: h.mono_ever.len() as u32,
+            // The coin this family mints, if its council governs a minting city.
+            coin_name: coin_for_house.clone(),
+            coin_value: coin_val_house,
+            coin_trust: coin_trust_house,
         }
     }).collect();
     // Active first, then richest first.
@@ -1633,6 +1736,12 @@ pub struct PolisBrief {
     /// DLC 3.5 · the polis's named coin ("" = none) + its acceptance/trust 0..1.
     pub coin_name: String,
     pub coin_trust: f32,
+    /// Coin value index (≈1.2 = strong agio, <1 = debased/distrusted).
+    pub coin_value: f32,
+    /// Issuing house (the council) whose arms ride the coin; "" → use the city.
+    pub coin_issuer: String,
+    /// The polis this city is at war with ("" = at peace).
+    pub war_with: String,
 }
 
 #[tauri::command]
@@ -1649,6 +1758,10 @@ pub fn campaign_get_poleis(db: State<'_, WorldDb>) -> Result<Vec<PolisBrief>, St
                     (house.name.clone(), archetype_label(house.archetype).to_string(), distinct_color(ci as usize))
                 } else { ("—".into(), String::new(), "#7a8aa0".into()) }
             } else { ("—".into(), String::new(), "#7a8aa0".into()) };
+            let coin_issuer = if ci >= 0 { council.clone() } else { String::new() };
+            let war_with = if h.war_with >= 0 {
+                sim.hubs.get(h.war_with as usize).map(|x| x.name.clone()).unwrap_or_default()
+            } else { String::new() };
             PolisBrief {
                 hub: h.id, name: h.name.clone(), x: h.x, y: h.y,
                 population: h.population as u32, treasury: h.treasury,
@@ -1656,6 +1769,8 @@ pub fn campaign_get_poleis(db: State<'_, WorldDb>) -> Result<Vec<PolisBrief>, St
                 mint_fineness: if h.mint_fineness <= 0.0 { 1.0 } else { h.mint_fineness },
                 council, council_archetype: arch, council_color: color,
                 coin_name: h.coin_name.clone(), coin_trust: h.coin_trust,
+                coin_value: if h.coin_name.is_empty() { 0.0 } else { crate::sim::tick::coin_value(h.mint_fineness, h.coin_trust) },
+                coin_issuer, war_with,
             }
         })
         .collect();
@@ -1679,6 +1794,10 @@ pub struct CurrencyBrief {
     /// True once trust clears the reserve-currency floor (accepted abroad).
     pub is_reserve: bool,
     pub color: String,
+    /// Value index (≈1.2 strong agio, <1 debased). Display metric.
+    pub value: f32,
+    /// Issuing house (council) whose arms ride the coin; "" → use the city.
+    pub issuer: String,
 }
 
 /// DLC 3.5 · the world's coinage, ranked by reserve strength (trust × throughput).
@@ -1690,6 +1809,9 @@ pub fn campaign_get_currencies(db: State<'_, WorldDb>) -> Result<Vec<CurrencyBri
         .filter(|(_, h)| !h.is_estate && !h.coin_name.is_empty())
         .map(|(i, h)| {
             let throughput = h.tw_house + h.tw_local + h.tw_guild;
+            let issuer = if h.council_house >= 0 {
+                sim.houses.get(h.council_house as usize).map(|x| x.name.clone()).unwrap_or_default()
+            } else { String::new() };
             CurrencyBrief {
                 hub: h.id, city: h.name.clone(), coin_name: h.coin_name.clone(),
                 trust: h.coin_trust,
@@ -1697,6 +1819,8 @@ pub fn campaign_get_currencies(db: State<'_, WorldDb>) -> Result<Vec<CurrencyBri
                 throughput,
                 is_reserve: h.coin_trust >= 0.55,
                 color: distinct_color(i),
+                value: crate::sim::tick::coin_value(h.mint_fineness, h.coin_trust),
+                issuer,
             }
         })
         .collect();
@@ -1712,6 +1836,8 @@ pub struct BankBrief {
     pub name: String,
     pub seat: String,
     pub owner: String,
+    /// Owning house index — lets the Houses panel match a bank to the selected house.
+    pub owner_idx: u32,
     pub color: String,
     pub founded_year: u32,
     pub defunct: bool,
@@ -1748,6 +1874,7 @@ pub fn campaign_get_banks(db: State<'_, WorldDb>) -> Result<Vec<BankBrief>, Stri
             .map(|e| e.text.clone()).collect();
         BankBrief {
             name: b.name.clone(), seat, owner,
+            owner_idx: b.house,
             color: distinct_color(b.house as usize),
             founded_year: b.founded_tick / TICKS_PER_YEAR,
             defunct: b.defunct,
@@ -1776,6 +1903,41 @@ pub fn campaign_get_crashes(db: State<'_, WorldDb>)
     let mut out = sim.crashes.clone();
     out.reverse();
     Ok(out)
+}
+
+/// DLC 3.5 · the economic-war picture: active wars + the concluded-war log.
+#[derive(Serialize, Clone)]
+pub struct WarBrief {
+    pub a: String,
+    pub b: String,
+    pub start_year: u32,
+    pub years: u32,
+    pub chest_a: f32,
+    pub chest_b: f32,
+    pub levies: f32,
+    pub cause: String,
+}
+#[derive(Serialize, Clone)]
+pub struct WarsPayload {
+    pub active: Vec<WarBrief>,
+    pub log: Vec<crate::sim::tick::WarRecord>,
+}
+
+#[tauri::command]
+pub fn campaign_get_wars(db: State<'_, WorldDb>) -> Result<WarsPayload, String> {
+    use crate::sim::tick::TICKS_PER_YEAR;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&conn)? { Some(s) => s, None => return Ok(WarsPayload { active: vec![], log: vec![] }) };
+    let name = |h: u32| sim.hubs.get(h as usize).map(|x| x.name.clone()).unwrap_or_default();
+    let active = sim.wars.iter().map(|w| WarBrief {
+        a: name(w.a), b: name(w.b),
+        start_year: w.start_tick / TICKS_PER_YEAR,
+        years: sim.tick.saturating_sub(w.start_tick) / TICKS_PER_YEAR,
+        chest_a: w.chest_a, chest_b: w.chest_b, levies: w.levies, cause: w.cause.clone(),
+    }).collect();
+    let mut log = sim.war_log.clone();
+    log.reverse();
+    Ok(WarsPayload { active, log })
 }
 
 /// DLC 3.5 · one city's "schematic" — its standing buildings, estates, bank

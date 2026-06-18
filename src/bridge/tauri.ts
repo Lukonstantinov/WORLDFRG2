@@ -504,7 +504,7 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 }
 
 // ── DLC 1 "Living Trade" tick simulation ──
-import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, CityRank, ContractRow, SpecCenter, PolisBrief, CurrencyBrief, BankBrief, CrashRecord, CitySchematic } from "../types";
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, CityRank, ContractRow, SpecCenter, PolisBrief, CurrencyBrief, BankBrief, CrashRecord, CitySchematic, WarsPayload } from "../types";
 
 /** Seed a fresh living-trade sim from the static economy snapshot (step 10). */
 export async function campaignStartSim(seed: number): Promise<CampaignSnapshot> {
@@ -565,6 +565,11 @@ export async function campaignGetBanks(): Promise<BankBrief[]> {
 /** DLC 3.5 · the log of regional financial crashes (newest first). */
 export async function campaignGetCrashes(): Promise<CrashRecord[]> {
   return invoke("campaign_get_crashes");
+}
+
+/** DLC 3.5 · active economic wars + the concluded-war log. */
+export async function campaignGetWars(): Promise<WarsPayload> {
+  return invoke("campaign_get_wars");
 }
 
 /** DLC 3.5 · per-city schematics (buildings / estates / banks / coin). */

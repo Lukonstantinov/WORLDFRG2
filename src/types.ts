@@ -298,6 +298,13 @@ export interface HubDetail {
   sold?: number;
   /** Estates & manufactories in this city's hinterland. */
   estates_here?: EstateRow[];
+  treasury?: number;                 // retained civic treasury
+  finance?: CityFinance | null;      // treasury books (current + prev)
+  war_with?: string;                 // polis at war with ("" = peace)
+  coin_name?: string;
+  coin_trust?: number;
+  coin_value?: number;
+  transit?: TransitRow[];            // carrying trade through this city's merchants
 }
 /** One estate / manufactory in a settlement's hinterland. */
 export interface EstateRow {
@@ -406,6 +413,13 @@ export interface HouseBrief {
   is_guild?: boolean;            // a civic Merchant Guild (acts for its home city)
   offices?: [string, [number, number]][]; // foreign cities where it has an office
   estates?: [string, string][];  // estates/manufactories it owns: [good, city]
+  owns_bank?: boolean;           // owns a chartered bank (🏦 badge + Bank subtab)
+  founded_year?: number;
+  worst_loss?: number;
+  mono_ever_count?: number;
+  coin_name?: string;            // the coin it mints (via its council seat), "" if none
+  coin_value?: number;
+  coin_trust?: number;
 }
 
 export interface HouseTimelineEvent {
@@ -785,6 +799,9 @@ export interface PolisBrief {
   council_color: string;
   coin_name: string;           // the polis's named coin ("" = none)
   coin_trust: number;          // acceptance / trust 0..1
+  coin_value: number;          // value index (≈1.2 strong, <1 debased)
+  coin_issuer: string;         // council house whose arms ride the coin ("" → city)
+  war_with: string;            // polis at war with ("" = peace)
 }
 
 // ── DLC 3.5 · Coin, Credit & Crashes ──────────────────────────────────────────
@@ -799,6 +816,8 @@ export interface CurrencyBrief {
   throughput: number;   // trade volume at the issuing city
   is_reserve: boolean;  // accepted abroad
   color: string;
+  value: number;        // value index (≈1.2 strong agio, <1 debased)
+  issuer: string;       // council house whose arms ride the coin ("" → city)
 }
 
 /** One bank's balance sheet + reach. */
@@ -806,6 +825,7 @@ export interface BankBrief {
   name: string;
   seat: string;
   owner: string;
+  owner_idx: number;   // owning house index (match to HouseBrief.idx)
   color: string;
   founded_year: number;
   defunct: boolean;
@@ -833,6 +853,67 @@ export interface CrashRecord {
   banks_failed: number;
   cause: string;
   text: string;
+}
+
+/** A polis's running treasury books (City Finances view); `prev` = last year. */
+export interface CityFinance {
+  year: number;
+  tax_trade: number;
+  tax_estate: number;
+  tax_manufacture: number;
+  tax_wealth: number;
+  seigniorage: number;
+  war_levy: number;
+  reparations_in: number;
+  spent_civic: number;
+  spent_war: number;
+  spent_works: number;
+  reparations_out: number;
+  prev?: CityFinance | null;
+}
+
+/** One active economic war. */
+export interface WarBrief {
+  a: string;
+  b: string;
+  start_year: number;
+  years: number;
+  chest_a: number;
+  chest_b: number;
+  levies: number;
+  cause: string;
+}
+/** A concluded war (the log). */
+export interface WarRecord {
+  start_year: number;
+  end_year: number;
+  a_name: string;
+  b_name: string;
+  winner: string;
+  loser: string;
+  reparations: number;
+  levies_total: number;
+  cause: string;
+  text: string;
+}
+export interface WarsPayload {
+  active: WarBrief[];
+  log: WarRecord[];
+}
+
+/** One leg of a city's carrying trade ("transit"). */
+export interface TransitRow {
+  merchant: string;
+  is_guild: boolean;
+  color: string;
+  good: string;
+  amount: number;
+  value: number;
+  from_name: string;
+  to_name: string;
+  sea: boolean;
+  coin: string;    // "" → barter
+  barter: string;  // e.g. "~3.2 wheat/unit"
 }
 
 export interface SchematicBuilding { label: string; effect: string }
