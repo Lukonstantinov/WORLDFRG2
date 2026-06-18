@@ -190,6 +190,14 @@ const SPECIALTY_MARGIN: f32 = 1.25; // extra profit on specialty goods
 const CHARTER_RENT: f32 = 1.30;     // extra profit on chartered goods
 const BANK_CREDIT_MULT: f32 = 1.6;  // financing reach beyond cash
 const BANK_INTEREST: f32 = 0.01;    // monthly interest on wealth
+/// DLC 3.5 rebalance: bankers earn interest only on liquid capital up to this cap,
+/// so the perk is a flat early boost rather than an uncapped compounding engine.
+const BANK_INTEREST_CAP: f32 = 20.0;
+/// DLC 3.5 · progressive civic wealth tax: a rich house bleeds a rising share of
+/// its fortune to its home city's TREASURY each month — both caps run-away wealth
+/// and funds the polis (war chest / public works). Max marginal rate at high wealth.
+const WEALTH_TAX_PROG: f32 = 0.02;
+const WEALTH_TAX_SCALE: f32 = 60.0;
 
 // ── Phase G: wealth sinks (monthly, multiplicative → wealth PLATEAUS instead of
 //    compounding forever). Money is hard-won and steadily bleeds, the way a
@@ -220,6 +228,10 @@ const IMPORT_TAX_RATE: f32 = 0.03;
 const GUILD_TAX_MULT: f32 = 1.6;
 /// Tax a city takes on an estate's rent paid to its owning house.
 const ESTATE_TAX_RATE: f32 = 0.10;
+/// DLC 3.5 · share of collected taxes RETAINED in the city treasury (the rest
+/// flows to the people via the civic pool, as before). Gives cities real capital
+/// to field wars and public works.
+const TREASURY_TAX_SHARE: f32 = 0.35;
 /// Yearly inflation — coin debasement + rising prices steadily eat the real value
 /// of a hoarded fortune (applied once a year to every house's wealth).
 const INFLATION_PER_YEAR: f32 = 0.015;
@@ -338,6 +350,18 @@ const CRASH_TRUST_HIT: f32 = 0.30;
 const CRASH_PANIC_TICKS: u32 = 240;
 /// Yearly chance a HIGH-tier (≥4★) speculative bubble actually POPS into a crash.
 const CRASH_BUBBLE_POP_CHANCE: f32 = 0.35;
+
+// ── DLC 3.5 · Economic war (a wealth sink + conflict) ───────────────────────
+/// At most this many wars run at once (wars are rare, dramatic events).
+const MAX_ACTIVE_WARS: usize = 2;
+/// Yearly chance a new war is declared (when below the cap).
+const WAR_DECLARE_CHANCE: f32 = 0.10;
+/// Yearly forced levy on each resident house's wealth → the city war chest. The
+/// principal way war drains over-rich houses.
+const WAR_LEVY_RATE: f32 = 0.12;
+/// Fraction of the treasury a belligerent burns on the war effort each year
+/// (consumed — the destructive cost of armies & blockade).
+const WAR_SPEND_RATE: f32 = 0.30;
 
 /// One tradable good in the tick economy (mapped from the world's `GoodSpec`).
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -473,6 +497,16 @@ pub struct TickHub {
     /// House index of the family/faction whose council governs this polis (−1 = no
     /// dominant council). The decision-maker behind tariff / mint / charter policy.
     #[serde(default = "neg_one_i32")] pub council_house: i32,
+    // ── DLC 3.5 · City finances (treasury books) + war state ──
+    /// Running yearly treasury books (taxes in, spending out) for the City Finances
+    /// panel; `prev` holds the last completed year.
+    #[serde(default)] pub finance: CityFinance,
+    /// Hub index of the polis this city is currently AT WAR with (−1 = at peace).
+    #[serde(default = "neg_one_i32")] pub war_with: i32,
+    /// Tick the current war began (for its duration / the Wars log).
+    #[serde(default)] pub war_since: u32,
+    /// Accumulated war effort / morale this side has mustered (war chest spent).
+    #[serde(default)] pub war_effort: f32,
     // ── DLC 3.5 · Coinage (the "Venice ducat") ──
     /// The NAMED coin this polis mints ("" = it issues none — only council seats do).
     #[serde(default)] pub coin_name: String,
@@ -774,6 +808,36 @@ pub struct CrashRecord {
     pub text: String,
 }
 
+/// DLC 3.5 · an active ECONOMIC war between two poleis. No troops — it is waged
+/// with war chests (treasury spending), forced levies on resident houses, and a
+/// trade blockade. Resolved after a minimum duration; the loser pays reparations.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct War {
+    pub a: u32,            // belligerent hub indices (a < b)
+    pub b: u32,
+    pub start_tick: u32,
+    pub chest_a: f32,      // cumulative war-chest spent (effort) by each side
+    pub chest_b: f32,
+    pub levies: f32,       // total raised from houses across both sides
+    pub cargo_lost: u32,
+    pub cause: String,
+}
+
+/// DLC 3.5 · a concluded war, for the Wars log.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct WarRecord {
+    pub start_year: u32,
+    pub end_year: u32,
+    pub a_name: String,
+    pub b_name: String,
+    pub winner: String,
+    pub loser: String,
+    pub reparations: f32,
+    pub levies_total: f32,
+    pub cause: String,
+    pub text: String,
+}
+
 /// A candidate empty-land site a wealthy house / large city can colonize with an
 /// estate. Precomputed from world tiles at the Economy step (the tick sim has no
 /// WorldBuffer) and carried into the campaign.
@@ -873,6 +937,8 @@ pub struct LedgerAcc {
     pub events: f32,
     pub consumption: f32,
     pub inflation: f32,
+    /// DLC 3.5 · progressive civic wealth tax + war levies paid to the home city.
+    #[serde(default)] pub civic_tax: f32,
     /// Monthly wealth samples through the year — drives the Accountant's wealth graph.
     pub wealth_samples: Vec<f32>,
 }
@@ -885,6 +951,39 @@ impl LedgerAcc {
         } else {
             v.push((city, amt));
         }
+    }
+}
+
+/// DLC 3.5 · a polis's running yearly TREASURY books (the City Finances view).
+/// All grain-equivalent. `prev` holds the last completed year for display, mirroring
+/// the house Accountant. Serde-default → old campaigns load empty.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct CityFinance {
+    pub year: u32,
+    // ── Income ──
+    pub tax_trade: f32,       // import + export tariffs collected from merchants
+    pub tax_estate: f32,      // tax on estate rent paid to owner houses
+    pub tax_manufacture: f32, // value-added tax on the city's manufactories
+    pub tax_wealth: f32,      // progressive civic wealth tax on resident houses
+    pub seigniorage: f32,     // mint profit from coinage
+    pub war_levy: f32,        // forced war contributions raised from houses
+    pub reparations_in: f32,  // reparations received after a won war
+    // ── Spending ──
+    pub spent_civic: f32,     // distributed to the people (civic pool)
+    pub spent_war: f32,       // war-chest spending (armies, blockade)
+    pub spent_works: f32,     // public works / buildings
+    pub reparations_out: f32, // reparations paid after a lost war
+    /// Last completed year, snapshotted at New Year for the panel.
+    pub prev: Option<Box<CityFinance>>,
+}
+
+impl CityFinance {
+    pub fn income_total(&self) -> f32 {
+        self.tax_trade + self.tax_estate + self.tax_manufacture + self.tax_wealth
+            + self.seigniorage + self.war_levy + self.reparations_in
+    }
+    pub fn spend_total(&self) -> f32 {
+        self.spent_civic + self.spent_war + self.spent_works + self.reparations_out
     }
 }
 
@@ -982,6 +1081,10 @@ pub struct CampaignSim {
     /// DLC 3.5 · log of regional financial crashes (origin region + year + cause),
     /// newest last. Surfaced in the Coin & Credit panel.
     #[serde(default)] pub crashes: Vec<CrashRecord>,
+    /// DLC 3.5 · active economic wars between poleis.
+    #[serde(default)] pub wars: Vec<War>,
+    /// DLC 3.5 · concluded wars, newest last (the Wars log).
+    #[serde(default)] pub war_log: Vec<WarRecord>,
     /// Derived route-days matrix (n·n, f32::INFINITY = unreachable). Not
     /// serialized — rebuilt from positions + components after load.
     #[serde(skip)]
@@ -1154,6 +1257,7 @@ impl CampaignSim {
             // Seigniorage from minting (esp. from debasement), scaled by throughput.
             let seign = through * (1.0 - fineness).max(0.0) * COIN_SEIGNIORAGE;
             self.hubs[h].treasury += seign;
+            self.hubs[h].finance.seigniorage += seign;
             self.hubs[h].mint_fineness_prev = fineness;
         }
     }
@@ -1467,6 +1571,150 @@ impl CampaignSim {
             if h >= self.hubs.len() || self.hub_in_panic(h) { continue; }
             self.trigger_regional_crash(h, 0, "bubble burst");
         }
+    }
+
+    /// DLC 3.5 · at New Year, snapshot each city's treasury books (for the City
+    /// Finances panel) and open a fresh year.
+    fn roll_city_finances(&mut self, yr: u32) {
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate { continue; }
+            let mut done = std::mem::take(&mut self.hubs[h].finance);
+            done.year = yr.saturating_sub(1);
+            done.prev = None; // don't nest histories
+            self.hubs[h].finance = CityFinance { year: yr, prev: Some(Box::new(done)), ..Default::default() };
+        }
+    }
+
+    /// Raise a forced WAR LEVY from every house homed at `hub`: a slice of each
+    /// fortune into the city's war chest (treasury). The core wealth sink of war.
+    /// Returns the total raised.
+    fn raise_war_levy(&mut self, hub: usize) -> f32 {
+        let mut total = 0.0f32;
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct || self.houses[hi].is_guild { continue; }
+            if self.houses[hi].hub as usize != hub { continue; }
+            let levy = self.houses[hi].wealth.max(0.0) * WAR_LEVY_RATE;
+            if levy <= EPS { continue; }
+            self.houses[hi].wealth -= levy;
+            total += levy;
+            if hi < self.house_ledger.len() { self.house_ledger[hi].civic_tax += levy; }
+        }
+        if hub < self.hubs.len() {
+            self.hubs[hub].treasury += total;
+            self.hubs[hub].finance.war_levy += total;
+        }
+        total
+    }
+
+    /// Spend a slice of `hub`'s treasury on the war effort (consumed — the cost of
+    /// armies & blockade). Returns the amount spent (its contribution to victory).
+    fn spend_war(&mut self, hub: usize) -> f32 {
+        let spend = (self.hubs[hub].treasury.max(0.0) * WAR_SPEND_RATE).min(self.hubs[hub].treasury.max(0.0));
+        self.hubs[hub].treasury -= spend;
+        self.hubs[hub].finance.spent_war += spend;
+        self.hubs[hub].war_effort += spend;
+        spend
+    }
+
+    /// DLC 3.5 · the economic-war engine. Once a year: wage & resolve active wars
+    /// (levies, war-chest spending, trade blockade, reparations) and occasionally
+    /// declare a new one between rival poleis. Deterministic.
+    fn update_wars(&mut self, yr: u32) {
+        let tick = self.tick;
+        let mut ended: Vec<usize> = Vec::new();
+        for wi in 0..self.wars.len() {
+            let (a, b) = (self.wars[wi].a as usize, self.wars[wi].b as usize);
+            if a >= self.hubs.len() || b >= self.hubs.len() {
+                ended.push(wi); continue;
+            }
+            // Wage: levies on each side's houses, war-chest spending, trade blockade.
+            let lev = self.raise_war_levy(a) + self.raise_war_levy(b);
+            self.wars[wi].levies += lev;
+            self.wars[wi].chest_a += self.spend_war(a);
+            self.wars[wi].chest_b += self.spend_war(b);
+            for &h in &[a, b] {
+                self.hubs[h].trade_wealth *= 0.8; // blockade bites commerce
+                self.active_events.push(ActiveEvent {
+                    kind: "war".into(), hub: h as i32, good: -1,
+                    magnitude: 0.4, until_tick: tick + TICKS_PER_YEAR,
+                });
+            }
+            // Resolve after >= 2 years, weighted by mustered effort + treasury.
+            let years = tick.saturating_sub(self.wars[wi].start_tick) / TICKS_PER_YEAR;
+            if years >= 2 {
+                let pa = self.wars[wi].chest_a + self.hubs[a].treasury + 1.0;
+                let pb = self.wars[wi].chest_b + self.hubs[b].treasury + 1.0;
+                let a_wins = hash01(self.seed, tick as u64 ^ 0xBA771E, wi as u64) < pa / (pa + pb);
+                let (win, lose) = if a_wins { (a, b) } else { (b, a) };
+                let rep = (self.hubs[lose].treasury.max(0.0) * 0.4).max(0.0);
+                self.hubs[lose].treasury -= rep;
+                self.hubs[win].treasury += rep;
+                self.hubs[win].finance.reparations_in += rep;
+                self.hubs[lose].finance.reparations_out += rep;
+                self.hubs[lose].coin_trust = (self.hubs[lose].coin_trust - 0.15).max(0.0);
+                self.hubs[a].war_with = -1;
+                self.hubs[b].war_with = -1;
+                let (an, bn) = (self.hubs[a].name.clone(), self.hubs[b].name.clone());
+                let (wn, ln) = (self.hubs[win].name.clone(), self.hubs[lose].name.clone());
+                let text = format!(
+                    "The war of {} and {} ends in year {}: {} prevails, {} pays {:.0} in reparations.",
+                    an, bn, yr, wn, ln, rep);
+                self.journal.push(JournalEntry { tick, kind: "war".into(), hub: win as i32, good: -1,
+                    value: rep, text: text.clone() });
+                self.war_log.push(WarRecord {
+                    start_year: self.wars[wi].start_tick / TICKS_PER_YEAR, end_year: yr,
+                    a_name: an, b_name: bn, winner: wn, loser: ln,
+                    reparations: rep, levies_total: self.wars[wi].levies,
+                    cause: self.wars[wi].cause.clone(), text,
+                });
+                ended.push(wi);
+            }
+        }
+        for &wi in ended.iter().rev() { self.wars.remove(wi); }
+        self.maybe_declare_war(yr);
+    }
+
+    /// Occasionally ignite a new economic war between two rival poleis in the same
+    /// region, both at peace. Rival councils are the spark; prosperity is the prize.
+    fn maybe_declare_war(&mut self, yr: u32) {
+        if self.wars.len() >= MAX_ACTIVE_WARS { return; }
+        if hash01(self.seed, self.tick as u64 ^ 0xDEC1A6E, yr as u64) > WAR_DECLARE_CHANCE { return; }
+        let n = self.hubs.len();
+        // Candidate seats: real cities with a council, at peace.
+        let seats: Vec<usize> = (0..n).filter(|&h|
+            !self.hubs[h].is_estate && self.hubs[h].war_with < 0
+            && self.hubs[h].council_house >= 0 && self.hubs[h].population > 1.0
+        ).collect();
+        if seats.len() < 2 { return; }
+        // Prefer a pair in the same region whose councils are rivals; else any pair.
+        let mut best: Option<(usize, usize, &'static str)> = None;
+        for (ii, &a) in seats.iter().enumerate() {
+            for &b in seats.iter().skip(ii + 1) {
+                if self.hubs[a].component != self.hubs[b].component { continue; }
+                let ca = self.hubs[a].council_house as usize;
+                let cb = self.hubs[b].council_house as usize;
+                let rivals = self.houses.get(ca).map(|h| h.rivals.contains(&cb)).unwrap_or(false)
+                    || self.houses.get(cb).map(|h| h.rivals.contains(&ca)).unwrap_or(false);
+                if rivals { best = Some((a, b, "rival councils")); break; }
+                if best.is_none() { best = Some((a, b, "trade dispute")); }
+            }
+            if matches!(best, Some((_, _, "rival councils"))) { break; }
+        }
+        let Some((a, b, cause)) = best else { return };
+        let (a, b) = if a < b { (a, b) } else { (b, a) };
+        self.hubs[a].war_with = b as i32;
+        self.hubs[b].war_with = a as i32;
+        self.hubs[a].war_since = self.tick;
+        self.hubs[b].war_since = self.tick;
+        let (an, bn) = (self.hubs[a].name.clone(), self.hubs[b].name.clone());
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "war".into(), hub: a as i32, good: -1, value: 0.0,
+            text: format!("{} declares war on {} ({})", an, bn, cause),
+        });
+        self.wars.push(War {
+            a: a as u32, b: b as u32, start_tick: self.tick,
+            chest_a: 0.0, chest_b: 0.0, levies: 0.0, cargo_lost: 0, cause: cause.into(),
+        });
     }
 
     /// DLC 3 · Phase 3 — the Speculation "Why-Engine". Once a year, score each
@@ -1949,8 +2197,10 @@ impl CampaignSim {
                 // regional crash.
                 self.decide_coinage(yr);
                 self.update_banks(yr);
+                self.update_wars(yr);
                 self.compute_speculation(yr);
                 self.maybe_pop_bubbles(yr);
+                self.roll_city_finances(yr);
                 for l in self.house_ledger.iter_mut() {
                     *l = LedgerAcc { year: yr, ..Default::default() };
                 }
@@ -2210,14 +2460,22 @@ impl CampaignSim {
             };
             let upkeep = wealth * UPKEEP_RATE;
             let consumption = wealth * consume_rate;
-            self.houses[hi].wealth -= upkeep + consumption;
+            // Progressive civic wealth tax → the home city's TREASURY (rises with
+            // wealth, so great fortunes bleed hardest and the polis grows rich).
+            // Guilds are civic bodies and exempt (they already spend on their city).
+            let civic_tax = if self.houses[hi].is_guild { 0.0 }
+                else { wealth * WEALTH_TAX_PROG * (wealth / (wealth + WEALTH_TAX_SCALE)) };
+            self.houses[hi].wealth -= upkeep + consumption + civic_tax;
             let home = self.houses[hi].hub as usize;
             if home < self.hubs.len() {
                 self.hubs[home].civic_pool += consumption;
+                self.hubs[home].treasury += civic_tax;
+                self.hubs[home].finance.tax_wealth += civic_tax; // city-finances ledger
             }
             if hi < self.house_ledger.len() {
                 self.house_ledger[hi].upkeep += upkeep;
                 self.house_ledger[hi].consumption += consumption;
+                self.house_ledger[hi].civic_tax += civic_tax;
                 // Sample wealth each month for the Accountant's year graph.
                 self.house_ledger[hi].wealth_samples.push(self.houses[hi].wealth.max(0.0));
             }
@@ -2557,8 +2815,17 @@ impl CampaignSim {
                             let etax = cut * ESTATE_TAX_RATE;
                             self.houses[owner as usize].wealth -= etax;
                             let parent = self.hubs[a].parent;
+                            let is_manu = self.hubs[a].estate_kind == 6;
                             if parent >= 0 && (parent as usize) < self.hubs.len() {
-                                self.hubs[parent as usize].civic_pool += etax;
+                                let p = parent as usize;
+                                let treas = etax * TREASURY_TAX_SHARE;
+                                self.hubs[p].treasury += treas;
+                                self.hubs[p].civic_pool += etax - treas;
+                                // Manufactories (kind 6) book under manufacturing tax;
+                                // raw estates under estate tax — for the City Finances panel.
+                                if is_manu { self.hubs[p].finance.tax_manufacture += etax; }
+                                else { self.hubs[p].finance.tax_estate += etax; }
+                                self.hubs[p].finance.spent_civic += etax - treas;
                             }
                             if (owner as usize) < self.house_ledger.len() {
                                 self.house_ledger[owner as usize].estate_income += cut;
@@ -2660,8 +2927,19 @@ impl CampaignSim {
                         let export_tax = value * exp_rate * tax_mult;
                         let import_tax = value * imp_rate * tax_mult;
                         self.houses[oi].wealth -= export_tax + import_tax;
-                        self.hubs[a].civic_pool += export_tax;
-                        self.hubs[b].civic_pool += import_tax;
+                        // DLC 3.5 · split tariffs: a share is retained in the city
+                        // treasury (capital for war/works), the rest reaches the
+                        // people via the civic pool. Gross is booked as city income.
+                        let exp_treas = export_tax * TREASURY_TAX_SHARE;
+                        let imp_treas = import_tax * TREASURY_TAX_SHARE;
+                        self.hubs[a].treasury += exp_treas;
+                        self.hubs[a].civic_pool += export_tax - exp_treas;
+                        self.hubs[a].finance.tax_trade += export_tax;
+                        self.hubs[a].finance.spent_civic += export_tax - exp_treas;
+                        self.hubs[b].treasury += imp_treas;
+                        self.hubs[b].civic_pool += import_tax - imp_treas;
+                        self.hubs[b].finance.tax_trade += import_tax;
+                        self.hubs[b].finance.spent_civic += import_tax - imp_treas;
                         if oi < self.house_ledger.len() {
                             LedgerAcc::add_city(&mut self.house_ledger[oi].trade_profit_by_city, b as u32, profit);
                             LedgerAcc::add_city(&mut self.house_ledger[oi].export_tax_by_city, a as u32, export_tax);
@@ -3352,6 +3630,7 @@ impl CampaignSim {
             estate_kind: kind, estate_tier: 1, owner_house, structures: vec![],
             founded_tick: self.tick, founder_house: owner_house,
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
+            finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
             coin_name: String::new(), coin_trust: 0.0, mint_fineness_prev: 0.0,
         });
         self.rebuild_routes();
@@ -3854,10 +4133,14 @@ impl CampaignSim {
         self.maybe_found_house();
         // Monthly: monopolies, political power, branching, extinction, feuds.
         if tick % 30 == 0 {
-            // Merchant bankers' capital earns interest each month.
+            // Merchant bankers earn a modest return on LIQUID capital — but only up
+            // to a cap, so it's a starting perk, not an exponential engine. Real
+            // banking growth now comes from OWNING a bank (bank_pass dividends).
+            // DLC 3.5 rebalance: the old uncapped 1%/mo on the whole fortune
+            // compounded houses to absurd wealth (100k in a decade).
             for hh in &mut self.houses {
                 if !hh.defunct && hh.archetype == ARCH_BANKING && hh.wealth > 0.0 {
-                    hh.wealth *= 1.0 + BANK_INTEREST;
+                    hh.wealth += hh.wealth.min(BANK_INTEREST_CAP) * BANK_INTEREST;
                 }
             }
             // Phase G: wealth bleeds (upkeep + consumption) so it plateaus and some
@@ -4482,6 +4765,7 @@ mod tests {
             estate_kind: 0, estate_tier: 0, owner_house: -1, structures: vec![],
             founded_tick: 0, founder_house: -1,
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
+            finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
             coin_name: String::new(), coin_trust: 0.0, mint_fineness_prev: 0.0,
         }
     }
@@ -4511,7 +4795,7 @@ mod tests {
             recent_trades: vec![],
             contracts: vec![], contract_archive: vec![], next_contract_id: 0,
             spec_centers: vec![], spec_year: 0, spec_prev_profit: vec![],
-            banks: vec![], crashes: vec![],
+            banks: vec![], crashes: vec![], wars: vec![], war_log: vec![],
             days: vec![],
         };
         s.rebuild_routes();
@@ -4685,6 +4969,32 @@ mod tests {
         assert!((s.houses[2].wealth - w_before[2]).abs() < 1e-4, "other region's house untouched");
         assert_eq!(s.crashes.len(), 1, "the crash was recorded");
         assert_eq!(s.crashes[0].cities_hit, 2);
+    }
+
+    #[test]
+    fn economic_war_levies_houses_and_resolves() {
+        // DLC 3.5 · a war drains resident houses via levies and resolves after ≥2
+        // years into the war log with reparations — the wealth sink in action.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut s = sim(vec![
+            hub(0, 10.0, 10.0, 10000.0, vec![100.0], 0),
+            hub(1, 14.0, 10.0, 9000.0, vec![90.0], 0),
+        ], goods);
+        for i in 0..2u32 { let mut h = house_at(i, vec![0], 2); h.wealth = 100.0; s.houses.push(h); }
+        s.hubs[0].treasury = 50.0; s.hubs[1].treasury = 20.0;
+        s.hubs[0].war_with = 1; s.hubs[1].war_with = 0;
+        s.wars.push(War { a: 0, b: 1, start_tick: 0, chest_a: 0.0, chest_b: 0.0,
+            levies: 0.0, cargo_lost: 0, cause: "test".into() });
+        let w0 = s.houses[0].wealth;
+        s.tick = 0;
+        s.update_wars(0); // wage one year — levy, no resolve
+        assert!(s.houses[0].wealth < w0, "war levy drained a resident house");
+        assert_eq!(s.war_log.len(), 0, "not resolved before 2 years");
+        s.tick = 2 * 365;
+        s.update_wars(2); // resolve
+        assert_eq!(s.war_log.len(), 1, "war resolved into the log");
+        assert!(s.hubs[0].war_with < 0 && s.hubs[1].war_with < 0, "war state cleared");
+        assert!(s.war_log[0].levies_total > 0.0, "levies recorded");
     }
 
     #[test]

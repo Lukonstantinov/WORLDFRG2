@@ -726,6 +726,10 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 tariff_import: 0.0,
                 mint_fineness: 1.0,
                 council_house: -1,
+                finance: crate::sim::tick::CityFinance::default(),
+                war_with: -1,
+                war_since: 0,
+                war_effort: 0.0,
                 coin_name: String::new(),
                 coin_trust: 0.0,
                 mint_fineness_prev: 0.0,
@@ -920,6 +924,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         spec_prev_profit: vec![],
         banks: vec![],
         crashes: vec![],
+        wars: vec![],
+        war_log: vec![],
         days: vec![],
     };
     sim.rebuild_routes();
