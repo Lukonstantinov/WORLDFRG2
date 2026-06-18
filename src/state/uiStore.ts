@@ -180,7 +180,7 @@ export const useUIStore = create<UIStore>((set) => ({
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
     speculation: false,
-    houseControl: false, merchantRoutes: false,
+    houseControl: false, merchantRoutes: false, dynamicFlow: false,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
     ...Object.fromEntries(GOOD_DEFS.map((g) => [goodOverlayKey(g.name), false])),
   },

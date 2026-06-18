@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { WorldMeta, OpenWorldResult, CampaignInfo, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, CultureRegion, TradeMatrix, PoliticalCenter, GoodSpec, EconomySnapshot } from "../types";
+import type { WorldMeta, OpenWorldResult, CampaignInfo, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, CultureRegion, TradeMatrix, TradeTrunk, PoliticalCenter, GoodSpec, EconomySnapshot } from "../types";
 
 export async function newWorld(name: string, gridWidth: number, gridHeight: number): Promise<WorldMeta> {
   return invoke("new_world", { name, gridWidth, gridHeight });
@@ -224,6 +224,20 @@ export async function computeTradeRoutes(
     piracy,
     season,
     months,
+  });
+}
+
+/** DLC 3.5 · the live campaign's dynamic trade-flow trunks (last year's actual
+ *  shipped volume, routed over the cost grid + bundled; width ∝ volume). */
+export async function campaignGetTradeFlow(
+  rivers: { points: [number, number][] }[],
+  reach: number,
+  maxCrossing: number,
+): Promise<TradeTrunk[]> {
+  return invoke("campaign_get_trade_flow", {
+    riversJson: JSON.stringify(rivers),
+    reach,
+    maxCrossing,
   });
 }
 

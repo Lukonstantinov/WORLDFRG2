@@ -45,6 +45,10 @@ const MONSOON_COLOR = "#3a9ad0";
 const REEF_COLOR = "#30c0b0";
 const TRADE_TRUNK = "#e0c060"; // major bundled commodity-flow trunk (amber)
 const TRADE_TRUNK_MINOR = "#b8a878"; // minor/low-volume trunk (muted amber)
+// DLC 3.5 · dynamic (live, yearly-averaged) trade-flow trunks — teal/cyan so they
+// read distinct from the static amber worldgen trunks.
+const DYN_FLOW = "#4fd0c0";
+const DYN_FLOW_MINOR = "#3a8a86";
 const POLITICAL_COLOR = "#d65fd0"; // trade-hub marker (magenta) — legacy
 const STAR_COLOR = "#ffd24a"; // power-tier stars on major hubs (gold) — legacy
 const HUB_BLUE = "#3a86d6"; // trade-hub circle
@@ -105,6 +109,7 @@ export class OverlayManager {
    *  back to the static GOOD_DEFS when absent. */
   private goodMeta: Map<string, { icon: string; color: string }> | null = null;
   private tradeTrunks: TradeTrunk[] = [];
+  private dynamicTrunks: TradeTrunk[] = [];
   private merchantRoutes: MerchantRoute[] = [];
   private politicalCenters: PoliticalCenter[] = [];
   private specCenters: SpecCenter[] = [];
@@ -207,6 +212,12 @@ export class OverlayManager {
   drawTradeTrunks(trunks: TradeTrunk[], gridW: number) {
     this.tradeTrunks = trunks;
     this.worldW = gridW;
+  }
+
+  /** DLC 3.5 · the live yearly-averaged dynamic trade-flow trunks. */
+  drawDynamicFlow(trunks: TradeTrunk[], gridW: number) {
+    this.dynamicTrunks = trunks;
+    if (gridW > 0) this.worldW = gridW;
   }
 
   drawMerchantRoutes(routes: MerchantRoute[], gridW: number) {
@@ -508,6 +519,9 @@ export class OverlayManager {
     // (width ∝ total volume on each corridor).
     if (this.visibility.tradeFlows && this.tradeTrunks.length > 0) {
       this.renderTradeTrunks(ctx);
+    }
+    if (this.visibility.dynamicFlow && this.dynamicTrunks.length > 0) {
+      this.renderTradeTrunks(ctx, this.dynamicTrunks, DYN_FLOW, DYN_FLOW_MINOR);
     }
 
     if (this.visibility.tradeRoutes && this.tradeRoutes.length > 0) {
@@ -921,9 +935,14 @@ export class OverlayManager {
     ctx.setLineDash([]);
   }
 
-  private renderTradeTrunks(ctx: CanvasRenderingContext2D) {
+  private renderTradeTrunks(
+    ctx: CanvasRenderingContext2D,
+    trunks: TradeTrunk[] = this.tradeTrunks,
+    majorColor: string = TRADE_TRUNK,
+    minorColor: string = TRADE_TRUNK_MINOR,
+  ) {
     let maxVol = 0;
-    for (const t of this.tradeTrunks) maxVol = Math.max(maxVol, t.volume);
+    for (const t of trunks) maxVol = Math.max(maxVol, t.volume);
     if (maxVol <= 0) return;
 
     ctx.lineCap = "round";
@@ -934,7 +953,7 @@ export class OverlayManager {
     // muted and dashed. Each trunk carries a direction arrowhead (toward the
     // consuming hub) and the major arteries are labelled (Spice Road / Silk Road).
     const labels: { x: number; y: number; text: string }[] = [];
-    for (const t of this.tradeTrunks) {
+    for (const t of trunks) {
       const pts = t.points;
       if (pts.length < 2) continue;
       const a = pts[0], b = pts[1];
@@ -943,7 +962,7 @@ export class OverlayManager {
       const norm = t.volume / maxVol;
       const major = norm >= 0.45;
       ctx.globalAlpha = major ? 0.85 : 0.5;
-      ctx.strokeStyle = major ? TRADE_TRUNK : TRADE_TRUNK_MINOR;
+      ctx.strokeStyle = major ? majorColor : minorColor;
       ctx.lineWidth = Math.max(
         0.5,
         (major ? 1.4 + norm * 5.0 : 0.5 + norm * 1.5) / Math.sqrt(this.currentScale),
@@ -968,7 +987,7 @@ export class OverlayManager {
         ctx.lineTo(bx - dx * hl + px * hl * 0.5, by - dy * hl + py * hl * 0.5);
         ctx.lineTo(bx - dx * hl - px * hl * 0.5, by - dy * hl - py * hl * 0.5);
         ctx.closePath();
-        ctx.fillStyle = major ? TRADE_TRUNK : TRADE_TRUNK_MINOR;
+        ctx.fillStyle = major ? majorColor : minorColor;
         ctx.fill();
       }
       if (t.road) labels.push({ x: (ax + bx) / 2, y: (ay + by) / 2, text: t.road });
@@ -1610,6 +1629,7 @@ export class OverlayManager {
     this.reefZones = [];
     this.goodRegions = [];
     this.tradeTrunks = [];
+    this.dynamicTrunks = [];
     this.politicalCenters = [];
     this.specCenters = [];
     this.houses = [];

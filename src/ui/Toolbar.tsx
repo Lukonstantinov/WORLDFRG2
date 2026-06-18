@@ -85,6 +85,7 @@ const bioOverlays = [
   { id: "politicalInfluence", label: "\u{1F535} Trade Hubs" },
   { id: "houseControl", label: "\u{2696} House Control" },
   { id: "merchantRoutes", label: "\u{1F6A2} Merchant Routes" },
+  { id: "dynamicFlow", label: "\u{1F30A} Dynamic Trade Flow" },
   { id: "tradeRegions", label: "\u{1F7E6} Trade Regions" },
   { id: "tradeCorridors", label: "\u{2194} Trade Corridors" },
   { id: "chokepoints", label: "\u{2693} Chokepoints" },

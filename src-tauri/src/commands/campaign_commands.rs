@@ -485,7 +485,7 @@ pub struct OfficeHere {
     pub goods: Vec<String>,    // goods it currently moves through here
 }
 
-fn get_sim(conn: &Connection) -> Result<Option<CampaignSim>, String> {
+pub(crate) fn get_sim(conn: &Connection) -> Result<Option<CampaignSim>, String> {
     // Make the organic culture map active so houses/guilds founded this tick are
     // named in their home city's culture (no-op when none is stored).
     crate::sim::cultures::ensure_active(conn);
@@ -959,6 +959,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         crashes: vec![],
         wars: vec![],
         war_log: vec![],
+        flow_year: vec![],
+        flow_accum: std::collections::HashMap::new(),
         days: vec![],
     };
     sim.rebuild_routes();
