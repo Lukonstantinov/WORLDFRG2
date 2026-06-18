@@ -111,6 +111,8 @@ interface UIStore {
   showSpeculation: boolean;
   /** DLC 3.5 · the Coin & Credit (currencies / banks / crashes / schematics) panel. */
   showCoinCredit: boolean;
+  /** DLC 4 · the floating Goods (quality & trade) window. */
+  showGoodsWindow: boolean;
   /** Goods & Chains review window open (always shown before goods generation). */
   chainReviewOpen: boolean;
   /** Action run when the user confirms "Generate" in the chain-review window
@@ -159,6 +161,7 @@ interface UIStore {
   setShowCityRanking: (v: boolean) => void;
   setShowSpeculation: (v: boolean) => void;
   setShowCoinCredit: (v: boolean) => void;
+  setShowGoodsWindow: (v: boolean) => void;
   openChainReview: (onConfirm?: () => void) => void;
   closeChainReview: () => void;
 }
@@ -229,6 +232,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showCityRanking: false,
   showSpeculation: false,
   showCoinCredit: false,
+  showGoodsWindow: false,
   chainReviewOpen: false,
   chainReviewConfirm: null,
 
@@ -303,6 +307,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowCityRanking: (v) => set({ showCityRanking: v }),
   setShowSpeculation: (v) => set({ showSpeculation: v }),
   setShowCoinCredit: (v) => set({ showCoinCredit: v }),
+  setShowGoodsWindow: (v) => set({ showGoodsWindow: v }),
   openChainReview: (onConfirm) => set({ chainReviewOpen: true, chainReviewConfirm: onConfirm ?? null }),
   closeChainReview: () => set({ chainReviewOpen: false, chainReviewConfirm: null }),
 

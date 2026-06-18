@@ -166,6 +166,9 @@ export function StepCampaign({ seed }: { seed: number; plateCount: number; inval
           <button onClick={() => useUIStore.getState().setShowCoinCredit(true)} style={housesBtn}>
             🪙 Coin, Credit &amp; Crashes
           </button>
+          <button onClick={() => useUIStore.getState().setShowGoodsWindow(true)} style={housesBtn}>
+            📦 Goods &amp; Quality
+          </button>
 
           {/* ── World pulse: population + prices in NUMBERS, with monthly Δ ── */}
           <div style={statRow}>

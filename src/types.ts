@@ -234,6 +234,20 @@ export interface HubGoodDetail {
   world_max: number;
   world_max_hub: string;
   world_avg?: number; // mean ×-world price across all settlements right now
+  quality?: number;   // this hub's production quality 0..1 for the good
+  grade?: string;     // grade label if the hub produces it ("Fine", "Exquisite", …)
+}
+/** One good's world-wide quality + trade picture (the floating Goods window). */
+export interface GoodMarketRow {
+  good: string;
+  best_quality: number;
+  best_grade: string;
+  best_city: string;
+  avg_quality: number;
+  produced: number;
+  traded: number;
+  n_producers: number;
+  manufactured: boolean;
 }
 /** One shipment touching a settlement (Market tab arrivals/departures). */
 export interface ShipmentRow {
@@ -307,6 +321,8 @@ export interface HubDetail {
   coin_trust?: number;
   coin_value?: number;
   transit?: TransitRow[];            // carrying trade through this city's merchants
+  stolen_good?: string;              // espionage: good whose technique this estate stole
+  stolen_from?: string;              // city it was stolen from ("" = none)
 }
 /** DLC 3 · a polis seat's government: council house + fiscal policy + speculation. */
 export interface Government {

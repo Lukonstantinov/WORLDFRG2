@@ -345,6 +345,9 @@ pub struct HubGoodDetail {
     /// Mean ×-world price across all settlements right now (the "world average"
     /// reference line on the Market price graphs).
     #[serde(default)] pub world_avg: f32,
+    /// DLC 4 · this hub's production quality 0..1 for the good + its grade label.
+    #[serde(default)] pub quality: f32,
+    #[serde(default)] pub grade: String,
 }
 
 /// One shipment touching a settlement (Market tab arrivals/departures), with its
@@ -471,6 +474,10 @@ pub struct HubDetail {
     /// Carrying trade: in-flight shipments THIS city's merchants run between OTHER
     /// cities (the entrepôt "transit" — goods that pass through its houses' hands).
     #[serde(default)] pub transit: Vec<TransitRow>,
+    /// DLC 4 · espionage: if this estate/manufactory stole a quality technique, the
+    /// good's name + the city it was stolen from ("" = none).
+    #[serde(default)] pub stolen_good: String,
+    #[serde(default)] pub stolen_from: String,
 }
 
 /// DLC 3.5 · one leg of a city's carrying trade (a merchant of this city hauling
@@ -1174,6 +1181,10 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                 world_max: if wmax.0.is_finite() { wmax.0 } else { 0.0 },
                 world_max_hub: wmax.1.to_string(),
                 world_avg,
+                quality: hub.quality.get(g).copied().unwrap_or(0.0),
+                grade: if hub.production[g] > 0.0 {
+                    crate::sim::tick::quality_grade(hub.quality.get(g).copied().unwrap_or(0.0)).to_string()
+                } else { String::new() },
             }
         })
         .collect();
@@ -1424,7 +1435,69 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         coin_trust: hub.coin_trust,
         coin_value,
         transit,
+        stolen_good: if hub.stolen_good >= 0 {
+            sim.goods.get(hub.stolen_good as usize).map(|g| g.name.clone()).unwrap_or_default()
+        } else { String::new() },
+        stolen_from: if hub.stolen_from >= 0 {
+            sim.hubs.iter().find(|h| h.id == hub.stolen_from as u32).map(|h| h.name.clone()).unwrap_or_default()
+        } else { String::new() },
     }))
+}
+
+/// DLC 4 · one good's world-wide quality + trade picture, for the floating Goods
+/// window. Aggregated across all producing hubs + in-flight cargo.
+#[derive(Serialize, Clone)]
+pub struct GoodMarketRow {
+    pub good: String,
+    pub best_quality: f32,
+    pub best_grade: String,
+    pub best_city: String,
+    pub avg_quality: f32,
+    pub produced: f32,
+    pub traded: f32,
+    pub n_producers: u32,
+    pub manufactured: bool,
+}
+
+/// DLC 4 · every good's quality rating + produced/traded totals (the Goods window).
+#[tauri::command]
+pub fn campaign_get_goods(db: State<'_, WorldDb>) -> Result<Vec<GoodMarketRow>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let ng = sim.goods.len();
+    let mut produced = vec![0.0f32; ng];
+    let mut q_sum = vec![0.0f32; ng];
+    let mut q_w = vec![0.0f32; ng];
+    let mut best = vec![(0.0f32, usize::MAX); ng]; // (quality, hub idx)
+    let mut n_prod = vec![0u32; ng];
+    for (hi, h) in sim.hubs.iter().enumerate() {
+        for g in 0..ng {
+            let p = h.production.get(g).copied().unwrap_or(0.0);
+            if p <= 0.0 { continue; }
+            let q = h.quality.get(g).copied().unwrap_or(0.0);
+            produced[g] += p; q_sum[g] += q * p; q_w[g] += p; n_prod[g] += 1;
+            if q > best[g].0 { best[g] = (q, hi); }
+        }
+    }
+    let mut traded = vec![0.0f32; ng];
+    for s in &sim.in_transit { if s.good < ng { traded[s.good] += s.amount.max(0.0); } }
+    let mut out: Vec<GoodMarketRow> = (0..ng).filter(|&g| produced[g] > 0.0 || traded[g] > 0.0).map(|g| {
+        let avg = if q_w[g] > 0.0 { q_sum[g] / q_w[g] } else { 0.0 };
+        let best_city = if best[g].1 != usize::MAX { sim.hubs[best[g].1].name.clone() } else { String::new() };
+        GoodMarketRow {
+            good: sim.goods[g].name.clone(),
+            best_quality: best[g].0,
+            best_grade: crate::sim::tick::quality_grade(best[g].0).to_string(),
+            best_city,
+            avg_quality: avg,
+            produced: produced[g],
+            traded: traded[g],
+            n_producers: n_prod[g],
+            manufactured: !sim.goods[g].inputs.is_empty(),
+        }
+    }).collect();
+    out.sort_by(|a, b| b.produced.partial_cmp(&a.produced).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(out)
 }
 
 /// One merchant family for the Houses panel / settlement window.

@@ -13,6 +13,15 @@ import type { HouseBrief } from "../types";
 import { SettlementScene } from "./SettlementScene";
 import { FlowsView } from "./FlowsView";
 
+/** DLC 4 · grade colour ramp (Coarse→Exquisite) for the quality labels. */
+function gradeColor(q: number): string {
+  if (q >= 0.85) return "#78c8e6";
+  if (q >= 0.68) return "#6eb496";
+  if (q >= 0.5) return "#96aa78";
+  if (q >= 0.32) return "#aa966e";
+  return "#96786e";
+}
+
 /** Icons/colours for the settlement chronicle's event kinds (year-grouped view). */
 const HUB_EVENT_ICON: Record<string, string> = {
   estate: "🏡", starvation: "💀", succession: "👤", structure: "🏗️", coinage: "🪙",
@@ -362,6 +371,11 @@ export function HubPanel() {
                 Owned by <span style={{ color: "#e8dcc0" }}>{detail.estate_owner || "—"}</span>
                 {detail.estate_good && <> · works {iconFor(detail.estate_good)} {labelFor(detail.estate_good)}</>}
               </div>
+              {detail.stolen_good && (
+                <div title="This workshop copied another city's quality technique" style={{ marginTop: 3, fontSize: 9, color: "#e6a07a", background: "#2a1818", border: "1px solid #5a3030", borderRadius: 4, padding: "2px 5px" }}>
+                  🕵 stole the {labelFor(detail.stolen_good)} craft{detail.stolen_from ? <> from <span style={{ color: "#f0c0a0" }}>{detail.stolen_from}</span></> : null}
+                </div>
+              )}
             </div>
           )}
           {hub.top_export && (
@@ -483,7 +497,10 @@ export function HubPanel() {
                         const gi = imp[g.name] ?? 0, go = exp[g.name] ?? 0;
                         return (
                           <div key={g.good} style={{ display: "flex", gap: 3, fontSize: 9, alignItems: "baseline" }}>
-                            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#c0d0e0" }}>{iconFor(g.name)} {labelFor(g.name)}</span>
+                            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#c0d0e0" }}>
+                              {iconFor(g.name)} {labelFor(g.name)}
+                              {g.production > 0.01 && g.grade ? <span title={`Quality: ${g.grade}`} style={{ color: gradeColor(g.quality ?? 0), marginLeft: 3 }}>· {g.grade}</span> : null}
+                            </span>
                             <span style={{ minWidth: 30, textAlign: "right", color: "#9ab0c8" }}>{g.production > 0.01 ? fmt(g.production) : "—"}</span>
                             <span style={{ minWidth: 26, textAlign: "right", color: "#7fd0a0" }}>{gi > 0.01 ? fmt(gi) : "·"}</span>
                             <span style={{ minWidth: 26, textAlign: "right", color: "#e0a080" }}>{go > 0.01 ? fmt(go) : "·"}</span>
