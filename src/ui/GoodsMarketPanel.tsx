@@ -24,6 +24,17 @@ function gradeColor(q: number): string {
   return "rgb(150,205,245)";
 }
 
+/** Grade colour by name (matches the worldgen ladder). */
+function gradeColorByName(grade: string): string {
+  switch (grade) {
+    case "Exquisite": return "rgb(120,190,230)";
+    case "Fine": return "rgb(110,180,150)";
+    case "Standard": return "rgb(150,170,120)";
+    case "Common": return "rgb(170,150,110)";
+    default: return "rgb(150,120,110)";
+  }
+}
+
 type Sort = "produced" | "traded" | "quality" | "name";
 
 /** DLC 4 · the floating Goods window — every good ranked by quality, with its best
@@ -38,6 +49,8 @@ export function GoodsMarketPanel() {
   const [sort, setSort] = useState<Sort>("produced");
   const [manuOnly, setManuOnly] = useState(false);
   const [tradedOnly, setTradedOnly] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleRow = (g: string) => setExpanded((p) => { const n = new Set(p); n.has(g) ? n.delete(g) : n.add(g); return n; });
 
   useEffect(() => {
     if (!open || !active) return;
@@ -90,25 +103,42 @@ export function GoodsMarketPanel() {
             <span style={{ width: 56, textAlign: "right" }}>Traded</span>
           </div>
           <div style={{ overflowY: "auto" }}>
-            {view.map((g) => (
-              <div key={g.good} style={row}>
-                <span style={{ flex: "0 0 150px", color: "#e8dcc0", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {icon(g.good)} {label(g.good)}{g.manufactured ? <span title="manufactured" style={{ color: "#7fa0c0" }}> ⚒</span> : null}
-                </span>
-                <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                  <span style={{ width: 90, height: 8, background: "#101c28", borderRadius: 3, overflow: "hidden", flex: "0 0 auto" }}>
-                    <span style={{ display: "block", height: "100%", width: `${Math.max(3, g.best_quality * 100)}%`, background: gradeColor(g.best_quality) }} />
+            {view.map((g) => {
+              const isOpen = expanded.has(g.good);
+              return (
+              <div key={g.good}>
+                <div style={{ ...row, cursor: "pointer" }} onClick={() => toggleRow(g.good)} title="Click to see the grade-by-grade breakdown">
+                  <span style={{ flex: "0 0 150px", color: "#e8dcc0", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span style={{ color: "#6a86a6", fontSize: 9 }}>{g.grades.length > 1 ? (isOpen ? "▾ " : "▸ ") : "  "}</span>
+                    {icon(g.good)} {label(g.good)}{g.manufactured ? <span title="manufactured" style={{ color: "#7fa0c0" }}> ⚒</span> : null}
                   </span>
-                  <span style={{ color: gradeColor(g.best_quality), fontSize: 10, fontWeight: 700 }}>{g.best_grade}</span>
-                  {g.best_city ? <span style={{ color: "#7a90a8", fontSize: 9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>· {g.best_city}</span> : null}
-                </span>
-                <span style={{ width: 40, textAlign: "right", color: gradeColor(g.avg_quality), fontSize: 10 }}>{Math.round(g.avg_quality * 100)}%</span>
-                <span style={{ width: 64, textAlign: "right", color: "#bcd0e4", fontSize: 10 }}>
-                  <Bar v={g.produced} max={maxProd} c="#c9a227" /> {fmt(g.produced)}
-                </span>
-                <span style={{ width: 56, textAlign: "right", color: "#9fd0b0", fontSize: 10 }}>{fmt(g.traded)}</span>
+                  <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                    <span style={{ width: 90, height: 8, background: "#101c28", borderRadius: 3, overflow: "hidden", flex: "0 0 auto" }}>
+                      <span style={{ display: "block", height: "100%", width: `${Math.max(3, g.best_quality * 100)}%`, background: gradeColor(g.best_quality) }} />
+                    </span>
+                    <span style={{ color: gradeColor(g.best_quality), fontSize: 10, fontWeight: 700 }}>{g.best_grade}</span>
+                    {g.best_city ? <span style={{ color: "#7a90a8", fontSize: 9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>· {g.best_city}</span> : null}
+                  </span>
+                  <span style={{ width: 40, textAlign: "right", color: gradeColor(g.avg_quality), fontSize: 10 }}>{Math.round(g.avg_quality * 100)}%</span>
+                  <span style={{ width: 64, textAlign: "right", color: "#bcd0e4", fontSize: 10 }}>
+                    <Bar v={g.produced} max={maxProd} c="#c9a227" /> {fmt(g.produced)}
+                  </span>
+                  <span style={{ width: 56, textAlign: "right", color: "#9fd0b0", fontSize: 10 }}>{fmt(g.traded)}</span>
+                </div>
+                {isOpen && g.grades.map((b) => (
+                  <div key={b.grade} style={{ ...row, background: "#0a121b", paddingTop: 2, paddingBottom: 2, borderBottom: "1px solid #0e1822" }}>
+                    <span style={{ flex: "0 0 150px", paddingLeft: 22, color: gradeColorByName(b.grade), fontSize: 10 }}>
+                      {label(g.good)} · <b>{b.grade}</b>
+                    </span>
+                    <span style={{ flex: 1, color: "#6a86a6", fontSize: 9 }}>{b.n_producers} producer{b.n_producers === 1 ? "" : "s"}</span>
+                    <span style={{ width: 40 }} />
+                    <span style={{ width: 64, textAlign: "right", color: "#c9a227", fontSize: 10 }}>{fmt(b.produced)}</span>
+                    <span style={{ width: 56, textAlign: "right", color: "#9fd0b0", fontSize: 10 }}>{fmt(b.traded)}</span>
+                  </div>
+                ))}
               </div>
-            ))}
+              );
+            })}
             {view.length === 0 && <div style={empty}>No goods match the filter.</div>}
           </div>
         </>

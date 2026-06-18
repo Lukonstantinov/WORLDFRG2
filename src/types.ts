@@ -248,6 +248,14 @@ export interface GoodMarketRow {
   traded: number;
   n_producers: number;
   manufactured: boolean;
+  grades: GradeBucket[];   // per quality-tier breakdown (Exquisite→Coarse)
+}
+/** One quality tier of a good (produced & traded at that grade). */
+export interface GradeBucket {
+  grade: string;
+  produced: number;
+  traded: number;
+  n_producers: number;
 }
 /** One shipment touching a settlement (Market tab arrivals/departures). */
 export interface ShipmentRow {

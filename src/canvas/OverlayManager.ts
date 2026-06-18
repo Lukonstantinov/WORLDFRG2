@@ -35,7 +35,28 @@ function convexHull(pts: [number, number][]): [number, number][] {
 /** Per-cell abundance → one of 4 discrete quality tiers (1 negligible … 4 very
  *  high). The cell's fill opacity steps with the tier so richer deposits read as
  *  more solid and poor deposits as faint. */
-const TIER_ALPHA = [0, 0.32, 0.55, 0.78, 1.0]; // index 1..4
+const TIER_ALPHA = [0, 0.32, 0.55, 0.78, 1.0]; // index 1..4 (legacy; kept for reference)
+void TIER_ALPHA;
+
+/** Parse "#rrggbb" or "rgb(r,g,b)" → [r,g,b], or null. */
+function parseColor(c: string): [number, number, number] | null {
+  const h = /^#?([0-9a-f]{6})$/i.exec(c);
+  if (h) { const n = parseInt(h[1], 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+  const m = /rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(c);
+  if (m) return [+m[1], +m[2], +m[3]];
+  return null;
+}
+/** Terroir ramp: blend a colour toward a pale tint at low quality `t`, full
+ *  saturation at high `t` — the wine-region heatmap gradient. */
+function rampToward(color: string, t: number): string {
+  const rgb = parseColor(color);
+  if (!rgb) return color;
+  const pale = 0.72 * (1 - t); // how far toward pale (toward white) at low quality
+  const r = Math.round(rgb[0] + (236 - rgb[0]) * pale);
+  const g = Math.round(rgb[1] + (230 - rgb[1]) * pale);
+  const b = Math.round(rgb[2] + (224 - rgb[2]) * pale);
+  return `rgb(${r},${g},${b})`;
+}
 
 const GOOD_BY_NAME = new Map(GOOD_DEFS.map((g) => [g.name, g]));
 const SHARK_COLOR = "#e04040";
@@ -982,16 +1003,20 @@ export class OverlayManager {
     const hasSub = !!(subtypes && subPalette && subtypes.length === cells.length);
     const hasVals = !!(values && values.length === cells.length);
 
-    // Fill every coarse cell — by subtype tint if present, else the good colour;
-    // opacity steps through 4 discrete quality tiers from per-cell abundance, so
-    // rich deposits read solid and negligible ones nearly transparent.
+    // Fill every coarse cell. DLC 4 · TERROIR HEATMAP: per-cell quality (the
+    // belt's suitability `value`) drives a continuous ramp — pale & faint where the
+    // good grows poorly, rich & saturated where the terroir is finest (think wine
+    // regions). Subtype goods (grain/paper) keep their subtype tint but still ramp
+    // their richness by quality. Zones without per-cell values fill flat.
     for (let i = 0; i < cells.length; i++) {
       const [cx, cy] = cells[i];
-      ctx.fillStyle = hasSub ? (subPalette![subtypes![i]]?.color ?? color) : color;
+      const baseCol = hasSub ? (subPalette![subtypes![i]]?.color ?? color) : color;
       if (hasVals) {
-        const tier = Math.min(4, Math.max(1, Math.ceil((values![i] / 255) * 4)));
-        ctx.globalAlpha = alpha * TIER_ALPHA[tier];
+        const t = Math.max(0, Math.min(1, values![i] / 255));
+        ctx.fillStyle = rampToward(baseCol, t);   // pale (low) → full colour (high)
+        ctx.globalAlpha = alpha * (0.45 + 1.5 * t); // richer quality = more opaque
       } else {
+        ctx.fillStyle = baseCol;
         ctx.globalAlpha = alpha;
       }
       ctx.fillRect(cx, cy, cellSize, cellSize);

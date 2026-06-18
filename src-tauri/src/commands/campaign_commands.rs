@@ -1457,7 +1457,25 @@ pub struct GoodMarketRow {
     pub traded: f32,
     pub n_producers: u32,
     pub manufactured: bool,
+    /// Per quality-grade breakdown (Exquisite→Coarse), only non-empty tiers — so the
+    /// Goods window can show e.g. Wheat · Fine / Standard / Coarse separately.
+    pub grades: Vec<GradeBucket>,
 }
+
+/// DLC 4 · one quality tier of a good: how much is produced & in trade at that grade.
+#[derive(Serialize, Clone)]
+pub struct GradeBucket {
+    pub grade: String,   // "Exquisite" | "Fine" | "Standard" | "Common" | "Coarse"
+    pub produced: f32,
+    pub traded: f32,
+    pub n_producers: u32,
+}
+
+/// Grade tier index 0..4 (Coarse..Exquisite) for a quality 0..1.
+fn grade_tier(q: f32) -> usize {
+    if q >= 0.85 { 4 } else if q >= 0.68 { 3 } else if q >= 0.50 { 2 } else if q >= 0.32 { 1 } else { 0 }
+}
+const GRADE_NAMES: [&str; 5] = ["Coarse", "Common", "Standard", "Fine", "Exquisite"];
 
 /// DLC 4 · every good's quality rating + produced/traded totals (the Goods window).
 #[tauri::command]
@@ -1470,20 +1488,39 @@ pub fn campaign_get_goods(db: State<'_, WorldDb>) -> Result<Vec<GoodMarketRow>, 
     let mut q_w = vec![0.0f32; ng];
     let mut best = vec![(0.0f32, usize::MAX); ng]; // (quality, hub idx)
     let mut n_prod = vec![0u32; ng];
+    // Per good × grade-tier: produced + #producers (traded filled from cargo below).
+    let mut tier_prod = vec![[0.0f32; 5]; ng];
+    let mut tier_traded = vec![[0.0f32; 5]; ng];
+    let mut tier_n = vec![[0u32; 5]; ng];
     for (hi, h) in sim.hubs.iter().enumerate() {
         for g in 0..ng {
             let p = h.production.get(g).copied().unwrap_or(0.0);
             if p <= 0.0 { continue; }
             let q = h.quality.get(g).copied().unwrap_or(0.0);
             produced[g] += p; q_sum[g] += q * p; q_w[g] += p; n_prod[g] += 1;
+            let t = grade_tier(q);
+            tier_prod[g][t] += p; tier_n[g][t] += 1;
             if q > best[g].0 { best[g] = (q, hi); }
         }
     }
     let mut traded = vec![0.0f32; ng];
-    for s in &sim.in_transit { if s.good < ng { traded[s.good] += s.amount.max(0.0); } }
+    for s in &sim.in_transit {
+        if s.good >= ng { continue; }
+        let amt = s.amount.max(0.0);
+        traded[s.good] += amt;
+        // Bucket the cargo by the ORIGIN hub's grade for the good (where it was made).
+        let oq = sim.hubs.get(s.from as usize).and_then(|h| h.quality.get(s.good).copied()).unwrap_or(0.0);
+        tier_traded[s.good][grade_tier(oq)] += amt;
+    }
     let mut out: Vec<GoodMarketRow> = (0..ng).filter(|&g| produced[g] > 0.0 || traded[g] > 0.0).map(|g| {
         let avg = if q_w[g] > 0.0 { q_sum[g] / q_w[g] } else { 0.0 };
         let best_city = if best[g].1 != usize::MAX { sim.hubs[best[g].1].name.clone() } else { String::new() };
+        let grades: Vec<GradeBucket> = (0..5).rev()
+            .filter(|&t| tier_prod[g][t] > 0.0 || tier_traded[g][t] > 0.0)
+            .map(|t| GradeBucket {
+                grade: GRADE_NAMES[t].to_string(),
+                produced: tier_prod[g][t], traded: tier_traded[g][t], n_producers: tier_n[g][t],
+            }).collect();
         GoodMarketRow {
             good: sim.goods[g].name.clone(),
             best_quality: best[g].0,
@@ -1494,6 +1531,7 @@ pub fn campaign_get_goods(db: State<'_, WorldDb>) -> Result<Vec<GoodMarketRow>, 
             traded: traded[g],
             n_producers: n_prod[g],
             manufactured: !sim.goods[g].inputs.is_empty(),
+            grades,
         }
     }).collect();
     out.sort_by(|a, b| b.produced.partial_cmp(&a.produced).unwrap_or(std::cmp::Ordering::Equal));
