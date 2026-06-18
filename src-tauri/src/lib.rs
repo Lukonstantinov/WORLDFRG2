@@ -96,6 +96,7 @@ pub fn run() {
             campaign_commands::campaign_get_currencies,
             campaign_commands::campaign_get_banks,
             campaign_commands::campaign_get_crashes,
+            campaign_commands::campaign_get_wars,
             campaign_commands::campaign_get_schematics,
             campaign_commands::campaign_house_ledger,
             campaign_commands::campaign_get_house_history,

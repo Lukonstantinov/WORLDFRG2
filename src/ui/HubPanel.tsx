@@ -7,6 +7,7 @@ import { campaignGetHub, campaignWarehouses, campaignFuturesLanes } from "../bri
 import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane } from "../types";
 import { climatePhrase } from "./climate";
 import { CoatOfArms, houseColor } from "./CoatOfArms";
+import { CoinIcon } from "./CoinIcon";
 import type { HouseBrief } from "../types";
 import { SettlementScene } from "./SettlementScene";
 import { FlowsView } from "./FlowsView";
@@ -385,6 +386,11 @@ export function HubPanel() {
             </>
           )}
 
+          {/* DLC 3.5 · City finances — the treasury books (taxes in, spending out) */}
+          {detail && (detail.treasury !== undefined) && (
+            <CityFinances detail={detail} />
+          )}
+
           {/* Population mood + drivers */}
           <div style={{ ...sectionHdr, marginTop: 6 }}>The people</div>
           {detail ? (
@@ -491,6 +497,35 @@ export function HubPanel() {
                   ))}
                 </div>
               </div>
+              {/* DLC 3.5 · Transit — the carrying trade: this city's merchants hauling
+                  goods between OTHER cities (the entrepôt handling-trade). */}
+              <div style={{ ...sectionHdr, marginTop: 8 }}>
+                Transit — carrying trade <span style={{ color: "#56708e", fontWeight: 400 }}>(our merchants moving goods between other cities)</span>
+              </div>
+              {(detail.transit ?? []).length === 0 && <div style={emptyTxt}>no goods passing through our hands right now</div>}
+              {(detail.transit ?? []).map((t, i) => (
+                <div key={"t" + i} style={{ borderBottom: "1px solid #131f2c", padding: "2px 0" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 9.5 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 2, background: t.color, flex: "0 0 auto" }} />
+                    <span style={{ color: "#cbd8e6", fontWeight: 600 }}>{t.merchant}{t.is_guild ? " (guild)" : ""}</span>
+                    <span style={{ color: "#cdbb88" }}>{iconFor(t.good)} {labelFor(t.good)} ×{fmt(t.amount)}</span>
+                    <span style={{ flex: 1 }} />
+                    <span style={{ fontSize: 10 }}>{t.sea ? "🚢" : "🐫"}</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 9, color: "#8aa8c8" }}>
+                    <span style={{ color: "#9ab0c8" }}>{t.from_name}</span>
+                    <span style={{ flex: 1, height: 1, background: "#24364e" }} />
+                    <span>▶</span>
+                    <span style={{ color: "#cfe0f4" }}>{t.to_name}</span>
+                  </div>
+                  <div style={{ fontSize: 9, color: "#7a90a8" }}>
+                    {t.coin
+                      ? <>deal {fmt(t.value)} <span style={{ color: "#d8c878" }}>{t.coin}</span></>
+                      : <>barter <span style={{ color: "#9ab0c8" }}>{t.barter}</span></>}
+                  </div>
+                </div>
+              ))}
+
               <div style={{ ...sectionHdr, marginTop: 8 }}>Prices — local vs world average (live)</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 10px" }}>
                 {[...detail.goods].filter((g) => g.production > 0.01 || g.stock > 0.01)
@@ -1019,6 +1054,57 @@ export function HubPanel() {
 }
 
 /** Population mood: a headline face + the three driver bars. */
+/** DLC 3.5 · the city's treasury books — taxes in, spending out, plus coin & war.
+ *  Shows the last completed year (`prev`) when available, else the running year. */
+function CityFinances({ detail }: { detail: HubDetail }) {
+  const f = detail.finance?.prev ?? detail.finance ?? null;
+  const Line = ({ label, amt, neg }: { label: string; amt: number; neg?: boolean }) => (
+    amt > 0.01 ? (
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5 }}>
+        <span style={{ color: "#9ab0c8" }}>{label}</span>
+        <span style={{ color: neg ? "#e0a0a0" : "#7fcf8f" }}>{neg ? "−" : "+"}{fmtN(amt)}</span>
+      </div>
+    ) : null
+  );
+  return (
+    <>
+      <div style={{ ...sectionHdr, marginTop: 6 }}>City finances</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, flexWrap: "wrap" }}>
+        <span style={{ color: "#d8c878", fontWeight: 700 }}>🏛 Treasury {fmtN(detail.treasury ?? 0)}</span>
+        {detail.coin_name ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "#d8c878" }}
+            title={`${detail.coin_name} · value ${(detail.coin_value ?? 0).toFixed(2)}×`}>
+            <CoinIcon issuer={detail.name} value={detail.coin_value} size={15} />
+            {detail.coin_name} {(detail.coin_value ?? 0).toFixed(2)}×
+          </span>
+        ) : null}
+        {detail.war_with ? <span style={{ color: "#e88" }}>⚔ war: {detail.war_with}</span> : null}
+      </div>
+      {f && (f.year > 0 || (detail.treasury ?? 0) > 0) && (
+        <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ color: "#6a86a6", fontSize: 8.5, textTransform: "uppercase" }}>Income · yr {f.year}</div>
+            <Line label="Trade tariffs" amt={f.tax_trade} />
+            <Line label="Estate tax" amt={f.tax_estate} />
+            <Line label="Manufacturing tax" amt={f.tax_manufacture} />
+            <Line label="Wealth tax" amt={f.tax_wealth} />
+            <Line label="Seigniorage" amt={f.seigniorage} />
+            <Line label="War levy" amt={f.war_levy} />
+            <Line label="Reparations" amt={f.reparations_in} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ color: "#6a86a6", fontSize: 8.5, textTransform: "uppercase" }}>Spending</div>
+            <Line label="To the people" amt={f.spent_civic} neg />
+            <Line label="War effort" amt={f.spent_war} neg />
+            <Line label="Public works" amt={f.spent_works} neg />
+            <Line label="Reparations paid" amt={f.reparations_out} neg />
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function MoodCard({ detail }: { detail: HubDetail }) {
   const mood = detail.mood;
   const face = mood > 0.75 ? "😄 Joyful" : mood > 0.58 ? "🙂 Content" : mood > 0.42 ? "😐 Uneasy"

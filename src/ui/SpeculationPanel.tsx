@@ -3,6 +3,7 @@ import { useCampaignStore } from "../state/campaignStore";
 import { useUIStore } from "../state/uiStore";
 import { campaignGetSpeculation, campaignGetPoleis } from "../bridge/tauri";
 import type { SpecCenter, PolisBrief } from "../types";
+import { CoinIcon } from "./CoinIcon";
 
 /** DLC 3 · Finance, the Polis & Speculation.
  *  Two tabs:
@@ -134,12 +135,17 @@ function PolisCard({ p }: { p: PolisBrief }) {
       </div>
       {p.coin_name ? (
         <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 9, marginTop: 2 }}>
+          <CoinIcon issuer={p.coin_issuer || p.name} value={p.coin_value} size={16}
+            title={`${p.coin_name} · value ${(p.coin_value ?? 0).toFixed(2)}×`} />
           <span style={{ color: "#d8c878" }}>{p.coin_name}</span>
+          <span style={{ color: p.coin_value >= 1.05 ? "#e0c060" : "#9ab0c8" }}>{(p.coin_value ?? 0).toFixed(2)}×</span>
           <span style={{ height: 5, background: p.coin_trust >= 0.55 ? "#37a05a" : "#7fa0c0",
-            borderRadius: 2, width: `${Math.max(3, p.coin_trust * 120)}px`, flex: "0 0 auto" }} />
-          <span style={{ color: "#8aa8c8" }}>trust {(p.coin_trust * 100).toFixed(0)}%
-            {p.coin_trust >= 0.55 ? " · reserve" : ""}</span>
+            borderRadius: 2, width: `${Math.max(3, p.coin_trust * 90)}px`, flex: "0 0 auto" }} />
+          <span style={{ color: "#8aa8c8" }}>{(p.coin_trust * 100).toFixed(0)}%{p.coin_trust >= 0.55 ? " · reserve" : ""}</span>
         </div>
+      ) : null}
+      {p.war_with ? (
+        <div style={{ color: "#e88", fontSize: 9, marginTop: 1 }}>⚔ at war with {p.war_with}</div>
       ) : null}
     </div>
   );

@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { useCampaignStore } from "../state/campaignStore";
 import { useUIStore } from "../state/uiStore";
 import { CoatOfArms } from "./CoatOfArms";
+import { CoinIcon } from "./CoinIcon";
 import { GOOD_DEFS } from "../goods";
-import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger } from "../bridge/tauri";
-import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger } from "../types";
+import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks } from "../bridge/tauri";
+import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief } from "../types";
 
 const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
 const goodIcon = (name: string) => GOOD_ICON.get(name) ?? "\u{1F4E6}"; // 📦 fallback
@@ -126,7 +127,10 @@ export function HousesPanel() {
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                 {/* Colour chip — vivid for private houses, dull for civic guilds */}
                 <span style={{ width: 9, height: 9, borderRadius: 2, background: h.is_guild ? dull(h.color ?? "") : (h.color ?? "#888"), flex: "0 0 auto", alignSelf: "center" }} />
-                <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12 }}>{h.name}</span>
+                {h.owns_bank && <span title="Owns a chartered bank" style={{ fontSize: 10 }}>🏦</span>}
+                <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12,
+                  textDecoration: h.owns_bank ? "underline" : "none", textDecorationColor: "#c9a227" }}>{h.name}</span>
+                {h.coin_name && <CoinIcon issuer={h.name} value={h.coin_value} size={14} title={`Mints the ${h.coin_name}`} />}
                 {h.is_guild && <span title="A civic Merchant Guild — acts in its home city's interest" style={{ fontSize: 9, color: "#7fd0c0", border: "1px solid #2e5a52", borderRadius: 3, padding: "0 3px" }}>GUILD</span>}
                 <span style={{ color: "#6a86a6", fontSize: 9 }}>· {h.home_name}</span>
                 <span style={{ flex: 1 }} />
@@ -223,7 +227,8 @@ function HouseDetail({ h, onClose, onChronicle }:
   { h: HouseBrief; onClose: () => void; onChronicle: (name: string) => void }) {
   const [routes, setRoutes] = useState<MerchantRoute[]>([]);
   const [ledger, setLedger] = useState<HouseLedger | null>(null);
-  const [view, setView] = useState<"summary" | "ledger">("summary");
+  const [bank, setBank] = useState<BankBrief | null>(null);
+  const [view, setView] = useState<"summary" | "bank" | "ledger">("summary");
   const tick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
   useEffect(() => {
     let alive = true;
@@ -233,8 +238,14 @@ function HouseDetail({ h, onClose, onChronicle }:
     if (h.idx !== undefined) {
       campaignHouseLedger(h.idx).then((l) => { if (alive) setLedger(l); }).catch(() => {});
     }
+    // Find this family's bank (if any) so we can show its balance-sheet subtab.
+    if (h.owns_bank) {
+      campaignGetBanks().then((bs) => {
+        if (alive) setBank(bs.find((b) => b.owner_idx === h.idx) ?? null);
+      }).catch(() => {});
+    } else { setBank(null); }
     return () => { alive = false; };
-  }, [h.name, h.idx, tick]);
+  }, [h.name, h.idx, h.owns_bank, tick]);
   const fmt = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
   const goodsStr = (gs: [string, number][]) => gs.slice(0, 3).map(([g, v]) => `${goodIcon(g)}${fmt(v)}`).join(" ") || "—";
   const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
@@ -247,27 +258,40 @@ function HouseDetail({ h, onClose, onChronicle }:
     <div style={detailPanel}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 3 }}>
         <span style={{ width: 10, height: 10, borderRadius: 2, background: h.is_guild ? dull(h.color ?? "") : (h.color ?? "#888"), alignSelf: "center" }} />
-        <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 13 }}>{h.name}</span>
+        {h.owns_bank && <span title="This family owns a chartered bank" style={{ fontSize: 11 }}>🏦</span>}
+        <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 13,
+          textDecoration: h.owns_bank ? "underline" : "none", textDecorationColor: "#c9a227" }}>{h.name}</span>
         {h.is_guild && <span style={{ fontSize: 8, color: "#7fd0c0" }}>GUILD</span>}
         <span style={{ flex: 1 }} />
         <span onClick={onClose} style={{ color: "#7090b0", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</span>
       </div>
       <div style={{ color: "#9ab0c8", fontSize: 10 }}>{h.head_name} · of {h.home_name} · gen {h.generation}</div>
-      <div style={{ color: "#c9a227", fontSize: 11, fontWeight: 700 }}>wealth {fmt(h.wealth)}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ color: "#c9a227", fontSize: 11, fontWeight: 700 }}>wealth {fmt(h.wealth)}</span>
+        {h.coin_name ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 9, color: "#d8c878" }}
+            title={`Mints the ${h.coin_name} · value ${(h.coin_value ?? 0).toFixed(2)}× · trust ${Math.round((h.coin_trust ?? 0) * 100)}%`}>
+            <CoinIcon issuer={h.name} value={h.coin_value} size={16} /> mints {h.coin_name} · {(h.coin_value ?? 0).toFixed(2)}×
+          </span>
+        ) : null}
+      </div>
 
       {/* Subtabs — Accountant gets its own roomy view so expenses aren't clipped. */}
       <div style={{ display: "flex", gap: 4, margin: "7px 0 5px", borderBottom: "1px solid #1a2a3e" }}>
-        {(["summary", "ledger"] as const).map((t) => (
+        {(["summary", ...(bank ? ["bank" as const] : []), "ledger"] as const).map((t) => (
           <div key={t} onClick={() => setView(t)} style={{
             fontSize: 10, padding: "3px 9px", cursor: "pointer",
             color: view === t ? "#e8dcc0" : "#7090b0", fontWeight: view === t ? 700 : 400,
             borderBottom: view === t ? "2px solid #c9a227" : "2px solid transparent",
-          }}>{t === "summary" ? "Summary" : `📒 Accountant${ledger && ledger.year > 0 ? ` · yr ${ledger.year}` : ""}`}</div>
+          }}>{t === "summary" ? "Summary" : t === "bank" ? "🏦 Bank" : `📒 Accountant${ledger && ledger.year > 0 ? ` · yr ${ledger.year}` : ""}`}</div>
         ))}
       </div>
 
-      {view === "summary" ? (
+      {view === "bank" && bank ? (
+        <BankSheet b={bank} fmt={fmt} />
+      ) : view === "summary" ? (
         <>
+          <HouseStatGrid h={h} fmt={fmt} />
           {h.active && h.active.length > 0 ? (
             <div style={{ margin: "2px 0 5px" }}>
               <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4 }}>
@@ -318,6 +342,88 @@ function HouseDetail({ h, onClose, onChronicle }:
         <LedgerView l={ledger} fmt={fmt} />
       ) : (
         <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>No completed year yet — the first year's books appear after a full year passes.</div>
+      )}
+    </div>
+  );
+}
+
+/** DLC 3.5 · a compact grid of a family's individual stats (top of the Summary). */
+function HouseStatGrid({ h, fmt }: { h: HouseBrief; fmt: (v: number) => string }) {
+  const year = useCampaignStore((s) => Math.floor((s.snapshot?.clock.tick ?? 0) / 365));
+  const age = h.founded_year !== undefined ? Math.max(0, year - h.founded_year) : undefined;
+  const Cell = ({ label, value, bar }: { label: string; value: React.ReactNode; bar?: number }) => (
+    <div style={{ background: "#0a1119", border: "1px solid #1a2a3c", borderRadius: 4, padding: "3px 5px" }}>
+      <div style={{ color: "#6a86a6", fontSize: 8, textTransform: "uppercase", letterSpacing: 0.3 }}>{label}</div>
+      <div style={{ color: "#cfe0f4", fontSize: 10, fontWeight: 700 }}>{value}</div>
+      {bar !== undefined && (
+        <div style={{ height: 3, background: "#0a1018", borderRadius: 2, marginTop: 1, overflow: "hidden" }}>
+          <div style={{ width: `${Math.min(100, bar * 100)}%`, height: "100%", background: "#c9a227" }} />
+        </div>
+      )}
+    </div>
+  );
+  return (
+    <>
+      {h.archetype_perk ? (
+        <div style={{ color: "#9fd0c0", fontSize: 9, marginBottom: 4 }}>{h.archetype_label} · {h.archetype_perk}</div>
+      ) : null}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+        <Cell label="Prestige" value={(h.prestige ?? 0).toFixed(2)} bar={h.prestige} />
+        <Cell label="Political power" value={(h.political_power ?? 0).toFixed(2)} bar={h.political_power} />
+        <Cell label="Trade volume" value={fmt(h.volume ?? 0)} />
+        <Cell label="Founded" value={age !== undefined ? `yr ${h.founded_year} · ${age}y` : "—"} />
+        <Cell label="Controls" value={String(h.controls?.length ?? 0)} />
+        <Cell label="Estates" value={String(h.estates?.length ?? 0)} />
+        <Cell label="Offices" value={String(h.offices?.length ?? 0)} />
+        <Cell label="Monopolies (all-time)" value={String(h.mono_ever_count ?? 0)} />
+        {(h.worst_loss ?? 0) > 0.01 && <Cell label="Worst loss" value={`−${fmt(h.worst_loss ?? 0)}`} />}
+        {h.coin_name ? <Cell label="Mints coin" value={`${(h.coin_value ?? 0).toFixed(2)}×`} /> : null}
+      </div>
+    </>
+  );
+}
+
+/** DLC 3.5 · a bank's T-account balance sheet (the Bank subtab in a house detail). */
+function BankSheet({ b, fmt }: { b: BankBrief; fmt: (v: number) => string }) {
+  const assets = b.reserves + b.loans_out + b.real_estate;
+  const liab = b.deposits + b.notes_issued;
+  const fragile = b.reserve_ratio < 0.22;
+  const Side = ({ title, rows, total, color }: { title: string; rows: [string, number][]; total: number; color: string }) => (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ color: "#8aa8c8", fontSize: 9, fontWeight: 700, borderBottom: "1px solid #1c2c40", paddingBottom: 2, marginBottom: 2 }}>{title}</div>
+      {rows.map(([k, v]) => (
+        <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, color: "#b8c8da" }}>
+          <span>{k}</span><span>{fmt(v)}</span>
+        </div>
+      ))}
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, fontWeight: 700, color, borderTop: "1px solid #1c2c40", marginTop: 2, paddingTop: 1 }}>
+        <span>Σ</span><span>{fmt(total)}</span>
+      </div>
+    </div>
+  );
+  return (
+    <div style={{ padding: "2px 4px 6px", border: "1px solid #1b2a3c", borderRadius: 4, background: "#0a1119" }}>
+      <div style={{ color: "#e8dcc0", fontSize: 11, fontWeight: 700 }}>{b.name}{b.defunct ? " · FAILED" : ""}</div>
+      <div style={{ color: "#9ab0c8", fontSize: 9, marginBottom: 4 }}>{b.seat} · est. {b.founded_year}</div>
+      <div style={{ display: "flex", gap: 12 }}>
+        <Side title="Assets" color="#80c890" total={assets}
+          rows={[["Specie reserves", b.reserves], ["Loans out", b.loans_out], ["Real estate", b.real_estate]]} />
+        <Side title="Liabilities" color="#e0a880" total={liab}
+          rows={[["Deposits", b.deposits], ["Notes issued", b.notes_issued], ["Equity", b.equity]]} />
+      </div>
+      <div style={{ display: "flex", gap: 10, fontSize: 9, color: "#8aa8c8", marginTop: 4, flexWrap: "wrap" }}>
+        <span style={{ color: fragile ? "#e6303a" : "#8aa8c8" }} title="Reserves ÷ liabilities — below 22% = fragile">
+          reserve ratio {Number.isFinite(b.reserve_ratio) ? `${Math.round(b.reserve_ratio * 100)}%` : "—"}{fragile ? " ⚠" : ""}
+        </span>
+        <span>{b.n_loans} loans</span>
+        <span style={{ color: "#80c890" }}>+{fmt(b.interest_earned)} earned</span>
+        {b.losses > 0.01 && <span style={{ color: "#e08080" }}>−{fmt(b.losses)} lost</span>}
+      </div>
+      {b.branches.length > 0 && (
+        <div style={{ fontSize: 9, color: "#7fa0c0", marginTop: 2 }}>Counting-houses: {b.branches.join(", ")}</div>
+      )}
+      {b.events.length > 0 && (
+        <div style={{ fontSize: 9, color: "#6a86a6", marginTop: 2, fontStyle: "italic" }}>{b.events[0]}</div>
       )}
     </div>
   );
