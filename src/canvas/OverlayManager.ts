@@ -69,7 +69,6 @@ const TRADE_TRUNK_MINOR = "#b8a878"; // minor/low-volume trunk (muted amber)
 // DLC 3.5 · dynamic (live, yearly-averaged) trade-flow trunks — teal/cyan so they
 // read distinct from the static amber worldgen trunks.
 const DYN_FLOW = "#4fd0c0";
-const DYN_FLOW_MINOR = "#3a8a86";
 const POLITICAL_COLOR = "#d65fd0"; // trade-hub marker (magenta) — legacy
 const STAR_COLOR = "#ffd24a"; // power-tier stars on major hubs (gold) — legacy
 const HUB_BLUE = "#3a86d6"; // trade-hub circle
@@ -736,7 +735,7 @@ export class OverlayManager {
       this.renderTradeTrunks(ctx);
     }
     if (this.visibility.dynamicFlow && this.dynamicTrunks.length > 0) {
-      this.renderTradeTrunks(ctx, this.dynamicTrunks, DYN_FLOW, DYN_FLOW_MINOR);
+      this.renderDynamicFlow(ctx);
     }
 
     if (this.visibility.tradeRoutes && this.tradeRoutes.length > 0) {
@@ -1384,6 +1383,55 @@ export class OverlayManager {
       ctx.textAlign = "start";
       ctx.textBaseline = "alphabetic";
     }
+    ctx.globalAlpha = 1;
+  }
+
+  /** Dynamic Trade Flow — last year's actual shipped volume, drawn in the smooth
+   *  uniform "Trade Corridors" style (solid lines, width + alpha by volume, a single
+   *  midpoint direction arrow) but in its own teal so it stays distinct from the
+   *  green Corridors overlay. No dashed minor tier and no road-name labels. */
+  private renderDynamicFlow(ctx: CanvasRenderingContext2D) {
+    const trunks = this.dynamicTrunks;
+    const half = (this.worldW || 1e9) / 2;
+    let maxVol = 0;
+    for (const t of trunks) maxVol = Math.max(maxVol, t.volume);
+    if (maxVol <= 0) return;
+    const inv = 1 / Math.sqrt(this.currentScale);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (const t of trunks) {
+      const pts = t.points;
+      if (pts.length < 2) continue;
+      const a = pts[0], b = pts[1]; // ordered source → consumer
+      if (this.worldW > 0 && Math.abs(a[0] - b[0]) > half) continue; // wrap seam
+      const norm = t.volume / maxVol;
+      const ax = a[0] + 0.5, ay = a[1] + 0.5, bx = b[0] + 0.5, by = b[1] + 0.5;
+      ctx.globalAlpha = 0.4 + 0.5 * norm;
+      ctx.strokeStyle = DYN_FLOW;
+      ctx.lineWidth = Math.max(0.5, (1.0 + norm * 5.0) * inv);
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+      // Single arrowhead at the corridor midpoint, pointing at the consumer (b).
+      let dx = bx - ax, dy = by - ay;
+      const m = Math.hypot(dx, dy);
+      if (m > 0.001) {
+        dx /= m; dy /= m;
+        const hl = Math.max(2, 8 * inv);
+        const px = -dy, py = dx;
+        const mxp = (ax + bx) / 2, myp = (ay + by) / 2;
+        ctx.beginPath();
+        ctx.moveTo(mxp + dx * hl * 0.5, myp + dy * hl * 0.5);
+        ctx.lineTo(mxp - dx * hl * 0.5 + px * hl * 0.5, myp - dy * hl * 0.5 + py * hl * 0.5);
+        ctx.lineTo(mxp - dx * hl * 0.5 - px * hl * 0.5, myp - dy * hl * 0.5 - py * hl * 0.5);
+        ctx.closePath();
+        ctx.fillStyle = DYN_FLOW;
+        ctx.fill();
+      }
+    }
+    ctx.lineCap = "butt";
+    ctx.lineJoin = "miter";
     ctx.globalAlpha = 1;
   }
 
