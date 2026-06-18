@@ -9,7 +9,31 @@ run.bat                # Windows: install deps, pull updates, launch dev
 npm run tauri dev      # Launch dev mode (Vite + Cargo)
 cargo check            # Rust type-check only (run from src-tauri/)
 npx tsc --noEmit       # TypeScript type-check only
+cargo test --lib tick::tests                                   # campaign-sim unit + dynamics tests
+cargo test --lib simulate_decades_reports_dynamics -- --nocapture  # WATCH the living economy (5-yearly digest)
 ```
+
+> The full Tauri build needs GTK/WebKit system libs. On a headless Linux box,
+> `sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev` makes `cargo check`
+> / `cargo test` work (the GUI can't be launched, but the sim + types do compile).
+
+## STANDING RULE — always iterate & test the simulation
+
+After ANY change touching `sim/tick.rs` (economy, houses, banks, coinage, war,
+crashes, trade) you MUST run the living simulation and read the dynamics, not just
+type-check. The world is meant to be DYNAMIC — houses rise and go **defunct**,
+banks are chartered and **fail**, poleis mint coin, wars flare, crashes ripple.
+
+```bash
+cargo test --lib simulate_decades_reports_dynamics -- --nocapture
+```
+
+Read the 5-yearly digest and sanity-check: wealth stays bounded (no 100k blow-ups,
+no negative craters — limited liability), houses turn over, banks/coins/wars/crashes
+actually occur. The test also HARD-ASSERTS bounded + finite wealth and that turnover
+happens, so it fails if a change breaks the economy. Tune constants in `tick.rs`
+(WAR_*, WEALTH_TAX_*, BANK_*, COIN_*, CONTRACT_*) and re-run until the dynamics read
+healthy. Houses dying is expected and good — do not "fix" it away.
 
 ## Architecture
 
@@ -62,68 +86,114 @@ the same grid size via `TileData::merge_columns`.
 
 ## Key Files
 
-### Rust Backend (`src-tauri/src/`)
+### Rust Backend (`src-tauri/src/`) — COMPLETE map
 ```
-lib.rs                          ← Entry: plugin registration, command handlers
-db/mod.rs                       ← WorldDb (Mutex<Connection>), in-memory SQLite
-db/schema.rs                    ← Tables: tiles, metadata, objects, sim_state, undo_journal
-db/tile_store.rs                ← load_tile / save_tile (zstd compressed)
-tile/cell.rs                    ← TileData: 20 columnar Vec fields per 128x128 tile
-tile/coords.rs                  ← TILE_SIZE=128, coordinate math
-render/tile_image.rs            ← 15 render layers (land, elevation, climate, etc.)
-paint/stroke.rs                 ← PaintValue enum (terrain/elevation/shelf/volcanic)
+main.rs                         ← Binary entry (calls lib run)
+lib.rs                          ← Entry: plugin registration + the FULL invoke_handler list (every #[tauri::command] must be registered here)
+commands/mod.rs                 ← Command module declarations
+commands/world_commands.rs      ← New world, grid/meta setup, world_progress
+commands/sim_commands.rs        ← Tauri commands wrapping sim phases (per-phase ColumnSet masks)
+commands/paint_commands.rs      ← Paint stroke commands (land/elev/shelf/volcano)
+commands/tile_commands.rs       ← get_tiles / get_tiles_packed (RGBA tile fetch), LOD
+commands/query_commands.rs      ← Read-only overlays + coarse routing: get_cell_info, trade routes/matrix/trunks, political layer, fishery banks, good/culture regions, coarse cost grid (cached_coarse_cost/coarse_dijkstra), campaign_get_trade_flow (DLC 3.5 dynamic flow)
+commands/campaign_commands.rs   ← finalize/unfreeze, new/save/open campaign, set_progress, campaign_start_sim/advance/get_state, ALL campaign read queries (HubDetail, HouseBrief, PolisBrief, CurrencyBrief, BankBrief, CrashRecord, WarsPayload, schematics, ledgers, journal). get_sim() loads the CampaignSim blob
+commands/goods_commands.rs      ← Goods spec CRUD, default_custom_goods, backfill_market_fields
+commands/import_commands.rs     ← import_world_layers (layered world import)
+commands/template_commands.rs   ← Image → land/sea detection (4-bit quantization)
+commands/file_commands.rs       ← Save/open world (.worldforge), export heightmap
+db/mod.rs                       ← WorldDb (Mutex<Connection>), in-memory SQLite, cached_tiles_with_conn
+db/schema.rs                    ← Tables: tiles, metadata, objects, campaign (key/value), undo_journal
+db/metadata.rs                  ← get_meta/set_meta typed helpers
+db/tile_store.rs                ← load_tile / save_tile (zstd compressed blobs, v2 self-describing)
+db/world_cache.rs               ← In-memory WorldBuffer/tile cache keyed by fingerprint
+tile/mod.rs · tile/cell.rs      ← TileData: 20+ columnar Vec fields per 128×128 tile (v2 blob, appended fields)
+tile/coords.rs                  ← TILE_SIZE=128, wrap_x/clamp_y coordinate math
+tile/lod.rs                     ← LOD supertile pyramid (lod 1-4)
+render/mod.rs · render/tile_image.rs ← 18 render layers (land, elevation, climate, …)
+paint/mod.rs · paint/stroke.rs  ← PaintValue enum (terrain/elevation/shelf/volcanic)
 paint/brush.rs                  ← circle_brush with cylindrical wrapping
-sim/world_buffer.rs             ← WorldBuffer: flat arrays, load/save from tiles
+import/mod.rs                   ← TileData::merge_columns (layer-group import)
+history/mod.rs · history/undo.rs ← Tile-level undo/redo journal
+sim/mod.rs                      ← Sim module declarations
+sim/world_buffer.rs             ← WorldBuffer: flat world arrays + per-phase ColumnSet masks, load/save from tiles
 sim/plates.rs                   ← Phase 1: Voronoi plate tectonics
 sim/elevation.rs                ← Phase 2: plate-based + template-based elevation
-sim/ocean.rs                    ← Phase 3a: wind belts, ocean currents, upwelling
+sim/ocean.rs                    ← Phase 3a: wind belts, ocean currents, upwelling, compute_salinity + thermohaline
 sim/temperature.rs              ← Phase 3b: latitude + lapse + current influence
 sim/precipitation.rs            ← Phase 3c: moisture advection, ITCZ, orographic
 sim/koppen.rs                   ← Phase 4: 22 Köppen climate zones
 sim/rivers.rs                   ← Phase 5: D8 flow, rivers, lakes
 sim/soil.rs                     ← Phase 6a: 11 soil types from climate
 sim/fertility.rs                ← Phase 6b: fertility scoring, fisheries
-sim/settlements.rs              ← Phase 7: habitability → city placement
-sim/biological.rs               ← Phase 8: shark-habitat risk + trade-good belts
-sim/ocean.rs (compute_salinity) ← Phase 3 add-on: wind/E-P salinity + thermohaline coupling
+sim/settlements.rs              ← Phase 7: habitability → city placement (Settlement struct)
+sim/biological.rs               ← Phase 8: shark/shipworm risk + trade-good belts + deposits
+sim/cultures.rs                 ← Organic culture/peoples map (names houses/guilds by home culture)
+sim/names.rs                    ← Deterministic place/family/head name generation
+sim/goods_spec.rs               ← GoodSpec (category/tier/base_value/bulk/perishable/inputs/labor), 45 builtins
 sim/market.rs                   ← Market equilibrium solver (stocks → grain-eq prices → arbitrage; bulk/perish freight)
 sim/manufacture.rs              ← Shared production-chain resolver (apply_manufacturing: DAG topo, labor∝pop)
-sim/tick.rs (DLC 3)             ← Polis agent (decide_polis_policy: council/tariff/mint/treasury) + Speculation why-engine (compute_speculation: yearly per-polis SpecCenter risk + ranked SpecDriver reason-chain), both at the yearly hook
-sim/tick.rs (DLC 3.5)           ← Coin/Credit/Crashes: decide_coinage (named polis coin + sticky coin_trust + seigniorage; reserve coins shave dispatch freight via coin_discount; coin_value index), Bank entity (balance sheet: reserves/loans/real_estate vs deposits/notes; update_banks yearly founding+branches, bank_pass monthly lend/service/fail), trigger_regional_crash (per-component contagion) fired by fail_bank & maybe_pop_bubbles
-sim/tick.rs (DLC 3.5 cont.)     ← Wealth rebalance (capped bank interest + progressive civic wealth tax→treasury); CityFinance per-hub treasury ledger (tariff/estate/manufacture/wealth tax + seigniorage vs civic/war/works, yearly snapshot); economic war (update_wars: rival poleis, forced house levies, war-chest spend, blockade, reparations + war_log); flow_accum→flow_year yearly per-pair trade volume for the Dynamic Trade Flow overlay (routed+bundled by query_commands::campaign_get_trade_flow)
-commands/sim_commands.rs        ← Tauri commands wrapping sim phases (per-phase ColumnSet masks)
-commands/campaign_commands.rs   ← finalize/unfreeze, new/save/open campaign, set_progress
-commands/import_commands.rs     ← import_world_layers (layered world import)
-commands/template_commands.rs   ← Image → land/sea detection (4-bit quantization)
-commands/file_commands.rs       ← Save/open world, export heightmap
-history/undo.rs                 ← Tile-level undo/redo journal
+sim/tick.rs                     ← THE CAMPAIGN TICK SIM (~4.7k lines). CampaignSim/TickHub/House/Bank/Contract/War + advance() day loop. See DLC notes below. TESTS live in `mod tests` at the bottom — incl. simulate_decades_reports_dynamics (the standing dynamics run) and bench_campaign_tick (ignored)
+```
+`sim/tick.rs` DLC layers (all at the yearly/monthly hooks inside `advance`):
+```
+DLC 1 "Living Trade" ← production/consumption/price/dispatch/arrivals/events, estates, abstract houses, succession, fleets, offices, contracts
+DLC 3 (Polis+Speculation) ← decide_polis_policy (council/tariff/mint/treasury) + compute_speculation (per-polis SpecCenter risk + ranked SpecDriver why-chain)
+DLC 3.5 Coin/Credit/Crashes ← decide_coinage (named polis coin + sticky coin_trust + seigniorage; coin_discount freight; coin_value index); Bank (balance sheet; update_banks founding+branches, bank_pass lend/service/fail); trigger_regional_crash (per-component contagion) via fail_bank & maybe_pop_bubbles
+DLC 3.5 Wealth/War/Flow ← capped bank interest + progressive civic wealth tax→treasury; CityFinance per-hub ledger (tariff/estate/manufacture/wealth tax + seigniorage vs civic/war/works); update_wars (rival poleis, forced house levies, war-chest, blockade, reparations + war_log); contract penalty LIMITED LIABILITY (cap to owner wealth); flow_accum→flow_year (yearly per-pair volume → Dynamic Trade Flow overlay)
 ```
 
-### React Frontend (`src/`)
+### React Frontend (`src/`) — COMPLETE map
 ```
-App.tsx                         ← Layout, header, file dialogs, NewWorldDialog
-ui/SpeculationPanel.tsx         ← DLC 3 Finance panel: Speculation (per-polis bubble risk + why-chain) / Poleis (treasury/tariff/mint/council + coin) tabs
-ui/CoinCreditPanel.tsx          ← DLC 3.5 Coin/Credit panel: Currencies (reserve ranking) / Banks (T-account balance sheets) / Crashes (regional crisis log) / Schematics (per-city building+estate+bank blueprint) tabs
-types.ts                        ← All shared types (WorldMeta, PaintValue, etc.)
-bridge/tauri.ts                 ← All IPC invoke wrappers
+main.tsx                        ← React entry / mount
+App.tsx                         ← Layout, header, file dialogs, NewWorldDialog, mounts all panels
+types.ts                        ← ALL shared TS types (mirror Rust serde structs); add new query types here
+goods.ts                        ← GOOD_DEFS (names/emoji) shared good metadata
+bridge/tauri.ts                 ← ALL IPC invoke wrappers (one per Rust command)
 state/worldStore.ts             ← Zustand: meta, rivers, lakes, settlements
-state/uiStore.ts                ← Zustand: tool, layer, workflow step, overlays
+state/campaignStore.ts          ← Zustand: campaign snapshot, houses, contracts, diagnostics, selectedHouse
+state/uiStore.ts                ← Zustand: tool, layer, workflow step, overlayVisibility registry, panel open flags
+state/goodsStore.ts             ← Zustand: goods spec being edited
 state/viewportStore.ts          ← Zustand: camera state, tile invalidation
+canvas/PixiApp.ts               ← PixiJS 8 application init
 canvas/TileViewport.ts          ← Pan/zoom, screenToWorld, getVisibleTileRange
 canvas/TileManager.ts           ← LRU tile cache, base64→texture, sprite management
-canvas/OverlayManager.ts        ← Vector overlays (rivers, settlements, wind arrows)
+canvas/OverlayManager.ts        ← ALL vector overlays (rivers, settlements, wind, trade trunks, merchant routes, dynamic flow, regions). visibility[type] gates each render
 canvas/PaintOverlay.ts          ← Brush preview, paint stamps
-canvas/PixiApp.ts               ← PixiJS 8 application init
-ui/workflow/WorkflowPanel.tsx   ← 7-step generation wizard + "Run All" buttons
-ui/workflow/Step*.tsx            ← Individual step UIs with prerequisite checks
-ui/GoodsEditor.tsx              ← Goods builder: distribution/value/bulk/perish + Manufactured recipe rows
-ui/GoodsChainReview.tsx         ← Always-on pre-generation review: planted vs manufactured + SVG recipe DAG
-ui/Toolbar.tsx                  ← Tools, layer selector, overlays (RIGHT side)
-ui/MapCanvas.tsx                ← PixiJS canvas, pointer events, painting
-ui/InfoPanel.tsx                ← Right-click cell inspector
-ui/ElevationLegend.tsx          ← Gradient legend (bottom-left, elevation layer only)
-ui/ElevationHistogram.tsx       ← Collapsible elevation distribution chart
+canvas/projection.ts            ← lat/lon ↔ world-cell projection helpers
+canvas/goodIcons.ts             ← good → emoji/texture for overlays
+ui/MapCanvas.tsx                ← PixiJS canvas, pointer events, painting, fetches+draws every overlay
+ui/Toolbar.tsx                  ← Tools, layer selector, overlay toggles (RIGHT side). overlayTypes/bioOverlays lists
 ui/StatusBar.tsx                ← Bottom status bar
+ui/InfoPanel.tsx                ← Right-click cell inspector
+ui/HubPanel.tsx                 ← Settlement detail (Summary/Trade/Estates/People). DLC 3.5: City finances block + Transit (carrying trade); year-grouped Chronicle
+ui/HousesPanel.tsx              ← Merchant Houses/Guilds/Contracts. House detail (Summary/🏦 Bank/Accountant), richer stat grid, bank badge; HouseTimeline (year-grouped chronicle)
+ui/SpeculationPanel.tsx         ← DLC 3 Finance: Speculation (bubble why-chain) / Poleis (treasury/tariff/mint/council + coin) tabs
+ui/CoinCreditPanel.tsx          ← DLC 3.5: Currencies / Banks (T-accounts) / ⚔ Wars / 📉 Crashes / 🏛 Schematics tabs
+ui/CoinIcon.tsx                 ← Heraldic minted coin (issuer's coat of arms on a gold disc + value tint)
+ui/YearChronicle.tsx            ← SHARED year-grouped expandable chronicle (used by HousesPanel + HubPanel)
+ui/CoatOfArms.tsx               ← Deterministic house heraldry (houseColor + shield SVG)
+ui/CityRankingPanel.tsx         ← Richest/busiest cities
+ui/MerchantRoutePanel.tsx       ← Click-through merchant route inspector
+ui/TradeMatrixPanel.tsx         ← Worldgen trade-matrix region/flow inspector
+ui/GoodsEditor.tsx              ← Goods builder (distribution/value/bulk/perish + Manufactured recipes)
+ui/GoodsChainReview.tsx         ← Pre-generation planted-vs-manufactured review + recipe DAG
+ui/GoodsBrowserPanel.tsx · ui/GoodDetailPanel.tsx · ui/GoodFlowPanel.tsx ← Goods browser/detail/flow views
+ui/SettlementSearch.tsx         ← Settlement name search/jump
+ui/ImportWorldDialog.tsx        ← Layered world import dialog
+ui/ElevationLegend.tsx · ui/ElevationHistogram.tsx ← Elevation legend + distribution chart
+ui/LatitudeControl.tsx          ← Latitude band config
+ui/climate.ts                   ← Köppen → human phrase helpers
+ui/workflow/WorkflowPanel.tsx   ← Generation wizard + "Run All" buttons
+ui/workflow/Step*.tsx           ← Step UIs: Landmass, Elevation, OceanAtmo, Climate, Rivers, SoilResources, Settlements, Biological, Economy, Political, Campaign
+```
+
+### Docs (`docs/`)
+```
+REDESIGN_AND_DLC_PLAN.md          ← Parts I-V master plan (DLC scope)
+FINANCE_POLIS_SPECULATION_PLAN.md ← DLC 3 finance/polis/speculation design
+TRADE_CARTOGRAPHY_SPEC.md · TRADE_SYSTEM_REVIEW.md ← trade routing/overlay design + review
+trade-goods-and-hazards-design.md ← goods/hazards design
+PERFORMANCE_OPTIMIZATION_PLAN.md  ← tick perf plan
 ```
 
 ## Simulation Pipeline

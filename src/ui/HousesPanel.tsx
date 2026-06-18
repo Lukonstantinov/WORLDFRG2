@@ -3,6 +3,7 @@ import { useCampaignStore } from "../state/campaignStore";
 import { useUIStore } from "../state/uiStore";
 import { CoatOfArms } from "./CoatOfArms";
 import { CoinIcon } from "./CoinIcon";
+import { YearChronicle } from "./YearChronicle";
 import { GOOD_DEFS } from "../goods";
 import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks } from "../bridge/tauri";
 import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief } from "../types";
@@ -590,20 +591,9 @@ function HouseTimeline({ history, onClose }: { history: HouseHistory; onClose: (
           </>
         )}
 
-        {/* Timeline */}
-        <div style={{ ...timelineHdr, marginTop: 10 }}>Chronicle</div>
-        {ev.length === 0 && <div style={empty}>No recorded events yet.</div>}
-        <div style={{ position: "relative", paddingLeft: 14 }}>
-          {/* vertical rail */}
-          <div style={{ position: "absolute", left: 4, top: 4, bottom: 4, width: 2, background: "#1c2c40" }} />
-          {ev.map((e, i) => (
-            <div key={i} style={{ position: "relative", marginBottom: 8 }}>
-              <span style={{ position: "absolute", left: -14, top: 0, fontSize: 11 }}>{EVENT_ICON[e.kind] ?? "•"}</span>
-              <div style={{ color: "#6a86a6", fontSize: 9 }}>Year {e.year}</div>
-              <div style={{ color: EVENT_COLOR[e.kind] ?? "#c0d0e0", fontSize: 11 }}>{e.text}</div>
-            </div>
-          ))}
-        </div>
+        {/* Timeline — grouped by year; click a year to expand what happened. */}
+        <div style={{ ...timelineHdr, marginTop: 10 }}>Chronicle <span style={{ color: "#56708e", fontWeight: 400 }}>(click a year)</span></div>
+        <YearChronicle entries={ev} icons={EVENT_ICON} colors={EVENT_COLOR} />
       </div>
     </div>
   );

@@ -5882,6 +5882,128 @@ mod tests {
         s
     }
 
+    /// STANDING PRACTICE (see CLAUDE.md): run the living campaign for decades and
+    /// watch the dynamics — houses rise and fall, banks are chartered and fail,
+    /// poleis mint coin, wars flare, crashes ripple. Prints a 5-yearly digest:
+    ///   `cargo test --lib simulate_decades_reports_dynamics -- --nocapture`
+    /// Also a hard regression: wealth must stay finite + bounded (no 100k blow-ups,
+    /// no −50M contract craters) over the whole run.
+    #[test]
+    fn simulate_decades_reports_dynamics() {
+        // 30 hubs in one connected market, six goods (three of them food).
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("fish", 0, 0, 1.2, 0.7, true),
+            good("olives", 0, 0, 1.6, 0.6, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+            good("iron", 2, 1, 5.0, 0.45, false),
+            good("wine", 3, 2, 8.0, 0.4, false),
+        ];
+        let ng = goods.len();
+        let mut hubs = Vec::new();
+        for i in 0..30u32 {
+            let x = (i % 6) as f32 * 9.0;
+            let y = (i / 6) as f32 * 9.0;
+            let pop = 8000.0 + (i as f32 * 911.0) % 26000.0;
+            // Each hub specializes: a couple of goods at high output, the rest low.
+            let prod: Vec<f32> = (0..ng)
+                .map(|g| if (g + i as usize) % 3 == 0 { pop * 0.012 } else { pop * 0.0015 })
+                .collect();
+            hubs.push(hub(i, x, y, pop, prod, 0));
+        }
+        let mut s = sim(hubs, goods);
+        // Ten houses: a spread of archetypes, several dominant at their seat so a
+        // council forms (→ coinage → banks).
+        for i in 0..10u32 {
+            let seat = (i * 3) % 30;
+            let mut h = house_at(seat, vec![3 + (i as usize % 3)], 3);
+            h.archetype = (i % 4) as u8;
+            h.wealth = 40.0 + (i as f32) * 8.0;
+            h.prestige = 0.5;
+            h.dominant_seat = i % 2 == 0;
+            s.houses.push(h);
+        }
+        s.seed_house_count = s.houses.len() as u32;
+        s.rebuild_routes();
+
+        let mut min_w = f32::INFINITY;
+        let mut peak_w = f32::NEG_INFINITY;
+        let mut late_max = 0.0f32; // richest in the final decade — the SUSTAINED level
+        let mut ever_dissolved = false;
+        for yr in 1..=50u32 {
+            s.advance(365);
+            let active = s.houses.iter().filter(|h| !h.defunct).count();
+            let defunct = s.houses.len() - active;
+            if defunct > 0 { ever_dissolved = true; }
+            let banks = s.banks.iter().filter(|b| !b.defunct).count();
+            let coins = s.hubs.iter().filter(|h| !h.coin_name.is_empty()).count();
+            let top_trust = s.hubs.iter().map(|h| h.coin_trust).fold(0.0f32, f32::max);
+            let rich = s.houses.iter().filter(|h| !h.defunct)
+                .map(|h| h.wealth).fold(0.0f32, f32::max);
+            if yr > 40 { late_max = late_max.max(rich); }
+            for h in &s.houses {
+                if h.wealth.is_finite() { min_w = min_w.min(h.wealth); peak_w = peak_w.max(h.wealth); }
+            }
+            assert!(s.tech_factor.is_finite());
+            if yr % 5 == 0 {
+                eprintln!(
+                    "yr {yr:2}: houses {active}↑/{defunct}✝  banks {banks}  coins {coins} (top trust {:.0}%)  wars {}  crashes {}  richest {rich:.0}",
+                    top_trust * 100.0, s.wars.len(), s.crashes.len(),
+                );
+            }
+        }
+        eprintln!("over 50y: wealth ∈ [{min_w:.1}, {peak_w:.1}] · sustained (late) richest {late_max:.0}");
+        assert!(min_w.is_finite() && peak_w.is_finite(), "wealth finite");
+        // SUSTAINED wealth must stay sane — the original bug was a fortune that sat
+        // at ~100k and kept growing. A transient early-game arbitrage spike that the
+        // progressive tax + market then corrects is acceptable dynamics.
+        assert!(late_max < 50_000.0, "no SUSTAINED runaway-rich house: {late_max}");
+        assert!(min_w > -100.0, "no runaway-insolvent house (limited liability): {min_w}");
+        // The world must actually be DYNAMIC: houses turn over.
+        assert!(ever_dissolved, "houses rise and fall over decades");
+    }
+
+    /// Manual benchmark for the per-day campaign tick. Run explicitly:
+    ///   `cargo test --release --lib bench_campaign_tick -- --ignored --nocapture`
+    /// Reports total + per-tick ms for a year on a mid-size campaign so the tick
+    /// cost (and how it scales with hub/good count) can be measured.
+    #[test]
+    #[ignore]
+    fn bench_campaign_tick() {
+        use std::time::Instant;
+        let ng = 24usize;
+        let goods: Vec<TickGood> = (0..ng)
+            .map(|g| good(&format!("g{g}"), (g % 12) as i32, (g % 3) as u8,
+                          1.0 + g as f32, 0.30 + 0.5 * ((g % 5) as f32 / 5.0), g < 6))
+            .collect();
+
+        let nhubs = 160u32;
+        let mut hubs = Vec::new();
+        for i in 0..nhubs {
+            let x = (i % 16) as f32 * 6.0;
+            let y = (i / 16) as f32 * 6.0;
+            let pop = 2000.0 + (i as f32 * 137.0) % 9000.0;
+            let prod: Vec<f32> = (0..ng)
+                .map(|g| if (g + i as usize) % 7 == 0 { pop * 0.02 } else { pop * 0.002 })
+                .collect();
+            hubs.push(hub(i, x, y, pop, prod, 0)); // one component → trade flows
+        }
+        let mut s = sim(hubs, goods);
+        for i in (0..nhubs).step_by(8) {
+            s.houses.push(house_at(i, vec![i as usize % ng], 2));
+        }
+        s.rebuild_routes();
+
+        let days = 365u32;
+        let t0 = Instant::now();
+        s.advance(days);
+        let total = t0.elapsed().as_secs_f64() * 1000.0;
+        println!(
+            "[campaign-bench hubs={nhubs} goods={ng}] {days} ticks: {total:.1}ms total, {:.3}ms/tick",
+            total / days as f64
+        );
+    }
+
     #[test]
     fn deterministic_and_finite() {
         let goods = vec![

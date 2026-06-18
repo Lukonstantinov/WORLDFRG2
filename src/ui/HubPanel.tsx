@@ -8,9 +8,20 @@ import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane } from
 import { climatePhrase } from "./climate";
 import { CoatOfArms, houseColor } from "./CoatOfArms";
 import { CoinIcon } from "./CoinIcon";
+import { YearChronicle } from "./YearChronicle";
 import type { HouseBrief } from "../types";
 import { SettlementScene } from "./SettlementScene";
 import { FlowsView } from "./FlowsView";
+
+/** Icons/colours for the settlement chronicle's event kinds (year-grouped view). */
+const HUB_EVENT_ICON: Record<string, string> = {
+  estate: "🏡", starvation: "💀", succession: "👤", structure: "🏗️", coinage: "🪙",
+  bank: "🏦", crash: "📉", war: "⚔", event: "⚡",
+};
+const HUB_EVENT_COLOR: Record<string, string> = {
+  estate: "#7fd0a0", starvation: "#ff7a6a", succession: "#c0a0e0", structure: "#cdbb88",
+  coinage: "#d8c878", bank: "#9fd0e0", crash: "#e6303a", war: "#e88", event: "#b8c8da",
+};
 
 type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "depots" | "people";
 
@@ -1032,18 +1043,13 @@ export function HubPanel() {
             ) : (
               <div style={emptyTxt}>Advance the campaign a few weeks to chart this city's history.</div>
             )}
-            <div style={{ ...sectionHdr, marginTop: 6 }}>Chronicle</div>
-            {detail.events.length === 0 && <div style={emptyTxt}>No notable events yet.</div>}
-            {[...detail.events].reverse().slice(0, 30).map((e, i) => (
-              <div key={i} style={{ display: "flex", gap: 6, fontSize: 9, padding: "1px 0" }}>
-                <span style={{ color: "#56708e", minWidth: 44 }}>Yr {Math.floor(e.tick / 365)}</span>
-                <span style={{
-                  flex: 1,
-                  color: e.kind === "starvation" ? "#ff7a6a" : e.kind === "estate" ? "#7fd0a0"
-                    : e.kind === "succession" ? "#c0a0e0" : "#b8c8da",
-                }}>{e.text}</span>
-              </div>
-            ))}
+            <div style={{ ...sectionHdr, marginTop: 6 }}>Chronicle <span style={{ color: "#56708e", fontWeight: 400 }}>(click a year)</span></div>
+            <YearChronicle
+              entries={detail.events.map((e) => ({ year: Math.floor(e.tick / 365), kind: e.kind, text: e.text }))}
+              icons={HUB_EVENT_ICON}
+              colors={HUB_EVENT_COLOR}
+              emptyText="No notable events yet."
+            />
           </>
         ) : (
           <div style={emptyTxt}>Begin the campaign (Step 11) — this city's history and charts fill in as time passes.</div>
