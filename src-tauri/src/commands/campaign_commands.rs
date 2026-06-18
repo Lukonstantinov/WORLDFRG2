@@ -839,6 +839,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 coin_name: String::new(),
                 coin_trust: 0.0,
                 mint_fineness_prev: 0.0,
+                quality: Vec::new(),
+                stolen_good: -1,
+                stolen_from: -1,
             }
         })
         .collect();
@@ -1033,6 +1036,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         war_log: vec![],
         flow_year: vec![],
         flow_accum: std::collections::HashMap::new(),
+        quality_migrated: false,
         days: vec![],
         neighbors: vec![],
         routes_dirty: false,

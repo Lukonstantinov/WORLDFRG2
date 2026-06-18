@@ -406,6 +406,24 @@ pub fn coin_value(fineness: f32, trust: f32) -> f32 {
     f * (0.7 + 0.5 * trust.clamp(0.0, 1.0))
 }
 
+// ── DLC 4 · Good quality ─────────────────────────────────────────────────────
+/// Value multiplier a good's quality earns: coarse goods trade at a discount,
+/// exquisite ones at a premium (≈0.6×…1.5× across the grade range).
+pub fn quality_value_mult(q: f32) -> f32 {
+    0.6 + 0.9 * q.clamp(0.0, 1.0)
+}
+/// 5-rung grade label for a quality 0..1 (matches the worldgen ladder).
+pub fn quality_grade(q: f32) -> &'static str {
+    if q >= 0.85 { "Exquisite" } else if q >= 0.68 { "Fine" }
+    else if q >= 0.50 { "Standard" } else if q >= 0.32 { "Common" } else { "Coarse" }
+}
+/// Monthly learning-by-doing rate: a manufactory drifts toward its quality cap.
+const QUALITY_LEARN_RATE: f32 = 0.04;
+/// Yearly chance a house with a manufactory steals a rival's quality technique.
+const QUALITY_STEAL_CHANCE: f32 = 0.10;
+/// On a successful steal, the thief closes this fraction of the gap to the leader.
+const QUALITY_STEAL_FRAC: f32 = 0.6;
+
 pub fn structure_label(id: u8) -> &'static str {
     match id {
         STRUCT_GRANARY => "Granary",
@@ -648,6 +666,15 @@ pub struct TickHub {
     /// Last year's mint fineness — so the coinage pass can read a sudden DEBASEMENT
     /// (a cut vs last year) and dock trust accordingly. 0 on old saves → no penalty.
     #[serde(default)] pub mint_fineness_prev: f32,
+    // ── DLC 4 · Good QUALITY (per producing settlement / estate / manufactory) ──
+    /// Per-good production quality 0..1 at THIS hub (Coarse→Exquisite). Seeded so it
+    /// varies by settlement; manufactures climb via learning-by-doing and can be
+    /// lifted by stealing a rival's technique. Empty until the one-time migration.
+    #[serde(default)] pub quality: Vec<f32>,
+    /// Espionage record (manufactories): good index whose technique was STOLEN into
+    /// this hub (−1 none) and the hub id it was taken from (−1 none).
+    #[serde(default = "neg_one_i32")] pub stolen_good: i32,
+    #[serde(default = "neg_one_i32")] pub stolen_from: i32,
 }
 
 /// Serde default for `owner_house` so old saves / non-estate hubs read −1, not 0
@@ -1267,6 +1294,8 @@ pub struct CampaignSim {
     /// Running per-pair flow tally for the CURRENT year (by hub id). Not persisted —
     /// rebuilt as trade flows; snapshotted into `flow_year` each New Year.
     #[serde(skip)] pub flow_accum: std::collections::HashMap<(u32, u32), f32>,
+    /// DLC 4 · one-time migration flag: seed per-hub good `quality` on first advance.
+    #[serde(default)] pub quality_migrated: bool,
     /// Derived route-days matrix (n·n, f32::INFINITY = unreachable). Not
     /// serialized — rebuilt from positions + components after load.
     #[serde(skip)]
@@ -1965,6 +1994,84 @@ impl CampaignSim {
         });
     }
 
+    /// DLC 4 · learning-by-doing: each month every MANUFACTORY/city drifts the
+    /// quality of the manufactured goods it makes toward a skill cap set by its size
+    /// and its craft buildings (guildhall/workshop). "Manufacturers start producing
+    /// higher quality goods" — and big skilled cities reach finer grades.
+    fn update_good_quality(&mut self) {
+        let ng = self.goods.len();
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].quality.len() != ng { continue; }
+            let pop = self.hubs[h].population.max(1.0);
+            let size_bonus = (pop / 60_000.0).min(0.20);
+            let mut struct_bonus = 0.0;
+            if self.hub_has_struct(h, STRUCT_WORKSHOP) { struct_bonus += 0.08; }
+            if self.hub_has_struct(h, STRUCT_GUILDHALL) { struct_bonus += 0.06; }
+            let manu_estate = self.hubs[h].is_estate && self.hubs[h].estate_kind == 6;
+            for g in 0..ng {
+                let manufactured = !self.goods[g].inputs.is_empty();
+                if !(manufactured || manu_estate) { continue; }
+                if self.hubs[h].production.get(g).copied().unwrap_or(0.0) <= 0.0
+                    && self.hubs[h].quality[g] <= 0.0 { continue; }
+                let cap = (0.62 + size_bonus + struct_bonus).clamp(0.0, 0.97);
+                let q = self.hubs[h].quality[g];
+                if q < cap {
+                    self.hubs[h].quality[g] = (q + (cap - q) * QUALITY_LEARN_RATE).min(cap);
+                }
+            }
+        }
+    }
+
+    /// DLC 4 · industrial espionage: once a year a house running a manufactory may
+    /// STEAL the technique of the world's finest maker of a good it produces,
+    /// jumping its own quality toward the leader's. Recorded on the thief's hub
+    /// (`stolen_good`/`stolen_from`) and journaled — visible in the estate view.
+    fn maybe_steal_quality(&mut self, yr: u32) {
+        let ng = self.goods.len();
+        // World-leading quality + its hub, per good (producers only).
+        let mut best_q = vec![0.0f32; ng];
+        let mut best_hub = vec![usize::MAX; ng];
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].quality.len() != ng { continue; }
+            for g in 0..ng {
+                if self.hubs[h].production.get(g).copied().unwrap_or(0.0) <= 0.0 { continue; }
+                if self.hubs[h].quality[g] > best_q[g] { best_q[g] = self.hubs[h].quality[g]; best_hub[g] = h; }
+            }
+        }
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct || self.houses[hi].is_guild { continue; }
+            // Spies are the cunning sorts: specialist / political / banking houses.
+            if self.houses[hi].archetype == ARCH_FLEET { continue; }
+            if hash01(self.seed, (hi as u64) ^ 0x57EA1, yr as u64) > QUALITY_STEAL_CHANCE { continue; }
+            // A manufactory this house owns, making a good a rival makes far better.
+            let mine: Option<(usize, usize)> = self.hubs.iter().enumerate()
+                .filter(|(_, e)| e.is_estate && e.owner_house == hi as i32 && e.estate_kind == 6
+                    && e.quality.len() == ng)
+                .filter_map(|(ei, e)| {
+                    let g = (0..ng).find(|&g| e.production.get(g).copied().unwrap_or(0.0) > 0.0)?;
+                    Some((ei, g))
+                })
+                .find(|&(ei, g)| best_hub[g] != usize::MAX && best_hub[g] != ei
+                    && best_q[g] - self.hubs[ei].quality.get(g).copied().unwrap_or(0.0) > 0.12);
+            let Some((ei, g)) = mine else { continue };
+            let leader = best_hub[g];
+            let gain = (best_q[g] - self.hubs[ei].quality[g]) * QUALITY_STEAL_FRAC;
+            self.hubs[ei].quality[g] += gain;
+            self.hubs[ei].stolen_good = g as i32;
+            self.hubs[ei].stolen_from = self.hubs[leader].id as i32;
+            let (hn, gn, victim) = (self.houses[hi].name.clone(),
+                self.goods[g].name.clone(), self.hubs[leader].name.clone());
+            self.journal.push(JournalEntry {
+                tick: self.tick, kind: "espionage".into(), hub: ei as i32, good: g as i32, value: gain,
+                text: format!("{} steals the secret of {} from {}", hn, gn, victim),
+            });
+            self.houses[hi].events.push(HouseEvent {
+                tick: self.tick, kind: "espionage".into(),
+                text: format!("stole the {} craft from {}", gn, victim),
+            });
+        }
+    }
+
     /// DLC 3 · Phase 3 — the Speculation "Why-Engine". Once a year, score each
     /// polis's bubble risk from drivers that ALL already exist in the sim, build a
     /// ranked causal reason-chain naming the real houses/goods, classify the
@@ -2453,6 +2560,34 @@ impl CampaignSim {
             }
             self.percap_migrated = true;
         }
+        // DLC 4 · one-time: seed per-hub good QUALITY so it varies by settlement.
+        // Raws get a terroir-ish base (a stable per-hub/good roll, nudged up for the
+        // hub's strongest output — its specialty is its finest); manufactures start
+        // lower (a craft to be learned). Producers only; non-producers stay 0.
+        if !self.quality_migrated {
+            for h in 0..self.hubs.len() {
+                if self.hubs[h].quality.len() == ng { continue; }
+                let mut q = vec![0.0f32; ng];
+                // strongest produced good (its specialty → a quality bump)
+                let best_g = (0..ng).max_by(|&a, &b| {
+                    let pa = self.hubs[h].base_per_capita.get(a).copied().unwrap_or(0.0);
+                    let pb = self.hubs[h].base_per_capita.get(b).copied().unwrap_or(0.0);
+                    pa.partial_cmp(&pb).unwrap_or(std::cmp::Ordering::Equal)
+                });
+                for g in 0..ng {
+                    let pc = self.hubs[h].base_per_capita.get(g).copied().unwrap_or(0.0);
+                    if pc <= 0.0 && self.hubs[h].production.get(g).copied().unwrap_or(0.0) <= 0.0 { continue; }
+                    let roll = hash01(self.seed, ((h as u64) << 8) ^ g as u64, 0x94A1170Du64);
+                    let manufactured = !self.goods[g].inputs.is_empty();
+                    let base = if manufactured { 0.30 } else { 0.42 };
+                    let mut v = base + 0.30 * roll;
+                    if Some(g) == best_g { v += 0.12; } // the specialty is finest
+                    q[g] = v.clamp(0.0, 0.95);
+                }
+                self.hubs[h].quality = q;
+            }
+            self.quality_migrated = true;
+        }
         // Per-day compounding growth equivalent to the yearly baseline drift.
         let tech_daily = (1.0 + PROD_GROWTH_PER_YEAR).powf(1.0 / TICKS_PER_YEAR as f32);
         // Reset per-advance diagnostics.
@@ -2540,6 +2675,7 @@ impl CampaignSim {
                 self.decide_coinage(yr);
                 self.update_banks(yr);
                 self.update_wars(yr);
+                self.maybe_steal_quality(yr);
                 self.compute_speculation(yr);
                 // Fold the year's trade flows into the Flows-subtab detail + trend graphs.
                 self.fold_trade_year();
@@ -2644,10 +2780,16 @@ impl CampaignSim {
             //     (then `manufacture_pass` turns them into cloth/metalware/etc.).
             self.add_manufacturing_demand(&mut needs);
 
-            // 3) Local prices (smoothed scarcity in the grain-eq numeraire).
+            // 3) Local prices (smoothed scarcity in the grain-eq numeraire). DLC 4:
+            //    a hub's OWN-produced good is worth more when its quality is high —
+            //    fine wine fetches a premium, coarse wine a discount (its grade is
+            //    "baked into" the local standard value), so quality is desired.
             for h in 0..n {
                 for g in 0..ng {
-                    let base = self.goods[g].base_value;
+                    let mut base = self.goods[g].base_value;
+                    if self.hubs[h].production.get(g).copied().unwrap_or(0.0) > 0.0 {
+                        base *= quality_value_mult(self.hubs[h].quality.get(g).copied().unwrap_or(0.0));
+                    }
                     let target = self.live_price(self.hubs[h].stock[g], needs[h][g], base);
                     self.hubs[h].price[g] = 0.6 * self.hubs[h].price[g] + 0.4 * target;
                 }
@@ -4515,6 +4657,10 @@ impl CampaignSim {
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
             coin_name: String::new(), coin_trust: 0.0, mint_fineness_prev: 0.0,
+            // DLC 4 · seed the new estate's quality (length ng) so it's graded from
+            // day one — a manufactory (kind 6) starts as a humble workshop and learns.
+            quality: { let mut q = vec![0.0f32; ng]; if g0 < ng { q[g0] = if kind == 6 { 0.34 } else { 0.46 }; } q },
+            stolen_good: -1, stolen_from: -1,
         });
         // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
         self.routes_dirty = true;
@@ -5256,6 +5402,8 @@ impl CampaignSim {
             self.form_contracts(needs);
             // DLC 3.5 · banks service loans, take deposits, lend, and may fail.
             self.bank_pass();
+            // DLC 4 · manufactories refine their craft (quality climbs toward a cap).
+            self.update_good_quality();
             // Local line's debt-based solvency check supersedes the old volume-based
             // dissolve (a house in the red ≥1yr goes bankrupt; guilds get bailouts).
             self.update_solvency();
@@ -5874,6 +6022,7 @@ mod tests {
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
             coin_name: String::new(), coin_trust: 0.0, mint_fineness_prev: 0.0,
+            quality: Vec::new(), stolen_good: -1, stolen_from: -1,
         }
     }
 
@@ -5905,6 +6054,7 @@ mod tests {
             spec_centers: vec![], spec_year: 0, spec_prev_profit: vec![],
             banks: vec![], crashes: vec![], wars: vec![], war_log: vec![],
             flow_year: vec![], flow_accum: std::collections::HashMap::new(),
+            quality_migrated: false,
             days: vec![],
             neighbors: vec![],
             routes_dirty: false,
@@ -5982,10 +6132,19 @@ mod tests {
                 if h.wealth.is_finite() { min_w = min_w.min(h.wealth); peak_w = peak_w.max(h.wealth); }
             }
             assert!(s.tech_factor.is_finite());
+            // DLC 4 · finest good in the world this year + cumulative espionage.
+            let mut finest = (0.0f32, 0usize);
+            for h in &s.hubs {
+                for (g, &q) in h.quality.iter().enumerate() {
+                    if h.production.get(g).copied().unwrap_or(0.0) > 0.0 && q > finest.0 { finest = (q, g); }
+                }
+            }
+            let thefts = s.journal.iter().filter(|e| e.kind == "espionage").count();
             if yr % 5 == 0 {
                 eprintln!(
-                    "yr {yr:2}: houses {active}↑/{defunct}✝  banks {banks}  coins {coins} (top trust {:.0}%)  wars {}  crashes {}  richest {rich:.0}",
+                    "yr {yr:2}: houses {active}↑/{defunct}✝  banks {banks}  coins {coins} (trust {:.0}%)  wars {}  crashes {}  richest {rich:.0}  finest {} {:.0}%  thefts {thefts}",
                     top_trust * 100.0, s.wars.len(), s.crashes.len(),
+                    s.goods[finest.1].name, finest.0 * 100.0,
                 );
             }
         }
