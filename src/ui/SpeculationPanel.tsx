@@ -132,6 +132,15 @@ function PolisCard({ p }: { p: PolisBrief }) {
           🪙 mint {(p.mint_fineness * 100).toFixed(0)}%{debased ? " (debased)" : ""}
         </span>
       </div>
+      {p.coin_name ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 9, marginTop: 2 }}>
+          <span style={{ color: "#d8c878" }}>{p.coin_name}</span>
+          <span style={{ height: 5, background: p.coin_trust >= 0.55 ? "#37a05a" : "#7fa0c0",
+            borderRadius: 2, width: `${Math.max(3, p.coin_trust * 120)}px`, flex: "0 0 auto" }} />
+          <span style={{ color: "#8aa8c8" }}>trust {(p.coin_trust * 100).toFixed(0)}%
+            {p.coin_trust >= 0.55 ? " · reserve" : ""}</span>
+        </div>
+      ) : null}
     </div>
   );
 }

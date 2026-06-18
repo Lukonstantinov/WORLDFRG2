@@ -89,6 +89,7 @@ sim/ocean.rs (compute_salinity) ← Phase 3 add-on: wind/E-P salinity + thermoha
 sim/market.rs                   ← Market equilibrium solver (stocks → grain-eq prices → arbitrage; bulk/perish freight)
 sim/manufacture.rs              ← Shared production-chain resolver (apply_manufacturing: DAG topo, labor∝pop)
 sim/tick.rs (DLC 3)             ← Polis agent (decide_polis_policy: council/tariff/mint/treasury) + Speculation why-engine (compute_speculation: yearly per-polis SpecCenter risk + ranked SpecDriver reason-chain), both at the yearly hook
+sim/tick.rs (DLC 3.5)           ← Coin/Credit/Crashes: decide_coinage (named polis coin + sticky coin_trust + seigniorage; reserve coins shave dispatch freight via coin_discount), Bank entity (balance sheet: reserves/loans/real_estate vs deposits/notes; update_banks yearly founding+branches, bank_pass monthly lend/service/fail), trigger_regional_crash (per-component contagion: trust collapse + house haircut + "panic" ActiveEvents + bank runs) fired by fail_bank & maybe_pop_bubbles
 commands/sim_commands.rs        ← Tauri commands wrapping sim phases (per-phase ColumnSet masks)
 commands/campaign_commands.rs   ← finalize/unfreeze, new/save/open campaign, set_progress
 commands/import_commands.rs     ← import_world_layers (layered world import)
@@ -100,7 +101,8 @@ history/undo.rs                 ← Tile-level undo/redo journal
 ### React Frontend (`src/`)
 ```
 App.tsx                         ← Layout, header, file dialogs, NewWorldDialog
-ui/SpeculationPanel.tsx         ← DLC 3 Finance panel: Speculation (per-polis bubble risk + why-chain) / Poleis (treasury/tariff/mint/council) tabs
+ui/SpeculationPanel.tsx         ← DLC 3 Finance panel: Speculation (per-polis bubble risk + why-chain) / Poleis (treasury/tariff/mint/council + coin) tabs
+ui/CoinCreditPanel.tsx          ← DLC 3.5 Coin/Credit panel: Currencies (reserve ranking) / Banks (T-account balance sheets) / Crashes (regional crisis log) / Schematics (per-city building+estate+bank blueprint) tabs
 types.ts                        ← All shared types (WorldMeta, PaintValue, etc.)
 bridge/tauri.ts                 ← All IPC invoke wrappers
 state/worldStore.ts             ← Zustand: meta, rivers, lakes, settlements

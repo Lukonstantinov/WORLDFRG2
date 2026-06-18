@@ -858,6 +858,74 @@ export interface PolisBrief {
   council: string;             // governing house ("—" if none)
   council_archetype: string;
   council_color: string;
+  coin_name: string;           // the polis's named coin ("" = none)
+  coin_trust: number;          // acceptance / trust 0..1
+}
+
+// ── DLC 3.5 · Coin, Credit & Crashes ──────────────────────────────────────────
+
+/** One coin in the world reserve-currency ranking. */
+export interface CurrencyBrief {
+  hub: number;
+  city: string;
+  coin_name: string;
+  trust: number;        // acceptance 0..1
+  fineness: number;     // 1 = full coin, < 1 = debased
+  throughput: number;   // trade volume at the issuing city
+  is_reserve: boolean;  // accepted abroad
+  color: string;
+}
+
+/** One bank's balance sheet + reach. */
+export interface BankBrief {
+  name: string;
+  seat: string;
+  owner: string;
+  color: string;
+  founded_year: number;
+  defunct: boolean;
+  reserves: number;
+  loans_out: number;
+  real_estate: number;
+  deposits: number;
+  notes_issued: number;
+  equity: number;
+  reserve_ratio: number;
+  n_loans: number;
+  interest_earned: number;
+  losses: number;
+  branches: string[];
+  events: string[];
+}
+
+/** A regional financial crash record. */
+export interface CrashRecord {
+  year: number;
+  origin_hub: number;
+  origin_name: string;
+  component: number;
+  cities_hit: number;
+  banks_failed: number;
+  cause: string;
+  text: string;
+}
+
+export interface SchematicBuilding { label: string; effect: string }
+export interface SchematicEstate { label: string; tier: number; owner: string; good: string }
+/** One city's blueprint: buildings, estates, bank presence and coin. */
+export interface CitySchematic {
+  hub: number;
+  name: string;
+  x: number;
+  y: number;
+  population: number;
+  coin_name: string;
+  coin_trust: number;
+  council: string;
+  buildings: SchematicBuilding[];
+  estates: SchematicEstate[];
+  banks_seated: string[];
+  bank_branches: string[];
 }
 
 export interface TradeRegion {

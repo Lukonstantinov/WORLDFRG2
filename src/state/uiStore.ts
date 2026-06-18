@@ -109,6 +109,8 @@ interface UIStore {
   showCityRanking: boolean;
   /** DLC 3 · the Speculation & Poleis (finance) panel open. */
   showSpeculation: boolean;
+  /** DLC 3.5 · the Coin & Credit (currencies / banks / crashes / schematics) panel. */
+  showCoinCredit: boolean;
   /** Goods & Chains review window open (always shown before goods generation). */
   chainReviewOpen: boolean;
   /** Action run when the user confirms "Generate" in the chain-review window
@@ -156,6 +158,7 @@ interface UIStore {
   setShowHouses: (v: boolean) => void;
   setShowCityRanking: (v: boolean) => void;
   setShowSpeculation: (v: boolean) => void;
+  setShowCoinCredit: (v: boolean) => void;
   openChainReview: (onConfirm?: () => void) => void;
   closeChainReview: () => void;
 }
@@ -225,6 +228,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showHouses: false,
   showCityRanking: false,
   showSpeculation: false,
+  showCoinCredit: false,
   chainReviewOpen: false,
   chainReviewConfirm: null,
 
@@ -298,6 +302,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowHouses: (v) => set({ showHouses: v }),
   setShowCityRanking: (v) => set({ showCityRanking: v }),
   setShowSpeculation: (v) => set({ showSpeculation: v }),
+  setShowCoinCredit: (v) => set({ showCoinCredit: v }),
   openChainReview: (onConfirm) => set({ chainReviewOpen: true, chainReviewConfirm: onConfirm ?? null }),
   closeChainReview: () => set({ chainReviewOpen: false, chainReviewConfirm: null }),
 
