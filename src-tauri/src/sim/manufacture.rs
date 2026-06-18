@@ -162,7 +162,9 @@ pub fn apply_manufacturing(
 /// (rock/bay) are interchangeable as a preservative cure; this list is
 /// deliberately narrow so structural inputs (metals, fibres) are NOT swapped.
 pub fn is_fungible_input_category(cat: &str) -> bool {
-    matches!(cat, "preservative")
+    // "preservative" = salt types (curing); "gem" = the split gemstone types, so a
+    // jeweller's "gemstones" input is satisfied by ruby / sapphire / emerald / … .
+    matches!(cat, "preservative" | "gem")
 }
 
 /// Map each good index in a fungible input category → the OTHER enabled goods of

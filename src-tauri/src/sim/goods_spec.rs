@@ -203,6 +203,8 @@ fn custom_category(id: &str) -> &'static str {
         "citrus" => "sweetener",
         "flax" => "fiber",
         "coral" | "ambergris" | "jade" => "prestige",
+        // Split gem types share the fungible "gem" category (see manufacture.rs).
+        "ruby" | "sapphire" | "emerald" | "diamond" | "amethyst" | "topaz" => "gem",
         "cinnamon" | "saffron" => "aromatic",
         "tyrian_purple" => "dye",
         "silver" | "lead" => "metal",
@@ -382,6 +384,24 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             dep(0.0, 1, 4), env(vec![], Some([12.0,10.0]), None, None, Some([30.0,65.0,12.0]), 0.0, 0.0)),
         cg("jade", "Jade", "\u{1F7E2}", "#00a86b", Domain::Continental, Distribution::Deposits, 0.90, 0.55, true,
             dep(0.40, 1, 3), env(vec![], None, None, Some([0.40,1.0,0.12]), None, 0.0, 0.0)),
+        // ── Gem types — the generic "gemstones" belt SPLIT into distinct gems, each
+        //    a deposit good with its OWN ore-province noise (`province_scale`) +
+        //    elevation floor, so ruby ranges ≠ sapphire ranges (real gem geology).
+        //    Category "gem" is fungible → a jeweller's "gemstones" input takes any of
+        //    them. Each is terroir-graded (clarity) by the quality system. Disable the
+        //    generic "gemstones" in the editor to show only these. ──
+        cg("ruby", "Ruby", "\u{1F534}", "#e0294a", Domain::Continental, Distribution::Deposits, 0.80, 0.62, true,
+            dep(0.42, 1, 2), env(vec![], Some([26.0,12.0]), None, Some([0.42,1.0,0.14]), None, 0.0, 0.0)),
+        cg("sapphire", "Sapphire", "\u{1F537}", "#2a5fd0", Domain::Continental, Distribution::Deposits, 0.80, 0.60, true,
+            dep(0.46, 1, 2), env(vec![], None, None, Some([0.46,1.0,0.13]), None, 0.0, 0.0)),
+        cg("emerald", "Emerald", "\u{1F49A}", "#1ea866", Domain::Continental, Distribution::Deposits, 0.82, 0.60, true,
+            dep(0.38, 1, 2), env(vec![], Some([22.0,14.0]), None, Some([0.38,0.9,0.14]), None, 0.0, 0.0)),
+        cg("diamond", "Diamond", "\u{1F48E}", "#dfe6ee", Domain::Continental, Distribution::Deposits, 0.90, 0.70, true,
+            dep(0.55, 1, 3), env(vec![], None, None, Some([0.55,1.0,0.12]), None, 0.0, 0.0)),
+        cg("amethyst", "Amethyst", "\u{1F7E3}", "#9b59d0", Domain::Continental, Distribution::Deposits, 0.66, 0.48, false,
+            dep(0.34, 2, 1), env(vec![], None, None, Some([0.34,0.85,0.16]), None, 0.0, 0.0)),
+        cg("topaz", "Topaz", "\u{1F7E7}", "#e0a92a", Domain::Continental, Distribution::Deposits, 0.62, 0.46, false,
+            dep(0.30, 2, 1), env(vec![], None, None, Some([0.30,0.8,0.16]), None, 0.0, 0.0)),
         // ── Precious metals & quarried stone (high-desire deposit goods) ──
         // Silver: a prized monetary metal, a touch commoner than gold. Hill/mountain
         // deposits. High desire — every wealthy market wants coin metal.

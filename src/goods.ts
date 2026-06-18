@@ -67,6 +67,13 @@ export const GOOD_DEFS: GoodDef[] = [
   { name: "silver", label: "Silver", emoji: "\u{1FA99}", color: "#c8ccd6" },
   { name: "marble", label: "Marble", emoji: "\u{1F3DB}\u{FE0F}", color: "#e8e6e0" },
   { name: "lead", label: "Lead", emoji: "\u{1F529}", color: "#8a8e96" },
+  // ── Gem types (split from the generic "gemstones" belt) ──
+  { name: "ruby", label: "Ruby", emoji: "\u{1F534}", color: "#e0294a" },
+  { name: "sapphire", label: "Sapphire", emoji: "\u{1F537}", color: "#2a5fd0" },
+  { name: "emerald", label: "Emerald", emoji: "\u{1F49A}", color: "#1ea866" },
+  { name: "diamond", label: "Diamond", emoji: "\u{1F48E}", color: "#dfe6ee" },
+  { name: "amethyst", label: "Amethyst", emoji: "\u{1F7E3}", color: "#9b59d0" },
+  { name: "topaz", label: "Topaz", emoji: "\u{1F7E7}", color: "#e0a92a" },
   // ── Clay (raw input) + manufactured chain goods (mirror goods_spec.rs) ──
   { name: "clay", label: "Clay", emoji: "\u{1F9F1}", color: "#b07a52" },
   { name: "cloth", label: "Woolen Cloth", emoji: "\u{1F9F6}", color: "#d8c8b0" },
@@ -181,6 +188,8 @@ const GOOD_CATEGORY: Record<string, string> = {
   salt: "Minerals & Metals", bay_salt: "Minerals & Metals", iron: "Minerals & Metals",
   copper: "Minerals & Metals", tin: "Minerals & Metals", gold: "Minerals & Metals",
   gemstones: "Minerals & Metals", jade: "Minerals & Metals", silver: "Minerals & Metals",
+  ruby: "Minerals & Metals", sapphire: "Minerals & Metals", emerald: "Minerals & Metals",
+  diamond: "Minerals & Metals", amethyst: "Minerals & Metals", topaz: "Minerals & Metals",
   marble: "Minerals & Metals", lead: "Minerals & Metals",
   metalware: "Minerals & Metals", bronzeware: "Minerals & Metals", jewelry: "Minerals & Metals",
   // Marine — sea catch/harvest AND the salted fish preserved for transport

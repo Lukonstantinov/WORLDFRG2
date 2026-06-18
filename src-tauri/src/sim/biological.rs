@@ -204,7 +204,7 @@ pub const GOOD_CATEGORY: [&str; GOODS_COUNT] = [
     "aromatic", "drink", "drink", "prestige", "construction", "prestige", // spices..amber
     "preservative", "dye", "aromatic",                                 // salt, dyes, incense
     "prestige", "oil",                                                 // pearls, whaling(oil)
-    "cereal", "metal", "fiber", "prestige",                            // wheat, iron, cotton, gemstones
+    "cereal", "metal", "fiber", "gem",                                 // wheat, iron, cotton, gemstones (split into gem types; "gem" is fungible)
     "construction", "livestock", "fiber", "fiber", "prestige", "drink", // hardwoods..cacao
     "metal", "metal", "metal",                                         // copper, tin, gold
     "aromatic", "aromatic", "craft",                                   // cloves, pepper, paper
