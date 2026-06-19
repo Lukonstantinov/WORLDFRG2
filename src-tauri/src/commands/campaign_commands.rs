@@ -872,6 +872,12 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 autonomous: false,
                 founder_hub: -1,
                 backers: Vec::new(),
+                reserve_food: 0.0,
+                reserve_cap: 0.0,
+                supply_years: 0.0,
+                colony_founded_tick: 0,
+                main_bank: -1,
+                indep_cooldown_until: 0,
             }
         })
         .collect();
@@ -1051,6 +1057,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         house_ledger_prev: Vec::new(),
         house_barred: Vec::new(),
         colonizable: econ.colonizable_sites.clone(),
+        colony_supply: Vec::new(),
         diag_shipments: 0,
         diag_by_house: 0,
         diag_by_guild: 0,
