@@ -4,7 +4,7 @@ import { useUIStore } from "../state/uiStore";
 import {
   campaignGetCurrencies, campaignGetBanks, campaignGetCrashes, campaignGetSchematics, campaignGetWars,
 } from "../bridge/tauri";
-import type { CurrencyBrief, BankBrief, CrashRecord, CitySchematic, WarsPayload } from "../types";
+import type { CurrencyBrief, BankBrief, CrashRecord, CitySchematic, WarsPayload, HouseBrief } from "../types";
 import { CoinIcon } from "./CoinIcon";
 
 /** DLC 3.5 · Coin, Credit & Crashes. Four tabs:
@@ -20,6 +20,7 @@ import { CoinIcon } from "./CoinIcon";
 export function CoinCreditPanel() {
   const open = useUIStore((s) => s.showCoinCredit);
   const snapshot = useCampaignStore((s) => s.snapshot);
+  const houses = useCampaignStore((s) => s.houses);
   const tick = snapshot?.clock?.tick ?? 0;
   const active = !!snapshot?.active;
   const [tab, setTab] = useState<"coins" | "banks" | "wars" | "crashes" | "schem">("coins");
@@ -81,7 +82,7 @@ export function CoinCreditPanel() {
       {active && tab === "banks" && (
         <div style={scroll}>
           {banks.length === 0 && <div style={empty}>No banks chartered yet — a wealthy banking house in a trusted-coin city founds the first.</div>}
-          {banks.map((b, i) => <BankCard key={`${b.name}-${i}`} b={b} />)}
+          {banks.map((b, i) => <BankCard key={`${b.name}-${i}`} b={b} house={houses.find((h) => h.idx === b.owner_idx)} />)}
         </div>
       )}
 
@@ -203,10 +204,20 @@ function Side({ title, rows, total, totalColor }: {
   );
 }
 
-function BankCard({ b }: { b: BankBrief }) {
+// Founding gates from sim/tick.rs `update_banks` (BANK_FOUND_* constants). A
+// chartered bank, by definition, met all of these the year it opened.
+const BANK_GATES: { label: string; need: string; get: (h: HouseBrief) => string }[] = [
+  { label: "Banking archetype", need: "Banking", get: (h) => h.archetype_label ?? (h.archetype === 2 ? "Banking" : "—") },
+  { label: "Wealth", need: "≥ 10.0", get: (h) => h.wealth.toFixed(1) },
+  { label: "Prestige", need: "≥ 0.30", get: (h) => h.prestige.toFixed(2) },
+  { label: "Seat coin-trust", need: "≥ 0.45", get: (h) => (h.coin_trust ?? 0).toFixed(2) },
+];
+
+function BankCard({ b, house }: { b: BankBrief; house?: HouseBrief }) {
   const assets = b.reserves + b.loans_out + b.real_estate;
   const liab = b.deposits + b.notes_issued;
   const fragile = b.reserve_ratio < 0.22;
+  const [showWhy, setShowWhy] = useState(false);
   return (
     <div style={{ ...card, opacity: b.defunct ? 0.55 : 1 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
@@ -219,7 +230,40 @@ function BankCard({ b }: { b: BankBrief }) {
       </div>
       <div style={{ color: "#9ab0c8", fontSize: 9, marginTop: 1 }}>
         {b.seat} · {b.owner} · est. {b.founded_year}
+        <span onClick={() => setShowWhy((s) => !s)} title="Why this bank opened"
+          style={{ color: "#7fb0d8", cursor: "pointer", marginLeft: 6 }}>
+          {showWhy ? "▾ why it opened" : "▸ why it opened"}
+        </span>
       </div>
+      {showWhy && (
+        <div style={{ margin: "4px 0", padding: "5px 7px", background: "#0e1a27", border: "1px solid #1e2e42", borderRadius: 6 }}>
+          <div style={{ fontSize: 9, color: "#9ab0c8", marginBottom: 3 }}>
+            Chartered in {b.founded_year} because {b.owner} met every founding condition:
+          </div>
+          {BANK_GATES.map((g) => {
+            // A chartered bank met all gates at founding; show ✓ and the house's
+            // current value as context (a guaranteed pass for the no-bank/one-per
+            // gate too). Fall back to a plain ✓ when the house isn't loaded.
+            return (
+              <div key={g.label} style={{ display: "flex", gap: 7, alignItems: "baseline", fontSize: 10, padding: "1px 0" }}>
+                <span style={{ color: "#5fbf6f", fontWeight: 700, width: 12 }}>✓</span>
+                <span style={{ flex: 1, color: "#cbd8e6" }}>{g.label} <span style={{ color: "#6a86a6" }}>{g.need}</span></span>
+                <span style={{ color: "#9ab0c8", fontFamily: "ui-monospace,monospace" }}>{house ? g.get(house) : "✓"}</span>
+              </div>
+            );
+          })}
+          <div style={{ display: "flex", gap: 7, alignItems: "baseline", fontSize: 10, padding: "1px 0" }}>
+            <span style={{ color: "#5fbf6f", fontWeight: 700, width: 12 }}>✓</span>
+            <span style={{ flex: 1, color: "#cbd8e6" }}>No prior bank <span style={{ color: "#6a86a6" }}>one per house</span></span>
+            <span style={{ color: "#9ab0c8" }}>first</span>
+          </div>
+          <div style={{ display: "flex", gap: 7, alignItems: "baseline", fontSize: 10, padding: "1px 0" }}>
+            <span style={{ color: "#5fbf6f", fontWeight: 700, width: 12 }}>✓</span>
+            <span style={{ flex: 1, color: "#cbd8e6" }}>Capital staked <span style={{ color: "#6a86a6" }}>min(6.0, ½ wealth)</span></span>
+            <span style={{ color: "#9ab0c8" }}>{fmtk(b.reserves)}</span>
+          </div>
+        </div>
+      )}
       {/* T-account balance sheet */}
       <div style={{ display: "flex", gap: 12, marginTop: 5 }}>
         <Side title="Assets" totalColor="#80c890" total={assets}

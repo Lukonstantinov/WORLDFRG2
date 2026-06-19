@@ -525,6 +525,7 @@ pub struct EstateRow {
     pub output: f32,         // current production/day of its good
     pub owner: String,       // owning house/guild, or "City of …"
     pub owner_is_guild: bool,
+    pub owner_is_civic: bool, // city-financed (locally owned), no private house/guild
     pub tier: u8,            // upgrade tier 1..5
 }
 
@@ -1275,6 +1276,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                 output: e.production.get(g).copied().unwrap_or(0.0),
                 owner,
                 owner_is_guild,
+                owner_is_civic: e.owner_house < 0,
                 tier: e.estate_tier.max(1),
             }
         })

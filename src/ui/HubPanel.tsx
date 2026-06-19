@@ -666,31 +666,47 @@ export function HubPanel() {
       {/* ════════════ ESTATES & BUILDINGS ════════════ */}
       {tab === "estates" && (
         <>
-          <div style={sectionHdr}>Estates &amp; manufactories</div>
+          <div style={sectionHdr}>Holdings — estates &amp; manufactories</div>
+          <div style={{ color: "#6a86a6", fontSize: 9, margin: "0 0 4px" }}>
+            Linked to this city — all their trade routes through here.
+            <span style={{ color: "#4fc06a", marginLeft: 6 }}>▬ manufactory</span>
+            <span style={{ color: "#ffe14a", marginLeft: 6 }}>▬ estate</span>
+          </div>
           {(detail?.estates_here?.length ?? 0) === 0 && (
             <div style={emptyTxt}>
-              {detail ? "No estates yet — wealthy houses & guilds build them over time." : "Begin the campaign (Step 11) to see this city's estates."}
+              {detail ? "No holdings yet — wealthy houses & guilds build them over time." : "Begin the campaign (Step 11) to see this city's holdings."}
             </div>
           )}
           {[...(detail?.estates_here ?? [])]
             .sort((a, b) => b.output - a.output)
-            .map((e, i) => (
+            .map((e, i) => {
+              // Manufactory (kind 6) ships finished goods (green line); every other
+              // estate kind ships raws (yellow line) — mirrors the map holdings tint.
+              const isManu = e.kind === 6;
+              const lineColor = isManu ? "#4fc06a" : "#ffe14a";
+              const ownerColor = e.owner_is_civic ? "#7fb8ff" : e.owner_is_guild ? "#7fd0c0" : "#e8dcc0";
+              const ownerLabel = e.owner_is_civic ? "city-owned" : e.owner;
+              return (
               <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 10, padding: "2px 2px", borderBottom: "1px solid #131f2c" }}>
+                <span style={{ alignSelf: "stretch", width: 4, borderRadius: 3, background: lineColor }} title={isManu ? "manufactory (green line)" : "estate (yellow line)"} />
                 <span style={{ fontSize: 13 }}>{ESTATE_EMOJI[e.kind] ?? "🏡"}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: "#cdbb88", fontWeight: 600 }}>
                     {ESTATE_LABEL[e.kind] ?? "Estate"} · {iconFor(e.good)} {labelFor(e.good)}
+                    <span style={{ color: lineColor, fontSize: 8, marginLeft: 5, fontWeight: 700 }}>
+                      {isManu ? "MANUFACTORY" : "ESTATE"}
+                    </span>
                     <span style={{ color: "#e0c060", fontSize: 9, marginLeft: 4 }} title="upgrade tier (owners invest to raise output)">
                       {"★".repeat(e.tier ?? 1)}<span style={{ color: "#3a4a5e" }}>{"★".repeat(Math.max(0, 5 - (e.tier ?? 1)))}</span>
                     </span>
                   </div>
                   <div style={{ color: "#7a90a8", fontSize: 9 }}>
-                    owner: <span style={{ color: e.owner_is_guild ? "#7fd0c0" : "#e8dcc0" }}>{e.owner}</span> · tier {e.tier ?? 1}/5
+                    owner: <span style={{ color: ownerColor }}>{ownerLabel}</span> · tier {e.tier ?? 1}/5
                   </div>
                 </div>
                 <span style={{ color: "#7fd0a0", fontSize: 10 }}>▲ {fmt(e.output)}/day</span>
               </div>
-            ))}
+            );})}
 
           {/* Buildings in the city itself (granary, warehouse, …) with effects */}
           <div style={{ ...sectionHdr, marginTop: 8 }}>Buildings</div>

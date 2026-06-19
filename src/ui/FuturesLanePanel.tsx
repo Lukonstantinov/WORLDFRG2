@@ -26,6 +26,15 @@ export function FuturesLanePanel() {
         📜 {lane.term}-year futures contract
         {lane.suspended && <span style={{ color: "#ff9a6a", fontSize: 9 }}> · ☣ suspended (quarantine)</span>}
       </div>
+      {/* Relation summary in the owner's colour — e.g. "Venice → Genoa (silk — House Medici)" */}
+      <div style={{ fontSize: 11, marginBottom: 5, lineHeight: 1.4 }}>
+        <span style={{ color: "#cfe0f4" }}>{lane.a_name}</span>
+        <span style={{ color: "#8aa0c0" }}> → </span>
+        <span style={{ color: "#cfe0f4" }}>{lane.b_name}</span>
+        <span style={{ color: "#8aa0c0" }}>{"  ("}{m.name} — </span>
+        <span style={{ color: lane.color, fontWeight: 700 }}>{lane.holder}</span>
+        <span style={{ color: "#8aa0c0" }}>{lane.is_guild ? ", guild)" : ")"}</span>
+      </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#cfe0f4", marginBottom: 4 }}>
         <span style={{ color: "#9ab0c8" }}>{m.icon} {m.name}</span>
         <span style={{ color: "#7fd0a0" }}>{fmt(lane.qty)}/mo</span>

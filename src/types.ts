@@ -402,6 +402,7 @@ export interface EstateRow {
   output: number;
   owner: string;
   owner_is_guild: boolean;
+  owner_is_civic?: boolean; // city-financed (locally owned)
   tier: number;       // upgrade tier 1..5
 }
 /** One city in the live richest-cities ranking. */
