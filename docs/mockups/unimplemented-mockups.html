@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorldForge 2 — Queued Feature Mockups</title>
+<style>
+  :root{--bg:#0b1420;--panel:#13202e;--panel2:#0f1a26;--line:#1e2e42;
+    --text:#cfe2f6;--muted:#6a86a6;--accent:#3a80c0;--flow:#4fd0c0;
+    --good:#5fbf6f;--warn:#f4c430;--bad:#ff6a4a;--manu:#4fc06a;--estate:#ffe14a;}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(circle at 30% -10%,#16273a,#0b1420 60%);
+    color:var(--text);font:13px/1.5 "Segoe UI",system-ui,sans-serif;padding:26px;}
+  h1{font-size:21px;margin:0 0 2px;font-weight:700}
+  h1 small{color:var(--muted);font-weight:400;font-size:13px}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:var(--flow);
+    margin:30px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  .queued{display:inline-block;font-size:10px;font-weight:700;color:#ffcf8a;background:#33260f;
+    border:1px solid #5a4520;border-radius:20px;padding:1px 9px;margin-left:8px;vertical-align:2px}
+  .grid{display:grid;gap:18px;grid-template-columns:1fr 1fr}
+  @media(max-width:880px){.grid{grid-template-columns:1fr}}
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);
+    border-radius:10px;padding:14px 16px;box-shadow:0 6px 22px rgba(0,0,0,.35)}
+  .ptitle{font-weight:700;font-size:13px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+  .muted{color:var(--muted)} .note{font-size:11.5px;color:var(--muted);border-left:2px solid var(--accent);padding-left:9px;margin:10px 0}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{text-align:left;color:var(--muted);font-weight:600;padding:5px 6px;border-bottom:1px solid var(--line);font-size:11px}
+  td{padding:5px 6px;border-bottom:1px solid #14222f;font-variant-numeric:tabular-nums}
+  .heat{display:inline-block;height:14px;border-radius:3px;text-align:center;color:#06121c;font-weight:700;font-size:10px;line-height:14px}
+  .spark{display:inline-flex;align-items:flex-end;gap:2px;height:18px}
+  .spark i{width:5px;border-radius:1px 1px 0 0}
+  .pop{position:relative;display:inline-block;border-bottom:1px dotted var(--flow);cursor:help}
+  .card{position:absolute;left:0;top:130%;width:250px;z-index:5;background:var(--panel);border:1px solid var(--line);
+    border-radius:8px;padding:10px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+  .row{display:flex;justify-content:space-between;padding:2px 0}
+  .bar{height:7px;border-radius:6px;background:#0c1622;overflow:hidden;flex:1;margin-left:8px;align-self:center}
+  .bar>span{display:block;height:100%}
+  .chip{display:inline-block;font-size:10px;border-radius:20px;padding:1px 8px;border:1px solid var(--line);margin:0 3px 0 0;color:var(--muted)}
+  .city{font-size:11px;fill:#cfe2f6;font-family:inherit} .small{font-size:9.5px;fill:#6a86a6}
+  .toggle{display:flex;align-items:center;gap:6px;font-size:11px;color:#cbd8e6;margin:2px 0}
+  .sw{width:14px;height:14px;border-radius:3px;display:inline-block}
+</style>
+</head>
+<body>
+
+<h1>WorldForge 2 — Queued feature mockups &nbsp;<small>how the not-yet-built pieces could look</small></h1>
+<div class="note">These are the four items flagged as still queued after Phases A–D. Colours/goods/values pulled from the code so they mirror reality.</div>
+
+<!-- ════════ 1 · HOLDINGS MAP OVERLAY ════════ -->
+<h2>1 · Holdings map overlay <span class="queued">QUEUED</span></h2>
+<div class="grid">
+  <div class="panel" style="padding:8px">
+    <svg viewBox="0 0 560 320" width="100%" style="background:radial-gradient(circle at 50% 45%,#0e2236,#091622);border:1px solid var(--line);border-radius:10px">
+      <!-- land blob -->
+      <path d="M60,90 C160,50 360,60 470,90 C520,150 500,250 400,275 C280,300 140,290 80,230 C30,180 30,130 60,90 Z" fill="#16324a" opacity=".5" stroke="#244a66"/>
+      <!-- the parent city -->
+      <circle cx="280" cy="170" r="9" fill="#ffd24a"/><text x="262" y="152" class="city">Verroa</text>
+      <!-- partner cities -->
+      <circle cx="120" cy="120" r="5" fill="#e6cf9a"/><text x="92" y="112" class="city">Pell</text>
+      <circle cx="450" cy="130" r="5" fill="#e6cf9a"/><text x="432" y="120" class="city">Dun</text>
+      <circle cx="420" cy="250" r="5" fill="#e6cf9a"/><text x="400" y="270" class="city">Aremm</text>
+      <!-- holdings lines: GREEN = manufactory exports, YELLOW = estate exports, all ROUTED (bent) -->
+      <g fill="none" stroke-linecap="round">
+        <path d="M280,170 C220,150 180,135 124,122" stroke="#4fc06a" stroke-width="4"/>
+        <path d="M280,170 C340,150 400,140 446,131" stroke="#4fc06a" stroke-width="3"/>
+        <path d="M280,170 C330,200 390,235 416,248" stroke="#ffe14a" stroke-width="4.5"/>
+        <path d="M280,170 C210,210 160,235 124,122" stroke="#ffe14a" stroke-width="2.5" opacity=".7"/>
+      </g>
+      <!-- single arrows -->
+      <g fill="#cfe2f6"><polygon points="180,131 192,125 190,139"/><polygon points="365,206 356,197 372,200"/></g>
+      <text x="150" y="300" class="small">all holdings lines originate at the parent city &amp; follow existing routes</text>
+    </svg>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Toolbar → new toggle</div>
+    <div class="toggle"><input type="checkbox" checked> <span class="sw" style="background:var(--manu)"></span> Manufactory flows (green)</div>
+    <div class="toggle"><input type="checkbox" checked> <span class="sw" style="background:var(--estate)"></span> Estate flows (yellow)</div>
+    <div class="note">A dedicated <code>holdingsFlows</code> overlay: for every holding in a city, draw a routed line from the parent to its top trade partner(s), tinted green (manufactory) / yellow (estate). One toggle so it doesn't clutter the base corridor view.</div>
+    <div class="ptitle" style="margin-top:8px">Hover a line</div>
+    <div style="background:#0e1a27;border:1px solid var(--line);border-radius:7px;padding:8px;font-size:11px">
+      <b style="color:var(--manu)">🏭 Cassii Weavers</b> · 🧵 cloth · tier III<br>
+      <span class="muted">Verroa → Pell · owner <span style="color:#e8dcc0">House Cassii</span> · 410/yr</span>
+    </div>
+    <div class="note">Backend: a small <code>campaign_get_holdings</code> query (parent pos + owner/kind/good + top-partner positions from <code>flow_year</code>); frontend routes via the existing <code>routeAlongTradeRoutes</code>.</div>
+  </div>
+</div>
+
+<!-- ════════ 2 · GOOD PRICE ATLAS ════════ -->
+<h2>2 · Good Price Atlas <span class="queued">QUEUED</span></h2>
+<div class="grid">
+  <div class="panel">
+    <div class="ptitle">🍷 wine — price across every city <span class="muted" style="font-weight:400">cheap → dear</span></div>
+    <table>
+      <tr><th>City</th><th>Price ×world</th><th>vs world</th><th>Arb (after freight)</th></tr>
+      <tr><td>Verroa</td><td><span class="heat" style="width:30px;background:#3aa0ff">0.8×</span></td><td class="muted">source</td><td>—</td></tr>
+      <tr><td>Pell</td><td><span class="heat" style="width:42px;background:#7fc06a">1.1×</span></td><td>+0.3</td><td style="color:var(--good)">+0.2</td></tr>
+      <tr><td>Aremm</td><td><span class="heat" style="width:58px;background:#f4c430">1.6×</span></td><td>+0.8</td><td style="color:var(--good)">+0.6</td></tr>
+      <tr><td>Dunhollow</td><td><span class="heat" style="width:74px;background:#ff6a4a">2.3×</span></td><td>+1.5</td><td style="color:var(--good)">+1.1</td></tr>
+      <tr><td>Brae</td><td><span class="heat" style="width:50px;background:#a8c060">1.3×</span></td><td>+0.5</td><td style="color:var(--good)">+0.3</td></tr>
+    </table>
+    <div class="note">Sortable; one row per hub. Data already exists in <code>EconHub.market</code> (price vs world standard, in/out flows). Picker at top to switch the good.</div>
+  </div>
+  <div class="panel" style="padding:8px">
+    <div class="ptitle" style="padding:6px 8px 0">Companion map overlay — price heatmap</div>
+    <svg viewBox="0 0 380 230" width="100%" style="background:radial-gradient(circle at 50% 45%,#0e2236,#091622);border:1px solid var(--line);border-radius:8px">
+      <path d="M40,60 C120,35 260,42 320,62 C350,110 335,175 270,190 C190,205 100,200 55,160 C25,130 25,90 40,60 Z" fill="#16324a" opacity=".4" stroke="#244a66"/>
+      <circle cx="120" cy="110" r="11" fill="#3aa0ff" opacity=".9"/><text x="104" y="98" class="small">Verroa 0.8×</text>
+      <circle cx="200" cy="80" r="9" fill="#7fc06a"/><text x="190" y="68" class="small">Pell</text>
+      <circle cx="270" cy="150" r="13" fill="#ff6a4a"/><text x="248" y="172" class="small">Dun 2.3×</text>
+      <circle cx="250" cy="100" r="10" fill="#f4c430"/>
+    </svg>
+    <div class="note" style="margin:6px 8px">Cities painted blue (cheap) → red (dear) for the selected good — makes "why trade flows that way" obvious; arrows could point down the gradient.</div>
+  </div>
+</div>
+
+<!-- ════════ 3 · GREAT HOUSES LEADERBOARD ════════ -->
+<h2>3 · Great Houses leaderboard <span class="queued">QUEUED</span></h2>
+<div class="grid">
+  <div class="panel">
+    <div class="ptitle">🏛 Great Houses <span class="muted" style="font-weight:400">sort: wealth ▾</span></div>
+    <table>
+      <tr><th>House</th><th>Wealth</th><th>Networth</th><th>Reach</th></tr>
+      <tr><td>🛡 Cassii</td><td>52.4</td><td><span class="spark"><i style="height:6px;background:#5fbf6f"></i><i style="height:9px;background:#5fbf6f"></i><i style="height:12px;background:#5fbf6f"></i><i style="height:18px;background:#5fbf6f"></i></span></td><td class="muted">3🏭 · 4 off.</td></tr>
+      <tr><td>🛡 Dorne</td><td>41.0</td><td><span class="spark"><i style="height:14px;background:#e08080"></i><i style="height:11px;background:#e08080"></i><i style="height:9px;background:#e08080"></i><i style="height:7px;background:#e08080"></i></span></td><td class="muted">2🍇 · 2 off.</td></tr>
+      <tr><td>⚖ Guild Pell</td><td>33.7</td><td><span class="spark"><i style="height:8px;background:#7fd0c0"></i><i style="height:10px;background:#7fd0c0"></i><i style="height:12px;background:#7fd0c0"></i><i style="height:15px;background:#7fd0c0"></i></span></td><td class="muted">1🏭 · civic</td></tr>
+      <tr><td>🛡 Medici</td><td>29.1</td><td><span class="spark"><i style="height:6px;background:#5fbf6f"></i><i style="height:8px;background:#5fbf6f"></i><i style="height:11px;background:#5fbf6f"></i><i style="height:13px;background:#5fbf6f"></i></span></td><td class="muted">🏦 bank</td></tr>
+    </table>
+    <div class="note">Sortable by wealth / prestige / reach. Networth sparkline from <code>House.wealth_history</code> (already stored, just not surfaced). Click a row → the dynasty view.</div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Click a house → dynasty dashboard</div>
+    <div style="font-size:11px;background:#0e1a27;border:1px solid var(--line);border-radius:8px;padding:10px">
+      <b style="color:#e8dcc0">House Cassii</b> · Gen 4 · Marcus Cassii<br>
+      <span class="muted">Wealth 52.4 <span style="color:var(--good)">▲ stable 11 yrs</span> · Prestige ★★★★☆</span>
+      <div style="margin-top:6px">
+        <span class="chip" style="color:var(--manu)">🏭 cloth manufactory</span>
+        <span class="chip" style="color:var(--estate)">🍷 wine estate</span>
+        <span class="chip">👑 wine 58%</span>
+        <span class="chip">🏛 4 offices</span>
+        <span class="chip" style="color:#e08080">⚔ rival Dorne</span>
+      </div>
+    </div>
+    <div class="note">All fields already on <code>HouseBrief</code> (offices, charters, monopolies, rivals, fleet, archetype) — the leaderboard + dashboard are pure presentation.</div>
+  </div>
+</div>
+
+<!-- ════════ 4 · EXPLAIN-THIS-NUMBER ════════ -->
+<h2>4 · "Explain this number" popover <span class="queued">QUEUED</span></h2>
+<div class="grid">
+  <div class="panel">
+    <div class="ptitle">Hover any derived stat</div>
+    <div style="font-size:13px">
+      Verroa wealth
+      <span class="pop">&nbsp;0.84&nbsp;
+        <span class="card">
+          <div style="font-weight:700;margin-bottom:6px;font-size:11px">wealth = norm(grain + 1.5·trade + 0.25·centrality)</div>
+          <div class="row"><span>🌾 grain</span><b>0.31</b></div>
+          <div class="row"><span>💰 trade ×1.5</span><b>0.46</b></div>
+          <div class="row"><span>🕸 centrality ×0.25</span><b>0.07</b></div>
+        </span>
+      </span>
+    </div>
+    <div style="margin-top:14px">
+      <div class="row" style="font-size:11px"><span class="muted">🌾 grain</span><div class="bar"><span style="width:37%;background:var(--good)"></span></div></div>
+      <div class="row" style="font-size:11px"><span class="muted">💰 trade</span><div class="bar"><span style="width:55%;background:var(--flow)"></span></div></div>
+      <div class="row" style="font-size:11px"><span class="muted">🕸 centrality</span><div class="bar"><span style="width:14%;background:var(--accent)"></span></div></div>
+    </div>
+    <div class="note">Hover the dotted <b>0.84</b> above. A tiny shared component; the formula breakdown reuses values the sim already computes (hub wealth, house political-power, market prices).</div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Where it'd appear</div>
+    <div class="muted" style="font-size:12px">
+      Any number that's a formula rather than a raw value — hub wealth, house political power, monopoly %, coin trust, bank reserve ratio, a good's local price. Each becomes hover-able with a one-line "why this number" breakdown, leaning on the existing SpecDriver-style why-chains where they already exist.
+    </div>
+  </div>
+</div>
+
+<p class="note" style="margin-top:24px;border:0;color:var(--muted);font-size:11px">Static mockups — the "0.84" popover is interactive on hover. Numbers illustrative; colours &amp; formulas pulled from the code.</p>
+</body>
+</html>
