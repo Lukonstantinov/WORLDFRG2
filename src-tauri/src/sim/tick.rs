@@ -80,8 +80,6 @@ const ESTATE_OWNER_CUT: f32 = 0.5;
 /// A resident house this wealthy (or richer) takes ownership of a new estate its
 /// city founds; below it, the city owns the estate.
 const ESTATE_HOUSE_OWNER_WEALTH: f32 = 6.0;
-/// A house must be at least this wealthy to lead a colonization of new land.
-const COLONIZE_HOUSE_WEALTH: f32 = 18.0;
 /// Max distance (fraction of world width) a new colony/route may hop from the
 /// founder OR any of its offices — offices CHAIN the reach (an office is a relay
 /// "ground" from which the next hop is measured), so a network projects far while
@@ -102,6 +100,14 @@ const COLONY_MIGRATION_FRAC: f32 = 0.06;
 const COLONY_FERTILE_SITE: f32 = 0.45;
 /// The age of colonisation opens only once the world has matured — year 50.
 const COLONY_START_TICK: u32 = 50 * 365;
+/// House TRADE OUTPOSTS open earlier — year 30 — but are gated behind serious
+/// wealth: only a great house (≈150k) can afford the heavy founding cost (≈120k).
+/// Easier conditions than a settlement colony (no bank/food/joint-stock), just the
+/// wealth + cost. Outposts can NEVER become independent and stay small.
+const OUTPOST_START_TICK: u32 = 30 * 365;
+const OUTPOST_FOUND_WEALTH: f32 = 150_000.0; // a house this rich may found one
+const OUTPOST_FOUND_COST: f32 = 120_000.0;   // heavy cost (debited from the house)
+const OUTPOST_MAX_POP: f32 = 800.0;          // a trade post stays small (hard pop cap)
 /// Yearly dividend a settlement colony pays its backers, as a fraction of its
 /// trade surplus (kept small so fortunes stay bounded).
 const COLONY_DIVIDEND_RATE: f32 = 0.10;
@@ -240,8 +246,12 @@ const WEALTH_TAX_SCALE: f32 = 60.0;
 /// Without this the local economy let a single house run away to ~1.25M; this pins
 /// the sustained richest house to a few tens of thousands.
 const HOUSE_WEALTH_TAX_BASE: f32 = 0.004;    // monthly flat civic wealth tax
-const HOUSE_WEALTH_SOFTCAP: f32 = 8_000.0;   // wealth below this escapes the surcharge
-const HOUSE_WEALTH_TAX_QUAD: f32 = 5.0e-6;   // monthly quadratic surcharge on the overshoot
+// Wealth is NOT hard-capped: the surcharge only bites well above the soft cap and
+// gently, so a great trading dynasty CAN climb into the hundreds of thousands (and
+// fund a trade outpost) — while the quadratic still bends the very richest back
+// before any millions-scale runaway. Was 8k / 5e-6 (which pinned the richest ~64k).
+const HOUSE_WEALTH_SOFTCAP: f32 = 60_000.0;  // wealth below this escapes the surcharge
+const HOUSE_WEALTH_TAX_QUAD: f32 = 3.0e-7;   // monthly quadratic surcharge on the overshoot
 const HOUSE_WEALTH_TAX_MAXFRAC: f32 = 0.4;   // never tax more than this share of wealth/month
 /// First-N-years surcharge: it is HARD to get rich early (founding generations), the
 /// multiplier lerps from `MULT` at year 0 down to 1.0 by `YEARS`.
@@ -4539,7 +4549,10 @@ impl CampaignSim {
                     });
                 }
             }
-            self.hubs[h].population = new_pop.max(self.hubs[h].founding_pop * 0.10);
+            let mut np = new_pop.max(self.hubs[h].founding_pop * 0.10);
+            // A house trade outpost stays a small trade post — hard population cap.
+            if self.hubs[h].colony_kind == 2 { np = np.min(OUTPOST_MAX_POP); }
+            self.hubs[h].population = np;
         }
         // Estate founding: a big, rich, food-secure hub with a hungry neighbour
         // founds a food estate. At most one per advance batch (cheap, rare).
@@ -4552,10 +4565,14 @@ impl CampaignSim {
         // (population expansion) that can grow into a city of its own. The age of
         // colonisation only opens once the world has matured — from YEAR 50 onward,
         // and only when the wealth/population/site conditions are actually met.
-        if self.tick % 365 == 0 && self.tick >= COLONY_START_TICK {
-            self.maybe_found_house_outpost();
-            self.maybe_found_settlement_colony();
-            self.colony_pass(); // graduation · dividends · autonomy
+        if self.tick % 365 == 0 {
+            // House trade outposts from year 30 (rich house, heavy cost); full
+            // settlement colonies from year 50 (joint-stock, food lifeline).
+            if self.tick >= OUTPOST_START_TICK { self.maybe_found_house_outpost(); }
+            if self.tick >= COLONY_START_TICK {
+                self.maybe_found_settlement_colony();
+                self.colony_pass(); // graduation · dividends · autonomy
+            }
         }
     }
 
@@ -4923,9 +4940,10 @@ impl CampaignSim {
     fn maybe_found_house_outpost(&mut self) {
         if self.colonizable.is_empty() || self.hubs.is_empty() { return; }
         if self.estate_count() >= MAX_TOTAL_ESTATES { return; }
-        // Founder: the richest house above the colonisation wealth floor.
+        // Founder: the richest house, but only if it clears the (heavy) wealth bar —
+        // a trade outpost is the privilege of a truly great house.
         let mut founder = -1i32;
-        let mut hw = COLONIZE_HOUSE_WEALTH;
+        let mut hw = OUTPOST_FOUND_WEALTH;
         for (hi, hh) in self.houses.iter().enumerate() {
             if hh.defunct { continue; }
             if hh.wealth > hw { hw = hh.wealth; founder = hi as i32; }
@@ -4970,13 +4988,13 @@ impl CampaignSim {
             }
         }
         if g0 == usize::MAX { return; }
-        let cost = INVEST_COST_BASE;
-        if self.houses[hi].wealth < cost + 2.0 { return; }
+        let cost = OUTPOST_FOUND_COST;
+        if self.houses[hi].wealth < cost { return; }
         let site = self.colonizable.swap_remove(si);
         let kind = estate_kind_for_good(&self.goods[g0].name, self.goods[g0].food);
         let founder_max_pc = self.hubs[home].base_per_capita.iter().cloned().fold(0.0f32, f32::max).max(0.1);
         let percap = founder_max_pc * (0.4 + site.fertility);
-        let est_pop = self.hubs[home].founding_pop * 0.08; // low-population outpost
+        let est_pop = OUTPOST_MAX_POP; // a small trade post (hard-capped, never grows into a city)
         let component = self.hubs[home].component;          // joins the home trade web
         self.houses[hi].wealth -= cost;
         // parent = −1 keeps the outpost at its REMOTE site coords (not co-located).
@@ -6382,13 +6400,13 @@ mod tests {
         }
         eprintln!("over 50y: wealth ∈ [{min_w:.1}, {peak_w:.1}] · sustained (late) richest {late_max:.0}");
         assert!(min_w.is_finite() && peak_w.is_finite(), "wealth finite");
-        // SUSTAINED wealth must stay sane. Before the progressive house wealth tax
-        // (HOUSE_WEALTH_TAX_*) a single family ran away to ~1.25M and kept climbing;
-        // now the sustained richest sits in the tens of thousands. The LOCAL futures
-        // economy is spikier than main's (one-off arbitrage/contract windfalls land
-        // before the monthly tax claws them back), so the bound is looser than main's
-        // 50k while still catching any true (order-of-magnitude) runaway.
-        assert!(late_max < 120_000.0, "no SUSTAINED runaway-rich house: {late_max}");
+        // SUSTAINED wealth must stay sane. Wealth is intentionally NOT hard-capped
+        // (a great trading dynasty can climb into the hundreds of thousands and so
+        // afford a trade outpost), but the gentle quadratic surcharge still bends the
+        // very richest back — no millions-scale runaway (the old bug ran to ~1.25M).
+        // The bound catches an order-of-magnitude runaway while allowing the elite
+        // ~0.3–0.5M the loosened tax now permits.
+        assert!(late_max < 800_000.0, "no SUSTAINED runaway-rich house: {late_max}");
         assert!(min_w > -100.0, "no runaway-insolvent house (limited liability): {min_w}");
         // The world must actually be DYNAMIC: houses turn over.
         assert!(ever_dissolved, "houses rise and fall over decades");
@@ -6420,9 +6438,10 @@ mod tests {
         s.hubs[0].starving = 0.0;
         s.hubs[0].sent_prosperity = 0.8;
         s.hubs[0].treasury = 40.0;
-        // A wealthy house seated at hub 0 → funds the venture + plants outposts.
+        // A GREAT house seated at hub 0 → funds the venture + plants outposts. Must
+        // clear the heavy outpost wealth bar (OUTPOST_FOUND_WEALTH).
         let mut rich = house_at(0, vec![2], 5);
-        rich.wealth = 300.0;
+        rich.wealth = 400_000.0;
         s.houses.push(rich);
         s.seed_house_count = 1;
         // Empty land near the cluster: a fertile site (→ settlement colony) and a
