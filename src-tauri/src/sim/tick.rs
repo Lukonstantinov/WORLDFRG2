@@ -4634,6 +4634,15 @@ impl CampaignSim {
         let mut production = vec![0.0f32; ng];
         production[g0] = base_per_capita[g0] * est_pop;
         let id = 100_000 + self.hubs.len() as u32;
+        // Holdings are LINKED to their parent settlement: co-locate the estate /
+        // manufactory at the parent's coordinates so it is not a separate point on
+        // the map and all its trade routes through the parent city. The passed
+        // `x,y` (a small offset near the parent) is kept only as a fallback when
+        // there is no parent. Terroir/quality here is seeded by kind, not the cell,
+        // so co-locating costs no fidelity.
+        let (x, y) = if parent >= 0 && (parent as usize) < self.hubs.len() {
+            (self.hubs[parent as usize].x, self.hubs[parent as usize].y)
+        } else { (x, y) };
         let owner_label = if owner_house >= 0 && (owner_house as usize) < self.houses.len() {
             self.houses[owner_house as usize].name.clone()
         } else if parent >= 0 && (parent as usize) < self.hubs.len() {
