@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorldForge 2 — Connection Line Catalog</title>
+<style>
+  :root{--bg:#0b1420;--panel:#13202e;--panel2:#0f1a26;--line:#1e2e42;
+    --text:#cfe2f6;--muted:#6a86a6;--accent:#3a80c0;--accent2:#4fd0c0;
+    --good:#5fbf6f;--warn:#f4c430;--bad:#ff6a4a;}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(circle at 30% -10%,#16273a,#0b1420 60%);
+    color:var(--text);font:13px/1.5 "Segoe UI",system-ui,sans-serif;padding:28px;}
+  h1{font-size:20px;margin:0 0 2px;font-weight:700}
+  h1 small{color:var(--muted);font-weight:400;font-size:13px}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:var(--accent2);
+    margin:30px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  .rule{background:linear-gradient(180deg,#1a2a18,#101c12);border:1px solid #2c5a2c;
+    border-left:4px solid var(--good);border-radius:10px;padding:14px 18px;margin-bottom:8px}
+  .rule b{color:#bfe8bf}
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(2,1fr)}
+  @media(max-width:860px){.grid{grid-template-columns:1fr}}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));
+    border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+    display:flex;gap:14px;align-items:center;box-shadow:0 5px 18px rgba(0,0,0,.3)}
+  .card svg{flex:0 0 230px}
+  .meta{flex:1;min-width:0}
+  .name{font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:8px}
+  .hex{font:11px ui-monospace,monospace;color:var(--muted);border:1px solid var(--line);
+    border-radius:5px;padding:1px 6px}
+  .desc{color:var(--muted);font-size:12px;margin:3px 0 6px}
+  .badge{font-size:10.5px;border-radius:20px;padding:2px 9px;font-weight:600;display:inline-block}
+  .b-ok{background:#14331c;color:#7fe0a0;border:1px solid #2c5a2c}
+  .b-no{background:#331616;color:#ff9a86;border:1px solid #5a2c2c}
+  .b-new{background:#16263a;color:#7fb8ff;border:1px solid #2c4a6a}
+  .swatch{width:13px;height:13px;border-radius:3px;display:inline-block;vertical-align:-2px}
+  .note{font-size:11.5px;color:var(--muted);border-left:2px solid var(--accent);padding-left:9px;margin:6px 0}
+  .legendrow{display:flex;gap:8px;align-items:center;padding:3px 0;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+
+<!-- shared routed-path symbols: a polyline that BENDS through waypoints, to make
+     the "follows existing routes" rule visible. stroke colour set per <use>. -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <!-- a routed corridor: dots = settlements, line snakes via passes/coast -->
+    <symbol id="route" viewBox="0 0 230 72">
+      <path d="M16,56 C40,52 48,30 74,34 S112,52 132,30 168,18 212,20"
+        fill="none" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="16" cy="56" r="4.5" fill="#e6cf9a"/>
+      <circle cx="212" cy="20" r="5.5" fill="#ffd700"/>
+      <circle cx="74" cy="34" r="3" fill="#0b1420" stroke="#6a86a6"/>
+      <circle cx="132" cy="30" r="3" fill="#0b1420" stroke="#6a86a6"/>
+    </symbol>
+  </defs>
+</svg>
+
+<h1>WorldForge 2 — Connection Line Catalog &nbsp;<small>every colour &amp; type · all routed</small></h1>
+
+<h2>The rule</h2>
+<div class="rule">
+  <b>RULE — EVERY line representing trade or a connection between settlements ALWAYS follows the existing trade-route network.</b>
+  No straight point-to-point segments. Every connection (corridors, dynamic flow, commodity trunks, house webs, futures lanes, merchant routes, and the new holdings lines) is snapped onto the already-computed least-cost roads (the coarse cost grid: mountain passes / rivers / coast-hugging) via <code>routeAlongTradeRoutes</code>. A line type only changes <i>colour / width / style / direction</i> — never the path. The bent sample lines below illustrate this.
+  <div class="note" style="margin-top:8px;border-color:var(--warn)">Today: house webs &amp; futures lanes already comply. <b style="color:#ffd28a">Trade Corridors</b> and <b style="color:#ffd28a">Dynamic Flow</b> still draw straight a→b lines (<code>renderCorridors</code> / flow redesign) and would be brought under the rule.</div>
+</div>
+
+<!-- ════════ EXISTING ROUTE PRIMITIVES (the roads everything snaps to) ════════ -->
+<h2>1 · Route primitives — the roads themselves (least-cost network)</h2>
+<div class="grid">
+
+  <div class="card">
+    <svg viewBox="0 0 230 72"><use href="#route" style="stroke:#caa15a"/></svg>
+    <div class="meta"><div class="name">Overland caravan route <span class="hex">#caa15a</span></div>
+      <div class="desc">Land road over passes &amp; valleys (tan).</div>
+      <span class="badge b-ok">✓ is a route</span></div>
+  </div>
+
+  <div class="card">
+    <svg viewBox="0 0 230 72"><use href="#route" style="stroke:#7fd0d8"/></svg>
+    <div class="meta"><div class="name">Maritime route <span class="hex">#7fd0d8</span></div>
+      <div class="desc">Coast-hugging / open-water sea lane (pale cyan).</div>
+      <span class="badge b-ok">✓ is a route</span></div>
+  </div>
+
+  <div class="card">
+    <svg viewBox="0 0 230 72"><use href="#route" style="stroke:#9fe07a"/></svg>
+    <div class="meta"><div class="name">River route <span class="hex">#9fe07a</span></div>
+      <div class="desc">Inland route following a navigable river (green).</div>
+      <span class="badge b-ok">✓ is a route</span></div>
+  </div>
+
+  <div class="card">
+    <svg viewBox="0 0 230 72"><use href="#route" style="stroke:#e0c060;stroke-width:5"/></svg>
+    <div class="meta"><div class="name">Major commodity trunk <span class="hex">#e0c060</span></div>
+      <div class="desc">Bundled worldgen flow; width ∝ volume (amber).</div>
+      <span class="badge b-ok">✓ routed &amp; bundled</span></div>
+  </div>
+
+  <div class="card">
+    <svg viewBox="0 0 230 72"><use href="#route" style="stroke:#b8a878;stroke-dasharray:7 5"/></svg>
+    <div class="meta"><div class="name">Minor trunk <span class="hex">#b8a878</span></div>
+      <div class="desc">Low-volume bundled flow (muted amber, dashed).</div>
+      <span class="badge b-ok">✓ routed &amp; bundled</span></div>
+  </div>
+</div>
+
+<!-- ════════ DYNAMIC / CAMPAIGN FLOWS ════════ -->
+<h2>2 · Live campaign flows &amp; networks</h2>
+<div class="grid">
+
+  <div class="card">
+    <svg viewBox="0 0 230 72"><use href="#route" style="stroke:#5fc8a8;stroke-width:4"/>
+      <polygon points="124,30 112,24 114,38" fill="#7fe0c0"/></svg>
+    <div class="meta"><div class="name">Trade Corridor (live econ) <span class="hex">#5fc8a8</span></div>
+      <div class="desc">Net good flow A⇄B, midpoint arrow = net direction (sea-green).</div>
+      <span class="badge b-no">✗ straight today → must route</span></div>
+  </div>
+
+  <div class="card">
+    <svg viewBox="0 0 230 72"><use href="#route" style="stroke:#4fd0c0;stroke-width:4"/>
+      <polygon points="124,30 112,24 114,38" fill="#4fd0c0"/></svg>
+    <div class="meta"><div class="name">Dynamic Trade Flow <span class="hex">#4fd0c0</span></div>
+      <div class="desc">Yearly-averaged shipped volume; width+alpha ∝ volume (teal).</div>
+      <span class="badge b-no">✗ straight today → must route</span></div>
+  </div>
+
+  <div class="card">
+    <svg viewBox="0 0 230 72"><use href="#route" style="stroke:#e8c84a;stroke-width:3.5"/></svg>
+    <div class="meta"><div class="name">House control web <span class="hex">per-house</span></div>
+      <div class="desc">Selected house's seat→cities reach; tinted by house colour.</div>
+      <span class="badge b-ok">✓ already routed</span></div>
+  </div>
+
+  <div class="card">
+    <svg viewBox="0 0 230 72"><use href="#route" style="stroke:#ffcf3f;stroke-width:3"/>
+      <polygon points="124,30 112,24 114,38" fill="#fff2b0"/></svg>
+    <div class="meta"><div class="name">Futures lane <span class="hex">term-tinted</span></div>
+      <div class="desc">Source→buyer contract; colour by term (3/5/7-yr), active = bright border.</div>
+      <span class="badge b-ok">✓ already routed</span></div>
+  </div>
+
+  <div class="card">
+    <svg viewBox="0 0 230 72"><use href="#route" style="stroke:#5fd0ff;stroke-width:3"/></svg>
+    <div class="meta"><div class="name">Merchant route — inbound <span class="hex">#5fd0ff</span></div>
+      <div class="desc">Goods arriving at the focused city (cyan).</div>
+      <span class="badge b-ok">✓ routed</span></div>
+  </div>
+
+  <div class="card">
+    <svg viewBox="0 0 230 72"><use href="#route" style="stroke:#ffce5f;stroke-width:3"/></svg>
+    <div class="meta"><div class="name">Merchant route — outbound <span class="hex">#ffce5f</span></div>
+      <div class="desc">Goods leaving the focused city (gold).</div>
+      <span class="badge b-ok">✓ routed</span></div>
+  </div>
+</div>
+
+<!-- ════════ NEW HOLDINGS LINES ════════ -->
+<h2>3 · New — holdings lines (estates &amp; manufactories inside the city)</h2>
+<div class="grid">
+
+  <div class="card">
+    <svg viewBox="0 0 230 72"><use href="#route" style="stroke:#4fc06a;stroke-width:3.5"/></svg>
+    <div class="meta"><div class="name">Manufactory export <span class="hex">#4fc06a</span></div>
+      <div class="desc">House/guild manufactory (<code>estate_kind==6</code>) shipping finished goods (green).</div>
+      <span class="badge b-new">NEW</span> <span class="badge b-ok" style="margin-left:4px">✓ routed</span></div>
+  </div>
+
+  <div class="card">
+    <svg viewBox="0 0 230 72"><use href="#route" style="stroke:#ffe14a;stroke-width:3.5"/></svg>
+    <div class="meta"><div class="name">Estate export <span class="hex">#ffe14a</span></div>
+      <div class="desc">Farm / plantation / mine estate shipping raws (shiny yellow).</div>
+      <span class="badge b-new">NEW</span> <span class="badge b-ok" style="margin-left:4px">✓ routed</span></div>
+  </div>
+</div>
+
+<!-- ════════ NOT SUBJECT TO THE RULE ════════ -->
+<h2>4 · Natural / physical lines — NOT trade connections (rule does not apply)</h2>
+<div class="card" style="display:block">
+  <div class="legendrow"><span class="swatch" style="background:#2288cc"></span> River <span class="hex">#2288cc</span> — follows terrain (hydrology), not the trade graph</div>
+  <div class="legendrow"><span class="swatch" style="background:#ee5533"></span> Warm current <span class="hex">#ee5533</span> · <span class="swatch" style="background:#3399ee"></span> Cold current <span class="hex">#3399ee</span> — ocean vectors</div>
+  <div class="legendrow"><span class="swatch" style="background:#aaccee"></span> Wind <span class="hex">#aaccee</span> · <span class="swatch" style="background:#cccc66"></span> Latitude lines <span class="hex">#cccc66</span></div>
+  <div class="note" style="margin-top:8px">These are physical-geography overlays — they keep their own paths. The rule scopes strictly to <b>trade &amp; settlement connections</b>.</div>
+</div>
+
+<p class="note" style="margin-top:24px;border:0;color:var(--muted);font-size:11px">Static mockup — sample lines are intentionally bent to show route-following. Hex values pulled from <code>OverlayManager.ts</code>.</p>
+</body>
+</html>

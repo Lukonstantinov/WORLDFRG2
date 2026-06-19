@@ -137,7 +137,7 @@
       <span class="muted">Teal — generic dynamic flow (existing)</span></div>
     <div class="legend-line"><span class="swatch" style="border-color:#e0c060"></span>
       <span class="muted">Amber — bundled commodity trunks (existing)</span></div>
-    <div class="note" style="border-left-color:var(--bad)"><b style="color:var(--text)">RULE — holdings lines ALWAYS follow existing trade routes.</b> The green (manufactory) and yellow (estate) lines are never drawn as straight point-to-point segments; they are routed along the already-computed least-cost corridors (the coarse cost grid: passes / rivers / coast-hugging), exactly like the existing trade-route &amp; dynamic-flow overlays. They only re-tint a path the trade graph already takes.</div>
+    <div class="note" style="border-left-color:var(--bad)"><b style="color:var(--text)">RULE — EVERY trade/connection line ALWAYS follows existing trade routes.</b> Not just the new green (manufactory) and yellow (estate) lines: all lines between settlements — corridors, dynamic flow, trunks, house webs, futures lanes, merchant routes, holdings — are routed along the already-computed least-cost corridors (coarse cost grid: passes / rivers / coast-hugging) via <code>routeAlongTradeRoutes</code>. They only change colour/width/style, never the path. See <code>connection-lines.html</code> for the full catalog.</div>
     <div class="note">Open question: estate/manufactory lines could be a <b>toggle layer</b> ("Holdings flows") so they don't clutter the base corridor view.</div>
   </div>
 </div>
