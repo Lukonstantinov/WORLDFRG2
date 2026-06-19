@@ -511,6 +511,16 @@ export async function setProgress(scope: "world" | "campaign", progressJson: str
   return invoke("set_progress", { scope, progressJson });
 }
 
+/** Save the appearance palette override (sparse JSON) with the world file. */
+export async function setAppearance(appearanceJson: string): Promise<void> {
+  return invoke("set_appearance", { appearanceJson });
+}
+
+/** Read the world's saved appearance palette override (null if never set). */
+export async function getAppearance(): Promise<string | null> {
+  return invoke("get_appearance");
+}
+
 /** Copy chosen layer groups from another .worldforge file into the current
  *  world (grid sizes must match). Returns the modified tile coords. */
 export async function importWorldLayers(path: string, groups: string[]): Promise<[number, number][]> {

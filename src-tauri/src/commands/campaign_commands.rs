@@ -243,6 +243,23 @@ pub fn set_progress(scope: String, progress_json: String, db: State<'_, WorldDb>
     }
 }
 
+/// Appearance palette (user-customized overlay/line colours) persisted in the
+/// world `metadata` so it travels with the `.worldforge` file — a shared world
+/// then looks the same for everyone. Stored as the sparse-override JSON the
+/// frontend `settingsStore` produces (only keys that differ from the defaults).
+#[tauri::command]
+pub fn set_appearance(appearance_json: String, db: State<'_, WorldDb>) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    metadata::set_meta(&conn, "appearance", &appearance_json).map_err(|e| e.to_string())
+}
+
+/// Read the saved appearance override (None if the world never customized it).
+#[tauri::command]
+pub fn get_appearance(db: State<'_, WorldDb>) -> Result<Option<String>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    metadata::get_meta(&conn, "appearance").map_err(|e| e.to_string())
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // DLC 1 "Living Trade" — tick simulation commands.
 // ═══════════════════════════════════════════════════════════════════════════

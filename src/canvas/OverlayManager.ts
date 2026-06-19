@@ -64,11 +64,6 @@ const SHIPWORM_COLOR = "#b98a4a";
 const STORM_COLOR = "#c050d0";
 const MONSOON_COLOR = "#3a9ad0";
 const REEF_COLOR = "#30c0b0";
-const TRADE_TRUNK = "#e0c060"; // major bundled commodity-flow trunk (amber)
-const TRADE_TRUNK_MINOR = "#b8a878"; // minor/low-volume trunk (muted amber)
-// DLC 3.5 · dynamic (live, yearly-averaged) trade-flow trunks — teal/cyan so they
-// read distinct from the static amber worldgen trunks.
-const DYN_FLOW = "#4fd0c0";
 const POLITICAL_COLOR = "#d65fd0"; // trade-hub marker (magenta) — legacy
 const STAR_COLOR = "#ffd24a"; // power-tier stars on major hubs (gold) — legacy
 const HUB_BLUE = "#3a86d6"; // trade-hub circle
@@ -103,10 +98,32 @@ const COLD_CURRENT = "#3399ee";
 const NEUTRAL_CURRENT = "#9bb0c0";
 const WIND_COLOR = "#aaccee";
 const LAT_LINE_COLOR = "#cccc66";
-const TRADE_LAND = "#caa15a"; // overland caravan route (tan)
-const TRADE_SEA = "#7fd0d8";  // maritime route (pale cyan)
-const TRADE_RIVER = "#9fe07a"; // river-following inland route (green)
 const FISHERY_BANK = "#39d3c0"; // grand-bank fishing ground (teal)
+
+/** Adjustable trade/connection-line colours — seeded with the historical defaults
+ *  and overridden live from the in-game Settings panel (`settingsStore` calls
+ *  `setLineColors`). Every trade/settlement-connection renderer reads from here so
+ *  the whole palette is user-configurable and saveable with the world. */
+export const LINE_COLOR_DEFAULTS = {
+  tradeTrunk: "#e0c060",      // major bundled commodity trunk (amber)
+  tradeTrunkMinor: "#b8a878", // minor/low-volume trunk (muted amber)
+  dynamicFlow: "#4fd0c0",     // live yearly-averaged trade flow (teal)
+  tradeLand: "#caa15a",       // overland caravan route (tan)
+  tradeSea: "#7fd0d8",        // maritime route (pale cyan)
+  tradeRiver: "#9fe07a",      // river-following inland route (green)
+  corridor: "#5fc8a8",        // live econ trade corridor (sea-green)
+  corridorArrow: "#7fe0c0",   // corridor arrowhead
+  merchantIn: "#5fd0ff",      // merchant route inbound (cyan)
+  merchantOut: "#ffce5f",     // merchant route outbound (gold)
+  manufactory: "#4fc06a",     // house/guild manufactory holding line (green)
+  estate: "#ffe14a",          // estate holding line (shiny yellow)
+};
+export type LineColorKey = keyof typeof LINE_COLOR_DEFAULTS;
+export const lineColors: Record<LineColorKey, string> = { ...LINE_COLOR_DEFAULTS };
+/** Apply a partial palette override (from the Settings store). */
+export function setLineColors(partial: Partial<Record<LineColorKey, string>>) {
+  Object.assign(lineColors, partial);
+}
 
 export class OverlayManager {
   private rivers: RiverData[] = [];
@@ -940,7 +957,7 @@ export class OverlayManager {
     const pts = route.points;
     if (pts.length < 2) return;
 
-    const color = route.kind === 1 ? TRADE_SEA : route.kind === 2 ? TRADE_RIVER : TRADE_LAND;
+    const color = route.kind === 1 ? lineColors.tradeSea : route.kind === 2 ? lineColors.tradeRiver : lineColors.tradeLand;
     // Minor connector roads (a lesser town's single link) are drawn thinner and
     // fainter than the major inter-hub routes, so every settlement is on the
     // network without the small roads overpowering the trunks.
@@ -1131,7 +1148,7 @@ export class OverlayManager {
     ctx.lineJoin = "round";
     for (const s of this.flowHighlight) {
       const inbound = s.dir === 0;
-      const color = inbound ? "#5fd0ff" : "#ffce5f"; // cyan in · gold out
+      const color = inbound ? lineColors.merchantIn : lineColors.merchantOut; // cyan in · gold out
       const w = Math.max(1.2, s.w * inv);
       // Trace the ACTUAL merchant path: snap to the drawn trade-routes layer (so the
       // line follows the roads/sea-lanes goods really took). Straight line only if no
@@ -1310,8 +1327,8 @@ export class OverlayManager {
   private renderTradeTrunks(
     ctx: CanvasRenderingContext2D,
     trunks: TradeTrunk[] = this.tradeTrunks,
-    majorColor: string = TRADE_TRUNK,
-    minorColor: string = TRADE_TRUNK_MINOR,
+    majorColor: string = lineColors.tradeTrunk,
+    minorColor: string = lineColors.tradeTrunkMinor,
   ) {
     let maxVol = 0;
     for (const t of trunks) maxVol = Math.max(maxVol, t.volume);
@@ -1392,47 +1409,148 @@ export class OverlayManager {
    *  green Corridors overlay. No dashed minor tier and no road-name labels. */
   private renderDynamicFlow(ctx: CanvasRenderingContext2D) {
     const trunks = this.dynamicTrunks;
+    if (trunks.length === 0) return;
     const half = (this.worldW || 1e9) / 2;
-    let maxVol = 0;
-    for (const t of trunks) maxVol = Math.max(maxVol, t.volume);
-    if (maxVol <= 0) return;
     const inv = 1 / Math.sqrt(this.currentScale);
+    const color = lineColors.dynamicFlow;
+
+    // The backend (`campaign_get_trade_flow`) already bundles every city-pair flow
+    // onto the coarse ROUTE edges it traverses, so each trunk is one short edge of
+    // the road network. We assemble those edges into ONE combined continental
+    // network: a node graph → segments (width ∝ volume, so arteries thicken toward
+    // the busy hubs/emporia) → degree-2 chains merged into arteries with a SINGLE
+    // arrow each (toward the higher-throughput end = the emporium).
+    const key = (p: [number, number]) => `${Math.round(p[0])},${Math.round(p[1])}`;
+    const nodePos = new Map<string, [number, number]>();
+    const nodeThru = new Map<string, number>(); // sum of incident volume
+    type E = { a: string; b: string; vol: number; pa: [number, number]; pb: [number, number] };
+    const edges: E[] = [];
+    let maxVol = 0;
+    for (const t of trunks) {
+      if (t.points.length < 2 || t.volume <= 0) continue;
+      const pa = t.points[0], pb = t.points[1];
+      if (this.worldW > 0 && Math.abs(pa[0] - pb[0]) > half) continue; // wrap seam
+      const ka = key(pa), kb = key(pb);
+      if (ka === kb) continue;
+      nodePos.set(ka, pa); nodePos.set(kb, pb);
+      nodeThru.set(ka, (nodeThru.get(ka) || 0) + t.volume);
+      nodeThru.set(kb, (nodeThru.get(kb) || 0) + t.volume);
+      edges.push({ a: ka, b: kb, vol: t.volume, pa, pb });
+      if (t.volume > maxVol) maxVol = t.volume;
+    }
+    if (edges.length === 0 || maxVol <= 0) return;
+
+    const adj = new Map<string, { e: number; other: string }[]>();
+    edges.forEach((e, i) => {
+      if (!adj.has(e.a)) adj.set(e.a, []);
+      if (!adj.has(e.b)) adj.set(e.b, []);
+      adj.get(e.a)!.push({ e: i, other: e.b });
+      adj.get(e.b)!.push({ e: i, other: e.a });
+    });
+    const isJunction = (k: string) => (adj.get(k)?.length ?? 0) !== 2;
+
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    for (const t of trunks) {
-      const pts = t.points;
-      if (pts.length < 2) continue;
-      const a = pts[0], b = pts[1]; // ordered source → consumer
-      if (this.worldW > 0 && Math.abs(a[0] - b[0]) > half) continue; // wrap seam
-      const norm = t.volume / maxVol;
-      const ax = a[0] + 0.5, ay = a[1] + 0.5, bx = b[0] + 0.5, by = b[1] + 0.5;
-      ctx.globalAlpha = 0.4 + 0.5 * norm;
-      ctx.strokeStyle = DYN_FLOW;
-      ctx.lineWidth = Math.max(0.5, (1.0 + norm * 5.0) * inv);
+
+    // 1) every edge as a segment — width & alpha by volume → the combined network.
+    let chokeEdge = 0;
+    for (let i = 0; i < edges.length; i++) {
+      const e = edges[i];
+      if (e.vol > edges[chokeEdge].vol) chokeEdge = i;
+      const norm = e.vol / maxVol;
+      ctx.globalAlpha = 0.30 + 0.55 * norm;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(0.5, (1.0 + norm * 7.0) * inv);
       ctx.beginPath();
-      ctx.moveTo(ax, ay);
-      ctx.lineTo(bx, by);
+      ctx.moveTo(e.pa[0] + 0.5, e.pa[1] + 0.5);
+      ctx.lineTo(e.pb[0] + 0.5, e.pb[1] + 0.5);
       ctx.stroke();
-      // Single arrowhead at the corridor midpoint, pointing at the consumer (b).
-      let dx = bx - ax, dy = by - ay;
-      const m = Math.hypot(dx, dy);
-      if (m > 0.001) {
-        dx /= m; dy /= m;
-        const hl = Math.max(2, 8 * inv);
-        const px = -dy, py = dx;
-        const mxp = (ax + bx) / 2, myp = (ay + by) / 2;
-        ctx.beginPath();
-        ctx.moveTo(mxp + dx * hl * 0.5, myp + dy * hl * 0.5);
-        ctx.lineTo(mxp - dx * hl * 0.5 + px * hl * 0.5, myp - dy * hl * 0.5 + py * hl * 0.5);
-        ctx.lineTo(mxp - dx * hl * 0.5 - px * hl * 0.5, myp - dy * hl * 0.5 - py * hl * 0.5);
-        ctx.closePath();
-        ctx.fillStyle = DYN_FLOW;
-        ctx.fill();
-      }
     }
+
+    // 2) merge degree-2 chains into arteries; one arrow each, toward the
+    //    higher-throughput endpoint (trade converges on the emporia).
+    const used = new Array(edges.length).fill(false);
+    const extend = (node: string, fromEdge: number): string[] => {
+      const seq: string[] = [];
+      let curNode = node, curEdge = fromEdge;
+      while (!isJunction(curNode)) {
+        const cont = adj.get(curNode)!.find((n) => n.e !== curEdge && !used[n.e]);
+        if (!cont) break;
+        used[cont.e] = true;
+        seq.push(cont.other);
+        curEdge = cont.e; curNode = cont.other;
+      }
+      return seq;
+    };
+    for (let i = 0; i < edges.length; i++) {
+      if (used[i]) continue;
+      used[i] = true;
+      const e = edges[i];
+      const left = extend(e.a, i);   // nodes outward from a
+      const right = extend(e.b, i);  // nodes outward from b
+      const chain = [...left.reverse(), e.a, e.b, ...right];
+      const pts = chain.map((k) => nodePos.get(k)!).filter(Boolean);
+      if (pts.length < 2) continue;
+      // orient toward the higher-throughput endpoint
+      const thruA = nodeThru.get(chain[0]) || 0;
+      const thruB = nodeThru.get(chain[chain.length - 1]) || 0;
+      const ordered = thruB >= thruA ? pts : [...pts].reverse();
+      this.drawFlowArrow(ctx, ordered, e.vol / maxVol, inv, color);
+    }
+
+    // 3) emporia glow on the top-throughput nodes + a chokepoint diamond.
+    const top = [...nodeThru.entries()].sort((x, y) => y[1] - x[1]).slice(0, 3);
+    for (const [k] of top) {
+      const p = nodePos.get(k); if (!p) continue;
+      const r = Math.max(4, 14 * inv);
+      const g = ctx.createRadialGradient(p[0] + 0.5, p[1] + 0.5, 0, p[0] + 0.5, p[1] + 0.5, r);
+      g.addColorStop(0, color); g.addColorStop(1, "transparent");
+      ctx.globalAlpha = 0.30; ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(p[0] + 0.5, p[1] + 0.5, r, 0, Math.PI * 2); ctx.fill();
+    }
+    const ce = edges[chokeEdge];
+    const cmx = (ce.pa[0] + ce.pb[0]) / 2 + 0.5, cmy = (ce.pa[1] + ce.pb[1]) / 2 + 0.5;
+    const d = Math.max(3, 7 * inv);
+    ctx.globalAlpha = 0.95; ctx.strokeStyle = "#ff6a4a"; ctx.lineWidth = Math.max(0.6, 1.6 * inv);
+    ctx.beginPath();
+    ctx.moveTo(cmx, cmy - d); ctx.lineTo(cmx + d, cmy); ctx.lineTo(cmx, cmy + d); ctx.lineTo(cmx - d, cmy);
+    ctx.closePath(); ctx.stroke();
+
     ctx.lineCap = "butt";
     ctx.lineJoin = "miter";
     ctx.globalAlpha = 1;
+  }
+
+  /** One arrowhead at the midpoint of a routed polyline, pointing forward (the
+   *  polyline is pre-oriented toward the consumer/emporium). Shared by the dynamic
+   *  flow arteries. */
+  private drawFlowArrow(
+    ctx: CanvasRenderingContext2D, pts: [number, number][], norm: number,
+    inv: number, color: string,
+  ) {
+    if (pts.length < 2) return;
+    const segs: number[] = []; let total = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const dd = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+      segs.push(dd); total += dd;
+    }
+    if (total <= 1e-6) return;
+    let acc = 0, mi = 0;
+    for (; mi < segs.length - 1; mi++) { if (acc + segs[mi] >= total / 2) break; acc += segs[mi]; }
+    const seg = Math.max(segs[mi], 1e-6);
+    const tt = (total / 2 - acc) / seg;
+    const p0 = pts[mi], p1 = pts[mi + 1];
+    const mx = p0[0] + (p1[0] - p0[0]) * tt + 0.5, my = p0[1] + (p1[1] - p0[1]) * tt + 0.5;
+    let dx = p1[0] - p0[0], dy = p1[1] - p0[1];
+    const m = Math.hypot(dx, dy) || 1; dx /= m; dy /= m;
+    const hl = Math.max(3, 11 * inv) * (0.7 + 0.6 * norm);
+    const px = -dy, py = dx;
+    ctx.globalAlpha = 0.95; ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(mx + dx * hl, my + dy * hl);
+    ctx.lineTo(mx - dx * hl * 0.3 + px * hl * 0.7, my - dy * hl * 0.3 + py * hl * 0.7);
+    ctx.lineTo(mx - dx * hl * 0.3 - px * hl * 0.7, my - dy * hl * 0.3 - py * hl * 0.7);
+    ctx.closePath(); ctx.fill();
   }
 
   /** Trade-region territories: each hub's hinterland as a translucent square
@@ -1873,6 +1991,7 @@ export class OverlayManager {
     if (maxV <= 0) return;
     const inv = 1 / Math.sqrt(this.currentScale);
     ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     for (const c of this.corridors) {
       if (c.points.length < 2) continue;
       const [pa, pb] = c.points;
@@ -1883,32 +2002,22 @@ export class OverlayManager {
       const fwd = c.fwd_value >= c.bwd_value;
       const from = fwd ? pa : pb;
       const to = fwd ? pb : pa;
-      const ax = from[0] + 0.5, ay = from[1] + 0.5, bx = to[0] + 0.5, by = to[1] + 0.5;
+      // RULE: connection lines follow the existing route network — snap onto the
+      // already-drawn roads (falls back to a straight segment only if unrouteable).
+      const routed = this.routeAlongTradeRoutes(from, to);
+      const path: [number, number][] = routed && routed.length >= 2 ? routed : [from, to];
       ctx.globalAlpha = 0.4 + 0.5 * norm;
-      ctx.strokeStyle = "#5fc8a8";
+      ctx.strokeStyle = lineColors.corridor;
       ctx.lineWidth = Math.max(0.5, (1.0 + norm * 5.0) * inv);
       ctx.beginPath();
-      ctx.moveTo(ax, ay);
-      ctx.lineTo(bx, by);
+      ctx.moveTo(path[0][0] + 0.5, path[0][1] + 0.5);
+      for (let i = 1; i < path.length; i++) ctx.lineTo(path[i][0] + 0.5, path[i][1] + 0.5);
       ctx.stroke();
-      // Arrowhead at the consumer end (net direction).
-      let dx = bx - ax, dy = by - ay;
-      const m = Math.hypot(dx, dy);
-      if (m > 0.001) {
-        dx /= m; dy /= m;
-        const hl = Math.max(2, 8 * inv);
-        const px = -dy, py = dx;
-        const mxp = (ax + bx) / 2, myp = (ay + by) / 2; // arrow at corridor midpoint
-        ctx.beginPath();
-        ctx.moveTo(mxp + dx * hl * 0.5, myp + dy * hl * 0.5);
-        ctx.lineTo(mxp - dx * hl * 0.5 + px * hl * 0.5, myp - dy * hl * 0.5 + py * hl * 0.5);
-        ctx.lineTo(mxp - dx * hl * 0.5 - px * hl * 0.5, myp - dy * hl * 0.5 - py * hl * 0.5);
-        ctx.closePath();
-        ctx.fillStyle = "#7fe0c0";
-        ctx.fill();
-      }
+      // Single arrowhead at the routed-path midpoint (net direction).
+      this.drawFlowArrow(ctx, path, norm, inv, lineColors.corridorArrow);
     }
     ctx.lineCap = "butt";
+    ctx.lineJoin = "miter";
     ctx.globalAlpha = 1;
   }
 

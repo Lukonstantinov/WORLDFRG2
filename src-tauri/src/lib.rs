@@ -83,6 +83,8 @@ pub fn run() {
             campaign_commands::save_campaign_as,
             campaign_commands::open_campaign,
             campaign_commands::set_progress,
+            campaign_commands::set_appearance,
+            campaign_commands::get_appearance,
             campaign_commands::campaign_start_sim,
             campaign_commands::campaign_advance,
             campaign_commands::campaign_persist,

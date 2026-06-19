@@ -24,11 +24,13 @@ import { GoodsEditor } from "./ui/GoodsEditor";
 import { GoodsChainReview } from "./ui/GoodsChainReview";
 import { GoodDetailPanel } from "./ui/GoodDetailPanel";
 import { ImportWorldDialog } from "./ui/ImportWorldDialog";
+import { SettingsPanel } from "./ui/SettingsPanel";
 import { useWorldStore } from "./state/worldStore";
 import { useUIStore } from "./state/uiStore";
 import { useViewportStore } from "./state/viewportStore";
 import { useGoodsStore } from "./state/goodsStore";
-import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, persistOverlays, getOverlays, saveCampaignAs, openCampaign, newCampaign, finalizeWorld } from "./bridge/tauri";
+import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, persistOverlays, getOverlays, saveCampaignAs, openCampaign, newCampaign, finalizeWorld, getAppearance } from "./bridge/tauri";
+import { useSettingsStore } from "./state/settingsStore";
 
 const EXPORTABLE_LAYERS: { id: string; label: string }[] = [
   { id: "land", label: "Land / Sea" },
@@ -269,6 +271,7 @@ export default function App() {
   const [showDialog, setShowDialog] = useState(!isLoaded);
   const [showExport, setShowExport] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const handleOpen = async () => {
     try {
@@ -295,6 +298,8 @@ export default function App() {
       // back complete — not just the map tiles.
       try {
         await loadGoodsFromWorld();
+        // Restore the world's saved appearance palette (file value wins).
+        try { const ap = await getAppearance(); useSettingsStore.getState().hydrate(ap ? JSON.parse(ap) : null); } catch { /* keep local palette */ }
         const ov = await getOverlays();
         if (ov.rivers?.length) setRivers(ov.rivers);
         if (ov.lakes?.length) setLakes(ov.lakes);
@@ -505,6 +510,8 @@ export default function App() {
 
         <div style={{ flex: 1 }} />
         {isLoaded && <SettlementSearch />}
+        <button onClick={() => setShowSettings(true)} style={{ ...headerBtn, marginLeft: 6 }}
+          title="Appearance settings (overlay colours)">⚙</button>
       </div>
 
       {/* Main layout: workflow | map | toolbar */}
@@ -545,6 +552,7 @@ export default function App() {
       {showDialog && <NewWorldDialog onCreated={() => setShowDialog(false)} />}
       {showExport && <ExportDialog name={meta?.name || "world"} onClose={() => setShowExport(false)} />}
       {showImport && <ImportWorldDialog onClose={() => setShowImport(false)} />}
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
     </div>
   );
 }
