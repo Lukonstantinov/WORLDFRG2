@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorldForge 2 — Continental Trade Flow</title>
+<style>
+  :root{--bg:#0b1420;--panel:#13202e;--panel2:#0f1a26;--line:#1e2e42;
+    --text:#cfe2f6;--muted:#6a86a6;--accent:#3a80c0;--flow:#4fd0c0;--bad:#ff6a4a;--gold:#ffd24a;}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(circle at 30% -10%,#16273a,#0b1420 60%);
+    color:var(--text);font:13px/1.5 "Segoe UI",system-ui,sans-serif;padding:26px;}
+  h1{font-size:20px;margin:0 0 2px;font-weight:700}
+  h1 small{color:var(--muted);font-weight:400;font-size:13px}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:var(--flow);
+    margin:26px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);
+    border-radius:10px;padding:14px 16px;box-shadow:0 6px 22px rgba(0,0,0,.35)}
+  .map{background:radial-gradient(circle at 55% 45%,#0e2236,#091622);border:1px solid var(--line);border-radius:10px}
+  .muted{color:var(--muted)} .note{font-size:11.5px;color:var(--muted);border-left:2px solid var(--accent);padding-left:9px;margin:10px 0}
+  .legendrow{display:flex;gap:9px;align-items:center;padding:3px 0;font-size:12px}
+  .swatch{height:0;border-top-style:solid;display:inline-block}
+  .grid{display:grid;grid-template-columns:1fr 300px;gap:18px}
+  @media(max-width:880px){.grid{grid-template-columns:1fr}}
+  .city{font-size:11px;fill:#cfe2f6;font-family:inherit}
+  .emp{font-size:13px;fill:#ffe9a8;font-weight:700;font-family:inherit}
+  .pill{display:inline-block;font-size:10.5px;border-radius:20px;padding:2px 9px;border:1px solid var(--line);margin:2px 3px 0 0}
+  .good{background:#14331c;color:#7fe0a0;border-color:#2c5a2c}
+</style>
+</head>
+<body>
+
+<h1>WorldForge 2 — Continental Trade Flow &nbsp;<small>one combined network · trade gravity toward the emporia</small></h1>
+
+<div class="grid">
+<div class="panel" style="padding:8px">
+  <svg viewBox="0 0 760 470" width="100%" class="map">
+    <!-- landmass blob -->
+    <path d="M70,120 C140,70 300,60 410,80 C540,100 690,90 700,180 C712,280 640,360 520,390
+             C400,420 250,430 160,380 C70,330 30,200 70,120 Z"
+          fill="#16324a" opacity=".55" stroke="#244a66" stroke-width="2"/>
+    <!-- sea inlet -->
+    <path d="M700,180 C740,230 740,300 660,330 C690,270 680,220 700,180 Z" fill="#0c2030" opacity=".7"/>
+
+    <!-- ============ COMBINED FLOW NETWORK ============ -->
+    <!-- thin tributaries from inland towns merge into thick arteries that converge on emporia.
+         widths grow toward the emporia (volume accumulates). single arrowheads along arteries. -->
+    <g fill="none" stroke="#4fd0c0" stroke-linecap="round">
+      <!-- tributaries (thin) feeding the western trunk -->
+      <path d="M150,300 C210,280 240,250 300,250" stroke-width="2.5" opacity=".55"/>
+      <path d="M180,160 C240,190 270,220 300,250" stroke-width="2.5" opacity=".55"/>
+      <path d="M120,230 C200,235 250,245 300,250" stroke-width="3" opacity=".6"/>
+      <!-- western trunk into emporium A -->
+      <path d="M300,250 C400,235 470,210 545,200" stroke-width="9" opacity=".9"/>
+      <!-- tributaries feeding the southern trunk -->
+      <path d="M260,380 C330,360 380,330 430,320" stroke-width="2.5" opacity=".55"/>
+      <path d="M400,400 C450,370 470,345 470,330" stroke-width="3" opacity=".6"/>
+      <!-- southern trunk into emporium A -->
+      <path d="M430,320 C490,300 520,250 545,205" stroke-width="7" opacity=".85"/>
+      <!-- main artery emporium A -> emporium B (the great sea lane) -->
+      <path d="M560,200 C610,210 630,250 615,300" stroke-width="11" opacity=".95"/>
+      <!-- spur to a third lesser emporium -->
+      <path d="M545,200 C520,150 470,120 430,110" stroke-width="5" opacity=".8"/>
+    </g>
+    <!-- single direction arrows (one per artery, mid-segment, pointing to the emporium) -->
+    <g fill="#aef3ea">
+      <polygon points="430,212 414,205 416,221"/>            <!-- western trunk -> A -->
+      <polygon points="505,255 491,243 521,247"/>            <!-- southern trunk -> A -->
+      <polygon points="622,250 606,246 612,266"/>            <!-- A -> B -->
+      <polygon points="480,150 466,142 472,160"/>            <!-- spur -> C -->
+    </g>
+
+    <!-- chokepoint where southern + western converge before A -->
+    <g transform="translate(545,202)"><rect x="-8" y="-8" width="16" height="16" transform="rotate(45)" fill="none" stroke="#ff6a4a" stroke-width="2.5"/></g>
+
+    <!-- ============ SETTLEMENTS ============ -->
+    <!-- emporia: large glowing gold -->
+    <circle cx="552" cy="200" r="16" fill="#ffd24a" opacity=".18"/>
+    <circle cx="552" cy="200" r="8" fill="#ffd24a"/><text x="556" y="190" class="emp">Venzia ★</text>
+    <circle cx="615" cy="305" r="14" fill="#ffd24a" opacity=".18"/>
+    <circle cx="615" cy="305" r="7" fill="#ffd24a"/><text x="560" y="330" class="emp">Constantia ★</text>
+    <circle cx="426" cy="108" r="10" fill="#ffd24a" opacity=".16"/>
+    <circle cx="426" cy="108" r="5.5" fill="#ffcf66"/><text x="380" y="98" class="emp" style="font-size:11px">Genova</text>
+
+    <!-- ordinary towns (small) -->
+    <g fill="#e6cf9a">
+      <circle cx="150" cy="300" r="4"/><circle cx="180" cy="160" r="4"/><circle cx="120" cy="230" r="4"/>
+      <circle cx="260" cy="380" r="4"/><circle cx="400" cy="400" r="4"/><circle cx="300" cy="250" r="4.5"/>
+      <circle cx="430" cy="320" r="4"/>
+    </g>
+    <g class="city" fill="#a7c0d8">
+      <text x="118" y="296">Aremm</text><text x="150" y="152">Pell</text><text x="86" y="232">Brae</text>
+      <text x="228" y="396">Dunhollow</text><text x="372" y="416">Calla</text><text x="270" y="244">Verroa</text>
+    </g>
+  </svg>
+</div>
+
+<div class="panel">
+  <div style="font-weight:700;margin-bottom:6px">Reading the map</div>
+  <div class="legendrow"><span class="swatch" style="width:30px;border-top-width:11px;border-color:#4fd0c0"></span> great artery — heaviest trade</div>
+  <div class="legendrow"><span class="swatch" style="width:30px;border-top-width:6px;border-color:#4fd0c0"></span> trunk</div>
+  <div class="legendrow"><span class="swatch" style="width:30px;border-top-width:2.5px;border-color:#4fd0c0;opacity:.6"></span> tributary (feeder)</div>
+  <div class="legendrow"><span style="color:var(--gold);font-size:16px">★</span> emporium — trade-gravity hub (Venzia / Constantia…)</div>
+  <div class="legendrow"><span style="color:var(--bad);font-size:15px">◇</span> chokepoint — arteries funnel through here</div>
+  <div class="legendrow"><span style="font-size:14px;color:#aef3ea">▶</span> one arrow per artery (net direction)</div>
+
+  <div class="note" style="border-color:var(--flow)"><b style="color:var(--text)">One combined network.</b> No per-pair lines: every settlement's average outflow merges into shared arteries that thicken as they approach the dominant emporia — the continental picture of <i>where trade tends to flow</i>, like routing toward Constantinople, Venice &amp; Genoa.</div>
+
+  <div style="font-weight:700;margin:8px 0 4px">Click an artery → its cargo</div>
+  <span class="pill good">🍷 wine</span><span class="pill good">🧂 salt</span><span class="pill good">🌾 grain</span>
+  <span class="pill good">🧵 cloth</span><span class="pill good">🪵 timber</span>
+
+  <div class="note">Continental scope: bundled per landmass / trade region, yearly-averaged. Faint zero-volume routes stay drawn (pre-generated network — future shifts may light them up).</div>
+  <div class="note">Colours here are user-set in <b>top-screen Settings</b> and <b>saved with the world / campaign file</b> (a shared world looks identical for everyone).</div>
+</div>
+</div>
+
+<p class="note" style="margin-top:22px;border:0;color:var(--muted);font-size:11px">Static mockup — arterial widths/positions illustrative. The merge-into-emporia structure is the point.</p>
+</body>
+</html>
