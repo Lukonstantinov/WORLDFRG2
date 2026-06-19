@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorldForge 2 — Colour Settings + Bundled Flow</title>
+<style>
+  :root{--bg:#0b1420;--panel:#13202e;--panel2:#0f1a26;--line:#1e2e42;
+    --text:#cfe2f6;--muted:#6a86a6;--accent:#3a80c0;--accent2:#4fd0c0;
+    --good:#5fbf6f;--warn:#f4c430;--bad:#ff6a4a;}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(circle at 30% -10%,#16273a,#0b1420 60%);
+    color:var(--text);font:13px/1.5 "Segoe UI",system-ui,sans-serif;padding:28px;}
+  h1{font-size:20px;margin:0 0 2px;font-weight:700}
+  h1 small{color:var(--muted);font-weight:400;font-size:13px}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:var(--accent2);
+    margin:30px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  .grid{display:grid;gap:18px;grid-template-columns:380px 1fr}
+  @media(max-width:880px){.grid{grid-template-columns:1fr}}
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));
+    border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+    box-shadow:0 6px 22px rgba(0,0,0,.35)}
+  .ptitle{font-weight:700;font-size:13.5px;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+  .muted{color:var(--muted)} .note{font-size:11.5px;color:var(--muted);border-left:2px solid var(--accent);padding-left:9px;margin:10px 0}
+  /* settings rows */
+  select,button{background:#0e1a27;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:5px 9px;font:inherit}
+  button{cursor:pointer} button:hover{border-color:var(--accent)}
+  .group{font-size:10.5px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:12px 0 4px}
+  .crow{display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid #14222f}
+  .crow .nm{flex:1}
+  .crow input[type=color]{width:30px;height:24px;border:1px solid var(--line);border-radius:5px;background:none;padding:0;cursor:pointer}
+  .crow .hex{font:11px ui-monospace,monospace;color:var(--muted);width:64px}
+  .crow .rst{color:var(--muted);cursor:pointer;font-size:14px}
+  .barline{height:0;border-top-width:3px;border-top-style:solid;flex:0 0 28px}
+  /* flow svg */
+  .lbl{font-size:11px;fill:#cfe2f6;font-family:inherit}
+  .smol{font-size:10px;fill:#6a86a6}
+  .legendrow{display:flex;gap:8px;align-items:center;padding:3px 0;color:var(--muted);font-size:12px}
+  .swatch{width:24px;height:0;border-top-width:3px;border-top-style:solid;display:inline-block}
+  .pill{display:inline-block;font-size:10.5px;border-radius:20px;padding:2px 9px;border:1px solid var(--line);margin:2px 3px 0 0}
+  .badbad{background:#331616;color:#ff9a86;border-color:#5a2c2c}
+  .badgood{background:#14331c;color:#7fe0a0;border-color:#2c5a2c}
+</style>
+</head>
+<body>
+
+<h1>WorldForge 2 — Colour settings &amp; bundled dynamic flow &nbsp;<small>static mockup · live colour pickers work</small></h1>
+
+<div class="grid">
+
+<!-- ════════ COLOUR SETTINGS PANEL ════════ -->
+<div class="panel">
+  <div class="ptitle">⚙ Settings — Appearance <span class="muted" style="font-weight:400">live preview</span></div>
+  <div style="display:flex;gap:8px;align-items:center;margin:6px 0 4px">
+    <span class="muted">Theme</span>
+    <select><option>Default</option><option>High contrast</option><option>Colour-blind safe</option><option>Custom</option></select>
+    <button>Reset all</button>
+  </div>
+  <div class="note">Each colour below is a live <code>&lt;input type=color&gt;</code> — drag one and imagine the map recolouring instantly. Saved to localStorage (and optionally into the .world / .campaign file).</div>
+
+  <div class="group">Route primitives</div>
+  <div class="crow"><span class="barline" style="border-color:#caa15a"></span><span class="nm">Overland caravan</span><span class="hex">#caa15a</span><input type="color" value="#caa15a"><span class="rst" title="reset">↺</span></div>
+  <div class="crow"><span class="barline" style="border-color:#7fd0d8"></span><span class="nm">Maritime</span><span class="hex">#7fd0d8</span><input type="color" value="#7fd0d8"><span class="rst">↺</span></div>
+  <div class="crow"><span class="barline" style="border-color:#9fe07a"></span><span class="nm">River</span><span class="hex">#9fe07a</span><input type="color" value="#9fe07a"><span class="rst">↺</span></div>
+  <div class="crow"><span class="barline" style="border-color:#e0c060"></span><span class="nm">Commodity trunk</span><span class="hex">#e0c060</span><input type="color" value="#e0c060"><span class="rst">↺</span></div>
+
+  <div class="group">Live flows &amp; networks</div>
+  <div class="crow"><span class="barline" style="border-color:#4fd0c0"></span><span class="nm">Dynamic trade flow</span><span class="hex">#4fd0c0</span><input type="color" value="#4fd0c0"><span class="rst">↺</span></div>
+  <div class="crow"><span class="barline" style="border-color:#5fc8a8"></span><span class="nm">Trade corridor</span><span class="hex">#5fc8a8</span><input type="color" value="#5fc8a8"><span class="rst">↺</span></div>
+  <div class="crow"><span class="barline" style="border-color:#5fd0ff"></span><span class="nm">Merchant — inbound</span><span class="hex">#5fd0ff</span><input type="color" value="#5fd0ff"><span class="rst">↺</span></div>
+  <div class="crow"><span class="barline" style="border-color:#ffce5f"></span><span class="nm">Merchant — outbound</span><span class="hex">#ffce5f</span><input type="color" value="#ffce5f"><span class="rst">↺</span></div>
+
+  <div class="group">Holdings (new)</div>
+  <div class="crow"><span class="barline" style="border-color:#4fc06a"></span><span class="nm">Manufactory export</span><span class="hex">#4fc06a</span><input type="color" value="#4fc06a"><span class="rst">↺</span></div>
+  <div class="crow"><span class="barline" style="border-color:#ffe14a"></span><span class="nm">Estate export</span><span class="hex">#ffe14a</span><input type="color" value="#ffe14a"><span class="rst">↺</span></div>
+
+  <div class="note" style="border-color:var(--good)">Feasible &amp; low-risk: move the hard-coded colour <code>const</code>s in <code>OverlayManager.ts</code> into a settings store the manager reads from; this panel writes that store.</div>
+</div>
+
+<!-- ════════ DYNAMIC FLOW — BEFORE / AFTER ════════ -->
+<div class="panel">
+  <div class="ptitle">Dynamic flow — bundle onto the route, one arrow</div>
+
+  <div class="group" style="margin-top:2px">Before — every pair its own straight line + its own arrow</div>
+  <svg viewBox="0 0 560 130" width="100%">
+    <circle cx="40" cy="65" r="6" fill="#ffd700"/><text x="22" y="48" class="lbl">Verroa</text>
+    <circle cx="520" cy="65" r="6" fill="#ff8844"/><text x="490" y="48" class="lbl">Dun</text>
+    <!-- 4 overlapping straight lines, each with its own arrow -->
+    <g stroke="#4fd0c0" stroke-width="2" opacity=".8">
+      <line x1="46" y1="60" x2="514" y2="56"/><polygon points="290,58 278,52 280,64" fill="#4fd0c0"/>
+      <line x1="46" y1="65" x2="514" y2="65"/><polygon points="300,65 288,59 290,71" fill="#4fd0c0"/>
+      <line x1="46" y1="70" x2="514" y2="74"/><polygon points="280,72 268,66 270,78" fill="#4fd0c0"/>
+      <line x1="46" y1="63" x2="514" y2="60"/><polygon points="312,61 300,55 302,67" fill="#4fd0c0"/>
+    </g>
+    <text x="180" y="110" class="smol">4 goods → 4 stacked lines, 4 arrows, straight across mountains</text>
+  </svg>
+  <div><span class="pill badbad">✗ clutter</span><span class="pill badbad">✗ straight</span><span class="pill badbad">✗ arrow spam</span></div>
+
+  <div class="group">After — one bundled line ON the route · single arrow · busiest highlighted · chokepoint flagged</div>
+  <svg viewBox="0 0 560 150" width="100%">
+    <circle cx="40" cy="80" r="6" fill="#ffd700"/><text x="22" y="63" class="lbl">Verroa</text>
+    <circle cx="520" cy="80" r="6" fill="#ff8844"/><text x="492" y="63" class="lbl">Dun</text>
+    <!-- one bundled routed (bent) line, width by total volume -->
+    <path d="M46,80 C140,72 180,52 250,56 S360,96 430,82 500,78 514,80"
+      fill="none" stroke="#4fd0c0" stroke-width="9" stroke-linecap="round" opacity=".92"/>
+    <!-- single midpoint arrow -->
+    <polygon points="262,55 246,47 250,67" fill="#aef3ea"/>
+    <!-- chokepoint diamond at the narrow pass -->
+    <g transform="translate(250,56)"><rect x="-7" y="-7" width="14" height="14" transform="rotate(45)" fill="none" stroke="#ff6a4a" stroke-width="2"/></g>
+    <text x="214" y="34" fill="#ff8f7a" font-size="11">⚠ choke: Aremm pass</text>
+    <!-- intermediate route waypoints -->
+    <circle cx="250" cy="56" r="3" fill="#0b1420" stroke="#6a86a6"/>
+    <circle cx="430" cy="82" r="3" fill="#0b1420" stroke="#6a86a6"/>
+    <text x="120" y="128" class="smol">width ∝ total volume (8,400 u/yr) · click → goods breakdown</text>
+  </svg>
+  <div style="margin-top:6px">
+    <span class="pill badgood">✓ one line</span><span class="pill badgood">✓ one arrow</span>
+    <span class="pill badgood">✓ follows route</span><span class="pill badgood">✓ chokepoint</span>
+    <span class="pill badgood">✓ width = busiest</span>
+  </div>
+
+  <div class="group">Click the bundled line → what it carries</div>
+  <div style="font-size:12px">
+    <div class="legendrow"><span style="width:64px">🍷 wine</span><span class="swatch" style="width:120px;border-color:#4fd0c0"></span><b style="margin-left:8px">3,100</b></div>
+    <div class="legendrow"><span style="width:64px">🧂 salt</span><span class="swatch" style="width:78px;border-color:#4fd0c0"></span><b style="margin-left:8px">2,000</b></div>
+    <div class="legendrow"><span style="width:64px">🧵 cloth</span><span class="swatch" style="width:52px;border-color:#4fd0c0"></span><b style="margin-left:8px">1,300</b></div>
+    <div class="legendrow muted"><span style="width:64px">+3 more</span><span class="swatch" style="width:40px;border-color:#2c5a6a"></span><span style="margin-left:8px">2,000</span></div>
+  </div>
+
+  <div class="note">Pre-generated routes never disappear: a route with <b>zero</b> current volume still draws as a faint thin "possible route" (future shifts may light it up), per your call.</div>
+</div>
+
+</div>
+
+<p class="note" style="margin-top:24px;border:0;color:var(--muted);font-size:11px">Static mockup. "After" line is bundled = sum of all pair-volumes that share that road; chokepoint = a route segment many bundles pass through.</p>
+</body>
+</html>
