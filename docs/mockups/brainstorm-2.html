@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorldForge 2 — UI Brainstorm v2</title>
+<style>
+  :root{
+    --bg:#0b1420; --panel:#13202e; --panel2:#0f1a26; --line:#1e2e42;
+    --text:#cfe2f6; --muted:#6a86a6; --accent:#3a80c0; --accent2:#4fd0c0;
+    --good:#5fbf6f; --warn:#f4c430; --bad:#ff6a4a;
+    --manu:#4fc06a;       /* manufactory trade line — green */
+    --estate:#ffe14a;     /* estate trade line — shiny yellow */
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(circle at 30% -10%,#16273a,#0b1420 60%);
+    color:var(--text);font:13px/1.5 "Segoe UI",system-ui,sans-serif;padding:28px;}
+  h1{font-size:20px;margin:0 0 2px;font-weight:700;letter-spacing:.3px}
+  h1 small{color:var(--muted);font-weight:400;font-size:13px}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:var(--accent2);
+    margin:34px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  .grid{display:grid;gap:18px}
+  .cols2{grid-template-columns:1fr 1fr}
+  .cols3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:900px){.cols2,.cols3{grid-template-columns:1fr}}
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));
+    border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+    box-shadow:0 6px 22px rgba(0,0,0,.35)}
+  .ptitle{font-weight:700;font-size:13.5px;display:flex;justify-content:space-between;
+    align-items:center;margin-bottom:10px}
+  .ptitle .x{color:#7090b0;cursor:pointer}
+  .tag{font-size:10px;color:var(--muted);border:1px solid var(--line);
+    border-radius:20px;padding:1px 8px}
+  .muted{color:var(--muted)}
+  .row{display:flex;justify-content:space-between;gap:8px;padding:3px 0}
+  .row b{font-weight:600}
+  .bar{height:7px;border-radius:6px;background:#0c1622;overflow:hidden;flex:1}
+  .bar>span{display:block;height:100%}
+  .chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);
+    border-radius:7px;padding:3px 8px;margin:2px 4px 2px 0;background:#0e1a27;font-size:12px}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .check{display:flex;gap:9px;align-items:flex-start;padding:5px 0;border-bottom:1px dashed #18283a}
+  .check:last-child{border:0}
+  .ok{color:var(--good)} .no{color:var(--bad)} .pend{color:var(--warn)}
+  .ico{width:18px;text-align:center;font-weight:700}
+  .cval{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
+  .legend-line{display:flex;align-items:center;gap:9px;padding:4px 0}
+  .swatch{width:34px;height:0;border-top-width:3px;border-top-style:solid}
+  .district{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:8px;
+    background:#0e1a27;border:1px solid var(--line);margin:5px 0}
+  .district .lead{width:6px;align-self:stretch;border-radius:4px}
+  .spark{display:flex;align-items:flex-end;gap:2px;height:34px}
+  .spark i{width:7px;background:linear-gradient(180deg,var(--accent2),#2b6f7a);border-radius:2px 2px 0 0}
+  .mini-map{position:relative;height:150px;background:
+    radial-gradient(circle at 60% 40%,#16324a,#0c1c2b);border:1px solid var(--line);
+    border-radius:8px;overflow:hidden}
+  .node{position:absolute;transform:translate(-50%,-50%);font-size:11px;text-align:center}
+  .node .pin{font-size:16px;display:block}
+  .edge{position:absolute;height:0;transform-origin:left center;border-top-width:2px;border-top-style:solid}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{ text-align:left;color:var(--muted);font-weight:600;padding:6px 6px;border-bottom:1px solid var(--line)}
+  td{padding:6px 6px;border-bottom:1px solid #14222f;font-variant-numeric:tabular-nums}
+  .heat{height:14px;border-radius:3px;min-width:26px;display:inline-block;text-align:center;
+    color:#06121c;font-weight:700;font-size:10px;line-height:14px}
+  .note{font-size:11.5px;color:var(--muted);margin-top:8px;border-left:2px solid var(--accent);
+    padding-left:9px}
+  .pop{position:relative;display:inline-block;border-bottom:1px dotted var(--accent2);cursor:help}
+  .pop .card{position:absolute;left:0;top:130%;width:260px;z-index:5}
+  .feed-item{display:flex;gap:9px;padding:7px 0;border-bottom:1px dashed #18283a}
+  .feed-item:last-child{border:0}
+  .feed-ico{font-size:15px;width:22px;text-align:center}
+  .filter{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:20px;
+    padding:2px 10px;margin:0 4px 4px 0;color:var(--muted);cursor:pointer}
+  .filter.on{color:var(--text);border-color:var(--accent);background:#11283f}
+</style>
+</head>
+<body>
+
+<h1>WorldForge 2 — UI Brainstorm v2 &nbsp;<small>static mockups · open in browser · worldbuilding-tool framing</small></h1>
+
+<!-- ════════════════ ESTATES & MANUFACTORIES INSIDE THE CITY ════════════════ -->
+<h2>1 · Estates &amp; manufactories move INSIDE the settlement</h2>
+<div class="grid cols2">
+
+  <div class="panel">
+    <div class="ptitle">Verroa — Holdings <span class="x">×</span></div>
+    <div class="muted" style="margin-bottom:8px">No more separate map pins. A city's estates &amp; manufactories live in a <b>Holdings</b> district list. Their <b>trade lines on the map</b> still emanate from the city, just colour-coded by owner type.</div>
+
+    <div class="district"><span class="lead" style="background:var(--manu)"></span>
+      <span style="font-size:16px">🏭</span>
+      <div><b>Cassii Weavers</b> · manufactory <span class="tag">🧵 cloth · tier II</span><br>
+      <span class="muted">owner House Cassii · skill ★★★ · out 410/yr</span></div>
+      <span class="cval" style="color:var(--manu)">▬ green line</span>
+    </div>
+    <div class="district"><span class="lead" style="background:var(--manu)"></span>
+      <span style="font-size:16px">🏭</span>
+      <div><b>Guild Foundry</b> · manufactory <span class="tag">⚙ metalware</span><br>
+      <span class="muted">owner Guild of Verroa · skill ★★ · out 260/yr</span></div>
+      <span class="cval" style="color:var(--manu)">▬ green line</span>
+    </div>
+    <div class="district"><span class="lead" style="background:var(--estate)"></span>
+      <span style="font-size:16px">🍇</span>
+      <div><b>Dorne Vineyard</b> · estate <span class="tag">🍷 wine</span><br>
+      <span class="muted">owner House Dorne · terroir ★★★★ · out 1,100/yr</span></div>
+      <span class="cval" style="color:var(--estate)">▬ yellow line</span>
+    </div>
+    <div class="district"><span class="lead" style="background:var(--estate)"></span>
+      <span style="font-size:16px">🌾</span>
+      <div><b>Verroa Grange</b> · estate <span class="tag">🌾 wheat</span><br>
+      <span class="muted">civic · terroir ★★★ · out 2,400/yr</span></div>
+      <span class="cval" style="color:var(--estate)">▬ yellow line</span>
+    </div>
+    <div class="note">Implementation note: estates today are real <code>is_estate</code> hubs at their own x/y. Folding them into the parent means they stop being map nodes but keep their production/quality — the lines are drawn parent→partner, tinted by <code>owner_house</code> / <code>estate_kind==6</code>.</div>
+  </div>
+
+  <div class="panel">
+    <div class="ptitle">Map — trade-line colour key</div>
+    <div class="mini-map" style="margin-bottom:10px">
+      <!-- city -->
+      <div class="node" style="left:50%;top:50%"><span class="pin">🏛</span>Verroa</div>
+      <!-- partners -->
+      <div class="node" style="left:14%;top:22%"><span class="pin">⚓</span>Pell</div>
+      <div class="node" style="left:86%;top:24%"><span class="pin">🏰</span>Dun</div>
+      <div class="node" style="left:80%;top:82%"><span class="pin">🏘</span>Aremm</div>
+      <div class="node" style="left:18%;top:80%"><span class="pin">🏘</span>Brae</div>
+      <!-- edges: green = manufactory exports, yellow = estate exports, teal = generic flow -->
+      <div class="edge" style="left:50%;top:50%;width:42%;transform:rotate(212deg);border-color:var(--manu)"></div>
+      <div class="edge" style="left:50%;top:50%;width:40%;transform:rotate(-30deg);border-color:var(--manu)"></div>
+      <div class="edge" style="left:50%;top:50%;width:40%;transform:rotate(34deg);border-color:var(--estate);border-top-width:3px"></div>
+      <div class="edge" style="left:50%;top:50%;width:42%;transform:rotate(148deg);border-color:var(--estate);border-top-width:3px"></div>
+    </div>
+    <div class="legend-line"><span class="swatch" style="border-color:var(--manu)"></span>
+      <span><b>Green</b> — house/guild <b>manufactory</b> exports</span></div>
+    <div class="legend-line"><span class="swatch" style="border-color:var(--estate)"></span>
+      <span><b>Shiny yellow</b> — <b>estate</b> (farm/plantation/mine) exports</span></div>
+    <div class="legend-line"><span class="swatch" style="border-color:var(--accent2)"></span>
+      <span class="muted">Teal — generic dynamic flow (existing)</span></div>
+    <div class="legend-line"><span class="swatch" style="border-color:#e0c060"></span>
+      <span class="muted">Amber — bundled commodity trunks (existing)</span></div>
+    <div class="note">Open question: estate/manufactory lines could be a <b>toggle layer</b> ("Holdings flows") so they don't clutter the base corridor view.</div>
+  </div>
+</div>
+
+<!-- ════════════════ BANK FOUNDING EXPLAINER ════════════════ -->
+<h2>2 · "Why did this bank open?" — founding explainer with met conditions</h2>
+<div class="grid cols2">
+  <div class="panel">
+    <div class="ptitle">🏦 Banco di Verroa — chartered 1471 <span class="tag">House Cassii</span></div>
+    <div class="muted" style="margin-bottom:10px">Shown the moment a family founds a bank (journal pop + a permanent card on the bank). Every gate from <code>update_banks()</code> with the family's actual value vs the floor.</div>
+
+    <div class="check"><span class="ico ok">✓</span><div><b>Banking archetype</b><br><span class="muted">House pursued capital &amp; lending</span></div><span class="cval">Banking ✓</span></div>
+    <div class="check"><span class="ico ok">✓</span><div><b>Wealth ≥ 10.0k</b><br><span class="muted">enough capital to back notes</span></div><span class="cval">52.4k</span></div>
+    <div class="check"><span class="ico ok">✓</span><div><b>Prestige ≥ 0.30</b><br><span class="muted">trusted enough to take deposits</span></div><span class="cval">0.61</span></div>
+    <div class="check"><span class="ico ok">✓</span><div><b>Seat coin-trust ≥ 0.45</b><br><span class="muted">Verroa's mint is credible</span></div><span class="cval">0.72</span></div>
+    <div class="check"><span class="ico ok">✓</span><div><b>No existing bank</b><br><span class="muted">one charter per house</span></div><span class="cval">first</span></div>
+    <div class="check"><span class="ico ok">✓</span><div><b>Capital ≥ 1.0k put up</b><br><span class="muted">min(6.0k, ½ wealth) staked as reserves</span></div><span class="cval">6.0k</span></div>
+    <div class="note">Reads like a tooltip "achievement". The same card, with a ✗/⏳, can preview a <b>rising house that's <i>almost</i></b> a banker ("needs +0.08 prestige").</div>
+  </div>
+
+  <div class="panel">
+    <div class="ptitle">House Aremm — bank candidacy <span class="tag">not yet</span></div>
+    <div class="muted" style="margin-bottom:10px">Same checklist, predictive. Lets a worldbuilder see who's <i>about</i> to become a banking power.</div>
+    <div class="check"><span class="ico ok">✓</span><div><b>Banking archetype</b></div><span class="cval">Banking ✓</span></div>
+    <div class="check"><span class="ico ok">✓</span><div><b>Wealth ≥ 10.0k</b></div><span class="cval">18.2k</span></div>
+    <div class="check"><span class="ico no">✗</span><div><b>Prestige ≥ 0.30</b><br><span class="no">short by 0.07</span></div><span class="cval">0.23</span></div>
+    <div class="check"><span class="ico pend">⏳</span><div><b>Seat coin-trust ≥ 0.45</b><br><span class="pend">Aremm minting, climbing 0.41→</span></div><span class="cval">0.41</span></div>
+    <div class="check"><span class="ico ok">✓</span><div><b>No existing bank</b></div><span class="cval">first</span></div>
+    <div style="margin-top:10px"><span class="muted">Projected charter:</span> <b>~1476</b> if prestige &amp; coin-trust hold their trend</div>
+    <div class="note">Open question: show this candidacy card only on demand (a "Could found a bank?" line in the house panel), or as a passive "Rising banks" watchlist?</div>
+  </div>
+</div>
+
+<!-- ════════════════ 3 NEW UI / DATA EXAMPLES ════════════════ -->
+<h2>3 · Three more UI / data ideas</h2>
+<div class="grid cols3">
+
+  <!-- 3a explain-this-number -->
+  <div class="panel">
+    <div class="ptitle">A · "Explain this number"</div>
+    <div class="muted" style="margin-bottom:12px">Every derived stat is hover-able and unpacks its formula. Example: a hub's wealth.</div>
+    <div class="row"><span>Verroa wealth</span>
+      <b class="pop">0.84
+        <span class="card panel" style="padding:10px">
+          <div style="font-weight:700;margin-bottom:6px">wealth = norm(grain + 1.5·trade + 0.25·centrality)</div>
+          <div class="row"><span>🌾 grain</span><b>0.31</b></div>
+          <div class="row"><span>💰 trade ×1.5</span><b>0.46</b></div>
+          <div class="row"><span>🕸 centrality ×0.25</span><b>0.07</b></div>
+        </span>
+      </b>
+    </div>
+    <div class="row"><span class="muted">🌾 grain</span><div class="bar"><span style="width:37%;background:var(--good)"></span></div></div>
+    <div class="row"><span class="muted">💰 trade</span><div class="bar"><span style="width:55%;background:var(--accent2)"></span></div></div>
+    <div class="row"><span class="muted">🕸 centrality</span><div class="bar"><span style="width:14%;background:var(--accent)"></span></div></div>
+    <div class="note">Hover the <b>0.84</b> above. Reuses your existing SpecDriver why-chains; no new sim data needed.</div>
+  </div>
+
+  <!-- 3b good price atlas -->
+  <div class="panel">
+    <div class="ptitle">B · Good Price Atlas — 🍷 wine</div>
+    <div class="muted" style="margin-bottom:10px">One good, every city, cheap→dear, with after-freight arbitrage margin. The trade map as a table.</div>
+    <table>
+      <tr><th>City</th><th>Price</th><th>vs world</th><th>Arb</th></tr>
+      <tr><td>Verroa</td><td><span class="heat" style="width:30px;background:#3aa0ff">0.8×</span></td><td class="muted">source</td><td>—</td></tr>
+      <tr><td>Pell</td><td><span class="heat" style="width:40px;background:#7fc06a">1.1×</span></td><td>+0.3</td><td class="ok">+0.2</td></tr>
+      <tr><td>Aremm</td><td><span class="heat" style="width:55px;background:#f4c430">1.6×</span></td><td>+0.8</td><td class="ok">+0.6</td></tr>
+      <tr><td>Dunhollow</td><td><span class="heat" style="width:70px;background:#ff6a4a">2.3×</span></td><td>+1.5</td><td class="ok">+1.1</td></tr>
+    </table>
+    <div class="note">Pairs with a map overlay that paints cities by the selected good's price (blue→red).</div>
+  </div>
+
+  <!-- 3c great houses leaderboard -->
+  <div class="panel">
+    <div class="ptitle">C · Great Houses leaderboard</div>
+    <div class="muted" style="margin-bottom:10px">Sortable roster with networth sparkline (uses <code>wealth_history</code>), trend, and a footprint count.</div>
+    <table>
+      <tr><th>House</th><th>Wealth</th><th>Trend</th><th>Reach</th></tr>
+      <tr><td>🛡 Cassii</td><td>52.4k</td><td><span class="spark" style="height:16px"><i style="height:6px"></i><i style="height:9px"></i><i style="height:12px"></i><i style="height:16px"></i></span></td><td>3 🏭 · 4 offices</td></tr>
+      <tr><td>🛡 Dorne</td><td>41.0k</td><td><span class="spark" style="height:16px"><i style="height:12px"></i><i style="height:10px"></i><i style="height:8px"></i><i style="height:7px"></i></span></td><td>2 🍇 · 2 offices</td></tr>
+      <tr><td>⚖ Guild Pell</td><td>33.7k</td><td><span class="spark" style="height:16px"><i style="height:8px"></i><i style="height:10px"></i><i style="height:11px"></i><i style="height:13px"></i></span></td><td>1 🏭 · civic</td></tr>
+    </table>
+    <div class="note">Click a row → the dynasty dashboard (networth chart + footprint mini-map + monopolies + rivals).</div>
+  </div>
+</div>
+
+<!-- ════════════════ BONUS: living news feed ════════════════ -->
+<h2>4 · Bonus — filterable world news feed (the chronicle, but global &amp; clickable)</h2>
+<div class="panel">
+  <div style="margin-bottom:8px">
+    <span class="filter on">All</span><span class="filter">🛡 Houses</span><span class="filter">🏦 Banks</span>
+    <span class="filter">⚔ Wars</span><span class="filter">📉 Crashes</span><span class="filter">🏭 Holdings</span><span class="filter">🍷 Markets</span>
+  </div>
+  <div class="feed-item"><span class="feed-ico">🏦</span><div><b>House Cassii founds the Banco di Verroa</b> <span class="muted">· 1471</span><br><span class="muted">6 of 6 founding conditions met — see card</span></div></div>
+  <div class="feed-item"><span class="feed-ico">🏭</span><div><b>Cassii Weavers upgraded to tier II</b> <span class="muted">· 1472 · Verroa</span><br><span class="muted">cloth output +38%, now grade B</span></div></div>
+  <div class="feed-item"><span class="feed-ico">⚔</span><div><b>Aremm &amp; Pell at war — Strait of Aremm blockaded</b> <span class="muted">· 1473</span><br><span class="muted">wine ▲34% downstream · 40% of corridor flow cut</span></div></div>
+  <div class="feed-item"><span class="feed-ico">📉</span><div><b>Spice bubble pops at Verroa</b> <span class="muted">· 1474</span><br><span class="muted">spice ▼58% · 2 houses take heavy losses</span></div></div>
+  <div class="note">Every line is clickable → focuses the relevant house / city / corridor. This is the "watch a living world" surface for a worldbuilding tool, minus any playback/replay control (per your call).</div>
+</div>
+
+<p class="muted" style="margin-top:30px;font-size:11px">Static mockup — colours &amp; numbers illustrative. WorldForge 2 brainstorm, proposals only.</p>
+</body>
+</html>
