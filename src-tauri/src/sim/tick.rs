@@ -82,6 +82,29 @@ const ESTATE_OWNER_CUT: f32 = 0.5;
 const ESTATE_HOUSE_OWNER_WEALTH: f32 = 6.0;
 /// A house must be at least this wealthy to lead a colonization of new land.
 const COLONIZE_HOUSE_WEALTH: f32 = 18.0;
+/// Max distance (fraction of world width) a new colony/route may hop from the
+/// founder OR any of its offices — offices CHAIN the reach (an office is a relay
+/// "ground" from which the next hop is measured), so a network projects far while
+/// no single leg is implausibly long. The trade-reach scale, realised in the sim.
+const COLONY_HOP_REACH_FRAC: f32 = 0.20;
+/// Capital it takes to found a SETTLEMENT colony (heavy — a city-scale venture),
+/// pooled from the parent city treasury + optional house & bank backers.
+const COLONY_FOUND_COST: f32 = 14.0;
+/// A city needs at least this population (pressure) before it exports a colony.
+const COLONY_PARENT_MIN_POP: f32 = 5_000.0;
+/// Hard ceiling on live settlement colonies (route-matrix is O(hubs²)).
+const MAX_SETTLEMENT_COLONIES: usize = 24;
+/// Fraction of the parent's population that emigrates to seed a settlement colony.
+const COLONY_MIGRATION_FRAC: f32 = 0.06;
+/// Fertility split between the two colony pools: at/above this a site is "good land"
+/// reserved for SETTLEMENT colonies; below it is poor, trade-prone land for HOUSE
+/// outposts. Keeps the two drives from cannibalising each other's sites.
+const COLONY_FERTILE_SITE: f32 = 0.45;
+/// The age of colonisation opens only once the world has matured — year 50.
+const COLONY_START_TICK: u32 = 50 * 365;
+/// Yearly dividend a settlement colony pays its backers, as a fraction of its
+/// trade surplus (kept small so fortunes stay bounded).
+const COLONY_DIVIDEND_RATE: f32 = 0.10;
 /// A house with at least this wealth invests its surplus capital into building an
 /// estate (raw production) or a manufactory (a luxury good) — the main wealth sink
 /// that turns hoarded profit into expansion and more production.
@@ -675,6 +698,22 @@ pub struct TickHub {
     /// this hub (−1 none) and the hub id it was taken from (−1 none).
     #[serde(default = "neg_one_i32")] pub stolen_good: i32,
     #[serde(default = "neg_one_i32")] pub stolen_from: i32,
+    // ── Colonisation (serde-defaulted → old saves load as ordinary hubs) ──
+    /// 0 = not a colony · 1 = SETTLEMENT colony (city-founded full market hub that
+    /// graduates outpost→city) · 2 = HOUSE trade outpost (remote low-pop factory).
+    #[serde(default)] pub colony_kind: u8,
+    /// Growth stage for a settlement colony: 1 outpost · 2 colony · 3 town · 4 city.
+    #[serde(default)] pub colony_stage: u8,
+    /// A settlement colony that has declared independence — keeps the hub but drops
+    /// the dependency on / monopoly link to its founder.
+    #[serde(default)] pub autonomous: bool,
+    /// Founding settlement (hub INDEX) for a colony — the metropolis it links to.
+    /// −1 = none / not a colony. (Distinct from `parent`, used for in-city estates.)
+    #[serde(default = "neg_one_i32")] pub founder_hub: i32,
+    /// Joint-stock backers of a settlement colony `(kind,idx,share)` where kind is
+    /// 0 city / 1 house / 2 bank, idx the hub/house/bank index, share 0..1. Empty
+    /// for house outposts and old saves. Dividends are paid back pro-rata.
+    #[serde(default)] pub backers: Vec<(u8, u32, f32)>,
 }
 
 /// Serde default for `owner_house` so old saves / non-estate hubs read −1, not 0
@@ -3459,6 +3498,10 @@ impl CampaignSim {
     fn form_contracts(&mut self, needs: &[Vec<f32>]) {
         if self.contracts.len() >= MAX_CONTRACTS { return; }
         let n = self.hubs.len();
+        // A colony/estate may have been founded earlier THIS tick (hubs grew, but the
+        // `days` travel matrix is only rebuilt at the next tick start). Skip forming
+        // until the matrix matches the hub count — avoids an out-of-bounds index.
+        if self.days.len() != n * n { return; }
         let ng = self.goods.len();
         let tick = self.tick;
         for hi in 0..self.houses.len() {
@@ -4504,8 +4547,15 @@ impl CampaignSim {
             self.maybe_found_estate();
         }
         // Colonization of new land: rarer (yearly) — the settled map fills in.
-        if self.tick % 365 == 0 {
-            self.maybe_colonize();
+        // Two distinct drives: a great house plants a remote trade OUTPOST (strategic
+        // reach / new goods), and an overcrowded city founds a full SETTLEMENT colony
+        // (population expansion) that can grow into a city of its own. The age of
+        // colonisation only opens once the world has matured — from YEAR 50 onward,
+        // and only when the wealth/population/site conditions are actually met.
+        if self.tick % 365 == 0 && self.tick >= COLONY_START_TICK {
+            self.maybe_found_house_outpost();
+            self.maybe_found_settlement_colony();
+            self.colony_pass(); // graduation · dividends · autonomy
         }
     }
 
@@ -4670,6 +4720,7 @@ impl CampaignSim {
             // day one — a manufactory (kind 6) starts as a humble workshop and learns.
             quality: { let mut q = vec![0.0f32; ng]; if g0 < ng { q[g0] = if kind == 6 { 0.34 } else { 0.46 }; } q },
             stolen_good: -1, stolen_from: -1,
+            colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
         });
         // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
         self.routes_dirty = true;
@@ -4850,72 +4901,243 @@ impl CampaignSim {
         }
     }
 
-    /// A very wealthy house (or, failing that, the largest city) plants an estate on
-    /// the best reachable empty-land site — the world's settled map fills in over the
-    /// campaign. Sites are precomputed at the Economy step and consumed as used.
-    fn maybe_colonize(&mut self) {
+    /// Distance from the nearest of a holder's network nodes (home + offices) to a
+    /// candidate site — the office-relay reach: the closest "ground" wins, so an
+    /// office lets the next hop be measured from there, not the distant home.
+    fn nearest_node_dist(&self, nodes: &[(f32, f32)], sx: f32, sy: f32) -> f32 {
+        let mut best = f32::MAX;
+        for &(nx, ny) in nodes {
+            let mut dx = (sx - nx).abs();
+            if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
+            let dy = sy - ny;
+            best = best.min((dx * dx + dy * dy).sqrt());
+        }
+        best
+    }
+
+    /// HOUSE colony — a wealthy house plants a remote, low-population TRADE OUTPOST
+    /// on a poorer, trade-prone (coastal) frontier site within reach of its home or
+    /// an office (the office is the relay "ground"). Reuses the estate machinery but
+    /// keeps its OWN remote coordinates (parent = −1 so it is not co-located in a
+    /// city) and is tagged `colony_kind = 2`.
+    fn maybe_found_house_outpost(&mut self) {
         if self.colonizable.is_empty() || self.hubs.is_empty() { return; }
         if self.estate_count() >= MAX_TOTAL_ESTATES { return; }
-        // Founder: the richest house (if wealthy enough) else the largest city.
-        let mut founder_house = -1i32;
+        // Founder: the richest house above the colonisation wealth floor.
+        let mut founder = -1i32;
         let mut hw = COLONIZE_HOUSE_WEALTH;
         for (hi, hh) in self.houses.iter().enumerate() {
             if hh.defunct { continue; }
-            if hh.wealth > hw { hw = hh.wealth; founder_house = hi as i32; }
+            if hh.wealth > hw { hw = hh.wealth; founder = hi as i32; }
         }
-        let founder_hub = if founder_house >= 0 {
-            self.houses[founder_house as usize].hub as usize
-        } else {
-            let mut best = (usize::MAX, 0.0f32);
-            for h in 0..self.hubs.len() {
-                if self.hubs[h].is_estate { continue; }
-                let s = self.hubs[h].population * self.hubs[h].trade_wealth.max(0.0);
-                if s > best.1 { best = (h, s); }
+        if founder < 0 { return; }
+        let hi = founder as usize;
+        let home = self.houses[hi].hub as usize;
+        if home >= self.hubs.len() { return; }
+        // Network nodes = home + offices (the relays).
+        let mut nodes = vec![(self.hubs[home].x, self.hubs[home].y)];
+        for &off in &self.houses[hi].offices {
+            if (off as usize) < self.hubs.len() {
+                nodes.push((self.hubs[off as usize].x, self.hubs[off as usize].y));
             }
-            match (best.0 != usize::MAX).then_some(best.0) { Some(h) => h, None => return }
-        };
-        if founder_hub >= self.hubs.len() { return; }
-        // Only a commercially strong city colonizes when no rich house leads.
-        if founder_house < 0 && self.hubs[founder_hub].trade_wealth < 0.25 { return; }
-        // Best reachable unused site (fertility-weighted, nearer is better).
-        let (fx, fy) = (self.hubs[founder_hub].x, self.hubs[founder_hub].y);
-        let max_reach = self.world_w * 0.30;
+        }
+        let cap = self.world_w * COLONY_HOP_REACH_FRAC;
+        // Pick the best reachable POOR, trade-prone site (the opposite bias to a
+        // settlement colony): low fertility + coastal, nearer is better.
         let mut bi = (usize::MAX, 0.0f32);
         for (i, s) in self.colonizable.iter().enumerate() {
-            let mut dx = (s.x - fx).abs();
-            if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
-            let dy = s.y - fy;
-            let dist = (dx * dx + dy * dy).sqrt();
-            if dist > max_reach { continue; }
-            let score = (0.4 + s.fertility) * (1.0 - dist / max_reach);
+            if s.fertility >= COLONY_FERTILE_SITE { continue; } // leave good land for settlement colonies
+            let d = self.nearest_node_dist(&nodes, s.x, s.y);
+            if d > cap { continue; }
+            let trade_score = (0.65 - s.fertility).max(0.05) + if s.coastal { 0.30 } else { 0.0 };
+            let score = trade_score * (1.0 - d / cap);
             if score > bi.1 { bi = (i, score); }
         }
         let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return };
-        let site = self.colonizable.swap_remove(si);
-        // Pick a good matching the site's hint (prefer one the founder already makes).
         let ng = self.goods.len();
+        // Good: prefer one the house's home makes that matches the site's kind hint.
         let (mut g0, mut gbest) = (usize::MAX, 0.0f32);
         for g in 0..ng {
-            if estate_kind_for_good(&self.goods[g].name, self.goods[g].food) == site.kind_hint {
-                let s = self.hubs[founder_hub].base_per_capita.get(g).copied().unwrap_or(0.0) + 0.001;
+            if estate_kind_for_good(&self.goods[g].name, self.goods[g].food) == self.colonizable[si].kind_hint {
+                let s = self.hubs[home].base_per_capita.get(g).copied().unwrap_or(0.0) + 0.001;
                 if s > gbest { gbest = s; g0 = g; }
             }
         }
         if g0 == usize::MAX {
             for g in 0..ng {
-                let pc = self.hubs[founder_hub].base_per_capita.get(g).copied().unwrap_or(0.0);
+                let pc = self.hubs[home].base_per_capita.get(g).copied().unwrap_or(0.0);
                 if pc > gbest { gbest = pc; g0 = g; }
             }
         }
         if g0 == usize::MAX { return; }
+        let cost = INVEST_COST_BASE;
+        if self.houses[hi].wealth < cost + 2.0 { return; }
+        let site = self.colonizable.swap_remove(si);
         let kind = estate_kind_for_good(&self.goods[g0].name, self.goods[g0].food);
-        let founder_max_pc = self.hubs[founder_hub].base_per_capita.iter().cloned()
-            .fold(0.0f32, f32::max).max(0.1);
-        let percap = founder_max_pc * (0.5 + site.fertility);
-        let est_pop = self.hubs[founder_hub].founding_pop * 0.12;
-        let component = self.hubs[founder_hub].component;
-        self.create_estate(founder_hub as i32, site.x, site.y, g0, kind, founder_house,
-            site.koppen, site.coastal, component, est_pop, percap);
+        let founder_max_pc = self.hubs[home].base_per_capita.iter().cloned().fold(0.0f32, f32::max).max(0.1);
+        let percap = founder_max_pc * (0.4 + site.fertility);
+        let est_pop = self.hubs[home].founding_pop * 0.08; // low-population outpost
+        let component = self.hubs[home].component;          // joins the home trade web
+        self.houses[hi].wealth -= cost;
+        // parent = −1 keeps the outpost at its REMOTE site coords (not co-located).
+        self.create_estate(-1, site.x, site.y, g0, kind, founder, site.koppen, site.coastal,
+            component, est_pop, percap);
+        let new = self.hubs.len() - 1;
+        self.hubs[new].colony_kind = 2;
+        self.hubs[new].founder_hub = home as i32;
+        let hname = self.houses[hi].name.clone();
+        self.hubs[new].name = format!("{} (outpost)", hname);
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "colony".into(), hub: new as i32, good: g0 as i32, value: 2.0,
+            text: format!("{} founds a trade outpost ({})", hname, self.goods[g0].name),
+        });
+    }
+
+    /// SETTLEMENT colony — an overcrowded, prosperous city founds a full new market
+    /// hub on a fertile reachable site (heavy, joint-stock financing), seeding it
+    /// with emigrants (relieving the parent). It graduates outpost→city in
+    /// `colony_pass` and may later go autonomous.
+    fn maybe_found_settlement_colony(&mut self) {
+        if self.colonizable.is_empty() { return; }
+        let n_settle = self.hubs.iter().filter(|h| h.colony_kind == 1 && !h.autonomous).count();
+        if n_settle >= MAX_SETTLEMENT_COLONIES { return; }
+        // Founder: a large, food-secure, prosperous ordinary city under population
+        // pressure with some treasury to commit.
+        let mut best = (usize::MAX, 0.0f32);
+        for h in 0..self.hubs.len() {
+            let hub = &self.hubs[h];
+            if hub.is_estate || hub.colony_kind != 0 { continue; }
+            // Large, prosperous, not in severe famine — the pressure to export people.
+            if hub.population < COLONY_PARENT_MIN_POP || hub.starving > 0.7 { continue; }
+            if hub.sent_prosperity < 0.25 { continue; }
+            let score = hub.population * hub.sent_prosperity.clamp(0.0, 1.0) * (0.2 + hub.treasury);
+            if score > best.1 { best = (h, score); }
+        }
+        let Some(founder) = (best.0 != usize::MAX).then_some(best.0) else { return };
+        // Best reachable FERTILE site (from the city; its prior colonies could relay
+        // too, but the city alone is enough for v1).
+        let nodes = vec![(self.hubs[founder].x, self.hubs[founder].y)];
+        let cap = self.world_w * COLONY_HOP_REACH_FRAC;
+        let mut bi = (usize::MAX, 0.0f32);
+        for (i, s) in self.colonizable.iter().enumerate() {
+            if s.fertility < COLONY_FERTILE_SITE { continue; } // good land only — settlements need to feed themselves
+            let d = self.nearest_node_dist(&nodes, s.x, s.y);
+            if d > cap { continue; }
+            let score = (0.4 + s.fertility) * (1.0 - d / cap);
+            if score > bi.1 { bi = (i, score); }
+        }
+        let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return };
+        // ── Raise the capital (affordability checked BEFORE anything is committed) ──
+        let need = COLONY_FOUND_COST;
+        // The city funds as much as its treasury allows (can self-fund); a resident
+        // house and a local bank top up any shortfall (the joint-stock part).
+        let city_put = self.hubs[founder].treasury.min(need).max(0.0);
+        let house_idx = self.strongest_house_at(founder).filter(|&h| !self.houses[h].defunct);
+        let house_put = house_idx.map(|h| (need - city_put).min(self.houses[h].wealth * 0.3).max(0.0)).unwrap_or(0.0);
+        let bank_idx = self.banks.iter().position(|b| !b.defunct
+            && (b.seat as usize == founder || b.branches.contains(&(founder as u32))));
+        let bank_lend = bank_idx.map(|b| (need - city_put - house_put).min(self.banks[b].reserves * 0.5).max(0.0)).unwrap_or(0.0);
+        let raised = city_put + house_put + bank_lend;
+        if raised < need * 0.8 { return; } // not enough backing — wait
+        // Commit: debit each backer and record proportional shares.
+        let mut backers: Vec<(u8, u32, f32)> = Vec::new();
+        if city_put > 0.5 { self.hubs[founder].treasury -= city_put; backers.push((0, founder as u32, city_put / raised)); }
+        if let (Some(h), true) = (house_idx, house_put > 0.5) { self.houses[h].wealth -= house_put; backers.push((1, h as u32, house_put / raised)); }
+        if let (Some(b), true) = (bank_idx, bank_lend > 0.5) {
+            self.banks[b].reserves -= bank_lend;
+            self.banks[b].loans.push(Loan {
+                borrower_house: -1, borrower_polis: founder as i32, principal: bank_lend,
+                outstanding: bank_lend, rate: BANK_LOAN_RATE, start_tick: self.tick,
+                term_ticks: TICKS_PER_YEAR * 8, purpose: "colony".into(),
+            });
+            backers.push((2, b as u32, bank_lend / raised));
+        }
+        let site = self.colonizable.swap_remove(si);
+        // Migration: emigrants seed the colony and RELIEVE the crowded parent.
+        let seed = (self.hubs[founder].population * COLONY_MIGRATION_FRAC).max(80.0);
+        self.hubs[founder].population = (self.hubs[founder].population - seed)
+            .max(self.hubs[founder].founding_pop * 0.3);
+        let new = self.create_market_colony(founder, &site, backers, seed);
+        let (pname, cname) = (self.hubs[founder].name.clone(), self.hubs[new].name.clone());
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "colony".into(), hub: new as i32, good: -1, value: 1.0,
+            text: format!("{} founds the settlement colony {}", pname, cname),
+        });
+    }
+
+    /// Found a full MARKET hub (is_estate = false) as a settlement colony — a mini
+    /// version of its founder so it has a real local economy from day one.
+    fn create_market_colony(&mut self, founder: usize, site: &ColonizeSite,
+                            backers: Vec<(u8, u32, f32)>, seed_pop: f32) -> usize {
+        let ng = self.goods.len();
+        let base_per_capita: Vec<f32> = self.hubs[founder].base_per_capita.iter().map(|v| v * 0.6).collect();
+        let pop = seed_pop.max(1.0);
+        let production: Vec<f32> = base_per_capita.iter().map(|v| v * pop).collect();
+        let id = 100_000 + self.hubs.len() as u32;
+        let name = format!("New {} (colony)", self.hubs[founder].name);
+        let component = self.hubs[founder].component;
+        self.hubs.push(TickHub {
+            id, x: site.x, y: site.y, name, population: pop, founding_pop: pop,
+            stock: production.clone(), price: self.goods.iter().map(|g| g.base_value).collect(),
+            production, grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
+            is_estate: false, parent: -1, koppen: site.koppen, coastal: site.coastal, component,
+            export_earn: 0.0, import_spend: 0.0, mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5,
+            sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
+            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
+            tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
+            estate_kind: 0, estate_tier: 0, owner_house: -1, structures: vec![],
+            treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
+            finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
+            coin_name: String::new(), coin_trust: 0.0, mint_fineness_prev: 0.0,
+            quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
+            colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
+        });
+        self.routes_dirty = true;
+        self.hubs.len() - 1
+    }
+
+    /// Yearly: settlement colonies graduate (outpost→colony→town→city by population),
+    /// pay dividends to their backers, and — once a city — may declare independence.
+    fn colony_pass(&mut self) {
+        let tick = self.tick;
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].colony_kind != 1 || self.hubs[h].autonomous { continue; }
+            let pop = self.hubs[h].population;
+            let stage: u8 = if pop >= 40_000.0 { 4 } else if pop >= 15_000.0 { 3 }
+                else if pop >= 4_000.0 { 2 } else { 1 };
+            if stage > self.hubs[h].colony_stage {
+                self.hubs[h].colony_stage = stage;
+                let nm = self.hubs[h].name.clone();
+                let label = ["", "outpost", "colony", "town", "city"][stage as usize];
+                self.journal.push(JournalEntry { tick, kind: "colony".into(), hub: h as i32,
+                    good: -1, value: stage as f32, text: format!("{} grows into a {}", nm, label) });
+            }
+            // Dividends from the colony's trade surplus — small & capped so fortunes
+            // stay bounded (the colony's earnings would otherwise pool locally).
+            let surplus = (self.hubs[h].trade_wealth.max(0.0) * pop * COLONY_DIVIDEND_RATE).min(2.0);
+            if surplus > 0.01 {
+                for (kind, idx, share) in self.hubs[h].backers.clone() {
+                    let cut = surplus * share;
+                    match kind {
+                        0 => { if (idx as usize) < self.hubs.len() { self.hubs[idx as usize].treasury += cut; } }
+                        1 => { if (idx as usize) < self.houses.len() && !self.houses[idx as usize].defunct { self.houses[idx as usize].wealth += cut; } }
+                        2 => { if (idx as usize) < self.banks.len() && !self.banks[idx as usize].defunct { self.banks[idx as usize].reserves += cut; } }
+                        _ => {}
+                    }
+                }
+            }
+            // A grown colony-city may break away from its founder.
+            if self.hubs[h].colony_stage >= 4 && hash01(self.seed, tick as u64, h as u64) < 0.10 {
+                let nm = self.hubs[h].name.replace(" (colony)", "");
+                self.hubs[h].colony_kind = 0;
+                self.hubs[h].autonomous = true;
+                self.hubs[h].founder_hub = -1;
+                self.hubs[h].backers.clear();
+                self.hubs[h].name = nm.clone();
+                self.journal.push(JournalEntry { tick, kind: "colony".into(), hub: h as i32,
+                    good: -1, value: 0.0, text: format!("{} declares independence", nm) });
+            }
+        }
     }
 
     fn update_houses(&mut self, needs: &[Vec<f32>]) {
@@ -6032,6 +6254,7 @@ mod tests {
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
             coin_name: String::new(), coin_trust: 0.0, mint_fineness_prev: 0.0,
             quality: Vec::new(), stolen_good: -1, stolen_from: -1,
+            colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
         }
     }
 
@@ -6169,6 +6392,84 @@ mod tests {
         assert!(min_w > -100.0, "no runaway-insolvent house (limited liability): {min_w}");
         // The world must actually be DYNAMIC: houses turn over.
         assert!(ever_dissolved, "houses rise and fall over decades");
+    }
+
+    /// Colonisation MECHANISM (deterministic): from year 50, an eligible city founds
+    /// a SETTLEMENT colony (full market hub, joint-stock funded, migrants seeded) and
+    /// a rich house plants a remote trade OUTPOST on poor land within office/home
+    /// reach — both land-only — and a grown colony graduates then may go autonomous.
+    #[test]
+    fn colonisation_mechanism() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("fish", 0, 0, 1.2, 0.7, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+            good("wine", 3, 2, 8.0, 0.4, false),
+        ];
+        let ng = goods.len();
+        // Three ordinary hubs clustered near the origin.
+        let mut hubs = Vec::new();
+        for i in 0..3u32 {
+            let prod: Vec<f32> = (0..ng).map(|g| if goods[g].food { 200.0 } else { 40.0 }).collect();
+            hubs.push(hub(i, (i as f32) * 4.0, 0.0, 20_000.0, prod, 0));
+        }
+        let mut s = sim(hubs, goods);
+        // A healthy, prosperous, treasury-rich founder city (hub 0).
+        s.hubs[0].population = 30_000.0;
+        s.hubs[0].founding_pop = 30_000.0;
+        s.hubs[0].starving = 0.0;
+        s.hubs[0].sent_prosperity = 0.8;
+        s.hubs[0].treasury = 40.0;
+        // A wealthy house seated at hub 0 → funds the venture + plants outposts.
+        let mut rich = house_at(0, vec![2], 5);
+        rich.wealth = 300.0;
+        s.houses.push(rich);
+        s.seed_house_count = 1;
+        // Empty land near the cluster: a fertile site (→ settlement colony) and a
+        // poor coastal site (→ house outpost), both within the hop-reach cap.
+        s.colonizable = vec![
+            ColonizeSite { x: 3.0, y: 3.0, koppen: 0, elevation: 0.2, fertility: 0.80, coastal: false, kind_hint: 1 },
+            ColonizeSite { x: 5.0, y: 2.0, koppen: 0, elevation: 0.1, fertility: 0.18, coastal: true, kind_hint: 4 },
+        ];
+        s.rebuild_routes();
+        s.tick = COLONY_START_TICK; // open the age of colonisation
+
+        let base = s.hubs.len();
+        let parent_pop0 = s.hubs[0].population;
+        s.maybe_found_house_outpost();
+        s.maybe_found_settlement_colony();
+
+        let outposts = s.hubs.iter().filter(|h| h.colony_kind == 2).count();
+        let settlements: Vec<usize> = (0..s.hubs.len()).filter(|&h| s.hubs[h].colony_kind == 1).collect();
+        assert_eq!(outposts, 1, "a house trade outpost was planted");
+        assert_eq!(settlements.len(), 1, "a settlement colony was founded");
+        assert!(s.hubs.len() == base + 2, "two new colony hubs exist");
+        // Outpost is REMOTE (kept its own site coords, not co-located with home).
+        let outpost = s.hubs.iter().find(|h| h.colony_kind == 2).unwrap();
+        assert!(!outpost.is_estate || outpost.parent < 0, "outpost is remote, not an in-city estate");
+        assert!(outpost.name.contains("(outpost)"));
+        // Settlement colony is a FULL market hub, tagged, with backers, and the parent
+        // shed migrants to seed it.
+        let c = settlements[0];
+        assert!(!s.hubs[c].is_estate, "settlement colony is a market hub");
+        assert!(s.hubs[c].name.contains("(colony)"));
+        assert!(!s.hubs[c].backers.is_empty(), "joint-stock backers recorded");
+        assert!(s.hubs[0].population < parent_pop0, "parent shed emigrants to the colony");
+
+        // Graduation + autonomy: grow the colony to city size and run the yearly pass.
+        s.hubs[c].population = 60_000.0;
+        let mut went_autonomous = false;
+        for y in 0..30u32 {
+            s.tick = COLONY_START_TICK + y * 365;
+            s.colony_pass();
+            if s.hubs[c].autonomous { went_autonomous = true; break; }
+        }
+        assert!(s.hubs[c].colony_stage >= 4 || went_autonomous, "colony graduates to city (then may go autonomous)");
+        if went_autonomous {
+            assert!(!s.hubs[c].name.contains("(colony)"), "an autonomous colony drops the tag");
+        }
+        // Wealth stays finite throughout.
+        for h in &s.houses { assert!(h.wealth.is_finite()); }
     }
 
     /// Manual benchmark for the per-day campaign tick. Run explicitly:

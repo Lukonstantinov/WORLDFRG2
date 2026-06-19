@@ -867,6 +867,11 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 quality: Vec::new(),
                 stolen_good: -1,
                 stolen_from: -1,
+                colony_kind: 0,
+                colony_stage: 0,
+                autonomous: false,
+                founder_hub: -1,
+                backers: Vec::new(),
             }
         })
         .collect();
