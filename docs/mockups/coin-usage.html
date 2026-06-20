@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Coin usage — overlay + per-coin breakdown (mockup)</title>
+<style>
+  :root { --bg:#0b1420; --panel:#13202e; --text:#cfe2f6; --muted:#7fa0c4; --accent:#3a80c0; --gold:#c9a227; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui, sans-serif; padding:26px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.lead { color:var(--muted); max-width:900px; margin:0 0 20px; }
+  .grid { display:grid; grid-template-columns:340px 1fr; gap:20px; max-width:1080px; align-items:start; }
+  .panel { background:var(--panel); border:1px solid #1e3346; border-radius:10px; padding:14px; }
+  h2 { font-size:13px; color:var(--accent); margin:0 0 10px; letter-spacing:.04em; text-transform:uppercase; }
+  .coinhdr { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .disc { width:26px; height:26px; border-radius:50%; background:radial-gradient(circle at 35% 30%, #f0d77a, var(--gold)); border:1px solid #8a6a18; flex:0 0 auto; }
+  .coinhdr b { font-size:14px; color:#e8dcc0; }
+  .reserve { color:#37a05a; font-size:10px; font-weight:700; margin-left:auto; }
+  .toggle { display:flex; gap:6px; margin:6px 0 12px; }
+  .toggle button { background:#0e1a26; border:1px solid #24364e; color:var(--muted); border-radius:6px; padding:4px 10px; font-size:11px; cursor:pointer; }
+  .toggle button.on { background:#19324a; border-color:var(--accent); color:var(--text); font-weight:600; }
+  .legend-row { display:flex; align-items:center; gap:7px; font-size:11px; color:#c7d6e8; padding:2px 0; }
+  .sw { width:11px; height:11px; border-radius:3px; flex:0 0 auto; }
+  .yearnote { color:#5a7290; font-size:10px; margin-top:8px; }
+  svg text { fill:var(--text); }
+  .maplbl { font-size:9px; fill:#cfe2f6; }
+  .maplbl.dim { fill:#8aa0bc; }
+  ul { color:var(--muted); max-width:1000px; margin-top:18px; }
+  code { background:#0e1a26; padding:1px 5px; border-radius:4px; color:#bcd7f2; }
+</style>
+</head>
+<body>
+  <h1>Coin usage — map overlay + per-coin breakdown</h1>
+  <p class="lead">Select a coin → (1) the map <b>tints every settlement that uses it</b> (the mint city brightest,
+     accepting/reserve cities shaded), and (2) the coin panel shows <b>which settlements use it most</b> as a
+     donut or bar chart. Shares are by trade throughput settled in that coin; the chart <b>refreshes once per year</b>.</p>
+
+  <div class="grid">
+    <!-- ── Coin panel with donut / bar ── -->
+    <div class="panel">
+      <div class="coinhdr"><span class="disc"></span><b>Solidus of Inveriduros</b><span class="reserve">RESERVE</span></div>
+      <div class="toggle">
+        <button id="bDonut" class="on" onclick="setMode('donut')">◍ Donut</button>
+        <button id="bBar" onclick="setMode('bar')">▭ Bars</button>
+      </div>
+      <div id="chart"></div>
+      <div class="yearnote">Updates once per year · year 41 snapshot · total settled ≈ 26.9k</div>
+    </div>
+
+    <!-- ── Map overlay mock ── -->
+    <div class="panel">
+      <h2>Coin-usage overlay (cities tinted by use of the selected coin)</h2>
+      <svg id="map" viewBox="0 0 520 300" width="100%" height="auto" style="background:#0c2740; border-radius:6px;">
+        <!-- land -->
+        <path d="M40,40 H300 Q340,90 300,150 V260 H40 Z" fill="#2f5134"/>
+        <path d="M360,30 H500 V210 Q430,230 360,200 Z" fill="#324f49"/>
+      </svg>
+      <div style="margin-top:10px;">
+        <div class="legend-row"><span class="sw" style="background:#f0d77a"></span> Mint city (issues the coin)</div>
+        <div class="legend-row"><span class="sw" style="background:#c9a227"></span> Heavy use (paid in this coin)</div>
+        <div class="legend-row"><span class="sw" style="background:#7a6320"></span> Light / occasional use</div>
+        <div class="legend-row"><span class="sw" style="background:transparent; border:1px dashed #37a05a"></span> Reserve reach (accepted abroad, dashed ring)</div>
+        <div class="legend-row"><span class="sw" style="background:#243246"></span> Uses a different coin</div>
+      </div>
+    </div>
+  </div>
+
+  <ul>
+    <li><b>Data:</b> per-coin, a list of <code>{settlement, share}</code> (throughput settled in the coin), snapshot yearly.
+        "Usage" = the mint city + cities in its trade component that accept it, weighted by trade volume; reserve coins reach across components.</li>
+    <li><b>Overlay:</b> a new toggle under Toolbar → "Coin in use" (or click a coin in the panel) tints settlements by their use share of the selected coin.</li>
+    <li><b>Chart:</b> donut (share by settlement) with a bar fallback; both from the same yearly snapshot.</li>
+  </ul>
+
+<script>
+  // Sample yearly snapshot: settlements and their share of trade settled in this coin.
+  const data = [
+    { name: "Inveriduros",        share: 0.34, mint: true },
+    { name: "Inveriduros Vell.",  share: 0.18 },
+    { name: "Treaacos",           share: 0.14 },
+    { name: "Ardamagos Mor",      share: 0.11 },
+    { name: "Llanenialon",        share: 0.09, reserve: true },
+    { name: "Branwiacos",         share: 0.08, reserve: true },
+    { name: "others",             share: 0.06 },
+  ];
+  const palette = ["#f0d77a","#c9a227","#b88f20","#9c7a1c","#6fae8a","#5f97c0","#52708e"];
+
+  function donut() {
+    const cx=120, cy=120, r=92, rin=52; let a0=-Math.PI/2; let paths="";
+    data.forEach((d,i)=>{
+      const a1=a0+d.share*2*Math.PI;
+      const x0=cx+r*Math.cos(a0), y0=cy+r*Math.sin(a0), x1=cx+r*Math.cos(a1), y1=cy+r*Math.sin(a1);
+      const xi0=cx+rin*Math.cos(a1), yi0=cy+rin*Math.sin(a1), xi1=cx+rin*Math.cos(a0), yi1=cy+rin*Math.sin(a0);
+      const large=d.share>0.5?1:0;
+      paths+=`<path d="M${x0},${y0} A${r},${r} 0 ${large} 1 ${x1},${y1} L${xi0},${yi0} A${rin},${rin} 0 ${large} 0 ${xi1},${yi1} Z" fill="${palette[i%palette.length]}" stroke="#0b1420" stroke-width="1"/>`;
+      a0=a1;
+    });
+    let legend=""; let ly=18;
+    data.forEach((d,i)=>{ legend+=`<rect x="250" y="${ly-9}" width="10" height="10" rx="2" fill="${palette[i%palette.length]}"/>
+      <text x="266" y="${ly}" font-size="11">${d.name} ${Math.round(d.share*100)}%${d.mint?" ★":d.reserve?" ⇄":""}</text>`; ly+=22; });
+    return `<svg viewBox="0 0 470 240" width="100%"><g>${paths}</g>
+      <text x="120" y="116" text-anchor="middle" font-size="11" fill="#9ab0c8">settled</text>
+      <text x="120" y="132" text-anchor="middle" font-size="13" font-weight="700">in coin</text>${legend}</svg>`;
+  }
+  function bars() {
+    const W=300, rowH=26, max=Math.max(...data.map(d=>d.share)); let y=6; let rows="";
+    data.forEach((d,i)=>{
+      const w=(d.share/max)*180;
+      rows+=`<text x="0" y="${y+12}" font-size="11" fill="#c7d6e8">${d.name}${d.mint?" ★":d.reserve?" ⇄":""}</text>
+        <rect x="120" y="${y+2}" width="${w}" height="12" rx="3" fill="${palette[i%palette.length]}"/>
+        <text x="${120+w+6}" y="${y+12}" font-size="10" fill="#9ab0c8">${Math.round(d.share*100)}%</text>`;
+      y+=rowH;
+    });
+    return `<svg viewBox="0 0 ${W} ${y+6}" width="100%">${rows}</svg>`;
+  }
+  function setMode(m){
+    document.getElementById('chart').innerHTML = m==='donut'?donut():bars();
+    document.getElementById('bDonut').className = m==='donut'?'on':'';
+    document.getElementById('bBar').className = m==='bar'?'on':'';
+  }
+
+  // Map dots: tint cities by use share of the coin.
+  (function(){
+    const cities = [
+      {x:170,y:90,name:"Inveriduros",mint:true},
+      {x:120,y:150,name:"Treaacos",share:0.14},
+      {x:230,y:130,name:"Inv. Vell.",share:0.18},
+      {x:90,y:210,name:"Ardamagos",share:0.11},
+      {x:430,y:90,name:"Llanenialon",share:0.09,reserve:true},
+      {x:470,y:160,name:"Branwiacos",share:0.08,reserve:true},
+      {x:260,y:210,name:"Cuauhtemila",other:true},
+    ];
+    const svg=document.getElementById('map'); let s="";
+    cities.forEach(c=>{
+      let fill="#243246", r=5, ring="";
+      if(c.mint){ fill="#f0d77a"; r=8; }
+      else if(c.other){ fill="#243246"; }
+      else { const t=Math.min(1,(c.share||0)/0.2); fill = t>0.6?"#c9a227":"#7a6320"; r=6; }
+      if(c.reserve){ ring=`<circle cx="${c.x}" cy="${c.y}" r="${r+4}" fill="none" stroke="#37a05a" stroke-width="1.4" stroke-dasharray="3 2"/>`; }
+      s+=`${ring}<circle cx="${c.x}" cy="${c.y}" r="${r}" fill="${fill}" stroke="#0b1420" stroke-width="1"/>
+          <text class="maplbl${c.other?' dim':''}" x="${c.x+8}" y="${c.y+3}">${c.name}</text>`;
+    });
+    svg.insertAdjacentHTML('beforeend', s);
+  })();
+  setMode('donut');
+</script>
+</body>
+</html>
