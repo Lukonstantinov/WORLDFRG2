@@ -35,6 +35,22 @@ happens, so it fails if a change breaks the economy. Tune constants in `tick.rs`
 (WAR_*, WEALTH_TAX_*, BANK_*, COIN_*, CONTRACT_*) and re-run until the dynamics read
 healthy. Houses dying is expected and good — do not "fix" it away.
 
+## STANDING RULE — always show an HTML report of visual changes
+
+For ANY change that affects what the user SEES (map overlays, connection/trade
+lines, panels, colours, icons, layouts) — and for visual proposals/mockups —
+you MUST generate a self-contained **HTML report** in `docs/mockups/` and send
+it to the user (`SendUserFile`) so they can open it and see how the visuals
+change. Show **before/after** (or every variant/colour/type) so the change is
+legible at a glance, not just described in prose.
+
+- One self-contained `.html` per report (inline CSS/SVG, no build step; dark theme
+  matching the app — bg `#0b1420`, panel `#13202e`, text `#cfe2f6`, accent `#3a80c0`).
+- Pull real values from the code (e.g. overlay colour `const`s in
+  `OverlayManager.ts`) so the report mirrors reality.
+- Commit the report alongside the change and **push** — these are versioned design
+  artifacts, not scratch. Existing reports: `docs/mockups/*.html`.
+
 ## Architecture
 
 **Stack:** Tauri 2 (Rust) + React 18 + PixiJS 8 + Zustand + SQLite (rusqlite) + zstd compression

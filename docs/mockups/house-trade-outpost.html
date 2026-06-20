@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorldForge 2 — House Trade Outposts</title>
+<style>
+  :root{--bg:#0b1420;--panel:#13202e;--panel2:#0f1a26;--line:#1e2e42;
+    --text:#cfe2f6;--muted:#6a86a6;--accent:#3a80c0;--manu:#4fc06a;--estate:#ffe14a;--gold:#ffd24a;--bad:#ff6a4a;}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(circle at 30% -10%,#16273a,#0b1420 60%);
+    color:var(--text);font:13px/1.5 "Segoe UI",system-ui,sans-serif;padding:26px;}
+  h1{font-size:21px;margin:0 0 2px;font-weight:700} h1 small{color:var(--muted);font-weight:400;font-size:13px}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:#b9a06a;margin:28px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  .grid{display:grid;gap:18px;grid-template-columns:1fr 1fr}@media(max-width:860px){.grid{grid-template-columns:1fr}}
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:10px;padding:14px 16px;box-shadow:0 6px 22px rgba(0,0,0,.35)}
+  .ptitle{font-weight:700;font-size:13px;margin-bottom:8px}
+  .muted{color:var(--muted)} .note{font-size:11.5px;color:var(--muted);border-left:2px solid var(--accent);padding-left:9px;margin:9px 0}
+  .check{display:flex;gap:8px;align-items:baseline;font-size:12px;padding:3px 0}
+  .ok{color:#5fbf6f;font-weight:700;width:14px} .no{color:var(--bad);font-weight:700;width:14px}
+  .cval{margin-left:auto;color:var(--muted);font-family:ui-monospace,monospace}
+  .city{font-size:11px;fill:#cfe2f6;font-family:inherit} .small{font-size:9.5px;fill:#6a86a6}
+  .legend{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px}
+  .sq{width:11px;height:11px;display:inline-block;border:1px solid #6a86a6}
+</style>
+</head>
+<body>
+<h1>WorldForge 2 — House Trade Outposts &nbsp;<small>refined · the simpler, costly colony</small></h1>
+<div class="note">A great house's remote trade factory: easier to found than a settlement colony (no bank, no food lifeline, no joint-stock) but gated behind serious wealth and a heavy cost. It stays small, trades, and can <b>never</b> become independent.</div>
+
+<div class="grid">
+  <div class="panel">
+    <div class="ptitle">Found a trade outpost — conditions are just wealth + cost</div>
+    <div class="check"><span class="ok">✓</span><span>Campaign age ≥ <b>year 30</b></span><span class="cval">yr 41</span></div>
+    <div class="check"><span class="ok">✓</span><span>A <b>great house</b> with wealth ≥ <b>150k</b></span><span class="cval">House Cassii 168k</span></div>
+    <div class="check"><span class="ok">✓</span><span>Pays the heavy founding cost ≈ <b>120k</b></span><span class="cval">−120k → 48k left</span></div>
+    <div class="check"><span class="ok">✓</span><span>Poor, trade-prone land within home/office reach (same continent)</span><span class="cval">Cape Ifri</span></div>
+    <div class="note">No bank, no food subsidy, no charter machinery — far simpler than a settlement colony, but only the very richest dynasties can bear the cost. Wealth is no longer capped, so elite houses can actually reach this.</div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">What it is — and isn't</div>
+    <div class="check"><span class="ok">✓</span><span>Trades its good back through the owner's network</span></div>
+    <div class="check"><span class="ok">✓</span><span>Population <b>hard-capped</b> small (a trade post, ≤ 800)</span></div>
+    <div class="no" style="display:flex;gap:8px"><span class="no">✗</span><span>Never grows into a city</span></div>
+    <div class="no" style="display:flex;gap:8px"><span class="no">✗</span><span>Never becomes independent (only settlement colonies do)</span></div>
+    <div style="margin-top:8px" class="legend"><span class="sq" style="background:#0a0a0a"></span> map marker: small <b>black square</b> + trade-post name, in the owner's colour</div>
+  </div>
+</div>
+
+<h2>On the map — black squares, owner-coloured</h2>
+<div class="grid">
+  <div class="panel" style="padding:8px">
+    <svg viewBox="0 0 560 250" width="100%" style="background:radial-gradient(circle at 40% 45%,#0e2236,#091622);border:1px solid var(--line);border-radius:8px">
+      <path d="M40,60 C150,35 330,45 390,80 C420,135 405,200 300,212 C190,224 90,205 55,160 C30,125 30,85 40,60 Z" fill="#16324a" opacity=".5" stroke="#244a66"/>
+      <!-- cities (circles) -->
+      <circle cx="150" cy="110" r="9" fill="var(--gold)"/><text x="120" y="96" class="city">Verroa ★</text>
+      <circle cx="250" cy="150" r="6" fill="#ff8844"/><text x="232" y="170" class="city">Pell</text>
+      <!-- house trade outposts: small BLACK squares with the owner's colour as a thin frame + label -->
+      <g>
+        <rect x="332" y="92" width="11" height="11" fill="#0a0a0a" stroke="#b03a5a" stroke-width="2"/>
+        <text x="348" y="101" class="city" style="fill:#e0a8b8">Cassii Post (silk)</text>
+      </g>
+      <g>
+        <rect x="300" y="180" width="11" height="11" fill="#0a0a0a" stroke="#4f80c0" stroke-width="2"/>
+        <text x="316" y="189" class="city" style="fill:#a8c8e8">Dorne Post (spice)</text>
+      </g>
+      <!-- routed trade line from outpost back through network (owner colour) -->
+      <path d="M338,103 C300,120 230,135 158,114" fill="none" stroke="#b03a5a" stroke-width="3" stroke-linecap="round" opacity=".85"/>
+      <polygon points="250,128 262,122 260,136" fill="#e0a8b8"/>
+      <text x="150" y="235" class="small">small black squares = house trade outposts · framed &amp; labelled in the owner house's colour</text>
+    </svg>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Marker spec</div>
+    <div class="legend"><span class="sq" style="background:#0a0a0a;border-color:#b03a5a;border-width:2px"></span> outpost — black fill, <b>owner-house colour</b> frame</div>
+    <div class="legend"><span style="width:11px;height:11px;border-radius:50%;background:var(--gold);display:inline-block"></span> city (circle, size by population)</div>
+    <div class="legend"><span style="width:11px;height:11px;border-radius:50%;background:#c08cff;display:inline-block"></span> settlement colony (own colour, grows)</div>
+    <div class="note">The trade line follows the route network (standing rule). Outpost colour is a Settings palette key (adjustable). Founding is logged in the World News feed.</div>
+  </div>
+</div>
+
+<p class="note" style="margin-top:24px;border:0;color:var(--muted);font-size:11px">Static mockup. Backend implemented: year-30 gate, 150k wealth / 120k cost, pop cap 800, no independence; wealth uncapped (elite reach ~0.3–0.5M). Map markers to be wired on the frontend pass.</p>
+</body>
+</html>

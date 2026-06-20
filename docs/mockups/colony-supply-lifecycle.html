@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorldForge 2 — Colony Supply & Lifecycle</title>
+<style>
+  :root{--bg:#0b1420;--panel:#13202e;--panel2:#0f1a26;--line:#1e2e42;
+    --text:#cfe2f6;--muted:#6a86a6;--accent:#3a80c0;--flow:#4fd0c0;
+    --good:#5fbf6f;--warn:#f4c430;--bad:#ff6a4a;--colony:#c08cff;--gold:#ffd24a;}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(circle at 30% -10%,#16273a,#0b1420 60%);
+    color:var(--text);font:13px/1.5 "Segoe UI",system-ui,sans-serif;padding:26px;}
+  h1{font-size:21px;margin:0 0 2px;font-weight:700}
+  h1 small{color:var(--muted);font-weight:400;font-size:13px}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:var(--colony);
+    margin:30px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  .grid{display:grid;gap:18px;grid-template-columns:1fr 1fr}
+  .grid3{display:grid;gap:18px;grid-template-columns:1fr 1fr 1fr}
+  @media(max-width:900px){.grid,.grid3{grid-template-columns:1fr}}
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);
+    border-radius:10px;padding:14px 16px;box-shadow:0 6px 22px rgba(0,0,0,.35)}
+  .ptitle{font-weight:700;font-size:13px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+  .muted{color:var(--muted)} .note{font-size:11.5px;color:var(--muted);border-left:2px solid var(--accent);padding-left:9px;margin:9px 0}
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:8px}
+  .tab{padding:4px 10px;font-size:11.5px;cursor:default;color:var(--muted);border-bottom:2px solid transparent}
+  .tab.on{color:var(--text);font-weight:700;border-bottom-color:var(--accent)}
+  .bar{height:9px;border-radius:6px;background:#0c1622;overflow:hidden;flex:1;align-self:center}
+  .bar>span{display:block;height:100%}
+  .row{display:flex;align-items:center;gap:8px;padding:5px 4px;border-bottom:1px solid #14222f;font-size:11.5px}
+  .src{flex:1;min-width:0}
+  .pill{display:inline-block;font-size:9.5px;border-radius:20px;padding:1px 7px;border:1px solid var(--line);color:var(--muted);margin-left:4px}
+  .empty{border:1px dashed #2c4055;border-radius:7px;padding:6px 8px;color:#6a86a6;font-size:11px;text-align:center;margin:5px 0;background:#0c1622}
+  .check{display:flex;gap:8px;align-items:baseline;font-size:11.5px;padding:3px 0}
+  .ok{color:var(--good);font-weight:700;width:14px} .no{color:var(--bad);font-weight:700;width:14px} .pend{color:var(--warn);font-weight:700;width:14px}
+  .cval{margin-left:auto;color:var(--muted);font-family:ui-monospace,monospace}
+  .stage{display:flex;align-items:center;gap:6px;margin:5px 0;font-size:12px}
+  .dot{width:10px;height:10px;border-radius:50%;flex:0 0 auto}
+  .city{font-size:11px;fill:#cfe2f6;font-family:inherit} .small{font-size:9.5px;fill:#6a86a6}
+  table{width:100%;border-collapse:collapse;font-size:11.5px}
+  th{text-align:left;color:var(--muted);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--line);font-size:10.5px}
+  td{padding:4px 6px;border-bottom:1px solid #14222f}
+</style>
+</head>
+<body>
+
+<h1>WorldForge 2 — Colony Supply &amp; Lifecycle &nbsp;<small>refined design · proposals only</small></h1>
+<div class="note">A settlement colony can't feed itself at first, so the founding metropolis must keep it supplied (contracts or shipments, fully subsidised) until it grows self-sufficient. Same-continent only; a same-continent bank funds it and becomes its bank + mint; the metropolis holds a trade monopoly until independence.</div>
+
+<!-- ════════ FOUNDING PRECONDITIONS ════════ -->
+<h2>Founding a settlement colony — heavy commitment</h2>
+<div class="grid">
+  <div class="panel">
+    <div class="ptitle">Venzia → found "New Venzia (colony)"</div>
+    <div class="check"><span class="ok">✓</span><span>Fertile empty land, same continent, within reach</span><span class="cval">Cape Verra</span></div>
+    <div class="check"><span class="ok">✓</span><span>Metropolis holds ≥ 1 year of the colony's food need</span><span class="cval">1.2 yr</span></div>
+    <div class="check"><span class="ok">✓</span><span>Same-continent <b>bank</b> backs it (required)</span><span class="cval">Banco di Verroa</span></div>
+    <div class="check"><span class="ok">✓</span><span>Joint-stock capital raised (city + house + bank)</span><span class="cval">18.0</span></div>
+    <div class="note" style="border-color:var(--gold)"><b style="color:var(--text)">The backing bank's family becomes the colony's main bank &amp; mint</b> — it sets the colony's council, mints its coin, and seeds coin-trust.</div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Why this makes cities &amp; banks think twice</div>
+    <ul style="margin:4px 0;padding-left:18px;font-size:12px">
+      <li>A full year of food held in reserve = locked capital.</li>
+      <li>Ongoing <b>subsidy</b>: the metropolis pays the food bill every shipment until self-sufficiency.</li>
+      <li>The bank stakes a real loan — if the colony <b>collapses</b>, the loan defaults and can feed a crash.</li>
+      <li>Reward: a <b>trade monopoly</b> on the colony + dividends, and eventually a daughter city.</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ════════ THE SUPPLY SUBTAB ════════ -->
+<h2>New settlement subtab — "Supply" (the supplier roster)</h2>
+<div class="grid">
+  <div class="panel">
+    <div class="ptitle">New Venzia (colony) · Supply <span class="muted" style="font-weight:400">deficit-based</span></div>
+    <div class="tabs"><span class="tab on">food</span><span class="tab">reserve food</span><span class="tab">preservatives</span></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:11px">
+      <span class="muted" style="width:64px">daily need</span>
+      <div class="bar"><span style="width:84%;background:var(--good)"></span></div>
+      <span class="cval">84% covered</span>
+    </div>
+    <!-- supplier rows: settlement/manufactory · good · route -->
+    <div class="row"><span style="font-size:14px">🏛</span><div class="src"><b>Venzia</b> · 🌾 wheat <span class="pill">caravan→ road</span></div><span style="color:var(--good)">▣ 1,400/yr</span></div>
+    <div class="row"><span style="font-size:14px">🏭</span><div class="src"><b>Pell Mills</b> (manufactory) · 🥖 bread <span class="pill">⚓ sea lane</span></div><span style="color:var(--good)">▣ 600/yr</span></div>
+    <div class="row"><span style="font-size:14px">🏛</span><div class="src"><b>Brae</b> · 🐟 fish <span class="pill">⚓ sea lane</span></div><span style="color:var(--warn)">▣ 300/yr ⚠ storm</span></div>
+    <div class="empty">＋ empty slot — 16% of need unfilled · sign a supplier contract</div>
+    <div class="note">Each row = a signed civic supply contract: <b>supplier settlement / manufactory · good · route</b> (routed, follows the landscape). Empty slots are obligations the metropolis must still cover.</div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">reserve food &amp; preservatives</div>
+    <div class="muted" style="font-size:11px;margin-bottom:4px">RESERVE — stockpile toward a 1-year buffer (drains if the lifeline breaks)</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span class="muted" style="width:64px;font-size:11px">1-yr buffer</span><div class="bar"><span style="width:62%;background:var(--flow)"></span></div><span class="cval">7.4 / 12 mo</span></div>
+    <div class="row"><span style="font-size:14px">🏛</span><div class="src"><b>Venzia granary</b> · 🌾 wheat <span class="pill">⚓ sea lane</span></div><span style="color:var(--flow)">▣ +0.4 mo/yr</span></div>
+    <div class="muted" style="font-size:11px;margin:8px 0 4px">PRESERVATIVES — stretch the reserve's shelf-life (uses goods' perishable)</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span class="muted" style="width:64px;font-size:11px">shelf life</span><div class="bar"><span style="width:45%;background:#d8b24a"></span></div><span class="cval">×1.5</span></div>
+    <div class="row"><span style="font-size:14px">🧂</span><div class="src"><b>Aremm salt pans</b> · 🧂 salt <span class="pill">caravan→ road</span></div><span style="color:#d8b24a">▣ 200/yr</span></div>
+    <div class="empty">＋ empty slot — add a preservative supplier to extend the buffer further</div>
+  </div>
+</div>
+
+<!-- ════════ LIFECYCLE ════════ -->
+<h2>Growth &amp; independence</h2>
+<div class="grid3">
+  <div class="panel">
+    <div class="ptitle">Stages (need ALL to advance)</div>
+    <div class="stage"><span class="dot" style="background:#8a6a3a"></span><b>Outpost</b></div>
+    <div class="stage"><span class="dot" style="background:#b08030"></span><b>Colony</b></div>
+    <div class="stage"><span class="dot" style="background:#c8a84a"></span><b>Town</b></div>
+    <div class="stage"><span class="dot" style="background:var(--gold)"></span><b>City</b></div>
+    <div class="note" style="margin-top:8px">Advance gate (all three):</div>
+    <div class="check"><span class="ok">✓</span><span>≥ 5 yrs unbroken supply</span><span class="cval">6.1 yr</span></div>
+    <div class="check"><span class="pend">◐</span><span>population threshold</span><span class="cval">11k/15k</span></div>
+    <div class="check"><span class="ok">✓</span><span>buildings built</span><span class="cval">3/3</span></div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Self-sufficiency</div>
+    <div class="muted" style="font-size:12px">As local farms grow, the <b>deficit (need − local production)</b> shrinks. Suppliers fall away; the subsidy ends. A colony self-feeding for good becomes <b>sustainable</b>.</div>
+    <div style="margin-top:8px;font-size:11px" class="muted">local production vs need</div>
+    <div style="display:flex;align-items:center;gap:8px"><span class="muted" style="width:46px;font-size:11px">yr 5</span><div class="bar"><span style="width:40%;background:var(--good)"></span></div></div>
+    <div style="display:flex;align-items:center;gap:8px"><span class="muted" style="width:46px;font-size:11px">yr 30</span><div class="bar"><span style="width:78%;background:var(--good)"></span></div></div>
+    <div style="display:flex;align-items:center;gap:8px"><span class="muted" style="width:46px;font-size:11px">yr 60</span><div class="bar"><span style="width:100%;background:var(--good)"></span></div></div>
+    <div class="note" style="border-color:var(--bad)">If the lifeline snaps before self-sufficiency (contract lapses · war/piracy blockade · metropolis can't pay) → reserve drains → starvation → the colony can <b>COLLAPSE</b> (backers + bank lose).</div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">⚔ War of independence (yr 70)</div>
+    <div class="muted" style="font-size:12px">At 70 yrs &amp; self-sustaining, the colony may rebel. War chest vs metropolis decides it — plus a <b>luck roll</b> (a colony can land a bigger blow, or fumble).</div>
+    <table style="margin-top:6px">
+      <tr><th></th><th>war chest</th><th>roll</th></tr>
+      <tr><td>New Venzia</td><td>8.0</td><td style="color:var(--good)">×1.4 🍀</td></tr>
+      <tr><td>Venzia</td><td>11.0</td><td style="color:var(--muted)">×1.0</td></tr>
+    </table>
+    <div class="check" style="margin-top:6px"><span class="ok">✓</span><span><b>Win</b> → independent city (own council/mint, monopoly ends)</span></div>
+    <div class="check"><span class="no">✗</span><span><b>Lose</b> → stays a colony 15 more years, then may retry</span></div>
+    <div class="note">If the metropolis has already collapsed by yr 70 → peaceful independence (no war).</div>
+  </div>
+</div>
+
+<!-- ════════ MAP ════════ -->
+<h2>On the map</h2>
+<div class="grid">
+  <div class="panel" style="padding:8px">
+    <svg viewBox="0 0 560 250" width="100%" style="background:radial-gradient(circle at 40% 45%,#0e2236,#091622);border:1px solid var(--line);border-radius:8px">
+      <path d="M40,60 C140,35 320,45 380,75 C410,130 395,200 300,210 C190,222 90,205 55,160 C30,125 30,85 40,60 Z" fill="#16324a" opacity=".5" stroke="#244a66"/>
+      <circle cx="150" cy="110" r="9" fill="var(--gold)"/><text x="120" y="96" class="city">Venzia ★ (metropolis)</text>
+      <circle cx="330" cy="160" r="7" fill="#c08cff"/><text x="300" y="146" class="city" style="fill:#d8c0ff">New Venzia (colony)</text>
+      <!-- monopoly supply+trade lane (purple), routed/landscape-following -->
+      <path d="M158,114 C220,120 270,150 324,158" fill="none" stroke="#c08cff" stroke-width="5" stroke-linecap="round"/>
+      <polygon points="250,138 238,131 240,147" fill="#d8c0ff"/>
+      <text x="180" y="200" class="small">colonial monopoly lane (own colour) — food out, goods back; same continent</text>
+    </svg>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Reading it</div>
+    <div class="check"><span style="color:var(--colony)">●</span><span style="margin-left:6px">colony pin in its own colour, name tagged <b>(colony)</b></span></div>
+    <div class="check"><span style="color:var(--colony)">▬</span><span style="margin-left:6px">colonial monopoly lane (food supply out + tribute/goods back)</span></div>
+    <div class="check"><span style="color:var(--gold)">★</span><span style="margin-left:6px">metropolis; its backing bank mints the colony's coin</span></div>
+    <div class="note">All colony lines follow the route network (the standing rule). Colours adjustable in Settings; the World News feed logs founding · graduations · the war of independence.</div>
+  </div>
+</div>
+
+<p class="note" style="margin-top:24px;border:0;color:var(--muted);font-size:11px">Static mockup — design proposal. Values illustrative; mechanics mapped to sim/tick.rs (component=continent, update_wars, goods.perishable, structures).</p>
+</body>
+</html>

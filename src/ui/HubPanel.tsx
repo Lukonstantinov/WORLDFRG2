@@ -3,8 +3,8 @@ import { useUIStore } from "../state/uiStore";
 import { useWorldStore } from "../state/worldStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
-import { campaignGetHub, campaignWarehouses, campaignFuturesLanes } from "../bridge/tauri";
-import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane } from "../types";
+import { campaignGetHub, campaignGetColony, campaignWarehouses, campaignFuturesLanes } from "../bridge/tauri";
+import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane, ColonyDetail } from "../types";
 import { climatePhrase } from "./climate";
 import { CoatOfArms, houseColor } from "./CoatOfArms";
 import { CoinIcon } from "./CoinIcon";
@@ -32,7 +32,7 @@ const HUB_EVENT_COLOR: Record<string, string> = {
   coinage: "#d8c878", bank: "#9fd0e0", crash: "#e6303a", war: "#e88", event: "#b8c8da",
 };
 
-type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "depots" | "people";
+type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "depots" | "people" | "supply";
 
 const LOCAL_COLOR = "#5d6675";  // unaffiliated local merchants (grey)
 const GUILD_COLOR = "#4a6a8a";  // organised merchant guilds (slate blue)
@@ -119,6 +119,7 @@ export function HubPanel() {
   const [tab, setTab] = useState<Tab>("summary");
   const [tradeView, setTradeView] = useState<"market" | "flows">("market");
   const [detail, setDetail] = useState<HubDetail | null>(null);
+  const [colony, setColony] = useState<ColonyDetail | null>(null);
   const [depots, setDepots] = useState<WarehouseInfo[]>([]);
   const [lanes, setLanes] = useState<FuturesLane[]>([]);
   const setFuturesFocus = useUIStore((s) => s.setFuturesFocus);
@@ -148,6 +149,7 @@ export function HubPanel() {
     let alive = true;
     if (selectedHub === null || !campActive) { setDetail(null); return; }
     campaignGetHub(selectedHub).then((d) => { if (alive) setDetail(d); }).catch(() => { if (alive) setDetail(null); });
+    campaignGetColony(selectedHub).then((c) => { if (alive) setColony(c); }).catch(() => { if (alive) setColony(null); });
     return () => { alive = false; };
   }, [selectedHub, campActive, campTick]);
 
@@ -215,6 +217,7 @@ export function HubPanel() {
     { id: "summary", label: "Summary" },
     ...(detail ? [{ id: "city" as Tab, label: detail.is_estate ? "Estate" : "City" }] : []),
     ...(detail && !detail.is_estate ? [{ id: "govt" as Tab, label: "Government" }] : []),
+    ...(colony ? [{ id: "supply" as Tab, label: "Supply" }] : []),
     { id: "trade", label: "Trade" },
     { id: "estates", label: "Estates" },
     ...(campActive ? [{ id: "depots" as Tab, label: "Depots" }] : []),
@@ -666,31 +669,47 @@ export function HubPanel() {
       {/* ════════════ ESTATES & BUILDINGS ════════════ */}
       {tab === "estates" && (
         <>
-          <div style={sectionHdr}>Estates &amp; manufactories</div>
+          <div style={sectionHdr}>Holdings — estates &amp; manufactories</div>
+          <div style={{ color: "#6a86a6", fontSize: 9, margin: "0 0 4px" }}>
+            Linked to this city — all their trade routes through here.
+            <span style={{ color: "#4fc06a", marginLeft: 6 }}>▬ manufactory</span>
+            <span style={{ color: "#ffe14a", marginLeft: 6 }}>▬ estate</span>
+          </div>
           {(detail?.estates_here?.length ?? 0) === 0 && (
             <div style={emptyTxt}>
-              {detail ? "No estates yet — wealthy houses & guilds build them over time." : "Begin the campaign (Step 11) to see this city's estates."}
+              {detail ? "No holdings yet — wealthy houses & guilds build them over time." : "Begin the campaign (Step 11) to see this city's holdings."}
             </div>
           )}
           {[...(detail?.estates_here ?? [])]
             .sort((a, b) => b.output - a.output)
-            .map((e, i) => (
+            .map((e, i) => {
+              // Manufactory (kind 6) ships finished goods (green line); every other
+              // estate kind ships raws (yellow line) — mirrors the map holdings tint.
+              const isManu = e.kind === 6;
+              const lineColor = isManu ? "#4fc06a" : "#ffe14a";
+              const ownerColor = e.owner_is_civic ? "#7fb8ff" : e.owner_is_guild ? "#7fd0c0" : "#e8dcc0";
+              const ownerLabel = e.owner_is_civic ? "city-owned" : e.owner;
+              return (
               <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 10, padding: "2px 2px", borderBottom: "1px solid #131f2c" }}>
+                <span style={{ alignSelf: "stretch", width: 4, borderRadius: 3, background: lineColor }} title={isManu ? "manufactory (green line)" : "estate (yellow line)"} />
                 <span style={{ fontSize: 13 }}>{ESTATE_EMOJI[e.kind] ?? "🏡"}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: "#cdbb88", fontWeight: 600 }}>
                     {ESTATE_LABEL[e.kind] ?? "Estate"} · {iconFor(e.good)} {labelFor(e.good)}
+                    <span style={{ color: lineColor, fontSize: 8, marginLeft: 5, fontWeight: 700 }}>
+                      {isManu ? "MANUFACTORY" : "ESTATE"}
+                    </span>
                     <span style={{ color: "#e0c060", fontSize: 9, marginLeft: 4 }} title="upgrade tier (owners invest to raise output)">
                       {"★".repeat(e.tier ?? 1)}<span style={{ color: "#3a4a5e" }}>{"★".repeat(Math.max(0, 5 - (e.tier ?? 1)))}</span>
                     </span>
                   </div>
                   <div style={{ color: "#7a90a8", fontSize: 9 }}>
-                    owner: <span style={{ color: e.owner_is_guild ? "#7fd0c0" : "#e8dcc0" }}>{e.owner}</span> · tier {e.tier ?? 1}/5
+                    owner: <span style={{ color: ownerColor }}>{ownerLabel}</span> · tier {e.tier ?? 1}/5
                   </div>
                 </div>
                 <span style={{ color: "#7fd0a0", fontSize: 10 }}>▲ {fmt(e.output)}/day</span>
               </div>
-            ))}
+            );})}
 
           {/* Buildings in the city itself (granary, warehouse, …) with effects */}
           <div style={{ ...sectionHdr, marginTop: 8 }}>Buildings</div>
@@ -708,6 +727,67 @@ export function HubPanel() {
           )}
         </>
       )}
+
+      {/* ════════════ SUPPLY (colony food lifeline + supplier roster) ════════════ */}
+      {tab === "supply" && colony && (() => {
+        const STAGE = ["", "Outpost", "Colony", "Town", "City"];
+        const CATS = [
+          { c: 0, label: "Food", hint: "covers the daily deficit", color: "#7fd0a0" },
+          { c: 1, label: "Reserve food", hint: "fills the ~1-year buffer", color: "#4fd0c0" },
+          { c: 2, label: "Preservatives", hint: "extend the reserve's shelf-life", color: "#d8b24a" },
+        ];
+        const reservePct = colony.reserve_cap > 0 ? Math.min(1, colony.reserve_food / colony.reserve_cap) : 0;
+        return (
+          <>
+            <div style={sectionHdr}>Colony — {STAGE[colony.stage] ?? "Colony"}{colony.autonomous ? " · independent" : ""}</div>
+            <div style={{ fontSize: 10, color: "#9ab0c8", lineHeight: 1.6 }}>
+              <div>Metropolis: <span style={{ color: "#cfe0f4" }}>{colony.founder_name || "—"}</span></div>
+              <div>Bank &amp; mint: <span style={{ color: "#e0c060" }}>{colony.main_bank_name || "—"}</span>{colony.coin_name ? ` · 🪙 ${colony.coin_name}` : ""}</div>
+              <div>Charter: {colony.charter_open
+                ? <span style={{ color: "#c08cff" }}>metropolis monopoly (open)</span>
+                : <span style={{ color: "#7fd0a0" }}>free trade</span>}</div>
+              <div>Supplied: <span style={{ color: colony.supply_years >= 5 ? "#7fd0a0" : "#f4c430" }}>{colony.supply_years.toFixed(1)} yr</span> (need 5 to grow) · age {colony.age_years} yr</div>
+              <div>Independence: {colony.indep_in_years > 0 ? `in ~${colony.indep_in_years} yr` : <span style={{ color: "#ff9a6a" }}>eligible</span>}</div>
+            </div>
+            {/* reserve buffer bar */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "6px 0 2px", fontSize: 9 }}>
+              <span style={{ color: "#6a86a6", width: 64 }}>reserve</span>
+              <div style={{ flex: 1, height: 7, borderRadius: 6, background: "#0c1622", overflow: "hidden" }}>
+                <div style={{ width: `${reservePct * 100}%`, height: "100%", background: "#4fd0c0" }} />
+              </div>
+              <span style={{ color: "#6a86a6" }}>{colony.reserve_food.toFixed(0)}/{colony.reserve_cap.toFixed(0)}d</span>
+            </div>
+            {colony.backers.length > 0 && (
+              <div style={{ margin: "4px 0", fontSize: 9.5 }}>
+                <span style={{ color: "#6a86a6" }}>Backers: </span>
+                {colony.backers.map((b, i) => (
+                  <span key={i} style={{ color: b.color, marginRight: 6 }}>
+                    {b.name} <span style={{ color: "#6a86a6" }}>{(b.share * 100).toFixed(0)}%</span>
+                  </span>
+                ))}
+              </div>
+            )}
+            {/* supplier roster */}
+            <div style={{ ...sectionHdr, marginTop: 6 }}>Supplier roster</div>
+            {CATS.map(({ c, label, hint, color }) => {
+              const rows = colony.supply.filter((r) => r.category === c);
+              return (
+                <div key={c} style={{ marginBottom: 5 }}>
+                  <div style={{ fontSize: 9.5, color, fontWeight: 700 }}>{label} <span style={{ color: "#6a86a6", fontWeight: 400 }}>· {hint}</span></div>
+                  {rows.length === 0 && <div style={{ fontSize: 9.5, color: "#6a86a6", fontStyle: "italic", padding: "1px 4px" }}>＋ empty slot — needs a supplier</div>}
+                  {rows.map((r, i) => (
+                    <div key={i} style={{ display: "flex", gap: 6, fontSize: 10, padding: "1px 4px", borderBottom: "1px solid #131f2c" }}>
+                      <span style={{ color: "#cdbb88", flex: 1 }}>{r.supplier}</span>
+                      <span style={{ color: "#9ab0c8" }}>{iconFor(r.good)} {labelFor(r.good)}</span>
+                      <span style={{ color: "#7fd0a0", width: 54, textAlign: "right" }}>{fmt(r.qty)}/mo</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </>
+        );
+      })()}
 
       {/* ════════════ DEPOTS (warehouses sited here + futures links) ════════════ */}
       {tab === "depots" && (() => {

@@ -203,6 +203,34 @@ export interface CampaignHubBrief {
   mood: number;
   /** Month-over-month population growth fraction (+0.05 = +5%). */
   growth: number;
+  /** Colony state for map markers: 0 none · 1 settlement colony · 2 house outpost. */
+  colony_kind: number;
+  colony_stage: number;
+  /** Owner house index (house outposts) — map to the house colour. */
+  owner_house: number;
+  /** Founder/owner-home hub index (lane endpoint); -1 if none. */
+  founder_hub: number;
+  autonomous: boolean;
+}
+/** One backer of a colony venture (city / house / bank). */
+export interface ColonyBackerRow { kind: number; name: string; color: string; share: number }
+/** One civic supply contract feeding a colony. */
+export interface ColonySupplyRow { category: number; supplier: string; good: string; qty: number }
+/** Colony detail for the HubPanel "Supply" subtab. */
+export interface ColonyDetail {
+  stage: number;
+  autonomous: boolean;
+  founder_name: string;
+  main_bank_name: string;
+  coin_name: string;
+  charter_open: boolean;
+  supply_years: number;
+  reserve_food: number;
+  reserve_cap: number;
+  age_years: number;
+  indep_in_years: number;
+  backers: ColonyBackerRow[];
+  supply: ColonySupplyRow[];
 }
 /** One weekly per-hub history sample (settlement-window charts). */
 export interface HubSample {
@@ -402,6 +430,7 @@ export interface EstateRow {
   output: number;
   owner: string;
   owner_is_guild: boolean;
+  owner_is_civic?: boolean; // city-financed (locally owned)
   tier: number;       // upgrade tier 1..5
 }
 /** One city in the live richest-cities ranking. */

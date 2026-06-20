@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorldForge 2 — Implementation Report (Phases A–D)</title>
+<style>
+  :root{--bg:#0b1420;--panel:#13202e;--panel2:#0f1a26;--line:#1e2e42;
+    --text:#cfe2f6;--muted:#6a86a6;--accent:#3a80c0;--flow:#4fd0c0;
+    --good:#5fbf6f;--warn:#f4c430;--bad:#ff6a4a;--manu:#4fc06a;--estate:#ffe14a;}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(circle at 30% -10%,#16273a,#0b1420 60%);
+    color:var(--text);font:13px/1.5 "Segoe UI",system-ui,sans-serif;padding:26px;}
+  h1{font-size:21px;margin:0 0 2px;font-weight:700}
+  h1 small{color:var(--muted);font-weight:400;font-size:13px}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:var(--flow);
+    margin:30px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  .done{display:inline-block;font-size:10px;font-weight:700;color:#7fe0a0;background:#14331c;
+    border:1px solid #2c5a2c;border-radius:20px;padding:1px 9px;margin-left:8px;vertical-align:2px}
+  .grid{display:grid;gap:18px;grid-template-columns:1fr 1fr}
+  @media(max-width:860px){.grid{grid-template-columns:1fr}}
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);
+    border-radius:10px;padding:14px 16px;box-shadow:0 6px 22px rgba(0,0,0,.35)}
+  .ptitle{font-weight:700;font-size:13px;margin-bottom:8px;display:flex;justify-content:space-between}
+  .muted{color:var(--muted)} .note{font-size:11.5px;color:var(--muted);border-left:2px solid var(--accent);padding-left:9px;margin:9px 0}
+  .crow{display:flex;align-items:center;gap:10px;padding:4px 0;border-bottom:1px solid #14222f}
+  .crow .nm{flex:1} .crow .hex{font:11px ui-monospace,monospace;color:var(--muted);width:64px}
+  .crow input[type=color]{width:28px;height:22px;border:1px solid var(--line);border-radius:5px;background:none;padding:0}
+  .lead{width:5px;align-self:stretch;border-radius:3px}
+  .hold{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;background:#0e1a27;border:1px solid var(--line);margin:5px 0}
+  .tag{font-size:8px;font-weight:700;padding:1px 5px;border-radius:4px}
+  .check{display:flex;gap:8px;align-items:baseline;padding:3px 0;font-size:11px}
+  .ok{color:var(--good);font-weight:700;width:12px}
+  .cval{margin-left:auto;color:var(--muted);font-family:ui-monospace,monospace}
+  .feed{display:flex;gap:8px;padding:5px 0;border-bottom:1px dashed #18283a}
+  .pill{display:inline-block;font-size:10px;border-radius:20px;padding:2px 8px;border:1px solid var(--line);margin:0 3px 4px 0;color:var(--muted)}
+  .pill.on{color:var(--text);border-color:var(--accent);background:#11283f}
+  .lbl{font-size:11px;fill:#cfe2f6;font-family:inherit}
+</style>
+</head>
+<body>
+
+<h1>WorldForge 2 — Implementation Report &nbsp;<small>what shipped across Phases A–D · tsc + cargo clean</small></h1>
+<div class="note" style="border-color:var(--good)">All four phases are implemented and pushed. Panels below mirror the live UI (colours/values pulled from the code). Open <code>continental-flow.html</code> for the full flow visual.</div>
+
+<!-- ════════ PHASE A ════════ -->
+<h2>Phase A — Adjustable colours + combined continental flow <span class="done">SHIPPED</span></h2>
+<div class="grid">
+  <div class="panel">
+    <div class="ptitle">⚙ Top-screen Settings → Appearance</div>
+    <div class="muted" style="font-size:11px;margin-bottom:8px">Every trade/connection-line colour is editable (live pickers below work). Saved to localStorage + the world file.</div>
+    <div class="crow"><span class="lead" style="background:#caa15a"></span><span class="nm">Overland caravan</span><span class="hex">#caa15a</span><input type="color" value="#caa15a"></div>
+    <div class="crow"><span class="lead" style="background:#7fd0d8"></span><span class="nm">Maritime</span><span class="hex">#7fd0d8</span><input type="color" value="#7fd0d8"></div>
+    <div class="crow"><span class="lead" style="background:#4fd0c0"></span><span class="nm">Dynamic trade flow</span><span class="hex">#4fd0c0</span><input type="color" value="#4fd0c0"></div>
+    <div class="crow"><span class="lead" style="background:#4fc06a"></span><span class="nm">Manufactory export</span><span class="hex">#4fc06a</span><input type="color" value="#4fc06a"></div>
+    <div class="crow"><span class="lead" style="background:#ffe14a"></span><span class="nm">Estate export</span><span class="hex">#ffe14a</span><input type="color" value="#ffe14a"></div>
+    <div class="note">+ presets (Default / High-contrast / Colour-blind-safe), per-key &amp; global reset. Backend <code>get/set_appearance</code> persists in world metadata.</div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Dynamic flow — one combined network</div>
+    <svg viewBox="0 0 380 150" width="100%">
+      <circle cx="30" cy="80" r="6" fill="#ffd24a"/><text x="14" y="64" class="lbl">Verroa</text>
+      <circle cx="350" cy="78" r="8" fill="#ffd24a"/><text x="318" y="62" class="lbl">Venzia ★</text>
+      <path d="M36,80 C120,72 150,52 210,56 S300,92 344,78" fill="none" stroke="#4fd0c0" stroke-width="9" stroke-linecap="round" opacity=".9"/>
+      <path d="M40,120 C110,108 160,70 210,56" fill="none" stroke="#4fd0c0" stroke-width="4" opacity=".6"/>
+      <polygon points="220,55 206,47 210,67" fill="#aef3ea"/>
+      <g transform="translate(210,56)"><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)" fill="none" stroke="#ff6a4a" stroke-width="2"/></g>
+      <circle cx="350" cy="78" r="15" fill="#4fd0c0" opacity=".18"/>
+    </svg>
+    <div class="note">Edge-bundled trunks assembled into arteries (width ∝ volume) that thicken toward the emporia · <b>one arrow per artery</b> · emporium glow · chokepoint ◇. Corridors now snap to routes too.</div>
+  </div>
+</div>
+
+<!-- ════════ PHASE B ════════ -->
+<h2>Phase B — Holdings linked to the city <span class="done">SHIPPED</span></h2>
+<div class="grid">
+  <div class="panel">
+    <div class="ptitle">HubPanel → Holdings</div>
+    <div class="muted" style="font-size:10px;margin-bottom:6px">Linked to this city — all trade routes through here. <span style="color:var(--manu)">▬ manufactory</span> <span style="color:var(--estate)">▬ estate</span></div>
+    <div class="hold"><span class="lead" style="background:var(--manu)"></span>🏭<div style="flex:1"><b style="color:#cdbb88">Manufactory · 🧵 cloth</b> <span class="tag" style="color:var(--manu)">MANUFACTORY</span> <span style="color:#e0c060">★★★</span><br><span class="muted" style="font-size:9px">owner: <span style="color:#e8dcc0">House Cassii</span> · tier 3/5</span></div><span style="color:#7fd0a0">▲ 410/day</span></div>
+    <div class="hold"><span class="lead" style="background:var(--estate)"></span>🍇<div style="flex:1"><b style="color:#cdbb88">Vineyard · 🍷 wine</b> <span class="tag" style="color:var(--estate)">ESTATE</span> <span style="color:#e0c060">★★★★</span><br><span class="muted" style="font-size:9px">owner: <span style="color:#e8dcc0">House Dorne</span> · tier 4/5</span></div><span style="color:#7fd0a0">▲ 1,100/day</span></div>
+    <div class="hold"><span class="lead" style="background:var(--estate)"></span>🌾<div style="flex:1"><b style="color:#cdbb88">Farm · 🌾 wheat</b> <span class="tag" style="color:var(--estate)">ESTATE</span><br><span class="muted" style="font-size:9px">owner: <span style="color:#7fb8ff">city-owned</span> · tier 2/5</span></div><span style="color:#7fd0a0">▲ 2,400/day</span></div>
+    <div class="note">Backend: estates co-located at parent (no separate map pin). New <code>owner_is_civic</code> → "city-owned" reads in blue.</div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Futures lane → owner relation</div>
+    <div style="background:rgba(12,18,26,0.97);border:1px solid #3a3214;border-radius:8px;padding:9px 11px">
+      <div style="display:flex;gap:6px;align-items:baseline"><span style="width:10px;height:10px;border-radius:2px;background:#b03a5a"></span><b style="color:#e8dcc0">House Medici</b></div>
+      <div style="color:#ffcf3f;font-size:12px;margin:3px 0">📜 5-year futures contract</div>
+      <div style="font-size:11px">
+        <span style="color:#cfe0f4">Venzia</span><span style="color:#8aa0c0"> → </span><span style="color:#cfe0f4">Genova</span>
+        <span style="color:#8aa0c0">  (silk — </span><span style="color:#b03a5a;font-weight:700">House Medici</span><span style="color:#8aa0c0">)</span>
+      </div>
+    </div>
+    <div class="note">The trade-agreement line now reads its owner in the house/guild colour — exactly the "Venice → Genoa (silk — House Medici)" form you asked for.</div>
+  </div>
+</div>
+
+<!-- ════════ PHASE C ════════ -->
+<h2>Phase C — Bank-founding explainer <span class="done">SHIPPED</span></h2>
+<div class="grid">
+  <div class="panel">
+    <div class="ptitle">🏦 Banco di Verroa — ▾ why it opened</div>
+    <div class="muted" style="font-size:10px;margin-bottom:5px">Chartered in 1471 because House Cassii met every founding condition:</div>
+    <div class="check"><span class="ok">✓</span><span>Banking archetype <span class="muted">Banking</span></span><span class="cval">Banking</span></div>
+    <div class="check"><span class="ok">✓</span><span>Wealth <span class="muted">≥ 10.0</span></span><span class="cval">52.4</span></div>
+    <div class="check"><span class="ok">✓</span><span>Prestige <span class="muted">≥ 0.30</span></span><span class="cval">0.61</span></div>
+    <div class="check"><span class="ok">✓</span><span>Seat coin-trust <span class="muted">≥ 0.45</span></span><span class="cval">0.72</span></div>
+    <div class="check"><span class="ok">✓</span><span>No prior bank <span class="muted">one per house</span></span><span class="cval">first</span></div>
+    <div class="check"><span class="ok">✓</span><span>Capital staked <span class="muted">min(6.0, ½ wealth)</span></span><span class="cval">6.0</span></div>
+    <div class="note">Expandable section on each bank card in the 🏦 Banks tab. Gates &amp; thresholds read straight from <code>update_banks</code> (BANK_FOUND_*); values from the owning house brief.</div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Why this matters</div>
+    <div class="muted" style="font-size:12px">Banks used to just "appear." Now every charter shows the exact economic conditions that made it possible — the worldbuilder can read why finance emerged where it did, and which trusted-coin cities grew their first bank.</div>
+  </div>
+</div>
+
+<!-- ════════ PHASE D ════════ -->
+<h2>Phase D — World News feed <span class="done">SHIPPED</span></h2>
+<div class="grid">
+  <div class="panel">
+    <div class="ptitle">🗞 World News</div>
+    <div style="margin-bottom:6px">
+      <span class="pill on">🗞 All</span><span class="pill">🛡 Houses</span><span class="pill">🏦 Banks</span>
+      <span class="pill">⚔ Wars</span><span class="pill">📉 Crashes</span><span class="pill">🏭 Holdings</span>
+    </div>
+    <div class="feed"><span style="width:20px;text-align:center">🏦</span><div><div style="font-size:10.5px;color:#cfe0f4">House Cassii founds the Banco di Verroa</div><div class="muted" style="font-size:9px">Year 71 · Verroa</div></div></div>
+    <div class="feed"><span style="width:20px;text-align:center">🏭</span><div><div style="font-size:10.5px;color:#cfe0f4">House Dorne establishes Dorne Vineyard (wine)</div><div class="muted" style="font-size:9px">Year 72 · Verroa</div></div></div>
+    <div class="feed"><span style="width:20px;text-align:center">⚔</span><div><div style="font-size:10.5px;color:#cfe0f4">Aremm &amp; Pell at war — strait blockaded</div><div class="muted" style="font-size:9px">Year 73 · Aremm</div></div></div>
+    <div class="feed"><span style="width:20px;text-align:center">📉</span><div><div style="font-size:10.5px;color:#cfe0f4">Spice bubble pops at Verroa</div><div class="muted" style="font-size:9px">Year 74 · Verroa</div></div></div>
+    <div class="note">Reads the global campaign journal (<code>campaign_get_journal(-1,-1)</code>); category filters; clicking an item focuses that settlement. Opened from the Campaign step (🗞 World News).</div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Still designed, not yet built</div>
+    <div class="muted" style="font-size:12px">From the Phase-D mockups (<code>brainstorm-2.html</code>): the <b>Good Price Atlas</b>, the <b>Great Houses leaderboard</b> with networth sparklines, and the <b>explain-this-number</b> popover. The News feed shipped first as the highest-value, lowest-risk piece. These remain queued.</div>
+  </div>
+</div>
+
+<p class="note" style="margin-top:24px;border:0;color:var(--muted);font-size:11px">Static report. Live pickers in Phase A are real. Numbers illustrative; colours &amp; thresholds pulled from the code.</p>
+</body>
+</html>

@@ -62,6 +62,7 @@ const overlayTypes = [
   { id: "rivers", label: "Rivers" },
   { id: "lakes", label: "Lakes" },
   { id: "settlements", label: "Settlements" },
+  { id: "colonies", label: "⛶ Colonies" },
   { id: "settlementNames", label: "Settlement Names" },
   { id: "hubNames", label: "Hub Names" },
   { id: "cultures", label: "\u{1F465} Peoples" },
