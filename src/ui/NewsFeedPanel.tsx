@@ -3,6 +3,7 @@ import { useUIStore } from "../state/uiStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { campaignGetJournal } from "../bridge/tauri";
 import type { JournalEntry } from "../types";
+import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 /** Phase D · the filterable World News feed — a global, clickable view over the
  *  campaign chronicle (the same `journal` the per-city/house timelines read).
@@ -44,14 +45,15 @@ export function NewsFeedPanel() {
     return [...filtered].sort((a, b) => b.tick - a.tick).slice(0, 200);
   }, [entries, cat]);
 
+  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.news);
   if (!open) return null;
 
   return (
-    <div style={panel}>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
+    <div data-draggable style={{ ...panel, ...rootStyle }}>
+      <div style={{ display: "flex", alignItems: "center", marginBottom: 6, cursor: "move" }} onPointerDown={onPointerDown}>
         <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 13 }}>🗞 World News</span>
         <span style={{ flex: 1 }} />
-        <span onClick={close} title="Close" style={{ color: "#7090b0", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</span>
+        <span data-no-drag onClick={close} title="Close" style={{ color: "#7090b0", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</span>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
         {CATS.map((c) => (

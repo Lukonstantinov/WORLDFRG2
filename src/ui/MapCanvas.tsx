@@ -763,6 +763,21 @@ export function MapCanvas() {
     return () => clearTimeout(t);
   }, [searchPin, requestRender]);
 
+  // #5: selecting a hub from ANY list/panel (Richest Cities, Trade matrix, Houses,
+  // Banks, …) recenters the map on that city AND drops the shiny highlight pin — so
+  // clicking a city name jumps the view there and makes it glow.
+  const focusOn = useViewportStore((s) => s.focusOn);
+  const setSearchPin = useViewportStore((s) => s.setSearchPin);
+  useEffect(() => {
+    if (selectedHub == null) return;
+    const hub = campaignSnapshot?.hubs.find((h) => h.id === selectedHub)
+      ?? economyRef.current?.hubs.find((h) => h.id === selectedHub);
+    if (hub && typeof hub.x === "number" && typeof hub.y === "number") {
+      focusOn(hub.x + 0.5, hub.y + 0.5);
+      setSearchPin(hub.x + 0.5, hub.y + 0.5);
+    }
+  }, [selectedHub]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {

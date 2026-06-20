@@ -863,6 +863,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 tw_guild: 0.0,
                 estate_kind: 0,
                 estate_tier: 0,
+                last_upgrade_tick: 0,
                 owner_house: -1,
                 structures: vec![],
                 treasury: 0.0,
@@ -1053,9 +1054,12 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
             text: "The age of trade begins.".into(),
         }],
         days_per_cell,
-        freight_per_day: 0.012,
+        // Higher per-day freight = dearer ship/caravan operation (#9). Lower trade
+        // margin = thinner merchant markups (#9). Together with lower tariffs and
+        // smaller feasts, profit is squeezed toward realistic levels.
+        freight_per_day: 0.018,
         k: 0.6,
-        margin: 0.05,
+        margin: 0.035,
         need_scale,
         world_w: grid_w,
         world_h: world_ref.grid_height.max(1) as f32,

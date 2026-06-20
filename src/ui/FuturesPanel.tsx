@@ -4,6 +4,7 @@ import { useCampaignStore } from "../state/campaignStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { campaignFuturesLanes } from "../bridge/tauri";
 import type { FuturesLane } from "../types";
+import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 /** The futures CONTRACTS list — every active supply contract in the world. Click a
  *  row to ISOLATE that one lane on the map (the rest fade). Click a city or the
@@ -41,6 +42,7 @@ export function FuturesPanel() {
       || r.a_name.toLowerCase().includes(s) || r.b_name.toLowerCase().includes(s));
   }, [rows, q]);
 
+  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.futures);
   if (!open) return null;
   const fmt = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
   const total = filtered.reduce((a, r) => a + r.qty, 0);
@@ -48,10 +50,10 @@ export function FuturesPanel() {
   const focusLabel = focus?.city ?? focus?.holder ?? focus?.good ?? null;
 
   return (
-    <div style={panel}>
-      <div style={header}>
+    <div data-draggable style={{ ...panel, ...rootStyle }}>
+      <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>📜 Futures Contracts</span>
-        <span style={{ cursor: "pointer", color: "#7a90a8" }} onClick={() => setOpen(false)}>✕</span>
+        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={() => setOpen(false)}>✕</span>
       </div>
       <div style={{ padding: "6px 8px", borderBottom: "1px solid #1a2a3e", display: "flex", gap: 6, alignItems: "center" }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="filter city / good / house…"

@@ -245,14 +245,16 @@ export function HubPanel() {
           style={{ color: "#7090b0", cursor: "pointer", fontSize: 18, lineHeight: 1 }} title="Close">×</span>
       </div>
 
-      {/* ── Tab bar ── */}
-      <div style={{ display: "flex", gap: 2, margin: "2px 0 6px", borderBottom: "1px solid #1e2e42" }}>
+      {/* ── Tab bar (wraps so every tab — incl. People — stays visible even when a
+             colony shows all 8; a non-wrapping row used to clip the last tabs) ── */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 2, margin: "2px 0 6px", borderBottom: "1px solid #1e2e42" }}>
         {TABS.map((t) => (
           <div key={t.id} onClick={() => setTab(t.id)}
             style={{
-              padding: "4px 9px", cursor: "pointer", fontSize: 11, fontWeight: tab === t.id ? 700 : 400,
+              padding: "4px 8px", cursor: "pointer", fontSize: 11, fontWeight: tab === t.id ? 700 : 400,
               color: tab === t.id ? "#cfe2f6" : "#6a86a6",
               borderBottom: tab === t.id ? "2px solid #3a80c0" : "2px solid transparent",
+              whiteSpace: "nowrap",
             }}>
             {t.label}
           </div>

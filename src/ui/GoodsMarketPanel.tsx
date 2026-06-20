@@ -4,6 +4,7 @@ import { useUIStore } from "../state/uiStore";
 import { campaignGetGoods } from "../bridge/tauri";
 import { GOOD_DEFS } from "../goods";
 import type { GoodMarketRow } from "../types";
+import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 const GICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
 const GLABEL = new Map(GOOD_DEFS.map((g) => [g.name, g.label]));
@@ -66,6 +67,7 @@ export function GoodsMarketPanel() {
     return [...r].sort((a, b) => { const ka = key[sort](a), kb = key[sort](b); return ka < kb ? -1 : ka > kb ? 1 : 0; });
   }, [rows, sort, manuOnly, tradedOnly]);
 
+  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.goods);
   if (!open) return null;
   const close = () => useUIStore.getState().setShowGoodsWindow(false);
   const maxProd = Math.max(1, ...view.map((x) => x.produced));
@@ -80,10 +82,10 @@ export function GoodsMarketPanel() {
   );
 
   return (
-    <div style={panel}>
-      <div style={header}>
+    <div data-draggable style={{ ...panel, ...rootStyle }}>
+      <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>📦 Goods of the World — quality &amp; trade</span>
-        <span style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
+        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
       </div>
       {!active && <div style={empty}>Begin the campaign (Step 11) — goods grade up as the world trades.</div>}
       {active && (

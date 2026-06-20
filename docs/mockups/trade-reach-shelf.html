@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Trade reach — shelf is reachable sea (before / after)</title>
+<style>
+  :root { --bg:#0b1420; --panel:#13202e; --text:#cfe2f6; --muted:#7fa0c4; --accent:#3a80c0; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui, sans-serif; padding:28px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  h2 { font-size:14px; color:var(--accent); margin:0 0 8px; letter-spacing:.04em; text-transform:uppercase; }
+  p.lead { color:var(--muted); max-width:880px; margin:0 0 22px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:22px; max-width:1000px; }
+  .card { background:var(--panel); border:1px solid #1e3346; border-radius:10px; padding:16px; }
+  .legend { display:flex; flex-wrap:wrap; gap:14px; margin:18px 0 0; color:var(--muted); font-size:12px; max-width:1000px; }
+  .legend span { display:inline-flex; align-items:center; gap:6px; }
+  .sw { width:16px; height:10px; border-radius:2px; display:inline-block; }
+  code { background:#0e1a26; padding:1px 5px; border-radius:4px; color:#bcd7f2; }
+  .note { font-size:12px; color:var(--muted); margin-top:8px; }
+  ul { margin:10px 0 0; padding-left:18px; color:var(--muted); max-width:1000px; }
+  li { margin:3px 0; }
+</style>
+</head>
+<body>
+  <h1>Trade reach — continental shelf is “reachable sea”</h1>
+  <p class="lead">User rule: <em>“If a tile is water but it is shelf, then it means there is a reachable sea (not high sea).”</em>
+     Coastal navigation hugged shallow shelf water; only crossing the deep / high sea (beyond the shelf) was the hard,
+     reach-limited part. The coarse trade-cost grid now treats <b>shelf water as cheap, unrestricted coastal sea</b> and
+     counts <b>only non-shelf deep ocean</b> against the open-water crossing limit.</p>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Before — only the 1-cell coastal ring was “reachable”</h2>
+      <svg viewBox="0 0 420 260" width="100%" height="auto">
+        <!-- deep ocean -->
+        <rect x="0" y="0" width="420" height="260" fill="#0c2740"/>
+        <!-- two landmasses -->
+        <path d="M0,0 H150 V70 Q120,110 150,150 V260 H0 Z" fill="#2f5134"/>
+        <path d="M420,40 H300 Q330,120 300,200 V260 H420 Z" fill="#2f5134"/>
+        <!-- shelf bands (shown but NOT used before) -->
+        <path d="M150,0 V70 Q120,110 150,150 V260 H180 V0 Z" fill="#0c2740"/>
+        <!-- cities -->
+        <circle cx="120" cy="40" r="6" fill="#f2c14e"/><text x="120" y="28" fill="#cfe2f6" font-size="11" text-anchor="middle">A</text>
+        <circle cx="120" cy="210" r="6" fill="#f2c14e"/><text x="120" y="232" fill="#cfe2f6" font-size="11" text-anchor="middle">B</text>
+        <circle cx="350" cy="150" r="6" fill="#f2c14e"/><text x="350" y="138" fill="#cfe2f6" font-size="11" text-anchor="middle">C</text>
+        <!-- A-B forced overland around the bay (expensive detour) -->
+        <path d="M120,40 Q60,125 120,210" fill="none" stroke="#e06a5a" stroke-width="3" stroke-dasharray="6 5"/>
+        <text x="40" y="125" fill="#e06a5a" font-size="11">overland detour</text>
+        <!-- A/B isolated from C: dropped -->
+        <text x="250" y="120" fill="#8a98a8" font-size="11">C dropped — open-sea run too long</text>
+      </svg>
+      <div class="note">Sea was “coastal” (cheap, reachable) only within ONE cell of land. Anything past that ring read
+        as open ocean, so a coastal hop along a wide shelf bay counted as a crossing — small/distant cities got dropped
+        (the disconnected dynamic-flow gaps), and routes detoured overland or beelined straight at the city.</div>
+    </div>
+
+    <div class="card">
+      <h2>After — the whole shelf is reachable coastal sea</h2>
+      <svg viewBox="0 0 420 260" width="100%" height="auto">
+        <rect x="0" y="0" width="420" height="260" fill="#0c2740"/>
+        <path d="M0,0 H150 V70 Q120,110 150,150 V260 H0 Z" fill="#2f5134"/>
+        <path d="M420,40 H300 Q330,120 300,200 V260 H420 Z" fill="#2f5134"/>
+        <!-- shelf bands now ACTIVE (light) -->
+        <path d="M150,0 V70 Q120,110 150,150 V260 H200 V0 Z" fill="#1d6f8c" opacity="0.55"/>
+        <path d="M300,40 Q330,120 300,200 V260 H260 V40 Z" fill="#1d6f8c" opacity="0.55"/>
+        <circle cx="120" cy="40" r="6" fill="#f2c14e"/><text x="120" y="28" fill="#cfe2f6" font-size="11" text-anchor="middle">A</text>
+        <circle cx="120" cy="210" r="6" fill="#f2c14e"/><text x="120" y="232" fill="#cfe2f6" font-size="11" text-anchor="middle">B</text>
+        <circle cx="350" cy="150" r="6" fill="#f2c14e"/><text x="350" y="138" fill="#cfe2f6" font-size="11" text-anchor="middle">C</text>
+        <!-- A-B hug the shelf (cheap coastal) -->
+        <path d="M120,40 Q175,125 120,210" fill="none" stroke="#4fd0c0" stroke-width="3"/>
+        <!-- A/B to C: short deep-sea crossing at the narrows, allowed -->
+        <path d="M150,125 Q230,140 300,140" fill="none" stroke="#4fd0c0" stroke-width="3"/>
+        <path d="M225,160 L210,150 L228,142" fill="none" stroke="#ffce5f" stroke-width="2"/>
+        <text x="205" y="178" fill="#ffce5f" font-size="10">deep-sea crossing (counted)</text>
+      </svg>
+      <div class="note">Shelf water is cheap shipping and is excluded from the crossing limit, so A↔B hug the shelf and
+        even C links via a short deep-sea hop at the narrows. Only the genuinely open ocean still counts toward
+        <code>max_crossing</code> — small &amp; coastal cities stop being dropped.</div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><i class="sw" style="background:#2f5134"></i> land</span>
+    <span><i class="sw" style="background:#1d6f8c; opacity:.55"></i> shelf — reachable coastal sea (cost 0.5, not a crossing)</span>
+    <span><i class="sw" style="background:#0c2740"></i> deep / high sea (cost 2.2, counts toward the crossing limit)</span>
+    <span><i class="sw" style="background:#4fd0c0"></i> trade flow / route</span>
+    <span><i class="sw" style="background:#e06a5a"></i> forced detour / dropped (before)</span>
+  </div>
+
+  <ul>
+    <li><b>Code:</b> <code>build_coarse_cost</code> samples <code>tile.is_shelf</code> into a coarse <code>shelf</code> mask;
+      shelf sea gets the coastal cost <code>0.5</code>, and <code>is_open_sea = !coastal &amp;&amp; !shelf</code>.</li>
+    <li><b>Effect on <code>path_allowed</code> (reach 1):</b> the open-water run now counts only deep-sea cells, so long
+      shelf coastlines never trip the crossing cap.</li>
+    <li><b>Fixes:</b> #7 disconnected dynamic flow, #12 “reachable but not connected”, #14 small cities with no trade.</li>
+  </ul>
+</body>
+</html>

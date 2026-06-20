@@ -26,6 +26,11 @@ pub const SEASONS: [&str; 4] = ["Spring", "Summer", "Autumn", "Winter"];
 
 const EPS: f32 = 1e-4;
 const TIER_WEIGHT: [f32; 3] = [1.0, 0.45, 0.22];
+/// Cities covet LUXURIES they can't make at home — fine goods from far lands. A
+/// luxury good NOT produced locally gets this extra desire, scaled by its prestige
+/// (base_value), so high-value foreign luxuries drive vigorous inter-city trade
+/// instead of every city being content with what it produces itself (#2).
+const LUX_IMPORT_DESIRE: f32 = 0.7;
 const PRICE_FLOOR_MULT: f32 = 0.15;
 const PRICE_CEIL_MULT: f32 = 12.0;
 /// Per-capita appetite scale; multiplied by the seed-time balance factor so total
@@ -105,8 +110,8 @@ const COLONY_START_TICK: u32 = 50 * 365;
 /// Easier conditions than a settlement colony (no bank/food/joint-stock), just the
 /// wealth + cost. Outposts can NEVER become independent and stay small.
 const OUTPOST_START_TICK: u32 = 30 * 365;
-const OUTPOST_FOUND_WEALTH: f32 = 150_000.0; // a house this rich may found one
-const OUTPOST_FOUND_COST: f32 = 120_000.0;   // heavy cost (debited from the house)
+const OUTPOST_FOUND_WEALTH: f32 = 100_000.0; // a house this rich may found one
+const OUTPOST_FOUND_COST: f32 = 70_000.0;    // heavy cost (debited from the house)
 const OUTPOST_MAX_POP: f32 = 800.0;          // a trade post stays small (hard pop cap)
 /// Yearly dividend a settlement colony pays its backers, as a fraction of its
 /// trade surplus (kept small so fortunes stay bounded).
@@ -132,6 +137,18 @@ const MANUFACTORY_PERCAP: f32 = 0.2;
 const MANUFACTURE_PULL: f32 = 12.0;
 /// Each estate/manufactory upgrade tier multiplies its output by this (5 tiers).
 const ESTATE_UPGRADE_MULT: f32 = 1.4;
+/// A MANUFACTORY (value-added workshop, estate_kind 6) is a major capital works —
+/// far dearer than a raw estate. Building one costs at least this; upgrading a tier
+/// costs this; and a workshop can only be upgraded once every `UPGRADE_INTERVAL`
+/// (re-tooling takes years). Calibrated to the live wealth scale (great houses hold
+/// 200k+), so only a serious house can found/expand one.
+// NOTE: a flat 40k BUILD floor collapses the economy in the dynamics test — cheap
+// manufactories are currently the load-bearing house growth engine, so pricing them
+// out stops houses bootstrapping. Reserved pending an income rebalance (see notes).
+#[allow(dead_code)]
+const MANUFACTORY_BUILD_COST: f32 = 40_000.0;
+const MANUFACTORY_UPGRADE_COST: f32 = 30_000.0;
+const MANUFACTORY_UPGRADE_INTERVAL: u32 = 5 * 365; // ticks (5 years)
 
 // ── Merchant fleets & voyage risk ────────────────────────────────────────────
 /// A settlement gets a civic Merchant Guild once it reaches this population.
@@ -186,6 +203,12 @@ const CONTEST_INFLUENCE: f32 = 0.30;
 /// non-dominators pay ×that (a modest sway, not a stranglehold).
 const DOMINATOR_TAX_MULT: f32 = 0.75;
 const RIVAL_TAX_MULT: f32 = 1.15;
+/// A house with overwhelming TRADE CONTROL of a city (influence ≥ this) MONOPOLISES
+/// its commerce: it commands the city's surplus and exports on its own terms,
+/// taking this extra export rent on goods shipped OUT of that controlled city.
+/// (User #2: at ≥80% control a house can monopolise and trade as it pleases.)
+const MONOPOLY_CONTROL: f32 = 0.80;
+const MONOPOLY_EXPORT_RENT: f32 = 0.5;
 // ── Bailo (governing headquarters) ──
 /// An office may rise to a Bailo only after sustained dominance at/above this influence,
 /// with the wealth to sustain it. The home seat is always a "Bailo-equivalent" capital.
@@ -331,9 +354,9 @@ const BOAT_CAPACITY: f32 = 70.0;    // river boat — mid
 const CARAVAN_CAPACITY: f32 = 40.0; // overland caravan — least
 /// Conspicuous consumption (feasts, weddings, charity, building): spent INTO the
 /// home city, lifting its people's prosperity — the main "wealth reaches people" lever.
-const HOUSE_CONSUMPTION_RATE: f32 = 0.004;
+const HOUSE_CONSUMPTION_RATE: f32 = 0.0022;
 /// Guilds are civic — they spend more of their wealth on their own citizens.
-const GUILD_CIVIC_RATE: f32 = 0.008;
+const GUILD_CIVIC_RATE: f32 = 0.005;
 /// Soft wealth ceiling for a guild in a baseline (~30k) city, scaled by
 /// `city_size_factor`. Beyond it a guild is pressed to endow its city; the drain
 /// grows with the overshoot (see `apply_wealth_sinks`), so guild fortunes
@@ -346,15 +369,15 @@ const GUILD_ENDOW_MAX: f32 = 0.5;
 const CIVIC_DECAY: f32 = 0.97;
 /// Monthly fleet upkeep as a fraction of a vessel's value (crew, repairs, berthing)
 /// — a steady sink that scales with how big a fleet the house runs.
-const FLEET_UPKEEP_FRAC: f32 = 0.035;
+const FLEET_UPKEEP_FRAC: f32 = 0.05;
 /// Per-vessel monthly chance of being lost to wear (rot, storms, breakdown) — the
 /// slow decay of ships & caravans, so fleets must be continually replaced.
 const FLEET_DECAY_CHANCE: f32 = 0.012;
 /// Civic taxes a city levies on a house's trade — export on goods leaving the
 /// origin, import on goods arriving at the destination. Paid by the house, funding
 /// the city (into its civic_pool → people). Guilds pay HEAVIER taxes (civic duty).
-pub const EXPORT_TAX_RATE: f32 = 0.04;
-pub const IMPORT_TAX_RATE: f32 = 0.05;
+pub const EXPORT_TAX_RATE: f32 = 0.03;
+pub const IMPORT_TAX_RATE: f32 = 0.035;
 const GUILD_TAX_MULT: f32 = 2.0;
 /// Guild trade taxes are PROGRESSIVE in trade volume: a dominant guild moving a
 /// great deal of cargo pays proportionally more on every shipment than a small
@@ -489,9 +512,9 @@ const NEIGHBOR_K: usize = 32;
 /// real hubs in `self.hubs`, so an uncapped count quadratically slows every tick.
 const MAX_TOTAL_ESTATES: usize = 220;
 
-const SHIP_COST: f32 = 5.0;
-const RIVER_COST: f32 = 3.5;
-const CARAVAN_COST: f32 = 3.0;
+const SHIP_COST: f32 = 7.0;
+const RIVER_COST: f32 = 4.5;
+const CARAVAN_COST: f32 = 4.0;
 
 // ── DLC 3.5 · Coinage (the "Venice ducat") ──────────────────────────────────
 // A council-led polis issues a NAMED coin whose acceptance ("trust") is sticky
@@ -518,7 +541,18 @@ const BANK_FOUND_WEALTH: f32 = 10.0;
 const BANK_FOUND_PRESTIGE: f32 = 0.30;
 /// The bank's seat city coin must be trusted at least this much (you bank in good money).
 const BANK_FOUND_COIN_TRUST: f32 = 0.45;
-/// Founding capital moved from the house into the new bank's specie reserves.
+/// PRICE of founding a bank: the chartering house commits this fraction of its
+/// fortune to the venture. (For a great house worth 200k that is an 80k outlay —
+/// a serious commitment befitting a bank.)
+const BANK_FOUND_PRICE_FRAC: f32 = 0.40;
+/// Of the founding price, this fraction is paid IN as the new bank's specie
+/// reserves (its starting treasury); the remaining 60% is the establishment /
+/// charter cost (counting-house, staff, the seat city's charter fee) and is paid
+/// to the seat polis's treasury rather than into the bank.
+const BANK_FOUND_RESERVE_FRAC: f32 = 0.40;
+/// Absolute floor on a new bank's starting reserves (for tiny test economies);
+/// also calibrates against a live economy where great houses hold 200k+, so banks
+/// are capitalised to scale instead of as a token reserve a single default wipes.
 const BANK_FOUND_CAPITAL: f32 = 6.0;
 /// Monthly interest a bank charges on loans / pays on deposits.
 const BANK_LOAN_RATE: f32 = 0.012;
@@ -532,13 +566,19 @@ const BANK_BRANCH_VALUE: f32 = 2.0;
 
 // ── DLC 3.5 · Regional financial crashes (contagion) ────────────────────────
 /// Fraction of wealth houses in the stricken region lose when the crash hits.
-const CRASH_WEALTH_HAIRCUT: f32 = 0.28;
-/// Coin-trust collapse applied to every polis in the stricken region.
-const CRASH_TRUST_HIT: f32 = 0.30;
+const CRASH_WEALTH_HAIRCUT: f32 = 0.15;
+/// Coin-trust collapse applied to every polis in the stricken region. Kept modest
+/// so a crash doesn't permanently drag coin_trust below the bank-founding floor
+/// (which would prevent the region ever re-chartering banks).
+const CRASH_TRUST_HIT: f32 = 0.15;
 /// Duration (ticks) of the regional panic event (frozen credit + low morale).
 const CRASH_PANIC_TICKS: u32 = 240;
 /// Yearly chance a HIGH-tier (≥4★) speculative bubble actually POPS into a crash.
-const CRASH_BUBBLE_POP_CHANCE: f32 = 0.35;
+const CRASH_BUBBLE_POP_CHANCE: f32 = 0.15;
+/// Fraction of deposits that flee a regional bank in a contagion run. A panic is a
+/// partial withdrawal — only thinly-reserved banks should be swept; a soundly
+/// capitalised bank rides it out (otherwise one failure wipes every bank).
+const CRASH_CONTAGION_RUN: f32 = 0.20;
 
 // ── DLC 3.5 · Economic war (a wealth sink + conflict) ───────────────────────
 /// At most this many wars run at once (wars are rare, dramatic events).
@@ -654,6 +694,9 @@ pub struct TickHub {
     /// Estate upgrade tier 1..5 — higher tiers produce more (owners invest to
     /// upgrade). 0 on non-estates / old saves (treated as tier 1 for estates).
     #[serde(default)] pub estate_tier: u8,
+    /// Tick of this estate's last build/upgrade. Manufactories may only be upgraded
+    /// once every `MANUFACTORY_UPGRADE_INTERVAL` (re-tooling takes years).
+    #[serde(default)] pub last_upgrade_tick: u32,
     /// Owning house index for an estate (−1 = owned by the parent city). Estate
     /// export income flows to this owner — a core engine of house growth.
     #[serde(default = "neg_one_i32")] pub owner_house: i32,
@@ -1655,9 +1698,18 @@ impl CampaignSim {
             if self.houses[hi].wealth < BANK_FOUND_WEALTH { continue; }
             if self.houses[hi].prestige < BANK_FOUND_PRESTIGE { continue; }
             if self.hubs[seat].coin_trust < BANK_FOUND_COIN_TRUST { continue; }
-            let capital = BANK_FOUND_CAPITAL.min(self.houses[hi].wealth * 0.5);
+            // The house pays the PRICE of founding (a fraction of its fortune). Of
+            // that price, BANK_FOUND_RESERVE_FRAC (40%) is paid in as the bank's
+            // starting specie reserves (its treasury); the remaining 60% is the
+            // establishment / charter cost, which goes to the seat city's treasury.
+            // Capitalising to the founder's wealth keeps the bank robust rather than
+            // a token reserve a single loan default would wipe.
+            let price = (self.houses[hi].wealth * BANK_FOUND_PRICE_FRAC).min(self.houses[hi].wealth);
+            let capital = (price * BANK_FOUND_RESERVE_FRAC).max(BANK_FOUND_CAPITAL).min(price);
             if capital < 1.0 { continue; }
-            self.houses[hi].wealth -= capital;
+            self.houses[hi].wealth -= price;
+            let charter_fee = price - capital; // establishment cost → seat city treasury
+            self.hubs[seat].treasury += charter_fee;
             let bname = self.bank_name_for(seat);
             let mut bank = Bank {
                 name: bname.clone(), house: hi as u32, seat: seat as u32,
@@ -1668,7 +1720,8 @@ impl CampaignSim {
                 interest_earned: 0.0, losses: 0.0, events: Vec::new(),
             };
             bank.events.push(HouseEvent { tick, kind: "founded".into(),
-                text: format!("{} chartered in {}", bname, self.hubs[seat].name) });
+                text: format!("{} chartered in {} with {:.0} in specie (founding price {:.0})",
+                    bname, self.hubs[seat].name, capital, price) });
             let house_name = self.houses[hi].name.clone();
             self.journal.push(JournalEntry { tick, kind: "bank".into(), hub: seat as i32, good: -1,
                 value: 0.0, text: format!("{} founds the {}", house_name, bname) });
@@ -1763,7 +1816,22 @@ impl CampaignSim {
             if !panicked { self.bank_maybe_lend(bi); }
             // 5) Attract deposits.
             self.bank_maybe_take_deposits(bi);
-            // 6) Failure.
+            // 6) Owner recapitalization: before a bank is allowed to fail, its owning
+            //    house — if solvent — injects fresh specie to cover a shortfall (a
+            //    family stands behind its bank). This absorbs a transient loss from a
+            //    loan default instead of letting one bad year topple a sound bank.
+            let owner = self.banks[bi].house as usize;
+            let shortfall = (-self.banks[bi].equity()).max(-self.banks[bi].reserves).max(0.0);
+            if shortfall > 0.0 && owner < self.houses.len() && !self.houses[owner].defunct {
+                let inject = shortfall.min(self.houses[owner].wealth * 0.5);
+                if inject > 0.0 {
+                    self.houses[owner].wealth -= inject;
+                    self.banks[bi].reserves += inject;
+                    self.banks[bi].events.push(HouseEvent { tick, kind: "recap".into(),
+                        text: format!("{} injects {:.0} to shore up the bank", self.houses[owner].name, inject) });
+                }
+            }
+            // 7) Failure (only if recapitalization couldn't cover it).
             if self.banks[bi].equity() < 0.0 || self.banks[bi].reserves < 0.0 {
                 self.fail_bank(bi);
             }
@@ -1886,7 +1954,7 @@ impl CampaignSim {
         for bi in 0..self.banks.len() {
             if self.banks[bi].defunct { continue; }
             if !region_hubs.contains(&(self.banks[bi].seat as usize)) { continue; }
-            let run = self.banks[bi].deposits * 0.5;
+            let run = self.banks[bi].deposits * CRASH_CONTAGION_RUN;
             self.banks[bi].reserves -= run;
             self.banks[bi].deposits = (self.banks[bi].deposits - run).max(0.0);
             if self.banks[bi].reserve_ratio() < BANK_RUN_RATIO || self.banks[bi].equity() < 0.0 {
@@ -2559,10 +2627,23 @@ impl CampaignSim {
         // cadence goods (furs, luxuries) sit cheaper locally and skew to wholesale.
         let interval = if tg.consumption_interval > 0.0 { tg.consumption_interval } else { 30.0 };
         let cadence = (30.0 / interval).clamp(0.30, 1.8);
+        // Craving for FOREIGN luxuries (#2): a luxury-tier good a city can't make at
+        // home is coveted the more — and the finer/dearer it is, the more so — so
+        // distant high-value luxuries pull strong import demand and feed inter-city
+        // trade, instead of every city resting on its own produce.
+        let mut foreign_lux = 1.0;
+        if tg.need_tier >= 2 {
+            let local = self.hubs[h].base_per_capita.get(g).copied().unwrap_or(0.0);
+            if local < 1e-4 {
+                let prestige = (tg.base_value / 15.0).clamp(0.4, 1.6);
+                foreign_lux = 1.0 + LUX_IMPORT_DESIRE * prestige;
+            }
+        }
         self.hubs[h].population
             * TIER_WEIGHT[tg.need_tier.min(2) as usize]
             * tg.desire.max(0.0)
             * cadence
+            * foreign_lux
             * self.need_scale
             * DEMAND_PRESSURE
     }
@@ -4151,6 +4232,15 @@ impl CampaignSim {
                         if self.houses[oi].archetype == ARCH_SPECIALTY
                             && self.houses[oi].spec.contains(&g) { mult *= SPECIALTY_MARGIN; }
                         if self.houses[oi].charters.contains(&g) { mult *= CHARTER_RENT; }
+                        // MONOPOLY EXPORT (#2): a house with ≥80% trade control of the
+                        // SOURCE city `a` commands its surplus and exports on its own
+                        // terms, taking a further rent — but only from a sustainable
+                        // (not starving) city that has goods to spare.
+                        if self.hubs[a].food_balance >= -0.1 {
+                            let ctrl = self.houses[oi].influence.iter()
+                                .find(|(c, _)| *c == a as u32).map(|(_, v)| *v).unwrap_or(0.0);
+                            if ctrl >= MONOPOLY_CONTROL { mult *= 1.0 + MONOPOLY_EXPORT_RENT; }
+                        }
                         let profit = margin * mult;
                         self.houses[oi].wealth += profit;
                         self.houses[oi].volume += amount;
@@ -4834,7 +4924,7 @@ impl CampaignSim {
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
-            estate_kind: kind, estate_tier: 1, owner_house, structures: vec![],
+            estate_kind: kind, estate_tier: 1, last_upgrade_tick: self.tick, owner_house, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
             coin_name: String::new(), coin_trust: 0.0, mint_fineness_prev: 0.0,
@@ -4935,12 +5025,18 @@ impl CampaignSim {
                 .map(|(idx, _)| idx)
             {
                 let tier = self.hubs[ei].estate_tier.max(1);
-                let cost = INVEST_COST_BASE * tier as f32 * 0.8; // rises with tier
-                if self.houses[hi].wealth >= cost * 1.5
+                let is_manu = self.hubs[ei].estate_kind == 6;
+                // A manufactory upgrade is a major, dear re-tooling — flat 30k and only
+                // once every 5 years per workshop. A raw estate upgrade stays cheap.
+                let cost = if is_manu { MANUFACTORY_UPGRADE_COST } else { INVEST_COST_BASE * tier as f32 * 0.8 };
+                let cooldown_ok = !is_manu
+                    || tick.saturating_sub(self.hubs[ei].last_upgrade_tick) >= MANUFACTORY_UPGRADE_INTERVAL;
+                if cooldown_ok && self.houses[hi].wealth >= cost * 1.5
                     && hash01(self.seed, tick as u64 ^ 0x09A7, hi as u64) < 0.5
                 {
                     self.houses[hi].wealth -= cost;
                     self.hubs[ei].estate_tier = tier + 1;
+                    self.hubs[ei].last_upgrade_tick = tick;
                     for v in self.hubs[ei].base_per_capita.iter_mut() { *v *= ESTATE_UPGRADE_MULT; }
                     let (en, ep) = (self.hubs[ei].name.clone(), self.hubs[ei].parent);
                     self.journal.push(JournalEntry {
@@ -5228,7 +5324,7 @@ impl CampaignSim {
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
-            estate_kind: 0, estate_tier: 0, owner_house: -1, structures: vec![],
+            estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
             coin_name: String::new(), coin_trust: 0.0, mint_fineness_prev: 0.0,
@@ -6479,13 +6575,27 @@ impl CampaignSim {
         const JOURNAL_WINDOW_TICKS: u32 = 25 * TICKS_PER_YEAR; // 25 years
         let cutoff = self.tick.saturating_sub(JOURNAL_WINDOW_TICKS);
         if self.journal.first().map_or(false, |e| e.tick < cutoff) {
-            self.journal.retain(|e| e.tick >= cutoff);
+            // Keep recent entries within the window AND, beyond it, the MILESTONE
+            // events that form a city/house's permanent record (founding, colonies,
+            // wars, crashes, banks, espionage, speculation calls). The bulk that the
+            // window exists to shed is the per-tick "price" samples + "voyage_loss"
+            // noise, so those are still dropped past 25 years. (Fixes city Chronicles
+            // losing their early history on long campaigns.)
+            self.journal.retain(|e| e.tick >= cutoff || is_milestone_kind(&e.kind));
         }
         if self.journal.len() > 12_000 {
             let drop = self.journal.len() - 12_000;
             self.journal.drain(0..drop);
         }
     }
+}
+
+/// Milestone journal kinds form a city/house's PERMANENT record and survive the
+/// rolling 25-year prune. Only the high-volume periodic samples — per-tick "price"
+/// index, the monthly "world" summary, and "voyage_loss" shipwreck noise — are
+/// shed past the window (they're what the window exists to bound).
+fn is_milestone_kind(kind: &str) -> bool {
+    !matches!(kind, "price" | "world" | "voyage_loss")
 }
 
 /// Compact human-readable population (12,400 / 1.2M) for chronicle text.
@@ -6554,7 +6664,7 @@ mod tests {
             in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
-            estate_kind: 0, estate_tier: 0, owner_house: -1, structures: vec![],
+            estate_kind: 0, estate_tier: 0, last_upgrade_tick: 0, owner_house: -1, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
             coin_name: String::new(), coin_trust: 0.0, mint_fineness_prev: 0.0,
@@ -7001,6 +7111,35 @@ mod tests {
         assert!((s.houses[2].wealth - w_before[2]).abs() < 1e-4, "other region's house untouched");
         assert_eq!(s.crashes.len(), 1, "the crash was recorded");
         assert_eq!(s.crashes[0].cities_hit, 2);
+    }
+
+    #[test]
+    fn sound_banks_survive_contagion_only_fragile_fall() {
+        // DLC 3.5 · a regional crash must NOT wipe every bank. With the softened
+        // contagion run, a well-capitalised bank rides out the panic; only a
+        // thinly-reserved (already-fragile) bank is swept. (Regression for the
+        // total-wipeout cascade where one failure killed all banks in a region.)
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 10.0, 10.0, 10000.0, vec![100.0], 0),
+            hub(1, 14.0, 10.0, 9000.0, vec![90.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        for i in 0..2u32 { s.houses.push(house_at(i, vec![0], 2)); }
+        let mk_bank = |name: &str, reserves: f32, deposits: f32, notes: f32| Bank {
+            name: name.into(), house: 0, seat: 0, founded_tick: 0, defunct: false,
+            reserves, loans: vec![], real_estate: 100.0, deposits, notes_issued: notes,
+            branches: vec![0], prestige: 0.5, interest_earned: 0.0, losses: 0.0, events: vec![],
+        };
+        // Two soundly-capitalised banks and one fragile (reserves ≪ liabilities).
+        s.banks.push(mk_bank("Banco Solido", 5000.0, 1000.0, 1000.0));   // ratio 2.5
+        s.banks.push(mk_bank("Banco Stabile", 3000.0, 2000.0, 1000.0));  // ratio 1.0
+        s.banks.push(mk_bank("Banco Fragile", 200.0, 2000.0, 500.0));    // ratio 0.08
+        s.trigger_regional_crash(0, 0, "test");
+        assert!(!s.banks[0].defunct, "a soundly-capitalised bank survives the panic");
+        assert!(!s.banks[1].defunct, "a second sound bank survives the panic");
+        assert!(s.banks[2].defunct, "the thinly-reserved fragile bank is swept away");
+        assert!(s.banks.iter().any(|b| !b.defunct), "not every bank fails");
     }
 
     #[test]

@@ -499,10 +499,14 @@ export default function App() {
           <button onClick={handleOpen} style={headerBtn}>Open</button>
           {isLoaded && (
             <>
-              <button onClick={handleSaveAs} style={headerBtn}>Save World</button>
+              <button onClick={handleSaveAs} style={headerBtn} title="Save the WORLD (geography/climate) to a .worldforge file">Save World</button>
               <button onClick={handleNewCampaign} style={headerBtn} title="Start a fresh campaign on this finalized world">New Campaign</button>
-              <button onClick={handleOpenCampaign} style={headerBtn}>Open Campaign</button>
-              <button onClick={handleSaveCampaign} style={headerBtn}>Save Campaign</button>
+              {/* Campaign save/load made prominent (accent) — these resume a running
+                  campaign from the exact year you saved, with all economy state. */}
+              <button onClick={handleSaveCampaign} style={campaignBtn}
+                title="Save the CAMPAIGN — resume later from this exact year with all houses, banks, trade and economy state intact">💾 Save Campaign</button>
+              <button onClick={handleOpenCampaign} style={campaignBtn}
+                title="Load a saved campaign and continue from the year it was saved">📂 Open Campaign</button>
               <button onClick={() => setShowImport(true)} style={headerBtn} title="Copy layers from another world file">Import Layers</button>
               <button onClick={() => setShowExport(true)} style={headerBtn}>Export</button>
             </>
@@ -586,4 +590,11 @@ const headerBtn: React.CSSProperties = {
   padding: "4px 12px", borderRadius: 4, border: "1px solid #1a2a40",
   background: "transparent", color: "#6a8aaa", cursor: "pointer", fontSize: 11,
   fontWeight: 500, transition: "background 0.1s",
+};
+// Campaign save/load — accented so they're easy to find (the user couldn't tell
+// the feature existed). Resume a campaign from the exact saved year.
+const campaignBtn: React.CSSProperties = {
+  padding: "4px 12px", borderRadius: 4, border: "1px solid #2f5a86",
+  background: "#16324a", color: "#bcd9f4", cursor: "pointer", fontSize: 11,
+  fontWeight: 600, transition: "background 0.1s",
 };

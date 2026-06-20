@@ -3,6 +3,7 @@ import { useUIStore } from "../state/uiStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { campaignCityRanking } from "../bridge/tauri";
 import type { CityRank } from "../types";
+import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 /** Live "Richest Cities" ranking — the busiest trading cities top to bottom, with
  *  each one's share of ALL world trade. Click a city to open its settlement view. */
@@ -21,15 +22,16 @@ export function CityRankingPanel() {
     return () => { alive = false; };
   }, [open, active, tick]);
 
+  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.ranking);
   if (!open) return null;
   const fmt = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
   const maxTrade = Math.max(1e-6, ...rows.map((r) => r.trade));
 
   return (
-    <div style={panel}>
-      <div style={header}>
+    <div data-draggable style={{ ...panel, ...rootStyle }}>
+      <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>🏆 Richest Cities</span>
-        <span style={{ cursor: "pointer", color: "#7a90a8" }} onClick={() => setOpen(false)}>✕</span>
+        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={() => setOpen(false)}>✕</span>
       </div>
       <div style={{ overflowY: "auto", padding: "4px 8px 10px" }}>
         {!active && <div style={{ color: "#506080", fontSize: 11, padding: 10 }}>Begin the campaign (Step 11) to rank cities by trade.</div>}

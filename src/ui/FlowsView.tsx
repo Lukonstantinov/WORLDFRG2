@@ -36,14 +36,20 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
   hubId: number; active: boolean; tick: number; setFlowHighlight: (s: Seg[]) => void;
 }) {
   const [flows, setFlows] = useState<TradeFlows | null>(null);
+  const [loading, setLoading] = useState(false);
   const [selGood, setSelGood] = useState<number | null>(null);
   const [selPartner, setSelPartner] = useState<number | null>(null);
 
-  // Fetch on open / when the campaign year ticks over (flows refresh yearly).
+  // Fetch on open / when the campaign year ticks over (flows refresh yearly). Track
+  // a real loading flag so a resolved-but-empty result ("no trade recorded") is told
+  // apart from "still fetching" — otherwise a null reply hung on "Loading…" forever.
   useEffect(() => {
-    if (!active) { setFlows(null); return; }
+    if (!active) { setFlows(null); setLoading(false); return; }
     let alive = true;
-    campaignTradeFlows(hubId).then((f) => { if (alive) setFlows(f); }).catch(() => {});
+    setLoading(true);
+    campaignTradeFlows(hubId)
+      .then((f) => { if (alive) { setFlows(f); setLoading(false); } })
+      .catch(() => { if (alive) { setFlows(null); setLoading(false); } });
     return () => { alive = false; };
   }, [hubId, active, tick]);
 
@@ -72,7 +78,8 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
     [flows, selGood]);
 
   if (!active) return <Note>Realized trade appears once a campaign is running.</Note>;
-  if (!flows) return <Note>Loading trade flows…</Note>;
+  if (loading && !flows) return <Note>Loading trade flows…</Note>;
+  if (!flows) return <Note>No trade data for this settlement yet.</Note>;
   if (flows.goods.length === 0) return <Note>No trade recorded yet — let a campaign year or two pass.</Note>;
 
   const maxAvg = Math.max(...flows.goods.map((g) => g.avg_volume), 1e-6);
@@ -115,7 +122,14 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
         <>
           <div style={hdr}>Routes — {GOOD_META.get(flows.goods.find((x) => x.good === selGood)?.name ?? "")?.label ?? "good"}
             <span style={{ color: "#5a7290", fontWeight: 400 }}> (largest flows first)</span></div>
-          {goodRoutes.length === 0 && <Note>No routed flows recorded.</Note>}
+          {goodRoutes.length === 0 && (() => {
+            const g = flows.goods.find((x) => x.good === selGood);
+            if (g && g.avg_volume > 0) {
+              return <Note>Not traded last year — {g.history.length}-yr average {fmt(g.avg_volume)}/yr.
+                Per-partner routes are recorded for the most recent trading year only.</Note>;
+            }
+            return <Note>No routed flows recorded.</Note>;
+          })()}
           {goodRoutes.slice(0, 8).map((r, i) => (
             <div key={i} style={{ ...row }}>
               <span style={{ width: 30, color: r.dir === 0 ? "#5fd0ff" : "#ffce5f" }}>{r.dir === 0 ? "◀ in" : "out ▶"}</span>

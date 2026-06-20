@@ -646,6 +646,11 @@ fn build_coarse_cost(
     // Maritime-hazard exposure per coarse cell (annual storm peak + reef wreck
     // risk), used to make stormy/reef-fouled sea more expensive to cross.
     let mut sea_hazard = vec![0.0f32; cn];
+    // Continental-shelf mask per coarse cell. Shelf (shallow) water is "reachable
+    // sea" — coastal navigation that ancient/medieval shipping hugged — so it is
+    // cheap AND is NOT counted as an open-water crossing. Only deep / high sea
+    // (non-shelf ocean) counts against the trade-reach crossing limit.
+    let mut shelf = vec![false; cn];
     {
         let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
         let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
@@ -657,6 +662,7 @@ fn build_coarse_cost(
         let mut f_koppen = vec![0u8; fn_cells];
         let mut f_hazard = vec![0.0f32; fn_cells];
         let mut f_temp = vec![0.0f32; fn_cells];
+        let mut f_shelf = vec![0u8; fn_cells];
         for ty in 0..tiles_y as i32 {
             for tx in 0..tiles_x as i32 {
                 let tile = world.tile(tx, ty);
@@ -673,6 +679,7 @@ fn build_coarse_cost(
                         f_koppen[gi] = tile.koppen[ti];
                         f_hazard[gi] = (tile.storm_base[ti].max(tile.reef_risk[ti])) as f32 / 255.0;
                         f_temp[gi] = tile.temperature[ti];
+                        f_shelf[gi] = tile.is_shelf[ti];
                     }
                 }
             }
@@ -688,6 +695,7 @@ fn build_coarse_cost(
                 koppen[ci] = f_koppen[gi];
                 sea_hazard[ci] = f_hazard[gi];
                 temp[ci] = f_temp[gi];
+                shelf[ci] = f_shelf[gi] != 0;
             }
         }
     }
@@ -792,8 +800,10 @@ fn build_coarse_cost(
                     if ny < 0 || ny >= ch { return false; }
                     base[(ny * cw + wrap_cx(cx + dx)) as usize]
                 });
-                // …but never re-open frozen coastal water (sea ice stays blocked).
-                if coastal && temp[ci] > SEA_FREEZE_C { cost[ci] = 0.5; }
+                // Coastal-ring AND continental-shelf water is cheap coast-hugging
+                // shipping (reachable sea). …but never re-open frozen water (sea ice
+                // stays blocked).
+                if (coastal || shelf[ci]) && temp[ci] > SEA_FREEZE_C { cost[ci] = 0.5; }
             }
         }
     }
@@ -830,7 +840,10 @@ fn build_coarse_cost(
                     if ny < 0 || ny >= ch { return false; }
                     base[(ny * cw + wrap_cx(cx + dx)) as usize]
                 });
-                is_open_sea[ci] = !coastal;
+                // Shelf (shallow) water is reachable coastal sea, NOT open ocean —
+                // so it never counts against the open-water crossing limit. Only
+                // deep / high sea beyond the shelf is a true crossing.
+                is_open_sea[ci] = !coastal && !shelf[ci];
             }
         }
     }

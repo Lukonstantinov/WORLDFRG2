@@ -7,6 +7,7 @@ import { YearChronicle } from "./YearChronicle";
 import { GOOD_DEFS } from "../goods";
 import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks } from "../bridge/tauri";
 import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief } from "../types";
+import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
 const goodIcon = (name: string) => GOOD_ICON.get(name) ?? "\u{1F4E6}"; // 📦 fallback
@@ -85,6 +86,7 @@ export function HousesPanel() {
   const openTimeline = (name: string) => {
     campaignGetHouseHistory(name).then((h) => setHistory(h)).catch(() => setHistory(null));
   };
+  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.houses);
   if (!open) return null;
 
   const active = houses.filter((h) => !h.defunct);
@@ -95,12 +97,12 @@ export function HousesPanel() {
   const nGuilds = active.filter((h) => h.is_guild).length;
 
   return (
-    <div style={panel}>
+    <div data-draggable style={{ ...panel, ...rootStyle }}>
       {history && <HouseTimeline history={history} onClose={() => setHistory(null)} />}
       {selected && <HouseDetail h={selected} onClose={() => selectHouse(null)} onChronicle={openTimeline} />}
-      <div style={header}>
+      <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>⚜️ Trading Families</span>
-        <span style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
+        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
       </div>
       {/* Houses vs Guilds tabs */}
       <div style={{ display: "flex", gap: 2, padding: "0 8px", borderBottom: "1px solid #1e2e42" }}>

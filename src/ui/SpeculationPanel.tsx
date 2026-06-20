@@ -4,6 +4,7 @@ import { useUIStore } from "../state/uiStore";
 import { campaignGetSpeculation, campaignGetPoleis } from "../bridge/tauri";
 import type { SpecCenter, PolisBrief } from "../types";
 import { CoinIcon } from "./CoinIcon";
+import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 /** DLC 3 · Finance, the Polis & Speculation.
  *  Two tabs:
@@ -27,16 +28,17 @@ export function SpeculationPanel() {
     campaignGetPoleis().then(setPoleis).catch(() => setPoleis([]));
   }, [open, active, tick]);
 
+  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.speculation);
   if (!open) return null;
   const close = () => useUIStore.getState().setShowSpeculation(false);
   // Turn the matching map overlay on when the user opens the Speculation tab.
   const showRiskOverlay = () => useUIStore.getState().setOverlayVisible("speculation", true);
 
   return (
-    <div style={panel}>
-      <div style={header}>
+    <div data-draggable style={{ ...panel, ...rootStyle }}>
+      <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>🫧 Finance · the Polis &amp; Speculation</span>
-        <span style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
+        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
       </div>
       <div style={{ display: "flex", gap: 2, padding: "0 8px", borderBottom: "1px solid #1e2e42" }}>
         {([["spec", "🫧 Speculation"], ["poleis", "🏛 Poleis"]] as const).map(([id, lbl]) => (

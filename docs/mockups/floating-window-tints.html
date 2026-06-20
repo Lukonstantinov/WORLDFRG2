@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Floating windows — distinct tints + draggable</title>
+<style>
+  :root { --bg:#0b1420; --text:#cfe2f6; --muted:#7fa0c4; --accent:#3a80c0; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui, sans-serif; padding:28px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.lead { color:var(--muted); max-width:880px; margin:0 0 22px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:16px; max-width:1080px; }
+  .win { border:1px solid #24364e; border-radius:8px; overflow:hidden; box-shadow:0 8px 30px rgba(0,0,0,0.5); }
+  .bar { display:flex; align-items:center; justify-content:space-between; padding:7px 10px; font-weight:700; font-size:12px; cursor:move; border-bottom:1px solid rgba(255,255,255,0.06); }
+  .bar .grip { color:var(--muted); font-weight:400; }
+  .body { padding:10px 12px; font-size:11px; color:#c7d6e8; min-height:54px; }
+  .body .row { display:flex; justify-content:space-between; padding:2px 0; border-bottom:1px solid rgba(255,255,255,0.05); }
+  code { background:#0e1a26; padding:1px 5px; border-radius:4px; color:#bcd7f2; }
+  ul { color:var(--muted); max-width:1000px; }
+</style>
+</head>
+<body>
+  <h1>Floating windows — distinct tints + drag-to-move</h1>
+  <p class="lead">Every floating sub-window now (1) carries a <b>faint distinct tint</b> so you can tell them apart
+     at a glance, and (2) is <b>draggable by its title bar</b> (grab ⠿, drop anywhere; the ✕/tabs still click
+     normally). Tints are defined in <code>src/ui/useFloatingWindow.ts</code> (<code>PANEL_TINTS</code>) and mirrored below.</p>
+
+  <div class="grid" id="grid"></div>
+
+  <ul>
+    <li>Drag handle = the title bar (<code>cursor: move</code>); children marked <code>data-no-drag</code> (close, tabs) don't start a drag.</li>
+    <li>First drag seeds from the window's live position so it doesn't jump; windows can't be dragged off the top-left edge.</li>
+    <li>Applied to: Coin/Credit, Speculation, Houses, Goods market, Richest Cities, World News, Warehouses, Futures.</li>
+  </ul>
+
+  <script>
+    const wins = [
+      ["🪙 Coin, Credit & Crashes", "rgba(18,24,14,0.97)", ["Banco di Huaingiang", "reserve 66%"]],
+      ["🫧 Finance · Polis & Speculation", "rgba(24,16,28,0.97)", ["Qicheng bubble ★★★★", "risk 0.62"]],
+      ["⚜️ Trading Families", "rgba(26,18,16,0.97)", ["House Zheng", "wealth 231k"]],
+      ["📦 Goods of the World", "rgba(14,24,24,0.97)", ["Silk · finest 83%", "11k/yr"]],
+      ["🏆 Richest Cities", "rgba(24,22,12,0.97)", ["#1 Qicheng", "21%"]],
+      ["🗞 World News", "rgba(12,20,28,0.97)", ["The Crash of 41", "—"]],
+      ["🏬 Warehouses & Estates", "rgba(16,22,16,0.97)", ["Entrepôt · Yunoukou", "tier 4"]],
+      ["📜 Futures Contracts", "rgba(22,14,22,0.97)", ["Grain → Jinaishan", "term 3y"]],
+    ];
+    const g = document.getElementById("grid");
+    for (const [title, tint, rows] of wins) {
+      const w = document.createElement("div");
+      w.className = "win"; w.style.background = tint;
+      w.innerHTML = `<div class="bar"><span>${title}</span><span class="grip">⠿ ✕</span></div>
+        <div class="body">${rows.map(r=>`<div class="row"><span>${r}</span></div>`).join("")}</div>`;
+      g.appendChild(w);
+    }
+  </script>
+</body>
+</html>

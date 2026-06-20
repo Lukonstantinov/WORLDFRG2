@@ -4,6 +4,7 @@ import { useCampaignStore } from "../state/campaignStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { campaignWarehouses } from "../bridge/tauri";
 import type { WarehouseInfo } from "../types";
+import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 const TIER_NAME = ["pool", "Depot", "Storehouse", "Warehouse", "Entrepôt", "Grand Entrepôt"];
 const KIND_ICON: Record<string, string> = {
@@ -41,6 +42,7 @@ export function WarehousesPanel() {
       || r.goods.some(([g]) => g.toLowerCase().includes(s)));
   }, [rows, q]);
 
+  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.warehouses);
   if (!open) return null;
   const fmt = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
 
@@ -53,10 +55,10 @@ export function WarehousesPanel() {
   };
 
   return (
-    <div style={panel}>
-      <div style={header}>
+    <div data-draggable style={{ ...panel, ...rootStyle }}>
+      <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>🏬 Warehouses & Estates</span>
-        <span style={{ cursor: "pointer", color: "#7a90a8" }} onClick={() => setOpen(false)}>✕</span>
+        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={() => setOpen(false)}>✕</span>
       </div>
       <div style={{ padding: "6px 8px", borderBottom: "1px solid #1a2a3e" }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="filter house / city / good…"

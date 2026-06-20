@@ -6,6 +6,7 @@ import {
 } from "../bridge/tauri";
 import type { CurrencyBrief, BankBrief, CrashRecord, CitySchematic, WarsPayload, HouseBrief } from "../types";
 import { CoinIcon } from "./CoinIcon";
+import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 /** DLC 3.5 · Coin, Credit & Crashes. Four tabs:
  *   • Currencies — the world reserve-currency ranking (the "Venice ducat"): each
@@ -39,6 +40,7 @@ export function CoinCreditPanel() {
     campaignGetWars().then(setWars).catch(() => setWars({ active: [], log: [] }));
   }, [open, active, tick]);
 
+  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.coin);
   if (!open) return null;
   const close = () => useUIStore.getState().setShowCoinCredit(false);
 
@@ -51,10 +53,10 @@ export function CoinCreditPanel() {
   ] as const;
 
   return (
-    <div style={panel}>
-      <div style={header}>
+    <div data-draggable style={{ ...panel, ...rootStyle }}>
+      <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>🪙 Coin, Credit &amp; Crashes</span>
-        <span style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
+        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
       </div>
       <div style={{ display: "flex", gap: 2, padding: "0 8px", borderBottom: "1px solid #1e2e42" }}>
         {tabs.map(([id, lbl]) => (
