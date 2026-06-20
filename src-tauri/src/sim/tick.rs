@@ -533,6 +533,18 @@ const COIN_SEIGNIORAGE: f32 = 0.04;
 const COIN_FREIGHT_DISCOUNT: f32 = 0.10;
 /// A coin must clear this trust to count as a reserve currency abroad.
 const RESERVE_TRUST_MIN: f32 = 0.55;
+/// Multi-currency circulation. A city holds a small BASKET of coins: its own/main
+/// plus foreign coins that arrive with trade. Shares ease toward an adoption target
+/// each year (sticky → flips take years). The main coin only flips when a rival
+/// leads it by `COIN_FLIP_MARGIN`.
+const COIN_BASKET_N: usize = 4;           // max coins tracked per city
+const COIN_ADOPT_EASE: f32 = 0.18;        // yearly easing of basket shares toward target
+const COIN_HOME_BIAS: f32 = 3.0;          // weight multiplier for the city's own mint
+const COIN_FLIP_MARGIN: f32 = 1.08;       // a rival must lead the main coin by this to flip
+/// Seigniorage (to the issuing polis treasury) per unit of trade circulating in its
+/// coin abroad, and a tiny prestige bump to the issuing council house. Small so the
+/// house-wealth bound holds (routes to TREASURY, not house wealth).
+const COIN_CIRCULATION_SEIGNIORAGE: f32 = 0.002;
 
 // ── DLC 3.5 · Banks (merchant bankers as institutions) ──────────────────────
 /// The age of banking opens once the world's coinage has matured — from year 20.
@@ -737,11 +749,15 @@ pub struct TickHub {
     /// Acceptance / trust in this coin, 0..1 — sticky reputation eased yearly. The
     /// strongest become reserve currencies accepted abroad. 0 = no/untrusted coin.
     #[serde(default)] pub coin_trust: f32,
-    /// The coin (hub INDEX of the issuing mint) this city actually SETTLES its trade
-    /// in — its own coin if it mints a trusted one, else the strongest reserve coin
-    /// reachable in its trade component. −1 = barter / none. Reassigned each year by
-    /// `assign_settle_coins`; drives the coin-usage overlay + per-coin breakdown.
+    /// The MAIN coin (hub INDEX of the issuing mint) this city settles its trade in.
+    /// −1 = barter / none. Can FLIP to a foreign coin that durably dominates the
+    /// basket. Reassigned yearly by `update_currency_baskets`.
     #[serde(default = "neg_one_i32")] pub settle_coin: i32,
+    /// The city's CURRENCY BASKET: up to `COIN_BASKET_N` coins it holds, as
+    /// `(coin mint hub INDEX, share 0..1)` sorted by share desc (shares ≈ sum 1).
+    /// Foreign coin arrives with trade; shares ease yearly toward an adoption target
+    /// (trust × value × issuer weight × home bias). Drives the usage overlay/chart.
+    #[serde(default)] pub coin_basket: Vec<(u32, f32)>,
     /// Last year's mint fineness — so the coinage pass can read a sudden DEBASEMENT
     /// (a cut vs last year) and dock trust accordingly. 0 on old saves → no penalty.
     #[serde(default)] pub mint_fineness_prev: f32,
@@ -1689,30 +1705,91 @@ impl CampaignSim {
     /// DLC 3.5 · once a year: qualifying banking houses charter banks, and existing
     /// banks open counting-house branches wherever their owner has trade offices
     /// (extending the home coin's reach and booking real estate).
-    /// DLC 3.5 · once a year, decide which COIN each city settles its trade in: its
-    /// own coin if it mints a trusted one, else the strongest reserve coin reachable
-    /// in its trade component (a hard foreign coin circulates where local money is
-    /// weak/absent). Drives the coin-usage overlay + per-coin breakdown.
-    fn assign_settle_coins(&mut self) {
-        // Best (most-trusted) minting hub per connectivity component.
-        let mut best_in_comp: std::collections::HashMap<u32, (usize, f32)> = std::collections::HashMap::new();
+    /// DLC 3.5 · once a year, update every city's CURRENCY BASKET: a small set of
+    /// coins it holds (own/main + foreign coins that arrive with trade). Shares ease
+    /// toward an adoption target (coin value × trust × issuer weight, with a home-mint
+    /// bias); the main coin flips only when a rival durably dominates. The issuing
+    /// polis earns a little seigniorage when its coin circulates abroad. Drives the
+    /// coin-usage overlay + per-coin breakdown + circulating amount.
+    fn update_currency_baskets(&mut self) {
+        // 1) Candidate coins (trusted minting hubs) with attractiveness.
+        struct Cand { idx: usize, comp: u32, attr: f32, reserve: bool }
+        let mut cands: Vec<Cand> = Vec::new();
         for (i, h) in self.hubs.iter().enumerate() {
-            if h.is_estate || h.coin_name.is_empty() { continue; }
-            let e = best_in_comp.entry(h.component).or_insert((usize::MAX, 0.0));
-            if h.coin_trust > e.1 { *e = (i, h.coin_trust); }
+            if h.is_estate || h.coin_name.is_empty() || h.coin_trust < BANK_FOUND_COIN_TRUST { continue; }
+            let thru = h.tw_house + h.tw_local + h.tw_guild;
+            let attr = coin_value(h.mint_fineness, h.coin_trust) * h.coin_trust * (1.0 + thru).sqrt();
+            cands.push(Cand { idx: i, comp: h.component, attr: attr.max(EPS), reserve: h.coin_trust >= RESERVE_TRUST_MIN });
         }
-        for i in 0..self.hubs.len() {
-            if self.hubs[i].is_estate { self.hubs[i].settle_coin = -1; continue; }
-            // Settle in own coin when it's a trusted mint; else the component's
-            // strongest reserve-grade coin; else barter (−1).
-            if !self.hubs[i].coin_name.is_empty() && self.hubs[i].coin_trust >= BANK_FOUND_COIN_TRUST {
-                self.hubs[i].settle_coin = i as i32;
-            } else {
-                let comp = self.hubs[i].component;
-                self.hubs[i].settle_coin = match best_in_comp.get(&comp) {
-                    Some(&(j, trust)) if j != usize::MAX && trust >= RESERVE_TRUST_MIN => j as i32,
-                    _ => -1,
-                };
+        let n = self.hubs.len();
+        let mut new_baskets: Vec<Vec<(u32, f32)>> = vec![Vec::new(); n];
+        let mut new_main: Vec<i32> = vec![-1; n];
+        for i in 0..n {
+            if self.hubs[i].is_estate { continue; }
+            let comp = self.hubs[i].component;
+            // Adoption target: reachable coins (same component, or reserve from afar),
+            // weighted by attractiveness × home bias × a foreign-reach penalty.
+            let mut tw: Vec<(u32, f32)> = Vec::new();
+            for c in &cands {
+                if !(c.comp == comp || c.reserve) { continue; }
+                let mut w = c.attr;
+                if c.comp != comp { w *= 0.5; }
+                if c.idx == i { w *= COIN_HOME_BIAS; }
+                tw.push((c.idx as u32, w));
+            }
+            if tw.is_empty() { continue; } // barter — no coin reaches here
+            tw.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            tw.truncate(COIN_BASKET_N);
+            let sum: f32 = tw.iter().map(|x| x.1).sum::<f32>().max(EPS);
+            // Ease last year's basket toward the target (sticky adoption).
+            let prev = &self.hubs[i].coin_basket;
+            let mut keys: Vec<u32> = tw.iter().map(|x| x.0).collect();
+            for &(k, _) in prev { if !keys.contains(&k) { keys.push(k); } }
+            let mut eased: Vec<(u32, f32)> = Vec::new();
+            for k in keys {
+                let pv = prev.iter().find(|x| x.0 == k).map(|x| x.1).unwrap_or(0.0);
+                let tv = tw.iter().find(|x| x.0 == k).map(|x| x.1 / sum).unwrap_or(0.0);
+                let nv = pv + COIN_ADOPT_EASE * (tv - pv);
+                if nv > 0.02 { eased.push((k, nv)); }
+            }
+            eased.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            eased.truncate(COIN_BASKET_N);
+            let s2: f32 = eased.iter().map(|x| x.1).sum::<f32>().max(EPS);
+            for e in eased.iter_mut() { e.1 /= s2; }
+            // Main coin: keep the current one unless a rival leads it by the flip margin.
+            let cur = self.hubs[i].settle_coin;
+            let leader = eased.first().map(|x| x.0 as i32).unwrap_or(-1);
+            let main = if cur >= 0 && eased.iter().any(|x| x.0 as i32 == cur) {
+                let cur_s = eased.iter().find(|x| x.0 as i32 == cur).map(|x| x.1).unwrap_or(0.0);
+                let lead_s = eased.first().map(|x| x.1).unwrap_or(0.0);
+                if leader != cur && lead_s > cur_s * COIN_FLIP_MARGIN { leader } else { cur }
+            } else { leader };
+            new_baskets[i] = eased;
+            new_main[i] = main;
+        }
+        for i in 0..n {
+            if self.hubs[i].is_estate { self.hubs[i].settle_coin = -1; self.hubs[i].coin_basket.clear(); continue; }
+            self.hubs[i].coin_basket = std::mem::take(&mut new_baskets[i]);
+            self.hubs[i].settle_coin = new_main[i];
+        }
+        // 2) Seigniorage: a coin circulating ABROAD earns its issuing polis a little
+        //    treasury income + a tiny prestige bump to the council house (routed to
+        //    TREASURY, not house wealth, so the wealth bound is unaffected).
+        let mut circ_abroad: Vec<f32> = vec![0.0; n];
+        for i in 0..n {
+            let thru = self.hubs[i].tw_house + self.hubs[i].tw_local + self.hubs[i].tw_guild;
+            for &(k, s) in &self.hubs[i].coin_basket {
+                let j = k as usize;
+                if j != i && j < n { circ_abroad[j] += thru * s; }
+            }
+        }
+        for j in 0..n {
+            if circ_abroad[j] <= 0.0 { continue; }
+            self.hubs[j].treasury += circ_abroad[j] * COIN_CIRCULATION_SEIGNIORAGE;
+            let ch = self.hubs[j].council_house;
+            if ch >= 0 && (ch as usize) < self.houses.len() {
+                self.houses[ch as usize].prestige =
+                    (self.houses[ch as usize].prestige + 0.001 * circ_abroad[j].min(50.0)).min(2.0);
             }
         }
     }
@@ -2880,7 +2957,7 @@ impl CampaignSim {
                 // engine reads the closed year, and HIGH-tier bubbles may POP into a
                 // regional crash.
                 self.decide_coinage(yr);
-                self.assign_settle_coins();
+                self.update_currency_baskets();
                 self.update_banks(yr);
                 self.update_wars(yr);
                 self.maybe_steal_quality(yr);
@@ -4957,7 +5034,7 @@ impl CampaignSim {
             estate_kind: kind, estate_tier: 1, last_upgrade_tick: self.tick, owner_house, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, mint_fineness_prev: 0.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
             // DLC 4 · seed the new estate's quality (length ng) so it's graded from
             // day one — a manufactory (kind 6) starts as a humble workshop and learns.
             quality: { let mut q = vec![0.0f32; ng]; if g0 < ng { q[g0] = if kind == 6 { 0.34 } else { 0.46 }; } q },
@@ -5357,7 +5434,7 @@ impl CampaignSim {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, mint_fineness_prev: 0.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
             reserve_food: 30.0, reserve_cap: 365.0, supply_years: 0.0, colony_founded_tick: self.tick,
@@ -6717,7 +6794,7 @@ mod tests {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: 0, owner_house: -1, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, mint_fineness_prev: 0.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
             quality: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,

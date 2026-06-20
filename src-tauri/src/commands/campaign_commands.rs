@@ -878,6 +878,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 coin_name: String::new(),
                 coin_trust: 0.0,
                 settle_coin: -1,
+                coin_basket: Vec::new(),
                 mint_fineness_prev: 0.0,
                 quality: Vec::new(),
                 stolen_good: -1,
@@ -2381,6 +2382,11 @@ pub struct CurrencyBrief {
     pub value: f32,
     /// Issuing house (council) whose arms ride the coin; "" → use the city.
     pub issuer: String,
+    /// Circulating amount = Σ over all holding cities of (throughput × share) — the
+    /// coin's effective money supply across the world (display-only for now).
+    pub circulating: f32,
+    /// How many settlements hold this coin in their basket.
+    pub held_in: u32,
 }
 
 /// DLC 3.5 · the world's coinage, ranked by reserve strength (trust × throughput).
@@ -2388,6 +2394,16 @@ pub struct CurrencyBrief {
 pub fn campaign_get_currencies(db: State<'_, WorldDb>) -> Result<Vec<CurrencyBrief>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    // Circulating amount + holder count per coin (by mint hub INDEX) from baskets.
+    let mut circ: std::collections::HashMap<usize, (f32, u32)> = std::collections::HashMap::new();
+    for h in sim.hubs.iter() {
+        if h.is_estate { continue; }
+        let thru = h.tw_house + h.tw_local + h.tw_guild;
+        for &(k, share) in &h.coin_basket {
+            let e = circ.entry(k as usize).or_insert((0.0, 0));
+            e.0 += thru * share; e.1 += 1;
+        }
+    }
     let mut out: Vec<CurrencyBrief> = sim.hubs.iter().enumerate()
         .filter(|(_, h)| !h.is_estate && !h.coin_name.is_empty())
         .map(|(i, h)| {
@@ -2395,6 +2411,7 @@ pub fn campaign_get_currencies(db: State<'_, WorldDb>) -> Result<Vec<CurrencyBri
             let issuer = if h.council_house >= 0 {
                 sim.houses.get(h.council_house as usize).map(|x| x.name.clone()).unwrap_or_default()
             } else { String::new() };
+            let (circulating, held_in) = circ.get(&i).copied().unwrap_or((0.0, 0));
             CurrencyBrief {
                 hub: h.id, city: h.name.clone(), coin_name: h.coin_name.clone(),
                 trust: h.coin_trust,
@@ -2404,6 +2421,7 @@ pub fn campaign_get_currencies(db: State<'_, WorldDb>) -> Result<Vec<CurrencyBri
                 color: distinct_color(i),
                 value: crate::sim::tick::coin_value(h.mint_fineness, h.coin_trust),
                 issuer,
+                circulating, held_in,
             }
         })
         .collect();
@@ -2435,22 +2453,28 @@ pub fn campaign_coin_usage(db: State<'_, WorldDb>) -> Result<Vec<CoinUseCity>, S
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
     let mut out: Vec<CoinUseCity> = Vec::new();
+    // A city now holds a BASKET of coins — emit one row per (city, coin) with the
+    // city's throughput weighted by that coin's share, so the chart/overlay reflect
+    // real circulation (a city can appear under several coins).
     for (i, h) in sim.hubs.iter().enumerate() {
-        if h.is_estate || h.settle_coin < 0 { continue; }
-        let sc = h.settle_coin as usize;
-        let Some(coin_hub) = sim.hubs.get(sc) else { continue };
-        if coin_hub.coin_name.is_empty() { continue; }
-        let mint = sc == i;
-        out.push(CoinUseCity {
-            coin: coin_hub.id,
-            coin_name: coin_hub.coin_name.clone(),
-            city: h.id,
-            name: h.name.clone(),
-            x: h.x, y: h.y,
-            volume: h.tw_house + h.tw_local + h.tw_guild,
-            mint,
-            reserve_reach: !mint && coin_hub.coin_trust >= 0.55,
-        });
+        if h.is_estate { continue; }
+        let thru = h.tw_house + h.tw_local + h.tw_guild;
+        for &(k, share) in &h.coin_basket {
+            let j = k as usize;
+            let Some(coin_hub) = sim.hubs.get(j) else { continue };
+            if coin_hub.coin_name.is_empty() { continue; }
+            let mint = j == i;
+            out.push(CoinUseCity {
+                coin: coin_hub.id,
+                coin_name: coin_hub.coin_name.clone(),
+                city: h.id,
+                name: h.name.clone(),
+                x: h.x, y: h.y,
+                volume: thru * share,
+                mint,
+                reserve_reach: !mint && coin_hub.coin_trust >= 0.55,
+            });
+        }
     }
     Ok(out)
 }

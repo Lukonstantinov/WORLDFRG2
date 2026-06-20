@@ -949,6 +949,8 @@ export interface CurrencyBrief {
   color: string;
   value: number;        // value index (≈1.2 strong agio, <1 debased)
   issuer: string;       // council house whose arms ride the coin ("" → city)
+  circulating: number;  // money supply = Σ holders (throughput × share)
+  held_in: number;      // how many settlements hold this coin
 }
 
 /** One settlement's use of a coin — for the coin-usage overlay + per-coin chart. */

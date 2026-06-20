@@ -225,9 +225,9 @@ function CurrencyCard({ c, rank, topCoin, usage, onMap, toggleMap }:
           </div>
           {/* Quick stat tiles */}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, margin: "2px 0 5px" }}>
-            <Stat label="Used by" value={`${cityCount} ${cityCount === 1 ? "city" : "cities"}`} />
+            <Stat label="Held in" value={`${c.held_in || cityCount} ${(c.held_in || cityCount) === 1 ? "city" : "cities"}`} hint="settlements that hold this coin in their currency basket" />
             <Stat label="Abroad" value={`${abroadCount}`} hint="cities outside the home market that hold this coin (reserve reach)" />
-            <Stat label="Settled/yr" value={fmtk(totalSettled)} hint="total trade volume settled in this coin this year" />
+            <Stat label="Circulating" value={fmtk(c.circulating || totalSettled)} hint="money supply: Σ over holders of (their trade volume × this coin's share of their basket). Display-only for now." />
             <Stat label="Rank" value={`#${rank}`} />
             {xrate && <Stat label={`vs ${topCoin!.coin_name.split(" ")[0]}`} value={`${xrate.toFixed(2)}×`} hint={`1 ${c.coin_name} ≈ ${xrate.toFixed(2)} ${topCoin!.coin_name} (by value)`} />}
           </div>
