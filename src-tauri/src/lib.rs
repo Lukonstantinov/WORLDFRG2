@@ -91,6 +91,7 @@ pub fn run() {
             campaign_commands::campaign_get_state,
             campaign_commands::campaign_get_journal,
             campaign_commands::campaign_get_hub,
+            campaign_commands::campaign_get_colony,
             campaign_commands::campaign_get_world_economy,
             campaign_commands::campaign_get_houses,
             campaign_commands::campaign_get_speculation,

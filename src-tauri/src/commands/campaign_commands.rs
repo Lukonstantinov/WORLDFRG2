@@ -294,6 +294,14 @@ pub struct HubBrief {
     /// Month-over-month population growth fraction (+0.05 = +5%); 0 until two
     /// monthly history samples exist. Drives the "which cities grow/shrink" list.
     pub growth: f32,
+    /// Colony state for map markers: 0 none · 1 settlement colony · 2 house outpost.
+    pub colony_kind: u8,
+    pub colony_stage: u8,
+    /// Owner house index (house outposts) — frontend maps it to the house colour.
+    pub owner_house: i32,
+    /// Founder/owner-home hub INDEX (lane endpoint); −1 if none.
+    pub founder_hub: i32,
+    pub autonomous: bool,
 }
 
 /// What `campaign_start_sim` / `campaign_advance` / `campaign_get_state` return.
@@ -629,6 +637,11 @@ fn build_snapshot(sim: &CampaignSim) -> CampaignSnapshot {
                 is_estate: h.is_estate,
                 mood: h.mood,
                 growth,
+                colony_kind: h.colony_kind,
+                colony_stage: h.colony_stage,
+                owner_house: h.owner_house,
+                founder_hub: h.founder_hub,
+                autonomous: h.autonomous,
             }
         })
         .collect();
@@ -1138,6 +1151,76 @@ pub fn campaign_get_state(db: State<'_, WorldDb>) -> Result<CampaignSnapshot, St
         Some(sim) => build_snapshot(&sim),
         None => inactive_snapshot(),
     })
+}
+
+/// One backer of a colony venture (city / house / bank), for the Supply subtab.
+#[derive(Serialize)]
+pub struct ColonyBackerRow { pub kind: u8, pub name: String, pub color: String, pub share: f32 }
+
+/// One civic supply contract row feeding a colony (the supplier roster).
+#[derive(Serialize)]
+pub struct ColonySupplyRow { pub category: u8, pub supplier: String, pub good: String, pub qty: f32 }
+
+/// Full colony detail for the HubPanel "Supply" subtab.
+#[derive(Serialize)]
+pub struct ColonyDetail {
+    pub stage: u8,
+    pub autonomous: bool,
+    pub founder_name: String,
+    pub main_bank_name: String,
+    pub coin_name: String,
+    pub charter_open: bool,
+    pub supply_years: f32,
+    pub reserve_food: f32,
+    pub reserve_cap: f32,
+    pub age_years: u32,
+    /// Years until the colony may seek independence (≤0 = eligible now).
+    pub indep_in_years: i32,
+    pub backers: Vec<ColonyBackerRow>,
+    pub supply: Vec<ColonySupplyRow>,
+}
+
+/// Colony detail for a settlement colony (None for non-colony hubs).
+#[tauri::command]
+pub fn campaign_get_colony(id: u32, db: State<'_, WorldDb>) -> Result<Option<ColonyDetail>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(None) };
+    let hi = match sim.hubs.iter().position(|h| h.id == id) { Some(i) => i, None => return Ok(None) };
+    let hub = &sim.hubs[hi];
+    if hub.colony_kind != 1 { return Ok(None); }
+    let founder_name = (hub.founder_hub >= 0).then(|| sim.hubs.get(hub.founder_hub as usize))
+        .flatten().map(|h| h.name.clone()).unwrap_or_default();
+    let main_bank_name = (hub.main_bank >= 0).then(|| sim.banks.get(hub.main_bank as usize))
+        .flatten().map(|b| b.name.clone()).unwrap_or_default();
+    let age_years = (sim.tick.saturating_sub(hub.colony_founded_tick) / 365) as u32;
+    let indep_in_years = 70i32 - age_years as i32;
+    let backers = hub.backers.iter().map(|&(kind, idx, share)| {
+        let (name, color) = match kind {
+            0 => (sim.hubs.get(idx as usize).map(|h| h.name.clone()).unwrap_or_default(), "#7fb8ff".to_string()),
+            1 => (sim.houses.get(idx as usize).map(|h| h.name.clone()).unwrap_or_default(), distinct_color(idx as usize)),
+            2 => {
+                let b = sim.banks.get(idx as usize);
+                (b.map(|b| b.name.clone()).unwrap_or_default(),
+                 b.map(|b| distinct_color(b.house as usize)).unwrap_or_else(|| "#cccccc".into()))
+            }
+            _ => (String::new(), "#cccccc".to_string()),
+        };
+        ColonyBackerRow { kind, name, color, share }
+    }).collect();
+    let supply = sim.colony_supply.iter().filter(|s| s.colony_hub == hi as u32).map(|s| {
+        ColonySupplyRow {
+            category: s.category,
+            supplier: sim.hubs.get(s.supplier_hub as usize).map(|h| h.name.clone()).unwrap_or_default(),
+            good: sim.goods.get(s.good).map(|g| g.name.clone()).unwrap_or_default(),
+            qty: s.monthly_qty,
+        }
+    }).collect();
+    Ok(Some(ColonyDetail {
+        stage: hub.colony_stage, autonomous: hub.autonomous, founder_name, main_bank_name,
+        coin_name: hub.coin_name.clone(), charter_open: hub.colony_kind == 1 && !hub.autonomous,
+        supply_years: hub.supply_years, reserve_food: hub.reserve_food, reserve_cap: hub.reserve_cap,
+        age_years, indep_in_years, backers, supply,
+    }))
 }
 
 /// Journal rows, optionally filtered to a hub and/or good (−1 = any), for the

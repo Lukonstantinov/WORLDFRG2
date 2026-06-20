@@ -33,6 +33,14 @@ const GROUPS: { label: string; keys: { k: LineColorKey; label: string }[] }[] = 
       { k: "estate", label: "Estate export" },
     ],
   },
+  {
+    label: "Colonies",
+    keys: [
+      { k: "settlementColony", label: "Settlement colony" },
+      { k: "houseOutpost", label: "House outpost" },
+      { k: "colonyLane", label: "Colony supply lane" },
+    ],
+  },
 ];
 
 const muted = "#6a86a6";

@@ -528,7 +528,7 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 }
 
 // ── DLC 1 "Living Trade" tick simulation ──
-import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow } from "../types";
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, ColonyDetail, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow } from "../types";
 
 /** Seed a fresh living-trade sim from the static economy snapshot (step 10). */
 export async function campaignStartSim(seed: number): Promise<CampaignSnapshot> {
@@ -560,6 +560,11 @@ export async function campaignGetJournal(hub: number, good: number): Promise<Jou
  *  when no campaign sim is running / the hub isn't in it. */
 export async function campaignGetHub(id: number): Promise<HubDetail | null> {
   return invoke("campaign_get_hub", { id });
+}
+
+/** Colony detail (Supply subtab) — null for non-colony hubs. */
+export async function campaignGetColony(id: number): Promise<ColonyDetail | null> {
+  return invoke("campaign_get_colony", { id });
 }
 
 /** World-economy panel data (per-good world prices + price-index series). */

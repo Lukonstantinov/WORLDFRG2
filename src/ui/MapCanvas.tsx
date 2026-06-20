@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { initPixiApp, type MapApp } from "../canvas/PixiApp";
 import { TileViewport } from "../canvas/TileViewport";
 import { TileManager } from "../canvas/TileManager";
-import { OverlayManager } from "../canvas/OverlayManager";
+import { OverlayManager, type ColonyMarker } from "../canvas/OverlayManager";
 import { createPaintOverlay, drawCursorRing, paintStamp, clearPaintOverlay } from "../canvas/PaintOverlay";
 import { useWorldStore } from "../state/worldStore";
 import { useViewportStore } from "../state/viewportStore";
@@ -408,6 +408,28 @@ export function MapCanvas() {
     om.drawSettlements(liveSettlements);
     requestRender();
   }, [rivers, lakes, liveSettlements, requestRender]);
+
+  // Colony & house-outpost markers + their routed supply lanes (from the live sim
+  // hubs; settlement colonies kind 1, house outposts kind 2).
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    const hubs = campaignSnapshot?.active ? campaignSnapshot.hubs : [];
+    const markers: ColonyMarker[] = [];
+    for (const h of hubs) {
+      if (h.colony_kind !== 1 && h.colony_kind !== 2) continue;
+      const f = h.founder_hub >= 0 && h.founder_hub < hubs.length ? hubs[h.founder_hub] : undefined;
+      const ownerColor = h.colony_kind === 2
+        ? (houses.find((ho) => ho.idx === h.owner_house)?.color ?? "#c9a96a")
+        : "";
+      markers.push({
+        x: h.x, y: h.y, name: h.name, kind: h.colony_kind, stage: h.colony_stage,
+        ownerColor, founderX: f ? f.x : -1, founderY: f ? f.y : -1,
+      });
+    }
+    om.drawColonies(markers);
+    requestRender();
+  }, [campaignSnapshot, houses, requestRender]);
 
   // Re-paint overlays when the user changes the appearance palette (the
   // settingsStore has already pushed the new colours into OverlayManager's

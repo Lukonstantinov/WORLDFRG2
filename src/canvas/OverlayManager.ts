@@ -117,7 +117,19 @@ export const LINE_COLOR_DEFAULTS = {
   merchantOut: "#ffce5f",     // merchant route outbound (gold)
   manufactory: "#4fc06a",     // house/guild manufactory holding line (green)
   estate: "#ffe14a",          // estate holding line (shiny yellow)
+  settlementColony: "#c08cff", // settlement colony pin + lane (violet)
+  houseOutpost: "#0a0a0a",    // house trade outpost marker (black; frame uses owner colour)
+  colonyLane: "#c08cff",      // colony↔metropolis supply/monopoly lane (violet)
 };
+/** A colony/outpost map marker (settlement colony or house trade outpost). */
+export interface ColonyMarker {
+  x: number; y: number; name: string;
+  kind: number;        // 1 = settlement colony · 2 = house outpost
+  stage: number;       // colony_stage 1..4 (settlement only)
+  ownerColor: string;  // owner-house colour (outpost frame / lane tint)
+  founderX: number; founderY: number; // metropolis/owner-home (lane endpoint); <0 = none
+}
+
 export type LineColorKey = keyof typeof LINE_COLOR_DEFAULTS;
 export const lineColors: Record<LineColorKey, string> = { ...LINE_COLOR_DEFAULTS };
 /** Apply a partial palette override (from the Settings store). */
@@ -129,6 +141,7 @@ export class OverlayManager {
   private rivers: RiverData[] = [];
   private lakes: LakeData[] = [];
   private settlements: Settlement[] = [];
+  private colonies: ColonyMarker[] = [];
   private windData: { samples: VectorSample[]; gridW: number; gridH: number } | null = null;
   private currentLines: Streamline[] = [];
   private tradeRoutes: TradeRoute[] = [];
@@ -201,6 +214,7 @@ export class OverlayManager {
   drawRivers(rivers: RiverData[]) { this.rivers = rivers; }
   drawLakes(lakes: LakeData[]) { this.lakes = lakes; }
   drawSettlements(settlements: Settlement[]) { this.settlements = settlements; }
+  drawColonies(colonies: ColonyMarker[]) { this.colonies = colonies; }
 
   drawWindArrows(data: VectorSample[], gridW: number, gridH: number) {
     this.windData = { samples: data, gridW, gridH };
@@ -857,6 +871,11 @@ export class OverlayManager {
         ctx.stroke();
         ctx.globalAlpha = 1;
       }
+    }
+
+    // Colonies & house trade outposts (their own markers + routed supply lanes).
+    if (this.visibility.colonies && this.colonies.length > 0) {
+      this.renderColonies(ctx);
     }
 
     // Name labels (opt-in overlays). Drawn last so they sit on top of markers.
@@ -1962,6 +1981,61 @@ export class OverlayManager {
   }
 
   /** Settlement-name labels (drawn when the "settlementNames" overlay is on). */
+  /** Colony markers + their routed supply/monopoly lanes. Settlement colonies are
+   *  violet circles (radius by stage); house outposts are small BLACK squares framed
+   *  in the owner-house colour. Lanes follow the existing route network. */
+  private renderColonies(ctx: CanvasRenderingContext2D) {
+    const inv = 1 / Math.sqrt(this.currentScale);
+    const half = (this.worldW || 1e9) / 2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    // 1) lanes (routed colony ↔ metropolis/owner-home) first, under the markers.
+    for (const c of this.colonies) {
+      if (c.founderX < 0 || c.founderY < 0) continue;
+      if (this.worldW > 0 && Math.abs(c.x - c.founderX) > half) continue; // seam
+      const tint = c.kind === 2 ? c.ownerColor : lineColors.colonyLane;
+      const routed = this.routeAlongTradeRoutes([c.founderX, c.founderY], [c.x, c.y]);
+      const path: [number, number][] = routed && routed.length >= 2 ? routed : [[c.founderX, c.founderY], [c.x, c.y]];
+      ctx.globalAlpha = 0.8;
+      ctx.strokeStyle = tint;
+      ctx.lineWidth = Math.max(0.5, (c.kind === 1 ? 2.4 : 1.6) * inv);
+      ctx.setLineDash(c.kind === 2 ? [3 * inv, 3 * inv] : []);
+      ctx.beginPath();
+      ctx.moveTo(path[0][0] + 0.5, path[0][1] + 0.5);
+      for (let i = 1; i < path.length; i++) ctx.lineTo(path[i][0] + 0.5, path[i][1] + 0.5);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    // 2) markers.
+    for (const c of this.colonies) {
+      const x = c.x + 0.5, y = c.y + 0.5;
+      if (c.kind === 2) {
+        // House trade outpost: small black square, framed in the owner's colour.
+        const s = Math.max(1.0, 1.9 * inv);
+        ctx.globalAlpha = 0.95;
+        ctx.fillStyle = lineColors.houseOutpost;
+        ctx.fillRect(x - s, y - s, s * 2, s * 2);
+        ctx.strokeStyle = c.ownerColor || "#cccccc";
+        ctx.lineWidth = Math.max(0.4, 0.9 * inv);
+        ctx.strokeRect(x - s, y - s, s * 2, s * 2);
+      } else {
+        // Settlement colony: violet circle, radius grows with stage.
+        const rr = Math.max(1.1, (1.4 + 0.5 * (c.stage || 1)) * inv);
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = lineColors.settlementColony;
+        ctx.beginPath();
+        ctx.arc(x, y, rr, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,0.6)";
+        ctx.lineWidth = 0.4;
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.lineCap = "butt";
+    ctx.lineJoin = "miter";
+  }
+
   private renderSettlementNames(ctx: CanvasRenderingContext2D) {
     const fs = Math.max(4, 8 / this.currentScale);
     ctx.font = `${fs}px sans-serif`;

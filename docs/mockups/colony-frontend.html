@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorldForge 2 — Colony Frontend (shipped)</title>
+<style>
+  :root{--bg:#0b1420;--panel:#13202e;--panel2:#0f1a26;--line:#1e2e42;
+    --text:#cfe2f6;--muted:#6a86a6;--accent:#3a80c0;--good:#7fd0a0;--warn:#f4c430;
+    --colony:#c08cff;--gold:#ffd24a;--flow:#4fd0c0;}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(circle at 30% -10%,#16273a,#0b1420 60%);
+    color:var(--text);font:13px/1.5 "Segoe UI",system-ui,sans-serif;padding:26px;}
+  h1{font-size:21px;margin:0 0 2px;font-weight:700}
+  h1 small{color:var(--muted);font-weight:400;font-size:13px}
+  .done{display:inline-block;font-size:10px;font-weight:700;color:#7fe0a0;background:#14331c;border:1px solid #2c5a2c;border-radius:20px;padding:1px 9px;margin-left:8px;vertical-align:2px}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:var(--colony);margin:28px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  .grid{display:grid;gap:18px;grid-template-columns:1.2fr 1fr}@media(max-width:880px){.grid{grid-template-columns:1fr}}
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:10px;padding:14px 16px;box-shadow:0 6px 22px rgba(0,0,0,.35)}
+  .ptitle{font-weight:700;font-size:13px;margin-bottom:8px}
+  .muted{color:var(--muted)} .note{font-size:11.5px;color:var(--muted);border-left:2px solid var(--accent);padding-left:9px;margin:9px 0}
+  .city{font-size:11px;fill:#cfe2f6;font-family:inherit} .small{font-size:9.5px;fill:#6a86a6}
+  .legend{display:flex;align-items:center;gap:9px;padding:3px 0;font-size:12px}
+  .sq{width:12px;height:12px;display:inline-block}
+  .dot{width:12px;height:12px;border-radius:50%;display:inline-block}
+  .hdr{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#8aa0b8;border-bottom:1px solid var(--line);padding-bottom:2px;margin:8px 0 4px}
+  .kv{font-size:10.5px;color:#9ab0c8;line-height:1.7}
+  .kv b{color:#cfe0f4;font-weight:600}
+  .bar{height:7px;border-radius:6px;background:#0c1622;overflow:hidden;flex:1}
+  .row{display:flex;gap:6px;font-size:10.5px;padding:1px 4px;border-bottom:1px solid #131f2c}
+  .empty{font-size:10px;color:#6a86a6;font-style:italic;padding:1px 4px}
+  .tab{display:inline-block;font-size:11px;padding:3px 9px;border-bottom:2px solid transparent;color:#6a86a6}
+  .tab.on{color:#cfe2f6;font-weight:700;border-bottom-color:var(--accent)}
+  .chip{display:inline-block;font-size:10px;border-radius:5px;padding:1px 6px;border:1px solid var(--line);margin:2px 3px 0 0;color:#cbd8e6}
+</style>
+</head>
+<body>
+<h1>WorldForge 2 — Colony frontend <span class="done">SHIPPED</span> &nbsp;<small>Phase H now live</small></h1>
+<div class="note">Colonies &amp; house outposts now appear on the map with their own markers + routed supply lanes, carry adjustable colours, toggle on/off, and a settlement colony opens a <b>Supply</b> subtab with its lifeline roster.</div>
+
+<h2>Map markers &amp; routed lanes</h2>
+<div class="grid">
+  <div class="panel" style="padding:8px">
+    <svg viewBox="0 0 560 270" width="100%" style="background:radial-gradient(circle at 42% 45%,#0e2236,#091622);border:1px solid var(--line);border-radius:8px">
+      <path d="M40,60 C150,35 330,45 395,80 C425,135 410,205 300,216 C190,228 90,205 55,160 C30,125 30,85 40,60 Z" fill="#16324a" opacity=".5" stroke="#244a66"/>
+      <!-- metropolis -->
+      <circle cx="150" cy="115" r="9" fill="var(--gold)"/><text x="120" y="101" class="city">Venzia ★</text>
+      <!-- settlement colony: violet circle, radius by stage -->
+      <path d="M158,118 C230,135 300,150 326,168" fill="none" stroke="#c08cff" stroke-width="3" stroke-linecap="round"/>
+      <polygon points="250,144 238,138 240,152" fill="#d8c0ff"/>
+      <circle cx="330" cy="170" r="7" fill="#c08cff"/><text x="300" y="156" class="city" style="fill:#d8c0ff">New Venzia (colony)</text>
+      <!-- house outpost: black square framed in owner colour, dashed owner lane -->
+      <path d="M158,112 C250,95 360,92 432,104" fill="none" stroke="#b03a5a" stroke-width="1.6" stroke-dasharray="4 4"/>
+      <rect x="426" y="98" width="11" height="11" fill="#0a0a0a" stroke="#b03a5a" stroke-width="2"/>
+      <text x="442" y="107" class="city" style="fill:#e0a8b8">Cassii Post</text>
+    </svg>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Marker key</div>
+    <div class="legend"><span class="dot" style="background:var(--colony)"></span> settlement colony — violet circle, grows with stage</div>
+    <div class="legend"><span class="sq" style="background:#0a0a0a;border:2px solid #b03a5a"></span> house outpost — black square, owner-house frame</div>
+    <div class="legend"><span style="width:24px;border-top:3px solid var(--colony);display:inline-block"></span> colony supply/monopoly lane (routed)</div>
+    <div class="legend"><span style="width:24px;border-top:2px dashed #b03a5a;display:inline-block"></span> outpost trade lane (owner colour, routed)</div>
+    <div class="note">All lanes follow the existing route network (the standing rule). Toolbar adds an <b>⛶ Colonies</b> toggle; Settings → Appearance now has a <b>Colonies</b> group (settlement / outpost / lane) — recolour live, saved with the world.</div>
+  </div>
+</div>
+
+<h2>HubPanel → Supply subtab (settlement colonies)</h2>
+<div class="grid">
+  <div class="panel">
+    <div>
+      <span class="tab">Summary</span><span class="tab on">Supply</span><span class="tab">Trade</span><span class="tab">Estates</span><span class="tab">People</span>
+    </div>
+    <div class="hdr">Colony — Town</div>
+    <div class="kv">
+      Metropolis: <b>Venzia</b><br>
+      Bank &amp; mint: <span style="color:var(--gold)">Banco di Verroa</span> · 🪙 New Venzia mark<br>
+      Charter: <span style="color:var(--colony)">metropolis monopoly (open)</span><br>
+      Supplied: <span style="color:var(--good)">6.1 yr</span> (need 5 to grow) · age 41 yr<br>
+      Independence: in ~29 yr
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin:6px 0 2px;font-size:9px">
+      <span style="color:#6a86a6;width:64px">reserve</span>
+      <div class="bar"><div style="width:62%;height:100%;background:var(--flow)"></div></div>
+      <span style="color:#6a86a6">226/365d</span>
+    </div>
+    <div style="font-size:9.5px;margin:4px 0"><span style="color:#6a86a6">Backers: </span>
+      <span style="color:#7fb8ff">City of Venzia 50%</span>
+      <span style="color:#caa15a;margin-left:6px">House Cassii 20%</span>
+      <span style="color:#e0c060;margin-left:6px">Banco di Verroa 30%</span>
+    </div>
+    <div class="hdr">Supplier roster</div>
+    <div style="font-size:9.5px;color:var(--good);font-weight:700">Food <span style="color:#6a86a6;font-weight:400">· covers the daily deficit</span></div>
+    <div class="row"><span style="color:#cdbb88;flex:1">Venzia</span><span style="color:#9ab0c8">🌾 wheat</span><span style="color:var(--good);width:54px;text-align:right">1,400/mo</span></div>
+    <div class="row"><span style="color:#cdbb88;flex:1">Pell Mills</span><span style="color:#9ab0c8">🥖 bread</span><span style="color:var(--good);width:54px;text-align:right">600/mo</span></div>
+    <div style="font-size:9.5px;color:var(--flow);font-weight:700;margin-top:4px">Reserve food <span style="color:#6a86a6;font-weight:400">· fills the ~1-year buffer</span></div>
+    <div class="row"><span style="color:#cdbb88;flex:1">Brae</span><span style="color:#9ab0c8">🐟 fish</span><span style="color:var(--good);width:54px;text-align:right">300/mo</span></div>
+    <div style="font-size:9.5px;color:#d8b24a;font-weight:700;margin-top:4px">Preservatives <span style="color:#6a86a6;font-weight:400">· extend the reserve's shelf-life</span></div>
+    <div class="empty">＋ empty slot — needs a supplier</div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Behind it (shipped backend)</div>
+    <div class="muted" style="font-size:12px">The roster reads the live <code>colony_supply</code> contracts via <code>campaign_get_colony</code>; the metropolis treasury pays the food bill each tick; the reserve drains on a break and the colony <b>collapses</b> if it empties (its bank's loan defaults → possible crash). Growth needs ≥5yr supply + population + buildings; at year 70 a self-sufficient city wages its war of independence (war-chest + a luck roll).</div>
+    <div style="margin-top:8px">
+      <span class="chip">⛶ Colonies toggle</span><span class="chip">Settings: Colonies colours</span>
+      <span class="chip">campaign_get_colony</span><span class="chip">HubBrief.colony_*</span>
+    </div>
+    <div class="note">tsc + cargo check clean · full lib suite 43/43.</div>
+  </div>
+</div>
+
+<p class="note" style="margin-top:24px;border:0;color:var(--muted);font-size:11px">Static report mirroring the shipped Phase-H UI. Values illustrative; colours from the OverlayManager palette.</p>
+</body>
+</html>
