@@ -547,6 +547,7 @@ pub struct EstateRow {
     pub owner_is_guild: bool,
     pub owner_is_civic: bool, // city-financed (locally owned), no private house/guild
     pub tier: u8,            // upgrade tier 1..5
+    pub damage: f32,         // disaster damage 0 (intact) .. 1 (ruined); suppresses output
 }
 
 /// One foreign merchant's office hosted in a settlement (host-side view).
@@ -879,6 +880,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 owner_house: -1,
                 stake_bank: -1,
                 stake_share: 0.0,
+                damage: 0.0,
                 structures: vec![],
                 treasury: 0.0,
                 tariff_export: 0.0,
@@ -1424,6 +1426,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                 owner_is_guild,
                 owner_is_civic: e.owner_house < 0,
                 tier: e.estate_tier.max(1),
+                damage: e.damage,
             }
         })
         .collect();

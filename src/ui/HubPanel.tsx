@@ -719,6 +719,12 @@ export function HubPanel() {
                   </div>
                   <div style={{ color: "#7a90a8", fontSize: 9 }}>
                     owner: <span style={{ color: ownerColor }}>{ownerLabel}</span> · tier {e.tier ?? 1}/5
+                    {(e.damage ?? 0) > 0.01 && (
+                      <span style={{ color: "#e0764a", fontWeight: 700, marginLeft: 5 }}
+                        title="disaster damage — output suppressed until repaired">
+                        🔥 {Math.round((e.damage ?? 0) * 100)}% damaged
+                      </span>
+                    )}
                   </div>
                 </div>
                 <span style={{ color: "#7fd0a0", fontSize: 10 }}>▲ {fmt(e.output)}/day</span>

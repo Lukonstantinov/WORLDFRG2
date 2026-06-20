@@ -440,6 +440,7 @@ export interface EstateRow {
   owner_is_guild: boolean;
   owner_is_civic?: boolean; // city-financed (locally owned)
   tier: number;       // upgrade tier 1..5
+  damage?: number;    // disaster damage 0 (intact) .. 1 (ruined)
 }
 /** One city in the live richest-cities ranking. */
 export interface CityRank {

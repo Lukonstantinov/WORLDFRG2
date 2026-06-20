@@ -164,6 +164,25 @@ const RESALE_DISTRESS_WEALTH: f32 = 6_000.0;
 const CIVIC_SALE_TREASURY_FLOOR: f32 = 100.0;
 /// A bank acquiring a manufactory on the resale market takes this controlling share.
 const RESALE_BANK_STAKE: f32 = 0.6;
+// ── Estate/manufactory condition: age decay, labor/unrest debuffs, disasters ──
+/// Effectiveness lost per year since a works was last built/upgraded (wear).
+const ESTATE_DECAY_PER_YEAR: f32 = 0.010;
+/// Cap on the age/wear penalty (an old un-upgraded works loses at most this).
+const ESTATE_AGE_PENALTY_CAP: f32 = 0.12;
+/// Host-city population for a fully-staffed works; smaller cities run below capacity.
+const ESTATE_LABOR_FULL_POP: f32 = 2_000.0;
+/// Cap on the labor-shortage penalty (an almost-empty host city).
+const ESTATE_LABOR_PENALTY_CAP: f32 = 0.12;
+/// Cap on the unrest/famine penalty (a fully-starving host city).
+const ESTATE_UNREST_PENALTY_CAP: f32 = 0.20;
+/// Per-year chance an intact works suffers a disaster (fire / flood / blight).
+const DISASTER_ANNUAL_CHANCE: f32 = 0.035;
+const DISASTER_MIN_DAMAGE: f32 = 0.30;
+const DISASTER_MAX_DAMAGE: f32 = 0.70;
+/// Fraction of outstanding damage repaired each year when the owner can fund it.
+const REPAIR_RATE_PER_YEAR: f32 = 0.30;
+/// Repair cost = (damage repaired) × (works value) × this.
+const REPAIR_COST_FRAC: f32 = 0.5;
 
 // ── Merchant fleets & voyage risk ────────────────────────────────────────────
 /// A settlement gets a civic Merchant Guild once it reaches this population.
@@ -735,6 +754,9 @@ pub struct TickHub {
     /// −1 for none. `stake_share` of the owner-cut is paid to that bank as a dividend.
     #[serde(default = "neg_one_i32")] pub stake_bank: i32,
     #[serde(default)] pub stake_share: f32,
+    /// Disaster damage to an estate/manufactory: 0 = intact, 1 = ruined. Suppresses
+    /// the works' output until repaired (a fire/flood/blight sets it; repair clears it).
+    #[serde(default)] pub damage: f32,
     /// Buildings this settlement has erected (ids: 1 Granary / 2 Warehouse /
     /// 3 Shipyard / 4 Guildhall / 5 Workshop). Each grants a standing bonus; at
     /// most one of each. Auto-built as a city/house prospers.
@@ -3185,6 +3207,9 @@ impl CampaignSim {
                 // Standing structure bonuses (Workshop/Warehouse = all goods,
                 // Granary = food only); `struct_bonus` was the A1 placeholder hook.
                 let (struct_all, struct_food) = self.hub_struct_prod(h);
+                // A works' condition (disaster damage / age / labor / unrest) scales its
+                // realized output; ordinary settlements are unaffected (1.0).
+                let eff = if self.hubs[h].is_estate { self.estate_effectiveness(h) } else { 1.0 };
                 for g in 0..ng {
                     // Manufactured (recipe) goods aren't extracted per-capita — they're
                     // made from imported raws in the manufacturing pass below.
@@ -3195,7 +3220,7 @@ impl CampaignSim {
                     let percap = self.hubs[h].base_per_capita.get(g).copied().unwrap_or(0.0);
                     let struct_bonus = struct_all * if self.goods[g].food { struct_food } else { 1.0 };
                     let realized = percap * pop * self.seasonal_mult(h, g, doy)
-                        * prod_mult[h][g] * tech * struct_bonus;
+                        * prod_mult[h][g] * tech * struct_bonus * eff;
                     self.hubs[h].production[g] = realized;
                     self.hubs[h].stock[g] += realized;
                 }
@@ -5074,6 +5099,8 @@ impl CampaignSim {
         // colonisation only opens once the world has matured — from YEAR 50 onward,
         // and only when the wealth/population/site conditions are actually met.
         if self.tick % 365 == 0 {
+            // Estate/manufactory disasters strike + funded repairs progress (yearly).
+            self.estate_condition_pass();
             // House trade outposts from year 30 (rich house, heavy cost); full
             // settlement colonies from year 50 (joint-stock, food lifeline).
             if self.tick >= OUTPOST_START_TICK { self.maybe_found_house_outpost(); }
@@ -5237,7 +5264,7 @@ impl CampaignSim {
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
-            estate_kind: kind, estate_tier: 1, last_upgrade_tick: self.tick, owner_house, stake_bank: -1, stake_share: 0.0, structures: vec![],
+            estate_kind: kind, estate_tier: 1, last_upgrade_tick: self.tick, owner_house, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
@@ -5527,6 +5554,78 @@ impl CampaignSim {
         });
     }
 
+    /// A works' EFFECTIVENESS multiplier on output (1.0 = at nominal tier). Four
+    /// debuffs compound: disaster `damage`, age/wear since the last build/upgrade, a
+    /// labor shortage in a small/shrunken host city, and unrest/famine there. All are
+    /// floored so a sound works in a healthy city stays near full, but a damaged works
+    /// in a starving backwater runs far below capacity.
+    fn estate_effectiveness(&self, h: usize) -> f32 {
+        let e = &self.hubs[h];
+        if !e.is_estate { return 1.0; }
+        // ADDITIVE penalties (NOT multiplicative): a sound works in a healthy city sits
+        // at ~1.0; only real problems bite. (Multiplicative stacking gutted the estate
+        // income that bootstraps houses and collapsed the whole economy — see CLAUDE.md.)
+        let mut penalty = e.damage.clamp(0.0, 1.0); // disaster damage is the big lever
+        let age_yrs = self.tick.saturating_sub(e.last_upgrade_tick) as f32 / TICKS_PER_YEAR as f32;
+        penalty += (ESTATE_DECAY_PER_YEAR * age_yrs).min(ESTATE_AGE_PENALTY_CAP);
+        if e.parent >= 0 && (e.parent as usize) < self.hubs.len() {
+            let p = &self.hubs[e.parent as usize];
+            // Labor: a works in a too-small host city runs a little below capacity.
+            penalty += (1.0 - (p.population / ESTATE_LABOR_FULL_POP).clamp(0.0, 1.0)) * ESTATE_LABOR_PENALTY_CAP;
+            // Unrest/famine in the host city cuts output.
+            penalty += p.starving.clamp(0.0, 1.0) * ESTATE_UNREST_PENALTY_CAP;
+        }
+        (1.0 - penalty).clamp(0.15, 1.0)
+    }
+
+    /// Yearly · estate/manufactory disasters + repair. An intact works may suffer a
+    /// fire/flood/blight (damage spikes → output drops via `estate_effectiveness`); a
+    /// damaged works is repaired over several years when its owner (a house, or the
+    /// parent city for civic works) can fund the work. (User-requested.)
+    fn estate_condition_pass(&mut self) {
+        let tick = self.tick;
+        let n = self.hubs.len();
+        const KINDS: [&str; 3] = ["fire", "flood", "blight"];
+        for ei in 0..n {
+            if !self.hubs[ei].is_estate || self.hubs[ei].estate_tier == 0 { continue; }
+            // 1) Disaster roll (only on a largely-intact works).
+            if self.hubs[ei].damage < 0.2
+                && hash01(self.seed, tick as u64 ^ 0xD15A57, ei as u64) < DISASTER_ANNUAL_CHANCE {
+                let r = hash01(self.seed, tick as u64 ^ 0xF1AE, ei as u64);
+                let dmg = DISASTER_MIN_DAMAGE + r * (DISASTER_MAX_DAMAGE - DISASTER_MIN_DAMAGE);
+                self.hubs[ei].damage = dmg.clamp(0.0, 1.0);
+                let kind = KINDS[(hash01(self.seed, tick as u64 ^ 0xCA1A, ei as u64) * 3.0) as usize % 3];
+                let (en, par) = (self.hubs[ei].name.clone(), self.hubs[ei].parent);
+                self.journal.push(JournalEntry { tick, kind: "disaster".into(), hub: par, good: -1,
+                    value: dmg, text: format!("{} strikes {} ({:.0}% damage)", kind, en, dmg * 100.0) });
+                continue;
+            }
+            // 2) Repair (if damaged and the owner can pay).
+            if self.hubs[ei].damage > 0.01 {
+                let repaired = (self.hubs[ei].damage * REPAIR_RATE_PER_YEAR).min(self.hubs[ei].damage);
+                let cost = repaired * self.estate_market_value(ei) * REPAIR_COST_FRAC;
+                let owner = self.hubs[ei].owner_house;
+                let paid = if owner >= 0 && (owner as usize) < self.houses.len()
+                    && !self.houses[owner as usize].defunct && self.houses[owner as usize].wealth > cost * 1.5 {
+                    self.houses[owner as usize].wealth -= cost; true
+                } else if owner < 0 {
+                    let par = self.hubs[ei].parent;
+                    if par >= 0 && (par as usize) < n && self.hubs[par as usize].treasury > cost * 1.5 {
+                        self.hubs[par as usize].treasury -= cost; true
+                    } else { false }
+                } else { false };
+                if paid {
+                    self.hubs[ei].damage = (self.hubs[ei].damage - repaired).max(0.0);
+                    if self.hubs[ei].damage <= 0.01 {
+                        let (en, par) = (self.hubs[ei].name.clone(), self.hubs[ei].parent);
+                        self.journal.push(JournalEntry { tick, kind: "estate".into(), hub: par, good: -1,
+                            value: 0.0, text: format!("{} is fully repaired and back to work", en) });
+                    }
+                }
+            }
+        }
+    }
+
     /// Resale value of a holding: ~60% of its rebuild cost, scaled by tier (and city
     /// size for raw estates). Manufactories are dear; raw estates cheap.
     fn estate_market_value(&self, ei: usize) -> f32 {
@@ -5790,7 +5889,7 @@ impl CampaignSim {
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
-            estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, structures: vec![],
+            estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
@@ -7156,7 +7255,7 @@ mod tests {
             in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
-            estate_kind: 0, estate_tier: 0, last_upgrade_tick: 0, owner_house: -1, stake_bank: -1, stake_share: 0.0, structures: vec![],
+            estate_kind: 0, estate_tier: 0, last_upgrade_tick: 0, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
