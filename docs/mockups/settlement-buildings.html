@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WorldForge 2 — Settlement building view (proposal)</title>
+<style>
+  :root { --bg:#0b1420; --panel:#13202e; --ink:#cfe2f6; --accent:#3a80c0; }
+  body { background:var(--bg); color:var(--ink); font:13px/1.5 system-ui, sans-serif; margin:0; padding:24px; }
+  h1 { font-size:20px; margin:0 0 2px; } h2 { color:#7fa0c4; font-size:12px; text-transform:uppercase; letter-spacing:.6px; margin:20px 0 8px; }
+  .sub { color:#7f96b2; margin:0 0 16px; max-width:880px; }
+  .wrap { display:flex; gap:16px; flex-wrap:wrap; }
+  .schem { width:560px; background:#0c141e; border:1px solid #1e3450; border-radius:10px; padding:12px; }
+  .plan { position:relative; height:380px; background:radial-gradient(circle at 50% 60%, #11212e, #0a131d); border:1px solid #1b2e44; border-radius:8px; overflow:hidden; }
+  .ring { position:absolute; border-radius:50%; border:1px dashed #21364e; }
+  .node { position:absolute; transform:translate(-50%,-50%); text-align:center; }
+  .ic { width:40px; height:40px; border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:20px; background:#16243a; border:1.5px solid #2a4a66; }
+  .ic { border:1.5px solid #2a4a66; }
+  .lab { font-size:8.5px; color:#9fb4cc; margin-top:2px; white-space:nowrap; }
+  .chip { font-size:7.5px; padding:0 3px; border-radius:3px; background:#0c1622; color:#8fb0d0; border:1px solid #25405c; }
+  .quarter { position:absolute; border-radius:14px; opacity:.5; }
+  .side { width:300px; }
+  .card { background:#0c141e; border:1px solid #1e3450; border-radius:8px; padding:10px 12px; margin-bottom:10px; }
+  .stat { display:flex; justify-content:space-between; font-size:11px; padding:2px 0; border-bottom:1px solid #131e2a; }
+  .bar { height:6px; background:#101a26; border-radius:3px; overflow:hidden; margin-top:2px; }
+  .bar > i { display:block; height:100%; }
+  .legend span { display:inline-flex; align-items:center; gap:4px; margin:0 10px 4px 0; font-size:10.5px; color:#aebfd4; }
+  .sw { width:11px; height:11px; border-radius:3px; display:inline-block; }
+  table { border-collapse:collapse; width:100%; font-size:11px; }
+  td,th { text-align:left; padding:3px 6px; border-bottom:1px solid #16243a; } th { color:#7fa0c4; font-weight:600; }
+  .rank { color:#e0c452; font-weight:700; }
+</style>
+</head>
+<body>
+  <h1>🏙 Settlement building view — improved schematic (proposal)</h1>
+  <p class="sub">A plan-view of the city's built environment instead of a flat list: a civic core, a harbour, family-coloured <b>merchant quarters</b> (Genoese/Venetian exclusive districts), a <b>counting-house bearing its bank's name</b>, and an outer ring of estates/manufactories each showing live stats (effectiveness, damage, tier, owner, income).</p>
+
+  <div class="wrap">
+    <div class="schem">
+      <div class="plan">
+        <!-- rings -->
+        <div class="ring" style="left:50%;top:60%;width:300px;height:300px;transform:translate(-50%,-50%)"></div>
+        <div class="ring" style="left:50%;top:60%;width:180px;height:180px;transform:translate(-50%,-50%)"></div>
+
+        <!-- merchant quarters (family-coloured districts) -->
+        <div class="quarter" style="left:20px;top:120px;width:120px;height:90px;background:#5b3a2e;"></div>
+        <div class="quarter" style="left:410px;top:130px;width:120px;height:95px;background:#2e3a5b;"></div>
+
+        <!-- civic core -->
+        <div class="node" style="left:50%;top:58%"><div class="ic" style="border-color:#c8a23a">🏛</div><div class="lab">Town Hall</div></div>
+        <div class="node" style="left:42%;top:46%"><div class="ic" style="border-color:#6fae8a">🏭</div><div class="lab">Workshop</div></div>
+        <div class="node" style="left:58%;top:46%"><div class="ic" style="border-color:#e0c452">🌾</div><div class="lab">Granary</div></div>
+        <div class="node" style="left:35%;top:70%"><div class="ic" style="border-color:#7fb0e0">⚖️</div><div class="lab">Guildhall</div></div>
+        <div class="node" style="left:65%;top:70%"><div class="ic" style="border-color:#b8728f">📦</div><div class="lab">Warehouse</div></div>
+        <div class="node" style="left:50%;top:80%"><div class="ic" style="border-color:#9fd0ff">💧</div><div class="lab">Aqueduct ✦</div></div>
+
+        <!-- harbour -->
+        <div class="node" style="left:50%;top:90%"><div class="ic" style="border-color:#4fb0c0">⚓</div><div class="lab">Shipyard + Harbour</div></div>
+
+        <!-- counting-house bears the bank name -->
+        <div class="node" style="left:78%;top:30%"><div class="ic" style="border-color:#e0c452">🏦</div><div class="lab" style="color:#e0c452">Banco di Vethra</div></div>
+
+        <!-- merchant-quarter crests -->
+        <div class="node" style="left:14%;top:30%"><div class="ic" style="border-color:#c98f5f">⚜️</div><div class="lab">Calderi Quarter</div></div>
+        <div class="node" style="left:86%;top:62%"><div class="ic" style="border-color:#7f9fd0">⚜️</div><div class="lab">Orlani Quarter</div></div>
+
+        <!-- estate ring with stat chips -->
+        <div class="node" style="left:18%;top:78%"><div class="ic" style="border-color:#4fc06a">🍇</div><div class="lab">Vineyard <span class="chip">T3</span> <span class="chip" style="color:#7fcf9f">98%</span></div></div>
+        <div class="node" style="left:82%;top:84%"><div class="ic" style="border-color:#e0764a">🏭</div><div class="lab">Silk Mfy <span class="chip">T4</span> <span class="chip" style="color:#e0764a">🔥45%</span></div></div>
+      </div>
+      <div class="legend" style="margin-top:8px">
+        <span><i class="sw" style="background:#5b3a2e"></i> Calderi quarter</span>
+        <span><i class="sw" style="background:#2e3a5b"></i> Orlani quarter</span>
+        <span><i class="sw" style="background:#16243a;border:1px solid #2a4a66"></i> civic</span>
+        <span>✦ proposed new building</span>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="card">
+        <h2 style="margin-top:0">Silk Manufactory — stats</h2>
+        <div class="stat"><span>Owner</span><span style="color:#e8dcc0">House Calderi</span></div>
+        <div class="stat"><span>Bank stake</span><span style="color:#6fae8a">Banco di Vethra · 25%</span></div>
+        <div class="stat"><span>Tier</span><span>★★★★☆ (4/5)</span></div>
+        <div class="stat"><span>Quality</span><span style="color:#cfe2f6">Fine (0.71)</span></div>
+        <div class="stat"><span>Effectiveness</span><span style="color:#e0764a">55%</span></div>
+        <div class="bar"><i style="width:55%;background:#e0764a"></i></div>
+        <div class="stat"><span>↳ fire damage</span><span style="color:#e0764a">−45%</span></div>
+        <div class="stat"><span>↳ age / labour / unrest</span><span style="color:#7f96b2">−0% / −0% / −0%</span></div>
+        <div class="stat"><span>Income to owner</span><span style="color:#7fcf9f">3.1k/yr</span></div>
+        <div class="stat"><span>Market value</span><span>72k</span></div>
+        <div class="stat" style="border:none"><span>Repair</span><span style="color:#e0c452">~2 yrs · funded</span></div>
+      </div>
+      <div class="card">
+        <h2 style="margin-top:0">Counting-house</h2>
+        <div class="stat"><span>Bank</span><span style="color:#e0c452">Banco di Vethra</span></div>
+        <div class="stat"><span>Benefit here</span><span style="color:#7fb0e0">−10% freight, +deposits</span></div>
+        <div class="stat" style="border:none"><span>Branch of</span><span>House Vethra</span></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>15 building ideas — ranked best → worst</h2>
+  <table>
+    <tr><th>#</th><th>Building</th><th>Effect on settlement / house / guild</th></tr>
+    <tr><td class="rank">1</td><td>💧 Aqueduct / Cistern</td><td>Raises population <b>carrying capacity</b> + cuts disease. City grows larger; more workers for estates/manufactories.</td></tr>
+    <tr><td class="rank">2</td><td>🏦 Counting-house (named bank)</td><td>Shows the bank's name; gives the bank a deposit/lending bonus + the city a credit-availability boost. House gains a branch.</td></tr>
+    <tr><td class="rank">3</td><td>⚓ Harbour / Mole</td><td>Raises sea-trade throughput + lowers shipping loss for resident houses. Maritime cities boom.</td></tr>
+    <tr><td class="rank">4</td><td>⚜️ Merchant quarter (Fondaco)</td><td>Exclusive district granted to one family/nation → trade monopoly bonus there, rent to the city, prestige to the house. Rivals pay a toll.</td></tr>
+    <tr><td class="rank">5</td><td>🎓 University / Studio</td><td>Faster manufactory <b>quality</b> gains + resists technique theft. Guilds prosper.</td></tr>
+    <tr><td class="rank">6</td><td>🏰 Walls / Fortifications</td><td>War defense: cuts blockade/levy damage in economic wars; stabilises morale.</td></tr>
+    <tr><td class="rank">7</td><td>⛲ Market square / Loggia</td><td>Lowers local price spread + raises trade volume (more buyers/sellers meet). City tax take rises.</td></tr>
+    <tr><td class="rank">8</td><td>⚖️ Mint house</td><td>Boosts coin trust/fineness ceiling + seigniorage to the council. Strengthens the city's currency.</td></tr>
+    <tr><td class="rank">9</td><td>⛪ Cathedral / Temple</td><td>Big prestige + stability; draws pilgrims (a steady demand sink). Festivals hit harder.</td></tr>
+    <tr><td class="rank">10</td><td>🏥 Lazaretto / Hospital</td><td>Shortens plague lock-ups (the contract force-majeure) + reduces famine mortality.</td></tr>
+    <tr><td class="rank">11</td><td>🛟 Drydock / Arsenal</td><td>Builds bigger/cheaper ships for the resident fleet house (Venetian Arsenal).</td></tr>
+    <tr><td class="rank">12</td><td>🧵 Guild factory hall</td><td>A guild's own works hub: concentrates manufacture + raises guild output/quality.</td></tr>
+    <tr><td class="rank">13</td><td>🛣 Road / Bridge works</td><td>Lowers inland freight on routes through the city (a land Guildhall).</td></tr>
+    <tr><td class="rank">14</td><td>🏚 Almshouse / Granary dole</td><td>Buffers famine (slows population loss) but is a civic money sink.</td></tr>
+    <tr><td class="rank">15</td><td>🗼 Clock tower / Monument</td><td>Pure prestige/flavour; minor stability. Lowest functional value.</td></tr>
+  </table>
+</body>
+</html>
