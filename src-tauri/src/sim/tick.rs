@@ -537,30 +537,21 @@ const RESERVE_TRUST_MIN: f32 = 0.55;
 // ── DLC 3.5 · Banks (merchant bankers as institutions) ──────────────────────
 /// The age of banking opens once the world's coinage has matured — from year 20.
 const BANK_START_TICK: u32 = 20 * 365;
-/// A banking house needs at least this wealth (and the prestige/coin floors) to
-/// charter a bank.
-const BANK_FOUND_WEALTH: f32 = 10.0;
-/// A non-banking house can still establish a bank once it is genuinely RICH (a
-/// great merchant turns banker) — so banks aren't gated to the rare banking
-/// archetype landing on a trusted-coin seat. Calibrated to the live wealth scale.
+/// A house must hold at least this wealth to charter a bank (a great fortune turns
+/// to banking). Universal — banking-archetype or not.
+const BANK_FOUND_WEALTH: f32 = 100_000.0;
+/// Wealth at which a house is "rich enough to be a banker" for the succession
+/// archetype pivot (distinct from the founding bar above).
 const BANK_FOUND_WEALTH_RICH: f32 = 5_000.0;
 const BANK_FOUND_PRESTIGE: f32 = 0.15;
 /// The bank's seat city coin must be trusted at least this much (you bank in good
 /// money). Kept modest so a bank can actually be chartered once coins are trusted.
 const BANK_FOUND_COIN_TRUST: f32 = 0.40;
-/// PRICE of founding a bank: the chartering house commits this fraction of its
-/// fortune to the venture. (For a great house worth 200k that is an 80k outlay —
-/// a serious commitment befitting a bank.)
-const BANK_FOUND_PRICE_FRAC: f32 = 0.40;
-/// Of the founding price, this fraction is paid IN as the new bank's specie
-/// reserves (its starting treasury); the remaining 60% is the establishment /
-/// charter cost (counting-house, staff, the seat city's charter fee) and is paid
-/// to the seat polis's treasury rather than into the bank.
-const BANK_FOUND_RESERVE_FRAC: f32 = 0.40;
-/// Absolute floor on a new bank's starting reserves (for tiny test economies);
-/// also calibrates against a live economy where great houses hold 200k+, so banks
-/// are capitalised to scale instead of as a token reserve a single default wipes.
-const BANK_FOUND_CAPITAL: f32 = 6.0;
+/// PRICE of founding a bank (debited from the house): 50k. Of that, 40k is paid IN
+/// as the new bank's specie reserves / liquidity (its starting treasury); the
+/// remaining 10k is the establishment / charter cost paid to the seat polis.
+const BANK_FOUND_PRICE: f32 = 50_000.0;
+const BANK_FOUND_RESERVE: f32 = 40_000.0;
 /// Monthly interest a bank charges on loans / pays on deposits.
 const BANK_LOAN_RATE: f32 = 0.012;
 const BANK_DEPOSIT_RATE: f32 = 0.006;
@@ -1700,24 +1691,17 @@ impl CampaignSim {
         if tick >= BANK_START_TICK {
         for hi in 0..self.houses.len() {
             if self.houses[hi].defunct || self.houses[hi].is_guild { continue; }
-            // Banking houses bank readily; any other house can too once it is RICH.
-            let banker = self.houses[hi].archetype == ARCH_BANKING;
-            if !banker && self.houses[hi].wealth < BANK_FOUND_WEALTH_RICH { continue; }
             if self.banks.iter().any(|b| !b.defunct && b.house == hi as u32) { continue; }
             let seat = self.houses[hi].hub as usize;
             if seat >= self.hubs.len() { continue; }
             if self.houses[hi].wealth < BANK_FOUND_WEALTH { continue; }
             if self.houses[hi].prestige < BANK_FOUND_PRESTIGE { continue; }
             if self.hubs[seat].coin_trust < BANK_FOUND_COIN_TRUST { continue; }
-            // The house pays the PRICE of founding (a fraction of its fortune). Of
-            // that price, BANK_FOUND_RESERVE_FRAC (40%) is paid in as the bank's
-            // starting specie reserves (its treasury); the remaining 60% is the
-            // establishment / charter cost, which goes to the seat city's treasury.
-            // Capitalising to the founder's wealth keeps the bank robust rather than
-            // a token reserve a single loan default would wipe.
-            let price = (self.houses[hi].wealth * BANK_FOUND_PRICE_FRAC).min(self.houses[hi].wealth);
-            let capital = (price * BANK_FOUND_RESERVE_FRAC).max(BANK_FOUND_CAPITAL).min(price);
-            if capital < 1.0 { continue; }
+            // The house pays the founding PRICE (50k). Of that, 40k is paid in as the
+            // bank's starting specie reserves / liquidity (its treasury); the rest
+            // (10k) is the establishment / charter cost paid to the seat city.
+            let price = BANK_FOUND_PRICE;
+            let capital = BANK_FOUND_RESERVE;
             self.houses[hi].wealth -= price;
             let charter_fee = price - capital; // establishment cost → seat city treasury
             self.hubs[seat].treasury += charter_fee;
@@ -6064,6 +6048,19 @@ impl CampaignSim {
         let name = self.houses[hi].name.clone();
         let heir = self.head_name_for(hub, &name, gen as u64 ^ 0x5151);
         let lifespan = self.roll_lifespan(hi as u64 ^ gen as u64);
+        // Archetype can PIVOT at a generational change to reflect what the family has
+        // become: a rich lender (or one that owns a bank) turns merchant-banker; a big
+        // shipper a fleet dynasty; a council power a political house; else a specialist.
+        let new_arch = {
+            let h = &self.houses[hi];
+            let fleet = h.fleet_sea + h.fleet_river + h.fleet_caravan;
+            let owns_bank = self.banks.iter().any(|b| !b.defunct && b.house == hi as u32);
+            if owns_bank || h.wealth >= BANK_FOUND_WEALTH_RICH { ARCH_BANKING }
+            else if fleet >= 12 { ARCH_FLEET }
+            else if h.political_power >= 0.6 || h.dominant_seat { ARCH_POLITICAL }
+            else { ARCH_SPECIALTY }
+        };
+        let old_arch = self.houses[hi].archetype;
         {
             let h = &mut self.houses[hi];
             h.generation = gen;
@@ -6071,10 +6068,17 @@ impl CampaignSim {
             h.head_since = tick;
             h.head_lifespan = lifespan;
             h.prestige += 0.05;
+            h.archetype = new_arch;
             h.events.push(HouseEvent {
                 tick, kind: "succession".into(),
                 text: format!("{} succeeds as head (generation {})", heir, gen),
             });
+            if new_arch != old_arch {
+                h.events.push(HouseEvent {
+                    tick, kind: "archetype".into(),
+                    text: format!("the family reinvents itself as {}", archetype_label(new_arch)),
+                });
+            }
         }
         self.journal.push(JournalEntry {
             tick, kind: "succession".into(), hub: hub as i32, good: -1,

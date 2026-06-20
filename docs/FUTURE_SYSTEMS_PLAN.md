@@ -109,6 +109,53 @@ via food/colony seeding. Labor + migration is the loop everything else plugs int
 3. Tie inflation into the existing **price index**, or a separate money-supply index
    shown in the finance panel?
 
+### Rank 4 extension — selectable numeraire (settings)
+The economy's unit of account is the **grain-equivalent** (wheat = 1). User idea: a
+**setting to switch the displayed numeraire** to **gold**, **silver**, or **"the most
+common & valuable item"** auto-chosen at worldgen from the world's resources. This is
+primarily a *display/units* change (the sim can keep solving in one stable internal
+numeraire and convert for display) — but if a real commodity money is chosen, it could
+also feed the money-supply/inflation loop.
+
+**Open questions (numeraire):**
+1. Is this **display-only** (convert grain→chosen unit for the UI) or a **real
+   re-basing** of the sim's prices? (Display-only is far safer.)
+2. "Most valuable item" — chosen once at worldgen and fixed, or re-evaluated as the
+   economy shifts?
+
+---
+
+## NEW — Plague / disease contagion along trade routes
+
+**Today:** plague is a *local* event (`roll_events`) — a single hub gets a quarantine
+lockup that suspends its trade for a spell; it does **not** spread. Historically the
+opposite is true (the Black Death rode the trade routes).
+
+**Proposal:** a plague at a hub can **spread to trading partners along active routes**
+(probability ∝ trade volume + traffic, modulated by quarantine), causing mortality
+(population loss) and rolling lockups — a route-borne epidemic that can hollow out a
+trade-connected region. Couples to Rank 1 (migration carries disease) and the trade
+network already built.
+
+**Open questions (plague):**
+1. Spread vector — along **merchant routes** (volume-weighted), via **migration**, or
+   both?
+2. Should a **quarantine** (existing lockup) actually *reduce* onward spread (a real
+   policy lever), trading economic pain for containment?
+3. Mortality scale — a mild recurring cull, or rare **catastrophic** pandemics that
+   reshape the map?
+
+---
+
+## Implemented this round (not future) — for reference
+- **Bank founding rule:** a house needs **≥ 100k wealth**; the bank costs **50k**, of
+  which **40k** becomes the bank's reserves/liquidity and **10k** is the seat city's
+  charter fee. Banks open from **year 20**; seat coin must be trusted ≥ 0.40.
+- **Bank↔coin:** each bank is now shown **denominated in its seat city's coin**, with
+  a balance-sheet **explain** panel. House wealth shows a **coin equivalent** too.
+- **Archetype** now **pivots at succession** (rich/bank-owning → Banking, big fleet →
+  Fleet, council power → Political).
+
 ---
 
 ## Rank 8 (reframed) — Shadow economy: smuggling, piracy, mafia, corruption

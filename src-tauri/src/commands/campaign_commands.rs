@@ -2417,6 +2417,10 @@ pub fn campaign_get_currencies(db: State<'_, WorldDb>) -> Result<Vec<CurrencyBri
 pub struct BankBrief {
     pub name: String,
     pub seat: String,
+    /// The coin the bank banks in (its seat city's coin) + its value (×grain), so the
+    /// balance sheet can be shown denominated in real money.
+    pub coin_name: String,
+    pub coin_value: f32,
     pub owner: String,
     /// Owning house index — lets the Houses panel match a bank to the selected house.
     pub owner_idx: u32,
@@ -2448,6 +2452,11 @@ pub fn campaign_get_banks(db: State<'_, WorldDb>) -> Result<Vec<BankBrief>, Stri
     let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
     let mut out: Vec<BankBrief> = sim.banks.iter().map(|b| {
         let seat = sim.hubs.get(b.seat as usize).map(|h| h.name.clone()).unwrap_or_default();
+        // The bank banks in its seat city's coin (if minted) — denominate the sheet in it.
+        let (coin_name, coin_value) = sim.hubs.get(b.seat as usize)
+            .filter(|h| !h.coin_name.is_empty())
+            .map(|h| (h.coin_name.clone(), crate::sim::tick::coin_value(h.mint_fineness, h.coin_trust)))
+            .unwrap_or_else(|| (String::new(), 0.0));
         let owner = sim.houses.get(b.house as usize).map(|h| h.name.clone()).unwrap_or_default();
         let branches = b.branches.iter()
             .filter_map(|&hb| sim.hubs.get(hb as usize).map(|h| h.name.clone()))
@@ -2455,7 +2464,7 @@ pub fn campaign_get_banks(db: State<'_, WorldDb>) -> Result<Vec<BankBrief>, Stri
         let events = b.events.iter().rev().take(8)
             .map(|e| e.text.clone()).collect();
         BankBrief {
-            name: b.name.clone(), seat, owner,
+            name: b.name.clone(), seat, coin_name, coin_value, owner,
             owner_idx: b.house,
             color: distinct_color(b.house as usize),
             founded_year: b.founded_tick / TICKS_PER_YEAR,

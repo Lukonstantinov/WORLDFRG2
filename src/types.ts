@@ -955,6 +955,8 @@ export interface CurrencyBrief {
 export interface BankBrief {
   name: string;
   seat: string;
+  coin_name: string;   // the coin the bank banks in (its seat city's coin)
+  coin_value: number;  // that coin's value (×grain) — to denominate the balance sheet
   owner: string;
   owner_idx: number;   // owning house index (match to HouseBrief.idx)
   color: string;

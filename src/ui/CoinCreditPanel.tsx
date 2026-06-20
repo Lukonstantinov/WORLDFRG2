@@ -252,10 +252,10 @@ function Side({ title, rows, total, totalColor }: {
 // Founding gates from sim/tick.rs `update_banks` (BANK_FOUND_* constants). A
 // chartered bank, by definition, met all of these the year it opened.
 const BANK_GATES: { label: string; need: string; get: (h: HouseBrief) => string }[] = [
-  { label: "Banking archetype", need: "Banking", get: (h) => h.archetype_label ?? (h.archetype === 2 ? "Banking" : "—") },
-  { label: "Wealth", need: "≥ 10.0", get: (h) => h.wealth.toFixed(1) },
-  { label: "Prestige", need: "≥ 0.30", get: (h) => h.prestige.toFixed(2) },
-  { label: "Seat coin-trust", need: "≥ 0.45", get: (h) => (h.coin_trust ?? 0).toFixed(2) },
+  { label: "Wealth", need: "≥ 100k", get: (h) => h.wealth.toFixed(0) },
+  { label: "Prestige", need: "≥ 0.15", get: (h) => h.prestige.toFixed(2) },
+  { label: "Seat coin-trust", need: "≥ 0.40", get: (h) => (h.coin_trust ?? 0).toFixed(2) },
+  { label: "Age of banking", need: "year ≥ 20", get: () => "✓" },
 ];
 
 function BankCard({ b, house }: { b: BankBrief; house?: HouseBrief }) {
@@ -263,6 +263,10 @@ function BankCard({ b, house }: { b: BankBrief; house?: HouseBrief }) {
   const liab = b.deposits + b.notes_issued;
   const fragile = b.reserve_ratio < 0.22;
   const [showWhy, setShowWhy] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
+  // Denominate the (grain-equivalent) sheet in the bank's seat coin, if it has one.
+  const inCoin = b.coin_name && b.coin_value > 0
+    ? (v: number) => `${fmtk(v / b.coin_value)} ${b.coin_name}` : null;
   return (
     <div style={{ ...card, opacity: b.defunct ? 0.55 : 1 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
@@ -275,11 +279,28 @@ function BankCard({ b, house }: { b: BankBrief; house?: HouseBrief }) {
       </div>
       <div style={{ color: "#9ab0c8", fontSize: 9, marginTop: 1 }}>
         {b.seat} · {b.owner} · est. {b.founded_year}
+        {b.coin_name && <span title="The coin this bank banks in (its seat city's coin)" style={{ color: "#d8c878" }}> · banks in {b.coin_name}</span>}
         <span onClick={() => setShowWhy((s) => !s)} title="Why this bank opened"
           style={{ color: "#7fb0d8", cursor: "pointer", marginLeft: 6 }}>
           {showWhy ? "▾ why it opened" : "▸ why it opened"}
         </span>
+        <span onClick={() => setShowInfo((s) => !s)} title="What the balance sheet means"
+          style={{ color: "#7fb0d8", cursor: "pointer", marginLeft: 6 }}>
+          {showInfo ? "▾ explain" : "▸ explain"}
+        </span>
       </div>
+      {showInfo && (
+        <div style={{ margin: "4px 0", padding: "5px 7px", background: "#0e1a27", border: "1px solid #1e2e42", borderRadius: 6, fontSize: 10, lineHeight: 1.5 }}>
+          {inCoin && <div style={{ color: "#d8c878", marginBottom: 3 }}>Amounts below are grain-equivalent; in {b.coin_name} the reserves ≈ {inCoin(b.reserves)}.</div>}
+          <Explain label="Specie reserves" value={inCoin ? inCoin(b.reserves) : fmtk(b.reserves)} text="Hard money (coin/bullion) in the vault — what actually backs the bank. The founding 40k starts here." />
+          <Explain label="Loans out" value={fmtk(b.loans_out)} text="Credit lent to houses (trade) and to the city treasury (public works), earning interest — an asset until repaid or defaulted." />
+          <Explain label="Real estate" value={fmtk(b.real_estate)} text="Counting-houses and foreclosed property booked as assets." />
+          <Explain label="Deposits" value={fmtk(b.deposits)} text="Idle capital wealthy families park here for interest — a liability the bank owes back." />
+          <Explain label="Notes issued" value={fmtk(b.notes_issued)} text="Paper credit the bank put into circulation (its IOUs) — a liability; this is bank-created money." />
+          <Explain label="Equity" value={fmtk(b.equity)} text="Net worth = assets − liabilities. If it turns negative the bank fails (the owner first injects capital to save it)." />
+          <Explain label="Reserve ratio" value={Number.isFinite(b.reserve_ratio) ? `${(b.reserve_ratio * 100).toFixed(0)}%` : "—"} text="Reserves ÷ liabilities. Below 22% the bank is fragile and vulnerable to a run/contagion." />
+        </div>
+      )}
       {showWhy && (
         <div style={{ margin: "4px 0", padding: "5px 7px", background: "#0e1a27", border: "1px solid #1e2e42", borderRadius: 6 }}>
           <div style={{ fontSize: 9, color: "#9ab0c8", marginBottom: 3 }}>
@@ -304,7 +325,7 @@ function BankCard({ b, house }: { b: BankBrief; house?: HouseBrief }) {
           </div>
           <div style={{ display: "flex", gap: 7, alignItems: "baseline", fontSize: 10, padding: "1px 0" }}>
             <span style={{ color: "#5fbf6f", fontWeight: 700, width: 12 }}>✓</span>
-            <span style={{ flex: 1, color: "#cbd8e6" }}>Capital staked <span style={{ color: "#6a86a6" }}>min(6.0, ½ wealth)</span></span>
+            <span style={{ flex: 1, color: "#cbd8e6" }}>Founding price <span style={{ color: "#6a86a6" }}>50k → 40k reserves, 10k charter fee</span></span>
             <span style={{ color: "#9ab0c8" }}>{fmtk(b.reserves)}</span>
           </div>
         </div>

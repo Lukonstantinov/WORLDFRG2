@@ -277,6 +277,11 @@ function HouseDetail({ h, onClose, onChronicle }:
       <div style={{ color: "#9ab0c8", fontSize: 10 }}>{h.head_name} · of {h.home_name} · gen {h.generation}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ color: "#c9a227", fontSize: 11, fontWeight: 700 }}>wealth {fmt(h.wealth)}</span>
+        {h.coin_name && (h.coin_value ?? 0) > 0 && (
+          <span style={{ color: "#9ab0c8", fontSize: 9 }} title={`Wealth denominated in the family's coin (grain-equivalent ÷ coin value ${(h.coin_value ?? 0).toFixed(2)}×)`}>
+            ≈ {fmt(h.wealth / (h.coin_value ?? 1))} {h.coin_name}
+          </span>
+        )}
         {h.coin_name ? (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 9, color: "#d8c878" }}
             title={`Mints the ${h.coin_name} · value ${(h.coin_value ?? 0).toFixed(2)}× · trust ${Math.round((h.coin_trust ?? 0) * 100)}%`}>
