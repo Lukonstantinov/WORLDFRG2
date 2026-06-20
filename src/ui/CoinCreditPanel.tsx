@@ -92,7 +92,7 @@ export function CoinCreditPanel() {
             </div>
           )}
           {coins.map((c, i) => (
-            <CurrencyCard key={c.hub} c={c} rank={i + 1}
+            <CurrencyCard key={c.hub} c={c} rank={i + 1} topCoin={coins[0]}
               usage={coinUse.filter((u) => u.coin === c.hub)}
               onMap={coinOverlay === c.hub}
               toggleMap={() => setCoinOverlay(coinOverlay === c.hub ? null : c.hub)} />
@@ -180,11 +180,18 @@ function TrustBar({ trust, reserve }: { trust: number; reserve: boolean }) {
   );
 }
 
-function CurrencyCard({ c, rank, usage, onMap, toggleMap }:
-  { c: CurrencyBrief; rank: number; usage: CoinUseCity[]; onMap: boolean; toggleMap: () => void }) {
+function CurrencyCard({ c, rank, topCoin, usage, onMap, toggleMap }:
+  { c: CurrencyBrief; rank: number; topCoin?: CurrencyBrief; usage: CoinUseCity[]; onMap: boolean; toggleMap: () => void }) {
   const [open, setOpen] = useState(false);
   const debased = c.fineness < 0.999;
   const strength = c.trust * c.throughput;
+  // Reach stats from the per-city usage snapshot.
+  const cityCount = usage.length;
+  const abroadCount = usage.filter((u) => u.reserve_reach).length;
+  const totalSettled = usage.reduce((s, u) => s + u.volume, 0);
+  // Exchange vs the world's strongest coin (1 of this ≈ X of that).
+  const xrate = topCoin && topCoin.hub !== c.hub && topCoin.value > 0
+    ? c.value / topCoin.value : null;
   return (
     <div style={{ ...card, cursor: "pointer", border: onMap ? "1px solid #3a80c0" : card.border }} onClick={() => setOpen((v) => !v)}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -216,6 +223,18 @@ function CurrencyCard({ c, rank, usage, onMap, toggleMap }:
           <div style={{ color: "#8aa8c8", marginBottom: 3 }}>
             Minted by <b style={{ color: "#cfe2f6" }}>{c.issuer || c.city}</b>{c.city && c.issuer ? ` · ${c.city}` : ""}.
           </div>
+          {/* Quick stat tiles */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, margin: "2px 0 5px" }}>
+            <Stat label="Used by" value={`${cityCount} ${cityCount === 1 ? "city" : "cities"}`} />
+            <Stat label="Abroad" value={`${abroadCount}`} hint="cities outside the home market that hold this coin (reserve reach)" />
+            <Stat label="Settled/yr" value={fmtk(totalSettled)} hint="total trade volume settled in this coin this year" />
+            <Stat label="Rank" value={`#${rank}`} />
+            {xrate && <Stat label={`vs ${topCoin!.coin_name.split(" ")[0]}`} value={`${xrate.toFixed(2)}×`} hint={`1 ${c.coin_name} ≈ ${xrate.toFixed(2)} ${topCoin!.coin_name} (by value)`} />}
+          </div>
+          <div style={{ color: "#8aa8c8", marginBottom: 4 }}>
+            {debased ? "⚠ Debased coin — " : c.value >= 1.05 ? "★ Hard premium coin — " : "Sound coin — "}
+            {c.is_reserve ? "trusted enough to serve as an international reserve." : "circulates mainly in its home market."}
+          </div>
           <Explain label="Trust (acceptance)" value={`${(c.trust * 100).toFixed(0)}%`}
             text="How widely merchants accept the coin. Sticky — it eases toward a target each year and is hit hard by debasement. ≥55% makes it a reserve currency." />
           <Explain label="Value (agio)" value={`${c.value.toFixed(2)}×`}
@@ -242,6 +261,15 @@ function Explain({ label, value, text }: { label: string; value: string; text: s
       <span style={{ color: "#cbb88a", fontWeight: 700 }}>{label}: </span>
       <span style={{ color: "#cfe2f6" }}>{value}</span>
       <div style={{ color: "#7e93ab" }}>{text}</div>
+    </div>
+  );
+}
+
+function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div title={hint} style={{ background: "#0e1925", border: "1px solid #1c2c40", borderRadius: 4, padding: "2px 7px", minWidth: 52 }}>
+      <div style={{ color: "#6a86a6", fontSize: 8, textTransform: "uppercase", letterSpacing: 0.3 }}>{label}</div>
+      <div style={{ color: "#cfe2f6", fontSize: 11, fontWeight: 700 }}>{value}</div>
     </div>
   );
 }
