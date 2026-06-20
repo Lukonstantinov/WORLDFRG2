@@ -147,6 +147,60 @@ network already built.
 
 ---
 
+## Multi-currency circulation  *(refined from the user's idea)*
+
+Today each city settles in ONE coin (`settle_coin`). The user wants a richer model:
+a city holds **multiple coins at once** — one **main** coin plus **foreign coins that
+arrive with merchants and goods** — and coins **spread by adoption**.
+
+### Refined design
+- **Who can mint (wealth-gated):** a settlement mints its **own** coin only if it is
+  **rich** (treasury/trade-wealth above a threshold) and has a council; likewise a
+  **rich merchant house** can mint a house coin. Poor settlements have **no coin of
+  their own** and rely on foreign money.
+- **A city's currency basket:** per city, a set of `{coin, amount}` — the circulating
+  stock of each coin held there. Foreign coin **arrives via trade**: when merchants
+  from city B sell into city A, A's holding of B's coin grows ∝ that trade volume.
+- **Main coin:** the city's own mint if it has one; ELSE the **dominant** coin in its
+  basket (largest circulating share) — which can be a foreign coin pushed in by a
+  **strong merchant house** ("became dominant due to merchant-house influence").
+- **Adoption / spread (the "adopt if reasonable" rule):** a foreign coin's share in a
+  city rises with its **trust × value** (hard, trusted money is hoarded — a Gresham
+  pull), the **trade volume** from its issuer, and the **influence of houses that use
+  it**. Sticky easing (like coin trust). A city's *main* coin can **flip** to a
+  foreign one once it durably dominates the basket.
+- **Houses benefit from their coin's use:** the issuing house earns **seigniorage** on
+  volume settled in its coin + **prestige**, and its merchants get the existing
+  reserve **freight discount**. So houses *push* their coin (settle contracts in it) to
+  grow adoption — a real incentive loop.
+- **Currency-denominated contracts:** a trade/futures contract can be **struck in a
+  specific coin**; if that coin debases, the real value shifts (**FX risk**), and the
+  issuing house profits when contracts ride its coin.
+- **"The amount there is" (money supply):** track **circulating amount per coin**
+  (minted specie + bank notes), shown on the coin card and feeding the Rank-4
+  money-supply → inflation loop (more coin minted → its value/agio softens).
+
+### Display
+- Coin card: add **circulating amount** + (later) a **trust/value trend sparkline**
+  (needs a small yearly history stored on the coin).
+- City panel: a small **currency-basket** pie (main coin + foreign coins held).
+
+### Open questions (multi-currency)
+1. **Basket depth:** full per-(city,coin) circulating stock (rich, heavier), or a
+   lighter "main coin + up to N accepted coins with shares"?
+2. **Mint wealth gate:** what threshold makes a city/house rich enough to mint — a flat
+   number (e.g. city trade-wealth ≥ X, house wealth ≥ 100k like banks), or relative to
+   the world's richest?
+3. **Main-coin flip:** allow a city's main coin to switch to a dominant foreign coin
+   (network effect), or does a local mint always stay main while it exists?
+4. **Contracts in currency:** implement real currency-denominated contracts with FX
+   risk, or just *tag* which coin a contract settles in (display + house seigniorage)
+   without full FX revaluation?
+5. **Adoption speed:** how fast should a hard foreign coin take over a market — slow
+   (decades, sticky) or responsive (a few years)?
+6. **Money-supply coupling:** should circulating amount actually move a coin's
+   value/agio (inflation), or stay a displayed stat for now?
+
 ## Implemented this round (not future) — for reference
 - **Bank founding rule:** a house needs **≥ 100k wealth**; the bank costs **50k**, of
   which **40k** becomes the bank's reserves/liquidity and **10k** is the seat city's
