@@ -267,9 +267,14 @@ export function HubPanel() {
       {tab === "city" && detail && (
         <>
           <SettlementScene detail={detail} />
-          {detail.coin_basket && detail.coin_basket.length > 0 && (
+          {detail.coin_basket && detail.coin_basket.length > 0 ? (
             <CurrencyBasket basket={detail.coin_basket} />
-          )}
+          ) : campActive ? (
+            <div style={{ marginTop: 8, padding: "6px 8px", background: "#0b1622", border: "1px solid #1e2e42", borderRadius: 6, fontSize: 10, color: "#8aa0bc" }}>
+              <span style={{ color: "#7fa0c4", fontWeight: 600 }}>🤝 Barter economy</span> — no coin reaches this market;
+              trade here is settled good-for-good.
+            </div>
+          ) : null}
         </>
       )}
       {tab === "city" && !detail && (

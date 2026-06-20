@@ -1716,32 +1716,46 @@ impl CampaignSim {
     /// polis earns a little seigniorage when its coin circulates abroad. Drives the
     /// coin-usage overlay + per-coin breakdown + circulating amount.
     fn update_currency_baskets(&mut self) {
-        // 1) Candidate coins (trusted minting hubs) with attractiveness.
-        struct Cand { idx: usize, comp: u32, attr: f32, reserve: bool }
-        let mut cands: Vec<Cand> = Vec::new();
-        for (i, h) in self.hubs.iter().enumerate() {
-            if h.is_estate || h.coin_name.is_empty() || h.coin_trust < BANK_FOUND_COIN_TRUST { continue; }
-            let thru = h.tw_house + h.tw_local + h.tw_guild;
-            let attr = coin_value(h.mint_fineness, h.coin_trust) * h.coin_trust * (1.0 + thru).sqrt();
-            cands.push(Cand { idx: i, comp: h.component, attr: attr.max(EPS), reserve: h.coin_trust >= RESERVE_TRUST_MIN });
-        }
         let n = self.hubs.len();
+        // 1) Per-hub trade-partner volumes (by hub INDEX) from last year's realized
+        //    flows. A coin can ONLY spread to a city that actually TRADES with a
+        //    coin-holder — so coins travel along merchant routes, not teleport across
+        //    the world. (Previously any reserve coin reached every hub.)
+        let mut partner_vol: Vec<std::collections::HashMap<usize, f32>> =
+            vec![std::collections::HashMap::new(); n];
+        for f in &self.trade_last {
+            let (a, b) = (f.hub as usize, f.partner as usize);
+            if a < n && b < n && a != b { *partner_vol[a].entry(b).or_insert(0.0) += f.amount; }
+        }
+        let attr = |h: &TickHub| (coin_value(h.mint_fineness, h.coin_trust) * h.coin_trust).max(EPS);
+        let mints = |h: &TickHub| !h.coin_name.is_empty() && h.coin_trust >= BANK_FOUND_COIN_TRUST;
         let mut new_baskets: Vec<Vec<(u32, f32)>> = vec![Vec::new(); n];
         let mut new_main: Vec<i32> = vec![-1; n];
         for i in 0..n {
             if self.hubs[i].is_estate { continue; }
-            let comp = self.hubs[i].component;
-            // Adoption target: reachable coins (same component, or reserve from afar),
-            // weighted by attractiveness × home bias × a foreign-reach penalty.
-            let mut tw: Vec<(u32, f32)> = Vec::new();
-            for c in &cands {
-                if !(c.comp == comp || c.reserve) { continue; }
-                let mut w = c.attr;
-                if c.comp != comp { w *= 0.5; }
-                if c.idx == i { w *= COIN_HOME_BIAS; }
-                tw.push((c.idx as u32, w));
+            // Adoption target: the city's OWN coin (home bias) + coins that ARRIVE via
+            // its trade partners — each partner's basket coins, weighted by the trade
+            // volume with that partner × the coin's share in the partner × its
+            // attractiveness. No trade link to a coin-holder ⇒ that coin never arrives.
+            let mut wmap: std::collections::HashMap<u32, f32> = std::collections::HashMap::new();
+            if mints(&self.hubs[i]) {
+                *wmap.entry(i as u32).or_insert(0.0) += COIN_HOME_BIAS * attr(&self.hubs[i]);
             }
-            if tw.is_empty() { continue; } // barter — no coin reaches here
+            let totv: f32 = partner_vol[i].values().sum::<f32>().max(EPS);
+            for (&p, &v) in &partner_vol[i] {
+                let frac = v / totv;
+                for &(c, share) in &self.hubs[p].coin_basket {
+                    let cj = c as usize;
+                    if cj < n && !self.hubs[cj].coin_name.is_empty() {
+                        *wmap.entry(c).or_insert(0.0) += frac * share * attr(&self.hubs[cj]);
+                    }
+                }
+                if mints(&self.hubs[p]) {
+                    *wmap.entry(p as u32).or_insert(0.0) += frac * 0.5 * attr(&self.hubs[p]);
+                }
+            }
+            if wmap.is_empty() { continue; } // barter — no coin physically reaches here
+            let mut tw: Vec<(u32, f32)> = wmap.into_iter().collect();
             tw.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
             tw.truncate(COIN_BASKET_N);
             let sum: f32 = tw.iter().map(|x| x.1).sum::<f32>().max(EPS);
