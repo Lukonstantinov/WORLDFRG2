@@ -328,12 +328,16 @@ export class OverlayManager {
       const u = hpop();
       if (done[u]) continue;
       done[u] = 1;
-      if (u === t) break;
+      // Run the FULL Dijkstra (no early break): if `t` turns out unreachable we need
+      // every node's distance to pick the best reachable junction to ride toward.
       for (const e of this.tgAdj[u]) {
         const nd = dist[u] + e.len;
         if (nd < dist[e.to]) { dist[e.to] = nd; prev[e.to] = u; prevPts[e.to] = e.pts; hpush(e.to); }
       }
     }
+    // The line must follow the corridor network end-to-end. If the partner's junction
+    // isn't reachable along existing routes, return null so the caller SKIPS it —
+    // we never bridge with a straight line.
     if (!isFinite(dist[t])) return null;
     const segs: [number, number][][] = [];
     let cur = t;
@@ -359,7 +363,7 @@ export class OverlayManager {
     for (const c of cities) {
       if (c[0] === sel.seat[0] && c[1] === sel.seat[1]) continue;
       const path = this.routeAlongTradeRoutes(sel.seat, c);
-      net.push(path && path.length >= 2 ? path : [sel.seat, c]); // straight fallback
+      if (path && path.length >= 2) net.push(path); // corridor only — never a straight line
     }
     this.houseNetwork = net;
   }
@@ -1169,11 +1173,13 @@ export class OverlayManager {
       const inbound = s.dir === 0;
       const color = inbound ? lineColors.merchantIn : lineColors.merchantOut; // cyan in · gold out
       const w = Math.max(1.2, s.w * inv);
-      // Trace the ACTUAL merchant path: snap to the drawn trade-routes layer (so the
-      // line follows the roads/sea-lanes goods really took). Straight line only if no
-      // routed path exists (e.g. the trade-routes overlay hasn't been computed).
+      // Trace the ACTUAL merchant path along the trade-routes layer (roads/sea-lanes).
+      // NEVER draw a straight slash: if no corridor path can be found at all (the
+      // routes layer isn't computed yet), skip this segment rather than drawing a
+      // straight line.
       const path = this.routeAlongTradeRoutes([s.ax, s.ay], [s.bx, s.by]);
-      const pts: [number, number][] = path && path.length >= 2 ? path : [[s.ax, s.ay], [s.bx, s.by]];
+      if (!path || path.length < 2) continue;
+      const pts: [number, number][] = path;
       const drawPolyline = () => {
         ctx.beginPath();
         let started = false;
@@ -2021,7 +2027,8 @@ export class OverlayManager {
       if (this.worldW > 0 && Math.abs(c.x - c.founderX) > half) continue; // seam
       const tint = c.kind === 2 ? c.ownerColor : lineColors.colonyLane;
       const routed = this.routeAlongTradeRoutes([c.founderX, c.founderY], [c.x, c.y]);
-      const path: [number, number][] = routed && routed.length >= 2 ? routed : [[c.founderX, c.founderY], [c.x, c.y]];
+      if (!routed || routed.length < 2) continue; // corridor only — never a straight line
+      const path: [number, number][] = routed;
       ctx.globalAlpha = 0.8;
       ctx.strokeStyle = tint;
       ctx.lineWidth = Math.max(0.5, (c.kind === 1 ? 2.4 : 1.6) * inv);
@@ -2102,10 +2109,11 @@ export class OverlayManager {
       const fwd = c.fwd_value >= c.bwd_value;
       const from = fwd ? pa : pb;
       const to = fwd ? pb : pa;
-      // RULE: connection lines follow the existing route network — snap onto the
-      // already-drawn roads (falls back to a straight segment only if unrouteable).
+      // RULE: connection lines ALWAYS follow the existing route network — snap onto
+      // the already-drawn roads. NEVER draw a straight line: skip if unrouteable.
       const routed = this.routeAlongTradeRoutes(from, to);
-      const path: [number, number][] = routed && routed.length >= 2 ? routed : [from, to];
+      if (!routed || routed.length < 2) continue;
+      const path: [number, number][] = routed;
       ctx.globalAlpha = 0.4 + 0.5 * norm;
       ctx.strokeStyle = lineColors.corridor;
       ctx.lineWidth = Math.max(0.5, (1.0 + norm * 5.0) * inv);
