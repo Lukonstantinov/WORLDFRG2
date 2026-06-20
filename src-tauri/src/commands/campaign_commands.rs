@@ -877,6 +877,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 estate_tier: 0,
                 last_upgrade_tick: 0,
                 owner_house: -1,
+                stake_bank: -1,
+                stake_share: 0.0,
                 structures: vec![],
                 treasury: 0.0,
                 tariff_export: 0.0,

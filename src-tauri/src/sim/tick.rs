@@ -105,6 +105,14 @@ const COLONY_MIGRATION_FRAC: f32 = 0.06;
 const COLONY_FERTILE_SITE: f32 = 0.45;
 /// The age of colonisation opens once the world has matured — from year 30.
 const COLONY_START_TICK: u32 = 30 * 365;
+/// A wealthy polis devotes this share of its treasury each month to sponsored
+/// MIGRATION (relieving its crowding by funding emigrants to needier cities /
+/// its own colonies). Drains the treasuries that otherwise hoard indefinitely.
+const POLIS_MIGRATION_SPEND: f32 = 0.03;
+/// A polis needs at least this treasury before it sponsors migration.
+const POLIS_MIGRATION_MIN_TREASURY: f32 = 50.0;
+/// Fraction of the sponsoring city's population a monthly migration wave moves.
+const POLIS_MIGRATION_POP_FRAC: f32 = 0.012;
 /// House TRADE OUTPOSTS open earlier — year 30 — but are gated behind serious
 /// wealth: only a great house (≈150k) can afford the heavy founding cost (≈120k).
 /// Easier conditions than a settlement colony (no bank/food/joint-stock), just the
@@ -149,6 +157,13 @@ const ESTATE_UPGRADE_MULT: f32 = 1.4;
 const MANUFACTORY_BUILD_COST: f32 = 40_000.0;
 const MANUFACTORY_UPGRADE_COST: f32 = 30_000.0;
 const MANUFACTORY_UPGRADE_INTERVAL: u32 = 5 * 365; // ticks (5 years)
+/// Estate/manufactory RESALE market. An asset-rich but cash-poor house below this
+/// wealth will sell a holding to raise liquidity (a distress sale).
+const RESALE_DISTRESS_WEALTH: f32 = 6_000.0;
+/// A polis with a treasury this thin will sell a city-owned (civic) works to refill it.
+const CIVIC_SALE_TREASURY_FLOOR: f32 = 100.0;
+/// A bank acquiring a manufactory on the resale market takes this controlling share.
+const RESALE_BANK_STAKE: f32 = 0.6;
 
 // ── Merchant fleets & voyage risk ────────────────────────────────────────────
 /// A settlement gets a civic Merchant Guild once it reaches this population.
@@ -573,6 +588,12 @@ const BANK_RESERVE_MULT: f32 = 3.0;
 const BANK_RUN_RATIO: f32 = 0.22;
 /// Book value a counting-house branch adds to a bank's real-estate assets.
 const BANK_BRANCH_VALUE: f32 = 2.0;
+/// Income share a bank's equity stake draws from a manufactory's owner-cut.
+const BANK_STAKE_SHARE: f32 = 0.25;
+/// Years of yearly balance-sheet snapshots kept per bank (bounds save size).
+const BANK_HISTORY_CAP: usize = 60;
+/// Capital value of a manufactory per tier; a stake costs `share × tier × this`.
+const BANK_STAKE_VALUE_PER_TIER: f32 = 40_000.0;
 
 // ── DLC 3.5 · Regional financial crashes (contagion) ────────────────────────
 /// Fraction of wealth houses in the stricken region lose when the crash hits.
@@ -710,6 +731,10 @@ pub struct TickHub {
     /// Owning house index for an estate (−1 = owned by the parent city). Estate
     /// export income flows to this owner — a core engine of house growth.
     #[serde(default = "neg_one_i32")] pub owner_house: i32,
+    /// A bank's equity stake in this manufactory: the bank index holding a share, or
+    /// −1 for none. `stake_share` of the owner-cut is paid to that bank as a dividend.
+    #[serde(default = "neg_one_i32")] pub stake_bank: i32,
+    #[serde(default)] pub stake_share: f32,
     /// Buildings this settlement has erected (ids: 1 Granary / 2 Warehouse /
     /// 3 Shipyard / 4 Guildhall / 5 Workshop). Each grants a standing bonus; at
     /// most one of each. Auto-built as a city/house prospers.
@@ -1013,6 +1038,21 @@ pub struct Loan {
     pub purpose: String,
 }
 
+/// A bank's EQUITY STAKE in a manufactory — the bank put capital into the works in
+/// exchange for a `share` of its owner-cut income (a dividend). The `basis` is the
+/// price paid, carried as the stake's book value on the bank's balance sheet.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct BankStake {
+    /// The estate (manufactory) hub the bank holds a share of.
+    pub estate_hub: u32,
+    /// Income share 0..1 the bank receives from the works' owner-cut.
+    pub share: f32,
+    /// Book value (price paid) — the asset carried on the balance sheet.
+    pub basis: f32,
+    /// The good the works produces (for the panel's deals list).
+    pub good: u32,
+}
+
 /// DLC 3.5 · a BANK — a great merchant-banking house's chartered institution,
 /// with a real balance sheet. Assets = specie `reserves` + loans outstanding +
 /// `real_estate` (branches / foreclosed property); Liabilities = `deposits`
@@ -1042,7 +1082,31 @@ pub struct Bank {
     /// Cumulative interest earned (income) and written-off losses (for the ledger).
     pub interest_earned: f32,
     pub losses: f32,
+    /// Equity stakes the bank holds in manufactories (a dividend-bearing asset class).
+    #[serde(default)] pub stakes: Vec<BankStake>,
+    /// Cumulative stake dividends collected (income, for the ledger / chart).
+    #[serde(default)] pub dividends_earned: f32,
+    /// Yearly balance-sheet snapshots for the Bank panel's history charts.
+    #[serde(default)] pub history: Vec<BankSnapshot>,
     pub events: Vec<HouseEvent>,
+}
+
+/// A yearly snapshot of a bank's balance sheet — drives the Bank panel line charts.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct BankSnapshot {
+    pub year: u32,
+    pub reserves: f32,
+    pub loans: f32,
+    pub stakes: f32,
+    pub real_estate: f32,
+    pub deposits: f32,
+    pub notes: f32,
+    pub equity: f32,
+    /// Cumulative interest earned / dividends / losses at snapshot time (the panel
+    /// differences successive years to show per-year income vs write-offs).
+    pub interest_cum: f32,
+    pub dividends_cum: f32,
+    pub losses_cum: f32,
 }
 
 impl Bank {
@@ -1050,8 +1114,12 @@ impl Bank {
     pub fn loans_outstanding(&self) -> f32 {
         self.loans.iter().map(|l| l.outstanding.max(0.0)).sum()
     }
+    /// Book value of the bank's equity stakes (an asset).
+    pub fn stake_book(&self) -> f32 {
+        self.stakes.iter().map(|s| s.basis.max(0.0)).sum()
+    }
     pub fn assets(&self) -> f32 {
-        self.reserves + self.loans_outstanding() + self.real_estate
+        self.reserves + self.loans_outstanding() + self.real_estate + self.stake_book()
     }
     pub fn liabilities(&self) -> f32 {
         self.deposits + self.notes_issued
@@ -1840,7 +1908,9 @@ impl CampaignSim {
                 reserves: capital, loans: Vec::new(), real_estate: BANK_BRANCH_VALUE,
                 deposits: 0.0, notes_issued: 0.0,
                 branches: vec![seat as u32], prestige: self.houses[hi].prestige,
-                interest_earned: 0.0, losses: 0.0, events: Vec::new(),
+                interest_earned: 0.0, losses: 0.0,
+                stakes: Vec::new(), dividends_earned: 0.0, history: Vec::new(),
+                events: Vec::new(),
             };
             bank.events.push(HouseEvent { tick, kind: "founded".into(),
                 text: format!("{} chartered in {} with {:.0} in specie (founding price {:.0})",
@@ -1868,6 +1938,21 @@ impl CampaignSim {
                     self.banks[bi].events.push(HouseEvent { tick, kind: "branch".into(),
                         text: format!("opens a counting-house in {}", cn) });
                 }
+            }
+        }
+        // 3) Snapshot each live bank's balance sheet for the Bank panel history charts.
+        let year = self.year();
+        for b in self.banks.iter_mut() {
+            if b.defunct { continue; }
+            b.history.push(BankSnapshot {
+                year,
+                reserves: b.reserves, loans: b.loans_outstanding(), stakes: b.stake_book(),
+                real_estate: b.real_estate, deposits: b.deposits, notes: b.notes_issued,
+                equity: b.equity(),
+                interest_cum: b.interest_earned, dividends_cum: b.dividends_earned, losses_cum: b.losses,
+            });
+            if b.history.len() > BANK_HISTORY_CAP {
+                let drop = b.history.len() - BANK_HISTORY_CAP; b.history.drain(0..drop);
             }
         }
     }
@@ -1950,8 +2035,8 @@ impl CampaignSim {
                 self.banks[bi].reserves -= dividend;
                 self.houses[owner].wealth += dividend;
             }
-            // 4) New lending (only in calm times).
-            if !panicked { self.bank_maybe_lend(bi); }
+            // 4) New lending + equity investment (only in calm times).
+            if !panicked { self.bank_maybe_lend(bi); self.bank_maybe_invest(bi); }
             // 5) Attract deposits.
             self.bank_maybe_take_deposits(bi);
             // 6) Owner recapitalization: before a bank is allowed to fail, its owning
@@ -2010,17 +2095,34 @@ impl CampaignSim {
         if hash01(self.seed, tick as u64 ^ 0x10A40, bi as u64) > 0.3 { return; }
         let seat = self.banks[bi].seat as usize;
         let amt = headroom.min(self.banks[bi].reserves * 0.5).max(1.0);
-        let to_house = hash01(self.seed, tick as u64 ^ 0x77B10, bi as u64) < 0.6;
         let owner = self.banks[bi].house;
-        let (bh, bp, purpose) = if to_house {
+        // Richest non-defunct resident borrower of the requested kind (guild or house),
+        // homed at the seat and not the bank's own owner.
+        let richest_resident = |guild: bool, this: &Self| -> usize {
             let mut best = (usize::MAX, 0.0f32);
-            for (hi, h) in self.houses.iter().enumerate() {
-                if h.defunct || h.is_guild || hi as u32 == owner { continue; }
+            for (hi, h) in this.houses.iter().enumerate() {
+                if h.defunct || h.is_guild != guild || hi as u32 == owner { continue; }
                 if h.hub as usize != seat { continue; }
                 if h.wealth > best.1 { best = (hi, h.wealth); }
             }
-            if best.0 == usize::MAX { return; }
-            (best.0 as i32, -1i32, "trade")
+            best.0
+        };
+        // Pick a borrower: most often a resident merchant house (trade venture);
+        // sometimes a resident GUILD financing a factory or civic works; sometimes the
+        // seat city's treasury (public works).
+        let pick = hash01(self.seed, tick as u64 ^ 0x77B10, bi as u64);
+        let (bh, bp, purpose) = if pick < 0.55 {
+            let h = richest_resident(false, self);
+            if h == usize::MAX { return; }
+            (h as i32, -1i32, "trade")
+        } else if pick < 0.80 {
+            let g = richest_resident(true, self);
+            if g == usize::MAX {
+                (-1i32, seat as i32, "treasury") // no guild here → fund public works instead
+            } else {
+                let civic = hash01(self.seed, tick as u64 ^ 0x6171C, bi as u64) < 0.4;
+                (g as i32, -1i32, if civic { "guild_civic" } else { "guild_factory" })
+            }
         } else {
             (-1i32, seat as i32, "treasury")
         };
@@ -2032,6 +2134,64 @@ impl CampaignSim {
         self.banks[bi].notes_issued += amt;
         if bh >= 0 { self.houses[bh as usize].wealth += amt; }
         else if bp >= 0 { self.hubs[bp as usize].treasury += amt; }
+    }
+
+    /// A sound bank takes an EQUITY STAKE in a promising manufactory in its branch
+    /// network: it injects capital into the works' owning house and, in return, draws
+    /// a share of that manufactory's income as a dividend. The stake is carried as a
+    /// balance-sheet asset, so a bank can grow its net worth from real PRODUCTION, not
+    /// only from lending. (User-requested: "banks should be able to invest in buildings.")
+    fn bank_maybe_invest(&mut self, bi: usize) {
+        let tick = self.tick;
+        // Invest only idle reserves, occasionally, keeping ample liquidity.
+        if self.banks[bi].reserves < BANK_FOUND_RESERVE * 0.5 { return; }
+        if hash01(self.seed, tick as u64 ^ 0x57A4E, bi as u64) > 0.10 { return; }
+        let branches = self.banks[bi].branches.clone();
+        // The highest-tier un-staked manufactory in the branch network whose owner is solvent.
+        let mut best: (usize, u8) = (usize::MAX, 0);
+        for ei in 0..self.hubs.len() {
+            let e = &self.hubs[ei];
+            if !e.is_estate || e.estate_kind != 6 || e.stake_bank >= 0 { continue; }
+            if e.parent < 0 || !branches.contains(&(e.parent as u32)) { continue; }
+            let oh = e.owner_house;
+            if oh < 0 || (oh as usize) >= self.houses.len() || self.houses[oh as usize].defunct { continue; }
+            if e.estate_tier > best.1 { best = (ei, e.estate_tier); }
+        }
+        let ei = best.0;
+        if ei == usize::MAX { return; }
+        let tier = self.hubs[ei].estate_tier.max(1);
+        let price = (tier as f32 * BANK_STAKE_VALUE_PER_TIER * BANK_STAKE_SHARE)
+            .min(self.banks[bi].reserves * 0.4);
+        if price < 1.0 || self.banks[bi].reserves < price * 2.0 { return; }
+        let good = self.hubs[ei].base_per_capita.iter().enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(g, _)| g as u32).unwrap_or(0);
+        let oh = self.hubs[ei].owner_house as usize;
+        self.banks[bi].reserves -= price;        // specie out
+        self.houses[oh].wealth += price;          // capital injected into the works
+        self.hubs[ei].stake_bank = bi as i32;
+        self.hubs[ei].stake_share = BANK_STAKE_SHARE;
+        self.banks[bi].stakes.push(BankStake {
+            estate_hub: ei as u32, share: BANK_STAKE_SHARE, basis: price, good });
+        let en = self.hubs[ei].name.clone();
+        self.banks[bi].events.push(HouseEvent { tick, kind: "stake".into(),
+            text: format!("takes a {:.0}% stake in {} for {:.0}", BANK_STAKE_SHARE * 100.0, en, price) });
+        let bn = self.banks[bi].name.clone();
+        self.journal.push(JournalEntry { tick, kind: "bank".into(), hub: self.hubs[ei].parent,
+            good: good as i32, value: price, text: format!("{} buys into {}", bn, en) });
+    }
+
+    /// Release a bank's equity stakes (on failure): each works reverts fully to its
+    /// owner so it can be re-staked later.
+    fn release_bank_stakes(&mut self, bi: usize) {
+        let staked: Vec<u32> = self.banks[bi].stakes.iter().map(|s| s.estate_hub).collect();
+        for eh in staked {
+            if (eh as usize) < self.hubs.len() && self.hubs[eh as usize].stake_bank == bi as i32 {
+                self.hubs[eh as usize].stake_bank = -1;
+                self.hubs[eh as usize].stake_share = 0.0;
+            }
+        }
+        self.banks[bi].stakes.clear();
     }
 
     /// A bank fails: depositors are wiped, its notes go worthless, the owning house
@@ -2052,6 +2212,7 @@ impl CampaignSim {
             self.houses[owner].wealth *= 0.6;
             self.houses[owner].prestige *= 0.7;
         }
+        self.release_bank_stakes(bi);
         self.trigger_regional_crash(seat, 1, "bank failure");
     }
 
@@ -2099,6 +2260,7 @@ impl CampaignSim {
                 self.banks[bi].defunct = true;
                 self.banks[bi].events.push(HouseEvent { tick, kind: "failed".into(),
                     text: "swept away in the panic".into() });
+                self.release_bank_stakes(bi);
                 banks_failed += 1;
             }
         }
@@ -4265,7 +4427,18 @@ impl CampaignSim {
                     // house's wealth (the engine of house growth), or to the parent
                     // city's prosperity if the estate is city-owned.
                     if self.hubs[a].is_estate {
-                        let cut = sale * ESTATE_OWNER_CUT;
+                        let mut cut = sale * ESTATE_OWNER_CUT;
+                        // A bank holding an equity STAKE in this manufactory collects its
+                        // share of the owner-cut as a dividend (income to its reserves).
+                        let sb = self.hubs[a].stake_bank;
+                        if sb >= 0 && (sb as usize) < self.banks.len() && !self.banks[sb as usize].defunct {
+                            let div = cut * self.hubs[a].stake_share.clamp(0.0, 0.9);
+                            if div > 0.0 {
+                                cut -= div;
+                                self.banks[sb as usize].reserves += div;
+                                self.banks[sb as usize].dividends_earned += div;
+                            }
+                        }
                         let owner = self.hubs[a].owner_house;
                         if owner >= 0 && (owner as usize) < self.houses.len()
                             && !self.houses[owner as usize].defunct {
@@ -5064,7 +5237,7 @@ impl CampaignSim {
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
-            estate_kind: kind, estate_tier: 1, last_upgrade_tick: self.tick, owner_house, structures: vec![],
+            estate_kind: kind, estate_tier: 1, last_upgrade_tick: self.tick, owner_house, stake_bank: -1, stake_share: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
@@ -5354,6 +5527,149 @@ impl CampaignSim {
         });
     }
 
+    /// Resale value of a holding: ~60% of its rebuild cost, scaled by tier (and city
+    /// size for raw estates). Manufactories are dear; raw estates cheap.
+    fn estate_market_value(&self, ei: usize) -> f32 {
+        let e = &self.hubs[ei];
+        if !e.is_estate { return 0.0; }
+        let tier = e.estate_tier.max(1) as f32;
+        if e.estate_kind == 6 {
+            tier * MANUFACTORY_UPGRADE_COST * 0.6
+        } else {
+            let popf = (e.population / 30_000.0).clamp(0.5, 3.0);
+            tier * INVEST_COST_BASE * popf * 8.0 * 0.6
+        }
+    }
+
+    /// Monthly · the estate & manufactory RESALE market. A cash-strapped house sells
+    /// a holding to raise specie; a polis sells a city-owned (civic) works to refill a
+    /// thin treasury. The best-capitalized bidder takes it: a solvent resident house
+    /// (title transfers), or — for a manufactory — a bank in that market (it can't hold
+    /// title, so it takes a CONTROLLING equity stake, acquiring the income stream).
+    /// (User-requested: settlements/houses can sell holdings; banks/houses buy them.)
+    fn estate_resale_pass(&mut self) {
+        let tick = self.tick;
+        let n = self.hubs.len();
+        // Find ONE holding for sale this month.
+        let mut sale: Option<(usize, i32)> = None; // (estate hub, seller house | -1 civic)
+        for ei in 0..n {
+            let e = &self.hubs[ei];
+            if !e.is_estate || e.estate_tier == 0 { continue; }
+            if e.owner_house >= 0 {
+                let oh = e.owner_house as usize;
+                if oh < self.houses.len() && !self.houses[oh].defunct
+                    && self.houses[oh].wealth < RESALE_DISTRESS_WEALTH
+                    && hash01(self.seed, tick as u64 ^ 0x5A1E5, ei as u64) < 0.4 {
+                    sale = Some((ei, oh as i32)); break;
+                }
+            } else if e.parent >= 0 && (e.parent as usize) < n
+                && self.hubs[e.parent as usize].treasury < CIVIC_SALE_TREASURY_FLOOR
+                && hash01(self.seed, tick as u64 ^ 0x6C1F5, ei as u64) < 0.2 {
+                sale = Some((ei, -1)); break;
+            }
+        }
+        let Some((ei, seller)) = sale else { return };
+        let price = self.estate_market_value(ei);
+        if price < 0.5 { return; }
+        let parent = self.hubs[ei].parent;
+        let is_manu = self.hubs[ei].estate_kind == 6;
+        let pay_seller = |this: &mut Self, amt: f32| {
+            if seller >= 0 { this.houses[seller as usize].wealth += amt; }
+            else if parent >= 0 && (parent as usize) < this.hubs.len() { this.hubs[parent as usize].treasury += amt; }
+        };
+        // BUYER 1: the richest solvent resident house at the parent city (≠ seller).
+        let mut buyer = (usize::MAX, 0.0f32);
+        if parent >= 0 && (parent as usize) < n {
+            for (hi, h) in self.houses.iter().enumerate() {
+                if h.defunct || h.is_guild || hi as i32 == seller { continue; }
+                if h.hub as usize != parent as usize { continue; }
+                if h.wealth > price * 1.5 && h.wealth > buyer.1 { buyer = (hi, h.wealth); }
+            }
+        }
+        if buyer.0 != usize::MAX {
+            let bh = buyer.0;
+            self.houses[bh].wealth -= price;
+            pay_seller(self, price);
+            self.hubs[ei].owner_house = bh as i32;
+            let (en, bn) = (self.hubs[ei].name.clone(), self.houses[bh].name.clone());
+            self.houses[bh].events.push(HouseEvent { tick, kind: "acquire".into(),
+                text: format!("{} acquires {} for {:.0}", bn, en, price) });
+            self.journal.push(JournalEntry { tick, kind: "estate".into(), hub: parent, good: -1,
+                value: price, text: format!("{} buys {}", bn, en) });
+            return;
+        }
+        // BUYER 2 (manufactories only): a bank in that market takes a controlling stake.
+        if is_manu {
+            let mut bk = usize::MAX;
+            for bi in 0..self.banks.len() {
+                if self.banks[bi].defunct { continue; }
+                if parent >= 0 && !self.banks[bi].branches.contains(&(parent as u32)) { continue; }
+                if self.banks[bi].reserves > price * 2.0 { bk = bi; break; }
+            }
+            if bk != usize::MAX {
+                self.banks[bk].reserves -= price;
+                pay_seller(self, price);
+                let good = self.hubs[ei].base_per_capita.iter().enumerate()
+                    .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                    .map(|(g, _)| g as u32).unwrap_or(0);
+                self.hubs[ei].stake_bank = bk as i32;
+                self.hubs[ei].stake_share = RESALE_BANK_STAKE;
+                self.banks[bk].stakes.retain(|s| s.estate_hub != ei as u32);
+                self.banks[bk].stakes.push(BankStake {
+                    estate_hub: ei as u32, share: RESALE_BANK_STAKE, basis: price, good });
+                let en = self.hubs[ei].name.clone();
+                self.banks[bk].events.push(HouseEvent { tick, kind: "acquire".into(),
+                    text: format!("acquires a controlling {:.0}% stake in {} for {:.0}",
+                        RESALE_BANK_STAKE * 100.0, en, price) });
+            }
+        }
+    }
+
+    /// Monthly · a prosperous, CROWDED polis with treasury to spare SPONSORS
+    /// emigration: it spends a slice of its treasury to move a wave of people to an
+    /// under-populated, food-secure city in its own trade region (preferring its own
+    /// colonies). This both relieves the sponsor's crowding and drains the treasuries
+    /// that would otherwise hoard wealth forever. (User-requested: "poleis should spend
+    /// a percentage of wealth each month on funding colonies and for people migration.")
+    fn poleis_sponsor_migration(&mut self) {
+        let tick = self.tick;
+        let n = self.hubs.len();
+        for src in 0..n {
+            let s = &self.hubs[src];
+            if s.is_estate { continue; }
+            if s.population < COLONY_PARENT_MIN_POP || s.starving > 0.5 { continue; }
+            if s.treasury < POLIS_MIGRATION_MIN_TREASURY || s.sent_prosperity < 0.3 { continue; }
+            // Sponsor roughly every other month per eligible city.
+            if hash01(self.seed, tick as u64 ^ 0x319A7E, src as u64) > 0.5 { continue; }
+            let comp = self.hubs[src].component;
+            let pop = self.hubs[src].population;
+            // Destination: the most under-populated food-secure city in the same trade
+            // region, strongly preferring a colony this polis founded.
+            let mut dest = (usize::MAX, f32::MAX);
+            for d in 0..n {
+                if d == src || self.hubs[d].is_estate || self.hubs[d].component != comp { continue; }
+                if self.hubs[d].food_balance < 0.0 { continue; }
+                if self.hubs[d].population >= pop * 0.5 { continue; } // must have room to grow
+                let own_colony = self.hubs[d].founder_hub == src as i32;
+                let rank = self.hubs[d].population * if own_colony { 0.4 } else { 1.0 };
+                if rank < dest.1 { dest = (d, rank); }
+            }
+            let Some(di) = (dest.0 != usize::MAX).then_some(dest.0) else { continue; };
+            let movers = (pop * POLIS_MIGRATION_POP_FRAC).clamp(20.0, 1500.0);
+            let spend = self.hubs[src].treasury * POLIS_MIGRATION_SPEND;
+            if spend <= 0.0 { continue; }
+            self.hubs[src].treasury -= spend;
+            self.hubs[src].population = (pop - movers).max(self.hubs[src].founding_pop * 0.5);
+            self.hubs[di].population += movers;
+            self.hubs[di].treasury += spend * 0.5; // settlement aid travels with the migrants
+            if hash01(self.seed, tick as u64 ^ 0x4D161, src as u64) < 0.15 {
+                let (sn, dn) = (self.hubs[src].name.clone(), self.hubs[di].name.clone());
+                self.journal.push(JournalEntry { tick, kind: "migration".into(), hub: di as i32, good: -1,
+                    value: movers, text: format!("{} sponsors {:.0} settlers to {}", sn, movers, dn) });
+            }
+        }
+    }
+
     /// SETTLEMENT colony — an overcrowded, prosperous city founds a full new market
     /// hub on a fertile reachable site (heavy, joint-stock financing), seeding it
     /// with emigrants (relieving the parent). It graduates outpost→city in
@@ -5424,6 +5740,16 @@ impl CampaignSim {
         self.hubs[founder].population = (self.hubs[founder].population - seed)
             .max(self.hubs[founder].founding_pop * 0.3);
         let new = self.create_market_colony(founder, &site, backers, seed);
+        // The backing merchant house OPENS AN OFFICE in the new colony — a permanent
+        // foothold in its market (the family that staked the venture trades there).
+        if let Some(h) = house_idx {
+            if !self.houses[h].offices.contains(&(new as u32)) {
+                self.houses[h].offices.push(new as u32);
+                let (cn, city) = (self.houses[h].name.clone(), self.hubs[new].name.clone());
+                self.houses[h].events.push(HouseEvent { tick: self.tick, kind: "branch".into(),
+                    text: format!("{} opens a counting-house in {}", cn, city) });
+            }
+        }
         // The backing bank's family becomes the colony's main bank + mint: it seats
         // the colony's council and strikes its coin.
         self.hubs[new].main_bank = bank_idx as i32;
@@ -5464,7 +5790,7 @@ impl CampaignSim {
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
-            estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, structures: vec![],
+            estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
@@ -6165,8 +6491,14 @@ impl CampaignSim {
             self.manage_fleets();
             self.update_structures();
             self.fund_public_works();
+            // DLC 3.5 · wealthy poleis spend a slice of treasury sponsoring migration
+            // (relieves crowding, drains hoarded treasuries).
+            self.poleis_sponsor_migration();
             self.maybe_branch_houses();
             self.maybe_house_invests();
+            // DLC 3.5 · resale market: distressed houses / thin-treasury poleis sell
+            // holdings; solvent houses & banks buy them.
+            self.estate_resale_pass();
             self.update_guilds_and_offices();
             // Offices (re)settled → update commercial influence, dominance & Bailos.
             self.update_influence_and_bailos();
@@ -6824,7 +7156,7 @@ mod tests {
             in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
-            estate_kind: 0, estate_tier: 0, last_upgrade_tick: 0, owner_house: -1, structures: vec![],
+            estate_kind: 0, estate_tier: 0, last_upgrade_tick: 0, owner_house: -1, stake_bank: -1, stake_share: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
@@ -7008,7 +7340,7 @@ mod tests {
         s.banks.push(Bank {
             name: "Banco di Test".into(), house: 0, seat: 0, founded_tick: 0, defunct: false,
             reserves: 50.0, loans: vec![], real_estate: 1.0, deposits: 0.0, notes_issued: 0.0,
-            branches: vec![0], prestige: 0.6, interest_earned: 0.0, losses: 0.0, events: vec![],
+            branches: vec![0], prestige: 0.6, interest_earned: 0.0, losses: 0.0, stakes: vec![], dividends_earned: 0.0, history: vec![], events: vec![],
         });
         // A second, non-backer house (seated elsewhere) → the charter should bar it.
         let mut other = house_at(1, vec![3], 2);
@@ -7096,7 +7428,7 @@ mod tests {
             reserves: 30.0, loans: vec![Loan { borrower_house: -1, borrower_polis: 1, principal: 10.0,
                 outstanding: 10.0, rate: 0.01, start_tick: 0, term_ticks: 3650, purpose: "colony".into() }],
             real_estate: 1.0, deposits: 0.0, notes_issued: 0.0, branches: vec![0], prestige: 0.5,
-            interest_earned: 0.0, losses: 0.0, events: vec![],
+            interest_earned: 0.0, losses: 0.0, stakes: vec![], dividends_earned: 0.0, history: vec![], events: vec![],
         });
         s.tick = 55 * 365;
         s.colony_pass();
@@ -7289,7 +7621,7 @@ mod tests {
         let mk_bank = |name: &str, reserves: f32, deposits: f32, notes: f32| Bank {
             name: name.into(), house: 0, seat: 0, founded_tick: 0, defunct: false,
             reserves, loans: vec![], real_estate: 100.0, deposits, notes_issued: notes,
-            branches: vec![0], prestige: 0.5, interest_earned: 0.0, losses: 0.0, events: vec![],
+            branches: vec![0], prestige: 0.5, interest_earned: 0.0, losses: 0.0, stakes: vec![], dividends_earned: 0.0, history: vec![], events: vec![],
         };
         // Two soundly-capitalised banks and one fragile (reserves ≪ liabilities).
         s.banks.push(mk_bank("Banco Solido", 5000.0, 1000.0, 1000.0));   // ratio 2.5
