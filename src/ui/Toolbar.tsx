@@ -107,6 +107,8 @@ export function Toolbar() {
   const setElevationValue = useUIStore((s) => s.setElevationValue);
   const toggleOverlay = useUIStore((s) => s.toggleOverlay);
   const setOverlaysVisible = useUIStore((s) => s.setOverlaysVisible);
+  const showBankIcons = useUIStore((s) => s.showBankIcons);
+  const setShowBankIcons = useUIStore((s) => s.setShowBankIcons);
   const setGoodDetail = useUIStore((s) => s.setGoodDetail);
   const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({});
   const bioParams = useUIStore((s) => s.bioParams);
@@ -242,6 +244,16 @@ export function Toolbar() {
             </span>
           </label>
         ))}
+        {/* Bank seats — a separate campaign overlay (not a worldgen layer). */}
+        <label style={checkboxRow}>
+          <input
+            type="checkbox"
+            checked={showBankIcons}
+            onChange={() => setShowBankIcons(!showBankIcons)}
+            style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
+          />
+          <span style={{ color: showBankIcons ? "#b0c8e0" : "#5a6a80" }}>{"\u{1F3E6}"} Banks</span>
+        </label>
       </div>
 
       {/* Dynamic latitude framing (move equator / expand 0–60 bands) */}

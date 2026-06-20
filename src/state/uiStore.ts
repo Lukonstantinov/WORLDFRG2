@@ -111,6 +111,12 @@ interface UIStore {
   showSpeculation: boolean;
   /** DLC 3.5 · the Coin & Credit (currencies / banks / crashes / schematics) panel. */
   showCoinCredit: boolean;
+  /** Dedicated Bank panel (balance-sheet charts / loans & deals / schematic / info). */
+  showBank: boolean;
+  /** Index of the bank to focus when the Bank panel opens (null = first/list). */
+  selectedBankIdx: number | null;
+  /** Bank icons on the map (find banks at a glance). */
+  showBankIcons: boolean;
   /** The filterable World News feed (global campaign chronicle). */
   showNews: boolean;
   /** DLC 4 · the floating Goods (quality & trade) window. */
@@ -170,6 +176,9 @@ interface UIStore {
   setShowCityRanking: (v: boolean) => void;
   setShowSpeculation: (v: boolean) => void;
   setShowCoinCredit: (v: boolean) => void;
+  setShowBank: (v: boolean) => void;
+  setSelectedBankIdx: (i: number | null) => void;
+  setShowBankIcons: (v: boolean) => void;
   setShowNews: (v: boolean) => void;
   setShowGoodsWindow: (v: boolean) => void;
   setShowWorkflow: (v: boolean) => void;
@@ -246,6 +255,9 @@ export const useUIStore = create<UIStore>((set) => ({
   showCityRanking: false,
   showSpeculation: false,
   showCoinCredit: false,
+  showBank: false,
+  selectedBankIdx: null,
+  showBankIcons: false,
   showNews: false,
   showGoodsWindow: false,
   showWorkflow: true,
@@ -325,6 +337,9 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowCityRanking: (v) => set({ showCityRanking: v }),
   setShowSpeculation: (v) => set({ showSpeculation: v }),
   setShowCoinCredit: (v) => set({ showCoinCredit: v }),
+  setShowBank: (v) => set({ showBank: v }),
+  setSelectedBankIdx: (i) => set({ selectedBankIdx: i }),
+  setShowBankIcons: (v) => set({ showBankIcons: v }),
   setShowNews: (v) => set({ showNews: v }),
   setShowGoodsWindow: (v) => set({ showGoodsWindow: v }),
   setShowWorkflow: (v) => set({ showWorkflow: v }),

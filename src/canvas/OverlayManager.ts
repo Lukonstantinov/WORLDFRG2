@@ -147,6 +147,8 @@ export class OverlayManager {
   private tradeRoutes: TradeRoute[] = [];
   private coinUse: CoinUseCity[] = [];
   private coinOverlayHub: number | null = null;
+  /** Bank seats to mark on the map (set empty to hide). */
+  private bankIcons: { x: number; y: number; name: string; defunct: boolean; color: string }[] = [];
   private fisheryBanks: FisheryBank[] = [];
   private sharkZones: SharkZone[] = [];
   private shipwormZones: SharkZone[] = [];
@@ -238,6 +240,25 @@ export class OverlayManager {
   setCoinUsage(usage: CoinUseCity[], hub: number | null) {
     this.coinUse = usage;
     this.coinOverlayHub = hub;
+  }
+
+  /** Bank seats to mark on the map (pass [] to hide). */
+  setBankIcons(banks: { x: number; y: number; name: string; defunct: boolean; color: string }[]) {
+    this.bankIcons = banks;
+  }
+
+  /** Hit-test a world point against the bank icons (for click-to-open). Returns the
+   *  bank's list index, or -1. `tol` is in world cells. */
+  bankIconAt(wx: number, wy: number, tol: number): number {
+    let best = -1, bestD = tol * tol;
+    for (let i = 0; i < this.bankIcons.length; i++) {
+      const b = this.bankIcons[i];
+      if (b.defunct) continue;
+      const dx = wx - (b.x + 0.5), dy = wy - (b.y + 0.5);
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
   }
 
   /** Build (once per routes array) an undirected graph whose nodes are settlement
@@ -830,6 +851,11 @@ export class OverlayManager {
       this.renderCoinUsage(ctx);
     }
 
+    // Bank seats — a gold disc + 🏦 so banks are easy to find on the map.
+    if (this.bankIcons.length > 0) {
+      this.renderBankIcons(ctx);
+    }
+
     // Trade ▸ Flows highlight (always on top when set by the settlement panel).
     if (this.flowHighlight.length > 0) {
       this.renderFlowHighlight(ctx);
@@ -1207,6 +1233,31 @@ export class OverlayManager {
       }
     }
     ctx.globalAlpha = 1;
+  }
+
+  private renderBankIcons(ctx: CanvasRenderingContext2D) {
+    const inv = 1 / Math.sqrt(this.currentScale);
+    const r = Math.max(2.2, 5 * inv);
+    const fs = Math.max(5, 9 * inv);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (const b of this.bankIcons) {
+      if (b.defunct) continue;
+      const cx = b.x + 0.5, cy = b.y + 0.5;
+      // Gold disc + the owning house's colour ring.
+      ctx.globalAlpha = 0.95;
+      ctx.fillStyle = "#1a2230";
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = b.color || "#e0c452";
+      ctx.lineWidth = Math.max(0.6, 1.4 * inv);
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.font = `${fs}px sans-serif`;
+      ctx.fillText("🏦", cx, cy + fs * 0.05);
+    }
+    ctx.globalAlpha = 1;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
   }
 
   private renderFlowHighlight(ctx: CanvasRenderingContext2D) {

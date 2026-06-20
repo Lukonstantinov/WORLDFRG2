@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WorldForge 2 — Bank panel & map icons</title>
+<style>
+  :root { --bg:#0b1420; --panel:#13202e; --ink:#cfe2f6; --accent:#3a80c0; }
+  body { background:var(--bg); color:var(--ink); font:13px/1.5 system-ui, sans-serif; margin:0; padding:24px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  h2 { font-size:13px; color:#7fa0c4; text-transform:uppercase; letter-spacing:.5px; margin:22px 0 8px; }
+  .sub { color:#7f96b2; margin:0 0 18px; }
+  .row { display:flex; gap:18px; flex-wrap:wrap; align-items:flex-start; }
+  .win { width:430px; background:#0c141e; border:1px solid #1e3450; border-radius:8px; box-shadow:0 8px 28px rgba(0,0,0,.5); overflow:hidden; }
+  .hd { display:flex; justify-content:space-between; padding:8px 10px; border-bottom:1px solid #1a2a3e; font-weight:700; }
+  .body { display:flex; }
+  .list { width:130px; border-right:1px solid #16243a; padding:4px 2px; }
+  .lrow { display:flex; gap:5px; align-items:center; padding:4px 5px; border-radius:4px; font-size:10.5px; }
+  .lrow.sel { background:#15243a; }
+  .dot { width:8px;height:8px;border-radius:8px;flex:0 0 auto; }
+  .det { flex:1; min-width:0; }
+  .tabs { display:flex; gap:2px; padding:2px 8px 0; border-bottom:1px solid #1e2e42; }
+  .tab { padding:4px 7px; font-size:10px; color:#6a86a6; }
+  .tab.on { color:#cfe2f6; font-weight:700; border-bottom:2px solid #5f97c0; }
+  .pad { padding:8px 9px 12px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:5px; }
+  .stat { background:#101a26; border-radius:4px; padding:4px 6px; }
+  .stat .k { color:#6a86a6; font-size:8px; } .stat .v { font-size:12px; font-weight:700; }
+  .lab { color:#7fa0c4; font-size:9px; text-transform:uppercase; letter-spacing:.5px; margin:9px 0 4px; font-weight:600; }
+  .bar { height:6px; background:#101a26; border-radius:3px; overflow:hidden; margin:2px 0 4px; }
+  .bar > i { display:block; height:100%; }
+  .cols { display:flex; gap:10px; }
+  .col { flex:1; }
+  .mini { color:#aebfd4; font-size:9px; display:flex; justify-content:space-between; }
+  svg { background:#0b121c; border-radius:4px; display:block; margin-top:2px; }
+  .deal { padding:4px 0; border-bottom:1px solid #131e2a; }
+  .deal .t { display:flex; justify-content:space-between; font-size:10px; color:#cfe2f6; }
+  .deal .s { color:#7f96b2; font-size:8.5px; }
+  .map { width:330px; height:300px; background:#0a1019; border:1px solid #1e3450; border-radius:8px; position:relative; overflow:hidden; }
+  .land { position:absolute; background:#16241c; border:1px solid #24402c; border-radius:40% 60% 55% 45%; }
+  .bank { position:absolute; width:22px; height:22px; border-radius:50%; background:#1a2230; display:flex; align-items:center; justify-content:center; font-size:13px; transform:translate(-50%,-50%); }
+  p { margin:0 0 6px; } ul { margin:2px 0 0 16px; padding:0; }
+  code { background:#16243a; padding:1px 5px; border-radius:3px; color:#9fd0ff; }
+</style>
+</head>
+<body>
+  <h1>🏦 Bank panel &amp; map icons</h1>
+  <p class="sub">New dedicated Bank window (charts · deals · schematic · explainer) + a clickable bank icon on the map. Colours/labels mirror <code>BankPanel.tsx</code> and <code>OverlayManager.renderBankIcons</code>.</p>
+
+  <div class="row">
+    <!-- ── The Bank panel ── -->
+    <div class="win">
+      <div class="hd"><span>🏦 Banks</span><span style="color:#7a90a8">✕</span></div>
+      <div class="body">
+        <div class="list">
+          <div class="lrow sel"><span class="dot" style="background:#c98f5f"></span><div><div>Banco di Vethra</div><div style="color:#5f7a96;font-size:8.5px">Vethra · eq 71k</div></div></div>
+          <div class="lrow"><span class="dot" style="background:#6fae8a"></span><div><div>Casa Orlani</div><div style="color:#5f7a96;font-size:8.5px">Pellar · eq 44k</div></div></div>
+          <div class="lrow" style="opacity:.5"><span class="dot" style="background:#9a8aa0"></span><div><div>Banco Sereni ✝</div><div style="color:#5f7a96;font-size:8.5px">Doln · eq -3k</div></div></div>
+        </div>
+        <div class="det">
+          <div style="padding:6px 8px 2px"><div style="font-size:12.5px;font-weight:700;color:#dfeafc">Banco di Vethra</div><div style="color:#7f96b2;font-size:9.5px">House Vethra · seat Vethra · founded yr 24 · banks in Vethra ducat</div></div>
+          <div class="tabs"><span class="tab on">Overview</span><span class="tab">Charts</span><span class="tab">Deals (6)</span><span class="tab">How it works</span></div>
+          <div class="pad">
+            <div class="grid">
+              <div class="stat"><div class="k">Net worth</div><div class="v" style="color:#7fcf9f">71k</div></div>
+              <div class="stat"><div class="k">Reserve ratio</div><div class="v" style="color:#7fb0e0">38%</div></div>
+              <div class="stat"><div class="k">Interest earned</div><div class="v">22k</div></div>
+              <div class="stat"><div class="k">Dividends</div><div class="v">9.4k</div></div>
+              <div class="stat"><div class="k">Write-offs</div><div class="v" style="color:#e0906a">3.1k</div></div>
+              <div class="stat"><div class="k">Branches</div><div class="v">4</div></div>
+            </div>
+            <div class="lab">Balance sheet</div>
+            <div class="cols">
+              <div class="col">
+                <div style="color:#8fa6c2;font-size:9px;margin-bottom:3px">Assets</div>
+                <div class="mini"><span>Reserves</span><span>52k</span></div><div class="bar"><i style="width:60%;background:#e0c452"></i></div>
+                <div class="mini"><span>Loans</span><span>38k</span></div><div class="bar"><i style="width:44%;background:#5f97c0"></i></div>
+                <div class="mini"><span>Stakes</span><span>20k</span></div><div class="bar"><i style="width:23%;background:#6fae8a"></i></div>
+                <div class="mini"><span>Property</span><span>8</span></div><div class="bar"><i style="width:2%;background:#9a8aa0"></i></div>
+              </div>
+              <div class="col">
+                <div style="color:#8fa6c2;font-size:9px;margin-bottom:3px">Liabilities + equity</div>
+                <div class="mini"><span>Deposits</span><span>21k</span></div><div class="bar"><i style="width:24%;background:#c98f5f"></i></div>
+                <div class="mini"><span>Notes</span><span>18k</span></div><div class="bar"><i style="width:21%;background:#b8728f"></i></div>
+                <div class="mini"><span>Equity</span><span>71k</span></div><div class="bar"><i style="width:82%;background:#7fcf9f"></i></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Charts tab ── -->
+    <div class="win" style="width:360px">
+      <div class="hd"><span>🏦 Banks — Charts</span><span style="color:#7a90a8">✕</span></div>
+      <div class="pad">
+        <div style="color:#8fa6c2;font-size:9.5px">Net worth (equity)</div>
+        <svg width="100%" viewBox="0 0 300 80"><text x="4" y="11" fill="#5a7290" font-size="7">80k</text>
+          <polyline fill="none" stroke="#7fcf9f" stroke-width="1.4" points="4,60 50,52 96,46 142,38 188,30 234,22 296,14"/>
+          <text x="4" y="78" fill="#5a7290" font-size="7">yr 24</text><text x="296" y="78" fill="#5a7290" font-size="7" text-anchor="end">yr 50</text></svg>
+        <div style="color:#8fa6c2;font-size:9.5px;margin-top:8px">Income vs write-offs (per year)</div>
+        <svg width="100%" viewBox="0 0 300 80"><text x="4" y="11" fill="#5a7290" font-size="7">2.4k</text>
+          <polyline fill="none" stroke="#7fb0e0" stroke-width="1.4" points="4,52 50,46 96,42 142,36 188,32 234,28 296,24"/>
+          <polyline fill="none" stroke="#6fae8a" stroke-width="1.4" points="4,66 50,62 96,58 142,52 188,48 234,44 296,40"/>
+          <polyline fill="none" stroke="#e06a5a" stroke-width="1.4" points="4,70 50,69 96,66 142,71 188,64 234,68 296,67"/>
+          <text x="4" y="78" fill="#5a7290" font-size="7">yr 24</text></svg>
+        <div style="display:flex;gap:8px;margin-top:4px;font-size:8.5px"><span style="color:#7fb0e0">● interest</span><span style="color:#6fae8a">● dividends</span><span style="color:#e06a5a">● write-offs</span></div>
+        <div class="lab">Deals</div>
+        <div class="deal"><div class="t"><span>⚜️ House Calderi</span><span style="color:#e0c452">12k</span></div><div class="s">Trade venture · 1.2%/mo · 5-yr term · from yr 41 · principal 14k</div></div>
+        <div class="deal"><div class="t"><span>🛠 Weavers' Guild</span><span style="color:#e0c452">6.5k</span></div><div class="s">Guild factory · 1.2%/mo · 5-yr term · from yr 44</div></div>
+        <div class="deal"><div class="t"><span>🏛 Vethra</span><span style="color:#e0c452">9k</span></div><div class="s">City public works · 1.2%/mo · 5-yr term</div></div>
+        <div class="deal"><div class="t"><span>🏭 Vethra Silk Manufactory</span><span style="color:#6fae8a">25%</span></div><div class="s">silk · book value 20k</div></div>
+      </div>
+    </div>
+
+    <!-- ── Map icons ── -->
+    <div>
+      <h2 style="margin-top:0">Map icons</h2>
+      <div class="map">
+        <div class="land" style="left:30px;top:40px;width:150px;height:120px"></div>
+        <div class="land" style="left:170px;top:120px;width:130px;height:110px"></div>
+        <div class="bank" style="left:90px;top:90px;border:2px solid #c98f5f">🏦</div>
+        <div class="bank" style="left:150px;top:130px;border:2px solid #6fae8a">🏦</div>
+        <div class="bank" style="left:230px;top:175px;border:2px solid #e0c452">🏦</div>
+      </div>
+      <p style="color:#7f96b2;font-size:11px;margin-top:8px;width:330px">Toggle <code>🏦 Banks</code> in Toolbar → Overlays. Each live bank shows a gold disc ringed in its owning house's colour at its seat; clicking one opens the Bank panel focused on that bank. Failed banks are hidden.</p>
+    </div>
+  </div>
+
+  <h2>How it works (explainer tab)</h2>
+  <div style="max-width:760px;color:#aebfd4">
+    <p><b style="color:#7fb0e0">Loan interest</b> — lends to houses (trade), guilds (factories &amp; civic works) and city treasuries (public works) at 1.2%/mo. Interest is profit; principal repayment retires the notes that funded the loan (the bug that destroyed principal — and every bank — is fixed).</p>
+    <p><b style="color:#6fae8a">Equity stakes</b> — buys a 25% share of a manufactory and draws that share of its income as a dividend (grows net worth from real production).</p>
+    <p><b style="color:#c98f5f">Deposits &amp; notes</b> — wealthy houses deposit capital; the bank issues notes up to 3× reserves. Keep the reserve ratio above 22% or a crash can trigger a fatal run.</p>
+  </div>
+</body>
+</html>

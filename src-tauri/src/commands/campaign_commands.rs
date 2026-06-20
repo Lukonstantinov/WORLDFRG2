@@ -2531,10 +2531,48 @@ pub struct BankBrief {
     pub n_loans: u32,
     pub interest_earned: f32,
     pub losses: f32,
+    /// Book value of equity stakes + cumulative stake dividends collected.
+    pub stake_book: f32,
+    pub dividends_earned: f32,
+    /// Seat coordinates (cell space) — for the bank icon on the map.
+    pub seat_x: f32,
+    pub seat_y: f32,
     /// Cities hosting a counting-house branch.
     pub branches: Vec<String>,
     /// Recent chronicle lines (founding, branches, defaults, failure).
     pub events: Vec<String>,
+    /// Yearly balance-sheet history (charts).
+    pub history: Vec<crate::sim::tick::BankSnapshot>,
+    /// Every live loan/deal on the books, with its agreement terms.
+    pub loans: Vec<BankLoanRow>,
+    /// Equity stakes the bank holds in manufactories.
+    pub stakes: Vec<BankStakeRow>,
+}
+
+/// One loan/deal on a bank's books, with the agreement terms (for the deals list).
+#[derive(Serialize, Clone)]
+pub struct BankLoanRow {
+    /// Borrower name (house, guild, or city).
+    pub borrower: String,
+    /// "house" | "guild" | "polis".
+    pub borrower_kind: String,
+    /// "trade" | "guild_factory" | "guild_civic" | "treasury" | "colony".
+    pub purpose: String,
+    pub principal: f32,
+    pub outstanding: f32,
+    /// Monthly interest rate.
+    pub rate: f32,
+    pub start_year: u32,
+    pub term_years: f32,
+}
+
+/// One equity stake a bank holds in a manufactory.
+#[derive(Serialize, Clone)]
+pub struct BankStakeRow {
+    pub works: String,
+    pub good: String,
+    pub share: f32,
+    pub basis: f32,
 }
 
 /// DLC 3.5 · all chartered banks, richest (by equity) first.
@@ -2554,8 +2592,32 @@ pub fn campaign_get_banks(db: State<'_, WorldDb>) -> Result<Vec<BankBrief>, Stri
         let branches = b.branches.iter()
             .filter_map(|&hb| sim.hubs.get(hb as usize).map(|h| h.name.clone()))
             .collect();
-        let events = b.events.iter().rev().take(8)
+        let events = b.events.iter().rev().take(12)
             .map(|e| e.text.clone()).collect();
+        let (seat_x, seat_y) = sim.hubs.get(b.seat as usize).map(|h| (h.x, h.y)).unwrap_or((0.0, 0.0));
+        // Live loans → deals list with borrower names + agreement terms.
+        let loans: Vec<BankLoanRow> = b.loans.iter().filter(|l| l.outstanding > 0.01).map(|l| {
+            let (borrower, kind) = if l.borrower_house >= 0 {
+                match sim.houses.get(l.borrower_house as usize) {
+                    Some(h) => (h.name.clone(), if h.is_guild { "guild" } else { "house" }.to_string()),
+                    None => ("—".into(), "house".into()),
+                }
+            } else if l.borrower_polis >= 0 {
+                (sim.hubs.get(l.borrower_polis as usize).map(|h| h.name.clone()).unwrap_or_default(), "polis".into())
+            } else { ("—".into(), "house".into()) };
+            BankLoanRow {
+                borrower, borrower_kind: kind, purpose: l.purpose.clone(),
+                principal: l.principal, outstanding: l.outstanding, rate: l.rate,
+                start_year: l.start_tick / TICKS_PER_YEAR,
+                term_years: l.term_ticks as f32 / TICKS_PER_YEAR as f32,
+            }
+        }).collect();
+        // Equity stakes → works name + good.
+        let stakes: Vec<BankStakeRow> = b.stakes.iter().map(|s| BankStakeRow {
+            works: sim.hubs.get(s.estate_hub as usize).map(|h| h.name.clone()).unwrap_or_default(),
+            good: sim.goods.get(s.good as usize).map(|g| g.name.clone()).unwrap_or_default(),
+            share: s.share, basis: s.basis,
+        }).collect();
         BankBrief {
             name: b.name.clone(), seat, coin_name, coin_value, owner,
             owner_idx: b.house,
@@ -2567,7 +2629,10 @@ pub fn campaign_get_banks(db: State<'_, WorldDb>) -> Result<Vec<BankBrief>, Stri
             equity: b.equity(), reserve_ratio: b.reserve_ratio(),
             n_loans: b.loans.iter().filter(|l| l.outstanding > 0.01).count() as u32,
             interest_earned: b.interest_earned, losses: b.losses,
+            stake_book: b.stake_book(), dividends_earned: b.dividends_earned,
+            seat_x, seat_y,
             branches, events,
+            history: b.history.clone(), loans, stakes,
         }
     }).collect();
     out.sort_by(|a, b| {

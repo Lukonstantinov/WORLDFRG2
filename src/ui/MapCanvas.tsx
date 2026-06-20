@@ -10,7 +10,7 @@ import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useSettingsStore } from "../state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks } from "../bridge/tauri";
 import type { MerchantRoute, FuturesLane } from "../types";
 import { goodOverlayKey } from "../goods";
 import type { PaintValue, EconChain, Settlement } from "../types";
@@ -779,6 +779,25 @@ export function MapCanvas() {
     return () => { alive = false; };
   }, [coinOverlayHub, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
 
+  // Bank icons: mark each live bank's seat on the map (toggle in the Toolbar).
+  const showBankIcons = useUIStore((s) => s.showBankIcons);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    if (!showBankIcons || !campaignSnapshot?.active) {
+      om.setBankIcons([]); requestRender(); return;
+    }
+    let alive = true;
+    campaignGetBanks()
+      .then((banks) => {
+        if (!alive) return;
+        om.setBankIcons(banks.map((b) => ({ x: b.seat_x, y: b.seat_y, name: b.name, defunct: b.defunct, color: b.color })));
+        requestRender();
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [showBankIcons, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
+
   // #5: selecting a hub from ANY list/panel (Richest Cities, Trade matrix, Houses,
   // Banks, …) recenters the map on that city AND drops the shiny highlight pin — so
   // clicking a city name jumps the view there and makes it glow.
@@ -887,6 +906,15 @@ export function MapCanvas() {
         if (rect) {
           const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
           const thresh = Math.max(6, m.grid_width * 0.012);
+          // A bank icon takes click priority when bank icons are shown → open the Bank panel.
+          if (useUIStore.getState().showBankIcons) {
+            const bi = overlayManagerRef.current?.bankIconAt(wx, wy, thresh) ?? -1;
+            if (bi >= 0) {
+              useUIStore.getState().setSelectedBankIdx(bi);
+              useUIStore.getState().setShowBank(true);
+              return;
+            }
+          }
           let best = -1; let bestD = thresh * thresh;
           for (const h of econ.hubs) {
             let dx = Math.abs(h.x - wx);

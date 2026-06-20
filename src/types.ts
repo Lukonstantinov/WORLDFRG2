@@ -995,8 +995,50 @@ export interface BankBrief {
   n_loans: number;
   interest_earned: number;
   losses: number;
+  stake_book: number;
+  dividends_earned: number;
+  seat_x: number;
+  seat_y: number;
   branches: string[];
   events: string[];
+  history: BankSnapshot[];
+  loans: BankLoanRow[];
+  stakes: BankStakeRow[];
+}
+
+/** A yearly balance-sheet snapshot (drives the Bank panel charts). */
+export interface BankSnapshot {
+  year: number;
+  reserves: number;
+  loans: number;
+  stakes: number;
+  real_estate: number;
+  deposits: number;
+  notes: number;
+  equity: number;
+  interest_cum: number;
+  dividends_cum: number;
+  losses_cum: number;
+}
+
+/** One loan/deal on a bank's books, with agreement terms. */
+export interface BankLoanRow {
+  borrower: string;
+  borrower_kind: string; // "house" | "guild" | "polis"
+  purpose: string;       // "trade" | "guild_factory" | "guild_civic" | "treasury" | "colony"
+  principal: number;
+  outstanding: number;
+  rate: number;          // monthly
+  start_year: number;
+  term_years: number;
+}
+
+/** One equity stake a bank holds in a manufactory. */
+export interface BankStakeRow {
+  works: string;
+  good: string;
+  share: number;
+  basis: number;
 }
 
 /** A regional financial crash record. */
