@@ -976,7 +976,38 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         hubs[b].population.partial_cmp(&hubs[a].population).unwrap_or(std::cmp::Ordering::Equal)
     });
     let mut houses: Vec<House> = Vec::new();
-    for &h in hub_order.iter().take(24) {
+    // Seed houses ACROSS continents: group population-ranked hubs by connectivity
+    // component and round-robin across components (largest landmass first each round)
+    // so every continent gets trading families. The old "top 24 by population" seeded
+    // them all on the single most-populous landmass, leaving other continents empty.
+    let seed_hubs: Vec<usize> = {
+        use std::collections::{BTreeMap, VecDeque};
+        let mut by_comp: BTreeMap<u32, VecDeque<usize>> = BTreeMap::new();
+        for &h in &hub_order {
+            if hubs[h].is_estate { continue; }
+            by_comp.entry(hubs[h].component).or_default().push_back(h);
+        }
+        let mut comp_keys: Vec<u32> = by_comp.keys().copied().collect();
+        comp_keys.sort_by(|&a, &b| {
+            let pa = by_comp[&a].front().map(|&h| hubs[h].population).unwrap_or(0.0);
+            let pb = by_comp[&b].front().map(|&h| hubs[h].population).unwrap_or(0.0);
+            pb.partial_cmp(&pa).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let mut out: Vec<usize> = Vec::new();
+        loop {
+            let mut progressed = false;
+            for &ck in &comp_keys {
+                if let Some(h) = by_comp.get_mut(&ck).and_then(|q| q.pop_front()) {
+                    out.push(h);
+                    progressed = true;
+                    if out.len() >= 24 { break; }
+                }
+            }
+            if !progressed || out.len() >= 24 { break; }
+        }
+        out
+    };
+    for &h in seed_hubs.iter() {
         let mut gi: Vec<usize> = (0..gc).collect();
         gi.sort_by(|&a, &b| {
             hubs[h].production[b].partial_cmp(&hubs[h].production[a]).unwrap_or(std::cmp::Ordering::Equal)

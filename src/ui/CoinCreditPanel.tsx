@@ -75,7 +75,17 @@ export function CoinCreditPanel() {
         <div style={scroll}>
           {coins.length === 0 && <div style={empty}>No coinage yet — a council seat mints its first coin at New Year.</div>}
           {coins.length > 0 && (
-            <div style={hint}>Ranked by reserve strength (trust × trade). Reserve coins are accepted abroad and shave freight.</div>
+            <div style={hint}>
+              Ranked by reserve strength (trust × trade). Reserve coins are accepted abroad and shave freight.
+              <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: "2px 10px", color: "#7a90a8" }}>
+                <span>▰ trust = acceptance</span>
+                <span>value = exchange agio (×grain)</span>
+                <span>🪙 = mint fineness</span>
+                <span>⇄ = trade throughput</span>
+                <span style={{ color: "#37a05a" }}>RESERVE = accepted abroad</span>
+              </div>
+              <div style={{ marginTop: 2, color: "#5a7290" }}>Click a coin for the full explanation.</div>
+            </div>
           )}
           {coins.map((c, i) => <CurrencyCard key={c.hub} c={c} rank={i + 1} />)}
         </div>
@@ -162,9 +172,11 @@ function TrustBar({ trust, reserve }: { trust: number; reserve: boolean }) {
 }
 
 function CurrencyCard({ c, rank }: { c: CurrencyBrief; rank: number }) {
+  const [open, setOpen] = useState(false);
   const debased = c.fineness < 0.999;
+  const strength = c.trust * c.throughput;
   return (
-    <div style={card}>
+    <div style={{ ...card, cursor: "pointer" }} onClick={() => setOpen((v) => !v)}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span style={{ color: "#6a86a6", fontSize: 9, width: 16, flex: "0 0 auto" }}>#{rank}</span>
         <CoinIcon issuer={c.issuer || c.city} value={c.value} size={22}
@@ -172,6 +184,7 @@ function CurrencyCard({ c, rank }: { c: CurrencyBrief; rank: number }) {
         <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12 }}>{c.coin_name}</span>
         <span style={{ flex: 1 }} />
         {c.is_reserve && <span style={{ color: "#37a05a", fontSize: 9, fontWeight: 700 }}>RESERVE</span>}
+        <span style={{ color: "#5a7290", fontSize: 10, marginLeft: 4 }}>{open ? "▾" : "▸"}</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3, flexWrap: "wrap" }}>
         <TrustBar trust={c.trust} reserve={c.is_reserve} />
@@ -184,6 +197,36 @@ function CurrencyCard({ c, rank }: { c: CurrencyBrief; rank: number }) {
         </span>
         <span style={{ color: "#7fa0c0", fontSize: 9 }} title="Trade throughput at the issuing city">⇄ {fmtk(c.throughput)}</span>
       </div>
+      {open && (
+        <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #1b2a3c", fontSize: 10, lineHeight: 1.5 }}>
+          <div style={{ color: "#8aa8c8", marginBottom: 3 }}>
+            Minted by <b style={{ color: "#cfe2f6" }}>{c.issuer || c.city}</b>{c.city && c.issuer ? ` · ${c.city}` : ""}.
+          </div>
+          <Explain label="Trust (acceptance)" value={`${(c.trust * 100).toFixed(0)}%`}
+            text="How widely merchants accept the coin. Sticky — it eases toward a target each year and is hit hard by debasement. ≥55% makes it a reserve currency." />
+          <Explain label="Value (agio)" value={`${c.value.toFixed(2)}×`}
+            text="Exchange value against the grain-equivalent numeraire. Above 1.0 is a 'hard' premium currency; below 1.0 is weak/debased money." />
+          <Explain label="Fineness" value={`${(c.fineness * 100).toFixed(0)}%`}
+            text={debased ? "Precious-metal content. Below 100% = DEBASED — the mint skimmed seigniorage into the treasury, which erodes trust and can feed bubbles." : "Precious-metal content. 100% = full-bodied, honest coin."} />
+          <Explain label="Throughput" value={fmtk(c.throughput)}
+            text="Trade volume moving through the issuing city — the economic weight standing behind the coin." />
+          <Explain label="Reserve strength" value={fmtk(strength)}
+            text="trust × throughput — the ranking score. The strongest coins become international reserves, accepted abroad and granting their merchants a small import-freight discount." />
+          <div style={{ color: c.is_reserve ? "#37a05a" : "#6a86a6", marginTop: 2 }}>
+            {c.is_reserve ? "★ A RESERVE currency — held and accepted across borders." : "Not yet a reserve currency (needs ≥55% trust)."}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Explain({ label, value, text }: { label: string; value: string; text: string }) {
+  return (
+    <div style={{ marginBottom: 3 }}>
+      <span style={{ color: "#cbb88a", fontWeight: 700 }}>{label}: </span>
+      <span style={{ color: "#cfe2f6" }}>{value}</span>
+      <div style={{ color: "#7e93ab" }}>{text}</div>
     </div>
   );
 }

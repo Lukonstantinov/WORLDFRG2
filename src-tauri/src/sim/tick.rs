@@ -103,8 +103,8 @@ const COLONY_MIGRATION_FRAC: f32 = 0.06;
 /// reserved for SETTLEMENT colonies; below it is poor, trade-prone land for HOUSE
 /// outposts. Keeps the two drives from cannibalising each other's sites.
 const COLONY_FERTILE_SITE: f32 = 0.45;
-/// The age of colonisation opens only once the world has matured — year 50.
-const COLONY_START_TICK: u32 = 50 * 365;
+/// The age of colonisation opens once the world has matured — from year 30.
+const COLONY_START_TICK: u32 = 30 * 365;
 /// House TRADE OUTPOSTS open earlier — year 30 — but are gated behind serious
 /// wealth: only a great house (≈150k) can afford the heavy founding cost (≈120k).
 /// Easier conditions than a settlement colony (no bank/food/joint-stock), just the
@@ -535,12 +535,19 @@ const COIN_FREIGHT_DISCOUNT: f32 = 0.10;
 const RESERVE_TRUST_MIN: f32 = 0.55;
 
 // ── DLC 3.5 · Banks (merchant bankers as institutions) ──────────────────────
+/// The age of banking opens once the world's coinage has matured — from year 20.
+const BANK_START_TICK: u32 = 20 * 365;
 /// A banking house needs at least this wealth (and the prestige/coin floors) to
 /// charter a bank.
 const BANK_FOUND_WEALTH: f32 = 10.0;
-const BANK_FOUND_PRESTIGE: f32 = 0.30;
-/// The bank's seat city coin must be trusted at least this much (you bank in good money).
-const BANK_FOUND_COIN_TRUST: f32 = 0.45;
+/// A non-banking house can still establish a bank once it is genuinely RICH (a
+/// great merchant turns banker) — so banks aren't gated to the rare banking
+/// archetype landing on a trusted-coin seat. Calibrated to the live wealth scale.
+const BANK_FOUND_WEALTH_RICH: f32 = 5_000.0;
+const BANK_FOUND_PRESTIGE: f32 = 0.15;
+/// The bank's seat city coin must be trusted at least this much (you bank in good
+/// money). Kept modest so a bank can actually be chartered once coins are trusted.
+const BANK_FOUND_COIN_TRUST: f32 = 0.40;
 /// PRICE of founding a bank: the chartering house commits this fraction of its
 /// fortune to the venture. (For a great house worth 200k that is an 80k outlay —
 /// a serious commitment befitting a bank.)
@@ -1688,10 +1695,14 @@ impl CampaignSim {
     /// (extending the home coin's reach and booking real estate).
     fn update_banks(&mut self, _year: u32) {
         let tick = self.tick;
-        // 1) Charter new banks.
+        // 1) Charter new banks — only once the age of banking has opened (year 20).
+        //    (Existing banks still service loans/deposits below before this gate.)
+        if tick >= BANK_START_TICK {
         for hi in 0..self.houses.len() {
             if self.houses[hi].defunct || self.houses[hi].is_guild { continue; }
-            if self.houses[hi].archetype != ARCH_BANKING { continue; }
+            // Banking houses bank readily; any other house can too once it is RICH.
+            let banker = self.houses[hi].archetype == ARCH_BANKING;
+            if !banker && self.houses[hi].wealth < BANK_FOUND_WEALTH_RICH { continue; }
             if self.banks.iter().any(|b| !b.defunct && b.house == hi as u32) { continue; }
             let seat = self.houses[hi].hub as usize;
             if seat >= self.hubs.len() { continue; }
@@ -1729,6 +1740,7 @@ impl CampaignSim {
                 text: format!("charters the {}", bname) });
             self.banks.push(bank);
         }
+        } // end year-20 charter gate
         // 2) Grow branches to follow the owner's trade offices.
         for bi in 0..self.banks.len() {
             if self.banks[bi].defunct { continue; }
