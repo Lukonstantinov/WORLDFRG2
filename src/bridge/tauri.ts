@@ -528,7 +528,7 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 }
 
 // ── DLC 1 "Living Trade" tick simulation ──
-import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, ColonyDetail, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow } from "../types";
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, ColonyDetail, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow } from "../types";
 
 /** Seed a fresh living-trade sim from the static economy snapshot (step 10). */
 export async function campaignStartSim(seed: number): Promise<CampaignSnapshot> {
@@ -596,6 +596,12 @@ export async function campaignTradeFlows(id: number): Promise<TradeFlows | null>
 /** DLC 3.5 · the world's coinage ranked by reserve strength (trust × throughput). */
 export async function campaignGetCurrencies(): Promise<CurrencyBrief[]> {
   return invoke("campaign_get_currencies");
+}
+
+/** Per-city coin usage: which coin each settlement settles its trade in + volume —
+ *  for the coin-usage map overlay and the per-coin donut/bar breakdown. */
+export async function campaignCoinUsage(): Promise<CoinUseCity[]> {
+  return invoke("campaign_coin_usage");
 }
 
 /** DLC 3.5 · all chartered banks with their balance sheets. */

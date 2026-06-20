@@ -877,6 +877,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 war_effort: 0.0,
                 coin_name: String::new(),
                 coin_trust: 0.0,
+                settle_coin: -1,
                 mint_fineness_prev: 0.0,
                 quality: Vec::new(),
                 stolen_good: -1,
@@ -2409,6 +2410,48 @@ pub fn campaign_get_currencies(db: State<'_, WorldDb>) -> Result<Vec<CurrencyBri
     out.sort_by(|a, b| (b.trust * (b.throughput + 1.0))
         .partial_cmp(&(a.trust * (a.throughput + 1.0)))
         .unwrap_or(std::cmp::Ordering::Equal));
+    Ok(out)
+}
+
+/// One city's USE of a coin (for the coin-usage overlay + per-coin breakdown chart).
+#[derive(Serialize)]
+pub struct CoinUseCity {
+    pub coin: u32,           // issuing-mint hub id — which coin this city settles in
+    pub coin_name: String,
+    pub city: u32,           // the city hub id using it
+    pub name: String,
+    pub x: f32,
+    pub y: f32,
+    pub volume: f32,         // trade throughput settled in this coin at this city
+    pub mint: bool,          // this city is the coin's own mint
+    pub reserve_reach: bool, // a foreign reserve coin circulating here
+}
+
+/// Per-city coin usage: which coin each settlement settles its trade in + the
+/// volume, from the yearly `settle_coin` assignment. The frontend groups by `coin`
+/// for the donut/bar breakdown and tints the map by it for the usage overlay.
+#[tauri::command]
+pub fn campaign_coin_usage(db: State<'_, WorldDb>) -> Result<Vec<CoinUseCity>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let mut out: Vec<CoinUseCity> = Vec::new();
+    for (i, h) in sim.hubs.iter().enumerate() {
+        if h.is_estate || h.settle_coin < 0 { continue; }
+        let sc = h.settle_coin as usize;
+        let Some(coin_hub) = sim.hubs.get(sc) else { continue };
+        if coin_hub.coin_name.is_empty() { continue; }
+        let mint = sc == i;
+        out.push(CoinUseCity {
+            coin: coin_hub.id,
+            coin_name: coin_hub.coin_name.clone(),
+            city: h.id,
+            name: h.name.clone(),
+            x: h.x, y: h.y,
+            volume: h.tw_house + h.tw_local + h.tw_guild,
+            mint,
+            reserve_reach: !mint && coin_hub.coin_trust >= 0.55,
+        });
+    }
     Ok(out)
 }
 

@@ -10,7 +10,7 @@ import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useSettingsStore } from "../state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage } from "../bridge/tauri";
 import type { MerchantRoute, FuturesLane } from "../types";
 import { goodOverlayKey } from "../goods";
 import type { PaintValue, EconChain, Settlement } from "../types";
@@ -762,6 +762,22 @@ export function MapCanvas() {
     const t = setTimeout(() => { om.clearSearchPin(); requestRender(); }, 5000);
     return () => clearTimeout(t);
   }, [searchPin, requestRender]);
+
+  // Coin-usage overlay: when a coin is selected in the Currencies panel, fetch the
+  // per-city settlement snapshot and tint the map by use of that coin.
+  const coinOverlayHub = useUIStore((s) => s.coinOverlayHub);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    if (coinOverlayHub == null || !campaignSnapshot?.active) {
+      om.setCoinUsage([], null); requestRender(); return;
+    }
+    let alive = true;
+    campaignCoinUsage()
+      .then((u) => { if (alive) { om.setCoinUsage(u, coinOverlayHub); requestRender(); } })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [coinOverlayHub, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
 
   // #5: selecting a hub from ANY list/panel (Richest Cities, Trade matrix, Houses,
   // Banks, …) recenters the map on that city AND drops the shiny highlight pin — so

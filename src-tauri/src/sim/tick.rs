@@ -737,6 +737,11 @@ pub struct TickHub {
     /// Acceptance / trust in this coin, 0..1 — sticky reputation eased yearly. The
     /// strongest become reserve currencies accepted abroad. 0 = no/untrusted coin.
     #[serde(default)] pub coin_trust: f32,
+    /// The coin (hub INDEX of the issuing mint) this city actually SETTLES its trade
+    /// in — its own coin if it mints a trusted one, else the strongest reserve coin
+    /// reachable in its trade component. −1 = barter / none. Reassigned each year by
+    /// `assign_settle_coins`; drives the coin-usage overlay + per-coin breakdown.
+    #[serde(default = "neg_one_i32")] pub settle_coin: i32,
     /// Last year's mint fineness — so the coinage pass can read a sudden DEBASEMENT
     /// (a cut vs last year) and dock trust accordingly. 0 on old saves → no penalty.
     #[serde(default)] pub mint_fineness_prev: f32,
@@ -1684,6 +1689,34 @@ impl CampaignSim {
     /// DLC 3.5 · once a year: qualifying banking houses charter banks, and existing
     /// banks open counting-house branches wherever their owner has trade offices
     /// (extending the home coin's reach and booking real estate).
+    /// DLC 3.5 · once a year, decide which COIN each city settles its trade in: its
+    /// own coin if it mints a trusted one, else the strongest reserve coin reachable
+    /// in its trade component (a hard foreign coin circulates where local money is
+    /// weak/absent). Drives the coin-usage overlay + per-coin breakdown.
+    fn assign_settle_coins(&mut self) {
+        // Best (most-trusted) minting hub per connectivity component.
+        let mut best_in_comp: std::collections::HashMap<u32, (usize, f32)> = std::collections::HashMap::new();
+        for (i, h) in self.hubs.iter().enumerate() {
+            if h.is_estate || h.coin_name.is_empty() { continue; }
+            let e = best_in_comp.entry(h.component).or_insert((usize::MAX, 0.0));
+            if h.coin_trust > e.1 { *e = (i, h.coin_trust); }
+        }
+        for i in 0..self.hubs.len() {
+            if self.hubs[i].is_estate { self.hubs[i].settle_coin = -1; continue; }
+            // Settle in own coin when it's a trusted mint; else the component's
+            // strongest reserve-grade coin; else barter (−1).
+            if !self.hubs[i].coin_name.is_empty() && self.hubs[i].coin_trust >= BANK_FOUND_COIN_TRUST {
+                self.hubs[i].settle_coin = i as i32;
+            } else {
+                let comp = self.hubs[i].component;
+                self.hubs[i].settle_coin = match best_in_comp.get(&comp) {
+                    Some(&(j, trust)) if j != usize::MAX && trust >= RESERVE_TRUST_MIN => j as i32,
+                    _ => -1,
+                };
+            }
+        }
+    }
+
     fn update_banks(&mut self, _year: u32) {
         let tick = self.tick;
         // 1) Charter new banks — only once the age of banking has opened (year 20).
@@ -2847,6 +2880,7 @@ impl CampaignSim {
                 // engine reads the closed year, and HIGH-tier bubbles may POP into a
                 // regional crash.
                 self.decide_coinage(yr);
+                self.assign_settle_coins();
                 self.update_banks(yr);
                 self.update_wars(yr);
                 self.maybe_steal_quality(yr);
@@ -4923,7 +4957,7 @@ impl CampaignSim {
             estate_kind: kind, estate_tier: 1, last_upgrade_tick: self.tick, owner_house, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, mint_fineness_prev: 0.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, mint_fineness_prev: 0.0,
             // DLC 4 · seed the new estate's quality (length ng) so it's graded from
             // day one — a manufactory (kind 6) starts as a humble workshop and learns.
             quality: { let mut q = vec![0.0f32; ng]; if g0 < ng { q[g0] = if kind == 6 { 0.34 } else { 0.46 }; } q },
@@ -5323,7 +5357,7 @@ impl CampaignSim {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, mint_fineness_prev: 0.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, mint_fineness_prev: 0.0,
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
             reserve_food: 30.0, reserve_cap: 365.0, supply_years: 0.0, colony_founded_tick: self.tick,
@@ -6683,7 +6717,7 @@ mod tests {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: 0, owner_house: -1, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, mint_fineness_prev: 0.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, mint_fineness_prev: 0.0,
             quality: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,

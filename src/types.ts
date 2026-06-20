@@ -951,6 +951,19 @@ export interface CurrencyBrief {
   issuer: string;       // council house whose arms ride the coin ("" → city)
 }
 
+/** One settlement's use of a coin — for the coin-usage overlay + per-coin chart. */
+export interface CoinUseCity {
+  coin: number;          // issuing-mint hub id (which coin this city settles in)
+  coin_name: string;
+  city: number;          // the city hub id using it
+  name: string;
+  x: number;
+  y: number;
+  volume: number;        // trade settled in this coin at this city
+  mint: boolean;         // this city is the coin's own mint
+  reserve_reach: boolean; // a foreign reserve coin circulating here
+}
+
 /** One bank's balance sheet + reach. */
 export interface BankBrief {
   name: string;

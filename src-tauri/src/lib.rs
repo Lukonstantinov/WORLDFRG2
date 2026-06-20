@@ -98,6 +98,7 @@ pub fn run() {
             campaign_commands::campaign_get_poleis,
             campaign_commands::campaign_trade_flows,
             campaign_commands::campaign_get_currencies,
+            campaign_commands::campaign_coin_usage,
             campaign_commands::campaign_get_banks,
             campaign_commands::campaign_get_crashes,
             campaign_commands::campaign_get_wars,

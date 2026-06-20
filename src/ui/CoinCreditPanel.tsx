@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import { useCampaignStore } from "../state/campaignStore";
 import { useUIStore } from "../state/uiStore";
 import {
-  campaignGetCurrencies, campaignGetBanks, campaignGetCrashes, campaignGetSchematics, campaignGetWars,
+  campaignGetCurrencies, campaignGetBanks, campaignGetCrashes, campaignGetSchematics, campaignGetWars, campaignCoinUsage,
 } from "../bridge/tauri";
-import type { CurrencyBrief, BankBrief, CrashRecord, CitySchematic, WarsPayload, HouseBrief } from "../types";
+import type { CurrencyBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, HouseBrief } from "../types";
 import { CoinIcon } from "./CoinIcon";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
@@ -30,6 +30,7 @@ export function CoinCreditPanel() {
   const [crashes, setCrashes] = useState<CrashRecord[]>([]);
   const [schem, setSchem] = useState<CitySchematic[]>([]);
   const [wars, setWars] = useState<WarsPayload>({ active: [], log: [] });
+  const [coinUse, setCoinUse] = useState<CoinUseCity[]>([]);
 
   useEffect(() => {
     if (!open || !active) return;
@@ -38,7 +39,10 @@ export function CoinCreditPanel() {
     campaignGetCrashes().then(setCrashes).catch(() => setCrashes([]));
     campaignGetSchematics().then(setSchem).catch(() => setSchem([]));
     campaignGetWars().then(setWars).catch(() => setWars({ active: [], log: [] }));
+    campaignCoinUsage().then(setCoinUse).catch(() => setCoinUse([]));
   }, [open, active, tick]);
+  const coinOverlay = useUIStore((s) => s.coinOverlayHub);
+  const setCoinOverlay = useUIStore((s) => s.setCoinOverlayHub);
 
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.coin);
   if (!open) return null;
@@ -87,7 +91,12 @@ export function CoinCreditPanel() {
               <div style={{ marginTop: 2, color: "#5a7290" }}>Click a coin for the full explanation.</div>
             </div>
           )}
-          {coins.map((c, i) => <CurrencyCard key={c.hub} c={c} rank={i + 1} />)}
+          {coins.map((c, i) => (
+            <CurrencyCard key={c.hub} c={c} rank={i + 1}
+              usage={coinUse.filter((u) => u.coin === c.hub)}
+              onMap={coinOverlay === c.hub}
+              toggleMap={() => setCoinOverlay(coinOverlay === c.hub ? null : c.hub)} />
+          ))}
         </div>
       )}
 
@@ -171,12 +180,13 @@ function TrustBar({ trust, reserve }: { trust: number; reserve: boolean }) {
   );
 }
 
-function CurrencyCard({ c, rank }: { c: CurrencyBrief; rank: number }) {
+function CurrencyCard({ c, rank, usage, onMap, toggleMap }:
+  { c: CurrencyBrief; rank: number; usage: CoinUseCity[]; onMap: boolean; toggleMap: () => void }) {
   const [open, setOpen] = useState(false);
   const debased = c.fineness < 0.999;
   const strength = c.trust * c.throughput;
   return (
-    <div style={{ ...card, cursor: "pointer" }} onClick={() => setOpen((v) => !v)}>
+    <div style={{ ...card, cursor: "pointer", border: onMap ? "1px solid #3a80c0" : card.border }} onClick={() => setOpen((v) => !v)}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span style={{ color: "#6a86a6", fontSize: 9, width: 16, flex: "0 0 auto" }}>#{rank}</span>
         <CoinIcon issuer={c.issuer || c.city} value={c.value} size={22}
@@ -184,6 +194,10 @@ function CurrencyCard({ c, rank }: { c: CurrencyBrief; rank: number }) {
         <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12 }}>{c.coin_name}</span>
         <span style={{ flex: 1 }} />
         {c.is_reserve && <span style={{ color: "#37a05a", fontSize: 9, fontWeight: 700 }}>RESERVE</span>}
+        <span onClick={(e) => { e.stopPropagation(); toggleMap(); }} title="Highlight the cities that use this coin on the map"
+          style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, marginLeft: 4,
+            border: `1px solid ${onMap ? "#3a80c0" : "#24364e"}`, background: onMap ? "#19324a" : "transparent",
+            color: onMap ? "#cfe2f6" : "#7fa0c4" }}>📍 map</span>
         <span style={{ color: "#5a7290", fontSize: 10, marginLeft: 4 }}>{open ? "▾" : "▸"}</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3, flexWrap: "wrap" }}>
@@ -215,6 +229,7 @@ function CurrencyCard({ c, rank }: { c: CurrencyBrief; rank: number }) {
           <div style={{ color: c.is_reserve ? "#37a05a" : "#6a86a6", marginTop: 2 }}>
             {c.is_reserve ? "★ A RESERVE currency — held and accepted across borders." : "Not yet a reserve currency (needs ≥55% trust)."}
           </div>
+          <CoinUsageChart usage={usage} />
         </div>
       )}
     </div>
@@ -229,6 +244,69 @@ function Explain({ label, value, text }: { label: string; value: string; text: s
       <div style={{ color: "#7e93ab" }}>{text}</div>
     </div>
   );
+}
+
+const COIN_PALETTE = ["#f0d77a", "#c9a227", "#b88f20", "#9c7a1c", "#6fae8a", "#5f97c0", "#52708e"];
+
+/** Which settlements use this coin most — donut (default) / bar, from the yearly
+ *  per-city settlement snapshot. */
+function CoinUsageChart({ usage }: { usage: CoinUseCity[] }) {
+  const [mode, setMode] = useState<"donut" | "bar">("donut");
+  if (usage.length === 0) return <div style={{ color: "#56708e", fontSize: 9, marginTop: 6 }}>No settlements settle in this coin yet.</div>;
+  const sorted = [...usage].sort((a, b) => b.volume - a.volume);
+  const top = sorted.slice(0, 6);
+  const restVol = sorted.slice(6).reduce((s, u) => s + u.volume, 0);
+  const rows = top.map((u) => ({ name: u.name, vol: u.volume, mint: u.mint, reserve: u.reserve_reach }));
+  if (restVol > 0) rows.push({ name: "others", vol: restVol, mint: false, reserve: false });
+  const total = rows.reduce((s, r) => s + r.vol, 0) || 1;
+  const tag = (r: { mint: boolean; reserve: boolean }) => (r.mint ? " ★" : r.reserve ? " ⇄" : "");
+  return (
+    <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid #1b2a3c" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+        <span style={{ color: "#8aa8c8", fontSize: 10, fontWeight: 700, flex: 1 }}>Used by settlements</span>
+        <span onClick={(e) => { e.stopPropagation(); setMode("donut"); }} style={chipS(mode === "donut")}>◍</span>
+        <span onClick={(e) => { e.stopPropagation(); setMode("bar"); }} style={chipS(mode === "bar")}>▭</span>
+      </div>
+      {mode === "donut" ? (
+        <svg viewBox="0 0 240 130" width="100%">
+          {(() => {
+            let a0 = -Math.PI / 2; const cx = 56, cy = 62, r = 48, ri = 27;
+            return rows.map((rw, i) => {
+              const a1 = a0 + (rw.vol / total) * Math.PI * 2;
+              const p = (ang: number, rad: number) => `${(cx + rad * Math.cos(ang)).toFixed(1)},${(cy + rad * Math.sin(ang)).toFixed(1)}`;
+              const large = rw.vol / total > 0.5 ? 1 : 0;
+              const d = `M${p(a0, r)} A${r},${r} 0 ${large} 1 ${p(a1, r)} L${p(a1, ri)} A${ri},${ri} 0 ${large} 0 ${p(a0, ri)} Z`;
+              a0 = a1;
+              return <path key={i} d={d} fill={COIN_PALETTE[i % COIN_PALETTE.length]} stroke="#0b1420" strokeWidth={1} />;
+            });
+          })()}
+          {rows.map((rw, i) => (
+            <g key={i}>
+              <rect x={120} y={8 + i * 17 - 8} width={9} height={9} rx={2} fill={COIN_PALETTE[i % COIN_PALETTE.length]} />
+              <text x={133} y={8 + i * 17} fontSize={9} fill="#c7d6e8">{rw.name}{tag(rw)} {Math.round((rw.vol / total) * 100)}%</text>
+            </g>
+          ))}
+        </svg>
+      ) : (
+        <div>
+          {rows.map((rw, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, padding: "1px 0", fontSize: 9 }}>
+              <span style={{ width: 96, color: "#c7d6e8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rw.name}{tag(rw)}</span>
+              <div style={{ flex: 1, height: 8, background: "#16202c", borderRadius: 3, overflow: "hidden" }}>
+                <div style={{ width: `${(rw.vol / total) * 100}%`, height: "100%", background: COIN_PALETTE[i % COIN_PALETTE.length] }} />
+              </div>
+              <span style={{ width: 28, textAlign: "right", color: "#9ab0c8" }}>{Math.round((rw.vol / total) * 100)}%</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function chipS(on: boolean): React.CSSProperties {
+  return { fontSize: 11, padding: "1px 7px", borderRadius: 4, cursor: "pointer",
+    border: `1px solid ${on ? "#3a80c0" : "#24364e"}`, background: on ? "#19324a" : "transparent", color: on ? "#cfe2f6" : "#7fa0c4" };
 }
 
 function Side({ title, rows, total, totalColor }: {

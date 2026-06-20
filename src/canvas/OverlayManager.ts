@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, CultureRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter } from "../types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, CultureRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity } from "../types";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "../goods";
 import { drawGoodIcon } from "./goodIcons";
 import { latLineY } from "./projection";
@@ -145,6 +145,8 @@ export class OverlayManager {
   private windData: { samples: VectorSample[]; gridW: number; gridH: number } | null = null;
   private currentLines: Streamline[] = [];
   private tradeRoutes: TradeRoute[] = [];
+  private coinUse: CoinUseCity[] = [];
+  private coinOverlayHub: number | null = null;
   private fisheryBanks: FisheryBank[] = [];
   private sharkZones: SharkZone[] = [];
   private shipwormZones: SharkZone[] = [];
@@ -230,6 +232,12 @@ export class OverlayManager {
     // lanes onto the new routes so they keep following what's drawn.
     this.recomputeHouseNetwork();
     this.routeFuturesLanes();
+  }
+
+  /** Coin-usage overlay data + the selected coin (mint hub id) to highlight. */
+  setCoinUsage(usage: CoinUseCity[], hub: number | null) {
+    this.coinUse = usage;
+    this.coinOverlayHub = hub;
   }
 
   /** Build (once per routes array) an undirected graph whose nodes are settlement
@@ -817,6 +825,11 @@ export class OverlayManager {
       this.renderHouseControlLayer(ctx);
     }
 
+    // Coin-usage overlay: tint settlements that settle in the selected coin.
+    if (this.coinOverlayHub != null && this.coinUse.length > 0) {
+      this.renderCoinUsage(ctx);
+    }
+
     // Trade ▸ Flows highlight (always on top when set by the settlement panel).
     if (this.flowHighlight.length > 0) {
       this.renderFlowHighlight(ctx);
@@ -1164,6 +1177,38 @@ export class OverlayManager {
   /** The live merchant layer: each active family/guild route as a line coloured by
    *  the owning house (width ∝ volume, dashed overland / solid by sea), with a dot
    *  at each end to read as a round-trip corridor. */
+  /** Tint every settlement by its use of the selected coin: the mint city brightest,
+   *  heavy users solid gold, light users dim gold, reserve-reach a dashed green ring.
+   *  Cities that use a DIFFERENT coin are left as small grey dots. */
+  private renderCoinUsage(ctx: CanvasRenderingContext2D) {
+    const inv = 1 / Math.sqrt(this.currentScale);
+    const cities = this.coinUse.filter((u) => u.coin === this.coinOverlayHub);
+    let maxVol = 0;
+    for (const u of cities) maxVol = Math.max(maxVol, u.volume);
+    const base = Math.max(2, 4 * inv);
+    ctx.lineCap = "round";
+    for (const u of cities) {
+      const t = maxVol > 0 ? u.volume / maxVol : 0;
+      const r = u.mint ? base * 2.0 : base * (1.0 + 0.8 * t);
+      const cx = u.x + 0.5, cy = u.y + 0.5;
+      if (u.reserve_reach) {
+        ctx.strokeStyle = "#37a05a"; ctx.globalAlpha = 0.9;
+        ctx.lineWidth = Math.max(0.8, 1.4 * inv);
+        ctx.setLineDash([Math.max(1.5, 3 * inv), Math.max(1.5, 2 * inv)]);
+        ctx.beginPath(); ctx.arc(cx, cy, r + 3 * inv, 0, Math.PI * 2); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.fillStyle = u.mint ? "#f0d77a" : t > 0.55 ? "#c9a227" : "#7a6320";
+      ctx.globalAlpha = u.mint ? 1 : 0.55 + 0.4 * t;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+      if (u.mint) {
+        ctx.strokeStyle = "#fff3c0"; ctx.globalAlpha = 0.9; ctx.lineWidth = Math.max(0.6, 1 * inv);
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
   private renderFlowHighlight(ctx: CanvasRenderingContext2D) {
     const inv = 1 / Math.sqrt(this.currentScale);
     const W = this.worldW;
