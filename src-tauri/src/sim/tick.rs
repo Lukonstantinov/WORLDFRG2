@@ -103,6 +103,13 @@ const COLONY_MIGRATION_FRAC: f32 = 0.06;
 /// reserved for SETTLEMENT colonies; below it is poor, trade-prone land for HOUSE
 /// outposts. Keeps the two drives from cannibalising each other's sites.
 const COLONY_FERTILE_SITE: f32 = 0.45;
+/// Daily logistic population-growth rate below carrying capacity (~5%/yr peak at
+/// low population; eases to 0 at capacity). Was 0.0006 (~24%/yr — too fast).
+const POP_GROWTH_RATE: f32 = 0.0003;
+/// Daily decline rate when a city is above its carrying capacity.
+const POP_DECLINE_RATE: f32 = 0.0006;
+/// Young settlement colonies grow this much faster organically (frontier boom).
+const POP_GROWTH_COLONY_MULT: f32 = 2.2;
 /// The age of colonisation opens once the world has matured — from year 30.
 const COLONY_START_TICK: u32 = 30 * 365;
 /// A wealthy polis devotes this share of its treasury each month to sponsored
@@ -5066,7 +5073,11 @@ impl CampaignSim {
             let capacity = (self.hubs[h].founding_pop * cap_mult)
                 .max(self.hubs[h].founding_pop * 0.15);
             // Logistic step: approach capacity from below, decline when above it.
-            let rate = if pop < capacity { 0.0006 } else { 0.0012 };
+            // Slower organic growth (~5%/yr peak at low pop, was ~24%). Young
+            // SETTLEMENT colonies grow faster (frontier boom + sponsored migration on
+            // top) so they still mature into cities within a campaign.
+            let colony_boom = if self.hubs[h].colony_kind == 1 && !self.hubs[h].autonomous { POP_GROWTH_COLONY_MULT } else { 1.0 };
+            let rate = if pop < capacity { POP_GROWTH_RATE * colony_boom } else { POP_DECLINE_RATE };
             let mut new_pop = pop + rate * pop * (1.0 - pop / capacity);
             // Famine empties a city faster than trade decline alone.
             if self.hubs[h].starving > 0.5 {
