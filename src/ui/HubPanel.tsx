@@ -12,6 +12,7 @@ import { YearChronicle } from "./YearChronicle";
 import type { HouseBrief } from "../types";
 import { SettlementScene } from "./SettlementScene";
 import { FlowsView } from "./FlowsView";
+import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 /** DLC 4 · grade colour ramp (Coarse→Exquisite) for the quality labels. */
 function gradeColor(q: number): string {
@@ -168,6 +169,7 @@ export function HubPanel() {
     }
   }, [detail]);
 
+  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.settlement);
   if (selectedHub === null || !economy) return null;
   const hub = economy.hubs.find((h) => h.id === selectedHub);
   if (!hub) return null;
@@ -225,9 +227,9 @@ export function HubPanel() {
   ];
 
   return (
-    <div style={{ ...panel, width: tab === "trade" ? 600 : 360 }}>
-      {/* ── Title + stats header (always visible) ── */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+    <div data-draggable style={{ ...panel, ...rootStyle, width: tab === "trade" ? 600 : 360 }}>
+      {/* ── Title + stats header (always visible; drag handle) ── */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, cursor: "move" }} onPointerDown={onPointerDown}>
         <div>
           <div style={{ color: isTop ? "#f4c430" : hub.emporium ? "#ff8a6a" : "#e8d8b0", fontSize: 15, fontWeight: 700 }}>
             {isTop ? "🟨 " : hub.emporium ? "🔺 " : ""}{hub.name}
@@ -241,7 +243,7 @@ export function HubPanel() {
             {hub.sea_access === false && <span style={{ color: "#6a86a6" }}>{"  ·  lake/inland"}</span>}
           </div>
         </div>
-        <span onClick={() => setSelectedHub(null)}
+        <span data-no-drag onClick={() => setSelectedHub(null)}
           style={{ color: "#7090b0", cursor: "pointer", fontSize: 18, lineHeight: 1 }} title="Close">×</span>
       </div>
 

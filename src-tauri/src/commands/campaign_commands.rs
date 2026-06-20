@@ -1674,6 +1674,7 @@ pub struct HouseBrief {
     pub generation: u32,
     pub head_age: u32,       // years the current head has led
     pub specialties: Vec<String>,       // good names
+    pub top_goods: Vec<String>,         // top exported/traded goods by cumulative profit
     pub monopolies: Vec<(String, f32)>, // good name + share 0..1
     pub rivals: Vec<String>,            // rival house names
     pub defunct: bool,
@@ -1819,18 +1820,38 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
 
     let mut out: Vec<HouseBrief> = sim.houses.iter().enumerate().map(|(hi, h)| {
         let hub = h.hub as usize;
-        // Influence-ranked "Active in" list (h.influence is kept sorted desc).
-        let active: Vec<HouseCity> = h.influence.iter().map(|&(hb, infl)| {
-            let c = hb as usize;
+        // Influence-ranked "Active in" list. Estates/manufactories are NOT independent
+        // places — they belong to a settlement — so fold their influence into the
+        // PARENT settlement (an office there already links the house to that
+        // manufactory). Keep the strongest influence seen at the settlement.
+        let display_hub = |c: usize| -> usize {
+            if c < nhubs && sim.hubs[c].is_estate && sim.hubs[c].parent >= 0 {
+                sim.hubs[c].parent as usize
+            } else { c }
+        };
+        let mut agg: std::collections::HashMap<usize, f32> = std::collections::HashMap::new();
+        for &(hb, infl) in &h.influence {
+            let d = display_hub(hb as usize);
+            let e = agg.entry(d).or_insert(0.0);
+            if infl > *e { *e = infl; }
+        }
+        let mut active: Vec<HouseCity> = agg.into_iter().map(|(c, infl)| {
+            let hb = c as u32;
+            // Does this house OWN an estate/manufactory sited at this settlement? Then
+            // it's the OWNER (it just transports its own goods) rather than a buyer.
+            let owns_here = sim.hubs.iter().any(|e|
+                e.is_estate && e.owner_house == hi as i32 && e.parent == c as i32);
             let role = if hb == h.hub { "seat" }
                 else if h.bailos.contains(&hb) { "bailo" }
                 else if sim.city_dominator.get(c).copied().unwrap_or(-1) == hi as i32 { "dominant" }
+                else if owns_here { "owner" }
                 else if h.offices.contains(&hb) { "office" }
                 else { "trade" };
             let contested = c < nhubs && hub_top2[c].1 >= 0.30;
             let p = seat_pos(c);
             HouseCity { name: hub_name(hb), x: p[0], y: p[1], influence: infl, role: role.into(), contested }
         }).collect();
+        active.sort_by(|a, b| b.influence.partial_cmp(&a.influence).unwrap_or(std::cmp::Ordering::Equal));
         // A house always counts its seat among the cities listed.
         let mut ctrl_hubs = std::mem::take(&mut controlled[hi]);
         // A house that DOMINATES its seat by trade volume (>=50% of resident-house
@@ -1868,6 +1889,14 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
             generation: h.generation,
             head_age: sim.tick.saturating_sub(h.head_since) / 365,
             specialties: h.spec.iter().map(|&g| gname(g)).collect(),
+            top_goods: {
+                // Top goods this family is KNOWN FOR — most profitable goods it has
+                // traded (up to 3), so the list shows its trade identity (#14).
+                let mut tg: Vec<(usize, f32)> = h.good_profit.iter().enumerate()
+                    .filter(|(_, &p)| p > 0.0).map(|(g, &p)| (g, p)).collect();
+                tg.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                tg.into_iter().take(3).map(|(g, _)| gname(g)).collect()
+            },
             monopolies: h.monopoly.iter().map(|&(g, s)| (gname(g), s)).collect(),
             rivals: h.rivals.iter().filter_map(|&r| sim.houses.get(r).map(|x| x.name.clone())).collect(),
             defunct: h.defunct,
@@ -2597,7 +2626,16 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
     let Some(hi) = sim.hubs.iter().position(|h| h.id == id) else { return Ok(None) };
     let hidx = hi as u32;
     let (hub_x, hub_y) = (sim.hubs[hi].x, sim.hubs[hi].y);
-    let pos = |idx: u32| sim.hubs.get(idx as usize).map(|h| (h.name.clone(), h.x, h.y));
+    // Estates/manufactories are NOT independent partners — fold them into their
+    // PARENT settlement so the partner list shows real cities, not "House X
+    // Manufactory" rows (#17). `pos` resolves the (folded) settlement's name/coords.
+    let city_of = |idx: u32| -> u32 {
+        match sim.hubs.get(idx as usize) {
+            Some(x) if x.is_estate && x.parent >= 0 => x.parent as u32,
+            _ => idx,
+        }
+    };
+    let pos = |idx: u32| sim.hubs.get(city_of(idx) as usize).map(|h| (h.name.clone(), h.x, h.y));
 
     // ── Per-good last-year in/out + per-(good,partner,dir) route amounts ──
     let mut g_in: HashMap<u32, f32> = HashMap::new();
@@ -2607,12 +2645,14 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
     let mut partner_vol: HashMap<u32, f32> = HashMap::new();
     let mut partner_goods: HashMap<u32, HashMap<u32, f32>> = HashMap::new(); // partner→good→amt
     for f in sim.trade_last.iter().filter(|f| f.hub == hidx) {
+        let partner = city_of(f.partner); // fold estates/manufactories into their settlement
+        if partner == hidx { continue; }  // skip self-trade after folding (own estate)
         if f.dir == 0 { *g_in.entry(f.good).or_insert(0.0) += f.amount; }
         else { *g_out.entry(f.good).or_insert(0.0) += f.amount; }
-        g_partners.entry(f.good).or_default().insert(f.partner);
-        *route_amt.entry((f.good, f.partner, f.dir)).or_insert(0.0) += f.amount;
-        *partner_vol.entry(f.partner).or_insert(0.0) += f.amount;
-        *partner_goods.entry(f.partner).or_default().entry(f.good).or_insert(0.0) += f.amount;
+        g_partners.entry(f.good).or_default().insert(partner);
+        *route_amt.entry((f.good, partner, f.dir)).or_insert(0.0) += f.amount;
+        *partner_vol.entry(partner).or_insert(0.0) += f.amount;
+        *partner_goods.entry(partner).or_default().entry(f.good).or_insert(0.0) += f.amount;
     }
 
     // ── Goods list: union of last-year flows + historical series ──
@@ -2699,6 +2739,10 @@ pub struct HouseLedger {
     pub net: f32,
     /// Monthly wealth samples through the year (for the Accountant's wealth graph).
     pub wealth_graph: Vec<f32>,
+    /// YEARLY wealth, oldest→newest, last ~10 years (the multi-year growth graph).
+    pub wealth_years: Vec<f32>,
+    /// Campaign year of the FIRST `wealth_years` sample (for the graph's X axis).
+    pub wealth_start_year: u32,
     // Warehouse stock held at the home city (what a fire/spoilage destroys).
     pub warehouse_city: String,
     pub warehouse: Vec<LedgerLine>,
@@ -2786,6 +2830,17 @@ pub fn campaign_house_ledger(db: State<'_, WorldDb>, house: usize) -> Result<Opt
         expense_total,
         net: income_total - expense_total,
         wealth_graph: led.wealth_samples.clone(),
+        wealth_years: {
+            // Last 10 YEARLY wealth samples (oldest→newest) for the growth graph.
+            let wh = &sim.houses[house].wealth_history;
+            let n = wh.len().min(10);
+            wh[wh.len() - n..].to_vec()
+        },
+        wealth_start_year: {
+            let wh = &sim.houses[house].wealth_history;
+            let n = wh.len().min(10) as u32;
+            (sim.tick / 365).saturating_sub(n.saturating_sub(1))
+        },
         warehouse_city,
         warehouse,
     }))

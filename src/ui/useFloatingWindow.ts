@@ -5,6 +5,8 @@ import { useRef, useState, useCallback } from "react";
  *  a near-opaque dark colour with a subtle hue so text stays readable. Mirrored in
  *  docs/mockups/floating-window-tints.html. */
 export const PANEL_TINTS = {
+  settlement: "rgba(12,18,26,0.97)", // 🏙 Settlement window — neutral slate (base)
+  house: "rgba(28,20,12,0.97)",     // ⚜️ House detail popup — bronze
   coin: "rgba(18,24,14,0.97)",      // 🪙 Coin/Credit — olive-gold
   speculation: "rgba(24,16,28,0.97)", // 📈 Speculation/Poleis — plum
   houses: "rgba(26,18,16,0.97)",    // 🏛 Houses — sienna

@@ -38,6 +38,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
   const [flows, setFlows] = useState<TradeFlows | null>(null);
   const [loading, setLoading] = useState(false);
   const [selGood, setSelGood] = useState<number | null>(null);
+  const [selDir, setSelDir] = useState<number | null>(null); // null=both · 0=import · 1=export
   const [selPartner, setSelPartner] = useState<number | null>(null);
 
   // Fetch on open / when the campaign year ticks over (flows refresh yearly). Track
@@ -54,15 +55,16 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
   }, [hubId, active, tick]);
 
   // Reset selection when the settlement changes.
-  useEffect(() => { setSelGood(null); setSelPartner(null); }, [hubId]);
+  useEffect(() => { setSelGood(null); setSelDir(null); setSelPartner(null); }, [hubId]);
 
-  // Drive the map highlight from the current selection.
+  // Drive the map highlight from the current selection. A good can be narrowed to
+  // just its IMPORT (dir 0) or EXPORT (dir 1) routes via the sub-rows (#16).
   useEffect(() => {
     if (!flows) { setFlowHighlight([]); return; }
     const ax = flows.hub_x + 0.5, ay = flows.hub_y + 0.5;
     let segs: Seg[] = [];
     if (selGood != null) {
-      const rs = flows.routes.filter((r) => r.good === selGood);
+      const rs = flows.routes.filter((r) => r.good === selGood && (selDir == null || r.dir === selDir));
       const max = Math.max(...rs.map((r) => r.amount), 1e-6);
       segs = rs.map((r) => ({ ax, ay, bx: r.px + 0.5, by: r.py + 0.5, dir: r.dir, w: 1 + (r.amount / max) * 3 }));
     } else if (selPartner != null) {
@@ -71,11 +73,13 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
       segs = rs.map((r) => ({ ax, ay, bx: r.px + 0.5, by: r.py + 0.5, dir: r.dir, w: 1 + (r.amount / max) * 3 }));
     }
     setFlowHighlight(segs);
-  }, [flows, selGood, selPartner, setFlowHighlight]);
+  }, [flows, selGood, selDir, selPartner, setFlowHighlight]);
 
   const goodRoutes = useMemo(
-    () => (flows && selGood != null ? flows.routes.filter((r) => r.good === selGood) : []),
-    [flows, selGood]);
+    () => (flows && selGood != null
+      ? flows.routes.filter((r) => r.good === selGood && (selDir == null || r.dir === selDir))
+      : []),
+    [flows, selGood, selDir]);
 
   if (!active) return <Note>Realized trade appears once a campaign is running.</Note>;
   if (loading && !flows) return <Note>Loading trade flows…</Note>;
@@ -93,25 +97,44 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
         const meta = GOOD_META.get(g.name);
         const sel = selGood === g.good;
         return (
-          <div key={g.good} onClick={() => { setSelGood(sel ? null : g.good); setSelPartner(null); }}
+          <div key={g.good}
             style={{ ...row, background: sel ? "#1a2a3c" : "transparent", cursor: "pointer", flexWrap: "wrap" }}>
-            <span style={{ width: 16 }}>{meta?.emoji ?? "•"}</span>
-            <span style={{ flex: 1, minWidth: 70, color: sel ? "#cfe2f6" : "#c7d6e8" }}>{meta?.label ?? g.name}</span>
-            <div style={{ flex: 1.4, minWidth: 60, height: 7, background: "#16202c", borderRadius: 3, overflow: "hidden" }}>
-              <div style={{ width: `${(g.avg_volume / maxAvg) * 100}%`, height: "100%", background: meta?.color ?? "#5a8fc0" }} />
-            </div>
-            <span style={{ width: 52, textAlign: "right", color: "#9fb4cc" }}>{fmt(g.avg_volume)}/yr</span>
-            <span style={{ width: 40, textAlign: "right", color: "#6a86a6", fontSize: 9 }}>
-              {g.in_volume >= g.out_volume ? "▼in" : "▲out"} {g.route_count}r
-            </span>
-            {sel && (
-              <div style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "3px 0 1px 16px" }}>
-                <Spark vals={g.history} />
-                <span style={{ color: "#7a90a8", fontSize: 9 }}>
-                  last yr {fmt(g.last_volume)} · {g.history.length}-yr trend
-                  {g.history.length >= 2 && g.last_volume < Math.max(...g.history) * 0.6 ? " · ⚠ fallen" : ""}
-                </span>
+            {/* Parent row → combined (both directions). */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, width: "100%" }}
+              onClick={() => { setSelGood(sel ? null : g.good); setSelDir(null); setSelPartner(null); }}>
+              <span style={{ width: 16 }}>{sel ? "▾" : "▸"}</span>
+              <span style={{ width: 16 }}>{meta?.emoji ?? "•"}</span>
+              <span style={{ flex: 1, minWidth: 70, color: sel ? "#cfe2f6" : "#c7d6e8" }}>{meta?.label ?? g.name}</span>
+              <div style={{ flex: 1.4, minWidth: 60, height: 7, background: "#16202c", borderRadius: 3, overflow: "hidden" }}>
+                <div style={{ width: `${(g.avg_volume / maxAvg) * 100}%`, height: "100%", background: meta?.color ?? "#5a8fc0" }} />
               </div>
+              <span style={{ width: 52, textAlign: "right", color: "#9fb4cc" }}>{fmt(g.avg_volume)}/yr</span>
+              <span style={{ width: 40, textAlign: "right", color: "#6a86a6", fontSize: 9 }}>
+                {g.in_volume >= g.out_volume ? "▼in" : "▲out"} {g.route_count}r
+              </span>
+            </div>
+            {sel && (
+              <>
+                {/* Export / Import sub-rows — independent amounts + routes (#16). */}
+                <div style={{ width: "100%", display: "flex", gap: 6, padding: "2px 0 0 32px" }}>
+                  {([[1, "out ▶ export", "#ffce5f", g.out_volume], [0, "◀ in import", "#5fd0ff", g.in_volume]] as const).map(([d, lbl, col, vol]) => (
+                    <div key={d} onClick={(e) => { e.stopPropagation(); setSelGood(g.good); setSelDir(selDir === d ? null : d); setSelPartner(null); }}
+                      style={{ flex: 1, display: "flex", alignItems: "center", gap: 5, padding: "1px 5px", borderRadius: 3, cursor: "pointer",
+                        background: selDir === d ? "#23384e" : "#101a26", border: `1px solid ${selDir === d ? col : "transparent"}` }}>
+                      <span style={{ color: col, fontSize: 9 }}>{lbl}</span>
+                      <span style={{ flex: 1 }} />
+                      <span style={{ color: "#9fb4cc", fontSize: 9 }}>{fmt(vol)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "3px 0 1px 32px" }}>
+                  <Spark vals={g.history} />
+                  <span style={{ color: "#7a90a8", fontSize: 9 }}>
+                    last yr {fmt(g.last_volume)} · {g.history.length}-yr trend
+                    {g.history.length >= 2 && g.last_volume < Math.max(...g.history) * 0.6 ? " · ⚠ fallen" : ""}
+                  </span>
+                </div>
+              </>
             )}
           </div>
         );
@@ -120,7 +143,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
       {/* ── Selected good's routes ── */}
       {selGood != null && (
         <>
-          <div style={hdr}>Routes — {GOOD_META.get(flows.goods.find((x) => x.good === selGood)?.name ?? "")?.label ?? "good"}
+          <div style={hdr}>{selDir === 1 ? "Export routes" : selDir === 0 ? "Import routes" : "Routes"} — {GOOD_META.get(flows.goods.find((x) => x.good === selGood)?.name ?? "")?.label ?? "good"}
             <span style={{ color: "#5a7290", fontWeight: 400 }}> (largest flows first)</span></div>
           {goodRoutes.length === 0 && (() => {
             const g = flows.goods.find((x) => x.good === selGood);

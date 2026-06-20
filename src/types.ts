@@ -512,6 +512,7 @@ export interface HouseBrief {
   generation: number;
   head_age: number;    // years the current head has led
   specialties: string[];
+  top_goods: string[];            // top exported/traded goods (what the house is known for)
   monopolies: [string, number][]; // good name + share 0..1
   rivals: string[];
   defunct: boolean;
@@ -586,6 +587,8 @@ export interface HouseLedger {
   expense_total: number;
   net: number;
   wealth_graph: number[];
+  wealth_years: number[];      // yearly wealth, oldest→newest (~last 10 years)
+  wealth_start_year: number;   // campaign year of the first wealth_years sample
   // Warehouse stock at the home city
   warehouse_city: string;
   warehouse: LedgerLine[];

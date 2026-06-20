@@ -153,6 +153,11 @@ export function HousesPanel() {
                   ))}
                 </div>
               )}
+              {h.top_goods && h.top_goods.length > 0 && (
+                <div style={{ color: "#8fbf9a", fontSize: 10, marginTop: 1 }} title="Top goods this family is known for exporting (by profit)">
+                  known for {h.top_goods.map((g) => `${goodIcon(g)} ${g}`).join(" · ")}
+                </div>
+              )}
               {h.monopolies.length > 0 && (
                 <div style={{ color: "#e0b060", fontSize: 10 }}>
                   {h.monopolies.map(([g, s]) => `${goodIcon(g)} ${g} ${Math.round(s * 100)}%`).join(" · ")} of the trade
@@ -232,6 +237,7 @@ function HouseDetail({ h, onClose, onChronicle }:
   const [ledger, setLedger] = useState<HouseLedger | null>(null);
   const [bank, setBank] = useState<BankBrief | null>(null);
   const [view, setView] = useState<"summary" | "bank" | "ledger">("summary");
+  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.house);
   const tick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
   useEffect(() => {
     let alive = true;
@@ -258,15 +264,15 @@ function HouseDetail({ h, onClose, onChronicle }:
     </div>
   );
   return (
-    <div style={detailPanel}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 3 }}>
+    <div data-draggable style={{ ...detailPanel, ...rootStyle }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 3, cursor: "move" }} onPointerDown={onPointerDown}>
         <span style={{ width: 10, height: 10, borderRadius: 2, background: h.is_guild ? dull(h.color ?? "") : (h.color ?? "#888"), alignSelf: "center" }} />
         {h.owns_bank && <span title="This family owns a chartered bank" style={{ fontSize: 11 }}>🏦</span>}
         <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 13,
           textDecoration: h.owns_bank ? "underline" : "none", textDecorationColor: "#c9a227" }}>{h.name}</span>
         {h.is_guild && <span style={{ fontSize: 8, color: "#7fd0c0" }}>GUILD</span>}
         <span style={{ flex: 1 }} />
-        <span onClick={onClose} style={{ color: "#7090b0", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</span>
+        <span data-no-drag onClick={onClose} style={{ color: "#7090b0", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</span>
       </div>
       <div style={{ color: "#9ab0c8", fontSize: 10 }}>{h.head_name} · of {h.home_name} · gen {h.generation}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -302,14 +308,14 @@ function HouseDetail({ h, onClose, onChronicle }:
               </div>
               {h.active.slice(0, 12).map((c, i) => {
                 const mark = c.role === "seat" ? "👑" : c.role === "bailo" ? "🏛️"
-                  : c.role === "dominant" ? "◆" : c.role === "office" ? "◇" : "·";
+                  : c.role === "owner" ? "🏭" : c.role === "dominant" ? "◆" : c.role === "office" ? "◇" : "·";
                 const roleColor = c.role === "seat" ? "#f4c430" : c.role === "bailo" ? "#e0863a"
-                  : c.role === "dominant" ? "#cfe2f6" : "#9fb4cc";
+                  : c.role === "owner" ? "#d8a85a" : c.role === "dominant" ? "#cfe2f6" : "#9fb4cc";
                 return (
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, padding: "1px 0" }}>
                     <span style={{ width: 16, textAlign: "center" }}>{mark}</span>
                     <span style={{ flex: 1, minWidth: 0, color: roleColor, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11 }}>
-                      {c.name}{c.role === "bailo" ? " · BAILO" : c.role === "dominant" ? " · dominates" : ""}
+                      {c.name}{c.role === "bailo" ? " · BAILO" : c.role === "dominant" ? " · dominates" : c.role === "owner" ? " · owns works here" : c.role === "office" ? " · office" : ""}
                       {c.contested && <span style={{ color: "#e08a8a" }}> ⚔</span>}
                     </span>
                     <div style={{ width: 54, height: 6, background: "#16202c", borderRadius: 3, overflow: "hidden" }}>
@@ -478,7 +484,13 @@ function LedgerView({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string }) 
         <span style={{ color: "#cfe0f4", fontWeight: 700, fontSize: 11 }}>NET</span>
         <span style={{ color: l.net >= 0 ? "#9fe0a8" : "#e88", fontWeight: 700, fontSize: 11 }}>{l.net >= 0 ? "+" : "−"}{fmt(Math.abs(l.net))}</span>
       </div>
-      {l.wealth_graph.length >= 2 && <WealthGraph data={l.wealth_graph} fmt={fmt} />}
+      {((l.wealth_years?.length ?? 0) >= 2 || l.wealth_graph.length >= 2) && (
+        <WealthGraph
+          data={(l.wealth_years?.length ?? 0) >= 2 ? l.wealth_years : l.wealth_graph}
+          startYear={l.wealth_start_year ?? 0}
+          yearly={(l.wealth_years?.length ?? 0) >= 2}
+          fmt={fmt} />
+      )}
       {l.warehouse.length > 0 && (
         <div>
           <div style={head}>Warehouse · {l.warehouse_city}</div>
@@ -489,28 +501,47 @@ function LedgerView({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string }) 
   );
 }
 
-/** Wealth-through-the-year sparkline (monthly samples) for the Accountant. */
-function WealthGraph({ data, fmt }: { data: number[]; fmt: (v: number) => string }) {
-  const W = 244, H = 46, pad = 3;
+/** Wealth graph for the Accountant. With `yearly` it plots the family's wealth over
+ *  the past ~10 YEARS (X = campaign year, Y = wealth) with real axis labels; else it
+ *  falls back to the within-year monthly samples. */
+function WealthGraph({ data, startYear, yearly, fmt }:
+  { data: number[]; startYear: number; yearly: boolean; fmt: (v: number) => string }) {
+  const W = 252, H = 80, padL = 42, padR = 6, padT = 10, padB = 16;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
   const max = Math.max(...data), min = Math.min(...data);
-  const span = max - min || 1;
-  const pts = data.map((v, i) => {
-    const x = pad + (i / (data.length - 1)) * (W - 2 * pad);
-    const y = pad + (1 - (v - min) / span) * (H - 2 * pad);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
+  const span = max - min || Math.abs(max) || 1;
+  const X = (i: number) => padL + (data.length <= 1 ? 0 : (i / (data.length - 1)) * plotW);
+  const Y = (v: number) => padT + (1 - (v - min) / span) * plotH;
+  const pts = data.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
   const up = data[data.length - 1] >= data[0];
   const stroke = up ? "#9fe0a8" : "#e8a0a0";
+  const growth = data[0] !== 0 ? ((data[data.length - 1] - data[0]) / Math.abs(data[0])) * 100 : 0;
+  const mid = (max + min) / 2;
   return (
     <div style={{ marginTop: 7 }}>
-      <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 2 }}>Wealth through the year</div>
-      <svg width={W} height={H} style={{ display: "block", background: "#0a1119", border: "1px solid #1b2a3c", borderRadius: 3 }}>
-        <polyline points={pts} fill="none" stroke={stroke} strokeWidth={1.5} strokeLinejoin="round" />
-      </svg>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#7a8aa0", marginTop: 1 }}>
-        <span>start {fmt(data[0])}</span>
-        <span style={{ color: stroke }}>end {fmt(data[data.length - 1])}</span>
+      <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 2 }}>
+        Wealth — {yearly ? `past ${data.length} year${data.length > 1 ? "s" : ""}` : "through the year"}
+        <span style={{ color: stroke, marginLeft: 6, fontWeight: 700 }}>{up ? "▲" : "▼"} {growth >= 0 ? "+" : ""}{growth.toFixed(0)}%</span>
       </div>
+      <svg width={W} height={H} style={{ display: "block", background: "#0a1119", border: "1px solid #1b2a3c", borderRadius: 3 }}>
+        {/* Axes */}
+        <line x1={padL} y1={padT} x2={padL} y2={padT + plotH} stroke="#26384c" strokeWidth={1} />
+        <line x1={padL} y1={padT + plotH} x2={W - padR} y2={padT + plotH} stroke="#26384c" strokeWidth={1} />
+        {/* Y grid + labels (max / mid / min) */}
+        {[max, mid, min].map((v, k) => (
+          <g key={k}>
+            <line x1={padL} y1={Y(v)} x2={W - padR} y2={Y(v)} stroke="#13202c" strokeWidth={1} />
+            <text x={padL - 3} y={Y(v) + 3} textAnchor="end" fill="#6a86a6" fontSize={8}>{fmt(v)}</text>
+          </g>
+        ))}
+        <polyline points={pts} fill="none" stroke={stroke} strokeWidth={1.6} strokeLinejoin="round" />
+        <circle cx={X(data.length - 1)} cy={Y(data[data.length - 1])} r={2.2} fill={stroke} />
+        {/* X labels (first / last) */}
+        <text x={padL} y={H - 4} fill="#7a8aa0" fontSize={8}>{yearly ? `yr ${startYear}` : "start"}</text>
+        <text x={W - padR} y={H - 4} textAnchor="end" fill="#7a8aa0" fontSize={8}>
+          {yearly ? `yr ${startYear + data.length - 1}` : "now"}
+        </text>
+      </svg>
     </div>
   );
 }

@@ -1190,6 +1190,32 @@ export class OverlayManager {
       ctx.strokeStyle = color;
       ctx.globalAlpha = 0.22; ctx.lineWidth = w * 3; drawPolyline();
       ctx.globalAlpha = 0.95; ctx.lineWidth = w; drawPolyline();
+      // Directional chevrons ALONG the line (-->-- inbound · --<-- outbound) so the
+      // flow direction reads at a glance, not just at the endpoint.
+      {
+        const spacing = Math.max(12, 30 * inv);
+        const ah = Math.max(2.5, 5 * inv);
+        ctx.strokeStyle = color; ctx.globalAlpha = 0.9;
+        ctx.lineWidth = Math.max(0.8, 1.3 * inv);
+        for (let i = 0; i < pts.length - 1; i++) {
+          const [x0, y0] = pts[i], [x1, y1] = pts[i + 1];
+          if (W > 0 && Math.abs(x1 - x0) > W / 2) continue; // skip the wrap-seam segment
+          let dx = x1 - x0, dy = y1 - y0;
+          const segLen = Math.hypot(dx, dy);
+          if (segLen < 1e-3) continue;
+          dx /= segLen; dy /= segLen;
+          if (inbound) { dx = -dx; dy = -dy; } // chevrons point toward the receiving city
+          const ang = Math.atan2(dy, dx);
+          for (let d = spacing * 0.5; d < segLen; d += spacing) {
+            const cx = x0 + (x1 - x0) * (d / segLen), cy = y0 + (y1 - y0) * (d / segLen);
+            ctx.beginPath();
+            ctx.moveTo(cx - ah * Math.cos(ang - 0.55), cy - ah * Math.sin(ang - 0.55));
+            ctx.lineTo(cx, cy);
+            ctx.lineTo(cx - ah * Math.cos(ang + 0.55), cy - ah * Math.sin(ang + 0.55));
+            ctx.stroke();
+          }
+        }
+      }
       // Arrowhead at the receiving end (city for inbound = path start, partner for
       // outbound = path end), aligned to that final leg.
       const [tx, ty, fx, fy] = inbound

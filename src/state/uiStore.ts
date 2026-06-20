@@ -115,6 +115,10 @@ interface UIStore {
   showNews: boolean;
   /** DLC 4 · the floating Goods (quality & trade) window. */
   showGoodsWindow: boolean;
+  /** Chrome visibility — lets the user hide the left workflow panel and the right
+   *  toolbar to get a clean map with just the floating window bar. */
+  showWorkflow: boolean;
+  showToolbar: boolean;
   /** Goods & Chains review window open (always shown before goods generation). */
   chainReviewOpen: boolean;
   /** Action run when the user confirms "Generate" in the chain-review window
@@ -165,6 +169,8 @@ interface UIStore {
   setShowCoinCredit: (v: boolean) => void;
   setShowNews: (v: boolean) => void;
   setShowGoodsWindow: (v: boolean) => void;
+  setShowWorkflow: (v: boolean) => void;
+  setShowToolbar: (v: boolean) => void;
   openChainReview: (onConfirm?: () => void) => void;
   closeChainReview: () => void;
 }
@@ -238,6 +244,8 @@ export const useUIStore = create<UIStore>((set) => ({
   showCoinCredit: false,
   showNews: false,
   showGoodsWindow: false,
+  showWorkflow: true,
+  showToolbar: true,
   chainReviewOpen: false,
   chainReviewConfirm: null,
 
@@ -314,6 +322,8 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowCoinCredit: (v) => set({ showCoinCredit: v }),
   setShowNews: (v) => set({ showNews: v }),
   setShowGoodsWindow: (v) => set({ showGoodsWindow: v }),
+  setShowWorkflow: (v) => set({ showWorkflow: v }),
+  setShowToolbar: (v) => set({ showToolbar: v }),
   openChainReview: (onConfirm) => set({ chainReviewOpen: true, chainReviewConfirm: onConfirm ?? null }),
   closeChainReview: () => set({ chainReviewOpen: false, chainReviewConfirm: null }),
 

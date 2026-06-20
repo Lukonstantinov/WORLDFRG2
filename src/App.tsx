@@ -26,6 +26,7 @@ import { GoodsChainReview } from "./ui/GoodsChainReview";
 import { GoodDetailPanel } from "./ui/GoodDetailPanel";
 import { ImportWorldDialog } from "./ui/ImportWorldDialog";
 import { SettingsPanel } from "./ui/SettingsPanel";
+import { WindowBar } from "./ui/WindowBar";
 import { useWorldStore } from "./state/worldStore";
 import { useUIStore } from "./state/uiStore";
 import { useViewportStore } from "./state/viewportStore";
@@ -263,6 +264,8 @@ export default function App() {
   const setLakes = useWorldStore((s) => s.setLakes);
   const setSettlements = useWorldStore((s) => s.setSettlements);
   const setEconomy = useWorldStore((s) => s.setEconomy);
+  const showWorkflow = useUIStore((s) => s.showWorkflow);
+  const showToolbar = useUIStore((s) => s.showToolbar);
   const markStepCompleted = useUIStore((s) => s.markStepCompleted);
   const setStepsCompleted = useUIStore((s) => s.setStepsCompleted);
   const setWorkflowStep = useUIStore((s) => s.setWorkflowStep);
@@ -521,12 +524,13 @@ export default function App() {
 
       {/* Main layout: workflow | map | toolbar */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        {/* Left: Workflow panel */}
-        {isLoaded && <WorkflowPanel />}
+        {/* Left: Workflow panel (toggleable via the window bar) */}
+        {isLoaded && showWorkflow && <WorkflowPanel />}
 
         {/* Center: Map */}
         <div style={{ flex: 1, position: "relative", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
           <MapCanvas />
+          {isLoaded && <WindowBar />}
           <InfoPanel />
           <HubPanel />
           <GoodFlowPanel />
@@ -546,8 +550,8 @@ export default function App() {
           <ElevationHistogram />
         </div>
 
-        {/* Right: Toolbar */}
-        <Toolbar />
+        {/* Right: Toolbar (toggleable via the window bar) */}
+        {showToolbar && <Toolbar />}
       </div>
 
       <StatusBar />
