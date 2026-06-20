@@ -2788,7 +2788,11 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
 
     // ── Goods list: union of last-year flows + historical series ──
     let mut hist_by_good: HashMap<u32, &Vec<f32>> = HashMap::new();
-    for h in sim.trade_hist.iter().filter(|h| h.hub == id) { hist_by_good.insert(h.good, &h.vols); }
+    // `trade_hist` is keyed by the sim's ARRAY INDEX (`hidx`), exactly like `trade_last`
+    // above — NOT the external settlement `id`. Filtering by `id` here left the history
+    // empty whenever id≠index, so the avg showed "0.0/yr" and a "0-yr trend" even though
+    // last-year flows (3.4k) were present.
+    for h in sim.trade_hist.iter().filter(|h| h.hub == hidx) { hist_by_good.insert(h.good, &h.vols); }
     let mut good_ids: std::collections::HashSet<u32> = std::collections::HashSet::new();
     for &g in g_in.keys().chain(g_out.keys()) { good_ids.insert(g); }
     for &g in hist_by_good.keys() { good_ids.insert(g); }

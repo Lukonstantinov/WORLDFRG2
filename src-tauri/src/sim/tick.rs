@@ -1885,11 +1885,16 @@ impl CampaignSim {
             let nloans = self.banks[bi].loans.len();
             let mut interest_income = 0.0f32;
             let mut writeoff = 0.0f32;
+            let mut principal_repaid = 0.0f32; // note-funded credit returned → retire notes
+            let mut cash_repaid = 0.0f32;      // specie returned on a cash-funded loan
             let mut keep = vec![true; nloans];
             for li in 0..nloans {
-                let (bh, bp, outstanding, principal, rate, term) = {
+                let (bh, bp, outstanding, principal, rate, term, cash_funded) = {
                     let l = &self.banks[bi].loans[li];
-                    (l.borrower_house, l.borrower_polis, l.outstanding, l.principal, l.rate, l.term_ticks)
+                    // Colony ventures are staked with hard specie OUT of reserves; every
+                    // other loan is funded by ISSUING NOTES (credit creation).
+                    (l.borrower_house, l.borrower_polis, l.outstanding, l.principal, l.rate,
+                     l.term_ticks, l.purpose == "colony")
                 };
                 if outstanding <= EPS { keep[li] = false; continue; }
                 let due = outstanding * rate;
@@ -1906,6 +1911,14 @@ impl CampaignSim {
                 } else { false };
                 if paid {
                     interest_income += due;
+                    // The borrower returns principal. A note-funded loan RETIRES the
+                    // notes it created (liability ↓); a cash loan returns specie to
+                    // reserves (asset ↑). Either way equity is conserved and only the
+                    // INTEREST is profit. (Previously the principal repayment simply
+                    // vanished — neither booked to reserves nor used to retire notes —
+                    // so equity bled ~`amort` per loan per month and EVERY bank went
+                    // insolvent within a few years, then its failure cascaded a crash.)
+                    if cash_funded { cash_repaid += amort; } else { principal_repaid += amort; }
                     let rem = (outstanding - amort).max(0.0);
                     self.banks[bi].loans[li].outstanding = rem;
                     if rem <= EPS { keep[li] = false; }
@@ -1920,7 +1933,8 @@ impl CampaignSim {
                         text: format!("writes off a loan of {:.0} in default", outstanding) });
                 }
             }
-            self.banks[bi].reserves += interest_income;
+            self.banks[bi].reserves += interest_income + cash_repaid;
+            self.banks[bi].notes_issued = (self.banks[bi].notes_issued - principal_repaid).max(0.0);
             self.banks[bi].interest_earned += interest_income;
             self.banks[bi].losses += writeoff;
             let mut idx = 0;
