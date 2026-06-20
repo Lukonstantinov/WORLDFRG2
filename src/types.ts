@@ -299,6 +299,13 @@ export interface ShipmentRow {
   returning_home: boolean;
 }
 /** Full live per-settlement detail (sentiment + market + history). */
+export interface CoinShare {
+  coin_name: string;
+  share: number;   // 0..1 of the city's circulation
+  main: boolean;   // the city's main settling coin
+  reserve: boolean; // a foreign reserve coin circulating here
+}
+
 export interface HubDetail {
   id: number;
   name: string;
@@ -356,6 +363,7 @@ export interface HubDetail {
   coin_name?: string;
   coin_trust?: number;
   coin_value?: number;
+  coin_basket?: CoinShare[];         // which coins circulate here + share (main first)
   transit?: TransitRow[];            // carrying trade through this city's merchants
   stolen_good?: string;              // espionage: good whose technique this estate stole
   stolen_from?: string;              // city it was stolen from ("" = none)

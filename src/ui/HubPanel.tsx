@@ -4,7 +4,7 @@ import { useWorldStore } from "../state/worldStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { campaignGetHub, campaignGetColony, campaignWarehouses, campaignFuturesLanes } from "../bridge/tauri";
-import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane, ColonyDetail } from "../types";
+import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane, ColonyDetail, CoinShare } from "../types";
 import { climatePhrase } from "./climate";
 import { CoatOfArms, houseColor } from "./CoatOfArms";
 import { CoinIcon } from "./CoinIcon";
@@ -265,7 +265,12 @@ export function HubPanel() {
 
       {/* ════════════ CITY / ESTATE SCHEMATIC ════════════ */}
       {tab === "city" && detail && (
-        <SettlementScene detail={detail} />
+        <>
+          <SettlementScene detail={detail} />
+          {detail.coin_basket && detail.coin_basket.length > 0 && (
+            <CurrencyBasket basket={detail.coin_basket} />
+          )}
+        </>
       )}
       {tab === "city" && !detail && (
         <div style={{ color: "#7a8aa0", fontSize: 11, padding: "8px 2px" }}>
@@ -1509,6 +1514,48 @@ function DualSpark({ local, world }: { local: number[]; world: number[] }) {
       <polyline points={path(world)} fill="none" stroke="#8aa0c0" strokeWidth={1} strokeDasharray="3 2" />
       <polyline points={path(local)} fill="none" stroke="#e0c060" strokeWidth={1.4} />
     </svg>
+  );
+}
+
+const BASKET_PALETTE = ["#f0d77a", "#c9a227", "#6fae8a", "#5f97c0", "#52708e"];
+
+/** The city's currency basket as a small donut + legend — which coins circulate
+ *  here and their share (main ★, foreign reserve ⇄). */
+function CurrencyBasket({ basket }: { basket: CoinShare[] }) {
+  const rows = basket.slice(0, 5);
+  const total = rows.reduce((s, b) => s + b.share, 0) || 1;
+  const cx = 34, cy = 34, r = 28, ri = 15;
+  let a0 = -Math.PI / 2;
+  return (
+    <div style={{ marginTop: 8, padding: "6px 8px", background: "#0b1622", border: "1px solid #1e2e42", borderRadius: 6 }}>
+      <div style={{ color: "#7fa0c4", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600, marginBottom: 4 }}>
+        Currency in circulation
+      </div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <svg width={68} height={68} viewBox="0 0 68 68" style={{ flex: "0 0 auto" }}>
+          {rows.map((b, i) => {
+            const a1 = a0 + (b.share / total) * Math.PI * 2;
+            const p = (ang: number, rad: number) => `${(cx + rad * Math.cos(ang)).toFixed(1)},${(cy + rad * Math.sin(ang)).toFixed(1)}`;
+            const large = b.share / total > 0.5 ? 1 : 0;
+            const d = `M${p(a0, r)} A${r},${r} 0 ${large} 1 ${p(a1, r)} L${p(a1, ri)} A${ri},${ri} 0 ${large} 0 ${p(a0, ri)} Z`;
+            a0 = a1;
+            return <path key={i} d={d} fill={BASKET_PALETTE[i % BASKET_PALETTE.length]} stroke="#0b1420" strokeWidth={0.8} />;
+          })}
+        </svg>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {rows.map((b, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, padding: "1px 0" }}>
+              <span style={{ width: 9, height: 9, borderRadius: 2, background: BASKET_PALETTE[i % BASKET_PALETTE.length], flex: "0 0 auto" }} />
+              <span style={{ flex: 1, color: b.main ? "#e8dcc0" : "#c0d0e0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {b.coin_name}{b.main ? " ★" : b.reserve ? " ⇄" : ""}
+              </span>
+              <span style={{ color: "#9ab0c8" }}>{Math.round((b.share / total) * 100)}%</span>
+            </div>
+          ))}
+          <div style={{ color: "#5a7290", fontSize: 8.5, marginTop: 2 }}>★ main coin · ⇄ foreign reserve</div>
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -422,6 +422,15 @@ pub struct Government {
     pub spec_watch: Vec<String>,
 }
 
+/// One coin in a city's currency basket (for the settlement-view pie).
+#[derive(Serialize)]
+pub struct CoinShare {
+    pub coin_name: String,
+    pub share: f32,    // 0..1 of the city's circulation
+    pub main: bool,    // the city's main settling coin
+    pub reserve: bool, // a foreign reserve coin circulating here
+}
+
 /// Full per-settlement detail for the redesigned settlement window (live campaign
 /// state): sentiment, market, and history.
 #[derive(Serialize)]
@@ -496,6 +505,9 @@ pub struct HubDetail {
     #[serde(default)] pub coin_name: String,
     #[serde(default)] pub coin_trust: f32,
     #[serde(default)] pub coin_value: f32,
+    /// The city's CURRENCY BASKET — which coins circulate here and their share
+    /// (main coin first). For the settlement-view currency-basket pie.
+    #[serde(default)] pub coin_basket: Vec<CoinShare>,
     /// Carrying trade: in-flight shipments THIS city's merchants run between OTHER
     /// cities (the entrepôt "transit" — goods that pass through its houses' hands).
     #[serde(default)] pub transit: Vec<TransitRow>,
@@ -1531,6 +1543,17 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
     } else { String::new() };
     let coin_value = if hub.coin_name.is_empty() { 0.0 }
         else { crate::sim::tick::coin_value(hub.mint_fineness, hub.coin_trust) };
+    // Currency basket: which coins circulate here + their share (main coin first).
+    let coin_basket: Vec<CoinShare> = hub.coin_basket.iter().filter_map(|&(k, share)| {
+        let c = sim.hubs.get(k as usize)?;
+        if c.coin_name.is_empty() { return None; }
+        Some(CoinShare {
+            coin_name: c.coin_name.clone(),
+            share,
+            main: hub.settle_coin == k as i32,
+            reserve: hub.settle_coin != k as i32 && c.coin_trust >= 0.55,
+        })
+    }).collect();
 
     Ok(Some(HubDetail {
         id: hub.id,
@@ -1585,6 +1608,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         coin_name: hub.coin_name.clone(),
         coin_trust: hub.coin_trust,
         coin_value,
+        coin_basket,
         transit,
         stolen_good: if hub.stolen_good >= 0 {
             sim.goods.get(hub.stolen_good as usize).map(|g| g.name.clone()).unwrap_or_default()

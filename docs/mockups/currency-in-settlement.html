@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Currency in the settlement view — basket pie + contract coin</title>
+<style>
+  :root { --bg:#0b1420; --panel:#0c141e; --text:#cfe2f6; --muted:#7fa0c4; --accent:#3a80c0; --gold:#c9a227; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui,sans-serif; padding:26px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.lead { color:var(--muted); max-width:900px; margin:0 0 20px; }
+  .row { display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start; }
+  .win { width:340px; background:rgba(12,18,26,0.97); border:1px solid #24364e; border-radius:8px; padding:12px 14px; box-shadow:0 8px 30px rgba(0,0,0,.5); }
+  .tabs { display:flex; gap:2px; border-bottom:1px solid #1e2e42; margin:6px 0 8px; font-size:11px; }
+  .tabs span { padding:4px 8px; color:#6a86a6; } .tabs .on { color:#cfe2f6; font-weight:700; border-bottom:2px solid var(--accent); }
+  .title { color:#e8d8b0; font-size:15px; font-weight:700; }
+  .sub { color:#8aa0c0; font-size:10px; margin-bottom:6px; }
+  .basket { margin-top:8px; padding:6px 8px; background:#0b1622; border:1px solid #1e2e42; border-radius:6px; }
+  .bhead { color:#7fa0c4; font-size:10px; text-transform:uppercase; letter-spacing:.4px; font-weight:600; margin-bottom:4px; }
+  .brow { display:flex; align-items:center; gap:5px; font-size:10px; padding:1px 0; }
+  .sw { width:9px; height:9px; border-radius:2px; flex:0 0 auto; }
+  .leg { color:#5a7290; font-size:8.5px; margin-top:2px; }
+  .ctile { display:inline-block; background:#0e1925; border:1px solid #1c2c40; border-radius:4px; padding:2px 7px; margin:2px 3px 0 0; }
+  .ctile .l { color:#6a86a6; font-size:8px; text-transform:uppercase; } .ctile .v { color:#cfe2f6; font-size:11px; font-weight:700; }
+  code { background:#0e1a26; padding:1px 5px; border-radius:4px; color:#bcd7f2; }
+  ul { color:var(--muted); max-width:1000px; }
+</style>
+</head>
+<body>
+  <h1>Currency in the settlement view</h1>
+  <p class="lead">As implemented: the <b>settlement window → City tab</b> now shows a <b>currency-basket donut</b>
+     (which coins circulate in the city + their share, main ★ / foreign reserve ⇄), and the <b>Coin &amp; Credit →
+     Currencies</b> coin cards gained <b>circulating amount + held-in</b> stats. Contracts are <b>struck in the
+     buyer city's main coin</b> (tagged in the model; the issuing polis earns seigniorage as its coin circulates).</p>
+
+  <div class="row">
+    <!-- Settlement window: City tab with currency basket -->
+    <div class="win">
+      <div class="title">🟨 Inveriduros</div>
+      <div class="sub">★★★ · wealth rank #1/681 · coastal</div>
+      <div class="tabs"><span>Summary</span><span class="on">City</span><span>Government</span><span>Trade</span><span>Estates</span><span>People</span></div>
+      <div style="color:#8aa0c0; font-size:11px;">… building schematic …</div>
+      <div class="basket">
+        <div class="bhead">Currency in circulation</div>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <svg id="pie" width="68" height="68" viewBox="0 0 68 68" style="flex:0 0 auto;"></svg>
+          <div style="flex:1;" id="legend"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Coin card stat tiles -->
+    <div class="win">
+      <div class="title">🪙 Solidus of Inveriduros <span style="color:#37a05a;font-size:10px;">RESERVE</span></div>
+      <div class="sub">Minted by House Iceni · trust 77% · value 1.08×</div>
+      <div>
+        <span class="ctile"><div class="l">Held in</div><div class="v">14 cities</div></span>
+        <span class="ctile"><div class="l">Abroad</div><div class="v">6</div></span>
+        <span class="ctile"><div class="l">Circulating</div><div class="v">31.4k</div></span>
+        <span class="ctile"><div class="l">Rank</div><div class="v">#1</div></span>
+        <span class="ctile"><div class="l">vs Florin</div><div class="v">1.09×</div></span>
+      </div>
+      <div style="margin-top:8px; color:#8aa8c8; font-size:11px;">
+        ★ Hard premium coin — trusted enough to serve as an international reserve.
+      </div>
+      <div style="margin-top:8px; color:#9ab0c8; font-size:11px; border-top:1px solid #1b2a3c; padding-top:6px;">
+        <b style="color:#cbb88a;">Contract:</b> Wheat · here → Treaacos · <b>struck in Solidus of Inveriduros</b>
+        <div style="color:#7e93ab; font-size:10px;">Contracts settle in the buyer city's main coin; the issuing polis earns seigniorage as the coin circulates (no FX risk).</div>
+      </div>
+    </div>
+  </div>
+
+  <ul>
+    <li><b>Basket model:</b> each city holds a main coin + up to 4 accepted coins with shares; foreign coin arrives with trade; shares ease yearly (sticky), and the main coin flips only when a rival durably dominates.</li>
+    <li><b>Where:</b> basket pie = <code>HubPanel</code> City tab; coin stats = <code>CoinCreditPanel</code> Currencies; contract coin tag = <code>Contract.coin</code> (model).</li>
+  </ul>
+
+<script>
+  const basket = [
+    { name: "Solidus of Inveriduros", share: 0.62, main: true },
+    { name: "Florin of Llanenialon", share: 0.21, reserve: true },
+    { name: "Bezant of Branwiacos", share: 0.11, reserve: true },
+    { name: "others", share: 0.06 },
+  ];
+  const pal = ["#f0d77a","#c9a227","#6fae8a","#5f97c0","#52708e"];
+  const cx=34, cy=34, r=28, ri=15; let a0=-Math.PI/2; let paths="";
+  const tot = basket.reduce((s,b)=>s+b.share,0);
+  basket.forEach((b,i)=>{
+    const a1=a0+(b.share/tot)*Math.PI*2;
+    const P=(an,rd)=>`${(cx+rd*Math.cos(an)).toFixed(1)},${(cy+rd*Math.sin(an)).toFixed(1)}`;
+    const lg=b.share/tot>0.5?1:0;
+    paths+=`<path d="M${P(a0,r)} A${r},${r} 0 ${lg} 1 ${P(a1,r)} L${P(a1,ri)} A${ri},${ri} 0 ${lg} 0 ${P(a0,ri)} Z" fill="${pal[i%pal.length]}" stroke="#0b1420" stroke-width="0.8"/>`;
+    a0=a1;
+  });
+  document.getElementById('pie').innerHTML = paths;
+  document.getElementById('legend').innerHTML = basket.map((b,i)=>`
+    <div class="brow"><span class="sw" style="background:${pal[i%pal.length]}"></span>
+      <span style="flex:1; color:${b.main?'#e8dcc0':'#c0d0e0'}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${b.name}${b.main?' ★':b.reserve?' ⇄':''}</span>
+      <span style="color:#9ab0c8;">${Math.round(b.share/tot*100)}%</span></div>`).join("")
+    + `<div class="leg">★ main coin · ⇄ foreign reserve</div>`;
+</script>
+</body>
+</html>

@@ -1300,6 +1300,10 @@ pub struct Contract {
     #[serde(default)] pub suspended_until: u32,
     /// Count of seller defaults; at 3 the contract is voided.
     #[serde(default)] pub defaults: u8,
+    /// The coin (mint hub INDEX) the contract is STRUCK/settled in — the buyer city's
+    /// main coin at signing. −1 = barter. Tag only (no FX revaluation); the issuing
+    /// polis's seigniorage already flows from circulation. Shown in the contracts view.
+    #[serde(default = "neg_one_i32")] pub coin: i32,
 }
 
 /// DLC 3.5 · a polis's running yearly TREASURY books (the City Finances view).
@@ -3834,6 +3838,7 @@ impl CampaignSim {
                         good: g, monthly_qty, strike_price: strike, term_years: term,
                         start_tick: tick, end_tick: tick + term as u32 * TICKS_PER_YEAR,
                         delivered: 0.0, last_fulfilled: 0, suspended_until: 0, defaults: 0,
+                        coin: self.hubs[buyer].settle_coin, // struck in the buyer city's main coin
                     });
                     // Lease BOTH ends for the contract's life (≥ its term) so the bases
                     // can't lapse under it — the durable spine of the trade network.
@@ -7635,7 +7640,7 @@ mod tests {
             seller_house: 0, buyer_hub: 1, source_hub: 0, good: 1, monthly_qty: 50.0,
             strike_price: 25.0, term_years: term, start_tick: 0,
             end_tick: term as u32 * TICKS_PER_YEAR, delivered: 0.0,
-            last_fulfilled: 0, suspended_until: 0, defaults: 0,
+            last_fulfilled: 0, suspended_until: 0, defaults: 0, coin: -1,
         });
         s.advance(150);
         let c = &s.contracts[0];
@@ -7665,7 +7670,7 @@ mod tests {
             seller_house: 0, buyer_hub: 1, source_hub: 0, good: 1, monthly_qty: 50.0,
             strike_price: 25.0, term_years: 3, start_tick: 0,
             end_tick: 3 * TICKS_PER_YEAR, delivered: 0.0,
-            last_fulfilled: 0, suspended_until: 0, defaults: 0,
+            last_fulfilled: 0, suspended_until: 0, defaults: 0, coin: -1,
         });
         // Drive one DUE delivery directly (no advance → no random plague quarantine,
         // which would force-majeure-suspend the contract instead of breaching it).
@@ -7731,7 +7736,7 @@ mod tests {
             seller_house: 0, buyer_hub: 1, source_hub: 0, good: 1, monthly_qty: 30.0,
             strike_price: 25.0, term_years: term, start_tick: 0,
             end_tick: term as u32 * TICKS_PER_YEAR, delivered: 0.0,
-            last_fulfilled: 0, suspended_until: 0, defaults: 0,
+            last_fulfilled: 0, suspended_until: 0, defaults: 0, coin: -1,
         });
         s.rebuild_routes();
         let needs = vec![vec![0.0, 0.0], vec![0.0, 5.0]]; // hub 1 needs silk
