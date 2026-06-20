@@ -185,21 +185,25 @@ arrive with merchants and goods** — and coins **spread by adoption**.
   (needs a small yearly history stored on the coin).
 - City panel: a small **currency-basket** pie (main coin + foreign coins held).
 
-### Open questions (multi-currency)
-1. **Basket depth:** full per-(city,coin) circulating stock (rich, heavier), or a
-   lighter "main coin + up to N accepted coins with shares"?
-2. **Mint wealth gate:** what threshold makes a city/house rich enough to mint — a flat
-   number (e.g. city trade-wealth ≥ X, house wealth ≥ 100k like banks), or relative to
-   the world's richest?
-3. **Main-coin flip:** allow a city's main coin to switch to a dominant foreign coin
-   (network effect), or does a local mint always stay main while it exists?
-4. **Contracts in currency:** implement real currency-denominated contracts with FX
-   risk, or just *tag* which coin a contract settles in (display + house seigniorage)
-   without full FX revaluation?
-5. **Adoption speed:** how fast should a hard foreign coin take over a market — slow
-   (decades, sticky) or responsive (a few years)?
-6. **Money-supply coupling:** should circulating amount actually move a coin's
-   value/agio (inflation), or stay a displayed stat for now?
+### LOCKED decisions (user, 2026-06-20) — ready to build
+1. **Basket depth:** **main coin + up to N accepted coins with shares** (light) — not
+   full per-(city,coin) stock. Each city: `main_coin: i32` + `accepted: Vec<(coin, share)>`.
+2. **Main-coin flip:** **YES** — a city's main coin flips to a foreign coin once that
+   coin **durably dominates** its basket (sticky, so it doesn't flicker).
+3. **Contracts in currency:** **tag the settling coin + house seigniorage/prestige**
+   when its coin is used — **no FX revaluation** (no exchange-rate risk math).
+4. **Money supply:** **display-only** circulating amount for now; the value/agio
+   coupling (inflation) is deferred to Rank 4.
+5. **Mint wealth gate (still to pin a number):** city rich enough (trade-wealth ≥ X) or
+   house ≥ ~100k (mirrors banks). Open: exact threshold.
+6. **Adoption speed (still to pin):** sticky easing; suggest ~a few years to shift, decades to fully flip.
+
+**Build outline:** replace `settle_coin` with a per-hub basket (main + shares),
+update shares yearly from trade-with-issuer weighted by trust×value×house-influence,
+flip main on durable dominance; add seigniorage to the issuing house when its coin
+settles trade/contracts; expose circulating amount + basket to the coin card and a
+city currency-basket pie. (`tick.rs` basket + adoption pass, `query` extend
+`campaign_coin_usage`, panels.)
 
 ## Implemented this round (not future) — for reference
 - **Bank founding rule:** a house needs **≥ 100k wealth**; the bank costs **50k**, of
