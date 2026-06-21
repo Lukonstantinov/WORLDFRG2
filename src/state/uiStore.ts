@@ -111,6 +111,8 @@ interface UIStore {
   showSpeculation: boolean;
   /** DLC 3.5 · the Coin & Credit (currencies / banks / crashes / schematics) panel. */
   showCoinCredit: boolean;
+  /** Colonial Office — empire-wide colony/outpost roster + founding-gate diagnostics. */
+  showColonial: boolean;
   /** Dedicated Bank panel (balance-sheet charts / loans & deals / schematic / info). */
   showBank: boolean;
   /** Index of the bank to focus when the Bank panel opens (null = first/list). */
@@ -176,6 +178,7 @@ interface UIStore {
   setShowCityRanking: (v: boolean) => void;
   setShowSpeculation: (v: boolean) => void;
   setShowCoinCredit: (v: boolean) => void;
+  setShowColonial: (v: boolean) => void;
   setShowBank: (v: boolean) => void;
   setSelectedBankIdx: (i: number | null) => void;
   setShowBankIcons: (v: boolean) => void;
@@ -255,6 +258,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showCityRanking: false,
   showSpeculation: false,
   showCoinCredit: false,
+  showColonial: false,
   showBank: false,
   selectedBankIdx: null,
   showBankIcons: false,
@@ -337,6 +341,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowCityRanking: (v) => set({ showCityRanking: v }),
   setShowSpeculation: (v) => set({ showSpeculation: v }),
   setShowCoinCredit: (v) => set({ showCoinCredit: v }),
+  setShowColonial: (v) => set({ showColonial: v }),
   setShowBank: (v) => set({ showBank: v }),
   setSelectedBankIdx: (i) => set({ selectedBankIdx: i }),
   setShowBankIcons: (v) => set({ showBankIcons: v }),

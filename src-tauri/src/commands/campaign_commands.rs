@@ -1276,6 +1276,176 @@ pub fn campaign_get_colony(id: u32, db: State<'_, WorldDb>) -> Result<Option<Col
     }))
 }
 
+/// One roster row for the Colonial Office subwindow — a light projection over a
+/// colony hub, covering BOTH settlement colonies (`colony_kind==1`) and house
+/// trade outposts (`colony_kind==2`). The heavy per-colony detail (joint-stock
+/// backers + supply contracts) stays in `ColonyDetail`/`campaign_get_colony`.
+#[derive(Serialize)]
+pub struct ColonySummary {
+    pub id: u32,
+    pub name: String,
+    pub x: f32,
+    pub y: f32,
+    pub colony_kind: u8,
+    pub colony_stage: u8,
+    pub autonomous: bool,
+    pub population: f32,
+    pub founder_hub: i32,
+    pub founder_name: String,
+    pub main_bank_name: String,
+    pub coin_name: String,
+    pub charter_open: bool,
+    pub reserve_food: f32,
+    pub reserve_cap: f32,
+    pub supply_years: f32,
+    pub age_years: u32,
+    pub indep_in_years: i32,
+    /// Owning house (house outposts, kind 2) — empty for settlement colonies.
+    pub owner_house_name: String,
+    pub owner_color: String,
+}
+
+/// Assemble a `ColonySummary` for colony hub `hi` (caller guarantees it IS a colony).
+fn colony_summary(sim: &CampaignSim, hi: usize) -> ColonySummary {
+    let hub = &sim.hubs[hi];
+    let founder_name = (hub.founder_hub >= 0)
+        .then(|| sim.hubs.get(hub.founder_hub as usize))
+        .flatten().map(|h| h.name.clone()).unwrap_or_default();
+    let main_bank_name = (hub.main_bank >= 0)
+        .then(|| sim.banks.get(hub.main_bank as usize))
+        .flatten().map(|b| b.name.clone()).unwrap_or_default();
+    // Age / independence only meaningful for a settlement colony (outposts don't
+    // record a founding tick and never become independent).
+    let (age_years, indep_in_years) = if hub.colony_kind == 1 {
+        let a = (sim.tick.saturating_sub(hub.colony_founded_tick) / 365) as u32;
+        (a, 70i32 - a as i32)
+    } else { (0, 0) };
+    // House outpost owner (kind 2): the owning house, coloured like the Houses panel.
+    let (owner_house_name, owner_color) = if hub.colony_kind == 2 && hub.owner_house >= 0 {
+        let oh = hub.owner_house as usize;
+        (sim.houses.get(oh).map(|h| h.name.clone()).unwrap_or_default(), distinct_color(oh))
+    } else {
+        (String::new(), String::new())
+    };
+    ColonySummary {
+        id: hub.id, name: hub.name.clone(), x: hub.x, y: hub.y,
+        colony_kind: hub.colony_kind, colony_stage: hub.colony_stage, autonomous: hub.autonomous,
+        population: hub.population,
+        founder_hub: hub.founder_hub, founder_name, main_bank_name,
+        coin_name: hub.coin_name.clone(),
+        charter_open: hub.colony_kind == 1 && !hub.autonomous,
+        reserve_food: hub.reserve_food, reserve_cap: hub.reserve_cap, supply_years: hub.supply_years,
+        age_years, indep_in_years,
+        owner_house_name, owner_color,
+    }
+}
+
+/// Empire-wide colony roster (settlement colonies + house outposts) for the
+/// Colonial Office subwindow. Grouped client-side by `founder_hub`.
+#[tauri::command]
+pub fn campaign_get_colonies(db: State<'_, WorldDb>) -> Result<Vec<ColonySummary>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let mut out = Vec::new();
+    for hi in 0..sim.hubs.len() {
+        if sim.hubs[hi].colony_kind != 0 {
+            out.push(colony_summary(&sim, hi));
+        }
+    }
+    Ok(out)
+}
+
+// Colony-founding gate thresholds — MIRRORED (read-only) from `sim/tick.rs`. The
+// Colonial Office REPORTS these to explain why no colony exists yet; it does NOT
+// change them. Keep in sync with the consts in tick.rs (COLONY_START_TICK = 30y,
+// COLONY_PARENT_MIN_POP, COLONY_FERTILE_SITE, COLONY_HOP_REACH_FRAC,
+// MAX_SETTLEMENT_COLONIES, and the founder filter in maybe_found_settlement_colony).
+const GATE_START_YEAR: u32 = 30;
+const GATE_MIN_POP: f32 = 5_000.0;
+const GATE_PROSPERITY_MIN: f32 = 0.25;
+const GATE_STARVING_MAX: f32 = 0.7;
+const GATE_FERTILE_SITE: f32 = 0.45;
+const GATE_HOP_REACH_FRAC: f32 = 0.20;
+const GATE_MAX_SETTLEMENT_COLONIES: u32 = 24;
+
+/// Read-only snapshot of the settlement-colony founding gates, for the Colonial
+/// Office "why no colonies yet?" empty state. Mirrors the conditions in
+/// `maybe_found_settlement_colony` WITHOUT changing them.
+#[derive(Serialize)]
+pub struct ColonyGateStatus {
+    pub year: u32,
+    pub start_year: u32,
+    pub year_ok: bool,
+    pub qualifying_founder: String,
+    pub founder_ok: bool,
+    pub bank_on_continent: bool,
+    pub colonizable_sites_in_range: u32,
+    pub site_ok: bool,
+    pub settlement_colonies: u32,
+    pub max_settlement_colonies: u32,
+    pub at_colony_cap: bool,
+    pub min_pop: f32,
+    /// First failing gate: "cap" | "year" | "founder" | "bank" | "site" | "none".
+    pub blocking_gate: String,
+}
+
+#[tauri::command]
+pub fn campaign_colony_gates(db: State<'_, WorldDb>) -> Result<Option<ColonyGateStatus>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(None) };
+    let year = sim.tick / 365;
+    let year_ok = year >= GATE_START_YEAR;
+    // Best qualifying founder (mirrors maybe_found_settlement_colony's filter/score).
+    let mut founder: Option<usize> = None;
+    let mut best = 0.0f32;
+    for h in 0..sim.hubs.len() {
+        let hub = &sim.hubs[h];
+        if hub.is_estate || hub.colony_kind != 0 { continue; }
+        if hub.population < GATE_MIN_POP || hub.starving > GATE_STARVING_MAX { continue; }
+        if hub.sent_prosperity < GATE_PROSPERITY_MIN { continue; }
+        let score = hub.population * hub.sent_prosperity.clamp(0.0, 1.0) * (0.2 + hub.treasury);
+        if score > best { best = score; founder = Some(h); }
+    }
+    let founder_ok = founder.is_some();
+    let qualifying_founder = founder.map(|h| sim.hubs[h].name.clone()).unwrap_or_default();
+    // A bank on the founder's continent (component) — the hard, dominant gate.
+    let comp = founder.map(|h| sim.hubs[h].component);
+    let bank_on_continent = sim.banks.iter().any(|b| !b.defunct
+        && sim.hubs.get(b.seat as usize)
+            .map(|s| comp.map_or(true, |c| s.component == c)).unwrap_or(false));
+    // Reachable fertile unsettled sites within the colony hop reach of the founder.
+    let cap = sim.world_w * GATE_HOP_REACH_FRAC;
+    let colonizable_sites_in_range = if let Some(h) = founder {
+        let (fx, fy) = (sim.hubs[h].x, sim.hubs[h].y);
+        sim.colonizable.iter().filter(|s| {
+            if s.fertility < GATE_FERTILE_SITE { return false; }
+            let mut dx = (s.x - fx).abs();
+            if sim.world_w > 0.0 { dx = dx.min(sim.world_w - dx); } // cylindrical wrap on X
+            let dy = s.y - fy;
+            (dx * dx + dy * dy).sqrt() <= cap
+        }).count() as u32
+    } else {
+        sim.colonizable.iter().filter(|s| s.fertility >= GATE_FERTILE_SITE).count() as u32
+    };
+    let site_ok = colonizable_sites_in_range > 0;
+    let settlement_colonies = sim.hubs.iter()
+        .filter(|h| h.colony_kind == 1 && !h.autonomous).count() as u32;
+    let at_colony_cap = settlement_colonies >= GATE_MAX_SETTLEMENT_COLONIES;
+    let blocking_gate = if at_colony_cap { "cap" }
+        else if !year_ok { "year" }
+        else if !founder_ok { "founder" }
+        else if !bank_on_continent { "bank" }
+        else if !site_ok { "site" }
+        else { "none" }.to_string();
+    Ok(Some(ColonyGateStatus {
+        year, start_year: GATE_START_YEAR, year_ok,
+        qualifying_founder, founder_ok, bank_on_continent,
+        colonizable_sites_in_range, site_ok,
+        settlement_colonies, max_settlement_colonies: GATE_MAX_SETTLEMENT_COLONIES, at_colony_cap,
+        min_pop: GATE_MIN_POP, blocking_gate,
+    }))
+}
+
 /// Journal rows, optionally filtered to a hub and/or good (−1 = any), for the
 /// settlement window's price/event history.
 #[tauri::command]

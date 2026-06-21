@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WorldForge 2 — Observed History: Map Schematics</title>
+<style>
+  :root{
+    --bg:#0b1420; --panel:#13202e; --panel2:#0f1b28; --text:#cfe2f6; --muted:#8aa6c0;
+    --accent:#3a80c0; --line:#21384e;
+    /* real overlay colours pulled from src/canvas/OverlayManager.ts */
+    --hub:#3a86d6; --capital:#ffd700; --city:#ff8844; --town:#e8e8e8;
+    --trunk:#e0c060; --sea:#7fd0d8; --land:#caa15a; --flow:#4fd0c0; --river:#2288cc;
+    --colony:#c08cff; --fishery:#39d3c0;
+    /* proposed war/politics palette (new) */
+    --war:#e0503a; --warDim:#a8392a; --siege:#ff7a4a; --rogue:#ff4d7a;
+    --leagueA:#5fa8ff; --leagueB:#ffb14a; --hegemony:#c08cff; --unrest:#e0503a; --calm:#4fc06a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 22px 64px}
+  h1{font-size:24px;margin:0 0 4px;letter-spacing:.2px}
+  h2{font-size:17px;margin:30px 0 10px;color:#eaf3ff;border-bottom:1px solid var(--line);padding-bottom:6px}
+  .sub{color:var(--muted);margin:0 0 18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin:14px 0;box-shadow:0 1px 0 #0006}
+  .cap{color:var(--muted);font-size:13px;margin:8px 2px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr}}
+  .legend{display:flex;flex-wrap:wrap;gap:10px 18px;margin:10px 0 0;font-size:12.5px;color:var(--muted)}
+  .legend b{color:var(--text);font-weight:600}
+  .sw{display:inline-block;width:13px;height:13px;border-radius:3px;vertical-align:-2px;margin-right:6px}
+  .pill{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11.5px;border:1px solid var(--line);color:var(--muted)}
+  .new{color:#9fe0b0;border-color:#2a5a3a}
+  svg text{font-family:inherit}
+  .ann{fill:var(--muted);font-size:11px}
+  .annT{fill:var(--text);font-size:11.5px;font-weight:600}
+  .chip{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  table{border-collapse:collapse;width:100%;font-size:13px;margin-top:6px}
+  td,th{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:#eaf3ff}
+  code{background:#0c1722;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12px;color:#bfe0ff}
+  .foot{color:var(--muted);font-size:12px;margin-top:22px;border-top:1px solid var(--line);padding-top:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>WorldForge&nbsp;2 — Observed History on the Map</h1>
+  <p class="sub">Schematic of how the proposed <b>epochal war</b>, <b>league / hegemony</b>, <b>social-strata&nbsp;&amp; unrest</b>, and <b>Ages timeline</b> layers would look as map overlays. Colours pulled from <code>OverlayManager.ts</code>; <span class="pill new">new</span> marks proposed additions. Dark theme matches the app. The world stays <b>observed</b> — these are read-outs of an emergent AI history.</p>
+
+  <!-- ====================== SCENE 1 — EPOCHAL WAR ====================== -->
+  <h2>1 · An epochal war on the trade map (balanced land + sea)</h2>
+  <div class="card">
+    <svg viewBox="0 0 1120 520" width="100%" height="auto" role="img" aria-label="War overlay schematic">
+      <!-- sea -->
+      <rect x="0" y="0" width="1120" height="520" fill="#0a1622"/>
+      <!-- landmasses -->
+      <path d="M0,0 H560 Q540,120 470,150 Q360,200 380,300 Q400,400 300,430 Q120,470 0,440 Z" fill="#16241a" stroke="#22402a" stroke-width="1.5"/>
+      <path d="M760,0 H1120 V250 Q980,240 940,180 Q880,110 760,120 Z" fill="#1d2418" stroke="#3a3c22" stroke-width="1.5"/>
+      <path d="M1120,520 H720 Q760,430 880,420 Q1040,405 1120,360 Z" fill="#16241a" stroke="#22402a" stroke-width="1.5"/>
+
+      <!-- ---- peaceful trade lanes (existing overlays) ---- -->
+      <g stroke-linecap="round" fill="none" opacity="0.92">
+        <!-- amber bundled trunk -->
+        <path d="M180,360 C320,300 420,250 470,150" stroke="var(--trunk)" stroke-width="5"/>
+        <!-- land caravan -->
+        <path d="M180,360 C260,380 360,360 430,300" stroke="var(--land)" stroke-width="2.4" stroke-dasharray="1 0"/>
+        <!-- teal dynamic flow -->
+        <path d="M470,150 C620,150 700,120 860,150" stroke="var(--flow)" stroke-width="3"/>
+      </g>
+
+      <!-- ---- SEA THEATRE: blockaded lane + fleets ---- -->
+      <!-- normal sea lane (pale cyan) that is now BLOCKADED -->
+      <path d="M520,180 C600,250 660,300 600,360" fill="none" stroke="var(--sea)" stroke-width="3" opacity="0.35"/>
+      <path d="M520,180 C600,250 660,300 600,360" fill="none" stroke="var(--war)" stroke-width="3.4" stroke-dasharray="9 9"/>
+      <text class="annT" x="612" y="285" fill="var(--war)">⛔ sea lane blockaded</text>
+      <text class="ann" x="612" y="300">trade reroutes around it</text>
+      <!-- fleet tokens (new) -->
+      <g>
+        <polygon points="560,232 574,240 560,248 564,240" fill="var(--leagueA)" stroke="#0a1622" stroke-width="1"/>
+        <polygon points="612,300 626,308 612,316 616,308" fill="var(--leagueB)" stroke="#0a1622" stroke-width="1"/>
+        <text class="ann" x="500" y="220">⚓ fleet (Sea League)</text>
+      </g>
+      <!-- naval battle marker where lanes cross -->
+      <g transform="translate(590,272)">
+        <circle r="13" fill="none" stroke="var(--war)" stroke-width="2"/>
+        <path d="M-7,-7 L7,7 M7,-7 L-7,7" stroke="var(--war)" stroke-width="2"/>
+      </g>
+      <text class="annT" x="600" y="258" fill="var(--war)">⚔ naval battle</text>
+
+      <!-- ---- LAND THEATRE: moving front corridor ---- -->
+      <!-- contested corridor band between two capitals -->
+      <path d="M210,360 C300,330 360,300 430,250" fill="none" stroke="var(--warDim)" stroke-width="16" opacity="0.30"/>
+      <!-- front line marker (perpendicular) -->
+      <g transform="translate(330,316) rotate(58)">
+        <line x1="0" y1="-22" x2="0" y2="22" stroke="var(--war)" stroke-width="3.5"/>
+        <polygon points="0,-22 -7,-12 7,-12" fill="var(--war)"/>
+        <text class="annT" x="10" y="-6" fill="var(--war)" transform="rotate(-58)">⮜ front advancing</text>
+      </g>
+      <text class="ann" x="250" y="392" transform="rotate(-20 250 392)">contested land corridor</text>
+
+      <!-- rogue mercenary company (new) -->
+      <g transform="translate(360,418)">
+        <polygon points="0,-11 10,0 0,11 -10,0" fill="var(--rogue)" stroke="#0a1622" stroke-width="1"/>
+        <text class="annT" x="14" y="-2" fill="var(--rogue)">⚑ rogue company</text>
+        <text class="ann" x="14" y="13">unpaid → pillages nearest hub</text>
+      </g>
+
+      <!-- ---- SIEGE on the losing capital ---- -->
+      <g transform="translate(210,360)">
+        <circle r="26" fill="none" stroke="var(--siege)" stroke-width="2" stroke-dasharray="5 5"/>
+        <circle r="32" fill="none" stroke="var(--siege)" stroke-width="1" opacity="0.5"/>
+        <text class="annT" x="-18" y="-36" fill="var(--siege)">⌖ under siege</text>
+        <text class="ann" x="-22" y="50">food reserve draining</text>
+      </g>
+
+      <!-- ===== HUBS ===== -->
+      <!-- capital A (besieged, losing) -->
+      <g transform="translate(210,360)"><circle r="8" fill="var(--capital)" stroke="#7a5c00" stroke-width="1.5"/><text class="annT" x="-6" y="-12">Athaia ♛</text></g>
+      <!-- capital B (aggressor) -->
+      <g transform="translate(470,150)"><circle r="8" fill="var(--capital)" stroke="#7a5c00" stroke-width="1.5"/><text class="annT" x="12" y="4">Vennetia ♛</text></g>
+      <!-- ally city -->
+      <g transform="translate(860,150)"><circle r="6.5" fill="var(--city)" stroke="#7a3a10" stroke-width="1.3"/><text class="annT" x="12" y="4">Kor▾ (Sea League)</text></g>
+      <!-- neutral port -->
+      <g transform="translate(600,360)"><circle r="6.5" fill="var(--city)" stroke="#7a3a10" stroke-width="1.3"/><text class="ann" x="12" y="4">neutral port</text></g>
+      <!-- town -->
+      <g transform="translate(430,250)"><circle r="5" fill="var(--town)" stroke="#555" stroke-width="1"/></g>
+    </svg>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--capital)"></span><b>♛ capital / polis seat</b></span>
+      <span><span class="sw" style="background:var(--city)"></span>city</span>
+      <span><span class="sw" style="background:var(--trunk)"></span>bundled trade trunk</span>
+      <span><span class="sw" style="background:var(--sea)"></span>sea lane</span>
+      <span><span class="sw" style="background:var(--flow)"></span>dynamic flow</span>
+      <span><span class="sw" style="background:var(--war)"></span><b class="new">war front / blockade / battle</b></span>
+      <span><span class="sw" style="background:var(--siege)"></span><b class="new">siege ring</b></span>
+      <span><span class="sw" style="background:var(--rogue)"></span><b class="new">rogue company</b></span>
+      <span><span class="sw" style="background:var(--leagueA)"></span><b class="new">fleet token</b></span>
+    </div>
+    <p class="cap">A war reuses the existing route network. One war can run a <b>naval front</b> (blockaded lanes, fleet tokens, battle markers) and a <b>land front</b> (a contested corridor with a front line that creeps toward the losing capital) at once — so a polis can win the sea and lose the land. A siege ring drains the city's food reserve; an unpaid mercenary company turns rogue and becomes a moving disaster.</p>
+  </div>
+
+  <!-- ====================== SCENE 2 — LEAGUES & HEGEMONY ====================== -->
+  <h2>2 · Leagues, tribute &amp; a hegemony (the political map that evolves)</h2>
+  <div class="grid2">
+    <div class="card">
+      <svg viewBox="0 0 540 380" width="100%" height="auto" role="img" aria-label="Leagues schematic">
+        <rect width="540" height="380" fill="#0a1622"/>
+        <!-- League A membership halo -->
+        <g opacity="0.9">
+          <circle cx="150" cy="130" r="80" fill="var(--leagueA)" opacity="0.10" stroke="var(--leagueA)" stroke-width="1.5" stroke-dasharray="4 4"/>
+          <text class="annT" x="92" y="46" fill="var(--leagueA)">Sea League</text>
+        </g>
+        <!-- League B membership halo -->
+        <g opacity="0.9">
+          <circle cx="400" cy="250" r="86" fill="var(--leagueB)" opacity="0.10" stroke="var(--leagueB)" stroke-width="1.5" stroke-dasharray="4 4"/>
+          <text class="annT" x="350" y="350" fill="var(--leagueB)">Inland League</text>
+        </g>
+        <!-- tribute arrows toward hegemon -->
+        <defs>
+          <marker id="arr" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--hegemony)"/></marker>
+        </defs>
+        <g stroke="var(--hegemony)" stroke-width="2.2" fill="none" marker-end="url(#arr)" opacity="0.85">
+          <path d="M110,90 C140,110 150,118 168,124"/>
+          <path d="M205,180 C190,160 178,142 168,134"/>
+          <path d="M120,200 C145,178 152,160 160,140"/>
+        </g>
+        <text class="ann" x="60" y="220" fill="var(--hegemony)">tribute → hegemon</text>
+        <!-- hegemon capital -->
+        <g transform="translate(160,128)"><circle r="13" fill="none" stroke="var(--hegemony)" stroke-width="2"/><circle r="9" fill="var(--capital)" stroke="#7a5c00" stroke-width="1.5"/><text class="annT" x="14" y="4">Vennetia ⊛ hegemon</text></g>
+        <!-- tributary members -->
+        <g fill="var(--city)" stroke="#7a3a10" stroke-width="1.2">
+          <circle cx="110" cy="90" r="6"/><circle cx="205" cy="180" r="6"/><circle cx="120" cy="200" r="6"/>
+        </g>
+        <!-- rival league members -->
+        <g fill="var(--city)" stroke="#7a3a10" stroke-width="1.2">
+          <circle cx="400" cy="250" r="8"/><circle cx="350" cy="210" r="6"/><circle cx="440" cy="300" r="6"/><circle cx="460" cy="220" r="6"/>
+        </g>
+        <text class="annT" x="384" y="246" fill="var(--text)">♛</text>
+      </svg>
+      <p class="cap">Leagues render as dashed membership halos; <b>tribute</b> flows as violet arrows into the hegemon. A dominant league becomes a <b>hegemony</b> (ringed capital) — its bloom grows as it wins epochal wars and shrinks when tributaries revolt.</p>
+    </div>
+    <div class="card">
+      <svg viewBox="0 0 540 380" width="100%" height="auto" role="img" aria-label="Hegemony rise and fall">
+        <rect width="540" height="380" fill="#0a1622"/>
+        <text class="annT" x="20" y="28">Hegemony arc across a campaign</text>
+        <!-- timeline axis -->
+        <line x1="40" y1="320" x2="510" y2="320" stroke="var(--line)" stroke-width="1.5"/>
+        <!-- influence-bloom curve (rise then collapse) -->
+        <path d="M40,318 C140,300 200,120 270,110 C330,102 360,140 380,210 C400,280 440,312 510,318" fill="none" stroke="var(--hegemony)" stroke-width="3"/>
+        <circle cx="270" cy="110" r="5" fill="var(--hegemony)"/>
+        <text class="ann" x="200" y="96" fill="var(--hegemony)">peak: 11 tributaries</text>
+        <!-- collapse marker -->
+        <g transform="translate(380,210)"><circle r="6" fill="none" stroke="var(--war)" stroke-width="2"/><path d="M-4,-4 L4,4 M4,-4 L-4,4" stroke="var(--war)" stroke-width="2"/></g>
+        <text class="ann" x="388" y="206" fill="var(--war)">tributary revolt</text>
+        <text class="ann" x="44" y="340">yr 40</text>
+        <text class="ann" x="250" y="340">yr 120</text>
+        <text class="ann" x="470" y="340">yr 220</text>
+      </svg>
+      <p class="cap">Hegemonies <b>overreach and collapse</b> — a revolt during a plague or after a lost war shatters the bloc. The map breathes across centuries instead of freezing into one winner.</p>
+    </div>
+  </div>
+
+  <!-- ====================== SCENE 3 — STRATA & UNREST (city inset) ====================== -->
+  <h2>3 · Social strata &amp; unrest — the city inspector (HubPanel)</h2>
+  <div class="grid2">
+    <div class="card">
+      <svg viewBox="0 0 540 300" width="100%" height="auto" role="img" aria-label="Strata inset calm">
+        <rect width="540" height="300" fill="var(--panel2)" rx="8"/>
+        <text class="annT" x="18" y="30" fill="#eaf3ff">Vennetia — content (mood 0.74)</text>
+        <text class="ann" x="18" y="48">Society (population shares)</text>
+        <!-- stacked strata bar -->
+        <g transform="translate(18,58)">
+          <rect x="0" y="0" width="60" height="22" fill="var(--capital)"/>
+          <rect x="60" y="0" width="120" height="22" fill="var(--city)"/>
+          <rect x="180" y="0" width="240" height="22" fill="var(--town)"/>
+          <rect x="420" y="0" width="84" height="22" fill="#7a8aa0"/>
+          <text class="ann" x="6" y="38">patrician</text>
+          <text class="ann" x="100" y="38">burghers</text>
+          <text class="ann" x="270" y="38">commoners</text>
+          <text class="ann" x="430" y="38">underclass</text>
+        </g>
+        <!-- meters -->
+        <g transform="translate(18,128)">
+          <text class="ann" x="0" y="0">inequality</text>
+          <rect x="92" y="-11" width="300" height="12" rx="6" fill="#16242f"/>
+          <rect x="92" y="-11" width="150" height="12" rx="6" fill="var(--calm)"/>
+          <text class="ann" x="400" y="0">moderate</text>
+        </g>
+        <g transform="translate(18,160)">
+          <text class="ann" x="0" y="0">unrest</text>
+          <rect x="92" y="-11" width="300" height="12" rx="6" fill="#16242f"/>
+          <rect x="92" y="-11" width="42" height="12" rx="6" fill="var(--calm)"/>
+          <text class="ann" x="400" y="0">calm</text>
+        </g>
+        <g transform="translate(18,196)">
+          <text class="ann" x="0" y="0">commoner welfare</text>
+          <rect x="150" y="-11" width="242" height="12" rx="6" fill="#16242f"/>
+          <rect x="150" y="-11" width="190" height="12" rx="6" fill="var(--flow)"/>
+        </g>
+        <text class="ann" x="18" y="250">Regime: Aristocratic Republic · liturgies fund the fleet</text>
+        <text class="ann" x="18" y="272">Mobility: 2 commoner families rising → burghers this decade</text>
+      </svg>
+      <p class="cap">A healthy city: bread is cheap, inequality moderate, unrest low. The strata bar shows the population structure; mobility is rising.</p>
+    </div>
+    <div class="card">
+      <svg viewBox="0 0 540 300" width="100%" height="auto" role="img" aria-label="Strata inset revolt">
+        <rect width="540" height="300" fill="var(--panel2)" rx="8" stroke="var(--war)" stroke-width="1.5"/>
+        <text class="annT" x="18" y="30" fill="var(--war)">Athaia — REVOLT (mood 0.21)</text>
+        <text class="ann" x="18" y="48">Society (population shares)</text>
+        <g transform="translate(18,58)">
+          <rect x="0" y="0" width="34" height="22" fill="var(--capital)"/>
+          <rect x="34" y="0" width="70" height="22" fill="var(--city)"/>
+          <rect x="104" y="0" width="230" height="22" fill="var(--town)"/>
+          <rect x="334" y="0" width="170" height="22" fill="#7a8aa0"/>
+          <text class="ann" x="2" y="38">patr.</text>
+          <text class="ann" x="55" y="38">burgh.</text>
+          <text class="ann" x="190" y="38">commoners</text>
+          <text class="ann" x="400" y="38">underclass ↑</text>
+        </g>
+        <g transform="translate(18,128)">
+          <text class="ann" x="0" y="0">inequality</text>
+          <rect x="92" y="-11" width="300" height="12" rx="6" fill="#16242f"/>
+          <rect x="92" y="-11" width="276" height="12" rx="6" fill="var(--unrest)"/>
+          <text class="ann" x="400" y="0" fill="var(--war)">extreme</text>
+        </g>
+        <g transform="translate(18,160)">
+          <text class="ann" x="0" y="0">unrest</text>
+          <rect x="92" y="-11" width="300" height="12" rx="6" fill="#16242f"/>
+          <rect x="92" y="-11" width="288" height="12" rx="6" fill="var(--unrest)"/>
+          <text class="ann" x="400" y="0" fill="var(--war)">boiling</text>
+        </g>
+        <g transform="translate(18,196)">
+          <text class="ann" x="0" y="0">commoner welfare</text>
+          <rect x="150" y="-11" width="242" height="12" rx="6" fill="#16242f"/>
+          <rect x="150" y="-11" width="58" height="12" rx="6" fill="var(--war)"/>
+        </g>
+        <text class="ann" x="18" y="250" fill="var(--war)">⚑ Bread riot → House Veltrani's council OVERTHROWN</text>
+        <text class="ann" x="18" y="272">Regime flips: Aristocratic Republic → Tyranny (a demagogue seizes power)</text>
+      </svg>
+      <p class="cap">Famine + extreme inequality → unrest boils → revolt unseats the dominant <code>council_house</code> and flips the regime (anacyclosis). Production drops, trade routes detour around the city — visible on the main map too.</p>
+    </div>
+  </div>
+
+  <!-- ====================== SCENE 4 — AGES TIMELINE SCRUBBER ====================== -->
+  <h2>4 · The Ages timeline scrubber (the observed-mode centrepiece)</h2>
+  <div class="card">
+    <svg viewBox="0 0 1120 220" width="100%" height="auto" role="img" aria-label="Timeline scrubber">
+      <rect width="1120" height="220" fill="var(--panel2)" rx="8"/>
+      <!-- age bands -->
+      <g>
+        <rect x="20" y="40" width="240" height="40" fill="#1d3a2a" stroke="#2a5a3a"/>
+        <text class="annT" x="30" y="64">The Long Commerce</text>
+        <rect x="260" y="40" width="180" height="40" fill="#3a2a1d" stroke="#5a3a2a"/>
+        <text class="annT" x="270" y="64">War of the Leagues</text>
+        <rect x="440" y="40" width="200" height="40" fill="#3a1d24" stroke="#5a2a32"/>
+        <text class="annT" x="450" y="64">The Hollow Years</text>
+        <rect x="640" y="40" width="220" height="40" fill="#241d3a" stroke="#32285a"/>
+        <text class="annT" x="650" y="64">Age of Tyrants</text>
+        <rect x="860" y="40" width="240" height="40" fill="#1d2e3a" stroke="#2a455a"/>
+        <text class="annT" x="870" y="64">The Vennetian Peace</text>
+      </g>
+      <!-- event ticks (causal markers) -->
+      <g>
+        <line x1="300" y1="40" x2="300" y2="150" stroke="var(--war)" stroke-width="2"/>
+        <circle cx="300" cy="150" r="5" fill="var(--war)"/><text class="ann" x="288" y="170">⚔ epochal war</text>
+        <line x1="500" y1="40" x2="500" y2="150" stroke="var(--unrest)" stroke-width="2"/>
+        <circle cx="500" cy="150" r="5" fill="var(--unrest)"/><text class="ann" x="476" y="170">☣ plague century</text>
+        <line x1="720" y1="40" x2="720" y2="150" stroke="var(--hegemony)" stroke-width="2"/>
+        <circle cx="720" cy="150" r="5" fill="var(--hegemony)"/><text class="ann" x="694" y="170">⚑ revolts / tyranny</text>
+        <line x1="960" y1="40" x2="960" y2="150" stroke="var(--capital)" stroke-width="2"/>
+        <circle cx="960" cy="150" r="5" fill="var(--capital)"/><text class="ann" x="930" y="170">⊛ hegemony forms</text>
+      </g>
+      <!-- scrubber handle -->
+      <g transform="translate(540,30)">
+        <line x1="0" y1="0" x2="0" y2="110" stroke="#eaf3ff" stroke-width="2"/>
+        <polygon points="0,0 -8,-12 8,-12" fill="#eaf3ff"/>
+        <text class="annT" x="-22" y="-16" fill="#eaf3ff">year 138</text>
+      </g>
+      <!-- axis -->
+      <line x1="20" y1="40" x2="1100" y2="40" stroke="var(--line)"/>
+      <text class="ann" x="20" y="200">yr 0</text>
+      <text class="ann" x="540" y="200">drag the handle → the political map redraws at that year</text>
+      <text class="ann" x="1060" y="200">yr 300</text>
+    </svg>
+    <p class="cap">The sim segments its own 300-year run into named <b>Ages</b> (auto-titled from each span's dominant events). Dragging the handle replays the political/economic map <b>at that year</b> — borders, hegemonies, trade dominance, war fronts, plague waves all animate. Event ticks are <b>causally linked</b> (cartel squeeze → riot → regime flip → war → default → crash), so the Chronicle reads as cause-and-effect, not a flat log. This is the payoff of an observed world: its history is a readable artifact.</p>
+  </div>
+
+  <!-- ====================== how it maps to code ====================== -->
+  <h2>5 · How each overlay maps to existing machinery</h2>
+  <div class="card">
+    <table>
+      <tr><th>Map element</th><th>Reuses / extends</th><th>New state</th></tr>
+      <tr><td>War front corridor</td><td>coarse least-cost route grid + trunk rendering</td><td><code>War.front_pos</code>, theatre = corridor</td></tr>
+      <tr><td>Blockaded sea lane (dashed red)</td><td>existing sea-route lanes + auto-reroute via components</td><td>per-lane <code>blockaded</code> flag</td></tr>
+      <tr><td>Fleet / mercenary tokens</td><td><code>InTransit</code> position + eta movement</td><td><code>Fleet</code> / <code>Company</code> map actors</td></tr>
+      <tr><td>Siege ring + falling city</td><td>colony <code>reserve_food</code> / <code>reserve_cap</code> lifeline</td><td>siege drains reserve → sack/conquest</td></tr>
+      <tr><td>League halo + tribute arrows</td><td>influence-disc rendering (political layer)</td><td><code>League</code> struct, tribute flows</td></tr>
+      <tr><td>Strata bars + unrest meter</td><td><code>mood</code>/<code>sent_*</code> + <code>merchant_pops</code> + <code>HubPanel</code></td><td><code>Society</code> shares, <code>unrest</code>, <code>inequality</code></td></tr>
+      <tr><td>Ages timeline scrubber</td><td>world chronicle + per-hub <code>history</code> sampling</td><td>per-year political snapshot + Age segmentation</td></tr>
+    </table>
+    <p class="cap">Nothing here is a from-scratch renderer — every overlay extends a layer the app already draws. Final build ships an updated mockup + the real overlay before/after, and re-runs <code>simulate_decades_reports_dynamics</code> to confirm wars/hegemonies/plagues stay rare, dramatic and bounded.</p>
+  </div>
+
+  <p class="foot">Schematic / design mockup — not yet implemented. WorldForge&nbsp;2 · observed-history proposal. Colours mirror <code>src/canvas/OverlayManager.ts</code>; <span class="pill new">new</span> elements are proposals.</p>
+</div>
+</body>
+</html>

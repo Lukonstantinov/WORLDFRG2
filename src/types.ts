@@ -232,6 +232,47 @@ export interface ColonyDetail {
   backers: ColonyBackerRow[];
   supply: ColonySupplyRow[];
 }
+/** One roster row in the Colonial Office (campaign_get_colonies). Covers both
+ *  settlement colonies (colony_kind 1) and house trade outposts (colony_kind 2). */
+export interface ColonySummary {
+  id: number;
+  name: string;
+  x: number;
+  y: number;
+  colony_kind: number;   // 1 = settlement colony · 2 = house outpost
+  colony_stage: number;  // 1 outpost · 2 colony · 3 town · 4 city
+  autonomous: boolean;
+  population: number;
+  founder_hub: number;
+  founder_name: string;
+  main_bank_name: string;
+  coin_name: string;
+  charter_open: boolean;
+  reserve_food: number;
+  reserve_cap: number;
+  supply_years: number;
+  age_years: number;
+  indep_in_years: number;
+  owner_house_name: string; // house outposts only
+  owner_color: string;
+}
+/** Read-only founding-gate status for the Colonial Office "why no colonies yet?"
+ *  empty state (campaign_colony_gates). Mirrors maybe_found_settlement_colony. */
+export interface ColonyGateStatus {
+  year: number;
+  start_year: number;
+  year_ok: boolean;
+  qualifying_founder: string;
+  founder_ok: boolean;
+  bank_on_continent: boolean;
+  colonizable_sites_in_range: number;
+  site_ok: boolean;
+  settlement_colonies: number;
+  max_settlement_colonies: number;
+  at_colony_cap: boolean;
+  min_pop: number;
+  blocking_gate: string; // "cap"|"year"|"founder"|"bank"|"site"|"none"
+}
 /** One weekly per-hub history sample (settlement-window charts). */
 export interface HubSample {
   tick: number;

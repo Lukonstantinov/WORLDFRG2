@@ -9,6 +9,7 @@ export function WindowBar() {
     { label: "⚜️ Houses", on: s.showHouses, set: s.setShowHouses },
     { label: "🪙 Coin", on: s.showCoinCredit, set: s.setShowCoinCredit },
     { label: "🏦 Banks", on: s.showBank, set: s.setShowBank },
+    { label: "🏛 Colonies", on: s.showColonial, set: s.setShowColonial },
     { label: "🫧 Finance", on: s.showSpeculation, set: s.setShowSpeculation },
     { label: "📦 Goods", on: s.showGoodsWindow, set: s.setShowGoodsWindow },
     { label: "🏆 Cities", on: s.showCityRanking, set: s.setShowCityRanking },

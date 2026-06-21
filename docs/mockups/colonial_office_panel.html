@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WorldForge 2 — Colonial Office (subwindow mockup)</title>
+<style>
+  :root{
+    --bg:#0b1420; --panel:#13202e; --panel2:#0f1b28; --panel3:#0c1722; --text:#cfe2f6; --muted:#8aa6c0;
+    --accent:#3a80c0; --line:#21384e;
+    --colony:#c08cff;       /* settlementColony pin + colonyLane (OverlayManager) */
+    --outpost:#c9a96a;      /* house outpost (frame uses owner colour) */
+    --capital:#ffd700; --city:#ff8844; --flow:#4fd0c0; --good:#9fe0b0; --warn:#e0503a; --ok:#4fc06a; --gold:#e0c060;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:13.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1100px;margin:0 auto;padding:24px 18px 56px}
+  h1{font-size:22px;margin:0 0 2px}
+  .sub{color:var(--muted);margin:0 0 16px;font-size:13px}
+  .pill{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11px;border:1px solid var(--line);color:var(--muted)}
+  .new{color:#9fe0b0;border-color:#2a5a3a}
+
+  /* the subwindow */
+  .win{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 10px 30px #0008}
+  .winbar{display:flex;align-items:center;gap:10px;padding:11px 14px;background:linear-gradient(180deg,#16263a,#11202e);border-bottom:1px solid var(--line)}
+  .winbar .dot{width:11px;height:11px;border-radius:50%;background:var(--colony);box-shadow:0 0 8px var(--colony)}
+  .winbar h2{font-size:15px;margin:0;font-weight:650;letter-spacing:.2px}
+  .winbar .x{margin-left:auto;color:var(--muted);cursor:default}
+  .stats{display:flex;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--panel2);flex-wrap:wrap}
+  .stat{background:var(--panel3);border:1px solid var(--line);border-radius:8px;padding:7px 11px;min-width:96px}
+  .stat .n{font-size:18px;font-weight:700;color:#eaf3ff}
+  .stat .l{font-size:11px;color:var(--muted)}
+
+  .body{display:grid;grid-template-columns:1.05fr 1fr;gap:0}
+  @media(max-width:780px){.body{grid-template-columns:1fr}}
+  .col{padding:12px 14px}
+  .col.left{border-right:1px solid var(--line)}
+  .sec{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin:4px 0 8px}
+
+  /* metropolis group + colony rows */
+  .metro{margin-bottom:14px}
+  .metro .mh{display:flex;align-items:center;gap:8px;font-weight:650;color:#eaf3ff;margin-bottom:6px}
+  .metro .mh .cap{width:9px;height:9px;border-radius:50%;background:var(--capital)}
+  .row{display:flex;align-items:center;gap:10px;padding:8px 9px;border:1px solid var(--line);border-radius:9px;background:var(--panel3);margin:5px 0 5px 14px;cursor:default}
+  .row.sel{border-color:var(--colony);box-shadow:0 0 0 1px var(--colony) inset}
+  .row .pin{width:10px;height:10px;border-radius:50%;flex:0 0 auto}
+  .row .nm{font-weight:600}
+  .row .meta{color:var(--muted);font-size:11.5px}
+  .badge{font-size:10.5px;padding:1px 7px;border-radius:20px;border:1px solid var(--line);color:var(--muted)}
+  .badge.city{color:#ffd0a8;border-color:#5a3a2a}
+  .badge.town{color:#e8e8e8}
+  .badge.colony{color:#d8c0ff;border-color:#3a2a5a}
+  .badge.outp{color:#e6cf9a;border-color:#4a3c22}
+  .grow{flex:1}
+  .bar{height:7px;border-radius:5px;background:#16242f;overflow:hidden}
+  .bar > i{display:block;height:100%;border-radius:5px}
+  .mini{font-size:11px;color:var(--muted)}
+
+  /* detail */
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-size:13px;margin:6px 0 12px}
+  .kv .k{color:var(--muted)}
+  .donut{display:flex;align-items:center;gap:14px;margin:6px 0 12px}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;margin-top:4px}
+  td,th{border:1px solid var(--line);padding:6px 8px;text-align:left}
+  th{background:var(--panel2);color:#eaf3ff;font-weight:600}
+  .lane{stroke:var(--colony);stroke-width:2.4;fill:none;opacity:.85}
+  .note{color:var(--muted);font-size:12px;margin-top:8px}
+  .empty{border:1px dashed var(--line);border-radius:10px;padding:14px;color:var(--muted);background:var(--panel3);margin-top:8px}
+  .empty b{color:var(--text)}
+  .legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:14px 2px 0;font-size:12px;color:var(--muted)}
+  .sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-2px;margin-right:5px}
+  h3{font-size:15px;margin:24px 0 8px;border-bottom:1px solid var(--line);padding-bottom:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Colonial Office <span class="pill new">new subwindow</span></h1>
+  <p class="sub">A dedicated panel aggregating the empire's colonies &amp; outposts — today this data only exists per-hub in the HubPanel "Supply" subtab (<code>campaign_get_colony</code>). One new command <code>campaign_get_colonies</code> rolls it up. Colours mirror <code>OverlayManager.ts</code>.</p>
+
+  <div class="win">
+    <div class="winbar"><span class="dot"></span><h2>🏛 Colonial Office</h2><span class="mini" style="color:var(--muted)">year 96</span><span class="x">✕</span></div>
+    <div class="stats">
+      <div class="stat"><div class="n">5</div><div class="l">settlement colonies</div></div>
+      <div class="stat"><div class="n">3</div><div class="l">house outposts</div></div>
+      <div class="stat"><div class="n">1</div><div class="l">went autonomous</div></div>
+      <div class="stat"><div class="n">2</div><div class="l">⚠ food-stressed</div></div>
+      <div class="stat"><div class="n">4</div><div class="l">metropoleis</div></div>
+    </div>
+
+    <div class="body">
+      <!-- LEFT: empire roster grouped by founding city -->
+      <div class="col left">
+        <div class="sec">Colonies by metropolis</div>
+
+        <div class="metro">
+          <div class="mh"><span class="cap"></span>Vennetia <span class="mini">— 2 colonies, 1 outpost</span></div>
+
+          <div class="row sel">
+            <span class="pin" style="background:var(--colony)"></span>
+            <div class="grow">
+              <div><span class="nm">Nova Vennetia</span> <span class="badge town">Town</span></div>
+              <div class="meta">age 41y · coin “Nova mark” · charter ✔ closed market</div>
+              <div class="bar" style="margin-top:5px"><i style="width:82%;background:var(--ok)"></i></div>
+              <div class="mini" style="margin-top:2px">food reserve 9.8 / 12 mo · supplied 11y unbroken</div>
+            </div>
+            <div style="text-align:right"><div class="mini">independence</div><div style="color:var(--gold)">in 29y</div></div>
+          </div>
+
+          <div class="row">
+            <span class="pin" style="background:var(--colony)"></span>
+            <div class="grow">
+              <div><span class="nm">Thalassa Minor</span> <span class="badge colony">Colony</span></div>
+              <div class="meta">age 18y · coin “Thal mark” · charter ✔</div>
+              <div class="bar" style="margin-top:5px"><i style="width:34%;background:var(--warn)"></i></div>
+              <div class="mini" style="margin-top:2px;color:var(--warn)">⚠ food reserve 4.1 / 12 mo · supply broke 2y ago</div>
+            </div>
+            <div style="text-align:right"><div class="mini">independence</div><div class="mini">in 52y</div></div>
+          </div>
+
+          <div class="row">
+            <span class="pin" style="background:#0a0a0a;border:2px solid var(--outpost)"></span>
+            <div class="grow">
+              <div><span class="nm">Cape Factory</span> <span class="badge outp">Outpost</span></div>
+              <div class="meta">House Veltrani · pop 640 (capped) · sources frankincense</div>
+            </div>
+            <div class="mini">trade post</div>
+          </div>
+        </div>
+
+        <div class="metro">
+          <div class="mh"><span class="cap"></span>Korinthos <span class="mini">— 1 colony</span></div>
+          <div class="row">
+            <span class="pin" style="background:var(--colony)"></span>
+            <div class="grow">
+              <div><span class="nm">Korinthia Libera</span> <span class="badge" style="color:#9fe0b0;border-color:#2a5a3a">Autonomous · City</span></div>
+              <div class="meta">age 78y · declared independence yr 92 · own council</div>
+              <div class="bar" style="margin-top:5px"><i style="width:96%;background:var(--ok)"></i></div>
+            </div>
+            <div class="mini">free city</div>
+          </div>
+        </div>
+
+        <div class="metro">
+          <div class="mh"><span class="cap"></span>Athaia <span class="mini">— 2 outposts</span></div>
+          <div class="row">
+            <span class="pin" style="background:#0a0a0a;border:2px solid #5fa8ff"></span>
+            <div class="grow"><div><span class="nm">Saltreach</span> <span class="badge outp">Outpost</span></div>
+            <div class="meta">House Marenz · sources salt · pop 510</div></div><div class="mini">trade post</div>
+          </div>
+        </div>
+
+        <div class="legend">
+          <span><span class="sw" style="background:var(--colony)"></span>settlement colony</span>
+          <span><span class="sw" style="background:#0a0a0a;border:1px solid var(--outpost)"></span>house outpost</span>
+          <span><span class="sw" style="background:var(--ok)"></span>well-supplied</span>
+          <span><span class="sw" style="background:var(--warn)"></span>food-stressed</span>
+        </div>
+      </div>
+
+      <!-- RIGHT: selected colony detail + network minimap -->
+      <div class="col">
+        <div class="sec">Nova Vennetia — settlement colony</div>
+        <div class="kv">
+          <span class="k">Metropolis</span><span>Vennetia <span class="mini">(founder)</span></span>
+          <span class="k">Stage</span><span>Town (3 / 4) → grows to City at 5y unbroken supply</span>
+          <span class="k">Main bank / mint</span><span>Banco Veltrani · strikes the “Nova mark” (trust 61%)</span>
+          <span class="k">Charter</span><span>Closed market — only backer houses may trade here</span>
+          <span class="k">Food lifeline</span><span>9.8 / 12 months reserve · 11 years unbroken supply</span>
+          <span class="k">Independence</span><span>eligible in 29 years (at colony age 70)</span>
+        </div>
+
+        <div class="sec">Joint-stock backers</div>
+        <div class="donut">
+          <svg width="92" height="92" viewBox="0 0 42 42" aria-label="backer shares">
+            <circle cx="21" cy="21" r="15.9" fill="none" stroke="#16242f" stroke-width="8"/>
+            <circle cx="21" cy="21" r="15.9" fill="none" stroke="#7fb8ff" stroke-width="8" stroke-dasharray="45 55" stroke-dashoffset="25"/>
+            <circle cx="21" cy="21" r="15.9" fill="none" stroke="#e0c060" stroke-width="8" stroke-dasharray="33 67" stroke-dashoffset="-20"/>
+            <circle cx="21" cy="21" r="15.9" fill="none" stroke="#c08cff" stroke-width="8" stroke-dasharray="22 78" stroke-dashoffset="-53"/>
+          </svg>
+          <div class="mini" style="line-height:1.8">
+            <div><span class="sw" style="background:#7fb8ff"></span>Vennetia (city) — 45%</div>
+            <div><span class="sw" style="background:#e0c060"></span>House Veltrani — 33%</div>
+            <div><span class="sw" style="background:#c08cff"></span>Banco Veltrani — 22%</div>
+            <div style="margin-top:4px;color:var(--good)">dividends paid pro-rata each year</div>
+          </div>
+        </div>
+
+        <div class="sec">Supply roster (civic contracts)</div>
+        <table>
+          <tr><th>Category</th><th>Supplier</th><th>Good</th><th>Qty/yr</th></tr>
+          <tr><td>Food lifeline</td><td>Vennetia</td><td>wheat</td><td>1,400</td></tr>
+          <tr><td>Preservative</td><td>Saltreach (outpost)</td><td>salt</td><td>180</td></tr>
+          <tr><td>Tools</td><td>House Marenz</td><td>metalware</td><td>90</td></tr>
+        </table>
+
+        <div class="sec" style="margin-top:14px">Colonial network</div>
+        <svg viewBox="0 0 360 150" width="100%" height="auto" aria-label="network minimap">
+          <rect width="360" height="150" fill="#0a1622" rx="8"/>
+          <path class="lane" d="M70,90 C130,60 180,55 230,40"/>
+          <path class="lane" d="M70,90 C120,110 170,120 210,110"/>
+          <path class="lane" d="M70,90 C100,70 110,55 140,46" stroke-dasharray="4 4"/>
+          <!-- metropolis -->
+          <g transform="translate(70,90)"><circle r="8" fill="var(--capital)" stroke="#7a5c00" stroke-width="1.5"/><text x="-4" y="24" fill="#8aa6c0" font-size="10">Vennetia</text></g>
+          <!-- colonies -->
+          <g transform="translate(230,40)"><circle r="6" fill="var(--colony)"/><text x="-20" y="-10" fill="#d8c0ff" font-size="10">Nova V.</text></g>
+          <g transform="translate(210,110)"><circle r="6" fill="var(--colony)"/><text x="-14" y="20" fill="#d8c0ff" font-size="10">Thalassa</text></g>
+          <!-- outpost -->
+          <g transform="translate(140,46)"><rect x="-5" y="-5" width="10" height="10" fill="#0a0a0a" stroke="var(--outpost)" stroke-width="2"/><text x="8" y="3" fill="#e6cf9a" font-size="10">Cape</text></g>
+        </svg>
+        <p class="note">Selecting a node on the main map opens it here; the violet lanes are the same <code>colonyLane</code> supply/monopoly links already drawn on the world map.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- WHY NONE APPEAR -->
+  <h3>Empty state — “why no colonies yet?” (addresses the diagnosis directly)</h3>
+  <div class="win" style="max-width:760px">
+    <div class="winbar"><span class="dot"></span><h2>🏛 Colonial Office</h2><span class="x">✕</span></div>
+    <div class="col">
+      <div class="empty">
+        <b>No colonies founded yet.</b> Colonisation opens once the world matures and the backing is in place. Outstanding gates:
+        <table style="margin-top:10px">
+          <tr><th>Gate</th><th>Status</th></tr>
+          <tr><td>Campaign age ≥ 30 years <span class="mini">(COLONY_START_TICK)</span></td><td style="color:var(--warn)">�’ year 14 — not yet</td></tr>
+          <tr><td>A chartered <b>bank</b> on the continent <span class="mini">(stakes &amp; mints the colony)</span></td><td style="color:var(--warn)">✗ no bank on this landmass</td></tr>
+          <tr><td>A large city (pop ≥ 5,000, prosperous, fed)</td><td style="color:var(--ok)">✔ Vennetia qualifies</td></tr>
+          <tr><td>Funding ≥ 80% of cost raised (city + house + bank)</td><td style="color:var(--warn)">pending bank</td></tr>
+          <tr><td>A reachable fertile unsettled site</td><td style="color:var(--ok)">✔ 3 sites in range</td></tr>
+        </table>
+        <p class="note">The blocking gate here is the <b>bank requirement</b> — and banks are themselves rare in a normal run. That coupling is the main reason colonies seldom appear.</p>
+      </div>
+    </div>
+  </div>
+
+  <p class="note" style="margin-top:22px">Schematic / design mockup — not yet implemented. WorldForge 2 · Colonial Office subwindow. <span class="pill new">new</span> = proposed.</p>
+</div>
+</body>
+</html>

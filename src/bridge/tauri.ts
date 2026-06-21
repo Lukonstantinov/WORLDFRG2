@@ -528,7 +528,7 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 }
 
 // ── DLC 1 "Living Trade" tick simulation ──
-import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, ColonyDetail, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow } from "../types";
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow } from "../types";
 
 /** Seed a fresh living-trade sim from the static economy snapshot (step 10). */
 export async function campaignStartSim(seed: number): Promise<CampaignSnapshot> {
@@ -565,6 +565,16 @@ export async function campaignGetHub(id: number): Promise<HubDetail | null> {
 /** Colony detail (Supply subtab) — null for non-colony hubs. */
 export async function campaignGetColony(id: number): Promise<ColonyDetail | null> {
   return invoke("campaign_get_colony", { id });
+}
+
+/** Empire-wide colony roster (settlement colonies + house outposts). */
+export async function campaignGetColonies(): Promise<ColonySummary[]> {
+  return invoke("campaign_get_colonies");
+}
+
+/** Read-only colony-founding gate status (the "why none yet?" diagnostics). */
+export async function campaignColonyGates(): Promise<ColonyGateStatus | null> {
+  return invoke("campaign_colony_gates");
 }
 
 /** World-economy panel data (per-good world prices + price-index series). */
