@@ -63,6 +63,14 @@ const LOCAL_HAUL_DAYS: f32 = 8.0;
 /// Share of a settlement's population engaged in merchant trade — split across
 /// houses / local merchants / guilds by their recent throughput at the hub.
 const MERCHANT_POP_FRACTION: f32 = 0.12;
+/// DLC · social strata: how strongly a city's class composition tilts its demand
+/// ladder (luxury ∝ patrician+burgher share, staples ∝ commoner+underclass). Kept
+/// small so it MODULATES demand without dominating the market solver. Normalized
+/// around an "average" society so total demand magnitude is preserved.
+const STRATA_DEMAND_TILT: f32 = 0.45;
+/// Fraction of a hub's population that flows between adjacent strata in a year at
+/// full mobility pressure — bounded so the social structure shifts gradually.
+const STRATA_MOBILITY_RATE: f32 = 0.04;
 /// Global productivity drift: technology/agronomy improve output ~1.5%/yr,
 /// applied as COMPOUND growth — each year multiplies the running index by
 /// (1 + rate), so year 1 = ×1.015, year 2 = ×1.015² ≈ ×1.030225, etc. Event
@@ -740,6 +748,9 @@ pub struct TickHub {
     #[serde(default)] pub lack_basic: f32,
     #[serde(default)] pub lack_comfort: f32,
     #[serde(default)] pub lack_luxury: f32,
+    /// DLC · abstract social strata of this settlement (shares + inequality +
+    /// commoner welfare). Seeded once on first advance; updated yearly.
+    #[serde(default)] pub society: Society,
     // ── Trade throughput touching this hub in the last while, split by who carried
     //    it (decaying tallies). Used to estimate the merchant population by class.
     #[serde(default)] pub tw_house: f32,
@@ -1426,6 +1437,27 @@ pub struct CityFinance {
     pub prev: Option<Box<CityFinance>>,
 }
 
+/// DLC · the abstract SOCIAL STRATA of a settlement — a cheap statistical model of
+/// the whole population (not just merchants, cf. `merchant_pops`). The four shares
+/// sum to 1; `commoner_wealth` and `inequality` are derived read-outs that the
+/// later social systems (unrest/revolts, epidemic mortality, regimes) consume.
+/// Serde-defaulted (all zero) so old `.campaign` saves load — a one-time seed
+/// (`society_migrated`) fills them on first advance.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct Society {
+    /// Population SHARES (Σ = 1). Ruling/merchant-patrician elite, the burgher
+    /// middle (shopkeepers, master craftsmen, lesser traders), the commoner mass
+    /// (labourers, smallholders), and the urban underclass (poor, casual, destitute).
+    pub patrician: f32,
+    pub burgher: f32,
+    pub commoner: f32,
+    pub underclass: f32,
+    /// Per-capita money reaching the common populace (0.. ), eased — feeds welfare.
+    pub commoner_wealth: f32,
+    /// 0 = egalitarian, 1 = extreme concentration. Elite wealth per head vs commoner.
+    pub inequality: f32,
+}
+
 impl CityFinance {
     pub fn income_total(&self) -> f32 {
         self.tax_trade + self.tax_estate + self.tax_manufacture + self.tax_wealth
@@ -1475,6 +1507,9 @@ pub struct CampaignSim {
     /// One-time migration flag: pre-fleet saves get a starting fleet seeded once.
     #[serde(default)]
     pub fleets_migrated: bool,
+    /// One-time migration flag: seed each hub's social `society` strata on first advance.
+    #[serde(default)]
+    pub society_migrated: bool,
     /// Global productivity multiplier — slow technological / agronomic improvement.
     /// Grows ~1.5%/yr (bumper events lift production further, locally + temporarily).
     /// `serde(default)` yields 0.0 on old saves → treated as 1.0 in `advance`.
@@ -2973,6 +3008,7 @@ impl CampaignSim {
             * tg.desire.max(0.0)
             * cadence
             * foreign_lux
+            * self.society_demand_mult(h, tg.need_tier)
             * self.need_scale
             * DEMAND_PRESSURE
     }
@@ -3094,6 +3130,17 @@ impl CampaignSim {
                 self.hubs[h].quality = q;
             }
             self.quality_migrated = true;
+        }
+        // DLC · one-time: seed each settlement's social strata. A prosperous trading
+        // city carries a larger patrician/burgher elite; a poor agrarian one is mostly
+        // commoners with a wide underclass. Derived from signals that already exist
+        // (trade vs grain wealth, population), so it works for new + migrated saves.
+        if !self.society_migrated {
+            for h in 0..self.hubs.len() {
+                if self.hubs[h].is_estate { continue; }
+                self.seed_society(h);
+            }
+            self.society_migrated = true;
         }
         // Per-day compounding growth equivalent to the yearly baseline drift.
         let tech_daily = (1.0 + PROD_GROWTH_PER_YEAR).powf(1.0 / TICKS_PER_YEAR as f32);
@@ -3422,6 +3469,129 @@ impl CampaignSim {
             hb.sent_stability += (target_stab - hb.sent_stability) * EASE;
             let target_mood = 0.45 * hb.sent_food + 0.30 * hb.sent_prosperity + 0.25 * hb.sent_stability;
             hb.mood += (target_mood - hb.mood) * EASE;
+        }
+    }
+
+    /// The STRUCTURAL strata composition a city tends toward, from signals that
+    /// already exist and genuinely differ city-to-city: trade orientation (mercantile
+    /// vs agrarian), wealth, and resident-elite riches. A trade entrepôt carries a
+    /// broad patrician/burgher elite; a poor agrarian backwater is mostly commoners
+    /// with a wide underclass. Returns normalized shares (Σ=1). The yearly mobility
+    /// eases the LIVE shares toward this target (with a hardship skew), which keeps
+    /// cities differentiated instead of all drifting to one attractor.
+    fn target_shares(&self, h: usize) -> (f32, f32, f32, f32) {
+        let hub = &self.hubs[h];
+        let trade = hub.trade_wealth.max(0.0);
+        let grain = hub.grain_wealth.max(0.0);
+        let orient = trade / (trade + grain + 1.0); // 0 agrarian … ~1 mercantile
+        let w = trade * 0.8 + grain * 0.4;
+        let prosp = (w / (w + 1.2)).clamp(0.0, 1.0);
+        let elite_w: f32 = self.houses.iter()
+            .filter(|hh| !hh.defunct && hh.hub as usize == h)
+            .map(|hh| hh.wealth.max(0.0)).sum();
+        let elite_pc = elite_w / hub.population.max(1.0);
+        let patrician = (0.02 + 0.07 * orient + 0.06 * (elite_pc / (elite_pc + 5.0))).clamp(0.01, 0.14);
+        let burgher = (0.08 + 0.20 * orient + 0.05 * prosp).clamp(0.06, 0.32);
+        let underclass = (0.12 + 0.24 * (1.0 - prosp)).clamp(0.05, 0.42);
+        let commoner = (1.0 - patrician - burgher - underclass).max(0.05);
+        let t = patrician + burgher + commoner + underclass;
+        (patrician / t, burgher / t, commoner / t, underclass / t)
+    }
+
+    /// Seed a settlement's social strata to its structural target. Called once per hub
+    /// (first advance / a freshly founded colony), then evolved by `update_society`.
+    fn seed_society(&mut self, h: usize) {
+        let (p, b, c, u) = self.target_shares(h);
+        {
+            let so = &mut self.hubs[h].society;
+            so.patrician = p; so.burgher = b; so.commoner = c; so.underclass = u;
+        }
+        let (cw, ineq) = self.society_metrics(h);
+        let so = &mut self.hubs[h].society;
+        so.commoner_wealth = cw;
+        so.inequality = ineq;
+    }
+
+    /// Derived strata read-outs from the live economy: per-capita money reaching the
+    /// commons, and an inequality index (elite wealth per head vs the commoner's).
+    fn society_metrics(&self, h: usize) -> (f32, f32) {
+        let hub = &self.hubs[h];
+        let pop = hub.population.max(1.0);
+        let civic_pc = hub.civic_pool / pop * 100.0; // same scale as update_sentiment
+        let food_aff = (1.0 - hub.starving).clamp(0.0, 1.0);
+        let tax = hub.tariff_export + hub.tariff_import;
+        let commoner_wealth = (civic_pc * 0.5 + hub.grain_wealth * 0.3 + food_aff * 0.4 - tax).max(0.0);
+        let elite_w: f32 = self.houses.iter()
+            .filter(|hh| !hh.defunct && hh.hub as usize == h)
+            .map(|hh| hh.wealth.max(0.0)).sum::<f32>()
+            + hub.treasury.max(0.0);
+        let elite_heads = ((hub.society.patrician + hub.society.burgher) * pop).max(1.0);
+        let elite_pc = elite_w / elite_heads;
+        let ratio = elite_pc / (commoner_wealth + 0.5);
+        let inequality = (ratio / (ratio + 8.0)).clamp(0.0, 1.0);
+        (commoner_wealth, inequality)
+    }
+
+    /// Yearly social mobility: prosperity lifts families up the strata; hardship and
+    /// shocks push them down (swelling the underclass). Shares stay bounded + Σ=1.
+    /// Then refresh the derived `commoner_wealth` / `inequality` read-outs (eased).
+    fn update_society(&mut self) {
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate { continue; }
+            // A colony founded after the one-time seed starts blank — seed it lazily.
+            let s0 = &self.hubs[h].society;
+            if s0.patrician + s0.burgher + s0.commoner + s0.underclass < 1e-3 {
+                self.seed_society(h);
+            }
+            let (lackb, starv) = {
+                let hub = &self.hubs[h];
+                (hub.lack_basic.clamp(0.0, 1.0), hub.starving.clamp(0.0, 1.0))
+            };
+            let shock: f32 = self.active_events.iter()
+                .filter(|e| e.hub == h as i32).map(|e| e.magnitude.max(0.2)).sum::<f32>().min(1.0);
+            // Hardship (famine / dearth / disaster) skews the target DOWN: it drains the
+            // upper tiers toward the underclass for as long as the hard times last.
+            let hard = (starv * 0.6 + lackb * 0.4 + shock * 0.3).clamp(0.0, 0.7);
+            let (tp, tb, tc, _tu) = self.target_shares(h);
+            let drain = hard * 0.5;
+            let (mut p, mut b, mut c) = (tp * (1.0 - drain), tb * (1.0 - drain), tc * (1.0 - drain * 0.5));
+            let mut u = (1.0 - p - b - c).max(0.0);
+            let tot = (p + b + c + u).max(1e-6);
+            p /= tot; b /= tot; c /= tot; u /= tot;
+            // Ease the LIVE shares toward this (skewed) target — gradual mobility, so
+            // shocks register over a few years and recovery takes a few more.
+            let ease = STRATA_MOBILITY_RATE * 2.5; // ~0.10/yr
+            {
+                let so = &mut self.hubs[h].society;
+                so.patrician += (p - so.patrician) * ease;
+                so.burgher += (b - so.burgher) * ease;
+                so.commoner += (c - so.commoner) * ease;
+                so.underclass += (u - so.underclass) * ease;
+                let t = (so.patrician + so.burgher + so.commoner + so.underclass).max(1e-6);
+                so.patrician /= t; so.burgher /= t; so.commoner /= t; so.underclass /= t;
+            }
+            let (cw, ineq) = self.society_metrics(h);
+            let so = &mut self.hubs[h].society;
+            so.commoner_wealth += (cw - so.commoner_wealth) * 0.3;
+            so.inequality += (ineq - so.inequality) * 0.3;
+        }
+    }
+
+    /// A gentle demand tilt from a city's class composition: a patrician-heavy city
+    /// soaks up luxuries (tier 2), a commoner mass eats staples (tier 0). Normalized
+    /// around an "average" society so total demand magnitude is preserved on average.
+    fn society_demand_mult(&self, h: usize, need_tier: u8) -> f32 {
+        let s = &self.hubs[h].society;
+        let tot = s.patrician + s.burgher + s.commoner + s.underclass;
+        if tot < 1e-3 { return 1.0; } // unseeded (e.g. estates)
+        let elite = (s.patrician + s.burgher) / tot;
+        let mass = (s.commoner + s.underclass) / tot;
+        const ELITE_BASE: f32 = 0.18;
+        const MASS_BASE: f32 = 0.82;
+        match need_tier {
+            2 => (1.0 + STRATA_DEMAND_TILT * (elite - ELITE_BASE) / ELITE_BASE).clamp(0.4, 1.8),
+            0 => (1.0 + STRATA_DEMAND_TILT * (mass - MASS_BASE) / MASS_BASE).clamp(0.6, 1.4),
+            _ => 1.0, // comfort tier neutral
         }
     }
 
@@ -5110,6 +5280,8 @@ impl CampaignSim {
         // colonisation only opens once the world has matured — from YEAR 50 onward,
         // and only when the wealth/population/site conditions are actually met.
         if self.tick % 365 == 0 {
+            // Yearly social mobility: strata shift with prosperity / hardship.
+            self.update_society();
             // Estate/manufactory disasters strike + funded repairs progress (yearly).
             self.estate_condition_pass();
             // House trade outposts from year 30 (rich house, heavy cost); full
@@ -5273,7 +5445,7 @@ impl CampaignSim {
             is_estate: true, parent, koppen, coastal, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5,
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
-            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
+            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(),
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: kind, estate_tier: 1, last_upgrade_tick: self.tick, owner_house, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
@@ -5898,7 +6070,7 @@ impl CampaignSim {
             is_estate: false, parent: -1, koppen: site.koppen, coastal: site.coastal, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5,
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
-            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
+            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(),
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
@@ -7264,7 +7436,7 @@ mod tests {
             export_earn: 0.0, import_spend: 0.0,
             mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5, sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(),
             in_by_sea: 0.0, in_by_land: 0.0,
-            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
+            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(),
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: 0, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
@@ -7297,7 +7469,7 @@ mod tests {
             active_events: vec![], journal: vec![], days_per_cell: 0.2, freight_per_day: 0.01,
             k: 0.6, margin: 0.05, need_scale: 1.0, world_w: 100.0, world_h: 100.0, last_tick_ms: 0.0,
             last_month_pop: 0.0, last_month_index: 0.0, seed_house_count: 0,
-            fleets_migrated: true, tech_factor: 1.0, percap_migrated: true,
+            fleets_migrated: true, tech_factor: 1.0, percap_migrated: true, society_migrated: false,
             house_ledger: Vec::new(), house_ledger_prev: Vec::new(), house_barred: Vec::new(),
             colonizable: vec![], colony_supply: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
@@ -7411,6 +7583,72 @@ mod tests {
         assert!(min_w > -100.0, "no runaway-insolvent house (limited liability): {min_w}");
         // The world must actually be DYNAMIC: houses turn over.
         assert!(ever_dissolved, "houses rise and fall over decades");
+    }
+
+    /// Social strata invariant: every settlement's four shares stay in [0,1] and sum
+    /// to ~1 across decades of mobility, the strata actually DIFFERENTIATE between
+    /// cities, and inequality stays a bounded 0..1 index.
+    #[test]
+    fn society_shares_bounded() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("fish", 0, 0, 1.2, 0.7, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+            good("iron", 2, 1, 5.0, 0.45, false),
+            good("wine", 3, 2, 8.0, 0.4, false),
+        ];
+        let ng = goods.len();
+        let mut hubs = Vec::new();
+        for i in 0..20u32 {
+            let x = (i % 5) as f32 * 9.0;
+            let y = (i / 5) as f32 * 9.0;
+            let pop = 6000.0 + (i as f32 * 1300.0) % 24000.0;
+            // A clear rich/poor gradient: the first third are luxury-exporting
+            // entrepôts (high trade wealth → patrician/burgher), the rest agrarian.
+            let rich = i < 7;
+            let prod: Vec<f32> = (0..ng)
+                .map(|g| {
+                    if g == 2 || g == 4 { // silk / wine — luxuries that build trade wealth
+                        if rich { pop * 0.020 } else { pop * 0.0005 }
+                    } else if (g + i as usize) % 3 == 0 { pop * 0.012 } else { pop * 0.0015 }
+                })
+                .collect();
+            hubs.push(hub(i, x, y, pop, prod, 0));
+        }
+        let mut s = sim(hubs, goods);
+        for i in 0..8u32 {
+            let seat = (i * 2) % 20;
+            let mut h = house_at(seat, vec![2 + (i as usize % 3)], 3);
+            h.archetype = (i % 4) as u8;
+            h.wealth = 40.0 + (i as f32) * 12.0;
+            h.dominant_seat = i % 2 == 0;
+            s.houses.push(h);
+        }
+        s.seed_house_count = s.houses.len() as u32;
+        s.rebuild_routes();
+
+        for _ in 1..=60u32 {
+            s.advance(365);
+            for h in &s.hubs {
+                if h.is_estate { continue; }
+                let so = &h.society;
+                let sum = so.patrician + so.burgher + so.commoner + so.underclass;
+                if sum < 1e-3 { continue; } // not yet seeded (brand-new colony this tick)
+                for (name, v) in [("patrician", so.patrician), ("burgher", so.burgher),
+                                  ("commoner", so.commoner), ("underclass", so.underclass)] {
+                    assert!(v >= -1e-4 && v <= 1.0 + 1e-4, "{name} share out of range: {v}");
+                }
+                assert!((sum - 1.0).abs() < 1e-2, "shares must sum to 1, got {sum}");
+                assert!(so.inequality >= 0.0 && so.inequality <= 1.0, "inequality 0..1: {}", so.inequality);
+                assert!(so.commoner_wealth.is_finite() && so.commoner_wealth >= 0.0, "commoner_wealth bad");
+            }
+        }
+        // The strata must DIFFERENTIATE — not every city ends with the same elite share.
+        let elites: Vec<f32> = s.hubs.iter().filter(|h| !h.is_estate)
+            .map(|h| h.society.patrician + h.society.burgher).collect();
+        let emin = elites.iter().cloned().fold(f32::INFINITY, f32::min);
+        let emax = elites.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        assert!(emax - emin > 0.02, "strata should vary across cities (spread {:.3})", emax - emin);
     }
 
     /// Colonisation MECHANISM (deterministic): from year 50, an eligible city founds

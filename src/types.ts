@@ -232,6 +232,17 @@ export interface ColonyDetail {
   backers: ColonyBackerRow[];
   supply: ColonySupplyRow[];
 }
+/** Abstract social strata of a settlement (HubPanel "Society" block). The four
+ *  shares sum to 1; inequality + welfare are 0..1 derived read-outs. */
+export interface SocietyBrief {
+  patrician: number;
+  burgher: number;
+  commoner: number;
+  underclass: number;
+  commoner_wealth: number;
+  inequality: number;
+  welfare: number;
+}
 /** One roster row in the Colonial Office (campaign_get_colonies). Covers both
  *  settlement colonies (colony_kind 1) and house trade outposts (colony_kind 2). */
 export interface ColonySummary {
@@ -378,6 +389,8 @@ export interface HubDetail {
   pop_house?: number;
   pop_local?: number;
   pop_guild?: number;
+  /** Abstract social strata of this settlement (null for estates / unseeded hubs). */
+  society?: SocietyBrief | null;
   /** Estate descriptors (kind 1 farm/2 mine/3 plantation/4 fishery/5 vineyard). */
   estate_kind?: number;
   estate_owner?: string;

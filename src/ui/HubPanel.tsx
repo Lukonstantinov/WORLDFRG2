@@ -4,7 +4,7 @@ import { useWorldStore } from "../state/worldStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { campaignGetHub, campaignGetColony, campaignWarehouses, campaignFuturesLanes } from "../bridge/tauri";
-import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane, ColonyDetail, CoinShare } from "../types";
+import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane, ColonyDetail, CoinShare, SocietyBrief } from "../types";
 import { climatePhrase } from "./climate";
 import { CoatOfArms, houseColor } from "./CoatOfArms";
 import { CoinIcon } from "./CoinIcon";
@@ -439,6 +439,14 @@ export function HubPanel() {
             <MoodCard detail={detail} />
           ) : (
             <div style={emptyTxt}>Begin the campaign (Step 11) to see how the people feel.</div>
+          )}
+
+          {/* Social strata */}
+          {detail?.society && (
+            <>
+              <div style={{ ...sectionHdr, marginTop: 8 }}>Society</div>
+              <SocietyCard society={detail.society} />
+            </>
           )}
 
           {/* Character summary */}
@@ -1245,6 +1253,47 @@ function MoodCard({ detail }: { detail: HubDetail }) {
       <DriverBar label="Food" frac={detail.sent_food} color="#5fc8a8" />
       <DriverBar label="Prosperity" frac={detail.sent_prosperity} color="#e0c060" />
       <DriverBar label={`Stability${stabNote}`} frac={detail.sent_stability} color="#8aa0c0" />
+    </div>
+  );
+}
+
+// Strata palette — matches the observed-history map schematic (Scene 3).
+const STRATA = [
+  { key: "patrician", label: "Patrician", color: "#ffd700" },
+  { key: "burgher", label: "Burgher", color: "#ff8844" },
+  { key: "commoner", label: "Commoner", color: "#e8d8b0" },
+  { key: "underclass", label: "Underclass", color: "#7a8aa0" },
+] as const;
+
+function SocietyCard({ society }: { society: SocietyBrief }) {
+  const ineqLabel = society.inequality > 0.66 ? "extreme" : society.inequality > 0.4 ? "marked" : "moderate";
+  const ineqColor = society.inequality > 0.66 ? "#e0503a" : society.inequality > 0.4 ? "#e0c060" : "#4fc06a";
+  const welColor = society.welfare > 0.5 ? "#4fc06a" : society.welfare > 0.28 ? "#e0c060" : "#e0503a";
+  return (
+    <div style={{ margin: "2px 0 4px" }}>
+      {/* stacked strata bar */}
+      <div style={{ display: "flex", height: 12, borderRadius: 3, overflow: "hidden", border: "1px solid #1e2e42" }}>
+        {STRATA.map((s) => {
+          const v = (society as unknown as Record<string, number>)[s.key];
+          return v > 0.001 ? <div key={s.key} title={`${s.label} ${Math.round(v * 100)}%`}
+            style={{ width: `${v * 100}%`, background: s.color }} /> : null;
+        })}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "1px 10px", marginTop: 3 }}>
+        {STRATA.map((s) => {
+          const v = (society as unknown as Record<string, number>)[s.key];
+          return (
+            <span key={s.key} style={{ fontSize: 9, color: "#7a90a8", display: "flex", alignItems: "center", gap: 3 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, display: "inline-block" }} />
+              {s.label} {Math.round(v * 100)}%
+            </span>
+          );
+        })}
+      </div>
+      <div style={{ marginTop: 4 }}>
+        <DriverBar label={`Inequality (${ineqLabel})`} frac={society.inequality} color={ineqColor} />
+        <DriverBar label="Commoner welfare" frac={society.welfare} color={welColor} />
+      </div>
     </div>
   );
 }

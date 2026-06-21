@@ -470,6 +470,8 @@ pub struct HubDetail {
     #[serde(default)] pub pop_house: f32,
     #[serde(default)] pub pop_local: f32,
     #[serde(default)] pub pop_guild: f32,
+    /// Abstract social strata of this settlement (shares + inequality + welfare).
+    #[serde(default)] pub society: Option<SocietyBrief>,
     /// For an estate: its kind (0 none / 1 farm / 2 mine / 3 plantation / 4 fishery /
     /// 5 vineyard), who owns it, and the good it works — for the inspector.
     #[serde(default)] pub estate_kind: u8,
@@ -515,6 +517,20 @@ pub struct HubDetail {
     /// good's name + the city it was stolen from ("" = none).
     #[serde(default)] pub stolen_good: String,
     #[serde(default)] pub stolen_from: String,
+}
+
+/// Abstract social strata of a settlement for the HubPanel "Society" block:
+/// the four population shares (Σ=1), an inequality index, and a derived welfare.
+#[derive(Serialize, Clone)]
+pub struct SocietyBrief {
+    pub patrician: f32,
+    pub burgher: f32,
+    pub commoner: f32,
+    pub underclass: f32,
+    pub commoner_wealth: f32,
+    pub inequality: f32,
+    /// 0 = destitute, 1 = comfortable — commoner welfare for the meter (derived).
+    pub welfare: f32,
 }
 
 /// DLC 3.5 · one leg of a city's carrying trade (a merchant of this city hauling
@@ -871,6 +887,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 lack_basic: 0.0,
                 lack_comfort: 0.0,
                 lack_luxury: 0.0,
+                society: crate::sim::tick::Society::default(),
                 tw_house: 0.0,
                 tw_local: 0.0,
                 tw_guild: 0.0,
@@ -1119,6 +1136,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         fleets_migrated: true, // new campaigns already seed fleets
         tech_factor: 1.0,
         percap_migrated: true, // hubs seeded with base_per_capita directly
+        society_migrated: false, // strata seeded on first advance (seed_society)
         house_ledger: Vec::new(),
         house_ledger_prev: Vec::new(),
         house_barred: Vec::new(),
@@ -1608,6 +1626,15 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         .cloned()
         .collect();
     let (pop_house, pop_local, pop_guild) = crate::sim::tick::merchant_pops(hub);
+    // Social strata (None for estates / unseeded hubs where the shares are blank).
+    let so = &hub.society;
+    let society = if !hub.is_estate && (so.patrician + so.burgher + so.commoner + so.underclass) > 1e-3 {
+        let welfare = (so.commoner_wealth / (so.commoner_wealth + 1.5)).clamp(0.0, 1.0);
+        Some(SocietyBrief {
+            patrician: so.patrician, burgher: so.burgher, commoner: so.commoner, underclass: so.underclass,
+            commoner_wealth: so.commoner_wealth, inequality: so.inequality, welfare,
+        })
+    } else { None };
     // Estate descriptors for the inspector (kind, owner, worked good).
     let (estate_owner, estate_good) = if hub.is_estate {
         let owner = if hub.owner_house >= 0 {
@@ -1761,6 +1788,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         pop_house,
         pop_local,
         pop_guild,
+        society,
         estate_kind: hub.estate_kind,
         estate_owner,
         estate_good,

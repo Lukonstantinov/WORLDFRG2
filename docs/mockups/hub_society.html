@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WorldForge 2 — HubPanel "Society" block (Iteration 2)</title>
+<style>
+  :root{
+    --bg:#0b1420; --panel:#0c141e; --line:#1e2e42; --text:#cfe2f6; --muted:#7a90a8; --hdr:#9ab0c8;
+    /* strata palette — matches SocietyCard in HubPanel.tsx */
+    --patrician:#ffd700; --burgher:#ff8844; --commoner:#e8d8b0; --underclass:#7a8aa0;
+    --ok:#4fc06a; --warn:#e0c060; --bad:#e0503a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:26px 18px 60px}
+  h1{font-size:21px;margin:0 0 4px}
+  .sub{color:var(--muted);margin:0 0 20px}
+  .pill{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11px;border:1px solid var(--line);color:#9fe0b0}
+  .row{display:flex;gap:18px;flex-wrap:wrap}
+  .card{flex:1;min-width:300px;background:var(--panel);border:1px solid #1e3450;border-radius:8px;padding:12px 14px}
+  .ctitle{font-weight:700;color:#dce8f6;font-size:13px}
+  .csub{color:var(--muted);font-size:11px;margin-bottom:10px}
+  .hdr{color:var(--hdr);font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin:10px 0 4px}
+  /* stacked strata bar */
+  .strata{display:flex;height:12px;border-radius:3px;overflow:hidden;border:1px solid var(--line)}
+  .legend{display:flex;flex-wrap:wrap;gap:1px 10px;margin-top:4px}
+  .lg{font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px}
+  .sw{width:8px;height:8px;border-radius:2px;display:inline-block}
+  /* meter (DriverBar) */
+  .meter{display:flex;align-items:center;gap:6px;margin:2px 0}
+  .meter .lbl{color:var(--muted);font-size:9px;min-width:140px}
+  .track{flex:1;height:5px;background:#13202e;border-radius:2px}
+  .fill{height:5px;border-radius:2px}
+  .note{color:var(--muted);font-size:12px;margin-top:22px;border-top:1px solid var(--line);padding-top:12px;line-height:1.6}
+  code{background:#0c1722;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:11.5px;color:#bfe0ff}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>HubPanel — "Society" block <span class="pill">Iteration 2 · shipped</span></h1>
+  <p class="sub">The new social-strata read-out in the settlement window's <b>Summary → The people</b> section.
+  Per-hub <b>patrician / burgher / commoner / underclass</b> shares (Σ=1), an <b>inequality</b> index and a
+  <b>commoner-welfare</b> meter. Computed in <code>tick.rs</code> (<code>update_society</code>), surfaced via
+  <code>campaign_get_hub</code>. Two contrasting cities below.</p>
+
+  <div class="row">
+    <!-- Patrician entrepôt -->
+    <div class="card">
+      <div class="ctitle">Vennetia — a mercantile entrepôt</div>
+      <div class="csub">high trade wealth → a broad patrician/burgher elite</div>
+      <div class="hdr">Society</div>
+      <div class="strata">
+        <div title="Patrician 11%" style="width:11%;background:var(--patrician)"></div>
+        <div title="Burgher 27%" style="width:27%;background:var(--burgher)"></div>
+        <div title="Commoner 50%" style="width:50%;background:var(--commoner)"></div>
+        <div title="Underclass 12%" style="width:12%;background:var(--underclass)"></div>
+      </div>
+      <div class="legend">
+        <span class="lg"><span class="sw" style="background:var(--patrician)"></span>Patrician 11%</span>
+        <span class="lg"><span class="sw" style="background:var(--burgher)"></span>Burgher 27%</span>
+        <span class="lg"><span class="sw" style="background:var(--commoner)"></span>Commoner 50%</span>
+        <span class="lg"><span class="sw" style="background:var(--underclass)"></span>Underclass 12%</span>
+      </div>
+      <div style="margin-top:6px">
+        <div class="meter"><span class="lbl">Inequality (marked)</span><div class="track"><div class="fill" style="width:52%;background:var(--warn)"></div></div></div>
+        <div class="meter"><span class="lbl">Commoner welfare</span><div class="track"><div class="fill" style="width:64%;background:var(--ok)"></div></div></div>
+      </div>
+    </div>
+
+    <!-- Commoner agrarian port -->
+    <div class="card">
+      <div class="ctitle">Athaia — a poor agrarian port</div>
+      <div class="csub">low trade, recent dearth → a wide commoner mass + underclass</div>
+      <div class="hdr">Society</div>
+      <div class="strata">
+        <div title="Patrician 3%" style="width:3%;background:var(--patrician)"></div>
+        <div title="Burgher 11%" style="width:11%;background:var(--burgher)"></div>
+        <div title="Commoner 54%" style="width:54%;background:var(--commoner)"></div>
+        <div title="Underclass 32%" style="width:32%;background:var(--underclass)"></div>
+      </div>
+      <div class="legend">
+        <span class="lg"><span class="sw" style="background:var(--patrician)"></span>Patrician 3%</span>
+        <span class="lg"><span class="sw" style="background:var(--burgher)"></span>Burgher 11%</span>
+        <span class="lg"><span class="sw" style="background:var(--commoner)"></span>Commoner 54%</span>
+        <span class="lg"><span class="sw" style="background:var(--underclass)"></span>Underclass 32%</span>
+      </div>
+      <div style="margin-top:6px">
+        <div class="meter"><span class="lbl">Inequality (extreme)</span><div class="track"><div class="fill" style="width:78%;background:var(--bad)"></div></div></div>
+        <div class="meter"><span class="lbl">Commoner welfare</span><div class="track"><div class="fill" style="width:22%;background:var(--bad)"></div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="note">
+    <b>What it does (and doesn't) do this iteration.</b> The strata are a cheap statistical substrate: a city's
+    composition is seeded from its trade orientation/wealth and evolves yearly via <code>update_society</code>
+    (prosperity lifts families up the tiers; famine, dearth and disasters push them down toward the underclass).
+    It gently tilts demand — patrician-heavy cities pull luxuries, commoner masses pull staples
+    (<code>society_demand_mult</code> in <code>base_need</code>). <b>It does not yet drive revolts or regime
+    change</b> — that is Iteration 3 (civil unrest), which will read this <code>inequality</code>/<code>welfare</code>
+    substrate. Verified: <code>society_shares_bounded</code> + <code>simulate_decades_reports_dynamics</code> green
+    (wealth bounded, shares ∈ [0,1], Σ=1, cities differentiate).
+  </p>
+</div>
+</body>
+</html>
