@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>WorldForge 2 — Civil Unrest in the Society block (It. 3)</title>
+<style>
+  :root{--bg:#0b1420;--panel:#13202e;--panel2:#0f1b28;--line:#21384e;--text:#cfe2f6;--muted:#7a90a8;
+    --pat:#ffd700;--bur:#ff8844;--com:#e8d8b0;--und:#7a8aa0;--ok:#4fc06a;--warn:#e0c060;--bad:#e0503a;}
+  *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);
+    font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  .wrap{max-width:980px;margin:0 auto;padding:26px 20px 60px}
+  h1{font-size:21px;margin:0 0 4px}.sub{color:var(--muted);margin:0 0 20px}
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+  @media(max-width:720px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:12px 13px}
+  .name{font-weight:700;font-size:13px;margin-bottom:8px;display:flex;justify-content:space-between}
+  .bar{display:flex;height:12px;border-radius:3px;overflow:hidden;border:1px solid var(--line)}
+  .legend{display:flex;flex-wrap:wrap;gap:1px 10px;margin-top:4px}
+  .lg{font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px}
+  .sw{width:8px;height:8px;border-radius:2px;display:inline-block}
+  .driver{display:flex;align-items:center;gap:6px;margin:2px 0}
+  .dl{color:var(--muted);font-size:9px;min-width:128px}
+  .track{flex:1;height:5px;background:#13202e;border-radius:2px}.fill{height:5px;border-radius:2px}
+  .tag{font-size:9px;padding:0 6px;border-radius:9px;border:1px solid var(--line)}
+  .note{color:var(--muted);font-size:12px;margin:18px 2px 0;line-height:1.6}
+  code{background:#0c1722;border:1px solid var(--line);border-radius:4px;padding:0 4px;font-size:11px;color:#bfe0ff}
+  .new{color:#9fe0b0}
+</style></head><body><div class="wrap">
+<h1>Civil Unrest — the new bar in the HubPanel “Society” block <span class="new">It. 3</span></h1>
+<p class="sub">It. 2 added the strata bar + inequality + commoner-welfare drivers. It. 3 adds the <b>Unrest</b>
+driver underneath and makes it <b>load-bearing</b>: it builds from low mood, inequality, dearth &amp; war, and
+crossing thresholds fires riots / revolts on the live map &amp; Chronicle. Four live states shown.</p>
+
+<div class="grid" id="cards"></div>
+
+<p class="note">
+Thresholds mirror <code>tick.rs</code>: <b style="color:var(--warn)">restless</b> ≥ 0.35 · <b style="color:var(--bad)">rioting</b> ≥ <code>RIOT_UNREST 0.60</code>
+(a city-wide <code>−22%</code> production + stability shock) · <b style="color:var(--bad)">revolt</b> ≥ <code>REVOLT_UNREST 0.82</code>
+(<code>−40%</code> disorder, seizes <code>15%</code> of resident-house wealth → the people, topples &amp; bars the ruling
+council for <code>12y</code>, then vents). Each riot/revolt lands in the year-grouped Chronicle.
+</p>
+</div>
+<script>
+const STRATA=[["Patrician","--pat"],["Burgher","--bur"],["Commoner","--com"],["Underclass","--und"]];
+const cs=getComputedStyle(document.documentElement);
+const col=v=>cs.getPropertyValue(v).trim();
+function drv(label,frac,c){const pct=Math.max(2,Math.min(100,frac*100));
+ return `<div class="driver"><span class="dl">${label}</span><div class="track"><div class="fill" style="width:${pct}%;background:${c}"></div></div></div>`;}
+function unrestBits(u){const lab=u>=0.82?"revolt":u>=0.6?"rioting":u>=0.35?"restless":"calm";
+ const c=u>=0.6?col("--bad"):u>=0.35?col("--warn"):col("--ok");return [lab,c];}
+function ineqBits(q){const lab=q>0.66?"extreme":q>0.4?"marked":"moderate";const c=q>0.66?col("--bad"):q>0.4?col("--warn"):col("--ok");return[lab,c];}
+function welCol(w){return w>0.5?col("--ok"):w>0.28?col("--warn"):col("--bad");}
+const cities=[
+ {name:"Vennetia",shares:[.10,.20,.50,.20],ineq:.34,wel:.70,unrest:.12,tag:"serene"},
+ {name:"Korinthos",shares:[.08,.16,.46,.30],ineq:.52,wel:.40,unrest:.44,tag:"restless"},
+ {name:"Thalassa",shares:[.06,.12,.44,.38],ineq:.71,wel:.22,unrest:.68,tag:"bread riots"},
+ {name:"Athaia",shares:[.05,.10,.40,.45],ineq:.83,wel:.14,unrest:.88,tag:"REVOLT — council toppled"},
+];
+document.getElementById("cards").innerHTML=cities.map(c=>{
+ const [ulab,uc]=unrestBits(c.unrest);const[ilab,ic]=ineqBits(c.ineq);
+ const bar=STRATA.map((s,i)=>`<div title="${s[0]} ${Math.round(c.shares[i]*100)}%" style="width:${c.shares[i]*100}%;background:${col(s[1])}"></div>`).join("");
+ const leg=STRATA.map((s,i)=>`<span class="lg"><span class="sw" style="background:${col(s[1])}"></span>${s[0]} ${Math.round(c.shares[i]*100)}%</span>`).join("");
+ return `<div class="card">
+   <div class="name"><span>${c.name}</span><span class="tag" style="color:${uc};border-color:${uc}">${c.tag}</span></div>
+   <div class="bar">${bar}</div><div class="legend">${leg}</div>
+   <div style="margin-top:6px">
+     ${drv(`Inequality (${ilab})`,c.ineq,ic)}
+     ${drv("Commoner welfare",c.wel,welCol(c.wel))}
+     ${drv(`Unrest (${ulab})`,c.unrest,uc)}
+   </div></div>`;}).join("");
+</script></body></html>

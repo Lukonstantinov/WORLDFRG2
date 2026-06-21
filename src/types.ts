@@ -242,6 +242,8 @@ export interface SocietyBrief {
   commoner_wealth: number;
   inequality: number;
   welfare: number;
+  /** 0 = content … 1 = boiling — civil unrest (It. 3). */
+  unrest?: number;
 }
 /** One roster row in the Colonial Office (campaign_get_colonies). Covers both
  *  settlement colonies (colony_kind 1) and house trade outposts (colony_kind 2). */
