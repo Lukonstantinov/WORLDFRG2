@@ -1269,6 +1269,9 @@ function SocietyCard({ society }: { society: SocietyBrief }) {
   const ineqLabel = society.inequality > 0.66 ? "extreme" : society.inequality > 0.4 ? "marked" : "moderate";
   const ineqColor = society.inequality > 0.66 ? "#e0503a" : society.inequality > 0.4 ? "#e0c060" : "#4fc06a";
   const welColor = society.welfare > 0.5 ? "#4fc06a" : society.welfare > 0.28 ? "#e0c060" : "#e0503a";
+  const unrest = society.unrest ?? 0;
+  const unrestLabel = unrest >= 0.82 ? "revolt" : unrest >= 0.6 ? "rioting" : unrest >= 0.35 ? "restless" : "calm";
+  const unrestColor = unrest >= 0.6 ? "#e0503a" : unrest >= 0.35 ? "#e0c060" : "#4fc06a";
   return (
     <div style={{ margin: "2px 0 4px" }}>
       {/* stacked strata bar */}
@@ -1293,6 +1296,7 @@ function SocietyCard({ society }: { society: SocietyBrief }) {
       <div style={{ marginTop: 4 }}>
         <DriverBar label={`Inequality (${ineqLabel})`} frac={society.inequality} color={ineqColor} />
         <DriverBar label="Commoner welfare" frac={society.welfare} color={welColor} />
+        <DriverBar label={`Unrest (${unrestLabel})`} frac={unrest} color={unrestColor} />
       </div>
     </div>
   );

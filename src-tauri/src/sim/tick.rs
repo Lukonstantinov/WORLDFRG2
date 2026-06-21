@@ -71,6 +71,21 @@ const STRATA_DEMAND_TILT: f32 = 0.45;
 /// Fraction of a hub's population that flows between adjacent strata in a year at
 /// full mobility pressure — bounded so the social structure shifts gradually.
 const STRATA_MOBILITY_RATE: f32 = 0.04;
+// ── Civil unrest & revolts (It. 3) — the social substrate turns load-bearing. ──
+/// How fast a hub's smouldering `unrest` eases toward its driver target (yearly).
+const UNREST_EASE: f32 = 0.35;
+/// Unrest at/above this erupts in bread riots (a production + stability shock).
+const RIOT_UNREST: f32 = 0.60;
+/// Unrest at/above this boils over into a REVOLT that topples the ruling council.
+const REVOLT_UNREST: f32 = 0.82;
+/// Slice of every resident house's wealth a revolt seizes and hands to the people
+/// (into the city's `civic_pool`) — a redistributive shock that cuts inequality.
+const REVOLT_REDISTRIB: f32 = 0.15;
+/// Years the toppled family is barred from the council after a revolt.
+const REVOLT_BAN_YEARS: u32 = 12;
+/// Production hit (hub-wide) while a riot / revolt event is active.
+const RIOT_PROD_HIT: f32 = 0.22;
+const REVOLT_PROD_HIT: f32 = 0.40;
 /// Global productivity drift: technology/agronomy improve output ~1.5%/yr,
 /// applied as COMPOUND growth — each year multiplies the running index by
 /// (1 + rate), so year 1 = ×1.015, year 2 = ×1.015² ≈ ×1.030225, etc. Event
@@ -1456,6 +1471,14 @@ pub struct Society {
     pub commoner_wealth: f32,
     /// 0 = egalitarian, 1 = extreme concentration. Elite wealth per head vs commoner.
     pub inequality: f32,
+    /// Smouldering civil unrest, 0 = content … 1 = boiling. Built from low mood,
+    /// inequality, dearth & war; vented by a riot/revolt. (It. 3)
+    #[serde(default)] pub unrest: f32,
+    /// After a revolt, the toppled council house index — barred from the seat until
+    /// `ousted_until`. Only meaningful while `ousted_until` is in the future
+    /// (defaults to 0 = no ban, so the default index 0 is never consulted).
+    #[serde(default)] pub ousted_house: i32,
+    #[serde(default)] pub ousted_until: u32,
 }
 
 impl CityFinance {
@@ -1669,7 +1692,12 @@ impl CampaignSim {
             if h.defunct || h.is_guild { continue; }
             let hub = h.hub as usize;
             if hub >= n { continue; }
-            if h.dominant_seat && h.wealth > council_wealth[hub] {
+            // A family driven from a seat by revolt is barred from it for a generation.
+            let banned = |this: &Self, hub: usize| {
+                let so = &this.hubs[hub].society;
+                so.ousted_house == hi as i32 && this.tick < so.ousted_until
+            };
+            if h.dominant_seat && h.wealth > council_wealth[hub] && !banned(self, hub) {
                 council[hub] = hi as i32;
                 council_wealth[hub] = h.wealth;
             }
@@ -1677,7 +1705,7 @@ impl CampaignSim {
             // each city where it has raised one (the only way besides the home seat).
             for &c in &h.bailos {
                 let c = c as usize;
-                if c < n && h.wealth > council_wealth[c] {
+                if c < n && h.wealth > council_wealth[c] && !banned(self, c) {
                     council[c] = hi as i32;
                     council_wealth[c] = h.wealth;
                 }
@@ -3577,6 +3605,105 @@ impl CampaignSim {
         }
     }
 
+    /// It. 3 · Civil unrest. Each year every settled hub's `unrest` eases toward a
+    /// target set by HOW THE PEOPLE LIVE — low mood, steep inequality, dearth of
+    /// basics, famine and war push it up; prosperity and commoner welfare pull it
+    /// down. Crossing thresholds erupts: a riot (a production + stability shock) or,
+    /// at the extreme, a REVOLT that topples the ruling council. This is where the
+    /// social substrate (It. 2) finally bites back on the economy and politics.
+    fn update_unrest(&mut self) {
+        let tick = self.tick;
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate { continue; }
+            let (mood, lackb, starv, prosp, atwar) = {
+                let hub = &self.hubs[h];
+                (hub.mood, hub.lack_basic.clamp(0.0, 1.0), hub.starving.clamp(0.0, 1.0),
+                 hub.sent_prosperity, hub.war_with >= 0)
+            };
+            let (welfare, ineq) = {
+                let so = &self.hubs[h].society;
+                ((so.commoner_wealth / (so.commoner_wealth + 1.5)).clamp(0.0, 1.0), so.inequality)
+            };
+            let target = (0.42 * (1.0 - mood)
+                + 0.30 * ineq
+                + 0.32 * lackb
+                + 0.22 * starv
+                + if atwar { 0.12 } else { 0.0 }
+                - 0.30 * welfare
+                - 0.18 * prosp).clamp(0.0, 1.0);
+            let u = {
+                let so = &mut self.hubs[h].society;
+                so.unrest += (target - so.unrest) * UNREST_EASE;
+                so.unrest = so.unrest.clamp(0.0, 1.0);
+                so.unrest
+            };
+            if u >= REVOLT_UNREST && self.hubs[h].council_house >= 0 {
+                self.trigger_revolt(h);
+            } else if u >= RIOT_UNREST {
+                let rioting = self.active_events.iter().any(|e| e.hub == h as i32 && e.kind == "riot");
+                if !rioting {
+                    self.active_events.push(ActiveEvent {
+                        kind: "riot".into(), hub: h as i32, good: -1,
+                        magnitude: RIOT_PROD_HIT, until_tick: tick + 150,
+                    });
+                    let name = self.hubs[h].name.clone();
+                    self.journal.push(JournalEntry {
+                        tick, kind: "unrest".into(), hub: h as i32, good: -1, value: u,
+                        text: format!("Bread riots break out in {}", name),
+                    });
+                }
+            }
+        }
+    }
+
+    /// A revolt: the populace seizes a slice of every resident house's wealth (→ the
+    /// city's `civic_pool`, i.e. the people), drives the ruling family from the
+    /// council and BARS it for a generation (`ousted_until`), throws the city into a
+    /// season of disorder (a production + stability shock), and vents the pressure.
+    /// The seat falls vacant; next New Year `decide_polis_policy` re-seats whoever is
+    /// eligible (the banned house excluded), so a rival faction tends to rise.
+    fn trigger_revolt(&mut self, h: usize) {
+        let tick = self.tick;
+        let ousted = self.hubs[h].council_house;
+        // Redistribute: every resident house loses a slice of its fortune to the people.
+        let mut seized = 0.0f32;
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct || self.houses[hi].hub as usize != h { continue; }
+            let take = self.houses[hi].wealth.max(0.0) * REVOLT_REDISTRIB;
+            self.houses[hi].wealth -= take;
+            seized += take;
+        }
+        self.hubs[h].civic_pool += seized;
+        let hubname = self.hubs[h].name.clone();
+        let oname = if ousted >= 0 {
+            let oi = ousted as usize;
+            self.houses[oi].prestige = (self.houses[oi].prestige - 0.25).max(0.0);
+            let nm = self.houses[oi].name.clone();
+            self.houses[oi].events.push(HouseEvent {
+                tick, kind: "revolt".into(),
+                text: format!("Driven from the council of {} by a popular revolt", hubname),
+            });
+            nm
+        } else { String::new() };
+        // Bar the ousted family from the seat; the council falls vacant for now.
+        self.hubs[h].society.ousted_house = ousted;
+        self.hubs[h].society.ousted_until = tick + REVOLT_BAN_YEARS * TICKS_PER_YEAR;
+        self.hubs[h].council_house = -1;
+        // A season of disorder: clear any riot, then crater production + stability.
+        self.active_events.retain(|e| !(e.hub == h as i32 && e.kind == "riot"));
+        self.active_events.push(ActiveEvent {
+            kind: "revolt".into(), hub: h as i32, good: -1,
+            magnitude: REVOLT_PROD_HIT, until_tick: tick + 120,
+        });
+        // Catharsis: the explosion vents the accumulated pressure.
+        self.hubs[h].society.unrest = 0.25;
+        self.journal.push(JournalEntry {
+            tick, kind: "revolt".into(), hub: h as i32, good: -1, value: 1.0,
+            text: if oname.is_empty() { format!("A popular revolt convulses {}", hubname) }
+                  else { format!("A popular revolt in {} topples {}", hubname, oname) },
+        });
+    }
+
     /// A gentle demand tilt from a city's class composition: a patrician-heavy city
     /// soaks up luxuries (tier 2), a commoner mass eats staples (tier 0). Normalized
     /// around an "average" society so total demand magnitude is preserved on average.
@@ -4435,6 +4562,13 @@ impl CampaignSim {
                         m[e.hub as usize][e.good as usize] *= 1.0 - e.magnitude;
                     }
                 }
+                "riot" | "revolt" => {
+                    // Civil disorder halts the workshops & wharves city-wide.
+                    if e.hub >= 0 {
+                        let c = e.hub as usize;
+                        for g in 0..ng { m[c][g] *= 1.0 - e.magnitude; }
+                    }
+                }
                 "bumper" => {
                     // Exceptional harvest: production surges at the hub (+mag), so
                     // its goods grow plentiful and cheap.
@@ -5282,6 +5416,9 @@ impl CampaignSim {
         if self.tick % 365 == 0 {
             // Yearly social mobility: strata shift with prosperity / hardship.
             self.update_society();
+            // Then the people may stir: unrest builds, riots flare, revolts topple
+            // councils (reads the freshly-updated inequality / welfare above).
+            self.update_unrest();
             // Estate/manufactory disasters strike + funded repairs progress (yearly).
             self.estate_condition_pass();
             // House trade outposts from year 30 (rich house, heavy cost); full
@@ -7649,6 +7786,55 @@ mod tests {
         let emin = elites.iter().cloned().fold(f32::INFINITY, f32::min);
         let emax = elites.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         assert!(emax - emin > 0.02, "strata should vary across cities (spread {:.3})", emax - emin);
+    }
+
+    /// It. 3 · A chronically poor, steeply unequal city should boil over: unrest
+    /// climbs, a revolt fires, the ruling council is toppled & barred, and wealth
+    /// stays finite throughout (the redistribution is a sink, not a blow-up).
+    #[test]
+    fn unrest_topples_councils() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.9, true),
+            good("fish", 0, 0, 1.2, 0.7, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+            good("iron", 2, 1, 5.0, 0.45, false),
+        ];
+        let ng = goods.len();
+        let mut hubs = Vec::new();
+        for i in 0..6u32 {
+            let x = (i % 3) as f32 * 8.0;
+            let y = (i / 3) as f32 * 8.0;
+            let pop = 12000.0;
+            // Food-starved everywhere (all one component → no relief), so dearth bites.
+            let prod: Vec<f32> = (0..ng).map(|g| if g == 0 { pop * 0.004 } else { pop * 0.002 }).collect();
+            hubs.push(hub(i, x, y, pop, prod, 0));
+        }
+        let mut s = sim(hubs, goods);
+        // A tiny, fabulously rich oligarchy sits each city's council → extreme inequality.
+        for i in 0..6u32 {
+            let mut h = house_at(i, vec![2], 2);
+            h.wealth = 800.0;
+            h.dominant_seat = true;
+            h.archetype = ARCH_POLITICAL;
+            s.houses.push(h);
+        }
+        s.seed_house_count = s.houses.len() as u32;
+        s.rebuild_routes();
+
+        for _ in 1..=45u32 {
+            s.advance(365);
+            for h in &s.hubs {
+                assert!(h.society.unrest >= 0.0 && h.society.unrest <= 1.0, "unrest 0..1");
+            }
+            for h in &s.houses {
+                assert!(h.wealth.is_finite() && h.wealth < 1.0e7, "house wealth blew up: {}", h.wealth);
+            }
+        }
+        let revolts = s.journal.iter().filter(|e| e.kind == "revolt").count();
+        assert!(revolts >= 1, "a chronically poor, unequal city should revolt at least once");
+        // Some council was barred by a revolt (the ban window was set).
+        let banned = s.hubs.iter().any(|h| h.society.ousted_until > 0);
+        assert!(banned, "a revolt should bar the toppled family from the council");
     }
 
     /// Colonisation MECHANISM (deterministic): from year 50, an eligible city founds

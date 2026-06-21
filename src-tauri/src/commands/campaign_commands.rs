@@ -531,6 +531,8 @@ pub struct SocietyBrief {
     pub inequality: f32,
     /// 0 = destitute, 1 = comfortable — commoner welfare for the meter (derived).
     pub welfare: f32,
+    /// 0 = content … 1 = boiling — civil unrest (It. 3).
+    #[serde(default)] pub unrest: f32,
 }
 
 /// DLC 3.5 · one leg of a city's carrying trade (a merchant of this city hauling
@@ -1632,7 +1634,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         let welfare = (so.commoner_wealth / (so.commoner_wealth + 1.5)).clamp(0.0, 1.0);
         Some(SocietyBrief {
             patrician: so.patrician, burgher: so.burgher, commoner: so.commoner, underclass: so.underclass,
-            commoner_wealth: so.commoner_wealth, inequality: so.inequality, welfare,
+            commoner_wealth: so.commoner_wealth, inequality: so.inequality, welfare, unrest: so.unrest,
         })
     } else { None };
     // Estate descriptors for the inspector (kind, owner, worked good).
