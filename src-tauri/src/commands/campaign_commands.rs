@@ -15,6 +15,20 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use crate::db::{metadata, WorldDb};
 
+/// Extract a human-readable message from a `catch_unwind` panic payload (the
+/// payload is `&str` for `panic!("…")` and `String` for `format!`-style panics;
+/// anything else is opaque). The full file:line is captured separately by the
+/// startup panic hook in `lib.rs`.
+fn panic_payload_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic (see the panic log in the app data dir)".to_string()
+    }
+}
+
 /// Campaign keys carried by `.campaign` files (and stripped from world saves
 /// via the whole-table strip — this list is what save/open copies explicitly).
 const CAMPAIGN_KEYS: [&str; 7] = [
@@ -1225,13 +1239,34 @@ pub fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<CampaignSn
     // Whether enough wall time has passed to warrant a flush (read before borrowing
     // `sim`, which borrows the cache).
     let stale = cache.last_persist.map(|t| t.elapsed().as_secs_f32() > 5.0).unwrap_or(true);
+    let ticks_run = ticks.clamp(1, 3650);
+    let year_before = cache.sim.as_ref()
+        .ok_or_else(|| "No active campaign sim — start it first.".to_string())?
+        .year();
+    let t0 = std::time::Instant::now();
+    // Crash-guard the tick. A panicking tick (an index/overflow bug, which the dev
+    // build turns into a real panic) must NOT abort the whole app — catch it,
+    // discard the half-mutated sim, and surface a recoverable error so the UI can
+    // fall back to the last autosave. (A true allocation failure still aborts —
+    // catch_unwind can't catch `abort()` — so a persistent crash here points at OOM
+    // rather than a logic panic, which itself is a useful signal.)
+    let caught = {
+        let sim = cache.sim.as_mut().expect("checked Some above");
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sim.advance(ticks_run)))
+    };
+    if let Err(payload) = caught {
+        let msg = panic_payload_message(&payload);
+        // Drop the corrupt in-memory sim so the next advance reloads the last good
+        // autosave instead of continuing from a half-applied tick.
+        cache.sim = None;
+        cache.dirty = false;
+        return Err(format!(
+            "Campaign tick crashed and was rolled back to the last autosave. ({msg})"
+        ));
+    }
     let (snap, json) = {
-        let sim = cache.sim.as_mut()
-            .ok_or_else(|| "No active campaign sim — start it first.".to_string())?;
-        let year_before = sim.year();
-        let t0 = std::time::Instant::now();
-        sim.advance(ticks.clamp(1, 3650));
-        sim.last_tick_ms = t0.elapsed().as_secs_f32() * 1000.0 / ticks.max(1) as f32;
+        let sim = cache.sim.as_mut().expect("present after a successful advance");
+        sim.last_tick_ms = t0.elapsed().as_secs_f32() * 1000.0 / ticks_run.max(1) as f32;
         let snap = build_snapshot(sim);
         // Serialize ONLY when it's time to autosave (year rolled over or wall-clock
         // cadence); otherwise the change just stays resident and dirty.

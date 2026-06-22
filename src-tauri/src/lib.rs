@@ -9,6 +9,7 @@ pub mod import;
 
 use commands::{world_commands, tile_commands, paint_commands, query_commands, template_commands, sim_commands, file_commands, goods_commands, campaign_commands, import_commands};
 use db::WorldDb;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -118,6 +119,43 @@ pub fn run() {
             file_commands::export_heightmap,
             file_commands::export_layers,
         ])
+        .setup(|app| {
+            // Capture panic location + message to a file. The crash-guard in
+            // `campaign_advance` turns a panicking tick into a recoverable error,
+            // but the dev console swallows stderr and a release build has none —
+            // so the only durable record of WHERE a tick blew up is this log.
+            if let Ok(dir) = app.path().app_log_dir() {
+                let _ = std::fs::create_dir_all(&dir);
+                let log_path = dir.join("panic.log");
+                let default = std::panic::take_hook();
+                std::panic::set_hook(Box::new(move |info| {
+                    let loc = info
+                        .location()
+                        .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+                        .unwrap_or_else(|| "<unknown location>".into());
+                    let msg = info
+                        .payload()
+                        .downcast_ref::<&str>()
+                        .map(|s| s.to_string())
+                        .or_else(|| info.payload().downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "<non-string panic payload>".into());
+                    let ts = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&log_path)
+                    {
+                        use std::io::Write;
+                        let _ = writeln!(f, "[unix {ts}] panic at {loc}: {msg}");
+                    }
+                    default(info);
+                }));
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

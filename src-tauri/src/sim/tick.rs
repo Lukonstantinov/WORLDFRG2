@@ -405,6 +405,10 @@ const CONTRACT_TRANSPORT_MARGIN: f32 = 1.2;
 const TRADE_HIST_CAP: usize = 40;
 /// Global cap on tracked (hub,good) history rows (sparse; drops dead trades first).
 const TRADE_HIST_ROWS: usize = 8000;
+/// Most-recent regional crashes / concluded wars kept (older entries age out so a
+/// century-long campaign can't grow these chronicles without bound → memory).
+const CRASH_RECORD_CAP: usize = 200;
+const WAR_LOG_CAP: usize = 200;
 // Term → strike factor (longer term = cheaper unit for the buyer) and break penalty
 // multiplier (longer = stiffer). Indexed 0:1yr 1:3yr 2:5yr 3:7yr.
 const TERM_YEARS: [u8; 4] = [1, 3, 5, 7];
@@ -2378,6 +2382,10 @@ impl CampaignSim {
             year, origin_hub: origin as u32, origin_name, component: region,
             cities_hit, banks_failed, cause: cause.into(), text,
         });
+        if self.crashes.len() > CRASH_RECORD_CAP {
+            let drop = self.crashes.len() - CRASH_RECORD_CAP;
+            self.crashes.drain(0..drop);
+        }
     }
 
     /// DLC 3.5 · after the yearly speculation read, a HIGH-tier (≥4★) bubble may
@@ -2494,6 +2502,10 @@ impl CampaignSim {
                     reparations: rep, levies_total: self.wars[wi].levies,
                     cause: self.wars[wi].cause.clone(), text,
                 });
+                if self.war_log.len() > WAR_LOG_CAP {
+                    let drop = self.war_log.len() - WAR_LOG_CAP;
+                    self.war_log.drain(0..drop);
+                }
                 // War of independence: the colony either wins free, or is brought to
                 // heel for 15 years before it may rebel again.
                 if self.wars[wi].cause == "independence" {
