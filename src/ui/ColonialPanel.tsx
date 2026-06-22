@@ -220,7 +220,7 @@ function GateCard({ gates }: { gates: ColonyGateStatus | null }) {
     { id: "year", label: `Campaign age ≥ ${gates.start_year} years`, ok: gates.year_ok, detail: `year ${gates.year}` },
     { id: "founder", label: `A large, prosperous founder city (pop ≥ ${(gates.min_pop / 1000).toFixed(0)}k)`, ok: gates.founder_ok, detail: gates.qualifying_founder || "none qualifies" },
     { id: "bank", label: "A chartered bank on the continent", ok: gates.bank_on_continent, detail: gates.bank_on_continent ? "present" : "none on this landmass" },
-    { id: "site", label: "A reachable fertile unsettled site", ok: gates.site_ok, detail: `${gates.colonizable_sites_in_range} in range` },
+    { id: "site", label: "A reachable unsettled colony site", ok: gates.site_ok, detail: `${gates.colonizable_sites_in_range} in range` },
   ];
   return (
     <div style={card}>

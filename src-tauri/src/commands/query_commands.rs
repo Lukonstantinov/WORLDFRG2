@@ -3154,6 +3154,7 @@ fn compute_colonizable_sites(
     world: &crate::db::world_cache::WorldTiles,
     grid_w: u32, grid_h: u32,
     settlements: &[RouteSettlement],
+    base_value: &[f32],
 ) -> Vec<crate::sim::tick::ColonizeSite> {
     use crate::sim::tick::ColonizeSite;
     if grid_w == 0 || grid_h == 0 { return vec![]; }
@@ -3163,6 +3164,8 @@ fn compute_colonizable_sites(
     let cn = (cw * ch) as usize;
     let (mut is_land, mut fert, mut koppen, mut elev) =
         (vec![false; cn], vec![0.0f32; cn], vec![0u8; cn], vec![0.0f32; cn]);
+    // Raw trade-good richness per coarse cell: Σ (belt strength × good base_value).
+    let mut traw = vec![0.0f32; cn];
     for cy in 0..ch {
         for cx in 0..cw {
             let wx = (cx as u32 * f + f / 2).min(grid_w - 1);
@@ -3174,8 +3177,16 @@ fn compute_colonizable_sites(
             fert[ci] = tile.fertility[ti];
             koppen[ci] = tile.koppen[ti];
             elev[ci] = tile.elevation[ti];
+            let mut tv = 0.0f32;
+            for g in 0..base_value.len().min(tile.goods.len()) {
+                tv += tile.goods[g][ti] as f32 / 255.0 * base_value[g];
+            }
+            traw[ci] = tv;
         }
     }
+    // Normalize trade richness to 0..1 across all land cells.
+    let tmax = traw.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
+    let tval: Vec<f32> = traw.iter().map(|&v| (v / tmax).clamp(0.0, 1.0)).collect();
     let wrap = |x: i32| ((x % cw) + cw) % cw;
     let coastal = |cx: i32, cy: i32| -> bool {
         [(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
@@ -3199,22 +3210,26 @@ fn compute_colonizable_sites(
         for cx in 0..cw {
             let ci = (cy * cw + cx) as usize;
             if !is_land[ci] { continue; }
-            // Skip unproductive flatland, but allow highlands (mines).
-            if fert[ci] < 0.30 && elev[ci] < 0.45 { continue; }
+            // Skip unproductive flatland — UNLESS it holds valuable trade goods (a
+            // lean but cargo-rich frontier is worth an outpost/colony) or highlands.
+            if fert[ci] < 0.30 && elev[ci] < 0.45 && tval[ci] < 0.20 { continue; }
             if min_settle_dist(cx, cy) < min_dist { continue; }
             let cst = coastal(cx, cy);
             let kind_hint = if cst && fert[ci] < 0.40 { 4 }
                 else if elev[ci] > 0.45 { 2 }
                 else if fert[ci] > 0.55 { 1 }
                 else { 3 };
+            // Rank candidates by farmland + highland + coast + the trade-goods prize,
+            // so trade-rich sites survive the greedy spread alongside fertile ones.
             let score = fert[ci]
                 + if elev[ci] > 0.45 { 0.2 } else { 0.0 }
-                + if cst { 0.1 } else { 0.0 };
+                + if cst { 0.1 } else { 0.0 }
+                + 0.6 * tval[ci];
             let wx = (cx as u32 * f + f / 2).min(grid_w - 1) as f32;
             let wy = (cy as u32 * f + f / 2).min(grid_h - 1) as f32;
             cands.push((score, ColonizeSite {
                 x: wx, y: wy, koppen: koppen[ci], elevation: elev[ci],
-                fertility: fert[ci], coastal: cst, kind_hint,
+                fertility: fert[ci], coastal: cst, kind_hint, trade_value: tval[ci],
             }));
         }
     }
@@ -3223,7 +3238,7 @@ fn compute_colonizable_sites(
     let spacing = (cw as f32 * 0.06).max(4.0) * f as f32; // world cells
     let mut picked: Vec<ColonizeSite> = Vec::new();
     for (_, s) in cands {
-        if picked.len() >= 60 { break; }
+        if picked.len() >= 120 { break; }
         let ok = picked.iter().all(|p| {
             let mut dx = (p.x - s.x).abs();
             if grid_w > 1 { dx = dx.min(grid_w as f32 - dx); }
@@ -3271,7 +3286,8 @@ pub fn compute_economy(
         return Ok(empty);
     }
     // Empty-land colonization candidates for the campaign (uses tile data here).
-    let colonizable_sites = compute_colonizable_sites(&world, grid_w, grid_h, &settlements);
+    let base_value: Vec<f32> = specs.iter().map(|s| s.base_value.max(0.0)).collect();
+    let colonizable_sites = compute_colonizable_sites(&world, grid_w, grid_h, &settlements, &base_value);
 
     let wrap_dx = |a: i32, b: i32| -> i32 {
         let mut d = (a - b).abs();

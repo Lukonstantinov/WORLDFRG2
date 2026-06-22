@@ -112,7 +112,7 @@ const ESTATE_HOUSE_OWNER_WEALTH: f32 = 6.0;
 /// founder OR any of its offices — offices CHAIN the reach (an office is a relay
 /// "ground" from which the next hop is measured), so a network projects far while
 /// no single leg is implausibly long. The trade-reach scale, realised in the sim.
-const COLONY_HOP_REACH_FRAC: f32 = 0.20;
+const COLONY_HOP_REACH_FRAC: f32 = 0.28;
 /// Capital it takes to found a SETTLEMENT colony (heavy — a city-scale venture),
 /// pooled from the parent city treasury + optional house & bank backers.
 const COLONY_FOUND_COST: f32 = 14.0;
@@ -122,10 +122,13 @@ const COLONY_PARENT_MIN_POP: f32 = 5_000.0;
 const MAX_SETTLEMENT_COLONIES: usize = 24;
 /// Fraction of the parent's population that emigrates to seed a settlement colony.
 const COLONY_MIGRATION_FRAC: f32 = 0.06;
-/// Fertility split between the two colony pools: at/above this a site is "good land"
-/// reserved for SETTLEMENT colonies; below it is poor, trade-prone land for HOUSE
-/// outposts. Keeps the two drives from cannibalising each other's sites.
-const COLONY_FERTILE_SITE: f32 = 0.45;
+/// Colony viability floor: a SETTLEMENT colony skips a site only when it is BOTH
+/// too lean to part-feed itself AND poor in trade goods (otherwise the food lifeline
+/// carries a trade-rich frontier colony). HOUSE outposts ignore fertility entirely
+/// and chase trade goods. These replace the old hard fertility split between the two
+/// pools — colonies now also settle less-fertile land, outposts follow the cargo.
+const COLONY_MIN_FERTILE: f32 = 0.20;
+const COLONY_MIN_TRADE: f32 = 0.25;
 /// Daily logistic population-growth rate below carrying capacity (~5%/yr peak at
 /// low population; eases to 0 at capacity). Was 0.0006 (~24%/yr — too fast).
 const POP_GROWTH_RATE: f32 = 0.0003;
@@ -1251,6 +1254,12 @@ pub struct ColonizeSite {
     /// Suggested estate kind for the site (1 farm / 2 mine / 3 plantation /
     /// 4 fishery / 5 vineyard), from its climate / elevation / coast / fertility.
     pub kind_hint: u8,
+    /// Normalized 0..1 richness of high-value TRADE GOODS at the site (Σ belt ×
+    /// base_value). Drives where merchant houses plant trade outposts, and lets
+    /// settlement colonies form on trade-rich frontier even when the land is lean.
+    /// 0 on pre-trade saves (serde default).
+    #[serde(default)]
+    pub trade_value: f32,
 }
 
 /// A civic supply contract: a supplier hub ships `monthly_qty` of `good` to a
@@ -5823,14 +5832,15 @@ impl CampaignSim {
             }
         }
         let cap = self.world_w * COLONY_HOP_REACH_FRAC;
-        // Pick the best reachable POOR, trade-prone site (the opposite bias to a
-        // settlement colony): low fertility + coastal, nearer is better.
+        // Pick the best reachable site for a TRADE outpost: a house plants its
+        // factory where the valuable trade goods are. Site trade-value dominates,
+        // a coast (shippable) adds a bonus, and nearer is better. Fertility is
+        // irrelevant — an outpost imports its food and exists to work the cargo.
         let mut bi = (usize::MAX, 0.0f32);
         for (i, s) in self.colonizable.iter().enumerate() {
-            if s.fertility >= COLONY_FERTILE_SITE { continue; } // leave good land for settlement colonies
             let d = self.nearest_node_dist(&nodes, s.x, s.y);
             if d > cap { continue; }
-            let trade_score = (0.65 - s.fertility).max(0.05) + if s.coastal { 0.30 } else { 0.0 };
+            let trade_score = s.trade_value + if s.coastal { 0.30 } else { 0.0 };
             let score = trade_score * (1.0 - d / cap);
             if score > bi.1 { bi = (i, score); }
         }
@@ -6116,10 +6126,15 @@ impl CampaignSim {
         let cap = self.world_w * COLONY_HOP_REACH_FRAC;
         let mut bi = (usize::MAX, 0.0f32);
         for (i, s) in self.colonizable.iter().enumerate() {
-            if s.fertility < COLONY_FERTILE_SITE { continue; } // good land only — settlements need to feed themselves
+            // Skip only the genuinely worthless: too lean to part-feed itself AND
+            // poor in trade goods. Otherwise a colony may settle less-fertile land —
+            // a trade-rich frontier is worth founding even on lean soil (its food
+            // lifeline contracts cover the deficit).
+            if s.fertility < COLONY_MIN_FERTILE && s.trade_value < COLONY_MIN_TRADE { continue; }
             let d = self.nearest_node_dist(&nodes, s.x, s.y);
             if d > cap { continue; }
-            let score = (0.4 + s.fertility) * (1.0 - d / cap);
+            // Balance self-sufficiency (fertility) against the prize (trade goods).
+            let score = (0.30 + 0.6 * s.fertility + 0.5 * s.trade_value) * (1.0 - d / cap);
             if score > bi.1 { bi = (i, score); }
         }
         let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return };
@@ -7881,10 +7896,10 @@ mod tests {
         other.wealth = 50.0;
         s.houses.push(other);
         // Empty land near the cluster: a fertile site (→ settlement colony) and a
-        // poor coastal site (→ house outpost), both within the hop-reach cap.
+        // trade-rich poor coastal site (→ house outpost), both within the hop-reach cap.
         s.colonizable = vec![
-            ColonizeSite { x: 3.0, y: 3.0, koppen: 0, elevation: 0.2, fertility: 0.80, coastal: false, kind_hint: 1 },
-            ColonizeSite { x: 5.0, y: 2.0, koppen: 0, elevation: 0.1, fertility: 0.18, coastal: true, kind_hint: 4 },
+            ColonizeSite { x: 3.0, y: 3.0, koppen: 0, elevation: 0.2, fertility: 0.80, coastal: false, kind_hint: 1, trade_value: 0.10 },
+            ColonizeSite { x: 5.0, y: 2.0, koppen: 0, elevation: 0.1, fertility: 0.18, coastal: true, kind_hint: 4, trade_value: 0.60 },
         ];
         s.rebuild_routes();
         s.tick = COLONY_START_TICK; // open the age of colonisation

@@ -934,9 +934,17 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         .collect();
     let nn = hubs.len();
 
-    // ── Connectivity components from corridors + chains (goods move only within
-    //    a component, so continents stay separate markets) ──
+    // ── Connectivity components: TOTAL TRADE within a landmass ────────────────
+    // Components were previously derived ONLY from realized worldgen flows
+    // (corridors + chains), so any city the static solve never shipped through —
+    // typically INLAND towns — became a singleton component and could NEVER trade
+    // (rebuild_routes marks every cross-component pair unreachable). We now build
+    // components from geographic reachability so every settlement on a landmass
+    // shares one trading market (the code's intended "continents = components"),
+    // while distinct continents / remote islands stay separate. Campaign-only —
+    // worldgen, compute_economy and the trade overlays are untouched.
     let mut parent: Vec<usize> = (0..nn).collect();
+    // Keep the worldgen trade lanes as links (the sea routes the static solve found).
     for c in &econ.corridors {
         if let (Some(&ia), Some(&ib)) = (id_to_idx.get(&c.a), id_to_idx.get(&c.b)) {
             uf_union(&mut parent, ia, ib);
@@ -946,6 +954,35 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         for w in ch.stops.windows(2) {
             if let (Some(&ia), Some(&ib)) = (id_to_idx.get(&w[0].hub), id_to_idx.get(&w[1].hub)) {
                 uf_union(&mut parent, ia, ib);
+            }
+        }
+    }
+    // Geographic K-nearest union: each hub links to its nearest neighbours within a
+    // max single-hop distance (≈30% of world width, mirroring the worldgen link
+    // ceiling). Transitive chaining then fuses a whole continent into one component
+    // regardless of its size, but a wide OCEAN gap (> the cap) is never bridged, so
+    // separate continents / far islands remain their own markets.
+    {
+        const COMP_K: usize = 6;
+        let world_w = world_ref.grid_width as f32;
+        let max_link = (world_w * 0.30).max(1.0);
+        let max_link2 = max_link * max_link;
+        let d2 = |a: usize, b: usize| -> f32 {
+            let mut dx = (hubs[a].x - hubs[b].x).abs();
+            if world_w > 1.0 { dx = dx.min(world_w - dx); } // cylindrical wrap on X
+            let dy = hubs[a].y - hubs[b].y;
+            dx * dx + dy * dy
+        };
+        let real: Vec<usize> = (0..nn).filter(|&i| !hubs[i].is_estate).collect();
+        let mut scratch: Vec<(usize, f32)> = Vec::with_capacity(real.len());
+        for &i in &real {
+            scratch.clear();
+            for &j in &real {
+                if j != i { scratch.push((j, d2(i, j))); }
+            }
+            scratch.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            for &(j, dd) in scratch.iter().take(COMP_K) {
+                if dd <= max_link2 { uf_union(&mut parent, i, j); }
             }
         }
     }
@@ -1378,14 +1415,17 @@ pub fn campaign_get_colonies(db: State<'_, WorldDb>) -> Result<Vec<ColonySummary
 // Colony-founding gate thresholds — MIRRORED (read-only) from `sim/tick.rs`. The
 // Colonial Office REPORTS these to explain why no colony exists yet; it does NOT
 // change them. Keep in sync with the consts in tick.rs (COLONY_START_TICK = 30y,
-// COLONY_PARENT_MIN_POP, COLONY_FERTILE_SITE, COLONY_HOP_REACH_FRAC,
+// COLONY_PARENT_MIN_POP, COLONY_MIN_FERTILE/COLONY_MIN_TRADE, COLONY_HOP_REACH_FRAC,
 // MAX_SETTLEMENT_COLONIES, and the founder filter in maybe_found_settlement_colony).
 const GATE_START_YEAR: u32 = 30;
 const GATE_MIN_POP: f32 = 5_000.0;
 const GATE_PROSPERITY_MIN: f32 = 0.25;
 const GATE_STARVING_MAX: f32 = 0.7;
-const GATE_FERTILE_SITE: f32 = 0.45;
-const GATE_HOP_REACH_FRAC: f32 = 0.20;
+// A site counts as colonisable when it can part-feed itself OR is rich in trade
+// goods (matches maybe_found_settlement_colony's relaxed viability floor).
+const GATE_FERTILE_SITE: f32 = 0.20;
+const GATE_TRADE_SITE: f32 = 0.25;
+const GATE_HOP_REACH_FRAC: f32 = 0.28;
 const GATE_MAX_SETTLEMENT_COLONIES: u32 = 24;
 
 /// Read-only snapshot of the settlement-colony founding gates, for the Colonial
@@ -1438,14 +1478,16 @@ pub fn campaign_colony_gates(db: State<'_, WorldDb>) -> Result<Option<ColonyGate
     let colonizable_sites_in_range = if let Some(h) = founder {
         let (fx, fy) = (sim.hubs[h].x, sim.hubs[h].y);
         sim.colonizable.iter().filter(|s| {
-            if s.fertility < GATE_FERTILE_SITE { return false; }
+            if s.fertility < GATE_FERTILE_SITE && s.trade_value < GATE_TRADE_SITE { return false; }
             let mut dx = (s.x - fx).abs();
             if sim.world_w > 0.0 { dx = dx.min(sim.world_w - dx); } // cylindrical wrap on X
             let dy = s.y - fy;
             (dx * dx + dy * dy).sqrt() <= cap
         }).count() as u32
     } else {
-        sim.colonizable.iter().filter(|s| s.fertility >= GATE_FERTILE_SITE).count() as u32
+        sim.colonizable.iter()
+            .filter(|s| s.fertility >= GATE_FERTILE_SITE || s.trade_value >= GATE_TRADE_SITE)
+            .count() as u32
     };
     let site_ok = colonizable_sites_in_range > 0;
     let settlement_colonies = sim.hubs.iter()
