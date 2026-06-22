@@ -3221,9 +3221,10 @@ impl CampaignSim {
         let profile = std::env::var("WF2_PROFILE").is_ok();
         let (mut t_rebuild, mut t_trade, mut t_events, mut t_houses) = (0f32, 0f32, 0f32, 0f32);
 
-        // Per-tick consumption scratch (n×ng), reused across the whole advance so a
-        // long run doesn't reallocate it every tick. Resized/cleared inside the loop.
+        // Per-tick scratch matrices (n×ng), reused across the whole advance so a long
+        // run doesn't reallocate them every tick. Resized/cleared inside the loop.
         let mut needs: Vec<Vec<f32>> = Vec::new();
+        let mut prod_mult: Vec<Vec<f32>> = Vec::new();
 
         for _ in 0..n_ticks {
             self.tick += 1;
@@ -3297,7 +3298,7 @@ impl CampaignSim {
             // Expire finished events.
             self.active_events.retain(|e| e.until_tick > tick);
             // Production multipliers from active events (per hub/good, default 1).
-            let prod_mult = self.event_production_mult();
+            self.fill_event_production_mult(&mut prod_mult);
             // Slow global productivity growth (~0.5%/yr baseline); bumper events add
             // more locally, adverse events dent the index (see roll_events).
             self.tech_factor *= tech_daily;
@@ -4556,10 +4557,17 @@ impl CampaignSim {
     }
 
     /// Per-hub per-good production multiplier from active events (drought/blight…).
-    fn event_production_mult(&self) -> Vec<Vec<f32>> {
+    /// Fill `m` (reused across ticks) with per-hub/good production multipliers from
+    /// active events — default 1.0, dented by drought/blight/etc. Resizing + resetting
+    /// in place avoids reallocating an n×ng matrix every single tick.
+    fn fill_event_production_mult(&self, m: &mut Vec<Vec<f32>>) {
         let n = self.hubs.len();
         let ng = self.goods.len();
-        let mut m = vec![vec![1.0f32; ng]; n];
+        m.resize(n, Vec::new());
+        for row in m.iter_mut() {
+            row.clear();
+            row.resize(ng, 1.0);
+        }
         for e in &self.active_events {
             match e.kind.as_str() {
                 "drought" | "blight" | "fishery_collapse" => {
@@ -4626,7 +4634,6 @@ impl CampaignSim {
                 if *v < EVENT_PROD_FLOOR { *v = EVENT_PROD_FLOOR; }
             }
         }
-        m
     }
 
     /// Arbitrage one round: each surplus hub ships toward the best reachable

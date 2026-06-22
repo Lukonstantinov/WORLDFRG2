@@ -157,13 +157,12 @@ force-close" path that also yields WER hang-dumps).
 - **Cap/pool runaway hub growth** — per-parent estate cap and/or merge co-located
   estates so `n` can't climb without bound.
 
-### 1c. Cheap constant-factor wins (guided by `WF2_PROFILE`)  ◑ STARTED
+### 1c. Cheap constant-factor wins (guided by `WF2_PROFILE`)  ✅ DONE
 
-> **Implemented:** the per-tick `needs` matrix (`n×ng` floats) is no longer
-> reallocated every tick — a reusable buffer is hoisted above the tick loop and
-> resized/cleared in place (behavior-identical; dynamics digest unchanged).
-> Remaining: `prod_mult` (`event_production_mult`) still allocates per tick — cheap
-> to pool when it shows up in the profiler.
+> **Implemented:** both per-tick `n×ng` scratch matrices — `needs` and `prod_mult`
+> (`event_production_mult` → `fill_event_production_mult`) — are now reused buffers
+> hoisted above the tick loop and resized/cleared in place instead of reallocated
+> every tick (behavior-identical; dynamics digest unchanged).
 
 **Verify (for the remaining 1b/1c work):** `WF2_PROFILE=1` before/after, capture the
 per-year ms breakdown into an HTML report (Tier rule: quantified change →
@@ -243,9 +242,30 @@ data flow). Do it only after Tier 0+1 land, and keep the synchronous
 |---|---|---|---|
 | 0 | small | a panicking tick shows a recoverable error + writes a panic log; caps added | ✅ done |
 | 1a | small | advance off the main thread; conn free during compute | ✅ done |
-| 1c | small | per-tick `needs` matrix no longer reallocated | ◑ partial (`prod_mult` left) |
-| 1b | medium | estates off the routing grid; per-year ms flat over 300 years | ⏳ deferred (semantics + GUI verify) |
+| 1c | small | per-tick `needs` + `prod_mult` matrices no longer reallocated | ✅ done |
+| 1b | medium | estates off the routing grid; per-year ms flat over 300 years | ⏳ blocked on profiler data (see below) |
 | 2 | larger | actor engine + event-driven UI; engine crash-recoverable | ⏳ deferred (needs in-app verify) |
+
+### Why 1b / Tier 2 are NOT shipped yet (and how to unblock them)
+
+The remaining items are invasive *and* would be done on a hypothesis. Before
+touching them we need one **profiler run from a real late-game campaign**: launch
+with `WF2_PROFILE=1`, play a long save (ideally one that has crashed/lagged), and
+read the per-year ms breakdown printed to the dev console (`t_rebuild` vs `t_trade`
+vs `t_events` vs `t_houses`).
+
+- If **`t_trade` dominates** → the per-tick dispatch is the cost; 1b's route-rebuild
+  optimization barely helps and we should instead trim dispatch (fewer goods scanned,
+  coarser cadence) — a different, safer change.
+- If **`t_rebuild` dominates** → the O(n²) route rebuild on a growing `n` is real, and
+  1b is worth the careful work: change `days` from a flat `Vec<f32>` (stride n) to an
+  appendable layout, append one hub's row on estate/colony founding (O(n) memcpy
+  re-index, no recompute), and give estates a parent-derived neighbour list. Guard
+  with the dynamics digest **and** an in-app run (estates must still get fed).
+
+Tier 2's actor/event-UI rewrite rewrites `campaignStore`/`StepCampaign`; its primary
+benefit (off-thread) is already delivered by 1a, so it's pure architectural polish —
+do it only when its UI flow can be exercised live.
 
 Across all tiers: **save-format back-compat** (new fields serde-default), and the
 **dynamics digest must stay healthy** (bounded finite wealth, houses turn over,
