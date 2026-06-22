@@ -1231,40 +1231,52 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
 /// Advance the living-trade sim by `ticks` days. The sim is mutated in place in the
 /// resident cache (no JSON round-trip per call) and flushed to the DB only on a year
 /// boundary or every few seconds of wall time — see `CampaignCache`.
+// `async` so Tauri runs the (heavy) tick on a worker thread instead of the main
+// thread — a synchronous command would block the UI event loop for the whole
+// advance, which is what made long campaigns feel frozen. There are no `.await`
+// points, so the std `MutexGuard`s never cross one (the future stays `Send`).
 #[tauri::command]
-pub fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<CampaignSnapshot, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
-    ensure_campaign_loaded(&mut cache, &conn)?;
-    // Whether enough wall time has passed to warrant a flush (read before borrowing
-    // `sim`, which borrows the cache).
-    let stale = cache.last_persist.map(|t| t.elapsed().as_secs_f32() > 5.0).unwrap_or(true);
+pub async fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<CampaignSnapshot, String> {
     let ticks_run = ticks.clamp(1, 3650);
-    let year_before = cache.sim.as_ref()
-        .ok_or_else(|| "No active campaign sim — start it first.".to_string())?
-        .year();
-    let t0 = std::time::Instant::now();
-    // Crash-guard the tick. A panicking tick (an index/overflow bug, which the dev
+
+    // Phase 1 — ensure the sim is resident (needs conn+campaign, in lock order) and
+    // read the autosave-cadence flags, then release BOTH locks. The heavy compute
+    // below deliberately does NOT hold `conn`, so conn-dependent commands (tile
+    // rendering) stay responsive while a long batch runs.
+    let (stale, year_before) = {
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
+        ensure_campaign_loaded(&mut cache, &conn)?;
+        let stale = cache.last_persist.map(|t| t.elapsed().as_secs_f32() > 5.0).unwrap_or(true);
+        let year_before = cache.sim.as_ref()
+            .ok_or_else(|| "No active campaign sim — start it first.".to_string())?
+            .year();
+        (stale, year_before)
+    };
+
+    // Phase 2 — the tick + snapshot + (maybe) serialize, holding ONLY the campaign
+    // lock. Crash-guarded: a panicking tick (an index/overflow bug, which the dev
     // build turns into a real panic) must NOT abort the whole app — catch it,
     // discard the half-mutated sim, and surface a recoverable error so the UI can
     // fall back to the last autosave. (A true allocation failure still aborts —
     // catch_unwind can't catch `abort()` — so a persistent crash here points at OOM
-    // rather than a logic panic, which itself is a useful signal.)
-    let caught = {
-        let sim = cache.sim.as_mut().expect("checked Some above");
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sim.advance(ticks_run)))
-    };
-    if let Err(payload) = caught {
-        let msg = panic_payload_message(&payload);
-        // Drop the corrupt in-memory sim so the next advance reloads the last good
-        // autosave instead of continuing from a half-applied tick.
-        cache.sim = None;
-        cache.dirty = false;
-        return Err(format!(
-            "Campaign tick crashed and was rolled back to the last autosave. ({msg})"
-        ));
-    }
+    // rather than a logic panic, which is itself a useful signal.)
+    let t0 = std::time::Instant::now();
     let (snap, json) = {
+        let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
+        let caught = {
+            let sim = cache.sim.as_mut()
+                .ok_or_else(|| "No active campaign sim — start it first.".to_string())?;
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sim.advance(ticks_run)))
+        };
+        if let Err(payload) = caught {
+            let msg = panic_payload_message(&payload);
+            cache.sim = None;
+            cache.dirty = false;
+            return Err(format!(
+                "Campaign tick crashed and was rolled back to the last autosave. ({msg})"
+            ));
+        }
         let sim = cache.sim.as_mut().expect("present after a successful advance");
         sim.last_tick_ms = t0.elapsed().as_secs_f32() * 1000.0 / ticks_run.max(1) as f32;
         let snap = build_snapshot(sim);
@@ -1277,13 +1289,20 @@ pub fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<CampaignSn
         };
         (snap, json)
     };
+
+    // Phase 3 — persist (conn+campaign in lock order) or just mark dirty.
     match json {
         Some(j) => {
+            let conn = db.conn.lock().map_err(|e| e.to_string())?;
+            let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
             metadata::campaign_set(&conn, "campaign_sim", &j).map_err(|e| e.to_string())?;
             cache.dirty = false;
             cache.last_persist = Some(std::time::Instant::now());
         }
-        None => cache.dirty = true,
+        None => {
+            let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
+            cache.dirty = true;
+        }
     }
     Ok(snap)
 }

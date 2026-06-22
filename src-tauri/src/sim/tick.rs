@@ -3221,6 +3221,10 @@ impl CampaignSim {
         let profile = std::env::var("WF2_PROFILE").is_ok();
         let (mut t_rebuild, mut t_trade, mut t_events, mut t_houses) = (0f32, 0f32, 0f32, 0f32);
 
+        // Per-tick consumption scratch (n×ng), reused across the whole advance so a
+        // long run doesn't reallocate it every tick. Resized/cleared inside the loop.
+        let mut needs: Vec<Vec<f32>> = Vec::new();
+
         for _ in 0..n_ticks {
             self.tick += 1;
             let tick = self.tick;
@@ -3334,7 +3338,15 @@ impl CampaignSim {
             self.manufacture_pass();
 
             // 2) Consumption with per-category substitution toward cheaper goods.
-            let mut needs = vec![vec![0.0f32; ng]; n];
+            // Reuse the `needs` buffer across ticks instead of reallocating an
+            // n×ng matrix every single tick — over a long campaign that per-tick
+            // allocation churn is a real cost (and allocator pressure). `n` can
+            // grow within the loop (estates), so resize, then clear each row.
+            needs.resize(n, Vec::new());
+            for row in needs.iter_mut() {
+                row.clear();
+                row.resize(ng, 0.0);
+            }
             for h in 0..n {
                 for g in 0..ng {
                     needs[h][g] = self.base_need(h, g);

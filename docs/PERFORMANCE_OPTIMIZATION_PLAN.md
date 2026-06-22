@@ -80,10 +80,16 @@ today (the app just vanishes). Tier 0 makes either one a recoverable, *named* er
 
 ---
 
-## Tier 0 — Stop the hard crash (small, ship first)
+## Tier 0 — Stop the hard crash (small, ship first)  ✅ DONE
 
 Goal: a bad tick or a failed allocation becomes a **recoverable error with a
 message**, never a silent process abort.
+
+> **Implemented** (cargo check + 30 tick tests green): `catch_unwind` crash-guard
+> in `campaign_advance`; startup panic hook → `app_log_dir/panic.log`;
+> `CRASH_RECORD_CAP`/`WAR_LOG_CAP` caps. The "shrink the autosave" item (4) is left
+> for later — frequent autosave is what the crash-guard rolls back to, so reducing
+> its cadence would just lose more progress; revisit only if OOM is confirmed.
 
 1. **Crash-guard `advance`.** In `campaign_advance` (campaign_commands.rs:1233) wrap
    the `sim.advance(...)` call in `std::panic::catch_unwind(AssertUnwindSafe(...))`.
@@ -114,59 +120,70 @@ around the `&mut sim` is fine because on panic we discard the sim without readin
 
 ---
 
-## Tier 1 — Fast & non-blocking (medium)
+## Tier 1 — Fast & non-blocking (medium)  ◑ PARTIALLY DONE
 
 Goal: the UI never freezes during a long batch, and late-campaign cost stops
 growing quadratically.
 
-### 1a. Get the sim off the UI thread
+### 1a. Get the sim off the UI thread  ✅ DONE
 
-Today `campaign_advance` is a **blocking** command holding **both** DB mutexes
-(`conn` + `campaign`) for the entire compute, so every tile fetch / panel query
-stalls behind it — the "frozen → force-close" path that also yields WER hang-dumps.
+`campaign_advance` was a **synchronous** command — in Tauri 2 those run on the
+**main thread**, so the whole advance blocked the UI event loop (the "frozen →
+force-close" path that also yields WER hang-dumps).
 
-- Make `campaign_advance` `async` and run the compute on `tauri::async_runtime::
-  spawn_blocking` (or a dedicated worker thread). Compute on an owned snapshot;
-  take the `campaign` lock only to swap the result back in. **Do not hold `conn`
-  during compute** — only re-acquire it for the (now less frequent) persist.
-- This is the stepping-stone to Tier 2: the sim already wants to own its state and
-  hand back snapshots.
+> **Implemented:** `campaign_advance` is now `async` (Tauri runs it on a worker
+> thread, not the main thread), and it is restructured into three tight lock
+> phases — (1) ensure-loaded under conn+campaign, (2) **compute holding ONLY the
+> `campaign` lock** so conn-dependent tile rendering stays responsive, (3) persist
+> under conn+campaign. The documented conn-before-campaign lock order is preserved
+> (phase 2 takes a single lock). No `.await` inside → the future stays `Send`.
 
-### 1b. Kill the O(n²)-on-growing-`n` cost
+### 1b. Kill the O(n²)-on-growing-`n` cost  ⏳ NOT DONE (revised — see caveat)
 
-- **Incremental route updates.** When a single estate/colony hub is appended, don't
-  rebuild the whole `n×n` matrix — append one row/column (its distances to existing
-  hubs, O(n)) and insert it into affected neighbour lists. Full rebuild only on
-  structural resets (load, or a rare compaction).
+- **Incremental route updates — blocked by storage layout.** `days` is a flat
+  `Vec<f32>` with stride `n` (`days[a*n+b]`), so growing `n` re-lays-out the whole
+  matrix; a true O(n) append needs the storage changed to jagged `Vec<Vec<f32>>`
+  (or a fixed-capacity arena), which touches every `days[…]` access site. Deferred
+  as a focused refactor — and lower priority than it looks, because the rebuild is
+  already batched to ≤1/tick and only fires on ticks that add a hub. The dominant
+  cost is per-tick dispatch across all ticks, not the occasional rebuild.
 - **Treat estates as satellites, not routing nodes.** An estate imports food from
   exactly one parent hub; it does not need a global routing row. Keep estates out
-  of `days`/`neighbors` and resolve their supply against their parent directly.
-  This caps the routing `n` near the number of *real settlements*, which is roughly
-  constant, and removes the dominant growth term.
-- **Cap or pool runaway hub growth.** If satellites are still modelled as hubs,
-  enforce a per-parent estate cap and/or merge co-located estates so `n` can't
-  climb without bound.
+  of `days`/`neighbors` and resolve their supply against the parent directly →
+  caps routing `n` near the (roughly constant) real-settlement count. This is the
+  highest-leverage structural win but it **changes economic semantics** (how
+  estates are supplied), so it must be done WITH in-app verification + the dynamics
+  digest, not blind. Deferred deliberately.
+- **Cap/pool runaway hub growth** — per-parent estate cap and/or merge co-located
+  estates so `n` can't climb without bound.
 
-### 1c. Cheap constant-factor wins (guided by `WF2_PROFILE`)
+### 1c. Cheap constant-factor wins (guided by `WF2_PROFILE`)  ◑ STARTED
 
-- Hoist per-tick allocations out of the loop: `needs` (`vec![vec![...]; n]`,
-  tick.rs:3325) and `prod_mult` reallocate every tick — keep reusable scratch
-  buffers on the sim and clear them instead.
-- Profile first; only optimize the phases the profiler shows are hot. Do not
-  hand-optimize blind.
+> **Implemented:** the per-tick `needs` matrix (`n×ng` floats) is no longer
+> reallocated every tick — a reusable buffer is hoisted above the tick loop and
+> resized/cleared in place (behavior-identical; dynamics digest unchanged).
+> Remaining: `prod_mult` (`event_production_mult`) still allocates per tick — cheap
+> to pool when it shows up in the profiler.
 
-**Verify:** `WF2_PROFILE=1` before/after, capture the per-year ms breakdown into the
-HTML report (Tier rule: visual/quantified change → `docs/mockups/*.html`,
-before/after). Run a long campaign (e.g. 300 in-game years) and confirm per-year ms
-stays roughly flat instead of climbing. Dynamics digest unchanged. UI stays
-responsive (tile pan works) while "Play" runs.
+**Verify (for the remaining 1b/1c work):** `WF2_PROFILE=1` before/after, capture the
+per-year ms breakdown into an HTML report (Tier rule: quantified change →
+`docs/mockups/*.html`, before/after). Run ~300 in-game years and confirm per-year ms
+stays roughly flat. Dynamics digest unchanged. UI stays responsive (tile pan works)
+while "Play" runs.
 
-**Risk:** medium. The satellite/estate change touches dispatch + supply — guard it
-behind the dynamics test (estates must still import food, houses still turn over).
+**Risk:** the satellite/estate change touches dispatch + supply — guard it behind
+the dynamics test (estates must still import food, houses still turn over).
 
 ---
 
-## Tier 2 — Dedicate the engine (background engine, same app)
+## Tier 2 — Dedicate the engine (background engine, same app)  ⏳ NOT DONE (needs in-app verification)
+
+> Note: Tier 1a already delivers Tier 2's **primary** user-facing benefit — the sim
+> runs off the UI thread, so the window no longer freezes during a long batch. What
+> remains below (the channel-based actor + event-driven UI) is a refinement that
+> rewrites the `campaignStore` / `StepCampaign` data flow, and that CANNOT be
+> validated headlessly — it needs the app running. It is deliberately left for a
+> session where the change can be exercised in-app, rather than shipped blind.
 
 Chosen architecture: **the sim runs on its own dedicated thread inside WF2**,
 isolated from the UI and the DB mutex, talking over channels. This delivers the
@@ -222,11 +239,13 @@ data flow). Do it only after Tier 0+1 land, and keep the synchronous
 
 ## Sequencing & exit criteria
 
-| Tier | Effort | Ship when |
-|---|---|---|
-| 0 | small | a panicking/OOM tick shows a recoverable error + writes a panic log; caps added |
-| 1 | medium | UI stays responsive during Play; per-year ms flat over 300 years; estates off the routing grid |
-| 2 | larger | sim runs on a dedicated engine thread/crate; UI is event-driven; engine crash-recoverable |
+| Tier | Effort | Ship when | Status |
+|---|---|---|---|
+| 0 | small | a panicking tick shows a recoverable error + writes a panic log; caps added | ✅ done |
+| 1a | small | advance off the main thread; conn free during compute | ✅ done |
+| 1c | small | per-tick `needs` matrix no longer reallocated | ◑ partial (`prod_mult` left) |
+| 1b | medium | estates off the routing grid; per-year ms flat over 300 years | ⏳ deferred (semantics + GUI verify) |
+| 2 | larger | actor engine + event-driven UI; engine crash-recoverable | ⏳ deferred (needs in-app verify) |
 
 Across all tiers: **save-format back-compat** (new fields serde-default), and the
 **dynamics digest must stay healthy** (bounded finite wealth, houses turn over,
