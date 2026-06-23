@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorldForge 2 — Victoria 2-style UI/UX Redesign</title>
+<style>
+  :root{
+    --bg:#0b1420; --panel:#13202e; --panel2:#0f1a26; --text:#cfe2f6;
+    --muted:#7e97b0; --accent:#3a80c0; --line:#21364a;
+    --good:#4cae7a; --warn:#d9a441; --bad:#c0573a; --gold:#d8b24a; --violet:#8a7bd8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.55 "Segoe UI",system-ui,sans-serif;padding:0 0 60px}
+  header{padding:32px 40px 22px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,#10202f,#0b1420)}
+  h1{margin:0 0 6px;font-size:26px;letter-spacing:.3px}
+  h1 small{color:var(--accent);font-weight:600}
+  .sub{color:var(--muted);max-width:900px}
+  main{padding:28px 40px;max-width:1180px;margin:0 auto}
+  h2{font-size:19px;margin:40px 0 14px;border-left:3px solid var(--accent);
+    padding-left:12px}
+  h3{font-size:15px;color:var(--accent);margin:22px 0 8px}
+  p{color:#bcd2e8}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:18px 20px;margin:14px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  code{background:#0c1622;border:1px solid var(--line);border-radius:4px;
+    padding:1px 5px;color:#9fd0ff;font-size:12.5px}
+  .muted{color:var(--muted)}
+  .note{font-size:12px;color:var(--muted);font-style:italic}
+
+  /* ---- wireframe: layout before/after ---- */
+  .wire{display:grid;gap:6px;background:#0c1622;border:1px solid var(--line);
+    border-radius:8px;padding:8px;height:230px}
+  .wire div{border:1px dashed #2c4458;border-radius:5px;
+    display:flex;align-items:center;justify-content:center;font-size:11px;
+    color:var(--muted);text-align:center;padding:4px}
+  .before{grid-template-columns:140px 1fr 120px;grid-template-rows:1fr 26px}
+  .before .map{grid-column:2;grid-row:1}
+  .before .lt{grid-row:1}.before .rt{grid-row:1}
+  .before .sb{grid-column:1/4;grid-row:2}
+  .after{grid-template-rows:54px 1fr 30px;grid-template-columns:1fr}
+  .after .hudbar{background:#16273a55;border-style:solid;border-color:var(--accent)}
+  .after .mapwrap{position:relative}
+  .after .float{position:absolute}
+
+  /* ---- mock: Country HUD ---- */
+  .hud{background:var(--panel2);border:1px solid var(--line);border-radius:12px;
+    overflow:hidden;margin-top:8px}
+  .hud-top{display:flex;align-items:center;gap:18px;padding:12px 18px;
+    background:linear-gradient(90deg,#16273a,#101c29);border-bottom:1px solid var(--line)}
+  .flag{width:46px;height:32px;border-radius:4px;border:1px solid #00000055;
+    background:linear-gradient(180deg,#b23 33%,#eee 33% 66%,#268 66%)}
+  .gp{margin-left:auto;text-align:right}
+  .gp .rank{color:var(--gold);font-weight:700;font-size:15px}
+  .stat{display:inline-block;margin-right:20px}
+  .stat b{display:block;font-size:15px}
+  .stat span{font-size:11px;color:var(--muted)}
+  .tabs{display:flex;gap:2px;padding:0 12px;background:#0d1825;
+    border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .tabs div{padding:9px 14px;font-size:12.5px;color:var(--muted);
+    border-bottom:2px solid transparent}
+  .tabs div.on{color:var(--text);border-bottom-color:var(--accent);background:#13202e}
+  .body{display:grid;grid-template-columns:1.1fr 1fr}
+  .pane{padding:16px 18px}
+  .pane+.pane{border-left:1px solid var(--line)}
+  .pane h4{margin:0 0 12px;font-size:13px;color:var(--accent);
+    text-transform:uppercase;letter-spacing:.5px}
+
+  /* budget sliders */
+  .slider{margin:10px 0}
+  .slider .lab{display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px}
+  .track{height:7px;border-radius:5px;background:#0c1622;position:relative;
+    border:1px solid var(--line)}
+  .fill{position:absolute;left:0;top:0;bottom:0;border-radius:5px;
+    background:linear-gradient(90deg,#2a5f8f,#3a80c0)}
+  .fill.red{background:linear-gradient(90deg,#7a3322,#c0573a)}
+  .fill.green{background:linear-gradient(90deg,#235e42,#4cae7a)}
+  .knob{position:absolute;top:-4px;width:13px;height:13px;border-radius:50%;
+    background:#cfe2f6;border:2px solid var(--accent);transform:translateX(-50%)}
+  .ledger{display:flex;justify-content:space-between;font-size:12px;
+    padding:4px 0;border-bottom:1px dotted var(--line)}
+  .pos{color:var(--good)} .neg{color:var(--bad)}
+
+  /* pop bars */
+  .pop{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:12.5px}
+  .pop .nm{width:96px;color:#bcd2e8}
+  .bar{flex:1;height:14px;border-radius:3px;background:#0c1622;
+    border:1px solid var(--line);overflow:hidden;display:flex}
+  .seg{height:100%}
+  .pop .pct{width:42px;text-align:right;color:var(--muted)}
+
+  /* pop card */
+  .popcard{background:#0e1a27;border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px;margin-top:6px}
+  .meter{height:8px;border-radius:4px;background:#0c1622;border:1px solid var(--line);
+    position:relative;margin:2px 0 9px}
+  .meter i{position:absolute;left:0;top:0;bottom:0;border-radius:4px}
+  .kv{display:flex;justify-content:space-between;font-size:12px;margin:3px 0}
+
+  /* reforms */
+  .reform{display:flex;align-items:center;gap:10px;margin:9px 0;font-size:12.5px}
+  .reform .dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+  .on-dot{background:var(--good)} .off-dot{background:#33485c}
+  .reform .meta{margin-left:auto;color:var(--muted);font-size:11px}
+
+  /* tokens */
+  .swatch{display:flex;align-items:center;gap:10px;font-size:12px;margin:6px 0}
+  .chip{width:30px;height:30px;border-radius:6px;border:1px solid #00000050;flex:0 0 auto}
+  .mapmode{display:flex;align-items:center;gap:10px;font-size:12.5px;margin:8px 0}
+  .mm-key{width:14px;height:14px;border-radius:3px;flex:0 0 auto;border:1px solid #00000050}
+
+  .road{counter-reset:step;margin-top:8px}
+  .road .step{display:flex;gap:14px;padding:12px 0;border-bottom:1px solid var(--line)}
+  .road .n{flex:0 0 auto;width:30px;height:30px;border-radius:50%;
+    background:#16273a;border:1px solid var(--accent);color:var(--accent);
+    display:flex;align-items:center;justify-content:center;font-weight:700}
+  .verdict{background:linear-gradient(180deg,#10261d,#0f1a26);
+    border:1px solid #234a39;border-radius:10px;padding:18px 22px;margin-top:10px}
+  .verdict .big{font-size:18px;color:var(--good);font-weight:700}
+  footer{color:var(--muted);text-align:center;padding:30px;font-size:12px;
+    border-top:1px solid var(--line);margin-top:30px}
+  ul{color:#bcd2e8} li{margin:4px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>WorldForge 2 → <small>Victoria 2-style UI / UX redesign</small></h1>
+  <p class="sub">A <b>visual &amp; interaction</b> design proposal only — screens,
+  layout, component library, map modes, colour &amp; type tokens, and the flows
+  that make the existing simulation feel like a grand-strategy game. No backend
+  changes are designed here. Theme matches the app
+  (<code>bg #0b1420 · panel #13202e · text #cfe2f6 · accent #3a80c0</code>).</p>
+</header>
+<main>
+
+  <h2>1 · Layout — before / after</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>Today — a world generator</h3>
+      <div class="wire before">
+        <div class="lt">Workflow<br>Panel</div>
+        <div class="map">Map (center)</div>
+        <div class="rt">Toolbar</div>
+        <div class="sb">Status bar</div>
+      </div>
+      <p class="note">Optimised for <i>making</i> a world: a left wizard, the map,
+      a right tool rail, a thin status bar.</p>
+    </div>
+    <div class="card">
+      <h3>Playing — a grand-strategy HUD</h3>
+      <div class="wire after">
+        <div class="hudbar">Country top-bar · flag · GP rank · treasury · date / speed</div>
+        <div class="mapwrap" style="position:relative">Map fills the screen
+          <span class="float" style="left:6px;top:6px;border-color:var(--accent)">Tab drawer</span>
+          <span class="float" style="right:6px;bottom:6px;border-color:var(--accent)">Inspector</span>
+        </div>
+        <div>Time bar · alerts · ledger ticker</div>
+      </div>
+      <p class="note">The map goes <b>full-bleed</b>; the generator panels collapse
+      into an overlay HUD. Same canvas, new chrome — no map re-engineering.</p>
+    </div>
+  </div>
+  <p class="note">Generation mode stays exactly as it is; "Play this world" swaps
+  the chrome. One canvas, two skins.</p>
+
+  <h2>2 · The Country screen (primary mockup)</h2>
+  <div class="hud">
+    <div class="hud-top">
+      <div class="flag"></div>
+      <div>
+        <div style="font-size:16px;font-weight:700">Republic of Veskaro</div>
+        <div class="muted" style="font-size:12px">Constitutional Monarchy · Mercantile Party</div>
+      </div>
+      <div class="stat" style="margin-left:30px"><b>⌛ 1457, Spring</b><span>▶ day · week · month · year</span></div>
+      <div class="gp">
+        <div class="rank">★ Great Power #3</div>
+        <div class="muted" style="font-size:12px">Prestige 142 · Industry 88 · Military 61</div>
+        <div style="font-size:13px">Treasury <b style="color:var(--gold)">£ 24,310</b>
+          <span class="pos">(+412/yr)</span></div>
+      </div>
+    </div>
+    <div class="tabs">
+      <div class="on">Budget</div><div>Population</div><div>Politics</div>
+      <div>Technology</div><div>Production</div><div>Trade</div>
+      <div>Diplomacy</div><div>Military</div>
+    </div>
+    <div class="body">
+      <div class="pane">
+        <h4>Budget &amp; Taxation</h4>
+        <div class="slider"><div class="lab"><span>Poor tax</span><span>32 %</span></div>
+          <div class="track"><div class="fill" style="width:32%"></div><div class="knob" style="left:32%"></div></div></div>
+        <div class="slider"><div class="lab"><span>Middle tax</span><span>41 %</span></div>
+          <div class="track"><div class="fill" style="width:41%"></div><div class="knob" style="left:41%"></div></div></div>
+        <div class="slider"><div class="lab"><span>Rich tax</span><span>55 %</span></div>
+          <div class="track"><div class="fill" style="width:55%"></div><div class="knob" style="left:55%"></div></div></div>
+        <div class="slider"><div class="lab"><span>Tariffs</span><span>+18 %</span></div>
+          <div class="track"><div class="fill" style="width:18%"></div><div class="knob" style="left:18%"></div></div></div>
+        <div class="slider"><div class="lab"><span>Education spending</span><span>70 %</span></div>
+          <div class="track"><div class="fill green" style="width:70%"></div><div class="knob" style="left:70%"></div></div></div>
+        <div class="slider"><div class="lab"><span>Military spending</span><span>45 %</span></div>
+          <div class="track"><div class="fill red" style="width:45%"></div><div class="knob" style="left:45%"></div></div></div>
+        <div style="margin-top:14px">
+          <div class="ledger"><span>Tariffs &amp; trade tax</span><span class="pos">+ 9,140</span></div>
+          <div class="ledger"><span>Poll &amp; wealth tax</span><span class="pos">+ 12,880</span></div>
+          <div class="ledger"><span>Factory subsidies</span><span class="neg">− 6,300</span></div>
+          <div class="ledger"><span>Education &amp; admin</span><span class="neg">− 8,900</span></div>
+          <div class="ledger" style="border:none;font-weight:700"><span>Net / year</span><span class="pos">+ 412</span></div>
+        </div>
+      </div>
+      <div class="pane">
+        <h4>Population — 1.84 M</h4>
+        <div class="pop"><span class="nm">Farmers</span><div class="bar"><div class="seg" style="width:46%;background:#4cae7a"></div></div><span class="pct">46%</span></div>
+        <div class="pop"><span class="nm">Labourers</span><div class="bar"><div class="seg" style="width:21%;background:#8a7bd8"></div></div><span class="pct">21%</span></div>
+        <div class="pop"><span class="nm">Craftsmen</span><div class="bar"><div class="seg" style="width:14%;background:#d9a441"></div></div><span class="pct">14%</span></div>
+        <div class="pop"><span class="nm">Clerks</span><div class="bar"><div class="seg" style="width:7%;background:#3a80c0"></div></div><span class="pct">7%</span></div>
+        <div class="pop"><span class="nm">Capitalists</span><div class="bar"><div class="seg" style="width:3%;background:var(--gold)"></div></div><span class="pct">3%</span></div>
+        <div class="pop"><span class="nm">Aristocrats</span><div class="bar"><div class="seg" style="width:3%;background:#c0573a"></div></div><span class="pct">3%</span></div>
+
+        <div class="popcard">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <b>Craftsmen of Kessa</b><span class="muted" style="font-size:11px">38,200 · Veskari</span>
+          </div>
+          <div class="kv"><span>Needs — life</span><span style="color:var(--good)">96%</span></div>
+          <div class="meter"><i style="width:96%;background:var(--good)"></i></div>
+          <div class="kv"><span>everyday</span><span style="color:var(--warn)">71%</span></div>
+          <div class="meter"><i style="width:71%;background:var(--warn)"></i></div>
+          <div class="kv"><span>luxury</span><span style="color:var(--bad)">22%</span></div>
+          <div class="meter"><i style="width:22%;background:var(--bad)"></i></div>
+          <div class="kv"><span>Militancy</span><span style="color:var(--warn)">3.7 ↑</span></div>
+          <div class="meter"><i style="width:37%;background:var(--warn)"></i></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="note">The eight tabs mirror Victoria 2's main screen. Every figure
+  shown already exists in the campaign data — this is presentation, not new
+  simulation.</p>
+
+  <h2>3 · Politics &amp; reform panels (mockup)</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>Upper House — party support</h3>
+      <div class="pop"><span class="nm">Mercantile</span><div class="bar"><div class="seg" style="width:38%;background:#3a80c0"></div></div><span class="pct">38%</span></div>
+      <div class="pop"><span class="nm">Aristocratic</span><div class="bar"><div class="seg" style="width:29%;background:#c0573a"></div></div><span class="pct">29%</span></div>
+      <div class="pop"><span class="nm">Reformist</span><div class="bar"><div class="seg" style="width:21%;background:#4cae7a"></div></div><span class="pct">21%</span></div>
+      <div class="pop"><span class="nm">Radical</span><div class="bar"><div class="seg" style="width:12%;background:#d9a441"></div></div><span class="pct">12%</span></div>
+    </div>
+    <div class="card">
+      <h3>Reforms</h3>
+      <div class="reform"><span class="dot on-dot"></span>Trade unions: state-controlled<span class="meta">enacted</span></div>
+      <div class="reform"><span class="dot on-dot"></span>Voting franchise: landed<span class="meta">enacted</span></div>
+      <div class="reform"><span class="dot off-dot"></span>Minimum wage<span class="meta">needs +6% Reformist</span></div>
+      <div class="reform"><span class="dot off-dot"></span>Work hours: 12h<span class="meta">available</span></div>
+      <div class="reform"><span class="dot off-dot"></span>Health care: low<span class="meta">+social spending</span></div>
+    </div>
+  </div>
+
+  <h2>4 · Map modes (reuse OverlayManager)</h2>
+  <p>The grand-strategy feel comes largely from <b>map modes</b> — the same canvas
+  recoloured. Each is a recolour pass on the existing <code>OverlayManager</code>
+  visibility registry, so no new rendering pipeline is needed:</p>
+  <div class="grid2">
+    <div class="card">
+      <div class="mapmode"><span class="mm-key" style="background:#3a80c0"></span><b>Political</b> — country fill colours + borders</div>
+      <div class="mapmode"><span class="mm-key" style="background:#4cae7a"></span><b>Population</b> — density shading by province</div>
+      <div class="mapmode"><span class="mm-key" style="background:#8a7bd8"></span><b>Culture / religion</b> — dominant-group tint</div>
+    </div>
+    <div class="card">
+      <div class="mapmode"><span class="mm-key" style="background:#d9a441"></span><b>RGO / production</b> — good icon per province</div>
+      <div class="mapmode"><span class="mm-key" style="background:#c0573a"></span><b>Militancy / unrest</b> — heat from calm→boiling</div>
+      <div class="mapmode"><span class="mm-key" style="background:var(--gold)"></span><b>Sphere / diplomacy</b> — Great-Power influence</div>
+    </div>
+  </div>
+  <p class="note">A map-mode strip (icons) sits where the layer selector is today;
+  switching is instant and remembered per session.</p>
+
+  <h2>5 · Design tokens &amp; components</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>Colour tokens (existing app theme)</h3>
+      <div class="swatch"><span class="chip" style="background:#0b1420"></span><code>--bg #0b1420</code> base canvas</div>
+      <div class="swatch"><span class="chip" style="background:#13202e"></span><code>--panel #13202e</code> panels / cards</div>
+      <div class="swatch"><span class="chip" style="background:#cfe2f6"></span><code>--text #cfe2f6</code> primary text</div>
+      <div class="swatch"><span class="chip" style="background:#3a80c0"></span><code>--accent #3a80c0</code> interactive</div>
+      <div class="swatch"><span class="chip" style="background:#4cae7a"></span><code>good #4cae7a</code> surplus / met</div>
+      <div class="swatch"><span class="chip" style="background:#d9a441"></span><code>warn #d9a441</code> strain</div>
+      <div class="swatch"><span class="chip" style="background:#c0573a"></span><code>bad #c0573a</code> deficit / unrest</div>
+      <div class="swatch"><span class="chip" style="background:#d8b24a"></span><code>gold #d8b24a</code> treasury / prestige</div>
+    </div>
+    <div class="card">
+      <h3>Reusable components</h3>
+      <ul>
+        <li><b>Stat pill</b> — value over caption (treasury, prestige, scores)</li>
+        <li><b>Budget slider</b> — labelled track + knob; red/green/blue intent</li>
+        <li><b>Pop bar</b> — name · proportional bar · percent (the population list)</li>
+        <li><b>Needs meter</b> — life/everyday/luxury, good→warn→bad colour ramp</li>
+        <li><b>Reform row</b> — status dot + label + unlock requirement</li>
+        <li><b>Ledger row</b> — line item with signed coloured amount</li>
+        <li><b>Map-mode chip</b> — icon toggle reusing overlay registry</li>
+      </ul>
+      <p class="note">These extend the existing panel style (HubPanel, HousesPanel,
+      CoinCreditPanel) rather than introducing a new visual language.</p>
+    </div>
+  </div>
+
+  <h2>6 · Interaction flows</h2>
+  <div class="grid3">
+    <div class="card"><h3>Steering a country</h3>
+      <p style="font-size:12.5px">Open Country screen → drag a budget slider →
+      live ledger preview updates → confirm. Hover any number for a breakdown
+      tooltip.</p></div>
+    <div class="card"><h3>Inspecting a province</h3>
+      <p style="font-size:12.5px">Click the map → right inspector slides in with
+      pops, RGO, factories, militancy → click a pop bar to open its needs card.</p></div>
+    <div class="card"><h3>Passing a reform</h3>
+      <p style="font-size:12.5px">Politics tab → reform shows its requirement →
+      when upper-house support crosses the line the row lights up → Enact, with a
+      militancy-impact preview.</p></div>
+  </div>
+
+  <h2>7 · Rollout — UI only, staged on the existing screens</h2>
+  <div class="road">
+    <div class="step"><div class="n">1</div><div><b>HUD shell.</b> Country top-bar +
+      tab drawer + full-bleed map skin, toggled by "Play this world". No new data —
+      reads existing campaign snapshot.</div></div>
+    <div class="step"><div class="n">2</div><div><b>Map-mode strip.</b> Political /
+      population / militancy / production recolours on <code>OverlayManager</code>.</div></div>
+    <div class="step"><div class="n">3</div><div><b>Population &amp; pop cards.</b>
+      Render <code>Society</code> strata as pop bars + needs meters in the inspector.</div></div>
+    <div class="step"><div class="n">4</div><div><b>Budget &amp; Politics tabs.</b>
+      Sliders + reform rows wired to existing polis policy / <code>CityFinance</code>.</div></div>
+    <div class="step"><div class="n">5</div><div><b>Diplomacy &amp; Great-Power bar.</b>
+      Scoreboard + relations view over existing war/economy data.</div></div>
+  </div>
+
+  <h2>8 · Verdict</h2>
+  <div class="verdict">
+    <div class="big">A Victoria 2 look &amp; feel is achievable as a pure UI/UX layer.</div>
+    <p>Every screen above is driven by data the campaign sim already produces
+    (society strata, treasury/tariff, wars, prestige-like scores, market prices).
+    The redesign is <b>new chrome over one unchanged canvas</b>: a country HUD,
+    eight tabs, map modes, and a small component kit built in the app's existing
+    dark theme.</p>
+    <p class="muted">Claude can design and build this UI incrementally (steps 1→5),
+    each a self-contained front-end change with its own HTML report. The live
+    Tauri window still needs your machine to view; verification here is via these
+    mockups and the type-checks. Deeper Victoria mechanics (real POP objects, tech
+    tree, full diplomacy) are a <i>separate</i> systems track — out of scope for
+    this UI-only proposal.</p>
+  </div>
+
+</main>
+<footer>WorldForge 2 · Victoria 2-style UI/UX redesign · design artifact —
+companion to <code>docs/VICTORIA2_REDESIGN_PROPOSAL.md</code></footer>
+</body>
+</html>
