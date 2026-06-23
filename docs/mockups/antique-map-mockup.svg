@@ -1,0 +1,209 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 760" font-family="'Times New Roman',Georgia,serif">
+<defs>
+  <radialGradient id="seal-iron" cx="38%" cy="35%" r="70%"><stop offset="0" stop-color="#efe3c4"/><stop offset="1" stop-color="#9a8f7a"/></radialGradient>
+  <radialGradient id="seal-grain" cx="38%" cy="35%" r="70%"><stop offset="0" stop-color="#efe3c4"/><stop offset="1" stop-color="#c9b25a"/></radialGradient>
+  <radialGradient id="seal-wine" cx="38%" cy="35%" r="70%"><stop offset="0" stop-color="#efe3c4"/><stop offset="1" stop-color="#7a2438"/></radialGradient>
+  <radialGradient id="seal-fish" cx="38%" cy="35%" r="70%"><stop offset="0" stop-color="#efe3c4"/><stop offset="1" stop-color="#5d8aa0"/></radialGradient>
+  <radialGradient id="seal-silk" cx="38%" cy="35%" r="70%"><stop offset="0" stop-color="#efe3c4"/><stop offset="1" stop-color="#9a5688"/></radialGradient>
+  <filter id="paper"><feTurbulence type="fractalNoise" baseFrequency="0.012 0.016" numOctaves="3" seed="7" result="n"/>
+    <feColorMatrix in="n" type="matrix" values="0 0 0 0 0.45  0 0 0 0 0.33  0 0 0 0 0.16  0 0 0 0.06 0"/></filter>
+  <pattern id="waves" width="46" height="22" patternUnits="userSpaceOnUse">
+    <path d="M2,11 a5,5 0 0 1 9,0" fill="none" stroke="#46563d" stroke-opacity="0.18" stroke-width="0.7"/>
+    <path d="M25,17 a5,5 0 0 1 9,0" fill="none" stroke="#46563d" stroke-opacity="0.18" stroke-width="0.7"/>
+  </pattern>
+  <!-- ── town glyph templates (baseline at y=0, drawn upward) ── -->
+  <g id="outpost"><rect x="-3.5" y="-12" width="7" height="12" fill="#e9dcb8" stroke="#3c2c18"/><rect x="-3.5" y="-14" width="2" height="2" fill="#3c2c18"/><rect x="-1" y="-14" width="2" height="2" fill="#3c2c18"/><rect x="1.5" y="-14" width="2" height="2" fill="#3c2c18"/></g>
+  <g id="village"><rect x="-6" y="-9" width="12" height="9" fill="#e9dcb8" stroke="#3c2c18"/><path d="M-7.5,-9 L0,-17.4 L7.5,-9 Z" fill="#9b3b2e" stroke="#3c2c18"/></g>
+  <g id="town">
+    <rect x="-12.5" y="-8" width="11" height="8" fill="#e9dcb8" stroke="#3c2c18"/><path d="M-14,-8 L-7,-15.7 L0,-8 Z" fill="#9b3b2e" stroke="#3c2c18"/>
+    <rect x="0.5" y="-10" width="13" height="10" fill="#e9dcb8" stroke="#3c2c18"/><path d="M-1,-10 L7,-19.1 L15,-10 Z" fill="#9b3b2e" stroke="#3c2c18"/>
+    <rect x="-5" y="-8" width="10" height="7" fill="#e9dcb8" stroke="#3c2c18"/><path d="M-6.5,-8 L0,-15 L6.5,-8 Z" fill="#9b3b2e" stroke="#3c2c18"/>
+  </g>
+  <g id="city">
+    <rect x="-20" y="-7" width="40" height="7" fill="#ddc9a0" stroke="#3c2c18"/>
+    <rect x="-20" y="-9" width="4" height="2" fill="#3c2c18"/><rect x="-8" y="-9" width="4" height="2" fill="#3c2c18"/><rect x="4" y="-9" width="4" height="2" fill="#3c2c18"/><rect x="16" y="-9" width="4" height="2" fill="#3c2c18"/>
+    <rect x="-22" y="-15" width="8" height="15" fill="#e9dcb8" stroke="#3c2c18"/><rect x="14" y="-15" width="8" height="15" fill="#e9dcb8" stroke="#3c2c18"/>
+    <rect x="-11.5" y="-13" width="11" height="8" fill="#e9dcb8" stroke="#3c2c18"/><path d="M-13,-13 L-6,-20.7 L1,-13 Z" fill="#9b3b2e" stroke="#3c2c18"/>
+    <rect x="1" y="-14" width="12" height="9" fill="#e9dcb8" stroke="#3c2c18"/><path d="M-0.5,-14 L7,-22.4 L14.5,-14 Z" fill="#9b3b2e" stroke="#3c2c18"/>
+    <rect x="-3" y="-6" width="6" height="6" fill="#3c2c18"/>
+  </g>
+  <g id="capital">
+    <rect x="-24" y="-8" width="48" height="8" fill="#ddc9a0" stroke="#3c2c18"/>
+    <rect x="-24" y="-10" width="3.6" height="2" fill="#3c2c18"/><rect x="-13" y="-10" width="3.6" height="2" fill="#3c2c18"/><rect x="-2" y="-10" width="3.6" height="2" fill="#3c2c18"/><rect x="9" y="-10" width="3.6" height="2" fill="#3c2c18"/><rect x="20" y="-10" width="3.6" height="2" fill="#3c2c18"/>
+    <rect x="-26" y="-16" width="9" height="16" fill="#e9dcb8" stroke="#3c2c18"/><rect x="17" y="-16" width="9" height="16" fill="#e9dcb8" stroke="#3c2c18"/>
+    <rect x="-14.5" y="-14" width="11" height="8" fill="#e9dcb8" stroke="#3c2c18"/><path d="M-16,-14 L-9,-21.7 L-2,-14 Z" fill="#9b3b2e" stroke="#3c2c18"/>
+    <rect x="3.5" y="-14" width="11" height="8" fill="#e9dcb8" stroke="#3c2c18"/><path d="M2,-14 L9,-21.7 L16,-14 Z" fill="#9b3b2e" stroke="#3c2c18"/>
+    <rect x="-6" y="-28" width="12" height="28" fill="#e9dcb8" stroke="#3c2c18"/>
+    <rect x="-6" y="-30" width="3.6" height="2" fill="#3c2c18"/><rect x="-1.8" y="-30" width="3.6" height="2" fill="#3c2c18"/><rect x="2.4" y="-30" width="3.6" height="2" fill="#3c2c18"/>
+    <line x1="0" y1="-30" x2="0" y2="-42" stroke="#3c2c18"/><path d="M0,-42 L9,-39.5 L0,-37 Z" fill="#9b3b2e"/>
+    <rect x="-3" y="-7" width="6" height="7" fill="#3c2c18"/>
+  </g>
+</defs>
+
+<!-- ── sea base ── -->
+<rect width="1160" height="760" fill="#9fb19a"/>
+<rect width="1160" height="760" fill="url(#waves)"/>
+<!-- graticule -->
+<g stroke="#3c2c18" stroke-opacity="0.16" stroke-width="0.6">
+  <line x1="200" y1="24" x2="200" y2="736"/><line x1="320" y1="24" x2="320" y2="736"/><line x1="440" y1="24" x2="440" y2="736"/><line x1="560" y1="24" x2="560" y2="736"/><line x1="680" y1="24" x2="680" y2="736"/><line x1="800" y1="24" x2="800" y2="736"/><line x1="920" y1="24" x2="920" y2="736"/><line x1="1040" y1="24" x2="1040" y2="736"/>
+  <line x1="24" y1="200" x2="1136" y2="200"/><line x1="24" y1="320" x2="1136" y2="320"/><line x1="24" y1="440" x2="1136" y2="440"/><line x1="24" y1="560" x2="1136" y2="560"/><line x1="24" y1="680" x2="1136" y2="680"/>
+</g>
+
+<!-- ── coastline echo ripples ── -->
+<g fill="none" stroke="#46563d">
+  <path d="M280,375 C310,275 400,235 500,240 C610,245 690,205 790,250 C880,290 870,360 850,450 C825,545 740,590 660,615 C570,640 470,650 390,615 C300,575 270,470 280,375 Z" stroke-opacity="0.10" stroke-width="1.2" transform="translate(560,400) scale(1.06) translate(-560,-400)"/>
+  <path d="M280,375 C310,275 400,235 500,240 C610,245 690,205 790,250 C880,290 870,360 850,450 C825,545 740,590 660,615 C570,640 470,650 390,615 C300,575 270,470 280,375 Z" stroke-opacity="0.14" stroke-width="1.2" transform="translate(560,400) scale(1.03) translate(-560,-400)"/>
+</g>
+
+<!-- ── land ── -->
+<path id="land" d="M280,375 C310,275 400,235 500,240 C610,245 690,205 790,250 C880,290 870,360 850,450 C825,545 740,590 660,615 C570,640 470,650 390,615 C300,575 270,470 280,375 Z" fill="#e9dcb8" stroke="#3c2c18" stroke-width="1.6"/>
+<path d="M280,375 C310,275 400,235 500,240 C610,245 690,205 790,250 C880,290 870,360 850,450 C825,545 740,590 660,615 C570,640 470,650 390,615 C300,575 270,470 280,375 Z" fill="#000" filter="url(#paper)"/>
+<!-- offshore island -->
+<path d="M905,236 C918,212 952,210 968,228 C982,244 980,262 962,272 C940,284 908,276 900,256 C896,248 898,244 905,236 Z" fill="#e9dcb8" stroke="#3c2c18" stroke-width="1.3"/>
+
+<!-- ── relief: mountains ── -->
+<g stroke="#3c2c18" stroke-width="1.1">
+  <path d="M448,330 L463,308 L470,322 L481,300 L492,330 Z" fill="#e9dcb8"/>
+  <path d="M488,345 L503,323 L510,337 L521,315 L532,345 Z" fill="#e9dcb8"/>
+  <path d="M530,330 L545,308 L552,322 L563,300 L574,330 Z" fill="#e9dcb8"/>
+  <path d="M573,348 L588,326 L595,340 L606,318 L617,348 Z" fill="#e9dcb8"/>
+  <path d="M614,335 L629,313 L636,327 L647,305 L658,335 Z" fill="#e9dcb8"/>
+</g>
+<!-- mountain hatch -->
+<g stroke="#3c2c18" stroke-opacity="0.45" stroke-width="0.6">
+  <line x1="481" y1="302" x2="490" y2="328"/><line x1="563" y1="302" x2="572" y2="328"/><line x1="647" y1="307" x2="656" y2="333"/>
+</g>
+<!-- forests -->
+<g stroke="#6f7d52" stroke-width="1" fill="#6f7d52">
+  <g transform="translate(455,440)"><line x1="0" y1="0" x2="0" y2="-5"/><path d="M-5,-4 L0,-13 L5,-4 Z"/></g>
+  <g transform="translate(478,452)"><line x1="0" y1="0" x2="0" y2="-5"/><path d="M-5,-4 L0,-13 L5,-4 Z"/></g>
+  <g transform="translate(500,445)"><line x1="0" y1="0" x2="0" y2="-5"/><path d="M-5,-4 L0,-13 L5,-4 Z"/></g>
+  <g transform="translate(465,468)"><line x1="0" y1="0" x2="0" y2="-5"/><path d="M-5,-4 L0,-13 L5,-4 Z"/></g>
+  <g transform="translate(520,460)"><line x1="0" y1="0" x2="0" y2="-5"/><path d="M-5,-4 L0,-13 L5,-4 Z"/></g>
+  <g transform="translate(540,475)"><line x1="0" y1="0" x2="0" y2="-5"/><path d="M-5,-4 L0,-13 L5,-4 Z"/></g>
+  <g transform="translate(610,455)"><line x1="0" y1="0" x2="0" y2="-5"/><path d="M-5,-4 L0,-13 L5,-4 Z"/></g>
+  <g transform="translate(632,470)"><line x1="0" y1="0" x2="0" y2="-5"/><path d="M-5,-4 L0,-13 L5,-4 Z"/></g>
+</g>
+<!-- rivers -->
+<g fill="none" stroke="#4f7d6e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M552,332 Q535,366 540,400 Q548,440 500,470 Q470,490 455,520 Q448,535 420,545"/>
+  <path d="M600,345 Q620,385 630,420 Q645,460 670,480 Q690,500 700,520"/>
+</g>
+<g fill="none" stroke="#e6e6d2" stroke-opacity="0.35" stroke-width="0.8">
+  <path d="M552,332 Q535,366 540,400 Q548,440 500,470 Q470,490 455,520 Q448,535 420,545"/>
+  <path d="M600,345 Q620,385 630,420 Q645,460 670,480 Q690,500 700,520"/>
+</g>
+
+<!-- ── ROUTES (under glyphs) ── -->
+<!-- sea rhumb-lines -->
+<g fill="none" stroke="#4f7d6e" stroke-width="1.3">
+  <path d="M430,548 Q620,420 712,524"/>
+  <path d="M712,524 Q800,360 940,236"/>
+  <path d="M560,250 Q760,200 940,236"/>
+</g>
+<!-- ship ticks on the main lane -->
+<g stroke="#4f7d6e" stroke-width="1">
+  <line x1="498" y1="503" x2="502" y2="509"/><line x1="556" y1="478" x2="560" y2="484"/><line x1="616" y1="466" x2="620" y2="472"/><line x1="672" y1="478" x2="676" y2="484"/>
+</g>
+<!-- trunk: capital <-> north port (double hand-inked) -->
+<path d="M430,548 Q510,360 560,250" fill="none" stroke="#5a4326" stroke-width="3.2"/>
+<path d="M430,548 Q510,360 560,250" fill="none" stroke="#e9dcb8" stroke-width="1.1"/>
+<!-- caravan tracks (dotted sepia) -->
+<g fill="none" stroke="#6e5230" stroke-width="1.7" stroke-dasharray="1.6 3.2">
+  <path d="M430,548 Q500,470 560,440"/>
+  <path d="M560,440 Q650,470 712,524"/>
+  <path d="M560,440 Q605,540 640,610"/>
+  <path d="M430,548 Q450,500 475,470"/>
+</g>
+<!-- a little ship on the sea lane -->
+<g transform="translate(571,470)" stroke="#3c2c18" stroke-width="1">
+  <path d="M-9,0 Q0,7 9,0 Z" fill="#e9dcb8"/>
+  <line x1="0" y1="0" x2="0" y2="-12"/>
+  <path d="M0,-11 L8,-5 L0,-2 Z" fill="#9b3b2e"/>
+</g>
+
+<!-- ── good wax-seals ── -->
+<!-- iron / pick -->
+<g transform="translate(512,300)">
+  <circle r="17" fill="url(#seal-iron)" stroke="#3c2c18" stroke-width="2"/>
+  <circle r="13.4" fill="none" stroke="#3c2c18" stroke-opacity="0.6" stroke-width="0.7" stroke-dasharray="1.5 1.5"/>
+  <g stroke="#3a2a16" stroke-width="2.7" stroke-linecap="round" fill="none"><line x1="-1" y1="-8" x2="-1" y2="9"/><path d="M-10,-4.5 Q0,-9.5 10,-4.5"/></g>
+</g>
+<text x="512" y="332" text-anchor="middle" font-style="italic" font-size="12" fill="#3c2c18">iron</text>
+<!-- grain -->
+<g transform="translate(520,560)">
+  <circle r="17" fill="url(#seal-grain)" stroke="#3c2c18" stroke-width="2"/>
+  <circle r="13.4" fill="none" stroke="#3c2c18" stroke-opacity="0.6" stroke-width="0.7" stroke-dasharray="1.5 1.5"/>
+  <g fill="#3a2a16" stroke="#3a2a16"><line x1="0" y1="10" x2="0" y2="-7" stroke-width="2.4" stroke-linecap="round"/>
+    <ellipse cx="-4" cy="-5" rx="3" ry="1.5" transform="rotate(-40 -4 -5)"/><ellipse cx="4" cy="-5" rx="3" ry="1.5" transform="rotate(40 4 -5)"/>
+    <ellipse cx="-4" cy="-1" rx="3" ry="1.5" transform="rotate(-40 -4 -1)"/><ellipse cx="4" cy="-1" rx="3" ry="1.5" transform="rotate(40 4 -1)"/>
+    <ellipse cx="-4" cy="3" rx="3" ry="1.5" transform="rotate(-40 -4 3)"/><ellipse cx="4" cy="3" rx="3" ry="1.5" transform="rotate(40 4 3)"/></g>
+</g>
+<text x="520" y="592" text-anchor="middle" font-style="italic" font-size="12" fill="#3c2c18">grain</text>
+<!-- wine / grapes -->
+<g transform="translate(664,624)">
+  <circle r="16" fill="url(#seal-wine)" stroke="#3c2c18" stroke-width="2"/>
+  <circle r="12.6" fill="none" stroke="#3c2c18" stroke-opacity="0.6" stroke-width="0.7" stroke-dasharray="1.5 1.5"/>
+  <g fill="#3a2a16"><circle cx="-4" cy="-3" r="2.6"/><circle cx="0" cy="-4" r="2.6"/><circle cx="4" cy="-3" r="2.6"/><circle cx="-2.4" cy="0.5" r="2.6"/><circle cx="2.4" cy="0.5" r="2.6"/><circle cx="0" cy="4" r="2.6"/></g>
+  <path d="M0,-5 L2,-9" stroke="#9b3b2e" stroke-width="1.4" stroke-linecap="round"/>
+</g>
+<text x="664" y="654" text-anchor="middle" font-style="italic" font-size="12" fill="#3c2c18">wine</text>
+<!-- fishery -->
+<g transform="translate(330,300)">
+  <circle r="16" fill="url(#seal-fish)" stroke="#3c2c18" stroke-width="2"/>
+  <circle r="12.6" fill="none" stroke="#3c2c18" stroke-opacity="0.6" stroke-width="0.7" stroke-dasharray="1.5 1.5"/>
+  <g fill="#3a2a16"><ellipse cx="1" cy="0" rx="9" ry="5"/><path d="M-7,0 L-11,-5 L-11,5 Z"/></g>
+  <circle cx="5" cy="-1.5" r="1.1" fill="#9b3b2e"/>
+</g>
+<text x="330" y="330" text-anchor="middle" font-style="italic" font-size="12" fill="#3c2c18">fishery</text>
+<!-- silk / spool -->
+<g transform="translate(760,470)">
+  <circle r="15" fill="url(#seal-silk)" stroke="#3c2c18" stroke-width="2"/>
+  <circle r="11.8" fill="none" stroke="#3c2c18" stroke-opacity="0.6" stroke-width="0.7" stroke-dasharray="1.5 1.5"/>
+  <rect x="-4.5" y="-7.7" width="9" height="15.4" fill="#3a2a16"/>
+  <rect x="-7.2" y="-7.7" width="14.4" height="2" fill="#9b3b2e"/><rect x="-7.2" y="5.7" width="14.4" height="2" fill="#9b3b2e"/>
+</g>
+<text x="760" y="498" text-anchor="middle" font-style="italic" font-size="12" fill="#3c2c18">silk</text>
+
+<!-- ── settlements + names ── -->
+<use href="#capital" x="430" y="548"/><text x="430" y="572" text-anchor="middle" font-style="italic" font-weight="600" font-size="14" fill="#3c2c18">Kessa</text>
+<use href="#city" x="712" y="524"/><text x="712" y="548" text-anchor="middle" font-style="italic" font-size="12" fill="#3c2c18">Voryn</text>
+<use href="#city" x="560" y="250"/><text x="560" y="274" text-anchor="middle" font-style="italic" font-size="12" fill="#3c2c18">Aldmar</text>
+<use href="#town" x="560" y="440"/><text x="560" y="464" text-anchor="middle" font-style="italic" font-size="12" fill="#3c2c18">Tessil</text>
+<use href="#town" x="640" y="610"/><text x="640" y="634" text-anchor="middle" font-style="italic" font-size="12" fill="#3c2c18">Drava</text>
+<use href="#outpost" x="940" y="236"/><text x="940" y="254" text-anchor="middle" font-style="italic" font-size="12" fill="#3c2c18">Far Hold</text>
+<use href="#village" x="475" y="470"/><text x="475" y="488" text-anchor="middle" font-style="italic" font-size="12" fill="#3c2c18">Wend</text>
+
+<!-- ── compass rose ── -->
+<g transform="translate(1068,664)">
+  <circle r="40" fill="none" stroke="#3c2c18"/><circle r="25" fill="none" stroke="#3c2c18"/>
+  <path d="M0,-40 L6,-8 L-6,-8 Z" fill="#3c2c18"/><path d="M0,40 L6,8 L-6,8 Z" fill="#3c2c18"/>
+  <path d="M40,0 L8,6 L8,-6 Z" fill="#3c2c18"/><path d="M-40,0 L-8,6 L-8,-6 Z" fill="#3c2c18"/>
+  <path d="M14,-14 L4,-4 L4,-4 Z M14,-14 L4,-4 L14,-14" fill="#9b3b2e"/>
+  <path d="M14,-14 L20,-4 L4,-4 Z" fill="#9b3b2e"/><path d="M-14,14 L-20,4 L-4,4 Z" fill="#9b3b2e"/>
+  <path d="M14,14 L20,4 L4,4 Z" fill="#9b3b2e"/><path d="M-14,-14 L-20,-4 L-4,-4 Z" fill="#9b3b2e"/>
+  <text x="0" y="-47" text-anchor="middle" font-weight="bold" font-size="11" fill="#3c2c18">N</text>
+  <text x="0" y="55" text-anchor="middle" font-weight="bold" font-size="11" fill="#3c2c18">S</text>
+  <text x="50" y="4" text-anchor="middle" font-weight="bold" font-size="11" fill="#3c2c18">E</text>
+  <text x="-50" y="4" text-anchor="middle" font-weight="bold" font-size="11" fill="#3c2c18">W</text>
+</g>
+
+<!-- ── cartouche ── -->
+<g>
+  <rect x="44" y="44" width="320" height="72" fill="#e3d2a8" fill-opacity="0.92" stroke="#3c2c18" stroke-width="2"/>
+  <rect x="49" y="49" width="310" height="62" fill="none" stroke="#3c2c18" stroke-width="0.8"/>
+  <text x="62" y="80" font-style="italic" font-weight="700" font-size="23" fill="#3c2c18">Mare Vestani</text>
+  <text x="62" y="100" font-style="italic" font-size="12" fill="#5a4326">&amp; the Kessan Coast — drawn anno 1457</text>
+</g>
+
+<!-- ── scale bar ── -->
+<g transform="translate(44,690)">
+  <text x="69" y="-8" text-anchor="middle" font-size="10" fill="#3c2c18">leagues</text>
+  <rect x="0" y="0" width="46" height="6" fill="#3c2c18" stroke="#3c2c18"/><rect x="46" y="0" width="46" height="6" fill="#efe3c4" stroke="#3c2c18"/><rect x="92" y="0" width="46" height="6" fill="#3c2c18" stroke="#3c2c18"/><rect x="138" y="0" width="46" height="6" fill="#efe3c4" stroke="#3c2c18"/>
+  <g font-size="10" fill="#3c2c18" text-anchor="middle"><text x="0" y="18">0</text><text x="46" y="18">50</text><text x="92" y="18">100</text><text x="138" y="18">150</text><text x="184" y="18">200</text></g>
+</g>
+
+<!-- ── decorative frame ── -->
+<rect x="10" y="10" width="1140" height="740" fill="none" stroke="#3c2c18" stroke-width="3"/>
+<rect x="18" y="18" width="1124" height="724" fill="none" stroke="#3c2c18" stroke-width="1"/>
+</svg>
