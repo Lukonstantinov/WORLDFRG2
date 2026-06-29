@@ -904,14 +904,43 @@ export class OverlayManager {
         const radius = (SETTLEMENT_SIZES[s.size] || 1) * popf;
         const color = SETTLEMENT_COLORS[s.size] || "#cccccc";
 
-        ctx.beginPath();
-        ctx.arc(s.x + 0.5, s.y + 0.5, radius, 0, Math.PI * 2);
+        // Tier-specific marker (flat map redesign): capital = gold disc + star ·
+        // city = disc + inner dot (ring) · town/village = plain disc ·
+        // outpost = small square. Replaces the uniform dot.
+        const cx = s.x + 0.5, cy = s.y + 0.5;
+        ctx.globalAlpha = 0.95;
         ctx.fillStyle = color;
-        ctx.globalAlpha = 0.9;
-        ctx.fill();
-        ctx.strokeStyle = "rgba(0,0,0,0.6)";
-        ctx.lineWidth = 0.3;
-        ctx.stroke();
+        ctx.strokeStyle = "rgba(0,0,0,0.65)";
+        ctx.lineWidth = Math.max(0.25, radius * 0.14);
+        if (s.size === "outpost") {
+          const hw = radius * 0.95;
+          ctx.beginPath();
+          ctx.rect(cx - hw, cy - hw, hw * 2, hw * 2);
+          ctx.fill();
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          if (s.size === "capital") {
+            ctx.fillStyle = "rgba(26,18,6,0.9)";
+            ctx.beginPath();
+            for (let i = 0; i < 10; i++) {
+              const rr = i % 2 === 0 ? radius * 0.62 : radius * 0.26;
+              const a = -Math.PI / 2 + (i * Math.PI) / 5;
+              const px = cx + Math.cos(a) * rr, py = cy + Math.sin(a) * rr;
+              if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            ctx.fill();
+          } else if (s.size === "city") {
+            ctx.fillStyle = "rgba(26,18,6,0.85)";
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius * 0.35, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
         ctx.globalAlpha = 1;
       }
     }

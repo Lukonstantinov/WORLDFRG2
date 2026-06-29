@@ -548,38 +548,40 @@ export function drawGoodIcon(
     color = GEM_COLORS[opts.sublabel];
   }
   const base = hexToRgb(color);
+  const lum = luminance(base);
 
   ctx.save();
-  // Drop shadow.
-  ctx.globalAlpha = 0.35;
+  // Soft drop shadow so the badge reads on any terrain.
+  ctx.globalAlpha = 0.3;
   ctx.fillStyle = "#000";
-  dot(ctx, cx + r * 0.06, cy + r * 0.08, r);
+  dot(ctx, cx + r * 0.05, cy + r * 0.07, r);
   ctx.globalAlpha = 1;
 
-  // Dimensional disc: light top → dark bottom gradient in the good's colour.
-  const grad = ctx.createLinearGradient(cx, cy - r, cx, cy + r);
-  grad.addColorStop(0, mix(base, 255, 0.45));
-  grad.addColorStop(0.55, color);
-  grad.addColorStop(1, mix(base, 0, 0.45));
-  ctx.fillStyle = grad;
+  // Flat parchment disc — a clean light "chip" matching the goods-iconography
+  // redesign (was a glossy gradient medallion with a gold metallic rim).
+  ctx.fillStyle = "#f1ead6";
   dot(ctx, cx, cy, r);
 
-  // Metallic rim.
-  ctx.lineWidth = r * 0.16;
-  ctx.strokeStyle = "rgba(20,16,10,0.7)";
-  ctx.beginPath(); ctx.arc(cx, cy, r * 0.97, 0, Math.PI * 2); ctx.stroke();
-  ctx.lineWidth = r * 0.08;
-  ctx.strokeStyle = "rgba(232,210,150,0.85)"; // gold inner ring
-  ctx.beginPath(); ctx.arc(cx, cy, r * 0.86, 0, Math.PI * 2); ctx.stroke();
+  // Coloured ring in the good's own colour (darkened when the colour is pale,
+  // so light goods like cotton/salt still get a visible rim).
+  const ring = lum > 0.7 ? mix(base, 0, 0.42) : color;
+  ctx.lineWidth = r * 0.17;
+  ctx.strokeStyle = ring;
+  ctx.beginPath(); ctx.arc(cx, cy, r * 0.9, 0, Math.PI * 2); ctx.stroke();
+  // Thin dark outline to seat the chip on the map.
+  ctx.lineWidth = r * 0.07;
+  ctx.strokeStyle = "rgba(22,17,10,0.6)";
+  ctx.beginPath(); ctx.arc(cx, cy, r * 0.99, 0, Math.PI * 2); ctx.stroke();
 
-  // Symbol ink: dark on light medallion, light on dark.
-  const lum = luminance(base);
-  const ink = lum > 0.55 ? "rgba(28,22,14,0.92)" : "rgba(245,242,232,0.95)";
-  const accent = lum > 0.55 ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.4)";
+  // Flat coloured pictogram (the good's own colour, contrast-safe): symbols are
+  // drawn in colour on the light chip instead of dark/light ink on a tinted disc.
+  const dark: [number, number, number] = [(base[0] * 0.5) | 0, (base[1] * 0.5) | 0, (base[2] * 0.5) | 0];
+  const ink = lum > 0.62 ? rgb(dark[0], dark[1], dark[2]) : color;
+  const accent = lum > 0.62 ? rgb(base[0], base[1], base[2]) : mix(base, 255, 0.4);
 
   const sym = SYMBOLS[name] ?? FALLBACK;
   ctx.lineJoin = "round";
-  sym(ctx, cx, cy, r * 0.62, ink, accent);
+  sym(ctx, cx, cy, r * 0.6, ink, accent);
 
   ctx.restore();
 }
