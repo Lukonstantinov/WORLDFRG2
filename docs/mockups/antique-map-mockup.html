@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorldForge 2 — Antique Map Mockup</title>
+<style>
+  body{margin:0;background:#0b1420;color:#cfe2f6;
+    font:14px/1.5 "Segoe UI",system-ui,sans-serif;padding:24px 0 50px}
+  .wrap{max-width:1160px;margin:0 auto;padding:0 24px}
+  h1{font-size:22px;margin:0 0 4px}
+  h1 small{color:#3a80c0}
+  p.sub{color:#7e97b0;margin:0 0 18px;max-width:880px}
+  .frame{border:1px solid #21364a;border-radius:10px;overflow:hidden;
+    box-shadow:0 8px 30px #0008;background:#0f1a26}
+  canvas{display:block;width:100%}
+  .leg{display:flex;flex-wrap:wrap;gap:18px;margin-top:14px;color:#9bb0c4;font-size:12.5px}
+  .leg b{color:#cfe2f6}
+  .leg span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:22px;height:8px;border-radius:2px;display:inline-block}
+  .note{color:#7e97b0;font-size:12px;font-style:italic;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>WorldForge 2 — <small>the antique map, composed</small></h1>
+  <p class="sub">The full proposed look in one scene: parchment base, hand-inked
+  coastline &amp; relief, pictorial town glyphs, sepia caravan tracks and verdigris
+  sea rhumb-lines, good wax-seals, a compass rose, graticule and title cartouche.
+  Everything is drawn live on <code style="color:#9fd0ff">&lt;canvas&gt;</code> —
+  no image assets — exactly how the app renders its overlays.</p>
+
+  <div class="frame"><canvas id="map"></canvas></div>
+
+  <div class="leg">
+    <span><span class="sw" style="background:#4f7d6e"></span><b>Sea rhumb-line</b> (maritime)</span>
+    <span><span class="sw" style="background:#6e5230;background-image:repeating-linear-gradient(90deg,#6e5230 0 3px,transparent 3px 6px)"></span><b>Caravan track</b> (overland)</span>
+    <span><span class="sw" style="background:#5a4326"></span><b>Trunk</b> (major bundled trade)</span>
+    <span><span class="sw" style="background:#6f7d52"></span><b>River route</b></span>
+    <span>⛫ walled city · ⌂ town · ♜ outpost · ⚑ capital keep</span>
+  </div>
+  <p class="note">Mockup — the same town/route/seal glyphs from the reskin report,
+  set on a drawn continent so the whole map reads as a single old chart.</p>
+</div>
+
+<script>
+const LW=1160, LH=760;
+function fit(cv){
+  const dpr=window.devicePixelRatio||1;
+  const cssW=cv.clientWidth; const cssH=cssW*LH/LW;
+  cv.style.height=cssH+'px';
+  cv.width=Math.round(cssW*dpr); cv.height=Math.round(cssH*dpr);
+  const ctx=cv.getContext('2d');
+  const s=cssW/LW*dpr;
+  ctx.setTransform(s,0,0,s,0,0);
+  return ctx;
+}
+function dot(c,x,y,r){c.beginPath();c.arc(x,y,r,0,7);c.fill();}
+function poly(c,p,close=true){c.beginPath();c.moveTo(p[0][0],p[0][1]);
+  for(let i=1;i<p.length;i++)c.lineTo(p[i][0],p[i][1]);if(close)c.closePath();}
+
+// deterministic pseudo-random
+let _s=20260623;
+function rnd(){_s=(_s*1664525+1013904223)&0x7fffffff;return _s/0x7fffffff;}
+
+// ───────── palette ─────────
+const SEA='#9fb19a', SEA2='#8aa389', PARCH='#e3d2a8', LAND='#e9dcb8',
+      INK='#3c2c18', SEPIA='#5a4326', ROOF='#9b3b2e', VERD='#4f7d6e',
+      FOREST='#6f7d52', GOLDLEAF='#b8924a';
+
+// ───────── continent coastline (organic radial blob) ─────────
+function coastPts(cx,cy,base,wx,wy){
+  const N=64, pts=[];
+  for(let i=0;i<N;i++){const a=i/N*Math.PI*2;
+    const r=base*(1+0.20*Math.sin(a*2+0.6)+0.13*Math.sin(a*3+1.7)
+      +0.08*Math.sin(a*5+0.2)+0.05*Math.sin(a*9));
+    pts.push([cx+Math.cos(a)*r*wx, cy+Math.sin(a)*r*wy]);
+  }
+  return pts;
+}
+function strokeSmooth(c,pts,close=true){
+  c.beginPath();
+  const n=pts.length;
+  c.moveTo((pts[0][0]+pts[n-1][0])/2,(pts[0][1]+pts[n-1][1])/2);
+  for(let i=0;i<n;i++){const cur=pts[i],nx=pts[(i+1)%n];
+    c.quadraticCurveTo(cur[0],cur[1],(cur[0]+nx[0])/2,(cur[1]+nx[1])/2);}
+  if(close)c.closePath();
+}
+
+// ───────── relief: mountains & forests ─────────
+function mountain(c,x,y,w){
+  c.fillStyle=LAND; c.strokeStyle=INK; c.lineWidth=1.1;
+  poly(c,[[x-w,y],[x-w*0.35,y-w*1.1],[x+w*0.1,y-w*0.4],[x+w*0.6,y-w*1.4],[x+w,y]]);
+  c.fill(); c.stroke();
+  // hatch shading on the right faces
+  c.strokeStyle='rgba(60,44,24,.5)'; c.lineWidth=0.7;
+  for(let i=0;i<3;i++){c.beginPath();
+    c.moveTo(x+w*0.6,y-w*1.4+i*4);c.lineTo(x+w*0.6+ (w*0.4-i*3),y-i*2);c.stroke();}
+}
+function tree(c,x,y,h){
+  c.strokeStyle=FOREST; c.lineWidth=1; c.fillStyle=FOREST;
+  c.beginPath();c.moveTo(x,y);c.lineTo(x,y-h*0.4);c.stroke();
+  poly(c,[[x-h*0.4,y-h*0.3],[x,y-h],[x+h*0.4,y-h*0.3]]);c.fill();
+}
+function river(c,pts){
+  c.strokeStyle=VERD; c.lineWidth=2.2; c.lineCap='round'; c.lineJoin='round';
+  c.beginPath();c.moveTo(pts[0][0],pts[0][1]);
+  for(let i=1;i<pts.length;i++){const a=pts[i-1],b=pts[i];
+    c.quadraticCurveTo((a[0]+b[0])/2+6*Math.sin(i),(a[1]+b[1])/2,b[0],b[1]);}
+  c.stroke();
+  c.strokeStyle='rgba(230,230,210,.35)';c.lineWidth=0.8;c.stroke();
+}
+
+// ───────── town glyphs (from the reskin report) ─────────
+function house(c,x,baseY,w,hh){
+  c.fillStyle=LAND;c.fillRect(x-w/2,baseY-hh,w,hh);
+  c.strokeStyle=INK;c.lineWidth=1;c.strokeRect(x-w/2,baseY-hh,w,hh);
+  c.fillStyle=ROOF;poly(c,[[x-w/2-1.5,baseY-hh],[x,baseY-hh-w*.7],[x+w/2+1.5,baseY-hh]]);c.fill();
+  c.strokeStyle=INK;c.stroke();
+}
+function tower(c,x,baseY,w,hh,banner){
+  c.fillStyle=LAND;c.fillRect(x-w/2,baseY-hh,w,hh);
+  c.strokeStyle=INK;c.lineWidth=1;c.strokeRect(x-w/2,baseY-hh,w,hh);
+  c.fillStyle=INK;for(let i=0;i<3;i++)c.fillRect(x-w/2+i*(w/3),baseY-hh-2,w/3-1.2,2);
+  if(banner){c.strokeStyle=INK;c.beginPath();c.moveTo(x,baseY-hh-2);c.lineTo(x,baseY-hh-12);c.stroke();
+    c.fillStyle=ROOF;poly(c,[[x,baseY-hh-12],[x+9,baseY-hh-9.5],[x,baseY-hh-7]]);c.fill();}
+}
+function town(c,k,cx,cy){
+  c.save();c.lineJoin='miter';const b=cy+9;
+  if(k==='outpost'){tower(c,cx,b,7,12,false);}
+  else if(k==='village'){house(c,cx,b,12,9);}
+  else if(k==='town'){house(c,cx-7,b,11,8);house(c,cx+7,b,13,10);house(c,cx,b-1,10,7);}
+  else if(k==='city'){
+    c.fillStyle='#ddc9a0';c.fillRect(cx-20,b-7,40,7);c.strokeStyle=INK;c.lineWidth=1;c.strokeRect(cx-20,b-7,40,7);
+    for(let i=0;i<7;i++)c.fillRect(cx-20+i*6,b-9,4,2);
+    tower(c,cx-18,b,8,15,false);tower(c,cx+18,b,8,15,false);
+    house(c,cx-6,b-5,11,8);house(c,cx+7,b-5,12,9);
+    c.fillStyle=INK;c.fillRect(cx-3,b-6,6,6);
+  } else if(k==='capital'){
+    c.fillStyle='#ddc9a0';c.fillRect(cx-24,b-8,48,8);c.strokeStyle=INK;c.lineWidth=1;c.strokeRect(cx-24,b-8,48,8);
+    for(let i=0;i<9;i++)c.fillRect(cx-24+i*5.6,b-10,3.6,2);
+    tower(c,cx-22,b,9,16,false);tower(c,cx+22,b,9,16,false);
+    house(c,cx-9,b-6,11,8);house(c,cx+9,b-6,11,8);
+    tower(c,cx,b-4,12,24,true);
+    c.fillStyle=INK;c.fillRect(cx-3,b-7,6,7);
+  }
+  c.restore();
+}
+function label(c,txt,x,y,big){
+  c.fillStyle=INK;c.font=(big?'italic 600 14px':'italic 12px')+' "Times New Roman",serif';
+  c.textAlign='center';
+  c.fillStyle='rgba(245,238,215,.7)';c.fillText(txt,x+0.7,y+0.7);
+  c.fillStyle=INK;c.fillText(txt,x,y);
+}
+
+// ───────── good wax-seal medallion (from the reskin report) ─────────
+const SYM={
+  grapes:(c,x,y,s,ink,ac)=>{c.strokeStyle=ac;c.lineWidth=s*.12;c.lineCap='round';
+    c.beginPath();c.moveTo(x,y-s*.55);c.lineTo(x+s*.12,y-s);c.stroke();
+    c.fillStyle=ink;[[-.46,-.45],[0,-.5],[.46,-.45],[-.26,-.02],[.26,-.02],[0,.42]].forEach(([dx,dy])=>dot(c,x+dx*s,y+dy*s,s*.29));},
+  pick:(c,x,y,s,ink)=>{c.strokeStyle=ink;c.lineWidth=s*.16;c.lineCap='round';
+    c.beginPath();c.moveTo(x-s*.1,y-s*.8);c.lineTo(x-s*.1,y+s*.9);c.stroke();
+    c.beginPath();c.moveTo(x-s,y-s*.45);c.quadraticCurveTo(x,y-s*.95,x+s,y-s*.45);c.stroke();},
+  fish:(c,x,y,s,ink,ac)=>{c.fillStyle=ink;c.beginPath();c.ellipse(x+s*.05,y,s*.85,s*.45,0,0,7);c.fill();
+    poly(c,[[x-s*.7,y],[x-s,y-s*.5],[x-s,y+s*.5]]);c.fill();c.fillStyle=ac;dot(c,x+s*.45,y-s*.12,s*.1);},
+  grain:(c,x,y,s,ink)=>{c.strokeStyle=ink;c.lineWidth=s*.14;c.lineCap='round';
+    c.beginPath();c.moveTo(x,y+s);c.lineTo(x,y-s*.7);c.stroke();c.fillStyle=ink;
+    for(let i=0;i<4;i++){const yy=y-s*.7+i*s*.45;for(const d of[-1,1]){c.beginPath();
+      c.ellipse(x+d*s*.42,yy+s*.18,s*.28,s*.14,d*.7,0,7);c.fill();}}},
+  spool:(c,x,y,s,ink,ac)=>{c.fillStyle=ink;c.fillRect(x-s*.5,y-s*.85,s,s*1.7);
+    c.fillStyle=ac;c.fillRect(x-s*.8,y-s*.85,s*1.6,s*.22);c.fillRect(x-s*.8,y+s*.63,s*1.6,s*.22);},
+};
+function seal(c,sym,col,cx,cy,r){
+  c.save();
+  c.globalAlpha=.18;c.fillStyle='#2b1f10';dot(c,cx+r*.05,cy+r*.07,r);c.globalAlpha=1;
+  const body=c.createRadialGradient(cx-r*.3,cy-r*.3,r*.2,cx,cy,r);
+  body.addColorStop(0,'#efe3c4');body.addColorStop(1,col);
+  c.fillStyle=body;dot(c,cx,cy,r);
+  c.save();c.beginPath();c.arc(cx,cy,r*.98,0,7);c.clip();
+  c.strokeStyle='rgba(70,50,28,.18)';c.lineWidth=.6;
+  for(let i=-r*2;i<r*2;i+=3){c.beginPath();c.moveTo(cx+i,cy-r);c.lineTo(cx+i+r*2,cy+r);c.stroke();}
+  c.restore();
+  c.strokeStyle=INK;c.lineWidth=r*.12;c.beginPath();
+  for(let a=0;a<=6.3;a+=.18){const rr=r*.93+Math.sin(a*7)*r*.015;
+    const px=cx+Math.cos(a)*rr,py=cy+Math.sin(a)*rr;a===0?c.moveTo(px,py):c.lineTo(px,py);}
+  c.closePath();c.stroke();
+  c.strokeStyle='rgba(60,44,24,.6)';c.lineWidth=.7;
+  for(let a=0;a<6.28;a+=Math.PI/16){c.beginPath();
+    c.moveTo(cx+Math.cos(a)*r*.78,cy+Math.sin(a)*r*.78);
+    c.lineTo(cx+Math.cos(a)*r*.86,cy+Math.sin(a)*r*.86);c.stroke();}
+  c.lineJoin='round';(SYM[sym])(c,cx,cy,r*.6,'#3a2a16','rgba(155,59,46,.85)');
+  c.restore();
+}
+
+// ───────── routes ─────────
+function curve(c,a,b,bow){const mx=(a[0]+b[0])/2,my=(a[1]+b[1])/2;
+  const nx=-(b[1]-a[1]),ny=(b[0]-a[0]);const L=Math.hypot(nx,ny)||1;
+  c.beginPath();c.moveTo(a[0],a[1]);c.quadraticCurveTo(mx+nx/L*bow,my+ny/L*bow,b[0],b[1]);c.stroke();}
+function bez(a,b,bow,t){const mx=(a[0]+b[0])/2,my=(a[1]+b[1])/2;
+  const nx=-(b[1]-a[1]),ny=(b[0]-a[0]);const L=Math.hypot(nx,ny)||1;
+  const cxx=mx+nx/L*bow,cyy=my+ny/L*bow;
+  return [(1-t)*(1-t)*a[0]+2*(1-t)*t*cxx+t*t*b[0],(1-t)*(1-t)*a[1]+2*(1-t)*t*cyy+t*t*b[1]];}
+function shipTicks(c,a,b,bow){for(let i=1;i<7;i++){const p=bez(a,b,bow,i/7);
+  c.strokeStyle=VERD;c.lineWidth=1;c.beginPath();c.moveTo(p[0]-2,p[1]-3);c.lineTo(p[0]+2,p[1]+3);c.stroke();}}
+function ship(c,x,y){
+  c.save();c.strokeStyle=INK;c.fillStyle=LAND;c.lineWidth=1;
+  // hull
+  c.beginPath();c.moveTo(x-9,y);c.quadraticCurveTo(x,y+7,x+9,y);c.closePath();c.fill();c.stroke();
+  // mast + sail
+  c.beginPath();c.moveTo(x,y);c.lineTo(x,y-12);c.stroke();
+  c.fillStyle=ROOF;poly(c,[[x,y-11],[x+8,y-5],[x,y-2]]);c.fill();c.stroke();
+  c.restore();
+}
+
+// ───────── compass rose ─────────
+function compass(c,x,y,r){
+  c.strokeStyle=INK;c.lineWidth=1;
+  c.beginPath();c.arc(x,y,r,0,7);c.stroke();
+  c.beginPath();c.arc(x,y,r*.62,0,7);c.stroke();
+  for(let i=0;i<8;i++){const a=i*Math.PI/4-Math.PI/2;const rr=i%2===0?r:r*.5;
+    c.fillStyle=i%2===0?INK:ROOF;
+    poly(c,[[x+Math.cos(a)*rr,y+Math.sin(a)*rr],
+      [x+Math.cos(a+.2)*r*.2,y+Math.sin(a+.2)*r*.2],
+      [x+Math.cos(a-.2)*r*.2,y+Math.sin(a-.2)*r*.2]]);c.fill();}
+  c.fillStyle=INK;c.font='bold 11px "Times New Roman",serif';c.textAlign='center';c.textBaseline='middle';
+  c.fillText('N',x,y-r-7);c.fillText('S',x,y+r+7);c.fillText('E',x+r+7,y);c.fillText('W',x-r-7,y);
+}
+
+// ───────── frame & cartouche ─────────
+function frame(c){
+  c.strokeStyle=INK;c.lineWidth=3;c.strokeRect(10,10,LW-20,LH-20);
+  c.lineWidth=1;c.strokeRect(18,18,LW-36,LH-36);
+  // graticule degree ticks along inner frame
+  c.fillStyle=INK;c.font='9px "Times New Roman",serif';c.textAlign='center';c.textBaseline='middle';
+  for(let x=80;x<LW-40;x+=120){c.fillRect(x,18,0.7,6);c.fillRect(x,LH-24,0.7,6);}
+  for(let y=80;y<LH-40;y+=120){c.fillRect(18,y,6,0.7);c.fillRect(LW-24,y,6,0.7);}
+}
+function cartouche(c){
+  const x=44,y=44,w=300,h=70;
+  c.fillStyle='rgba(227,210,168,.92)';c.fillRect(x,y,w,h);
+  c.strokeStyle=INK;c.lineWidth=2;c.strokeRect(x,y,w,h);
+  c.lineWidth=0.8;c.strokeRect(x+5,y+5,w-10,h-10);
+  c.fillStyle=INK;c.textAlign='left';
+  c.font='italic 700 22px "Times New Roman",serif';
+  c.fillText('Mare Vestani',x+18,y+34);
+  c.font='italic 12px "Times New Roman",serif';c.fillStyle=SEPIA;
+  c.fillText('& the Kessan Coast — drawn anno 1457',x+18,y+54);
+}
+function scalebar(c){
+  const x=44,y=LH-54,seg=46;
+  c.fillStyle=INK;c.font='10px "Times New Roman",serif';c.textAlign='center';
+  c.fillText('leagues',x+seg*1.5,y-8);
+  for(let i=0;i<4;i++){c.fillStyle=i%2?'#efe3c4':INK;
+    c.fillRect(x+i*seg,y,seg,6);c.strokeStyle=INK;c.lineWidth=1;c.strokeRect(x+i*seg,y,seg,6);}
+  c.fillStyle=INK;c.textAlign='center';
+  ['0','50','100','150','200'].forEach((t,i)=>c.fillText(t,x+i*seg,y+18));
+}
+
+// ───────── graticule over sea ─────────
+function graticule(c){
+  c.strokeStyle='rgba(60,44,24,.16)';c.lineWidth=0.6;
+  for(let x=80;x<LW-30;x+=120){c.beginPath();c.moveTo(x,24);c.lineTo(x,LH-24);c.stroke();}
+  for(let y=80;y<LH-30;y+=120){c.beginPath();c.moveTo(24,y);c.lineTo(LW-24,y);c.stroke();}
+}
+
+// ───────── compose ─────────
+function draw(){
+  const ctx=fit(document.getElementById('map'));
+  // parchment + sea base
+  ctx.fillStyle=SEA;ctx.fillRect(0,0,LW,LH);
+  // sea stipple / wave hatching
+  ctx.strokeStyle='rgba(70,90,75,.18)';ctx.lineWidth=0.6;
+  for(let y=40;y<LH;y+=22)for(let x=20;x<LW;x+=46){
+    ctx.beginPath();ctx.arc(x+(y/22%2?12:0),y,5,Math.PI*0.15,Math.PI*0.85);ctx.stroke();}
+  graticule(ctx);
+
+  // continent
+  const land=coastPts(560,400,250,1.35,0.95);
+  // coastal "echo" line (lighter, offset out) for the old-map ripple
+  ctx.save();
+  for(let k=3;k>=1;k--){
+    strokeSmooth(ctx,land.map(p=>[560+(p[0]-560)*(1+0.03*k),400+(p[1]-400)*(1+0.03*k)]));
+    ctx.strokeStyle=`rgba(70,90,75,${0.10*k})`;ctx.lineWidth=1.2;ctx.stroke();
+  }
+  ctx.restore();
+  // land fill
+  strokeSmooth(ctx,land);
+  ctx.fillStyle=LAND;ctx.fill();
+  ctx.strokeStyle=INK;ctx.lineWidth=1.6;ctx.stroke();
+  // subtle parchment blotches on land
+  ctx.save();strokeSmooth(ctx,land);ctx.clip();
+  for(let i=0;i<40;i++){ctx.fillStyle=`rgba(120,95,55,${0.03+rnd()*0.04})`;
+    dot(ctx,200+rnd()*720,200+rnd()*420,12+rnd()*30);}
+  // a small offshore island
+  const isle=coastPts(940,250,42,1.2,0.9);strokeSmooth(ctx,isle);
+  ctx.fillStyle=LAND;ctx.fill();ctx.strokeStyle=INK;ctx.lineWidth=1.4;ctx.stroke();
+  ctx.restore();
+
+  // relief: a mountain spine + forests
+  const mtns=[[470,330],[510,345],[552,330],[595,348],[636,335]];
+  mtns.forEach(m=>mountain(ctx,m[0],m[1],22));
+  for(let i=0;i<26;i++)tree(ctx,440+rnd()*250,430+rnd()*120,12+rnd()*6);
+  // rivers from the range to the coast
+  river(ctx,[[552,332],[540,400],[500,470],[455,520],[420,545]]);
+  river(ctx,[[600,345],[630,420],[670,480],[700,520]]);
+
+  // ─ settlements ─
+  const S={
+    cap:  {k:'capital',x:430,y:548,nm:'Kessa'},
+    east: {k:'city',   x:712,y:524,nm:'Voryn'},
+    nport:{k:'city',   x:560,y:250,nm:'Aldmar'},
+    inl:  {k:'town',   x:560,y:440,nm:'Tessil'},
+    sth:  {k:'town',   x:640,y:610,nm:'Drava'},
+    isle: {k:'outpost',x:940,y:236,nm:'Far Hold'},
+    vil:  {k:'village',x:475,y:470,nm:'Wend'},
+  };
+
+  // ─ routes (under the glyphs) ─
+  // sea rhumb-lines
+  ctx.setLineDash([]);ctx.strokeStyle=VERD;ctx.lineWidth=1.3;
+  curve(ctx,[S.cap.x,S.cap.y],[S.east.x,S.east.y],120); shipTicks(ctx,[S.cap.x,S.cap.y],[S.east.x,S.east.y],120);
+  curve(ctx,[S.east.x,S.east.y],[S.isle.x,S.isle.y],-60); shipTicks(ctx,[S.east.x,S.east.y],[S.isle.x,S.isle.y],-60);
+  curve(ctx,[S.nport.x,S.nport.y],[S.isle.x,S.isle.y],-40);
+  // trunk: capital <-> north port (double hand-inked)
+  ctx.strokeStyle=SEPIA;ctx.lineWidth=3.2;curve(ctx,[S.cap.x,S.cap.y],[S.nport.x,S.nport.y],40);
+  ctx.strokeStyle='rgba(233,220,184,.9)';ctx.lineWidth=1.1;curve(ctx,[S.cap.x,S.cap.y],[S.nport.x,S.nport.y],40);
+  // caravan tracks (dotted sepia)
+  ctx.setLineDash([1.6,3.2]);ctx.strokeStyle='#6e5230';ctx.lineWidth=1.7;
+  curve(ctx,[S.cap.x,S.cap.y],[S.inl.x,S.inl.y],-18);
+  curve(ctx,[S.inl.x,S.inl.y],[S.east.x,S.east.y],-22);
+  curve(ctx,[S.inl.x,S.inl.y],[S.sth.x,S.sth.y],14);
+  curve(ctx,[S.cap.x,S.cap.y],[S.vil.x,S.vil.y],-8);
+  ctx.setLineDash([]);
+  // a little ship on the main sea lane
+  const sp=bez([S.cap.x,S.cap.y],[S.east.x,S.east.y],120,0.5);ship(ctx,sp[0],sp[1]);
+
+  // ─ good wax-seals near their regions ─
+  seal(ctx,'pick','#9a8f7a',512,300,17);  label(ctx,'iron',512,332);          // mountains
+  seal(ctx,'grain','#c9b25a',520,560,17);  label(ctx,'grain',520,592);        // plains
+  seal(ctx,'grapes','#7a2438',664,624,16); label(ctx,'wine',664,654);         // south
+  seal(ctx,'fish','#5d8aa0',330,300,16);   label(ctx,'fishery',330,330);      // sea bank
+  seal(ctx,'spool','#9a5688',760,470,15);  label(ctx,'silk',760,498);         // east port hinterland
+
+  // ─ towns + names (on top) ─
+  for(const key in S){const s=S[key];town(ctx,s.k,s.x,s.y);
+    label(ctx,s.nm,s.x,s.y+ (s.k==='outpost'||s.k==='village'?18:24), s.k==='capital');}
+
+  // chrome
+  frame(ctx);cartouche(ctx);scalebar(ctx);compass(ctx,LW-92,LH-96,40);
+}
+window.addEventListener('load',draw);
+window.addEventListener('resize',draw);
+</script>
+</body>
+</html>
