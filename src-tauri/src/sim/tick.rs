@@ -773,6 +773,10 @@ pub struct TickHub {
     /// DLC · abstract social strata of this settlement (shares + inequality +
     /// commoner welfare). Seeded once on first advance; updated yearly.
     #[serde(default)] pub society: Society,
+    /// DLC 4 · typed population units derived from `society` × population each year
+    /// (read-only foundation; not yet wired into consumption). Empty on old saves
+    /// until the next yearly derive.
+    #[serde(default)] pub pops: Vec<Pop>,
     // ── Trade throughput touching this hub in the last while, split by who carried
     //    it (decaying tallies). Used to estimate the merchant population by class.
     #[serde(default)] pub tw_house: f32,
@@ -1492,6 +1496,28 @@ pub struct Society {
     /// (defaults to 0 = no ban, so the default index 0 is never consulted).
     #[serde(default)] pub ousted_house: i32,
     #[serde(default)] pub ousted_until: u32,
+}
+
+/// DLC 4 · profession classes for a `Pop` (Victoria-style social roles).
+pub const POP_PROFESSIONS: [&str; 9] = [
+    "Farmers", "Labourers", "Craftsmen", "Clerks", "Merchants", "Clergy",
+    "Capitalists", "Aristocrats", "Soldiers",
+];
+
+/// DLC 4 · a typed population unit — the foundation of the Nations & POPs layer.
+/// The abstract `Society` shares are derived into these each year. NOT yet wired
+/// into consumption/politics (that is DLC 4 step 2); kept read-only so the economy
+/// (and its dynamics test) is unchanged while the data model lands.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct Pop {
+    pub profession: u8,      // index into POP_PROFESSIONS
+    pub size: f32,           // people
+    pub money: f32,          // per-capita wealth (grain-eq)
+    pub needs_life: f32,     // 0..1 satisfaction of life needs
+    pub needs_everyday: f32, // 0..1 everyday needs
+    pub needs_luxury: f32,   // 0..1 luxury needs
+    pub consciousness: f32,  // 0..10 political awareness
+    pub militancy: f32,      // 0..10 willingness to revolt
 }
 
 impl CityFinance {
@@ -3637,6 +3663,56 @@ impl CampaignSim {
             so.commoner_wealth += (cw - so.commoner_wealth) * 0.3;
             so.inequality += (ineq - so.inequality) * 0.3;
         }
+        // DLC 4 · derive typed Pops from the freshly-updated shares (read-only foundation).
+        for h in 0..self.hubs.len() { self.derive_pops(h); }
+    }
+
+    /// DLC 4 · derive typed `Pop` units for hub `h` from its `society` shares ×
+    /// population. Read-only foundation for the Nations & POPs layer — nothing
+    /// consumes these yet, so the economy is unchanged; refreshed yearly so the
+    /// future Population panel and (later) pop-driven demand can read them.
+    fn derive_pops(&mut self, h: usize) {
+        let hub = &self.hubs[h];
+        if hub.is_estate || hub.population < 1.0 {
+            self.hubs[h].pops.clear();
+            return;
+        }
+        let pop = hub.population.max(0.0);
+        let so = &hub.society;
+        let split: [(u8, f32); 9] = [
+            (0, so.commoner * 0.60),                        // farmers
+            (1, so.commoner * 0.40 + so.underclass * 0.55), // labourers (+ urban poor)
+            (2, so.burgher * 0.40),                         // craftsmen
+            (3, so.burgher * 0.28),                         // clerks
+            (4, so.burgher * 0.32),                         // merchants
+            (5, so.patrician * 0.30),                       // clergy
+            (6, so.patrician * 0.28),                       // capitalists
+            (7, so.patrician * 0.42),                       // aristocrats
+            (8, so.underclass * 0.45),                      // soldiers
+        ];
+        let cw = so.commoner_wealth.max(0.0);
+        let life = (1.0 - hub.lack_basic).clamp(0.0, 1.0);
+        let every = (1.0 - hub.lack_comfort).clamp(0.0, 1.0);
+        let lux = (1.0 - hub.lack_luxury).clamp(0.0, 1.0);
+        let base_mil = (so.unrest * 10.0).clamp(0.0, 10.0);
+        let base_con = (so.inequality * 6.0).clamp(0.0, 10.0);
+        let mut pops = Vec::with_capacity(9);
+        for (prof, frac) in split {
+            let size = frac * pop;
+            if size < 1.0 { continue; }
+            let elite = matches!(prof, 6 | 7);
+            let mid = matches!(prof, 2 | 3 | 4 | 5);
+            let money = if elite { cw * 6.0 + 5.0 } else if mid { cw * 1.6 + 1.0 } else { cw };
+            let mil = (base_mil
+                + if elite { -2.0 } else if prof == 1 || prof == 8 { 1.5 } else { 0.0 }).clamp(0.0, 10.0);
+            let con = (base_con + if mid || elite { 1.5 } else { 0.0 }).clamp(0.0, 10.0);
+            pops.push(Pop {
+                profession: prof, size, money,
+                needs_life: life, needs_everyday: every, needs_luxury: lux,
+                consciousness: con, militancy: mil,
+            });
+        }
+        self.hubs[h].pops = pops;
     }
 
     /// It. 3 · Civil unrest. Each year every settled hub's `unrest` eases toward a
@@ -5622,7 +5698,7 @@ impl CampaignSim {
             is_estate: true, parent, koppen, coastal, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5,
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
-            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(),
+            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(),
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: kind, estate_tier: 1, last_upgrade_tick: self.tick, owner_house, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
@@ -6253,7 +6329,7 @@ impl CampaignSim {
             is_estate: false, parent: -1, koppen: site.koppen, coastal: site.coastal, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5,
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
-            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(),
+            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(),
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
@@ -7619,7 +7695,7 @@ mod tests {
             export_earn: 0.0, import_spend: 0.0,
             mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5, sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(),
             in_by_sea: 0.0, in_by_land: 0.0,
-            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(),
+            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(),
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: 0, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,

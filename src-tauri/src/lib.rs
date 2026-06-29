@@ -97,6 +97,7 @@ pub fn run() {
             campaign_commands::campaign_colony_gates,
             campaign_commands::campaign_get_world_economy,
             campaign_commands::campaign_get_houses,
+            campaign_commands::campaign_get_pops,
             campaign_commands::campaign_get_speculation,
             campaign_commands::campaign_get_poleis,
             campaign_commands::campaign_trade_flows,

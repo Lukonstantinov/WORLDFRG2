@@ -12,7 +12,8 @@ what is **design-only**, and the ordered plan for what remains.
 | Vector coat-of-arms (16 charges, 5 shapes, ermine/vair furs, 11 divisions, 10 ordinaries) | `src/ui/CoatOfArms.tsx` | #19 |
 | Expanded house surnames + guild words + guild name pattern | `src-tauri/src/sim/cultures.rs` | #19 |
 | Trade-route line **styles** by kind (sea rhumb dashes · river even dash · land dotted caravan) | `src/canvas/OverlayManager.ts` | #20 |
-| Icon **coverage**: all 85 goods now draw a symbol (was ~35 blank dots) | `src/canvas/goodIcons.ts` | this PR |
+| Icon **coverage**: all 85 goods now draw a symbol (was ~35 blank dots) | `src/canvas/goodIcons.ts` | #21 |
+| **DLC 4.1 — POP data model** (typed `Pop` derived from `Society` each year, read-only) + `campaign_get_pops` IPC | `sim/tick.rs`, `commands/campaign_commands.rs`, `lib.rs`, `types.ts`, `bridge/tauri.ts` | this PR |
 
 Verification gates for every change: `npx tsc --noEmit` and (for Rust) `cargo check`.
 For `tick.rs` economy changes additionally run

@@ -528,7 +528,7 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 }
 
 // ── DLC 1 "Living Trade" tick simulation ──
-import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow } from "../types";
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow, PopBrief } from "../types";
 
 /** Seed a fresh living-trade sim from the static economy snapshot (step 10). */
 export async function campaignStartSim(seed: number): Promise<CampaignSnapshot> {
@@ -585,6 +585,11 @@ export async function campaignGetWorldEconomy(): Promise<WorldEconomy> {
 /** All merchant families (active first, richest first). */
 export async function campaignGetHouses(): Promise<HouseBrief[]> {
   return invoke("campaign_get_houses");
+}
+
+/** DLC 4 · the derived typed Pops of one hub (Nations & POPs foundation). */
+export async function campaignGetPops(hub: number): Promise<PopBrief[]> {
+  return invoke("campaign_get_pops", { hub });
 }
 
 /** DLC 3 · the cached yearly speculation read (per-polis bubble risk + why). */
