@@ -1054,13 +1054,18 @@ export class OverlayManager {
     // network without the small roads overpowering the trunks.
     const lineWidth = Math.max(0.4, (route.minor ? 0.8 : 1.6) / Math.sqrt(this.currentScale));
     const dash = Math.max(1.5, 4 / Math.sqrt(this.currentScale));
+    // Distinguish routes by line STYLE, not just colour (flat map redesign):
+    // sea = long rhumb-line dashes · river = even dash · land = fine dotted caravan track.
+    const pattern = route.kind === 1 ? [dash * 2.2, dash]
+      : route.kind === 2 ? [dash, dash]
+      : [Math.max(0.8, dash * 0.5), dash * 1.5];
 
     ctx.globalAlpha = route.minor ? 0.5 : 0.8;
     ctx.strokeStyle = color;
     ctx.lineWidth = lineWidth;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.setLineDash([dash, dash]);
+    ctx.setLineDash(pattern);
 
     const seamGap = 20;
     ctx.beginPath();
