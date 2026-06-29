@@ -513,6 +513,28 @@ const sheaf: Sym = (ctx, x, y, s, ink, accent) => {
   ctx.stroke();
 };
 
+const book: Sym = (ctx, x, y, s, ink, accent) => {
+  ctx.fillStyle = ink;
+  ctx.fillRect(x - s * 0.7, y - s * 0.85, s * 1.4, s * 1.7);
+  ctx.fillStyle = accent;
+  ctx.fillRect(x - s * 0.55, y - s * 0.7, s * 1.1, s * 1.4); // pages
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = s * 0.1;
+  ctx.beginPath(); ctx.moveTo(x, y - s * 0.7); ctx.lineTo(x, y + s * 0.7); ctx.stroke(); // spine
+};
+
+const candle: Sym = (ctx, x, y, s, ink, accent) => {
+  ctx.fillStyle = ink;
+  ctx.fillRect(x - s * 0.32, y - s * 0.45, s * 0.64, s * 1.35); // body
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = s * 0.12;
+  ctx.beginPath(); ctx.moveTo(x, y - s * 0.45); ctx.lineTo(x, y - s * 0.78); ctx.stroke(); // wick
+  ctx.fillStyle = accent; // flame
+  ctx.beginPath();
+  ctx.ellipse(x, y - s, s * 0.22, s * 0.42, 0, 0, Math.PI * 2);
+  ctx.fill();
+};
+
 const SYMBOLS: Record<string, Sym> = {
   silk: spool, cotton: bale, wool_fleece: bale, wool_llama: bale, flax: sheaf,
   wine: grapes, oliveoil: amphora, ceramics: pot, glassware: goblet,
@@ -529,6 +551,20 @@ const SYMBOLS: Record<string, Sym> = {
   gemstones: gem, jade: ring, marble: column,
   horses: animal, ivory: tusk,
   paper: scroll, dates: palm, citrus: citrus,
+  // ── newly covered goods (previously rendered as a plain fallback dot) ──
+  rice: grain, barley: grain, millet: grain,
+  herring: fish, salted_herring: fish,
+  honey: amphora, hides: pelt, leather_goods: pelt,
+  beer: goblet, mead: goblet, brandy: goblet, citrus_liqueur: goblet,
+  ruby: gem, sapphire: gem, emerald: gem, diamond: gem, amethyst: gem, topaz: gem,
+  clay: blob, soap: blob,
+  cloth: bale, linen: bale, cotton_cloth: bale, carpets: bale,
+  silk_brocade: spool,
+  metalware: ingot, bronzeware: ingot,
+  refined_sugar: crystals,
+  jewelry: ring, perfume: drop,
+  candles: candle, books: book, furniture: log,
+  ivory_carvings: tusk, statuary: column,
 };
 const FALLBACK: Sym = (ctx, x, y, s, ink) => {
   ctx.fillStyle = ink;

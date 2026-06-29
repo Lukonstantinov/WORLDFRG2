@@ -11,7 +11,8 @@ what is **design-only**, and the ordered plan for what remains.
 | Settlement tier markers (gold-star capital / ring city / disc town / square outpost) | `src/canvas/OverlayManager.ts` | #19 |
 | Vector coat-of-arms (16 charges, 5 shapes, ermine/vair furs, 11 divisions, 10 ordinaries) | `src/ui/CoatOfArms.tsx` | #19 |
 | Expanded house surnames + guild words + guild name pattern | `src-tauri/src/sim/cultures.rs` | #19 |
-| Trade-route line **styles** by kind (sea rhumb dashes · river even dash · land dotted caravan) | `src/canvas/OverlayManager.ts` | this PR |
+| Trade-route line **styles** by kind (sea rhumb dashes · river even dash · land dotted caravan) | `src/canvas/OverlayManager.ts` | #20 |
+| Icon **coverage**: all 85 goods now draw a symbol (was ~35 blank dots) | `src/canvas/goodIcons.ts` | this PR |
 
 Verification gates for every change: `npx tsc --noEmit` and (for Rust) `cargo check`.
 For `tick.rs` economy changes additionally run
@@ -19,11 +20,14 @@ For `tick.rs` economy changes additionally run
 
 ## 🔜 Phase A — finish the visual layer (small, contained)
 
-1. **Per-good bespoke pictograms** (`goodIcons.ts`). Today the flat chip reuses
-   the existing monochrome `SYMBOLS`. Replace ~90 silhouettes with the
-   2-tone pictograms from `docs/mockups/goods-iconography-redesign.svg`,
-   one `Sym` fn per good. *Effort: large but mechanical; pure front-end.*
-   *Ship in batches by category, each with a refreshed icon sheet.*
+1. **Per-good pictograms** (`goodIcons.ts`).
+   - ✅ *Batch 1 (done):* every good now maps to a thematic symbol — the ~35
+     goods that fell back to a plain dot (gems, rice/barley/herring, manufactured
+     goods) now render an icon; +`book`/`candle` symbols added. See
+     `docs/mockups/goods-icon-coverage.svg`.
+   - ⏳ *Follow-up:* give the highest-traffic goods **bespoke distinct** art (the
+     2-tone pictograms in `docs/mockups/goods-iconography-redesign.svg`) instead
+     of reusing shared symbols. Ship in batches by category.
 2. **Parchment / aged base map** (`src-tauri/src/render/tile_image.rs`). Tint the
    land/sea ramps toward the aged palette + a subtle paper grain. *Server-side
    render change; needs the dynamics/visual report. Medium risk — gate behind a
