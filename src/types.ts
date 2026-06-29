@@ -563,6 +563,18 @@ export interface OfficeHere {
   goods: string[];
 }
 /** A merchant family (trading house) — for the Houses panel + settlement window. */
+/** DLC 4 · one typed population unit of a hub (Nations & POPs foundation). */
+export interface PopBrief {
+  profession: string;
+  size: number;
+  money: number;
+  needs_life: number;
+  needs_everyday: number;
+  needs_luxury: number;
+  consciousness: number;
+  militancy: number;
+}
+
 export interface HouseBrief {
   idx?: number;        // index into sim.houses — key for the ledger query
   barred?: string[];   // cities this house is barred from (active trade wars)

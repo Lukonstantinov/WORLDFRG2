@@ -904,6 +904,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 lack_comfort: 0.0,
                 lack_luxury: 0.0,
                 society: crate::sim::tick::Society::default(),
+                pops: Vec::new(),
                 tw_house: 0.0,
                 tw_local: 0.0,
                 tw_guild: 0.0,
@@ -1315,6 +1316,40 @@ pub fn campaign_get_state(db: State<'_, WorldDb>) -> Result<CampaignSnapshot, St
         Some(sim) => build_snapshot(&sim),
         None => inactive_snapshot(),
     })
+}
+
+/// DLC 4 · one typed population unit for the (future) Population panel.
+#[derive(Serialize)]
+pub struct PopBrief {
+    pub profession: String,
+    pub size: f32,
+    pub money: f32,
+    pub needs_life: f32,
+    pub needs_everyday: f32,
+    pub needs_luxury: f32,
+    pub consciousness: f32,
+    pub militancy: f32,
+}
+
+/// DLC 4 · the derived Pops of one hub (read-only foundation of the Nations & POPs
+/// layer). Empty when no campaign is active or the hub index is unknown.
+#[tauri::command]
+pub fn campaign_get_pops(db: State<'_, WorldDb>, hub: u32) -> Result<Vec<PopBrief>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let h = hub as usize;
+    if h >= sim.hubs.len() { return Ok(vec![]); }
+    Ok(sim.hubs[h].pops.iter().map(|p| PopBrief {
+        profession: crate::sim::tick::POP_PROFESSIONS
+            .get(p.profession as usize).copied().unwrap_or("?").to_string(),
+        size: p.size,
+        money: p.money,
+        needs_life: p.needs_life,
+        needs_everyday: p.needs_everyday,
+        needs_luxury: p.needs_luxury,
+        consciousness: p.consciousness,
+        militancy: p.militancy,
+    }).collect())
 }
 
 /// One backer of a colony venture (city / house / bank), for the Supply subtab.
