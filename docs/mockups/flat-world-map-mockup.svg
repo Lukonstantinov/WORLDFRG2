@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 720" font-family="'Segoe UI',system-ui,sans-serif">
+<defs>
+<linearGradient id="sea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#16344a"/><stop offset="1" stop-color="#0c2233"/></linearGradient>
+<radialGradient id="shallow" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#1f5066" stop-opacity=".7"/><stop offset="1" stop-color="#1f5066" stop-opacity="0"/></radialGradient>
+<radialGradient id="disc-wine" cx="38%" cy="35%" r="70%"><stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset="1" stop-color="#8e2440"/></radialGradient>
+<radialGradient id="disc-grain" cx="38%" cy="35%" r="70%"><stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset="1" stop-color="#c9b25a"/></radialGradient>
+<radialGradient id="disc-iron" cx="38%" cy="35%" r="70%"><stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset="1" stop-color="#8a9099"/></radialGradient>
+<radialGradient id="disc-fish" cx="38%" cy="35%" r="70%"><stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset="1" stop-color="#5d8aa0"/></radialGradient>
+<radialGradient id="disc-silk" cx="38%" cy="35%" r="70%"><stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset="1" stop-color="#b0508f"/></radialGradient>
+</defs>
+<rect width="1180" height="720" fill="url(#sea)"/>
+<circle cx="360" cy="360" r="260" fill="url(#shallow)"/>
+<circle cx="880" cy="300" r="150" fill="url(#shallow)"/>
+<path d="M120,360 C150,250 260,200 380,210 C520,222 600,180 700,235 C800,290 760,380 740,470 C720,560 620,610 500,615 C380,620 230,600 165,500 C120,440 100,420 120,360 Z" fill="#5e7d44" stroke="#2c4a30" stroke-width="2"/>
+<clipPath id="cc"><path d="M120,360 C150,250 260,200 380,210 C520,222 600,180 700,235 C800,290 760,380 740,470 C720,560 620,610 500,615 C380,620 230,600 165,500 C120,440 100,420 120,360 Z"/></clipPath>
+<g clip-path="url(#cc)">
+<path d="M120,360 C200,330 280,340 320,420 C360,500 280,560 200,540 C140,520 110,440 120,360 Z" fill="#6f8a3a"/>
+<ellipse cx="560" cy="300" rx="120" ry="80" fill="#3f6b3a"/>
+<ellipse cx="650" cy="430" rx="110" ry="70" fill="#b5a25a"/>
+<path d="M412,300 L430,274 L440,290 L452,270 L464,300 Z" fill="#8f96a0" stroke="#5c636c" stroke-width="1"/>
+<path d="M452,312 L470,286 L480,302 L492,282 L504,312 Z" fill="#8f96a0" stroke="#5c636c" stroke-width="1"/>
+<path d="M492,300 L510,274 L520,290 L532,270 L544,300 Z" fill="#8f96a0" stroke="#5c636c" stroke-width="1"/>
+<path d="M532,316 L550,290 L560,306 L572,286 L584,316 Z" fill="#8f96a0" stroke="#5c636c" stroke-width="1"/>
+<path d="M572,302 L590,276 L600,292 L612,272 L624,302 Z" fill="#8f96a0" stroke="#5c636c" stroke-width="1"/>
+<path d="M510,300 Q500,360 470,410 Q440,470 420,520" fill="none" stroke="#9fe07a" stroke-width="3" stroke-linecap="round" opacity=".9"/>
+<path d="M560,316 Q600,380 640,440" fill="none" stroke="#9fe07a" stroke-width="2.4" stroke-linecap="round" opacity=".9"/>
+</g>
+<path d="M860,250 C900,225 970,228 995,265 C1015,295 1000,345 950,360 C895,372 845,345 840,300 C838,280 845,262 860,250 Z" fill="#5e7d44" stroke="#2c4a30" stroke-width="2"/>
+<ellipse cx="930" cy="300" rx="45" ry="32" fill="#3f6b3a"/>
+<g fill="none" stroke-linecap="round">
+<path d="M300,520 Q401.44764960247073,359.48637319487693 560,255" stroke="#e0c060" stroke-width="5" opacity=".95"/>
+<path d="M300,520 Q374.1349744368545,448.208596856957 470,410" stroke="#caa15a" stroke-width="2.6" stroke-dasharray="2 5"/>
+<path d="M470,410 Q571.6248900946161,419.0211813670489 660,470" stroke="#caa15a" stroke-width="2.6" stroke-dasharray="2 5"/>
+<path d="M470,410 Q499.5651273371742,494.26092359769547 560,560" stroke="#caa15a" stroke-width="2.6" stroke-dasharray="2 5"/>
+<path d="M300,520 Q323.9259471810776,479.79366901235227 360,450" stroke="#caa15a" stroke-width="2.6" stroke-dasharray="2 5"/>
+<path d="M660,470 Q676.6871952905944,523.8752031396036 720,560" stroke="#caa15a" stroke-width="2.6" stroke-dasharray="2 5"/>
+<path d="M300,520 Q495.7786361058007,689.3243208890929 720,560" stroke="#7fd0d8" stroke-width="2.4" stroke-dasharray="7 5"/>
+<path d="M720,560 Q797.5501718754809,396.87130588984854 950,300" stroke="#7fd0d8" stroke-width="2.4" stroke-dasharray="7 5"/>
+<path d="M560,255 Q759.5849643194052,237.76364256515475 950,300" stroke="#7fd0d8" stroke-width="2.4" stroke-dasharray="7 5"/>
+<path d="M660,470 Q820.1715849913726,410.88093910292974 950,300" stroke="#7fd0d8" stroke-width="2.4" stroke-dasharray="7 5"/>
+</g>
+<g transform="translate(524.0,615.9) rotate(1.4)"><path d="M0,0 L-7,-3.5 L-7,3.5 Z" fill="#7fd0d8"/></g>
+<g transform="translate(776.8,260.1) rotate(7.7)"><path d="M0,0 L-7,-3.5 L-7,3.5 Z" fill="#7fd0d8"/></g>
+<g transform="translate(502.9,614.7)" stroke="#0c1118" stroke-width="1"><path d="M-8,0 Q0,6 8,0 Z" fill="#e8e0cc"/><line x1="0" y1="0" x2="0" y2="-11"/><path d="M0,-10 L7,-5 L0,-2 Z" fill="#7fd0d8"/></g>
+<circle cx="520" cy="290" r="15" fill="url(#disc-iron)" stroke="#0c1118" stroke-width="1.5"/>
+<circle cx="520" cy="290" r="15" fill="none" stroke="#e8d28e" stroke-width="1" opacity=".7"/>
+<g transform="translate(510,280)"><path d="M5,12 L7,9 H13 L15,12 L13,15 H7 Z" fill="#eef0f2"/><path d="M7,9 H13 L12,11 H8 Z" fill="#cfd4da"/></g>
+<text x="520" y="317" text-anchor="middle" font-size="11" font-weight="600" fill="#f0e8d0">iron</text>
+<circle cx="230" cy="470" r="15" fill="url(#disc-grain)" stroke="#0c1118" stroke-width="1.5"/>
+<circle cx="230" cy="470" r="15" fill="none" stroke="#e8d28e" stroke-width="1" opacity=".7"/>
+<g transform="translate(220,460)"><rect x="9.3" y="6" width="1.4" height="9" fill="#3a2e12"/><ellipse cx="8.5" cy="7" rx="1.6" ry=".8" fill="#3a2e12" transform="rotate(-33.0 8.5 7)"/><ellipse cx="11.5" cy="7" rx="1.6" ry=".8" fill="#3a2e12" transform="rotate(33.0 11.5 7)"/><ellipse cx="8.5" cy="9" rx="1.6" ry=".8" fill="#3a2e12" transform="rotate(-33.0 8.5 9)"/><ellipse cx="11.5" cy="9" rx="1.6" ry=".8" fill="#3a2e12" transform="rotate(33.0 11.5 9)"/><ellipse cx="8.5" cy="11" rx="1.6" ry=".8" fill="#3a2e12" transform="rotate(-33.0 8.5 11)"/><ellipse cx="11.5" cy="11" rx="1.6" ry=".8" fill="#3a2e12" transform="rotate(33.0 11.5 11)"/><ellipse cx="8.5" cy="13" rx="1.6" ry=".8" fill="#3a2e12" transform="rotate(-33.0 8.5 13)"/><ellipse cx="11.5" cy="13" rx="1.6" ry=".8" fill="#3a2e12" transform="rotate(33.0 11.5 13)"/></g>
+<text x="230" y="497" text-anchor="middle" font-size="11" font-weight="600" fill="#f0e8d0">grain</text>
+<circle cx="630" cy="470" r="15" fill="url(#disc-wine)" stroke="#0c1118" stroke-width="1.5"/>
+<circle cx="630" cy="470" r="15" fill="none" stroke="#e8d28e" stroke-width="1" opacity=".7"/>
+<g transform="translate(620,460)"><path d="M6.5,5 H13.5 Q12.5,11 10,11 Q7.5,11 6.5,5 Z" fill="#f0e8e0"/><rect x="9.3" y="11" width="1.4" height="4" fill="#f0e8e0"/><rect x="7" y="15" width="6" height="1.2" rx=".6" fill="#f0e8e0"/></g>
+<text x="630" y="497" text-anchor="middle" font-size="11" font-weight="600" fill="#f0e8d0">wine</text>
+<circle cx="760" cy="300" r="15" fill="url(#disc-fish)" stroke="#0c1118" stroke-width="1.5"/>
+<circle cx="760" cy="300" r="15" fill="none" stroke="#e8d28e" stroke-width="1" opacity=".7"/>
+<g transform="translate(750,290)"><ellipse cx="9" cy="10" rx="5" ry="2.8" fill="#eaf2f6"/><path d="M14,10 L17,7 V13 Z" fill="#eaf2f6"/><circle cx="6.5" cy="9.4" r=".8" fill="#3a4a55"/></g>
+<text x="760" y="327" text-anchor="middle" font-size="11" font-weight="600" fill="#f0e8d0">fishery</text>
+<circle cx="930" cy="300" r="15" fill="url(#disc-silk)" stroke="#0c1118" stroke-width="1.5"/>
+<circle cx="930" cy="300" r="15" fill="none" stroke="#e8d28e" stroke-width="1" opacity=".7"/>
+<g transform="translate(920,290)"><rect x="8.5" y="5" width="3" height="10" fill="#f4e6ef"/><rect x="6.5" y="5" width="7" height="1.6" rx=".8" fill="#f4e6ef"/><rect x="6.5" y="13.4" width="7" height="1.6" rx=".8" fill="#f4e6ef"/></g>
+<text x="930" y="327" text-anchor="middle" font-size="11" font-weight="600" fill="#f0e8d0">silk</text>
+<circle cx="300" cy="520" r="9" fill="#ffd700" stroke="#1a1206" stroke-width="1.6"/>
+<path d="M300,514 l1.8,3.8 4.2.4 -3.2,2.7 1,4.1 -3.8,-2.3 -3.8,2.3 1,-4.1 -3.2,-2.7 4.2,-.4 z" fill="#1a1206"/>
+<circle cx="660" cy="470" r="6.5" fill="#ff8844" stroke="#1a1206" stroke-width="1.4"/>
+<circle cx="660" cy="470" r="2.4" fill="#1a1206"/>
+<circle cx="560" cy="255" r="6.5" fill="#ff8844" stroke="#1a1206" stroke-width="1.4"/>
+<circle cx="560" cy="255" r="2.4" fill="#1a1206"/>
+<circle cx="470" cy="410" r="5" fill="#e8e8e8" stroke="#1a1206" stroke-width="1.3"/>
+<circle cx="560" cy="560" r="5" fill="#e8e8e8" stroke="#1a1206" stroke-width="1.3"/>
+<rect x="946.6" y="296.6" width="6.8" height="6.8" fill="#c9a96a" stroke="#1a1206" stroke-width="1.1"/>
+<circle cx="360" cy="450" r="3.4" fill="#e6cf9a" stroke="#1a1206" stroke-width="1.1"/>
+<circle cx="720" cy="560" r="6.5" fill="#ff8844" stroke="#1a1206" stroke-width="1.4"/>
+<circle cx="720" cy="560" r="2.4" fill="#1a1206"/>
+<text x="300" y="542" text-anchor="middle" font-size="13" font-weight="700" fill="#f4ecd6" style="paint-order:stroke;stroke:#0a1018;stroke-width:2.4px">Kessa</text>
+<text x="660" y="492" text-anchor="middle" font-size="11.5" font-weight="500" fill="#f4ecd6" style="paint-order:stroke;stroke:#0a1018;stroke-width:2.4px">Voryn</text>
+<text x="560" y="277" text-anchor="middle" font-size="11.5" font-weight="500" fill="#f4ecd6" style="paint-order:stroke;stroke:#0a1018;stroke-width:2.4px">Aldmar</text>
+<text x="470" y="428" text-anchor="middle" font-size="11.5" font-weight="500" fill="#f4ecd6" style="paint-order:stroke;stroke:#0a1018;stroke-width:2.4px">Tessil</text>
+<text x="560" y="578" text-anchor="middle" font-size="11.5" font-weight="500" fill="#f4ecd6" style="paint-order:stroke;stroke:#0a1018;stroke-width:2.4px">Drava</text>
+<text x="950" y="318" text-anchor="middle" font-size="11.5" font-weight="500" fill="#f4ecd6" style="paint-order:stroke;stroke:#0a1018;stroke-width:2.4px">Far Hold</text>
+<text x="360" y="468" text-anchor="middle" font-size="11.5" font-weight="500" fill="#f4ecd6" style="paint-order:stroke;stroke:#0a1018;stroke-width:2.4px">Wend</text>
+<text x="720" y="582" text-anchor="middle" font-size="11.5" font-weight="500" fill="#f4ecd6" style="paint-order:stroke;stroke:#0a1018;stroke-width:2.4px">Halsa</text>
+<g transform="translate(1090,640)" stroke="#cfe2f6" fill="#cfe2f6">
+<circle r="30" fill="none" stroke-width="1"/>
+<path d="M0,-30 L5,-6 L-5,-6 Z" fill="#ff8844" stroke="none"/><path d="M0,30 L5,6 L-5,6 Z" fill="#cfe2f6" stroke="none"/>
+<path d="M30,0 L6,5 L6,-5 Z" fill="#cfe2f6" stroke="none"/><path d="M-30,0 L-6,5 L-6,-5 Z" fill="#cfe2f6" stroke="none"/>
+<text x="0" y="-36" text-anchor="middle" font-size="11" font-weight="bold" stroke="none">N</text></g>
+<rect x="20" y="20" width="360" height="56" rx="10" fill="#0e1a26" fill-opacity=".85" stroke="#21364a"/>
+<text x="38" y="46" font-size="19" font-weight="800" fill="#cfe2f6">Map redesign — flat overlays</text>
+<text x="38" y="66" font-size="12" fill="#7e97b0">settlements · land &amp; sea trade routes · good medallions</text>
+<line x1="40" y1="680" x2="74" y2="680" stroke="#e0c060" stroke-width="4"/>
+<text x="82" y="684" font-size="12" fill="#cfe2f6">Trunk (bundled trade)</text>
+<line x1="255" y1="680" x2="289" y2="680" stroke="#caa15a" stroke-width="3" stroke-dasharray="2 5"/>
+<text x="297" y="684" font-size="12" fill="#cfe2f6">Caravan route (land)</text>
+<line x1="463" y1="680" x2="497" y2="680" stroke="#7fd0d8" stroke-width="3" stroke-dasharray="7 5"/>
+<text x="505" y="684" font-size="12" fill="#cfe2f6">Sea lane (maritime)</text>
+<line x1="664" y1="680" x2="698" y2="680" stroke="#9fe07a" stroke-width="4"/>
+<text x="706" y="684" font-size="12" fill="#cfe2f6">River route</text>
+<circle cx="40" cy="704" r="6" fill="#ffd700" stroke="#0a1018"/>
+<text x="52" y="708" font-size="12" fill="#cfe2f6">Capital</text>
+<circle cx="127" cy="704" r="5" fill="#ff8844" stroke="#0a1018"/><circle cx="127" cy="704" r="1.8" fill="#0a1018"/>
+<text x="139" y="708" font-size="12" fill="#cfe2f6">City</text>
+<circle cx="193" cy="704" r="4.4" fill="#e8e8e8" stroke="#0a1018"/>
+<text x="205" y="708" font-size="12" fill="#cfe2f6">Town</text>
+<rect x="255.6" y="700.6" width="6.8" height="6.8" fill="#c9a96a" stroke="#0a1018"/>
+<text x="271" y="708" font-size="12" fill="#cfe2f6">Outpost</text>
+<rect x="6" y="6" width="1168" height="708" rx="12" fill="none" stroke="#21364a" stroke-width="2"/>
+</svg>
