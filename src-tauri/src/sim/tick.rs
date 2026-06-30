@@ -4214,6 +4214,29 @@ impl CampaignSim {
             }
             let spot = self.live_price(self.hub_stock(buyer, g), needs[buyer][g], self.goods[g].base_value);
             let wi = whidx.get(&(seller as i32, src as u32)).copied();
+            // On-demand restock: if the source depot is short for this delivery, the
+            // house BUYS the shortfall from the source city's spare stock at the local
+            // spot price. `form_contracts` may source from any network node that
+            // PRODUCES the good, but a depot only refills monthly — without this a
+            // contract whose depot hasn't refilled yet defaults every cycle and voids
+            // (the "futures contracts always fail" bug). Only the city's surplus above
+            // its own reserve is for sale, so a source that genuinely can't supply still
+            // defaults.
+            if let Some(i) = wi {
+                let have0 = self.warehouses[i].stock.get(g).copied().unwrap_or(0.0);
+                if have0 < c.monthly_qty {
+                    let reserve = needs[src][g] * TRADE_RESERVE_MULT;
+                    let avail = (self.hubs[src].stock[g] - reserve).max(0.0);
+                    let want = (c.monthly_qty - have0).min(avail);
+                    if want > EPS {
+                        let src_price = self.live_price(self.hub_stock(src, g), needs[src][g], self.goods[g].base_value);
+                        self.hubs[src].stock[g] -= want;
+                        self.warehouses[i].stock[g] += want;
+                        self.houses[seller].wealth -= want * src_price;
+                        self.hubs[src].civic_pool += want * src_price;
+                    }
+                }
+            }
             let have = wi.map(|i| self.warehouses[i].stock.get(g).copied().unwrap_or(0.0)).unwrap_or(0.0);
             if wi.is_none() || have < c.monthly_qty {
                 // SELLER DEFAULT — can't deliver. Compensate the buyer above its spot
@@ -6733,15 +6756,22 @@ impl CampaignSim {
             if self.houses[hi].defunct { self.houses[hi].influence.clear(); continue; }
             let mut infl: std::collections::HashMap<u32, f32> =
                 self.houses[hi].influence.iter().copied().collect();
-            for v in infl.values_mut() { *v = (*v - INFLUENCE_DECAY).max(0.0); }
+            // Standing RELAXES toward the house's current market share in each city (an
+            // EMA), so influence reflects real share instead of ratcheting to 1.0. The
+            // old additive-gain/flat-decay scheme had no interior fixed point: any
+            // positive share (gain > decay) climbed to the clamp, so every active city
+            // pinned at 1.00. Untraded cities decay multiplicatively toward 0; city
+            // RESISTANCE (pop + a resident guild) only slows how fast a house climbs —
+            // share, not elapsed time, sets the ceiling, so dominance stays reachable.
+            for v in infl.values_mut() { *v *= 1.0 - INFLUENCE_DECAY; }
             let trade_at = self.houses[hi].trade_at.clone();
             for &(hb, v) in &trade_at {
                 let c = hb as usize; if c >= n { continue; }
-                let share = if city_total[c] > 1e-6 { v.max(0.0) / city_total[c] } else { 0.0 };
+                let share = if city_total[c] > 1e-6 { (v.max(0.0) / city_total[c]).clamp(0.0, 1.0) } else { 0.0 };
                 let resist = 1.0 + self.hubs[c].population.max(0.0) / INFLUENCE_POP_REF
                     + if has_guild[c] { INFLUENCE_GUILD_RESIST } else { 0.0 };
                 let e = infl.entry(hb).or_insert(0.0);
-                *e = (*e + INFLUENCE_GAIN * share / resist).clamp(0.0, 1.0);
+                *e = (*e + (INFLUENCE_GAIN / resist) * (share - *e)).clamp(0.0, 1.0);
             }
             // Seat + offices guarantee a standing foothold of influence.
             let home = self.houses[hi].hub;
@@ -7876,6 +7906,91 @@ mod tests {
         };
         s.rebuild_routes();
         s
+    }
+
+    /// Reproduction for the "campaign restarts near year 30" crash: outposts only
+    /// start founding at OUTPOST_START_TICK (= year 30), and founding APPENDS a hub
+    /// mid-tick. With colonization sites seeded and houses rich enough to clear the
+    /// outpost wealth bar, the world grows past year 30 — exercising every per-hub
+    /// loop against a freshly-appended hub. Must not panic (index/overflow) for 50y.
+    #[test]
+    fn outposts_and_colonies_past_year_30_dont_crash() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("fish", 0, 0, 1.2, 0.7, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+            good("iron", 2, 1, 5.0, 0.45, false),
+            good("spices", 1, 2, 16.0, 0.4, false),
+        ];
+        let ng = goods.len();
+        let mut hubs = Vec::new();
+        for i in 0..24u32 {
+            let x = (i % 6) as f32 * 9.0;
+            let y = (i / 6) as f32 * 9.0;
+            let pop = 9000.0 + (i as f32 * 911.0) % 24000.0;
+            let prod: Vec<f32> = (0..ng)
+                .map(|g| if (g + i as usize) % 3 == 0 { pop * 0.013 } else { pop * 0.0015 })
+                .collect();
+            hubs.push(hub(i, x, y, pop, prod, 0)); // one component → a connected market
+        }
+        let mut s = sim(hubs, goods);
+        // A handful of houses, two of them seeded already wealthy so they clear the
+        // heavy OUTPOST_FOUND_WEALTH (100k) bar by year 30 and actually plant outposts.
+        for i in 0..6u32 {
+            let seat = (i * 3) % 24;
+            let mut h = house_at(seat, vec![2 + (i as usize % 3)], 3);
+            h.archetype = (i % 4) as u8;
+            // Seed several houses already very rich so they clear the heavy
+            // OUTPOST_FOUND_WEALTH (100k) bar repeatedly and actually plant outposts.
+            h.wealth = if i < 4 { 400_000.0 } else { 60.0 + i as f32 * 10.0 };
+            h.prestige = 0.6;
+            h.dominant_seat = i % 2 == 0;
+            s.houses.push(h);
+        }
+        s.seed_house_count = s.houses.len() as u32;
+        // Seed colonization sites on the frontier so outposts AND settlement colonies
+        // can be founded (a bank is needed for a settlement colony; outposts only need
+        // a rich house). Spread them across the map, trade-rich + coastal.
+        for k in 0..12u32 {
+            s.colonizable.push(ColonizeSite {
+                x: (k % 4) as f32 * 12.0 + 4.0,
+                y: (k / 4) as f32 * 12.0 + 4.0,
+                koppen: 11, elevation: 0.2, fertility: 0.5, coastal: k % 2 == 0,
+                kind_hint: ((k % 5) + 1) as u8, trade_value: 0.4 + (k as f32 % 3.0) * 0.2,
+            });
+        }
+        // A bank so settlement colonies (which need a same-continent bank) can form too.
+        s.banks.push(Bank {
+            name: "Banco".into(), house: 0, seat: 0, founded_tick: 0, defunct: false,
+            reserves: 80.0, loans: vec![], real_estate: 1.0, deposits: 0.0, notes_issued: 0.0,
+            branches: vec![0], prestige: 0.6, interest_earned: 0.0, losses: 0.0, stakes: vec![],
+            dividends_earned: 0.0, history: vec![], events: vec![],
+        });
+        s.rebuild_routes();
+        let hubs0 = s.hubs.len();
+        // Run through and well past year 30 — the outpost/colony founding window.
+        for yr in 1..=50u32 {
+            // Keep two houses permanently above the heavy outpost wealth bar so the
+            // outpost-founding path is GUARANTEED to fire every year from year 30 on
+            // (the real campaign has dynasties this rich; left alone the wealth tax
+            // bends them under the bar before year 30 and the path never runs).
+            for hi in 0..2usize.min(s.houses.len()) {
+                if !s.houses[hi].defunct { s.houses[hi].wealth = s.houses[hi].wealth.max(400_000.0); }
+            }
+            s.advance(365);
+            // Per-hub persistent arrays must never lag the hub list (the crash class).
+            assert!(s.hub_patron.len() <= s.hubs.len(), "hub_patron never exceeds hubs");
+            for h in &s.hubs { assert_eq!(h.stock.len(), ng, "every hub keeps ng columns"); }
+            if yr % 5 == 0 {
+                let outposts = s.hubs.iter().filter(|h| h.colony_kind == 2).count();
+                eprintln!("yr {yr:2}: hubs {} (+{} since start) · outposts {outposts}",
+                    s.hubs.len(), s.hubs.len() - hubs0);
+            }
+        }
+        // The point of the test is the founding path: confirm the world actually GREW
+        // past year 30 (outposts/estates/colonies appended) without crashing.
+        assert!(s.hubs.len() > hubs0,
+            "world must grow past year 30 (founding exercised): {} → {}", hubs0, s.hubs.len());
     }
 
     /// A wealthy house develops an EXISTING under-traded small city into a TRADE BASE:

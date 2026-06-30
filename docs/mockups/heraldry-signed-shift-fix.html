@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Heraldry fix — coats of arms that never appeared</title>
+<style>
+  :root { --bg:#0b1420; --panel:#13202e; --text:#cfe2f6; --accent:#3a80c0; --muted:#7c97b3; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif; padding:24px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  h2 { font-size:15px; color:var(--accent); margin:26px 0 10px; border-bottom:1px solid #21384e; padding-bottom:6px; }
+  p { color:var(--muted); max-width:880px; }
+  code { background:#0c1a28; padding:1px 5px; border-radius:4px; color:#9fd0ff; }
+  .legend { display:flex; gap:18px; margin:10px 0 4px; flex-wrap:wrap; }
+  .legend span { color:var(--muted); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(168px,1fr)); gap:12px; margin-top:12px; }
+  .cell { background:var(--panel); border:1px solid #21384e; border-radius:8px; padding:10px; }
+  .cell .name { font-size:12px; margin-bottom:6px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pair { display:flex; gap:10px; align-items:flex-start; }
+  .arm { text-align:center; flex:1; }
+  .arm .lab { font-size:10px; color:var(--muted); margin-top:3px; }
+  .blank-note { color:#e06b6b; font-weight:600; }
+  .ok-note { color:#6bd089; }
+  .summary { background:var(--panel); border:1px solid #21384e; border-radius:8px; padding:12px 16px; margin-top:12px; max-width:880px; }
+  .swatch-row { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+</style>
+</head>
+<body>
+  <h1>Coats of arms that never appeared — root cause &amp; fix</h1>
+  <p>
+    <code>CoatOfArms.tsx</code> derives every house's shield from <code>hash(name)</code>, an
+    <b>unsigned</b> 32-bit value (<code>h&nbsp;&gt;&gt;&gt;&nbsp;0</code>). But feature selection used the
+    <b>signed</b> shift <code>h&nbsp;&gt;&gt;&nbsp;k</code>. When a name's hash has the top bit set
+    (~half of all names), JavaScript coerces <code>h</code> to a negative <code>Int32</code> before shifting,
+    so e.g. <code>(h&nbsp;&gt;&gt;&nbsp;3)&nbsp;%&nbsp;5</code> is <b>negative</b> →
+    <code>SHIELD_SHAPES[-2]</code> is <code>undefined</code> → the clip path's <code>d</code> is
+    <code>undefined</code> → the whole shield is clipped away → <b>blank arms</b>.
+    The fix: use the unsigned shift <code>h&nbsp;&gt;&gt;&gt;&nbsp;k</code> everywhere.
+  </p>
+  <div class="legend">
+    <span><b style="color:var(--text)">Left</b> = before (signed <code>&gt;&gt;</code>)</span>
+    <span><b style="color:var(--text)">Right</b> = after (unsigned <code>&gt;&gt;&gt;</code>)</span>
+    <span class="blank-note">red = rendered blank</span>
+  </div>
+  <div class="summary" id="summary"></div>
+  <div class="grid" id="grid"></div>
+
+<script>
+// ── ported verbatim from src/ui/CoatOfArms.tsx ───────────────────────────────
+const TINCTURES = ["#b32d2d","#2a5fa0","#2f7d44","#6a3d9a","#1d2733","#c9a227","#c8ced6","#b5651d"];
+const METALS = ["#c9a227","#c8ced6","#e8e2d0"];
+const SHIELD_SHAPES = [
+  "M3 3 H29 V20 Q29 32 16 37 Q3 32 3 20 Z",
+  "M3 3 H29 V22 Q29 35 16 37 Q3 35 3 22 Z",
+  "M4 3 H28 V28 Q28 33 23 35 L16 37 L9 35 Q4 33 4 28 Z",
+  "M5 3 Q3 3 3 6 V21 Q3 32 16 37 Q29 32 29 21 V6 Q29 3 27 3 Z",
+  "M16 2 Q29 2 29 19 Q29 36 16 37 Q3 36 3 19 Q3 2 16 2 Z",
+];
+const HOUSE_CHARGE_NAMES = ["lion","eagle","tower","fleur-de-lis","crown","mullet","sun","crescent","rose","garb","escallop","sword","key","anchor","boar","trefoil"];
+function ordinaryPath(kind, c) {
+  switch (((kind % 10) + 10) % 10) {
+    case 0: return "";
+    case 1: return `<rect x="0" y="15" width="32" height="7" fill="${c}"/>`;
+    case 2: return `<rect x="13" y="0" width="7" height="38" fill="${c}"/>`;
+    case 3: return `<path d="M0 4 L4 0 L32 28 L32 36 Z" fill="${c}"/>`;
+    case 4: return `<path d="M0 38 L16 18 L32 38 L26 38 L16 26 L6 38 Z" fill="${c}"/>`;
+    case 5: return `<g fill="${c}"><rect x="13" y="0" width="6" height="38"/><rect x="0" y="14" width="32" height="6"/></g>`;
+    case 6: return `<g fill="${c}"><path d="M0 2 L3 0 L32 34 L29 37 Z"/><path d="M29 0 L32 2 L3 37 L0 34 Z"/></g>`;
+    case 7: return `<rect x="0" y="0" width="32" height="9" fill="${c}"/>`;
+    case 8: return `<path d="M0 0 L32 0 L16 29 Z" fill="${c}"/>`;
+    default: return `<path d="M3 3 H29 V20 Q29 32 16 37 Q3 32 3 20 Z M6 7 H26 V20 Q26 30 16 34 Q6 30 6 20 Z" fill="${c}" fill-rule="evenodd"/>`;
+  }
+}
+function hash(s){ let h=0x811c9dc5; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,0x01000193);} return h>>>0; }
+
+// Render one shield. `shift` is the operator: "signed" (the bug) or "unsigned" (the fix).
+function shield(name, shift) {
+  const h = hash(name);
+  const sh = (k) => shift === "signed" ? (h >> k) : (h >>> k);
+  const field = TINCTURES[h % TINCTURES.length];
+  let field2 = TINCTURES[(((sh(17)) % TINCTURES.length)+TINCTURES.length)%TINCTURES.length];
+  const metal = METALS[(((sh(5)) % METALS.length)+METALS.length)%METALS.length];
+  const shapePath = SHIELD_SHAPES[(sh(3)) % SHIELD_SHAPES.length];      // <-- may be undefined when signed-negative
+  const division = (sh(11)) % 11;
+  const ord = (sh(14)) % 10;
+  const chargeIdx = (sh(23)) % 16;
+  const chargeName = HOUSE_CHARGE_NAMES[((chargeIdx % 16)+16)%16];
+  const blank = shapePath === undefined;
+  let divEl = "";
+  const d = ((division % 11)+11)%11;
+  if (d===1) divEl=`<rect x="16" y="0" width="16" height="38" fill="${field2}"/>`;
+  else if (d===2) divEl=`<rect x="0" y="19" width="32" height="19" fill="${field2}"/>`;
+  else if (d===3) divEl=`<path d="M0 0 L32 0 L32 38 Z" fill="${field2}"/>`;
+  else if (d===6) divEl=`<rect x="0" y="0" width="32" height="9" fill="${field2}"/>`;
+  else if (d===8) divEl=`<path d="M0 37 L16 20 L32 37 Z" fill="${field2}"/>`;
+  const sid = "c"+shift+h;
+  const svg = `<svg width="58" height="69" viewBox="0 0 32 38">
+    <defs><clipPath id="${sid}"><path d="${shapePath===undefined?'':shapePath}"/></clipPath></defs>
+    <g clip-path="url(#${sid})">
+      <rect x="0" y="0" width="32" height="38" fill="${field}"/>
+      ${divEl}
+      ${ordinaryPath(ord, metal)}
+      <text x="16" y="22" text-anchor="middle" font-size="6" fill="rgba(255,255,255,.85)">${blank?'':chargeName.slice(0,4)}</text>
+    </g>
+    <path d="${shapePath===undefined?'':shapePath}" fill="none" stroke="#0c1118" stroke-width="1.8"/>
+    <path d="${shapePath===undefined?'':shapePath}" fill="none" stroke="#c9a227" stroke-width="0.9" opacity="0.85"/>
+  </svg>`;
+  return { svg, blank, chargeName };
+}
+
+// Sample house names drawn from the expanded family lists (multiple cultures).
+const NAMES = [
+  "Cassii","Valerii","Aurelii","Antonii","Calpurnii","Octavii","Petronii","Lutatii",
+  "Alkmaionidai","Philaidai","Kodridai","Aigeidai","Phytalidai",
+  "Barcids","Magonids","Hamilcarids","Abibaalids","Iomilkids",
+  "Karen","Suren","Bawandids","Shahrbaraz","Rashnu",
+  "Bjornsson","Ragnarsson","Olafsson","Gormsson","Floksson",
+  "Brigantes","Arverni","Helvetii","Treveri","Namnetes",
+  "al-Kindi","al-Razi","al-Baghdadi","al-Halabi",
+  "Maurya","Chola","Kakatiya","Sisodia","Chera",
+  "Wang","Zhang","Zhao","Cao","Fan",
+  "Rurikids","Monomakhi","Svyatoslavichi","Tverichi",
+  "Mexica","Acolhua","Texcoca","Acolman",
+  "Ashina","Kipchak","Qarakhanid","Chepni",
+];
+
+const grid = document.getElementById("grid");
+let blankBefore = 0, blankAfter = 0;
+for (const n of NAMES) {
+  const before = shield(n, "signed");
+  const after  = shield(n, "unsigned");
+  if (before.blank) blankBefore++;
+  if (after.blank) blankAfter++;
+  const div = document.createElement("div");
+  div.className = "cell";
+  div.innerHTML = `<div class="name" title="${n}">${n}</div>
+    <div class="pair">
+      <div class="arm">${before.svg}<div class="lab ${before.blank?'blank-note':''}">${before.blank?'BLANK':'ok'}</div></div>
+      <div class="arm">${after.svg}<div class="lab ok-note">${after.chargeName}</div></div>
+    </div>`;
+  grid.appendChild(div);
+}
+document.getElementById("summary").innerHTML =
+  `<b>${NAMES.length}</b> sample houses &nbsp;·&nbsp; before fix: <b class="blank-note">${blankBefore} rendered blank</b>
+   &nbsp;·&nbsp; after fix: <b class="ok-note">${blankAfter} blank</b>.
+   <div class="swatch-row">${TINCTURES.map(c=>`<span style="display:inline-block;width:18px;height:18px;border-radius:3px;background:${c};border:1px solid #0008"></span>`).join("")}</div>`;
+</script>
+</body>
+</html>

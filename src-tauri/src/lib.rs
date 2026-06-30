@@ -100,6 +100,7 @@ pub fn run() {
             campaign_commands::campaign_get_colonies,
             campaign_commands::campaign_colony_gates,
             campaign_commands::campaign_get_world_economy,
+            campaign_commands::campaign_city_price_index,
             campaign_commands::campaign_get_houses,
             campaign_commands::campaign_get_inequality,
             campaign_commands::campaign_get_pops,

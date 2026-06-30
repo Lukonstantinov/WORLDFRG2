@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "../state/uiStore";
 import { useWorldStore } from "../state/worldStore";
 import { useGoodsStore } from "../state/goodsStore";
-import type { EconChain } from "../types";
+import { useCampaignStore } from "../state/campaignStore";
+import { campaignGetWorldEconomy } from "../bridge/tauri";
+import type { EconChain, WorldGoodPrice } from "../types";
 import { commodityHistory } from "../commodityHistory";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
@@ -23,8 +25,20 @@ export function GoodsCodexPanel() {
   const economy = useWorldStore((s) => s.economy);
   const specs = useGoodsStore((s) => s.specs);
   const meta = useGoodsStore((s) => s.meta);
+  const snapshot = useCampaignStore((s) => s.snapshot);
+  const active = !!snapshot?.active;
+  const year = snapshot?.clock?.year ?? 0;
 
   const [tab, setTab] = useState<"prov" | "hist" | "scar">("prov");
+  // Live per-good world prices from the running campaign, refreshed once per YEAR so
+  // the Codex reflects the living market, not just the frozen worldgen snapshot.
+  const [liveGoods, setLiveGoods] = useState<WorldGoodPrice[]>([]);
+  useEffect(() => {
+    if (!open || !active) { setLiveGoods([]); return; }
+    let alive = true;
+    campaignGetWorldEconomy().then((we) => { if (alive) setLiveGoods(we.goods); }).catch(() => { if (alive) setLiveGoods([]); });
+    return () => { alive = false; };
+  }, [open, active, year]);
 
   // Goods that actually exist in this world (have specs); fall back to economy.goods.
   const goodIds = useMemo(() => {
@@ -101,6 +115,27 @@ export function GoodsCodexPanel() {
         {/* PROVENANCE */}
         {tab === "prov" && (
           <>
+            {/* Live market (refreshed once per campaign year) for the selected good. */}
+            {(() => {
+              const lg = active ? liveGoods.find((g) => g.name === codexGood) : null;
+              if (!lg) return null;
+              return (
+                <div style={{ marginBottom: 10, padding: "6px 8px", background: "#0d1a14", border: "1px solid #1e3a2a", borderRadius: 6 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                    <span style={{ color: "#7fd0a0", fontWeight: 700, fontSize: 11 }}>Live market</span>
+                    <span style={{ color: "#5a7a66", fontSize: 9 }}>year {year}</span>
+                    <span style={{ flex: 1 }} />
+                    <span style={{ color: lg.world_price >= 1.3 ? "#e08080" : lg.world_price <= 0.77 ? "#7fd0a0" : "#cfe2f6", fontWeight: 700, fontSize: 12 }}>
+                      {lg.world_price.toFixed(2)}×
+                    </span>
+                  </div>
+                  <div style={{ color: "#8aa0b8", fontSize: 9.5, marginTop: 2 }}>
+                    world avg price · {lg.producers} producing {lg.producers === 1 ? "city" : "cities"}
+                    {lg.top_hub ? <> · top: <span style={{ color: "#cfe2f6" }}>{lg.top_hub}</span></> : null}
+                  </div>
+                </div>
+              );
+            })()}
             {spec && spec.distribution === "manufactured" && (spec.inputs?.length ?? 0) > 0 ? (
               <div style={{ marginBottom: 10 }}>
                 <div style={sectionHdr}>Made from</div>

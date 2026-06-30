@@ -730,6 +730,11 @@ export interface WorldGoodPrice {
   producers: number;
   top_hub: string;
 }
+/** #30 · one city's live cost-of-living basket index (campaign_city_price_index). */
+export interface CityPriceIndex {
+  name: string;
+  index: number; // need-weighted mean of price ÷ base_value, ×100 (100 = world standard)
+}
 export interface WorldEconomy {
   goods: WorldGoodPrice[];
   index_series: [number, number][];

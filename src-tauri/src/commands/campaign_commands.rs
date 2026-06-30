@@ -3620,6 +3620,43 @@ pub fn campaign_get_house_history(name: String, db: State<'_, WorldDb>) -> Resul
     }))
 }
 
+/// One city's live cost-of-living basket index (#30 Economy Dashboard · Prices).
+#[derive(serde::Serialize)]
+pub struct CityPriceIndex {
+    pub name: String,
+    /// Need-tier-weighted mean of price ÷ base_value across goods, ×100 (100 = world
+    /// standard). Leans on staples (tier 0) over luxuries (tier 2).
+    pub index: f32,
+}
+
+/// LIVE per-city price baskets from the running campaign (the Economy Dashboard's
+/// Prices tab). Unlike the frozen worldgen `EconomySnapshot`, this reads the sim's
+/// current per-hub prices each call, so the panel updates as the campaign advances.
+#[tauri::command]
+pub fn campaign_city_price_index(db: State<'_, WorldDb>) -> Result<Vec<CityPriceIndex>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? {
+        Some(s) => s,
+        None => return Ok(vec![]),
+    };
+    let ng = sim.goods.len();
+    let mut out: Vec<CityPriceIndex> = sim.hubs.iter().map(|h| {
+        let mut num = 0.0f32;
+        let mut den = 0.0f32;
+        for g in 0..ng {
+            let base = sim.goods[g].base_value;
+            if base <= 0.0 { continue; }
+            // Staples (low need_tier) weigh most, mirroring the frontend basket.
+            let w = (3i32 - sim.goods[g].need_tier as i32).max(1) as f32;
+            num += w * (h.price[g] / base);
+            den += w;
+        }
+        CityPriceIndex { name: h.name.clone(), index: if den > 0.0 { (num / den) * 100.0 } else { 100.0 } }
+    }).collect();
+    out.sort_by(|a, b| a.index.partial_cmp(&b.index).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(out)
+}
+
 /// World-economy panel (M6): per-good world prices + the price-index series.
 #[tauri::command]
 pub fn campaign_get_world_economy(db: State<'_, WorldDb>) -> Result<WorldEconomy, String> {

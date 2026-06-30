@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manufactured-goods overlay removal + Trade-base badge</title>
+<style>
+  :root{
+    --bg:#0b1420; --panel:#13202e; --text:#cfe2f6; --muted:#7f97b0;
+    --accent:#3a80c0; --line:#22344a; --good:#86e0b0; --bad:#f0a594;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.55 system-ui,Segoe UI,Roboto,sans-serif;padding:28px;max-width:1040px}
+  h1{font-size:20px;margin:0 0 4px}
+  h2{font-size:15px;margin:30px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  .sub{color:var(--muted);margin:0 0 8px;max-width:820px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .card h3{font-size:13px;margin:0;padding:10px 13px;border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:8px}
+  .tag{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:20px}
+  .b{background:#43221c;color:var(--bad);border:1px solid #6b3026}
+  .g{background:#163a2a;color:var(--good);border:1px solid #1f5a3f}
+  .body{padding:13px}
+  code{background:#0c1b2a;border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:#bcd6f2}
+  /* toggle list mock */
+  .toggles{display:flex;flex-direction:column;gap:3px}
+  .row{display:flex;align-items:center;gap:8px;padding:4px 7px;border-radius:5px;background:#0e1a27;font-size:12.5px}
+  .row.mfg{outline:1px dashed #6b3026}
+  .sw{width:14px;height:14px;border-radius:3px;border:1px solid #2c4a66}
+  .strike{opacity:.5}
+  /* hub panel header mock */
+  .hub{background:#0d1726;border:1px solid var(--line);border-radius:8px;padding:12px 14px;max-width:360px}
+  .hub .name{font-weight:700;font-size:15px}
+  .hub .meta{color:#8aa0c0;font-size:11px;margin-top:3px}
+  .stars{color:#ffd24a}
+  .badge{color:#7fd0a0;font-size:11px;margin-top:5px}
+  ul{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+  <h1>Two visual changes</h1>
+  <p class="sub">(1) Manufactured goods no longer get a map overlay, and (2) a city a
+  house is developing now shows a trade-base badge.</p>
+
+  <h2>1 · Manufactured goods — no overlay (they're made in cities, not grown)</h2>
+  <p class="sub">Cloth, metalware, refined sugar, citrus liqueur have no natural belt.
+  The backend (<code>compute_good_regions</code>) used to synthesize a misleading
+  "supply-zone" belt from their input goods; it now emits <b>nothing</b> for them, and
+  the Trade-Goods toggle list (<code>Toolbar.tsx</code>) hides their toggles.</p>
+  <div class="grid">
+    <div class="card">
+      <h3>Before <span class="tag b">phantom belt + toggle</span></h3>
+      <div class="body">
+        <div class="toggles">
+          <div class="row"><span class="sw" style="background:#caa45a"></span>🌾 Wheat</div>
+          <div class="row"><span class="sw" style="background:#8a6a3a"></span>🪵 Timber</div>
+          <div class="row mfg"><span class="sw" style="background:#9bb0c4"></span>🧵 Cloth <span style="color:var(--bad);font-size:10px">— belt = input supply zone</span></div>
+          <div class="row mfg"><span class="sw" style="background:#b0b6be"></span>⚙️ Metalware <span style="color:var(--bad);font-size:10px">— belt = input supply zone</span></div>
+        </div>
+        <ul><li>Cloth/Metalware draw a filled region on the map as if they grew there.</li></ul>
+      </div>
+    </div>
+    <div class="card">
+      <h3>After <span class="tag g">hidden, no belt</span></h3>
+      <div class="body">
+        <div class="toggles">
+          <div class="row"><span class="sw" style="background:#caa45a"></span>🌾 Wheat</div>
+          <div class="row"><span class="sw" style="background:#8a6a3a"></span>🪵 Timber</div>
+          <div class="row strike"><span class="sw" style="background:#324154"></span>🧵 Cloth <span style="font-size:10px">(no toggle — made in cities)</span></div>
+          <div class="row strike"><span class="sw" style="background:#324154"></span>⚙️ Metalware <span style="font-size:10px">(no toggle — made in cities)</span></div>
+        </div>
+        <ul><li>Only naturally-occurring raws have overlays; manufactured goods are surfaced through the cities that make them.</li></ul>
+      </div>
+    </div>
+  </div>
+
+  <h2>2 · Trade-base badge in the city inspector</h2>
+  <p class="sub">When a merchant house develops an under-traded small city as a base of
+  operations, the HubPanel header shows it. Driven by the new <code>patron</code> field
+  on <code>HubDetail</code>.</p>
+  <div class="grid">
+    <div class="card">
+      <h3>Before <span class="tag b">no indication</span></h3>
+      <div class="body">
+        <div class="hub">
+          <div class="name">Beyakent</div>
+          <div class="meta"><span class="stars">★★★</span>  ≈0% of Tushpaandana the Great  ·  wealth rank #436/558</div>
+        </div>
+        <ul><li>Nothing tells the player a house has taken an interest in the town.</li></ul>
+      </div>
+    </div>
+    <div class="card">
+      <h3>After <span class="tag g">patron shown</span></h3>
+      <div class="body">
+        <div class="hub">
+          <div class="name">Beyakent</div>
+          <div class="meta"><span class="stars">★★★</span>  ≈0% of Tushpaandana the Great  ·  wealth rank #436/558</div>
+          <div class="badge">⚓ Trade base of House Velthuran</div>
+        </div>
+        <ul>
+          <li>The patron house opened an office, built a Guildhall + Warehouse (in the City tab), and seeded capital.</li>
+          <li>The badge clears once the city matures into a self-standing node.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

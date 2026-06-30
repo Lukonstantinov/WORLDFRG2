@@ -3,8 +3,8 @@ import { useUIStore } from "../state/uiStore";
 import { useWorldStore } from "../state/worldStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
-import { campaignGetInequality } from "../bridge/tauri";
-import type { InequalitySnapshot } from "../types";
+import { campaignGetInequality, campaignCityPriceIndex } from "../bridge/tauri";
+import type { InequalitySnapshot, CityPriceIndex } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 /** #30/#29 · Economy Dashboard.
@@ -19,14 +19,25 @@ export function EconomyDashboardPanel() {
   const snapshot = useCampaignStore((s) => s.snapshot);
   const active = !!snapshot?.active;
   const tick = snapshot?.clock?.tick ?? 0;
+  const year = snapshot?.clock?.year ?? 0;
 
   const [tab, setTab] = useState<"prices" | "ineq">("prices");
   const [ineq, setIneq] = useState<InequalitySnapshot | null>(null);
+  // Live per-city basket from the running sim, refreshed once per campaign YEAR so
+  // the Prices tab tracks the living economy instead of the frozen worldgen snapshot.
+  const [liveCities, setLiveCities] = useState<CityPriceIndex[]>([]);
 
   useEffect(() => {
     if (!open || tab !== "ineq" || !active) return;
     campaignGetInequality().then(setIneq).catch(() => setIneq(null));
   }, [open, tab, active, tick]);
+
+  useEffect(() => {
+    if (!open || tab !== "prices" || !active) { setLiveCities([]); return; }
+    let alive = true;
+    campaignCityPriceIndex().then((c) => { if (alive) setLiveCities(c); }).catch(() => { if (alive) setLiveCities([]); });
+    return () => { alive = false; };
+  }, [open, tab, active, year]);
 
   // Need-tier weights so the basket leans on staples (0 basic) over luxuries (2).
   const weightOf = useMemo(() => {
@@ -38,8 +49,8 @@ export function EconomyDashboardPanel() {
     };
   }, [specs]);
 
-  // Per-city basket index: weighted mean of price/base_value (1.0 = world standard).
-  const cities = useMemo(() => {
+  // Per-city basket index from the STATIC worldgen snapshot (pre-campaign fallback).
+  const staticCities = useMemo(() => {
     if (!economy) return [];
     const out: { name: string; index: number }[] = [];
     for (const h of economy.hubs) {
@@ -55,6 +66,12 @@ export function EconomyDashboardPanel() {
     }
     return out.sort((a, b) => a.index - b.index);
   }, [economy, weightOf]);
+
+  // Live campaign baskets (refreshed yearly) take precedence; fall back to the static
+  // worldgen snapshot before/without a campaign.
+  const cities = active && liveCities.length > 0
+    ? [...liveCities].sort((a, b) => a.index - b.index)
+    : staticCities;
 
   const idxLo = cities.length ? cities[0].index : 0;
   const idxHi = cities.length ? cities[cities.length - 1].index : 100;
@@ -85,12 +102,15 @@ export function EconomyDashboardPanel() {
         {/* PRICE INDEX */}
         {tab === "prices" && (
           <>
-            {!economy && <div style={empty}>Run the Economy step (10) to compute market prices.</div>}
-            {economy && cities.length === 0 && <div style={empty}>No market price data yet.</div>}
+            {!economy && !active && <div style={empty}>Run the Economy step (10) to compute market prices.</div>}
+            {(economy || active) && cities.length === 0 && <div style={empty}>No market price data yet.</div>}
             {cities.length > 0 && (
               <>
                 <div style={{ color: "#8aa0b8", fontSize: 10, marginBottom: 6 }}>
                   Basket cost of living — 100 = the world-standard price. Cheapest cities first.
+                  {active && liveCities.length > 0
+                    ? <span style={{ color: "#7fd0a0" }}> · live (year {year})</span>
+                    : <span style={{ color: "#7a8aa0" }}> · worldgen snapshot</span>}
                 </div>
                 {cities.map((c) => {
                   const pct = ((c.index - idxLo) / span) * 100;

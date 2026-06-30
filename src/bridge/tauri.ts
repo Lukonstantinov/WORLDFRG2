@@ -622,6 +622,11 @@ export async function campaignGetWorldEconomy(): Promise<WorldEconomy> {
   return invoke("campaign_get_world_economy");
 }
 
+/** #30 · live per-city cost-of-living basket index from the running campaign. */
+export async function campaignCityPriceIndex(): Promise<import("../types").CityPriceIndex[]> {
+  return invoke("campaign_city_price_index");
+}
+
 /** All merchant families (active first, richest first). */
 export async function campaignGetHouses(): Promise<HouseBrief[]> {
   return invoke("campaign_get_houses");

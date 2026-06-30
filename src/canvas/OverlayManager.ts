@@ -1587,10 +1587,13 @@ export class OverlayManager {
       || ((!focus.city || r.a_name === focus.city || r.b_name === focus.city)
         && (!focus.holder || r.holder === focus.holder)
         && (!focus.good || r.good === focus.good));
-    // Stroke a lane as its ROUTED polyline (roads/sea) when present, else a straight
-    // a→b line. Breaks the path at the cylindrical X seam.
-    const strokeLane = (r: FuturesLane) => {
-      const pts = r.path && r.path.length >= 2 ? r.path : [r.a, r.b];
+    // Stroke a lane as its ROUTED polyline (roads/sea), breaking at the cylindrical X
+    // seam. A lane with no snapped corridor path is SKIPPED (returns false) rather than
+    // bridged with a straight diagonal slash across the terrain — matching the merchant
+    // layer, so futures never "connect cities directly" off the road network.
+    const strokeLane = (r: FuturesLane): boolean => {
+      const pts = r.path;
+      if (!pts || pts.length < 2) return false;
       let started = false;
       for (let i = 0; i < pts.length; i++) {
         if (i > 0 && this.worldW > 0 && Math.abs(pts[i][0] - pts[i - 1][0]) > this.worldW / 2) started = false; // seam
@@ -1598,12 +1601,13 @@ export class OverlayManager {
         else ctx.lineTo(pts[i][0] + 0.5, pts[i][1] + 0.5);
       }
       ctx.stroke();
+      return true;
     };
     for (const r of this.futuresLanes) {
       const ax = r.a[0] + 0.5, ay = r.a[1] + 0.5, bx = r.b[0] + 0.5, by = r.b[1] + 0.5;
-      // Only skip a straight (unrouted) lane that spans the seam; a routed path
-      // handles its own seam breaks in strokeLane.
-      if (!(r.path && r.path.length >= 2) && this.worldW > 0 && Math.abs(ax - bx) > this.worldW / 2) continue;
+      // No snapped corridor path → skip the lane entirely (no straight diagonal slash,
+      // and no orphan source/buyer markers or arrowhead either).
+      if (!(r.path && r.path.length >= 2)) continue;
       const isSel = sel != null && sel.a_name === r.a_name && sel.b_name === r.b_name
         && sel.holder === r.holder && sel.good === r.good;
       // A single selection isolates ONE road; otherwise a focus filter (city /

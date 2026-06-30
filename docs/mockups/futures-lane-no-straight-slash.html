@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Futures lanes — no straight city-to-city slash (before / after)</title>
+<style>
+  :root { --bg:#0b1420; --panel:#13202e; --text:#cfe2f6; --accent:#3a80c0; --muted:#7a90a8; }
+  body { background:var(--bg); color:var(--text); font:13px/1.5 system-ui, sans-serif; margin:0; padding:24px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  p.sub { color:var(--muted); margin:0 0 20px; }
+  .row { display:flex; gap:20px; flex-wrap:wrap; }
+  .card { background:var(--panel); border:1px solid #1e2e42; border-radius:8px; padding:12px 14px; flex:1; min-width:340px; }
+  .card h2 { font-size:13px; margin:0 0 8px; letter-spacing:.4px; text-transform:uppercase; }
+  .bad { color:#e6303a; } .good { color:#7fd0a0; }
+  svg { background:#0e1a26; border-radius:6px; display:block; }
+  .legend { color:var(--muted); font-size:11px; margin-top:8px; }
+  .legend b { color:var(--text); }
+  code { background:#0a131d; padding:1px 5px; border-radius:4px; color:#e0c060; }
+</style>
+</head>
+<body>
+  <h1>Futures overlay — corridor-only lanes</h1>
+  <p class="sub">Issue: futures contract lanes sometimes drew a straight diagonal <b>directly between two cities</b>, ignoring the road/sea network. Colours below are the real <code>termColor()</code> gold gradient from <code>OverlayManager.renderFutures</code>; the coastline + road network are schematic.</p>
+
+  <div class="row">
+    <!-- BEFORE -->
+    <div class="card">
+      <h2 class="bad">Before — straight slash fallback</h2>
+      <svg width="340" height="240" viewBox="0 0 340 240">
+        <!-- land mass -->
+        <path d="M20,150 Q60,90 130,95 Q210,100 250,60 Q300,40 320,90 L320,220 L20,220 Z" fill="#16241b" stroke="#26402c" stroke-width="1"/>
+        <!-- a mountain band the road must skirt -->
+        <path d="M150,110 l18,-34 l16,34 l16,-26 l18,26 Z" fill="#3a3326" stroke="#5a4a30" stroke-width="1"/>
+        <!-- existing road network (tan) -->
+        <polyline points="55,165 110,150 145,140 150,120 195,118 235,95" fill="none" stroke="#caa15a" stroke-width="2" stroke-dasharray="4 3" opacity="0.85"/>
+        <!-- the BAD straight futures lane cutting across mountains/sea -->
+        <line x1="55" y1="165" x2="235" y2="95" stroke="#ffcf3f" stroke-width="2.4" stroke-dasharray="5 5"/>
+        <polygon points="235,95 226,92 229,101" fill="#ffcf3f"/>
+        <rect x="51" y="161" width="8" height="8" fill="#d8a85a"/>
+        <circle cx="235" cy="95" r="4.5" fill="none" stroke="#d8a85a" stroke-width="1.5"/>
+        <!-- city dots -->
+        <circle cx="55" cy="165" r="3" fill="#cfe2f6"/><circle cx="235" cy="95" r="3" fill="#cfe2f6"/>
+      </svg>
+      <div class="legend"><b style="color:#ffcf3f">━ ━</b> futures lane jumps the chord, crossing the mountain band and a bay it could never traverse. The road network (<b style="color:#caa15a">tan</b>) is ignored.</div>
+    </div>
+
+    <!-- AFTER -->
+    <div class="card">
+      <h2 class="good">After — corridor only (or skipped)</h2>
+      <svg width="340" height="240" viewBox="0 0 340 240">
+        <path d="M20,150 Q60,90 130,95 Q210,100 250,60 Q300,40 320,90 L320,220 L20,220 Z" fill="#16241b" stroke="#26402c" stroke-width="1"/>
+        <path d="M150,110 l18,-34 l16,34 l16,-26 l18,26 Z" fill="#3a3326" stroke="#5a4a30" stroke-width="1"/>
+        <polyline points="55,165 110,150 145,140 150,120 195,118 235,95" fill="none" stroke="#caa15a" stroke-width="2" stroke-dasharray="4 3" opacity="0.5"/>
+        <!-- futures lane SNAPPED onto the road polyline -->
+        <polyline points="55,165 110,150 145,140 150,120 195,118 235,95" fill="none" stroke="#ffcf3f" stroke-width="2.4" stroke-dasharray="5 5"/>
+        <polygon points="235,95 226,93 228,102" fill="#ffcf3f"/>
+        <rect x="51" y="161" width="8" height="8" fill="#d8a85a"/>
+        <circle cx="235" cy="95" r="4.5" fill="none" stroke="#d8a85a" stroke-width="1.5"/>
+        <circle cx="55" cy="165" r="3" fill="#cfe2f6"/><circle cx="235" cy="95" r="3" fill="#cfe2f6"/>
+      </svg>
+      <div class="legend">The lane now follows the snapped <b>corridor</b> (roads/sea-lanes, via <code>routeAlongTradeRoutes</code>). If no path can be snapped, the lane is <b>skipped</b> entirely — no slash, no orphan square/ring markers — matching the merchant-route layer.</div>
+    </div>
+  </div>
+
+  <p class="sub" style="margin-top:20px">Code: <code>renderFutures</code>'s <code>strokeLane</code> no longer falls back to <code>[r.a, r.b]</code>; it returns <code>false</code> for a path-less lane, and the draw loop now <code>continue</code>s on <code>!(r.path &amp;&amp; r.path.length &gt;= 2)</code> before drawing any markers. The trade-route graph must be loaded for lanes to snap; if the Trade Routes layer data isn't present, lanes are hidden rather than drawn straight.</p>
+</body>
+</html>

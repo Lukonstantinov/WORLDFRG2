@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Merchant Routes — straight-line fix</title>
+<style>
+  :root{
+    --bg:#0b1420; --panel:#13202e; --text:#cfe2f6;
+    --muted:#7f97b0; --accent:#3a80c0; --line:#22344a;
+    --sea:#16384a; --sea2:#1c4860; --land:#1d3a30; --land2:#27513f;
+    --route:#7da9d6; --merchant:#e0563c; --merchant2:#e0563c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif;padding:28px}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--muted);margin:0 0 22px;max-width:760px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:980px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    overflow:hidden}
+  .card h2{font-size:14px;margin:0;padding:11px 14px;border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:8px}
+  .tag{font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px}
+  .bad{background:#43221c;color:#f0a594;border:1px solid #6b3026}
+  .good{background:#163a2a;color:#86e0b0;border:1px solid #1f5a3f}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin:14px 0 26px;
+    color:var(--muted);font-size:12.5px;max-width:980px}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  .sw{width:26px;height:0;border-top-width:3px;border-top-style:solid;display:inline-block}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+  .note{max-width:980px;margin:22px 0 0;color:var(--muted);font-size:12.5px}
+  code{background:#0c1b2a;border:1px solid var(--line);border-radius:4px;padding:1px 5px;
+    color:#bcd6f2}
+  svg{display:block;width:100%;height:auto;background:
+    linear-gradient(160deg,var(--sea) 0%,var(--sea2) 45%,#13303f 100%)}
+</style>
+</head>
+<body>
+  <h1>Merchant Routes — corridor snapping (straight-line slash fix)</h1>
+  <p class="sub">The <b>Merchant Routes</b> overlay was the only line layer that drew a
+  raw <code>a→b</code> straight line, ignoring terrain — exactly the red diagonal
+  slashes reported. Every other line layer (flow highlight, house web, futures) snaps
+  to the existing trade-route corridors via <code>routeAlongTradeRoutes</code> and
+  <b>skips</b> when no corridor exists. This change brings merchant routes in line:
+  cached <code>path</code> per route, stroked along roads/sea-lanes, no slash.</p>
+
+  <div class="legend">
+    <span><i class="sw" style="border-color:#27513f"></i>land</span>
+    <span><i class="sw" style="border-color:#1c4860"></i>sea</span>
+    <span><i class="sw" style="border-color:#7da9d6;border-top-style:solid"></i>trade-route corridor (roads/sea-lanes)</span>
+    <span><i class="sw" style="border-color:#e0563c;border-top-style:dashed"></i>merchant route (colour = owning house)</span>
+    <span><i class="dot" style="background:#0a0f16;border:2px solid #cfe2f6"></i>founder city</span>
+    <span><i class="dot" style="background:#e08a3c"></i>partner city</span>
+  </div>
+
+  <div class="grid">
+    <!-- ───────────── BEFORE ───────────── -->
+    <div class="card">
+      <h2>Before <span class="tag bad">straight slash</span></h2>
+      <svg viewBox="0 0 460 300" role="img" aria-label="Before: straight merchant lines">
+        <!-- coastline / landmass -->
+        <path d="M0,300 L0,150 C70,120 110,150 150,120 C200,82 240,120 300,96
+                 C350,76 400,110 460,92 L460,300 Z" fill="#22513c" opacity="0.92"/>
+        <path d="M150,300 L150,200 C190,185 210,210 255,196 C300,182 330,210 360,200
+                 L360,300 Z" fill="#1f4636" opacity="0.7"/>
+        <!-- trade-route corridors (ghosted, ignored by the old renderer) -->
+        <g stroke="#7da9d6" stroke-width="2" fill="none" opacity="0.30">
+          <path d="M70,205 C120,170 150,150 200,150 C250,150 280,135 330,120"/>
+          <path d="M200,150 C210,185 235,205 275,210"/>
+          <path d="M200,150 C250,150 300,150 350,168"/>
+          <path d="M70,205 C90,235 120,250 160,250"/>
+        </g>
+        <!-- STRAIGHT merchant lines (the bug) -->
+        <g stroke="#e0563c" stroke-width="2.4" stroke-dasharray="6 5" fill="none">
+          <line x1="70" y1="205" x2="330" y2="120"/>
+          <line x1="70" y1="205" x2="275" y2="210"/>
+          <line x1="70" y1="205" x2="350" y2="168"/>
+          <line x1="70" y1="205" x2="160" y2="250"/>
+        </g>
+        <!-- nodes -->
+        <circle cx="70" cy="205" r="6" fill="#0a0f16" stroke="#cfe2f6" stroke-width="2"/>
+        <circle cx="330" cy="120" r="4.5" fill="#e08a3c"/>
+        <circle cx="275" cy="210" r="4.5" fill="#e08a3c"/>
+        <circle cx="350" cy="168" r="4.5" fill="#e08a3c"/>
+        <circle cx="160" cy="250" r="4.5" fill="#e08a3c"/>
+      </svg>
+    </div>
+
+    <!-- ───────────── AFTER ───────────── -->
+    <div class="card">
+      <h2>After <span class="tag good">follows corridors</span></h2>
+      <svg viewBox="0 0 460 300" role="img" aria-label="After: routed merchant lines">
+        <path d="M0,300 L0,150 C70,120 110,150 150,120 C200,82 240,120 300,96
+                 C350,76 400,110 460,92 L460,300 Z" fill="#22513c" opacity="0.92"/>
+        <path d="M150,300 L150,200 C190,185 210,210 255,196 C300,182 330,210 360,200
+                 L360,300 Z" fill="#1f4636" opacity="0.7"/>
+        <!-- trade-route corridors (the network the routes now ride) -->
+        <g stroke="#7da9d6" stroke-width="2" fill="none" opacity="0.45">
+          <path d="M70,205 C120,170 150,150 200,150 C250,150 280,135 330,120"/>
+          <path d="M200,150 C210,185 235,205 275,210"/>
+          <path d="M200,150 C250,150 300,150 350,168"/>
+          <path d="M70,205 C90,235 120,250 160,250"/>
+        </g>
+        <!-- merchant routes snapped onto the corridors -->
+        <g stroke="#e0563c" stroke-width="2.4" stroke-dasharray="6 5" fill="none"
+           stroke-linecap="round" stroke-linejoin="round">
+          <path d="M70,205 C120,170 150,150 200,150 C250,150 280,135 330,120"/>
+          <path d="M70,205 C120,170 150,150 200,150 C210,185 235,205 275,210"/>
+          <path d="M70,205 C120,170 150,150 200,150 C250,150 300,150 350,168"/>
+          <path d="M70,205 C90,235 120,250 160,250"/>
+        </g>
+        <circle cx="70" cy="205" r="6" fill="#0a0f16" stroke="#cfe2f6" stroke-width="2"/>
+        <circle cx="330" cy="120" r="4.5" fill="#e08a3c"/>
+        <circle cx="275" cy="210" r="4.5" fill="#e08a3c"/>
+        <circle cx="350" cy="168" r="4.5" fill="#e08a3c"/>
+        <circle cx="160" cy="250" r="4.5" fill="#e08a3c"/>
+      </svg>
+    </div>
+  </div>
+
+  <p class="note">
+  <b>Implementation.</b> <code>OverlayManager.renderMerchantRoutes</code> now strokes
+  each route's cached <code>path</code> (built by <code>routeMerchantRoutes()</code>,
+  which mirrors <code>routeFuturesLanes()</code> and re-runs only when the route set or
+  the road network changes — never per frame). A route with no corridor path is
+  <b>skipped</b>, never bridged with a straight line. Volume→width, the per-house
+  colour, the land-leg dash and the cylindrical wrap-seam break are all preserved.
+  If you still see a straight line on the <i>futures</i> layer it is the documented
+  fallback in <code>strokeLane</code> when no corridor is found — say the word and I'll
+  make that skip too.
+  </p>
+</body>
+</html>
