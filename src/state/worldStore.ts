@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { WorldMeta, RiverData, LakeData, Settlement, EconomySnapshot } from "../types";
+import type { WorldMeta, RiverData, LakeData, Settlement, EconomySnapshot, Toponym } from "../types";
 
 /** Live latitude framing, kept SEPARATE from `meta` on purpose. Dragging the
  *  Latitude Frame sliders mutates only this slice so the lat-line overlay tracks
@@ -27,6 +27,8 @@ interface WorldStore {
   settlementsBaseline: Settlement[];
   /** Persisted economy snapshot (Phase 2): hubs, chains, chokepoints. */
   economy: EconomySnapshot | null;
+  /** #26 · named geographic features (rivers/mountains/lakes/regions). */
+  toponyms: Toponym[];
   setMeta: (meta: WorldMeta) => void;
   /** Update only the live latitude framing while dragging the sliders. Does NOT
    *  touch `meta`, so heavy meta-keyed effects stay quiet during the drag. */
@@ -37,6 +39,7 @@ interface WorldStore {
   /** Apply trade-developed populations without disturbing the baseline. */
   setSettlementsDeveloped: (settlements: Settlement[]) => void;
   setEconomy: (economy: EconomySnapshot | null) => void;
+  setToponyms: (toponyms: Toponym[]) => void;
   clear: () => void;
 }
 
@@ -57,6 +60,7 @@ export const useWorldStore = create<WorldStore>((set) => ({
   settlements: [],
   settlementsBaseline: [],
   economy: null,
+  toponyms: [],
   // Setting meta reseeds the live latitude framing so the two stay in sync on
   // world load and after a persisted slider change.
   setMeta: (meta) => set({ meta, isLoaded: true, latConfig: latFromMeta(meta) }),
@@ -66,6 +70,7 @@ export const useWorldStore = create<WorldStore>((set) => ({
   setSettlements: (settlements) => set({ settlements, settlementsBaseline: settlements }),
   setSettlementsDeveloped: (settlements) => set({ settlements }),
   setEconomy: (economy) => set({ economy }),
+  setToponyms: (toponyms) => set({ toponyms }),
   clear: () =>
-    set({ meta: null, isLoaded: false, latConfig: DEFAULT_LAT, rivers: [], lakes: [], settlements: [], settlementsBaseline: [], economy: null }),
+    set({ meta: null, isLoaded: false, latConfig: DEFAULT_LAT, rivers: [], lakes: [], settlements: [], settlementsBaseline: [], economy: null, toponyms: [] }),
 }));

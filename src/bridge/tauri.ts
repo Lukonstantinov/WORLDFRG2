@@ -159,6 +159,27 @@ export async function simRunAll(seed: number, plateCount: number): Promise<impor
   return invoke("sim_run_all", { seed, plateCount });
 }
 
+// ── #26 · Geographic toponyms (gated, editable) ──
+/** Generate culture-styled names for rivers/mountains/lakes/regions (gated on the
+ *  Settlements + Rivers steps; errors otherwise). Returns & persists the list. */
+export async function simGenerateToponyms(
+  rivers: { points: [number, number][] }[],
+  lakes: { cells: [number, number][] }[],
+): Promise<import("../types").Toponym[]> {
+  return invoke("sim_generate_toponyms", {
+    riversJson: JSON.stringify(rivers),
+    lakesJson: JSON.stringify(lakes),
+  });
+}
+/** Persist a user-edited toponym list (renames). */
+export async function saveToponyms(toponyms: import("../types").Toponym[]): Promise<void> {
+  return invoke("save_toponyms", { toponymsJson: JSON.stringify(toponyms) });
+}
+/** Load the persisted toponym list (empty until generated). */
+export async function getToponyms(): Promise<import("../types").Toponym[]> {
+  return invoke("get_toponyms");
+}
+
 export async function simRunAllFromTerrain(
   seed: number,
   mountainDensity: number,

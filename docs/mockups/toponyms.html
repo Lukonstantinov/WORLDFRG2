@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorldForge 2 — Geographic Toponyms (#26)</title>
+<style>
+  :root{--bg:#0b1420;--text:#cfe2f6;--muted:#7f9bb5;--accent:#3a80c0;--line:#1f3346;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,Segoe UI,Roboto,Arial,sans-serif;}
+  .wrap{max-width:1000px;margin:0 auto;padding:28px 20px 56px;}
+  h1{font-size:23px;margin:0 0 4px;}
+  .sub{color:var(--muted);margin:0 0 22px;font-size:13.5px;}
+  .grid{display:grid;grid-template-columns:250px 1fr;gap:20px;align-items:start;}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  /* step panel */
+  .step{background:#0d1219;border:1px solid #1e2a38;border-radius:6px;padding:8px;}
+  .stitle{color:#c0d8f0;font-weight:600;font-size:12px;margin-bottom:2px;}
+  .sdesc{color:#506080;font-size:10px;margin-bottom:8px;}
+  .btn{width:100%;padding:6px 8px;border-radius:4px;border:1px solid #1a2a40;background:#151d28;color:#7a98b8;font-size:11px;text-align:left;margin-bottom:6px;}
+  .chips{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;align-items:center;}
+  .chip{padding:2px 7px;border-radius:10px;font-size:10px;border:1px solid #1e2e42;background:#0c1622;color:#7a98b8;}
+  .chip.on{border-color:#3a80c0;background:#19324a;color:#cfe2f6;}
+  .lab{margin-left:auto;color:#7a98b8;font-size:10px;}
+  .row{display:flex;align-items:center;gap:4px;margin-bottom:2px;}
+  .row .ic{width:16px;text-align:center;}
+  .inp{flex:1;background:#080c12;border:1px solid #1e2e42;color:#cfe0f4;padding:2px 5px;border-radius:4px;font-size:11px;}
+  .save{width:100%;padding:6px;border-radius:4px;border:1px solid #2a6070;background:#1a4a5a;color:#a0d0e0;font-size:11px;text-align:center;margin-top:6px;}
+  .gate{color:#cc8844;font-size:10px;margin-bottom:6px;}
+  /* map */
+  .map{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#0a1a24;}
+  .cap{color:var(--muted);font-size:12px;margin-top:8px;}
+  .leg{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:11px;color:#9ab0c8;}
+  .leg span{display:inline-flex;align-items:center;gap:5px;}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block;}
+  h2{font-size:15px;margin:26px 0 8px;}
+  p.lead{color:#bcd3ea;font-size:13px;margin:0 0 8px;}
+  code{background:#0a131d;border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:#9fd0ff;font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🗺️ Geographic Toponyms <span style="color:#5a8;font-size:14px">(#26 · optional, gated, editable)</span></h1>
+  <p class="sub">Name rivers, mountains, lakes and regions in each area's local culture style — then rename anything by hand. Persisted with the world.</p>
+
+  <div class="grid">
+    <!-- STEP PANEL MOCK -->
+    <div>
+      <div class="step">
+        <div class="stitle">12. Toponyms (optional)</div>
+        <div class="sdesc">Name rivers, mountains, lakes and regions in the local culture's style. Editable. Needs Rivers (5) + Settlements (7).</div>
+        <button class="btn">Regenerate place names</button>
+        <div class="chips">
+          <span class="chip on">All 64</span>
+          <span class="chip">🏳️ 6</span>
+          <span class="chip">🌊 28</span>
+          <span class="chip">🏔️ 22</span>
+          <span class="chip">💧 8</span>
+          <span class="lab"><input type="checkbox" checked> labels</span>
+        </div>
+        <div class="row"><span class="ic">🏳️</span><input class="inp" value="Vexillia"></div>
+        <div class="row"><span class="ic">🌊</span><input class="inp" value="Aderyn"></div>
+        <div class="row"><span class="ic">🌊</span><input class="inp" value="Tamesa"></div>
+        <div class="row"><span class="ic">🏔️</span><input class="inp" value="Kald Fell"></div>
+        <div class="row"><span class="ic">💧</span><input class="inp" value="Lyrwater"></div>
+        <button class="save">Save renamed places</button>
+      </div>
+      <div style="margin-top:8px;color:#506080;font-size:10px">
+        The <b>gate</b>: before Rivers + Settlements exist the button is disabled, and the
+        backend refuses (no culture map / no rivers).
+      </div>
+    </div>
+
+    <!-- MAP MOCK -->
+    <div>
+      <div class="map">
+        <svg viewBox="0 0 600 380" width="100%">
+          <rect width="600" height="380" fill="#0a1a24"/>
+          <path d="M40,60 C160,30 320,40 380,110 C420,160 400,250 320,290 C220,330 80,320 50,240 C25,170 10,90 40,60 Z" fill="#1c3326" stroke="#2a4a36"/>
+          <!-- rivers -->
+          <path d="M150,80 C170,130 160,190 200,250" fill="none" stroke="#3f7fb0" stroke-width="2.4" opacity=".85"/>
+          <path d="M300,70 C290,120 250,150 230,210" fill="none" stroke="#3f7fb0" stroke-width="1.8" opacity=".8"/>
+          <!-- lake -->
+          <ellipse cx="120" cy="200" rx="20" ry="13" fill="#27506a" stroke="#3a6f8a"/>
+          <!-- region label -->
+          <text x="220" y="180" fill="rgba(202,166,224,0.85)" font-size="15" font-weight="700" text-anchor="middle" letter-spacing="2">VEXILLIA</text>
+          <!-- river labels w/ dots -->
+          <circle cx="180" cy="165" r="2.2" fill="#7fc8e0"/><text x="186" y="165" fill="#7fc8e0" font-size="11">Aderyn</text>
+          <circle cx="262" cy="150" r="2.2" fill="#7fc8e0"/><text x="268" y="150" fill="#7fc8e0" font-size="11">Tamesa</text>
+          <!-- peak -->
+          <circle cx="330" cy="120" r="2.2" fill="#d8c0a0"/><text x="336" y="120" fill="#d8c0a0" font-size="11">Kald Fell</text>
+          <circle cx="95" cy="120" r="2.2" fill="#d8c0a0"/><text x="101" y="120" fill="#d8c0a0" font-size="11">Dremmor</text>
+          <!-- lake label -->
+          <circle cx="120" cy="200" r="2.2" fill="#9ad0e8"/><text x="120" y="222" fill="#9ad0e8" font-size="11" text-anchor="middle">Lyrwater</text>
+        </svg>
+      </div>
+      <div class="cap">Labels sit on the live map: regions in faint tracked capitals, rivers / peaks / lakes with a small locator dot. Names follow the local culture's phonology.</div>
+      <div class="leg">
+        <span><span class="dot" style="background:#caa6e0"></span> region</span>
+        <span><span class="dot" style="background:#7fc8e0"></span> river</span>
+        <span><span class="dot" style="background:#d8c0a0"></span> mountain</span>
+        <span><span class="dot" style="background:#9ad0e8"></span> lake</span>
+      </div>
+    </div>
+  </div>
+
+  <h2>How it works</h2>
+  <p class="lead"><b>Generation</b> (<code>sim_generate_toponyms</code>) reuses the deterministic culture-name engine
+  (<code>names.rs</code> → <code>cultures::place_name</code>): each feature is named in the style of the people whose land it lies in.
+  Rivers/lakes come from the Rivers step, peaks are prominent local elevation maxima, regions are the culture hearths' homeland names.</p>
+  <p class="lead"><b>Gated &amp; optional:</b> the step button is disabled until Rivers (5) + Settlements (7) are done, and the backend errors if the
+  culture map or rivers are missing — so you can't name a world before the things to name exist.
+  <b>Editable &amp; persisted:</b> rename any feature inline; <code>save_toponyms</code> writes the edited list to world metadata, so names travel with the world.</p>
+</div>
+</body>
+</html>

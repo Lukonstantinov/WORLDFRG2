@@ -1,7 +1,8 @@
 use tauri::State;
 use crate::db::WorldDb;
 use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
-use crate::sim::{plates, elevation, ocean, temperature, precipitation, koppen, rivers, soil, fertility, settlements, biological};
+use crate::sim::{plates, elevation, ocean, temperature, precipitation, koppen, rivers, soil, fertility, settlements, biological, toponyms};
+use crate::db::metadata;
 
 /// Generate tectonic plates and derive landmass.
 /// Phase 1: Plate tectonics → terrain
@@ -469,4 +470,52 @@ pub struct SimRunAllResult {
     pub rivers: Vec<rivers::River>,
     pub lakes: Vec<rivers::Lake>,
     pub settlements: Vec<settlements::Settlement>,
+}
+
+// ── #26 · Geographic toponyms (optional, gated, editable) ────────────────────
+
+/// Generate culture-appropriate names for rivers, mountains, lakes and regions.
+/// GATED: requires the culture map (Settlements step) and rivers (Rivers step);
+/// errors clearly otherwise. The result is persisted in world metadata and may be
+/// edited later via `save_toponyms`. Naming a world's geography does not change
+/// its geography, so this is allowed whether or not the world is finalized.
+#[tauri::command]
+pub fn sim_generate_toponyms(
+    rivers_json: String,
+    lakes_json: String,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<toponyms::Toponym>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::sim::cultures::ensure_active(&conn);
+    if crate::sim::cultures::active().is_none() {
+        return Err("Generate settlements first — toponyms need the culture map (run the Settlements step).".into());
+    }
+    let rivers: Vec<rivers::River> = serde_json::from_str(&rivers_json).unwrap_or_default();
+    let lakes: Vec<rivers::Lake> = serde_json::from_str(&lakes_json).unwrap_or_default();
+    if rivers.is_empty() {
+        return Err("Generate rivers first — toponyms name the rivers and lakes (run the Rivers step).".into());
+    }
+    let buf = WorldBuffer::load_with(&conn, ColumnSet::TERRAIN | ColumnSet::ELEVATION)?;
+    let list = toponyms::generate(&buf, &rivers, &lakes);
+    metadata::set_meta(&conn, "toponyms", &serde_json::to_string(&list).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    Ok(list)
+}
+
+/// Persist a user-edited toponym list (renames). Validates it parses first.
+#[tauri::command]
+pub fn save_toponyms(toponyms_json: String, db: State<'_, WorldDb>) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _: Vec<toponyms::Toponym> = serde_json::from_str(&toponyms_json).map_err(|e| e.to_string())?;
+    metadata::set_meta(&conn, "toponyms", &toponyms_json).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Load the persisted toponym list (empty if none generated yet).
+#[tauri::command]
+pub fn get_toponyms(db: State<'_, WorldDb>) -> Result<Vec<toponyms::Toponym>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    Ok(metadata::get_meta(&conn, "toponyms").map_err(|e| e.to_string())?
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default())
 }

@@ -180,7 +180,7 @@ export interface RiverParams {
   lakeMaxFraction: number; // 0.000002-0.05: max lake size as fraction of grid (low = tiny lakes)
 }
 
-export type WorkflowStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+export type WorkflowStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
 
 // ── DLC 1 "Living Trade" tick simulation ──
 export interface CampaignClock {
@@ -1260,6 +1260,14 @@ export interface Settlement {
   region?: string;  // region / homeland name ("Vexillia")
   site?: string;    // "coast" | "river" | "hills" | "plain"
   dead?: boolean;   // population collapsed → drawn as a black cross, not a dot
+}
+
+/** #26 · a named geographic feature. Mirrors the Rust `Toponym` struct. */
+export interface Toponym {
+  kind: "river" | "mountain" | "lake" | "region";
+  name: string;
+  x: number;
+  y: number;
 }
 
 /** #29 · one year's merchant-house wealth-inequality reading. */

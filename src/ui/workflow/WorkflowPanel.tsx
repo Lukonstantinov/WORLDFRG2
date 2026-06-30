@@ -14,6 +14,7 @@ import { StepBiological } from "./StepBiological";
 import { StepPolitical } from "./StepPolitical";
 import { StepEconomy } from "./StepEconomy";
 import { StepCampaign } from "./StepCampaign";
+import { StepToponyms } from "./StepToponyms";
 
 const STEP_INFO = [
   { step: 1, label: "Landmass", desc: "Paint your landmasses, load an image template, or generate from plates." },
@@ -27,6 +28,7 @@ const STEP_INFO = [
   { step: 9, label: "Political", desc: "Re-rank settlements by trade power (route centrality + good monopoly) and map their influence." },
   { step: 10, label: "Economy", desc: "Solve the market equilibrium: stock-based prices in grain-equivalent, barter ratios, currency goods, grain & trade wealth, supply chains and chokepoints." },
   { step: 11, label: "Living Trade", desc: "DLC 1 — advance the campaign in time. Cities produce, consume and trade each day; prices drift, wealth shifts, food estates rise and famines fall. History accrues in the chronicle." },
+  { step: 12, label: "Toponyms (optional)", desc: "Name rivers, mountains, lakes and regions in the local culture's style. Editable — rename any feature. Needs Rivers (5) + Settlements (7)." },
 ] as const;
 
 export function WorkflowPanel() {
@@ -287,6 +289,7 @@ export function WorkflowPanel() {
                 {step === 7 && <StepSettlements {...stepProps} />}
                 {step === 8 && <StepBiological {...stepProps} />}
                 {step === 9 && <StepPolitical {...stepProps} />}
+                {step === 12 && <StepToponyms />}
                 {step === 10 && <StepEconomy {...stepProps} />}
                 {step === 11 && <StepCampaign {...stepProps} />}
 

@@ -788,6 +788,15 @@ export function MapCanvas() {
     requestRender();
   }, [travelRoute, requestRender]);
 
+  // #26 · geographic toponym labels, pushed from the world store.
+  const toponyms = useWorldStore((s) => s.toponyms);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.drawToponyms(toponyms);
+    requestRender();
+  }, [toponyms, requestRender]);
+
   // #37 · per-good scarcity discs: when the overlay is on and a good is chosen in
   // the Goods Codex, colour each hub by its local price premium for that good.
   const codexGood = useUIStore((s) => s.codexGood);

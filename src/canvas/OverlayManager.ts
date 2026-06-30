@@ -150,6 +150,8 @@ export class OverlayManager {
   /** #37 · per-hub local price premium for the selected good (1 = par with the
    *  world base value; <1 cheap/abundant, >1 dear/scarce). */
   private goodScarcity: { x: number; y: number; premium: number }[] = [];
+  /** #26 · named geographic features (rivers/mountains/lakes/regions). */
+  private toponyms: { kind: string; name: string; x: number; y: number }[] = [];
   private coinUse: CoinUseCity[] = [];
   private coinOverlayHub: number | null = null;
   /** Bank seats to mark on the map (set empty to hide). */
@@ -241,6 +243,11 @@ export class OverlayManager {
   /** Set (or clear with []) the per-hub scarcity discs for the selected good. */
   drawGoodScarcity(cities: { x: number; y: number; premium: number }[]) {
     this.goodScarcity = cities;
+  }
+
+  /** Set (or clear with []) the named geographic features to label. */
+  drawToponyms(t: { kind: string; name: string; x: number; y: number }[]) {
+    this.toponyms = t;
   }
 
   drawTradeRoutes(routes: TradeRoute[]) {
@@ -835,6 +842,11 @@ export class OverlayManager {
       this.renderGoodScarcity(ctx);
     }
 
+    // #26 · geographic toponyms: culture-styled labels for rivers/peaks/lakes/regions.
+    if (this.visibility.toponyms && this.toponyms.length > 0) {
+      this.renderToponyms(ctx);
+    }
+
     // Merchant layer: live family/guild routes coloured by the owning house.
     if (this.visibility.merchantRoutes && this.merchantRoutes.length > 0) {
       this.renderMerchantRoutes(ctx);
@@ -1172,6 +1184,41 @@ export class OverlayManager {
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
+  }
+
+  /** #26 · draw toponym labels. Regions read as faint uppercase tracking; rivers/
+   *  peaks/lakes get a small kind-coloured dot + italic-ish name. Sizes are
+   *  zoom-compensated and kept legible with a dark halo. */
+  private renderToponyms(ctx: CanvasRenderingContext2D) {
+    const inv = 1 / Math.sqrt(this.currentScale);
+    const COLORS: Record<string, string> = {
+      river: "#7fc8e0", mountain: "#d8c0a0", lake: "#9ad0e8", region: "#caa6e0",
+    };
+    ctx.textBaseline = "middle";
+    ctx.lineJoin = "round";
+    for (const t of this.toponyms) {
+      const region = t.kind === "region";
+      const fs = Math.max(6, Math.min(16, (region ? 13 : 9) * inv));
+      ctx.font = `${region ? "700 " : ""}${fs}px -apple-system, Segoe UI, sans-serif`;
+      const label = region ? t.name.toUpperCase() : t.name;
+      const col = COLORS[t.kind] ?? "#cfe2f6";
+      const dotR = Math.max(0.5, 1.4 * inv);
+      const tx = t.x + 0.5 + (region ? 0 : dotR + 1.5 * inv);
+      // Non-region features get a small locator dot.
+      if (!region) {
+        ctx.beginPath();
+        ctx.arc(t.x + 0.5, t.y + 0.5, dotR, 0, Math.PI * 2);
+        ctx.fillStyle = col;
+        ctx.fill();
+      }
+      ctx.textAlign = region ? "center" : "left";
+      ctx.lineWidth = Math.max(0.6, 2.2 * inv);
+      ctx.strokeStyle = "rgba(6,12,18,0.85)";
+      ctx.strokeText(label, tx, t.y + 0.5);
+      ctx.fillStyle = region ? "rgba(202,166,224,0.85)" : col;
+      ctx.fillText(label, tx, t.y + 0.5);
+    }
+    ctx.textAlign = "left";
   }
 
   /** Boundary edges of a coarse-cell mask (only edges whose neighbour is outside
@@ -2584,6 +2631,7 @@ export class OverlayManager {
     this.tradeRoutes = [];
     this.travelRoute = [];
     this.goodScarcity = [];
+    this.toponyms = [];
     this.fisheryBanks = [];
     this.sharkZones = [];
     this.shipwormZones = [];

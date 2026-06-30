@@ -11,6 +11,7 @@ pub mod fertility;
 pub mod settlements;
 pub mod names;
 pub mod cultures;
+pub mod toponyms;
 pub mod biological;
 pub mod goods_spec;
 pub mod manufacture;
