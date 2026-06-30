@@ -4,6 +4,7 @@ import { useGoodsStore } from "../state/goodsStore";
 import { previewGoodScore } from "../bridge/tauri";
 import { koppenName, koppenHex, koppenRgb } from "./climate";
 import { goodCategory } from "../goods";
+import { commodityHistory } from "../commodityHistory";
 import type { GoodSpec } from "../types";
 
 const panel: React.CSSProperties = {
@@ -110,6 +111,7 @@ export function GoodDetailPanel() {
 
   const pt = prodType(spec.distribution);
   const sc = spec.scoring;
+  const hist = commodityHistory(spec.id);
 
   return (
     <div style={panel} onClick={() => close(null)}>
@@ -136,6 +138,13 @@ export function GoodDetailPanel() {
             </span>
           )}
         </div>
+
+        {hist && (
+          <div style={{ background: "#0e1a14", border: "1px solid #1c3326", borderRadius: 6, padding: 12, marginBottom: 12 }}>
+            <div style={{ color: "#d8c878", fontSize: 11, fontWeight: 700, letterSpacing: 0.3 }}>📜 {hist.era}</div>
+            <div style={{ color: "#cfe2f6", fontSize: 12, lineHeight: 1.6, marginTop: 5 }}>{hist.note}</div>
+          </div>
+        )}
 
         {isManufactured ? (
           <div style={{ background: "#0e1218", border: "1px solid #232b36", borderRadius: 6, padding: 12 }}>

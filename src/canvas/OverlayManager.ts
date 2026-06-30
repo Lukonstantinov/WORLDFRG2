@@ -147,6 +147,9 @@ export class OverlayManager {
   private tradeRoutes: TradeRoute[] = [];
   /** #23 · the single highlighted itinerary route (world cells), or empty. */
   private travelRoute: [number, number][] = [];
+  /** #37 · per-hub local price premium for the selected good (1 = par with the
+   *  world base value; <1 cheap/abundant, >1 dear/scarce). */
+  private goodScarcity: { x: number; y: number; premium: number }[] = [];
   private coinUse: CoinUseCity[] = [];
   private coinOverlayHub: number | null = null;
   /** Bank seats to mark on the map (set empty to hide). */
@@ -233,6 +236,11 @@ export class OverlayManager {
   /** Set (or clear with []) the highlighted point-to-point itinerary route. */
   drawTravelRoute(points: [number, number][]) {
     this.travelRoute = points;
+  }
+
+  /** Set (or clear with []) the per-hub scarcity discs for the selected good. */
+  drawGoodScarcity(cities: { x: number; y: number; premium: number }[]) {
+    this.goodScarcity = cities;
   }
 
   drawTradeRoutes(routes: TradeRoute[]) {
@@ -821,6 +829,12 @@ export class OverlayManager {
       this.renderTravelRoute(ctx);
     }
 
+    // #37 · per-good scarcity: graduated discs at each hub, green where the good
+    // is cheap/abundant through to red where it is dear/scarce.
+    if (this.visibility.goodScarcity && this.goodScarcity.length > 0) {
+      this.renderGoodScarcity(ctx);
+    }
+
     // Merchant layer: live family/guild routes coloured by the owning house.
     if (this.visibility.merchantRoutes && this.merchantRoutes.length > 0) {
       this.renderMerchantRoutes(ctx);
@@ -1127,6 +1141,36 @@ export class OverlayManager {
     };
     pin(pts[0], "#46d07a");
     pin(pts[pts.length - 1], "#e85b5b");
+    ctx.globalAlpha = 1;
+  }
+
+  /** #37 · scarcity discs. Premium (local price ÷ world base value) maps green
+   *  (≤0.8, cheap) → grey (≈1, par) → red (≥1.5, dear); disc size grows with how
+   *  far from par the price sits, so the priciest/cheapest markets read loudest. */
+  private renderGoodScarcity(ctx: CanvasRenderingContext2D) {
+    const base = Math.max(1.4, 3.2 / Math.sqrt(this.currentScale));
+    for (const c of this.goodScarcity) {
+      const p = c.premium;
+      // Colour ramp around par (1.0).
+      let col: string;
+      if (p <= 1) {
+        const t = Math.max(0, Math.min(1, (1 - p) / 0.5)); // 0 at par → 1 at half price
+        col = `rgb(${Math.round(120 - 50 * t)},${Math.round(150 + 60 * t)},${Math.round(120 - 40 * t)})`;
+      } else {
+        const t = Math.max(0, Math.min(1, (p - 1) / 0.8)); // 0 at par → 1 at +80%
+        col = `rgb(${Math.round(150 + 90 * t)},${Math.round(140 - 90 * t)},${Math.round(120 - 80 * t)})`;
+      }
+      const r = base * (1 + Math.min(1.2, Math.abs(p - 1) * 1.4));
+      ctx.beginPath();
+      ctx.arc(c.x + 0.5, c.y + 0.5, r, 0, Math.PI * 2);
+      ctx.globalAlpha = 0.72;
+      ctx.fillStyle = col;
+      ctx.fill();
+      ctx.globalAlpha = 0.9;
+      ctx.lineWidth = Math.max(0.3, r * 0.18);
+      ctx.strokeStyle = "#0b1420";
+      ctx.stroke();
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -2539,6 +2583,7 @@ export class OverlayManager {
     this.currentLines = [];
     this.tradeRoutes = [];
     this.travelRoute = [];
+    this.goodScarcity = [];
     this.fisheryBanks = [];
     this.sharkZones = [];
     this.shipwormZones = [];

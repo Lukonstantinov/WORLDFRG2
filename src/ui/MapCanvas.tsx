@@ -788,6 +788,24 @@ export function MapCanvas() {
     requestRender();
   }, [travelRoute, requestRender]);
 
+  // #37 · per-good scarcity discs: when the overlay is on and a good is chosen in
+  // the Goods Codex, colour each hub by its local price premium for that good.
+  const codexGood = useUIStore((s) => s.codexGood);
+  const goodScarcityOn = useUIStore((s) => s.overlayVisibility.goodScarcity);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    if (!goodScarcityOn || !codexGood || !economy) { om.drawGoodScarcity([]); requestRender(); return; }
+    const cities: { x: number; y: number; premium: number }[] = [];
+    for (const h of economy.hubs) {
+      const mg = h.market?.prices.find((p) => p.good_name === codexGood);
+      if (!mg || mg.base_value <= 0) continue;
+      cities.push({ x: h.x, y: h.y, premium: mg.price / mg.base_value });
+    }
+    om.drawGoodScarcity(cities);
+    requestRender();
+  }, [goodScarcityOn, codexGood, economy, requestRender]);
+
   // Bank icons: mark each live bank's seat on the map (toggle in the Toolbar).
   const showBankIcons = useUIStore((s) => s.showBankIcons);
   useEffect(() => {
