@@ -164,3 +164,97 @@ fed by one bundled reference dataset, with **#1 histogram** and **#3 legend** as
 wins. That trio delivers the exact "see how my map correlates to real climate, with
 biology" pitch, reuses existing data, and stays fully offline. **#10 animal-envelope
 overlay** is the standout shareable follow-up.
+
+---
+
+# Part 2 — Human, Settlement, Economy & Goods (18 more)
+
+The campaign side is the engine's deepest layer (tick sim: houses, banks, coin, wars,
+markets; 45 goods + recipe DAGs; trade trunks; political/centrality ranking). Most of
+these are **reuse + new panels**. ⭐ = standout value.
+
+## Human & settlement
+
+### 21. City rank-size (Zipf) realism check
+Plot settlement wealth/size vs Zipf's law; flag a missing primate city or a too-flat hierarchy.
+- **Critique:** fantasy worlds may differ — a lens, not a verdict. **Feasibility: high** (`CityRankingPanel`).
+
+### 22. "Why is this city here?" site dossier ⭐
+Break down the habitability score + tag the real site archetype (river-ford, harbor, oasis, hill).
+- **Value:** explainable placement lore; pairs with #6. **Feasibility: high** (Phase-7 components).
+
+### 23. Travel-time / itinerary calculator ⭐
+Two settlements → journey time by foot/horse/cart/ship/river over the coarse cost grid.
+- **Value:** top GM tool. **Critique:** needs per-mode speeds. **Feasibility: high** (cost grid + routes exist).
+
+### 24. Settlement tiers + real analogs
+hamlet→metropolis bands + a real historical analog.
+- **Critique:** curated mapping. **Feasibility: high.**
+
+### 25. Population & carrying-capacity estimate + density map
+Plausible populations from fertility/area; density overlay.
+- **Critique:** tech-level assumption; rough. **Feasibility: high–medium.**
+
+### 26. Geographic toponym generator
+Extend `names.rs` + cultures to name rivers/mountains/regions with meanings.
+- **Critique:** linguistic rabbit hole. **Feasibility: high.**
+
+### 27. Persistent roads & waystations
+Promote trade trunks into named roads with inns spaced a day apart.
+- **Critique:** persistence + placement is new. **Feasibility: medium.**
+
+### 28. Defensibility / fortification layer
+Terrain + chokepoints + rivers → where castles/walls make sense.
+- **Critique:** heuristic-heavy. **Feasibility: medium.**
+
+## Economy
+
+### 29. Wealth inequality (Gini) & social mobility over time ⭐
+Chart Gini, concentration, and house turnover from the tick sim; optional historical compare.
+- **Value:** makes the living economy legible; on-theme. **Feasibility: high** (tick tracks wealth + turnover).
+
+### 30. City price index / cost-of-living
+Basket-of-goods CPI per hub to compare cities.
+- **Feasibility: high** (market prices exist).
+
+### 31. Trade balance & comparative-advantage map
+Per-region net exporter/importer + Ricardian specialization.
+- **Feasibility: high** (trade-matrix net flows).
+
+### 32. Economic shock timeline
+Replay crashes/wars/bank failures with cause→effect chains.
+- **Critique:** mostly UI over existing logs/why-chains. **Feasibility: medium (UI).**
+
+### 33. Historical economy-era analog
+Tag the current economy (barter/coinage/banking) to a real era.
+- **Critique:** interpretive, fuzzy. **Feasibility: medium.**
+
+### 34. Wages & labor layer
+Wages by city from labor demand vs cost of living.
+- **Critique:** new variable to balance. **Feasibility: medium.**
+
+## Goods
+
+### 35. Goods provenance / supply-chain tracer ⭐
+Click a finished good → trace back through recipe DAG + actual routes/belts.
+- **Value:** spectacular; reuses DAG + `GoodFlowPanel`. **Feasibility: high.**
+
+### 36. Real-world commodity history cards
+Each good gets a short real-history card (silk road, spice trade, salt-as-money).
+- **Value:** cheap lore depth; on-theme. **Feasibility: very high** (static content).
+
+### 37. Scarcity ↔ luxury heatmap per good
+Overlay cheap-commodity vs prized-luxury from market price gradients.
+- **Feasibility: high** (gradients already computed).
+
+### 38. Seasonal harvest calendar
+Perishables/harvests vary by season per region (shares season model with #12/#19).
+- **Critique:** needs a season model. **Feasibility: medium.**
+
+## Best bets (Part 2)
+- **Settlement layer:** #22 + #23 + #24 (mostly reuse).
+- **Economy legibility:** #29 + #30 + #31 (dashboards over tick data).
+- **Goods:** #35 + #36 (high wow, low cost).
+
+Biggest "wow per hour": **#23 travel-time** and **#35 provenance tracer**; nearly free
+wins: **#36 commodity cards** and **#22 site dossier**.

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorldForge 2 — Human, Settlement, Economy &amp; Goods: 18 Proposals (Part 2)</title>
+<style>
+  :root{--bg:#0b1420;--panel:#13202e;--panel2:#0f1b27;--text:#cfe2f6;--muted:#7f9bb5;
+    --accent:#3a80c0;--line:#1f3346;--h:#4a7fc0;--e:#b07a3a;--g:#6a9a4a;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:15px/1.55 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:1120px;margin:0 auto;padding:32px 22px 64px;}
+  h1{font-size:25px;margin:0 0 6px;}
+  .sub{color:var(--muted);margin:0 0 18px;font-size:14px;}
+  .ground{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    padding:14px 18px;margin:0 0 26px;font-size:13.5px;color:#bcd3ea;}
+  .ground b{color:var(--text)}
+  .ground code{background:#0a131d;border:1px solid var(--line);border-radius:4px;
+    padding:1px 5px;color:#9fd0ff;font-size:12px;}
+  .tierhead{display:flex;align-items:center;gap:10px;margin:30px 0 12px;}
+  .tierhead h2{font-size:18px;margin:0;}
+  .pill{font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;
+    padding:3px 9px;border-radius:999px;color:#06121b;}
+  .ph{background:#6fa6e6} .pe{background:#e0a766} .pg{background:#9ccc6e}
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:11px;
+    padding:14px 16px 15px;border-left-width:4px;}
+  .card.h{border-left-color:var(--h)} .card.e{border-left-color:var(--e)} .card.g{border-left-color:var(--g)}
+  .card h3{margin:0 0 7px;font-size:15.5px;display:flex;gap:8px;align-items:baseline;}
+  .num{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:26px;
+    background:#0a131d;border:1px solid var(--line);border-radius:7px;font-weight:700;
+    color:var(--accent);font-size:13px;flex:0 0 auto;}
+  .star{color:#ffd86b}
+  .pitch{margin:0 0 10px;font-size:13.5px;color:#dbe9f8;}
+  .row{font-size:12.7px;margin:3px 0;display:flex;gap:7px;}
+  .row .k{color:var(--muted);flex:0 0 64px;font-weight:600;}
+  .row.crit .k{color:#e0a3a3}
+  .feas{margin-top:10px;display:inline-block;font-size:11.5px;font-weight:700;
+    padding:3px 9px;border-radius:6px;background:#0a131d;border:1px solid var(--line);}
+  .f5{color:#7be0a8;border-color:#235a3e} .f4{color:#bfe07b;border-color:#4d5a23}
+  .f3{color:#e7c25e;border-color:#5a4d23} .f2{color:#e09a6b;border-color:#5a3f23}
+  .reco{margin-top:30px;background:linear-gradient(180deg,#16283a,#11202e);
+    border:1px solid #25496a;border-radius:12px;padding:18px 20px;}
+  .reco h2{margin:0 0 8px;font-size:18px;color:#bfe0ff} .reco b{color:#fff}
+  .spine{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .chip{background:#0a131d;border:1px solid var(--accent);border-radius:999px;
+    padding:5px 12px;font-size:12.5px;color:#bfe0ff}
+  footer{margin-top:34px;color:var(--muted);font-size:12px;text-align:center}
+  .navnote{font-size:12.5px;color:var(--muted);margin:-8px 0 20px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Human · Settlement · Economy · Goods — 18 Proposals (Part 2)</h1>
+  <p class="sub">WorldForge 2 · continuation brainstorm · ranked by feasibility within each domain · ⭐ = standout value</p>
+  <p class="navnote">Companion to Part 1 (climate &amp; biology, ideas 1–20) in <code>climate-correlation-brainstorm.html</code>.</p>
+
+  <div class="ground">
+    <b>Why most of these are cheap:</b> the campaign side is the engine's deepest layer — the
+    tick sim (<code>sim/tick.rs</code>) already runs houses, banks, coin, wars and markets;
+    there are 45 goods with <b>recipe DAGs</b>, routed <b>trade trunks</b>, and a
+    political/<b>centrality</b> ranking. Most ideas below are <b>reuse + a new panel/overlay</b>.
+  </div>
+
+  <!-- HUMAN -->
+  <div class="tierhead"><span class="pill ph">Human</span><h2>Settlement &amp; people</h2></div>
+  <div class="grid">
+    <div class="card h"><h3><span class="num">21</span> City rank-size (Zipf) check</h3>
+      <p class="pitch">Plot settlement size/wealth vs Zipf's law; flag missing primate city or too-flat hierarchy.</p>
+      <div class="row crit"><span class="k">Critique</span><span>A lens, not a verdict — worlds may differ.</span></div>
+      <span class="feas f4">Feasibility: high</span></div>
+
+    <div class="card h"><h3><span class="num">22</span> "Why is this city here?" dossier <span class="star">⭐</span></h3>
+      <p class="pitch">Break down the habitability score + tag the site archetype (ford, harbor, oasis, hill).</p>
+      <div class="row"><span class="k">Value</span><span>Explainable placement lore; pairs with climate dossier #6.</span></div>
+      <span class="feas f4">Feasibility: high</span></div>
+
+    <div class="card h"><h3><span class="num">23</span> Travel-time / itinerary calc <span class="star">⭐</span></h3>
+      <p class="pitch">Two settlements → journey time by foot/horse/cart/ship/river over the coarse cost grid.</p>
+      <div class="row"><span class="k">Value</span><span>Top GM tool.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Needs per-mode speed constants.</span></div>
+      <span class="feas f4">Feasibility: high</span></div>
+
+    <div class="card h"><h3><span class="num">24</span> Settlement tiers + real analogs</h3>
+      <p class="pitch">hamlet→metropolis population bands + a real historical analog city.</p>
+      <div class="row crit"><span class="k">Critique</span><span>Curated mapping.</span></div>
+      <span class="feas f4">Feasibility: high</span></div>
+
+    <div class="card h"><h3><span class="num">25</span> Population &amp; carrying capacity</h3>
+      <p class="pitch">Plausible populations from fertility/area; density overlay.</p>
+      <div class="row crit"><span class="k">Critique</span><span>Tech-level assumption; rough.</span></div>
+      <span class="feas f4">Feasibility: high–medium</span></div>
+
+    <div class="card h"><h3><span class="num">26</span> Geographic toponym generator</h3>
+      <p class="pitch">Name rivers/mountains/regions via <code>names.rs</code> + cultures, with meanings.</p>
+      <div class="row crit"><span class="k">Critique</span><span>Linguistic rabbit hole.</span></div>
+      <span class="feas f4">Feasibility: high</span></div>
+
+    <div class="card h"><h3><span class="num">27</span> Persistent roads &amp; waystations</h3>
+      <p class="pitch">Promote trade trunks into named roads with inns spaced a day apart.</p>
+      <div class="row crit"><span class="k">Critique</span><span>Persistence + placement is new work.</span></div>
+      <span class="feas f3">Feasibility: medium</span></div>
+
+    <div class="card h"><h3><span class="num">28</span> Defensibility / fortification</h3>
+      <p class="pitch">Terrain + chokepoints + rivers → where castles/walls make sense.</p>
+      <div class="row crit"><span class="k">Critique</span><span>Heuristic-heavy.</span></div>
+      <span class="feas f3">Feasibility: medium</span></div>
+  </div>
+
+  <!-- ECONOMY -->
+  <div class="tierhead"><span class="pill pe">Economy</span><h2>Markets, wealth &amp; shocks</h2></div>
+  <div class="grid">
+    <div class="card e"><h3><span class="num">29</span> Wealth inequality (Gini) &amp; mobility <span class="star">⭐</span></h3>
+      <p class="pitch">Chart Gini, concentration, house turnover from the tick sim; optional historical compare.</p>
+      <div class="row"><span class="k">Value</span><span>Makes the living economy legible; on-theme.</span></div>
+      <span class="feas f4">Feasibility: high</span></div>
+
+    <div class="card e"><h3><span class="num">30</span> City price index / cost-of-living</h3>
+      <p class="pitch">Basket-of-goods CPI per hub to compare cities ("Y is 2.3× pricier").</p>
+      <div class="row"><span class="k">Value</span><span>Concrete cross-city comparison.</span></div>
+      <span class="feas f4">Feasibility: high</span></div>
+
+    <div class="card e"><h3><span class="num">31</span> Trade balance &amp; comparative advantage</h3>
+      <p class="pitch">Per-region net exporter/importer + Ricardian specialization highlight.</p>
+      <div class="row"><span class="k">Value</span><span>Reveals regional economic identity.</span></div>
+      <span class="feas f4">Feasibility: high</span></div>
+
+    <div class="card e"><h3><span class="num">32</span> Economic shock timeline</h3>
+      <p class="pitch">Replay crashes/wars/bank failures with cause→effect chains.</p>
+      <div class="row crit"><span class="k">Critique</span><span>Mostly UI over existing logs/why-chains.</span></div>
+      <span class="feas f3">Feasibility: medium (UI)</span></div>
+
+    <div class="card e"><h3><span class="num">33</span> Historical economy-era analog</h3>
+      <p class="pitch">Tag the economy (barter/coinage/banking) to a real era.</p>
+      <div class="row crit"><span class="k">Critique</span><span>Interpretive, fuzzy.</span></div>
+      <span class="feas f3">Feasibility: medium</span></div>
+
+    <div class="card e"><h3><span class="num">34</span> Wages &amp; labor layer</h3>
+      <p class="pitch">Wages by city from labor demand vs cost of living.</p>
+      <div class="row crit"><span class="k">Critique</span><span>New variable to balance.</span></div>
+      <span class="feas f3">Feasibility: medium</span></div>
+  </div>
+
+  <!-- GOODS -->
+  <div class="tierhead"><span class="pill pg">Goods</span><h2>Commodities &amp; chains</h2></div>
+  <div class="grid">
+    <div class="card g"><h3><span class="num">35</span> Goods provenance / chain tracer <span class="star">⭐</span></h3>
+      <p class="pitch">Click a finished good → trace back through recipe DAG + actual routes/belts.</p>
+      <div class="row"><span class="k">Value</span><span>Spectacular; reuses DAG + <code>GoodFlowPanel</code>.</span></div>
+      <span class="feas f4">Feasibility: high</span></div>
+
+    <div class="card g"><h3><span class="num">36</span> Real-world commodity history cards</h3>
+      <p class="pitch">Each good gets a short real-history card (silk road, spice trade, salt-as-money).</p>
+      <div class="row"><span class="k">Value</span><span>Cheap lore depth; on-theme.</span></div>
+      <span class="feas f5">Feasibility: very high</span></div>
+
+    <div class="card g"><h3><span class="num">37</span> Scarcity ↔ luxury heatmap</h3>
+      <p class="pitch">Overlay cheap-commodity vs prized-luxury from market price gradients.</p>
+      <div class="row"><span class="k">Value</span><span>Shows where a good is worth carrying.</span></div>
+      <span class="feas f4">Feasibility: high</span></div>
+
+    <div class="card g"><h3><span class="num">38</span> Seasonal harvest calendar</h3>
+      <p class="pitch">Perishables/harvests vary by season per region (shares season model with #12/#19).</p>
+      <div class="row crit"><span class="k">Critique</span><span>Needs a season model.</span></div>
+      <span class="feas f3">Feasibility: medium</span></div>
+  </div>
+
+  <div class="reco">
+    <h2>Best bets (Part 2)</h2>
+    <p><b>Settlement layer:</b> #22 site dossier + #23 travel-time + #24 tiers (mostly reuse).
+    <b>Economy legibility:</b> #29 Gini + #30 price index + #31 trade balance (dashboards over
+    tick data). <b>Goods:</b> #35 provenance tracer + #36 history cards (high wow, low cost).</p>
+    <div class="spine">
+      <span class="chip">㉒ Site dossier ⭐</span>
+      <span class="chip">㉓ Travel-time ⭐</span>
+      <span class="chip">㉙ Gini &amp; mobility ⭐</span>
+      <span class="chip">㉚ Price index</span>
+      <span class="chip">㉛ Trade balance</span>
+      <span class="chip">㉟ Provenance tracer ⭐</span>
+      <span class="chip">㊱ Commodity cards</span>
+    </div>
+    <p style="margin-top:12px">Biggest "wow per hour": <b>#23 travel-time</b> and <b>#35 provenance tracer</b>;
+    nearly free wins: <b>#36 commodity cards</b> and <b>#22 site dossier</b>.</p>
+  </div>
+
+  <footer>WorldForge 2 · docs/mockups/human-economy-goods-brainstorm.html · design brainstorm artifact</footer>
+</div>
+</body>
+</html>
