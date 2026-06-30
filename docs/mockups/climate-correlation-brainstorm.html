@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorldForge 2 — Real-Climate Correlation & Biology: 20 Proposals</title>
+<style>
+  :root{
+    --bg:#0b1420; --panel:#13202e; --panel2:#0f1b27; --text:#cfe2f6;
+    --muted:#7f9bb5; --accent:#3a80c0; --line:#1f3346;
+    --a:#2f7d5b; --b:#9a7b2e; --c:#9a3e3e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:15px/1.55 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:1120px;margin:0 auto;padding:32px 22px 64px;}
+  h1{font-size:26px;margin:0 0 6px;letter-spacing:.2px;}
+  .sub{color:var(--muted);margin:0 0 18px;font-size:14px;}
+  .ground{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    padding:14px 18px;margin:0 0 26px;font-size:13.5px;color:#bcd3ea;}
+  .ground b{color:var(--text)}
+  .ground code{background:#0a131d;border:1px solid var(--line);border-radius:4px;
+    padding:1px 5px;color:#9fd0ff;font-size:12px;}
+  .tierhead{display:flex;align-items:center;gap:10px;margin:30px 0 12px;}
+  .tierhead h2{font-size:18px;margin:0;}
+  .pill{font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;
+    padding:3px 9px;border-radius:999px;color:#06121b;}
+  .pa{background:#5fcf9b} .pb{background:#e7c25e} .pc{background:#e08a8a}
+  .tiernote{color:var(--muted);font-size:12.5px}
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:11px;
+    padding:14px 16px 15px;position:relative;border-left-width:4px;}
+  .card.ta{border-left-color:var(--a)} .card.tb{border-left-color:var(--b)} .card.tc{border-left-color:var(--c)}
+  .card h3{margin:0 0 7px;font-size:15.5px;display:flex;gap:8px;align-items:baseline;}
+  .num{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;
+    background:#0a131d;border:1px solid var(--line);border-radius:7px;font-weight:700;
+    color:var(--accent);font-size:13px;flex:0 0 auto;}
+  .star{color:#ffd86b}
+  .pitch{margin:0 0 10px;font-size:13.5px;color:#dbe9f8;}
+  .row{font-size:12.7px;margin:3px 0;display:flex;gap:7px;}
+  .row .k{color:var(--muted);flex:0 0 64px;font-weight:600;}
+  .row.crit .k{color:#e0a3a3}
+  .feas{margin-top:10px;display:inline-block;font-size:11.5px;font-weight:700;
+    padding:3px 9px;border-radius:6px;background:#0a131d;border:1px solid var(--line);}
+  .f5{color:#7be0a8;border-color:#235a3e}
+  .f4{color:#bfe07b;border-color:#4d5a23}
+  .f3{color:#e7c25e;border-color:#5a4d23}
+  .f2{color:#e09a6b;border-color:#5a3f23}
+  .f1{color:#e08a8a;border-color:#5a2323}
+  .reco{margin-top:30px;background:linear-gradient(180deg,#16283a,#11202e);
+    border:1px solid #25496a;border-radius:12px;padding:18px 20px;}
+  .reco h2{margin:0 0 8px;font-size:18px;color:#bfe0ff}
+  .reco b{color:#fff}
+  .spine{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .chip{background:#0a131d;border:1px solid var(--accent);border-radius:999px;
+    padding:5px 12px;font-size:12.5px;color:#bfe0ff}
+  footer{margin-top:34px;color:var(--muted);font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Real-Climate Correlation &amp; Biology — 20 Proposals</h1>
+  <p class="sub">WorldForge 2 · brainstorm for world creators · ranked by feasibility · ⭐ = highest creator value</p>
+
+  <div class="ground">
+    <b>Why most of these are cheap:</b> the engine already stores full <b>Köppen</b> (32 zones,
+    <code>sim/koppen.rs</code>), per-cell <b>temperature + seasonal range</b>, <b>precipitation</b>,
+    <b>ocean currents</b>, <b>salinity</b>, a <b>biomes</b> layer, hazard columns
+    (<code>storm</code>/<code>reef</code>/<code>disease</code>/shark/shipworm) and climate-tied
+    <b>trade-good belts</b>. So "correlate to real climate" is mostly a <b>bundled reference
+    dataset + new overlays/panels</b> — no new physics, and it stays fully offline.
+  </div>
+
+  <!-- TIER A -->
+  <div class="tierhead">
+    <span class="pill pa">Tier A</span><h2>Low-hanging fruit</h2>
+    <span class="tiernote">data already present · UI + small bundled table</span>
+  </div>
+  <div class="grid">
+    <div class="card ta"><h3><span class="num">1</span> Köppen distribution vs. Earth</h3>
+      <p class="pitch">% of world land per climate zone, overlaid on Earth's real distribution; flag over/under-represented zones.</p>
+      <div class="row"><span class="k">Value</span><span>Instant realism gut-check.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Earth is one reference; frame as comparison, not error.</span></div>
+      <span class="feas f5">Feasibility: very high</span></div>
+
+    <div class="card ta"><h3><span class="num">2</span> Latitude climate ribbon</h3>
+      <p class="pitch">Hover a row → strip of Earth's climate/biome bands at that latitude.</p>
+      <div class="row"><span class="k">Value</span><span>Teaches latitude→climate intuition live.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Ignores continentality / longitude.</span></div>
+      <span class="feas f5">Feasibility: very high</span></div>
+
+    <div class="card ta"><h3><span class="num">3</span> Köppen legend w/ real examples</h3>
+      <p class="pitch">Click a zone → real cities/regions + plain-language description.</p>
+      <div class="row"><span class="k">Value</span><span>Demystifies the codes.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Needs curated text content.</span></div>
+      <span class="feas f5">Feasibility: very high</span></div>
+
+    <div class="card ta"><h3><span class="num">4</span> Earth-Analog Finder <span class="star">⭐</span></h3>
+      <p class="pitch">Closest real place by climate vector (Köppen + temp + precip + seasonality): "this coast ≈ Pacific NW."</p>
+      <div class="row"><span class="k">Value</span><span>The single most on-brief feature.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Quality scales with reference set; needs a good distance metric.</span></div>
+      <span class="feas f4">Feasibility: high</span></div>
+
+    <div class="card ta"><h3><span class="num">5</span> Biome → real flora &amp; fauna</h3>
+      <p class="pitch">Per biome/zone, curated analog animals &amp; plants (taiga → moose, lynx, conifers).</p>
+      <div class="row"><span class="k">Value</span><span>The biological angle; inspiration for GMs/authors.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Static lookup; curation; label "for inspiration."</span></div>
+      <span class="feas f4">Feasibility: high</span></div>
+
+    <div class="card ta"><h3><span class="num">6</span> Region dossier / reference card</h3>
+      <p class="pitch">Select region → one-pager: Köppen, analogs, weather, flora/fauna, crops, hazards.</p>
+      <div class="row"><span class="k">Value</span><span>Turns raw sim into usable lore.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Aggregator — only as good as #4/#5.</span></div>
+      <span class="feas f4">Feasibility: high</span></div>
+
+    <div class="card ta"><h3><span class="num">7</span> Day-length &amp; insolation overlay</h3>
+      <p class="pitch">Daylight hours + incoming sunlight by latitude &amp; season (pure astronomy).</p>
+      <div class="row"><span class="k">Value</span><span>Polar-night realism; growing-season grounding.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Needs an axial-tilt setting.</span></div>
+      <span class="feas f4">Feasibility: high</span></div>
+
+    <div class="card ta"><h3><span class="num">8</span> Hardiness &amp; growing-season zones</h3>
+      <p class="pitch">USDA-style hardiness + frost-free season from temp; plausible real crops.</p>
+      <div class="row"><span class="k">Value</span><span>Agriculture realism; ties to economy/goods.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Needs winter-min estimate; approximate mapping.</span></div>
+      <span class="feas f4">Feasibility: high</span></div>
+  </div>
+
+  <!-- TIER B -->
+  <div class="tierhead">
+    <span class="pill pb">Tier B</span><h2>Moderate</h2>
+    <span class="tiernote">new derived computation or a richer dataset</span>
+  </div>
+  <div class="grid">
+    <div class="card tb"><h3><span class="num">9</span> Whittaker biome layer upgrade</h3>
+      <p class="pitch">Promote <code>biomes</code> to a true Whittaker (temp × precip) classification + 2D legend.</p>
+      <div class="row"><span class="k">Value</span><span>Ecology-first lens on climate.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>May overlap current logic — verify first.</span></div>
+      <span class="feas f4">Feasibility: high–medium</span></div>
+
+    <div class="card tb"><h3><span class="num">10</span> Animal habitat-envelope overlay <span class="star">⭐</span></h3>
+      <p class="pitch">Pick a real animal → highlight cells matching its range ("where could polar bears live?").</p>
+      <div class="row"><span class="k">Value</span><span>Most fun / shareable biological feature.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Needs envelope dataset; ignores prey/barriers.</span></div>
+      <span class="feas f3">Feasibility: medium</span></div>
+
+    <div class="card tb"><h3><span class="num">11</span> Köppen realism validator</h3>
+      <p class="pitch">Rule-based linter flags implausible placements with explanations + jump-to-cell.</p>
+      <div class="row"><span class="k">Value</span><span>Catches invisible mistakes.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>"Implausible" is subtle; make rules dismissible.</span></div>
+      <span class="feas f3">Feasibility: medium</span></div>
+
+    <div class="card tb"><h3><span class="num">12</span> Walter-Lieth climate diagram</h3>
+      <p class="pitch">Classic 12-month temp+precip atlas graph for any clicked cell.</p>
+      <div class="row"><span class="k">Value</span><span>Professional way to read climate; pairs with #4.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Months must be synthesized (approximation).</span></div>
+      <span class="feas f3">Feasibility: medium</span></div>
+
+    <div class="card tb"><h3><span class="num">13</span> Realism report card</h3>
+      <p class="pitch">Whole-world score: band realism, biome diversity, ocean sanity, vs Earth.</p>
+      <div class="row"><span class="k">Value</span><span>One-glance health + onboarding.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Subjective — show components, not just a grade.</span></div>
+      <span class="feas f3">Feasibility: medium</span></div>
+
+    <div class="card tb"><h3><span class="num">14</span> Earth Köppen comparison overlay</h3>
+      <p class="pitch">Bundle a real Earth Köppen raster; side-by-side / latitude-aligned view.</p>
+      <div class="row"><span class="k">Value</span><span>Direct visual benchmark.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>World isn't Earth-shaped → compare by latitude band only.</span></div>
+      <span class="feas f3">Feasibility: medium</span></div>
+
+    <div class="card tb"><h3><span class="num">15</span> Ecoregion clustering &amp; naming</h3>
+      <p class="pitch">Cluster similar climate+biome cells into named ecoregions (à la WWF).</p>
+      <div class="row"><span class="k">Value</span><span>Ready-made named regions.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Boundary tuning; reuse trade-region clustering.</span></div>
+      <span class="feas f3">Feasibility: medium</span></div>
+
+    <div class="card tb"><h3><span class="num">16</span> Storm / hurricane-genesis realism</h3>
+      <p class="pitch">Use storm column + SST + latitude to mark plausible cyclone genesis belts.</p>
+      <div class="row"><span class="k">Value</span><span>Coastal-hazard realism + lore.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Simplified genesis model.</span></div>
+      <span class="feas f3">Feasibility: medium</span></div>
+  </div>
+
+  <!-- TIER C -->
+  <div class="tierhead">
+    <span class="pill pc">Tier C</span><h2>Ambitious</h2>
+    <span class="tiernote">real new simulation / heavier scope</span>
+  </div>
+  <div class="grid">
+    <div class="card tc"><h3><span class="num">17</span> Climate-change / tilt scenario slider</h3>
+      <p class="pitch">Offset global temp or axial tilt, re-run pipeline, watch biomes migrate.</p>
+      <div class="row"><span class="k">Value</span><span>Ice-age vs greenhouse worldbuilding + education.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Re-sim cost; compare-states UX; caching.</span></div>
+      <span class="feas f2">Feasibility: medium–low</span></div>
+
+    <div class="card tc"><h3><span class="num">18</span> Ocean-current circulation check</h3>
+      <p class="pitch">Verify gyres (CW N / CCW S), W-boundary warm, E cold; flag anomalies.</p>
+      <div class="row"><span class="k">Value</span><span>Catches subtle ocean errors most generators miss.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Robust detection is genuinely hard.</span></div>
+      <span class="feas f2">Feasibility: medium–low</span></div>
+
+    <div class="card tc"><h3><span class="num">19</span> Seasonal climate playback (Jan→Dec)</h3>
+      <p class="pitch">Animate temp/precip + ITCZ/monsoon shift across the year.</p>
+      <div class="row"><span class="k">Value</span><span>Makes the world feel alive; shows wet/dry seasons.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Needs month-synthesis (#12) + renderer animation plumbing.</span></div>
+      <span class="feas f2">Feasibility: low–medium</span></div>
+
+    <div class="card tc"><h3><span class="num">20</span> Migratory corridors / species gen</h3>
+      <p class="pitch">Model seasonal migration over biomes; generate creature ecologies from climate niches.</p>
+      <div class="row"><span class="k">Value</span><span>Deepest biological layer; unique GM hook.</span></div>
+      <div class="row crit"><span class="k">Critique</span><span>Big scope, fuzzy to validate, easy to over-engineer.</span></div>
+      <span class="feas f1">Feasibility: low</span></div>
+  </div>
+
+  <!-- RECO -->
+  <div class="reco">
+    <h2>Recommendation — build the spine first</h2>
+    <p><b>#4 Earth-Analog Finder + #5 flora/fauna + #6 dossier</b>, fed by one bundled reference
+    dataset, with <b>#1 histogram</b> and <b>#3 legend</b> as quick wins. That trio delivers the
+    exact "see how my map correlates to real climate, with biology" pitch, reuses existing data,
+    and stays fully offline. <b>#10 animal-envelope overlay</b> is the standout shareable follow-up.</p>
+    <div class="spine">
+      <span class="chip">① Histogram vs Earth</span>
+      <span class="chip">③ Legend + examples</span>
+      <span class="chip">④ Earth-Analog Finder ⭐</span>
+      <span class="chip">⑤ Flora &amp; fauna</span>
+      <span class="chip">⑥ Region dossier</span>
+      <span class="chip">⑩ Animal envelope ⭐</span>
+    </div>
+  </div>
+
+  <footer>WorldForge 2 · docs/mockups/climate-correlation-brainstorm.html · design brainstorm artifact</footer>
+</div>
+</body>
+</html>
