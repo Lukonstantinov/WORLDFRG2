@@ -154,6 +154,18 @@ const OUTPOST_START_TICK: u32 = 30 * 365;
 const OUTPOST_FOUND_WEALTH: f32 = 100_000.0; // a house this rich may found one
 const OUTPOST_FOUND_COST: f32 = 70_000.0;    // heavy cost (debited from the house)
 const OUTPOST_MAX_POP: f32 = 800.0;          // a trade post stays small (hard pop cap)
+// ── Trade bases (houses develop EXISTING under-traded small cities). See
+//    docs/TRADE_BASE_MECHANIC_PLAN.md. The accessible cousin of the outpost: a house
+//    invests influence + capital into a real settlement to bootstrap it into a node. ──
+const BASE_START_TICK: u32 = 10 * 365;        // bases open from ~year 10
+const BASE_INVEST_WEALTH: f32 = 40_000.0;     // a house this rich may develop a base
+const BASE_INVEST_COST: f32 = 18_000.0;       // base cost (scaled by city size below)
+const BASE_SEED: f32 = 600.0;                 // working capital seeded into the city
+const BASE_MIN_POP: f32 = 5_000.0;            // big enough to matter
+const BASE_MAX_POP: f32 = 60_000.0;           // small/undeveloped enough to be worth it
+const BASE_UNDERTRADE_FRAC: f32 = 0.06;       // under-traded if throughput < frac·pop
+const BASE_POP_GROWTH_BONUS: f32 = 0.012;     // yearly pop nudge while patronised
+const BASE_DEVELOPED_POP: f32 = 75_000.0;     // patronage concludes once developed
 /// Yearly dividend a settlement colony pays its backers, as a fraction of its
 /// trade surplus (kept small so fortunes stay bounded).
 const COLONY_DIVIDEND_RATE: f32 = 0.10;
@@ -387,6 +399,13 @@ const WH_FULL_FRAC: f32 = 0.85;        // enlarge once fill ≥ this fraction
 const WH_STOCK_FRAC: f32 = 0.25;       // share of a good's local surplus a house stocks/mo
 const WEALTH_HISTORY_CAP: usize = 80;  // years of wealth samples kept per house
 const HOUSE_EVENTS_CAP: usize = 60;    // most-recent chronicle entries kept per house
+// The GLOBAL event chronicle. Unlike the per-house / per-hub / bank histories (all
+// capped above/below), `self.journal` is appended from 30+ sites every tick and is
+// fully serialized into each year-boundary autosave. Left unbounded it grows without
+// limit over a long campaign until the autosave's `to_string` OOMs and the process
+// aborts mid-year (the "campaign died/restarted after ~30 years" crash). Cap it to
+// the most-recent N entries — plenty for the year-grouped Chronicle UI.
+const JOURNAL_CAP: usize = 20_000;
 // ── Futures contracts (Phase 3). A contract is a thin, two-sided stability layer
 //    ON TOP of the spot market: it covers only a slice of a city's need (so the
 //    price signal survives), at a struck price allowed to drift within a band, for
@@ -1598,6 +1617,11 @@ pub struct CampaignSim {
     /// the Economy step). Consumed as colonies are founded; empty on old saves.
     #[serde(default)]
     pub colonizable: Vec<ColonizeSite>,
+    /// Trade-base patronage: the house developing each hub as a base (hub-indexed,
+    /// −1 = none). Resized to `hubs` each tick. Empty on old saves (serde default).
+    /// See docs/TRADE_BASE_MECHANIC_PLAN.md.
+    #[serde(default)]
+    pub hub_patron: Vec<i32>,
     /// Civic supply contracts feeding settlement colonies (the food lifeline). Each
     /// row = a supplier shipping a good to a colony, paid by the metropolis treasury.
     #[serde(default)]
@@ -3264,6 +3288,12 @@ impl CampaignSim {
                 self.rebuild_routes();
                 t_rebuild += _s.elapsed().as_secs_f32() * 1000.0;
             }
+            // Bound the global chronicle so a long campaign's autosave can't OOM on
+            // serialization (the cheap length check is a no-op until the cap is hit).
+            if self.journal.len() > JOURNAL_CAP {
+                let drop = self.journal.len() - JOURNAL_CAP;
+                self.journal.drain(0..drop);
+            }
             let n = self.hubs.len();
             let doy = self.day_of_year();
 
@@ -3272,6 +3302,7 @@ impl CampaignSim {
             // Accountant's displayed `_prev`, and a fresh current year starts.
             self.house_ledger.resize(self.houses.len(), LedgerAcc::default());
             self.house_barred.resize(self.houses.len(), Vec::new());
+            self.hub_patron.resize(self.hubs.len(), -1); // trade-base patronage (hub-indexed)
             if tick % TICKS_PER_YEAR == 0 {
                 // Yearly inflation erodes every fortune's real value, recorded in the
                 // year that is now closing — then archive it for the Accountant.
@@ -5539,6 +5570,10 @@ impl CampaignSim {
             self.estate_condition_pass();
             // House trade outposts from year 30 (rich house, heavy cost); full
             // settlement colonies from year 50 (joint-stock, food lifeline).
+            if self.tick >= BASE_START_TICK {
+                self.maybe_establish_trade_base();
+                self.trade_base_pass();
+            }
             if self.tick >= OUTPOST_START_TICK { self.maybe_found_house_outpost(); }
             if self.tick >= COLONY_START_TICK {
                 self.maybe_found_settlement_colony();
@@ -5989,6 +6024,98 @@ impl CampaignSim {
             tick: self.tick, kind: "colony".into(), hub: new as i32, good: g0 as i32, value: 2.0,
             text: format!("{} founds a trade outpost ({})", hname, self.goods[g0].name),
         });
+    }
+
+    /// Yearly: a wealthy house develops an EXISTING under-traded small city into a
+    /// trade BASE — opening an office, building a guildhall + warehouse, seeding
+    /// working capital and taking the city under its patronage so its modest surplus
+    /// finally clears to market. The accessible, existing-settlement cousin of
+    /// `maybe_found_house_outpost`. At most one per call. See
+    /// docs/TRADE_BASE_MECHANIC_PLAN.md.
+    fn maybe_establish_trade_base(&mut self) {
+        if self.hubs.is_empty() || self.houses.is_empty() { return; }
+        self.hub_patron.resize(self.hubs.len(), -1);
+        // Founder: the richest non-guild house clearing the (modest) wealth bar.
+        let mut founder = -1i32;
+        let mut hw = BASE_INVEST_WEALTH;
+        for (hi, hh) in self.houses.iter().enumerate() {
+            if hh.defunct || hh.is_guild { continue; }
+            if hh.wealth > hw { hw = hh.wealth; founder = hi as i32; }
+        }
+        if founder < 0 { return; }
+        let hi = founder as usize;
+        if self.houses[hi].wealth < BASE_INVEST_COST { return; }
+        let seat = self.houses[hi].hub as usize;
+        if seat >= self.hubs.len() { return; }
+        let comp = self.hubs[seat].component;
+        let n = self.hubs.len();
+        // Target: the nearest reachable, under-traded small city on the same continent
+        // that this house doesn't already hold and nobody patronises yet.
+        let mut best = (usize::MAX, f32::INFINITY);
+        for c in 0..n {
+            if c == seat { continue; }
+            let hub = &self.hubs[c];
+            if hub.is_estate || hub.colony_kind != 0 { continue; }
+            if hub.component != comp { continue; }
+            if self.hub_patron[c] >= 0 { continue; }
+            if hub.population < BASE_MIN_POP || hub.population > BASE_MAX_POP { continue; }
+            // Under-traded: throughput well below what its population could support.
+            if hub.export_earn + hub.import_spend > BASE_UNDERTRADE_FRAC * hub.population { continue; }
+            if self.houses[hi].offices.contains(&(c as u32)) { continue; }
+            let d = self.days.get(seat * n + c).copied().unwrap_or(f32::INFINITY);
+            if d.is_finite() && d < best.1 { best = (c, d); }
+        }
+        let Some(c) = (best.0 != usize::MAX).then_some(best.0) else { return };
+        // Commit (affordability already checked): pay, plant the base, take patronage.
+        self.houses[hi].wealth -= BASE_INVEST_COST;
+        if !self.houses[hi].offices.contains(&(c as u32)) {
+            self.houses[hi].offices.push(c as u32);
+        }
+        if !self.hubs[c].structures.contains(&STRUCT_GUILDHALL) {
+            self.hubs[c].structures.push(STRUCT_GUILDHALL);
+        }
+        if !self.hubs[c].structures.contains(&STRUCT_WAREHOUSE) {
+            self.hubs[c].structures.push(STRUCT_WAREHOUSE);
+        }
+        self.hubs[c].treasury += BASE_SEED;
+        self.hub_patron[c] = hi as i32;
+        let (hn, cn) = (self.houses[hi].name.clone(), self.hubs[c].name.clone());
+        self.houses[hi].events.push(HouseEvent {
+            tick: self.tick, kind: "base".into(),
+            text: format!("{} establishes a trade base in {}", hn, cn),
+        });
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "base".into(), hub: c as i32, good: -1, value: 1.0,
+            text: format!("{} establishes a trade base in {}", hn, cn),
+        });
+    }
+
+    /// Yearly upkeep for patronised trade bases: a gentle development pop bonus while
+    /// the city is still small, and patronage CONCLUDES once it has grown into a real
+    /// node (the house keeps trading from it). Stale patronage (the hub collapsed or
+    /// became an estate/colony) is dropped.
+    fn trade_base_pass(&mut self) {
+        self.hub_patron.resize(self.hubs.len(), -1);
+        for h in 0..self.hubs.len() {
+            if self.hub_patron[h] < 0 { continue; }
+            if self.hubs[h].is_estate || self.hubs[h].colony_kind != 0 || self.hubs[h].population < 1.0 {
+                self.hub_patron[h] = -1;
+                continue;
+            }
+            if self.hubs[h].population >= BASE_DEVELOPED_POP {
+                let ph = self.hub_patron[h] as usize;
+                let hn = self.houses.get(ph).map(|x| x.name.clone()).unwrap_or_default();
+                let cn = self.hubs[h].name.clone();
+                self.hub_patron[h] = -1;
+                self.journal.push(JournalEntry {
+                    tick: self.tick, kind: "base".into(), hub: h as i32, good: -1, value: 2.0,
+                    text: format!("{} matures into a thriving market — {}'s trade base is fully established", cn, hn),
+                });
+                continue;
+            }
+            // Development nudge while patronised and still small.
+            self.hubs[h].population *= 1.0 + BASE_POP_GROWTH_BONUS;
+        }
     }
 
     /// A works' EFFECTIVENESS multiplier on output (1.0 = at nominal tier). Four
@@ -7730,7 +7857,7 @@ mod tests {
             last_month_pop: 0.0, last_month_index: 0.0, seed_house_count: 0,
             fleets_migrated: true, tech_factor: 1.0, percap_migrated: true, society_migrated: false,
             house_ledger: Vec::new(), house_ledger_prev: Vec::new(), house_barred: Vec::new(),
-            colonizable: vec![], colony_supply: vec![],
+            colonizable: vec![], hub_patron: vec![], colony_supply: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
             recent_trades: vec![],
             spec_centers: vec![], spec_year: 0, spec_prev_profit: vec![],
@@ -7749,6 +7876,56 @@ mod tests {
         };
         s.rebuild_routes();
         s
+    }
+
+    /// A wealthy house develops an EXISTING under-traded small city into a TRADE BASE:
+    /// it opens an office, builds a guildhall, seeds capital and takes the city under
+    /// its patronage — and patronage concludes once the city grows up. See
+    /// docs/TRADE_BASE_MECHANIC_PLAN.md.
+    #[test]
+    fn trade_base_development() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let ng = goods.len();
+        // Hub 0: the house's busy seat. Hub 1: a small, inert town on the same
+        // continent, in reach. Hub 2: too big to qualify (a control).
+        let prod0: Vec<f32> = (0..ng).map(|g| if goods[g].food { 400.0 } else { 120.0 }).collect();
+        let prod1: Vec<f32> = (0..ng).map(|g| if goods[g].food { 200.0 } else { 5.0 }).collect();
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 80_000.0, prod0.clone(), 0),
+            hub(1, 4.0, 0.0, 20_000.0, prod1, 0),
+            hub(2, 8.0, 0.0, 200_000.0, prod0, 0),
+        ];
+        let mut s = sim(hubs, goods);
+        // The small town starts inert (no throughput) — the under-traded signal.
+        s.hubs[1].export_earn = 0.0;
+        s.hubs[1].import_spend = 0.0;
+        // A rich house seated at hub 0, clearing the (modest) base-investment bar.
+        let mut rich = house_at(0, vec![1], 2);
+        rich.wealth = 100_000.0;
+        s.houses.push(rich);
+        s.seed_house_count = 1;
+        s.rebuild_routes();
+        s.hub_patron.resize(s.hubs.len(), -1);
+        s.tick = BASE_START_TICK;
+
+        let w0 = s.houses[0].wealth;
+        s.maybe_establish_trade_base();
+
+        // The small town (hub 1) — not the big control (hub 2) — became the base.
+        assert_eq!(s.hub_patron[1], 0, "the small under-traded city is patronised by house 0");
+        assert_eq!(s.hub_patron[2], -1, "the large well-developed city is NOT taken as a base");
+        assert!(s.houses[0].offices.contains(&1), "the patron opens an office in the base");
+        assert!(s.hubs[1].structures.contains(&STRUCT_GUILDHALL), "a guildhall is built in the base");
+        assert!(s.hubs[1].treasury > 0.0, "working capital is seeded into the city");
+        assert!(s.houses[0].wealth < w0, "the house pays for the investment");
+
+        // Graduation: once the base grows into a real node, patronage concludes.
+        s.hubs[1].population = BASE_DEVELOPED_POP + 1.0;
+        s.trade_base_pass();
+        assert_eq!(s.hub_patron[1], -1, "patronage concludes once the city is developed");
     }
 
     /// STANDING PRACTICE (see CLAUDE.md): run the living campaign for decades and

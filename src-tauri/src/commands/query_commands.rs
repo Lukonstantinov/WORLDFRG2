@@ -1897,6 +1897,12 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
             Some(s) if s.enabled => s,
             _ => continue, // disabled goods produce nothing to map
         };
+        // Manufactured goods are made in CITIES from imported raws — they have no
+        // natural homeland, so they get NO map overlay (drawing the input supply zone
+        // misleadingly implied a belt). The frontend hides their toggle to match.
+        if matches!(spec.distribution, Distribution::Manufactured) {
+            continue;
+        }
         // Deposit goods are scattered (keep every deposit). Global goods blanket
         // the world (many patches). Local goods are one homeland (top few).
         // Manufactured goods have NO belt of their own — they're made in cities from
@@ -3150,10 +3156,10 @@ fn coarse_path_cost(cc: &CoarseCost, path: &[usize]) -> f32 {
 /// a good distance from every settlement, spread out, tagged with a suggested estate
 /// kind. Stored in the economy snapshot so the tick sim (which has no WorldBuffer)
 /// can plant colonies. See `CampaignSim::maybe_colonize`.
-fn compute_colonizable_sites(
+pub(crate) fn compute_colonizable_sites(
     world: &crate::db::world_cache::WorldTiles,
     grid_w: u32, grid_h: u32,
-    settlements: &[RouteSettlement],
+    settlements: &[(f32, f32)],
     base_value: &[f32],
 ) -> Vec<crate::sim::tick::ColonizeSite> {
     use crate::sim::tick::ColonizeSite;
@@ -3195,7 +3201,7 @@ fn compute_colonizable_sites(
         })
     };
     let scoords: Vec<(i32, i32)> = settlements.iter()
-        .map(|s| ((s.x / f) as i32, (s.y / f) as i32)).collect();
+        .map(|&(sx, sy)| ((sx / f as f32) as i32, (sy / f as f32) as i32)).collect();
     let min_settle_dist = |cx: i32, cy: i32| -> f32 {
         scoords.iter().map(|&(sx, sy)| {
             let mut dx = (cx - sx).abs();
@@ -3287,7 +3293,8 @@ pub fn compute_economy(
     }
     // Empty-land colonization candidates for the campaign (uses tile data here).
     let base_value: Vec<f32> = specs.iter().map(|s| s.base_value.max(0.0)).collect();
-    let colonizable_sites = compute_colonizable_sites(&world, grid_w, grid_h, &settlements, &base_value);
+    let settle_xy: Vec<(f32, f32)> = settlements.iter().map(|s| (s.x as f32, s.y as f32)).collect();
+    let colonizable_sites = compute_colonizable_sites(&world, grid_w, grid_h, &settle_xy, &base_value);
 
     let wrap_dx = |a: i32, b: i32| -> i32 {
         let mut d = (a - b).abs();

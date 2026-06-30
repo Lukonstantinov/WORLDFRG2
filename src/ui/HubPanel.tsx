@@ -242,6 +242,12 @@ export function HubPanel() {
             <span style={{ color: "#6a86a6" }}>{`  ·  wealth rank #${wealthRank}/${economy.hubs.length}`}</span>
             {hub.sea_access === false && <span style={{ color: "#6a86a6" }}>{"  ·  lake/inland"}</span>}
           </div>
+          {detail?.patron && (
+            <div style={{ color: "#7fd0a0", fontSize: 10, marginTop: 2 }}
+              title="A merchant house is developing this city as a trade base.">
+              ⚓ Trade base of {detail.patron}
+            </div>
+          )}
         </div>
         <span data-no-drag onClick={() => setSelectedHub(null)}
           style={{ color: "#7090b0", cursor: "pointer", fontSize: 18, lineHeight: 1 }} title="Close">×</span>

@@ -117,7 +117,10 @@ export function Toolbar() {
   const setHubDisplay = useUIStore((s) => s.setHubDisplay);
   const goodsSpecs = useGoodsStore((s) => s.specs);
   const goodItems = goodsSpecs.length > 0
-    ? goodsSpecs.filter((g) => g.enabled).map((g) => ({ id: g.id, icon: g.icon, name: g.name }))
+    // Manufactured goods are made in cities, not grown in a belt — they have no map
+    // overlay (the backend emits no region for them), so hide their toggle here.
+    ? goodsSpecs.filter((g) => g.enabled && g.distribution !== "manufactured")
+        .map((g) => ({ id: g.id, icon: g.icon, name: g.name }))
     : GOOD_DEFS.map((g) => ({ id: g.name, icon: g.emoji, name: g.label }));
   const setLayerOpacity = useUIStore((s) => s.setLayerOpacity);
   const stretchToFit = useUIStore((s) => s.stretchToFit);

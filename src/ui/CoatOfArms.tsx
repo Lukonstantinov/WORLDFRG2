@@ -60,7 +60,7 @@ export function houseColor(name: string): string {
 /** A short heraldic blazon-ish description of a HOUSE's arms (for tooltips). */
 export function blazonOf(name: string): string {
   const h = hash(name);
-  return HOUSE_CHARGE_NAMES[(h >> 23) % HOUSE_CHARGE_NAMES.length];
+  return HOUSE_CHARGE_NAMES[(h >>> 23) % HOUSE_CHARGE_NAMES.length];
 }
 
 const INK = "#0c1118";
@@ -212,16 +212,16 @@ export function CoatOfArms({ name, size = 26, guild = false }: { name: string; s
   // Field + (for houses) a contrasting metal charge/ordinary per the rule of tincture.
   const field = TINCTURES[h % TINCTURES.length];
   const fieldIsMetal = METALS.includes(field);
-  const metal = METALS[(h >> 5) % METALS.length];
-  const colour = COLOURS[(h >> 7) % COLOURS.length];
+  const metal = METALS[(h >>> 5) % METALS.length];
+  const colour = COLOURS[(h >>> 7) % COLOURS.length];
   // The figurative bits sit in a contrasting tincture (metal on colour / colour on metal).
   const chargeTint = fieldIsMetal ? colour : metal;
-  let field2 = TINCTURES[(h >> 17) % TINCTURES.length];
+  let field2 = TINCTURES[(h >>> 17) % TINCTURES.length];
   if (field2 === field) field2 = (fieldIsMetal ? colour : metal);
 
   if (guild) {
     // ── Old design: geometric charge on a simply divided field ──
-    const division = (h >> 11) % 4; // 0 plain · 1 per pale · 2 per fess · 3 per bend
+    const division = (h >>> 11) % 4; // 0 plain · 1 per pale · 2 per fess · 3 per bend
     return (
       <svg width={size} height={(size * 38) / 32} viewBox="0 0 32 38" style={{ display: "block", flex: "0 0 auto" }}>
         <defs><clipPath id={sid}><path d={HEATER} /></clipPath></defs>
@@ -230,7 +230,7 @@ export function CoatOfArms({ name, size = 26, guild = false }: { name: string; s
           {division === 1 && <rect x="16" y="0" width="16" height="38" fill={field2} />}
           {division === 2 && <rect x="0" y="19" width="32" height="19" fill={field2} />}
           {division === 3 && <path d="M0 0 L32 0 L32 38 Z" fill={field2} />}
-          {guildCharge(h >> 23, chargeTint)}
+          {guildCharge(h >>> 23, chargeTint)}
         </g>
         <path d={HEATER} fill="none" stroke="#0c1118" strokeWidth="1.6" />
         <path d={HEATER} fill="none" stroke="#c9a227" strokeWidth="0.6" opacity="0.6" />
@@ -239,17 +239,17 @@ export function CoatOfArms({ name, size = 26, guild = false }: { name: string; s
   }
 
   // ── House design: shape + furs + divisions + optional ordinary + vector charge ──
-  const shapePath = SHIELD_SHAPES[(h >> 3) % SHIELD_SHAPES.length];
+  const shapePath = SHIELD_SHAPES[(h >>> 3) % SHIELD_SHAPES.length];
   // Occasionally the field is a heraldic FUR (ermine / vair) instead of a tincture.
-  const furKind = ((h >> 9) % 5) === 0 ? ((h >> 10) & 1 ? "vair" : "ermine") : null;
+  const furKind = ((h >>> 9) % 5) === 0 ? ((h >>> 10) & 1 ? "vair" : "ermine") : null;
   const fieldFill = furKind ? `url(#fur${sid})` : field;
 
-  const division = (h >> 11) % 11;
+  const division = (h >>> 11) % 11;
   // 0 plain · 1 per pale · 2 per fess · 3 per bend · 4 quarterly · 5 per saltire
   // 6 chief · 7 semé · 8 per chevron · 9 paly · 10 barry
-  const ord = (h >> 14) % 10; // ordinary (0 = none)
-  const chargeIdx = (h >> 23) % 16;
-  const semeGlyph = ["✦", "⚜", "●", "✚"][(h >> 20) % 4];
+  const ord = (h >>> 14) % 10; // ordinary (0 = none)
+  const chargeIdx = (h >>> 23) % 16;
+  const semeGlyph = ["✦", "⚜", "●", "✚"][(h >>> 20) % 4];
 
   return (
     <svg width={size} height={(size * 38) / 32} viewBox="0 0 32 38" style={{ display: "block", flex: "0 0 auto" }}>

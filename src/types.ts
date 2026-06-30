@@ -399,6 +399,8 @@ export interface HubDetail {
   estate_good?: string;
   /** Buildings erected here: [name, one-line effect]. */
   structures?: [string, string][];
+  /** Trade-base patron: the merchant house developing this city as a base (empty = none). */
+  patron?: string;
   /** Foreign merchant offices hosted in this settlement. */
   offices_here?: OfficeHere[];
   /** Market flow: in-flight shipments arriving / departing (ranked by value). */
@@ -520,6 +522,7 @@ export interface MerchantRoute {
   volume: number;
   out_goods: [string, number][]; // goods a→b
   ret_goods: [string, number][]; // goods b→a
+  path?: [number, number][]; // routed a→b polyline (roads/sea); skipped if no corridor
 }
 /** One active futures contract as a directional supply lane (source → buyer). */
 export interface FuturesLane {
