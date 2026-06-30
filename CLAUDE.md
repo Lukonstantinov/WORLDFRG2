@@ -111,8 +111,8 @@ commands/world_commands.rs      ← New world, grid/meta setup, world_progress
 commands/sim_commands.rs        ← Tauri commands wrapping sim phases (per-phase ColumnSet masks)
 commands/paint_commands.rs      ← Paint stroke commands (land/elev/shelf/volcano)
 commands/tile_commands.rs       ← get_tiles / get_tiles_packed (RGBA tile fetch), LOD
-commands/query_commands.rs      ← Read-only overlays + coarse routing: get_cell_info, trade routes/matrix/trunks, political layer, fishery banks, good/culture regions, coarse cost grid (cached_coarse_cost/coarse_dijkstra), campaign_get_trade_flow (DLC 3.5 dynamic flow)
-commands/campaign_commands.rs   ← finalize/unfreeze, new/save/open campaign, set_progress, campaign_start_sim/advance/get_state, ALL campaign read queries (HubDetail, HouseBrief, PolisBrief, CurrencyBrief, BankBrief, CrashRecord, WarsPayload, schematics, ledgers, journal). get_sim() loads the CampaignSim blob
+commands/query_commands.rs      ← Read-only overlays + coarse routing: get_cell_info, trade routes/matrix/trunks, political layer, fishery banks, good/culture regions, coarse cost grid (cached_coarse_cost/coarse_dijkstra), campaign_get_trade_flow (DLC 3.5 dynamic flow), compute_itinerary (#23 travel-time over the coarse grid)
+commands/campaign_commands.rs   ← finalize/unfreeze, new/save/open campaign, set_progress, campaign_start_sim/advance/get_state, ALL campaign read queries (HubDetail, HouseBrief, PolisBrief, CurrencyBrief, BankBrief, CrashRecord, WarsPayload, schematics, ledgers, journal, campaign_get_inequality #29 Gini/mobility). get_sim() loads the CampaignSim blob
 commands/goods_commands.rs      ← Goods spec CRUD, default_custom_goods, backfill_market_fields
 commands/import_commands.rs     ← import_world_layers (layered world import)
 commands/template_commands.rs   ← Image → land/sea detection (4-bit quantization)
@@ -144,6 +144,7 @@ sim/fertility.rs                ← Phase 6b: fertility scoring, fisheries
 sim/settlements.rs              ← Phase 7: habitability → city placement (Settlement struct)
 sim/biological.rs               ← Phase 8: shark/shipworm risk + trade-good belts + deposits
 sim/cultures.rs                 ← Organic culture/peoples map (names houses/guilds by home culture)
+sim/toponyms.rs                 ← #26 culture-styled names for rivers/mountains/lakes/regions (sim_generate_toponyms/save_toponyms/get_toponyms; gated on cultures+rivers)
 sim/names.rs                    ← Deterministic place/family/head name generation
 sim/goods_spec.rs               ← GoodSpec (category/tier/base_value/bulk/perishable/inputs/labor), 45 builtins
 sim/market.rs                   ← Market equilibrium solver (stocks → grain-eq prices → arbitrage; bulk/perish freight)
@@ -164,6 +165,7 @@ main.tsx                        ← React entry / mount
 App.tsx                         ← Layout, header, file dialogs, NewWorldDialog, mounts all panels
 types.ts                        ← ALL shared TS types (mirror Rust serde structs); add new query types here
 goods.ts                        ← GOOD_DEFS (names/emoji) shared good metadata
+commodityHistory.ts             ← #36 real-world commodity-history cards (Goods Codex + Good Detail)
 bridge/tauri.ts                 ← ALL IPC invoke wrappers (one per Rust command)
 state/worldStore.ts             ← Zustand: meta, rivers, lakes, settlements
 state/campaignStore.ts          ← Zustand: campaign snapshot, houses, contracts, diagnostics, selectedHouse
@@ -185,6 +187,9 @@ ui/HubPanel.tsx                 ← Settlement detail (Summary/Trade/Estates/Peo
 ui/HousesPanel.tsx              ← Merchant Houses/Guilds/Contracts. House detail (Summary/🏦 Bank/Accountant), richer stat grid, bank badge; HouseTimeline (year-grouped chronicle)
 ui/SpeculationPanel.tsx         ← DLC 3 Finance: Speculation (bubble why-chain) / Poleis (treasury/tariff/mint/council + coin) tabs
 ui/CoinCreditPanel.tsx          ← DLC 3.5: Currencies / Banks (T-accounts) / ⚔ Wars / 📉 Crashes / 🏛 Schematics tabs
+ui/ItineraryPanel.tsx           ← #23 travel-time tool (origin/dest pickers, per-mode days, draws the route overlay)
+ui/EconomyDashboardPanel.tsx    ← #30/#29 Price Index (basket CPI per city) + Inequality (Gini/top-share/turnover/mobility) tabs
+ui/GoodsCodexPanel.tsx          ← #35/#36/#37 per-good Provenance + real-world History card + Scarcity overlay toggle
 ui/CoinIcon.tsx                 ← Heraldic minted coin (issuer's coat of arms on a gold disc + value tint)
 ui/YearChronicle.tsx            ← SHARED year-grouped expandable chronicle (used by HousesPanel + HubPanel)
 ui/CoatOfArms.tsx               ← Deterministic house heraldry (houseColor + shield SVG)
@@ -200,7 +205,7 @@ ui/ElevationLegend.tsx · ui/ElevationHistogram.tsx ← Elevation legend + distr
 ui/LatitudeControl.tsx          ← Latitude band config
 ui/climate.ts                   ← Köppen → human phrase helpers
 ui/workflow/WorkflowPanel.tsx   ← Generation wizard + "Run All" buttons
-ui/workflow/Step*.tsx           ← Step UIs: Landmass, Elevation, OceanAtmo, Climate, Rivers, SoilResources, Settlements, Biological, Economy, Political, Campaign
+ui/workflow/Step*.tsx           ← Step UIs: Landmass, Elevation, OceanAtmo, Climate, Rivers, SoilResources, Settlements, Biological, Economy, Political, Campaign, Toponyms (#26, optional/gated)
 ```
 
 ### Docs (`docs/`)
