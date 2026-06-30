@@ -779,6 +779,15 @@ export function MapCanvas() {
     return () => { alive = false; };
   }, [coinOverlayHub, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
 
+  // #23 · the chosen itinerary route, pushed from the Itinerary panel via uiStore.
+  const travelRoute = useUIStore((s) => s.travelRoute);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.drawTravelRoute(travelRoute ?? []);
+    requestRender();
+  }, [travelRoute, requestRender]);
+
   // Bank icons: mark each live bank's seat on the map (toggle in the Toolbar).
   const showBankIcons = useUIStore((s) => s.showBankIcons);
   useEffect(() => {

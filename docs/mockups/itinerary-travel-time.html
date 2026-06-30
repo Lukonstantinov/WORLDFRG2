@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorldForge 2 — Itinerary / Travel-Time (#23)</title>
+<style>
+  :root{--bg:#0b1420;--panel:#13202e;--text:#cfe2f6;--muted:#7f9bb5;--accent:#3a80c0;--line:#1f3346;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,Segoe UI,Roboto,Arial,sans-serif;}
+  .wrap{max-width:1000px;margin:0 auto;padding:28px 20px 56px;}
+  h1{font-size:23px;margin:0 0 4px;}
+  .sub{color:var(--muted);margin:0 0 22px;font-size:13.5px;}
+  .grid{display:grid;grid-template-columns:330px 1fr;gap:22px;align-items:start;}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  /* panel mock */
+  .panel{background:#0c141e;border:1px solid #1e3450;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.5);}
+  .ph{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-bottom:1px solid #1a2a3e;color:#cfe0f4;font-weight:700;font-size:12px;}
+  .pb{padding:10px 12px;}
+  .row{display:flex;align-items:center;gap:6px;margin-bottom:6px;}
+  .row .lbl{color:#8aa0b8;font-size:10px;width:60px;}
+  select,.sel{flex:1;background:#080c12;border:1px solid #1e2e42;color:#cfe0f4;padding:4px 6px;border-radius:4px;font-size:11px;}
+  .chk{display:flex;align-items:center;gap:6px;margin:4px 0 8px;color:#9ab0c8;font-size:10px;}
+  .btn{width:100%;padding:6px;background:#2060a0;color:#fff;border:none;border-radius:4px;font-size:11px;font-weight:600;}
+  .res{margin-top:12px;}
+  .head{display:flex;align-items:baseline;gap:8px;margin-bottom:6px;}
+  .km{color:#cfe2f6;font-weight:700;font-size:14px;}
+  .mode{color:#7fa0c0;font-size:10px;}
+  .bar{display:flex;align-items:center;gap:6px;margin-bottom:3px;}
+  .bar .bl{width:56px;color:#8aa0b8;font-size:9px;}
+  .track{flex:1;height:7px;background:#0a131d;border-radius:3px;overflow:hidden;}
+  .fill{display:block;height:100%;}
+  .bv{width:56px;text-align:right;color:#9ab0c8;font-size:9px;}
+  .cards{margin-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;}
+  .card{background:#0c1622;border:1px solid #1a2a3e;border-radius:6px;padding:6px 4px;text-align:center;}
+  .card .cl{color:#8aa0b8;font-size:9px;}
+  .card .cv{color:#e8dcc0;font-weight:700;font-size:12px;margin-top:2px;}
+  .note{color:#5a6a80;font-size:9px;margin-top:8px;line-height:1.5;}
+  /* map mock */
+  .map{background:#0a1a24;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
+  .cap{color:var(--muted);font-size:12px;margin:8px 2px 0;}
+  .leg{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:#9ab0c8;}
+  .leg span{display:inline-flex;align-items:center;gap:5px;}
+  .sw{width:16px;height:4px;border-radius:2px;display:inline-block;}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block;border:1px solid #0b1420;}
+  h2{font-size:15px;margin:26px 0 8px;}
+  p.lead{color:#bcd3ea;font-size:13px;margin:0 0 8px;}
+  code{background:#0a131d;border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:#9fd0ff;font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🧭 Itinerary · travel-time tool <span style="color:#5a8;font-size:14px">(#23)</span></h1>
+  <p class="sub">Pick two settlements → realistic days by foot / horse / cart over the same coarse cost grid trade uses; the route is drawn on the map.</p>
+
+  <div class="grid">
+    <!-- PANEL MOCK -->
+    <div>
+      <div class="panel">
+        <div class="ph"><span>🧭 Itinerary · travel time</span><span style="color:#7a90a8">✕</span></div>
+        <div class="pb">
+          <div class="row"><span>🟢</span><span class="lbl">From</span><span class="sel">Aquentia ★</span></div>
+          <div class="row"><span>🔴</span><span class="lbl">To</span><span class="sel">Vexillia Harbor</span></div>
+          <label class="chk"><input type="checkbox"> Avoid open-sea crossings (stay on one landmass)</label>
+          <button class="btn">Plot journey</button>
+
+          <div class="res">
+            <div class="head"><span class="km">1.4k km</span><span class="mode">· mostly by sea</span></div>
+            <div class="bar"><span class="bl">Overland</span><span class="track"><span class="fill" style="width:32%;background:#c98a4a"></span></span><span class="bv">450 km</span></div>
+            <div class="bar"><span class="bl">River</span><span class="track"><span class="fill" style="width:12%;background:#4a9ad0"></span></span><span class="bv">170 km</span></div>
+            <div class="bar"><span class="bl">Sea</span><span class="track"><span class="fill" style="width:56%;background:#3a7a9a"></span></span><span class="bv">780 km</span></div>
+
+            <div class="cards">
+              <div class="card"><div class="cl">🚶 On foot</div><div class="cv">25 days</div></div>
+              <div class="card"><div class="cl">🐎 By horse</div><div class="cv">15 days</div></div>
+              <div class="card"><div class="cl">🛒 By cart</div><div class="cv">31 days</div></div>
+            </div>
+            <div class="note">Water legs travel by boat/ship; the mode only sets the land pace. Terrain (relief, storms) already slows the affected legs.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MAP MOCK -->
+    <div>
+      <div class="map">
+        <svg viewBox="0 0 600 380" width="100%" preserveAspectRatio="xMidYMid meet">
+          <!-- sea -->
+          <rect width="600" height="380" fill="#0a1a24"/>
+          <!-- landmass A -->
+          <path d="M40,60 C120,30 240,40 300,90 C340,125 330,200 280,250 C220,300 90,300 60,230 C30,165 10,95 40,60 Z" fill="#1c3326" stroke="#2a4a36" stroke-width="1.5"/>
+          <!-- landmass B (island) -->
+          <path d="M420,150 C480,130 560,160 560,220 C560,280 500,320 440,300 C390,283 380,210 420,150 Z" fill="#1c3326" stroke="#2a4a36" stroke-width="1.5"/>
+          <!-- river on A -->
+          <path d="M150,95 C170,140 160,190 200,235" fill="none" stroke="#3f7fb0" stroke-width="2" opacity=".8"/>
+          <!-- faint trade routes -->
+          <g stroke="#43607a" stroke-width="1" opacity=".5" fill="none" stroke-dasharray="2 4">
+            <path d="M110,120 L230,110"/><path d="M230,110 L260,200"/><path d="M470,210 L520,250"/>
+          </g>
+          <!-- ITINERARY ROUTE: overland on A -> river -> coast -> sea crossing -> island -->
+          <path d="M110,120 C140,140 150,170 175,200 C195,225 235,235 285,235 C330,250 380,220 430,205"
+                fill="none" stroke="#e85bd0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <!-- origin / destination pins -->
+          <circle cx="110" cy="120" r="6" fill="#46d07a" stroke="#0b1420" stroke-width="1.5"/>
+          <circle cx="430" cy="205" r="6" fill="#e85b5b" stroke="#0b1420" stroke-width="1.5"/>
+          <text x="110" y="108" fill="#cfe2f6" font-size="11" text-anchor="middle">Aquentia</text>
+          <text x="430" y="193" fill="#cfe2f6" font-size="11" text-anchor="middle">Vexillia Harbor</text>
+        </svg>
+      </div>
+      <div class="cap">The journey thread (magenta) overlays the trade network: overland from the capital, down the river, then a sea crossing to the island port.</div>
+      <div class="leg">
+        <span><span class="sw" style="background:#e85bd0"></span> itinerary route</span>
+        <span><span class="dot" style="background:#46d07a"></span> origin</span>
+        <span><span class="dot" style="background:#e85b5b"></span> destination</span>
+        <span><span class="sw" style="background:#43607a"></span> trade routes (context)</span>
+      </div>
+    </div>
+  </div>
+
+  <h2>How it works</h2>
+  <p class="lead">Backend command <code>compute_itinerary(from, to, rivers, reach, desert_routes)</code> reuses the existing
+  <code>coarse_dijkstra</code> least-cost path and <code>path_metrics</code> medium-classification — no new pathfinding.
+  Each leg is tagged land / navigable-river / sea; relief slows land legs and storm/reef hazard slows sea legs (same factors trade uses).</p>
+  <p class="lead">Per-mode days = land distance ÷ mode speed + water distance ÷ boat/ship speed. Land speeds:
+  <b>foot 25</b>, <b>horse 55</b>, <b>cart 18</b> km/day; rivers 40, ship 120 km/day (the map width = one Earth circumference, so 1 cell ≈ 40075 ÷ grid-width km).
+  Ticking <i>Avoid open-sea crossings</i> sets <code>reach = 2</code> so the route stays on one landmass (or reports unreachable).</p>
+</div>
+</body>
+</html>

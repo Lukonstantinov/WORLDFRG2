@@ -145,6 +145,8 @@ export class OverlayManager {
   private windData: { samples: VectorSample[]; gridW: number; gridH: number } | null = null;
   private currentLines: Streamline[] = [];
   private tradeRoutes: TradeRoute[] = [];
+  /** #23 · the single highlighted itinerary route (world cells), or empty. */
+  private travelRoute: [number, number][] = [];
   private coinUse: CoinUseCity[] = [];
   private coinOverlayHub: number | null = null;
   /** Bank seats to mark on the map (set empty to hide). */
@@ -226,6 +228,11 @@ export class OverlayManager {
 
   drawCurrentStreamlines(lines: Streamline[]) {
     this.currentLines = lines;
+  }
+
+  /** Set (or clear with []) the highlighted point-to-point itinerary route. */
+  drawTravelRoute(points: [number, number][]) {
+    this.travelRoute = points;
   }
 
   drawTradeRoutes(routes: TradeRoute[]) {
@@ -808,6 +815,12 @@ export class OverlayManager {
       }
     }
 
+    // #23 · the chosen itinerary route — a bright magenta thread with endpoint
+    // pins, drawn over the trade network so the journey stands out.
+    if (this.visibility.travelRoute && this.travelRoute.length >= 2) {
+      this.renderTravelRoute(ctx);
+    }
+
     // Merchant layer: live family/guild routes coloured by the owning house.
     if (this.visibility.merchantRoutes && this.merchantRoutes.length > 0) {
       this.renderMerchantRoutes(ctx);
@@ -1078,6 +1091,42 @@ export class OverlayManager {
     }
     ctx.stroke();
     ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+
+  /** #23 · the highlighted itinerary route: a bright thread plus origin/destination
+   *  pins. Drawn in world cells; the antimeridian seam is split like trade routes. */
+  private renderTravelRoute(ctx: CanvasRenderingContext2D) {
+    const pts = this.travelRoute;
+    const w = Math.max(0.9, 2.4 / Math.sqrt(this.currentScale));
+    ctx.strokeStyle = "#e85bd0";
+    ctx.lineWidth = w;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.globalAlpha = 0.95;
+    const seamGap = 20;
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < pts.length; i++) {
+      const [x, y] = pts[i];
+      if (i > 0 && Math.abs(x - pts[i - 1][0]) > seamGap) started = false;
+      if (!started) { ctx.moveTo(x + 0.5, y + 0.5); started = true; }
+      else ctx.lineTo(x + 0.5, y + 0.5);
+    }
+    ctx.stroke();
+    // Endpoint pins (origin green, destination red).
+    const r = Math.max(1.2, 3 / Math.sqrt(this.currentScale));
+    const pin = (p: [number, number], fill: string) => {
+      ctx.beginPath();
+      ctx.arc(p[0] + 0.5, p[1] + 0.5, r, 0, Math.PI * 2);
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.lineWidth = Math.max(0.4, r * 0.35);
+      ctx.strokeStyle = "#0b1420";
+      ctx.stroke();
+    };
+    pin(pts[0], "#46d07a");
+    pin(pts[pts.length - 1], "#e85b5b");
     ctx.globalAlpha = 1;
   }
 
@@ -2489,6 +2538,7 @@ export class OverlayManager {
     this.windData = null;
     this.currentLines = [];
     this.tradeRoutes = [];
+    this.travelRoute = [];
     this.fisheryBanks = [];
     this.sharkZones = [];
     this.shipwormZones = [];

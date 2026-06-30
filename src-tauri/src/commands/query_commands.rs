@@ -578,6 +578,12 @@ const KM_EQUATOR: f32 = 40075.0;
 const SPEED_CARAVAN_KMD: f32 = 30.0;  // overland pack caravan
 const SPEED_SHIP_KMD: f32 = 120.0;    // coastal sailing ship
 const SPEED_RIVER_KMD: f32 = 40.0;    // river barge / boat
+// Per-traveller land speeds for the itinerary calculator (water legs always go by
+// boat/ship at SPEED_RIVER/SPEED_SHIP). A lone traveller on foot makes better time
+// than a laden pack caravan; a post-horse better still; an ox/mule cart is slowest.
+const SPEED_FOOT_KMD: f32 = 25.0;   // traveller on foot
+const SPEED_HORSE_KMD: f32 = 55.0;  // mounted / post-horse
+const SPEED_CART_KMD: f32 = 18.0;   // ox / mule cart (slow, heavy)
 
 /// Physical length (km), travel time (days) and dominant transport mode
 /// (0 land / 1 sea / 2 river) of a coarse routed path. Each coarse step spans `f`
@@ -1108,6 +1114,115 @@ pub fn compute_trade_routes(
     }
 
     Ok(routes)
+}
+
+/// A point-to-point journey over the shared coarse movement-cost grid: the routed
+/// polyline plus the physical distance split by medium (land / navigable river /
+/// sea) and the travel time for each land-travel mode. Water legs always go by
+/// boat (river) or ship (sea); the chosen mode only changes the land speed.
+#[derive(Serialize)]
+pub struct Itinerary {
+    pub points: Vec<[f32; 2]>,
+    pub reachable: bool,
+    pub km: f32,
+    pub land_km: f32,
+    pub river_km: f32,
+    pub sea_km: f32,
+    pub days_foot: f32,
+    pub days_horse: f32,
+    pub days_cart: f32,
+    /// 0 = mostly overland, 1 = mostly sea, 2 = mostly river.
+    pub dominant_mode: u8,
+}
+
+/// Travel-time / itinerary calculator (#23). Least-cost route between two world
+/// cells over the same coarse grid trade uses, then per-mode journey times. Reuses
+/// `cached_coarse_cost`, `coarse_dijkstra`, `path_metrics`'s per-segment medium
+/// classification and `world_of` (no new pathfinding). `reach == 2` (continental)
+/// blocks open-sea crossings so the route stays on one landmass.
+#[tauri::command]
+pub fn compute_itinerary(
+    from_x: u32,
+    from_y: u32,
+    to_x: u32,
+    to_y: u32,
+    rivers_json: String,
+    reach: u8,
+    desert_routes: bool,
+    db: State<'_, WorldDb>,
+) -> Result<Itinerary, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let empty = Itinerary {
+        points: vec![], reachable: false, km: 0.0, land_km: 0.0, river_km: 0.0,
+        sea_km: 0.0, days_foot: 0.0, days_horse: 0.0, days_cart: 0.0, dominant_mode: 0,
+    };
+    if grid_w == 0 || grid_h == 0 { return Ok(empty); }
+
+    let world = db.cached_tiles_with_conn(&conn)?;
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h,
+        &rivers_json, reach == 2, desert_routes, 0.0, 0, 0)?;
+    let km_per_cell = KM_EQUATOR / grid_w as f32;
+
+    let start = cc.cidx((from_x / cc.f).min(cc.cw as u32 - 1) as i32,
+                        (from_y / cc.f).min(cc.ch as u32 - 1) as i32);
+    let goal = cc.cidx((to_x / cc.f).min(cc.cw as u32 - 1) as i32,
+                       (to_y / cc.f).min(cc.ch as u32 - 1) as i32);
+
+    let path = match coarse_dijkstra(&cc, start, goal) {
+        Some(p) => p,
+        None => return Ok(Itinerary {
+            points: vec![cc.world_of(start), cc.world_of(goal)], ..empty
+        }),
+    };
+
+    // Per-medium effective distance (km × terrain factor) mirrors `path_metrics`:
+    // relief slows land legs; storm/reef hazard slows sea legs.
+    let (mut land_km, mut river_km, mut sea_km) = (0.0f32, 0.0f32, 0.0f32);
+    let (mut land_eff, mut river_eff, mut sea_eff) = (0.0f32, 0.0f32, 0.0f32);
+    let (mut land_n, mut sea_n, mut river_n) = (0u32, 0u32, 0u32);
+    for w in path.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let ax = (a as i32) % cc.cw; let ay = (a as i32) / cc.cw;
+        let bx = (b as i32) % cc.cw; let by = (b as i32) / cc.cw;
+        let mut dx = (ax - bx).abs(); if dx > cc.cw / 2 { dx = cc.cw - dx; }
+        let dy = (ay - by).abs();
+        let diag = dx != 0 && dy != 0;
+        let seg_km = (if diag { std::f32::consts::SQRT_2 } else { 1.0 }) * cc.f as f32 * km_per_cell;
+        let (a_land, b_land) = (cc.is_land[a], cc.is_land[b]);
+        let (a_riv, b_riv) = (cc.is_river[a], cc.is_river[b]);
+        if a_land && b_land && (a_riv || b_riv) {
+            river_n += 1;
+            river_km += seg_km;
+            river_eff += seg_km * (1.0 + 0.4 * ((cc.elev[a] + cc.elev[b]) * 0.5));
+        } else if !a_land || !b_land {
+            sea_n += 1;
+            sea_km += seg_km;
+            let hz = ((cc.sea_hazard[a] + cc.sea_hazard[b]) * 0.5).clamp(0.0, 1.0);
+            sea_eff += seg_km * (1.0 + 0.8 * hz);
+        } else {
+            land_n += 1;
+            land_km += seg_km;
+            land_eff += seg_km * (1.0 + 1.6 * ((cc.elev[a] + cc.elev[b]) * 0.5));
+        }
+    }
+    let water_days = river_eff / SPEED_RIVER_KMD + sea_eff / SPEED_SHIP_KMD;
+    let dominant_mode = if sea_n >= land_n && sea_n >= river_n { 1 }
+        else if river_n > land_n { 2 } else { 0 };
+
+    Ok(Itinerary {
+        points: path.iter().map(|&c| cc.world_of(c)).collect(),
+        reachable: true,
+        km: land_km + river_km + sea_km,
+        land_km, river_km, sea_km,
+        days_foot: land_eff / SPEED_FOOT_KMD + water_days,
+        days_horse: land_eff / SPEED_HORSE_KMD + water_days,
+        days_cart: land_eff / SPEED_CART_KMD + water_days,
+        dominant_mode,
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

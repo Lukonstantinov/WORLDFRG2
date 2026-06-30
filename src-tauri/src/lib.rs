@@ -36,6 +36,7 @@ pub fn run() {
             query_commands::get_overlay_vectors,
             query_commands::get_current_streamlines,
             query_commands::compute_trade_routes,
+            query_commands::compute_itinerary,
             query_commands::compute_fishery_banks,
             query_commands::compute_shark_zones,
             query_commands::compute_shipworm_zones,

@@ -1262,6 +1262,21 @@ export interface Settlement {
   dead?: boolean;   // population collapsed → drawn as a black cross, not a dot
 }
 
+/** A point-to-point journey over the shared coarse cost grid (#23 itinerary).
+ *  Mirrors the Rust `Itinerary` struct in query_commands.rs. */
+export interface Itinerary {
+  points: [number, number][]; // routed polyline in world cells
+  reachable: boolean;
+  km: number;
+  land_km: number;
+  river_km: number;
+  sea_km: number;
+  days_foot: number;
+  days_horse: number;
+  days_cart: number;
+  dominant_mode: number; // 0 land · 1 sea · 2 river
+}
+
 /** One people's territory for the Peoples overlay (compute_culture_regions). */
 export interface CultureRegion {
   cells: [number, number][]; // coarse cell top-left world coords

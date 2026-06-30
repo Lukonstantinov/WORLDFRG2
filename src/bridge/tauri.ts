@@ -227,6 +227,25 @@ export async function computeTradeRoutes(
   });
 }
 
+/** Travel-time / itinerary between two world cells over the shared coarse cost
+ *  grid (#23). `reach`: 2 = continental (no open-sea crossings), else sea allowed. */
+export async function computeItinerary(
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number,
+  rivers: { points: [number, number][] }[],
+  reach: number,
+  desertRoutes: boolean,
+): Promise<import("../types").Itinerary> {
+  return invoke("compute_itinerary", {
+    fromX, fromY, toX, toY,
+    riversJson: JSON.stringify(rivers),
+    reach,
+    desertRoutes,
+  });
+}
+
 /** DLC 3.5 · the live campaign's dynamic trade-flow trunks (last year's actual
  *  shipped volume, routed over the cost grid + bundled; width ∝ volume). */
 export async function campaignGetTradeFlow(

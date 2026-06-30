@@ -17,6 +17,9 @@ export function WindowBar() {
     { label: "🏬 Depots", on: s.showWarehouses, set: s.setShowWarehouses },
     { label: "📜 Futures", on: s.showFutures, set: s.setShowFutures },
     { label: "🔀 Trade", on: s.showTradeMatrix, set: s.setShowTradeMatrix },
+    { label: "🧭 Itinerary", on: s.showItinerary, set: s.setShowItinerary },
+    { label: "📊 Economy", on: s.showEconomyDashboard, set: s.setShowEconomyDashboard },
+    { label: "📖 Codex", on: s.showGoodsCodex, set: s.setShowGoodsCodex },
   ];
   const chrome: { label: string; on: boolean; set: (v: boolean) => void }[] = [
     { label: "◧ Workflow", on: s.showWorkflow, set: s.setShowWorkflow },

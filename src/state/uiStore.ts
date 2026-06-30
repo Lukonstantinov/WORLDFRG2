@@ -111,6 +111,16 @@ interface UIStore {
   showSpeculation: boolean;
   /** DLC 3.5 · the Coin & Credit (currencies / banks / crashes / schematics) panel. */
   showCoinCredit: boolean;
+  /** #23 · Itinerary / travel-time panel open. */
+  showItinerary: boolean;
+  /** #30/#29 · Economy Dashboard (price index / inequality) panel open. */
+  showEconomyDashboard: boolean;
+  /** #35/#36/#37 · Goods Codex (provenance / history / scarcity) panel open. */
+  showGoodsCodex: boolean;
+  /** Itinerary routed polyline (world cells) to draw on the map, or null. */
+  travelRoute: [number, number][] | null;
+  /** Goods Codex: the good whose provenance/history/scarcity is shown, or null. */
+  codexGood: string | null;
   /** Colonial Office — empire-wide colony/outpost roster + founding-gate diagnostics. */
   showColonial: boolean;
   /** Dedicated Bank panel (balance-sheet charts / loans & deals / schematic / info). */
@@ -177,6 +187,11 @@ interface UIStore {
   setShowHouses: (v: boolean) => void;
   setShowCityRanking: (v: boolean) => void;
   setShowSpeculation: (v: boolean) => void;
+  setShowItinerary: (v: boolean) => void;
+  setShowEconomyDashboard: (v: boolean) => void;
+  setShowGoodsCodex: (v: boolean) => void;
+  setTravelRoute: (pts: [number, number][] | null) => void;
+  setCodexGood: (g: string | null) => void;
   setShowCoinCredit: (v: boolean) => void;
   setShowColonial: (v: boolean) => void;
   setShowBank: (v: boolean) => void;
@@ -229,6 +244,7 @@ export const useUIStore = create<UIStore>((set) => ({
     houseControl: false, merchantRoutes: false, futures: false, dynamicFlow: false,
     colonies: true,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
+    travelRoute: false, goodScarcity: false, toponyms: false,
     ...Object.fromEntries(GOOD_DEFS.map((g) => [goodOverlayKey(g.name), false])),
   },
   layerOpacity: 1,
@@ -258,6 +274,11 @@ export const useUIStore = create<UIStore>((set) => ({
   showCityRanking: false,
   showSpeculation: false,
   showCoinCredit: false,
+  showItinerary: false,
+  showEconomyDashboard: false,
+  showGoodsCodex: false,
+  travelRoute: null,
+  codexGood: null,
   showColonial: false,
   showBank: false,
   selectedBankIdx: null,
@@ -341,6 +362,11 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowCityRanking: (v) => set({ showCityRanking: v }),
   setShowSpeculation: (v) => set({ showSpeculation: v }),
   setShowCoinCredit: (v) => set({ showCoinCredit: v }),
+  setShowItinerary: (v) => set({ showItinerary: v }),
+  setShowEconomyDashboard: (v) => set({ showEconomyDashboard: v }),
+  setShowGoodsCodex: (v) => set({ showGoodsCodex: v }),
+  setTravelRoute: (pts) => set({ travelRoute: pts }),
+  setCodexGood: (g) => set({ codexGood: g }),
   setShowColonial: (v) => set({ showColonial: v }),
   setShowBank: (v) => set({ showBank: v }),
   setSelectedBankIdx: (i) => set({ selectedBankIdx: i }),
