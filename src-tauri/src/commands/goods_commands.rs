@@ -65,7 +65,19 @@ pub struct PreviewGrid {
 #[tauri::command]
 pub fn preview_good_score(spec: GoodSpec, db: State<'_, WorldDb>) -> Result<PreviewGrid, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let buf = crate::sim::world_buffer::WorldBuffer::load(&conn)?;
+    // Load ONLY the columns the suitability scorer reads (good_score / envelope_score).
+    // Loading ColumnSet::ALL here pulled in the 45-wide `goods` array plus the
+    // salinity/shark/shipworm/storm/reef/disease columns — none of which the preview
+    // touches — allocating well over a gigabyte on a large world just to draw a
+    // 220×110 thumbnail. A failed allocation aborts the process, so clicking a good
+    // to preview its minimap could crash the app. This minimal set avoids that.
+    use crate::sim::world_buffer::ColumnSet;
+    let cols = ColumnSet::TERRAIN | ColumnSet::ELEVATION | ColumnSet::SEA_DEPTH
+        | ColumnSet::SHELF | ColumnSet::CURRENTS | ColumnSet::DIST_OCEAN
+        | ColumnSet::TEMPERATURE | ColumnSet::PRECIPITATION | ColumnSet::KOPPEN
+        | ColumnSet::VOLCANIC | ColumnSet::FERTILITY | ColumnSet::FISHERY
+        | ColumnSet::HABITABILITY;
+    let buf = crate::sim::world_buffer::WorldBuffer::load_with(&conn, cols)?;
     let (pw, ph) = (220u32, 110u32);
     let data = crate::sim::biological::preview_score_grid(&buf, &spec, pw, ph);
     // Coarse land mask at the same resolution (same nearest-sample mapping as

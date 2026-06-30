@@ -493,6 +493,9 @@ pub struct HubDetail {
     #[serde(default)] pub estate_good: String,
     /// Buildings erected here: (name, one-line effect) — for the inspector.
     #[serde(default)] pub structures: Vec<(String, String)>,
+    /// Trade-base patron: the merchant house developing this city as a base of
+    /// operations (empty = none). See docs/TRADE_BASE_MECHANIC_PLAN.md.
+    #[serde(default)] pub patron: String,
     /// DLC 3 · the polis government of this seat (council + fiscal policy + this
     /// city's speculation read). None for estates / unsettled hubs.
     #[serde(default)] pub government: Option<Government>,
@@ -1195,6 +1198,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         house_ledger_prev: Vec::new(),
         house_barred: Vec::new(),
         colonizable: econ.colonizable_sites.clone(),
+        hub_patron: vec![],
         colony_supply: Vec::new(),
         diag_shipments: 0,
         diag_by_house: 0,
@@ -1222,11 +1226,47 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         trade_last: vec![],
         trade_hist: vec![],
     };
+    // Backfill the colonization pool if the saved economy predates the feature (its
+    // `colonizable_sites` deserialized to the serde default — empty). Without this a
+    // campaign built on an older economy snapshot can NEVER found colonies/outposts.
+    if sim.colonizable.is_empty() {
+        let hub_xy: Vec<(f32, f32)> = sim.hubs.iter().map(|h| (h.x, h.y)).collect();
+        if let Ok(sites) = recompute_colonizable(&db, &conn, &hub_xy) {
+            sim.colonizable = sites;
+        }
+    }
     sim.rebuild_routes();
     sim.seed_initial_guilds(); // civic guilds for cities already ≥ 50k people
     set_sim(&db, &sim)?;
     persist_campaign(&db, &conn)?; // write the fresh campaign to the DB immediately
     Ok(build_snapshot(&sim))
+}
+
+/// Below this many remaining sites, `campaign_advance` recomputes the colonization
+/// pool from live tiles. The tick sim has no WorldBuffer, so it can never refill the
+/// pool itself; gating on a low floor keeps the (cheap) recompute rare.
+const COLONIZE_POOL_FLOOR: usize = 8;
+
+/// Recompute the empty-land colonization pool from current tile data, excluding land
+/// near any EXISTING hub (cities + already-founded colonies/outposts, so consumed
+/// sites are never re-added). Mirrors the Economy step's `compute_colonizable_sites`
+/// inputs. This is what keeps colonization alive across a long campaign and unsticks
+/// old saves whose one-time pool was empty or drained.
+fn recompute_colonizable(
+    db: &WorldDb,
+    conn: &Connection,
+    hub_xy: &[(f32, f32)],
+) -> Result<Vec<crate::sim::tick::ColonizeSite>, String> {
+    let grid_w: u32 = metadata::get_meta(conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+    let specs = crate::commands::goods_commands::load_world_goods(conn);
+    let base_value: Vec<f32> = specs.iter().map(|s| s.base_value.max(0.0)).collect();
+    let world = db.cached_tiles_with_conn(conn)?;
+    Ok(crate::commands::query_commands::compute_colonizable_sites(
+        &world, grid_w, grid_h, hub_xy, &base_value))
 }
 
 /// Advance the living-trade sim by `ticks` days. The sim is mutated in place in the
@@ -1248,6 +1288,22 @@ pub async fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<Camp
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
         let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
         ensure_campaign_loaded(&mut cache, &conn)?;
+        // Self-heal the colonization pool BEFORE the tick if it has run dry — an old
+        // save that predates the feature, or a long campaign that consumed its
+        // one-time pool, would otherwise be stuck forever at "0 colony sites in
+        // range". Gated on a low floor so the tile recompute runs rarely. We hold
+        // `conn` here (needed for tiles); the heavy tick below still releases it.
+        let need_sites = cache.sim.as_ref()
+            .map(|s| s.colonizable.len() < COLONIZE_POOL_FLOOR).unwrap_or(false);
+        if need_sites {
+            let hub_xy: Vec<(f32, f32)> = cache.sim.as_ref().unwrap()
+                .hubs.iter().map(|h| (h.x, h.y)).collect();
+            if let Ok(sites) = recompute_colonizable(&db, &conn, &hub_xy) {
+                if !sites.is_empty() {
+                    if let Some(sim) = cache.sim.as_mut() { sim.colonizable = sites; }
+                }
+            }
+        }
         let stale = cache.last_persist.map(|t| t.elapsed().as_secs_f32() > 5.0).unwrap_or(true);
         let year_before = cache.sim.as_ref()
             .ok_or_else(|| "No active campaign sim — start it first.".to_string())?
@@ -1937,6 +1993,8 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             crate::sim::tick::structure_label(s).to_string(),
             crate::sim::tick::structure_effect(s).to_string(),
         )).collect(),
+        patron: sim.hub_patron.get(hi).copied().filter(|&p| p >= 0)
+            .and_then(|p| sim.houses.get(p as usize)).map(|h| h.name.clone()).unwrap_or_default(),
         government,
         treasury: hub.treasury,
         finance: Some(hub.finance.clone()),

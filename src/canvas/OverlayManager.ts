@@ -253,9 +253,10 @@ export class OverlayManager {
   drawTradeRoutes(routes: TradeRoute[]) {
     this.tradeRoutes = routes;
     // The road network changed → re-snap any already-loaded house web / futures
-    // lanes onto the new routes so they keep following what's drawn.
+    // lanes / merchant routes onto the new routes so they keep following what's drawn.
     this.recomputeHouseNetwork();
     this.routeFuturesLanes();
+    this.routeMerchantRoutes();
   }
 
   /** Coin-usage overlay data + the selected coin (mint hub id) to highlight. */
@@ -427,6 +428,17 @@ export class OverlayManager {
     }
   }
 
+  /** Snap every merchant route onto the existing trade routes (a→b). Cached on each
+   *  route's `path` so we run Dijkstra only when the route set or the road network
+   *  changes — never per frame. A route with no corridor path is left `path`-less
+   *  and SKIPPED at draw time (we never bridge with a straight slash). */
+  private routeMerchantRoutes() {
+    for (const r of this.merchantRoutes) {
+      const path = this.routeAlongTradeRoutes(r.a, r.b);
+      r.path = path && path.length >= 2 ? path : undefined;
+    }
+  }
+
   drawFisheryBanks(banks: FisheryBank[]) {
     this.fisheryBanks = banks;
   }
@@ -485,6 +497,8 @@ export class OverlayManager {
   drawMerchantRoutes(routes: MerchantRoute[], gridW: number) {
     this.merchantRoutes = routes;
     if (gridW > 0) this.worldW = gridW;
+    // Snap each route onto the existing trade routes (roads/sea-lanes).
+    this.routeMerchantRoutes();
   }
 
   /** Transient highlight of one settlement's trade flows (Trade ▸ Flows subtab):
@@ -1517,25 +1531,36 @@ export class OverlayManager {
     if (maxVol <= 0) return;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
+    const W = this.worldW;
     const dash = Math.max(1.5, 3 / Math.sqrt(this.currentScale));
     for (const r of this.merchantRoutes) {
-      const ax = r.a[0] + 0.5, ay = r.a[1] + 0.5, bx = r.b[0] + 0.5, by = r.b[1] + 0.5;
-      if (this.worldW > 0 && Math.abs(ax - bx) > this.worldW / 2) continue; // wrap seam
+      // Stroke the ACTUAL corridor (roads/sea-lanes), never a straight slash. If no
+      // path could be snapped (trade-routes layer not built / endpoints off-network)
+      // we skip the route rather than draw a diagonal line across the terrain.
+      const pts = r.path;
+      if (!pts || pts.length < 2) continue;
       const norm = r.volume / maxVol;
       ctx.globalAlpha = 0.5 + 0.4 * norm;
       ctx.strokeStyle = r.color || "#cccccc";
       ctx.lineWidth = Math.max(0.5, (0.8 + norm * 4.0) / Math.sqrt(this.currentScale));
       ctx.setLineDash(r.sea ? [] : [dash, dash]);
       ctx.beginPath();
-      ctx.moveTo(ax, ay);
-      ctx.lineTo(bx, by);
+      let started = false;
+      for (let i = 0; i < pts.length; i++) {
+        const px = pts[i][0] + 0.5, py = pts[i][1] + 0.5;
+        if (i > 0 && W > 0 && Math.abs(px - (pts[i - 1][0] + 0.5)) > W / 2) {
+          ctx.stroke(); ctx.beginPath(); started = false; // break at the wrap seam
+        }
+        if (!started) { ctx.moveTo(px, py); started = true; } else { ctx.lineTo(px, py); }
+      }
       ctx.stroke();
       ctx.setLineDash([]);
       const dotR = Math.max(0.8, 1.6 / Math.sqrt(this.currentScale));
       ctx.globalAlpha = 0.85;
       ctx.fillStyle = r.color || "#cccccc";
-      ctx.beginPath(); ctx.arc(ax, ay, dotR, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(bx, by, dotR, 0, Math.PI * 2); ctx.fill();
+      const a = pts[0], b = pts[pts.length - 1];
+      ctx.beginPath(); ctx.arc(a[0] + 0.5, a[1] + 0.5, dotR, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(b[0] + 0.5, b[1] + 0.5, dotR, 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalAlpha = 1;
     ctx.setLineDash([]);
