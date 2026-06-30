@@ -606,6 +606,11 @@ export async function campaignGetHouses(): Promise<HouseBrief[]> {
   return invoke("campaign_get_houses");
 }
 
+/** #29 · wealth-inequality (Gini) + social-mobility snapshot from the live sim. */
+export async function campaignGetInequality(): Promise<import("../types").InequalitySnapshot> {
+  return invoke("campaign_get_inequality");
+}
+
 /** DLC 4 · the derived typed Pops of one hub (Nations & POPs foundation). */
 export async function campaignGetPops(hub: number): Promise<PopBrief[]> {
   return invoke("campaign_get_pops", { hub });

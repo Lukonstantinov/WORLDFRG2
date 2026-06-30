@@ -18,6 +18,7 @@ import { SpeculationPanel } from "./ui/SpeculationPanel";
 import { CoinCreditPanel } from "./ui/CoinCreditPanel";
 import { ItineraryPanel } from "./ui/ItineraryPanel";
 import { GoodsCodexPanel } from "./ui/GoodsCodexPanel";
+import { EconomyDashboardPanel } from "./ui/EconomyDashboardPanel";
 import { ColonialPanel } from "./ui/ColonialPanel";
 import { BankPanel } from "./ui/BankPanel";
 import { NewsFeedPanel } from "./ui/NewsFeedPanel";
@@ -544,6 +545,7 @@ export default function App() {
           <CoinCreditPanel />
           <ItineraryPanel />
           <GoodsCodexPanel />
+          <EconomyDashboardPanel />
           <ColonialPanel />
           <BankPanel />
           <NewsFeedPanel />

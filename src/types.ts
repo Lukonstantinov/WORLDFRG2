@@ -1262,6 +1262,27 @@ export interface Settlement {
   dead?: boolean;   // population collapsed → drawn as a black cross, not a dot
 }
 
+/** #29 · one year's merchant-house wealth-inequality reading. */
+export interface InequalityPoint {
+  year: number;
+  gini: number;
+  active: number;
+  mean_wealth: number;
+  top10_share: number;
+}
+/** #29 · wealth inequality + social mobility snapshot (campaign sim). */
+export interface InequalitySnapshot {
+  active: boolean;
+  year: number;
+  gini_now: number;
+  top10_share_now: number;
+  active_houses: number;
+  defunct_houses: number;
+  founded_total: number;
+  rank_churn: number;
+  series: InequalityPoint[]; // oldest → newest
+}
+
 /** A point-to-point journey over the shared coarse cost grid (#23 itinerary).
  *  Mirrors the Rust `Itinerary` struct in query_commands.rs. */
 export interface Itinerary {

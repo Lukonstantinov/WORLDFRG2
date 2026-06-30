@@ -2646,6 +2646,134 @@ pub fn campaign_get_houses(db: State<'_, WorldDb>) -> Result<Vec<HouseBrief>, St
     })
 }
 
+/// #29 · one year's wealth-inequality reading among the merchant houses.
+#[derive(Serialize, Clone, Default)]
+pub struct InequalityPoint {
+    pub year: u32,
+    pub gini: f32,        // 0 = perfectly equal, →1 = one house holds it all
+    pub active: u32,      // houses with positive wealth that year
+    pub mean_wealth: f32,
+    pub top10_share: f32, // wealth share of the richest 10%
+}
+
+/// #29 · the wealth-inequality & social-mobility snapshot for the Economy
+/// Dashboard. Pure read over the campaign sim — Gini now, a yearly Gini/top-share
+/// trend reconstructed from each house's `wealth_history`, plus turnover stats.
+#[derive(Serialize, Clone, Default)]
+pub struct InequalitySnapshot {
+    pub active: bool,
+    pub year: u32,
+    pub gini_now: f32,
+    pub top10_share_now: f32,
+    pub active_houses: u32,
+    pub defunct_houses: u32,
+    pub founded_total: u32,
+    /// 0 = a frozen pecking order, →1 = ranks reshuffle wildly year to year.
+    pub rank_churn: f32,
+    pub series: Vec<InequalityPoint>, // oldest → newest
+}
+
+/// Gini coefficient of a list of (positive) wealths. 0 = equal, →1 = concentrated.
+fn gini_of(mut v: Vec<f32>) -> f32 {
+    v.retain(|&x| x > 0.0);
+    let n = v.len();
+    if n < 2 { return 0.0; }
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let sum: f32 = v.iter().sum();
+    if sum <= 0.0 { return 0.0; }
+    let mut cum = 0.0f32;
+    for (i, &x) in v.iter().enumerate() { cum += (i as f32 + 1.0) * x; }
+    (((2.0 * cum) / (n as f32 * sum)) - (n as f32 + 1.0) / n as f32).clamp(0.0, 1.0)
+}
+
+/// Wealth share held by the richest 10% (at least one house).
+fn top10_share_of(mut v: Vec<f32>) -> f32 {
+    v.retain(|&x| x > 0.0);
+    if v.is_empty() { return 0.0; }
+    v.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    let total: f32 = v.iter().sum();
+    if total <= 0.0 { return 0.0; }
+    let k = ((v.len() as f32 * 0.1).ceil() as usize).max(1);
+    v.iter().take(k).sum::<f32>() / total
+}
+
+#[tauri::command]
+pub fn campaign_get_inequality(db: State<'_, WorldDb>) -> Result<InequalitySnapshot, String> {
+    use crate::sim::tick::TICKS_PER_YEAR;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let Some(sim) = get_sim(&db, &conn)? else { return Ok(InequalitySnapshot::default()) };
+    let cur_year = sim.tick / TICKS_PER_YEAR;
+
+    // Current inequality among living houses (live wealth).
+    let now_vals: Vec<f32> = sim.houses.iter().filter(|h| !h.defunct).map(|h| h.wealth).collect();
+    let gini_now = gini_of(now_vals.clone());
+    let top10_share_now = top10_share_of(now_vals);
+    let active_houses = sim.houses.iter().filter(|h| !h.defunct).count() as u32;
+    let defunct_houses = sim.houses.iter().filter(|h| h.defunct).count() as u32;
+
+    // Yearly trend reconstructed from per-house wealth_history (aligned from the
+    // most-recent sample backwards; each house contributes only the years it has).
+    let maxlen = sim.houses.iter().map(|h| h.wealth_history.len()).max().unwrap_or(0);
+    let span = maxlen.min(40);
+    let mut series: Vec<InequalityPoint> = Vec::new();
+    for o in (0..span).rev() {
+        let mut vals: Vec<f32> = Vec::new();
+        for h in &sim.houses {
+            let len = h.wealth_history.len();
+            if len > o {
+                let w = h.wealth_history[len - 1 - o];
+                if w > 0.0 { vals.push(w); }
+            }
+        }
+        if vals.len() < 2 { continue; }
+        let active = vals.len() as u32;
+        let mean = vals.iter().sum::<f32>() / active as f32;
+        series.push(InequalityPoint {
+            year: cur_year.saturating_sub(o as u32),
+            gini: gini_of(vals.clone()),
+            active,
+            mean_wealth: mean,
+            top10_share: top10_share_of(vals),
+        });
+    }
+
+    // Social mobility: average normalized change in wealth RANK between the two
+    // most recent yearly samples (0 = unchanged hierarchy, higher = more churn).
+    let pairs: Vec<(f32, f32)> = sim.houses.iter().filter_map(|h| {
+        let len = h.wealth_history.len();
+        if len >= 2 {
+            let (now, prev) = (h.wealth_history[len - 1], h.wealth_history[len - 2]);
+            if now > 0.0 && prev > 0.0 { Some((now, prev)) } else { None }
+        } else { None }
+    }).collect();
+    let rank_churn = if pairs.len() >= 2 {
+        let n = pairs.len();
+        let rank_by = |sel: &dyn Fn(&(f32, f32)) -> f32| -> Vec<usize> {
+            let mut order: Vec<usize> = (0..n).collect();
+            order.sort_by(|&a, &b| sel(&pairs[b]).partial_cmp(&sel(&pairs[a])).unwrap_or(std::cmp::Ordering::Equal));
+            let mut rank = vec![0usize; n];
+            for (r, &idx) in order.iter().enumerate() { rank[idx] = r; }
+            rank
+        };
+        let rank_now = rank_by(&|p| p.0);
+        let rank_prev = rank_by(&|p| p.1);
+        let sum: f32 = (0..n).map(|k| (rank_now[k] as i32 - rank_prev[k] as i32).unsigned_abs() as f32).sum();
+        (sum / n as f32) / ((n as f32 - 1.0).max(1.0))
+    } else { 0.0 };
+
+    Ok(InequalitySnapshot {
+        active: true,
+        year: cur_year,
+        gini_now,
+        top10_share_now,
+        active_houses,
+        defunct_houses,
+        founded_total: sim.houses.len() as u32,
+        rank_churn,
+        series,
+    })
+}
+
 /// DLC 3 · the cached yearly speculation read (per-polis bubble risk + the
 /// generated causal reason-chain). Empty until the campaign passes its first
 /// New Year. Mirrors the `compute_political` overlay payload.
