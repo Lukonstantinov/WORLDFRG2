@@ -1568,9 +1568,11 @@ const GATE_PROSPERITY_MIN: f32 = 0.25;
 const GATE_STARVING_MAX: f32 = 0.7;
 // A site counts as colonisable when it can part-feed itself OR is rich in trade
 // goods (matches maybe_found_settlement_colony's relaxed viability floor).
-const GATE_FERTILE_SITE: f32 = 0.20;
-const GATE_TRADE_SITE: f32 = 0.25;
-const GATE_HOP_REACH_FRAC: f32 = 0.28;
+// Mirror of COLONY_MIN_FERTILE / COLONY_MIN_TRADE / COLONY_HOP_REACH_FRAC in
+// sim/tick.rs — keep these in lockstep or the gate will lie about "0 in range".
+const GATE_FERTILE_SITE: f32 = 0.12;
+const GATE_TRADE_SITE: f32 = 0.18;
+const GATE_HOP_REACH_FRAC: f32 = 0.42;
 const GATE_MAX_SETTLEMENT_COLONIES: u32 = 24;
 
 /// Read-only snapshot of the settlement-colony founding gates, for the Colonial

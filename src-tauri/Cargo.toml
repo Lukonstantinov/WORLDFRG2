@@ -38,6 +38,14 @@ tauri-build = { version = "2", features = [] }
 # several times while keeping usable backtraces for our own code.
 [profile.dev]
 debug = "line-tables-only"        # backtraces, but drop the heavy full symbol tables
+# The campaign tick is a numeric-hot simulation; at the default dev opt-level 0 it
+# runs ~6× slower than optimized (≈1.3ms→0.23ms/tick at 160 hubs, far worse late
+# campaign), which is the "campaign too slow" the user feels in `tauri dev`.
+# opt-level 2 optimizes OUR crate's hot loops while keeping a fast incremental
+# rebuild. `overflow-checks`/`debug-assertions` stay ON (dev defaults), so the
+# year-30 index/overflow panic is still caught — we only make the math fast.
+opt-level = 2
 
 [profile.dev.package."*"]
 debug = false                     # dependencies are rarely stepped into → no debuginfo
+opt-level = 3                     # fully optimize deps (compiled once; rarely rebuilt)

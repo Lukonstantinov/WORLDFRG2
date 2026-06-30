@@ -2124,16 +2124,12 @@ export class OverlayManager {
         ctx.closePath();
         ctx.fill();
       };
-      if (this.houseNetwork.length > 0) {
-        for (const path of this.houseNetwork) { if (path.length >= 2) drawRedPath(path); }
-      } else {
-        // Fallback: straight web until the routed paths load.
-        for (const p of selPts) {
-          if (this.worldW > 0 && Math.abs(p[0] - sel.seat[0]) > this.worldW / 2) continue; // wrap seam
-          if (p[0] === sel.seat[0] && p[1] === sel.seat[1]) continue;
-          drawRedPath([sel.seat, p]);
-        }
-      }
+      // Corridor-only: each path in `houseNetwork` is already snapped onto the trade
+      // routes (`recomputeHouseNetwork`). We NEVER bridge with a straight slash — a
+      // city whose corridor can't be snapped is simply not drawn (matches the merchant
+      // and futures layers). The old straight-web fallback is what drew the wrong
+      // diagonal lines the user saw.
+      for (const path of this.houseNetwork) { if (path.length >= 2) drawRedPath(path); }
     }
 
     // ── Focused house markers: offices = small SQUARES, BAILOS = circle+triangle

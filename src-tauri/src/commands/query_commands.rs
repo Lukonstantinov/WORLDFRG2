@@ -3325,27 +3325,31 @@ pub(crate) fn compute_colonizable_sites(
             ((dx * dx + dy * dy) as f32).sqrt()
         }).fold(f32::MAX, f32::min)
     };
-    let min_dist = (cw as f32 * 0.05).max(5.0);
+    // Lowered so sites may sit a little nearer existing cities (more reachable, the
+    // "0 in range" fix) while still keeping a buffer so colonies aren't suburbs.
+    let min_dist = (cw as f32 * 0.04).max(4.0);
     let mut cands: Vec<(f32, ColonizeSite)> = Vec::new();
     for cy in 0..ch {
         for cx in 0..cw {
             let ci = (cy * cw + cx) as usize;
             if !is_land[ci] { continue; }
-            // Skip unproductive flatland — UNLESS it holds valuable trade goods (a
-            // lean but cargo-rich frontier is worth an outpost/colony) or highlands.
-            if fert[ci] < 0.30 && elev[ci] < 0.45 && tval[ci] < 0.20 { continue; }
+            // Skip only genuinely worthless flatland. Thresholds lowered so lean but
+            // cargo-rich frontier (low fertility, some trade goods) qualifies — the
+            // colony/outpost leans on trade, not farmland (user ask).
+            if fert[ci] < 0.22 && elev[ci] < 0.45 && tval[ci] < 0.12 { continue; }
             if min_settle_dist(cx, cy) < min_dist { continue; }
             let cst = coastal(cx, cy);
             let kind_hint = if cst && fert[ci] < 0.40 { 4 }
                 else if elev[ci] > 0.45 { 2 }
                 else if fert[ci] > 0.55 { 1 }
                 else { 3 };
-            // Rank candidates by farmland + highland + coast + the trade-goods prize,
-            // so trade-rich sites survive the greedy spread alongside fertile ones.
-            let score = fert[ci]
+            // Rank candidates leaning on the TRADE-GOODS prize over farmland, so the
+            // greedy spatial spread keeps cargo-rich frontier sites (not just fertile
+            // belts) — what makes trade outposts/colonies reachable.
+            let score = 0.6 * fert[ci]
                 + if elev[ci] > 0.45 { 0.2 } else { 0.0 }
-                + if cst { 0.1 } else { 0.0 }
-                + 0.6 * tval[ci];
+                + if cst { 0.15 } else { 0.0 }
+                + 1.1 * tval[ci];
             let wx = (cx as u32 * f + f / 2).min(grid_w - 1) as f32;
             let wy = (cy as u32 * f + f / 2).min(grid_h - 1) as f32;
             cands.push((score, ColonizeSite {

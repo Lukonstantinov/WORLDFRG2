@@ -112,7 +112,10 @@ const ESTATE_HOUSE_OWNER_WEALTH: f32 = 6.0;
 /// founder OR any of its offices — offices CHAIN the reach (an office is a relay
 /// "ground" from which the next hop is measured), so a network projects far while
 /// no single leg is implausibly long. The trade-reach scale, realised in the sim.
-const COLONY_HOP_REACH_FRAC: f32 = 0.28;
+// Reach of a founder/seat to a colonisable site, as a fraction of world width.
+// Raised from 0.28 so sites are far more often "in range" (the common "0 in range"
+// stall): a great city / rich house can now reach roughly half a continent away.
+const COLONY_HOP_REACH_FRAC: f32 = 0.42;
 /// Capital it takes to found a SETTLEMENT colony (heavy — a city-scale venture),
 /// pooled from the parent city treasury + optional house & bank backers.
 const COLONY_FOUND_COST: f32 = 14.0;
@@ -127,8 +130,11 @@ const COLONY_MIGRATION_FRAC: f32 = 0.06;
 /// carries a trade-rich frontier colony). HOUSE outposts ignore fertility entirely
 /// and chase trade goods. These replace the old hard fertility split between the two
 /// pools — colonies now also settle less-fertile land, outposts follow the cargo.
-const COLONY_MIN_FERTILE: f32 = 0.20;
-const COLONY_MIN_TRADE: f32 = 0.25;
+// Lowered so colonisation leans on TRADE rather than farmland (user ask): a leaner
+// site still qualifies, and a trade-rich frontier qualifies easily — its food
+// lifeline contracts cover the deficit. Outposts ignore fertility entirely.
+const COLONY_MIN_FERTILE: f32 = 0.12;
+const COLONY_MIN_TRADE: f32 = 0.18;
 /// Daily logistic population-growth rate below carrying capacity (~5%/yr peak at
 /// low population; eases to 0 at capacity). Was 0.0006 (~24%/yr — too fast).
 const POP_GROWTH_RATE: f32 = 0.0003;
@@ -6390,8 +6396,9 @@ impl CampaignSim {
             if s.fertility < COLONY_MIN_FERTILE && s.trade_value < COLONY_MIN_TRADE { continue; }
             let d = self.nearest_node_dist(&nodes, s.x, s.y);
             if d > cap { continue; }
-            // Balance self-sufficiency (fertility) against the prize (trade goods).
-            let score = (0.30 + 0.6 * s.fertility + 0.5 * s.trade_value) * (1.0 - d / cap);
+            // Weight the PRIZE (trade goods) over self-sufficiency (fertility): a
+            // colony chases cargo, leaning on its food lifeline for the rest.
+            let score = (0.25 + 0.35 * s.fertility + 1.0 * s.trade_value) * (1.0 - d / cap);
             if score > bi.1 { bi = (i, score); }
         }
         let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return };
