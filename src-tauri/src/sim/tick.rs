@@ -1560,6 +1560,15 @@ const MARRIAGE_DOWRY_FRAC: f32 = 0.08;
 const MARRIAGE_DOWRY_CAP: f32 = 500.0;
 const MARRIAGE_BREAK_CHANCE: f32 = 0.04;
 
+/// Phase 5 (flavour) · craft-guild tuning (bounded quality lift; a strike is a
+/// short, capped manufacture dent via the existing production-shock path).
+const GUILD_MAX: usize = 12;
+const GUILD_QUALITY_STEP: f32 = 0.03;
+const GUILD_QUALITY_CAP: f32 = 0.92;
+const GUILD_STRIKE_CHANCE: f32 = 0.10;
+const GUILD_STRIKE_MAG: f32 = 0.5;      // halves the good's manufacture while out
+const GUILD_HALL_STRENGTH: f32 = 0.6;   // standing at which a guildhall is raised
+
 /// Phase 4 (flavour) · kinds of notable figure, indexing `FIGURE_KINDS`.
 pub const FIGURE_KINDS: [&str; 5] =
     ["Admiral", "Demagogue", "Master Craftsman", "Great Banker", "Explorer"];
@@ -1630,6 +1639,22 @@ const PILGRIM_STABILITY: f32 = 0.10;  // faith knits the community (stability li
 const PILGRIM_LANES: usize = 4;
 const PILGRIM_FLOW: f32 = 150.0;      // overlay-only pilgrim traffic per inbound lane
 const PILGRIM_PRICE_BUMP: f32 = 1.20; // transient ritual-good demand spike (self-relaxes)
+
+/// Phase 5 (flavour) · a CRAFT GUILD — the masters of one manufactured good in a
+/// city. It steadily lifts that good's local quality, guards the craft (occasionally
+/// downing tools in a strike that halts its manufacture for a spell), and in time
+/// raises a guildhall. Dedicated list on `CampaignSim` (no TickHub churn).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CraftGuild {
+    /// Host hub index.
+    pub hub: u32,
+    /// The manufactured good the guild masters (good index).
+    pub good: u32,
+    /// Standing 0..1 (built by quality + longevity) — drives guildhall + clout.
+    pub strength: f32,
+    /// A guildhall has been raised (a one-time civic monument).
+    pub hall: bool,
+}
 
 /// Phase 4 (flavour) · a HOLY CITY / great temple. Once a year its pilgrimage
 /// season draws the faithful: a civic-stability boon, inbound pilgrim traffic, and
@@ -1839,6 +1864,12 @@ pub struct CampaignSim {
     /// rekindles the feud. `#[serde(default)]` so old saves load with none.
     #[serde(default)]
     pub alliances: Vec<(u32, u32)>,
+    /// Phase 5 (flavour) · craft guilds (one per manufacturing city), seeded once.
+    #[serde(default)]
+    pub guilds: Vec<CraftGuild>,
+    /// One-time flag: `seed_craft_guilds` has run.
+    #[serde(default)]
+    pub guilds_seeded: bool,
 }
 
 /// Deterministic 0..1 hash of three mixed inputs (splitmix64).
@@ -3380,6 +3411,8 @@ impl CampaignSim {
         // Phase 4 (flavour) · seed holy cities once (after fairs, so a holy city can
         // be chosen distinct from its component's fair town).
         if !self.holy_seeded { self.seed_holy_sites(); self.holy_seeded = true; }
+        // Phase 5 (flavour) · seed craft guilds once (manufacturing cities).
+        if !self.guilds_seeded { self.seed_craft_guilds(); self.guilds_seeded = true; }
         // Per-day compounding growth equivalent to the yearly baseline drift.
         let tech_daily = (1.0 + PROD_GROWTH_PER_YEAR).powf(1.0 / TICKS_PER_YEAR as f32);
         // Reset per-advance diagnostics.
@@ -3490,6 +3523,8 @@ impl CampaignSim {
                 self.raise_notable_figures(yr);
                 // Phase 5 (flavour) · dynastic marriages/alliances between houses.
                 self.arrange_marriages(yr);
+                // Phase 5 (flavour) · craft guilds master their craft, strike, build.
+                self.run_craft_guilds(yr);
                 for l in self.house_ledger.iter_mut() {
                     *l = LedgerAcc { year: yr, ..Default::default() };
                 }
@@ -4878,7 +4913,9 @@ impl CampaignSim {
                         }
                     }
                 }
-                "embargo" => {
+                "embargo" | "guild_strike" => {
+                    // A trade embargo, or a craft guild downing tools — the good
+                    // stops being made at that hub for the duration.
                     if e.hub >= 0 && e.good >= 0 {
                         m[e.hub as usize][e.good as usize] *= 1.0 - e.magnitude;
                     }
@@ -7242,6 +7279,77 @@ impl CampaignSim {
         });
     }
 
+    /// Phase 5 (flavour) · seed CRAFT GUILDS once — the strongest manufacturing city
+    /// for each manufactured (recipe) good gets a guild of its masters. Deterministic;
+    /// capped at `GUILD_MAX`.
+    fn seed_craft_guilds(&mut self) {
+        let n = self.hubs.len();
+        let ng = self.goods.len();
+        let mut guilds: Vec<CraftGuild> = Vec::new();
+        for g in 0..ng {
+            if self.goods[g].inputs.is_empty() { continue; } // only manufactured goods
+            // The city that makes the most of this good.
+            let mut best_hub = usize::MAX; let mut best = 0.0f32;
+            for h in 0..n {
+                if self.hubs[h].is_estate { continue; }
+                let p = self.hubs[h].production.get(g).copied().unwrap_or(0.0);
+                if p > best { best = p; best_hub = h; }
+            }
+            if best_hub != usize::MAX && best > 0.0 {
+                guilds.push(CraftGuild { hub: best_hub as u32, good: g as u32, strength: 0.3, hall: false });
+            }
+        }
+        // Keep the strongest guilds (by their host city's output) if we overflow.
+        guilds.sort_by(|a, b| {
+            let pa = self.hubs[a.hub as usize].production.get(a.good as usize).copied().unwrap_or(0.0);
+            let pb = self.hubs[b.hub as usize].production.get(b.good as usize).copied().unwrap_or(0.0);
+            pb.partial_cmp(&pa).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        guilds.truncate(GUILD_MAX);
+        guilds.sort_by_key(|gd| (gd.hub, gd.good)); // stable order
+        self.guilds = guilds;
+    }
+
+    /// Phase 5 (flavour) · run the CRAFT GUILDS yearly: lift their good's local
+    /// quality, occasionally strike (a short manufacture dent), and raise a guildhall
+    /// once the guild is strong. Bounded quality/stability; chronicle beats.
+    fn run_craft_guilds(&mut self, yr: u32) {
+        let ng = self.goods.len();
+        for gi in 0..self.guilds.len() {
+            let (hub, good) = (self.guilds[gi].hub as usize, self.guilds[gi].good as usize);
+            if hub >= self.hubs.len() || good >= ng { continue; }
+            // Master the craft: a steady, capped quality lift.
+            if self.hubs[hub].quality.len() == ng {
+                let q = self.hubs[hub].quality[good];
+                self.hubs[hub].quality[good] = (q + GUILD_QUALITY_STEP).min(GUILD_QUALITY_CAP);
+            }
+            self.guilds[gi].strength = (self.guilds[gi].strength + 0.04).min(1.0);
+            // Raise a guildhall once the guild is well-established (one-time monument).
+            if !self.guilds[gi].hall && self.guilds[gi].strength >= GUILD_HALL_STRENGTH {
+                self.guilds[gi].hall = true;
+                self.hubs[hub].sent_stability = (self.hubs[hub].sent_stability + 0.05).min(1.0);
+                let (city, gn) = (self.hubs[hub].name.clone(), self.goods[good].name.clone());
+                self.journal.push(JournalEntry {
+                    tick: self.tick, kind: "guildhall".into(), hub: hub as i32, good: good as i32,
+                    value: 0.0, text: format!("The {} guild of {} raises a grand guildhall.", gn, city),
+                });
+            }
+            // A strike: the masters down tools, halting the craft for a spell.
+            if hash01(self.seed, yr as u64 ^ 0x6111D, gi as u64) < GUILD_STRIKE_CHANCE {
+                let dur = 20 + (hash01(self.seed, yr as u64, gi as u64) * 40.0) as u32;
+                self.active_events.push(ActiveEvent {
+                    kind: "guild_strike".into(), hub: hub as i32, good: good as i32,
+                    magnitude: GUILD_STRIKE_MAG, until_tick: self.tick + dur,
+                });
+                let (city, gn) = (self.hubs[hub].name.clone(), self.goods[good].name.clone());
+                self.journal.push(JournalEntry {
+                    tick: self.tick, kind: "guild_strike".into(), hub: hub as i32, good: good as i32,
+                    value: dur as f32, text: format!("The {} guild of {} downs tools in a strike.", gn, city),
+                });
+            }
+        }
+    }
+
     /// Phase 5 (flavour) · dynastic MARRIAGES between houses. Once a year a prominent
     /// house may wed another — ending any feud between them, sealing an alliance, and
     /// exchanging a capped dowry. A broken match rekindles the feud. Deterministic;
@@ -8451,6 +8559,8 @@ mod tests {
             holy_sites: vec![],
             holy_seeded: false,
             alliances: vec![],
+            guilds: vec![],
+            guilds_seeded: false,
         };
         s.rebuild_routes();
         s
