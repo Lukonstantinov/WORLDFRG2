@@ -2,7 +2,9 @@ import { useState } from "react";
 import { useUIStore } from "../../state/uiStore";
 import { useWorldStore } from "../../state/worldStore";
 import { useViewportStore } from "../../state/viewportStore";
-import { simRunAll, simRunAllFromTerrain, finalizeWorld, saveWorldAs, persistOverlays, getWorldMeta } from "../../bridge/tauri";
+import { simRunAll, simRunAllFromTerrain, finalizeWorld, saveWorldAs, persistOverlays, getWorldMeta,
+  computePolitical, computeEconomy, computeSettlementDevelopment } from "../../bridge/tauri";
+import type { Settlement, RiverData } from "../../types";
 import { StepLandmass } from "./StepLandmass";
 import { StepElevation } from "./StepElevation";
 import { StepOceanAtmo } from "./StepOceanAtmo";
@@ -13,7 +15,6 @@ import { StepSettlements } from "./StepSettlements";
 import { StepBiological } from "./StepBiological";
 import { StepPolitical } from "./StepPolitical";
 import { StepEconomy } from "./StepEconomy";
-import { StepCampaign } from "./StepCampaign";
 import { StepToponyms } from "./StepToponyms";
 
 const STEP_INFO = [
@@ -27,7 +28,9 @@ const STEP_INFO = [
   { step: 8, label: "Biological-Trade", desc: "Shark & shipworm waters, trade-good belts, trade routes, and the regional trade matrix." },
   { step: 9, label: "Political", desc: "Re-rank settlements by trade power (route centrality + good monopoly) and map their influence." },
   { step: 10, label: "Economy", desc: "Solve the market equilibrium: stock-based prices in grain-equivalent, barter ratios, currency goods, grain & trade wealth, supply chains and chokepoints." },
-  { step: 11, label: "Living Trade", desc: "DLC 1 — advance the campaign in time. Cities produce, consume and trade each day; prices drift, wealth shifts, food estates rise and famines fall. History accrues in the chronicle." },
+  // Step 11 (Living Trade / the campaign tick) is no longer part of the Forge
+  // wizard — it lives in Chronicle mode (ChroniclePanel). Forge owns generation
+  // only; finalizing after Economy hands off to Chronicle.
   { step: 12, label: "Toponyms (optional)", desc: "Name rivers, mountains, lakes and regions in the local culture's style. Editable — rename any feature. Needs Rivers (5) + Settlements (7)." },
 ] as const;
 
@@ -44,13 +47,48 @@ export function WorkflowPanel() {
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
   const terrainParams = useUIStore((s) => s.terrainParams);
   const invalidateTiles = useViewportStore((s) => s.invalidateTiles);
-  const { setRivers, setLakes, setSettlements, setMeta } = useWorldStore();
+  const { setRivers, setLakes, setSettlements, setEconomy, setSettlementsDeveloped, setMeta } = useWorldStore();
   const meta = useWorldStore((s) => s.meta);
+  const setAppMode = useUIStore((s) => s.setAppMode);
+  const bioParams = useUIStore((s) => s.bioParams);
   const [seed, setSeed] = useState(() => Math.floor(Math.random() * 999999));
   const [plateCount, setPlateCount] = useState(16);
 
   const frozen = meta?.frozen === true;
   const canAdvance = (step: number) => stepCompleted[step] === true;
+
+  // The steps present in the Forge wizard, in order (11 removed → 10 then optional
+  // 12). Navigation walks this list so the 10→12 gap is skipped cleanly.
+  const stepOrder: number[] = STEP_INFO.map((s) => s.step);
+
+  // Chain the two query-only layers (Political → Economy) the same way their step
+  // UIs do, so "Generate Full World" leaves a fully-generated, finalize-ready world.
+  const runPoliticalAndEconomy = async (setts: Settlement[], rvs: RiverData[]) => {
+    const hubs = setts.map((s) => ({ x: s.x, y: s.y, score: s.score, population: s.population }));
+    const riverPts = rvs.map((r) => ({ points: r.points }));
+    await computePolitical(hubs, riverPts, bioParams.tradeReach, bioParams.maxCrossing,
+      bioParams.desertRoutes, bioParams.economicRegions, bioParams.piracyLevel);
+    markStepCompleted(9);
+    const econ = await computeEconomy(hubs, riverPts, bioParams.tradeReach, bioParams.maxCrossing,
+      bioParams.desertRoutes, bioParams.economicRegions, bioParams.luxuryBias, bioParams.piracyLevel,
+      bioParams.tradeSeason, bioParams.calendarMonths);
+    setEconomy(econ);
+    // Grow settlements by realized trade wealth (mirrors StepEconomy).
+    try {
+      const developed = await computeSettlementDevelopment(setts);
+      if (developed.length > 0) setSettlementsDeveloped(developed);
+    } catch { /* keep as-generated populations */ }
+    markStepCompleted(10);
+    setOverlayVisible("chokepoints", true);
+    setOverlayVisible("politicalInfluence", true);
+  };
+
+  // The single Forge → Chronicle handoff: finalize (lock + save) the world, then
+  // switch into Chronicle to play the campaign on it.
+  const finalizeAndPlay = async () => {
+    const ok = await lockAndSaveWorld();
+    if (ok) setAppMode("chronicle");
+  };
 
   const refreshMeta = async () => {
     const m = await getWorldMeta();
@@ -100,15 +138,13 @@ export function WorkflowPanel() {
   };
 
   const goNext = () => {
-    if (workflowStep < 11) {
-      setWorkflowStep((workflowStep + 1) as any);
-    }
+    const i = stepOrder.indexOf(workflowStep);
+    if (i >= 0 && i < stepOrder.length - 1) setWorkflowStep(stepOrder[i + 1] as any);
   };
 
   const goBack = () => {
-    if (workflowStep > 1) {
-      setWorkflowStep((workflowStep - 1) as any);
-    }
+    const i = stepOrder.indexOf(workflowStep);
+    if (i > 0) setWorkflowStep(stepOrder[i - 1] as any);
   };
 
   const handleRunAll = async () => {
@@ -123,10 +159,13 @@ export function WorkflowPanel() {
       invalidateTiles();
       for (let i = 1; i <= 8; i++) markStepCompleted(i);
       setLandmassSource("plates");
-      setWorkflowStep(8);
       enableAllOverlays();
-      setStatus(`World complete! ${result.rivers.length} rivers, ${result.settlements.length} settlements`);
-      await lockAndSaveWorld();
+      setStatus("Ranking trade powers & solving the economy…");
+      // Carry generation all the way through Political + Economy so the world is
+      // fully generated and finalize-ready (no mid freeze — that moves to the end).
+      await runPoliticalAndEconomy(result.settlements, result.rivers);
+      setWorkflowStep(10);
+      setStatus(`World complete! ${result.rivers.length} rivers, ${result.settlements.length} settlements — economy built. Finalize to play.`);
     } catch (err) {
       setStatus(`Error: ${err}`);
     }
@@ -150,10 +189,11 @@ export function WorkflowPanel() {
       setSettlements(result.settlements);
       invalidateTiles();
       for (let i = 2; i <= 8; i++) markStepCompleted(i);
-      setWorkflowStep(8);
       enableAllOverlays();
-      setStatus(`World complete! ${result.rivers.length} rivers, ${result.settlements.length} settlements`);
-      await lockAndSaveWorld();
+      setStatus("Ranking trade powers & solving the economy…");
+      await runPoliticalAndEconomy(result.settlements, result.rivers);
+      setWorkflowStep(10);
+      setStatus(`World complete! ${result.rivers.length} rivers, ${result.settlements.length} settlements — economy built. Finalize to play.`);
     } catch (err) {
       setStatus(`Error: ${err}`);
     }
@@ -215,43 +255,27 @@ export function WorkflowPanel() {
 
       <div style={{ borderTop: "1px solid #1a2a40", margin: "2px 0" }} />
 
-      {/* Steps \u2014 World group (1-6, geography) then Campaign group (7-10). */}
+      {/* Steps \u2014 Geography group (1-6) then Detail group (7-10): settlements,
+          trade goods, political & economy. ALL are generation and run in Forge;
+          finalizing after Economy hands the finished world to Chronicle. */}
       {STEP_INFO.map(({ step, label, desc }) => {
         const isActive = workflowStep === step;
         const isDone = stepCompleted[step] === true;
-        // Campaign steps stay locked until the world's geography is finalized.
-        const locked = step >= 7 && !frozen;
+        // Only geography steps (1-6) lock once the world is finalized (frozen);
+        // every generation step is otherwise available in Forge.
+        const locked = step <= 6 && frozen;
 
         return (
           <div key={step}>
           {step === 7 && (
             <div style={{ borderTop: "1px solid #1a2a40", margin: "6px 0 4px", paddingTop: 6 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                <span style={{ color: "#3a80c0", fontWeight: 700, fontSize: 12, flex: 1 }}>
-                  Campaign
-                </span>
-                {frozen ? (
-                  <span title="The map is permanently locked (read-only). Geography can no longer be edited."
-                    style={{ ...smallBtn, padding: "2px 8px", color: "#c0a060", borderColor: "#4a3a20", cursor: "default" }}>
-                    \ud83d\udd12 Locked
-                  </span>
-                ) : (
-                  <button onClick={lockAndSaveWorld} disabled={simRunning || !canAdvance(6)}
-                    title={canAdvance(6)
-                      ? "Permanently lock & save the map, then play the campaign on it"
-                      : "Finish the World steps (1-6) first"}
-                    style={{ ...smallBtn, padding: "2px 8px",
-                      color: canAdvance(6) ? "#a0e0b0" : "#405060",
-                      borderColor: canAdvance(6) ? "#2a7040" : "#1a2a40" }}>
-                    Lock &amp; Save Map
-                  </button>
-                )}
+              <div style={{ color: "#3a80c0", fontWeight: 700, fontSize: 12, marginBottom: 3 }}>
+                Settlements, Trade &amp; Economy
               </div>
-              {!frozen && (
-                <div style={{ color: "#506080", fontSize: 10, marginBottom: 4 }}>
-                  Locking the map is permanent \u2014 geography can't be edited afterwards. Settlements, trade and economy are then played on top.
-                </div>
-              )}
+              <div style={{ color: "#506080", fontSize: 10, marginBottom: 4 }}>
+                People, goods and the market \u2014 all generated here in Forge. Finalize
+                after Economy to lock the map and play the campaign in Chronicle.
+              </div>
             </div>
           )}
           <div style={{
@@ -263,7 +287,7 @@ export function WorkflowPanel() {
             {/* Step header */}
             <div onClick={() => {
                 if (simRunning) return;
-                if (locked) { setStatus("Finalize the world (after step 6) to unlock campaign steps."); return; }
+                if (locked) { setStatus("World is finalized — unfreeze to edit geography (steps 1-6)."); return; }
                 setWorkflowStep(step as any);
               }}
               style={{
@@ -291,9 +315,11 @@ export function WorkflowPanel() {
                 {step === 9 && <StepPolitical {...stepProps} />}
                 {step === 12 && <StepToponyms />}
                 {step === 10 && <StepEconomy {...stepProps} />}
-                {step === 11 && <StepCampaign {...stepProps} />}
 
-                {/* Navigation */}
+                {/* Navigation. Economy (10) and the optional Toponyms (12) are the
+                    terminal generation steps \u2014 there the CTA is Finalize & Play
+                    (needs the economy built), which locks the world and enters
+                    Chronicle. Every other step just continues. */}
                 <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
                   {step > 1 && (
                     <button onClick={goBack} disabled={simRunning} style={navBtn}>
@@ -301,17 +327,20 @@ export function WorkflowPanel() {
                     </button>
                   )}
                   <div style={{ flex: 1 }} />
-                  {step < 11 ? (
+                  {step !== 10 && step !== 12 ? (
                     <button onClick={goNext} disabled={!canAdvance(step) || simRunning}
                       style={{ ...navBtn, background: canAdvance(step) ? "#2a5080" : "#1a2a40",
                         color: canAdvance(step) ? "#fff" : "#405060" }}>
                       Continue \u2192
                     </button>
                   ) : (
-                    <button onClick={() => {}} disabled={!isDone}
-                      style={{ ...navBtn, background: isDone ? "#2a6a3a" : "#1a2a40",
-                        color: isDone ? "#a0e0b0" : "#405060" }}>
-                      Complete \u2713
+                    <button onClick={finalizeAndPlay} disabled={simRunning || !canAdvance(10)}
+                      title={canAdvance(10)
+                        ? "Lock & save the finished world, then play the campaign in Chronicle"
+                        : "Build the Economy (step 10) first"}
+                      style={{ ...navBtn, background: canAdvance(10) ? "#2a6a3a" : "#1a2a40",
+                        color: canAdvance(10) ? "#a0e0b0" : "#405060", fontWeight: 600 }}>
+                      \ud83d\udd12 Finalize &amp; Play \u2192
                     </button>
                   )}
                 </div>

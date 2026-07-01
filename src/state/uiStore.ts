@@ -305,10 +305,12 @@ export const useUIStore = create<UIStore>((set) => ({
   // (step 11): the map is a read-only stage there, so paint tools must not be
   // active. Leaving to Forge restores the pan tool (the user reselects a tool).
   setAppMode: (mode) =>
-    set(() =>
+    set((state) =>
       mode === "chronicle"
         ? { appMode: mode, activeTool: "pan", workflowStep: 11 as WorkflowStep }
-        : { appMode: mode }
+        // Step 11 (the campaign tick) is Chronicle-only and no longer in the Forge
+        // wizard; clamp back to Economy (10) so a Forge step is always expanded.
+        : { appMode: mode, workflowStep: (state.workflowStep === 11 ? 10 : state.workflowStep) as WorkflowStep }
     ),
   setTool: (tool) => set({ activeTool: tool }),
   setLayer: (layer) => set({ activeLayer: layer }),

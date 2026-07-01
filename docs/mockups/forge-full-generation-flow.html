@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WorldForge 2 — Forge owns all generation (steps 1–10), single Finalize gate</title>
+<style>
+  :root{--bg:#0b1420;--panel:#13202e;--panel2:#0d1219;--text:#cfe2f6;--muted:#6a8aaa;
+    --dim:#506080;--accent:#3a80c0;--accent2:#2a5a8a;--line:#1e2a38;--good:#80c890;
+    --geo:#3a80c0;--warn:#c0a060;}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.5;padding:28px 20px 60px;}
+  .wrap{max-width:1100px;margin:0 auto;}
+  h1{font-size:22px;color:var(--accent);margin:0 0 4px;}
+  h2{font-size:15px;color:#9fc0e4;margin:32px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line);}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 6px;}
+  code{background:#0a1018;border:1px solid #16202e;border-radius:4px;padding:1px 5px;
+    font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#9fc0e4;}
+  .callout{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);
+    border-radius:6px;padding:10px 14px;margin:12px 0;font-size:13px;color:#b8cce4;}
+  .cols{display:flex;gap:16px;flex-wrap:wrap;}
+  .col{flex:1 1 330px;}
+  .tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.5px;padding:2px 9px;border-radius:20px;}
+  .tag.old{background:#2a1a1a;color:#e0a0a0;border:1px solid #5a3030;}
+  .tag.new{background:#16324a;color:#bcd9f4;border:1px solid #2f5a86;}
+  /* wizard mock */
+  .wiz{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:12px;}
+  .wiz .t{color:var(--accent);font-weight:700;font-size:12px;margin-bottom:8px;}
+  .grp{color:var(--geo);font-weight:700;font-size:11px;margin:10px 0 3px;border-top:1px solid #1a2a40;padding-top:7px;}
+  .grp .note{color:var(--dim);font-weight:400;font-size:10px;display:block;margin-top:2px;}
+  .s{display:flex;align-items:center;gap:7px;padding:3px 4px;border-radius:4px;margin:1px 0;}
+  .s .n{min-width:16px;color:var(--muted);}
+  .s.done .n{color:var(--good);}
+  .s.done{color:var(--good);}
+  .s.act{background:#0e1824;border:1px solid #1e3a58;color:#c0d8f0;font-weight:600;}
+  .s.lock{opacity:.42;color:var(--dim);}
+  .s.lock .n:before{content:"🔒";}
+  .btn{display:block;width:100%;text-align:center;padding:6px;border-radius:5px;font-size:11px;font-weight:600;margin:6px 0;}
+  .btn.gen{background:#1a5a2a;border:1px solid #2a7040;color:#a0e0b0;}
+  .btn.gen2{background:#1a4a5a;border:1px solid #2a6070;color:#a0d0e0;}
+  .btn.lock{background:#151d28;border:1px solid #2a7040;color:#a0e0b0;font-size:10px;padding:3px 8px;width:auto;display:inline-block;}
+  .btn.fin{background:#1a4a2a;border:1px solid #2a6a40;color:#a0e0b0;}
+  .btn.dis{background:#151d28;border:1px solid #1a2a40;color:#405060;}
+  .flow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0;font-size:12px;color:var(--muted);}
+  .pill{padding:4px 10px;border-radius:16px;border:1px solid var(--line);background:var(--panel);}
+  .pill.geo{border-color:#274a68;color:#bcd9f4;}
+  .pill.det{border-color:#2f5a86;color:#bcd9f4;}
+  .pill.fin{border-color:#2a6a40;color:#a0e0b0;background:#12241a;}
+  .pill.chr{border-color:#3a3050;color:#d8c8f0;background:#181426;}
+  .arr{color:#3a4e64;}
+  table{border-collapse:collapse;width:100%;font-size:12px;margin-top:8px;}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top;}
+  th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px;}
+  .yes{color:var(--good);} .no{color:#e08a8a;}
+  .foot{color:var(--dim);font-size:11px;margin-top:38px;border-top:1px solid var(--line);padding-top:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Forge owns the whole generation pipeline</h1>
+  <p class="sub">Phase 3: everything <b>generated</b> — geography <i>and</i> settlements, trade goods,
+    political &amp; economy — is completed in <b>Forge</b>. A single <b>Finalize</b> after Economy locks
+    the world and hands off to <b>Chronicle</b>, which now owns only the living campaign tick.</p>
+
+  <div class="callout">
+    <b>Why:</b> steps 7–10 never actually needed a frozen world — <code>sim_biological</code> and
+    <code>sim_generate_settlements</code> write derived tile columns (no <code>ensure_unfrozen</code>),
+    and political/economy are query-only. The old "freeze after step 6, then do 7–10" was a UI gate, not
+    a technical one. So this is a pure <b>frontend workflow reorganization</b> — no backend change.
+  </div>
+
+  <!-- New flow strip -->
+  <div class="flow">
+    <span class="pill geo">1–6 Geography</span><span class="arr">→</span>
+    <span class="pill det">7–10 Settlements · Trade · Political · Economy</span><span class="arr">→</span>
+    <span class="pill fin">🔒 Finalize &amp; Play</span><span class="arr">→</span>
+    <span class="pill chr">📜 Chronicle (campaign tick)</span>
+  </div>
+
+  <h2>Before / after — the Forge wizard</h2>
+  <div class="cols">
+    <!-- BEFORE -->
+    <div class="col">
+      <div style="margin-bottom:8px"><span class="tag old">BEFORE</span></div>
+      <div class="wiz">
+        <div class="t">World Generation</div>
+        <button class="btn gen">Generate Full World</button>
+        <div class="grp" style="color:var(--geo)">World (1–6)</div>
+        <div class="s done"><span class="n">✓</span>1. Landmass</div>
+        <div class="s done"><span class="n">✓</span>…</div>
+        <div class="s done"><span class="n">✓</span>6. Soil &amp; Resources</div>
+        <div class="grp" style="color:var(--geo)">Campaign
+          <span class="note">locked until you freeze the map</span></div>
+        <div style="text-align:right;margin:2px 0 6px"><span class="btn lock">Lock &amp; Save Map</span></div>
+        <div class="s lock"><span class="n"></span>7. Settlements</div>
+        <div class="s lock"><span class="n"></span>8. Biological-Trade</div>
+        <div class="s lock"><span class="n"></span>9. Political</div>
+        <div class="s lock"><span class="n"></span>10. Economy</div>
+        <div class="s lock"><span class="n"></span>11. Living Trade <span style="font-size:9px">(campaign tick)</span></div>
+      </div>
+      <p class="sub" style="margin-top:8px">Generation was split by a mid-wizard freeze; 7–10 sat behind
+        a "Campaign" lock, and the campaign tick (11) lived inside the generation wizard.</p>
+    </div>
+
+    <!-- AFTER -->
+    <div class="col">
+      <div style="margin-bottom:8px"><span class="tag new">AFTER</span></div>
+      <div class="wiz">
+        <div class="t">World Generation</div>
+        <button class="btn gen">Generate Full World</button>
+        <div style="color:var(--dim);font-size:10px;margin:-2px 0 4px">…now runs all the way through Economy</div>
+        <div class="grp" style="color:var(--geo)">Geography (1–6)</div>
+        <div class="s done"><span class="n">✓</span>1. Landmass</div>
+        <div class="s done"><span class="n">✓</span>…</div>
+        <div class="s done"><span class="n">✓</span>6. Soil &amp; Resources</div>
+        <div class="grp">Settlements, Trade &amp; Economy
+          <span class="note">all generated here in Forge</span></div>
+        <div class="s done"><span class="n">✓</span>7. Settlements</div>
+        <div class="s done"><span class="n">✓</span>8. Biological-Trade</div>
+        <div class="s done"><span class="n">✓</span>9. Political</div>
+        <div class="s act"><span class="n">✓</span>10. Economy ◂</div>
+        <button class="btn fin" style="margin-top:8px">🔒 Finalize &amp; Play →</button>
+        <div style="color:var(--dim);font-size:10px;text-align:center">locks the world · enters Chronicle</div>
+      </div>
+      <p class="sub" style="margin-top:8px">One continuous flow 1→10, no mid freeze. Step 11 moved out to
+        Chronicle. A single Finalize (enabled once Economy is built) is the handoff.</p>
+    </div>
+  </div>
+
+  <h2>What changed</h2>
+  <table>
+    <thead><tr><th>Aspect</th><th>Before</th><th>After</th></tr></thead>
+    <tbody>
+      <tr><td>Steps 7–10 (settlements→economy)</td>
+        <td class="no">Locked until the map was frozen</td>
+        <td class="yes">Always available in Forge (unfrozen)</td></tr>
+      <tr><td>Freeze / finalize</td>
+        <td>Mid-wizard "Lock &amp; Save Map" after step 6</td>
+        <td class="yes">Single "Finalize &amp; Play" after Economy (10)</td></tr>
+      <tr><td>Campaign tick (step 11)</td>
+        <td>Inside the generation wizard</td>
+        <td class="yes">Chronicle only (ChroniclePanel)</td></tr>
+      <tr><td>"Generate Full World"</td>
+        <td>Ran phases 1–8, then auto-froze</td>
+        <td class="yes">Runs 1–10 (chains Political + Economy) → finalize-ready</td></tr>
+      <tr><td>Group label at step 7</td>
+        <td>"Campaign"</td>
+        <td class="yes">"Settlements, Trade &amp; Economy"</td></tr>
+      <tr><td>Backend</td>
+        <td colspan="2" class="yes">Unchanged — reuses <code>computePolitical</code>, <code>computeEconomy</code>,
+          <code>finalize_world</code>, <code>campaign_start_sim</code></td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout" style="border-left-color:#8fd0a0">
+    <b>Result:</b> by the time you press <b>Finalize &amp; Play</b>, every layer is generated — geography,
+    settlements, trade goods, political, economy. Chronicle opens on a complete world and the campaign
+    re-derives the <i>live</i> economy from it (Phase 1). Forge = build everything; Chronicle = play it.
+  </div>
+
+  <div class="foot">
+    WorldForge 2 · Phase 3 — Forge owns all generation ·
+    Frontend: <code>src/ui/workflow/WorkflowPanel.tsx</code>, <code>src/state/uiStore.ts</code>,
+    <code>src/App.tsx</code> · dark theme bg <code>#0b1420</code> / panel <code>#13202e</code> / accent <code>#3a80c0</code>.
+  </div>
+</div>
+</body>
+</html>

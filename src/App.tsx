@@ -529,7 +529,7 @@ export default function App() {
                 cursor: meta?.frozen ? "pointer" : "not-allowed" }}
               title={meta?.frozen
                 ? "Living campaign — play the economy on the finalized world"
-                : "Finalize the world (lock the map) to unlock the campaign"}>
+                : "Finish generation through Economy, then Finalize to enter Chronicle"}>
               📜 Chronicle
             </button>
           </div>
