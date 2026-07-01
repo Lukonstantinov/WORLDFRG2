@@ -3369,6 +3369,97 @@ pub fn campaign_get_guilds(db: State<'_, WorldDb>) -> Result<Vec<GuildBrief>, St
     Ok(out)
 }
 
+/// Phase 6 · one notable figure (Great Lives roster).
+#[derive(Serialize, Clone)]
+pub struct FigureBrief {
+    pub name: String,
+    pub role: String,
+    pub hub: u32,
+    pub x: f32,
+    pub y: f32,
+    pub city: String,
+    /// The craft a master craftsman is renowned for (else "").
+    pub good_name: String,
+    pub born_year: u32,
+    pub died_year: u32,
+    pub alive: bool,
+}
+
+/// Phase 6 · the Notable Figures panel: the campaign's great lives, living first.
+#[tauri::command]
+pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, String> {
+    use crate::sim::tick::{TICKS_PER_YEAR, FIGURE_KINDS};
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let mut out: Vec<FigureBrief> = sim.figures.iter().map(|f| {
+        let h = sim.hubs.get(f.hub as usize);
+        FigureBrief {
+            name: f.name.clone(),
+            role: FIGURE_KINDS.get(f.kind as usize).copied().unwrap_or("Figure").to_string(),
+            hub: f.hub,
+            x: h.map(|x| x.x).unwrap_or(0.0),
+            y: h.map(|x| x.y).unwrap_or(0.0),
+            city: h.map(|x| x.name.clone()).unwrap_or_default(),
+            good_name: if f.good >= 0 {
+                sim.goods.get(f.good as usize).map(|g| g.name.clone()).unwrap_or_default()
+            } else { String::new() },
+            born_year: f.born_tick / TICKS_PER_YEAR,
+            died_year: if f.dead { f.dies_tick / TICKS_PER_YEAR } else { 0 },
+            alive: !f.dead,
+        }
+    }).collect();
+    out.sort_by(|a, b| b.alive.cmp(&a.alive).then(b.born_year.cmp(&a.born_year)));
+    Ok(out)
+}
+
+/// Phase 6 · one landmark / place of note (wonders, holy cities, fair towns, guildhalls).
+#[derive(Serialize, Clone)]
+pub struct LandmarkBrief {
+    pub hub: u32,
+    pub x: f32,
+    pub y: f32,
+    pub city: String,
+    /// "wonder" | "temple" | "fair" | "guildhall".
+    pub kind: String,
+    pub label: String,
+    pub detail: String,
+}
+
+/// Phase 6 · the Landmarks & Sacred Sites panel: the world's places of note.
+#[tauri::command]
+pub fn campaign_get_landmarks(db: State<'_, WorldDb>) -> Result<Vec<LandmarkBrief>, String> {
+    use crate::sim::tick::WONDER_NAMES;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let mut out: Vec<LandmarkBrief> = Vec::new();
+    let good = |g: i32| if g >= 0 {
+        sim.goods.get(g as usize).map(|x| x.name.clone()).unwrap_or_default()
+    } else { String::new() };
+    let mut push = |hub: u32, kind: &str, label: String, detail: String, out: &mut Vec<LandmarkBrief>| {
+        if let Some(h) = sim.hubs.get(hub as usize) {
+            out.push(LandmarkBrief { hub, x: h.x, y: h.y, city: h.name.clone(),
+                kind: kind.to_string(), label, detail });
+        }
+    };
+    for (hub, tier) in &sim.wonders {
+        push(*hub, "wonder", WONDER_NAMES.get(*tier as usize).copied().unwrap_or("a wonder").to_string(),
+            String::new(), &mut out);
+    }
+    for s in &sim.holy_sites {
+        push(s.hub, "temple", if s.tier >= 2 { "Great holy city" } else { "Temple city" }.to_string(),
+            if s.patron_good >= 0 { format!("patron: {}", good(s.patron_good)) } else { String::new() }, &mut out);
+    }
+    for f in &sim.fairs {
+        push(f.hub, "fair", "Trade fair".to_string(), format!("opens month {}", f.month), &mut out);
+    }
+    for g in &sim.guilds {
+        if g.hall {
+            push(g.hub, "guildhall", format!("{} guildhall", good(g.good as i32)), String::new(), &mut out);
+        }
+    }
+    Ok(out)
+}
+
 /// DLC 3.5 · one city's "schematic" — its standing buildings, estates, bank
 /// presence and coin, for the Schematics (blueprint) view.
 #[derive(Serialize, Clone)]

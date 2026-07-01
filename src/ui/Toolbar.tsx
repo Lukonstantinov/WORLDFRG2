@@ -94,6 +94,8 @@ const bioOverlays = [
   { id: "speculation", label: "\u{1FAE7} Speculation Risk" },
   { id: "plagueZones", label: "\u{2620} Plague Zones" },
   { id: "guildCities", label: "\u{1F3DB} Guild Cities" },
+  { id: "figureMarks", label: "\u{269C} Notable Figures" },
+  { id: "landmarks", label: "\u{1F5FF} Landmarks" },
 ];
 
 export function Toolbar() {

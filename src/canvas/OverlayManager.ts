@@ -162,6 +162,9 @@ export class OverlayManager {
   /** Phase 6 · guild cities to mark with their good's emoji (+ a brand label for
    *  exceptional crafts). */
   private guildCities: { x: number; y: number; emoji: string; label: string }[] = [];
+  /** Phase 6 · living notable figures + landmarks, as emoji map markers. */
+  private figureMarks: { x: number; y: number; emoji: string }[] = [];
+  private landmarkMarks: { x: number; y: number; emoji: string }[] = [];
   private fisheryBanks: FisheryBank[] = [];
   private sharkZones: SharkZone[] = [];
   private shipwormZones: SharkZone[] = [];
@@ -289,6 +292,11 @@ export class OverlayManager {
   setGuilds(cities: { x: number; y: number; emoji: string; label: string }[]) {
     this.guildCities = cities;
   }
+
+  /** Phase 6 · living-figure map markers (pass [] to hide). */
+  setFigureMarks(marks: { x: number; y: number; emoji: string }[]) { this.figureMarks = marks; }
+  /** Phase 6 · landmark map markers (pass [] to hide). */
+  setLandmarkMarks(marks: { x: number; y: number; emoji: string }[]) { this.landmarkMarks = marks; }
 
   /** Hit-test a world point against the bank icons (for click-to-open). Returns the
    *  bank's list index, or -1. `tol` is in world cells. */
@@ -937,6 +945,14 @@ export class OverlayManager {
     if (this.visibility.guildCities && this.guildCities.length > 0) {
       this.renderGuildCities(ctx);
     }
+    // Phase 6 · living notable figures.
+    if (this.visibility.figureMarks && this.figureMarks.length > 0) {
+      this.renderEmojiMarks(ctx, this.figureMarks, "#9070c0");
+    }
+    // Phase 6 · landmarks & sacred sites.
+    if (this.visibility.landmarks && this.landmarkMarks.length > 0) {
+      this.renderEmojiMarks(ctx, this.landmarkMarks, "#40b090");
+    }
 
     // Trade ▸ Flows highlight (always on top when set by the settlement panel).
     if (this.flowHighlight.length > 0) {
@@ -1517,6 +1533,31 @@ export class OverlayManager {
       ctx.font = `${fs}px sans-serif`;
       if (c.origin) ctx.fillText("★", cx, cy + fs * 0.05);
       else if (c.active) ctx.fillText("☠", cx, cy + fs * 0.05);
+    }
+    ctx.globalAlpha = 1;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+  }
+
+  /** Phase 6/7 · generic emoji map markers (figures, landmarks): a tinted disc +
+   *  the emoji, in world coords. */
+  private renderEmojiMarks(ctx: CanvasRenderingContext2D, list: { x: number; y: number; emoji: string }[], ring: string) {
+    const inv = 1 / Math.sqrt(this.currentScale);
+    const r = Math.max(2.0, 4.5 * inv);
+    const fs = Math.max(5, 8.5 * inv);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (const m of list) {
+      const cx = m.x + 0.5, cy = m.y + 0.5;
+      ctx.globalAlpha = 0.92;
+      ctx.fillStyle = "#141018";
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = ring;
+      ctx.lineWidth = Math.max(0.6, 1.3 * inv);
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.font = `${fs}px sans-serif`;
+      ctx.fillText(m.emoji || "•", cx, cy + fs * 0.05);
     }
     ctx.globalAlpha = 1;
     ctx.textAlign = "left";

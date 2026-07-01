@@ -10,7 +10,7 @@ import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useSettingsStore } from "../state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks } from "../bridge/tauri";
 import type { MerchantRoute, FuturesLane } from "../types";
 import { goodOverlayKey, GOOD_DEFS } from "../goods";
 import type { PaintValue, EconChain, Settlement } from "../types";
@@ -872,6 +872,38 @@ export function MapCanvas() {
     }).catch(() => {});
     return () => { alive = false; };
   }, [showGuildCities, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
+
+  // Phase 7 · living notable figures as map markers (role emoji).
+  const showFigureMarks = useUIStore((s) => s.overlayVisibility.figureMarks);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    if (!showFigureMarks || !campaignSnapshot?.active) { om.setFigureMarks([]); requestRender(); return; }
+    let alive = true;
+    const roleEmoji: Record<string, string> = { "Admiral": "⚓", "Demagogue": "📢", "Master Craftsman": "⚒", "Great Banker": "🏦", "Explorer": "🧭" };
+    campaignGetFigures().then((figs) => {
+      if (!alive) return;
+      om.setFigureMarks(figs.filter((f) => f.alive).map((f) => ({ x: f.x, y: f.y, emoji: roleEmoji[f.role] ?? "⚜️" })));
+      requestRender();
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [showFigureMarks, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
+
+  // Phase 7 · landmarks & sacred sites as map markers (kind emoji).
+  const showLandmarks = useUIStore((s) => s.overlayVisibility.landmarks);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    if (!showLandmarks || !campaignSnapshot?.active) { om.setLandmarkMarks([]); requestRender(); return; }
+    let alive = true;
+    const kindEmoji: Record<string, string> = { wonder: "🗿", temple: "⛪", fair: "🎪", guildhall: "🏛" };
+    campaignGetLandmarks().then((lms) => {
+      if (!alive) return;
+      om.setLandmarkMarks(lms.map((l) => ({ x: l.x, y: l.y, emoji: kindEmoji[l.kind] ?? "🗿" })));
+      requestRender();
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [showLandmarks, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
 
   // #5: selecting a hub from ANY list/panel (Richest Cities, Trade matrix, Houses,
   // Banks, …) recenters the map on that city AND drops the shiny highlight pin — so

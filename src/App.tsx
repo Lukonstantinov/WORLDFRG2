@@ -25,6 +25,8 @@ import { BankPanel } from "./ui/BankPanel";
 import { NewsFeedPanel } from "./ui/NewsFeedPanel";
 import { PlaguePanel } from "./ui/PlaguePanel";
 import { GuildsPanel } from "./ui/GuildsPanel";
+import { FiguresPanel } from "./ui/FiguresPanel";
+import { LandmarksPanel } from "./ui/LandmarksPanel";
 import { GoodsMarketPanel } from "./ui/GoodsMarketPanel";
 import { SettlementSearch } from "./ui/SettlementSearch";
 import { ElevationLegend } from "./ui/ElevationLegend";
@@ -591,6 +593,8 @@ export default function App() {
           <NewsFeedPanel />
           <PlaguePanel />
           <GuildsPanel />
+          <FiguresPanel />
+          <LandmarksPanel />
           <GoodsMarketPanel />
           <CityRankingPanel />
           <MerchantRoutePanel />

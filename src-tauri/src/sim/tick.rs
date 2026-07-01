@@ -1574,7 +1574,7 @@ const FASHION_YEARLY_CHANCE: f32 = 0.35;
 const FASHION_MAG: f32 = 0.30;          // +30% demand for the vogue good
 const FASHION_MAX_MULT: f32 = 1.4;      // hard cap on the demand multiplier
 const WONDER_YEARLY_CHANCE: f32 = 0.30;
-const WONDER_NAMES: [&str; 3] = ["a great lighthouse", "a grand market hall", "a soaring cathedral"];
+pub const WONDER_NAMES: [&str; 3] = ["a great lighthouse", "a grand market hall", "a soaring cathedral"];
 const PIRACY_YEARLY_CHANCE: f32 = 0.35;
 const DIASPORA_YEARLY_CHANCE: f32 = 0.30;
 

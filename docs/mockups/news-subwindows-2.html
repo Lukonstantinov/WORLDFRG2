@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WorldForge 2 — News subwindows II: guild brands · epidemic spread · Figures · Landmarks</title>
+<style>
+  :root{--bg:#0b1420;--line:#1e2a38;--text:#cfe2f6;--muted:#6a8aaa;--dim:#506080;--accent:#3a80c0;}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.5;padding:28px 20px 60px;}
+  .wrap{max-width:1060px;margin:0 auto;}
+  h1{font-size:22px;color:var(--accent);margin:0 0 4px;}
+  h2{font-size:15px;color:#9fc0e4;margin:28px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line);}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 12px;}
+  code{background:#0a1018;border:1px solid #16202e;border-radius:4px;padding:1px 5px;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#9fc0e4;}
+  .cols{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;}
+  .col{flex:1 1 320px;}
+  .win{border-radius:8px;padding:10px 12px;box-shadow:0 8px 30px rgba(0,0,0,.5);font-size:12px;}
+  .win.guild{background:rgba(24,20,12,.97);border:1px solid #3a3220;}
+  .win.plague{background:rgba(26,14,14,.97);border:1px solid #3a2020;}
+  .win.fig{background:rgba(20,16,26,.97);border:1px solid #2e2640;}
+  .win.land{background:rgba(14,22,22,.97);border:1px solid #243a34;}
+  .whead{display:flex;align-items:center;margin-bottom:6px;font-weight:700;font-size:13px;}
+  .guild .whead{color:#e8d8b0;} .plague .whead{color:#e8c0c0;} .fig .whead{color:#d8c8f0;} .land .whead{color:#bfe0d4;}
+  .row{display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px dashed #241f12;}
+  .em{font-size:15px;width:20px;text-align:center;}
+  .muted{color:var(--muted);font-size:9px;}
+  .chips{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;}
+  .chip{font-size:10px;padding:2px 8px;border-radius:20px;border:1px solid #333;color:#889;}
+  .chip.on{border-color:#c0a040;background:#2a2410;color:#f0e0b0;}
+  .callout{background:#13202e;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:6px;padding:10px 14px;margin:14px 0;font-size:13px;color:#b8cce4;}
+  .cityrow{display:flex;gap:6px;font-size:10px;padding:2px 4px 2px 12px;color:#c8a8a8;}
+  .foot{color:var(--dim);font-size:11px;margin-top:34px;border-top:1px solid var(--line);padding-top:12px;}
+  b.brand{color:#f0d888;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>News subwindows II — refinements + two more panels</h1>
+  <p class="sub">Exceptional crafts get a place-brand; epidemics show their origin &amp; spread history (panel +
+    map); and two new panels join the set: <b>Notable Figures</b> and <b>Landmarks &amp; Sacred Sites</b>.</p>
+
+  <div class="cols">
+    <!-- GUILD BRANDS -->
+    <div class="col">
+      <div class="win guild">
+        <div class="whead">🏛 Guilds &amp; Crafts</div>
+        <div class="chips"><span class="chip on">Finest</span><span class="chip">Most made</span><span class="chip">Strongest</span><span class="chip">Luxuries</span></div>
+        <div class="row"><span class="em">🧵</span><div style="flex:1">
+          <div><b class="brand">Veyra cloth</b> <span style="color:#e0c060">★</span> <span style="color:#d0a0d0;font-size:9px">· luxury</span> 🏛</div>
+          <div class="muted">Veyra · Aurelian</div></div><div style="color:#e0c060;font-weight:700">88%</div></div>
+        <div class="row"><span class="em">⚒</span><div style="flex:1">
+          <div><b class="brand">Kolvarr metalware</b> <span style="color:#e0c060">★</span></div>
+          <div class="muted">Kolvarr · Norvic</div></div><div style="color:#e0c060;font-weight:700">83%</div></div>
+        <div class="row"><span class="em">🍬</span><div style="flex:1">
+          <div style="color:#e8dcc0">refined_sugar <span style="color:#d0a0d0;font-size:9px">· luxury</span></div>
+          <div class="muted">Sund · Meridic</div></div><div style="color:#e0c060;font-weight:700">71%</div></div>
+      </div>
+      <p class="sub" style="margin-top:8px">Crafts at ≥ 80% quality become a <b class="brand">place-brand</b>
+        (like Murano glass / Damascus steel) — shown ★ in the panel and labelled on the map. The culture is noted too.</p>
+    </div>
+
+    <!-- EPIDEMIC SPREAD -->
+    <div class="col">
+      <div class="win plague">
+        <div class="whead">☠ Plagues &amp; Epidemics</div>
+        <div style="color:#e8c8c8;font-weight:600">The Veyra Pestilence <span style="color:#ff8a6a;font-size:9px">● active</span></div>
+        <div class="muted" style="margin:2px 0 4px">Began in <b style="color:#e8a0a0">Veyra</b> · spread to 3 more · Year 27–29</div>
+        <div class="cityrow"><span style="color:#7a5656;min-width:26px">★ src</span><span style="flex:1">Veyra <span style="color:#6a5050">Yr27</span></span><span style="color:#e08a6a">9,800 †</span></div>
+        <div class="cityrow"><span style="color:#7a5656;min-width:26px">→ 1</span><span style="flex:1">Kolvarr <span style="color:#6a5050">Yr27</span> <span style="color:#ff8a6a">· quarantined</span> <span style="color:#6a5050">← Veyra</span></span><span style="color:#e08a6a">7,100 †</span></div>
+        <div class="cityrow"><span style="color:#7a5656;min-width:26px">→ 2</span><span style="flex:1">Aldermoor <span style="color:#6a5050">Yr28</span> <span style="color:#6a5050">← Kolvarr</span></span><span style="color:#e08a6a">3,300 †</span></div>
+      </div>
+      <p class="sub" style="margin-top:8px">An outbreak now names where it <b>began</b> and lists cities in
+        <b>spread order</b> (★ src → 1 → 2 …) with the strike year. On the map: directional contagion arrows from a
+        <span style="color:#ff6030">★ starred origin</span>.</p>
+    </div>
+  </div>
+
+  <h2>Two new panels</h2>
+  <div class="cols">
+    <div class="col">
+      <div class="win fig">
+        <div class="whead">⚜️ Notable Figures</div>
+        <div class="chips"><span class="chip on">All</span><span class="chip">⚓ Admiral</span><span class="chip">📢 Demagogue</span><span class="chip">⚒ Master</span><span class="chip">Living</span></div>
+        <div class="row" style="border-color:#201a2c"><span class="em">⚓</span><div style="flex:1"><div style="color:#e0d4f4">Corvane Vethi the Bold</div><div class="muted">Admiral · Veyra</div></div><div class="muted">b. 21</div></div>
+        <div class="row" style="border-color:#201a2c"><span class="em">⚒</span><div style="flex:1"><div style="color:#e0d4f4">Ilse Toran</div><div class="muted">Master Craftsman · wine · Veyra</div></div><div class="muted">b. 30</div></div>
+        <div class="row" style="border-color:#201a2c"><span class="em">📢</span><div style="flex:1"><div style="color:#9c94ac">Rask Dunmar the Loud †</div><div class="muted">Demagogue · Kolvarr</div></div><div class="muted">18–41</div></div>
+      </div>
+      <p class="sub" style="margin-top:8px">The campaign's Great Lives — living first, filter by role. Map toggle
+        marks the living at their city.</p>
+    </div>
+    <div class="col">
+      <div class="win land">
+        <div class="whead">🗿 Landmarks &amp; Sacred Sites</div>
+        <div class="chips"><span class="chip on">All</span><span class="chip">🗿 Wonders</span><span class="chip">⛪ Holy</span><span class="chip">🎪 Fairs</span><span class="chip">🏛 Guildhalls</span></div>
+        <div class="row" style="border-color:#172622"><span class="em">🗿</span><div style="flex:1"><div style="color:#d8ecdf;text-transform:capitalize">a soaring cathedral</div><div class="muted">Sunreach</div></div></div>
+        <div class="row" style="border-color:#172622"><span class="em">⛪</span><div style="flex:1"><div style="color:#d8ecdf">Great holy city</div><div class="muted">Sunreach · patron: frankincense</div></div></div>
+        <div class="row" style="border-color:#172622"><span class="em">🎪</span><div style="flex:1"><div style="color:#d8ecdf">Trade fair</div><div class="muted">Aldermoor · opens month 9</div></div></div>
+        <div class="row" style="border-color:#172622"><span class="em">🏛</span><div style="flex:1"><div style="color:#d8ecdf">cloth guildhall</div><div class="muted">Veyra</div></div></div>
+      </div>
+      <p class="sub" style="margin-top:8px">The world's places of note — civic wonders, holy cities, fair towns,
+        guildhalls — filter by kind, click to focus, map toggle marks them all.</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <b>All read existing sim state</b> (guilds, figures, wonders, holy sites, fairs) — no tick-sim change, so the
+    dynamics test is untouched and 32/32 tick tests pass. Panels reuse <code>useFloatingWindow</code>; map markers
+    reuse the <code>OverlayManager</code> emoji-marker + fetch pattern.
+  </div>
+
+  <div class="foot">
+    WorldForge 2 · Phase 7 · <code>campaign_get_figures</code> / <code>campaign_get_landmarks</code> +
+    <code>FiguresPanel.tsx</code> / <code>LandmarksPanel.tsx</code>; guild brand + epidemic spread in
+    <code>campaign_get_guilds</code> / <code>campaign_get_epidemics</code>.
+  </div>
+</div>
+</body>
+</html>

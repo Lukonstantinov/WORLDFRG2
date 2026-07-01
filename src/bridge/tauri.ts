@@ -568,7 +568,7 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 }
 
 // ── DLC 1 "Living Trade" tick simulation ──
-import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow, PopBrief, EpidemicBrief, GuildBrief } from "../types";
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow, PopBrief, EpidemicBrief, GuildBrief, FigureBrief, LandmarkBrief } from "../types";
 
 /** Seed a fresh living-trade sim from the static economy snapshot (step 10). */
 export async function campaignStartSim(seed: number): Promise<CampaignSnapshot> {
@@ -692,6 +692,16 @@ export async function campaignGetEpidemics(): Promise<EpidemicBrief[]> {
 /** Phase 6 · craft guilds (good, quality, output, strength, guildhall). */
 export async function campaignGetGuilds(): Promise<GuildBrief[]> {
   return invoke("campaign_get_guilds");
+}
+
+/** Phase 6 · notable figures (Great Lives roster). */
+export async function campaignGetFigures(): Promise<FigureBrief[]> {
+  return invoke("campaign_get_figures");
+}
+
+/** Phase 6 · landmarks & sacred sites (wonders, holy cities, fairs, guildhalls). */
+export async function campaignGetLandmarks(): Promise<LandmarkBrief[]> {
+  return invoke("campaign_get_landmarks");
 }
 
 /** DLC 4 · every good's quality rating + produced/traded totals (Goods window). */

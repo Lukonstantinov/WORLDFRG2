@@ -22,6 +22,8 @@ export const PANEL_TINTS = {
   bank: "rgba(16,20,28,0.97)",      // 🏦 Bank — deep blue-steel
   plague: "rgba(26,14,14,0.97)",    // Plagues & Epidemics — sickly red
   guild: "rgba(24,20,12,0.97)",     // Guilds & Crafts — guild gold
+  figures: "rgba(20,16,26,0.97)",   // Notable Figures — royal violet
+  landmarks: "rgba(14,22,22,0.97)", // Landmarks & Sacred Sites — verdigris
 } as const;
 
 /** Make a floating panel DRAGGABLE by its header and TINTED so it's distinct.

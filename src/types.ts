@@ -1220,6 +1220,31 @@ export interface GuildBrief {
   culture: string;
 }
 
+/** Phase 6 · a notable figure (Great Lives roster). */
+export interface FigureBrief {
+  name: string;
+  role: string;
+  hub: number;
+  x: number;
+  y: number;
+  city: string;
+  good_name: string;
+  born_year: number;
+  died_year: number;
+  alive: boolean;
+}
+
+/** Phase 6 · a landmark / place of note. */
+export interface LandmarkBrief {
+  hub: number;
+  x: number;
+  y: number;
+  city: string;
+  kind: string; // wonder | temple | fair | guildhall
+  label: string;
+  detail: string;
+}
+
 /** One leg of a city's carrying trade ("transit"). */
 export interface TransitRow {
   merchant: string;
