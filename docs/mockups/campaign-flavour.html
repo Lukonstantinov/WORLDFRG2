@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WorldForge 2 — Campaign flavour: Great Lives · Trade Fairs · Faith & Pilgrimage</title>
+<style>
+  :root{--bg:#0b1420;--panel:#13202e;--panel2:#0d1219;--text:#cfe2f6;--muted:#6a8aaa;
+    --dim:#506080;--accent:#3a80c0;--line:#1e2a38;
+    --figure:#e6c878;--fair:#6fceb0;--pilgrim:#c6a6e6;--temple:#e0cf9a;}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.5;padding:28px 20px 60px;}
+  .wrap{max-width:1060px;margin:0 auto;}
+  h1{font-size:22px;color:var(--accent);margin:0 0 4px;}
+  h2{font-size:15px;color:#9fc0e4;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line);}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 6px;}
+  code{background:#0a1018;border:1px solid #16202e;border-radius:4px;padding:1px 5px;
+    font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#9fc0e4;}
+  .cols{display:flex;gap:16px;flex-wrap:wrap;}
+  .col{flex:1 1 300px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;}
+  .card h3{margin:0 0 3px;font-size:13px;}
+  .tag{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;letter-spacing:.4px;}
+  /* chronicle mock */
+  .chron{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;}
+  .chron .yr{display:flex;align-items:center;gap:7px;padding:4px 2px;border-bottom:1px solid #131f2c;}
+  .chron .yr b{color:#cfe0f4;font-size:11px;min-width:52px;}
+  .chron .cnt{color:#56708e;font-size:9px;}
+  .chron .glance{margin-left:auto;font-size:11px;letter-spacing:1px;}
+  .ev{display:flex;gap:8px;padding:3px 2px 3px 14px;}
+  .ev .ic{width:16px;text-align:center;}
+  .ev .tx{font-size:11px;line-height:1.3;}
+  .leg{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--muted);}
+  .leg span{display:inline-flex;align-items:center;gap:5px;}
+  .dot{width:9px;height:9px;border-radius:2px;display:inline-block;}
+  table{border-collapse:collapse;width:100%;font-size:12px;margin-top:6px;}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top;}
+  th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px;}
+  .callout{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);
+    border-radius:6px;padding:10px 14px;margin:12px 0;font-size:13px;color:#b8cce4;}
+  .foot{color:var(--dim);font-size:11px;margin-top:36px;border-top:1px solid var(--line);padding-top:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Campaign flavour — three historian's packs</h1>
+  <p class="sub">Each plugs into the existing chronicle (<code>JournalEntry</code> / <code>HouseEvent</code> /
+    <code>ActiveEvent</code>) at low-risk "mostly flavour" coupling — capped effects + named beats, so the
+    economy dynamics stay bounded (32/32 tick tests pass, wealth range unchanged).</p>
+
+  <div class="callout">
+    <b>Pack D · Great Lives</b> — named admirals, demagogues, master craftsmen, bankers &amp; explorers rise and
+    pass, each nudging one bounded field. &nbsp;<b>Pack C · Trade Fairs</b> — seasonal markets converge trade on a
+    crossroads town. &nbsp;<b>Pack B · Faith &amp; Pilgrimage</b> — holy cities draw the faithful each year.
+  </div>
+
+  <h2>World News — as it reads in the chronicle</h2>
+  <div class="chron">
+    <div class="yr"><b>Year 34</b><span class="cnt">5 events</span>
+      <span class="glance">🎖 🎪 ⛪ 🕊 ⚔</span></div>
+    <div class="ev"><span class="ic">🎖</span><span class="tx" style="color:var(--figure)">Admiral Corvane Vethi the Bold wins renown at sea for House Vethi.</span></div>
+    <div class="ev"><span class="ic">🎪</span><span class="tx" style="color:var(--fair)">The Fair of Aldermoor opens; merchants converge from across the region.</span></div>
+    <div class="ev"><span class="ic">⛪</span><span class="tx" style="color:var(--temple)">The great temple of Sunreach is renowned across the land.</span></div>
+    <div class="ev"><span class="ic">🕊</span><span class="tx" style="color:var(--pilgrim)">Pilgrims throng to Sunreach for the holy season — frankincense for the altar.</span></div>
+    <div class="ev"><span class="ic">🎖</span><span class="tx" style="color:var(--figure)">Master Ilse Toran raises the wine craft of Veyra to new heights.</span></div>
+    <div class="yr"><b>Year 41</b><span class="cnt">3 events</span><span class="glance">🎖 🕊 🎪</span></div>
+    <div class="ev"><span class="ic">🎖</span><span class="tx" style="color:var(--figure)">The demagogue Rask Dunmar the Loud stirs the crowds of Kolvarr.</span></div>
+    <div class="ev"><span class="ic">🎖</span><span class="tx" style="color:var(--figure)">Admiral Corvane Vethi the Bold of Veyra has died.</span></div>
+    <div class="ev"><span class="ic">🕊</span><span class="tx" style="color:var(--pilgrim)">Pilgrims throng to Sunreach for the holy season — frankincense for the altar.</span></div>
+  </div>
+  <div class="leg">
+    <span><i class="dot" style="background:var(--figure)"></i>🎖 figure (Great Lives)</span>
+    <span><i class="dot" style="background:var(--fair)"></i>🎪 fair</span>
+    <span><i class="dot" style="background:var(--pilgrim)"></i>🕊 pilgrimage</span>
+    <span><i class="dot" style="background:var(--temple)"></i>⛪ temple</span>
+  </div>
+  <p class="sub" style="margin-top:8px">These appear in the settlement &amp; house timelines (<code>YearChronicle</code>),
+    the campaign panel's chronicle, and a new <b>“Life &amp; Faith”</b> filter in the World News feed.</p>
+
+  <h2>What each pack adds (and its capped effect)</h2>
+  <table>
+    <thead><tr><th>Pack</th><th>Historical hook</th><th>Capped effect (bounded)</th><th>Domains</th></tr></thead>
+    <tbody>
+      <tr><td><span class="tag" style="background:#3a3320;color:var(--figure)">🎖 Great Lives</span></td>
+        <td>History turns on individuals — Nelson, Cosimo, a guild master, a rabble-rouser, an explorer.</td>
+        <td>Admiral +1 sea fleet · Demagogue +unrest · Craftsman +craft quality · Banker/Explorer +house prestige. Sparse (≤6 alive).</td>
+        <td>houses · settlements · trade · economy</td></tr>
+      <tr><td><span class="tag" style="background:#1e352c;color:var(--fair)">🎪 Trade Fairs</span></td>
+        <td>Champagne, Leipzig, Nizhny Novgorod — trade concentrated in time &amp; place.</td>
+        <td>Civic-mood boon + a burst of converging volume on inbound lanes (Dynamic Trade Flow overlay only).</td>
+        <td>routes · economy · settlements</td></tr>
+      <tr><td><span class="tag" style="background:#2c2440;color:var(--pilgrim)">🕊 Faith</span></td>
+        <td>Mecca's hajj, Delphi, temple towns — pilgrimage drove premodern demand &amp; movement.</td>
+        <td>Civic-stability boon + inbound pilgrim traffic + a transient, self-relaxing demand spike for a patron ritual good.</td>
+        <td>settlements · routes · economy</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout" style="border-left-color:#8fd0a0">
+    <b>Why bounded:</b> effects only nudge existing capped fields (a fleet count, unrest ≤1, quality ≤0.9, a
+    price that the daily relax pulls back) or write to overlay-only volume — no new feedback loops. The
+    standing dynamics test reads identical wealth bounds and turnover after all three packs; a master craftsman
+    even visibly lifts a city's wine above silk as the world's "finest".
+  </div>
+
+  <div class="foot">
+    WorldForge 2 · Phase 4 campaign flavour (Packs D/C/B) · backend <code>src-tauri/src/sim/tick.rs</code>,
+    UI <code>HubPanel.tsx</code> / <code>HousesPanel.tsx</code> / <code>NewsFeedPanel.tsx</code> /
+    <code>StepCampaign.tsx</code> · dark theme bg <code>#0b1420</code> / panel <code>#13202e</code>.
+    Deferred follow-ups: route-borne epidemics, dynastic marriages, craft guilds.
+  </div>
+</div>
+</body>
+</html>

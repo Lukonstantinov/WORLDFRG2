@@ -27,10 +27,12 @@ function gradeColor(q: number): string {
 const HUB_EVENT_ICON: Record<string, string> = {
   estate: "🏡", starvation: "💀", succession: "👤", structure: "🏗️", coinage: "🪙",
   bank: "🏦", crash: "📉", war: "⚔", event: "⚡",
+  figure: "🎖", fair: "🎪", pilgrimage: "🕊", temple: "⛪",
 };
 const HUB_EVENT_COLOR: Record<string, string> = {
   estate: "#7fd0a0", starvation: "#ff7a6a", succession: "#c0a0e0", structure: "#cdbb88",
   coinage: "#d8c878", bank: "#9fd0e0", crash: "#e6303a", war: "#e88", event: "#b8c8da",
+  figure: "#e6c878", fair: "#6fceb0", pilgrimage: "#c6a6e6", temple: "#e0cf9a",
 };
 
 type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "depots" | "people" | "supply";

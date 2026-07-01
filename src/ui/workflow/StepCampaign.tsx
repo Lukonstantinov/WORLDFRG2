@@ -388,6 +388,10 @@ function eventColor(kind: string): string {
     case "estate": return "#8fd0a0";
     case "succession": return "#c0a0e0";
     case "world": return "#cfe0f4"; // monthly world summary (brighter — the headline)
+    case "figure": return "#e6c878";     // notable figures (Great Lives)
+    case "fair": return "#6fceb0";       // trade fairs
+    case "pilgrimage": return "#c6a6e6"; // pilgrimage seasons
+    case "temple": return "#e0cf9a";     // holy cities / temples
     default: return "#a8bcd4";
   }
 }

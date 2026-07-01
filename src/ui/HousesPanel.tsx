@@ -584,11 +584,12 @@ const diagCell: React.CSSProperties = {
 const EVENT_ICON: Record<string, string> = {
   founded: "🏛", succession: "👤", monopoly: "💰", monopoly_lost: "💸",
   control_gained: "⚖", control_lost: "💔", branch: "🌿", loss: "⚠️", dissolved: "🪦",
+  figure: "🎖",
 };
 const EVENT_COLOR: Record<string, string> = {
   founded: "#cfe0f4", succession: "#9ab0c8", monopoly: "#e0b060", monopoly_lost: "#b08a5a",
   control_gained: "#7fd0a0", control_lost: "#d88", loss: "#e08a5a",
-  branch: "#9fe07a", dissolved: "#8a93a0",
+  branch: "#9fe07a", dissolved: "#8a93a0", figure: "#e6c878",
 };
 
 /** A house's chronicle as a vertical timeline: founding, successions, monopolies,

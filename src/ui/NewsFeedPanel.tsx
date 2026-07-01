@@ -16,11 +16,13 @@ const CATS: { id: string; label: string; icon: string; kinds: string[] }[] = [
   { id: "wars", label: "Wars", icon: "⚔", kinds: ["war"] },
   { id: "crashes", label: "Crashes", icon: "📉", kinds: ["crash", "speculation"] },
   { id: "holdings", label: "Holdings", icon: "🏭", kinds: ["estate", "warehouse"] },
+  { id: "life", label: "Life & Faith", icon: "✦", kinds: ["figure", "fair", "pilgrimage", "temple"] },
 ];
 
 const ICON: Record<string, string> = {
   bank: "🏦", war: "⚔", crash: "📉", speculation: "📉", estate: "🏭",
   warehouse: "🏬", house: "🛡", succession: "🛡", monopoly: "👑", office: "🏛",
+  figure: "🎖", fair: "🎪", pilgrimage: "🕊", temple: "⛪",
 };
 
 export function NewsFeedPanel() {
