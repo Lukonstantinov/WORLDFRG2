@@ -1240,6 +1240,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         guilds: vec![],
         guilds_seeded: false,
         wonders: vec![],
+        epidemics: vec![],
+        next_outbreak: 0,
     };
     // Backfill the colonization pool if the saved economy predates the feature (its
     // `colonizable_sites` deserialized to the serde default — empty). Without this a
@@ -3224,6 +3226,119 @@ pub fn campaign_get_wars(db: State<'_, WorldDb>) -> Result<WarsPayload, String> 
     let mut log = sim.war_log.clone();
     log.reverse();
     Ok(WarsPayload { active, log })
+}
+
+/// Phase 6 · one plague-struck city inside an epidemic (for the Plagues panel + map).
+#[derive(Serialize, Clone)]
+pub struct PlagueCityBrief {
+    pub hub: u32,
+    pub x: f32,
+    pub y: f32,
+    pub name: String,
+    pub deaths: u32,
+    /// Population that survived the strike (immediate aftermath).
+    pub pop: u32,
+    /// Still under quarantine right now.
+    pub active: bool,
+    /// The city the pestilence was carried from ("" = spontaneous origin).
+    pub from_name: String,
+}
+
+/// Phase 6 · an EPIDEMIC = a contagion chain (all strikes sharing an outbreak id).
+#[derive(Serialize, Clone)]
+pub struct EpidemicBrief {
+    pub id: u32,
+    pub name: String,
+    pub start_year: u32,
+    pub end_year: u32,
+    pub active: bool,
+    pub total_dead: u32,
+    /// Cities hit, deadliest first. Each `from_name`→`name` is a contagion route.
+    pub cities: Vec<PlagueCityBrief>,
+}
+
+/// Phase 6 · the Plagues & Epidemics panel: outbreaks grouped from the strike log,
+/// active first then deadliest. The panel re-sorts client-side.
+#[tauri::command]
+pub fn campaign_get_epidemics(db: State<'_, WorldDb>) -> Result<Vec<EpidemicBrief>, String> {
+    use crate::sim::tick::TICKS_PER_YEAR;
+    use std::collections::BTreeMap;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let name = |h: u32| sim.hubs.get(h as usize).map(|x| x.name.clone()).unwrap_or_default();
+    let mut groups: BTreeMap<u32, Vec<&crate::sim::tick::PlagueStrike>> = BTreeMap::new();
+    for s in &sim.epidemics { groups.entry(s.outbreak).or_default().push(s); }
+    let mut out: Vec<EpidemicBrief> = groups.into_iter().map(|(id, strikes)| {
+        let start = strikes.iter().map(|s| s.start_tick).min().unwrap_or(0);
+        let end = strikes.iter().map(|s| s.until_tick).max().unwrap_or(0);
+        let active = strikes.iter().any(|s| s.until_tick > sim.tick);
+        let total_dead: f32 = strikes.iter().map(|s| s.deaths).sum();
+        // Origin = the spontaneous strike (source < 0), else the earliest.
+        let origin_hub = strikes.iter().find(|s| s.source < 0).map(|s| s.hub)
+            .unwrap_or_else(|| strikes.iter().min_by_key(|s| s.start_tick).map(|s| s.hub).unwrap_or(0));
+        let mut cities: Vec<PlagueCityBrief> = strikes.iter().map(|s| PlagueCityBrief {
+            hub: s.hub,
+            x: sim.hubs.get(s.hub as usize).map(|h| h.x).unwrap_or(0.0),
+            y: sim.hubs.get(s.hub as usize).map(|h| h.y).unwrap_or(0.0),
+            name: name(s.hub),
+            deaths: s.deaths.round() as u32,
+            pop: s.pop_at.round() as u32,
+            active: s.until_tick > sim.tick,
+            from_name: if s.source >= 0 { name(s.source as u32) } else { String::new() },
+        }).collect();
+        cities.sort_by(|a, b| b.deaths.cmp(&a.deaths));
+        EpidemicBrief {
+            id,
+            name: format!("The {} Pestilence", name(origin_hub)),
+            start_year: start / TICKS_PER_YEAR,
+            end_year: end / TICKS_PER_YEAR,
+            active,
+            total_dead: total_dead.round() as u32,
+            cities,
+        }
+    }).collect();
+    out.sort_by(|a, b| b.active.cmp(&a.active)
+        .then(b.total_dead.cmp(&a.total_dead))
+        .then(b.end_year.cmp(&a.end_year)));
+    Ok(out)
+}
+
+/// Phase 6 · one craft guild (for the Guilds & Crafts panel + map).
+#[derive(Serialize, Clone)]
+pub struct GuildBrief {
+    pub hub: u32,
+    pub x: f32,
+    pub y: f32,
+    pub city: String,
+    pub good: u32,
+    pub good_name: String,
+    pub quality: f32,
+    pub output: f32,
+    pub strength: f32,
+    pub hall: bool,
+    pub luxury: bool,
+}
+
+/// Phase 6 · the Guilds & Crafts panel: every craft guild, highest quality first.
+#[tauri::command]
+pub fn campaign_get_guilds(db: State<'_, WorldDb>) -> Result<Vec<GuildBrief>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let mut out: Vec<GuildBrief> = sim.guilds.iter().filter_map(|g| {
+        let (hub, good) = (g.hub as usize, g.good as usize);
+        let h = sim.hubs.get(hub)?;
+        let spec = sim.goods.get(good)?;
+        Some(GuildBrief {
+            hub: g.hub, x: h.x, y: h.y, city: h.name.clone(),
+            good: g.good, good_name: spec.name.clone(),
+            quality: h.quality.get(good).copied().unwrap_or(0.0),
+            output: h.production.get(good).copied().unwrap_or(0.0),
+            strength: g.strength, hall: g.hall,
+            luxury: spec.need_tier >= 2,
+        })
+    }).collect();
+    out.sort_by(|a, b| b.quality.partial_cmp(&a.quality).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(out)
 }
 
 /// DLC 3.5 · one city's "schematic" — its standing buildings, estates, bank

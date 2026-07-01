@@ -1674,6 +1674,22 @@ pub struct CraftGuild {
     pub hall: bool,
 }
 
+/// Phase 6 (observability) · one city struck by plague — recorded for the Plagues &
+/// Epidemics panel. `source` is the hub the pestilence was carried from (−1 = a
+/// spontaneous outbreak); `outbreak` groups a contagion chain (all strikes sharing
+/// an id are one epidemic). `deaths` is the population culled at the strike; `pop_at`
+/// is the population that survived. Pure observability — does not affect the sim.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct PlagueStrike {
+    pub hub: u32,
+    pub source: i32,
+    pub outbreak: u32,
+    pub deaths: f32,
+    pub pop_at: f32,
+    pub start_tick: u32,
+    pub until_tick: u32,
+}
+
 /// Phase 4 (flavour) · a HOLY CITY / great temple. Once a year its pilgrimage
 /// season draws the faithful: a civic-stability boon, inbound pilgrim traffic, and
 /// a transient demand spike for its patron ritual good. Sanctuary/temple-banking is
@@ -1892,6 +1908,13 @@ pub struct CampaignSim {
     /// pairs (tier 0..2 → lighthouse/market hall/cathedral). `#[serde(default)]`.
     #[serde(default)]
     pub wonders: Vec<(u32, u8)>,
+    /// Phase 6 (observability) · every plague strike, for the Plagues panel + map.
+    /// `#[serde(default)]` so old saves load with none. Capped in `strike_plague`.
+    #[serde(default)]
+    pub epidemics: Vec<PlagueStrike>,
+    /// Phase 6 · next outbreak id to assign to a spontaneous plague.
+    #[serde(default)]
+    pub next_outbreak: u32,
 }
 
 /// Deterministic 0..1 hash of three mixed inputs (splitmix64).
@@ -5495,23 +5518,50 @@ impl CampaignSim {
     /// it (a `plague_lockup` that suspends contracts + reroutes trade), and chronicle
     /// it. `carried_from` names the origin city for a contagion beat (route-borne
     /// spread) rather than a spontaneous outbreak.
-    fn strike_plague(&mut self, hub: usize, mag: f32, carried_from: Option<&str>) {
+    fn strike_plague(&mut self, hub: usize, mag: f32, carried: Option<(usize, u32)>) {
         if hub >= self.hubs.len() { return; }
         let tick = self.tick;
+        let pre = self.hubs[hub].population.max(0.0);
         self.hubs[hub].population *= 1.0 - mag.clamp(0.0, 0.6);
+        let post = self.hubs[hub].population.max(0.0);
         let lock = 60 + (hash01(self.seed, tick as u64 ^ 0x10CC, hub as u64) * 120.0) as u32;
         self.active_events.push(ActiveEvent {
             kind: "plague_lockup".into(), hub: hub as i32, good: -1,
             magnitude: 1.0, until_tick: tick + lock,
         });
+        // Observability record (Plagues panel + map). Spontaneous → a new outbreak;
+        // contagion → inherits the source hub's outbreak id.
+        let (source, outbreak) = match carried {
+            Some((src, ob)) => (src as i32, ob),
+            None => { let ob = self.next_outbreak; self.next_outbreak += 1; (-1, ob) }
+        };
+        self.epidemics.push(PlagueStrike {
+            hub: hub as u32, source, outbreak, deaths: (pre - post).max(0.0),
+            pop_at: post, start_tick: tick, until_tick: tick + lock,
+        });
+        if self.epidemics.len() > 400 { let d = self.epidemics.len() - 400; self.epidemics.drain(0..d); }
         let city = self.hubs[hub].name.clone();
-        let (kind, text) = match carried_from {
-            Some(origin) => ("contagion".to_string(),
-                format!("The pestilence reaches {}, carried by traders from {}.", city, origin)),
+        let (kind, text) = match carried {
+            Some((src, _)) => {
+                let origin = self.hubs.get(src).map(|h| h.name.clone()).unwrap_or_default();
+                ("contagion".to_string(),
+                    format!("The pestilence reaches {}, carried by traders from {}.", city, origin))
+            }
             None => ("disaster".to_string(), format!("{} is locked down under quarantine", city)),
         };
         self.journal.push(JournalEntry {
             tick, kind, hub: hub as i32, good: -1, value: lock as f32, text });
+    }
+
+    /// The outbreak id currently active at a hub (its most recent live strike), or a
+    /// fresh id if none — so a contagion child groups with its source's epidemic.
+    fn outbreak_at(&mut self, hub: usize) -> u32 {
+        let tick = self.tick;
+        if let Some(s) = self.epidemics.iter().rev()
+            .find(|s| s.hub as usize == hub && s.until_tick > tick) {
+            return s.outbreak;
+        }
+        let ob = self.next_outbreak; self.next_outbreak += 1; ob
     }
 
     /// Phase 5 (flavour) · CONTAGION: plague travels the trade network. Each infected
@@ -5537,8 +5587,8 @@ impl CampaignSim {
             let partner = self.neighbors.get(src).and_then(|v| v.iter().map(|&x| x as usize)
                 .find(|&h| h < n && !self.hubs[h].is_estate && !locked_set.contains(&h)));
             if let Some(dst) = partner {
-                let origin = self.hubs[src].name.clone();
-                self.strike_plague(dst, EPIDEMIC_CONTAGION_MAG, Some(&origin));
+                let ob = self.outbreak_at(src);
+                self.strike_plague(dst, EPIDEMIC_CONTAGION_MAG, Some((src, ob)));
                 new_infections += 1;
             }
         }
@@ -8714,6 +8764,8 @@ mod tests {
             guilds: vec![],
             guilds_seeded: false,
             wonders: vec![],
+            epidemics: vec![],
+            next_outbreak: 0,
         };
         s.rebuild_routes();
         s
