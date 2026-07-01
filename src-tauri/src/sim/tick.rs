@@ -1585,6 +1585,26 @@ pub struct Figure {
     pub dead: bool,
 }
 
+/// A component needs at least this many settlements to host its own fair.
+const FAIR_MIN_COMPONENT_HUBS: u32 = 4;
+const FAIR_PROSPERITY: f32 = 0.10;  // civic-mood lift when the fair opens
+const FAIR_STABILITY: f32 = 0.06;
+const FAIR_LANES: usize = 4;        // nearest lanes that swell with fair traffic
+const FAIR_FLOW: f32 = 200.0;       // overlay-only volume added per inbound lane
+
+/// Phase 4 (flavour) · a recurring seasonal TRADE FAIR at a well-connected market
+/// town (Champagne/Leipzig/Nizhny). Once a year in its month the fair opens: a
+/// civic-mood boon, a burst of volume on its inbound lanes (visible on the Dynamic
+/// Trade Flow overlay), and a chronicle beat. Held in a dedicated list rather than
+/// as `TickHub` columns to keep the hub struct (and its many literals) untouched.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Fair {
+    /// Host hub index.
+    pub hub: u32,
+    /// Month it opens, 1..12.
+    pub month: u8,
+}
+
 impl CityFinance {
     pub fn income_total(&self) -> f32 {
         self.tax_trade + self.tax_estate + self.tax_manufacture + self.tax_wealth
@@ -1758,6 +1778,13 @@ pub struct CampaignSim {
     /// `#[serde(default)]` so old `.campaign` saves load with none.
     #[serde(default)]
     pub figures: Vec<Figure>,
+    /// Phase 4 (flavour) · seasonal trade fairs (one per large trading component),
+    /// seeded once. `#[serde(default)]` so old saves load with none.
+    #[serde(default)]
+    pub fairs: Vec<Fair>,
+    /// One-time flag: `seed_trade_fairs` has run.
+    #[serde(default)]
+    pub fairs_seeded: bool,
 }
 
 /// Deterministic 0..1 hash of three mixed inputs (splitmix64).
@@ -3293,6 +3320,9 @@ impl CampaignSim {
             }
             self.society_migrated = true;
         }
+        // Phase 4 (flavour) · seed seasonal trade fairs once (population-scored, since
+        // routes/neighbours aren't built until the tick loop below).
+        if !self.fairs_seeded { self.seed_trade_fairs(); self.fairs_seeded = true; }
         // Per-day compounding growth equivalent to the yearly baseline drift.
         let tech_daily = (1.0 + PROD_GROWTH_PER_YEAR).powf(1.0 / TICKS_PER_YEAR as f32);
         // Reset per-advance diagnostics.
@@ -3405,6 +3435,10 @@ impl CampaignSim {
                     *l = LedgerAcc { year: yr, ..Default::default() };
                 }
             }
+
+            // Phase 4 (flavour) · open any trade fair whose season begins today
+            // (checked every tick — fairs open mid-year on their month).
+            self.run_trade_fairs(doy);
 
             // Expire finished events.
             self.active_events.retain(|e| e.until_tick > tick);
@@ -7102,6 +7136,66 @@ impl CampaignSim {
         });
     }
 
+    /// Phase 4 (flavour) · seed one seasonal TRADE FAIR per large trading component,
+    /// at its crossroads market town (prominence + a mild inland bias — the historic
+    /// Champagne/Leipzig pattern). Deterministic; runs once (before routes are built,
+    /// so it scores by population rather than live connectivity).
+    fn seed_trade_fairs(&mut self) {
+        use std::collections::HashMap;
+        let n = self.hubs.len();
+        let mut best: HashMap<u32, (usize, f32)> = HashMap::new();
+        let mut count: HashMap<u32, u32> = HashMap::new();
+        for h in 0..n {
+            if self.hubs[h].is_estate { continue; }
+            let comp = self.hubs[h].component;
+            *count.entry(comp).or_insert(0) += 1;
+            let inland = if self.hubs[h].coastal { 1.0 } else { 1.25 };
+            let score = self.hubs[h].population.max(0.0) * inland;
+            let e = best.entry(comp).or_insert((h, -1.0));
+            if score > e.1 { *e = (h, score); }
+        }
+        let mut fairs: Vec<Fair> = Vec::new();
+        for (comp, (hub, _)) in best {
+            if count.get(&comp).copied().unwrap_or(0) < FAIR_MIN_COMPONENT_HUBS { continue; }
+            // Spring (month 4) or autumn (month 9) opening, by a deterministic roll.
+            let month = if hash01(self.seed, hub as u64, 0xFA12) < 0.5 { 4 } else { 9 };
+            fairs.push(Fair { hub: hub as u32, month });
+        }
+        fairs.sort_by_key(|f| f.hub); // HashMap order isn't stable → sort for determinism
+        self.fairs = fairs;
+    }
+
+    /// Phase 4 (flavour) · open the fairs whose month begins today: a civic boon, a
+    /// burst of converging trade on the nearest lanes (overlay-only), a chronicle
+    /// beat, and an `ActiveEvent{kind:"fair"}` while the season lasts.
+    fn run_trade_fairs(&mut self, doy: u32) {
+        if self.fairs.is_empty() { return; }
+        let tick = self.tick;
+        let month_len = TICKS_PER_YEAR / 12;
+        let opening: Vec<u32> = self.fairs.iter()
+            .filter(|f| (f.month.saturating_sub(1) as u32) * month_len == doy)
+            .map(|f| f.hub).collect();
+        for hub in opening {
+            let h = hub as usize;
+            if h >= self.hubs.len() { continue; }
+            self.hubs[h].sent_prosperity = (self.hubs[h].sent_prosperity + FAIR_PROSPERITY).min(1.0);
+            self.hubs[h].sent_stability = (self.hubs[h].sent_stability + FAIR_STABILITY).min(1.0);
+            let nbrs: Vec<usize> = self.neighbors.get(h)
+                .map(|v| v.iter().take(FAIR_LANES).map(|&x| x as usize).collect())
+                .unwrap_or_default();
+            for nb in nbrs { self.accrue_flow(nb, h, FAIR_FLOW); }
+            self.active_events.push(ActiveEvent {
+                kind: "fair".into(), hub: hub as i32, good: -1,
+                magnitude: 1.0, until_tick: tick + month_len,
+            });
+            let city = self.hubs[h].name.clone();
+            self.journal.push(JournalEntry {
+                tick, kind: "fair".into(), hub: hub as i32, good: -1, value: 0.0,
+                text: format!("The Fair of {} opens; merchants converge from across the region.", city),
+            });
+        }
+    }
+
     /// The living merchant families: ageing heads, monopolies, feuds, founding,
     /// extinction and political power.
     /// Log a dispatched trade for the Market "recent deals" rows (rolling, capped).
@@ -8085,6 +8179,8 @@ mod tests {
             trade_last: vec![],
             trade_hist: vec![],
             figures: vec![],
+            fairs: vec![],
+            fairs_seeded: false,
         };
         s.rebuild_routes();
         s
