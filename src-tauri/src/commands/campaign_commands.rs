@@ -861,14 +861,15 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
             // stock and prices all scale with it, so only the displayed magnitudes
             // change (trade stops looking like "≈0").
             for v in production.iter_mut() { *v *= 1000.0; }
-            let mut price: Vec<f32> = goods.iter().map(|g| g.base_value).collect();
-            if let Some(m) = &eh.market {
-                for mg in &m.prices {
-                    if mg.good < gc {
-                        price[mg.good] = mg.price.max(0.01);
-                    }
-                }
-            }
+            // FOUNDING (autarky) prices. We deliberately do NOT seed prices from the
+            // static `compute_economy` market solve: that solve is a single frozen
+            // trade-geography *preview*, not the campaign's economic reality. The
+            // campaign must derive prices live — the founding world hasn't traded yet,
+            // so every hub starts at each good's intrinsic base_value and the tick's
+            // stock-driven price relax (tick.rs) then discovers real, trade-driven
+            // prices over the first weeks of sim. (Substrate crosses the boundary —
+            // city sites, productive potential, routes — but economics is re-derived.)
+            let price: Vec<f32> = goods.iter().map(|g| g.base_value).collect();
             let founding = (eh.population.max(1)) as f32;
             // Per-capita production: the static economy's output is for the founding
             // population, so production = base_per_capita · population thereafter.
@@ -1019,16 +1020,21 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         .max(1e-3);
     let need_scale = total_prod / (total_pop * sum_tw_desire);
 
-    // ── Guarantee a FOOD surplus ──────────────────────────────────────────────
-    // `need_scale` balances *total* production against *total* need, but FOOD is
-    // only a fraction of all goods. A world rich in luxuries but modest in cereal
-    // would seed a chronic food deficit → world-wide famine → population collapse
-    // (the 8M→1M crash). So measure the actual food need (with the same demand
-    // pressure the tick uses) vs food production and, if food is short, scale every
-    // hub's food output up to a healthy surplus. Production scales with live
-    // population thereafter, so this ratio is population-invariant; tech growth then
-    // makes food steadily MORE abundant over the campaign. We only ever raise food
-    // (`max(1.0)`), never cut a world that already grows plenty.
+    // ── Founding food-viability constraint ────────────────────────────────────
+    // This is NOT a warm-start fudge to match the static solve — it is a physical
+    // founding condition: a settlement would not exist where it cannot feed itself.
+    // Because the campaign now starts at founding and evolves LIVE (no burn-in) with
+    // autarky prices, the earliest years are the most fragile — a chronic food
+    // deficit would snowball into world-wide famine → population collapse (the
+    // 8M→1M crash) before the player could react. `need_scale` balances *total*
+    // production against *total* need, but FOOD is only a fraction of all goods, so a
+    // world rich in luxuries but modest in cereal could still starve. We therefore
+    // measure the actual food need (same demand pressure the tick uses) vs food
+    // production and, if food is short, raise every hub's food output to a viable
+    // surplus. Production scales with live population thereafter, so this ratio is
+    // population-invariant; tech growth then makes food steadily MORE abundant over
+    // the campaign. We only ever raise food (`max(1.0)`), never cut a world that
+    // already grows plenty — geography that supports a city is left untouched.
     const FOOD_SURPLUS: f32 = 1.5; // ~50% headroom for seasons, lean years, growth
     let mut total_food_need = 0.0f32;
     let mut total_food_prod = 0.0f32;
