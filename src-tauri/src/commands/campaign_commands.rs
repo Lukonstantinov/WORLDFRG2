@@ -3242,6 +3242,10 @@ pub struct PlagueCityBrief {
     pub active: bool,
     /// The city the pestilence was carried from ("" = spontaneous origin).
     pub from_name: String,
+    /// Year this city was struck.
+    pub year: u32,
+    /// Spread step: 0 = the origin, 1,2,… as the pestilence travelled the lanes.
+    pub order: u32,
 }
 
 /// Phase 6 · an EPIDEMIC = a contagion chain (all strikes sharing an outbreak id).
@@ -3249,11 +3253,14 @@ pub struct PlagueCityBrief {
 pub struct EpidemicBrief {
     pub id: u32,
     pub name: String,
+    /// The city the outbreak began in.
+    pub origin_name: String,
     pub start_year: u32,
     pub end_year: u32,
     pub active: bool,
     pub total_dead: u32,
-    /// Cities hit, deadliest first. Each `from_name`→`name` is a contagion route.
+    /// Cities hit, in SPREAD ORDER (origin first). Each `from_name`→`name` is a
+    /// contagion route; the panel can re-sort by deaths.
     pub cities: Vec<PlagueCityBrief>,
 }
 
@@ -3268,7 +3275,7 @@ pub fn campaign_get_epidemics(db: State<'_, WorldDb>) -> Result<Vec<EpidemicBrie
     let name = |h: u32| sim.hubs.get(h as usize).map(|x| x.name.clone()).unwrap_or_default();
     let mut groups: BTreeMap<u32, Vec<&crate::sim::tick::PlagueStrike>> = BTreeMap::new();
     for s in &sim.epidemics { groups.entry(s.outbreak).or_default().push(s); }
-    let mut out: Vec<EpidemicBrief> = groups.into_iter().map(|(id, strikes)| {
+    let mut out: Vec<EpidemicBrief> = groups.into_iter().map(|(id, mut strikes)| {
         let start = strikes.iter().map(|s| s.start_tick).min().unwrap_or(0);
         let end = strikes.iter().map(|s| s.until_tick).max().unwrap_or(0);
         let active = strikes.iter().any(|s| s.until_tick > sim.tick);
@@ -3276,7 +3283,9 @@ pub fn campaign_get_epidemics(db: State<'_, WorldDb>) -> Result<Vec<EpidemicBrie
         // Origin = the spontaneous strike (source < 0), else the earliest.
         let origin_hub = strikes.iter().find(|s| s.source < 0).map(|s| s.hub)
             .unwrap_or_else(|| strikes.iter().min_by_key(|s| s.start_tick).map(|s| s.hub).unwrap_or(0));
-        let mut cities: Vec<PlagueCityBrief> = strikes.iter().map(|s| PlagueCityBrief {
+        // Chronological → the spread history (origin first, then each city as reached).
+        strikes.sort_by_key(|s| s.start_tick);
+        let cities: Vec<PlagueCityBrief> = strikes.iter().enumerate().map(|(i, s)| PlagueCityBrief {
             hub: s.hub,
             x: sim.hubs.get(s.hub as usize).map(|h| h.x).unwrap_or(0.0),
             y: sim.hubs.get(s.hub as usize).map(|h| h.y).unwrap_or(0.0),
@@ -3285,11 +3294,13 @@ pub fn campaign_get_epidemics(db: State<'_, WorldDb>) -> Result<Vec<EpidemicBrie
             pop: s.pop_at.round() as u32,
             active: s.until_tick > sim.tick,
             from_name: if s.source >= 0 { name(s.source as u32) } else { String::new() },
+            year: s.start_tick / TICKS_PER_YEAR,
+            order: i as u32,
         }).collect();
-        cities.sort_by(|a, b| b.deaths.cmp(&a.deaths));
         EpidemicBrief {
             id,
             name: format!("The {} Pestilence", name(origin_hub)),
+            origin_name: name(origin_hub),
             start_year: start / TICKS_PER_YEAR,
             end_year: end / TICKS_PER_YEAR,
             active,
@@ -3317,24 +3328,41 @@ pub struct GuildBrief {
     pub strength: f32,
     pub hall: bool,
     pub luxury: bool,
+    /// True when the guild's craft is EXCEPTIONAL (renowned enough to be branded).
+    pub exceptional: bool,
+    /// Place-brand for an exceptional craft ("Veyra cloth" — like Murano glass /
+    /// Damascus steel), else "". `culture` names the people whose style it is.
+    pub brand: String,
+    pub culture: String,
 }
 
+/// Quality at/above which a guild's craft earns a place-brand (renowned).
+const GUILD_EXCEPTIONAL: f32 = 0.80;
+
 /// Phase 6 · the Guilds & Crafts panel: every craft guild, highest quality first.
+/// Exceptional crafts carry a place-brand so they read as distinct goods.
 #[tauri::command]
 pub fn campaign_get_guilds(db: State<'_, WorldDb>) -> Result<Vec<GuildBrief>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let (gw, gh) = (sim.world_w as u32, (sim.world_w * 0.5) as u32);
     let mut out: Vec<GuildBrief> = sim.guilds.iter().filter_map(|g| {
         let (hub, good) = (g.hub as usize, g.good as usize);
         let h = sim.hubs.get(hub)?;
         let spec = sim.goods.get(good)?;
+        let quality = h.quality.get(good).copied().unwrap_or(0.0);
+        let exceptional = quality >= GUILD_EXCEPTIONAL;
+        let culture = crate::sim::names::culture_label(
+            h.x.max(0.0) as u32, h.y.max(0.0) as u32, gw, gh).to_string();
+        // Brand by the city (a place of renown, like Murano glass).
+        let brand = if exceptional { format!("{} {}", h.name, spec.name) } else { String::new() };
         Some(GuildBrief {
             hub: g.hub, x: h.x, y: h.y, city: h.name.clone(),
             good: g.good, good_name: spec.name.clone(),
-            quality: h.quality.get(good).copied().unwrap_or(0.0),
-            output: h.production.get(good).copied().unwrap_or(0.0),
+            quality, output: h.production.get(good).copied().unwrap_or(0.0),
             strength: g.strength, hall: g.hall,
             luxury: spec.need_tier >= 2,
+            exceptional, brand, culture,
         })
     }).collect();
     out.sort_by(|a, b| b.quality.partial_cmp(&a.quality).unwrap_or(std::cmp::Ordering::Equal));
