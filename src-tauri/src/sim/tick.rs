@@ -1569,6 +1569,15 @@ const GUILD_STRIKE_CHANCE: f32 = 0.10;
 const GUILD_STRIKE_MAG: f32 = 0.5;      // halves the good's manufacture while out
 const GUILD_HALL_STRENGTH: f32 = 0.6;   // standing at which a guildhall is raised
 
+/// Phase 5 (flavour) · fashion / wonders / piracy / diaspora tuning (all bounded).
+const FASHION_YEARLY_CHANCE: f32 = 0.35;
+const FASHION_MAG: f32 = 0.30;          // +30% demand for the vogue good
+const FASHION_MAX_MULT: f32 = 1.4;      // hard cap on the demand multiplier
+const WONDER_YEARLY_CHANCE: f32 = 0.30;
+const WONDER_NAMES: [&str; 3] = ["a great lighthouse", "a grand market hall", "a soaring cathedral"];
+const PIRACY_YEARLY_CHANCE: f32 = 0.35;
+const DIASPORA_YEARLY_CHANCE: f32 = 0.30;
+
 /// Phase 4 (flavour) · kinds of notable figure, indexing `FIGURE_KINDS`.
 pub const FIGURE_KINDS: [&str; 5] =
     ["Admiral", "Demagogue", "Master Craftsman", "Great Banker", "Explorer"];
@@ -1582,6 +1591,15 @@ const FIGURE_YEARLY_CHANCE: f32 = 0.45;
 /// Short title prefix for a figure kind (chronicle text).
 fn role_title(kind: u8) -> &'static str {
     match kind { 0 => "Admiral", 1 => "Demagogue", 2 => "Master", 3 => "Banker", _ => "Explorer" }
+}
+
+/// Capitalize the first character (for a good name at the start of a sentence).
+fn cap_first(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => String::new(),
+    }
 }
 
 /// Phase 4 (flavour) · a named individual who rose to prominence in the campaign.
@@ -1870,6 +1888,10 @@ pub struct CampaignSim {
     /// One-time flag: `seed_craft_guilds` has run.
     #[serde(default)]
     pub guilds_seeded: bool,
+    /// Phase 5 (flavour) · civic WONDERS raised over the campaign, as (hub, tier)
+    /// pairs (tier 0..2 → lighthouse/market hall/cathedral). `#[serde(default)]`.
+    #[serde(default)]
+    pub wonders: Vec<(u32, u8)>,
 }
 
 /// Deterministic 0..1 hash of three mixed inputs (splitmix64).
@@ -3525,6 +3547,12 @@ impl CampaignSim {
                 self.arrange_marriages(yr);
                 // Phase 5 (flavour) · craft guilds master their craft, strike, build.
                 self.run_craft_guilds(yr);
+                // Phase 5 (flavour) · lighter set: fashion cycles, civic wonders,
+                // piracy raids, diaspora quarters.
+                self.roll_fashion(yr);
+                self.run_civic_wonders(yr);
+                self.run_piracy(yr);
+                self.run_diaspora(yr);
                 for l in self.house_ledger.iter_mut() {
                     *l = LedgerAcc { year: yr, ..Default::default() };
                 }
@@ -3588,6 +3616,16 @@ impl CampaignSim {
                 row.clear();
                 row.resize(ng, 0.0);
             }
+            // Phase 5 (flavour) · fashion demand multipliers per good (1.0 = not in
+            // vogue), from active "fashion" events — a capped, transient demand lift.
+            let mut fashion_mult = vec![1.0f32; ng];
+            let mut any_fashion = false;
+            for e in &self.active_events {
+                if e.kind == "fashion" && e.good >= 0 && (e.good as usize) < ng {
+                    fashion_mult[e.good as usize] = (1.0 + e.magnitude).min(FASHION_MAX_MULT);
+                    any_fashion = true;
+                }
+            }
             for h in 0..n {
                 for g in 0..ng {
                     needs[h][g] = self.base_need(h, g);
@@ -3612,6 +3650,13 @@ impl CampaignSim {
                     let wsum: f32 = weights.iter().sum::<f32>().max(EPS);
                     for (mi, &g) in members.iter().enumerate() {
                         needs[h][g] = total * weights[mi] / wsum;
+                    }
+                }
+                // Phase 5 (flavour) · a good in vogue is consumed more keenly
+                // (post-substitution, so fashion draws real extra demand → price rises).
+                if any_fashion {
+                    for g in 0..ng {
+                        if fashion_mult[g] != 1.0 { needs[h][g] *= fashion_mult[g]; }
                     }
                 }
                 // Eat down stock; track unmet demand per need-tier for the
@@ -7279,6 +7324,113 @@ impl CampaignSim {
         });
     }
 
+    /// Phase 5 (flavour) · FASHION: a luxury good may become the rage of the season,
+    /// lifting its demand for a couple of years (via a capped `fashion` ActiveEvent
+    /// the consumption step reads), then falling from favour. Deterministic.
+    fn roll_fashion(&mut self, yr: u32) {
+        if hash01(self.seed, yr as u64 ^ 0xFA5A, 0) >= FASHION_YEARLY_CHANCE { return; }
+        let ng = self.goods.len();
+        // Luxuries (top need tier) that aren't food.
+        let lux: Vec<usize> = (0..ng)
+            .filter(|&g| self.goods[g].need_tier >= 2 && !self.goods[g].food).collect();
+        if lux.is_empty() { return; }
+        let g = lux[((hash01(self.seed, yr as u64, 0xF00) * lux.len() as f32) as usize) % lux.len()];
+        // Already in vogue? skip.
+        if self.active_events.iter().any(|e| e.kind == "fashion" && e.good == g as i32) { return; }
+        let dur = (2.0 + hash01(self.seed, yr as u64, 0xF01) * 2.0) * TICKS_PER_YEAR as f32;
+        self.active_events.push(ActiveEvent {
+            kind: "fashion".into(), hub: -1, good: g as i32,
+            magnitude: FASHION_MAG, until_tick: self.tick + dur as u32,
+        });
+        let gn = self.goods[g].name.clone();
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "fashion".into(), hub: -1, good: g as i32, value: 0.0,
+            text: format!("{} is the rage of the season — everyone must have it.", cap_first(&gn)),
+        });
+    }
+
+    /// Phase 5 (flavour) · CIVIC WONDERS: a prosperous city occasionally raises a
+    /// monument (lighthouse → market hall → cathedral) for prestige & stability.
+    fn run_civic_wonders(&mut self, yr: u32) {
+        if hash01(self.seed, yr as u64 ^ 0x0A0E, 0) >= WONDER_YEARLY_CHANCE { return; }
+        let n = self.hubs.len();
+        // The most prosperous real city that still has a wonder tier to build.
+        let mut best = usize::MAX; let mut best_score = -1.0f32;
+        for h in 0..n {
+            if self.hubs[h].is_estate { continue; }
+            let built = self.wonders.iter().filter(|w| w.0 == h as u32).count();
+            if built >= WONDER_NAMES.len() { continue; }
+            let score = self.hubs[h].population.max(0.0)
+                * self.hubs[h].sent_prosperity.clamp(0.0, 1.0);
+            if score > best_score { best_score = score; best = h; }
+        }
+        if best == usize::MAX { return; }
+        let tier = self.wonders.iter().filter(|w| w.0 == best as u32).count() as u8;
+        self.wonders.push((best as u32, tier));
+        self.hubs[best].sent_stability = (self.hubs[best].sent_stability + 0.06).min(1.0);
+        let city = self.hubs[best].name.clone();
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "wonder".into(), hub: best as i32, good: -1, value: 0.0,
+            text: format!("{} completes {} — a wonder of the age.", city, WONDER_NAMES[tier.min(2) as usize]),
+        });
+    }
+
+    /// Phase 5 (flavour) · PIRACY: corsairs seize a merchant house's galley, costing
+    /// it one sea-fleet asset (floored at 0). Bounded; a chronicle beat.
+    fn run_piracy(&mut self, yr: u32) {
+        if hash01(self.seed, yr as u64 ^ 0x9A17, 0) >= PIRACY_YEARLY_CHANCE { return; }
+        let cand: Vec<usize> = (0..self.houses.len())
+            .filter(|&i| !self.houses[i].defunct && self.houses[i].fleet_sea > 0).collect();
+        if cand.is_empty() { return; }
+        let hi = cand[((hash01(self.seed, yr as u64, 0x9A2) * cand.len() as f32) as usize) % cand.len()];
+        self.houses[hi].fleet_sea = self.houses[hi].fleet_sea.saturating_sub(1);
+        let (hn, hub) = (self.houses[hi].name.clone(), self.houses[hi].hub as i32);
+        let city = self.hubs.get(hub as usize).map(|h| h.name.clone()).unwrap_or_default();
+        self.houses[hi].events.push(HouseEvent {
+            tick: self.tick, kind: "piracy".into(), text: format!("Corsairs seize one of our galleys off {}.", city) });
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "piracy".into(), hub, good: -1, value: 0.0,
+            text: format!("Corsairs seize a {} galley off {}.", hn, city),
+        });
+    }
+
+    /// Phase 5 (flavour) · DIASPORA quarters: a house with a far-flung office founds a
+    /// resident QUARTER (fondaco) there — a small standing-influence foothold + a beat.
+    fn run_diaspora(&mut self, yr: u32) {
+        if hash01(self.seed, yr as u64 ^ 0xD1A5, 0) >= DIASPORA_YEARLY_CHANCE { return; }
+        let world_w = self.world_w.max(1.0);
+        // Collect (house, distant office hub) candidates.
+        let mut cand: Vec<(usize, u32)> = Vec::new();
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct { continue; }
+            let home = self.houses[hi].hub as usize;
+            if home >= self.hubs.len() { continue; }
+            let (hx, hy) = (self.hubs[home].x, self.hubs[home].y);
+            for &off in &self.houses[hi].offices {
+                let o = off as usize;
+                if o >= self.hubs.len() { continue; }
+                let mut dx = (self.hubs[o].x - hx).abs();
+                if world_w > 1.0 { dx = dx.min(world_w - dx); }
+                let dy = self.hubs[o].y - hy;
+                if (dx * dx + dy * dy).sqrt() > world_w * 0.20 { cand.push((hi, off)); }
+            }
+        }
+        if cand.is_empty() { return; }
+        let (hi, off) = cand[((hash01(self.seed, yr as u64, 0xD1B) * cand.len() as f32) as usize) % cand.len()];
+        // Small standing-influence foothold at the host city.
+        if let Some(e) = self.houses[hi].influence.iter_mut().find(|e| e.0 == off) {
+            e.1 = (e.1 + 0.05).min(1.0);
+        } else {
+            self.houses[hi].influence.push((off, 0.05));
+        }
+        let (hn, city) = (self.houses[hi].name.clone(),
+            self.hubs.get(off as usize).map(|h| h.name.clone()).unwrap_or_default());
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "diaspora".into(), hub: off as i32, good: -1, value: 0.0,
+            text: format!("{} founds a merchant quarter in {} — a diaspora takes root.", hn, city),
+        });
+    }
+
     /// Phase 5 (flavour) · seed CRAFT GUILDS once — the strongest manufacturing city
     /// for each manufactured (recipe) good gets a guild of its masters. Deterministic;
     /// capped at `GUILD_MAX`.
@@ -8561,6 +8713,7 @@ mod tests {
             alliances: vec![],
             guilds: vec![],
             guilds_seeded: false,
+            wonders: vec![],
         };
         s.rebuild_routes();
         s
