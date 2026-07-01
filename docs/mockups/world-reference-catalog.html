@@ -195,7 +195,16 @@
   <p class="sub">The merchant-network tiers a trading holder climbs, plus the chartered-bank institution.
      Constants shown are the shipped values from <code>sim/tick.rs</code>.</p>
 
-  <h3 style="margin:16px 0 6px">Holder kinds</h3>
+  <h3 style="margin:16px 0 6px">How they look on the map</h3>
+  <p class="sub">The actual markers the overlay draws (from <code>OverlayManager.ts</code> /
+     <code>CoinIcon.tsx</code>). Focused-house markers are drawn in that house's own colour (azure shown here).</p>
+  <div id="finance-visuals" class="arms-grid"></div>
+
+  <h3 style="margin:22px 0 6px">Panel role glyphs</h3>
+  <p class="sub">In the Houses panel each city a holder touches carries a role glyph:</p>
+  <div id="role-glyphs" style="display:flex;flex-wrap:wrap;gap:14px"></div>
+
+  <h3 style="margin:22px 0 6px">Holder kinds</h3>
   <div class="grid cat" id="holderkinds"></div>
 
   <h3 style="margin:22px 0 6px">House archetypes (4) — each grants a standing bonus</h3>
@@ -243,6 +252,80 @@ const DEP = new Set(["iron","copper","tin","gold","gemstones","silver","lead","m
   "tyrian_purple","ambergris","ruby","sapphire","emerald","diamond","amethyst","topaz","salt","amber","pearls"]);
 const MAR = new Set(["stockfish","spices","pearls","whaling","amber","dyes","herring","coral","ambergris",
   "tyrian_purple","salted_herring"]);
+
+/* ---------- GOOD ICON MEDALLIONS (ported verbatim from src/canvas/goodIcons.ts) ----------
+   The real in-app good icon: a flat parchment disc with the good's coloured ring and a
+   duotone vector pictogram — NOT an emoji. Rendered here onto a small canvas per good. */
+function hexToRgb(hex){const h=hex.replace("#","");const v=h.length===3?h.split("").map(c=>c+c).join(""):h.padEnd(6,"0").slice(0,6);return[parseInt(v.slice(0,2),16),parseInt(v.slice(2,4),16),parseInt(v.slice(4,6),16)];}
+function rgbS(r,g,b){return`rgb(${r|0},${g|0},${b|0})`;}
+function mix([r,g,b],to,t){return rgbS(r+(to-r)*t,g+(to-g)*t,b+(to-b)*t);}
+function lumin([r,g,b]){return(0.299*r+0.587*g+0.114*b)/255;}
+const GEM_COLORS={Ruby:"#e0245e",Sapphire:"#2f6fe0",Emerald:"#2faa55",Diamond:"#cfeaf0",Topaz:"#e0a83a",Amethyst:"#9b59d0"};
+function poly(ctx,pts,close){if(close===undefined)close=true;ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i][0],pts[i][1]);if(close)ctx.closePath();}
+function dotc(ctx,x,y,rr){ctx.beginPath();ctx.arc(x,y,rr,0,Math.PI*2);ctx.fill();}
+const drop=(ctx,x,y,s,ink)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.moveTo(x,y-s);ctx.bezierCurveTo(x+s*0.9,y-s*0.1,x+s*0.7,y+s*0.9,x,y+s*0.9);ctx.bezierCurveTo(x-s*0.7,y+s*0.9,x-s*0.9,y-s*0.1,x,y-s);ctx.fill();};
+const leaf=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.moveTo(x-s*0.7,y+s*0.7);ctx.quadraticCurveTo(x-s*0.9,y-s*0.9,x+s*0.7,y-s*0.7);ctx.quadraticCurveTo(x+s*0.9,y+s*0.5,x-s*0.7,y+s*0.7);ctx.fill();ctx.strokeStyle=accent;ctx.lineWidth=s*0.12;ctx.beginPath();ctx.moveTo(x-s*0.6,y+s*0.6);ctx.lineTo(x+s*0.6,y-s*0.6);ctx.stroke();};
+const grain=(ctx,x,y,s,ink)=>{ctx.strokeStyle=ink;ctx.lineWidth=s*0.14;ctx.lineCap="round";ctx.beginPath();ctx.moveTo(x,y+s);ctx.lineTo(x,y-s*0.7);ctx.stroke();ctx.fillStyle=ink;for(let i=0;i<4;i++){const yy=y-s*0.7+i*s*0.45;for(const dir of[-1,1]){ctx.beginPath();ctx.ellipse(x+dir*s*0.42,yy+s*0.18,s*0.28,s*0.14,dir*0.7,0,Math.PI*2);ctx.fill();}}};
+const gem=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;poly(ctx,[[x,y-s],[x+s*0.85,y-s*0.2],[x+s*0.45,y+s],[x-s*0.45,y+s],[x-s*0.85,y-s*0.2]]);ctx.fill();ctx.strokeStyle=accent;ctx.lineWidth=s*0.1;ctx.beginPath();ctx.moveTo(x-s*0.85,y-s*0.2);ctx.lineTo(x+s*0.85,y-s*0.2);ctx.moveTo(x,y-s);ctx.lineTo(x-s*0.3,y-s*0.2);ctx.lineTo(x-s*0.45,y+s);ctx.moveTo(x,y-s);ctx.lineTo(x+s*0.3,y-s*0.2);ctx.lineTo(x+s*0.45,y+s);ctx.stroke();};
+const fish=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.ellipse(x+s*0.05,y,s*0.85,s*0.45,0,0,Math.PI*2);ctx.fill();poly(ctx,[[x-s*0.7,y],[x-s,y-s*0.5],[x-s,y+s*0.5]]);ctx.fill();ctx.fillStyle=accent;dotc(ctx,x+s*0.45,y-s*0.12,s*0.1);};
+const whale=(ctx,x,y,s,ink)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.moveTo(x-s,y+s*0.2);ctx.quadraticCurveTo(x-s*0.2,y-s*0.7,x+s*0.7,y-s*0.1);ctx.quadraticCurveTo(x+s,y,x+s*0.8,y+s*0.4);ctx.quadraticCurveTo(x,y+s*0.7,x-s,y+s*0.2);ctx.fill();poly(ctx,[[x+s*0.6,y-s*0.1],[x+s,y-s*0.8],[x+s*0.95,y-s*0.1]]);ctx.fill();};
+const ingot=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;poly(ctx,[[x-s*0.55,y-s*0.4],[x+s*0.55,y-s*0.4],[x+s*0.85,y+s*0.4],[x-s*0.85,y+s*0.4]]);ctx.fill();ctx.fillStyle=accent;poly(ctx,[[x-s*0.55,y-s*0.4],[x+s*0.55,y-s*0.4],[x+s*0.4,y-s*0.15],[x-s*0.4,y-s*0.15]]);ctx.fill();};
+const pick=(ctx,x,y,s,ink)=>{ctx.strokeStyle=ink;ctx.lineWidth=s*0.16;ctx.lineCap="round";ctx.beginPath();ctx.moveTo(x-s*0.1,y-s*0.8);ctx.lineTo(x-s*0.1,y+s*0.9);ctx.stroke();ctx.beginPath();ctx.moveTo(x-s,y-s*0.45);ctx.quadraticCurveTo(x,y-s*0.95,x+s,y-s*0.45);ctx.stroke();};
+const coinS=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;dotc(ctx,x,y,s*0.9);ctx.fillStyle=accent;dotc(ctx,x,y,s*0.62);ctx.fillStyle=ink;ctx.font=`bold ${s}px serif`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("✦",x,y+s*0.05);};
+const amphora=(ctx,x,y,s,ink)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.moveTo(x,y-s);ctx.quadraticCurveTo(x+s*0.7,y-s*0.6,x+s*0.5,y+s*0.2);ctx.quadraticCurveTo(x+s*0.35,y+s,x,y+s);ctx.quadraticCurveTo(x-s*0.35,y+s,x-s*0.5,y+s*0.2);ctx.quadraticCurveTo(x-s*0.7,y-s*0.6,x,y-s);ctx.fill();ctx.strokeStyle=ink;ctx.lineWidth=s*0.14;ctx.beginPath();ctx.arc(x-s*0.5,y-s*0.35,s*0.28,Math.PI*0.2,Math.PI*1.1);ctx.arc(x+s*0.5,y-s*0.35,s*0.28,-Math.PI*0.1,Math.PI*0.8,true);ctx.stroke();};
+const goblet=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.moveTo(x-s*0.6,y-s*0.8);ctx.lineTo(x+s*0.6,y-s*0.8);ctx.quadraticCurveTo(x+s*0.5,y+s*0.1,x,y+s*0.2);ctx.quadraticCurveTo(x-s*0.5,y+s*0.1,x-s*0.6,y-s*0.8);ctx.fill();ctx.strokeStyle=ink;ctx.lineWidth=s*0.13;ctx.beginPath();ctx.moveTo(x,y+s*0.2);ctx.lineTo(x,y+s*0.8);ctx.moveTo(x-s*0.45,y+s*0.9);ctx.lineTo(x+s*0.45,y+s*0.9);ctx.stroke();ctx.fillStyle=accent;poly(ctx,[[x-s*0.5,y-s*0.75],[x+s*0.5,y-s*0.75],[x,y-s*0.2]]);ctx.fill();};
+const bale=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.ellipse(x,y,s*0.9,s*0.8,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle=accent;ctx.lineWidth=s*0.1;for(let i=-1;i<=1;i++){ctx.beginPath();ctx.ellipse(x,y,s*0.9,s*0.8,0,0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.moveTo(x+i*s*0.4,y-s*0.78);ctx.lineTo(x+i*s*0.4,y+s*0.78);ctx.stroke();}};
+const spool=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.fillRect(x-s*0.5,y-s*0.85,s,s*1.7);ctx.fillStyle=accent;ctx.fillRect(x-s*0.8,y-s*0.85,s*1.6,s*0.22);ctx.fillRect(x-s*0.8,y+s*0.63,s*1.6,s*0.22);};
+const logS=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.ellipse(x,y,s*0.95,s*0.6,Math.PI/4,0,Math.PI*2);ctx.fill();ctx.fillStyle=accent;ctx.beginPath();ctx.ellipse(x+s*0.5,y-s*0.5,s*0.3,s*0.22,Math.PI/4,0,Math.PI*2);ctx.fill();};
+const animal=(ctx,x,y,s,ink)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.ellipse(x,y+s*0.1,s*0.8,s*0.45,0,0,Math.PI*2);ctx.fill();poly(ctx,[[x+s*0.5,y-s*0.1],[x+s,y-s],[x+s*1.05,y-s*0.55],[x+s*0.7,y+s*0.1]]);ctx.fill();ctx.fillRect(x-s*0.6,y+s*0.4,s*0.18,s*0.7);ctx.fillRect(x+s*0.3,y+s*0.4,s*0.18,s*0.7);};
+const tusk=(ctx,x,y,s,ink)=>{ctx.strokeStyle=ink;ctx.lineWidth=s*0.3;ctx.lineCap="round";ctx.beginPath();ctx.moveTo(x-s*0.6,y-s*0.7);ctx.quadraticCurveTo(x+s*0.4,y-s*0.2,x+s*0.3,y+s*0.8);ctx.stroke();};
+const pelt=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;poly(ctx,[[x,y-s],[x+s*0.5,y-s*0.6],[x+s,y-s*0.7],[x+s*0.6,y+s*0.2],[x+s*0.4,y+s],[x-s*0.4,y+s],[x-s*0.6,y+s*0.2],[x-s,y-s*0.7],[x-s*0.5,y-s*0.6]]);ctx.fill();ctx.fillStyle=accent;dotc(ctx,x,y,s*0.18);};
+const crystals=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;poly(ctx,[[x-s*0.8,y+s*0.6],[x-s*0.4,y-s*0.4],[x,y+s*0.6]]);ctx.fill();poly(ctx,[[x-s*0.1,y+s*0.6],[x+s*0.35,y-s*0.8],[x+s*0.8,y+s*0.6]]);ctx.fill();ctx.fillStyle=accent;poly(ctx,[[x+s*0.2,y+s*0.6],[x+s*0.55,y+s*0.05],[x+s*0.9,y+s*0.6]]);ctx.fill();};
+const bean=(ctx,x,y,s,ink,accent)=>{for(const[dx,dy]of[[-s*0.35,-s*0.1],[s*0.35,s*0.1]]){ctx.fillStyle=ink;ctx.beginPath();ctx.ellipse(x+dx,y+dy,s*0.45,s*0.62,0.5,0,Math.PI*2);ctx.fill();ctx.strokeStyle=accent;ctx.lineWidth=s*0.08;ctx.beginPath();ctx.moveTo(x+dx-s*0.28,y+dy-s*0.32);ctx.quadraticCurveTo(x+dx+s*0.1,y+dy,x+dx+s*0.28,y+dy+s*0.32);ctx.stroke();}};
+const flower=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;for(let i=0;i<6;i++){const a=(i/6)*Math.PI*2;ctx.beginPath();ctx.ellipse(x+Math.cos(a)*s*0.5,y+Math.sin(a)*s*0.5,s*0.34,s*0.2,a,0,Math.PI*2);ctx.fill();}ctx.fillStyle=accent;dotc(ctx,x,y,s*0.3);};
+const smoke=(ctx,x,y,s,ink)=>{ctx.strokeStyle=ink;ctx.lineWidth=s*0.16;ctx.lineCap="round";for(const dx of[-s*0.4,s*0.4]){ctx.beginPath();ctx.moveTo(x+dx,y+s);ctx.bezierCurveTo(x+dx-s*0.6,y+s*0.2,x+dx+s*0.6,y-s*0.4,x+dx,y-s);ctx.stroke();}};
+const palm=(ctx,x,y,s,ink,accent)=>{ctx.strokeStyle=ink;ctx.lineWidth=s*0.14;ctx.beginPath();ctx.moveTo(x,y+s);ctx.quadraticCurveTo(x-s*0.2,y,x-s*0.1,y-s*0.4);ctx.stroke();ctx.strokeStyle=ink;for(let i=0;i<5;i++){const a=-Math.PI/2+(i-2)*0.55;ctx.beginPath();ctx.moveTo(x-s*0.1,y-s*0.5);ctx.quadraticCurveTo(x+Math.cos(a)*s*0.6,y-s*0.5+Math.sin(a)*s*0.5,x+Math.cos(a)*s*1.1,y-s*0.4+Math.sin(a)*s);ctx.stroke();}ctx.fillStyle=accent;dotc(ctx,x+s*0.1,y+s*0.55,s*0.16);};
+const berries=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;for(const[dx,dy]of[[-s*0.4,-s*0.2],[s*0.4,-s*0.2],[0,s*0.4]])dotc(ctx,x+dx,y+dy,s*0.42);ctx.fillStyle=accent;for(const[dx,dy]of[[-s*0.4,-s*0.2],[s*0.4,-s*0.2],[0,s*0.4]])dotc(ctx,x+dx-s*0.12,y+dy-s*0.12,s*0.12);};
+const scroll=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.fillRect(x-s*0.7,y-s*0.6,s*1.4,s*1.2);ctx.fillStyle=accent;ctx.beginPath();ctx.ellipse(x-s*0.7,y,s*0.22,s*0.6,0,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.ellipse(x+s*0.7,y,s*0.22,s*0.6,0,0,Math.PI*2);ctx.fill();};
+const pot=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.moveTo(x-s*0.65,y-s*0.5);ctx.quadraticCurveTo(x-s*0.95,y+s*0.2,x-s*0.4,y+s*0.8);ctx.lineTo(x+s*0.4,y+s*0.8);ctx.quadraticCurveTo(x+s*0.95,y+s*0.2,x+s*0.65,y-s*0.5);ctx.quadraticCurveTo(x,y-s*0.85,x-s*0.65,y-s*0.5);ctx.fill();ctx.strokeStyle=accent;ctx.lineWidth=s*0.1;ctx.beginPath();ctx.moveTo(x-s*0.7,y-s*0.1);ctx.lineTo(x+s*0.7,y-s*0.1);ctx.stroke();};
+const shell=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.moveTo(x,y+s*0.7);ctx.arc(x,y-s*0.1,s*0.85,Math.PI,0);ctx.closePath();ctx.fill();ctx.strokeStyle=accent;ctx.lineWidth=s*0.08;for(let i=-2;i<=2;i++){ctx.beginPath();ctx.moveTo(x,y+s*0.6);ctx.lineTo(x+i*s*0.35,y-s*0.75);ctx.stroke();}};
+const grapes=(ctx,x,y,s,ink,accent)=>{ctx.strokeStyle=accent;ctx.lineWidth=s*0.12;ctx.lineCap="round";ctx.beginPath();ctx.moveTo(x,y-s*0.55);ctx.lineTo(x+s*0.12,y-s);ctx.stroke();ctx.fillStyle=accent;ctx.beginPath();ctx.ellipse(x+s*0.42,y-s*0.85,s*0.3,s*0.16,-0.5,0,Math.PI*2);ctx.fill();ctx.fillStyle=ink;for(const[dx,dy]of[[-0.46,-0.45],[0,-0.5],[0.46,-0.45],[-0.26,-0.02],[0.26,-0.02],[0,0.42]])dotc(ctx,x+dx*s,y+dy*s,s*0.29);};
+const coralS=(ctx,x,y,s,ink)=>{ctx.strokeStyle=ink;ctx.lineWidth=s*0.2;ctx.lineCap="round";ctx.lineJoin="round";const branch=(bx,by,ang,len,depth)=>{const ex=bx+Math.cos(ang)*len,ey=by+Math.sin(ang)*len;ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(ex,ey);ctx.stroke();if(depth>0){branch(ex,ey,ang-0.6,len*0.72,depth-1);branch(ex,ey,ang+0.5,len*0.72,depth-1);}};branch(x,y+s*0.95,-Math.PI/2,s*0.62,2);};
+const cinnamonS=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;for(const dx of[-0.42,0.02]){ctx.save();ctx.translate(x+dx*s,y);ctx.rotate(0.12);ctx.fillRect(-s*0.18,-s*0.92,s*0.4,s*1.84);ctx.strokeStyle=accent;ctx.lineWidth=s*0.09;ctx.beginPath();ctx.ellipse(s*0.02,-s*0.92,s*0.2,s*0.09,0,0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.ellipse(s*0.02,s*0.92,s*0.2,s*0.09,0,0,Math.PI*2);ctx.stroke();ctx.restore();}};
+const citrusS=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;dotc(ctx,x,y,s*0.9);ctx.strokeStyle=accent;ctx.lineWidth=s*0.1;for(let i=0;i<7;i++){const a=(i/7)*Math.PI*2;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+Math.cos(a)*s*0.82,y+Math.sin(a)*s*0.82);ctx.stroke();}ctx.fillStyle=accent;dotc(ctx,x,y,s*0.13);};
+const column=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.fillRect(x-s*0.42,y-s*0.62,s*0.84,s*1.2);ctx.fillStyle=accent;ctx.fillRect(x-s*0.72,y-s*0.9,s*1.44,s*0.24);ctx.fillRect(x-s*0.72,y+s*0.6,s*1.44,s*0.28);ctx.strokeStyle=accent;ctx.lineWidth=s*0.07;for(const dx of[-0.18,0.18]){ctx.beginPath();ctx.moveTo(x+dx*s,y-s*0.55);ctx.lineTo(x+dx*s,y+s*0.55);ctx.stroke();}};
+const ring=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;dotc(ctx,x,y,s*0.92);ctx.fillStyle=accent;dotc(ctx,x,y,s*0.58);ctx.fillStyle=ink;dotc(ctx,x,y,s*0.3);};
+const blob=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.moveTo(x-s*0.8,y);ctx.bezierCurveTo(x-s*0.7,y-s*0.9,x+s*0.6,y-s*0.85,x+s*0.82,y-s*0.1);ctx.bezierCurveTo(x+s*0.95,y+s*0.7,x-s*0.5,y+s*0.92,x-s*0.8,y);ctx.fill();ctx.fillStyle=accent;dotc(ctx,x-s*0.18,y-s*0.22,s*0.18);dotc(ctx,x+s*0.3,y+s*0.2,s*0.12);};
+const sheaf=(ctx,x,y,s,ink,accent)=>{ctx.strokeStyle=ink;ctx.lineWidth=s*0.13;ctx.lineCap="round";for(const dx of[-0.4,0,0.4]){ctx.beginPath();ctx.moveTo(x+dx*s*0.7,y+s);ctx.lineTo(x+dx*s,y-s);ctx.stroke();ctx.fillStyle=ink;dotc(ctx,x+dx*s,y-s,s*0.15);}ctx.strokeStyle=accent;ctx.lineWidth=s*0.16;ctx.beginPath();ctx.moveTo(x-s*0.5,y+s*0.3);ctx.lineTo(x+s*0.5,y+s*0.3);ctx.stroke();};
+const book=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.fillRect(x-s*0.7,y-s*0.85,s*1.4,s*1.7);ctx.fillStyle=accent;ctx.fillRect(x-s*0.55,y-s*0.7,s*1.1,s*1.4);ctx.strokeStyle=ink;ctx.lineWidth=s*0.1;ctx.beginPath();ctx.moveTo(x,y-s*0.7);ctx.lineTo(x,y+s*0.7);ctx.stroke();};
+const candle=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.fillRect(x-s*0.32,y-s*0.45,s*0.64,s*1.35);ctx.strokeStyle=ink;ctx.lineWidth=s*0.12;ctx.beginPath();ctx.moveTo(x,y-s*0.45);ctx.lineTo(x,y-s*0.78);ctx.stroke();ctx.fillStyle=accent;ctx.beginPath();ctx.ellipse(x,y-s,s*0.22,s*0.42,0,0,Math.PI*2);ctx.fill();};
+const SYMBOLS={silk:spool,cotton:bale,wool_fleece:bale,wool_llama:bale,flax:sheaf,wine:grapes,oliveoil:amphora,ceramics:pot,glassware:goblet,sugar:crystals,salt:crystals,bay_salt:crystals,frankincense:smoke,incense:smoke,stockfish:fish,dyes:drop,indigo:drop,tyrian_purple:shell,spices:leaf,tea:leaf,cloves:leaf,pepper:berries,tobacco:leaf,cinnamon:cinnamonS,saffron:flower,coffee:bean,cacao:bean,furs:pelt,timber:logS,hardwoods:logS,amber:drop,pearls:shell,coral:coralS,ambergris:blob,whaling:whale,wheat:grain,iron:pick,copper:ingot,tin:ingot,gold:coinS,silver:ingot,lead:ingot,gemstones:gem,jade:ring,marble:column,horses:animal,ivory:tusk,paper:scroll,dates:palm,citrus:citrusS,rice:grain,barley:grain,millet:grain,herring:fish,salted_herring:fish,honey:amphora,hides:pelt,leather_goods:pelt,beer:goblet,mead:goblet,brandy:goblet,citrus_liqueur:goblet,ruby:gem,sapphire:gem,emerald:gem,diamond:gem,amethyst:gem,topaz:gem,clay:blob,soap:blob,cloth:bale,linen:bale,cotton_cloth:bale,carpets:bale,silk_brocade:spool,metalware:ingot,bronzeware:ingot,refined_sugar:crystals,jewelry:ring,perfume:drop,candles:candle,books:book,furniture:logS,ivory_carvings:tusk,statuary:column};
+const FALLBACK=(ctx,x,y,s,ink)=>{ctx.fillStyle=ink;dotc(ctx,x,y,s*0.5);};
+function drawGoodIcon(ctx,name,cx,cy,r,baseColor,opts){opts=opts||{};
+  let color=baseColor;
+  if(name==="gemstones"&&opts.sublabel&&GEM_COLORS[opts.sublabel])color=GEM_COLORS[opts.sublabel];
+  const base=hexToRgb(color);const lum=lumin(base);
+  ctx.save();
+  ctx.globalAlpha=0.3;ctx.fillStyle="#000";dotc(ctx,cx+r*0.05,cy+r*0.07,r);ctx.globalAlpha=1;
+  ctx.fillStyle="#f1ead6";dotc(ctx,cx,cy,r);
+  const rng=lum>0.7?mix(base,0,0.42):color;
+  ctx.lineWidth=r*0.17;ctx.strokeStyle=rng;ctx.beginPath();ctx.arc(cx,cy,r*0.9,0,Math.PI*2);ctx.stroke();
+  ctx.lineWidth=r*0.07;ctx.strokeStyle="rgba(22,17,10,0.6)";ctx.beginPath();ctx.arc(cx,cy,r*0.99,0,Math.PI*2);ctx.stroke();
+  const dark=[(base[0]*0.5)|0,(base[1]*0.5)|0,(base[2]*0.5)|0];
+  const ink=lum>0.62?rgbS(dark[0],dark[1],dark[2]):color;
+  const accent=lum>0.62?rgbS(base[0],base[1],base[2]):mix(base,255,0.4);
+  const sym=SYMBOLS[name]||FALLBACK;ctx.lineJoin="round";sym(ctx,cx,cy,r*0.6,ink,accent);
+  ctx.restore();
+}
+/** Build a crisp <canvas> medallion for one good. px = CSS size. */
+function iconCanvas(name,color,px,sublabel){
+  px=px||44;const dpr=window.devicePixelRatio||1;
+  const cv=document.createElement("canvas");
+  cv.width=px*dpr;cv.height=px*dpr;cv.style.width=px+"px";cv.style.height=px+"px";cv.style.flex="0 0 auto";
+  const ctx=cv.getContext("2d");ctx.scale(dpr,dpr);
+  drawGoodIcon(ctx,name,px/2,px/2,px/2*0.92,color,{sublabel:sublabel});
+  return cv;
+}
 
 const GOODS = [
   ["silk","Silk","\u{1F41B}","#d97fb0","Textiles & Animal"],
@@ -321,9 +404,11 @@ function goodType(id){ if(DEP.has(id))return["Deposit","b-dep"]; if(MAR.has(id))
     for(const g of GOODS.filter(x=>x[4]===cat && !MAN.has(x[0]))){
       const [id,label,emoji,color]=g; const [tl,tc]=goodType(id);
       const c=document.createElement("div");c.className="card";
-      c.innerHTML=`<div class="sw" style="background:${color}"></div>
-        <div><span class="emoji">${emoji}</span> <span class="nm">${label}</span>
-        <div class="id">${id}</div><span class="badge ${tc}">${tl}</span></div>`;
+      c.appendChild(iconCanvas(id,color,44));
+      const txt=document.createElement("div");
+      txt.innerHTML=`<span class="nm">${label}</span>
+        <div class="id">${id}</div><span class="badge ${tc}">${tl}</span>`;
+      c.appendChild(txt);
       m.appendChild(c);
     }
   }
@@ -361,9 +446,14 @@ const LBL=Object.fromEntries(GOODS.map(g=>[g[0],g[1]]));
   for(const [id,label,emoji,color,val,recipe,note] of MANU){
     const r=recipe.map(([g,q])=>`${LBL[g]||g} ×${q}`).join(" + ");
     const tr=document.createElement("tr");
-    tr.innerHTML=`<td><span class="sw" style="display:inline-block;width:14px;height:14px;vertical-align:middle;background:${color}"></span>
-      <span class="emoji">${emoji}</span> <span class="nm">${label}</span></td>
-      <td class="id">${id}</td><td>${val}</td><td class="recipe">${r}</td><td style="color:var(--muted)">${note}</td>`;
+    const td0=document.createElement("td");
+    td0.style.display="flex";td0.style.alignItems="center";td0.style.gap="8px";
+    td0.appendChild(iconCanvas(id,color,34));
+    const nm=document.createElement("span");nm.className="nm";nm.textContent=label;td0.appendChild(nm);
+    tr.appendChild(td0);
+    const rest=document.createElement("template");
+    rest.innerHTML=`<td class="id">${id}</td><td>${val}</td><td class="recipe">${r}</td><td style="color:var(--muted)">${note}</td>`;
+    tr.appendChild(rest.content);
     tb.appendChild(tr);
   }
 })();
@@ -608,6 +698,78 @@ const ARCH=[
 (function(){const tb=document.getElementById("arch-mount");
   for(const [id,l,p] of ARCH){const tr=document.createElement("tr");
     tr.innerHTML=`<td class="id">ARCH ${id}</td><td class="nm">${l}</td><td style="color:var(--muted)">${p}</td>`;tb.appendChild(tr);}})();
+
+/* Finance map markers — mirror OverlayManager.ts draw code (house colour = azure). */
+const HOUSE_COL="#2a5fa0";
+function markerCanvas(draw,px){
+  px=px||58;const dpr=window.devicePixelRatio||1;
+  const cv=document.createElement("canvas");cv.width=px*dpr;cv.height=px*dpr;
+  cv.style.width=px+"px";cv.style.height=px+"px";
+  const ctx=cv.getContext("2d");ctx.scale(dpr,dpr);
+  // subtle map-ish backdrop so light markers read
+  ctx.fillStyle="#17324a";ctx.fillRect(0,0,px,px);
+  draw(ctx,px/2,px/2,px);
+  return cv;
+}
+function fvCard(mount,cv,name,sub){
+  const d=document.createElement("div");d.className="arms";
+  d.appendChild(cv);
+  const l=document.createElement("div");l.className="lbl";l.innerHTML=`${name}${sub?`<small>${sub}</small>`:""}`;
+  d.appendChild(l);document.getElementById(mount).appendChild(d);
+}
+(function(){
+  const M="finance-visuals";
+  // Bank seat: dark disc + owning-house colour ring + 🏦
+  fvCard(M,markerCanvas((c,x,y)=>{const r=13;c.globalAlpha=.95;c.fillStyle="#1a2230";c.beginPath();c.arc(x,y,r,0,7);c.fill();
+    c.strokeStyle="#e0c452";c.lineWidth=2.4;c.beginPath();c.arc(x,y,r,0,7);c.stroke();c.globalAlpha=1;
+    c.font="16px sans-serif";c.textAlign="center";c.textBaseline="middle";c.fillText("🏦",x,y+1);}),
+    "Bank seat","dark disc · house-colour ring · 🏦");
+  // Coin: gold radial disc + issuer arms (✦ fallback) — CoinIcon.tsx
+  const coin=document.createElement("div");
+  coin.style.cssText="display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;background:radial-gradient(circle at 38% 32%,#f0d061 0%,#f0d061 45%,#9c7a16 100%);border:1px solid #9c7a16;box-shadow:inset 0 0 3px rgba(0,0,0,.5),0 1px 3px rgba(0,0,0,.4)";
+  coin.innerHTML=houseSVG({shape:0,field:"#b32d2d",charge:0,size:26});
+  const coinWrap=document.createElement("div");coinWrap.className="arms";coinWrap.appendChild(coin);
+  coinWrap.insertAdjacentHTML("beforeend",`<div class="lbl" style="margin-top:8px">Minted coin<small>gold disc · issuer's arms embossed</small></div>`);
+  document.getElementById(M).appendChild(coinWrap);
+  // Coin-usage tints (mint / heavy / light / reserve-reach)
+  fvCard(M,markerCanvas((c,x,y)=>{
+    c.fillStyle="#37a05a";c.globalAlpha=.9;c.lineWidth=1.6;c.setLineDash([3,2]);c.beginPath();c.arc(x-11,y,9,0,7);c.stroke();c.setLineDash([]);
+    c.globalAlpha=1;c.fillStyle="#f0d77a";c.beginPath();c.arc(x-11,y,6,0,7);c.fill();c.strokeStyle="#fff3c0";c.lineWidth=1;c.beginPath();c.arc(x-11,y,6,0,7);c.stroke();
+    c.globalAlpha=1;c.fillStyle="#c9a227";c.beginPath();c.arc(x+6,y-6,5,0,7);c.fill();
+    c.globalAlpha=.7;c.fillStyle="#7a6320";c.beginPath();c.arc(x+10,y+8,4,0,7);c.fill();c.globalAlpha=1;}),
+    "Coin usage","mint (bright, green reserve ring) · heavy · light");
+  // Office: small square in house colour
+  fvCard(M,markerCanvas((c,x,y)=>{const s=8;c.fillStyle=HOUSE_COL;c.strokeStyle="rgba(8,16,28,.95)";c.lineWidth=1.4;
+    c.fillRect(x-s,y-s,s*2,s*2);c.strokeRect(x-s,y-s,s*2,s*2);}),
+    "Office","small square · house colour");
+  // Bailo: circle + white triangle
+  fvCard(M,markerCanvas((c,x,y)=>{const r=12;c.fillStyle=HOUSE_COL;c.strokeStyle="rgba(8,16,28,.95)";c.lineWidth=1.6;
+    c.beginPath();c.arc(x,y,r,0,7);c.fill();c.stroke();const t=r*.72;c.fillStyle="#fff";
+    c.beginPath();c.moveTo(x,y-t);c.lineTo(x+t*.87,y+t*.5);c.lineTo(x-t*.87,y+t*.5);c.closePath();c.fill();}),
+    "Bailo (HQ)","circle + white triangle");
+  // Seat (main city): large circle + white pip
+  fvCard(M,markerCanvas((c,x,y)=>{const r=14;c.fillStyle=HOUSE_COL;c.strokeStyle="rgba(8,16,28,.95)";c.lineWidth=1.8;
+    c.beginPath();c.arc(x,y,r,0,7);c.fill();c.stroke();c.fillStyle="#fff";c.beginPath();c.arc(x,y,r*.4,0,7);c.fill();}),
+    "Seat / capital","large circle + white pip");
+  // House trade outpost: black square framed in owner colour
+  fvCard(M,markerCanvas((c,x,y)=>{const s=9;c.globalAlpha=.95;c.fillStyle="#0a0a0a";c.fillRect(x-s,y-s,s*2,s*2);
+    c.strokeStyle=HOUSE_COL;c.lineWidth=1.6;c.strokeRect(x-s,y-s,s*2,s*2);c.globalAlpha=1;}),
+    "Trade outpost","black square · owner-colour frame");
+  // Settlement colony: violet circle
+  fvCard(M,markerCanvas((c,x,y)=>{c.globalAlpha=.9;c.fillStyle="#c08cff";c.beginPath();c.arc(x,y,11,0,7);c.fill();
+    c.strokeStyle="rgba(0,0,0,.6)";c.lineWidth=1;c.stroke();c.globalAlpha=1;}),
+    "Settlement colony","violet circle · grows with stage");
+})();
+// Role glyphs
+(function(){
+  const roles=[["👑","seat","#f4c430"],["🏛️","bailo","#e0863a"],["🏭","owns works","#cfa0e0"],
+    ["◆","dominates","#9fd0c0"],["◇","office","#a8c0d8"],["🏢","offices list","#a8c0d8"],
+    ["🏦","owns a bank","#e0c452"],["GUILD","civic guild","#7fd0c0"]];
+  const m=document.getElementById("role-glyphs");
+  for(const [g,l,col] of roles){const d=document.createElement("div");d.className="card";d.style.minWidth="130px";
+    d.innerHTML=`<span style="font-size:18px;color:${col};min-width:26px;text-align:center">${g}</span>
+      <div><span class="nm">${l}</span></div>`;m.appendChild(d);}
+})();
 
 const TIERS=[
   ["1","Trade tie","An informal, decaying tally of recent volume through a hub (<code>trade_at</code>). No cost, no footing — just presence. Sustained volume is what earns an office.",
