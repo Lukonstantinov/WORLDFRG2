@@ -392,6 +392,15 @@ function eventColor(kind: string): string {
     case "fair": return "#6fceb0";       // trade fairs
     case "pilgrimage": return "#c6a6e6"; // pilgrimage seasons
     case "temple": return "#e0cf9a";     // holy cities / temples
+    case "contagion": return "#c07070";  // route-borne epidemics
+    case "marriage": return "#e6a6c8";   // dynastic marriages
+    case "feud": return "#d88a6a";       // broken alliances
+    case "guildhall": return "#cdbb88";  // craft guildhalls
+    case "guild_strike": return "#d0a060";
+    case "fashion": return "#e0a0d0";    // fashion cycles
+    case "wonder": return "#b8c8a0";     // civic wonders
+    case "piracy": return "#c07070";     // corsair raids
+    case "diaspora": return "#8ac0c0";   // diaspora quarters
     default: return "#a8bcd4";
   }
 }

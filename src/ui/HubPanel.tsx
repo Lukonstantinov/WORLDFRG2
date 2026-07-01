@@ -28,11 +28,15 @@ const HUB_EVENT_ICON: Record<string, string> = {
   estate: "🏡", starvation: "💀", succession: "👤", structure: "🏗️", coinage: "🪙",
   bank: "🏦", crash: "📉", war: "⚔", event: "⚡",
   figure: "🎖", fair: "🎪", pilgrimage: "🕊", temple: "⛪",
+  contagion: "☠", marriage: "💍", feud: "🗡", guild_strike: "✊", guildhall: "🏛",
+  fashion: "👗", wonder: "🗿", piracy: "🏴", diaspora: "🧭",
 };
 const HUB_EVENT_COLOR: Record<string, string> = {
   estate: "#7fd0a0", starvation: "#ff7a6a", succession: "#c0a0e0", structure: "#cdbb88",
   coinage: "#d8c878", bank: "#9fd0e0", crash: "#e6303a", war: "#e88", event: "#b8c8da",
   figure: "#e6c878", fair: "#6fceb0", pilgrimage: "#c6a6e6", temple: "#e0cf9a",
+  contagion: "#c07070", marriage: "#e6a6c8", feud: "#d88a6a", guild_strike: "#d0a060",
+  guildhall: "#cdbb88", fashion: "#e0a0d0", wonder: "#b8c8a0", piracy: "#c07070", diaspora: "#8ac0c0",
 };
 
 type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "depots" | "people" | "supply";

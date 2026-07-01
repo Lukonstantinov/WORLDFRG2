@@ -16,13 +16,18 @@ const CATS: { id: string; label: string; icon: string; kinds: string[] }[] = [
   { id: "wars", label: "Wars", icon: "⚔", kinds: ["war"] },
   { id: "crashes", label: "Crashes", icon: "📉", kinds: ["crash", "speculation"] },
   { id: "holdings", label: "Holdings", icon: "🏭", kinds: ["estate", "warehouse"] },
-  { id: "life", label: "Life & Faith", icon: "✦", kinds: ["figure", "fair", "pilgrimage", "temple"] },
+  { id: "life", label: "Life & Faith", icon: "✦",
+    kinds: ["figure", "fair", "pilgrimage", "temple", "marriage", "feud", "guildhall",
+            "guild_strike", "fashion", "wonder", "diaspora"] },
+  { id: "plague", label: "Plague & Sea", icon: "☠", kinds: ["contagion", "piracy"] },
 ];
 
 const ICON: Record<string, string> = {
   bank: "🏦", war: "⚔", crash: "📉", speculation: "📉", estate: "🏭",
   warehouse: "🏬", house: "🛡", succession: "🛡", monopoly: "👑", office: "🏛",
   figure: "🎖", fair: "🎪", pilgrimage: "🕊", temple: "⛪",
+  contagion: "☠", marriage: "💍", feud: "🗡", guild_strike: "✊", guildhall: "🏛",
+  fashion: "👗", wonder: "🗿", piracy: "🏴", diaspora: "🧭",
 };
 
 export function NewsFeedPanel() {
