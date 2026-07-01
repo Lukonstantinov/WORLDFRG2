@@ -102,11 +102,15 @@ export function GuildsPanel() {
               borderBottom: "1px dashed #241f12", cursor: "pointer" }}>
             <span style={{ fontSize: 15, width: 20, textAlign: "center" }}>{EMOJI[g.good_name] ?? "🏺"}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ color: "#e8dcc0", fontSize: 11 }}>
-                {g.good_name}{g.luxury && <span style={{ color: "#d0a0d0", fontSize: 9 }}> · luxury</span>}
+              <div style={{ color: g.exceptional ? "#f0d888" : "#e8dcc0", fontSize: 11, fontWeight: g.exceptional ? 700 : 400 }}>
+                {g.exceptional ? g.brand : g.good_name}
+                {g.exceptional && <span title="Exceptional craft — a renowned brand" style={{ color: "#e0c060", fontSize: 9 }}> ★</span>}
+                {g.luxury && <span style={{ color: "#d0a0d0", fontSize: 9 }}> · luxury</span>}
                 {g.hall && <span title="Guildhall raised" style={{ marginLeft: 4 }}>🏛</span>}
               </div>
-              <div style={{ color: "#8c8060", fontSize: 9 }}>{g.city}</div>
+              <div style={{ color: "#8c8060", fontSize: 9 }}>
+                {g.city}{g.culture ? <span style={{ color: "#6a6448" }}> · {g.culture}</span> : null}
+              </div>
               {/* strength bar */}
               <div style={{ height: 3, background: "#241f12", borderRadius: 2, marginTop: 3, width: "80%" }}>
                 <div style={{ width: `${Math.round(g.strength * 100)}%`, height: "100%", background: "#c0a040", borderRadius: 2 }} />

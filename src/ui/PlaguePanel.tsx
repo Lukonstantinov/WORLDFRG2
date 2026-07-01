@@ -120,15 +120,23 @@ export function PlaguePanel() {
               </div>
               {isOpen && (
                 <div style={{ paddingLeft: 14, paddingBottom: 5 }}>
+                  <div style={{ fontSize: 9, color: "#8c6a6a", marginBottom: 3 }}>
+                    Began in <b style={{ color: "#e8a0a0" }}>{e.origin_name}</b> · spread to {e.cities.length - 1} more
+                  </div>
+                  {/* Cities in SPREAD ORDER (origin first) — the contagion history. */}
                   {e.cities.map((c) => (
                     <div key={c.hub} onClick={() => focusCity(c.hub)}
                       style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, padding: "2px 4px", cursor: "pointer" }}>
+                      <span style={{ color: "#7a5656", fontSize: 8, minWidth: 26 }}>
+                        {c.order === 0 ? "★ src" : `→ ${c.order}`}
+                      </span>
                       <span style={{ flex: 1, color: "#c8a8a8" }}>
-                        {c.name}{c.active && <span style={{ color: "#ff8a6a" }}> · quarantined</span>}
+                        {c.name} <span style={{ color: "#6a5050" }}>Yr{c.year}</span>
+                        {c.active && <span style={{ color: "#ff8a6a" }}> · quarantined</span>}
                         {c.from_name && <span style={{ color: "#6a5050" }}> ← {c.from_name}</span>}
                       </span>
                       <span style={{ color: "#e08a6a", minWidth: 44, textAlign: "right" }}>{c.deaths.toLocaleString()} †</span>
-                      <span style={{ color: "#7a8a6a", minWidth: 44, textAlign: "right" }}>{c.pop.toLocaleString()} ✚</span>
+                      <span style={{ color: "#7a8a6a", minWidth: 40, textAlign: "right" }}>{c.pop.toLocaleString()} ✚</span>
                     </div>
                   ))}
                 </div>

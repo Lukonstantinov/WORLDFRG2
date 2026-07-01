@@ -843,7 +843,7 @@ export function MapCanvas() {
     let alive = true;
     campaignGetEpidemics().then((eps) => {
       if (!alive) return;
-      const cities = eps.flatMap((e) => e.cities.map((c) => ({ x: c.x, y: c.y, active: c.active, deaths: c.deaths })));
+      const cities = eps.flatMap((e) => e.cities.map((c) => ({ x: c.x, y: c.y, active: c.active, deaths: c.deaths, origin: c.order === 0 })));
       // Contagion routes: map each city's `from_name` back to its coords.
       const coord = new Map<string, { x: number; y: number }>();
       for (const e of eps) for (const c of e.cities) coord.set(c.name, { x: c.x, y: c.y });
@@ -867,7 +867,7 @@ export function MapCanvas() {
     const emoji: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.emoji]));
     campaignGetGuilds().then((guilds) => {
       if (!alive) return;
-      om.setGuilds(guilds.map((g) => ({ x: g.x, y: g.y, emoji: emoji[g.good_name] ?? "🏛" })));
+      om.setGuilds(guilds.map((g) => ({ x: g.x, y: g.y, emoji: emoji[g.good_name] ?? "🏛", label: g.exceptional ? g.brand : "" })));
       requestRender();
     }).catch(() => {});
     return () => { alive = false; };

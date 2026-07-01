@@ -156,11 +156,12 @@ export class OverlayManager {
   private coinOverlayHub: number | null = null;
   /** Bank seats to mark on the map (set empty to hide). */
   private bankIcons: { x: number; y: number; name: string; defunct: boolean; color: string }[] = [];
-  /** Phase 6 · plague-struck cities + contagion routes (source→city). */
-  private plagueCities: { x: number; y: number; active: boolean; deaths: number }[] = [];
+  /** Phase 6 · plague-struck cities + contagion routes (source→city, directional). */
+  private plagueCities: { x: number; y: number; active: boolean; deaths: number; origin: boolean }[] = [];
   private plagueEdges: { ax: number; ay: number; bx: number; by: number }[] = [];
-  /** Phase 6 · guild cities to mark with their good's emoji. */
-  private guildCities: { x: number; y: number; emoji: string }[] = [];
+  /** Phase 6 · guild cities to mark with their good's emoji (+ a brand label for
+   *  exceptional crafts). */
+  private guildCities: { x: number; y: number; emoji: string; label: string }[] = [];
   private fisheryBanks: FisheryBank[] = [];
   private sharkZones: SharkZone[] = [];
   private shipwormZones: SharkZone[] = [];
@@ -277,7 +278,7 @@ export class OverlayManager {
 
   /** Phase 6 · plague overlay: struck cities + contagion routes (pass [],[] to hide). */
   setEpidemics(
-    cities: { x: number; y: number; active: boolean; deaths: number }[],
+    cities: { x: number; y: number; active: boolean; deaths: number; origin: boolean }[],
     edges: { ax: number; ay: number; bx: number; by: number }[],
   ) {
     this.plagueCities = cities;
@@ -285,7 +286,7 @@ export class OverlayManager {
   }
 
   /** Phase 6 · guild-city overlay (pass [] to hide). */
-  setGuilds(cities: { x: number; y: number; emoji: string }[]) {
+  setGuilds(cities: { x: number; y: number; emoji: string; label: string }[]) {
     this.guildCities = cities;
   }
 
@@ -1485,27 +1486,37 @@ export class OverlayManager {
     ctx.strokeStyle = "rgba(200,70,70,0.5)";
     ctx.lineWidth = Math.max(0.4, 1.0 * inv);
     ctx.setLineDash([Math.max(1, 3 * inv), Math.max(1, 3 * inv)]);
+    const ah = Math.max(1.2, 3 * inv); // arrowhead size (world cells)
     for (const e of this.plagueEdges) {
-      let dx = e.bx - e.ax;
-      if (W > 0 && Math.abs(dx) > W / 2) continue; // skip seam-crossing edges (no slash)
+      if (W > 0 && Math.abs(e.bx - e.ax) > W / 2) continue; // skip seam-crossing (no slash)
+      const ax = e.ax + 0.5, ay = e.ay + 0.5, bx = e.bx + 0.5, by = e.by + 0.5;
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      // Arrowhead at the destination = direction the pestilence travelled.
+      const ang = Math.atan2(by - ay, bx - ax);
+      ctx.setLineDash([]);
       ctx.beginPath();
-      ctx.moveTo(e.ax + 0.5, e.ay + 0.5);
-      ctx.lineTo(e.bx + 0.5, e.by + 0.5);
+      ctx.moveTo(bx, by);
+      ctx.lineTo(bx - ah * Math.cos(ang - 0.4), by - ah * Math.sin(ang - 0.4));
+      ctx.moveTo(bx, by);
+      ctx.lineTo(bx - ah * Math.cos(ang + 0.4), by - ah * Math.sin(ang + 0.4));
       ctx.stroke();
+      ctx.setLineDash([Math.max(1, 3 * inv), Math.max(1, 3 * inv)]);
     }
     ctx.setLineDash([]);
-    // City glow.
+    // City glow (origin gets a star; active cities a skull).
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     const fs = Math.max(5, 9 * inv);
     for (const c of this.plagueCities) {
       const cx = c.x + 0.5, cy = c.y + 0.5;
-      const r = Math.max(2.0, (c.active ? 6 : 4) * inv);
+      const r = Math.max(2.0, (c.origin ? 7 : c.active ? 6 : 4) * inv);
       ctx.globalAlpha = c.active ? 0.5 : 0.28;
-      ctx.fillStyle = c.active ? "#e04040" : "#a05050";
+      ctx.fillStyle = c.origin ? "#ff6030" : c.active ? "#e04040" : "#a05050";
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = 1;
-      if (c.active) { ctx.font = `${fs}px sans-serif`; ctx.fillText("☠", cx, cy + fs * 0.05); }
+      ctx.font = `${fs}px sans-serif`;
+      if (c.origin) ctx.fillText("★", cx, cy + fs * 0.05);
+      else if (c.active) ctx.fillText("☠", cx, cy + fs * 0.05);
     }
     ctx.globalAlpha = 1;
     ctx.textAlign = "left";
@@ -1530,6 +1541,12 @@ export class OverlayManager {
       ctx.globalAlpha = 1;
       ctx.font = `${fs}px sans-serif`;
       ctx.fillText(g.emoji || "🏛", cx, cy + fs * 0.05);
+      // Renowned crafts carry their place-brand beneath the marker.
+      if (g.label) {
+        ctx.font = `${Math.max(4, fs * 0.7)}px sans-serif`;
+        ctx.fillStyle = "#e0c878";
+        ctx.fillText(g.label, cx, cy + r + fs * 0.7);
+      }
     }
     ctx.globalAlpha = 1;
     ctx.textAlign = "left";

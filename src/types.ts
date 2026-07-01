@@ -1186,17 +1186,20 @@ export interface PlagueCityBrief {
   pop: number;      // survivors at the strike
   active: boolean;  // still under quarantine
   from_name: string; // carried from (""=spontaneous origin)
+  year: number;     // year struck
+  order: number;    // spread step (0 = origin)
 }
 
 /** Phase 6 · an epidemic = a contagion chain (cities sharing an outbreak). */
 export interface EpidemicBrief {
   id: number;
   name: string;
+  origin_name: string;
   start_year: number;
   end_year: number;
   active: boolean;
   total_dead: number;
-  cities: PlagueCityBrief[];
+  cities: PlagueCityBrief[]; // in spread order (origin first)
 }
 
 /** Phase 6 · one craft guild (Guilds & Crafts panel + map). */
@@ -1212,6 +1215,9 @@ export interface GuildBrief {
   strength: number;
   hall: boolean;
   luxury: boolean;
+  exceptional: boolean;
+  brand: string;    // "Veyra cloth" when exceptional, else ""
+  culture: string;
 }
 
 /** One leg of a city's carrying trade ("transit"). */
