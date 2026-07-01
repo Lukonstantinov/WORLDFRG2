@@ -1234,6 +1234,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         figures: vec![],
         fairs: vec![],
         fairs_seeded: false,
+        holy_sites: vec![],
+        holy_seeded: false,
     };
     // Backfill the colonization pool if the saved economy predates the feature (its
     // `colonizable_sites` deserialized to the serde default — empty). Without this a

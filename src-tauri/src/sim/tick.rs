@@ -1605,6 +1605,33 @@ pub struct Fair {
     pub month: u8,
 }
 
+/// Ritual goods a holy site may take as its patron (searched by name; the first
+/// present in the world's goods spec is used). Frankincense/incense for the altar,
+/// wine for libation, wax for candles, pearls/amber for votive offering.
+const RITUAL_GOODS: [&str; 6] = ["frankincense", "incense", "wine", "pearls", "amber", "dyes"];
+const HOLY_MIN_COMPONENT_HUBS: u32 = 4;
+const PILGRIM_PROSPERITY: f32 = 0.08;
+const PILGRIM_STABILITY: f32 = 0.10;  // faith knits the community (stability lift)
+const PILGRIM_LANES: usize = 4;
+const PILGRIM_FLOW: f32 = 150.0;      // overlay-only pilgrim traffic per inbound lane
+const PILGRIM_PRICE_BUMP: f32 = 1.20; // transient ritual-good demand spike (self-relaxes)
+
+/// Phase 4 (flavour) · a HOLY CITY / great temple. Once a year its pilgrimage
+/// season draws the faithful: a civic-stability boon, inbound pilgrim traffic, and
+/// a transient demand spike for its patron ritual good. Sanctuary/temple-banking is
+/// deferred; this is the pilgrimage + festival layer. Dedicated list (no TickHub churn).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct HolySite {
+    /// Host hub index.
+    pub hub: u32,
+    /// Patron ritual good (good index), or −1 if the world grows none.
+    pub patron_good: i32,
+    /// 1 = notable temple · 2 = great holy city (flavour/size).
+    pub tier: u8,
+    /// Month the pilgrimage season opens, 1..12.
+    pub month: u8,
+}
+
 impl CityFinance {
     pub fn income_total(&self) -> f32 {
         self.tax_trade + self.tax_estate + self.tax_manufacture + self.tax_wealth
@@ -1785,6 +1812,13 @@ pub struct CampaignSim {
     /// One-time flag: `seed_trade_fairs` has run.
     #[serde(default)]
     pub fairs_seeded: bool,
+    /// Phase 4 (flavour) · holy cities / great temples with a pilgrimage season,
+    /// seeded once. `#[serde(default)]` so old saves load with none.
+    #[serde(default)]
+    pub holy_sites: Vec<HolySite>,
+    /// One-time flag: `seed_holy_sites` has run.
+    #[serde(default)]
+    pub holy_seeded: bool,
 }
 
 /// Deterministic 0..1 hash of three mixed inputs (splitmix64).
@@ -3323,6 +3357,9 @@ impl CampaignSim {
         // Phase 4 (flavour) · seed seasonal trade fairs once (population-scored, since
         // routes/neighbours aren't built until the tick loop below).
         if !self.fairs_seeded { self.seed_trade_fairs(); self.fairs_seeded = true; }
+        // Phase 4 (flavour) · seed holy cities once (after fairs, so a holy city can
+        // be chosen distinct from its component's fair town).
+        if !self.holy_seeded { self.seed_holy_sites(); self.holy_seeded = true; }
         // Per-day compounding growth equivalent to the yearly baseline drift.
         let tech_daily = (1.0 + PROD_GROWTH_PER_YEAR).powf(1.0 / TICKS_PER_YEAR as f32);
         // Reset per-advance diagnostics.
@@ -3436,9 +3473,10 @@ impl CampaignSim {
                 }
             }
 
-            // Phase 4 (flavour) · open any trade fair whose season begins today
-            // (checked every tick — fairs open mid-year on their month).
+            // Phase 4 (flavour) · open any trade fair / pilgrimage season beginning
+            // today (checked every tick — they open mid-year on their month).
             self.run_trade_fairs(doy);
+            self.run_pilgrimages(doy);
 
             // Expire finished events.
             self.active_events.retain(|e| e.until_tick > tick);
@@ -7196,6 +7234,101 @@ impl CampaignSim {
         }
     }
 
+    /// Phase 4 (flavour) · seed one HOLY CITY per large component, at a prominent
+    /// settlement distinct (where possible) from its fair town, with a patron ritual
+    /// good drawn from the world's goods. Deterministic; runs once. A temple beat is
+    /// chronicled at founding.
+    fn seed_holy_sites(&mut self) {
+        use std::collections::{HashMap, HashSet};
+        let n = self.hubs.len();
+        // Ritual goods actually present in this world (by name → index).
+        let present: Vec<usize> = RITUAL_GOODS.iter()
+            .filter_map(|name| self.goods.iter().position(|g| g.name == *name))
+            .collect();
+        let fair_hubs: HashSet<u32> = self.fairs.iter().map(|f| f.hub).collect();
+        // Per component, the most prominent real hub that is NOT already a fair town
+        // (fall back to allowing a fair town if that's all there is).
+        let mut best: HashMap<u32, (usize, f32)> = HashMap::new();
+        let mut best_any: HashMap<u32, (usize, f32)> = HashMap::new();
+        let mut count: HashMap<u32, u32> = HashMap::new();
+        for h in 0..n {
+            if self.hubs[h].is_estate { continue; }
+            let comp = self.hubs[h].component;
+            *count.entry(comp).or_insert(0) += 1;
+            let score = self.hubs[h].population.max(0.0);
+            let a = best_any.entry(comp).or_insert((h, -1.0));
+            if score > a.1 { *a = (h, score); }
+            if !fair_hubs.contains(&(h as u32)) {
+                let e = best.entry(comp).or_insert((h, -1.0));
+                if score > e.1 { *e = (h, score); }
+            }
+        }
+        let mut sites: Vec<HolySite> = Vec::new();
+        let mut comps: Vec<u32> = count.keys().copied().collect();
+        comps.sort_unstable();
+        for comp in comps {
+            if count.get(&comp).copied().unwrap_or(0) < HOLY_MIN_COMPONENT_HUBS { continue; }
+            let hub = best.get(&comp).or_else(|| best_any.get(&comp)).map(|&(h, _)| h);
+            let hub = match hub { Some(h) => h, None => continue };
+            let patron_good = if present.is_empty() { -1 } else {
+                let pick = (hash01(self.seed, hub as u64, 0x40FE) * present.len() as f32) as usize;
+                present[pick.min(present.len() - 1)] as i32
+            };
+            let tier = if hash01(self.seed, hub as u64, 0x7E3) < 0.4 { 2 } else { 1 };
+            let month = 1 + (hash01(self.seed, hub as u64, 0xB105) * 12.0) as u8;
+            sites.push(HolySite { hub: hub as u32, patron_good, tier, month: month.min(12).max(1) });
+            let city = self.hubs[hub].name.clone();
+            self.journal.push(JournalEntry {
+                tick: self.tick, kind: "temple".into(), hub: hub as i32, good: patron_good, value: 0.0,
+                text: format!("The great temple of {} is renowned across the land.", city),
+            });
+        }
+        self.holy_sites = sites;
+    }
+
+    /// Phase 4 (flavour) · open any PILGRIMAGE season beginning today: a civic boon,
+    /// inbound pilgrim traffic (overlay-only), a transient demand spike for the patron
+    /// ritual good (self-relaxes), an `ActiveEvent{kind:"pilgrimage"}`, and a beat.
+    fn run_pilgrimages(&mut self, doy: u32) {
+        if self.holy_sites.is_empty() { return; }
+        let tick = self.tick;
+        let month_len = TICKS_PER_YEAR / 12;
+        let opening: Vec<(u32, i32)> = self.holy_sites.iter()
+            .filter(|s| (s.month.saturating_sub(1) as u32) * month_len == doy)
+            .map(|s| (s.hub, s.patron_good)).collect();
+        for (hub, patron) in opening {
+            let h = hub as usize;
+            if h >= self.hubs.len() { continue; }
+            self.hubs[h].sent_prosperity = (self.hubs[h].sent_prosperity + PILGRIM_PROSPERITY).min(1.0);
+            self.hubs[h].sent_stability = (self.hubs[h].sent_stability + PILGRIM_STABILITY).min(1.0);
+            let nbrs: Vec<usize> = self.neighbors.get(h)
+                .map(|v| v.iter().take(PILGRIM_LANES).map(|&x| x as usize).collect())
+                .unwrap_or_default();
+            for nb in nbrs { self.accrue_flow(nb, h, PILGRIM_FLOW); }
+            // Pilgrim demand bids up the patron ritual good (transient — the price
+            // relax pulls it back over the following days). Capped for safety.
+            if patron >= 0 {
+                let g = patron as usize;
+                if g < self.hubs[h].price.len() && g < self.goods.len() {
+                    let cap = self.goods[g].base_value.max(0.01) * 5.0;
+                    self.hubs[h].price[g] = (self.hubs[h].price[g] * PILGRIM_PRICE_BUMP).min(cap);
+                }
+            }
+            self.active_events.push(ActiveEvent {
+                kind: "pilgrimage".into(), hub: hub as i32, good: patron,
+                magnitude: 1.0, until_tick: tick + month_len,
+            });
+            let city = self.hubs[h].name.clone();
+            let good_txt = if patron >= 0 {
+                self.goods.get(patron as usize).map(|g| format!(" — {} for the altar", g.name)).unwrap_or_default()
+            } else { String::new() };
+            self.journal.push(JournalEntry {
+                tick, kind: "pilgrimage".into(), hub: hub as i32, good: patron, value: 0.0,
+                text: format!("Pilgrims throng to {} for the holy season{}.", city, good_txt),
+            });
+        }
+    }
+
     /// The living merchant families: ageing heads, monopolies, feuds, founding,
     /// extinction and political power.
     /// Log a dispatched trade for the Market "recent deals" rows (rolling, capped).
@@ -8181,6 +8314,8 @@ mod tests {
             figures: vec![],
             fairs: vec![],
             fairs_seeded: false,
+            holy_sites: vec![],
+            holy_seeded: false,
         };
         s.rebuild_routes();
         s
