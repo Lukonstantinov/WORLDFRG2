@@ -1545,6 +1545,13 @@ pub struct Pop {
     pub militancy: f32,      // 0..10 willingness to revolt
 }
 
+/// Phase 5 (flavour) · CONTAGION tuning. Kept mild + capped so an outbreak spreads
+/// as a wave along the trade lanes and then burns out, and the world recovers (the
+/// dynamics test must stay bounded — no famine collapse).
+const EPIDEMIC_SPREAD_CHANCE: f32 = 0.06;      // per infected focus, per tick
+const EPIDEMIC_CONTAGION_MAG: f32 = 0.08;      // milder cull than the 0.18 origin
+const EPIDEMIC_MAX_SPREAD_PER_TICK: usize = 2; // new foci ignited per tick
+
 /// Phase 4 (flavour) · kinds of notable figure, indexing `FIGURE_KINDS`.
 pub const FIGURE_KINDS: [&str; 5] =
     ["Admiral", "Demagogue", "Master Craftsman", "Great Banker", "Explorer"];
@@ -3639,6 +3646,8 @@ impl CampaignSim {
             // 6) Events.
             let _s_ev = std::time::Instant::now();
             self.roll_events();
+            // Phase 5 (flavour) · plague travels the trade lanes from any active focus.
+            self.spread_epidemics();
             t_events += _s_ev.elapsed().as_secs_f32() * 1000.0;
 
             // 7) Food balance, estates & starvation.
@@ -5385,6 +5394,59 @@ impl CampaignSim {
             .unwrap_or(-1)
     }
 
+    /// Phase 5 (flavour) · strike a hub with plague: cull its population, quarantine
+    /// it (a `plague_lockup` that suspends contracts + reroutes trade), and chronicle
+    /// it. `carried_from` names the origin city for a contagion beat (route-borne
+    /// spread) rather than a spontaneous outbreak.
+    fn strike_plague(&mut self, hub: usize, mag: f32, carried_from: Option<&str>) {
+        if hub >= self.hubs.len() { return; }
+        let tick = self.tick;
+        self.hubs[hub].population *= 1.0 - mag.clamp(0.0, 0.6);
+        let lock = 60 + (hash01(self.seed, tick as u64 ^ 0x10CC, hub as u64) * 120.0) as u32;
+        self.active_events.push(ActiveEvent {
+            kind: "plague_lockup".into(), hub: hub as i32, good: -1,
+            magnitude: 1.0, until_tick: tick + lock,
+        });
+        let city = self.hubs[hub].name.clone();
+        let (kind, text) = match carried_from {
+            Some(origin) => ("contagion".to_string(),
+                format!("The pestilence reaches {}, carried by traders from {}.", city, origin)),
+            None => ("disaster".to_string(), format!("{} is locked down under quarantine", city)),
+        };
+        self.journal.push(JournalEntry {
+            tick, kind, hub: hub as i32, good: -1, value: lock as f32, text });
+    }
+
+    /// Phase 5 (flavour) · CONTAGION: plague travels the trade network. Each infected
+    /// (quarantined) hub may pass the pestilence to a nearby trade partner, so an
+    /// outbreak spreads city-to-city along the lanes — the dark side of connectivity.
+    /// Bounded: milder than the origin, ≤2 new foci per tick, and a hard cap so no
+    /// more than ~a quarter of the world is locked at once (the plague burns out).
+    fn spread_epidemics(&mut self) {
+        use std::collections::HashSet;
+        let tick = self.tick;
+        let n = self.hubs.len();
+        if n == 0 { return; }
+        let locked: Vec<usize> = self.active_events.iter()
+            .filter(|e| e.kind == "plague_lockup" && e.until_tick > tick && e.hub >= 0)
+            .map(|e| e.hub as usize).filter(|&h| h < n).collect();
+        if locked.is_empty() { return; }
+        if locked.len() >= (n / 4).max(1) { return; } // hard cap → burns out
+        let locked_set: HashSet<usize> = locked.iter().copied().collect();
+        let mut new_infections = 0usize;
+        for &src in &locked {
+            if new_infections >= EPIDEMIC_MAX_SPREAD_PER_TICK { break; }
+            if hash01(self.seed, tick as u64 ^ 0xC0FFEE, src as u64) >= EPIDEMIC_SPREAD_CHANCE { continue; }
+            let partner = self.neighbors.get(src).and_then(|v| v.iter().map(|&x| x as usize)
+                .find(|&h| h < n && !self.hubs[h].is_estate && !locked_set.contains(&h)));
+            if let Some(dst) = partner {
+                let origin = self.hubs[src].name.clone();
+                self.strike_plague(dst, EPIDEMIC_CONTAGION_MAG, Some(&origin));
+                new_infections += 1;
+            }
+        }
+    }
+
     /// Roll low-probability events for this tick.
     fn roll_events(&mut self) {
         let n = self.hubs.len();
@@ -5526,20 +5588,11 @@ impl CampaignSim {
                 }
             }
             "plague" => {
-                self.hubs[hub].population *= 1.0 - mag;
-                // Quarantine: the stricken city is LOCKED UP — no trade in or out —
-                // for a spell longer than the mortality window. The spot market routes
-                // around it; futures contracts touching it are force-majeure suspended
-                // (no default). Tagged "disaster" so the lockup shows in the chronicle.
-                let lock = 60 + (hash01(self.seed, tick as u64 ^ 0x10CC, hub as u64) * 120.0) as u32;
-                self.active_events.push(ActiveEvent {
-                    kind: "plague_lockup".into(), hub: hub as i32, good: -1,
-                    magnitude: 1.0, until_tick: tick + lock,
-                });
-                self.journal.push(JournalEntry {
-                    tick, kind: "disaster".into(), hub: hub as i32, good: -1, value: lock as f32,
-                    text: format!("{} is locked down under quarantine", self.hubs[hub].name),
-                });
+                // A spontaneous outbreak: cull + quarantine (shared with contagion
+                // spread). The market routes around the lockup; futures touching it
+                // are force-majeure suspended. Phase 5 `spread_epidemics` then carries
+                // it along the trade lanes from this focus.
+                self.strike_plague(hub, mag, None);
             }
             "festival" => { /* demand spike handled implicitly by low stock */ }
             _ => {}
