@@ -49,7 +49,15 @@ export interface BioParamsState {
   tradeSeason: number;       // 0 = all-year routes; 1..calendarMonths applies seasonal closures
 }
 
+/** The two subproducts, presented as one app. "forge" = world generation
+ *  (paint + sim phases 1–10, geography editable); "chronicle" = the living
+ *  campaign played on a finalized world (read-only map, economy simulated live).
+ *  Chronicle is only reachable once the world is finalized (frozen). */
+export type AppMode = "forge" | "chronicle";
+
 interface UIStore {
+  /** Which subproduct is on screen (Forge vs Chronicle). */
+  appMode: AppMode;
   activeTool: ActiveTool;
   activeLayer: ActiveLayer;
   brushRadius: number;
@@ -146,6 +154,7 @@ interface UIStore {
    *  (set by StepBiological); null when the window is opened just to inspect. */
   chainReviewConfirm: (() => void) | null;
 
+  setAppMode: (mode: AppMode) => void;
   setTool: (tool: ActiveTool) => void;
   setLayer: (layer: ActiveLayer) => void;
   setBrushRadius: (r: number) => void;
@@ -225,6 +234,7 @@ const STEP_DEFAULTS: Record<number, { layer: ActiveLayer; tool: ActiveTool }> = 
 };
 
 export const useUIStore = create<UIStore>((set) => ({
+  appMode: "forge",
   activeTool: "pan",
   activeLayer: "land",
   brushRadius: 3,
@@ -291,6 +301,15 @@ export const useUIStore = create<UIStore>((set) => ({
   chainReviewOpen: false,
   chainReviewConfirm: null,
 
+  // Entering Chronicle forces a non-destructive tool + lands on the campaign step
+  // (step 11): the map is a read-only stage there, so paint tools must not be
+  // active. Leaving to Forge restores the pan tool (the user reselects a tool).
+  setAppMode: (mode) =>
+    set(() =>
+      mode === "chronicle"
+        ? { appMode: mode, activeTool: "pan", workflowStep: 11 as WorkflowStep }
+        : { appMode: mode }
+    ),
   setTool: (tool) => set({ activeTool: tool }),
   setLayer: (layer) => set({ activeLayer: layer }),
   setBrushRadius: (r) => set({ brushRadius: r }),

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WorldForge 2 — Forge / Chronicle split + campaign economy re-derivation</title>
+<style>
+  :root {
+    --bg: #0b1420; --panel: #13202e; --panel2: #0d1219; --text: #cfe2f6;
+    --muted: #6a8aaa; --dim: #506080; --accent: #3a80c0; --accent2: #2a5a8a;
+    --line: #1e2a38; --good: #80c890; --warn: #e0b070; --bad: #e08080;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.5; padding: 28px 20px 60px; }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  h1 { font-size: 22px; color: var(--accent); margin: 0 0 4px; letter-spacing: .3px; }
+  h2 { font-size: 15px; color: #9fc0e4; margin: 34px 0 10px; padding-bottom: 6px;
+    border-bottom: 1px solid var(--line); letter-spacing: .3px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
+  .cols { display: flex; gap: 16px; flex-wrap: wrap; }
+  .col { flex: 1 1 340px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    overflow: hidden; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .5px;
+    padding: 2px 9px; border-radius: 20px; }
+  .tag.forge { background: #16324a; color: #bcd9f4; border: 1px solid #2f5a86; }
+  .tag.chron { background: #181426; color: #d8c8f0; border: 1px solid #3a3050; }
+  .note { color: var(--dim); font-size: 12px; }
+  /* Mini app mock */
+  .app { border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+    background: #080c12; font-size: 11px; }
+  .hdr { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+    background: #0a0f18; border-bottom: 1px solid #1a2535; }
+  .hdr .logo { color: var(--accent); font-weight: 700; font-size: 12px; }
+  .seg { display: flex; border: 1px solid #1e3450; border-radius: 6px; overflow: hidden; }
+  .seg b { padding: 3px 10px; font-weight: 600; }
+  .seg .on { background: var(--accent2); color: #eaf4ff; }
+  .seg .off { color: var(--muted); }
+  .seg .lock { color: var(--muted); opacity: .4; }
+  .hbtn { padding: 3px 9px; border: 1px solid #1a2a40; border-radius: 4px;
+    color: var(--muted); background: transparent; font-size: 10px; }
+  .hbtn.acc { border-color: #2f5a86; background: #16324a; color: #bcd9f4; }
+  .body { display: flex; height: 232px; }
+  .left { width: 150px; background: var(--panel2); border-right: 1px solid #1e2a38;
+    padding: 8px; overflow: hidden; }
+  .center { flex: 1; position: relative; background:
+    radial-gradient(circle at 40% 45%, #10233a 0%, #0a1526 60%, #070f1a 100%); }
+  .right { width: 92px; background: var(--panel2); border-left: 1px solid #1e2a38; padding: 7px; }
+  .ttl { color: var(--accent); font-weight: 700; font-size: 11px; margin-bottom: 6px; }
+  .row { color: var(--muted); padding: 2px 0; }
+  .row.done { color: var(--good); }
+  .row.lock { color: var(--dim); opacity: .5; }
+  .row.act { color: #c0d8f0; font-weight: 600; }
+  .chip { display:inline-block; background:#0c1420; border:1px solid #1e3450;
+    border-radius:5px; padding:5px 7px; margin-bottom:6px; width:100%; }
+  .chip b { color: #cfe0f4; font-size: 12px; }
+  .toolbtn { display:inline-block; width:40px; text-align:center; padding:3px 0;
+    border-radius:4px; background:#151d28; color:var(--muted); margin:0 2px 3px 0; font-size:9px; }
+  .toolbtn.on { background:#2a5080; color:#e0eeff; }
+  .rlabel { font-size:9px; color:var(--dim); margin:4px 0 2px; text-transform:uppercase; letter-spacing:.5px; }
+  .ck { color: var(--muted); padding: 1px 0; font-size: 10px; }
+  .ck .b { color: var(--accent); }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; margin-top: 6px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+  td.num { font-family: ui-monospace, Menlo, monospace; text-align: right; }
+  .bar { height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--accent2), var(--accent)); }
+  .legend { display:flex; gap:16px; flex-wrap:wrap; margin-top:8px; font-size:12px; color:var(--muted); }
+  .legend i { display:inline-block; width:22px; height:0; border-top:3px solid; vertical-align:middle; margin-right:6px; }
+  .callout { background: var(--panel); border:1px solid var(--line); border-left:3px solid var(--accent);
+    border-radius: 6px; padding: 10px 14px; margin: 12px 0; font-size: 13px; color: #b8cce4; }
+  code { background:#0a1018; border:1px solid #16202e; border-radius:4px; padding:1px 5px;
+    font-family: ui-monospace, Menlo, monospace; font-size: 12px; color:#9fc0e4; }
+  .foot { color: var(--dim); font-size: 11px; margin-top: 40px; border-top:1px solid var(--line); padding-top:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>WorldForge 2 → two subproducts, one app</h1>
+  <p class="sub">Design report for the <b>Forge / Chronicle</b> split and the campaign
+    economy <b>re-derivation from geography</b>. Colours &amp; values mirror the app
+    (<code>uiStore.appMode</code>, <code>campaign_start_sim</code>, <code>Toolbar.tsx</code>).</p>
+
+  <div class="callout">
+    <b>The seam in one line:</b> the finalized <b>world</b> hands the campaign only the
+    physical substrate — city sites, founding population, productive potential, the goods
+    spec, and the <b>trade-route network</b>. The campaign <b>re-derives</b> prices, wealth
+    and trade-flow <b>volumes</b> live, starting at founding. <b>Routes in, flows out.</b>
+  </div>
+
+  <!-- ───────────────────────── MODE SPLIT ───────────────────────── -->
+  <h2>1 · One app, two modes — a header switch gated on Finalize World</h2>
+  <div class="cols">
+    <!-- FORGE -->
+    <div class="col">
+      <div style="margin-bottom:8px"><span class="tag forge">🛠 FORGE</span>
+        <span class="note"> — build the world (editable until finalized)</span></div>
+      <div class="app">
+        <div class="hdr">
+          <span class="logo">WorldForge 2</span>
+          <span class="seg"><b class="on">🛠 Forge</b><b class="off">📜 Chronicle</b></span>
+          <span class="hbtn">Save World</span>
+          <span class="hbtn">Import</span>
+          <span class="hbtn">Export</span>
+        </div>
+        <div class="body">
+          <div class="left">
+            <div class="ttl">World Generation</div>
+            <div class="row done">✓ 1. Landmass</div>
+            <div class="row done">✓ 2. Elevation</div>
+            <div class="row done">✓ 3. Ocean &amp; Atmosphere</div>
+            <div class="row done">✓ 4. Biomes &amp; Climate</div>
+            <div class="row done">✓ 5. Rivers &amp; Lakes</div>
+            <div class="row act">6. Soil &amp; Resources ◂</div>
+            <div class="row lock">🔒 7. Settlements</div>
+            <div class="row lock">🔒 8. Biological-Trade</div>
+            <div class="row lock">🔒 10. Economy</div>
+          </div>
+          <div class="center"></div>
+          <div class="right">
+            <div class="rlabel">Tools</div>
+            <span class="toolbtn on">✋Pan</span><span class="toolbtn">◎Sel</span>
+            <span class="toolbtn">✏Paint</span><span class="toolbtn">▲Elev</span>
+            <span class="toolbtn">≈Shelf</span><span class="toolbtn">◆Volc</span>
+            <div class="rlabel">Overlays</div>
+            <div class="ck">Trade routes &amp; flows show the worldgen equilibrium (<span class="b">potential</span>)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- CHRONICLE -->
+    <div class="col">
+      <div style="margin-bottom:8px"><span class="tag chron">📜 CHRONICLE</span>
+        <span class="note"> — play the living campaign (map read-only)</span></div>
+      <div class="app">
+        <div class="hdr">
+          <span class="logo">WorldForge 2</span>
+          <span class="seg"><b class="off">🛠 Forge</b><b class="on">📜 Chronicle</b></span>
+          <span class="hbtn">New Campaign</span>
+          <span class="hbtn acc">💾 Save</span>
+          <span class="hbtn acc">📂 Open</span>
+        </div>
+        <div class="body">
+          <div class="left">
+            <div class="ttl">Chronicle — Living Campaign</div>
+            <div class="chip"><b>Year 12</b> · Day 40 &nbsp;·&nbsp; <span style="color:#6aa0d8">Spring</span>
+              <div style="margin-top:5px"><span class="toolbtn on" style="width:auto;padding:3px 8px">▶ Play</span>
+                <span class="toolbtn" style="width:auto;padding:3px 6px">week</span>
+                <span class="toolbtn on" style="width:auto;padding:3px 6px">month</span></div>
+            </div>
+            <div class="row" style="color:#d8c8f0">⚜️ Merchant Houses</div>
+            <div class="row" style="color:#d8c8f0">🏆 Richest Cities</div>
+            <div class="row" style="color:#d8c8f0">🪙 Coin, Credit &amp; Crashes</div>
+            <div class="row" style="color:#d8c8f0">🗞 World News</div>
+          </div>
+          <div class="center"></div>
+          <div class="right">
+            <div class="rlabel">Tools</div>
+            <span class="toolbtn on">✋Pan</span><span class="toolbtn">◎Sel</span>
+            <div class="note" style="font-size:9px;margin:2px 0 4px">paint tools hidden — map is finalized</div>
+            <div class="rlabel">Overlays</div>
+            <div class="ck">Routes inherited from the world · flow = <span class="b">live</span> campaign volume</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="note" style="margin-top:10px">Forge shows the 10-step generation workflow, all paint
+    tools and every render layer. Chronicle replaces the left panel with the campaign clock,
+    hides the sculpting tools (Pan/Select only), and swaps the header's world file actions for
+    campaign save/load. The <span class="tag chron" style="font-size:10px">📜 Chronicle</span>
+    segment is disabled until the world is finalized.</p>
+
+  <!-- ───────────────────────── ROUTES IN / FLOWS OUT ───────────────────────── -->
+  <h2>2 · Routes in, flows out — the same network, two different truths</h2>
+  <div class="cols">
+    <div class="col">
+      <div style="margin-bottom:6px"><span class="tag forge">Worldgen — potential</span></div>
+      <div class="card" style="padding:10px">
+        <svg viewBox="0 0 380 220" width="100%" height="200">
+          <!-- routes: uniform preview widths -->
+          <g stroke="#3a6a9a" stroke-opacity="0.85" fill="none" stroke-linecap="round">
+            <line x1="60" y1="60" x2="180" y2="40" stroke-width="4"/>
+            <line x1="180" y1="40" x2="300" y2="80" stroke-width="4"/>
+            <line x1="60" y1="60" x2="120" y2="150" stroke-width="4"/>
+            <line x1="120" y1="150" x2="240" y2="180" stroke-width="4"/>
+            <line x1="240" y1="180" x2="300" y2="80" stroke-width="4"/>
+            <line x1="180" y1="40" x2="240" y2="180" stroke-width="4"/>
+          </g>
+          <g font-size="10" fill="#9fb4cc" text-anchor="middle">
+            <circle cx="60" cy="60" r="6" fill="#cfe0f4"/><text x="60" y="46">Aral</text>
+            <circle cx="180" cy="40" r="6" fill="#cfe0f4"/><text x="180" y="26">Veyra</text>
+            <circle cx="300" cy="80" r="6" fill="#cfe0f4"/><text x="300" y="66">Sund</text>
+            <circle cx="120" cy="150" r="6" fill="#cfe0f4"/><text x="120" y="168">Kol</text>
+            <circle cx="240" cy="180" r="6" fill="#cfe0f4"/><text x="240" y="198">Mira</text>
+          </g>
+        </svg>
+        <p class="note">Every lane drawn at a uniform, solver-derived width — a static snapshot
+          of where trade <i>could</i> flow. Good as a map of the world's trade geography.</p>
+      </div>
+    </div>
+    <div class="col">
+      <div style="margin-bottom:6px"><span class="tag chron">Campaign — live (Year 12)</span></div>
+      <div class="card" style="padding:10px">
+        <svg viewBox="0 0 380 220" width="100%" height="200">
+          <!-- same routes, widths ∝ live volume; one quiet this year -->
+          <g fill="none" stroke-linecap="round">
+            <line x1="60" y1="60" x2="180" y2="40" stroke="#2a86d6" stroke-width="9"/>
+            <line x1="180" y1="40" x2="300" y2="80" stroke="#2a86d6" stroke-width="6"/>
+            <line x1="60" y1="60" x2="120" y2="150" stroke="#2a86d6" stroke-width="2.5"/>
+            <line x1="120" y1="150" x2="240" y2="180" stroke="#3a5470" stroke-width="1.5" stroke-dasharray="4 4"/>
+            <line x1="240" y1="180" x2="300" y2="80" stroke="#2a86d6" stroke-width="5"/>
+            <line x1="180" y1="40" x2="240" y2="180" stroke="#2a86d6" stroke-width="11"/>
+          </g>
+          <g font-size="10" fill="#9fb4cc" text-anchor="middle">
+            <circle cx="60" cy="60" r="6" fill="#cfe0f4"/><text x="60" y="46">Aral</text>
+            <circle cx="180" cy="40" r="7" fill="#eac86a"/><text x="180" y="26">Veyra</text>
+            <circle cx="300" cy="80" r="6" fill="#cfe0f4"/><text x="300" y="66">Sund</text>
+            <circle cx="120" cy="150" r="6" fill="#cfe0f4"/><text x="120" y="168">Kol</text>
+            <circle cx="240" cy="180" r="6" fill="#cfe0f4"/><text x="240" y="198">Mira</text>
+          </g>
+        </svg>
+        <p class="note">Same route network — but lane width is the <b>live yearly volume</b>
+          (<code>flow_accum → flow_year</code>). Veyra's houses have cornered the trade;
+          the Kol–Mira lane sits <span style="color:#8aa0b8">quiet</span> this year (dashed).</p>
+      </div>
+    </div>
+  </div>
+  <div class="legend">
+    <span><i style="border-color:#3a6a9a"></i>route (geography — always present)</span>
+    <span><i style="border-color:#2a86d6"></i>live flow volume (thicker = busier)</span>
+    <span><i style="border-color:#3a5470;border-top-style:dashed"></i>route active but quiet this year</span>
+  </div>
+
+  <!-- ───────────────────────── FOUNDING VS SETTLED PRICES ───────────────────────── -->
+  <h2>3 · Founding prices evolve live (no seeded worldgen numbers)</h2>
+  <p class="sub">Before: hub prices were copied from the static market solve. After: every hub
+    starts at each good's intrinsic <code>base_value</code> (autarky) and the tick's stock-driven
+    relax discovers real, trade-driven prices over the first weeks — <b>start at founding, evolve live</b>.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Good (at Veyra)</th>
+        <th>Founding · Day 0 <span class="note">(base_value)</span></th>
+        <th>Settled · Year 3 <span class="note">(simulated)</span></th>
+        <th style="width:34%">Live trajectory</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Wheat (numeraire)</td><td class="num">1.00×</td><td class="num" style="color:var(--good)">0.82×</td>
+        <td><div class="bar" style="width:41%"></div><span class="note">local surplus → cheaper</span></td></tr>
+      <tr><td>Silk</td><td class="num">1.00×</td><td class="num" style="color:var(--warn)">3.6×</td>
+        <td><div class="bar" style="width:90%"></div><span class="note">import-dependent → dear</span></td></tr>
+      <tr><td>Salt</td><td class="num">1.00×</td><td class="num" style="color:var(--warn)">1.7×</td>
+        <td><div class="bar" style="width:60%"></div><span class="note">bulky freight premium</span></td></tr>
+      <tr><td>Stockfish</td><td class="num">1.00×</td><td class="num" style="color:var(--good)">0.71×</td>
+        <td><div class="bar" style="width:34%"></div><span class="note">coastal glut</span></td></tr>
+    </tbody>
+  </table>
+  <p class="note" style="margin-top:8px">Illustrative values. The point: prices are no longer a
+    frozen echo of the worldgen preview — they emerge from the campaign's own production,
+    freight and demand, and diverge across cities as trade develops.</p>
+
+  <div class="callout" style="border-left-color:#8fd0a0">
+    <b>What crosses the boundary (unchanged):</b> city sites, founding population,
+    per-hub productive potential (<code>base_per_capita</code>), goods spec, and the
+    route / reachability graph — plus a <b>founding food-viability constraint</b> (a city
+    wouldn't exist where it can't feed itself), which keeps the live-evolving start from
+    famine-crashing. <b>What is re-derived:</b> prices, wealth, trade-flow volumes,
+    and which routes are active — all emergent.
+  </div>
+
+  <div class="foot">
+    WorldForge 2 · Forge/Chronicle split &amp; campaign economy re-derivation ·
+    dark theme bg <code>#0b1420</code> / panel <code>#13202e</code> / accent <code>#3a80c0</code>.
+    Backend change: <code>src-tauri/src/commands/campaign_commands.rs</code> ·
+    Frontend: <code>uiStore.ts</code>, <code>App.tsx</code>, <code>Toolbar.tsx</code>, <code>ChroniclePanel.tsx</code>.
+  </div>
+</div>
+</body>
+</html>

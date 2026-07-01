@@ -95,6 +95,7 @@ const bioOverlays = [
 ];
 
 export function Toolbar() {
+  const appMode = useUIStore((s) => s.appMode);
   const activeTool = useUIStore((s) => s.activeTool);
   const activeLayer = useUIStore((s) => s.activeLayer);
   const brushRadius = useUIStore((s) => s.brushRadius);
@@ -129,6 +130,12 @@ export function Toolbar() {
 
   const showBrush = activeTool === "paint" || activeTool === "elevation" || activeTool === "shelf";
 
+  // In Chronicle the map is a finalized, read-only stage — hide the paint/sculpt
+  // tools (they mutate geography) and keep only the non-destructive Pan / Select.
+  const visibleTools = appMode === "chronicle"
+    ? tools.filter((t) => t.id === "pan" || t.id === "select")
+    : tools;
+
   return (
     <div style={{
       display: "flex", flexDirection: "column", gap: 0,
@@ -139,7 +146,7 @@ export function Toolbar() {
       <div style={section}>
         <div style={sectionHeader}>Tools</div>
         <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-          {tools.map((t) => (
+          {visibleTools.map((t) => (
             <button
               key={t.id}
               onClick={() => setTool(t.id)}
@@ -234,6 +241,14 @@ export function Toolbar() {
       {/* Overlays */}
       <div style={section}>
         <div style={sectionHeader}>Overlays</div>
+        {/* The trade map means different things per mode: in Forge the routes/flows
+            are the worldgen equilibrium *preview* (potential); in Chronicle the
+            routes remain but flow activity is the *live* simulated volume. */}
+        <div style={{ fontSize: 9, color: "#5a7390", marginBottom: 5, lineHeight: 1.4 }}>
+          {appMode === "chronicle"
+            ? "Trade: routes inherited from the world · flow = live campaign volume (Dynamic Trade Flow)"
+            : "Trade routes & flows show the worldgen equilibrium (potential)"}
+        </div>
         {overlayTypes.map((o) => (
           <label key={o.id} style={checkboxRow}>
             <input

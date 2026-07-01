@@ -3,6 +3,7 @@ import { MapCanvas } from "./ui/MapCanvas";
 import { Toolbar } from "./ui/Toolbar";
 import { StatusBar } from "./ui/StatusBar";
 import { WorkflowPanel } from "./ui/workflow/WorkflowPanel";
+import { ChroniclePanel } from "./ui/ChroniclePanel";
 import { InfoPanel } from "./ui/InfoPanel";
 import { TradeMatrixPanel } from "./ui/TradeMatrixPanel";
 import { HubPanel } from "./ui/HubPanel";
@@ -168,6 +169,8 @@ function NewWorldDialog({ onCreated }: { onCreated: () => void }) {
     try {
       const meta = await newWorld(name, width, height);
       setMeta(meta);
+      // A brand-new world is unfinalized — always land in Forge (build) mode.
+      useUIStore.getState().setAppMode("forge");
       onCreated();
     } catch (err) {
       console.error("Failed to create world:", err);
@@ -271,6 +274,8 @@ export default function App() {
   const setEconomy = useWorldStore((s) => s.setEconomy);
   const showWorkflow = useUIStore((s) => s.showWorkflow);
   const showToolbar = useUIStore((s) => s.showToolbar);
+  const appMode = useUIStore((s) => s.appMode);
+  const setAppMode = useUIStore((s) => s.setAppMode);
   const markStepCompleted = useUIStore((s) => s.markStepCompleted);
   const setStepsCompleted = useUIStore((s) => s.setStepsCompleted);
   const setWorkflowStep = useUIStore((s) => s.setWorkflowStep);
@@ -332,6 +337,12 @@ export default function App() {
         // otherwise the economy step so it can be (re)built on the locked map.
         if (res.meta.frozen) {
           setWorkflowStep((ov.economy && ov.economy.hubs.length ? 11 : 10) as never);
+          // A finalized world is a Chronicle (campaign) product — open it there.
+          setAppMode("chronicle");
+        } else {
+          // An unfinalized world is a Forge product — never strand the UI in
+          // Chronicle (e.g. left over from a previously-open frozen world).
+          setAppMode("forge");
         }
       } catch (e) {
         console.warn("Overlay re-hydration skipped:", e);
@@ -502,12 +513,40 @@ export default function App() {
           </span>
         )}
 
+        {/* Subproduct switch: Forge (build the world) ↔ Chronicle (play the
+            living campaign). Chronicle unlocks only once the world is finalized. */}
+        {isLoaded && (
+          <div style={{ display: "flex", gap: 0, marginRight: 12,
+            border: "1px solid #1e3450", borderRadius: 6, overflow: "hidden" }}>
+            <button onClick={() => setAppMode("forge")} style={modeBtn(appMode === "forge")}
+              title="World generation — paint & simulate the map (editable until finalized)">
+              🛠 Forge
+            </button>
+            <button
+              onClick={() => meta?.frozen && setAppMode("chronicle")}
+              disabled={!meta?.frozen}
+              style={{ ...modeBtn(appMode === "chronicle"), opacity: meta?.frozen ? 1 : 0.4,
+                cursor: meta?.frozen ? "pointer" : "not-allowed" }}
+              title={meta?.frozen
+                ? "Living campaign — play the economy on the finalized world"
+                : "Finalize the world (lock the map) to unlock the campaign"}>
+              📜 Chronicle
+            </button>
+          </div>
+        )}
+
         <div style={{ display: "flex", gap: 2, marginLeft: 4 }}>
           <button onClick={() => setShowDialog(true)} style={headerBtn}>New</button>
           <button onClick={handleOpen} style={headerBtn}>Open</button>
-          {isLoaded && (
+          {isLoaded && appMode === "forge" && (
             <>
               <button onClick={handleSaveAs} style={headerBtn} title="Save the WORLD (geography/climate) to a .worldforge file">Save World</button>
+              <button onClick={() => setShowImport(true)} style={headerBtn} title="Copy layers from another world file">Import Layers</button>
+              <button onClick={() => setShowExport(true)} style={headerBtn}>Export</button>
+            </>
+          )}
+          {isLoaded && appMode === "chronicle" && (
+            <>
               <button onClick={handleNewCampaign} style={headerBtn} title="Start a fresh campaign on this finalized world">New Campaign</button>
               {/* Campaign save/load made prominent (accent) — these resume a running
                   campaign from the exact year you saved, with all economy state. */}
@@ -515,8 +554,6 @@ export default function App() {
                 title="Save the CAMPAIGN — resume later from this exact year with all houses, banks, trade and economy state intact">💾 Save Campaign</button>
               <button onClick={handleOpenCampaign} style={campaignBtn}
                 title="Load a saved campaign and continue from the year it was saved">📂 Open Campaign</button>
-              <button onClick={() => setShowImport(true)} style={headerBtn} title="Copy layers from another world file">Import Layers</button>
-              <button onClick={() => setShowExport(true)} style={headerBtn}>Export</button>
             </>
           )}
         </div>
@@ -529,8 +566,9 @@ export default function App() {
 
       {/* Main layout: workflow | map | toolbar */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        {/* Left: Workflow panel (toggleable via the window bar) */}
-        {isLoaded && showWorkflow && <WorkflowPanel />}
+        {/* Left panel — the active subproduct: Forge = generation workflow,
+            Chronicle = the living campaign clock. (Toggleable via the window bar.) */}
+        {isLoaded && showWorkflow && (appMode === "forge" ? <WorkflowPanel /> : <ChroniclePanel />)}
 
         {/* Center: Map */}
         <div style={{ flex: 1, position: "relative", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
@@ -612,3 +650,10 @@ const campaignBtn: React.CSSProperties = {
   background: "#16324a", color: "#bcd9f4", cursor: "pointer", fontSize: 11,
   fontWeight: 600, transition: "background 0.1s",
 };
+// Subproduct switch segment — active segment reads as a filled accent tab.
+const modeBtn = (active: boolean): React.CSSProperties => ({
+  padding: "4px 12px", border: "none", cursor: "pointer", fontSize: 11,
+  fontWeight: 600, transition: "background 0.1s",
+  background: active ? "#2a5a8a" : "transparent",
+  color: active ? "#eaf4ff" : "#6a8aaa",
+});
