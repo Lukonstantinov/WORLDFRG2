@@ -1552,6 +1552,14 @@ const EPIDEMIC_SPREAD_CHANCE: f32 = 0.06;      // per infected focus, per tick
 const EPIDEMIC_CONTAGION_MAG: f32 = 0.08;      // milder cull than the 0.18 origin
 const EPIDEMIC_MAX_SPREAD_PER_TICK: usize = 2; // new foci ignited per tick
 
+/// Phase 5 (flavour) · dynastic MARRIAGE tuning (bounded — a dowry only *moves*
+/// wealth between houses, which limited-liability already caps).
+const MARRIAGE_MIN_WEALTH: f32 = 30.0;
+const MARRIAGE_YEARLY_CHANCE: f32 = 0.5;
+const MARRIAGE_DOWRY_FRAC: f32 = 0.08;
+const MARRIAGE_DOWRY_CAP: f32 = 500.0;
+const MARRIAGE_BREAK_CHANCE: f32 = 0.04;
+
 /// Phase 4 (flavour) · kinds of notable figure, indexing `FIGURE_KINDS`.
 pub const FIGURE_KINDS: [&str; 5] =
     ["Admiral", "Demagogue", "Master Craftsman", "Great Banker", "Explorer"];
@@ -1826,6 +1834,11 @@ pub struct CampaignSim {
     /// One-time flag: `seed_holy_sites` has run.
     #[serde(default)]
     pub holy_seeded: bool,
+    /// Phase 5 (flavour) · dynastic MARRIAGE alliances between houses, as (a,b) house
+    /// index pairs (a<b). Ending a feud + a dowry accompany a match; a broken match
+    /// rekindles the feud. `#[serde(default)]` so old saves load with none.
+    #[serde(default)]
+    pub alliances: Vec<(u32, u32)>,
 }
 
 /// Deterministic 0..1 hash of three mixed inputs (splitmix64).
@@ -3475,6 +3488,8 @@ impl CampaignSim {
                 self.roll_city_finances(yr);
                 // Phase 4 (flavour) · raise/retire notable figures (Great Lives).
                 self.raise_notable_figures(yr);
+                // Phase 5 (flavour) · dynastic marriages/alliances between houses.
+                self.arrange_marriages(yr);
                 for l in self.house_ledger.iter_mut() {
                     *l = LedgerAcc { year: yr, ..Default::default() };
                 }
@@ -7227,6 +7242,72 @@ impl CampaignSim {
         });
     }
 
+    /// Phase 5 (flavour) · dynastic MARRIAGES between houses. Once a year a prominent
+    /// house may wed another — ending any feud between them, sealing an alliance, and
+    /// exchanging a capped dowry. A broken match rekindles the feud. Deterministic;
+    /// wealth only moves between houses so the economy stays bounded.
+    fn arrange_marriages(&mut self, yr: u32) {
+        let nh = self.houses.len();
+        if nh < 2 { return; }
+        // ── A match sours: dissolve an alliance back into feud (rare). ──
+        let mut kept: Vec<(u32, u32)> = Vec::with_capacity(self.alliances.len());
+        for (a, b) in self.alliances.clone() {
+            let (ua, ub) = (a as usize, b as usize);
+            if ua >= nh || ub >= nh { continue; }
+            let broke = hash01(self.seed, (yr as u64) ^ ((a as u64) << 20) ^ (b as u64), 0xF00D)
+                < MARRIAGE_BREAK_CHANCE;
+            if broke && !self.houses[ua].defunct && !self.houses[ub].defunct {
+                if !self.houses[ua].rivals.contains(&ub) { self.houses[ua].rivals.push(ub); }
+                if !self.houses[ub].rivals.contains(&ua) { self.houses[ub].rivals.push(ua); }
+                let (na, nb) = (self.houses[ua].name.clone(), self.houses[ub].name.clone());
+                self.journal.push(JournalEntry {
+                    tick: self.tick, kind: "feud".into(), hub: self.houses[ua].hub as i32,
+                    good: -1, value: 0.0,
+                    text: format!("The alliance of {} and {} collapses into feud.", na, nb),
+                });
+            } else {
+                kept.push((a, b));
+            }
+        }
+        self.alliances = kept;
+        // ── Arrange one new marriage this year (deterministic). ──
+        if hash01(self.seed, yr as u64 ^ 0x1EDD, 0) >= MARRIAGE_YEARLY_CHANCE { return; }
+        let mut cand: Vec<usize> = (0..nh).filter(|&i| {
+            let h = &self.houses[i];
+            !h.defunct && !h.is_guild && h.wealth > MARRIAGE_MIN_WEALTH
+        }).collect();
+        if cand.len() < 2 { return; }
+        cand.sort_by(|&a, &b| self.houses[b].wealth
+            .partial_cmp(&self.houses[a].wealth).unwrap_or(std::cmp::Ordering::Equal));
+        let top = cand.len().min(12);
+        let a = cand[((hash01(self.seed, yr as u64, 0x0A) * top as f32) as usize) % top];
+        let mut b = cand[((hash01(self.seed, yr as u64, 0x0B) * top as f32) as usize) % top];
+        if a == b { b = cand[(cand.iter().position(|&x| x == a).unwrap_or(0) + 1) % cand.len()]; }
+        if a == b { return; }
+        let (lo, hi) = if a < b { (a as u32, b as u32) } else { (b as u32, a as u32) };
+        if self.alliances.contains(&(lo, hi)) { return; } // already wed
+        // End any feud, seal the alliance.
+        self.houses[a].rivals.retain(|&r| r != b);
+        self.houses[b].rivals.retain(|&r| r != a);
+        self.alliances.push((lo, hi));
+        // Dowry: a capped transfer from the wealthier to the other + prestige both.
+        let (rich, poor) = if self.houses[a].wealth >= self.houses[b].wealth { (a, b) } else { (b, a) };
+        let dowry = (self.houses[rich].wealth * MARRIAGE_DOWRY_FRAC).min(MARRIAGE_DOWRY_CAP).max(0.0);
+        self.houses[rich].wealth -= dowry;
+        self.houses[poor].wealth += dowry;
+        self.houses[a].prestige += 0.05;
+        self.houses[b].prestige += 0.05;
+        let (na, nb) = (self.houses[a].name.clone(), self.houses[b].name.clone());
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "marriage".into(), hub: self.houses[a].hub as i32, good: -1,
+            value: 0.0, text: format!("{} and {} are joined in marriage, sealing an alliance.", na, nb),
+        });
+        self.houses[a].events.push(HouseEvent {
+            tick: self.tick, kind: "marriage".into(), text: format!("Wed into {} — a new alliance.", nb) });
+        self.houses[b].events.push(HouseEvent {
+            tick: self.tick, kind: "marriage".into(), text: format!("Wed into {} — a new alliance.", na) });
+    }
+
     /// Phase 4 (flavour) · seed one seasonal TRADE FAIR per large trading component,
     /// at its crossroads market town (prominence + a mild inland bias — the historic
     /// Champagne/Leipzig pattern). Deterministic; runs once (before routes are built,
@@ -8369,6 +8450,7 @@ mod tests {
             fairs_seeded: false,
             holy_sites: vec![],
             holy_seeded: false,
+            alliances: vec![],
         };
         s.rebuild_routes();
         s
