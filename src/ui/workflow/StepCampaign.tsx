@@ -172,6 +172,12 @@ export function StepCampaign({ seed }: { seed: number; plateCount: number; inval
           <button onClick={() => useUIStore.getState().setShowNews(true)} style={housesBtn}>
             🗞 World News
           </button>
+          <button onClick={() => useUIStore.getState().setShowPlagues(true)} style={housesBtn}>
+            ☠ Plagues &amp; Epidemics
+          </button>
+          <button onClick={() => useUIStore.getState().setShowGuilds(true)} style={housesBtn}>
+            🏛 Guilds &amp; Crafts
+          </button>
 
           {/* ── World pulse: population + prices in NUMBERS, with monthly Δ ── */}
           <div style={statRow}>

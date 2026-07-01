@@ -1176,6 +1176,44 @@ export interface WarsPayload {
   log: WarRecord[];
 }
 
+/** Phase 6 · one plague-struck city inside an epidemic. */
+export interface PlagueCityBrief {
+  hub: number;
+  x: number;
+  y: number;
+  name: string;
+  deaths: number;
+  pop: number;      // survivors at the strike
+  active: boolean;  // still under quarantine
+  from_name: string; // carried from (""=spontaneous origin)
+}
+
+/** Phase 6 · an epidemic = a contagion chain (cities sharing an outbreak). */
+export interface EpidemicBrief {
+  id: number;
+  name: string;
+  start_year: number;
+  end_year: number;
+  active: boolean;
+  total_dead: number;
+  cities: PlagueCityBrief[];
+}
+
+/** Phase 6 · one craft guild (Guilds & Crafts panel + map). */
+export interface GuildBrief {
+  hub: number;
+  x: number;
+  y: number;
+  city: string;
+  good: number;
+  good_name: string;
+  quality: number;
+  output: number;
+  strength: number;
+  hall: boolean;
+  luxury: boolean;
+}
+
 /** One leg of a city's carrying trade ("transit"). */
 export interface TransitRow {
   merchant: string;

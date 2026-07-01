@@ -568,7 +568,7 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 }
 
 // ── DLC 1 "Living Trade" tick simulation ──
-import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow, PopBrief } from "../types";
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow, PopBrief, EpidemicBrief, GuildBrief } from "../types";
 
 /** Seed a fresh living-trade sim from the static economy snapshot (step 10). */
 export async function campaignStartSim(seed: number): Promise<CampaignSnapshot> {
@@ -682,6 +682,16 @@ export async function campaignGetCrashes(): Promise<CrashRecord[]> {
 /** DLC 3.5 · active economic wars + the concluded-war log. */
 export async function campaignGetWars(): Promise<WarsPayload> {
   return invoke("campaign_get_wars");
+}
+
+/** Phase 6 · plagues & epidemics grouped into outbreaks (active-first, deadliest). */
+export async function campaignGetEpidemics(): Promise<EpidemicBrief[]> {
+  return invoke("campaign_get_epidemics");
+}
+
+/** Phase 6 · craft guilds (good, quality, output, strength, guildhall). */
+export async function campaignGetGuilds(): Promise<GuildBrief[]> {
+  return invoke("campaign_get_guilds");
 }
 
 /** DLC 4 · every good's quality rating + produced/traded totals (Goods window). */

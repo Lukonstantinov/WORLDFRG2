@@ -156,6 +156,11 @@ export class OverlayManager {
   private coinOverlayHub: number | null = null;
   /** Bank seats to mark on the map (set empty to hide). */
   private bankIcons: { x: number; y: number; name: string; defunct: boolean; color: string }[] = [];
+  /** Phase 6 · plague-struck cities + contagion routes (source→city). */
+  private plagueCities: { x: number; y: number; active: boolean; deaths: number }[] = [];
+  private plagueEdges: { ax: number; ay: number; bx: number; by: number }[] = [];
+  /** Phase 6 · guild cities to mark with their good's emoji. */
+  private guildCities: { x: number; y: number; emoji: string }[] = [];
   private fisheryBanks: FisheryBank[] = [];
   private sharkZones: SharkZone[] = [];
   private shipwormZones: SharkZone[] = [];
@@ -268,6 +273,20 @@ export class OverlayManager {
   /** Bank seats to mark on the map (pass [] to hide). */
   setBankIcons(banks: { x: number; y: number; name: string; defunct: boolean; color: string }[]) {
     this.bankIcons = banks;
+  }
+
+  /** Phase 6 · plague overlay: struck cities + contagion routes (pass [],[] to hide). */
+  setEpidemics(
+    cities: { x: number; y: number; active: boolean; deaths: number }[],
+    edges: { ax: number; ay: number; bx: number; by: number }[],
+  ) {
+    this.plagueCities = cities;
+    this.plagueEdges = edges;
+  }
+
+  /** Phase 6 · guild-city overlay (pass [] to hide). */
+  setGuilds(cities: { x: number; y: number; emoji: string }[]) {
+    this.guildCities = cities;
   }
 
   /** Hit-test a world point against the bank icons (for click-to-open). Returns the
@@ -909,6 +928,15 @@ export class OverlayManager {
       this.renderBankIcons(ctx);
     }
 
+    // Phase 6 · plague-struck cities (red glow) + contagion routes.
+    if (this.visibility.plagueZones && this.plagueCities.length > 0) {
+      this.renderPlagueZones(ctx);
+    }
+    // Phase 6 · guild cities marked with their good's emoji.
+    if (this.visibility.guildCities && this.guildCities.length > 0) {
+      this.renderGuildCities(ctx);
+    }
+
     // Trade ▸ Flows highlight (always on top when set by the settlement panel).
     if (this.flowHighlight.length > 0) {
       this.renderFlowHighlight(ctx);
@@ -1442,6 +1470,66 @@ export class OverlayManager {
       ctx.globalAlpha = 1;
       ctx.font = `${fs}px sans-serif`;
       ctx.fillText("🏦", cx, cy + fs * 0.05);
+    }
+    ctx.globalAlpha = 1;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+  }
+
+  /** Phase 6 · plague overlay: contagion routes (faint dashed red, source→city) +
+   *  a red glow on each struck city (brighter + a skull while still quarantined). */
+  private renderPlagueZones(ctx: CanvasRenderingContext2D) {
+    const inv = 1 / Math.sqrt(this.currentScale);
+    const W = this.worldW;
+    // Contagion routes first (under the city glyphs).
+    ctx.strokeStyle = "rgba(200,70,70,0.5)";
+    ctx.lineWidth = Math.max(0.4, 1.0 * inv);
+    ctx.setLineDash([Math.max(1, 3 * inv), Math.max(1, 3 * inv)]);
+    for (const e of this.plagueEdges) {
+      let dx = e.bx - e.ax;
+      if (W > 0 && Math.abs(dx) > W / 2) continue; // skip seam-crossing edges (no slash)
+      ctx.beginPath();
+      ctx.moveTo(e.ax + 0.5, e.ay + 0.5);
+      ctx.lineTo(e.bx + 0.5, e.by + 0.5);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    // City glow.
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const fs = Math.max(5, 9 * inv);
+    for (const c of this.plagueCities) {
+      const cx = c.x + 0.5, cy = c.y + 0.5;
+      const r = Math.max(2.0, (c.active ? 6 : 4) * inv);
+      ctx.globalAlpha = c.active ? 0.5 : 0.28;
+      ctx.fillStyle = c.active ? "#e04040" : "#a05050";
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      if (c.active) { ctx.font = `${fs}px sans-serif`; ctx.fillText("☠", cx, cy + fs * 0.05); }
+    }
+    ctx.globalAlpha = 1;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+  }
+
+  /** Phase 6 · guild cities: a gold disc + the good's emoji. */
+  private renderGuildCities(ctx: CanvasRenderingContext2D) {
+    const inv = 1 / Math.sqrt(this.currentScale);
+    const r = Math.max(2.2, 5 * inv);
+    const fs = Math.max(5, 9 * inv);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (const g of this.guildCities) {
+      const cx = g.x + 0.5, cy = g.y + 0.5;
+      ctx.globalAlpha = 0.95;
+      ctx.fillStyle = "#221c10";
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#c0a040";
+      ctx.lineWidth = Math.max(0.6, 1.4 * inv);
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.font = `${fs}px sans-serif`;
+      ctx.fillText(g.emoji || "🏛", cx, cy + fs * 0.05);
     }
     ctx.globalAlpha = 1;
     ctx.textAlign = "left";

@@ -139,6 +139,10 @@ interface UIStore {
   showBankIcons: boolean;
   /** The filterable World News feed (global campaign chronicle). */
   showNews: boolean;
+  /** Phase 6 · Plagues & Epidemics panel open. */
+  showPlagues: boolean;
+  /** Phase 6 · Guilds & Crafts panel open. */
+  showGuilds: boolean;
   /** DLC 4 · the floating Goods (quality & trade) window. */
   showGoodsWindow: boolean;
   /** Chrome visibility — lets the user hide the left workflow panel and the right
@@ -207,6 +211,8 @@ interface UIStore {
   setSelectedBankIdx: (i: number | null) => void;
   setShowBankIcons: (v: boolean) => void;
   setShowNews: (v: boolean) => void;
+  setShowPlagues: (v: boolean) => void;
+  setShowGuilds: (v: boolean) => void;
   setShowGoodsWindow: (v: boolean) => void;
   setShowWorkflow: (v: boolean) => void;
   setShowToolbar: (v: boolean) => void;
@@ -255,6 +261,7 @@ export const useUIStore = create<UIStore>((set) => ({
     colonies: true,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
     travelRoute: false, goodScarcity: false, toponyms: false,
+    plagueZones: false, guildCities: false,
     ...Object.fromEntries(GOOD_DEFS.map((g) => [goodOverlayKey(g.name), false])),
   },
   layerOpacity: 1,
@@ -294,6 +301,8 @@ export const useUIStore = create<UIStore>((set) => ({
   selectedBankIdx: null,
   showBankIcons: false,
   showNews: false,
+  showPlagues: false,
+  showGuilds: false,
   showGoodsWindow: false,
   showWorkflow: true,
   showToolbar: true,
@@ -393,6 +402,8 @@ export const useUIStore = create<UIStore>((set) => ({
   setSelectedBankIdx: (i) => set({ selectedBankIdx: i }),
   setShowBankIcons: (v) => set({ showBankIcons: v }),
   setShowNews: (v) => set({ showNews: v }),
+  setShowPlagues: (v) => set({ showPlagues: v }),
+  setShowGuilds: (v) => set({ showGuilds: v }),
   setShowGoodsWindow: (v) => set({ showGoodsWindow: v }),
   setShowWorkflow: (v) => set({ showWorkflow: v }),
   setShowToolbar: (v) => set({ showToolbar: v }),

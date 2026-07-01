@@ -10,9 +10,9 @@ import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useSettingsStore } from "../state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds } from "../bridge/tauri";
 import type { MerchantRoute, FuturesLane } from "../types";
-import { goodOverlayKey } from "../goods";
+import { goodOverlayKey, GOOD_DEFS } from "../goods";
 import type { PaintValue, EconChain, Settlement } from "../types";
 
 /** Largest box with the world's aspect ratio that fits inside the pane. */
@@ -833,6 +833,45 @@ export function MapCanvas() {
       .catch(() => {});
     return () => { alive = false; };
   }, [showBankIcons, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
+
+  // Phase 6 · plague overlay: struck cities + contagion routes (source→city).
+  const showPlagueZones = useUIStore((s) => s.overlayVisibility.plagueZones);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    if (!showPlagueZones || !campaignSnapshot?.active) { om.setEpidemics([], []); requestRender(); return; }
+    let alive = true;
+    campaignGetEpidemics().then((eps) => {
+      if (!alive) return;
+      const cities = eps.flatMap((e) => e.cities.map((c) => ({ x: c.x, y: c.y, active: c.active, deaths: c.deaths })));
+      // Contagion routes: map each city's `from_name` back to its coords.
+      const coord = new Map<string, { x: number; y: number }>();
+      for (const e of eps) for (const c of e.cities) coord.set(c.name, { x: c.x, y: c.y });
+      const edges = eps.flatMap((e) => e.cities.flatMap((c) => {
+        const src = c.from_name ? coord.get(c.from_name) : undefined;
+        return src ? [{ ax: src.x, ay: src.y, bx: c.x, by: c.y }] : [];
+      }));
+      om.setEpidemics(cities, edges);
+      requestRender();
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [showPlagueZones, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
+
+  // Phase 6 · guild-city overlay: markers with each guild's good emoji.
+  const showGuildCities = useUIStore((s) => s.overlayVisibility.guildCities);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    if (!showGuildCities || !campaignSnapshot?.active) { om.setGuilds([]); requestRender(); return; }
+    let alive = true;
+    const emoji: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.emoji]));
+    campaignGetGuilds().then((guilds) => {
+      if (!alive) return;
+      om.setGuilds(guilds.map((g) => ({ x: g.x, y: g.y, emoji: emoji[g.good_name] ?? "🏛" })));
+      requestRender();
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [showGuildCities, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
 
   // #5: selecting a hub from ANY list/panel (Richest Cities, Trade matrix, Houses,
   // Banks, …) recenters the map on that city AND drops the shiny highlight pin — so

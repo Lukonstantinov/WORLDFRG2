@@ -92,6 +92,8 @@ const bioOverlays = [
   { id: "tradeCorridors", label: "\u{2194} Trade Corridors" },
   { id: "chokepoints", label: "\u{2693} Chokepoints" },
   { id: "speculation", label: "\u{1FAE7} Speculation Risk" },
+  { id: "plagueZones", label: "\u{2620} Plague Zones" },
+  { id: "guildCities", label: "\u{1F3DB} Guild Cities" },
 ];
 
 export function Toolbar() {

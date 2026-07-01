@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WorldForge 2 — News subwindows: Plagues & Epidemics · Guilds & Crafts</title>
+<style>
+  :root{--bg:#0b1420;--line:#1e2a38;--text:#cfe2f6;--muted:#6a8aaa;--dim:#506080;--accent:#3a80c0;}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.5;padding:28px 20px 60px;}
+  .wrap{max-width:1040px;margin:0 auto;}
+  h1{font-size:22px;color:var(--accent);margin:0 0 4px;}
+  h2{font-size:15px;color:#9fc0e4;margin:28px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line);}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 12px;}
+  code{background:#0a1018;border:1px solid #16202e;border-radius:4px;padding:1px 5px;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#9fc0e4;}
+  .cols{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;}
+  .col{flex:1 1 340px;}
+  /* window chrome */
+  .win{border-radius:8px;padding:10px 12px;box-shadow:0 8px 30px rgba(0,0,0,.5);font-size:12px;}
+  .win.plague{background:rgba(26,14,14,.97);border:1px solid #3a2020;}
+  .win.guild{background:rgba(24,20,12,.97);border:1px solid #3a3220;}
+  .whead{display:flex;align-items:center;margin-bottom:6px;}
+  .whead .t{font-weight:700;font-size:13px;}
+  .plague .t{color:#e8c0c0;} .guild .t{color:#e8d8b0;}
+  .whead .x{margin-left:auto;color:#8a6a6a;cursor:pointer;}
+  .meta{display:flex;gap:8px;font-size:10px;margin-bottom:6px;}
+  .plague .meta{color:#9c8080;} .guild .meta{color:#9c9070;}
+  .chips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;}
+  .chip{font-size:10px;padding:2px 8px;border-radius:20px;border:1px solid #3a2626;color:#9c7676;}
+  .chip.on{background:#301818;border-color:#c05858;color:#f0cccc;}
+  .guild .chip{border-color:#3a3220;color:#9c9070;}
+  .guild .chip.on{background:#2a2410;border-color:#c0a040;color:#f0e0b0;}
+  .row{display:flex;align-items:center;gap:6px;padding:5px 2px;}
+  .plague .row{border-bottom:1px solid #2a1818;}
+  .guild .row{border-bottom:1px dashed #241f12;}
+  .out{color:#e8c8c8;font-weight:600;} .out .a{color:#ff8a6a;font-size:9px;}
+  .yr{color:#8c6a6a;font-size:9px;}
+  .dead{color:#ff8a6a;font-size:12px;font-weight:700;text-align:right;}
+  .cityrow{display:flex;gap:6px;font-size:10px;padding:2px 4px 2px 16px;color:#c8a8a8;}
+  .cityrow .d{color:#e08a6a;margin-left:auto;} .cityrow .s{color:#7a8a6a;min-width:46px;text-align:right;}
+  .gemoji{font-size:15px;width:20px;text-align:center;}
+  .gname{color:#e8dcc0;} .gname .lux{color:#d0a0d0;font-size:9px;}
+  .gcity{color:#8c8060;font-size:9px;}
+  .bar{height:3px;background:#241f12;border-radius:2px;margin-top:3px;width:80%;}
+  .bar > i{display:block;height:100%;background:#c0a040;border-radius:2px;}
+  .q{color:#e0c060;font-size:12px;font-weight:700;text-align:right;}
+  .qd{color:#7a7050;font-size:8px;text-align:right;}
+  .callout{background:#13202e;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:6px;padding:10px 14px;margin:14px 0;font-size:13px;color:#b8cce4;}
+  .map{margin-top:8px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:radial-gradient(circle at 45% 45%,#10233a,#0a1526 60%,#070f1a);}
+  .foot{color:var(--dim);font-size:11px;margin-top:34px;border-top:1px solid var(--line);padding-top:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>News subwindows — Plagues &amp; Guilds</h1>
+  <p class="sub">Dedicated, draggable panels with structured stats, sort/filter, click-to-focus, and a map
+    toggle. Backed by <code>campaign_get_epidemics</code> / <code>campaign_get_guilds</code> (observability —
+    the sim is unchanged).</p>
+
+  <div class="cols">
+    <!-- PLAGUE PANEL -->
+    <div class="col">
+      <div class="win plague">
+        <div class="whead"><span class="t">☠ Plagues &amp; Epidemics</span><span class="x">×</span></div>
+        <div class="meta"><span>3 outbreaks</span><span>· 1 active</span><span>· 41,900 dead</span>
+          <span style="margin-left:auto;color:#c07070">☑ Show on map</span></div>
+        <div class="chips"><span class="chip">Deadliest</span><span class="chip">Most cities</span>
+          <span class="chip">Recent</span><span class="chip on">Active first</span><span class="chip">Active only</span></div>
+        <div class="row"><span style="color:#7a5656">▾</span>
+          <div style="flex:1"><div class="out">The Veyra Pestilence <span class="a">● active</span></div>
+            <div class="yr">Year 27–29 · 4 cities</div></div>
+          <div><div class="dead">22,400</div><div class="yr" style="text-align:right">died</div></div></div>
+        <div class="cityrow"><span style="flex:1">Veyra</span><span class="d">9,800 †</span><span class="s">31k ✚</span></div>
+        <div class="cityrow"><span style="flex:1">Kolvarr <span style="color:#ff8a6a">· quarantined</span> <span style="color:#6a5050">← Veyra</span></span><span class="d">7,100 †</span><span class="s">18k ✚</span></div>
+        <div class="cityrow"><span style="flex:1">Aldermoor <span style="color:#6a5050">← Kolvarr</span></span><span class="d">3,300 †</span><span class="s">12k ✚</span></div>
+        <div class="row"><span style="color:#7a5656">▸</span>
+          <div style="flex:1"><div class="out">The Sund Pestilence</div><div class="yr">Year 14–16 · 3 cities</div></div>
+          <div><div class="dead">12,600</div><div class="yr" style="text-align:right">died</div></div></div>
+        <div class="row"><span style="color:#7a5656">▸</span>
+          <div style="flex:1"><div class="out">The Mira Pestilence</div><div class="yr">Year 6 · 1 city</div></div>
+          <div><div class="dead">6,900</div><div class="yr" style="text-align:right">died</div></div></div>
+      </div>
+      <p class="sub" style="margin-top:8px">Sort deadliest→least, expand an outbreak to its cities &amp; the
+        contagion routes (← carried-from). <b>†</b> died · <b>✚</b> survived. Click a city → it focuses on the map.</p>
+    </div>
+
+    <!-- GUILDS PANEL -->
+    <div class="col">
+      <div class="win guild">
+        <div class="whead"><span class="t">🏛 Guilds &amp; Crafts</span><span class="x">×</span></div>
+        <div class="meta"><span>7 guilds</span><span>· 3 guildhalls</span>
+          <span style="margin-left:auto;color:#c0a040">☑ Show on map</span></div>
+        <div class="chips"><span class="chip on">Finest</span><span class="chip">Most made</span>
+          <span class="chip">Strongest</span><span class="chip">Luxuries</span></div>
+        <div class="row"><span class="gemoji">🧵</span>
+          <div style="flex:1"><div class="gname">cloth <span class="lux">· luxury</span> 🏛</div>
+            <div class="gcity">Veyra</div><div class="bar"><i style="width:78%"></i></div></div>
+          <div><div class="q">86%</div><div class="qd">2.1k/day</div></div></div>
+        <div class="row"><span class="gemoji">⚒</span>
+          <div style="flex:1"><div class="gname">metalware 🏛</div>
+            <div class="gcity">Kolvarr</div><div class="bar"><i style="width:64%"></i></div></div>
+          <div><div class="q">79%</div><div class="qd">1.4k/day</div></div></div>
+        <div class="row"><span class="gemoji">🍬</span>
+          <div style="flex:1"><div class="gname">refined_sugar <span class="lux">· luxury</span></div>
+            <div class="gcity">Sund</div><div class="bar"><i style="width:47%"></i></div></div>
+          <div><div class="q">71%</div><div class="qd">840/day</div></div></div>
+        <div class="row"><span class="gemoji">🥃</span>
+          <div style="flex:1"><div class="gname">citrus_liqueur <span class="lux">· luxury</span></div>
+            <div class="gcity">Aldermoor</div><div class="bar"><i style="width:38%"></i></div></div>
+          <div><div class="q">63%</div><div class="qd">410/day</div></div></div>
+      </div>
+      <p class="sub" style="margin-top:8px">Each guild's good, quality mastered, daily output, standing bar,
+        and 🏛 guildhall. Sort by finest / most-made / strongest; filter to luxuries. Click → focus its city.</p>
+    </div>
+  </div>
+
+  <h2>On the map</h2>
+  <div class="map">
+    <svg viewBox="0 0 900 220" width="100%" height="200">
+      <!-- contagion routes -->
+      <g stroke="#c84646" stroke-opacity="0.5" stroke-dasharray="5 5" fill="none">
+        <line x1="150" y1="70" x2="300" y2="55"/><line x1="300" y1="55" x2="430" y2="110"/>
+      </g>
+      <!-- plague cities -->
+      <g>
+        <circle cx="150" cy="70" r="16" fill="#e04040" opacity="0.5"/><text x="150" y="75" font-size="14" text-anchor="middle">☠</text>
+        <circle cx="300" cy="55" r="16" fill="#e04040" opacity="0.5"/><text x="300" y="60" font-size="14" text-anchor="middle">☠</text>
+        <circle cx="430" cy="110" r="11" fill="#a05050" opacity="0.28"/>
+        <text x="150" y="98" fill="#e8a0a0" font-size="10" text-anchor="middle">Veyra</text>
+        <text x="300" y="40" fill="#e8a0a0" font-size="10" text-anchor="middle">Kolvarr</text>
+        <text x="430" y="132" fill="#c89090" font-size="10" text-anchor="middle">Aldermoor</text>
+      </g>
+      <!-- guild cities -->
+      <g>
+        <circle cx="640" cy="90" r="12" fill="#221c10" stroke="#c0a040" stroke-width="2"/><text x="640" y="95" font-size="12" text-anchor="middle">🧵</text>
+        <circle cx="760" cy="140" r="12" fill="#221c10" stroke="#c0a040" stroke-width="2"/><text x="760" y="145" font-size="12" text-anchor="middle">⚒</text>
+        <text x="640" y="115" fill="#d8c890" font-size="10" text-anchor="middle">Veyra (cloth)</text>
+        <text x="760" y="165" fill="#d8c890" font-size="10" text-anchor="middle">Kolvarr (metalware)</text>
+      </g>
+    </svg>
+  </div>
+  <p class="sub" style="margin-top:8px">Toolbar toggles <b>☠ Plague Zones</b> (red glow on struck cities +
+    dashed contagion routes; a skull while quarantined) and <b>🏛 Guild Cities</b> (gold disc + the good's emoji).</p>
+
+  <div class="callout">
+    <b>Reuse:</b> query→payload like <code>campaign_get_wars</code>; panels via <code>useFloatingWindow</code>
+    like <code>NewsFeedPanel</code>; overlays via the <code>showBankIcons</code>/<code>dynamicFlow</code> fetch
+    pattern in <code>MapCanvas</code> → <code>OverlayManager</code>. Epidemic strike records are pure
+    observability, so the dynamics test is unchanged &amp; bounded; 32/32 tick tests pass.
+  </div>
+
+  <div class="foot">
+    WorldForge 2 · Phase 6 news subwindows · backend <code>campaign_commands.rs</code> (records + queries);
+    UI <code>PlaguePanel.tsx</code> / <code>GuildsPanel.tsx</code> / <code>OverlayManager.ts</code> /
+    <code>MapCanvas.tsx</code>. Panels for the other packs generalize from this pattern.
+  </div>
+</div>
+</body>
+</html>
