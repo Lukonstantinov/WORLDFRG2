@@ -1545,6 +1545,46 @@ pub struct Pop {
     pub militancy: f32,      // 0..10 willingness to revolt
 }
 
+/// Phase 4 (flavour) · kinds of notable figure, indexing `FIGURE_KINDS`.
+pub const FIGURE_KINDS: [&str; 5] =
+    ["Admiral", "Demagogue", "Master Craftsman", "Great Banker", "Explorer"];
+/// At most this many notable figures alive at once (keeps the chronicle sparse).
+const FIGURE_LIVING_CAP: usize = 6;
+/// Total roster cap (living + dead kept for the record) — bounds save size.
+const FIGURE_CAP: usize = 60;
+/// Yearly probability the world raises a new notable figure.
+const FIGURE_YEARLY_CHANCE: f32 = 0.45;
+
+/// Short title prefix for a figure kind (chronicle text).
+fn role_title(kind: u8) -> &'static str {
+    match kind { 0 => "Admiral", 1 => "Demagogue", 2 => "Master", 3 => "Banker", _ => "Explorer" }
+}
+
+/// Phase 4 (flavour) · a named individual who rose to prominence in the campaign.
+/// Purely a chronicle actor plus ONE small, capped, one-time effect on an existing
+/// bounded field (a house's fleet, a city's craft quality, civic unrest, a house's
+/// prestige) — so the economy dynamics stay bounded. Deterministic: raised from a
+/// `hash01(seed, tick, hub)` roll at the yearly hook.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Figure {
+    /// The person's name (role is conveyed by `kind` + the chronicle text).
+    pub name: String,
+    /// Index into `FIGURE_KINDS`.
+    pub kind: u8,
+    /// Home city (hub index).
+    pub hub: u32,
+    /// Linked house index, or −1 (demagogues/explorers may be unaffiliated).
+    pub house: i32,
+    /// Relevant good (master craftsman's craft), else −1.
+    pub good: i32,
+    pub born_tick: u32,
+    /// Planned death tick (a career length, not a full lifespan).
+    pub dies_tick: u32,
+    /// Death already chronicled.
+    #[serde(default)]
+    pub dead: bool,
+}
+
 impl CityFinance {
     pub fn income_total(&self) -> f32 {
         self.tax_trade + self.tax_estate + self.tax_manufacture + self.tax_wealth
@@ -1712,6 +1752,12 @@ pub struct CampaignSim {
     /// Per-(hub, good) yearly trade-volume history (the trend graphs).
     #[serde(default)]
     pub trade_hist: Vec<TradeHist>,
+    /// Phase 4 (flavour) · notable individuals raised over the campaign — admirals,
+    /// demagogues, master craftsmen, great bankers, explorers. Each grants ONE
+    /// capped effect and is chronicled at rise and death. Appended LAST →
+    /// `#[serde(default)]` so old `.campaign` saves load with none.
+    #[serde(default)]
+    pub figures: Vec<Figure>,
 }
 
 /// Deterministic 0..1 hash of three mixed inputs (splitmix64).
@@ -3353,6 +3399,8 @@ impl CampaignSim {
                 self.fold_trade_year();
                 self.maybe_pop_bubbles(yr);
                 self.roll_city_finances(yr);
+                // Phase 4 (flavour) · raise/retire notable figures (Great Lives).
+                self.raise_notable_figures(yr);
                 for l in self.house_ledger.iter_mut() {
                     *l = LedgerAcc { year: yr, ..Default::default() };
                 }
@@ -6928,6 +6976,132 @@ impl CampaignSim {
         ((45.0 + r * 30.0) * TICKS_PER_YEAR as f32) as u32
     }
 
+    /// Phase 4 (flavour) · raise & retire NOTABLE FIGURES at the yearly hook. Sparse
+    /// (≤ `FIGURE_LIVING_CAP` alive, a modest yearly chance) and deterministic (all
+    /// rolls hash `seed`/`tick`/`hub`). Each figure grants ONE small, capped effect
+    /// on an existing bounded field and is chronicled at rise and at death, so the
+    /// economy dynamics stay bounded.
+    fn raise_notable_figures(&mut self, yr: u32) {
+        let tick = self.tick;
+        // 1) Retire the departed — chronicle each death once.
+        for i in 0..self.figures.len() {
+            if self.figures[i].dead || self.figures[i].dies_tick > tick { continue; }
+            self.figures[i].dead = true;
+            let (kind, good, hub, house) =
+                (self.figures[i].kind, self.figures[i].good, self.figures[i].hub, self.figures[i].house);
+            let name = self.figures[i].name.clone();
+            let city = self.hubs.get(hub as usize).map(|h| h.name.clone()).unwrap_or_default();
+            self.journal.push(JournalEntry {
+                tick, kind: "figure".into(), hub: hub as i32, good, value: 0.0,
+                text: format!("{} {} of {} has died.", role_title(kind), name, city),
+            });
+            if house >= 0 && (house as usize) < self.houses.len() {
+                self.houses[house as usize].events.push(HouseEvent {
+                    tick, kind: "figure".into(),
+                    text: format!("{} {} passes into memory.", role_title(kind), name),
+                });
+            }
+        }
+        // Bound the roster (dead figures accumulate over a long campaign).
+        if self.figures.len() > FIGURE_CAP {
+            let drop = self.figures.len() - FIGURE_CAP;
+            self.figures.drain(0..drop);
+        }
+        // 2) Maybe raise a new one.
+        let living = self.figures.iter().filter(|f| !f.dead).count();
+        if living >= FIGURE_LIVING_CAP { return; }
+        if hash01(self.seed, tick as u64, 0xF16) >= FIGURE_YEARLY_CHANCE { return; }
+        let n = self.hubs.len();
+        if n == 0 { return; }
+        // Prominent hub: hash-pick from the most populous real settlements.
+        let mut real: Vec<usize> = (0..n).filter(|&h| !self.hubs[h].is_estate).collect();
+        if real.is_empty() { return; }
+        real.sort_by(|&a, &b| self.hubs[b].population
+            .partial_cmp(&self.hubs[a].population).unwrap_or(std::cmp::Ordering::Equal));
+        real.truncate(20.min(real.len()));
+        let pick = (hash01(self.seed, tick as u64 ^ 0xA1, yr as u64) * real.len() as f32) as usize;
+        let hub = real[pick.min(real.len() - 1)];
+        let ng = self.goods.len();
+        // Resident house (first non-defunct family seated here), if any.
+        let resident = self.houses.iter()
+            .position(|h| h.hub as usize == hub && !h.defunct).map(|i| i as i32).unwrap_or(-1);
+        let has_house = resident >= 0;
+        let coastal = self.hubs[hub].coastal;
+        // Kind: base roll, with fallbacks when the context can't support it.
+        let mut kind = ((hash01(self.seed, tick as u64 ^ 0x5E, hub as u64) * 5.0) as u8).min(4);
+        if (kind == 0 || kind == 3) && !has_house { kind = 1; }          // house role → demagogue
+        if (kind == 0 || kind == 4) && !coastal && has_house { kind = 3; } // inland → banker
+        // Craftsman's craft = the hub's strongest output; else fall back to demagogue.
+        let mut good = -1i32;
+        if kind == 2 {
+            if self.hubs[hub].quality.len() == ng && ng > 0 {
+                let mut bg = 0usize; let mut bv = -1.0f32;
+                for g in 0..ng {
+                    let p = self.hubs[hub].production.get(g).copied().unwrap_or(0.0);
+                    if p > bv { bv = p; bg = g; }
+                }
+                good = bg as i32;
+            } else { kind = 1; }
+        }
+        // Name (+ an epithet for the martial/rabble-rousing/roving kinds).
+        let salt = (tick as u64) ^ (hub as u64).wrapping_mul(0x9E3779B1) ^ (yr as u64);
+        let surname_src = if has_house { self.houses[resident as usize].name.clone() }
+            else { self.hubs[hub].name.clone() };
+        let person = self.head_name_for(hub, &surname_src, salt);
+        let (fx, fy) = (self.hubs[hub].x.max(0.0) as u32, self.hubs[hub].y.max(0.0) as u32);
+        let epithet = crate::sim::names::gen_name_epithet(fx, fy, self.world_w as u32, self.world_h(), 2);
+        let name = if !epithet.is_empty() && (kind == 0 || kind == 1 || kind == 4) {
+            format!("{} {}", person, epithet)
+        } else { person };
+        let city = self.hubs[hub].name.clone();
+        // Effect (capped) + chronicle text.
+        let text = match kind {
+            0 => { // Admiral — a house's sea fleet + renown
+                let hi = resident as usize;
+                if self.houses[hi].fleet_sea < 15 { self.houses[hi].fleet_sea += 1; }
+                self.houses[hi].prestige += 0.05;
+                format!("Admiral {} wins renown at sea for {}.", name, self.houses[hi].name)
+            }
+            1 => { // Demagogue — stirs civic unrest
+                let u = self.hubs[hub].society.unrest;
+                self.hubs[hub].society.unrest = (u + 0.08).min(1.0);
+                format!("The demagogue {} stirs the crowds of {}.", name, city)
+            }
+            2 => { // Master Craftsman — lifts a city's craft quality
+                let g = good.max(0) as usize;
+                if g < self.hubs[hub].quality.len() {
+                    let q = self.hubs[hub].quality[g];
+                    self.hubs[hub].quality[g] = (q + 0.06).min(0.9);
+                }
+                let gn = self.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
+                format!("Master {} raises the {} craft of {} to new heights.", name, gn, city)
+            }
+            3 => { // Great Banker — a house's standing
+                if has_house { self.houses[resident as usize].prestige += 0.08; }
+                format!("{}, a great banker of {}, gathers capital from across the sea.", name, city)
+            }
+            _ => { // Explorer — a house's standing + a distant venture
+                if has_house { self.houses[resident as usize].prestige += 0.06; }
+                format!("{} sets out from {} to chart distant shores.", name, city)
+            }
+        };
+        self.journal.push(JournalEntry {
+            tick, kind: "figure".into(), hub: hub as i32, good, value: 0.0, text,
+        });
+        if has_house {
+            self.houses[resident as usize].events.push(HouseEvent {
+                tick, kind: "figure".into(),
+                text: format!("{} {} brings the family renown.", role_title(kind), name),
+            });
+        }
+        let span = ((15.0 + hash01(self.seed, tick as u64 ^ 0xCA6, hub as u64) * 25.0)
+            * TICKS_PER_YEAR as f32) as u32;
+        self.figures.push(Figure {
+            name, kind, hub: hub as u32, house: resident, good,
+            born_tick: tick, dies_tick: tick + span, dead: false,
+        });
+    }
+
     /// The living merchant families: ageing heads, monopolies, feuds, founding,
     /// extinction and political power.
     /// Log a dispatched trade for the Market "recent deals" rows (rolling, capped).
@@ -7910,6 +8084,7 @@ mod tests {
             city_dominator: vec![],
             trade_last: vec![],
             trade_hist: vec![],
+            figures: vec![],
         };
         s.rebuild_routes();
         s
