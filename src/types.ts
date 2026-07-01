@@ -1245,6 +1245,26 @@ export interface LandmarkBrief {
   detail: string;
 }
 
+/** Phase 7 · a link between two houses (marriage alliance or feud). */
+export interface HouseLink {
+  a_name: string;
+  b_name: string;
+  a_hub: number;
+  b_hub: number;
+  ax: number;
+  ay: number;
+  bx: number;
+  by: number;
+  a_city: string;
+  b_city: string;
+}
+
+/** Phase 7 · dynasties: marriage alliances + feuds between houses. */
+export interface DynastiesPayload {
+  alliances: HouseLink[];
+  feuds: HouseLink[];
+}
+
 /** One leg of a city's carrying trade ("transit"). */
 export interface TransitRow {
   merchant: string;

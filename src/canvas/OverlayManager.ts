@@ -165,6 +165,8 @@ export class OverlayManager {
   /** Phase 6 · living notable figures + landmarks, as emoji map markers. */
   private figureMarks: { x: number; y: number; emoji: string }[] = [];
   private landmarkMarks: { x: number; y: number; emoji: string }[] = [];
+  /** Phase 7 · dynasty ties between house seat cities (ally = gold, feud = red). */
+  private dynastyLinks: { ax: number; ay: number; bx: number; by: number; ally: boolean }[] = [];
   private fisheryBanks: FisheryBank[] = [];
   private sharkZones: SharkZone[] = [];
   private shipwormZones: SharkZone[] = [];
@@ -297,6 +299,8 @@ export class OverlayManager {
   setFigureMarks(marks: { x: number; y: number; emoji: string }[]) { this.figureMarks = marks; }
   /** Phase 6 · landmark map markers (pass [] to hide). */
   setLandmarkMarks(marks: { x: number; y: number; emoji: string }[]) { this.landmarkMarks = marks; }
+  /** Phase 7 · dynasty ties between house seat cities (pass [] to hide). */
+  setDynastyLinks(links: { ax: number; ay: number; bx: number; by: number; ally: boolean }[]) { this.dynastyLinks = links; }
 
   /** Hit-test a world point against the bank icons (for click-to-open). Returns the
    *  bank's list index, or -1. `tol` is in world cells. */
@@ -953,6 +957,10 @@ export class OverlayManager {
     if (this.visibility.landmarks && this.landmarkMarks.length > 0) {
       this.renderEmojiMarks(ctx, this.landmarkMarks, "#40b090");
     }
+    // Phase 7 · dynasty ties (alliances gold, feuds red) between seat cities.
+    if (this.visibility.dynastyLinks && this.dynastyLinks.length > 0) {
+      this.renderDynastyLinks(ctx);
+    }
 
     // Trade ▸ Flows highlight (always on top when set by the settlement panel).
     if (this.flowHighlight.length > 0) {
@@ -1537,6 +1545,25 @@ export class OverlayManager {
     ctx.globalAlpha = 1;
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
+  }
+
+  /** Phase 7 · dynasty ties: a line between two house seat cities — solid gold for a
+   *  marriage alliance, dashed red for a feud. Seam-crossing links are skipped. */
+  private renderDynastyLinks(ctx: CanvasRenderingContext2D) {
+    const inv = 1 / Math.sqrt(this.currentScale);
+    const W = this.worldW;
+    ctx.lineCap = "round";
+    for (const l of this.dynastyLinks) {
+      if (W > 0 && Math.abs(l.bx - l.ax) > W / 2) continue; // no slash across the seam
+      ctx.strokeStyle = l.ally ? "rgba(220,180,90,0.7)" : "rgba(200,80,80,0.6)";
+      ctx.lineWidth = Math.max(0.4, (l.ally ? 1.2 : 0.9) * inv);
+      ctx.setLineDash(l.ally ? [] : [Math.max(1, 3 * inv), Math.max(1, 2 * inv)]);
+      ctx.beginPath();
+      ctx.moveTo(l.ax + 0.5, l.ay + 0.5);
+      ctx.lineTo(l.bx + 0.5, l.by + 0.5);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
   }
 
   /** Phase 6/7 · generic emoji map markers (figures, landmarks): a tinted disc +

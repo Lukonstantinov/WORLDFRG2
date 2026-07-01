@@ -3460,6 +3460,65 @@ pub fn campaign_get_landmarks(db: State<'_, WorldDb>) -> Result<Vec<LandmarkBrie
     Ok(out)
 }
 
+/// Phase 7 · a link between two houses (a marriage alliance or a feud).
+#[derive(Serialize, Clone)]
+pub struct HouseLink {
+    pub a_name: String,
+    pub b_name: String,
+    pub a_hub: u32,
+    pub b_hub: u32,
+    pub ax: f32,
+    pub ay: f32,
+    pub bx: f32,
+    pub by: f32,
+    pub a_city: String,
+    pub b_city: String,
+}
+
+/// Phase 7 · the Dynasties & Alliances panel: marriage alliances + feuds.
+#[derive(Serialize, Clone)]
+pub struct DynastiesPayload {
+    pub alliances: Vec<HouseLink>,
+    pub feuds: Vec<HouseLink>,
+}
+
+/// Phase 7 · marriage alliances (from `sim.alliances`) + feuds (from `House.rivals`)
+/// between living houses, with their seat cities for the map.
+#[tauri::command]
+pub fn campaign_get_dynasties(db: State<'_, WorldDb>) -> Result<DynastiesPayload, String> {
+    use std::collections::HashSet;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? {
+        Some(s) => s, None => return Ok(DynastiesPayload { alliances: vec![], feuds: vec![] }),
+    };
+    let houses = &sim.houses;
+    let link = |a: usize, b: usize| -> Option<HouseLink> {
+        let (ha, hb) = (houses.get(a)?, houses.get(b)?);
+        if ha.defunct || hb.defunct { return None; }
+        let (ca, cb) = (sim.hubs.get(ha.hub as usize)?, sim.hubs.get(hb.hub as usize)?);
+        Some(HouseLink {
+            a_name: ha.name.clone(), b_name: hb.name.clone(),
+            a_hub: ha.hub, b_hub: hb.hub,
+            ax: ca.x, ay: ca.y, bx: cb.x, by: cb.y,
+            a_city: ca.name.clone(), b_city: cb.name.clone(),
+        })
+    };
+    let alliances: Vec<HouseLink> = sim.alliances.iter()
+        .filter_map(|&(a, b)| link(a as usize, b as usize)).collect();
+    // Feuds: unique (min,max) pairs from rivals lists among living houses.
+    let mut seen: HashSet<(usize, usize)> = HashSet::new();
+    let mut feuds: Vec<HouseLink> = Vec::new();
+    for (i, h) in houses.iter().enumerate() {
+        if h.defunct { continue; }
+        for &r in &h.rivals {
+            let (lo, hi) = if i < r { (i, r) } else { (r, i) };
+            if lo == hi || !seen.insert((lo, hi)) { continue; }
+            if let Some(l) = link(lo, hi) { feuds.push(l); }
+        }
+    }
+    Ok(DynastiesPayload { alliances, feuds })
+}
+
 /// DLC 3.5 · one city's "schematic" — its standing buildings, estates, bank
 /// presence and coin, for the Schematics (blueprint) view.
 #[derive(Serialize, Clone)]

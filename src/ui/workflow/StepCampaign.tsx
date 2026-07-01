@@ -184,6 +184,9 @@ export function StepCampaign({ seed }: { seed: number; plateCount: number; inval
           <button onClick={() => useUIStore.getState().setShowLandmarks(true)} style={housesBtn}>
             🗿 Landmarks &amp; Sites
           </button>
+          <button onClick={() => useUIStore.getState().setShowDynasties(true)} style={housesBtn}>
+            ⚭ Dynasties &amp; Alliances
+          </button>
 
           {/* ── World pulse: population + prices in NUMBERS, with monthly Δ ── */}
           <div style={statRow}>

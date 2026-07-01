@@ -96,6 +96,7 @@ const bioOverlays = [
   { id: "guildCities", label: "\u{1F3DB} Guild Cities" },
   { id: "figureMarks", label: "\u{269C} Notable Figures" },
   { id: "landmarks", label: "\u{1F5FF} Landmarks" },
+  { id: "dynastyLinks", label: "\u{26AD} Dynasty Ties" },
 ];
 
 export function Toolbar() {

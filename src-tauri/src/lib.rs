@@ -116,6 +116,7 @@ pub fn run() {
             campaign_commands::campaign_get_guilds,
             campaign_commands::campaign_get_figures,
             campaign_commands::campaign_get_landmarks,
+            campaign_commands::campaign_get_dynasties,
             campaign_commands::campaign_get_goods,
             campaign_commands::campaign_get_schematics,
             campaign_commands::campaign_house_ledger,

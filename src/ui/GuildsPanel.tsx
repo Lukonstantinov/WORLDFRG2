@@ -100,7 +100,7 @@ export function GuildsPanel() {
           <div key={`${g.hub}-${g.good}`} onClick={() => focusCity(g.hub)}
             style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 2px",
               borderBottom: "1px dashed #241f12", cursor: "pointer" }}>
-            <span style={{ fontSize: 15, width: 20, textAlign: "center" }}>{EMOJI[g.good_name] ?? "🏺"}</span>
+            <span style={{ fontSize: 15, width: 20, textAlign: "center" }}>{EMOJI[g.good_name] ?? "🏭"}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ color: g.exceptional ? "#f0d888" : "#e8dcc0", fontSize: 11, fontWeight: g.exceptional ? 700 : 400 }}>
                 {g.exceptional ? g.brand : g.good_name}

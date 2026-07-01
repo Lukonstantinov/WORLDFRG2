@@ -147,6 +147,8 @@ interface UIStore {
   showFigures: boolean;
   /** Phase 6 · Landmarks & Sacred Sites panel open. */
   showLandmarks: boolean;
+  /** Phase 7 · Dynasties & Alliances panel open. */
+  showDynasties: boolean;
   /** DLC 4 · the floating Goods (quality & trade) window. */
   showGoodsWindow: boolean;
   /** Chrome visibility — lets the user hide the left workflow panel and the right
@@ -219,6 +221,7 @@ interface UIStore {
   setShowGuilds: (v: boolean) => void;
   setShowFigures: (v: boolean) => void;
   setShowLandmarks: (v: boolean) => void;
+  setShowDynasties: (v: boolean) => void;
   setShowGoodsWindow: (v: boolean) => void;
   setShowWorkflow: (v: boolean) => void;
   setShowToolbar: (v: boolean) => void;
@@ -267,7 +270,7 @@ export const useUIStore = create<UIStore>((set) => ({
     colonies: true,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
     travelRoute: false, goodScarcity: false, toponyms: false,
-    plagueZones: false, guildCities: false, figureMarks: false, landmarks: false,
+    plagueZones: false, guildCities: false, figureMarks: false, landmarks: false, dynastyLinks: false,
     ...Object.fromEntries(GOOD_DEFS.map((g) => [goodOverlayKey(g.name), false])),
   },
   layerOpacity: 1,
@@ -311,6 +314,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showGuilds: false,
   showFigures: false,
   showLandmarks: false,
+  showDynasties: false,
   showGoodsWindow: false,
   showWorkflow: true,
   showToolbar: true,
@@ -414,6 +418,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowGuilds: (v) => set({ showGuilds: v }),
   setShowFigures: (v) => set({ showFigures: v }),
   setShowLandmarks: (v) => set({ showLandmarks: v }),
+  setShowDynasties: (v) => set({ showDynasties: v }),
   setShowGoodsWindow: (v) => set({ showGoodsWindow: v }),
   setShowWorkflow: (v) => set({ showWorkflow: v }),
   setShowToolbar: (v) => set({ showToolbar: v }),

@@ -10,7 +10,7 @@ import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useSettingsStore } from "../state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties } from "../bridge/tauri";
 import type { MerchantRoute, FuturesLane } from "../types";
 import { goodOverlayKey, GOOD_DEFS } from "../goods";
 import type { PaintValue, EconChain, Settlement } from "../types";
@@ -867,7 +867,7 @@ export function MapCanvas() {
     const emoji: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.emoji]));
     campaignGetGuilds().then((guilds) => {
       if (!alive) return;
-      om.setGuilds(guilds.map((g) => ({ x: g.x, y: g.y, emoji: emoji[g.good_name] ?? "🏛", label: g.exceptional ? g.brand : "" })));
+      om.setGuilds(guilds.map((g) => ({ x: g.x, y: g.y, emoji: emoji[g.good_name] ?? "🏭", label: g.exceptional ? g.brand : "" })));
       requestRender();
     }).catch(() => {});
     return () => { alive = false; };
@@ -904,6 +904,25 @@ export function MapCanvas() {
     }).catch(() => {});
     return () => { alive = false; };
   }, [showLandmarks, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
+
+  // Phase 7 · dynasty ties (alliances + feuds) between house seat cities.
+  const showDynastyLinks = useUIStore((s) => s.overlayVisibility.dynastyLinks);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    if (!showDynastyLinks || !campaignSnapshot?.active) { om.setDynastyLinks([]); requestRender(); return; }
+    let alive = true;
+    campaignGetDynasties().then((d) => {
+      if (!alive) return;
+      const links = [
+        ...d.alliances.map((l) => ({ ax: l.ax, ay: l.ay, bx: l.bx, by: l.by, ally: true })),
+        ...d.feuds.map((l) => ({ ax: l.ax, ay: l.ay, bx: l.bx, by: l.by, ally: false })),
+      ];
+      om.setDynastyLinks(links);
+      requestRender();
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [showDynastyLinks, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
 
   // #5: selecting a hub from ANY list/panel (Richest Cities, Trade matrix, Houses,
   // Banks, …) recenters the map on that city AND drops the shiny highlight pin — so

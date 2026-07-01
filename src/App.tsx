@@ -27,6 +27,7 @@ import { PlaguePanel } from "./ui/PlaguePanel";
 import { GuildsPanel } from "./ui/GuildsPanel";
 import { FiguresPanel } from "./ui/FiguresPanel";
 import { LandmarksPanel } from "./ui/LandmarksPanel";
+import { DynastiesPanel } from "./ui/DynastiesPanel";
 import { GoodsMarketPanel } from "./ui/GoodsMarketPanel";
 import { SettlementSearch } from "./ui/SettlementSearch";
 import { ElevationLegend } from "./ui/ElevationLegend";
@@ -595,6 +596,7 @@ export default function App() {
           <GuildsPanel />
           <FiguresPanel />
           <LandmarksPanel />
+          <DynastiesPanel />
           <GoodsMarketPanel />
           <CityRankingPanel />
           <MerchantRoutePanel />
