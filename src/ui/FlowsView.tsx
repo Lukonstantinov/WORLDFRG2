@@ -40,6 +40,9 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
   const [selGood, setSelGood] = useState<number | null>(null);
   const [selDir, setSelDir] = useState<number | null>(null); // null=both · 0=import · 1=export
   const [selPartner, setSelPartner] = useState<number | null>(null);
+  // A SINGLE isolated route (one partner→here / here→partner for one good), shown on the
+  // map on its own with its direction arrow.
+  const [selRoute, setSelRoute] = useState<{ good: number; partner: number; dir: number } | null>(null);
 
   // Fetch on open / when the campaign year ticks over (flows refresh yearly). Track
   // a real loading flag so a resolved-but-empty result ("no trade recorded") is told
@@ -55,7 +58,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
   }, [hubId, active, tick]);
 
   // Reset selection when the settlement changes.
-  useEffect(() => { setSelGood(null); setSelDir(null); setSelPartner(null); }, [hubId]);
+  useEffect(() => { setSelGood(null); setSelDir(null); setSelPartner(null); setSelRoute(null); }, [hubId]);
 
   // Drive the map highlight from the current selection. A good can be narrowed to
   // just its IMPORT (dir 0) or EXPORT (dir 1) routes via the sub-rows (#16).
@@ -63,6 +66,13 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
     if (!flows) { setFlowHighlight([]); return; }
     const ax = flows.hub_x + 0.5, ay = flows.hub_y + 0.5;
     let segs: Seg[] = [];
+    if (selRoute) {
+      // A single isolated route → one segment, drawn thick with its direction arrow.
+      const r = flows.routes.find((x) => x.good === selRoute.good && x.partner === selRoute.partner && x.dir === selRoute.dir);
+      if (r) segs = [{ ax, ay, bx: r.px + 0.5, by: r.py + 0.5, dir: r.dir, w: 3.5 }];
+      setFlowHighlight(segs);
+      return;
+    }
     if (selGood != null) {
       const rs = flows.routes.filter((r) => r.good === selGood && (selDir == null || r.dir === selDir));
       const max = Math.max(...rs.map((r) => r.amount), 1e-6);
@@ -73,7 +83,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
       segs = rs.map((r) => ({ ax, ay, bx: r.px + 0.5, by: r.py + 0.5, dir: r.dir, w: 1 + (r.amount / max) * 3 }));
     }
     setFlowHighlight(segs);
-  }, [flows, selGood, selDir, selPartner, setFlowHighlight]);
+  }, [flows, selGood, selDir, selPartner, selRoute, setFlowHighlight]);
 
   const goodRoutes = useMemo(
     () => (flows && selGood != null
@@ -101,7 +111,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
             style={{ ...row, background: sel ? "#1a2a3c" : "transparent", cursor: "pointer", flexWrap: "wrap" }}>
             {/* Parent row → combined (both directions). */}
             <div style={{ display: "flex", alignItems: "center", gap: 6, width: "100%" }}
-              onClick={() => { setSelGood(sel ? null : g.good); setSelDir(null); setSelPartner(null); }}>
+              onClick={() => { setSelGood(sel ? null : g.good); setSelDir(null); setSelPartner(null); setSelRoute(null); }}>
               <span style={{ width: 16 }}>{sel ? "▾" : "▸"}</span>
               <span style={{ width: 16 }}>{meta?.emoji ?? "•"}</span>
               <span style={{ flex: 1, minWidth: 70, color: sel ? "#cfe2f6" : "#c7d6e8" }}>{meta?.label ?? g.name}</span>
@@ -118,7 +128,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
                 {/* Export / Import sub-rows — independent amounts + routes (#16). */}
                 <div style={{ width: "100%", display: "flex", gap: 6, padding: "2px 0 0 32px" }}>
                   {([[1, "out ▶ export", "#ffce5f", g.out_volume], [0, "◀ in import", "#5fd0ff", g.in_volume]] as const).map(([d, lbl, col, vol]) => (
-                    <div key={d} onClick={(e) => { e.stopPropagation(); setSelGood(g.good); setSelDir(selDir === d ? null : d); setSelPartner(null); }}
+                    <div key={d} onClick={(e) => { e.stopPropagation(); setSelGood(g.good); setSelDir(selDir === d ? null : d); setSelPartner(null); setSelRoute(null); }}
                       style={{ flex: 1, display: "flex", alignItems: "center", gap: 5, padding: "1px 5px", borderRadius: 3, cursor: "pointer",
                         background: selDir === d ? "#23384e" : "#101a26", border: `1px solid ${selDir === d ? col : "transparent"}` }}>
                       <span style={{ color: col, fontSize: 9 }}>{lbl}</span>
@@ -153,16 +163,24 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
             }
             return <Note>No routed flows recorded.</Note>;
           })()}
-          {goodRoutes.slice(0, 8).map((r, i) => (
-            <div key={i} style={{ ...row }}>
-              <span style={{ width: 30, color: r.dir === 0 ? "#5fd0ff" : "#ffce5f" }}>{r.dir === 0 ? "◀ in" : "out ▶"}</span>
-              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {r.dir === 0 ? `${r.partner_name} → here` : `here → ${r.partner_name}`}
-              </span>
-              <span style={{ width: 50, textAlign: "right", color: "#9fb4cc" }}>{fmt(r.amount)}</span>
-              <span style={{ width: 40, textAlign: "right", color: "#6a86a6" }}>{r.pct.toFixed(0)}%</span>
-            </div>
-          ))}
+          <div style={{ color: "#5a7290", fontSize: 10, margin: "1px 0 3px" }}>click a route to isolate it on the map</div>
+          {goodRoutes.slice(0, 8).map((r, i) => {
+            const isSel = !!selRoute && selRoute.good === r.good && selRoute.partner === r.partner && selRoute.dir === r.dir;
+            return (
+              <div key={i}
+                onClick={() => setSelRoute(isSel ? null : { good: r.good, partner: r.partner, dir: r.dir })}
+                style={{ ...row, cursor: "pointer", background: isSel ? "#1a2a3c" : "transparent",
+                  borderLeft: isSel ? `2px solid ${r.dir === 0 ? "#5fd0ff" : "#ffce5f"}` : "2px solid transparent" }}>
+                <span style={{ width: 30, color: r.dir === 0 ? "#5fd0ff" : "#ffce5f" }}>{r.dir === 0 ? "◀ in" : "out ▶"}</span>
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  color: isSel ? "#cfe2f6" : undefined }}>
+                  {r.dir === 0 ? `${r.partner_name} → here` : `here → ${r.partner_name}`}
+                </span>
+                <span style={{ width: 50, textAlign: "right", color: "#9fb4cc" }}>{fmt(r.amount)}</span>
+                <span style={{ width: 40, textAlign: "right", color: "#6a86a6" }}>{r.pct.toFixed(0)}%</span>
+              </div>
+            );
+          })}
         </>
       )}
 
@@ -171,7 +189,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
       {flows.partners.map((p) => {
         const sel = selPartner === p.hub;
         return (
-          <div key={p.hub} onClick={() => { setSelPartner(sel ? null : p.hub); setSelGood(null); }}
+          <div key={p.hub} onClick={() => { setSelPartner(sel ? null : p.hub); setSelGood(null); setSelRoute(null); }}
             style={{ ...row, background: sel ? "#1a2a3c" : "transparent", cursor: "pointer" }}>
             <span style={{ flex: 1, minWidth: 70, color: sel ? "#cfe2f6" : "#c7d6e8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
             <div style={{ flex: 1, minWidth: 50, height: 7, background: "#16202c", borderRadius: 3, overflow: "hidden" }}>

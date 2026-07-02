@@ -112,6 +112,7 @@ function HouseSharePie({ houses, localVolume, guildVolume, merchants }:
 export function HubPanel() {
   const selectedHub = useUIStore((s) => s.selectedHub);
   const setSelectedHub = useUIStore((s) => s.setSelectedHub);
+  const setShowColonial = useUIStore((s) => s.setShowColonial);
   const selectedChain = useUIStore((s) => s.selectedChain);
   const setSelectedChain = useUIStore((s) => s.setSelectedChain);
   const selectedExport = useUIStore((s) => s.selectedExport);
@@ -287,6 +288,24 @@ export function HubPanel() {
               trade here is settled good-for-good.
             </div>
           ) : null}
+          {detail.related_colonies && detail.related_colonies.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <div style={sectionHdr}>🏛 Colonies of this city ({detail.related_colonies.length})</div>
+              {detail.related_colonies.map((c) => (
+                <div key={c.id} data-no-drag
+                  onClick={() => { setSelectedHub(c.id); setShowColonial(true); }}
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 4px", cursor: "pointer", borderRadius: 5 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: c.colony_kind === 2 ? 2 : "50%",
+                    background: c.colony_kind === 2 ? "#c9a96a" : "#c08cff", flex: "0 0 auto" }} />
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#d8c8f4", fontSize: 11 }}>{c.name}</span>
+                  <span style={{ color: "#7a90a8", fontSize: 10 }}>
+                    {c.colony_kind === 2 ? "outpost" : (["", "outpost", "colony", "town", "city"][c.colony_stage] || "colony")}
+                    {" · "}{c.population >= 1000 ? `${(c.population / 1000).toFixed(0)}k` : Math.round(c.population)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       )}
       {tab === "city" && !detail && (
@@ -335,6 +354,57 @@ export function HubPanel() {
               )}
             </div>
 
+            <div style={sectionHdr}>Regime</div>
+            {govRow("Government", g.govt_type || "—")}
+            {govRow("Next turnover", g.next_election_years <= 0 ? "imminent" : `in ${g.next_election_years}y`)}
+            {g.captor && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "3px 0", fontSize: 11 }}>
+                <span style={{ color: "#8aa0c0" }}>🔴 Captured by</span>
+                <span style={{ width: 9, height: 9, borderRadius: 2, background: g.captor_color, flex: "0 0 auto" }} />
+                <span style={{ color: g.captor_color, fontWeight: 700 }}>{g.captor}</span>
+              </div>
+            )}
+
+            <div style={sectionHdr}>Key figures</div>
+            {g.officials.length === 0
+              ? <div style={{ color: "#6a86a6", fontSize: 10 }}>No officials seated yet.</div>
+              : g.officials.map((o, i) => {
+                const m = officialMeta(o.status);
+                return (
+                  <div key={i} style={{ margin: "4px 0" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span title={o.status} style={{ fontSize: 12 }}>{m.icon}</span>
+                      <span style={{ color: "#e8dcc0", fontWeight: 600 }}>{o.role}</span>
+                      <span style={{ color: "#8aa0c0", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.name}</span>
+                      {o.allegiance
+                        ? <span style={{ color: o.allegiance_color, fontSize: 10 }}>{m.label} {o.allegiance}</span>
+                        : <span style={{ color: "#6fae6f", fontSize: 10 }}>independent</span>}
+                    </div>
+                    {o.allegiance && (
+                      <div style={{ height: 5, background: "#1e2e42", borderRadius: 3, overflow: "hidden", marginTop: 2 }}>
+                        <div style={{ width: `${Math.round(Math.min(1, o.control) * 100)}%`, height: "100%", background: m.bar }} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+            {g.family_influence.length > 0 && (
+              <>
+                <div style={sectionHdr}>Family influence</div>
+                {g.family_influence.map((f, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, margin: "2px 0" }}>
+                    <span style={{ width: 9, height: 9, borderRadius: 2, background: f.color, flex: "0 0 auto" }} />
+                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#cfe0f4", fontSize: 11 }}>{f.name}</span>
+                    <div style={{ width: 70, height: 6, background: "#1e2e42", borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ width: `${Math.round(f.pct * 100)}%`, height: "100%", background: f.color }} />
+                    </div>
+                    <span style={{ color: "#8aa6c0", fontSize: 10, minWidth: 30, textAlign: "right" }}>{Math.round(f.pct * 100)}%</span>
+                  </div>
+                ))}
+              </>
+            )}
+
             <div style={sectionHdr}>
               Fiscal policy{" "}
               {g.tariff_default && <span style={{ color: "#6a86a6", fontWeight: 400, fontSize: 9 }}>(default — no council yet)</span>}
@@ -346,9 +416,26 @@ export function HubPanel() {
               <div style={{ color: "#ff8a6a", fontSize: 9, marginTop: 1 }}>⚠ debased coin — "cheap money"</div>
             )}
 
-            <div style={sectionHdr}>Treasury</div>
+            {g.laws.length > 0 && (
+              <>
+                <div style={sectionHdr}>Laws &amp; decrees</div>
+                {g.laws.map((l, i) => (
+                  <div key={i} style={{ fontSize: 10, color: "#9fb4cc", margin: "1px 0" }}>
+                    <span style={{ color: "#6a86a6" }}>Y{l.year} </span>{l.text}
+                  </div>
+                ))}
+              </>
+            )}
+
+            <div style={sectionHdr}>Treasury &amp; stores</div>
             {govRow("City treasury", fmt(g.treasury))}
             {govRow("Circulating civic pool", fmt(g.civic_pool))}
+            {g.civic_goods.length > 0 && (
+              <>
+                <div style={{ color: "#6a86a6", fontSize: 9, margin: "4px 0 1px" }}>Government granary / stores</div>
+                {g.civic_goods.map((c, i) => govRow(c.name, fmt(c.amount)))}
+              </>
+            )}
 
             <div style={sectionHdr}>🫧 Speculation</div>
             {g.spec_tier ? (
@@ -1543,6 +1630,16 @@ function CurBar({ label, frac, color, hint }: { label: string; frac: number; col
 }
 
 const fmtN = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
+
+/** Icon / label / bar-colour for a key figure's allegiance status. */
+function officialMeta(status: string): { icon: string; label: string; bar: string } {
+  switch (status) {
+    case "kin": return { icon: "👪", label: "kin of", bar: "#c86ad0" };
+    case "controlled": return { icon: "🔴", label: "controlled by", bar: "#e0503a" };
+    case "leaning": return { icon: "🟡", label: "leans to", bar: "#e0b020" };
+    default: return { icon: "🟢", label: "", bar: "#4fc06a" };
+  }
+}
 
 /** One shipment row in the Market flow (arrivals / departures), tagged with its
  *  owner (house/guild/local), origin or destination, carrier, good, amount and

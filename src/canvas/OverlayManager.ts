@@ -2516,6 +2516,24 @@ export class OverlayManager {
       }
     }
     ctx.globalAlpha = 1;
+    // Colony/outpost NAME labels, in the colony/owner colour (so they read as colonies,
+    // not ordinary cities). Drawn here — the white settlement-name pass skips them.
+    const fs = Math.max(4, 8 / this.currentScale);
+    ctx.font = `${fs}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.lineWidth = Math.max(0.5, 1.6 / this.currentScale);
+    for (const c of this.colonies) {
+      if (!c.name) continue;
+      const rr = c.kind === 2 ? Math.max(1.0, 1.9 * inv) : Math.max(1.1, (1.4 + 0.5 * (c.stage || 1)) * inv);
+      const col = c.kind === 2 ? (c.ownerColor || "#c9a96a") : lineColors.settlementColony;
+      ctx.strokeStyle = "rgba(0,0,0,0.8)";
+      ctx.strokeText(c.name, c.x + 0.5, c.y + 0.5 - rr - 0.8);
+      ctx.fillStyle = col;
+      ctx.fillText(c.name, c.x + 0.5, c.y + 0.5 - rr - 0.8);
+    }
+    ctx.textAlign = "start";
+    ctx.textBaseline = "alphabetic";
     ctx.lineCap = "butt";
     ctx.lineJoin = "miter";
   }
@@ -2526,8 +2544,12 @@ export class OverlayManager {
     ctx.textAlign = "center";
     ctx.textBaseline = "bottom";
     ctx.lineWidth = Math.max(0.5, 1.6 / this.currentScale);
+    // Colony/outpost names are drawn (in their own colour) by renderColonies — skip
+    // them here so they aren't double-drawn in white.
+    const colonyKeys = new Set(this.colonies.map((c) => `${Math.round(c.x)},${Math.round(c.y)}`));
     for (const s of this.settlements) {
       if (!s.name) continue;
+      if (colonyKeys.has(`${Math.round(s.x)},${Math.round(s.y)}`)) continue;
       const radius = SETTLEMENT_SIZES[s.size] || 1;
       ctx.strokeStyle = "rgba(0,0,0,0.75)";
       ctx.strokeText(s.name, s.x + 0.5, s.y + 0.5 - radius - 0.6);

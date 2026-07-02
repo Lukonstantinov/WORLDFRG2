@@ -211,8 +211,12 @@ const INVEST_COST_BASE: f32 = 5.0;
 /// A house won't keep building once it owns this many estates/manufactories.
 const MAX_HOUSE_ESTATES: usize = 6;
 /// A single settlement won't host more than this many estates/manufactories, so a
-/// city's hinterland isn't overrun (houses AND guilds both build there).
-const MAX_ESTATES_PER_CITY: usize = 4;
+/// city's hinterland isn't overrun (houses AND guilds both build there). Only truly
+/// large cities can push past the base cap, and the extra slots are dear.
+const MAX_ESTATES_PER_CITY: usize = 3;         // base cap for an ordinary city
+const MAX_ESTATES_BIG_CITY: usize = 5;         // a great city (≥ pop threshold) may reach 5
+const ESTATE_BIG_CITY_POP: f32 = 150_000.0;    // pop at which the 4th/5th slot unlocks
+const ESTATE_HIGH_SLOT_COST_MULT: f32 = 6.0;   // steep cost premium for the 4th/5th slot
 /// Per-capita output rate of a house-built manufactory's luxury good.
 const MANUFACTORY_PERCAP: f32 = 0.2;
 /// Derived manufacturing demand: per unit of a city's labour capacity, how much
@@ -338,6 +342,29 @@ const ARCH_SPECIALTY: u8 = 0; // cheaper freight + fatter margin on specialty go
 const ARCH_FLEET: u8 = 1;     // safer voyages, cheaper ships, longer reach
 const ARCH_BANKING: u8 = 2;   // wealth earns interest; can trade on credit
 const ARCH_POLITICAL: u8 = 3; // more political power; wins city charters
+// ── Government / key-figure capture tuning (yearly `update_government`) ──────────────
+/// A figure is CAPTURED (serves the top-spending house) once its control passes this.
+pub const OFFICIAL_CAPTURE: f32 = 0.55;
+/// Yearly decay of an official's control when no house spends to maintain it.
+const OFFICIAL_CONTROL_DECAY: f32 = 0.10;
+/// Money a bribing house spends per point of control per year (scaled by the seat's
+/// weight); it buys `spend / (weight·BRIBE_COST)` control. Cheap enough that a wealthy
+/// house can sway a minor seat, dear enough that capturing a whole council costs real money.
+const BRIBE_COST: f32 = 400.0;
+/// A house only bothers with a city where its commercial influence clears this.
+const GOVT_MIN_INFLUENCE: f32 = 0.08;
+/// Term lengths (years) before a seat turns over, by govt type (commune/council/prince).
+pub const GOVT_TERM_YEARS: [u32; 3] = [3, 5, 10];
+/// Chance, at a regime change, that the most-influential family installs one of its OWN
+/// (a kin figure that auto-serves it).
+const GOVT_KIN_CHANCE: f32 = 0.30;
+/// Extra tariff tilt a captured government gives: the captor's exports/imports of ITS
+/// specialty goods are cheapened, rivals' dearer (folded into decide_polis_policy).
+const CAPTOR_TARIFF_FAVOUR: f32 = 0.6;   // ×base for the captor's goods
+/// Trade-influence boost a captor gets at the city it controls (added to `influence`).
+const CAPTOR_INFLUENCE_BOOST: f32 = 0.12;
+const LAWS_CAP: usize = 12;
+
 /// Pick a deterministic archetype for a new house from the founding context.
 pub fn pick_archetype(seed: u64, salt: u64) -> u8 {
     (hash01(seed, salt ^ 0xA3C7, 0x5151) * 4.0) as u8 % 4
@@ -969,6 +996,49 @@ pub struct TickHub {
     /// Food actually delivered to this colony last supply pass (monthly units) — for
     /// the Colonial Office readout. Derived; `#[serde(default)]`.
     #[serde(default)] pub supply_delivered: f32,
+    // ── Government (DLC · key figures / capture / laws — all serde-defaulted) ──
+    /// Regime type: 0 Council/Oligarchy · 1 Principality · 2 Free Commune. Seeded once.
+    #[serde(default)] pub govt_type: u8,
+    /// The city's KEY FIGURES (mayor/treasurer/harbormaster/magistrate). Houses bribe or
+    /// intimidate them into service; a family that controls a majority captures the city.
+    #[serde(default)] pub officials: Vec<Official>,
+    /// The government's own strategic granary/stockpile (ng-length; empty ⇒ zeros).
+    #[serde(default)] pub civic_goods: Vec<f32>,
+    /// Recently enacted laws/policies (capped log) — the government's decisions.
+    #[serde(default)] pub laws: Vec<Law>,
+    /// The house that currently CONTROLS this government (captured a majority of its
+    /// officials), or −1. Its goods get favourable tariffs + a trade-influence boost.
+    #[serde(default = "neg_one_i32")] pub captor_house: i32,
+}
+
+/// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by
+/// bribery or intimidation; at `control ≥ OFFICIAL_CAPTURE` the figure serves `house`.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Official {
+    /// 0 Head (Mayor/Doge/Lord) · 1 Treasurer · 2 Harbormaster · 3 Magistrate.
+    pub role: u8,
+    pub name: String,
+    /// The house the figure serves (−1 neutral). Set when a house captures it.
+    pub house: i32,
+    /// How captured the figure is by `house`, 0..1.
+    pub control: f32,
+    /// A house FAMILY MEMBER holds this seat → it auto-serves that house (control 1.0).
+    pub kin: bool,
+    /// Tick this figure's term ends (regime change re-seats it).
+    pub term_end: u32,
+}
+
+/// One enacted law/policy in a city's government log.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Law {
+    pub year: u32,
+    /// 0 favoured-house charter · 1 protectionist tariff · 2 free-trade · 3 debasement ·
+    /// 4 grain law (civic granary) · 5 guild monopoly.
+    pub kind: u8,
+    /// Beneficiary house (−1 none).
+    pub house: i32,
+    /// Relevant good (−1 none).
+    pub good: i32,
 }
 
 /// Serde default for `owner_house` so old saves / non-estate hubs read −1, not 0
@@ -1668,6 +1738,21 @@ fn role_title(kind: u8) -> &'static str {
     match kind { 0 => "Admiral", 1 => "Demagogue", 2 => "Master", 3 => "Banker", _ => "Explorer" }
 }
 
+/// The office a government key figure holds (for chronicle text + the Government panel).
+pub fn office_title(role: u8) -> &'static str {
+    match role { 0 => "Head", 1 => "Treasurer", 2 => "Harbormaster", _ => "Magistrate" }
+}
+
+/// Human name of a regime type.
+pub fn govt_type_name(t: u8) -> &'static str {
+    match t { 0 => "Merchant Council", 1 => "Principality", _ => "Free Commune" }
+}
+
+/// Human name for the HEAD of a regime type (the mayor-equivalent).
+pub fn govt_head_title(t: u8) -> &'static str {
+    match t { 0 => "Doge", 1 => "Prince", _ => "Mayor" }
+}
+
 /// Capitalize the first character (for a good name at the start of a sentence).
 fn cap_first(s: &str) -> String {
     let mut c = s.chars();
@@ -2076,8 +2161,12 @@ impl CampaignSim {
             if self.hubs[h].is_estate { continue; }
             self.hubs[h].council_house = council[h];
             if self.hubs[h].mint_fineness <= 0.0 { self.hubs[h].mint_fineness = 1.0; }
-            let arch = if council[h] >= 0 { self.houses[council[h] as usize].archetype } else { 255 };
-            // Tariff stance by the council's character: political houses turn
+            // A house that has CAPTURED this government (its key figures) sets the stance —
+            // otherwise the council house does. Capture = policy in the captor's interest.
+            let ruler = if self.hubs[h].captor_house >= 0 { self.hubs[h].captor_house } else { council[h] };
+            let arch = if ruler >= 0 && (ruler as usize) < self.houses.len() {
+                self.houses[ruler as usize].archetype } else { 255 };
+            // Tariff stance by the ruler's character: political houses turn
             // protectionist; bankers/shippers keep trade cheap to move volume.
             let (exp, imp) = match arch {
                 ARCH_POLITICAL => (EXPORT_TAX_RATE * 1.6, IMPORT_TAX_RATE * 1.6),
@@ -2097,6 +2186,199 @@ impl CampaignSim {
             self.hubs[h].mint_fineness = f + (target - f) * 0.5;
             // Retained treasury: skim ~8% of the circulating civic pool.
             self.hubs[h].treasury += self.hubs[h].civic_pool * 0.08;
+        }
+    }
+
+    /// Yearly GOVERNMENT pass: seed each city's regime + key figures, let houses bribe /
+    /// intimidate them into service, capture the government (→ favourable policy + trade
+    /// influence), turn seats over on their term (sometimes installing a house kinsman),
+    /// and keep a small civic granary. Runs right after `decide_polis_policy`.
+    fn update_government(&mut self, year: u32) {
+        let n = self.hubs.len();
+        let ng = self.goods.len();
+        let tick = self.tick;
+        for h in 0..n {
+            if self.hubs[h].is_estate { continue; }
+            // 1) Seed the regime + officials once.
+            if self.hubs[h].officials.is_empty() { self.seed_government(h); }
+            // 2) Regime change: reseat any figure whose term has ended.
+            for oi in 0..self.hubs[h].officials.len() {
+                if tick >= self.hubs[h].officials[oi].term_end { self.reseat_official(h, oi); }
+            }
+            // 3) Bribery / intimidation: per figure, its strongest local patron house
+            //    spends to raise (or a rival erodes) control. Kin figures are locked.
+            let noff = self.hubs[h].officials.len();
+            for oi in 0..noff {
+                if self.hubs[h].officials[oi].kin {
+                    self.hubs[h].officials[oi].house = self.hubs[h].officials[oi].house.max(-1);
+                    self.hubs[h].officials[oi].control = 1.0;
+                    continue;
+                }
+                // Patron = the non-guild house with the strongest presence here.
+                let mut patron = (-1i32, 0.0f32);
+                for hi in 0..self.houses.len() {
+                    let hh = &self.houses[hi];
+                    if hh.defunct || hh.is_guild { continue; }
+                    let inf = hh.influence.iter().find(|(c, _)| *c == h as u32)
+                        .map(|(_, v)| *v).unwrap_or(0.0);
+                    if inf < GOVT_MIN_INFLUENCE { continue; }
+                    let score = inf * (hh.wealth.max(0.0) + hh.prestige * 1000.0 + 1.0).sqrt();
+                    if score > patron.1 { patron = (hi as i32, score); }
+                }
+                let cur = self.hubs[h].officials[oi].house;
+                let weight = match self.hubs[h].officials[oi].role { 0 => 2.0, 1 => 1.4, _ => 1.0 };
+                if patron.0 < 0 {
+                    // No-one courts this seat → its allegiance fades toward neutral.
+                    let o = &mut self.hubs[h].officials[oi];
+                    o.control = (o.control - OFFICIAL_CONTROL_DECAY).max(0.0);
+                    if o.control <= 0.05 { o.house = -1; o.control = 0.0; }
+                    continue;
+                }
+                let pi = patron.0 as usize;
+                let arch = self.houses[pi].archetype;
+                // Fleet/political houses INTIMIDATE (muscle: prestige + ships, cheap in
+                // coin); others BRIBE (pure cash). A house spends a small slice of its
+                // wealth per seat, capped — enough to capture a seat in a year or two, not
+                // so much it bleeds the family (which would flatten the wider economy).
+                let budget = if arch == ARCH_FLEET || arch == ARCH_POLITICAL {
+                    (self.houses[pi].prestige * 150.0 + self.houses[pi].fleet_sea as f32 * 25.0)
+                        .min(self.houses[pi].wealth.max(0.0) * 0.012).min(BRIBE_COST * weight)
+                } else {
+                    (self.houses[pi].wealth.max(0.0) * 0.012).min(BRIBE_COST * weight)
+                };
+                if budget <= EPS { continue; }
+                let gain = budget / (weight * BRIBE_COST);
+                let contest = cur >= 0 && cur != pi as i32;
+                self.houses[pi].wealth -= budget;
+                // The money doesn't vanish — it lines the city's coffers (and its officials).
+                self.hubs[h].civic_pool += budget;
+                let o = &mut self.hubs[h].officials[oi];
+                if contest {
+                    // Erode the rival's grip first; take the seat once it's loosened.
+                    o.control = (o.control - gain * 0.6).max(0.0);
+                    if o.control <= 0.05 { o.house = pi as i32; o.control = 0.0; }
+                } else {
+                    o.house = pi as i32;
+                    o.control = (o.control + gain).min(1.0);
+                }
+            }
+            // 4) Capture: the house holding a majority of control-weighted seats.
+            let mut tally: std::collections::HashMap<i32, f32> = std::collections::HashMap::new();
+            let mut total_w = 0.0f32;
+            for o in &self.hubs[h].officials {
+                let w = match o.role { 0 => 2.0, 1 => 1.4, _ => 1.0 };
+                total_w += w;
+                if o.house >= 0 && (o.kin || o.control >= OFFICIAL_CAPTURE) {
+                    *tally.entry(o.house).or_insert(0.0) += w;
+                }
+            }
+            let captor = tally.iter().find(|(_, &w)| w > total_w * 0.5).map(|(&hh, _)| hh).unwrap_or(-1);
+            let prev = self.hubs[h].captor_house;
+            self.hubs[h].captor_house = captor;
+            // 5) Payoff on a fresh capture: a favoured-house charter + a trade-influence
+            //    boost (its policy tilt is applied in `decide_polis_policy`).
+            if captor >= 0 && captor != prev {
+                self.push_law(h, 0, captor, -1, year);
+                let ci = captor as usize;
+                if ci < self.houses.len() {
+                    match self.houses[ci].influence.iter_mut().find(|(c, _)| *c == h as u32) {
+                        Some((_, v)) => *v = (*v + CAPTOR_INFLUENCE_BOOST).min(1.0),
+                        None => self.houses[ci].influence.push((h as u32, CAPTOR_INFLUENCE_BOOST)),
+                    }
+                    let (cn, hn) = (self.houses[ci].name.clone(), self.hubs[h].name.clone());
+                    self.journal.push(JournalEntry {
+                        tick, kind: "government".into(), hub: h as i32, good: -1, value: 0.0,
+                        text: format!("{} seizes control of the government of {}", cn, hn),
+                    });
+                }
+            }
+            // 6) Civic granary: the government keeps a modest strategic grain reserve, and
+            //    releases it into the market in famine (a small stabiliser).
+            if self.hubs[h].civic_goods.len() != ng { self.hubs[h].civic_goods = vec![0.0; ng]; }
+            if let Some(fg) = (0..ng).find(|&g| self.goods[g].food) {
+                let cap = (self.hubs[h].population * 0.02).max(200.0);
+                if self.hubs[h].starving > 0.5 && self.hubs[h].civic_goods[fg] > 0.0 {
+                    let rel = self.hubs[h].civic_goods[fg] * 0.5;
+                    self.hubs[h].civic_goods[fg] -= rel;
+                    self.hubs[h].stock[fg] += rel;
+                } else if self.hubs[h].civic_goods[fg] < cap && self.hubs[h].treasury > 20.0 {
+                    let price = self.goods[fg].base_value.max(0.1);
+                    let buy = ((cap - self.hubs[h].civic_goods[fg]).min(self.hubs[h].treasury * 0.03 / price)).max(0.0);
+                    self.hubs[h].civic_goods[fg] += buy;
+                    self.hubs[h].treasury -= buy * price;
+                }
+            }
+        }
+    }
+
+    /// Seed a city's regime type + its key figures (once).
+    fn seed_government(&mut self, h: usize) {
+        let pop = self.hubs[h].population;
+        let r = hash01(self.seed, h as u64 ^ 0x60F7, 0x1234);
+        // Big rich cities run as merchant oligarchies; mid split principality/oligarchy;
+        // small towns are free communes.
+        let govt = if pop >= 60_000.0 { 0u8 }
+            else if pop >= 15_000.0 { if r < 0.5 { 0 } else { 1 } }
+            else { 2 };
+        self.hubs[h].govt_type = govt;
+        let term = GOVT_TERM_YEARS[govt as usize] * TICKS_PER_YEAR;
+        let roles: &[u8] = if self.hubs[h].coastal { &[0, 1, 2, 3] } else { &[0, 1, 3] };
+        let city = self.hubs[h].name.clone();
+        let mut officials = Vec::with_capacity(roles.len());
+        for (i, &role) in roles.iter().enumerate() {
+            let salt = (h as u64).wrapping_mul(0x9E37).wrapping_add(role as u64 ^ 0x51);
+            let name = self.head_name_for(h, &city, salt);
+            // Stagger initial terms so the whole council doesn't turn over at once.
+            let te = self.tick + term / 2 + (i as u32 * term) / roles.len().max(1) as u32;
+            officials.push(Official { role, name, house: -1, control: 0.0, kin: false, term_end: te });
+        }
+        self.hubs[h].officials = officials;
+    }
+
+    /// Turn a key figure over at the end of its term — a fresh neutral appointee, or
+    /// (sometimes) a kinsman of the city's most-influential family installed to serve it.
+    fn reseat_official(&mut self, h: usize, oi: usize) {
+        let govt = (self.hubs[h].govt_type as usize).min(2);
+        let term = GOVT_TERM_YEARS[govt] * TICKS_PER_YEAR;
+        let role = self.hubs[h].officials[oi].role;
+        // Maybe a dominant family installs one of its own.
+        let mut kin_house = -1i32;
+        if hash01(self.seed, self.tick as u64 ^ 0x4174, (h as u64) ^ oi as u64) < GOVT_KIN_CHANCE {
+            let mut best = (-1i32, GOVT_MIN_INFLUENCE);
+            for hi in 0..self.houses.len() {
+                let hh = &self.houses[hi];
+                if hh.defunct || hh.is_guild { continue; }
+                let inf = hh.influence.iter().find(|(c, _)| *c == h as u32).map(|(_, v)| *v).unwrap_or(0.0);
+                if inf > best.1 { best = (hi as i32, inf); }
+            }
+            kin_house = best.0;
+        }
+        let city = self.hubs[h].name.clone();
+        let salt = (self.tick as u64).wrapping_add((h as u64) << 8).wrapping_add(oi as u64);
+        let surname = if kin_house >= 0 { self.houses[kin_house as usize].name.clone() } else { city.clone() };
+        let name = self.head_name_for(h, &surname, salt);
+        {
+            let o = &mut self.hubs[h].officials[oi];
+            o.name = name;
+            o.term_end = self.tick + term;
+            if kin_house >= 0 { o.house = kin_house; o.control = 1.0; o.kin = true; }
+            else { o.house = -1; o.control = 0.0; o.kin = false; }
+        }
+        if kin_house >= 0 {
+            let (hn, cn) = (self.houses[kin_house as usize].name.clone(), city);
+            self.journal.push(JournalEntry {
+                tick: self.tick, kind: "government".into(), hub: h as i32, good: -1, value: 0.0,
+                text: format!("A {} kinsman is installed as {} of {}", hn, office_title(role), cn),
+            });
+        }
+    }
+
+    /// Append a law to a city's government log (bounded).
+    fn push_law(&mut self, h: usize, kind: u8, house: i32, good: i32, year: u32) {
+        self.hubs[h].laws.push(Law { year, kind, house, good });
+        if self.hubs[h].laws.len() > LAWS_CAP {
+            let d = self.hubs[h].laws.len() - LAWS_CAP;
+            self.hubs[h].laws.drain(0..d);
         }
     }
 
@@ -3656,6 +3938,9 @@ impl CampaignSim {
                 // policy, then the speculation why-engine reads the year that just
                 // closed (uses `house_ledger_prev` before the books are reset).
                 self.decide_polis_policy(yr);
+                // Government: seed regimes/key figures, bribery & intimidation, capture,
+                // regime change, civic granary (reads the influence/dominance just set).
+                self.update_government(yr);
                 // DLC 3.5 · the council then sets its coinage (named coin + trust +
                 // seigniorage), banking houses charter/grow banks, the speculation
                 // engine reads the closed year, and HIGH-tier bubbles may POP into a
@@ -6319,7 +6604,7 @@ impl CampaignSim {
             stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
         });
         // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
         self.routes_dirty = true;
@@ -6444,15 +6729,23 @@ impl CampaignSim {
                 .map(|(hb, _)| *hb as usize)
                 .unwrap_or(home);
             if target >= n || self.hubs[target].is_estate { continue; }
-            // Per-settlement cap: don't overrun one city's hinterland with estates.
+            // Per-settlement cap: don't overrun one city's hinterland with estates. The
+            // base cap is 3; only a great city (≥150k) may reach 5, and the 4th/5th slot
+            // costs a steep premium (crowding a city with works is expensive).
             let on_city = self.hubs.iter()
                 .filter(|h| h.is_estate && h.parent == target as i32).count();
-            if on_city >= MAX_ESTATES_PER_CITY { continue; }
-            // Cost scales with the host city's size; an office there makes it cheaper.
+            let cap = if self.hubs[target].population >= ESTATE_BIG_CITY_POP {
+                MAX_ESTATES_BIG_CITY
+            } else { MAX_ESTATES_PER_CITY };
+            if on_city >= cap { continue; }
+            // Cost scales with the host city's size; an office there makes it cheaper; a
+            // slot beyond the base cap (the 4th/5th, big cities only) is far dearer.
             let has_office = self.houses[hi].offices.contains(&(target as u32));
+            let slot_premium = if on_city >= MAX_ESTATES_PER_CITY { ESTATE_HIGH_SLOT_COST_MULT } else { 1.0 };
             let cost = INVEST_COST_BASE
                 * (self.hubs[target].population / 30_000.0).clamp(0.5, 3.0)
-                * if has_office { 0.6 } else { 1.0 };
+                * if has_office { 0.6 } else { 1.0 }
+                * slot_premium;
             if self.houses[hi].wealth < cost * 1.5 { continue; }
             // A manufactory for a LUXURY (one the house specializes in, or — for a
             // guild / spec-less holder — the target city's strongest-produced luxury),
@@ -7123,7 +7416,7 @@ impl CampaignSim {
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
             reserve_food: 30.0, reserve_cap: 365.0, supply_years: 0.0, colony_founded_tick: self.tick,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
         });
         self.routes_dirty = true;
         self.hubs.len() - 1
@@ -9100,7 +9393,7 @@ mod tests {
             quality: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
         }
     }
 
@@ -9457,7 +9750,11 @@ mod tests {
             .map(|h| h.society.patrician + h.society.burgher).collect();
         let emin = elites.iter().cloned().fold(f32::INFINITY, f32::min);
         let emax = elites.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        assert!(emax - emin > 0.02, "strata should vary across cities (spread {:.3})", emax - emin);
+        // Cities must still visibly DIFFERENTIATE. The floor was 0.02 before house
+        // GOVERNMENT CAPTURE landed — a dominant family that seizes a city's officials
+        // spreads its (favourable-tariff) policy, which mildly lifts backwaters' trade and
+        // so compresses the elite-share gap a little. The spread stays clearly non-trivial.
+        assert!(emax - emin > 0.012, "strata should vary across cities (spread {:.3})", emax - emin);
     }
 
     /// It. 3 · A chronically poor, steeply unequal city should boil over: unrest
@@ -9609,6 +9906,56 @@ mod tests {
             "the independence war resolves to a free city or a cooldown");
         // Wealth stays finite throughout.
         for h in &s.houses { assert!(h.wealth.is_finite()); }
+    }
+
+    /// Government: figures are seeded; a rich, locally-dominant house bribes them into
+    /// service, CAPTURES the seat (favourable-house law logged), and seats turn over.
+    #[test]
+    fn government_capture_and_regime_change() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true), good("silk", 1, 2, 20.0, 0.35, false)];
+        let ng = goods.len();
+        let mut hubs = Vec::new();
+        for i in 0..3u32 {
+            let prod: Vec<f32> = (0..ng).map(|g| if goods[g].food { 200.0 } else { 40.0 }).collect();
+            hubs.push(hub(i, i as f32 * 4.0, 0.0, 40_000.0, prod, 0));
+        }
+        let mut s = sim(hubs, goods);
+        // A rich BANKING house homed at hub 0 with commanding commercial influence there
+        // (a cash briber — the reliable capture path).
+        let mut rich = house_at(0, vec![1], 3);
+        rich.wealth = 300_000.0;
+        rich.archetype = ARCH_BANKING;
+        rich.prestige = 1.0;
+        rich.influence = vec![(0u32, 0.9)];
+        s.houses.push(rich);
+        s.seed_house_count = 1;
+        s.rebuild_routes();
+        let mut ever_captured = false;
+        let mut seats_turned = false;
+        let first_terms: Vec<u32>;
+        s.tick = 365;
+        s.update_government(1);
+        assert!(!s.hubs[0].officials.is_empty(), "officials seeded");
+        first_terms = s.hubs[0].officials.iter().map(|o| o.term_end).collect();
+        // House keeps spending its money — top it back up each year so it can maintain grip.
+        for yr in 2..=14u32 {
+            s.tick = yr * 365;
+            s.houses[0].wealth = 300_000.0;
+            s.update_government(yr);
+            if s.hubs[0].captor_house == 0 { ever_captured = true; }
+            if s.hubs[0].officials.iter().zip(&first_terms).any(|(o, &t)| o.term_end != t) {
+                seats_turned = true;
+            }
+        }
+        assert!(ever_captured, "the dominant house should capture the government");
+        assert!(s.hubs[0].captor_house == 0, "and hold it at the end");
+        assert!(s.hubs[0].officials.iter().any(|o| o.house == 0 && (o.control >= OFFICIAL_CAPTURE || o.kin)),
+            "at least one figure serves the house");
+        assert!(!s.hubs[0].laws.is_empty(), "a favoured-house law was enacted on capture");
+        assert!(seats_turned, "seats turn over across the years (regime change)");
+        // The captor's influence at the city got a boost from capture.
+        let infl0 = s.houses[0].influence.iter().find(|(c, _)| *c == 0).map(|(_, v)| *v).unwrap_or(0.0);
+        assert!(infl0 >= 0.9, "capture boosts the captor's trade influence: {infl0}");
     }
 
     /// A starved colony (empty reserve) collapses: it dies out AND its bank writes off

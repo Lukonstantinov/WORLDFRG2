@@ -630,6 +630,23 @@ function HouseTimeline({ history, onClose }: { history: HouseHistory; onClose: (
           </>
         )}
 
+        {/* Colonies this house owns (outposts) or backed (joint-stock). */}
+        {history.colonies && history.colonies.length > 0 && (
+          <>
+            <div style={{ ...timelineHdr, marginTop: 10 }}>🏛 Colonies &amp; outposts ({history.colonies.length})</div>
+            {history.colonies.map((c) => (
+              <div key={c.id} data-no-drag
+                onClick={() => { useUIStore.getState().setSelectedHub(c.id); useUIStore.getState().setShowColonial(true); }}
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 2px", cursor: "pointer" }}>
+                <span style={{ width: 9, height: 9, borderRadius: c.colony_kind === 2 ? 2 : "50%",
+                  background: c.colony_kind === 2 ? "#c9a96a" : "#c08cff", flex: "0 0 auto" }} />
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#d8c8f4", fontSize: 10 }}>{c.name}</span>
+                <span style={{ color: "#7a90a8", fontSize: 9 }}>{c.colony_kind === 2 ? "outpost" : "colony"}</span>
+              </div>
+            ))}
+          </>
+        )}
+
         {/* Timeline — grouped by year; click a year to expand what happened. */}
         <div style={{ ...timelineHdr, marginTop: 10 }}>Chronicle <span style={{ color: "#56708e", fontWeight: 400 }}>(click a year)</span></div>
         <YearChronicle entries={ev} icons={EVENT_ICON} colors={EVENT_COLOR} />

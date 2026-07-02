@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"/><title>WF2 — Government · Flows · Colonies</title>
+<style>
+  :root{--bg:#0b1420;--panel:#13202e;--text:#cfe2f6;--accent:#3a80c0;--muted:#7a90a8;
+        --ok:#4fc06a;--warn:#e0503a;--gold:#c9a227;--violet:#c08cff;--in:#5fd0ff;--out:#ffce5f;}
+  body{background:var(--bg);color:var(--text);font:14px/1.5 system-ui,sans-serif;margin:0;padding:26px;}
+  h1{font-size:20px;margin:0 0 4px;} h2{font-size:13px;color:var(--accent);text-transform:uppercase;letter-spacing:.6px;margin:24px 0 10px;}
+  .sub{color:var(--muted);margin:0 0 16px;} .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  .card{background:var(--panel);border:1px solid #1e3450;border-radius:10px;padding:12px 14px;}
+  .hdr{color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.6px;margin:10px 0 3px;}
+  .row{display:flex;align-items:center;gap:6px;margin:3px 0;font-size:12px;}
+  .kv{display:flex;justify-content:space-between;font-size:12px;margin:2px 0;}
+  .kv .k{color:var(--muted);} .bar{height:6px;border-radius:3px;background:#1e2e42;overflow:hidden;}
+  .bar>i{display:block;height:100%;} .chip{width:9px;height:9px;border-radius:2px;flex:0 0 auto;}
+  ul{margin:6px 0 0;padding-left:18px;} li{margin:3px 0;}
+  .map{position:relative;height:150px;background:linear-gradient(160deg,#16351c,#20421f);border-radius:8px;border:1px solid #1e3450;overflow:hidden;}
+  .city{position:absolute;width:11px;height:11px;border-radius:50%;background:#ffd27f;transform:translate(-50%,-50%);box-shadow:0 0 0 2px #6b4a1a;}
+  .col{position:absolute;width:10px;height:10px;border-radius:50%;background:var(--violet);transform:translate(-50%,-50%);box-shadow:0 0 0 2px #3a2a5a;}
+  .lbl{position:absolute;font-size:10px;transform:translate(-50%,-150%);text-shadow:0 1px 2px #000;}
+  .route{position:absolute;height:0;border-top:3px solid var(--in);transform-origin:left center;}
+  .arrow{position:absolute;color:var(--in);font-size:13px;transform:translate(-50%,-52%);}
+</style></head><body>
+  <h1>Government · Flow routes · Colonies</h1>
+  <p class="sub">A real government layer (key figures, capture, laws, stores), single-route flow highlighting with a direction arrow, and colony visibility. Values from <code>sim/tick.rs</code>.</p>
+
+  <h2>City ▸ Government tab (new)</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="hdr">Regime</div>
+      <div class="kv"><span class="k">Government</span><span>Merchant Council</span></div>
+      <div class="kv"><span class="k">Next turnover</span><span>in 3y</span></div>
+      <div class="row"><span class="k" style="color:var(--muted)">🔴 Captured by</span><span class="chip" style="background:#d98a3a"></span><span style="color:#d98a3a;font-weight:700">House Rutilii</span></div>
+      <div class="hdr">Key figures</div>
+      <div class="row">🔴 <b>Doge</b> <span style="flex:1;color:var(--muted)">Marcus Rutilii</span> <span style="color:#d98a3a;font-size:10px">controlled by House Rutilii</span></div>
+      <div class="bar" style="margin:0 0 4px"><i style="width:82%;background:var(--warn)"></i></div>
+      <div class="row">👪 <b>Treasurer</b> <span style="flex:1;color:var(--muted)">Gaia Rutilii</span> <span style="color:#d98a3a;font-size:10px">kin of House Rutilii</span></div>
+      <div class="bar" style="margin:0 0 4px"><i style="width:100%;background:#c86ad0"></i></div>
+      <div class="row">🟡 <b>Harbormaster</b> <span style="flex:1;color:var(--muted)">Titus Varro</span> <span style="color:#7fb0d8;font-size:10px">leans to House Cassia</span></div>
+      <div class="bar" style="margin:0 0 4px"><i style="width:35%;background:#e0b020"></i></div>
+      <div class="row">🟢 <b>Magistrate</b> <span style="flex:1;color:var(--muted)">Lucia Vela</span> <span style="color:var(--ok);font-size:10px">independent</span></div>
+    </div>
+    <div class="card">
+      <div class="hdr">Family influence</div>
+      <div class="row"><span class="chip" style="background:#d98a3a"></span><span style="flex:1">House Rutilii</span><div class="bar" style="width:70px"><i style="width:62%;background:#d98a3a"></i></div><span style="color:var(--muted);width:30px;text-align:right">62%</span></div>
+      <div class="row"><span class="chip" style="background:#7fb0d8"></span><span style="flex:1">House Cassia</span><div class="bar" style="width:70px"><i style="width:24%;background:#7fb0d8"></i></div><span style="color:var(--muted);width:30px;text-align:right">24%</span></div>
+      <div class="row"><span class="chip" style="background:#8fd08f"></span><span style="flex:1">House Vela</span><div class="bar" style="width:70px"><i style="width:14%;background:#8fd08f"></i></div><span style="color:var(--muted);width:30px;text-align:right">14%</span></div>
+      <div class="hdr">Laws &amp; decrees</div>
+      <div style="font-size:10px;color:#9fb4cc"><span style="color:var(--muted)">Y42 </span>Favoured-house charter → House Rutilii</div>
+      <div style="font-size:10px;color:#9fb4cc"><span style="color:var(--muted)">Y40 </span>Grain law — civic granary stocked</div>
+      <div class="hdr">Treasury &amp; stores</div>
+      <div class="kv"><span class="k">City treasury</span><span>4842.9k</span></div>
+      <div class="kv"><span class="k">Circulating civic pool</span><span>59.0k</span></div>
+      <div style="color:var(--muted);font-size:9px;margin:4px 0 1px">Government granary / stores</div>
+      <div class="kv"><span class="k">wheat</span><span>3.2k</span></div>
+    </div>
+  </div>
+  <p class="sub" style="margin-top:8px">Houses spend money to <b>bribe</b> (cash) or <b>intimidate</b> (prestige + fleet muscle) key figures. Enough control → the figure serves the house; a majority → the house <b>captures</b> the government (favourable tariffs on its goods + a trade-influence boost). Seats turn over on their term (Commune 3y / Council 5y / Principality 10y), sometimes installing a <b>kinsman</b> who auto-serves. Bribe money flows into the city coffers.</p>
+
+  <h2>Trade ▸ Flows — click one route, see its direction</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="hdr">Import routes — Pepper <span style="color:#5a7290">(click a route to isolate)</span></div>
+      <div class="row" style="background:#1a2a3c;border-left:2px solid var(--in);padding:2px 4px;border-radius:3px"><span style="color:var(--in);width:30px">◀ in</span><span style="flex:1;color:#cfe2f6">Qiingxi → here</span><span style="color:#9fb4cc">289</span><span style="color:var(--muted);width:32px;text-align:right">49%</span></div>
+      <div class="row" style="padding:2px 4px"><span style="color:var(--in);width:30px">◀ in</span><span style="flex:1">Qiingling → here</span><span style="color:#9fb4cc">218</span><span style="color:var(--muted);width:32px;text-align:right">37%</span></div>
+      <div class="row" style="padding:2px 4px"><span style="color:var(--in);width:30px">◀ in</span><span style="flex:1">Benedicum → here</span><span style="color:#9fb4cc">35</span><span style="color:var(--muted);width:32px;text-align:right">6%</span></div>
+    </div>
+    <div class="card">
+      <div class="hdr">Map — only the picked route, with an IN arrow</div>
+      <div class="map">
+        <div class="route" style="left:20%;top:60%;width:150px;transform:rotate(-18deg)"></div>
+        <div class="arrow" style="left:44%;top:47%">▶</div>
+        <div class="city" style="left:70%;top:44%"></div><div class="lbl" style="left:70%;top:44%;color:#ffd27f">here</div>
+        <div class="col" style="left:20%;top:60%;background:#ffd27f;box-shadow:0 0 0 2px #6b4a1a"></div><div class="lbl" style="left:20%;top:60%;color:#dce8f6">Qiingxi</div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Colonies</h2>
+  <ul>
+    <li><b>Names on the map</b> in the colony (violet) / owner colour, so they read as colonies.</li>
+    <li><b>Clickable</b> — click a colony/outpost → its Colonial Office detail opens.</li>
+    <li><b>Related colonies</b> now listed on the founder <b>City</b> panel and on the backing/owning <b>House</b> panel (click → jump).</li>
+    <li><b>Trade to/from colonies</b> — verified: colonies are full market hubs, already carried in dispatch, flows, corridors and merchant routes (a colony already shows as a top trade partner).</li>
+    <li><b>No mainland connection lines</b> (removed earlier this batch).</li>
+  </ul>
+  <h2>Estates</h2>
+  <p class="sub">A city hosts at most <b>3</b> estates/manufactories; only a great city (≥150k pop) may reach <b>5</b>, and the 4th/5th slot costs a steep ×6 premium.</p>
+</body></html>

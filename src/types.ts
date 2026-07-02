@@ -431,6 +431,7 @@ export interface HubDetail {
   transit?: TransitRow[];            // carrying trade through this city's merchants
   stolen_good?: string;              // espionage: good whose technique this estate stole
   stolen_from?: string;              // city it was stolen from ("" = none)
+  related_colonies?: ColonySummary[]; // colonies/outposts this city founded
 }
 /** DLC 3 · a polis seat's government: council house + fiscal policy + speculation. */
 export interface Government {
@@ -451,7 +452,27 @@ export interface Government {
   spec_pattern: string;
   spec_drivers: string[];
   spec_watch: string[];
+  // Government layer
+  govt_type: string;
+  next_election_years: number;
+  captor: string;
+  captor_color: string;
+  officials: OfficialRow[];
+  family_influence: InfluenceRow[];
+  laws: LawRow[];
+  civic_goods: CivicGoodRow[];
 }
+export interface OfficialRow {
+  role: string;
+  name: string;
+  allegiance: string;       // "" = neutral
+  allegiance_color: string;
+  control: number;          // 0..1
+  status: "neutral" | "leaning" | "controlled" | "kin" | string;
+}
+export interface InfluenceRow { name: string; color: string; pct: number }
+export interface LawRow { year: number; text: string }
+export interface CivicGoodRow { name: string; amount: number }
 /** Trade Flows subtab — one traded good at a settlement (avg + last-year volume,
  *  route count, and a yearly volume series for the trend graph). */
 export interface TradeFlowGood {
@@ -688,6 +709,7 @@ export interface HouseHistory {
   events: HouseTimelineEvent[];
   top_goods: [string, number][]; // most profitable resources (name + cumulative profit)
   defunct: boolean;
+  colonies?: ColonySummary[]; // colonies owned (outposts) or backed by this house
 }
 export interface JournalEntry {
   tick: number;

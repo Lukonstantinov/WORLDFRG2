@@ -444,7 +444,48 @@ pub struct Government {
     /// The ranked causal "why" clauses (largest driver first).
     pub spec_drivers: Vec<String>,
     pub spec_watch: Vec<String>,
+    // ── Government layer (key figures, capture, laws, stores) ──
+    /// Regime type label ("Merchant Council" / "Principality" / "Free Commune").
+    pub govt_type: String,
+    /// Years until the next seat turns over (regime change).
+    pub next_election_years: i32,
+    /// The house that CONTROLS this government (captured a majority of its figures), or "".
+    pub captor: String,
+    pub captor_color: String,
+    /// The city's key figures (mayor/treasurer/harbormaster/magistrate).
+    pub officials: Vec<OfficialRow>,
+    /// Each family's influence over the government, as a normalised %.
+    pub family_influence: Vec<InfluenceRow>,
+    /// Recent enacted laws (newest first).
+    pub laws: Vec<LawRow>,
+    /// The goods the government itself holds (civic granary/stockpile).
+    pub civic_goods: Vec<CivicGoodRow>,
 }
+
+/// One government key figure for the Government subtab.
+#[derive(Serialize, Clone)]
+pub struct OfficialRow {
+    pub role: String,
+    pub name: String,
+    /// The house it serves ("" = neutral) + colour + a status word.
+    pub allegiance: String,
+    pub allegiance_color: String,
+    pub control: f32,
+    /// "neutral" | "leaning" | "controlled" | "kin".
+    pub status: String,
+}
+
+/// One family's share of government influence.
+#[derive(Serialize, Clone)]
+pub struct InfluenceRow { pub name: String, pub color: String, pub pct: f32 }
+
+/// One enacted-law log row (rendered text).
+#[derive(Serialize, Clone)]
+pub struct LawRow { pub year: u32, pub text: String }
+
+/// One good the government holds in its stores.
+#[derive(Serialize, Clone)]
+pub struct CivicGoodRow { pub name: String, pub amount: f32 }
 
 /// One coin in a city's currency basket (for the settlement-view pie).
 #[derive(Serialize)]
@@ -544,6 +585,8 @@ pub struct HubDetail {
     /// good's name + the city it was stolen from ("" = none).
     #[serde(default)] pub stolen_good: String,
     #[serde(default)] pub stolen_from: String,
+    /// Colonies & outposts this city FOUNDED (its metropolis roster).
+    #[serde(default)] pub related_colonies: Vec<ColonySummary>,
 }
 
 /// Abstract social strata of a settlement for the HubPanel "Society" block:
@@ -970,6 +1013,11 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 supply_ships: 0,
                 supply_source: -1,
                 supply_delivered: 0.0,
+                govt_type: 0,
+                officials: Vec::new(),
+                civic_goods: Vec::new(),
+                laws: Vec::new(),
+                captor_house: -1,
             }
         })
         .collect();
@@ -2011,7 +2059,8 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
     let government = if hub.is_estate {
         None
     } else {
-        use crate::sim::tick::{archetype_label, EXPORT_TAX_RATE, IMPORT_TAX_RATE};
+        use crate::sim::tick::{archetype_label, office_title, govt_type_name, govt_head_title,
+            EXPORT_TAX_RATE, IMPORT_TAX_RATE, OFFICIAL_CAPTURE};
         let ci = hub.council_house;
         let (council, council_color, council_archetype, council_is_guild, council_power) =
             if ci >= 0 {
@@ -2030,12 +2079,81 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                 c.watch_goods.clone()),
             None => (0.0, String::new(), 0, String::new(), vec![], vec![]),
         };
+        // Key figures with their allegiance status.
+        let hname = |hi: i32| -> (String, String) {
+            if hi >= 0 { sim.houses.get(hi as usize)
+                .map(|h| (h.name.clone(), distinct_color(hi as usize)))
+                .unwrap_or_default() } else { (String::new(), String::new()) }
+        };
+        let officials: Vec<OfficialRow> = hub.officials.iter().map(|o| {
+            let (an, ac) = hname(o.house);
+            let status = if o.kin { "kin" } else if o.house < 0 { "neutral" }
+                else if o.control >= OFFICIAL_CAPTURE { "controlled" } else { "leaning" };
+            let role = if o.role == 0 { govt_head_title(hub.govt_type).to_string() }
+                else { office_title(o.role).to_string() };
+            OfficialRow { role, name: o.name.clone(), allegiance: an, allegiance_color: ac,
+                control: o.control, status: status.to_string() }
+        }).collect();
+        // Family influence over the government: controlled-figure weight (×3) + council
+        // seat (×2) + commercial influence here, normalised across houses to a %.
+        let mut infl: std::collections::HashMap<usize, f32> = std::collections::HashMap::new();
+        for o in &hub.officials {
+            if o.house >= 0 && (o.kin || o.control >= OFFICIAL_CAPTURE) {
+                let w = match o.role { 0 => 2.0, 1 => 1.4, _ => 1.0 };
+                *infl.entry(o.house as usize).or_insert(0.0) += 3.0 * w;
+            }
+        }
+        if ci >= 0 { *infl.entry(ci as usize).or_insert(0.0) += 2.0; }
+        for (hidx, house) in sim.houses.iter().enumerate() {
+            if house.defunct || house.is_guild { continue; }
+            if let Some((_, v)) = house.influence.iter().find(|(c, _)| *c == hub.id
+                || sim.hubs.get(*c as usize).map(|hh| hh.id == hub.id).unwrap_or(false)) {
+                if *v > 0.02 { *infl.entry(hidx).or_insert(0.0) += *v; }
+            }
+        }
+        let tot_infl: f32 = infl.values().sum::<f32>().max(1e-6);
+        let mut family_influence: Vec<InfluenceRow> = infl.iter().map(|(&hi, &v)| InfluenceRow {
+            name: sim.houses.get(hi).map(|h| h.name.clone()).unwrap_or_default(),
+            color: distinct_color(hi), pct: v / tot_infl,
+        }).filter(|r| !r.name.is_empty() && r.pct >= 0.01).collect();
+        family_influence.sort_by(|a, b| b.pct.partial_cmp(&a.pct).unwrap_or(std::cmp::Ordering::Equal));
+        family_influence.truncate(8);
+        // Enacted-law log (newest first), rendered to text.
+        let mut laws: Vec<LawRow> = hub.laws.iter().rev().take(8).map(|l| {
+            let hn = hname(l.house).0;
+            let gn = if l.good >= 0 { sim.goods.get(l.good as usize).map(|g| g.name.clone()).unwrap_or_default() } else { String::new() };
+            let text = match l.kind {
+                0 => format!("Favoured-house charter → {}", if hn.is_empty() { "a family".into() } else { hn }),
+                1 => "Protectionist tariff raised".to_string(),
+                2 => "Free-trade tariff cut".to_string(),
+                3 => "The coin is debased".to_string(),
+                4 => "Grain law — civic granary stocked".to_string(),
+                5 => format!("Guild monopoly on {}", gn),
+                _ => "A decree is issued".to_string(),
+            };
+            LawRow { year: l.year, text }
+        }).collect();
+        laws.retain(|l| !l.text.is_empty());
+        // Government stores it holds (top few goods by amount).
+        let mut civic_goods: Vec<CivicGoodRow> = hub.civic_goods.iter().enumerate()
+            .filter(|(_, &a)| a > 0.5)
+            .filter_map(|(g, &a)| sim.goods.get(g).map(|gd| CivicGoodRow { name: gd.name.clone(), amount: a }))
+            .collect();
+        civic_goods.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
+        civic_goods.truncate(6);
+        // Years until the soonest seat turns over.
+        let soonest = hub.officials.iter().map(|o| o.term_end).min().unwrap_or(sim.tick);
+        let next_election_years = ((soonest.saturating_sub(sim.tick)) / 365) as i32;
+        let (captor, captor_color) = hname(hub.captor_house);
         Some(Government {
             council, council_color, council_archetype, council_is_guild, council_power,
             tariff_export, tariff_import, tariff_default,
             mint_fineness: if hub.mint_fineness <= 0.0 { 1.0 } else { hub.mint_fineness },
             treasury: hub.treasury, civic_pool: hub.civic_pool,
             spec_risk, spec_tier, spec_stars, spec_pattern, spec_drivers, spec_watch,
+            govt_type: govt_type_name(hub.govt_type).to_string(),
+            next_election_years, captor, captor_color,
+            officials, family_influence, laws, civic_goods,
         })
     };
     // ── DLC 3.5 · Carrying trade ("transit"): in-flight shipments run by THIS
@@ -2148,6 +2266,11 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         stolen_from: if hub.stolen_from >= 0 {
             sim.hubs.iter().find(|h| h.id == hub.stolen_from as u32).map(|h| h.name.clone()).unwrap_or_default()
         } else { String::new() },
+        // Colonies/outposts this city founded (founder_hub is a hub INDEX == hi).
+        related_colonies: (0..sim.hubs.len())
+            .filter(|&ci| sim.hubs[ci].colony_kind != 0 && sim.hubs[ci].founder_hub == hi as i32)
+            .map(|ci| colony_summary(&sim, ci))
+            .collect(),
     }))
 }
 
@@ -4022,6 +4145,8 @@ pub struct HouseHistory {
     pub events: Vec<HouseTimelineEvent>,
     pub top_goods: Vec<(String, f32)>, // most profitable resources (name + cumulative profit)
     pub defunct: bool,
+    /// Colonies/outposts this house OWNS (outposts) or BACKED (joint-stock share).
+    #[serde(default)] pub colonies: Vec<ColonySummary>,
 }
 
 /// The timeline / chronicle of one house, looked up by name.
@@ -4046,6 +4171,12 @@ pub fn campaign_get_house_history(name: String, db: State<'_, WorldDb>) -> Resul
     top_goods.truncate(5);
     let founder = h.events.iter().find(|e| e.kind == "founded")
         .map(|e| e.text.clone()).unwrap_or_default();
+    // Colonies this house owns (outposts, owner_house) or backed (kind-1 joint-stock).
+    let colonies: Vec<ColonySummary> = (0..sim.hubs.len()).filter(|&ci| {
+        let c = &sim.hubs[ci];
+        c.colony_kind != 0 && (c.owner_house == idx as i32
+            || c.backers.iter().any(|(k, i, _)| *k == 1 && *i == idx as u32))
+    }).map(|ci| colony_summary(&sim, ci)).collect();
     Ok(Some(HouseHistory {
         name: h.name.clone(),
         color: distinct_color(idx),
@@ -4054,6 +4185,7 @@ pub fn campaign_get_house_history(name: String, db: State<'_, WorldDb>) -> Resul
         events,
         top_goods,
         defunct: h.defunct,
+        colonies,
     }))
 }
 
