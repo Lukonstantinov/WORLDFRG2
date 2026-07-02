@@ -1199,6 +1199,9 @@ export interface EpidemicBrief {
   end_year: number;
   active: boolean;
   total_dead: number;
+  /** 1 = Great Plague (rare, spreads ~4000 km along the lanes), 2 = Regional (reaches
+   *  one further city), 3 = Local outbreak (stays put). */
+  category: number;
   cities: PlagueCityBrief[]; // in spread order (origin first)
 }
 

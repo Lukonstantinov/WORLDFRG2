@@ -107,7 +107,8 @@ export function PlaguePanel() {
                 <span style={{ color: "#7a5656", fontSize: 9, width: 9 }}>{isOpen ? "▾" : "▸"}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: "#e8c8c8", fontSize: 11, fontWeight: 600 }}>
-                    {e.name} {e.active && <span style={{ color: "#ff8a6a", fontSize: 9 }}>● active</span>}
+                    {e.name} <CategoryTag category={e.category} />
+                    {e.active && <span style={{ color: "#ff8a6a", fontSize: 9 }}> ● active</span>}
                   </div>
                   <div style={{ color: "#8c6a6a", fontSize: 9 }}>
                     Year {e.start_year}{e.end_year > e.start_year ? `–${e.end_year}` : ""} · {e.cities.length} cit{e.cities.length === 1 ? "y" : "ies"}
@@ -146,6 +147,22 @@ export function PlaguePanel() {
         })}
       </div>
     </div>
+  );
+}
+
+/** Plague severity badge: Cat 1 = Great Plague (rare, reaches ~4000 km along the trade
+ *  lanes), Cat 2 = Regional (reaches one further city), Cat 3 = Local outbreak. */
+function CategoryTag({ category }: { category: number }) {
+  const meta = category === 1
+    ? { label: "Cat 1 · Great Plague", bg: "#4a1010", bd: "#c04040", fg: "#ffb0a0" }
+    : category === 2
+    ? { label: "Cat 2 · Regional", bg: "#3a2410", bd: "#b07030", fg: "#f0c890" }
+    : { label: "Cat 3 · Local", bg: "#25301a", bd: "#5a7040", fg: "#bcd8a0" };
+  return (
+    <span style={{ fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 10,
+      border: `1px solid ${meta.bd}`, background: meta.bg, color: meta.fg, whiteSpace: "nowrap" }}>
+      {meta.label}
+    </span>
   );
 }
 

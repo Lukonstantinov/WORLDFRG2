@@ -570,9 +570,17 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 // ── DLC 1 "Living Trade" tick simulation ──
 import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow, PopBrief, EpidemicBrief, GuildBrief, FigureBrief, LandmarkBrief, DynastiesPayload } from "../types";
 
-/** Seed a fresh living-trade sim from the static economy snapshot (step 10). */
+/** Seed a fresh living-trade sim from the static economy snapshot (step 10). A RUNNING
+ *  campaign is never restarted by this — it returns the current sim unchanged. */
 export async function campaignStartSim(seed: number): Promise<CampaignSnapshot> {
   return invoke("campaign_start_sim", { seed });
+}
+
+/** Start a FRESH dynamic campaign on the same world/economy (a "new game"). Clears the
+ *  current sim and reseeds — the caller must first SAVE the running campaign to its own
+ *  .campaign file so it is preserved. */
+export async function campaignNewGame(seed: number): Promise<CampaignSnapshot> {
+  return invoke("campaign_new_game", { seed });
 }
 
 /** Advance the sim by N days. The backend keeps the sim resident in memory and

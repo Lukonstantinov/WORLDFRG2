@@ -17,6 +17,7 @@ export function StepCampaign({ seed }: { seed: number; plateCount: number; inval
   const error = useCampaignStore((s) => s.error);
   const refresh = useCampaignStore((s) => s.refresh);
   const start = useCampaignStore((s) => s.start);
+  const newGame = useCampaignStore((s) => s.newGame);
   const advance = useCampaignStore((s) => s.advance);
   const setStatus = useUIStore((s) => s.setStatus);
   const setShowHouses = useUIStore((s) => s.setShowHouses);
@@ -300,8 +301,20 @@ export function StepCampaign({ seed }: { seed: number; plateCount: number; inval
             )}
           </div>
 
-          <button onClick={() => start(seed)} disabled={busy} style={{ ...smallReset, opacity: busy ? 0.5 : 1 }}>
-            ⟲ Restart campaign from current economy
+          {/* A running campaign is NEVER restarted in place. Starting another game
+              first SAVES this one to its own .campaign file, then seeds a fresh,
+              dynamic campaign on the same world (a new random seed). */}
+          <button
+            onClick={async () => {
+              setPlaying(false);
+              const ok = await newGame(Math.floor(Math.random() * 1_000_000_000));
+              if (ok) { setStatus("New campaign started (previous one saved)."); await refresh(); }
+            }}
+            disabled={busy}
+            style={{ ...smallReset, opacity: busy ? 0.5 : 1 }}
+            title="Saves the current campaign to its own file, then begins a fresh one"
+          >
+            ➕ New campaign (saves the current one first)
           </button>
         </>
       )}

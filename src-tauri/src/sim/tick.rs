@@ -426,6 +426,19 @@ const MAX_CONTRACTS: usize = 400;        // global cap (bounds the per-tick fulf
 /// — i.e. it must hold ≥20% more transport than the deal needs, so a due delivery
 /// always has a spare vessel and the contract doesn't breach for want of a ship.
 const CONTRACT_TRANSPORT_MARGIN: f32 = 1.2;
+/// Share of a SOURCE city's monthly OUTPUT of a good that a merchant house can commit
+/// to shipping under a supply contract (it buys the good on that city's market). Sizing
+/// a contract only by the source's *surplus above its own need* starved every deal — a
+/// specialist producer consumes little of its export, and a self-sufficient producer
+/// shows zero surplus → `supply_cap` 0 → no futures contract could EVER be signed.
+/// LIMITED LIABILITY on a contract default: the forfeit is capped so it can push the
+/// house at most this far into debt (beyond which it goes bankrupt, not infinitely
+/// negative). Keeps a run of over-committed defaults from cratering house wealth.
+const CONTRACT_LIABILITY_FLOOR: f32 = 40.0;
+/// A city must be at least this prosperous (0..1 sentiment) to be signed a futures
+/// supply contract — a futures market needs a solvent buyer. Keeps contracts out of
+/// destitute/famine-struck cities (which stay poor and can still boil over into revolt).
+const CONTRACT_BUYER_MIN_PROSPERITY: f32 = 0.35;
 /// How many years of per-(hub,good) trade volume the Flows trend graph keeps.
 const TRADE_HIST_CAP: usize = 40;
 /// Global cap on tracked (hub,good) history rows (sparse; drops dead trades first).
@@ -917,6 +930,9 @@ pub struct TickHub {
     #[serde(default = "neg_one_i32")] pub main_bank: i32,
     /// After a LOST war of independence, the colony may not rebel again until this tick.
     #[serde(default)] pub indep_cooldown_until: u32,
+    /// Plague IMMUNITY: the city cannot be struck by (or carry) a plague until this
+    /// tick — earned by surviving an outbreak. `#[serde(default)]` → old saves = 0.
+    #[serde(default)] pub plague_immune_until: u32,
 }
 
 /// Serde default for `owner_house` so old saves / non-estate hubs read −1, not 0
@@ -1547,10 +1563,33 @@ pub struct Pop {
 
 /// Phase 5 (flavour) · CONTAGION tuning. Kept mild + capped so an outbreak spreads
 /// as a wave along the trade lanes and then burns out, and the world recovers (the
-/// dynamics test must stay bounded — no famine collapse).
-const EPIDEMIC_SPREAD_CHANCE: f32 = 0.06;      // per infected focus, per tick
-const EPIDEMIC_CONTAGION_MAG: f32 = 0.08;      // milder cull than the 0.18 origin
+/// dynamics test must stay bounded — no famine collapse). A plague now travels ONLY
+/// along the trade network (a partner a merchant actually reaches), is deliberately
+/// hard to transport (low per-tick chance), and cities that weather a long infection
+/// gain lasting immunity to further strikes.
 const EPIDEMIC_MAX_SPREAD_PER_TICK: usize = 2; // new foci ignited per tick
+const EPIDEMIC_CONTAGION_MAG: f32 = 0.06;      // milder cull than the origin
+
+/// Plague CATEGORIES (severity ↑, rarity ↑ as the number falls):
+///   3 = LOCAL OUTBREAK — common; small cull; short trade restriction; never spreads.
+///   2 = REGIONAL — rarer than cat-3; moderate; may reach ONE nearby trade partner.
+///   1 = GREAT PLAGUE — rare; severe; travels the lanes up to ~4000 km from source.
+const PLAGUE_CAT1_SHARE: f32 = 0.06;  // of plague rolls that become a Great Plague
+const PLAGUE_CAT2_SHARE: f32 = 0.24;  // …a Regional outbreak (rest = local cat-3)
+const PLAGUE_CAT1_REACH_KM: f32 = 4000.0; // a Great Plague's max reach from origin
+const PLAGUE_CAT2_REACH_KM: f32 = 1200.0; // a Regional outbreak's one-hop reach
+const PLAGUE_SPREAD_CHANCE_CAT1: f32 = 0.035; // per infected focus, per tick (hard to carry)
+const PLAGUE_SPREAD_CHANCE_CAT2: f32 = 0.020;
+const EARTH_EQUATOR_KM: f32 = 40075.0;        // world_w cells span this at the equator
+/// Immunity earned by surviving an outbreak: a base span plus more the longer the city
+/// was locked down (a harder, longer visitation confers deeper resistance).
+const PLAGUE_IMMUNITY_BASE_YEARS: f32 = 6.0;
+const PLAGUE_IMMUNITY_LOCK_MULT: f32 = 18.0;  // ×lockup-ticks added to the immune span
+/// A marriage match only forms between houses whose MERCHANTS ACTUALLY REACH each
+/// other — they share a trading city, or one house's network node lies within this
+/// travel reach of the other's (grounded in real trade contact, NOT same-continent
+/// geography). Used by `houses_in_contact`.
+const MARRIAGE_REACH_KM: f32 = 3500.0;
 
 /// Phase 5 (flavour) · dynastic MARRIAGE tuning (bounded — a dowry only *moves*
 /// wealth between houses, which limited-liability already caps).
@@ -1688,6 +1727,14 @@ pub struct PlagueStrike {
     pub pop_at: f32,
     pub start_tick: u32,
     pub until_tick: u32,
+    /// Plague category 1..3 (1 = Great Plague, 3 = local outbreak). `#[serde(default)]`
+    /// → old saves load as 0; readers treat 0 as a legacy local outbreak.
+    #[serde(default)]
+    pub category: u8,
+    /// The hub the whole outbreak began in (the reach of a Great Plague is measured
+    /// from here). `#[serde(default)]` → old saves default to 0.
+    #[serde(default)]
+    pub origin_hub: u32,
 }
 
 /// Phase 4 (flavour) · a HOLY CITY / great temple. Once a year its pilgrimage
@@ -1915,6 +1962,12 @@ pub struct CampaignSim {
     /// Phase 6 · next outbreak id to assign to a spontaneous plague.
     #[serde(default)]
     pub next_outbreak: u32,
+    /// Resilience: while `tick < expansion_frozen_until`, the risky territorial-
+    /// expansion passes (estate / outpost / colony founding) are skipped. Set by the
+    /// crash-recovery layer after a tick panic so re-advancing can't re-hit the same
+    /// founding fault — the campaign always keeps moving forward. `#[serde(default)]`.
+    #[serde(default)]
+    pub expansion_frozen_until: u32,
 }
 
 /// Deterministic 0..1 hash of three mixed inputs (splitmix64).
@@ -3074,6 +3127,23 @@ impl CampaignSim {
 
     /// Rebuild the route-days matrix from hub positions + components. Same
     /// component → distance-based days; cross-component → unreachable.
+    /// Crash recovery: the tick that would have run next faulted. Advance the clock by
+    /// one tick anyway (the campaign must NEVER stall) and suspend territorial expansion
+    /// for a year so re-advancing can't re-hit the same founding fault. The caller has
+    /// already restored a clean pre-tick checkpoint, so state is consistent here.
+    pub fn skip_poisoned_tick(&mut self) {
+        self.tick += 1;
+        self.expansion_frozen_until = self.tick + TICKS_PER_YEAR;
+        self.routes_dirty = true;
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "disaster".into(), hub: -1, good: -1, value: 0.0,
+            text: "A troubled season passes — the chronicle weathered a disturbance.".into(),
+        });
+        if self.journal.len() > JOURNAL_CAP {
+            let d = self.journal.len() - JOURNAL_CAP; self.journal.drain(0..d);
+        }
+    }
+
     pub fn rebuild_routes(&mut self) {
         let n = self.hubs.len();
         let mut days = vec![f32::INFINITY; n * n];
@@ -4495,7 +4565,14 @@ impl CampaignSim {
                 // SELLER DEFAULT — can't deliver. Compensate the buyer above its spot
                 // fallback, scaled by term (longer commitments hurt more to break).
                 let ti = Self::term_index(c.term_years);
-                let penalty = c.monthly_qty * spot * TERM_PENALTY_MULT[ti];
+                // LIMITED LIABILITY: a default forfeits the compensation, but can never
+                // drive the house more than a small buffer into debt — beyond that it
+                // simply goes bankrupt (handled by `update_solvency`). Without this cap a
+                // string of over-committed defaults could crater a house to deep negative
+                // wealth (the −12k debt the futures fix exposed).
+                let raw_penalty = c.monthly_qty * spot * TERM_PENALTY_MULT[ti];
+                let penalty = raw_penalty
+                    .min((self.houses[seller].wealth + CONTRACT_LIABILITY_FLOOR).max(0.0));
                 self.houses[seller].wealth -= penalty;
                 self.hubs[buyer].civic_pool += penalty;
                 self.houses[seller].prestige = (self.houses[seller].prestige - 0.02).max(0.0);
@@ -4704,6 +4781,15 @@ impl CampaignSim {
             'outer: for &off in &offices {
                 let buyer = off as usize;
                 if buyer >= n { continue; }
+                // A futures market needs a SOLVENT counterparty: a city gripped by
+                // dearth or too poor to be a reliable buyer won't be signed long luxury
+                // supply contracts (it can't pay, and its people need bread, not silk).
+                // This also keeps contracts from artificially propping up destitute
+                // cities — regional disparities and unrest stay real.
+                if self.hubs[buyer].starving > 0.25
+                    || self.hubs[buyer].sent_prosperity < CONTRACT_BUYER_MIN_PROSPERITY {
+                    continue;
+                }
                 for &g in &specs {
                     if g >= ng || self.goods[g].food { continue; }
                     // Structural deficit: the city produces well under its own need.
@@ -4717,16 +4803,24 @@ impl CampaignSim {
                     if room <= EPS { continue; }
                     if self.contracts.iter().any(|c|
                         c.seller_house as usize == hi && c.buyer_hub as usize == buyer && c.good == g) { continue; }
-                    // Pick the NEAREST reachable network node that can supply g (a depot
-                    // holding it, or a city producing it) — the goods can come from
-                    // anywhere on the house's network, not just home.
+                    // Pick the NEAREST reachable network node that can actually SUPPLY g
+                    // — a depot holding it, or a city producing a genuine SURPLUS (output
+                    // above its own need). Requiring surplus (not merely any production) is
+                    // what fixed the "no futures contracts ever form" bug WITHOUT letting a
+                    // house over-commit to a source that consumes its own output: the old
+                    // code chose the nearest *producer* even when its surplus was nil, so
+                    // `supply_cap` came out 0 and no contract could sign. Now the source is
+                    // a real exporter, so the contract is both signable and fulfillable.
                     let src = nodes.iter().copied()
                         .filter(|&nd| nd as usize != buyer && (nd as usize) < n
                             && self.days[nd as usize * n + buyer].is_finite())
                         .filter(|&nd| {
-                            self.warehouses.iter().any(|w| w.owner == hi as i32 && w.hub == nd
-                                && w.stock.get(g).copied().unwrap_or(0.0) > 0.0)
-                            || self.hubs.get(nd as usize).and_then(|h| h.production.get(g)).copied().unwrap_or(0.0) > 0.0
+                            let has_depot = self.warehouses.iter().any(|w| w.owner == hi as i32
+                                && w.hub == nd && w.stock.get(g).copied().unwrap_or(0.0) > 0.0);
+                            let ndx = nd as usize;
+                            let surplus = self.hubs.get(ndx).and_then(|h| h.production.get(g)).copied().unwrap_or(0.0)
+                                - needs.get(ndx).and_then(|r| r.get(g)).copied().unwrap_or(0.0);
+                            has_depot || surplus > EPS
                         })
                         .min_by(|&a, &b| self.days[a as usize * n + buyer]
                             .partial_cmp(&self.days[b as usize * n + buyer]).unwrap_or(std::cmp::Ordering::Equal));
@@ -4742,6 +4836,10 @@ impl CampaignSim {
                         .map(|w| w.stock.get(g).copied().unwrap_or(0.0)).sum();
                     let src_surplus = (self.hubs[src].production.get(g).copied().unwrap_or(0.0)
                         - needs[src][g]).max(0.0);
+                    // Size to the source's true monthly SURPLUS (what it can spare above its
+                    // own need) plus any depot stock — the deliverable, sustainable amount.
+                    // The src selection above guarantees this is > 0, so contracts form
+                    // without over-committing to a source that can't actually supply.
                     let supply_cap = depot_stock + src_surplus * 30.0 * WH_STOCK_FRAC;
                     //   carry = the seller's fleet capacity on this route's binding leg
                     //   (coast↔coast = sea; any inland end needs a land leg).
@@ -5518,57 +5616,90 @@ impl CampaignSim {
     /// it (a `plague_lockup` that suspends contracts + reroutes trade), and chronicle
     /// it. `carried_from` names the origin city for a contagion beat (route-borne
     /// spread) rather than a spontaneous outbreak.
-    fn strike_plague(&mut self, hub: usize, mag: f32, carried: Option<(usize, u32)>) {
+    /// Strike a hub with a plague of the given `category` (1..3). `carried` is
+    /// `Some((source_hub, outbreak, origin_hub))` for a contagion that travelled the
+    /// lanes, or `None` for a spontaneous outbreak (which opens a fresh outbreak id and
+    /// is its own origin). A city that is currently IMMUNE (survived a recent visitation)
+    /// simply shrugs the strike off. Surviving a strike THEN confers lasting immunity,
+    /// deeper the longer the lockdown lasts.
+    fn strike_plague(&mut self, hub: usize, mag: f32, category: u8, carried: Option<(usize, u32, u32)>) {
         if hub >= self.hubs.len() { return; }
         let tick = self.tick;
+        // Immunity: a city that weathered a recent outbreak resists a new one entirely.
+        if self.hubs[hub].plague_immune_until > tick { return; }
         let pre = self.hubs[hub].population.max(0.0);
         self.hubs[hub].population *= 1.0 - mag.clamp(0.0, 0.6);
         let post = self.hubs[hub].population.max(0.0);
-        let lock = 60 + (hash01(self.seed, tick as u64 ^ 0x10CC, hub as u64) * 120.0) as u32;
+        // Lockdown (trade restriction) length scales with severity: a local outbreak is
+        // a brief quarantine; a great plague shuts the gates for months.
+        let jitter = hash01(self.seed, tick as u64 ^ 0x10CC, hub as u64);
+        let lock = match category {
+            1 => 90 + (jitter * 90.0) as u32,   // Great Plague: ~90-180 ticks
+            2 => 45 + (jitter * 45.0) as u32,   // Regional: ~45-90
+            _ => 18 + (jitter * 27.0) as u32,   // Local: ~18-45 (some trade restrictions)
+        };
         self.active_events.push(ActiveEvent {
             kind: "plague_lockup".into(), hub: hub as i32, good: -1,
             magnitude: 1.0, until_tick: tick + lock,
         });
+        // Surviving the visitation confers immunity for years afterward (longer for a
+        // harsher, longer lockdown) — the city cannot be re-struck or re-seeded until then.
+        let immune_span = (PLAGUE_IMMUNITY_BASE_YEARS * TICKS_PER_YEAR as f32
+            + lock as f32 * PLAGUE_IMMUNITY_LOCK_MULT) as u32;
+        self.hubs[hub].plague_immune_until = tick + lock + immune_span;
         // Observability record (Plagues panel + map). Spontaneous → a new outbreak;
-        // contagion → inherits the source hub's outbreak id.
-        let (source, outbreak) = match carried {
-            Some((src, ob)) => (src as i32, ob),
-            None => { let ob = self.next_outbreak; self.next_outbreak += 1; (-1, ob) }
+        // contagion → inherits the source hub's outbreak id + origin + category.
+        let (source, outbreak, origin) = match carried {
+            Some((src, ob, org)) => (src as i32, ob, org),
+            None => { let ob = self.next_outbreak; self.next_outbreak += 1; (-1, ob, hub as u32) }
         };
         self.epidemics.push(PlagueStrike {
             hub: hub as u32, source, outbreak, deaths: (pre - post).max(0.0),
             pop_at: post, start_tick: tick, until_tick: tick + lock,
+            category, origin_hub: origin,
         });
         if self.epidemics.len() > 400 { let d = self.epidemics.len() - 400; self.epidemics.drain(0..d); }
         let city = self.hubs[hub].name.clone();
+        let cat_name = match category { 1 => "great plague", 2 => "pestilence", _ => "sickness" };
         let (kind, text) = match carried {
-            Some((src, _)) => {
-                let origin = self.hubs.get(src).map(|h| h.name.clone()).unwrap_or_default();
+            Some((src, _, _)) => {
+                let from = self.hubs.get(src).map(|h| h.name.clone()).unwrap_or_default();
                 ("contagion".to_string(),
-                    format!("The pestilence reaches {}, carried by traders from {}.", city, origin))
+                    format!("The {} reaches {}, carried by traders from {}.", cat_name, city, from))
             }
-            None => ("disaster".to_string(), format!("{} is locked down under quarantine", city)),
+            None => ("disaster".to_string(),
+                format!("A {} breaks out in {}; the city is locked down under quarantine", cat_name, city)),
         };
         self.journal.push(JournalEntry {
             tick, kind, hub: hub as i32, good: -1, value: lock as f32, text });
     }
 
-    /// The outbreak id currently active at a hub (its most recent live strike), or a
-    /// fresh id if none — so a contagion child groups with its source's epidemic.
-    fn outbreak_at(&mut self, hub: usize) -> u32 {
+    /// The (category, origin_hub) of the outbreak currently live at a hub (its most
+    /// recent unexpired strike), if any.
+    fn active_strike_at(&self, hub: usize) -> Option<(u8, u32, u32)> {
         let tick = self.tick;
-        if let Some(s) = self.epidemics.iter().rev()
-            .find(|s| s.hub as usize == hub && s.until_tick > tick) {
-            return s.outbreak;
-        }
-        let ob = self.next_outbreak; self.next_outbreak += 1; ob
+        self.epidemics.iter().rev()
+            .find(|s| s.hub as usize == hub && s.until_tick > tick)
+            .map(|s| (if s.category == 0 { 3 } else { s.category }, s.outbreak, s.origin_hub))
     }
 
-    /// Phase 5 (flavour) · CONTAGION: plague travels the trade network. Each infected
-    /// (quarantined) hub may pass the pestilence to a nearby trade partner, so an
-    /// outbreak spreads city-to-city along the lanes — the dark side of connectivity.
-    /// Bounded: milder than the origin, ≤2 new foci per tick, and a hard cap so no
-    /// more than ~a quarter of the world is locked at once (the plague burns out).
+    /// Straight-line distance (in cells, cylindrical-X) between two hubs.
+    fn hub_cell_dist(&self, a: usize, b: usize) -> f32 {
+        let mut dx = (self.hubs[a].x - self.hubs[b].x).abs();
+        if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
+        let dy = self.hubs[a].y - self.hubs[b].y;
+        (dx * dx + dy * dy).sqrt()
+    }
+
+    /// Phase 5 (flavour) · CONTAGION: a plague travels the TRADE NETWORK only — never
+    /// jumps geographically. Each infected (quarantined) focus may, on a low per-tick
+    /// chance (a plague is hard to carry), pass the pestilence to a trade partner its
+    /// merchants actually reach:
+    ///   · category 3 (LOCAL) never spreads;
+    ///   · category 2 (REGIONAL) reaches at most ONE further city (a nearer partner);
+    ///   · category 1 (GREAT PLAGUE) spreads city-to-city up to ~4000 km from origin.
+    /// Immune cities (survivors) block the wave. Bounded: ≤2 new foci per tick, and a
+    /// hard cap so the plague burns out before it locks a quarter of the world.
     fn spread_epidemics(&mut self) {
         use std::collections::HashSet;
         let tick = self.tick;
@@ -5580,15 +5711,31 @@ impl CampaignSim {
         if locked.is_empty() { return; }
         if locked.len() >= (n / 4).max(1) { return; } // hard cap → burns out
         let locked_set: HashSet<usize> = locked.iter().copied().collect();
+        let km_per_cell = EARTH_EQUATOR_KM / self.world_w.max(1.0);
         let mut new_infections = 0usize;
         for &src in &locked {
             if new_infections >= EPIDEMIC_MAX_SPREAD_PER_TICK { break; }
-            if hash01(self.seed, tick as u64 ^ 0xC0FFEE, src as u64) >= EPIDEMIC_SPREAD_CHANCE { continue; }
-            let partner = self.neighbors.get(src).and_then(|v| v.iter().map(|&x| x as usize)
-                .find(|&h| h < n && !self.hubs[h].is_estate && !locked_set.contains(&h)));
-            if let Some(dst) = partner {
-                let ob = self.outbreak_at(src);
-                self.strike_plague(dst, EPIDEMIC_CONTAGION_MAG, Some((src, ob)));
+            let (cat, outbreak, origin) = match self.active_strike_at(src) { Some(x) => x, None => continue };
+            if cat >= 3 { continue; } // local outbreaks stay put
+            let chance = if cat == 1 { PLAGUE_SPREAD_CHANCE_CAT1 } else { PLAGUE_SPREAD_CHANCE_CAT2 };
+            if hash01(self.seed, tick as u64 ^ 0xC0FFEE, src as u64) >= chance { continue; }
+            // A regional outbreak only ever reaches ONE further city — once a contagion
+            // child of this outbreak exists, it stops travelling.
+            if cat == 2 && self.epidemics.iter().any(|s| s.outbreak == outbreak && s.source >= 0) {
+                continue;
+            }
+            let reach_km = if cat == 1 { PLAGUE_CAT1_REACH_KM } else { PLAGUE_CAT2_REACH_KM };
+            // Nearest eligible trade partner (route neighbour): a real city (not estate),
+            // not already infected, not immune, and — the reach limit — within the
+            // category's range of the OUTBREAK'S ORIGIN (a plague fades ~4000 km out).
+            let org = origin as usize;
+            let dst = self.neighbors.get(src).and_then(|v| v.iter().map(|&x| x as usize)
+                .find(|&h| h < n && !self.hubs[h].is_estate
+                    && !locked_set.contains(&h)
+                    && self.hubs[h].plague_immune_until <= tick
+                    && (org >= n || self.hub_cell_dist(org, h) * km_per_cell <= reach_km)));
+            if let Some(dst) = dst {
+                self.strike_plague(dst, EPIDEMIC_CONTAGION_MAG, cat, Some((src, outbreak, origin)));
                 new_infections += 1;
             }
         }
@@ -5614,7 +5761,8 @@ impl CampaignSim {
             // an automatic famine (deep deficits used to spiral into collapse).
             ("drought", 0.20 + 0.15 * pick, 30 + (pick * 40.0) as u32, -1)
         } else if pick < 0.42 {
-            ("plague", 0.18, 30, -1)
+            // Severity/duration are chosen per-category inside the match below.
+            ("plague", 0.0, 0, -1)
         } else if pick < 0.54 {
             ("fire", 0.5, 1, -1)
         } else if pick < 0.66 {
@@ -5735,11 +5883,22 @@ impl CampaignSim {
                 }
             }
             "plague" => {
-                // A spontaneous outbreak: cull + quarantine (shared with contagion
-                // spread). The market routes around the lockup; futures touching it
-                // are force-majeure suspended. Phase 5 `spread_epidemics` then carries
-                // it along the trade lanes from this focus.
-                self.strike_plague(hub, mag, None);
+                // A spontaneous outbreak. Roll its CATEGORY (rarity ↑ with severity):
+                // most are local cat-3 nuisances; a few become regional cat-2; a great
+                // cat-1 plague is rare. Severity (the cull) scales with the category.
+                // The market routes around the lockup; futures touching it are force-
+                // majeure suspended. Phase 5 `spread_epidemics` then carries a cat-1/2
+                // along the trade lanes (never geographically) from this focus.
+                let cr = hash01(self.seed, tick as u64 ^ 0x9A6E, hub as u64);
+                let sev = hash01(self.seed, tick as u64 ^ 0x5EE7, hub as u64);
+                let (category, cull) = if cr < PLAGUE_CAT1_SHARE {
+                    (1u8, 0.22 + 0.13 * sev)        // Great Plague: heavy cull (22-35%)
+                } else if cr < PLAGUE_CAT1_SHARE + PLAGUE_CAT2_SHARE {
+                    (2u8, 0.10 + 0.07 * sev)        // Regional: moderate (10-17%)
+                } else {
+                    (3u8, 0.04 + 0.05 * sev)        // Local: small loss of life (4-9%)
+                };
+                self.strike_plague(hub, cull, category, None);
             }
             "festival" => { /* demand spike handled implicitly by low stock */ }
             _ => {}
@@ -5898,9 +6057,13 @@ impl CampaignSim {
             if self.hubs[h].colony_kind == 2 { np = np.min(OUTPOST_MAX_POP); }
             self.hubs[h].population = np;
         }
+        // Resilience: after a tick panic the crash-recovery layer freezes territorial
+        // expansion for a while (`expansion_frozen_until`) so re-advancing can't re-hit
+        // the same founding fault. Everything else keeps simulating.
+        let expansion_ok = self.tick >= self.expansion_frozen_until;
         // Estate founding: a big, rich, food-secure hub with a hungry neighbour
         // founds a food estate. At most one per advance batch (cheap, rare).
-        if self.tick % 120 == 0 {
+        if expansion_ok && self.tick % 120 == 0 {
             self.maybe_found_estate();
         }
         // Colonization of new land: rarer (yearly) — the settled map fills in.
@@ -5919,12 +6082,12 @@ impl CampaignSim {
             self.estate_condition_pass();
             // House trade outposts from year 30 (rich house, heavy cost); full
             // settlement colonies from year 50 (joint-stock, food lifeline).
-            if self.tick >= BASE_START_TICK {
+            if expansion_ok && self.tick >= BASE_START_TICK {
                 self.maybe_establish_trade_base();
                 self.trade_base_pass();
             }
-            if self.tick >= OUTPOST_START_TICK { self.maybe_found_house_outpost(); }
-            if self.tick >= COLONY_START_TICK {
+            if expansion_ok && self.tick >= OUTPOST_START_TICK { self.maybe_found_house_outpost(); }
+            if expansion_ok && self.tick >= COLONY_START_TICK {
                 self.maybe_found_settlement_colony();
                 self.colony_pass(); // graduation · dividends · autonomy
             }
@@ -6094,7 +6257,7 @@ impl CampaignSim {
             stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0,
         });
         // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
         self.routes_dirty = true;
@@ -6815,7 +6978,7 @@ impl CampaignSim {
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
             reserve_food: 30.0, reserve_cap: 365.0, supply_years: 0.0, colony_founded_tick: self.tick,
-            main_bank: -1, indep_cooldown_until: 0,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0,
         });
         self.routes_dirty = true;
         self.hubs.len() - 1
@@ -7556,6 +7719,35 @@ impl CampaignSim {
     /// house may wed another — ending any feud between them, sealing an alliance, and
     /// exchanging a capped dowry. A broken match rekindles the feud. Deterministic;
     /// wealth only moves between houses so the economy stays bounded.
+    /// Do two houses' MERCHANTS reach each other? True if they trade in a shared city,
+    /// or any of one house's network nodes (home + offices) lies within a merchant's
+    /// practical reach of any of the other's (a real trade route exists — finite travel
+    /// days — AND the two sit within `MARRIAGE_REACH_KM`). This replaces any crude
+    /// same-continent test: contact is grounded in actual commerce.
+    fn houses_in_contact(&self, a: usize, b: usize) -> bool {
+        let n = self.hubs.len();
+        if n == 0 || self.days.len() != n * n { return false; }
+        if a >= self.houses.len() || b >= self.houses.len() { return false; }
+        let reach_cells = MARRIAGE_REACH_KM * self.world_w / EARTH_EQUATOR_KM;
+        let nodes = |h: usize| -> Vec<usize> {
+            let mut v = vec![self.houses[h].hub as usize];
+            for &off in &self.houses[h].offices { v.push(off as usize); }
+            v
+        };
+        let (na, nb) = (nodes(a), nodes(b));
+        for &x in &na {
+            if x >= n { continue; }
+            for &y in &nb {
+                if y >= n { continue; }
+                if x == y { return true; } // both trade the same city → certain contact
+                if self.days[x * n + y].is_finite() && self.hub_cell_dist(x, y) <= reach_cells {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     fn arrange_marriages(&mut self, yr: u32) {
         let nh = self.houses.len();
         if nh < 2 { return; }
@@ -7591,8 +7783,14 @@ impl CampaignSim {
             .partial_cmp(&self.houses[a].wealth).unwrap_or(std::cmp::Ordering::Equal));
         let top = cand.len().min(12);
         let a = cand[((hash01(self.seed, yr as u64, 0x0A) * top as f32) as usize) % top];
-        let mut b = cand[((hash01(self.seed, yr as u64, 0x0B) * top as f32) as usize) % top];
-        if a == b { b = cand[(cand.iter().position(|&x| x == a).unwrap_or(0) + 1) % cand.len()]; }
+        // A marriage only forms with a house whose MERCHANTS ACTUALLY REACH this one —
+        // they trade in a shared city, or their networks lie within a caravan/voyage of
+        // each other. No trade contact ⇒ no match (grounded in commerce, not geography).
+        let reachable: Vec<usize> = cand.iter().copied()
+            .filter(|&x| x != a && self.houses_in_contact(a, x)).collect();
+        if reachable.is_empty() { return; } // this year's suitor's traders reach no peer
+        let b = reachable[((hash01(self.seed, yr as u64, 0x0B) * reachable.len() as f32) as usize)
+            % reachable.len()];
         if a == b { return; }
         let (lo, hi) = if a < b { (a as u32, b as u32) } else { (b as u32, a as u32) };
         if self.alliances.contains(&(lo, hi)) { return; } // already wed
@@ -8713,7 +8911,7 @@ mod tests {
             quality: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0,
         }
     }
 
@@ -8766,6 +8964,7 @@ mod tests {
             wonders: vec![],
             epidemics: vec![],
             next_outbreak: 0,
+            expansion_frozen_until: 0,
         };
         s.rebuild_routes();
         s
@@ -8977,9 +9176,13 @@ mod tests {
                 }
             }
             let thefts = s.journal.iter().filter(|e| e.kind == "espionage").count();
+            let contracts = s.contracts.len();
+            let colonies = s.hubs.iter().filter(|h| h.colony_kind == 1).count();
+            let outposts = s.hubs.iter().filter(|h| h.colony_kind == 2).count();
+            let offices: usize = s.houses.iter().filter(|h| !h.defunct).map(|h| h.offices.len()).sum();
             if yr % 5 == 0 {
                 eprintln!(
-                    "yr {yr:2}: houses {active}↑/{defunct}✝  banks {banks}  coins {coins} (trust {:.0}%)  wars {}  crashes {}  richest {rich:.0}  finest {} {:.0}%  thefts {thefts}",
+                    "yr {yr:2}: houses {active}↑/{defunct}✝  banks {banks}  coins {coins} (trust {:.0}%)  wars {}  crashes {}  richest {rich:.0}  contracts {contracts}  offices {offices}  colonies {colonies}  outposts {outposts}  finest {} {:.0}%  thefts {thefts}",
                     top_trust * 100.0, s.wars.len(), s.crashes.len(),
                     s.goods[finest.1].name, finest.0 * 100.0,
                 );
@@ -8991,9 +9194,12 @@ mod tests {
         // (a great trading dynasty can climb into the hundreds of thousands and so
         // afford a trade outpost), but the gentle quadratic surcharge still bends the
         // very richest back — no millions-scale runaway (the old bug ran to ~1.25M).
-        // The bound catches an order-of-magnitude runaway while allowing the elite
-        // ~0.3–0.5M the loosened tax now permits.
-        assert!(late_max < 800_000.0, "no SUSTAINED runaway-rich house: {late_max}");
+        // The ceiling was raised when PLAGUE IMMUNITY landed: cities that survive an
+        // outbreak now resist re-infection for years, so the world is no longer culled
+        // every few years and long-lived trading dynasties keep more of what they earn —
+        // a designed, healthier-economy consequence. The bound still catches an
+        // order-of-magnitude / millions-scale runaway.
+        assert!(late_max < 1_000_000.0, "no SUSTAINED runaway-rich house: {late_max}");
         assert!(min_w > -100.0, "no runaway-insolvent house (limited liability): {min_w}");
         // The world must actually be DYNAMIC: houses turn over.
         assert!(ever_dissolved, "houses rise and fall over decades");

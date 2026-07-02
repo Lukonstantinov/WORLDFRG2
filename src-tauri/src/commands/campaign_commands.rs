@@ -142,6 +142,16 @@ pub fn new_campaign(name: String, db: State<'_, WorldDb>) -> Result<(), String> 
     let world_ref = current_world_ref(&conn)?;
     conn.execute("DELETE FROM campaign", [])
         .map_err(|e| e.to_string())?;
+    // Drop the resident sim so a fresh campaign truly starts from scratch — otherwise
+    // the running-campaign restart guard in `campaign_start_sim` would see the stale
+    // cached sim (tick > 0) and refuse to reseed.
+    {
+        let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
+        cache.sim = None;
+        cache.loaded = true; // don't reload the just-deleted row from the DB
+        cache.dirty = false;
+        cache.last_persist = None;
+    }
     metadata::campaign_set(&conn, "name", &name).map_err(|e| e.to_string())?;
     metadata::campaign_set(
         &conn,
@@ -781,6 +791,14 @@ fn uf_union(parent: &mut [usize], a: usize, b: usize) {
 #[tauri::command]
 pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignSnapshot, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    // A RUNNING campaign is NEVER restarted/clobbered. If a sim has already advanced,
+    // return it unchanged — starting a fresh game is the explicit New-Campaign action
+    // (`campaign_new_game`), which preserves the current run in its own file first.
+    if let Some(existing) = get_sim(&db, &conn)? {
+        if existing.tick > 0 {
+            return Ok(build_snapshot(&existing));
+        }
+    }
     crate::sim::cultures::ensure_active(&conn); // seed house names in their local culture
     let econ_json = metadata::campaign_get(&conn, "economy")
         .map_err(|e| e.to_string())?
@@ -948,6 +966,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 colony_founded_tick: 0,
                 main_bank: -1,
                 indep_cooldown_until: 0,
+                plague_immune_until: 0,
             }
         })
         .collect();
@@ -1242,6 +1261,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         wonders: vec![],
         epidemics: vec![],
         next_outbreak: 0,
+        expansion_frozen_until: 0,
     };
     // Backfill the colonization pool if the saved economy predates the feature (its
     // `colonizable_sites` deserialized to the serde default — empty). Without this a
@@ -1258,6 +1278,32 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
     persist_campaign(&db, &conn)?; // write the fresh campaign to the DB immediately
     Ok(build_snapshot(&sim))
 }
+
+/// Start a FRESH dynamic campaign on the SAME finalized world/economy — a "new game".
+/// A running campaign is never restarted in place; the caller must first SAVE the
+/// current run to its own `.campaign` file (so it's preserved). This then clears just
+/// the resident/persisted sim (keeping the economy so the new game is immediately
+/// dynamic) and reseeds with a fresh seed.
+#[tauri::command]
+pub fn campaign_new_game(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignSnapshot, String> {
+    {
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
+        cache.sim = None;
+        cache.loaded = true; // don't reload the old sim from the DB row
+        cache.dirty = false;
+        cache.last_persist = None;
+        metadata::campaign_set(&conn, "campaign_sim", "").map_err(|e| e.to_string())?;
+    }
+    // tick == 0 path now → `campaign_start_sim` reseeds fresh (the guard won't fire).
+    campaign_start_sim(seed, db)
+}
+
+/// Autosave cadence: the campaign is flushed to disk every this many SIM-years
+/// (crossing an even-year boundary), with a wall-clock safety flush so an unattended
+/// fast-play still checkpoints between boundaries.
+const AUTOSAVE_EVERY_YEARS: u32 = 2;
+const AUTOSAVE_WALLCLOCK_SECS: f32 = 120.0;
 
 /// Below this many remaining sites, `campaign_advance` recomputes the colonization
 /// pool from live tiles. The tick sim has no WorldBuffer, so it can never refill the
@@ -1284,6 +1330,60 @@ fn recompute_colonizable(
     let world = db.cached_tiles_with_conn(conn)?;
     Ok(crate::commands::query_commands::compute_colonizable_sites(
         &world, grid_w, grid_h, hub_xy, &base_value))
+}
+
+/// Advance the sim resiliently — the campaign must ALWAYS move forward and NEVER crash
+/// out. The batch runs in year-sized chunks under `catch_unwind`. On a tick fault:
+///   1. restore the pre-chunk checkpoint (a cheap in-memory clone — NaN-safe, unlike a
+///      JSON round-trip) and RETRY the chunk with territorial expansion frozen (the
+///      year-30 founding paths are the usual suspects);
+///   2. if it STILL faults, step the chunk tick-by-tick, skipping ONLY the single
+///      poisoned tick (the clock still advances) and simulating every good tick.
+/// State is preserved throughout (never discarded), so any batch — even one that hits a
+/// deterministic bug — completes and the run stays continuable.
+fn advance_resilient(sim: &mut crate::sim::tick::CampaignSim, ticks: u32) {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use crate::sim::tick::TICKS_PER_YEAR;
+    if ticks == 0 { return; }
+    let chunk_len = TICKS_PER_YEAR.max(1);
+    let mut checkpoint = sim.clone();
+    let mut done = 0u32;
+    while done < ticks {
+        let chunk = (ticks - done).min(chunk_len);
+        // Fast path — the chunk simulates cleanly.
+        if catch_unwind(AssertUnwindSafe(|| sim.advance(chunk))).is_ok() {
+            checkpoint = sim.clone();
+            done += chunk;
+            continue;
+        }
+        // Recovery step 1 — restore, freeze expansion, retry the whole chunk once.
+        *sim = checkpoint.clone();
+        sim.expansion_frozen_until = sim.tick + chunk_len + chunk;
+        if catch_unwind(AssertUnwindSafe(|| sim.advance(chunk))).is_ok() {
+            checkpoint = sim.clone();
+            done += chunk;
+            continue;
+        }
+        // Recovery step 2 — restore and step tick-by-tick, skipping only bad ticks so
+        // the run can never stall on a persistent, deterministic fault.
+        *sim = checkpoint.clone();
+        let mut tick_cp = checkpoint.clone();
+        for _ in 0..chunk {
+            match catch_unwind(AssertUnwindSafe(|| sim.advance(1))) {
+                Ok(()) => tick_cp = sim.clone(),
+                Err(payload) => {
+                    // Log the fault so a recurring deterministic bug is diagnosable, then
+                    // roll back to the pre-tick checkpoint and skip just this tick.
+                    eprintln!("[campaign] tick fault skipped: {}", panic_payload_message(&payload));
+                    *sim = tick_cp.clone();
+                    sim.skip_poisoned_tick();
+                    tick_cp = sim.clone();
+                }
+            }
+        }
+        checkpoint = sim.clone();
+        done += chunk;
+    }
 }
 
 /// Advance the living-trade sim by `ticks` days. The sim is mutated in place in the
@@ -1321,7 +1421,9 @@ pub async fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<Camp
                 }
             }
         }
-        let stale = cache.last_persist.map(|t| t.elapsed().as_secs_f32() > 5.0).unwrap_or(true);
+        // Wall-clock safety flush: an unattended fast-play still checkpoints even if it
+        // hasn't crossed a 2-year boundary yet (kept long so the 2-year cadence leads).
+        let stale = cache.last_persist.map(|t| t.elapsed().as_secs_f32() > AUTOSAVE_WALLCLOCK_SECS).unwrap_or(true);
         let year_before = cache.sim.as_ref()
             .ok_or_else(|| "No active campaign sim — start it first.".to_string())?
             .year();
@@ -1329,34 +1431,29 @@ pub async fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<Camp
     };
 
     // Phase 2 — the tick + snapshot + (maybe) serialize, holding ONLY the campaign
-    // lock. Crash-guarded: a panicking tick (an index/overflow bug, which the dev
-    // build turns into a real panic) must NOT abort the whole app — catch it,
-    // discard the half-mutated sim, and surface a recoverable error so the UI can
-    // fall back to the last autosave. (A true allocation failure still aborts —
-    // catch_unwind can't catch `abort()` — so a persistent crash here points at OOM
-    // rather than a logic panic, which is itself a useful signal.)
+    // lock. RESILIENT: a panicking tick (an index/overflow bug, which the dev build
+    // turns into a real panic) must NEVER stop the campaign. `advance_resilient` runs
+    // the batch under `catch_unwind` and, on a fault, restores a clean checkpoint,
+    // freezes territorial expansion, and — worst case — skips only the single poisoned
+    // tick so the simulation ALWAYS keeps moving forward. State is preserved (never
+    // discarded), so the run can always be continued. (A true allocation failure still
+    // aborts — catch_unwind can't catch `abort()` — pointing at OOM, not a logic bug.)
     let t0 = std::time::Instant::now();
     let (snap, json) = {
         let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
-        let caught = {
+        {
             let sim = cache.sim.as_mut()
                 .ok_or_else(|| "No active campaign sim — start it first.".to_string())?;
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sim.advance(ticks_run)))
-        };
-        if let Err(payload) = caught {
-            let msg = panic_payload_message(&payload);
-            cache.sim = None;
-            cache.dirty = false;
-            return Err(format!(
-                "Campaign tick crashed and was rolled back to the last autosave. ({msg})"
-            ));
+            advance_resilient(sim, ticks_run);
+            sim.last_tick_ms = t0.elapsed().as_secs_f32() * 1000.0 / ticks_run.max(1) as f32;
         }
-        let sim = cache.sim.as_mut().expect("present after a successful advance");
-        sim.last_tick_ms = t0.elapsed().as_secs_f32() * 1000.0 / ticks_run.max(1) as f32;
+        let sim = cache.sim.as_ref().expect("present after a resilient advance");
         let snap = build_snapshot(sim);
-        // Serialize ONLY when it's time to autosave (year rolled over or wall-clock
-        // cadence); otherwise the change just stays resident and dirty.
-        let json = if sim.year() != year_before || stale {
+        // Serialize ONLY when it's time to autosave — every 2 sim-years (crossing an
+        // even-year boundary) or the wall-clock safety; otherwise the change just stays
+        // resident and dirty. `AUTOSAVE_EVERY_YEARS` = 2 per the campaign save cadence.
+        let crossed_autosave = (sim.year() / AUTOSAVE_EVERY_YEARS) != (year_before / AUTOSAVE_EVERY_YEARS);
+        let json = if crossed_autosave || stale {
             Some(serde_json::to_string(sim).map_err(|e| e.to_string())?)
         } else {
             None
@@ -3259,6 +3356,9 @@ pub struct EpidemicBrief {
     pub end_year: u32,
     pub active: bool,
     pub total_dead: u32,
+    /// Plague category: 1 = Great Plague (rare, reaches ~4000 km along the lanes),
+    /// 2 = Regional (reaches one further city), 3 = Local outbreak (stays put).
+    pub category: u8,
     /// Cities hit, in SPREAD ORDER (origin first). Each `from_name`→`name` is a
     /// contagion route; the panel can re-sort by deaths.
     pub cities: Vec<PlagueCityBrief>,
@@ -3280,6 +3380,10 @@ pub fn campaign_get_epidemics(db: State<'_, WorldDb>) -> Result<Vec<EpidemicBrie
         let end = strikes.iter().map(|s| s.until_tick).max().unwrap_or(0);
         let active = strikes.iter().any(|s| s.until_tick > sim.tick);
         let total_dead: f32 = strikes.iter().map(|s| s.deaths).sum();
+        // The outbreak's category = the (most severe) category recorded on its strikes
+        // (legacy strikes stored 0 → treat as local cat-3).
+        let category = strikes.iter().map(|s| if s.category == 0 { 3 } else { s.category })
+            .min().unwrap_or(3);
         // Origin = the spontaneous strike (source < 0), else the earliest.
         let origin_hub = strikes.iter().find(|s| s.source < 0).map(|s| s.hub)
             .unwrap_or_else(|| strikes.iter().min_by_key(|s| s.start_tick).map(|s| s.hub).unwrap_or(0));
@@ -3305,6 +3409,7 @@ pub fn campaign_get_epidemics(db: State<'_, WorldDb>) -> Result<Vec<EpidemicBrie
             end_year: end / TICKS_PER_YEAR,
             active,
             total_dead: total_dead.round() as u32,
+            category,
             cities,
         }
     }).collect();

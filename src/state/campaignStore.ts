@@ -2,11 +2,14 @@ import { create } from "zustand";
 import type { CampaignSnapshot, WorldEconomy, HouseBrief, CampaignDiagnostics } from "../types";
 import {
   campaignStartSim,
+  campaignNewGame,
   campaignAdvance,
   campaignGetState,
   campaignGetWorldEconomy,
   campaignGetHouses,
   campaignDiagnostics,
+  campaignPersist,
+  saveCampaignAs,
 } from "../bridge/tauri";
 
 interface CampaignStore {
@@ -25,6 +28,10 @@ interface CampaignStore {
   refresh: () => Promise<void>;
   /** Seed a brand-new living-trade simulation. */
   start: (seed: number) => Promise<void>;
+  /** Start a NEW dynamic campaign on the same world — first SAVES the current running
+   *  campaign to its own .campaign file (a running campaign is never wiped), then
+   *  reseeds fresh. Returns false if the user cancelled the save dialog. */
+  newGame: (seed: number) => Promise<boolean>;
   /** Advance N days. `heavy` (default true) also refreshes the world-economy +
    *  houses + diagnostics; pass false during fast Play to update only the snapshot
    *  (clock + map markers) and skip the costlier panel queries. */
@@ -63,6 +70,50 @@ export const useCampaignStore = create<CampaignStore>((set, get) => ({
       set({ snapshot: snap, worldEconomy: we, houses, diagnostics: diag });
     } catch (e) {
       set({ error: String(e) });
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  newGame: async (seed) => {
+    if (get().busy) return false;
+    const snap = get().snapshot;
+    const running = snap?.active === true && (snap?.clock.tick ?? 0) > 0;
+    // A running campaign must be preserved in its OWN file before a new one starts.
+    if (running) {
+      let path: string | null = null;
+      try {
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        path = await save({
+          title: "Save the current campaign before starting a new one",
+          filters: [{ name: "WorldForge Campaign", extensions: ["campaign"] }],
+          defaultPath: "campaign.campaign",
+        });
+      } catch {
+        path = prompt("Save the current campaign to path (.campaign):", "campaign.campaign");
+      }
+      if (!path) return false; // cancelled → keep the running game untouched
+      set({ busy: true, error: null });
+      try {
+        await campaignPersist();
+        await saveCampaignAs(path);
+      } catch (e) {
+        set({ error: String(e), busy: false });
+        return false;
+      }
+    } else {
+      set({ busy: true, error: null });
+    }
+    try {
+      const s = await campaignNewGame(seed);
+      const [we, houses, diag] = await Promise.all([
+        campaignGetWorldEconomy(), campaignGetHouses(), campaignDiagnostics(),
+      ]);
+      set({ snapshot: s, worldEconomy: we, houses, diagnostics: diag });
+      return true;
+    } catch (e) {
+      set({ error: String(e) });
+      return false;
     } finally {
       set({ busy: false });
     }
