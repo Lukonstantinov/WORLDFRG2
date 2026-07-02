@@ -111,6 +111,10 @@ export function MapCanvas() {
   brushRadiusRef.current = brushRadius;
   const economyRef = useRef(economy);
   economyRef.current = economy;
+  // Live campaign hubs (includes in-campaign colonies/outposts that the frozen economy
+  // snapshot lacks) — used so a click on a colony can select it and open its detail.
+  const campaignSnapshotRef = useRef(campaignSnapshot);
+  campaignSnapshotRef.current = campaignSnapshot;
   const elevationValueRef = useRef(elevationValue);
   elevationValueRef.current = elevationValue;
   // Good regions kept for click hit-testing (click a good belt → good-flow panel).
@@ -1041,15 +1045,25 @@ export function MapCanvas() {
               return;
             }
           }
-          let best = -1; let bestD = thresh * thresh;
-          for (const h of econ.hubs) {
+          // Hit-test the LIVE campaign hubs when a campaign is running (they include the
+          // in-campaign colonies/outposts the frozen economy snapshot lacks); otherwise
+          // the economy hubs. A click on a colony/outpost also opens the Colonial Office.
+          const snap = campaignSnapshotRef.current;
+          const hubList: { id: number; x: number; y: number; colony_kind?: number; is_estate?: boolean }[] =
+            snap?.active ? snap.hubs.filter((h) => !h.is_estate) : econ.hubs;
+          let best = -1; let bestD = thresh * thresh; let bestColony = 0;
+          for (const h of hubList) {
             let dx = Math.abs(h.x - wx);
             if (dx > m.grid_width / 2) dx = m.grid_width - dx;
             const dy = h.y - wy;
             const d = dx * dx + dy * dy;
-            if (d < bestD) { bestD = d; best = h.id; }
+            if (d < bestD) { bestD = d; best = h.id; bestColony = h.colony_kind ?? 0; }
           }
-          if (best >= 0) { setSelectedHub(best); return; }
+          if (best >= 0) {
+            setSelectedHub(best);
+            if (bestColony === 1 || bestColony === 2) useUIStore.getState().setShowColonial(true);
+            return;
+          }
           // No hub hit — if the merchant layer is on, try to pick a route.
           const om = overlayManagerRef.current;
           if (om && merchantRoutesRef.current.length > 0) {

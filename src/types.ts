@@ -231,6 +231,10 @@ export interface ColonyDetail {
   indep_in_years: number;
   backers: ColonyBackerRow[];
   supply: ColonySupplyRow[];
+  supply_ships: number;      // dedicated grain-run ships
+  supply_capacity: number;   // monthly carriage of the fleet
+  supply_delivered: number;  // food delivered last month
+  supply_source: string;     // designated food source city
 }
 /** Abstract social strata of a settlement (HubPanel "Society" block). The four
  *  shares sum to 1; inequality + welfare are 0..1 derived read-outs. */
@@ -268,6 +272,8 @@ export interface ColonySummary {
   indep_in_years: number;
   owner_house_name: string; // house outposts only
   owner_color: string;
+  supply_ships: number;      // dedicated grain-run ships
+  supply_delivered: number;  // food delivered last month
 }
 /** Read-only founding-gate status for the Colonial Office "why no colonies yet?"
  *  empty state (campaign_colony_gates). Mirrors maybe_found_settlement_colony. */

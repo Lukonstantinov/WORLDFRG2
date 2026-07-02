@@ -125,6 +125,32 @@ const COLONY_PARENT_MIN_POP: f32 = 5_000.0;
 const MAX_SETTLEMENT_COLONIES: usize = 24;
 /// Fraction of the parent's population that emigrates to seed a settlement colony.
 const COLONY_MIGRATION_FRAC: f32 = 0.06;
+// ── Colony food LIFELINE: dedicated supply ships on the grain run ──────────────────
+/// Monthly food a single dedicated supply ship carries to a colony.
+pub const SUPPLY_SHIP_CAPACITY: f32 = 900.0;
+/// Cost (treasury/wealth units) to commission ONE new dedicated supply ship — paid by
+/// the colony's backers (metropolis treasury, then the backing bank/house) when the
+/// colony runs short, so the metropolis INVESTS in steady supply.
+const SUPPLY_SHIP_COST: f32 = 3.0;
+/// A colony's dedicated supply fleet never grows past this (bounds the investment).
+const MAX_SUPPLY_SHIPS: u32 = 12;
+/// Ships a fresh colony is founded with (the founding fleet on the first grain run).
+const SUPPLY_SHIPS_AT_FOUNDING: u32 = 2;
+/// A food SOURCE must keep this share of its own grain surplus (only the rest is
+/// shippable to colonies) — so a colony is only fed from a genuinely sufficient source.
+const SUPPLY_SOURCE_SPARE_FRAC: f32 = 0.6;
+/// Days of its OWN grain output a food source keeps as a buffer before any is shippable.
+const SOURCE_BUFFER_DAYS: f32 = 20.0;
+/// A city plants a GRAIN COLONY (the Greek Crimea pattern) once its starvation pressure
+/// passes this, to secure a food supply — a survival move it can self-fund (no bank).
+const FOOD_COLONY_STARVE_MIN: f32 = 0.30;
+const FOOD_COLONY_MIN_TREASURY: f32 = 8.0;
+/// Food per-capita boost a grain colony gets (it exists to farm, so it out-produces
+/// grain and its surplus flows back to the hungry metropolis through the market).
+const FOOD_COLONY_FARM_MULT: f32 = 2.4;
+/// Freight cost of a colony grain run, as a fraction of the food's value (the food
+/// itself comes from the source's surplus; the metropolis pays only to carry it).
+const COLONY_FREIGHT_RATE: f32 = 0.12;
 /// Colony viability floor: a SETTLEMENT colony skips a site only when it is BOTH
 /// too lean to part-feed itself AND poor in trade goods (otherwise the food lifeline
 /// carries a trade-rich frontier colony). HOUSE outposts ignore fertility entirely
@@ -933,6 +959,16 @@ pub struct TickHub {
     /// Plague IMMUNITY: the city cannot be struck by (or carry) a plague until this
     /// tick — earned by surviving an outbreak. `#[serde(default)]` → old saves = 0.
     #[serde(default)] pub plague_immune_until: u32,
+    /// Colony food LIFELINE: dedicated supply ships the metropolis/backers keep on the
+    /// grain run to this colony (invested in when the colony runs short, to make the
+    /// supply steady). `#[serde(default)]` → old saves = 0.
+    #[serde(default)] pub supply_ships: u32,
+    /// The hub currently designated as this colony's food SOURCE (nearest sufficient
+    /// grain surplus on the component), or −1. `#[serde(default = "neg_one_i32")]`.
+    #[serde(default = "neg_one_i32")] pub supply_source: i32,
+    /// Food actually delivered to this colony last supply pass (monthly units) — for
+    /// the Colonial Office readout. Derived; `#[serde(default)]`.
+    #[serde(default)] pub supply_delivered: f32,
 }
 
 /// Serde default for `owner_house` so old saves / non-estate hubs read −1, not 0
@@ -5948,48 +5984,73 @@ impl CampaignSim {
                     food_have += self.hubs[h].stock[g] + self.hubs[h].production[g];
                 }
             }
-            // ── Settlement-colony food LIFELINE ──────────────────────────────────
-            // The colony can't feed itself early: the metropolis ships food (paid from
-            // its treasury) to cover the deficit; a reserve buffers brief breaks; a
-            // sustained break (no supply AND empty reserve, or the metropolis can't
-            // pay) snaps the lifeline and starves the colony.
+            // ── Settlement-colony food LIFELINE (dedicated supply ships) ─────────
+            // A young colony can't feed itself: its metropolis runs a fleet of dedicated
+            // SUPPLY SHIPS carrying real grain from a sufficient food SOURCE (a nearby
+            // surplus city — often the metropolis). The ships' capacity, the source's
+            // spare grain, and the backers' freight budget bound the delivery; a reserve
+            // buffers brief breaks. Monthly, the metropolis re-picks the source and
+            // INVESTS in more ships when the colony runs short (steady supply). Grain
+            // physically leaves the source, so the source must genuinely be sufficient.
             if self.hubs[h].colony_kind == 1 && !self.hubs[h].autonomous {
-                // Preservative contracts extend the reserve's shelf-life (a longer buffer).
-                let pres: f32 = self.colony_supply.iter()
-                    .filter(|s| s.colony_hub == h as u32 && s.category == 2)
-                    .map(|s| s.monthly_qty).sum();
-                self.hubs[h].reserve_cap = 365.0 + pres * 6.0;
-                let deficit = (food_need - food_prod).max(0.0);
+                self.hubs[h].reserve_cap = 365.0;
+                let deficit = (food_need - food_prod).max(0.0); // daily grain shortfall
+                // Monthly: re-designate the food source + top up the dedicated fleet.
+                if self.tick % 30 == 0 {
+                    self.designate_colony_supply(h, deficit * 30.0);
+                }
                 if deficit <= EPS {
                     // Self-sufficient: top the reserve, supply unbroken.
-                    self.hubs[h].reserve_food = (self.hubs[h].reserve_food + 1.0).min(self.hubs[h].reserve_cap.max(1.0));
+                    self.hubs[h].reserve_food = (self.hubs[h].reserve_food + 1.0).min(self.hubs[h].reserve_cap);
                     self.hubs[h].supply_years += 1.0 / TICKS_PER_YEAR as f32;
+                    self.hubs[h].supply_delivered = 0.0;
                 } else {
-                    let cap: f32 = self.colony_supply.iter()
-                        .filter(|s| s.colony_hub == h as u32 && s.category == 0)
-                        .map(|s| s.monthly_qty / 30.0).sum();
-                    let m = self.hubs[h].founder_hub;
-                    let metro = if m >= 0 && (m as usize) < n { m as usize } else { usize::MAX };
-                    let price = self.goods.iter().filter(|g| g.food).map(|g| g.base_value).fold(0.0, f32::max).max(1.0);
-                    // Pay for as much as the contracts can carry AND the metropolis can afford.
-                    let mut supplied = deficit.min(cap);
-                    if metro != usize::MAX {
-                        let afford = (self.hubs[metro].treasury.max(0.0)) / price;
-                        supplied = supplied.min(afford);
-                        self.hubs[metro].treasury -= supplied * price;
-                        self.hubs[metro].finance.spent_works += supplied * price;
-                    } else { supplied = 0.0; }
-                    // Deliver into the colony's first food good (fed this tick).
-                    if let Some(fg) = (0..ng).find(|&g| self.goods[g].food) {
-                        self.hubs[h].stock[fg] += supplied;
-                        food_have += supplied;
+                    let fleet_daily = self.hubs[h].supply_ships as f32 * SUPPLY_SHIP_CAPACITY / 30.0;
+                    let mut delivered = deficit.min(fleet_daily);
+                    let src = self.hubs[h].supply_source;
+                    // Real grain moves: pull from the source's spare food STOCK (kept above
+                    // a buffer for its own residents), deducting it — no free food.
+                    if delivered > EPS && src >= 0 && (src as usize) < n {
+                        let s = src as usize;
+                        let mut remaining = delivered;
+                        for g in 0..ng {
+                            if !self.goods[g].food || remaining <= EPS { continue; }
+                            let buffer = self.hubs[s].production[g] * SOURCE_BUFFER_DAYS;
+                            let spare = ((self.hubs[s].stock[g] - buffer) * SUPPLY_SOURCE_SPARE_FRAC).max(0.0);
+                            let take = spare.min(remaining);
+                            self.hubs[s].stock[g] -= take;
+                            self.hubs[s].export_earn += take * self.goods[g].base_value;
+                            remaining -= take;
+                        }
+                        delivered -= remaining; // only what the source could actually spare
+                    } else {
+                        delivered = 0.0;
                     }
-                    let short = deficit - supplied;
+                    // Backers pay the FREIGHT for the run (best-effort — the metropolis is
+                    // committed to its colony, so a thin treasury doesn't cut the food off,
+                    // it just runs the treasury down). This removes the old hard "can't
+                    // pay → 0 food" gate that silently starved every colony.
+                    let price = self.goods.iter().filter(|g| g.food).map(|g| g.base_value).fold(0.0, f32::max).max(1.0);
+                    let freight = delivered * price * COLONY_FREIGHT_RATE;
+                    let m = self.hubs[h].founder_hub;
+                    if m >= 0 && (m as usize) < n {
+                        let mi = m as usize;
+                        let pay = self.hubs[mi].treasury.max(0.0).min(freight);
+                        self.hubs[mi].treasury -= pay;
+                        self.hubs[mi].finance.spent_works += pay;
+                    }
+                    // Deliver the grain into the colony's first food good.
+                    if let Some(fg) = (0..ng).find(|&g| self.goods[g].food) {
+                        self.hubs[h].stock[fg] += delivered;
+                        food_have += delivered;
+                    }
+                    self.hubs[h].supply_delivered = delivered * 30.0; // monthly, for the readout
+                    let short = deficit - delivered;
                     if short <= EPS {
-                        self.hubs[h].reserve_food = (self.hubs[h].reserve_food + 0.5).min(self.hubs[h].reserve_cap.max(1.0));
+                        self.hubs[h].reserve_food = (self.hubs[h].reserve_food + 0.5).min(self.hubs[h].reserve_cap);
                         self.hubs[h].supply_years += 1.0 / TICKS_PER_YEAR as f32;
                     } else if self.hubs[h].reserve_food > 0.0 {
-                        // Eat into the reserve to stay fed; supply record continues.
+                        // Eat into the reserve to stay fed; the supply record continues.
                         self.hubs[h].reserve_food -= 1.0;
                         if let Some(fg) = (0..ng).find(|&g| self.goods[g].food) {
                             self.hubs[h].stock[fg] += short;
@@ -5997,7 +6058,7 @@ impl CampaignSim {
                         }
                         self.hubs[h].supply_years += 1.0 / TICKS_PER_YEAR as f32;
                     } else {
-                        // Lifeline snapped: reserve empty and supply short → the record
+                        // Lifeline snapped: reserve empty AND supply short → the record
                         // breaks and the colony starves (handled below by food balance).
                         self.hubs[h].supply_years = 0.0;
                     }
@@ -6089,6 +6150,7 @@ impl CampaignSim {
             if expansion_ok && self.tick >= OUTPOST_START_TICK { self.maybe_found_house_outpost(); }
             if expansion_ok && self.tick >= COLONY_START_TICK {
                 self.maybe_found_settlement_colony();
+                self.maybe_found_food_colony(); // Greek-Crimea grain colony (food stress)
                 self.colony_pass(); // graduation · dividends · autonomy
             }
         }
@@ -6257,7 +6319,7 @@ impl CampaignSim {
             stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0,
         });
         // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
         self.routes_dirty = true;
@@ -6942,12 +7004,95 @@ impl CampaignSim {
         self.hubs[new].mint_fineness = 1.0;
         // Metropolis trade MONOPOLY: bar non-backer houses from the colony's market.
         self.apply_colony_charter(new);
-        // Sign the initial food / reserve / preservative supply contracts.
-        self.colony_auto_supply(new);
+        // Designate the food source + commission the founding grain fleet. Seed the
+        // reserve so a fresh colony isn't instantly food-short before its first run.
+        self.hubs[new].reserve_food = 60.0;
+        let est_deficit_monthly = (self.hubs[new].population * 0.30).max(300.0);
+        self.designate_colony_supply(new, est_deficit_monthly);
         let (pname, cname) = (self.hubs[founder].name.clone(), self.hubs[new].name.clone());
         self.journal.push(JournalEntry {
             tick: self.tick, kind: "colony".into(), hub: new as i32, good: -1, value: 1.0,
             text: format!("{} founds the settlement colony {}", pname, cname),
+        });
+    }
+
+    /// GRAIN COLONY (the Greek Crimea pattern): a large city gripped by a SUSTAINED food
+    /// shortage plants a farming colony on the most FERTILE reachable site to secure its
+    /// grain. Unlike the crowding-driven settlement colony this is a survival move — the
+    /// city SELF-FUNDS it (no bank required, so it can act on hunger alone) and it can
+    /// sit near existing cities. The colony is biased to farm; its surplus flows back to
+    /// the hungry metropolis through the ordinary market.
+    fn maybe_found_food_colony(&mut self) {
+        if self.colonizable.is_empty() { return; }
+        let n_settle = self.hubs.iter().filter(|h| h.colony_kind == 1 && !h.autonomous).count();
+        if n_settle >= MAX_SETTLEMENT_COLONIES { return; }
+        // Founder: a big city under real food stress with some treasury to commit.
+        let mut best = (usize::MAX, 0.0f32);
+        for h in 0..self.hubs.len() {
+            let hub = &self.hubs[h];
+            if hub.is_estate || hub.colony_kind != 0 { continue; }
+            if hub.population < COLONY_PARENT_MIN_POP || hub.treasury < FOOD_COLONY_MIN_TREASURY { continue; }
+            let stress = hub.starving.max((-hub.food_balance).max(0.0)).clamp(0.0, 1.0);
+            if stress < FOOD_COLONY_STARVE_MIN { continue; } // not hungry enough
+            let score = hub.population * stress * (0.2 + hub.treasury);
+            if score > best.1 { best = (h, score); }
+        }
+        let Some(founder) = (best.0 != usize::MAX).then_some(best.0) else { return };
+        // Best reachable FERTILE (grain) site — fertility dominates, nearer is better.
+        let nodes = vec![(self.hubs[founder].x, self.hubs[founder].y)];
+        let cap = self.world_w * COLONY_HOP_REACH_FRAC;
+        let mut bi = (usize::MAX, 0.0f32);
+        for (i, s) in self.colonizable.iter().enumerate() {
+            if s.fertility < COLONY_MIN_FERTILE { continue; } // must be farmable
+            let d = self.nearest_node_dist(&nodes, s.x, s.y);
+            if d > cap { continue; }
+            let score = (0.2 + 1.6 * s.fertility) * (1.0 - d / cap);
+            if score > bi.1 { bi = (i, score); }
+        }
+        let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return };
+        // Self-funded survival venture: the city commits the founding cost; a resident
+        // house may chip in. NO bank required (that's the whole point — hunger acts).
+        let need = COLONY_FOUND_COST;
+        let city_put = self.hubs[founder].treasury.min(need).max(0.0);
+        if city_put < need * 0.5 { return; } // can't afford even half → wait
+        let house_idx = self.strongest_house_at(founder).filter(|&h| !self.houses[h].defunct);
+        let house_put = house_idx.map(|h| (need - city_put).min(self.houses[h].wealth * 0.3).max(0.0)).unwrap_or(0.0);
+        let raised = (city_put + house_put).max(EPS);
+        let mut backers: Vec<(u8, u32, f32)> = Vec::new();
+        self.hubs[founder].treasury -= city_put;
+        backers.push((0, founder as u32, city_put / raised));
+        if let (Some(h), true) = (house_idx, house_put > 0.5) {
+            self.houses[h].wealth -= house_put; backers.push((1, h as u32, house_put / raised));
+        }
+        let comp = self.hubs[founder].component;
+        let bank_idx = self.banks.iter().position(|b| !b.defunct
+            && self.hubs.get(b.seat as usize).map(|s| s.component == comp).unwrap_or(false));
+        let site = self.colonizable.swap_remove(si);
+        let seed = (self.hubs[founder].population * COLONY_MIGRATION_FRAC).max(80.0);
+        self.hubs[founder].population = (self.hubs[founder].population - seed)
+            .max(self.hubs[founder].founding_pop * 0.3);
+        let new = self.create_market_colony(founder, &site, backers, seed);
+        // Bias it to FARM — its grain surplus is the whole reason it exists.
+        let ng = self.goods.len();
+        let pop = self.hubs[new].population;
+        for g in 0..ng {
+            if self.goods[g].food {
+                self.hubs[new].base_per_capita[g] *= FOOD_COLONY_FARM_MULT;
+                self.hubs[new].production[g] = self.hubs[new].base_per_capita[g] * pop;
+                self.hubs[new].stock[g] = self.hubs[new].production[g];
+            }
+        }
+        self.hubs[new].reserve_food = 60.0;
+        let cshort = self.hubs[new].name.replace(" (colony)", "");
+        self.hubs[new].coin_name = format!("{} mark", cshort);
+        self.hubs[new].coin_trust = 0.40;
+        if let Some(b) = bank_idx { self.hubs[new].main_bank = b as i32; }
+        self.apply_colony_charter(new);
+        // A grain colony is food-secure by design (no import fleet); just log it.
+        let (pname, cname) = (self.hubs[founder].name.clone(), self.hubs[new].name.clone());
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "colony".into(), hub: new as i32, good: -1, value: 1.0,
+            text: format!("Hungry {} plants the grain colony {} to secure its bread", pname, cname),
         });
     }
 
@@ -6978,7 +7123,7 @@ impl CampaignSim {
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
             reserve_food: 30.0, reserve_cap: 365.0, supply_years: 0.0, colony_founded_tick: self.tick,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0,
         });
         self.routes_dirty = true;
         self.hubs.len() - 1
@@ -6988,60 +7133,104 @@ impl CampaignSim {
     /// preservative slots from the nearest reachable suppliers on the metropolis's
     /// continent (same `component`): the metropolis itself, other food-producing
     /// cities/estates, and a salt-type producer for preservatives. Stale rows whose
-    /// supplier vanished are dropped first (a lapse the lifeline then feels).
-    fn colony_auto_supply(&mut self, c: usize) {
+    /// (Re)designate a settlement colony's food SOURCE — the reachable same-component
+    /// hub with the largest shippable grain surplus (the metropolis gets a nearness
+    /// edge) — and INVEST the backers' money in enough dedicated supply ships to carry
+    /// the monthly deficit steadily. Also refreshes the display roster row.
+    fn designate_colony_supply(&mut self, c: usize, deficit_monthly: f32) {
+        let n = self.hubs.len();
         let ng = self.goods.len();
         let comp = self.hubs[c].component;
         let metro = self.hubs[c].founder_hub;
-        // Drop rows whose supplier is gone/dead or no longer produces.
-        let valid: Vec<ColonySupply> = self.colony_supply.iter().filter(|s| {
-            if s.colony_hub != c as u32 { return true; } // keep other colonies' rows
-            let sh = s.supplier_hub as usize;
-            sh < self.hubs.len() && self.hubs[sh].population > 1.0
-        }).cloned().collect();
-        self.colony_supply = valid;
-        // A food good and a salt/preservative good.
-        let food_g = (0..ng).find(|&g| self.goods[g].food);
-        let pres_g = (0..ng).find(|&g| { let nm = self.goods[g].name.to_lowercase(); nm.contains("salt") })
-            .or(food_g);
-        // Candidate suppliers: same-continent hubs (incl. the metropolis) that produce
-        // the good, nearest first by travel days.
-        let nearest = |me: &Self, g: usize| -> Vec<usize> {
-            let n = me.hubs.len();
-            let mut v: Vec<(usize, f32)> = (0..n).filter(|&h| h != c
-                && me.hubs[h].component == comp
-                && me.hubs[h].population > 1.0
-                && me.hubs[h].production.get(g).copied().unwrap_or(0.0) > 0.0)
-                .map(|h| {
-                    let d = me.days.get(h * n + c).copied().unwrap_or(f32::INFINITY);
-                    (h, d)
-                }).filter(|(_, d)| d.is_finite()).collect();
-            v.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-            v.into_iter().map(|(h, _)| h).collect()
+        // Best food source: the biggest reachable grain PRODUCER (a stable choice from day
+        // one — before any stock has accumulated), nudged toward the metropolis/nearer.
+        // The daily run is still capped by the source's real spare STOCK, so a designated
+        // source that has nothing spare simply ships nothing until its granary fills.
+        let food_output = |me: &Self, h: usize| -> f32 {
+            let mut p = 0.0;
+            for g in 0..me.goods.len() { if me.goods[g].food { p += me.hubs[h].production[g].max(0.0); } }
+            p
         };
-        let need = (self.hubs[c].population * 0.012).max(50.0); // rough monthly food draw
-        // food + reserve: up to 3 suppliers each; preservative: 1.
-        if let Some(fg) = food_g {
-            let cands = nearest(self, fg);
-            for &cat in &[0u8, 1u8] {
-                for &sup in cands.iter().take(3) {
-                    let cnt = self.colony_supply.iter().filter(|s| s.colony_hub == c as u32 && s.category == cat).count();
-                    if cnt >= 3 { break; }
-                    if self.colony_supply.iter().any(|s| s.colony_hub == c as u32 && s.supplier_hub == sup as u32 && s.category == cat) { continue; }
-                    self.colony_supply.push(ColonySupply { colony_hub: c as u32, supplier_hub: sup as u32, good: fg, monthly_qty: need, category: cat });
-                }
+        let mut best = (-1i32, 0.0f32);
+        for h in 0..n {
+            if h == c || self.hubs[h].component != comp || self.hubs[h].population <= 1.0 { continue; }
+            let d = self.days.get(h * n + c).copied().unwrap_or(f32::INFINITY);
+            if !d.is_finite() { continue; }
+            let fp = food_output(self, h);
+            if fp <= EPS { continue; }
+            let score = fp * (if h as i32 == metro { 1.3 } else { 1.0 }) / (1.0 + d * 0.02);
+            if score > best.1 { best = (h as i32, score); }
+        }
+        self.hubs[c].supply_source = best.0;
+        // Invest in ships until the fleet can carry the monthly deficit (steady supply),
+        // as far as the backers can afford — cities pour money into the grain run. A
+        // food-secure colony (no deficit) needs no fleet.
+        let required = if deficit_monthly <= EPS { 0 } else {
+            ((deficit_monthly / SUPPLY_SHIP_CAPACITY).ceil().max(SUPPLY_SHIPS_AT_FOUNDING as f32)
+                as u32).min(MAX_SUPPLY_SHIPS)
+        };
+        while self.hubs[c].supply_ships < required {
+            if !self.buy_colony_supply_ship(c) { break; }
+        }
+        // Display roster: the designated source on the grain run + a preservative row.
+        self.colony_supply.retain(|s| s.colony_hub != c as u32);
+        if best.0 >= 0 {
+            let fg = (0..ng).find(|&g| self.goods[g].food).unwrap_or(0);
+            let carried = (self.hubs[c].supply_ships as f32 * SUPPLY_SHIP_CAPACITY)
+                .min(deficit_monthly.max(1.0));
+            self.colony_supply.push(ColonySupply {
+                colony_hub: c as u32, supplier_hub: best.0 as u32, good: fg,
+                monthly_qty: carried, category: 0,
+            });
+            if let Some(pg) = (0..ng).find(|&g| self.goods[g].name.to_lowercase().contains("salt")) {
+                self.colony_supply.push(ColonySupply {
+                    colony_hub: c as u32, supplier_hub: best.0 as u32, good: pg,
+                    monthly_qty: carried * 0.2, category: 2,
+                });
             }
         }
-        if let Some(pg) = pres_g {
-            let has_pres = self.colony_supply.iter().any(|s| s.colony_hub == c as u32 && s.category == 2);
-            if !has_pres {
-                let cands = nearest(self, pg);
-                if let Some(&sup) = cands.first() {
-                    self.colony_supply.push(ColonySupply { colony_hub: c as u32, supplier_hub: sup as u32, good: pg, monthly_qty: need * 0.3, category: 2 });
-                }
+    }
+
+    /// Commission ONE more dedicated supply ship for colony `c`, paid by its backers
+    /// (metropolis treasury first, then the backing bank's reserves, then a backing
+    /// house's wealth). Returns false — and buys nothing — if they can't afford it.
+    fn buy_colony_supply_ship(&mut self, c: usize) -> bool {
+        if self.hubs[c].supply_ships >= MAX_SUPPLY_SHIPS { return false; }
+        let cost = SUPPLY_SHIP_COST;
+        // Tally what the backers can put up, in payment order.
+        let m = self.hubs[c].founder_hub;
+        let metro_pool = if m >= 0 && (m as usize) < self.hubs.len() {
+            self.hubs[m as usize].treasury.max(0.0)
+        } else { 0.0 };
+        let backers = self.hubs[c].backers.clone();
+        let mut bank_pool = 0.0;
+        let mut house_pool = 0.0;
+        for (kind, idx, _) in &backers {
+            match kind {
+                2 => { if let Some(b) = self.banks.get(*idx as usize) { if !b.defunct { bank_pool += b.reserves.max(0.0); } } }
+                1 => { if let Some(hh) = self.houses.get(*idx as usize) { if !hh.defunct { house_pool += hh.wealth.max(0.0); } } }
+                _ => {}
             }
         }
-        let _ = metro;
+        if metro_pool + bank_pool + house_pool < cost { return false; }
+        // Debit metro → bank(s) → house(s) in order.
+        let mut owed = cost;
+        if m >= 0 && (m as usize) < self.hubs.len() {
+            let take = self.hubs[m as usize].treasury.max(0.0).min(owed);
+            self.hubs[m as usize].treasury -= take; owed -= take;
+        }
+        for (kind, idx, _) in &backers {
+            if owed <= EPS { break; }
+            if *kind == 2 { if let Some(b) = self.banks.get_mut(*idx as usize) { if !b.defunct {
+                let take = b.reserves.max(0.0).min(owed); b.reserves -= take; owed -= take; } } }
+        }
+        for (kind, idx, _) in &backers {
+            if owed <= EPS { break; }
+            if *kind == 1 { if let Some(hh) = self.houses.get_mut(*idx as usize) { if !hh.defunct {
+                let take = hh.wealth.max(0.0).min(owed); hh.wealth -= take; owed -= take; } } }
+        }
+        self.hubs[c].supply_ships += 1;
+        true
     }
 
     /// Yearly: settlement colonies (re)sign supply, may collapse if starved, graduate
@@ -7051,8 +7240,8 @@ impl CampaignSim {
         let tick = self.tick;
         for h in 0..self.hubs.len() {
             if self.hubs[h].colony_kind != 1 || self.hubs[h].autonomous { continue; }
-            // Renew/lapse supply contracts (a vanished supplier drops out).
-            self.colony_auto_supply(h);
+            // (The food source + dedicated fleet are refreshed monthly by the daily
+            // lifeline in `update_food_and_starvation`, so no yearly re-sign here.)
             // COLLAPSE: empty reserve + severe sustained starvation → the lifeline failed.
             if self.hubs[h].reserve_food <= 0.0 && self.hubs[h].starving > 0.8 {
                 self.collapse_colony(h);
@@ -8911,7 +9100,7 @@ mod tests {
             quality: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0,
         }
     }
 

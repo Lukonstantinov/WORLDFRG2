@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>WF2 — Colony grain lifeline + supply fleet</title>
+<style>
+  :root { --bg:#0b1420; --panel:#13202e; --text:#cfe2f6; --accent:#3a80c0;
+          --muted:#7a90a8; --ok:#4fc06a; --warn:#e0503a; --violet:#c08cff; --ship:#7fb8ff; }
+  body { background:var(--bg); color:var(--text); font:14px/1.5 system-ui,sans-serif; margin:0; padding:28px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  h2 { font-size:14px; color:var(--accent); text-transform:uppercase; letter-spacing:.6px; margin:26px 0 10px; }
+  .sub { color:var(--muted); margin:0 0 18px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  .card { background:var(--panel); border:1px solid #1e3450; border-radius:10px; padding:14px 16px; }
+  .tag { display:inline-block; font-size:11px; padding:1px 8px; border-radius:10px; border:1px solid; }
+  .bad { color:var(--warn); border-color:#5a2a24; background:#2a1614; }
+  .good { color:var(--ok); border-color:#255a35; background:#122a1a; }
+  .bar { height:7px; border-radius:5px; background:#16242f; overflow:hidden; margin:5px 0 2px; }
+  .bar > i { display:block; height:100%; border-radius:5px; }
+  .row { display:flex; align-items:center; gap:8px; margin:4px 0; }
+  .dot { width:11px; height:11px; border-radius:50%; background:var(--violet); flex:0 0 auto; }
+  .k { color:var(--muted); min-width:100px; display:inline-block; }
+  .mut { color:var(--muted); }
+  .map { position:relative; height:190px; background:linear-gradient(160deg,#16351c,#20421f); border-radius:8px; overflow:hidden; border:1px solid #1e3450; }
+  .city { position:absolute; width:12px; height:12px; border-radius:50%; background:#ffd27f; transform:translate(-50%,-50%); box-shadow:0 0 0 2px #6b4a1a; }
+  .col { position:absolute; width:11px; height:11px; border-radius:50%; background:var(--violet); transform:translate(-50%,-50%); box-shadow:0 0 0 2px #3a2a5a; }
+  .lane { position:absolute; height:0; border-top:2px dashed var(--violet); transform-origin:left center; opacity:.85; }
+  .lbl { position:absolute; font-size:10px; color:#dce8f6; transform:translate(-50%,-140%); text-shadow:0 1px 2px #000; }
+  ul { margin:6px 0 0; padding-left:18px; } li { margin:3px 0; }
+</style>
+</head>
+<body>
+  <h1>Colony grain lifeline &amp; dedicated supply fleet</h1>
+  <p class="sub">Food now actually reaches colonies via dedicated ships from a sufficient source; the metropolis↔colony connection lines are gone; colonies are clickable on the map. Values from <code>sim/tick.rs</code> supply consts.</p>
+
+  <h2>Before → After · colony row</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="mut" style="font-size:11px;margin-bottom:6px">BEFORE — starving, no supply</div>
+      <div class="row"><span class="dot"></span><b>New Tarrentia (colony)</b> <span class="tag bad">Outpost</span></div>
+      <div class="mut" style="font-size:11px">pop 41k · New Tarrentia mark · charter ✔</div>
+      <div class="bar"><i style="width:0%;background:var(--warn)"></i></div>
+      <div style="font-size:11px;color:var(--warn)">food 0.0/365 mo · supplied 0y</div>
+    </div>
+    <div class="card">
+      <div class="mut" style="font-size:11px;margin-bottom:6px">AFTER — fed by a dedicated fleet</div>
+      <div class="row"><span class="dot"></span><b>New Tarrentia (colony)</b> <span class="tag good">Colony</span></div>
+      <div class="mut" style="font-size:11px">pop 41k · New Tarrentia mark · charter ✔</div>
+      <div class="bar"><i style="width:72%;background:var(--ok)"></i></div>
+      <div style="font-size:11px;color:var(--muted)">food 264.0/365 mo · supplied 4y <span style="color:var(--ship)">· 🚢4</span></div>
+    </div>
+  </div>
+
+  <h2>New in the detail — ⚓ Grain lifeline</h2>
+  <div class="card" style="max-width:420px">
+    <div style="font-weight:700;margin-bottom:6px">New Tarrentia (colony) — detail</div>
+    <div><span class="k">Food reserve</span> 264.0 / 365 mo · 4y unbroken</div>
+    <div style="color:var(--accent);font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin:8px 0 3px">⚓ Grain lifeline</div>
+    <div class="row"><span style="font-size:14px">🚢</span><span><b>4</b> dedicated supply ships <span class="mut">· 3,600/mo carriage</span></span></div>
+    <div><span class="k">Food source</span> Tarrentia</div>
+    <div class="bar"><i style="width:73%;background:var(--ok)"></i></div>
+    <div class="mut" style="font-size:11px">delivered 2,640/mo of 3,600 capacity</div>
+  </div>
+
+  <h2>Map — connection lines removed, colonies clickable</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="mut" style="font-size:11px;margin-bottom:6px">BEFORE — dashed lanes to the metropolis</div>
+      <div class="map">
+        <div class="lane" style="left:22%;top:40%;width:190px;transform:rotate(24deg)"></div>
+        <div class="lane" style="left:22%;top:40%;width:150px;transform:rotate(-10deg)"></div>
+        <div class="city" style="left:22%;top:40%"></div><div class="lbl" style="left:22%;top:40%">Tarrentia</div>
+        <div class="col" style="left:70%;top:70%"></div>
+        <div class="col" style="left:64%;top:26%"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="mut" style="font-size:11px;margin-bottom:6px">AFTER — clean markers, click → detail</div>
+      <div class="map">
+        <div class="city" style="left:22%;top:40%"></div><div class="lbl" style="left:22%;top:40%">Tarrentia</div>
+        <div class="col" style="left:70%;top:70%;cursor:pointer"></div><div class="lbl" style="left:70%;top:70%;color:var(--violet)">New Tarrentia ▸</div>
+        <div class="col" style="left:64%;top:26%"></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>What changed (mechanics)</h2>
+  <ul>
+    <li><b>Food reaches colonies.</b> Root cause: the old lifeline gated delivery on the metropolis <i>treasury</i> (which drained to 0 → 0 food) and looked for a supplier of only the first food good. Now a colony draws real grain from a designated <b>food source</b> (biggest reachable producer) via a dedicated fleet; freight is best-effort so a thin treasury no longer cuts the food off.</li>
+    <li><b>Dedicated supply ships.</b> Each colony keeps <code>supply_ships</code> on the grain run (capacity {SUPPLY_SHIP_CAPACITY}=900/mo each). When short, the metropolis <b>invests</b> in more ships (paid by backers: city treasury → bank → house), up to 12 — steady supply.</li>
+    <li><b>Sufficient source.</b> A source only ships grain above a {SOURCE_BUFFER_DAYS}=20-day self-buffer × a spare fraction, so it never starves itself — a colony is only fed from a genuinely sufficient source.</li>
+    <li><b>Grain colonies (Greek Crimea).</b> A big city in sustained food shortage plants a farming colony (self-funded, no bank needed) on the most fertile reachable site; its surplus flows back through the market.</li>
+    <li><b>No mainland lines.</b> The colony↔metropolis supply lanes were removed from the map.</li>
+    <li><b>Clickable colonies.</b> The map hit-tests live campaign hubs, so a click on a colony/outpost selects it and opens the Colonial Office detail.</li>
+  </ul>
+</body>
+</html>

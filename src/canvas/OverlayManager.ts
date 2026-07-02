@@ -2486,28 +2486,11 @@ export class OverlayManager {
    *  in the owner-house colour. Lanes follow the existing route network. */
   private renderColonies(ctx: CanvasRenderingContext2D) {
     const inv = 1 / Math.sqrt(this.currentScale);
-    const half = (this.worldW || 1e9) / 2;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    // 1) lanes (routed colony ↔ metropolis/owner-home) first, under the markers.
-    for (const c of this.colonies) {
-      if (c.founderX < 0 || c.founderY < 0) continue;
-      if (this.worldW > 0 && Math.abs(c.x - c.founderX) > half) continue; // seam
-      const tint = c.kind === 2 ? c.ownerColor : lineColors.colonyLane;
-      const routed = this.routeAlongTradeRoutes([c.founderX, c.founderY], [c.x, c.y]);
-      if (!routed || routed.length < 2) continue; // corridor only — never a straight line
-      const path: [number, number][] = routed;
-      ctx.globalAlpha = 0.8;
-      ctx.strokeStyle = tint;
-      ctx.lineWidth = Math.max(0.5, (c.kind === 1 ? 2.4 : 1.6) * inv);
-      ctx.setLineDash(c.kind === 2 ? [3 * inv, 3 * inv] : []);
-      ctx.beginPath();
-      ctx.moveTo(path[0][0] + 0.5, path[0][1] + 0.5);
-      for (let i = 1; i < path.length; i++) ctx.lineTo(path[i][0] + 0.5, path[i][1] + 0.5);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-    // 2) markers.
+    // Markers only — the colony↔metropolis supply lanes were removed (the user doesn't
+    // want the mainland-connection lines cluttering the map). Colonies still show their
+    // pin; the grain lifeline lives in the Colonial Office panel.
     for (const c of this.colonies) {
       const x = c.x + 0.5, y = c.y + 0.5;
       if (c.kind === 2) {

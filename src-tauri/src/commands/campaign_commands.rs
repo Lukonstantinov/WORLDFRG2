@@ -967,6 +967,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 main_bank: -1,
                 indep_cooldown_until: 0,
                 plague_immune_until: 0,
+                supply_ships: 0,
+                supply_source: -1,
+                supply_delivered: 0.0,
             }
         })
         .collect();
@@ -1547,6 +1550,14 @@ pub struct ColonyDetail {
     pub indep_in_years: i32,
     pub backers: Vec<ColonyBackerRow>,
     pub supply: Vec<ColonySupplyRow>,
+    /// Dedicated grain-run supply ships the metropolis keeps on this colony.
+    pub supply_ships: u32,
+    /// Total monthly carriage of that fleet (ships × ship capacity).
+    pub supply_capacity: f32,
+    /// Food actually delivered last month by the fleet.
+    pub supply_delivered: f32,
+    /// The city currently designated as the colony's food source (empty = none found).
+    pub supply_source: String,
 }
 
 /// Colony detail for a settlement colony (None for non-colony hubs).
@@ -1584,11 +1595,18 @@ pub fn campaign_get_colony(id: u32, db: State<'_, WorldDb>) -> Result<Option<Col
             qty: s.monthly_qty,
         }
     }).collect();
+    let supply_source = (hub.supply_source >= 0)
+        .then(|| sim.hubs.get(hub.supply_source as usize)).flatten()
+        .map(|h| h.name.clone()).unwrap_or_default();
     Ok(Some(ColonyDetail {
         stage: hub.colony_stage, autonomous: hub.autonomous, founder_name, main_bank_name,
         coin_name: hub.coin_name.clone(), charter_open: hub.colony_kind == 1 && !hub.autonomous,
         supply_years: hub.supply_years, reserve_food: hub.reserve_food, reserve_cap: hub.reserve_cap,
         age_years, indep_in_years, backers, supply,
+        supply_ships: hub.supply_ships,
+        supply_capacity: hub.supply_ships as f32 * crate::sim::tick::SUPPLY_SHIP_CAPACITY,
+        supply_delivered: hub.supply_delivered,
+        supply_source,
     }))
 }
 
@@ -1619,6 +1637,9 @@ pub struct ColonySummary {
     /// Owning house (house outposts, kind 2) — empty for settlement colonies.
     pub owner_house_name: String,
     pub owner_color: String,
+    /// Dedicated grain-run supply ships + what they delivered last month.
+    pub supply_ships: u32,
+    pub supply_delivered: f32,
 }
 
 /// Assemble a `ColonySummary` for colony hub `hi` (caller guarantees it IS a colony).
@@ -1653,6 +1674,7 @@ fn colony_summary(sim: &CampaignSim, hi: usize) -> ColonySummary {
         reserve_food: hub.reserve_food, reserve_cap: hub.reserve_cap, supply_years: hub.supply_years,
         age_years, indep_in_years,
         owner_house_name, owner_color,
+        supply_ships: hub.supply_ships, supply_delivered: hub.supply_delivered,
     }
 }
 

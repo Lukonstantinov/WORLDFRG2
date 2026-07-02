@@ -33,6 +33,7 @@ function fmtPop(p: number): string {
 export function ColonialPanel() {
   const open = useUIStore((s) => s.showColonial);
   const setSelectedHub = useUIStore((s) => s.setSelectedHub);
+  const selectedHub = useUIStore((s) => s.selectedHub);
   const snapshot = useCampaignStore((s) => s.snapshot);
   const tick = snapshot?.clock?.tick ?? 0;
   const active = !!snapshot?.active;
@@ -47,6 +48,12 @@ export function ColonialPanel() {
     campaignGetColonies().then(setColonies).catch(() => setColonies([]));
     campaignColonyGates().then(setGates).catch(() => setGates(null));
   }, [open, active, tick]);
+
+  // A click on a colony ON THE MAP selects that hub globally — mirror it into the panel
+  // so its detail opens (only when the selected hub is actually a colony we list).
+  useEffect(() => {
+    if (selectedHub != null && colonies.some((c) => c.id === selectedHub)) setSel(selectedHub);
+  }, [selectedHub, colonies]);
 
   useEffect(() => {
     if (sel == null) { setDetail(null); return; }
@@ -157,6 +164,7 @@ function ColonyRow({ c, selected, onClick }: { c: ColonySummary; selected: boole
             <div style={{ ...bar, marginTop: 4 }}><i style={{ width: `${frac * 100}%`, background: reserveColor(frac), display: "block", height: "100%", borderRadius: 5 }} /></div>
             <div style={{ fontSize: 9.5, color: frac < 0.25 ? WARN : "#6a86a6", marginTop: 1 }}>
               food {c.reserve_food.toFixed(1)}/{c.reserve_cap.toFixed(0)} mo · supplied {c.supply_years.toFixed(0)}y
+              {c.supply_ships > 0 && <span style={{ color: "#7fb8ff" }}> · 🚢{c.supply_ships}</span>}
             </div>
           </>
         )}
@@ -181,8 +189,30 @@ function DetailCard({ detail, colony }: { detail: ColonyDetail; colony?: ColonyS
       <KV k="Stage" v={STAGE[detail.stage] || "Colony"} />
       <KV k="Bank / mint" v={`${detail.main_bank_name || "—"}${detail.coin_name ? ` · ${detail.coin_name}` : ""}`} />
       <KV k="Charter" v={detail.charter_open ? "Closed market (backers only)" : "Open"} />
-      <KV k="Food lifeline" v={`${detail.reserve_food.toFixed(1)} / ${detail.reserve_cap.toFixed(0)} mo · ${detail.supply_years.toFixed(0)}y unbroken`} />
+      <KV k="Food reserve" v={`${detail.reserve_food.toFixed(1)} / ${detail.reserve_cap.toFixed(0)} mo · ${detail.supply_years.toFixed(0)}y unbroken`} />
       <KV k="Independence" v={detail.indep_in_years <= 0 ? "eligible now" : `in ${detail.indep_in_years}y`} />
+
+      {(detail.supply_ships > 0 || detail.supply_source) && (
+        <>
+          <div style={sec}>⚓ Grain lifeline</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "3px 0", fontSize: 11, color: "#cfe0f4" }}>
+            <span style={{ fontSize: 14 }}>🚢</span>
+            <span style={{ flex: 1 }}>
+              <b>{detail.supply_ships}</b> dedicated supply ship{detail.supply_ships === 1 ? "" : "s"}
+              <span style={{ color: "#7a90a8" }}> · {Math.round(detail.supply_capacity).toLocaleString()}/mo carriage</span>
+            </span>
+          </div>
+          <KV k="Food source" v={detail.supply_source || "— none sufficient —"} />
+          <div style={{ ...bar, marginTop: 2 }}>
+            <i style={{
+              width: `${detail.supply_capacity > 0 ? Math.min(100, (detail.supply_delivered / detail.supply_capacity) * 100) : 0}%`,
+              background: detail.supply_delivered > 0 ? OK : WARN, display: "block", height: "100%", borderRadius: 5 }} />
+          </div>
+          <div style={{ fontSize: 9.5, color: detail.supply_delivered <= 0 ? WARN : "#6a86a6", marginTop: 2 }}>
+            delivered {Math.round(detail.supply_delivered).toLocaleString()}/mo of {Math.round(detail.supply_capacity).toLocaleString()} capacity
+          </div>
+        </>
+      )}
 
       {detail.backers.length > 0 && (
         <>
