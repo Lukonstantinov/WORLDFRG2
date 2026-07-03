@@ -568,7 +568,7 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 }
 
 // ── DLC 1 "Living Trade" tick simulation ──
-import type { CampaignSnapshot, JournalEntry, WorldEconomy, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow, PopBrief, EpidemicBrief, GuildBrief, FigureBrief, LandmarkBrief, DynastiesPayload } from "../types";
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, TradeBasin, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow, PopBrief, EpidemicBrief, GuildBrief, FigureBrief, LandmarkBrief, DynastiesPayload } from "../types";
 
 /** Seed a fresh living-trade sim from the static economy snapshot (step 10). A RUNNING
  *  campaign is never restarted by this — it returns the current sim unchanged. */
@@ -602,6 +602,11 @@ export async function campaignGetState(): Promise<CampaignSnapshot> {
 /** Journal rows, filtered by hub and/or good (-1 = any). */
 export async function campaignGetJournal(hub: number, good: number): Promise<JournalEntry[]> {
   return invoke("campaign_get_journal", { hub, good });
+}
+
+/** Atlas 2.0 · named trade basins clustered from the yearly flow ledger. */
+export async function campaignGetTradeBasins(): Promise<TradeBasin[]> {
+  return invoke("campaign_get_trade_basins");
 }
 
 /** Full live detail for one settlement (sentiment + market + history), or null

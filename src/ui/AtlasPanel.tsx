@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "../state/uiStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useViewportStore } from "../state/viewportStore";
-import { campaignGetJournal } from "../bridge/tauri";
-import type { CampaignHubBrief, JournalEntry } from "../types";
+import { campaignGetJournal, campaignGetTradeBasins } from "../bridge/tauri";
+import type { CampaignHubBrief, JournalEntry, TradeBasin } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 import { T, SERIF } from "./chronicleTheme";
 
@@ -21,12 +21,14 @@ export function AtlasPanel() {
   const setOpen = useUIStore((s) => s.setShowAtlas);
   const toggleOverlay = useUIStore((s) => s.toggleOverlay);
   const heatOn = useUIStore((s) => s.overlayVisibility.tradeHeat ?? false);
+  const basinsOverlayOn = useUIStore((s) => s.overlayVisibility.tradeBasins ?? false);
   const snapshot = useCampaignStore((s) => s.snapshot);
   const worldEconomy = useCampaignStore((s) => s.worldEconomy);
   const setSearchPin = useViewportStore((s) => s.setSearchPin);
-  const [tab, setTab] = useState<"overview" | "cities" | "timeline">("overview");
+  const [tab, setTab] = useState<"overview" | "cities" | "regions" | "timeline">("overview");
   const [sortBy, setSortBy] = useState<"population" | "growth" | "trade" | "wealth">("population");
   const [journal, setJournal] = useState<JournalEntry[]>([]);
+  const [basins, setBasins] = useState<TradeBasin[]>([]);
   const [kindFilter, setKindFilter] = useState<Record<string, boolean>>({
     lifecycle: true, war: true, finance: true, plague: true,
   });
@@ -39,6 +41,14 @@ export function AtlasPanel() {
     if (!open || !active || tab !== "timeline") return;
     let alive = true;
     campaignGetJournal(-1, -1).then((r) => { if (alive) setJournal(r); }).catch(() => {});
+    return () => { alive = false; };
+  }, [open, active, tab, year]);
+
+  // The Regions tab reads the named trade basins — refetch as years pass.
+  useEffect(() => {
+    if (!open || !active || tab !== "regions") return;
+    let alive = true;
+    campaignGetTradeBasins().then((r) => { if (alive) setBasins(r); }).catch(() => {});
     return () => { alive = false; };
   }, [open, active, tab, year]);
 
@@ -66,7 +76,8 @@ export function AtlasPanel() {
 
   const status = (h: CampaignHubBrief): { label: string; color: string; bg: string } => {
     const nowTick = snapshot?.clock.tick ?? 0;
-    if (h.abandoned || h.population < 100) return { label: "† ruin", color: "#9a9a9a", bg: "#1a1a1a" };
+    if (h.abandoned || h.population < 100)
+      return { label: `† ${h.died_cause || "ruin"}`, color: "#9a9a9a", bg: "#1a1a1a" };
     if (h.founded_tick > 0 && nowTick - h.founded_tick < 15 * 365)
       return { label: "✦ new", color: "#ffd75e", bg: "#2a230e" };
     if (h.starving > 0.5) return { label: "starving", color: T.badInk, bg: "#2a1218" };
@@ -131,6 +142,7 @@ export function AtlasPanel() {
       <div style={{ display: "flex", borderBottom: `1px solid ${T.lineSoft}`, padding: "0 6px" }}>
         {tabBtn("overview", "📈 Overview")}
         {tabBtn("cities", "🏙 Cities")}
+        {tabBtn("regions", "🏞 Regions")}
         {tabBtn("timeline", "📜 Timeline")}
       </div>
 
@@ -168,8 +180,8 @@ export function AtlasPanel() {
                 }}>{k}</button>
               ))}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1.6fr 0.8fr 0.6fr 0.8fr 0.8fr 0.9fr", gap: 2, fontSize: 10, color: T.inkDim, padding: "2px 4px", textTransform: "uppercase", letterSpacing: 0.4 }}>
-              <span>City</span><span style={num}>Pop</span><span style={num}>Δ%/mo</span>
+            <div style={{ display: "grid", gridTemplateColumns: CENSUS_COLS, gap: 2, fontSize: 10, color: T.inkDim, padding: "2px 4px", textTransform: "uppercase", letterSpacing: 0.4 }}>
+              <span>City</span><span>History</span><span style={num}>Pop</span><span style={num}>Δ%/mo</span>
               <span style={num}>Trade/yr</span><span style={num}>Wealth</span><span>Status</span>
             </div>
             {cities.map((h) => {
@@ -178,7 +190,7 @@ export function AtlasPanel() {
                 <div key={h.id} onClick={() => setSearchPin(h.x, h.y)}
                   title="Click to pin this city on the map"
                   style={{
-                    display: "grid", gridTemplateColumns: "1.6fr 0.8fr 0.6fr 0.8fr 0.8fr 0.9fr", gap: 2,
+                    display: "grid", gridTemplateColumns: CENSUS_COLS, gap: 2, alignItems: "center",
                     fontSize: 11, padding: "3px 4px", cursor: "pointer", borderRadius: 4,
                     borderBottom: `1px solid ${T.lineSoft}`,
                     opacity: h.abandoned ? 0.55 : 1,
@@ -186,6 +198,7 @@ export function AtlasPanel() {
                   <span style={{ color: T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {h.abandoned ? "† " : ""}{h.name}{h.colony_kind === 1 ? " ⛶" : ""}
                   </span>
+                  <Spark values={h.pop_spark} dead={h.abandoned} />
                   <span style={{ ...num, color: T.inkMid }}>{fmtNum(h.population)}</span>
                   <span style={{ ...num, color: h.growth > 0 ? T.goodInk : h.growth < 0 ? T.badInk : T.inkDim }}>
                     {(h.growth * 100).toFixed(1)}
@@ -196,6 +209,43 @@ export function AtlasPanel() {
                 </div>
               );
             })}
+          </>
+        )}
+
+        {active && tab === "regions" && (
+          <>
+            <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ color: T.inkDim, fontSize: 11 }}>
+                Named trade basins — clusters bound by their strongest trade ties.
+              </span>
+              <span style={{ flex: 1 }} />
+              <button onClick={() => toggleOverlay("tradeBasins")} style={{
+                padding: "2px 9px", borderRadius: 5, fontSize: 10, cursor: "pointer",
+                border: `1px solid ${basinsOverlayOn ? T.gold : T.line}`,
+                background: basinsOverlayOn ? "#241d0c" : "transparent",
+                color: basinsOverlayOn ? T.gold : T.inkDim,
+              }}>🏞 show on map</button>
+            </div>
+            {basins.length === 0 && <div style={hint}>No basins yet — trade needs a full year on the ledger.</div>}
+            {basins.map((b, i) => (
+              <div key={b.name + i} onClick={() => setSearchPin(b.cx, b.cy)}
+                title="Click to pin this basin's heart on the map"
+                style={{
+                  display: "flex", alignItems: "baseline", gap: 8, cursor: "pointer",
+                  background: T.card, border: `1px solid ${T.lineSoft}`, borderRadius: 6,
+                  borderLeft: `3px solid ${BASIN_UI_COLORS[i % BASIN_UI_COLORS.length]}`,
+                  padding: "6px 9px", marginBottom: 5,
+                }}>
+                <span style={{ fontFamily: SERIF, color: BASIN_UI_COLORS[i % BASIN_UI_COLORS.length], fontWeight: 700, fontSize: 13 }}>
+                  {b.name}
+                </span>
+                <span style={{ color: T.inkDim, fontSize: 10 }}>{b.hub_ids.length} towns</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ color: T.inkDim, fontSize: 10 }}>busiest</span>
+                <span style={{ color: T.inkMid, fontSize: 11 }}>{b.top_city}</span>
+                <span style={{ color: "#7fd0c0", fontSize: 12, fontWeight: 700 }}>{fmtNum(b.volume)}</span>
+              </div>
+            ))}
           </>
         )}
 
@@ -240,6 +290,32 @@ function lifecycleMarkers(series: [number, number, number, number, number, numbe
   }
   return marks;
 }
+
+/** Tiny inline population sparkline for one census row (≤30 points). */
+function Spark({ values, dead }: { values: number[]; dead: boolean }) {
+  if (!values || values.length < 2) return <span style={{ color: T.inkFaint, fontSize: 9 }}>—</span>;
+  const w = 56, h = 14;
+  const lo = Math.min(...values), hi = Math.max(...values);
+  const span = hi - lo || 1;
+  const pts = values.map((v, i) =>
+    `${((i / (values.length - 1)) * w).toFixed(1)},${(h - 2 - ((v - lo) / span) * (h - 4)).toFixed(1)}`
+  ).join(" ");
+  return (
+    <svg width={w} height={h} style={{ display: "block" }}>
+      <polyline points={pts} fill="none"
+        stroke={dead ? "#6a6a6a" : "#6ab0e8"} strokeWidth={1} />
+    </svg>
+  );
+}
+
+/** Census grid template (City · History spark · Pop · Δ · Trade · Wealth · Status). */
+const CENSUS_COLS = "1.45fr 62px 0.7fr 0.55fr 0.7fr 0.7fr 1fr";
+
+/** Mirror of the map overlay's basin palette (OverlayManager BASIN_COLORS). */
+const BASIN_UI_COLORS = [
+  "#4fd0c0", "#d8b24a", "#c08cff", "#7fd08a", "#e08a6a", "#6aa9e8",
+  "#e0a0d0", "#c9c96a", "#8ad0e0", "#d88a8a", "#a9c96a", "#c0a06a",
+];
 
 function Tile({ label, value, color }: { label: string; value: string; color?: string }) {
   return (

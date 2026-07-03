@@ -10,7 +10,7 @@ import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useSettingsStore } from "../state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins } from "../bridge/tauri";
 import type { MerchantRoute, FuturesLane } from "../types";
 import { goodOverlayKey, GOOD_DEFS } from "../goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "../types";
@@ -446,6 +446,7 @@ export function MapCanvas() {
 
   // Atlas 2.0 · Trade Heat — per-hub yearly throughput from the live sim (updates
   // each New Year when the flow ledger rolls). The overlay toggle gates rendering.
+  // Migration arrows ride the same snapshot: refugee roads fade over ~4 years.
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om) return;
@@ -453,8 +454,37 @@ export function MapCanvas() {
     om.drawTradeHeat(hubs
       .filter((h) => !h.is_estate && !h.abandoned && h.trade_volume > 0)
       .map((h) => ({ x: h.x, y: h.y, v: h.trade_volume })));
+    const nowTick = campaignSnapshot?.clock?.tick ?? 0;
+    om.drawMigrations((campaignSnapshot?.migrations ?? []).map((m) => ({
+      fx: m[0], fy: m[1], tx: m[2], ty: m[3],
+      age: Math.min(1, (nowTick - m[4]) / (4 * 365)),
+    })));
     requestRender();
   }, [campaignSnapshot, requestRender]);
+
+  // Atlas 2.0 · named trade basins — refetched as years pass while the overlay
+  // (or the Atlas Regions tab) wants them.
+  const basinsOn = overlayVisibility.tradeBasins ?? false;
+  const campaignYear = campaignSnapshot?.active ? Math.floor(campaignSnapshot.clock.tick / 365) : 0;
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    if (!basinsOn || !campaignSnapshot?.active) {
+      om.drawTradeBasins([]);
+      requestRender();
+      return;
+    }
+    let alive = true;
+    campaignGetTradeBasins().then((bs) => {
+      if (!alive || !overlayManagerRef.current) return;
+      overlayManagerRef.current.drawTradeBasins(bs.map((b) => ({
+        name: b.name, pts: b.pts, cx: b.cx, cy: b.cy,
+      })));
+      requestRender();
+    }).catch(() => {});
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [basinsOn, campaignYear, requestRender]);
 
   // Re-paint overlays when the user changes the appearance palette (the
   // settingsStore has already pushed the new colours into OverlayManager's

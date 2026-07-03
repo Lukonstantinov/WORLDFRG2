@@ -270,6 +270,7 @@ export const useUIStore = create<UIStore>((set) => ({
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
     speculation: false,
     houseControl: false, merchantRoutes: false, futures: false, dynamicFlow: false, tradeHeat: false,
+    tradeBasins: false, migrations: true,
     colonies: true,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
     travelRoute: false, goodScarcity: false, toponyms: false,

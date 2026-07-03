@@ -217,6 +217,20 @@ export interface CampaignHubBrief {
   founded_tick: number;
   /** Last full year's trade throughput (grain-eq, in+out) — Trade Heat overlay. */
   trade_volume: number;
+  /** Why the settlement died ("famine"/"plague"/"war"/"disaster"; "" = alive). */
+  died_cause: string;
+  /** Downsampled population history (≤30 points) — the census sparkline. */
+  pop_spark: number[];
+}
+/** Atlas 2.0 · one named trade basin (campaign_get_trade_basins). */
+export interface TradeBasin {
+  name: string;
+  volume: number;
+  hub_ids: number[];
+  pts: [number, number][];
+  cx: number;
+  cy: number;
+  top_city: string;
 }
 /** One backer of a colony venture (city / house / bank). */
 export interface ColonyBackerRow { kind: number; name: string; color: string; share: number }
@@ -756,6 +770,9 @@ export interface CampaignSnapshot {
   population_delta: number;
   /** World price-index change since the last monthly chronicle sample. */
   price_index_delta: number;
+  /** Atlas 2.0 · recent refugee roads [from_x, from_y, to_x, to_y, tick] —
+   *  drawn as fading migration arrows for ~4 years. */
+  migrations: [number, number, number, number, number][];
 }
 export interface WorldGoodPrice {
   good: number;

@@ -212,6 +212,8 @@ export function CampaignTopBar() {
           style={lensChip(ui.overlayVisibility.tradeHeat ?? false, "#d9a441")}>🔥</button>
         <button onClick={() => ui.toggleOverlay("dynamicFlow")} title="Dynamic Trade Flow — the live trade arteries"
           style={lensChip(ui.overlayVisibility.dynamicFlow ?? false, "#4fd0c0")}>🌊</button>
+        <button onClick={() => ui.toggleOverlay("tradeBasins")} title="Named trade basins — the regions trade binds together"
+          style={lensChip(ui.overlayVisibility.tradeBasins ?? false, "#7fd08a")}>🏞</button>
         <span style={{ width: 1, height: 20, background: T.line, margin: "0 3px" }} />
         {groups.map((g) => {
           const openCount = g.items.filter((i) => i.on).length;

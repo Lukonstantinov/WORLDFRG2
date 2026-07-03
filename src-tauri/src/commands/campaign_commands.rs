@@ -332,6 +332,11 @@ pub struct HubBrief {
     pub founded_tick: u32,
     /// Last full year's trade throughput (grain-eq, in+out) — Trade Heat overlay.
     pub trade_volume: f32,
+    /// Why the settlement died ("famine"/"plague"/"war"/"disaster"; "" = alive).
+    pub died_cause: String,
+    /// Downsampled population history (≤30 points, oldest first) — the census
+    /// sparkline. Empty until the hub has history samples.
+    pub pop_spark: Vec<f32>,
 }
 
 /// What `campaign_start_sim` / `campaign_advance` / `campaign_get_state` return.
@@ -351,6 +356,9 @@ pub struct CampaignSnapshot {
     pub population_delta: i32,
     /// World price-index change since the last monthly chronicle sample.
     pub price_index_delta: f32,
+    /// Atlas 2.0 · recent refugee roads `[from_x, from_y, to_x, to_y, tick]` —
+    /// the map draws them as fading migration arrows for ~4 years.
+    pub migrations: Vec<[f32; 5]>,
 }
 
 /// M6 world-economy panel datum: one good's world price + who moves it.
@@ -755,6 +763,12 @@ fn build_snapshot(sim: &CampaignSim) -> CampaignSnapshot {
                 abandoned: h.abandoned,
                 founded_tick: h.founded_tick,
                 trade_volume: h.trade_last_year,
+                died_cause: h.died_cause.clone(),
+                pop_spark: {
+                    // ≤30 evenly-spaced population samples for the census sparkline.
+                    let step = (h.history.len() / 30).max(1);
+                    h.history.iter().step_by(step).map(|s| s.population).collect()
+                },
             }
         })
         .collect();
@@ -799,6 +813,11 @@ fn build_snapshot(sim: &CampaignSim) -> CampaignSnapshot {
         total_population: total_population.max(0.0) as u32,
         population_delta,
         price_index_delta,
+        // Refugee roads still fresh enough to draw (fade over ~4 years).
+        migrations: sim.migrations.iter()
+            .filter(|m| sim.tick as f32 - m[4] < 4.0 * 365.0)
+            .cloned()
+            .collect(),
     }
 }
 
@@ -813,7 +832,91 @@ fn inactive_snapshot() -> CampaignSnapshot {
         total_population: 0,
         population_delta: 0,
         price_index_delta: 0.0,
+        migrations: vec![],
     }
+}
+
+/// Atlas 2.0 · one NAMED TRADE BASIN — a cluster of living market towns whose
+/// strongest trade ties bind them together: "the regions where trade happens".
+#[derive(Serialize)]
+pub struct TradeBasin {
+    /// Culture-styled region name from the basin's heart (e.g. "Vexillia").
+    pub name: String,
+    /// Total yearly flow volume INTERNAL to the basin (grain-eq).
+    pub volume: f32,
+    pub hub_ids: Vec<u32>,
+    /// Member positions (world cells) — the frontend hulls + labels them.
+    pub pts: Vec<[f32; 2]>,
+    pub cx: f32,
+    pub cy: f32,
+    /// Busiest member (highest yearly throughput).
+    pub top_city: String,
+}
+
+/// Cluster the yearly flow ledger into named trade basins: each town keeps only
+/// its TOP-2 flow edges, and the connected components of that sparse
+/// "strongest-partner" graph are the basins — weak long-range ties don't merge
+/// the whole world into one blob. Volume counts ALL flow internal to a basin.
+#[tauri::command]
+pub fn campaign_get_trade_basins(db: State<'_, WorldDb>) -> Result<Vec<TradeBasin>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    if sim.flow_year.is_empty() { return Ok(vec![]); }
+    let idx_of: std::collections::HashMap<u32, usize> = sim.hubs.iter().enumerate()
+        .filter(|(_, h)| !h.is_estate && !h.abandoned && h.population >= 1.0)
+        .map(|(i, h)| (h.id, i))
+        .collect();
+    let mut edges: std::collections::HashMap<usize, Vec<(usize, f32)>> =
+        std::collections::HashMap::new();
+    for &(a, b, v) in &sim.flow_year {
+        let (Some(&ia), Some(&ib)) = (idx_of.get(&a), idx_of.get(&b)) else { continue };
+        edges.entry(ia).or_default().push((ib, v));
+        edges.entry(ib).or_default().push((ia, v));
+    }
+    let n = sim.hubs.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    for (&i, list) in edges.iter() {
+        let mut l = list.clone();
+        l.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal));
+        for &(j, _) in l.iter().take(2) {
+            let (ri, rj) = (uf_find(&mut parent, i), uf_find(&mut parent, j));
+            if ri != rj { parent[ri] = rj; }
+        }
+    }
+    let mut comp: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+    for &i in edges.keys() {
+        let r = uf_find(&mut parent, i);
+        comp.entry(r).or_default().push(i);
+    }
+    let mut internal: std::collections::HashMap<usize, f32> = std::collections::HashMap::new();
+    for &(a, b, v) in &sim.flow_year {
+        let (Some(&ia), Some(&ib)) = (idx_of.get(&a), idx_of.get(&b)) else { continue };
+        let (ra, rb) = (uf_find(&mut parent, ia), uf_find(&mut parent, ib));
+        if ra == rb { *internal.entry(ra).or_insert(0.0) += v; }
+    }
+    let (w, hgt) = (sim.world_w as u32, sim.world_h());
+    let mut basins: Vec<TradeBasin> = comp.into_iter()
+        .filter(|(_, m)| m.len() >= 2)
+        .map(|(root, members)| {
+            let cx = members.iter().map(|&i| sim.hubs[i].x).sum::<f32>() / members.len() as f32;
+            let cy = members.iter().map(|&i| sim.hubs[i].y).sum::<f32>() / members.len() as f32;
+            let top = members.iter()
+                .max_by(|&&a, &&b| sim.hubs[a].trade_last_year
+                    .partial_cmp(&sim.hubs[b].trade_last_year).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|&i| sim.hubs[i].name.clone()).unwrap_or_default();
+            TradeBasin {
+                name: crate::sim::names::region_name(cx.max(0.0) as u32, cy.max(0.0) as u32, w, hgt),
+                volume: internal.get(&root).copied().unwrap_or(0.0),
+                hub_ids: members.iter().map(|&i| sim.hubs[i].id).collect(),
+                pts: members.iter().map(|&i| [sim.hubs[i].x, sim.hubs[i].y]).collect(),
+                cx, cy,
+                top_city: top,
+            }
+        })
+        .collect();
+    basins.sort_by(|a, b| b.volume.partial_cmp(&a.volume).unwrap_or(std::cmp::Ordering::Equal));
+    basins.truncate(12);
+    Ok(basins)
 }
 
 /// Deterministic initial head lifespan (≈45–75 years, in ticks).
@@ -1036,6 +1139,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 founded_tick: 0,
                 died_tick: 0,
                 trade_last_year: 0.0,
+                died_cause: String::new(),
             }
         })
         .collect();
@@ -1312,6 +1416,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         world_series: vec![],
         total_foundings: 0,
         total_abandonments: 0,
+        migrations: vec![],
         quality_migrated: false,
         days: vec![],
         neighbors: vec![],

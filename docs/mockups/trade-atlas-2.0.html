@@ -194,15 +194,15 @@ over 50y: wealth ∈ [-4.6, 508981.0] · houses turn over · all asserts green</
 floor — the resurrect bug's regression test). The digest now permanently reports
 <code>towns (+F/−A) hungry N thriving M</code>.</p>
 
-<h2>5 · Phase 2 proposals <span class="tag proposed">PROPOSED</span></h2>
+<h2>5 · Phase 2 <span class="tag shipped">SHIPPED</span> (era scrubber &amp; per-good heat remain proposed)</h2>
 <table>
-  <tr><th>Idea</th><th>What it adds</th></tr>
-  <tr><td><b>Named trade basins</b></td><td>Cluster the flow graph into named regions ("The Amber Road", "Inner Sea") with soft borders + a per-basin stat card in the Atlas (volume, top goods, richest port) — the Regions tab.</td></tr>
-  <tr><td><b>Cause chips on deaths</b></td><td>Attach the dominant cause to each abandonment (famine · plague · war · route shift) from the town's last decade of journal entries — the census and timeline show <i>why</i> it died, not just when.</td></tr>
-  <tr><td><b>Migration arrows</b></td><td>A transient map animation when a town empties: fading arrows along the survivors' roads to their havens.</td></tr>
-  <tr><td><b>Era scrubber</b></td><td>Drag a year slider under the Atlas graphs to replay the world: markers, heat and census snap to that year (needs per-year hub snapshots — bounded ring buffer).</td></tr>
-  <tr><td><b>Census sparklines</b></td><td>A tiny 30-year population sparkline per census row from <code>TickHub.history</code>.</td></tr>
-  <tr><td><b>Heat by good</b></td><td>Filter Trade Heat to one commodity (silk heat vs grain heat) from the Goods Codex.</td></tr>
+  <tr><th>Idea</th><th>Status · what landed</th></tr>
+  <tr><td><b>Named trade basins</b></td><td><span class="tag shipped">SHIPPED</span> <code>campaign_get_trade_basins</code> clusters the flow ledger by each town's top-2 trade partners (union-find over the strongest-partner graph — weak long ties don't merge the world). Each basin gets a culture-styled region name, internal volume, busiest city. On the map (🏞 lens in the HUD / Toolbar): a soft dashed hull in a rotating palette + a serif region label. In the Atlas: the new <b>Regions tab</b> — per-basin cards (name, towns, busiest, volume), click pins the basin's heart, plus a "show on map" toggle.</td></tr>
+  <tr><td><b>Cause chips on deaths</b></td><td><span class="tag shipped">SHIPPED</span> At abandonment the sim classifies the final decade — a plague strike → <i>plague</i>, war journal → <i>war</i>, recorded supply-shock → <i>disaster</i>, else <i>famine</i> — stores it on the ruin, writes it into the chronicle ("<i>abandoned after years of the plague</i>") and the census ruin chip reads <code>† plague</code> instead of a bare cross.</td></tr>
+  <tr><td><b>Migration arrows</b></td><td><span class="tag shipped">SHIPPED</span> Every refugee road (dying town → each haven) is recorded; the map draws parchment dashed arcs with arrowheads that fade out over ~4 years (🚶 toggle, on by default). You SEE a city empty into its neighbours.</td></tr>
+  <tr><td><b>Census sparklines</b></td><td><span class="tag shipped">SHIPPED</span> Each census row carries a tiny ≤30-point population history sparkline (greyed for ruins) from the hub's live history samples.</td></tr>
+  <tr><td><b>Era scrubber</b></td><td><span class="tag proposed">PROPOSED</span> Needs a per-year per-hub snapshot ring buffer — next phase.</td></tr>
+  <tr><td><b>Heat by good</b></td><td><span class="tag proposed">PROPOSED</span> Needs per-good flow accumulation (the ledger is per-pair today) — next phase.</td></tr>
 </table>
 
 <div class="note"><b style="color:var(--parchment)">Files touched:</b> <code>sim/tick.rs</code> (lifecycle pass, swarming, throughput/world series, colony-zombie fix, 2 new tests + digest), <code>commands/campaign_commands.rs</code> (HubBrief/WorldEconomy payloads), <code>canvas/OverlayManager.ts</code> (Trade Heat, † halo, ✦ star), <code>ui/AtlasPanel.tsx</code> (new), <code>ui/CampaignTopBar.tsx</code> (Atlas button + lenses), <code>ui/MapCanvas.tsx</code>, <code>ui/Toolbar.tsx</code>, stores + types.</div>

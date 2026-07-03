@@ -38,6 +38,12 @@ function convexHull(pts: [number, number][]): [number, number][] {
 const TIER_ALPHA = [0, 0.32, 0.55, 0.78, 1.0]; // index 1..4 (legacy; kept for reference)
 void TIER_ALPHA;
 
+/** Atlas 2.0 · rotating palette for named trade basins (hull + label tints). */
+const BASIN_COLORS = [
+  "#4fd0c0", "#d8b24a", "#c08cff", "#7fd08a", "#e08a6a", "#6aa9e8",
+  "#e0a0d0", "#c9c96a", "#8ad0e0", "#d88a8a", "#a9c96a", "#c0a06a",
+];
+
 /** Parse "#rrggbb" or "rgb(r,g,b)" → [r,g,b], or null. */
 function parseColor(c: string): [number, number, number] | null {
   const h = /^#?([0-9a-f]{6})$/i.exec(c);
@@ -144,6 +150,10 @@ export class OverlayManager {
   private colonies: ColonyMarker[] = [];
   /** Atlas 2.0 · per-hub yearly trade throughput for the Trade Heat overlay. */
   private heatPoints: { x: number; y: number; v: number }[] = [];
+  /** Atlas 2.0 · named trade basins (member positions hulled + labelled). */
+  private basins: { name: string; pts: [number, number][]; cx: number; cy: number }[] = [];
+  /** Atlas 2.0 · refugee roads (age01 = 0 fresh … 1 faded out). */
+  private migrations: { fx: number; fy: number; tx: number; ty: number; age: number }[] = [];
   private windData: { samples: VectorSample[]; gridW: number; gridH: number } | null = null;
   private currentLines: Streamline[] = [];
   private tradeRoutes: TradeRoute[] = [];
@@ -241,6 +251,85 @@ export class OverlayManager {
   drawColonies(colonies: ColonyMarker[]) { this.colonies = colonies; }
   /** Atlas 2.0 · set the Trade Heat points (hub position + yearly throughput). */
   drawTradeHeat(pts: { x: number; y: number; v: number }[]) { this.heatPoints = pts; }
+  /** Atlas 2.0 · set the named trade basins. */
+  drawTradeBasins(b: { name: string; pts: [number, number][]; cx: number; cy: number }[]) { this.basins = b; }
+  /** Atlas 2.0 · set the refugee roads (age01 0 = fresh, 1 = fully faded). */
+  drawMigrations(m: { fx: number; fy: number; tx: number; ty: number; age: number }[]) { this.migrations = m; }
+
+  /** Named trade basins: a soft dashed hull around each cluster's member towns +
+   *  a serif region label at its heart. Colours rotate a fixed palette so basins
+   *  stay tellable-apart; seam-spanning basins are skipped (no slash). */
+  private renderTradeBasins(ctx: CanvasRenderingContext2D) {
+    const inv = 1 / Math.sqrt(this.currentScale);
+    const W = this.worldW;
+    this.basins.forEach((b, i) => {
+      const col = BASIN_COLORS[i % BASIN_COLORS.length];
+      const xs = b.pts.map((p) => p[0]);
+      if (W > 0 && Math.max(...xs) - Math.min(...xs) > W / 2) return;
+      const hull = convexHull(b.pts);
+      if (hull.length < 3) return;
+      const grow = 4; // soft margin, pushed out from the centroid
+      ctx.beginPath();
+      hull.forEach(([x, y], k) => {
+        const dx = x - b.cx, dy = y - b.cy;
+        const d = Math.hypot(dx, dy) || 1;
+        const px = x + (dx / d) * grow + 0.5, py = y + (dy / d) * grow + 0.5;
+        if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      });
+      ctx.closePath();
+      ctx.fillStyle = `${col}1c`;
+      ctx.strokeStyle = `${col}66`;
+      ctx.lineWidth = Math.max(0.6, 1.2 * inv);
+      ctx.setLineDash([4 * inv, 3 * inv]);
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const fs = Math.max(6, 11 * inv);
+      ctx.font = `600 ${fs}px Georgia, 'Times New Roman', serif`;
+      ctx.textAlign = "center";
+      ctx.lineWidth = Math.max(1.5, 2.5 * inv);
+      ctx.strokeStyle = "rgba(0,0,0,0.7)";
+      ctx.strokeText(b.name, b.cx + 0.5, b.cy - grow - 2 * inv);
+      ctx.fillStyle = col;
+      ctx.fillText(b.name, b.cx + 0.5, b.cy - grow - 2 * inv);
+      ctx.textAlign = "left";
+    });
+  }
+
+  /** Refugee roads: parchment dashed arcs from a dying town to its havens,
+   *  fading out over ~4 years, with an arrowhead at the destination. */
+  private renderMigrations(ctx: CanvasRenderingContext2D) {
+    const inv = 1 / Math.sqrt(this.currentScale);
+    const W = this.worldW;
+    for (const m of this.migrations) {
+      if (W > 0 && Math.abs(m.tx - m.fx) > W / 2) continue; // no seam slash
+      const a = Math.max(0, 1 - m.age) * 0.75;
+      if (a <= 0.03) continue;
+      const mx = (m.fx + m.tx) / 2, my = (m.fy + m.ty) / 2;
+      const dx = m.tx - m.fx, dy = m.ty - m.fy;
+      const len = Math.hypot(dx, dy) || 1;
+      const cxp = mx - (dy / len) * len * 0.12, cyp = my + (dx / len) * len * 0.12;
+      ctx.strokeStyle = `rgba(232,217,176,${a.toFixed(3)})`;
+      ctx.lineWidth = Math.max(0.5, 1.1 * inv);
+      ctx.setLineDash([3 * inv, 2.4 * inv]);
+      ctx.beginPath();
+      ctx.moveTo(m.fx + 0.5, m.fy + 0.5);
+      ctx.quadraticCurveTo(cxp + 0.5, cyp + 0.5, m.tx + 0.5, m.ty + 0.5);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const ax = m.tx - cxp, ay = m.ty - cyp;
+      const al = Math.hypot(ax, ay) || 1;
+      const ux = ax / al, uy = ay / al;
+      const s = Math.max(1.2, 2.2 * inv);
+      ctx.fillStyle = `rgba(232,217,176,${a.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.moveTo(m.tx + 0.5, m.ty + 0.5);
+      ctx.lineTo(m.tx + 0.5 - ux * s - uy * s * 0.5, m.ty + 0.5 - uy * s + ux * s * 0.5);
+      ctx.lineTo(m.tx + 0.5 - ux * s + uy * s * 0.5, m.ty + 0.5 - uy * s - ux * s * 0.5);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
 
   /** Trade Heat: additive radial glows sized/coloured by each hub's share of the
    *  busiest hub's yearly throughput. sqrt ramp keeps mid-size markets visible;
@@ -1028,11 +1117,22 @@ export class OverlayManager {
       this.renderReachNetwork(ctx);
     }
 
+    // Atlas 2.0 · NAMED TRADE BASINS — dashed hulls + region labels, drawn first
+    // so heat, routes and markers sit on top.
+    if (this.visibility.tradeBasins && this.basins.length > 0) {
+      this.renderTradeBasins(ctx);
+    }
+
     // Atlas 2.0 · TRADE HEAT — where trade concentrates. Soft additive glows per
     // hub, radius + colour ∝ last year's throughput (teal → gold → crimson).
     // Drawn UNDER the settlement markers so the dots stay crisp on the glow.
     if (this.visibility.tradeHeat && this.heatPoints.length > 0) {
       this.renderTradeHeat(ctx);
+    }
+
+    // Atlas 2.0 · MIGRATION ARROWS — fading refugee roads from abandoned towns.
+    if (this.visibility.migrations !== false && this.migrations.length > 0) {
+      this.renderMigrations(ctx);
     }
 
     if (this.visibility.settlements && this.settlements.length > 0) {

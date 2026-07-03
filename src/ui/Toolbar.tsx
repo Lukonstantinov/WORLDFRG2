@@ -89,6 +89,8 @@ const bioOverlays = [
   { id: "futures", label: "\u{1F4DC} Futures" },
   { id: "dynamicFlow", label: "\u{1F30A} Dynamic Trade Flow" },
   { id: "tradeHeat", label: "\u{1F525} Trade Heat" },
+  { id: "tradeBasins", label: "\u{1F3DE} Trade Basins" },
+  { id: "migrations", label: "\u{1F6B6} Migrations" },
   { id: "tradeRegions", label: "\u{1F7E6} Trade Regions" },
   { id: "tradeCorridors", label: "\u{2194} Trade Corridors" },
   { id: "chokepoints", label: "\u{2693} Chokepoints" },

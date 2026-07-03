@@ -1049,6 +1049,9 @@ pub struct TickHub {
     /// Last FULL YEAR's trade throughput (grain-eq, imports + exports) from the
     /// flow ledger — drives the Trade Heat overlay and the Atlas census.
     #[serde(default)] pub trade_last_year: f32,
+    /// Why the settlement died ("famine" / "plague" / "war" / "disaster"),
+    /// classified from its final decade at abandonment. Empty = alive.
+    #[serde(default)] pub died_cause: String,
 }
 
 /// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by
@@ -2003,6 +2006,10 @@ pub struct CampaignSim {
     pub total_foundings: u32,
     #[serde(default)]
     pub total_abandonments: u32,
+    /// Atlas 2.0 — recent refugee roads for the map's migration arrows:
+    /// `[from_x, from_y, to_x, to_y, tick]`, bounded to the last 60.
+    #[serde(default)]
+    pub migrations: Vec<[f32; 5]>,
     /// Trade-base patronage: the house developing each hub as a base (hub-indexed,
     /// −1 = none). Resized to `hubs` each tick. Empty on old saves (serde default).
     /// See docs/TRADE_BASE_MECHANIC_PLAN.md.
@@ -6684,7 +6691,7 @@ impl CampaignSim {
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
-            abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0,
+            abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
         });
         // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
         self.routes_dirty = true;
@@ -7330,13 +7337,36 @@ impl CampaignSim {
         }
     }
 
+    /// Classify WHY a settlement died from its final decade: a plague strike, a
+    /// war, a recorded supply-shock disaster — famine otherwise (the terminal
+    /// condition is always famine-shaped; this names the deeper wound).
+    fn abandon_cause(&self, h: usize) -> &'static str {
+        let since = self.tick.saturating_sub(10 * 365);
+        if self.epidemics.iter().any(|p| p.hub == h as u32 && p.start_tick >= since) {
+            return "plague";
+        }
+        let (mut war, mut shock) = (false, false);
+        for e in self.journal.iter().rev() {
+            if e.tick < since { break; }
+            if e.hub != h as i32 { continue; }
+            match e.kind.as_str() {
+                "war" => war = true,
+                "event" => shock = true, // drought / blight / fishery collapse / embargo
+                _ => {}
+            }
+        }
+        if war { "war" } else if shock { "disaster" } else { "famine" }
+    }
+
     /// Abandon a settlement: survivors migrate to the nearest living towns of the
-    /// same component, the ruin (population 0, `abandoned`) stays on the map.
+    /// same component (recorded as refugee roads for the map's migration arrows),
+    /// the ruin (population 0, `abandoned`, `died_cause`) stays on the map.
     fn abandon_hub(&mut self, h: usize) {
         let tick = self.tick;
         let nm = self.hubs[h].name.clone();
         let comp = self.hubs[h].component;
         let (hx, hy) = (self.hubs[h].x, self.hubs[h].y);
+        let cause = self.abandon_cause(h);
         let mut dests: Vec<(usize, f32)> = (0..self.hubs.len())
             .filter(|&j| j != h && !self.hubs[j].is_estate && !self.hubs[j].abandoned
                 && self.hubs[j].component == comp && self.hubs[j].population >= 1.0)
@@ -7352,11 +7382,19 @@ impl CampaignSim {
         let dest_name = dests.first().map(|&(j, _)| self.hubs[j].name.clone());
         if !dests.is_empty() {
             let share = refugees / dests.len() as f32;
-            for &(j, _) in &dests { self.hubs[j].population += share; }
+            for &(j, _) in &dests {
+                self.hubs[j].population += share;
+                self.migrations.push([hx, hy, self.hubs[j].x, self.hubs[j].y, tick as f32]);
+            }
+            if self.migrations.len() > 60 {
+                let excess = self.migrations.len() - 60;
+                self.migrations.drain(0..excess);
+            }
         }
         let hub = &mut self.hubs[h];
         hub.abandoned = true;
         hub.died_tick = tick;
+        hub.died_cause = cause.into();
         hub.population = 0.0;
         hub.starving = 0.0;
         hub.decline_years = 0.0;
@@ -7364,10 +7402,16 @@ impl CampaignSim {
         for v in hub.production.iter_mut() { *v = 0.0; }
         self.total_abandonments += 1;
         self.routes_dirty = true;
+        let why = match cause {
+            "plague" => "the plague",
+            "war" => "the war",
+            "disaster" => "disaster upon disaster",
+            _ => "famine",
+        };
         self.journal.push(JournalEntry { tick, kind: "abandonment".into(), hub: h as i32,
             good: -1, value: 0.0, text: match dest_name {
-                Some(d) => format!("{} is abandoned — its last families take the road to {}", nm, d),
-                None => format!("{} is abandoned — famine and decline have emptied it", nm),
+                Some(d) => format!("{} is abandoned after years of {} — its last families take the road to {}", nm, why, d),
+                None => format!("{} is abandoned after years of {} — the land lies empty", nm, why),
             } });
     }
 
@@ -7446,7 +7490,7 @@ impl CampaignSim {
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
-            abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0,
+            abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
         });
         self.routes_dirty = true;
         self.hubs.len() - 1
@@ -7665,7 +7709,7 @@ impl CampaignSim {
             colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
             reserve_food: 30.0, reserve_cap: 365.0, supply_years: 0.0, colony_founded_tick: self.tick,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
-            abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0,
+            abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
         });
         self.total_foundings += 1; // Atlas 2.0 lifecycle counter (colony ventures too)
         self.routes_dirty = true;
@@ -7889,6 +7933,7 @@ impl CampaignSim {
         // population pass resurrected collapsed colonies at 10% strength next tick.
         self.hubs[h].abandoned = true;
         self.hubs[h].died_tick = tick;
+        self.hubs[h].died_cause = "famine".into(); // the lifeline failed
         for v in self.hubs[h].stock.iter_mut() { *v = 0.0; }
         for v in self.hubs[h].production.iter_mut() { *v = 0.0; }
         self.total_abandonments += 1;
@@ -8103,7 +8148,7 @@ impl CampaignSim {
         }
     }
 
-    fn world_h(&self) -> u32 { (self.world_w * 0.5).max(1.0) as u32 }
+    pub fn world_h(&self) -> u32 { (self.world_w * 0.5).max(1.0) as u32 }
 
     /// "House Cassii"-style family name for the home `hub`, varied by `salt`.
     fn family_name_for(&self, hub: usize, salt: u64) -> String {
@@ -9651,7 +9696,7 @@ mod tests {
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
-            abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0,
+            abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
         }
     }
 
@@ -9684,6 +9729,7 @@ mod tests {
             banks: vec![], crashes: vec![], wars: vec![], war_log: vec![],
             flow_year: vec![], flow_accum: std::collections::HashMap::new(),
             world_series: vec![], total_foundings: 0, total_abandonments: 0,
+            migrations: vec![],
             quality_migrated: false,
             days: vec![],
             neighbors: vec![],
