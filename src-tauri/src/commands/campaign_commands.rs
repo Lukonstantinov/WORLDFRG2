@@ -326,6 +326,12 @@ pub struct HubBrief {
     /// Founder/owner-home hub INDEX (lane endpoint); −1 if none.
     pub founder_hub: i32,
     pub autonomous: bool,
+    /// Atlas 2.0 · the settlement is a DEAD ruin († marker, skipped by the sim).
+    pub abandoned: bool,
+    /// Tick founded mid-campaign (0 = primordial) — drives the "new town" badge.
+    pub founded_tick: u32,
+    /// Last full year's trade throughput (grain-eq, in+out) — Trade Heat overlay.
+    pub trade_volume: f32,
 }
 
 /// What `campaign_start_sim` / `campaign_advance` / `campaign_get_state` return.
@@ -374,6 +380,9 @@ pub struct WorldEconomy {
     #[serde(default)] pub lack_series: Vec<[f32; 4]>,
     /// World time series `[tick, houses, local, guild]` merchant population totals.
     #[serde(default)] pub merchant_series: Vec<[f32; 4]>,
+    /// Atlas 2.0 — yearly world samples `[year, population, trade volume, live
+    /// hubs, cumulative foundings, cumulative abandonments]` for the Atlas graphs.
+    #[serde(default)] pub world_series: Vec<[f32; 6]>,
 }
 
 /// One good's live state at a hub, for the settlement-window Market tab.
@@ -743,6 +752,9 @@ fn build_snapshot(sim: &CampaignSim) -> CampaignSnapshot {
                 owner_house: h.owner_house,
                 founder_hub: h.founder_hub,
                 autonomous: h.autonomous,
+                abandoned: h.abandoned,
+                founded_tick: h.founded_tick,
+                trade_volume: h.trade_last_year,
             }
         })
         .collect();
@@ -1018,6 +1030,12 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 civic_goods: Vec::new(),
                 laws: Vec::new(),
                 captor_house: -1,
+                // Atlas 2.0 lifecycle: primordial (worldgen) settlements.
+                abandoned: false,
+                decline_years: 0.0,
+                founded_tick: 0,
+                died_tick: 0,
+                trade_last_year: 0.0,
             }
         })
         .collect();
@@ -1291,6 +1309,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         war_log: vec![],
         flow_year: vec![],
         flow_accum: std::collections::HashMap::new(),
+        world_series: vec![],
+        total_foundings: 0,
+        total_abandonments: 0,
         quality_migrated: false,
         days: vec![],
         neighbors: vec![],
@@ -4236,7 +4257,7 @@ pub fn campaign_get_world_economy(db: State<'_, WorldDb>) -> Result<WorldEconomy
             goods: vec![], index_series: vec![],
             lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             pop_house: 0.0, pop_local: 0.0, pop_guild: 0.0,
-            lack_series: vec![], merchant_series: vec![],
+            lack_series: vec![], merchant_series: vec![], world_series: vec![],
         }),
     };
     let ng = sim.goods.len();
@@ -4316,6 +4337,7 @@ pub fn campaign_get_world_economy(db: State<'_, WorldDb>) -> Result<WorldEconomy
         lack_basic: lb / wp, lack_comfort: lc / wp, lack_luxury: ll / wp,
         pop_house: ph, pop_local: pl, pop_guild: pg,
         lack_series, merchant_series,
+        world_series: sim.world_series.clone(),
     })
 }
 

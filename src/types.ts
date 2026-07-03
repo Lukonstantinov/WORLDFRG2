@@ -211,6 +211,12 @@ export interface CampaignHubBrief {
   /** Founder/owner-home hub index (lane endpoint); -1 if none. */
   founder_hub: number;
   autonomous: boolean;
+  /** Atlas 2.0 · the settlement is a dead ruin († marker, skipped by the sim). */
+  abandoned: boolean;
+  /** Tick founded mid-campaign (0 = primordial) — drives the "new town" badge. */
+  founded_tick: number;
+  /** Last full year's trade throughput (grain-eq, in+out) — Trade Heat overlay. */
+  trade_volume: number;
 }
 /** One backer of a colony venture (city / house / bank). */
 export interface ColonyBackerRow { kind: number; name: string; color: string; share: number }
@@ -778,6 +784,9 @@ export interface WorldEconomy {
   lack_series?: [number, number, number, number][];
   /** World time series [tick, houses, local, guild] merchant population totals. */
   merchant_series?: [number, number, number, number][];
+  /** Atlas 2.0 · yearly world samples [year, population, trade volume, live hubs,
+   *  cumulative foundings, cumulative abandonments] for the Atlas graphs. */
+  world_series?: [number, number, number, number, number, number][];
 }
 
 // ── Economy snapshot (Phase 2) ──
@@ -1387,7 +1396,8 @@ export interface Settlement {
   culture?: string; // people/culture governing the site ("Norse", …)
   region?: string;  // region / homeland name ("Vexillia")
   site?: string;    // "coast" | "river" | "hills" | "plain"
-  dead?: boolean;   // population collapsed → drawn as a black cross, not a dot
+  dead?: boolean;   // abandoned/collapsed → drawn as a † ruin cross, not a dot
+  isNew?: boolean;  // founded this campaign, still young → gold founding star
 }
 
 /** #26 · a named geographic feature. Mirrors the Rust `Toponym` struct. */

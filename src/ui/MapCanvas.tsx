@@ -13,7 +13,7 @@ import { useSettingsStore } from "../state/settingsStore";
 import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties } from "../bridge/tauri";
 import type { MerchantRoute, FuturesLane } from "../types";
 import { goodOverlayKey, GOOD_DEFS } from "../goods";
-import type { PaintValue, EconChain, Settlement } from "../types";
+import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "../types";
 
 /** Largest box with the world's aspect ratio that fits inside the pane. */
 function fitBox(paneW: number, paneH: number, gridW: number, gridH: number) {
@@ -374,6 +374,12 @@ export function MapCanvas() {
     const posKey = (x: number, y: number) => `${Math.round(x)},${Math.round(y)}`;
     const liveByPos = new Map(hubs.map((h) => [posKey(h.x, h.y), h]));
     const matched = new Set<string>();
+    // Atlas 2.0 lifecycle flags: † ruin when abandoned (or the pop collapsed),
+    // gold founding star while a mid-campaign settlement is still young (<15y).
+    const nowTick = campaignSnapshot?.clock?.tick ?? 0;
+    const isDead = (h: CampaignHubBrief) => h.abandoned || h.population < 100;
+    const isNew = (h: CampaignHubBrief) => !isDead(h)
+      && h.founded_tick > 0 && nowTick - h.founded_tick < 15 * 365;
     const merged: Settlement[] = settlements.map((s) => {
       const k = posKey(s.x, s.y);
       const h = liveByPos.get(k);
@@ -384,17 +390,20 @@ export function MapCanvas() {
         size: tier(h.population),
         population: h.population,
         score: h.population,
-        dead: h.population < 100, // collapsed city → black cross (still shown)
+        dead: isDead(h),
+        isNew: isNew(h),
       };
     });
-    // Add any live hubs with no static counterpart (e.g. colonies founded in-campaign).
+    // Add any live hubs with no static counterpart (organic towns swarmed and
+    // colonies founded in-campaign).
     for (const h of hubs) {
       const k = posKey(h.x, h.y);
       if (matched.has(k)) continue;
       merged.push({
         id: String(h.id), x: h.x, y: h.y, name: h.name,
         size: tier(h.population), population: h.population, score: h.population,
-        dead: h.population < 100,
+        dead: isDead(h),
+        isNew: isNew(h),
       });
     }
     return merged;
@@ -434,6 +443,18 @@ export function MapCanvas() {
     om.drawColonies(markers);
     requestRender();
   }, [campaignSnapshot, houses, requestRender]);
+
+  // Atlas 2.0 · Trade Heat — per-hub yearly throughput from the live sim (updates
+  // each New Year when the flow ledger rolls). The overlay toggle gates rendering.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    const hubs = campaignSnapshot?.active ? campaignSnapshot.hubs : [];
+    om.drawTradeHeat(hubs
+      .filter((h) => !h.is_estate && !h.abandoned && h.trade_volume > 0)
+      .map((h) => ({ x: h.x, y: h.y, v: h.trade_volume })));
+    requestRender();
+  }, [campaignSnapshot, requestRender]);
 
   // Re-paint overlays when the user changes the appearance palette (the
   // settingsStore has already pushed the new colours into OverlayManager's

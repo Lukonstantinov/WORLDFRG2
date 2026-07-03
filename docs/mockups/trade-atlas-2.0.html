@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Trade &amp; World Dynamics 2.0 — the Living Map, Trade Heat &amp; the World Atlas</title>
+<style>
+  :root{
+    --bg:#0b1420; --panel:#13202e; --card:#0a1018; --line:#1e2e42; --linesoft:#16202e;
+    --linegold:rgba(216,178,74,0.35); --ink:#cfe2f6; --inkmid:#9fb4cc; --inkdim:#5a7390;
+    --inkfaint:#46586e; --accent:#3a80c0; --gold:#d8b24a; --parchment:#e8d9b0;
+    --good:#80c890; --warn:#d9a441; --bad:#e08080;
+    --serif:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif;padding:28px 20px 60px}
+  .wrap{max-width:1040px;margin:0 auto}
+  h1{font-family:var(--serif);color:var(--gold);font-size:26px;margin:0 0 4px;letter-spacing:.5px}
+  h2{font-family:var(--serif);color:var(--parchment);font-size:18px;margin:38px 0 6px;border-bottom:1px solid var(--linegold);padding-bottom:5px}
+  h3{color:var(--inkmid);font-size:12px;text-transform:uppercase;letter-spacing:.8px;margin:18px 0 8px}
+  p{color:var(--inkmid);max-width:80ch}
+  .sub{color:var(--inkdim);font-size:12px;margin-bottom:22px}
+  .tag{display:inline-block;padding:2px 9px;border-radius:10px;font-size:10px;font-weight:700;margin-left:8px;vertical-align:2px}
+  .tag.shipped{background:#12331e;color:var(--good);border:1px solid #2a6040}
+  .tag.proposed{background:#241d0c;color:var(--gold);border:1px solid #6a5a24}
+  .stage{background:#060a10;border:1px solid var(--line);border-radius:10px;padding:14px;margin:10px 0 4px;overflow-x:auto}
+  .caption{color:var(--inkdim);font-size:11px;margin:3px 0 0}
+  table{border-collapse:collapse;font-size:12px;width:100%}
+  th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--linesoft);color:var(--inkmid);vertical-align:top}
+  th{color:var(--inkdim);font-size:10px;text-transform:uppercase;letter-spacing:.6px}
+  td b{color:var(--ink)}
+  code{background:#0e1826;border-radius:4px;padding:1px 5px;font-size:11px;color:#9fc0e0}
+  .qa{background:var(--card);border-left:3px solid var(--accent);border-radius:0 6px 6px 0;padding:8px 12px;margin:8px 0;font-size:12px;color:var(--inkmid)}
+  .qa b{color:var(--ink)}
+  .qa .a{color:var(--gold);font-weight:700}
+  .note{background:var(--card);border-left:3px solid var(--gold);border-radius:0 6px 6px 0;padding:8px 12px;color:var(--inkmid);font-size:12px;margin:10px 0}
+  .digest{font:10.5px/1.7 ui-monospace,Menlo,Consolas,monospace;color:#9fb4cc;background:#0b1622;border:1px solid var(--linesoft);border-radius:6px;padding:8px 10px;white-space:pre;overflow-x:auto}
+  .bad-t{color:var(--bad)} .good-t{color:var(--good)}
+  /* atlas mock */
+  .win{width:560px;background:rgba(12,19,27,.97);border:1px solid var(--line);border-radius:8px;box-shadow:0 12px 34px rgba(0,0,0,.55);font-size:12px}
+  .win .hd{display:flex;align-items:center;padding:7px 10px;border-bottom:1px solid var(--line)}
+  .win .hd b{font-family:var(--serif);color:var(--gold);font-size:14px}
+  .win .hd i{font-style:normal;color:var(--inkfaint);font-size:10px;margin-left:8px}
+  .tabs{display:flex;border-bottom:1px solid var(--linesoft);padding:0 6px}
+  .tabs span{padding:5px 12px;color:var(--inkdim);font-size:12px;border-bottom:2px solid transparent}
+  .tabs .on{color:var(--ink);font-weight:700;border-bottom-color:var(--gold)}
+  .tiles{display:flex;gap:6px;padding:8px 10px 0}
+  .tile{flex:1;background:var(--card);border:1px solid var(--linesoft);border-radius:6px;padding:5px 8px}
+  .tile em{display:block;font-style:normal;color:var(--inkdim);font-size:8.5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+  .tile b{font-size:14px}
+  .chart{background:var(--card);border:1px solid var(--linesoft);border-radius:6px;padding:6px 8px;margin:8px 10px}
+  .chart .t{display:flex;color:var(--inkdim);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+  .chart .t span:last-child{margin-left:auto;font-weight:700}
+  .census{padding:4px 10px 10px}
+  .crow{display:grid;grid-template-columns:1.6fr .8fr .6fr .8fr .9fr;gap:2px;font-size:11px;padding:3px 4px;border-bottom:1px solid var(--linesoft)}
+  .crow.h{font-size:10px;color:var(--inkdim);text-transform:uppercase;letter-spacing:.4px}
+  .crow span:nth-child(2),.crow span:nth-child(3),.crow span:nth-child(4){text-align:right}
+  .chip{border-radius:4px;padding:1px 6px;font-size:9.5px;font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Trade &amp; World Dynamics 2.0</h1>
+<div class="sub">"See what happens in the world and why" — the Living Map (cities born ✦ and dying †), the Trade Heat lens, and the World Atlas · brainstorm + design + implementation report</div>
+
+<h2>0 · The brief, and what the world could already do</h2>
+<p>The ask: watch trade concentrate into regions, watch settlements appear and cities die (with a cross), and
+navigate stats/graphs that explain <b style="color:var(--parchment)">why</b>. The audit found the simulation was closer than expected —
+and blocked in three places:</p>
+<table>
+  <tr><th>Capability</th><th>Before 2.0</th></tr>
+  <tr><td><b>Settlements appearing</b></td><td>Only as chartered COLONIES (joint-stock ventures from year 50). No organic growth — a thriving free city never spawned a daughter town.</td></tr>
+  <tr><td><b>Cities dying</b></td><td>Only colonies could collapse — and a latent bug meant even those <i>resurrected</i>: the population floor (<code>max(founding_pop·0.10)</code>) revived every "dead" hub at 10% strength the next tick, so the † cross never survived.</td></tr>
+  <tr><td><b>Trade regions</b></td><td><code>flow_year</code> recorded every city-pair's yearly volume and drew trunk LINES — but nothing showed where trade <i>concentrates</i>, and no per-city throughput stat existed at all.</td></tr>
+  <tr><td><b>Graphs / navigable stats</b></td><td>Per-city history charts existed in the settlement window; the WORLD had only a price-index sparkline. No census, no lifecycle timeline, no world graphs.</td></tr>
+</table>
+
+<h2>1 · The questions (asked; channel failed) &amp; the answers taken</h2>
+<div class="qa"><b>How brutal should organic city death be?</b> → <span class="a">Moderate + migration.</span> Famine-driven only: a town shrunk to the famine floor and starving for 8 straight years is abandoned; survivors take the road. Poverty alone never kills (see §4 — the first draft that allowed it emptied 29 of 30 test towns).</div>
+<div class="qa"><b>How should new settlements appear?</b> → <span class="a">Organic + colonial.</span> Chartered colonies stay; from year 25 a thriving city bursting past 1.55× its founding size <i>swarms</i> — 7% of its people found an independent town on fertile free land nearby.</div>
+<div class="qa"><b>How to show where trade concentrates?</b> → <span class="a">Heat overlay first.</span> Additive glow per city ∝ its yearly throughput; named "trade basins" proposed for phase 2.</div>
+<div class="qa"><b>Which Atlas tabs?</b> → <span class="a">Overview graphs + Cities census + Timeline</span> (Regions drill-down deferred to phase 2).</div>
+
+<h2>2 · The Living Map <span class="tag shipped">SHIPPED</span></h2>
+<div class="stage">
+<svg width="640" height="240" viewBox="0 0 640 240">
+  <rect width="640" height="240" fill="#0e1a14"/>
+  <path d="M0,200 Q120,150 240,175 T480,150 T640,180 L640,240 L0,240 Z" fill="#123044" opacity="0.85"/>
+  <path d="M0,0 L640,0 L640,150 Q500,120 380,140 T140,120 T0,150 Z" fill="#0e1a14"/>
+  <!-- trade heat glows -->
+  <radialGradient id="h1"><stop offset="0" stop-color="rgba(214,80,58,0.5)"/><stop offset="0.55" stop-color="rgba(216,178,74,0.22)"/><stop offset="1" stop-color="rgba(216,178,74,0)"/></radialGradient>
+  <radialGradient id="h2"><stop offset="0" stop-color="rgba(216,178,74,0.4)"/><stop offset="1" stop-color="rgba(216,178,74,0)"/></radialGradient>
+  <radialGradient id="h3"><stop offset="0" stop-color="rgba(79,208,192,0.35)"/><stop offset="1" stop-color="rgba(79,208,192,0)"/></radialGradient>
+  <circle cx="205" cy="95" r="80" fill="url(#h1)"/>
+  <circle cx="300" cy="120" r="55" fill="url(#h2)"/>
+  <circle cx="470" cy="90" r="45" fill="url(#h3)"/>
+  <circle cx="105" cy="70" r="30" fill="url(#h3)"/>
+  <!-- routes -->
+  <path d="M205,95 Q250,100 300,120" stroke="rgba(79,208,192,0.7)" stroke-width="2.5" fill="none"/>
+  <path d="M300,120 Q390,95 470,90" stroke="rgba(79,208,192,0.5)" stroke-width="1.8" fill="none"/>
+  <path d="M105,70 Q150,80 205,95" stroke="rgba(79,208,192,0.45)" stroke-width="1.4" fill="none"/>
+  <!-- cities -->
+  <circle cx="205" cy="95" r="7" fill="#e8c96a" stroke="rgba(0,0,0,0.65)"/>
+  <circle cx="205" cy="95" r="2.6" fill="rgba(26,18,6,0.9)"/>
+  <circle cx="300" cy="120" r="5" fill="#d8d8c8" stroke="rgba(0,0,0,0.65)"/>
+  <circle cx="470" cy="90" r="4.4" fill="#c8c8b8" stroke="rgba(0,0,0,0.65)"/>
+  <circle cx="105" cy="70" r="4" fill="#c8c8b8" stroke="rgba(0,0,0,0.65)"/>
+  <!-- NEW town: dot + gold founding star -->
+  <circle cx="382" cy="145" r="3.4" fill="#b8c8a8" stroke="rgba(0,0,0,0.65)"/>
+  <path d="M392,132 l2.2,4.6 4.8,0.8 -3.4,3.6 0.7,5 -4.3-2.4 -4.3,2.4 0.7-5 -3.4-3.6 4.8-0.8 Z" fill="#ffd75e" stroke="rgba(0,0,0,0.6)" stroke-width="0.6"/>
+  <text x="382" y="162" text-anchor="middle" font-size="9" fill="#cfe2f6">Velkarr ✦ founded Y212</text>
+  <!-- DEAD city: † ruin -->
+  <g transform="translate(540,140)">
+    <line x1="0" y1="-9" x2="0" y2="8" stroke="rgba(232,217,176,0.55)" stroke-width="3.4"/>
+    <line x1="-5.5" y1="-3.5" x2="5.5" y2="-3.5" stroke="rgba(232,217,176,0.55)" stroke-width="3.4"/>
+    <line x1="0" y1="-9" x2="0" y2="8" stroke="#0d0d0d" stroke-width="1.5"/>
+    <line x1="-5.5" y1="-3.5" x2="5.5" y2="-3.5" stroke="#0d0d0d" stroke-width="1.5"/>
+  </g>
+  <text x="540" y="162" text-anchor="middle" font-size="9" fill="#8a9ab0">Iskren Port † abandoned Y208</text>
+  <text x="205" y="78" text-anchor="middle" font-size="9" fill="#cfe2f6">Qart-Zahar</text>
+</svg>
+</div>
+<p class="caption"><b>One map, three new signals.</b> 🔥 <b>Trade Heat</b> (toggle in the HUD, Toolbar or the Atlas): additive teal→gold→crimson glows per city, radius and colour ∝ its share of the busiest market's yearly throughput — overlapping basins genuinely glow, so "the regions where trade happens a lot" read instantly. ✦ <b>Founding star</b>: a settlement founded this campaign wears gold for its first 15 years. † <b>Ruin cross</b>: an abandoned city keeps a parchment-haloed cross forever (and — bug fixed — actually stays dead).</p>
+
+<h3>The lifecycle rules (sim/tick.rs)</h3>
+<table>
+  <tr><th>Event</th><th>Rule</th><th>Chronicled as</th></tr>
+  <tr><td><b>† Abandonment</b></td><td>Famine-floored (&lt; 13% of founding size — only famine can push below the 15% capacity floor) AND starving &gt; 0.5 for <b>8 accumulated years</b> (recovery only halves the scar), AND a <b>haven exists</b> — a fed, living town of the same region to migrate to. 60% of survivors split between the 3 nearest living towns. Anchors (at war / bank seat) hold on; max 2/year worldwide.</td><td>"<i>Iskren Port is abandoned — its last families take the road to Qart-Zahar</i>"</td></tr>
+  <tr><td><b>✦ Swarming</b></td><td>From year 25: a free city over 1.55× its founding size, ≥ 9k people, content (mood &gt; 0.5) and fed, sends 7% of its people to the best fertile free site within a settler's walk (10% of the map, not on the doorstep). One per year worldwide; the site pool is the same precomputed free land colonies use.</td><td>"<i>Settlers from Qart-Zahar found Velkarr</i>"</td></tr>
+  <tr><td><b>Colony collapse</b></td><td>Unchanged rules — but now marks the hub truly dead instead of leaving a zombie the population floor revived at 10% strength next tick.</td><td>(existing colony chronicle)</td></tr>
+</table>
+
+<h2>3 · The World Atlas <span class="tag shipped">SHIPPED</span></h2>
+<div class="stage">
+<div class="win">
+  <div class="hd"><b>🗺 World Atlas</b><i>Year 214 · 37 towns alive · 2 ruins</i><span style="flex:1"></span>
+    <span class="chip" style="border:1px solid #d9a441;color:#ffd75e;background:#2a230e">🔥 Heat</span>
+    <span style="color:#7a90a8;margin-left:8px">✕</span></div>
+  <div class="tabs"><span class="on">📈 Overview</span><span>🏙 Cities</span><span>📜 Timeline</span></div>
+  <div class="tiles">
+    <div class="tile"><em>Towns alive</em><b>37</b></div>
+    <div class="tile"><em>Founded</em><b style="color:#ffd75e">+9</b></div>
+    <div class="tile"><em>Abandoned</em><b style="color:#c0a0a0">−4</b></div>
+    <div class="tile"><em>Trade (yr)</em><b style="color:#7fd0c0">48.2k</b></div>
+  </div>
+  <div class="chart"><div class="t"><span>Trade volume (grain-eq / year)</span><span style="color:#4fd0c0">48.2k</span></div>
+    <svg width="100%" height="70" viewBox="0 0 520 70" preserveAspectRatio="none" style="background:#0b1622;border-radius:4px">
+      <polyline points="4,62 44,58 84,59 124,52 164,54 204,44 244,47 284,38 324,41 364,30 404,33 444,22 484,26 516,18" fill="none" stroke="#4fd0c0" stroke-width="1.6"/>
+    </svg>
+  </div>
+  <div class="chart"><div class="t"><span>Towns alive — ▲ founded · † abandoned</span><span style="color:#d8b24a">37</span></div>
+    <svg width="100%" height="70" viewBox="0 0 520 70" preserveAspectRatio="none" style="background:#0b1622;border-radius:4px">
+      <polyline points="4,40 84,40 124,36 204,36 244,40 324,32 364,28 444,28 484,24 516,24" fill="none" stroke="#d8b24a" stroke-width="1.6"/>
+      <text x="124" y="66" text-anchor="middle" font-size="9" fill="#ffd75e">▲</text>
+      <text x="244" y="66" text-anchor="middle" font-size="9" fill="#c0a0a0">†</text>
+      <text x="324" y="66" text-anchor="middle" font-size="9" fill="#ffd75e">▲</text>
+      <text x="484" y="66" text-anchor="middle" font-size="9" fill="#ffd75e">▲</text>
+    </svg>
+  </div>
+  <div class="census">
+    <div class="crow h"><span>City</span><span>Pop</span><span>Δ%/mo</span><span>Trade/yr</span><span>Status</span></div>
+    <div class="crow"><span>Qart-Zahar</span><span>64k</span><span style="color:var(--good)">1.8</span><span style="color:#7fd0c0">9.4k</span><span><span class="chip" style="background:#122a1a;color:var(--good)">growing</span></span></div>
+    <div class="crow"><span>Velkarr ⛶</span><span>2.1k</span><span style="color:var(--good)">4.2</span><span style="color:#7fd0c0">310</span><span><span class="chip" style="background:#2a230e;color:#ffd75e">✦ new</span></span></div>
+    <div class="crow"><span>Harrowmere</span><span>11k</span><span style="color:var(--bad)">−1.1</span><span style="color:#7fd0c0">820</span><span><span class="chip" style="background:#2a1218;color:var(--bad)">starving</span></span></div>
+    <div class="crow" style="opacity:.55"><span>† Iskren Port</span><span>0</span><span>0.0</span><span>—</span><span><span class="chip" style="background:#1a1a1a;color:#9a9a9a">† ruin</span></span></div>
+  </div>
+</div>
+</div>
+<p class="caption">One navigable screen, three tabs, launched from a dedicated gold <b>🗺 Atlas</b> button in the campaign HUD (with 🔥/🌊 quick map-lens chips beside it). <b>Overview</b>: world population, yearly trade volume and towns-alive graphs — the towns chart carries ▲/† tick marks the year each founding/abandonment happened. <b>Cities</b>: the living census — sortable by population/growth/trade/wealth, lifecycle status chips, click a row to pin the city on the map. <b>Timeline</b>: the year-grouped chronicle of foundings, abandonments, colonies, wars, crashes and plagues, with per-theme filter chips — the "what happened and why" ledger.</p>
+
+<h3>New data plumbing</h3>
+<table>
+  <tr><td><code>TickHub.trade_last_year</code></td><td>Per-city yearly throughput, rolled from the flow ledger each New Year → drives Trade Heat + the census.</td></tr>
+  <tr><td><code>CampaignSim.world_series</code></td><td>One row per completed year: [year, population, trade volume, towns alive, cumulative foundings, cumulative abandonments] → the Atlas graphs.</td></tr>
+  <tr><td><code>TickHub.abandoned / founded_tick / died_tick / decline_years</code></td><td>The lifecycle state itself — appended serde-default fields, old saves load untouched.</td></tr>
+  <tr><td><code>HubBrief.abandoned / founded_tick / trade_volume</code></td><td>Snapshot additions the map markers and census read.</td></tr>
+  <tr><td>Journal kinds <code>founding</code> / <code>abandonment</code></td><td>New chronicle entries (the Timeline groups them under 🏙 lifecycle).</td></tr>
+</table>
+
+<h2>4 · Tuning story — how the standing dynamics test shaped the rules</h2>
+<p>The first draft let <i>misery</i> (mood &lt; 0.18) qualify a town for death. The standing 50-year dynamics run
+answered immediately:</p>
+<div class="digest"><span class="bad-t">yr 15: … towns 20 (+0/−10) …
+yr 25: … towns  1 (+0/−29) …   ← the world ground itself empty</span></div>
+<p>Instrumenting the digest showed why: the harsh 6-good toy world lives in <i>universal chronic famine</i>
+(<code>hungry 30 · thriving 0</code>) — any purely local rule kills everyone. The fix is the <b>pull factor</b>:
+abandonment is <i>migration</i>, so it requires a haven — a fed, living town to walk to. If everywhere is hungry,
+people endure where they are:</p>
+<div class="digest"><span class="good-t">yr 50: houses 2↑/8✝  banks 1  coins 10 … towns 30 (+0/−0) hungry 30 thriving 0 …</span>
+over 50y: wealth ∈ [-4.6, 508981.0] · houses turn over · all asserts green</div>
+<p>The mechanics themselves are proven by two new deterministic tests:
+<code>thriving_city_swarms_a_daughter_town</code> (site consumed, settlers leave, founding chronicled) and
+<code>famine_town_is_abandoned_and_stays_dead</code> (survivors reach the haven, the ruin survives the population
+floor — the resurrect bug's regression test). The digest now permanently reports
+<code>towns (+F/−A) hungry N thriving M</code>.</p>
+
+<h2>5 · Phase 2 proposals <span class="tag proposed">PROPOSED</span></h2>
+<table>
+  <tr><th>Idea</th><th>What it adds</th></tr>
+  <tr><td><b>Named trade basins</b></td><td>Cluster the flow graph into named regions ("The Amber Road", "Inner Sea") with soft borders + a per-basin stat card in the Atlas (volume, top goods, richest port) — the Regions tab.</td></tr>
+  <tr><td><b>Cause chips on deaths</b></td><td>Attach the dominant cause to each abandonment (famine · plague · war · route shift) from the town's last decade of journal entries — the census and timeline show <i>why</i> it died, not just when.</td></tr>
+  <tr><td><b>Migration arrows</b></td><td>A transient map animation when a town empties: fading arrows along the survivors' roads to their havens.</td></tr>
+  <tr><td><b>Era scrubber</b></td><td>Drag a year slider under the Atlas graphs to replay the world: markers, heat and census snap to that year (needs per-year hub snapshots — bounded ring buffer).</td></tr>
+  <tr><td><b>Census sparklines</b></td><td>A tiny 30-year population sparkline per census row from <code>TickHub.history</code>.</td></tr>
+  <tr><td><b>Heat by good</b></td><td>Filter Trade Heat to one commodity (silk heat vs grain heat) from the Goods Codex.</td></tr>
+</table>
+
+<div class="note"><b style="color:var(--parchment)">Files touched:</b> <code>sim/tick.rs</code> (lifecycle pass, swarming, throughput/world series, colony-zombie fix, 2 new tests + digest), <code>commands/campaign_commands.rs</code> (HubBrief/WorldEconomy payloads), <code>canvas/OverlayManager.ts</code> (Trade Heat, † halo, ✦ star), <code>ui/AtlasPanel.tsx</code> (new), <code>ui/CampaignTopBar.tsx</code> (Atlas button + lenses), <code>ui/MapCanvas.tsx</code>, <code>ui/Toolbar.tsx</code>, stores + types.</div>
+
+</div>
+</body>
+</html>

@@ -198,6 +198,21 @@ export function CampaignTopBar() {
         <div style={{ position: "fixed", inset: 0, zIndex: 140 }} onClick={() => setOpenMenu(null)} />
       )}
       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        {/* The Atlas — the headline "what happens in the world and why" screen. */}
+        <button onClick={() => ui.setShowAtlas(!ui.showAtlas)}
+          title="World Atlas — world graphs, city census, lifecycle timeline"
+          style={{
+            padding: "5px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap",
+            border: `1px solid ${ui.showAtlas ? T.goldDim : T.line}`,
+            background: ui.showAtlas ? "#241d0c" : "rgba(12,18,26,0.6)",
+            color: ui.showAtlas ? T.gold : T.inkDim, fontWeight: ui.showAtlas ? 700 : 400,
+          }}>🗺 Atlas</button>
+        {/* Map lenses: quick toggles for the trade overlays. */}
+        <button onClick={() => ui.toggleOverlay("tradeHeat")} title="Trade Heat — where trade concentrates"
+          style={lensChip(ui.overlayVisibility.tradeHeat ?? false, "#d9a441")}>🔥</button>
+        <button onClick={() => ui.toggleOverlay("dynamicFlow")} title="Dynamic Trade Flow — the live trade arteries"
+          style={lensChip(ui.overlayVisibility.dynamicFlow ?? false, "#4fd0c0")}>🌊</button>
+        <span style={{ width: 1, height: 20, background: T.line, margin: "0 3px" }} />
         {groups.map((g) => {
           const openCount = g.items.filter((i) => i.on).length;
           const isOpen = openMenu === g.key;
@@ -318,6 +333,14 @@ const menuItem: React.CSSProperties = {
   padding: "6px 8px", borderRadius: 5, border: "none", background: "transparent",
   cursor: "pointer", fontSize: 11.5, whiteSpace: "nowrap",
 };
+/** A compact map-lens toggle (overlay on/off) tinted in the overlay's colour. */
+const lensChip = (on: boolean, hue: string): React.CSSProperties => ({
+  width: 28, height: 26, borderRadius: 6, fontSize: 12, cursor: "pointer",
+  border: `1px solid ${on ? hue : T.line}`,
+  background: on ? "rgba(255,255,255,0.05)" : "rgba(12,18,26,0.6)",
+  opacity: on ? 1 : 0.6,
+});
+
 const chromeChip = (on: boolean): React.CSSProperties => ({
   padding: "5px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap",
   border: `1px solid ${on ? T.accent : T.line}`,

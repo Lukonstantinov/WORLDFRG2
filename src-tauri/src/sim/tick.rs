@@ -134,6 +134,32 @@ pub const SUPPLY_SHIP_CAPACITY: f32 = 900.0;
 const SUPPLY_SHIP_COST: f32 = 3.0;
 /// A colony's dedicated supply fleet never grows past this (bounds the investment).
 const MAX_SUPPLY_SHIPS: u32 = 12;
+// ── Atlas 2.0 · organic city LIFECYCLE ──────────────────────────────────────
+/// Years of TERMINAL decline before a settlement is abandoned. Terminal means
+/// FAMINE-driven: severe sustained starvation while shrunk BELOW the natural
+/// capacity floor (poverty alone must never empty a town — an early draft with a
+/// mood clause killed 29 of 30 test towns by year 25). Recovery only halves the
+/// count — scars persist. At most 2 abandonments/year worldwide.
+const ABANDON_YEARS: f32 = 8.0;
+/// Population bar as a multiple of founding size. The pop pass caps capacity at
+/// ≥0.15× founding and floors at 0.10×, so only FAMINE (which multiplies pop
+/// below capacity) can push a town under 0.13 — exactly the towns that qualify.
+const ABANDON_POP_FRAC: f32 = 0.13;
+/// Organic SWARMING opens at year 25 (a generation in) — earlier than the colonial
+/// era, because walking over the hill needs no joint-stock company.
+const SWARM_START_TICK: u32 = 25 * 365;
+/// A mother city must outgrow its founding size by this multiple (prosperous,
+/// crowded), with good mood and no famine, before it swarms.
+const SWARM_PRESSURE: f32 = 1.55;
+const SWARM_MIN_POP: f32 = 9_000.0;
+/// Share of the mother's people who walk out to break new ground.
+const SWARM_POP_FRAC: f32 = 0.07;
+/// Swarming is SHORT-range (fraction of world width) — daughters cluster into
+/// living regions, unlike the long colonial reach.
+const SWARM_REACH_FRAC: f32 = 0.10;
+/// Only genuinely farmable sites attract organic settlers (no food lifeline).
+const SWARM_MIN_FERTILE: f32 = 0.25;
+
 /// Ships a fresh colony is founded with (the founding fleet on the first grain run).
 const SUPPLY_SHIPS_AT_FOUNDING: u32 = 2;
 /// A food SOURCE must keep this share of its own grain surplus (only the rest is
@@ -1009,6 +1035,20 @@ pub struct TickHub {
     /// The house that currently CONTROLS this government (captured a majority of its
     /// officials), or −1. Its goods get favourable tariffs + a trade-influence boost.
     #[serde(default = "neg_one_i32")] pub captor_house: i32,
+    // ── Atlas 2.0 · city LIFECYCLE (appended LAST → old saves default). ──
+    /// The settlement is DEAD (a † ruin on the map): skipped by the food/population
+    /// pass so it stays dead, kept forever for the record.
+    #[serde(default)] pub abandoned: bool,
+    /// Years accumulated in TERMINAL decline (at the famine floor and still
+    /// starving/miserable); at ABANDON_YEARS the settlement empties.
+    #[serde(default)] pub decline_years: f32,
+    /// Tick the settlement was founded MID-CAMPAIGN (0 = primordial, from worldgen).
+    #[serde(default)] pub founded_tick: u32,
+    /// Tick the settlement died (0 = alive).
+    #[serde(default)] pub died_tick: u32,
+    /// Last FULL YEAR's trade throughput (grain-eq, imports + exports) from the
+    /// flow ledger — drives the Trade Heat overlay and the Atlas census.
+    #[serde(default)] pub trade_last_year: f32,
 }
 
 /// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by
@@ -1952,6 +1992,17 @@ pub struct CampaignSim {
     /// the Economy step). Consumed as colonies are founded; empty on old saves.
     #[serde(default)]
     pub colonizable: Vec<ColonizeSite>,
+    /// Atlas 2.0 — yearly world samples for the Atlas graphs, one row per completed
+    /// year: `[year, population, trade volume (grain-eq), live hubs, cumulative
+    /// foundings, cumulative abandonments]`. Bounded (oldest rows drop past ~400).
+    #[serde(default)]
+    pub world_series: Vec<[f32; 6]>,
+    /// Atlas 2.0 — lifetime settlement lifecycle counters (all causes: organic
+    /// swarming + colony ventures; abandonments + colony collapses).
+    #[serde(default)]
+    pub total_foundings: u32,
+    #[serde(default)]
+    pub total_abandonments: u32,
     /// Trade-base patronage: the house developing each hub as a base (hub-indexed,
     /// −1 = none). Resized to `hubs` each tick. Empty on old saves (serde default).
     /// See docs/TRADE_BASE_MECHANIC_PLAN.md.
@@ -3047,6 +3098,29 @@ impl CampaignSim {
         if !self.flow_accum.is_empty() {
             self.flow_year = self.flow_accum.iter().map(|(&(a, b), &v)| (a, b, v)).collect();
             self.flow_accum.clear();
+        }
+        // ── Atlas 2.0 · per-hub yearly throughput (Trade Heat / census) + the
+        //    world sample for the Atlas graphs. ──
+        let by_id: std::collections::HashMap<u32, usize> =
+            self.hubs.iter().enumerate().map(|(i, h)| (h.id, i)).collect();
+        for h in self.hubs.iter_mut() { h.trade_last_year = 0.0; }
+        let mut trade_total = 0.0f32;
+        for &(a, b, v) in &self.flow_year {
+            trade_total += v;
+            if let Some(&i) = by_id.get(&a) { self.hubs[i].trade_last_year += v; }
+            if let Some(&i) = by_id.get(&b) { self.hubs[i].trade_last_year += v; }
+        }
+        let population: f32 = self.hubs.iter()
+            .filter(|h| !h.is_estate).map(|h| h.population.max(0.0)).sum();
+        let alive = self.hubs.iter()
+            .filter(|h| !h.is_estate && !h.abandoned && h.population >= 1.0).count();
+        self.world_series.push([
+            yr.saturating_sub(1) as f32, population, trade_total, alive as f32,
+            self.total_foundings as f32, self.total_abandonments as f32,
+        ]);
+        if self.world_series.len() > 400 {
+            let excess = self.world_series.len() - 400;
+            self.world_series.drain(0..excess);
         }
     }
 
@@ -6259,6 +6333,9 @@ impl CampaignSim {
         let n = self.hubs.len();
         let ng = self.goods.len();
         for h in 0..n {
+            // A dead settlement stays dead — the founding-pop floor below must
+            // never resurrect an abandoned ruin (or a collapsed colony).
+            if self.hubs[h].abandoned { continue; }
             let mut food_need = 0.0;
             let mut food_have = 0.0;
             let mut food_prod = 0.0;
@@ -6426,6 +6503,8 @@ impl CampaignSim {
             self.update_unrest();
             // Estate/manufactory disasters strike + funded repairs progress (yearly).
             self.estate_condition_pass();
+            // Atlas 2.0 — the LIVING MAP: organic settlement death & birth.
+            self.lifecycle_pass(expansion_ok);
             // House trade outposts from year 30 (rich house, heavy cost); full
             // settlement colonies from year 50 (joint-stock, food lifeline).
             if expansion_ok && self.tick >= BASE_START_TICK {
@@ -6605,6 +6684,7 @@ impl CampaignSim {
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0,
         });
         // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
         self.routes_dirty = true;
@@ -7204,6 +7284,174 @@ impl CampaignSim {
     /// hub on a fertile reachable site (heavy, joint-stock financing), seeding it
     /// with emigrants (relieving the parent). It graduates outpost→city in
     /// `colony_pass` and may later go autonomous.
+    // ── Atlas 2.0 · the LIVING MAP: organic settlement death & birth ────────────
+
+    /// Yearly. DEATH: a city that has spent ABANDON_YEARS shrunk to the famine
+    /// floor while still starving/miserable is abandoned — survivors scatter to
+    /// the nearest living towns and a † ruin remains. BIRTH: a thriving city
+    /// bursting past its founding size swarms — a slice of its people walk out
+    /// and found an independent town on nearby free land.
+    fn lifecycle_pass(&mut self, expansion_ok: bool) {
+        // ── DEATH ──
+        let mut deaths = 0u32;
+        for h in 0..self.hubs.len() {
+            let hub = &self.hubs[h];
+            if hub.is_estate || hub.abandoned || (hub.colony_kind == 1 && !hub.autonomous) {
+                continue; // dependent colonies die by their own lifeline rules
+            }
+            if hub.population < 1.0 { continue; }
+            let terminal = hub.population < hub.founding_pop * ABANDON_POP_FRAC
+                && hub.starving > 0.5;
+            if terminal {
+                self.hubs[h].decline_years += 1.0;
+            } else {
+                self.hubs[h].decline_years = (self.hubs[h].decline_years - 0.5).max(0.0);
+            }
+            if self.hubs[h].decline_years < ABANDON_YEARS || deaths >= 2 { continue; }
+            // Systemic anchors don't wink out mid-story: a city at war or hosting a
+            // live bank holds on.
+            if self.hubs[h].war_with >= 0 { continue; }
+            if self.banks.iter().any(|b| !b.defunct && b.seat as usize == h) { continue; }
+            // The PULL factor: abandonment is MIGRATION, not evaporation — it needs
+            // somewhere better to go: a living, fed town of the same component.
+            // (This also keeps a uniformly-starving world from grinding itself
+            // empty: if everywhere is hungry, people endure where they are.)
+            let comp = self.hubs[h].component;
+            let has_haven = self.hubs.iter().enumerate().any(|(j, o)| j != h
+                && !o.is_estate && !o.abandoned && o.component == comp
+                && o.starving < 0.25 && o.population > o.founding_pop * 0.5);
+            if !has_haven { continue; }
+            self.abandon_hub(h);
+            deaths += 1;
+        }
+        // ── BIRTH ──
+        if expansion_ok && self.tick >= SWARM_START_TICK {
+            self.maybe_swarm_town();
+        }
+    }
+
+    /// Abandon a settlement: survivors migrate to the nearest living towns of the
+    /// same component, the ruin (population 0, `abandoned`) stays on the map.
+    fn abandon_hub(&mut self, h: usize) {
+        let tick = self.tick;
+        let nm = self.hubs[h].name.clone();
+        let comp = self.hubs[h].component;
+        let (hx, hy) = (self.hubs[h].x, self.hubs[h].y);
+        let mut dests: Vec<(usize, f32)> = (0..self.hubs.len())
+            .filter(|&j| j != h && !self.hubs[j].is_estate && !self.hubs[j].abandoned
+                && self.hubs[j].component == comp && self.hubs[j].population >= 1.0)
+            .map(|j| {
+                let mut dx = (self.hubs[j].x - hx).abs();
+                if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
+                (j, (dx * dx + (self.hubs[j].y - hy).powi(2)).sqrt())
+            })
+            .collect();
+        dests.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        dests.truncate(3);
+        let refugees = self.hubs[h].population * 0.6;
+        let dest_name = dests.first().map(|&(j, _)| self.hubs[j].name.clone());
+        if !dests.is_empty() {
+            let share = refugees / dests.len() as f32;
+            for &(j, _) in &dests { self.hubs[j].population += share; }
+        }
+        let hub = &mut self.hubs[h];
+        hub.abandoned = true;
+        hub.died_tick = tick;
+        hub.population = 0.0;
+        hub.starving = 0.0;
+        hub.decline_years = 0.0;
+        for v in hub.stock.iter_mut() { *v = 0.0; }
+        for v in hub.production.iter_mut() { *v = 0.0; }
+        self.total_abandonments += 1;
+        self.routes_dirty = true;
+        self.journal.push(JournalEntry { tick, kind: "abandonment".into(), hub: h as i32,
+            good: -1, value: 0.0, text: match dest_name {
+                Some(d) => format!("{} is abandoned — its last families take the road to {}", nm, d),
+                None => format!("{} is abandoned — famine and decline have emptied it", nm),
+            } });
+    }
+
+    /// A thriving, crowded city sends SWARM_POP_FRAC of its people to break new
+    /// ground: an INDEPENDENT town (no charter, no lifeline) on the best farmable
+    /// free site within short range. At most one founding a year worldwide so each
+    /// stays a legible chronicle event.
+    fn maybe_swarm_town(&mut self) {
+        if self.colonizable.is_empty() { return; }
+        let mut best = (usize::MAX, 0.0f32);
+        for h in 0..self.hubs.len() {
+            let hub = &self.hubs[h];
+            if hub.is_estate || hub.abandoned || hub.colony_kind != 0 { continue; }
+            if hub.population < SWARM_MIN_POP
+                || hub.population < hub.founding_pop * SWARM_PRESSURE { continue; }
+            if hub.starving > 0.05 || hub.mood < 0.5 { continue; }
+            let score = hub.population / hub.founding_pop.max(1.0) * (0.5 + hub.mood);
+            if score > best.1 { best = (h, score); }
+        }
+        let Some(mother) = (best.0 != usize::MAX).then_some(best.0) else { return };
+        let cap = self.world_w * SWARM_REACH_FRAC;
+        let (mx, my) = (self.hubs[mother].x, self.hubs[mother].y);
+        let mut bi = (usize::MAX, 0.0f32);
+        for (i, s) in self.colonizable.iter().enumerate() {
+            if s.fertility < SWARM_MIN_FERTILE { continue; }
+            let mut dx = (s.x - mx).abs();
+            if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
+            let d = (dx * dx + (s.y - my).powi(2)).sqrt();
+            // Not beyond a settler's walk, and not on the mother's doorstep either.
+            if d > cap || d < cap * 0.15 { continue; }
+            let score = (0.3 + s.fertility + 0.5 * s.trade_value) * (1.0 - d / cap);
+            if score > bi.1 { bi = (i, score); }
+        }
+        let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return };
+        let site = self.colonizable.remove(si);
+        let seed_pop = (self.hubs[mother].population * SWARM_POP_FRAC).max(600.0);
+        self.hubs[mother].population -= seed_pop;
+        let mother_name = self.hubs[mother].name.clone();
+        let idx = self.create_organic_town(mother, &site, seed_pop);
+        let new_name = self.hubs[idx].name.clone();
+        self.total_foundings += 1;
+        self.journal.push(JournalEntry { tick: self.tick, kind: "founding".into(),
+            hub: idx as i32, good: -1, value: seed_pop,
+            text: format!("Settlers from {} found {}", mother_name, new_name) });
+    }
+
+    /// Create the swarm's daughter town: an ordinary FREE settlement (colony_kind 0)
+    /// with a culture-styled name, farming what the site gives it.
+    fn create_organic_town(&mut self, mother: usize, site: &ColonizeSite, seed_pop: f32) -> usize {
+        let ng = self.goods.len();
+        // Settlers carry their skills but raw land yields less at first; fertile
+        // ground closes the gap.
+        let base_per_capita: Vec<f32> = self.hubs[mother].base_per_capita.iter()
+            .map(|v| v * (0.40 + 0.40 * site.fertility)).collect();
+        let pop = seed_pop.max(1.0);
+        let production: Vec<f32> = base_per_capita.iter().map(|v| v * pop).collect();
+        let id = 100_000 + self.hubs.len() as u32;
+        let name = crate::sim::names::gen_name(
+            site.x.max(0.0) as u32, site.y.max(0.0) as u32,
+            self.world_w as u32, self.world_h());
+        let component = self.hubs[mother].component;
+        self.hubs.push(TickHub {
+            id, x: site.x, y: site.y, name, population: pop, founding_pop: pop,
+            stock: production.clone(), price: self.goods.iter().map(|g| g.base_value).collect(),
+            production, grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
+            is_estate: false, parent: -1, koppen: site.koppen, coastal: site.coastal, component,
+            export_earn: 0.0, import_spend: 0.0, mood: 0.62, sent_food: 0.7, sent_prosperity: 0.5,
+            sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
+            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(),
+            tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
+            estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
+            treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
+            finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
+            quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
+            colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
+            reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0,
+        });
+        self.routes_dirty = true;
+        self.hubs.len() - 1
+    }
+
     fn maybe_found_settlement_colony(&mut self) {
         if self.colonizable.is_empty() { return; }
         let n_settle = self.hubs.iter().filter(|h| h.colony_kind == 1 && !h.autonomous).count();
@@ -7417,7 +7665,9 @@ impl CampaignSim {
             colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
             reserve_food: 30.0, reserve_cap: 365.0, supply_years: 0.0, colony_founded_tick: self.tick,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0,
         });
+        self.total_foundings += 1; // Atlas 2.0 lifecycle counter (colony ventures too)
         self.routes_dirty = true;
         self.hubs.len() - 1
     }
@@ -7635,6 +7885,13 @@ impl CampaignSim {
         self.hubs[h].main_bank = -1;
         self.hubs[h].backers.clear();
         self.hubs[h].population = 0.0; // the dead-city marker handles the rest
+        // Atlas 2.0: mark it truly DEAD — without this the founding-pop floor in the
+        // population pass resurrected collapsed colonies at 10% strength next tick.
+        self.hubs[h].abandoned = true;
+        self.hubs[h].died_tick = tick;
+        for v in self.hubs[h].stock.iter_mut() { *v = 0.0; }
+        for v in self.hubs[h].production.iter_mut() { *v = 0.0; }
+        self.total_abandonments += 1;
         self.journal.push(JournalEntry { tick, kind: "colony".into(), hub: h as i32, good: -1,
             value: 0.0, text: format!("{} collapses — its food lifeline failed and the settlement is abandoned", nm) });
     }
@@ -9394,6 +9651,7 @@ mod tests {
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0,
         }
     }
 
@@ -9425,6 +9683,7 @@ mod tests {
             spec_centers: vec![], spec_year: 0, spec_prev_profit: vec![],
             banks: vec![], crashes: vec![], wars: vec![], war_log: vec![],
             flow_year: vec![], flow_accum: std::collections::HashMap::new(),
+            world_series: vec![], total_foundings: 0, total_abandonments: 0,
             quality_migrated: false,
             days: vec![],
             neighbors: vec![],
@@ -9629,6 +9888,18 @@ mod tests {
             s.houses.push(h);
         }
         s.seed_house_count = s.houses.len() as u32;
+        // Atlas 2.0 · FREE LAND south of the market towns, so the lifecycle passes
+        // (organic swarming + colonial ventures) have somewhere to found.
+        for i in 0..12u32 {
+            s.colonizable.push(ColonizeSite {
+                x: 4.5 + (i % 4) as f32 * 12.0,
+                y: 40.0 + (i / 4) as f32 * 8.0,
+                koppen: 8, elevation: 0.1,
+                fertility: 0.45 + (i % 3) as f32 * 0.15,
+                coastal: i % 2 == 0, kind_hint: 1,
+                trade_value: 0.2 + (i % 4) as f32 * 0.1,
+            });
+        }
         s.rebuild_routes();
 
         let mut min_w = f32::INFINITY;
@@ -9663,9 +9934,16 @@ mod tests {
             let outposts = s.hubs.iter().filter(|h| h.colony_kind == 2).count();
             let offices: usize = s.houses.iter().filter(|h| !h.defunct).map(|h| h.offices.len()).sum();
             if yr % 5 == 0 {
+                let towns_alive = s.hubs.iter()
+                    .filter(|h| !h.is_estate && !h.abandoned && h.population >= 1.0).count();
+                let hungry = s.hubs.iter()
+                    .filter(|h| !h.is_estate && !h.abandoned && h.starving > 0.5).count();
+                let thriving = s.hubs.iter().filter(|h| !h.is_estate && !h.abandoned
+                    && h.mood > 0.55 && h.starving < 0.1).count();
                 eprintln!(
-                    "yr {yr:2}: houses {active}↑/{defunct}✝  banks {banks}  coins {coins} (trust {:.0}%)  wars {}  crashes {}  richest {rich:.0}  contracts {contracts}  offices {offices}  colonies {colonies}  outposts {outposts}  finest {} {:.0}%  thefts {thefts}",
+                    "yr {yr:2}: houses {active}↑/{defunct}✝  banks {banks}  coins {coins} (trust {:.0}%)  wars {}  crashes {}  richest {rich:.0}  contracts {contracts}  offices {offices}  colonies {colonies}  outposts {outposts}  towns {towns_alive} (+{}/−{}) hungry {hungry} thriving {thriving}  finest {} {:.0}%  thefts {thefts}",
                     top_trust * 100.0, s.wars.len(), s.crashes.len(),
+                    s.total_foundings, s.total_abandonments,
                     s.goods[finest.1].name, finest.0 * 100.0,
                 );
             }
@@ -9685,6 +9963,65 @@ mod tests {
         assert!(min_w > -100.0, "no runaway-insolvent house (limited liability): {min_w}");
         // The world must actually be DYNAMIC: houses turn over.
         assert!(ever_dissolved, "houses rise and fall over decades");
+    }
+
+    /// Atlas 2.0 · a thriving city bursting past its founding size SWARMS: a slice
+    /// of its people found an independent daughter town on nearby free land, the
+    /// site is consumed, and the founding is chronicled.
+    #[test]
+    fn thriving_city_swarms_a_daughter_town() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let h0 = hub(0, 10.0, 10.0, 20_000.0, vec![20_000.0 * 0.02], 0);
+        let mut s = sim(vec![h0], goods);
+        s.colonizable.push(ColonizeSite {
+            x: 16.0, y: 10.0, koppen: 8, elevation: 0.1, fertility: 0.8,
+            coastal: false, kind_hint: 1, trade_value: 0.3,
+        });
+        // The swarm preconditions: crowded (2× founding), content, fed.
+        s.hubs[0].population = s.hubs[0].founding_pop * 2.0;
+        s.hubs[0].mood = 0.7;
+        s.hubs[0].starving = 0.0;
+        s.tick = SWARM_START_TICK;
+        let mother_pop = s.hubs[0].population;
+        s.maybe_swarm_town();
+        assert_eq!(s.hubs.len(), 2, "a daughter town was founded");
+        let d = &s.hubs[1];
+        assert_eq!(d.colony_kind, 0, "organic town, not a chartered colony");
+        assert!(d.founded_tick == SWARM_START_TICK && !d.abandoned && !d.name.is_empty());
+        assert!(d.population > 0.0 && s.hubs[0].population < mother_pop,
+            "settlers actually left the mother city");
+        assert!(s.colonizable.is_empty(), "the site was consumed");
+        assert!(s.journal.iter().any(|e| e.kind == "founding"), "founding chronicled");
+        assert_eq!(s.total_foundings, 1);
+    }
+
+    /// Atlas 2.0 · a famine-floored town with a fed HAVEN nearby is abandoned:
+    /// survivors migrate to the haven, the abandonment is chronicled, and the ruin
+    /// is never resurrected by the population floor.
+    #[test]
+    fn famine_town_is_abandoned_and_stays_dead() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 10.0, 10.0, 30_000.0, vec![30_000.0 * 0.03], 0), // the haven: fed
+            hub(1, 60.0, 10.0, 10_000.0, vec![0.0], 0),             // doomed: no food
+        ];
+        let mut s = sim(hubs, goods);
+        s.rebuild_routes();
+        // Terminal state reached: famine-floored and starving for ABANDON_YEARS.
+        s.hubs[1].population = s.hubs[1].founding_pop * 0.11;
+        s.hubs[1].starving = 0.9;
+        s.hubs[1].decline_years = ABANDON_YEARS;
+        let haven_before = s.hubs[0].population;
+        s.lifecycle_pass(true);
+        assert!(s.hubs[1].abandoned, "famine town abandoned");
+        assert!(s.hubs[1].population < 1.0 && s.hubs[1].died_tick == s.tick);
+        assert!(s.hubs[0].population > haven_before, "survivors reached the haven");
+        assert!(s.journal.iter().any(|e| e.kind == "abandonment"), "abandonment chronicled");
+        assert_eq!(s.total_abandonments, 1);
+        // The ruin stays dead through real ticks (the pop floor must not revive it).
+        s.advance(60);
+        assert!(s.hubs[1].population < 1.0, "ruin not resurrected by the pop floor");
+        assert!(s.hubs[1].abandoned);
     }
 
     /// Social strata invariant: every settlement's four shares stay in [0,1] and sum

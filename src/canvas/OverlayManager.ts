@@ -142,6 +142,8 @@ export class OverlayManager {
   private lakes: LakeData[] = [];
   private settlements: Settlement[] = [];
   private colonies: ColonyMarker[] = [];
+  /** Atlas 2.0 · per-hub yearly trade throughput for the Trade Heat overlay. */
+  private heatPoints: { x: number; y: number; v: number }[] = [];
   private windData: { samples: VectorSample[]; gridW: number; gridH: number } | null = null;
   private currentLines: Streamline[] = [];
   private tradeRoutes: TradeRoute[] = [];
@@ -237,6 +239,43 @@ export class OverlayManager {
   drawLakes(lakes: LakeData[]) { this.lakes = lakes; }
   drawSettlements(settlements: Settlement[]) { this.settlements = settlements; }
   drawColonies(colonies: ColonyMarker[]) { this.colonies = colonies; }
+  /** Atlas 2.0 · set the Trade Heat points (hub position + yearly throughput). */
+  drawTradeHeat(pts: { x: number; y: number; v: number }[]) { this.heatPoints = pts; }
+
+  /** Trade Heat: additive radial glows sized/coloured by each hub's share of the
+   *  busiest hub's yearly throughput. sqrt ramp keeps mid-size markets visible;
+   *  "lighter" compositing makes overlapping basins genuinely GLOW — the regions
+   *  where trade concentrates read instantly. */
+  private renderTradeHeat(ctx: CanvasRenderingContext2D) {
+    const max = this.heatPoints.reduce((m, p) => Math.max(m, p.v), 0);
+    if (max <= 0) return;
+    const ramp = (t: number): string => {
+      // teal (79,208,192) → gold (216,178,74) → crimson (214,80,58)
+      const lerp = (a: number, b: number, k: number) => Math.round(a + (b - a) * k);
+      const [r, g, b] = t < 0.5
+        ? [lerp(79, 216, t * 2), lerp(208, 178, t * 2), lerp(192, 74, t * 2)]
+        : [lerp(216, 214, t * 2 - 1), lerp(178, 80, t * 2 - 1), lerp(74, 58, t * 2 - 1)];
+      return `${r},${g},${b}`;
+    };
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (const p of this.heatPoints) {
+      const t = Math.sqrt(p.v / max);
+      if (t < 0.05) continue;
+      const r = 3 + 20 * t; // world cells — scales naturally with zoom
+      const cx = p.x + 0.5, cy = p.y + 0.5;
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      const col = ramp(t);
+      grad.addColorStop(0, `rgba(${col},${(0.10 + 0.32 * t).toFixed(3)})`);
+      grad.addColorStop(0.55, `rgba(${col},${(0.15 * t).toFixed(3)})`);
+      grad.addColorStop(1, `rgba(${col},0)`);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
 
   drawWindArrows(data: VectorSample[], gridW: number, gridH: number) {
     this.windData = { samples: data, gridW, gridH };
@@ -989,18 +1028,34 @@ export class OverlayManager {
       this.renderReachNetwork(ctx);
     }
 
+    // Atlas 2.0 · TRADE HEAT — where trade concentrates. Soft additive glows per
+    // hub, radius + colour ∝ last year's throughput (teal → gold → crimson).
+    // Drawn UNDER the settlement markers so the dots stay crisp on the glow.
+    if (this.visibility.tradeHeat && this.heatPoints.length > 0) {
+      this.renderTradeHeat(ctx);
+    }
+
     if (this.visibility.settlements && this.settlements.length > 0) {
       for (const s of this.settlements) {
-        // A DEAD (collapsed) city is marked with a small black cross in place, still
-        // shown on the map so the player sees where a settlement was lost.
+        // A DEAD (abandoned/collapsed) city is a † ruin: a dark cross on a faint
+        // parchment halo, still on the map so the loss stays visible forever.
         if (s.dead) {
           const dinv = 1 / Math.sqrt(this.currentScale);
-          const r = Math.max(0.9, 1.6 * dinv);
-          ctx.strokeStyle = "#000000";
+          const r = Math.max(1.0, 1.8 * dinv);
+          const cx = s.x + 0.5, cy = s.y + 0.5;
+          // Halo first so the cross reads on dark terrain too.
+          ctx.strokeStyle = "rgba(232,217,176,0.55)";
+          ctx.lineWidth = Math.max(1.1, 2.2 * dinv);
+          ctx.beginPath();
+          ctx.moveTo(cx, cy - r * 1.15); ctx.lineTo(cx, cy + r);
+          ctx.moveTo(cx - r * 0.75, cy - r * 0.45); ctx.lineTo(cx + r * 0.75, cy - r * 0.45);
+          ctx.stroke();
+          // The † itself.
+          ctx.strokeStyle = "#0d0d0d";
           ctx.lineWidth = Math.max(0.5, 1.0 * dinv);
           ctx.beginPath();
-          ctx.moveTo(s.x + 0.5 - r, s.y + 0.5 - r); ctx.lineTo(s.x + 0.5 + r, s.y + 0.5 + r);
-          ctx.moveTo(s.x + 0.5 + r, s.y + 0.5 - r); ctx.lineTo(s.x + 0.5 - r, s.y + 0.5 + r);
+          ctx.moveTo(cx, cy - r * 1.15); ctx.lineTo(cx, cy + r);
+          ctx.moveTo(cx - r * 0.75, cy - r * 0.45); ctx.lineTo(cx + r * 0.75, cy - r * 0.45);
           ctx.stroke();
           continue;
         }
@@ -1046,6 +1101,26 @@ export class OverlayManager {
             ctx.arc(cx, cy, radius * 0.35, 0, Math.PI * 2);
             ctx.fill();
           }
+        }
+        // Atlas 2.0 · a settlement founded THIS campaign wears a gold founding
+        // star for its first years — new towns pop out at a glance.
+        if (s.isNew) {
+          const dinv = 1 / Math.sqrt(this.currentScale);
+          const sr = Math.max(radius * 0.9, 1.4 * dinv);
+          const sx = cx + radius + sr * 0.6, sy = cy - radius - sr * 0.4;
+          ctx.fillStyle = "#ffd75e";
+          ctx.strokeStyle = "rgba(0,0,0,0.6)";
+          ctx.lineWidth = Math.max(0.2, 0.35 * dinv);
+          ctx.beginPath();
+          for (let i = 0; i < 8; i++) {
+            const rr = i % 2 === 0 ? sr : sr * 0.38;
+            const a = -Math.PI / 2 + (i * Math.PI) / 4;
+            const px = sx + Math.cos(a) * rr, py = sy + Math.sin(a) * rr;
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
         }
         ctx.globalAlpha = 1;
       }

@@ -121,6 +121,8 @@ interface UIStore {
   showCoinCredit: boolean;
   /** #23 · Itinerary / travel-time panel open. */
   showItinerary: boolean;
+  /** Atlas 2.0 · the World Atlas (world graphs / city census / timeline) panel. */
+  showAtlas: boolean;
   /** #30/#29 · Economy Dashboard (price index / inequality) panel open. */
   showEconomyDashboard: boolean;
   /** #35/#36/#37 · Goods Codex (provenance / history / scarcity) panel open. */
@@ -207,6 +209,7 @@ interface UIStore {
   setShowCityRanking: (v: boolean) => void;
   setShowSpeculation: (v: boolean) => void;
   setShowItinerary: (v: boolean) => void;
+  setShowAtlas: (v: boolean) => void;
   setShowEconomyDashboard: (v: boolean) => void;
   setShowGoodsCodex: (v: boolean) => void;
   setTravelRoute: (pts: [number, number][] | null) => void;
@@ -266,7 +269,7 @@ export const useUIStore = create<UIStore>((set) => ({
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
     speculation: false,
-    houseControl: false, merchantRoutes: false, futures: false, dynamicFlow: false,
+    houseControl: false, merchantRoutes: false, futures: false, dynamicFlow: false, tradeHeat: false,
     colonies: true,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
     travelRoute: false, goodScarcity: false, toponyms: false,
@@ -301,6 +304,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showSpeculation: false,
   showCoinCredit: false,
   showItinerary: false,
+  showAtlas: false,
   showEconomyDashboard: false,
   showGoodsCodex: false,
   travelRoute: null,
@@ -405,6 +409,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowSpeculation: (v) => set({ showSpeculation: v }),
   setShowCoinCredit: (v) => set({ showCoinCredit: v }),
   setShowItinerary: (v) => set({ showItinerary: v }),
+  setShowAtlas: (v) => set({ showAtlas: v }),
   setShowEconomyDashboard: (v) => set({ showEconomyDashboard: v }),
   setShowGoodsCodex: (v) => set({ showGoodsCodex: v }),
   setTravelRoute: (pts) => set({ travelRoute: pts }),
