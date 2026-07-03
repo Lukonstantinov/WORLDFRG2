@@ -22,7 +22,12 @@ pub struct CampaignCache {
     /// True once we've tried to load from the DB, so a genuinely empty campaign is
     /// distinguished from "not yet loaded".
     pub loaded: bool,
-    pub sim: Option<CampaignSim>,
+    /// Arc so read-only query commands take the sim by POINTER BUMP instead of a
+    /// deep clone (the old `.clone()` copied every hub's per-good vectors, the
+    /// per-hub histories and the 20k-entry journal on EVERY panel query). Writers
+    /// (`campaign_advance` etc.) go through `Arc::make_mut`, which only copies if
+    /// a query happens to hold a reference at that instant.
+    pub sim: Option<Arc<CampaignSim>>,
     /// Unsaved in-memory changes not yet written to the DB metadata row.
     pub dirty: bool,
     /// Wall-clock time of the last DB flush (drives the autosave cadence).

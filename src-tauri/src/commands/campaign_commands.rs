@@ -681,7 +681,7 @@ fn ensure_campaign_loaded(cache: &mut crate::db::CampaignCache, conn: &Connectio
             let mut sim: CampaignSim =
                 serde_json::from_str(&s).map_err(|e| format!("campaign_sim parse: {e}"))?;
             sim.rebuild_routes(); // `days` / `neighbors` are not serialized
-            Some(sim)
+            Some(std::sync::Arc::new(sim))
         }
         _ => None,
     };
@@ -690,9 +690,14 @@ fn ensure_campaign_loaded(cache: &mut crate::db::CampaignCache, conn: &Connectio
     Ok(())
 }
 
-/// A CLONE of the resident sim (loading it from the DB once if needed). Read-only
-/// commands use this; it never re-parses JSON after the first load.
-pub(crate) fn get_sim(db: &WorldDb, conn: &Connection) -> Result<Option<CampaignSim>, String> {
+/// A HANDLE to the resident sim (loading it from the DB once if needed) — an Arc
+/// pointer bump, NOT a deep copy. The old version returned `CampaignSim.clone()`,
+/// which copied every hub's per-good vectors, the per-hub histories and the
+/// 20k-entry journal on EVERY read-only panel query — megabytes per HUD refresh.
+/// The campaign lock is released before the caller computes, so heavy queries
+/// never stall the Play loop.
+pub(crate) fn get_sim(db: &WorldDb, conn: &Connection)
+    -> Result<Option<std::sync::Arc<CampaignSim>>, String> {
     let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
     ensure_campaign_loaded(&mut cache, conn)?;
     Ok(cache.sim.clone())
@@ -703,7 +708,7 @@ pub(crate) fn get_sim(db: &WorldDb, conn: &Connection) -> Result<Option<Campaign
 /// the whole sim.
 fn set_sim(db: &WorldDb, sim: &CampaignSim) -> Result<(), String> {
     let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
-    cache.sim = Some(sim.clone());
+    cache.sim = Some(std::sync::Arc::new(sim.clone()));
     cache.loaded = true;
     cache.dirty = true;
     Ok(())
@@ -715,7 +720,7 @@ fn persist_campaign(db: &WorldDb, conn: &Connection) -> Result<(), String> {
     let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
     if cache.dirty {
         if let Some(sim) = &cache.sim {
-            let json = serde_json::to_string(sim).map_err(|e| e.to_string())?;
+            let json = serde_json::to_string(sim.as_ref()).map_err(|e| e.to_string())?;
             metadata::campaign_set(conn, "campaign_sim", &json).map_err(|e| e.to_string())?;
         }
         cache.dirty = false;
@@ -838,7 +843,7 @@ fn inactive_snapshot() -> CampaignSnapshot {
 
 /// Atlas 2.0 · one NAMED TRADE BASIN — a cluster of living market towns whose
 /// strongest trade ties bind them together: "the regions where trade happens".
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct TradeBasin {
     /// Culture-styled region name from the basin's heart (e.g. "Vexillia").
     pub name: String,
@@ -857,11 +862,24 @@ pub struct TradeBasin {
 /// its TOP-2 flow edges, and the connected components of that sparse
 /// "strongest-partner" graph are the basins — weak long-range ties don't merge
 /// the whole world into one blob. Volume counts ALL flow internal to a basin.
+/// Basin memo: the clustering is deterministic in the sim state and can only
+/// change when time advances, so repeated panel opens / overlay refreshes at the
+/// same (seed, tick) are answered from this cache.
+static BASINS_MEMO: std::sync::Mutex<Option<(u64, u32, Vec<TradeBasin>)>> =
+    std::sync::Mutex::new(None);
+
 #[tauri::command]
 pub fn campaign_get_trade_basins(db: State<'_, WorldDb>) -> Result<Vec<TradeBasin>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
     if sim.flow_year.is_empty() { return Ok(vec![]); }
+    if let Ok(memo) = BASINS_MEMO.lock() {
+        if let Some((seed, tick, cached)) = memo.as_ref() {
+            if *seed == sim.seed && *tick == sim.tick {
+                return Ok(cached.clone());
+            }
+        }
+    }
     let idx_of: std::collections::HashMap<u32, usize> = sim.hubs.iter().enumerate()
         .filter(|(_, h)| !h.is_estate && !h.abandoned && h.population >= 1.0)
         .map(|(i, h)| (h.id, i))
@@ -916,6 +934,9 @@ pub fn campaign_get_trade_basins(db: State<'_, WorldDb>) -> Result<Vec<TradeBasi
         .collect();
     basins.sort_by(|a, b| b.volume.partial_cmp(&a.volume).unwrap_or(std::cmp::Ordering::Equal));
     basins.truncate(12);
+    if let Ok(mut memo) = BASINS_MEMO.lock() {
+        *memo = Some((sim.seed, sim.tick, basins.clone()));
+    }
     Ok(basins)
 }
 
@@ -1594,7 +1615,9 @@ pub async fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<Camp
                 .hubs.iter().map(|h| (h.x, h.y)).collect();
             if let Ok(sites) = recompute_colonizable(&db, &conn, &hub_xy) {
                 if !sites.is_empty() {
-                    if let Some(sim) = cache.sim.as_mut() { sim.colonizable = sites; }
+                    if let Some(sim) = cache.sim.as_mut() {
+                        std::sync::Arc::make_mut(sim).colonizable = sites;
+                    }
                 }
             }
         }
@@ -1619,8 +1642,10 @@ pub async fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<Camp
     let (snap, json) = {
         let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
         {
-            let sim = cache.sim.as_mut()
-                .ok_or_else(|| "No active campaign sim — start it first.".to_string())?;
+            // `make_mut` mutates in place; it only copies if a panel query holds an
+            // Arc to the sim at this exact instant (rare, and then just once).
+            let sim = std::sync::Arc::make_mut(cache.sim.as_mut()
+                .ok_or_else(|| "No active campaign sim — start it first.".to_string())?);
             advance_resilient(sim, ticks_run);
             sim.last_tick_ms = t0.elapsed().as_secs_f32() * 1000.0 / ticks_run.max(1) as f32;
         }
@@ -1631,7 +1656,7 @@ pub async fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<Camp
         // resident and dirty. `AUTOSAVE_EVERY_YEARS` = 2 per the campaign save cadence.
         let crossed_autosave = (sim.year() / AUTOSAVE_EVERY_YEARS) != (year_before / AUTOSAVE_EVERY_YEARS);
         let json = if crossed_autosave || stale {
-            Some(serde_json::to_string(sim).map_err(|e| e.to_string())?)
+            Some(serde_json::to_string(sim.as_ref()).map_err(|e| e.to_string())?)
         } else {
             None
         };

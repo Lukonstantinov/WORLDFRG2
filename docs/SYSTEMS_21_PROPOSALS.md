@@ -7,7 +7,20 @@ Each item names the code it touches and a rough cost. Nothing here is built yet.
 
 ## 1 · Performance
 
-### P1 — Stop cloning the whole sim per query  ★ the big one, cheap to fix
+> **Status (implemented):** P1 ✅ and P5 ✅ shipped. Receipt from the new
+> `bench_sim_clone` (30-hub toy world after 30 sim-years): a read-only query
+> paid **0.956 ms** for the old deep clone vs **0.000013 ms** for the Arc bump
+> — ~75 000× — and a real 150-hub campaign pays several times more per clone.
+> P2/P3/P4 were **evaluated against the code and deliberately skipped**:
+> P2 (bincode/journal split) — the persist cadence is already 2 sim-years /
+> wall-clock, and bincode isn't self-describing, which would break the
+> append-serde-default save-compat strategy the whole project relies on;
+> P3 (snapshot gating) — measured trivial (pop_spark is ≤30 points/hub);
+> P4 (rayon) — the daily passes interleave journal pushes and cross-hub reads,
+> so parallelising safely needs a pass restructuring first (revisit if tick
+> cost actually bites; `bench_campaign_tick` is the gate).
+
+### P1 — Stop cloning the whole sim per query  ★ SHIPPED
 `campaign_commands::get_sim` returns `cache.sim.clone()` — **every read-only
 panel query deep-clones the entire `CampaignSim`**: ~150 hubs × 45-good
 `stock/price/production/quality` vectors, per-hub `history`, the whole journal
@@ -45,7 +58,7 @@ contagion) serial for determinism. Measure with the existing
 `bench_campaign_tick` (`--ignored`) before/after.
 *Cost: 1–2 days incl. determinism audit; benefit grows with hub count.*
 
-### P5 — Query result caching keyed by tick
+### P5 — Query result caching keyed by tick  ★ SHIPPED (trade basins memo)
 Read-only queries (basins, speculation, inequality, trade flow) recompute per
 call but can only change when `sim.tick` advances (most only at New Year).
 A tiny `(tick, result)` memo in the campaign cache makes repeated panel opens

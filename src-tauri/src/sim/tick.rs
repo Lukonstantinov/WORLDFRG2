@@ -10011,6 +10011,49 @@ mod tests {
         assert!(ever_dissolved, "houses rise and fall over decades");
     }
 
+    /// Perf P1 receipt · what a read-only panel query paid BEFORE the Arc resident
+    /// sim (a full deep clone of a mature campaign) vs after (an Arc bump).
+    /// Run: cargo test --lib bench_sim_clone -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bench_sim_clone() {
+        use std::time::Instant;
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("fish", 0, 0, 1.2, 0.7, true),
+            good("olives", 0, 0, 1.6, 0.6, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+            good("iron", 2, 1, 5.0, 0.45, false),
+            good("wine", 3, 2, 8.0, 0.4, false),
+        ];
+        let ng = goods.len();
+        let mut hubs = Vec::new();
+        for i in 0..30u32 {
+            let pop = 8000.0 + (i as f32 * 911.0) % 26000.0;
+            let prod: Vec<f32> = (0..ng)
+                .map(|g| if (g + i as usize) % 3 == 0 { pop * 0.012 } else { pop * 0.0015 })
+                .collect();
+            hubs.push(hub(i, (i % 6) as f32 * 9.0, (i / 6) as f32 * 9.0, pop, prod, 0));
+        }
+        let mut s = sim(hubs, goods);
+        for i in 0..10u32 {
+            s.houses.push(house_at((i * 3) % 30, vec![3 + (i as usize % 3)], 3));
+        }
+        s.seed_house_count = s.houses.len() as u32;
+        s.rebuild_routes();
+        s.advance(365 * 30); // a mature campaign: histories + journal filled
+        let arc = std::sync::Arc::new(s);
+        let t0 = Instant::now();
+        for _ in 0..50 { let c = (*arc).clone(); std::hint::black_box(&c); }
+        let deep = t0.elapsed().as_secs_f64() * 1000.0 / 50.0;
+        let t1 = Instant::now();
+        for _ in 0..1_000_000 { let c = arc.clone(); std::hint::black_box(&c); }
+        let bump = t1.elapsed().as_secs_f64() * 1000.0 / 1_000_000.0;
+        eprintln!("per-query cost: deep clone {deep:.3} ms  →  Arc bump {bump:.6} ms  ({:.0}× faster)",
+            deep / bump.max(1e-9));
+        assert!(deep > bump, "Arc bump must beat a deep clone");
+    }
+
     /// Atlas 2.0 · a thriving city bursting past its founding size SWARMS: a slice
     /// of its people found an independent daughter town on nearby free land, the
     /// site is consumed, and the founding is chronicled.
