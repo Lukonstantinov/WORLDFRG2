@@ -123,6 +123,11 @@ interface UIStore {
   showItinerary: boolean;
   /** Atlas 2.0 · the World Atlas (world graphs / city census / timeline) panel. */
   showAtlas: boolean;
+  /** Batch 1 · Trade Heat filtered to ONE good (by id/name); null = all goods. */
+  heatGood: string | null;
+  /** Batch 1 · era scrubber: when set, the map's markers + heat show this past
+   *  year instead of the live world (set from the Atlas year slider). */
+  eraFrame: import("../types").EraFrame | null;
   /** #30/#29 · Economy Dashboard (price index / inequality) panel open. */
   showEconomyDashboard: boolean;
   /** #35/#36/#37 · Goods Codex (provenance / history / scarcity) panel open. */
@@ -210,6 +215,8 @@ interface UIStore {
   setShowSpeculation: (v: boolean) => void;
   setShowItinerary: (v: boolean) => void;
   setShowAtlas: (v: boolean) => void;
+  setHeatGood: (g: string | null) => void;
+  setEraFrame: (f: import("../types").EraFrame | null) => void;
   setShowEconomyDashboard: (v: boolean) => void;
   setShowGoodsCodex: (v: boolean) => void;
   setTravelRoute: (pts: [number, number][] | null) => void;
@@ -306,6 +313,8 @@ export const useUIStore = create<UIStore>((set) => ({
   showCoinCredit: false,
   showItinerary: false,
   showAtlas: false,
+  heatGood: null,
+  eraFrame: null,
   showEconomyDashboard: false,
   showGoodsCodex: false,
   travelRoute: null,
@@ -411,6 +420,8 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowCoinCredit: (v) => set({ showCoinCredit: v }),
   setShowItinerary: (v) => set({ showItinerary: v }),
   setShowAtlas: (v) => set({ showAtlas: v }),
+  setHeatGood: (g) => set({ heatGood: g }),
+  setEraFrame: (f) => set({ eraFrame: f }),
   setShowEconomyDashboard: (v) => set({ showEconomyDashboard: v }),
   setShowGoodsCodex: (v) => set({ showGoodsCodex: v }),
   setTravelRoute: (pts) => set({ travelRoute: pts }),

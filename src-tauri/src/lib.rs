@@ -97,6 +97,8 @@ pub fn run() {
             campaign_commands::campaign_get_state,
             campaign_commands::campaign_get_journal,
             campaign_commands::campaign_get_trade_basins,
+            campaign_commands::campaign_get_good_heat,
+            campaign_commands::campaign_get_era_frame,
             campaign_commands::campaign_get_hub,
             campaign_commands::campaign_get_colony,
             campaign_commands::campaign_get_colonies,

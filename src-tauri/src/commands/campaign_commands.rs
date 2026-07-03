@@ -391,6 +391,8 @@ pub struct WorldEconomy {
     /// Atlas 2.0 — yearly world samples `[year, population, trade volume, live
     /// hubs, cumulative foundings, cumulative abandonments]` for the Atlas graphs.
     #[serde(default)] pub world_series: Vec<[f32; 6]>,
+    /// Batch 1 — the Hall of Records (all-time world records).
+    #[serde(default)] pub records: crate::sim::tick::WorldRecords,
 }
 
 /// One good's live state at a hub, for the settlement-window Market tab.
@@ -678,8 +680,7 @@ fn ensure_campaign_loaded(cache: &mut crate::db::CampaignCache, conn: &Connectio
     let raw = metadata::campaign_get(conn, "campaign_sim").map_err(|e| e.to_string())?;
     cache.sim = match raw {
         Some(s) if !s.is_empty() => {
-            let mut sim: CampaignSim =
-                serde_json::from_str(&s).map_err(|e| format!("campaign_sim parse: {e}"))?;
+            let mut sim = decode_campaign_blob(&s)?;
             sim.rebuild_routes(); // `days` / `neighbors` are not serialized
             Some(std::sync::Arc::new(sim))
         }
@@ -688,6 +689,62 @@ fn ensure_campaign_loaded(cache: &mut crate::db::CampaignCache, conn: &Connectio
     cache.loaded = true;
     cache.dirty = false;
     Ok(())
+}
+
+/// Batch 1 · campaign blob codec: `"Z1:" + base64(zstd(json))` — ~5-10× smaller
+/// DB rows and `.campaign` files. JSON stays the wire format underneath
+/// (self-describing, so the append-`serde(default)` save-compat strategy is
+/// untouched); legacy plain-JSON rows load via the prefix check.
+fn compress_blob(json: &str) -> Result<String, String> {
+    use base64::Engine as _;
+    let z = zstd::encode_all(json.as_bytes(), 3).map_err(|e| e.to_string())?;
+    Ok(format!("Z1:{}", base64::engine::general_purpose::STANDARD.encode(z)))
+}
+
+/// Returns the JSON inside `raw` — decompressing a `Z1:` blob, passing a legacy
+/// plain-JSON row through untouched.
+fn decompress_blob(raw: &str) -> Result<std::borrow::Cow<'_, str>, String> {
+    use base64::Engine as _;
+    if let Some(b64) = raw.strip_prefix("Z1:") {
+        let z = base64::engine::general_purpose::STANDARD.decode(b64)
+            .map_err(|e| format!("campaign_sim base64: {e}"))?;
+        let bytes = zstd::decode_all(&z[..]).map_err(|e| format!("campaign_sim zstd: {e}"))?;
+        Ok(std::borrow::Cow::Owned(
+            String::from_utf8(bytes).map_err(|e| format!("campaign_sim utf8: {e}"))?))
+    } else {
+        Ok(std::borrow::Cow::Borrowed(raw))
+    }
+}
+
+fn encode_campaign_blob(sim: &CampaignSim) -> Result<String, String> {
+    let json = serde_json::to_string(sim).map_err(|e| e.to_string())?;
+    compress_blob(&json)
+}
+
+fn decode_campaign_blob(raw: &str) -> Result<CampaignSim, String> {
+    let json = decompress_blob(raw)?;
+    serde_json::from_str(&json).map_err(|e| format!("campaign_sim parse: {e}"))
+}
+
+#[cfg(test)]
+mod blob_tests {
+    use super::{compress_blob, decompress_blob};
+
+    /// Batch 1 · the save-blob codec round-trips and shrinks; legacy plain-JSON
+    /// rows pass through untouched.
+    #[test]
+    fn campaign_blob_codec_roundtrip_and_legacy() {
+        // A repetitive JSON-ish payload (like real sim state) compresses well.
+        let json = format!("{{\"hubs\":[{}]}}",
+            (0..500).map(|i| format!("{{\"id\":{i},\"stock\":[0.0,1.5,2.25]}}"))
+                .collect::<Vec<_>>().join(","));
+        let blob = compress_blob(&json).expect("compress");
+        assert!(blob.starts_with("Z1:"));
+        assert!(blob.len() < json.len() / 3, "blob {} vs json {}", blob.len(), json.len());
+        assert_eq!(decompress_blob(&blob).expect("decompress").as_ref(), json);
+        // Legacy row (no prefix) passes through untouched.
+        assert_eq!(decompress_blob(&json).expect("legacy").as_ref(), json);
+    }
 }
 
 /// A HANDLE to the resident sim (loading it from the DB once if needed) — an Arc
@@ -720,8 +777,8 @@ fn persist_campaign(db: &WorldDb, conn: &Connection) -> Result<(), String> {
     let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
     if cache.dirty {
         if let Some(sim) = &cache.sim {
-            let json = serde_json::to_string(sim.as_ref()).map_err(|e| e.to_string())?;
-            metadata::campaign_set(conn, "campaign_sim", &json).map_err(|e| e.to_string())?;
+            let blob = encode_campaign_blob(sim.as_ref())?;
+            metadata::campaign_set(conn, "campaign_sim", &blob).map_err(|e| e.to_string())?;
         }
         cache.dirty = false;
         cache.last_persist = Some(std::time::Instant::now());
@@ -856,6 +913,8 @@ pub struct TradeBasin {
     pub cy: f32,
     /// Busiest member (highest yearly throughput).
     pub top_city: String,
+    /// Batch 1 · the basin's top traded goods (≤2, by yearly volume).
+    pub top_goods: Vec<String>,
 }
 
 /// Cluster the yearly flow ledger into named trade basins: each town keeps only
@@ -913,6 +972,7 @@ pub fn campaign_get_trade_basins(db: State<'_, WorldDb>) -> Result<Vec<TradeBasi
         if ra == rb { *internal.entry(ra).or_insert(0.0) += v; }
     }
     let (w, hgt) = (sim.world_w as u32, sim.world_h());
+    let ng = sim.goods.len();
     let mut basins: Vec<TradeBasin> = comp.into_iter()
         .filter(|(_, m)| m.len() >= 2)
         .map(|(root, members)| {
@@ -922,6 +982,18 @@ pub fn campaign_get_trade_basins(db: State<'_, WorldDb>) -> Result<Vec<TradeBasi
                 .max_by(|&&a, &&b| sim.hubs[a].trade_last_year
                     .partial_cmp(&sim.hubs[b].trade_last_year).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|&i| sim.hubs[i].name.clone()).unwrap_or_default();
+            // Top goods from the per-hub per-good yearly ledger (empty pre-ledger).
+            let mut totals = vec![0.0f32; ng];
+            for &i in &members {
+                for g in 0..ng {
+                    totals[g] += sim.hub_good_trade.get(i * ng + g).copied().unwrap_or(0.0);
+                }
+            }
+            let mut order: Vec<usize> = (0..ng).collect();
+            order.sort_by(|&x, &y| totals[y].partial_cmp(&totals[x]).unwrap_or(std::cmp::Ordering::Equal));
+            let top_goods: Vec<String> = order.into_iter().take(2)
+                .filter(|&g| totals[g] > 0.0)
+                .map(|g| sim.goods[g].name.clone()).collect();
             TradeBasin {
                 name: crate::sim::names::region_name(cx.max(0.0) as u32, cy.max(0.0) as u32, w, hgt),
                 volume: internal.get(&root).copied().unwrap_or(0.0),
@@ -929,6 +1001,7 @@ pub fn campaign_get_trade_basins(db: State<'_, WorldDb>) -> Result<Vec<TradeBasi
                 pts: members.iter().map(|&i| [sim.hubs[i].x, sim.hubs[i].y]).collect(),
                 cx, cy,
                 top_city: top,
+                top_goods,
             }
         })
         .collect();
@@ -938,6 +1011,66 @@ pub fn campaign_get_trade_basins(db: State<'_, WorldDb>) -> Result<Vec<TradeBasi
         *memo = Some((sim.seed, sim.tick, basins.clone()));
     }
     Ok(basins)
+}
+
+/// Batch 1 · per-good Trade Heat: each living town's LAST-YEAR throughput of one
+/// good (by name), as `[x, y, volume]` points for the heat overlay.
+#[tauri::command]
+pub fn campaign_get_good_heat(good: String, db: State<'_, WorldDb>) -> Result<Vec<[f32; 3]>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let ng = sim.goods.len();
+    let Some(g) = sim.goods.iter().position(|x| x.name == good) else { return Ok(vec![]) };
+    if sim.hub_good_trade.is_empty() { return Ok(vec![]); }
+    Ok(sim.hubs.iter().enumerate()
+        .filter(|(_, h)| !h.is_estate && !h.abandoned)
+        .filter_map(|(i, h)| {
+            let v = sim.hub_good_trade.get(i * ng + g).copied().unwrap_or(0.0);
+            (v > 0.0).then(|| [h.x, h.y, v])
+        })
+        .collect())
+}
+
+/// Batch 1 · era scrubber: the world as it stood at the end of `year` — marker +
+/// heat data reconstructed from the yearly frame ring. None if that year isn't
+/// in the (bounded) ring.
+#[derive(Serialize)]
+pub struct EraFrame {
+    pub year: u32,
+    pub hubs: Vec<EraHub>,
+}
+#[derive(Serialize)]
+pub struct EraHub {
+    pub x: f32,
+    pub y: f32,
+    pub name: String,
+    pub population: f32,
+    pub trade: f32,
+    pub dead: bool,
+    pub is_new: bool,
+}
+
+#[tauri::command]
+pub fn campaign_get_era_frame(year: u32, db: State<'_, WorldDb>) -> Result<Option<EraFrame>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(None) };
+    let Some(frame) = sim.year_frames.iter().find(|f| f.year == year) else { return Ok(None) };
+    let year_end_tick = (year + 1) * 365;
+    let hubs = frame.pop.iter().enumerate()
+        .filter(|(_, &p)| p >= 0.0) // -1 = estate marker
+        .map(|(i, &p)| {
+            let h = &sim.hubs[i];
+            EraHub {
+                x: h.x, y: h.y, name: h.name.clone(),
+                population: p,
+                trade: frame.trade.get(i).copied().unwrap_or(0.0),
+                dead: (h.died_tick > 0 && h.died_tick <= year_end_tick) || p < 100.0,
+                is_new: h.founded_tick > 0 && h.founded_tick <= year_end_tick
+                    && year_end_tick - h.founded_tick < 15 * 365,
+            }
+        })
+        .collect();
+    Ok(Some(EraFrame { year, hubs }))
 }
 
 /// Deterministic initial head lifespan (≈45–75 years, in ticks).
@@ -1438,6 +1571,10 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         total_foundings: 0,
         total_abandonments: 0,
         migrations: vec![],
+        good_flow_accum: vec![],
+        hub_good_trade: vec![],
+        year_frames: vec![],
+        records: Default::default(),
         quality_migrated: false,
         days: vec![],
         neighbors: vec![],
@@ -1656,7 +1793,7 @@ pub async fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<Camp
         // resident and dirty. `AUTOSAVE_EVERY_YEARS` = 2 per the campaign save cadence.
         let crossed_autosave = (sim.year() / AUTOSAVE_EVERY_YEARS) != (year_before / AUTOSAVE_EVERY_YEARS);
         let json = if crossed_autosave || stale {
-            Some(serde_json::to_string(sim.as_ref()).map_err(|e| e.to_string())?)
+            Some(encode_campaign_blob(sim.as_ref())?)
         } else {
             None
         };
@@ -4388,6 +4525,7 @@ pub fn campaign_get_world_economy(db: State<'_, WorldDb>) -> Result<WorldEconomy
             lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0,
             pop_house: 0.0, pop_local: 0.0, pop_guild: 0.0,
             lack_series: vec![], merchant_series: vec![], world_series: vec![],
+            records: Default::default(),
         }),
     };
     let ng = sim.goods.len();
@@ -4468,6 +4606,7 @@ pub fn campaign_get_world_economy(db: State<'_, WorldDb>) -> Result<WorldEconomy
         pop_house: ph, pop_local: pl, pop_guild: pg,
         lack_series, merchant_series,
         world_series: sim.world_series.clone(),
+        records: sim.records.clone(),
     })
 }
 

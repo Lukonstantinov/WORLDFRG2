@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Batch 1 — Era Scrubber, Per-Good Heat, Hall of Records, Compact Saves</title>
+<style>
+  :root{--bg:#0b1420;--card:#0a1018;--line:#1e2e42;--linesoft:#16202e;--linegold:rgba(216,178,74,.35);
+  --ink:#cfe2f6;--inkmid:#9fb4cc;--inkdim:#5a7390;--inkfaint:#46586e;--gold:#d8b24a;--parchment:#e8d9b0;
+  --serif:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif;padding:28px 20px 60px}
+  .wrap{max-width:980px;margin:0 auto}
+  h1{font-family:var(--serif);color:var(--gold);font-size:24px;margin:0 0 4px}
+  h2{font-family:var(--serif);color:var(--parchment);font-size:17px;margin:34px 0 6px;border-bottom:1px solid var(--linegold);padding-bottom:5px}
+  p{color:var(--inkmid);max-width:80ch}
+  .sub{color:var(--inkdim);font-size:12px;margin-bottom:20px}
+  .stage{background:#060a10;border:1px solid var(--line);border-radius:10px;padding:14px;margin:10px 0 4px;overflow-x:auto}
+  .caption{color:var(--inkdim);font-size:11px;margin:3px 0 0}
+  table{border-collapse:collapse;font-size:12px;width:100%}
+  th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--linesoft);color:var(--inkmid);vertical-align:top}
+  th{color:var(--inkdim);font-size:10px;text-transform:uppercase;letter-spacing:.6px}
+  td b{color:var(--ink)}
+  code{background:#0e1826;border-radius:4px;padding:1px 5px;font-size:11px;color:#9fc0e0}
+  .scrub{display:flex;align-items:center;gap:8px;background:#241d0c;border:1px solid #8a7434;border-radius:6px;padding:6px 10px;max-width:520px}
+  .scrub b{font-family:var(--serif);color:var(--gold);font-size:12px;white-space:nowrap}
+  .rail{flex:1;height:4px;background:#0a1018;border-radius:2px;position:relative}
+  .rail i{position:absolute;left:62%;top:-4px;width:12px;height:12px;border-radius:6px;background:var(--gold)}
+  .btn{border:1px solid #8a7434;color:var(--gold);border-radius:5px;font-size:10px;padding:2px 9px}
+  .rec{display:flex;align-items:baseline;gap:8px;background:var(--card);border:1px solid var(--linesoft);border-radius:6px;padding:7px 10px;margin-bottom:5px;max-width:560px}
+  .rec .l{color:var(--inkdim);font-size:11px;min-width:150px}
+  .rec .h{font-family:var(--serif);color:var(--parchment);font-weight:700;font-size:13px}
+  .rec .v{margin-left:auto;color:var(--gold);font-weight:700;font-size:12px}
+  .rec .y{color:var(--inkfaint);font-size:10px}
+  .chip{border:1px solid #d9a441;background:#2a230e;color:#ffd75e;border-radius:5px;font-size:10.5px;padding:3px 9px;font-weight:700}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Batch 1 — Data Plumbing &amp; Quick Wins</h1>
+<div class="sub">Era scrubber · per-good Trade Heat · Hall of Records · compact saves · basin top-goods — implementation report</div>
+
+<h2>⏳ Era scrubber (Atlas ▸ Overview)</h2>
+<div class="stage">
+  <div class="scrub"><b>⏳ Year 187</b><span class="rail"><i></i></span><span class="btn">return to present</span></div>
+</div>
+<p class="caption">A gold year slider under the Overview tiles. Dragging into the past makes the <b>MAP itself time-travel</b>:
+settlement markers re-tier to that year's populations, dead cities show † only if they had already fallen,
+founding stars ✦ only if the town was still young, and the Trade Heat glows with that year's volumes.
+Migration arrows hide while time-travelling. Sliding fully right (or closing the Atlas) returns to the present.
+Data: a bounded ring of yearly per-hub <code>[population, trade]</code> frames (<code>CampaignSim.year_frames</code>,
+hub indices are stable so old frames simply omit later foundings) served by <code>campaign_get_era_frame</code>.</p>
+
+<h2>🔥 Per-good Trade Heat (Goods Codex)</h2>
+<div class="stage">
+  <span style="color:#5a7390;font-size:12px">📖 Goods Codex ▸</span>
+  <span style="font-size:14px"> 🧵</span>
+  <span style="color:#cfe2f6;font-size:12px"> silk ▾ </span>
+  <span class="chip">🔥 this good</span>
+</div>
+<p class="caption">One click beside the Codex's good picker filters the 🔥 Trade Heat overlay to a single commodity —
+silk heat vs grain heat look completely different. Changing the selected good moves the filter with it; closing
+the Codex returns heat to all goods. Data: <code>accrue_flow</code> now also feeds a per-hub per-good yearly ledger
+(<code>hub_good_trade</code>, flat hub×good, ~27 KB), snapshotted each New Year; <code>campaign_get_good_heat(name)</code>
+serves the points. The same ledger gives every trade basin its <b>top goods</b> — Regions cards now read
+"<span style="color:#c9b96a">silk · wine</span>" beside the town count.</p>
+
+<h2>🏆 Hall of Records (Atlas ▸ Records)</h2>
+<div class="stage">
+  <div class="rec"><span>🏙</span><span class="l">Largest city ever</span><span class="h">Qart-Zahar</span><span class="v">128k</span><span class="y">Y204</span></div>
+  <div class="rec"><span>⚜️</span><span class="l">Richest house ever</span><span class="h">House Velen</span><span class="v">312k</span><span class="y">Y198</span></div>
+  <div class="rec"><span>🚢</span><span class="l">Greatest trade year</span><span class="h">Iskren Port</span><span class="v">61.2k</span><span class="y">Y211</span></div>
+  <div class="rec"><span>☠</span><span class="l">Deadliest plague strike</span><span class="h">Velmora</span><span class="v">9.4k dead</span><span class="y">Y176</span></div>
+</div>
+<p class="caption">All-time bests, written at each New Year into <code>CampaignSim.records</code> and shown as a fifth Atlas
+tab: largest city · richest house · greatest trade year · most towns alive · longest dynasty · deadliest plague
+strike · worst crash — each with holder and the year it was set.</p>
+
+<h2>💾 Compact saves (invisible, but you'll feel it)</h2>
+<table>
+  <tr><th>What</th><th>Before</th><th>After</th></tr>
+  <tr><td>Campaign blob (<code>campaign_sim</code> row, <code>.campaign</code> files)</td>
+      <td>Plain JSON — multi-MB on a mature campaign, rewritten at every autosave</td>
+      <td><code>Z1: + base64(zstd(json))</code> — typically 5–10× smaller. JSON stays the format underneath, so the
+      append-<code>serde(default)</code> save-compat strategy is untouched; legacy plain rows load via the prefix
+      check. Round-trip + legacy passthrough covered by a unit test.</td></tr>
+</table>
+
+<p style="margin-top:18px;color:var(--inkdim);font-size:12px">Gates: 36 backend tests green (35 tick + codec),
+dynamics digest byte-identical (the new ledgers don't perturb the sim), <code>tsc</code> + Vite build clean.
+Next per <code>docs/ROADMAP_BATCHES.md</code>: Batch 2 — economic migration, the Living Cultures Map,
+caravanserais, basin history beats.</p>
+</div>
+</body>
+</html>

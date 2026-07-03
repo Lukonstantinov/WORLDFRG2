@@ -10,7 +10,7 @@ import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useSettingsStore } from "../state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat } from "../bridge/tauri";
 import type { MerchantRoute, FuturesLane } from "../types";
 import { goodOverlayKey, GOOD_DEFS } from "../goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "../types";
@@ -348,7 +348,12 @@ export function MapCanvas() {
   // simulation hubs (current population + any new estates) and re-tier each dot
   // by its share of the largest city's population; otherwise show the static
   // Phase-7 list. This makes a dot's size track the LIVE population (#5).
-  const liveSettlements = useMemo<Settlement[]>(() => {
+  // Batch 1 · era scrubber: when the Atlas year slider sets a frame, the map's
+  // markers (and heat, below) time-travel to that year instead of the live world.
+  const eraFrame = useUIStore((s) => s.eraFrame);
+  const heatGood = useUIStore((s) => s.heatGood);
+
+  const liveSettlementsNow = useMemo<Settlement[]>(() => {
     // Estates (ids >= 100000) are INTERNAL to their parent city — never drawn as
     // their own map dots.
     const hubs = campaignSnapshot?.active ? campaignSnapshot.hubs.filter((h) => h.id < 100000) : null;
@@ -409,6 +414,24 @@ export function MapCanvas() {
     return merged;
   }, [campaignSnapshot, settlements]);
 
+  // Batch 1 · era view: rebuild the marker list from the selected past year's
+  // frame (dead/new states as they stood THEN); live view passes through.
+  const liveSettlements = useMemo<Settlement[]>(() => {
+    if (!eraFrame) return liveSettlementsNow;
+    const tier = (pop: number): Settlement["size"] => {
+      if (pop >= 120_000) return "capital";
+      if (pop >= 50_000) return "city";
+      if (pop >= 18_000) return "town";
+      if (pop >= 5_000) return "village";
+      return "outpost";
+    };
+    return eraFrame.hubs.map((h, i) => ({
+      id: `era-${i}`, x: h.x, y: h.y, name: h.name,
+      size: tier(h.population), population: h.population, score: h.population,
+      dead: h.dead, isNew: h.is_new,
+    }));
+  }, [eraFrame, liveSettlementsNow]);
+
   // Redraw overlays when data changes
   useEffect(() => {
     const om = overlayManagerRef.current;
@@ -445,22 +468,38 @@ export function MapCanvas() {
   }, [campaignSnapshot, houses, requestRender]);
 
   // Atlas 2.0 · Trade Heat — per-hub yearly throughput from the live sim (updates
-  // each New Year when the flow ledger rolls). The overlay toggle gates rendering.
-  // Migration arrows ride the same snapshot: refugee roads fade over ~4 years.
+  // each New Year when the flow ledger rolls). Batch 1 layers two lenses on top:
+  // an ERA FRAME (the Atlas year slider) wins outright; otherwise a single-good
+  // filter (Goods Codex 🔥) fetches that good's per-hub volumes. Migration
+  // arrows ride the live snapshot: refugee roads fade over ~4 years.
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om) return;
     const hubs = campaignSnapshot?.active ? campaignSnapshot.hubs : [];
-    om.drawTradeHeat(hubs
-      .filter((h) => !h.is_estate && !h.abandoned && h.trade_volume > 0)
-      .map((h) => ({ x: h.x, y: h.y, v: h.trade_volume })));
+    let alive = true;
+    if (eraFrame) {
+      om.drawTradeHeat(eraFrame.hubs
+        .filter((h) => h.trade > 0 && !h.dead)
+        .map((h) => ({ x: h.x, y: h.y, v: h.trade })));
+    } else if (heatGood && campaignSnapshot?.active) {
+      campaignGetGoodHeat(heatGood).then((pts) => {
+        if (!alive || !overlayManagerRef.current) return;
+        overlayManagerRef.current.drawTradeHeat(pts.map((p) => ({ x: p[0], y: p[1], v: p[2] })));
+        requestRender();
+      }).catch(() => {});
+    } else {
+      om.drawTradeHeat(hubs
+        .filter((h) => !h.is_estate && !h.abandoned && h.trade_volume > 0)
+        .map((h) => ({ x: h.x, y: h.y, v: h.trade_volume })));
+    }
     const nowTick = campaignSnapshot?.clock?.tick ?? 0;
-    om.drawMigrations((campaignSnapshot?.migrations ?? []).map((m) => ({
+    om.drawMigrations(eraFrame ? [] : (campaignSnapshot?.migrations ?? []).map((m) => ({
       fx: m[0], fy: m[1], tx: m[2], ty: m[3],
       age: Math.min(1, (nowTick - m[4]) / (4 * 365)),
     })));
     requestRender();
-  }, [campaignSnapshot, requestRender]);
+    return () => { alive = false; };
+  }, [campaignSnapshot, eraFrame, heatGood, requestRender]);
 
   // Atlas 2.0 · named trade basins — refetched as years pass while the overlay
   // (or the Atlas Regions tab) wants them.

@@ -30,7 +30,7 @@ push to branch + main.
   dynamics FEED on the migration flows, so migration lands first.
 - **#40 + #44 exporters** share one HTML-snapshot generator.
 
-## Batch 1 — Data plumbing & quick wins  (foundations; ~2 days)
+## Batch 1 — Data plumbing & quick wins  ✅ SHIPPED (see docs/mockups/atlas-batch1.html)
 | # | Feature | Notes |
 |---|---------|-------|
 | 4 | zstd-compressed campaign saves | prefix-detected, legacy JSON fallback |

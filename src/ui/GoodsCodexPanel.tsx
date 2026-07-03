@@ -22,6 +22,7 @@ export function GoodsCodexPanel() {
   const setCodexGood = useUIStore((s) => s.setCodexGood);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
   const scarcityOn = useUIStore((s) => s.overlayVisibility.goodScarcity);
+  const heatGoodOn = useUIStore((s) => s.heatGood !== null && s.heatGood === s.codexGood);
   const economy = useWorldStore((s) => s.economy);
   const specs = useGoodsStore((s) => s.specs);
   const meta = useGoodsStore((s) => s.meta);
@@ -53,7 +54,11 @@ export function GoodsCodexPanel() {
 
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.goodbrowser);
   if (!open) return null;
-  const close = () => { setOverlayVisible("goodScarcity", false); useUIStore.getState().setShowGoodsCodex(false); };
+  const close = () => {
+    setOverlayVisible("goodScarcity", false);
+    useUIStore.getState().setHeatGood(null); // heat returns to all goods
+    useUIStore.getState().setShowGoodsCodex(false);
+  };
 
   const spec = specs.find((s) => s.id === codexGood) ?? null;
   const m = codexGood ? meta(codexGood) : null;
@@ -85,14 +90,37 @@ export function GoodsCodexPanel() {
         <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
       </div>
 
-      {/* Good picker */}
+      {/* Good picker + Batch 1 per-good Trade Heat lens (🔥 this good only). */}
       <div style={{ padding: "8px 10px 6px", display: "flex", alignItems: "center", gap: 6 }}>
         <span style={{ fontSize: 14 }}>{m?.icon ?? "📦"}</span>
-        <select value={codexGood ?? ""} onChange={(e) => setCodexGood(e.target.value || null)} style={select}>
+        <select value={codexGood ?? ""} onChange={(e) => {
+          const id = e.target.value || null;
+          setCodexGood(id);
+          // A live heat filter follows the selected good.
+          if (useUIStore.getState().heatGood && id) useUIStore.getState().setHeatGood(id);
+        }} style={select}>
           {goodIds.map((id) => (
             <option key={id} value={id}>{meta(id).name}</option>
           ))}
         </select>
+        <button
+          data-no-drag
+          onClick={() => {
+            const s = useUIStore.getState();
+            if (s.heatGood === codexGood) { s.setHeatGood(null); return; }
+            s.setHeatGood(codexGood);
+            s.setOverlayVisible("tradeHeat", true);
+          }}
+          title="Trade Heat for THIS good only (toggles the 🔥 overlay to a single commodity)"
+          style={{
+            padding: "3px 9px", borderRadius: 5, fontSize: 10.5, cursor: "pointer", whiteSpace: "nowrap",
+            border: `1px solid ${heatGoodOn ? "#d9a441" : "#1e2e42"}`,
+            background: heatGoodOn ? "#2a230e" : "transparent",
+            color: heatGoodOn ? "#ffd75e" : "#5a7390",
+            fontWeight: heatGoodOn ? 700 : 400,
+          }}>
+          🔥 {heatGoodOn ? "this good" : "heat"}
+        </button>
       </div>
 
       {/* Tabs */}

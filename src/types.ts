@@ -231,6 +231,32 @@ export interface TradeBasin {
   cx: number;
   cy: number;
   top_city: string;
+  /** Batch 1 · the basin's top traded goods (≤2, by yearly volume). */
+  top_goods: string[];
+}
+/** Batch 1 · Hall of Records — each entry is [value, holder, year]. */
+export interface WorldRecords {
+  largest_city: [number, string, number];
+  richest_house: [number, string, number];
+  biggest_trade_year: [number, string, number];
+  deadliest_plague: [number, string, number];
+  worst_crash: [number, string, number];
+  longest_dynasty: [number, string, number];
+  most_towns: [number, string, number];
+}
+/** Batch 1 · era scrubber: the world as it stood at the end of `year`. */
+export interface EraHub {
+  x: number;
+  y: number;
+  name: string;
+  population: number;
+  trade: number;
+  dead: boolean;
+  is_new: boolean;
+}
+export interface EraFrame {
+  year: number;
+  hubs: EraHub[];
 }
 /** One backer of a colony venture (city / house / bank). */
 export interface ColonyBackerRow { kind: number; name: string; color: string; share: number }
@@ -804,6 +830,8 @@ export interface WorldEconomy {
   /** Atlas 2.0 · yearly world samples [year, population, trade volume, live hubs,
    *  cumulative foundings, cumulative abandonments] for the Atlas graphs. */
   world_series?: [number, number, number, number, number, number][];
+  /** Batch 1 · the Hall of Records (all-time world records). */
+  records?: WorldRecords;
 }
 
 // ── Economy snapshot (Phase 2) ──

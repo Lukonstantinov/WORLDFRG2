@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "../state/uiStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useViewportStore } from "../state/viewportStore";
-import { campaignGetJournal, campaignGetTradeBasins } from "../bridge/tauri";
+import { campaignGetJournal, campaignGetTradeBasins, campaignGetEraFrame } from "../bridge/tauri";
 import type { CampaignHubBrief, JournalEntry, TradeBasin } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 import { T, SERIF } from "./chronicleTheme";
@@ -25,7 +25,9 @@ export function AtlasPanel() {
   const snapshot = useCampaignStore((s) => s.snapshot);
   const worldEconomy = useCampaignStore((s) => s.worldEconomy);
   const setSearchPin = useViewportStore((s) => s.setSearchPin);
-  const [tab, setTab] = useState<"overview" | "cities" | "regions" | "timeline">("overview");
+  const [tab, setTab] = useState<"overview" | "cities" | "regions" | "records" | "timeline">("overview");
+  const eraFrame = useUIStore((s) => s.eraFrame);
+  const setEraFrame = useUIStore((s) => s.setEraFrame);
   const [sortBy, setSortBy] = useState<"population" | "growth" | "trade" | "wealth">("population");
   const [journal, setJournal] = useState<JournalEntry[]>([]);
   const [basins, setBasins] = useState<TradeBasin[]>([]);
@@ -51,6 +53,18 @@ export function AtlasPanel() {
     campaignGetTradeBasins().then((r) => { if (alive) setBasins(r); }).catch(() => {});
     return () => { alive = false; };
   }, [open, active, tab, year]);
+
+  // Closing the Atlas always returns the map to the present.
+  useEffect(() => {
+    if (!open) setEraFrame(null);
+  }, [open, setEraFrame]);
+
+  // Era scrubber: slide to a past year → the MAP time-travels (markers + heat);
+  // sliding back to the far right returns to the live world.
+  const scrubTo = (y: number, maxYear: number) => {
+    if (y >= maxYear) { setEraFrame(null); return; }
+    campaignGetEraFrame(y).then((f) => setEraFrame(f)).catch(() => {});
+  };
 
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.atlas);
 
@@ -143,6 +157,7 @@ export function AtlasPanel() {
         {tabBtn("overview", "📈 Overview")}
         {tabBtn("cities", "🏙 Cities")}
         {tabBtn("regions", "🏞 Regions")}
+        {tabBtn("records", "🏆 Records")}
         {tabBtn("timeline", "📜 Timeline")}
       </div>
 
@@ -159,6 +174,33 @@ export function AtlasPanel() {
               <Tile label="Founded" value={`+${last ? last[4] : 0}`} color="#ffd75e" />
               <Tile label="Abandoned" value={`−${last ? last[5] : 0}`} color="#c0a0a0" />
               <Tile label="Trade (yr)" value={fmtNum(last ? last[2] : 0)} color="#7fd0c0" />
+            </div>
+            {/* ── Era scrubber: drag into the past; the MAP follows. ── */}
+            <div style={{
+              display: "flex", alignItems: "center", gap: 8, marginBottom: 10,
+              background: eraFrame ? "#241d0c" : T.card,
+              border: `1px solid ${eraFrame ? T.goldDim : T.lineSoft}`,
+              borderRadius: 6, padding: "6px 10px",
+            }}>
+              <span style={{ fontFamily: SERIF, color: eraFrame ? T.gold : T.inkDim, fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
+                {eraFrame ? `⏳ Year ${eraFrame.year}` : "⏳ Present"}
+              </span>
+              <input
+                type="range"
+                min={series[0][0]}
+                max={year}
+                step={1}
+                value={eraFrame ? eraFrame.year : year}
+                onChange={(e) => scrubTo(Number(e.target.value), year)}
+                style={{ flex: 1, accentColor: "#d8b24a" }}
+                title="Drag into the past — the map's markers and heat time-travel"
+              />
+              {eraFrame && (
+                <button onClick={() => setEraFrame(null)} style={{
+                  padding: "2px 9px", borderRadius: 5, fontSize: 10, cursor: "pointer",
+                  border: `1px solid ${T.goldDim}`, background: "transparent", color: T.gold,
+                }}>return to present</button>
+              )}
             </div>
             <Chart title="World population" rows={series.map((r) => [r[0], r[1]])} color="#6ab0e8" fmt={fmtNum} />
             <Chart title="Trade volume (grain-eq / year)" rows={series.map((r) => [r[0], r[2]])} color="#4fd0c0" fmt={fmtNum} />
@@ -240,12 +282,54 @@ export function AtlasPanel() {
                   {b.name}
                 </span>
                 <span style={{ color: T.inkDim, fontSize: 10 }}>{b.hub_ids.length} towns</span>
+                {b.top_goods.length > 0 && (
+                  <span style={{ color: "#c9b96a", fontSize: 10 }}>{b.top_goods.join(" · ")}</span>
+                )}
                 <span style={{ flex: 1 }} />
                 <span style={{ color: T.inkDim, fontSize: 10 }}>busiest</span>
                 <span style={{ color: T.inkMid, fontSize: 11 }}>{b.top_city}</span>
                 <span style={{ color: "#7fd0c0", fontSize: 12, fontWeight: 700 }}>{fmtNum(b.volume)}</span>
               </div>
             ))}
+          </>
+        )}
+
+        {active && tab === "records" && (
+          <>
+            <div style={{ color: T.inkDim, fontSize: 11, marginBottom: 8 }}>
+              The Hall of Records — all-time bests of this world, set the year they happened.
+            </div>
+            {(() => {
+              const rec = worldEconomy?.records;
+              if (!rec) return <div style={hint}>Advance time — records are written at each New Year.</div>;
+              const rows: { icon: string; label: string; entry: [number, string, number]; fmt: (v: number) => string }[] = [
+                { icon: "🏙", label: "Largest city ever", entry: rec.largest_city, fmt: fmtNum },
+                { icon: "⚜️", label: "Richest house ever", entry: rec.richest_house, fmt: fmtNum },
+                { icon: "🚢", label: "Greatest trade year", entry: rec.biggest_trade_year, fmt: fmtNum },
+                { icon: "🏘", label: "Most towns alive", entry: rec.most_towns, fmt: (v) => String(Math.round(v)) },
+                { icon: "⚭", label: "Longest dynasty", entry: rec.longest_dynasty, fmt: (v) => `${Math.round(v)} generations` },
+                { icon: "☠", label: "Deadliest plague strike", entry: rec.deadliest_plague, fmt: (v) => `${fmtNum(v)} dead` },
+                { icon: "📉", label: "Worst crash", entry: rec.worst_crash, fmt: (v) => `${Math.round(v)} cities hit` },
+              ];
+              const set = rows.filter((r) => r.entry && (r.entry[0] > 0 || r.entry[1] !== ""));
+              if (set.length === 0) return <div style={hint}>No records yet — advance at least a year.</div>;
+              return set.map((r) => (
+                <div key={r.label} style={{
+                  display: "flex", alignItems: "baseline", gap: 8,
+                  background: T.card, border: `1px solid ${T.lineSoft}`, borderRadius: 6,
+                  padding: "7px 10px", marginBottom: 5,
+                }}>
+                  <span style={{ fontSize: 14 }}>{r.icon}</span>
+                  <span style={{ color: T.inkDim, fontSize: 11, minWidth: 150 }}>{r.label}</span>
+                  <span style={{ fontFamily: SERIF, color: T.parchment, fontSize: 13, fontWeight: 700 }}>
+                    {r.entry[1] || "—"}
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  <span style={{ color: T.gold, fontSize: 12, fontWeight: 700 }}>{r.fmt(r.entry[0])}</span>
+                  <span style={{ color: T.inkFaint, fontSize: 10 }}>Y{r.entry[2]}</span>
+                </div>
+              ));
+            })()}
           </>
         )}
 

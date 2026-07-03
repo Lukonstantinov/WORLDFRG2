@@ -1460,6 +1460,34 @@ pub struct ColonizeSite {
     pub trade_value: f32,
 }
 
+/// Batch 1 · one row of the ERA-SCRUBBER ring: the world as it stood at the end
+/// of `year`. Vectors are hub-indexed at snapshot time — hub indices are stable
+/// (hubs are never removed), so later-founded hubs simply aren't in older rows.
+/// Estates carry -1 population so readers skip them.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct YearFrame {
+    pub year: u32,
+    pub pop: Vec<f32>,
+    pub trade: Vec<f32>,
+}
+
+/// Batch 1 · the HALL OF RECORDS — all-time world records, each a
+/// `(value, holder, year)` triple (zero/empty until first set).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct WorldRecords {
+    pub largest_city: (f32, String, u32),
+    pub richest_house: (f32, String, u32),
+    /// Value = the year's total flow volume; holder = its busiest city.
+    pub biggest_trade_year: (f32, String, u32),
+    /// Value = deaths in the single worst plague strike; holder = the city.
+    pub deadliest_plague: (f32, String, u32),
+    /// Value = cities hit; holder = the crash's origin city.
+    pub worst_crash: (f32, String, u32),
+    /// Value = generations; holder = the house.
+    pub longest_dynasty: (f32, String, u32),
+    pub most_towns: (f32, String, u32),
+}
+
 /// A civic supply contract: a supplier hub ships `monthly_qty` of `good` to a
 /// settlement colony, paid for by the founding metropolis's treasury (the food
 /// lifeline subsidy). `category`: 0 = food (covers the daily deficit) · 1 = reserve
@@ -2010,6 +2038,20 @@ pub struct CampaignSim {
     /// `[from_x, from_y, to_x, to_y, tick]`, bounded to the last 60.
     #[serde(default)]
     pub migrations: Vec<[f32; 5]>,
+    /// Batch 1 · per-hub PER-GOOD throughput accumulator for the running year
+    /// (flat, `hub·ng + good`; rebuilt in-year, so not serialized).
+    #[serde(skip)]
+    pub good_flow_accum: Vec<f32>,
+    /// Batch 1 · last FULL year's per-hub per-good throughput (flat, `hub·ng +
+    /// good`) — the per-good Trade Heat + basin top-goods read this.
+    #[serde(default)]
+    pub hub_good_trade: Vec<f32>,
+    /// Batch 1 · era-scrubber ring (one row per completed year, bounded ~400).
+    #[serde(default)]
+    pub year_frames: Vec<YearFrame>,
+    /// Batch 1 · the Hall of Records (all-time world records).
+    #[serde(default)]
+    pub records: WorldRecords,
     /// Trade-base patronage: the house developing each hub as a base (hub-indexed,
     /// −1 = none). Resized to `hubs` each tick. Empty on old saves (serde default).
     /// See docs/TRADE_BASE_MECHANIC_PLAN.md.
@@ -2444,12 +2486,22 @@ impl CampaignSim {
 
     /// DLC 3.5 · accrue shipped volume on a hub-pair for the yearly Dynamic Trade
     /// Flow snapshot (keyed by stable hub IDs, ordered low→high; direction-agnostic).
+    /// `good` also feeds the per-hub PER-GOOD ledger (Batch 1: per-good Trade Heat,
+    /// basin top-goods); pass `usize::MAX` for goods-less flavour flow (fairs,
+    /// pilgrimages) to skip that ledger.
     #[inline]
-    fn accrue_flow(&mut self, from: usize, to: usize, amount: f32) {
+    fn accrue_flow(&mut self, from: usize, to: usize, good: usize, amount: f32) {
         if amount <= 0.0 || from >= self.hubs.len() || to >= self.hubs.len() || from == to { return; }
         let (ia, ib) = (self.hubs[from].id, self.hubs[to].id);
         let key = if ia <= ib { (ia, ib) } else { (ib, ia) };
         *self.flow_accum.entry(key).or_insert(0.0) += amount;
+        if good != usize::MAX && good < self.goods.len() {
+            let ng = self.goods.len();
+            let need = self.hubs.len() * ng;
+            if self.good_flow_accum.len() < need { self.good_flow_accum.resize(need, 0.0); }
+            self.good_flow_accum[from * ng + good] += amount;
+            self.good_flow_accum[to * ng + good] += amount;
+        }
     }
 
     /// Recent trade volume touching a hub (the decaying per-class tallies) — used
@@ -3128,6 +3180,65 @@ impl CampaignSim {
         if self.world_series.len() > 400 {
             let excess = self.world_series.len() - 400;
             self.world_series.drain(0..excess);
+        }
+        // ── Batch 1 · per-GOOD ledger snapshot + era frame + Hall of Records ──
+        if !self.good_flow_accum.is_empty() {
+            self.hub_good_trade = std::mem::take(&mut self.good_flow_accum);
+        }
+        self.year_frames.push(YearFrame {
+            year: yr.saturating_sub(1),
+            pop: self.hubs.iter()
+                .map(|h| if h.is_estate { -1.0 } else { h.population.max(0.0) }).collect(),
+            trade: self.hubs.iter().map(|h| h.trade_last_year).collect(),
+        });
+        if self.year_frames.len() > 400 {
+            let excess = self.year_frames.len() - 400;
+            self.year_frames.drain(0..excess);
+        }
+        self.update_records(yr.saturating_sub(1), trade_total);
+    }
+
+    /// Batch 1 · refresh the Hall of Records (all-time bests) at New Year.
+    fn update_records(&mut self, year: u32, trade_total: f32) {
+        let r = &mut self.records;
+        for h in &self.hubs {
+            if h.is_estate || h.abandoned { continue; }
+            if h.population > r.largest_city.0 {
+                r.largest_city = (h.population, h.name.clone(), year);
+            }
+        }
+        for house in &self.houses {
+            if house.defunct { continue; }
+            if house.wealth > r.richest_house.0 {
+                r.richest_house = (house.wealth, house.name.clone(), year);
+            }
+            if house.generation as f32 > r.longest_dynasty.0 {
+                r.longest_dynasty = (house.generation as f32, house.name.clone(), year);
+            }
+        }
+        if trade_total > r.biggest_trade_year.0 {
+            let busiest = self.hubs.iter()
+                .filter(|h| !h.is_estate)
+                .max_by(|a, b| a.trade_last_year.partial_cmp(&b.trade_last_year)
+                    .unwrap_or(std::cmp::Ordering::Equal))
+                .map(|h| h.name.clone()).unwrap_or_default();
+            r.biggest_trade_year = (trade_total, busiest, year);
+        }
+        for p in &self.epidemics {
+            if p.deaths > r.deadliest_plague.0 {
+                let name = self.hubs.get(p.hub as usize).map(|h| h.name.clone()).unwrap_or_default();
+                r.deadliest_plague = (p.deaths, name, p.start_tick / 365);
+            }
+        }
+        for c in &self.crashes {
+            if c.cities_hit as f32 > r.worst_crash.0 {
+                r.worst_crash = (c.cities_hit as f32, c.origin_name.clone(), c.year);
+            }
+        }
+        let alive = self.hubs.iter()
+            .filter(|h| !h.is_estate && !h.abandoned && h.population >= 1.0).count() as f32;
+        if alive > r.most_towns.0 {
+            r.most_towns = (alive, String::new(), year);
         }
     }
 
@@ -5864,7 +5975,7 @@ impl CampaignSim {
                         self.bump_trade_at(oi, a, amount);
                         self.bump_trade_at(oi, b, amount);
                     }
-                    self.accrue_flow(a, b, amount);
+                    self.accrue_flow(a, b, g, amount);
                     self.in_transit.push(InTransit {
                         from: a as u32,
                         to: b as u32,
@@ -5979,7 +6090,7 @@ impl CampaignSim {
         self.bump_trade_at(owner, b, amount);
         // The same vessel carries it home (occupies the owner's slot until it lands).
         // No fresh voyage-loss roll here — the return is the trip's bonus leg.
-        self.accrue_flow(b, a, amount);
+        self.accrue_flow(b, a, g, amount);
         self.in_transit.push(InTransit {
             from: b as u32,
             to: a as u32,
@@ -8647,7 +8758,7 @@ impl CampaignSim {
             let nbrs: Vec<usize> = self.neighbors.get(h)
                 .map(|v| v.iter().take(FAIR_LANES).map(|&x| x as usize).collect())
                 .unwrap_or_default();
-            for nb in nbrs { self.accrue_flow(nb, h, FAIR_FLOW); }
+            for nb in nbrs { self.accrue_flow(nb, h, usize::MAX, FAIR_FLOW); }
             self.active_events.push(ActiveEvent {
                 kind: "fair".into(), hub: hub as i32, good: -1,
                 magnitude: 1.0, until_tick: tick + month_len,
@@ -8730,7 +8841,7 @@ impl CampaignSim {
             let nbrs: Vec<usize> = self.neighbors.get(h)
                 .map(|v| v.iter().take(PILGRIM_LANES).map(|&x| x as usize).collect())
                 .unwrap_or_default();
-            for nb in nbrs { self.accrue_flow(nb, h, PILGRIM_FLOW); }
+            for nb in nbrs { self.accrue_flow(nb, h, usize::MAX, PILGRIM_FLOW); }
             // Pilgrim demand bids up the patron ritual good (transient — the price
             // relax pulls it back over the following days). Capped for safety.
             if patron >= 0 {
@@ -9730,6 +9841,8 @@ mod tests {
             flow_year: vec![], flow_accum: std::collections::HashMap::new(),
             world_series: vec![], total_foundings: 0, total_abandonments: 0,
             migrations: vec![],
+            good_flow_accum: vec![], hub_good_trade: vec![], year_frames: vec![],
+            records: WorldRecords::default(),
             quality_migrated: false,
             days: vec![],
             neighbors: vec![],
