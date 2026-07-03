@@ -12,6 +12,10 @@ import {
   saveCampaignAs,
 } from "../bridge/tauri";
 
+/** Auto-advance step size for the campaign clock. */
+export type CampaignSpeed = "week" | "month" | "year";
+export const SPEED_TICKS: Record<CampaignSpeed, number> = { week: 7, month: 30, year: 365 };
+
 interface CampaignStore {
   snapshot: CampaignSnapshot | null;
   worldEconomy: WorldEconomy | null;
@@ -19,6 +23,15 @@ interface CampaignStore {
   diagnostics: CampaignDiagnostics | null;
   busy: boolean;
   error: string | null;
+  /** The campaign clock lives in the STORE so any surface (top HUD, ledger rail)
+   *  can drive or reflect it — exactly one auto-advance loop ever runs. */
+  playing: boolean;
+  speed: CampaignSpeed;
+  setSpeed: (s: CampaignSpeed) => void;
+  /** Start auto-advancing one `speed` step per beat until pause() (or an error). */
+  play: () => Promise<void>;
+  /** Stop the clock; the running loop then refreshes panels + flushes to disk. */
+  pause: () => void;
   /** Index of the house focused in the Houses panel — the map highlights only it
    *  (its sphere, routes, offices). null = show all houses. */
   selectedHouseIdx: number | null;
@@ -45,8 +58,31 @@ export const useCampaignStore = create<CampaignStore>((set, get) => ({
   diagnostics: null,
   busy: false,
   error: null,
+  playing: false,
+  speed: "month",
   selectedHouseIdx: null,
   setSelectedHouse: (idx) => set({ selectedHouseIdx: idx }),
+  setSpeed: (s) => set({ speed: s }),
+  pause: () => set({ playing: false }),
+
+  play: async () => {
+    if (get().playing) return;
+    set({ playing: true });
+    let i = 0;
+    while (get().playing && get().snapshot?.active === true) {
+      i++;
+      // Heavy panel refresh (economy / houses / diagnostics) only every 6th step;
+      // the other steps update just the snapshot (clock + live map markers), so
+      // fast Play doesn't fire the costlier panel queries every single tick.
+      await get().advance(SPEED_TICKS[get().speed], i % 6 === 0);
+      if (get().error) break;
+      await new Promise((r) => setTimeout(r, 450));
+    }
+    // Paused (or errored): bring the panels current and flush the resident sim.
+    set({ playing: false });
+    await get().refresh();
+    campaignPersist().catch(() => {});
+  },
 
   refresh: async () => {
     try {
@@ -77,6 +113,7 @@ export const useCampaignStore = create<CampaignStore>((set, get) => ({
 
   newGame: async (seed) => {
     if (get().busy) return false;
+    set({ playing: false }); // stop the clock before swapping campaigns
     const snap = get().snapshot;
     const running = snap?.active === true && (snap?.clock.tick ?? 0) > 0;
     // A running campaign must be preserved in its OWN file before a new one starts.

@@ -38,6 +38,7 @@ import { GoodDetailPanel } from "./ui/GoodDetailPanel";
 import { ImportWorldDialog } from "./ui/ImportWorldDialog";
 import { SettingsPanel } from "./ui/SettingsPanel";
 import { WindowBar } from "./ui/WindowBar";
+import { CampaignTopBar } from "./ui/CampaignTopBar";
 import { useWorldStore } from "./state/worldStore";
 import { useUIStore } from "./state/uiStore";
 import { useViewportStore } from "./state/viewportStore";
@@ -578,7 +579,9 @@ export default function App() {
         {/* Center: Map */}
         <div style={{ flex: 1, position: "relative", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
           <MapCanvas />
-          {isLoaded && <WindowBar />}
+          {/* Forge keeps the flat WindowBar; Chronicle gets the campaign HUD
+              (clock + world pulse + grouped ledger menus). */}
+          {isLoaded && (appMode === "chronicle" ? <CampaignTopBar /> : <WindowBar />)}
           <InfoPanel />
           <HubPanel />
           <GoodFlowPanel />

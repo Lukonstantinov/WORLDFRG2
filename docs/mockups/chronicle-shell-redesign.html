@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Chronicle Shell Redesign — Campaign HUD, Ledger Menus & World Ledger Rail</title>
+<style>
+  :root{
+    --bg:#0b1420; --panel:#13202e; --panel2:#0d1521; --raised:#111b2a; --card:#0a1018;
+    --line:#1e2e42; --linesoft:#16202e; --linegold:rgba(216,178,74,0.35);
+    --ink:#cfe2f6; --inkmid:#9fb4cc; --inkdim:#5a7390; --inkfaint:#46586e;
+    --accent:#3a80c0; --accentsoft:#19324a;
+    --gold:#d8b24a; --golddim:#8a7434; --parchment:#e8d9b0;
+    --good:#4cae7a; --goodink:#80c890; --warn:#d9a441; --bad:#c0573a; --badink:#e08080;
+    --serif:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,'Times New Roman',serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif;padding:28px 20px 60px}
+  .wrap{max-width:1060px;margin:0 auto}
+  h1{font-family:var(--serif);color:var(--gold);font-size:26px;margin:0 0 4px;letter-spacing:.5px}
+  h2{font-family:var(--serif);color:var(--parchment);font-size:18px;margin:40px 0 6px;border-bottom:1px solid var(--linegold);padding-bottom:5px}
+  h3{color:var(--inkmid);font-size:12px;text-transform:uppercase;letter-spacing:.8px;margin:20px 0 8px}
+  p{color:var(--inkmid);max-width:78ch}
+  .sub{color:var(--inkdim);font-size:12px;margin-bottom:24px}
+  .tag{display:inline-block;padding:2px 9px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:.5px;vertical-align:2px;margin-left:8px}
+  .tag.before{background:#3a1820;color:var(--badink);border:1px solid #5a2f3a}
+  .tag.after{background:#12331e;color:var(--goodink);border:1px solid #2a6040}
+  .stage{background:#060a10;border:1px solid var(--line);border-radius:10px;padding:14px;margin:10px 0 6px;overflow-x:auto}
+  .caption{color:var(--inkdim);font-size:11px;margin:2px 0 0}
+  .cols{display:flex;gap:16px;flex-wrap:wrap}
+  .cols>div{flex:1;min-width:320px}
+  /* ————— BEFORE: WindowBar chip soup ————— */
+  .chipbar{display:flex;gap:4px;flex-wrap:wrap;justify-content:center;padding:5px 8px;border-radius:8px;background:rgba(9,14,20,.92);border:1px solid var(--line);box-shadow:0 6px 22px rgba(0,0,0,.5);max-width:640px;margin:0 auto}
+  .chip{padding:3px 9px;border-radius:5px;font-size:11px;white-space:nowrap;border:1px solid var(--line);background:rgba(12,18,26,.6);color:#6a86a6}
+  .chip.on{border-color:var(--accent);background:#19324a;color:var(--ink);font-weight:600}
+  .chip.red{border:1px solid #5a2f3a;background:#3a1820;color:#e0a0a0;font-weight:600}
+  /* ————— AFTER: Campaign HUD ————— */
+  .hud{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:6px 12px;background:linear-gradient(180deg,rgba(11,17,26,.97),rgba(9,13,20,.93));border-bottom:1px solid var(--line);border-top:2px solid var(--linegold);box-shadow:0 6px 22px rgba(0,0,0,.45);border-radius:4px}
+  .yr{font-family:var(--serif);color:var(--gold);font-weight:700;font-size:16px;letter-spacing:.5px}
+  .day{color:var(--inkdim);font-size:11px;margin-left:7px}
+  .seasonbar{height:3px;background:#0a1018;border-radius:2px;margin-top:4px;overflow:hidden;position:relative;width:150px}
+  .seasonbar i{display:block;width:38%;height:100%;background:linear-gradient(90deg,var(--golddim),var(--gold))}
+  .seasonbar s{position:absolute;top:0;bottom:0;width:1px;background:#1c2a3c}
+  .play{width:34px;height:30px;border-radius:6px;font-size:13px;font-weight:700;border:1px solid #2a6040;background:#12331e;color:var(--goodink);display:inline-flex;align-items:center;justify-content:center}
+  .seg{display:inline-flex;border-radius:6px;overflow:hidden;border:1px solid var(--line);vertical-align:middle}
+  .seg b,.seg span{padding:6px 10px;font-size:11px}
+  .seg b{background:var(--accentsoft);color:var(--ink)}
+  .seg span{color:var(--inkdim)}
+  .step{height:30px;padding:0 10px;border-radius:6px;border:1px solid var(--line);background:var(--raised);color:var(--inkmid);font-size:12px;display:inline-flex;align-items:center}
+  .pulse{background:#0c1420;border:1px solid var(--linesoft);border-radius:6px;padding:3px 9px;min-width:64px}
+  .pulse em{display:block;font-style:normal;color:var(--inkdim);font-size:8.5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+  .pulse b{color:var(--ink);font-size:13px}
+  .pulse small{font-size:9px;font-weight:400;margin-left:4px}
+  .pulse.alert{border-color:#6a3040;background:#2a1218}
+  .pulse.alert em{color:#c08090}.pulse.alert b{color:var(--badink)}
+  .gbtn{padding:5px 10px;border-radius:6px;font-size:11px;white-space:nowrap;border:1px solid var(--line);background:rgba(12,18,26,.6);color:var(--inkdim);position:relative}
+  .gbtn.on{border-color:var(--accent);background:#132638;color:var(--ink);font-weight:600}
+  .gbtn.open{border-color:var(--accent);background:var(--accentsoft);color:var(--ink)}
+  .gbtn .n{margin-left:5px;padding:0 5px;border-radius:8px;font-size:9px;font-weight:700;background:var(--accent);color:#08141f}
+  .gbtn .v{margin-left:4px;font-size:8px;color:var(--inkfaint)}
+  .menu{position:absolute;top:calc(100% + 4px);right:0;display:flex;flex-direction:column;min-width:210px;padding:4px;background:rgba(10,15,23,.98);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.6);z-index:5;text-align:left}
+  .mi{display:flex;align-items:center;gap:7px;padding:6px 8px;border-radius:5px;font-size:11.5px;color:var(--inkmid);white-space:nowrap}
+  .mi.on{color:var(--ink)}
+  .mi .dot{width:12px;text-align:center;font-size:10px;color:var(--inkfaint)}
+  .mi.on .dot{color:var(--gold)}
+  /* ————— rails ————— */
+  .rail{width:252px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:8px;font-size:12px}
+  .rail-old{width:220px;background:#0d1219;border:1px solid #1e2a38;border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:6px;font-size:12px}
+  .mast{padding-bottom:6px;border-bottom:1px solid var(--linegold)}
+  .mast b{font-family:var(--serif);color:var(--gold);font-size:16px;letter-spacing:.5px}
+  .mast i{display:block;font-style:normal;color:var(--inkdim);font-size:10px;line-height:1.5;margin-top:2px}
+  .card{background:var(--card);border:1px solid var(--linesoft);border-radius:6px;padding:7px 9px}
+  .card h4{margin:0 0 4px;color:var(--inkdim);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.6px}
+  .statrow{display:flex;gap:5px}
+  .stat{flex:1;background:var(--card);border:1px solid var(--linesoft);border-radius:5px;padding:4px 7px}
+  .stat em{display:block;font-style:normal;color:var(--inkdim);font-size:8.5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+  .stat b{color:var(--ink);font-size:13px}
+  .stat small{display:block;color:var(--goodink);font-size:9px}
+  .row{display:flex;align-items:center;font-size:11px;margin-bottom:2px;color:var(--inkmid)}
+  .row .name{flex:1;margin-left:5px}
+  .launch{width:100%;padding:6px;border-radius:5px;border:1px solid #3a3050;background:#181426;color:#d8c8f0;font-size:11px;font-weight:600;text-align:center}
+  .oldclock{background:#0c1420;border:1px solid #1e3450;border-radius:6px;padding:8px}
+  .oldclock .t{color:#cfe0f4;font-weight:700;font-size:15px}
+  .oldbtns{display:flex;gap:4px;margin-top:6px}
+  .oldbtns span{flex:1;padding:5px;border-radius:4px;border:1px solid #234058;background:#13202e;color:#9cc0e0;font-size:11px;text-align:center}
+  /* tokens */
+  .swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+  .sw{border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--card)}
+  .sw i{display:block;height:34px}
+  .sw div{padding:5px 8px;font-size:10px;color:var(--inkmid)}
+  .sw code{color:var(--inkdim);font-size:9.5px}
+  table{border-collapse:collapse;font-size:12px;width:100%}
+  th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--linesoft);color:var(--inkmid);vertical-align:top}
+  th{color:var(--inkdim);font-size:10px;text-transform:uppercase;letter-spacing:.6px}
+  td b{color:var(--ink)}
+  kbd{background:var(--raised);border:1px solid var(--line);border-radius:4px;padding:1px 6px;font-size:11px;color:var(--ink)}
+  .note{background:var(--card);border-left:3px solid var(--gold);border-radius:0 6px 6px 0;padding:8px 12px;color:var(--inkmid);font-size:12px;margin:10px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Chronicle Shell Redesign</h1>
+<div class="sub">Campaign interface — Paradox-style HUD, grouped ledger menus and the World Ledger rail · design + implementation report</div>
+
+<p>The campaign's content was already rich (heraldry, T-accounts, why-chains, year chronicles) — what it
+lacked was <b style="color:var(--parchment)">information architecture and hierarchy</b>. Twenty independent floating windows hung off a flat
+16-chip strip; the campaign clock sat buried in a 220px worldgen leftover; nothing said "you are playing a
+living world" at a glance. This pass applies the three moves every Paradox title uses: a persistent
+<b style="color:var(--parchment)">top HUD</b> (date · speed · world pulse · alerts), <b style="color:var(--parchment)">grouped screens</b> instead of a chip soup, and one
+shared <b style="color:var(--parchment)">design language</b> (tokens in <code>src/ui/chronicleTheme.ts</code>).</p>
+
+<h2>1 · The top strip <span class="tag before">BEFORE</span></h2>
+<div class="stage">
+  <div class="chipbar">
+    <span class="chip on">⚜️ Houses</span><span class="chip">🪙 Coin</span><span class="chip">🏦 Banks</span>
+    <span class="chip">🏛 Colonies</span><span class="chip">🫧 Finance</span><span class="chip">📦 Goods</span>
+    <span class="chip">🏆 Cities</span><span class="chip on">🗞 News</span><span class="chip">🏬 Depots</span>
+    <span class="chip">📜 Futures</span><span class="chip">🔀 Trade</span><span class="chip">🧭 Itinerary</span>
+    <span class="chip">📊 Economy</span><span class="chip">📖 Codex</span>
+    <span class="chip">◧ Workflow</span><span class="chip">Toolbar ◨</span><span class="chip red">✕ Hide all</span>
+  </div>
+</div>
+<p class="caption">Sixteen sibling chips with no grouping, no clock, no world state. Finding "Banks" among "Coin", "Finance" and "Futures" is a scan of the whole row; the campaign date lives elsewhere.</p>
+
+<h2>1 · The Campaign HUD <span class="tag after">AFTER</span></h2>
+<div class="stage" style="padding-bottom:170px">
+  <div class="hud">
+    <div style="min-width:148px">
+      <span class="yr">Year 214</span><span class="day">Day 141 · Summer</span>
+      <div class="seasonbar"><i></i><s style="left:25%"></s><s style="left:50%"></s><s style="left:75%"></s></div>
+    </div>
+    <span class="play">▶</span>
+    <span class="seg"><span>week</span><b>month</b><span>year</span></span>
+    <span class="step">⏭</span>
+    <span class="pulse"><em>Population</em><b>2.41M<small style="color:var(--goodink)">+3.2k/mo</small></b></span>
+    <span class="pulse"><em>Price idx</em><b>1.08×<small style="color:var(--warn)">+0.03</small></b></span>
+    <span class="pulse"><em>Caravans</em><b>184</b></span>
+    <span class="pulse alert"><em>Starving</em><b>⚠ 2</b></span>
+    <span style="flex:1"></span>
+    <span class="gbtn">📦 Economy<span class="v">▼</span></span>
+    <span class="gbtn on">⚜️ Society<span class="n">1</span><span class="v">▼</span></span>
+    <span class="gbtn open" style="z-index:6">🪙 Finance<span class="v">▼</span>
+      <span class="menu">
+        <span class="mi on"><span class="dot">◉</span>🪙 Coin, Credit &amp; Crashes</span>
+        <span class="mi"><span class="dot">○</span>🏦 Banks</span>
+        <span class="mi"><span class="dot">○</span>🫧 Speculation &amp; Poleis</span>
+      </span>
+    </span>
+    <span class="gbtn">🌍 World<span class="v">▼</span></span>
+    <span style="width:1px;height:20px;background:var(--line)"></span>
+    <span class="gbtn on">◧ Ledger</span><span class="gbtn on">Tools ◨</span>
+    <span class="chip red" style="padding:5px 10px;border-radius:6px">✕ Clear</span>
+  </div>
+</div>
+<p class="caption">Full-width HUD docked to the map's top edge, gold hairline signature. Left→right: <b>date plaque</b> (serif year, season progress with quarter ticks), <b>play cluster</b> (pause/play · week/month/year · single-step), <b>world pulse</b> (population Δ, price index Δ, caravans, starving alert — red tile only when &gt; 0), then the four <b>ledger menus</b>: 20 windows grouped into Economy · Society · Finance · World, each with an open-count badge and ◉ state dots. <kbd>Space</kbd> toggles pause anywhere.</p>
+
+<h3>Where every window went</h3>
+<table>
+  <tr><th>📦 Economy</th><th>⚜️ Society</th><th>🪙 Finance</th><th>🌍 World</th></tr>
+  <tr>
+    <td>Goods &amp; Quality · Economy Dashboard · Goods Codex · Trade Matrix · Warehouses &amp; Estates · Futures Contracts · Itinerary</td>
+    <td>Merchant Houses · Dynasties &amp; Alliances · Guilds &amp; Crafts · Notable Figures · Landmarks &amp; Sites · Plagues &amp; Epidemics</td>
+    <td>Coin, Credit &amp; Crashes · Banks · Speculation &amp; Poleis</td>
+    <td>City Ranking · Colonial Office · World News</td>
+  </tr>
+</table>
+
+<h2>2 · The left rail <span class="tag before">BEFORE</span> → World Ledger <span class="tag after">AFTER</span></h2>
+<div class="stage">
+  <div class="cols">
+    <div>
+      <div class="rail-old">
+        <div style="color:var(--accent);font-weight:700;font-size:13px">Chronicle — Living Campaign</div>
+        <div style="color:#506080;font-size:10px">The map is finalized. Cities start at their founding conditions…</div>
+        <div class="oldclock">
+          <span class="t">Year 214</span> <span style="color:#7a98b8;font-size:12px">· Day 141</span>
+          <div class="seasonbar" style="width:100%"><i style="background:#2a6a9a"></i></div>
+          <div class="oldbtns"><span style="background:#1a4a2a;color:#a0e0b0;border-color:#2a6040">▶ Play</span><span>week</span><span>month</span><span>year</span></div>
+          <div class="oldbtns"><span>+ Week</span><span>+ Month</span><span>+ Year</span></div>
+        </div>
+        <span class="launch">⚜️ Merchant Houses</span>
+        <span class="launch">🏆 Richest Cities</span>
+        <span class="launch">📜 Futures Contracts</span>
+        <span class="launch">🏬 Warehouses &amp; Estates</span>
+        <span class="launch">🫧 Finance &amp; Speculation</span>
+        <span class="launch">🪙 Coin, Credit &amp; Crashes</span>
+        <span class="launch" style="opacity:.6">… 7 more buttons …</span>
+        <div class="statrow"><span class="stat"><em>Population</em><b>2.41M</b></span><span class="stat"><em>Price idx</em><b>1.08×</b></span></div>
+      </div>
+      <p class="caption">The clock, 13 stacked launcher buttons and the analytics all competed in one 220px worldgen-styled column — the launchers duplicated the top chips and pushed the reading matter below the fold.</p>
+    </div>
+    <div>
+      <div class="rail">
+        <div class="mast"><b>📜 Chronicle</b><i>The world is finalized. Prices, wealth and trade are simulated <b style="color:var(--inkmid)">live</b> — this ledger reads the world; the clock rides the top bar.</i></div>
+        <div class="statrow">
+          <span class="stat"><em>Population</em><b>2.41M</b><small>+3.2k/mo</small></span>
+          <span class="stat"><em>Price idx</em><b>1.08×</b><small style="color:var(--warn)">+0.03</small></span>
+        </div>
+        <div class="statrow">
+          <span class="stat"><em>Hubs</em><b>38</b></span>
+          <span class="stat"><em>Estates</em><b>11</b></span>
+          <span class="stat"><em>Starving</em><b style="color:var(--badink)">2</b></span>
+        </div>
+        <div style="color:var(--inkfaint);font-size:9px">sim tick 6.4 ms &nbsp; 184 caravans in transit</div>
+        <div class="card"><h4>Cities growing / shrinking</h4>
+          <div class="row"><span style="color:var(--goodink)">▲</span><span class="name">Qart-Zahar</span><span style="font-size:10px;margin-right:6px">64k</span><span style="color:var(--goodink)">1.8%</span></div>
+          <div class="row"><span style="color:var(--goodink)">▲</span><span class="name">Velmora</span><span style="font-size:10px;margin-right:6px">41k</span><span style="color:var(--goodink)">1.1%</span></div>
+          <div class="row"><span style="color:var(--badink)">▼</span><span class="name">Iskren Port</span><span style="font-size:10px;margin-right:6px">18k</span><span style="color:var(--badink)">−0.9%</span></div>
+        </div>
+        <div class="card"><h4>World price index</h4>
+          <svg width="216" height="36"><polyline points="0,30 22,28 44,29 66,24 88,25 110,20 132,22 154,16 176,18 198,12 216,14" fill="none" stroke="#4a90c0" stroke-width="1.5"/></svg>
+        </div>
+        <div class="card"><h4>Dearest goods (× world standard)</h4>
+          <div class="row"><span class="name" style="margin-left:0">Silk</span><span style="color:#d8b070">4.21×</span><span style="color:var(--inkdim);font-size:10px;margin-left:6px">1 src</span></div>
+          <div class="row"><span class="name" style="margin-left:0">Frankincense</span><span style="color:#d8b070">3.60×</span><span style="color:var(--inkdim);font-size:10px;margin-left:6px">1 src</span></div>
+        </div>
+        <div class="card"><h4>Chronicle</h4>
+          <div class="row" style="color:#e6a6c8"><span style="color:var(--inkfaint)">Y214&nbsp;</span>House Velen weds House Qarim — the feud ends.</div>
+          <div class="row" style="color:#c07070"><span style="color:var(--inkfaint)">Y214&nbsp;</span>Grey fever reaches Iskren Port along the amber road.</div>
+        </div>
+      </div>
+      <p class="caption">The rail becomes the <b>World Ledger</b> — pure reading matter under a serif masthead with the gold hairline: pulse tiles with deltas, movers, price history, shortages, dearest goods and the running chronicle. Launchers and the clock are gone (they live in the HUD). Width 220 → 252px.</p>
+    </div>
+  </div>
+</div>
+
+<h2>3 · Design tokens (<code>src/ui/chronicleTheme.ts</code>)</h2>
+<p>One shared vocabulary for every campaign surface — the HUD and rail consume it now; floating windows migrate next.</p>
+<div class="swatches">
+  <div class="sw"><i style="background:#0b1420"></i><div>bg <code>#0b1420</code></div></div>
+  <div class="sw"><i style="background:#0d1521"></i><div>panel <code>#0d1521</code></div></div>
+  <div class="sw"><i style="background:#111b2a"></i><div>raised <code>#111b2a</code></div></div>
+  <div class="sw"><i style="background:#0a1018"></i><div>card <code>#0a1018</code></div></div>
+  <div class="sw"><i style="background:#1e2e42"></i><div>line <code>#1e2e42</code></div></div>
+  <div class="sw"><i style="background:#cfe2f6"></i><div>ink <code>#cfe2f6</code></div></div>
+  <div class="sw"><i style="background:#9fb4cc"></i><div>inkMid <code>#9fb4cc</code></div></div>
+  <div class="sw"><i style="background:#5a7390"></i><div>inkDim <code>#5a7390</code></div></div>
+  <div class="sw"><i style="background:#3a80c0"></i><div>accent <code>#3a80c0</code></div></div>
+  <div class="sw"><i style="background:#d8b24a"></i><div>gold — the Chronicle signature <code>#d8b24a</code></div></div>
+  <div class="sw"><i style="background:#e8d9b0"></i><div>parchment <code>#e8d9b0</code></div></div>
+  <div class="sw"><i style="background:#4cae7a"></i><div>good <code>#4cae7a</code></div></div>
+  <div class="sw"><i style="background:#d9a441"></i><div>warn <code>#d9a441</code></div></div>
+  <div class="sw"><i style="background:#c0573a"></i><div>bad <code>#c0573a</code></div></div>
+</div>
+<p style="margin-top:10px">Type: campaign headings and the date use the serif stack
+<span style="font-family:var(--serif);color:var(--gold)">'Iowan Old Style' / Palatino / Georgia</span> — the "chronicle voice";
+body and data stay in the app sans for density. Gold is reserved for identity moments (dates, mastheads,
+season progress, active ◉ dots) so it stays special.</p>
+
+<h2>4 · Interaction &amp; architecture notes</h2>
+<table>
+  <tr><th>Change</th><th>Why</th></tr>
+  <tr><td><b>Clock moved into <code>campaignStore</code></b> (playing / speed / auto-advance loop)</td>
+      <td>Exactly one loop ever runs; any surface (HUD, rail, future hotkeys) can drive or reflect it. Pausing still refreshes panels and flushes the sim to disk.</td></tr>
+  <tr><td><b><kbd>Space</kbd> = pause/play</b></td><td>The strategy-game reflex. Ignored while typing in inputs.</td></tr>
+  <tr><td><b>Forge keeps WindowBar</b>; Chronicle gets the HUD</td><td>The two subproducts now read differently at a glance — build tool vs. living game.</td></tr>
+  <tr><td><b>Starving alert tile</b> appears only when &gt; 0</td><td>Alerts earn their pixels; a permanent zero is noise.</td></tr>
+  <tr><td><b>Menus close on outside click</b>, ◉/○ state dots, open-count badges</td><td>The bar shows what's open without opening anything.</td></tr>
+</table>
+
+<div class="note"><b style="color:var(--parchment)">Next phase (proposed):</b> migrate the floating windows' headers to the shared
+chrome (serif title + tint + unified tab row via <code>chronicleTheme.ts</code>), then an EU4-style
+outliner mode for the rail (pinned cities/houses/wars) and map-mode buttons in the HUD.</div>
+
+</div>
+</body>
+</html>
