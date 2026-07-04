@@ -38,6 +38,21 @@ const PRICE_CEIL_MULT: f32 = 12.0;
 pub const DEMAND_PRESSURE: f32 = 1.15;
 /// A house with wealth below this and no trade dissolves (bankruptcy).
 const HOUSE_BANKRUPT: f32 = 0.15;
+/// Merchant houses emerge GRADUALLY over the opening years — the founding baseline
+/// ramps to the full target over this many years (not all seeded at once).
+const HOUSE_RAMP_YEARS: f32 = 5.0;
+/// Emergence order (user rule): local merchants → GUILDS (from year 5, a city's
+/// merchants chartering a guild) → HOUSES (from year 10, a family splitting off a
+/// guild's trade). Houses never appear before guilds.
+const GUILD_START_YEAR: u32 = 5;
+const HOUSE_START_YEAR: u32 = 10;
+/// Hard cap on the number of live merchant houses in the world.
+const HOUSE_MAX_TOTAL: usize = 100;
+/// Cadet-branch house splits are DISABLED (user rule: no cadet branches).
+const ENABLE_CADET_BRANCHES: bool = false;
+/// Extra population growth for a TRADE-RICH, WELL-FED city (prosperity × food): a
+/// thriving entrepôt can grow up to ~10%/yr. Scales the logistic rate.
+const TRADE_FOOD_GROWTH_BONUS: f32 = 0.6;
 /// Export reserves: a hub only ships stock ABOVE a kept reserve. Ordinary goods
 /// keep a thin day's buffer, but FOOD keeps a granary — roughly this many days of
 /// local consumption — so the autumn harvest is held back to feed the city through
@@ -115,7 +130,9 @@ const ESTATE_HOUSE_OWNER_WEALTH: f32 = 6.0;
 // Reach of a founder/seat to a colonisable site, as a fraction of world width.
 // Raised from 0.28 so sites are far more often "in range" (the common "0 in range"
 // stall): a great city / rich house can now reach roughly half a continent away.
-const COLONY_HOP_REACH_FRAC: f32 = 0.42;
+/// Colonies are founded at most this far from their metropolis (was ~0.42·world_w ≈
+/// 16 800 km at default res — colonies appeared across whole oceans). 5000 km cap.
+const COLONY_MAX_KM: f32 = 5000.0;
 /// Capital it takes to found a SETTLEMENT colony (heavy — a city-scale venture),
 /// pooled from the parent city treasury + optional house & bank backers.
 const COLONY_FOUND_COST: f32 = 14.0;
@@ -194,6 +211,35 @@ const POP_GROWTH_RATE: f32 = 0.0003;
 const POP_DECLINE_RATE: f32 = 0.0006;
 /// Young settlement colonies grow this much faster organically (frontier boom).
 const POP_GROWTH_COLONY_MULT: f32 = 2.2;
+/// Below this population a settlement is a "small city" (user growth/disease rules).
+const SMALL_CITY_POP: f32 = 10_000.0;
+/// A well-fed small city grows up to this multiple of the base rate (user rule:
+/// humble towns can rise into cities). Scaled by food security.
+const SMALL_CITY_GROWTH_MULT: f32 = 5.0;
+/// …and is this many times LESS likely to be struck by a plague (user rule).
+const SMALL_CITY_PLAGUE_RESIST: f32 = 3.0;
+/// ── SATELLITE cities (Ostia→Rome, Piraeus→Athens, Westminster/Southwark→London):
+/// a LARGE metropolis whose council can fund it spins off a SHORT-RANGE satellite
+/// to serve a concrete NEED it can't fit inside itself — a PORT (inland/large hub
+/// wants a harbour), a GRANARY (food-short core), or a WORKSHOP (very large core
+/// outgrows its works). Council pays + relocates settlers.
+const SATELLITE_METRO_POP: f32 = 25_000.0;    // only a large metropolis spins one off
+const SATELLITE_COST: f32 = 8_000.0;          // council pays this from its treasury
+const SATELLITE_SEED_POP: f32 = 800.0;        // relocated settlers seed the satellite
+const SATELLITE_REACH_FRAC: f32 = 0.06;       // short range around the metropolis
+const SATELLITE_MAX_PER_METRO: u32 = 3;       // a metropolis can raise a few
+const SATELLITE_WORKSHOP_POP: f32 = 60_000.0; // this large → it needs a workshop town
+const SATELLITE_INDEP_YEARS: u32 = 40;        // a mature satellite may go independent
+const SATELLITE_INDEP_POP: f32 = 8_000.0;     // …once it has grown into a real city
+/// ── CARAVANSERAIS: waystations on long INLAND trade corridors (Silk-Road halts a
+/// day apart between distant cities); a small settlement founded near a heavy land
+/// tie's midpoint, which can grow into a town like any other.
+const CARAVAN_CITY_MIN_POP: f32 = 12_000.0;   // the anchoring inland trade cities
+const CARAVAN_MIN_GAP_FRAC: f32 = 0.10;       // the pair must be a long land haul apart
+const CARAVAN_SEED_POP: f32 = 300.0;          // a small waystation seed
+const CARAVAN_NEAR_MIDPOINT: f32 = 0.04;      // a site must sit near the route midpoint
+const CARAVAN_CLEAR_RADIUS: f32 = 0.05;       // skip if a town already serves the midpoint
+const CARAVAN_MAX_PER_YEAR: u32 = 3;
 /// The age of colonisation opens once the world has matured — from year 30.
 const COLONY_START_TICK: u32 = 30 * 365;
 /// A wealthy polis devotes this share of its treasury each month to sponsored
@@ -204,6 +250,37 @@ const POLIS_MIGRATION_SPEND: f32 = 0.03;
 const POLIS_MIGRATION_MIN_TREASURY: f32 = 50.0;
 /// Fraction of the sponsoring city's population a monthly migration wave moves.
 const POLIS_MIGRATION_POP_FRAC: f32 = 0.012;
+/// Recent migration arrows kept for the map (refugee roads + economic drift).
+const MIGRATION_ARROW_CAP: usize = 120;
+/// ── Economic migration (#23) — yearly wage/mood-driven population drift toward
+/// thriving cities in the same trade component. People LEAVE a city only when its
+/// opportunity (prosperity − starvation) is below `ECON_MIG_STAY_ABOVE`, and only
+/// toward a destination that is clearly better by `ECON_MIG_GRADIENT`. Bounded to
+/// `ECON_MIG_FRAC` of population/year so the dynamics guardrails stay satisfied.
+const ECON_MIG_MIN_POP: f32 = 400.0;
+const ECON_MIG_STAY_ABOVE: f32 = 0.55;
+const ECON_MIG_GRADIENT: f32 = 0.15;
+const ECON_MIG_FRAC: f32 = 0.02;
+/// People migrate CITY-TO-CITY to the NEAREST better city within this range — not in
+/// one global A→Z leap. Over years the drift chains A→B→C toward the best regions.
+const MIGRATION_MAX_KM: f32 = 3000.0;
+/// Minority quarters blend into the majority at this fraction per year.
+const MINORITY_ASSIM_RATE: f32 = 0.04;
+/// ── Diaspora: travel-prone MERCHANT cultures (Hansa-in-the-Baltic / trading
+/// minority) spread as minority quarters along trade ties. ~20% of cultures are
+/// high-mobility (mobility ≥ gate); they send a trickle to a trade partner yearly.
+const DIASPORA_MIN_POP: f32 = 800.0;      // a city needs some people to send a diaspora
+const DIASPORA_SEND_FRAC: f32 = 0.006;    // fraction of pop that emigrates per wave
+const DIASPORA_MOBILITY_GATE: f32 = 0.6;  // only cultures at/above this mobility spread
+const DIASPORA_MAX_MINORITY: f32 = 0.35;  // a diaspora tops out at this share of a host
+const DIASPORA_MAX_PER_YEAR: u32 = 8;     // trickle so the map stays legible
+/// ── Ruin REVIVAL — a long-dead site is resettled once its region recovers.
+const RESETTLE_COOLDOWN_YEARS: u32 = 15; // a ruin must lie empty this long first
+const RESETTLE_REACH_FRAC: f32 = 0.12;   // a thriving patron must be within this of world width
+const RESETTLE_PATRON_MIN_POP: f32 = 8_000.0; // the reviving region needs a real city nearby
+const RESETTLE_POP: f32 = 500.0;         // pioneers refound a small town (tiered scale)
+const RESETTLE_PROB: f32 = 0.10;         // per eligible ruin per year
+const RESETTLE_MAX_PER_YEAR: u32 = 2;    // trickle, so revivals stay legible
 /// House TRADE OUTPOSTS open earlier — year 30 — but are gated behind serious
 /// wealth: only a great house (≈150k) can afford the heavy founding cost (≈120k).
 /// Easier conditions than a settlement colony (no bank/food/joint-stock), just the
@@ -292,8 +369,17 @@ const REPAIR_RATE_PER_YEAR: f32 = 0.30;
 const REPAIR_COST_FRAC: f32 = 0.5;
 
 // ── Merchant fleets & voyage risk ────────────────────────────────────────────
+/// A prospering TOWN can charter a guild from year 5 (lower bar than the initial
+/// seed), but only if commercially successful — so guilds cluster in thriving
+/// cities and the world stays differentiated (not a guild in every town).
+const GUILD_FORM_POP: f32 = 6_000.0;
+const GUILD_FORM_PROSPERITY: f32 = 0.45;
 /// A settlement gets a civic Merchant Guild once it reaches this population.
-const GUILD_MIN_POP: f32 = 50_000.0;
+// Lowered 50k→35k: the old 50k was almost never reached on the new humble scale, so
+// guilds never formed ("guilds disappear"). The capacity fix now lets thriving
+// cities grow past 35k, so the greatest commercial centres charter guilds — kept a
+// big-city institution (NOT every large town) so the world stays differentiated.
+const GUILD_MIN_POP: f32 = 35_000.0;
 /// Monthly civic subsidy into a guild's treasury, per 1,000 home-city people
 /// (scaled by the city's prosperity). The city funds its guild.
 const GUILD_SUBSIDY_PER_1K: f32 = 0.02;
@@ -1458,6 +1544,11 @@ pub struct ColonizeSite {
     /// 0 on pre-trade saves (serde default).
     #[serde(default)]
     pub trade_value: f32,
+    /// River-mouth / DELTA (fertile coastal alluvium — a natural port + granary).
+    #[serde(default)] pub delta: bool,
+    /// Land→sea CHOKEPOINT (strait / isthmus / portage where cargo transships and
+    /// tolls can be levied — Venice/Bruges/Constantinople-style prize sites).
+    #[serde(default)] pub chokepoint: bool,
 }
 
 /// Batch 1 · one row of the ERA-SCRUBBER ring: the world as it stood at the end
@@ -1751,13 +1842,54 @@ const EPIDEMIC_CONTAGION_MAG: f32 = 0.06;      // milder cull than the origin
 ///   3 = LOCAL OUTBREAK — common; small cull; short trade restriction; never spreads.
 ///   2 = REGIONAL — rarer than cat-3; moderate; may reach ONE nearby trade partner.
 ///   1 = GREAT PLAGUE — rare; severe; travels the lanes up to ~4000 km from source.
-const PLAGUE_CAT1_SHARE: f32 = 0.06;  // of plague rolls that become a Great Plague
-const PLAGUE_CAT2_SHARE: f32 = 0.24;  // …a Regional outbreak (rest = local cat-3)
-const PLAGUE_CAT1_REACH_KM: f32 = 4000.0; // a Great Plague's max reach from origin
-const PLAGUE_CAT2_REACH_KM: f32 = 1200.0; // a Regional outbreak's one-hop reach
-const PLAGUE_SPREAD_CHANCE_CAT1: f32 = 0.035; // per infected focus, per tick (hard to carry)
-const PLAGUE_SPREAD_CHANCE_CAT2: f32 = 0.020;
+// (Per-disease spread rate, deadliness and reach now live in the DISEASES table.)
+/// A single contagion hop can never exceed this — stops a plague leaping a wide
+/// ocean to ANOTHER CONTINENT via a long maritime trade tie (user rule). Regional
+/// coastal spread still works; only transoceanic jumps are blocked.
+const PLAGUE_HOP_MAX_KM: f32 = 1500.0;
 const EARTH_EQUATOR_KM: f32 = 40075.0;        // world_w cells span this at the equator
+
+// ── Historical DISEASES ─────────────────────────────────────────────────────────
+/// Transmission mode: 0 = TRADE lanes (rats/goods) · 1 = WATER (river-mouth/coast) ·
+/// 2 = AIRBORNE (fastest, any near neighbour, usually milder) · 3 = VECTOR/LOCALE
+/// (spawns in warm wet places, does NOT pass city-to-city).
+pub struct DiseaseSpec {
+    pub name: &'static str,
+    pub spread: f32,   // per-focus per-tick contagion chance
+    pub dead_lo: f32,  // cull fraction range (deadliness)
+    pub dead_hi: f32,
+    pub mode: u8,
+    pub reach_km: f32, // max spread distance from the outbreak origin
+    pub immunity: f32, // 0 none … 1 lasting (scales the survivor-immunity window)
+    pub weight: f32,   // relative outbreak frequency
+}
+pub const DISEASES: [DiseaseSpec; 9] = [
+    DiseaseSpec { name: "Bubonic Plague",    spread: 0.045, dead_lo: 0.30, dead_hi: 0.60, mode: 0, reach_km: 4000.0, immunity: 1.0, weight: 0.06 },
+    DiseaseSpec { name: "Smallpox",          spread: 0.090, dead_lo: 0.25, dead_hi: 0.35, mode: 2, reach_km: 3000.0, immunity: 1.0, weight: 0.10 },
+    DiseaseSpec { name: "Typhus",            spread: 0.045, dead_lo: 0.15, dead_hi: 0.30, mode: 0, reach_km: 2000.0, immunity: 0.5, weight: 0.12 },
+    DiseaseSpec { name: "Cholera",           spread: 0.070, dead_lo: 0.30, dead_hi: 0.50, mode: 1, reach_km: 2500.0, immunity: 0.2, weight: 0.12 },
+    DiseaseSpec { name: "Dysentery",         spread: 0.050, dead_lo: 0.08, dead_hi: 0.15, mode: 1, reach_km: 1500.0, immunity: 0.1, weight: 0.18 },
+    DiseaseSpec { name: "Malaria",           spread: 0.000, dead_lo: 0.05, dead_hi: 0.15, mode: 3, reach_km: 0.0,    immunity: 0.0, weight: 0.12 },
+    DiseaseSpec { name: "Influenza",         spread: 0.110, dead_lo: 0.03, dead_hi: 0.08, mode: 2, reach_km: 4000.0, immunity: 0.3, weight: 0.16 },
+    DiseaseSpec { name: "Measles",           spread: 0.100, dead_lo: 0.10, dead_hi: 0.20, mode: 2, reach_km: 3000.0, immunity: 1.0, weight: 0.08 },
+    DiseaseSpec { name: "Sweating Sickness", spread: 0.060, dead_lo: 0.30, dead_hi: 0.50, mode: 2, reach_km: 2000.0, immunity: 0.0, weight: 0.06 },
+];
+/// Severity category (1 great / 2 regional / 3 local) derived from a disease's
+/// deadliness — the UI badge + the immunity/lockdown length still key off this.
+pub fn disease_category(d: u8) -> u8 {
+    let hi = DISEASES.get(d as usize).map(|s| s.dead_hi).unwrap_or(0.1);
+    if hi >= 0.30 { 1 } else if hi >= 0.15 { 2 } else { 3 }
+}
+/// Weighted pick of a disease for a spontaneous outbreak.
+fn pick_disease(seed: u64, tick: u32, hub: usize) -> u8 {
+    let total: f32 = DISEASES.iter().fold(0.0f32, |a, d| a + d.weight);
+    let mut r = hash01(seed, tick as u64 ^ 0xD15EA5E, hub as u64) * total;
+    for (i, d) in DISEASES.iter().enumerate() {
+        r -= d.weight;
+        if r <= 0.0 { return i as u8; }
+    }
+    0
+}
 /// Immunity earned by surviving an outbreak: a base span plus more the longer the city
 /// was locked down (a harder, longer visitation confers deeper resistance).
 const PLAGUE_IMMUNITY_BASE_YEARS: f32 = 6.0;
@@ -1927,6 +2059,9 @@ pub struct PlagueStrike {
     /// from here). `#[serde(default)]` → old saves default to 0.
     #[serde(default)]
     pub origin_hub: u32,
+    /// Which DISEASE this is (index into `DISEASES`). serde-default 0 = Bubonic Plague.
+    #[serde(default)]
+    pub disease: u8,
 }
 
 /// Phase 4 (flavour) · a HOLY CITY / great temple. Once a year its pilgrimage
@@ -2057,6 +2192,19 @@ pub struct CampaignSim {
     /// See docs/TRADE_BASE_MECHANIC_PLAN.md.
     #[serde(default)]
     pub hub_patron: Vec<i32>,
+    /// Per-hub majority people/culture (hub-indexed; seeded from the worldgen
+    /// culture map at campaign start, inherited by colonies). Resized each tick.
+    #[serde(default)]
+    pub hub_culture: Vec<String>,
+    /// Per-hub minority quarters `(people, share 0..1)` — grown by in-migration of
+    /// a DIFFERENT culture and eroded by slow assimilation. Display-only (no
+    /// economic coupling), so it never affects the dynamics guardrails.
+    #[serde(default)]
+    pub hub_minorities: Vec<Vec<(String, f32)>>,
+    /// Consecutive UNPROFITABLE years per MANUFACTORY (hub-indexed). A works idle
+    /// for 4 years is shut down + partly sold back to its owner. serde-default.
+    #[serde(default)]
+    pub estate_idle_years: Vec<u8>,
     /// Civic supply contracts feeding settlement colonies (the food lifeline). Each
     /// row = a supplier shipping a good to a colony, paid by the metropolis treasury.
     #[serde(default)]
@@ -4441,8 +4589,12 @@ impl CampaignSim {
         let orient = trade / (trade + grain + 1.0); // 0 agrarian … ~1 mercantile
         let w = trade * 0.8 + grain * 0.4;
         let prosp = (w / (w + 1.2)).clamp(0.0, 1.0);
+        // The private patrician elite = resident merchant HOUSES only. Civic GUILDS
+        // are excluded: their wealth scales with city size, so counting them made the
+        // per-capita elite uniform across cities and flattened strata differentiation
+        // once guilds began forming in every large city.
         let elite_w: f32 = self.houses.iter()
-            .filter(|hh| !hh.defunct && hh.hub as usize == h)
+            .filter(|hh| !hh.defunct && !hh.is_guild && hh.hub as usize == h)
             .map(|hh| hh.wealth.max(0.0)).sum();
         let elite_pc = elite_w / hub.population.max(1.0);
         let patrician = (0.02 + 0.07 * orient + 0.06 * (elite_pc / (elite_pc + 5.0))).clamp(0.01, 0.14);
@@ -6135,11 +6287,17 @@ impl CampaignSim {
     /// is its own origin). A city that is currently IMMUNE (survived a recent visitation)
     /// simply shrugs the strike off. Surviving a strike THEN confers lasting immunity,
     /// deeper the longer the lockdown lasts.
-    fn strike_plague(&mut self, hub: usize, mag: f32, category: u8, carried: Option<(usize, u32, u32)>) {
+    fn strike_plague(&mut self, hub: usize, mag: f32, category: u8, disease: u8, carried: Option<(usize, u32, u32, u8)>) {
         if hub >= self.hubs.len() { return; }
         let tick = self.tick;
         // Immunity: a city that weathered a recent outbreak resists a new one entirely.
         if self.hubs[hub].plague_immune_until > tick { return; }
+        // Small cities are less crowded/dense → 3× less likely to be struck at all
+        // (user rule): shrug off 2 of every 3 strikes when under 10k people.
+        if self.hubs[hub].population < SMALL_CITY_POP
+            && hash01(self.seed, tick as u64 ^ 0x5A1717, hub as u64) > 1.0 / SMALL_CITY_PLAGUE_RESIST {
+            return;
+        }
         let pre = self.hubs[hub].population.max(0.0);
         self.hubs[hub].population *= 1.0 - mag.clamp(0.0, 0.6);
         let post = self.hubs[hub].population.max(0.0);
@@ -6157,43 +6315,46 @@ impl CampaignSim {
         });
         // Surviving the visitation confers immunity for years afterward (longer for a
         // harsher, longer lockdown) — the city cannot be re-struck or re-seeded until then.
-        let immune_span = (PLAGUE_IMMUNITY_BASE_YEARS * TICKS_PER_YEAR as f32
-            + lock as f32 * PLAGUE_IMMUNITY_LOCK_MULT) as u32;
+        // Immunity window scaled by the DISEASE (some, like flu/cholera, confer little
+        // lasting immunity so they recur; smallpox/measles/plague confer strong immunity).
+        let dimm = DISEASES.get(disease as usize).map(|s| s.immunity).unwrap_or(1.0);
+        let immune_span = ((PLAGUE_IMMUNITY_BASE_YEARS * TICKS_PER_YEAR as f32
+            + lock as f32 * PLAGUE_IMMUNITY_LOCK_MULT) * dimm) as u32;
         self.hubs[hub].plague_immune_until = tick + lock + immune_span;
         // Observability record (Plagues panel + map). Spontaneous → a new outbreak;
-        // contagion → inherits the source hub's outbreak id + origin + category.
+        // contagion → inherits the source hub's outbreak id + origin + disease.
         let (source, outbreak, origin) = match carried {
-            Some((src, ob, org)) => (src as i32, ob, org),
+            Some((src, ob, org, _dz)) => (src as i32, ob, org),
             None => { let ob = self.next_outbreak; self.next_outbreak += 1; (-1, ob, hub as u32) }
         };
         self.epidemics.push(PlagueStrike {
             hub: hub as u32, source, outbreak, deaths: (pre - post).max(0.0),
             pop_at: post, start_tick: tick, until_tick: tick + lock,
-            category, origin_hub: origin,
+            category, origin_hub: origin, disease,
         });
         if self.epidemics.len() > 400 { let d = self.epidemics.len() - 400; self.epidemics.drain(0..d); }
         let city = self.hubs[hub].name.clone();
-        let cat_name = match category { 1 => "great plague", 2 => "pestilence", _ => "sickness" };
+        let dname = DISEASES.get(disease as usize).map(|s| s.name).unwrap_or("sickness");
         let (kind, text) = match carried {
-            Some((src, _, _)) => {
+            Some((src, _, _, _)) => {
                 let from = self.hubs.get(src).map(|h| h.name.clone()).unwrap_or_default();
                 ("contagion".to_string(),
-                    format!("The {} reaches {}, carried by traders from {}.", cat_name, city, from))
+                    format!("{} reaches {}, carried by traders from {}.", dname, city, from))
             }
             None => ("disaster".to_string(),
-                format!("A {} breaks out in {}; the city is locked down under quarantine", cat_name, city)),
+                format!("{} breaks out in {}; the city is locked down under quarantine", dname, city)),
         };
         self.journal.push(JournalEntry {
             tick, kind, hub: hub as i32, good: -1, value: lock as f32, text });
     }
 
-    /// The (category, origin_hub) of the outbreak currently live at a hub (its most
-    /// recent unexpired strike), if any.
-    fn active_strike_at(&self, hub: usize) -> Option<(u8, u32, u32)> {
+    /// The (category, outbreak, origin_hub, disease) of the outbreak currently live at
+    /// a hub (its most recent unexpired strike), if any.
+    fn active_strike_at(&self, hub: usize) -> Option<(u8, u32, u32, u8)> {
         let tick = self.tick;
         self.epidemics.iter().rev()
             .find(|s| s.hub as usize == hub && s.until_tick > tick)
-            .map(|s| (if s.category == 0 { 3 } else { s.category }, s.outbreak, s.origin_hub))
+            .map(|s| (if s.category == 0 { 3 } else { s.category }, s.outbreak, s.origin_hub, s.disease))
     }
 
     /// Straight-line distance (in cells, cylindrical-X) between two hubs.
@@ -6228,27 +6389,43 @@ impl CampaignSim {
         let mut new_infections = 0usize;
         for &src in &locked {
             if new_infections >= EPIDEMIC_MAX_SPREAD_PER_TICK { break; }
-            let (cat, outbreak, origin) = match self.active_strike_at(src) { Some(x) => x, None => continue };
-            if cat >= 3 { continue; } // local outbreaks stay put
-            let chance = if cat == 1 { PLAGUE_SPREAD_CHANCE_CAT1 } else { PLAGUE_SPREAD_CHANCE_CAT2 };
-            if hash01(self.seed, tick as u64 ^ 0xC0FFEE, src as u64) >= chance { continue; }
+            let (cat, outbreak, origin, disease) = match self.active_strike_at(src) { Some(x) => x, None => continue };
+            let spec = &DISEASES[disease.min(8) as usize];
+            // VECTOR diseases (malaria) never pass city-to-city — they re-emerge from
+            // the land itself, so they don't travel here.
+            if spec.mode == 3 || spec.spread <= 0.0 { continue; }
+            if cat >= 3 && spec.mode != 2 { continue; } // local outbreaks stay put (airborne still drifts)
+            if hash01(self.seed, tick as u64 ^ 0xC0FFEE, src as u64) >= spec.spread { continue; }
             // A regional outbreak only ever reaches ONE further city — once a contagion
             // child of this outbreak exists, it stops travelling.
             if cat == 2 && self.epidemics.iter().any(|s| s.outbreak == outbreak && s.source >= 0) {
                 continue;
             }
-            let reach_km = if cat == 1 { PLAGUE_CAT1_REACH_KM } else { PLAGUE_CAT2_REACH_KM };
-            // Nearest eligible trade partner (route neighbour): a real city (not estate),
-            // not already infected, not immune, and — the reach limit — within the
-            // category's range of the OUTBREAK'S ORIGIN (a plague fades ~4000 km out).
+            let reach_cells = spec.reach_km / km_per_cell.max(1e-3);
             let org = origin as usize;
-            let dst = self.neighbors.get(src).and_then(|v| v.iter().map(|&x| x as usize)
-                .find(|&h| h < n && !self.hubs[h].is_estate
-                    && !locked_set.contains(&h)
-                    && self.hubs[h].plague_immune_until <= tick
-                    && (org >= n || self.hub_cell_dist(org, h) * km_per_cell <= reach_km)));
-            if let Some(dst) = dst {
-                self.strike_plague(dst, EPIDEMIC_CONTAGION_MAG, cat, Some((src, outbreak, origin)));
+            let comp = self.hubs[org.min(n - 1)].component;
+            // Candidate destinations by TRANSMISSION MODE:
+            //   trade (0): a trade-route neighbour (merchants carry it)
+            //   water (1): a COASTAL/river-mouth trade neighbour (foul water)
+            //   airborne (2): ANY nearby city (not only trade partners — it drifts)
+            let mut best: (usize, f32) = (usize::MAX, f32::MAX);
+            let mut consider = |me: &Self, h: usize, best: &mut (usize, f32)| {
+                if h >= n || h == src || me.hubs[h].is_estate || me.hubs[h].abandoned { return; }
+                if locked_set.contains(&h) || me.hubs[h].plague_immune_until > tick { return; }
+                if me.hubs[h].component != comp { return; }
+                if spec.mode == 1 && !me.hubs[h].coastal { return; } // water needs a wet city
+                let dsrc = me.hub_cell_dist(src, h) * km_per_cell;
+                if dsrc > PLAGUE_HOP_MAX_KM { return; }
+                if org < n && me.hub_cell_dist(org, h) * km_per_cell > spec.reach_km { return; }
+                if (dsrc / km_per_cell) < best.1 { *best = (h, dsrc / km_per_cell); }
+            };
+            if spec.mode == 2 {
+                for h in 0..n { if self.hub_cell_dist(src, h) <= reach_cells { consider(self, h, &mut best); } }
+            } else if let Some(v) = self.neighbors.get(src) {
+                for &x in v { consider(self, x as usize, &mut best); }
+            }
+            if best.0 != usize::MAX {
+                self.strike_plague(best.0, EPIDEMIC_CONTAGION_MAG, cat, disease, Some((src, outbreak, origin, disease)));
                 new_infections += 1;
             }
         }
@@ -6262,19 +6439,20 @@ impl CampaignSim {
         }
         let tick = self.tick;
         let r = hash01(self.seed, tick as u64, 0xE7E7);
-        // ~ one event every ~12 ticks on average.
-        if r > 0.085 {
+        // ~ one event every ~10 ticks on average (raised for MORE epidemics; the
+        // disease origin gates + immunity keep them from overrunning the world).
+        if r > 0.10 {
             return;
         }
         let pick = hash01(self.seed, tick as u64, 0x1234);
         let hub = (hash01(self.seed, tick as u64, 0x5678) * n as f32) as usize % n;
-        let (kind, mag, dur, good): (&str, f32, u32, i32) = if pick < 0.26 {
+        let (kind, mag, dur, good): (&str, f32, u32, i32) = if pick < 0.22 {
             // A drought trims food for a season. Kept moderate so a hub's granary
             // reserve + the baseline food surplus can ride it out — a bad year, not
             // an automatic famine (deep deficits used to spiral into collapse).
             ("drought", 0.20 + 0.15 * pick, 30 + (pick * 40.0) as u32, -1)
-        } else if pick < 0.42 {
-            // Severity/duration are chosen per-category inside the match below.
+        } else if pick < 0.46 {
+            // The disease + severity are chosen inside the match below (24% of events).
             ("plague", 0.0, 0, -1)
         } else if pick < 0.54 {
             ("fire", 0.5, 1, -1)
@@ -6402,16 +6580,19 @@ impl CampaignSim {
                 // The market routes around the lockup; futures touching it are force-
                 // majeure suspended. Phase 5 `spread_epidemics` then carries a cat-1/2
                 // along the trade lanes (never geographically) from this focus.
-                let cr = hash01(self.seed, tick as u64 ^ 0x9A6E, hub as u64);
-                let sev = hash01(self.seed, tick as u64 ^ 0x5EE7, hub as u64);
-                let (category, cull) = if cr < PLAGUE_CAT1_SHARE {
-                    (1u8, 0.22 + 0.13 * sev)        // Great Plague: heavy cull (22-35%)
-                } else if cr < PLAGUE_CAT1_SHARE + PLAGUE_CAT2_SHARE {
-                    (2u8, 0.10 + 0.07 * sev)        // Regional: moderate (10-17%)
-                } else {
-                    (3u8, 0.04 + 0.05 * sev)        // Local: small loss of life (4-9%)
-                };
-                self.strike_plague(hub, cull, category, None);
+                // Pick a DISEASE (weighted). Some need a specific ORIGIN: water-borne
+                // (cholera/dysentery) and vector (malaria) emerge in a wet/coastal
+                // locale; trade/airborne can start anywhere. The cull is the disease's
+                // own deadliness range; the severity category follows from that.
+                let disease = pick_disease(self.seed, tick, hub);
+                let spec = &DISEASES[disease as usize];
+                let origin_ok = match spec.mode { 1 | 3 => self.hubs[hub].coastal, _ => true };
+                if origin_ok {
+                    let sev = hash01(self.seed, tick as u64 ^ 0x5EE7, hub as u64);
+                    let cull = spec.dead_lo + (spec.dead_hi - spec.dead_lo) * sev;
+                    let category = disease_category(disease);
+                    self.strike_plague(hub, cull, category, disease, None);
+                }
             }
             "festival" => { /* demand spike handled implicitly by low stock */ }
             _ => {}
@@ -6569,7 +6750,12 @@ impl CampaignSim {
             let prosperity = self.hubs[h].sent_prosperity.clamp(0.0, 1.0); // trade+grain wealth
             // Capacity in multiples of the founding population (≈0.25× when poor &
             // hungry, up to ≈2.7× for a rich, well-fed entrepôt).
-            let cap_mult = (0.35 + 1.15 * food_sec) * (0.70 + 1.10 * prosperity);
+            // Capacity scales with FOOD security and (strongly) TRADE prosperity so a
+            // thriving hub keeps growing into a real city instead of stalling at a
+            // fixed ~2.7× of its humble founding size — the old ceiling froze every
+            // city ~year 50 and flat-lined trade. A rich, well-fed entrepôt can now
+            // reach ~9× its founding size; a poor isolated one stays small.
+            let cap_mult = (0.35 + 1.30 * food_sec) * (0.60 + 5.0 * prosperity * prosperity);
             let capacity = (self.hubs[h].founding_pop * cap_mult)
                 .max(self.hubs[h].founding_pop * 0.15);
             // Logistic step: approach capacity from below, decline when above it.
@@ -6577,7 +6763,16 @@ impl CampaignSim {
             // SETTLEMENT colonies grow faster (frontier boom + sponsored migration on
             // top) so they still mature into cities within a campaign.
             let colony_boom = if self.hubs[h].colony_kind == 1 && !self.hubs[h].autonomous { POP_GROWTH_COLONY_MULT } else { 1.0 };
-            let rate = if pop < capacity { POP_GROWTH_RATE * colony_boom } else { POP_DECLINE_RATE };
+            // Small-city growth bonus (user rule): a well-fed town under 10k grows up
+            // to 5× faster so humble settlements rise into cities — scaled by food
+            // security (needs food on-site or traded in), no benefit when starving.
+            let small_boost = if pop < SMALL_CITY_POP {
+                1.0 + (SMALL_CITY_GROWTH_MULT - 1.0) * food_sec
+            } else { 1.0 };
+            // Trade-rich + well-fed cities of ANY size grow faster (user rule: up to
+            // ~10%/yr) — a thriving, food-secure entrepôt booms; a poor/hungry one crawls.
+            let trade_food_boost = 1.0 + TRADE_FOOD_GROWTH_BONUS * prosperity * food_sec;
+            let rate = if pop < capacity { POP_GROWTH_RATE * colony_boom * small_boost * trade_food_boost } else { POP_DECLINE_RATE };
             let mut new_pop = pop + rate * pop * (1.0 - pop / capacity);
             // Famine empties a city faster than trade decline alone.
             if self.hubs[h].starving > 0.5 {
@@ -6621,8 +6816,17 @@ impl CampaignSim {
             self.update_unrest();
             // Estate/manufactory disasters strike + funded repairs progress (yearly).
             self.estate_condition_pass();
+            self.manufactory_solvency_pass(); // shut works idle 4+ years
             // Atlas 2.0 — the LIVING MAP: organic settlement death & birth.
             self.lifecycle_pass(expansion_ok);
+            // …and REBIRTH: long-dead ruins in recovered regions are resettled.
+            self.resettle_pass(expansion_ok);
+            // #23 · Peoples: seed/settle cultures, drift people toward opportunity
+            // (draws migration arrows), and slowly assimilate minority quarters.
+            self.ensure_hub_cultures();
+            self.economic_migration_pass();
+            self.diaspora_pass();
+            self.assimilation_pass();
             // House trade outposts from year 30 (rich house, heavy cost); full
             // settlement colonies from year 50 (joint-stock, food lifeline).
             if expansion_ok && self.tick >= BASE_START_TICK {
@@ -6634,6 +6838,9 @@ impl CampaignSim {
                 self.maybe_found_settlement_colony();
                 self.maybe_found_food_colony(); // Greek-Crimea grain colony (food stress)
                 self.colony_pass(); // graduation · dividends · autonomy
+                self.maybe_found_satellite(expansion_ok); // port/granary/workshop suburbs
+                self.maybe_found_caravanserai(expansion_ok); // waystations on long land ties
+                self.satellite_independence_pass();        // mature satellites → free cities
             }
         }
     }
@@ -6814,6 +7021,65 @@ impl CampaignSim {
         self.hubs.iter().filter(|h| h.is_estate).count()
     }
 
+    /// Yearly: a MANUFACTORY (estate_kind 6) that hasn't turned a profit for 4 years
+    /// is SHUT DOWN — its owner recoups part of the works' capital and the city's
+    /// estate slot is freed. "Unprofitable" = it makes nothing (input/labor-starved)
+    /// OR its output piles up unsold (a persistent glut). Raw estates are left alone.
+    fn manufactory_solvency_pass(&mut self) {
+        let n = self.hubs.len();
+        let ng = self.goods.len();
+        if self.estate_idle_years.len() < n { self.estate_idle_years.resize(n, 0); }
+        for h in 0..n {
+            if !self.hubs[h].is_estate || self.hubs[h].abandoned || self.hubs[h].estate_kind != 6 {
+                if h < self.estate_idle_years.len() { self.estate_idle_years[h] = 0; }
+                continue;
+            }
+            // Output good = the good it produces most.
+            let g = (0..ng).max_by(|&a, &b| self.hubs[h].production[a]
+                .partial_cmp(&self.hubs[h].production[b]).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(0);
+            let prod = self.hubs[h].production.get(g).copied().unwrap_or(0.0);
+            let stock = self.hubs[h].stock.get(g).copied().unwrap_or(0.0);
+            // Unprofitable this year: makes nothing (starved) OR a year-plus unsold glut.
+            let unprofitable = prod <= EPS || stock > prod * 360.0;
+            if unprofitable {
+                self.estate_idle_years[h] = self.estate_idle_years[h].saturating_add(1);
+            } else {
+                self.estate_idle_years[h] = 0;
+            }
+            if self.estate_idle_years[h] >= 4 {
+                self.close_manufactory(h);
+                self.estate_idle_years[h] = 0;
+            }
+        }
+    }
+
+    /// Shut an unprofitable manufactory: the owner recoups 40% of its capital value,
+    /// the works go inert and detach from their city (freeing the estate slot).
+    fn close_manufactory(&mut self, h: usize) {
+        let tick = self.tick;
+        let tier = self.hubs[h].estate_tier.max(1) as f32;
+        let recoup = 0.4 * tier * BANK_STAKE_VALUE_PER_TIER;
+        let owner = self.hubs[h].owner_house;
+        if owner >= 0 && (owner as usize) < self.houses.len() && !self.houses[owner as usize].defunct {
+            self.houses[owner as usize].wealth += recoup;
+        }
+        let owner_name = if owner >= 0 && (owner as usize) < self.houses.len() {
+            self.houses[owner as usize].name.clone()
+        } else { "The city".to_string() };
+        let (ename, parent) = (self.hubs[h].name.clone(), self.hubs[h].parent);
+        let ng = self.goods.len();
+        {
+            let e = &mut self.hubs[h];
+            e.abandoned = true; e.estate_tier = 0; e.owner_house = -1; e.parent = -1;
+            e.production = vec![0.0; ng];
+            for v in e.base_per_capita.iter_mut() { *v = 0.0; }
+        }
+        self.journal.push(JournalEntry {
+            tick, kind: "disaster".into(), hub: parent, good: -1, value: 0.0,
+            text: format!("{} shutters its unprofitable works at {}", owner_name, ename) });
+    }
+
     fn maybe_found_estate(&mut self) {
         if self.estate_count() >= MAX_TOTAL_ESTATES { return; }
         let n = self.hubs.len();
@@ -6826,6 +7092,12 @@ impl CampaignSim {
             if self.hubs[h].is_estate { continue; }
             if self.hubs[h].trade_wealth <= 0.15 { continue; }
             if self.hubs[h].food_balance < -0.1 { continue; } // a hungry city doesn't expand
+            // Per-city cap (was MISSING here → the single richest city amassed dozens of
+            // same-good estates). Skip cities already at their estate cap so the
+            // hinterland spreads across the region instead of one monoculture.
+            let on_city = self.hubs.iter().filter(|e| e.is_estate && e.parent == h as i32).count();
+            let cap = if self.hubs[h].population >= ESTATE_BIG_CITY_POP { MAX_ESTATES_BIG_CITY } else { MAX_ESTATES_PER_CITY };
+            if on_city >= cap { continue; }
             let score = self.hubs[h].population * self.hubs[h].trade_wealth.max(0.0);
             if score > best_score { best_score = score; best = Some(h); }
         }
@@ -7038,7 +7310,7 @@ impl CampaignSim {
                 nodes.push((self.hubs[off as usize].x, self.hubs[off as usize].y));
             }
         }
-        let cap = self.world_w * COLONY_HOP_REACH_FRAC;
+        let cap = COLONY_MAX_KM * self.world_w / EARTH_EQUATOR_KM; // ≤ 5000 km from the metropolis
         // Pick the best reachable site for a TRADE outpost: a house plants its
         // factory where the valuable trade goods are. Site trade-value dominates,
         // a coast (shippable) adds a bonus, and nearer is better. Fertility is
@@ -7084,7 +7356,13 @@ impl CampaignSim {
         self.hubs[new].colony_kind = 2;
         self.hubs[new].founder_hub = home as i32;
         let hname = self.houses[hi].name.clone();
-        self.hubs[new].name = format!("{} (outpost)", hname);
+        // Distinct place-name + the (outpost) tag (was "{house} (outpost)", which
+        // duplicated when a house planted several); the founding house is named in
+        // the chronicle below and shown via `owner_house`.
+        let place = crate::sim::names::gen_name(
+            site.x.max(0.0) as u32, site.y.max(0.0) as u32,
+            self.world_w as u32, self.world_h());
+        self.hubs[new].name = format!("{} (outpost)", place);
         self.journal.push(JournalEntry {
             tick: self.tick, kind: "colony".into(), hub: new as i32, good: g0 as i32, value: 2.0,
             text: format!("{} founds a trade outpost ({})", hname, self.goods[g0].name),
@@ -7354,6 +7632,200 @@ impl CampaignSim {
     }
 
     /// Monthly · a prosperous, CROWDED polis with treasury to spare SPONSORS
+    /// Append a fading migration arrow (a "refugee road" / drift line) for the map,
+    /// bounded so the snapshot stays small.
+    fn push_migration_arrow(&mut self, sx: f32, sy: f32, tx: f32, ty: f32) {
+        self.migrations.push([sx, sy, tx, ty, self.tick as f32]);
+        if self.migrations.len() > MIGRATION_ARROW_CAP {
+            let excess = self.migrations.len() - MIGRATION_ARROW_CAP;
+            self.migrations.drain(0..excess);
+        }
+    }
+
+    /// Ensure every live hub has a majority culture (seeded from the worldgen
+    /// culture map, inherited by its founder for colonies) and a minorities slot.
+    /// Only fills empties, so it self-heals old saves and newly-founded hubs.
+    pub(crate) fn ensure_hub_cultures(&mut self) {
+        let n = self.hubs.len();
+        if self.hub_culture.len() < n { self.hub_culture.resize(n, String::new()); }
+        if self.hub_minorities.len() < n { self.hub_minorities.resize(n, Vec::new()); }
+        let map = crate::sim::cultures::active();
+        for i in 0..n {
+            if !self.hub_culture[i].is_empty() { continue; }
+            let founder = self.hubs[i].founder_hub;
+            if founder >= 0 && (founder as usize) < n
+                && self.hub_culture.get(founder as usize).map(|c| !c.is_empty()).unwrap_or(false) {
+                self.hub_culture[i] = self.hub_culture[founder as usize].clone();
+            } else if let Some(m) = &map {
+                if let Some(h) = m.hearth_at(self.hubs[i].x as u32, self.hubs[i].y as u32) {
+                    self.hub_culture[i] = h.people.clone();
+                }
+            }
+            if self.hub_culture[i].is_empty() { self.hub_culture[i] = "—".into(); }
+        }
+    }
+
+    /// Migrants carry their home culture. Where it differs from the destination's
+    /// majority, it swells a minority quarter there (as a share of destination pop).
+    fn record_migration_culture(&mut self, dest: usize, src: usize, movers: f32) {
+        let src_culture = match self.hub_culture.get(src) {
+            Some(c) if !c.is_empty() && c != "—" => c.clone(),
+            _ => return,
+        };
+        self.add_minority(dest, &src_culture, movers);
+    }
+
+    /// Grow a culture's minority quarter at `dest` by `movers` people (no-op if it
+    /// is already the majority culture there).
+    fn add_minority(&mut self, dest: usize, culture: &str, movers: f32) {
+        if dest >= self.hub_minorities.len() || culture.is_empty() || culture == "—" { return; }
+        if self.hub_culture.get(dest).map(|c| c == culture).unwrap_or(false) { return; }
+        let dest_pop = self.hubs[dest].population.max(1.0);
+        let add = (movers / dest_pop).clamp(0.0, 0.95);
+        if add <= 0.0 { return; }
+        let list = &mut self.hub_minorities[dest];
+        if let Some(e) = list.iter_mut().find(|(c, _)| c == culture) {
+            e.1 = (e.1 + add).min(0.95);
+        } else {
+            list.push((culture.to_string(), add));
+        }
+    }
+
+    /// The share (0..1) of `culture` at `hub` — the majority remainder if it is the
+    /// city's main people, else its minority share, else 0.
+    pub(crate) fn culture_share_at(&self, hub: usize, culture: &str) -> f32 {
+        if self.hub_culture.get(hub).map(|c| c == culture).unwrap_or(false) {
+            let mshare: f32 = self.hub_minorities.get(hub)
+                .map(|m| m.iter().fold(0.0f32, |a, (_, s)| a + *s)).unwrap_or(0.0);
+            return (1.0 - mshare).clamp(0.0, 1.0);
+        }
+        self.hub_minorities.get(hub)
+            .and_then(|m| m.iter().find(|(c, _)| c == culture).map(|(_, s)| *s)).unwrap_or(0.0)
+    }
+
+    /// Deterministic per-culture MOBILITY (0..1). ~20% of peoples are travel-prone
+    /// merchant diasporas (mobility ≥ 0.7); the rest are more sedentary. Modelled on
+    /// historical trading minorities (Hanseatic Germans, Jewish/Armenian/Greek
+    /// diasporas) whose communities spread through the trade network.
+    pub(crate) fn culture_mobility(name: &str) -> f32 {
+        if name.is_empty() || name == "—" { return 0.2; }
+        let mut h = 0xcbf29ce484222325u64;
+        for b in name.bytes() { h ^= b as u64; h = h.wrapping_mul(0x100000001b3); }
+        let r = (h % 1000) as f32 / 1000.0;
+        if r > 0.80 { 0.7 + (r - 0.80) / 0.20 * 0.30 } else { 0.1 + r / 0.80 * 0.4 }
+    }
+
+    /// #23 · Yearly DIASPORA spread: a travel-prone culture present in a city (as its
+    /// majority OR an existing minority — enabling chain migration) sends a trickle
+    /// of settlers ALONG a trade tie to a partner city, seeding/growing a minority
+    /// quarter there. So merchant peoples visibly spread across the trade map.
+    fn diaspora_pass(&mut self) {
+        let tick = self.tick;
+        let n = self.hubs.len();
+        let mut sent = 0u32;
+        for src in 0..n {
+            if sent >= DIASPORA_MAX_PER_YEAR { break; }
+            if self.hubs[src].is_estate || self.hubs[src].abandoned { continue; }
+            if self.hubs[src].population < DIASPORA_MIN_POP { continue; }
+            // The most travel-prone culture PRESENT here (majority or minority).
+            let mut cand: Option<(String, f32)> = None;
+            if let Some(maj) = self.hub_culture.get(src) {
+                let m = Self::culture_mobility(maj);
+                if m >= DIASPORA_MOBILITY_GATE { cand = Some((maj.clone(), m)); }
+            }
+            if let Some(mins) = self.hub_minorities.get(src) {
+                for (c, s) in mins {
+                    if *s < 0.02 { continue; }
+                    let m = Self::culture_mobility(c);
+                    if m >= DIASPORA_MOBILITY_GATE && cand.as_ref().map_or(true, |(_, cm)| m > *cm) {
+                        cand = Some((c.clone(), m));
+                    }
+                }
+            }
+            let Some((culture, mob)) = cand else { continue; };
+            if hash01(self.seed, tick as u64 ^ 0xD1A5, src as u64) > 0.15 * mob { continue; }
+            // Destination: a TRADE PARTNER (route neighbour — never a direct geographic
+            // jump) where this culture is still under-represented.
+            let max_cells = MIGRATION_MAX_KM / (EARTH_EQUATOR_KM / self.world_w.max(1.0)).max(1e-3);
+            let dst = self.neighbors.get(src).and_then(|v| v.iter().map(|&x| x as usize)
+                .find(|&d| d < n && d != src && !self.hubs[d].is_estate && !self.hubs[d].abandoned
+                    && self.hub_cell_dist(src, d) <= max_cells
+                    && self.culture_share_at(d, &culture) < DIASPORA_MAX_MINORITY));
+            let Some(dst) = dst else { continue; };
+            let movers = (self.hubs[src].population * DIASPORA_SEND_FRAC).clamp(5.0, 200.0);
+            self.hubs[src].population = (self.hubs[src].population - movers)
+                .max(self.hubs[src].founding_pop * 0.3);
+            self.hubs[dst].population += movers;
+            self.add_minority(dst, &culture, movers);
+            let (sx, sy, dx, dy) = (self.hubs[src].x, self.hubs[src].y, self.hubs[dst].x, self.hubs[dst].y);
+            self.push_migration_arrow(sx, sy, dx, dy);
+            sent += 1;
+            if hash01(self.seed, tick as u64 ^ 0x9A17, src as u64) < 0.10 {
+                let dn = self.hubs[dst].name.clone();
+                self.journal.push(JournalEntry { tick, kind: "migration".into(), hub: dst as i32, good: -1,
+                    value: movers, text: format!("{:.0} {} traders settle in {}", movers, culture, dn) });
+            }
+        }
+    }
+
+    /// Yearly assimilation: minority quarters slowly blend into the majority.
+    fn assimilation_pass(&mut self) {
+        for list in self.hub_minorities.iter_mut() {
+            for e in list.iter_mut() { e.1 *= 1.0 - MINORITY_ASSIM_RATE; }
+            list.retain(|(_, s)| *s > 0.005);
+            if list.len() > 5 {
+                list.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                list.truncate(5);
+            }
+        }
+    }
+
+    /// #23 · Yearly economic migration: within a trade component, people drift from
+    /// low-opportunity (poor / hungry) cities to the most thriving reachable one.
+    /// Emits fading arrows + mixes cultures. Small fractions keep populations bounded.
+    fn economic_migration_pass(&mut self) {
+        let tick = self.tick;
+        let n = self.hubs.len();
+        // Opportunity per hub (prosperity − starvation); precomputed so the inner
+        // destination scan is cheap and borrow-safe.
+        let opp: Vec<f32> = self.hubs.iter()
+            .map(|h| if h.is_estate || h.abandoned { f32::MIN } else { h.sent_prosperity - h.starving })
+            .collect();
+        for src in 0..n {
+            let s = &self.hubs[src];
+            if s.is_estate || s.abandoned || s.population < ECON_MIG_MIN_POP { continue; }
+            let src_opp = opp[src];
+            if src_opp > ECON_MIG_STAY_ABOVE { continue; } // content cities keep their people
+            let comp = s.component;
+            let src_pop = s.population;
+            let km_per_cell = EARTH_EQUATOR_KM / self.world_w.max(1.0);
+            let max_cells = MIGRATION_MAX_KM / km_per_cell.max(1e-3);
+            let mut dest = (usize::MAX, f32::MIN);
+            for d in 0..n {
+                if d == src { continue; }
+                let o = &self.hubs[d];
+                if o.is_estate || o.abandoned || o.component != comp || o.food_balance < 0.0 { continue; }
+                // Nearest better city within 3000 km only — no global A→Z jump.
+                if self.hub_cell_dist(src, d) > max_cells { continue; }
+                if opp[d] > dest.1 { dest = (d, opp[d]); }
+            }
+            let Some(di) = (dest.0 != usize::MAX).then_some(dest.0) else { continue; };
+            if dest.1 - src_opp < ECON_MIG_GRADIENT { continue; } // needs a real pull
+            let movers = (src_pop * ECON_MIG_FRAC).clamp(10.0, 800.0);
+            if movers >= src_pop * 0.5 { continue; }
+            self.hubs[src].population -= movers;
+            self.hubs[di].population += movers;
+            self.record_migration_culture(di, src, movers);
+            let (sx, sy, dx, dy) = (self.hubs[src].x, self.hubs[src].y, self.hubs[di].x, self.hubs[di].y);
+            self.push_migration_arrow(sx, sy, dx, dy);
+            if hash01(self.seed, tick as u64 ^ 0x5EED_0C, src as u64) < 0.08 {
+                let (sn, dn) = (self.hubs[src].name.clone(), self.hubs[di].name.clone());
+                self.journal.push(JournalEntry { tick, kind: "migration".into(), hub: di as i32, good: -1,
+                    value: movers, text: format!("{:.0} people leave {} seeking work in {}", movers, sn, dn) });
+            }
+        }
+    }
+
     /// emigration: it spends a slice of its treasury to move a wave of people to an
     /// under-populated, food-secure city in its own trade region (preferring its own
     /// colonies). This both relieves the sponsor's crowding and drains the treasuries
@@ -7390,6 +7862,9 @@ impl CampaignSim {
             self.hubs[src].population = (pop - movers).max(self.hubs[src].founding_pop * 0.5);
             self.hubs[di].population += movers;
             self.hubs[di].treasury += spend * 0.5; // settlement aid travels with the migrants
+            self.record_migration_culture(di, src, movers);
+            let (sx, sy, dx, dy) = (self.hubs[src].x, self.hubs[src].y, self.hubs[di].x, self.hubs[di].y);
+            self.push_migration_arrow(sx, sy, dx, dy);
             if hash01(self.seed, tick as u64 ^ 0x4D161, src as u64) < 0.15 {
                 let (sn, dn) = (self.hubs[src].name.clone(), self.hubs[di].name.clone());
                 self.journal.push(JournalEntry { tick, kind: "migration".into(), hub: di as i32, good: -1,
@@ -7497,8 +7972,8 @@ impl CampaignSim {
                 self.hubs[j].population += share;
                 self.migrations.push([hx, hy, self.hubs[j].x, self.hubs[j].y, tick as f32]);
             }
-            if self.migrations.len() > 60 {
-                let excess = self.migrations.len() - 60;
+            if self.migrations.len() > MIGRATION_ARROW_CAP {
+                let excess = self.migrations.len() - MIGRATION_ARROW_CAP;
                 self.migrations.drain(0..excess);
             }
         }
@@ -7564,9 +8039,16 @@ impl CampaignSim {
         let idx = self.create_organic_town(mother, &site, seed_pop);
         let new_name = self.hubs[idx].name.clone();
         self.total_foundings += 1;
+        // Naturally-spawned free towns are a MERCHANT venture (related to a house/
+        // guild), unlike the city-founded DEPENDENT satellites: name the sponsoring
+        // house/guild in the beat so the tie reads in the chronicle.
+        let sponsor = self.strongest_house_at(mother).map(|hi| self.houses[hi].name.clone());
+        let text = match &sponsor {
+            Some(hn) => format!("Merchants of {} lead settlers from {} to found {}", hn, mother_name, new_name),
+            None => format!("Settlers from {} found {}", mother_name, new_name),
+        };
         self.journal.push(JournalEntry { tick: self.tick, kind: "founding".into(),
-            hub: idx as i32, good: -1, value: seed_pop,
-            text: format!("Settlers from {} found {}", mother_name, new_name) });
+            hub: idx as i32, good: -1, value: seed_pop, text });
     }
 
     /// Create the swarm's daughter town: an ordinary FREE settlement (colony_kind 0)
@@ -7607,6 +8089,160 @@ impl CampaignSim {
         self.hubs.len() - 1
     }
 
+    /// SATELLITE cities: a large metropolis founds a SHORT-RANGE satellite to serve a
+    /// concrete NEED it cannot fit inside itself — a PORT (a big INLAND trade hub
+    /// wants a harbour at the land/sea interface), a GRANARY (food-short core), or a
+    /// WORKSHOP (a very large core outgrows its works). Council-approved, funded from
+    /// the city treasury, seeded with relocated townsfolk. Historical: Ostia/Portus→
+    /// Rome, Piraeus→Athens, Westminster & Southwark→London, Galata→Constantinople.
+    /// One per call (yearly).
+    fn maybe_found_satellite(&mut self, expansion_ok: bool) {
+        if !expansion_ok || self.colonizable.is_empty() { return; }
+        let tick = self.tick;
+        let reach = (self.world_w * SATELLITE_REACH_FRAC).max(2.0);
+        for m in 0..self.hubs.len() {
+            let metro = &self.hubs[m];
+            if metro.is_estate || metro.abandoned || metro.colony_kind != 0 { continue; }
+            if metro.population < SATELLITE_METRO_POP || metro.treasury < SATELLITE_COST { continue; }
+            let sat_count = self.hubs.iter()
+                .filter(|h| h.founder_hub == m as i32 && !h.abandoned && h.colony_kind == 0)
+                .count() as u32;
+            if sat_count >= SATELLITE_MAX_PER_METRO { continue; }
+            // The NEED decides the role (priority: survival → trade → industry).
+            let need_granary = metro.food_balance < 0.0;
+            let need_port = !metro.coastal && metro.trade_wealth > 0.0;
+            let need_workshop = metro.population >= SATELLITE_WORKSHOP_POP;
+            let role: u8 = if need_granary { 1 } else if need_port { 0 }
+                else if need_workshop { 2 } else { continue };
+            if hash01(self.seed, tick as u64 ^ 0x5A7E11, m as u64) > 0.5 { continue; }
+            // Nearest reachable colonizable site (a PORT needs a COASTAL one — the
+            // land/sea transshipment point).
+            let (mx, my) = (metro.x, metro.y);
+            let mut best = (usize::MAX, f32::MAX);
+            for (i, site) in self.colonizable.iter().enumerate() {
+                if role == 0 && !site.coastal { continue; }
+                let mut dx = (site.x - mx).abs();
+                if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
+                let dy = site.y - my;
+                let d2 = dx * dx + dy * dy;
+                if d2 > reach * reach { continue; }
+                if d2 < best.1 { best = (i, d2); }
+            }
+            let Some(si) = (best.0 != usize::MAX).then_some(best.0) else { continue; };
+            // Council funds it + relocates settlers from the crowded core.
+            self.hubs[m].treasury -= SATELLITE_COST;
+            let seed = SATELLITE_SEED_POP.min(self.hubs[m].population * 0.12);
+            self.hubs[m].population = (self.hubs[m].population - seed)
+                .max(self.hubs[m].founding_pop * 0.5);
+            let site = self.colonizable.swap_remove(si);
+            let new = self.create_organic_town(m, &site, seed);
+            self.hubs[new].founder_hub = m as i32; // tracks the metropolis it serves
+            self.hubs[new].colony_kind = 3;        // SATELLITE (dependent on its metropolis)
+            self.hubs[new].colony_founded_tick = tick;
+            let ng = self.goods.len();
+            match role {
+                1 => { // GRANARY — farm bias so its surplus feeds the metropolis
+                    for g in 0..ng {
+                        if self.goods[g].food {
+                            self.hubs[new].base_per_capita[g] *= FOOD_COLONY_FARM_MULT;
+                            self.hubs[new].production[g] = self.hubs[new].base_per_capita[g] * self.hubs[new].population;
+                            self.hubs[new].stock[g] = self.hubs[new].production[g];
+                        }
+                    }
+                    self.hubs[new].reserve_food = 60.0;
+                }
+                0 => { self.hubs[new].coastal = true; } // PORT — the harbour at the coast
+                _ => {}                                  // WORKSHOP — manufacturing follows pop/labor
+            }
+            let role_name = match role { 1 => "granary", 0 => "port", _ => "workshop" };
+            let (metro_name, sat_name) = (self.hubs[m].name.clone(), self.hubs[new].name.clone());
+            self.journal.push(JournalEntry {
+                tick, kind: "founding".into(), hub: new as i32, good: -1, value: seed,
+                text: format!("The council of {} founds the {} town of {}", metro_name, role_name, sat_name),
+            });
+            self.total_foundings += 1;
+            self.routes_dirty = true;
+            return; // one satellite per call
+        }
+    }
+
+    /// A mature, sizeable SATELLITE eventually outgrows its dependency and becomes a
+    /// free city in its own right (colony_kind→0), keeping `founder_hub` so the map
+    /// and panels can still show which metropolis raised it.
+    fn satellite_independence_pass(&mut self) {
+        let tick = self.tick;
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].colony_kind != 3 || self.hubs[h].abandoned { continue; }
+            let age = tick.saturating_sub(self.hubs[h].colony_founded_tick) / TICKS_PER_YEAR;
+            if age >= SATELLITE_INDEP_YEARS && self.hubs[h].population >= SATELLITE_INDEP_POP {
+                self.hubs[h].colony_kind = 0;
+                self.hubs[h].autonomous = true; // free city (founder_hub kept = its heritage)
+                let nm = self.hubs[h].name.clone();
+                let metro = self.hubs[h].founder_hub;
+                let mn = if metro >= 0 && (metro as usize) < self.hubs.len() {
+                    self.hubs[metro as usize].name.clone()
+                } else { String::new() };
+                self.journal.push(JournalEntry {
+                    tick, kind: "colony".into(), hub: h as i32, good: -1, value: 0.0,
+                    text: if mn.is_empty() { format!("{} grows into a free city in its own right", nm) }
+                        else { format!("{} outgrows {} and becomes a free city", nm, mn) },
+                });
+            }
+        }
+    }
+
+    /// CARAVANSERAIS: found a waystation near the midpoint of a long INLAND trade tie
+    /// between two sizeable cities (a Silk-Road-style day's halt). It seeds small and
+    /// can grow into a town. At most a few per year.
+    fn maybe_found_caravanserai(&mut self, expansion_ok: bool) {
+        if !expansion_ok || self.colonizable.is_empty() { return; }
+        let tick = self.tick;
+        let n = self.hubs.len();
+        let min_gap = self.world_w * CARAVAN_MIN_GAP_FRAC;
+        let near = self.world_w * CARAVAN_NEAR_MIDPOINT;
+        let clear = self.world_w * CARAVAN_CLEAR_RADIUS;
+        let mut made = 0u32;
+        for a in 0..n {
+            if made >= CARAVAN_MAX_PER_YEAR { break; }
+            let ha = &self.hubs[a];
+            if ha.is_estate || ha.abandoned || ha.coastal || ha.population < CARAVAN_CITY_MIN_POP { continue; }
+            let comp = ha.component;
+            let (ax, ay) = (ha.x, ha.y);
+            // A distant INLAND trade partner (long land haul).
+            let partner = self.neighbors.get(a).and_then(|v| v.iter().map(|&x| x as usize).find(|&b| {
+                b < n && b != a && !self.hubs[b].is_estate && !self.hubs[b].abandoned
+                    && !self.hubs[b].coastal && self.hubs[b].component == comp
+                    && self.hub_cell_dist(a, b) >= min_gap
+            }));
+            let Some(b) = partner else { continue };
+            if a > b { continue; } // each pair once
+            if hash01(self.seed, tick as u64 ^ 0xCA5A, (a as u64) ^ ((b as u64) << 20)) > 0.4 { continue; }
+            let (bx, by) = (self.hubs[b].x, self.hubs[b].y);
+            let (mx, my) = ((ax + bx) * 0.5, (ay + by) * 0.5); // midpoint (cross-seam ties rare)
+            // Already served? (a town near the midpoint)
+            let occupied = (0..n).any(|h| h != a && h != b && !self.hubs[h].is_estate
+                && !self.hubs[h].abandoned
+                && ((self.hubs[h].x - mx).powi(2) + (self.hubs[h].y - my).powi(2)).sqrt() < clear);
+            if occupied { continue; }
+            // Nearest INLAND colonizable site to the midpoint.
+            let mut best = (usize::MAX, near * near);
+            for (i, s) in self.colonizable.iter().enumerate() {
+                if s.coastal { continue; }
+                let d2 = (s.x - mx).powi(2) + (s.y - my).powi(2);
+                if d2 < best.1 { best = (i, d2); }
+            }
+            let Some(si) = (best.0 != usize::MAX).then_some(best.0) else { continue };
+            let site = self.colonizable.swap_remove(si);
+            let idx = self.create_organic_town(a, &site, CARAVAN_SEED_POP);
+            let (an, bn, cn) = (self.hubs[a].name.clone(), self.hubs[b].name.clone(), self.hubs[idx].name.clone());
+            self.total_foundings += 1;
+            self.journal.push(JournalEntry { tick, kind: "founding".into(), hub: idx as i32, good: -1,
+                value: CARAVAN_SEED_POP,
+                text: format!("A caravanserai rises at {} on the road between {} and {}", cn, an, bn) });
+            made += 1;
+        }
+    }
+
     fn maybe_found_settlement_colony(&mut self) {
         if self.colonizable.is_empty() { return; }
         let n_settle = self.hubs.iter().filter(|h| h.colony_kind == 1 && !h.autonomous).count();
@@ -7627,9 +8263,13 @@ impl CampaignSim {
         // Best reachable FERTILE site (from the city; its prior colonies could relay
         // too, but the city alone is enough for v1).
         let nodes = vec![(self.hubs[founder].x, self.hubs[founder].y)];
-        let cap = self.world_w * COLONY_HOP_REACH_FRAC;
+        let cap = COLONY_MAX_KM * self.world_w / EARTH_EQUATOR_KM; // ≤ 5000 km from the metropolis
+        let founder_coastal = self.hubs[founder].coastal;
         let mut bi = (usize::MAX, 0.0f32);
         for (i, s) in self.colonizable.iter().enumerate() {
+            // INLAND cities have no fleet tradition — they can only found INLAND
+            // colonies; only a coastal metropolis colonizes the sea (user rule).
+            if !founder_coastal && s.coastal { continue; }
             // Skip only the genuinely worthless: too lean to part-feed itself AND
             // poor in trade goods. Otherwise a colony may settle less-fertile land —
             // a trade-rich frontier is worth founding even on lean soil (its food
@@ -7637,9 +8277,12 @@ impl CampaignSim {
             if s.fertility < COLONY_MIN_FERTILE && s.trade_value < COLONY_MIN_TRADE { continue; }
             let d = self.nearest_node_dist(&nodes, s.x, s.y);
             if d > cap { continue; }
-            // Weight the PRIZE (trade goods) over self-sufficiency (fertility): a
-            // colony chases cargo, leaning on its food lifeline for the rest.
-            let score = (0.25 + 0.35 * s.fertility + 1.0 * s.trade_value) * (1.0 - d / cap);
+            // Weight the PRIZE (trade goods) over self-sufficiency, PLUS the prized
+            // site premiums: sea shore, river delta, land→sea chokepoint (toll points).
+            let site_bonus = if s.coastal { 0.35 } else { 0.0 }
+                + if s.delta { 0.60 } else { 0.0 }
+                + if s.chokepoint { 0.80 } else { 0.0 };
+            let score = (0.25 + 0.35 * s.fertility + 1.0 * s.trade_value + site_bonus) * (1.0 - d / cap);
             if score > bi.1 { bi = (i, score); }
         }
         let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return };
@@ -7736,7 +8379,7 @@ impl CampaignSim {
         let Some(founder) = (best.0 != usize::MAX).then_some(best.0) else { return };
         // Best reachable FERTILE (grain) site — fertility dominates, nearer is better.
         let nodes = vec![(self.hubs[founder].x, self.hubs[founder].y)];
-        let cap = self.world_w * COLONY_HOP_REACH_FRAC;
+        let cap = COLONY_MAX_KM * self.world_w / EARTH_EQUATOR_KM; // ≤ 5000 km from the metropolis
         let mut bi = (usize::MAX, 0.0f32);
         for (i, s) in self.colonizable.iter().enumerate() {
             if s.fertility < COLONY_MIN_FERTILE { continue; } // must be farmable
@@ -7801,7 +8444,12 @@ impl CampaignSim {
         let pop = seed_pop.max(1.0);
         let production: Vec<f32> = base_per_capita.iter().map(|v| v * pop).collect();
         let id = 100_000 + self.hubs.len() as u32;
-        let name = format!("New {} (colony)", self.hubs[founder].name);
+        // A fresh culture-styled name (like any founded town) so a metropolis's
+        // several colonies are DISTINCT places, not duplicate "New X (colony)".
+        // The `colony_kind` field + the Colonial-panel tree carry the relationship.
+        let name = crate::sim::names::gen_name(
+            site.x.max(0.0) as u32, site.y.max(0.0) as u32,
+            self.world_w as u32, self.world_h());
         let component = self.hubs[founder].component;
         self.hubs.push(TickHub {
             id, x: site.x, y: site.y, name, population: pop, founding_pop: pop,
@@ -7931,6 +8579,74 @@ impl CampaignSim {
         true
     }
 
+    /// Yearly REVIVAL: a long-dead ruin whose region has since recovered is
+    /// resettled — pioneers refound a small town on the old site (its buried
+    /// productive potential, `base_per_capita`, was preserved at abandonment, so
+    /// the extractor refills its trade next tick). Needs a thriving, food-secure
+    /// living city nearby in the same trade region and a cooling-off period.
+    fn resettle_pass(&mut self, expansion_ok: bool) {
+        if !expansion_ok { return; }
+        let tick = self.tick;
+        let reach = (self.world_w * RESETTLE_REACH_FRAC).max(1.0);
+        let mut revivals = 0u32;
+        for h in 0..self.hubs.len() {
+            if revivals >= RESETTLE_MAX_PER_YEAR { break; }
+            let hub = &self.hubs[h];
+            if !hub.abandoned || hub.is_estate { continue; }
+            if tick.saturating_sub(hub.died_tick) < RESETTLE_COOLDOWN_YEARS * TICKS_PER_YEAR { continue; }
+            // The old site must still carry productive potential to refound onto.
+            if hub.base_per_capita.iter().all(|&v| v <= 0.0) { continue; }
+            let comp = hub.component;
+            let (hx, hy) = (hub.x, hub.y);
+            let mut patron_ok = false;
+            for o in 0..self.hubs.len() {
+                if o == h { continue; }
+                let nb = &self.hubs[o];
+                if nb.is_estate || nb.abandoned || nb.component != comp { continue; }
+                if nb.population < RESETTLE_PATRON_MIN_POP || nb.sent_prosperity < 0.5
+                    || nb.food_balance < 0.1 { continue; }
+                let mut dx = (nb.x - hx).abs();
+                if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
+                let dy = nb.y - hy;
+                if dx * dx + dy * dy <= reach * reach { patron_ok = true; break; }
+            }
+            if !patron_ok { continue; }
+            if hash01(self.seed, tick as u64 ^ 0x2E51_1F, h as u64) > RESETTLE_PROB { continue; }
+            self.revive_hub(h);
+            revivals += 1;
+        }
+    }
+
+    /// Refound a ruin as a living small town (restores its living settlement icon).
+    fn revive_hub(&mut self, h: usize) {
+        let tick = self.tick;
+        let pop = RESETTLE_POP;
+        {
+            let hub = &mut self.hubs[h];
+            hub.abandoned = false;
+            hub.population = pop;
+            hub.founding_pop = pop;
+            hub.died_tick = 0;
+            hub.died_cause = String::new();
+            hub.founded_tick = tick;
+            hub.decline_years = 0.0;
+            hub.starving = 0.0;
+            hub.food_balance = 1.0;
+            hub.reserve_food = 30.0;
+            hub.mood = 0.6;
+            hub.sent_food = 0.7;
+            hub.sent_prosperity = 0.4;
+            hub.sent_stability = 0.6;
+        }
+        self.routes_dirty = true;
+        self.total_foundings += 1;
+        let nm = self.hubs[h].name.clone();
+        self.journal.push(JournalEntry {
+            tick, kind: "founding".into(), hub: h as i32, good: -1, value: pop,
+            text: format!("Pioneers resettle the ruins of {} — the town lives again", nm),
+        });
+    }
+
     /// Yearly: settlement colonies (re)sign supply, may collapse if starved, graduate
     /// (gated by ≥5yr supply + population + buildings), pay dividends, and — once a
     /// mature self-sustaining city at year 70 — wage a war of independence.
@@ -7977,10 +8693,13 @@ impl CampaignSim {
                     }
                 }
             }
-            // INDEPENDENCE: a mature (≥70y), city-stage, well-supplied colony rebels —
-            // war if the metropolis still stands, peacefully if it has fallen.
+            // INDEPENDENCE: a mature (≥50y), TOWN-stage-or-better, well-supplied
+            // colony rebels — war if the metropolis still stands, peacefully if it
+            // has fallen. Relaxed from ≥70y/city-stage(40k) to ≥50y/town-stage(15k)
+            // so colonies actually reach independence and become full free cities
+            // (make_colony_independent already promotes colony_kind→0).
             let age = tick.saturating_sub(self.hubs[h].colony_founded_tick) / TICKS_PER_YEAR;
-            if age >= 70 && self.hubs[h].colony_stage >= 4 && supplied
+            if age >= 50 && self.hubs[h].colony_stage >= 3 && supplied
                 && tick > self.hubs[h].indep_cooldown_until && self.hubs[h].war_with < 0 {
                 let m = self.hubs[h].founder_hub;
                 let metro_alive = m >= 0 && (m as usize) < self.hubs.len()
@@ -8936,14 +9655,21 @@ impl CampaignSim {
     fn update_guilds_and_offices(&mut self) {
         let tick = self.tick;
         let n = self.hubs.len();
-        // 1) A city that has grown to GUILD_MIN_POP and has no guild founds one.
-        for h in 0..n {
-            if self.hubs[h].is_estate { continue; }
-            if self.hubs[h].population < GUILD_MIN_POP { continue; }
-            let has_guild = self.houses.iter()
-                .any(|g| !g.defunct && g.is_guild && g.hub as usize == h);
-            if !has_guild {
-                self.found_guild(h);
+        // 1) A prospering town charters a civic GUILD (from year 5). Lower population
+        //    bar than the initial-seed GUILD_MIN_POP so guilds are the common early
+        //    institution — but gated on PROSPERITY so they cluster in commercially
+        //    successful cities (poor backwaters stay guild-less → the world stays
+        //    differentiated, and there are far more than a handful of guilds).
+        if self.tick >= GUILD_START_YEAR * TICKS_PER_YEAR {
+            for h in 0..n {
+                if self.hubs[h].is_estate { continue; }
+                if self.hubs[h].population < GUILD_FORM_POP { continue; }
+                if self.hubs[h].sent_prosperity < GUILD_FORM_PROSPERITY { continue; }
+                let has_guild = self.houses.iter()
+                    .any(|g| !g.defunct && g.is_guild && g.hub as usize == h);
+                if !has_guild {
+                    self.found_guild(h);
+                }
             }
         }
         // 2) Civic subsidy: the home city funds its guild (scaled by size + prosperity).
@@ -9001,7 +9727,11 @@ impl CampaignSim {
                 let hb = hb as usize;
                 if hb == home || hb >= n { continue; }
                 if self.houses[hi].offices.contains(&(hb as u32)) { continue; }
-                if v < OFFICE_OPEN_VOLUME || v < max_vol * 0.5 { continue; }
+                // Relaxed the relative gate 0.5→0.3 so a house also plants offices at
+                // its SECOND-tier partners, not only its single dominant one — this
+                // spreads several competing houses' counting-houses across each city
+                // (was: one house monopolising a settlement).
+                if v < OFFICE_OPEN_VOLUME || v < max_vol * 0.3 { continue; }
                 if cand.map_or(true, |(_, bv)| v > bv) { cand = Some((hb, v)); }
             }
             if let Some((hb, _)) = cand {
@@ -9137,7 +9867,7 @@ impl CampaignSim {
             // DLC 3.5 · wealthy poleis spend a slice of treasury sponsoring migration
             // (relieves crowding, drains hoarded treasuries).
             self.poleis_sponsor_migration();
-            self.maybe_branch_houses();
+            if ENABLE_CADET_BRANCHES { self.maybe_branch_houses(); } // disabled (user rule)
             self.maybe_house_invests();
             // DLC 3.5 · resale market: distressed houses / thin-treasury poleis sell
             // holdings; solvent houses & banks buy them.
@@ -9548,16 +10278,21 @@ impl CampaignSim {
             max_tw = max_tw.max(self.hubs[h].trade_wealth);
             let tw = self.hubs[h].trade_wealth;
             if tw <= 0.05 { continue; } // any hub with a little trade can seed a family
-            let mut strongest = 0.0f32;
-            let mut count = 0u32;
-            for hs in self.houses.iter().filter(|hs| !hs.defunct && hs.hub as usize == h) {
-                strongest = strongest.max(hs.wealth);
-                count += 1;
-            }
-            // Room for a new family: no overwhelmingly dominant house yet, and a
-            // big hub can host a couple of rivals (small ones just one).
+            // A house SPINS OFF a guild's trade — so it only appears in a city that
+            // already has a GUILD (local merchants → guild → a family separating out).
+            let has_guild = self.houses.iter()
+                .any(|g| !g.defunct && g.is_guild && g.hub as usize == h);
+            if !has_guild { continue; }
+            let count = self.houses.iter()
+                .filter(|hs| !hs.defunct && hs.hub as usize == h).count() as u32;
+            // Several rival families may SHARE a city (that is the competition the
+            // map should show), capped by hub size. The old `strongest > 8.0` block
+            // permanently locked out new houses the moment any incumbent grew past a
+            // trivial wealth — collapsing every city to one dynasty and, over a
+            // century, the whole world to a handful of houses. Cap only, no wealth
+            // lockout: rich cities host up to 3 competing houses, smaller ones 2.
             let cap = if tw >= 0.5 * max_tw { 3 } else { 2 };
-            if strongest > 8.0 || count >= cap { continue; }
+            if count >= cap { continue; }
             if tw > best.1 { best = (h, tw); }
         }
         let Some(hub) = (best.0 != usize::MAX).then_some(best.0) else { return };
@@ -9566,10 +10301,23 @@ impl CampaignSim {
         //   • below the seeded baseline → 10% (the world repopulates its houses)
         //   • a large trade hub (>=50% of the richest hub's trade) → 5%
         //   • otherwise → 2%
-        let active = self.houses.iter().filter(|h| !h.defunct).count() as u32;
-        let baseline = if self.seed_house_count > 0 { self.seed_house_count } else { 24 };
+        let active = self.houses.iter().filter(|h| !h.defunct && !h.is_guild).count() as u32;
+        // Hard cap on live houses, and houses only start appearing from year 10 (after
+        // guilds have emerged from year 5). Prefer to spin a house off a city that
+        // already has a GUILD (a family separating a share of the guild's trade).
+        if active as usize >= HOUSE_MAX_TOTAL { return; }
+        if self.tick < HOUSE_START_YEAR * TICKS_PER_YEAR { return; }
+        let target = if self.seed_house_count > 0 { self.seed_house_count } else { 24 };
+        // Houses appear GRADUALLY over the first ~5 years, not all at once: the
+        // effective baseline ramps linearly from a small start up to the full target,
+        // so the merchant class emerges over the opening decade instead of instantly.
+        let ramp = (self.tick as f32 / (HOUSE_RAMP_YEARS * TICKS_PER_YEAR as f32)).clamp(0.0, 1.0);
+        let baseline = ((target as f32) * ramp).ceil() as u32;
         let large = best.1 >= 0.5 * max_tw;
-        let prob = if active < baseline { 0.10 } else if large { 0.05 } else { 0.02 };
+        // A house is a RARE spin-off from a guild's trade (user: "small chance") — much
+        // lower per-tick odds than before, so guilds stay the norm and houses the
+        // exception (was 10/5/2% → a runaway 178 houses vs 2 guilds).
+        let prob = if active < baseline { 0.02 } else if large { 0.01 } else { 0.004 };
         if hash01(self.seed, tick as u64 ^ 0xF0F0, hub as u64) > prob { return; }
         // Specialty = the hub's top-2 produced goods.
         let mut gi: Vec<usize> = (0..ng).collect();
@@ -9834,6 +10582,7 @@ mod tests {
             fleets_migrated: true, tech_factor: 1.0, percap_migrated: true, society_migrated: false,
             house_ledger: Vec::new(), house_ledger_prev: Vec::new(), house_barred: Vec::new(),
             colonizable: vec![], hub_patron: vec![], colony_supply: vec![],
+            hub_culture: vec![], hub_minorities: vec![], estate_idle_years: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
             recent_trades: vec![],
             spec_centers: vec![], spec_year: 0, spec_prev_profit: vec![],
@@ -9919,6 +10668,7 @@ mod tests {
                 y: (k / 4) as f32 * 12.0 + 4.0,
                 koppen: 11, elevation: 0.2, fertility: 0.5, coastal: k % 2 == 0,
                 kind_hint: ((k % 5) + 1) as u8, trade_value: 0.4 + (k as f32 % 3.0) * 0.2,
+                delta: false, chokepoint: false,
             });
         }
         // A bank so settlement colonies (which need a same-continent bank) can form too.
@@ -10057,6 +10807,7 @@ mod tests {
                 fertility: 0.45 + (i % 3) as f32 * 0.15,
                 coastal: i % 2 == 0, kind_hint: 1,
                 trade_value: 0.2 + (i % 4) as f32 * 0.1,
+                delta: false, chokepoint: false,
             });
         }
         s.rebuild_routes();
@@ -10178,6 +10929,7 @@ mod tests {
         s.colonizable.push(ColonizeSite {
             x: 16.0, y: 10.0, koppen: 8, elevation: 0.1, fertility: 0.8,
             coastal: false, kind_hint: 1, trade_value: 0.3,
+            delta: false, chokepoint: false,
         });
         // The swarm preconditions: crowded (2× founding), content, fed.
         s.hubs[0].population = s.hubs[0].founding_pop * 2.0;
@@ -10391,8 +11143,8 @@ mod tests {
         // Empty land near the cluster: a fertile site (→ settlement colony) and a
         // trade-rich poor coastal site (→ house outpost), both within the hop-reach cap.
         s.colonizable = vec![
-            ColonizeSite { x: 3.0, y: 3.0, koppen: 0, elevation: 0.2, fertility: 0.80, coastal: false, kind_hint: 1, trade_value: 0.10 },
-            ColonizeSite { x: 5.0, y: 2.0, koppen: 0, elevation: 0.1, fertility: 0.18, coastal: true, kind_hint: 4, trade_value: 0.60 },
+            ColonizeSite { x: 3.0, y: 3.0, koppen: 0, elevation: 0.2, fertility: 0.80, coastal: false, kind_hint: 1, trade_value: 0.10, delta: false, chokepoint: false },
+            ColonizeSite { x: 5.0, y: 2.0, koppen: 0, elevation: 0.1, fertility: 0.18, coastal: true, kind_hint: 4, trade_value: 0.60, delta: false, chokepoint: false },
         ];
         s.rebuild_routes();
         s.tick = COLONY_START_TICK; // open the age of colonisation
@@ -10415,7 +11167,8 @@ mod tests {
         // shed migrants to seed it.
         let c = settlements[0];
         assert!(!s.hubs[c].is_estate, "settlement colony is a market hub");
-        assert!(s.hubs[c].name.contains("(colony)"));
+        assert_eq!(s.hubs[c].colony_kind, 1, "tagged as a settlement colony");
+        assert_ne!(s.hubs[c].name, format!("New {}", s.hubs[0].name), "colony has its OWN fresh name, not a duplicate of the parent");
         assert!(!s.hubs[c].backers.is_empty(), "joint-stock backers recorded");
         assert!(s.hubs[0].population < parent_pop0, "parent shed emigrants to the colony");
         // Bank + mint: the backing bank's family seats the colony's council & coin.
@@ -10920,7 +11673,8 @@ mod tests {
 
     #[test]
     fn guild_appears_only_in_large_cities() {
-        // A city ≥ 50k people charters a civic Merchant Guild; a small town doesn't.
+        // A large city (≥ GUILD_MIN_POP 10k) charters a civic Merchant Guild; a
+        // small town (9k) doesn't.
         let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
         let big = hub(0, 10.0, 10.0, 60_000.0, vec![60_000.0 * 0.85 * DEMAND_PRESSURE * 1.5], 0);
         let small = hub(1, 40.0, 12.0, 9_000.0, vec![9_000.0 * 0.85 * DEMAND_PRESSURE * 1.5], 0);

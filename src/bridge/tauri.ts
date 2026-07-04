@@ -568,7 +568,7 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 }
 
 // ── DLC 1 "Living Trade" tick simulation ──
-import type { CampaignSnapshot, JournalEntry, WorldEconomy, TradeBasin, EraFrame, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow, PopBrief, EpidemicBrief, GuildBrief, FigureBrief, LandmarkBrief, DynastiesPayload } from "../types";
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, TradeBasin, EraFrame, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow, PopBrief, EpidemicBrief, GuildBrief, FigureBrief, LandmarkBrief, DynastiesPayload, CultureBrief } from "../types";
 
 /** Seed a fresh living-trade sim from the static economy snapshot (step 10). A RUNNING
  *  campaign is never restarted by this — it returns the current sim unchanged. */
@@ -617,6 +617,16 @@ export async function campaignGetGoodHeat(good: string): Promise<[number, number
 /** Batch 1 · era scrubber: the world at the end of `year` (null = not in ring). */
 export async function campaignGetEraFrame(year: number): Promise<EraFrame | null> {
   return invoke("campaign_get_era_frame", { year });
+}
+
+/** #1/#23 · per-culture world census for the Peoples panel. */
+export async function campaignGetCultures(): Promise<CultureBrief[]> {
+  return invoke("campaign_get_cultures");
+}
+
+/** #1/#23 · per-hub share `[x,y,share]` of ONE culture for the map overlay. */
+export async function campaignCultureHubs(name: string): Promise<[number, number, number][]> {
+  return invoke("campaign_culture_hubs", { name });
 }
 
 /** Full live detail for one settlement (sentiment + market + history), or null

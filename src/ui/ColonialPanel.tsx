@@ -34,6 +34,7 @@ export function ColonialPanel() {
   const open = useUIStore((s) => s.showColonial);
   const setSelectedHub = useUIStore((s) => s.setSelectedHub);
   const selectedHub = useUIStore((s) => s.selectedHub);
+  const setColonyHighlight = useUIStore((s) => s.setColonyHighlight);
   const snapshot = useCampaignStore((s) => s.snapshot);
   const tick = snapshot?.clock?.tick ?? 0;
   const active = !!snapshot?.active;
@@ -42,6 +43,9 @@ export function ColonialPanel() {
   const [gates, setGates] = useState<ColonyGateStatus | null>(null);
   const [sel, setSel] = useState<number | null>(null);
   const [detail, setDetail] = useState<ColonyDetail | null>(null);
+
+  // Closing the panel clears the map's colony↔metropolis highlight line.
+  useEffect(() => { if (!open) setColonyHighlight(null); }, [open, setColonyHighlight]);
 
   useEffect(() => {
     if (!open || !active) return;
@@ -116,7 +120,13 @@ export function ColonialPanel() {
                 </div>
                 {g.rows.map((c) => (
                   <ColonyRow key={c.id} c={c} selected={sel === c.id}
-                    onClick={() => { setSel(c.id); setSelectedHub(c.id); }} />
+                    onClick={() => {
+                      setSel(c.id);
+                      setSelectedHub(c.id);
+                      // Shine the metropolis, this colony/satellite, and the tie between.
+                      setColonyHighlight(c.founder_x != null && c.founder_x >= 0
+                        ? { ax: c.founder_x, ay: c.founder_y ?? 0, bx: c.x, by: c.y } : null);
+                    }} />
                 ))}
               </div>
             ))}
@@ -140,13 +150,15 @@ function Stat({ n, l, warn }: { n: number; l: string; warn?: boolean }) {
 
 function ColonyRow({ c, selected, onClick }: { c: ColonySummary; selected: boolean; onClick: () => void }) {
   const outpost = c.colony_kind === 2;
+  const satellite = c.colony_kind === 3;
+  const settlementColony = c.colony_kind === 1;
   const frac = reserveFrac(c);
-  const stage = c.autonomous ? "Autonomous" : outpost ? "Outpost" : (STAGE[c.colony_stage] || "Colony");
+  const stage = c.autonomous ? "Autonomous" : outpost ? "Outpost" : satellite ? "Satellite" : (STAGE[c.colony_stage] || "Colony");
   return (
     <div onClick={onClick} style={{ ...rowS, ...(selected ? rowSel : {}) }}>
       <span style={{
         width: 10, height: 10, borderRadius: outpost ? 2 : "50%", flex: "0 0 auto", marginTop: 3,
-        background: outpost ? "#0a0a0a" : COLONY_VIOLET,
+        background: outpost ? "#0a0a0a" : satellite ? "#e0503a" : COLONY_VIOLET,
         border: outpost ? `2px solid ${c.owner_color || OUTPOST_TAN}` : "none",
       }} />
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -159,7 +171,7 @@ function ColonyRow({ c, selected, onClick }: { c: ColonySummary; selected: boole
             ? `${c.owner_house_name} · pop ${fmtPop(c.population)}`
             : `pop ${fmtPop(c.population)}${c.coin_name ? ` · ${c.coin_name}` : ""}${c.charter_open ? " · charter ✔" : ""}`}
         </div>
-        {!outpost && !c.autonomous && (
+        {settlementColony && !c.autonomous && (
           <>
             <div style={{ ...bar, marginTop: 4 }}><i style={{ width: `${frac * 100}%`, background: reserveColor(frac), display: "block", height: "100%", borderRadius: 5 }} /></div>
             <div style={{ fontSize: 9.5, color: frac < 0.25 ? WARN : "#6a86a6", marginTop: 1 }}>
@@ -169,7 +181,7 @@ function ColonyRow({ c, selected, onClick }: { c: ColonySummary; selected: boole
           </>
         )}
       </div>
-      {!outpost && !c.autonomous && (
+      {(settlementColony || satellite) && !c.autonomous && (
         <div style={{ textAlign: "right", flex: "0 0 auto" }}>
           <div style={{ fontSize: 9, color: "#6a86a6" }}>independence</div>
           <div style={{ fontSize: 10.5, color: c.indep_in_years <= 0 ? OK : GOLD }}>

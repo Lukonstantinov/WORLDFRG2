@@ -1,0 +1,134 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Peoples, Migration & Settlement Scale</title>
+<style>
+  body{background:#0b1420;color:#cfe2f6;font:14px/1.5 system-ui,sans-serif;margin:0;padding:28px 32px;}
+  h1{color:#e6c46a;font-size:20px;margin:0 0 4px;}
+  h2{color:#7fb0e0;font-size:15px;margin:26px 0 8px;border-bottom:1px solid #24384c;padding-bottom:4px;}
+  .sub{color:#7a90a8;font-size:12px;margin-bottom:18px;}
+  .row{display:flex;gap:24px;flex-wrap:wrap;}
+  .card{background:#13202e;border:1px solid #24384c;border-radius:8px;padding:14px 16px;}
+  table{border-collapse:collapse;font-size:13px;}
+  td,th{padding:5px 12px;text-align:right;border-bottom:1px solid #1d2c3c;}
+  th{color:#7a90a8;font-weight:600;}
+  td:first-child,th:first-child{text-align:left;}
+  .old{color:#c08a6a;} .new{color:#6ac08a;}
+  svg{background:#0a1520;border-radius:6px;}
+  .mut{width:90px;color:#c8b6e0;font-size:12px;}
+  .bar{flex:1;height:8px;border-radius:3px;background:#0a1018;overflow:hidden;}
+  .fill{height:100%;background:#9a6fd0;}
+  .pct{width:34px;text-align:right;color:#9ab0c8;font-size:11px;}
+  .mrow{display:flex;align-items:center;gap:8px;margin:3px 0;width:340px;}
+  code{background:#0a1520;padding:1px 5px;border-radius:3px;color:#e6c46a;font-size:12px;}
+</style></head><body>
+<h1>Peoples · Migration · Settlement Scale</h1>
+<div class="sub">WorldForge 2 — batch: humble tiered starting populations + dynamic icons, visible economic
+migration, and per-settlement culture / minority quarters. Values pulled from the code.</div>
+
+<h2>1 · Tiered starting populations (campaign start)</h2>
+<div class="row">
+  <div class="card">
+    <table>
+      <tr><th>Bucket (worldgen rank)</th><th>Seed pop</th><th>Tier / icon</th></tr>
+      <tr><td>top 15% — large</td><td class="new">10 000</td><td>city (disc + ring)</td></tr>
+      <tr><td>next 35% — medium</td><td class="new">2 000</td><td>town (disc)</td></tr>
+      <tr><td>bottom 50% — small</td><td class="new">500</td><td>village (small disc)</td></tr>
+    </table>
+    <div class="sub" style="margin:10px 0 0;max-width:360px">Balance-neutral: per-capita output is derived
+    from this founding pop, so day-0 production is unchanged. Cities then grow/shrink and the icon tracks it.</div>
+  </div>
+  <div class="card">
+    <b style="color:#7fb0e0">Campaign tier thresholds (recalibrated)</b>
+    <table style="margin-top:8px">
+      <tr><th>Tier</th><th class="old">old ≥</th><th class="new">new ≥</th></tr>
+      <tr><td>capital</td><td class="old">120 000</td><td class="new">35 000</td></tr>
+      <tr><td>city</td><td class="old">50 000</td><td class="new">8 000</td></tr>
+      <tr><td>town</td><td class="old">18 000</td><td class="new">1 500</td></tr>
+      <tr><td>village</td><td class="old">5 000</td><td class="new">350</td></tr>
+    </table>
+  </div>
+</div>
+
+<h2>2 · Icon size curve — widened (a 10k city must dwarf a 500 village)</h2>
+<div class="row">
+  <div class="card">
+    <table>
+      <tr><th>pop</th><th>tier base</th><th class="old">old radius</th><th class="new">new radius</th></tr>
+      <tr><td>500</td><td>1.0 (village)</td><td class="old">1.14</td><td class="new">1.32</td></tr>
+      <tr><td>2 000</td><td>1.6 (town)</td><td class="old">2.02</td><td class="new">2.42</td></tr>
+      <tr><td>10 000</td><td>2.2 (city)</td><td class="old">3.08</td><td class="new">3.81</td></tr>
+      <tr><td>35 000</td><td>3.0 (capital)</td><td class="old">4.80</td><td class="new">5.71</td></tr>
+    </table>
+    <div class="sub" style="margin:8px 0 0">old <code>min(1.7, 0.6+log10(pop)/5)</code> →
+      new <code>clamp(0.45+log10(pop)·0.32, 0.7, 2.2)</code></div>
+  </div>
+  <div class="card">
+    <svg width="360" height="140" viewBox="0 0 360 140">
+      <!-- old dots (amber) vs new dots (green), radius to scale -->
+      <text x="12" y="16" fill="#7a90a8" font-size="11">old</text>
+      <circle cx="60" cy="30" r="1.14" fill="#c08a6a"/><circle cx="130" cy="30" r="2.02" fill="#c08a6a"/>
+      <circle cx="210" cy="30" r="3.08" fill="#c08a6a"/><circle cx="310" cy="30" r="4.8" fill="#c08a6a"/>
+      <text x="12" y="86" fill="#7a90a8" font-size="11">new</text>
+      <circle cx="60" cy="96" r="1.32" fill="#6ac08a"/><circle cx="130" cy="96" r="2.42" fill="#6ac08a"/>
+      <circle cx="210" cy="96" r="3.81" fill="#6ac08a"/><circle cx="310" cy="96" r="5.71" fill="#6ac08a"/>
+      <text x="60" y="128" fill="#7a90a8" font-size="10" text-anchor="middle">500</text>
+      <text x="130" y="128" fill="#7a90a8" font-size="10" text-anchor="middle">2k</text>
+      <text x="210" y="128" fill="#7a90a8" font-size="10" text-anchor="middle">10k</text>
+      <text x="310" y="128" fill="#7a90a8" font-size="10" text-anchor="middle">35k</text>
+    </svg>
+  </div>
+</div>
+
+<h2>3 · Peoples & minority quarters (Settlement ▸ People tab)</h2>
+<div class="card" style="width:360px">
+  <div style="color:#7a90a8;font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Peoples</div>
+  <div style="display:flex;gap:6px;align-items:baseline;margin-bottom:6px">
+    <span style="color:#cfe2f6;font-weight:700">Vexillia</span>
+    <span style="color:#7a90a8;font-size:11px">majority · 78%</span>
+  </div>
+  <div class="mrow"><span class="mut">Oranthi</span><div class="bar"><div class="fill" style="width:14%"></div></div><span class="pct">14%</span></div>
+  <div class="mrow"><span class="mut">Sarn</span><div class="bar"><div class="fill" style="width:8%"></div></div><span class="pct">8%</span></div>
+  <div class="sub" style="margin:8px 0 0">Minority shares grow when migrants of another culture arrive and fade
+    ~4%/yr as they assimilate.</div>
+</div>
+
+<h2>4 · Migration made visible</h2>
+<div class="card" style="max-width:620px">
+  <ul style="margin:0;padding-left:18px;line-height:1.7">
+    <li><b>Economic drift</b> (new, yearly): within a trade region, people leave poor/hungry cities
+      (opportunity &lt; 0.55) for the most thriving reachable one — capped at 2%/yr, dynamics-bounded.</li>
+    <li><b>Arrows now drawn for ALL migration</b> — economic drift + polis-sponsored waves both push a fading
+      "refugee road" arrow (was: only city <i>deaths</i> drew arrows, so migration looked broken).</li>
+    <li>Each wave <b>carries its culture</b> into the destination's minority quarters (§3), and writes a
+      Timeline beat: <i>"320 people leave Askar seeking work in Vex Port."</i></li>
+    <li>Toggle: Toolbar ▸ Overlays ▸ <b>🚶 Migrations</b> (already present, on by default).</li>
+  </ul>
+</div>
+
+<h2>5 · Several houses per city — the real root fix</h2>
+<div class="card" style="max-width:620px">
+  <b style="color:#6ac08a">Root cause found:</b> <code>maybe_found_house</code> blocked a new family wherever
+  the strongest incumbent had <code>wealth &gt; 8.0</code> — but houses run at <b>100 000+</b>, so every city
+  with an established house was <i>permanently</i> locked out, collapsing the whole world to one dynasty
+  over a century. <b>Fix:</b> dropped the wealth lockout; a hub now hosts up to <b>3 competing houses</b>
+  (rich) / 2 (small) by a size cap, no matter how rich the incumbents are. Also relaxed the office-open gate
+  <code>0.5→0.3</code>× so houses plant second-tier offices too.
+  <div class="sub" style="margin:8px 0 0">Note: the 30-hub dynamics test is trade-starved
+    (<code>trade_wealth ≤ 0.05</code> everywhere → founding filtered before the gate), so it can't demonstrate
+    plurality; the fix is structural for real 681-city campaigns.</div>
+</div>
+
+<h2>6 · Colonies grow up · dead cities come back</h2>
+<div class="card" style="max-width:620px">
+  <ul style="margin:0;padding-left:18px;line-height:1.7">
+    <li><b>Colony independence</b>: gate relaxed <code>70y / city-stage (40k)</code> →
+      <code>50y / town-stage (15k)</code>. On independence the colony becomes a <b>full free city</b>
+      (<code>colony_kind→0</code>) — war of independence if the metropolis still stands, else peacefully.</li>
+    <li><b>Ruin revival</b>: a ruin dead ≥15 y with a thriving food-secure city nearby in its trade region
+      is <b>resettled</b> — pioneers refound a town at pop 500, and its buried productive potential
+      (<code>base_per_capita</code>, preserved at death) refills trade next tick. The <b>living settlement
+      icon returns</b> (with a gold "new" star) and a Timeline beat: <i>"Pioneers resettle the ruins of
+      Askar — the town lives again."</i> Trickle-capped (≤2/yr).</li>
+  </ul>
+</div>
+
+</body></html>

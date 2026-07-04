@@ -100,6 +100,20 @@ export function FuturesPanel() {
                 <span onClick={(e) => { e.stopPropagation(); setFocus({ city: r.b_name }); }}
                   style={{ cursor: "pointer", color: "#cfe0f4" }} title="Focus this city's contracts">{r.b_name}</span>
               </div>
+              {r.fulfilled_pct != null && (
+                <div style={{ marginTop: 3 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 9, color: "#8aa0b8" }}>
+                    <span style={{ minWidth: 60 }}>{Math.round(r.fulfilled_pct)}% fulfilled</span>
+                    <div style={{ flex: 1, height: 5, background: "#0a141e", borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ width: `${Math.round(r.fulfilled_pct)}%`, height: "100%", background: r.fulfilled_pct >= 80 ? "#4fc06a" : r.fulfilled_pct >= 40 ? "#e0c060" : "#e0503a" }} />
+                    </div>
+                    <span style={{ color: "#7fd0a0" }} title="grain-eq value moved so far">{fmt(r.value ?? 0)}</span>
+                  </div>
+                  <div style={{ fontSize: 8.5, color: "#56708e", marginTop: 1 }}>
+                    sealed in {r.sealed_at || r.b_name} · {fmt(r.delivered ?? 0)} delivered
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}

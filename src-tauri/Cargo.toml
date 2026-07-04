@@ -38,6 +38,13 @@ tauri-build = { version = "2", features = [] }
 # several times while keeping usable backtraces for our own code.
 [profile.dev]
 debug = "line-tables-only"        # backtraces, but drop the heavy full symbol tables
+# Incremental OFF: with opt-level 2 (below) rustc enables `share-generics`, and its
+# incremental cache intermittently drops a shared generic instantiation
+# (`Iterator::sum::<f32>`), producing `LNK2019 unresolved external symbol anon…llvm`
+# at DLL link time (cargo check/test don't link, so they pass — only `tauri dev`
+# breaks). Disabling incremental for our crate makes the link reliable. Deps are
+# built once (profile below), so rebuilds recompile only this crate.
+incremental = false
 # The campaign tick is a numeric-hot simulation; at the default dev opt-level 0 it
 # runs ~6× slower than optimized (≈1.3ms→0.23ms/tick at 160 hubs, far worse late
 # campaign), which is the "campaign too slow" the user feels in `tauri dev`.

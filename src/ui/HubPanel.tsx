@@ -970,7 +970,36 @@ export function HubPanel() {
       {/* ════════════ PEOPLE (society + history) ════════════ */}
       {tab === "people" && (
         <>
-          <div style={sectionHdr}>Society</div>
+          {/* #23 · who lives here — majority people + minority quarters grown by
+              in-migration (each fades as newcomers assimilate). */}
+          {detail?.culture && (
+            <>
+              <div style={sectionHdr}>Peoples</div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 4 }}>
+                <span style={{ color: "#cfe2f6", fontSize: 12, fontWeight: 700 }}>{detail.culture}</span>
+                <span style={{ color: "#7a90a8", fontSize: 10 }}>
+                  majority{(() => {
+                    const m = (detail.minorities ?? []).reduce((a, [, s]) => a + s, 0);
+                    return m > 0.005 ? ` · ${Math.round((1 - Math.min(m, 0.95)) * 100)}%` : "";
+                  })()}
+                </span>
+              </div>
+              {(detail.minorities ?? []).filter(([, s]) => s > 0.005).length > 0 ? (
+                (detail.minorities ?? []).filter(([, s]) => s > 0.005).map(([people, share]) => (
+                  <div key={people} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                    <span style={{ width: 90, color: "#c8b6e0", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{people}</span>
+                    <div style={{ flex: 1, height: 7, borderRadius: 3, background: "#0a1018", overflow: "hidden" }}>
+                      <div style={{ width: `${Math.round(Math.min(share, 0.95) * 100)}%`, height: "100%", background: "#9a6fd0" }} />
+                    </div>
+                    <span style={{ width: 34, textAlign: "right", color: "#9ab0c8", fontSize: 10 }}>{Math.round(share * 100)}%</span>
+                  </div>
+                ))
+              ) : (
+                <div style={{ color: "#7a90a8", fontSize: 10, marginBottom: 2 }}>No minority quarters — homogeneous population.</div>
+              )}
+            </>
+          )}
+          <div style={{ ...sectionHdr, marginTop: detail?.culture ? 8 : 0 }}>Society</div>
           <div style={{ display: "flex", gap: 4 }}>
             <ClassTile label="Nobility" value={hub.nobility ?? 0} level={hub.elite_level ?? 0} color="#e0c060" />
             <ClassTile label="Merchants" value={hub.merchants ?? 0} level={hub.merchant_level ?? 0} color="#5fc8a8" />
@@ -1104,7 +1133,8 @@ export function HubPanel() {
               <>
                 <div style={{ ...sectionHdr, marginTop: 6 }}>Who controls the trade (houses · merchants · guilds)</div>
                 <HouseSharePie houses={hs} localVolume={localVolume} guildVolume={guildVolume} merchants={hub.merchants ?? 0} />
-                {hs.map((h, i) => (
+                {/* Only list houses with a MEANINGFUL share (> 1%) — 0% holders are noise. */}
+                {hs.filter((h) => (Math.max(0, h.wealth) / total) > 0.01).map((h, i) => (
                   <div key={h.name + i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 3 }}>
                     <CoatOfArms name={h.name} size={20} guild={h.is_guild} />
                     <div style={{ flex: 1, minWidth: 0 }}>

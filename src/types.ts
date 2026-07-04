@@ -258,6 +258,17 @@ export interface EraFrame {
   year: number;
   hubs: EraHub[];
 }
+/** #1/#23 · one people's world census, for the Peoples panel. */
+export interface CultureBrief {
+  name: string;
+  color: [number, number, number];
+  population: number;
+  towns: number;      // settlements where this culture is the majority
+  presence: number;   // settlements where present (≥5%)
+  mobility: number;   // 0..1 travel-proneness (≥0.7 = merchant diaspora)
+  top_cities: [string, number][];
+  houses: string[];
+}
 /** One backer of a colony venture (city / house / bank). */
 export interface ColonyBackerRow { kind: number; name: string; color: string; share: number }
 /** One civic supply contract feeding a colony. */
@@ -302,12 +313,14 @@ export interface ColonySummary {
   name: string;
   x: number;
   y: number;
-  colony_kind: number;   // 1 = settlement colony · 2 = house outpost
+  colony_kind: number;   // 1 = settlement colony · 2 = house outpost · 3 = satellite
   colony_stage: number;  // 1 outpost · 2 colony · 3 town · 4 city
   autonomous: boolean;
   population: number;
   founder_hub: number;
   founder_name: string;
+  founder_x?: number;
+  founder_y?: number;
   main_bank_name: string;
   coin_name: string;
   charter_open: boolean;
@@ -453,6 +466,10 @@ export interface HubDetail {
   structures?: [string, string][];
   /** Trade-base patron: the merchant house developing this city as a base (empty = none). */
   patron?: string;
+  /** #23 · majority people of this settlement. */
+  culture?: string;
+  /** #23 · minority quarters [people, population share 0..1], grown by in-migration. */
+  minorities?: [string, number][];
   /** Foreign merchant offices hosted in this settlement. */
   offices_here?: OfficeHere[];
   /** Market flow: in-flight shipments arriving / departing (ranked by value). */
@@ -612,6 +629,10 @@ export interface FuturesLane {
   end_year: number;      // campaign year the contract expires
   suspended: boolean;    // force-majeure (plague lockup) right now
   path?: [number, number][]; // routed source→buyer polyline (roads/sea); straight a→b if absent
+  delivered?: number;      // running total delivered to date
+  fulfilled_pct?: number;  // delivered vs what was due by now (0-100)
+  value?: number;          // grain-eq value moved so far
+  sealed_at?: string;      // city where the deal was struck (buyer)
 }
 /** One house/guild asset for the Warehouses & Estates infographic. */
 export interface WarehouseInfo {
@@ -1284,6 +1305,9 @@ export interface EpidemicBrief {
   /** 1 = Great Plague (rare, spreads ~4000 km along the lanes), 2 = Regional (reaches
    *  one further city), 3 = Local outbreak (stays put). */
   category: number;
+  /** Named disease (Bubonic Plague, Cholera, Malaria, …) + transmission mode. */
+  disease?: string;
+  transmission?: string;
   cities: PlagueCityBrief[]; // in spread order (origin first)
 }
 

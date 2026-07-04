@@ -492,9 +492,9 @@ pub fn sim_generate_toponyms(
     }
     let rivers: Vec<rivers::River> = serde_json::from_str(&rivers_json).unwrap_or_default();
     let lakes: Vec<rivers::Lake> = serde_json::from_str(&lakes_json).unwrap_or_default();
-    if rivers.is_empty() {
-        return Err("Generate rivers first — toponyms name the rivers and lakes (run the Rivers step).".into());
-    }
+    // Toponyms also name MOUNTAINS and REGIONS, so rivers aren't strictly required —
+    // a river-poor world (or an old save whose river overlay didn't reload) can still
+    // be named. Only the culture map (above) is mandatory.
     let buf = WorldBuffer::load_with(&conn, ColumnSet::TERRAIN | ColumnSet::ELEVATION)?;
     let list = toponyms::generate(&buf, &rivers, &lakes);
     metadata::set_meta(&conn, "toponyms", &serde_json::to_string(&list).map_err(|e| e.to_string())?)

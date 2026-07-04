@@ -21,6 +21,7 @@ import { ItineraryPanel } from "./ui/ItineraryPanel";
 import { GoodsCodexPanel } from "./ui/GoodsCodexPanel";
 import { EconomyDashboardPanel } from "./ui/EconomyDashboardPanel";
 import { AtlasPanel } from "./ui/AtlasPanel";
+import { PeoplesPanel } from "./ui/PeoplesPanel";
 import { ColonialPanel } from "./ui/ColonialPanel";
 import { BankPanel } from "./ui/BankPanel";
 import { NewsFeedPanel } from "./ui/NewsFeedPanel";
@@ -40,11 +41,12 @@ import { ImportWorldDialog } from "./ui/ImportWorldDialog";
 import { SettingsPanel } from "./ui/SettingsPanel";
 import { WindowBar } from "./ui/WindowBar";
 import { CampaignTopBar } from "./ui/CampaignTopBar";
+import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { useWorldStore } from "./state/worldStore";
 import { useUIStore } from "./state/uiStore";
 import { useViewportStore } from "./state/viewportStore";
 import { useGoodsStore } from "./state/goodsStore";
-import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, persistOverlays, getOverlays, saveCampaignAs, openCampaign, newCampaign, finalizeWorld, getAppearance } from "./bridge/tauri";
+import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, persistOverlays, getOverlays, saveCampaignAs, openCampaign, newCampaign, finalizeWorld, getAppearance, getToponyms } from "./bridge/tauri";
 import { useSettingsStore } from "./state/settingsStore";
 
 const EXPORTABLE_LAYERS: { id: string; label: string }[] = [
@@ -279,6 +281,7 @@ export default function App() {
   const setLakes = useWorldStore((s) => s.setLakes);
   const setSettlements = useWorldStore((s) => s.setSettlements);
   const setEconomy = useWorldStore((s) => s.setEconomy);
+  const setToponyms = useWorldStore((s) => s.setToponyms);
   const showWorkflow = useUIStore((s) => s.showWorkflow);
   const showToolbar = useUIStore((s) => s.showToolbar);
   const appMode = useUIStore((s) => s.appMode);
@@ -326,6 +329,9 @@ export default function App() {
         if (ov.lakes?.length) setLakes(ov.lakes);
         if (ov.settlements?.length) setSettlements(ov.settlements);
         if (ov.economy && ov.economy.hubs.length) setEconomy(ov.economy);
+        // #26 · toponyms (river/peak/lake/region names) — load them on OPEN so the
+        // layer works in a campaign (they were only fetched in the Toponyms step).
+        try { const tp = await getToponyms(); if (tp.length) setToponyms(tp); } catch { /* none saved */ }
         // Restore the persisted wizard progress; older saves never wrote it, so
         // fall back to inferring completion from which data is present.
         const restored = [
@@ -400,6 +406,7 @@ export default function App() {
       const ov = await getOverlays();
       setSettlements(ov.settlements ?? []);
       setEconomy(ov.economy && ov.economy.hubs.length ? ov.economy : null);
+      try { const tp = await getToponyms(); if (tp.length) setToponyms(tp); } catch { /* none saved */ }
       const restored = parseProgress(info.campaign_progress);
       const ui = useUIStore.getState();
       const worldSteps = Object.entries(ui.stepCompleted)
@@ -579,10 +586,17 @@ export default function App() {
 
         {/* Center: Map */}
         <div style={{ flex: 1, position: "relative", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
-          <MapCanvas />
+          <ErrorBoundary label="Map"><MapCanvas /></ErrorBoundary>
           {/* Forge keeps the flat WindowBar; Chronicle gets the campaign HUD
               (clock + world pulse + grouped ledger menus). */}
           {isLoaded && (appMode === "chronicle" ? <CampaignTopBar /> : <WindowBar />)}
+          {/* One broken panel (e.g. the Atlas) must not black out the whole app —
+              show its error and clear the likely triggers (open Atlas / era frame). */}
+          <ErrorBoundary label="Panels" onReset={() => {
+            const s = useUIStore.getState();
+            s.setShowAtlas(false);
+            s.setEraFrame(null);
+          }}>
           <InfoPanel />
           <HubPanel />
           <GoodFlowPanel />
@@ -594,6 +608,7 @@ export default function App() {
           <GoodsCodexPanel />
           <EconomyDashboardPanel />
           <AtlasPanel />
+          <PeoplesPanel />
           <ColonialPanel />
           <BankPanel />
           <NewsFeedPanel />
@@ -611,6 +626,7 @@ export default function App() {
           <TradeMatrixPanel />
           <ElevationLegend />
           <ElevationHistogram />
+          </ErrorBoundary>
         </div>
 
         {/* Right: Toolbar (toggleable via the window bar) */}

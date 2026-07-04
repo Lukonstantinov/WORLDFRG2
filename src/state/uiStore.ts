@@ -123,6 +123,13 @@ interface UIStore {
   showItinerary: boolean;
   /** Atlas 2.0 · the World Atlas (world graphs / city census / timeline) panel. */
   showAtlas: boolean;
+  /** #1/#23 · the Peoples (cultures) panel + the culture currently isolated on the map. */
+  showPeoples: boolean;
+  selectedCulture: string | null;
+  /** Colony/satellite ↔ metropolis link to shine on the map (a=metro, b=colony). */
+  colonyHighlight: { ax: number; ay: number; bx: number; by: number } | null;
+  /** Plague spread REPLAY: show outbreak `id`'s spread up to step (0=origin). */
+  plagueReplay: { id: number; step: number } | null;
   /** Batch 1 · Trade Heat filtered to ONE good (by id/name); null = all goods. */
   heatGood: string | null;
   /** Batch 1 · era scrubber: when set, the map's markers + heat show this past
@@ -215,6 +222,10 @@ interface UIStore {
   setShowSpeculation: (v: boolean) => void;
   setShowItinerary: (v: boolean) => void;
   setShowAtlas: (v: boolean) => void;
+  setShowPeoples: (v: boolean) => void;
+  setSelectedCulture: (c: string | null) => void;
+  setColonyHighlight: (l: { ax: number; ay: number; bx: number; by: number } | null) => void;
+  setPlagueReplay: (r: { id: number; step: number } | null) => void;
   setHeatGood: (g: string | null) => void;
   setEraFrame: (f: import("../types").EraFrame | null) => void;
   setShowEconomyDashboard: (v: boolean) => void;
@@ -313,6 +324,10 @@ export const useUIStore = create<UIStore>((set) => ({
   showCoinCredit: false,
   showItinerary: false,
   showAtlas: false,
+  showPeoples: false,
+  selectedCulture: null,
+  colonyHighlight: null,
+  plagueReplay: null,
   heatGood: null,
   eraFrame: null,
   showEconomyDashboard: false,
@@ -420,6 +435,10 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowCoinCredit: (v) => set({ showCoinCredit: v }),
   setShowItinerary: (v) => set({ showItinerary: v }),
   setShowAtlas: (v) => set({ showAtlas: v }),
+  setShowPeoples: (v) => set({ showPeoples: v }),
+  setSelectedCulture: (c) => set({ selectedCulture: c }),
+  setColonyHighlight: (l) => set({ colonyHighlight: l }),
+  setPlagueReplay: (r) => set({ plagueReplay: r }),
   setHeatGood: (g) => set({ heatGood: g }),
   setEraFrame: (f) => set({ eraFrame: f }),
   setShowEconomyDashboard: (v) => set({ showEconomyDashboard: v }),

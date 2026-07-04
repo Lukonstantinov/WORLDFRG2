@@ -23,6 +23,8 @@ export function PlaguePanel() {
   const setSelectedHub = useUIStore((s) => s.setSelectedHub);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
   const showZones = useUIStore((s) => s.overlayVisibility.plagueZones);
+  const plagueReplay = useUIStore((s) => s.plagueReplay);
+  const setPlagueReplay = useUIStore((s) => s.setPlagueReplay);
   const snapshot = useCampaignStore((s) => s.snapshot);
   const tick = snapshot?.clock?.tick ?? 0;
   const active = !!snapshot?.active;
@@ -31,6 +33,9 @@ export function PlaguePanel() {
   const [sort, setSort] = useState<Sort>("active");
   const [activeOnly, setActiveOnly] = useState(false);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  // Closing the panel ends any spread replay on the map.
+  useEffect(() => { if (!open) setPlagueReplay(null); }, [open, setPlagueReplay]);
 
   useEffect(() => {
     if (!open || !active) return;
@@ -108,6 +113,11 @@ export function PlaguePanel() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: "#e8c8c8", fontSize: 11, fontWeight: 600 }}>
                     {e.name} <CategoryTag category={e.category} />
+                    {e.transmission && (
+                      <span style={{ fontSize: 8, color: "#9ab0c8", border: "1px solid #2a3a4a", borderRadius: 8, padding: "0 5px", marginLeft: 3 }}>
+                        {e.transmission}
+                      </span>
+                    )}
                     {e.active && <span style={{ color: "#ff8a6a", fontSize: 9 }}> ● active</span>}
                   </div>
                   <div style={{ color: "#8c6a6a", fontSize: 9 }}>
@@ -124,6 +134,29 @@ export function PlaguePanel() {
                   <div style={{ fontSize: 9, color: "#8c6a6a", marginBottom: 3 }}>
                     Began in <b style={{ color: "#e8a0a0" }}>{e.origin_name}</b> · spread to {e.cities.length - 1} more
                   </div>
+                  {/* Spread REPLAY: drag to trace how the plague travelled the trade
+                      lanes from its origin, city by city (plague-red on the map). */}
+                  {(() => {
+                    const maxOrder = e.cities.reduce((m, c) => Math.max(m, c.order), 0);
+                    if (maxOrder < 1) return null;
+                    const replaying = plagueReplay?.id === e.id;
+                    const step = replaying ? plagueReplay!.step : 0;
+                    return (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "2px 0 5px", padding: "3px 5px", background: "#1a0e0e", border: "1px solid #3a2020", borderRadius: 5 }}>
+                        <span title="Trace the spread on the map"
+                          onClick={() => setPlagueReplay(replaying ? null : { id: e.id, step: 0 })}
+                          style={{ fontSize: 10, cursor: "pointer", color: replaying ? "#ff9a6a" : "#9c7676" }}>
+                          {replaying ? "■ stop" : "▶ trace"}
+                        </span>
+                        <input type="range" min={0} max={maxOrder} step={1} value={step}
+                          onChange={(ev) => setPlagueReplay({ id: e.id, step: Number(ev.target.value) })}
+                          style={{ flex: 1, accentColor: "#c05050" }} />
+                        <span style={{ fontSize: 9, color: "#c8a8a8", minWidth: 54, textAlign: "right" }}>
+                          {step === 0 ? "origin" : `+${step} ${step === 1 ? "city" : "cities"}`}
+                        </span>
+                      </div>
+                    );
+                  })()}
                   {/* Cities in SPREAD ORDER (origin first) — the contagion history. */}
                   {e.cities.map((c) => (
                     <div key={c.hub} onClick={() => focusCity(c.hub)}

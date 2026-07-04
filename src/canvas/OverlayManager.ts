@@ -99,6 +99,9 @@ const SETTLEMENT_SIZES: Record<string, number> = {
   outpost: 0.8, // small
 };
 
+/** Satellite city marker (dependent port/granary/workshop town of a metropolis). */
+const SATELLITE_COLOR = "#e0503a";
+
 const WARM_CURRENT = "#ee5533";
 const COLD_CURRENT = "#3399ee";
 const NEUTRAL_CURRENT = "#9bb0c0";
@@ -154,6 +157,18 @@ export class OverlayManager {
   private basins: { name: string; pts: [number, number][]; cx: number; cy: number }[] = [];
   /** Atlas 2.0 · refugee roads (age01 = 0 fresh … 1 faded out). */
   private migrations: { fx: number; fy: number; tx: number; ty: number; age: number }[] = [];
+  /** Settlement (cell coords) currently under the cursor — drawn as a shiny ring. */
+  private hoverPoint: { x: number; y: number } | null = null;
+  setHoverPoint(p: { x: number; y: number } | null) { this.hoverPoint = p; }
+  /** #1/#23 · per-hub share of the ISOLATED culture (halo + inner fill overlay). */
+  private cultureShares: { x: number; y: number; share: number }[] = [];
+  private cultureColor: [number, number, number] = [200, 120, 220];
+  setCultureShares(pts: { x: number; y: number; share: number }[], color: [number, number, number]) {
+    this.cultureShares = pts; this.cultureColor = color;
+  }
+  /** Colony/satellite ↔ metropolis link to shine (a=metropolis, b=colony). */
+  private colonyLink: { ax: number; ay: number; bx: number; by: number } | null = null;
+  setColonyLink(l: { ax: number; ay: number; bx: number; by: number } | null) { this.colonyLink = l; }
   private windData: { samples: VectorSample[]; gridW: number; gridH: number } | null = null;
   private currentLines: Streamline[] = [];
   private tradeRoutes: TradeRoute[] = [];
@@ -1161,46 +1176,42 @@ export class OverlayManager {
         }
         // Dot scales continuously with population (log) on top of the tier base,
         // so the emergent carrying-capacity / trade hierarchy reads on the map.
-        const popf = Math.min(1.7, 0.6 + Math.log10(Math.max(s.population, 100)) / 5);
+        // Widened range (≈0.7–2.2×): on the humble campaign scale a 10k city must
+        // visibly dwarf a 500-pop village (the old 0.6+log/5 curve compressed
+        // everything into ~1.1–1.7×). Combined with the tier base this gives a
+        // strong, legible size hierarchy that tracks growth/decline live.
+        const popf = Math.min(2.2, Math.max(0.7, 0.45 + Math.log10(Math.max(s.population, 50)) * 0.32));
         const radius = (SETTLEMENT_SIZES[s.size] || 1) * popf;
         const color = SETTLEMENT_COLORS[s.size] || "#cccccc";
 
-        // Tier-specific marker (flat map redesign): capital = gold disc + star ·
-        // city = disc + inner dot (ring) · town/village = plain disc ·
-        // outpost = small square. Replaces the uniform dot.
+        // Settlements are small SQUARES (user rule), tier-tinted + size-scaled with
+        // population: capital = square + gold star · city = square + inner dot ·
+        // town/village/outpost = plain square. Dead cities render as a † cross above.
         const cx = s.x + 0.5, cy = s.y + 0.5;
         ctx.globalAlpha = 0.95;
         ctx.fillStyle = color;
         ctx.strokeStyle = "rgba(0,0,0,0.65)";
         ctx.lineWidth = Math.max(0.25, radius * 0.14);
-        if (s.size === "outpost") {
-          const hw = radius * 0.95;
+        const hw = radius * 0.92; // half-side of the square
+        ctx.beginPath();
+        ctx.rect(cx - hw, cy - hw, hw * 2, hw * 2);
+        ctx.fill();
+        ctx.stroke();
+        if (s.size === "capital") {
+          ctx.fillStyle = "rgba(26,18,6,0.9)";
           ctx.beginPath();
-          ctx.rect(cx - hw, cy - hw, hw * 2, hw * 2);
-          ctx.fill();
-          ctx.stroke();
-        } else {
-          ctx.beginPath();
-          ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-          if (s.size === "capital") {
-            ctx.fillStyle = "rgba(26,18,6,0.9)";
-            ctx.beginPath();
-            for (let i = 0; i < 10; i++) {
-              const rr = i % 2 === 0 ? radius * 0.62 : radius * 0.26;
-              const a = -Math.PI / 2 + (i * Math.PI) / 5;
-              const px = cx + Math.cos(a) * rr, py = cy + Math.sin(a) * rr;
-              if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-            }
-            ctx.closePath();
-            ctx.fill();
-          } else if (s.size === "city") {
-            ctx.fillStyle = "rgba(26,18,6,0.85)";
-            ctx.beginPath();
-            ctx.arc(cx, cy, radius * 0.35, 0, Math.PI * 2);
-            ctx.fill();
+          for (let i = 0; i < 10; i++) {
+            const rr = i % 2 === 0 ? radius * 0.6 : radius * 0.25;
+            const a = -Math.PI / 2 + (i * Math.PI) / 5;
+            const px = cx + Math.cos(a) * rr, py = cy + Math.sin(a) * rr;
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
           }
+          ctx.closePath();
+          ctx.fill();
+        } else if (s.size === "city") {
+          ctx.fillStyle = "rgba(26,18,6,0.85)";
+          const ih = hw * 0.4;
+          ctx.fillRect(cx - ih, cy - ih, ih * 2, ih * 2);
         }
         // Atlas 2.0 · a settlement founded THIS campaign wears a gold founding
         // star for its first years — new towns pop out at a glance.
@@ -1224,6 +1235,64 @@ export class OverlayManager {
         }
         ctx.globalAlpha = 1;
       }
+    }
+
+    // #1/#23 · Culture-share overlay: for the isolated people, each settlement gets
+    // a coloured HALO ring (thickness by share tier) + an inner FILL disc whose area
+    // grows with the share — 75%+ solid, 45-74 half, 20-44 quarter, 5-19 ring only.
+    if (this.cultureShares.length > 0) {
+      const inv = 1 / Math.sqrt(this.currentScale);
+      const [cr, cg, cb] = this.cultureColor;
+      const colour = `rgb(${cr},${cg},${cb})`;
+      const r = Math.max(2.0, 2.8 * inv);
+      for (const p of this.cultureShares) {
+        const s = p.share;
+        const cx = p.x + 0.5, cy = p.y + 0.5;
+        // A WHITE circle background with an inner circle in the people's COLOUR, sized
+        // by share: 75%+ ≈ solid · 45-74 majority · 20-44 significant · 5-19 minority dot.
+        ctx.fillStyle = "rgba(250,250,252,0.92)";
+        ctx.strokeStyle = "rgba(0,0,0,0.45)";
+        ctx.lineWidth = Math.max(0.2, 0.4 * inv);
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        const frac = s >= 0.75 ? 0.98 : s >= 0.45 ? 0.68 : s >= 0.20 ? 0.42 : 0.22;
+        ctx.fillStyle = colour;
+        ctx.beginPath(); ctx.arc(cx, cy, r * frac, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
+    // Colony/satellite ↔ metropolis link: a glowing dashed tie with a ring at each
+    // end (the metropolis larger), set when a row is clicked in the Colonial panel.
+    if (this.colonyLink && this.colonyLink.ax >= 0 && this.colonyLink.bx >= 0) {
+      const inv = 1 / Math.sqrt(this.currentScale);
+      const { ax, ay, bx, by } = this.colonyLink;
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,222,120,0.9)";
+      ctx.lineWidth = Math.max(0.6, 1.5 * inv);
+      ctx.setLineDash([Math.max(1.5, 3 * inv), Math.max(1, 2 * inv)]);
+      ctx.beginPath(); ctx.moveTo(ax + 0.5, ay + 0.5); ctx.lineTo(bx + 0.5, by + 0.5); ctx.stroke();
+      ctx.setLineDash([]);
+      for (const [x, y, rr] of [[ax, ay, 3.4] as const, [bx, by, 2.6] as const]) {
+        ctx.strokeStyle = "rgba(255,222,120,0.95)";
+        ctx.lineWidth = Math.max(0.5, 1.0 * inv);
+        ctx.beginPath(); ctx.arc(x + 0.5, y + 0.5, Math.max(1.6, rr * inv), 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Hover "shine": a bright pulsing double ring around the settlement under the
+    // cursor, so it's obvious which one a click will select.
+    if (this.hoverPoint) {
+      const inv = 1 / Math.sqrt(this.currentScale);
+      const cx = this.hoverPoint.x + 0.5, cy = this.hoverPoint.y + 0.5;
+      const r = Math.max(2.4, 3.6 * inv);
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,236,150,0.95)";
+      ctx.lineWidth = Math.max(0.5, 0.9 * inv);
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = "rgba(255,236,150,0.30)";
+      ctx.lineWidth = Math.max(1.0, 2.2 * inv);
+      ctx.beginPath(); ctx.arc(cx, cy, r * 1.55, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
     }
 
     // Colonies & house trade outposts (their own markers + routed supply lanes).
@@ -1709,13 +1778,16 @@ export class OverlayManager {
     for (const c of this.plagueCities) {
       const cx = c.x + 0.5, cy = c.y + 0.5;
       const r = Math.max(2.0, (c.origin ? 7 : c.active ? 6 : 4) * inv);
-      ctx.globalAlpha = c.active ? 0.5 : 0.28;
-      ctx.fillStyle = c.origin ? "#ff6030" : c.active ? "#e04040" : "#a05050";
+      // Colour by DEATH TOLL so the worst-hit cities stand out (user rule): RED for a
+      // touched city, BROWN when it bites hard, BLACK for a devastating cull.
+      const dc = c.deaths >= 5000 ? "#141010" : c.deaths >= 800 ? "#7a3a1a" : "#e04040";
+      ctx.globalAlpha = c.active ? 0.72 : 0.5;
+      ctx.fillStyle = c.origin && c.deaths < 800 ? "#ff6030" : dc;
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = 1;
       ctx.font = `${fs}px sans-serif`;
-      if (c.origin) ctx.fillText("★", cx, cy + fs * 0.05);
-      else if (c.active) ctx.fillText("☠", cx, cy + fs * 0.05);
+      if (c.origin) { ctx.fillStyle = "#ffe0b0"; ctx.fillText("★", cx, cy + fs * 0.05); }
+      else if (c.active) { ctx.fillStyle = "#f0d0d0"; ctx.fillText("☠", cx, cy + fs * 0.05); }
     }
     ctx.globalAlpha = 1;
     ctx.textAlign = "left";
@@ -2677,6 +2749,18 @@ export class OverlayManager {
         ctx.strokeStyle = c.ownerColor || "#cccccc";
         ctx.lineWidth = Math.max(0.4, 0.9 * inv);
         ctx.strokeRect(x - s, y - s, s * 2, s * 2);
+      } else if (c.kind === 3) {
+        // Satellite city (a large metropolis's dependent port/granary/workshop town):
+        // a RED disc so it stands apart from ordinary free towns and violet colonies.
+        const rr = Math.max(1.1, 1.7 * inv);
+        ctx.globalAlpha = 0.92;
+        ctx.fillStyle = SATELLITE_COLOR;
+        ctx.beginPath();
+        ctx.arc(x, y, rr, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,0.6)";
+        ctx.lineWidth = Math.max(0.3, 0.7 * inv);
+        ctx.stroke();
       } else {
         // Settlement colony: violet circle, radius grows with stage.
         const rr = Math.max(1.1, (1.4 + 0.5 * (c.stage || 1)) * inv);
@@ -2700,8 +2784,12 @@ export class OverlayManager {
     ctx.lineWidth = Math.max(0.5, 1.6 / this.currentScale);
     for (const c of this.colonies) {
       if (!c.name) continue;
-      const rr = c.kind === 2 ? Math.max(1.0, 1.9 * inv) : Math.max(1.1, (1.4 + 0.5 * (c.stage || 1)) * inv);
-      const col = c.kind === 2 ? (c.ownerColor || "#c9a96a") : lineColors.settlementColony;
+      const rr = c.kind === 2 ? Math.max(1.0, 1.9 * inv)
+        : c.kind === 3 ? Math.max(1.1, 1.7 * inv)
+        : Math.max(1.1, (1.4 + 0.5 * (c.stage || 1)) * inv);
+      const col = c.kind === 2 ? (c.ownerColor || "#c9a96a")
+        : c.kind === 3 ? SATELLITE_COLOR
+        : lineColors.settlementColony;
       ctx.strokeStyle = "rgba(0,0,0,0.8)";
       ctx.strokeText(c.name, c.x + 0.5, c.y + 0.5 - rr - 0.8);
       ctx.fillStyle = col;

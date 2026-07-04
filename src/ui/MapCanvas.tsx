@@ -10,7 +10,7 @@ import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useSettingsStore } from "../state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs } from "../bridge/tauri";
 import type { MerchantRoute, FuturesLane } from "../types";
 import { goodOverlayKey, GOOD_DEFS } from "../goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "../types";
@@ -39,6 +39,7 @@ export function MapCanvas() {
   const tileManagerRef = useRef<TileManager | null>(null);
   const overlayManagerRef = useRef<OverlayManager | null>(null);
   const isPaintingRef = useRef(false);
+  const hoveredHubRef = useRef<number>(-1);
   const isErasingRef = useRef(false);
   const pendingCellsRef = useRef<Set<number>>(new Set());
   const initRef = useRef(false);
@@ -352,6 +353,8 @@ export function MapCanvas() {
   // markers (and heat, below) time-travel to that year instead of the live world.
   const eraFrame = useUIStore((s) => s.eraFrame);
   const heatGood = useUIStore((s) => s.heatGood);
+  const selectedCulture = useUIStore((s) => s.selectedCulture);
+  const colonyHighlight = useUIStore((s) => s.colonyHighlight);
 
   const liveSettlementsNow = useMemo<Settlement[]>(() => {
     // Estates (ids >= 100000) are INTERNAL to their parent city — never drawn as
@@ -361,11 +364,14 @@ export function MapCanvas() {
     // Tier by ABSOLUTE population, not as a ratio to the single largest city — a
     // metropolis used to push every other city below 8% of its pop, collapsing real
     // 30k cities to the tiny near-invisible "outpost" tier even though they're alive.
+    // Tiers on the campaign's HUMBLE population scale (settlements seed at
+    // 500/2000/10000 = village/town/city and grow from there). Applies only to
+    // LIVE campaign hubs; worldgen-preview settlements keep their own `s.size`.
     const tier = (pop: number): Settlement["size"] => {
-      if (pop >= 120_000) return "capital";
-      if (pop >= 50_000) return "city";
-      if (pop >= 18_000) return "town";
-      if (pop >= 5_000) return "village";
+      if (pop >= 35_000) return "capital";
+      if (pop >= 8_000) return "city";
+      if (pop >= 1_500) return "town";
+      if (pop >= 350) return "village";
       return "outpost";
     };
     // The campaign sim only keeps the strongest ~150 settlements as live economic
@@ -418,14 +424,17 @@ export function MapCanvas() {
   // frame (dead/new states as they stood THEN); live view passes through.
   const liveSettlements = useMemo<Settlement[]>(() => {
     if (!eraFrame) return liveSettlementsNow;
+    // Tiers on the campaign's HUMBLE population scale (settlements seed at
+    // 500/2000/10000 = village/town/city and grow from there). Applies only to
+    // LIVE campaign hubs; worldgen-preview settlements keep their own `s.size`.
     const tier = (pop: number): Settlement["size"] => {
-      if (pop >= 120_000) return "capital";
-      if (pop >= 50_000) return "city";
-      if (pop >= 18_000) return "town";
-      if (pop >= 5_000) return "village";
+      if (pop >= 35_000) return "capital";
+      if (pop >= 8_000) return "city";
+      if (pop >= 1_500) return "town";
+      if (pop >= 350) return "village";
       return "outpost";
     };
-    return eraFrame.hubs.map((h, i) => ({
+    return (eraFrame.hubs ?? []).map((h, i) => ({
       id: `era-${i}`, x: h.x, y: h.y, name: h.name,
       size: tier(h.population), population: h.population, score: h.population,
       dead: h.dead, isNew: h.is_new,
@@ -453,7 +462,7 @@ export function MapCanvas() {
     const hubs = campaignSnapshot?.active ? campaignSnapshot.hubs : [];
     const markers: ColonyMarker[] = [];
     for (const h of hubs) {
-      if (h.colony_kind !== 1 && h.colony_kind !== 2) continue;
+      if (h.colony_kind !== 1 && h.colony_kind !== 2 && h.colony_kind !== 3) continue;
       const f = h.founder_hub >= 0 && h.founder_hub < hubs.length ? hubs[h.founder_hub] : undefined;
       const ownerColor = h.colony_kind === 2
         ? (houses.find((ho) => ho.idx === h.owner_house)?.color ?? "#c9a96a")
@@ -478,7 +487,7 @@ export function MapCanvas() {
     const hubs = campaignSnapshot?.active ? campaignSnapshot.hubs : [];
     let alive = true;
     if (eraFrame) {
-      om.drawTradeHeat(eraFrame.hubs
+      om.drawTradeHeat((eraFrame.hubs ?? [])
         .filter((h) => h.trade > 0 && !h.dead)
         .map((h) => ({ x: h.x, y: h.y, v: h.trade })));
     } else if (heatGood && campaignSnapshot?.active) {
@@ -500,6 +509,34 @@ export function MapCanvas() {
     requestRender();
     return () => { alive = false; };
   }, [campaignSnapshot, eraFrame, heatGood, requestRender]);
+
+  // Colony/satellite ↔ metropolis link highlight (set by the Colonial panel).
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setColonyLink(colonyHighlight);
+    requestRender();
+  }, [colonyHighlight, requestRender]);
+
+  // #1/#23 · Culture isolation: when a people is picked in the Peoples panel, shade
+  // every settlement by that culture's share (halo + inner fill). Refetch yearly.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    if (!selectedCulture || !campaignSnapshot?.active) {
+      om.setCultureShares([], [200, 120, 220]);
+      requestRender();
+      return;
+    }
+    let alive = true;
+    Promise.all([campaignGetCultures(), campaignCultureHubs(selectedCulture)]).then(([cults, hubs]) => {
+      if (!alive || !overlayManagerRef.current) return;
+      const color = (cults.find((c) => c.name === selectedCulture)?.color ?? [200, 120, 220]) as [number, number, number];
+      overlayManagerRef.current.setCultureShares(hubs.map((h) => ({ x: h[0], y: h[1], share: h[2] })), color);
+      requestRender();
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [selectedCulture, campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365), requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Atlas 2.0 · named trade basins — refetched as years pass while the overlay
   // (or the Atlas Regions tab) wants them.
@@ -930,18 +967,38 @@ export function MapCanvas() {
 
   // Phase 6 · plague overlay: struck cities + contagion routes (source→city).
   const showPlagueZones = useUIStore((s) => s.overlayVisibility.plagueZones);
+  const plagueReplay = useUIStore((s) => s.plagueReplay);
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om) return;
-    if (!showPlagueZones || !campaignSnapshot?.active) { om.setEpidemics([], []); requestRender(); return; }
+    // The layer shows when the toggle is on OR a spread REPLAY is running.
+    if ((!showPlagueZones && !plagueReplay) || !campaignSnapshot?.active) { om.setEpidemics([], []); requestRender(); return; }
     let alive = true;
     campaignGetEpidemics().then((eps) => {
       if (!alive) return;
-      const cities = eps.flatMap((e) => e.cities.map((c) => ({ x: c.x, y: c.y, active: c.active, deaths: c.deaths, origin: c.order === 0 })));
-      // Contagion routes: map each city's `from_name` back to its coords.
+      if (plagueReplay) {
+        // REPLAY one outbreak: reveal its spread up to `step` (0 = origin), tracing the
+        // contagion route in plague-red with the origin city bolded.
+        const ep = eps.find((e) => e.id === plagueReplay.id);
+        const cs = ep ? ep.cities.filter((c) => c.order <= plagueReplay.step) : [];
+        const cities = cs.map((c) => ({ x: c.x, y: c.y, active: true, deaths: c.deaths, origin: c.order === 0 }));
+        const coord = new Map<string, { x: number; y: number }>();
+        for (const c of ep?.cities ?? []) coord.set(c.name, { x: c.x, y: c.y });
+        const edges = cs.filter((c) => c.order > 0).flatMap((c) => {
+          const src = c.from_name ? coord.get(c.from_name) : undefined;
+          return src ? [{ ax: src.x, ay: src.y, bx: c.x, by: c.y }] : [];
+        });
+        om.setEpidemics(cities, edges);
+        requestRender();
+        return;
+      }
+      // Only ACTIVE outbreaks are shown on the map (user rule) — historical strikes
+      // live in the Plagues panel, not as permanent map zones.
+      const cities = eps.flatMap((e) => e.cities.filter((c) => c.active)
+        .map((c) => ({ x: c.x, y: c.y, active: true, deaths: c.deaths, origin: c.order === 0 })));
       const coord = new Map<string, { x: number; y: number }>();
       for (const e of eps) for (const c of e.cities) coord.set(c.name, { x: c.x, y: c.y });
-      const edges = eps.flatMap((e) => e.cities.flatMap((c) => {
+      const edges = eps.flatMap((e) => e.cities.filter((c) => c.active).flatMap((c) => {
         const src = c.from_name ? coord.get(c.from_name) : undefined;
         return src ? [{ ax: src.x, ay: src.y, bx: c.x, by: c.y }] : [];
       }));
@@ -949,7 +1006,7 @@ export function MapCanvas() {
       requestRender();
     }).catch(() => {});
     return () => { alive = false; };
-  }, [showPlagueZones, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
+  }, [showPlagueZones, plagueReplay, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
 
   // Phase 6 · guild-city overlay: markers with each guild's good emoji.
   const showGuildCities = useUIStore((s) => s.overlayVisibility.guildCities);
@@ -1143,9 +1200,12 @@ export function MapCanvas() {
             snap?.active ? snap.hubs.filter((h) => !h.is_estate) : econ.hubs;
           let best = -1; let bestD = thresh * thresh; let bestColony = 0;
           for (const h of hubList) {
-            let dx = Math.abs(h.x - wx);
+            // Markers are DRAWN at the cell CENTRE (h.x+0.5), so hit-test the centre
+            // too — comparing against the cell corner offset every click half a cell
+            // up-left ("clicking slightly left").
+            let dx = Math.abs(h.x + 0.5 - wx);
             if (dx > m.grid_width / 2) dx = m.grid_width - dx;
-            const dy = h.y - wy;
+            const dy = h.y + 0.5 - wy;
             const d = dx * dx + dy * dy;
             if (d < bestD) { bestD = d; best = h.id; bestColony = h.colony_kind ?? 0; }
           }
@@ -1241,6 +1301,30 @@ export function MapCanvas() {
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
     const { wx, wy } = viewport.screenToWorld(screenX, screenY);
+
+    // Hover shine: highlight the settlement under the cursor so it's clear what a
+    // click will select (inspection tools, not while painting/panning).
+    const hoverTool = activeToolRef.current === "select" || activeToolRef.current === "pan";
+    if (hoverTool && !isPaintingRef.current && e.buttons === 0) {
+      const snap = campaignSnapshotRef.current;
+      const econ = economyRef.current;
+      const hubList = snap?.active ? snap.hubs.filter((h) => !h.is_estate) : (econ?.hubs ?? []);
+      const thresh = Math.max(6, m.grid_width * 0.012);
+      let best = -1; let bx = 0; let by = 0; let bestD = thresh * thresh;
+      for (const h of hubList) {
+        let dx = Math.abs(h.x + 0.5 - wx);
+        if (dx > m.grid_width / 2) dx = m.grid_width - dx;
+        const dy = h.y + 0.5 - wy;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = h.id; bx = h.x; by = h.y; }
+      }
+      if (best !== hoveredHubRef.current) {
+        hoveredHubRef.current = best;
+        overlayManagerRef.current?.setHoverPoint(best >= 0 ? { x: bx, y: by } : null);
+        if (containerRef.current) containerRef.current.style.cursor = best >= 0 ? "pointer" : "";
+        requestRender();
+      }
+    }
 
     if (wx >= 0 && wx < m.grid_width && wy >= 0 && wy < m.grid_height) {
       const tool = activeToolRef.current;

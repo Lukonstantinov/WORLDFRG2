@@ -99,6 +99,8 @@ pub fn run() {
             campaign_commands::campaign_get_trade_basins,
             campaign_commands::campaign_get_good_heat,
             campaign_commands::campaign_get_era_frame,
+            campaign_commands::campaign_get_cultures,
+            campaign_commands::campaign_culture_hubs,
             campaign_commands::campaign_get_hub,
             campaign_commands::campaign_get_colony,
             campaign_commands::campaign_get_colonies,

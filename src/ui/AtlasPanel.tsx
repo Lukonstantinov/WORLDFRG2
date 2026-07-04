@@ -82,8 +82,6 @@ export function AtlasPanel() {
     return [...hubs].sort((a, b) => key[sortBy](b) - key[sortBy](a));
   }, [hubs, sortBy]);
 
-  if (!open) return null;
-
   const alive_n = hubs.filter((h) => !h.abandoned && h.population >= 1).length;
   const ruins = hubs.filter((h) => h.abandoned).length;
   const last = series.length > 0 ? series[series.length - 1] : null;
@@ -125,6 +123,11 @@ export function AtlasPanel() {
     }
     return [...byYear.entries()].sort((a, b) => b[0] - a[0]);
   }, [journal, kindFilter]);
+
+  // Every hook (incl. the `timeline` useMemo above) must run on EVERY render —
+  // bail out only AFTER them, never before, or React throws "Rendered more hooks
+  // than during the previous render" and the whole panel fails to mount.
+  if (!open) return null;
 
   const tabBtn = (id: typeof tab, label: string) => (
     <button key={id} data-no-drag onClick={() => setTab(id)} style={{

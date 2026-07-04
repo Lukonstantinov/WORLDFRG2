@@ -566,6 +566,11 @@ pub struct HubDetail {
     /// Trade-base patron: the merchant house developing this city as a base of
     /// operations (empty = none). See docs/TRADE_BASE_MECHANIC_PLAN.md.
     #[serde(default)] pub patron: String,
+    /// #23 · the majority PEOPLE of this settlement + its minority quarters
+    /// `(people, population share)` — grown by in-migration of a different culture
+    /// and slowly eroded by assimilation. Display-only.
+    #[serde(default)] pub culture: String,
+    #[serde(default)] pub minorities: Vec<(String, f32)>,
     /// DLC 3 · the polis government of this seat (council + fiscal policy + this
     /// city's speculation read). None for estates / unsettled hubs.
     #[serde(default)] pub government: Option<Government>,
@@ -1073,6 +1078,104 @@ pub fn campaign_get_era_frame(year: u32, db: State<'_, WorldDb>) -> Result<Optio
     Ok(Some(EraFrame { year, hubs }))
 }
 
+// ── #1/#23 · Peoples (cultures) ─────────────────────────────────────────────────
+#[derive(Serialize)]
+pub struct CultureBrief {
+    pub name: String,
+    pub color: [u8; 3],
+    pub population: u32,
+    pub towns: u32,      // settlements where this culture is the MAJORITY
+    pub presence: u32,   // settlements where it is present (≥ 5%)
+    pub mobility: f32,   // 0..1 travel-proneness (≥0.7 = merchant diaspora)
+    pub top_cities: Vec<(String, u32)>, // by this culture's population, top 4
+    pub houses: Vec<String>,            // merchant houses of this people
+}
+
+/// Culture colour: the worldgen hearth colour if known, else a deterministic tint.
+fn culture_color(name: &str) -> [u8; 3] {
+    if let Some(m) = crate::sim::cultures::active() {
+        if let Some(h) = m.hearths.iter().find(|h| h.people == name) {
+            return h.color;
+        }
+    }
+    let mut x = 0xcbf29ce484222325u64;
+    for b in name.bytes() { x ^= b as u64; x = x.wrapping_mul(0x100000001b3); }
+    [(80 + (x % 150)) as u8, (80 + ((x >> 8) % 150)) as u8, (80 + ((x >> 16) % 150)) as u8]
+}
+
+/// Per-culture census: population, town count, top cities, houses, mobility. Sorted
+/// by population (largest people first). Powers the Peoples panel.
+#[tauri::command]
+pub fn campaign_get_cultures(db: State<'_, WorldDb>) -> Result<Vec<CultureBrief>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    use std::collections::HashMap;
+    struct Acc { pop: f64, towns: u32, presence: u32, cities: Vec<(String, f64)> }
+    let mut map: HashMap<String, Acc> = HashMap::new();
+    let add = |map: &mut HashMap<String, Acc>, c: &str, name: &str, p: f64, major: bool, present: bool| {
+        let e = map.entry(c.to_string()).or_insert_with(|| Acc { pop: 0.0, towns: 0, presence: 0, cities: vec![] });
+        e.pop += p;
+        if major { e.towns += 1; }
+        if present { e.presence += 1; }
+        e.cities.push((name.to_string(), p));
+    };
+    for i in 0..sim.hubs.len() {
+        let h = &sim.hubs[i];
+        if h.is_estate || h.abandoned || h.population < 1.0 { continue; }
+        let pop = h.population.max(0.0) as f64;
+        let maj = sim.hub_culture.get(i).cloned().unwrap_or_default();
+        if maj.is_empty() || maj == "—" { continue; }
+        let mshare: f32 = sim.hub_minorities.get(i).map(|m| m.iter().fold(0.0f32, |a, (_, s)| a + *s)).unwrap_or(0.0);
+        let maj_share = (1.0 - mshare).clamp(0.0, 1.0) as f64;
+        add(&mut map, &maj, &h.name, pop * maj_share, true, true);
+        if let Some(mins) = sim.hub_minorities.get(i) {
+            for (c, s) in mins {
+                if *s <= 0.005 { continue; }
+                add(&mut map, c, &h.name, pop * (*s as f64), false, *s >= 0.05);
+            }
+        }
+    }
+    let mut houses_by: HashMap<String, Vec<String>> = HashMap::new();
+    for hh in &sim.houses {
+        if hh.defunct { continue; }
+        if let Some(c) = sim.hub_culture.get(hh.hub as usize) {
+            if !c.is_empty() && c != "—" {
+                houses_by.entry(c.clone()).or_default().push(hh.name.clone());
+            }
+        }
+    }
+    let mut out: Vec<CultureBrief> = map.into_iter().map(|(name, mut acc)| {
+        acc.cities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let top: Vec<(String, u32)> = acc.cities.into_iter().take(4).map(|(n, p)| (n, p as u32)).collect();
+        let mut houses = houses_by.remove(&name).unwrap_or_default();
+        houses.sort(); houses.dedup(); houses.truncate(8);
+        CultureBrief {
+            color: culture_color(&name),
+            mobility: crate::sim::tick::CampaignSim::culture_mobility(&name),
+            population: acc.pop as u32, towns: acc.towns, presence: acc.presence,
+            top_cities: top, houses, name,
+        }
+    }).collect();
+    out.sort_by(|a, b| b.population.cmp(&a.population));
+    Ok(out)
+}
+
+/// Per-hub share of ONE culture: `[x, y, share]` for every settlement where the
+/// people is present (≥ 5%). Drives the map's culture-share overlay.
+#[tauri::command]
+pub fn campaign_culture_hubs(name: String, db: State<'_, WorldDb>) -> Result<Vec<[f32; 3]>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let mut out = vec![];
+    for i in 0..sim.hubs.len() {
+        let h = &sim.hubs[i];
+        if h.is_estate || h.abandoned || h.population < 1.0 { continue; }
+        let share = sim.culture_share_at(i, &name);
+        if share > 0.05 { out.push([h.x, h.y, share]); }
+    }
+    Ok(out)
+}
+
 /// Deterministic initial head lifespan (≈45–75 years, in ticks).
 fn seed_lifespan(seed: u64, salt: u64) -> u32 {
     let mut z = seed.wrapping_add(salt.wrapping_mul(0x9E3779B97F4A7C15));
@@ -1168,11 +1271,28 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         })
         .collect();
 
-    // ── Hubs ── (cap to the strongest 150 to bound tick cost + state size)
+    // ── Hubs ── (cap to the strongest 250 to bound tick cost + state size). Raised
+    // 150→250 so more notable cities are actually simulated — a "large" city ranked
+    // 151+ was rendered but not a live hub, so it couldn't be clicked/inspected.
     let mut order: Vec<usize> = (0..econ.hubs.len()).collect();
     order.sort_by(|&a, &b| econ.hubs[b].population.cmp(&econ.hubs[a].population));
-    order.truncate(150);
+    order.truncate(250);
     order.sort_unstable(); // keep snapshot index order stable
+    // Tiered founding populations (user rule): every settlement starts HUMBLE and
+    // grows — small towns begin at 500, medium at 2000, large at 10000 — and the
+    // map's settlement icon then scales with live population as the city rises or
+    // falls. Buckets are by worldgen-population RANK so the biggest sites start
+    // "large". Balance-neutral: `base_per_capita` is derived from THIS founding
+    // pop below, so day-0 production is unchanged and per-capita output stays
+    // consistent as population changes.
+    let mut ranked_pops: Vec<u32> = order.iter().map(|&h| econ.hubs[h].population).collect();
+    ranked_pops.sort_unstable_by(|a, b| b.cmp(a));
+    let rn = ranked_pops.len().max(1);
+    let large_cut = ranked_pops[((rn as f32 * 0.15) as usize).min(rn - 1)]; // top 15% → large
+    let medium_cut = ranked_pops[((rn as f32 * 0.50) as usize).min(rn - 1)]; // next 35% → medium
+    let tier_founding = |p: u32| -> f32 {
+        if p >= large_cut { 10_000.0 } else if p >= medium_cut { 2_000.0 } else { 500.0 }
+    };
     let id_to_idx: std::collections::HashMap<u32, usize> =
         order.iter().enumerate().map(|(i, &h)| (econ.hubs[h].id, i)).collect();
 
@@ -1200,7 +1320,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
             // prices over the first weeks of sim. (Substrate crosses the boundary —
             // city sites, productive potential, routes — but economics is re-derived.)
             let price: Vec<f32> = goods.iter().map(|g| g.base_value).collect();
-            let founding = (eh.population.max(1)) as f32;
+            let founding = tier_founding(eh.population);
             // Per-capita production: the static economy's output is for the founding
             // population, so production = base_per_capita · population thereafter.
             let base_per_capita: Vec<f32> = production.iter().map(|&p| p / founding).collect();
@@ -1451,7 +1571,14 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         }
         out
     };
-    for &h in seed_hubs.iter() {
+    // Only a FEW founding families exist at the dawn of the campaign; the rest of
+    // the merchant class emerges over the first ~5 years (see HOUSE_RAMP_YEARS +
+    // maybe_found_house). `seed_house_count` below is set to the FULL target so the
+    // tick ramps up to it.
+    // No houses at the dawn of a campaign — local merchants trade, guilds charter
+    // from year 5, and only then (year 10+) do houses spin off a guild's trade.
+    const INITIAL_SEED_HOUSES: usize = 0;
+    for &h in seed_hubs.iter().take(INITIAL_SEED_HOUSES) {
         let mut gi: Vec<usize> = (0..gc).collect();
         gi.sort_by(|&a, &b| {
             hubs[h].production[b].partial_cmp(&hubs[h].production[a]).unwrap_or(std::cmp::Ordering::Equal)
@@ -1510,7 +1637,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         });
     }
 
-    let houses_len = houses.len() as u32; // baseline house count (before `houses` is moved)
+    // The TARGET baseline is the full seed-hub set (up to 24); only a few are
+    // created now, the ramp fills the rest over the opening years.
+    let houses_len = (seed_hubs.len() as u32).max(houses.len() as u32);
     let days_per_cell = ((40075.0 / grid_w) / 55.0).max(0.02); // ~55 km/day blended
     let mut sim = CampaignSim {
         seed,
@@ -1551,6 +1680,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         house_barred: Vec::new(),
         colonizable: econ.colonizable_sites.clone(),
         hub_patron: vec![],
+        hub_culture: vec![],
+        hub_minorities: vec![],
+        estate_idle_years: vec![],
         colony_supply: Vec::new(),
         diag_shipments: 0,
         diag_by_house: 0,
@@ -1608,6 +1740,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         }
     }
     sim.rebuild_routes();
+    sim.ensure_hub_cultures(); // seed each hub's majority people from the culture map
     sim.seed_initial_guilds(); // civic guilds for cities already ≥ 50k people
     set_sim(&db, &sim)?;
     persist_campaign(&db, &conn)?; // write the fresh campaign to the DB immediately
@@ -1962,6 +2095,9 @@ pub struct ColonySummary {
     pub population: f32,
     pub founder_hub: i32,
     pub founder_name: String,
+    /// The metropolis's map coordinates (−1 if none) — for the click-highlight line.
+    #[serde(default)] pub founder_x: f32,
+    #[serde(default)] pub founder_y: f32,
     pub main_bank_name: String,
     pub coin_name: String,
     pub charter_open: bool,
@@ -1981,18 +2117,20 @@ pub struct ColonySummary {
 /// Assemble a `ColonySummary` for colony hub `hi` (caller guarantees it IS a colony).
 fn colony_summary(sim: &CampaignSim, hi: usize) -> ColonySummary {
     let hub = &sim.hubs[hi];
-    let founder_name = (hub.founder_hub >= 0)
-        .then(|| sim.hubs.get(hub.founder_hub as usize))
-        .flatten().map(|h| h.name.clone()).unwrap_or_default();
+    let founder_hub_ref = (hub.founder_hub >= 0)
+        .then(|| sim.hubs.get(hub.founder_hub as usize)).flatten();
+    let founder_name = founder_hub_ref.map(|h| h.name.clone()).unwrap_or_default();
+    let (founder_x, founder_y) = founder_hub_ref.map(|h| (h.x, h.y)).unwrap_or((-1.0, -1.0));
     let main_bank_name = (hub.main_bank >= 0)
         .then(|| sim.banks.get(hub.main_bank as usize))
         .flatten().map(|b| b.name.clone()).unwrap_or_default();
     // Age / independence only meaningful for a settlement colony (outposts don't
     // record a founding tick and never become independent).
-    let (age_years, indep_in_years) = if hub.colony_kind == 1 {
-        let a = (sim.tick.saturating_sub(hub.colony_founded_tick) / 365) as u32;
-        (a, 70i32 - a as i32)
-    } else { (0, 0) };
+    let (age_years, indep_in_years) = match hub.colony_kind {
+        1 => { let a = (sim.tick.saturating_sub(hub.colony_founded_tick) / 365) as u32; (a, 70i32 - a as i32) }
+        3 => { let a = (sim.tick.saturating_sub(hub.colony_founded_tick) / 365) as u32; (a, 40i32 - a as i32) }
+        _ => (0, 0),
+    };
     // House outpost owner (kind 2): the owning house, coloured like the Houses panel.
     let (owner_house_name, owner_color) = if hub.colony_kind == 2 && hub.owner_house >= 0 {
         let oh = hub.owner_house as usize;
@@ -2004,7 +2142,7 @@ fn colony_summary(sim: &CampaignSim, hi: usize) -> ColonySummary {
         id: hub.id, name: hub.name.clone(), x: hub.x, y: hub.y,
         colony_kind: hub.colony_kind, colony_stage: hub.colony_stage, autonomous: hub.autonomous,
         population: hub.population,
-        founder_hub: hub.founder_hub, founder_name, main_bank_name,
+        founder_hub: hub.founder_hub, founder_name, founder_x, founder_y, main_bank_name,
         coin_name: hub.coin_name.clone(),
         charter_open: hub.colony_kind == 1 && !hub.autonomous,
         reserve_food: hub.reserve_food, reserve_cap: hub.reserve_cap, supply_years: hub.supply_years,
@@ -2539,6 +2677,8 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         )).collect(),
         patron: sim.hub_patron.get(hi).copied().filter(|&p| p >= 0)
             .and_then(|p| sim.houses.get(p as usize)).map(|h| h.name.clone()).unwrap_or_default(),
+        culture: sim.hub_culture.get(hi).cloned().unwrap_or_default(),
+        minorities: sim.hub_minorities.get(hi).cloned().unwrap_or_default(),
         government,
         treasury: hub.treasury,
         finance: Some(hub.finance.clone()),
@@ -3036,6 +3176,10 @@ pub struct FuturesLane {
     pub term: u8,         // 1 / 3 / 5 / 7 years
     pub end_year: u32,    // campaign year the contract expires
     pub suspended: bool,  // force-majeure (plague lockup) right now
+    #[serde(default)] pub delivered: f32,      // running total delivered to date
+    #[serde(default)] pub fulfilled_pct: f32,  // delivered vs what was due by now (0-100)
+    #[serde(default)] pub value: f32,          // grain-eq value moved so far
+    #[serde(default)] pub sealed_at: String,   // city where the deal was struck (buyer)
 }
 
 /// Expose the active futures contracts as directional supply lanes for the map's
@@ -3057,6 +3201,10 @@ pub fn campaign_futures_lanes(db: State<'_, WorldDb>) -> Result<Vec<FuturesLane>
     let tick = sim.tick;
     let mut out: Vec<FuturesLane> = sim.contracts.iter().map(|c| {
         let h = sim.houses.get(c.seller_house as usize);
+        // % fulfilled = delivered vs what was DUE by now (monthly_qty × months elapsed).
+        let months = (tick.min(c.end_tick).saturating_sub(c.start_tick)) as f32 / 30.0;
+        let due = (c.monthly_qty * months).max(1e-6);
+        let base_value = sim.goods.get(c.good).map(|x| x.base_value).unwrap_or(1.0);
         FuturesLane {
             a: pos(c.source_hub), b: pos(c.buyer_hub),
             a_name: hname(c.source_hub), b_name: hname(c.buyer_hub),
@@ -3067,6 +3215,10 @@ pub fn campaign_futures_lanes(db: State<'_, WorldDb>) -> Result<Vec<FuturesLane>
             qty: c.monthly_qty, term: c.term_years,
             end_year: c.end_tick / TICKS_PER_YEAR,
             suspended: c.suspended_until > tick,
+            delivered: c.delivered,
+            fulfilled_pct: (c.delivered / due * 100.0).clamp(0.0, 100.0),
+            value: c.delivered * base_value,
+            sealed_at: hname(c.buyer_hub),
         }
     }).collect();
     out.sort_by(|x, y| y.qty.partial_cmp(&x.qty).unwrap_or(std::cmp::Ordering::Equal));
@@ -3792,6 +3944,9 @@ pub struct EpidemicBrief {
     /// Plague category: 1 = Great Plague (rare, reaches ~4000 km along the lanes),
     /// 2 = Regional (reaches one further city), 3 = Local outbreak (stays put).
     pub category: u8,
+    /// The named DISEASE (Bubonic Plague, Cholera, Malaria, …) + its transmission mode.
+    #[serde(default)] pub disease: String,
+    #[serde(default)] pub transmission: String,
     /// Cities hit, in SPREAD ORDER (origin first). Each `from_name`→`name` is a
     /// contagion route; the panel can re-sort by deaths.
     pub cities: Vec<PlagueCityBrief>,
@@ -3834,15 +3989,25 @@ pub fn campaign_get_epidemics(db: State<'_, WorldDb>) -> Result<Vec<EpidemicBrie
             year: s.start_tick / TICKS_PER_YEAR,
             order: i as u32,
         }).collect();
+        // The named disease = the disease of the spontaneous (origin) strike.
+        let dz = strikes.iter().find(|s| s.source < 0).map(|s| s.disease)
+            .unwrap_or_else(|| strikes.first().map(|s| s.disease).unwrap_or(0));
+        let dspec = crate::sim::tick::DISEASES.get(dz as usize);
+        let disease = dspec.map(|s| s.name.to_string()).unwrap_or_else(|| "Pestilence".into());
+        let transmission = match dspec.map(|s| s.mode).unwrap_or(0) {
+            1 => "water-borne", 2 => "airborne", 3 => "vector · locale", _ => "trade-borne",
+        }.to_string();
         EpidemicBrief {
             id,
-            name: format!("The {} Pestilence", name(origin_hub)),
+            name: format!("{} of {}", disease, name(origin_hub)),
             origin_name: name(origin_hub),
             start_year: start / TICKS_PER_YEAR,
             end_year: end / TICKS_PER_YEAR,
             active,
             total_dead: total_dead.round() as u32,
             category,
+            disease,
+            transmission,
             cities,
         }
     }).collect();

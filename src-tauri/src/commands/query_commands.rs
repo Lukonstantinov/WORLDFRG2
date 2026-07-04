@@ -3315,6 +3315,19 @@ pub(crate) fn compute_colonizable_sites(
             ny >= 0 && ny < ch && !is_land[(ny * cw + nx) as usize]
         })
     };
+    // Land→sea CHOKEPOINT: a land cell with open sea on TWO OPPOSITE sides within a
+    // few cells — a strait / isthmus / portage where cargo must transship (toll site).
+    let sea_within = |cx: i32, cy: i32, dx: i32, dy: i32, r: i32| -> bool {
+        (1..=r).any(|k| {
+            let (nx, ny) = (wrap(cx + dx * k), cy + dy * k);
+            ny >= 0 && ny < ch && !is_land[(ny * cw + nx) as usize]
+        })
+    };
+    let chokepoint = |cx: i32, cy: i32| -> bool {
+        let r = 3;
+        (sea_within(cx, cy, -1, 0, r) && sea_within(cx, cy, 1, 0, r))
+            || (sea_within(cx, cy, 0, -1, r) && sea_within(cx, cy, 0, 1, r))
+    };
     let scoords: Vec<(i32, i32)> = settlements.iter()
         .map(|&(sx, sy)| ((sx / f as f32) as i32, (sy / f as f32) as i32)).collect();
     let min_settle_dist = |cx: i32, cy: i32| -> f32 {
@@ -3343,18 +3356,25 @@ pub(crate) fn compute_colonizable_sites(
                 else if elev[ci] > 0.45 { 2 }
                 else if fert[ci] > 0.55 { 1 }
                 else { 3 };
-            // Rank candidates leaning on the TRADE-GOODS prize over farmland, so the
-            // greedy spatial spread keeps cargo-rich frontier sites (not just fertile
-            // belts) — what makes trade outposts/colonies reachable.
+            // River-mouth / DELTA proxy: a fertile coastal alluvial cell (natural
+            // port + granary). Chokepoint: a land→sea transshipment neck.
+            let delta = cst && fert[ci] > 0.55;
+            let choke = chokepoint(cx, cy);
+            // Rank candidates leaning on the TRADE-GOODS prize over farmland, plus a
+            // premium for the historically prized sites: sea shore, river delta, and
+            // land→sea chokepoints (transshipment / toll points).
             let score = 0.6 * fert[ci]
                 + if elev[ci] > 0.45 { 0.2 } else { 0.0 }
-                + if cst { 0.15 } else { 0.0 }
+                + if cst { 0.35 } else { 0.0 }
+                + if delta { 0.60 } else { 0.0 }
+                + if choke { 0.80 } else { 0.0 }
                 + 1.1 * tval[ci];
             let wx = (cx as u32 * f + f / 2).min(grid_w - 1) as f32;
             let wy = (cy as u32 * f + f / 2).min(grid_h - 1) as f32;
             cands.push((score, ColonizeSite {
                 x: wx, y: wy, koppen: koppen[ci], elevation: elev[ci],
                 fertility: fert[ci], coastal: cst, kind_hint, trade_value: tval[ci],
+                delta, chokepoint: choke,
             }));
         }
     }

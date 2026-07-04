@@ -207,6 +207,15 @@ export function CampaignTopBar() {
             background: ui.showAtlas ? "#241d0c" : "rgba(12,18,26,0.6)",
             color: ui.showAtlas ? T.gold : T.inkDim, fontWeight: ui.showAtlas ? 700 : 400,
           }}>🗺 Atlas</button>
+        {/* The Peoples panel — living cultures, diasporas, minority quarters. */}
+        <button onClick={() => ui.setShowPeoples(!ui.showPeoples)}
+          title="Peoples — the world's cultures, their homelands, houses and spread"
+          style={{
+            padding: "5px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap",
+            border: `1px solid ${ui.showPeoples ? T.goldDim : T.line}`,
+            background: ui.showPeoples ? "#241d0c" : "rgba(12,18,26,0.6)",
+            color: ui.showPeoples ? T.gold : T.inkDim, fontWeight: ui.showPeoples ? 700 : 400,
+          }}>👥 Peoples</button>
         {/* Map lenses: quick toggles for the trade overlays. */}
         <button onClick={() => ui.toggleOverlay("tradeHeat")} title="Trade Heat — where trade concentrates"
           style={lensChip(ui.overlayVisibility.tradeHeat ?? false, "#d9a441")}>🔥</button>
