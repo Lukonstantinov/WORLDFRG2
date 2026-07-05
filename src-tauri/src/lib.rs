@@ -105,6 +105,7 @@ pub fn run() {
             campaign_commands::campaign_get_colony,
             campaign_commands::campaign_get_satellite,
             campaign_commands::campaign_get_migration_routes,
+            campaign_commands::campaign_get_provisioning,
             campaign_commands::campaign_get_colonies,
             campaign_commands::campaign_colony_gates,
             campaign_commands::campaign_get_world_economy,

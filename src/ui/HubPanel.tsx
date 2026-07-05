@@ -3,8 +3,10 @@ import { useUIStore } from "../state/uiStore";
 import { useWorldStore } from "../state/worldStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
-import { campaignGetHub, campaignGetColony, campaignWarehouses, campaignFuturesLanes } from "../bridge/tauri";
-import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane, ColonyDetail, CoinShare, SocietyBrief } from "../types";
+import { campaignGetHub, campaignGetColony, campaignWarehouses, campaignFuturesLanes, campaignGetProvisioning } from "../bridge/tauri";
+import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief } from "../types";
+import { GOOD_DEFS } from "../goods";
+const HP_GOOD_EMOJI: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.emoji]));
 import { climatePhrase } from "./climate";
 import { CoatOfArms, houseColor } from "./CoatOfArms";
 import { CoinIcon } from "./CoinIcon";
@@ -39,7 +41,7 @@ const HUB_EVENT_COLOR: Record<string, string> = {
   guildhall: "#cdbb88", fashion: "#e0a0d0", wonder: "#b8c8a0", piracy: "#c07070", diaspora: "#8ac0c0",
 };
 
-type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "depots" | "people" | "supply";
+type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "depots" | "people" | "supply" | "provision";
 
 const LOCAL_COLOR = "#5d6675";  // unaffiliated local merchants (grey)
 const GUILD_COLOR = "#4a6a8a";  // organised merchant guilds (slate blue)
@@ -135,6 +137,7 @@ export function HubPanel() {
   const [tradeView, setTradeView] = useState<"market" | "flows">("market");
   const [detail, setDetail] = useState<HubDetail | null>(null);
   const [colony, setColony] = useState<ColonyDetail | null>(null);
+  const [prov, setProv] = useState<ProvisioningBrief | null>(null);
   const [depots, setDepots] = useState<WarehouseInfo[]>([]);
   const [lanes, setLanes] = useState<FuturesLane[]>([]);
   const setFuturesFocus = useUIStore((s) => s.setFuturesFocus);
@@ -165,6 +168,7 @@ export function HubPanel() {
     if (selectedHub === null || !campActive) { setDetail(null); return; }
     campaignGetHub(selectedHub).then((d) => { if (alive) setDetail(d); }).catch(() => { if (alive) setDetail(null); });
     campaignGetColony(selectedHub).then((c) => { if (alive) setColony(c); }).catch(() => { if (alive) setColony(null); });
+    campaignGetProvisioning(selectedHub).then((p) => { if (alive) setProv(p); }).catch(() => { if (alive) setProv(null); });
     return () => { alive = false; };
   }, [selectedHub, campActive, campTick]);
 
@@ -233,6 +237,7 @@ export function HubPanel() {
     { id: "summary", label: "Summary" },
     ...(detail ? [{ id: "city" as Tab, label: detail.is_estate ? "Estate" : "City" }] : []),
     ...(detail && !detail.is_estate ? [{ id: "govt" as Tab, label: "Government" }] : []),
+    ...(detail && !detail.is_estate && campActive ? [{ id: "provision" as Tab, label: "Provision" }] : []),
     ...(colony ? [{ id: "supply" as Tab, label: "Supply" }] : []),
     { id: "trade", label: "Trade" },
     { id: "estates", label: "Estates" },
@@ -920,6 +925,53 @@ export function HubPanel() {
               );
             })}
           </>
+        );
+      })()}
+
+      {/* ════════════ PROVISION (council right-of-first-buy / civic reserve) ════════════ */}
+      {tab === "provision" && (() => {
+        if (!prov) return <div style={{ color: "#6a86a6", fontSize: 11, padding: 6 }}>No provisioning data.</div>;
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+            {/* First-buy status banner */}
+            <div style={{
+              padding: "8px 10px", borderRadius: 6, fontSize: 11,
+              background: prov.first_buy ? "#0c1e14" : "#1c1408",
+              border: `1px solid ${prov.first_buy ? "#1d4a30" : "#4a3a12"}`,
+              color: prov.first_buy ? "#8fe0aa" : "#e8cf8a",
+            }}>
+              {prov.first_buy
+                ? "✔ Right of first buy: ACTIVE — the council pre-empts arriving merchants for the goods it needs."
+                : `✖ First buy SUSPENDED — House ${prov.dominant_house || "?"} dominates this city's trade and takes the market first. The council must buy at a retail premium.`}
+            </div>
+            <div style={{ fontSize: 11, color: "#9ab0c8" }}>
+              Provisioning <b>{prov.dependents}</b> {prov.dependents === 1 ? "dependent" : "dependents"} (colonies + satellites)
+              {" · "}reserve target {prov.reserve_target.toFixed(0)}/good
+            </div>
+            <div style={{ fontSize: 11, color: "#7fb0e0", fontWeight: 600 }}>Secured in the civic warehouse</div>
+            {prov.goods.length === 0 && (
+              <div style={{ color: "#6a86a6", fontSize: 10 }}>Nothing secured yet — the council stocks up as goods arrive.</div>
+            )}
+            {prov.goods.map((g, i) => {
+              const pct = prov.reserve_target > 0 ? Math.min(1, g.secured / prov.reserve_target) : 0;
+              return (
+                <div key={i} style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#a8bcd4" }}>
+                    <span>{HP_GOOD_EMOJI[g.good] ?? "📦"} {g.good}{g.food ? " 🍞" : ""}</span>
+                    <span style={{ color: "#7a8aa0" }}>{g.secured.toFixed(0)} / {g.target.toFixed(0)}</span>
+                  </div>
+                  <div style={{ height: 8, borderRadius: 4, background: "#0e1a27", border: "1px solid #1c2c40", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${pct * 100}%`, background: g.food ? "#5fc88a" : "#5f9fd0" }} />
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{ fontSize: 9, color: "#56708e", marginTop: 2, lineHeight: 1.4 }}>
+              The council invests treasury to secure staples + colonial supply in warehouses.
+              Its colonies and satellite builds draw this reserve first — an investment that
+              pays back as they grow and ship goods home.
+            </div>
+          </div>
         );
       })()}
 

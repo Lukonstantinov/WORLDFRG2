@@ -568,7 +568,7 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 }
 
 // ── DLC 1 "Living Trade" tick simulation ──
-import type { CampaignSnapshot, JournalEntry, WorldEconomy, TradeBasin, EraFrame, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow, PopBrief, EpidemicBrief, GuildBrief, FigureBrief, LandmarkBrief, DynastiesPayload, CultureBrief, SatelliteBrief, MigrationRouteBrief } from "../types";
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, TradeBasin, EraFrame, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow, PopBrief, EpidemicBrief, GuildBrief, FigureBrief, LandmarkBrief, DynastiesPayload, CultureBrief, SatelliteBrief, MigrationRouteBrief, ProvisioningBrief } from "../types";
 
 /** Seed a fresh living-trade sim from the static economy snapshot (step 10). A RUNNING
  *  campaign is never restarted by this — it returns the current sim unchanged. */
@@ -648,6 +648,11 @@ export async function campaignGetSatellite(id: number): Promise<SatelliteBrief |
 /** Route-bound migration flows (polylines along the trade network) for the overlay. */
 export async function campaignGetMigrationRoutes(): Promise<MigrationRouteBrief[]> {
   return invoke("campaign_get_migration_routes");
+}
+
+/** Council right-of-first-buy / provisioning state for a city (Provisioning tab). */
+export async function campaignGetProvisioning(id: number): Promise<ProvisioningBrief | null> {
+  return invoke("campaign_get_provisioning", { id });
 }
 
 /** Empire-wide colony roster (settlement colonies + house outposts). */

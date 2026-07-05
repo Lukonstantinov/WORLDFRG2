@@ -347,6 +347,19 @@ export interface MigrationRouteBrief {
   to_hub: number;
   age_years: number;
 }
+export interface ProvGoodRow {
+  good: string;
+  secured: number;
+  target: number;
+  food: boolean;
+}
+export interface ProvisioningBrief {
+  first_buy: boolean;
+  dominant_house: string;
+  dependents: number;
+  reserve_target: number;
+  goods: ProvGoodRow[];
+}
 
 export interface ColonySummary {
   id: number;

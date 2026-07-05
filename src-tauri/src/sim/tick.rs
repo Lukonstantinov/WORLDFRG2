@@ -245,6 +245,14 @@ const SAT_BUY_MARKUP: f32 = 1.3;              // premium the council pays mercha
                                               // in a supply shortfall (secures the works)
 const SAT_DECAY_PER_IDLE_MONTH: f32 = 0.006;  // GENTLE decay when truly starved (user: far less)
 const SAT_STAGE_DROP_IDLE_MONTHS: u8 = 60;    // ~5 y fully starved before a stage slips back
+// ── Council RIGHT OF FIRST BUY (staple right / pre-emption). A city council pre-empts
+//    needed goods from arriving merchants into its civic warehouse (secures the city +
+//    its colonies), UNLESS a house has captured/dominates the city's trade. ──
+const COUNCIL_PROVISION_MIN_TREASURY: f32 = 1_500.0; // below this the council can't provision
+const COUNCIL_PROVISION_BUDGET_FRAC: f32 = 0.15;     // ≤15% of treasury spent per month securing goods
+pub(crate) const COUNCIL_RESERVE_BASE: f32 = 180.0;  // target civic stock per needed good (× scale)
+const COUNCIL_BUY_PRICE: f32 = 1.0;                  // first-buy pays market price
+const COUNCIL_RETAIL_PRICE: f32 = 1.4;               // dominated council must buy at a retail premium
 /// ── CARAVANSERAIS: waystations on long INLAND trade corridors (Silk-Road halts a
 /// day apart between distant cities); a small settlement founded near a heavy land
 /// tie's midpoint, which can grow into a town like any other.
@@ -4629,6 +4637,7 @@ impl CampaignSim {
             //    snapshot (charts + growth movers), the world price-index point
             //    (sparkline), and a rich world-summary chronicle row with numbers.
             if tick % 30 == 0 {
+                self.council_provision_pass(); // councils pre-empt needed goods into civic warehouses
                 self.construction_pass(); // satellite build sites: haul supply, advance/decay
                 self.sample_hub_history();
                 self.sample_journal();
@@ -8454,9 +8463,67 @@ impl CampaignSim {
         if best.0 == u16::MAX { 0 } else { best.0 }
     }
 
+    /// Count the living colonies + satellites a city provisions (its founder-hub children).
+    fn dependents_of(&self, h: usize) -> usize {
+        self.hubs.iter().filter(|d| d.founder_hub == h as i32 && !d.abandoned
+            && (d.colony_kind == 1 || d.colony_kind == 3 || d.build_stage > 0)).count()
+    }
+
+    /// The council's target civic reserve per needed good — scales with the city's size
+    /// and how many colonies/satellites it must feed.
+    fn council_reserve_target(&self, h: usize, deps: usize) -> f32 {
+        COUNCIL_RESERVE_BASE * (1.0 + deps as f32)
+            * (self.hubs[h].population / 5_000.0).clamp(0.3, 4.0)
+    }
+
+    /// Monthly · RIGHT OF FIRST BUY (staple right). Each solvent city council pre-empts
+    /// the goods it needs (food always; plus preservables/construction when it provisions
+    /// colonies or a satellite build) out of its OWN market stock — i.e. it buys from the
+    /// merchants arriving in the city before the open market clears — and secures them in
+    /// the civic warehouse (`civic_goods`). A council whose city has been CAPTURED by a
+    /// house (the house dominates its trade) loses first refusal: it can still stock up,
+    /// but only at a retail premium after the house has creamed the market. This is the
+    /// investment that lets colonies grow (their build/supply draws the civic reserve
+    /// first) and pays back later as those colonies ship goods home. User-requested.
+    fn council_provision_pass(&mut self) {
+        let ng = self.goods.len();
+        if ng == 0 { return; }
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned || self.hubs[h].population < 1.0 { continue; }
+            if self.hubs[h].treasury < COUNCIL_PROVISION_MIN_TREASURY { continue; }
+            let deps = self.dependents_of(h);
+            // A city that neither provisions a colony nor is food-stressed needn't hoard.
+            if deps == 0 && self.hubs[h].food_balance > 0.15 { continue; }
+            // First-buy right is suspended when a house has captured the city government.
+            let first_buy = self.hubs[h].captor_house < 0;
+            let unit_mult = if first_buy { COUNCIL_BUY_PRICE } else { COUNCIL_RETAIL_PRICE };
+            let target = self.council_reserve_target(h, deps);
+            if self.hubs[h].civic_goods.len() < ng { self.hubs[h].civic_goods.resize(ng, 0.0); }
+            let budget = self.hubs[h].treasury * COUNCIL_PROVISION_BUDGET_FRAC;
+            let mut spent = 0.0f32;
+            for g in 0..ng {
+                // Need it? Food is always secured; other goods only when feeding dependents.
+                if !(self.goods[g].food || deps > 0) { continue; }
+                let have = self.hubs[h].civic_goods[g];
+                if have >= target { continue; }
+                let avail = self.hubs[h].stock.get(g).copied().unwrap_or(0.0).max(0.0);
+                let price = self.hubs[h].price.get(g).copied()
+                    .unwrap_or(self.goods[g].base_value).max(0.01) * unit_mult;
+                let afford = (budget - spent).max(0.0) / price;
+                let buy = (target - have).min(avail).min(afford);
+                if buy <= 0.0 { continue; }
+                self.hubs[h].stock[g] -= buy;          // pre-empted out of the open market
+                self.hubs[h].civic_goods[g] += buy;    // …into the civic warehouse
+                spent += buy * price;
+            }
+            self.hubs[h].treasury -= spent;
+        }
+    }
+
     /// Monthly: advance every satellite still under construction. Convoys pull the 3
-    /// supply goods out of the metropolis's stock and the council treasury pays convoy
-    /// upkeep; the least-supplied category throttles progress. A starved month DECAYS the
+    /// supply goods out of the metropolis's civic reserve (secured by the council's
+    /// first-buy) and then its market stock, buying any remaining shortfall on the
+    /// market; the least-supplied category throttles progress. A starved month DECAYS the
     /// stage, and a long drought slips a whole stage back (user: 10y build with decay).
     /// The 5th stage's completion turns the site into a functional, metropolis-BOUND city.
     fn construction_pass(&mut self) {
@@ -8479,16 +8546,26 @@ impl CampaignSim {
             for c in 0..3usize {
                 let g = self.hubs[h].build_supply_good[c] as usize;
                 if g >= ng { self.hubs[h].build_supply[c] = 1.0; continue; }
-                let have = self.hubs[m].stock.get(g).copied().unwrap_or(0.0).max(0.0);
-                let from_stock = have.min(SAT_STAGE_QUOTA);
+                let mut delivered = 0.0f32;
+                // 1) draw the council's SECURED civic reserve first (its first-buy pays off).
+                if g < self.hubs[m].civic_goods.len() {
+                    let from_civic = self.hubs[m].civic_goods[g].max(0.0).min(SAT_STAGE_QUOTA);
+                    self.hubs[m].civic_goods[g] -= from_civic;
+                    delivered += from_civic;
+                }
+                // 2) then the open-market stock.
+                let from_stock = self.hubs[m].stock.get(g).copied().unwrap_or(0.0)
+                    .max(0.0).min(SAT_STAGE_QUOTA - delivered);
                 if g < self.hubs[m].stock.len() { self.hubs[m].stock[g] -= from_stock; }
-                let deficit = (SAT_STAGE_QUOTA - from_stock).max(0.0);
+                delivered += from_stock;
+                // 3) buy any remaining shortfall on the market with treasury.
+                let deficit = (SAT_STAGE_QUOTA - delivered).max(0.0);
                 let price = self.hubs[m].price.get(g).copied()
                     .unwrap_or(self.goods[g].base_value).max(0.01) * SAT_BUY_MARKUP;
                 let afford = (self.hubs[m].treasury - buy_cost).max(0.0) / price;
                 let bought = deficit.min(afford);
                 buy_cost += bought * price;
-                let ratio = (from_stock + bought) / SAT_STAGE_QUOTA;
+                let ratio = (delivered + bought) / SAT_STAGE_QUOTA;
                 self.hubs[h].build_supply[c] = ratio;
                 met = met.min(ratio);
             }

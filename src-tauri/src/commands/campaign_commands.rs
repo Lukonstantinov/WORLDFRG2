@@ -2245,6 +2245,55 @@ pub fn campaign_get_satellite(id: u32, db: State<'_, WorldDb>) -> Result<Option<
     }))
 }
 
+/// One secured good in a council's civic warehouse (Provisioning tab).
+#[derive(Serialize)]
+pub struct ProvGoodRow {
+    pub good: String,
+    pub secured: f32,
+    pub target: f32,
+    pub food: bool,
+}
+
+/// Council RIGHT-OF-FIRST-BUY / provisioning state for a city (Provisioning tab).
+#[derive(Serialize)]
+pub struct ProvisioningBrief {
+    pub first_buy: bool,
+    pub dominant_house: String,
+    pub dependents: u32,
+    pub reserve_target: f32,
+    pub goods: Vec<ProvGoodRow>,
+}
+
+#[tauri::command]
+pub fn campaign_get_provisioning(id: u32, db: State<'_, WorldDb>) -> Result<Option<ProvisioningBrief>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(None) };
+    let hi = match sim.hubs.iter().position(|h| h.id == id) { Some(i) => i, None => return Ok(None) };
+    let hub = &sim.hubs[hi];
+    if hub.is_estate || hub.abandoned { return Ok(None); }
+    let deps = sim.hubs.iter().filter(|d| d.founder_hub == hi as i32 && !d.abandoned
+        && (d.colony_kind == 1 || d.colony_kind == 3 || d.build_stage > 0)).count() as u32;
+    let first_buy = hub.captor_house < 0;
+    let dominant_house = if hub.captor_house >= 0 {
+        sim.houses.get(hub.captor_house as usize).map(|h| h.name.clone()).unwrap_or_default()
+    } else { String::new() };
+    let reserve_target = crate::sim::tick::COUNCIL_RESERVE_BASE * (1.0 + deps as f32)
+        * (hub.population / 5_000.0).clamp(0.3, 4.0);
+    let mut goods: Vec<ProvGoodRow> = (0..sim.goods.len())
+        .filter(|&g| hub.civic_goods.get(g).copied().unwrap_or(0.0) > 0.01
+            || (sim.goods[g].food && (deps > 0 || hub.food_balance <= 0.15)))
+        .map(|g| ProvGoodRow {
+            good: sim.goods[g].name.clone(),
+            secured: hub.civic_goods.get(g).copied().unwrap_or(0.0),
+            target: reserve_target,
+            food: sim.goods[g].food,
+        })
+        .collect();
+    goods.sort_by(|a, b| b.secured.partial_cmp(&a.secured).unwrap_or(std::cmp::Ordering::Equal));
+    goods.truncate(10);
+    Ok(Some(ProvisioningBrief { first_buy, dominant_house, dependents: deps, reserve_target, goods }))
+}
+
 /// A route-bound migration flow for the reworked Migration overlay (polyline along the
 /// trade network + culture + volume + age for fade).
 #[derive(Serialize)]
