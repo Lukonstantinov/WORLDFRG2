@@ -126,6 +126,9 @@ interface UIStore {
   /** #1/#23 · the Peoples (cultures) panel + the culture currently isolated on the map. */
   showPeoples: boolean;
   selectedCulture: string | null;
+  /** Route-bound migration overlay mode: ribbon (width∝volume) · dots · focus (inbound
+   *  flows of the selected city only). */
+  migrationMode: "ribbon" | "dots" | "focus";
   /** Colony/satellite ↔ metropolis link to shine on the map (a=metro, b=colony). */
   colonyHighlight: { ax: number; ay: number; bx: number; by: number } | null;
   /** Plague spread REPLAY: show outbreak `id`'s spread up to step (0=origin). */
@@ -224,6 +227,7 @@ interface UIStore {
   setShowAtlas: (v: boolean) => void;
   setShowPeoples: (v: boolean) => void;
   setSelectedCulture: (c: string | null) => void;
+  setMigrationMode: (m: "ribbon" | "dots" | "focus") => void;
   setColonyHighlight: (l: { ax: number; ay: number; bx: number; by: number } | null) => void;
   setPlagueReplay: (r: { id: number; step: number } | null) => void;
   setHeatGood: (g: string | null) => void;
@@ -326,6 +330,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showAtlas: false,
   showPeoples: false,
   selectedCulture: null,
+  migrationMode: "ribbon",
   colonyHighlight: null,
   plagueReplay: null,
   heatGood: null,
@@ -437,6 +442,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowAtlas: (v) => set({ showAtlas: v }),
   setShowPeoples: (v) => set({ showPeoples: v }),
   setSelectedCulture: (c) => set({ selectedCulture: c }),
+  setMigrationMode: (m) => set({ migrationMode: m }),
   setColonyHighlight: (l) => set({ colonyHighlight: l }),
   setPlagueReplay: (r) => set({ plagueReplay: r }),
   setHeatGood: (g) => set({ heatGood: g }),

@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WF2 — Satellite Construction + Route-Bound Migration</title>
+<style>
+  :root{
+    --bg:#0b1420; --panel:#13202e; --panel2:#0e1a27; --line:#243650;
+    --text:#cfe2f6; --dim:#8ea6c0; --dim2:#5a7391; --accent:#3a80c0;
+    --gold:#ffd75e; --red:#e63030; --green:#4bc07a; --purple:#c08cff;
+    --sat:#e0503a; --food:#7fcf6b; --pres:#5ec6e0; --con:#d9a441;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:"Segoe UI",system-ui,sans-serif;font-size:14px;line-height:1.5;padding:28px}
+  h1{font-size:24px;margin:0 0 4px;color:#fff}
+  h2{font-size:17px;margin:34px 0 10px;color:var(--gold);border-bottom:1px solid var(--line);padding-bottom:6px}
+  h3{font-size:13px;margin:0 0 10px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em}
+  .lead{color:var(--dim);max-width:900px;margin:0 0 8px}
+  .grid{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
+  .win{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    width:360px;box-shadow:0 12px 34px rgba(0,0,0,.5);overflow:hidden}
+  .win .hdr{background:linear-gradient(180deg,#1a2c3f,#13202e);padding:10px 13px;border-bottom:1px solid var(--line);
+    display:flex;justify-content:space-between;align-items:center}
+  .win .hdr .t{font-weight:700;color:#fff}
+  .win .hdr .s{font-size:11px;color:var(--dim2)}
+  .win .body{padding:13px}
+  .tag{display:inline-block;font-size:10px;padding:1px 6px;border-radius:4px;border:1px solid var(--line)}
+  .tag.sat{color:var(--sat);border-color:#5a2a22;background:#20120e}
+  .muted{color:var(--dim2);font-size:11px}
+  .cap{color:var(--dim);font-size:12px;margin:6px 0 14px;max-width:360px}
+
+  /* 5-step progress */
+  .steps{display:flex;align-items:center;margin:6px 0 4px}
+  .steps .node{width:16px;height:16px;border-radius:50%;border:2px solid var(--accent);flex:0 0 auto;background:var(--panel2)}
+  .steps .node.done{background:var(--accent)}
+  .steps .node.cur{background:var(--gold);border-color:var(--gold);box-shadow:0 0 0 3px rgba(255,215,94,.18)}
+  .steps .seg{height:3px;flex:1;background:var(--line)}
+  .steps .seg.done{background:var(--accent)}
+  .steplabels{display:flex;justify-content:space-between;font-size:9px;color:var(--dim2);margin-bottom:10px}
+  .steplabels span{width:19%;text-align:center}
+  .bar{height:12px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);overflow:hidden}
+  .bar > i{display:block;height:100%;background:linear-gradient(90deg,#2f6ea6,#4bc07a)}
+  .row{display:flex;justify-content:space-between;align-items:center;margin:9px 0}
+  .row .k{color:var(--dim)}
+  .spark{display:flex;align-items:flex-end;gap:2px;height:26px}
+  .spark i{width:6px;background:var(--accent);border-radius:1px;opacity:.85}
+  .tabs{display:flex;gap:4px;margin:12px 0 8px}
+  .tabs .tb{flex:1;text-align:center;padding:5px;border-radius:6px;font-size:11px;border:1px solid var(--line);background:var(--panel2);color:var(--dim)}
+  .tabs .tb.on{color:#fff;border-color:var(--accent);background:#16324a}
+  .tabs .tb.food.on{border-color:var(--food);color:var(--food)}
+  .tabs .tb.pres.on{border-color:var(--pres);color:var(--pres)}
+  .tabs .tb.con.on{border-color:var(--con);color:var(--con)}
+  .card{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0}
+  .card .ttl{font-size:12px;font-weight:600;margin-bottom:6px}
+  .pill{display:inline-flex;gap:5px;align-items:center;font-size:11px;background:#0c1826;border:1px solid var(--line);border-radius:20px;padding:2px 8px;margin:2px 4px 2px 0}
+  .exploit{display:flex;gap:8px;margin-top:6px}
+  .exploit .e{flex:1;text-align:center;background:#0c1826;border:1px dashed var(--line);border-radius:8px;padding:6px;font-size:11px}
+  .evt{margin-top:10px;background:#1c1408;border:1px solid #4a3a12;border-radius:8px;padding:8px 10px;font-size:11px;color:#e8cf8a}
+  .evt.good{background:#0c1e14;border-color:#1d4a30;color:#8fe0aa}
+
+  /* dashboard variant */
+  .dash{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .metric{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px}
+  .metric .big{font-size:19px;font-weight:700;color:#fff}
+  .metric .lbl{font-size:10px;color:var(--dim2);text-transform:uppercase;letter-spacing:.05em}
+
+  /* migration SVG maps */
+  .maps{display:flex;gap:18px;flex-wrap:wrap}
+  .mapbox{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px;width:360px}
+  .mapbox h3{margin-bottom:6px}
+  svg{display:block;width:100%;height:auto;background:#081019;border-radius:6px}
+  .legend{font-size:11px;color:var(--dim);margin-top:8px;display:flex;flex-wrap:wrap;gap:10px}
+  .legend b{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:middle}
+  .note{font-size:11px;color:var(--dim2);margin-top:6px}
+  .cf{color:var(--sat)} .cg{color:#6db3ff} .cp{color:var(--purple)}
+  table{border-collapse:collapse;width:100%;font-size:11px;margin-top:6px}
+  td,th{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left}
+  th{color:var(--dim2);font-weight:600}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+  .flag{font-size:10px;color:var(--dim2)}
+  .banner{background:#122031;border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:10px 0;font-size:12px;color:var(--dim)}
+</style>
+</head>
+<body>
+
+<h1>Satellite Construction &amp; Route-Bound Migration</h1>
+<p class="lead">Design mockups (not built yet). A metropolis council spends city wealth to <b>found &amp; build</b> a satellite over
+~10&nbsp;years: buying caravans/ships, hauling food, preservables and construction goods along real trade routes, passing
+5 build stages, and weathering events that speed or delay the works. When finished, the construction window is replaced by
+a normal city window — but the satellite is <b>bound to its metropolis</b> (all trade routes through the mother city first).
+Below: 3 window variants, the migration rework bound to trade routes (3 variants), and open questions.</p>
+
+<!-- ============================ SATELLITE WINDOW VARIANTS ============================ -->
+<h2>A · Satellite Construction Window — three layout variants</h2>
+
+<div class="grid">
+
+  <!-- VARIANT 1 — LEDGER -->
+  <div>
+    <p class="cap"><b>Variant 1 · "Construction Ledger"</b> — single vertical scroll: stage bar on top, monthly cost graph,
+    then the 3 supply tabs, then future exploits &amp; the active event.</p>
+    <div class="win">
+      <div class="hdr">
+        <div><span class="t">Ostia</span> &nbsp;<span class="tag sat">◮ satellite of Rome</span></div>
+        <div class="s">Yr 112 → ~122</div>
+      </div>
+      <div class="body">
+        <div class="steps">
+          <div class="node done"></div><div class="seg done"></div>
+          <div class="node done"></div><div class="seg done"></div>
+          <div class="node cur"></div><div class="seg"></div>
+          <div class="node"></div><div class="seg"></div>
+          <div class="node"></div>
+        </div>
+        <div class="steplabels"><span>Survey</span><span>Foundations</span><span>Warehousing</span><span>Walls</span><span>Market</span></div>
+        <div class="bar"><i style="width:52%"></i></div>
+        <div class="row"><span class="k">Stage 3 / 5 · Warehousing</span><span><b>52%</b> built</span></div>
+
+        <div class="row">
+          <span class="k">Monthly upkeep</span>
+          <span class="spark">
+            <i style="height:40%"></i><i style="height:55%"></i><i style="height:48%"></i><i style="height:70%"></i>
+            <i style="height:82%"></i><i style="height:66%"></i><i style="height:90%"></i><i style="height:74%"></i>
+          </span>
+          <span><b>~340</b><span class="muted"> gr-eq/mo</span></span>
+        </div>
+        <div class="row"><span class="k">Rome council fund</span><span>12,400 <span class="muted">left · ~37 mo runway</span></span></div>
+
+        <div class="tabs">
+          <div class="tb food">🌾 Food</div>
+          <div class="tb pres on">🧂 Preservables</div>
+          <div class="tb con">🧱 Construction</div>
+        </div>
+        <div class="card">
+          <div class="ttl" style="color:var(--pres)">Preservables · Salt &amp; salted fish <span class="muted">(local coast + Rome)</span></div>
+          <span class="pill">🐟 3 caravans</span><span class="pill">⛵ 1 ship</span><span class="pill">120 u/mo</span>
+          <div class="bar" style="margin-top:8px"><i style="width:78%;background:linear-gradient(90deg,#2f7ea0,#5ec6e0)"></i></div>
+          <div class="muted" style="margin-top:4px">78% of monthly quota delivered · shortfall slows the stage clock</div>
+        </div>
+
+        <div class="row" style="margin-top:12px"><span class="k">Future exploits here</span></div>
+        <div class="exploit">
+          <div class="e">🌾<br>Grain<br><span class="muted">fertile delta</span></div>
+          <div class="e">🧂<br>Salt<br><span class="muted">coastal pans</span></div>
+          <div class="e">💎<br>Gems<br><span class="muted">hill seam</span></div>
+        </div>
+
+        <div class="evt">⚠ <b>Storm season</b> — a grain convoy scattered off the cape. Warehousing +2 months. <span class="muted">[Reroute · 400 gr]</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VARIANT 2 — DASHBOARD -->
+  <div>
+    <p class="cap"><b>Variant 2 · "Dashboard"</b> — metric cards up top for at-a-glance status, stage bar across the middle,
+    supply tabs collapsed to a compact manifest. Good for players who want numbers first.</p>
+    <div class="win">
+      <div class="hdr">
+        <div><span class="t">Piraeus</span> &nbsp;<span class="tag sat">◮ satellite of Athens</span></div>
+        <div class="s">under construction</div>
+      </div>
+      <div class="body">
+        <div class="dash">
+          <div class="metric"><div class="lbl">Progress</div><div class="big">41%</div><div class="muted">stage 2/5 · Foundations</div></div>
+          <div class="metric"><div class="lbl">ETA</div><div class="big">6.8 yr</div><div class="muted">at current supply rate</div></div>
+          <div class="metric"><div class="lbl">Monthly cost</div><div class="big">290</div><div class="muted">gr-eq · trending ↑</div></div>
+          <div class="metric"><div class="lbl">Convoys</div><div class="big">4🐫 2⛵</div><div class="muted">6 dedicated · 1 idle</div></div>
+        </div>
+        <div class="steps" style="margin-top:12px">
+          <div class="node done"></div><div class="seg done"></div>
+          <div class="node cur"></div><div class="seg"></div>
+          <div class="node"></div><div class="seg"></div>
+          <div class="node"></div><div class="seg"></div>
+          <div class="node"></div>
+        </div>
+        <div class="steplabels"><span>Survey</span><span>Foundations</span><span>Warehousing</span><span>Walls</span><span>Market</span></div>
+
+        <div class="tabs">
+          <div class="tb food on">🌾 Food</div>
+          <div class="tb pres">🧂 Presv.</div>
+          <div class="tb con">🧱 Constr.</div>
+        </div>
+        <table>
+          <tr><th>Supply</th><th>Source</th><th>Rate</th><th>Met</th></tr>
+          <tr><td>🌾 Wheat</td><td>Athens</td><td>90/mo</td><td style="color:var(--green)">100%</td></tr>
+          <tr><td>🫒 Olive oil</td><td>Athens</td><td>30/mo</td><td style="color:var(--gold)">64%</td></tr>
+          <tr><td>🐟 Fish</td><td>local</td><td>free</td><td style="color:var(--green)">—</td></tr>
+        </table>
+        <div class="evt good">✔ <b>Skilled masons hired</b> — Athens diverted a guild crew. Foundations −1.5 months.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VARIANT 3 — LOGISTICS -->
+  <div>
+    <p class="cap"><b>Variant 3 · "Manifest / Logistics"</b> — foregrounds the caravans &amp; ships and what each is carrying
+    (the user's "dedicated caravans/ships + goods transported"). Stage bar is a thin header strip.</p>
+    <div class="win">
+      <div class="hdr">
+        <div><span class="t">Ostia</span> &nbsp;<span class="tag sat">◮ satellite of Rome</span></div>
+        <div class="s">52% · stage 3/5</div>
+      </div>
+      <div class="body">
+        <div class="bar"><i style="width:52%"></i></div>
+        <div class="steplabels" style="margin-top:6px"><span>✔</span><span>✔</span><span>◐ Warehousing</span><span>Walls</span><span>Market</span></div>
+
+        <h3 style="margin-top:6px">Dedicated convoys → Ostia</h3>
+        <div class="card" style="margin:6px 0">
+          <div class="row" style="margin:2px 0"><span>🐫 Caravan I</span><span class="muted">Rome → Ostia</span><span>🧱 timber ×80</span></div>
+          <div class="row" style="margin:2px 0"><span>🐫 Caravan II</span><span class="muted">Rome → Ostia</span><span>🌾 wheat ×60</span></div>
+          <div class="row" style="margin:2px 0"><span>⛵ Ship I</span><span class="muted">coast → Ostia</span><span>🧂 salt ×120</span></div>
+          <div class="row" style="margin:2px 0"><span>🐫 Caravan III</span><span class="flag">idle · awaiting funds</span><span>—</span></div>
+        </div>
+        <div class="row"><span class="k">Upkeep of convoys</span><span>110 <span class="muted">gr-eq/mo</span></span></div>
+        <div class="row"><span class="k">Goods in transit</span><span>260 <span class="muted">u · 2 lost to piracy</span></span></div>
+
+        <div class="tabs">
+          <div class="tb food">🌾</div><div class="tb pres">🧂</div><div class="tb con on">🧱 Construction</div>
+        </div>
+        <div class="card">
+          <div class="ttl" style="color:var(--con)">Construction · Timber + Stone <span class="muted">(Rome quarries)</span></div>
+          <div class="bar"><i style="width:70%;background:linear-gradient(90deg,#8a6320,#d9a441)"></i></div>
+          <div class="muted" style="margin-top:4px">70% quota · walls stage will need +stone</div>
+        </div>
+        <div class="exploit">
+          <div class="e">🌾 Grain</div><div class="e">💎 Gems</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="banner">
+  <b>Post-completion (all variants):</b> the 5-step bar &amp; supply tabs vanish; the window becomes a normal city panel with a small
+  <span class="tag sat">◮ bound to Rome</span> badge. A <b>Trade Binding</b> line appears: <i>"All exports route through Rome first —
+  Rome's market receives the surplus."</i> The <b>Future exploits</b> become live production (grain/gems now extracted).
+</div>
+
+<!-- ============================ MIGRATION VARIANTS ============================ -->
+<h2>B · Route-Bound Migration — three visual variants</h2>
+<p class="lead">Today migration draws a smooth arc between two cities and does not follow the trade network — so people appear to
+"jump" across terrain. The rework routes every migrant flow <b>strictly along existing trade routes</b> (multi-hop through
+intermediate cities). Below the same 3-city corridor drawn 3 ways. Cultures: <span class="cf">■ Latin</span>
+<span class="cg">■ Hellene</span> <span class="cp">■ Phoenician</span>.</p>
+
+<div class="maps">
+
+  <!-- MIG VARIANT 1 — dots along route -->
+  <div class="mapbox">
+    <h3>1 · Flowing dots on the route</h3>
+    <svg viewBox="0 0 340 180">
+      <!-- trade route polyline A-B-C (kinked, following "coast") -->
+      <polyline points="30,150 120,120 175,60 250,50 310,95" fill="none" stroke="#22354a" stroke-width="6"/>
+      <polyline points="30,150 120,120 175,60 250,50 310,95" fill="none" stroke="#31567a" stroke-width="2" stroke-dasharray="3 4"/>
+      <!-- migrant dots -->
+      <circle cx="120" cy="120" r="3.4" fill="#e0503a"/><circle cx="150" cy="92" r="3.4" fill="#e0503a"/>
+      <circle cx="175" cy="60" r="3.4" fill="#6db3ff"/><circle cx="215" cy="54" r="3.4" fill="#6db3ff"/>
+      <circle cx="250" cy="50" r="3.4" fill="#c08cff"/>
+      <!-- cities -->
+      <circle cx="30" cy="150" r="6" fill="#ff8a3c" stroke="#000"/><text x="18" y="170" fill="#cfe2f6" font-size="9">Tyre</text>
+      <circle cx="175" cy="60" r="7" fill="#ff8a3c" stroke="#000"/><text x="160" y="48" fill="#cfe2f6" font-size="9">Carthage</text>
+      <circle cx="310" cy="95" r="6" fill="#ff8a3c" stroke="#000"/><text x="292" y="115" fill="#cfe2f6" font-size="9">Gades</text>
+    </svg>
+    <div class="legend">Dots ride the polyline; colour = culture; spacing = volume. Cheapest to render.</div>
+  </div>
+
+  <!-- MIG VARIANT 2 — culture ribbon -->
+  <div class="mapbox">
+    <h3>2 · Culture ribbon (width = volume)</h3>
+    <svg viewBox="0 0 340 180">
+      <polyline points="30,150 120,120 175,60 250,50 310,95" fill="none" stroke="#e0503a" stroke-width="9" stroke-opacity=".55" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="30,150 120,120 175,60" fill="none" stroke="#6db3ff" stroke-width="5" stroke-opacity=".8" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="175,60 250,50 310,95" fill="none" stroke="#c08cff" stroke-width="4" stroke-opacity=".8" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="30" cy="150" r="6" fill="#ff8a3c" stroke="#000"/><text x="18" y="170" fill="#cfe2f6" font-size="9">Tyre</text>
+      <circle cx="175" cy="60" r="7" fill="#ff8a3c" stroke="#000"/><text x="160" y="48" fill="#cfe2f6" font-size="9">Carthage</text>
+      <circle cx="310" cy="95" r="6" fill="#ff8a3c" stroke="#000"/><text x="292" y="115" fill="#cfe2f6" font-size="9">Gades</text>
+    </svg>
+    <div class="legend">Overlapping ribbons per culture, thickness ∝ people/yr. Reads "who flows where" best.</div>
+  </div>
+
+  <!-- MIG VARIANT 3 — satellite panel + highlight -->
+  <div class="mapbox">
+    <h3>3 · Click a city → its bound routes light up</h3>
+    <svg viewBox="0 0 340 180">
+      <!-- dim network -->
+      <polyline points="30,150 120,120 175,60 250,50 310,95" fill="none" stroke="#1c2c3e" stroke-width="4"/>
+      <polyline points="175,60 200,140" fill="none" stroke="#1c2c3e" stroke-width="4"/>
+      <!-- highlighted inbound to Carthage -->
+      <polyline points="30,150 120,120 175,60" fill="none" stroke="#ffd75e" stroke-width="3"/>
+      <polyline points="200,140 175,60" fill="none" stroke="#ffd75e" stroke-width="3"/>
+      <circle cx="175" cy="60" r="8" fill="#ffd75e" stroke="#000"/><text x="160" y="46" fill="#ffd75e" font-size="9">Carthage ◄</text>
+      <circle cx="30" cy="150" r="5" fill="#ff8a3c"/><circle cx="200" cy="140" r="5" fill="#ff8a3c"/><circle cx="310" cy="95" r="5" fill="#2a3d52"/>
+    </svg>
+    <table>
+      <tr><th>From</th><th>Culture</th><th>People/yr</th></tr>
+      <tr><td>Tyre</td><td><span class="dot" style="background:#e0503a"></span>Phoenician</td><td>+320</td></tr>
+      <tr><td>Utica</td><td><span class="dot" style="background:#6db3ff"></span>Libyan</td><td>+140</td></tr>
+    </table>
+    <div class="note">Selected city shows inbound origins + cultures; map isolates only the trade routes those migrants used.</div>
+  </div>
+
+</div>
+
+<div class="banner">
+  <b>Core migration rule (all variants):</b> a migrant flow is only possible if an unbroken chain of trade routes connects
+  origin → destination; the drawn path is the <i>actual routed polyline</i> (coarse-grid path, same geometry as trade trunks),
+  not a straight arc. No route ⇒ no migration. Volume is capped by the route's capacity (piracy/blockade throttle it).
+</div>
+
+</body>
+</html>

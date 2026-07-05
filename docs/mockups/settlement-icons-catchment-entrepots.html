@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WF2 — Settlement icons · catchment · satellites · dynamic entrepôts</title>
+<style>
+  :root {
+    --bg:#0b1420; --panel:#13202e; --panel2:#182b3d; --text:#cfe2f6;
+    --muted:#7a90a8; --accent:#3a80c0; --line:#22384f;
+    --white:#f0f0f0; --orange:#ff8a3c; --black:#0a0a0a; --gold:#ffd24a;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif; padding:28px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  h2 { font-size:16px; margin:26px 0 10px; color:#9fc4 e8; border-bottom:1px solid var(--line); padding-bottom:6px; }
+  h2 { color:#9fc4e8; }
+  .sub { color:var(--muted); margin:0 0 20px; }
+  .grid { display:grid; gap:14px; }
+  .cols2 { grid-template-columns:1fr 1fr; }
+  .cols3 { grid-template-columns:1fr 1fr 1fr; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .card h3 { margin:0 0 12px; font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+  table { width:100%; border-collapse:collapse; }
+  td,th { padding:8px 6px; border-bottom:1px solid var(--line); text-align:left; vertical-align:middle; }
+  th { color:var(--muted); font-weight:600; font-size:12px; }
+  .tag { display:inline-block; padding:1px 7px; border-radius:20px; font-size:11px; background:var(--panel2); color:var(--muted); }
+  .old { border-left:3px solid #7a4a4a; }
+  .new { border-left:3px solid #4a7a5a; }
+  code { background:#0d1a28; padding:1px 5px; border-radius:4px; color:#e6c88a; font-size:12px; }
+  .legend-row { display:flex; align-items:center; gap:12px; padding:7px 0; border-bottom:1px solid var(--line); }
+  .legend-row:last-child { border-bottom:none; }
+  .legend-row .lbl { flex:1; }
+  .legend-row .desc { color:var(--muted); font-size:12px; }
+  svg text { fill:var(--text); font-size:11px; }
+  .note { background:#1a2536; border:1px solid var(--line); border-left:3px solid var(--gold);
+    border-radius:8px; padding:12px 14px; margin:12px 0; font-size:13px; }
+  .flowbox { background:#0d1a28; border-radius:8px; padding:14px; }
+  ul { margin:6px 0; padding-left:20px; } li { margin:3px 0; }
+</style>
+</head>
+<body>
+  <h1>WorldForge 2 — Settlement icons · goods catchment · satellites · dynamic entrepôts</h1>
+  <p class="sub">Design schematic for the requested batch. Colours/values pulled from <code>OverlayManager.ts</code>, <code>query_commands.rs</code>, <code>tick.rs</code>. Nothing implemented yet — this is the proposal.</p>
+
+  <!-- ============ 1. ICONS ============ -->
+  <h2>1 · New settlement marker system (by population + type)</h2>
+  <div class="grid cols2">
+    <div class="card old">
+      <h3>Before — everything is a tinted square</h3>
+      <svg width="100%" height="150" viewBox="0 0 300 150">
+        <rect x="30" y="60" width="9" height="9" fill="#c9a96a" stroke="#000" stroke-width="1"/>
+        <text x="34" y="90" text-anchor="middle">outpost</text>
+        <rect x="80" y="58" width="11" height="11" fill="#e6cf9a" stroke="#000" stroke-width="1"/>
+        <text x="85" y="90" text-anchor="middle">village</text>
+        <rect x="128" y="55" width="15" height="15" fill="#e8e8e8" stroke="#000" stroke-width="1"/>
+        <text x="135" y="90" text-anchor="middle">town</text>
+        <rect x="178" y="52" width="19" height="19" fill="#ff8844" stroke="#000" stroke-width="1"/>
+        <rect x="183" y="57" width="9" height="9" fill="#1a1206"/>
+        <text x="187" y="90" text-anchor="middle">city</text>
+        <rect x="232" y="49" width="23" height="23" fill="#ffd700" stroke="#000" stroke-width="1"/>
+        <text x="243" y="90" text-anchor="middle">capital</text>
+        <text x="150" y="130" text-anchor="middle" fill="#7a90a8">All squares; capital = ★, city = inner dot. Tier by string, not pop.</text>
+      </svg>
+    </div>
+    <div class="card new">
+      <h3>After — squares only for the smallest, circles above</h3>
+      <svg width="100%" height="150" viewBox="0 0 300 150">
+        <!-- outpost: black square -->
+        <rect x="26" y="62" width="7" height="7" fill="#0a0a0a" stroke="#556" stroke-width="0.8"/>
+        <text x="29" y="92" text-anchor="middle">outpost</text>
+        <!-- village: white small square -->
+        <rect x="74" y="61" width="8" height="8" fill="#f0f0f0" stroke="#333" stroke-width="0.8"/>
+        <text x="78" y="92" text-anchor="middle">village</text>
+        <!-- city ≤20k: white circle -->
+        <circle cx="126" cy="65" r="6" fill="#f0f0f0" stroke="#333" stroke-width="0.9"/>
+        <text x="126" y="92" text-anchor="middle">≤ 20k</text>
+        <!-- 20-100k: orange circle -->
+        <circle cx="182" cy="65" r="7.5" fill="#ff8a3c" stroke="#3a1c08" stroke-width="0.9"/>
+        <text x="182" y="92" text-anchor="middle">20k–100k</text>
+        <!-- >100k: orange circle + star -->
+        <circle cx="248" cy="65" r="8.5" fill="#ff8a3c" stroke="#3a1c08" stroke-width="0.9"/>
+        <path d="M248 60 l1.6 3.2 3.5 .5 -2.5 2.5 .6 3.5 -3.1 -1.6 -3.1 1.6 .6 -3.5 -2.5 -2.5 3.5 -.5 z" fill="#1a1206"/>
+        <text x="248" y="92" text-anchor="middle">≥ 100k</text>
+        <text x="150" y="128" text-anchor="middle" fill="#7a90a8">Squares smaller overall. Shape + colour now read population at a glance.</text>
+      </svg>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <table>
+      <tr><th>Tier</th><th>Trigger</th><th>Shape</th><th>Colour</th><th>Extra</th></tr>
+      <tr><td>Outpost</td><td><code>size==="outpost"</code> / colony_kind 2</td><td>small square</td><td><span class="tag" style="color:#ddd">black #0a0a0a</span></td><td>—</td></tr>
+      <tr><td>Village</td><td><code>pop &lt; 1,500</code></td><td>small square</td><td><span class="tag" style="color:#fff">white #f0f0f0</span></td><td>—</td></tr>
+      <tr><td>Town / City</td><td><code>1,500 ≤ pop &lt; 20,000</code></td><td>circle (grows w/ pop)</td><td><span class="tag" style="color:#fff">white #f0f0f0</span></td><td>—</td></tr>
+      <tr><td>City</td><td><code>20,000 ≤ pop &lt; 100,000</code></td><td>circle (larger)</td><td><span class="tag" style="color:var(--orange)">orange #ff8a3c</span></td><td>—</td></tr>
+      <tr><td>Metropolis</td><td><code>pop ≥ 100,000</code></td><td>circle (larger)</td><td><span class="tag" style="color:var(--orange)">orange #ff8a3c</span></td><td>★ star inside</td></tr>
+    </table>
+    <div class="note">The 20k / 100k breakpoints are <b>absolute population</b>, replacing today's string-tier + inner-dot scheme. Radius still scales continuously with <code>log10(pop)</code> so growth reads live.</div>
+  </div>
+
+  <!-- ============ 2. CATCHMENT ============ -->
+  <h2>2 · Goods-collection radius (bounded catchment)</h2>
+  <div class="grid cols2">
+    <div class="card old">
+      <h3>Before — unbounded nearest-hub Voronoi</h3>
+      <svg width="100%" height="200" viewBox="0 0 300 200">
+        <rect x="0" y="0" width="300" height="200" fill="#0d1a28"/>
+        <!-- voronoi-ish split -->
+        <line x1="150" y1="0" x2="150" y2="200" stroke="#33506e" stroke-dasharray="4 3"/>
+        <line x1="150" y1="90" x2="300" y2="40" stroke="#33506e" stroke-dasharray="4 3"/>
+        <circle cx="80" cy="110" r="5" fill="#ff8a3c"/>
+        <circle cx="220" cy="70" r="5" fill="#f0f0f0"/>
+        <text x="80" y="128" text-anchor="middle">city A</text>
+        <text x="220" y="58" text-anchor="middle">city B</text>
+        <text x="150" y="185" text-anchor="middle" fill="#7a90a8">Every land cell → nearest hub, NO cap.</text>
+        <text x="150" y="198" text-anchor="middle" fill="#7a90a8">A lone city harvests 100s of km.</text>
+      </svg>
+    </div>
+    <div class="card new">
+      <h3>After — fixed radius by size (50 km → 70 km)</h3>
+      <svg width="100%" height="200" viewBox="0 0 300 200">
+        <rect x="0" y="0" width="300" height="200" fill="#0d1a28"/>
+        <circle cx="90" cy="100" r="34" fill="#ff8a3c22" stroke="#ff8a3c" stroke-dasharray="3 3"/>
+        <circle cx="90" cy="100" r="5" fill="#ff8a3c"/>
+        <text x="90" y="150" text-anchor="middle">large city · 70 km</text>
+        <circle cx="215" cy="90" r="22" fill="#f0f0f033" stroke="#f0f0f0" stroke-dasharray="3 3"/>
+        <circle cx="215" cy="90" r="4" fill="#f0f0f0"/>
+        <text x="215" y="128" text-anchor="middle">outpost · 50 km</text>
+        <text x="150" y="185" text-anchor="middle" fill="#7a90a8">Belts outside every radius stay UNCLAIMED</text>
+        <text x="150" y="198" text-anchor="middle" fill="#7a90a8">(a colony/outpost target — feeds part 3).</text>
+      </svg>
+    </div>
+  </div>
+  <div class="note">
+    <b>Scale reality check:</b> at the default 3,600-wide world, <code>1 cell ≈ 11.1 km</code>, so 50 km ≈ <b>4.5 cells</b> and 70 km ≈ <b>6.3 cells</b>. That is <i>finer</i> than the current coarse catchment grid (<code>f = grid_w/220 ≈ 16 cells ≈ 178 km</code>). Implementation must gather at a <b>bounded fine-resolution window</b> around each hub, not the coarse Voronoi.
+    <br><br><b>Balance risk:</b> tiny radii mean most goods belts are collected by <i>no one</i> → hub production drops sharply and trade thins. Recommended: radius <b>lerps 50→70 km by population/tier</b>, and we <b>re-run</b> <code>cargo test --lib simulate_decades_reports_dynamics -- --nocapture</code> to confirm the economy still lives. This may need a companion tweak (e.g. per-cell yield up) to keep totals sane.
+  </div>
+
+  <!-- ============ 3. SATELLITES ============ -->
+  <h2>3 · Satellites must sit next to the metropolis</h2>
+  <div class="grid cols2">
+    <div class="card old">
+      <h3>Before — satellite pulled from the far colonizable pool</h3>
+      <svg width="100%" height="170" viewBox="0 0 300 170">
+        <rect x="0" y="0" width="300" height="170" fill="#0d1a28"/>
+        <circle cx="60" cy="85" r="7" fill="#ff8a3c"/>
+        <text x="60" y="105" text-anchor="middle">metropolis</text>
+        <rect x="245" y="45" width="9" height="9" fill="#e0503a"/>
+        <line x1="67" y1="83" x2="245" y2="50" stroke="#e0503a" stroke-dasharray="4 3"/>
+        <text x="215" y="72" text-anchor="middle">"satellite" ~2,400 km away</text>
+        <text x="150" y="158" text-anchor="middle" fill="#7a90a8">colonizable sites forced ≥1,600 km from any city →</text>
+        <text x="150" y="169" text-anchor="middle" fill="#7a90a8">nearest one is far, so satellites land far.</text>
+      </svg>
+    </div>
+    <div class="card new">
+      <h3>After — dedicated near-metro site scan</h3>
+      <svg width="100%" height="170" viewBox="0 0 300 170">
+        <rect x="0" y="0" width="300" height="170" fill="#0d1a28"/>
+        <circle cx="150" cy="85" r="45" fill="#ffffff08" stroke="#4a7a5a" stroke-dasharray="3 3"/>
+        <circle cx="150" cy="85" r="7" fill="#ff8a3c"/>
+        <text x="150" y="140" text-anchor="middle">metropolis + short reach</text>
+        <rect x="176" y="60" width="8" height="8" fill="#e0503a"/>
+        <rect x="118" y="98" width="8" height="8" fill="#e0503a"/>
+        <line x1="156" y1="82" x2="178" y2="63" stroke="#e0503a"/>
+        <line x1="144" y1="90" x2="122" y2="101" stroke="#e0503a"/>
+        <text x="150" y="158" text-anchor="middle" fill="#7a90a8">Ostia→Rome, Piraeus→Athens: a day's ride, not an ocean.</text>
+      </svg>
+    </div>
+  </div>
+  <div class="note"><code>maybe_found_satellite</code> keeps <code>SATELLITE_REACH_FRAC=0.06</code> but the <b>site source is the problem</b>: it draws from <code>self.colonizable</code>, whose sites are buffered ≥1,600 km from every city. Fix: give satellites their own tight near-metro candidate scan (a few cells out, ignoring the colony buffer), OR shrink the buffer so near sites exist. Recommend the former so colonies stay far while satellites hug home.</div>
+
+  <!-- ============ 4. DYNAMIC ENTREPOTS ============ -->
+  <h2>4 · Dynamic entrepôts &amp; trade hubs (campaign-only) — brainstorm</h2>
+  <div class="card">
+    <p style="margin-top:0"><b>Today:</b> "emporium / trade hub / stars" are decided <b>statically</b> in <code>compute_political</code> + <code>compute_economy</code> from geography (<code>throughput = production × centrality</code>) — a frozen worldgen preview. They do not react to the living campaign, even though the tick already moves real cargo and even charges a <b>transit toll</b> on goods passing THROUGH a city.</p>
+    <p><b>Goal:</b> a hub earns "trade hub" / "entrepôt" status <b>during the campaign</b> from the trade that actually flows through it — and can <b>lose</b> it when trade shifts (Bruges silts up, Antwerp rises).</p>
+
+    <div class="grid cols3" style="margin:14px 0">
+      <div class="flowbox">
+        <b>Signal</b>
+        <ul>
+          <li><b>Transit volume</b> = cargo a hub's merchants carry that neither originates nor ends there (the Venice signal). Already partly tracked via toll hubs / flow_year.</li>
+          <li>New per-hub yearly accumulator <code>transit_year</code>.</li>
+        </ul>
+      </div>
+      <div class="flowbox">
+        <b>Classify (yearly)</b>
+        <ul>
+          <li><b>Trade hub</b> (class 1): transit in world top ~20%, or transit &gt; k× local production.</li>
+          <li><b>Entrepôt</b> (class 2): sea-accessible + top few by transit + transit &gt; local consumption.</li>
+        </ul>
+      </div>
+      <div class="flowbox">
+        <b>Hysteresis</b>
+        <ul>
+          <li>Gain status after <b>N=3</b> straight years above threshold.</li>
+          <li>Lose it after <b>M=3</b> years below. Stops flicker; makes rise/fall a story.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Emergence timeline (one hub)</h3>
+    <svg width="100%" height="120" viewBox="0 0 640 120">
+      <line x1="30" y1="80" x2="620" y2="80" stroke="#33506e"/>
+      <!-- year markers -->
+      <g fill="#7a90a8">
+        <text x="30" y="100">yr 30</text><text x="180" y="100">yr 45</text>
+        <text x="330" y="100">yr 60</text><text x="480" y="100">yr 75</text><text x="580" y="100">yr 90</text>
+      </g>
+      <!-- dot states -->
+      <circle cx="60" cy="80" r="6" fill="#f0f0f0" stroke="#333"/>
+      <text x="60" y="55" text-anchor="middle" fill="#cfe2f6">plain town</text>
+      <circle cx="230" cy="80" r="7" fill="#f0f0f0" stroke="#3a80c0" stroke-width="2"/>
+      <text x="230" y="52" text-anchor="middle" fill="#3a80c0">trade hub (blue ring)</text>
+      <circle cx="400" cy="80" r="8" fill="#ff8a3c" stroke="#e63030" stroke-width="2.5"/>
+      <text x="400" y="50" text-anchor="middle" fill="#e63030">entrepôt (red ring)</text>
+      <circle cx="560" cy="80" r="7" fill="#f0f0f0" stroke="#3a80c0" stroke-width="2"/>
+      <text x="560" y="52" text-anchor="middle" fill="#3a80c0">demoted → trade hub</text>
+      <!-- rising/falling transit curve -->
+      <path d="M60 80 Q 230 78 400 40 T 560 78" fill="none" stroke="#ffd24a" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <text x="300" y="24" fill="#ffd24a">transit volume (dashed)</text>
+    </svg>
+    <div class="note"><b>Scope guard:</b> only runs while <code>campaign.active</code>. Pre-campaign, the Political step keeps its static preview. New field <code>hub_class:u8</code> on <code>CampaignHubBrief</code> → <code>OverlayManager</code> draws a <b>blue ring</b> (trade hub) or <b>red ring</b> (entrepôt) around the population dot — layered on top of the part-1 marker, so both "how big" and "how commercial" read together.</div>
+  </div>
+
+  <h2>Open questions for you</h2>
+  <div class="card">
+    <ul>
+      <li><b>Catchment totals:</b> OK for hub production to drop with the small radius (more realistic, thinner trade), or should per-cell yield rise to keep total output roughly constant?</li>
+      <li><b>Radius gradient:</b> lerp 50→70 km smoothly by population, or hard steps (outpost 50 / village 55 / town 60 / city 70)?</li>
+      <li><b>Entrepôt rings vs replacing markers:</b> ring around the pop dot (shown here) — or a distinct shape as today (red triangle / gold square)?</li>
+      <li><b>Should the static Political-step preview be removed</b> once campaign entrepôts exist, or kept as a "geographic potential" pre-campaign view?</li>
+    </ul>
+  </div>
+</body>
+</html>

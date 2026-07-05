@@ -217,6 +217,11 @@ export interface CampaignHubBrief {
   founded_tick: number;
   /** Last full year's trade throughput (grain-eq, in+out) — Trade Heat overlay. */
   trade_volume: number;
+  /** Dynamically-earned commercial class (re-ranked twice a year): 0 ordinary ·
+   *  1 trade hub · 2 entrepôt. Drives the distinct map marker. */
+  hub_class?: number;
+  /** Satellite construction stage: 0 = finished/not building · 1..=5 = under construction. */
+  build_stage?: number;
   /** Why the settlement died ("famine"/"plague"/"war"/"disaster"; "" = alive). */
   died_cause: string;
   /** Downsampled population history (≤30 points) — the census sparkline. */
@@ -308,6 +313,41 @@ export interface SocietyBrief {
 }
 /** One roster row in the Colonial Office (campaign_get_colonies). Covers both
  *  settlement colonies (colony_kind 1) and house trade outposts (colony_kind 2). */
+export interface SatSupplyRow {
+  category: string;
+  good: string;
+  source: string;
+  rate: number;
+  met: number;
+}
+export interface SatelliteBrief {
+  id: number;
+  name: string;
+  metropolis: string;
+  metropolis_id: number;
+  role: string;
+  stage: number;
+  progress: number;
+  overall: number;
+  eta_years: number;
+  monthly_cost: number;
+  fund: number;
+  runway_months: number;
+  convoys: number;
+  idle_months: number;
+  founded_year: number;
+  supply: SatSupplyRow[];
+  exploits: string[];
+}
+export interface MigrationRouteBrief {
+  path: [number, number][];
+  culture: string;
+  volume: number;
+  from_hub: number;
+  to_hub: number;
+  age_years: number;
+}
+
 export interface ColonySummary {
   id: number;
   name: string;
@@ -1467,6 +1507,7 @@ export interface Settlement {
   site?: string;    // "coast" | "river" | "hills" | "plain"
   dead?: boolean;   // abandoned/collapsed → drawn as a † ruin cross, not a dot
   isNew?: boolean;  // founded this campaign, still young → gold founding star
+  hubClass?: number; // 0 ordinary · 1 trade hub · 2 entrepôt (campaign, earned live)
 }
 
 /** #26 · a named geographic feature. Mirrors the Rust `Toponym` struct. */

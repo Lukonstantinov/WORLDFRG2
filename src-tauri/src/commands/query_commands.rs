@@ -3395,6 +3395,89 @@ pub(crate) fn compute_colonizable_sites(
     picked
 }
 
+/// Candidate sites for a metropolis SATELLITE (Ostia→Rome, Piraeus→Athens): valid
+/// land NEAR an existing city — roughly 30–500 km away, a day's ride rather than an
+/// ocean. Unlike `compute_colonizable_sites` (which buffers colony sites ≥~1600 km
+/// from every city so colonies aren't suburbs), a satellite is MEANT to hug its
+/// metropolis, so this pool deliberately keeps the near-city ring the colony pool
+/// excludes. The founder picks the NEAREST, so satellites land close.
+pub(crate) fn compute_satellite_sites(
+    world: &crate::db::world_cache::WorldTiles,
+    grid_w: u32, grid_h: u32,
+    settlements: &[(f32, f32)],
+    base_value: &[f32],
+) -> Vec<crate::sim::tick::ColonizeSite> {
+    use crate::sim::tick::ColonizeSite;
+    if grid_w == 0 || grid_h == 0 || settlements.is_empty() { return vec![]; }
+    let km_per_cell = KM_EQUATOR / grid_w.max(1) as f32;
+    let near_min = 30.0 / km_per_cell;   // world cells — not on top of the city
+    let near_max = 500.0 / km_per_cell;  // ≤ 500 km from the metropolis (user rule)
+    let f = (grid_w / 300).max(2);
+    let cw = ((grid_w + f - 1) / f) as i32;
+    let ch = ((grid_h + f - 1) / f) as i32;
+    let wrap = |x: i32| ((x % cw) + cw) % cw;
+    let min_settle_dist = |wx: f32, wy: f32| -> f32 {
+        settlements.iter().map(|&(sx, sy)| {
+            let mut dx = (wx - sx).abs();
+            if dx > grid_w as f32 / 2.0 { dx = grid_w as f32 - dx; }
+            let dy = wy - sy;
+            (dx * dx + dy * dy).sqrt()
+        }).fold(f32::MAX, f32::min)
+    };
+    let mut cands: Vec<(f32, ColonizeSite)> = Vec::new();
+    for cy in 0..ch {
+        for cx in 0..cw {
+            let wx = (cx as u32 * f + f / 2).min(grid_w - 1);
+            let wy = (cy as u32 * f + f / 2).min(grid_h - 1);
+            let tile = world.tile((wx / TILE_SIZE) as i32, (wy / TILE_SIZE) as i32);
+            let ti = ((wy % TILE_SIZE) * TILE_SIZE + (wx % TILE_SIZE)) as usize;
+            if tile.terrain[ti] != 1 { continue; } // land only
+            let d = min_settle_dist(wx as f32, wy as f32);
+            if d < near_min || d > near_max { continue; }
+            let fert = tile.fertility[ti];
+            let elev = tile.elevation[ti];
+            let mut tv = 0.0f32;
+            for g in 0..base_value.len().min(tile.goods.len()) {
+                tv += tile.goods[g][ti] as f32 / 255.0 * base_value[g];
+            }
+            let coastal = [(-1i32, 0), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
+                let nx = wrap(cx + dx);
+                let ny = cy + dy;
+                if ny < 0 || ny >= ch { return false; }
+                let nwx = (nx as u32 * f + f / 2).min(grid_w - 1);
+                let nwy = (ny as u32 * f + f / 2).min(grid_h - 1);
+                let nt = world.tile((nwx / TILE_SIZE) as i32, (nwy / TILE_SIZE) as i32);
+                let nti = ((nwy % TILE_SIZE) * TILE_SIZE + (nwx % TILE_SIZE)) as usize;
+                nt.terrain[nti] == 0
+            });
+            let kind_hint = if coastal && fert < 0.40 { 4 } else if elev > 0.45 { 2 }
+                else if fert > 0.55 { 1 } else { 3 };
+            // Prefer CLOSE, fertile, coastal suburb sites; nearer scores higher.
+            let score = (0.6 * fert + if coastal { 0.3 } else { 0.0 } + 0.3 * tv)
+                * (1.0 - d / near_max);
+            cands.push((score, ColonizeSite {
+                x: wx as f32, y: wy as f32, koppen: tile.koppen[ti], elevation: elev,
+                fertility: fert, coastal, kind_hint, trade_value: tv.min(1.0),
+                delta: false, chokepoint: false,
+            }));
+        }
+    }
+    cands.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    let spacing = (60.0 / km_per_cell).max(3.0); // ~60 km apart
+    let mut picked: Vec<ColonizeSite> = Vec::new();
+    for (_, s) in cands {
+        if picked.len() >= 240 { break; }
+        let ok = picked.iter().all(|p| {
+            let mut dx = (p.x - s.x).abs();
+            if grid_w > 1 { dx = dx.min(grid_w as f32 - dx); }
+            let dy = p.y - s.y;
+            (dx * dx + dy * dy).sqrt() >= spacing
+        });
+        if ok { picked.push(s); }
+    }
+    picked
+}
+
 /// Build the economy snapshot, persist it to metadata, and return it. Same
 /// inputs as the matrix/political commands so the hubs stay consistent.
 #[tauri::command]
@@ -3597,64 +3680,83 @@ pub fn compute_economy(
         }
     }
 
-    // ── Production: assign each good-bearing coarse cell to its nearest hub ──
+    // ── Territory overlay grid: each land coarse cell → nearest MAJOR hub. This is
+    // the legible trade-REGION overlay ONLY (kept broad per major hub so regions read
+    // cleanly); the actual goods COLLECTION below is bounded by a small per-hub radius.
     let f = (grid_w / 220).max(1);
     let cw = ((grid_w + f - 1) / f) as i32;
     let ch = ((grid_h + f - 1) / f) as i32;
-    let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
-    let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
-    let mut coarse = vec![vec![0.0f32; gc]; (cw * ch) as usize];
-    for ty in 0..tiles_y as i32 {
-        for tx in 0..tiles_x as i32 {
-            let tile = world.tile(tx, ty);
-            let base_x = tx as u32 * TILE_SIZE;
-            let base_y = ty as u32 * TILE_SIZE;
-            let max_lx = TILE_SIZE.min(grid_w - base_x);
-            let max_ly = TILE_SIZE.min(grid_h - base_y);
-            for ly in 0..max_ly {
-                for lx in 0..max_lx {
-                    let ti = (ly * TILE_SIZE + lx) as usize;
-                    let cx = ((base_x + lx) / f) as i32;
-                    let cy = ((base_y + ly) / f) as i32;
-                    let ci = (cy * cw + cx) as usize;
-                    for g in 0..gc.min(tile.goods.len()) {
-                        coarse[ci][g] += tile.goods[g][ti] as f32 / 255.0;
-                    }
-                }
-            }
-        }
-    }
-    let mut prod = vec![vec![0.0f32; gc]; nn];
-    // Territory: the LAND cell each MAJOR hub controls (nearest-hub Voronoi over the
-    // top `territory_n`). Emitted as a cell-mask region per hub so the user can see
-    // each trade region's area — kept to the majors so the overlay stays legible.
     let mut owner = vec![u16::MAX; (cw * ch) as usize];
     for cy in 0..ch {
         for cx in 0..cw {
             let ci = (cy * cw + cx) as usize;
             let wx = (cx as u32 * f + f / 2).min(grid_w - 1) as i32;
             let wy = (cy as u32 * f + f / 2).min(grid_h - 1) as i32;
-            // Production goes to the nearest settlement (every node, no distance
-            // cutoff — far-flung goods are no longer silently dropped).
-            let mut best = 0usize;
-            let mut bd = i64::MAX;
-            // Territory ownership goes to the nearest MAJOR hub.
             let mut best_t = 0usize;
             let mut bd_t = i64::MAX;
-            for (ni, s) in nodes.iter().enumerate() {
+            for (ni, s) in nodes.iter().enumerate().take(territory_n) {
                 let dx = wrap_dx(wx, s.x as i32) as i64;
                 let dy = (wy - s.y as i32) as i64;
                 let d = dx * dx + dy * dy;
-                if d < bd { bd = d; best = ni; }
-                if ni < territory_n && d < bd_t { bd_t = d; best_t = ni; }
+                if d < bd_t { bd_t = d; best_t = ni; }
             }
-            for g in 0..gc { prod[best][g] += coarse[ci][g]; }
-            // Record territory ownership on land only.
             let tx = (wx as u32 / TILE_SIZE) as i32;
             let ty = (wy as u32 / TILE_SIZE) as i32;
             let lt = world.tile(tx, ty);
             let ti = ((wy as u32 % TILE_SIZE) * TILE_SIZE + (wx as u32 % TILE_SIZE)) as usize;
             if lt.terrain[ti] != 0 { owner[ci] = best_t as u16; }
+        }
+    }
+
+    // ── Production: each hub gathers goods from a BOUNDED radius — ≈50 km for the
+    // smallest towns / outposts, scaling up to ≈120 km for a great metropolis (user
+    // rule). Replaces the old unbounded nearest-hub Voronoi, so a lone city no longer
+    // harvests half a continent. Cells beyond EVERY hub's radius stay UNCLAIMED (a
+    // colonization prize that feeds the colony/outpost site scoring). Overlapping
+    // radii resolve to the nearest hub. Marine goods on nearby sea are collected too
+    // (a port works its own fishery), so no land-only filter here.
+    let km_per_cell = KM_EQUATOR / grid_w.max(1) as f32;
+    let hub_radius_cells: Vec<i32> = (0..nn)
+        .map(|hh| {
+            let km = if is_outpost[hh] {
+                50.0
+            } else {
+                // log-scaled 50→120 km across ~500 … ~100k population (ln 6.2 … 11.5).
+                let t = ((nodes[hh].population as f32).max(1.0).ln() - 6.2) / (11.5 - 6.2);
+                50.0 + t.clamp(0.0, 1.0) * (120.0 - 50.0)
+            };
+            ((km / km_per_cell).round() as i32).max(1)
+        })
+        .collect();
+    // cell key (wy*grid_w + wx) → (best distance², owning hub).
+    let mut claim: std::collections::HashMap<u64, (i64, u32)> = std::collections::HashMap::new();
+    for hh in 0..nn {
+        let r = hub_radius_cells[hh];
+        let r2 = (r as i64) * (r as i64);
+        let (sx, sy) = (nodes[hh].x as i32, nodes[hh].y as i32);
+        for dy in -r..=r {
+            let wy = sy + dy;
+            if wy < 0 || wy >= grid_h as i32 { continue; }
+            let dy2 = (dy as i64) * (dy as i64);
+            for dx in -r..=r {
+                let d2 = (dx as i64) * (dx as i64) + dy2;
+                if d2 > r2 { continue; }
+                let wx = (((sx + dx) % grid_w as i32) + grid_w as i32) % grid_w as i32;
+                let key = (wy as u64) * (grid_w as u64) + wx as u64;
+                let e = claim.entry(key).or_insert((i64::MAX, u32::MAX));
+                if d2 < e.0 { *e = (d2, hh as u32); }
+            }
+        }
+    }
+    let mut prod = vec![vec![0.0f32; gc]; nn];
+    for (&key, &(_, hh)) in claim.iter() {
+        if hh == u32::MAX { continue; }
+        let wx = (key % grid_w as u64) as u32;
+        let wy = (key / grid_w as u64) as u32;
+        let tile = world.tile((wx / TILE_SIZE) as i32, (wy / TILE_SIZE) as i32);
+        let ti = ((wy % TILE_SIZE) * TILE_SIZE + (wx % TILE_SIZE)) as usize;
+        for g in 0..gc.min(tile.goods.len()) {
+            prod[hh as usize][g] += tile.goods[g][ti] as f32 / 255.0;
         }
     }
 

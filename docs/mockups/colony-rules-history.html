@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WF2 — Colony rules, historically iterated</title>
+<style>
+  :root{--bg:#0b1420;--panel:#13202e;--panel2:#182b3d;--text:#cfe2f6;--muted:#7a90a8;
+    --accent:#3a80c0;--line:#22384f;--red:#e0503a;--purple:#c08cff;--grey:#9aa7b4;--gold:#ffd24a;--orange:#ff8a3c;}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;padding:28px;max-width:1180px;}
+  h1{font-size:23px;margin:0 0 4px;}
+  h2{font-size:16px;margin:30px 0 12px;color:#9fc4e8;border-bottom:1px solid var(--line);padding-bottom:6px;}
+  h3{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 10px;}
+  .sub{color:var(--muted);margin:0 0 18px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin:12px 0;}
+  table{width:100%;border-collapse:collapse;}
+  td,th{padding:8px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;font-size:13px;}
+  th{color:var(--muted);font-weight:600;font-size:12px;}
+  code{background:#0d1a28;padding:1px 5px;border-radius:4px;color:#e6c88a;font-size:12px;}
+  .pill{display:inline-block;width:12px;height:12px;border-radius:50%;vertical-align:middle;margin-right:5px;}
+  .sq{display:inline-block;width:11px;height:11px;vertical-align:middle;margin-right:5px;}
+  .note{background:#1a2536;border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:8px;padding:12px 14px;margin:12px 0;font-size:13px;}
+  .hist{border-left:3px solid var(--accent);}
+  ul{margin:6px 0;padding-left:20px;} li{margin:4px 0;}
+  .cols2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .cols4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+  .mini{background:#0d1a28;border-radius:8px;padding:12px;font-size:12.5px;}
+  .mini b{color:var(--text);} .mini .h{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
+  em.k{color:#e6c88a;font-style:normal;}
+</style>
+</head>
+<body>
+<h1>How colonies appear — current rules &amp; a historical iteration</h1>
+<p class="sub">Phoenicia (Tyre→Carthage), Greek <em class="k">apoikia</em>, Roman <em class="k">colonia</em>, Portuguese <em class="k">feitoria</em>. Colours: <span class="pill" style="background:var(--red)"></span>satellite · <span class="pill" style="background:var(--purple)"></span>colony · <span class="pill" style="background:var(--grey)"></span>outpost.</p>
+
+<!-- ============ CURRENT ============ -->
+<h2>A · Current rules (as coded today)</h2>
+<div class="card">
+<table>
+  <tr><th>Tier</th><th>Founder</th><th>Trigger / gates</th><th>Reach</th><th>Independence</th></tr>
+  <tr>
+    <td><span class="sq" style="background:var(--grey)"></span><b>Outpost</b><br><span style="color:var(--muted)">colony_kind 2</span></td>
+    <td>Richest <b>house</b> (must clear a heavy wealth bar)</td>
+    <td>Year 30+; chases a site's <b>trade goods</b> (fertility ignored); pays <code>OUTPOST_FOUND_COST</code>. Pop hard-capped — <b>never grows into a city</b>.</td>
+    <td>≤ 5000 km from house home/offices</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td><span class="pill" style="background:var(--red)"></span><b>Satellite</b><br><span style="color:var(--muted)">colony_kind 3</span></td>
+    <td>A large <b>metropolis</b>' council (pop ≥ 25k, treasury ≥ 8k)</td>
+    <td>Fills a metropolis <b>NEED</b>: granary / port / workshop. ≤ 3 per metro.</td>
+    <td><code>0.06·world_w</code> ≈ <b>2,400 km</b> (too far!)</td>
+    <td>Age ≥ 40y &amp; pop ≥ 8k → free city</td>
+  </tr>
+  <tr>
+    <td><span class="pill" style="background:var(--purple)"></span><b>Colony</b><br><span style="color:var(--muted)">colony_kind 1</span></td>
+    <td>Big city (pop ≥ 5k) + resident house + <b>same-continent bank (required)</b></td>
+    <td>Year 30+; capital pooled ≥ 80% of cost; site fertility ≥ 0.12 <b>OR</b> trade ≥ 0.18; inland cities can't found sea colonies; global cap 24.</td>
+    <td>≤ 5000 km</td>
+    <td>War of independence (crushed or freed); graduation pass</td>
+  </tr>
+</table>
+</div>
+<div class="note"><b>Problems this creates:</b> "satellites" land ~2,400 km away (not satellites at all); outposts can never mature into cities (ahistorical — Gadir, Utica, Goa all did); independence has no real driver and no handover of who runs the freed city.</div>
+
+<!-- ============ HISTORY ============ -->
+<h2>B · The historical models</h2>
+<div class="cols4">
+  <div class="mini hist"><div class="h">Phoenician</div><b>Emporion → apoikia.</b> Merchant city-states (Tyre, Sidon) plant coastal <b>trading posts</b> sited by CARGO — tin, silver, purple — a day's sail apart. Founded by the mother-city + a leading <b>family</b>, seeded small, tied by cult &amp; trade, not conquest. Gadir/Utica/Carthage grew into cities.</div>
+  <div class="mini hist"><div class="h">Greek</div><b>Apoikia.</b> <b>Population pressure</b> &amp; land hunger. An <em class="k">oikist</em> leads settlers; the colony is <b>politically independent from birth</b> but keeps the mother-city's cult. Syracuse, Massalia.</div>
+  <div class="mini hist"><div class="h">Roman</div><b>Colonia.</b> <b>State-directed, strategic.</b> Veteran/citizen settlement on conquered land, <b>road-linked</b>, a garrison that Romanizes. Ostia is Rome's <b>port satellite</b>. Politically = Rome; never secedes.</div>
+  <div class="mini hist"><div class="h">Portuguese</div><b>Feitoria.</b> Crown / chartered-company financed <b>fortified trading post</b> for one good (gold, pepper). Very long ocean reach. Some (Goa, Luanda) became full colonies.</div>
+</div>
+
+<h2>C · Iterated ruleset (mapping history → the three tiers)</h2>
+<div class="card">
+<table>
+  <tr><th>Tier</th><th>Historical analog</th><th>Driver</th><th>Reach (proposed)</th><th>Can mature?</th></tr>
+  <tr><td><span class="pill" style="background:var(--red)"></span><b>Satellite</b></td><td>Ostia→Rome, Piraeus→Athens</td><td>Metropolis <b>need</b> (food/port/craft)</td><td><b>≤ 500 km</b> (a day's ride) — dedicated near-metro site scan</td><td>Outgrows parent → free city (rare)</td></tr>
+  <tr><td><span class="pill" style="background:var(--grey)"></span><b>Outpost</b></td><td>Phoenician emporion / PT feitoria</td><td>A <b>good</b> (house chases cargo)</td><td>Long (follows the trade route / offices)</td><td><b>NEW: yes</b> — a thriving outpost graduates to a colony</td></tr>
+  <tr><td><span class="pill" style="background:var(--purple)"></span><b>Colony</b></td><td>Carthage, colonia, Goa</td><td>Pop pressure + trade prize</td><td>Medium-long (≤ 5000 km)</td><td>Grows into a city; <b>can secede (Carthage)</b></td></tr>
+</table>
+</div>
+
+<div class="cols2">
+  <div class="card">
+    <h3>New rule 1 — Outpost → Colony (emporion → city)</h3>
+    <p>A house outpost that grows past a pop/trade threshold and attracts settlers <b>graduates</b> to a full colony (Gadir, Utica). Lifts today's hard pop cap for outposts that thrive. The founding house keeps its stake.</p>
+  </div>
+  <div class="card">
+    <h3>New rule 2 — Colonies spawn colonies</h3>
+    <p>An <b>independent</b> colony that becomes a metropolis in its own right becomes an eligible founder — Carthage planted Cartagena, Ibiza. Recursion of the whole system.</p>
+  </div>
+  <div class="card">
+    <h3>New rule 3 — Founding dynasty (the Magonids)</h3>
+    <p>The founding house keeps a <b>controlling office</b> in the colony from birth (<code>council_house = founder house</code>). This is the "default control by the trade family that built it."</p>
+  </div>
+  <div class="card">
+    <h3>New rule 4 — Metropolis decline emancipates (Tyre falls)</h3>
+    <p>When Nebuchadnezzar besieged Tyre, Carthage rose. If the mother city is <b>sacked / abandoned / shrinks</b> below a floor, its colonies auto-emancipate.</p>
+  </div>
+</div>
+
+<!-- ============ INDEPENDENCE ============ -->
+<h2>D · Independence, the Carthaginian way</h2>
+<div class="card">
+  <p style="margin-top:0"><b>When</b> a colony secedes — triggered by any of: it grows <b>richer/bigger than its mother</b> (wealth or pop ratio &gt; k, like Carthage vs a fallen Tyre); it sits <b>far</b> from the metropolis (distance loosens the leash); or the <b>metropolis declines</b> (rule 4).</p>
+  <div class="cols2">
+    <div class="mini">
+      <div class="h">Peaceful drift (default)</div>
+      <b>Control → the founding house.</b> The trade dynasty that built the colony (the Magonids of Carthage) takes it as a free city. It gets its own <b>settlement window</b> as an independent hub; <code>council_house</code> stays the founder house.
+    </div>
+    <div class="mini">
+      <div class="h">War of independence</div>
+      The mother-city's house is <b>expelled</b>; a <b>new revolutionary trade family</b> is spawned locally to lead the freed city (a fresh house at that hub). This is the "new trade family appears" case.
+    </div>
+  </div>
+  <svg width="100%" height="150" viewBox="0 0 760 150" style="margin-top:14px">
+    <rect x="0" y="0" width="760" height="150" fill="#0d1a28" rx="8"/>
+    <!-- mother -->
+    <circle cx="70" cy="75" r="12" fill="var(--orange)" stroke="#3a1c08"/>
+    <text x="70" y="105" fill="#cfe2f6" font-size="11" text-anchor="middle">Tyre (mother)</text>
+    <!-- colony -->
+    <circle cx="330" cy="75" r="9" fill="var(--purple)" stroke="#2a1740"/>
+    <text x="330" y="102" fill="#cfe2f6" font-size="11" text-anchor="middle">Carthage (colony)</text>
+    <line x1="82" y1="75" x2="320" y2="75" stroke="var(--purple)" stroke-dasharray="4 3"/>
+    <text x="200" y="65" fill="#7a90a8" font-size="10.5" text-anchor="middle">founding tie · Magonid house office</text>
+    <!-- fork -->
+    <path d="M345 75 L 520 40" stroke="#4a7a5a" stroke-width="1.4"/>
+    <path d="M345 75 L 520 118" stroke="#7a4a4a" stroke-width="1.4"/>
+    <circle cx="545" cy="35" r="10" fill="var(--purple)" stroke="var(--gold)" stroke-width="2"/>
+    <text x="620" y="30" fill="#8fd0a0" font-size="11">free city · founder house rules</text>
+    <text x="620" y="45" fill="#7a90a8" font-size="10">(peaceful — default control)</text>
+    <circle cx="545" cy="118" r="10" fill="var(--purple)" stroke="var(--red)" stroke-width="2"/>
+    <text x="620" y="113" fill="#e0a0a0" font-size="11">free city · NEW trade family</text>
+    <text x="620" y="128" fill="#7a90a8" font-size="10">(won a war of independence)</text>
+  </svg>
+</div>
+
+<!-- ============ ALSO ============ -->
+<h2>E · Folded-in earlier decisions</h2>
+<div class="card">
+  <ul>
+    <li><b>Satellite ≤ 500 km, red</b> — new <code>SATELLITE_MAX_KM=500</code> + dedicated near-metro site pool (colonizable sites are ≥1,600 km from cities, so satellites need their own near pool).</li>
+    <li><b>Colonies purple, outposts grey</b> — <code>LINE_COLORS.houseOutpost</code> #0a0a0a→grey; satellite red; colony purple (already).</li>
+    <li><b>Goods catchment</b> — bounded radius, <b>50 km floor → up to ~120 km</b> scaling with population (your pick), replacing the unbounded Voronoi.</li>
+    <li><b>Population markers</b> — outpost/village = small squares; ≤20k white circle; 20–100k orange circle; ≥100k orange circle + ★.</li>
+    <li><b>Dynamic entrepôts</b> — earned live from <b>transit volume</b> with hysteresis (Venice/Bruges rise &amp; fall), shown as distinct shapes (red triangle = entrepôt, gold square = greatest). Campaign-only.</li>
+  </ul>
+</div>
+</body>
+</html>

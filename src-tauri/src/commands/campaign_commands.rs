@@ -332,6 +332,13 @@ pub struct HubBrief {
     pub founded_tick: u32,
     /// Last full year's trade throughput (grain-eq, in+out) — Trade Heat overlay.
     pub trade_volume: f32,
+    /// Dynamically-earned commercial class (re-ranked twice a year): 0 ordinary ·
+    /// 1 trade hub · 2 entrepôt. Drives the distinct map marker (blue diamond / red
+    /// triangle). 0 until a campaign has run.
+    #[serde(default)] pub hub_class: u8,
+    /// Satellite CONSTRUCTION stage: 0 = finished/not a build site · 1..=5 = building.
+    /// Drives the map's under-construction marker + opens the construction window.
+    #[serde(default)] pub build_stage: u8,
     /// Why the settlement died ("famine"/"plague"/"war"/"disaster"; "" = alive).
     pub died_cause: String,
     /// Downsampled population history (≤30 points, oldest first) — the census
@@ -830,6 +837,8 @@ fn build_snapshot(sim: &CampaignSim) -> CampaignSnapshot {
                 abandoned: h.abandoned,
                 founded_tick: h.founded_tick,
                 trade_volume: h.trade_last_year,
+                hub_class: h.hub_class,
+                build_stage: h.build_stage,
                 died_cause: h.died_cause.clone(),
                 pop_spark: {
                     // ≤30 evenly-spaced population samples for the census sparkline.
@@ -839,7 +848,10 @@ fn build_snapshot(sim: &CampaignSim) -> CampaignSnapshot {
             }
         })
         .collect();
-    let total_population: f32 = sim.hubs.iter().map(|h| h.population.max(0.0)).sum();
+    // Census = live simulated hubs + the inert hinterland towns below the sim cap
+    // (decouple: counted even though they aren't ticked, so Atlas isn't undercounting).
+    let total_population: f32 = sim.hubs.iter().map(|h| h.population.max(0.0)).sum::<f32>()
+        + sim.hinterland.iter().map(|t| t.population.max(0.0)).sum::<f32>();
     let population_delta = if sim.last_month_pop > 0.0 {
         (total_population - sim.last_month_pop) as i32
     } else { 0 };
@@ -1276,6 +1288,10 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
     // 151+ was rendered but not a live hub, so it couldn't be clicked/inspected.
     let mut order: Vec<usize> = (0..econ.hubs.len()).collect();
     order.sort_by(|&a, &b| econ.hubs[b].population.cmp(&econ.hubs[a].population));
+    // DECOUPLE: settlements ranked below the live cap aren't simulated, but they're
+    // still real places — captured as `hinterland` so they stay drawn/clickable AND
+    // their population is counted in the world census (fixes the Atlas undercount).
+    let overflow: Vec<usize> = order.iter().skip(250).copied().collect();
     order.truncate(250);
     order.sort_unstable(); // keep snapshot index order stable
     // Tiered founding populations (user rule): every settlement starts HUMBLE and
@@ -1295,6 +1311,20 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
     };
     let id_to_idx: std::collections::HashMap<u32, usize> =
         order.iter().enumerate().map(|(i, &h)| (econ.hubs[h].id, i)).collect();
+
+    // Inert hinterland towns (below the sim cap) — same humble founding scale as the
+    // live hubs so the world census is consistent. Counted + clickable, not simulated.
+    let hinterland_towns: Vec<crate::sim::tick::HinterlandTown> = overflow
+        .iter()
+        .map(|&hi| {
+            let eh = &econ.hubs[hi];
+            crate::sim::tick::HinterlandTown {
+                x: eh.x, y: eh.y, name: eh.name.clone(),
+                population: tier_founding(eh.population),
+                koppen: eh.koppen, coastal: eh.coastal,
+            }
+        })
+        .collect();
 
     let mut hubs: Vec<TickHub> = order
         .iter()
@@ -1402,6 +1432,16 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 supply_ships: 0,
                 supply_source: -1,
                 supply_delivered: 0.0,
+                transit_year: 0.0,
+                hub_class: 0,
+                class_momentum: 0,
+                build_stage: 0,
+                build_progress: 0.0,
+                build_supply: [0.0; 3],
+                build_supply_good: [0; 3],
+                build_idle_months: 0,
+                build_convoys: 0,
+                build_start_tick: 0,
                 govt_type: 0,
                 officials: Vec::new(),
                 civic_goods: Vec::new(),
@@ -1679,6 +1719,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         house_ledger_prev: Vec::new(),
         house_barred: Vec::new(),
         colonizable: econ.colonizable_sites.clone(),
+        satellite_sites: vec![], // filled from tiles just after construction (below)
+        hinterland: hinterland_towns,
         hub_patron: vec![],
         hub_culture: vec![],
         hub_minorities: vec![],
@@ -1703,6 +1745,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         total_foundings: 0,
         total_abandonments: 0,
         migrations: vec![],
+        migration_routes: vec![],
         good_flow_accum: vec![],
         hub_good_trade: vec![],
         year_frames: vec![],
@@ -1737,6 +1780,14 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         let hub_xy: Vec<(f32, f32)> = sim.hubs.iter().map(|h| (h.x, h.y)).collect();
         if let Ok(sites) = recompute_colonizable(&db, &conn, &hub_xy) {
             sim.colonizable = sites;
+        }
+    }
+    // Near-city satellite pool (Ostia→Rome). Always (re)computed at build — it's not
+    // carried in the economy snapshot.
+    if sim.satellite_sites.is_empty() {
+        let hub_xy: Vec<(f32, f32)> = sim.hubs.iter().map(|h| (h.x, h.y)).collect();
+        if let Ok(sites) = recompute_satellite_sites(&db, &conn, &hub_xy) {
+            sim.satellite_sites = sites;
         }
     }
     sim.rebuild_routes();
@@ -1797,6 +1848,26 @@ fn recompute_colonizable(
     let base_value: Vec<f32> = specs.iter().map(|s| s.base_value.max(0.0)).collect();
     let world = db.cached_tiles_with_conn(conn)?;
     Ok(crate::commands::query_commands::compute_colonizable_sites(
+        &world, grid_w, grid_h, hub_xy, &base_value))
+}
+
+/// Recompute the NEAR-city satellite site pool from current tiles (≤500 km from a
+/// city). Mirrors `recompute_colonizable` but calls the near-city variant. Used to
+/// (re)fill `CampaignSim::satellite_sites` at build and when it drains.
+fn recompute_satellite_sites(
+    db: &WorldDb,
+    conn: &Connection,
+    hub_xy: &[(f32, f32)],
+) -> Result<Vec<crate::sim::tick::ColonizeSite>, String> {
+    let grid_w: u32 = metadata::get_meta(conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+    let specs = crate::commands::goods_commands::load_world_goods(conn);
+    let base_value: Vec<f32> = specs.iter().map(|s| s.base_value.max(0.0)).collect();
+    let world = db.cached_tiles_with_conn(conn)?;
+    Ok(crate::commands::query_commands::compute_satellite_sites(
         &world, grid_w, grid_h, hub_xy, &base_value))
 }
 
@@ -1887,6 +1958,21 @@ pub async fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<Camp
                 if !sites.is_empty() {
                     if let Some(sim) = cache.sim.as_mut() {
                         std::sync::Arc::make_mut(sim).colonizable = sites;
+                    }
+                }
+            }
+        }
+        // Same self-heal for the near-city SATELLITE pool (consumed as satellites are
+        // founded; refilled from tiles when it drains).
+        let need_sat = cache.sim.as_ref()
+            .map(|s| s.satellite_sites.len() < COLONIZE_POOL_FLOOR).unwrap_or(false);
+        if need_sat {
+            let hub_xy: Vec<(f32, f32)> = cache.sim.as_ref().unwrap()
+                .hubs.iter().map(|h| (h.x, h.y)).collect();
+            if let Ok(sites) = recompute_satellite_sites(&db, &conn, &hub_xy) {
+                if !sites.is_empty() {
+                    if let Some(sim) = cache.sim.as_mut() {
+                        std::sync::Arc::make_mut(sim).satellite_sites = sites;
                     }
                 }
             }
@@ -2077,6 +2163,109 @@ pub fn campaign_get_colony(id: u32, db: State<'_, WorldDb>) -> Result<Option<Col
         supply_delivered: hub.supply_delivered,
         supply_source,
     }))
+}
+
+/// One construction-supply tab for the satellite window (food / preservables / construction).
+#[derive(Serialize)]
+pub struct SatSupplyRow {
+    pub category: String,
+    pub good: String,
+    pub source: String,
+    pub rate: f32,
+    pub met: f32,
+}
+
+/// Live state of a satellite still UNDER CONSTRUCTION (build_stage>0) — everything the
+/// construction window needs. `None` once finished (it becomes a normal bound city).
+#[derive(Serialize)]
+pub struct SatelliteBrief {
+    pub id: u32,
+    pub name: String,
+    pub metropolis: String,
+    pub metropolis_id: i32,
+    pub role: String,
+    pub stage: u8,
+    pub progress: f32,   // within the current stage
+    pub overall: f32,    // 0..1 across all 5 stages
+    pub eta_years: f32,
+    pub monthly_cost: f32,
+    pub fund: f32,
+    pub runway_months: f32,
+    pub convoys: u8,
+    pub idle_months: u8,
+    pub founded_year: f32,
+    pub supply: Vec<SatSupplyRow>,
+    pub exploits: Vec<String>,
+}
+
+#[tauri::command]
+pub fn campaign_get_satellite(id: u32, db: State<'_, WorldDb>) -> Result<Option<SatelliteBrief>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(None) };
+    let hi = match sim.hubs.iter().position(|h| h.id == id) { Some(i) => i, None => return Ok(None) };
+    let hub = &sim.hubs[hi];
+    if hub.build_stage == 0 { return Ok(None); } // not (or no longer) a construction site
+    let m = hub.founder_hub;
+    let (metropolis, metropolis_id, fund) = if m >= 0 && (m as usize) < sim.hubs.len() {
+        (sim.hubs[m as usize].name.clone(), m, sim.hubs[m as usize].treasury)
+    } else { ("—".to_string(), -1, 0.0) };
+    let role = match hub.colony_stage { 1 => "Granary", 0 => "Port", _ => "Workshop" }.to_string();
+    let stage = hub.build_stage.min(5);
+    let overall = (((stage.saturating_sub(1)) as f32) + hub.build_progress.clamp(0.0, 1.0)) / 5.0;
+    let met = hub.build_supply.iter().cloned().fold(1.0f32, f32::min).clamp(0.0, 1.0);
+    let months_left = ((5 - stage) as f32 + (1.0 - hub.build_progress).max(0.0))
+        * crate::sim::tick::SAT_STAGE_MONTHS;
+    let eta_years = months_left / met.max(0.08) / 12.0;
+    let monthly_cost = crate::sim::tick::SAT_CONVOY_UPKEEP * hub.build_convoys as f32;
+    let runway_months = if monthly_cost > 0.0 { fund / monthly_cost } else { 0.0 };
+    let cats = ["Food", "Preservables", "Construction"];
+    let supply = (0..3usize).map(|c| {
+        let g = hub.build_supply_good[c] as usize;
+        SatSupplyRow {
+            category: cats[c].to_string(),
+            good: sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_else(|| "—".into()),
+            source: metropolis.clone(),
+            rate: crate::sim::tick::SAT_STAGE_QUOTA,
+            met: hub.build_supply[c].clamp(0.0, 1.0),
+        }
+    }).collect();
+    // Future exploits = the goods this site will actually produce once finished.
+    let mut gi: Vec<usize> = (0..sim.goods.len()).collect();
+    gi.sort_by(|&a, &b| hub.base_per_capita.get(b).copied().unwrap_or(0.0)
+        .partial_cmp(&hub.base_per_capita.get(a).copied().unwrap_or(0.0)).unwrap_or(std::cmp::Ordering::Equal));
+    let exploits = gi.into_iter()
+        .filter(|&g| hub.base_per_capita.get(g).copied().unwrap_or(0.0) > 0.0)
+        .take(4).map(|g| sim.goods[g].name.clone()).collect();
+    Ok(Some(SatelliteBrief {
+        id, name: hub.name.clone(), metropolis, metropolis_id, role,
+        stage, progress: hub.build_progress.clamp(0.0, 1.0), overall, eta_years,
+        monthly_cost, fund, runway_months, convoys: hub.build_convoys,
+        idle_months: hub.build_idle_months, founded_year: hub.build_start_tick as f32 / 365.0,
+        supply, exploits,
+    }))
+}
+
+/// A route-bound migration flow for the reworked Migration overlay (polyline along the
+/// trade network + culture + volume + age for fade).
+#[derive(Serialize)]
+pub struct MigrationRouteBrief {
+    pub path: Vec<[f32; 2]>,
+    pub culture: String,
+    pub volume: f32,
+    pub from_hub: i32,
+    pub to_hub: i32,
+    pub age_years: f32,
+}
+
+#[tauri::command]
+pub fn campaign_get_migration_routes(db: State<'_, WorldDb>) -> Result<Vec<MigrationRouteBrief>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    Ok(sim.migration_routes.iter().map(|r| MigrationRouteBrief {
+        path: r.path.clone(), culture: r.culture.clone(), volume: r.volume,
+        from_hub: r.from_hub, to_hub: r.to_hub,
+        age_years: sim.tick.saturating_sub(r.tick) as f32 / 365.0,
+    }).collect())
 }
 
 /// One roster row for the Colonial Office subwindow — a light projection over a

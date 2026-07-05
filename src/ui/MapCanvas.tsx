@@ -10,7 +10,7 @@ import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useSettingsStore } from "../state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes } from "../bridge/tauri";
 import type { MerchantRoute, FuturesLane } from "../types";
 import { goodOverlayKey, GOOD_DEFS } from "../goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "../types";
@@ -88,6 +88,7 @@ export function MapCanvas() {
   const futuresLanesRef = useRef<FuturesLane[]>([]);
   const selectedChain = useUIStore((s) => s.selectedChain);
   const selectedHub = useUIStore((s) => s.selectedHub);
+  const migrationMode = useUIStore((s) => s.migrationMode);
   const openRoads = useUIStore((s) => s.openRoads);
   const selectedExport = useUIStore((s) => s.selectedExport);
   const setSelectedGood = useUIStore((s) => s.setSelectedGood);
@@ -403,6 +404,7 @@ export function MapCanvas() {
         score: h.population,
         dead: isDead(h),
         isNew: isNew(h),
+        hubClass: h.hub_class ?? 0,
       };
     });
     // Add any live hubs with no static counterpart (organic towns swarmed and
@@ -415,6 +417,7 @@ export function MapCanvas() {
         size: tier(h.population), population: h.population, score: h.population,
         dead: isDead(h),
         isNew: isNew(h),
+        hubClass: h.hub_class ?? 0,
       });
     }
     return merged;
@@ -509,6 +512,25 @@ export function MapCanvas() {
     requestRender();
     return () => { alive = false; };
   }, [campaignSnapshot, eraFrame, heatGood, requestRender]);
+
+  // Route-bound migration overlay: fetch the trade-route-following flows and drive the
+  // ribbon/dots/focus mode (focus isolates the selected city's inbound flows).
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setMigrationMode(migrationMode);
+    om.setMigrationFocus(migrationMode === "focus" ? (selectedHub ?? null) : null);
+    if (!campaignSnapshot?.active || eraFrame) { om.setMigrationRoutes([]); requestRender(); return; }
+    let alive = true;
+    campaignGetMigrationRoutes().then((rs) => {
+      if (!alive) return;
+      om.setMigrationRoutes(rs.map((r) => ({
+        path: r.path, culture: r.culture, volume: r.volume, to: r.to_hub, age: r.age_years,
+      })));
+      requestRender();
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [campaignSnapshot, eraFrame, migrationMode, selectedHub, requestRender]);
 
   // Colony/satellite ↔ metropolis link highlight (set by the Colonial panel).
   useEffect(() => {
@@ -1208,6 +1230,21 @@ export function MapCanvas() {
             const dy = h.y + 0.5 - wy;
             const d = dx * dx + dy * dy;
             if (d < bestD) { bestD = d; best = h.id; bestColony = h.colony_kind ?? 0; }
+          }
+          // Fallback: the campaign sim only keeps the strongest ~250 settlements as
+          // LIVE hubs, but the map still draws EVERY worldgen settlement. Those extra
+          // dots were pure visuals — unclickable — because the hit-test scanned only
+          // the live hubs. Also scan the full frozen `econ.hubs` so every visible
+          // settlement is clickable; HubPanel renders their worldgen data even without
+          // a live campaign detail. Live hubs keep priority (checked first / smaller D).
+          if (best < 0 && snap?.active) {
+            for (const h of econ.hubs) {
+              let dx = Math.abs(h.x + 0.5 - wx);
+              if (dx > m.grid_width / 2) dx = m.grid_width - dx;
+              const dy = h.y + 0.5 - wy;
+              const d = dx * dx + dy * dy;
+              if (d < bestD) { bestD = d; best = h.id; bestColony = 0; }
+            }
           }
           if (best >= 0) {
             setSelectedHub(best);

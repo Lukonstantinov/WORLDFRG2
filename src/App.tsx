@@ -7,6 +7,7 @@ import { ChroniclePanel } from "./ui/ChroniclePanel";
 import { InfoPanel } from "./ui/InfoPanel";
 import { TradeMatrixPanel } from "./ui/TradeMatrixPanel";
 import { HubPanel } from "./ui/HubPanel";
+import { SatelliteConstructionPanel } from "./ui/SatelliteConstructionPanel";
 import { MerchantRoutePanel } from "./ui/MerchantRoutePanel";
 import { FuturesLanePanel } from "./ui/FuturesLanePanel";
 import { FuturesPanel } from "./ui/FuturesPanel";
@@ -599,6 +600,7 @@ export default function App() {
           }}>
           <InfoPanel />
           <HubPanel />
+          <SatelliteConstructionPanel />
           <GoodFlowPanel />
           <GoodsBrowserPanel />
           <HousesPanel />

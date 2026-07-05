@@ -126,8 +126,8 @@ export const LINE_COLOR_DEFAULTS = {
   merchantOut: "#ffce5f",     // merchant route outbound (gold)
   manufactory: "#4fc06a",     // house/guild manufactory holding line (green)
   estate: "#ffe14a",          // estate holding line (shiny yellow)
-  settlementColony: "#c08cff", // settlement colony pin + lane (violet)
-  houseOutpost: "#0a0a0a",    // house trade outpost marker (black; frame uses owner colour)
+  settlementColony: "#c08cff", // settlement colony pin + lane (violet/purple)
+  houseOutpost: "#9aa7b4",    // house trade outpost marker (grey; frame uses owner colour)
   colonyLane: "#c08cff",      // colony↔metropolis supply/monopoly lane (violet)
 };
 /** A colony/outpost map marker (settlement colony or house trade outpost). */
@@ -271,6 +271,26 @@ export class OverlayManager {
   /** Atlas 2.0 · set the refugee roads (age01 0 = fresh, 1 = fully faded). */
   drawMigrations(m: { fx: number; fy: number; tx: number; ty: number; age: number }[]) { this.migrations = m; }
 
+  // ── Route-bound migration overlay (dots · ribbon · focus) ──
+  private migrationRoutes: { path: [number, number][]; culture: string; volume: number; to: number; age: number }[] = [];
+  private migrationMode: "dots" | "ribbon" | "focus" = "ribbon";
+  private migrationFocusHub: number | null = null;
+  private migMaxVol = 1;
+  /** Set the reworked migration flows (polylines along trade routes + culture + volume). */
+  setMigrationRoutes(r: { path: [number, number][]; culture: string; volume: number; to: number; age: number }[]) {
+    this.migrationRoutes = r;
+    this.migMaxVol = r.reduce((m, x) => Math.max(m, x.volume), 1);
+  }
+  setMigrationMode(mode: "dots" | "ribbon" | "focus") { this.migrationMode = mode; }
+  setMigrationFocus(hub: number | null) { this.migrationFocusHub = hub; }
+  /** Deterministic vivid colour per culture name (stable across the app). */
+  private cultureHue(name: string): string {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < name.length; i++) { h ^= name.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    const hue = (h >>> 0) % 360;
+    return `hsl(${hue},70%,62%)`;
+  }
+
   /** Named trade basins: a soft dashed hull around each cluster's member towns +
    *  a serif region label at its heart. Colours rotate a fixed palette so basins
    *  stay tellable-apart; seam-spanning basins are skipped (no slash). */
@@ -344,6 +364,81 @@ export class OverlayManager {
       ctx.closePath();
       ctx.fill();
     }
+  }
+
+  /** Route-bound migration: every flow is drawn STRICTLY along its trade-route polyline
+   *  (through the intermediate hubs the sim routed it over), coloured by the migrants'
+   *  culture. Three modes: `ribbon` (width ∝ volume) · `dots` (spaced markers riding the
+   *  path) · `focus` (only flows arriving at the focused hub, brightly). */
+  private renderMigrationRoutes(ctx: CanvasRenderingContext2D) {
+    const inv = 1 / Math.sqrt(this.currentScale);
+    const W = this.worldW;
+    const focus = this.migrationFocusHub;
+    const spanOk = (p: [number, number][]) => {
+      // Skip a flow that would slash across the cylindrical seam.
+      for (let i = 1; i < p.length; i++) if (W > 0 && Math.abs(p[i][0] - p[i - 1][0]) > W / 2) return false;
+      return true;
+    };
+    for (const r of this.migrationRoutes) {
+      if (r.path.length < 2 || !spanOk(r.path)) continue;
+      if (this.migrationMode === "focus" && focus != null && r.to !== focus) continue;
+      const focused = this.migrationMode === "focus" && focus != null && r.to === focus;
+      const fade = Math.max(0.12, 1 - r.age / 6); // ~6y lifetime
+      const col = this.cultureHue(r.culture);
+      const volN = Math.min(1, r.volume / this.migMaxVol);
+
+      if (this.migrationMode === "dots") {
+        // Markers spaced along the routed polyline.
+        ctx.strokeStyle = this.rgba(col, fade * 0.28);
+        ctx.lineWidth = Math.max(0.4, 0.8 * inv);
+        this.tracePath(ctx, r.path);
+        ctx.stroke();
+        const step = 4;
+        for (let i = 1; i < r.path.length; i++) {
+          const [x0, y0] = r.path[i - 1], [x1, y1] = r.path[i];
+          const segs = Math.max(1, Math.round(Math.hypot(x1 - x0, y1 - y0) / step));
+          for (let s = 0; s < segs; s++) {
+            const t = s / segs;
+            ctx.fillStyle = this.rgba(col, fade);
+            ctx.beginPath();
+            ctx.arc(x0 + (x1 - x0) * t + 0.5, y0 + (y1 - y0) * t + 0.5, Math.max(0.7, (0.9 + volN) * inv), 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      } else {
+        // Ribbon (and focus) — a stroked path whose width tracks volume.
+        ctx.strokeStyle = this.rgba(col, focused ? Math.min(1, fade + 0.25) : fade * 0.85);
+        ctx.lineWidth = Math.max(0.6, (focused ? 2.2 : 1.0 + volN * 2.4) * inv);
+        ctx.lineJoin = "round"; ctx.lineCap = "round";
+        this.tracePath(ctx, r.path);
+        ctx.stroke();
+        // Arrowhead at the destination.
+        const n = r.path.length;
+        const [px, py] = r.path[n - 2], [qx, qy] = r.path[n - 1];
+        const al = Math.hypot(qx - px, qy - py) || 1;
+        const ux = (qx - px) / al, uy = (qy - py) / al;
+        const s = Math.max(1.4, 2.6 * inv);
+        ctx.fillStyle = this.rgba(col, focused ? 1 : fade);
+        ctx.beginPath();
+        ctx.moveTo(qx + 0.5, qy + 0.5);
+        ctx.lineTo(qx + 0.5 - ux * s - uy * s * 0.5, qy + 0.5 - uy * s + ux * s * 0.5);
+        ctx.lineTo(qx + 0.5 - ux * s + uy * s * 0.5, qy + 0.5 - uy * s - ux * s * 0.5);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  }
+
+  private tracePath(ctx: CanvasRenderingContext2D, p: [number, number][]) {
+    ctx.beginPath();
+    ctx.moveTo(p[0][0] + 0.5, p[0][1] + 0.5);
+    for (let i = 1; i < p.length; i++) ctx.lineTo(p[i][0] + 0.5, p[i][1] + 0.5);
+  }
+
+  /** hsl(...) / #hex → rgba-ish stroke with alpha via globalAlpha-free helper. */
+  private rgba(col: string, a: number): string {
+    if (col.startsWith("hsl(")) return col.replace("hsl(", "hsla(").replace(")", `,${a.toFixed(3)})`);
+    return col;
   }
 
   /** Trade Heat: additive radial glows sized/coloured by each hub's share of the
@@ -1145,9 +1240,11 @@ export class OverlayManager {
       this.renderTradeHeat(ctx);
     }
 
-    // Atlas 2.0 · MIGRATION ARROWS — fading refugee roads from abandoned towns.
-    if (this.visibility.migrations !== false && this.migrations.length > 0) {
-      this.renderMigrations(ctx);
+    // Atlas 2.0 · MIGRATION — route-bound flows (dots/ribbon/focus) when present,
+    // else the legacy fading refugee-road arrows.
+    if (this.visibility.migrations !== false) {
+      if (this.migrationRoutes.length > 0) this.renderMigrationRoutes(ctx);
+      else if (this.migrations.length > 0) this.renderMigrations(ctx);
     }
 
     if (this.visibility.settlements && this.settlements.length > 0) {
@@ -1181,37 +1278,90 @@ export class OverlayManager {
         // everything into ~1.1–1.7×). Combined with the tier base this gives a
         // strong, legible size hierarchy that tracks growth/decline live.
         const popf = Math.min(2.2, Math.max(0.7, 0.45 + Math.log10(Math.max(s.population, 50)) * 0.32));
-        const radius = (SETTLEMENT_SIZES[s.size] || 1) * popf;
-        const color = SETTLEMENT_COLORS[s.size] || "#cccccc";
 
-        // Settlements are small SQUARES (user rule), tier-tinted + size-scaled with
-        // population: capital = square + gold star · city = square + inner dot ·
-        // town/village/outpost = plain square. Dead cities render as a † cross above.
+        // Marker system by POPULATION + type (user rule):
+        //   outpost           → small GREY square
+        //   village (<1.5k)   → small WHITE square
+        //   town/city ≤20k    → WHITE circle (grows with pop)
+        //   20k–100k          → ORANGE circle (larger)
+        //   ≥100k             → ORANGE circle + ★ star inside
+        // Squares are kept small; circles carry the growth hierarchy. Dead cities
+        // render as a † cross above.
+        const pop = s.population;
+        const isOutpost = s.size === "outpost";
+        const isVillage = !isOutpost && pop < 1_500;
+        const isSquare = isOutpost || isVillage;
         const cx = s.x + 0.5, cy = s.y + 0.5;
         ctx.globalAlpha = 0.95;
-        ctx.fillStyle = color;
         ctx.strokeStyle = "rgba(0,0,0,0.65)";
-        ctx.lineWidth = Math.max(0.25, radius * 0.14);
-        const hw = radius * 0.92; // half-side of the square
-        ctx.beginPath();
-        ctx.rect(cx - hw, cy - hw, hw * 2, hw * 2);
-        ctx.fill();
-        ctx.stroke();
-        if (s.size === "capital") {
-          ctx.fillStyle = "rgba(26,18,6,0.9)";
+        let radius: number;
+        if (isSquare) {
+          // Small squares — outposts a touch smaller than villages.
+          radius = (isOutpost ? 0.7 : 0.9) * popf;
+          ctx.fillStyle = isOutpost ? "#9aa7b4" : "#f0f0f0"; // grey outpost · white village
+          ctx.lineWidth = Math.max(0.2, radius * 0.16);
+          const hw = radius * 0.72; // smaller squares than before
           ctx.beginPath();
-          for (let i = 0; i < 10; i++) {
-            const rr = i % 2 === 0 ? radius * 0.6 : radius * 0.25;
-            const a = -Math.PI / 2 + (i * Math.PI) / 5;
-            const px = cx + Math.cos(a) * rr, py = cy + Math.sin(a) * rr;
-            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-          }
-          ctx.closePath();
+          ctx.rect(cx - hw, cy - hw, hw * 2, hw * 2);
           ctx.fill();
-        } else if (s.size === "city") {
-          ctx.fillStyle = "rgba(26,18,6,0.85)";
-          const ih = hw * 0.4;
-          ctx.fillRect(cx - ih, cy - ih, ih * 2, ih * 2);
+          ctx.stroke();
+        } else {
+          const orange = pop >= 20_000;
+          // Circles kept small (user: "way smaller") — population still drives the
+          // size hierarchy via popf, but the base is tightened so even a metropolis
+          // reads as a compact dot rather than a blob.
+          radius = (orange ? 1.05 : 0.85) * popf;
+          ctx.fillStyle = orange ? "#ff8a3c" : "#f0f0f0"; // orange ≥20k · white town/city
+          ctx.lineWidth = Math.max(0.25, radius * 0.14);
+          ctx.beginPath();
+          ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          if (pop >= 100_000) {
+            // Metropolis: a dark ★ set inside the orange disc.
+            ctx.fillStyle = "rgba(26,18,6,0.9)";
+            ctx.beginPath();
+            for (let i = 0; i < 10; i++) {
+              const rr = i % 2 === 0 ? radius * 0.62 : radius * 0.26;
+              const a = -Math.PI / 2 + (i * Math.PI) / 5;
+              const px = cx + Math.cos(a) * rr, py = cy + Math.sin(a) * rr;
+              if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
+        // Dynamically-earned commercial rank (campaign, re-ranked twice a year): a
+        // TRADE HUB wears a small blue diamond, an ENTREPÔT a red triangle — a distinct
+        // shape set above the population dot, so "how big" and "how commercial" read
+        // together. Rises and falls with the trade that actually flows through.
+        const hc = s.hubClass ?? 0;
+        if (hc >= 1) {
+          const dinv = 1 / Math.sqrt(this.currentScale);
+          const mr = Math.max(radius * 0.85, 1.3 * dinv);
+          const mx = cx, my = cy - radius - mr * 1.15;
+          ctx.lineWidth = Math.max(0.2, 0.35 * dinv);
+          ctx.strokeStyle = "rgba(0,0,0,0.7)";
+          if (hc >= 2) {
+            ctx.fillStyle = "#e63030"; // entrepôt — red triangle
+            ctx.beginPath();
+            ctx.moveTo(mx, my - mr);
+            ctx.lineTo(mx - mr * 0.9, my + mr * 0.7);
+            ctx.lineTo(mx + mr * 0.9, my + mr * 0.7);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+          } else {
+            ctx.fillStyle = "#3a86d6"; // trade hub — blue diamond
+            ctx.beginPath();
+            ctx.moveTo(mx, my - mr);
+            ctx.lineTo(mx - mr * 0.8, my);
+            ctx.lineTo(mx, my + mr);
+            ctx.lineTo(mx + mr * 0.8, my);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+          }
         }
         // Atlas 2.0 · a settlement founded THIS campaign wears a gold founding
         // star for its first years — new towns pop out at a glance.
@@ -2729,8 +2879,8 @@ export class OverlayManager {
 
   /** Settlement-name labels (drawn when the "settlementNames" overlay is on). */
   /** Colony markers + their routed supply/monopoly lanes. Settlement colonies are
-   *  violet circles (radius by stage); house outposts are small BLACK squares framed
-   *  in the owner-house colour. Lanes follow the existing route network. */
+   *  violet/purple circles (radius by stage); house outposts are small GREY squares
+   *  framed in the owner-house colour. Lanes follow the existing route network. */
   private renderColonies(ctx: CanvasRenderingContext2D) {
     const inv = 1 / Math.sqrt(this.currentScale);
     ctx.lineCap = "round";
@@ -2741,7 +2891,7 @@ export class OverlayManager {
     for (const c of this.colonies) {
       const x = c.x + 0.5, y = c.y + 0.5;
       if (c.kind === 2) {
-        // House trade outpost: small black square, framed in the owner's colour.
+        // House trade outpost: small grey square, framed in the owner's colour.
         const s = Math.max(1.0, 1.9 * inv);
         ctx.globalAlpha = 0.95;
         ctx.fillStyle = lineColors.houseOutpost;

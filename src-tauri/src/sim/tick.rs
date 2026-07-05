@@ -131,8 +131,13 @@ const ESTATE_HOUSE_OWNER_WEALTH: f32 = 6.0;
 // Raised from 0.28 so sites are far more often "in range" (the common "0 in range"
 // stall): a great city / rich house can now reach roughly half a continent away.
 /// Colonies are founded at most this far from their metropolis (was ~0.42·world_w ≈
-/// 16 800 km at default res — colonies appeared across whole oceans). 5000 km cap.
-const COLONY_MAX_KM: f32 = 5000.0;
+/// 16 800 km at default res — colonies appeared across whole oceans). 2500 km cap
+/// (user rule): a colony is a bold venture but not on the far side of the world.
+const COLONY_MAX_KM: f32 = 2500.0;
+/// SATELLITES hug their metropolis — a day's ride (Ostia→Rome), never an ocean. They
+/// draw from a dedicated near-city pool (`compute_satellite_sites`) and are capped at
+/// this range from the parent (user rule).
+const SATELLITE_MAX_KM: f32 = 500.0;
 /// Capital it takes to found a SETTLEMENT colony (heavy — a city-scale venture),
 /// pooled from the parent city treasury + optional house & bank backers.
 const COLONY_FOUND_COST: f32 = 14.0;
@@ -226,11 +231,18 @@ const SMALL_CITY_PLAGUE_RESIST: f32 = 3.0;
 const SATELLITE_METRO_POP: f32 = 25_000.0;    // only a large metropolis spins one off
 const SATELLITE_COST: f32 = 8_000.0;          // council pays this from its treasury
 const SATELLITE_SEED_POP: f32 = 800.0;        // relocated settlers seed the satellite
-const SATELLITE_REACH_FRAC: f32 = 0.06;       // short range around the metropolis
+// Range is now the absolute `SATELLITE_MAX_KM` (500 km) against the near-city pool.
 const SATELLITE_MAX_PER_METRO: u32 = 3;       // a metropolis can raise a few
 const SATELLITE_WORKSHOP_POP: f32 = 60_000.0; // this large → it needs a workshop town
 const SATELLITE_INDEP_YEARS: u32 = 40;        // a mature satellite may go independent
 const SATELLITE_INDEP_POP: f32 = 8_000.0;     // …once it has grown into a real city
+// ── Satellite CONSTRUCTION (10-year build with decay). See the plan doc. ──
+const SAT_BUILD_CONVOYS: u8 = 3;              // dedicated caravans+ships per project
+pub(crate) const SAT_STAGE_MONTHS: f32 = 24.0; // 5 stages × 24 mo = 120 mo ≈ 10 years
+pub(crate) const SAT_STAGE_QUOTA: f32 = 300.0; // goods/month per category a stage demands
+pub(crate) const SAT_CONVOY_UPKEEP: f32 = 40.0; // gr-eq/month per convoy, paid by the council
+const SAT_DECAY_PER_IDLE_MONTH: f32 = 0.03;   // stage progress lost each starved month
+const SAT_STAGE_DROP_IDLE_MONTHS: u8 = 18;    // ~1.5 y starved → slip a whole stage back
 /// ── CARAVANSERAIS: waystations on long INLAND trade corridors (Silk-Road halts a
 /// day apart between distant cities); a small settlement founded near a heavy land
 /// tie's midpoint, which can grow into a town like any other.
@@ -252,6 +264,8 @@ const POLIS_MIGRATION_MIN_TREASURY: f32 = 50.0;
 const POLIS_MIGRATION_POP_FRAC: f32 = 0.012;
 /// Recent migration arrows kept for the map (refugee roads + economic drift).
 const MIGRATION_ARROW_CAP: usize = 120;
+/// Recent ROUTE-BOUND migration flows kept for the reworked Migration overlay.
+const MIGRATION_ROUTE_CAP: usize = 90;
 /// ── Economic migration (#23) — yearly wage/mood-driven population drift toward
 /// thriving cities in the same trade component. People LEAVE a city only when its
 /// opportunity (prosperity − starvation) is below `ECON_MIG_STAY_ABOVE`, and only
@@ -289,6 +303,11 @@ const OUTPOST_START_TICK: u32 = 30 * 365;
 const OUTPOST_FOUND_WEALTH: f32 = 100_000.0; // a house this rich may found one
 const OUTPOST_FOUND_COST: f32 = 70_000.0;    // heavy cost (debited from the house)
 const OUTPOST_MAX_POP: f32 = 800.0;          // a trade post stays small (hard pop cap)
+/// A long-lived, thriving outpost (at the cap) whose wealthy house has held it this
+/// many years may MATURE into a full colony (Phoenician emporion → city: Gadir, Utica).
+const OUTPOST_GRADUATE_YEARS: u32 = 30;
+/// …and its owning house must be at least this rich to make the investment.
+const OUTPOST_GRADUATE_WEALTH: f32 = 60_000.0;
 // ── Trade bases (houses develop EXISTING under-traded small cities). See
 //    docs/TRADE_BASE_MECHANIC_PLAN.md. The accessible cousin of the outpost: a house
 //    invests influence + capital into a real settlement to bootstrap it into a node. ──
@@ -1108,6 +1127,35 @@ pub struct TickHub {
     /// Food actually delivered to this colony last supply pass (monthly units) — for
     /// the Colonial Office readout. Derived; `#[serde(default)]`.
     #[serde(default)] pub supply_delivered: f32,
+    // ── Dynamic entrepôt / trade-hub status (campaign-only; serde-defaulted) ──
+    /// Realized trade throughput touching this hub in the LAST year (imports+exports
+    /// from `flow_year`). Drives `hub_class`. Display + classification signal.
+    #[serde(default)] pub transit_year: f32,
+    /// Commercial rank earned LIVE from trade: 0 = ordinary · 1 = trade hub · 2 =
+    /// entrepôt (a great sea pass-through market — Venice/Bruges). Rises and falls with
+    /// the trade that actually flows through the city.
+    #[serde(default)] pub hub_class: u8,
+    /// Hysteresis momentum for `hub_class`: consecutive years pushing up (+) or down
+    /// (−); a tier changes only after 3 confirming years, so status doesn't flicker.
+    #[serde(default)] pub class_momentum: i8,
+    // ── Satellite CONSTRUCTION project (a metropolis builds this suburb over ~10y; all
+    //    serde-defaulted so 0 = "finished / not a construction site"). See
+    //    docs/SATELLITE_CONSTRUCTION_AND_MIGRATION_PLAN.md ──
+    /// 0 = functional (not under construction); 1..=5 = current build stage
+    /// (Survey · Foundations · Warehousing · Walls · Market).
+    #[serde(default)] pub build_stage: u8,
+    /// Progress 0..1 within the CURRENT stage. Advances with supply, decays when starved.
+    #[serde(default)] pub build_progress: f32,
+    /// This month's delivered-vs-quota ratio per category [food, preservables, construction].
+    #[serde(default)] pub build_supply: [f32; 3],
+    /// Auto-picked good id feeding each category (by locale — cheapest available).
+    #[serde(default)] pub build_supply_good: [u16; 3],
+    /// Consecutive under-supplied months (drives decay + a stage drop past the threshold).
+    #[serde(default)] pub build_idle_months: u8,
+    /// Dedicated caravans+ships hauling the works (upkeep paid by the metropolis council).
+    #[serde(default)] pub build_convoys: u8,
+    /// Tick the project broke ground (for ETA + the window's "founded" line).
+    #[serde(default)] pub build_start_tick: u32,
     // ── Government (DLC · key figures / capture / laws — all serde-defaulted) ──
     /// Regime type: 0 Council/Oligarchy · 1 Principality · 2 Free Commune. Seeded once.
     #[serde(default)] pub govt_type: u8,
@@ -1549,6 +1597,35 @@ pub struct ColonizeSite {
     /// Land→sea CHOKEPOINT (strait / isthmus / portage where cargo transships and
     /// tolls can be levied — Venice/Bruges/Constantinople-style prize sites).
     #[serde(default)] pub chokepoint: bool,
+}
+
+/// A worldgen settlement that ranked BELOW the live-hub cap, so it is NOT
+/// economically simulated (that would blow up the O(n²) tick cost). It is still a
+/// real place on the map: its static worldgen population is COUNTED in the world
+/// total and it stays clickable/searchable — the "decouple" of clickability +
+/// census from simulation. Held on the sim purely as inert reference data.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct HinterlandTown {
+    pub x: f32,
+    pub y: f32,
+    pub name: String,
+    pub population: f32,
+    pub koppen: u8,
+    pub coastal: bool,
+}
+
+/// A migration flow drawn STRICTLY along the trade-route network: `path` is the routed
+/// polyline (origin → … intermediate trade hubs … → destination cell coords), so people
+/// visibly travel the same corridors goods do — never a straight jump across terrain.
+/// Carries the migrants' culture + volume for the ribbon/dots/focus overlays.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct MigrationRoute {
+    pub path: Vec<[f32; 2]>,
+    pub culture: String,
+    pub volume: f32,
+    pub tick: u32,
+    pub from_hub: i32,
+    pub to_hub: i32,
 }
 
 /// Batch 1 · one row of the ERA-SCRUBBER ring: the world as it stood at the end
@@ -2158,6 +2235,16 @@ pub struct CampaignSim {
     /// the Economy step). Consumed as colonies are founded; empty on old saves.
     #[serde(default)]
     pub colonizable: Vec<ColonizeSite>,
+    /// NEAR-city sites for metropolis satellites (≤500 km — Ostia→Rome). Separate from
+    /// `colonizable` (whose sites are buffered far from cities so colonies aren't
+    /// suburbs). Consumed as satellites are founded; refilled from tiles when low.
+    #[serde(default)]
+    pub satellite_sites: Vec<ColonizeSite>,
+    /// Worldgen settlements below the live-hub cap: drawn + clickable + counted in
+    /// the world census, but NOT simulated (keeps tick cost bounded). See
+    /// [`HinterlandTown`]. Empty on pre-feature saves (serde default).
+    #[serde(default)]
+    pub hinterland: Vec<HinterlandTown>,
     /// Atlas 2.0 — yearly world samples for the Atlas graphs, one row per completed
     /// year: `[year, population, trade volume (grain-eq), live hubs, cumulative
     /// foundings, cumulative abandonments]`. Bounded (oldest rows drop past ~400).
@@ -2173,6 +2260,10 @@ pub struct CampaignSim {
     /// `[from_x, from_y, to_x, to_y, tick]`, bounded to the last 60.
     #[serde(default)]
     pub migrations: Vec<[f32; 5]>,
+    /// Route-bound migration flows (polyline along the trade network + culture + volume),
+    /// for the reworked Migration overlay (dots · ribbon · focus). Bounded.
+    #[serde(default)]
+    pub migration_routes: Vec<MigrationRoute>,
     /// Batch 1 · per-hub PER-GOOD throughput accumulator for the running year
     /// (flat, `hub·ng + good`; rebuilt in-year, so not serialized).
     #[serde(skip)]
@@ -3483,7 +3574,7 @@ impl CampaignSim {
                         else if self.hubs[b].colony_kind == 1 { b } else { usize::MAX };
                     if colony != usize::MAX {
                         if colony == win {
-                            self.make_colony_independent(colony);
+                            self.make_colony_independent(colony, true);
                         } else {
                             self.hubs[colony].indep_cooldown_until = tick + 15 * TICKS_PER_YEAR;
                             let cn = self.hubs[colony].name.clone();
@@ -3835,10 +3926,26 @@ impl CampaignSim {
         let n = self.hubs.len();
         let mut neighbors: Vec<Vec<u32>> = vec![Vec::new(); n];
         let mut scratch: Vec<(u32, f32)> = Vec::with_capacity(n);
+        // A FINISHED, bound satellite (colony_kind 3, build done, has a metropolis) trades
+        // strictly through its mother city — invisible to every other partner, and its own
+        // partner list is just the metropolis. So all its exports/imports divert to the
+        // metropolis first and that market reaps the surplus (user: permanent binding).
+        let is_bound = |i: usize| {
+            let h = &self.hubs[i];
+            h.colony_kind == 3 && h.build_stage == 0 && h.founder_hub >= 0
+        };
         for a in 0..n {
             scratch.clear();
+            // A bound satellite only ever trades with its metropolis.
+            if is_bound(a) {
+                let m = self.hubs[a].founder_hub as usize;
+                if m < n && self.days[a * n + m].is_finite() { neighbors[a] = vec![m as u32]; }
+                continue;
+            }
             for b in 0..n {
                 if b == a { continue; }
+                // A bound satellite is hidden from everyone EXCEPT its own metropolis.
+                if is_bound(b) && self.hubs[b].founder_hub as usize != a { continue; }
                 let d = self.days[a * n + b];
                 if d.is_finite() { scratch.push((b as u32, d)); }
             }
@@ -4248,6 +4355,12 @@ impl CampaignSim {
             self.house_ledger.resize(self.houses.len(), LedgerAcc::default());
             self.house_barred.resize(self.houses.len(), Vec::new());
             self.hub_patron.resize(self.hubs.len(), -1); // trade-base patronage (hub-indexed)
+            // Twice a year, re-rank hubs into commercial classes (trade hub / entrepôt)
+            // from the trade that has actually flowed this period (user: entrepôts
+            // change once per half-year). Hysteresis inside makes status earned/lost.
+            if tick > 0 && tick % (TICKS_PER_YEAR / 2) == 0 {
+                self.classify_hubs();
+            }
             if tick % TICKS_PER_YEAR == 0 {
                 // Yearly inflation erodes every fortune's real value, recorded in the
                 // year that is now closing — then archive it for the Accountant.
@@ -4514,6 +4627,7 @@ impl CampaignSim {
             //    snapshot (charts + growth movers), the world price-index point
             //    (sparkline), and a rich world-summary chronicle row with numbers.
             if tick % 30 == 0 {
+                self.construction_pass(); // satellite build sites: haul supply, advance/decay
                 self.sample_hub_history();
                 self.sample_journal();
                 self.sample_world_chronicle();
@@ -6833,7 +6947,10 @@ impl CampaignSim {
                 self.maybe_establish_trade_base();
                 self.trade_base_pass();
             }
-            if expansion_ok && self.tick >= OUTPOST_START_TICK { self.maybe_found_house_outpost(); }
+            if expansion_ok && self.tick >= OUTPOST_START_TICK {
+                self.maybe_found_house_outpost();
+                self.maybe_graduate_outpost(); // a thriving old outpost matures into a colony
+            }
             if expansion_ok && self.tick >= COLONY_START_TICK {
                 self.maybe_found_settlement_colony();
                 self.maybe_found_food_colony(); // Greek-Crimea grain colony (food stress)
@@ -7008,7 +7125,7 @@ impl CampaignSim {
             stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
         });
         // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
@@ -7355,6 +7472,7 @@ impl CampaignSim {
         let new = self.hubs.len() - 1;
         self.hubs[new].colony_kind = 2;
         self.hubs[new].founder_hub = home as i32;
+        self.hubs[new].colony_founded_tick = self.tick; // for the graduation age gate
         let hname = self.houses[hi].name.clone();
         // Distinct place-name + the (outpost) tag (was "{house} (outpost)", which
         // duplicated when a house planted several); the founding house is named in
@@ -7367,6 +7485,55 @@ impl CampaignSim {
             tick: self.tick, kind: "colony".into(), hub: new as i32, good: g0 as i32, value: 2.0,
             text: format!("{} founds a trade outpost ({})", hname, self.goods[g0].name),
         });
+    }
+
+    /// A thriving house OUTPOST matures into a full colony (Phoenician emporion → city:
+    /// Gadir, Utica, Goa). A long-lived outpost at its population cap, whose owning
+    /// house is wealthy, is PROMOTED IN PLACE: it sheds estate status, becomes a
+    /// settlement colony backed & led by its founding house (which keeps control on any
+    /// later independence — the Magonid pattern), and the small-outpost pop cap is
+    /// lifted so it can grow into a city. At most one graduation per call.
+    fn maybe_graduate_outpost(&mut self) {
+        let tick = self.tick;
+        let mut best = (usize::MAX, 0.0f32);
+        for h in 0..self.hubs.len() {
+            let hub = &self.hubs[h];
+            if !hub.is_estate || hub.colony_kind != 2 || hub.abandoned { continue; }
+            let owner = hub.owner_house;
+            if owner < 0 || (owner as usize) >= self.houses.len()
+                || self.houses[owner as usize].defunct { continue; }
+            let age = tick.saturating_sub(hub.colony_founded_tick);
+            if age < OUTPOST_GRADUATE_YEARS * TICKS_PER_YEAR { continue; }
+            if hub.population < OUTPOST_MAX_POP * 0.9 { continue; }
+            let wealth = self.houses[owner as usize].wealth;
+            if wealth < OUTPOST_GRADUATE_WEALTH { continue; }
+            if wealth > best.1 { best = (h, wealth); }
+        }
+        let Some(h) = (best.0 != usize::MAX).then_some(best.0) else { return };
+        let owner = self.hubs[h].owner_house;
+        let home = if owner >= 0 && (owner as usize) < self.houses.len() {
+            self.houses[owner as usize].hub as i32
+        } else { -1 };
+        // Promote in place: a real hub now, a settlement colony led by its founding house.
+        self.hubs[h].is_estate = false;
+        self.hubs[h].colony_kind = 1;
+        self.hubs[h].colony_stage = 1;
+        self.hubs[h].founder_hub = home;
+        self.hubs[h].backers = vec![(1, owner.max(0) as u32, 1.0)];
+        self.hubs[h].council_house = owner;
+        self.hubs[h].colony_founded_tick = tick; // independence clock restarts from here
+        self.hubs[h].founding_pop = self.hubs[h].population.max(1.0);
+        self.hubs[h].reserve_cap = self.hubs[h].reserve_cap.max(6.0);
+        self.hubs[h].supply_years = 0.0;
+        self.hubs[h].name = self.hubs[h].name.replace(" (outpost)", "");
+        self.routes_dirty = true;
+        self.total_foundings += 1;
+        let cn = self.hubs[h].name.clone();
+        let hn = if owner >= 0 && (owner as usize) < self.houses.len() {
+            self.houses[owner as usize].name.clone()
+        } else { String::new() };
+        self.journal.push(JournalEntry { tick, kind: "colony".into(), hub: h as i32, good: -1,
+            value: 0.0, text: format!("{} grows from a trading post into a colony of {}", cn, hn) });
     }
 
     /// Yearly: a wealthy house develops an EXISTING under-traded small city into a
@@ -7642,6 +7809,74 @@ impl CampaignSim {
         }
     }
 
+    /// Shortest hop-path from `src` to `dst` over the TRADE-ROUTE graph (`neighbors`,
+    /// weighted by `days`). Returns the hub-index chain [src, …, dst], or `None` if no
+    /// trade-route chain connects them (⇒ no migration — people move strictly by routes).
+    fn neighbor_path(&self, src: usize, dst: usize) -> Option<Vec<usize>> {
+        let n = self.hubs.len();
+        if src >= n || dst >= n { return None; }
+        if src == dst { return Some(vec![src]); }
+        // Small Dijkstra over the capped neighbour adjacency.
+        let mut dist = vec![f32::INFINITY; n];
+        let mut prev = vec![usize::MAX; n];
+        let mut visited = vec![false; n];
+        dist[src] = 0.0;
+        for _ in 0..n {
+            // pick the closest unvisited (n is small after the NEIGHBOR_K cap keeps the
+            // graph sparse; this stays cheap relative to the trade phase).
+            let mut u = usize::MAX;
+            let mut best = f32::INFINITY;
+            for i in 0..n {
+                if !visited[i] && dist[i] < best { best = dist[i]; u = i; }
+            }
+            if u == usize::MAX { break; }
+            if u == dst { break; }
+            visited[u] = true;
+            if let Some(nbrs) = self.neighbors.get(u) {
+                for &bn in nbrs {
+                    let b = bn as usize;
+                    if b >= n || visited[b] { continue; }
+                    let w = self.days.get(u * n + b).copied().unwrap_or(f32::INFINITY);
+                    if !w.is_finite() { continue; }
+                    let nd = dist[u] + w.max(0.01);
+                    if nd < dist[b] { dist[b] = nd; prev[b] = u; }
+                }
+            }
+        }
+        if !dist[dst].is_finite() { return None; }
+        let mut chain = vec![dst];
+        let mut cur = dst;
+        while cur != src {
+            let p = prev[cur];
+            if p == usize::MAX { return None; }
+            chain.push(p);
+            cur = p;
+        }
+        chain.reverse();
+        Some(chain)
+    }
+
+    /// Emit a route-bound migration flow: trace the trade-route polyline from `src`→`dst`
+    /// and record it (culture + volume) for the reworked overlay. Falls back to a legacy
+    /// endpoint arrow too, so the old overlay stays populated. Returns whether a route
+    /// existed (callers treat "no route" as "no move" when they want strict routing).
+    fn emit_migration_route(&mut self, src: usize, dst: usize, culture: &str, volume: f32) -> bool {
+        let Some(chain) = self.neighbor_path(src, dst) else { return false; };
+        let path: Vec<[f32; 2]> = chain.iter().map(|&h| [self.hubs[h].x, self.hubs[h].y]).collect();
+        let (sx, sy) = (self.hubs[src].x, self.hubs[src].y);
+        let (dx, dy) = (self.hubs[dst].x, self.hubs[dst].y);
+        self.migration_routes.push(MigrationRoute {
+            path, culture: culture.to_string(), volume, tick: self.tick,
+            from_hub: src as i32, to_hub: dst as i32,
+        });
+        if self.migration_routes.len() > MIGRATION_ROUTE_CAP {
+            let excess = self.migration_routes.len() - MIGRATION_ROUTE_CAP;
+            self.migration_routes.drain(0..excess);
+        }
+        self.push_migration_arrow(sx, sy, dx, dy);
+        true
+    }
+
     /// Ensure every live hub has a majority culture (seeded from the worldgen
     /// culture map, inherited by its founder for colonies) and a minorities slot.
     /// Only fills empties, so it self-heals old saves and newly-founded hubs.
@@ -7757,8 +7992,7 @@ impl CampaignSim {
                 .max(self.hubs[src].founding_pop * 0.3);
             self.hubs[dst].population += movers;
             self.add_minority(dst, &culture, movers);
-            let (sx, sy, dx, dy) = (self.hubs[src].x, self.hubs[src].y, self.hubs[dst].x, self.hubs[dst].y);
-            self.push_migration_arrow(sx, sy, dx, dy);
+            self.emit_migration_route(src, dst, &culture, movers); // 1-hop trade tie
             sent += 1;
             if hash01(self.seed, tick as u64 ^ 0x9A17, src as u64) < 0.10 {
                 let dn = self.hubs[dst].name.clone();
@@ -7813,11 +8047,12 @@ impl CampaignSim {
             if dest.1 - src_opp < ECON_MIG_GRADIENT { continue; } // needs a real pull
             let movers = (src_pop * ECON_MIG_FRAC).clamp(10.0, 800.0);
             if movers >= src_pop * 0.5 { continue; }
+            // STRICT: people move only if a trade-route chain connects the two cities.
+            let culture = self.hub_culture.get(src).cloned().unwrap_or_default();
+            if !self.emit_migration_route(src, di, &culture, movers) { continue; }
             self.hubs[src].population -= movers;
             self.hubs[di].population += movers;
             self.record_migration_culture(di, src, movers);
-            let (sx, sy, dx, dy) = (self.hubs[src].x, self.hubs[src].y, self.hubs[di].x, self.hubs[di].y);
-            self.push_migration_arrow(sx, sy, dx, dy);
             if hash01(self.seed, tick as u64 ^ 0x5EED_0C, src as u64) < 0.08 {
                 let (sn, dn) = (self.hubs[src].name.clone(), self.hubs[di].name.clone());
                 self.journal.push(JournalEntry { tick, kind: "migration".into(), hub: di as i32, good: -1,
@@ -7843,12 +8078,18 @@ impl CampaignSim {
             if hash01(self.seed, tick as u64 ^ 0x319A7E, src as u64) > 0.5 { continue; }
             let comp = self.hubs[src].component;
             let pop = self.hubs[src].population;
+            let km_per_cell = EARTH_EQUATOR_KM / self.world_w.max(1.0);
+            let max_cells = MIGRATION_MAX_KM / km_per_cell.max(1e-3);
             // Destination: the most under-populated food-secure city in the same trade
             // region, strongly preferring a colony this polis founded.
             let mut dest = (usize::MAX, f32::MAX);
             for d in 0..n {
                 if d == src || self.hubs[d].is_estate || self.hubs[d].component != comp { continue; }
                 if self.hubs[d].food_balance < 0.0 { continue; }
+                // Settlers move to NEARBY cities only — no cross-map sponsorship. Being
+                // in the same trade component spans the whole continent/ocean, so gate on
+                // real distance (≤ MIGRATION_MAX_KM) like the other migration passes.
+                if self.hub_cell_dist(src, d) > max_cells { continue; }
                 if self.hubs[d].population >= pop * 0.5 { continue; } // must have room to grow
                 let own_colony = self.hubs[d].founder_hub == src as i32;
                 let rank = self.hubs[d].population * if own_colony { 0.4 } else { 1.0 };
@@ -7863,8 +8104,8 @@ impl CampaignSim {
             self.hubs[di].population += movers;
             self.hubs[di].treasury += spend * 0.5; // settlement aid travels with the migrants
             self.record_migration_culture(di, src, movers);
-            let (sx, sy, dx, dy) = (self.hubs[src].x, self.hubs[src].y, self.hubs[di].x, self.hubs[di].y);
-            self.push_migration_arrow(sx, sy, dx, dy);
+            let culture = self.hub_culture.get(src).cloned().unwrap_or_default();
+            self.emit_migration_route(src, di, &culture, movers); // routed along the trade network
             if hash01(self.seed, tick as u64 ^ 0x4D161, src as u64) < 0.15 {
                 let (sn, dn) = (self.hubs[src].name.clone(), self.hubs[di].name.clone());
                 self.journal.push(JournalEntry { tick, kind: "migration".into(), hub: di as i32, good: -1,
@@ -8082,7 +8323,7 @@ impl CampaignSim {
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
         });
         self.routes_dirty = true;
@@ -8097,9 +8338,12 @@ impl CampaignSim {
     /// Rome, Piraeus→Athens, Westminster & Southwark→London, Galata→Constantinople.
     /// One per call (yearly).
     fn maybe_found_satellite(&mut self, expansion_ok: bool) {
-        if !expansion_ok || self.colonizable.is_empty() { return; }
+        if !expansion_ok || self.satellite_sites.is_empty() { return; }
         let tick = self.tick;
-        let reach = (self.world_w * SATELLITE_REACH_FRAC).max(2.0);
+        // Satellites hug the metropolis: ≤ 500 km (a day's ride), from the dedicated
+        // near-city pool — NOT the far colony pool. `SATELLITE_REACH_FRAC` is no longer
+        // the leash; the absolute km cap is.
+        let reach = (SATELLITE_MAX_KM * self.world_w / EARTH_EQUATOR_KM).max(2.0);
         for m in 0..self.hubs.len() {
             let metro = &self.hubs[m];
             if metro.is_estate || metro.abandoned || metro.colony_kind != 0 { continue; }
@@ -8115,11 +8359,11 @@ impl CampaignSim {
             let role: u8 = if need_granary { 1 } else if need_port { 0 }
                 else if need_workshop { 2 } else { continue };
             if hash01(self.seed, tick as u64 ^ 0x5A7E11, m as u64) > 0.5 { continue; }
-            // Nearest reachable colonizable site (a PORT needs a COASTAL one — the
+            // Nearest reachable NEAR-city site (a PORT needs a COASTAL one — the
             // land/sea transshipment point).
             let (mx, my) = (metro.x, metro.y);
             let mut best = (usize::MAX, f32::MAX);
-            for (i, site) in self.colonizable.iter().enumerate() {
+            for (i, site) in self.satellite_sites.iter().enumerate() {
                 if role == 0 && !site.coastal { continue; }
                 let mut dx = (site.x - mx).abs();
                 if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
@@ -8134,36 +8378,171 @@ impl CampaignSim {
             let seed = SATELLITE_SEED_POP.min(self.hubs[m].population * 0.12);
             self.hubs[m].population = (self.hubs[m].population - seed)
                 .max(self.hubs[m].founding_pop * 0.5);
-            let site = self.colonizable.swap_remove(si);
+            let site = self.satellite_sites.swap_remove(si);
             let new = self.create_organic_town(m, &site, seed);
             self.hubs[new].founder_hub = m as i32; // tracks the metropolis it serves
             self.hubs[new].colony_kind = 3;        // SATELLITE (dependent on its metropolis)
             self.hubs[new].colony_founded_tick = tick;
-            let ng = self.goods.len();
-            match role {
-                1 => { // GRANARY — farm bias so its surplus feeds the metropolis
-                    for g in 0..ng {
-                        if self.goods[g].food {
-                            self.hubs[new].base_per_capita[g] *= FOOD_COLONY_FARM_MULT;
-                            self.hubs[new].production[g] = self.hubs[new].base_per_capita[g] * self.hubs[new].population;
-                            self.hubs[new].stock[g] = self.hubs[new].production[g];
-                        }
-                    }
-                    self.hubs[new].reserve_food = 60.0;
-                }
-                0 => { self.hubs[new].coastal = true; } // PORT — the harbour at the coast
-                _ => {}                                  // WORKSHOP — manufacturing follows pop/labor
+            if role == 0 { self.hubs[new].coastal = true; } // PORT — the harbour at the coast
+            // Break ground on the CONSTRUCTION project (10y, decay model — the role bias +
+            // future-exploit production activate only on COMPLETION; the site just consumes
+            // hauled supply while it's built). `colony_stage` parks the intended role until
+            // then. See docs/SATELLITE_CONSTRUCTION_AND_MIGRATION_PLAN.md.
+            self.hubs[new].build_stage = 1;
+            self.hubs[new].build_start_tick = tick;
+            self.hubs[new].build_convoys = SAT_BUILD_CONVOYS;
+            self.hubs[new].colony_stage = role; // 0 port · 1 granary · else workshop
+            for c in 0u8..3 {
+                self.hubs[new].build_supply_good[c as usize] = self.pick_build_supply_good(m, c);
             }
             let role_name = match role { 1 => "granary", 0 => "port", _ => "workshop" };
             let (metro_name, sat_name) = (self.hubs[m].name.clone(), self.hubs[new].name.clone());
             self.journal.push(JournalEntry {
                 tick, kind: "founding".into(), hub: new as i32, good: -1, value: seed,
-                text: format!("The council of {} founds the {} town of {}", metro_name, role_name, sat_name),
+                text: format!("The council of {} breaks ground on the {} town of {}", metro_name, role_name, sat_name),
             });
             self.total_foundings += 1;
             self.routes_dirty = true;
             return; // one satellite per call
         }
+    }
+
+    /// Auto-pick the good that feeds one construction category (0 food · 1 preservables ·
+    /// 2 construction) from the metropolis by locale: the most available good matching the
+    /// category (name hints steer preservables→salt/dried and construction→timber/stone).
+    fn pick_build_supply_good(&self, metro: usize, cat: u8) -> u16 {
+        let ng = self.goods.len();
+        if ng == 0 || metro >= self.hubs.len() { return 0; }
+        let avail = |g: usize| self.hubs[metro].stock.get(g).copied().unwrap_or(0.0).max(0.0)
+            + self.hubs[metro].production.get(g).copied().unwrap_or(0.0).max(0.0);
+        let name_has = |g: usize, subs: &[&str]| {
+            let n = self.goods[g].name.to_lowercase();
+            subs.iter().any(|s| n.contains(s))
+        };
+        let mut best = (u16::MAX, f32::MIN);
+        for g in 0..ng {
+            let sc = match cat {
+                0 => if self.goods[g].food && self.goods[g].perishable > 0.15 { avail(g) + 1.0 } else { f32::MIN },
+                1 => if self.goods[g].food && self.goods[g].perishable <= 0.15 {
+                        avail(g) + if name_has(g, &["salt", "stockfish", "dried", "cured", "cheese", "honey", "oil"]) { 1e4 } else { 0.0 }
+                    } else { f32::MIN },
+                _ => if !self.goods[g].food {
+                        avail(g) * self.goods[g].bulk.max(1.0)
+                        + if name_has(g, &["timber", "wood", "stone", "iron", "brick", "clay", "marble", "lime", "tile"]) { 1e4 } else { 0.0 }
+                    } else { f32::MIN },
+            };
+            if sc > best.1 { best = (g as u16, sc); }
+        }
+        if best.0 == u16::MAX { 0 } else { best.0 }
+    }
+
+    /// Monthly: advance every satellite still under construction. Convoys pull the 3
+    /// supply goods out of the metropolis's stock and the council treasury pays convoy
+    /// upkeep; the least-supplied category throttles progress. A starved month DECAYS the
+    /// stage, and a long drought slips a whole stage back (user: 10y build with decay).
+    /// The 5th stage's completion turns the site into a functional, metropolis-BOUND city.
+    fn construction_pass(&mut self) {
+        let tick = self.tick;
+        let ng = self.goods.len();
+        let sites: Vec<usize> = (0..self.hubs.len())
+            .filter(|&h| self.hubs[h].build_stage > 0 && !self.hubs[h].abandoned)
+            .collect();
+        for h in sites {
+            let mf = self.hubs[h].founder_hub;
+            if mf < 0 || (mf as usize) >= self.hubs.len() { self.finish_construction(h); continue; }
+            let m = mf as usize;
+            // 1) Pull each supply good from the metropolis (capped by its stock); met% = worst.
+            let mut met = 1.0f32;
+            for c in 0..3usize {
+                let g = self.hubs[h].build_supply_good[c] as usize;
+                if g >= ng { self.hubs[h].build_supply[c] = 1.0; continue; }
+                let have = self.hubs[m].stock.get(g).copied().unwrap_or(0.0).max(0.0);
+                let take = have.min(SAT_STAGE_QUOTA);
+                if g < self.hubs[m].stock.len() { self.hubs[m].stock[g] -= take; }
+                let ratio = take / SAT_STAGE_QUOTA;
+                self.hubs[h].build_supply[c] = ratio;
+                met = met.min(ratio);
+            }
+            // 2) Council pays the convoy crews; if it can't, no work happens this month.
+            let upkeep = SAT_CONVOY_UPKEEP * self.hubs[h].build_convoys as f32;
+            if self.hubs[m].treasury >= upkeep { self.hubs[m].treasury -= upkeep; }
+            else { met = 0.0; }
+            // 3) Advance or decay.
+            if met > 0.05 {
+                self.hubs[h].build_idle_months = 0;
+                self.hubs[h].build_progress += met / SAT_STAGE_MONTHS;
+                while self.hubs[h].build_progress >= 1.0 {
+                    self.hubs[h].build_progress -= 1.0;
+                    self.hubs[h].build_stage += 1;
+                    if self.hubs[h].build_stage > 5 { self.finish_construction(h); break; }
+                }
+            } else {
+                let idle = self.hubs[h].build_idle_months.saturating_add(1);
+                self.hubs[h].build_idle_months = idle;
+                self.hubs[h].build_progress = (self.hubs[h].build_progress - SAT_DECAY_PER_IDLE_MONTH).max(0.0);
+                if idle >= SAT_STAGE_DROP_IDLE_MONTHS && self.hubs[h].build_stage > 1 {
+                    self.hubs[h].build_stage -= 1;
+                    self.hubs[h].build_progress = 0.6;
+                    self.hubs[h].build_idle_months = 0;
+                    let nm = self.hubs[h].name.clone();
+                    self.journal.push(JournalEntry { tick, kind: "construction".into(), hub: h as i32,
+                        good: -1, value: 0.0, text: format!("Works at {} rot for want of supply — the build slips a stage back", nm) });
+                }
+            }
+            if self.hubs[h].build_stage > 0 { self.maybe_construction_event(h); }
+        }
+    }
+
+    /// Occasional construction event (both kinds, per the user): masons/patron speed the
+    /// works; a collapse/flood sets them back. Rolled monthly per active site.
+    fn maybe_construction_event(&mut self, h: usize) {
+        let tick = self.tick;
+        let r = hash01(self.seed, tick as u64 ^ 0xC0_11_5A, h as u64);
+        if r < 0.03 {
+            self.hubs[h].build_progress = (self.hubs[h].build_progress + 0.25).min(0.999);
+            let nm = self.hubs[h].name.clone();
+            self.journal.push(JournalEntry { tick, kind: "construction".into(), hub: h as i32, good: -1,
+                value: 0.0, text: format!("Skilled masons hasten the works at {}", nm) });
+        } else if r > 0.975 {
+            self.hubs[h].build_progress = (self.hubs[h].build_progress - 0.2).max(0.0);
+            let nm = self.hubs[h].name.clone();
+            self.journal.push(JournalEntry { tick, kind: "construction".into(), hub: h as i32, good: -1,
+                value: 0.0, text: format!("A scaffold collapse sets back the works at {}", nm) });
+        }
+    }
+
+    /// Finish a satellite build: clear the project state, activate the parked role's
+    /// production (its "future exploits" go live) and mark it a functional bound city.
+    fn finish_construction(&mut self, h: usize) {
+        let tick = self.tick;
+        let ng = self.goods.len();
+        let role = self.hubs[h].colony_stage; // parked at founding: 0 port · 1 granary · else workshop
+        self.hubs[h].build_stage = 0;
+        self.hubs[h].build_progress = 0.0;
+        self.hubs[h].build_idle_months = 0;
+        self.hubs[h].colony_stage = 0;
+        match role {
+            1 => { // GRANARY — farm bias so its surplus feeds the metropolis
+                for g in 0..ng {
+                    if self.goods[g].food {
+                        self.hubs[h].base_per_capita[g] *= FOOD_COLONY_FARM_MULT;
+                        self.hubs[h].production[g] = self.hubs[h].base_per_capita[g] * self.hubs[h].population;
+                        self.hubs[h].stock[g] = self.hubs[h].production[g];
+                    }
+                }
+                self.hubs[h].reserve_food = 60.0;
+            }
+            0 => { self.hubs[h].coastal = true; } // PORT
+            _ => {}                               // WORKSHOP — manufacturing follows pop/labor
+        }
+        self.routes_dirty = true;
+        let m = self.hubs[h].founder_hub;
+        let mn = if m >= 0 && (m as usize) < self.hubs.len() {
+            self.hubs[m as usize].name.clone()
+        } else { "its metropolis".into() };
+        let (nm, pop) = (self.hubs[h].name.clone(), self.hubs[h].population);
+        self.journal.push(JournalEntry { tick, kind: "founding".into(), hub: h as i32, good: -1,
+            value: pop, text: format!("{} is completed — a functional town bound to {}", nm, mn) });
     }
 
     /// A mature, sizeable SATELLITE eventually outgrows its dependency and becomes a
@@ -8172,7 +8551,7 @@ impl CampaignSim {
     fn satellite_independence_pass(&mut self) {
         let tick = self.tick;
         for h in 0..self.hubs.len() {
-            if self.hubs[h].colony_kind != 3 || self.hubs[h].abandoned { continue; }
+            if self.hubs[h].colony_kind != 3 || self.hubs[h].abandoned || self.hubs[h].build_stage > 0 { continue; }
             let age = tick.saturating_sub(self.hubs[h].colony_founded_tick) / TICKS_PER_YEAR;
             if age >= SATELLITE_INDEP_YEARS && self.hubs[h].population >= SATELLITE_INDEP_POP {
                 self.hubs[h].colony_kind = 0;
@@ -8467,7 +8846,7 @@ impl CampaignSim {
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
             reserve_food: 30.0, reserve_cap: 365.0, supply_years: 0.0, colony_founded_tick: self.tick,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
         });
         self.total_foundings += 1; // Atlas 2.0 lifecycle counter (colony ventures too)
@@ -8707,7 +9086,9 @@ impl CampaignSim {
                 if metro_alive {
                     self.declare_independence_war(h, m as usize);
                 } else {
-                    self.make_colony_independent(h);
+                    // Metropolis has fallen (Tyre besieged) → peaceful drift, founding
+                    // dynasty inherits.
+                    self.make_colony_independent(h, false);
                 }
             }
         }
@@ -8771,10 +9152,83 @@ impl CampaignSim {
             value: 0.0, text: format!("{} collapses — its food lifeline failed and the settlement is abandoned", nm) });
     }
 
-    /// Free a colony from its metropolis (peaceful, or after a won war): drop the
-    /// dependency, the `(colony)` tag, the charter and the backers.
-    fn make_colony_independent(&mut self, h: usize) {
+    /// Re-rank hubs into commercial classes from the trade that has ACTUALLY flowed
+    /// this period (0 ordinary · 1 trade hub · 2 entrepôt). Called twice a year. An
+    /// entrepôt is a great SEA pass-through market (Venice/Bruges); a trade hub is a
+    /// busy secondary market. 3-check hysteresis (`class_momentum`) so status is earned
+    /// and lost over time, not flickered. Uses year-to-date flows, so ranking is
+    /// relative and cadence-independent.
+    fn classify_hubs(&mut self) {
+        let nn = self.hubs.len();
+        if nn == 0 { return; }
+        let mut throughput = vec![0.0f32; nn];
+        for (&(a, b), &v) in self.flow_accum.iter() {
+            if (a as usize) < nn { throughput[a as usize] += v; }
+            if (b as usize) < nn { throughput[b as usize] += v; }
+        }
+        let mut order: Vec<usize> = (0..nn)
+            .filter(|&i| !self.hubs[i].is_estate && !self.hubs[i].abandoned
+                && self.hubs[i].population >= 1.0)
+            .collect();
+        order.sort_by(|&a, &b| throughput[b]
+            .partial_cmp(&throughput[a]).unwrap_or(std::cmp::Ordering::Equal));
+        let live = order.len().max(1);
+        let hub_cut = ((live as f32) * 0.20).ceil() as usize;         // top 20% → trade hub
+        let emp_cut = ((live as f32) * 0.05).ceil().max(1.0) as usize; // top 5% → entrepôt
+        let max_thr = throughput.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
+        let mut rank = vec![usize::MAX; nn];
+        for (r, &i) in order.iter().enumerate() { rank[i] = r; }
+        for i in 0..nn {
+            self.hubs[i].transit_year = throughput[i];
+            if self.hubs[i].is_estate || self.hubs[i].abandoned || self.hubs[i].population < 1.0 {
+                self.hubs[i].hub_class = 0;
+                self.hubs[i].class_momentum = 0;
+                continue;
+            }
+            let r = rank[i];
+            let thr = throughput[i];
+            // Desired class this period, with an absolute-volume floor so a barely-
+            // trading world doesn't crown entrepôts. Entrepôts must be SEA ports.
+            let desired: u8 = if r < emp_cut && self.hubs[i].coastal && thr >= 0.45 * max_thr {
+                2
+            } else if r < hub_cut && thr >= 0.12 * max_thr {
+                1
+            } else {
+                0
+            };
+            let cur = self.hubs[i].hub_class;
+            if desired > cur {
+                let m = self.hubs[i].class_momentum.max(0) + 1;
+                if m >= 3 { self.hubs[i].hub_class = cur + 1; self.hubs[i].class_momentum = 0; }
+                else { self.hubs[i].class_momentum = m; }
+            } else if desired < cur {
+                let m = self.hubs[i].class_momentum.min(0) - 1;
+                if m <= -3 { self.hubs[i].hub_class = cur - 1; self.hubs[i].class_momentum = 0; }
+                else { self.hubs[i].class_momentum = m; }
+            } else {
+                let s = self.hubs[i].class_momentum.signum();
+                self.hubs[i].class_momentum -= s;
+            }
+        }
+    }
+
+    /// Free a colony from its metropolis (drop dependency, the `(colony)` tag, charter
+    /// and backers) and hand over CONTROL, Carthage-style:
+    ///   • peaceful (via_war=false) → the FOUNDING HOUSE (the trade dynasty that built
+    ///     it — the Magonids of Carthage) inherits the free city's council;
+    ///   • won by WAR (via_war=true) → the mother city's house is EXPELLED and a NEW
+    ///     revolutionary trade family rises to lead it.
+    fn make_colony_independent(&mut self, h: usize, via_war: bool) {
+        let tick = self.tick;
         let nm = self.hubs[h].name.replace(" (colony)", "");
+        // Founding merchant house = the house backer of the joint-stock venture.
+        let founding_house = self.hubs[h].backers.iter()
+            .find(|(k, _, _)| *k == 1).map(|&(_, i, _)| i as usize)
+            .filter(|&i| i < self.houses.len() && !self.houses[i].defunct);
+        let metro = self.hubs[h].founder_hub;
+        let metro_house = if metro >= 0 && (metro as usize) < self.hubs.len() {
+            self.hubs[metro as usize].council_house
+        } else { -1 };
         self.hubs[h].colony_kind = 0;
         self.hubs[h].autonomous = true;
         self.hubs[h].founder_hub = -1;
@@ -8782,8 +9236,77 @@ impl CampaignSim {
         self.colony_supply.retain(|s| s.colony_hub != h as u32);
         self.lift_colony_charter(h);
         self.hubs[h].name = nm.clone();
-        self.journal.push(JournalEntry { tick: self.tick, kind: "colony".into(), hub: h as i32,
-            good: -1, value: 0.0, text: format!("{} wins its independence and stands a free city", nm) });
+        if via_war {
+            // Expel the mother city's house (its office here + bar it), then seat a NEW
+            // revolutionary family that leads the freed city.
+            if metro_house >= 0 && (metro_house as usize) < self.houses.len() {
+                let mh = metro_house as usize;
+                self.houses[mh].offices.retain(|&o| o as usize != h);
+                self.house_barred.resize(self.houses.len(), Vec::new());
+                if let Some(v) = self.house_barred.get_mut(mh) {
+                    if !v.contains(&(h as u32)) { v.push(h as u32); }
+                }
+            }
+            let new_house = self.found_house_at(h);
+            self.hubs[h].council_house = new_house.map(|i| i as i32).unwrap_or(-1);
+            let mn = if metro >= 0 && (metro as usize) < self.hubs.len() {
+                self.hubs[metro as usize].name.clone()
+            } else { "its metropolis".into() };
+            self.journal.push(JournalEntry { tick, kind: "colony".into(), hub: h as i32,
+                good: -1, value: 0.0,
+                text: format!("{} throws off {} in a war of independence; a new merchant family takes the reins", nm, mn) });
+        } else {
+            // Peaceful drift: the founding dynasty inherits the free city.
+            if let Some(fh) = founding_house {
+                self.hubs[h].council_house = fh as i32;
+                if !self.houses[fh].offices.contains(&(h as u32)) {
+                    self.houses[fh].offices.push(h as u32);
+                }
+                let (hn, cn) = (self.houses[fh].name.clone(), nm.clone());
+                self.houses[fh].events.push(HouseEvent { tick, kind: "colony".into(),
+                    text: format!("{} inherits {} as a free city", hn, cn) });
+            }
+            self.journal.push(JournalEntry { tick, kind: "colony".into(), hub: h as i32,
+                good: -1, value: 0.0,
+                text: format!("{} comes peacefully into its own as a free city under its founding house", nm) });
+        }
+    }
+
+    /// Seat a brand-new merchant family at hub `h` — used when a colony WINS its
+    /// independence by war (a fresh dynasty rises to rule the free city). Returns the
+    /// new house index. Mirrors `maybe_found_house`'s construction.
+    fn found_house_at(&mut self, h: usize) -> Option<usize> {
+        let tick = self.tick;
+        let ng = self.goods.len();
+        if ng == 0 { return None; }
+        let mut gi: Vec<usize> = (0..ng).collect();
+        gi.sort_by(|&a, &b| self.hubs[h].production[b]
+            .partial_cmp(&self.hubs[h].production[a]).unwrap_or(std::cmp::Ordering::Equal));
+        let mut spec: Vec<usize> = gi.into_iter()
+            .filter(|&g| self.hubs[h].production[g] > 0.0).take(2).collect();
+        if spec.is_empty() { spec.push(0); }
+        let name = self.unique_family_name_for(h, tick as u64 ^ 0xBEEF);
+        let head = self.head_name_for(h, &name, tick as u64 ^ 0x2468);
+        let founded = HouseEvent { tick, kind: "founded".into(),
+            text: format!("{} rises to lead free {}", name, self.hubs[h].name) };
+        let (fleet_sea, fleet_river, fleet_caravan) = Self::initial_fleet(self.hubs[h].coastal, false);
+        let idx = self.houses.len();
+        self.houses.push(House {
+            name, hub: h as u32, wealth: 5.0, prestige: 0.2, spec,
+            monopoly: vec![], rivals: vec![], generation: 1,
+            events: vec![founded], good_profit: Vec::new(), mono50: Vec::new(),
+            mono_ever: Vec::new(), dominant_seat: true, prev_wealth: 5.0, worst_loss: 0.0,
+            fleet_sea, fleet_river, fleet_caravan,
+            head_name: head, head_since: tick,
+            head_lifespan: self.roll_lifespan(h as u64 ^ 0x51),
+            founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
+            archetype: pick_archetype(self.seed, tick as u64 ^ h as u64),
+            charters: Vec::new(),
+            is_guild: false, offices: vec![h as u32], trade_at: Vec::new(), debt_since: 0,
+            wealth_history: Vec::new(), office_leases: Vec::new(),
+            influence: Vec::new(), bailos: Vec::new(),
+        });
+        Some(idx)
     }
 
     /// Open a war of independence between a colony and its metropolis (reuses the
@@ -10554,7 +11077,7 @@ mod tests {
             quality: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
         }
     }
@@ -10581,7 +11104,7 @@ mod tests {
             last_month_pop: 0.0, last_month_index: 0.0, seed_house_count: 0,
             fleets_migrated: true, tech_factor: 1.0, percap_migrated: true, society_migrated: false,
             house_ledger: Vec::new(), house_ledger_prev: Vec::new(), house_barred: Vec::new(),
-            colonizable: vec![], hub_patron: vec![], colony_supply: vec![],
+            colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], hub_patron: vec![], colony_supply: vec![],
             hub_culture: vec![], hub_minorities: vec![], estate_idle_years: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
             recent_trades: vec![],

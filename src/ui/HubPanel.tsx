@@ -123,6 +123,13 @@ export function HubPanel() {
   // The campaign tick — re-fetch the hub detail whenever it advances so the open
   // settlement's prices/wealth/population update live alongside the campaign.
   const campTick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
+  // A satellite still UNDER CONSTRUCTION shows the dedicated construction window instead
+  // of this normal city panel; once built (build_stage→0) this panel takes over again.
+  const isConstruction = useCampaignStore((s) => {
+    if (selectedHub == null || !s.snapshot?.active) return false;
+    const h = s.snapshot.hubs.find((x) => x.id === selectedHub);
+    return !!h && (h.build_stage ?? 0) > 0;
+  });
 
   const [tab, setTab] = useState<Tab>("summary");
   const [tradeView, setTradeView] = useState<"market" | "flows">("market");
@@ -177,7 +184,7 @@ export function HubPanel() {
   }, [detail]);
 
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.settlement);
-  if (selectedHub === null || !economy) return null;
+  if (selectedHub === null || !economy || isConstruction) return null;
   const hub = economy.hubs.find((h) => h.id === selectedHub);
   if (!hub) return null;
 

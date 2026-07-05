@@ -116,6 +116,8 @@ export function Toolbar() {
   const setElevationValue = useUIStore((s) => s.setElevationValue);
   const toggleOverlay = useUIStore((s) => s.toggleOverlay);
   const setOverlaysVisible = useUIStore((s) => s.setOverlaysVisible);
+  const migrationMode = useUIStore((s) => s.migrationMode);
+  const setMigrationMode = useUIStore((s) => s.setMigrationMode);
   const showBankIcons = useUIStore((s) => s.showBankIcons);
   const setShowBankIcons = useUIStore((s) => s.setShowBankIcons);
   const setGoodDetail = useUIStore((s) => s.setGoodDetail);
@@ -258,17 +260,36 @@ export function Toolbar() {
             : "Trade routes & flows show the worldgen equilibrium (potential)"}
         </div>
         {overlayTypes.map((o) => (
-          <label key={o.id} style={checkboxRow}>
-            <input
-              type="checkbox"
-              checked={!!overlayVisibility[o.id]}
-              onChange={() => toggleOverlay(o.id)}
-              style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
-            />
-            <span style={{ color: overlayVisibility[o.id] ? "#b0c8e0" : "#5a6a80" }}>
-              {o.label}
-            </span>
-          </label>
+          <div key={o.id}>
+            <label style={checkboxRow}>
+              <input
+                type="checkbox"
+                checked={!!overlayVisibility[o.id]}
+                onChange={() => toggleOverlay(o.id)}
+                style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
+              />
+              <span style={{ color: overlayVisibility[o.id] ? "#b0c8e0" : "#5a6a80" }}>
+                {o.label}
+              </span>
+            </label>
+            {/* Route-bound migration: ribbon / dots / focus mode (people follow trade routes). */}
+            {o.id === "migrations" && overlayVisibility[o.id] && (
+              <div style={{ display: "flex", gap: 3, margin: "1px 0 4px 22px" }}>
+                {(["ribbon", "dots", "focus"] as const).map((m) => (
+                  <button key={m} onClick={() => setMigrationMode(m)}
+                    style={{
+                      flex: 1, fontSize: 9.5, padding: "2px 0", borderRadius: 4, cursor: "pointer",
+                      border: `1px solid ${migrationMode === m ? "#4a90d0" : "#26374d"}`,
+                      background: migrationMode === m ? "#16324a" : "#0e1826",
+                      color: migrationMode === m ? "#cfe2f6" : "#6a86a6",
+                    }}
+                    title={m === "focus" ? "Only the selected city's inbound flows" : m === "dots" ? "Dots riding the trade routes" : "Culture ribbons, width = volume"}>
+                    {m}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         ))}
         {/* Bank seats — a separate campaign overlay (not a worldgen layer). */}
         <label style={checkboxRow}>
