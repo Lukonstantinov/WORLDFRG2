@@ -356,8 +356,10 @@ export interface ProvGoodRow {
 export interface ProvisioningBrief {
   first_buy: boolean;
   dominant_house: string;
+  dominant_share: number;
   dependents: number;
   reserve_target: number;
+  bought_month: number;
   goods: ProvGoodRow[];
 }
 

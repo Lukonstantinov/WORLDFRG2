@@ -941,12 +941,13 @@ export function HubPanel() {
               color: prov.first_buy ? "#8fe0aa" : "#e8cf8a",
             }}>
               {prov.first_buy
-                ? "✔ Right of first buy: ACTIVE — the council pre-empts arriving merchants for the goods it needs."
-                : `✖ First buy SUSPENDED — House ${prov.dominant_house || "?"} dominates this city's trade and takes the market first. The council must buy at a retail premium.`}
+                ? `✔ Right of first buy: ACTIVE — the council pre-empts arriving merchants for the goods it needs. Houses carry ${Math.round(prov.dominant_share * 100)}% of trade (< 60%).`
+                : `✖ First buy SUSPENDED — ${prov.dominant_house ? `House ${prov.dominant_house} controls the government` : `merchant houses carry ${Math.round(prov.dominant_share * 100)}% of trade`} and take the market first. The council must buy at a retail premium.`}
             </div>
             <div style={{ fontSize: 11, color: "#9ab0c8" }}>
               Provisioning <b>{prov.dependents}</b> {prov.dependents === 1 ? "dependent" : "dependents"} (colonies + satellites)
               {" · "}reserve target {prov.reserve_target.toFixed(0)}/good
+              {prov.bought_month > 0 && <> · <span style={{ color: "#7fd0a0" }}>secured {prov.bought_month.toFixed(0)} gr-eq this month</span></>}
             </div>
             <div style={{ fontSize: 11, color: "#7fb0e0", fontWeight: 600 }}>Secured in the civic warehouse</div>
             {prov.goods.length === 0 && (

@@ -1746,6 +1746,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         total_abandonments: 0,
         migrations: vec![],
         migration_routes: vec![],
+        council_bought_month: vec![],
         good_flow_accum: vec![],
         hub_good_trade: vec![],
         year_frames: vec![],
@@ -2259,8 +2260,12 @@ pub struct ProvGoodRow {
 pub struct ProvisioningBrief {
     pub first_buy: bool,
     pub dominant_house: String,
+    /// Fraction of the city's trade carried by merchant houses (0..1).
+    pub dominant_share: f32,
     pub dependents: u32,
     pub reserve_target: f32,
+    /// Grain-eq secured into the civic warehouse last month.
+    pub bought_month: f32,
     pub goods: Vec<ProvGoodRow>,
 }
 
@@ -2273,10 +2278,15 @@ pub fn campaign_get_provisioning(id: u32, db: State<'_, WorldDb>) -> Result<Opti
     if hub.is_estate || hub.abandoned { return Ok(None); }
     let deps = sim.hubs.iter().filter(|d| d.founder_hub == hi as i32 && !d.abandoned
         && (d.colony_kind == 1 || d.colony_kind == 3 || d.build_stage > 0)).count() as u32;
-    let first_buy = hub.captor_house < 0;
+    // Real trade-share dominance: houses carrying ≥60% of the city's trade (or a captured
+    // government) suspend the council's right of first buy.
+    let tw_total = hub.tw_house + hub.tw_local + hub.tw_guild;
+    let dominant_share = if tw_total > 1e-6 { hub.tw_house / tw_total } else { 0.0 };
+    let first_buy = dominant_share < 0.60 && hub.captor_house < 0;
     let dominant_house = if hub.captor_house >= 0 {
         sim.houses.get(hub.captor_house as usize).map(|h| h.name.clone()).unwrap_or_default()
     } else { String::new() };
+    let bought_month = sim.council_bought_month.get(hi).copied().unwrap_or(0.0);
     let reserve_target = crate::sim::tick::COUNCIL_RESERVE_BASE * (1.0 + deps as f32)
         * (hub.population / 5_000.0).clamp(0.3, 4.0);
     let mut goods: Vec<ProvGoodRow> = (0..sim.goods.len())
@@ -2291,7 +2301,7 @@ pub fn campaign_get_provisioning(id: u32, db: State<'_, WorldDb>) -> Result<Opti
         .collect();
     goods.sort_by(|a, b| b.secured.partial_cmp(&a.secured).unwrap_or(std::cmp::Ordering::Equal));
     goods.truncate(10);
-    Ok(Some(ProvisioningBrief { first_buy, dominant_house, dependents: deps, reserve_target, goods }))
+    Ok(Some(ProvisioningBrief { first_buy, dominant_house, dominant_share, dependents: deps, reserve_target, bought_month, goods }))
 }
 
 /// A route-bound migration flow for the reworked Migration overlay (polyline along the

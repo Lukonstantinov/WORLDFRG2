@@ -253,6 +253,15 @@ const COUNCIL_PROVISION_BUDGET_FRAC: f32 = 0.15;     // ≤15% of treasury spent
 pub(crate) const COUNCIL_RESERVE_BASE: f32 = 180.0;  // target civic stock per needed good (× scale)
 const COUNCIL_BUY_PRICE: f32 = 1.0;                  // first-buy pays market price
 const COUNCIL_RETAIL_PRICE: f32 = 1.4;               // dominated council must buy at a retail premium
+const COUNCIL_DOMINANCE_THRESHOLD: f32 = 0.60;       // houses carrying ≥60% of the city's trade
+                                                     // (or a captured govt) suspend first-buy
+
+/// Fraction of a hub's trade carried by merchant HOUSES (vs local traders + guilds).
+/// The council loses its right of first refusal once houses dominate the market.
+fn hub_house_trade_share(hub: &TickHub) -> f32 {
+    let total = hub.tw_house + hub.tw_local + hub.tw_guild;
+    if total <= 1e-6 { 0.0 } else { hub.tw_house / total }
+}
 /// ── CARAVANSERAIS: waystations on long INLAND trade corridors (Silk-Road halts a
 /// day apart between distant cities); a small settlement founded near a heavy land
 /// tie's midpoint, which can grow into a town like any other.
@@ -2274,6 +2283,10 @@ pub struct CampaignSim {
     /// for the reworked Migration overlay (dots · ribbon · focus). Bounded.
     #[serde(default)]
     pub migration_routes: Vec<MigrationRoute>,
+    /// Grain-eq a council secured into its civic warehouse LAST month (parallel to hubs),
+    /// for the Provisioning tab's "secured this month" figure. Rebuilt each pass.
+    #[serde(default)]
+    pub council_bought_month: Vec<f32>,
     /// Batch 1 · per-hub PER-GOOD throughput accumulator for the running year
     /// (flat, `hub·ng + good`; rebuilt in-year, so not serialized).
     #[serde(skip)]
@@ -8488,14 +8501,21 @@ impl CampaignSim {
     fn council_provision_pass(&mut self) {
         let ng = self.goods.len();
         if ng == 0 { return; }
-        for h in 0..self.hubs.len() {
+        let n = self.hubs.len();
+        if self.council_bought_month.len() != n { self.council_bought_month = vec![0.0; n]; }
+        for h in 0..n {
+            self.council_bought_month[h] = 0.0;
             if self.hubs[h].is_estate || self.hubs[h].abandoned || self.hubs[h].population < 1.0 { continue; }
             if self.hubs[h].treasury < COUNCIL_PROVISION_MIN_TREASURY { continue; }
             let deps = self.dependents_of(h);
             // A city that neither provisions a colony nor is food-stressed needn't hoard.
             if deps == 0 && self.hubs[h].food_balance > 0.15 { continue; }
-            // First-buy right is suspended when a house has captured the city government.
-            let first_buy = self.hubs[h].captor_house < 0;
+            // Right of first buy is suspended when merchant HOUSES dominate the city's trade
+            // (carry ≥60% of it) OR a house has captured the government. Then the council can
+            // still stock up, but only at a retail premium after the houses take the market.
+            let dominated = hub_house_trade_share(&self.hubs[h]) >= COUNCIL_DOMINANCE_THRESHOLD
+                || self.hubs[h].captor_house >= 0;
+            let first_buy = !dominated;
             let unit_mult = if first_buy { COUNCIL_BUY_PRICE } else { COUNCIL_RETAIL_PRICE };
             let target = self.council_reserve_target(h, deps);
             if self.hubs[h].civic_goods.len() < ng { self.hubs[h].civic_goods.resize(ng, 0.0); }
@@ -8517,6 +8537,7 @@ impl CampaignSim {
                 spent += buy * price;
             }
             self.hubs[h].treasury -= spent;
+            self.council_bought_month[h] = spent; // grain-eq secured this month (UI)
         }
     }
 
@@ -11220,7 +11241,7 @@ mod tests {
             last_month_pop: 0.0, last_month_index: 0.0, seed_house_count: 0,
             fleets_migrated: true, tech_factor: 1.0, percap_migrated: true, society_migrated: false,
             house_ledger: Vec::new(), house_ledger_prev: Vec::new(), house_barred: Vec::new(),
-            colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], hub_patron: vec![], colony_supply: vec![],
+            colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], council_bought_month: vec![], hub_patron: vec![], colony_supply: vec![],
             hub_culture: vec![], hub_minorities: vec![], estate_idle_years: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
             recent_trades: vec![],
