@@ -7849,30 +7849,43 @@ impl CampaignSim {
         let n = self.hubs.len();
         if src >= n || dst >= n { return None; }
         if src == dst { return Some(vec![src]); }
-        // Small Dijkstra over the capped neighbour adjacency.
+        // FAST PATH — a DIRECT trade tie (the overwhelmingly common case: economic drift and
+        // diaspora always target a neighbour). Returns immediately with NO Dijkstra and no
+        // O(n) allocations, which is what kept the yearly migration passes from freezing the
+        // new-year tick on big maps.
+        if let Some(nbrs) = self.neighbors.get(src) {
+            if nbrs.iter().any(|&b| b as usize == dst) {
+                return Some(vec![src, dst]);
+            }
+        }
+        // Sparse Dijkstra over the capped neighbour adjacency (BinaryHeap → O(E·log V), not
+        // O(V²)). Only reached for genuinely multi-hop targets (e.g. a sponsored colony).
+        use std::cmp::Ordering;
+        struct He(f32, usize); // (distance, node) — min-heap via reversed Ord
+        impl PartialEq for He { fn eq(&self, o: &Self) -> bool { self.1 == o.1 && self.0 == o.0 } }
+        impl Eq for He {}
+        impl Ord for He {
+            fn cmp(&self, o: &Self) -> Ordering {
+                o.0.partial_cmp(&self.0).unwrap_or(Ordering::Equal).then_with(|| self.1.cmp(&o.1))
+            }
+        }
+        impl PartialOrd for He { fn partial_cmp(&self, o: &Self) -> Option<Ordering> { Some(self.cmp(o)) } }
         let mut dist = vec![f32::INFINITY; n];
         let mut prev = vec![usize::MAX; n];
-        let mut visited = vec![false; n];
+        let mut heap: std::collections::BinaryHeap<He> = std::collections::BinaryHeap::new();
         dist[src] = 0.0;
-        for _ in 0..n {
-            // pick the closest unvisited (n is small after the NEIGHBOR_K cap keeps the
-            // graph sparse; this stays cheap relative to the trade phase).
-            let mut u = usize::MAX;
-            let mut best = f32::INFINITY;
-            for i in 0..n {
-                if !visited[i] && dist[i] < best { best = dist[i]; u = i; }
-            }
-            if u == usize::MAX { break; }
+        heap.push(He(0.0, src));
+        while let Some(He(d, u)) = heap.pop() {
             if u == dst { break; }
-            visited[u] = true;
+            if d > dist[u] { continue; } // stale heap entry
             if let Some(nbrs) = self.neighbors.get(u) {
                 for &bn in nbrs {
                     let b = bn as usize;
-                    if b >= n || visited[b] { continue; }
+                    if b >= n { continue; }
                     let w = self.days.get(u * n + b).copied().unwrap_or(f32::INFINITY);
                     if !w.is_finite() { continue; }
-                    let nd = dist[u] + w.max(0.01);
-                    if nd < dist[b] { dist[b] = nd; prev[b] = u; }
+                    let nd = d + w.max(0.01);
+                    if nd < dist[b] { dist[b] = nd; prev[b] = u; heap.push(He(nd, b)); }
                 }
             }
         }
@@ -8476,12 +8489,6 @@ impl CampaignSim {
         if best.0 == u16::MAX { 0 } else { best.0 }
     }
 
-    /// Count the living colonies + satellites a city provisions (its founder-hub children).
-    fn dependents_of(&self, h: usize) -> usize {
-        self.hubs.iter().filter(|d| d.founder_hub == h as i32 && !d.abandoned
-            && (d.colony_kind == 1 || d.colony_kind == 3 || d.build_stage > 0)).count()
-    }
-
     /// The council's target civic reserve per needed good — scales with the city's size
     /// and how many colonies/satellites it must feed.
     fn council_reserve_target(&self, h: usize, deps: usize) -> f32 {
@@ -8503,11 +8510,21 @@ impl CampaignSim {
         if ng == 0 { return; }
         let n = self.hubs.len();
         if self.council_bought_month.len() != n { self.council_bought_month = vec![0.0; n]; }
+        // Precompute each city's dependent count ONCE (O(n)) instead of scanning all hubs per
+        // hub (that O(n²) monthly scan was part of the late-campaign slowdown).
+        let mut deps_count = vec![0usize; n];
+        for d in &self.hubs {
+            if d.abandoned { continue; }
+            if d.founder_hub >= 0 && (d.colony_kind == 1 || d.colony_kind == 3 || d.build_stage > 0) {
+                let f = d.founder_hub as usize;
+                if f < n { deps_count[f] += 1; }
+            }
+        }
         for h in 0..n {
             self.council_bought_month[h] = 0.0;
             if self.hubs[h].is_estate || self.hubs[h].abandoned || self.hubs[h].population < 1.0 { continue; }
             if self.hubs[h].treasury < COUNCIL_PROVISION_MIN_TREASURY { continue; }
-            let deps = self.dependents_of(h);
+            let deps = deps_count[h];
             // A city that neither provisions a colony nor is food-stressed needn't hoard.
             if deps == 0 && self.hubs[h].food_balance > 0.15 { continue; }
             // Right of first buy is suspended when merchant HOUSES dominate the city's trade
