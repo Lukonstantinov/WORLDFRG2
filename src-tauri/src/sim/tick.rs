@@ -241,8 +241,10 @@ const SAT_BUILD_CONVOYS: u8 = 3;              // dedicated caravans+ships per pr
 pub(crate) const SAT_STAGE_MONTHS: f32 = 24.0; // 5 stages × 24 mo = 120 mo ≈ 10 years
 pub(crate) const SAT_STAGE_QUOTA: f32 = 300.0; // goods/month per category a stage demands
 pub(crate) const SAT_CONVOY_UPKEEP: f32 = 40.0; // gr-eq/month per convoy, paid by the council
-const SAT_DECAY_PER_IDLE_MONTH: f32 = 0.03;   // stage progress lost each starved month
-const SAT_STAGE_DROP_IDLE_MONTHS: u8 = 18;    // ~1.5 y starved → slip a whole stage back
+const SAT_BUY_MARKUP: f32 = 1.3;              // premium the council pays merchants to bring
+                                              // in a supply shortfall (secures the works)
+const SAT_DECAY_PER_IDLE_MONTH: f32 = 0.006;  // GENTLE decay when truly starved (user: far less)
+const SAT_STAGE_DROP_IDLE_MONTHS: u8 = 60;    // ~5 y fully starved before a stage slips back
 /// ── CARAVANSERAIS: waystations on long INLAND trade corridors (Silk-Road halts a
 /// day apart between distant cities); a small settlement founded near a heavy land
 /// tie's midpoint, which can grow into a town like any other.
@@ -6518,6 +6520,14 @@ impl CampaignSim {
             let reach_cells = spec.reach_km / km_per_cell.max(1e-3);
             let org = origin as usize;
             let comp = self.hubs[org.min(n - 1)].component;
+            // OUTBREAK MEMORY: the set of cities THIS outbreak has ALREADY struck. A
+            // contagion must never bounce back into a city it already passed through
+            // (that inflated one 14-city plague into "186 cities" of re-records). When
+            // the outbreak later dies out its records age away, so a FRESH outbreak (new
+            // id) can strike those cities again — plague can recur, just not loop.
+            let hit: HashSet<usize> = self.epidemics.iter()
+                .filter(|s| s.outbreak == outbreak)
+                .map(|s| s.hub as usize).collect();
             // Candidate destinations by TRANSMISSION MODE:
             //   trade (0): a trade-route neighbour (merchants carry it)
             //   water (1): a COASTAL/river-mouth trade neighbour (foul water)
@@ -6525,6 +6535,7 @@ impl CampaignSim {
             let mut best: (usize, f32) = (usize::MAX, f32::MAX);
             let mut consider = |me: &Self, h: usize, best: &mut (usize, f32)| {
                 if h >= n || h == src || me.hubs[h].is_estate || me.hubs[h].abandoned { return; }
+                if hit.contains(&h) { return; } // already visited by this outbreak — no loop-back
                 if locked_set.contains(&h) || me.hubs[h].plague_immune_until > tick { return; }
                 if me.hubs[h].component != comp { return; }
                 if spec.mode == 1 && !me.hubs[h].coastal { return; } // water needs a wet city
@@ -8030,18 +8041,21 @@ impl CampaignSim {
             if s.is_estate || s.abandoned || s.population < ECON_MIG_MIN_POP { continue; }
             let src_opp = opp[src];
             if src_opp > ECON_MIG_STAY_ABOVE { continue; } // content cities keep their people
-            let comp = s.component;
             let src_pop = s.population;
-            let km_per_cell = EARTH_EQUATOR_KM / self.world_w.max(1.0);
-            let max_cells = MIGRATION_MAX_KM / km_per_cell.max(1e-3);
-            let mut dest = (usize::MAX, f32::MIN);
-            for d in 0..n {
-                if d == src { continue; }
-                let o = &self.hubs[d];
-                if o.is_estate || o.abandoned || o.component != comp || o.food_balance < 0.0 { continue; }
-                // Nearest better city within 3000 km only — no global A→Z jump.
-                if self.hub_cell_dist(src, d) > max_cells { continue; }
-                if opp[d] > dest.1 { dest = (d, opp[d]); }
+            // STRICT ROUTE RULE: people may only move to a DIRECT TRADE PARTNER (a single
+            // trade tie), never a straight geographic jump to a distant city. They chain
+            // city→city→city across the network over successive years, so every migration
+            // line lies exactly on a real trade route. (User: "no migration except via
+            // trade routes.") Pick the best-opportunity direct neighbour.
+            let mut dest = (usize::MAX, src_opp); // must beat the home city's own opportunity
+            if let Some(nbrs) = self.neighbors.get(src) {
+                for &bn in nbrs {
+                    let d = bn as usize;
+                    if d >= n || d == src { continue; }
+                    let o = &self.hubs[d];
+                    if o.is_estate || o.abandoned || o.food_balance < 0.0 { continue; }
+                    if opp[d] > dest.1 { dest = (d, opp[d]); }
+                }
             }
             let Some(di) = (dest.0 != usize::MAX).then_some(dest.0) else { continue; };
             if dest.1 - src_opp < ECON_MIG_GRADIENT { continue; } // needs a real pull
@@ -8348,8 +8362,12 @@ impl CampaignSim {
             let metro = &self.hubs[m];
             if metro.is_estate || metro.abandoned || metro.colony_kind != 0 { continue; }
             if metro.population < SATELLITE_METRO_POP || metro.treasury < SATELLITE_COST { continue; }
+            // NO SPAM: only ONE satellite may be under construction per metropolis — it must
+            // be FINISHED before the council breaks ground on the next (user rule).
+            if self.hubs.iter().any(|h| h.founder_hub == m as i32 && h.build_stage > 0 && !h.abandoned) { continue; }
+            // Cap the total dependent satellites (kind 3) a single metropolis sustains.
             let sat_count = self.hubs.iter()
-                .filter(|h| h.founder_hub == m as i32 && !h.abandoned && h.colony_kind == 0)
+                .filter(|h| h.founder_hub == m as i32 && !h.abandoned && h.colony_kind == 3)
                 .count() as u32;
             if sat_count >= SATELLITE_MAX_PER_METRO { continue; }
             // The NEED decides the role (priority: survival → trade → industry).
@@ -8451,18 +8469,30 @@ impl CampaignSim {
             let mf = self.hubs[h].founder_hub;
             if mf < 0 || (mf as usize) >= self.hubs.len() { self.finish_construction(h); continue; }
             let m = mf as usize;
-            // 1) Pull each supply good from the metropolis (capped by its stock); met% = worst.
+            // 1) Supply each category: take what the metropolis has in STOCK, then BUY the
+            //    shortfall on the market with council treasury. Founding a satellite makes
+            //    the city PRIORITISE securing its supply — it pays merchants a premium to
+            //    haul in whatever it lacks, so the works aren't deadlocked just because the
+            //    mother city doesn't happen to stockpile olive oil. met% = worst category.
             let mut met = 1.0f32;
+            let mut buy_cost = 0.0f32;
             for c in 0..3usize {
                 let g = self.hubs[h].build_supply_good[c] as usize;
                 if g >= ng { self.hubs[h].build_supply[c] = 1.0; continue; }
                 let have = self.hubs[m].stock.get(g).copied().unwrap_or(0.0).max(0.0);
-                let take = have.min(SAT_STAGE_QUOTA);
-                if g < self.hubs[m].stock.len() { self.hubs[m].stock[g] -= take; }
-                let ratio = take / SAT_STAGE_QUOTA;
+                let from_stock = have.min(SAT_STAGE_QUOTA);
+                if g < self.hubs[m].stock.len() { self.hubs[m].stock[g] -= from_stock; }
+                let deficit = (SAT_STAGE_QUOTA - from_stock).max(0.0);
+                let price = self.hubs[m].price.get(g).copied()
+                    .unwrap_or(self.goods[g].base_value).max(0.01) * SAT_BUY_MARKUP;
+                let afford = (self.hubs[m].treasury - buy_cost).max(0.0) / price;
+                let bought = deficit.min(afford);
+                buy_cost += bought * price;
+                let ratio = (from_stock + bought) / SAT_STAGE_QUOTA;
                 self.hubs[h].build_supply[c] = ratio;
                 met = met.min(ratio);
             }
+            self.hubs[m].treasury -= buy_cost;
             // 2) Council pays the convoy crews; if it can't, no work happens this month.
             let upkeep = SAT_CONVOY_UPKEEP * self.hubs[h].build_convoys as f32;
             if self.hubs[m].treasury >= upkeep { self.hubs[m].treasury -= upkeep; }
@@ -9166,16 +9196,23 @@ impl CampaignSim {
             if (a as usize) < nn { throughput[a as usize] += v; }
             if (b as usize) < nn { throughput[b as usize] += v; }
         }
+        // Commercial standing = mostly trade throughput, but BLENDED with population so
+        // the ranks genuinely move as cities rise and fall (user: entrepôts/trade hubs
+        // must be dynamic, not frozen). A booming city climbs the ranks; a shrinking one
+        // slips even if its old trade lingers. Both terms normalised to 0..1.
+        let max_thr = throughput.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
+        let max_pop = self.hubs.iter().map(|h| h.population).fold(1.0f32, f32::max);
+        let score: Vec<f32> = (0..nn).map(|i| {
+            0.65 * (throughput[i] / max_thr) + 0.35 * (self.hubs[i].population / max_pop)
+        }).collect();
         let mut order: Vec<usize> = (0..nn)
             .filter(|&i| !self.hubs[i].is_estate && !self.hubs[i].abandoned
                 && self.hubs[i].population >= 1.0)
             .collect();
-        order.sort_by(|&a, &b| throughput[b]
-            .partial_cmp(&throughput[a]).unwrap_or(std::cmp::Ordering::Equal));
+        order.sort_by(|&a, &b| score[b].partial_cmp(&score[a]).unwrap_or(std::cmp::Ordering::Equal));
         let live = order.len().max(1);
         let hub_cut = ((live as f32) * 0.20).ceil() as usize;         // top 20% → trade hub
         let emp_cut = ((live as f32) * 0.05).ceil().max(1.0) as usize; // top 5% → entrepôt
-        let max_thr = throughput.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
         let mut rank = vec![usize::MAX; nn];
         for (r, &i) in order.iter().enumerate() { rank[i] = r; }
         for i in 0..nn {
@@ -9186,24 +9223,26 @@ impl CampaignSim {
                 continue;
             }
             let r = rank[i];
-            let thr = throughput[i];
-            // Desired class this period, with an absolute-volume floor so a barely-
-            // trading world doesn't crown entrepôts. Entrepôts must be SEA ports.
-            let desired: u8 = if r < emp_cut && self.hubs[i].coastal && thr >= 0.45 * max_thr {
+            let sc = score[i];
+            // Desired class this period, with an absolute floor so a barely-active world
+            // doesn't crown entrepôts. Entrepôts must be SEA ports.
+            let desired: u8 = if r < emp_cut && self.hubs[i].coastal && sc >= 0.30 {
                 2
-            } else if r < hub_cut && thr >= 0.12 * max_thr {
+            } else if r < hub_cut && sc >= 0.10 {
                 1
             } else {
                 0
             };
             let cur = self.hubs[i].hub_class;
+            // Hysteresis: 2 confirming half-years to change a tier (faster than before so
+            // the map keeps up with a shifting economy, still no per-check flicker).
             if desired > cur {
                 let m = self.hubs[i].class_momentum.max(0) + 1;
-                if m >= 3 { self.hubs[i].hub_class = cur + 1; self.hubs[i].class_momentum = 0; }
+                if m >= 2 { self.hubs[i].hub_class = cur + 1; self.hubs[i].class_momentum = 0; }
                 else { self.hubs[i].class_momentum = m; }
             } else if desired < cur {
                 let m = self.hubs[i].class_momentum.min(0) - 1;
-                if m <= -3 { self.hubs[i].hub_class = cur - 1; self.hubs[i].class_momentum = 0; }
+                if m <= -2 { self.hubs[i].hub_class = cur - 1; self.hubs[i].class_momentum = 0; }
                 else { self.hubs[i].class_momentum = m; }
             } else {
                 let s = self.hubs[i].class_momentum.signum();

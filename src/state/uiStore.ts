@@ -108,6 +108,8 @@ interface UIStore {
   hubDisplay: { size: number; intensity: number };
   /** Settlement density / realism (0..1): low = sparse & strict, high = dense. */
   settlementRealism: number;
+  /** Hard cap on total settlements (20..1000); 0 = auto (realism-driven). */
+  settlementCap: number;
   /** Goods-browser panel open (toolbar button → browse all goods by origin). */
   showGoodsBrowser: boolean;
   /** Id of the good whose seeding/climate detail panel is open (null = closed). */
@@ -218,6 +220,7 @@ interface UIStore {
   setSelectedExport: (g: string | null) => void;
   setHubDisplay: (p: Partial<{ size: number; intensity: number }>) => void;
   setSettlementRealism: (v: number) => void;
+  setSettlementCap: (v: number) => void;
   setShowGoodsBrowser: (v: boolean) => void;
   setGoodDetail: (id: string | null) => void;
   setShowHouses: (v: boolean) => void;
@@ -320,6 +323,7 @@ export const useUIStore = create<UIStore>((set) => ({
   selectedExport: null,
   hubDisplay: { size: 1, intensity: 1 },
   settlementRealism: 0.55,
+  settlementCap: 0,
   showGoodsBrowser: false,
   goodDetailId: null,
   showHouses: false,
@@ -432,6 +436,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setSelectedExport: (g) => set({ selectedExport: g }),
   setHubDisplay: (p) => set((state) => ({ hubDisplay: { ...state.hubDisplay, ...p } })),
   setSettlementRealism: (v) => set({ settlementRealism: v }),
+  setSettlementCap: (v) => set({ settlementCap: v }),
   setShowGoodsBrowser: (v) => set({ showGoodsBrowser: v }),
   setGoodDetail: (id) => set({ goodDetailId: id }),
   setShowHouses: (v) => set({ showHouses: v }),

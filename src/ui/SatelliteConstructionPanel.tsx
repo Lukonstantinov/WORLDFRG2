@@ -4,10 +4,13 @@ import { useCampaignStore } from "../state/campaignStore";
 import { campaignGetSatellite } from "../bridge/tauri";
 import type { SatelliteBrief } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
+import { GOOD_DEFS } from "../goods";
 
 const STAGE_NAMES = ["Survey", "Foundations", "Warehousing", "Walls", "Market"];
 const CAT_ICON = ["🌾", "🧂", "🧱"];
 const CAT_COLOR = ["#7fcf6b", "#5ec6e0", "#d9a441"];
+const GOOD_EMOJI: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.emoji]));
+const goodIcon = (name: string) => GOOD_EMOJI[name] ?? "📦";
 
 /** Satellite CONSTRUCTION window (Blend V1+V3): a 5-stage bar + monthly cost/runway on
  *  top, the 3 supply tabs (food / preservables / construction) each carrying the convoy
@@ -108,7 +111,7 @@ export function SatelliteConstructionPanel() {
       {sup && (
         <div style={card}>
           <div style={{ fontSize: 12, fontWeight: 600, color: CAT_COLOR[tab], marginBottom: 6 }}>
-            {sup.category} · {sup.good} <span style={muted}>(from {sup.source})</span>
+            {sup.category} · {goodIcon(sup.good)} {sup.good} <span style={muted}>(from {sup.source})</span>
           </div>
           <div style={{ fontSize: 11, color: "#9ab0c8", marginBottom: 6 }}>
             {CAT_ICON[tab]} {Math.max(1, Math.round(brief.convoys / 3))} convoy(s) · {sup.rate.toFixed(0)} u/mo quota
@@ -127,7 +130,7 @@ export function SatelliteConstructionPanel() {
         <tbody>
           {brief.supply.map((s, i) => (
             <tr key={i}>
-              <td style={tdCell}>{CAT_ICON[i]} {s.good}</td>
+              <td style={tdCell}>{CAT_ICON[i]} {goodIcon(s.good)} {s.good}</td>
               <td style={{ ...tdCell, color: "#6a86a6" }}>{s.source}</td>
               <td style={{ ...tdCell, textAlign: "right", color: s.met >= 0.8 ? "#4bc07a" : s.met >= 0.4 ? "#ffd75e" : "#e07a5a" }}>
                 {Math.round(s.met * 100)}%
@@ -142,7 +145,7 @@ export function SatelliteConstructionPanel() {
         <>
           <div style={{ ...row, marginTop: 10, marginBottom: 4 }}><span style={{ color: "#9ab0c8" }}>Future exploits here</span></div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {brief.exploits.map((g, i) => <span key={i} style={exploitChip}>{g}</span>)}
+            {brief.exploits.map((g, i) => <span key={i} style={exploitChip}>{goodIcon(g)} {g}</span>)}
           </div>
         </>
       )}

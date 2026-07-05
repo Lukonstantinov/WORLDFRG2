@@ -239,7 +239,7 @@ pub fn sim_run_all(
     let cmap = crate::sim::cultures::compute_culture_map(&buf, seed);
     crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
     let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
-    let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed, 0.55);
+    let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed, 0.55, None);
     settlements::write_habitability(&mut buf, &habitability);
 
     // Phase 8: Biological — shark + shipworm waters + trade-good belts.
@@ -362,7 +362,7 @@ pub fn sim_run_all_from_terrain(
     let cmap = crate::sim::cultures::compute_culture_map(&buf, seed);
     crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
     let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
-    let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed, 0.55);
+    let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed, 0.55, None);
     settlements::write_habitability(&mut buf, &habitability);
 
     // Phase 8: Biological — shark + shipworm waters + trade-good belts.
@@ -426,6 +426,7 @@ pub fn sim_generate_settlements(
     seed: u64,
     rivers_json: String,
     realism: Option<f32>,
+    max_settlements: Option<u32>,
     db: State<'_, WorldDb>,
 ) -> Result<SimSettlementsResult, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
@@ -449,7 +450,8 @@ pub fn sim_generate_settlements(
     crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
     let habitability = settlements::compute_habitability(&buf, &river_data, &lakes);
     let result = settlements::generate_settlements(
-        &buf, &habitability, &river_data, seed, realism.unwrap_or(0.55));
+        &buf, &habitability, &river_data, seed, realism.unwrap_or(0.55),
+        max_settlements.map(|c| c as usize));
 
     // Persist the habitability field so the Habitability heatmap layer can render.
     settlements::write_habitability(&mut buf, &habitability);

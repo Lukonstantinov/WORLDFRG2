@@ -20,6 +20,8 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
   const setLayer = useUIStore((s) => s.setLayer);
   const settlementRealism = useUIStore((s) => s.settlementRealism);
   const setSettlementRealism = useUIStore((s) => s.setSettlementRealism);
+  const settlementCap = useUIStore((s) => s.settlementCap);
+  const setSettlementCap = useUIStore((s) => s.setSettlementCap);
   const focusOn = useViewportStore((s) => s.focusOn);
   const { rivers, settlements, setSettlements } = useWorldStore();
 
@@ -34,7 +36,9 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
     setSimRunning(true);
     setStatus("Scoring habitability & placing cities...");
     try {
-      const result = await simGenerateSettlements(seed, JSON.stringify(rivers), settlementRealism);
+      const result = await simGenerateSettlements(
+        seed, JSON.stringify(rivers), settlementRealism,
+        settlementCap > 0 ? settlementCap : undefined);
       setSettlements(result.settlements);
       markStepCompleted(7);
       // Show the habitability heatmap + ranked city dots.
@@ -71,6 +75,20 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
         <div style={{ color: "#405060", fontSize: 9 }}>
           Low = fewer, only genuinely viable sites (no marginal polar/desert specks);
           high = denser and more permissive.
+        </div>
+      </div>
+
+      {/* Hard count cap (20..1000; 0 = auto). Overrides the density slider's count. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 2 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", color: "#8090b0", fontSize: 10 }}>
+          <span>Limit total settlements</span>
+          <span>{settlementCap === 0 ? "Auto (no limit)" : `${settlementCap}`}</span>
+        </div>
+        <input type="range" min={0} max={1000} step={10} value={settlementCap}
+          onChange={(e) => { const v = parseInt(e.target.value, 10); setSettlementCap(v === 0 ? 0 : Math.max(20, v)); }} />
+        <div style={{ color: "#405060", fontSize: 9 }}>
+          0 = auto (density slider decides). Otherwise a hard cap of 20–1000 settlements
+          scattered across the world (keeps the strongest sites).
         </div>
       </div>
 

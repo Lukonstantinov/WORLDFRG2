@@ -650,7 +650,7 @@ mod tests {
         let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_SETTLEMENTS).unwrap();
         crate::sim::biological::compute_disease_risk(&mut buf, &rivers);
         let hab = crate::sim::settlements::compute_habitability(&buf, &rivers, &lakes);
-        let _ = crate::sim::settlements::generate_settlements(&buf, &hab, &rivers, 7, 0.55);
+        let _ = crate::sim::settlements::generate_settlements(&buf, &hab, &rivers, 7, 0.55, None);
         crate::sim::settlements::write_habitability(&mut buf, &hab);
         buf.save(&conn, "settlements").unwrap();
 

@@ -326,6 +326,7 @@ pub fn generate_settlements(
     rivers: &[River],
     _seed: u64,
     realism: f32,
+    cap: Option<usize>,
 ) -> Vec<Settlement> {
     let w = buf.width;
     let h = buf.height;
@@ -335,7 +336,10 @@ pub fn generate_settlements(
     // realism is lowered — pruning marginal sites and thinning the map together.
     let min_dist = ((w as f32 / (95.0 + 90.0 * (1.0 - d))) as u32).max(3) as i32;
     let threshold = 0.22 + 0.18 * (1.0 - d); // d=1 → 0.22 (permissive) · d=0 → 0.40 (strict)
-    let max_settlements = (180.0 + 820.0 * d) as usize; // d=1 → 1000 · d=0 → 180
+    // An explicit user cap (20..1000) HARD-limits the total settlement count; otherwise
+    // the realism slider sets it (d=1 → 1000 · d=0 → 180).
+    let explicit_cap = cap.map(|c| c.clamp(20, 1000));
+    let max_settlements = explicit_cap.unwrap_or((180.0 + 820.0 * d) as usize);
 
     let food = compute_food_capacity(buf, rivers);
 
@@ -561,7 +565,10 @@ pub fn generate_settlements(
         // steppe, mild tundra and the *milder* subarctic (DFc 16, DWc 29).
         let harsh = |k: u8| matches!(k, 4 | 5 | 6 | 7 | 21 | 16 | 29);
         let out_min_dist = (min_dist * 2).max(4);
-        let max_outposts = (sites.len() / 5).min(50);
+        // Under an explicit cap the harsh-zone outposts must fit within the remaining
+        // budget so the TOTAL never exceeds the user's limit.
+        let budget = if explicit_cap.is_some() { max_settlements.saturating_sub(settlements.len()) } else { usize::MAX };
+        let max_outposts = (sites.len() / 5).min(50).min(budget);
         let mut cand: Vec<(usize, f32)> = Vec::new();
         for y in 1..h - 1 {
             for x in 0..w {
@@ -622,6 +629,10 @@ pub fn generate_settlements(
             });
         }
     }
+
+    // Hard cap: guarantee the total never exceeds the user's explicit limit (the primary
+    // sites come first / highest-priority, so truncation drops only marginal tail sites).
+    if let Some(c) = explicit_cap { settlements.truncate(c); }
 
     settlements
 }

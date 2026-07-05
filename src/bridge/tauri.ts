@@ -118,9 +118,9 @@ export async function simScaleElevation(
 }
 
 export async function simGenerateSettlements(
-  seed: number, riversJson: string, realism?: number
+  seed: number, riversJson: string, realism?: number, maxSettlements?: number
 ): Promise<import("../types").SimSettlementsResult> {
-  return invoke("sim_generate_settlements", { seed, riversJson, realism });
+  return invoke("sim_generate_settlements", { seed, riversJson, realism, maxSettlements });
 }
 
 export async function simBiological(
