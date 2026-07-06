@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "../state/uiStore";
 import { useWorldStore } from "../state/worldStore";
 import { useViewportStore } from "../state/viewportStore";
-import { getRiverSystems } from "../bridge/tauri";
+import { getRiverSystems, renderWorldCrop } from "../bridge/tauri";
 import type { RiverNode, RiverData, Toponym } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
@@ -17,6 +17,7 @@ export function HydrologyPanel() {
   const settlements = useWorldStore((s) => s.settlements);
   const toponyms = useWorldStore((s) => s.toponyms);
   const focusOn = useViewportStore((s) => s.focusOn);
+  const setRiverHighlight = useUIStore((s) => s.setRiverHighlight);
 
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.hydrology);
 
@@ -46,6 +47,18 @@ export function HydrologyPanel() {
   // Assign a display name to every node: a matching river toponym if one sits on
   // the reach, else a stable generated name. Memoized over the loaded systems.
   const names = useMemo(() => nameMap(systems, toponyms), [systems, toponyms]);
+
+  // Glow the selected river system's subtree on the map (cleared when nothing is
+  // open or the panel is closed).
+  useEffect(() => {
+    if (!open || openId == null) { setRiverHighlight(null); return; }
+    const sys = systems.find((s) => s.id === openId);
+    if (!sys) { setRiverHighlight(null); return; }
+    const node = findNode(sys, selId) ?? sys;
+    setRiverHighlight(subtreeIds(node));
+  }, [open, openId, selId, systems, setRiverHighlight]);
+  // Clear the highlight when the panel unmounts.
+  useEffect(() => () => setRiverHighlight(null), [setRiverHighlight]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -171,27 +184,53 @@ export function HydrologyPanel() {
   );
 }
 
-// ── Location snip: draws only this river's subtree (trunk + tributaries) + cities ──
+// ── Location snip: real terrain crop with only this river's subtree drawn over it ──
 function Snip({ node, byId, names, onLocate }: {
   node: RiverNode; byId: Map<number, RiverData>; names: Map<number, string>; onLocate: () => void;
 }) {
-  const ids = subtreeIds(node);
-  const paths = ids.map((id) => byId.get(id)?.points ?? []).filter((p) => p.length > 1);
-  if (paths.length === 0) return null;
-  // Bounding box over every point (raw coords; seam-crossing rivers are rare).
-  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
-  for (const p of paths) for (const [x, y] of p) {
-    if (x < minx) minx = x; if (x > maxx) maxx = x;
-    if (y < miny) miny = y; if (y > maxy) maxy = y;
-  }
-  const pad = Math.max(3, Math.max(maxx - minx, maxy - miny) * 0.06);
-  minx -= pad; miny -= pad; maxx += pad; maxy += pad;
-  const bw = Math.max(1, maxx - minx), bh = Math.max(1, maxy - miny);
-  // Fit into a 200-wide viewbox, preserving aspect.
-  const VW = 200, VH = Math.max(70, Math.min(150, (VW * bh) / bw));
+  const geo = useMemo(() => {
+    const ids = subtreeIds(node);
+    const paths = ids.map((id) => byId.get(id)?.points ?? []).filter((p) => p.length > 1);
+    if (paths.length === 0) return null;
+    let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+    for (const p of paths) for (const [x, y] of p) {
+      if (x < minx) minx = x; if (x > maxx) maxx = x;
+      if (y < miny) miny = y; if (y > maxy) maxy = y;
+    }
+    const pad = Math.max(3, Math.max(maxx - minx, maxy - miny) * 0.06);
+    minx -= pad; miny -= pad; maxx += pad; maxy += pad;
+    const bw = Math.max(1, maxx - minx), bh = Math.max(1, maxy - miny);
+    const VW = 200, VH = Math.max(70, Math.min(150, (VW * bh) / bw));
+    return { ids, minx, miny, maxx, maxy, bw, bh, VW, VH };
+  }, [node, byId]);
+
+  // Fetch a real terrain crop for the bbox and turn it into a data-URL backdrop.
+  const [bg, setBg] = useState<string | null>(null);
+  useEffect(() => {
+    if (!geo) { setBg(null); return; }
+    let alive = true;
+    setBg(null);
+    renderWorldCrop(Math.floor(geo.minx), Math.floor(geo.miny), Math.ceil(geo.maxx), Math.ceil(geo.maxy), "land", 256)
+      .then((img) => {
+        if (!alive) return;
+        const bin = atob(img.data);
+        const arr = new Uint8ClampedArray(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        const cv = document.createElement("canvas");
+        cv.width = img.w; cv.height = img.h;
+        const cx = cv.getContext("2d");
+        if (!cx) return;
+        cx.putImageData(new ImageData(arr, img.w, img.h), 0, 0);
+        setBg(cv.toDataURL());
+      })
+      .catch(() => { if (alive) setBg(null); });
+    return () => { alive = false; };
+  }, [geo?.minx, geo?.miny, geo?.maxx, geo?.maxy]);
+
+  if (!geo) return null;
+  const { ids, minx, miny, bw, bh, VW, VH } = geo;
   const sx = (x: number) => ((x - minx) / bw) * VW;
   const sy = (y: number) => ((y - miny) / bh) * VH;
-
   const cities = subtreeCities(node).slice(0, 14);
   const trunkPts = byId.get(node.id)?.points ?? [];
 
@@ -200,6 +239,8 @@ function Snip({ node, byId, names, onLocate }: {
       <svg viewBox={`0 0 ${VW} ${VH}`} onClick={onLocate}
         style={{ width: "100%", height: "auto", display: "block", borderRadius: 7, border: "1px solid #16283a",
           background: "radial-gradient(120% 90% at 22% 12%, #1b2f3d 0%, #10202b 55%, #0b161e 100%)", cursor: "pointer" }}>
+        {/* real terrain crop backdrop (falls back to the gradient until loaded) */}
+        {bg && <image href={bg} x={0} y={0} width={VW} height={VH} preserveAspectRatio="none" opacity={0.92} />}
         {/* tributaries (thin) */}
         {ids.map((id, i) => {
           if (id === node.id) return null;

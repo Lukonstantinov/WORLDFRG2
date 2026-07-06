@@ -394,3 +394,73 @@ mod tests {
         assert_eq!(off, buf.len());
     }
 }
+
+/// A downscaled RGBA raster of an arbitrary world rectangle (used as the terrain
+/// backdrop behind the Hydrology river snip).
+#[derive(Serialize)]
+pub struct CropImage {
+    pub data: String, // base64-encoded RGBA
+    pub w: u32,
+    pub h: u32,
+}
+
+/// Render an arbitrary world-cell rectangle [x0..=x1] × [y0..=y1] for one layer,
+/// downscaled so the longer side is at most `max_dim`. Reuses the per-tile
+/// renderer, rendering only the tiles the output actually samples (cached), so a
+/// small crop is cheap. Coordinates are clamped to the world; seam-crossing
+/// rectangles aren't wrapped (the river snip's bbox is in-range in practice).
+#[tauri::command]
+pub fn render_world_crop(
+    x0: u32, y0: u32, x1: u32, y1: u32,
+    layer: String, max_dim: u32,
+    db: State<'_, WorldDb>,
+) -> Result<CropImage, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let gw: u32 = crate::db::metadata::get_meta_required(&conn, "grid_width")
+        .map_err(|e| e.to_string())?.parse().map_err(|_| "bad grid_width".to_string())?;
+    let gh: u32 = crate::db::metadata::get_meta_required(&conn, "grid_height")
+        .map_err(|e| e.to_string())?.parse().map_err(|_| "bad grid_height".to_string())?;
+
+    let x0 = x0.min(gw.saturating_sub(1));
+    let y0 = y0.min(gh.saturating_sub(1));
+    let x1 = x1.min(gw.saturating_sub(1)).max(x0);
+    let y1 = y1.min(gh.saturating_sub(1)).max(y0);
+    let cw = x1 - x0 + 1;
+    let ch = y1 - y0 + 1;
+
+    let md = max_dim.clamp(16, 512) as f32;
+    let scale = (md / cw.max(ch) as f32).min(1.0);
+    let out_w = ((cw as f32 * scale).round() as u32).max(1);
+    let out_h = ((ch as f32 * scale).round() as u32).max(1);
+
+    let ts = TILE_SIZE;
+    let tsz = TILE_SIZE as usize;
+    let mut cache: HashMap<(i32, i32), Vec<u8>> = HashMap::new();
+    let mut out = vec![0u8; (out_w * out_h * 4) as usize];
+
+    for oy in 0..out_h {
+        let wy = (y0 + (oy * ch) / out_h).min(y1);
+        let ty = (wy / ts) as i32;
+        let ly = (wy % ts) as usize;
+        for ox in 0..out_w {
+            let wx = (x0 + (ox * cw) / out_w).min(x1);
+            let tx = (wx / ts) as i32;
+            let lx = (wx % ts) as usize;
+            if !cache.contains_key(&(tx, ty)) {
+                let tile = match tile_store::load_blob_with_version(&conn, tx, ty, 0)
+                    .map_err(|e| e.to_string())?
+                {
+                    Some((_, blob)) => TileData::decompress(&blob),
+                    None => TileData::new_sea(),
+                };
+                cache.insert((tx, ty), tile_image::render_tile(&tile, &layer));
+            }
+            let buf = &cache[&(tx, ty)];
+            let si = (ly * tsz + lx) * 4;
+            let di = ((oy * out_w + ox) * 4) as usize;
+            out[di..di + 4].copy_from_slice(&buf[si..si + 4]);
+        }
+    }
+
+    Ok(CropImage { data: BASE64.encode(&out), w: out_w, h: out_h })
+}

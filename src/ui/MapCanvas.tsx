@@ -941,6 +941,15 @@ export function MapCanvas() {
     requestRender();
   }, [travelRoute, requestRender]);
 
+  // 🌊 Hydrology · the selected river system's subtree glows on the map.
+  const riverHighlight = useUIStore((s) => s.riverHighlight);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setRiverHighlight(riverHighlight);
+    requestRender();
+  }, [riverHighlight, requestRender]);
+
   // #26 · geographic toponym labels, pushed from the world store.
   const toponyms = useWorldStore((s) => s.toponyms);
   useEffect(() => {

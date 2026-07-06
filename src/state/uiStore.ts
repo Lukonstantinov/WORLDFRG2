@@ -148,6 +148,9 @@ interface UIStore {
   showGoodsCodex: boolean;
   /** Itinerary routed polyline (world cells) to draw on the map, or null. */
   travelRoute: [number, number][] | null;
+  /** 🌊 Hydrology: river indices (into the rivers array) of the selected system's
+   *  subtree to glow on the map (others dim), or null. */
+  riverHighlight: number[] | null;
   /** Goods Codex: the good whose provenance/history/scarcity is shown, or null. */
   codexGood: string | null;
   /** Colonial Office — empire-wide colony/outpost roster + founding-gate diagnostics. */
@@ -241,6 +244,7 @@ interface UIStore {
   setShowHydrology: (v: boolean) => void;
   setShowGoodsCodex: (v: boolean) => void;
   setTravelRoute: (pts: [number, number][] | null) => void;
+  setRiverHighlight: (ids: number[] | null) => void;
   setCodexGood: (g: string | null) => void;
   setShowCoinCredit: (v: boolean) => void;
   setShowColonial: (v: boolean) => void;
@@ -346,6 +350,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showHydrology: false,
   showGoodsCodex: false,
   travelRoute: null,
+  riverHighlight: null,
   codexGood: null,
   showColonial: false,
   showBank: false,
@@ -460,6 +465,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowHydrology: (v) => set({ showHydrology: v }),
   setShowGoodsCodex: (v) => set({ showGoodsCodex: v }),
   setTravelRoute: (pts) => set({ travelRoute: pts }),
+  setRiverHighlight: (ids) => set({ riverHighlight: ids }),
   setCodexGood: (g) => set({ codexGood: g }),
   setShowColonial: (v) => set({ showColonial: v }),
   setShowBank: (v) => set({ showBank: v }),

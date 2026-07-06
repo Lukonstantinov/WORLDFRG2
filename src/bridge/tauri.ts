@@ -192,6 +192,14 @@ export async function simRunAllFromTerrain(
   });
 }
 
+/** Render a downscaled RGBA raster of a world rectangle for one layer — the
+ *  terrain backdrop behind the Hydrology river snip. Returns base64 RGBA + dims. */
+export async function renderWorldCrop(
+  x0: number, y0: number, x1: number, y1: number, layer: string, maxDim: number,
+): Promise<{ data: string; w: number; h: number }> {
+  return invoke("render_world_crop", { x0, y0, x1, y1, layer, maxDim });
+}
+
 /** Hydrology dashboard: build the river-system tree (trunks + nested tributaries)
  *  with per-river stats, elevation profile, cities-on-river and Earth counterpart.
  *  Pass the world's rivers + settlements from the store. */

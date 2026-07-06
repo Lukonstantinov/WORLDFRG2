@@ -202,6 +202,9 @@ export class OverlayManager {
   private tradeRoutes: TradeRoute[] = [];
   /** #23 · the single highlighted itinerary route (world cells), or empty. */
   private travelRoute: [number, number][] = [];
+  /** 🌊 Hydrology · indices (into `rivers`) of the selected system's subtree to
+   *  glow on the map; empty = no selection (all rivers drawn normally). */
+  private riverHighlight: Set<number> = new Set();
   /** #37 · per-hub local price premium for the selected good (1 = par with the
    *  world base value; <1 cheap/abundant, >1 dear/scarce). */
   private goodScarcity: { x: number; y: number; premium: number }[] = [];
@@ -515,6 +518,11 @@ export class OverlayManager {
   /** Set (or clear with []) the highlighted point-to-point itinerary route. */
   drawTravelRoute(points: [number, number][]) {
     this.travelRoute = points;
+  }
+
+  /** 🌊 Set (or clear with null/[]) which rivers glow as the selected system. */
+  setRiverHighlight(ids: number[] | null) {
+    this.riverHighlight = new Set(ids ?? []);
   }
 
   /** Set (or clear with []) the per-hub scarcity discs for the selected good. */
@@ -946,14 +954,20 @@ export class OverlayManager {
       const inv = 1 / Math.sqrt(this.currentScale);
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
-      for (const river of this.rivers) {
-        if (river.points.length < 2) continue;
+      // Hydrology selection: when a river system is picked, its subtree glows and
+      // every other river dims so the chosen network stands out on the map.
+      const hl = this.riverHighlight;
+      const hasHL = hl.size > 0;
+      this.rivers.forEach((river, i) => {
+        if (river.points.length < 2) return;
+        const isHL = hasHL && hl.has(i);
         // Width scales with the river's Strahler order (headwater creek → great
         // trunk): order 1 ≈ 1 px, a high-order trunk ≈ 2.6 px, zoom-compensated.
         // Width never balloons into a blob.
         const ord = river.order ?? (river.major ? 4 : 1);
         const baseW = 0.9 + Math.min(ord, 6) * 0.32;
         const riverW = Math.max(0.8, Math.min(3, baseW) * inv);
+        ctx.globalAlpha = hasHL ? (isHL ? 0.95 : 0.22) : 0.85;
         ctx.strokeStyle = riverShade(river.major);
         ctx.lineWidth = riverW;
         // Catmull-Rom smoothing so the drainage lines read as natural meanders
@@ -975,6 +989,21 @@ export class OverlayManager {
             ctx.stroke();
           }
         }
+      });
+      // Glow pass over the highlighted subtree (drawn last → on top).
+      if (hasHL) {
+        ctx.save();
+        ctx.globalAlpha = 0.95;
+        ctx.shadowColor = "#8fd8ff";
+        ctx.shadowBlur = 8 * inv;
+        ctx.strokeStyle = "#cdeeff";
+        this.rivers.forEach((river, i) => {
+          if (!hl.has(i) || river.points.length < 2) return;
+          const ord = river.order ?? (river.major ? 4 : 1);
+          ctx.lineWidth = Math.max(1.1, Math.min(3.4, 1.2 + Math.min(ord, 6) * 0.34) * inv);
+          strokeSmoothPath(ctx, river.points);
+        });
+        ctx.restore();
       }
       ctx.globalAlpha = 1;
     }
@@ -3275,6 +3304,7 @@ export class OverlayManager {
     this.currentLines = [];
     this.tradeRoutes = [];
     this.travelRoute = [];
+    this.riverHighlight = new Set();
     this.goodScarcity = [];
     this.toponyms = [];
     this.fisheryBanks = [];

@@ -28,6 +28,7 @@ pub fn run() {
             world_commands::set_latitude_config,
             tile_commands::get_tiles,
             tile_commands::get_tiles_packed,
+            tile_commands::render_world_crop,
             tile_commands::get_tile_range,
             paint_commands::paint_stroke,
             paint_commands::undo,
