@@ -493,6 +493,46 @@ pub fn place_name(kit: usize, ms: u64, x: u32, y: u32) -> String {
     cap_first(&mutate(&raw, ms))
 }
 
+/// Hydronym (water-word) suiting a kit's environment, so a river reads with a
+/// culturally-flavoured "river" element — Persian *rud*, Arabic *nahr*, Sanskrit
+/// *nadi*, Greek *potamos*, Celtic *avon*, Norse *elv* … Kept per-`Env` (five
+/// small banks) rather than per-kit to stay compact while still fitting the land.
+fn hydronym(env: Env, h: u64) -> &'static str {
+    let bank: &[&str] = match env {
+        Env::Cold => &["elv", "aan", "foss", "bekk", "strom", "vatn", "aa"],
+        Env::Arid => &["rud", "nahr", "joi", "wadi", "darya", "ab", "chai"],
+        Env::Tropical => &["nadi", "ganga", "kali", "batang", "apo", "krung", "song"],
+        Env::Maritime => &["potamos", "rhoas", "naros", "aigos", "roas", "poros"],
+        Env::Temperate => &["water", "avon", "dwr", "flumen", "isca", "brook", "usk"],
+    };
+    pick(bank, h)
+}
+
+/// A culture-styled RIVER name built from the kit's on/mid/end stem plus (often)
+/// an environment-appropriate hydronym element. `seed` fully drives the draw, so
+/// a caller can re-roll with a different seed to break a duplicate. Arid cultures
+/// take the water-word as a prefix ("Nahr Aldan"); the rest as a suffix
+/// ("Aldan Isca"). The stem alone spans |on|×|mid|×|end| combinations (≈1000+ per
+/// kit), and the hydronym multiplies that further, so unique names are plentiful.
+pub fn river_name(kit: usize, ms: u64, seed: u64) -> String {
+    let k = &KITS[kit.min(KITS.len() - 1)];
+    let base = hash64(seed ^ 0x0D15_EA5E_9E37_79B1);
+    let stem_raw = format!("{}{}{}", pick(k.on, base), pick(k.mid, base >> 8), pick(k.end, base >> 16));
+    let stem_raw: String = stem_raw.split_whitespace().collect::<Vec<_>>().join("");
+    let stem = cap_first(&mutate(&stem_raw, ms));
+    // ~70% of rivers carry a water-word; the rest stay bare (still unique stems).
+    if (base >> 40) % 10 < 7 {
+        let word = cap_first(&mutate(hydronym(k.env, base >> 24), ms));
+        if k.env == Env::Arid {
+            format!("{} {}", word, stem) // "Nahr Aldan"
+        } else {
+            format!("{} {}", stem, word) // "Aldan Isca"
+        }
+    } else {
+        stem
+    }
+}
+
 /// A region / people label for a hearth (a grander homeland name).
 pub fn gen_people_name(kit: usize, ms: u64, x: u32, y: u32) -> String {
     let k = &KITS[kit.min(KITS.len() - 1)];

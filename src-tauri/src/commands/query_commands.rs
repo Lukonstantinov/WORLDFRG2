@@ -4809,6 +4809,8 @@ pub struct RiverCityInfo {
 pub struct RiverNode {
     /// Index into the input rivers array (so the frontend can look up the cell path).
     pub id: usize,
+    /// Unique, culture-styled river name (deterministic; dedup'd across the world).
+    pub name: String,
     pub order: u8,
     pub navigable: bool,
     pub tributary: bool,
@@ -4864,24 +4866,32 @@ struct RiverDerived {
     profile: Vec<f32>,
 }
 
-const EARTH_RIVERS: &[(&str, f32)] = &[
-    ("the Amazon", 209000.0), ("the Congo", 41000.0), ("the Ganges", 38000.0),
-    ("the Orinoco", 37000.0), ("the Yangtze", 30000.0), ("the Yenisei", 19000.0),
-    ("the Paraná", 18000.0), ("the Lena", 17000.0), ("the Mekong", 16000.0),
-    ("the Mississippi", 16000.0), ("the Saint Lawrence", 12000.0), ("the Ob", 12000.0),
-    ("the Amur", 11000.0), ("the Volga", 8000.0), ("the Indus", 6600.0),
-    ("the Danube", 6500.0), ("the Niger", 5700.0), ("the Zambezi", 3400.0),
-    ("the Nile", 2800.0), ("the Rhine", 2300.0), ("the Rhône", 1700.0),
-    ("the Elbe", 870.0), ("the Seine", 560.0), ("the Thames", 65.0),
+/// Real rivers as (name, mean discharge m³/s, absolute mouth latitude °). The
+/// latitude lets the match respect CLIMATE BAND: a big tropical river is likened
+/// to the Amazon/Congo, a big far-northern one to the Lena/Ob — not purely by
+/// discharge (which would call a great arctic river "the Amazon").
+const EARTH_RIVERS: &[(&str, f32, f32)] = &[
+    ("the Amazon", 209000.0, 0.0), ("the Congo", 41000.0, 6.0), ("the Ganges", 38000.0, 22.0),
+    ("the Orinoco", 37000.0, 9.0), ("the Yangtze", 30000.0, 31.0), ("the Yenisei", 19000.0, 70.0),
+    ("the Paraná", 18000.0, 34.0), ("the Lena", 17000.0, 72.0), ("the Mekong", 16000.0, 10.0),
+    ("the Mississippi", 16000.0, 29.0), ("the Saint Lawrence", 12000.0, 48.0), ("the Ob", 12000.0, 66.0),
+    ("the Amur", 11000.0, 53.0), ("the Volga", 8000.0, 46.0), ("the Indus", 6600.0, 24.0),
+    ("the Danube", 6500.0, 45.0), ("the Niger", 5700.0, 5.0), ("the Zambezi", 3400.0, 18.0),
+    ("the Nile", 2800.0, 31.0), ("the Rhine", 2300.0, 52.0), ("the Rhône", 1700.0, 43.0),
+    ("the Elbe", 870.0, 54.0), ("the Seine", 560.0, 49.0), ("the Thames", 65.0, 51.0),
 ];
 
-fn earth_counterpart(q: f32) -> String {
+/// Closest real-world river by BOTH discharge (log-distance, primary) and mouth
+/// latitude (secondary). The latitude term (≈1 penalty per 25° of difference)
+/// only tips the choice between rivers of similar size, so climate band is
+/// respected without overriding the dominant discharge match.
+fn earth_counterpart(q: f32, abs_lat: f32) -> String {
     let lq = q.max(1.0).ln();
     let mut best = EARTH_RIVERS[0];
     let mut best_d = f32::MAX;
-    for &(name, eq) in EARTH_RIVERS {
-        let d = (lq - eq.ln()).abs();
-        if d < best_d { best_d = d; best = (name, eq); }
+    for &(name, eq, elat) in EARTH_RIVERS {
+        let d = (lq - eq.ln()).abs() + 0.9 * (abs_lat - elat).abs() / 25.0;
+        if d < best_d { best_d = d; best = (name, eq, elat); }
     }
     best.0.to_string()
 }
@@ -5075,12 +5085,46 @@ fn build_river_systems(
         cs.sort_by(|a, b| a.dist_from_mouth_km.partial_cmp(&b.dist_from_mouth_km).unwrap_or(std::cmp::Ordering::Equal));
     }
 
+    // ── Unique culture-styled name + latitude-aware counterpart per river ────
+    // Names are drawn from the local culture at each river's midpoint and made
+    // globally unique (longest rivers pick first, so great trunks keep clean
+    // names and only small tributaries fall back to re-rolls). The counterpart
+    // matches by discharge AND mouth latitude so climate band is respected.
+    let mut order_by_len: Vec<usize> = (0..rivers.len()).collect();
+    order_by_len.sort_by(|&a, &b| {
+        der[b].length_km.partial_cmp(&der[a].length_km).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut names_by_id: Vec<String> = vec![String::new(); rivers.len()];
+    let mut counterpart_by_id: Vec<String> = vec![String::new(); rivers.len()];
+    for &i in &order_by_len {
+        let mid = der[i].mid;
+        let (kit, ms) = crate::sim::names::resolve_kit(mid.0, mid.1, w, h);
+        let seed0 = (mid.0 as u64).wrapping_mul(73856093)
+            ^ (mid.1 as u64).wrapping_mul(19349663)
+            ^ (i as u64).wrapping_mul(0x9E3779B97F4A7C15);
+        let mut chosen = String::new();
+        for t in 0..32u64 {
+            let cand = crate::sim::cultures::river_name(kit, ms, seed0.wrapping_add(t.wrapping_mul(0x100000001B3)));
+            if used.insert(cand.clone()) { chosen = cand; break; }
+        }
+        if chosen.is_empty() {
+            // Guaranteed-unique fallback (only if 32 draws all collided).
+            let base = crate::sim::cultures::river_name(kit, ms, seed0);
+            chosen = format!("{} {}", base, uniq_suffix(i));
+            used.insert(chosen.clone());
+        }
+        names_by_id[i] = chosen;
+        counterpart_by_id[i] = earth_counterpart(der[i].discharge, buf.latitude(der[i].mouth_pt.1).abs());
+    }
+
     // ── Assemble the tree (recursive, full depth) ────────────────────────────
     // `seen` guards against a degenerate mutual-confluence cycle: a node already
     // on the current path is emitted as a leaf so the recursion can't run away.
     fn build(
         i: usize, rivers: &[crate::sim::rivers::River], der: &[RiverDerived],
         children: &[Vec<usize>], join_km: &[f32], river_cities: &[Vec<RiverCityInfo>],
+        names_by_id: &[String], counterpart_by_id: &[String],
         seen: &mut Vec<bool>,
     ) -> RiverNode {
         let cyclic = seen[i];
@@ -5090,12 +5134,13 @@ fn build_river_systems(
         let mut kids: Vec<usize> = if cyclic { Vec::new() } else { children[i].clone() };
         kids.sort_by(|&a, &b| der[b].discharge.partial_cmp(&der[a].discharge).unwrap_or(std::cmp::Ordering::Equal));
         let child_nodes: Vec<RiverNode> = kids.iter()
-            .map(|&c| build(c, rivers, der, children, join_km, river_cities, seen))
+            .map(|&c| build(c, rivers, der, children, join_km, river_cities, names_by_id, counterpart_by_id, seen))
             .collect();
         let trib_total = child_nodes.iter().map(|c| 1 + c.trib_total).sum();
         let city_total = river_cities[i].len() + child_nodes.iter().map(|c| c.city_total).sum::<usize>();
         RiverNode {
             id: i,
+            name: names_by_id[i].clone(),
             order: r.order,
             navigable: r.navigable,
             tributary: r.tributary,
@@ -5116,8 +5161,8 @@ fn build_river_systems(
             join_km: join_km[i],
             trib_total,
             city_total,
-            // Every river shows its closest real-world counterpart (by discharge).
-            counterpart: earth_counterpart(d.discharge),
+            // Closest real-world counterpart (by discharge AND mouth latitude).
+            counterpart: counterpart_by_id[i].clone(),
             profile: d.profile.clone(),
             cities: river_cities[i].clone(),
             children: child_nodes,
@@ -5127,12 +5172,26 @@ fn build_river_systems(
     let mut seen = vec![false; rivers.len()];
     let mut roots: Vec<RiverNode> = (0..rivers.len())
         .filter(|&i| parent[i] == usize::MAX)
-        .map(|i| build(i, &rivers, &der, &children, &join_km, &river_cities, &mut seen))
+        .map(|i| build(i, &rivers, &der, &children, &join_km, &river_cities, &names_by_id, &counterpart_by_id, &mut seen))
         .collect();
 
     // Sort systems by length (longest first); counterpart is set per node in build.
     roots.sort_by(|a, b| b.length_km.partial_cmp(&a.length_km).unwrap_or(std::cmp::Ordering::Equal));
     roots
+}
+
+/// A short base-26 letter tag (0→A, 1→B, 26→AA …) — a guaranteed-unique-per-id
+/// last-resort suffix for the astronomically rare case where every name draw for
+/// one river collides with an already-used name.
+fn uniq_suffix(mut n: usize) -> String {
+    let mut s = String::new();
+    loop {
+        s.insert(0, (b'A' + (n % 26) as u8) as char);
+        n /= 26;
+        if n == 0 { break; }
+        n -= 1;
+    }
+    s
 }
 
 #[cfg(test)]
@@ -5176,7 +5235,7 @@ mod river_system_tests {
         }
         let buf = synth(w, h, terrain, elev);
         let hy = crate::sim::rivers::compute_hydrology(&buf);
-        let rivers = crate::sim::rivers::extract_rivers(&buf, &hy.flow_dir, &hy.acc, 1.2, 1.0);
+        let rivers = crate::sim::rivers::extract_rivers(&buf, &hy.flow_dir, &hy.acc, 1.2, 1.0, &[]);
         assert!(!rivers.is_empty(), "the valley world should produce rivers");
 
         // Put a settlement right on the main valley floor near the coast.

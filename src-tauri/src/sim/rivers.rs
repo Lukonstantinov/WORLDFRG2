@@ -228,13 +228,26 @@ pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
 /// rivers can be made thinner.
 pub fn extract_rivers(
     buf: &WorldBuffer, flow_dir: &[i32], acc: &[u32],
-    density: f32, width_scale: f32,
+    density: f32, width_scale: f32, lakes: &[Lake],
 ) -> Vec<River> {
     let w = buf.width;
     let h = buf.height;
     let total = buf.total();
     let density = density.clamp(0.0, 1.5);
     let width_scale = width_scale.clamp(0.2, 2.0);
+
+    // Cells that belong to a lake are OPEN WATER, not channel: a river must stop
+    // where it meets a lake and resume at the outlet, never draw a line straight
+    // across the basin (the "river crosses the lake" artefact). Flow accumulation
+    // still passes through the filled basin, so the outflow reach is sized by the
+    // full upstream catchment — the river, the lake and its outflow read as one
+    // connected system, just not one line over the water.
+    let mut is_lake = vec![false; total];
+    for lk in lakes {
+        for &(lx, ly) in &lk.cells {
+            is_lake[buf.idx(lx, ly)] = true;
+        }
+    }
     let area_ratio = (w * h) as f32 / 64800.0;
     let base = (40.0 * area_ratio.sqrt()).max(20.0);
     // density 0 → 3× threshold (sparse), 0.5 → 1.7×, 1 → 0.4×, 1.5 → 0.1× (very
@@ -251,6 +264,7 @@ pub fn extract_rivers(
     // ever followed the single largest upstream branch — hence "no tributaries").
     let is_channel = |i: usize| -> bool {
         buf.terrain[i] == 1
+            && !is_lake[i]
             && buf.koppen[i] != crate::sim::koppen::EF
             && acc[i] >= threshold
     };
@@ -540,7 +554,7 @@ mod tests {
         }
         let buf = synth(w, h, terrain, elev);
         let hy = compute_hydrology(&buf);
-        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, 1.2, 1.0);
+        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, 1.2, 1.0, &[]);
         let trunks = rivers.iter().filter(|r| !r.tributary).count();
         let tribs = rivers.iter().filter(|r| r.tributary).count();
         assert!(trunks >= 1, "expected at least one trunk reaching the sea");

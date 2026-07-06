@@ -37,11 +37,15 @@ const MIN_LAKE_CELLS: usize = 6;
 pub fn generate(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake]) -> Vec<Toponym> {
     let (w, h) = (buf.width, buf.height);
     let mut out: Vec<Toponym> = Vec::new();
+    // Every drawn feature name must be unique across the whole world — no two
+    // rivers/lakes/peaks share a label (the "same name in several places" bug).
+    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     // ── Regions: one per culture hearth (its homeland name) ──
     if let Some(map) = super::cultures::active() {
         for hh in &map.hearths {
             if hh.people.is_empty() { continue; }
+            used.insert(hh.people.clone());
             out.push(Toponym { kind: "region".into(), name: hh.people.clone(), x: hh.x, y: hh.y });
         }
     }
@@ -59,10 +63,11 @@ pub fn generate(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake]) -> Vec<Topo
         let pts = &rivers[i].points;
         if pts.len() < 4 { continue; }
         let (mx, my) = pts[pts.len() / 2];
-        // Salt the name draw so a river never collides with a settlement on the
-        // same cell, and each river reads distinctly.
-        let name = feature_name(mx, my, w, h, 0x1111 ^ n as u32);
-        out.push(Toponym { kind: "river".into(), name, x: mx as f32, y: my as f32 });
+        // Culture-styled river name from the local people, made globally unique
+        // (re-rolled on a collision). Matches the Hydrology dashboard's naming.
+        if let Some(name) = unique_river_name(mx, my, w, h, 0x1111 ^ n as u64, &mut used) {
+            out.push(Toponym { kind: "river".into(), name, x: mx as f32, y: my as f32 });
+        }
     }
 
     // ── Lakes: name the larger basins at their centroid ──
@@ -71,8 +76,9 @@ pub fn generate(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake]) -> Vec<Topo
         let (mut sx, mut sy) = (0u64, 0u64);
         for &(cx, cy) in &lake.cells { sx += cx as u64; sy += cy as u64; }
         let (cx, cy) = ((sx / lake.cells.len() as u64) as u32, (sy / lake.cells.len() as u64) as u32);
-        let name = feature_name(cx, cy, w, h, 0x2222 ^ n as u32);
-        out.push(Toponym { kind: "lake".into(), name, x: cx as f32, y: cy as f32 });
+        if let Some(name) = unique_feature_name(cx, cy, w, h, 0x2222 ^ n as u32, &mut used) {
+            out.push(Toponym { kind: "lake".into(), name, x: cx as f32, y: cy as f32 });
+        }
     }
 
     // ── Mountains: prominent local elevation maxima ──
@@ -104,11 +110,34 @@ pub fn generate(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake]) -> Vec<Topo
     peaks.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
     peaks.truncate(MAX_PEAKS);
     for (n, &(px, py, _)) in peaks.iter().enumerate() {
-        let name = feature_name(px, py, w, h, 0x3333 ^ n as u32);
-        out.push(Toponym { kind: "mountain".into(), name, x: px as f32, y: py as f32 });
+        if let Some(name) = unique_feature_name(px, py, w, h, 0x3333 ^ n as u32, &mut used) {
+            out.push(Toponym { kind: "mountain".into(), name, x: px as f32, y: py as f32 });
+        }
     }
 
     out
+}
+
+/// A culture-styled RIVER name at `(x,y)`, re-rolled until it's not already in
+/// `used` (bounded). Returns None only if every draw collided (vanishingly rare).
+fn unique_river_name(x: u32, y: u32, w: u32, h: u32, salt: u64, used: &mut std::collections::HashSet<String>) -> Option<String> {
+    let (kit, ms) = names::resolve_kit(x, y, w, h);
+    let seed0 = (x as u64).wrapping_mul(73856093) ^ (y as u64).wrapping_mul(19349663) ^ salt.wrapping_mul(0x9E3779B97F4A7C15);
+    for t in 0..32u64 {
+        let cand = super::cultures::river_name(kit, ms, seed0.wrapping_add(t.wrapping_mul(0x100000001B3)));
+        if used.insert(cand.clone()) { return Some(cand); }
+    }
+    None
+}
+
+/// A culture-styled place name for a lake/peak at `(x,y)`, re-rolled off `salt`
+/// until it isn't already in `used`. Returns None if all attempts collided.
+fn unique_feature_name(x: u32, y: u32, w: u32, h: u32, salt: u32, used: &mut std::collections::HashSet<String>) -> Option<String> {
+    for t in 0..24u32 {
+        let cand = feature_name(x, y, w, h, salt.wrapping_add(t.wrapping_mul(2654435761)));
+        if used.insert(cand.clone()) { return Some(cand); }
+    }
+    None
 }
 
 /// A culture-styled proper name for the feature at `(x,y)`, salted so distinct

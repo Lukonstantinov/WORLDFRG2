@@ -1519,6 +1519,7 @@ export interface RiverCityInfo {
  *  hydrological stats, elevation profile, cities and children. Mirrors Rust `RiverNode`. */
 export interface RiverNode {
   id: number; // index into the world's rivers array (look up its cell path)
+  name: string; // unique, culture-styled river name (dedup'd across the world)
   order: number;
   navigable: boolean;
   tributary: boolean;

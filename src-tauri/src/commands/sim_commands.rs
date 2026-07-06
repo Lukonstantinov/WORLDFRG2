@@ -102,8 +102,10 @@ pub fn sim_rivers_hydrology(
     let max_cells = ((buf.total() as f32) * lake_max_fraction.clamp(0.000002, 0.05)) as usize;
     let max_cells = max_cells.max(4);
     let hydro = rivers::compute_hydrology(&buf);
-    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, river_density, river_width);
+    // Lakes first: rivers must terminate at lake shores (not draw across them),
+    // so channel extraction needs to know which cells are open lake water.
     let lakes = rivers::detect_lakes(&buf, &hydro.filled, lake_fill_depth, max_cells);
+    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, river_density, river_width, &lakes);
 
     // Store rivers as serialized state for rendering
     // (Rivers are overlays, not per-cell data stored in tiles)
@@ -220,11 +222,12 @@ pub fn sim_run_all(
     // Phase 4: Climate
     koppen::classify_koppen(&mut buf);
 
-    // Phase 5: Rivers (default river/lake parameters)
+    // Phase 5: Rivers (default river/lake parameters). Lakes first so channel
+    // extraction can stop rivers at lake shores instead of crossing the water.
     let hydro = rivers::compute_hydrology(&buf);
-    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0);
     let lake_max = (buf.total() / 2000).max(20);
     let lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
+    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0, &lakes);
 
     // Phase 6: Soil & fertility
     soil::classify_soil(&mut buf);
@@ -343,11 +346,12 @@ pub fn sim_run_all_from_terrain(
     // Phase 4: Climate
     koppen::classify_koppen(&mut buf);
 
-    // Phase 5: Rivers (default river/lake parameters)
+    // Phase 5: Rivers (default river/lake parameters). Lakes first so channel
+    // extraction can stop rivers at lake shores instead of crossing the water.
     let hydro = rivers::compute_hydrology(&buf);
-    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0);
     let lake_max = (buf.total() / 2000).max(20);
     let lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
+    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0, &lakes);
 
     // Phase 6: Soil & fertility
     soil::classify_soil(&mut buf);

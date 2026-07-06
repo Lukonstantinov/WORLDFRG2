@@ -109,6 +109,46 @@ function strokeSmoothPath(ctx: CanvasRenderingContext2D, pts: [number, number][]
   }
   ctx.stroke();
 }
+/** Displace a cell path with gentle, deterministic MEANDERS so rivers read as
+ *  natural winding channels rather than the straight diagonal grid-lines the
+ *  steepest-descent drainage produces on flats. Endpoints are anchored (the
+ *  envelope tapers to 0 at both ends) so mouths and confluences stay put, and a
+ *  seam guard skips the ±worldW jump so wrap-around rivers don't spike. Amplitude
+ *  and wavelength grow with stream order (a great river swings in broad bends, a
+ *  creek in tight ones). Cheap O(n); the result is cached per points array. */
+function meanderPath(pts: [number, number][], seed: number, order: number, worldW: number): [number, number][] {
+  const n = pts.length;
+  if (n < 4) return pts;
+  const amp = Math.min(1.2, 0.45 + order * 0.13);
+  const wav = 6 + order * 2.4; // cells per meander cycle
+  const k = (Math.PI * 2) / wav;
+  let ph = Math.sin(seed * 12.9898) * 43758.5453;
+  ph = (ph - Math.floor(ph)) * Math.PI * 2;
+  const half = worldW > 0 ? worldW / 2 : Infinity;
+  const out: [number, number][] = new Array(n);
+  out[0] = pts[0];
+  out[n - 1] = pts[n - 1];
+  let cum = 0;
+  for (let i = 1; i < n - 1; i++) {
+    const [px, py] = pts[i - 1];
+    const [x, y] = pts[i];
+    const [nx, ny] = pts[i + 1];
+    // Seam / gap guard: leave points near a wrap seam (or a long jump) untouched.
+    if (Math.abs(nx - px) > half || Math.abs(x - px) > half || Math.abs(nx - x) > half) {
+      out[i] = pts[i];
+      continue;
+    }
+    cum += Math.hypot(x - px, y - py);
+    let tx = nx - px, ty = ny - py;
+    const len = Math.hypot(tx, ty) || 1;
+    tx /= len; ty /= len;
+    const f = i / (n - 1);
+    const env = Math.sin(Math.PI * f); // 0 at ends, 1 mid-course
+    const off = amp * env * Math.sin(ph + cum * k);
+    out[i] = [x - ty * off, y + tx * off]; // perpendicular to the local tangent
+  }
+  return out;
+}
 const LAKE_COLOR = "rgba(51, 153, 221, 0.7)";
 
 const SETTLEMENT_COLORS: Record<string, string> = {
@@ -293,6 +333,13 @@ export class OverlayManager {
   private edgeCache = new WeakMap<object, number[]>();
   /** Cached subtype-split edges, keyed by each region's `subtypes` array. */
   private subtypeEdgeCache = new WeakMap<object, number[]>();
+  /** Cached meandered river paths, keyed by each river's raw `points` array
+   *  (rebuilt only when the rivers data is replaced). */
+  private meanderCache = new WeakMap<object, [number, number][]>();
+  /** Placed label bounding boxes for the current frame (world/cell coords), used
+   *  to skip overlapping settlement + toponym labels ("Rusapolyelgorod" merges).
+   *  Cleared at the top of every `render`. */
+  private placedLabels: { x0: number; y0: number; x1: number; y1: number }[] = [];
 
   drawRivers(rivers: RiverData[]) { this.rivers = rivers; }
   drawLakes(lakes: LakeData[]) { this.lakes = lakes; }
@@ -933,8 +980,43 @@ export class OverlayManager {
     this.currentScale = scale;
   }
 
+  /** Meandered render path for a river, cached per raw `points` array (meanders
+   *  are scale-independent, so this is computed once per rivers-data load). */
+  private riverPath(river: RiverData, id: number, order: number): [number, number][] {
+    const cached = this.meanderCache.get(river.points);
+    if (cached) return cached;
+    const [sx, sy] = river.points[0];
+    const seed = ((sx * 73856093) ^ (sy * 19349663) ^ (id * 83492791)) >>> 0;
+    const path = meanderPath(river.points, seed, order, this.worldW || 0);
+    this.meanderCache.set(river.points, path);
+    return path;
+  }
+
+  /** Does a candidate label box overlap any already-placed label this frame? */
+  private labelCollides(x0: number, y0: number, x1: number, y1: number): boolean {
+    for (const r of this.placedLabels) {
+      if (x0 < r.x1 && x1 > r.x0 && y0 < r.y1 && y1 > r.y0) return true;
+    }
+    return false;
+  }
+
+  /** Reserve a label box (centered horizontally on `cx`, bottom-anchored at
+   *  `baseY`) if it doesn't collide with an already-placed one. Returns true and
+   *  records the box when placed; false when it should be skipped. `w`/`h` are the
+   *  text metrics in world (cell) units. A small pad keeps neighbours from kissing. */
+  private reserveLabel(cx: number, baseY: number, w: number, h: number): boolean {
+    const pad = h * 0.18;
+    const x0 = cx - w / 2 - pad, x1 = cx + w / 2 + pad;
+    const y0 = baseY - h - pad, y1 = baseY + pad;
+    if (this.labelCollides(x0, y0, x1, y1)) return false;
+    this.placedLabels.push({ x0, y0, x1, y1 });
+    return true;
+  }
+
   /** Render all overlays to a 2D context (called within viewport transform) */
   render(ctx: CanvasRenderingContext2D) {
+    // Fresh label-collision map each frame (settlement + toponym passes share it).
+    this.placedLabels = [];
     // Trade-region territories first (under everything else) so markers/routes
     // stay legible on top.
     if (this.visibility.tradeRegions && this.econRegions.length > 0) {
@@ -975,9 +1057,10 @@ export class OverlayManager {
         ctx.globalAlpha = hasHL ? (isHL ? 0.95 : 0.22) : 0.85;
         ctx.strokeStyle = riverShade(river.major);
         ctx.lineWidth = riverW;
-        // Catmull-Rom smoothing so the drainage lines read as natural meanders
-        // rather than the 8-neighbour grid staircase of the raw cell path.
-        strokeSmoothPath(ctx, river.points);
+        // Meander + Catmull-Rom smoothing so the drainage lines read as natural
+        // winding channels rather than the straight diagonal grid-lines the
+        // steepest-descent flow produces on flats.
+        strokeSmoothPath(ctx, this.riverPath(river, i, ord));
         // Delta: braided distributary fan + marsh stipple over the shallow shelf.
         if (river.mouth_kind === 1 && river.delta && river.delta.length > 0) {
           const [mx, my] = river.points[river.points.length - 1];
@@ -1008,7 +1091,7 @@ export class OverlayManager {
           ctx.shadowColor = col;
           const ord = river.order ?? (river.major ? 4 : 1);
           ctx.lineWidth = Math.max(1.1, Math.min(3.4, 1.2 + Math.min(ord, 6) * 0.34) * inv);
-          strokeSmoothPath(ctx, river.points);
+          strokeSmoothPath(ctx, this.riverPath(river, i, ord));
         });
         ctx.restore();
       }
@@ -1722,7 +1805,12 @@ export class OverlayManager {
     };
     ctx.textBaseline = "middle";
     ctx.lineJoin = "round";
-    for (const t of this.toponyms) {
+    // Regions first (they always draw — faint homeland labels), then the point
+    // features, which are dropped when they'd overlap an already-drawn label so a
+    // cluster of nearby rivers/peaks doesn't stack names on one spot.
+    const ordered = [...this.toponyms].sort((a, b) =>
+      (a.kind === "region" ? 0 : 1) - (b.kind === "region" ? 0 : 1));
+    for (const t of ordered) {
       const region = t.kind === "region";
       const fs = Math.max(6, Math.min(16, (region ? 13 : 9) * inv));
       ctx.font = `${region ? "700 " : ""}${fs}px -apple-system, Segoe UI, sans-serif`;
@@ -1730,6 +1818,14 @@ export class OverlayManager {
       const col = COLORS[t.kind] ?? "#cfe2f6";
       const dotR = Math.max(0.5, 1.4 * inv);
       const tx = t.x + 0.5 + (region ? 0 : dotR + 1.5 * inv);
+      // Point features de-collide (regions bypass — they're a different, faint layer).
+      if (!region) {
+        const wLbl = ctx.measureText(label).width;
+        const x0 = tx - fs * 0.2, x1 = tx + wLbl + fs * 0.2;
+        const y0 = t.y + 0.5 - fs * 0.7, y1 = t.y + 0.5 + fs * 0.7;
+        if (this.labelCollides(x0, y0, x1, y1)) continue;
+        this.placedLabels.push({ x0, y0, x1, y1 });
+      }
       // Non-region features get a small locator dot.
       if (!region) {
         ctx.beginPath();
@@ -3025,14 +3121,23 @@ export class OverlayManager {
     // Colony/outpost names are drawn (in their own colour) by renderColonies — skip
     // them here so they aren't double-drawn in white.
     const colonyKeys = new Set(this.colonies.map((c) => `${Math.round(c.x)},${Math.round(c.y)}`));
-    for (const s of this.settlements) {
+    // Draw biggest places first so, when two labels would overlap, the more
+    // important city keeps its name and the lesser one is dropped (rather than the
+    // two colliding into an unreadable "Rusapolyelgorod" blob).
+    const rank: Record<string, number> = { capital: 5, city: 4, town: 3, village: 2, outpost: 1 };
+    const ordered = [...this.settlements].sort((a, b) =>
+      (rank[b.size] || 0) - (rank[a.size] || 0) || (b.population || 0) - (a.population || 0));
+    for (const s of ordered) {
       if (!s.name) continue;
       if (colonyKeys.has(`${Math.round(s.x)},${Math.round(s.y)}`)) continue;
       const radius = SETTLEMENT_SIZES[s.size] || 1;
+      const cx = s.x + 0.5, baseY = s.y + 0.5 - radius - 0.6;
+      const wLbl = ctx.measureText(s.name).width;
+      if (!this.reserveLabel(cx, baseY, wLbl, fs)) continue; // would overlap → skip
       ctx.strokeStyle = "rgba(0,0,0,0.75)";
-      ctx.strokeText(s.name, s.x + 0.5, s.y + 0.5 - radius - 0.6);
+      ctx.strokeText(s.name, cx, baseY);
       ctx.fillStyle = "#e8e8e0";
-      ctx.fillText(s.name, s.x + 0.5, s.y + 0.5 - radius - 0.6);
+      ctx.fillText(s.name, cx, baseY);
     }
     ctx.textAlign = "start";
     ctx.textBaseline = "alphabetic";

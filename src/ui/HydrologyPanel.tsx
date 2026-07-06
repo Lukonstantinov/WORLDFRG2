@@ -441,27 +441,21 @@ function findNode(node: RiverNode, id: number | null): RiverNode | null {
   return null;
 }
 
-const SYL_A = ["Ald", "Vex", "Sor", "Kel", "Mar", "Dun", "Bre", "Cor", "Fen", "Gath", "Har", "Lor", "Mor", "Nen", "Orr", "Per", "Quel", "Ral", "Ser", "Tarn", "Ul", "Vor", "Wen", "Yth", "Esk", "Cael", "Bryn", "Dov"];
-const SYL_B = ["a", "e", "o", "i", "en", "or", "an", "el", "ir", "ow", "as", "un", "ael", "eth"];
-const SUFFIX = ["mere", "water", "run", "beck", "ford", "wash", "brook", "reach"];
-function genName(x: number, y: number): string {
-  const hsh = ((x * 73856093) ^ (y * 19349663)) >>> 0;
-  const a = SYL_A[hsh % SYL_A.length];
-  const b = SYL_B[(hsh >> 5) % SYL_B.length];
-  const base = a + b;
-  return (hsh >> 13) % 2 === 0 ? `${base} ${SUFFIX[(hsh >> 9) % SUFFIX.length]}` : base;
-}
-/** Map every node id → display name: a nearby river toponym, else a generated name. */
+/** Map every node id → display name: a nearby river toponym (so a named river
+ *  matches its map label), else the backend's unique culture-styled `node.name`. */
 function nameMap(systems: RiverNode[], toponyms: Toponym[]): Map<number, string> {
   const m = new Map<number, string>();
   const riverTops = toponyms.filter((t) => t.kind === "river");
+  const used = new Set<string>();
   const walk = (n: RiverNode) => {
     let best: string | null = null, bestD = 36; // within 6 cells of the midpoint
     for (const t of riverTops) {
       const dx = t.x - n.mid_x, dy = t.y - n.mid_y, d = dx * dx + dy * dy;
-      if (d < bestD) { bestD = d; best = t.name; }
+      if (d < bestD && !used.has(t.name)) { bestD = d; best = t.name; }
     }
-    m.set(n.id, best ?? genName(n.source_x, n.source_y));
+    const name = best ?? n.name;
+    used.add(name);
+    m.set(n.id, name);
     n.children.forEach(walk);
   };
   systems.forEach(walk);
