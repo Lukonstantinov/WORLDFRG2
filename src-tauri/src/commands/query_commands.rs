@@ -516,6 +516,10 @@ struct RouteSettlement {
 #[derive(Deserialize)]
 struct RouteRiver {
     points: Vec<(u32, u32)>,
+    /// Navigable trunk (barge/boat highway). Old callers that send only `points`
+    /// default to false → treated as a minor river (still a cheap corridor).
+    #[serde(default)]
+    navigable: bool,
 }
 
 /// A computed trade route between two settlements.
@@ -708,13 +712,18 @@ fn build_coarse_cost(
 
     // Coarse river mask from overlay JSON (rivers aren't stored in tiles).
     let mut is_river = vec![false; cn];
+    // Navigable trunks are a distinct, cheaper corridor than minor rivers (a
+    // barge highway vs a fordable creek), so route preferentially down them.
+    let mut is_nav_river = vec![false; cn];
     {
         let rivers: Vec<RouteRiver> = serde_json::from_str(rivers_json).unwrap_or_default();
         for r in &rivers {
             for &(rx, ry) in &r.points {
                 let cx = (rx / f).min(cw as u32 - 1) as i32;
                 let cy = (ry / f).min(ch as u32 - 1) as i32;
-                is_river[(cy * cw + cx) as usize] = true;
+                let ci = (cy * cw + cx) as usize;
+                is_river[ci] = true;
+                if r.navigable { is_nav_river[ci] = true; }
             }
         }
     }
@@ -747,7 +756,10 @@ fn build_coarse_cost(
                     32 => 7.0,              // H highland
                     _ => 0.0,
                 };
-                if is_river[ci] { c = c.min(1.2); }
+                // Navigable trunk = a fast inland highway (cheapest overland
+                // corridor); a minor river is still a cheap valley route.
+                if is_nav_river[ci] { c = c.min(0.8); }
+                else if is_river[ci] { c = c.min(1.4); }
                 // Ice-sheet land (EF ice cap or a deeply frozen interior) is
                 // near-impassable — caravans don't road across a glacier.
                 if koppen[ci] == 22 || temp[ci] <= ICE_LAND_C {

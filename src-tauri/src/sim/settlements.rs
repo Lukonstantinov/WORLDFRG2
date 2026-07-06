@@ -36,15 +36,40 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake])
     // Pre-compute river cell set and coast proximity
     let mut is_river_cell = vec![false; total];
     let mut is_river_mouth = vec![false; total];
+    // Navigable rivers are inland highways — a town on one behaves like a port.
+    let mut is_navigable_cell = vec![false; total];
+    // Confluences (where a tributary joins a larger stream) and the head of
+    // navigation (upstream limit of a navigable trunk = the fall line where
+    // rapids stop boats) are the classic river-city magnets — St. Louis /
+    // Khartoum sit at confluences, Richmond / fall-line cities at the head of nav.
+    let mut is_confluence_cell = vec![false; total];
+    let mut is_head_of_nav = vec![false; total];
+    // Estuary/delta mouths (drowned tidal mouth or depositional fan) are prime
+    // deep-water port + fishery sites, distinct from an ordinary river mouth.
+    let mut is_estuary_mouth = vec![false; total];
     for river in rivers {
         for &(rx, ry) in &river.points {
             let idx = buf.idx(rx, ry);
             is_river_cell[idx] = true;
+            if river.navigable { is_navigable_cell[idx] = true; }
         }
-        // River mouth = last point
-        if let Some(&(mx, my)) = river.points.last() {
-            let idx = buf.idx(mx, my);
-            is_river_mouth[idx] = true;
+        if river.tributary {
+            // Tributary segment ends at its confluence with a larger stream.
+            if let Some(&(cx, cy)) = river.points.last() {
+                is_confluence_cell[buf.idx(cx, cy)] = true;
+            }
+        } else if let Some(&(mx, my)) = river.points.last() {
+            // Trunk: last point is the sea mouth.
+            is_river_mouth[buf.idx(mx, my)] = true;
+            if river.mouth_kind == 1 || river.mouth_kind == 2 {
+                is_estuary_mouth[buf.idx(mx, my)] = true;
+            }
+        }
+        // Head of navigation: the upstream-most point of a navigable trunk.
+        if river.navigable {
+            if let Some(&(hx, hy)) = river.points.first() {
+                is_head_of_nav[buf.idx(hx, hy)] = true;
+            }
         }
     }
     // Lake cells — fresh inland water is a first-class settlement draw (lakeshore
@@ -163,13 +188,22 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake])
             // the draw is strong — a cell ON or right beside a river gets the full
             // bonus, making river valleys line with towns.
             let on_river = is_river_cell[idx];
+            let mut on_navigable = false;
+            let mut near_confluence = false;
             let has_river = on_river || (-2i32..=2).any(|dy| {
                 (-2i32..=2).any(|dx| {
                     let ni = buf.widx(x as i32 + dx, y as i32 + dy);
+                    if is_navigable_cell[ni] { on_navigable = true; }
+                    if is_confluence_cell[ni] { near_confluence = true; }
                     is_river_cell[ni]
                 })
             });
             if has_river { water_score += if on_river { 0.7 } else { 0.55 }; }
+            // A navigable river (an inland trade artery) is a stronger draw than an
+            // unnavigable creek, and a confluence doubly so (two valleys + a route
+            // node meet). Bounded by the overall water_score.min(1.0) below.
+            if on_navigable { water_score += 0.20; }
+            if near_confluence { water_score += 0.15; }
 
             // Coast nearby — a stronger draw now, so genuine PORTS form on rivers'
             // absence (harbours, fishing towns), not only at river mouths.
@@ -207,16 +241,29 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake])
             let terrain_score = (farm + defensive).min(1.0);
 
             // --- Trade score (10%) ---
-            // River mouth nearby
-            let near_river_mouth = (-3i32..=3).any(|dy| {
-                (-3i32..=3).any(|dx| {
+            // River mouth / estuary / head-of-navigation nearby (the river-trade
+            // nodes). Estuaries & deltas are deep-water ports; the head of
+            // navigation is a natural entrepôt where river and overland trade meet.
+            let mut near_river_mouth = false;
+            let mut near_estuary = false;
+            for dy in -3i32..=3 {
+                for dx in -3i32..=3 {
                     let ni = buf.widx(x as i32 + dx, y as i32 + dy);
-                    is_river_mouth[ni]
-                })
+                    if is_river_mouth[ni] { near_river_mouth = true; }
+                    if is_estuary_mouth[ni] { near_estuary = true; }
+                }
+            }
+            let near_head_nav = (-2i32..=2).any(|dy| {
+                (-2i32..=2).any(|dx| is_head_of_nav[buf.widx(x as i32 + dx, y as i32 + dy)])
             });
 
-            let trade_score = if near_river_mouth { 1.0 }
+            let trade_score = if near_estuary { 1.0 }        // drowned tidal port / delta entrepôt
+                else if near_river_mouth { 0.92 }
+                else if near_coast && on_navigable { 0.90 }  // river port at the sea
                 else if near_coast && has_river { 0.85 }
+                else if near_confluence { 0.80 }             // confluence trade node
+                else if near_head_nav { 0.78 }               // fall-line entrepôt
+                else if on_navigable { 0.70 }                // navigable inland highway
                 else if near_coast { 0.6 }   // natural harbour / port
                 else if oasis { 0.6 }        // caravan oasis on a desert route
                 else if has_lake { 0.5 }     // lake port

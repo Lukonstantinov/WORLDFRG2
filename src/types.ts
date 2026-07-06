@@ -1502,6 +1502,8 @@ export interface RiverData {
   navigable?: boolean;
   mouth_kind?: number; // 0 plain, 1 delta, 2 estuary
   delta?: [number, number][];
+  tributary?: boolean; // ends at a confluence with a larger stream (not the sea)
+  order?: number; // Strahler-ish stream order (1 = headwater creek)
 }
 
 export interface LakeData {

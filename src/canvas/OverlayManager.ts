@@ -81,6 +81,34 @@ const RIVER_COLOR = "#2288cc";
 function riverShade(major: boolean | undefined): string {
   return major ? "rgb(34,96,165)" : "rgb(120,190,225)";
 }
+
+/** Stroke a cell path as a smooth Catmull-Rom spline (converted to cubic Béziers)
+ *  so rivers read as natural meanders instead of the 8-neighbour grid staircase.
+ *  Falls back to straight segments for 2-point paths. Points are cell coords;
+ *  +0.5 centres the line in the cell. */
+function strokeSmoothPath(ctx: CanvasRenderingContext2D, pts: [number, number][]) {
+  const n = pts.length;
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0] + 0.5, pts[0][1] + 0.5);
+  if (n === 2) {
+    ctx.lineTo(pts[1][0] + 0.5, pts[1][1] + 0.5);
+    ctx.stroke();
+    return;
+  }
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = pts[i === 0 ? 0 : i - 1];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2 < n ? i + 2 : n - 1];
+    // Catmull-Rom → cubic Bézier control points (tension 1/6).
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
+    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
+    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    ctx.bezierCurveTo(c1x + 0.5, c1y + 0.5, c2x + 0.5, c2y + 0.5, p2[0] + 0.5, p2[1] + 0.5);
+  }
+  ctx.stroke();
+}
 const LAKE_COLOR = "rgba(51, 153, 221, 0.7)";
 
 const SETTLEMENT_COLORS: Record<string, string> = {
@@ -916,20 +944,21 @@ export class OverlayManager {
       // stream is thin and pale, a great trunk river wide and deep blue. Width is
       // zoom-compensated so even small streams stay visible.
       const inv = 1 / Math.sqrt(this.currentScale);
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
       for (const river of this.rivers) {
         if (river.points.length < 2) continue;
-        // Every river renders thin: ordinary streams ~1 px, major trunks ~2.5 px,
-        // zoom-compensated. Width never balloons into a blob.
-        const baseW = river.major ? 2.5 : 1.1;
+        // Width scales with the river's Strahler order (headwater creek → great
+        // trunk): order 1 ≈ 1 px, a high-order trunk ≈ 2.6 px, zoom-compensated.
+        // Width never balloons into a blob.
+        const ord = river.order ?? (river.major ? 4 : 1);
+        const baseW = 0.9 + Math.min(ord, 6) * 0.32;
         const riverW = Math.max(0.8, Math.min(3, baseW) * inv);
         ctx.strokeStyle = riverShade(river.major);
         ctx.lineWidth = riverW;
-        ctx.beginPath();
-        ctx.moveTo(river.points[0][0] + 0.5, river.points[0][1] + 0.5);
-        for (let i = 1; i < river.points.length; i++) {
-          ctx.lineTo(river.points[i][0] + 0.5, river.points[i][1] + 0.5);
-        }
-        ctx.stroke();
+        // Catmull-Rom smoothing so the drainage lines read as natural meanders
+        // rather than the 8-neighbour grid staircase of the raw cell path.
+        strokeSmoothPath(ctx, river.points);
         // Delta: braided distributary fan + marsh stipple over the shallow shelf.
         if (river.mouth_kind === 1 && river.delta && river.delta.length > 0) {
           const [mx, my] = river.points[river.points.length - 1];

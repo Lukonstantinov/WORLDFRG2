@@ -83,10 +83,15 @@ pub fn apply_volcanic_apron(buf: &mut WorldBuffer) {
 /// Rivers data provides proximity information.
 pub fn apply_alluvial_override(buf: &mut WorldBuffer, rivers: &[super::rivers::River]) {
     for river in rivers {
-        if river.width < 2.5 { continue; }
+        // Alluvium forms along the lower course of any sizeable river, and along
+        // MOST of a navigable trunk — its floodplain is the historic breadbasket
+        // (the Nile/Indus/Mesopotamia geometry) and where valley towns cluster.
+        if river.width < 2.0 && !river.navigable { continue; }
 
-        // Only lower 60% of river
-        let start = (river.points.len() as f32 * 0.4) as usize;
+        // Navigable trunks lay alluvium over their lower 80%; smaller rivers only
+        // the lower 60% (headwaters are too steep/incised to deposit sediment).
+        let frac = if river.navigable { 0.20 } else { 0.40 };
+        let start = (river.points.len() as f32 * frac) as usize;
         for &(rx, ry) in &river.points[start..] {
             // Mark cells within 2 of river as alluvial
             for dy in -2i32..=2 {
