@@ -205,6 +205,9 @@ export class OverlayManager {
   /** 🌊 Hydrology · indices (into `rivers`) of the selected system's subtree to
    *  glow on the map; empty = no selection (all rivers drawn normally). */
   private riverHighlight: Set<number> = new Set();
+  /** 🌊 Hydrology · per-river-index glow colour (branch / order scheme); missing
+   *  entries fall back to the default cyan. */
+  private riverHighlightColors: Record<number, string> = {};
   /** #37 · per-hub local price premium for the selected good (1 = par with the
    *  world base value; <1 cheap/abundant, >1 dear/scarce). */
   private goodScarcity: { x: number; y: number; premium: number }[] = [];
@@ -520,9 +523,11 @@ export class OverlayManager {
     this.travelRoute = points;
   }
 
-  /** 🌊 Set (or clear with null/[]) which rivers glow as the selected system. */
-  setRiverHighlight(ids: number[] | null) {
+  /** 🌊 Set (or clear with null/[]) which rivers glow as the selected system,
+   *  with an optional per-river-index colour map (branch / order scheme). */
+  setRiverHighlight(ids: number[] | null, colors?: Record<number, string> | null) {
     this.riverHighlight = new Set(ids ?? []);
+    this.riverHighlightColors = colors ?? {};
   }
 
   /** Set (or clear with []) the per-hub scarcity discs for the selected good. */
@@ -990,15 +995,17 @@ export class OverlayManager {
           }
         }
       });
-      // Glow pass over the highlighted subtree (drawn last → on top).
+      // Glow pass over the highlighted subtree (drawn last → on top). Each
+      // tributary can glow its own colour (branch / order scheme from the panel).
       if (hasHL) {
         ctx.save();
         ctx.globalAlpha = 0.95;
-        ctx.shadowColor = "#8fd8ff";
         ctx.shadowBlur = 8 * inv;
-        ctx.strokeStyle = "#cdeeff";
         this.rivers.forEach((river, i) => {
           if (!hl.has(i) || river.points.length < 2) return;
+          const col = this.riverHighlightColors[i] ?? "#cdeeff";
+          ctx.strokeStyle = col;
+          ctx.shadowColor = col;
           const ord = river.order ?? (river.major ? 4 : 1);
           ctx.lineWidth = Math.max(1.1, Math.min(3.4, 1.2 + Math.min(ord, 6) * 0.34) * inv);
           strokeSmoothPath(ctx, river.points);
@@ -3305,6 +3312,7 @@ export class OverlayManager {
     this.tradeRoutes = [];
     this.travelRoute = [];
     this.riverHighlight = new Set();
+    this.riverHighlightColors = {};
     this.goodScarcity = [];
     this.toponyms = [];
     this.fisheryBanks = [];

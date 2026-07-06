@@ -941,14 +941,16 @@ export function MapCanvas() {
     requestRender();
   }, [travelRoute, requestRender]);
 
-  // 🌊 Hydrology · the selected river system's subtree glows on the map.
+  // 🌊 Hydrology · the selected river system's subtree glows on the map, each
+  // tributary in its own colour (branch / order scheme).
   const riverHighlight = useUIStore((s) => s.riverHighlight);
+  const riverHighlightColors = useUIStore((s) => s.riverHighlightColors);
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om) return;
-    om.setRiverHighlight(riverHighlight);
+    om.setRiverHighlight(riverHighlight, riverHighlightColors);
     requestRender();
-  }, [riverHighlight, requestRender]);
+  }, [riverHighlight, riverHighlightColors, requestRender]);
 
   // #26 · geographic toponym labels, pushed from the world store.
   const toponyms = useWorldStore((s) => s.toponyms);

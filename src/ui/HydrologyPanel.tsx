@@ -18,6 +18,7 @@ export function HydrologyPanel() {
   const toponyms = useWorldStore((s) => s.toponyms);
   const focusOn = useViewportStore((s) => s.focusOn);
   const setRiverHighlight = useUIStore((s) => s.setRiverHighlight);
+  const setRiverHighlightColors = useUIStore((s) => s.setRiverHighlightColors);
 
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.hydrology);
 
@@ -28,6 +29,7 @@ export function HydrologyPanel() {
   const [sort, setSort] = useState<"length" | "discharge" | "order">("length");
   const [openId, setOpenId] = useState<number | null>(null);
   const [selId, setSelId] = useState<number | null>(null);
+  const [colorMode, setColorMode] = useState<ColorMode>("branch");
 
   // Fetch the system tree whenever the panel opens or the rivers change.
   useEffect(() => {
@@ -48,17 +50,20 @@ export function HydrologyPanel() {
   // the reach, else a stable generated name. Memoized over the loaded systems.
   const names = useMemo(() => nameMap(systems, toponyms), [systems, toponyms]);
 
-  // Glow the selected river system's subtree on the map (cleared when nothing is
-  // open or the panel is closed).
+  const openSys = useMemo(() => systems.find((s) => s.id === openId) ?? null, [systems, openId]);
+  // Per-river glow colour for the open system, by the chosen scheme.
+  const colorMap = useMemo(() => (openSys ? buildColorMap(openSys, colorMode) : {}), [openSys, colorMode]);
+
+  // Glow the selected river system's subtree on the map, coloured by scheme
+  // (cleared when nothing is open or the panel is closed).
   useEffect(() => {
-    if (!open || openId == null) { setRiverHighlight(null); return; }
-    const sys = systems.find((s) => s.id === openId);
-    if (!sys) { setRiverHighlight(null); return; }
-    const node = findNode(sys, selId) ?? sys;
+    if (!open || !openSys) { setRiverHighlight(null); setRiverHighlightColors(null); return; }
+    const node = findNode(openSys, selId) ?? openSys;
     setRiverHighlight(subtreeIds(node));
-  }, [open, openId, selId, systems, setRiverHighlight]);
+    setRiverHighlightColors(colorMap);
+  }, [open, openSys, selId, colorMap, setRiverHighlight, setRiverHighlightColors]);
   // Clear the highlight when the panel unmounts.
-  useEffect(() => () => setRiverHighlight(null), [setRiverHighlight]);
+  useEffect(() => () => { setRiverHighlight(null); setRiverHighlightColors(null); }, [setRiverHighlight, setRiverHighlightColors]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -89,6 +94,13 @@ export function HydrologyPanel() {
           <option value="length">Length</option>
           <option value="discharge">Discharge</option>
           <option value="order">Order</option>
+        </select>
+        <select value={colorMode} onChange={(e) => setColorMode(e.target.value as ColorMode)}
+          title="How tributaries are coloured on the map & in the snip"
+          style={{ background: "#0a141d", border: "1px solid #1d2f42", borderRadius: 5, color: "#9fb6cc", fontSize: 11, padding: "3px 4px" }}>
+          <option value="branch">🎨 Branch</option>
+          <option value="order">🎨 By order</option>
+          <option value="single">🎨 Single</option>
         </select>
       </div>
 
@@ -128,7 +140,7 @@ export function HydrologyPanel() {
               {/* Expanded snip-hero detail */}
               {isOpen && (
                 <div style={{ padding: "2px 9px 10px" }}>
-                  <Snip node={sel} byId={byId} names={names} onLocate={() => focusOn(sel.mouth_x, sel.mouth_y)} />
+                  <Snip node={sel} byId={byId} names={names} colors={colorMap} onLocate={() => focusOn(sel.mouth_x, sel.mouth_y)} />
 
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "9px 0 8px" }}>
                     {sel.navigable && <span style={chip}>⚓ navigable {fmt(sel.navigable_km)} km</span>}
@@ -171,7 +183,7 @@ export function HydrologyPanel() {
 
                   <div style={{ ...subLabel, marginTop: 10 }}>Tributaries · full network</div>
                   <div style={{ fontSize: 12 }}>
-                    <TreeRow node={sys} names={names} selId={sel.id}
+                    <TreeRow node={sys} names={names} colors={colorMap} selId={sel.id}
                       onSelect={(id, mx, my) => { setSelId(id); focusOn(mx, my); }} depth={0} isRoot />
                   </div>
                 </div>
@@ -185,8 +197,9 @@ export function HydrologyPanel() {
 }
 
 // ── Location snip: real terrain crop with only this river's subtree drawn over it ──
-function Snip({ node, byId, names, onLocate }: {
-  node: RiverNode; byId: Map<number, RiverData>; names: Map<number, string>; onLocate: () => void;
+function Snip({ node, byId, names, colors, onLocate }: {
+  node: RiverNode; byId: Map<number, RiverData>; names: Map<number, string>;
+  colors: Record<number, string>; onLocate: () => void;
 }) {
   const geo = useMemo(() => {
     const ids = subtreeIds(node);
@@ -241,13 +254,13 @@ function Snip({ node, byId, names, onLocate }: {
           background: "radial-gradient(120% 90% at 22% 12%, #1b2f3d 0%, #10202b 55%, #0b161e 100%)", cursor: "pointer" }}>
         {/* real terrain crop backdrop (falls back to the gradient until loaded) */}
         {bg && <image href={bg} x={0} y={0} width={VW} height={VH} preserveAspectRatio="none" opacity={0.92} />}
-        {/* tributaries (thin) */}
+        {/* tributaries (thin) — coloured by the chosen scheme */}
         {ids.map((id, i) => {
           if (id === node.id) return null;
           const pts = byId.get(id)?.points ?? [];
           if (pts.length < 2) return null;
           return <polyline key={i} points={pts.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ")}
-            fill="none" stroke="#57a6cf" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" opacity={0.9} />;
+            fill="none" stroke={colors[id] ?? "#57a6cf"} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" opacity={0.95} />;
         })}
         {/* trunk (bold + halo) */}
         {trunkPts.length > 1 && <>
@@ -316,17 +329,21 @@ function Profile({ node, names }: { node: RiverNode; names: Map<number, string> 
 }
 
 // ── Recursive named tributary tree ──
-function TreeRow({ node, names, selId, onSelect, depth, isRoot }: {
-  node: RiverNode; names: Map<number, string>; selId: number;
+function TreeRow({ node, names, colors, selId, onSelect, depth, isRoot }: {
+  node: RiverNode; names: Map<number, string>; colors: Record<number, string>; selId: number;
   onSelect: (id: number, mx: number, my: number) => void; depth: number; isRoot?: boolean;
 }) {
   const nm = names.get(node.id) ?? "River";
   const on = node.id === selId;
+  const swatch = colors[node.id];
   return (
     <div>
       <div data-no-drag onClick={() => onSelect(node.id, node.mid_x, node.mid_y)}
         style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 4px", marginLeft: depth * 12,
           cursor: "pointer", borderRadius: 4, background: on ? "#14324a" : "transparent" }}>
+        {/* colour swatch keyed to the map glow (empty in Single mode) */}
+        <span style={{ width: 8, height: 8, borderRadius: 2, flex: "0 0 auto",
+          background: swatch ?? "transparent", border: swatch ? "none" : "1px solid #2a4256" }} />
         <span style={{ color: "#5f7a95" }}>{isRoot ? "" : "⑂"}</span>
         <span style={ordBadgeSm}>{node.order}</span>
         <span style={{ fontWeight: on ? 700 : 500, color: on ? "#cfe8fa" : isRoot ? "#bfe0f2" : "#a8c2d8" }}>{nm}</span>
@@ -336,7 +353,7 @@ function TreeRow({ node, names, selId, onSelect, depth, isRoot }: {
         </span>
       </div>
       {node.children.map((c) => (
-        <TreeRow key={c.id} node={c} names={names} selId={selId} onSelect={onSelect} depth={depth + 1} />
+        <TreeRow key={c.id} node={c} names={names} colors={colors} selId={selId} onSelect={onSelect} depth={depth + 1} />
       ))}
     </div>
   );
@@ -379,6 +396,38 @@ function subtreeIds(node: RiverNode): number[] {
   const out = [node.id];
   for (const c of node.children) out.push(...subtreeIds(c));
   return out;
+}
+
+// ── Tributary colouring ──
+type ColorMode = "branch" | "order" | "single";
+// Distinct hues that read on both the terrain snip and the dark map glow.
+const BRANCH_PALETTE = ["#ffd24a", "#ff8f5a", "#e56ad0", "#9b8cff", "#5ad1e0", "#77d86a", "#ff6f91", "#b6e152", "#6aa8ff", "#f0a35e", "#4fe0b0", "#d98cff"];
+const TRUNK_COLOR = "#cdeeff";
+// Pale headwater → deep trunk, indexed by Strahler order 1..7.
+const ORDER_PALETTE = ["#e6f3fb", "#a7dcf0", "#72c6e6", "#57a8d8", "#4f86c8", "#5566c8", "#6a4fb8"];
+
+/** Build a river-index → glow colour map for one system by the chosen scheme.
+ *  branch: the trunk is bright, each direct tributary (and its whole sub-network)
+ *  gets its own hue. order: colour by Strahler order. single: {} (default cyan). */
+function buildColorMap(root: RiverNode, mode: ColorMode): Record<number, string> {
+  const m: Record<number, string> = {};
+  if (mode === "single") return m;
+  if (mode === "order") {
+    const walk = (n: RiverNode) => {
+      m[n.id] = ORDER_PALETTE[Math.min(Math.max(n.order, 1), ORDER_PALETTE.length) - 1];
+      n.children.forEach(walk);
+    };
+    walk(root);
+    return m;
+  }
+  // branch
+  m[root.id] = TRUNK_COLOR;
+  root.children.forEach((child, k) => {
+    const col = BRANCH_PALETTE[k % BRANCH_PALETTE.length];
+    const paint = (n: RiverNode) => { m[n.id] = col; n.children.forEach(paint); };
+    paint(child);
+  });
+  return m;
 }
 function subtreeCities(node: RiverNode): RiverNode["cities"] {
   const out = [...node.cities];
