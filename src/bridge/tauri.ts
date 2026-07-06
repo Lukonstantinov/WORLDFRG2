@@ -192,6 +192,19 @@ export async function simRunAllFromTerrain(
   });
 }
 
+/** Hydrology dashboard: build the river-system tree (trunks + nested tributaries)
+ *  with per-river stats, elevation profile, cities-on-river and Earth counterpart.
+ *  Pass the world's rivers + settlements from the store. */
+export async function getRiverSystems(
+  rivers: import("../types").RiverData[],
+  settlements: { x: number; y: number; name?: string; size?: string }[],
+): Promise<import("../types").RiverNode[]> {
+  return invoke("get_river_systems", {
+    riversJson: JSON.stringify(rivers),
+    settlementsJson: JSON.stringify(settlements),
+  });
+}
+
 // --- Overlay / query commands ---
 
 export interface OverlayVectors {

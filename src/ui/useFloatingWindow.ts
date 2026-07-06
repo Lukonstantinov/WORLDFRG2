@@ -26,6 +26,7 @@ export const PANEL_TINTS = {
   landmarks: "rgba(14,22,22,0.97)", // Landmarks & Sacred Sites — verdigris
   dynasties: "rgba(26,18,20,0.97)", // Dynasties & Alliances — claret
   atlas: "rgba(12,19,27,0.97)",     // 🗺 World Atlas — deep chart-blue
+  hydrology: "rgba(10,22,30,0.97)", // 🌊 Hydrology — deep river-teal
 } as const;
 
 /** Make a floating panel DRAGGABLE by its header and TINTED so it's distinct.

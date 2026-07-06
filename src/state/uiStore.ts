@@ -142,6 +142,8 @@ interface UIStore {
   eraFrame: import("../types").EraFrame | null;
   /** #30/#29 · Economy Dashboard (price index / inequality) panel open. */
   showEconomyDashboard: boolean;
+  /** 🌊 Hydrology dashboard (river systems) panel open. */
+  showHydrology: boolean;
   /** #35/#36/#37 · Goods Codex (provenance / history / scarcity) panel open. */
   showGoodsCodex: boolean;
   /** Itinerary routed polyline (world cells) to draw on the map, or null. */
@@ -236,6 +238,7 @@ interface UIStore {
   setHeatGood: (g: string | null) => void;
   setEraFrame: (f: import("../types").EraFrame | null) => void;
   setShowEconomyDashboard: (v: boolean) => void;
+  setShowHydrology: (v: boolean) => void;
   setShowGoodsCodex: (v: boolean) => void;
   setTravelRoute: (pts: [number, number][] | null) => void;
   setCodexGood: (g: string | null) => void;
@@ -340,6 +343,7 @@ export const useUIStore = create<UIStore>((set) => ({
   heatGood: null,
   eraFrame: null,
   showEconomyDashboard: false,
+  showHydrology: false,
   showGoodsCodex: false,
   travelRoute: null,
   codexGood: null,
@@ -453,6 +457,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setHeatGood: (g) => set({ heatGood: g }),
   setEraFrame: (f) => set({ eraFrame: f }),
   setShowEconomyDashboard: (v) => set({ showEconomyDashboard: v }),
+  setShowHydrology: (v) => set({ showHydrology: v }),
   setShowGoodsCodex: (v) => set({ showGoodsCodex: v }),
   setTravelRoute: (pts) => set({ travelRoute: pts }),
   setCodexGood: (g) => set({ codexGood: g }),

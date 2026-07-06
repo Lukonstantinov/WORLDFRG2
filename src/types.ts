@@ -1506,6 +1506,48 @@ export interface RiverData {
   order?: number; // Strahler-ish stream order (1 = headwater creek)
 }
 
+/** A city sitting on a river reach (Hydrology dashboard). Mirrors Rust `RiverCityInfo`. */
+export interface RiverCityInfo {
+  name: string;
+  x: number;
+  y: number;
+  size: string;
+  dist_from_mouth_km: number;
+}
+
+/** One river in the system tree — a trunk (root) or a nested tributary — with its
+ *  hydrological stats, elevation profile, cities and children. Mirrors Rust `RiverNode`. */
+export interface RiverNode {
+  id: number; // index into the world's rivers array (look up its cell path)
+  order: number;
+  navigable: boolean;
+  tributary: boolean;
+  mouth_kind: number; // 0 plain, 1 delta, 2 estuary
+  length_km: number;
+  drop_m: number;
+  source_elev_m: number;
+  mouth_elev_m: number;
+  avg_slope_m_per_km: number;
+  discharge_m3s: number;
+  max_width_m: number;
+  max_depth_m: number;
+  navigable_km: number;
+  source_kind: string; // alpine | highland | hills | lowland | bog
+  source_x: number;
+  source_y: number;
+  mouth_x: number;
+  mouth_y: number;
+  mid_x: number;
+  mid_y: number;
+  join_km: number; // distance downstream along the parent to this confluence (km)
+  trib_total: number;
+  city_total: number;
+  counterpart: string; // Earth counterpart (roots only)
+  profile: number[]; // elevation (m), source → mouth
+  cities: RiverCityInfo[];
+  children: RiverNode[];
+}
+
 export interface LakeData {
   cells: [number, number][];
   elevation: number;

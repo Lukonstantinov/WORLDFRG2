@@ -21,6 +21,7 @@ import { CoinCreditPanel } from "./ui/CoinCreditPanel";
 import { ItineraryPanel } from "./ui/ItineraryPanel";
 import { GoodsCodexPanel } from "./ui/GoodsCodexPanel";
 import { EconomyDashboardPanel } from "./ui/EconomyDashboardPanel";
+import { HydrologyPanel } from "./ui/HydrologyPanel";
 import { AtlasPanel } from "./ui/AtlasPanel";
 import { PeoplesPanel } from "./ui/PeoplesPanel";
 import { ColonialPanel } from "./ui/ColonialPanel";
@@ -609,6 +610,7 @@ export default function App() {
           <ItineraryPanel />
           <GoodsCodexPanel />
           <EconomyDashboardPanel />
+          <HydrologyPanel />
           <AtlasPanel />
           <PeoplesPanel />
           <ColonialPanel />

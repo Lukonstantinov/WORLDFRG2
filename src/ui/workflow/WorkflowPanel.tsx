@@ -25,13 +25,16 @@ const STEP_INFO = [
   { step: 5, label: "Rivers & Lakes", desc: "Trace rivers downhill and detect lake basins." },
   { step: 6, label: "Soil & Resources", desc: "Soil types, fertility scores, and fishery zones." },
   { step: 7, label: "Settlements", desc: "Find optimal locations for cities, towns, and villages." },
+  // Toponyms sits right after Settlements: once cities exist the culture map is
+  // active, so rivers/mountains/lakes/regions can be named in local style. It is
+  // OPTIONAL and off the linear Continue chain (reached by clicking).
+  { step: 12, label: "Toponyms (optional)", desc: "Name rivers, mountains, lakes and regions in the local culture's style. Editable — rename any feature. Needs Rivers (5) + Settlements (7)." },
   { step: 8, label: "Biological-Trade", desc: "Shark & shipworm waters, trade-good belts, trade routes, and the regional trade matrix." },
   { step: 9, label: "Political", desc: "Re-rank settlements by trade power (route centrality + good monopoly) and map their influence." },
   { step: 10, label: "Economy", desc: "Solve the market equilibrium: stock-based prices in grain-equivalent, barter ratios, currency goods, grain & trade wealth, supply chains and chokepoints." },
   // Step 11 (Living Trade / the campaign tick) is no longer part of the Forge
   // wizard — it lives in Chronicle mode (ChroniclePanel). Forge owns generation
   // only; finalizing after Economy hands off to Chronicle.
-  { step: 12, label: "Toponyms (optional)", desc: "Name rivers, mountains, lakes and regions in the local culture's style. Editable — rename any feature. Needs Rivers (5) + Settlements (7)." },
 ] as const;
 
 export function WorkflowPanel() {
@@ -59,7 +62,10 @@ export function WorkflowPanel() {
 
   // The steps present in the Forge wizard, in order (11 removed → 10 then optional
   // 12). Navigation walks this list so the 10→12 gap is skipped cleanly.
-  const stepOrder: number[] = STEP_INFO.map((s) => s.step);
+  // Linear Continue/Back chain: the mandatory generation steps in order. Toponyms
+  // (12) is optional and OFF this chain — it's displayed after Settlements but
+  // reached by clicking, so Continue at Settlements goes straight to Biological.
+  const stepOrder: number[] = STEP_INFO.map((s) => s.step).filter((s) => s !== 12);
 
   // Chain the two query-only layers (Political → Economy) the same way their step
   // UIs do, so "Generate Full World" leaves a fully-generated, finalize-ready world.
@@ -143,6 +149,8 @@ export function WorkflowPanel() {
   };
 
   const goBack = () => {
+    // Toponyms (12) is off the linear chain; its Back returns to Settlements.
+    if (workflowStep === 12) { setWorkflowStep(7 as any); return; }
     const i = stepOrder.indexOf(workflowStep);
     if (i > 0) setWorkflowStep(stepOrder[i - 1] as any);
   };

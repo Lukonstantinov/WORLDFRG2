@@ -1,6 +1,7 @@
 use serde::{Serialize, Deserialize};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -4777,4 +4778,434 @@ pub fn compute_settlement_development(
             else { "village" }.to_string();
     }
     Ok(settlements)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// River systems — Hydrology dashboard (#hydrology)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A settlement as sent from the frontend store (only what the river panel needs).
+#[derive(Deserialize, Default)]
+struct RiverSettleIn {
+    x: u32,
+    y: u32,
+    #[serde(default)] name: String,
+    #[serde(default)] size: String,
+}
+
+/// A city sitting on (within a few cells of) a river reach.
+#[derive(Serialize, Clone)]
+pub struct RiverCityInfo {
+    pub name: String,
+    pub x: u32,
+    pub y: u32,
+    pub size: String,
+    pub dist_from_mouth_km: f32,
+}
+
+/// One river in the system tree: a trunk (root) or a tributary (nested), with its
+/// hydrological stats, longitudinal elevation profile, cities and children.
+#[derive(Serialize)]
+pub struct RiverNode {
+    /// Index into the input rivers array (so the frontend can look up the cell path).
+    pub id: usize,
+    pub order: u8,
+    pub navigable: bool,
+    pub tributary: bool,
+    pub mouth_kind: u8,
+    pub length_km: f32,
+    pub drop_m: f32,
+    pub source_elev_m: f32,
+    pub mouth_elev_m: f32,
+    pub avg_slope_m_per_km: f32,
+    pub discharge_m3s: f32,
+    pub max_width_m: f32,
+    pub max_depth_m: f32,
+    pub navigable_km: f32,
+    /// "alpine" | "highland" | "hills" | "lowland" | "bog".
+    pub source_kind: String,
+    pub source_x: u32,
+    pub source_y: u32,
+    pub mouth_x: u32,
+    pub mouth_y: u32,
+    pub mid_x: u32,
+    pub mid_y: u32,
+    /// Distance downstream along the PARENT (from its source) at which this
+    /// tributary joins, in km. 0 for a trunk.
+    pub join_km: f32,
+    /// Total tributaries and cities in this subtree (this node + descendants).
+    pub trib_total: usize,
+    pub city_total: usize,
+    /// Earth counterpart matched by discharge (roots only; empty for tributaries).
+    pub counterpart: String,
+    /// Downsampled elevation (m) along the reach, source → mouth.
+    pub profile: Vec<f32>,
+    pub cities: Vec<RiverCityInfo>,
+    pub children: Vec<RiverNode>,
+}
+
+/// Precomputed per-river metrics (before the tree is assembled).
+struct RiverDerived {
+    length_km: f32,
+    len_cells: f32,
+    cum_km: Vec<f32>, // cumulative distance from source (km) at each point
+    source_pt: (u32, u32),
+    mouth_pt: (u32, u32),
+    mid: (u32, u32),
+    outlet: usize, // this reach's own downstream-most channel cell
+    discharge: f32,
+    width_m: f32,
+    depth_m: f32,
+    drop_m: f32,
+    source_elev_m: f32,
+    mouth_elev_m: f32,
+    avg_slope: f32,
+    source_kind: String,
+    profile: Vec<f32>,
+}
+
+const EARTH_RIVERS: &[(&str, f32)] = &[
+    ("the Amazon", 209000.0), ("the Congo", 41000.0), ("the Ganges", 38000.0),
+    ("the Orinoco", 37000.0), ("the Yangtze", 30000.0), ("the Yenisei", 19000.0),
+    ("the Paraná", 18000.0), ("the Lena", 17000.0), ("the Mekong", 16000.0),
+    ("the Mississippi", 16000.0), ("the Saint Lawrence", 12000.0), ("the Ob", 12000.0),
+    ("the Amur", 11000.0), ("the Volga", 8000.0), ("the Indus", 6600.0),
+    ("the Danube", 6500.0), ("the Niger", 5700.0), ("the Zambezi", 3400.0),
+    ("the Nile", 2800.0), ("the Rhine", 2300.0), ("the Rhône", 1700.0),
+    ("the Elbe", 870.0), ("the Seine", 560.0), ("the Thames", 65.0),
+];
+
+fn earth_counterpart(q: f32) -> String {
+    let lq = q.max(1.0).ln();
+    let mut best = EARTH_RIVERS[0];
+    let mut best_d = f32::MAX;
+    for &(name, eq) in EARTH_RIVERS {
+        let d = (lq - eq.ln()).abs();
+        if d < best_d { best_d = d; best = (name, eq); }
+    }
+    best.0.to_string()
+}
+
+/// Build the river-system tree with full hydrological stats for the Hydrology
+/// dashboard. Takes the world's rivers + settlements (from the frontend store),
+/// loads the elevation/precip columns and recomputes flow accumulation to size
+/// discharge, then assembles trunks with their tributaries nested (full depth).
+#[tauri::command]
+pub fn get_river_systems(
+    rivers_json: String,
+    settlements_json: String,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<RiverNode>, String> {
+    use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_RIVERS)?;
+
+    let rivers: Vec<crate::sim::rivers::River> =
+        serde_json::from_str(&rivers_json).map_err(|e| e.to_string())?;
+    if rivers.is_empty() { return Ok(vec![]); }
+    let settles: Vec<RiverSettleIn> = serde_json::from_str(&settlements_json).unwrap_or_default();
+    Ok(build_river_systems(&buf, &rivers, &settles))
+}
+
+/// Core of `get_river_systems`, factored out so it can be unit-tested with a
+/// synthetic world (no DB / Tauri State needed).
+fn build_river_systems(
+    buf: &crate::sim::world_buffer::WorldBuffer,
+    rivers: &[crate::sim::rivers::River],
+    settles: &[RiverSettleIn],
+) -> Vec<RiverNode> {
+    let w = buf.width;
+    let h = buf.height;
+    let km_per_cell = 40075.0f32 / w as f32;
+    let cell_area_km2 = km_per_cell * km_per_cell;
+    let hydro = crate::sim::rivers::compute_hydrology(&buf);
+    let acc = &hydro.acc;
+    let idx = |x: u32, y: u32| (y * w + x) as usize;
+
+    // Cylindrical segment length (cells) between two adjacent river points.
+    let seg = |a: (u32, u32), b: (u32, u32)| -> f32 {
+        let dxr = (a.0 as i32 - b.0 as i32).abs();
+        let dx = dxr.min(w as i32 - dxr) as f32;
+        let dy = (a.1 as i32 - b.1 as i32) as f32;
+        (dx * dx + dy * dy).sqrt()
+    };
+
+    // ── Per-river metrics ────────────────────────────────────────────────────
+    let mut der: Vec<RiverDerived> = Vec::with_capacity(rivers.len());
+    for r in rivers {
+        let pts = &r.points;
+        let m = pts.len();
+        // Cumulative distance from source.
+        let mut cum_km = vec![0.0f32; m];
+        for k in 1..m { cum_km[k] = cum_km[k - 1] + seg(pts[k - 1], pts[k]) * km_per_cell; }
+        let len_cells = if m > 1 { cum_km[m - 1] / km_per_cell } else { 0.0 };
+        let length_km = cum_km[m.saturating_sub(1)];
+        let source_pt = pts[0];
+        let mouth_pt = pts[m - 1];
+        // This reach's own outlet: the mouth (trunk) or the cell before the
+        // confluence (tributary, whose last point belongs to the parent).
+        let outlet_pt = if r.tributary && m >= 2 { pts[m - 2] } else { mouth_pt };
+        let outlet = idx(outlet_pt.0, outlet_pt.1);
+        let outlet_acc = acc[outlet] as f32;
+
+        // Discharge from catchment area × runoff (precip-scaled), then hydraulic
+        // geometry for width/depth (channel depth isn't modelled — this is an
+        // estimate). Q clamped to a sane river range.
+        let mut psum = 0.0f32;
+        for &(px, py) in pts { psum += buf.precipitation[idx(px, py)]; }
+        let mean_p = psum / m.max(1) as f32;
+        let runoff_m = (mean_p / 1000.0 * 0.35).clamp(0.01, 1.2);
+        let area_km2 = outlet_acc * cell_area_km2;
+        let q = (area_km2 * 1.0e6 * runoff_m / 3.15576e7).clamp(0.3, 300000.0);
+        let width_m = (6.0 * q.sqrt()).clamp(1.0, 4000.0);
+        // Max (thalweg) depth — great rivers run VERY deep: the Amazon reaches
+        // ~100 m and the Congo deeper still. This is the DEEPEST point, not the
+        // mean, so it uses a stronger exponent and a high cap; small streams stay
+        // shallow. Depth isn't modelled per-cell, so it's an estimate from Q.
+        let depth_m = (0.62 * q.powf(0.43)).clamp(0.3, 230.0);
+
+        let source_elev_m = buf.elevation[idx(source_pt.0, source_pt.1)] * 8848.0;
+        let mouth_elev_m = buf.elevation[outlet] * 8848.0;
+        let drop_m = (source_elev_m - mouth_elev_m).max(0.0);
+        let avg_slope = if length_km > 1.0 { drop_m / length_km } else { 0.0 };
+
+        // Source classification (mountain spring ↔ lowland bog).
+        let src_norm = buf.elevation[idx(source_pt.0, source_pt.1)];
+        let src_precip = buf.precipitation[idx(source_pt.0, source_pt.1)];
+        let near = pts[m.min(4) - 1];
+        let near_km = cum_km[m.min(4) - 1].max(0.001);
+        let head_slope = ((source_elev_m - buf.elevation[idx(near.0, near.1)] * 8848.0) / near_km).abs();
+        let source_kind = if src_norm > 0.45 { "alpine" }
+            else if src_norm > 0.28 { "highland" }
+            else if src_norm > 0.15 { "hills" }
+            else if src_precip > 1100.0 && head_slope < 3.0 { "bog" }
+            else { "lowland" }.to_string();
+
+        // Downsampled profile (m), source → mouth.
+        let samples = 48usize.min(m);
+        let mut profile = Vec::with_capacity(samples);
+        for s in 0..samples {
+            let t = if samples > 1 { s as f32 / (samples - 1) as f32 } else { 0.0 };
+            let pi = (t * (m - 1) as f32).round() as usize;
+            let (px, py) = pts[pi.min(m - 1)];
+            profile.push(buf.elevation[idx(px, py)] * 8848.0);
+        }
+
+        der.push(RiverDerived {
+            length_km, len_cells, cum_km, source_pt, mouth_pt, mid: pts[m / 2],
+            outlet, discharge: q, width_m, depth_m, drop_m, source_elev_m, mouth_elev_m,
+            avg_slope, source_kind, profile,
+        });
+    }
+
+    // ── Cell ownership (for parent linking + city attribution) ───────────────
+    // owner_best[cell] = (order, river_id, point_index) preferring the higher-order
+    // river where reaches share a cell (confluence cells belong to more than one).
+    let mut owners: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut owner_best: HashMap<usize, (u8, usize, usize)> = HashMap::new();
+    for (ri, r) in rivers.iter().enumerate() {
+        for (pi, &(px, py)) in r.points.iter().enumerate() {
+            let c = idx(px, py);
+            owners.entry(c).or_default().push(ri);
+            let e = owner_best.entry(c).or_insert((0, ri, pi));
+            if r.order >= e.0 { *e = (r.order, ri, pi); }
+        }
+    }
+
+    // ── Parent linking: each tributary joins the largest reach through its
+    // confluence cell (its last point). Unmatched tributaries become roots. ──
+    let mut parent = vec![usize::MAX; rivers.len()];
+    let mut children: Vec<Vec<usize>> = vec![Vec::new(); rivers.len()];
+    let mut join_km = vec![0.0f32; rivers.len()];
+    for (ri, r) in rivers.iter().enumerate() {
+        if !r.tributary { continue; }
+        let jc = *r.points.last().unwrap();
+        let jci = idx(jc.0, jc.1);
+        if let Some(list) = owners.get(&jci) {
+            let mut best: Option<usize> = None;
+            for &cand in list {
+                if cand == ri { continue; }
+                match best {
+                    None => best = Some(cand),
+                    Some(b) => {
+                        let better = rivers[cand].order > rivers[b].order
+                            || (rivers[cand].order == rivers[b].order
+                                && der[cand].length_km > der[b].length_km);
+                        if better { best = Some(cand); }
+                    }
+                }
+            }
+            if let Some(p) = best {
+                parent[ri] = p;
+                children[p].push(ri);
+                // Distance along the parent (from its source) to the confluence.
+                if let Some(pi) = rivers[p].points.iter().position(|&c| idx(c.0, c.1) == jci) {
+                    join_km[ri] = der[p].cum_km[pi];
+                }
+            }
+        }
+    }
+
+    // ── City attribution: nearest owned river cell within 3 cells ────────────
+    let mut river_cities: Vec<Vec<RiverCityInfo>> = vec![Vec::new(); rivers.len()];
+    let wrap_x = |x: i32| ((x % w as i32) + w as i32) % w as i32;
+    for s in settles {
+        let mut best: Option<(f32, usize, usize)> = None; // (dist, river_id, point_idx)
+        for dy in -3i32..=3 {
+            let ny = s.y as i32 + dy;
+            if ny < 0 || ny >= h as i32 { continue; }
+            for dx in -3i32..=3 {
+                let nx = wrap_x(s.x as i32 + dx) as u32;
+                let c = idx(nx, ny as u32);
+                if let Some(&(_, rid, pidx)) = owner_best.get(&c) {
+                    let d = ((dx * dx + dy * dy) as f32).sqrt();
+                    if best.map_or(true, |(bd, _, _)| d < bd) { best = Some((d, rid, pidx)); }
+                }
+            }
+        }
+        if let Some((_, rid, pidx)) = best {
+            let dist_from_mouth_km = (der[rid].length_km - der[rid].cum_km[pidx]).max(0.0);
+            river_cities[rid].push(RiverCityInfo {
+                name: if s.name.is_empty() { "(unnamed)".into() } else { s.name.clone() },
+                x: s.x, y: s.y, size: s.size.clone(), dist_from_mouth_km,
+            });
+        }
+    }
+    for cs in river_cities.iter_mut() {
+        cs.sort_by(|a, b| a.dist_from_mouth_km.partial_cmp(&b.dist_from_mouth_km).unwrap_or(std::cmp::Ordering::Equal));
+    }
+
+    // ── Assemble the tree (recursive, full depth) ────────────────────────────
+    // `seen` guards against a degenerate mutual-confluence cycle: a node already
+    // on the current path is emitted as a leaf so the recursion can't run away.
+    fn build(
+        i: usize, rivers: &[crate::sim::rivers::River], der: &[RiverDerived],
+        children: &[Vec<usize>], join_km: &[f32], river_cities: &[Vec<RiverCityInfo>],
+        seen: &mut Vec<bool>,
+    ) -> RiverNode {
+        let cyclic = seen[i];
+        seen[i] = true;
+        let r = &rivers[i];
+        let d = &der[i];
+        let mut kids: Vec<usize> = if cyclic { Vec::new() } else { children[i].clone() };
+        kids.sort_by(|&a, &b| der[b].discharge.partial_cmp(&der[a].discharge).unwrap_or(std::cmp::Ordering::Equal));
+        let child_nodes: Vec<RiverNode> = kids.iter()
+            .map(|&c| build(c, rivers, der, children, join_km, river_cities, seen))
+            .collect();
+        let trib_total = child_nodes.iter().map(|c| 1 + c.trib_total).sum();
+        let city_total = river_cities[i].len() + child_nodes.iter().map(|c| c.city_total).sum::<usize>();
+        RiverNode {
+            id: i,
+            order: r.order,
+            navigable: r.navigable,
+            tributary: r.tributary,
+            mouth_kind: r.mouth_kind,
+            length_km: d.length_km,
+            drop_m: d.drop_m,
+            source_elev_m: d.source_elev_m,
+            mouth_elev_m: d.mouth_elev_m,
+            avg_slope_m_per_km: d.avg_slope,
+            discharge_m3s: d.discharge,
+            max_width_m: d.width_m,
+            max_depth_m: d.depth_m,
+            navigable_km: if r.navigable { d.length_km } else { 0.0 },
+            source_kind: d.source_kind.clone(),
+            source_x: d.source_pt.0, source_y: d.source_pt.1,
+            mouth_x: d.mouth_pt.0, mouth_y: d.mouth_pt.1,
+            mid_x: d.mid.0, mid_y: d.mid.1,
+            join_km: join_km[i],
+            trib_total,
+            city_total,
+            // Every river shows its closest real-world counterpart (by discharge).
+            counterpart: earth_counterpart(d.discharge),
+            profile: d.profile.clone(),
+            cities: river_cities[i].clone(),
+            children: child_nodes,
+        }
+    }
+
+    let mut seen = vec![false; rivers.len()];
+    let mut roots: Vec<RiverNode> = (0..rivers.len())
+        .filter(|&i| parent[i] == usize::MAX)
+        .map(|i| build(i, &rivers, &der, &children, &join_km, &river_cities, &mut seen))
+        .collect();
+
+    // Sort systems by length (longest first); counterpart is set per node in build.
+    roots.sort_by(|a, b| b.length_km.partial_cmp(&a.length_km).unwrap_or(std::cmp::Ordering::Equal));
+    roots
+}
+
+#[cfg(test)]
+mod river_system_tests {
+    use super::*;
+    use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
+
+    fn synth(w: u32, h: u32, terrain: Vec<u8>, elevation: Vec<f32>) -> WorldBuffer {
+        let n = (w * h) as usize;
+        let sea_depth: Vec<f32> = (0..n).map(|i| if terrain[i] == 0 { 0.05 } else { 0.0 }).collect();
+        let is_shelf: Vec<u8> = (0..n).map(|i| (terrain[i] == 0) as u8).collect();
+        WorldBuffer {
+            cols: ColumnSet::ALL, width: w, height: h, tiles_x: 1, tiles_y: 1,
+            equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0,
+            terrain, elevation, sea_depth, is_shelf, is_shelf_edge: vec![0u8; n],
+            locked_bits: Vec::new(), plate_index: Vec::new(), boundary_type: Vec::new(),
+            is_volcanic: Vec::new(), temperature: Vec::new(),
+            precipitation: vec![1200.0f32; n], koppen: vec![crate::sim::koppen::CFB; n],
+            soil_type: Vec::new(), fertility: Vec::new(), fishery: Vec::new(),
+            current_type: Vec::new(), wind_vx: Vec::new(), wind_vy: Vec::new(),
+            current_vx: Vec::new(), current_vy: Vec::new(), distance_to_ocean: Vec::new(),
+            habitability: Vec::new(), salinity: Vec::new(), shark_risk: Vec::new(),
+            goods: Vec::new(), shipworm_risk: Vec::new(), storm_base: Vec::new(),
+            reef_risk: Vec::new(), disease_risk: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn river_systems_have_tributaries_and_stats() {
+        let (w, h) = (60u32, 30u32);
+        let n = (w * h) as usize;
+        let mut terrain = vec![1u8; n];
+        let mut elev = vec![0.0f32; n];
+        let y0 = h as f32 / 2.0;
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                if x == 0 { terrain[i] = 0; }
+                elev[i] = 0.02 + x as f32 * 0.015 + ((y as f32 - y0).abs()) * 0.02;
+            }
+        }
+        let buf = synth(w, h, terrain, elev);
+        let hy = crate::sim::rivers::compute_hydrology(&buf);
+        let rivers = crate::sim::rivers::extract_rivers(&buf, &hy.flow_dir, &hy.acc, 1.2, 1.0);
+        assert!(!rivers.is_empty(), "the valley world should produce rivers");
+
+        // Put a settlement right on the main valley floor near the coast.
+        let settles = vec![
+            RiverSettleIn { x: 6, y: (y0 as u32), name: "Rivermouth".into(), size: "city".into() },
+        ];
+
+        let systems = build_river_systems(&buf, &rivers, &settles);
+        assert!(!systems.is_empty(), "should return at least one river system");
+        let root = &systems[0];
+        assert!(root.length_km > 0.0, "system has a positive length");
+        assert!(root.discharge_m3s > 0.0, "system has a positive discharge");
+        assert!(root.max_depth_m > 0.0 && root.max_width_m > 0.0, "depth/width estimated");
+        assert!(!root.counterpart.is_empty(), "an Earth counterpart is assigned");
+        assert!(!root.profile.is_empty(), "the elevation profile is sampled");
+        // The largest system should own tributaries (the tree, not a bare trunk).
+        let total_tribs: usize = systems.iter().map(|s| s.trib_total).sum();
+        assert!(total_tribs >= 1, "expected tributaries in the system tree");
+        // The settlement on the trunk should be attributed to some reach.
+        let total_cities: usize = systems.iter().map(|s| s.city_total).sum();
+        assert!(total_cities >= 1, "the trunk-side city should attach to a reach");
+    }
+
+    #[test]
+    fn deeper_discharge_gives_deeper_river() {
+        // Sanity on the depth model: a big-discharge river reads much deeper.
+        let shallow = (0.62f32 * 50.0f32.powf(0.43)).clamp(0.3, 230.0);
+        let amazon = (0.62f32 * 209000.0f32.powf(0.43)).clamp(0.3, 230.0);
+        assert!(amazon > 90.0, "a great river should be very deep, got {amazon}");
+        assert!(amazon > shallow * 15.0, "great rivers dwarf creeks in depth");
+    }
 }
