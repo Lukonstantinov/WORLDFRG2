@@ -4888,6 +4888,7 @@ struct RiverDerived {
     wildlife: String,
     band: crate::sim::aquatic::Band,
     arid: bool,
+    med: bool,
     profile: Vec<f32>,
 }
 
@@ -5041,6 +5042,8 @@ fn build_river_systems(
         let mean_temp = if have_temp { tsum / m as f32 } else { 12.0 };
         let dominant_koppen = khist.iter().max_by_key(|(_, &c)| c).map(|(&k, _)| k).unwrap_or(0);
         let arid = arid_cells as f32 / m as f32 > 0.4;
+        // Mediterranean (Köppen Cs) reaches get their own roster.
+        let med = matches!(dominant_koppen, crate::sim::koppen::CSA | crate::sim::koppen::CSB);
         let band = aquatic::band_from_temp(mean_temp);
         // Estuary/delta mouth admits diadromous runs; a plain inland/lake end doesn't.
         let estuary = r.mouth_kind != 0;
@@ -5072,7 +5075,7 @@ fn build_river_systems(
         der.push(RiverDerived {
             length_km, len_cells, cum_km, source_pt, mouth_pt, mid: pts[m / 2],
             outlet, discharge: q, width_m, depth_m, drop_m, source_elev_m, mouth_elev_m,
-            avg_slope, source_kind, regime, fish, riparian, water, wildlife, band, arid, profile,
+            avg_slope, source_kind, regime, fish, riparian, water, wildlife, band, arid, med, profile,
         });
     }
 
@@ -5233,7 +5236,7 @@ fn build_river_systems(
             ^ (d.mouth_pt.1 as u64).wrapping_mul(40503)
             ^ (i as u64);
         let species: Vec<FishSpeciesOut> =
-            crate::sim::aquatic::assign_river_fish(d.band, &d.source_kind, r.mouth_kind, d.discharge, d.arid, sp_seed)
+            crate::sim::aquatic::assign_river_fish(d.band, &d.source_kind, r.mouth_kind, d.discharge, d.arid, d.med, sp_seed)
                 .into_iter()
                 .map(|f| FishSpeciesOut {
                     slug: f.slug.into(), name: f.name.into(), binomial: f.binomial.into(),

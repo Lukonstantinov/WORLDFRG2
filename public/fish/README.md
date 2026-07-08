@@ -22,11 +22,18 @@ torrent-loach · ribbon-dace · redflank-char · goldvein-barbel · bronze-chub 
 sailback-asp · whiskered-wels · marbled-perch · gravel-nase · broadscale-bream ·
 marsh-carp · reedwater-zander · silt-sturgeon · silverback-eel · tidewater-shad
 
-**Tropical:** emberscale-tetra · golden-pacu · sabertooth-payara · king-arapaima ·
-emperor-cichlid · whiskered-redtail
+**Mediterranean (Cs):** adriatic-trout · iberian-minnow · spined-loach ·
+med-bullhead · iberian-barbel · southern-nase · med-chub · pardilla-roach ·
+fartet-toothcarp · flathead-mullet · sand-smelt · estuary-eel
+
+**Tropical:** emberscale-tetra · cascade-danio · stone-pleco · hillstream-loach ·
+golden-pacu · sabertooth-payara · spotted-wolffish · tigerfish · king-arapaima ·
+emperor-cichlid · whiskered-redtail · silver-arowana
 
 **Boreal / subarctic:** silverpike-taimen · broad-whitefish · arctic-grayling ·
-boreal-burbot · northern-pike · blackfin-char
+alpine-bullhead · boreal-burbot · northern-pike · amur-ide · siberian-dace ·
+blackfin-char · sheefish-inconnu · arctic-cisco · sterlet-sturgeon
 
-**Arid / desert:** wadi-killifish · desert-barb · oasis-tilapia · sand-catfish ·
-saltcreek-pupfish · wadi-mullet
+**Arid / desert:** wadi-killifish · relict-desert-trout · spring-dace ·
+desert-chub · desert-barb · oasis-tilapia · desert-snakehead · sailfin-molly ·
+sand-catfish · saltcreek-pupfish · wadi-mullet · desert-goby

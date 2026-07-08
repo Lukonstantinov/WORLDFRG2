@@ -673,6 +673,12 @@ pub const SIGNATURE_FISH: &[FishSpec] = &[
     FishSpec{slug:"tidewater-shad",name:"Tidewater Shad",binomial:"Alosa aestuaria",zone:2,real:"shad",blurb:"a silver herring that runs up from the sea to spawn.",bands:&[WarmTemperate,CoolTemperate,Boreal]},
     // ── Tropical roster (Af/Am/Aw) ──
     FishSpec{slug:"emberscale-tetra",name:"Emberscale Tetra",binomial:"Hyphessobrycon cataractae",zone:0,real:"tetra",blurb:"a jewel-bright shoaling characin of clear tropical headwaters.",bands:&[Tropical]},
+    FishSpec{slug:"cascade-danio",name:"Cascade Danio",binomial:"Devario cataractae",zone:0,real:"danio",blurb:"a darting, striped danio of clear tropical headwaters.",bands:&[Tropical]},
+    FishSpec{slug:"stone-pleco",name:"Stone Pleco",binomial:"Hypostomus lapis",zone:0,real:"suckermouth catfish",blurb:"an armoured suckermouth catfish grazing algae off rapids stones.",bands:&[Tropical]},
+    FishSpec{slug:"spotted-wolffish",name:"Spotted Wolf-Fish",binomial:"Hoplias maculatus",zone:1,real:"trahira / wolf-fish",blurb:"a cylindrical, toothy ambush predator of warm pools.",bands:&[Tropical]},
+    FishSpec{slug:"hillstream-loach",name:"Hillstream Loach",binomial:"Sewellia montana",zone:0,real:"hillstream loach",blurb:"a flat, sucker-bellied loach clinging to tropical rapids.",bands:&[Tropical]},
+    FishSpec{slug:"tigerfish",name:"Tigerfish",binomial:"Hydrocynus tigris",zone:1,real:"tigerfish",blurb:"a striped, dagger-toothed hunter of tropical rivers.",bands:&[Tropical]},
+    FishSpec{slug:"silver-arowana",name:"Silver Arowana",binomial:"Osteoglossum argenteum",zone:2,real:"arowana",blurb:"a long, surface-cruising predator that leaps for prey.",bands:&[Tropical]},
     FishSpec{slug:"golden-pacu",name:"Golden Pacu",binomial:"Piaractus auratus",zone:1,real:"pacu",blurb:"a deep-bodied, seed-crushing herbivore of the tropical main river.",bands:&[Tropical]},
     FishSpec{slug:"sabertooth-payara",name:"Sabertooth Payara",binomial:"Hydrolycus dentex",zone:1,real:"payara",blurb:"a fanged silver predator of fast tropical rivers.",bands:&[Tropical]},
     FishSpec{slug:"king-arapaima",name:"King Arapaima",binomial:"Arapaima regalis",zone:2,real:"arapaima",blurb:"a giant air-breathing behemoth of tropical floodplains.",bands:&[Tropical]},
@@ -685,6 +691,12 @@ pub const SIGNATURE_FISH: &[FishSpec] = &[
     FishSpec{slug:"boreal-burbot",name:"Boreal Burbot",binomial:"Lota borealis",zone:1,real:"burbot",blurb:"an eel-shaped freshwater cod of cold, deep water.",bands:&[Boreal,CoolTemperate]},
     FishSpec{slug:"northern-pike",name:"Northern Pike",binomial:"Esox borealis",zone:1,real:"pike",blurb:"a long-jawed ambush predator of northern rivers.",bands:&[Boreal,CoolTemperate]},
     FishSpec{slug:"blackfin-char",name:"Blackfin Char",binomial:"Salvelinus ater",zone:2,real:"char",blurb:"a dark, pale-spotted char of the coldest reaches.",bands:&[Boreal,Polar]},
+    FishSpec{slug:"alpine-bullhead",name:"Alpine Bullhead",binomial:"Cottus poecilopus",zone:0,real:"alpine bullhead",blurb:"a stony-bottom sculpin of cold northern headwaters.",bands:&[Boreal,CoolTemperate]},
+    FishSpec{slug:"amur-ide",name:"Amur Ide",binomial:"Leuciscus amurensis",zone:1,real:"ide / orfe",blurb:"a silvery, red-finned cyprinid of cool northern rivers.",bands:&[Boreal,CoolTemperate]},
+    FishSpec{slug:"siberian-dace",name:"Siberian Dace",binomial:"Leuciscus baicalensis",zone:1,real:"Siberian dace",blurb:"a hardy shoaling dace of the far north.",bands:&[Boreal,CoolTemperate]},
+    FishSpec{slug:"sheefish-inconnu",name:"Sheefish Inconnu",binomial:"Stenodus leucichthys",zone:2,real:"inconnu / sheefish",blurb:"a big predatory whitefish of arctic deltas.",bands:&[Boreal,Polar]},
+    FishSpec{slug:"arctic-cisco",name:"Arctic Cisco",binomial:"Coregonus autumnalis",zone:2,real:"cisco",blurb:"a slender, anadromous cisco running the cold lower river.",bands:&[Boreal,Polar]},
+    FishSpec{slug:"sterlet-sturgeon",name:"Sterlet Sturgeon",binomial:"Acipenser ruthenus",zone:2,real:"sterlet",blurb:"a small, barbelled sturgeon of northern rivers.",bands:&[Boreal,CoolTemperate]},
 ];
 
 /// Arid-river / oasis roster (BW/BS Köppen). Kept separate so it is only drawn
@@ -697,6 +709,30 @@ pub const ARID_FISH: &[FishSpec] = &[
     FishSpec{slug:"sand-catfish",name:"Sand Catfish",binomial:"Bagrus harenae",zone:2,real:"catfish",blurb:"a pale, whiskered catfish of muddy desert-river beds.",bands:&[Tropical,WarmTemperate,CoolTemperate]},
     FishSpec{slug:"saltcreek-pupfish",name:"Saltcreek Pupfish",binomial:"Cyprinodon deserti",zone:2,real:"pupfish",blurb:"a tiny, heat- and salt-hardy fish of shrinking desert pools.",bands:&[Tropical,WarmTemperate,CoolTemperate]},
     FishSpec{slug:"wadi-mullet",name:"Wadi Mullet",binomial:"Liza deserti",zone:2,real:"grey mullet",blurb:"a silver, salt-tolerant mullet of brackish desert mouths.",bands:&[Tropical,WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"relict-desert-trout",name:"Relict Desert Trout",binomial:"Oncorhynchus deserti",zone:0,real:"desert / Apache trout",blurb:"a golden relict trout clinging to cool desert springs.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"spring-dace",name:"Spring Dace",binomial:"Eremichthys fontis",zone:0,real:"desert dace",blurb:"a stout little dace of warm desert springs.",bands:&[Tropical,WarmTemperate]},
+    FishSpec{slug:"desert-chub",name:"Desert Chub",binomial:"Gila deserti",zone:0,real:"Gila chub",blurb:"a tough chub of intermittent desert creeks.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"desert-snakehead",name:"Desert Snakehead",binomial:"Channa deserti",zone:1,real:"snakehead",blurb:"an air-breathing snakehead that crosses land between pools.",bands:&[Tropical,WarmTemperate]},
+    FishSpec{slug:"sailfin-molly",name:"Sailfin Molly",binomial:"Poecilia velifera",zone:1,real:"sailfin molly",blurb:"a sail-finned livebearer of warm brackish springs.",bands:&[Tropical,WarmTemperate]},
+    FishSpec{slug:"desert-goby",name:"Desert Goby",binomial:"Chlamydogobius deserti",zone:2,real:"desert goby",blurb:"a tiny, salt-hardy goby of desert pools and creek mouths.",bands:&[Tropical,WarmTemperate,CoolTemperate]},
+];
+
+/// Mediterranean roster (Köppen Cs — winter-flood, summer-drought rivers). Drawn
+/// only for reaches flagged `med`, so a Mediterranean river shows barbels, nase
+/// and soft-mouth trout rather than the generic temperate set. Bands warm/cool.
+pub const MED_FISH: &[FishSpec] = &[
+    FishSpec{slug:"adriatic-trout",name:"Adriatic Trout",binomial:"Salmo obtusirostris",zone:0,real:"soft-mouth trout",blurb:"a soft-snouted Mediterranean trout of cool karst streams.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"iberian-minnow",name:"Iberian Minnow",binomial:"Phoxinus bigerri",zone:0,real:"minnow",blurb:"a small shoaling minnow of clear southern streams.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"spined-loach",name:"Spined Loach",binomial:"Cobitis paludica",zone:0,real:"spined loach",blurb:"a slender, spotted loach of gravel beds.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"med-bullhead",name:"Mediterranean Bullhead",binomial:"Cottus meridionalis",zone:0,real:"bullhead",blurb:"a stony-bottom sculpin of Mediterranean headwaters.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"iberian-barbel",name:"Iberian Barbel",binomial:"Luciobarbus bocagei",zone:1,real:"Iberian barbel",blurb:"a large barbel of sun-warmed southern rivers.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"southern-nase",name:"Southern Nase",binomial:"Parachondrostoma miegii",zone:1,real:"nase",blurb:"an algae-scraping nase of the middle river.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"med-chub",name:"Mediterranean Chub",binomial:"Squalius pyrenaicus",zone:1,real:"chub",blurb:"a bold chub of warm Mediterranean rivers.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"pardilla-roach",name:"Pardilla Roach",binomial:"Iberochondrostoma lemmingii",zone:1,real:"pardilla",blurb:"a slim endemic roach of Iberian rivers.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"fartet-toothcarp",name:"Fartet Toothcarp",binomial:"Aphanius iberus",zone:2,real:"Spanish toothcarp",blurb:"a tiny, salt-tolerant toothcarp of coastal wetlands.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"flathead-mullet",name:"Flathead Mullet",binomial:"Mugil cephalus",zone:2,real:"flathead mullet",blurb:"a silver mullet running between river and sea.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"sand-smelt",name:"Sand Smelt",binomial:"Atherina boyeri",zone:2,real:"sand smelt",blurb:"a translucent, shoaling smelt of brackish lagoons.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"estuary-eel",name:"Estuary Eel",binomial:"Anguilla anguilla",zone:2,real:"European eel",blurb:"a catadromous eel of the Mediterranean estuary.",bands:&[WarmTemperate,CoolTemperate]},
 ];
 
 /// Assign one signature species per river ZONE the reach spans, filtered to the
@@ -705,8 +741,10 @@ pub const ARID_FISH: &[FishSpec] = &[
 /// reaches draw from the desert roster (barbs, pupfish) instead of the main one.
 /// Returns `&'static FishSpec` references (deterministic per `seed`); empty only
 /// when no catalogued species fits the band (e.g. an ice-cap polar river).
-pub fn assign_river_fish(band: Band, source_kind: &str, mouth_kind: u8, discharge: f32, arid: bool, seed: u64) -> Vec<&'static FishSpec> {
-    let cat: &'static [FishSpec] = if arid { ARID_FISH } else { SIGNATURE_FISH };
+pub fn assign_river_fish(band: Band, source_kind: &str, mouth_kind: u8, discharge: f32, arid: bool, med: bool, seed: u64) -> Vec<&'static FishSpec> {
+    // Arid deserts win over Mediterranean (a dry Cs basin reads as desert); a
+    // Mediterranean (Cs) basin gets its own roster; everything else the main one.
+    let cat: &'static [FishSpec] = if arid { ARID_FISH } else if med { MED_FISH } else { SIGNATURE_FISH };
     let mut zones: Vec<u8> = Vec::new();
     let src_zone = match source_kind {
         "alpine" | "highland" => 0u8,
@@ -741,7 +779,7 @@ mod tests {
     fn temperate_river_gets_zoned_species() {
         // An alpine-sourced, delta-mouthed, large cool-temperate river should get a
         // headwater + middle + lower species, all band-appropriate.
-        let sp = assign_river_fish(Band::CoolTemperate, "alpine", 1, 5000.0, false, 42);
+        let sp = assign_river_fish(Band::CoolTemperate, "alpine", 1, 5000.0, false, false, 42);
         assert!(sp.len() >= 2, "a great river spans multiple zones: {}", sp.len());
         let zones: Vec<u8> = sp.iter().map(|f| f.zone).collect();
         assert!(zones.contains(&0) && zones.contains(&2), "spans headwater and mouth: {:?}", zones);
@@ -751,13 +789,17 @@ mod tests {
     #[test]
     fn tropical_and_arid_rivers_get_their_own_rosters() {
         // Tropical rivers now have a roster (arapaima etc.).
-        let trop = assign_river_fish(Band::Tropical, "hills", 1, 5000.0, false, 1);
+        let trop = assign_river_fish(Band::Tropical, "hills", 1, 5000.0, false, false, 1);
         assert!(!trop.is_empty(), "tropical river has signature species");
         for f in &trop { assert!(f.bands.contains(&Band::Tropical)); }
         // An arid reach draws desert fish, never a trout.
-        let arid = assign_river_fish(Band::WarmTemperate, "hills", 0, 300.0, true, 2);
+        let arid = assign_river_fish(Band::WarmTemperate, "hills", 0, 300.0, true, false, 2);
         assert!(!arid.is_empty(), "arid river has desert species");
         assert!(arid.iter().all(|f| ARID_FISH.iter().any(|a| a.slug == f.slug)), "arid roster used");
+        // A Mediterranean reach draws the Cs roster (Iberian barbel etc.).
+        let med = assign_river_fish(Band::WarmTemperate, "hills", 1, 2000.0, false, true, 3);
+        assert!(!med.is_empty(), "mediterranean river has its own species");
+        assert!(med.iter().all(|f| MED_FISH.iter().any(|m| m.slug == f.slug)), "med roster used");
     }
 
     #[test]
