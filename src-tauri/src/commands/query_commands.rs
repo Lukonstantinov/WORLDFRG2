@@ -4855,6 +4855,9 @@ pub struct RiverNode {
     /// A UNIQUE, multi-sentence National-Geographic-style account of this river
     /// system, seeded per-river so no two read alike (`aquatic::river_story`).
     pub story: String,
+    /// Signature fish species for this river (one per zone it spans). Each carries
+    /// a `slug` the frontend uses to show an illustration (`public/fish/<slug>.png`).
+    pub species: Vec<FishSpeciesOut>,
     /// Downsampled elevation (m) along the reach, source → mouth.
     pub profile: Vec<f32>,
     pub cities: Vec<RiverCityInfo>,
@@ -5225,6 +5228,21 @@ fn build_river_systems(
                 ^ (d.source_pt.1 as u64).wrapping_mul(19349663)
                 ^ (i as u64).wrapping_mul(0x9E3779B97F4A7C15),
         });
+        // Signature fish species — one per river zone this reach spans.
+        let sp_seed = (d.source_pt.0 as u64).wrapping_mul(2654435761)
+            ^ (d.mouth_pt.1 as u64).wrapping_mul(40503)
+            ^ (i as u64);
+        let species: Vec<FishSpeciesOut> =
+            crate::sim::aquatic::assign_river_fish(d.band, &d.source_kind, r.mouth_kind, d.discharge, sp_seed)
+                .into_iter()
+                .map(|si| {
+                    let f = &crate::sim::aquatic::SIGNATURE_FISH[si];
+                    FishSpeciesOut {
+                        slug: f.slug.into(), name: f.name.into(), binomial: f.binomial.into(),
+                        zone: f.zone, real: f.real.into(), blurb: f.blurb.into(),
+                    }
+                })
+                .collect();
         RiverNode {
             id: i,
             name: names_by_id[i].clone(),
@@ -5256,6 +5274,7 @@ fn build_river_systems(
             water: d.water.clone(),
             wildlife: d.wildlife.clone(),
             story,
+            species,
             profile: d.profile.clone(),
             cities: river_cities[i].clone(),
             children: child_nodes,
@@ -5271,6 +5290,17 @@ fn build_river_systems(
     // Sort systems by length (longest first); counterpart is set per node in build.
     roots.sort_by(|a, b| b.length_km.partial_cmp(&a.length_km).unwrap_or(std::cmp::Ordering::Equal));
     roots
+}
+
+/// A signature fish species assigned to a river reach (mirrors TS `FishSpecies`).
+#[derive(serde::Serialize, Clone)]
+pub struct FishSpeciesOut {
+    pub slug: String,
+    pub name: String,
+    pub binomial: String,
+    pub zone: u8,
+    pub real: String,
+    pub blurb: String,
 }
 
 /// One classified lake with its limnological + ecological profile, for the

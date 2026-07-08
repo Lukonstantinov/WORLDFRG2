@@ -629,9 +629,102 @@ pub fn lake_story(f: &LakeStoryFacts) -> String {
     s
 }
 
+// ───────────────────── Signature fish species (river zonation) ───────────────
+// A curated catalogue of named freshwater fish, one roster per river ZONE
+// (0 = upper/headwater, 1 = middle river, 2 = lower/delta), each suited to a set
+// of thermal bands. A river reach is assigned one signature species per zone it
+// spans (see `assign_river_fish`), giving a biologically-correct longitudinal
+// succession (trout up top → barbel in the middle → sturgeon & shad at the mouth).
+// `slug` is the stable key the frontend uses to look up an illustration
+// (`public/fish/<slug>.png`), falling back to a drawn silhouette if absent.
+#[derive(Clone, Copy)]
+pub struct FishSpec {
+    pub slug: &'static str,
+    pub name: &'static str,
+    pub binomial: &'static str,
+    pub zone: u8,
+    pub real: &'static str,
+    pub blurb: &'static str,
+    pub bands: &'static [Band],
+}
+
+use Band::*;
+pub const SIGNATURE_FISH: &[FishSpec] = &[
+    // ── Zone 0 · upper / headwater ──
+    FishSpec{slug:"silverfin-trout",name:"Silverfin Trout",binomial:"Salmo argentiventris",zone:0,real:"brown trout",blurb:"the classic cold-water game fish of clean gravelly streams.",bands:&[CoolTemperate,Boreal]},
+    FishSpec{slug:"frostscale-grayling",name:"Frostscale Grayling",binomial:"Thymallus gelidus",zone:0,real:"grayling",blurb:"the sail-finned 'lady of the stream', an insect-hunter of clean water.",bands:&[CoolTemperate,Boreal]},
+    FishSpec{slug:"stonecling-bullhead",name:"Stonecling Bullhead",binomial:"Cottus rupicola",zone:0,real:"bullhead sculpin",blurb:"a pebble-coloured bottom-lurker of stony riffles.",bands:&[CoolTemperate,Boreal,WarmTemperate]},
+    FishSpec{slug:"torrent-loach",name:"Torrent Loach",binomial:"Nemacheilus torrentis",zone:0,real:"stone loach",blurb:"a barbelled bottom-forager of clean gravel.",bands:&[CoolTemperate,WarmTemperate]},
+    FishSpec{slug:"ribbon-dace",name:"Ribbon Dace",binomial:"Leuciscus vittatus",zone:0,real:"dace",blurb:"a quick silver shoaling fish of running water.",bands:&[CoolTemperate,WarmTemperate]},
+    FishSpec{slug:"redflank-char",name:"Redflank Char",binomial:"Salvelinus rubrimarga",zone:0,real:"Arctic char",blurb:"a jewel-bellied cold-water salmonid of the highest reaches.",bands:&[Boreal,CoolTemperate]},
+    // ── Zone 1 · middle river ──
+    FishSpec{slug:"goldvein-barbel",name:"Goldvein Barbel",binomial:"Barbus auritenuis",zone:1,real:"barbel",blurb:"a barbelled bottom-feeder of warm gravel runs.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"bronze-chub",name:"Bronze Chub",binomial:"Squalius aeneus",zone:1,real:"chub",blurb:"a bold, broad-headed opportunist of the middle river.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"sailback-asp",name:"Sailback Asp",binomial:"Aspius rapax",zone:1,real:"asp",blurb:"a hard-hunting open-water predator of the mid-river.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"whiskered-wels",name:"Whiskered Wels",binomial:"Silurus paludis",zone:1,real:"wels catfish",blurb:"a giant nocturnal catfish of deep slow pools.",bands:&[WarmTemperate]},
+    FishSpec{slug:"marbled-perch",name:"Marbled Perch",binomial:"Perca marmorata",zone:1,real:"perch",blurb:"a barred, spiny-finned ambush predator.",bands:&[WarmTemperate,CoolTemperate,Boreal]},
+    FishSpec{slug:"gravel-nase",name:"Gravel Nase",binomial:"Chondrostoma lithos",zone:1,real:"nase",blurb:"an algae-scraping shoaler with a black underslung mouth.",bands:&[WarmTemperate,CoolTemperate]},
+    // ── Zone 2 · lower / delta / estuary ──
+    FishSpec{slug:"broadscale-bream",name:"Broadscale Bream",binomial:"Abramis latus",zone:2,real:"bream",blurb:"a deep, slab-sided bottom-forager of slow water.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"marsh-carp",name:"Marsh Carp",binomial:"Cyprinus paludis",zone:2,real:"carp",blurb:"a hardy, barbelled omnivore of warm still reaches.",bands:&[WarmTemperate]},
+    FishSpec{slug:"reedwater-zander",name:"Reedwater Zander",binomial:"Sander stagni",zone:2,real:"zander",blurb:"a glassy-eyed, fanged predator of turbid lower rivers.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"silt-sturgeon",name:"Silt Sturgeon",binomial:"Acipenser magnus",zone:2,real:"sturgeon",blurb:"an armoured, ancient bottom-feeder that runs up from the sea.",bands:&[WarmTemperate,CoolTemperate,Boreal]},
+    FishSpec{slug:"silverback-eel",name:"Silverback Eel",binomial:"Anguilla vitrea",zone:2,real:"eel",blurb:"a snake-bodied migrant that breeds far out in the ocean.",bands:&[WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"tidewater-shad",name:"Tidewater Shad",binomial:"Alosa aestuaria",zone:2,real:"shad",blurb:"a silver herring that runs up from the sea to spawn.",bands:&[WarmTemperate,CoolTemperate,Boreal]},
+];
+
+/// Assign up to three signature species to a river reach — one per river ZONE the
+/// reach spans — filtered to the reach's thermal band. Headwater sources start in
+/// zone 0, sizeable rivers gain a middle (zone 1) reach, and delta/estuary or big
+/// mouths reach zone 2. Returns catalogue indices (deterministic per `seed`).
+/// Empty when no catalogued species fits the band (e.g. a tropical river — those
+/// keep the prose assemblage until a tropical roster is added).
+pub fn assign_river_fish(band: Band, source_kind: &str, mouth_kind: u8, discharge: f32, seed: u64) -> Vec<usize> {
+    let mut zones: Vec<u8> = Vec::new();
+    let src_zone = match source_kind {
+        "alpine" | "highland" => 0u8,
+        "hills" => 1,
+        _ => if discharge < 150.0 { 1 } else { 2 },
+    };
+    zones.push(src_zone);
+    if discharge >= 150.0 && !zones.contains(&1) { zones.push(1); }
+    let mouth_zone = if mouth_kind != 0 || discharge >= 800.0 { 2u8 } else { 1 };
+    if !zones.contains(&mouth_zone) { zones.push(mouth_zone); }
+    zones.sort_unstable();
+
+    let mut r = Rng(seed ^ 0x00F1_5100_0000_0001);
+    let mut out: Vec<usize> = Vec::new();
+    for &z in &zones {
+        let cands: Vec<usize> = (0..SIGNATURE_FISH.len())
+            .filter(|&i| SIGNATURE_FISH[i].zone == z && SIGNATURE_FISH[i].bands.contains(&band))
+            .collect();
+        if !cands.is_empty() {
+            let pick = cands[(r.next() % cands.len() as u64) as usize];
+            if !out.contains(&pick) { out.push(pick); }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn temperate_river_gets_zoned_species() {
+        // An alpine-sourced, delta-mouthed, large cool-temperate river should get a
+        // headwater + middle + lower species, all band-appropriate.
+        let ids = assign_river_fish(Band::CoolTemperate, "alpine", 1, 5000.0, 42);
+        assert!(ids.len() >= 2, "a great river spans multiple zones: {:?}", ids);
+        let zones: Vec<u8> = ids.iter().map(|&i| SIGNATURE_FISH[i].zone).collect();
+        assert!(zones.contains(&0) && zones.contains(&2), "spans headwater and mouth: {:?}", zones);
+        for &i in &ids { assert!(SIGNATURE_FISH[i].bands.contains(&Band::CoolTemperate)); }
+    }
+
+    #[test]
+    fn tropical_river_has_no_temperate_species_yet() {
+        assert!(assign_river_fish(Band::Tropical, "hills", 0, 500.0, 1).is_empty());
+    }
 
     #[test]
     fn bands_split_by_temp() {

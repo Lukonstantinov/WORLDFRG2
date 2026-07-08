@@ -3,7 +3,7 @@ import { useUIStore } from "../state/uiStore";
 import { useWorldStore } from "../state/worldStore";
 import { useViewportStore } from "../state/viewportStore";
 import { getRiverSystems, getLakeSystems, renderWorldCrop } from "../bridge/tauri";
-import type { RiverNode, RiverData, LakeNode, Toponym } from "../types";
+import type { RiverNode, RiverData, LakeNode, FishSpecies, Toponym } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 /** 🌊 Hydrology dashboard — every river system with full hydrological stats.
@@ -198,6 +198,15 @@ export function HydrologyPanel() {
                     <EcoRow icon="🌿" label="Banks" text={sel.riparian} />
                     {sel.story && <div style={storyBox}><Hl text={sel.story} names={[sel.name, sel.counterpart]} /></div>}
                   </div>}
+
+                  {sel.species && sel.species.length > 0 && (
+                    <div style={{ marginTop: 9 }}>
+                      <div style={subLabel}>🐟 Fish of this river · source → mouth</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {[...sel.species].sort((a, b) => a.zone - b.zone).map((sp) => <FishPlate key={sp.slug} sp={sp} />)}
+                      </div>
+                    </div>
+                  )}
 
                   <div style={subLabel}>Long profile · source → mouth</div>
                   <Profile node={sel} names={names} />
@@ -508,6 +517,38 @@ const storyBox: React.CSSProperties = {
   marginTop: 9, padding: "8px 10px", borderRadius: 6, background: "#0a1620",
   border: "1px solid #14283a", fontSize: 12, lineHeight: 1.6, color: "#cde0f2", fontStyle: "italic",
 };
+
+// ── Signature fish species plate ── shows a generated illustration from
+// `/fish/<slug>.png` (drop your plates in `public/fish/`), falling back to a
+// simple emoji tile when the image is absent, so the feature works with or
+// without the artwork.
+const ZONE_LABEL = ["headwater", "middle river", "delta / estuary"];
+const ZONE_ICON = ["🏔", "🌾", "🐟"];
+function FishPlate({ sp }: { sp: FishSpecies }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div style={{ display: "flex", gap: 9, alignItems: "center", background: "#0a1620",
+      border: "1px solid #14283a", borderRadius: 7, padding: "6px 8px" }}>
+      <div style={{ width: 90, height: 50, flex: "0 0 auto", borderRadius: 5, overflow: "hidden",
+        background: "radial-gradient(130% 100% at 30% 20%, #14304a, #0a1620 70%)", display: "grid", placeItems: "center" }}>
+        {!failed
+          ? <img src={`/fish/${sp.slug}.png`} alt={sp.name} onError={() => setFailed(true)}
+              style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+          : <span style={{ fontSize: 24, opacity: 0.6 }}>🐟</span>}
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 650, color: "#e6f2fb" }}>
+          {sp.name}
+          <span style={{ fontSize: 9.5, color: "#7d94ab", marginLeft: 6, fontWeight: 500 }}>
+            {ZONE_ICON[sp.zone] ?? ""} {ZONE_LABEL[sp.zone] ?? ""}
+          </span>
+        </div>
+        <div style={{ fontSize: 10, fontStyle: "italic", color: "#7fae8f" }}>{sp.binomial}</div>
+        <div style={{ fontSize: 10.5, color: "#93a9be", marginTop: 1 }}>{sp.blurb}</div>
+      </div>
+    </div>
+  );
+}
 
 // ── River filter helpers ──
 type RiverFilter = "all" | "navigable" | "major" | "delta" | "estuary";

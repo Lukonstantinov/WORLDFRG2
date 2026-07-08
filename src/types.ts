@@ -1551,6 +1551,7 @@ export interface RiverNode {
   water: string;    // water character (clarity/sediment/productivity)
   wildlife: string; // charismatic riverine wildlife beyond fish
   story: string;    // unique multi-sentence NatGeo-style account of the system
+  species: FishSpecies[]; // signature fish, one per river zone the reach spans
   profile: number[]; // elevation (m), source → mouth
   cities: RiverCityInfo[];
   children: RiverNode[];
@@ -1588,6 +1589,18 @@ export interface LakeNode {
 export interface LakeData {
   cells: [number, number][];
   elevation: number;
+}
+
+/** A signature fish species on a river reach. `slug` keys an illustration at
+ *  `/fish/<slug>.png` (drop your generated plates in `public/fish/`). Mirrors Rust
+ *  `FishSpeciesOut`. */
+export interface FishSpecies {
+  slug: string;
+  name: string;
+  binomial: string;
+  zone: number;      // 0 upper · 1 middle · 2 lower/delta
+  real: string;      // real-world model species
+  blurb: string;
 }
 
 export interface Settlement {
