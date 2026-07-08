@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WorldForge 2 — World Reference Catalog</title>
+<style>
+  :root{
+    --bg:#0b1420; --panel:#13202e; --panel2:#182a3c; --text:#cfe2f6;
+    --muted:#8aa6c2; --accent:#3a80c0; --line:#24384e; --good:#46d07a; --warn:#e0b040;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji",sans-serif;
+    line-height:1.5;font-size:14px}
+  header{padding:26px 32px 18px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,#0e1a28,#0b1420)}
+  header h1{margin:0 0 4px;font-size:24px;letter-spacing:.3px}
+  header p{margin:0;color:var(--muted);max-width:820px}
+  nav{position:sticky;top:0;z-index:5;background:rgba(11,20,32,.94);backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--line);padding:10px 32px;display:flex;flex-wrap:wrap;gap:8px}
+  nav a{color:var(--text);text-decoration:none;background:var(--panel);border:1px solid var(--line);
+    padding:5px 11px;border-radius:14px;font-size:12.5px}
+  nav a:hover{border-color:var(--accent);color:#fff}
+  main{padding:8px 32px 60px;max-width:1240px;margin:0 auto}
+  section{margin:34px 0}
+  section h2{font-size:19px;margin:0 0 4px;padding-bottom:6px;border-bottom:2px solid var(--accent);display:inline-block}
+  .sub{color:var(--muted);margin:4px 0 16px;max-width:900px}
+  .grid{display:grid;gap:10px}
+  .cat{grid-template-columns:repeat(auto-fill,minmax(215px,1fr))}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:9px 11px;display:flex;gap:9px;align-items:flex-start}
+  .sw{width:22px;height:22px;border-radius:5px;flex:0 0 auto;border:1px solid rgba(255,255,255,.18);margin-top:2px}
+  .emoji{font-size:17px;line-height:1}
+  .nm{font-weight:600}
+  .id{color:var(--muted);font-size:11.5px;font-family:ui-monospace,Menlo,Consolas,monospace}
+  .badge{display:inline-block;font-size:10.5px;padding:1px 7px;border-radius:9px;border:1px solid var(--line);
+    color:var(--muted);margin-top:3px}
+  .b-man{background:#2a1c33;border-color:#6a3d9a;color:#c9a6e0}
+  .b-dep{background:#33261a;border-color:#b5651d;color:#e0b98a}
+  .b-mar{background:#122a33;border-color:#2f7d8a;color:#8fd0d8}
+  .b-plant{background:#1a2a1a;border-color:#3a7d44;color:#9fd0a0}
+  .catlabel{grid-column:1/-1;margin:14px 0 2px;font-size:13px;letter-spacing:.4px;text-transform:uppercase;color:var(--accent)}
+  table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.3px}
+  tr:hover td{background:rgba(58,128,192,.06)}
+  .kc{width:34px;height:20px;border-radius:4px;border:1px solid rgba(255,255,255,.2);display:inline-block}
+  code{background:#0e1a28;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12px;
+    font-family:ui-monospace,Menlo,Consolas,monospace;color:#bcd6f0}
+  .recipe{color:var(--muted);font-size:12px;margin-top:2px}
+  .arms-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px}
+  .arms{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;text-align:center}
+  .arms svg{display:block;margin:0 auto 6px}
+  .arms .lbl{font-size:12px}
+  .arms .lbl small{color:var(--muted);display:block;font-size:10.5px}
+  .line-row{display:flex;align-items:center;gap:14px;padding:9px 4px;border-bottom:1px solid var(--line)}
+  .line-swatch{width:150px;flex:0 0 auto}
+  .line-meta{flex:1}
+  .line-meta .nm{font-size:13.5px}
+  .line-meta .id{margin-left:8px}
+  .note{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--good);
+    border-radius:6px;padding:10px 13px;margin:12px 0;color:#d8ecdd}
+  .note.warn{border-left-color:var(--warn);color:#efe0c0}
+  .tier{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 15px;margin:10px 0}
+  .tier h4{margin:0 0 4px;font-size:14.5px}
+  .tier h4 .step{display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:50%;
+    background:var(--accent);color:#fff;font-size:12px;margin-right:8px}
+  .kv{display:grid;grid-template-columns:180px 1fr;gap:2px 12px;margin-top:6px;font-size:12.5px}
+  .kv .k{color:var(--muted)}
+  .foot{color:var(--muted);font-size:12px;margin-top:40px;padding-top:14px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<header>
+  <h1>WorldForge 2 — World Reference Catalog</h1>
+  <p>A single self-contained reference for every generated commodity, the coat-of-arms component library for
+     houses &amp; guilds, the full Köppen climate palette, every trade / connection line colour, and the
+     bank / office / bailo classifications. All values are pulled directly from the codebase
+     (<code>goods.ts</code>, <code>goods_spec.rs</code>, <code>CoatOfArms.tsx</code>, <code>koppen.rs</code>,
+     <code>tile_image.rs</code>, <code>OverlayManager.ts</code>, <code>tick.rs</code>).</p>
+</header>
+<nav>
+  <a href="#goods">Generated Goods</a>
+  <a href="#manufactured">Manufactured Goods</a>
+  <a href="#arms">Coats of Arms</a>
+  <a href="#koppen">Köppen Climate</a>
+  <a href="#routes">Trade Routes</a>
+  <a href="#banks">Banks · Offices · Bailos</a>
+</nav>
+<main>
+
+<!-- ============================ GOODS ============================ -->
+<section id="goods">
+  <h2>Generated (raw) goods</h2>
+  <p class="sub">Every commodity placed on the map by the biological / trade step, grouped by its thematic
+     category. <span class="badge b-plant">Planted / Extracted</span> grow or are dug from suitable cells;
+     <span class="badge b-dep">Deposit</span> goods (metals &amp; gems) are discrete ore-province blobs;
+     <span class="badge b-mar">Marine</span> goods are harvested from the sea. Manufactured goods are listed
+     separately below. Swatch = the region tint drawn on the map overlay.</p>
+  <div id="goods-mount" class="grid cat"></div>
+</section>
+
+<!-- ======================= MANUFACTURED ======================= -->
+<section id="manufactured">
+  <h2>Manufactured goods <span class="badge b-man" style="vertical-align:middle">23 chain goods</span></h2>
+  <p class="sub">Finished goods made <em>in cities</em> from imported raws — they have no per-cell belt; the
+     shared <code>apply_manufacturing</code> pass produces them at populous hubs that hold the inputs (output
+     ∝ labor ∝ population). Values below are <code>base_value</code> in grain-equivalent.</p>
+  <div class="note">
+    <strong>Viability check ✔ — all 23 are viable.</strong> Every recipe input resolves to an existing raw
+    good, and <em>no manufactured good depends on another manufactured good</em>, so the production DAG has no
+    cycles and no missing inputs. The topological resolver would therefore never disable any of them.
+    (Fresh <code>herring</code> is perishable and eaten at its port; only <code>salted_herring</code> keeps
+    long enough to ship — the one deliberate "must-be-refined-to-travel" chain.)
+  </div>
+  <table>
+    <thead><tr><th>Good</th><th>id</th><th>Value</th><th>Recipe (input × qty)</th><th>Note</th></tr></thead>
+    <tbody id="man-mount"></tbody>
+  </table>
+</section>
+
+<!-- ========================= ARMS ========================= -->
+<section id="arms">
+  <h2>Coats of arms — houses &amp; guilds</h2>
+  <p class="sub">Arms are <strong>deterministic</strong>: a holder's tinctures, shield shape, division,
+     ordinary and charge are all derived from its name hash, so a given house always shows the same arms.
+     Below is the complete <em>component library</em> — every atomic element the generator can combine.
+     A private <strong>house</strong> draws the rich dynastic system (shape + fur + division + ordinary +
+     figurative charge); a civic <strong>guild</strong> draws the simpler geometric mark.</p>
+
+  <h3 style="margin:18px 0 4px">Tinctures (8) — the field &amp; charge palette</h3>
+  <div id="tinctures" class="grid cat"></div>
+
+  <h3 style="margin:22px 0 4px">House shield shapes (5)</h3>
+  <div id="shapes" class="arms-grid"></div>
+
+  <h3 style="margin:22px 0 4px">Heraldic furs (field can be a fur ~20% of the time)</h3>
+  <div id="furs" class="arms-grid"></div>
+
+  <h3 style="margin:22px 0 4px">House field divisions (11)</h3>
+  <div id="divisions" class="arms-grid"></div>
+
+  <h3 style="margin:22px 0 4px">Ordinaries (10 — a metal bar/cross over the field)</h3>
+  <div id="ordinaries" class="arms-grid"></div>
+
+  <h3 style="margin:22px 0 4px">House charges (16 figurative vector charges)</h3>
+  <div id="charges" class="arms-grid"></div>
+
+  <h3 style="margin:22px 0 4px">Guild charges (6 geometric marks) &amp; guild divisions (4)</h3>
+  <div id="guild" class="arms-grid"></div>
+
+  <div class="note">
+    <strong>How many arms are possible?</strong> Houses combine 8 fields × 5 shapes × 3 fur states ×
+    11 divisions × 10 ordinaries × 16 charges (plus the contrasting metal/colour picks per the rule of
+    tincture) — tens of thousands of distinct blazons. Guilds combine 8 fields × 4 divisions × 6 charges.
+    Every combination renders as crisp, tintable SVG.
+  </div>
+</section>
+
+<!-- ========================= KÖPPEN ========================= -->
+<section id="koppen">
+  <h2>Köppen climate classification — all colours</h2>
+  <p class="sub">The 32 zones the climate layer can paint, with the exact RGB from
+     <code>render/tile_image.rs :: koppen_color</code>, the Köppen code, the app's plain-language name
+     (<code>ui/climate.ts</code>), and what each zone means. The "analogue" is a real-world city of that climate.</p>
+  <table>
+    <thead><tr><th style="width:60px">Colour</th><th>Köppen</th><th>Plain name</th><th>Explanation</th><th>Analogue</th></tr></thead>
+    <tbody id="koppen-mount"></tbody>
+  </table>
+</section>
+
+<!-- ========================= ROUTES ========================= -->
+<section id="routes">
+  <h2>Trade routes &amp; connection lines — all colours</h2>
+  <p class="sub">Every vector line the map can draw for trade, holdings and money, with its default colour
+     from <code>OverlayManager.ts</code>. Line colours are user-adjustable in the Settings panel and saved
+     with the world — these are the shipped defaults. Line thickness scales with volume / importance at draw time.</p>
+
+  <h3 style="margin:16px 0 4px">Least-cost routes (the road/sea network)</h3>
+  <div id="routes-net"></div>
+
+  <h3 style="margin:20px 0 4px">Bundled trunks &amp; live flow</h3>
+  <div id="routes-trunk"></div>
+
+  <h3 style="margin:20px 0 4px">Merchant, corridor &amp; holding lines</h3>
+  <div id="routes-merchant"></div>
+
+  <h3 style="margin:20px 0 4px">Water &amp; current lines (context)</h3>
+  <div id="routes-water"></div>
+</section>
+
+<!-- ========================= BANKS ========================= -->
+<section id="banks">
+  <h2>Banks, offices &amp; bailos — classifications</h2>
+  <p class="sub">The merchant-network tiers a trading holder climbs, plus the chartered-bank institution.
+     Constants shown are the shipped values from <code>sim/tick.rs</code>.</p>
+
+  <h3 style="margin:16px 0 6px">How they look on the map</h3>
+  <p class="sub">The actual markers the overlay draws (from <code>OverlayManager.ts</code> /
+     <code>CoinIcon.tsx</code>). Focused-house markers are drawn in that house's own colour (azure shown here).</p>
+  <div id="finance-visuals" class="arms-grid"></div>
+
+  <h3 style="margin:22px 0 6px">Panel role glyphs</h3>
+  <p class="sub">In the Houses panel each city a holder touches carries a role glyph:</p>
+  <div id="role-glyphs" style="display:flex;flex-wrap:wrap;gap:14px"></div>
+
+  <h3 style="margin:22px 0 6px">Holder kinds</h3>
+  <div class="grid cat" id="holderkinds"></div>
+
+  <h3 style="margin:22px 0 6px">House archetypes (4) — each grants a standing bonus</h3>
+  <table>
+    <thead><tr><th>Archetype</th><th>Label</th><th>Perk</th></tr></thead>
+    <tbody id="arch-mount"></tbody>
+  </table>
+
+  <h3 style="margin:24px 0 6px">Foreign-presence tiers (escalating footholds)</h3>
+  <div id="tiers"></div>
+
+  <h3 style="margin:24px 0 6px">The Bank — a chartered balance-sheet institution</h3>
+  <div class="tier">
+    <h4>🏦 Bank <span class="id">"Banco di &lt;City&gt;"</span></h4>
+    <p style="margin:6px 0;color:var(--muted)">A great merchant-banking house's chartered institution with a
+       real balance sheet. Chartering opens in the <strong>"age of banking" (year 20)</strong> and requires a
+       great fortune; the charter/establishment fee is paid to the seat city's treasury. Counting-house
+       <strong>branches</strong> follow the owner's trade offices, extending the home coin's reach and letting
+       its bank-notes shave freight cost in branch cities. A bank that runs its reserve ratio too thin is
+       vulnerable to a <strong>run</strong>; a failed bank can ignite a <strong>regional crash</strong> (contagion).</p>
+    <div class="kv">
+      <div class="k">Assets</div><div>specie <code>reserves</code> + loans outstanding + <code>real_estate</code> (branches / foreclosed property) + <code>stakes</code> (equity in manufactories)</div>
+      <div class="k">Liabilities</div><div><code>deposits</code> (capital placed by other houses) + <code>notes_issued</code> (bank-notes in circulation)</div>
+      <div class="k">Equity</div><div>assets − liabilities (tracked yearly for the panel's history charts)</div>
+      <div class="k">Charter opens</div><div>year 20 · fee → seat-city treasury</div>
+      <div class="k">Interest</div><div><code>1%/mo</code> on liquid capital, capped at <code>20</code> (banker houses) — a flat early boost, not uncapped compounding</div>
+      <div class="k">Credit reach</div><div><code>×1.6</code> financing beyond cash (banker archetype trades on credit)</div>
+    </div>
+  </div>
+</section>
+
+<p class="foot">Generated as a versioned design artifact in <code>docs/mockups/</code>. Dark theme matches the app
+   (bg <code>#0b1420</code>, panel <code>#13202e</code>, accent <code>#3a80c0</code>). All data mirrors the source
+   at time of writing — re-generate if the goods spec, heraldry, climate palette, overlay colours or tick
+   constants change.</p>
+</main>
+
+<script>
+/* ---------- GOODS (mirrors src/goods.ts GOOD_DEFS + goods_spec.rs distribution) ---------- */
+// type: plant | dep | mar | man   (man = manufactured, listed in its own section)
+const MAN = new Set(["ceramics","glassware","cloth","metalware","refined_sugar","citrus_liqueur","linen",
+  "cotton_cloth","silk_brocade","carpets","leather_goods","salted_herring","bronzeware","jewelry","brandy",
+  "mead","perfume","soap","candles","books","furniture","ivory_carvings","statuary"]);
+const DEP = new Set(["iron","copper","tin","gold","gemstones","silver","lead","marble","jade","bay_salt",
+  "tyrian_purple","ambergris","ruby","sapphire","emerald","diamond","amethyst","topaz","salt","amber","pearls"]);
+const MAR = new Set(["stockfish","spices","pearls","whaling","amber","dyes","herring","coral","ambergris",
+  "tyrian_purple","salted_herring"]);
+
+/* ---------- GOOD ICON MEDALLIONS (ported verbatim from src/canvas/goodIcons.ts) ----------
+   The real in-app good icon: a flat parchment disc with the good's coloured ring and a
+   duotone vector pictogram — NOT an emoji. Rendered here onto a small canvas per good. */
+function hexToRgb(hex){const h=hex.replace("#","");const v=h.length===3?h.split("").map(c=>c+c).join(""):h.padEnd(6,"0").slice(0,6);return[parseInt(v.slice(0,2),16),parseInt(v.slice(2,4),16),parseInt(v.slice(4,6),16)];}
+function rgbS(r,g,b){return`rgb(${r|0},${g|0},${b|0})`;}
+function mix([r,g,b],to,t){return rgbS(r+(to-r)*t,g+(to-g)*t,b+(to-b)*t);}
+function lumin([r,g,b]){return(0.299*r+0.587*g+0.114*b)/255;}
+const GEM_COLORS={Ruby:"#e0245e",Sapphire:"#2f6fe0",Emerald:"#2faa55",Diamond:"#cfeaf0",Topaz:"#e0a83a",Amethyst:"#9b59d0"};
+function poly(ctx,pts,close){if(close===undefined)close=true;ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i][0],pts[i][1]);if(close)ctx.closePath();}
+function dotc(ctx,x,y,rr){ctx.beginPath();ctx.arc(x,y,rr,0,Math.PI*2);ctx.fill();}
+const drop=(ctx,x,y,s,ink)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.moveTo(x,y-s);ctx.bezierCurveTo(x+s*0.9,y-s*0.1,x+s*0.7,y+s*0.9,x,y+s*0.9);ctx.bezierCurveTo(x-s*0.7,y+s*0.9,x-s*0.9,y-s*0.1,x,y-s);ctx.fill();};
+const leaf=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.moveTo(x-s*0.7,y+s*0.7);ctx.quadraticCurveTo(x-s*0.9,y-s*0.9,x+s*0.7,y-s*0.7);ctx.quadraticCurveTo(x+s*0.9,y+s*0.5,x-s*0.7,y+s*0.7);ctx.fill();ctx.strokeStyle=accent;ctx.lineWidth=s*0.12;ctx.beginPath();ctx.moveTo(x-s*0.6,y+s*0.6);ctx.lineTo(x+s*0.6,y-s*0.6);ctx.stroke();};
+const grain=(ctx,x,y,s,ink)=>{ctx.strokeStyle=ink;ctx.lineWidth=s*0.14;ctx.lineCap="round";ctx.beginPath();ctx.moveTo(x,y+s);ctx.lineTo(x,y-s*0.7);ctx.stroke();ctx.fillStyle=ink;for(let i=0;i<4;i++){const yy=y-s*0.7+i*s*0.45;for(const dir of[-1,1]){ctx.beginPath();ctx.ellipse(x+dir*s*0.42,yy+s*0.18,s*0.28,s*0.14,dir*0.7,0,Math.PI*2);ctx.fill();}}};
+const gem=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;poly(ctx,[[x,y-s],[x+s*0.85,y-s*0.2],[x+s*0.45,y+s],[x-s*0.45,y+s],[x-s*0.85,y-s*0.2]]);ctx.fill();ctx.strokeStyle=accent;ctx.lineWidth=s*0.1;ctx.beginPath();ctx.moveTo(x-s*0.85,y-s*0.2);ctx.lineTo(x+s*0.85,y-s*0.2);ctx.moveTo(x,y-s);ctx.lineTo(x-s*0.3,y-s*0.2);ctx.lineTo(x-s*0.45,y+s);ctx.moveTo(x,y-s);ctx.lineTo(x+s*0.3,y-s*0.2);ctx.lineTo(x+s*0.45,y+s);ctx.stroke();};
+const fish=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.ellipse(x+s*0.05,y,s*0.85,s*0.45,0,0,Math.PI*2);ctx.fill();poly(ctx,[[x-s*0.7,y],[x-s,y-s*0.5],[x-s,y+s*0.5]]);ctx.fill();ctx.fillStyle=accent;dotc(ctx,x+s*0.45,y-s*0.12,s*0.1);};
+const whale=(ctx,x,y,s,ink)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.moveTo(x-s,y+s*0.2);ctx.quadraticCurveTo(x-s*0.2,y-s*0.7,x+s*0.7,y-s*0.1);ctx.quadraticCurveTo(x+s,y,x+s*0.8,y+s*0.4);ctx.quadraticCurveTo(x,y+s*0.7,x-s,y+s*0.2);ctx.fill();poly(ctx,[[x+s*0.6,y-s*0.1],[x+s,y-s*0.8],[x+s*0.95,y-s*0.1]]);ctx.fill();};
+const ingot=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;poly(ctx,[[x-s*0.55,y-s*0.4],[x+s*0.55,y-s*0.4],[x+s*0.85,y+s*0.4],[x-s*0.85,y+s*0.4]]);ctx.fill();ctx.fillStyle=accent;poly(ctx,[[x-s*0.55,y-s*0.4],[x+s*0.55,y-s*0.4],[x+s*0.4,y-s*0.15],[x-s*0.4,y-s*0.15]]);ctx.fill();};
+const pick=(ctx,x,y,s,ink)=>{ctx.strokeStyle=ink;ctx.lineWidth=s*0.16;ctx.lineCap="round";ctx.beginPath();ctx.moveTo(x-s*0.1,y-s*0.8);ctx.lineTo(x-s*0.1,y+s*0.9);ctx.stroke();ctx.beginPath();ctx.moveTo(x-s,y-s*0.45);ctx.quadraticCurveTo(x,y-s*0.95,x+s,y-s*0.45);ctx.stroke();};
+const coinS=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;dotc(ctx,x,y,s*0.9);ctx.fillStyle=accent;dotc(ctx,x,y,s*0.62);ctx.fillStyle=ink;ctx.font=`bold ${s}px serif`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("✦",x,y+s*0.05);};
+const amphora=(ctx,x,y,s,ink)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.moveTo(x,y-s);ctx.quadraticCurveTo(x+s*0.7,y-s*0.6,x+s*0.5,y+s*0.2);ctx.quadraticCurveTo(x+s*0.35,y+s,x,y+s);ctx.quadraticCurveTo(x-s*0.35,y+s,x-s*0.5,y+s*0.2);ctx.quadraticCurveTo(x-s*0.7,y-s*0.6,x,y-s);ctx.fill();ctx.strokeStyle=ink;ctx.lineWidth=s*0.14;ctx.beginPath();ctx.arc(x-s*0.5,y-s*0.35,s*0.28,Math.PI*0.2,Math.PI*1.1);ctx.arc(x+s*0.5,y-s*0.35,s*0.28,-Math.PI*0.1,Math.PI*0.8,true);ctx.stroke();};
+const goblet=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.moveTo(x-s*0.6,y-s*0.8);ctx.lineTo(x+s*0.6,y-s*0.8);ctx.quadraticCurveTo(x+s*0.5,y+s*0.1,x,y+s*0.2);ctx.quadraticCurveTo(x-s*0.5,y+s*0.1,x-s*0.6,y-s*0.8);ctx.fill();ctx.strokeStyle=ink;ctx.lineWidth=s*0.13;ctx.beginPath();ctx.moveTo(x,y+s*0.2);ctx.lineTo(x,y+s*0.8);ctx.moveTo(x-s*0.45,y+s*0.9);ctx.lineTo(x+s*0.45,y+s*0.9);ctx.stroke();ctx.fillStyle=accent;poly(ctx,[[x-s*0.5,y-s*0.75],[x+s*0.5,y-s*0.75],[x,y-s*0.2]]);ctx.fill();};
+const bale=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.ellipse(x,y,s*0.9,s*0.8,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle=accent;ctx.lineWidth=s*0.1;for(let i=-1;i<=1;i++){ctx.beginPath();ctx.ellipse(x,y,s*0.9,s*0.8,0,0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.moveTo(x+i*s*0.4,y-s*0.78);ctx.lineTo(x+i*s*0.4,y+s*0.78);ctx.stroke();}};
+const spool=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.fillRect(x-s*0.5,y-s*0.85,s,s*1.7);ctx.fillStyle=accent;ctx.fillRect(x-s*0.8,y-s*0.85,s*1.6,s*0.22);ctx.fillRect(x-s*0.8,y+s*0.63,s*1.6,s*0.22);};
+const logS=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.ellipse(x,y,s*0.95,s*0.6,Math.PI/4,0,Math.PI*2);ctx.fill();ctx.fillStyle=accent;ctx.beginPath();ctx.ellipse(x+s*0.5,y-s*0.5,s*0.3,s*0.22,Math.PI/4,0,Math.PI*2);ctx.fill();};
+const animal=(ctx,x,y,s,ink)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.ellipse(x,y+s*0.1,s*0.8,s*0.45,0,0,Math.PI*2);ctx.fill();poly(ctx,[[x+s*0.5,y-s*0.1],[x+s,y-s],[x+s*1.05,y-s*0.55],[x+s*0.7,y+s*0.1]]);ctx.fill();ctx.fillRect(x-s*0.6,y+s*0.4,s*0.18,s*0.7);ctx.fillRect(x+s*0.3,y+s*0.4,s*0.18,s*0.7);};
+const tusk=(ctx,x,y,s,ink)=>{ctx.strokeStyle=ink;ctx.lineWidth=s*0.3;ctx.lineCap="round";ctx.beginPath();ctx.moveTo(x-s*0.6,y-s*0.7);ctx.quadraticCurveTo(x+s*0.4,y-s*0.2,x+s*0.3,y+s*0.8);ctx.stroke();};
+const pelt=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;poly(ctx,[[x,y-s],[x+s*0.5,y-s*0.6],[x+s,y-s*0.7],[x+s*0.6,y+s*0.2],[x+s*0.4,y+s],[x-s*0.4,y+s],[x-s*0.6,y+s*0.2],[x-s,y-s*0.7],[x-s*0.5,y-s*0.6]]);ctx.fill();ctx.fillStyle=accent;dotc(ctx,x,y,s*0.18);};
+const crystals=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;poly(ctx,[[x-s*0.8,y+s*0.6],[x-s*0.4,y-s*0.4],[x,y+s*0.6]]);ctx.fill();poly(ctx,[[x-s*0.1,y+s*0.6],[x+s*0.35,y-s*0.8],[x+s*0.8,y+s*0.6]]);ctx.fill();ctx.fillStyle=accent;poly(ctx,[[x+s*0.2,y+s*0.6],[x+s*0.55,y+s*0.05],[x+s*0.9,y+s*0.6]]);ctx.fill();};
+const bean=(ctx,x,y,s,ink,accent)=>{for(const[dx,dy]of[[-s*0.35,-s*0.1],[s*0.35,s*0.1]]){ctx.fillStyle=ink;ctx.beginPath();ctx.ellipse(x+dx,y+dy,s*0.45,s*0.62,0.5,0,Math.PI*2);ctx.fill();ctx.strokeStyle=accent;ctx.lineWidth=s*0.08;ctx.beginPath();ctx.moveTo(x+dx-s*0.28,y+dy-s*0.32);ctx.quadraticCurveTo(x+dx+s*0.1,y+dy,x+dx+s*0.28,y+dy+s*0.32);ctx.stroke();}};
+const flower=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;for(let i=0;i<6;i++){const a=(i/6)*Math.PI*2;ctx.beginPath();ctx.ellipse(x+Math.cos(a)*s*0.5,y+Math.sin(a)*s*0.5,s*0.34,s*0.2,a,0,Math.PI*2);ctx.fill();}ctx.fillStyle=accent;dotc(ctx,x,y,s*0.3);};
+const smoke=(ctx,x,y,s,ink)=>{ctx.strokeStyle=ink;ctx.lineWidth=s*0.16;ctx.lineCap="round";for(const dx of[-s*0.4,s*0.4]){ctx.beginPath();ctx.moveTo(x+dx,y+s);ctx.bezierCurveTo(x+dx-s*0.6,y+s*0.2,x+dx+s*0.6,y-s*0.4,x+dx,y-s);ctx.stroke();}};
+const palm=(ctx,x,y,s,ink,accent)=>{ctx.strokeStyle=ink;ctx.lineWidth=s*0.14;ctx.beginPath();ctx.moveTo(x,y+s);ctx.quadraticCurveTo(x-s*0.2,y,x-s*0.1,y-s*0.4);ctx.stroke();ctx.strokeStyle=ink;for(let i=0;i<5;i++){const a=-Math.PI/2+(i-2)*0.55;ctx.beginPath();ctx.moveTo(x-s*0.1,y-s*0.5);ctx.quadraticCurveTo(x+Math.cos(a)*s*0.6,y-s*0.5+Math.sin(a)*s*0.5,x+Math.cos(a)*s*1.1,y-s*0.4+Math.sin(a)*s);ctx.stroke();}ctx.fillStyle=accent;dotc(ctx,x+s*0.1,y+s*0.55,s*0.16);};
+const berries=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;for(const[dx,dy]of[[-s*0.4,-s*0.2],[s*0.4,-s*0.2],[0,s*0.4]])dotc(ctx,x+dx,y+dy,s*0.42);ctx.fillStyle=accent;for(const[dx,dy]of[[-s*0.4,-s*0.2],[s*0.4,-s*0.2],[0,s*0.4]])dotc(ctx,x+dx-s*0.12,y+dy-s*0.12,s*0.12);};
+const scroll=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.fillRect(x-s*0.7,y-s*0.6,s*1.4,s*1.2);ctx.fillStyle=accent;ctx.beginPath();ctx.ellipse(x-s*0.7,y,s*0.22,s*0.6,0,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.ellipse(x+s*0.7,y,s*0.22,s*0.6,0,0,Math.PI*2);ctx.fill();};
+const pot=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.moveTo(x-s*0.65,y-s*0.5);ctx.quadraticCurveTo(x-s*0.95,y+s*0.2,x-s*0.4,y+s*0.8);ctx.lineTo(x+s*0.4,y+s*0.8);ctx.quadraticCurveTo(x+s*0.95,y+s*0.2,x+s*0.65,y-s*0.5);ctx.quadraticCurveTo(x,y-s*0.85,x-s*0.65,y-s*0.5);ctx.fill();ctx.strokeStyle=accent;ctx.lineWidth=s*0.1;ctx.beginPath();ctx.moveTo(x-s*0.7,y-s*0.1);ctx.lineTo(x+s*0.7,y-s*0.1);ctx.stroke();};
+const shell=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.moveTo(x,y+s*0.7);ctx.arc(x,y-s*0.1,s*0.85,Math.PI,0);ctx.closePath();ctx.fill();ctx.strokeStyle=accent;ctx.lineWidth=s*0.08;for(let i=-2;i<=2;i++){ctx.beginPath();ctx.moveTo(x,y+s*0.6);ctx.lineTo(x+i*s*0.35,y-s*0.75);ctx.stroke();}};
+const grapes=(ctx,x,y,s,ink,accent)=>{ctx.strokeStyle=accent;ctx.lineWidth=s*0.12;ctx.lineCap="round";ctx.beginPath();ctx.moveTo(x,y-s*0.55);ctx.lineTo(x+s*0.12,y-s);ctx.stroke();ctx.fillStyle=accent;ctx.beginPath();ctx.ellipse(x+s*0.42,y-s*0.85,s*0.3,s*0.16,-0.5,0,Math.PI*2);ctx.fill();ctx.fillStyle=ink;for(const[dx,dy]of[[-0.46,-0.45],[0,-0.5],[0.46,-0.45],[-0.26,-0.02],[0.26,-0.02],[0,0.42]])dotc(ctx,x+dx*s,y+dy*s,s*0.29);};
+const coralS=(ctx,x,y,s,ink)=>{ctx.strokeStyle=ink;ctx.lineWidth=s*0.2;ctx.lineCap="round";ctx.lineJoin="round";const branch=(bx,by,ang,len,depth)=>{const ex=bx+Math.cos(ang)*len,ey=by+Math.sin(ang)*len;ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(ex,ey);ctx.stroke();if(depth>0){branch(ex,ey,ang-0.6,len*0.72,depth-1);branch(ex,ey,ang+0.5,len*0.72,depth-1);}};branch(x,y+s*0.95,-Math.PI/2,s*0.62,2);};
+const cinnamonS=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;for(const dx of[-0.42,0.02]){ctx.save();ctx.translate(x+dx*s,y);ctx.rotate(0.12);ctx.fillRect(-s*0.18,-s*0.92,s*0.4,s*1.84);ctx.strokeStyle=accent;ctx.lineWidth=s*0.09;ctx.beginPath();ctx.ellipse(s*0.02,-s*0.92,s*0.2,s*0.09,0,0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.ellipse(s*0.02,s*0.92,s*0.2,s*0.09,0,0,Math.PI*2);ctx.stroke();ctx.restore();}};
+const citrusS=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;dotc(ctx,x,y,s*0.9);ctx.strokeStyle=accent;ctx.lineWidth=s*0.1;for(let i=0;i<7;i++){const a=(i/7)*Math.PI*2;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+Math.cos(a)*s*0.82,y+Math.sin(a)*s*0.82);ctx.stroke();}ctx.fillStyle=accent;dotc(ctx,x,y,s*0.13);};
+const column=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.fillRect(x-s*0.42,y-s*0.62,s*0.84,s*1.2);ctx.fillStyle=accent;ctx.fillRect(x-s*0.72,y-s*0.9,s*1.44,s*0.24);ctx.fillRect(x-s*0.72,y+s*0.6,s*1.44,s*0.28);ctx.strokeStyle=accent;ctx.lineWidth=s*0.07;for(const dx of[-0.18,0.18]){ctx.beginPath();ctx.moveTo(x+dx*s,y-s*0.55);ctx.lineTo(x+dx*s,y+s*0.55);ctx.stroke();}};
+const ring=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;dotc(ctx,x,y,s*0.92);ctx.fillStyle=accent;dotc(ctx,x,y,s*0.58);ctx.fillStyle=ink;dotc(ctx,x,y,s*0.3);};
+const blob=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.beginPath();ctx.moveTo(x-s*0.8,y);ctx.bezierCurveTo(x-s*0.7,y-s*0.9,x+s*0.6,y-s*0.85,x+s*0.82,y-s*0.1);ctx.bezierCurveTo(x+s*0.95,y+s*0.7,x-s*0.5,y+s*0.92,x-s*0.8,y);ctx.fill();ctx.fillStyle=accent;dotc(ctx,x-s*0.18,y-s*0.22,s*0.18);dotc(ctx,x+s*0.3,y+s*0.2,s*0.12);};
+const sheaf=(ctx,x,y,s,ink,accent)=>{ctx.strokeStyle=ink;ctx.lineWidth=s*0.13;ctx.lineCap="round";for(const dx of[-0.4,0,0.4]){ctx.beginPath();ctx.moveTo(x+dx*s*0.7,y+s);ctx.lineTo(x+dx*s,y-s);ctx.stroke();ctx.fillStyle=ink;dotc(ctx,x+dx*s,y-s,s*0.15);}ctx.strokeStyle=accent;ctx.lineWidth=s*0.16;ctx.beginPath();ctx.moveTo(x-s*0.5,y+s*0.3);ctx.lineTo(x+s*0.5,y+s*0.3);ctx.stroke();};
+const book=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.fillRect(x-s*0.7,y-s*0.85,s*1.4,s*1.7);ctx.fillStyle=accent;ctx.fillRect(x-s*0.55,y-s*0.7,s*1.1,s*1.4);ctx.strokeStyle=ink;ctx.lineWidth=s*0.1;ctx.beginPath();ctx.moveTo(x,y-s*0.7);ctx.lineTo(x,y+s*0.7);ctx.stroke();};
+const candle=(ctx,x,y,s,ink,accent)=>{ctx.fillStyle=ink;ctx.fillRect(x-s*0.32,y-s*0.45,s*0.64,s*1.35);ctx.strokeStyle=ink;ctx.lineWidth=s*0.12;ctx.beginPath();ctx.moveTo(x,y-s*0.45);ctx.lineTo(x,y-s*0.78);ctx.stroke();ctx.fillStyle=accent;ctx.beginPath();ctx.ellipse(x,y-s,s*0.22,s*0.42,0,0,Math.PI*2);ctx.fill();};
+const SYMBOLS={silk:spool,cotton:bale,wool_fleece:bale,wool_llama:bale,flax:sheaf,wine:grapes,oliveoil:amphora,ceramics:pot,glassware:goblet,sugar:crystals,salt:crystals,bay_salt:crystals,frankincense:smoke,incense:smoke,stockfish:fish,dyes:drop,indigo:drop,tyrian_purple:shell,spices:leaf,tea:leaf,cloves:leaf,pepper:berries,tobacco:leaf,cinnamon:cinnamonS,saffron:flower,coffee:bean,cacao:bean,furs:pelt,timber:logS,hardwoods:logS,amber:drop,pearls:shell,coral:coralS,ambergris:blob,whaling:whale,wheat:grain,iron:pick,copper:ingot,tin:ingot,gold:coinS,silver:ingot,lead:ingot,gemstones:gem,jade:ring,marble:column,horses:animal,ivory:tusk,paper:scroll,dates:palm,citrus:citrusS,rice:grain,barley:grain,millet:grain,herring:fish,salted_herring:fish,honey:amphora,hides:pelt,leather_goods:pelt,beer:goblet,mead:goblet,brandy:goblet,citrus_liqueur:goblet,ruby:gem,sapphire:gem,emerald:gem,diamond:gem,amethyst:gem,topaz:gem,clay:blob,soap:blob,cloth:bale,linen:bale,cotton_cloth:bale,carpets:bale,silk_brocade:spool,metalware:ingot,bronzeware:ingot,refined_sugar:crystals,jewelry:ring,perfume:drop,candles:candle,books:book,furniture:logS,ivory_carvings:tusk,statuary:column};
+const FALLBACK=(ctx,x,y,s,ink)=>{ctx.fillStyle=ink;dotc(ctx,x,y,s*0.5);};
+function drawGoodIcon(ctx,name,cx,cy,r,baseColor,opts){opts=opts||{};
+  let color=baseColor;
+  if(name==="gemstones"&&opts.sublabel&&GEM_COLORS[opts.sublabel])color=GEM_COLORS[opts.sublabel];
+  const base=hexToRgb(color);const lum=lumin(base);
+  ctx.save();
+  ctx.globalAlpha=0.3;ctx.fillStyle="#000";dotc(ctx,cx+r*0.05,cy+r*0.07,r);ctx.globalAlpha=1;
+  ctx.fillStyle="#f1ead6";dotc(ctx,cx,cy,r);
+  const rng=lum>0.7?mix(base,0,0.42):color;
+  ctx.lineWidth=r*0.17;ctx.strokeStyle=rng;ctx.beginPath();ctx.arc(cx,cy,r*0.9,0,Math.PI*2);ctx.stroke();
+  ctx.lineWidth=r*0.07;ctx.strokeStyle="rgba(22,17,10,0.6)";ctx.beginPath();ctx.arc(cx,cy,r*0.99,0,Math.PI*2);ctx.stroke();
+  const dark=[(base[0]*0.5)|0,(base[1]*0.5)|0,(base[2]*0.5)|0];
+  const ink=lum>0.62?rgbS(dark[0],dark[1],dark[2]):color;
+  const accent=lum>0.62?rgbS(base[0],base[1],base[2]):mix(base,255,0.4);
+  const sym=SYMBOLS[name]||FALLBACK;ctx.lineJoin="round";sym(ctx,cx,cy,r*0.6,ink,accent);
+  ctx.restore();
+}
+/** Build a crisp <canvas> medallion for one good. px = CSS size. */
+function iconCanvas(name,color,px,sublabel){
+  px=px||44;const dpr=window.devicePixelRatio||1;
+  const cv=document.createElement("canvas");
+  cv.width=px*dpr;cv.height=px*dpr;cv.style.width=px+"px";cv.style.height=px+"px";cv.style.flex="0 0 auto";
+  const ctx=cv.getContext("2d");ctx.scale(dpr,dpr);
+  drawGoodIcon(ctx,name,px/2,px/2,px/2*0.92,color,{sublabel:sublabel});
+  return cv;
+}
+
+const GOODS = [
+  ["silk","Silk","\u{1F41B}","#d97fb0","Textiles & Animal"],
+  ["wine","Wine","\u{1F377}","#9b2d4f","Wine, Oil & Vine"],
+  ["oliveoil","Olive Oil","\u{1FAD2}","#8ea33a","Wine, Oil & Vine"],
+  ["sugar","Sugar Cane","\u{1F36C}","#e8d8a0","Cash Crops"],
+  ["frankincense","Frankincense","\u{1FA94}","#c79a4b","Spices & Aromatics"],
+  ["stockfish","Stockfish & Salt-cod","\u{1F41F}","#6fb0c8","Marine"],
+  ["spices","Spices","\u{1F336}\u{FE0F}","#d2622a","Spices & Aromatics"],
+  ["tea","Tea","\u{1F375}","#5fae6f","Cash Crops"],
+  ["coffee","Coffee","☕","#7a4a2a","Cash Crops"],
+  ["furs","Furs","\u{1F98A}","#a9763d","Textiles & Animal"],
+  ["timber","Timber","\u{1FAB5}","#6b8f4e","Forestry & Craft"],
+  ["amber","Amber","\u{1F7E0}","#e0962a","Marine"],
+  ["salt","Rock Salt","\u{1F9C2}","#cfd6dc","Minerals & Metals"],
+  ["dyes","Dyes","\u{1F41A}","#8a52c0","Marine"],
+  ["incense","Incense","\u{1F4A8}","#b0a0c0","Spices & Aromatics"],
+  ["pearls","Pearls","\u{1F9AA}","#d8e4ec","Marine"],
+  ["whaling","Whaling Grounds","\u{1F40B}","#5878a0","Marine"],
+  ["wheat","Grain","\u{1F33E}","#d9b94a","Staples"],
+  ["iron","Iron / Ore","⛏\u{FE0F}","#9aa0a6","Minerals & Metals"],
+  ["cotton","Cotton","\u{1F9F6}","#eef0e8","Textiles & Animal"],
+  ["gemstones","Gemstones","\u{1F48E}","#56c8d8","Minerals & Metals"],
+  ["hardwoods","Tropical Hardwoods","\u{1F333}","#5b3a1e","Forestry & Craft"],
+  ["horses","Horses","\u{1F40E}","#b5793a","Textiles & Animal"],
+  ["wool_fleece","Fleece Wool","\u{1F411}","#e8e3d8","Textiles & Animal"],
+  ["wool_llama","Highland Wool","\u{1F999}","#c8a06a","Textiles & Animal"],
+  ["ivory","Ivory","\u{1F418}","#efe6d0","Textiles & Animal"],
+  ["cacao","Cacao","\u{1F36B}","#6b4226","Cash Crops"],
+  ["copper","Copper","\u{1F7E4}","#b06a3a","Minerals & Metals"],
+  ["tin","Tin","⚪","#b8bcc0","Minerals & Metals"],
+  ["gold","Gold","\u{1F7E1}","#d4af37","Minerals & Metals"],
+  ["cloves","Cloves","\u{1F33F}","#7a3b1e","Spices & Aromatics"],
+  ["pepper","Pepper","⚫","#2f2f33","Spices & Aromatics"],
+  ["paper","Paper","\u{1F4DC}","#e8e0c8","Forestry & Craft"],
+  ["ceramics","Ceramics","\u{1F3FA}","#5a86c8","Forestry & Craft"],
+  ["glassware","Glassware","\u{1FA9F}","#9fd8d0","Forestry & Craft"],
+  ["tobacco","Tobacco","\u{1F6AC}","#8a6a3a","Cash Crops"],
+  ["indigo","Indigo","\u{1F7E6}","#3a4fb0","Cash Crops"],
+  ["dates","Dates","\u{1F33D}","#c08a3a","Staples"],
+  ["rice","Rice","\u{1F35A}","#e6e2c8","Staples"],
+  ["barley","Barley & Rye","\u{1F35E}","#c8a85a","Staples"],
+  ["millet","Millet","\u{1F963}","#d8c070","Staples"],
+  ["herring","Herring","\u{1F420}","#7ab8d0","Marine"],
+  ["honey","Honey & Wax","\u{1F36F}","#e0a020","Staples"],
+  ["hides","Hides & Leather","\u{1F404}","#9a7a50","Textiles & Animal"],
+  ["beer","Beer & Ale","\u{1F37A}","#d09030","Wine, Oil & Vine"],
+  ["bay_salt","Bay Salt","\u{1F9C2}","#e8e0d0","Minerals & Metals"],
+  ["citrus","Citrus","\u{1F34A}","#f4a33a","Wine, Oil & Vine"],
+  ["flax","Flax / Linen","\u{1F9F5}","#cfe0e8","Textiles & Animal"],
+  ["coral","Red Coral","\u{1FAB8}","#ff6f61","Marine"],
+  ["cinnamon","Cinnamon","\u{1F33F}","#a9603a","Spices & Aromatics"],
+  ["saffron","Saffron","\u{1F33C}","#f4c430","Spices & Aromatics"],
+  ["tyrian_purple","Tyrian Purple","\u{1F7E3}","#6a0dad","Marine"],
+  ["ambergris","Ambergris","\u{1F40B}","#cfc0a0","Marine"],
+  ["jade","Jade","\u{1F7E2}","#00a86b","Minerals & Metals"],
+  ["silver","Silver","\u{1FA99}","#c8ccd6","Minerals & Metals"],
+  ["marble","Marble","\u{1F3DB}\u{FE0F}","#e8e6e0","Minerals & Metals"],
+  ["lead","Lead","\u{1F529}","#8a8e96","Minerals & Metals"],
+  ["ruby","Ruby","\u{1F534}","#e0294a","Minerals & Metals"],
+  ["sapphire","Sapphire","\u{1F537}","#2a5fd0","Minerals & Metals"],
+  ["emerald","Emerald","\u{1F49A}","#1ea866","Minerals & Metals"],
+  ["diamond","Diamond","\u{1F48E}","#dfe6ee","Minerals & Metals"],
+  ["amethyst","Amethyst","\u{1F7E3}","#9b59d0","Minerals & Metals"],
+  ["topaz","Topaz","\u{1F7E7}","#e0a92a","Minerals & Metals"],
+  ["clay","Clay","\u{1F9F1}","#b07a52","Forestry & Craft"],
+];
+
+const CAT_ORDER=["Staples","Wine, Oil & Vine","Cash Crops","Spices & Aromatics",
+  "Textiles & Animal","Forestry & Craft","Minerals & Metals","Marine"];
+function goodType(id){ if(DEP.has(id))return["Deposit","b-dep"]; if(MAR.has(id))return["Marine","b-mar"]; return["Planted/Extracted","b-plant"]; }
+(function(){
+  const m=document.getElementById("goods-mount");
+  for(const cat of CAT_ORDER){
+    const h=document.createElement("div");h.className="catlabel";h.textContent=cat;m.appendChild(h);
+    for(const g of GOODS.filter(x=>x[4]===cat && !MAN.has(x[0]))){
+      const [id,label,emoji,color]=g; const [tl,tc]=goodType(id);
+      const c=document.createElement("div");c.className="card";
+      c.appendChild(iconCanvas(id,color,44));
+      const txt=document.createElement("div");
+      txt.innerHTML=`<span class="nm">${label}</span>
+        <div class="id">${id}</div><span class="badge ${tc}">${tl}</span>`;
+      c.appendChild(txt);
+      m.appendChild(c);
+    }
+  }
+})();
+
+/* ---------- MANUFACTURED (mirrors goods_spec.rs) ---------- */
+const MANU = [
+  ["ceramics","Ceramics","\u{1F3FA}","#5a86c8","—",[["clay",1.0],["timber",0.2]],"Kiln craft; heavy, stays near source"],
+  ["glassware","Glassware","\u{1FA9F}","#9fd8d0","—",[["bay_salt",0.1],["timber",0.3]],"Soda + kiln fuel"],
+  ["cloth","Woolen Cloth","\u{1F9F6}","#d8c8b0","8.0",[["wool_fleece",1.0],["dyes",0.2]],"Import raw wool → export cloth"],
+  ["metalware","Metalware & Arms","⚔\u{FE0F}","#9099a8","9.0",[["iron",1.0],["copper",0.3]],"Tools, fittings, weapons"],
+  ["refined_sugar","Refined Sugar","\u{1F367}","#f0e8d8","7.0",[["sugar",1.2]],"Boiled & refined in ports"],
+  ["citrus_liqueur","Citrus Liqueur","\u{1F378}","#e8b24a","14.0",[["citrus",1.0],["sugar",0.5]],"Distilled — two raws"],
+  ["linen","Linen","\u{1F9FA}","#cfe0e8","5.0",[["flax",1.0]],"Flax-family cloth"],
+  ["cotton_cloth","Cotton Cloth","\u{1F455}","#eef0e8","5.0",[["cotton",1.0]],"Cotton-family cloth"],
+  ["silk_brocade","Fine Silk Brocade","\u{1F9E3}","#d96fb0","28.0",[["silk",1.0],["dyes",0.2],["gold",0.02]],"Gold-threaded luxury"],
+  ["carpets","Carpets & Tapestry","\u{1F7EB}","#9b4f2f","11.0",[["wool_fleece",1.2],["dyes",0.3]],"Knotted luxury"],
+  ["leather_goods","Leather Goods","\u{1F45E}","#7a4a2a","4.0",[["hides",1.0],["salt",0.1]],"Tanned & salted"],
+  ["salted_herring","Salted Herring","\u{1F9C2}","#88b8c0","3.0",[["herring",1.0],["salt",0.3]],"The Hanseatic staple — only salted fish ships"],
+  ["bronzeware","Bronzeware","\u{1F514}","#b06a3a","6.0",[["copper",0.9],["tin",0.1]],"Copper + tin alloy"],
+  ["jewelry","Fine Jewelry","\u{1F48D}","#d4af37","45.0",[["gold",0.3],["silver",0.3],["gemstones",0.1]],"Highest-value good"],
+  ["brandy","Brandy & Spirits","\u{1F943}","#a9603a","10.0",[["wine",1.0]],"Distilled wine"],
+  ["mead","Mead","\u{1F36F}","#e0a020","4.0",[["honey",1.0]],"Fermented honey"],
+  ["perfume","Perfume & Attar","\u{1F9F4}","#c79a4b","30.0",[["frankincense",0.3],["saffron",0.05],["oliveoil",0.2]],"Distilled aromatics"],
+  ["soap","Soap","\u{1F9FC}","#cfe0d8","3.0",[["oliveoil",0.6],["salt",0.2]],"Oil + lye"],
+  ["candles","Candles & Wax Goods","\u{1F56F}\u{FE0F}","#e8d8a0","3.0",[["honey",0.8]],"Beeswax"],
+  ["books","Books & Manuscripts","\u{1F4DA}","#8a6a3a","20.0",[["paper",0.8],["dyes",0.1]],"Paper + ink"],
+  ["furniture","Fine Furniture","\u{1FA91}","#6b4226","5.0",[["hardwoods",1.0],["iron",0.1]],"Joined hardwood"],
+  ["ivory_carvings","Ivory Carvings","♟\u{FE0F}","#efe6d0","25.0",[["ivory",1.0]],"Carved luxury"],
+  ["statuary","Statuary","\u{1F5FF}","#e8e6e0","8.0",[["marble",1.0]],"Carved marble"],
+];
+const LBL=Object.fromEntries(GOODS.map(g=>[g[0],g[1]]));
+(function(){
+  const tb=document.getElementById("man-mount");
+  for(const [id,label,emoji,color,val,recipe,note] of MANU){
+    const r=recipe.map(([g,q])=>`${LBL[g]||g} ×${q}`).join(" + ");
+    const tr=document.createElement("tr");
+    const td0=document.createElement("td");
+    td0.style.display="flex";td0.style.alignItems="center";td0.style.gap="8px";
+    td0.appendChild(iconCanvas(id,color,34));
+    const nm=document.createElement("span");nm.className="nm";nm.textContent=label;td0.appendChild(nm);
+    tr.appendChild(td0);
+    const rest=document.createElement("template");
+    rest.innerHTML=`<td class="id">${id}</td><td>${val}</td><td class="recipe">${r}</td><td style="color:var(--muted)">${note}</td>`;
+    tr.appendChild(rest.content);
+    tb.appendChild(tr);
+  }
+})();
+
+/* ---------- COATS OF ARMS (mirrors CoatOfArms.tsx) ---------- */
+const TINCT=[["#b32d2d","gules","red"],["#2a5fa0","azure","blue"],["#2f7d44","vert","green"],
+  ["#6a3d9a","purpure","purple"],["#1d2733","sable","near-black"],["#c9a227","or","gold"],
+  ["#c8ced6","argent","silver"],["#b5651d","tenné","orange-brown"]];
+const SHAPES=[
+  ["Heater","M3 3 H29 V20 Q29 32 16 37 Q3 32 3 20 Z"],
+  ["Iberian","M3 3 H29 V22 Q29 35 16 37 Q3 35 3 22 Z"],
+  ["French","M4 3 H28 V28 Q28 33 23 35 L16 37 L9 35 Q4 33 4 28 Z"],
+  ["Swiss","M5 3 Q3 3 3 6 V21 Q3 32 16 37 Q29 32 29 21 V6 Q29 3 27 3 Z"],
+  ["Cartouche","M16 2 Q29 2 29 19 Q29 36 16 37 Q3 36 3 19 Q3 2 16 2 Z"],
+];
+const HEATER=SHAPES[0][1];
+const INK="#0c1118";
+function starPoints(r,pts){pts=pts||5;let s="";for(let i=0;i<pts*2;i++){const rr=i%2===0?r:r*0.45;const a=-Math.PI/2+(i*Math.PI)/pts;s+=`${(Math.cos(a)*rr).toFixed(1)},${(Math.sin(a)*rr).toFixed(1)} `;}return s.trim();}
+function houseCharge(idx,fill){
+  switch(idx%16){
+    case 0:{let m="";for(let i=0;i<12;i++){const a=i*0.52;m+=`<polygon points="0,0 ${(Math.cos(a)*10).toFixed(1)},${(Math.sin(a)*10).toFixed(1)} ${(Math.cos(a+0.4)*10).toFixed(1)},${(Math.sin(a+0.4)*10).toFixed(1)}" fill="${fill}" transform="translate(0,-1)"/>`;}
+      return m+`<circle cx="0" cy="-1" r="6" fill="${fill}"/><circle cx="-2.2" cy="-2" r="0.9" fill="${INK}"/><circle cx="2.2" cy="-2" r="0.9" fill="${INK}"/><path d="M-2,1.5 Q0,3.5 2,1.5" stroke="${INK}" stroke-width="1" fill="none"/>`;}
+    case 1:return `<g fill="${fill}"><circle cx="0" cy="-7" r="2.4"/><polygon points="2,-7 6,-8 5,-6"/><path d="M0,-4 Q-2,2 -1,8 H1 Q2,2 0,-4 Z"/><path d="M-1,-3 Q-9,-6 -11,2 Q-6,0 -2,4 Z"/><path d="M1,-3 Q9,-6 11,2 Q6,0 2,4 Z"/></g>`;
+    case 2:return `<g fill="${fill}"><rect x="-6" y="-4" width="12" height="13"/><rect x="-6" y="-7" width="3" height="3"/><rect x="-1.5" y="-7" width="3" height="3"/><rect x="3" y="-7" width="3" height="3"/><path d="M-2,9 V2 A2,2 0 0 1 2,2 V9 Z" fill="${INK}"/></g>`;
+    case 3:return `<g fill="${fill}"><path d="M0 -10 C 2 -6 1 -4 0 -3 C -1 -4 -2 -6 0 -10 Z"/><path d="M0 -3 C 4 -8 8 -2 4 2 C 2 4 0 2 0 0 C 0 2 -2 4 -4 2 C -8 -2 -4 -8 0 -3 Z"/><path d="M-5 2 L5 2 L4 4 L-4 4 Z"/><path d="M-1 4 H1 V9 H-1 Z"/><path d="M-3 6 C -2 9 2 9 3 6 Z"/></g>`;
+    case 4:return `<g fill="${fill}"><path d="M-8,6 L-8,-3 L-4,1 L0,-6 L4,1 L8,-3 L8,6 Z"/><circle cx="-8" cy="-4" r="1.5"/><circle cx="0" cy="-7.5" r="1.7"/><circle cx="8" cy="-4" r="1.5"/><rect x="-8" y="6" width="16" height="2.4"/></g>`;
+    case 5:return `<polygon points="${starPoints(9,5)}" fill="${fill}"/>`;
+    case 6:{let s="";for(let i=0;i<8;i++)s+=`<polygon points="0,-11 1.6,-7 -1.6,-7" fill="${fill}" transform="rotate(${i*45})"/>`;return s+`<circle r="5" fill="${fill}"/>`;}
+    case 7:return `<path d="M-2,-8 A8,8 0 1 0 -2,8 A6,6 0 1 1 -2,-8 Z" fill="${fill}"/>`;
+    case 8:{let s="";for(let i=0;i<5;i++)s+=`<ellipse cx="0" cy="-5.5" rx="2.6" ry="3.4" fill="${fill}" transform="rotate(${i*72})"/>`;return s+`<circle r="2.2" fill="${fill}"/>`;}
+    case 9:{let s="";[-3,-1.2,0,1.2,3].forEach(dx=>{s+=`<line x1="${dx}" y1="9" x2="${dx*1.6}" y2="-9" stroke="${fill}" stroke-width="1.5"/>`;});[-3,-1.2,0,1.2,3].forEach(dx=>{s+=`<circle cx="${dx*1.6}" cy="-9" r="1.3" fill="${fill}"/>`;});return s+`<rect x="-5" y="2" width="10" height="2.4" fill="${fill}"/>`;}
+    case 10:return `<path d="M0,8 A9,8 0 0 1 -9,-1 Q0,-11 9,-1 A9,8 0 0 1 0,8 Z" fill="${fill}"/>`;
+    case 11:return `<g fill="${fill}"><polygon points="0,-10 1.4,-6 1.4,5 -1.4,5 -1.4,-6"/><rect x="-4.5" y="5" width="9" height="1.8"/><rect x="-1" y="6.8" width="2" height="3.5"/></g>`;
+    case 12:return `<g fill="${fill}"><circle cx="0" cy="-5" r="3.6"/><circle cx="0" cy="-5" r="1.5" fill="${INK}"/><rect x="-1" y="-2" width="2" height="11"/><rect x="1" y="6" width="3.5" height="2"/><rect x="1" y="9" width="3" height="2"/></g>`;
+    case 13:return `<g fill="none" stroke="${fill}" stroke-width="2"><circle cx="0" cy="-8" r="2.2"/><line x1="0" y1="-6" x2="0" y2="9"/><line x1="-5" y1="-1" x2="5" y2="-1"/><path d="M-7,4 Q-7,9 0,9 Q7,9 7,4"/></g>`;
+    case 14:return `<g fill="${fill}"><ellipse cx="0" cy="0" rx="9" ry="4.5"/><polygon points="7,-2 13,-3 12,2 7,3"/><polygon points="11,-1 14,-2 13,0"/><rect x="-6" y="3" width="1.8" height="6"/><rect x="3" y="3" width="1.8" height="6"/></g>`;
+    default:return `<g fill="${fill}"><circle cx="0" cy="-4" r="3.2"/><circle cx="-3.4" cy="1" r="3.2"/><circle cx="3.4" cy="1" r="3.2"/><rect x="-0.8" y="2" width="1.6" height="7"/></g>`;
+  }
+}
+const CHARGE_NAMES=["lion","eagle","tower","fleur-de-lis","crown","mullet","sun","crescent","rose","garb","escallop","sword","key","anchor","boar","trefoil"];
+function guildCharge(kind,c){
+  switch(kind%6){
+    case 0:return `<circle cx="16" cy="18" r="6" fill="${c}"/>`;
+    case 1:return `<path d="M16 11 l1.8 4 4.4.3 -3.4 2.8 1.1 4.3 -3.9-2.4 -3.9 2.4 1.1-4.3 -3.4-2.8 4.4-.3z" fill="${c}"/>`;
+    case 2:return `<path d="M16 10 L22 18 L16 26 L10 18 Z" fill="${c}"/>`;
+    case 3:return `<path d="M14 11 h4 v5 h5 v4 h-5 v5 h-4 v-5 h-5 v-4 h5 z" fill="${c}"/>`;
+    case 4:return `<path d="M7 24 L16 13 L25 24 L21 24 L16 18 L11 24 Z" fill="${c}"/>`;
+    default:return `<path d="M8 10 L12 10 L24 26 L20 26 Z" fill="${c}"/>`;
+  }
+}
+const GUILD_CHARGE_NAMES=["roundel","mullet","lozenge","cross","chevron","bend"];
+function ordinary(kind,c){
+  switch(kind%10){
+    case 0:return "";
+    case 1:return `<rect x="0" y="15" width="32" height="7" fill="${c}"/>`;
+    case 2:return `<rect x="13" y="0" width="7" height="38" fill="${c}"/>`;
+    case 3:return `<path d="M0 4 L4 0 L32 28 L32 36 Z" fill="${c}"/>`;
+    case 4:return `<path d="M0 38 L16 18 L32 38 L26 38 L16 26 L6 38 Z" fill="${c}"/>`;
+    case 5:return `<g fill="${c}"><rect x="13" y="0" width="6" height="38"/><rect x="0" y="14" width="32" height="6"/></g>`;
+    case 6:return `<g fill="${c}"><path d="M0 2 L3 0 L32 34 L29 37 Z"/><path d="M29 0 L32 2 L3 37 L0 34 Z"/></g>`;
+    case 7:return `<rect x="0" y="0" width="32" height="9" fill="${c}"/>`;
+    case 8:return `<path d="M0 0 L32 0 L16 29 Z" fill="${c}"/>`;
+    default:return `<path d="M3 3 H29 V20 Q29 32 16 37 Q3 32 3 20 Z M6 7 H26 V20 Q26 30 16 34 Q6 30 6 20 Z" fill="${c}" fill-rule="evenodd"/>`;
+  }
+}
+const ORD_NAMES=["(none)","fess","pale","bend","chevron","cross","saltire","chief","pile","bordure"];
+function division(kind,f2){
+  switch(kind){
+    case 1:return `<rect x="16" y="0" width="16" height="38" fill="${f2}"/>`;
+    case 2:return `<rect x="0" y="19" width="32" height="19" fill="${f2}"/>`;
+    case 3:return `<path d="M0 0 L32 0 L32 38 Z" fill="${f2}"/>`;
+    case 4:return `<g fill="${f2}"><rect x="16" y="0" width="16" height="19"/><rect x="0" y="19" width="16" height="19"/></g>`;
+    case 5:return `<g fill="${f2}"><path d="M16 19 L32 0 L32 19 Z"/><path d="M16 19 L0 38 L16 38 Z"/></g>`;
+    case 6:return `<rect x="0" y="0" width="32" height="9" fill="${f2}"/>`;
+    case 7:{let s=`<text fill="#c9a227" opacity="0.5" font-size="6" font-family="serif">`;[6,16,26].forEach(py=>{[4,13,22].forEach(px=>{s+=`<tspan x="${px}" y="${py}">✦</tspan>`;});});return s+`</text>`;}
+    case 8:return `<path d="M0 37 L16 20 L32 37 Z" fill="${f2}"/>`;
+    case 9:{let s=`<g fill="${f2}">`;[0,1,2,3].forEach(i=>s+=`<rect x="${i*8}" y="0" width="4" height="38"/>`);return s+`</g>`;}
+    case 10:{let s=`<g fill="${f2}">`;[0,1,2,3,4].forEach(i=>s+=`<rect x="0" y="${i*8}" width="32" height="4"/>`);return s+`</g>`;}
+    default:return "";
+  }
+}
+const DIV_NAMES=["plain","per pale","per fess","per bend","quarterly","per saltire","chief","semé","per chevron","paly","barry"];
+let SID=0;
+// Generic house arms builder with explicit parts (for the component gallery).
+function houseSVG(opts){
+  const id="s"+(SID++);
+  const shape=opts.shape!==undefined?SHAPES[opts.shape][1]:HEATER;
+  const field=opts.field||"#2a5fa0";
+  const f2=opts.field2||"#c9a227";
+  const metal=opts.metal||"#c9a227";
+  const tint=opts.tint||"#c9a227";
+  let fieldFill=field, defs="";
+  if(opts.fur==="ermine"){fieldFill=`url(#f${id})`;defs=`<pattern id="f${id}" width="10" height="12" patternUnits="userSpaceOnUse"><rect width="10" height="12" fill="#eef0f2"/><path d="M5,3 q-1.6,2 -0.6,4 h1.2 q1,-2 -0.6,-4 Z" fill="#1d2733"/><circle cx="3.4" cy="2.2" r="0.5" fill="#1d2733"/><circle cx="6.6" cy="2.2" r="0.5" fill="#1d2733"/><circle cx="5" cy="3.4" r="0.5" fill="#1d2733"/></pattern>`;}
+  if(opts.fur==="vair"){fieldFill=`url(#f${id})`;defs=`<pattern id="f${id}" width="8" height="10" patternUnits="userSpaceOnUse"><rect width="8" height="10" fill="#c8ced6"/><path d="M0,0 Q4,7 8,0 Z" fill="#2a5fa0"/><path d="M-4,5 Q0,12 4,5 Z" fill="#2a5fa0"/><path d="M4,5 Q8,12 12,5 Z" fill="#2a5fa0"/></pattern>`;}
+  const div=opts.division!==undefined?division(opts.division,f2):"";
+  const ord=opts.ordinary!==undefined?ordinary(opts.ordinary,metal):"";
+  const charge=opts.charge!==undefined?`<g transform="translate(16,19)">${houseCharge(opts.charge,tint)}</g>`:"";
+  const sz=opts.size||58;
+  return `<svg width="${sz}" height="${sz*38/32}" viewBox="0 0 32 38"><defs><clipPath id="c${id}"><path d="${shape}"/></clipPath>${defs}</defs>
+    <g clip-path="url(#c${id})"><rect x="0" y="0" width="32" height="38" fill="${fieldFill}"/>${div}${ord}${charge}</g>
+    <path d="${shape}" fill="none" stroke="#0c1118" stroke-width="1.8"/><path d="${shape}" fill="none" stroke="#c9a227" stroke-width="0.9" opacity="0.85"/></svg>`;
+}
+function guildSVG(opts){
+  const id="g"+(SID++);
+  const field=opts.field||"#b32d2d", f2=opts.field2||"#c9a227", tint=opts.tint||"#c9a227";
+  const dv=opts.division||0;
+  let div="";
+  if(dv===1)div=`<rect x="16" y="0" width="16" height="38" fill="${f2}"/>`;
+  if(dv===2)div=`<rect x="0" y="19" width="32" height="19" fill="${f2}"/>`;
+  if(dv===3)div=`<path d="M0 0 L32 0 L32 38 Z" fill="${f2}"/>`;
+  const sz=opts.size||58;
+  return `<svg width="${sz}" height="${sz*38/32}" viewBox="0 0 32 38"><defs><clipPath id="c${id}"><path d="${HEATER}"/></clipPath></defs>
+    <g clip-path="url(#c${id})"><rect x="0" y="0" width="32" height="38" fill="${field}"/>${div}${guildCharge(opts.charge||0,tint)}</g>
+    <path d="${HEATER}" fill="none" stroke="#0c1118" stroke-width="1.6"/><path d="${HEATER}" fill="none" stroke="#c9a227" stroke-width="0.6" opacity="0.6"/></svg>`;
+}
+function armsCard(mount,svg,name,sub){
+  const d=document.createElement("div");d.className="arms";
+  d.innerHTML=svg+`<div class="lbl">${name}${sub?`<small>${sub}</small>`:""}</div>`;
+  document.getElementById(mount).appendChild(d);
+}
+// Tinctures
+(function(){const m=document.getElementById("tinctures");
+  for(const [hex,her,plain] of TINCT){const c=document.createElement("div");c.className="card";
+    c.innerHTML=`<div class="sw" style="background:${hex}"></div><div><span class="nm">${her}</span> <span style="color:var(--muted)">(${plain})</span><div class="id">${hex}</div></div>`;m.appendChild(c);}})();
+// Shapes
+SHAPES.forEach((s,i)=>armsCard("shapes",houseSVG({shape:i,field:"#2a5fa0",charge:0}),s[0],"shape "+i));
+// Furs
+armsCard("furs",houseSVG({fur:"ermine",charge:4}),"Ermine","black tails on white");
+armsCard("furs",houseSVG({fur:"vair",charge:4}),"Vair","blue/silver bells");
+armsCard("furs",houseSVG({field:"#b32d2d",charge:4}),"(plain tincture)","~80% of fields");
+// Divisions
+DIV_NAMES.forEach((n,i)=>armsCard("divisions",houseSVG({field:"#2f7d44",field2:"#c9a227",division:i}),n,"division "+i));
+// Ordinaries
+ORD_NAMES.forEach((n,i)=>armsCard("ordinaries",houseSVG({field:"#6a3d9a",ordinary:i,metal:"#c9a227"}),n,"ordinary "+i));
+// Charges
+CHARGE_NAMES.forEach((n,i)=>armsCard("charges",houseSVG({field:"#1d2733",charge:i,tint:"#c9a227"}),n,"charge "+i));
+// Guild
+GUILD_CHARGE_NAMES.forEach((n,i)=>armsCard("guild",guildSVG({field:"#b32d2d",charge:i}),n,"guild charge "+i));
+["plain","per pale","per fess","per bend"].forEach((n,i)=>armsCard("guild",guildSVG({field:"#2a5fa0",field2:"#c9a227",division:i,charge:0}),n,"guild division "+i));
+
+/* ---------- KÖPPEN (mirrors koppen.rs + tile_image.rs + climate.ts) ---------- */
+const KOPPEN=[
+  [1,"Af","steamy equatorial rainforest",[0,0,255],"Tropical rainforest — hot &amp; wet all year, no dry season (driest month ≥60 mm)","Singapore"],
+  [2,"Am","monsoon-drenched tropics",[0,120,255],"Tropical monsoon — a short dry season, then a very wet monsoon","Mumbai"],
+  [3,"Aw","tropical savanna",[70,170,250],"Tropical wet–dry — pronounced dry (low-sun) season","Bangkok"],
+  [23,"As","dry-season savanna",[110,200,230],"Tropical savanna, dry-summer variant","Khartoum"],
+  [4,"BWh","scorching hot desert",[255,0,0],"Hot desert — arid, mean temp ≥18 °C","Cairo"],
+  [5,"BWk","cold high desert",[255,150,150],"Cold desert — arid with cold winters","Kashgar"],
+  [6,"BSh","hot semi-arid steppe",[245,165,0],"Hot steppe — semi-arid grassland, hot","Baghdad"],
+  [7,"BSk","cool grassland steppe",[255,220,100],"Cold steppe — semi-arid, cool","Astana"],
+  [8,"Csa","sun-baked Mediterranean",[255,255,0],"Mediterranean, hot summer — dry hot summer, mild wet winter","Athens"],
+  [9,"Csb","mild Mediterranean",[200,200,0],"Mediterranean, warm summer","Lisbon"],
+  [10,"Csc","cool Mediterranean",[150,150,0],"Mediterranean, cool short summer","Santiago"],
+  [11,"Cfa","humid subtropical",[200,255,80],"Humid subtropical — hot humid summers, no dry season","Shanghai"],
+  [12,"Cfb","temperate oceanic",[100,200,100],"Oceanic — mild, wet year-round","London"],
+  [13,"Cfc","cool subpolar oceanic",[50,150,50],"Subpolar oceanic — cool, short summers","Reykjavík"],
+  [24,"Cwa","monsoon humid-subtropical",[170,235,120],"Dry-winter humid subtropical (summer monsoon)","Guangzhou"],
+  [25,"Cwb","mild subtropical highland",[120,205,120],"Dry-winter subtropical highland","Kunming"],
+  [26,"Cwc","cold highland",[80,165,95],"Dry-winter cold subtropical highland","Lhasa"],
+  [14,"Dfa","warm humid-continental",[0,255,150],"Hot-summer humid continental","Chicago"],
+  [15,"Dfb","cold humid-continental",[55,200,255],"Warm-summer humid continental","Moscow"],
+  [16,"Dfc","harsh subarctic",[0,125,125],"Subarctic (taiga)","Yakutsk"],
+  [17,"Dfd","bitter subarctic",[0,70,95],"Extremely cold subarctic","Verkhoyansk"],
+  [18,"Dsa","dry-summer continental",[255,0,255],"Mediterranean-influenced hot continental","Tehran"],
+  [19,"Dsb","dry-summer continental",[200,0,200],"Mediterranean-influenced warm continental","Erzurum"],
+  [20,"Dsc","dry-summer subarctic",[150,50,150],"Mediterranean-influenced subarctic","Ulaanbaatar"],
+  [31,"Dsd","dry-summer subarctic",[150,50,150],"Dry-summer extremely cold subarctic","the cold steppe"],
+  [27,"Dwa","dry-winter continental",[150,130,225],"Dry-winter hot-summer continental","Beijing"],
+  [28,"Dwb","dry-winter continental",[120,100,205],"Dry-winter warm-summer continental","Harbin"],
+  [29,"Dwc","dry-winter subarctic",[95,85,170],"Dry-winter subarctic","Chita"],
+  [30,"Dwd","dry-winter subarctic",[70,60,130],"Dry-winter extremely cold subarctic","Oymyakon"],
+  [21,"ET","frozen tundra",[200,205,210],"Tundra — warmest month 0–10 °C","Murmansk"],
+  [22,"EF","polar ice",[240,246,252],"Ice cap — warmest month below 0 °C","an ice-bound shore"],
+  [32,"H","alpine highland",[185,165,185],"Highland / alpine — high elevation, latitude-adjusted treeline","an alpine vale"],
+];
+(function(){
+  const tb=document.getElementById("koppen-mount");
+  for(const [code,letters,plain,rgb,expl,an] of KOPPEN){
+    const hex=`rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+    const tr=document.createElement("tr");
+    tr.innerHTML=`<td><span class="kc" style="background:${hex}"></span></td>
+      <td><span class="nm">${letters}</span></td><td>${plain}</td><td>${expl}</td>
+      <td style="color:var(--muted)">${an}</td>`;
+    tb.appendChild(tr);
+  }
+})();
+
+/* ---------- TRADE ROUTE / CONNECTION LINES (mirrors OverlayManager.ts) ---------- */
+function lineSample(color,dashed,width,alpha){
+  width=width||2.4;
+  return `<svg width="150" height="20" viewBox="0 0 150 20"><line x1="4" y1="10" x2="146" y2="10"
+    stroke="${color}" stroke-width="${width}" ${dashed?'stroke-dasharray="6 5"':''} ${alpha?`opacity="${alpha}"`:''} stroke-linecap="round"/></svg>`;
+}
+function lineRow(mount,color,name,id,desc,opt){
+  opt=opt||{};
+  const d=document.createElement("div");d.className="line-row";
+  d.innerHTML=`<div class="line-swatch">${lineSample(color,opt.dashed,opt.width,opt.alpha)}</div>
+    <div class="line-meta"><span class="nm">${name}</span><span class="id">${id}</span>
+    <div style="color:var(--muted);font-size:12.5px;margin-top:2px">${desc}</div></div>`;
+  document.getElementById(mount).appendChild(d);
+}
+lineRow("routes-net","#7fd0d8","Maritime route (sea)","tradeSea · kind 1","Open-water sea lane between coastal cities; limited by trade reach / max open-water crossing.",{width:2.2});
+lineRow("routes-net","#9fe07a","River route (inland)","tradeRiver · kind 2","Least-cost path that follows navigable rivers inland.",{width:2.2});
+lineRow("routes-net","#caa15a","Overland route (land)","tradeLand · else","Overland caravan road over passes / coast-hugging terrain.",{width:2.2});
+lineRow("routes-net","#caa15a","Minor route","(minor flag)","Any of the above at low volume — drawn thinner.",{width:1});
+
+lineRow("routes-trunk","#e0c060","Major trade trunk","tradeTrunk","Bundled commodity trunk (amber); each coarse edge's width ∝ total goods volume it carries.",{width:4.5});
+lineRow("routes-trunk","#b8a878","Minor trade trunk","tradeTrunkMinor","Low-volume bundled trunk (muted amber).",{width:1.6});
+lineRow("routes-trunk","#4fd0c0","Dynamic trade flow","dynamicFlow","DLC 3.5 live yearly-averaged realized flow per city pair (teal).",{width:3.2});
+lineRow("routes-trunk","#5fc8a8","Econ trade corridor","corridor","Live economy trade corridor (sea-green), with a #7fe0c0 arrowhead for direction.",{width:2.6});
+
+lineRow("routes-merchant","#5fd0ff","Merchant route — inbound","merchantIn","A house/guild's inbound leg (cyan) — goods flowing to the focused holder.",{width:2.4});
+lineRow("routes-merchant","#ffce5f","Merchant route — outbound","merchantOut","Outbound leg (gold) — goods the holder ships out.",{width:2.4});
+lineRow("routes-merchant","#4fc06a","Manufactory line","manufactory","Holding line to a house/guild manufactory (green).",{width:2});
+lineRow("routes-merchant","#ffe14a","Estate line","estate","Holding line to an estate the holder owns (shiny yellow).",{width:2});
+lineRow("routes-merchant","#c08cff","Colony / supply lane","settlementColony · colonyLane","Settlement colony pin + colony↔metropolis monopoly/supply lane (violet).",{width:2.2,dashed:true});
+lineRow("routes-merchant","#fff2b0","Futures lane","term-tinted","A signed futures contract lane; colour warms with term length (gold=long).",{width:2.6});
+
+lineRow("routes-water","rgb(120,190,225)","River (ordinary)","RIVER minor","Ordinary stream — light blue.",{width:1.6});
+lineRow("routes-water","rgb(34,96,165)","River (major trunk)","RIVER major","A river grown into a major trunk — deeper blue.",{width:3});
+lineRow("routes-water","rgba(51,153,221,0.7)","Lake","LAKE_COLOR","Inland lake body fill.",{width:6});
+lineRow("routes-water","#ee5533","Warm current","WARM_CURRENT","Warm ocean current streamline (red-orange).",{width:2.4});
+lineRow("routes-water","#3399ee","Cold current","COLD_CURRENT","Cold ocean current streamline (blue).",{width:2.4});
+lineRow("routes-water","#9bb0c0","Neutral current","NEUTRAL_CURRENT","Neutral / weak current (grey).",{width:2});
+
+/* ---------- BANKS / OFFICES / BAILOS (mirrors tick.rs) ---------- */
+const HOLDERS=[
+  ["Private House","A merchant family with a named, ageing head and heirs. Competes for trade, holds monopolies, feuds with rivals. Goes bankrupt if insolvent for a full year.","#c9a227"],
+  ["Civic Merchant Guild","Acts in its home city's interest (fills the city's needs, secures supply), funded by a civic subsidy, and never goes bankrupt. Same machinery (fleet, offices, trade) otherwise.","#5fd0ff"],
+];
+(function(){const m=document.getElementById("holderkinds");
+  for(const [n,d,c] of HOLDERS){const el=document.createElement("div");el.className="card";
+    el.innerHTML=`<div class="sw" style="background:${c}"></div><div><span class="nm">${n}</span>
+    <div style="color:var(--muted);font-size:12.5px;margin-top:2px">${d}</div></div>`;m.appendChild(el);}})();
+
+const ARCH=[
+  ["0","Specialist traders","+25% profit on specialty goods"],
+  ["1","Shipping dynasty","safer voyages · cheaper ships · longer reach"],
+  ["2","Merchant bankers","trades on credit (×1.6 reach) · wealth earns interest"],
+  ["3","Political house","more power · wins city charters"],
+];
+(function(){const tb=document.getElementById("arch-mount");
+  for(const [id,l,p] of ARCH){const tr=document.createElement("tr");
+    tr.innerHTML=`<td class="id">ARCH ${id}</td><td class="nm">${l}</td><td style="color:var(--muted)">${p}</td>`;tb.appendChild(tr);}})();
+
+/* Finance map markers — mirror OverlayManager.ts draw code (house colour = azure). */
+const HOUSE_COL="#2a5fa0";
+function markerCanvas(draw,px){
+  px=px||58;const dpr=window.devicePixelRatio||1;
+  const cv=document.createElement("canvas");cv.width=px*dpr;cv.height=px*dpr;
+  cv.style.width=px+"px";cv.style.height=px+"px";
+  const ctx=cv.getContext("2d");ctx.scale(dpr,dpr);
+  // subtle map-ish backdrop so light markers read
+  ctx.fillStyle="#17324a";ctx.fillRect(0,0,px,px);
+  draw(ctx,px/2,px/2,px);
+  return cv;
+}
+function fvCard(mount,cv,name,sub){
+  const d=document.createElement("div");d.className="arms";
+  d.appendChild(cv);
+  const l=document.createElement("div");l.className="lbl";l.innerHTML=`${name}${sub?`<small>${sub}</small>`:""}`;
+  d.appendChild(l);document.getElementById(mount).appendChild(d);
+}
+(function(){
+  const M="finance-visuals";
+  // Bank seat: dark disc + owning-house colour ring + 🏦
+  fvCard(M,markerCanvas((c,x,y)=>{const r=13;c.globalAlpha=.95;c.fillStyle="#1a2230";c.beginPath();c.arc(x,y,r,0,7);c.fill();
+    c.strokeStyle="#e0c452";c.lineWidth=2.4;c.beginPath();c.arc(x,y,r,0,7);c.stroke();c.globalAlpha=1;
+    c.font="16px sans-serif";c.textAlign="center";c.textBaseline="middle";c.fillText("🏦",x,y+1);}),
+    "Bank seat","dark disc · house-colour ring · 🏦");
+  // Coin: gold radial disc + issuer arms (✦ fallback) — CoinIcon.tsx
+  const coin=document.createElement("div");
+  coin.style.cssText="display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;background:radial-gradient(circle at 38% 32%,#f0d061 0%,#f0d061 45%,#9c7a16 100%);border:1px solid #9c7a16;box-shadow:inset 0 0 3px rgba(0,0,0,.5),0 1px 3px rgba(0,0,0,.4)";
+  coin.innerHTML=houseSVG({shape:0,field:"#b32d2d",charge:0,size:26});
+  const coinWrap=document.createElement("div");coinWrap.className="arms";coinWrap.appendChild(coin);
+  coinWrap.insertAdjacentHTML("beforeend",`<div class="lbl" style="margin-top:8px">Minted coin<small>gold disc · issuer's arms embossed</small></div>`);
+  document.getElementById(M).appendChild(coinWrap);
+  // Coin-usage tints (mint / heavy / light / reserve-reach)
+  fvCard(M,markerCanvas((c,x,y)=>{
+    c.fillStyle="#37a05a";c.globalAlpha=.9;c.lineWidth=1.6;c.setLineDash([3,2]);c.beginPath();c.arc(x-11,y,9,0,7);c.stroke();c.setLineDash([]);
+    c.globalAlpha=1;c.fillStyle="#f0d77a";c.beginPath();c.arc(x-11,y,6,0,7);c.fill();c.strokeStyle="#fff3c0";c.lineWidth=1;c.beginPath();c.arc(x-11,y,6,0,7);c.stroke();
+    c.globalAlpha=1;c.fillStyle="#c9a227";c.beginPath();c.arc(x+6,y-6,5,0,7);c.fill();
+    c.globalAlpha=.7;c.fillStyle="#7a6320";c.beginPath();c.arc(x+10,y+8,4,0,7);c.fill();c.globalAlpha=1;}),
+    "Coin usage","mint (bright, green reserve ring) · heavy · light");
+  // Office: small square in house colour
+  fvCard(M,markerCanvas((c,x,y)=>{const s=8;c.fillStyle=HOUSE_COL;c.strokeStyle="rgba(8,16,28,.95)";c.lineWidth=1.4;
+    c.fillRect(x-s,y-s,s*2,s*2);c.strokeRect(x-s,y-s,s*2,s*2);}),
+    "Office","small square · house colour");
+  // Bailo: circle + white triangle
+  fvCard(M,markerCanvas((c,x,y)=>{const r=12;c.fillStyle=HOUSE_COL;c.strokeStyle="rgba(8,16,28,.95)";c.lineWidth=1.6;
+    c.beginPath();c.arc(x,y,r,0,7);c.fill();c.stroke();const t=r*.72;c.fillStyle="#fff";
+    c.beginPath();c.moveTo(x,y-t);c.lineTo(x+t*.87,y+t*.5);c.lineTo(x-t*.87,y+t*.5);c.closePath();c.fill();}),
+    "Bailo (HQ)","circle + white triangle");
+  // Seat (main city): large circle + white pip
+  fvCard(M,markerCanvas((c,x,y)=>{const r=14;c.fillStyle=HOUSE_COL;c.strokeStyle="rgba(8,16,28,.95)";c.lineWidth=1.8;
+    c.beginPath();c.arc(x,y,r,0,7);c.fill();c.stroke();c.fillStyle="#fff";c.beginPath();c.arc(x,y,r*.4,0,7);c.fill();}),
+    "Seat / capital","large circle + white pip");
+  // House trade outpost: black square framed in owner colour
+  fvCard(M,markerCanvas((c,x,y)=>{const s=9;c.globalAlpha=.95;c.fillStyle="#0a0a0a";c.fillRect(x-s,y-s,s*2,s*2);
+    c.strokeStyle=HOUSE_COL;c.lineWidth=1.6;c.strokeRect(x-s,y-s,s*2,s*2);c.globalAlpha=1;}),
+    "Trade outpost","black square · owner-colour frame");
+  // Settlement colony: violet circle
+  fvCard(M,markerCanvas((c,x,y)=>{c.globalAlpha=.9;c.fillStyle="#c08cff";c.beginPath();c.arc(x,y,11,0,7);c.fill();
+    c.strokeStyle="rgba(0,0,0,.6)";c.lineWidth=1;c.stroke();c.globalAlpha=1;}),
+    "Settlement colony","violet circle · grows with stage");
+})();
+// Role glyphs
+(function(){
+  const roles=[["👑","seat","#f4c430"],["🏛️","bailo","#e0863a"],["🏭","owns works","#cfa0e0"],
+    ["◆","dominates","#9fd0c0"],["◇","office","#a8c0d8"],["🏢","offices list","#a8c0d8"],
+    ["🏦","owns a bank","#e0c452"],["GUILD","civic guild","#7fd0c0"]];
+  const m=document.getElementById("role-glyphs");
+  for(const [g,l,col] of roles){const d=document.createElement("div");d.className="card";d.style.minWidth="130px";
+    d.innerHTML=`<span style="font-size:18px;color:${col};min-width:26px;text-align:center">${g}</span>
+      <div><span class="nm">${l}</span></div>`;m.appendChild(d);}
+})();
+
+const TIERS=[
+  ["1","Trade tie","An informal, decaying tally of recent volume through a hub (<code>trade_at</code>). No cost, no footing — just presence. Sustained volume is what earns an office.",
+    [["Opens office at","volume ≥ 4.0 (OFFICE_OPEN_VOLUME)"],["Abandoned below","volume < 0.5 (OFFICE_CLOSE_VOLUME, hysteresis)"]]],
+  ["2","Office","A foreign foothold: −5% on goods bought there, and the house can originate trade from it. Offices <em>chain</em> the house's reach (each is a relay). Guarantees a standing influence floor.",
+    [["Buy discount","−5% (OFFICE_BUY_DISCOUNT)"],["Open cost","4.0 base × host-city importance (OFFICE_COST_BASE)"],["Influence floor","0.18 (OFFICE_INFLUENCE_FLOOR)"]]],
+  ["3","Leased office","A durable base backing a futures contract: never auto-closes before its term, pays the city monthly rent. The chain of leased offices is the house's standing trade NETWORK.",
+    [["Lease term","10 years (OFFICE_LEASE_YEARS)"],["Upfront fee","6.0 × city size (OFFICE_LEASE_FEE)"],["Monthly rent","0.05 × city size (OFFICE_LEASE_RENT)"]]],
+  ["4","Bailo (governing HQ)","An office raised to a governing headquarters: the house sits that city's council and runs a near-toll-free concession lane home. Soft-capped by wealth/power. The home seat is always a Bailo-equivalent capital.",
+    [["Min influence","0.70 (BAILO_MIN_INFLUENCE)"],["Min wealth","400 (BAILO_MIN_WEALTH)"],["Concession toll","0.10 × normal tax (BAILO_CONCESSION_TOLL)"],["Upkeep","0.6/mo × city size (BAILO_UPKEEP)"],["Soft cap","floor(power×3) + wealth/30 000"]]],
+];
+(function(){const mount=document.getElementById("tiers");
+  for(const [step,name,desc,kv] of TIERS){
+    const d=document.createElement("div");d.className="tier";
+    let rows=kv.map(([k,v])=>`<div class="k">${k}</div><div>${v}</div>`).join("");
+    d.innerHTML=`<h4><span class="step">${step}</span>${name}</h4>
+      <p style="margin:6px 0;color:var(--muted)">${desc}</p><div class="kv">${rows}</div>`;
+    mount.appendChild(d);
+  }})();
+</script>
+</body>
+</html>
