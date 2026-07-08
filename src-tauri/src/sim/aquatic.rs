@@ -314,7 +314,7 @@ pub fn river_story(f: &RiverStoryFacts) -> String {
         s.push_str(&r.pick(&[
             " In scale and character it recalls {CP}.",
             " Travellers might liken it to {CP}.",
-            " It is, in its way, a {CP} of this world.",
+            " In its way it is a cousin to {CP}.",
         ]).replace("{CP}", f.counterpart));
     }
 
@@ -622,7 +622,7 @@ pub fn lake_story(f: &LakeStoryFacts) -> String {
     if r.chance(85) {
         s.push_str(&r.pick(&[
             " In kind it recalls {A}.",
-            " It is, in miniature, a {A} of this world.",
+            " In its way it is a cousin to {A}.",
             " Naturalists would name {A} as its closest likeness.",
         ]).replace("{A}", f.analog));
     }
