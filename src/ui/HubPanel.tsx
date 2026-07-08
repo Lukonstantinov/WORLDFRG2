@@ -132,6 +132,14 @@ export function HubPanel() {
     const h = s.snapshot.hubs.find((x) => x.id === selectedHub);
     return !!h && (h.build_stage ?? 0) > 0;
   });
+  // A DEPENDENT colony (1) or house outpost (2) has its own Colonial Office window —
+  // don't also synthesize a city panel for it. Finished satellites (3) and free
+  // towns (0) get the normal city panel via the live-detail fallback below.
+  const selKind = useCampaignStore((s) => {
+    if (selectedHub == null || !s.snapshot?.active) return -1;
+    const h = s.snapshot.hubs.find((x) => x.id === selectedHub);
+    return h ? h.colony_kind : -1;
+  });
 
   const [tab, setTab] = useState<Tab>("summary");
   const [tradeView, setTradeView] = useState<"market" | "flows">("market");
@@ -189,8 +197,24 @@ export function HubPanel() {
 
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.settlement);
   if (selectedHub === null || !economy || isConstruction) return null;
-  const hub = economy.hubs.find((h) => h.id === selectedHub);
+  const econHub = economy.hubs.find((h) => h.id === selectedHub);
+  // In-campaign-founded hubs (swarm towns, finished satellites, independent
+  // ex-colonies) exist ONLY in the live campaign — never in the frozen worldgen
+  // economy snapshot. Without a fallback the panel used to `return null`, so a click
+  // on such a town opened nothing and it felt "unclickable". Synthesize a minimal
+  // EconHub from the live detail so the normal city window still opens (its
+  // City/Government/People tabs, driven by `detail`, carry the real data).
+  const starsForPop = (pop: number): number =>
+    pop >= 35_000 ? 5 : pop >= 8_000 ? 4 : pop >= 1_500 ? 3 : pop >= 350 ? 2 : 1;
+  const hub: EconHub | undefined = econHub ?? ((detail && selKind !== 1 && selKind !== 2) ? {
+    id: detail.id, x: detail.x, y: detail.y, name: detail.name, power: 0,
+    stars: starsForPop(detail.population),
+    wealth: detail.trade_wealth + detail.grain_wealth, population: detail.population,
+    coastal: detail.coastal, koppen: detail.koppen, sea_access: detail.coastal,
+    produces: [], receives: [],
+  } : undefined);
   if (!hub) return null;
+  const inEconomy = !!econHub; // false ⇒ synthesized in-campaign hub (no worldgen rank)
 
   const iconFor = (id: string) => goodMeta(id).icon;
   const labelFor = (id: string) => goodMeta(id).name;
@@ -258,7 +282,7 @@ export function HubPanel() {
           <div style={{ color: "#8aa0c0", fontSize: 10 }}>
             <span style={{ color: "#ffd24a" }}>{"★".repeat(stars)}</span>
             {`  ${cmp}`}
-            <span style={{ color: "#6a86a6" }}>{`  ·  wealth rank #${wealthRank}/${economy.hubs.length}`}</span>
+            {inEconomy && <span style={{ color: "#6a86a6" }}>{`  ·  wealth rank #${wealthRank}/${economy.hubs.length}`}</span>}
             {hub.sea_access === false && <span style={{ color: "#6a86a6" }}>{"  ·  lake/inland"}</span>}
           </div>
           {detail?.patron && (

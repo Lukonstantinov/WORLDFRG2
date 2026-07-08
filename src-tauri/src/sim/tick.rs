@@ -236,6 +236,13 @@ const SATELLITE_MAX_PER_METRO: u32 = 3;       // a metropolis can raise a few
 const SATELLITE_WORKSHOP_POP: f32 = 60_000.0; // this large → it needs a workshop town
 const SATELLITE_INDEP_YEARS: u32 = 40;        // a mature satellite may go independent
 const SATELLITE_INDEP_POP: f32 = 8_000.0;     // …once it has grown into a real city
+// ── Absorption: rather than let a tiny, failing town die with its trade halted, a
+// big healthy neighbour ADOPTS it as a satellite — relocating settlers, binding its
+// trade through the metropolis and feeding it via the satellite lifeline. (User rule.)
+const ABSORB_POP_MAX: f32 = 250.0;            // a town this small is a rescue candidate
+const ABSORB_METRO_POP: f32 = 12_000.0;       // its rescuer must be a substantial city
+const ABSORB_MIN_AGE_YEARS: u32 = 8;          // give a young swarm town time to find its feet
+const ABSORB_AID_FRAC: f32 = 0.03;            // settlers the metropolis relocates to shore it up
 // ── Satellite CONSTRUCTION (10-year build with decay). See the plan doc. ──
 const SAT_BUILD_CONVOYS: u8 = 3;              // dedicated caravans+ships per project
 pub(crate) const SAT_STAGE_MONTHS: f32 = 24.0; // 5 stages × 24 mo = 120 mo ≈ 10 years
@@ -297,16 +304,20 @@ const ECON_MIG_FRAC: f32 = 0.02;
 /// People migrate CITY-TO-CITY to the NEAREST better city within this range — not in
 /// one global A→Z leap. Over years the drift chains A→B→C toward the best regions.
 const MIGRATION_MAX_KM: f32 = 3000.0;
-/// Minority quarters blend into the majority at this fraction per year.
-const MINORITY_ASSIM_RATE: f32 = 0.04;
+/// Minority quarters blend into the majority at this fraction per year. Kept gentle so
+/// immigrant quarters actually PERSIST long enough to read on the map (was 0.04, which
+/// erased a slow trickle of newcomers almost as fast as it arrived — cities looked
+/// permanently monocultural).
+const MINORITY_ASSIM_RATE: f32 = 0.02;
 /// ── Diaspora: travel-prone MERCHANT cultures (Hansa-in-the-Baltic / trading
-/// minority) spread as minority quarters along trade ties. ~20% of cultures are
-/// high-mobility (mobility ≥ gate); they send a trickle to a trade partner yearly.
+/// minority) spread as minority quarters along trade ties. Roughly a third of cultures
+/// are mobile enough (mobility ≥ gate); they send settlers to trade partners each year,
+/// so a real patchwork of minority quarters grows across the trade network over decades.
 const DIASPORA_MIN_POP: f32 = 800.0;      // a city needs some people to send a diaspora
-const DIASPORA_SEND_FRAC: f32 = 0.006;    // fraction of pop that emigrates per wave
-const DIASPORA_MOBILITY_GATE: f32 = 0.6;  // only cultures at/above this mobility spread
-const DIASPORA_MAX_MINORITY: f32 = 0.35;  // a diaspora tops out at this share of a host
-const DIASPORA_MAX_PER_YEAR: u32 = 8;     // trickle so the map stays legible
+const DIASPORA_SEND_FRAC: f32 = 0.01;     // fraction of pop that emigrates per wave
+const DIASPORA_MOBILITY_GATE: f32 = 0.5;  // only cultures at/above this mobility spread
+const DIASPORA_MAX_MINORITY: f32 = 0.45;  // a diaspora tops out at this share of a host
+const DIASPORA_MAX_PER_YEAR: u32 = 20;    // a visible flow, still legible
 /// ── Ruin REVIVAL — a long-dead site is resettled once its region recovers.
 const RESETTLE_COOLDOWN_YEARS: u32 = 15; // a ruin must lie empty this long first
 const RESETTLE_REACH_FRAC: f32 = 0.12;   // a thriving patron must be within this of world width
@@ -6800,7 +6811,13 @@ impl CampaignSim {
             // buffers brief breaks. Monthly, the metropolis re-picks the source and
             // INVESTS in more ships when the colony runs short (steady supply). Grain
             // physically leaves the source, so the source must genuinely be sufficient.
-            if self.hubs[h].colony_kind == 1 && !self.hubs[h].autonomous {
+            // A metropolis-BOUND satellite (built or absorbed, kind 3, done building) is
+            // fed by the SAME lifeline: its mother city keeps it supplied. This is what
+            // lets a big city genuinely REVIVE a tiny town it has adopted — and stops a
+            // finished satellite whose own farms fall short from quietly starving.
+            let bound_satellite = self.hubs[h].colony_kind == 3
+                && self.hubs[h].build_stage == 0 && self.hubs[h].founder_hub >= 0;
+            if (self.hubs[h].colony_kind == 1 && !self.hubs[h].autonomous) || bound_satellite {
                 self.hubs[h].reserve_cap = 365.0;
                 let deficit = (food_need - food_prod).max(0.0); // daily grain shortfall
                 // Monthly: re-designate the food source + top up the dedicated fleet.
@@ -6989,6 +7006,7 @@ impl CampaignSim {
                 self.maybe_found_food_colony(); // Greek-Crimea grain colony (food stress)
                 self.colony_pass(); // graduation · dividends · autonomy
                 self.maybe_found_satellite(expansion_ok); // port/granary/workshop suburbs
+                self.maybe_absorb_dying_city();            // big city adopts a failing neighbour
                 self.maybe_found_caravanserai(expansion_ok); // waystations on long land ties
                 self.satellite_independence_pass();        // mature satellites → free cities
             }
@@ -8457,6 +8475,91 @@ impl CampaignSim {
             self.total_foundings += 1;
             self.routes_dirty = true;
             return; // one satellite per call
+        }
+    }
+
+    /// Yearly. ABSORPTION: a tiny, failing FREE town beside a big healthy city is taken
+    /// under that city's wing as a SATELLITE instead of being left to die with its trade
+    /// halted. The metropolis relocates settlers to shore it up, ships it a founding
+    /// grant of food, and binds its trade — so it is fed by the satellite lifeline and
+    /// can grow back. Its newcomers seed a quarter of the metropolis's people (cultural
+    /// mixing). One absorption per call. (User: "large nearby cities can integrate those
+    /// dying cities and become satellites of the bigger ones.")
+    fn maybe_absorb_dying_city(&mut self) {
+        let tick = self.tick;
+        let ng = self.goods.len();
+        let n = self.hubs.len();
+        let reach = (SATELLITE_MAX_KM * self.world_w / EARTH_EQUATOR_KM).max(2.0);
+        // Current satellite dependents per metropolis, precomputed once (keeps this an
+        // O(n²) scan, not O(n³) if the map has many tiny towns and no eligible rescuer).
+        let mut sat_deps = vec![0u32; n];
+        for d in &self.hubs {
+            if !d.abandoned && d.colony_kind == 3 && d.founder_hub >= 0 && (d.founder_hub as usize) < n {
+                sat_deps[d.founder_hub as usize] += 1;
+            }
+        }
+        for h in 0..self.hubs.len() {
+            let c = &self.hubs[h];
+            // A genuinely FREE, tiny, struggling town — not an estate, colony, satellite,
+            // ruin, or a brand-new swarm town still finding its feet.
+            if c.is_estate || c.abandoned || c.colony_kind != 0 { continue; }
+            if c.population < 1.0 || c.population > ABSORB_POP_MAX { continue; }
+            if tick.saturating_sub(c.founded_tick) < ABSORB_MIN_AGE_YEARS * TICKS_PER_YEAR { continue; }
+            // It must actually be in trouble (poor/hungry/shrinking) — a happy hamlet is
+            // left to grow on its own.
+            let struggling = c.sent_prosperity < 0.45 || c.starving > 0.08 || c.decline_years > 2.0;
+            if !struggling { continue; }
+            let (cx, cy, comp) = (c.x, c.y, c.component);
+            // Nearest big, healthy, free city within a day's reach in the same market.
+            let mut best = (usize::MAX, f32::MAX);
+            for m in 0..self.hubs.len() {
+                if m == h { continue; }
+                let mm = &self.hubs[m];
+                if mm.is_estate || mm.abandoned || mm.colony_kind != 0 { continue; }
+                if mm.component != comp { continue; }
+                if mm.population < ABSORB_METRO_POP || mm.starving > 0.3 { continue; }
+                // Don't let one metropolis hoard an unbounded number of dependents.
+                if sat_deps[m] >= SATELLITE_MAX_PER_METRO { continue; }
+                let mut dx = (mm.x - cx).abs();
+                if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
+                let dy = mm.y - cy;
+                let d2 = dx * dx + dy * dy;
+                if d2 > reach * reach { continue; }
+                if d2 < best.1 { best = (m, d2); }
+            }
+            let Some(m) = (best.0 != usize::MAX).then_some(best.0) else { continue; };
+            // Adopt it. Relocate a wave of settlers from the metropolis…
+            let aid = (self.hubs[m].population * ABSORB_AID_FRAC).clamp(150.0, 1500.0);
+            self.hubs[m].population = (self.hubs[m].population - aid)
+                .max(self.hubs[m].founding_pop * 0.5);
+            self.hubs[h].population += aid;
+            // …and ship a founding grant of food so it starts fed, not starving.
+            for g in 0..ng {
+                if !self.goods[g].food { continue; }
+                let grant = (self.hubs[m].stock[g] * 0.10).max(0.0);
+                self.hubs[m].stock[g] -= grant;
+                self.hubs[h].stock[g] += grant;
+            }
+            self.hubs[h].colony_kind = 3;              // a metropolis-BOUND satellite now
+            self.hubs[h].founder_hub = m as i32;
+            self.hubs[h].colony_founded_tick = tick;
+            self.hubs[h].colony_stage = 0;
+            self.hubs[h].build_stage = 0;
+            self.hubs[h].decline_years = 0.0;
+            self.hubs[h].reserve_food = 60.0;
+            self.hubs[h].reserve_cap = 365.0;
+            // Judge it as a fresh small satellite (so the abandon floor doesn't drag its
+            // old, larger founding size behind it).
+            self.hubs[h].founding_pop = self.hubs[h].population.max(1.0);
+            // The metropolis's people settle in as a minority quarter (culture mixing).
+            let mc = self.hub_culture.get(m).cloned().unwrap_or_default();
+            self.record_migration_culture(h, m, aid);
+            self.emit_migration_route(m, h, &mc, aid);
+            self.routes_dirty = true;
+            let (mn, cn) = (self.hubs[m].name.clone(), self.hubs[h].name.clone());
+            self.journal.push(JournalEntry { tick, kind: "colony".into(), hub: h as i32, good: -1,
+                value: aid, text: format!("{} takes the failing town of {} under its wing as a satellite", mn, cn) });
+            return; // one absorption per call
         }
     }
 
@@ -11294,6 +11397,77 @@ mod tests {
         };
         s.rebuild_routes();
         s
+    }
+
+    /// Migration must MIX cultures: when people of one people move (over a trade tie)
+    /// into a city of a DIFFERENT people, a minority quarter of the newcomers' culture
+    /// must appear there. Guards the "every city stays monocultural" regression.
+    #[test]
+    fn migration_seeds_foreign_minority_quarters() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("fish", 0, 0, 1.2, 0.7, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let ng = goods.len();
+        // Four adjacent cities in one connected market; two peoples split down the middle.
+        let mut hubs = Vec::new();
+        for i in 0..4u32 {
+            let prod: Vec<f32> = (0..ng).map(|g| if g == 0 { 6000.0 } else { 800.0 }).collect();
+            hubs.push(hub(i, (i as f32) * 3.0, 0.0, 5000.0, prod, 0));
+        }
+        let mut s = sim(hubs, goods);
+        s.rebuild_routes();
+        // Assign cultures: hubs 0,1 = "Aiora"; hubs 2,3 = "Belgar". (ensure_hub_cultures
+        // won't overwrite these non-empty entries.)
+        s.hub_culture = vec!["Aiora".into(), "Aiora".into(), "Belgar".into(), "Belgar".into()];
+        s.hub_minorities = vec![Vec::new(); 4];
+        // Make hub 1 (an "Aiora" city) the one thriving magnet; the "Belgar" hub 2 next
+        // door is miserable, so its people drift across the culture border into hub 1.
+        for (i, h) in s.hubs.iter_mut().enumerate() {
+            if i == 1 { h.sent_prosperity = 0.95; h.starving = 0.0; h.food_balance = 1.0; }
+            else { h.sent_prosperity = 0.30; h.starving = 0.0; h.food_balance = 1.0; }
+        }
+        // Run the economic-migration pass a few years (it's yearly).
+        for _ in 0..8 { s.economic_migration_pass(); }
+        // Hub 1 ("Aiora") must now host a "Belgar" minority carried in by the migrants.
+        let belgar_at_1 = s.hub_minorities[1].iter().find(|(c, _)| c == "Belgar").map(|(_, sh)| *sh).unwrap_or(0.0);
+        assert!(belgar_at_1 > 0.0,
+            "expected a Belgar minority to form in the Aiora magnet city, got {:?}", s.hub_minorities[1]);
+    }
+
+    /// A big healthy city must ADOPT a tiny, failing neighbour as a satellite (reviving
+    /// it) instead of leaving it to die. Guards the absorption rescue path.
+    #[test]
+    fn big_city_absorbs_dying_neighbour() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("fish", 0, 0, 1.2, 0.7, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let ng = goods.len();
+        // Hub 0 = a big healthy metropolis; hub 1 = a tiny failing town right beside it.
+        let big_prod: Vec<f32> = (0..ng).map(|g| if g == 0 { 40_000.0 } else { 5_000.0 }).collect();
+        let small_prod: Vec<f32> = (0..ng).map(|_| 30.0).collect();
+        let mut hubs = vec![
+            hub(0, 0.0, 0.0, 20_000.0, big_prod, 0),
+            hub(1, 1.5, 0.0, 150.0, small_prod, 0),
+        ];
+        hubs[0].sent_prosperity = 0.65; hubs[0].starving = 0.0;
+        hubs[0].stock = vec![10_000.0, 4_000.0, 0.0]; // food to grant
+        hubs[1].sent_prosperity = 0.25; hubs[1].starving = 0.2; // struggling
+        let mut s = sim(hubs, goods);
+        s.tick = 20 * 365; // old enough that the town is past ABSORB_MIN_AGE
+        s.hub_culture = vec!["Aiora".into(), "Belgar".into()];
+        s.hub_minorities = vec![Vec::new(); 2];
+        s.rebuild_routes();
+        s.maybe_absorb_dying_city();
+        assert_eq!(s.hubs[1].colony_kind, 3, "dying town should become a satellite");
+        assert_eq!(s.hubs[1].founder_hub, 0, "…bound to the big neighbour");
+        assert!(s.hubs[1].population > 150.0, "…and shored up with relocated settlers");
+        // The metropolis's people arrive as a minority quarter (culture mixing).
+        assert!(s.hub_minorities[1].iter().any(|(c, _)| c == "Aiora"),
+            "adopted town should host an Aiora minority, got {:?}", s.hub_minorities[1]);
     }
 
     /// Reproduction for the "campaign restarts near year 30" crash: outposts only

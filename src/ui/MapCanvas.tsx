@@ -358,9 +358,12 @@ export function MapCanvas() {
   const colonyHighlight = useUIStore((s) => s.colonyHighlight);
 
   const liveSettlementsNow = useMemo<Settlement[]>(() => {
-    // Estates (ids >= 100000) are INTERNAL to their parent city — never drawn as
-    // their own map dots.
-    const hubs = campaignSnapshot?.active ? campaignSnapshot.hubs.filter((h) => h.id < 100000) : null;
+    // Estates are INTERNAL to their parent city (co-located, never their own dot).
+    // Filter on the `is_estate` FLAG, not the id range: in-campaign-founded towns,
+    // satellites and colonies all get id >= 100000 too (from create_organic_town),
+    // so an id<100000 test wrongly hid every swarm town, finished satellite and
+    // independent ex-colony — they vanished from the map. `!is_estate` keeps them.
+    const hubs = campaignSnapshot?.active ? campaignSnapshot.hubs.filter((h) => !h.is_estate) : null;
     if (!hubs || hubs.length === 0) return settlements;
     // Tier by ABSOLUTE population, not as a ratio to the single largest city — a
     // metropolis used to push every other city below 8% of its pop, collapsing real
