@@ -35,7 +35,18 @@ pub struct River {
     /// without re-deriving the drainage tree.
     #[serde(default)]
     pub order: u8,
+    /// Render-time meander amplitude scale in 0..1, set from the reach's mean
+    /// gradient: ~0 for steep alpine/headwater reaches (the channel is pinned to
+    /// the valley floor and runs nearly straight down the fall line) and ~1 for
+    /// flat lowland floodplains (where a river is free to wander in broad bends).
+    /// The frontend multiplies its cosmetic meander offset by this so rivers stop
+    /// wiggling across the highlands and only meander where they physically would.
+    /// Defaults to 1.0 so pre-existing saves render exactly as before.
+    #[serde(default = "one_f32")]
+    pub meander: f32,
 }
+
+fn one_f32() -> f32 { 1.0 }
 
 /// Lake data
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -360,6 +371,18 @@ pub fn extract_rivers(
         // rendering / settlement scoring without a full stream-order pass.
         let order = (((outlet_acc / threshold as f32).max(1.0).log2().floor() as i32) + 1)
             .clamp(1, 7) as u8;
+
+        // ── Meander scale (gradient-gated) ── mean channel gradient over the reach
+        // in normalized-elevation units per cell: steep headwaters run straight
+        // down the fall line, flat lowland reaches are free to meander. Map a steep
+        // gradient (≥ ~0.004/cell ≈ 35 m/cell of the 8848 m range) to 0 amplitude
+        // and a near-flat one (≤ ~0.0005/cell) to full amplitude, so the render
+        // stops wiggling rivers across the highlands (the "doesn't follow the
+        // terrain" artefact) and only bends them on true floodplains.
+        let src_e = buf.elevation[buf.idx(points[0].0, points[0].1)];
+        let out_e = buf.elevation[outlet];
+        let grad_per_cell = (src_e - out_e).max(0.0) / length.max(1.0);
+        let meander = (1.0 - (grad_per_cell - 0.0005) / (0.004 - 0.0005)).clamp(0.0, 1.0);
         // MAJOR = a long trunk OR a high-order channel → darker render shade.
         let major = length >= major_len || order >= 4;
         // Navigable = enough discharge to float a barge (a real inland highway).
@@ -390,7 +413,7 @@ pub fn extract_rivers(
             if mouth_kind == 2 { delta.clear(); }
         }
 
-        rivers.push(River { points, width, major, navigable, mouth_kind, delta, tributary, order });
+        rivers.push(River { points, width, major, navigable, mouth_kind, delta, tributary, order, meander });
     }
 
     rivers

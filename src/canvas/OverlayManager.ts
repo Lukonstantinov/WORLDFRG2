@@ -116,10 +116,13 @@ function strokeSmoothPath(ctx: CanvasRenderingContext2D, pts: [number, number][]
  *  seam guard skips the ±worldW jump so wrap-around rivers don't spike. Amplitude
  *  and wavelength grow with stream order (a great river swings in broad bends, a
  *  creek in tight ones). Cheap O(n); the result is cached per points array. */
-function meanderPath(pts: [number, number][], seed: number, order: number, worldW: number): [number, number][] {
+function meanderPath(pts: [number, number][], seed: number, order: number, worldW: number, scale: number): [number, number][] {
   const n = pts.length;
-  if (n < 4) return pts;
-  const amp = Math.min(1.2, 0.45 + order * 0.13);
+  if (n < 4 || scale <= 0.02) return pts;
+  // Gradient-gated amplitude: `scale` (from rivers.rs, 0 steep → 1 flat) collapses
+  // the meander toward zero on steep headwater/alpine reaches so the channel hugs
+  // the fall line and only wanders on true lowland floodplains.
+  const amp = Math.min(1.2, 0.45 + order * 0.13) * scale;
   const wav = 6 + order * 2.4; // cells per meander cycle
   const k = (Math.PI * 2) / wav;
   let ph = Math.sin(seed * 12.9898) * 43758.5453;
@@ -336,12 +339,15 @@ export class OverlayManager {
   /** Cached meandered river paths, keyed by each river's raw `points` array
    *  (rebuilt only when the rivers data is replaced). */
   private meanderCache = new WeakMap<object, [number, number][]>();
+  /** Cached nearest-river lookup for atlas river labels, keyed by "x,y" of the
+   *  toponym; invalidated whenever rivers or toponyms are replaced. */
+  private riverLabelCache = new Map<string, { river: RiverData; bi: number } | null>();
   /** Placed label bounding boxes for the current frame (world/cell coords), used
    *  to skip overlapping settlement + toponym labels ("Rusapolyelgorod" merges).
    *  Cleared at the top of every `render`. */
   private placedLabels: { x0: number; y0: number; x1: number; y1: number }[] = [];
 
-  drawRivers(rivers: RiverData[]) { this.rivers = rivers; }
+  drawRivers(rivers: RiverData[]) { this.rivers = rivers; this.riverLabelCache.clear(); }
   drawLakes(lakes: LakeData[]) { this.lakes = lakes; }
   drawSettlements(settlements: Settlement[]) { this.settlements = settlements; }
   drawColonies(colonies: ColonyMarker[]) { this.colonies = colonies; }
@@ -607,6 +613,7 @@ export class OverlayManager {
   /** Set (or clear with []) the named geographic features to label. */
   drawToponyms(t: { kind: string; name: string; x: number; y: number }[]) {
     this.toponyms = t;
+    this.riverLabelCache.clear();
   }
 
   drawTradeRoutes(routes: TradeRoute[]) {
@@ -1009,7 +1016,7 @@ export class OverlayManager {
     if (cached) return cached;
     const [sx, sy] = river.points[0];
     const seed = ((sx * 73856093) ^ (sy * 19349663) ^ (id * 83492791)) >>> 0;
-    const path = meanderPath(river.points, seed, order, this.worldW || 0);
+    const path = meanderPath(river.points, seed, order, this.worldW || 0, river.meander ?? 1);
     this.meanderCache.set(river.points, path);
     return path;
   }
@@ -1832,12 +1839,24 @@ export class OverlayManager {
     // cluster of nearby rivers/peaks doesn't stack names on one spot.
     const ordered = [...this.toponyms].sort((a, b) =>
       (a.kind === "region" ? 0 : 1) - (b.kind === "region" ? 0 : 1));
+    // Per-feature-type visibility (split toggles under the master `toponyms`).
+    const kindVisible: Record<string, boolean> = {
+      river: this.visibility.toponymsRiver !== false,
+      lake: this.visibility.toponymsLake !== false,
+      mountain: this.visibility.toponymsMountain !== false,
+      region: this.visibility.toponymsRegion !== false,
+    };
     for (const t of ordered) {
+      if (kindVisible[t.kind] === false) continue;
       const region = t.kind === "region";
       const fs = Math.max(6, Math.min(16, (region ? 13 : 9) * inv));
+      const col = COLORS[t.kind] ?? "#cfe2f6";
+      // Rivers read like an atlas: the name is set in italic and CURVES along the
+      // channel, angled to the flow. Falls back to a point label if the reach is
+      // too short/kinked or the label would collide.
+      if (t.kind === "river" && this.drawRiverLabel(ctx, t, fs, col, inv)) continue;
       ctx.font = `${region ? "700 " : ""}${fs}px -apple-system, Segoe UI, sans-serif`;
       const label = region ? t.name.toUpperCase() : t.name;
-      const col = COLORS[t.kind] ?? "#cfe2f6";
       const dotR = Math.max(0.5, 1.4 * inv);
       const tx = t.x + 0.5 + (region ? 0 : dotR + 1.5 * inv);
       // Point features de-collide (regions bypass — they're a different, faint layer).
@@ -1863,6 +1882,108 @@ export class OverlayManager {
       ctx.fillText(label, tx, t.y + 0.5);
     }
     ctx.textAlign = "left";
+  }
+
+  /** Atlas-style CURVED river label: lays the name glyph-by-glyph along the
+   *  river channel it sits on, each letter rotated to the local flow direction
+   *  and the whole string flipped when the reach runs right-to-left so it always
+   *  reads upright. Returns false (→ caller draws a plain point label) when no
+   *  river is close enough, the reach is too short/kinked for the name, or it
+   *  crosses the wrap seam. Returns true when handled (drawn OR skipped-on-collision). */
+  private drawRiverLabel(ctx: CanvasRenderingContext2D, t: { name: string; x: number; y: number }, fs: number, col: string, inv: number): boolean {
+    const hit = this.nearestRiverPoint(t.x, t.y);
+    if (!hit) return false;
+    const pts = hit.river.points;
+    const n = pts.length;
+    if (n < 3) return false;
+
+    ctx.font = `italic ${fs}px -apple-system, Segoe UI, sans-serif`;
+    const chars = [...t.name];
+    const sp = fs * 0.05;                       // extra letter spacing (atlas feel)
+    const widths = chars.map((c) => ctx.measureText(c).width);
+    const W = widths.reduce((a, b) => a + b, 0) + sp * Math.max(0, chars.length - 1);
+
+    // Cumulative arc length along the channel, bailing on a wrap-seam jump.
+    const half = this.worldW > 0 ? this.worldW / 2 : Infinity;
+    const cum = new Array<number>(n);
+    cum[0] = 0;
+    for (let i = 1; i < n; i++) {
+      const dx = pts[i][0] - pts[i - 1][0], dy = pts[i][1] - pts[i - 1][1];
+      if (Math.abs(dx) > half) return false;    // crosses the seam → point label
+      cum[i] = cum[i - 1] + Math.hypot(dx, dy);
+    }
+    const sMid = cum[hit.bi];
+    const sStart = sMid - W / 2, sEnd = sMid + W / 2;
+    if (sStart < 0 || sEnd > cum[n - 1]) return false;   // reach too short for the name
+
+    const a0 = this.arcSample(pts, cum, sStart);
+    const a1 = this.arcSample(pts, cum, sEnd);
+    const reversed = a1.x < a0.x;               // reads right-to-left → flip upright
+
+    // Approximate collision box for the whole label; de-collide like point labels.
+    const minx = Math.min(a0.x, a1.x) - fs, maxx = Math.max(a0.x, a1.x) + fs;
+    const miny = Math.min(a0.y, a1.y) - fs, maxy = Math.max(a0.y, a1.y) + fs;
+    if (this.labelCollides(minx, miny, maxx, maxy)) return true; // handled: skip, don't stamp a flat one
+    this.placedLabels.push({ x0: minx, y0: miny, x1: maxx, y1: maxy });
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineWidth = Math.max(0.6, 2.0 * inv);
+    ctx.strokeStyle = "rgba(6,12,18,0.85)";
+    ctx.fillStyle = col;
+    let acc = 0;
+    for (let k = 0; k < chars.length; k++) {
+      const w = widths[k];
+      const sChar = reversed ? (sEnd - acc - w / 2) : (sStart + acc + w / 2);
+      acc += w + sp;
+      const s = this.arcSample(pts, cum, sChar);
+      const ang = Math.atan2(s.ty, s.tx) + (reversed ? Math.PI : 0);
+      ctx.save();
+      ctx.translate(s.x + 0.5, s.y + 0.5);
+      ctx.rotate(ang);
+      ctx.strokeText(chars[k], 0, -fs * 0.12); // nudge off the channel line so it stays visible
+      ctx.fillText(chars[k], 0, -fs * 0.12);
+      ctx.restore();
+    }
+    ctx.textAlign = "left";
+    return true;
+  }
+
+  /** The river (from the drawn set) whose nearest path point is closest to
+   *  `(x,y)`, with that point's index — or null if none is within ~3 cells.
+   *  Cached per (toponym position) since rivers don't move between data loads. */
+  private nearestRiverPoint(x: number, y: number): { river: RiverData; bi: number } | null {
+    const key = `${x},${y}`;
+    const cached = this.riverLabelCache.get(key);
+    if (cached !== undefined) return cached;
+    let best: { river: RiverData; bi: number } | null = null;
+    let bd = 9; // (3 cells)² — must sit right on the channel to attach
+    for (const river of this.rivers) {
+      const pts = river.points;
+      for (let i = 0; i < pts.length; i++) {
+        const dx = pts[i][0] - x, dy = pts[i][1] - y;
+        const d = dx * dx + dy * dy;
+        if (d < bd) { bd = d; best = { river, bi: i }; }
+      }
+    }
+    this.riverLabelCache.set(key, best);
+    return best;
+  }
+
+  /** Position + unit tangent at arc length `s` along a polyline with cumulative
+   *  lengths `cum` (binary-search the segment, then linear-interpolate). */
+  private arcSample(pts: [number, number][], cum: number[], s: number): { x: number; y: number; tx: number; ty: number } {
+    const n = pts.length;
+    let lo = 0, hi = n - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (cum[mid] < s) lo = mid + 1; else hi = mid; }
+    const i = Math.max(1, lo);
+    const seg = cum[i] - cum[i - 1] || 1;
+    const f = Math.min(1, Math.max(0, (s - cum[i - 1]) / seg));
+    const ax = pts[i - 1][0], ay = pts[i - 1][1], bx = pts[i][0], by = pts[i][1];
+    let tx = bx - ax, ty = by - ay;
+    const len = Math.hypot(tx, ty) || 1;
+    tx /= len; ty /= len;
+    return { x: ax + (bx - ax) * f, y: ay + (by - ay) * f, tx, ty };
   }
 
   /** Boundary edges of a coarse-cell mask (only edges whose neighbour is outside

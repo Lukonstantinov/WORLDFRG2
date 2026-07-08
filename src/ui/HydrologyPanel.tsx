@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "../state/uiStore";
 import { useWorldStore } from "../state/worldStore";
 import { useViewportStore } from "../state/viewportStore";
-import { getRiverSystems, renderWorldCrop } from "../bridge/tauri";
-import type { RiverNode, RiverData, Toponym } from "../types";
+import { getRiverSystems, getLakeSystems, renderWorldCrop } from "../bridge/tauri";
+import type { RiverNode, RiverData, LakeNode, FishSpecies, Toponym } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 /** 🌊 Hydrology dashboard — every river system with full hydrological stats.
@@ -30,6 +30,11 @@ export function HydrologyPanel() {
   const [openId, setOpenId] = useState<number | null>(null);
   const [selId, setSelId] = useState<number | null>(null);
   const [colorMode, setColorMode] = useState<ColorMode>("branch");
+  // Tab switch (Rivers / Lakes / Legend) + a quality filter for the river list.
+  const [tab, setTab] = useState<"rivers" | "lakes" | "legend">("rivers");
+  const [riverFilter, setRiverFilter] = useState<RiverFilter>("all");
+  const lakes = useWorldStore((s) => s.lakes);
+  const rivers2 = rivers; // alias for clarity when passing to lakes fetch
 
   // Fetch the system tree whenever the panel opens or the rivers change.
   useEffect(() => {
@@ -69,10 +74,11 @@ export function HydrologyPanel() {
     const q = query.trim().toLowerCase();
     let list = systems;
     if (q) list = systems.filter((r) => (names.get(r.id) ?? "").toLowerCase().includes(q));
+    list = list.filter((r) => matchesRiverFilter(r, riverFilter));
     const key = (r: RiverNode) =>
       sort === "length" ? r.length_km : sort === "discharge" ? r.discharge_m3s : r.order;
     return [...list].sort((a, b) => key(b) - key(a));
-  }, [systems, query, sort, names]);
+  }, [systems, query, sort, names, riverFilter]);
 
   if (!open) return null;
   const close = () => useUIStore.getState().setShowHydrology(false);
@@ -81,19 +87,36 @@ export function HydrologyPanel() {
   return (
     <div data-draggable style={{ ...panel, ...rootStyle }}>
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
-        <span>🌊 Hydrology · Rivers</span>
+        <span>🌊 Hydrology</span>
         <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
       </div>
 
-      <div data-no-drag style={{ display: "flex", gap: 6, alignItems: "center", padding: "7px 10px", borderBottom: "1px solid #16283a" }}>
+      {/* Rivers / Lakes / Legend tab switch */}
+      <div data-no-drag style={{ display: "flex", gap: 4, padding: "6px 8px 0" }}>
+        <TabBtn on={tab === "rivers"} onClick={() => setTab("rivers")}>🌊 Rivers</TabBtn>
+        <TabBtn on={tab === "lakes"} onClick={() => setTab("lakes")}>🏞 Lakes</TabBtn>
+        <TabBtn on={tab === "legend"} onClick={() => setTab("legend")}>📖 Legend</TabBtn>
+      </div>
+
+      {tab === "rivers" && (<>
+      <div data-no-drag style={{ display: "flex", gap: 6, alignItems: "center", padding: "7px 10px", borderBottom: "1px solid #16283a", flexWrap: "wrap" }}>
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search rivers…"
-          style={{ flex: 1, minWidth: 0, background: "#0a141d", border: "1px solid #1d2f42", borderRadius: 5,
+          style={{ flex: 1, minWidth: 80, background: "#0a141d", border: "1px solid #1d2f42", borderRadius: 5,
             color: "#cfe2f6", fontSize: 11, padding: "3px 7px" }} />
         <select value={sort} onChange={(e) => setSort(e.target.value as any)}
           style={{ background: "#0a141d", border: "1px solid #1d2f42", borderRadius: 5, color: "#9fb6cc", fontSize: 11, padding: "3px 4px" }}>
           <option value="length">Length</option>
           <option value="discharge">Discharge</option>
           <option value="order">Order</option>
+        </select>
+        <select value={riverFilter} onChange={(e) => setRiverFilter(e.target.value as RiverFilter)}
+          title="Filter rivers by quality"
+          style={{ background: "#0a141d", border: "1px solid #1d2f42", borderRadius: 5, color: "#9fb6cc", fontSize: 11, padding: "3px 4px" }}>
+          <option value="all">All rivers</option>
+          <option value="navigable">⚓ Navigable</option>
+          <option value="major">Major trunks</option>
+          <option value="delta">Δ Delta mouths</option>
+          <option value="estuary">Estuaries</option>
         </select>
         <select value={colorMode} onChange={(e) => setColorMode(e.target.value as ColorMode)}
           title="How tributaries are coloured on the map & in the snip"
@@ -102,6 +125,7 @@ export function HydrologyPanel() {
           <option value="order">🎨 By order</option>
           <option value="single">🎨 Single</option>
         </select>
+        <LabelToggle keyName="toponymsRiver" label="🏷 River names" />
       </div>
 
       <div style={{ overflowY: "auto", maxHeight: "68vh", padding: "6px 8px 12px" }}>
@@ -164,6 +188,26 @@ export function HydrologyPanel() {
                     <span style={{ color: "#5f7a95", marginLeft: 6 }}>(by discharge)</span>
                   </div>
 
+                  {/* Freshwater ecology — regime, water, fish, wildlife, banks */}
+                  {sel.regime && <div style={{ marginTop: 8 }}>
+                    <div style={subLabel}>Ecology &amp; character</div>
+                    <EcoRow icon="🌦" label="Regime" text={sel.regime} />
+                    <EcoRow icon="💧" label="Water" text={sel.water} />
+                    <EcoRow icon="🐟" label="Fish" text={sel.fish} />
+                    <EcoRow icon="🦦" label="Wildlife" text={sel.wildlife} />
+                    <EcoRow icon="🌿" label="Banks" text={sel.riparian} />
+                    {sel.story && <div style={storyBox}><Hl text={sel.story} names={[sel.name, sel.counterpart]} /></div>}
+                  </div>}
+
+                  {sel.species && sel.species.length > 0 && (
+                    <div style={{ marginTop: 9 }}>
+                      <div style={subLabel}>🐟 Fish of this river · source → mouth</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {[...sel.species].sort((a, b) => a.zone - b.zone).map((sp) => <FishPlate key={sp.slug} sp={sp} />)}
+                      </div>
+                    </div>
+                  )}
+
                   <div style={subLabel}>Long profile · source → mouth</div>
                   <Profile node={sel} names={names} />
 
@@ -192,8 +236,330 @@ export function HydrologyPanel() {
           );
         })}
       </div>
+      </>)}
+
+      {tab === "lakes" && <LakesTab lakes={lakes} rivers={rivers2} focusOn={focusOn} />}
+      {tab === "legend" && <LegendTab />}
     </div>
   );
+}
+
+// ── Tab button + on-map label toggle ──
+function TabBtn({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button data-no-drag onClick={onClick} style={{
+      flex: 1, fontSize: 11.5, fontWeight: on ? 700 : 500, padding: "5px 6px", cursor: "pointer",
+      color: on ? "#d6e8f6" : "#7d94ab", background: on ? "#0c1a24" : "transparent",
+      border: "1px solid", borderColor: on ? "#204058" : "#152535", borderBottom: on ? "1px solid #0c1a24" : "1px solid #152535",
+      borderTopLeftRadius: 6, borderTopRightRadius: 6,
+    }}>{children}</button>
+  );
+}
+
+/** A checkbox that toggles an on-map toponym label layer (river/lake names). */
+function LabelToggle({ keyName, label }: { keyName: string; label: string }) {
+  const on = useUIStore((s) => s.overlayVisibility[keyName] !== false);
+  const master = useUIStore((s) => s.overlayVisibility.toponyms);
+  const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
+  return (
+    <label data-no-drag title={master ? "" : "Generate place names (Toponyms step) to show labels"}
+      style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, color: "#9fb6cc", cursor: "pointer", whiteSpace: "nowrap" }}>
+      <input type="checkbox" checked={on} onChange={(e) => {
+        setOverlayVisible(keyName, e.target.checked);
+        if (e.target.checked && !master) setOverlayVisible("toponyms", true);
+      }} />
+      {label}
+    </label>
+  );
+}
+
+// ── Lakes tab: search + type filter + per-lake limnological/ecological detail ──
+type LakeSort = "area" | "depth" | "elev";
+function LakesTab({ lakes, rivers, focusOn }: {
+  lakes: import("../types").LakeData[]; rivers: RiverData[]; focusOn: (x: number, y: number) => void;
+}) {
+  const [nodes, setNodes] = useState<LakeNode[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<LakeSort>("area");
+  const [kind, setKind] = useState<string>("all");
+  const [openId, setOpenId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (lakes.length === 0) { setNodes([]); return; }
+    let alive = true;
+    setLoading(true); setErr(null);
+    getLakeSystems(lakes, rivers)
+      .then((n) => { if (alive) { setNodes(n); setLoading(false); } })
+      .catch((e) => { if (alive) { setErr(String(e)); setLoading(false); } });
+    return () => { alive = false; };
+  }, [lakes, rivers]);
+
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    let list = nodes;
+    if (q) list = list.filter((l) => l.name.toLowerCase().includes(q) || l.kind_label.toLowerCase().includes(q));
+    if (kind !== "all") list = list.filter((l) => l.kind === kind);
+    const key = (l: LakeNode) => sort === "area" ? l.area_km2 : sort === "depth" ? l.max_depth_m : l.elev_m;
+    return [...list].sort((a, b) => key(b) - key(a));
+  }, [nodes, query, sort, kind]);
+
+  return (
+    <>
+      <div data-no-drag style={{ display: "flex", gap: 6, alignItems: "center", padding: "7px 10px", borderBottom: "1px solid #16283a", flexWrap: "wrap" }}>
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search lakes…"
+          style={{ flex: 1, minWidth: 80, background: "#0a141d", border: "1px solid #1d2f42", borderRadius: 5, color: "#cfe2f6", fontSize: 11, padding: "3px 7px" }} />
+        <select value={sort} onChange={(e) => setSort(e.target.value as LakeSort)}
+          style={{ background: "#0a141d", border: "1px solid #1d2f42", borderRadius: 5, color: "#9fb6cc", fontSize: 11, padding: "3px 4px" }}>
+          <option value="area">Area</option>
+          <option value="depth">Depth</option>
+          <option value="elev">Elevation</option>
+        </select>
+        <select value={kind} onChange={(e) => setKind(e.target.value)} title="Filter lakes by type"
+          style={{ background: "#0a141d", border: "1px solid #1d2f42", borderRadius: 5, color: "#9fb6cc", fontSize: 11, padding: "3px 4px" }}>
+          <option value="all">All types</option>
+          <option value="rift">🏔 Rift</option>
+          <option value="crater">🌋 Crater</option>
+          <option value="salt">🧂 Salt</option>
+          <option value="glacial">❄ Glacial</option>
+          <option value="tropical">🌴 Tropical</option>
+          <option value="lowland">🌾 Lowland</option>
+          <option value="tarn">⛰ Tarn</option>
+        </select>
+        <LabelToggle keyName="toponymsLake" label="🏷 Lake names" />
+      </div>
+
+      <div style={{ overflowY: "auto", maxHeight: "68vh", padding: "6px 8px 12px" }}>
+        {loading && <div style={empty}>Sounding the lakes…</div>}
+        {err && <div style={{ ...empty, color: "#d08a6a" }}>Couldn’t read lakes: {err}</div>}
+        {!loading && !err && lakes.length === 0 && (
+          <div style={empty}>Run the Rivers &amp; Lakes step (5) to generate lakes first.</div>
+        )}
+        {!loading && !err && lakes.length > 0 && shown.length === 0 && (
+          <div style={empty}>No lakes match your filter.</div>
+        )}
+        {!loading && shown.map((lk) => {
+          const isOpen = openId === lk.id;
+          return (
+            <div key={lk.id} style={{ marginBottom: 6, border: `1px solid ${isOpen ? "#204058" : "#152535"}`, borderRadius: 7, background: isOpen ? "#0c1a24" : "transparent", overflow: "hidden" }}>
+              <div onClick={() => setOpenId(isOpen ? null : lk.id)}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 9px", cursor: "pointer" }}>
+                <span style={{ color: "#5f7a95", fontSize: 10, width: 8 }}>{isOpen ? "▾" : "▸"}</span>
+                <span style={{ fontSize: 13 }}>{LAKE_ICON[lk.kind] ?? "🏞"}</span>
+                <span style={{ fontWeight: 650, color: "#d6e8f6", fontSize: 12.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: "0 1 auto" }}>{lk.name}</span>
+                {lk.endorheic && <span style={{ ...navTag, color: "#e0b24a" }}>🧂</span>}
+                <span style={{ color: "#7d94ab", fontSize: 10.5, marginLeft: "auto", whiteSpace: "nowrap" }}>{lk.kind_label}</span>
+                <span style={{ color: "#5f7a95", fontSize: 10, whiteSpace: "nowrap" }}>{fmt(lk.area_km2)} km²</span>
+              </div>
+              {isOpen && <LakeDetail lk={lk} focusOn={focusOn} />}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+const LAKE_ICON: Record<string, string> = {
+  rift: "🏔", crater: "🌋", salt: "🧂", glacial: "❄", tropical: "🌴", lowland: "🌾", tarn: "⛰",
+};
+
+function LakeDetail({ lk, focusOn }: { lk: LakeNode; focusOn: (x: number, y: number) => void }) {
+  return (
+    <div style={{ padding: "2px 9px 10px" }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "4px 0 8px" }}>
+        <span style={{ ...chip, ...srcChip }}>{LAKE_ICON[lk.kind]} {lk.kind_label}</span>
+        {lk.endorheic && <span style={{ ...chip, color: "#e0b24a", borderColor: "#45402a", background: "#1c1a12" }}>🧂 terminal · {fmt(lk.salinity_ppt)} ppt</span>}
+        <button data-no-drag onClick={() => focusOn(lk.cx, lk.cy)} style={locateBtn}>📍 Locate</button>
+      </div>
+      <div style={statsGrid}>
+        <Stat k="Area" v={fmt(lk.area_km2)} u="km²" />
+        <Stat k="Max depth" v={`≈${fmt(lk.max_depth_m)}`} u="m" />
+        <Stat k="Mean depth" v={`≈${fmt(lk.mean_depth_m)}`} u="m" />
+        <Stat k="Elevation" v={fmt(lk.elev_m)} u="m" />
+        <Stat k="Volume" v={`≈${fmt(lk.volume_km3)}`} u="km³" />
+        <Stat k="Salinity" v={lk.salinity_ppt < 1 ? "fresh" : fmt(lk.salinity_ppt)} u={lk.salinity_ppt < 1 ? "" : "ppt"} />
+      </div>
+      <div style={counter}>🌍 Comparable · <b>{lk.analog}</b></div>
+      <EcoRow icon="🌡" label="Thermal" text={lk.thermal} />
+      <EcoRow icon="💧" label="Water" text={lk.water} />
+      <EcoRow icon="🐟" label="Fish" text={lk.fish} />
+      <EcoRow icon="🦩" label="Wildlife" text={lk.wildlife} />
+      <EcoRow icon="🧬" label="Endemism" text={lk.endemism} />
+      {(lk.inflows.length > 0 || lk.outflow) && (
+        <EcoRow icon="↳" label="Drainage"
+          names={[...lk.inflows, lk.outflow]}
+          text={`${lk.inflows.length > 0 ? `fed by ${lk.inflows.slice(0, 4).join(", ")}` : "no named inflows"}${lk.outflow ? ` · drains via the ${lk.outflow}` : lk.endorheic ? " · no outlet (terminal)" : ""}`} />
+      )}
+      <div style={storyBox}><Hl text={lk.story} names={[lk.name, lk.analog, lk.outflow, ...lk.inflows]} /></div>
+    </div>
+  );
+}
+
+// ── Legend / explanations tab ──
+function LegendTab() {
+  return (
+    <div style={{ overflowY: "auto", maxHeight: "72vh", padding: "10px 12px 16px", fontSize: 12, lineHeight: 1.5, color: "#bcd2e6" }}>
+      <LegendSection title="River flow regimes">
+        <LegendItem term="Perennial tropical">Steady, high flow all year (Af/Am) — the Amazon, Congo, Mekong.</LegendItem>
+        <LegendItem term="Flood-pulse">A great wet-season flood and a lean dry season (Aw) — the Niger, Zambezi.</LegendItem>
+        <LegendItem term="Mediterranean">Winter floods, a parched summer low (Cs) — the Ebro, Rhône.</LegendItem>
+        <LegendItem term="Perennial temperate">Rain-fed and reliable (Cf) — the Rhine, Danube.</LegendItem>
+        <LegendItem term="Snowmelt freshet">A strong spring melt, winter ice (Df) — the Volga, upper Mississippi.</LegendItem>
+        <LegendItem term="Nival subarctic">Snowmelt-dominated, frozen much of the year (Dfc/E) — the Lena, Ob.</LegendItem>
+        <LegendItem term="Arid / ephemeral">Flows only after storms, or 'exotic' from wetter uplands — the Nile, Colorado.</LegendItem>
+      </LegendSection>
+      <LegendSection title="Lake types">
+        <LegendItem term="🏔 Rift">Deep, ancient graben lakes with endemic species flocks — Baikal, Tanganyika.</LegendItem>
+        <LegendItem term="🌋 Crater">Drowned volcanic calderas, deep and clear — Crater Lake, Toba.</LegendItem>
+        <LegendItem term="🧂 Salt (endorheic)">Terminal arid basins with no outlet; saline — Caspian, Aral, Chad.</LegendItem>
+        <LegendItem term="❄ Glacial">Ice-carved, cold, oligotrophic — the Great Lakes, Finnish lakes.</LegendItem>
+        <LegendItem term="🌴 Tropical">Large, shallow, warm and productive — Victoria.</LegendItem>
+        <LegendItem term="🌾 Lowland">Shallow, warm, reedy and eutrophic — Balaton, Neusiedl.</LegendItem>
+        <LegendItem term="⛰ Tarn">Small, cold, clear upland lakes — alpine tarns.</LegendItem>
+      </LegendSection>
+      <LegendSection title="Water & biology terms">
+        <LegendItem term="Whitewater / blackwater / clearwater">Silty & fertile / tea-stained & acidic / clear & nutrient-poor — the classic tropical river triad.</LegendItem>
+        <LegendItem term="Rheophilic vs limnophilic">Fast-water fish (trout, sculpin) vs slow-water fish (carp, bream, pike).</LegendItem>
+        <LegendItem term="Diadromous">Fish that migrate between river and sea to spawn — salmon, shad, eel, sturgeon.</LegendItem>
+        <LegendItem term="Dimictic / monomictic">Lake mixes twice a year / once a year — set by depth and climate.</LegendItem>
+        <LegendItem term="Oligotrophic / eutrophic">Nutrient-poor & clear / nutrient-rich, green & productive.</LegendItem>
+        <LegendItem term="Endemism">Share of the fauna found in this water and nowhere else — highest in ancient rift lakes.</LegendItem>
+      </LegendSection>
+    </div>
+  );
+}
+function LegendSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ ...subLabel, marginTop: 0 }}>{title}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>{children}</div>
+    </div>
+  );
+}
+function LegendItem({ term, children }: { term: string; children: React.ReactNode }) {
+  return (
+    <div><b style={{ color: "#d6e8f6" }}>{term}</b> <span style={{ color: "#93a9be" }}>— {children}</span></div>
+  );
+}
+
+// ── Term highlighting ── fish (amber), rivers/lakes (blue), climate/limnology
+// (green) are bolded + coloured wherever they appear in the ecology prose, so the
+// key specifics pop out of the sentences.
+type HlCat = "fish" | "climate" | "water";
+const HL_COLORS: Record<HlCat, string> = { fish: "#f0a35e", climate: "#7fd6a6", water: "#79c4e6" };
+const FISH_TERMS = [
+  "hillstream catfish", "pimelodid catfish", "giant catfish", "wels catfish", "stone loach",
+  "brown trout", "bullhead sculpin", "arctic char", "sea bass", "electric eel", "freshwater seal",
+  "pike-perch", "brine shrimp", "characins", "cichlid", "arapaima", "arowana", "lungfish",
+  "catfish", "sturgeon", "grayling", "whitefish", "sculpin", "burbot", "tilapia", "cyprinodonts",
+  "snakehead", "mudskipper", "stickleback", "loach", "tetra", "pacu", "piranha", "barbel", "nase",
+  "carp", "roach", "bream", "perch", "pike", "trout", "char", "mullet", "snook", "shad", "eel",
+  "salmon", "tench", "omul", "seal", "minnow",
+];
+const CLIMATE_TERMS = [
+  "perennial tropical", "tropical flood-pulse", "subtropical monsoonal", "perennial temperate",
+  "nival subarctic", "nival polar", "snowmelt freshet", "cold-monomictic", "warm-monomictic",
+  "warm-polymictic", "flood-pulse", "mediterranean", "continental", "oligotrophic", "eutrophic",
+  "mesotrophic", "dimictic", "monomictic", "polymictic", "hypersaline", "brackish", "oxygen-poor",
+  "whitewater", "blackwater", "clearwater", "diadromous", "anadromous", "rheophilic", "limnophilic",
+  "ephemeral", "exotic", "endemic", "endemism", "saline", "turbid", "freshet", "snowmelt", "nival",
+];
+const WATER_TERMS = [
+  "Saint Lawrence", "Great Salt Lake", "Crater Lake", "Great Lakes", "Dead Sea", "Lake Baikal",
+  "Lake Tanganyika", "Lake Victoria", "Lake Balaton", "Lake Chad", "Caspian Sea",
+  "Amazon", "Congo", "Ganges", "Orinoco", "Yangtze", "Yenisei", "Paraná", "Parana", "Mekong",
+  "Mississippi", "Amur", "Volga", "Indus", "Danube", "Niger", "Zambezi", "Nile", "Rhine",
+  "Rhône", "Rhone", "Elbe", "Seine", "Thames", "Colorado", "Ebro", "Lena", "Baikal", "Tanganyika",
+  "Victoria", "Caspian", "Aral", "Chad", "Toba", "Balaton", "Neusiedl",
+];
+function buildHl(extra: string[]): { re: RegExp; cat: Map<string, HlCat> } {
+  const cat = new Map<string, HlCat>();
+  const all: string[] = [];
+  const add = (t: string, c: HlCat) => { const k = t.toLowerCase(); if (!cat.has(k)) { cat.set(k, c); all.push(t); } };
+  FISH_TERMS.forEach((t) => add(t, "fish"));
+  CLIMATE_TERMS.forEach((t) => add(t, "climate"));
+  WATER_TERMS.forEach((t) => add(t, "water"));
+  extra.filter(Boolean).forEach((t) => add(t.replace(/^the\s+/i, ""), "water"));
+  all.sort((a, b) => b.length - a.length);
+  const esc = all.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return { re: new RegExp(`\\b(?:${esc.join("|")})s?\\b`, "gi"), cat };
+}
+/** Render `text` with known fish / river / climate terms bolded + coloured. */
+function Hl({ text, names = [] }: { text: string; names?: string[] }) {
+  const { re, cat } = useMemo(() => buildHl(names), [names.join("|")]);
+  const out: React.ReactNode[] = [];
+  let last = 0;
+  re.lastIndex = 0;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const key = m[0].toLowerCase();
+    const c = cat.get(key) ?? cat.get(key.replace(/s$/, "")) ?? "water";
+    out.push(<b key={m.index} style={{ color: HL_COLORS[c], fontWeight: 700 }}>{m[0]}</b>);
+    last = m.index + m[0].length;
+    if (m[0].length === 0) re.lastIndex++;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return <>{out}</>;
+}
+
+// ── Shared eco-row + story box ──
+function EcoRow({ icon, label, text, names }: { icon: string; label: string; text: string; names?: string[] }) {
+  return (
+    <div style={{ display: "flex", gap: 6, margin: "5px 0", fontSize: 11.5, lineHeight: 1.45 }}>
+      <span style={{ flex: "0 0 auto", width: 16, textAlign: "center" }}>{icon}</span>
+      <span><b style={{ color: "#9fc0da", fontWeight: 600 }}>{label} · </b><span style={{ color: "#c2d6ea" }}><Hl text={text} names={names} /></span></span>
+    </div>
+  );
+}
+const storyBox: React.CSSProperties = {
+  marginTop: 9, padding: "8px 10px", borderRadius: 6, background: "#0a1620",
+  border: "1px solid #14283a", fontSize: 12, lineHeight: 1.6, color: "#cde0f2", fontStyle: "italic",
+};
+
+// ── Signature fish species plate ── shows a generated illustration from
+// `/fish/<slug>.png` (drop your plates in `public/fish/`), falling back to a
+// simple emoji tile when the image is absent, so the feature works with or
+// without the artwork.
+const ZONE_LABEL = ["headwater", "middle river", "delta / estuary"];
+const ZONE_ICON = ["🏔", "🌾", "🐟"];
+function FishPlate({ sp }: { sp: FishSpecies }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div style={{ display: "flex", gap: 9, alignItems: "center", background: "#0a1620",
+      border: "1px solid #14283a", borderRadius: 7, padding: "6px 8px" }}>
+      <div style={{ width: 90, height: 50, flex: "0 0 auto", borderRadius: 5, overflow: "hidden",
+        background: "radial-gradient(130% 100% at 30% 20%, #14304a, #0a1620 70%)", display: "grid", placeItems: "center" }}>
+        {!failed
+          ? <img src={`/fish/${sp.slug}.png`} alt={sp.name} onError={() => setFailed(true)}
+              style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+          : <span style={{ fontSize: 24, opacity: 0.6 }}>🐟</span>}
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 650, color: "#e6f2fb" }}>
+          {sp.name}
+          <span style={{ fontSize: 9.5, color: "#7d94ab", marginLeft: 6, fontWeight: 500 }}>
+            {ZONE_ICON[sp.zone] ?? ""} {ZONE_LABEL[sp.zone] ?? ""}
+          </span>
+        </div>
+        <div style={{ fontSize: 10, fontStyle: "italic", color: "#7fae8f" }}>{sp.binomial}</div>
+        <div style={{ fontSize: 10.5, color: "#93a9be", marginTop: 1 }}>{sp.blurb}</div>
+      </div>
+    </div>
+  );
+}
+
+// ── River filter helpers ──
+type RiverFilter = "all" | "navigable" | "major" | "delta" | "estuary";
+function matchesRiverFilter(r: RiverNode, f: RiverFilter): boolean {
+  switch (f) {
+    case "navigable": return r.navigable;
+    case "major": return r.order >= 4;
+    case "delta": return r.mouth_kind === 1;
+    case "estuary": return r.mouth_kind === 2;
+    default: return true;
+  }
 }
 
 // ── Location snip: real terrain crop with only this river's subtree drawn over it ──
