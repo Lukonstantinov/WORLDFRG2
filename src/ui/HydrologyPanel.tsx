@@ -196,7 +196,7 @@ export function HydrologyPanel() {
                     <EcoRow icon="🐟" label="Fish" text={sel.fish} />
                     <EcoRow icon="🦦" label="Wildlife" text={sel.wildlife} />
                     <EcoRow icon="🌿" label="Banks" text={sel.riparian} />
-                    {sel.story && <div style={storyBox}>{sel.story}</div>}
+                    {sel.story && <div style={storyBox}><Hl text={sel.story} names={[sel.name, sel.counterpart]} /></div>}
                   </div>}
 
                   <div style={subLabel}>Long profile · source → mouth</div>
@@ -380,9 +380,10 @@ function LakeDetail({ lk, focusOn }: { lk: LakeNode; focusOn: (x: number, y: num
       <EcoRow icon="🧬" label="Endemism" text={lk.endemism} />
       {(lk.inflows.length > 0 || lk.outflow) && (
         <EcoRow icon="↳" label="Drainage"
+          names={[...lk.inflows, lk.outflow]}
           text={`${lk.inflows.length > 0 ? `fed by ${lk.inflows.slice(0, 4).join(", ")}` : "no named inflows"}${lk.outflow ? ` · drains via the ${lk.outflow}` : lk.endorheic ? " · no outlet (terminal)" : ""}`} />
       )}
-      <div style={storyBox}>{lk.story}</div>
+      <div style={storyBox}><Hl text={lk.story} names={[lk.name, lk.analog, lk.outflow, ...lk.inflows]} /></div>
     </div>
   );
 }
@@ -434,12 +435,72 @@ function LegendItem({ term, children }: { term: string; children: React.ReactNod
   );
 }
 
+// ── Term highlighting ── fish (amber), rivers/lakes (blue), climate/limnology
+// (green) are bolded + coloured wherever they appear in the ecology prose, so the
+// key specifics pop out of the sentences.
+type HlCat = "fish" | "climate" | "water";
+const HL_COLORS: Record<HlCat, string> = { fish: "#f0a35e", climate: "#7fd6a6", water: "#79c4e6" };
+const FISH_TERMS = [
+  "hillstream catfish", "pimelodid catfish", "giant catfish", "wels catfish", "stone loach",
+  "brown trout", "bullhead sculpin", "arctic char", "sea bass", "electric eel", "freshwater seal",
+  "pike-perch", "brine shrimp", "characins", "cichlid", "arapaima", "arowana", "lungfish",
+  "catfish", "sturgeon", "grayling", "whitefish", "sculpin", "burbot", "tilapia", "cyprinodonts",
+  "snakehead", "mudskipper", "stickleback", "loach", "tetra", "pacu", "piranha", "barbel", "nase",
+  "carp", "roach", "bream", "perch", "pike", "trout", "char", "mullet", "snook", "shad", "eel",
+  "salmon", "tench", "omul", "seal", "minnow",
+];
+const CLIMATE_TERMS = [
+  "perennial tropical", "tropical flood-pulse", "subtropical monsoonal", "perennial temperate",
+  "nival subarctic", "nival polar", "snowmelt freshet", "cold-monomictic", "warm-monomictic",
+  "warm-polymictic", "flood-pulse", "mediterranean", "continental", "oligotrophic", "eutrophic",
+  "mesotrophic", "dimictic", "monomictic", "polymictic", "hypersaline", "brackish", "oxygen-poor",
+  "whitewater", "blackwater", "clearwater", "diadromous", "anadromous", "rheophilic", "limnophilic",
+  "ephemeral", "exotic", "endemic", "endemism", "saline", "turbid", "freshet", "snowmelt", "nival",
+];
+const WATER_TERMS = [
+  "Saint Lawrence", "Great Salt Lake", "Crater Lake", "Great Lakes", "Dead Sea", "Lake Baikal",
+  "Lake Tanganyika", "Lake Victoria", "Lake Balaton", "Lake Chad", "Caspian Sea",
+  "Amazon", "Congo", "Ganges", "Orinoco", "Yangtze", "Yenisei", "Paraná", "Parana", "Mekong",
+  "Mississippi", "Amur", "Volga", "Indus", "Danube", "Niger", "Zambezi", "Nile", "Rhine",
+  "Rhône", "Rhone", "Elbe", "Seine", "Thames", "Colorado", "Ebro", "Lena", "Baikal", "Tanganyika",
+  "Victoria", "Caspian", "Aral", "Chad", "Toba", "Balaton", "Neusiedl",
+];
+function buildHl(extra: string[]): { re: RegExp; cat: Map<string, HlCat> } {
+  const cat = new Map<string, HlCat>();
+  const all: string[] = [];
+  const add = (t: string, c: HlCat) => { const k = t.toLowerCase(); if (!cat.has(k)) { cat.set(k, c); all.push(t); } };
+  FISH_TERMS.forEach((t) => add(t, "fish"));
+  CLIMATE_TERMS.forEach((t) => add(t, "climate"));
+  WATER_TERMS.forEach((t) => add(t, "water"));
+  extra.filter(Boolean).forEach((t) => add(t.replace(/^the\s+/i, ""), "water"));
+  all.sort((a, b) => b.length - a.length);
+  const esc = all.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return { re: new RegExp(`\\b(?:${esc.join("|")})s?\\b`, "gi"), cat };
+}
+/** Render `text` with known fish / river / climate terms bolded + coloured. */
+function Hl({ text, names = [] }: { text: string; names?: string[] }) {
+  const { re, cat } = useMemo(() => buildHl(names), [names.join("|")]);
+  const out: React.ReactNode[] = [];
+  let last = 0;
+  re.lastIndex = 0;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const key = m[0].toLowerCase();
+    const c = cat.get(key) ?? cat.get(key.replace(/s$/, "")) ?? "water";
+    out.push(<b key={m.index} style={{ color: HL_COLORS[c], fontWeight: 700 }}>{m[0]}</b>);
+    last = m.index + m[0].length;
+    if (m[0].length === 0) re.lastIndex++;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return <>{out}</>;
+}
+
 // ── Shared eco-row + story box ──
-function EcoRow({ icon, label, text }: { icon: string; label: string; text: string }) {
+function EcoRow({ icon, label, text, names }: { icon: string; label: string; text: string; names?: string[] }) {
   return (
     <div style={{ display: "flex", gap: 6, margin: "5px 0", fontSize: 11.5, lineHeight: 1.45 }}>
       <span style={{ flex: "0 0 auto", width: 16, textAlign: "center" }}>{icon}</span>
-      <span><b style={{ color: "#9fc0da", fontWeight: 600 }}>{label} · </b><span style={{ color: "#c2d6ea" }}>{text}</span></span>
+      <span><b style={{ color: "#9fc0da", fontWeight: 600 }}>{label} · </b><span style={{ color: "#c2d6ea" }}><Hl text={text} names={names} /></span></span>
     </div>
   );
 }
