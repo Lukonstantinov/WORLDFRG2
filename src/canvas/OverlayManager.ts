@@ -116,10 +116,13 @@ function strokeSmoothPath(ctx: CanvasRenderingContext2D, pts: [number, number][]
  *  seam guard skips the ±worldW jump so wrap-around rivers don't spike. Amplitude
  *  and wavelength grow with stream order (a great river swings in broad bends, a
  *  creek in tight ones). Cheap O(n); the result is cached per points array. */
-function meanderPath(pts: [number, number][], seed: number, order: number, worldW: number): [number, number][] {
+function meanderPath(pts: [number, number][], seed: number, order: number, worldW: number, scale: number): [number, number][] {
   const n = pts.length;
-  if (n < 4) return pts;
-  const amp = Math.min(1.2, 0.45 + order * 0.13);
+  if (n < 4 || scale <= 0.02) return pts;
+  // Gradient-gated amplitude: `scale` (from rivers.rs, 0 steep → 1 flat) collapses
+  // the meander toward zero on steep headwater/alpine reaches so the channel hugs
+  // the fall line and only wanders on true lowland floodplains.
+  const amp = Math.min(1.2, 0.45 + order * 0.13) * scale;
   const wav = 6 + order * 2.4; // cells per meander cycle
   const k = (Math.PI * 2) / wav;
   let ph = Math.sin(seed * 12.9898) * 43758.5453;
@@ -987,7 +990,7 @@ export class OverlayManager {
     if (cached) return cached;
     const [sx, sy] = river.points[0];
     const seed = ((sx * 73856093) ^ (sy * 19349663) ^ (id * 83492791)) >>> 0;
-    const path = meanderPath(river.points, seed, order, this.worldW || 0);
+    const path = meanderPath(river.points, seed, order, this.worldW || 0, river.meander ?? 1);
     this.meanderCache.set(river.points, path);
     return path;
   }
@@ -1810,7 +1813,15 @@ export class OverlayManager {
     // cluster of nearby rivers/peaks doesn't stack names on one spot.
     const ordered = [...this.toponyms].sort((a, b) =>
       (a.kind === "region" ? 0 : 1) - (b.kind === "region" ? 0 : 1));
+    // Per-feature-type visibility (split toggles under the master `toponyms`).
+    const kindVisible: Record<string, boolean> = {
+      river: this.visibility.toponymsRiver !== false,
+      lake: this.visibility.toponymsLake !== false,
+      mountain: this.visibility.toponymsMountain !== false,
+      region: this.visibility.toponymsRegion !== false,
+    };
     for (const t of ordered) {
+      if (kindVisible[t.kind] === false) continue;
       const region = t.kind === "region";
       const fs = Math.max(6, Math.min(16, (region ? 13 : 9) * inv));
       ctx.font = `${region ? "700 " : ""}${fs}px -apple-system, Segoe UI, sans-serif`;

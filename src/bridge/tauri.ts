@@ -213,6 +213,17 @@ export async function getRiverSystems(
   });
 }
 
+/** Classified lakes with their limnological + ecological profiles (Lakes tab). */
+export async function getLakeSystems(
+  lakes: import("../types").LakeData[],
+  rivers: import("../types").RiverData[],
+): Promise<import("../types").LakeNode[]> {
+  return invoke("get_lake_systems", {
+    lakesJson: JSON.stringify(lakes),
+    riversJson: JSON.stringify(rivers),
+  });
+}
+
 // --- Overlay / query commands ---
 
 export interface OverlayVectors {

@@ -1504,6 +1504,7 @@ export interface RiverData {
   delta?: [number, number][];
   tributary?: boolean; // ends at a confluence with a larger stream (not the sea)
   order?: number; // Strahler-ish stream order (1 = headwater creek)
+  meander?: number; // 0..1 render meander scale (0 = steep/straight, 1 = flat floodplain)
 }
 
 /** A city sitting on a river reach (Hydrology dashboard). Mirrors Rust `RiverCityInfo`. */
@@ -1544,9 +1545,44 @@ export interface RiverNode {
   trib_total: number;
   city_total: number;
   counterpart: string; // Earth counterpart (roots only)
+  regime: string;   // Köppen flow-regime phrase ("perennial temperate", …)
+  fish: string;     // fish assemblage prose (real Earth taxa)
+  riparian: string; // bankside vegetation phrase
+  water: string;    // water character (clarity/sediment/productivity)
+  wildlife: string; // charismatic riverine wildlife beyond fish
+  story: string;    // unique multi-sentence NatGeo-style account of the system
   profile: number[]; // elevation (m), source → mouth
   cities: RiverCityInfo[];
   children: RiverNode[];
+}
+
+/** One classified lake with its limnological + ecological profile (Hydrology
+ *  dashboard, Lakes tab). Mirrors Rust `LakeNode`. */
+export interface LakeNode {
+  id: number;
+  name: string;
+  kind: "rift" | "crater" | "salt" | "glacial" | "tropical" | "lowland" | "tarn";
+  kind_label: string;
+  area_km2: number;
+  max_depth_m: number;
+  mean_depth_m: number;
+  elev_m: number;
+  volume_km3: number;
+  endorheic: boolean;   // terminal salt lake (no outflow)
+  salinity_ppt: number;
+  analog: string;       // real-world analog lake
+  thermal: string;      // mixing regime
+  water: string;        // trophic / clarity
+  fish: string;
+  wildlife: string;
+  endemism: string;
+  blurb: string;        // one-line flavour description
+  story: string;        // unique multi-sentence NatGeo-style account
+  inflows: string[];    // feeder river names
+  outflow: string;      // draining river name ("" = terminal)
+  cx: number;
+  cy: number;
+  area_cells: number;
 }
 
 export interface LakeData {

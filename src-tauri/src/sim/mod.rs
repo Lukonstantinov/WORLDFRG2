@@ -6,6 +6,7 @@ pub mod temperature;
 pub mod precipitation;
 pub mod koppen;
 pub mod rivers;
+pub mod aquatic;
 pub mod soil;
 pub mod fertility;
 pub mod settlements;

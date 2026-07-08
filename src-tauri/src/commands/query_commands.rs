@@ -4840,6 +4840,21 @@ pub struct RiverNode {
     pub city_total: usize,
     /// Earth counterpart matched by discharge (roots only; empty for tributaries).
     pub counterpart: String,
+    /// Hydrological flow regime phrase (Köppen-driven): "perennial temperate",
+    /// "tropical flood-pulse", "nival subarctic", … (`sim/aquatic::river_regime`).
+    pub regime: String,
+    /// Fish assemblage prose — real Earth taxa by climate band × gradient × size
+    /// × estuary (`sim/aquatic::river_fish`).
+    pub fish: String,
+    /// Riparian (bankside) vegetation phrase (`sim/aquatic::river_riparian`).
+    pub riparian: String,
+    /// Water character — clarity / sediment / productivity (`aquatic::river_water`).
+    pub water: String,
+    /// Charismatic riverine wildlife beyond fish (`aquatic::river_wildlife`).
+    pub wildlife: String,
+    /// A UNIQUE, multi-sentence National-Geographic-style account of this river
+    /// system, seeded per-river so no two read alike (`aquatic::river_story`).
+    pub story: String,
     /// Downsampled elevation (m) along the reach, source → mouth.
     pub profile: Vec<f32>,
     pub cities: Vec<RiverCityInfo>,
@@ -4863,6 +4878,13 @@ struct RiverDerived {
     mouth_elev_m: f32,
     avg_slope: f32,
     source_kind: String,
+    regime: String,
+    fish: String,
+    riparian: String,
+    water: String,
+    wildlife: String,
+    band: crate::sim::aquatic::Band,
+    arid: bool,
     profile: Vec<f32>,
 }
 
@@ -4908,7 +4930,9 @@ pub fn get_river_systems(
 ) -> Result<Vec<RiverNode>, String> {
     use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_RIVERS)?;
+    // Rivers columns + TEMPERATURE (thermal band for the fish/ecology layer).
+    let cols = ColumnSet(ColumnSet::PHASE_RIVERS.0 | ColumnSet::TEMPERATURE.0);
+    let buf = WorldBuffer::load_with(&conn, cols)?;
 
     let rivers: Vec<crate::sim::rivers::River> =
         serde_json::from_str(&rivers_json).map_err(|e| e.to_string())?;
@@ -4991,20 +5015,61 @@ fn build_river_systems(
             else if src_precip > 1100.0 && head_slope < 3.0 { "bog" }
             else { "lowland" }.to_string();
 
-        // Downsampled profile (m), source → mouth.
+        // ── Freshwater ecology (regime / fish / riparian) ──
+        // Aggregate the reach's climate: mean air temperature, the dominant Köppen
+        // class (mode over the reach), and how arid it runs. These feed the shared
+        // aquatic-ecology mapper (real Earth taxa + flow regime).
+        use crate::sim::aquatic;
+        let mut tsum = 0.0f32;
+        let mut arid_cells = 0usize;
+        let mut khist: std::collections::HashMap<u8, u32> = std::collections::HashMap::new();
+        let have_temp = !buf.temperature.is_empty();
+        let have_kop = !buf.koppen.is_empty();
+        for &(px, py) in pts {
+            let pi = idx(px, py);
+            if have_temp { tsum += buf.temperature[pi]; }
+            if have_kop {
+                let k = buf.koppen[pi];
+                *khist.entry(k).or_insert(0) += 1;
+                if matches!(k, crate::sim::koppen::BWH | crate::sim::koppen::BWK
+                    | crate::sim::koppen::BSH | crate::sim::koppen::BSK) { arid_cells += 1; }
+            }
+        }
+        let mean_temp = if have_temp { tsum / m as f32 } else { 12.0 };
+        let dominant_koppen = khist.iter().max_by_key(|(_, &c)| c).map(|(&k, _)| k).unwrap_or(0);
+        let arid = arid_cells as f32 / m as f32 > 0.4;
+        let band = aquatic::band_from_temp(mean_temp);
+        // Estuary/delta mouth admits diadromous runs; a plain inland/lake end doesn't.
+        let estuary = r.mouth_kind != 0;
+        let regime = aquatic::river_regime(dominant_koppen, band);
+        let fish = aquatic::river_fish(band, avg_slope, q, estuary);
+        let riparian = aquatic::river_riparian(band, arid);
+        let water = aquatic::river_water(band, avg_slope >= 6.0, arid);
+        let wildlife = aquatic::river_wildlife(band, q >= 3000.0);
+
+        // Downsampled long profile (m), source → mouth. A river's water surface can
+        // only ever DESCEND, so we sample the depression-FILLED surface (which is
+        // strictly monotonic downhill along the flow path) rather than raw terrain
+        // (which rises and falls across the flats the channel crosses — the "height
+        // jumps up and down in river view" artefact). A running minimum guards
+        // against any residual downsampling wobble so the plotted profile never
+        // climbs between source and mouth.
         let samples = 48usize.min(m);
         let mut profile = Vec::with_capacity(samples);
+        let mut running_min = f32::MAX;
         for s in 0..samples {
             let t = if samples > 1 { s as f32 / (samples - 1) as f32 } else { 0.0 };
             let pi = (t * (m - 1) as f32).round() as usize;
             let (px, py) = pts[pi.min(m - 1)];
-            profile.push(buf.elevation[idx(px, py)] * 8848.0);
+            let e = hydro.filled[idx(px, py)] * 8848.0;
+            running_min = running_min.min(e);
+            profile.push(running_min);
         }
 
         der.push(RiverDerived {
             length_km, len_cells, cum_km, source_pt, mouth_pt, mid: pts[m / 2],
             outlet, discharge: q, width_m, depth_m, drop_m, source_elev_m, mouth_elev_m,
-            avg_slope, source_kind, profile,
+            avg_slope, source_kind, regime, fish, riparian, water, wildlife, band, arid, profile,
         });
     }
 
@@ -5138,6 +5203,28 @@ fn build_river_systems(
             .collect();
         let trib_total = child_nodes.iter().map(|c| 1 + c.trib_total).sum();
         let city_total = river_cities[i].len() + child_nodes.iter().map(|c| c.city_total).sum::<usize>();
+        // Unique NatGeo-style write-up for this river system (seeded per-river).
+        let story = crate::sim::aquatic::river_story(&crate::sim::aquatic::RiverStoryFacts {
+            name: &names_by_id[i],
+            counterpart: &counterpart_by_id[i],
+            length_km: d.length_km,
+            discharge_m3s: d.discharge,
+            source_kind: &d.source_kind,
+            mouth_kind: r.mouth_kind,
+            navigable: r.navigable,
+            trib_total,
+            city_total,
+            band: d.band,
+            regime: &d.regime,
+            fish: &d.fish,
+            riparian: &d.riparian,
+            water: &d.water,
+            wildlife: &d.wildlife,
+            arid: d.arid,
+            seed: (d.source_pt.0 as u64).wrapping_mul(73856093)
+                ^ (d.source_pt.1 as u64).wrapping_mul(19349663)
+                ^ (i as u64).wrapping_mul(0x9E3779B97F4A7C15),
+        });
         RiverNode {
             id: i,
             name: names_by_id[i].clone(),
@@ -5163,6 +5250,12 @@ fn build_river_systems(
             city_total,
             // Closest real-world counterpart (by discharge AND mouth latitude).
             counterpart: counterpart_by_id[i].clone(),
+            regime: d.regime.clone(),
+            fish: d.fish.clone(),
+            riparian: d.riparian.clone(),
+            water: d.water.clone(),
+            wildlife: d.wildlife.clone(),
+            story,
             profile: d.profile.clone(),
             cities: river_cities[i].clone(),
             children: child_nodes,
@@ -5178,6 +5271,237 @@ fn build_river_systems(
     // Sort systems by length (longest first); counterpart is set per node in build.
     roots.sort_by(|a, b| b.length_km.partial_cmp(&a.length_km).unwrap_or(std::cmp::Ordering::Equal));
     roots
+}
+
+/// One classified lake with its limnological + ecological profile, for the
+/// Hydrology dashboard's Lakes tab. Mirrors the TS `LakeNode`.
+#[derive(serde::Serialize)]
+pub struct LakeNode {
+    pub id: usize,
+    pub name: String,
+    /// Machine type slug: rift | crater | salt | glacial | tropical | lowland | tarn.
+    pub kind: String,
+    pub kind_label: String,
+    pub area_km2: f32,
+    pub max_depth_m: f32,
+    pub mean_depth_m: f32,
+    pub elev_m: f32,
+    pub volume_km3: f32,
+    /// True terminal salt lake (no outflow river, arid basin).
+    pub endorheic: bool,
+    pub salinity_ppt: f32,
+    /// Real-world analog lake (Baikal, Victoria, …).
+    pub analog: String,
+    pub thermal: String,
+    pub water: String,
+    pub fish: String,
+    pub wildlife: String,
+    pub endemism: String,
+    pub blurb: String,
+    /// A UNIQUE, seeded NatGeo-style account of the lake (no two read alike).
+    pub story: String,
+    /// Names of the rivers that feed / drain the lake ("" outflow = terminal).
+    pub inflows: Vec<String>,
+    pub outflow: String,
+    pub cx: u32,
+    pub cy: u32,
+    pub area_cells: usize,
+}
+
+/// Classify the world's lakes and build their limnological + ecological profiles
+/// (type, depth, thermal/trophic regime, fish, wildlife, endemism, real-world
+/// analog, inflow/outflow rivers). Read-only; mirrors `get_river_systems`.
+#[tauri::command]
+pub fn get_lake_systems(
+    lakes_json: String,
+    rivers_json: String,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<LakeNode>, String> {
+    use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    // Rivers columns + temperature (thermal band) + plates/volcanic (rift/crater)
+    // + salinity (for completeness). All needed to classify a lake.
+    let cols = ColumnSet(
+        ColumnSet::PHASE_RIVERS.0 | ColumnSet::TEMPERATURE.0
+            | ColumnSet::PLATES.0 | ColumnSet::VOLCANIC.0 | ColumnSet::SALINITY.0,
+    );
+    let buf = WorldBuffer::load_with(&conn, cols)?;
+    let lakes: Vec<crate::sim::rivers::Lake> =
+        serde_json::from_str(&lakes_json).map_err(|e| e.to_string())?;
+    if lakes.is_empty() { return Ok(vec![]); }
+    let rivers: Vec<crate::sim::rivers::River> =
+        serde_json::from_str(&rivers_json).unwrap_or_default();
+    Ok(build_lake_systems(&buf, &lakes, &rivers))
+}
+
+/// Core of `get_lake_systems`, factored out for unit testing without a DB.
+fn build_lake_systems(
+    buf: &crate::sim::world_buffer::WorldBuffer,
+    lakes: &[crate::sim::rivers::Lake],
+    rivers: &[crate::sim::rivers::River],
+) -> Vec<LakeNode> {
+    use crate::sim::aquatic;
+    let w = buf.width;
+    let h = buf.height;
+    let km_per_cell = 40075.0f32 / w as f32;
+    let cell_area_km2 = km_per_cell * km_per_cell;
+    let idx = |x: u32, y: u32| (y * w + x) as usize;
+    let hydro = crate::sim::rivers::compute_hydrology(buf);
+    let have_temp = !buf.temperature.is_empty();
+    let have_bound = !buf.boundary_type.is_empty();
+    let have_volc = !buf.is_volcanic.is_empty();
+
+    // A cell is "near a lake" if it or an 8-neighbour is a lake cell (used to
+    // attach inflow/outflow rivers whose channel stops one cell short of water).
+    let mut lake_of: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for (li, lk) in lakes.iter().enumerate() {
+        for &(cx, cy) in &lk.cells { lake_of.insert(idx(cx, cy), li); }
+    }
+    let near_lake = |x: u32, y: u32| -> Option<usize> {
+        if let Some(&l) = lake_of.get(&idx(x, y)) { return Some(l); }
+        for &(dx, dy) in &[(-1i32,0i32),(1,0),(0,-1),(0,1),(-1,-1),(1,-1),(-1,1),(1,1)] {
+            let nx = buf.wrap_x(x as i32 + dx);
+            let ny = y as i32 + dy;
+            if ny < 0 || ny >= h as i32 { continue; }
+            if let Some(&l) = lake_of.get(&idx(nx, ny as u32)) { return Some(l); }
+        }
+        None
+    };
+
+    // River label = culture-styled name at the reach midpoint (matches the
+    // toponym/river-panel naming machinery closely enough for a feeder list).
+    let river_label = |r: &crate::sim::rivers::River| -> String {
+        if r.points.len() < 2 { return "a stream".into(); }
+        let (mx, my) = r.points[r.points.len() / 2];
+        let (kit, ms) = crate::sim::names::resolve_kit(mx, my, w, h);
+        let seed = (mx as u64).wrapping_mul(73856093) ^ (my as u64).wrapping_mul(19349663) ^ 0x1111;
+        crate::sim::cultures::river_name(kit, ms, seed)
+    };
+
+    // Attach each river to a lake as inflow (its MOUTH dies at the shore) or
+    // outflow (its SOURCE resumes at the shore = the lake drains through it).
+    let mut inflows: Vec<Vec<String>> = vec![Vec::new(); lakes.len()];
+    let mut outflow: Vec<Option<String>> = vec![None; lakes.len()];
+    for r in rivers {
+        if r.points.len() < 2 { continue; }
+        let (sx, sy) = r.points[0];
+        let (ex, ey) = r.points[r.points.len() - 1];
+        if let Some(l) = near_lake(ex, ey) { inflows[l].push(river_label(r)); }
+        if let Some(l) = near_lake(sx, sy) {
+            // The largest reach resuming at the shore is the outflow.
+            if outflow[l].is_none() { outflow[l] = Some(river_label(r)); }
+        }
+    }
+
+    let mut out: Vec<LakeNode> = Vec::with_capacity(lakes.len());
+    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (li, lk) in lakes.iter().enumerate() {
+        let n = lk.cells.len();
+        if n == 0 { continue; }
+        // Centroid + bbox (for elongation) + depth + climate aggregates.
+        let (mut sx, mut sy) = (0u64, 0u64);
+        let (mut minx, mut maxx, mut miny, mut maxy) = (u32::MAX, 0u32, u32::MAX, 0u32);
+        let (mut max_depth, mut depth_sum) = (0.0f32, 0.0f32);
+        let (mut tsum, mut arid_cells) = (0.0f32, 0usize);
+        let (mut volcanic, mut on_boundary) = (false, false);
+        for &(cx, cy) in &lk.cells {
+            sx += cx as u64; sy += cy as u64;
+            minx = minx.min(cx); maxx = maxx.max(cx); miny = miny.min(cy); maxy = maxy.max(cy);
+            let ci = idx(cx, cy);
+            let d = ((hydro.filled[ci] - buf.elevation[ci]).max(0.0)) * 8848.0;
+            max_depth = max_depth.max(d); depth_sum += d;
+            if have_temp { tsum += buf.temperature[ci]; }
+            if !buf.koppen.is_empty() && matches!(buf.koppen[ci],
+                crate::sim::koppen::BWH | crate::sim::koppen::BWK
+                    | crate::sim::koppen::BSH | crate::sim::koppen::BSK) { arid_cells += 1; }
+            if have_volc && buf.is_volcanic[ci] == 1 { volcanic = true; }
+            if have_bound && buf.boundary_type[ci] != 0 { on_boundary = true; }
+        }
+        let cx = (sx / n as u64) as u32;
+        let cy = (sy / n as u64) as u32;
+        let area_km2 = n as f32 * cell_area_km2;
+        // Basins are shallow relative to their fill; scale the modelled fill depth
+        // to a plausible lake depth (rift/crater basins run genuinely deep). Add a
+        // floor so even a shallow pan reads as a few metres.
+        let max_depth_m = (max_depth * 3.0 + 2.0).clamp(2.0, 1600.0);
+        let mean_depth_m = ((depth_sum / n as f32) * 3.0 + 1.0).clamp(1.0, max_depth_m);
+        let elev_m = lk.elevation * 8848.0;
+        let volume_km3 = area_km2 * mean_depth_m / 1000.0;
+        let abs_lat = buf.latitude(cy).abs();
+        let mean_temp = if have_temp { tsum / n as f32 } else { 30.0 - 0.4 * abs_lat };
+        let arid = arid_cells as f32 / n as f32 > 0.4;
+        let span_x = (maxx - minx) as f32 + 1.0;
+        let span_y = (maxy - miny) as f32 + 1.0;
+        let elongated = (span_x / span_y).max(span_y / span_x) >= 2.2;
+        let has_outflow = outflow[li].is_some();
+        let endorheic = !has_outflow && arid;
+
+        let facts = aquatic::LakeFacts {
+            area_km2, max_depth_m, elev_m, abs_lat, mean_temp_c: mean_temp,
+            volcanic, on_boundary, endorheic, arid, elongated,
+        };
+        let kind = aquatic::classify_lake(&facts);
+        let band = aquatic::band_from_temp(mean_temp);
+
+        // Unique culture-styled name at the centroid.
+        let name = {
+            let (kit, ms) = crate::sim::names::resolve_kit(cx, cy, w, h);
+            let mut nm = crate::sim::cultures::place_name(kit, ms, cx, cy);
+            let mut t = 1u32;
+            while !used.insert(nm.clone()) && t < 24 {
+                nm = crate::sim::cultures::place_name(kit, ms,
+                    (cx + t) % w.max(1), (cy + (t / 4)) % h.max(1));
+                t += 1;
+            }
+            nm
+        };
+
+        let story = aquatic::lake_story(&aquatic::LakeStoryFacts {
+            name: &name,
+            kind, band,
+            analog: aquatic::lake_analog(kind, band),
+            area_km2, max_depth_m, endorheic,
+            inflow_count: inflows[li].len(),
+            outflow: outflow[li].as_deref().unwrap_or(""),
+            thermal: &aquatic::lake_thermal(kind, band, max_depth_m),
+            water: &aquatic::lake_water(kind),
+            fish: &aquatic::lake_fish(kind, band),
+            wildlife: &aquatic::lake_wildlife(kind, band),
+            endemism: &aquatic::lake_endemism(kind, band),
+            seed: (cx as u64).wrapping_mul(73856093)
+                ^ (cy as u64).wrapping_mul(19349663)
+                ^ (li as u64).wrapping_mul(0x9E3779B97F4A7C15),
+        });
+
+        out.push(LakeNode {
+            id: li,
+            name,
+            kind: kind.as_str().into(),
+            kind_label: kind.label().into(),
+            area_km2,
+            max_depth_m,
+            mean_depth_m,
+            elev_m,
+            volume_km3,
+            endorheic,
+            salinity_ppt: aquatic::lake_salinity_ppt(kind, max_depth_m),
+            analog: aquatic::lake_analog(kind, band).into(),
+            thermal: aquatic::lake_thermal(kind, band, max_depth_m),
+            water: aquatic::lake_water(kind),
+            fish: aquatic::lake_fish(kind, band),
+            wildlife: aquatic::lake_wildlife(kind, band),
+            endemism: aquatic::lake_endemism(kind, band),
+            blurb: aquatic::lake_blurb(kind, band),
+            story,
+            inflows: inflows[li].clone(),
+            outflow: outflow[li].clone().unwrap_or_default(),
+            cx, cy,
+            area_cells: n,
+        });
+    }
+    // Largest first.
+    out.sort_by(|a, b| b.area_km2.partial_cmp(&a.area_km2).unwrap_or(std::cmp::Ordering::Equal));
+    out
 }
 
 /// A short base-26 letter tag (0→A, 1→B, 26→AA …) — a guaranteed-unique-per-id
@@ -5251,6 +5575,19 @@ mod river_system_tests {
         assert!(root.max_depth_m > 0.0 && root.max_width_m > 0.0, "depth/width estimated");
         assert!(!root.counterpart.is_empty(), "an Earth counterpart is assigned");
         assert!(!root.profile.is_empty(), "the elevation profile is sampled");
+        // The long profile must never climb (water flows downhill source→mouth).
+        for w in root.profile.windows(2) {
+            assert!(w[1] <= w[0] + 1e-3, "profile rises {} → {} (must be monotone down)", w[0], w[1]);
+        }
+        // Ecology + a UNIQUE narrative are populated for every system.
+        assert!(!root.regime.is_empty() && !root.fish.is_empty(), "regime + fish assigned");
+        assert!(!root.story.is_empty(), "a NatGeo-style story is generated");
+        // Distinct river systems must not share the same write-up verbatim.
+        if systems.len() >= 2 {
+            let a = &systems[0].story;
+            let b = &systems[1].story;
+            assert_ne!(a, b, "two river systems share an identical story");
+        }
         // The largest system should own tributaries (the tree, not a bare trunk).
         let total_tribs: usize = systems.iter().map(|s| s.trib_total).sum();
         assert!(total_tribs >= 1, "expected tributaries in the system tree");

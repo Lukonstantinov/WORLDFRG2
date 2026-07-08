@@ -310,6 +310,8 @@ export const useUIStore = create<UIStore>((set) => ({
     colonies: true,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
     travelRoute: false, goodScarcity: false, toponyms: false,
+    // Per-feature-type toponym label toggles (gated under the master `toponyms`).
+    toponymsRiver: true, toponymsLake: true, toponymsMountain: true, toponymsRegion: true,
     plagueZones: false, guildCities: false, figureMarks: false, landmarks: false, dynastyLinks: false,
     ...Object.fromEntries(GOOD_DEFS.map((g) => [goodOverlayKey(g.name), false])),
   },
