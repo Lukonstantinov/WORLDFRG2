@@ -5233,14 +5233,11 @@ fn build_river_systems(
             ^ (d.mouth_pt.1 as u64).wrapping_mul(40503)
             ^ (i as u64);
         let species: Vec<FishSpeciesOut> =
-            crate::sim::aquatic::assign_river_fish(d.band, &d.source_kind, r.mouth_kind, d.discharge, sp_seed)
+            crate::sim::aquatic::assign_river_fish(d.band, &d.source_kind, r.mouth_kind, d.discharge, d.arid, sp_seed)
                 .into_iter()
-                .map(|si| {
-                    let f = &crate::sim::aquatic::SIGNATURE_FISH[si];
-                    FishSpeciesOut {
-                        slug: f.slug.into(), name: f.name.into(), binomial: f.binomial.into(),
-                        zone: f.zone, real: f.real.into(), blurb: f.blurb.into(),
-                    }
+                .map(|f| FishSpeciesOut {
+                    slug: f.slug.into(), name: f.name.into(), binomial: f.binomial.into(),
+                    zone: f.zone, real: f.real.into(), blurb: f.blurb.into(),
                 })
                 .collect();
         RiverNode {

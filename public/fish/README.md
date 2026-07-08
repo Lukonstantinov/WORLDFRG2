@@ -17,7 +17,16 @@ Recommended: transparent or dark-charcoal background, side profile facing left,
 ~600×340 px (matches the panel's ~16:9 plate). Slugs are defined in
 `src-tauri/src/sim/aquatic.rs` (`SIGNATURE_FISH`). Current slugs:
 
-silverfin-trout · frostscale-grayling · stonecling-bullhead · torrent-loach ·
-ribbon-dace · redflank-char · goldvein-barbel · bronze-chub · sailback-asp ·
-whiskered-wels · marbled-perch · gravel-nase · broadscale-bream · marsh-carp ·
-reedwater-zander · silt-sturgeon · silverback-eel · tidewater-shad
+**Temperate:** silverfin-trout · frostscale-grayling · stonecling-bullhead ·
+torrent-loach · ribbon-dace · redflank-char · goldvein-barbel · bronze-chub ·
+sailback-asp · whiskered-wels · marbled-perch · gravel-nase · broadscale-bream ·
+marsh-carp · reedwater-zander · silt-sturgeon · silverback-eel · tidewater-shad
+
+**Tropical:** emberscale-tetra · golden-pacu · sabertooth-payara · king-arapaima ·
+emperor-cichlid · whiskered-redtail
+
+**Boreal / subarctic:** silverpike-taimen · broad-whitefish · arctic-grayling ·
+boreal-burbot · northern-pike · blackfin-char
+
+**Arid / desert:** wadi-killifish · desert-barb · oasis-tilapia · sand-catfish ·
+saltcreek-pupfish · wadi-mullet

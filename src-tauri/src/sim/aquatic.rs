@@ -671,15 +671,42 @@ pub const SIGNATURE_FISH: &[FishSpec] = &[
     FishSpec{slug:"silt-sturgeon",name:"Silt Sturgeon",binomial:"Acipenser magnus",zone:2,real:"sturgeon",blurb:"an armoured, ancient bottom-feeder that runs up from the sea.",bands:&[WarmTemperate,CoolTemperate,Boreal]},
     FishSpec{slug:"silverback-eel",name:"Silverback Eel",binomial:"Anguilla vitrea",zone:2,real:"eel",blurb:"a snake-bodied migrant that breeds far out in the ocean.",bands:&[WarmTemperate,CoolTemperate]},
     FishSpec{slug:"tidewater-shad",name:"Tidewater Shad",binomial:"Alosa aestuaria",zone:2,real:"shad",blurb:"a silver herring that runs up from the sea to spawn.",bands:&[WarmTemperate,CoolTemperate,Boreal]},
+    // ── Tropical roster (Af/Am/Aw) ──
+    FishSpec{slug:"emberscale-tetra",name:"Emberscale Tetra",binomial:"Hyphessobrycon cataractae",zone:0,real:"tetra",blurb:"a jewel-bright shoaling characin of clear tropical headwaters.",bands:&[Tropical]},
+    FishSpec{slug:"golden-pacu",name:"Golden Pacu",binomial:"Piaractus auratus",zone:1,real:"pacu",blurb:"a deep-bodied, seed-crushing herbivore of the tropical main river.",bands:&[Tropical]},
+    FishSpec{slug:"sabertooth-payara",name:"Sabertooth Payara",binomial:"Hydrolycus dentex",zone:1,real:"payara",blurb:"a fanged silver predator of fast tropical rivers.",bands:&[Tropical]},
+    FishSpec{slug:"king-arapaima",name:"King Arapaima",binomial:"Arapaima regalis",zone:2,real:"arapaima",blurb:"a giant air-breathing behemoth of tropical floodplains.",bands:&[Tropical]},
+    FishSpec{slug:"emperor-cichlid",name:"Emperor Cichlid",binomial:"Cichla imperator",zone:2,real:"peacock bass",blurb:"a barred, eye-spotted cichlid of warm lowland rivers.",bands:&[Tropical,WarmTemperate]},
+    FishSpec{slug:"whiskered-redtail",name:"Whiskered Redtail",binomial:"Phractocephalus igneus",zone:2,real:"redtail catfish",blurb:"a huge red-tailed catfish of the tropical lower river.",bands:&[Tropical]},
+    // ── Boreal / subarctic roster (Dfc/Dwc/ET) ──
+    FishSpec{slug:"silverpike-taimen",name:"Silverpike Taimen",binomial:"Hucho borealis",zone:0,real:"taimen",blurb:"a giant cold-river salmonid, the 'river tiger' of the north.",bands:&[Boreal,CoolTemperate]},
+    FishSpec{slug:"broad-whitefish",name:"Broad Whitefish",binomial:"Coregonus latus",zone:0,real:"whitefish",blurb:"a silvery cold-water shoaler of northern rivers and lakes.",bands:&[Boreal,Polar,CoolTemperate]},
+    FishSpec{slug:"arctic-grayling",name:"Arctic Grayling",binomial:"Thymallus arcticus",zone:0,real:"Arctic grayling",blurb:"a sail-finned grayling of clear subarctic streams.",bands:&[Boreal,Polar]},
+    FishSpec{slug:"boreal-burbot",name:"Boreal Burbot",binomial:"Lota borealis",zone:1,real:"burbot",blurb:"an eel-shaped freshwater cod of cold, deep water.",bands:&[Boreal,CoolTemperate]},
+    FishSpec{slug:"northern-pike",name:"Northern Pike",binomial:"Esox borealis",zone:1,real:"pike",blurb:"a long-jawed ambush predator of northern rivers.",bands:&[Boreal,CoolTemperate]},
+    FishSpec{slug:"blackfin-char",name:"Blackfin Char",binomial:"Salvelinus ater",zone:2,real:"char",blurb:"a dark, pale-spotted char of the coldest reaches.",bands:&[Boreal,Polar]},
 ];
 
-/// Assign up to three signature species to a river reach — one per river ZONE the
-/// reach spans — filtered to the reach's thermal band. Headwater sources start in
-/// zone 0, sizeable rivers gain a middle (zone 1) reach, and delta/estuary or big
-/// mouths reach zone 2. Returns catalogue indices (deterministic per `seed`).
-/// Empty when no catalogued species fits the band (e.g. a tropical river — those
-/// keep the prose assemblage until a tropical roster is added).
-pub fn assign_river_fish(band: Band, source_kind: &str, mouth_kind: u8, discharge: f32, seed: u64) -> Vec<usize> {
+/// Arid-river / oasis roster (BW/BS Köppen). Kept separate so it is only drawn
+/// for reaches flagged arid — a desert river shows barbs and pupfish, not trout.
+/// Bands span hot to cold deserts.
+pub const ARID_FISH: &[FishSpec] = &[
+    FishSpec{slug:"wadi-killifish",name:"Wadi Killifish",binomial:"Nothobranchius wadi",zone:0,real:"annual killifish",blurb:"a jewel-coloured killifish that races the drying season.",bands:&[Tropical,WarmTemperate]},
+    FishSpec{slug:"desert-barb",name:"Desert Barb",binomial:"Barbus deserticola",zone:1,real:"barb",blurb:"a hardy brassy barb of warm, turbid desert rivers.",bands:&[Tropical,WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"oasis-tilapia",name:"Oasis Tilapia",binomial:"Oreochromis aridus",zone:1,real:"tilapia",blurb:"a tough, tolerant cichlid of oases and warm pools.",bands:&[Tropical,WarmTemperate]},
+    FishSpec{slug:"sand-catfish",name:"Sand Catfish",binomial:"Bagrus harenae",zone:2,real:"catfish",blurb:"a pale, whiskered catfish of muddy desert-river beds.",bands:&[Tropical,WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"saltcreek-pupfish",name:"Saltcreek Pupfish",binomial:"Cyprinodon deserti",zone:2,real:"pupfish",blurb:"a tiny, heat- and salt-hardy fish of shrinking desert pools.",bands:&[Tropical,WarmTemperate,CoolTemperate]},
+    FishSpec{slug:"wadi-mullet",name:"Wadi Mullet",binomial:"Liza deserti",zone:2,real:"grey mullet",blurb:"a silver, salt-tolerant mullet of brackish desert mouths.",bands:&[Tropical,WarmTemperate,CoolTemperate]},
+];
+
+/// Assign one signature species per river ZONE the reach spans, filtered to the
+/// reach's thermal band. Headwater sources start in zone 0, sizeable rivers gain a
+/// middle (zone 1) reach, and delta/estuary or big mouths reach zone 2. Arid
+/// reaches draw from the desert roster (barbs, pupfish) instead of the main one.
+/// Returns `&'static FishSpec` references (deterministic per `seed`); empty only
+/// when no catalogued species fits the band (e.g. an ice-cap polar river).
+pub fn assign_river_fish(band: Band, source_kind: &str, mouth_kind: u8, discharge: f32, arid: bool, seed: u64) -> Vec<&'static FishSpec> {
+    let cat: &'static [FishSpec] = if arid { ARID_FISH } else { SIGNATURE_FISH };
     let mut zones: Vec<u8> = Vec::new();
     let src_zone = match source_kind {
         "alpine" | "highland" => 0u8,
@@ -693,14 +720,14 @@ pub fn assign_river_fish(band: Band, source_kind: &str, mouth_kind: u8, discharg
     zones.sort_unstable();
 
     let mut r = Rng(seed ^ 0x00F1_5100_0000_0001);
-    let mut out: Vec<usize> = Vec::new();
+    let mut out: Vec<&'static FishSpec> = Vec::new();
     for &z in &zones {
-        let cands: Vec<usize> = (0..SIGNATURE_FISH.len())
-            .filter(|&i| SIGNATURE_FISH[i].zone == z && SIGNATURE_FISH[i].bands.contains(&band))
+        let cands: Vec<&'static FishSpec> = cat.iter()
+            .filter(|f| f.zone == z && f.bands.contains(&band))
             .collect();
         if !cands.is_empty() {
             let pick = cands[(r.next() % cands.len() as u64) as usize];
-            if !out.contains(&pick) { out.push(pick); }
+            if !out.iter().any(|f| f.slug == pick.slug) { out.push(pick); }
         }
     }
     out
@@ -714,16 +741,23 @@ mod tests {
     fn temperate_river_gets_zoned_species() {
         // An alpine-sourced, delta-mouthed, large cool-temperate river should get a
         // headwater + middle + lower species, all band-appropriate.
-        let ids = assign_river_fish(Band::CoolTemperate, "alpine", 1, 5000.0, 42);
-        assert!(ids.len() >= 2, "a great river spans multiple zones: {:?}", ids);
-        let zones: Vec<u8> = ids.iter().map(|&i| SIGNATURE_FISH[i].zone).collect();
+        let sp = assign_river_fish(Band::CoolTemperate, "alpine", 1, 5000.0, false, 42);
+        assert!(sp.len() >= 2, "a great river spans multiple zones: {}", sp.len());
+        let zones: Vec<u8> = sp.iter().map(|f| f.zone).collect();
         assert!(zones.contains(&0) && zones.contains(&2), "spans headwater and mouth: {:?}", zones);
-        for &i in &ids { assert!(SIGNATURE_FISH[i].bands.contains(&Band::CoolTemperate)); }
+        for f in &sp { assert!(f.bands.contains(&Band::CoolTemperate)); }
     }
 
     #[test]
-    fn tropical_river_has_no_temperate_species_yet() {
-        assert!(assign_river_fish(Band::Tropical, "hills", 0, 500.0, 1).is_empty());
+    fn tropical_and_arid_rivers_get_their_own_rosters() {
+        // Tropical rivers now have a roster (arapaima etc.).
+        let trop = assign_river_fish(Band::Tropical, "hills", 1, 5000.0, false, 1);
+        assert!(!trop.is_empty(), "tropical river has signature species");
+        for f in &trop { assert!(f.bands.contains(&Band::Tropical)); }
+        // An arid reach draws desert fish, never a trout.
+        let arid = assign_river_fish(Band::WarmTemperate, "hills", 0, 300.0, true, 2);
+        assert!(!arid.is_empty(), "arid river has desert species");
+        assert!(arid.iter().all(|f| ARID_FISH.iter().any(|a| a.slug == f.slug)), "arid roster used");
     }
 
     #[test]
