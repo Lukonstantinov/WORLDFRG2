@@ -353,7 +353,10 @@ export class OverlayManager {
   drawMigrations(m: { fx: number; fy: number; tx: number; ty: number; age: number }[]) { this.migrations = m; }
 
   // ── Route-bound migration overlay (dots · ribbon · focus) ──
-  private migrationRoutes: { path: [number, number][]; culture: string; volume: number; to: number; age: number }[] = [];
+  // `routed` is the polyline SNAPPED onto the trade-route network (computed lazily
+  // from `path`'s hub hops); we draw that so flows follow the roads instead of
+  // slashing a straight line to the city.
+  private migrationRoutes: { path: [number, number][]; culture: string; volume: number; to: number; age: number; routed?: [number, number][] }[] = [];
   private migrationMode: "dots" | "ribbon" | "focus" = "ribbon";
   private migrationFocusHub: number | null = null;
   private migMaxVol = 1;
@@ -361,6 +364,23 @@ export class OverlayManager {
   setMigrationRoutes(r: { path: [number, number][]; culture: string; volume: number; to: number; age: number }[]) {
     this.migrationRoutes = r;
     this.migMaxVol = r.reduce((m, x) => Math.max(m, x.volume), 1);
+  }
+
+  /** The migration polyline snapped to the trade roads: route each hub→hub hop over
+   *  the trade-route graph (same geometry as the trunks) and concatenate. Falls back
+   *  to the straight hub segment for any hop the graph can't route. Memoized on the
+   *  route object so the Dijkstra runs once per fetch, not every frame. */
+  private routedMigration(r: { path: [number, number][]; routed?: [number, number][] }): [number, number][] {
+    if (r.routed) return r.routed;
+    const out: [number, number][] = [];
+    for (let i = 1; i < r.path.length; i++) {
+      const a = r.path[i - 1], b = r.path[i];
+      const seg = this.routeAlongTradeRoutes(a, b) ?? [a, b];
+      // Drop the duplicated junction shared with the previous segment.
+      for (let k = out.length ? 1 : 0; k < seg.length; k++) out.push(seg[k]);
+    }
+    r.routed = out.length >= 2 ? out : r.path;
+    return r.routed;
   }
   setMigrationMode(mode: "dots" | "ribbon" | "focus") { this.migrationMode = mode; }
   setMigrationFocus(hub: number | null) { this.migrationFocusHub = hub; }
@@ -461,8 +481,10 @@ export class OverlayManager {
       return true;
     };
     for (const r of this.migrationRoutes) {
-      if (r.path.length < 2 || !spanOk(r.path)) continue;
+      if (r.path.length < 2) continue;
       if (this.migrationMode === "focus" && focus != null && r.to !== focus) continue;
+      const path = this.routedMigration(r);
+      if (path.length < 2 || !spanOk(path)) continue;
       const focused = this.migrationMode === "focus" && focus != null && r.to === focus;
       const fade = Math.max(0.12, 1 - r.age / 6); // ~6y lifetime
       const col = this.cultureHue(r.culture);
@@ -472,11 +494,11 @@ export class OverlayManager {
         // Markers spaced along the routed polyline.
         ctx.strokeStyle = this.rgba(col, fade * 0.28);
         ctx.lineWidth = Math.max(0.4, 0.8 * inv);
-        this.tracePath(ctx, r.path);
+        this.tracePath(ctx, path);
         ctx.stroke();
         const step = 4;
-        for (let i = 1; i < r.path.length; i++) {
-          const [x0, y0] = r.path[i - 1], [x1, y1] = r.path[i];
+        for (let i = 1; i < path.length; i++) {
+          const [x0, y0] = path[i - 1], [x1, y1] = path[i];
           const segs = Math.max(1, Math.round(Math.hypot(x1 - x0, y1 - y0) / step));
           for (let s = 0; s < segs; s++) {
             const t = s / segs;
@@ -491,11 +513,11 @@ export class OverlayManager {
         ctx.strokeStyle = this.rgba(col, focused ? Math.min(1, fade + 0.25) : fade * 0.85);
         ctx.lineWidth = Math.max(0.6, (focused ? 2.2 : 1.0 + volN * 2.4) * inv);
         ctx.lineJoin = "round"; ctx.lineCap = "round";
-        this.tracePath(ctx, r.path);
+        this.tracePath(ctx, path);
         ctx.stroke();
         // Arrowhead at the destination.
-        const n = r.path.length;
-        const [px, py] = r.path[n - 2], [qx, qy] = r.path[n - 1];
+        const n = path.length;
+        const [px, py] = path[n - 2], [qx, qy] = path[n - 1];
         const al = Math.hypot(qx - px, qy - py) || 1;
         const ux = (qx - px) / al, uy = (qy - py) / al;
         const s = Math.max(1.4, 2.6 * inv);
