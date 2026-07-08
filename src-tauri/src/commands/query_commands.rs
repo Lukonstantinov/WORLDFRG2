@@ -4858,6 +4858,8 @@ pub struct RiverNode {
     /// Signature fish species for this river (one per zone it spans). Each carries
     /// a `slug` the frontend uses to show an illustration (`public/fish/<slug>.png`).
     pub species: Vec<FishSpeciesOut>,
+    /// Prose trophic food-web summary (apex predator → prey → grazer "stock").
+    pub food_web: String,
     /// Downsampled elevation (m) along the reach, source → mouth.
     pub profile: Vec<f32>,
     pub cities: Vec<RiverCityInfo>,
@@ -5238,11 +5240,19 @@ fn build_river_systems(
         let species: Vec<FishSpeciesOut> =
             crate::sim::aquatic::assign_river_fish(d.band, &d.source_kind, r.mouth_kind, d.discharge, d.arid, d.med, sp_seed)
                 .into_iter()
-                .map(|f| FishSpeciesOut {
-                    slug: f.slug.into(), name: f.name.into(), binomial: f.binomial.into(),
-                    zone: f.zone, real: f.real.into(), blurb: f.blurb.into(),
+                .map(|f| {
+                    let (role, diet) = crate::sim::aquatic::fish_role(f.slug);
+                    FishSpeciesOut {
+                        slug: f.slug.into(), name: f.name.into(), binomial: f.binomial.into(),
+                        zone: f.zone, real: f.real.into(), blurb: f.blurb.into(),
+                        role, diet: diet.into(),
+                    }
                 })
                 .collect();
+        // Trophic food-web summary from the assigned species.
+        let web_members: Vec<(&str, u8, &str)> =
+            species.iter().map(|s| (s.name.as_str(), s.role, s.diet.as_str())).collect();
+        let food_web = crate::sim::aquatic::river_food_web(&web_members);
         RiverNode {
             id: i,
             name: names_by_id[i].clone(),
@@ -5275,6 +5285,7 @@ fn build_river_systems(
             wildlife: d.wildlife.clone(),
             story,
             species,
+            food_web,
             profile: d.profile.clone(),
             cities: river_cities[i].clone(),
             children: child_nodes,
@@ -5301,6 +5312,10 @@ pub struct FishSpeciesOut {
     pub zone: u8,
     pub real: String,
     pub blurb: String,
+    /// Trophic level: 4 apex · 3 predator · 2 forage/insectivore · 1 grazer.
+    pub role: u8,
+    /// Short diet phrase.
+    pub diet: String,
 }
 
 /// One classified lake with its limnological + ecological profile, for the

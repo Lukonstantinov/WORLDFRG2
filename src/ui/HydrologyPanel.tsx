@@ -202,8 +202,14 @@ export function HydrologyPanel() {
                   {sel.species && sel.species.length > 0 && (
                     <div style={{ marginTop: 9 }}>
                       <div style={subLabel}>🐟 Fish of this river · source → mouth</div>
+                      {sel.food_web && (
+                        <div style={{ fontSize: 11, lineHeight: 1.5, color: "#c2d6ea", background: "#0a1620",
+                          border: "1px solid #14283a", borderRadius: 6, padding: "6px 9px", margin: "0 0 7px" }}>
+                          🕸️ <b style={{ color: "#9fc0da" }}>Food web · </b>{sel.food_web}
+                        </div>
+                      )}
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        {[...sel.species].sort((a, b) => a.zone - b.zone).map((sp) => <FishPlate key={sp.slug} sp={sp} />)}
+                        {[...sel.species].sort((a, b) => b.role - a.role).map((sp) => <FishPlate key={sp.slug} sp={sp} />)}
                       </div>
                     </div>
                   )}
@@ -524,8 +530,13 @@ const storyBox: React.CSSProperties = {
 // without the artwork.
 const ZONE_LABEL = ["headwater", "middle river", "delta / estuary"];
 const ZONE_ICON = ["🏔", "🌾", "🐟"];
+// Trophic role by level (1 grazer … 4 apex).
+const ROLE_LABEL = ["", "grazer", "forage", "predator", "apex predator"];
+const ROLE_ICON = ["", "🌿", "🐟", "🎯", "🦈"];
+const ROLE_COLOR = ["", "#7fd6a6", "#79c4e6", "#e0a35e", "#e06a5a"];
 function FishPlate({ sp }: { sp: FishSpecies }) {
   const [failed, setFailed] = useState(false);
+  const lvl = sp.role ?? 2;
   return (
     <div style={{ display: "flex", gap: 9, alignItems: "center", background: "#0a1620",
       border: "1px solid #14283a", borderRadius: 7, padding: "6px 8px" }}>
@@ -544,7 +555,13 @@ function FishPlate({ sp }: { sp: FishSpecies }) {
           </span>
         </div>
         <div style={{ fontSize: 10, fontStyle: "italic", color: "#7fae8f" }}>{sp.binomial}</div>
-        <div style={{ fontSize: 10.5, color: "#93a9be", marginTop: 1 }}>{sp.blurb}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3,
+            color: ROLE_COLOR[lvl], border: `1px solid ${ROLE_COLOR[lvl]}55`, whiteSpace: "nowrap" }}>
+            {ROLE_ICON[lvl]} {ROLE_LABEL[lvl]}
+          </span>
+          <span style={{ fontSize: 10, color: "#93a9be", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>eats {sp.diet}</span>
+        </div>
       </div>
     </div>
   );

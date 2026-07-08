@@ -1552,6 +1552,7 @@ export interface RiverNode {
   wildlife: string; // charismatic riverine wildlife beyond fish
   story: string;    // unique multi-sentence NatGeo-style account of the system
   species: FishSpecies[]; // signature fish, one per river zone the reach spans
+  food_web: string;  // prose trophic summary (apex predator → prey → grazer stock)
   profile: number[]; // elevation (m), source → mouth
   cities: RiverCityInfo[];
   children: RiverNode[];
@@ -1601,6 +1602,8 @@ export interface FishSpecies {
   zone: number;      // 0 upper · 1 middle · 2 lower/delta
   real: string;      // real-world model species
   blurb: string;
+  role: number;      // trophic level: 4 apex · 3 predator · 2 forage · 1 grazer
+  diet: string;      // short diet phrase
 }
 
 export interface Settlement {

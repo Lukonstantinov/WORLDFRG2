@@ -735,6 +735,85 @@ pub const MED_FISH: &[FishSpec] = &[
     FishSpec{slug:"estuary-eel",name:"Estuary Eel",binomial:"Anguilla anguilla",zone:2,real:"European eel",blurb:"a catadromous eel of the Mediterranean estuary.",bands:&[WarmTemperate,CoolTemperate]},
 ];
 
+/// Join names as "a, b and c".
+fn join_and(names: &[&str]) -> String {
+    match names.len() {
+        0 => String::new(),
+        1 => names[0].to_string(),
+        2 => format!("{} and {}", names[0], names[1]),
+        _ => format!("{} and {}", names[..names.len()-1].join(", "), names[names.len()-1]),
+    }
+}
+
+/// A prose food-web summary for a river's assigned fish: names the apex predator,
+/// its prey, and the grazer/detritivore "stock" at the base of the chain.
+/// `members` = (name, trophic level, diet).
+pub fn river_food_web(members: &[(&str, u8, &str)]) -> String {
+    if members.is_empty() { return String::new(); }
+    let mut m: Vec<&(&str, u8, &str)> = members.iter().collect();
+    m.sort_by(|a, b| b.1.cmp(&a.1));
+    let apex = m[0];
+    if apex.1 <= 2 {
+        let names: Vec<&str> = m.iter().map(|x| x.0).collect();
+        return format!("No large predator rules this reach — {} share it, feeding on insects, algae and detritus.", join_and(&names));
+    }
+    let base = m[m.len() - 1];
+    let prey: Vec<&str> = m[1..].iter().map(|x| x.0).collect();
+    let apex_word = if apex.1 >= 4 { "apex predator" } else { "chief predator" };
+    format!("The {} is the river's {}, hunting the {}. At the base, the {} works the bottom ({}) — the stock the whole web feeds on.",
+        apex.0, apex_word, join_and(&prey), base.0, base.2)
+}
+
+/// Trophic role of a fish, as (level, diet). Level: 4 = apex predator, 3 =
+/// predator, 2 = forage / insectivore (the prey base), 1 = grazer / detritivore
+/// (the bottom of the web). Keyed by slug so the catalogue literals stay lean.
+pub fn fish_role(slug: &str) -> (u8, &'static str) {
+    match slug {
+        // ── apex predators (4) ──
+        "sailback-asp" => (4, "surface fish"),
+        "whiskered-wels" => (4, "fish, crayfish & waterfowl"),
+        "reedwater-zander" => (4, "fish"),
+        "sabertooth-payara" | "spotted-wolffish" | "tigerfish" | "whiskered-redtail" => (4, "fish"),
+        "king-arapaima" => (4, "fish & anything it can gulp"),
+        "silver-arowana" => (4, "surface insects & fish"),
+        "silverpike-taimen" => (4, "fish & small mammals"),
+        "northern-pike" => (4, "fish, frogs & ducklings"),
+        "sheefish-inconnu" => (4, "fish"),
+        "desert-snakehead" => (4, "fish & amphibians"),
+        // ── predators (3) ──
+        "silverfin-trout" | "redflank-char" | "adriatic-trout" | "relict-desert-trout" => (3, "insects & small fish"),
+        "marbled-perch" => (3, "fry & invertebrates"),
+        "stonecling-bullhead" | "alpine-bullhead" | "med-bullhead" => (3, "invertebrates & fry"),
+        "silt-sturgeon" | "sand-catfish" => (3, "benthic invertebrates & fish"),
+        "sterlet-sturgeon" => (3, "benthic invertebrates"),
+        "silverback-eel" | "estuary-eel" | "boreal-burbot" | "blackfin-char" => (3, "fish & invertebrates"),
+        "emperor-cichlid" => (3, "fish & invertebrates"),
+        "desert-goby" => (3, "invertebrates"),
+        // ── forage / insectivores (2) ──
+        "frostscale-grayling" | "arctic-grayling" => (2, "drifting insects"),
+        "ribbon-dace" | "siberian-dace" | "spring-dace" | "iberian-minnow" => (2, "insects & algae"),
+        "cascade-danio" | "wadi-killifish" => (2, "insects"),
+        "emberscale-tetra" => (2, "insects & detritus"),
+        "torrent-loach" | "spined-loach" => (2, "benthic invertebrates"),
+        "tidewater-shad" | "sand-smelt" => (2, "plankton"),
+        "arctic-cisco" => (2, "plankton & invertebrates"),
+        "broad-whitefish" => (2, "invertebrates"),
+        "fartet-toothcarp" => (2, "invertebrates & algae"),
+        "bronze-chub" | "med-chub" | "desert-chub" | "amur-ide" => (2, "omnivore"),
+        // ── grazers / detritivores (1) ──
+        "goldvein-barbel" | "iberian-barbel" => (1, "bottom invertebrates & plants"),
+        "gravel-nase" | "southern-nase" => (1, "scraped algae"),
+        "pardilla-roach" | "saltcreek-pupfish" => (1, "algae & invertebrates"),
+        "broadscale-bream" => (1, "bottom detritus & invertebrates"),
+        "marsh-carp" | "desert-barb" => (1, "bottom omnivore"),
+        "oasis-tilapia" | "sailfin-molly" => (1, "algae & detritus"),
+        "golden-pacu" => (1, "fruit, seeds & plants"),
+        "stone-pleco" | "hillstream-loach" => (1, "rasped algae & aufwuchs"),
+        "wadi-mullet" | "flathead-mullet" => (1, "detritus & algae"),
+        _ => (2, "invertebrates & detritus"),
+    }
+}
+
 /// Assign one signature species per river ZONE the reach spans, filtered to the
 /// reach's thermal band. Headwater sources start in zone 0, sizeable rivers gain a
 /// middle (zone 1) reach, and delta/estuary or big mouths reach zone 2. Arid
@@ -800,6 +879,18 @@ mod tests {
         let med = assign_river_fish(Band::WarmTemperate, "hills", 1, 2000.0, false, true, 3);
         assert!(!med.is_empty(), "mediterranean river has its own species");
         assert!(med.iter().all(|f| MED_FISH.iter().any(|m| m.slug == f.slug)), "med roster used");
+    }
+
+    #[test]
+    fn food_web_names_apex_and_base() {
+        // pike (apex 4), grayling (forage 2), barbel (grazer 1).
+        let members = [("Northern Pike", 4u8, "fish"), ("Frostscale Grayling", 2, "insects"), ("Goldvein Barbel", 1, "plants")];
+        let web = river_food_web(&members);
+        assert!(web.contains("Northern Pike") && web.contains("apex predator"), "{web}");
+        assert!(web.contains("Goldvein Barbel"), "base named: {web}");
+        // a reach of only small fish has no apex.
+        let small = [("Ribbon Dace", 2u8, "insects"), ("Gravel Nase", 1, "algae")];
+        assert!(river_food_web(&small).contains("No large predator"));
     }
 
     #[test]
