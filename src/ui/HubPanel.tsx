@@ -501,14 +501,33 @@ export function HubPanel() {
       {/* ════════════ OVERVIEW ════════════ */}
       {tab === "summary" && (
         <>
-          <div style={statGrid}>
-            <Stat label="Throughput" value={fmt(hub.throughput ?? 0)} />
-            <Stat label="Exports →" value={fmt(hub.exports ?? 0)} />
-            <Stat label="← Imports" value={fmt(hub.imports ?? 0)} />
-            <Stat label="Partners" value={String(hub.partners ?? 0)} />
-            <Stat label="Wealth" value={`${Math.round(hub.wealth * 100)}%`} />
-            <Stat label="Population" value={(detail?.population ?? hub.population).toLocaleString()} />
-          </div>
+          {/* During a live campaign the stats come from the running simulation, not
+              the frozen worldgen snapshot (which never moves once play begins). The
+              worldgen figures are shown only before a campaign starts. */}
+          {campActive && detail ? (
+            <>
+              <div style={statGrid}>
+                <Stat label="Sold →" value={fmt(detail.sold ?? 0)} />
+                <Stat label="← Bought" value={fmt(detail.bought ?? 0)} />
+                <Stat label="By sea" value={fmt(detail.in_by_sea ?? 0)} />
+                <Stat label="By land" value={fmt(detail.in_by_land ?? 0)} />
+                <Stat label="Wealth" value={fmt((detail.trade_wealth ?? 0) + (detail.grain_wealth ?? 0))} />
+                <Stat label="Population" value={detail.population.toLocaleString()} />
+              </div>
+              <div style={{ fontSize: 9, color: "#5a7088", margin: "3px 2px 0", letterSpacing: "0.03em" }}>
+                live · recent trade this year
+              </div>
+            </>
+          ) : (
+            <div style={statGrid}>
+              <Stat label="Throughput" value={fmt(hub.throughput ?? 0)} />
+              <Stat label="Exports →" value={fmt(hub.exports ?? 0)} />
+              <Stat label="← Imports" value={fmt(hub.imports ?? 0)} />
+              <Stat label="Partners" value={String(hub.partners ?? 0)} />
+              <Stat label="Wealth" value={`${Math.round(hub.wealth * 100)}%`} />
+              <Stat label="Population" value={hub.population.toLocaleString()} />
+            </div>
+          )}
           {detail && (detail.estate_kind ?? 0) > 0 && (
             <div style={estateBox}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
