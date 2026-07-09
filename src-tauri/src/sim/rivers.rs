@@ -55,6 +55,13 @@ pub struct River {
     /// frontend falls back to its cosmetic meander of `points`.
     #[serde(default)]
     pub render: Vec<(f32, f32)>,
+    /// BRAIDED anabranches — thin secondary channels that split off and rejoin the
+    /// main stem on the widest, flattest reaches of a great river (the
+    /// sandbar-island braid of the lower Mississippi / Brahmaputra). Each is a
+    /// short sub-cell strand (cell-index coords) drawn faint beside the trunk.
+    /// Empty for small/steep rivers and old saves.
+    #[serde(default)]
+    pub braids: Vec<Vec<(f32, f32)>>,
 }
 
 fn one_f32() -> f32 { 1.0 }
@@ -431,12 +438,12 @@ pub fn extract_rivers(
 
         // TRUE meander geometry (sub-cell render polyline) — winds on flat
         // lowlands, straight in the steep headwaters, clamped to the valley floor.
-        let render = build_meander_path(
-            buf, &points, width, discharge, threshold as f32,
-            (s as u64).wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(0x51ED),
-        );
+        let mseed = (s as u64).wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(0x51ED);
+        let render = build_meander_path(buf, &points, width, discharge, threshold as f32, mseed);
+        // Braided anabranches on the widest, flattest reaches of a great river.
+        let braids = build_braids(buf, &render, width, order, mseed ^ 0xB2A1);
 
-        rivers.push(River { points, width, major, navigable, mouth_kind, delta, tributary, order, meander, render });
+        rivers.push(River { points, width, major, navigable, mouth_kind, delta, tributary, order, meander, render, braids });
     }
 
     rivers
@@ -571,6 +578,76 @@ fn build_meander_path(
         let mut xx = p.0 % w;
         if xx < 0.0 { xx += w; }
         p.0 = xx;
+    }
+    out
+}
+
+/// Build BRAIDED anabranches for a great river's widest, flattest reaches — thin
+/// secondary channels that split off and rejoin the main stem around a sandbar
+/// island. Only for large rivers (order ≥ 5); each strand bows a modest, valley-
+/// clamped amount to one side over a short run, tapering in and out so it reads as
+/// a splitting channel, not a parallel line. Conservative (≤ 3 strands/river) so
+/// the effect enriches the great trunks without cluttering the map.
+fn build_braids(buf: &WorldBuffer, render: &[(f32, f32)], width_cells: f32, order: u8, seed: u64) -> Vec<Vec<(f32, f32)>> {
+    let n = render.len();
+    if order < 5 || width_cells < 1.6 || n < 44 { return Vec::new(); }
+    let w = buf.width as f32;
+    let h = buf.height;
+
+    let sample_elev = |fx: f32, fy: f32| -> f32 {
+        let xi = buf.wrap_x(fx.round() as i32);
+        let yi = (fy.round() as i32).clamp(0, h as i32 - 1) as u32;
+        buf.elevation[buf.idx(xi, yi)]
+    };
+    let is_land = |fx: f32, fy: f32| -> bool {
+        let xi = buf.wrap_x(fx.round() as i32);
+        let yi = (fy.round() as i32).clamp(0, h as i32 - 1) as u32;
+        buf.terrain[buf.idx(xi, yi)] == 1
+    };
+
+    const STEEP_G: f32 = 0.004;
+    const FLAT_G: f32 = 0.0005;
+    let island = 14usize;                 // strand length in vertices
+    let side_amp = (width_cells * 0.9).clamp(1.5, 4.0);
+    let mut out: Vec<Vec<(f32, f32)>> = Vec::new();
+    let mut side = 1.0f32;                 // alternate banks
+    let mut k = n / 6;
+    while k + island < n && out.len() < 3 {
+        // Local slowness (flatness) at the strand's midpoint.
+        let m = k + island / 2;
+        let a = sample_elev(render[m - 3].0, render[m - 3].1);
+        let b = sample_elev(render[m + 3].0, render[m + 3].1);
+        let grad = (a - b).abs() / 6.0;
+        let slow = ((1.0 - (grad - FLAT_G) / (STEEP_G - FLAT_G)) as f32).clamp(0.0, 1.0);
+        if slow < 0.6 { k += 6; continue; }
+
+        // Build the strand: offset each vertex perpendicular to the local flow,
+        // with a sine envelope so it splits from and rejoins the trunk. Bail out
+        // if it would leave the flat valley (rising ground / sea / edge).
+        let mut strand: Vec<(f32, f32)> = Vec::with_capacity(island + 1);
+        let mut ok = true;
+        for j in 0..=island {
+            let idx = k + j;
+            let (px, py) = render[idx.saturating_sub(1)];
+            let (nx, ny) = render[(idx + 1).min(n - 1)];
+            let (mut tx, mut ty) = (nx - px, ny - py);
+            let tl = (tx * tx + ty * ty).sqrt().max(1e-4);
+            tx /= tl; ty /= tl;
+            let (nrx, nry) = (-ty, tx);
+            let env = (std::f32::consts::PI * j as f32 / island as f32).sin(); // 0..1..0
+            let off = side * side_amp * env;
+            let (sx, sy) = (render[idx].0 + nrx * off, render[idx].1 + nry * off);
+            if sy < 0.0 || sy >= h as f32 || !is_land(sx, sy) { ok = false; break; }
+            let mut xx = sx % w; if xx < 0.0 { xx += w; }
+            strand.push((xx, sy));
+        }
+        if ok && strand.len() >= island {
+            out.push(strand);
+            side = -side;         // next island splits the other bank
+            k += island * 2;      // leave a gap before the next braid
+        } else {
+            k += 6;
+        }
     }
     out
 }
@@ -878,7 +955,7 @@ mod tests {
         let render = build_meander_path(&buf, &pts, 3.0, 8000.0, 20.0, 7);
         let river = River {
             points: pts, width: 3.0, major: true, navigable: true, mouth_kind: 0,
-            delta: vec![], tributary: false, order: 5, meander: 1.0, render,
+            delta: vec![], tributary: false, order: 5, meander: 1.0, render, braids: vec![],
         };
         let oxbows = extract_oxbows(&[river], &buf, &[]);
         for lk in &oxbows {
@@ -888,5 +965,27 @@ mod tests {
                 assert_eq!(buf.terrain[buf.idx(x, y)], 1, "oxbow cell is land");
             }
         }
+    }
+
+    /// A great river on a broad flat plain grows braided anabranches that stay on
+    /// land and inside the map; a small river grows none.
+    #[test]
+    fn braids_only_on_great_flat_rivers() {
+        let (w, h) = (140u32, 60u32);
+        let n = (w * h) as usize;
+        let buf = synth(w, h, vec![1u8; n], vec![0.1f32; n]);
+        let pts: Vec<(u32, u32)> = (5..130).map(|x| (x, 30)).collect();
+        let render = build_meander_path(&buf, &pts, 3.0, 9000.0, 20.0, 3);
+
+        let braids = build_braids(&buf, &render, 3.0, 6, 55);
+        assert!(!braids.is_empty(), "a great flat river should braid");
+        for strand in &braids {
+            for &(x, y) in strand {
+                assert!(x >= 0.0 && x < w as f32 && y >= 0.0 && y < h as f32, "braid in bounds");
+                assert_eq!(buf.terrain[buf.idx(x.round() as u32 % w, y.round() as u32)], 1, "braid on land");
+            }
+        }
+        // A small creek (low order, thin) never braids.
+        assert!(build_braids(&buf, &render, 1.0, 2, 55).is_empty(), "creeks do not braid");
     }
 }

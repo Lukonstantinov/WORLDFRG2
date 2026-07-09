@@ -1097,6 +1097,17 @@ export class OverlayManager {
         ctx.globalAlpha = hasHL ? (isHL ? 0.95 : 0.22) : 0.85;
         ctx.strokeStyle = riverShade(river.major);
         ctx.lineWidth = riverW;
+        // Braided anabranches first (faint, thin), so the main stem draws over them
+        // and they read as side-channels splitting around sandbar islands.
+        if (river.braids && river.braids.length > 0) {
+          ctx.save();
+          ctx.globalAlpha = (hasHL ? (isHL ? 0.6 : 0.14) : 0.5);
+          ctx.lineWidth = Math.max(0.6, riverW * 0.55);
+          for (const strand of river.braids) {
+            if (strand.length >= 2) strokeSmoothPath(ctx, strand);
+          }
+          ctx.restore();
+        }
         // Meander + Catmull-Rom smoothing so the drainage lines read as natural
         // winding channels rather than the straight diagonal grid-lines the
         // steepest-descent flow produces on flats.

@@ -1511,6 +1511,9 @@ export interface RiverData {
    *  Drawn in place of the cosmetic meander when present. Empty/absent on old
    *  saves → the frontend falls back to `meanderPath(points)`. */
   render?: [number, number][];
+  /** Braided anabranches (thin secondary channels) on a great river's widest,
+   *  flattest reaches — drawn faint beside the trunk. */
+  braids?: [number, number][][];
 }
 
 /** A city sitting on a river reach (Hydrology dashboard). Mirrors Rust `RiverCityInfo`. */
