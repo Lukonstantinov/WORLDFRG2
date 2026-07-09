@@ -109,6 +109,9 @@ pub fn sim_rivers_hydrology(
     // Oxbow backwaters cut off from the meandering lowland reaches (real lakes).
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
+    // Tag terminal salt lakes (endorheic + arid) so the overlay tints them and the
+    // Hydrology panel, goods and settlements agree on the brine.
+    rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
 
     // Store rivers as serialized state for rendering
     // (Rivers are overlays, not per-cell data stored in tiles)
@@ -233,6 +236,7 @@ pub fn sim_run_all(
     let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0, &lakes);
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
+    rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
 
     // Phase 6: Soil & fertility
     soil::classify_soil(&mut buf);
@@ -359,6 +363,7 @@ pub fn sim_run_all_from_terrain(
     let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0, &lakes);
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
+    rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
 
     // Phase 6: Soil & fertility
     soil::classify_soil(&mut buf);

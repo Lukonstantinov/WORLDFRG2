@@ -1601,6 +1601,11 @@ export interface LakeData {
   /** 0 = normal depression-filled basin · 1 = oxbow/backwater cut off from a
    *  meandering river (drawn as a still green-blue backwater). */
   kind?: number;
+  /** True terminal salt lake (arid, no outflow) — tinted pink on the map. */
+  endorheic?: boolean;
+  /** Approximate salinity (ppt); ~0.2 fresh, 12-120+ for a salt lake. Drives the
+   *  brackish→saline→hypersaline pink tint. */
+  salinity_ppt?: number;
 }
 
 /** A signature fish species on a river reach. `slug` keys an illustration at

@@ -76,6 +76,82 @@ pub struct Lake {
     /// a distinct render + its own limnology (still, weedy backwater ecology).
     #[serde(default)]
     pub kind: u8,
+    /// True terminal SALT lake — an arid basin with no river outflow, where the sun
+    /// alone empties it and brine concentrates (Caspian / Great Salt Lake / playa).
+    /// Set by `classify_salt_lakes`; drives the pink brine tint, salt-good
+    /// production and the salt-shore settlement draw.
+    #[serde(default)]
+    pub endorheic: bool,
+    /// Approximate salinity in parts-per-thousand — ~0.2 for a freshwater lake,
+    /// 12-120+ for a terminal salt lake (shallower & more arid = more concentrated).
+    #[serde(default)]
+    pub salinity_ppt: f32,
+}
+
+/// Salinity (PSU) window the persisted `salinity` u8 column encodes — must match
+/// `query_commands` and `ocean.rs` so a salt-lake value round-trips consistently.
+pub const SAL_MIN_PSU: f32 = 28.0;
+pub const SAL_MAX_PSU: f32 = 42.0;
+/// Encode a salinity in ppt into the u8 salinity-column value (clamped to window).
+pub fn salinity_to_u8(ppt: f32) -> u8 {
+    (((ppt - SAL_MIN_PSU) / (SAL_MAX_PSU - SAL_MIN_PSU)).clamp(0.0, 1.0) * 255.0).round() as u8
+}
+/// A terminal salt lake is considered salt-PRODUCING once its brine reaches at
+/// least seawater strength (~35 ppt); milder brackish basins do not make salt.
+pub const SALT_PRODUCTION_PPT: f32 = 35.0;
+
+/// Classify each lake's SALINITY in place: a lake with no river outflow sitting in
+/// an arid (BW/BS) basin is a terminal salt lake; the sun alone empties it and
+/// brine concentrates (shallower → stronger). Mirrors the Hydrology panel's
+/// limnology so the map, the goods layer and the panel all agree. Freshwater lakes
+/// are left at ~0.2 ppt. `rivers` supplies outflow detection (a river resuming at
+/// the shore = the lake drains, so it is NOT terminal).
+pub fn classify_salt_lakes(buf: &WorldBuffer, lakes: &mut [Lake], rivers: &[River]) {
+    use crate::sim::koppen;
+    let have_koppen = !buf.koppen.is_empty();
+    // Cells at/near a lake, mapped to their lake index, for outflow attachment.
+    let mut lake_of: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for (li, lk) in lakes.iter().enumerate() {
+        for &(x, y) in &lk.cells { lake_of.insert(buf.idx(x, y), li); }
+    }
+    let near_lake = |x: u32, y: u32| -> Option<usize> {
+        if let Some(&l) = lake_of.get(&buf.idx(x, y)) { return Some(l); }
+        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+            let nx = buf.wrap_x(x as i32 + dx);
+            let ny = y as i32 + dy;
+            if ny < 0 || ny >= buf.height as i32 { continue; }
+            if let Some(&l) = lake_of.get(&buf.idx(nx, ny as u32)) { return Some(l); }
+        }
+        None
+    };
+    // A river whose SOURCE resumes at a lake shore = that lake's outflow.
+    let mut has_outflow = vec![false; lakes.len()];
+    for r in rivers {
+        if r.points.len() < 2 { continue; }
+        let (sx, sy) = r.points[0];
+        if let Some(l) = near_lake(sx, sy) { has_outflow[l] = true; }
+    }
+    for (li, lk) in lakes.iter_mut().enumerate() {
+        let n = lk.cells.len().max(1);
+        let mut arid_cells = 0usize;
+        let mut max_depth = 0.0f32;
+        for &(x, y) in &lk.cells {
+            let ci = buf.idx(x, y);
+            if have_koppen && matches!(buf.koppen[ci],
+                koppen::BWH | koppen::BWK | koppen::BSH | koppen::BSK) { arid_cells += 1; }
+            max_depth = max_depth.max((lk.elevation - buf.elevation[ci]).max(0.0));
+        }
+        let arid = arid_cells as f32 / n as f32 > 0.4;
+        let endorheic = arid && !has_outflow[li];
+        lk.endorheic = endorheic;
+        lk.salinity_ppt = if endorheic {
+            let depth_m = (max_depth * 8848.0 * 3.0 + 2.0).clamp(2.0, 1600.0);
+            crate::sim::aquatic::lake_salinity_ppt(
+                crate::sim::aquatic::LakeKind::SaltEndorheic, depth_m)
+        } else {
+            0.2
+        };
+    }
 }
 
 /// D8 flow directions (index of downhill neighbor, or special values)
@@ -722,7 +798,7 @@ pub fn extract_oxbows(rivers: &[River], buf: &WorldBuffer, existing: &[Lake]) ->
                     let mut se = 0.0;
                     for &(x, y) in &cells { se += buf.elevation[buf.idx(x, y)]; occupied[buf.idx(x, y)] = true; }
                     let elev = se / cells.len() as f32;
-                    out.push(Lake { cells, elevation: elev, kind: 1 });
+                    out.push(Lake { cells, elevation: elev, kind: 1, endorheic: false, salinity_ppt: 0.2 });
                     made += 1;
                     if made >= 2 { break; }
                     k += 2 * q; // one bend → one oxbow
@@ -791,7 +867,7 @@ pub fn detect_lakes(buf: &WorldBuffer, filled: &[f32], fill_depth: f32, max_cell
             // `max_cells` (giant flooded basins are usually artefacts).
             if cells.len() >= 2 && cells.len() <= max_cells {
                 let elevation = sum_elev / cells.len() as f32;
-                lakes.push(Lake { cells, elevation, kind: 0 });
+                lakes.push(Lake { cells, elevation, kind: 0, endorheic: false, salinity_ppt: 0.0 });
             }
         }
     }

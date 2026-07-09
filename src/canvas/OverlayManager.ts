@@ -155,6 +155,19 @@ function meanderPath(pts: [number, number][], seed: number, order: number, world
 const LAKE_COLOR = "rgba(51, 153, 221, 0.7)";
 /** Oxbow / backwater lake — a stiller, weedier green-blue than open lake water. */
 const OXBOW_COLOR = "rgba(64, 150, 150, 0.72)";
+/** Lake fill by character: oxbow backwater, then a brine ramp toward the vivid
+ *  pink of a hypersaline lake (halophile / Dunaliella bloom — Lake Retba, the
+ *  Great Salt Lake north arm), else open blue water. */
+function lakeFill(lake: LakeData): string {
+  if (lake.kind === 1) return OXBOW_COLOR;
+  const s = lake.salinity_ppt ?? 0;
+  if (lake.endorheic || s >= 1) {
+    if (s >= 120) return "rgba(216, 90, 134, 0.78)";  // hypersaline — vivid pink
+    if (s >= 35) return "rgba(201, 122, 150, 0.74)";  // saline — pale rose
+    return "rgba(70, 150, 158, 0.72)";                // brackish — steely teal
+  }
+  return LAKE_COLOR;
+}
 
 const SETTLEMENT_COLORS: Record<string, string> = {
   capital: "#ffd700",
@@ -1064,8 +1077,8 @@ export class OverlayManager {
 
     if (this.visibility.lakes && this.lakes.length > 0) {
       for (const lake of this.lakes) {
-        // Oxbows / backwaters read as a stiller, greener water than open lakes.
-        ctx.fillStyle = lake.kind === 1 ? OXBOW_COLOR : LAKE_COLOR;
+        // Oxbow backwater · salt-lake brine tint · else open blue water.
+        ctx.fillStyle = lakeFill(lake);
         for (const [x, y] of lake.cells) {
           ctx.fillRect(x, y, 1, 1);
         }
