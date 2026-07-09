@@ -1559,11 +1559,29 @@ export interface RiverNode {
   riparian: string; // bankside vegetation phrase
   water: string;    // water character (clarity/sediment/productivity)
   wildlife: string; // charismatic riverine wildlife beyond fish
-  story: string;    // unique multi-sentence NatGeo-style account of the system
+  story: string;    // trunk: SUMMARY lede of the whole course · tributary: short account
+  climate_journey: string; // biomes crossed source→mouth ("temperate forest, then …")
+  zones: RiverZone[];      // upper / middle / lower-delta reaches (trunks only)
   species: FishSpecies[]; // signature fish, one per river zone the reach spans
   profile: number[]; // elevation (m), source → mouth
   cities: RiverCityInfo[];
   children: RiverNode[];
+}
+
+/** A tributary joining a river at a given distance downstream. Mirrors Rust. */
+export interface TribJoin { name: string; km: number; }
+
+/** One reach of a trunk river — upper / middle / lower-delta. Mirrors Rust `RiverZoneOut`. */
+export interface RiverZone {
+  kind: "upper" | "middle" | "delta";
+  label: string;      // "Upper river" | "Middle river" | "Delta / Estuary / Lower course"
+  start_km: number;
+  end_km: number;
+  biome: string;      // dominant biome of this reach
+  koppen: string;     // dominant Köppen code (tooltip)
+  character: string;  // short width/speed phrase
+  story: string;
+  tributaries: TribJoin[];
 }
 
 /** One classified lake with its limnological + ecological profile (Hydrology

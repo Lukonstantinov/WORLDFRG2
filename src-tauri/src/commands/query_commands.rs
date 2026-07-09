@@ -4852,9 +4852,18 @@ pub struct RiverNode {
     pub water: String,
     /// Charismatic riverine wildlife beyond fish (`aquatic::river_wildlife`).
     pub wildlife: String,
-    /// A UNIQUE, multi-sentence National-Geographic-style account of this river
-    /// system, seeded per-river so no two read alike (`aquatic::river_story`).
+    /// A UNIQUE account of this river: for a trunk it is the SUMMARY lede
+    /// synthesizing the whole course (`aquatic::river_summary`); for a tributary a
+    /// short seeded description (`aquatic::river_story`).
     pub story: String,
+    /// The biomes the trunk crosses source→mouth, as a phrase ("temperate forest,
+    /// then cold steppe, ending in reed delta"). Empty for tributaries.
+    #[serde(default)]
+    pub climate_journey: String,
+    /// The trunk's course split into upper / middle / lower-delta reaches, each
+    /// with its own biome, character, story and confluences. Empty for tributaries.
+    #[serde(default)]
+    pub zones: Vec<RiverZoneOut>,
     /// Signature fish species for this river (one per zone it spans). Each carries
     /// a `slug` the frontend uses to show an illustration (`public/fish/<slug>.png`).
     pub species: Vec<FishSpeciesOut>,
@@ -4904,6 +4913,13 @@ const EARTH_RIVERS: &[(&str, f32, f32)] = &[
     ("the Danube", 6500.0, 45.0), ("the Niger", 5700.0, 5.0), ("the Zambezi", 3400.0, 18.0),
     ("the Nile", 2800.0, 31.0), ("the Rhine", 2300.0, 52.0), ("the Rhône", 1700.0, 43.0),
     ("the Elbe", 870.0, 54.0), ("the Seine", 560.0, 49.0), ("the Thames", 65.0, 51.0),
+    // Regional mid/small rivers, so a modest river is likened to a real one of its
+    // own climate & size rather than to a great continental trunk.
+    ("the Chao Phraya", 3200.0, 13.0), ("the Magdalena", 7000.0, 11.0), ("the Neva", 2500.0, 60.0),
+    ("the Northern Dvina", 3300.0, 64.0), ("the Po", 1540.0, 45.0), ("the Vistula", 1080.0, 54.0),
+    ("the Loire", 840.0, 47.0), ("the Nemunas", 680.0, 55.0), ("the Daugava", 680.0, 57.0),
+    ("the Garonne", 630.0, 45.0), ("the Oder", 570.0, 54.0), ("the Ebro", 430.0, 41.0),
+    ("the Kemijoki", 560.0, 66.0), ("the Tiber", 240.0, 42.0), ("the Venta", 100.0, 57.0),
 ];
 
 /// Closest real-world river by BOTH discharge (log-distance, primary) and mouth
@@ -5186,6 +5202,97 @@ fn build_river_systems(
         counterpart_by_id[i] = earth_counterpart(der[i].discharge, buf.latitude(der[i].mouth_pt.1).abs());
     }
 
+    // ── Segmented course: climate journey + upper/middle/delta zones (trunks) ──
+    // Precomputed here because it needs the WorldBuffer (Köppen/elevation along the
+    // reach); `build` then attaches it. Only the main stem (a sea-reaching trunk)
+    // gets zones — tributaries keep a single short description.
+    let mut river_journey = vec![String::new(); rivers.len()];
+    let mut river_zones: Vec<Vec<RiverZoneOut>> = vec![Vec::new(); rivers.len()];
+    let have_koppen = !buf.koppen.is_empty();
+    for i in 0..rivers.len() {
+        let r = &rivers[i];
+        if r.tributary { continue; }
+        let d = &der[i];
+        let pts = &r.points;
+        let np = pts.len();
+        if np < 6 || d.length_km < 1.0 || d.cum_km.len() != np { continue; }
+        let cum = &d.cum_km;
+        let ll = d.length_km;
+        let elev_at = |k: usize| buf.elevation[idx(pts[k].0, pts[k].1)];
+        let kop_at = |k: usize| if have_koppen { buf.koppen[idx(pts[k].0, pts[k].1)] } else { 0 };
+
+        // Zone boundaries: gradient-primary (a river sheds most height early, so the
+        // 60%/92%-of-drop marks split headwater/middle/lower) with distance clamps.
+        let src_e = elev_at(0);
+        let total_drop = (src_e - elev_at(np - 1)).max(1e-4);
+        let (mut u_end, mut d_start) = (0.30 * ll, 0.75 * ll);
+        let (mut got_u, mut got_d) = (false, false);
+        let mut mine = src_e;
+        for k in 0..np {
+            let e = elev_at(k);
+            if e < mine { mine = e; }
+            let frac = (src_e - mine) / total_drop;
+            if !got_u && frac >= 0.60 { u_end = cum[k]; got_u = true; }
+            if !got_d && frac >= 0.92 { d_start = cum[k]; got_d = true; }
+        }
+        u_end = u_end.clamp(0.15 * ll, 0.42 * ll);
+        d_start = d_start.clamp(0.62 * ll, 0.90 * ll).max(u_end + 0.05 * ll);
+
+        // Climate journey — biomes crossed source→mouth, de-duplicated in order.
+        if have_koppen {
+            let mut uniq: Vec<&str> = Vec::new();
+            for k in 0..np {
+                let b = crate::sim::aquatic::koppen_to_biome(kop_at(k));
+                if !uniq.contains(&b) { uniq.push(b); }
+            }
+            uniq.truncate(4);
+            river_journey[i] = join_biomes(&uniq);
+        }
+
+        // Direct tributaries as (name, km-from-source-of-this-trunk).
+        let tribs: Vec<(String, f32)> = children[i].iter()
+            .map(|&c| (names_by_id[c].clone(), join_km[c]))
+            .collect();
+
+        let mut zones: Vec<RiverZoneOut> = Vec::new();
+        for &(zs, ze, kind) in &[(0.0, u_end, 0u8), (u_end, d_start, 1u8), (d_start, ll, 2u8)] {
+            if ze - zs < 0.5 { continue; }
+            // Dominant Köppen over this reach.
+            let mut counts: std::collections::HashMap<u8, u32> = std::collections::HashMap::new();
+            for k in 0..np { if cum[k] >= zs && cum[k] <= ze { *counts.entry(kop_at(k)).or_default() += 1; } }
+            let dom_k = counts.iter().max_by_key(|(_, c)| **c).map(|(k, _)| *k).unwrap_or(0);
+            let biome = crate::sim::aquatic::koppen_to_biome(dom_k);
+            let ztribs: Vec<(String, f32)> = tribs.iter().filter(|(_, km)| *km >= zs && *km < ze).cloned().collect();
+            // Reach-appropriate fish (steep headwater → gentle middle → tidal mouth).
+            let (grad, disch, est) = match kind {
+                0 => (20.0, d.discharge * 0.3, false),
+                1 => (2.0, d.discharge * 0.7, false),
+                _ => (0.6, d.discharge, r.mouth_kind != 0 || d.discharge >= 800.0),
+            };
+            let fish = crate::sim::aquatic::river_fish(d.band, grad, disch, est);
+            let story = crate::sim::aquatic::zone_story(&crate::sim::aquatic::ZoneFacts {
+                kind, name: &names_by_id[i], biome, fish: &fish, tribs: &ztribs,
+                mouth_kind: if kind == 2 { r.mouth_kind } else { 0 }, band: d.band,
+                seed: (d.source_pt.0 as u64).wrapping_mul(2246822519)
+                    ^ (d.mouth_pt.1 as u64).wrapping_mul(3266489917)
+                    ^ ((i as u64) << 3) ^ kind as u64,
+            });
+            let label = match kind {
+                0 => "Upper river", 1 => "Middle river",
+                _ => match r.mouth_kind { 1 => "Delta", 2 => "Estuary", _ => "Lower course" },
+            };
+            zones.push(RiverZoneOut {
+                kind: match kind { 0 => "upper", 1 => "middle", _ => "delta" }.into(),
+                label: label.into(), start_km: zs, end_km: ze,
+                biome: biome.into(), koppen: crate::sim::aquatic::koppen_code(dom_k).into(),
+                character: zone_character(kind, r.mouth_kind).into(),
+                story,
+                tributaries: ztribs.into_iter().map(|(name, km)| TribJoin { name, km }).collect(),
+            });
+        }
+        river_zones[i] = zones;
+    }
+
     // ── Assemble the tree (recursive, full depth) ────────────────────────────
     // `seen` guards against a degenerate mutual-confluence cycle: a node already
     // on the current path is emitted as a leaf so the recursion can't run away.
@@ -5193,6 +5300,7 @@ fn build_river_systems(
         i: usize, rivers: &[crate::sim::rivers::River], der: &[RiverDerived],
         children: &[Vec<usize>], join_km: &[f32], river_cities: &[Vec<RiverCityInfo>],
         names_by_id: &[String], counterpart_by_id: &[String],
+        river_journey: &[String], river_zones: &[Vec<RiverZoneOut>],
         seen: &mut Vec<bool>,
     ) -> RiverNode {
         let cyclic = seen[i];
@@ -5202,32 +5310,33 @@ fn build_river_systems(
         let mut kids: Vec<usize> = if cyclic { Vec::new() } else { children[i].clone() };
         kids.sort_by(|&a, &b| der[b].discharge.partial_cmp(&der[a].discharge).unwrap_or(std::cmp::Ordering::Equal));
         let child_nodes: Vec<RiverNode> = kids.iter()
-            .map(|&c| build(c, rivers, der, children, join_km, river_cities, names_by_id, counterpart_by_id, seen))
+            .map(|&c| build(c, rivers, der, children, join_km, river_cities, names_by_id, counterpart_by_id, river_journey, river_zones, seen))
             .collect();
         let trib_total = child_nodes.iter().map(|c| 1 + c.trib_total).sum();
         let city_total = river_cities[i].len() + child_nodes.iter().map(|c| c.city_total).sum::<usize>();
-        // Unique NatGeo-style write-up for this river system (seeded per-river).
-        let story = crate::sim::aquatic::river_story(&crate::sim::aquatic::RiverStoryFacts {
-            name: &names_by_id[i],
-            counterpart: &counterpart_by_id[i],
-            length_km: d.length_km,
-            discharge_m3s: d.discharge,
-            source_kind: &d.source_kind,
-            mouth_kind: r.mouth_kind,
-            navigable: r.navigable,
-            trib_total,
-            city_total,
-            band: d.band,
-            regime: &d.regime,
-            fish: &d.fish,
-            riparian: &d.riparian,
-            water: &d.water,
-            wildlife: &d.wildlife,
-            arid: d.arid,
-            seed: (d.source_pt.0 as u64).wrapping_mul(73856093)
-                ^ (d.source_pt.1 as u64).wrapping_mul(19349663)
-                ^ (i as u64).wrapping_mul(0x9E3779B97F4A7C15),
-        });
+        // Write-up: a TRUNK gets the SUMMARY lede (the whole-course synthesis) plus
+        // its upper/middle/delta zones + climate journey; a TRIBUTARY keeps a short
+        // seeded description and no zones.
+        let seed = (d.source_pt.0 as u64).wrapping_mul(73856093)
+            ^ (d.source_pt.1 as u64).wrapping_mul(19349663)
+            ^ (i as u64).wrapping_mul(0x9E3779B97F4A7C15);
+        let (story, climate_journey, zones): (String, String, Vec<RiverZoneOut>) = if !r.tributary {
+            let summary = crate::sim::aquatic::river_summary(&crate::sim::aquatic::RiverSummaryFacts {
+                name: &names_by_id[i], discharge_m3s: d.discharge, source_kind: &d.source_kind,
+                mouth_kind: r.mouth_kind, trib_total, journey: &river_journey[i],
+                counterpart: &counterpart_by_id[i], length_km: d.length_km, navigable: r.navigable, seed,
+            });
+            (summary, river_journey[i].clone(), river_zones[i].clone())
+        } else {
+            let s = crate::sim::aquatic::river_story(&crate::sim::aquatic::RiverStoryFacts {
+                name: &names_by_id[i], counterpart: &counterpart_by_id[i], length_km: d.length_km,
+                discharge_m3s: d.discharge, source_kind: &d.source_kind, mouth_kind: r.mouth_kind,
+                navigable: r.navigable, trib_total, city_total, band: d.band, regime: &d.regime,
+                fish: &d.fish, riparian: &d.riparian, water: &d.water, wildlife: &d.wildlife,
+                arid: d.arid, seed,
+            });
+            (s, String::new(), Vec::new())
+        };
         // Signature fish species — one per river zone this reach spans.
         let sp_seed = (d.source_pt.0 as u64).wrapping_mul(2654435761)
             ^ (d.mouth_pt.1 as u64).wrapping_mul(40503)
@@ -5271,6 +5380,8 @@ fn build_river_systems(
             water: d.water.clone(),
             wildlife: d.wildlife.clone(),
             story,
+            climate_journey,
+            zones,
             species,
             profile: d.profile.clone(),
             cities: river_cities[i].clone(),
@@ -5281,7 +5392,7 @@ fn build_river_systems(
     let mut seen = vec![false; rivers.len()];
     let mut roots: Vec<RiverNode> = (0..rivers.len())
         .filter(|&i| parent[i] == usize::MAX)
-        .map(|i| build(i, &rivers, &der, &children, &join_km, &river_cities, &names_by_id, &counterpart_by_id, &mut seen))
+        .map(|i| build(i, &rivers, &der, &children, &join_km, &river_cities, &names_by_id, &counterpart_by_id, &river_journey, &river_zones, &mut seen))
         .collect();
 
     // Sort systems by length (longest first); counterpart is set per node in build.
@@ -5298,6 +5409,56 @@ pub struct FishSpeciesOut {
     pub zone: u8,
     pub real: String,
     pub blurb: String,
+}
+
+/// A tributary joining a river at a given distance downstream (mirrors TS).
+#[derive(serde::Serialize, Clone)]
+pub struct TribJoin {
+    pub name: String,
+    pub km: f32,
+}
+
+/// One reach of a trunk river's course — upper / middle / lower-delta — with the
+/// biome it crosses, its character, a seeded story and the tributaries that join
+/// along it (mirrors TS `RiverZone`). Only the main stem (a sea-reaching trunk)
+/// gets zones; tributaries keep a single short description.
+#[derive(serde::Serialize, Clone)]
+pub struct RiverZoneOut {
+    pub kind: String,     // "upper" | "middle" | "delta"
+    pub label: String,    // "Upper river" | "Middle river" | "Delta / estuary"
+    pub start_km: f32,
+    pub end_km: f32,
+    pub biome: String,    // dominant biome of this reach
+    pub koppen: String,   // dominant Köppen code (tooltip)
+    pub character: String,
+    pub story: String,
+    pub tributaries: Vec<TribJoin>,
+}
+
+/// Format the ordered list of biomes a river crosses into a prose phrase.
+fn join_biomes(b: &[&str]) -> String {
+    match b.len() {
+        0 => String::new(),
+        1 => b[0].to_string(),
+        2 => format!("{}, then {}", b[0], b[1]),
+        _ => {
+            let (last, head) = b.split_last().unwrap();
+            format!("{}, ending in {}", head.join(", then "), last)
+        }
+    }
+}
+
+/// A short character phrase for a reach (upper / middle / lower-delta).
+fn zone_character(kind: u8, mouth_kind: u8) -> &'static str {
+    match kind {
+        0 => "steep and fast — a rocky, clear mountain stream",
+        1 => "broad and steady, beginning to meander over its floodplain",
+        _ => match mouth_kind {
+            1 => "flat and branching, splitting into distributaries across its delta",
+            2 => "wide and tidal, brackish where it meets the sea",
+            _ => "slow and wide as it nears its end",
+        },
+    }
 }
 
 /// One classified lake with its limnological + ecological profile, for the

@@ -199,6 +199,22 @@ export function HydrologyPanel() {
                     {sel.story && <div style={storyBox}><Hl text={sel.story} names={[sel.name, sel.counterpart]} /></div>}
                   </div>}
 
+                  {/* The river's course, told in three reaches (trunks only). */}
+                  {sel.zones && sel.zones.length > 0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={subLabel}>The river's course · source → sea</div>
+                      {sel.climate_journey && (
+                        <div style={{ fontSize: 11, color: "#93a9be", margin: "1px 0 8px", lineHeight: 1.5 }}>
+                          🌍 <b style={{ color: "#9fc0da", fontWeight: 600 }}>Through the climates: </b>
+                          <Hl text={sel.climate_journey} names={[]} />
+                        </div>
+                      )}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                        {sel.zones.map((z) => <ZoneCard key={z.kind} z={z} names={[sel.name, sel.counterpart]} focusOn={focusOn} />)}
+                      </div>
+                    </div>
+                  )}
+
                   {sel.species && sel.species.length > 0 && (
                     <div style={{ marginTop: 9 }}>
                       <div style={subLabel}>🐟 Fish of this river · source → mouth</div>
@@ -593,6 +609,39 @@ function LakeFishPlate({ sp }: { sp: FishSpecies }) {
         <div style={{ fontSize: 10, fontStyle: "italic", color: "#7fae8f" }}>{sp.binomial}</div>
         <div style={{ fontSize: 10.5, color: "#93a9be", marginTop: 1 }}>{sp.blurb}</div>
       </div>
+    </div>
+  );
+}
+
+// ── River course reach card (upper / middle / lower-delta) ──
+const ZONE_KIND_ICON: Record<string, string> = { upper: "🏔", middle: "🌾", delta: "🐟" };
+function ZoneCard({ z, names, focusOn }: {
+  z: import("../types").RiverZone; names: string[]; focusOn: (x: number, y: number) => void;
+}) {
+  return (
+    <div style={{ border: "1px solid #16283a", borderRadius: 7, background: "#0a1620", padding: "7px 9px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+        <span style={{ fontSize: 13 }}>{ZONE_KIND_ICON[z.kind] ?? "🌊"}</span>
+        <span style={{ fontWeight: 700, color: "#d6e8f6", fontSize: 12 }}>{z.label}</span>
+        <span style={{ color: "#5f7a95", fontSize: 10, fontVariantNumeric: "tabular-nums" }}>
+          {fmt(z.start_km)}–{fmt(z.end_km)} km
+        </span>
+        <span style={{ flex: 1 }} />
+        <span title={`Köppen ${z.koppen}`} style={{ color: "#7fd6a6", fontSize: 10, fontWeight: 600, cursor: "help" }}>{z.biome}</span>
+      </div>
+      <div style={{ fontSize: 10.5, color: "#8aa0b8", fontStyle: "italic", margin: "2px 0 4px" }}>{z.character}</div>
+      <div style={{ fontSize: 11.5, lineHeight: 1.55, color: "#c2d6ea" }}>
+        <Hl text={z.story} names={names} />
+      </div>
+      {z.tributaries.length > 0 && (
+        <div style={{ marginTop: 5, display: "flex", flexWrap: "wrap", gap: 5 }}>
+          {z.tributaries.map((t, i) => (
+            <span key={i} style={{ ...chip, color: "#89cbe0" }} title={`joins ${fmt(t.km)} km from the source`}>
+              ⑂ {t.name} <span style={{ color: "#5f7a95" }}>@ {fmt(t.km)} km</span>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
