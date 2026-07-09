@@ -392,6 +392,10 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
         redistribute_elevation(&mut elevation, &terrain, n, &target);
     }
 
+    // Terrain-aware micro-relief so no land area is ever a perfectly flat, mono
+    // plateau (plateaus stay smooth, hillsides roll, floodplains stay flat).
+    apply_micro_relief(&mut elevation, &terrain, w, h, seed.wrapping_add(0x31C7));
+
     for i in 0..n {
         buf.elevation[i] = if terrain[i] == 1 { elevation[i] } else { 0.0 };
     }
@@ -831,7 +835,8 @@ pub fn generate_elevation_from_terrain(
         redistribute_elevation(&mut elevation, &terrain, n, &target);
     }
 
-    // ── Step 6: Write back to buffer ────────────────────────────────────
+    // ── Step 6: Terrain-aware micro-relief, then write back to buffer ────
+    apply_micro_relief(&mut elevation, &terrain, w, h, seed.wrapping_add(0x31C7));
     for i in 0..n {
         if terrain[i] == 1 {
             buf.elevation[i] = elevation[i];
@@ -977,6 +982,9 @@ pub fn generate_elevation_ridged(
         redistribute_elevation(&mut elevation, &terrain, n, &target);
     }
 
+    // Terrain-aware micro-relief (plateaus smooth, hillsides roll, flats flat).
+    apply_micro_relief(&mut elevation, &terrain, w, h, seed.wrapping_add(0x31C7));
+
     for i in 0..n {
         buf.elevation[i] = if terrain[i] == 1 { elevation[i] } else { 0.0 };
     }
@@ -993,6 +1001,59 @@ pub fn scale_elevation(buf: &mut WorldBuffer, scale: f32, lock_above: f32) {
         if buf.terrain[i] != 1 { continue; }
         if lock_above < 1.0 && buf.elevation[i] >= lock_above { continue; }
         buf.elevation[i] = (buf.elevation[i] * scale).clamp(0.01, 1.0);
+    }
+}
+
+/// Terrain-aware MICRO-RELIEF dither — guarantees there are no perfectly flat,
+/// mono-height plateaus while keeping genuine flats (floodplains, high tablelands)
+/// readable as flat. Two bands:
+///   • FLOOR  (~±2 m): a fine, per-cell dither applied EVERYWHERE, so no two
+///     adjacent land cells ever hold the exact same height — the "very minor
+///     fluctuation" the map should always have.
+///   • RELIEF (~±14 m): a rolling, few-cell undulation gated by LOCAL SLOPE, so
+///     hillsides and mountain flanks get rolling texture while low-slope surfaces
+///     (floodplains AND high plateaus) stay smooth — a real high desert/steppe
+///     reads as a tableland, and lowland floodplains stay flat enough for rivers
+///     to meander across them (see rivers.rs meander pass).
+/// Runs on the finished (redistributed) surface, in normalized-elevation units,
+/// with amplitudes far below the ~18 m lake-fill threshold so it never spawns
+/// spurious lakes, yet far above the 9 mm drainage ε so drainage is unaffected.
+fn apply_micro_relief(elevation: &mut [f32], terrain: &[u8], w: u32, h: u32, seed: u64) {
+    const MAX_ELEV: f32 = 8848.0;
+    let floor_amp = 2.0 / MAX_ELEV;    // ~±2 m everywhere
+    let relief_amp = 14.0 / MAX_ELEV;  // ~±14 m on true slopes
+    // Local slope (normalized units per cell) at which RELIEF saturates: ~53 m/cell.
+    let slope_ref = 53.0 / MAX_ELEV;
+    let s_fine = seed.wrapping_add(0x00D1_7737);
+    let s_roll = seed.wrapping_add(0x00A5_1CE0);
+    let wi = w as i32;
+    let hi = h as i32;
+    // Snapshot so the slope read is from the pre-dither surface.
+    let base = elevation.to_vec();
+    for y in 0..hi {
+        for x in 0..wi {
+            let i = (y * wi + x) as usize;
+            if terrain[i] != 1 { continue; }
+            // Local slope = max abs height difference to the 4-neighbours (X wraps,
+            // Y clamps), the same cylindrical topology the rest of the sim uses.
+            let mut slope = 0.0f32;
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let nx = ((x + dx) % wi + wi) % wi;
+                let ny = (y + dy).clamp(0, hi - 1);
+                let ni = (ny * wi + nx) as usize;
+                if terrain[ni] != 1 { continue; }
+                slope = slope.max((base[i] - base[ni]).abs());
+            }
+            let mut rough = (slope / slope_ref).min(1.0);
+            rough = rough * rough * (3.0 - 2.0 * rough); // smoothstep 0..1
+            let ax = x as f32;
+            let ay = y as f32;
+            // Fine per-cell dither (−1..1) and a rolling few-cell undulation (−1..1).
+            let fine = (fbm_noise(ax * 0.9 + 0.3, ay * 0.9 + 0.7, s_fine, 2, 2.0, 0.5) - 0.5) * 2.0;
+            let roll = (fbm_noise(ax * 0.16 + 0.9, ay * 0.16 + 0.2, s_roll, 3, 2.0, 0.5) - 0.5) * 2.0;
+            let delta = floor_amp * fine + relief_amp * rough * roll;
+            elevation[i] = (base[i] + delta).clamp(0.01, 1.0);
+        }
     }
 }
 
@@ -1050,5 +1111,74 @@ fn redistribute_elevation(elevation: &mut [f32], terrain: &[u8], n: usize, targe
     while cell_idx < total_land {
         elevation[land_indices[cell_idx]] = (last_min + 0.01).min(1.0);
         cell_idx += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Micro-relief must (1) leave no perfectly flat mono-plateau — a uniform
+    /// input comes out with adjacent cells differing — while (2) staying tiny
+    /// (well under the ~18 m lake-fill threshold, and on a FLAT surface under the
+    /// ~2 m floor since no slope means no rolling relief), and (3) be deterministic.
+    #[test]
+    fn micro_relief_dithers_flats_but_stays_bounded() {
+        let (w, h) = (40u32, 24u32);
+        let n = (w * h) as usize;
+        let terrain = vec![1u8; n];
+        let flat = 0.3f32;
+
+        let mut a = vec![flat; n];
+        apply_micro_relief(&mut a, &terrain, w, h, 777);
+
+        // (2) bounded: a flat surface has zero slope → only the ~2 m floor applies.
+        let floor = 2.0 / 8848.0;
+        let lake_thresh = 0.002; // ~18 m
+        let mut max_dev = 0.0f32;
+        for &v in &a {
+            let d = (v - flat).abs();
+            if d > max_dev { max_dev = d; }
+            assert!(d < lake_thresh, "micro-relief must never approach the lake threshold: {d}");
+        }
+        assert!(max_dev <= floor * 1.05, "flat ground gets only the floor band: {max_dev} vs {floor}");
+        assert!(max_dev > 0.0, "flat ground must actually be dithered");
+
+        // (1) no mono: overwhelmingly, horizontally-adjacent cells now differ.
+        let mut differ = 0usize;
+        for y in 0..h { for x in 0..w - 1 {
+            let i = (y * w + x) as usize;
+            if a[i] != a[i + 1] { differ += 1; }
+        }}
+        let pairs = (h * (w - 1)) as usize;
+        assert!(differ as f32 / pairs as f32 > 0.99, "flats must not stay mono-height: {differ}/{pairs}");
+
+        // (3) deterministic: same seed → identical result.
+        let mut b = vec![flat; n];
+        apply_micro_relief(&mut b, &terrain, w, h, 777);
+        assert_eq!(a, b, "micro-relief must be reproducible for a given seed");
+    }
+
+    /// Sloped ground should get MORE relief than flat ground (rolling hills), so
+    /// the dither is genuinely terrain-aware, not uniform noise.
+    #[test]
+    fn micro_relief_is_stronger_on_slopes() {
+        let (w, h) = (48u32, 8u32);
+        let n = (w * h) as usize;
+        let terrain = vec![1u8; n];
+        // A steep ramp in x (big local slope) vs the flat case above.
+        let mut ramp: Vec<f32> = (0..n).map(|i| 0.05 + (i as u32 % w) as f32 * 0.02).collect();
+        let base = ramp.clone();
+        apply_micro_relief(&mut ramp, &terrain, w, h, 4242);
+        // Deviation from the smooth ramp, away from the clamped edges.
+        let mut max_dev = 0.0f32;
+        for y in 0..h { for x in 4..w - 4 {
+            let i = (y * w + x) as usize;
+            let d = (ramp[i] - base[i]).abs();
+            if d > max_dev { max_dev = d; }
+        }}
+        let floor = 2.0 / 8848.0;
+        assert!(max_dev > floor * 2.0, "slopes get rolling relief beyond the floor: {max_dev}");
+        assert!(max_dev < 0.002, "…but still under the lake threshold: {max_dev}");
     }
 }
