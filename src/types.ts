@@ -1505,6 +1505,12 @@ export interface RiverData {
   tributary?: boolean; // ends at a confluence with a larger stream (not the sea)
   order?: number; // Strahler-ish stream order (1 = headwater creek)
   meander?: number; // 0..1 render meander scale (0 = steep/straight, 1 = flat floodplain)
+  /** True meander geometry — a smoothed, sub-cell render polyline (cell-index
+   *  coords, same convention as `points`) computed physically in the backend
+   *  (winds on flat lowlands, straight on steep headwaters, clamped to the valley).
+   *  Drawn in place of the cosmetic meander when present. Empty/absent on old
+   *  saves → the frontend falls back to `meanderPath(points)`. */
+  render?: [number, number][];
 }
 
 /** A city sitting on a river reach (Hydrology dashboard). Mirrors Rust `RiverCityInfo`. */
@@ -1589,6 +1595,9 @@ export interface LakeNode {
 export interface LakeData {
   cells: [number, number][];
   elevation: number;
+  /** 0 = normal depression-filled basin · 1 = oxbow/backwater cut off from a
+   *  meandering river (drawn as a still green-blue backwater). */
+  kind?: number;
 }
 
 /** A signature fish species on a river reach. `slug` keys an illustration at

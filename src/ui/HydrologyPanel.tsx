@@ -611,7 +611,8 @@ function Snip({ node, byId, names, colors, onLocate }: {
   const sx = (x: number) => ((x - minx) / bw) * VW;
   const sy = (y: number) => ((y - miny) / bh) * VH;
   const cities = subtreeCities(node).slice(0, 14);
-  const trunkPts = byId.get(node.id)?.points ?? [];
+  const trunkRd = byId.get(node.id);
+  const trunkPts = (trunkRd?.render && trunkRd.render.length >= 2 ? trunkRd.render : trunkRd?.points) ?? [];
 
   return (
     <div style={{ position: "relative" }}>
@@ -623,7 +624,8 @@ function Snip({ node, byId, names, colors, onLocate }: {
         {/* tributaries (thin) — coloured by the chosen scheme */}
         {ids.map((id, i) => {
           if (id === node.id) return null;
-          const pts = byId.get(id)?.points ?? [];
+          const rd = byId.get(id);
+          const pts = (rd?.render && rd.render.length >= 2 ? rd.render : rd?.points) ?? [];
           if (pts.length < 2) return null;
           return <polyline key={i} points={pts.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ")}
             fill="none" stroke={colors[id] ?? "#57a6cf"} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" opacity={0.95} />;

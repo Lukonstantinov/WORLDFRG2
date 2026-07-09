@@ -104,8 +104,11 @@ pub fn sim_rivers_hydrology(
     let hydro = rivers::compute_hydrology(&buf);
     // Lakes first: rivers must terminate at lake shores (not draw across them),
     // so channel extraction needs to know which cells are open lake water.
-    let lakes = rivers::detect_lakes(&buf, &hydro.filled, lake_fill_depth, max_cells);
+    let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, lake_fill_depth, max_cells);
     let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, river_density, river_width, &lakes);
+    // Oxbow backwaters cut off from the meandering lowland reaches (real lakes).
+    let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
+    lakes.extend(oxbows);
 
     // Store rivers as serialized state for rendering
     // (Rivers are overlays, not per-cell data stored in tiles)
@@ -226,8 +229,10 @@ pub fn sim_run_all(
     // extraction can stop rivers at lake shores instead of crossing the water.
     let hydro = rivers::compute_hydrology(&buf);
     let lake_max = (buf.total() / 2000).max(20);
-    let lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
+    let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
     let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0, &lakes);
+    let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
+    lakes.extend(oxbows);
 
     // Phase 6: Soil & fertility
     soil::classify_soil(&mut buf);
@@ -350,8 +355,10 @@ pub fn sim_run_all_from_terrain(
     // extraction can stop rivers at lake shores instead of crossing the water.
     let hydro = rivers::compute_hydrology(&buf);
     let lake_max = (buf.total() / 2000).max(20);
-    let lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
+    let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
     let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0, &lakes);
+    let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
+    lakes.extend(oxbows);
 
     // Phase 6: Soil & fertility
     soil::classify_soil(&mut buf);

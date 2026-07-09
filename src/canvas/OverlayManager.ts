@@ -153,6 +153,8 @@ function meanderPath(pts: [number, number][], seed: number, order: number, world
   return out;
 }
 const LAKE_COLOR = "rgba(51, 153, 221, 0.7)";
+/** Oxbow / backwater lake — a stiller, weedier green-blue than open lake water. */
+const OXBOW_COLOR = "rgba(64, 150, 150, 0.72)";
 
 const SETTLEMENT_COLORS: Record<string, string> = {
   capital: "#ffd700",
@@ -1014,9 +1016,17 @@ export class OverlayManager {
   private riverPath(river: RiverData, id: number, order: number): [number, number][] {
     const cached = this.meanderCache.get(river.points);
     if (cached) return cached;
-    const [sx, sy] = river.points[0];
-    const seed = ((sx * 73856093) ^ (sy * 19349663) ^ (id * 83492791)) >>> 0;
-    const path = meanderPath(river.points, seed, order, this.worldW || 0, river.meander ?? 1);
+    // Prefer the backend's TRUE meander geometry (physically clamped to the valley,
+    // straight in the headwaters, winding on the lowlands). Only fall back to the
+    // cosmetic client-side meander for old saves that predate the `render` field.
+    let path: [number, number][];
+    if (river.render && river.render.length >= 2) {
+      path = river.render;
+    } else {
+      const [sx, sy] = river.points[0];
+      const seed = ((sx * 73856093) ^ (sy * 19349663) ^ (id * 83492791)) >>> 0;
+      path = meanderPath(river.points, seed, order, this.worldW || 0, river.meander ?? 1);
+    }
     this.meanderCache.set(river.points, path);
     return path;
   }
@@ -1053,8 +1063,9 @@ export class OverlayManager {
     }
 
     if (this.visibility.lakes && this.lakes.length > 0) {
-      ctx.fillStyle = LAKE_COLOR;
       for (const lake of this.lakes) {
+        // Oxbows / backwaters read as a stiller, greener water than open lakes.
+        ctx.fillStyle = lake.kind === 1 ? OXBOW_COLOR : LAKE_COLOR;
         for (const [x, y] of lake.cells) {
           ctx.fillRect(x, y, 1, 1);
         }
