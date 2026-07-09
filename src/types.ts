@@ -273,6 +273,8 @@ export interface CultureBrief {
   mobility: number;   // 0..1 travel-proneness (≥0.7 = merchant diaspora)
   top_cities: [string, number][];
   houses: string[];
+  family?: string;    // language family (Italic, Semitic, …) or "Creole (A · B)"
+  origin?: string;    // static origin card (Cultures 2.0)
 }
 /** One backer of a colony venture (city / house / bank). */
 export interface ColonyBackerRow { kind: number; name: string; color: string; share: number }

@@ -84,6 +84,25 @@ pub fn new_world(
     })
 }
 
+/// Set how many CULTURES (hearths) the world starts with. Persisted to metadata so
+/// the next culture-map computation (settlement/run-all phase) uses it. `0` = auto
+/// (scale with land area, the default). Clamped to a sane upper bound at generation.
+#[tauri::command]
+pub fn set_culture_count(count: u32, db: State<'_, WorldDb>) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    metadata::set_meta(&conn, "culture_count", &count.to_string()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Read the world's chosen culture count (0 = auto). For the worldgen UI to show the
+/// current setting.
+#[tauri::command]
+pub fn get_culture_count(db: State<'_, WorldDb>) -> Result<u32, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    Ok(metadata::get_meta(&conn, "culture_count").map_err(|e| e.to_string())?
+        .and_then(|s| s.parse::<u32>().ok()).unwrap_or(0))
+}
+
 /// Update the latitude framing (equator position + expansion). Persisted to
 /// metadata so the next run of any simulation phase generates against the new
 /// latitudes. Values are clamped to sane ranges.

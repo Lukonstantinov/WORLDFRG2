@@ -19,6 +19,14 @@ export async function setLatitudeConfig(
   return invoke("set_latitude_config", { equatorOffset, latScale, latRatio });
 }
 
+/** How many cultures the world starts with (0 = auto by land area). */
+export async function setCultureCount(count: number): Promise<void> {
+  return invoke("set_culture_count", { count });
+}
+export async function getCultureCount(): Promise<number> {
+  return invoke("get_culture_count");
+}
+
 export async function getTiles(
   tiles: [number, number][],
   layers: string[],

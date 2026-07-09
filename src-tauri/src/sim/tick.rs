@@ -243,6 +243,21 @@ const HOSPICE_DECAY: f32 = 0.05;
 /// bounded civic toll from that hinterland trade (grain-eq per villager per year).
 /// Bounded by `civic_pool`'s decay sink → cannot inflate wealth.
 const HINTERLAND_TOLL: f32 = 0.01;
+/// ── ETHNOGENESIS (Cultures 2.0): a large, long-resident minority blends with the
+/// local majority into a NEW creole people. Bounded so only a handful arise per campaign.
+const CREOLE_MAX: usize = 24;              // global cap on live creole peoples
+const CREOLE_MIN_POP: f32 = 4_000.0;       // only sizeable cities spawn creoles
+const CREOLE_MIN_MINORITY: f32 = 0.30;     // the minority must be at least this share
+const CREOLE_YEARLY_CHANCE: f32 = 0.08;    // per eligible city per year
+const CREOLE_SEED_FRAC: f32 = 0.5;         // share of the minority that becomes the creole
+/// Cultures 2.0 · migration HOMOPHILY: bonus to a destination's opportunity per unit
+/// of the migrant's culture already present there (people move toward their own kin).
+/// Small vs the opportunity scale so it nudges, not dominates.
+const HOMOPHILY_PULL: f32 = 0.15;
+/// Cultures 2.0 · a large, UNASSIMILATED minority adds this much to a city's unrest
+/// target at full (one-culture-minority) blend — modest, feeds the existing clamped
+/// unrest/revolt system so a big disaffected quarter can stir trouble over years.
+const MINORITY_UNREST: f32 = 0.06;
 /// ── SATELLITE cities (Ostia→Rome, Piraeus→Athens, Westminster/Southwark→London):
 /// a LARGE metropolis whose council can fund it spins off a SHORT-RANGE satellite
 /// to serve a concrete NEED it can't fit inside itself — a PORT (inland/large hub
@@ -1686,6 +1701,20 @@ pub struct MigrationRoute {
     pub to_hub: i32,
 }
 
+/// Cultures 2.0 · a CREOLE people — a new culture born of sustained blending in one
+/// city (ethnogenesis). It carries a synthesized name drawn from BOTH parent peoples'
+/// word-banks and its own static origin card, then lives like any other culture
+/// (spreading, assimilating). Registered on the sim so queries can show its lore.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Creole {
+    pub name: String,       // synthesized blended name (e.g. "Novvik")
+    pub family: String,     // "Creole (ParentA · ParentB)"
+    pub origin: String,     // static origin card
+    pub color: [u8; 3],
+    pub born_tick: u32,
+    pub birthplace: String, // the city where it arose
+}
+
 /// Batch 1 · one row of the ERA-SCRUBBER ring: the world as it stood at the end
 /// of `year`. Vectors are hub-indexed at snapshot time — hub indices are stable
 /// (hubs are never removed), so later-founded hubs simply aren't in older rows.
@@ -2362,6 +2391,10 @@ pub struct CampaignSim {
     /// economic coupling), so it never affects the dynamics guardrails.
     #[serde(default)]
     pub hub_minorities: Vec<Vec<(String, f32)>>,
+    /// Cultures 2.0 · creole peoples born of blending during the campaign (ethnogenesis).
+    /// `#[serde(default)]` → old saves load with none.
+    #[serde(default)]
+    pub creoles: Vec<Creole>,
     /// Consecutive UNPROFITABLE years per MANUFACTORY (hub-indexed). A works idle
     /// for 4 years is shut down + partly sold back to its owner. serde-default.
     #[serde(default)]
@@ -4953,11 +4986,19 @@ impl CampaignSim {
                 let so = &self.hubs[h].society;
                 ((so.commoner_wealth / (so.commoner_wealth + 1.5)).clamp(0.0, 1.0), so.inequality)
             };
+            // Cultures 2.0 · a large minority stirs unrest ONLY in a city that is already
+            // struggling (dearth/famine/low mood) — a content, prosperous melting pot stays
+            // calm. Bounded and small, so it can seed a revolt over years without runaway.
+            let largest_min = self.hub_minorities.get(h)
+                .map(|m| m.iter().fold(0.0f32, |a, (_, s)| a.max(*s))).unwrap_or(0.0);
+            let stress = (lackb + starv + (1.0 - mood) * 0.5).clamp(0.0, 1.0);
+            let minority_unrest = MINORITY_UNREST * largest_min.clamp(0.0, 1.0) * stress;
             let target = (0.42 * (1.0 - mood)
                 + 0.30 * ineq
                 + 0.32 * lackb
                 + 0.22 * starv
                 + if atwar { 0.12 } else { 0.0 }
+                + minority_unrest
                 - 0.30 * welfare
                 - 0.18 * prosp).clamp(0.0, 1.0);
             let u = {
@@ -7060,6 +7101,8 @@ impl CampaignSim {
             self.economic_migration_pass();
             self.diaspora_pass();
             self.assimilation_pass();
+            // Cultures 2.0 · sustained blending in a city can birth a new creole people.
+            self.ethnogenesis_pass(self.tick / TICKS_PER_YEAR);
             // Connect sub-cap villages to the trade network via their nearest market town.
             self.hinterland_pass();
             // House trade outposts from year 30 (rich house, heavy cost); full
@@ -8172,16 +8215,107 @@ impl CampaignSim {
         }
     }
 
-    /// Yearly assimilation: minority quarters slowly blend into the majority.
+    /// The language FAMILY of a live culture (creole registry first, then the worldgen
+    /// hearth kit). "" for an unknown/legacy culture.
+    pub(crate) fn culture_family(&self, name: &str) -> String {
+        if name.is_empty() || name == "—" { return String::new(); }
+        if let Some(cr) = self.creoles.iter().find(|c| c.name == name) { return cr.family.clone(); }
+        crate::sim::cultures::kit_of_people(name)
+            .map(|k| crate::sim::cultures::KITS[k].lang_family.to_string())
+            .unwrap_or_default()
+    }
+
+    /// Cultures 2.0 · Yearly assimilation — minority quarters blend into the majority,
+    /// FASTER when they share a language family with the local majority (mutual
+    /// intelligibility) and in big, prosperous "melting-pot" cities; SLOWER across
+    /// distant families. Keeps the composition alive and bounded.
     fn assimilation_pass(&mut self) {
-        for list in self.hub_minorities.iter_mut() {
-            for e in list.iter_mut() { e.1 *= 1.0 - MINORITY_ASSIM_RATE; }
-            list.retain(|(_, s)| *s > 0.005);
-            if list.len() > 5 {
-                list.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-                list.truncate(5);
+        let n = self.hubs.len();
+        for h in 0..n.min(self.hub_minorities.len()) {
+            if self.hub_minorities[h].is_empty() { continue; }
+            let maj_fam = self.culture_family(&self.hub_culture.get(h).cloned().unwrap_or_default());
+            // Prestige / melting-pot pressure: large, wealthy cities assimilate faster.
+            let prestige = (self.hubs[h].population / 20_000.0).clamp(0.0, 1.0) * 0.5
+                + self.hubs[h].trade_wealth.clamp(0.0, 1.0) * 0.5;
+            let mins = std::mem::take(&mut self.hub_minorities[h]);
+            let mut kept: Vec<(String, f32)> = Vec::with_capacity(mins.len());
+            for (c, s) in mins {
+                let fam = self.culture_family(&c);
+                let related = !fam.is_empty() && !maj_fam.is_empty() && fam == maj_fam;
+                // Same family → 2×; distant family → 0.6×; unknown → 1×. Prestige adds up to +100%.
+                let kin = if fam.is_empty() || maj_fam.is_empty() { 1.0 }
+                    else if related { 2.0 } else { 0.6 };
+                let rate = (MINORITY_ASSIM_RATE * kin * (1.0 + prestige)).clamp(0.0, 0.25);
+                let ns = s * (1.0 - rate);
+                if ns > 0.005 { kept.push((c, ns)); }
             }
+            kept.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            kept.truncate(5);
+            self.hub_minorities[h] = kept;
         }
+    }
+
+    /// Cultures 2.0 · Ethnogenesis — where a large minority has long shared a city with
+    /// the majority, the two blend into a NEW creole people with a synthesized name and
+    /// its own origin card. Bounded (a global cap + a low yearly chance), so a handful
+    /// of creoles arise over a long campaign rather than a flood.
+    fn ethnogenesis_pass(&mut self, year: u32) {
+        if self.creoles.len() >= CREOLE_MAX { return; }
+        let tick = self.tick;
+        let n = self.hubs.len();
+        for h in 0..n.min(self.hub_minorities.len()) {
+            if self.creoles.len() >= CREOLE_MAX { break; }
+            if self.hubs[h].is_estate || self.hubs[h].abandoned || self.hubs[h].population < CREOLE_MIN_POP { continue; }
+            // Largest minority quarter here.
+            let (mut bi, mut bs) = (usize::MAX, 0.0f32);
+            for (i, (_, s)) in self.hub_minorities[h].iter().enumerate() {
+                if *s > bs { bs = *s; bi = i; }
+            }
+            if bi == usize::MAX || bs < CREOLE_MIN_MINORITY { continue; }
+            if hash01(self.seed, tick as u64 ^ 0xE7_1409E5, h as u64) > CREOLE_YEARLY_CHANCE { continue; }
+            let maj = self.hub_culture.get(h).cloned().unwrap_or_default();
+            let minc = self.hub_minorities[h][bi].0.clone();
+            if maj.is_empty() || maj == "—" || maj == minc { continue; }
+            // Don't re-spawn a creole already born of this same pair.
+            let pair_fam = format!("Creole ({} · {})", maj, minc);
+            if self.creoles.iter().any(|c| c.family == pair_fam) { continue; }
+            let (name, color) = self.synth_creole_name(&maj, &minc, h, year);
+            if name.is_empty() || self.creoles.iter().any(|c| c.name == name) { continue; }
+            // Seed: half the minority quarter becomes the creole (intermarriage with locals).
+            let take = bs * CREOLE_SEED_FRAC;
+            self.hub_minorities[h][bi].1 -= take;
+            self.hub_minorities[h].push((name.clone(), take));
+            let mob = crate::sim::cultures::people_mobility(&name);
+            let temperament = if mob >= 0.6 { "an outward-looking people, quick to take to the trade roads" }
+                else { "a settled people, rooted where they were born" };
+            let origin = format!(
+                "{name} — a creole people born in {place} around year {year}, where {maj} and {minc} quarters blended into one; {temperament}.",
+                name = name, place = self.hubs[h].name, year = year, maj = maj, minc = minc, temperament = temperament);
+            self.creoles.push(Creole {
+                name: name.clone(), family: pair_fam, origin, color,
+                born_tick: tick, birthplace: self.hubs[h].name.clone(),
+            });
+            self.journal.push(JournalEntry {
+                tick, kind: "ethnogenesis".into(), hub: h as i32, good: -1, value: take,
+                text: format!("A new people, the {}, is born in {} as {} and {} blend into one.",
+                    name, self.hubs[h].name, maj, minc) });
+        }
+    }
+
+    /// Synthesize a creole's name + colour from its two parent peoples. Falls back to
+    /// default kits when a parent isn't a worldgen hearth (e.g. a creole of a creole).
+    fn synth_creole_name(&self, a: &str, b: &str, h: usize, year: u32) -> (String, [u8; 3]) {
+        use crate::sim::cultures as cul;
+        let ka = cul::kit_of_people(a).unwrap_or(0);
+        let kb = cul::kit_of_people(b).unwrap_or(1);
+        let seed = cul::hash64(self.seed ^ (h as u64).wrapping_mul(0x9E3779B97F4A7C15) ^ ((year as u64) << 12));
+        let name = cul::blend_name(ka, kb, seed);
+        let ca = cul::color_of_people(a).unwrap_or([170, 130, 190]);
+        let cb = cul::color_of_people(b).unwrap_or([130, 170, 150]);
+        let color = [((ca[0] as u16 + cb[0] as u16) / 2) as u8,
+            ((ca[1] as u16 + cb[1] as u16) / 2) as u8,
+            ((ca[2] as u16 + cb[2] as u16) / 2) as u8];
+        (name, color)
     }
 
     /// #23 · Yearly economic migration: within a trade component, people drift from
@@ -8206,6 +8340,7 @@ impl CampaignSim {
             // city→city→city across the network over successive years, so every migration
             // line lies exactly on a real trade route. (User: "no migration except via
             // trade routes.") Pick the best-opportunity direct neighbour.
+            let src_culture = self.hub_culture.get(src).cloned().unwrap_or_default();
             let mut dest = (usize::MAX, src_opp); // must beat the home city's own opportunity
             if let Some(nbrs) = self.neighbors.get(src) {
                 for &bn in nbrs {
@@ -8213,7 +8348,10 @@ impl CampaignSim {
                     if d >= n || d == src { continue; }
                     let o = &self.hubs[d];
                     if o.is_estate || o.abandoned || o.food_balance < 0.0 { continue; }
-                    if opp[d] > dest.1 { dest = (d, opp[d]); }
+                    // Cultures 2.0 · HOMOPHILY: kin already settled at a destination make it
+                    // more attractive — people prefer to move where their own people are.
+                    let o_eff = opp[d] + HOMOPHILY_PULL * self.culture_share_at(d, &src_culture);
+                    if o_eff > dest.1 { dest = (d, o_eff); }
                 }
             }
             let Some(di) = (dest.0 != usize::MAX).then_some(dest.0) else { continue; };
@@ -8221,7 +8359,7 @@ impl CampaignSim {
             let movers = (src_pop * ECON_MIG_FRAC).clamp(10.0, 800.0);
             if movers >= src_pop * 0.5 { continue; }
             // STRICT: people move only if a trade-route chain connects the two cities.
-            let culture = self.hub_culture.get(src).cloned().unwrap_or_default();
+            let culture = src_culture;
             if !self.emit_migration_route(src, di, &culture, movers) { continue; }
             self.hubs[src].population -= movers;
             self.hubs[di].population += movers;
@@ -11467,7 +11605,7 @@ mod tests {
             last_month_pop: 0.0, last_month_index: 0.0, seed_house_count: 0,
             fleets_migrated: true, tech_factor: 1.0, percap_migrated: true, society_migrated: false,
             house_ledger: Vec::new(), house_ledger_prev: Vec::new(), house_barred: Vec::new(),
-            colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], council_bought_month: vec![], hub_patron: vec![], colony_supply: vec![],
+            colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], council_bought_month: vec![], hub_patron: vec![], colony_supply: vec![],
             hub_culture: vec![], hub_minorities: vec![], estate_idle_years: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
             recent_trades: vec![],

@@ -1117,6 +1117,24 @@ pub struct CultureBrief {
     pub mobility: f32,   // 0..1 travel-proneness (≥0.7 = merchant diaspora)
     pub top_cities: Vec<(String, u32)>, // by this culture's population, top 4
     pub houses: Vec<String>,            // merchant houses of this people
+    /// Language family (Italic, Semitic, Germanic, …); "" for a creole with mixed roots.
+    #[serde(default)] pub family: String,
+    /// Static origin card — where this people arose + temperament (Cultures 2.0).
+    #[serde(default)] pub origin: String,
+}
+
+/// A culture's (family, origin card) from the active worldgen hearths (or a spawned
+/// creole recorded on the sim). "" when unknown (e.g. a legacy save without cards).
+fn culture_lore(sim: &crate::sim::tick::CampaignSim, name: &str) -> (String, String) {
+    if let Some(cr) = sim.creoles.iter().find(|c| c.name == name) {
+        return (cr.family.clone(), cr.origin.clone());
+    }
+    if let Some(m) = crate::sim::cultures::active() {
+        if let Some(h) = m.hearths.iter().find(|h| h.people == name) {
+            return (h.family.clone(), h.origin.clone());
+        }
+    }
+    (String::new(), String::new())
 }
 
 /// Culture colour: the worldgen hearth colour if known, else a deterministic tint.
@@ -1177,11 +1195,12 @@ pub fn campaign_get_cultures(db: State<'_, WorldDb>) -> Result<Vec<CultureBrief>
         let top: Vec<(String, u32)> = acc.cities.into_iter().take(4).map(|(n, p)| (n, p as u32)).collect();
         let mut houses = houses_by.remove(&name).unwrap_or_default();
         houses.sort(); houses.dedup(); houses.truncate(8);
+        let (family, origin) = culture_lore(&sim, &name);
         CultureBrief {
             color: culture_color(&name),
             mobility: crate::sim::tick::CampaignSim::culture_mobility(&name),
             population: acc.pop as u32, towns: acc.towns, presence: acc.presence,
-            top_cities: top, houses, name,
+            top_cities: top, houses, family, origin, name,
         }
     }).collect();
     out.sort_by(|a, b| b.population.cmp(&a.population));
@@ -1764,6 +1783,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         total_abandonments: 0,
         migrations: vec![],
         migration_routes: vec![],
+        creoles: vec![],
         council_bought_month: vec![],
         good_flow_accum: vec![],
         hub_good_trade: vec![],

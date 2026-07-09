@@ -1,7 +1,8 @@
+import { useEffect, useState } from "react";
 import { useUIStore } from "../../state/uiStore";
 import { useWorldStore } from "../../state/worldStore";
 import { useViewportStore } from "../../state/viewportStore";
-import { simGenerateSettlements } from "../../bridge/tauri";
+import { simGenerateSettlements, setCultureCount as saveCultureCount, getCultureCount } from "../../bridge/tauri";
 import { genBtn } from "./WorkflowPanel";
 
 interface Props {
@@ -24,6 +25,15 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
   const setSettlementCap = useUIStore((s) => s.setSettlementCap);
   const focusOn = useViewportStore((s) => s.focusOn);
   const { rivers, settlements, setSettlements } = useWorldStore();
+
+  // Cultures 2.0 · how many cultures/peoples the world starts with (0 = auto by land
+  // area). Persisted to world metadata so the culture map picks it up at generation.
+  const [cultureCount, setCultureCount] = useState<number>(0);
+  useEffect(() => { getCultureCount().then(setCultureCount).catch(() => {}); }, []);
+  const onCultureCount = (v: number) => {
+    setCultureCount(v);
+    saveCultureCount(v).catch(() => {});
+  };
 
   const step6Done = stepCompleted[6] === true;
 
@@ -89,6 +99,20 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
         <div style={{ color: "#405060", fontSize: 9 }}>
           0 = auto (density slider decides). Otherwise a hard cap of 20–1000 settlements
           scattered across the world (keeps the strongest sites).
+        </div>
+      </div>
+
+      {/* Cultures 2.0 · initial number of cultures/peoples (0 = auto by land area). */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 2 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", color: "#8090b0", fontSize: 10 }}>
+          <span>Cultures at world start</span>
+          <span>{cultureCount === 0 ? "Auto (by land area)" : `${cultureCount}`}</span>
+        </div>
+        <input type="range" min={0} max={24} step={1} value={cultureCount}
+          onChange={(e) => onCultureCount(parseInt(e.target.value, 10))} />
+        <div style={{ color: "#405060", fontSize: 9 }}>
+          How many distinct peoples/language-hearths seed the map (0 = auto, ~5–14 by
+          size). More = a patchier cultural map. Applied when settlements are generated.
         </div>
       </div>
 

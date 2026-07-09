@@ -89,13 +89,27 @@ export function PeoplesPanel() {
             {!sel && <div style={hint}>Select a people to see its homelands, houses and spread — and to colour the map.</div>}
             {sel && (
               <>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                   <span style={{ width: 16, height: 16, borderRadius: 4, background: rgb(sel.color), border: "1px solid rgba(0,0,0,0.4)" }} />
                   <span style={{ fontFamily: SERIF, color: T.ink, fontSize: 16, fontWeight: 700 }}>{sel.name}</span>
+                  {sel.family?.startsWith("Creole") && <span style={creoleBadge}>✶ creole people</span>}
                   {sel.mobility >= 0.7 && (
                     <span style={diasporaBadge}>⚓ merchant diaspora</span>
                   )}
                 </div>
+                {/* Language family + STATIC origin card (Cultures 2.0). */}
+                {sel.family && (
+                  <div style={{ color: T.inkDim, fontSize: 10.5, marginBottom: 6 }}>
+                    Language family: <b style={{ color: T.inkMid }}>{sel.family}</b>
+                  </div>
+                )}
+                {sel.origin && (
+                  <div style={{ fontFamily: SERIF, fontStyle: "italic", color: T.inkMid, fontSize: 12,
+                    lineHeight: 1.5, marginBottom: 10, padding: "7px 9px", background: T.card,
+                    border: `1px solid ${T.lineSoft}`, borderRadius: 6 }}>
+                    {sel.origin}
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
                   <Tile label="People" value={fmtNum(sel.population)} />
                   <Tile label="Homelands" value={String(sel.towns)} color="#7fd0a0" />
@@ -178,6 +192,10 @@ const mapBtn: React.CSSProperties = {
 };
 const diasporaBadge: React.CSSProperties = {
   fontSize: 9.5, color: "#e0b060", border: "1px solid #6a5426", background: "#241d0c",
+  borderRadius: 10, padding: "1px 7px",
+};
+const creoleBadge: React.CSSProperties = {
+  fontSize: 9.5, color: "#c8a0e0", border: "1px solid #4a3466", background: "#1e1430",
   borderRadius: 10, padding: "1px 7px",
 };
 const housePill: React.CSSProperties = {

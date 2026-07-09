@@ -40,6 +40,7 @@ pub enum Env { Temperate, Cold, Arid, Tropical, Maritime }
 
 pub struct Kit {
     pub name: &'static str,           // people / culture label
+    pub lang_family: &'static str,    // language family (relatedness → assimilation/borrowing)
     pub on: &'static [&'static str],  // place-name onsets
     pub mid: &'static [&'static str],
     pub end: &'static [&'static str], // place-name endings
@@ -52,7 +53,7 @@ pub struct Kit {
 
 pub const KITS: &[Kit] = &[
     // 0 Roman
-    Kit { name: "Roman", env: Env::Temperate,
+    Kit { name: "Roman", lang_family: "Italic", env: Env::Temperate,
         on: &["Aqu","Por","Nov","Ver","Cas","Lav","Tarr","Bened","Aug","Salt","Ostia","Vol","Arr","Pomp","Luc","Mar"],
         mid: &["","i","e","en","el","ar"],
         end: &["ium","a","entia","onium","aria","anum","ona","ina","etia","olum","estum","icum"],
@@ -61,7 +62,7 @@ pub const KITS: &[Kit] = &[
         guild: &["Collegium","Societas","Corpus","Negotiatores","Mercatura","Argentaria","Officina"],
         epithet: &["Magna","Augusta","Maior"] },
     // 1 Greek
-    Kit { name: "Hellene", env: Env::Maritime,
+    Kit { name: "Hellene", lang_family: "Hellenic", env: Env::Maritime,
         on: &["Meg","Thess","Korin","Pyr","Hali","Eph","Mil","Delph","Olymp","Argos","Naxa","Therm","Knoss","Pell","Syrak","Mykon"],
         mid: &["","a","i","o","ar","is"],
         end: &["os","on","aia","polis","andros","ia","ene","yssa","kos","thea","nthos","kleia"],
@@ -70,7 +71,7 @@ pub const KITS: &[Kit] = &[
         guild: &["Emporion","Koinon","Synedrion","Thiasos","Eranos","Symmoria","Naukleroi"],
         epithet: &["Megale","Hypsele","Akra"] },
     // 2 Phoenician / Punic
-    Kit { name: "Punic", env: Env::Maritime,
+    Kit { name: "Punic", lang_family: "Semitic", env: Env::Maritime,
         on: &["Qart","Gad","Tyr","Sid","Byr","Mel","Utix","Lep","Mot","Pan","Sab","Mag","Tharr","Hadr","Bos","Kart"],
         mid: &["","a","i","o","ad","as"],
         end: &["ada","on","ath","qart","im","tis","uba","esh","ar","anto","umet","shama"],
@@ -79,7 +80,7 @@ pub const KITS: &[Kit] = &[
         guild: &["Beth","Sokim","Miqdash","Mahanet","Tarsis","Kothon","Suffetim"],
         epithet: &["Rabba","Adir","the Great Harbour"] },
     // 3 Persian
-    Kit { name: "Persian", env: Env::Arid,
+    Kit { name: "Persian", lang_family: "Iranian", env: Env::Arid,
         on: &["Pasar","Ekba","Susa","Persa","Zara","Bakh","Ragha","Hyrka","Nisa","Kuru","Asha","Dara","Anshan","Gaba","Tushpa","Mithra"],
         mid: &["","a","i","an","ar","o"],
         end: &["gard","kana","dana","shahr","abad","stan","kert","vana","thra","spa","drava","mada"],
@@ -88,7 +89,7 @@ pub const KITS: &[Kit] = &[
         guild: &["Karwan","Anjoman","Bazaar","Rasta","Sarai","Kalantar","Ostandar"],
         epithet: &["Buzurg","the Great","Shahanshah"] },
     // 4 Norse
-    Kit { name: "Norse", env: Env::Cold,
+    Kit { name: "Norse", lang_family: "Germanic", env: Env::Cold,
         on: &["Haf","Bjor","Skag","Vester","Nor","Ulf","Thrond","Stav","Gud","Ravn","Iso","Frost","Vik","Hald","Birk","Auste"],
         mid: &["","a","e","s","ar","en"],
         end: &["vik","fjord","by","heim","stad","nes","holm","berg","dal","oy","fell","gard"],
@@ -97,7 +98,7 @@ pub const KITS: &[Kit] = &[
         guild: &["Felag","Kaupang","Lag","Gildi","Stafnbui","Bryggja","Varda"],
         epithet: &["hinn Mikli","Storr","the Elder"] },
     // 5 Celtic
-    Kit { name: "Celtic", env: Env::Temperate,
+    Kit { name: "Celtic", lang_family: "Celtic", env: Env::Temperate,
         on: &["Dun","Caer","Llan","Aber","Pen","Tre","Inver","Kil","Bally","Glen","Rath","Cair","Loch","Ard","Bran","Vin"],
         mid: &["","a","y","wy","o","en"],
         end: &["dunon","briga","magos","ialon","duros","rix","vellaunum","acos","onna","ennon","bona","ritum"],
@@ -106,7 +107,7 @@ pub const KITS: &[Kit] = &[
         guild: &["Comann","Margad","Tuath","Nemeton","Cuallacht","Aonach","Ceard"],
         epithet: &["Mor","Vellaunos","the Tall"] },
     // 6 Arabic
-    Kit { name: "Arab", env: Env::Arid,
+    Kit { name: "Arab", lang_family: "Semitic", env: Env::Arid,
         on: &["Al-","Ban","Qas","Madin","Hisn","Ras","Bir","Wad","Suq","Dar","Jab","Sham","Naj","Khaf","Yath","Hadr"],
         mid: &["","a","i","u","an","ar"],
         end: &["ah","iyah","abad","iya","an","un","at","ir","ur","im","aniyah","ut"],
@@ -115,7 +116,7 @@ pub const KITS: &[Kit] = &[
         guild: &["Suq","Funduq","Tujjar","Qaysariyya","Wakala","Hisba","Sinf"],
         epithet: &["al-Kubra","al-Azim","the Radiant"] },
     // 7 Sanskritic / Indic
-    Kit { name: "Indic", env: Env::Tropical,
+    Kit { name: "Indic", lang_family: "Indo-Aryan", env: Env::Tropical,
         on: &["Pata","Vara","Indra","Maha","Kasi","Ujja","Taksha","Vidi","Champa","Sura","Naga","Kanya","Praya","Dvara","Amara","Bhima"],
         mid: &["","a","i","na","ra","va"],
         end: &["pura","nagar","gram","desha","vati","stan","khanda","loka","dvipa","ashtra","kshetra","palli"],
@@ -124,7 +125,7 @@ pub const KITS: &[Kit] = &[
         guild: &["Shreni","Nigama","Sangha","Puga","Gana","Vanik","Mahajana"],
         epithet: &["Maha","Uttama","the Golden"] },
     // 8 Sinitic
-    Kit { name: "Sinitic", env: Env::Temperate,
+    Kit { name: "Sinitic", lang_family: "Sinitic", env: Env::Temperate,
         on: &["Chang","Luo","Xian","Jian","Lin","Hang","Guang","Nan","Bei","Tai","Hua","Jin","Wu","Qi","Lu","Yun"],
         mid: &["","an","ing","ou","ai","ong"],
         end: &["zhou","jing","yang","an","cheng","fu","kou","shan","hai","ling","du","xi"],
@@ -133,7 +134,7 @@ pub const KITS: &[Kit] = &[
         guild: &["Hang","Hui","Shanghui","Gongsuo","Bang","Zihao","Piaohao"],
         epithet: &["Da","Sheng","the Great"] },
     // 9 Slavic
-    Kit { name: "Slavic", env: Env::Cold,
+    Kit { name: "Slavic", lang_family: "Slavic", env: Env::Cold,
         on: &["Nov","Bel","Veli","Krak","Smol","Cherni","Pere","Plesk","Rus","Vlad","Yaro","Sviat","Tver","Polo","Mira","Drago"],
         mid: &["","o","i","a","os","e"],
         end: &["grad","gorod","sk","ovo","ica","yn","slav","mir","polye","ov","ino","ets"],
@@ -142,7 +143,7 @@ pub const KITS: &[Kit] = &[
         guild: &["Bratstvo","Torg","Druzhina","Artel","Sotnya","Ryad","Gostiny"],
         epithet: &["Velikiy","Slavny","the Bold"] },
     // 10 Nahuatl / Mesoamerican
-    Kit { name: "Nahua", env: Env::Tropical,
+    Kit { name: "Nahua", lang_family: "Nahuan", env: Env::Tropical,
         on: &["Teno","Tlate","Texco","Xochi","Tlaxca","Cholo","Teoti","Azca","Cuauh","Mixco","Tula","Mali","Coa","Itz","Tepe","Huey"],
         mid: &["","a","i","te","tla","co"],
         end: &["titlan","tlan","co","pan","tepec","apan","huacan","calco","tzinco","mila","lan","oztoc"],
@@ -151,7 +152,7 @@ pub const KITS: &[Kit] = &[
         guild: &["Pochteca","Calpolli","Tianquiztli","Pochtlan","Oztomeca","Tealtianime"],
         epithet: &["Huey","Tlatoani","the Revered"] },
     // 11 Turkic
-    Kit { name: "Turkic", env: Env::Arid,
+    Kit { name: "Turkic", lang_family: "Turkic", env: Env::Arid,
         on: &["Bal","Qara","Sar","Otra","Tash","Bukh","Sam","Talas","Aksu","Kashg","Turk","Yenis","Bes","Ulan","Altan","Bey"],
         mid: &["","a","i","y","an","ar"],
         end: &["kent","baliq","gar","tepe","shahr","oba","kol","tag","yurt","saray","bulaq","orda"],
@@ -182,6 +183,13 @@ pub struct Hearth {
     pub mut_seed: u64,
     pub people: String, // region / people label, e.g. "Vexillia"
     pub color: [u8; 3],
+    /// Language family this people belongs to (from its kit) — relatedness drives how
+    /// readily its minorities assimilate elsewhere. `#[serde(default)]` → old saves fill "".
+    #[serde(default)] pub family: String,
+    /// A STATIC origin card written at worldgen: where this people arose (homeland /
+    /// biome), their language family, and their temperament (rooted vs migration-prone).
+    /// Fixed for the life of the world. `#[serde(default)]` → old saves show "".
+    #[serde(default)] pub origin: String,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -287,7 +295,7 @@ const CULTURE_PALETTE: &[[u8; 3]] = &[
 ];
 
 /// Compute the organic culture map from terrain/climate. `seed` is the world seed.
-pub fn compute_culture_map(buf: &WorldBuffer, seed: u64) -> CultureMap {
+pub fn compute_culture_map(buf: &WorldBuffer, seed: u64, desired: Option<usize>) -> CultureMap {
     let w = buf.width;
     let h = buf.height;
     // Coarse raster: ~280 cells across, proportional height.
@@ -319,8 +327,14 @@ pub fn compute_culture_map(buf: &WorldBuffer, seed: u64) -> CultureMap {
         }
     }
 
-    // How many hearths: scale with land area, clamped.
-    let k = ((land_cells as f32).sqrt() / 9.0).round().clamp(5.0, 14.0) as usize;
+    // How many hearths (initial cultures): the user's chosen count if given (clamped to a
+    // sane range for the map's land area), else auto-scaled with land area.
+    let auto = ((land_cells as f32).sqrt() / 9.0).round().clamp(5.0, 14.0) as usize;
+    let hard_max = ((land_cells as f32).sqrt() / 4.0).round().max(6.0) as usize; // enough room to space seeds
+    let k = match desired {
+        Some(d) if d >= 1 => d.clamp(1, hard_max.max(1)),
+        _ => auto,
+    };
 
     // Seed candidate cells: land, mild, low — ranked by a habitability-ish score
     // plus seeded noise, then greedily chosen with a minimum spacing.
@@ -373,7 +387,9 @@ pub fn compute_culture_map(buf: &WorldBuffer, seed: u64) -> CultureMap {
         let mut_seed = hash64(seed ^ (hi as u64).wrapping_mul(0x9E3779B97F4A7C15) ^ 0xC0117);
         let people = gen_people_name(kit, mut_seed, fx, fy);
         let color = CULTURE_PALETTE[hi % CULTURE_PALETTE.len()];
-        hearths.push(Hearth { x: fx as f32, y: fy as f32, kit: kit as u8, mut_seed, people, color });
+        let family = KITS[kit.min(KITS.len() - 1)].lang_family.to_string();
+        let origin = origin_card(&people, kit, env);
+        hearths.push(Hearth { x: fx as f32, y: fy as f32, kit: kit as u8, mut_seed, people, color, family, origin });
     }
 
     // Multi-source least-cost flood-fill over the coarse land grid (Dijkstra; X wraps).
@@ -531,6 +547,71 @@ pub fn river_name(kit: usize, ms: u64, seed: u64) -> String {
     } else {
         stem
     }
+}
+
+/// Deterministic per-people MOBILITY (0..1) from the people label — MUST match
+/// `tick::CampaignSim::culture_mobility` so the origin card's temperament agrees with
+/// how the people actually spreads in the sim. ~20% are travel-prone (≥0.7).
+pub fn people_mobility(name: &str) -> f32 {
+    if name.is_empty() || name == "—" { return 0.2; }
+    let mut h = 0xcbf29ce484222325u64;
+    for b in name.bytes() { h ^= b as u64; h = h.wrapping_mul(0x100000001b3); }
+    let r = (h % 1000) as f32 / 1000.0;
+    if r > 0.80 { 0.7 + (r - 0.80) / 0.20 * 0.30 } else { 0.1 + r / 0.80 * 0.4 }
+}
+
+/// The homeland biome phrase for a hearth's environment (used in the origin card).
+fn homeland_phrase(env: Env) -> &'static str {
+    match env {
+        Env::Cold => "the cold northern coasts and pine forests",
+        Env::Arid => "the arid steppes and desert margins",
+        Env::Tropical => "the hot, wet tropics",
+        Env::Maritime => "a sheltered, island-strewn seaboard",
+        Env::Temperate => "a temperate, river-fed heartland",
+    }
+}
+
+/// A STATIC origin card for a people: where they arose, their language family, and
+/// their temperament (rooted vs migration-prone). Deterministic; written once at
+/// worldgen and never rewritten (the LIVE present-spread is shown separately in the UI).
+pub fn origin_card(people: &str, kit: usize, env: Env) -> String {
+    let k = &KITS[kit.min(KITS.len() - 1)];
+    let mob = people_mobility(people);
+    let temperament = if mob >= 0.7 {
+        "A restless, seafaring people: their merchant quarters spread far along the trade roads, so kin of theirs turn up settled in distant ports."
+    } else if mob >= 0.45 {
+        "A people of moderate wanderlust — traders and settlers who reach neighbouring lands but keep a firm homeland."
+    } else {
+        "A rooted, sedentary people, slow to mingle far beyond their own homeland."
+    };
+    let article = if matches!(k.lang_family.chars().next(), Some('A' | 'E' | 'I' | 'O' | 'U')) { "an" } else { "a" };
+    format!(
+        "{people} — {article} {family} people who speak a {tongue}-styled tongue — arose on {home}. {temperament}",
+        people = people, article = article, family = k.lang_family, tongue = k.name,
+        home = homeland_phrase(env), temperament = temperament,
+    )
+}
+
+/// The kit index of a live people (by its label), from the active worldgen map, if any.
+pub fn kit_of_people(name: &str) -> Option<usize> {
+    active().and_then(|m| m.hearths.iter().find(|h| h.people == name).map(|h| h.kit as usize))
+}
+
+/// The hearth colour of a live people (by its label), from the active map, if any.
+pub fn color_of_people(name: &str) -> Option<[u8; 3]> {
+    active().and_then(|m| m.hearths.iter().find(|h| h.people == name).map(|h| h.color))
+}
+
+/// Cultures 2.0 · synthesize a CREOLE name from two parent kits' word-banks: the onset
+/// of parent A + a middle/ending of parent B (e.g. Roman "Nov" + Norse "vik" → "Novvik").
+/// Deterministic in `seed` so a caller can re-roll to avoid a duplicate.
+pub fn blend_name(kit_a: usize, kit_b: usize, seed: u64) -> String {
+    let a = &KITS[kit_a.min(KITS.len() - 1)];
+    let b = &KITS[kit_b.min(KITS.len() - 1)];
+    let base = hash64(seed ^ 0x9E37_79B9_7F4A_7C15);
+    let raw = format!("{}{}{}", pick(a.on, base), pick(b.mid, base >> 8), pick(b.end, base >> 16));
+    let raw: String = raw.split_whitespace().collect::<Vec<_>>().join("");
+    cap_first(&raw)
 }
 
 /// A region / people label for a hearth (a grander homeland name).
