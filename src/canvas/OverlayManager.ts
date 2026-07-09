@@ -342,7 +342,7 @@ export class OverlayManager {
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
-    speculation: false,
+    speculation: false, coinDominance: false,
     houseControl: false, merchantRoutes: false, futures: false,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
   };
@@ -1395,7 +1395,11 @@ export class OverlayManager {
       this.renderHouseControlLayer(ctx);
     }
 
-    // Coin-usage overlay: tint settlements that settle in the selected coin.
+    // Monetary-dominance map: tint EVERY settlement by the coin it settles in.
+    if (this.visibility.coinDominance && this.coinUse.length > 0) {
+      this.renderCoinDominance(ctx);
+    }
+    // Coin-usage drill-down: a selected coin's territory (primary / held / reserve).
     if (this.coinOverlayHub != null && this.coinUse.length > 0) {
       this.renderCoinUsage(ctx);
     }
@@ -2194,30 +2198,104 @@ export class OverlayManager {
   /** Tint every settlement by its use of the selected coin: the mint city brightest,
    *  heavy users solid gold, light users dim gold, reserve-reach a dashed green ring.
    *  Cities that use a DIFFERENT coin are left as small grey dots. */
+  /** All-coins MONETARY-DOMINANCE map: every settlement filled with the colour of
+   *  the coin it settles in (its `primary` currency). A city that has flipped to a
+   *  FOREIGN coin (a reserve currency that took its market) gets a bright ring, so
+   *  reserve-currency incursions read at a glance; each coin's own mint is starred. */
+  private renderCoinDominance(ctx: CanvasRenderingContext2D) {
+    const inv = 1 / Math.sqrt(this.currentScale);
+    const prim = this.coinUse.filter((u) => u.primary);
+    let maxVol = 0;
+    for (const u of prim) maxVol = Math.max(maxVol, u.volume);
+    const base = Math.max(2, 3.6 * inv);
+    ctx.lineCap = "round";
+    for (const u of prim) {
+      const t = maxVol > 0 ? u.volume / maxVol : 0;
+      const r = u.mint ? base * 2.0 : base * (0.9 + 0.9 * t);
+      const cx = u.x + 0.5, cy = u.y + 0.5;
+      // Fill by the settling coin's colour.
+      ctx.fillStyle = u.color || "#c9a227";
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+      if (u.mint) {
+        // A mint — the capital of its currency: bright outline.
+        ctx.strokeStyle = "#fff3c0"; ctx.globalAlpha = 0.95; ctx.lineWidth = Math.max(0.7, 1.3 * inv);
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      } else {
+        // A foreign coin settles here → a reserve currency has taken this market.
+        ctx.strokeStyle = "#eaf2ff"; ctx.globalAlpha = 0.7; ctx.lineWidth = Math.max(0.5, 0.9 * inv);
+        ctx.beginPath(); ctx.arc(cx, cy, r + 1.2 * inv, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** Convex hull (monotone chain) of {x,y} points — the coin's "territory" shape. */
+  private convexHull(pts: { x: number; y: number }[]): { x: number; y: number }[] {
+    if (pts.length < 3) return pts.slice();
+    const p = pts.slice().sort((a, b) => a.x - b.x || a.y - b.y);
+    const cross = (o: any, a: any, b: any) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    const lower: any[] = [];
+    for (const q of p) { while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop(); lower.push(q); }
+    const upper: any[] = [];
+    for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop(); upper.push(q); }
+    lower.pop(); upper.pop();
+    return lower.concat(upper);
+  }
+
+  /** Single-coin DRILL-DOWN: the selected coin's reach in THREE tiers — PRIMARY
+   *  (its home turf: bold coins inside a translucent territory hull), RESERVE-reach
+   *  (held abroad as a reserve: green dashed rings) and HELD-only (a minor basket
+   *  holding: faint dots). Shows both how far a coin has spread and where it rules. */
   private renderCoinUsage(ctx: CanvasRenderingContext2D) {
     const inv = 1 / Math.sqrt(this.currentScale);
     const cities = this.coinUse.filter((u) => u.coin === this.coinOverlayHub);
     let maxVol = 0;
     for (const u of cities) maxVol = Math.max(maxVol, u.volume);
     const base = Math.max(2, 4 * inv);
+
+    // Territory hull around the PRIMARY cities (the coin's core turf).
+    const primary = cities.filter((u) => u.primary);
+    const coinColor = cities[0]?.color || "#c9a227";
+    if (primary.length >= 3) {
+      const hull = this.convexHull(primary.map((u) => ({ x: u.x + 0.5, y: u.y + 0.5 })));
+      if (hull.length >= 3) {
+        ctx.beginPath();
+        ctx.moveTo(hull[0].x, hull[0].y);
+        for (let i = 1; i < hull.length; i++) ctx.lineTo(hull[i].x, hull[i].y);
+        ctx.closePath();
+        ctx.fillStyle = coinColor; ctx.globalAlpha = 0.10; ctx.fill();
+        ctx.strokeStyle = coinColor; ctx.globalAlpha = 0.4;
+        ctx.lineWidth = Math.max(0.6, 1.1 * inv);
+        ctx.setLineDash([Math.max(2, 4 * inv), Math.max(1.5, 3 * inv)]); ctx.stroke(); ctx.setLineDash([]);
+      }
+    }
+
     ctx.lineCap = "round";
     for (const u of cities) {
       const t = maxVol > 0 ? u.volume / maxVol : 0;
-      const r = u.mint ? base * 2.0 : base * (1.0 + 0.8 * t);
       const cx = u.x + 0.5, cy = u.y + 0.5;
-      if (u.reserve_reach) {
+      if (u.primary) {
+        // Home turf — a bold struck coin sized by volume.
+        const r = u.mint ? base * 2.0 : base * (1.0 + 0.8 * t);
+        ctx.fillStyle = u.mint ? "#f6df85" : coinColor;
+        ctx.globalAlpha = u.mint ? 1 : 0.7 + 0.3 * t;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = u.mint ? "#fff3c0" : "#12202f"; ctx.globalAlpha = 0.9;
+        ctx.lineWidth = Math.max(0.5, (u.mint ? 1.1 : 0.7) * inv);
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      } else if (u.reserve_reach) {
+        // Held abroad as a reserve — a green dashed ring (not its primary money).
+        const r = base * (1.0 + 0.5 * t);
         ctx.strokeStyle = "#37a05a"; ctx.globalAlpha = 0.9;
         ctx.lineWidth = Math.max(0.8, 1.4 * inv);
         ctx.setLineDash([Math.max(1.5, 3 * inv), Math.max(1.5, 2 * inv)]);
-        ctx.beginPath(); ctx.arc(cx, cy, r + 3 * inv, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx, cy, r + 2 * inv, 0, Math.PI * 2); ctx.stroke();
         ctx.setLineDash([]);
-      }
-      ctx.fillStyle = u.mint ? "#f0d77a" : t > 0.55 ? "#c9a227" : "#7a6320";
-      ctx.globalAlpha = u.mint ? 1 : 0.55 + 0.4 * t;
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
-      if (u.mint) {
-        ctx.strokeStyle = "#fff3c0"; ctx.globalAlpha = 0.9; ctx.lineWidth = Math.max(0.6, 1 * inv);
-        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      } else {
+        // Minor basket holding — a faint dot.
+        ctx.fillStyle = coinColor; ctx.globalAlpha = 0.28 + 0.25 * t;
+        ctx.beginPath(); ctx.arc(cx, cy, Math.max(1, base * 0.7), 0, Math.PI * 2); ctx.fill();
       }
     }
     ctx.globalAlpha = 1;

@@ -4081,8 +4081,11 @@ pub struct CoinUseCity {
     pub x: f32,
     pub y: f32,
     pub volume: f32,         // trade throughput settled in this coin at this city
+    pub share: f32,          // this coin's share of the city's currency basket 0..1
     pub mint: bool,          // this city is the coin's own mint
-    pub reserve_reach: bool, // a foreign reserve coin circulating here
+    pub primary: bool,       // this coin is the city's MAIN settlement currency (settle_coin)
+    pub reserve_reach: bool, // a foreign reserve coin circulating here (held, not primary)
+    pub color: String,       // stable per-coin colour (its council's arms) for the dominance map
 }
 
 /// Per-city coin usage: which coin each settlement settles its trade in + the
@@ -4104,6 +4107,10 @@ pub fn campaign_coin_usage(db: State<'_, WorldDb>) -> Result<Vec<CoinUseCity>, S
             let Some(coin_hub) = sim.hubs.get(j) else { continue };
             if coin_hub.coin_name.is_empty() { continue; }
             let mint = j == i;
+            let primary = h.settle_coin == j as i32;
+            let color = if coin_hub.council_house >= 0 {
+                distinct_color(coin_hub.council_house as usize)
+            } else { distinct_color(j) };
             out.push(CoinUseCity {
                 coin: coin_hub.id,
                 coin_name: coin_hub.coin_name.clone(),
@@ -4111,8 +4118,11 @@ pub fn campaign_coin_usage(db: State<'_, WorldDb>) -> Result<Vec<CoinUseCity>, S
                 name: h.name.clone(),
                 x: h.x, y: h.y,
                 volume: thru * share,
+                share,
                 mint,
-                reserve_reach: !mint && coin_hub.coin_trust >= 0.55,
+                primary,
+                reserve_reach: !primary && coin_hub.coin_trust >= 0.55,
+                color,
             });
         }
     }

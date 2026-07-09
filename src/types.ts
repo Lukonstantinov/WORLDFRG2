@@ -1251,8 +1251,11 @@ export interface CoinUseCity {
   x: number;
   y: number;
   volume: number;        // trade settled in this coin at this city
+  share: number;         // this coin's share of the city's basket 0..1
   mint: boolean;         // this city is the coin's own mint
-  reserve_reach: boolean; // a foreign reserve coin circulating here
+  primary: boolean;      // this coin is the city's MAIN settlement currency
+  reserve_reach: boolean; // a foreign reserve coin circulating here (held, not primary)
+  color: string;         // stable per-coin colour (its council's arms)
 }
 
 /** One bank's balance sheet + reach. */

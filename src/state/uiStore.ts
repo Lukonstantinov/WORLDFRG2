@@ -305,7 +305,7 @@ export const useUIStore = create<UIStore>((set) => ({
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
-    speculation: false,
+    speculation: false, coinDominance: false,
     houseControl: false, merchantRoutes: false, futures: false, dynamicFlow: false, tradeHeat: false,
     tradeBasins: false, migrations: true,
     colonies: true,

@@ -922,10 +922,13 @@ export function MapCanvas() {
   // Coin-usage overlay: when a coin is selected in the Currencies panel, fetch the
   // per-city settlement snapshot and tint the map by use of that coin.
   const coinOverlayHub = useUIStore((s) => s.coinOverlayHub);
+  const coinDominanceOn = overlayVisibility.coinDominance ?? false;
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om) return;
-    if (coinOverlayHub == null || !campaignSnapshot?.active) {
+    // Fetch the per-city coin snapshot when EITHER the all-coins dominance map is on
+    // or a coin is selected for drill-down; the same data feeds both renders.
+    if ((coinOverlayHub == null && !coinDominanceOn) || !campaignSnapshot?.active) {
       om.setCoinUsage([], null); requestRender(); return;
     }
     let alive = true;
@@ -933,7 +936,7 @@ export function MapCanvas() {
       .then((u) => { if (alive) { om.setCoinUsage(u, coinOverlayHub); requestRender(); } })
       .catch(() => {});
     return () => { alive = false; };
-  }, [coinOverlayHub, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
+  }, [coinOverlayHub, coinDominanceOn, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
 
   // #23 · the chosen itinerary route, pushed from the Itinerary panel via uiStore.
   const travelRoute = useUIStore((s) => s.travelRoute);
