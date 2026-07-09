@@ -1587,6 +1587,7 @@ export interface LakeNode {
   wildlife: string;
   endemism: string;
   blurb: string;        // one-line flavour description
+  species: FishSpecies[]; // signature fish (variable roster by type × band)
   story: string;        // unique multi-sentence NatGeo-style account
   inflows: string[];    // feeder river names
   outflow: string;      // draining river name ("" = terminal)

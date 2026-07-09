@@ -5325,6 +5325,9 @@ pub struct LakeNode {
     pub wildlife: String,
     pub endemism: String,
     pub blurb: String,
+    /// Signature fish species for this lake (a variable-length roster by type ×
+    /// band — a rift flock, a single tarn char, brine shrimp for a salt lake).
+    pub species: Vec<FishSpeciesOut>,
     /// A UNIQUE, seeded NatGeo-style account of the lake (no two read alike).
     pub story: String,
     /// Names of the rivers that feed / drain the lake ("" outflow = terminal).
@@ -5519,6 +5522,13 @@ fn build_lake_systems(
             wildlife: aquatic::lake_wildlife(kind, band),
             endemism: aquatic::lake_endemism(kind, band),
             blurb: aquatic::lake_blurb(kind, band),
+            species: aquatic::assign_lake_fish(kind, band, aquatic::lake_salinity_ppt(kind, max_depth_m))
+                .into_iter()
+                .map(|f| FishSpeciesOut {
+                    slug: f.slug.into(), name: f.name.into(), binomial: f.binomial.into(),
+                    zone: f.zone, real: f.real.into(), blurb: f.blurb.into(),
+                })
+                .collect(),
             story,
             inflows: inflows[li].clone(),
             outflow: outflow[li].clone().unwrap_or_default(),

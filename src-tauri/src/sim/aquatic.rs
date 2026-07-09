@@ -733,6 +733,84 @@ pub fn assign_river_fish(band: Band, source_kind: &str, mouth_kind: u8, discharg
     out
 }
 
+// ───────────────────── Signature fish species (lake rosters) ─────────────────
+// Lake-only species (cichlid flocks, the freshwater seal, brine shrimp, lake
+// trout…), reusing the same FishSpec shape so the frontend plate machinery is
+// shared. `zone` is repurposed as a rough depth niche (0 shallows · 1 open water ·
+// 2 deep) and is not shown for lakes. River-roster slugs are reused directly where
+// a species also lives in lakes (pike, perch, whitefish, char, bream, tench…), so
+// only genuinely lake-signature fish are added here.
+pub const LAKE_FISH: &[FishSpec] = &[
+    // Rift / great-lake cichlid flock (tropical)
+    FishSpec{slug:"mosaic-cichlid",name:"Mosaic Cichlid",binomial:"Haplochromis tessellatus",zone:0,real:"haplochromine cichlid",blurb:"one of an explosive flock of jewel-coloured cichlids found in this lake alone.",bands:&[Tropical]},
+    FishSpec{slug:"azure-mbuna",name:"Azure Mbuna",binomial:"Maylandia azurea",zone:0,real:"mbuna cichlid",blurb:"a rock-grazing cichlid in electric blue, endemic to the rocky shore.",bands:&[Tropical]},
+    FishSpec{slug:"marsh-lungfish",name:"Marsh Lungfish",binomial:"Protopterus paludis",zone:2,real:"lungfish",blurb:"an air-gulping relic that survives the dry season buried in mud.",bands:&[Tropical,WarmTemperate]},
+    // Deep rift (cold) — relict fauna + the freshwater seal
+    FishSpec{slug:"abyss-sculpin",name:"Abyss Sculpin",binomial:"Cottus abyssalis",zone:2,real:"deep-water sculpin",blurb:"a relict sculpin of the cold, lightless depths.",bands:&[Boreal,CoolTemperate]},
+    FishSpec{slug:"silver-nerpa",name:"Silver Nerpa",binomial:"Pusa argentea",zone:1,real:"freshwater seal",blurb:"the world's only wholly freshwater seal, hauling out on the ice.",bands:&[Boreal,CoolTemperate]},
+    FishSpec{slug:"pallid-omul",name:"Pallid Omul",binomial:"Coregonus pallidus",zone:1,real:"omul whitefish",blurb:"an endemic whitefish shoaling in the cold open water.",bands:&[Boreal,CoolTemperate,Polar]},
+    // Glacial great lakes
+    FishSpec{slug:"graven-laketrout",name:"Graven Lake Trout",binomial:"Salvelinus namaycush",zone:2,real:"lake trout",blurb:"a big, deep-dwelling char of cold, clear lakes.",bands:&[CoolTemperate,Boreal]},
+    FishSpec{slug:"glass-cisco",name:"Glass Cisco",binomial:"Coregonus vitreus",zone:1,real:"cisco",blurb:"a silvery plankton-feeder of the cold pelagic zone.",bands:&[CoolTemperate,Boreal]},
+    // Tropical great (Victoria-like) + lowland reedy lakes
+    FishSpec{slug:"goldshoal-tilapia",name:"Goldshoal Tilapia",binomial:"Oreochromis auratus",zone:0,real:"tilapia",blurb:"a hardy, prolific cichlid crowding the warm, productive shallows.",bands:&[Tropical,WarmTemperate]},
+    FishSpec{slug:"reed-tench",name:"Reed Tench",binomial:"Tinca palustris",zone:0,real:"tench",blurb:"an olive, slime-scaled bottom-fish of warm, weedy shallows.",bands:&[WarmTemperate,CoolTemperate]},
+    // Salt / hypersaline
+    FishSpec{slug:"brine-shrimp",name:"Brine Shrimp",binomial:"Artemia salina",zone:1,real:"brine shrimp",blurb:"not a fish at all — a tiny crustacean that reddens the brine and feeds the flamingoes.",bands:&[Tropical,WarmTemperate,CoolTemperate,Boreal,Polar]},
+    FishSpec{slug:"lakeshore-pupfish",name:"Lakeshore Pupfish",binomial:"Cyprinodon lacustris",zone:0,real:"pupfish",blurb:"a thumb-sized survivor of hot, salty desert water.",bands:&[Tropical,WarmTemperate]},
+];
+
+/// Find a fish spec by slug across every roster (river / arid / lake), so lake
+/// assemblages can reuse river species that also live in lakes.
+fn fish_by_slug(slug: &str) -> Option<&'static FishSpec> {
+    SIGNATURE_FISH.iter().chain(ARID_FISH).chain(LAKE_FISH).find(|f| f.slug == slug)
+}
+
+/// Assign a lake's signature fish — a VARIABLE-length roster keyed to lake type ×
+/// thermal band (a rift lake shows a flock of several, a tarn one, a hypersaline
+/// lake only brine shrimp). Deterministic; band-filtered so no fish appears out of
+/// its climate. Returns `&'static FishSpec`, empty only for a truly barren water.
+pub fn assign_lake_fish(kind: LakeKind, band: Band, salinity_ppt: f32) -> Vec<&'static FishSpec> {
+    // Candidate slugs per lake type (ordered best-first); band filtering + the
+    // per-type cap below produce the variable count.
+    let (want, cap): (&[&str], usize) = match kind {
+        LakeKind::Rift => if band == Band::Tropical {
+            (&["mosaic-cichlid", "azure-mbuna", "marsh-lungfish", "whiskered-redtail", "goldshoal-tilapia"], 5)
+        } else {
+            (&["silver-nerpa", "abyss-sculpin", "pallid-omul", "broad-whitefish", "boreal-burbot"], 5)
+        },
+        LakeKind::TropicalGreat => (&["goldshoal-tilapia", "mosaic-cichlid", "marsh-lungfish", "azure-mbuna"], 4),
+        LakeKind::Glacial => (&["graven-laketrout", "glass-cisco", "broad-whitefish", "northern-pike", "marbled-perch"], 5),
+        LakeKind::Lowland => (&["reed-tench", "marbled-perch", "broadscale-bream", "northern-pike", "reedwater-zander"], 5),
+        LakeKind::Crater => if matches!(band, Band::Boreal | Band::Polar | Band::CoolTemperate) {
+            (&["redflank-char"], 1)
+        } else {
+            (&["goldshoal-tilapia"], 2)
+        },
+        LakeKind::SaltEndorheic => if salinity_ppt >= 120.0 {
+            (&["brine-shrimp"], 1) // hypersaline: brine shrimp & flamingoes, no fish
+        } else {
+            (&["brine-shrimp", "lakeshore-pupfish", "oasis-tilapia"], 3)
+        },
+        LakeKind::Tarn => if band == Band::Tropical {
+            (&["goldshoal-tilapia"], 1)
+        } else {
+            (&["redflank-char"], 1)
+        },
+    };
+    let mut out: Vec<&'static FishSpec> = Vec::new();
+    for &slug in want {
+        if out.len() >= cap { break; }
+        if let Some(f) = fish_by_slug(slug) {
+            // Brine shrimp ignore the band gate (a crustacean, present at any temp).
+            if f.slug == "brine-shrimp" || f.bands.contains(&band) {
+                if !out.iter().any(|e| e.slug == f.slug) { out.push(f); }
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -799,6 +877,26 @@ mod tests {
             arid: true, elongated: false,
         };
         assert_eq!(classify_lake(&f), LakeKind::SaltEndorheic);
+    }
+
+    #[test]
+    fn lake_fish_vary_by_type_and_band() {
+        // A tropical rift lake shows a multi-species cichlid flock…
+        let rift = assign_lake_fish(LakeKind::Rift, Band::Tropical, 0.2);
+        assert!(rift.len() >= 3, "rift lake shows a flock: {}", rift.len());
+        assert!(rift.iter().any(|f| f.real.contains("cichlid")), "rift flock has cichlids");
+        // …a tarn shows a single cold-water fish…
+        let tarn = assign_lake_fish(LakeKind::Tarn, Band::Boreal, 0.2);
+        assert_eq!(tarn.len(), 1, "a tarn is a one-fish water");
+        // …and a hypersaline lake shows only brine shrimp (no fish).
+        let brine = assign_lake_fish(LakeKind::SaltEndorheic, Band::WarmTemperate, 150.0);
+        assert_eq!(brine.len(), 1, "hypersaline: brine shrimp only");
+        assert_eq!(brine[0].slug, "brine-shrimp");
+        // Every assigned fish suits the lake's band (brine shrimp excepted).
+        for f in &rift { assert!(f.bands.contains(&Band::Tropical)); }
+        // A milder salt lake supports a few halotolerant specialists.
+        let salty = assign_lake_fish(LakeKind::SaltEndorheic, Band::WarmTemperate, 45.0);
+        assert!(salty.len() >= 2, "a brackish salt lake has a few specialists");
     }
 
     #[test]

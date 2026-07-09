@@ -387,6 +387,14 @@ function LakeDetail({ lk, focusOn }: { lk: LakeNode; focusOn: (x: number, y: num
       <EcoRow icon="🐟" label="Fish" text={lk.fish} />
       <EcoRow icon="🦩" label="Wildlife" text={lk.wildlife} />
       <EcoRow icon="🧬" label="Endemism" text={lk.endemism} />
+      {lk.species && lk.species.length > 0 && (
+        <div style={{ marginTop: 9 }}>
+          <div style={subLabel}>🐟 Signature fish of this lake</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {lk.species.map((sp) => <LakeFishPlate key={sp.slug} sp={sp} />)}
+          </div>
+        </div>
+      )}
       {(lk.inflows.length > 0 || lk.outflow) && (
         <EcoRow icon="↳" label="Drainage"
           names={[...lk.inflows, lk.outflow]}
@@ -542,6 +550,32 @@ function FishPlate({ sp }: { sp: FishSpecies }) {
           <span style={{ fontSize: 9.5, color: "#7d94ab", marginLeft: 6, fontWeight: 500 }}>
             {ZONE_ICON[sp.zone] ?? ""} {ZONE_LABEL[sp.zone] ?? ""}
           </span>
+        </div>
+        <div style={{ fontSize: 10, fontStyle: "italic", color: "#7fae8f" }}>{sp.binomial}</div>
+        <div style={{ fontSize: 10.5, color: "#93a9be", marginTop: 1 }}>{sp.blurb}</div>
+      </div>
+    </div>
+  );
+}
+
+// ── Lake fish plate ── same illustration/emoji-fallback as rivers, but no river
+// zone label (lakes aren't zoned source→mouth); shows the real-world model fish.
+function LakeFishPlate({ sp }: { sp: FishSpecies }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div style={{ display: "flex", gap: 9, alignItems: "center", background: "#0a1620",
+      border: "1px solid #14283a", borderRadius: 7, padding: "6px 8px" }}>
+      <div style={{ width: 90, height: 50, flex: "0 0 auto", borderRadius: 5, overflow: "hidden",
+        background: "radial-gradient(130% 100% at 30% 20%, #14304a, #0a1620 70%)", display: "grid", placeItems: "center" }}>
+        {!failed
+          ? <img src={`/fish/${sp.slug}.png`} alt={sp.name} onError={() => setFailed(true)}
+              style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+          : <span style={{ fontSize: 24, opacity: 0.6 }}>🐟</span>}
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 650, color: "#e6f2fb" }}>
+          {sp.name}
+          <span style={{ fontSize: 9.5, color: "#7d94ab", marginLeft: 6, fontWeight: 500 }}>~ {sp.real}</span>
         </div>
         <div style={{ fontSize: 10, fontStyle: "italic", color: "#7fae8f" }}>{sp.binomial}</div>
         <div style={{ fontSize: 10.5, color: "#93a9be", marginTop: 1 }}>{sp.blurb}</div>
