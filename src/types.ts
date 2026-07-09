@@ -1228,6 +1228,7 @@ export interface MintBrief {
   abroad: number;        // holders outside the home market
   // v2.0 monetary loop + reform
   price_level: number;   // local CPI index (1.0 = par)
+  bullion: string;       // "ample" | "tight" | "scarce" — coin-supply limiting factor
   under_mandate: boolean; // honest-money mandate active (no debasement)
   reformed: boolean;      // has reformed its coinage at least once
 }

@@ -152,6 +152,10 @@ const fmtk = (v: number) => {
 const METAL_COLOR: Record<string, string> = {
   gold: "#e8c452", silver: "#c4cdd8", electrum: "#dcd083", bronze: "#c07f45",
 };
+/** Tint for the bullion-supply (coin-supply limit) label. */
+const BULLION_COLOR: Record<string, string> = {
+  ample: "#5fbf8a", tight: "#e0b060", scarce: "#e08080",
+};
 
 /** A labelled driver sub-bar (fineness / trust). */
 function DriverBar({ label, frac, color, text }: { label: string; frac: number; color: string; text: string }) {
@@ -239,6 +243,12 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap }:
         <span style={{ color: cpi >= 1.15 ? "#e0a880" : "#8aa8c8" }} title="Local price level (CPI, 1.0 = par at start) — rises with debasement / money growth">
           prices ×{cpi.toFixed(2)}
         </span>
+        {m.bullion && (
+          <span style={{ color: BULLION_COLOR[m.bullion] ?? "#8aa8c8" }}
+            title="Bullion supply — how much gold/silver the region can mint. Scarce bullion caps fineness (forces debasement); it is the hard limit on coin supply.">
+            ⛏ {m.bullion}
+          </span>
+        )}
         {m.war_with && <span style={{ color: "#e88" }}>⚔ {m.war_with}</span>}
       </div>
 
@@ -267,6 +277,9 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap }:
               <Explain label="Fineness" value={`${(m.fineness * 100).toFixed(0)}%`} text={debased ? "Precious-metal content. Below 100% = DEBASED — the mint skimmed seigniorage into the treasury, which erodes trust AND raises local prices (the inflation tax)." : "Precious-metal content. 100% = full-bodied, honest coin."} />
               <Explain label="Trust (acceptance)" value={`${(m.trust * 100).toFixed(0)}%`} text="How widely merchants accept the coin. Sticky reputation; hit hard by debasement. ≥55% makes it a reserve currency accepted abroad." />
               <Explain label="Price level" value={`×${cpi.toFixed(2)}`} text="v2.0 closed loop: this city's cost of living. Debasing the coin it settles in, or flooding money supply, drives this up — and erodes resident fortunes faster." />
+              <Explain label="Bullion supply" value={m.bullion} text={m.bullion === "ample"
+                ? "The region has gold/silver to spare — the mint can strike full-bodied coin. Bullion is not the binding constraint here."
+                : `Coin SUPPLY is limited by the region's ${m.metal} bullion. Minting beyond the metal forces debasement — fineness is capped down, so scarce bullion is the hard limit on how sound this coin can be.`} />
               <CoinUsageChart usage={usage} />
             </>
           ) : (

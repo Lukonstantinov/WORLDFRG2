@@ -1419,6 +1419,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 last_reform_tick: 0,
                 reform_until: 0,
                 coin_metal: 0,
+                mint_bullion_ratio: 1.0,
                 quality: Vec::new(),
                 stolen_good: -1,
                 stolen_from: -1,
@@ -3967,6 +3968,9 @@ pub struct MintBrief {
     // ── v2.0 monetary loop + reform ──
     /// Local price-level index (1.0 = par at start). Rises with debasement/money growth.
     pub price_level: f32,
+    /// Bullion capacity: "ample" | "tight" | "scarce" — how the region's gold/silver
+    /// supply constrains minting (the coin-supply limiting factor).
+    pub bullion: String,
     /// Honest-money mandate currently in force (no debasement allowed).
     pub under_mandate: bool,
     /// This mint has reformed its coinage at least once.
@@ -4023,6 +4027,10 @@ pub fn campaign_get_mints(db: State<'_, WorldDb>) -> Result<Vec<MintBrief>, Stri
                 is_reserve: has_coin && h.coin_trust >= 0.55,
                 circulating, held_in, abroad,
                 price_level: if h.price_level <= 0.0 { 1.0 } else { h.price_level },
+                bullion: if !has_coin { String::new() }
+                    else if h.mint_bullion_ratio >= 1.0 { "ample".into() }
+                    else if h.mint_bullion_ratio >= 0.5 { "tight".into() }
+                    else { "scarce".into() },
                 under_mandate: h.reform_until > sim.tick,
                 reformed: h.last_reform_tick != 0,
             }

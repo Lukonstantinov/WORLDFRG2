@@ -826,6 +826,19 @@ const REFORM_MANDATE_YEARS: u32 = 6;
 /// reserve ratio has fallen below `BANK_RUN_RATIO`.
 const BANK_RUN_WITHDRAW: f32 = 0.18;
 
+// ── v2.0 · bullion-limited minting (mint regulation) ─────────────────────────
+/// Bullion (weighted gold+silver output) a region needs per unit of coin demand
+/// (throughput) to sustain FULL-BODIED coin. Below this ratio the mint is forced
+/// to stretch its metal — fineness is capped down (endogenous debasement from
+/// scarcity, not choice). Lenient so only genuinely bullion-poor regions bind.
+const MINT_BULLION_DEMAND: f32 = 0.04;
+/// Gold is far denser in value than silver — weight it in the bullion tally.
+const MINT_GOLD_WEIGHT: f32 = 3.0;
+/// The lowest fineness bullion scarcity alone can force (a bullion-starved mint
+/// still strikes a passable, if base-heavy, coin — it imports/short-weights, it
+/// does not collapse). Full bullion supply lifts the cap to 1.0.
+const MINT_FINENESS_FLOOR: f32 = 0.85;
+
 // ── DLC 4 · Good quality ─────────────────────────────────────────────────────
 /// Value multiplier a good's quality earns: coarse goods trade at a discount,
 /// exquisite ones at a premium (≈0.6×…1.5× across the grade range).
@@ -1165,6 +1178,10 @@ pub struct TickHub {
     /// its trade region can reach: 0 = silver (default/imported), 1 = gold,
     /// 2 = electrum (both gold & silver), 3 = bronze/billon (only base metal).
     #[serde(default)] pub coin_metal: u8,
+    /// v2.0 · bullion capacity ratio = regional bullion output ÷ coin demand. ≥1
+    /// means metal is ample (fineness can be full); <1 means the mint is stretched
+    /// and bullion scarcity is forcing debasement (surfaced as the "limiting factor").
+    #[serde(default)] pub mint_bullion_ratio: f32,
     // ── DLC 4 · Good QUALITY (per producing settlement / estate / manufactory) ──
     /// Per-good production quality 0..1 at THIS hub (Coarse→Exquisite). Seeded so it
     /// varies by settlement; manufactures climb via learning-by-doing and can be
@@ -2893,6 +2910,25 @@ impl CampaignSim {
         else { 0 } // no precious metal in the region → assume imported silver specie
     }
 
+    /// v2.0 · the ceiling bullion supply puts on a mint's fineness. A region flush
+    /// with gold/silver relative to its coin demand can strike full-bodied money
+    /// (cap → 1.0); a bullion-poor region minting beyond its metal is forced to
+    /// debase (cap → `MINT_FINENESS_FLOOR`). Returns the cap in [floor, 1.0] plus
+    /// the raw capacity ratio (for the panel's "limiting factor" read).
+    fn mint_bullion_cap(&self, hub: usize, gi: Option<usize>, si: Option<usize>) -> (f32, f32) {
+        let region = self.hubs[hub].component;
+        let (mut bull, mut demand) = (0.0f32, 0.0f32);
+        for h in &self.hubs {
+            if h.is_estate || h.component != region { continue; }
+            if let Some(i) = gi { bull += h.production.get(i).copied().unwrap_or(0.0) * MINT_GOLD_WEIGHT; }
+            if let Some(i) = si { bull += h.production.get(i).copied().unwrap_or(0.0); }
+            demand += h.tw_house + h.tw_local + h.tw_guild;
+        }
+        let cr = if demand > EPS { bull / (demand * MINT_BULLION_DEMAND) } else { 1.0 };
+        let cap = (MINT_FINENESS_FLOOR + (1.0 - MINT_FINENESS_FLOOR) * cr.clamp(0.0, 1.0)).clamp(MINT_FINENESS_FLOOR, 1.0);
+        (cap, cr)
+    }
+
     /// DLC 3.5 · Coinage — once a year each council seat mints a NAMED coin and
     /// updates its acceptance ("trust"): sticky reputation built from full-bodied
     /// minting, a deep treasury, trade wealth, civic stability and throughput, and
@@ -2939,6 +2975,13 @@ impl CampaignSim {
             }
             // v2.0 · pick the metal from the region's reachable bullion.
             self.hubs[h].coin_metal = self.coin_metal_for(h, gi, si, cui, tii);
+            // v2.0 · MINT REGULATION — regional bullion caps how full-bodied the coin
+            // can be. A bullion-poor mint striking beyond its metal is forced to debase
+            // (fineness capped down); an ample region can strike full-bodied coin.
+            let (bcap, bratio) = self.mint_bullion_cap(h, gi, si);
+            self.hubs[h].mint_bullion_ratio = bratio;
+            if self.hubs[h].mint_fineness > bcap { self.hubs[h].mint_fineness = bcap; }
+            let fineness = if self.hubs[h].mint_fineness <= 0.0 { 1.0 } else { self.hubs[h].mint_fineness };
             // Trust target — each term in 0..1.
             let through = self.hub_throughput(h);
             let t_fine = fineness.clamp(0.0, 1.0);
@@ -7374,7 +7417,7 @@ impl CampaignSim {
             estate_kind: kind, estate_tier: 1, last_upgrade_tick: self.tick, owner_house, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0,
             // DLC 4 · seed the new estate's quality (length ng) so it's graded from
             // day one — a manufactory (kind 6) starts as a humble workshop and learns.
             quality: { let mut q = vec![0.0f32; ng]; if g0 < ng { q[g0] = if kind == 6 { 0.34 } else { 0.46 }; } q },
@@ -8591,7 +8634,7 @@ impl CampaignSim {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0,
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
@@ -9295,7 +9338,7 @@ impl CampaignSim {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0,
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
             reserve_food: 30.0, reserve_cap: 365.0, supply_years: 0.0, colony_founded_tick: self.tick,
@@ -11535,7 +11578,7 @@ mod tests {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: 0, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0,
             quality: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
