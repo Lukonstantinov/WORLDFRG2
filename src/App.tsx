@@ -333,7 +333,7 @@ export default function App() {
         if (ov.economy && ov.economy.hubs.length) setEconomy(ov.economy);
         // #26 · toponyms (river/peak/lake/region names) — load them on OPEN so the
         // layer works in a campaign (they were only fetched in the Toponyms step).
-        try { const tp = await getToponyms(); if (tp.length) setToponyms(tp); } catch { /* none saved */ }
+        try { const tp = await getToponyms(); if (tp.length) { setToponyms(tp); useUIStore.getState().setOverlayVisible("toponyms", true); } } catch { /* none saved */ }
         // Restore the persisted wizard progress; older saves never wrote it, so
         // fall back to inferring completion from which data is present.
         const restored = [
@@ -408,7 +408,7 @@ export default function App() {
       const ov = await getOverlays();
       setSettlements(ov.settlements ?? []);
       setEconomy(ov.economy && ov.economy.hubs.length ? ov.economy : null);
-      try { const tp = await getToponyms(); if (tp.length) setToponyms(tp); } catch { /* none saved */ }
+      try { const tp = await getToponyms(); if (tp.length) { setToponyms(tp); useUIStore.getState().setOverlayVisible("toponyms", true); } } catch { /* none saved */ }
       const restored = parseProgress(info.campaign_progress);
       const ui = useUIStore.getState();
       const worldSteps = Object.entries(ui.stepCompleted)

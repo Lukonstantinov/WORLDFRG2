@@ -256,17 +256,24 @@ function TabBtn({ on, onClick, children }: { on: boolean; onClick: () => void; c
   );
 }
 
-/** A checkbox that toggles an on-map toponym label layer (river/lake names). */
+/** A checkbox that toggles an on-map toponym label layer (river/lake names).
+ *  The checkbox reflects ACTUAL visibility (the master `toponyms` layer AND this
+ *  feature-kind must both be on), and turning it on always enables the master —
+ *  otherwise the box could read "checked" while the layer stayed hidden, so a
+ *  single click confusingly hid an already-hidden layer. */
 function LabelToggle({ keyName, label }: { keyName: string; label: string }) {
-  const on = useUIStore((s) => s.overlayVisibility[keyName] !== false);
-  const master = useUIStore((s) => s.overlayVisibility.toponyms);
+  const kindOn = useUIStore((s) => s.overlayVisibility[keyName] !== false);
+  const master = useUIStore((s) => s.overlayVisibility.toponyms !== false);
+  const hasNames = useWorldStore((s) => s.toponyms.length > 0);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
+  const on = master && kindOn;
   return (
-    <label data-no-drag title={master ? "" : "Generate place names (Toponyms step) to show labels"}
-      style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, color: "#9fb6cc", cursor: "pointer", whiteSpace: "nowrap" }}>
+    <label data-no-drag title={hasNames ? "" : "Generate place names (Toponyms step) to show labels"}
+      style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, color: hasNames ? "#9fb6cc" : "#5f7488", cursor: "pointer", whiteSpace: "nowrap" }}>
       <input type="checkbox" checked={on} onChange={(e) => {
         setOverlayVisible(keyName, e.target.checked);
-        if (e.target.checked && !master) setOverlayVisible("toponyms", true);
+        // Turning any kind on enables the shared master layer.
+        if (e.target.checked) setOverlayVisible("toponyms", true);
       }} />
       {label}
     </label>
