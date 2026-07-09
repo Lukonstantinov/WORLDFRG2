@@ -28,6 +28,7 @@ import { ColonialPanel } from "./ui/ColonialPanel";
 import { BankPanel } from "./ui/BankPanel";
 import { NewsFeedPanel } from "./ui/NewsFeedPanel";
 import { PlaguePanel } from "./ui/PlaguePanel";
+import { ImmigrationPanel } from "./ui/ImmigrationPanel";
 import { GuildsPanel } from "./ui/GuildsPanel";
 import { FiguresPanel } from "./ui/FiguresPanel";
 import { LandmarksPanel } from "./ui/LandmarksPanel";
@@ -617,6 +618,7 @@ export default function App() {
           <BankPanel />
           <NewsFeedPanel />
           <PlaguePanel />
+          <ImmigrationPanel />
           <GuildsPanel />
           <FiguresPanel />
           <LandmarksPanel />

@@ -15,6 +15,7 @@ import { YearChronicle } from "./YearChronicle";
 import type { HouseBrief } from "../types";
 import { SettlementScene } from "./SettlementScene";
 import { FlowsView } from "./FlowsView";
+import { CultureDonut } from "./CultureDonut";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 /** DLC 4 · grade colour ramp (Coarse→Exquisite) for the quality labels. */
@@ -1082,28 +1083,17 @@ export function HubPanel() {
               in-migration (each fades as newcomers assimilate). */}
           {detail?.culture && (
             <>
-              <div style={sectionHdr}>Peoples</div>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 4 }}>
-                <span style={{ color: "#cfe2f6", fontSize: 12, fontWeight: 700 }}>{detail.culture}</span>
-                <span style={{ color: "#7a90a8", fontSize: 10 }}>
-                  majority{(() => {
-                    const m = (detail.minorities ?? []).reduce((a, [, s]) => a + s, 0);
-                    return m > 0.005 ? ` · ${Math.round((1 - Math.min(m, 0.95)) * 100)}%` : "";
-                  })()}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={sectionHdr}>Peoples</div>
+                <span onClick={() => useUIStore.getState().setShowImmigration(true)} title="Migration & immigration for this city"
+                  style={{ fontSize: 9, color: "#9ab0c8", cursor: "pointer", border: "1px solid #2a3a4a", borderRadius: 10, padding: "1px 7px" }}>
+                  🧭 Migration
                 </span>
               </div>
-              {(detail.minorities ?? []).filter(([, s]) => s > 0.005).length > 0 ? (
-                (detail.minorities ?? []).filter(([, s]) => s > 0.005).map(([people, share]) => (
-                  <div key={people} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                    <span style={{ width: 90, color: "#c8b6e0", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{people}</span>
-                    <div style={{ flex: 1, height: 7, borderRadius: 3, background: "#0a1018", overflow: "hidden" }}>
-                      <div style={{ width: `${Math.round(Math.min(share, 0.95) * 100)}%`, height: "100%", background: "#9a6fd0" }} />
-                    </div>
-                    <span style={{ width: 34, textAlign: "right", color: "#9ab0c8", fontSize: 10 }}>{Math.round(share * 100)}%</span>
-                  </div>
-                ))
-              ) : (
-                <div style={{ color: "#7a90a8", fontSize: 10, marginBottom: 2 }}>No minority quarters — homogeneous population.</div>
+              {/* Culture composition as a circular diagram: majority + minority quarters. */}
+              <CultureDonut majority={detail.culture} minorities={(detail.minorities ?? []) as [string, number][]} />
+              {(detail.minorities ?? []).filter(([, s]) => s > 0.005).length === 0 && (
+                <div style={{ color: "#7a90a8", fontSize: 10, marginBottom: 2 }}>No minority quarters — a homogeneous population.</div>
               )}
             </>
           )}

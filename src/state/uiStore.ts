@@ -171,6 +171,8 @@ interface UIStore {
   showNews: boolean;
   /** Phase 6 · Plagues & Epidemics panel open. */
   showPlagues: boolean;
+  /** Migration & Immigration panel open (per selected city). */
+  showImmigration: boolean;
   /** Phase 6 · Guilds & Crafts panel open. */
   showGuilds: boolean;
   /** Phase 6 · Notable Figures panel open. */
@@ -261,6 +263,7 @@ interface UIStore {
   setShowBankIcons: (v: boolean) => void;
   setShowNews: (v: boolean) => void;
   setShowPlagues: (v: boolean) => void;
+  setShowImmigration: (v: boolean) => void;
   setShowGuilds: (v: boolean) => void;
   setShowFigures: (v: boolean) => void;
   setShowLandmarks: (v: boolean) => void;
@@ -370,6 +373,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showBankIcons: false,
   showNews: false,
   showPlagues: false,
+  showImmigration: false,
   showGuilds: false,
   showFigures: false,
   showLandmarks: false,
@@ -487,6 +491,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowBankIcons: (v) => set({ showBankIcons: v }),
   setShowNews: (v) => set({ showNews: v }),
   setShowPlagues: (v) => set({ showPlagues: v }),
+  setShowImmigration: (v) => set({ showImmigration: v }),
   setShowGuilds: (v) => set({ showGuilds: v }),
   setShowFigures: (v) => set({ showFigures: v }),
   setShowLandmarks: (v) => set({ showLandmarks: v }),
