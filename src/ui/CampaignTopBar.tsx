@@ -74,9 +74,8 @@ export function CampaignTopBar() {
     {
       key: "finance", label: "🪙 Finance",
       items: [
-        { label: "🪙 Coin, Credit & Crashes", on: ui.showCoinCredit, set: ui.setShowCoinCredit },
+        { label: "💰 Money & Finance", on: ui.showMoneyFinance, set: ui.setShowMoneyFinance },
         { label: "🏦 Banks", on: ui.showBank, set: ui.setShowBank },
-        { label: "🫧 Speculation & Poleis", on: ui.showSpeculation, set: ui.setShowSpeculation },
       ],
     },
     {

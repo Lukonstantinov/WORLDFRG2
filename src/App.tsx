@@ -16,8 +16,7 @@ import { CityRankingPanel } from "./ui/CityRankingPanel";
 import { GoodFlowPanel } from "./ui/GoodFlowPanel";
 import { GoodsBrowserPanel } from "./ui/GoodsBrowserPanel";
 import { HousesPanel } from "./ui/HousesPanel";
-import { SpeculationPanel } from "./ui/SpeculationPanel";
-import { CoinCreditPanel } from "./ui/CoinCreditPanel";
+import { MoneyFinancePanel } from "./ui/MoneyFinancePanel";
 import { ItineraryPanel } from "./ui/ItineraryPanel";
 import { GoodsCodexPanel } from "./ui/GoodsCodexPanel";
 import { EconomyDashboardPanel } from "./ui/EconomyDashboardPanel";
@@ -605,8 +604,7 @@ export default function App() {
           <GoodFlowPanel />
           <GoodsBrowserPanel />
           <HousesPanel />
-          <SpeculationPanel />
-          <CoinCreditPanel />
+          <MoneyFinancePanel />
           <ItineraryPanel />
           <GoodsCodexPanel />
           <EconomyDashboardPanel />
