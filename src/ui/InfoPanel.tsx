@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useUIStore } from "../state/uiStore";
 import { useWorldStore } from "../state/worldStore";
 import { getCellInfo } from "../bridge/tauri";
 import type { CellInfo } from "../types";
 import { GOOD_DEFS } from "../goods";
+import { settlementStory } from "../settlementStory";
 
 const goodLabel = (name: string) => {
   const d = GOOD_DEFS.find((g) => g.name === name);
@@ -71,6 +72,10 @@ export function InfoPanel() {
   const inspectedCell = useUIStore((s) => s.inspectedCell);
   const setInspectedCell = useUIStore((s) => s.setInspectedCell);
   const meta = useWorldStore((s) => s.meta);
+  const settlements = useWorldStore((s) => s.settlements);
+  const rivers = useWorldStore((s) => s.rivers);
+  const lakes = useWorldStore((s) => s.lakes);
+  const toponyms = useWorldStore((s) => s.toponyms);
   const [info, setInfo] = useState<CellInfo | null>(null);
 
   useEffect(() => {
@@ -82,6 +87,19 @@ export function InfoPanel() {
       .then(setInfo)
       .catch(() => setInfo(null));
   }, [inspectedCell]);
+
+  // A settlement on (within ~2 cells of) the inspected cell → show its story.
+  const story = useMemo(() => {
+    if (!inspectedCell) return null;
+    const { wx, wy } = inspectedCell;
+    let best: (typeof settlements)[number] | null = null;
+    let bd = 5; // within ~2 cells
+    for (const s of settlements) {
+      const dx = Math.abs(s.x - wx), dy = Math.abs(s.y - wy), d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = s; }
+    }
+    return best ? { name: best.name, ...settlementStory(best, rivers, toponyms, lakes, meta?.grid_width ?? 0) } : null;
+  }, [inspectedCell, settlements, rivers, toponyms, lakes, meta?.grid_width]);
 
   if (!info) return null;
 
@@ -162,6 +180,15 @@ export function InfoPanel() {
       {row("Longitude", `${Math.abs(lon).toFixed(1)}\u00B0 ${lonDir}`)}
       {row("Terrain", info.terrain === "land" ? "Land" : "Sea")}
       {row("Plate", `#${info.plate_index}`)}
+
+      {story && (
+        <>
+          {section(story.name)}
+          <div style={{ color: "#a8c0d8", fontSize: 10.5, lineHeight: 1.5, fontStyle: "italic", padding: "1px 0 2px" }}>
+            {story.text}
+          </div>
+        </>
+      )}
 
       {info.terrain === "land" ? (
         <>

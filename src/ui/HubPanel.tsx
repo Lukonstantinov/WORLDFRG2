@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useUIStore } from "../state/uiStore";
 import { useWorldStore } from "../state/worldStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { campaignGetHub, campaignGetColony, campaignWarehouses, campaignFuturesLanes, campaignGetProvisioning } from "../bridge/tauri";
-import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief } from "../types";
+import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement } from "../types";
+import { settlementStory } from "../settlementStory";
 import { GOOD_DEFS } from "../goods";
 const HP_GOOD_EMOJI: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.emoji]));
 import { climatePhrase } from "./climate";
@@ -605,6 +606,10 @@ export function HubPanel() {
 
           {/* Character summary */}
           <div style={blurbBox}>{peopleSummary(hub, labelFor, topHub?.name, isTop)}</div>
+
+          {/* Site & story — what the town stands on and lives by (river/reach/lake,
+              trade role, delta abundance). Worldgen-static, shown always. */}
+          <SettlementStoryBox x={hub.x} y={hub.y} name={hub.name} stars={stars} />
         </>
       )}
 
@@ -1638,6 +1643,31 @@ function MultiSeriesChart({ series, min, max, fmt }: {
 
 /** A fuller character sketch: climate & terrain, what the people are known for and
  *  their social character, population/scale, and a touch of founding history. */
+/** "Site & story" — the settlement's account of the river/reach or lake it stands
+ *  on, its trade role, and (for a delta town) the abundance of life at the mouth.
+ *  Reads the world's rivers/toponyms/lakes; renders nothing if there's no story. */
+function SettlementStoryBox({ x, y, name, stars }: { x: number; y: number; name: string; stars: number }) {
+  const settlements = useWorldStore((s) => s.settlements);
+  const rivers = useWorldStore((s) => s.rivers);
+  const lakes = useWorldStore((s) => s.lakes);
+  const toponyms = useWorldStore((s) => s.toponyms);
+  const meta = useWorldStore((s) => s.meta);
+  const worldW = meta?.grid_width ?? 0;
+  const story = useMemo(() => {
+    const size: Settlement["size"] = stars >= 5 ? "capital" : stars >= 4 ? "city" : stars >= 3 ? "town" : stars >= 2 ? "village" : "outpost";
+    const found = settlements.find((s) => s.x === x && s.y === y);
+    const st: Settlement = found ?? { id: "", x, y, name, size, population: 0, score: 0 };
+    return settlementStory(st, rivers, toponyms, lakes, worldW);
+  }, [x, y, name, stars, settlements, rivers, toponyms, lakes, worldW]);
+  if (!story.text) return null;
+  return (
+    <>
+      <div style={{ ...sectionHdr, marginTop: 8 }}>Site &amp; story</div>
+      <div style={{ ...blurbBox, fontStyle: "italic" }}>{story.text}</div>
+    </>
+  );
+}
+
 function peopleSummary(hub: EconHub, labelFor: (id: string) => string, topName?: string, isTop?: boolean): string {
   const known = hub.monopolies && hub.monopolies.length > 0
     ? hub.monopolies.map(labelFor)
