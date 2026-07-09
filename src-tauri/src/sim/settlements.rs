@@ -72,12 +72,17 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake])
             }
         }
     }
-    // Lake cells — fresh inland water is a first-class settlement draw (lakeshore
-    // towns), previously computed but unused for habitability.
+    // Lake cells — FRESH inland water is a first-class settlement draw (lakeshore
+    // towns). Terminal SALT lakes are held apart: their brine is undrinkable (no
+    // fresh-water bonus) but their shores are a strong TRADE magnet — salt was a
+    // prime historical commodity (Salzburg, Timbuktu, the salt roads).
     let mut is_lake_cell = vec![false; total];
+    let mut is_salt_lake_cell = vec![false; total];
     for lake in lakes {
+        let salt = lake.endorheic && lake.salinity_ppt >= crate::sim::rivers::SALT_PRODUCTION_PPT;
         for &(lx, ly) in &lake.cells {
-            is_lake_cell[buf.idx(lx, ly)] = true;
+            if salt { is_salt_lake_cell[buf.idx(lx, ly)] = true; }
+            else { is_lake_cell[buf.idx(lx, ly)] = true; }
         }
     }
 
@@ -256,6 +261,10 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake])
             let near_head_nav = (-2i32..=2).any(|dy| {
                 (-2i32..=2).any(|dx| is_head_of_nav[buf.widx(x as i32 + dx, y as i32 + dy)])
             });
+            // Salt-lake shore within a few cells → a salt-trading town site.
+            let near_salt = (-3i32..=3).any(|dy| {
+                (-3i32..=3).any(|dx| is_salt_lake_cell[buf.widx(x as i32 + dx, y as i32 + dy)])
+            });
 
             let trade_score = if near_estuary { 1.0 }        // drowned tidal port / delta entrepôt
                 else if near_river_mouth { 0.92 }
@@ -263,6 +272,7 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake])
                 else if near_coast && has_river { 0.85 }
                 else if near_confluence { 0.80 }             // confluence trade node
                 else if near_head_nav { 0.78 }               // fall-line entrepôt
+                else if near_salt { 0.76 }   // salt-lake shore: salt-trade town
                 else if on_navigable { 0.70 }                // navigable inland highway
                 else if near_coast { 0.6 }   // natural harbour / port
                 else if oasis { 0.6 }        // caravan oasis on a desert route
