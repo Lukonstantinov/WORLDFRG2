@@ -223,6 +223,21 @@ const SMALL_CITY_POP: f32 = 10_000.0;
 const SMALL_CITY_GROWTH_MULT: f32 = 5.0;
 /// …and is this many times LESS likely to be struck by a plague (user rule).
 const SMALL_CITY_PLAGUE_RESIST: f32 = 3.0;
+/// ── HOSPICES / QUARANTINE (public health): a prosperous city's council funds public
+/// health, which CUTS plague mortality and LENGTHENS post-outbreak immunity — a rich
+/// city spends coin so fewer of its people die. All bounded so treasuries never crater.
+/// Max mortality reduction at full funding (0.6 = a fully-provisioned city loses 60%
+/// fewer people to a strike).
+const HOSPICE_MAX_LEVEL: f32 = 0.6;
+/// A council needs at least this much treasury before it funds public health.
+const HOSPICE_MIN_TREASURY: f32 = 30.0;
+/// Yearly easing of `public_health` toward its prosperity-set target (~4-8y to build).
+const HOSPICE_EASE: f32 = 0.25;
+/// Slice of treasury a funding council spends on public health each year (bounded,
+/// comparable to the ~8% civic skim → recorded in `finance.spent_health`).
+const HOSPICE_TREASURY_SKIM: f32 = 0.04;
+/// Public health lapses this much per year when a council can't afford it.
+const HOSPICE_DECAY: f32 = 0.05;
 /// ── SATELLITE cities (Ostia→Rome, Piraeus→Athens, Westminster/Southwark→London):
 /// a LARGE metropolis whose council can fund it spins off a SHORT-RANGE satellite
 /// to serve a concrete NEED it can't fit inside itself — a PORT (inland/large hub
@@ -1147,6 +1162,10 @@ pub struct TickHub {
     /// Plague IMMUNITY: the city cannot be struck by (or carry) a plague until this
     /// tick — earned by surviving an outbreak. `#[serde(default)]` → old saves = 0.
     #[serde(default)] pub plague_immune_until: u32,
+    /// PUBLIC HEALTH (hospices / quarantine), 0..`HOSPICE_MAX_LEVEL`. A prosperous
+    /// council funds it (drawing on treasury → `finance.spent_health`); it cuts the
+    /// death toll of a plague strike and lengthens the immunity earned. `#[serde(default)]`.
+    #[serde(default)] pub public_health: f32,
     /// Colony food LIFELINE: dedicated supply ships the metropolis/backers keep on the
     /// grain run to this colony (invested in when the colony runs short, to make the
     /// supply steady). `#[serde(default)]` → old saves = 0.
@@ -1880,6 +1899,8 @@ pub struct CityFinance {
     pub spent_civic: f32,     // distributed to the people (civic pool)
     pub spent_war: f32,       // war-chest spending (armies, blockade)
     pub spent_works: f32,     // public works / buildings
+    #[serde(default)]
+    pub spent_health: f32,    // hospices / quarantine (public health) — cuts plague deaths
     pub reparations_out: f32, // reparations paid after a lost war
     /// Last completed year, snapshotted at New Year for the panel.
     pub prev: Option<Box<CityFinance>>,
@@ -2169,6 +2190,12 @@ pub struct PlagueStrike {
     /// Which DISEASE this is (index into `DISEASES`). serde-default 0 = Bubonic Plague.
     #[serde(default)]
     pub disease: u8,
+    /// SIR observability · how many people fell ILL in this strike (`infected` ≥ `deaths`;
+    /// `recovered = infected − deaths`). Derived from `deaths / case-fatality-rate`, so a
+    /// mild disease infects many and kills few. Pure observability — does not affect the
+    /// sim. `#[serde(default)]` → old saves load with 0 (readers fall back to `deaths`).
+    #[serde(default)]
+    pub infected: f32,
 }
 
 /// Phase 4 (flavour) · a HOLY CITY / great temple. Once a year its pilgrimage
@@ -2193,7 +2220,7 @@ impl CityFinance {
             + self.seigniorage + self.war_levy + self.reparations_in
     }
     pub fn spend_total(&self) -> f32 {
-        self.spent_civic + self.spent_war + self.spent_works + self.reparations_out
+        self.spent_civic + self.spent_war + self.spent_works + self.spent_health + self.reparations_out
     }
 }
 
@@ -2559,6 +2586,21 @@ impl CampaignSim {
             self.hubs[h].mint_fineness = f + (target - f) * 0.5;
             // Retained treasury: skim ~8% of the circulating civic pool.
             self.hubs[h].treasury += self.hubs[h].civic_pool * 0.08;
+            // Hospices & quarantine (public health): a council with treasury headroom funds
+            // public health, easing it toward a prosperity-set target and spending a small,
+            // bounded slice of treasury (recorded in `finance.spent_health`). When a council
+            // can't afford it, the provision lapses. This is the lever by which a WEALTHY
+            // city buys down its plague mortality — coin spent so fewer of its people die.
+            let ph = self.hubs[h].public_health;
+            if self.hubs[h].treasury > HOSPICE_MIN_TREASURY {
+                let target = self.hubs[h].trade_wealth.clamp(0.0, 1.0) * HOSPICE_MAX_LEVEL;
+                self.hubs[h].public_health = (ph + (target - ph) * HOSPICE_EASE).clamp(0.0, HOSPICE_MAX_LEVEL);
+                let cost = self.hubs[h].treasury * HOSPICE_TREASURY_SKIM;
+                self.hubs[h].treasury -= cost;
+                self.hubs[h].finance.spent_health += cost;
+            } else {
+                self.hubs[h].public_health = (ph - HOSPICE_DECAY).max(0.0);
+            }
         }
     }
 
@@ -6447,8 +6489,13 @@ impl CampaignSim {
             && hash01(self.seed, tick as u64 ^ 0x5A1717, hub as u64) > 1.0 / SMALL_CITY_PLAGUE_RESIST {
             return;
         }
+        // Public health (hospices/quarantine) buys down the DEATH toll — the same people
+        // still fall ill, but a well-provisioned city nurses more of them through.
+        let ph = self.hubs[hub].public_health.clamp(0.0, HOSPICE_MAX_LEVEL);
+        let base_mag = mag.clamp(0.0, 0.6);
+        let mag_eff = (base_mag * (1.0 - ph)).clamp(0.0, 0.6);
         let pre = self.hubs[hub].population.max(0.0);
-        self.hubs[hub].population *= 1.0 - mag.clamp(0.0, 0.6);
+        self.hubs[hub].population *= 1.0 - mag_eff;
         let post = self.hubs[hub].population.max(0.0);
         // Lockdown (trade restriction) length scales with severity: a local outbreak is
         // a brief quarantine; a great plague shuts the gates for months.
@@ -6467,8 +6514,10 @@ impl CampaignSim {
         // Immunity window scaled by the DISEASE (some, like flu/cholera, confer little
         // lasting immunity so they recur; smallpox/measles/plague confer strong immunity).
         let dimm = DISEASES.get(disease as usize).map(|s| s.immunity).unwrap_or(1.0);
+        // Public health also lengthens the immunity earned (better convalescence + lasting
+        // quarantine discipline) — a well-provisioned city resists the next visitation longer.
         let immune_span = ((PLAGUE_IMMUNITY_BASE_YEARS * TICKS_PER_YEAR as f32
-            + lock as f32 * PLAGUE_IMMUNITY_LOCK_MULT) * dimm) as u32;
+            + lock as f32 * PLAGUE_IMMUNITY_LOCK_MULT) * dimm * (1.0 + ph)) as u32;
         self.hubs[hub].plague_immune_until = tick + lock + immune_span;
         // Observability record (Plagues panel + map). Spontaneous → a new outbreak;
         // contagion → inherits the source hub's outbreak id + origin + disease.
@@ -6476,10 +6525,21 @@ impl CampaignSim {
             Some((src, ob, org, _dz)) => (src as i32, ob, org),
             None => { let ob = self.next_outbreak; self.next_outbreak += 1; (-1, ob, hub as u32) }
         };
+        // SIR split (observability): infer how many fell ILL from the deaths and the
+        // disease's case-fatality rate (its `dead_hi` reads as CFR-per-case). A mild
+        // disease (low CFR) infects many and kills few; a lethal one infects nearer the
+        // death toll. `recovered = infected − deaths` is derived by readers.
+        let deaths = (pre - post).max(0.0);
+        let cfr = DISEASES.get(disease as usize).map(|s| s.dead_hi).unwrap_or(0.5).clamp(0.03, 0.7);
+        // `infected` reflects the UNMITIGATED attack (hospices cut deaths, not infections),
+        // so a city with public health shows the same ill count but more recovered, fewer
+        // dead — the visible payoff of its spending.
+        let base_deaths = pre * base_mag;
+        let infected = (base_deaths / cfr).clamp(deaths, pre * 0.9);
         self.epidemics.push(PlagueStrike {
-            hub: hub as u32, source, outbreak, deaths: (pre - post).max(0.0),
+            hub: hub as u32, source, outbreak, deaths,
             pop_at: post, start_tick: tick, until_tick: tick + lock,
-            category, origin_hub: origin, disease,
+            category, origin_hub: origin, disease, infected,
         });
         if self.epidemics.len() > 400 { let d = self.epidemics.len() - 400; self.epidemics.drain(0..d); }
         let city = self.hubs[hub].name.clone();
@@ -7176,7 +7236,7 @@ impl CampaignSim {
             stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
         });
         // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
@@ -8390,7 +8450,7 @@ impl CampaignSim {
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
         });
         self.routes_dirty = true;
@@ -9094,7 +9154,7 @@ impl CampaignSim {
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
             reserve_food: 30.0, reserve_cap: 365.0, supply_years: 0.0, colony_founded_tick: self.tick,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
         });
         self.total_foundings += 1; // Atlas 2.0 lifecycle counter (colony ventures too)
@@ -11334,7 +11394,7 @@ mod tests {
             quality: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
         }
     }

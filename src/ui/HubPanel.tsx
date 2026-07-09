@@ -1465,8 +1465,21 @@ function CityFinances({ detail }: { detail: HubDetail }) {
             <Line label="To the people" amt={f.spent_civic} neg />
             <Line label="War effort" amt={f.spent_war} neg />
             <Line label="Public works" amt={f.spent_works} neg />
+            <Line label="Hospices / quarantine" amt={f.spent_health ?? 0} neg />
             <Line label="Reparations paid" amt={f.reparations_out} neg />
           </div>
+        </div>
+      )}
+      {/* Public health: a rich council funds hospices/quarantine → fewer plague deaths. */}
+      {(detail.public_health ?? 0) > 0.02 && (
+        <div style={{ marginTop: 5, fontSize: 9.5, color: "#8ab0a0", display: "flex", alignItems: "center", gap: 6 }}>
+          <span title="Hospices & quarantine spending. Higher = far fewer die in a plague, and longer immunity afterward.">
+            ⚕ Public health
+          </span>
+          <div style={{ flex: 1, height: 6, background: "#20302a", borderRadius: 3, overflow: "hidden", maxWidth: 120 }}>
+            <div style={{ width: `${Math.round(((detail.public_health ?? 0) / 0.6) * 100)}%`, height: "100%", background: "#5aa880" }} />
+          </div>
+          <span style={{ color: "#7a9a8a" }}>−{Math.round((detail.public_health ?? 0) * 100)}% plague deaths</span>
         </div>
       )}
     </>

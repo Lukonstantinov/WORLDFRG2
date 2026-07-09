@@ -541,6 +541,7 @@ export interface HubDetail {
   government?: Government | null;
   treasury?: number;                 // retained civic treasury
   finance?: CityFinance | null;      // treasury books (current + prev)
+  public_health?: number;            // hospices/quarantine level 0..0.6 (cuts plague deaths)
   war_with?: string;                 // polis at war with ("" = peace)
   coin_name?: string;
   coin_trust?: number;
@@ -1301,6 +1302,7 @@ export interface CityFinance {
   spent_civic: number;
   spent_war: number;
   spent_works: number;
+  spent_health?: number; // hospices / quarantine (public health)
   reparations_out: number;
   prev?: CityFinance | null;
 }
@@ -1341,6 +1343,8 @@ export interface PlagueCityBrief {
   y: number;
   name: string;
   deaths: number;
+  ill?: number;       // SIR · fell ill in this strike (>= deaths)
+  recovered?: number; // SIR · fell ill and survived (ill - deaths)
   pop: number;      // survivors at the strike
   active: boolean;  // still under quarantine
   from_name: string; // carried from (""=spontaneous origin)
@@ -1357,6 +1361,8 @@ export interface EpidemicBrief {
   end_year: number;
   active: boolean;
   total_dead: number;
+  total_ill?: number;       // SIR · total fell ill across the outbreak
+  total_recovered?: number; // SIR · total recovered across the outbreak
   /** 1 = Great Plague (rare, spreads ~4000 km along the lanes), 2 = Regional (reaches
    *  one further city), 3 = Local outbreak (stays put). */
   category: number;

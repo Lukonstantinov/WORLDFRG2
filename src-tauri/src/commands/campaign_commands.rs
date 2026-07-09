@@ -600,6 +600,9 @@ pub struct HubDetail {
     #[serde(default)] pub treasury: f32,
     /// The city's treasury books (current running year + last completed in `prev`).
     #[serde(default)] pub finance: Option<crate::sim::tick::CityFinance>,
+    /// PUBLIC HEALTH level (hospices/quarantine), 0..0.6 — how far the council funds
+    /// disease mitigation. Higher = far fewer die in a plague, longer immunity.
+    #[serde(default)] pub public_health: f32,
     /// Name of the polis this city is at war with ("" = at peace).
     #[serde(default)] pub war_with: String,
     /// Its coin, if it mints one.
@@ -1429,6 +1432,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 main_bank: -1,
                 indep_cooldown_until: 0,
                 plague_immune_until: 0,
+                public_health: 0.0,
                 supply_ships: 0,
                 supply_source: -1,
                 supply_delivered: 0.0,
@@ -2928,6 +2932,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         culture: sim.hub_culture.get(hi).cloned().unwrap_or_default(),
         minorities: sim.hub_minorities.get(hi).cloned().unwrap_or_default(),
         government,
+        public_health: hub.public_health,
         treasury: hub.treasury,
         finance: Some(hub.finance.clone()),
         war_with,
@@ -4166,6 +4171,10 @@ pub struct PlagueCityBrief {
     pub y: f32,
     pub name: String,
     pub deaths: u32,
+    /// SIR · people who fell ill in this strike (`ill` ≥ `deaths`).
+    #[serde(default)] pub ill: u32,
+    /// SIR · people who fell ill and survived (`ill − deaths`).
+    #[serde(default)] pub recovered: u32,
     /// Population that survived the strike (immediate aftermath).
     pub pop: u32,
     /// Still under quarantine right now.
@@ -4189,6 +4198,9 @@ pub struct EpidemicBrief {
     pub end_year: u32,
     pub active: bool,
     pub total_dead: u32,
+    /// SIR · total people who fell ill / recovered across the whole outbreak.
+    #[serde(default)] pub total_ill: u32,
+    #[serde(default)] pub total_recovered: u32,
     /// Plague category: 1 = Great Plague (rare, reaches ~4000 km along the lanes),
     /// 2 = Regional (reaches one further city), 3 = Local outbreak (stays put).
     pub category: u8,
@@ -4216,6 +4228,11 @@ pub fn campaign_get_epidemics(db: State<'_, WorldDb>) -> Result<Vec<EpidemicBrie
         let end = strikes.iter().map(|s| s.until_tick).max().unwrap_or(0);
         let active = strikes.iter().any(|s| s.until_tick > sim.tick);
         let total_dead: f32 = strikes.iter().map(|s| s.deaths).sum();
+        // SIR totals. Legacy strikes stored no `infected` (0) → fall back to deaths so
+        // the ill count is never below the death toll.
+        let ill_of = |s: &crate::sim::tick::PlagueStrike| s.infected.max(s.deaths);
+        let total_ill: f32 = strikes.iter().map(|s| ill_of(s)).sum();
+        let total_recovered: f32 = (total_ill - total_dead).max(0.0);
         // The outbreak's category = the (most severe) category recorded on its strikes
         // (legacy strikes stored 0 → treat as local cat-3).
         let category = strikes.iter().map(|s| if s.category == 0 { 3 } else { s.category })
@@ -4231,6 +4248,8 @@ pub fn campaign_get_epidemics(db: State<'_, WorldDb>) -> Result<Vec<EpidemicBrie
             y: sim.hubs.get(s.hub as usize).map(|h| h.y).unwrap_or(0.0),
             name: name(s.hub),
             deaths: s.deaths.round() as u32,
+            ill: ill_of(s).round() as u32,
+            recovered: (ill_of(s) - s.deaths).max(0.0).round() as u32,
             pop: s.pop_at.round() as u32,
             active: s.until_tick > sim.tick,
             from_name: if s.source >= 0 { name(s.source as u32) } else { String::new() },
@@ -4253,6 +4272,8 @@ pub fn campaign_get_epidemics(db: State<'_, WorldDb>) -> Result<Vec<EpidemicBrie
             end_year: end / TICKS_PER_YEAR,
             active,
             total_dead: total_dead.round() as u32,
+            total_ill: total_ill.round() as u32,
+            total_recovered: total_recovered.round() as u32,
             category,
             disease,
             transmission,
