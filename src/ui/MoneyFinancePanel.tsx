@@ -27,7 +27,7 @@ export function MoneyFinancePanel() {
   const houses = useCampaignStore((s) => s.houses);
   const tick = snapshot?.clock?.tick ?? 0;
   const active = !!snapshot?.active;
-  const [tab, setTab] = useState<"mints" | "banks" | "bubbles" | "shocks" | "schem">("mints");
+  const [tab, setTab] = useState<"mints" | "reserves" | "banks" | "bubbles" | "shocks" | "schem">("mints");
   const [mints, setMints] = useState<MintBrief[]>([]);
   const [banks, setBanks] = useState<BankBrief[]>([]);
   const [crashes, setCrashes] = useState<CrashRecord[]>([]);
@@ -60,6 +60,7 @@ export function MoneyFinancePanel() {
   const topCoin = coined[0];
   const tabs = [
     ["mints", "🪙 Coin & Mints"],
+    ["reserves", "💰 Reserves"],
     ["banks", "🏦 Banks"],
     ["bubbles", "🫧 Bubbles"],
     ["shocks", `⚔ Shocks${wars.active.length ? ` (${wars.active.length})` : ""}`],
@@ -104,6 +105,8 @@ export function MoneyFinancePanel() {
           ))}
         </div>
       )}
+
+      {active && tab === "reserves" && <ReservesTab coinUse={coinUse} />}
 
       {active && tab === "banks" && (
         <div style={scroll}>
@@ -356,6 +359,76 @@ function CoinUsageChart({ usage }: { usage: CoinUseCity[] }) {
 function chipS(on: boolean): React.CSSProperties {
   return { fontSize: 11, padding: "1px 7px", borderRadius: 4, cursor: "pointer",
     border: `1px solid ${on ? "#3a80c0" : "#24364e"}`, background: on ? "#19324a" : "transparent", color: on ? "#cfe2f6" : "#7fa0c4" };
+}
+
+// ── Reserves (per-settlement currency composition) ───────────────────────────
+interface Slice { name: string; short: string; share: number; color: string; primary: boolean; mint: boolean }
+/** Group the coin-usage rows into each settlement's currency BASKET (what coins it
+ *  holds in reserve, by share), sorted by the city's trade throughput. */
+function ReservesTab({ coinUse }: { coinUse: CoinUseCity[] }) {
+  const byCity = new Map<number, { name: string; vol: number; slices: Slice[] }>();
+  for (const u of coinUse) {
+    let e = byCity.get(u.city);
+    if (!e) { e = { name: u.name, vol: 0, slices: [] }; byCity.set(u.city, e); }
+    e.vol += u.volume;
+    e.slices.push({ name: u.coin_name, short: u.coin_name.split(" ")[0], share: u.share, color: u.color, primary: u.primary, mint: u.mint });
+  }
+  const cities = [...byCity.values()]
+    .map((c) => ({ ...c, slices: c.slices.sort((a, b) => b.share - a.share) }))
+    .sort((a, b) => b.vol - a.vol)
+    .slice(0, 40);
+  return (
+    <div style={scroll}>
+      {cities.length === 0 && <div style={empty}>No coin in circulation yet — currency baskets form once councils mint and trade carries the coin.</div>}
+      {cities.length > 0 && (
+        <div style={hint}>
+          Each settlement's <b style={{ color: "#cbb88a" }}>currency reserves</b> — the mix of coins it actually holds,
+          as a share of its basket. The <b>primary</b> (settlement) coin is ringed; ★ marks its own mint.
+        </div>
+      )}
+      {cities.map((c, i) => <ReserveCard key={i} name={c.name} slices={c.slices} />)}
+    </div>
+  );
+}
+
+function ReserveCard({ name, slices }: { name: string; slices: Slice[] }) {
+  const total = slices.reduce((s, x) => s + x.share, 0) || 1;
+  const primary = slices.find((s) => s.primary);
+  const cx = 32, cy = 32, r = 28, ri = 16;
+  let a0 = -Math.PI / 2;
+  return (
+    <div style={card}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <svg viewBox="0 0 64 64" width={56} height={56} style={{ flex: "0 0 auto" }}>
+          {slices.map((s, i) => {
+            const a1 = a0 + (s.share / total) * Math.PI * 2;
+            const p = (ang: number, rad: number) => `${(cx + rad * Math.cos(ang)).toFixed(1)},${(cy + rad * Math.sin(ang)).toFixed(1)}`;
+            const large = (s.share / total) > 0.5 ? 1 : 0;
+            const d = `M${p(a0, r)} A${r},${r} 0 ${large} 1 ${p(a1, r)} L${p(a1, ri)} A${ri},${ri} 0 ${large} 0 ${p(a0, ri)} Z`;
+            a0 = a1;
+            return <path key={i} d={d} fill={s.color} stroke={s.primary ? "#f2ead0" : "#0b1420"} strokeWidth={s.primary ? 1.4 : 0.8} />;
+          })}
+        </svg>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+            <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12 }}>{name}</span>
+            {primary && <span style={{ color: "#9ab0c8", fontSize: 9 }}>settles in <b style={{ color: "#d8c878" }}>{primary.short}</b>{primary.mint ? " ★" : ""}</span>}
+          </div>
+          <div style={{ marginTop: 3 }}>
+            {slices.slice(0, 4).map((s, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 9, padding: "0.5px 0" }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, flex: "0 0 auto" }} />
+                <span style={{ flex: 1, color: s.primary ? "#cfe2f6" : "#9ab0c8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {s.short}{s.mint ? " ★" : ""}{s.primary ? " · primary" : s.share >= 0.2 ? " · reserve" : ""}
+                </span>
+                <span style={{ color: "#8aa8c8" }}>{Math.round((s.share / total) * 100)}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Bubbles (speculation) ─────────────────────────────────────────────────────
