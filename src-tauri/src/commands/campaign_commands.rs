@@ -1418,6 +1418,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 coin_circ_prev: 0.0,
                 last_reform_tick: 0,
                 reform_until: 0,
+                coin_metal: 0,
                 quality: Vec::new(),
                 stolen_good: -1,
                 stolen_from: -1,
@@ -3951,6 +3952,8 @@ pub struct MintBrief {
     // ── the coin ("" coin_name = this polis mints none) ──
     pub coin_name: String,
     pub issuer: String,
+    /// The metal it is struck in: "gold" | "silver" | "electrum" | "bronze".
+    pub metal: String,
     pub trust: f32,
     pub fineness: f32,
     pub value: f32,
@@ -4011,6 +4014,7 @@ pub fn campaign_get_mints(db: State<'_, WorldDb>) -> Result<Vec<MintBrief>, Stri
                 council, council_archetype: arch, council_color: color, war_with,
                 coin_name: h.coin_name.clone(),
                 issuer: if ci >= 0 { sim.houses.get(ci as usize).map(|x| x.name.clone()).unwrap_or_default() } else { String::new() },
+                metal: match h.coin_metal { 1 => "gold", 2 => "electrum", 3 => "bronze", _ => "silver" }.to_string(),
                 trust: h.coin_trust,
                 fineness,
                 value: if has_coin { coin_value(h.mint_fineness, h.coin_trust) } else { 0.0 },
@@ -4626,6 +4630,8 @@ pub struct CitySchematic {
     pub population: u32,
     pub coin_name: String,
     pub coin_trust: f32,
+    /// Metal the city's coin is struck in ("gold" | "silver" | "electrum" | "bronze").
+    pub coin_metal: String,
     pub council: String,
     pub buildings: Vec<SchematicBuilding>,
     pub estates: Vec<SchematicEstate>,
@@ -4679,6 +4685,7 @@ pub fn campaign_get_schematics(db: State<'_, WorldDb>) -> Result<Vec<CitySchemat
             hub: h.id, name: h.name.clone(), x: h.x, y: h.y,
             population: h.population as u32,
             coin_name: h.coin_name.clone(), coin_trust: h.coin_trust,
+            coin_metal: match h.coin_metal { 1 => "gold", 2 => "electrum", 3 => "bronze", _ => "silver" }.to_string(),
             council, buildings, estates, banks_seated, bank_branches,
         });
     }

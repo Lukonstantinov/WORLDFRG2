@@ -1161,6 +1161,10 @@ pub struct TickHub {
     /// `decide_polis_policy` holds mint fineness at 1.0 (no debasement) until it
     /// lapses, after which cheap-money pressure can creep back. 0 = no mandate.
     #[serde(default)] pub reform_until: u32,
+    /// v2.0 · the monetary METAL this polis strikes its coin in, from the bullion
+    /// its trade region can reach: 0 = silver (default/imported), 1 = gold,
+    /// 2 = electrum (both gold & silver), 3 = bronze/billon (only base metal).
+    #[serde(default)] pub coin_metal: u8,
     // ── DLC 4 · Good QUALITY (per producing settlement / estate / manufactory) ──
     /// Per-good production quality 0..1 at THIS hub (Coarse→Exquisite). Seeded so it
     /// varies by settlement; manufactures climb via learning-by-doing and can be
@@ -2863,6 +2867,32 @@ impl CampaignSim {
         DENOMS[i]
     }
 
+    /// v2.0 · the monetary METAL a mint strikes, from the bullion its trade region
+    /// can reach: gold if a gold province lies in the region, silver if silver hills,
+    /// electrum where both are plentiful and balanced, bronze/billon where only base
+    /// metal (copper/tin) is available (0 silver · 1 gold · 2 electrum · 3 bronze).
+    fn coin_metal_for(&self, hub: usize, gi: Option<usize>, si: Option<usize>,
+                      ci: Option<usize>, ti: Option<usize>) -> u8 {
+        let region = self.hubs[hub].component;
+        let (mut g, mut s, mut base) = (0.0f32, 0.0f32, 0.0f32);
+        for h in &self.hubs {
+            if h.is_estate || h.component != region { continue; }
+            if let Some(i) = gi { g += h.production.get(i).copied().unwrap_or(0.0); }
+            if let Some(i) = si { s += h.production.get(i).copied().unwrap_or(0.0); }
+            if let Some(i) = ci { base += h.production.get(i).copied().unwrap_or(0.0); }
+            if let Some(i) = ti { base += h.production.get(i).copied().unwrap_or(0.0); }
+        }
+        let (has_g, has_s) = (g > EPS, s > EPS);
+        if has_g && has_s {
+            // Both metals in reach → a balanced supply is struck as electrum, else
+            // the region coins its dominant precious metal.
+            if g.min(s) > 0.25 * g.max(s) { 2 } else if g >= s { 1 } else { 0 }
+        } else if has_g { 1 }
+        else if has_s { 0 }
+        else if base > EPS { 3 }
+        else { 0 } // no precious metal in the region → assume imported silver specie
+    }
+
     /// DLC 3.5 · Coinage — once a year each council seat mints a NAMED coin and
     /// updates its acceptance ("trust"): sticky reputation built from full-bodied
     /// minting, a deep treasury, trade wealth, civic stability and throughput, and
@@ -2879,6 +2909,11 @@ impl CampaignSim {
             max_treasury = max_treasury.max(self.hubs[h].treasury);
             max_through = max_through.max(self.hub_throughput(h));
         }
+        // Good indices for the monetary metals (computed once) → per-mint metal.
+        let gi = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("gold"));
+        let si = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("silver"));
+        let cui = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("copper"));
+        let tii = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("tin"));
         let tick = self.tick;
         for h in 0..n {
             if self.hubs[h].is_estate { continue; }
@@ -2902,6 +2937,8 @@ impl CampaignSim {
                 self.hubs[h].mint_fineness_prev = fineness;
                 continue;
             }
+            // v2.0 · pick the metal from the region's reachable bullion.
+            self.hubs[h].coin_metal = self.coin_metal_for(h, gi, si, cui, tii);
             // Trust target — each term in 0..1.
             let through = self.hub_throughput(h);
             let t_fine = fineness.clamp(0.0, 1.0);
@@ -7337,7 +7374,7 @@ impl CampaignSim {
             estate_kind: kind, estate_tier: 1, last_upgrade_tick: self.tick, owner_house, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0,
             // DLC 4 · seed the new estate's quality (length ng) so it's graded from
             // day one — a manufactory (kind 6) starts as a humble workshop and learns.
             quality: { let mut q = vec![0.0f32; ng]; if g0 < ng { q[g0] = if kind == 6 { 0.34 } else { 0.46 }; } q },
@@ -8554,7 +8591,7 @@ impl CampaignSim {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0,
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
@@ -9258,7 +9295,7 @@ impl CampaignSim {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0,
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
             reserve_food: 30.0, reserve_cap: 365.0, supply_years: 0.0, colony_founded_tick: self.tick,
@@ -11498,7 +11535,7 @@ mod tests {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: 0, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0,
             quality: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,

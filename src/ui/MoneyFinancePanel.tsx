@@ -9,7 +9,7 @@ import type {
   MintBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload,
   HouseBrief, SpecCenter, MonetaryEvent,
 } from "../types";
-import { CoinIcon } from "./CoinIcon";
+import { CoinIcon, type CoinMetal } from "./CoinIcon";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 /** v2.0 · 💰 Money & Finance — the ONE window for the whole monetary system,
@@ -145,6 +145,11 @@ const fmtk = (v: number) => {
   return v.toFixed(a < 10 ? 1 : 0);
 };
 
+/** Tint for the metal label (matches the struck-coin palettes). */
+const METAL_COLOR: Record<string, string> = {
+  gold: "#e8c452", silver: "#c4cdd8", electrum: "#dcd083", bronze: "#c07f45",
+};
+
 /** A labelled driver sub-bar (fineness / trust). */
 function DriverBar({ label, frac, color, text }: { label: string; frac: number; color: string; text: string }) {
   return (
@@ -176,8 +181,8 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap }:
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span style={{ color: "#6a86a6", fontSize: 9, width: 16, flex: "0 0 auto" }}>#{rank}</span>
         {hasCoin
-          ? <CoinIcon issuer={m.issuer || m.city} value={m.value} size={22}
-              title={`${m.coin_name} · strength ${sc.toFixed(0)} · value ${m.value.toFixed(2)}×`} />
+          ? <CoinIcon issuer={m.issuer || m.city} value={m.value} metal={m.metal as CoinMetal} size={22}
+              title={`${m.coin_name} · ${m.metal} · strength ${sc.toFixed(0)} · value ${m.value.toFixed(2)}×`} />
           : <span style={{ width: 22, textAlign: "center", flex: "0 0 auto" }}>🏛</span>}
         <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12 }}>{hasCoin ? m.coin_name : m.city}</span>
         <span style={{ flex: 1 }} />
@@ -205,11 +210,15 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap }:
               {m.value.toFixed(2)}×
             </span>
           </div>
-          <div style={{ display: "flex", gap: 12, marginTop: 3, marginLeft: 46 }}>
+          <div style={{ display: "flex", gap: 12, marginTop: 3, marginLeft: 46, alignItems: "center" }}>
             <DriverBar label="fineness" frac={m.fineness} color={debased ? "#e0a020" : "#8ab0d0"}
               text={`${(m.fineness * 100).toFixed(0)}%${debased ? " ✂" : ""}`} />
             <DriverBar label="trust" frac={m.trust} color={m.is_reserve ? "#37a05a" : "#c8a23a"}
               text={`${(m.trust * 100).toFixed(0)}%`} />
+            <span style={{ color: METAL_COLOR[m.metal] ?? "#9ab0c8", fontSize: 8.5, textTransform: "capitalize" }}
+              title="The metal this coin is struck in — set by the bullion the polis's region can reach">
+              ◈ {m.metal}
+            </span>
           </div>
         </div>
       ) : (
@@ -576,7 +585,7 @@ function SchematicCard({ s }: { s: CitySchematic }) {
         <span style={{ flex: 1 }} />
         {s.coin_name ? (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#d8c878", fontSize: 9 }}>
-            <CoinIcon issuer={s.council || s.name} size={16} /> {s.coin_name}
+            <CoinIcon issuer={s.council || s.name} metal={s.coin_metal as CoinMetal} size={16} /> {s.coin_name}
           </span>
         ) : null}
       </div>

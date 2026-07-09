@@ -1216,6 +1216,7 @@ export interface MintBrief {
   // coin
   coin_name: string;
   issuer: string;
+  metal: string;         // "gold" | "silver" | "electrum" | "bronze"
   trust: number;
   fineness: number;
   value: number;
@@ -1500,6 +1501,7 @@ export interface CitySchematic {
   population: number;
   coin_name: string;
   coin_trust: number;
+  coin_metal: string;   // "gold" | "silver" | "electrum" | "bronze"
   council: string;
   buildings: SchematicBuilding[];
   estates: SchematicEstate[];
