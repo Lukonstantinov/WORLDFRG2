@@ -5,6 +5,7 @@ import { useViewportStore } from "../state/viewportStore";
 import { campaignGetCultures } from "../bridge/tauri";
 import type { CultureBrief } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
+import { CultureFigures } from "./CultureFigures";
 import { T, SERIF } from "./chronicleTheme";
 
 /** #1/#23 · The PEOPLES panel — the living cultures of the world. A two-pane census:
@@ -108,6 +109,13 @@ export function PeoplesPanel() {
                     lineHeight: 1.5, marginBottom: 10, padding: "7px 9px", background: T.card,
                     border: `1px solid ${T.lineSoft}`, borderRadius: 6 }}>
                     {sel.origin}
+                  </div>
+                )}
+                {/* Full-body figures in national dress (man + woman; creole blends parents). */}
+                {sel.kit != null && sel.kit >= 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={sectionHdr}>In national dress</div>
+                    <CultureFigures name={sel.name} kit={sel.kit} kit2={sel.kit2} color={sel.color} />
                   </div>
                 )}
                 <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>

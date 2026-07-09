@@ -258,6 +258,10 @@ const HOMOPHILY_PULL: f32 = 0.15;
 /// target at full (one-culture-minority) blend — modest, feeds the existing clamped
 /// unrest/revolt system so a big disaffected quarter can stir trouble over years.
 const MINORITY_UNREST: f32 = 0.06;
+/// Cultures 2.0 · ethnic-APPEARANCE affinity: minorities of the same appearance group
+/// (climate/dress) as the majority assimilate this much faster even across language
+/// families — "people who look alike blend a little more easily". Small, bounded.
+const APPEARANCE_ASSIM_BONUS: f32 = 1.3;
 /// ── SATELLITE cities (Ostia→Rome, Piraeus→Athens, Westminster/Southwark→London):
 /// a LARGE metropolis whose council can fund it spins off a SHORT-RANGE satellite
 /// to serve a concrete NEED it can't fit inside itself — a PORT (inland/large hub
@@ -1713,6 +1717,9 @@ pub struct Creole {
     pub color: [u8; 3],
     pub born_tick: u32,
     pub birthplace: String, // the city where it arose
+    /// Parent kits (appearance/dress blend for the figure art). `#[serde(default)]`.
+    #[serde(default)] pub kit_a: u8,
+    #[serde(default)] pub kit_b: u8,
 }
 
 /// Batch 1 · one row of the ERA-SCRUBBER ring: the world as it stood at the end
@@ -8233,7 +8240,9 @@ impl CampaignSim {
         let n = self.hubs.len();
         for h in 0..n.min(self.hub_minorities.len()) {
             if self.hub_minorities[h].is_empty() { continue; }
-            let maj_fam = self.culture_family(&self.hub_culture.get(h).cloned().unwrap_or_default());
+            let maj_name = self.hub_culture.get(h).cloned().unwrap_or_default();
+            let maj_fam = self.culture_family(&maj_name);
+            let maj_env = crate::sim::cultures::people_env(&maj_name);
             // Prestige / melting-pot pressure: large, wealthy cities assimilate faster.
             let prestige = (self.hubs[h].population / 20_000.0).clamp(0.0, 1.0) * 0.5
                 + self.hubs[h].trade_wealth.clamp(0.0, 1.0) * 0.5;
@@ -8245,7 +8254,13 @@ impl CampaignSim {
                 // Same family → 2×; distant family → 0.6×; unknown → 1×. Prestige adds up to +100%.
                 let kin = if fam.is_empty() || maj_fam.is_empty() { 1.0 }
                     else if related { 2.0 } else { 0.6 };
-                let rate = (MINORITY_ASSIM_RATE * kin * (1.0 + prestige)).clamp(0.0, 0.25);
+                // Light ETHNIC-APPEARANCE tie: peoples of the same appearance group (climate/
+                // dress) blend a little more readily even across language families.
+                let look = match (maj_env, crate::sim::cultures::people_env(&c)) {
+                    (Some(a), Some(b)) if a == b && !related => APPEARANCE_ASSIM_BONUS,
+                    _ => 1.0,
+                };
+                let rate = (MINORITY_ASSIM_RATE * kin * look * (1.0 + prestige)).clamp(0.0, 0.25);
                 let ns = s * (1.0 - rate);
                 if ns > 0.005 { kept.push((c, ns)); }
             }
@@ -8279,7 +8294,7 @@ impl CampaignSim {
             // Don't re-spawn a creole already born of this same pair.
             let pair_fam = format!("Creole ({} · {})", maj, minc);
             if self.creoles.iter().any(|c| c.family == pair_fam) { continue; }
-            let (name, color) = self.synth_creole_name(&maj, &minc, h, year);
+            let (name, color, kit_a, kit_b) = self.synth_creole_name(&maj, &minc, h, year);
             if name.is_empty() || self.creoles.iter().any(|c| c.name == name) { continue; }
             // Seed: half the minority quarter becomes the creole (intermarriage with locals).
             let take = bs * CREOLE_SEED_FRAC;
@@ -8293,7 +8308,7 @@ impl CampaignSim {
                 name = name, place = self.hubs[h].name, year = year, maj = maj, minc = minc, temperament = temperament);
             self.creoles.push(Creole {
                 name: name.clone(), family: pair_fam, origin, color,
-                born_tick: tick, birthplace: self.hubs[h].name.clone(),
+                born_tick: tick, birthplace: self.hubs[h].name.clone(), kit_a, kit_b,
             });
             self.journal.push(JournalEntry {
                 tick, kind: "ethnogenesis".into(), hub: h as i32, good: -1, value: take,
@@ -8302,9 +8317,9 @@ impl CampaignSim {
         }
     }
 
-    /// Synthesize a creole's name + colour from its two parent peoples. Falls back to
-    /// default kits when a parent isn't a worldgen hearth (e.g. a creole of a creole).
-    fn synth_creole_name(&self, a: &str, b: &str, h: usize, year: u32) -> (String, [u8; 3]) {
+    /// Synthesize a creole's name + colour + parent kits from its two parent peoples.
+    /// Falls back to default kits when a parent isn't a worldgen hearth (creole-of-creole).
+    fn synth_creole_name(&self, a: &str, b: &str, h: usize, year: u32) -> (String, [u8; 3], u8, u8) {
         use crate::sim::cultures as cul;
         let ka = cul::kit_of_people(a).unwrap_or(0);
         let kb = cul::kit_of_people(b).unwrap_or(1);
@@ -8315,7 +8330,7 @@ impl CampaignSim {
         let color = [((ca[0] as u16 + cb[0] as u16) / 2) as u8,
             ((ca[1] as u16 + cb[1] as u16) / 2) as u8,
             ((ca[2] as u16 + cb[2] as u16) / 2) as u8];
-        (name, color)
+        (name, color, ka as u8, kb as u8)
     }
 
     /// #23 · Yearly economic migration: within a trade component, people drift from

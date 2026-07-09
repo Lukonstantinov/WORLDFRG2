@@ -597,6 +597,20 @@ pub fn kit_of_people(name: &str) -> Option<usize> {
     active().and_then(|m| m.hearths.iter().find(|h| h.people == name).map(|h| h.kit as usize))
 }
 
+/// A kit's native environment as a small index (0 Temperate · 1 Cold · 2 Arid ·
+/// 3 Tropical · 4 Maritime) — the "appearance group" a people looks like (skin/dress
+/// track climate). Drives the ethnic-appearance affinity in assimilation.
+pub fn kit_env_index(kit: usize) -> u8 {
+    match KITS[kit.min(KITS.len() - 1)].env {
+        Env::Temperate => 0, Env::Cold => 1, Env::Arid => 2, Env::Tropical => 3, Env::Maritime => 4,
+    }
+}
+
+/// The appearance-group index of a live people (by label), via its kit, if known.
+pub fn people_env(name: &str) -> Option<u8> {
+    kit_of_people(name).map(kit_env_index)
+}
+
 /// The hearth colour of a live people (by its label), from the active map, if any.
 pub fn color_of_people(name: &str) -> Option<[u8; 3]> {
     active().and_then(|m| m.hearths.iter().find(|h| h.people == name).map(|h| h.color))
