@@ -129,6 +129,19 @@ export async function simBiological(
   return invoke("sim_biological", { seed, riversJson, gemDeposits, climateStrictness });
 }
 
+/** One-click refresh of hydrology → biology on an existing world (rivers/lakes +
+ *  oxbows + salt + delta abundance + goods) without re-rolling terrain or moving
+ *  settlements. Returns the fresh rivers & lakes for the overlays. */
+export async function simRefreshHydrologyBiology(
+  seed: number, riverDensity: number, riverWidth: number,
+  lakeFillDepth: number, lakeMaxFraction: number,
+  gemDeposits: number, climateStrictness: number,
+): Promise<import("../types").SimRiversResult> {
+  return invoke("sim_refresh_hydrology_biology", {
+    seed, riverDensity, riverWidth, lakeFillDepth, lakeMaxFraction, gemDeposits, climateStrictness,
+  });
+}
+
 export async function simGenerateTerrainFromTemplate(
   seed: number,
   mountainDensity: number,

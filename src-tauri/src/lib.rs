@@ -80,6 +80,7 @@ pub fn run() {
             sim_commands::sim_scale_elevation,
             sim_commands::sim_generate_settlements,
             sim_commands::sim_biological,
+            sim_commands::sim_refresh_hydrology_biology,
             sim_commands::sim_generate_toponyms,
             sim_commands::save_toponyms,
             sim_commands::get_toponyms,

@@ -1,6 +1,6 @@
 import { useUIStore } from "../../state/uiStore";
 import { useWorldStore } from "../../state/worldStore";
-import { simRiversHydrology } from "../../bridge/tauri";
+import { simRiversHydrology, simRefreshHydrologyBiology } from "../../bridge/tauri";
 import { genBtn } from "./WorkflowPanel";
 
 interface Props {
@@ -9,7 +9,7 @@ interface Props {
   invalidateTiles: () => void;
 }
 
-export function StepRivers({ invalidateTiles }: Props) {
+export function StepRivers({ seed, invalidateTiles }: Props) {
   const simRunning = useUIStore((s) => s.simRunning);
   const setSimRunning = useUIStore((s) => s.setSimRunning);
   const setStatus = useUIStore((s) => s.setStatus);
@@ -42,6 +42,28 @@ export function StepRivers({ invalidateTiles }: Props) {
       setOverlayVisible("rivers", true);
       setOverlayVisible("lakes", true);
       setStatus(`Rivers: ${result.rivers.length} rivers, ${result.lakes.length} lakes`);
+    } catch (err) { setStatus(`Error: ${err}`); }
+    setSimRunning(false);
+  };
+
+  // One-click refresh: re-run hydrology → soil/fertility → biology on the existing
+  // world, so an older world gains meanders, oxbow backwaters, salt lakes, delta
+  // abundance and the salt/goods economy without re-rolling terrain or moving cities.
+  const handleRefresh = async () => {
+    if (simRunning) return;
+    setSimRunning(true);
+    setStatus("Refreshing rivers, lakes, salt & goods…");
+    try {
+      const result = await simRefreshHydrologyBiology(
+        seed, riverParams.density, 1.0,
+        riverParams.lakeFillDepth, riverParams.lakeMaxFraction, 6, 0.5,
+      );
+      setRivers(result.rivers);
+      setLakes(result.lakes);
+      invalidateTiles();
+      setOverlayVisible("rivers", true);
+      setOverlayVisible("lakes", true);
+      setStatus(`Refreshed: ${result.rivers.length} rivers, ${result.lakes.length} lakes, salt & goods updated`);
     } catch (err) { setStatus(`Error: ${err}`); }
     setSimRunning(false);
   };
@@ -92,6 +114,16 @@ export function StepRivers({ invalidateTiles }: Props) {
           {rivers.length} rivers, {lakes.length} lakes extracted
         </div>
       )}
+
+      <button onClick={handleRefresh} disabled={simRunning || !step2Done}
+        title="Re-run hydrology → soil/fertility → biology on the existing world: adds meanders, oxbow backwaters, salt lakes, delta abundance and salt/goods — without re-rolling terrain or moving settlements."
+        style={{ ...genBtn, background: "#12222e", color: "#8fc0d8", border: "1px solid #244a60" }}>
+        🔄 Refresh meanders, salt &amp; goods
+      </button>
+      <div style={{ color: "#405060", fontSize: 9 }}>
+        Refresh updates rivers, lakes, salt &amp; the goods economy on an existing
+        world (keeps your terrain &amp; cities). Full regen: use “Complete from Landmass”.
+      </div>
       <div style={{ color: "#405060", fontSize: 10 }}>
         Uses D8 steepest-descent flow routing over a depression-filled surface.
         Adjust density for the river network and the lake threshold for how

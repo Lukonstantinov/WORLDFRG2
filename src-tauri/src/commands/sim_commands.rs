@@ -198,6 +198,59 @@ pub fn sim_biological(
     buf.save(&conn, "Biological (sharks, shipworms, storms, reefs & trade goods)")
 }
 
+/// One-click REFRESH of hydrology → biology on an existing world, WITHOUT
+/// re-rolling elevation/climate or relocating settlements. Re-runs the rivers &
+/// lakes pass (so a world made before the meander/oxbow/salt work gains true
+/// meanders, oxbow backwaters and classified salt lakes), the soil/fertility pass
+/// (delta floodplain abundance + delta fisheries) and the biological pass (trade
+/// goods + inland salt-pan production). The human map (settlements) is left
+/// untouched — use "Complete from Landmass" if you want cities re-placed too.
+#[tauri::command]
+pub fn sim_refresh_hydrology_biology(
+    seed: u64,
+    river_density: f32,
+    river_width: f32,
+    lake_fill_depth: f32,
+    lake_max_fraction: f32,
+    gem_deposits: u32,
+    climate_strictness: f32,
+    db: State<'_, WorldDb>,
+) -> Result<SimRiversResult, String> {
+    db.clear_caches();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?;
+    let mut buf = WorldBuffer::load(&conn)?; // ALL columns (writes soil/fert/goods/salinity/…)
+
+    // Phase 5: rivers → lakes → oxbows → salt classification.
+    let hydro = rivers::compute_hydrology(&buf);
+    let max_cells = (((buf.total() as f32) * lake_max_fraction.clamp(0.000002, 0.05)) as usize).max(4);
+    let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, lake_fill_depth, max_cells);
+    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, river_density, river_width, &lakes);
+    let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
+    lakes.extend(oxbows);
+    rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
+
+    // Phase 6: soil & fertility (incl. delta floodplain abundance + delta fisheries).
+    soil::classify_soil(&mut buf);
+    soil::apply_volcanic_apron(&mut buf);
+    soil::apply_alluvial_override(&mut buf, &extracted_rivers);
+    fertility::compute_fertility(&mut buf, &extracted_rivers);
+    fertility::compute_fisheries(&mut buf, &extracted_rivers);
+
+    // Phase 8: biological — hazards, trade goods, and inland salt pans.
+    let goods = crate::commands::goods_commands::load_world_goods(&conn);
+    biological::compute_disease_risk(&mut buf, &extracted_rivers);
+    biological::compute_shark_risk(&mut buf, &extracted_rivers);
+    biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
+    biological::compute_storm_base(&mut buf);
+    biological::compute_reef_risk(&mut buf);
+    biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, gem_deposits, climate_strictness, &goods);
+    biological::apply_salt_pans(&mut buf, &lakes, &goods);
+
+    let modified = buf.save(&conn, "Refresh hydrology & biology")?;
+    Ok(SimRiversResult { modified, rivers: extracted_rivers, lakes })
+}
+
 /// Run all simulations in sequence (full world generation pipeline).
 /// This is a convenience command that runs all phases.
 #[tauri::command]
