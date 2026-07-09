@@ -664,7 +664,7 @@ fn build_meander_path(
 /// clamped amount to one side over a short run, tapering in and out so it reads as
 /// a splitting channel, not a parallel line. Conservative (≤ 3 strands/river) so
 /// the effect enriches the great trunks without cluttering the map.
-fn build_braids(buf: &WorldBuffer, render: &[(f32, f32)], width_cells: f32, order: u8, seed: u64) -> Vec<Vec<(f32, f32)>> {
+fn build_braids(buf: &WorldBuffer, render: &[(f32, f32)], width_cells: f32, order: u8, _seed: u64) -> Vec<Vec<(f32, f32)>> {
     let n = render.len();
     if order < 5 || width_cells < 1.6 || n < 44 { return Vec::new(); }
     let w = buf.width as f32;

@@ -393,11 +393,21 @@ fn render_salinity(tile: &TileData, rgba: &mut [u8]) {
     for i in 0..PIXEL_COUNT {
         let offset = i * 4;
         if tile.terrain[i] == 1 {
-            // Land: dim so the sea field reads clearly.
-            rgba[offset] = 18;
-            rgba[offset + 1] = 22;
-            rgba[offset + 2] = 26;
-            rgba[offset + 3] = 255;
+            // Land is dim so the sea field reads clearly — EXCEPT terminal salt
+            // lakes, whose brine was written into the column (compute salt pans):
+            // show them on a pink→white hypersaline ramp so the salinity index
+            // surfaces the inland playas too.
+            let sl = tile.salinity[i] as f32 / 255.0; // 0 ↔ 28 PSU … 1 ↔ 42 PSU
+            if sl > 0.45 { // ≳ 34 PSU: an evaporite salt lake, not ordinary land
+                let (r, g, b) = if sl < 0.85 {
+                    lerp_rgb((198, 110, 150), (232, 150, 120), (sl - 0.45) / 0.40) // rose → salmon
+                } else {
+                    lerp_rgb((232, 150, 120), (245, 238, 232), (sl - 0.85) / 0.15) // → salt-crust white
+                };
+                rgba[offset] = r; rgba[offset + 1] = g; rgba[offset + 2] = b; rgba[offset + 3] = 255;
+            } else {
+                rgba[offset] = 18; rgba[offset + 1] = 22; rgba[offset + 2] = 26; rgba[offset + 3] = 255;
+            }
             continue;
         }
         // u8 0..255 ↔ ~28-42 PSU. Fresh → teal-green, ~normal → blue,

@@ -187,6 +187,14 @@ pub fn sim_biological(
     biological::compute_reef_risk(&mut buf);
     biological::compute_trade_goods(&mut buf, &river_data, seed, gem_deposits, climate_strictness, &goods);
 
+    // Terminal salt lakes → brine into the salinity column + inland salt-pan
+    // production. Lakes are re-derived here (this phase does not receive them).
+    let hydro = rivers::compute_hydrology(&buf);
+    let lake_max = (buf.total() / 2000).max(20);
+    let mut salt_lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
+    rivers::classify_salt_lakes(&buf, &mut salt_lakes, &river_data);
+    biological::apply_salt_pans(&mut buf, &salt_lakes, &goods);
+
     buf.save(&conn, "Biological (sharks, shipworms, storms, reefs & trade goods)")
 }
 
@@ -261,6 +269,8 @@ pub fn sim_run_all(
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
     biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
+    // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
+    biological::apply_salt_pans(&mut buf, &lakes, &goods);
 
     let modified = buf.save(&conn, "Full world generation")?;
 
@@ -388,6 +398,8 @@ pub fn sim_run_all_from_terrain(
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
     biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
+    // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
+    biological::apply_salt_pans(&mut buf, &lakes, &goods);
 
     let modified = buf.save(&conn, "Full generation from template")?;
 
