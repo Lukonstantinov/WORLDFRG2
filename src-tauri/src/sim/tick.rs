@@ -238,6 +238,11 @@ const HOSPICE_EASE: f32 = 0.25;
 const HOSPICE_TREASURY_SKIM: f32 = 0.04;
 /// Public health lapses this much per year when a council can't afford it.
 const HOSPICE_DECAY: f32 = 0.05;
+/// ── HINTERLAND VILLAGES: sub-cap settlements aren't full hubs, but each markets
+/// through its nearest live town (a satellite trade tie). The town earns a small,
+/// bounded civic toll from that hinterland trade (grain-eq per villager per year).
+/// Bounded by `civic_pool`'s decay sink → cannot inflate wealth.
+const HINTERLAND_TOLL: f32 = 0.01;
 /// ── SATELLITE cities (Ostia→Rome, Piraeus→Athens, Westminster/Southwark→London):
 /// a LARGE metropolis whose council can fund it spins off a SHORT-RANGE satellite
 /// to serve a concrete NEED it can't fit inside itself — a PORT (inland/large hub
@@ -1661,6 +1666,10 @@ pub struct HinterlandTown {
     pub population: f32,
     pub koppen: u8,
     pub coastal: bool,
+    /// Satellite trade tie: the nearest LIVE hub this village markets through (its
+    /// produce flows to that town, and it buys from it). Assigned lazily in
+    /// `hinterland_pass`; `-1` until linked. `#[serde(default)]` → old saves relink.
+    #[serde(default = "neg_one_i32")] pub parent_hub: i32,
 }
 
 /// A migration flow drawn STRICTLY along the trade-route network: `path` is the routed
@@ -7051,6 +7060,8 @@ impl CampaignSim {
             self.economic_migration_pass();
             self.diaspora_pass();
             self.assimilation_pass();
+            // Connect sub-cap villages to the trade network via their nearest market town.
+            self.hinterland_pass();
             // House trade outposts from year 30 (rich house, heavy cost); full
             // settlement colonies from year 50 (joint-stock, food lifeline).
             if expansion_ok && self.tick >= BASE_START_TICK {
@@ -8123,6 +8134,41 @@ impl CampaignSim {
                 self.journal.push(JournalEntry { tick, kind: "migration".into(), hub: dst as i32, good: -1,
                     value: movers, text: format!("{:.0} {} traders settle in {}", movers, culture, dn) });
             }
+        }
+    }
+
+    /// Yearly HINTERLAND pass: connect every sub-cap village to the trade network by
+    /// tying it to its nearest live market town (satellite trade), and let that town
+    /// earn a small, bounded civic toll from the hinterland trade. This is how villages
+    /// below the sim cap "join the economy" without becoming O(n²) full hubs — they feed
+    /// a real hub and show up in its books, instead of sitting inert and disconnected.
+    fn hinterland_pass(&mut self) {
+        let n = self.hubs.len();
+        if self.hinterland.is_empty() || n == 0 { return; }
+        // (Re)assign each village its nearest live market town — only when unlinked or
+        // its town has died (cheap no-op once every village is settled on a live hub).
+        for ti in 0..self.hinterland.len() {
+            let cur = self.hinterland[ti].parent_hub;
+            let ok = cur >= 0 && (cur as usize) < n
+                && !self.hubs[cur as usize].is_estate && !self.hubs[cur as usize].abandoned;
+            if ok { continue; }
+            let (vx, vy) = (self.hinterland[ti].x, self.hinterland[ti].y);
+            let mut best = (-1i32, f32::MAX);
+            for h in 0..n {
+                if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+                let mut dx = (self.hubs[h].x - vx).abs();
+                if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
+                let dy = self.hubs[h].y - vy;
+                let d = dx * dx + dy * dy;
+                if d < best.1 { best = (h as i32, d); }
+            }
+            self.hinterland[ti].parent_hub = best.0;
+        }
+        // Market toll: each town earns a small civic income from its satellite villages.
+        for ti in 0..self.hinterland.len() {
+            let p = self.hinterland[ti].parent_hub;
+            if p < 0 || (p as usize) >= n { continue; }
+            self.hubs[p as usize].civic_pool += self.hinterland[ti].population * HINTERLAND_TOLL;
         }
     }
 

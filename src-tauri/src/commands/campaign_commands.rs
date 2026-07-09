@@ -522,6 +522,15 @@ pub struct CoinShare {
     pub reserve: bool, // a foreign reserve coin circulating here
 }
 
+/// One sub-cap hinterland village that markets through this town (satellite trade).
+#[derive(Serialize, Clone)]
+pub struct HinterlandVillage {
+    pub name: String,
+    pub population: u32,
+    pub x: f32,
+    pub y: f32,
+}
+
 /// Full per-settlement detail for the redesigned settlement window (live campaign
 /// state): sentiment, market, and history.
 #[derive(Serialize)]
@@ -603,6 +612,10 @@ pub struct HubDetail {
     /// PUBLIC HEALTH level (hospices/quarantine), 0..0.6 — how far the council funds
     /// disease mitigation. Higher = far fewer die in a plague, longer immunity.
     #[serde(default)] pub public_health: f32,
+    /// Sub-cap HINTERLAND villages that market through this town (satellite trade). These
+    /// are the small settlements below the sim cap — connected to the economy via their
+    /// nearest hub rather than simulated individually.
+    #[serde(default)] pub satellites: Vec<HinterlandVillage>,
     /// Name of the polis this city is at war with ("" = at peace).
     #[serde(default)] pub war_with: String,
     /// Its coin, if it mints one.
@@ -1325,6 +1338,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 x: eh.x, y: eh.y, name: eh.name.clone(),
                 population: tier_founding(eh.population),
                 koppen: eh.koppen, coastal: eh.coastal,
+                parent_hub: -1,
             }
         })
         .collect();
@@ -2933,6 +2947,10 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         minorities: sim.hub_minorities.get(hi).cloned().unwrap_or_default(),
         government,
         public_health: hub.public_health,
+        satellites: sim.hinterland.iter()
+            .filter(|v| v.parent_hub == hi as i32)
+            .map(|v| HinterlandVillage { name: v.name.clone(), population: v.population.round().max(0.0) as u32, x: v.x, y: v.y })
+            .collect(),
         treasury: hub.treasury,
         finance: Some(hub.finance.clone()),
         war_with,

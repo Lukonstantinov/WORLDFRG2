@@ -480,6 +480,8 @@ export interface CoinShare {
   reserve: boolean; // a foreign reserve coin circulating here
 }
 
+/** A sub-cap hinterland village that markets through a town (satellite trade). */
+export interface HinterlandVillage { name: string; population: number; x: number; y: number }
 export interface HubDetail {
   id: number;
   name: string;
@@ -542,6 +544,7 @@ export interface HubDetail {
   treasury?: number;                 // retained civic treasury
   finance?: CityFinance | null;      // treasury books (current + prev)
   public_health?: number;            // hospices/quarantine level 0..0.6 (cuts plague deaths)
+  satellites?: HinterlandVillage[];  // sub-cap villages that market through this town
   war_with?: string;                 // polis at war with ("" = peace)
   coin_name?: string;
   coin_trust?: number;

@@ -608,6 +608,12 @@ export function HubPanel() {
           {/* Character summary */}
           <div style={blurbBox}>{peopleSummary(hub, labelFor, topHub?.name, isTop)}</div>
 
+          {/* Satellite villages: sub-cap hinterland settlements that market through this
+              town — how the small villages join the trade network. */}
+          {(detail?.satellites?.length ?? 0) > 0 && (
+            <SatelliteVillages villages={detail!.satellites!} />
+          )}
+
           {/* Site & story — what the town stands on and lives by (river/reach/lake,
               trade role, delta abundance). Worldgen-static, shown always. */}
           <SettlementStoryBox x={hub.x} y={hub.y} name={hub.name} stars={stars} />
@@ -1473,6 +1479,34 @@ function CityFinances({ detail }: { detail: HubDetail }) {
         </div>
       )}
     </>
+  );
+}
+
+/** Satellite villages: the sub-cap hinterland settlements that market through this town.
+ *  How the small villages "join the trade" — connected to a real hub, not left inert. */
+function SatelliteVillages({ villages }: { villages: NonNullable<HubDetail["satellites"]> }) {
+  const [open, setOpen] = useState(false);
+  const totalPop = villages.reduce((a, v) => a + v.population, 0);
+  const sorted = [...villages].sort((a, b) => b.population - a.population);
+  return (
+    <div style={{ margin: "6px 0", padding: "6px 8px", background: "rgba(20,30,22,0.5)", border: "1px solid #24382a", borderRadius: 6 }}>
+      <div onClick={() => setOpen((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 10.5 }}>
+        <span style={{ color: "#8fbf90", fontSize: 9 }}>{open ? "▾" : "▸"}</span>
+        <span style={{ color: "#a8d0a8", fontWeight: 600 }}>🏘 Market town for {villages.length} village{villages.length === 1 ? "" : "s"}</span>
+        <span style={{ flex: 1 }} />
+        <span style={{ color: "#7a9a7a" }}>{Math.round(totalPop).toLocaleString()} hinterland folk</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 5, display: "flex", flexWrap: "wrap", gap: "2px 10px" }}>
+          {sorted.slice(0, 24).map((v, i) => (
+            <span key={i} style={{ fontSize: 9.5, color: "#9ab0a0", minWidth: 110 }}>
+              {v.name} <span style={{ color: "#6a806a" }}>{v.population.toLocaleString()}</span>
+            </span>
+          ))}
+          {sorted.length > 24 && <span style={{ fontSize: 9.5, color: "#6a806a" }}>+{sorted.length - 24} more…</span>}
+        </div>
+      )}
+    </div>
   );
 }
 
