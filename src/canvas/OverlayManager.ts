@@ -534,12 +534,18 @@ export class OverlayManager {
           }
         }
       } else {
-        // Ribbon (and focus) — a stroked path whose width tracks volume.
+        // Ribbon (and focus) — a stroked path whose width tracks volume, drawn as a
+        // DASH-DOT line ( -•-•-• ) so migration reads distinctly from solid trade lanes,
+        // with an arrowhead into the destination city.
         ctx.strokeStyle = this.rgba(col, focused ? Math.min(1, fade + 0.25) : fade * 0.85);
         ctx.lineWidth = Math.max(0.6, (focused ? 2.2 : 1.0 + volN * 2.4) * inv);
         ctx.lineJoin = "round"; ctx.lineCap = "round";
+        // dash · gap · dot(~0, rendered as a round cap) · gap → the "-•-•-•" pattern.
+        const dash = 2.4 * inv, gap = 1.7 * inv;
+        ctx.setLineDash([dash, gap, 0.01, gap]);
         this.tracePath(ctx, path);
         ctx.stroke();
+        ctx.setLineDash([]); // reset so it doesn't leak into other overlays
         // Arrowhead at the destination.
         const n = path.length;
         const [px, py] = path[n - 2], [qx, qy] = path[n - 1];
