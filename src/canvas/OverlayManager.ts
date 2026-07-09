@@ -266,6 +266,10 @@ export class OverlayManager {
   /** 🌊 Hydrology · per-river-index glow colour (branch / order scheme); missing
    *  entries fall back to the default cyan. */
   private riverHighlightColors: Record<number, string> = {};
+  /** 🌊 Hydrology · index (into `lakes`) of the selected lake to glow; -1 = none.
+   *  When set, every other lake dims so the chosen basin stands out. */
+  private lakeHighlight = -1;
+  setLakeHighlight(idx: number | null) { this.lakeHighlight = idx ?? -1; }
   /** #37 · per-hub local price premium for the selected good (1 = par with the
    *  world base value; <1 cheap/abundant, >1 dear/scarce). */
   private goodScarcity: { x: number; y: number; premium: number }[] = [];
@@ -1076,13 +1080,23 @@ export class OverlayManager {
     }
 
     if (this.visibility.lakes && this.lakes.length > 0) {
-      for (const lake of this.lakes) {
-        // Oxbow backwater · salt-lake brine tint · else open blue water.
+      const lhl = this.lakeHighlight;
+      const hasLakeHL = lhl >= 0 && lhl < this.lakes.length;
+      this.lakes.forEach((lake, li) => {
+        const isSel = hasLakeHL && li === lhl;
+        // Oxbow backwater · salt-lake brine tint · else open blue water. When a
+        // lake is selected in the Hydrology panel, dim the others so it stands out.
+        ctx.globalAlpha = hasLakeHL ? (isSel ? 1 : 0.28) : 1;
         ctx.fillStyle = lakeFill(lake);
-        for (const [x, y] of lake.cells) {
-          ctx.fillRect(x, y, 1, 1);
+        for (const [x, y] of lake.cells) ctx.fillRect(x, y, 1, 1);
+        // Bright wash over the selected basin so it reads as picked (cheap — one
+        // extra fill pass, no per-cell shadow).
+        if (isSel) {
+          ctx.fillStyle = "rgba(220, 240, 255, 0.5)";
+          for (const [x, y] of lake.cells) ctx.fillRect(x, y, 1, 1);
         }
-      }
+      });
+      ctx.globalAlpha = 1;
     }
 
     if (this.visibility.rivers && this.rivers.length > 0) {
@@ -3596,6 +3610,7 @@ export class OverlayManager {
     this.travelRoute = [];
     this.riverHighlight = new Set();
     this.riverHighlightColors = {};
+    this.lakeHighlight = -1;
     this.goodScarcity = [];
     this.toponyms = [];
     this.fisheryBanks = [];

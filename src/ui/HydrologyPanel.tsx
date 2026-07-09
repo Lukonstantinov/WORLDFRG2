@@ -285,6 +285,12 @@ function LakesTab({ lakes, rivers, focusOn }: {
   const [sort, setSort] = useState<LakeSort>("area");
   const [kind, setKind] = useState<string>("all");
   const [openId, setOpenId] = useState<number | null>(null);
+  const setLakeHighlight = useUIStore((s) => s.setLakeHighlight);
+
+  // Glow the opened lake on the map (others dim); clear when none is open or the
+  // Lakes tab unmounts.
+  useEffect(() => { setLakeHighlight(openId); }, [openId, setLakeHighlight]);
+  useEffect(() => () => setLakeHighlight(null), [setLakeHighlight]);
 
   useEffect(() => {
     if (lakes.length === 0) { setNodes([]); return; }

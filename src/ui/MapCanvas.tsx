@@ -955,6 +955,15 @@ export function MapCanvas() {
     requestRender();
   }, [riverHighlight, riverHighlightColors, requestRender]);
 
+  // 🌊 Hydrology · the lake selected in the Lakes tab glows; others dim.
+  const lakeHighlight = useUIStore((s) => s.lakeHighlight);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setLakeHighlight(lakeHighlight);
+    requestRender();
+  }, [lakeHighlight, requestRender]);
+
   // #26 · geographic toponym labels, pushed from the world store.
   const toponyms = useWorldStore((s) => s.toponyms);
   useEffect(() => {

@@ -154,6 +154,9 @@ interface UIStore {
   /** 🌊 Hydrology: per-river-index glow colour (branch / order scheme). Missing
    *  entries fall back to the default cyan glow. */
   riverHighlightColors: Record<number, string> | null;
+  /** 🌊 Hydrology: index of the lake selected in the Lakes tab to glow on the map
+   *  (others dim), or null. */
+  lakeHighlight: number | null;
   /** Goods Codex: the good whose provenance/history/scarcity is shown, or null. */
   codexGood: string | null;
   /** Colonial Office — empire-wide colony/outpost roster + founding-gate diagnostics. */
@@ -249,6 +252,7 @@ interface UIStore {
   setTravelRoute: (pts: [number, number][] | null) => void;
   setRiverHighlight: (ids: number[] | null) => void;
   setRiverHighlightColors: (c: Record<number, string> | null) => void;
+  setLakeHighlight: (idx: number | null) => void;
   setCodexGood: (g: string | null) => void;
   setShowCoinCredit: (v: boolean) => void;
   setShowColonial: (v: boolean) => void;
@@ -358,6 +362,7 @@ export const useUIStore = create<UIStore>((set) => ({
   travelRoute: null,
   riverHighlight: null,
   riverHighlightColors: null,
+  lakeHighlight: null,
   codexGood: null,
   showColonial: false,
   showBank: false,
@@ -474,6 +479,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setTravelRoute: (pts) => set({ travelRoute: pts }),
   setRiverHighlight: (ids) => set({ riverHighlight: ids }),
   setRiverHighlightColors: (c) => set({ riverHighlightColors: c }),
+  setLakeHighlight: (idx) => set({ lakeHighlight: idx }),
   setCodexGood: (g) => set({ codexGood: g }),
   setShowColonial: (v) => set({ showColonial: v }),
   setShowBank: (v) => set({ showBank: v }),
