@@ -474,6 +474,34 @@ function CorrelationsTab({ points, geo, onPick }: {
   const zipf = [...points].sort((a, b) => b.pop - a.pop)
     .map((p, i) => ({ x: i + 1, y: p.pop, label: p.name, mx: p.x, my: p.y }));
   const geoOk = geo.length >= 4;
+
+  // Unified per-city vector for the correlation matrix — geography joined to the
+  // economic census by name (geo carries climate; the census carries mood/growth).
+  const cityByName = new Map(points.map((p) => [p.name, p]));
+  const matrixData: Record<string, number>[] = geoOk
+    ? geo.map((g) => {
+        const c = cityByName.get(g.name);
+        return {
+          pop: g.population, wealth: g.wealth, trade: g.trade,
+          temp: g.temperature, precip: g.precipitation, elev: g.elevation,
+          coast: g.distance_to_ocean, fert: g.fertility,
+          growth: c ? c.growth : 0, mood: c ? c.mood : 0, lat: c ? c.lat : 0,
+        };
+      })
+    : points.map((p) => ({ pop: p.pop, wealth: p.wealth, trade: p.trade, growth: p.growth, mood: p.mood, lat: p.lat }));
+  const matrixVars: { key: string; label: string; log?: boolean }[] = geoOk
+    ? [
+        { key: "pop", label: "Pop", log: true }, { key: "wealth", label: "Wealth", log: true },
+        { key: "trade", label: "Trade", log: true }, { key: "temp", label: "Temp" },
+        { key: "precip", label: "Rain" }, { key: "elev", label: "Elev" },
+        { key: "coast", label: "Coast" }, { key: "fert", label: "Fert" },
+        { key: "lat", label: "Lat" }, { key: "mood", label: "Mood" }, { key: "growth", label: "Grow" },
+      ]
+    : [
+        { key: "pop", label: "Pop", log: true }, { key: "wealth", label: "Wealth", log: true },
+        { key: "trade", label: "Trade", log: true }, { key: "lat", label: "Lat" },
+        { key: "mood", label: "Mood" }, { key: "growth", label: "Grow" },
+      ];
   return (
     <>
       <div style={{ color: T.inkDim, fontSize: 11, marginBottom: 8, lineHeight: 1.5 }}>
@@ -482,7 +510,10 @@ function CorrelationsTab({ points, geo, onPick }: {
         least-squares trend. These relationships live nowhere else in the app.
       </div>
 
-      <div style={sectionHdrLocal}>City scaling</div>
+      <div style={sectionHdrLocal}>Correlation matrix — every variable pair at a glance</div>
+      <CorrMatrix vars={matrixVars} data={matrixData} />
+
+      <div style={{ ...sectionHdrLocal, marginTop: 10 }}>City scaling</div>
       <Grid2>
         <Scatter title="City rank–size (Zipf)" pts={zipf} onPick={onPick}
           xLabel="rank (largest → smallest)" yLabel="population"
@@ -913,6 +944,67 @@ function Scatter({ title, pts, xLabel, yLabel, logX, logY, color, note, onPick }
       </div>
       {note && <div style={{ color: T.inkDim, fontSize: 9.5, marginTop: 3, lineHeight: 1.4 }}>{note}</div>}
     </CardShell>
+  );
+}
+
+/** A Pearson-r heat grid over every pair of the given variables. Heavy-tailed
+ *  columns (flagged `log`) are correlated in log space so a couple of giant
+ *  cities don't swamp the signal. Cell colour = sign (green +, red −), opacity =
+ *  strength; hover any cell for the exact pair + r. */
+function CorrMatrix({ vars, data }: {
+  vars: { key: string; label: string; log?: boolean }[]; data: Record<string, number>[];
+}) {
+  if (data.length < 4 || vars.length < 2) {
+    return <div style={hint}>Not enough cities yet for a correlation matrix.</div>;
+  }
+  const cols = vars.map((v) => data.map((d) => (v.log ? Math.log10(Math.max(1e-6, d[v.key])) : d[v.key])));
+  const n = vars.length;
+  const r: number[][] = cols.map((ci) => cols.map((cj) => pearson(ci, cj)));
+  const cell = 30, labelW = 44, headH = 20;
+  const w = labelW + n * cell, h = headH + n * cell;
+  return (
+    <div style={{ overflowX: "auto", background: T.card, border: `1px solid ${T.lineSoft}`, borderRadius: 6, padding: 6, marginBottom: 4 }}>
+      <svg width={w} height={h} style={{ display: "block", fontFamily: "inherit" }}>
+        {/* column headers */}
+        {vars.map((v, j) => (
+          <text key={`c${j}`} x={labelW + j * cell + cell / 2} y={headH - 6} textAnchor="middle"
+            fontSize={9} fill={T.inkMid}>{v.label}</text>
+        ))}
+        {vars.map((vi, i) => (
+          <g key={`r${i}`}>
+            <text x={labelW - 4} y={headH + i * cell + cell / 2 + 3} textAnchor="end" fontSize={9} fill={T.inkMid}>{vi.label}</text>
+            {vars.map((_vj, j) => {
+              const val = r[i][j];
+              const diag = i === j;
+              const a = diag ? 0 : Math.min(0.85, Math.abs(val));
+              const fill = diag ? "#132030" : (val >= 0 ? "#4cae7a" : "#c0573a");
+              return (
+                <g key={j}>
+                  <rect x={labelW + j * cell} y={headH + i * cell} width={cell - 1.5} height={cell - 1.5}
+                    rx={2} fill={fill} fillOpacity={diag ? 1 : a}>
+                    {!diag && <title>{`${vars[i].label} ↔ ${vars[j].label}: r = ${val.toFixed(2)} (${rDesc(val)})`}</title>}
+                  </rect>
+                  <text x={labelW + j * cell + (cell - 1.5) / 2} y={headH + i * cell + (cell - 1.5) / 2 + 3}
+                    textAnchor="middle" fontSize={8.5}
+                    fill={diag ? T.inkFaint : (Math.abs(val) > 0.45 ? "#0b1420" : T.inkMid)}>
+                    {diag ? "—" : val.toFixed(1).replace("0.", ".").replace("-.", "−.")}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
+        ))}
+      </svg>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 4, fontSize: 9, color: T.inkFaint }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+          <span style={{ width: 10, height: 10, background: "#c0573a", borderRadius: 2 }} /> negative
+        </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+          <span style={{ width: 10, height: 10, background: "#4cae7a", borderRadius: 2 }} /> positive
+        </span>
+        <span>· deeper = stronger · hover a cell for the exact r{cols.length && data.length ? ` · n=${data.length} cities` : ""}</span>
+      </div>
+    </div>
   );
 }
 
