@@ -883,6 +883,17 @@ const MINT_GOLD_WEIGHT: f32 = 3.0;
 /// does not collapse). Full bullion supply lifts the cap to 1.0.
 const MINT_FINENESS_FLOOR: f32 = 0.85;
 
+// ── v2.0 · mint charter (minting as a privilege) ─────────────────────────────
+/// A council seat earns the RIGHT OF THE MINT only once it is a real commercial
+/// centre: its trade throughput must clear this fraction of the world's busiest
+/// hub, AND its population this fraction of the largest — so tiny council seats
+/// don't each strike their own coin. Relative, so it adapts to any world.
+const MINT_CHARTER_THROUGH_FRAC: f32 = 0.08;
+const MINT_CHARTER_POP_FRAC: f32 = 0.05;
+/// One-time cost to establish the mint (paid from the treasury) — a city must be
+/// solvent enough to fund the minting house.
+const MINT_CHARTER_COST: f32 = 30.0;
+
 // ── DLC 4 · Good quality ─────────────────────────────────────────────────────
 /// Value multiplier a good's quality earns: coarse goods trade at a discount,
 /// exquisite ones at a premium (≈0.6×…1.5× across the grade range).
@@ -1226,6 +1237,11 @@ pub struct TickHub {
     /// means metal is ample (fineness can be full); <1 means the mint is stretched
     /// and bullion scarcity is forcing debasement (surfaced as the "limiting factor").
     #[serde(default)] pub mint_bullion_ratio: f32,
+    /// v2.0 · whether this polis holds the RIGHT OF THE MINT (a charter). Minting is
+    /// a privilege of substantial commercial centres, not automatic for every council
+    /// seat — a city earns it once it is large & busy enough and pays to establish a
+    /// mint. Grandfathered true for any city that already struck a coin.
+    #[serde(default)] pub has_mint: bool,
     // ── DLC 4 · Good QUALITY (per producing settlement / estate / manufactory) ──
     /// Per-good production quality 0..1 at THIS hub (Coarse→Exquisite). Seeded so it
     /// varies by settlement; manufactures climb via learning-by-doing and can be
@@ -3036,10 +3052,12 @@ impl CampaignSim {
         // Normalizers across all council seats.
         let mut max_treasury = 1.0f32;
         let mut max_through = 1.0f32;
+        let mut max_pop = 1.0f32;
         for h in 0..n {
             if self.hubs[h].is_estate { continue; }
             max_treasury = max_treasury.max(self.hubs[h].treasury);
             max_through = max_through.max(self.hub_throughput(h));
+            max_pop = max_pop.max(self.hubs[h].population);
         }
         // Good indices for the monetary metals (computed once) → per-mint metal.
         let gi = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("gold"));
@@ -3051,8 +3069,29 @@ impl CampaignSim {
             if self.hubs[h].is_estate { continue; }
             let fineness = if self.hubs[h].mint_fineness <= 0.0 { 1.0 } else { self.hubs[h].mint_fineness };
             let council = self.hubs[h].council_house;
-            // A council seat with no coin yet starts minting one.
-            if council >= 0 && self.hubs[h].coin_name.is_empty() {
+            // v2.0 · MINT CHARTER — minting is a privilege. Grandfather any city that
+            // already struck a coin; otherwise a council seat earns the right of the
+            // mint only once it is a substantial commercial centre (busy AND large)
+            // and can pay to establish the mint-house.
+            if !self.hubs[h].has_mint {
+                if !self.hubs[h].coin_name.is_empty() {
+                    self.hubs[h].has_mint = true; // pre-existing coin keeps its mint
+                } else if council >= 0 {
+                    let busy = self.hub_throughput(h) >= MINT_CHARTER_THROUGH_FRAC * max_through;
+                    let big = self.hubs[h].population >= MINT_CHARTER_POP_FRAC * max_pop;
+                    if busy && big && self.hubs[h].treasury >= MINT_CHARTER_COST {
+                        self.hubs[h].treasury -= MINT_CHARTER_COST;
+                        self.hubs[h].has_mint = true;
+                        let city = self.hubs[h].name.clone();
+                        self.journal.push(JournalEntry {
+                            tick, kind: "charter".into(), hub: h as i32, good: -1, value: MINT_CHARTER_COST,
+                            text: format!("{} is granted the right of the mint and establishes a mint-house", city),
+                        });
+                    }
+                }
+            }
+            // A chartered council seat with no coin yet strikes its first.
+            if council >= 0 && self.hubs[h].has_mint && self.hubs[h].coin_name.is_empty() {
                 let denom = self.coin_denomination(h);
                 let city = self.hubs[h].name.clone();
                 self.hubs[h].coin_name = format!("{} of {}", denom, city);
@@ -7575,7 +7614,7 @@ impl CampaignSim {
             estate_kind: kind, estate_tier: 1, last_upgrade_tick: self.tick, owner_house, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0, has_mint: false,
             // DLC 4 · seed the new estate's quality (length ng) so it's graded from
             // day one — a manufactory (kind 6) starts as a humble workshop and learns.
             quality: { let mut q = vec![0.0f32; ng]; if g0 < ng { q[g0] = if kind == 6 { 0.34 } else { 0.46 }; } q },
@@ -8945,7 +8984,7 @@ impl CampaignSim {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0, has_mint: false,
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
@@ -9649,7 +9688,7 @@ impl CampaignSim {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0, has_mint: false,
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
             reserve_food: 30.0, reserve_cap: 365.0, supply_years: 0.0, colony_founded_tick: self.tick,
@@ -11889,7 +11928,7 @@ mod tests {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: 0, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0, has_mint: false,
             quality: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
@@ -12815,6 +12854,9 @@ mod tests {
                 h.dominant_seat = true;     // controls its seat → becomes the council
                 s.houses.push(h);
             }
+            // v2.0 · minting is now chartered (a paid privilege) — seed each seat a
+            // treasury it can draw on to establish its mint-house.
+            for hh in s.hubs.iter_mut() { hh.treasury = 200.0; }
             s.rebuild_routes();
             s
         };

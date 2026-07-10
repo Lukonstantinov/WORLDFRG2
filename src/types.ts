@@ -1251,6 +1251,7 @@ export interface MintBrief {
   // v2.0 monetary loop + reform
   price_level: number;   // local CPI index (1.0 = par)
   bullion: string;       // "ample" | "tight" | "scarce" — coin-supply limiting factor
+  has_mint: boolean;     // holds the right of the mint (charter)
   under_mandate: boolean; // honest-money mandate active (no debasement)
   reformed: boolean;      // has reformed its coinage at least once
 }
@@ -1263,6 +1264,31 @@ export interface MonetaryEvent {
   city: string;
   value: number;
   text: string;
+}
+
+/** v2.0 · one coin in a holder's currency reserves (a donut slice). */
+export interface ReserveSlice {
+  coin_name: string;
+  color: string;
+  metal: string;
+  share: number;    // 0..1
+  primary: boolean; // the holder's main/settlement coin
+  mint: boolean;    // the holder's own city mints this coin
+}
+
+/** v2.0 · one holder (city / bank / house) and its currency reserve composition. */
+export interface ReserveHolder {
+  kind: string;     // "city" | "bank" | "house"
+  name: string;
+  seat: string;     // home/seat city ("" for a city)
+  total: number;    // reserves/wealth (grain-eq)
+  slices: ReserveSlice[];
+}
+
+export interface ReservesPayload {
+  cities: ReserveHolder[];
+  banks: ReserveHolder[];
+  houses: ReserveHolder[];
 }
 
 /** One settlement's use of a coin — for the coin-usage overlay + per-coin chart. */
