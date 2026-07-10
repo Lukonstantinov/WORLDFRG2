@@ -1125,6 +1125,8 @@ pub struct CultureBrief {
     /// `kit` and `kit2` are its two parent kits so the figures blend both dresses.
     #[serde(default = "neg_one_i32c")] pub kit: i32,
     #[serde(default = "neg_one_i32c")] pub kit2: i32,
+    /// Goods this people PRIZES (cultural taste) — good-spec ids, for the panel.
+    #[serde(default)] pub desired_goods: Vec<String>,
 }
 fn neg_one_i32c() -> i32 { -1 }
 
@@ -1201,15 +1203,72 @@ pub fn campaign_get_cultures(db: State<'_, WorldDb>) -> Result<Vec<CultureBrief>
         let mut houses = houses_by.remove(&name).unwrap_or_default();
         houses.sort(); houses.dedup(); houses.truncate(8);
         let (family, origin, kit, kit2) = culture_lore(&sim, &name);
+        // Desired goods: this people's kit (plus a creole's second parent), deduped.
+        let mut desired_goods: Vec<String> = Vec::new();
+        for k in [kit, kit2] {
+            if k >= 0 {
+                for g in crate::sim::cultures::kit_desired_goods(k as usize) {
+                    if !desired_goods.iter().any(|x| x == g) { desired_goods.push((*g).to_string()); }
+                }
+            }
+        }
         CultureBrief {
             color: culture_color(&name),
             mobility: crate::sim::tick::CampaignSim::culture_mobility(&name),
             population: acc.pop as u32, towns: acc.towns, presence: acc.presence,
-            top_cities: top, houses, family, origin, kit, kit2, name,
+            top_cities: top, houses, family, origin, kit, kit2, desired_goods, name,
         }
     }).collect();
     out.sort_by(|a, b| b.population.cmp(&a.population));
     Ok(out)
+}
+
+/// A coarse "where this people lives" raster for the Peoples-panel mini-map — the same
+/// shape as the Goods Editor's suitability preview (`data` 0..255 + a `land` mask), so
+/// the UI draws it identically. Homeland territory (from the worldgen culture raster)
+/// is brightest; live cities where the people is present are lit too (majority brighter
+/// than a minority quarter), so migration/diaspora shows.
+#[derive(serde::Serialize)]
+pub struct CulturePresenceGrid { pub width: u32, pub height: u32, pub data: Vec<u8>, pub land: Vec<u8> }
+
+#[tauri::command]
+pub fn campaign_get_culture_presence(name: String, db: State<'_, WorldDb>) -> Result<CulturePresenceGrid, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::sim::cultures::ensure_active(&conn);
+    let map = match crate::sim::cultures::active() { Some(m) => m, None => return Ok(CulturePresenceGrid { width: 0, height: 0, data: vec![], land: vec![] }) };
+    let (cw, ch) = (map.cw, map.ch);
+    let n = (cw * ch) as usize;
+    let mut data = vec![0u8; n];
+    let mut land = vec![0u8; n];
+    // Homeland raster: this people's hearth cells brightest, other land dim.
+    let home = map.hearths.iter().position(|h| h.people == name);
+    for (ci, &id) in map.ids.iter().enumerate().take(n) {
+        if id != 255 { land[ci] = 1; data[ci] = 40; }
+        if let Some(hi) = home { if id as usize == hi { data[ci] = 255; } }
+    }
+    // Live spread: light up coarse cells around cities where the people lives now.
+    if let Some(sim) = get_sim(&db, &conn)? {
+        let (ww, wh) = (map.world_w.max(1) as f32, map.world_h.max(1) as f32);
+        let coarse = |x: f32, y: f32| -> usize {
+            let cx = ((x / ww * cw as f32) as u32).min(cw.saturating_sub(1));
+            let cy = ((y / wh * ch as f32) as u32).min(ch.saturating_sub(1));
+            (cy * cw + cx) as usize
+        };
+        for i in 0..sim.hubs.len() {
+            let h = &sim.hubs[i];
+            if h.is_estate || h.abandoned || h.population < 1.0 { continue; }
+            let ci = coarse(h.x, h.y);
+            if ci >= n { continue; }
+            if sim.hub_culture.get(i).map(|c| c == &name).unwrap_or(false) {
+                land[ci] = 1; data[ci] = 255;
+            } else if let Some(mins) = sim.hub_minorities.get(i) {
+                if let Some((_, s)) = mins.iter().find(|(c, _)| c == &name) {
+                    if *s >= 0.05 { land[ci] = 1; data[ci] = data[ci].max((120.0 + *s * 130.0).min(240.0) as u8); }
+                }
+            }
+        }
+    }
+    Ok(CulturePresenceGrid { width: cw, height: ch, data, land })
 }
 
 /// Per-hub share of ONE culture: `[x, y, share]` for every settlement where the

@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useUIStore } from "../state/uiStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useViewportStore } from "../state/viewportStore";
-import { campaignGetCultures } from "../bridge/tauri";
+import { campaignGetCultures, campaignGetCulturePresence } from "../bridge/tauri";
 import type { CultureBrief } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 import { CultureFigures } from "./CultureFigures";
+import { CoatOfArms, houseColor } from "./CoatOfArms";
+import { GOOD_DEFS } from "../goods";
 import { T, SERIF } from "./chronicleTheme";
+
+const GOOD_BY_NAME = new Map(GOOD_DEFS.map((g) => [g.name, g]));
 
 /** #1/#23 · The PEOPLES panel — the living cultures of the world. A two-pane census:
  *  every people (with its colour), its population, homelands and merchant houses;
@@ -125,6 +129,29 @@ export function PeoplesPanel() {
                   <Tile label="Mobility" value={`${Math.round(sel.mobility * 100)}%`} color={sel.mobility >= 0.7 ? "#e0b060" : T.inkMid} />
                 </div>
 
+                {/* Cultural taste — the goods this people prizes and its markets seek. */}
+                {(sel.desired_goods?.length ?? 0) > 0 && (
+                  <>
+                    <div style={sectionHdr}>Prizes &amp; seeks</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
+                      {sel.desired_goods!.map((g) => {
+                        const d = GOOD_BY_NAME.get(g);
+                        return (
+                          <span key={g} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11,
+                            color: T.inkMid, border: `1px solid ${T.lineSoft}`, background: T.card, borderRadius: 12, padding: "2px 8px" }}>
+                            <span>{d?.emoji ?? "•"}</span>{d?.label ?? g}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+
+                {/* Where they live — a mini world map (toggle), same look as the goods preview. */}
+                {sel.kit != null && sel.kit >= 0 && (
+                  <CulturePresence name={sel.name} color={sel.color} />
+                )}
+
                 <div style={sectionHdr}>Chief cities</div>
                 {sel.top_cities.length === 0 ? <div style={hint}>—</div> : sel.top_cities.map(([name, pop]) => (
                   <div key={name} onClick={() => { const h = snapshot?.hubs.find((x) => x.name === name); if (h) setSearchPin(h.x, h.y); }}
@@ -139,9 +166,13 @@ export function PeoplesPanel() {
                 {sel.houses.length === 0 ? (
                   <div style={hint}>No trading houses of this people (yet).</div>
                 ) : (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
                     {sel.houses.map((h) => (
-                      <span key={h} style={housePill}>{h}</span>
+                      <span key={h} style={{ ...housePill, display: "inline-flex", alignItems: "center", gap: 5, paddingLeft: 4 }}>
+                        <CoatOfArms name={h} size={16} />
+                        <span style={{ width: 8, height: 8, borderRadius: 2, background: houseColor(h), border: "1px solid rgba(0,0,0,0.35)" }} />
+                        {h}
+                      </span>
                     ))}
                   </div>
                 )}
@@ -156,6 +187,56 @@ export function PeoplesPanel() {
             )}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** A toggleable mini world-map of where a people lives — homeland territory brightest,
+ *  live cities lit too. Drawn exactly like the Goods Editor's suitability preview. */
+function CulturePresence({ name, color }: { name: string; color: [number, number, number] }) {
+  const [show, setShow] = useState(false);
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    if (!show) return;
+    let cancelled = false;
+    campaignGetCulturePresence(name).then((grid) => {
+      const cv = ref.current;
+      if (cancelled || !cv || grid.width === 0) return;
+      cv.width = grid.width; cv.height = grid.height;
+      const ctx = cv.getContext("2d"); if (!ctx) return;
+      const img = ctx.createImageData(grid.width, grid.height);
+      for (let p = 0; p < grid.data.length; p++) {
+        const v = grid.data[p] / 255;
+        const isLand = grid.land[p] === 1;
+        const o = p * 4;
+        const bR = isLand ? 26 : 8, bG = isLand ? 32 : 11, bB = isLand ? 42 : 16;
+        img.data[o] = Math.round(bR + color[0] * v);
+        img.data[o + 1] = Math.round(bG + color[1] * v);
+        img.data[o + 2] = Math.round(bB + color[2] * v);
+        img.data[o + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show, name]);
+  return (
+    <div style={{ marginBottom: 11 }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginBottom: 5,
+        color: T.inkDim, fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>
+        <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)}
+          style={{ accentColor: "#9b7ad0", width: 11, height: 11 }} />
+        Where they live
+      </label>
+      {show && (
+        <>
+          <canvas ref={ref} style={{ width: "100%", height: 118, imageRendering: "pixelated",
+            border: `1px solid ${T.lineSoft}`, borderRadius: 5, background: "#06090d", display: "block" }} />
+          <div style={{ color: T.inkFaint, fontSize: 9, marginTop: 3 }}>
+            Bright = homeland &amp; cities where this people lives · faint = other land.
+          </div>
+        </>
       )}
     </div>
   );

@@ -677,6 +677,11 @@ export async function campaignGetCultures(): Promise<CultureBrief[]> {
   return invoke("campaign_get_cultures");
 }
 
+/** Coarse "where this people lives" raster for the Peoples-panel mini-map. */
+export async function campaignGetCulturePresence(name: string): Promise<import("../types").CulturePresenceGrid> {
+  return invoke("campaign_get_culture_presence", { name });
+}
+
 /** #1/#23 · per-hub share `[x,y,share]` of ONE culture for the map overlay. */
 export async function campaignCultureHubs(name: string): Promise<[number, number, number][]> {
   return invoke("campaign_culture_hubs", { name });

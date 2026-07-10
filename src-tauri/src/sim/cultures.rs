@@ -160,7 +160,88 @@ pub const KITS: &[Kit] = &[
         family: &["Ashina","Oguz","Kipchak","Karluk","Pecheneg","Khazar","Uyghur","Bashkir","Kimek","Tatar","Bulgar","Seljuk","Qarluq","Toquz","Onoq","Turgesh","Qangli","Yagma","Qarakhanid","Avar","Cuman","Khalaj","Chigil","Yabaku","Basmyl","Sabir","Utigur","Kutrigur","Bayandur","Salur","Yiwa","Afshar","Begdili","Chepni"],
         guild: &["Orda","Kervan","Lonca","Esnaf","Ahi","Bazirgan","Tamga"],
         epithet: &["Ulug","Khan","the Wolf"] },
+    // ── Minor peoples (smaller, rarer hearths) ─────────────────────────────
+    // 12 Egyptian / Nilotic
+    Kit { name: "Nilotic", lang_family: "Nilotic", env: Env::Arid,
+        on: &["Was","Men","Aba","Per","Sais","Buto","Ineb","Kha","Ombos","Tani","Meru","Nekh","Djeba","Behdet","Iuny","Swen"],
+        mid: &["","a","e","en","er","et"],
+        end: &[" nefer","het","opolis","waset","meru","ankh","tep","hor","aset","ra","khet","tjenu"],
+        given: &["Amenhotep","Ramesu","Sneferu","Khufu","Thutmose","Djedefre","Setna","Merenptah","Nectanebo","Psamtik","Ankhef","Nebamun"],
+        family: &["Amunids","Ptahmoset","Setiu","Nubkha","Ramessids","Sematawy","Ahmoside","Khaemwaset","Panhesy","Userkaf","Meritamun","Djehutis","Bakenkhonsu","Nebseny","Paankh","Iryhor"],
+        guild: &["Per-hedj","Shena","Wabet","Kap","Hut-ka","Sesh","Menat"],
+        epithet: &["the Golden","Neb-Maat","of the Two Lands"] },
+    // 13 Amazigh / Berber
+    Kit { name: "Amazigh", lang_family: "Berber", env: Env::Arid,
+        on: &["Agad","Tam","Tin","Ida","Ait"," Imi","Tafr","Ghar","Ouar","Zag","Tazr","Amel","Ifr","Tigh","Assa","Wadn"],
+        mid: &["","a","i","ou","en","er"],
+        end: &["ir","zgou","ratin","mlal","nadn","ghir","zzou","went","sust","dagh","fella","runt"],
+        given: &["Massin","Yugurt","Aksil","Tacfin","Idir","Gaya","Firmus","Takfarinas","Amayas","Izem","Yidir","Massinissa"],
+        family: &["Zenata","Sanhaja","Masmuda","Nafusa","Kutama","Awraba","Miknasa","Houara","Luwata","Gomara","Barghawata","Iznagen","Ait-Atta","Iregwaten","Ihahan","Aitmzab"],
+        guild: &["Amur","Taddart","Agadir","Jmaa","Souk","Taqbilt","Amghar"],
+        epithet: &["Amenokal","the Free","of the Veil"] },
+    // 14 Yamato / Japonic
+    Kit { name: "Yamato", lang_family: "Japonic", env: Env::Maritime,
+        on: &["Yama","Kawa","Naga","Higa","Aki","Toyo","Iso","Miya","Kama","Owa","Shina","Kuni","Sato","Hira","Fuji","Naru"],
+        mid: &["","a","i","no","shi","ma"],
+        end: &["moto","gawa","saki","mura","oka","hara","tani","shima","dera","take","numa","bashi"],
+        given: &["Takeru","Hiro","Masashi","Yorito","Kaneie","Sadao","Munenori","Tadashi","Michizane","Yoritomo","Kagemasa","Toshiie"],
+        family: &["Fujiwara","Taira","Minamoto","Tachibana","Soga","Mononobe","Otomo","Abe","Hojo","Ashikaga","Hosokawa","Shimazu","Mori","Date","Uesugi","Takeda","Ii","Maeda"],
+        guild: &["Za","Kumi","Toiya","Nakama","Kabu","Machishu","Kaisho"],
+        epithet: &["no Kami","the Elder","Daimyo"] },
+    // 15 Mongol / steppe horde
+    Kit { name: "Mongol", lang_family: "Mongolic", env: Env::Cold,
+        on: &["Kara","Ordu","Erden","Tsag","Bur","Khal","Nai","Kere","Merk","Oira","Bar","Onon","Selen","Tuul","Khent","Altan"],
+        mid: &["","a","u","in","gh","an"],
+        end: &["baatar","gol","nuur","khan","balgas","tal","uul","sum","noor","tug","yin","dai"],
+        given: &["Temujin","Jochi","Chagatai","Ogedei","Subedei","Mukhali","Borte","Kublai","Tolui","Batu","Hulegu","Berke"],
+        family: &["Borjigin","Kereyid","Naiman","Merkid","Tatar","Oirat","Khongirad","Jalair","Barlas","Manghud","Uriankhai","Besud","Tayichiud","Khori","Buryat","Dorbet"],
+        guild: &["Ordu","Yam","Nokod","Kesig","Aimag","Khuraldai","Zud"],
+        epithet: &["Khan","the Great Khan","Bagatur"] },
+    // 16 Andean / Quechua
+    Kit { name: "Quechua", lang_family: "Quechuan", env: Env::Tropical,
+        on: &["Qusqu","Willka","Machu","Ollan","Sacsa","Pisaq","Cham","Wari","Tiwa","Cara","Chimu","Nazca","Apu","Inti","Puma","Yana"],
+        mid: &["","a","i","na","pa","ri"],
+        end: &["marca","pata","waman","tambo","huaca","raqay","cancha","pampa","yuq","llaqta","suyu","qucha"],
+        given: &["Pachacuti","Atawallpa","Huayna","Tupac","Manco","Sinchi","Yupanqui","Wiraqucha","Amaru","Inti","Rumi","Kusi"],
+        family: &["Inka","Chanka","Wanka","Chimu","Colla","Lupaca","Cañari","Chachapoya","Quilla","Ayarmaca","Wari","Tiwanaku","Moche","Nazca","Chincha","Yarovilca"],
+        guild: &["Ayllu","Mita","Qhapaq","Kuraka","Chaski","Tampu","Qollqa"],
+        epithet: &["Sapa","the Sun-Born","Qhapaq"] },
+    // 17 Mande / Sahel
+    Kit { name: "Mande", lang_family: "Mande", env: Env::Tropical,
+        on: &["Wag","Nia","Kang","Segu","Dje","Timbu","Kum","Bam","Tou","Sika","Kaya","Gao","Kong","Bou","Mopt","Djen"],
+        mid: &["","a","i","ou","an","ba"],
+        end: &["adou","koro","dougou","ni","bara","fara","mba","sso","nkan","biri","tigi","fing"],
+        given: &["Sundiata","Mansa","Sakura","Souleyman","Kankou","Fakoli","Tiramakan","Naré","Bakari","Kanku","Musa","Diata"],
+        family: &["Keita","Traore","Konate","Diarra","Cisse","Kouyate","Dembele","Sissoko","Koroma","Kamara","Diakite","Sanogo","Doumbia","Fofana","Diallo","Sacko"],
+        guild: &["Ton","Djeli","Marka","Wangara","Dyula","Kafu","Numu"],
+        epithet: &["Mansa","the Lion","Faama"] },
 ];
+
+/// Goods a people PRIZES (its cultural taste) — the luxuries/staples its markets seek.
+/// Names match the goods-spec ids so the UI can show the good's emoji. Indexed by kit.
+pub fn kit_desired_goods(kit: usize) -> &'static [&'static str] {
+    const D: [&[&str]; 18] = [
+        &["wine", "oliveoil", "wheat"],      // Roman
+        &["wine", "oliveoil", "pearls"],     // Hellene
+        &["dyes", "pearls", "gemstones"],    // Punic
+        &["spices", "silk", "gemstones"],    // Persian
+        &["furs", "amber", "whaling"],       // Norse
+        &["hides", "salt", "beer"],          // Celtic
+        &["frankincense", "incense", "coffee"], // Arab
+        &["spices", "cotton", "gemstones"],  // Indic
+        &["silk", "tea", "salt"],            // Sinitic
+        &["furs", "amber", "honey"],         // Slavic
+        &["cotton", "dyes", "gemstones"],    // Nahua
+        &["furs", "hides", "salt"],          // Turkic
+        &["wheat", "oliveoil", "incense"],   // Nilotic
+        &["salt", "dyes", "hides"],          // Amazigh
+        &["silk", "tea", "pearls"],          // Yamato
+        &["furs", "hides", "amber"],         // Mongol
+        &["cotton", "gemstones", "dyes"],    // Quechua
+        &["salt", "iron", "cotton"],         // Mande
+    ];
+    D.get(kit).copied().unwrap_or(&[])
+}
 
 /// Candidate kit indices for a hearth's environment (the kit's `env` matching the
 /// hearth cell biases selection; any kit can still appear via the hash tiebreak).

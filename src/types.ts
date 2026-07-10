@@ -275,9 +275,12 @@ export interface CultureBrief {
   houses: string[];
   family?: string;    // language family (Italic, Semitic, …) or "Creole (A · B)"
   origin?: string;    // static origin card (Cultures 2.0)
-  kit?: number;       // costume/appearance kit 0..11 (-1 unknown); for figure art
+  kit?: number;       // costume/appearance kit 0..17 (-1 unknown); for figure art
   kit2?: number;      // creole: second parent kit (blend), else -1
+  desired_goods?: string[]; // goods this people prizes (cultural taste)
 }
+/** Coarse "where a people lives" raster (Peoples-panel mini-map; mirrors the goods preview). */
+export interface CulturePresenceGrid { width: number; height: number; data: number[]; land: number[] }
 /** One backer of a colony venture (city / house / bank). */
 export interface ColonyBackerRow { kind: number; name: string; color: string; share: number }
 /** One civic supply contract feeding a colony. */
