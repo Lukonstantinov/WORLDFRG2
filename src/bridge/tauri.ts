@@ -621,7 +621,7 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 }
 
 // ── DLC 1 "Living Trade" tick simulation ──
-import type { CampaignSnapshot, JournalEntry, WorldEconomy, TradeBasin, EraFrame, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, MintBrief, MonetaryEvent, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow, PopBrief, EpidemicBrief, GuildBrief, FigureBrief, LandmarkBrief, DynastiesPayload, CultureBrief, SatelliteBrief, MigrationRouteBrief, ProvisioningBrief } from "../types";
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, TradeBasin, EraFrame, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, MintBrief, MonetaryEvent, ReservesPayload, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow, PopBrief, EpidemicBrief, GuildBrief, FigureBrief, LandmarkBrief, DynastiesPayload, CultureBrief, SatelliteBrief, MigrationRouteBrief, ProvisioningBrief } from "../types";
 
 /** Seed a fresh living-trade sim from the static economy snapshot (step 10). A RUNNING
  *  campaign is never restarted by this — it returns the current sim unchanged. */
@@ -772,6 +772,11 @@ export async function campaignGetMints(): Promise<MintBrief[]> {
 /** v2.0 · the monetary chronicle (mints, debasements, reforms, runs, crashes), newest first. */
 export async function campaignMonetaryChronicle(): Promise<MonetaryEvent[]> {
   return invoke("campaign_monetary_chronicle");
+}
+
+/** v2.0 · currency reserves per holder (cities / banks / houses) for the Reserves donuts. */
+export async function campaignReserves(): Promise<ReservesPayload> {
+  return invoke("campaign_reserves");
 }
 
 /** Per-city coin usage: which coin each settlement settles its trade in + volume —

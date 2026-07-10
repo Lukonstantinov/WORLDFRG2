@@ -1461,6 +1461,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 reform_until: 0,
                 coin_metal: 0,
                 mint_bullion_ratio: 1.0,
+                has_mint: false,
                 quality: Vec::new(),
                 stolen_good: -1,
                 stolen_from: -1,
@@ -4019,6 +4020,9 @@ pub struct MintBrief {
     /// Bullion capacity: "ample" | "tight" | "scarce" — how the region's gold/silver
     /// supply constrains minting (the coin-supply limiting factor).
     pub bullion: String,
+    /// v2.0 · holds the RIGHT OF THE MINT (a charter). A coinless council seat that
+    /// lacks this simply isn't a big enough commercial centre to coin yet.
+    pub has_mint: bool,
     /// Honest-money mandate currently in force (no debasement allowed).
     pub under_mandate: bool,
     /// This mint has reformed its coinage at least once.
@@ -4079,6 +4083,7 @@ pub fn campaign_get_mints(db: State<'_, WorldDb>) -> Result<Vec<MintBrief>, Stri
                     else if h.mint_bullion_ratio >= 1.0 { "ample".into() }
                     else if h.mint_bullion_ratio >= 0.5 { "tight".into() }
                     else { "scarce".into() },
+                has_mint: h.has_mint,
                 under_mandate: h.reform_until > sim.tick,
                 reformed: h.last_reform_tick != 0,
             }
@@ -4111,7 +4116,7 @@ pub fn campaign_monetary_chronicle(db: State<'_, WorldDb>) -> Result<Vec<Monetar
     use crate::sim::tick::TICKS_PER_YEAR;
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
-    const KINDS: [&str; 5] = ["coinage", "reform", "run", "bank", "crash"];
+    const KINDS: [&str; 6] = ["coinage", "charter", "reform", "run", "bank", "crash"];
     let mut out: Vec<MonetaryEvent> = sim.journal.iter()
         .filter(|e| KINDS.contains(&e.kind.as_str()))
         .map(|e| MonetaryEvent {
@@ -4183,6 +4188,124 @@ pub fn campaign_coin_usage(db: State<'_, WorldDb>) -> Result<Vec<CoinUseCity>, S
         }
     }
     Ok(out)
+}
+
+/// v2.0 · one coin in a holder's currency reserves (a donut slice).
+#[derive(Serialize, Clone)]
+pub struct ReserveSlice {
+    pub coin_name: String,
+    pub color: String,
+    pub metal: String,
+    pub share: f32,     // 0..1 of the holder's reserves
+    pub primary: bool,  // the holder's main/settlement coin
+    pub mint: bool,     // the holder's own city mints this coin
+}
+
+/// v2.0 · one holder (city / bank / house) and the currency composition of its
+/// reserves — the inward view (what coins it HOLDS), for the Reserves donuts.
+#[derive(Serialize, Clone)]
+pub struct ReserveHolder {
+    pub kind: String,   // "city" | "bank" | "house"
+    pub name: String,
+    pub seat: String,   // home/seat city ("" for a city holder)
+    pub total: f32,     // total reserves/wealth (grain-equivalent)
+    pub slices: Vec<ReserveSlice>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct ReservesPayload {
+    pub cities: Vec<ReserveHolder>,
+    pub banks: Vec<ReserveHolder>,
+    pub houses: Vec<ReserveHolder>,
+}
+
+/// v2.0 · currency reserves for every holder. Cities carry an explicit `coin_basket`;
+/// BANKS and HOUSES don't hold per-coin balances in the sim, so their composition is
+/// DERIVED at read time — a bank's specie is attributed across its seat + branch
+/// cities' baskets, a house's wealth across the baskets of its home hub + offices.
+/// (Pure presentation: the underlying wealth dynamics are untouched.)
+#[tauri::command]
+pub fn campaign_reserves(db: State<'_, WorldDb>) -> Result<ReservesPayload, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(ReservesPayload { cities: vec![], banks: vec![], houses: vec![] }) };
+    let n = sim.hubs.len();
+    let metal_name = |m: u8| match m { 1 => "gold", 2 => "electrum", 3 => "bronze", _ => "silver" }.to_string();
+    // Per-coin metadata (name/colour/metal) keyed by issuing-mint hub INDEX.
+    let coin_meta = |k: usize| -> Option<(String, String, String)> {
+        let h = sim.hubs.get(k)?;
+        if h.coin_name.is_empty() { return None; }
+        let color = if h.council_house >= 0 { distinct_color(h.council_house as usize) } else { distinct_color(k) };
+        Some((h.coin_name.clone(), color, metal_name(h.coin_metal)))
+    };
+    // Blend a set of (hub, weight) presences into a normalized coin→share basket.
+    let blend = |presence: &[(usize, f32)], main_hub: Option<usize>| -> Vec<ReserveSlice> {
+        let mut w: std::collections::HashMap<usize, f32> = std::collections::HashMap::new();
+        for &(hub, wt) in presence {
+            if hub >= n || wt <= 0.0 { continue; }
+            for &(k, share) in &sim.hubs[hub].coin_basket { *w.entry(k as usize).or_insert(0.0) += share * wt; }
+        }
+        let tot: f32 = w.values().sum::<f32>().max(1e-6);
+        let main_coin = main_hub.and_then(|h| sim.hubs.get(h)).map(|h| h.settle_coin).unwrap_or(-1);
+        let mut slices: Vec<ReserveSlice> = w.into_iter().filter_map(|(k, v)| {
+            let (coin_name, color, metal) = coin_meta(k)?;
+            Some(ReserveSlice {
+                coin_name, color, metal, share: v / tot,
+                primary: k as i32 == main_coin,
+                mint: main_hub == Some(k),
+            })
+        }).collect();
+        slices.sort_by(|a, b| b.share.partial_cmp(&a.share).unwrap_or(std::cmp::Ordering::Equal));
+        slices.truncate(6);
+        slices
+    };
+
+    // Cities — their explicit basket.
+    let mut cities: Vec<ReserveHolder> = Vec::new();
+    for (i, h) in sim.hubs.iter().enumerate() {
+        if h.is_estate || h.population < 1.0 || h.coin_basket.is_empty() { continue; }
+        let total = h.tw_house + h.tw_local + h.tw_guild;
+        let slices = blend(&[(i, 1.0)], Some(i));
+        if slices.is_empty() { continue; }
+        cities.push(ReserveHolder { kind: "city".into(), name: h.name.clone(), seat: String::new(), total, slices });
+    }
+    cities.sort_by(|a, b| b.total.partial_cmp(&a.total).unwrap_or(std::cmp::Ordering::Equal));
+    cities.truncate(40);
+
+    // Banks — specie attributed across seat (heavy) + branch cities' baskets.
+    let mut banks: Vec<ReserveHolder> = Vec::new();
+    for b in sim.banks.iter().filter(|b| !b.defunct) {
+        let seat = b.seat as usize;
+        let mut presence: Vec<(usize, f32)> = vec![(seat, 2.0)];
+        for &br in &b.branches { if br as usize != seat { presence.push((br as usize, 1.0)); } }
+        let slices = blend(&presence, Some(seat));
+        if slices.is_empty() { continue; }
+        banks.push(ReserveHolder {
+            kind: "bank".into(), name: b.name.clone(),
+            seat: sim.hubs.get(seat).map(|h| h.name.clone()).unwrap_or_default(),
+            total: b.reserves, slices,
+        });
+    }
+    banks.sort_by(|a, b| b.total.partial_cmp(&a.total).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Houses — wealth attributed across home hub (heavy) + offices + bailos.
+    let mut houses: Vec<ReserveHolder> = Vec::new();
+    for h in sim.houses.iter().filter(|h| !h.defunct && h.wealth > 1.0) {
+        let home = h.hub as usize;
+        let mut presence: Vec<(usize, f32)> = vec![(home, 2.0)];
+        for &o in &h.offices { if o as usize != home { presence.push((o as usize, 1.0)); } }
+        for &b in &h.bailos { if b as usize != home { presence.push((b as usize, 1.0)); } }
+        let slices = blend(&presence, Some(home));
+        if slices.is_empty() { continue; }
+        houses.push(ReserveHolder {
+            kind: "house".into(), name: h.name.clone(),
+            seat: sim.hubs.get(home).map(|x| x.name.clone()).unwrap_or_default(),
+            total: h.wealth, slices,
+        });
+    }
+    houses.sort_by(|a, b| b.total.partial_cmp(&a.total).unwrap_or(std::cmp::Ordering::Equal));
+    houses.truncate(40);
+
+    Ok(ReservesPayload { cities, banks, houses })
 }
 
 /// DLC 3.5 · one bank's balance sheet + reach, for the Coin & Credit panel.

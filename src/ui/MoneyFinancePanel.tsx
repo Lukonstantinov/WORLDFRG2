@@ -4,10 +4,11 @@ import { useUIStore } from "../state/uiStore";
 import {
   campaignGetMints, campaignGetBanks, campaignGetCrashes, campaignGetSchematics,
   campaignGetWars, campaignCoinUsage, campaignGetSpeculation, campaignMonetaryChronicle,
+  campaignReserves,
 } from "../bridge/tauri";
 import type {
   MintBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload,
-  HouseBrief, SpecCenter, MonetaryEvent,
+  HouseBrief, SpecCenter, MonetaryEvent, ReservesPayload, ReserveHolder,
 } from "../types";
 import { CoinIcon, type CoinMetal } from "./CoinIcon";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
@@ -36,6 +37,7 @@ export function MoneyFinancePanel() {
   const [coinUse, setCoinUse] = useState<CoinUseCity[]>([]);
   const [bubbles, setBubbles] = useState<SpecCenter[]>([]);
   const [chronicle, setChronicle] = useState<MonetaryEvent[]>([]);
+  const [reserves, setReserves] = useState<ReservesPayload>({ cities: [], banks: [], houses: [] });
 
   useEffect(() => {
     if (!open || !active) return;
@@ -47,6 +49,7 @@ export function MoneyFinancePanel() {
     campaignCoinUsage().then(setCoinUse).catch(() => setCoinUse([]));
     campaignGetSpeculation().then(setBubbles).catch(() => setBubbles([]));
     campaignMonetaryChronicle().then(setChronicle).catch(() => setChronicle([]));
+    campaignReserves().then(setReserves).catch(() => setReserves({ cities: [], banks: [], houses: [] }));
   }, [open, active, tick]);
   const coinOverlay = useUIStore((s) => s.coinOverlayHub);
   const setCoinOverlay = useUIStore((s) => s.setCoinOverlayHub);
@@ -106,7 +109,7 @@ export function MoneyFinancePanel() {
         </div>
       )}
 
-      {active && tab === "reserves" && <ReservesTab coinUse={coinUse} />}
+      {active && tab === "reserves" && <ReservesTab reserves={reserves} />}
 
       {active && tab === "banks" && (
         <div style={scroll}>
@@ -229,7 +232,11 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap }:
           </div>
         </div>
       ) : (
-        <div style={{ color: "#6a86a6", fontSize: 9.5, marginTop: 3, marginLeft: 22 }}>Mints no coin yet — a council seat awaiting its first striking.</div>
+        <div style={{ color: "#6a86a6", fontSize: 9.5, marginTop: 3, marginLeft: 22 }}>
+          {m.has_mint
+            ? "Holds the right of the mint — its first coin is struck at New Year."
+            : "No mint right — not yet a large enough commercial centre to be chartered a mint."}
+        </div>
       )}
 
       {/* CIVIC row — the polis behind the mint */}
@@ -284,7 +291,9 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap }:
             </>
           ) : (
             <div style={{ color: "#7e93ab" }}>
-              This council seat governs but mints no coin — its trade settles in neighbours' currency or by barter. It will strike its own coin once it seats a council at New Year.
+              {m.has_mint
+                ? "This council seat has just been granted the right of the mint (a charter) and will strike its own coin at New Year. Until then its trade settles in neighbours' currency."
+                : "Minting is a privilege of substantial commercial centres. This seat isn't busy or large enough to be chartered a mint yet, so its trade settles in neighbours' currency or by barter."}
             </div>
           )}
         </div>
@@ -374,46 +383,52 @@ function chipS(on: boolean): React.CSSProperties {
     border: `1px solid ${on ? "#3a80c0" : "#24364e"}`, background: on ? "#19324a" : "transparent", color: on ? "#cfe2f6" : "#7fa0c4" };
 }
 
-// ── Reserves (per-settlement currency composition) ───────────────────────────
-interface Slice { name: string; short: string; share: number; color: string; primary: boolean; mint: boolean }
-/** Group the coin-usage rows into each settlement's currency BASKET (what coins it
- *  holds in reserve, by share), sorted by the city's trade throughput. */
-function ReservesTab({ coinUse }: { coinUse: CoinUseCity[] }) {
-  const byCity = new Map<number, { name: string; vol: number; slices: Slice[] }>();
-  for (const u of coinUse) {
-    let e = byCity.get(u.city);
-    if (!e) { e = { name: u.name, vol: 0, slices: [] }; byCity.set(u.city, e); }
-    e.vol += u.volume;
-    e.slices.push({ name: u.coin_name, short: u.coin_name.split(" ")[0], share: u.share, color: u.color, primary: u.primary, mint: u.mint });
-  }
-  const cities = [...byCity.values()]
-    .map((c) => ({ ...c, slices: c.slices.sort((a, b) => b.share - a.share) }))
-    .sort((a, b) => b.vol - a.vol)
-    .slice(0, 40);
+// ── Reserves (currency composition per holder: cities / banks / houses) ───────
+const HOLDER_TABS = [
+  ["cities", "🏙 Settlements"], ["banks", "🏦 Banks"], ["houses", "⚜ Houses"],
+] as const;
+type HolderKind = typeof HOLDER_TABS[number][0];
+const HOLDER_BLURB: Record<HolderKind, string> = {
+  cities: "Each settlement's currency reserves — the coins it holds in its basket, by share. The primary (settlement) coin is ringed; ★ marks its own mint.",
+  banks: "Each bank's specie reserves, attributed across the coins of its seat and branch cities — so a bank with counting-houses in gold- and silver-coin cities holds both.",
+  houses: "Each house's fortune, spread over the coins of the markets where it is active (home city + trade offices) — its currency exposure.",
+};
+
+/** Currency-reserve donuts per holder, with a Settlements / Banks / Houses toggle.
+ *  Cities carry an explicit basket; banks & houses have their composition derived
+ *  from the markets they operate in (see campaign_reserves). */
+function ReservesTab({ reserves }: { reserves: ReservesPayload }) {
+  const [kind, setKind] = useState<HolderKind>("cities");
+  const list = kind === "cities" ? reserves.cities : kind === "banks" ? reserves.banks : reserves.houses;
   return (
     <div style={scroll}>
-      {cities.length === 0 && <div style={empty}>No coin in circulation yet — currency baskets form once councils mint and trade carries the coin.</div>}
-      {cities.length > 0 && (
-        <div style={hint}>
-          Each settlement's <b style={{ color: "#cbb88a" }}>currency reserves</b> — the mix of coins it actually holds,
-          as a share of its basket. The <b>primary</b> (settlement) coin is ringed; ★ marks its own mint.
-        </div>
-      )}
-      {cities.map((c, i) => <ReserveCard key={i} name={c.name} slices={c.slices} />)}
+      <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+        {HOLDER_TABS.map(([id, lbl]) => (
+          <span key={id} onClick={() => setKind(id)} style={chipS(kind === id)}>{lbl}</span>
+        ))}
+      </div>
+      <div style={hint}>{HOLDER_BLURB[kind]}</div>
+      {list.length === 0 && <div style={empty}>
+        {kind === "banks" ? "No banks yet — none hold currency reserves."
+          : kind === "houses" ? "No houses hold coined wealth yet."
+          : "No coin in circulation yet — currency baskets form once councils mint and trade carries the coin."}
+      </div>}
+      {list.map((h, i) => <ReserveCard key={i} h={h} />)}
     </div>
   );
 }
 
-function ReserveCard({ name, slices }: { name: string; slices: Slice[] }) {
-  const total = slices.reduce((s, x) => s + x.share, 0) || 1;
-  const primary = slices.find((s) => s.primary);
+function ReserveCard({ h }: { h: ReserveHolder }) {
+  const total = h.slices.reduce((s, x) => s + x.share, 0) || 1;
+  const primary = h.slices.find((s) => s.primary);
   const cx = 32, cy = 32, r = 28, ri = 16;
   let a0 = -Math.PI / 2;
+  const kindLabel = h.kind === "bank" ? "🏦" : h.kind === "house" ? "⚜" : "🏙";
   return (
     <div style={card}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <svg viewBox="0 0 64 64" width={56} height={56} style={{ flex: "0 0 auto" }}>
-          {slices.map((s, i) => {
+          {h.slices.map((s, i) => {
             const a1 = a0 + (s.share / total) * Math.PI * 2;
             const p = (ang: number, rad: number) => `${(cx + rad * Math.cos(ang)).toFixed(1)},${(cy + rad * Math.sin(ang)).toFixed(1)}`;
             const large = (s.share / total) > 0.5 ? 1 : 0;
@@ -424,15 +439,20 @@ function ReserveCard({ name, slices }: { name: string; slices: Slice[] }) {
         </svg>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-            <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12 }}>{name}</span>
-            {primary && <span style={{ color: "#9ab0c8", fontSize: 9 }}>settles in <b style={{ color: "#d8c878" }}>{primary.short}</b>{primary.mint ? " ★" : ""}</span>}
+            <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{kindLabel} {h.name}</span>
+            <span style={{ flex: 1 }} />
+            <span style={{ color: "#8aa8c8", fontSize: 9 }} title="Total reserves / wealth (grain-equivalent)">{fmtk(h.total)}</span>
+          </div>
+          <div style={{ color: "#7a90a8", fontSize: 8.5 }}>
+            {h.seat && <span>{h.seat} · </span>}
+            {primary ? <span>holds mainly <b style={{ color: "#d8c878" }}>{primary.coin_name.split(" ")[0]}</b>{primary.mint ? " ★" : ""}</span> : "barter / no coin"}
           </div>
           <div style={{ marginTop: 3 }}>
-            {slices.slice(0, 4).map((s, i) => (
+            {h.slices.slice(0, 4).map((s, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 9, padding: "0.5px 0" }}>
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, flex: "0 0 auto" }} />
                 <span style={{ flex: 1, color: s.primary ? "#cfe2f6" : "#9ab0c8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {s.short}{s.mint ? " ★" : ""}{s.primary ? " · primary" : s.share >= 0.2 ? " · reserve" : ""}
+                  {s.coin_name.split(" ")[0]}{s.mint ? " ★" : ""} <span style={{ color: METAL_COLOR[s.metal] ?? "#7a90a8" }}>◈</span>{s.primary ? " · primary" : s.share >= 0.2 ? " · reserve" : ""}
                 </span>
                 <span style={{ color: "#8aa8c8" }}>{Math.round((s.share / total) * 100)}%</span>
               </div>
@@ -476,8 +496,8 @@ function SpecCard({ c }: { c: SpecCenter }) {
 }
 
 // ── Shocks (wars + crashes + monetary chronicle, interleaved by year) ──────────
-const CHRON_ICON: Record<string, string> = { coinage: "🪙", reform: "⚖", run: "🏦", bank: "🏦", crash: "📉" };
-const CHRON_COLOR: Record<string, string> = { coinage: "#d8c878", reform: "#7fd0a0", run: "#e0a880", bank: "#8ab0d0", crash: "#e6303a" };
+const CHRON_ICON: Record<string, string> = { coinage: "🪙", charter: "⚒", reform: "⚖", run: "🏦", bank: "🏦", crash: "📉" };
+const CHRON_COLOR: Record<string, string> = { coinage: "#d8c878", charter: "#c0b088", reform: "#7fd0a0", run: "#e0a880", bank: "#8ab0d0", crash: "#e6303a" };
 function ShocksTab({ wars, crashes, chronicle }:
   { wars: WarsPayload; crashes: CrashRecord[]; chronicle: MonetaryEvent[] }) {
   const nothing = wars.active.length === 0 && wars.log.length === 0 && crashes.length === 0 && chronicle.length === 0;
