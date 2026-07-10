@@ -682,6 +682,11 @@ export async function campaignGetCulturePresence(name: string): Promise<import("
   return invoke("campaign_get_culture_presence", { name });
 }
 
+/** 6-monthly population series [year, population] for one people (line chart). */
+export async function campaignGetCultureHistory(name: string): Promise<[number, number][]> {
+  return invoke("campaign_get_culture_history", { name });
+}
+
 /** #1/#23 · per-hub share `[x,y,share]` of ONE culture for the map overlay. */
 export async function campaignCultureHubs(name: string): Promise<[number, number, number][]> {
   return invoke("campaign_culture_hubs", { name });

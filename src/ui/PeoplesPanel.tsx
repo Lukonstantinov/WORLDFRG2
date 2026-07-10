@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useUIStore } from "../state/uiStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useViewportStore } from "../state/viewportStore";
-import { campaignGetCultures, campaignGetCulturePresence } from "../bridge/tauri";
-import type { CultureBrief } from "../types";
+import { campaignGetCultures, campaignGetCulturePresence, campaignGetCultureHistory, campaignGetMigrationRoutes } from "../bridge/tauri";
+import type { CultureBrief, MigrationRouteBrief } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 import { CultureFigures } from "./CultureFigures";
 import { CoatOfArms, houseColor } from "./CoatOfArms";
@@ -152,6 +152,13 @@ export function PeoplesPanel() {
                   <CulturePresence name={sel.name} color={sel.color} />
                 )}
 
+                {/* Population over time — sampled every 6 months. */}
+                <CulturePopChart name={sel.name} color={sel.color} tick={snapshot?.clock?.tick ?? 0} />
+
+                {/* Migration — where this people is moving (from the live migration flows). */}
+                <CultureMigration name={sel.name} color={sel.color}
+                  hubs={snapshot?.hubs ?? []} tick={snapshot?.clock?.tick ?? 0} />
+
                 <div style={sectionHdr}>Chief cities</div>
                 {sel.top_cities.length === 0 ? <div style={hint}>—</div> : sel.top_cities.map(([name, pop]) => (
                   <div key={name} onClick={() => { const h = snapshot?.hubs.find((x) => x.name === name); if (h) setSearchPin(h.x, h.y); }}
@@ -236,6 +243,89 @@ function CulturePresence({ name, color }: { name: string; color: [number, number
           <div style={{ color: T.inkFaint, fontSize: 9, marginTop: 3 }}>
             Bright = homeland &amp; cities where this people lives · faint = other land.
           </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function fmtK(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  if (n >= 1_000) return Math.round(n / 1_000) + "k";
+  return String(Math.round(n));
+}
+
+/** Population of one people over time — a line chart sampled every 6 months. */
+function CulturePopChart({ name, color, tick }: { name: string; color: [number, number, number]; tick: number }) {
+  const [pts, setPts] = useState<[number, number][]>([]);
+  useEffect(() => {
+    let ok = true;
+    campaignGetCultureHistory(name).then((r) => { if (ok) setPts(r); }).catch(() => {});
+    return () => { ok = false; };
+  }, [name, tick]);
+  if (pts.length < 2) return null;
+  const w = 260, h = 82, pad = 4;
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const y1 = Math.max(...ys, 1);
+  const sx = (x: number) => pad + (x1 > x0 ? (x - x0) / (x1 - x0) : 0) * (w - 2 * pad);
+  const sy = (y: number) => (h - pad) - (y / y1) * (h - 2 * pad);
+  const rgb = `rgb(${color[0]},${color[1]},${color[2]})`;
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${sx(p[0]).toFixed(1)} ${sy(p[1]).toFixed(1)}`).join(" ");
+  const area = `${line} L${sx(x1).toFixed(1)} ${h - pad} L${sx(x0).toFixed(1)} ${h - pad} Z`;
+  const now = pts[pts.length - 1][1];
+  return (
+    <div style={{ marginBottom: 11 }}>
+      <div style={{ ...sectionHdr, display: "flex", justifyContent: "space-between" }}>
+        <span>Population over time</span>
+        <span style={{ color: rgb, fontWeight: 700 }}>{fmtK(now)}</span>
+      </div>
+      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: 82, display: "block" }}>
+        <path d={area} fill={rgb} opacity={0.14} />
+        <path d={line} fill="none" stroke={rgb} strokeWidth={1.6} />
+        <circle cx={sx(x1)} cy={sy(now)} r={2.4} fill={rgb} />
+        <text x={pad} y={h - 1} fill={T.inkFaint} fontSize={7}>Yr {Math.round(x0)}</text>
+        <text x={w - pad} y={h - 1} fill={T.inkFaint} fontSize={7} textAnchor="end">Yr {Math.round(x1)}</text>
+        <text x={pad} y={9} fill={T.inkFaint} fontSize={7}>{fmtK(y1)}</text>
+      </svg>
+      <div style={{ color: T.inkFaint, fontSize: 9, marginTop: 1 }}>Sampled every 6 months.</div>
+    </div>
+  );
+}
+
+/** Migration — where this people is moving now, aggregated from live migration flows. */
+function CultureMigration({ name, color, hubs, tick }: {
+  name: string; color: [number, number, number]; hubs: { id: number; name: string }[]; tick: number;
+}) {
+  const [routes, setRoutes] = useState<MigrationRouteBrief[]>([]);
+  useEffect(() => {
+    let ok = true;
+    campaignGetMigrationRoutes().then((r) => { if (ok) setRoutes(r); }).catch(() => {});
+    return () => { ok = false; };
+  }, [tick]);
+  const dests = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const r of routes) if (r.culture === name && r.to_hub >= 0) m.set(r.to_hub, (m.get(r.to_hub) ?? 0) + r.volume);
+    return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  }, [routes, name]);
+  const total = dests.reduce((s, [, v]) => s + v, 0);
+  const rgb = `rgb(${color[0]},${color[1]},${color[2]})`;
+  const nameOf = (i: number) => hubs[i]?.name ?? `#${i}`;
+  return (
+    <div style={{ marginBottom: 11 }}>
+      <div style={sectionHdr}>Where they move</div>
+      {dests.length === 0 ? (
+        <div style={{ color: T.inkFaint, fontSize: 10 }}>No recent migration of this people.</div>
+      ) : (
+        <>
+          <div style={{ fontSize: 10, color: T.inkDim, marginBottom: 3 }}>{fmtK(total)} recently on the move →</div>
+          {dests.map(([hub, vol]) => (
+            <div key={hub} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, padding: "2px 2px" }}>
+              <span style={{ width: 6, height: 6, borderRadius: 3, background: rgb, flex: "0 0 auto" }} />
+              <span style={{ flex: 1, color: T.inkMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nameOf(hub)}</span>
+              <span style={{ color: rgb }}>{fmtK(vol)}</span>
+            </div>
+          ))}
         </>
       )}
     </div>

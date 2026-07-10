@@ -1286,6 +1286,18 @@ pub fn campaign_get_culture_presence(name: String, db: State<'_, WorldDb>) -> Re
     Ok(CulturePresenceGrid { width: cw, height: ch, data, land })
 }
 
+/// The 6-monthly population series for one people (for the Peoples-panel line chart).
+/// Returns `[year, population]` points in time order.
+#[tauri::command]
+pub fn campaign_get_culture_history(name: String, db: State<'_, WorldDb>) -> Result<Vec<[f32; 2]>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    Ok(sim.culture_history.iter().map(|s| {
+        let p = s.pops.iter().find(|(c, _)| c == &name).map(|(_, p)| *p).unwrap_or(0.0);
+        [s.t, p]
+    }).collect())
+}
+
 /// Per-hub share of ONE culture: `[x, y, share]` for every settlement where the
 /// people is present (≥ 5%). Drives the map's culture-share overlay.
 #[tauri::command]
@@ -1870,6 +1882,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         migrations: vec![],
         migration_routes: vec![],
         creoles: vec![],
+        culture_history: vec![],
         council_bought_month: vec![],
         good_flow_accum: vec![],
         hub_good_trade: vec![],

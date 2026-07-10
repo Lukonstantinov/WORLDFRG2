@@ -1821,6 +1821,14 @@ pub struct Creole {
     #[serde(default)] pub kit_b: u8,
 }
 
+/// Cultures 2.0 · a 6-monthly snapshot of every living people's total population, for
+/// the Peoples-panel population line chart. `t` is the sample time in YEARS (fractional).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CultureHistSample {
+    pub t: f32,
+    pub pops: Vec<(String, f32)>,
+}
+
 /// Batch 1 · one row of the ERA-SCRUBBER ring: the world as it stood at the end
 /// of `year`. Vectors are hub-indexed at snapshot time — hub indices are stable
 /// (hubs are never removed), so later-founded hubs simply aren't in older rows.
@@ -2501,6 +2509,9 @@ pub struct CampaignSim {
     /// `#[serde(default)]` → old saves load with none.
     #[serde(default)]
     pub creoles: Vec<Creole>,
+    /// Cultures 2.0 · 6-monthly per-people population samples (capped) for the line chart.
+    #[serde(default)]
+    pub culture_history: Vec<CultureHistSample>,
     /// Consecutive UNPROFITABLE years per MANUFACTORY (hub-indexed). A works idle
     /// for 4 years is shut down + partly sold back to its owner. serde-default.
     #[serde(default)]
@@ -7413,6 +7424,10 @@ impl CampaignSim {
         // (population expansion) that can grow into a city of its own. The age of
         // colonisation only opens once the world has matured — from YEAR 50 onward,
         // and only when the wealth/population/site conditions are actually met.
+        // Cultures 2.0 · sample every people's population twice a year for the line chart.
+        if self.tick % (TICKS_PER_YEAR / 2) == 0 {
+            self.sample_culture_history();
+        }
         if self.tick % 365 == 0 {
             // Yearly social mobility: strata shift with prosperity / hardship.
             self.update_society();
@@ -8543,6 +8558,36 @@ impl CampaignSim {
             let p = self.hinterland[ti].parent_hub;
             if p < 0 || (p as usize) >= n { continue; }
             self.hubs[p as usize].civic_pool += self.hinterland[ti].population * HINTERLAND_TOLL;
+        }
+    }
+
+    /// Cultures 2.0 · snapshot every living people's total population (majority share +
+    /// minority quarters) for the population line chart. Called twice a year; capped.
+    fn sample_culture_history(&mut self) {
+        use std::collections::HashMap;
+        self.ensure_hub_cultures(); // self-heal so the very first sample has cultures
+        let mut pops: HashMap<String, f32> = HashMap::new();
+        for i in 0..self.hubs.len() {
+            let h = &self.hubs[i];
+            if h.is_estate || h.abandoned || h.population < 1.0 { continue; }
+            let pop = h.population.max(0.0);
+            let minsum: f32 = self.hub_minorities.get(i).map(|m| m.iter().map(|(_, s)| *s).sum()).unwrap_or(0.0);
+            if let Some(maj) = self.hub_culture.get(i) {
+                if !maj.is_empty() && maj != "—" {
+                    *pops.entry(maj.clone()).or_insert(0.0) += pop * (1.0 - minsum).clamp(0.0, 1.0);
+                }
+            }
+            if let Some(mins) = self.hub_minorities.get(i) {
+                for (c, s) in mins { if *s > 0.005 { *pops.entry(c.clone()).or_insert(0.0) += pop * *s; } }
+            }
+        }
+        let t = self.tick as f32 / TICKS_PER_YEAR as f32;
+        let mut entries: Vec<(String, f32)> = pops.into_iter().filter(|(_, p)| *p >= 1.0).collect();
+        entries.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        self.culture_history.push(CultureHistSample { t, pops: entries });
+        if self.culture_history.len() > 220 {
+            let d = self.culture_history.len() - 220;
+            self.culture_history.drain(0..d);
         }
     }
 
@@ -11959,7 +12004,7 @@ mod tests {
             last_month_pop: 0.0, last_month_index: 0.0, seed_house_count: 0,
             fleets_migrated: true, tech_factor: 1.0, percap_migrated: true, society_migrated: false,
             house_ledger: Vec::new(), house_ledger_prev: Vec::new(), house_barred: Vec::new(),
-            colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], council_bought_month: vec![], hub_patron: vec![], colony_supply: vec![],
+            colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], culture_history: vec![], council_bought_month: vec![], hub_patron: vec![], colony_supply: vec![],
             hub_culture: vec![], hub_minorities: vec![], estate_idle_years: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
             recent_trades: vec![],
