@@ -1455,6 +1455,12 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 settle_coin: -1,
                 coin_basket: Vec::new(),
                 mint_fineness_prev: 0.0,
+                price_level: 1.0,
+                coin_circ_prev: 0.0,
+                last_reform_tick: 0,
+                reform_until: 0,
+                coin_metal: 0,
+                mint_bullion_ratio: 1.0,
                 quality: Vec::new(),
                 stolen_good: -1,
                 stolen_from: -1,
@@ -3974,6 +3980,153 @@ pub fn campaign_get_currencies(db: State<'_, WorldDb>) -> Result<Vec<CurrencyBri
     Ok(out)
 }
 
+/// v2.0 · one MINT/polis in the unified "Coin & Mints" view — the polis (treasury,
+/// tariffs, council, war) AND its coin (strength, drivers, reach, price level)
+/// fused into a single card, replacing the old split Poleis + Currencies tabs.
+#[derive(Serialize, Clone)]
+pub struct MintBrief {
+    pub hub: u32,
+    pub city: String,
+    pub x: f32,
+    pub y: f32,
+    pub population: u32,
+    // ── civic (the polis behind the mint) ──
+    pub treasury: f32,
+    pub tariff_export: f32,
+    pub tariff_import: f32,
+    pub council: String,
+    pub council_archetype: String,
+    pub council_color: String,
+    pub war_with: String,
+    // ── the coin ("" coin_name = this polis mints none) ──
+    pub coin_name: String,
+    pub issuer: String,
+    /// The metal it is struck in: "gold" | "silver" | "electrum" | "bronze".
+    pub metal: String,
+    pub trust: f32,
+    pub fineness: f32,
+    pub value: f32,
+    /// Single headline 0..100 (fineness × acceptance) — the number the card leads with.
+    pub strength: f32,
+    pub throughput: f32,
+    pub is_reserve: bool,
+    pub circulating: f32,
+    pub held_in: u32,
+    pub abroad: u32,
+    // ── v2.0 monetary loop + reform ──
+    /// Local price-level index (1.0 = par at start). Rises with debasement/money growth.
+    pub price_level: f32,
+    /// Bullion capacity: "ample" | "tight" | "scarce" — how the region's gold/silver
+    /// supply constrains minting (the coin-supply limiting factor).
+    pub bullion: String,
+    /// Honest-money mandate currently in force (no debasement allowed).
+    pub under_mandate: bool,
+    /// This mint has reformed its coinage at least once.
+    pub reformed: bool,
+}
+
+/// v2.0 · every polis (council seat) as a unified mint card, ranked by coin
+/// strength then treasury. Coinless poleis are included (empty `coin_name`).
+#[tauri::command]
+pub fn campaign_get_mints(db: State<'_, WorldDb>) -> Result<Vec<MintBrief>, String> {
+    use crate::sim::tick::{archetype_label, coin_value, coin_strength};
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let n = sim.hubs.len();
+    // Circulating supply + holder/abroad counts per coin (by mint hub INDEX).
+    let mut circ: std::collections::HashMap<usize, (f32, u32, u32)> = std::collections::HashMap::new();
+    for (hi, h) in sim.hubs.iter().enumerate() {
+        if h.is_estate { continue; }
+        let thru = h.tw_house + h.tw_local + h.tw_guild;
+        for &(k, share) in &h.coin_basket {
+            let e = circ.entry(k as usize).or_insert((0.0, 0, 0));
+            e.0 += thru * share; e.1 += 1;
+            if k as usize != hi { e.2 += 1; }
+        }
+    }
+    let mut out: Vec<MintBrief> = sim.hubs.iter().enumerate()
+        .filter(|(_, h)| !h.is_estate && h.population >= 1.0 && h.council_house >= 0)
+        .map(|(i, h)| {
+            let ci = h.council_house;
+            let (council, arch, color) = if ci >= 0 {
+                if let Some(house) = sim.houses.get(ci as usize) {
+                    (house.name.clone(), archetype_label(house.archetype).to_string(), distinct_color(ci as usize))
+                } else { ("—".into(), String::new(), "#7a8aa0".into()) }
+            } else { ("—".into(), String::new(), "#7a8aa0".into()) };
+            let war_with = if h.war_with >= 0 {
+                sim.hubs.get(h.war_with as usize).map(|x| x.name.clone()).unwrap_or_default()
+            } else { String::new() };
+            let fineness = if h.mint_fineness <= 0.0 { 1.0 } else { h.mint_fineness };
+            let throughput = h.tw_house + h.tw_local + h.tw_guild;
+            let (circulating, held_in, abroad) = circ.get(&i).copied().unwrap_or((0.0, 0, 0));
+            let has_coin = !h.coin_name.is_empty();
+            MintBrief {
+                hub: h.id, city: h.name.clone(), x: h.x, y: h.y, population: h.population as u32,
+                treasury: h.treasury, tariff_export: h.tariff_export, tariff_import: h.tariff_import,
+                council, council_archetype: arch, council_color: color, war_with,
+                coin_name: h.coin_name.clone(),
+                issuer: if ci >= 0 { sim.houses.get(ci as usize).map(|x| x.name.clone()).unwrap_or_default() } else { String::new() },
+                metal: match h.coin_metal { 1 => "gold", 2 => "electrum", 3 => "bronze", _ => "silver" }.to_string(),
+                trust: h.coin_trust,
+                fineness,
+                value: if has_coin { coin_value(h.mint_fineness, h.coin_trust) } else { 0.0 },
+                strength: if has_coin { coin_strength(fineness, h.coin_trust) } else { 0.0 },
+                throughput,
+                is_reserve: has_coin && h.coin_trust >= 0.55,
+                circulating, held_in, abroad,
+                price_level: if h.price_level <= 0.0 { 1.0 } else { h.price_level },
+                bullion: if !has_coin { String::new() }
+                    else if h.mint_bullion_ratio >= 1.0 { "ample".into() }
+                    else if h.mint_bullion_ratio >= 0.5 { "tight".into() }
+                    else { "scarce".into() },
+                under_mandate: h.reform_until > sim.tick,
+                reformed: h.last_reform_tick != 0,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        let sa = if a.coin_name.is_empty() { -1.0 } else { a.strength };
+        let sb = if b.coin_name.is_empty() { -1.0 } else { b.strength };
+        sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+            .then(b.treasury.partial_cmp(&a.treasury).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    Ok(out)
+}
+
+/// v2.0 · one entry in the MONETARY CHRONICLE — the dated story of money (mints,
+/// debasements, reforms, bank foundings, runs, crashes) for the Shocks timeline.
+#[derive(Serialize, Clone)]
+pub struct MonetaryEvent {
+    pub year: u32,
+    pub tick: u32,
+    pub kind: String,   // coinage | reform | run | bank | crash
+    pub city: String,   // resolved hub name ("" = world)
+    pub value: f32,
+    pub text: String,
+}
+
+/// v2.0 · the monetary chronicle: journal rows about money & credit, newest first.
+#[tauri::command]
+pub fn campaign_monetary_chronicle(db: State<'_, WorldDb>) -> Result<Vec<MonetaryEvent>, String> {
+    use crate::sim::tick::TICKS_PER_YEAR;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    const KINDS: [&str; 5] = ["coinage", "reform", "run", "bank", "crash"];
+    let mut out: Vec<MonetaryEvent> = sim.journal.iter()
+        .filter(|e| KINDS.contains(&e.kind.as_str()))
+        .map(|e| MonetaryEvent {
+            year: e.tick / TICKS_PER_YEAR,
+            tick: e.tick,
+            kind: e.kind.clone(),
+            city: if e.hub >= 0 { sim.hubs.get(e.hub as usize).map(|h| h.name.clone()).unwrap_or_default() } else { String::new() },
+            value: e.value,
+            text: e.text.clone(),
+        })
+        .collect();
+    out.reverse(); // newest first
+    Ok(out)
+}
+
 /// One city's USE of a coin (for the coin-usage overlay + per-coin breakdown chart).
 #[derive(Serialize)]
 pub struct CoinUseCity {
@@ -3984,8 +4137,11 @@ pub struct CoinUseCity {
     pub x: f32,
     pub y: f32,
     pub volume: f32,         // trade throughput settled in this coin at this city
+    pub share: f32,          // this coin's share of the city's currency basket 0..1
     pub mint: bool,          // this city is the coin's own mint
-    pub reserve_reach: bool, // a foreign reserve coin circulating here
+    pub primary: bool,       // this coin is the city's MAIN settlement currency (settle_coin)
+    pub reserve_reach: bool, // a foreign reserve coin circulating here (held, not primary)
+    pub color: String,       // stable per-coin colour (its council's arms) for the dominance map
 }
 
 /// Per-city coin usage: which coin each settlement settles its trade in + the
@@ -4007,6 +4163,10 @@ pub fn campaign_coin_usage(db: State<'_, WorldDb>) -> Result<Vec<CoinUseCity>, S
             let Some(coin_hub) = sim.hubs.get(j) else { continue };
             if coin_hub.coin_name.is_empty() { continue; }
             let mint = j == i;
+            let primary = h.settle_coin == j as i32;
+            let color = if coin_hub.council_house >= 0 {
+                distinct_color(coin_hub.council_house as usize)
+            } else { distinct_color(j) };
             out.push(CoinUseCity {
                 coin: coin_hub.id,
                 coin_name: coin_hub.coin_name.clone(),
@@ -4014,8 +4174,11 @@ pub fn campaign_coin_usage(db: State<'_, WorldDb>) -> Result<Vec<CoinUseCity>, S
                 name: h.name.clone(),
                 x: h.x, y: h.y,
                 volume: thru * share,
+                share,
                 mint,
-                reserve_reach: !mint && coin_hub.coin_trust >= 0.55,
+                primary,
+                reserve_reach: !primary && coin_hub.coin_trust >= 0.55,
+                color,
             });
         }
     }
@@ -4549,6 +4712,8 @@ pub struct CitySchematic {
     pub population: u32,
     pub coin_name: String,
     pub coin_trust: f32,
+    /// Metal the city's coin is struck in ("gold" | "silver" | "electrum" | "bronze").
+    pub coin_metal: String,
     pub council: String,
     pub buildings: Vec<SchematicBuilding>,
     pub estates: Vec<SchematicEstate>,
@@ -4602,6 +4767,7 @@ pub fn campaign_get_schematics(db: State<'_, WorldDb>) -> Result<Vec<CitySchemat
             hub: h.id, name: h.name.clone(), x: h.x, y: h.y,
             population: h.population as u32,
             coin_name: h.coin_name.clone(), coin_trust: h.coin_trust,
+            coin_metal: match h.coin_metal { 1 => "gold", 2 => "electrum", 3 => "bronze", _ => "silver" }.to_string(),
             council, buildings, estates, banks_seated, bank_branches,
         });
     }

@@ -1204,6 +1204,53 @@ export interface CurrencyBrief {
   held_in: number;      // how many settlements hold this coin
 }
 
+/** v2.0 · a MINT/polis fused into one card for the unified "Coin & Mints" tab —
+ *  the civic polis (treasury, tariffs, council, war) plus its coin. `coin_name`
+ *  empty = a council seat that mints no coin yet. */
+export interface MintBrief {
+  hub: number;
+  city: string;
+  x: number;
+  y: number;
+  population: number;
+  // civic
+  treasury: number;
+  tariff_export: number;
+  tariff_import: number;
+  council: string;
+  council_archetype: string;
+  council_color: string;
+  war_with: string;
+  // coin
+  coin_name: string;
+  issuer: string;
+  metal: string;         // "gold" | "silver" | "electrum" | "bronze"
+  trust: number;
+  fineness: number;
+  value: number;
+  strength: number;      // headline 0..100 (fineness × acceptance)
+  throughput: number;
+  is_reserve: boolean;
+  circulating: number;
+  held_in: number;
+  abroad: number;        // holders outside the home market
+  // v2.0 monetary loop + reform
+  price_level: number;   // local CPI index (1.0 = par)
+  bullion: string;       // "ample" | "tight" | "scarce" — coin-supply limiting factor
+  under_mandate: boolean; // honest-money mandate active (no debasement)
+  reformed: boolean;      // has reformed its coinage at least once
+}
+
+/** v2.0 · one dated entry in the monetary chronicle (Shocks timeline). */
+export interface MonetaryEvent {
+  year: number;
+  tick: number;
+  kind: string;   // coinage | reform | run | bank | crash
+  city: string;
+  value: number;
+  text: string;
+}
+
 /** One settlement's use of a coin — for the coin-usage overlay + per-coin chart. */
 export interface CoinUseCity {
   coin: number;          // issuing-mint hub id (which coin this city settles in)
@@ -1213,8 +1260,11 @@ export interface CoinUseCity {
   x: number;
   y: number;
   volume: number;        // trade settled in this coin at this city
+  share: number;         // this coin's share of the city's basket 0..1
   mint: boolean;         // this city is the coin's own mint
-  reserve_reach: boolean; // a foreign reserve coin circulating here
+  primary: boolean;      // this coin is the city's MAIN settlement currency
+  reserve_reach: boolean; // a foreign reserve coin circulating here (held, not primary)
+  color: string;         // stable per-coin colour (its council's arms)
 }
 
 /** One bank's balance sheet + reach. */
@@ -1468,6 +1518,7 @@ export interface CitySchematic {
   population: number;
   coin_name: string;
   coin_trust: number;
+  coin_metal: string;   // "gold" | "silver" | "electrum" | "bronze"
   council: string;
   buildings: SchematicBuilding[];
   estates: SchematicEstate[];

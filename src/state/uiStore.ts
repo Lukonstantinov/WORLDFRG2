@@ -117,10 +117,8 @@ interface UIStore {
   /** Merchant-houses panel open. */
   showHouses: boolean;
   showCityRanking: boolean;
-  /** DLC 3 · the Speculation & Poleis (finance) panel open. */
-  showSpeculation: boolean;
-  /** DLC 3.5 · the Coin & Credit (currencies / banks / crashes / schematics) panel. */
-  showCoinCredit: boolean;
+  /** v2.0 · the unified Money & Finance panel (mints · banks · bubbles · shocks · schematics). */
+  showMoneyFinance: boolean;
   /** #23 · Itinerary / travel-time panel open. */
   showItinerary: boolean;
   /** Atlas 2.0 · the World Atlas (world graphs / city census / timeline) panel. */
@@ -238,7 +236,6 @@ interface UIStore {
   setGoodDetail: (id: string | null) => void;
   setShowHouses: (v: boolean) => void;
   setShowCityRanking: (v: boolean) => void;
-  setShowSpeculation: (v: boolean) => void;
   setShowItinerary: (v: boolean) => void;
   setShowAtlas: (v: boolean) => void;
   setShowPeoples: (v: boolean) => void;
@@ -256,7 +253,7 @@ interface UIStore {
   setRiverHighlightColors: (c: Record<number, string> | null) => void;
   setLakeHighlight: (idx: number | null) => void;
   setCodexGood: (g: string | null) => void;
-  setShowCoinCredit: (v: boolean) => void;
+  setShowMoneyFinance: (v: boolean) => void;
   setShowColonial: (v: boolean) => void;
   setShowBank: (v: boolean) => void;
   setSelectedBankIdx: (i: number | null) => void;
@@ -311,7 +308,7 @@ export const useUIStore = create<UIStore>((set) => ({
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
-    speculation: false,
+    speculation: false, coinDominance: false,
     houseControl: false, merchantRoutes: false, futures: false, dynamicFlow: false, tradeHeat: false,
     tradeBasins: false, migrations: true,
     colonies: true,
@@ -348,8 +345,7 @@ export const useUIStore = create<UIStore>((set) => ({
   goodDetailId: null,
   showHouses: false,
   showCityRanking: false,
-  showSpeculation: false,
-  showCoinCredit: false,
+  showMoneyFinance: false,
   showItinerary: false,
   showAtlas: false,
   showPeoples: false,
@@ -466,8 +462,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setGoodDetail: (id) => set({ goodDetailId: id }),
   setShowHouses: (v) => set({ showHouses: v }),
   setShowCityRanking: (v) => set({ showCityRanking: v }),
-  setShowSpeculation: (v) => set({ showSpeculation: v }),
-  setShowCoinCredit: (v) => set({ showCoinCredit: v }),
+  setShowMoneyFinance: (v) => set({ showMoneyFinance: v }),
   setShowItinerary: (v) => set({ showItinerary: v }),
   setShowAtlas: (v) => set({ showAtlas: v }),
   setShowPeoples: (v) => set({ showPeoples: v }),

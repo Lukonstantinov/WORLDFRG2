@@ -759,9 +759,6 @@ const ESTATE_TAX_RATE: f32 = 0.10;
 /// flows to the people via the civic pool, as before). Gives cities real capital
 /// to field wars and public works.
 const TREASURY_TAX_SHARE: f32 = 0.35;
-/// Yearly inflation — coin debasement + rising prices steadily eat the real value
-/// of a hoarded fortune (applied once a year to every house's wealth).
-const INFLATION_PER_YEAR: f32 = 0.015;
 /// PUBLIC WORKS: a city whose civic treasury (`civic_pool`, fed by trade taxes,
 /// guild dues and endowments) has grown past a per-capita threshold spends it on
 /// the common good — erecting a useful building outright, or, once well-built,
@@ -823,6 +820,63 @@ pub fn coin_value(fineness: f32, trust: f32) -> f32 {
     let f = if fineness <= 0.0 { 1.0 } else { fineness };
     f * (0.7 + 0.5 * trust.clamp(0.0, 1.0))
 }
+
+/// v2.0 · a coin's single headline STRENGTH (0..100) — the one number the Money
+/// panel leads with, built from its two drivers (fineness × acceptance). A
+/// fully-trusted, full-bodied coin scores 100; debasement OR distrust drag it down.
+pub fn coin_strength(fineness: f32, trust: f32) -> f32 {
+    let f = (if fineness <= 0.0 { 1.0 } else { fineness }).clamp(0.0, 1.0);
+    100.0 * trust.clamp(0.0, 1.0) * (0.55 + 0.45 * f)
+}
+
+// ── v2.0 · closed monetary loop (quantity-theory-lite inflation) ─────────────
+/// Baseline monetary inflation every economy carries (a mild ~1.5% drift), so even
+/// sound money still levies an inflation-tax on hoarded fortunes (as the old flat
+/// rate did) — debasement/money growth then adds ON TOP.
+const INFL_BASE: f32 = 0.015;
+/// Debasement pass-through: a coin cut to fineness `f` adds `(1−f)·K` to prices.
+const INFL_DEBASE_K: f32 = 0.10;
+/// Money-growth pass-through: a coin whose circulation grew `g` YoY adds `g·K`.
+const INFL_MONEY_K: f32 = 0.10;
+/// Real-output growth that soaks up money each year (the deflationary offset).
+const INFL_REAL_GROWTH: f32 = 0.005;
+/// Bounds on a single year's local inflation (keeps price levels + the wealth
+/// inflation-tax finite; always a small positive drift, capped so it can't blow up).
+const INFL_MIN: f32 = 0.002;
+const INFL_MAX: f32 = 0.06;
+
+// ── v2.0 · recoinage / reform ────────────────────────────────────────────────
+/// A council reforms its coinage only when fineness has slipped below this.
+const REFORM_FINENESS_FLOOR: f32 = 0.90;
+/// …and trust has fallen below this (the coin is visibly failing).
+const REFORM_TRUST_FLOOR: f32 = 0.50;
+/// Cost of a reform (recall + re-strike), as a fraction of the seat's throughput —
+/// paid from the treasury, so only a solvent polis can afford honest money.
+const REFORM_COST_FRAC: f32 = 0.6;
+/// Immediate confidence restored by re-minting at full fineness.
+const REFORM_TRUST_BUMP: f32 = 0.15;
+/// Years a council must wait between reforms, and years its honest-money mandate
+/// holds fineness at 1.0 afterwards.
+const REFORM_COOLDOWN_YEARS: u32 = 8;
+const REFORM_MANDATE_YEARS: u32 = 6;
+
+// ── v2.0 · bank runs (idiosyncratic, outside a systemic crash) ───────────────
+/// Fraction of deposits a fragile bank bleeds in a run, scaled by how far its
+/// reserve ratio has fallen below `BANK_RUN_RATIO`.
+const BANK_RUN_WITHDRAW: f32 = 0.18;
+
+// ── v2.0 · bullion-limited minting (mint regulation) ─────────────────────────
+/// Bullion (weighted gold+silver output) a region needs per unit of coin demand
+/// (throughput) to sustain FULL-BODIED coin. Below this ratio the mint is forced
+/// to stretch its metal — fineness is capped down (endogenous debasement from
+/// scarcity, not choice). Lenient so only genuinely bullion-poor regions bind.
+const MINT_BULLION_DEMAND: f32 = 0.04;
+/// Gold is far denser in value than silver — weight it in the bullion tally.
+const MINT_GOLD_WEIGHT: f32 = 3.0;
+/// The lowest fineness bullion scarcity alone can force (a bullion-starved mint
+/// still strikes a passable, if base-heavy, coin — it imports/short-weights, it
+/// does not collapse). Full bullion supply lifts the cap to 1.0.
+const MINT_FINENESS_FLOOR: f32 = 0.85;
 
 // ── DLC 4 · Good quality ─────────────────────────────────────────────────────
 /// Value multiplier a good's quality earns: coarse goods trade at a discount,
@@ -1143,6 +1197,30 @@ pub struct TickHub {
     /// Last year's mint fineness — so the coinage pass can read a sudden DEBASEMENT
     /// (a cut vs last year) and dock trust accordingly. 0 on old saves → no penalty.
     #[serde(default)] pub mint_fineness_prev: f32,
+    // ── v2.0 · closed monetary loop (debasement/money-supply → local prices) ──
+    /// Local PRICE LEVEL index (1.0 = par at campaign start). Compounds each year by
+    /// the inflation of this city's settle-coin (debasement + money growth − real
+    /// output growth), so a debased-coin city visibly gets dearer. 0/absent → 1.0.
+    #[serde(default)] pub price_level: f32,
+    /// Last year's money supply (Σ throughput × basket-share) for the coin THIS hub
+    /// issues — lets the price loop read year-on-year money growth. 0 on old saves.
+    #[serde(default)] pub coin_circ_prev: f32,
+    // ── v2.0 · recoinage / reform ──
+    /// Tick of this polis's last coinage REFORM (call-in + re-mint at full fineness).
+    /// Gates a reform cooldown so a council can't reform every year. 0 = never.
+    #[serde(default)] pub last_reform_tick: u32,
+    /// Until this tick the council upholds an HONEST-MONEY mandate after a reform:
+    /// `decide_polis_policy` holds mint fineness at 1.0 (no debasement) until it
+    /// lapses, after which cheap-money pressure can creep back. 0 = no mandate.
+    #[serde(default)] pub reform_until: u32,
+    /// v2.0 · the monetary METAL this polis strikes its coin in, from the bullion
+    /// its trade region can reach: 0 = silver (default/imported), 1 = gold,
+    /// 2 = electrum (both gold & silver), 3 = bronze/billon (only base metal).
+    #[serde(default)] pub coin_metal: u8,
+    /// v2.0 · bullion capacity ratio = regional bullion output ÷ coin demand. ≥1
+    /// means metal is ample (fineness can be full); <1 means the mint is stretched
+    /// and bullion scarcity is forcing debasement (surfaced as the "limiting factor").
+    #[serde(default)] pub mint_bullion_ratio: f32,
     // ── DLC 4 · Good QUALITY (per producing settlement / estate / manufactory) ──
     /// Per-good production quality 0..1 at THIS hub (Coarse→Exquisite). Seeded so it
     /// varies by settlement; manufactures climb via learning-by-doing and can be
@@ -2629,7 +2707,10 @@ impl CampaignSim {
             // Mint: a prosperous, banking-led council "cuts the coin fine" to lend
             // cheap (fineness eases down); others slowly restore full-bodied coin.
             let prosperous = self.hubs[h].trade_wealth > 0.5;
-            let target = if arch == ARCH_BANKING && prosperous { 0.88 }
+            // v2.0 · a post-reform HONEST-MONEY mandate bars debasement until it lapses.
+            let under_mandate = self.hubs[h].reform_until > self.tick;
+            let target = if under_mandate { 1.0 }
+                else if arch == ARCH_BANKING && prosperous { 0.88 }
                 else if prosperous { 0.96 } else { 1.0 };
             let f = self.hubs[h].mint_fineness;
             self.hubs[h].mint_fineness = f + (target - f) * 0.5;
@@ -2894,6 +2975,51 @@ impl CampaignSim {
         DENOMS[i]
     }
 
+    /// v2.0 · the monetary METAL a mint strikes, from the bullion its trade region
+    /// can reach: gold if a gold province lies in the region, silver if silver hills,
+    /// electrum where both are plentiful and balanced, bronze/billon where only base
+    /// metal (copper/tin) is available (0 silver · 1 gold · 2 electrum · 3 bronze).
+    fn coin_metal_for(&self, hub: usize, gi: Option<usize>, si: Option<usize>,
+                      ci: Option<usize>, ti: Option<usize>) -> u8 {
+        let region = self.hubs[hub].component;
+        let (mut g, mut s, mut base) = (0.0f32, 0.0f32, 0.0f32);
+        for h in &self.hubs {
+            if h.is_estate || h.component != region { continue; }
+            if let Some(i) = gi { g += h.production.get(i).copied().unwrap_or(0.0); }
+            if let Some(i) = si { s += h.production.get(i).copied().unwrap_or(0.0); }
+            if let Some(i) = ci { base += h.production.get(i).copied().unwrap_or(0.0); }
+            if let Some(i) = ti { base += h.production.get(i).copied().unwrap_or(0.0); }
+        }
+        let (has_g, has_s) = (g > EPS, s > EPS);
+        if has_g && has_s {
+            // Both metals in reach → a balanced supply is struck as electrum, else
+            // the region coins its dominant precious metal.
+            if g.min(s) > 0.25 * g.max(s) { 2 } else if g >= s { 1 } else { 0 }
+        } else if has_g { 1 }
+        else if has_s { 0 }
+        else if base > EPS { 3 }
+        else { 0 } // no precious metal in the region → assume imported silver specie
+    }
+
+    /// v2.0 · the ceiling bullion supply puts on a mint's fineness. A region flush
+    /// with gold/silver relative to its coin demand can strike full-bodied money
+    /// (cap → 1.0); a bullion-poor region minting beyond its metal is forced to
+    /// debase (cap → `MINT_FINENESS_FLOOR`). Returns the cap in [floor, 1.0] plus
+    /// the raw capacity ratio (for the panel's "limiting factor" read).
+    fn mint_bullion_cap(&self, hub: usize, gi: Option<usize>, si: Option<usize>) -> (f32, f32) {
+        let region = self.hubs[hub].component;
+        let (mut bull, mut demand) = (0.0f32, 0.0f32);
+        for h in &self.hubs {
+            if h.is_estate || h.component != region { continue; }
+            if let Some(i) = gi { bull += h.production.get(i).copied().unwrap_or(0.0) * MINT_GOLD_WEIGHT; }
+            if let Some(i) = si { bull += h.production.get(i).copied().unwrap_or(0.0); }
+            demand += h.tw_house + h.tw_local + h.tw_guild;
+        }
+        let cr = if demand > EPS { bull / (demand * MINT_BULLION_DEMAND) } else { 1.0 };
+        let cap = (MINT_FINENESS_FLOOR + (1.0 - MINT_FINENESS_FLOOR) * cr.clamp(0.0, 1.0)).clamp(MINT_FINENESS_FLOOR, 1.0);
+        (cap, cr)
+    }
+
     /// DLC 3.5 · Coinage — once a year each council seat mints a NAMED coin and
     /// updates its acceptance ("trust"): sticky reputation built from full-bodied
     /// minting, a deep treasury, trade wealth, civic stability and throughput, and
@@ -2910,6 +3036,11 @@ impl CampaignSim {
             max_treasury = max_treasury.max(self.hubs[h].treasury);
             max_through = max_through.max(self.hub_throughput(h));
         }
+        // Good indices for the monetary metals (computed once) → per-mint metal.
+        let gi = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("gold"));
+        let si = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("silver"));
+        let cui = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("copper"));
+        let tii = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("tin"));
         let tick = self.tick;
         for h in 0..n {
             if self.hubs[h].is_estate { continue; }
@@ -2933,6 +3064,15 @@ impl CampaignSim {
                 self.hubs[h].mint_fineness_prev = fineness;
                 continue;
             }
+            // v2.0 · pick the metal from the region's reachable bullion.
+            self.hubs[h].coin_metal = self.coin_metal_for(h, gi, si, cui, tii);
+            // v2.0 · MINT REGULATION — regional bullion caps how full-bodied the coin
+            // can be. A bullion-poor mint striking beyond its metal is forced to debase
+            // (fineness capped down); an ample region can strike full-bodied coin.
+            let (bcap, bratio) = self.mint_bullion_cap(h, gi, si);
+            self.hubs[h].mint_bullion_ratio = bratio;
+            if self.hubs[h].mint_fineness > bcap { self.hubs[h].mint_fineness = bcap; }
+            let fineness = if self.hubs[h].mint_fineness <= 0.0 { 1.0 } else { self.hubs[h].mint_fineness };
             // Trust target — each term in 0..1.
             let through = self.hub_throughput(h);
             let t_fine = fineness.clamp(0.0, 1.0);
@@ -3089,6 +3229,87 @@ impl CampaignSim {
         }
     }
 
+    /// v2.0 · close the monetary loop. Each year, turn every coin's DEBASEMENT and
+    /// MONEY-SUPPLY growth into a real inflation rate (quantity-theory-lite:
+    /// π ≈ debasement + money growth − real output growth), compound each city's
+    /// `price_level` by the inflation of the coin it settles in, and RETURN the
+    /// per-hub inflation rate so the caller can levy the matching inflation-tax on
+    /// resident fortunes. A debased-coin city now visibly gets dearer AND erodes its
+    /// hoards faster — the seigniorage the mint skimmed is paid back as an inflation
+    /// tax on the people who hold the coin.
+    fn update_price_levels(&mut self) -> Vec<f32> {
+        let n = self.hubs.len();
+        // 1) Money supply per issuing coin (hub INDEX) = Σ holders' throughput×share.
+        let mut m: Vec<f32> = vec![0.0; n];
+        for h in 0..n {
+            if self.hubs[h].is_estate { continue; }
+            let thru = self.hubs[h].tw_house + self.hubs[h].tw_local + self.hubs[h].tw_guild;
+            for &(k, share) in &self.hubs[h].coin_basket {
+                if (k as usize) < n { m[k as usize] += thru * share; }
+            }
+        }
+        // 2) Per-coin inflation from debasement + money growth − real growth.
+        let mut coin_infl: Vec<f32> = vec![0.0; n];
+        for c in 0..n {
+            if self.hubs[c].coin_name.is_empty() { self.hubs[c].coin_circ_prev = m[c]; continue; }
+            let fine = if self.hubs[c].mint_fineness <= 0.0 { 1.0 } else { self.hubs[c].mint_fineness };
+            let mprev = if self.hubs[c].coin_circ_prev <= EPS { m[c].max(EPS) } else { self.hubs[c].coin_circ_prev };
+            let mgrow = ((m[c] - mprev) / mprev).clamp(-0.5, 0.5);
+            coin_infl[c] = (INFL_BASE + INFL_DEBASE_K * (1.0 - fine).max(0.0) + INFL_MONEY_K * mgrow - INFL_REAL_GROWTH)
+                .clamp(INFL_MIN, INFL_MAX);
+            self.hubs[c].coin_circ_prev = m[c];
+        }
+        // 3) Per-hub local inflation = its settle-coin's inflation (barter → base),
+        //    compounded into the price level (bounded so a long campaign stays finite).
+        let mut hub_infl: Vec<f32> = vec![INFL_BASE; n];
+        for h in 0..n {
+            if self.hubs[h].is_estate { continue; }
+            let sc = self.hubs[h].settle_coin;
+            let infl = if sc >= 0 && (sc as usize) < n && !self.hubs[sc as usize].coin_name.is_empty() {
+                coin_infl[sc as usize]
+            } else { INFL_BASE };
+            if self.hubs[h].price_level <= 0.0 { self.hubs[h].price_level = 1.0; }
+            self.hubs[h].price_level = (self.hubs[h].price_level * (1.0 + infl)).clamp(0.1, 1000.0);
+            hub_infl[h] = infl;
+        }
+        hub_infl
+    }
+
+    /// v2.0 · recoinage / reform. A council whose coin has slipped — fineness below
+    /// `REFORM_FINENESS_FLOOR` AND trust below `REFORM_TRUST_FLOOR` — CALLS IN the
+    /// debased coin and re-mints at full fineness, if its treasury can bear the cost
+    /// and it hasn't reformed within the cooldown. Confidence partly recovers at
+    /// once, the price level eases, and an HONEST-MONEY mandate then bars further
+    /// debasement for a few years (after which cheap-money pressure can creep back).
+    fn maybe_reform_coinage(&mut self, _year: u32) {
+        let tick = self.tick;
+        let year = self.year();
+        let n = self.hubs.len();
+        for h in 0..n {
+            if self.hubs[h].is_estate || self.hubs[h].coin_name.is_empty() { continue; }
+            let fine = if self.hubs[h].mint_fineness <= 0.0 { 1.0 } else { self.hubs[h].mint_fineness };
+            if fine >= REFORM_FINENESS_FLOOR || self.hubs[h].coin_trust >= REFORM_TRUST_FLOOR { continue; }
+            if self.hubs[h].last_reform_tick != 0
+                && tick < self.hubs[h].last_reform_tick + REFORM_COOLDOWN_YEARS * TICKS_PER_YEAR { continue; }
+            let cost = self.hub_throughput(h) * REFORM_COST_FRAC;
+            if self.hubs[h].treasury < cost { continue; }
+            self.hubs[h].treasury -= cost;
+            self.hubs[h].mint_fineness = 1.0;
+            self.hubs[h].mint_fineness_prev = 1.0; // the re-mint is not read as a debasement
+            self.hubs[h].coin_trust = (self.hubs[h].coin_trust + REFORM_TRUST_BUMP).clamp(0.0, 1.0);
+            self.hubs[h].price_level = (self.hubs[h].price_level * 0.92).max(0.5);
+            self.hubs[h].last_reform_tick = tick;
+            self.hubs[h].reform_until = tick + REFORM_MANDATE_YEARS * TICKS_PER_YEAR;
+            let cn = self.hubs[h].coin_name.clone();
+            let city = self.hubs[h].name.clone();
+            self.journal.push(JournalEntry {
+                tick, kind: "reform".into(), hub: h as i32, good: -1, value: cost,
+                text: format!("{} reforms the {} — the debased coin is called in and re-struck at full fineness", city, cn),
+            });
+            let _ = year;
+        }
+    }
+
     fn update_banks(&mut self, _year: u32) {
         let tick = self.tick;
         // 1) Charter new banks — only once the age of banking has opened (year 20).
@@ -3236,6 +3457,24 @@ impl CampaignSim {
             // 2) Depositor interest (a cost paid from reserves).
             let dep_cost = self.banks[bi].deposits * BANK_DEPOSIT_RATE;
             self.banks[bi].reserves -= dep_cost;
+            // 2b) v2.0 · IDIOSYNCRATIC BANK RUN. A bank whose reserve ratio has slipped
+            //     below the fragility floor faces withdrawals as depositors lose
+            //     confidence — even absent a systemic panic. The run drains reserves
+            //     (scaled by how far below the floor it is) and can tip a stressed bank
+            //     into failure on its own; a sound, well-reserved bank never sees one.
+            let rr = self.banks[bi].reserve_ratio();
+            if rr < BANK_RUN_RATIO && self.banks[bi].deposits > EPS {
+                let severity = ((BANK_RUN_RATIO - rr) / BANK_RUN_RATIO).clamp(0.0, 1.0);
+                let withdraw = (self.banks[bi].deposits * BANK_RUN_WITHDRAW * (0.5 + severity))
+                    .min(self.banks[bi].deposits);
+                self.banks[bi].reserves -= withdraw;
+                self.banks[bi].deposits = (self.banks[bi].deposits - withdraw).max(0.0);
+                self.banks[bi].events.push(HouseEvent { tick, kind: "run".into(),
+                    text: format!("depositors withdraw {:.0} in a run on the bank", withdraw) });
+                self.journal.push(JournalEntry { tick, kind: "run".into(), hub: seat as i32,
+                    good: -1, value: withdraw,
+                    text: format!("Run on {}: depositors pull {:.0} as confidence cracks", self.banks[bi].name, withdraw) });
+            }
             // 3) Dividend the bank's net spread to the owning house.
             let owner = self.banks[bi].house as usize;
             let profit = interest_income - dep_cost;
@@ -4487,13 +4726,20 @@ impl CampaignSim {
                 self.classify_hubs();
             }
             if tick % TICKS_PER_YEAR == 0 {
+                // v2.0 · close the monetary loop: turn each coin's debasement +
+                // money growth into a real per-city inflation rate and compound the
+                // local price level. The inflation-tax below is then levied at the
+                // resident city's rate (debased-coin cities erode fortunes faster).
+                let hub_infl = self.update_price_levels();
                 // Yearly inflation erodes every fortune's real value, recorded in the
                 // year that is now closing — then archive it for the Accountant.
                 for hi in 0..self.houses.len() {
                     if self.houses[hi].defunct {
                         continue;
                     }
-                    let infl = self.houses[hi].wealth.max(0.0) * INFLATION_PER_YEAR;
+                    let rate = hub_infl.get(self.houses[hi].hub as usize).copied()
+                        .unwrap_or(INFL_BASE).max(0.0); // deflation never ADDS wealth
+                    let infl = self.houses[hi].wealth.max(0.0) * rate;
                     self.houses[hi].wealth -= infl;
                     if hi < self.house_ledger.len() {
                         self.house_ledger[hi].inflation += infl;
@@ -4524,6 +4770,8 @@ impl CampaignSim {
                 // engine reads the closed year, and HIGH-tier bubbles may POP into a
                 // regional crash.
                 self.decide_coinage(yr);
+                // v2.0 · a council whose coin has failed may REFORM it (call-in + re-mint).
+                self.maybe_reform_coinage(yr);
                 self.update_currency_baskets();
                 self.update_banks(yr);
                 self.update_wars(yr);
@@ -7290,7 +7538,7 @@ impl CampaignSim {
             estate_kind: kind, estate_tier: 1, last_upgrade_tick: self.tick, owner_house, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0,
             // DLC 4 · seed the new estate's quality (length ng) so it's graded from
             // day one — a manufactory (kind 6) starts as a humble workshop and learns.
             quality: { let mut q = vec![0.0f32; ng]; if g0 < ng { q[g0] = if kind == 6 { 0.34 } else { 0.46 }; } q },
@@ -8645,7 +8893,7 @@ impl CampaignSim {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0,
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
@@ -9349,7 +9597,7 @@ impl CampaignSim {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0,
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
             reserve_food: 30.0, reserve_cap: 365.0, supply_years: 0.0, colony_founded_tick: self.tick,
@@ -11589,7 +11837,7 @@ mod tests {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: 0, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0,
             quality: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
