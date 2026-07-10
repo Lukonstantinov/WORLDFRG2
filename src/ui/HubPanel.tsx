@@ -1106,6 +1106,9 @@ export function HubPanel() {
                 <div style={{ marginTop: 8 }}>
                   <div style={sectionHdr}>Contentment — is what they crave supplied?</div>
                   {detail.culture_moods!.map((m) => <CultureMoodRow key={m.name} m={m} />)}
+                  <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 3 }}>
+                    Unmet cravings feed unrest — a large discontented people grows restive.
+                  </div>
                 </div>
               )}
             </>

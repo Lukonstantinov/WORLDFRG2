@@ -267,6 +267,10 @@ const APPEARANCE_ASSIM_BONUS: f32 = 1.3;
 /// an Arab one incense. Bounded (capped total) so the economy stays stable.
 const CULTURE_DESIRE_BOOST: f32 = 0.4;
 const CULTURE_DESIRE_MAX: f32 = 0.5;
+/// Cultures 2.0 · when a city cannot supply its resident peoples the goods they PRIZE,
+/// that discontent adds to unrest — weighted by how large (pop share) the craving group
+/// is. At full, city-wide unmet craving adds this much to the unrest target. Bounded.
+const CULTURE_UNREST: f32 = 0.18;
 /// ── SATELLITE cities (Ostia→Rome, Piraeus→Athens, Westminster/Southwark→London):
 /// a LARGE metropolis whose council can fund it spins off a SHORT-RANGE satellite
 /// to serve a concrete NEED it can't fit inside itself — a PORT (inland/large hub
@@ -5335,12 +5339,16 @@ impl CampaignSim {
                 .map(|m| m.iter().fold(0.0f32, |a, (_, s)| a.max(*s))).unwrap_or(0.0);
             let stress = (lackb + starv + (1.0 - mood) * 0.5).clamp(0.0, 1.0);
             let minority_unrest = MINORITY_UNREST * largest_min.clamp(0.0, 1.0) * stress;
+            // Cultures 2.0 · unmet cultural cravings stoke unrest (pop-weighted): a city
+            // that never supplies its peoples the goods they prize grows restive.
+            let cult_discontent = self.cultural_discontent(h);
             let target = (0.42 * (1.0 - mood)
                 + 0.30 * ineq
                 + 0.32 * lackb
                 + 0.22 * starv
                 + if atwar { 0.12 } else { 0.0 }
                 + minority_unrest
+                + CULTURE_UNREST * cult_discontent
                 - 0.30 * welfare
                 - 0.18 * prosp).clamp(0.0, 1.0);
             let u = {
@@ -8589,6 +8597,37 @@ impl CampaignSim {
             let d = self.culture_history.len() - 220;
             self.culture_history.drain(0..d);
         }
+    }
+
+    /// Cultures 2.0 · population-weighted CULTURAL DISCONTENT in a city (0..1): how much
+    /// of its resident peoples' prized-good demand goes unmet (goods scarce/dear here),
+    /// weighted by each people's population share — a big people whose cravings never
+    /// arrive weighs heavily. Feeds the unrest target.
+    pub(crate) fn cultural_discontent(&self, h: usize) -> f32 {
+        let maj = self.hub_culture.get(h).cloned().unwrap_or_default();
+        let minsum: f32 = self.hub_minorities.get(h)
+            .map(|m| m.iter().map(|(_, s)| *s).sum()).unwrap_or(0.0);
+        let mut present: Vec<(String, f32)> = Vec::new();
+        if !maj.is_empty() && maj != "—" { present.push((maj, (1.0 - minsum).clamp(0.0, 1.0))); }
+        if let Some(mins) = self.hub_minorities.get(h) {
+            for (c, s) in mins { if *s > 0.02 { present.push((c.clone(), *s)); } }
+        }
+        let (mut num, mut den) = (0.0f32, 0.0f32);
+        for (c, share) in present {
+            let desired = self.culture_desired_goods(&c);
+            if desired.is_empty() { continue; }
+            let (mut d, mut cnt) = (0.0f32, 0u32);
+            for nm in &desired {
+                if let Some(g) = self.goods.iter().position(|tg| &tg.name == nm) {
+                    let base = self.goods[g].base_value.max(0.01);
+                    let price = self.hubs[h].price.get(g).copied().unwrap_or(base).max(0.01);
+                    let avail = (base * 1.3 / price).clamp(0.0, 1.0);
+                    d += 1.0 - avail; cnt += 1;
+                }
+            }
+            if cnt > 0 { num += share * (d / cnt as f32); den += share; }
+        }
+        if den > 0.0 { (num / den).clamp(0.0, 1.0) } else { 0.0 }
     }
 
     /// Good ids a culture PRIZES (creole → both parents' tastes; hearth culture → its
