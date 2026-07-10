@@ -110,7 +110,7 @@ commands/sim_commands.rs        ← Tauri commands wrapping sim phases (per-phas
 commands/paint_commands.rs      ← Paint stroke commands (land/elev/shelf/volcano)
 commands/tile_commands.rs       ← get_tiles / get_tiles_packed (RGBA tile fetch), LOD
 commands/query_commands.rs      ← Read-only overlays + coarse routing: get_cell_info, trade routes/matrix/trunks, political layer, fishery banks, good/culture regions, coarse cost grid (cached_coarse_cost/coarse_dijkstra), campaign_get_trade_flow (DLC 3.5 dynamic flow), compute_itinerary (#23 travel-time over the coarse grid)
-commands/campaign_commands.rs   ← finalize/unfreeze, new/save/open campaign, set_progress, campaign_start_sim/advance/get_state, ALL campaign read queries (HubDetail, HouseBrief, PolisBrief, CurrencyBrief, BankBrief, CrashRecord, WarsPayload, schematics, ledgers, journal, campaign_get_inequality #29 Gini/mobility). get_sim() loads the CampaignSim blob
+commands/campaign_commands.rs   ← finalize/unfreeze, new/save/open campaign, set_progress, campaign_start_sim/advance/get_state, ALL campaign read queries (HubDetail, HouseBrief, PolisBrief, CurrencyBrief, BankBrief, CrashRecord, WarsPayload, schematics, ledgers, journal, campaign_get_inequality #29 Gini/mobility). ATLAS: campaign_get_world_economy (WorldEconomy: goods/price+lack+merchant series, world_series [year,pop,trade,live hubs,cum foundings,cum abandonments], WorldRecords), campaign_get_trade_basins (named basins), campaign_get_era_frame (world-as-of-year for the era scrubber), campaign_get_geo_points (Atlas v2 — each live city joined to its cell's CLIMATE: temp/precip/elev/coast/fertility/koppen, for the geography↔economy correlations; groups hubs by tile so each loads once). get_sim() loads the CampaignSim blob
 commands/goods_commands.rs      ← Goods spec CRUD, default_custom_goods, backfill_market_fields
 commands/import_commands.rs     ← import_world_layers (layered world import)
 commands/template_commands.rs   ← Image → land/sea detection (4-bit quantization)
@@ -166,8 +166,8 @@ goods.ts                        ← GOOD_DEFS (names/emoji) shared good metadata
 commodityHistory.ts             ← #36 real-world commodity-history cards (Goods Codex + Good Detail)
 bridge/tauri.ts                 ← ALL IPC invoke wrappers (one per Rust command)
 state/worldStore.ts             ← Zustand: meta, rivers, lakes, settlements
-state/campaignStore.ts          ← Zustand: campaign snapshot, houses, contracts, diagnostics, selectedHouse
-state/uiStore.ts                ← Zustand: tool, layer, workflow step, overlayVisibility registry, panel open flags
+state/campaignStore.ts          ← Zustand: campaign snapshot, worldEconomy (Atlas series + records), houses, contracts, diagnostics, selectedHouse
+state/uiStore.ts                ← Zustand: tool, layer, workflow step, overlayVisibility registry, panel open flags (incl. showAtlas), eraFrame (Atlas era scrubber → map time-travel)
 state/goodsStore.ts             ← Zustand: goods spec being edited
 state/viewportStore.ts          ← Zustand: camera state, tile invalidation
 canvas/PixiApp.ts               ← PixiJS 8 application init
@@ -187,6 +187,7 @@ ui/SpeculationPanel.tsx         ← DLC 3 Finance: Speculation (bubble why-chain
 ui/CoinCreditPanel.tsx          ← DLC 3.5: Currencies / Banks (T-accounts) / ⚔ Wars / 📉 Crashes / 🏛 Schematics tabs
 ui/ItineraryPanel.tsx           ← #23 travel-time tool (origin/dest pickers, per-mode days, draws the route overlay)
 ui/EconomyDashboardPanel.tsx    ← #30/#29 Price Index (basket CPI per city) + Inequality (Gini/top-share/turnover/mobility) tabs
+ui/AtlasPanel.tsx               ← 🗺 World Atlas v2 — the resizable analytics dashboard (drag the bottom-right grip) that gathers what the other panels show piecemeal. Tabs: 📈 Pulse (KPIs + world time-series grid + era scrubber, reads world_series + inequality) · 🔗 Correlations (a Pearson-r heat MATRIX over every city-variable pair + scatter groups City-scaling/Geography↔economy/Society, each scatter carrying r + a least-squares trend, dots click-to-pin; geography vars from campaign_get_geo_points) · 💰 Economy (price index, unmet-demand-by-tier + merchant-class STACKED areas, inequality, mean wealth) · ⚔ Turmoil (wars/crashes/bank-shocks/plagues quantified per year from the journal as stacked bars) · 🏙 Cities (census) · 🏞 Regions (basins) · 🏆 Records (Hall of Records) · 📜 Timeline. Self-contained chart primitives (Chart/MultiLine/StackedArea/StackedBars/Scatter/CorrMatrix + pearson/linFit). Overlay toggles: 🔥 tradeHeat, 🏞 tradeBasins
 ui/GoodsCodexPanel.tsx          ← #35/#36/#37 per-good Provenance + real-world History card + Scarcity overlay toggle
 ui/CoinIcon.tsx                 ← Heraldic minted coin (issuer's coat of arms on a gold disc + value tint)
 ui/YearChronicle.tsx            ← SHARED year-grouped expandable chronicle (used by HousesPanel + HubPanel)

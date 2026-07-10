@@ -960,10 +960,28 @@ function CorrMatrix({ vars, data }: {
   const cols = vars.map((v) => data.map((d) => (v.log ? Math.log10(Math.max(1e-6, d[v.key])) : d[v.key])));
   const n = vars.length;
   const r: number[][] = cols.map((ci) => cols.map((cj) => pearson(ci, cj)));
+  // Headline: the strongest positive and strongest negative pair (i < j).
+  let bestPos = { r: 0, i: -1, j: -1 }, bestNeg = { r: 0, i: -1, j: -1 };
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+    const v = r[i][j];
+    if (v > bestPos.r) bestPos = { r: v, i, j };
+    if (v < bestNeg.r) bestNeg = { r: v, i, j };
+  }
   const cell = 30, labelW = 44, headH = 20;
   const w = labelW + n * cell, h = headH + n * cell;
+  const varLabel = (idx: number) => vars[idx]?.label ?? "";
   return (
     <div style={{ overflowX: "auto", background: T.card, border: `1px solid ${T.lineSoft}`, borderRadius: 6, padding: 6, marginBottom: 4 }}>
+      {(bestPos.i >= 0 || bestNeg.i >= 0) && (
+        <div style={{ fontSize: 10.5, color: T.inkMid, marginBottom: 6, lineHeight: 1.5 }}>
+          {bestPos.i >= 0 && (
+            <>Strongest link: <b style={{ color: "#7fd08a" }}>{varLabel(bestPos.i)} ↔ {varLabel(bestPos.j)}</b> (r {bestPos.r.toFixed(2)}, {rDesc(bestPos.r)}).</>
+          )}
+          {bestNeg.i >= 0 && Math.abs(bestNeg.r) > 0.15 && (
+            <> Strongest trade-off: <b style={{ color: "#e08080" }}>{varLabel(bestNeg.i)} ↔ {varLabel(bestNeg.j)}</b> (r {bestNeg.r.toFixed(2)}, {rDesc(bestNeg.r)}).</>
+          )}
+        </div>
+      )}
       <svg width={w} height={h} style={{ display: "block", fontFamily: "inherit" }}>
         {/* column headers */}
         {vars.map((v, j) => (
