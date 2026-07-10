@@ -4,7 +4,7 @@ import { useWorldStore } from "../state/worldStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { campaignGetHub, campaignGetColony, campaignWarehouses, campaignFuturesLanes, campaignGetProvisioning } from "../bridge/tauri";
-import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement } from "../types";
+import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement, CultureMood } from "../types";
 import { settlementStory } from "../settlementStory";
 import { GOOD_DEFS } from "../goods";
 const HP_GOOD_EMOJI: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.emoji]));
@@ -1101,6 +1101,13 @@ export function HubPanel() {
               {(detail.minorities ?? []).filter(([, s]) => s > 0.005).length === 0 && (
                 <div style={{ color: "#7a90a8", fontSize: 10, marginBottom: 2 }}>No minority quarters — a homogeneous population.</div>
               )}
+              {/* Contentment of peoples — are each culture's prized goods supplied here? */}
+              {(detail.culture_moods?.length ?? 0) > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={sectionHdr}>Contentment — is what they crave supplied?</div>
+                  {detail.culture_moods!.map((m) => <CultureMoodRow key={m.name} m={m} />)}
+                </div>
+              )}
             </>
           )}
           <div style={{ ...sectionHdr, marginTop: detail?.culture ? 8 : 0 }}>Society</div>
@@ -1506,6 +1513,27 @@ function SatelliteVillages({ villages }: { villages: NonNullable<HubDetail["sate
           {sorted.length > 24 && <span style={{ fontSize: 9.5, color: "#6a806a" }}>+{sorted.length - 24} more…</span>}
         </div>
       )}
+    </div>
+  );
+}
+
+/** One resident people's contentment: a face by satisfaction + the prized goods this
+ *  city supplies (met) or leaves them craving (unmet). */
+function CultureMoodRow({ m }: { m: CultureMood }) {
+  const rgb = `rgb(${m.color[0]},${m.color[1]},${m.color[2]})`;
+  const s = m.satisfaction;
+  const face = s >= 0.66 ? "😀" : s >= 0.5 ? "🙂" : s >= 0.38 ? "😐" : "☹️";
+  const fc = s >= 0.66 ? "#7fd0a0" : s >= 0.5 ? "#bcd08a" : s >= 0.38 ? "#e0c060" : "#e08a6a";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 2px", fontSize: 11 }}>
+      <span style={{ width: 9, height: 9, borderRadius: 2, background: rgb, flex: "0 0 auto", border: "1px solid rgba(0,0,0,0.4)" }} />
+      <span style={{ width: 84, color: "#cfe2f6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
+      <span style={{ fontSize: 13 }} title={`${Math.round(s * 100)}% of what they crave is supplied`}>{face}</span>
+      <span style={{ flex: 1, minWidth: 0, textAlign: "right", color: "#8aa0b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {m.unmet.length > 0
+          ? <span style={{ color: fc }}>craves {m.unmet.map((g) => HP_GOOD_EMOJI[g] ?? g).join(" ")}</span>
+          : <span style={{ color: "#7fa090" }}>content {m.met.slice(0, 3).map((g) => HP_GOOD_EMOJI[g] ?? "").join(" ")}</span>}
+      </span>
     </div>
   );
 }

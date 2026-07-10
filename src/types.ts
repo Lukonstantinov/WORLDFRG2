@@ -489,6 +489,15 @@ export interface CoinShare {
 
 /** A sub-cap hinterland village that markets through a town (satellite trade). */
 export interface HinterlandVillage { name: string; population: number; x: number; y: number }
+/** Cultures 2.0 · a resident people's contentment in a city (prized-goods supply). */
+export interface CultureMood {
+  name: string;
+  share: number;         // 0..1 of the city's population
+  satisfaction: number;  // 0..1 mean availability of its prized goods
+  color: [number, number, number];
+  met: string[];         // prized goods well-supplied here
+  unmet: string[];       // prized goods scarce/dear here
+}
 export interface HubDetail {
   id: number;
   name: string;
@@ -534,6 +543,8 @@ export interface HubDetail {
   culture?: string;
   /** #23 · minority quarters [people, population share 0..1], grown by in-migration. */
   minorities?: [string, number][];
+  /** Cultures 2.0 · per-people contentment here (are their prized goods supplied?). */
+  culture_moods?: CultureMood[];
   /** Foreign merchant offices hosted in this settlement. */
   offices_here?: OfficeHere[];
   /** Market flow: in-flight shipments arriving / departing (ranked by value). */

@@ -262,6 +262,11 @@ const MINORITY_UNREST: f32 = 0.06;
 /// (climate/dress) as the majority assimilate this much faster even across language
 /// families — "people who look alike blend a little more easily". Small, bounded.
 const APPEARANCE_ASSIM_BONUS: f32 = 1.3;
+/// Cultures 2.0 · CULTURAL TASTE: a good a resident people PRIZES gets this much extra
+/// local demand, scaled by that people's population share — so a Norse city craves furs,
+/// an Arab one incense. Bounded (capped total) so the economy stays stable.
+const CULTURE_DESIRE_BOOST: f32 = 0.4;
+const CULTURE_DESIRE_MAX: f32 = 0.5;
 /// ── SATELLITE cities (Ostia→Rome, Piraeus→Athens, Westminster/Southwark→London):
 /// a LARGE metropolis whose council can fund it spins off a SHORT-RANGE satellite
 /// to serve a concrete NEED it can't fit inside itself — a PORT (inland/large hub
@@ -4866,6 +4871,36 @@ impl CampaignSim {
                     any_fashion = true;
                 }
             }
+            // Cultural taste: precompute each hub's desired-good demand lifts (from its
+            // resident peoples, weighted by pop share; capped). Applied after substitution
+            // + fashion so the prized good genuinely pulls more demand.
+            let name_to_g: std::collections::HashMap<&str, usize> =
+                self.goods.iter().enumerate().map(|(g, tg)| (tg.name.as_str(), g)).collect();
+            let mut culture_goods: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+            let mut hub_desire: Vec<Vec<(usize, f32)>> = vec![Vec::new(); n];
+            for h in 0..n {
+                if self.hubs[h].is_estate { continue; }
+                let maj = self.hub_culture.get(h).cloned().unwrap_or_default();
+                let minsum: f32 = self.hub_minorities.get(h)
+                    .map(|m| m.iter().map(|(_, s)| *s).sum()).unwrap_or(0.0);
+                let mut present: Vec<(String, f32)> = Vec::new();
+                if !maj.is_empty() && maj != "—" { present.push((maj, (1.0 - minsum).clamp(0.0, 1.0))); }
+                if let Some(mins) = self.hub_minorities.get(h) {
+                    for (c, s) in mins { if *s > 0.02 { present.push((c.clone(), *s)); } }
+                }
+                let mut boost: std::collections::HashMap<usize, f32> = std::collections::HashMap::new();
+                for (c, share) in present {
+                    if !culture_goods.contains_key(&c) {
+                        let gis: Vec<usize> = self.culture_desired_goods(&c).iter()
+                            .filter_map(|nm| name_to_g.get(nm).copied()).collect();
+                        culture_goods.insert(c.clone(), gis);
+                    }
+                    for &gi in &culture_goods[&c] {
+                        *boost.entry(gi).or_insert(0.0) += share * CULTURE_DESIRE_BOOST;
+                    }
+                }
+                hub_desire[h] = boost.into_iter().map(|(gi, b)| (gi, b.min(CULTURE_DESIRE_MAX))).collect();
+            }
             for h in 0..n {
                 for g in 0..ng {
                     needs[h][g] = self.base_need(h, g);
@@ -4899,6 +4934,8 @@ impl CampaignSim {
                         if fashion_mult[g] != 1.0 { needs[h][g] *= fashion_mult[g]; }
                     }
                 }
+                // Cultural taste: the resident peoples' prized goods pull extra demand.
+                for &(gi, b) in &hub_desire[h] { needs[h][gi] *= 1.0 + b; }
                 // Eat down stock; track unmet demand per need-tier for the
                 // "% population lacking goods" graph (basic / comfort / luxury).
                 let mut tier_need = [0.0f32; 3];
@@ -8468,6 +8505,21 @@ impl CampaignSim {
             if p < 0 || (p as usize) >= n { continue; }
             self.hubs[p as usize].civic_pool += self.hinterland[ti].population * HINTERLAND_TOLL;
         }
+    }
+
+    /// Good ids a culture PRIZES (creole → both parents' tastes; hearth culture → its
+    /// kit's tastes). Empty for an unknown/legacy culture.
+    pub(crate) fn culture_desired_goods(&self, culture: &str) -> Vec<&'static str> {
+        if let Some(cr) = self.creoles.iter().find(|c| c.name == culture) {
+            let mut v = crate::sim::cultures::kit_desired_goods(cr.kit_a as usize).to_vec();
+            for g in crate::sim::cultures::kit_desired_goods(cr.kit_b as usize) {
+                if !v.contains(g) { v.push(g); }
+            }
+            return v;
+        }
+        crate::sim::cultures::kit_of_people(culture)
+            .map(|k| crate::sim::cultures::kit_desired_goods(k).to_vec())
+            .unwrap_or_default()
     }
 
     /// The language FAMILY of a live culture (creole registry first, then the worldgen

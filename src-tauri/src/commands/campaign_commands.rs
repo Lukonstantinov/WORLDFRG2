@@ -531,6 +531,18 @@ pub struct HinterlandVillage {
     pub y: f32,
 }
 
+/// Cultures 2.0 · one resident people's contentment in a city — how well the goods it
+/// prizes are supplied here (met vs unmet), so the panel can show happy/unhappy peoples.
+#[derive(Serialize, Clone)]
+pub struct CultureMood {
+    pub name: String,
+    pub share: f32,          // 0..1 of the city's population
+    pub satisfaction: f32,   // 0..1 — mean availability of its prized goods
+    pub color: [u8; 3],
+    pub met: Vec<String>,    // prized goods well-supplied here
+    pub unmet: Vec<String>,  // prized goods scarce/dear here
+}
+
 /// Full per-settlement detail for the redesigned settlement window (live campaign
 /// state): sentiment, market, and history.
 #[derive(Serialize)]
@@ -587,6 +599,9 @@ pub struct HubDetail {
     /// and slowly eroded by assimilation. Display-only.
     #[serde(default)] pub culture: String,
     #[serde(default)] pub minorities: Vec<(String, f32)>,
+    /// Cultures 2.0 · per-people SATISFACTION in this city — is each resident culture's
+    /// prized goods well-supplied here? Drives the "happy / unhappy peoples" readout.
+    #[serde(default)] pub culture_moods: Vec<CultureMood>,
     /// DLC 3 · the polis government of this seat (council + fiscal policy + this
     /// city's speculation read). None for estates / unsettled hubs.
     #[serde(default)] pub government: Option<Government>,
@@ -3035,6 +3050,35 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             .and_then(|p| sim.houses.get(p as usize)).map(|h| h.name.clone()).unwrap_or_default(),
         culture: sim.hub_culture.get(hi).cloned().unwrap_or_default(),
         minorities: sim.hub_minorities.get(hi).cloned().unwrap_or_default(),
+        culture_moods: {
+            // How content is each resident people here — are its prized goods well-supplied?
+            let name_to_g: std::collections::HashMap<&str, usize> =
+                sim.goods.iter().enumerate().map(|(g, tg)| (tg.name.as_str(), g)).collect();
+            let mut present: Vec<(String, f32)> = Vec::new();
+            let minsum: f32 = sim.hub_minorities.get(hi).map(|m| m.iter().map(|(_, s)| *s).sum()).unwrap_or(0.0);
+            let maj = sim.hub_culture.get(hi).cloned().unwrap_or_default();
+            if !maj.is_empty() && maj != "—" { present.push((maj, (1.0 - minsum).clamp(0.0, 1.0))); }
+            if let Some(mins) = sim.hub_minorities.get(hi) {
+                for (c, s) in mins { if *s > 0.02 { present.push((c.clone(), *s)); } }
+            }
+            present.into_iter().map(|(name, share)| {
+                let desired = sim.culture_desired_goods(&name);
+                let (mut met, mut unmet) = (Vec::new(), Vec::new());
+                let (mut sum, mut cnt) = (0.0f32, 0u32);
+                for nm in &desired {
+                    if let Some(&g) = name_to_g.get(nm) {
+                        let base = sim.goods[g].base_value.max(0.01);
+                        let price = hub.price.get(g).copied().unwrap_or(base).max(0.01);
+                        let avail = (base * 1.3 / price).clamp(0.0, 1.0);
+                        sum += avail; cnt += 1;
+                        if avail >= 0.6 { met.push((*nm).to_string()); }
+                        else if avail < 0.4 { unmet.push((*nm).to_string()); }
+                    }
+                }
+                let satisfaction = if cnt > 0 { sum / cnt as f32 } else { 0.5 };
+                CultureMood { color: culture_color(&name), name, share, satisfaction, met, unmet }
+            }).collect()
+        },
         government,
         public_health: hub.public_health,
         satellites: sim.hinterland.iter()
