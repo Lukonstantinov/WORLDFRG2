@@ -1767,6 +1767,23 @@ export interface Toponym {
   y: number;
 }
 
+/** Atlas v2 · one living city joined to the CLIMATE of its cell — for the
+ *  geography ↔ economy correlations (mirror of the Rust GeoHubPoint). */
+export interface GeoHubPoint {
+  name: string;
+  x: number;
+  y: number;
+  population: number;
+  wealth: number;
+  trade: number;
+  koppen: number;
+  temperature: number;   // °C
+  precipitation: number; // mm/yr
+  elevation: number;     // 0..1 normalized
+  distance_to_ocean: number;
+  fertility: number;     // 0..1
+}
+
 /** #29 · one year's merchant-house wealth-inequality reading. */
 export interface InequalityPoint {
   year: number;

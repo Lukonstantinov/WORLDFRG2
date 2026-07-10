@@ -3952,6 +3952,70 @@ pub fn campaign_get_inequality(db: State<'_, WorldDb>) -> Result<InequalitySnaps
     })
 }
 
+/// Atlas v2 · one living city joined to the CLIMATE of the cell it sits on, so
+/// the Correlations tab can plot the human economy against the physical map
+/// (temperature/precip/elevation/coast-distance/fertility ↔ wealth/pop/trade).
+/// Pure read: campaign hubs × the frozen world tiles. No sim mutation.
+#[derive(Serialize, Clone, Default)]
+pub struct GeoHubPoint {
+    pub name: String,
+    pub x: f32,
+    pub y: f32,
+    pub population: f32,
+    pub wealth: f32,
+    pub trade: f32,
+    pub koppen: u8,
+    pub temperature: f32,   // °C
+    pub precipitation: f32, // mm/yr
+    pub elevation: f32,     // 0..1 normalized
+    pub distance_to_ocean: f32,
+    pub fertility: f32,     // 0..1
+}
+
+#[tauri::command]
+pub fn campaign_get_geo_points(db: State<'_, WorldDb>) -> Result<Vec<GeoHubPoint>, String> {
+    use crate::tile::coords::{TileCoord, TILE_SIZE};
+    use crate::db::tile_store;
+    use std::collections::HashMap;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let Some(sim) = get_sim(&db, &conn)? else { return Ok(vec![]) };
+
+    // Group live hubs by their tile so each tile loads from SQLite exactly once.
+    let mut by_tile: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+    for (i, h) in sim.hubs.iter().enumerate() {
+        if h.is_estate || h.abandoned || h.population < 1.0 { continue; }
+        let tc = TileCoord::from_world(h.x.max(0.0) as u32, h.y.max(0.0) as u32);
+        by_tile.entry((tc.tx, tc.ty)).or_default().push(i);
+    }
+
+    let mut out: Vec<GeoHubPoint> = Vec::new();
+    for ((tx, ty), idxs) in by_tile {
+        let Some(tile) = tile_store::load_tile(&conn, tx, ty, 0).map_err(|e| e.to_string())? else { continue };
+        for i in idxs {
+            let h = &sim.hubs[i];
+            let (lx, ly) = TileCoord::local(h.x.max(0.0) as u32, h.y.max(0.0) as u32);
+            let idx = (ly * TILE_SIZE + lx) as usize;
+            if idx >= tile.koppen.len() { continue; }
+            out.push(GeoHubPoint {
+                name: h.name.clone(),
+                x: h.x,
+                y: h.y,
+                population: h.population.max(0.0),
+                wealth: h.grain_wealth + h.trade_wealth,
+                trade: h.trade_last_year.max(0.0),
+                koppen: tile.koppen[idx],
+                temperature: tile.temperature[idx],
+                precipitation: tile.precipitation[idx],
+                elevation: tile.elevation[idx],
+                distance_to_ocean: tile.distance_to_ocean[idx],
+                fertility: tile.fertility[idx],
+            });
+        }
+    }
+    out.sort_by(|a, b| b.population.partial_cmp(&a.population).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(out)
+}
+
 /// DLC 3 · the cached yearly speculation read (per-polis bubble risk + the
 /// generated causal reason-chain). Empty until the campaign passes its first
 /// New Year. Mirrors the `compute_political` overlay payload.

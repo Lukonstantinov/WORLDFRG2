@@ -748,6 +748,12 @@ export async function campaignGetInequality(): Promise<import("../types").Inequa
   return invoke("campaign_get_inequality");
 }
 
+/** Atlas v2 · each living city joined to its cell's climate (for the
+ *  geography ↔ economy correlations). */
+export async function campaignGetGeoPoints(): Promise<import("../types").GeoHubPoint[]> {
+  return invoke("campaign_get_geo_points");
+}
+
 /** DLC 4 · the derived typed Pops of one hub (Nations & POPs foundation). */
 export async function campaignGetPops(hub: number): Promise<PopBrief[]> {
   return invoke("campaign_get_pops", { hub });

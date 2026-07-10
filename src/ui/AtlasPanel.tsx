@@ -5,9 +5,10 @@ import { useViewportStore } from "../state/viewportStore";
 import { useWorldStore } from "../state/worldStore";
 import {
   campaignGetJournal, campaignGetTradeBasins, campaignGetEraFrame, campaignGetInequality,
+  campaignGetGeoPoints,
 } from "../bridge/tauri";
 import type {
-  CampaignHubBrief, JournalEntry, TradeBasin, InequalitySnapshot,
+  CampaignHubBrief, JournalEntry, TradeBasin, InequalitySnapshot, GeoHubPoint,
 } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 import { T, SERIF } from "./chronicleTheme";
@@ -50,6 +51,7 @@ export function AtlasPanel() {
   const [journal, setJournal] = useState<JournalEntry[]>([]);
   const [basins, setBasins] = useState<TradeBasin[]>([]);
   const [ineq, setIneq] = useState<InequalitySnapshot | null>(null);
+  const [geo, setGeo] = useState<GeoHubPoint[]>([]);
   const [kindFilter, setKindFilter] = useState<Record<string, boolean>>({
     lifecycle: true, war: true, finance: true, plague: true,
   });
@@ -71,6 +73,14 @@ export function AtlasPanel() {
     if (!open || !active || (tab !== "economy" && tab !== "correlations" && tab !== "pulse")) return;
     let alive = true;
     campaignGetInequality().then((r) => { if (alive) setIneq(r); }).catch(() => {});
+    return () => { alive = false; };
+  }, [open, active, tab, year]);
+
+  // The Correlations tab joins each city to its cell's climate (backend read).
+  useEffect(() => {
+    if (!open || !active || tab !== "correlations") return;
+    let alive = true;
+    campaignGetGeoPoints().then((r) => { if (alive) setGeo(r); }).catch(() => {});
     return () => { alive = false; };
   }, [open, active, tab, year]);
 
@@ -126,6 +136,8 @@ export function AtlasPanel() {
   const cityPoints = useMemo(() =>
     hubs.filter((h) => !h.abandoned && h.population >= 1).map((h) => ({
       name: h.name,
+      x: h.x,
+      y: h.y,
       pop: Math.max(1, h.population),
       wealth: Math.max(0.01, h.grain_wealth + h.trade_wealth),
       trade: Math.max(0.01, h.trade_volume),
@@ -246,7 +258,7 @@ export function AtlasPanel() {
         )}
 
         {active && tab === "correlations" && (
-          <CorrelationsTab points={cityPoints} />
+          <CorrelationsTab points={cityPoints} geo={geo} onPick={(x, y) => setSearchPin(x, y)} />
         )}
 
         {active && tab === "economy" && (
@@ -450,44 +462,81 @@ function PulseTab({ series, last, alive_n, ineq, worldEconomy, eraFrame, setEraF
 
 /* ─────────────────────── Correlations tab ─────────────────────── */
 
-type CityPoint = { name: string; pop: number; wealth: number; trade: number; growth: number; mood: number; lat: number };
+type CityPoint = { name: string; x: number; y: number; pop: number; wealth: number; trade: number; growth: number; mood: number; lat: number };
 
-function CorrelationsTab({ points }: { points: CityPoint[] }) {
+function CorrelationsTab({ points, geo, onPick }: {
+  points: CityPoint[]; geo: GeoHubPoint[]; onPick: (x: number, y: number) => void;
+}) {
   if (points.length < 4) {
     return <div style={hint}>Need at least four living cities on the ledger to read correlations.</div>;
   }
   // Zipf: rank cities by population, plot log rank vs log population.
   const zipf = [...points].sort((a, b) => b.pop - a.pop)
-    .map((p, i) => ({ x: i + 1, y: p.pop, label: p.name }));
+    .map((p, i) => ({ x: i + 1, y: p.pop, label: p.name, mx: p.x, my: p.y }));
+  const geoOk = geo.length >= 4;
   return (
     <>
       <div style={{ color: T.inkDim, fontSize: 11, marginBottom: 8, lineHeight: 1.5 }}>
-        Each dot is one living city. <b style={{ color: T.inkMid }}>r</b> is the Pearson correlation
-        (−1…+1); the gold line is the least-squares trend. These relationships live nowhere else in the app.
+        Each dot is one living city — <b style={{ color: T.inkMid }}>click a dot to pin it on the map</b>.
+        {" "}<b style={{ color: T.inkMid }}>r</b> is the Pearson correlation (−1…+1); the gold line is the
+        least-squares trend. These relationships live nowhere else in the app.
       </div>
+
+      <div style={sectionHdrLocal}>City scaling</div>
       <Grid2>
-        <Scatter title="City rank–size (Zipf)" pts={zipf}
+        <Scatter title="City rank–size (Zipf)" pts={zipf} onPick={onPick}
           xLabel="rank (largest → smallest)" yLabel="population"
           logX logY color="#6ab0e8"
           note="A straight −1 slope = a healthy Zipf hierarchy; a flat top = no dominant primate city." />
-        <Scatter title="Population ↔ Wealth"
-          pts={points.map((p) => ({ x: p.pop, y: p.wealth, label: p.name }))}
+        <Scatter title="Population ↔ Wealth" onPick={onPick}
+          pts={points.map((p) => ({ x: p.pop, y: p.wealth, label: p.name, mx: p.x, my: p.y }))}
           xLabel="population" yLabel="wealth" logX logY color="#d8b070"
           note="Does size buy wealth? Cities well above the line punch above their weight." />
-        <Scatter title="Population ↔ Trade throughput"
-          pts={points.map((p) => ({ x: p.pop, y: p.trade, label: p.name }))}
+        <Scatter title="Population ↔ Trade throughput" onPick={onPick}
+          pts={points.map((p) => ({ x: p.pop, y: p.trade, label: p.name, mx: p.x, my: p.y }))}
           xLabel="population" yLabel="trade / yr" logX logY color="#4fd0c0"
           note="Trade hubs sit above the line — busier than their size implies." />
-        <Scatter title="Trade ↔ Wealth"
-          pts={points.map((p) => ({ x: p.trade, y: p.wealth, label: p.name }))}
+        <Scatter title="Trade ↔ Wealth" onPick={onPick}
+          pts={points.map((p) => ({ x: p.trade, y: p.wealth, label: p.name, mx: p.x, my: p.y }))}
           xLabel="trade / yr" yLabel="wealth" logX logY color="#c9b96a"
           note="Is commerce the road to riches, or does grain wealth dominate?" />
-        <Scatter title="Latitude ↔ Wealth (geography)"
-          pts={points.map((p) => ({ x: p.lat, y: p.wealth, label: p.name }))}
-          xLabel="0 equator → 1 pole" yLabel="wealth" logY color="#7fd08a"
-          note="Ties the human economy back to the physical map — do the tropics or the temperate belts prosper?" />
-        <Scatter title="Growth ↔ Mood"
-          pts={points.map((p) => ({ x: p.mood, y: p.growth * 100, label: p.name }))}
+      </Grid2>
+
+      <div style={{ ...sectionHdrLocal, marginTop: 10 }}>Geography ↔ economy</div>
+      {!geoOk && <div style={hint}>Reading the climate under each city…</div>}
+      {geoOk && (
+        <Grid2>
+          <Scatter title="Temperature ↔ Wealth" onPick={onPick}
+            pts={geo.map((p) => ({ x: p.temperature, y: Math.max(0.01, p.wealth), label: p.name, mx: p.x, my: p.y }))}
+            xLabel="mean temp °C" yLabel="wealth" logY color="#e08a6a"
+            note="Do warm or cool cities prosper? Ties wealth to the temperature belts." />
+          <Scatter title="Rainfall ↔ Wealth" onPick={onPick}
+            pts={geo.map((p) => ({ x: p.precipitation, y: Math.max(0.01, p.wealth), label: p.name, mx: p.x, my: p.y }))}
+            xLabel="precip mm/yr" yLabel="wealth" logY color="#6aa9e8"
+            note="Wet breadbaskets vs arid trade entrepôts." />
+          <Scatter title="Coast distance ↔ Trade" onPick={onPick}
+            pts={geo.map((p) => ({ x: Math.max(0.001, p.distance_to_ocean), y: Math.max(0.01, p.trade), label: p.name, mx: p.x, my: p.y }))}
+            xLabel="distance to ocean" yLabel="trade / yr" logY color="#7fd0c0"
+            note="Expect a NEGATIVE r — ports out-trade the landlocked interior." />
+          <Scatter title="Fertility ↔ Population" onPick={onPick}
+            pts={geo.map((p) => ({ x: p.fertility, y: Math.max(1, p.population), label: p.name, mx: p.x, my: p.y }))}
+            xLabel="soil fertility" yLabel="population" logY color="#7fd08a"
+            note="Fertile ground should feed bigger cities." />
+          <Scatter title="Elevation ↔ Population" onPick={onPick}
+            pts={geo.map((p) => ({ x: p.elevation, y: Math.max(1, p.population), label: p.name, mx: p.x, my: p.y }))}
+            xLabel="elevation (0–1)" yLabel="population" logY color="#c9b96a"
+            note="Highland vs lowland settlement — usually a negative slope." />
+          <Scatter title="Latitude ↔ Wealth" onPick={onPick}
+            pts={points.map((p) => ({ x: p.lat, y: p.wealth, label: p.name, mx: p.x, my: p.y }))}
+            xLabel="0 equator → 1 pole" yLabel="wealth" logY color="#c08cff"
+            note="Do the tropics or the temperate belts hold the riches?" />
+        </Grid2>
+      )}
+
+      <div style={{ ...sectionHdrLocal, marginTop: 10 }}>Society</div>
+      <Grid2>
+        <Scatter title="Growth ↔ Mood" onPick={onPick}
+          pts={points.map((p) => ({ x: p.mood, y: p.growth * 100, label: p.name, mx: p.x, my: p.y }))}
           xLabel="civic mood" yLabel="growth %/mo" color="#e0a86a"
           note="Happy cities should be growing cities — outliers are worth a look." />
       </Grid2>
@@ -825,9 +874,10 @@ function StackedBars({ title, rows, keys }: {
 
 /** Scatter plot with an optional log axis, a fitted trend line and a Pearson r.
  *  `pts` are `{x, y, label}`; r + fit are computed in the (possibly log) space. */
-function Scatter({ title, pts, xLabel, yLabel, logX, logY, color, note }: {
-  title: string; pts: { x: number; y: number; label?: string }[];
+function Scatter({ title, pts, xLabel, yLabel, logX, logY, color, note, onPick }: {
+  title: string; pts: { x: number; y: number; label?: string; mx?: number; my?: number }[];
   xLabel: string; yLabel: string; logX?: boolean; logY?: boolean; color: string; note?: string;
+  onPick?: (x: number, y: number) => void;
 }) {
   const w = 540, h = 150, padL = 6, padB = 4, padT = 4, padR = 6;
   const tx = (v: number) => (logX ? Math.log10(Math.max(1e-6, v)) : v);
@@ -849,8 +899,10 @@ function Scatter({ title, pts, xLabel, yLabel, logX, logY, color, note }: {
         {/* trend line */}
         <line x1={px(lx0)} y1={py(ly0)} x2={px(lx1)} y2={py(ly1)} stroke={T.gold} strokeWidth={1.2} strokeDasharray="4 3" opacity={0.8} />
         {pts.map((p, i) => (
-          <circle key={i} cx={px(p.x)} cy={py(p.y)} r={2.6} fill={color} fillOpacity={0.75}>
-            {p.label && <title>{`${p.label}\n${xLabel}: ${fmtNum(p.x)}\n${yLabel}: ${fmtNum(p.y)}`}</title>}
+          <circle key={i} cx={px(p.x)} cy={py(p.y)} r={2.6} fill={color} fillOpacity={0.75}
+            style={onPick && p.mx !== undefined ? { cursor: "pointer" } : undefined}
+            onClick={onPick && p.mx !== undefined ? () => onPick(p.mx!, p.my!) : undefined}>
+            {p.label && <title>{`${p.label}\n${xLabel}: ${fmtNum(p.x)}\n${yLabel}: ${fmtNum(p.y)}${onPick ? "\n(click to pin on map)" : ""}`}</title>}
           </circle>
         ))}
       </svg>
