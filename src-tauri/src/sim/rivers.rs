@@ -431,6 +431,15 @@ pub fn extract_rivers(
         main_child[i] = best_ni;
     }
 
+    // CONFLUENCE cells — a channel with two or more channel inflows (its main-stem
+    // child plus at least one tributary head). A tributary segment ENDS on exactly
+    // such a cell (the appended junction), while the main stem passes THROUGH it as
+    // an interior vertex. So the trunk's meander must be pinned to the cell centre
+    // here; otherwise the trunk's rendered line wanders off-centre while the
+    // tributary's endpoint stays on the centre — the visible "rivers don't join"
+    // gap. Anchoring the confluence on the trunk makes both meet exactly.
+    let confluence: Vec<bool> = (0..total).map(|i| up_count[i] >= 2).collect();
+
     // Walk one polyline per SOURCE (a channel cell with no channel inflow). Each
     // walk runs downstream while it stays the main branch, ending either at the
     // sea (a trunk river) or at the confluence where it merges into a larger
@@ -541,7 +550,7 @@ pub fn extract_rivers(
         // TRUE meander geometry (sub-cell render polyline) — winds on flat
         // lowlands, straight in the steep headwaters, clamped to the valley floor.
         let mseed = (s as u64).wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(0x51ED);
-        let render = build_meander_path(buf, &points, width, discharge, threshold as f32, mseed);
+        let render = build_meander_path(buf, &points, width, discharge, threshold as f32, mseed, &confluence);
         // Braided anabranches on the widest, flattest reaches of a great river.
         let braids = build_braids(buf, &render, width, order, mseed ^ 0xB2A1);
 
@@ -562,6 +571,7 @@ pub fn extract_rivers(
 fn build_meander_path(
     buf: &WorldBuffer, points: &[(u32, u32)],
     width_cells: f32, discharge: f32, threshold: f32, seed: u64,
+    confluence: &[bool],
 ) -> Vec<(f32, f32)> {
     let n = points.len();
     if n < 4 {
@@ -584,11 +594,23 @@ fn build_meander_path(
         cx[k] = best;
     }
     let mut cy: Vec<f32> = points.iter().map(|&(_, y)| y as f32).collect();
+    // Exact (unrolled) cell centres before smoothing/meandering — used to PIN any
+    // confluence vertex so the trunk passes dead-centre through a junction, meeting
+    // the tributary whose endpoint is anchored to the same cell.
+    let ux0 = cx.clone();
+    let uy0 = cy.clone();
+    let is_anchor = |k: usize| -> bool {
+        !confluence.is_empty() && {
+            let idx = buf.idx(points[k].0, points[k].1);
+            confluence.get(idx).copied().unwrap_or(false)
+        }
+    };
 
     // ── Smooth the 8-neighbour staircase (windowed passes, endpoints anchored) ──
     for _ in 0..2 {
         let (sx, sy) = (cx.clone(), cy.clone());
         for k in 1..n - 1 {
+            if is_anchor(k) { cx[k] = ux0[k]; cy[k] = uy0[k]; continue; } // pin confluence
             cx[k] = sx[k - 1] * 0.25 + sx[k] * 0.5 + sx[k + 1] * 0.25;
             cy[k] = sy[k - 1] * 0.25 + sy[k] * 0.5 + sy[k + 1] * 0.25;
         }
@@ -624,6 +646,9 @@ fn build_meander_path(
         ((s * 12.9898).sin() * 43758.545).fract().abs() * std::f32::consts::TAU
     };
     for k in 1..n - 1 {
+        // A confluence vertex stays pinned to its exact cell centre so the trunk
+        // meets every joining tributary (whose endpoint sits on the same cell).
+        if is_anchor(k) { out[k] = (ux0[k], uy0[k]); continue; }
         let (px, py) = (cx[k - 1], cy[k - 1]);
         let (x, y) = (cx[k], cy[k]);
         let (nx, ny) = (cx[k + 1], cy[k + 1]);
@@ -1010,6 +1035,19 @@ mod tests {
         for r in &rivers {
             assert_eq!(r.render.len(), r.points.len(), "render path mirrors the cell path");
         }
+        // RULE 2 — a tributary must VISUALLY JOIN the stream it flows into: its last
+        // render vertex (the confluence) must coincide with a render vertex of some
+        // OTHER river (the trunk anchors that confluence to the same cell centre).
+        // This guards the "rivers don't join together" gap.
+        for (ti, t) in rivers.iter().enumerate() {
+            if !t.tributary { continue; }
+            let end = *t.render.last().unwrap();
+            let joined = rivers.iter().enumerate().any(|(oi, o)| {
+                oi != ti && o.render.iter().any(|&(x, y)|
+                    (x - end.0).abs() < 0.05 && (y - end.1).abs() < 0.05)
+            });
+            assert!(joined, "tributary {ti} ends at {:?} but no trunk shares that point", end);
+        }
     }
 
     /// A river crossing a FLAT floodplain must actually meander — its render path
@@ -1021,7 +1059,7 @@ mod tests {
         let n = (w * h) as usize;
         let buf = synth(w, h, vec![1u8; n], vec![0.1f32; n]); // all land, dead flat
         let pts: Vec<(u32, u32)> = (5..70).map(|x| (x, 20)).collect();
-        let render = build_meander_path(&buf, &pts, 2.5, 4000.0, 20.0, 12345);
+        let render = build_meander_path(&buf, &pts, 2.5, 4000.0, 20.0, 12345, &[]);
 
         assert_eq!(render.len(), pts.len(), "render mirrors the cell path");
         assert!((render[0].0 - 5.0).abs() < 0.001 && (render[0].1 - 20.0).abs() < 0.001,
@@ -1046,7 +1084,7 @@ mod tests {
         let buf = synth(w, h, vec![1u8; n], elev);
         // Source high (large x) → mouth low (small x): a real downhill reach.
         let pts: Vec<(u32, u32)> = (5..70).rev().map(|x| (x, 20)).collect();
-        let render = build_meander_path(&buf, &pts, 2.5, 4000.0, 20.0, 999);
+        let render = build_meander_path(&buf, &pts, 2.5, 4000.0, 20.0, 999, &[]);
         let max_dev = render.iter().map(|&(_, y)| (y - 20.0).abs()).fold(0.0f32, f32::max);
         assert!(max_dev < 0.35, "steep ground stays near-straight: {max_dev}");
     }
@@ -1059,7 +1097,7 @@ mod tests {
         let n = (w * h) as usize;
         let buf = synth(w, h, vec![1u8; n], vec![0.1f32; n]);
         let pts: Vec<(u32, u32)> = (5..110).map(|x| (x, 30)).collect();
-        let render = build_meander_path(&buf, &pts, 3.0, 8000.0, 20.0, 7);
+        let render = build_meander_path(&buf, &pts, 3.0, 8000.0, 20.0, 7, &[]);
         let river = River {
             points: pts, width: 3.0, major: true, navigable: true, mouth_kind: 0,
             delta: vec![], tributary: false, order: 5, meander: 1.0, render, braids: vec![],
@@ -1082,7 +1120,7 @@ mod tests {
         let n = (w * h) as usize;
         let buf = synth(w, h, vec![1u8; n], vec![0.1f32; n]);
         let pts: Vec<(u32, u32)> = (5..130).map(|x| (x, 30)).collect();
-        let render = build_meander_path(&buf, &pts, 3.0, 9000.0, 20.0, 3);
+        let render = build_meander_path(&buf, &pts, 3.0, 9000.0, 20.0, 3, &[]);
 
         let braids = build_braids(&buf, &render, 3.0, 6, 55);
         assert!(!braids.is_empty(), "a great flat river should braid");
