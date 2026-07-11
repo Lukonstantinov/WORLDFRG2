@@ -65,8 +65,16 @@ pub fn sim_ocean_atmosphere(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, S
     ocean::generate_ocean_currents(&mut buf);
     ocean::advect_salinity_and_recouple(&mut buf);
     ocean::compute_distance_to_ocean(&mut buf);
+    // Seasonal sea ice on shallow high-latitude shelf seas (Hudson Bay / Okhotsk):
+    // compute the freeze index once, let it reinforce cold currents (brine
+    // rejection) BEFORE temperature so the current-influence pass sees the new
+    // cold tags, then apply the "refrigerator" cooling AFTER temperature (which
+    // rewrites the field from scratch, so an earlier cooling would be lost).
+    let sea_freeze = ocean::compute_shelf_freeze(&buf);
+    ocean::reinforce_cold_shelf_currents(&mut buf, &sea_freeze);
     temperature::compute_temperature(&mut buf);
     ocean::compute_upwelling_zones(&mut buf);
+    ocean::apply_cold_shelf_cooling(&mut buf, &sea_freeze);
     precipitation::compute_precipitation(&mut buf);
 
     buf.save(&conn, "Ocean & atmosphere simulation")
@@ -282,8 +290,16 @@ pub fn sim_run_all(
     ocean::generate_ocean_currents(&mut buf);
     ocean::advect_salinity_and_recouple(&mut buf);
     ocean::compute_distance_to_ocean(&mut buf);
+    // Seasonal sea ice on shallow high-latitude shelf seas (Hudson Bay / Okhotsk):
+    // compute the freeze index once, let it reinforce cold currents (brine
+    // rejection) BEFORE temperature so the current-influence pass sees the new
+    // cold tags, then apply the "refrigerator" cooling AFTER temperature (which
+    // rewrites the field from scratch, so an earlier cooling would be lost).
+    let sea_freeze = ocean::compute_shelf_freeze(&buf);
+    ocean::reinforce_cold_shelf_currents(&mut buf, &sea_freeze);
     temperature::compute_temperature(&mut buf);
     ocean::compute_upwelling_zones(&mut buf);
+    ocean::apply_cold_shelf_cooling(&mut buf, &sea_freeze);
     precipitation::compute_precipitation(&mut buf);
 
     // Phase 4: Climate
@@ -413,8 +429,16 @@ pub fn sim_run_all_from_terrain(
     ocean::generate_ocean_currents(&mut buf);
     ocean::advect_salinity_and_recouple(&mut buf);
     ocean::compute_distance_to_ocean(&mut buf);
+    // Seasonal sea ice on shallow high-latitude shelf seas (Hudson Bay / Okhotsk):
+    // compute the freeze index once, let it reinforce cold currents (brine
+    // rejection) BEFORE temperature so the current-influence pass sees the new
+    // cold tags, then apply the "refrigerator" cooling AFTER temperature (which
+    // rewrites the field from scratch, so an earlier cooling would be lost).
+    let sea_freeze = ocean::compute_shelf_freeze(&buf);
+    ocean::reinforce_cold_shelf_currents(&mut buf, &sea_freeze);
     temperature::compute_temperature(&mut buf);
     ocean::compute_upwelling_zones(&mut buf);
+    ocean::apply_cold_shelf_cooling(&mut buf, &sea_freeze);
     precipitation::compute_precipitation(&mut buf);
 
     // Phase 4: Climate

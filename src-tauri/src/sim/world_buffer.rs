@@ -625,8 +625,11 @@ mod tests {
         crate::sim::ocean::generate_ocean_currents(&mut buf);
         crate::sim::ocean::advect_salinity_and_recouple(&mut buf);
         crate::sim::ocean::compute_distance_to_ocean(&mut buf);
+        let sea_freeze = crate::sim::ocean::compute_shelf_freeze(&buf);
+        crate::sim::ocean::reinforce_cold_shelf_currents(&mut buf, &sea_freeze);
         crate::sim::temperature::compute_temperature(&mut buf);
         crate::sim::ocean::compute_upwelling_zones(&mut buf);
+        crate::sim::ocean::apply_cold_shelf_cooling(&mut buf, &sea_freeze);
         crate::sim::precipitation::compute_precipitation(&mut buf);
         buf.save(&conn, "ocean").unwrap();
 

@@ -1263,6 +1263,250 @@ pub fn advect_salinity_and_recouple(buf: &mut WorldBuffer) {
     extend_warm_tag(buf, reach);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Cold shelf seas — seasonal sea ice as a high-latitude "refrigerator"
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Shallow, semi-enclosed seas at high latitude (Hudson Bay, the Baltic, the Sea
+// of Okhotsk) freeze over each winter and behave as a COLD RESERVOIR rather than
+// a maritime moderator. The ice caps the ocean→air heat flux (so the sea gives
+// NO winter warming — the maritime moderation switches off) and the cold melt
+// pool chills the surrounding land into summer, dragging the local climate one or
+// two Köppen belts colder than latitude alone would give (the tundra fingers that
+// reach south of Hudson Bay).
+//
+// This is a four-term competition — winter cooling demand vs. the heat available
+// to resist it — NOT latitude+depth alone. A sea bathed by a warm current (the
+// Norwegian shelf, ice-free at >70°N) does not freeze, while Labrador freezes at
+// a lower latitude. The freeze index Φ ∈ [0,1] therefore is:
+//
+//   Φ = lat_gate                   net annual radiation deficit   smoothstep 45→62°
+//     · 1[is_shelf]                low heat capacity C = ρ·cp·H    (shallow shelf)
+//     · (1 − warm)                 no advective heat import        (no warm current near)
+//     · (0.55 + 0.45·brackish)     freezing point raised by low S  (Millero/UNESCO Tf)
+//     · (0.45 + 0.55·enclosure)    poor exchange with open ocean   (BFS to open water)
+//
+// Science anchors: seawater freezing point Tf ≈ −0.055·S (Millero/UNESCO, TEOS-10);
+// sea-ice albedo 0.5–0.85 vs 0.06 open water and the ice insulation flux cut
+// (Curry et al. 1995; Hill et al. 2019); the latent-heat reservoir ρ·Lf·h that
+// delays summer warming, measured as a >3 MJ m⁻³ Hudson Bay heat anomaly (Joly et
+// al. 2010); NSIDC sea-ice background.
+
+/// Latitude onset/saturation of the seasonal-ice regime.
+const SEA_ICE_LAT_LO: f32 = 45.0;
+const SEA_ICE_LAT_HI: f32 = 62.0;
+
+/// Smoothstep S-curve (0 below `a`, 1 above `b`).
+#[inline]
+fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
+    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Freezing point of seawater from stored salinity (linearized Millero/UNESCO,
+/// surface pressure): Tf ≈ −0.055·S. salinity is u8 over SAL_MIN..SAL_MAX PSU.
+#[inline]
+fn seawater_freezing_point(sal_u8: u8) -> f32 {
+    let psu = SAL_MIN_PSU + (sal_u8 as f32 / 255.0) * (SAL_MAX_PSU - SAL_MIN_PSU);
+    -0.055 * psu
+}
+
+/// True if a WARM current (type 1) runs within `r` cells — this keeps a shelf
+/// ice-free despite high latitude (the Norwegian Current vs. Labrador contrast).
+fn warm_current_near(buf: &WorldBuffer, x: u32, y: u32, r: i32) -> bool {
+    if buf.current_type.is_empty() { return false; }
+    for dy in -r..=r {
+        let ny = y as i32 + dy;
+        if ny < 0 || ny >= buf.height as i32 { continue; }
+        for dx in -r..=r {
+            let ni = buf.idx(buf.wrap_x(x as i32 + dx), ny as u32);
+            if buf.terrain[ni] == 0 && buf.current_type[ni] == 1 { return true; }
+        }
+    }
+    false
+}
+
+/// BFS distance (in cells, capped) from every ocean cell to the nearest OPEN
+/// ocean — deep (non-shelf) water. An enclosed shelf basin is far from open water
+/// → poor heat exchange → freezes harder.
+fn open_ocean_distance(buf: &WorldBuffer, cap: u16) -> Vec<u16> {
+    let (w, h, n) = (buf.width, buf.height, buf.total());
+    let mut dist = vec![u16::MAX; n];
+    let mut q = VecDeque::new();
+    for i in 0..n {
+        if buf.terrain[i] == 0 && buf.is_shelf[i] == 0 {
+            dist[i] = 0;
+            q.push_back(i);
+        }
+    }
+    while let Some(i) = q.pop_front() {
+        let d = dist[i];
+        if d >= cap { continue; }
+        let cx = (i % w as usize) as i32;
+        let cy = (i / w as usize) as i32;
+        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+            let ny = cy + dy;
+            if ny < 0 || ny >= h as i32 { continue; }
+            let ni = buf.idx(buf.wrap_x(cx + dx), ny as u32);
+            if buf.terrain[ni] == 0 && dist[ni] > d + 1 {
+                dist[ni] = d + 1;
+                q.push_back(ni);
+            }
+        }
+    }
+    for v in dist.iter_mut() {
+        if *v == u16::MAX { *v = cap; }
+    }
+    dist
+}
+
+/// Compute the seasonal-sea-ice freeze index Φ per ocean cell (see the section
+/// header). Pure read; returns a world-sized f32 field (0 over land and over
+/// ice-free water). Requires shelf + salinity + currents to have been computed.
+pub fn compute_shelf_freeze(buf: &WorldBuffer) -> Vec<f32> {
+    let (w, h, n) = (buf.width, buf.height, buf.total());
+    // Defensive: without these columns loaded there is nothing to test.
+    if buf.is_shelf.is_empty() || buf.salinity.is_empty() || buf.current_type.is_empty() {
+        return vec![0.0; n];
+    }
+    let open = open_ocean_distance(buf, 16);
+    let mut phi = vec![0.0f32; n];
+    for y in 0..h {
+        let lat_gate = smoothstep(SEA_ICE_LAT_LO, SEA_ICE_LAT_HI, buf.abs_latitude(y));
+        if lat_gate <= 0.0 { continue; }
+        for x in 0..w {
+            let i = buf.idx(x, y);
+            if buf.terrain[i] != 0 || buf.is_shelf[i] == 0 { continue; }
+            if warm_current_near(buf, x, y, 3) { continue; } // Norwegian-shelf exception
+            // Fresher water freezes at a warmer Tf → freezes more readily. Map the
+            // salinity-dependent Tf (−0.4 near-fresh .. −2.3 briny) to brackish 0..1.
+            let tf = seawater_freezing_point(buf.salinity[i]);
+            let brackish = ((tf + 2.3) / 1.9).clamp(0.0, 1.0);
+            let encl = (open[i] as f32 / 12.0).clamp(0.0, 1.0);
+            phi[i] = (lat_gate * (0.55 + 0.45 * brackish) * (0.45 + 0.55 * encl)).clamp(0.0, 1.0);
+        }
+    }
+    phi
+}
+
+/// Ocean-current refinement from seasonal sea ice (brine rejection). A freezing
+/// shelf sea ejects salt and forms cold, dense water that sinks and is exported
+/// as a COLD current (Sea of Okhotsk → East Sakhalin Current → Oyashio; Labrador
+/// shelf → Labrador Current). We tag strongly-freezing shelf water as cold, then
+/// trace a short cold plume downstream into the adjacent open ocean and give it a
+/// small speed boost (the dense-water outflow). This feeds the EXISTING cold-
+/// current climate machinery: the temperature current-influence pass, the
+/// precipitation cold-coast/monsoon terms, and Köppen. Call BEFORE
+/// `compute_temperature` so those consumers see the new tags.
+pub fn reinforce_cold_shelf_currents(buf: &mut WorldBuffer, freeze: &[f32]) {
+    let (w, h, n) = (buf.width, buf.height, buf.total());
+    if buf.current_type.is_empty() || freeze.len() != n { return; }
+
+    // 1. The freezing shelf water itself reads as ice-margin cold water.
+    for i in 0..n {
+        if buf.terrain[i] == 0 && freeze[i] > 0.35 && buf.current_type[i] != 1 {
+            buf.current_type[i] = 2;
+        }
+    }
+
+    // 2. Brine-rejection export: from strongly-freezing shelf cells that border
+    //    OPEN (non-shelf) water, trace a short downstream plume, cold-tag it, and
+    //    accelerate the dense-water outflow. Bounded reach keeps it marginal.
+    let base_freeze = freeze.to_vec();
+    const MAX_STEPS: usize = 10;
+    const STEP: f32 = 1.5;
+    const OUTFLOW_BOOST: f32 = 1.12;
+    for sy in 0..h {
+        for sx in 0..w {
+            let si = (sy * w + sx) as usize;
+            if base_freeze[si] <= 0.5 { continue; }
+            let borders_open = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
+                let ny = sy as i32 + dy;
+                if ny < 0 || ny >= h as i32 { return false; }
+                let ni = buf.idx(buf.wrap_x(sx as i32 + dx), ny as u32);
+                buf.terrain[ni] == 0 && buf.is_shelf[ni] == 0
+            });
+            if !borders_open { continue; }
+
+            let mut px = sx as f32 + 0.5;
+            let mut py = sy as f32 + 0.5;
+            for _ in 0..MAX_STEPS {
+                let (xi, yi) = (px.floor() as i32, py.floor() as i32);
+                if yi < 0 || yi >= h as i32 { break; }
+                let i = buf.idx(buf.wrap_x(xi), yi as u32);
+                if buf.terrain[i] != 0 { break; }      // reached the coast
+                if buf.current_type[i] == 1 { break; } // don't overwrite warm water
+                buf.current_type[i] = 2;
+                let (vmx, vmy) = (buf.current_vx[i], buf.current_vy[i]);
+                let mag = (vmx * vmx + vmy * vmy).sqrt();
+                if mag < 0.05 { break; }
+                buf.current_vx[i] *= OUTFLOW_BOOST;
+                buf.current_vy[i] *= OUTFLOW_BOOST;
+                px += vmx / mag * STEP;
+                py += vmy / mag * STEP;
+            }
+        }
+    }
+}
+
+/// Apply the seasonal-sea-ice cooling onto the temperature field: drag the frozen
+/// water's own annual mean toward its freezing point (ice + cold pool), and chill
+/// the adjacent land — the "refrigerator". The land term is accumulated then
+/// clamped (the upwelling pattern) so a shore ringed by ice on several sides can't
+/// stack an unphysical deep-freeze. Call AFTER `compute_temperature`, which
+/// rewrites the temperature field from scratch (an earlier cooling would be lost).
+pub fn apply_cold_shelf_cooling(buf: &mut WorldBuffer, freeze: &[f32]) {
+    let (w, h, n) = (buf.width, buf.height, buf.total());
+    if freeze.len() != n { return; }
+
+    // (1) The frozen water: pull its mean toward Tf (albedo + insulation flip).
+    for i in 0..n {
+        if buf.terrain[i] == 0 && freeze[i] > 0.0 {
+            let tf = seawater_freezing_point(buf.salinity[i]);
+            let t = buf.temperature[i];
+            if t > tf { buf.temperature[i] = t + (tf - t) * 0.75 * freeze[i]; }
+        }
+    }
+
+    // (2) Chill the adjacent land. Reach ~3 cells, Gaussian falloff, clamped so a
+    //     fully ice-ringed shore reaches ~MAX_COOL (calibrated to the ~one-Köppen-
+    //     belt / Joly-2010 Hudson Bay coastal cooling).
+    const REACH: i32 = 3;
+    const MAX_COOL: f32 = 8.0;
+    const SIGMA2: f32 = 4.0;
+    let kernel = |dx: i32, dy: i32| (-(((dx * dx + dy * dy) as f32) / (2.0 * SIGMA2))).exp();
+    let mut norm = 0.0f32;
+    for dy in -REACH..=REACH {
+        for dx in -REACH..=REACH {
+            if dx == 0 && dy == 0 { continue; }
+            norm += kernel(dx, dy);
+        }
+    }
+    let scale = MAX_COOL / norm.max(1e-6);
+
+    let mut delta = vec![0.0f32; n];
+    for y in 0..h {
+        for x in 0..w {
+            let i = buf.idx(x, y);
+            if buf.terrain[i] != 0 || freeze[i] <= 0.0 { continue; }
+            let src = freeze[i];
+            for dy in -REACH..=REACH {
+                let ny = buf.clamp_y(y as i32 + dy);
+                for dx in -REACH..=REACH {
+                    let ni = buf.idx(buf.wrap_x(x as i32 + dx), ny);
+                    if buf.terrain[ni] != 1 { continue; }
+                    delta[ni] -= src * kernel(dx, dy) * scale;
+                }
+            }
+        }
+    }
+    for i in 0..n {
+        if buf.terrain[i] == 1 {
+            buf.temperature[i] += delta[i].max(-MAX_COOL);
+        }
+    }
+}
+
 /// Compute upwelling zones: shelf + cold current + equatorward flow + eastern boundary.
 pub fn compute_upwelling_zones(buf: &mut WorldBuffer) {
     let w = buf.width;
@@ -1360,5 +1604,92 @@ pub fn compute_distance_to_ocean(buf: &mut WorldBuffer) {
     for i in 0..buf.total() {
         let d = dist[i].min(max_dist) as f32;
         buf.distance_to_ocean[i] = d / max_dist as f32;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sim::world_buffer::ColumnSet;
+
+    /// Build a 16×12 all-land test world. With equator_offset 0.5 and unit lat
+    /// scaling, abs_lat(row) = 15·|6−row|, so row 2 = 60°N, row 6 = equator.
+    fn land_world() -> WorldBuffer {
+        let (w, h) = (16u32, 12u32);
+        let n = (w * h) as usize;
+        WorldBuffer {
+            cols: ColumnSet::ALL, width: w, height: h, tiles_x: 1, tiles_y: 1,
+            equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0,
+            terrain: vec![1u8; n], elevation: vec![0.1; n], sea_depth: vec![0.0; n],
+            is_shelf: vec![0u8; n], is_shelf_edge: vec![0u8; n], locked_bits: Vec::new(),
+            plate_index: Vec::new(), boundary_type: Vec::new(), is_volcanic: Vec::new(),
+            temperature: vec![5.0f32; n], precipitation: Vec::new(), koppen: Vec::new(),
+            soil_type: Vec::new(), fertility: Vec::new(), fishery: Vec::new(),
+            current_type: vec![0u8; n], wind_vx: Vec::new(), wind_vy: Vec::new(),
+            current_vx: vec![0.0f32; n], current_vy: vec![0.0f32; n],
+            distance_to_ocean: Vec::new(), habitability: Vec::new(),
+            salinity: vec![128u8; n], shark_risk: Vec::new(), goods: Vec::new(),
+            shipworm_risk: Vec::new(), storm_base: Vec::new(), reef_risk: Vec::new(),
+            disease_risk: Vec::new(),
+        }
+    }
+
+    /// Turn a cell into an enclosed brackish shelf-sea cell (Hudson-Bay-like).
+    fn make_cold_sea(buf: &mut WorldBuffer, x: u32, y: u32) {
+        let i = buf.idx(x, y);
+        buf.terrain[i] = 0;
+        buf.is_shelf[i] = 1;
+        buf.salinity[i] = 40; // ~30 PSU, brackish → freezes readily
+    }
+
+    #[test]
+    fn shelf_freeze_index_gates_on_latitude_shelf_and_warm_current() {
+        let mut buf = land_world();
+        // Enclosed cold shelf sea at 60°N (row 2), all-land surroundings.
+        make_cold_sea(&mut buf, 5, 2);
+        make_cold_sea(&mut buf, 6, 2);
+        // A high-lat shelf sea bathed by a warm current (Norwegian-shelf analogue).
+        make_cold_sea(&mut buf, 10, 2);
+        make_cold_sea(&mut buf, 11, 2);
+        let warm_idx = buf.idx(11, 2);
+        buf.current_type[warm_idx] = 1; // warm current on the pair
+        // A tropical shelf sea (row 6, equator) — latitude gate should zero it.
+        make_cold_sea(&mut buf, 5, 6);
+
+        let phi = compute_shelf_freeze(&buf);
+
+        assert!(phi[buf.idx(5, 2)] > 0.35, "enclosed high-lat brackish shelf freezes");
+        assert_eq!(phi[buf.idx(10, 2)], 0.0, "warm current keeps the shelf ice-free");
+        assert_eq!(phi[buf.idx(11, 2)], 0.0, "warm current cell itself never freezes");
+        assert_eq!(phi[buf.idx(5, 6)], 0.0, "tropical shelf never freezes");
+    }
+
+    #[test]
+    fn cold_shelf_refrigerates_adjacent_land_and_tags_currents() {
+        let mut buf = land_world();
+        // A sizeable enclosed high-latitude basin (rows 1-2 = 75°/60°N), like the
+        // real Hudson Bay — big enough that its shore is chilled from several sides.
+        for y in 1..=2 {
+            for x in 3..=7 {
+                make_cold_sea(&mut buf, x, y);
+            }
+        }
+
+        let phi = compute_shelf_freeze(&buf);
+        reinforce_cold_shelf_currents(&mut buf, &phi);
+        // The freezing water reads as a cold current (brine-rejection tag).
+        assert_eq!(buf.current_type[buf.idx(5, 2)], 2, "frozen shelf tagged cold");
+
+        apply_cold_shelf_cooling(&mut buf, &phi);
+        // The water's own annual mean is dragged well below the 5°C start toward
+        // its freezing point (not all the way — it's a seasonal, ~0.75·Φ pull).
+        assert!(buf.temperature[buf.idx(5, 2)] < 3.0, "frozen sea mean cooled: {}", buf.temperature[buf.idx(5, 2)]);
+        // Land on the ice-facing shore (row 3, below the basin) is chilled well
+        // below the 5°C baseline (the refrigerator reaching inland).
+        let shore = buf.idx(5, 3);
+        assert!(buf.temperature[shore] < 4.0, "shore cooled: {}", buf.temperature[shore]);
+        // Far-field land (the opposite side of the world) is untouched.
+        let far = buf.idx(13, 9);
+        assert_eq!(buf.temperature[far], 5.0, "distant land unaffected");
     }
 }
