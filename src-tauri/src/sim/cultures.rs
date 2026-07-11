@@ -243,6 +243,89 @@ pub fn kit_desired_goods(kit: usize) -> &'static [&'static str] {
     D.get(kit).copied().unwrap_or(&[])
 }
 
+// ── Culture TRAITS ──────────────────────────────────────────────────────────
+/// A cultural trait — a lasting disposition that colours a people's character and
+/// (where wired) drives sim behaviour: assimilation, migration, trade, quarters.
+pub struct CultureTrait {
+    pub name: &'static str,
+    pub emoji: &'static str,
+    pub blurb: &'static str,
+}
+
+/// The fixed trait catalogue. Index order is stable (persisted implicitly via the
+/// deterministic assignment below); append new traits at the END only.
+pub const TRAITS: &[CultureTrait] = &[
+    CultureTrait { name: "Mercantile", emoji: "💰", blurb: "born traders — wealth flows through their markets and counting-houses" },      // 0
+    CultureTrait { name: "Seafaring",  emoji: "⚓", blurb: "sailors and shipwrights, at home on open water" },                              // 1
+    CultureTrait { name: "Insular",    emoji: "🏝", blurb: "keep to their own — slow to mix with or adopt the ways of outsiders" },          // 2
+    CultureTrait { name: "Martial",    emoji: "⚔", blurb: "a warrior tradition — quick to raise arms and prize valour" },                    // 3
+    CultureTrait { name: "Devout",     emoji: "🕯", blurb: "deeply pious — faith and rite order daily life" },                               // 4
+    CultureTrait { name: "Nomadic",    emoji: "🐎", blurb: "move with the seasons — few permanent walls, mobile herds and camps" },          // 5
+    CultureTrait { name: "Diaspora",   emoji: "🧳", blurb: "scattered far from any homeland — keep their own quarters and wander widely" },   // 6
+    CultureTrait { name: "Assimilative", emoji: "🤝", blurb: "readily absorb neighbours and are absorbed — a melting-pot people" },          // 7
+    CultureTrait { name: "Clannish",   emoji: "🩸", blurb: "bound by kin and blood-loyalty above all" },                                     // 8
+    CultureTrait { name: "Scholarly",  emoji: "📜", blurb: "keepers of letters, law and learning" },                                        // 9
+    CultureTrait { name: "Agrarian",   emoji: "🌾", blurb: "rooted farmers of settled, tilled land" },                                       // 10
+    CultureTrait { name: "Pastoral",   emoji: "🐐", blurb: "herders of the dry and open country" },                                          // 11
+    CultureTrait { name: "Artisan",    emoji: "🔨", blurb: "renowned crafters — fine wares and skilled hands" },                             // 12
+    CultureTrait { name: "Xenophobic", emoji: "🚫", blurb: "wary of strangers — resist foreign ways and intermarriage" },                    // 13
+];
+
+/// Deterministic traits for a culture, from its kit archetype, homeland environment,
+/// travel-proneness and a stable seed. Returns 2–3 trait indices (into `TRAITS`), most
+/// characteristic first. A highly mobile people gains **Diaspora + Insular** (the
+/// scattered, self-contained merchant-minority profile), so real-world-style diaspora
+/// cultures emerge naturally from high mobility.
+pub fn kit_traits(kit: usize, mobility: f32, seed: u64) -> Vec<usize> {
+    // Two archetype traits per kit (index into TRAITS).
+    const ARCH: [[usize; 2]; 18] = [
+        [3, 9],   // 0 Roman    — martial, scholarly (law)
+        [1, 9],   // 1 Hellene  — seafaring, scholarly
+        [0, 1],   // 2 Punic    — mercantile, seafaring
+        [9, 4],   // 3 Persian  — scholarly, devout
+        [3, 1],   // 4 Norse    — martial, seafaring
+        [8, 3],   // 5 Celtic   — clannish, martial
+        [0, 4],   // 6 Arab     — mercantile, devout
+        [4, 12],  // 7 Indic    — devout, artisan
+        [9, 12],  // 8 Sinitic  — scholarly, artisan
+        [10, 8],  // 9 Slavic   — agrarian, clannish
+        [4, 12],  // 10 Nahua   — devout, artisan
+        [5, 11],  // 11 Turkic  — nomadic, pastoral
+        [11, 5],  // 12 Nilotic — pastoral, nomadic
+        [11, 0],  // 13 Amazigh — pastoral, mercantile (caravans)
+        [12, 4],  // 14 Yamato  — artisan, devout
+        [5, 3],   // 15 Mongol  — nomadic, martial
+        [10, 12], // 16 Quechua — agrarian, artisan
+        [0, 11],  // 17 Mande   — mercantile, pastoral
+    ];
+    let mut out: Vec<usize> = Vec::new();
+    let mut push = |out: &mut Vec<usize>, id: usize| { if !out.contains(&id) { out.push(id); } };
+    if let Some(a) = ARCH.get(kit) { push(&mut out, a[0]); push(&mut out, a[1]); }
+    // Travel-proneness → the diaspora/nomad axis.
+    if mobility >= 0.68 { push(&mut out, 6); push(&mut out, 2); }      // Diaspora + Insular
+    else if mobility >= 0.5 { push(&mut out, 5); }                     // Nomadic
+    else if mobility <= 0.22 { push(&mut out, 10); }                   // very rooted → Agrarian
+    // A seeded flavour trait for variety when there's still room.
+    if out.len() < 3 {
+        let flavour = [7usize, 13, 12, 8, 9, 0][(seed % 6) as usize];
+        push(&mut out, flavour);
+    }
+    out.truncate(3);
+    out
+}
+
+/// Does a culture with these trait indices strongly RESIST assimilation? Insular,
+/// Xenophobic and Diaspora peoples keep to themselves (their minorities persist as
+/// quarters instead of dissolving); Assimilative peoples do the opposite.
+pub fn traits_resist_assimilation(traits: &[usize]) -> f32 {
+    let mut r = 1.0f32;
+    if traits.contains(&2) { r *= 0.45; }  // Insular
+    if traits.contains(&13) { r *= 0.5; }  // Xenophobic
+    if traits.contains(&6) { r *= 0.4; }   // Diaspora
+    if traits.contains(&7) { r *= 1.6; }   // Assimilative (dissolves faster)
+    r.clamp(0.15, 1.8)
+}
+
 /// Candidate kit indices for a hearth's environment (the kit's `env` matching the
 /// hearth cell biases selection; any kit can still appear via the hash tiebreak).
 fn env_of_cell(buf: &WorldBuffer, idx: usize) -> Env {

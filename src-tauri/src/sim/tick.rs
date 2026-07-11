@@ -8655,6 +8655,27 @@ impl CampaignSim {
             .unwrap_or_default()
     }
 
+    /// Culture TRAIT indices (into `cultures::TRAITS`) for a live culture — from its
+    /// kit archetype, travel-proneness and a stable seed. Empty for a legacy/unknown
+    /// culture. Drives trait-based behaviour (e.g. assimilation resistance).
+    pub(crate) fn culture_trait_ids(&self, name: &str) -> Vec<usize> {
+        let kit = if let Some(cr) = self.creoles.iter().find(|c| c.name == name) {
+            cr.kit_a as usize
+        } else if let Some(k) = crate::sim::cultures::kit_of_people(name) {
+            k
+        } else {
+            return Vec::new();
+        };
+        let seed = crate::sim::cultures::active()
+            .and_then(|m| m.hearths.iter().find(|h| h.people == name).map(|h| h.mut_seed))
+            .unwrap_or_else(|| {
+                let mut x = 0xcbf29ce484222325u64;
+                for b in name.bytes() { x ^= b as u64; x = x.wrapping_mul(0x100000001b3); }
+                x
+            });
+        crate::sim::cultures::kit_traits(kit, Self::culture_mobility(name), seed)
+    }
+
     /// Cultures 2.0 · Yearly assimilation — minority quarters blend into the majority,
     /// FASTER when they share a language family with the local majority (mutual
     /// intelligibility) and in big, prosperous "melting-pot" cities; SLOWER across
@@ -8683,7 +8704,11 @@ impl CampaignSim {
                     (Some(a), Some(b)) if a == b && !related => APPEARANCE_ASSIM_BONUS,
                     _ => 1.0,
                 };
-                let rate = (MINORITY_ASSIM_RATE * kin * look * (1.0 + prestige)).clamp(0.0, 0.25);
+                // TRAIT resistance: Insular / Xenophobic / Diaspora peoples keep their
+                // quarters intact (a real self-contained minority, e.g. a diaspora
+                // trading community); Assimilative peoples dissolve faster.
+                let resist = crate::sim::cultures::traits_resist_assimilation(&self.culture_trait_ids(&c));
+                let rate = (MINORITY_ASSIM_RATE * kin * look * resist * (1.0 + prestige)).clamp(0.0, 0.25);
                 let ns = s * (1.0 - rate);
                 if ns > 0.005 { kept.push((c, ns)); }
             }

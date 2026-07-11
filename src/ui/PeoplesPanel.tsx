@@ -12,6 +12,14 @@ import { T, SERIF } from "./chronicleTheme";
 
 const GOOD_BY_NAME = new Map(GOOD_DEFS.map((g) => [g.name, g]));
 
+/** Relation chip styling by kind (kin / friendly / rival / hostile). */
+const REL_STYLE: Record<string, { icon: string; color: string; title: string }> = {
+  kin: { icon: "🤝", color: "#8fd0a0", title: "Kindred — same language family" },
+  friendly: { icon: "🕊", color: "#7fb0e0", title: "Friendly — peaceable neighbours who share cities" },
+  rival: { icon: "⚖", color: "#e0b060", title: "Rivals — competing merchant peoples" },
+  hostile: { icon: "⚔", color: "#e07a6a", title: "Hostile — friction between these peoples" },
+};
+
 /** #1/#23 · The PEOPLES panel — the living cultures of the world. A two-pane census:
  *  every people (with its colour), its population, homelands and merchant houses;
  *  click one to shade the map by that culture's share of each settlement. Travel-
@@ -42,6 +50,14 @@ export function PeoplesPanel() {
   const sel = useMemo(() => cultures.find((c) => c.name === selected) ?? null, [cultures, selected]);
   const rgb = (c: [number, number, number]) => `rgb(${c[0]},${c[1]},${c[2]})`;
 
+  // Living peoples vs the VANISHED (extinct) ones, filed separately.
+  const living = useMemo(() => cultures.filter((c) => c.alive !== false), [cultures]);
+  const dead = useMemo(() => cultures.filter((c) => c.alive === false), [cultures]);
+  // Top-3 wealthiest living peoples get a 👑 in the list (richest-cultures ranking).
+  const richest = useMemo(() => new Set(
+    [...living].sort((a, b) => (b.wealth ?? 0) - (a.wealth ?? 0)).slice(0, 3).map((c) => c.name)
+  ), [living]);
+
   if (!open) return null;
 
   return (
@@ -51,7 +67,7 @@ export function PeoplesPanel() {
           👥 Peoples
         </span>
         <span style={{ color: T.inkFaint, fontSize: 10, marginLeft: 8 }}>
-          {active ? `${cultures.length} peoples · Year ${year}` : "no campaign"}
+          {active ? `${living.length} peoples${dead.length ? ` · ${dead.length} vanished` : ""} · Year ${year}` : "no campaign"}
         </span>
         <span style={{ flex: 1 }} />
         {selected && (
@@ -66,9 +82,9 @@ export function PeoplesPanel() {
 
       {active && cultures.length > 0 && (
         <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-          {/* ── Left: the culture list ── */}
+          {/* ── Left: the culture list (living, then the vanished) ── */}
           <div style={{ width: 168, overflowY: "auto", borderRight: `1px solid ${T.lineSoft}`, padding: "4px 0" }}>
-            {cultures.map((c) => {
+            {living.map((c) => {
               const on = c.name === selected;
               return (
                 <div key={c.name} onClick={() => setSelected(on ? null : c.name)}
@@ -82,8 +98,30 @@ export function PeoplesPanel() {
                   <span style={{ flex: 1, color: on ? T.ink : T.inkMid, fontSize: 12, fontWeight: on ? 700 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {c.name}
                   </span>
+                  {richest.has(c.name) && <span title="Among the richest peoples" style={{ fontSize: 10 }}>👑</span>}
                   {c.mobility >= 0.7 && <span title="Travel-prone merchant diaspora" style={{ fontSize: 10 }}>⚓</span>}
                   <span style={{ color: T.inkFaint, fontSize: 10 }}>{fmtNum(c.population)}</span>
+                </div>
+              );
+            })}
+            {dead.length > 0 && (
+              <div style={{ color: T.inkFaint, fontSize: 9, fontWeight: 700, textTransform: "uppercase",
+                letterSpacing: 0.6, padding: "9px 9px 3px", borderTop: `1px solid ${T.lineSoft}`, marginTop: 4 }}>
+                ✝ Vanished peoples
+              </div>
+            )}
+            {dead.map((c) => {
+              const on = c.name === selected;
+              return (
+                <div key={c.name} onClick={() => setSelected(on ? null : c.name)}
+                  title="An extinct people — no living settlement holds it"
+                  style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 9px", cursor: "pointer",
+                    background: on ? "rgba(255,255,255,0.05)" : "transparent", opacity: 0.55,
+                    borderLeft: `3px solid ${on ? rgb(c.color) : "transparent"}` }}>
+                  <span style={{ width: 11, height: 11, borderRadius: 3, background: rgb(c.color), flexShrink: 0, border: "1px solid rgba(0,0,0,0.4)", filter: "grayscale(0.5)" }} />
+                  <span style={{ flex: 1, color: T.inkDim, fontSize: 12, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: "line-through" }}>
+                    {c.name}
+                  </span>
                 </div>
               );
             })}
@@ -115,6 +153,27 @@ export function PeoplesPanel() {
                     {sel.origin}
                   </div>
                 )}
+                {/* Obituary — for an extinct people. */}
+                {sel.alive === false && sel.obituary && (
+                  <div style={{ fontFamily: SERIF, fontStyle: "italic", color: "#c9a9a9", fontSize: 12,
+                    lineHeight: 1.55, marginBottom: 10, padding: "8px 10px", background: "rgba(60,20,24,0.35)",
+                    border: "1px solid rgba(150,70,70,0.4)", borderRadius: 6 }}>
+                    ✝ {sel.obituary}
+                  </div>
+                )}
+                {/* Character traits (2–3). */}
+                {(sel.traits?.length ?? 0) > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
+                    {sel.traits!.map((t) => (
+                      <span key={t.name} title={t.blurb}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600,
+                          color: T.ink, border: `1px solid ${T.lineSoft}`, background: T.card, borderRadius: 12,
+                          padding: "2px 9px", cursor: "help" }}>
+                        <span>{t.emoji}</span>{t.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {/* Full-body figures in national dress (man + woman; creole blends parents). */}
                 {sel.kit != null && sel.kit >= 0 && (
                   <div style={{ marginBottom: 12 }}>
@@ -127,7 +186,30 @@ export function PeoplesPanel() {
                   <Tile label="Homelands" value={String(sel.towns)} color="#7fd0a0" />
                   <Tile label="Present in" value={String(sel.presence)} color="#7fb0e0" />
                   <Tile label="Mobility" value={`${Math.round(sel.mobility * 100)}%`} color={sel.mobility >= 0.7 ? "#e0b060" : T.inkMid} />
+                  {sel.alive !== false && (sel.wealth ?? 0) > 0 && (
+                    <Tile label="Wealth" value={fmtNum(sel.wealth!)} color={richest.has(sel.name) ? "#e8c860" : T.inkMid} />
+                  )}
                 </div>
+                {/* Relations — kin, friends, rivals, foes. */}
+                {(sel.relations?.length ?? 0) > 0 && (
+                  <>
+                    <div style={sectionHdr}>Relations with other peoples</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
+                      {sel.relations!.map((r) => {
+                        const s = REL_STYLE[r.kind] ?? REL_STYLE.friendly;
+                        return (
+                          <span key={r.name + r.kind} title={s.title}
+                            onClick={() => setSelected(r.name)}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, cursor: "pointer",
+                              color: s.color, border: `1px solid ${s.color}55`, background: `${s.color}18`,
+                              borderRadius: 12, padding: "2px 9px" }}>
+                            <span>{s.icon}</span>{r.name}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
 
                 {/* Cultural taste — the goods this people prizes and its markets seek. */}
                 {(sel.desired_goods?.length ?? 0) > 0 && (
@@ -184,12 +266,16 @@ export function PeoplesPanel() {
                   </div>
                 )}
 
-                <button onClick={() => setSelected(sel.name)} style={{ ...mapBtn, marginTop: 12, borderColor: rgb(sel.color) }}>
-                  ◧ colour the map by {sel.name}
-                </button>
-                <div style={{ color: T.inkFaint, fontSize: 10, marginTop: 6, lineHeight: 1.4 }}>
-                  On the map: 75%+ solid ring &amp; fill · 45–74% half · 20–44% quarter · 5–19% ring only.
-                </div>
+                {sel.alive !== false && (
+                  <>
+                    <button onClick={() => setSelected(sel.name)} style={{ ...mapBtn, marginTop: 12, borderColor: rgb(sel.color) }}>
+                      ◧ colour the map by {sel.name}
+                    </button>
+                    <div style={{ color: T.inkFaint, fontSize: 10, marginTop: 6, lineHeight: 1.4 }}>
+                      On the map: 75%+ solid ring &amp; fill · 45–74% half · 20–44% quarter · 5–19% ring only.
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>

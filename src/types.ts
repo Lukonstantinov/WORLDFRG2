@@ -278,7 +278,14 @@ export interface CultureBrief {
   kit?: number;       // costume/appearance kit 0..17 (-1 unknown); for figure art
   kit2?: number;      // creole: second parent kit (blend), else -1
   desired_goods?: string[]; // goods this people prizes (cultural taste)
+  traits?: CultureTraitBrief[]; // character traits (2–3)
+  relations?: CultureRelation[]; // kin / friendly / rival / hostile neighbours
+  wealth?: number;    // total wealth (for richest-cultures ranking)
+  alive?: boolean;    // false = extinct (filed under Vanished peoples)
+  obituary?: string;  // shown for extinct peoples
 }
+export interface CultureTraitBrief { name: string; emoji: string; blurb: string }
+export interface CultureRelation { name: string; kind: string } // kin|friendly|rival|hostile
 /** Coarse "where a people lives" raster (Peoples-panel mini-map; mirrors the goods preview). */
 export interface CulturePresenceGrid { width: number; height: number; data: number[]; land: number[] }
 /** One backer of a colony venture (city / house / bank). */

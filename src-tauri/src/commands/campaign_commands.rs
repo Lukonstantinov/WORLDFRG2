@@ -1142,8 +1142,31 @@ pub struct CultureBrief {
     #[serde(default = "neg_one_i32c")] pub kit2: i32,
     /// Goods this people PRIZES (cultural taste) — good-spec ids, for the panel.
     #[serde(default)] pub desired_goods: Vec<String>,
+    /// Character traits (name/emoji/blurb), 2–3 per people (Cultures 3.0).
+    #[serde(default)] pub traits: Vec<CultureTraitBrief>,
+    /// Inter-culture relations: kin/friendly, rivals, hostile neighbours.
+    #[serde(default)] pub relations: Vec<CultureRelation>,
+    /// Total wealth attributed to this people (city grain+trade wealth by share +
+    /// its merchant houses) — powers the "richest cultures" ranking.
+    #[serde(default)] pub wealth: f64,
+    /// False for an EXTINCT people (no living settlement holds it) — the panel files
+    /// these under a separate "Vanished peoples" section.
+    #[serde(default = "true_bool")] pub alive: bool,
+    /// Obituary shown for an extinct people (how/where they faded).
+    #[serde(default)] pub obituary: String,
 }
 fn neg_one_i32c() -> i32 { -1 }
+fn true_bool() -> bool { true }
+
+#[derive(serde::Serialize, Clone)]
+pub struct CultureTraitBrief { pub name: String, pub emoji: String, pub blurb: String }
+
+#[derive(serde::Serialize, Clone)]
+pub struct CultureRelation {
+    pub name: String,
+    /// "kin" (same family), "friendly", "rival" (economic), or "hostile".
+    pub kind: String,
+}
 
 /// A culture's (family, origin card, kit, kit2) from the active worldgen hearths (or a
 /// spawned creole). "" / -1 when unknown (e.g. a legacy save without cards).
@@ -1157,6 +1180,26 @@ fn culture_lore(sim: &crate::sim::tick::CampaignSim, name: &str) -> (String, Str
         }
     }
     (String::new(), String::new(), -1, -1)
+}
+
+/// Deterministic per-culture seed (a hearth's mut_seed, else a hash of the name) —
+/// so trait assignment is stable across queries.
+fn culture_seed(name: &str) -> u64 {
+    if let Some(m) = crate::sim::cultures::active() {
+        if let Some(h) = m.hearths.iter().find(|h| h.people == name) { return h.mut_seed; }
+    }
+    let mut x = 0xcbf29ce484222325u64;
+    for b in name.bytes() { x ^= b as u64; x = x.wrapping_mul(0x100000001b3); }
+    x
+}
+
+/// Trait indices for a culture (into `cultures::TRAITS`), from its kit + mobility +
+/// seed. Empty when the kit is unknown (legacy save).
+fn culture_trait_ids(sim: &crate::sim::tick::CampaignSim, name: &str) -> Vec<usize> {
+    let (_, _, kit, _) = culture_lore(sim, name);
+    if kit < 0 { return Vec::new(); }
+    let mob = crate::sim::tick::CampaignSim::culture_mobility(name);
+    crate::sim::cultures::kit_traits(kit as usize, mob, culture_seed(name))
 }
 
 /// Culture colour: the worldgen hearth colour if known, else a deterministic tint.
@@ -1212,6 +1255,114 @@ pub fn campaign_get_cultures(db: State<'_, WorldDb>) -> Result<Vec<CultureBrief>
             }
         }
     }
+
+    // ── Wealth, co-habitation and house-rivalries per culture ──
+    let mut wealth_by: HashMap<String, f64> = HashMap::new();
+    let mut cohab: HashMap<String, HashMap<String, f32>> = HashMap::new();
+    for i in 0..sim.hubs.len() {
+        let h = &sim.hubs[i];
+        if h.is_estate || h.abandoned || h.population < 1.0 { continue; }
+        let w = (h.grain_wealth as f64 + 1.5 * h.trade_wealth as f64).max(0.0);
+        let maj = sim.hub_culture.get(i).cloned().unwrap_or_default();
+        if maj.is_empty() || maj == "—" { continue; }
+        let mins = sim.hub_minorities.get(i);
+        let mshare: f32 = mins.map(|m| m.iter().fold(0.0f32, |a, (_, s)| a + *s)).unwrap_or(0.0);
+        let maj_share = (1.0 - mshare).clamp(0.0, 1.0);
+        *wealth_by.entry(maj.clone()).or_default() += w * maj_share as f64;
+        let mut present: Vec<(String, f32)> = vec![(maj.clone(), maj_share)];
+        if let Some(m) = mins {
+            for (c, s) in m {
+                if *s <= 0.005 { continue; }
+                *wealth_by.entry(c.clone()).or_default() += w * (*s as f64);
+                if *s >= 0.05 { present.push((c.clone(), *s)); }
+            }
+        }
+        for a in 0..present.len() {
+            for b in 0..present.len() {
+                if a == b { continue; }
+                *cohab.entry(present[a].0.clone()).or_default()
+                    .entry(present[b].0.clone()).or_default() += present[a].1.min(present[b].1);
+            }
+        }
+    }
+    for hh in &sim.houses {
+        if hh.defunct { continue; }
+        if let Some(c) = sim.hub_culture.get(hh.hub as usize) {
+            if !c.is_empty() && c != "—" { *wealth_by.entry(c.clone()).or_default() += hh.wealth.max(0.0) as f64; }
+        }
+    }
+    // House rivalries → culture rivalries.
+    let mut rival_by: HashMap<String, HashMap<String, u32>> = HashMap::new();
+    for hh in &sim.houses {
+        if hh.defunct { continue; }
+        let ca = sim.hub_culture.get(hh.hub as usize).cloned().unwrap_or_default();
+        if ca.is_empty() || ca == "—" { continue; }
+        for &r in &hh.rivals {
+            if let Some(rh) = sim.houses.get(r) {
+                let cb = sim.hub_culture.get(rh.hub as usize).cloned().unwrap_or_default();
+                if !cb.is_empty() && cb != "—" && cb != ca {
+                    *rival_by.entry(ca.clone()).or_default().entry(cb).or_default() += 1;
+                }
+            }
+        }
+    }
+
+    let living_names: std::collections::HashSet<String> = map.keys().cloned().collect();
+    let family_of: HashMap<String, String> =
+        living_names.iter().map(|n| (n.clone(), culture_lore(&sim, n).0)).collect();
+    let traits_of: HashMap<String, Vec<usize>> =
+        living_names.iter().map(|n| (n.clone(), culture_trait_ids(&sim, n))).collect();
+    let is_frictional = |t: &[usize]| t.contains(&3) || t.contains(&13); // Martial / Xenophobic
+    let is_mercantile = |t: &[usize]| t.contains(&0);
+
+    // Relations for one living culture: kin (same family), then co-habitants sorted by
+    // shared presence classed hostile / rival / friendly, plus house rivalries.
+    let relations_for = |name: &str| -> Vec<CultureRelation> {
+        let mut rels: Vec<CultureRelation> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let fam = family_of.get(name).cloned().unwrap_or_default();
+        let my_t = traits_of.get(name).cloned().unwrap_or_default();
+        // Kin — same language family.
+        let mut kin: Vec<&String> = living_names.iter()
+            .filter(|o| o.as_str() != name && !fam.is_empty() && family_of.get(*o) == Some(&fam))
+            .collect();
+        kin.sort();
+        for k in kin.into_iter().take(3) {
+            if seen.insert(k.clone()) { rels.push(CultureRelation { name: k.clone(), kind: "kin".into() }); }
+        }
+        // Co-habitants (share cities) → hostile / rival / friendly by trait clash.
+        if let Some(neigh) = cohab.get(name) {
+            let mut ns: Vec<(&String, f32)> = neigh.iter().map(|(k, v)| (k, *v)).collect();
+            ns.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            for (o, _) in ns.into_iter().take(5) {
+                if o == name || seen.contains(o) { continue; }
+                let ot = traits_of.get(o).cloned().unwrap_or_default();
+                let same_fam = !fam.is_empty() && family_of.get(o) == Some(&fam);
+                let kind = if !same_fam && (is_frictional(&my_t) || is_frictional(&ot)) { "hostile" }
+                    else if is_mercantile(&my_t) && is_mercantile(&ot) { "rival" }
+                    else { "friendly" };
+                seen.insert(o.clone());
+                rels.push(CultureRelation { name: o.clone(), kind: kind.into() });
+            }
+        }
+        // Merchant-house rivalries.
+        if let Some(rv) = rival_by.get(name) {
+            let mut rs: Vec<(&String, u32)> = rv.iter().map(|(k, v)| (k, *v)).collect();
+            rs.sort_by(|a, b| b.1.cmp(&a.1));
+            for (o, _) in rs.into_iter().take(3) {
+                if seen.insert(o.clone()) { rels.push(CultureRelation { name: o.clone(), kind: "rival".into() }); }
+            }
+        }
+        rels.truncate(8);
+        rels
+    };
+
+    let trait_briefs = |ids: &[usize]| -> Vec<CultureTraitBrief> {
+        ids.iter().filter_map(|&i| crate::sim::cultures::TRAITS.get(i)).map(|t| CultureTraitBrief {
+            name: t.name.to_string(), emoji: t.emoji.to_string(), blurb: t.blurb.to_string(),
+        }).collect()
+    };
+
     let mut out: Vec<CultureBrief> = map.into_iter().map(|(name, mut acc)| {
         acc.cities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         let top: Vec<(String, u32)> = acc.cities.into_iter().take(4).map(|(n, p)| (n, p as u32)).collect();
@@ -1227,14 +1378,59 @@ pub fn campaign_get_cultures(db: State<'_, WorldDb>) -> Result<Vec<CultureBrief>
                 }
             }
         }
+        let trait_ids = traits_of.get(&name).cloned().unwrap_or_default();
         CultureBrief {
             color: culture_color(&name),
             mobility: crate::sim::tick::CampaignSim::culture_mobility(&name),
             population: acc.pop as u32, towns: acc.towns, presence: acc.presence,
-            top_cities: top, houses, family, origin, kit, kit2, desired_goods, name,
+            top_cities: top, houses, family, origin, kit, kit2, desired_goods,
+            traits: trait_briefs(&trait_ids),
+            relations: relations_for(&name),
+            wealth: *wealth_by.get(&name).unwrap_or(&0.0),
+            alive: true, obituary: String::new(),
+            name,
         }
     }).collect();
     out.sort_by(|a, b| b.population.cmp(&a.population));
+
+    // ── Extinct peoples: worldgen hearths (and creoles) that no living settlement
+    // now holds. Filed separately by the panel, with an obituary. ──
+    let mut dead_names: Vec<(String, String, i32)> = Vec::new(); // (name, origin, kit)
+    if let Some(m) = crate::sim::cultures::active() {
+        for h in &m.hearths {
+            if !living_names.contains(&h.people) {
+                dead_names.push((h.people.clone(), h.origin.clone(), h.kit as i32));
+            }
+        }
+    }
+    for cr in &sim.creoles {
+        if !living_names.contains(&cr.name) && !dead_names.iter().any(|(n, _, _)| n == &cr.name) {
+            dead_names.push((cr.name.clone(), cr.origin.clone(), cr.kit_a as i32));
+        }
+    }
+    dead_names.sort(); dead_names.dedup_by(|a, b| a.0 == b.0);
+    for (name, origin, kit) in dead_names {
+        let (family, o2, k2, kit2) = culture_lore(&sim, &name);
+        let origin = if origin.is_empty() { o2 } else { origin };
+        let kit = if kit >= 0 { kit } else { k2 };
+        let trait_ids = culture_trait_ids(&sim, &name);
+        let home = origin.split(['.', ';', '—']).next().unwrap_or("").trim();
+        let obituary = if home.is_empty() {
+            format!("The {name} are no more — no living settlement now holds them; they survive only in memory and in the blood of neighbouring peoples.")
+        } else {
+            format!("The {name} have faded from the living world. {home}. No settlement now holds them as its own; their line endures only mingled into the peoples who absorbed them.")
+        };
+        out.push(CultureBrief {
+            color: culture_color(&name),
+            mobility: crate::sim::tick::CampaignSim::culture_mobility(&name),
+            population: 0, towns: 0, presence: 0, top_cities: vec![], houses: vec![],
+            family, origin, kit, kit2,
+            desired_goods: vec![],
+            traits: trait_briefs(&trait_ids),
+            relations: vec![],
+            wealth: 0.0, alive: false, obituary, name,
+        });
+    }
     Ok(out)
 }
 
