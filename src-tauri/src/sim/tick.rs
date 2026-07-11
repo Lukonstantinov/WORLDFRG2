@@ -250,6 +250,13 @@ const CREOLE_MIN_POP: f32 = 4_000.0;       // only sizeable cities spawn creoles
 const CREOLE_MIN_MINORITY: f32 = 0.30;     // the minority must be at least this share
 const CREOLE_YEARLY_CHANCE: f32 = 0.08;    // per eligible city per year
 const CREOLE_SEED_FRAC: f32 = 0.5;         // share of the minority that becomes the creole
+/// Cultures 3.0 · SPLINTERING — a far-flung, isolated community of one people slowly
+/// drifts into a NEW daughter people of its own (American English from British, Afrikaans
+/// from Dutch). Same kit/appearance, a fresh unique name and its own origin card. Rare,
+/// biased toward communities far from the parent's hearth.
+const SPLINTER_YEARLY_CHANCE: f32 = 0.012; // rare base rate; scaled UP by isolation (distance + few trade ties)
+const SPLINTER_MIN_SHARE: f32 = 0.6;       // the parent must clearly dominate the city
+const SPLINTER_SEED_FRAC: f32 = 0.45;      // share of the local majority that becomes the daughter
 /// Cultures 2.0 · migration HOMOPHILY: bonus to a destination's opportunity per unit
 /// of the migrant's culture already present there (people move toward their own kin).
 /// Small vs the opportunity scale so it nudges, not dominates.
@@ -7547,6 +7554,9 @@ impl CampaignSim {
             self.assimilation_pass();
             // Cultures 2.0 · sustained blending in a city can birth a new creole people.
             self.ethnogenesis_pass(self.tick / TICKS_PER_YEAR);
+            // Cultures 3.0 · a far-flung, isolated community can splinter into a new
+            // daughter people of the same stock.
+            self.splinter_pass(self.tick / TICKS_PER_YEAR);
             // Connect sub-cap villages to the trade network via their nearest market town.
             self.hinterland_pass();
             // House trade outposts from year 30 (rich house, heavy cost); full
@@ -8852,6 +8862,79 @@ impl CampaignSim {
                 tick, kind: "ethnogenesis".into(), hub: h as i32, good: -1, value: take,
                 text: format!("A new people, the {}, is born in {} as {} and {} blend into one.",
                     name, self.hubs[h].name, maj, minc) });
+        }
+    }
+
+    /// Cultures 3.0 · SPLINTERING — a large, far-flung community of one people, long
+    /// isolated from its hearth, drifts into a NEW daughter people with its own name and
+    /// origin card (same kit/appearance as the parent). Rare and distance-biased, capped
+    /// by the shared creole limit, so a few daughter peoples arise over a long campaign.
+    fn splinter_pass(&mut self, year: u32) {
+        if self.creoles.len() >= CREOLE_MAX { return; }
+        let tick = self.tick;
+        let n = self.hubs.len();
+        let ww = self.world_w.max(1.0);
+        for h in 0..n.min(self.hub_minorities.len()) {
+            if self.creoles.len() >= CREOLE_MAX { break; }
+            if self.hubs[h].is_estate || self.hubs[h].abandoned || self.hubs[h].population < CREOLE_MIN_POP { continue; }
+            let maj = self.hub_culture.get(h).cloned().unwrap_or_default();
+            if maj.is_empty() || maj == "—" { continue; }
+            // Only a rooted HEARTH people splinters (creoles are already new peoples).
+            let kit = match crate::sim::cultures::kit_of_people(&maj) { Some(k) => k, None => continue };
+            // The parent must clearly dominate this city (a coherent community).
+            let minsum: f32 = self.hub_minorities[h].iter().map(|(_, s)| *s).sum();
+            let maj_share = (1.0 - minsum).clamp(0.0, 1.0);
+            if maj_share < SPLINTER_MIN_SHARE { continue; }
+            // Divergence rises with DISTANCE from the parent hearth — a far-flung,
+            // isolated community drifts into its own people.
+            let dist = crate::sim::cultures::active().and_then(|m| {
+                m.hearths.iter().find(|hh| hh.people == maj).map(|hh| {
+                    let mut dx = (hh.x - self.hubs[h].x).abs();
+                    if ww > 1.0 { dx = dx.min(ww - dx); }
+                    let dy = hh.y - self.hubs[h].y;
+                    (dx * dx + dy * dy).sqrt()
+                })
+            }).unwrap_or(0.0);
+            let far = (dist / (ww * 0.25)).clamp(0.0, 1.0); // 0 at the hearth, 1 a quarter-world away
+            if far < 0.35 { continue; } // must be genuinely far-flung
+            // ISOLATION drives the (otherwise rare) chance: distance from the hearth
+            // (steeply, far^1.6) AND how few trade ties the settlement has — a lonely
+            // outpost with one or no trade partners drifts into its own people far more
+            // readily than a well-connected city. A hub with ≤1 tie gets up to ~3×.
+            let ties = self.neighbors.get(h).map(|v| v.len()).unwrap_or(0);
+            let lonely = 1.0 + (1.0 - (ties as f32 / 4.0).min(1.0)) * 2.0; // 3× at 0 ties → 1× at ≥4
+            let chance = SPLINTER_YEARLY_CHANCE * far.powf(1.6) * lonely;
+            if hash01(self.seed, tick as u64 ^ 0x5D1B_7E20, h as u64) > chance { continue; }
+
+            let nseed = crate::sim::cultures::hash64(
+                self.seed ^ (h as u64).wrapping_mul(0x9E3779B97F4A7C15) ^ ((year as u64) << 20) ^ 0xDA02);
+            let name = crate::sim::cultures::gen_people_name(kit, nseed, self.hubs[h].x as u32, self.hubs[h].y as u32);
+            if name.is_empty() || name == maj
+                || self.creoles.iter().any(|c| c.name == name)
+                || crate::sim::cultures::active().map(|m| m.hearths.iter().any(|hh| hh.people == name)).unwrap_or(false) {
+                continue;
+            }
+            // Daughter colour: the parent's, nudged so the two read apart on the map.
+            let base = crate::sim::cultures::color_of_people(&maj).unwrap_or([150, 140, 170]);
+            let shift = |c: u8, d: i32| (c as i32 + d).clamp(30, 235) as u8;
+            let s0 = (crate::sim::cultures::hash64(nseed ^ 0x515F) % 3) as usize;
+            let color = [shift(base[0], if s0 == 0 { 40 } else { -25 }),
+                         shift(base[1], if s0 == 1 { 40 } else { -25 }),
+                         shift(base[2], if s0 == 2 { 40 } else { -25 })];
+            // The daughter secedes from the local majority (seeded as its own quarter).
+            let take = maj_share * SPLINTER_SEED_FRAC;
+            self.hub_minorities[h].push((name.clone(), take));
+            let origin = format!(
+                "{name} — a daughter people of the {maj}, arisen around year {year} in far-off {place}. Generations removed from the {maj} heartland, their speech and ways drifted until they became a people of their own.",
+                name = name, maj = maj, year = year, place = self.hubs[h].name);
+            self.creoles.push(Creole {
+                name: name.clone(), family: format!("Branch of {maj}"), origin, color,
+                born_tick: tick, birthplace: self.hubs[h].name.clone(), kit_a: kit as u8, kit_b: kit as u8,
+            });
+            self.journal.push(JournalEntry {
+                tick, kind: "ethnogenesis".into(), hub: h as i32, good: -1, value: take,
+                text: format!("A new people, the {}, splinters from the {} in far-off {}.",
+                    name, maj, self.hubs[h].name) });
         }
     }
 
