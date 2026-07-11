@@ -648,7 +648,12 @@ fn build_meander_path(
     // rivers wander far enough to weave into one another (the "spaghetti" look);
     // gentle broad bends read as natural meanders without the tangle.
     let max_reach = 10i32;
-    let base_wav = (width_cells * 16.0).clamp(8.0, 44.0);
+    // Meander wavelength follows the geomorphic scaling law λ ≈ 11·w (Leopold &
+    // Wolman): one full S-curve spans about eleven channel widths. `width_cells`
+    // is the channel's render width, so a great trunk winds in long broad bends and
+    // a creek in short tight ones — the physically-correct relationship, computed
+    // here in the BACKEND (the frontend just draws this path, no cosmetic meander).
+    let base_wav = (width_cells * 11.0).clamp(7.0, 40.0);
     let _ = (discharge, threshold); // size is already encoded in channel width
 
     let mut out = vec![(0.0f32, 0.0f32); n];

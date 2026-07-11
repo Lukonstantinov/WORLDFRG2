@@ -1042,17 +1042,15 @@ export class OverlayManager {
   private riverPath(river: RiverData, id: number, order: number): [number, number][] {
     const cached = this.meanderCache.get(river.points);
     if (cached) return cached;
-    // Prefer the backend's TRUE meander geometry (physically clamped to the valley,
-    // straight in the headwaters, winding on the lowlands). Only fall back to the
-    // cosmetic client-side meander for old saves that predate the `render` field.
-    let path: [number, number][];
-    if (river.render && river.render.length >= 2) {
-      path = river.render;
-    } else {
-      const [sx, sy] = river.points[0];
-      const seed = ((sx * 73856093) ^ (sy * 19349663) ^ (id * 83492791)) >>> 0;
-      path = meanderPath(river.points, seed, order, this.worldW || 0, river.meander ?? 1);
-    }
+    // Meanders are generated in the BACKEND (build_meander_path): physically
+    // clamped to the valley AND walled off from neighbouring rivers so render paths
+    // never cross. The frontend only draws that path (Catmull-Rom smoothed). Old
+    // saves that predate the `render` field fall back to the TRUE cell path — which,
+    // being the real drainage tree, is itself non-crossing — rather than the old
+    // cosmetic client-side meander that could weave across neighbours.
+    void id; void order;
+    const path: [number, number][] =
+      river.render && river.render.length >= 2 ? river.render : river.points;
     this.meanderCache.set(river.points, path);
     return path;
   }
