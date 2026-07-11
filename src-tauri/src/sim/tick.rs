@@ -357,6 +357,16 @@ const MIGRATION_MAX_KM: f32 = 3000.0;
 /// erased a slow trickle of newcomers almost as fast as it arrived — cities looked
 /// permanently monocultural).
 const MINORITY_ASSIM_RATE: f32 = 0.02;
+/// SUBSISTENCE FARMING — every land settlement grows its own staple food. Each tick a
+/// hub's cereal production is topped up to at least this fraction of its own food NEED,
+/// so an isolated town (no trade route reaching a producer) still feeds itself and is
+/// not "100% short" on everything. Trade still supplies comfort/luxury and surpluses.
+const SUBSISTENCE_FOOD_FRAC: f32 = 0.9;
+/// A settlement can only feed itself from its OWN fields up to this population — the
+/// carrying capacity of a village's hinterland. Beyond it a city MUST bring food in
+/// by trade (or face shortage), so subsistence never props up a large city that
+/// outgrew its region: big cities live and grow on trade, remote hamlets stay small.
+const REMOTE_MAX_POP: f32 = 4000.0;
 /// ── Diaspora: travel-prone MERCHANT cultures (Hansa-in-the-Baltic / trading
 /// minority) spread as minority quarters along trade ties. Roughly a third of cultures
 /// are mobile enough (mobility ≥ gate); they send settlers to trade partners each year,
@@ -4550,6 +4560,26 @@ impl CampaignSim {
 
     /// Base (pre-substitution) per-capita need for a hub/good this tick.
     #[inline]
+    /// The staple cereal a settlement of climate `koppen` grows for subsistence —
+    /// rice in the wet tropics, millet on the arid steppe, barley in the cold north,
+    /// wheat otherwise. Falls back to any available food good. `food_gs` is the list
+    /// of extracted (non-recipe) food-good indices.
+    fn climate_staple(&self, koppen: u8, food_gs: &[usize]) -> Option<usize> {
+        let by_name = |nm: &str| self.goods.iter().position(|g| g.name == nm).filter(|g| food_gs.contains(g));
+        let primary = match koppen {
+            1 | 2 | 3 => "rice",            // Af/Am/Aw tropical
+            4 | 5 | 6 | 7 => "millet",      // BW/BS arid / steppe
+            14..=22 => "barley",            // continental / polar cold
+            _ => "wheat",
+        };
+        by_name(primary)
+            .or_else(|| by_name("wheat"))
+            .or_else(|| by_name("barley"))
+            .or_else(|| by_name("millet"))
+            .or_else(|| by_name("grain"))
+            .or_else(|| food_gs.first().copied())
+    }
+
     fn base_need(&self, h: usize, g: usize) -> f32 {
         let tg = &self.goods[g];
         // Demand cadence: a good consumed every N days exerts ~30/N of the daily
@@ -4877,6 +4907,30 @@ impl CampaignSim {
             //    `production[g]` is kept as the realized output for downstream
             //    readers (estates, briefs, "strongest good").
             let tech = self.tech_factor;
+            // Extracted (non-recipe) FOOD goods — for the subsistence-farming floor.
+            let food_gs: Vec<usize> = (0..ng)
+                .filter(|&g| self.goods[g].food && self.goods[g].inputs.is_empty())
+                .collect();
+            // Per-TRADE-COMPONENT food balance (natural capacity vs need). A hub only
+            // falls back on subsistence farming when its component CANNOT supply food —
+            // i.e. a remote/isolated or genuinely food-poor region that no trade route
+            // reaches. A connected, food-secure region relies on trade instead (so we
+            // don't magically make every big city self-feeding and kill the grain trade).
+            let mut comp_food_supply: std::collections::HashMap<u32, f32> = std::collections::HashMap::new();
+            let mut comp_food_need: std::collections::HashMap<u32, f32> = std::collections::HashMap::new();
+            if !food_gs.is_empty() {
+                for h in 0..n {
+                    if self.hubs[h].is_estate { continue; }
+                    let comp = self.hubs[h].component;
+                    let pop = self.hubs[h].population.max(0.0);
+                    let mut sup = 0.0f32;
+                    for &g in &food_gs { sup += self.hubs[h].base_per_capita.get(g).copied().unwrap_or(0.0) * pop; }
+                    let mut nd = 0.0f32;
+                    for &g in &food_gs { nd += self.base_need(h, g); }
+                    *comp_food_supply.entry(comp).or_default() += sup * tech;
+                    *comp_food_need.entry(comp).or_default() += nd;
+                }
+            }
             for h in 0..n {
                 let pop = self.hubs[h].population.max(0.0);
                 // Standing structure bonuses (Workshop/Warehouse = all goods,
@@ -4898,6 +4952,38 @@ impl CampaignSim {
                         * prod_mult[h][g] * tech * struct_bonus * eff;
                     self.hubs[h].production[g] = realized;
                     self.hubs[h].stock[g] += realized;
+                }
+                // SUBSISTENCE FARMING — a REMOTE land settlement whose trade component
+                // cannot supply food feeds itself from its own fields, so an isolated
+                // town isn't "100% short" when no trade route reaches it. A connected,
+                // food-secure region is left to TRADE for its food (routes exist, so use
+                // them). Remote hubs are only brought to ~0.9× need — enough to survive
+                // but with no surplus, so they stay small (as a remote outpost should).
+                let comp = self.hubs[h].component;
+                let comp_secure = comp_food_supply.get(&comp).copied().unwrap_or(0.0)
+                    >= comp_food_need.get(&comp).copied().unwrap_or(0.0) * 0.85;
+                if !self.hubs[h].is_estate && pop > 0.0 && pop < REMOTE_MAX_POP
+                    && !food_gs.is_empty() && !comp_secure {
+                    let mut food_prod = 0.0f32;
+                    let mut food_need = 0.0f32;
+                    for &g in &food_gs {
+                        food_prod += self.hubs[h].production[g];
+                        food_need += self.base_need(h, g);
+                    }
+                    let target = food_need * SUBSISTENCE_FOOD_FRAC;
+                    if food_prod < target {
+                        // The hub's staple: the food it already grows most, else the
+                        // climate-appropriate cereal.
+                        let grown = food_gs.iter().copied()
+                            .filter(|&g| self.hubs[h].production[g] > 0.0)
+                            .max_by(|&a, &b| self.hubs[h].production[a]
+                                .partial_cmp(&self.hubs[h].production[b]).unwrap_or(std::cmp::Ordering::Equal));
+                        if let Some(g) = grown.or_else(|| self.climate_staple(self.hubs[h].koppen, &food_gs)) {
+                            let add = target - food_prod;
+                            self.hubs[h].production[g] += add;
+                            self.hubs[h].stock[g] += add;
+                        }
+                    }
                 }
             }
 
@@ -5648,6 +5734,10 @@ impl CampaignSim {
             if oi >= nh || self.houses[oi].defunct { continue; }
             let hub = self.warehouses[wi].hub as usize;
             if hub >= self.hubs.len() { continue; }
+            // `needs` is sized to the hub count at the consumption pass; a hub added
+            // later this tick (a fresh estate/colony) has no needs row yet — skip it
+            // this tick rather than index out of bounds.
+            if hub >= needs.len() { continue; }
             let used: f32 = self.warehouses[wi].stock.iter().sum();
             let mut room = (self.warehouses[wi].capacity - used).max(0.0);
             if room <= EPS { continue; }
