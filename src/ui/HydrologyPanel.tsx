@@ -126,6 +126,7 @@ export function HydrologyPanel() {
           <option value="single">🎨 Single</option>
         </select>
         <LabelToggle keyName="toponymsRiver" label="🏷 River names" />
+        <PlainToggle keyName="riverBreaks" label="🪧 Reach breaks" />
       </div>
 
       <div style={{ overflowY: "auto", maxHeight: "68vh", padding: "6px 8px 12px" }}>
@@ -215,7 +216,9 @@ export function HydrologyPanel() {
                     </div>
                   )}
 
-                  {sel.species && sel.species.length > 0 && (
+                  {/* Trunks show their fish grouped under each reach (above); a
+                      tributary has no reaches, so list its fish here instead. */}
+                  {(!sel.zones || sel.zones.length === 0) && sel.species && sel.species.length > 0 && (
                     <div style={{ marginTop: 9 }}>
                       <div style={subLabel}>🐟 Fish of this river · source → mouth</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -280,7 +283,9 @@ function TabBtn({ on, onClick, children }: { on: boolean; onClick: () => void; c
 function LabelToggle({ keyName, label }: { keyName: string; label: string }) {
   const kindOn = useUIStore((s) => s.overlayVisibility[keyName] !== false);
   const master = useUIStore((s) => s.overlayVisibility.toponyms !== false);
-  const hasNames = useWorldStore((s) => s.toponyms.length > 0);
+  // Names show either from the saved Toponyms step OR the fallback synthesized
+  // from the river/lake systems (loaded on world open), so both count.
+  const hasNames = useWorldStore((s) => s.toponyms.length > 0 || s.riverSystems.length > 0 || s.lakeSystems.length > 0);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
   const on = master && kindOn;
   return (
@@ -291,6 +296,20 @@ function LabelToggle({ keyName, label }: { keyName: string; label: string }) {
         // Turning any kind on enables the shared master layer.
         if (e.target.checked) setOverlayVisible("toponyms", true);
       }} />
+      {label}
+    </label>
+  );
+}
+
+/** A plain on-map overlay checkbox (not gated under the toponyms master). */
+function PlainToggle({ keyName, label }: { keyName: string; label: string }) {
+  const on = useUIStore((s) => s.overlayVisibility[keyName] !== false);
+  const hasRivers = useWorldStore((s) => s.riverSystems.length > 0);
+  const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
+  return (
+    <label data-no-drag title={hasRivers ? "Mark where trunk rivers turn upper→middle→delta" : "Open a world with rivers to show reach breaks"}
+      style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, color: hasRivers ? "#9fb6cc" : "#5f7488", cursor: "pointer", whiteSpace: "nowrap" }}>
+      <input type="checkbox" checked={on} onChange={(e) => setOverlayVisible(keyName, e.target.checked)} />
       {label}
     </label>
   );
@@ -494,6 +513,8 @@ const FISH_TERMS = [
   "snakehead", "mudskipper", "stickleback", "loach", "tetra", "pacu", "piranha", "barbel", "nase",
   "carp", "roach", "bream", "perch", "pike", "trout", "char", "mullet", "snook", "shad", "eel",
   "salmon", "tench", "omul", "seal", "minnow",
+  "ide", "vimba", "bleak", "gudgeon", "sabrefish", "rudd", "ruffe", "bitterling",
+  "bocachico", "silver dollar", "eartheater cichlid", "cichlid", "arapaima",
 ];
 const CLIMATE_TERMS = [
   "perennial tropical", "tropical flood-pulse", "subtropical monsoonal", "perennial temperate",
@@ -640,6 +661,15 @@ function ZoneCard({ z, names, focusOn }: {
               ⑂ {t.name} <span style={{ color: "#5f7a95" }}>@ {fmt(t.km)} km</span>
             </span>
           ))}
+        </div>
+      )}
+      {z.species && z.species.length > 0 && (
+        <div style={{ marginTop: 6 }}>
+          <div style={{ fontSize: 9.5, letterSpacing: 0.4, textTransform: "uppercase",
+            color: "#6f88a0", fontWeight: 600, marginBottom: 4 }}>🐟 Fish of this reach</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {z.species.map((sp) => <FishPlate key={sp.slug} sp={sp} />)}
+          </div>
         </div>
       )}
     </div>

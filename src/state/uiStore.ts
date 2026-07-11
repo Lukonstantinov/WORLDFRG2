@@ -313,7 +313,7 @@ export const useUIStore = create<UIStore>((set) => ({
     tradeBasins: false, migrations: true,
     colonies: true,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
-    travelRoute: false, goodScarcity: false, toponyms: false,
+    travelRoute: false, goodScarcity: false, toponyms: false, riverBreaks: true,
     // Per-feature-type toponym label toggles (gated under the master `toponyms`).
     toponymsRiver: true, toponymsLake: true, toponymsMountain: true, toponymsRegion: true,
     plagueZones: false, guildCities: false, figureMarks: false, landmarks: false, dynastyLinks: false,

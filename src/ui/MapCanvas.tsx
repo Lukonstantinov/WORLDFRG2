@@ -10,8 +10,8 @@ import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useSettingsStore } from "../state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes } from "../bridge/tauri";
-import type { MerchantRoute, FuturesLane } from "../types";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes } from "../bridge/tauri";
+import type { MerchantRoute, FuturesLane, Toponym } from "../types";
 import { goodOverlayKey, GOOD_DEFS } from "../goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "../types";
 
@@ -997,14 +997,90 @@ export function MapCanvas() {
     requestRender();
   }, [lakeHighlight, requestRender]);
 
-  // #26 · geographic toponym labels, pushed from the world store.
+  // 🌊 Load classified river/lake SYSTEMS on world load, so the map can label
+  // rivers/lakes (and mark reach breaks) even when the optional Toponyms step
+  // (#26) was never run. River names are settlement-independent, so this is keyed
+  // on rivers/lakes only (settlements read live) to avoid campaign-growth churn.
+  useEffect(() => {
+    if (rivers.length === 0 && lakes.length === 0) {
+      useWorldStore.getState().setRiverSystems([]);
+      useWorldStore.getState().setLakeSystems([]);
+      return;
+    }
+    let cancelled = false;
+    const sts = useWorldStore.getState().settlements.map((s) => ({ x: s.x, y: s.y, name: s.name, size: s.size }));
+    getRiverSystems(rivers, sts).then((rs) => { if (!cancelled) useWorldStore.getState().setRiverSystems(rs); }).catch(() => {});
+    getLakeSystems(lakes, rivers).then((ls) => { if (!cancelled) useWorldStore.getState().setLakeSystems(ls); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [rivers, lakes]);
+
+  // #26 · geographic toponym labels. Prefer the saved toponyms (from the Toponyms
+  // step); otherwise synthesize hydronyms from the loaded river/lake systems so
+  // river & lake names always appear on the map.
   const toponyms = useWorldStore((s) => s.toponyms);
+  const riverSystems = useWorldStore((s) => s.riverSystems);
+  const lakeSystems = useWorldStore((s) => s.lakeSystems);
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om) return;
-    om.drawToponyms(toponyms);
+    if (toponyms.length > 0) {
+      om.drawToponyms(toponyms);
+    } else {
+      const synth: Toponym[] = [];
+      for (const r of riverSystems) {
+        if (!r.tributary && r.name) synth.push({ kind: "river", name: r.name, x: r.mid_x, y: r.mid_y });
+      }
+      for (const l of lakeSystems) {
+        if (l.name) synth.push({ kind: "lake", name: l.name, x: l.cx, y: l.cy });
+      }
+      om.drawToponyms(synth);
+      if (synth.length > 0) useUIStore.getState().setOverlayVisible("toponyms", true);
+    }
     requestRender();
-  }, [toponyms, requestRender]);
+  }, [toponyms, riverSystems, lakeSystems, requestRender]);
+
+  // 🌊 Reach breaks: mark where a trunk river changes upper→middle→delta. The
+  // zone boundary km (from the river systems) is mapped onto the river's cell
+  // polyline by cumulative arc-length (both monotonic along the same path).
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    const firstWord = (s: string) => (s || "").split(" ")[0];
+    const fmtKm = (km: number) => `${Math.round(km).toLocaleString()} km`;
+    const breaks: { x: number; y: number; tx: number; ty: number; label: string }[] = [];
+    for (const node of riverSystems) {
+      if (node.tributary || node.order < 3 || node.length_km < 1) continue;
+      const zones = node.zones ?? [];
+      if (zones.length < 2) continue;
+      const pts = rivers[node.id]?.points;
+      if (!pts || pts.length < 3) continue;
+      // Cumulative cell-length along the channel.
+      const cum: number[] = [0];
+      for (let i = 1; i < pts.length; i++) {
+        cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+      }
+      const total = cum[cum.length - 1] || 1;
+      for (let z = 0; z < zones.length - 1; z++) {
+        const frac = Math.max(0, Math.min(1, zones[z].end_km / node.length_km));
+        const target = frac * total;
+        // Locate the segment containing `target`.
+        let i = 1;
+        while (i < cum.length - 1 && cum[i] < target) i++;
+        const seg = (cum[i] - cum[i - 1]) || 1;
+        const t = Math.max(0, Math.min(1, (target - cum[i - 1]) / seg));
+        const ax = pts[i - 1][0], ay = pts[i - 1][1], bx = pts[i][0], by = pts[i][1];
+        breaks.push({
+          x: ax + (bx - ax) * t,
+          y: ay + (by - ay) * t,
+          tx: bx - ax,
+          ty: by - ay,
+          label: `${firstWord(zones[z].label)} › ${firstWord(zones[z + 1].label)} · ${fmtKm(zones[z].end_km)}`,
+        });
+      }
+    }
+    om.drawRiverBreaks(breaks);
+    requestRender();
+  }, [riverSystems, rivers, requestRender]);
 
   // #37 · per-good scarcity discs: when the overlay is on and a good is chosen in
   // the Goods Codex, colour each hub by its local price premium for that good.

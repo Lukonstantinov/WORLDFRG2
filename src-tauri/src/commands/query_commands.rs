@@ -5254,6 +5254,8 @@ fn build_river_systems(
             .map(|&c| (names_by_id[c].clone(), join_km[c]))
             .collect();
 
+        // A "great" trunk (mega-river) carries sturgeon/giant-catfish down its deep stem.
+        let great = d.discharge >= 3000.0;
         let mut zones: Vec<RiverZoneOut> = Vec::new();
         for &(zs, ze, kind) in &[(0.0, u_end, 0u8), (u_end, d_start, 1u8), (d_start, ll, 2u8)] {
             if ze - zs < 0.5 { continue; }
@@ -5263,19 +5265,23 @@ fn build_river_systems(
             let dom_k = counts.iter().max_by_key(|(_, c)| **c).map(|(k, _)| *k).unwrap_or(0);
             let biome = crate::sim::aquatic::koppen_to_biome(dom_k);
             let ztribs: Vec<(String, f32)> = tribs.iter().filter(|(_, km)| *km >= zs && *km < ze).cloned().collect();
-            // Reach-appropriate fish (steep headwater → gentle middle → tidal mouth).
-            let (grad, disch, est) = match kind {
-                0 => (20.0, d.discharge * 0.3, false),
-                1 => (2.0, d.discharge * 0.7, false),
-                _ => (0.6, d.discharge, r.mouth_kind != 0 || d.discharge >= 800.0),
-            };
-            let fish = crate::sim::aquatic::river_fish(d.band, grad, disch, est);
+            // Tidal/brackish mouth → diadromous runs ascend the delta reach.
+            let est = kind == 2 && (r.mouth_kind != 0 || d.discharge >= 800.0);
+            let zone_seed = (d.source_pt.0 as u64).wrapping_mul(2246822519)
+                ^ (d.mouth_pt.1 as u64).wrapping_mul(3266489917)
+                ^ ((i as u64) << 3) ^ kind as u64;
+            // The FULL reach assemblage (every fish that lives in this reach); the
+            // prose sentence is built from the SAME species so plates and text agree.
+            let reach_species = crate::sim::aquatic::assign_reach_fish(d.band, kind, great, est, d.arid, zone_seed);
+            let fish = crate::sim::aquatic::reach_fish_prose(&reach_species);
+            let species_out: Vec<FishSpeciesOut> = reach_species.iter().map(|f| FishSpeciesOut {
+                slug: f.slug.into(), name: f.name.into(), binomial: f.binomial.into(),
+                zone: f.zone, real: f.real.into(), blurb: f.blurb.into(),
+            }).collect();
             let story = crate::sim::aquatic::zone_story(&crate::sim::aquatic::ZoneFacts {
                 kind, name: &names_by_id[i], biome, fish: &fish, tribs: &ztribs,
                 mouth_kind: if kind == 2 { r.mouth_kind } else { 0 }, band: d.band,
-                seed: (d.source_pt.0 as u64).wrapping_mul(2246822519)
-                    ^ (d.mouth_pt.1 as u64).wrapping_mul(3266489917)
-                    ^ ((i as u64) << 3) ^ kind as u64,
+                seed: zone_seed,
             });
             let label = match kind {
                 0 => "Upper river", 1 => "Middle river",
@@ -5288,6 +5294,7 @@ fn build_river_systems(
                 character: zone_character(kind, r.mouth_kind).into(),
                 story,
                 tributaries: ztribs.into_iter().map(|(name, km)| TribJoin { name, km }).collect(),
+                species: species_out,
             });
         }
         river_zones[i] = zones;
@@ -5337,18 +5344,30 @@ fn build_river_systems(
             });
             (s, String::new(), Vec::new())
         };
-        // Signature fish species — one per river zone this reach spans.
-        let sp_seed = (d.source_pt.0 as u64).wrapping_mul(2654435761)
-            ^ (d.mouth_pt.1 as u64).wrapping_mul(40503)
-            ^ (i as u64);
-        let species: Vec<FishSpeciesOut> =
+        // Signature fish species. A TRUNK's flat list is the union of its reach
+        // assemblages (deduped, source→mouth); a TRIBUTARY (no zones) keeps the
+        // single-species-per-zone roster.
+        let species: Vec<FishSpeciesOut> = if !zones.is_empty() {
+            let mut seen: Vec<String> = Vec::new();
+            let mut out: Vec<FishSpeciesOut> = Vec::new();
+            for z in &zones {
+                for sp in &z.species {
+                    if !seen.contains(&sp.slug) { seen.push(sp.slug.clone()); out.push(sp.clone()); }
+                }
+            }
+            out
+        } else {
+            let sp_seed = (d.source_pt.0 as u64).wrapping_mul(2654435761)
+                ^ (d.mouth_pt.1 as u64).wrapping_mul(40503)
+                ^ (i as u64);
             crate::sim::aquatic::assign_river_fish(d.band, &d.source_kind, r.mouth_kind, d.discharge, d.arid, sp_seed)
                 .into_iter()
                 .map(|f| FishSpeciesOut {
                     slug: f.slug.into(), name: f.name.into(), binomial: f.binomial.into(),
                     zone: f.zone, real: f.real.into(), blurb: f.blurb.into(),
                 })
-                .collect();
+                .collect()
+        };
         RiverNode {
             id: i,
             name: names_by_id[i].clone(),
@@ -5433,6 +5452,9 @@ pub struct RiverZoneOut {
     pub character: String,
     pub story: String,
     pub tributaries: Vec<TribJoin>,
+    /// The full fish assemblage that lives in THIS reach (every named species,
+    /// with an illustration slug). Empty for tributaries (no zones).
+    pub species: Vec<FishSpeciesOut>,
 }
 
 /// Format the ordered list of biomes a river crosses into a prose phrase.

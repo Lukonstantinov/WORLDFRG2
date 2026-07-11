@@ -851,6 +851,28 @@ pub const SIGNATURE_FISH: &[FishSpec] = &[
     FishSpec{slug:"boreal-burbot",name:"Boreal Burbot",binomial:"Lota borealis",zone:1,real:"burbot",blurb:"an eel-shaped freshwater cod of cold, deep water.",bands:&[Boreal,CoolTemperate]},
     FishSpec{slug:"northern-pike",name:"Northern Pike",binomial:"Esox borealis",zone:1,real:"pike",blurb:"a long-jawed ambush predator of northern rivers.",bands:&[Boreal,CoolTemperate]},
     FishSpec{slug:"blackfin-char",name:"Blackfin Char",binomial:"Salvelinus ater",zone:2,real:"char",blurb:"a dark, pale-spotted char of the coldest reaches.",bands:&[Boreal,Polar]},
+    // ── Continental / lowland variety (Dfa/Dfb → cool-temperate & boreal) ──
+    // A deep bench so neighbouring continental rivers roll DIFFERENT rosters.
+    FishSpec{slug:"marble-trout",name:"Dappled Marble Trout",binomial:"Salmo marmoratus",zone:0,real:"marble trout",blurb:"a marble-patterned trout of cold, clear headwaters.",bands:&[CoolTemperate,WarmTemperate]},
+    FishSpec{slug:"rustscale-roach",name:"Rustscale Roach",binomial:"Rutilus ferrugineus",zone:1,real:"roach",blurb:"a red-finned silver shoaler, the commonest fish of the middle river.",bands:&[CoolTemperate,WarmTemperate,Boreal]},
+    FishSpec{slug:"goldeye-ide",name:"Goldeye Ide",binomial:"Leuciscus auratus",zone:1,real:"ide",blurb:"a golden-eyed, thick-bodied cyprinid of steady lowland flow.",bands:&[CoolTemperate,Boreal]},
+    FishSpec{slug:"blueback-vimba",name:"Blueback Vimba",binomial:"Vimba caerulea",zone:1,real:"vimba",blurb:"a bottom-grubbing bream-cousin that runs upriver to spawn.",bands:&[CoolTemperate,WarmTemperate]},
+    FishSpec{slug:"silverstreak-bleak",name:"Silverstreak Bleak",binomial:"Alburnus fulgens",zone:1,real:"bleak",blurb:"a tiny, flashing surface shoaler that dimples the calm water.",bands:&[CoolTemperate,WarmTemperate,Boreal]},
+    FishSpec{slug:"barbeled-gudgeon",name:"Barbeled Gudgeon",binomial:"Gobio limosus",zone:1,real:"gudgeon",blurb:"a small, spotted bottom-forager of clean sandy runs.",bands:&[CoolTemperate,WarmTemperate]},
+    FishSpec{slug:"curveblade-sabrefish",name:"Curveblade Sabrefish",binomial:"Pelecus falcatus",zone:1,real:"sabrefish",blurb:"a sabre-bellied silver predator that hunts the open mid-river.",bands:&[CoolTemperate,WarmTemperate]},
+    FishSpec{slug:"redwing-rudd",name:"Redwing Rudd",binomial:"Scardinius rubellus",zone:2,real:"rudd",blurb:"a golden, red-finned fish of warm weedy backwaters.",bands:&[CoolTemperate,WarmTemperate,Boreal]},
+    FishSpec{slug:"thornback-ruffe",name:"Thornback Ruffe",binomial:"Gymnocephalus spinosus",zone:2,real:"ruffe",blurb:"a small, spiny bottom-percid of turbid lower rivers.",bands:&[CoolTemperate,Boreal]},
+    FishSpec{slug:"mussel-bitterling",name:"Mussel Bitterling",binomial:"Rhodeus amarus",zone:2,real:"bitterling",blurb:"a thumb-sized fish that lays its eggs inside living freshwater mussels.",bands:&[WarmTemperate,CoolTemperate]},
+    // ── Migratory / megafish (RESERVED — only added to great trunks / estuaries) ──
+    FishSpec{slug:"greatmaw-catfish",name:"Greatmaw Catfish",binomial:"Silurus giganteus",zone:2,real:"giant catfish",blurb:"a vast, whiskered predator that patrols the deep main channel.",bands:&[WarmTemperate,CoolTemperate,Boreal]},
+    FishSpec{slug:"silverleap-salmon",name:"Silverleap Salmon",binomial:"Salmo saliens",zone:2,real:"salmon",blurb:"a silver anadromous salmonid that leaps upriver from the sea to spawn.",bands:&[CoolTemperate,Boreal,Polar]},
+    FishSpec{slug:"delta-mullet",name:"Delta Mullet",binomial:"Mugil deltae",zone:2,real:"grey mullet",blurb:"a silver, salt-tolerant grazer that pushes up from the brackish delta.",bands:&[Tropical,WarmTemperate]},
+    FishSpec{slug:"brackish-snook",name:"Brackish Snook",binomial:"Centropomus aestuarii",zone:2,real:"snook",blurb:"a line-flanked estuary ambusher running between salt and fresh.",bands:&[Tropical,WarmTemperate]},
+    // ── Tropical variety (Af/Am/Aw middle & delta) ──
+    FishSpec{slug:"cataract-loach",name:"Cataract Hillstream Loach",binomial:"Sewellia cataractae",zone:0,real:"hillstream loach",blurb:"a sucker-bellied loach clinging to rocks in swift tropical headwaters.",bands:&[Tropical]},
+    FishSpec{slug:"silver-bocachico",name:"Silver Bocachico",binomial:"Prochilodus argenteus",zone:1,real:"bocachico",blurb:"a detritus-grazing shoaler that migrates in vast silver runs.",bands:&[Tropical]},
+    FishSpec{slug:"redhook-myleus",name:"Redhook Silver Dollar",binomial:"Myloplus rubripinnis",zone:1,real:"silver dollar",blurb:"a disc-bodied, red-finned relative of the pacu of tropical rivers.",bands:&[Tropical]},
+    FishSpec{slug:"painted-eartheater",name:"Painted Eartheater",binomial:"Geophagus pictus",zone:2,real:"eartheater cichlid",blurb:"a sand-sifting cichlid of warm lowland channels and delta pools.",bands:&[Tropical,WarmTemperate]},
 ];
 
 /// Arid-river / oasis roster (BW/BS Köppen). Kept separate so it is only drawn
@@ -897,6 +919,106 @@ pub fn assign_river_fish(band: Band, source_kind: &str, mouth_kind: u8, discharg
         }
     }
     out
+}
+
+// ─────────────── Full per-REACH assemblage (one roster per upper/middle/delta) ─
+// Where `assign_river_fish` returns one signature species per zone the whole
+// river spans, this returns the FULL assemblage a naturalist would list for a
+// SINGLE reach (upper / middle / delta), so the panel can show every fish that
+// lives there. Ecologically correct + seed-varied so neighbouring continental
+// rivers roll different rosters (the user's "add variety for continental").
+//
+//  * base pool  — every catalogued species of this zone×band, MINUS the reserved
+//    migrants below; a seed-shuffled subset is taken so rivers differ.
+//  * megafish   — sturgeon / giant catfish (arapaima & redtail in the tropics)
+//    ONLY on a `great` trunk's middle & delta.
+//  * diadromous — salmon / shad / eel (mullet & snook in the tropics) ONLY at an
+//    `estuary`/delta reach.
+
+/// Reserved migrant slugs — kept OUT of the base pool so a small river's delta
+/// doesn't sprout sturgeon or salmon; re-added only for great/estuary reaches.
+fn is_reserved_migrant(slug: &str) -> bool {
+    matches!(slug,
+        "silt-sturgeon" | "greatmaw-catfish" | "king-arapaima" | "whiskered-redtail" |
+        "silverleap-salmon" | "tidewater-shad" | "silverback-eel" | "delta-mullet" | "brackish-snook")
+}
+
+/// Megafish that haunt the deep trunk of a GREAT river (band-appropriate).
+fn megafish_slugs(band: Band) -> &'static [&'static str] {
+    match band {
+        Tropical => &["king-arapaima", "whiskered-redtail"],
+        WarmTemperate | CoolTemperate | Boreal => &["silt-sturgeon", "greatmaw-catfish"],
+        Polar => &[],
+    }
+}
+
+/// Diadromous fish that run in from the sea at an estuary/delta (band-appropriate).
+fn run_slugs(band: Band) -> &'static [&'static str] {
+    match band {
+        Tropical => &["delta-mullet", "brackish-snook"],
+        WarmTemperate => &["tidewater-shad", "silverback-eel", "brackish-snook"],
+        CoolTemperate => &["silverleap-salmon", "tidewater-shad", "silverback-eel"],
+        Boreal => &["silverleap-salmon", "tidewater-shad"],
+        Polar => &["silverleap-salmon"],
+    }
+}
+
+/// Seed-pick up to `n` species out of `cands` (removing them), deterministic.
+fn shuffle_take<'a>(cands: &mut Vec<&'a FishSpec>, r: &mut Rng, n: usize) -> Vec<&'a FishSpec> {
+    let mut out = Vec::new();
+    let take = n.min(cands.len());
+    for _ in 0..take {
+        let i = (r.next() % cands.len() as u64) as usize;
+        out.push(cands.remove(i));
+    }
+    out
+}
+
+/// The full fish assemblage of ONE reach. `zone` 0 upper · 1 middle · 2 delta;
+/// `great` = a big trunk (megafish), `estuary` = tidal/delta mouth (diadromous runs).
+pub fn assign_reach_fish(band: Band, zone: u8, great: bool, estuary: bool, arid: bool, seed: u64) -> Vec<&'static FishSpec> {
+    if arid {
+        let mut c: Vec<&'static FishSpec> = ARID_FISH.iter()
+            .filter(|f| f.zone == zone && f.bands.contains(&band)).collect();
+        if c.is_empty() {
+            c = ARID_FISH.iter().filter(|f| f.bands.contains(&band)).collect();
+        }
+        let mut r = Rng(seed ^ 0x00A1_D000_0000_0001);
+        return shuffle_take(&mut c, &mut r, 3);
+    }
+    let mut cands: Vec<&'static FishSpec> = SIGNATURE_FISH.iter()
+        .filter(|f| f.zone == zone && f.bands.contains(&band) && !is_reserved_migrant(f.slug))
+        .collect();
+    let mut r = Rng(seed ^ 0x00F1_5EAC_0000_0001);
+    let base_n = if zone == 0 { 3 } else { 4 };
+    let mut out = shuffle_take(&mut cands, &mut r, base_n);
+    if great && zone >= 1 {
+        for slug in megafish_slugs(band) {
+            if let Some(f) = fish_by_slug(slug) {
+                if f.bands.contains(&band) && !out.iter().any(|e| e.slug == f.slug) { out.push(f); }
+            }
+        }
+    }
+    if estuary && zone == 2 {
+        for slug in run_slugs(band) {
+            if let Some(f) = fish_by_slug(slug) {
+                if f.bands.contains(&band) && !out.iter().any(|e| e.slug == f.slug) { out.push(f); }
+            }
+        }
+    }
+    out
+}
+
+/// Prose fish-list for a reach, built from its assigned species' real-world names
+/// (so the reach's sentence and its plates always name the SAME fish).
+pub fn reach_fish_prose(species: &[&FishSpec]) -> String {
+    if species.is_empty() { return "only a few hardy fish".into(); }
+    let mut uniq: Vec<String> = Vec::new();
+    for f in species {
+        let n = f.real.to_string();
+        if !uniq.contains(&n) { uniq.push(n); }
+    }
+    join_and(&uniq)
 }
 
 // ───────────────────── Signature fish species (lake rosters) ─────────────────
@@ -1002,6 +1124,53 @@ mod tests {
         let arid = assign_river_fish(Band::WarmTemperate, "hills", 0, 300.0, true, 2);
         assert!(!arid.is_empty(), "arid river has desert species");
         assert!(arid.iter().all(|f| ARID_FISH.iter().any(|a| a.slug == f.slug)), "arid roster used");
+    }
+
+    #[test]
+    fn reach_assemblage_is_multi_and_correct() {
+        // A great cool-temperate delta lists a whole assemblage incl. migrants.
+        let delta = assign_reach_fish(Band::CoolTemperate, 2, true, true, false, 7);
+        assert!(delta.len() >= 4, "a great delta lists many fish: {}", delta.len());
+        assert!(delta.iter().any(|f| f.real == "salmon"), "estuary run includes salmon");
+        assert!(delta.iter().any(|f| f.real == "giant catfish" || f.real == "sturgeon"),
+            "a great trunk has megafish");
+        for f in &delta { assert!(f.bands.contains(&Band::CoolTemperate)); }
+        // A small plain headwater is a short list — no sturgeon, no salmon.
+        let up = assign_reach_fish(Band::CoolTemperate, 0, false, false, false, 3);
+        assert!(!up.is_empty() && up.iter().all(|f| f.zone == 0));
+        assert!(!up.iter().any(|f| is_reserved_migrant(f.slug)), "no migrants in a plain headwater");
+        // The reach's prose names the SAME species as its plates.
+        let prose = reach_fish_prose(&up);
+        assert!(prose.contains(up[0].real), "prose lists the assigned species: {prose}");
+    }
+
+    /// Dump the whole fish catalogue to JSON for the standalone HTML gallery
+    /// generator (`scripts/gen_fish_gallery.mjs`). Ignored by default — run with
+    /// `cargo test --lib emit_fish_catalogue -- --ignored --nocapture` to refresh.
+    #[test]
+    #[ignore]
+    fn emit_fish_catalogue() {
+        fn band_str(b: Band) -> &'static str {
+            match b {
+                Tropical => "Tropical", WarmTemperate => "WarmTemperate",
+                CoolTemperate => "CoolTemperate", Boreal => "Boreal", Polar => "Polar",
+            }
+        }
+        fn esc(s: &str) -> String { s.replace('\\', "\\\\").replace('"', "\\\"") }
+        fn one(group: &str, f: &FishSpec) -> String {
+            let bands: Vec<String> = f.bands.iter().map(|b| format!("\"{}\"", band_str(*b))).collect();
+            format!("{{\"group\":\"{}\",\"slug\":\"{}\",\"name\":\"{}\",\"binomial\":\"{}\",\"zone\":{},\"real\":\"{}\",\"blurb\":\"{}\",\"bands\":[{}]}}",
+                group, esc(f.slug), esc(f.name), esc(f.binomial), f.zone, esc(f.real), esc(f.blurb), bands.join(","))
+        }
+        let mut items: Vec<String> = Vec::new();
+        for f in SIGNATURE_FISH { items.push(one("river", f)); }
+        for f in ARID_FISH { items.push(one("arid", f)); }
+        for f in LAKE_FISH { items.push(one("lake", f)); }
+        let json = format!("[\n  {}\n]\n", items.join(",\n  "));
+        let path = std::env::var("FISH_CATALOGUE_OUT")
+            .unwrap_or_else(|_| "../scripts/fish_catalogue.json".to_string());
+        std::fs::write(&path, json).expect("write fish_catalogue.json");
+        eprintln!("wrote {} fish to {}", items.len(), path);
     }
 
     #[test]

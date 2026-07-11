@@ -278,6 +278,8 @@ export class OverlayManager {
   private goodScarcity: { x: number; y: number; premium: number }[] = [];
   /** #26 · named geographic features (rivers/mountains/lakes/regions). */
   private toponyms: { kind: string; name: string; x: number; y: number }[] = [];
+  /** 🌊 Reach-break markers on trunk rivers (upper→middle→delta transitions). */
+  private riverBreaks: { x: number; y: number; tx: number; ty: number; label: string }[] = [];
   private coinUse: CoinUseCity[] = [];
   private coinOverlayHub: number | null = null;
   /** Bank seats to mark on the map (set empty to hide). */
@@ -348,6 +350,7 @@ export class OverlayManager {
     speculation: false, coinDominance: false,
     houseControl: false, merchantRoutes: false, futures: false,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
+    riverBreaks: true,
   };
 
   private currentScale = 1;
@@ -642,6 +645,11 @@ export class OverlayManager {
   drawToponyms(t: { kind: string; name: string; x: number; y: number }[]) {
     this.toponyms = t;
     this.riverLabelCache.clear();
+  }
+
+  /** Set (or clear with []) the reach-break markers along trunk rivers. */
+  drawRiverBreaks(breaks: { x: number; y: number; tx: number; ty: number; label: string }[]) {
+    this.riverBreaks = breaks;
   }
 
   drawTradeRoutes(routes: TradeRoute[]) {
@@ -1375,6 +1383,11 @@ export class OverlayManager {
       this.renderToponyms(ctx);
     }
 
+    // 🌊 Reach breaks: where a trunk river turns upper→middle→delta.
+    if (this.visibility.riverBreaks !== false && this.riverBreaks.length > 0) {
+      this.renderRiverBreaks(ctx);
+    }
+
     // Merchant layer: live family/guild routes coloured by the owning house.
     if (this.visibility.merchantRoutes && this.merchantRoutes.length > 0) {
       this.renderMerchantRoutes(ctx);
@@ -1953,6 +1966,51 @@ export class OverlayManager {
       ctx.fillText(label, tx, t.y + 0.5);
     }
     ctx.textAlign = "left";
+  }
+
+  /** 🌊 Draw the reach-break markers: a small amber tick across the channel + a
+   *  "Upper › Middle @X km" label where a trunk river changes reach. De-collides
+   *  against already-placed labels (toponyms run first). */
+  private renderRiverBreaks(ctx: CanvasRenderingContext2D) {
+    const inv = 1 / Math.sqrt(this.currentScale);
+    const tick = Math.max(3, 7 * inv);
+    const fs = Math.max(6, 8.5 * inv);
+    ctx.save();
+    ctx.font = `600 ${fs}px -apple-system, Segoe UI, sans-serif`;
+    ctx.textBaseline = "middle";
+    for (const b of this.riverBreaks) {
+      const len = Math.hypot(b.tx, b.ty) || 1;
+      const nx = -b.ty / len, ny = b.tx / len;   // perpendicular to flow
+      const cx = b.x + 0.5, cy = b.y + 0.5;
+      // Tick across the channel (dark halo under amber).
+      ctx.beginPath();
+      ctx.moveTo(cx - nx * tick, cy - ny * tick);
+      ctx.lineTo(cx + nx * tick, cy + ny * tick);
+      ctx.strokeStyle = "rgba(8,14,20,0.9)";
+      ctx.lineWidth = Math.max(0.9, 2.6 * inv);
+      ctx.stroke();
+      ctx.strokeStyle = "#ffd27f";
+      ctx.lineWidth = Math.max(0.5, 1.4 * inv);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(0.9, 1.7 * inv), 0, Math.PI * 2);
+      ctx.fillStyle = "#ffd27f";
+      ctx.fill();
+      // Label offset to the side, de-collided.
+      const tx = cx + nx * (tick + 2.5 * inv), ty = cy + ny * (tick + 2.5 * inv);
+      const w = ctx.measureText(b.label).width;
+      const x0 = tx - fs * 0.3, x1 = tx + w + fs * 0.3, y0 = ty - fs * 0.8, y1 = ty + fs * 0.8;
+      if (this.labelCollides(x0, y0, x1, y1)) continue;
+      this.placedLabels.push({ x0, y0, x1, y1 });
+      ctx.textAlign = "left";
+      ctx.lineWidth = Math.max(0.6, 2.0 * inv);
+      ctx.strokeStyle = "rgba(8,14,20,0.85)";
+      ctx.strokeText(b.label, tx, ty);
+      ctx.fillStyle = "#ffe0a0";
+      ctx.fillText(b.label, tx, ty);
+    }
+    ctx.textAlign = "left";
+    ctx.restore();
   }
 
   /** Atlas-style CURVED river label: lays the name glyph-by-glyph along the
@@ -3709,6 +3767,7 @@ export class OverlayManager {
     this.lakeHighlight = -1;
     this.goodScarcity = [];
     this.toponyms = [];
+    this.riverBreaks = [];
     this.fisheryBanks = [];
     this.sharkZones = [];
     this.shipwormZones = [];

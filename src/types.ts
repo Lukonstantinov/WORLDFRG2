@@ -1698,6 +1698,7 @@ export interface RiverZone {
   character: string;  // short width/speed phrase
   story: string;
   tributaries: TribJoin[];
+  species: FishSpecies[]; // the full fish assemblage that lives in THIS reach
 }
 
 /** One classified lake with its limnological + ecological profile (Hydrology
