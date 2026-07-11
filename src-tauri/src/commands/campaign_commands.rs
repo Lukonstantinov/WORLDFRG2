@@ -522,6 +522,27 @@ pub struct CoinShare {
     pub reserve: bool, // a foreign reserve coin circulating here
 }
 
+/// One sub-cap hinterland village that markets through this town (satellite trade).
+#[derive(Serialize, Clone)]
+pub struct HinterlandVillage {
+    pub name: String,
+    pub population: u32,
+    pub x: f32,
+    pub y: f32,
+}
+
+/// Cultures 2.0 · one resident people's contentment in a city — how well the goods it
+/// prizes are supplied here (met vs unmet), so the panel can show happy/unhappy peoples.
+#[derive(Serialize, Clone)]
+pub struct CultureMood {
+    pub name: String,
+    pub share: f32,          // 0..1 of the city's population
+    pub satisfaction: f32,   // 0..1 — mean availability of its prized goods
+    pub color: [u8; 3],
+    pub met: Vec<String>,    // prized goods well-supplied here
+    pub unmet: Vec<String>,  // prized goods scarce/dear here
+}
+
 /// Full per-settlement detail for the redesigned settlement window (live campaign
 /// state): sentiment, market, and history.
 #[derive(Serialize)]
@@ -578,6 +599,9 @@ pub struct HubDetail {
     /// and slowly eroded by assimilation. Display-only.
     #[serde(default)] pub culture: String,
     #[serde(default)] pub minorities: Vec<(String, f32)>,
+    /// Cultures 2.0 · per-people SATISFACTION in this city — is each resident culture's
+    /// prized goods well-supplied here? Drives the "happy / unhappy peoples" readout.
+    #[serde(default)] pub culture_moods: Vec<CultureMood>,
     /// DLC 3 · the polis government of this seat (council + fiscal policy + this
     /// city's speculation read). None for estates / unsettled hubs.
     #[serde(default)] pub government: Option<Government>,
@@ -600,6 +624,13 @@ pub struct HubDetail {
     #[serde(default)] pub treasury: f32,
     /// The city's treasury books (current running year + last completed in `prev`).
     #[serde(default)] pub finance: Option<crate::sim::tick::CityFinance>,
+    /// PUBLIC HEALTH level (hospices/quarantine), 0..0.6 — how far the council funds
+    /// disease mitigation. Higher = far fewer die in a plague, longer immunity.
+    #[serde(default)] pub public_health: f32,
+    /// Sub-cap HINTERLAND villages that market through this town (satellite trade). These
+    /// are the small settlements below the sim cap — connected to the economy via their
+    /// nearest hub rather than simulated individually.
+    #[serde(default)] pub satellites: Vec<HinterlandVillage>,
     /// Name of the polis this city is at war with ("" = at peace).
     #[serde(default)] pub war_with: String,
     /// Its coin, if it mints one.
@@ -1101,6 +1132,31 @@ pub struct CultureBrief {
     pub mobility: f32,   // 0..1 travel-proneness (≥0.7 = merchant diaspora)
     pub top_cities: Vec<(String, u32)>, // by this culture's population, top 4
     pub houses: Vec<String>,            // merchant houses of this people
+    /// Language family (Italic, Semitic, Germanic, …); "" for a creole with mixed roots.
+    #[serde(default)] pub family: String,
+    /// Static origin card — where this people arose + temperament (Cultures 2.0).
+    #[serde(default)] pub origin: String,
+    /// Costume/appearance kit index (0..11) for the figure art; -1 unknown. For a creole,
+    /// `kit` and `kit2` are its two parent kits so the figures blend both dresses.
+    #[serde(default = "neg_one_i32c")] pub kit: i32,
+    #[serde(default = "neg_one_i32c")] pub kit2: i32,
+    /// Goods this people PRIZES (cultural taste) — good-spec ids, for the panel.
+    #[serde(default)] pub desired_goods: Vec<String>,
+}
+fn neg_one_i32c() -> i32 { -1 }
+
+/// A culture's (family, origin card, kit, kit2) from the active worldgen hearths (or a
+/// spawned creole). "" / -1 when unknown (e.g. a legacy save without cards).
+fn culture_lore(sim: &crate::sim::tick::CampaignSim, name: &str) -> (String, String, i32, i32) {
+    if let Some(cr) = sim.creoles.iter().find(|c| c.name == name) {
+        return (cr.family.clone(), cr.origin.clone(), cr.kit_a as i32, cr.kit_b as i32);
+    }
+    if let Some(m) = crate::sim::cultures::active() {
+        if let Some(h) = m.hearths.iter().find(|h| h.people == name) {
+            return (h.family.clone(), h.origin.clone(), h.kit as i32, -1);
+        }
+    }
+    (String::new(), String::new(), -1, -1)
 }
 
 /// Culture colour: the worldgen hearth colour if known, else a deterministic tint.
@@ -1161,15 +1217,85 @@ pub fn campaign_get_cultures(db: State<'_, WorldDb>) -> Result<Vec<CultureBrief>
         let top: Vec<(String, u32)> = acc.cities.into_iter().take(4).map(|(n, p)| (n, p as u32)).collect();
         let mut houses = houses_by.remove(&name).unwrap_or_default();
         houses.sort(); houses.dedup(); houses.truncate(8);
+        let (family, origin, kit, kit2) = culture_lore(&sim, &name);
+        // Desired goods: this people's kit (plus a creole's second parent), deduped.
+        let mut desired_goods: Vec<String> = Vec::new();
+        for k in [kit, kit2] {
+            if k >= 0 {
+                for g in crate::sim::cultures::kit_desired_goods(k as usize) {
+                    if !desired_goods.iter().any(|x| x == g) { desired_goods.push((*g).to_string()); }
+                }
+            }
+        }
         CultureBrief {
             color: culture_color(&name),
             mobility: crate::sim::tick::CampaignSim::culture_mobility(&name),
             population: acc.pop as u32, towns: acc.towns, presence: acc.presence,
-            top_cities: top, houses, name,
+            top_cities: top, houses, family, origin, kit, kit2, desired_goods, name,
         }
     }).collect();
     out.sort_by(|a, b| b.population.cmp(&a.population));
     Ok(out)
+}
+
+/// A coarse "where this people lives" raster for the Peoples-panel mini-map — the same
+/// shape as the Goods Editor's suitability preview (`data` 0..255 + a `land` mask), so
+/// the UI draws it identically. Homeland territory (from the worldgen culture raster)
+/// is brightest; live cities where the people is present are lit too (majority brighter
+/// than a minority quarter), so migration/diaspora shows.
+#[derive(serde::Serialize)]
+pub struct CulturePresenceGrid { pub width: u32, pub height: u32, pub data: Vec<u8>, pub land: Vec<u8> }
+
+#[tauri::command]
+pub fn campaign_get_culture_presence(name: String, db: State<'_, WorldDb>) -> Result<CulturePresenceGrid, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::sim::cultures::ensure_active(&conn);
+    let map = match crate::sim::cultures::active() { Some(m) => m, None => return Ok(CulturePresenceGrid { width: 0, height: 0, data: vec![], land: vec![] }) };
+    let (cw, ch) = (map.cw, map.ch);
+    let n = (cw * ch) as usize;
+    let mut data = vec![0u8; n];
+    let mut land = vec![0u8; n];
+    // Homeland raster: this people's hearth cells brightest, other land dim.
+    let home = map.hearths.iter().position(|h| h.people == name);
+    for (ci, &id) in map.ids.iter().enumerate().take(n) {
+        if id != 255 { land[ci] = 1; data[ci] = 40; }
+        if let Some(hi) = home { if id as usize == hi { data[ci] = 255; } }
+    }
+    // Live spread: light up coarse cells around cities where the people lives now.
+    if let Some(sim) = get_sim(&db, &conn)? {
+        let (ww, wh) = (map.world_w.max(1) as f32, map.world_h.max(1) as f32);
+        let coarse = |x: f32, y: f32| -> usize {
+            let cx = ((x / ww * cw as f32) as u32).min(cw.saturating_sub(1));
+            let cy = ((y / wh * ch as f32) as u32).min(ch.saturating_sub(1));
+            (cy * cw + cx) as usize
+        };
+        for i in 0..sim.hubs.len() {
+            let h = &sim.hubs[i];
+            if h.is_estate || h.abandoned || h.population < 1.0 { continue; }
+            let ci = coarse(h.x, h.y);
+            if ci >= n { continue; }
+            if sim.hub_culture.get(i).map(|c| c == &name).unwrap_or(false) {
+                land[ci] = 1; data[ci] = 255;
+            } else if let Some(mins) = sim.hub_minorities.get(i) {
+                if let Some((_, s)) = mins.iter().find(|(c, _)| c == &name) {
+                    if *s >= 0.05 { land[ci] = 1; data[ci] = data[ci].max((120.0 + *s * 130.0).min(240.0) as u8); }
+                }
+            }
+        }
+    }
+    Ok(CulturePresenceGrid { width: cw, height: ch, data, land })
+}
+
+/// The 6-monthly population series for one people (for the Peoples-panel line chart).
+/// Returns `[year, population]` points in time order.
+#[tauri::command]
+pub fn campaign_get_culture_history(name: String, db: State<'_, WorldDb>) -> Result<Vec<[f32; 2]>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    Ok(sim.culture_history.iter().map(|s| {
+        let p = s.pops.iter().find(|(c, _)| c == &name).map(|(_, p)| *p).unwrap_or(0.0);
+        [s.t, p]
+    }).collect())
 }
 
 /// Per-hub share of ONE culture: `[x, y, share]` for every settlement where the
@@ -1322,6 +1448,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 x: eh.x, y: eh.y, name: eh.name.clone(),
                 population: tier_founding(eh.population),
                 koppen: eh.koppen, coastal: eh.coastal,
+                parent_hub: -1,
             }
         })
         .collect();
@@ -1414,6 +1541,13 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 settle_coin: -1,
                 coin_basket: Vec::new(),
                 mint_fineness_prev: 0.0,
+                price_level: 1.0,
+                coin_circ_prev: 0.0,
+                last_reform_tick: 0,
+                reform_until: 0,
+                coin_metal: 0,
+                mint_bullion_ratio: 1.0,
+                has_mint: false,
                 quality: Vec::new(),
                 stolen_good: -1,
                 stolen_from: -1,
@@ -1429,6 +1563,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 main_bank: -1,
                 indep_cooldown_until: 0,
                 plague_immune_until: 0,
+                public_health: 0.0,
                 supply_ships: 0,
                 supply_source: -1,
                 supply_delivered: 0.0,
@@ -1746,6 +1881,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         total_abandonments: 0,
         migrations: vec![],
         migration_routes: vec![],
+        creoles: vec![],
+        culture_history: vec![],
         council_bought_month: vec![],
         good_flow_accum: vec![],
         hub_good_trade: vec![],
@@ -2927,7 +3064,41 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             .and_then(|p| sim.houses.get(p as usize)).map(|h| h.name.clone()).unwrap_or_default(),
         culture: sim.hub_culture.get(hi).cloned().unwrap_or_default(),
         minorities: sim.hub_minorities.get(hi).cloned().unwrap_or_default(),
+        culture_moods: {
+            // How content is each resident people here — are its prized goods well-supplied?
+            let name_to_g: std::collections::HashMap<&str, usize> =
+                sim.goods.iter().enumerate().map(|(g, tg)| (tg.name.as_str(), g)).collect();
+            let mut present: Vec<(String, f32)> = Vec::new();
+            let minsum: f32 = sim.hub_minorities.get(hi).map(|m| m.iter().map(|(_, s)| *s).sum()).unwrap_or(0.0);
+            let maj = sim.hub_culture.get(hi).cloned().unwrap_or_default();
+            if !maj.is_empty() && maj != "—" { present.push((maj, (1.0 - minsum).clamp(0.0, 1.0))); }
+            if let Some(mins) = sim.hub_minorities.get(hi) {
+                for (c, s) in mins { if *s > 0.02 { present.push((c.clone(), *s)); } }
+            }
+            present.into_iter().map(|(name, share)| {
+                let desired = sim.culture_desired_goods(&name);
+                let (mut met, mut unmet) = (Vec::new(), Vec::new());
+                let (mut sum, mut cnt) = (0.0f32, 0u32);
+                for nm in &desired {
+                    if let Some(&g) = name_to_g.get(nm) {
+                        let base = sim.goods[g].base_value.max(0.01);
+                        let price = hub.price.get(g).copied().unwrap_or(base).max(0.01);
+                        let avail = (base * 1.3 / price).clamp(0.0, 1.0);
+                        sum += avail; cnt += 1;
+                        if avail >= 0.6 { met.push((*nm).to_string()); }
+                        else if avail < 0.4 { unmet.push((*nm).to_string()); }
+                    }
+                }
+                let satisfaction = if cnt > 0 { sum / cnt as f32 } else { 0.5 };
+                CultureMood { color: culture_color(&name), name, share, satisfaction, met, unmet }
+            }).collect()
+        },
         government,
+        public_health: hub.public_health,
+        satellites: sim.hinterland.iter()
+            .filter(|v| v.parent_hub == hi as i32)
+            .map(|v| HinterlandVillage { name: v.name.clone(), population: v.population.round().max(0.0) as u32, x: v.x, y: v.y })
+            .collect(),
         treasury: hub.treasury,
         finance: Some(hub.finance.clone()),
         war_with,
@@ -3926,6 +4097,157 @@ pub fn campaign_get_currencies(db: State<'_, WorldDb>) -> Result<Vec<CurrencyBri
     Ok(out)
 }
 
+/// v2.0 · one MINT/polis in the unified "Coin & Mints" view — the polis (treasury,
+/// tariffs, council, war) AND its coin (strength, drivers, reach, price level)
+/// fused into a single card, replacing the old split Poleis + Currencies tabs.
+#[derive(Serialize, Clone)]
+pub struct MintBrief {
+    pub hub: u32,
+    pub city: String,
+    pub x: f32,
+    pub y: f32,
+    pub population: u32,
+    // ── civic (the polis behind the mint) ──
+    pub treasury: f32,
+    pub tariff_export: f32,
+    pub tariff_import: f32,
+    pub council: String,
+    pub council_archetype: String,
+    pub council_color: String,
+    pub war_with: String,
+    // ── the coin ("" coin_name = this polis mints none) ──
+    pub coin_name: String,
+    pub issuer: String,
+    /// The metal it is struck in: "gold" | "silver" | "electrum" | "bronze".
+    pub metal: String,
+    pub trust: f32,
+    pub fineness: f32,
+    pub value: f32,
+    /// Single headline 0..100 (fineness × acceptance) — the number the card leads with.
+    pub strength: f32,
+    pub throughput: f32,
+    pub is_reserve: bool,
+    pub circulating: f32,
+    pub held_in: u32,
+    pub abroad: u32,
+    // ── v2.0 monetary loop + reform ──
+    /// Local price-level index (1.0 = par at start). Rises with debasement/money growth.
+    pub price_level: f32,
+    /// Bullion capacity: "ample" | "tight" | "scarce" — how the region's gold/silver
+    /// supply constrains minting (the coin-supply limiting factor).
+    pub bullion: String,
+    /// v2.0 · holds the RIGHT OF THE MINT (a charter). A coinless council seat that
+    /// lacks this simply isn't a big enough commercial centre to coin yet.
+    pub has_mint: bool,
+    /// Honest-money mandate currently in force (no debasement allowed).
+    pub under_mandate: bool,
+    /// This mint has reformed its coinage at least once.
+    pub reformed: bool,
+}
+
+/// v2.0 · every polis (council seat) as a unified mint card, ranked by coin
+/// strength then treasury. Coinless poleis are included (empty `coin_name`).
+#[tauri::command]
+pub fn campaign_get_mints(db: State<'_, WorldDb>) -> Result<Vec<MintBrief>, String> {
+    use crate::sim::tick::{archetype_label, coin_value, coin_strength};
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let n = sim.hubs.len();
+    // Circulating supply + holder/abroad counts per coin (by mint hub INDEX).
+    let mut circ: std::collections::HashMap<usize, (f32, u32, u32)> = std::collections::HashMap::new();
+    for (hi, h) in sim.hubs.iter().enumerate() {
+        if h.is_estate { continue; }
+        let thru = h.tw_house + h.tw_local + h.tw_guild;
+        for &(k, share) in &h.coin_basket {
+            let e = circ.entry(k as usize).or_insert((0.0, 0, 0));
+            e.0 += thru * share; e.1 += 1;
+            if k as usize != hi { e.2 += 1; }
+        }
+    }
+    let mut out: Vec<MintBrief> = sim.hubs.iter().enumerate()
+        .filter(|(_, h)| !h.is_estate && h.population >= 1.0 && h.council_house >= 0)
+        .map(|(i, h)| {
+            let ci = h.council_house;
+            let (council, arch, color) = if ci >= 0 {
+                if let Some(house) = sim.houses.get(ci as usize) {
+                    (house.name.clone(), archetype_label(house.archetype).to_string(), distinct_color(ci as usize))
+                } else { ("—".into(), String::new(), "#7a8aa0".into()) }
+            } else { ("—".into(), String::new(), "#7a8aa0".into()) };
+            let war_with = if h.war_with >= 0 {
+                sim.hubs.get(h.war_with as usize).map(|x| x.name.clone()).unwrap_or_default()
+            } else { String::new() };
+            let fineness = if h.mint_fineness <= 0.0 { 1.0 } else { h.mint_fineness };
+            let throughput = h.tw_house + h.tw_local + h.tw_guild;
+            let (circulating, held_in, abroad) = circ.get(&i).copied().unwrap_or((0.0, 0, 0));
+            let has_coin = !h.coin_name.is_empty();
+            MintBrief {
+                hub: h.id, city: h.name.clone(), x: h.x, y: h.y, population: h.population as u32,
+                treasury: h.treasury, tariff_export: h.tariff_export, tariff_import: h.tariff_import,
+                council, council_archetype: arch, council_color: color, war_with,
+                coin_name: h.coin_name.clone(),
+                issuer: if ci >= 0 { sim.houses.get(ci as usize).map(|x| x.name.clone()).unwrap_or_default() } else { String::new() },
+                metal: match h.coin_metal { 1 => "gold", 2 => "electrum", 3 => "bronze", _ => "silver" }.to_string(),
+                trust: h.coin_trust,
+                fineness,
+                value: if has_coin { coin_value(h.mint_fineness, h.coin_trust) } else { 0.0 },
+                strength: if has_coin { coin_strength(fineness, h.coin_trust) } else { 0.0 },
+                throughput,
+                is_reserve: has_coin && h.coin_trust >= 0.55,
+                circulating, held_in, abroad,
+                price_level: if h.price_level <= 0.0 { 1.0 } else { h.price_level },
+                bullion: if !has_coin { String::new() }
+                    else if h.mint_bullion_ratio >= 1.0 { "ample".into() }
+                    else if h.mint_bullion_ratio >= 0.5 { "tight".into() }
+                    else { "scarce".into() },
+                has_mint: h.has_mint,
+                under_mandate: h.reform_until > sim.tick,
+                reformed: h.last_reform_tick != 0,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        let sa = if a.coin_name.is_empty() { -1.0 } else { a.strength };
+        let sb = if b.coin_name.is_empty() { -1.0 } else { b.strength };
+        sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+            .then(b.treasury.partial_cmp(&a.treasury).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    Ok(out)
+}
+
+/// v2.0 · one entry in the MONETARY CHRONICLE — the dated story of money (mints,
+/// debasements, reforms, bank foundings, runs, crashes) for the Shocks timeline.
+#[derive(Serialize, Clone)]
+pub struct MonetaryEvent {
+    pub year: u32,
+    pub tick: u32,
+    pub kind: String,   // coinage | reform | run | bank | crash
+    pub city: String,   // resolved hub name ("" = world)
+    pub value: f32,
+    pub text: String,
+}
+
+/// v2.0 · the monetary chronicle: journal rows about money & credit, newest first.
+#[tauri::command]
+pub fn campaign_monetary_chronicle(db: State<'_, WorldDb>) -> Result<Vec<MonetaryEvent>, String> {
+    use crate::sim::tick::TICKS_PER_YEAR;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    const KINDS: [&str; 6] = ["coinage", "charter", "reform", "run", "bank", "crash"];
+    let mut out: Vec<MonetaryEvent> = sim.journal.iter()
+        .filter(|e| KINDS.contains(&e.kind.as_str()))
+        .map(|e| MonetaryEvent {
+            year: e.tick / TICKS_PER_YEAR,
+            tick: e.tick,
+            kind: e.kind.clone(),
+            city: if e.hub >= 0 { sim.hubs.get(e.hub as usize).map(|h| h.name.clone()).unwrap_or_default() } else { String::new() },
+            value: e.value,
+            text: e.text.clone(),
+        })
+        .collect();
+    out.reverse(); // newest first
+    Ok(out)
+}
+
 /// One city's USE of a coin (for the coin-usage overlay + per-coin breakdown chart).
 #[derive(Serialize)]
 pub struct CoinUseCity {
@@ -3936,8 +4258,11 @@ pub struct CoinUseCity {
     pub x: f32,
     pub y: f32,
     pub volume: f32,         // trade throughput settled in this coin at this city
+    pub share: f32,          // this coin's share of the city's currency basket 0..1
     pub mint: bool,          // this city is the coin's own mint
-    pub reserve_reach: bool, // a foreign reserve coin circulating here
+    pub primary: bool,       // this coin is the city's MAIN settlement currency (settle_coin)
+    pub reserve_reach: bool, // a foreign reserve coin circulating here (held, not primary)
+    pub color: String,       // stable per-coin colour (its council's arms) for the dominance map
 }
 
 /// Per-city coin usage: which coin each settlement settles its trade in + the
@@ -3959,6 +4284,10 @@ pub fn campaign_coin_usage(db: State<'_, WorldDb>) -> Result<Vec<CoinUseCity>, S
             let Some(coin_hub) = sim.hubs.get(j) else { continue };
             if coin_hub.coin_name.is_empty() { continue; }
             let mint = j == i;
+            let primary = h.settle_coin == j as i32;
+            let color = if coin_hub.council_house >= 0 {
+                distinct_color(coin_hub.council_house as usize)
+            } else { distinct_color(j) };
             out.push(CoinUseCity {
                 coin: coin_hub.id,
                 coin_name: coin_hub.coin_name.clone(),
@@ -3966,12 +4295,133 @@ pub fn campaign_coin_usage(db: State<'_, WorldDb>) -> Result<Vec<CoinUseCity>, S
                 name: h.name.clone(),
                 x: h.x, y: h.y,
                 volume: thru * share,
+                share,
                 mint,
-                reserve_reach: !mint && coin_hub.coin_trust >= 0.55,
+                primary,
+                reserve_reach: !primary && coin_hub.coin_trust >= 0.55,
+                color,
             });
         }
     }
     Ok(out)
+}
+
+/// v2.0 · one coin in a holder's currency reserves (a donut slice).
+#[derive(Serialize, Clone)]
+pub struct ReserveSlice {
+    pub coin_name: String,
+    pub color: String,
+    pub metal: String,
+    pub share: f32,     // 0..1 of the holder's reserves
+    pub primary: bool,  // the holder's main/settlement coin
+    pub mint: bool,     // the holder's own city mints this coin
+}
+
+/// v2.0 · one holder (city / bank / house) and the currency composition of its
+/// reserves — the inward view (what coins it HOLDS), for the Reserves donuts.
+#[derive(Serialize, Clone)]
+pub struct ReserveHolder {
+    pub kind: String,   // "city" | "bank" | "house"
+    pub name: String,
+    pub seat: String,   // home/seat city ("" for a city holder)
+    pub total: f32,     // total reserves/wealth (grain-equivalent)
+    pub slices: Vec<ReserveSlice>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct ReservesPayload {
+    pub cities: Vec<ReserveHolder>,
+    pub banks: Vec<ReserveHolder>,
+    pub houses: Vec<ReserveHolder>,
+}
+
+/// v2.0 · currency reserves for every holder. Cities carry an explicit `coin_basket`;
+/// BANKS and HOUSES don't hold per-coin balances in the sim, so their composition is
+/// DERIVED at read time — a bank's specie is attributed across its seat + branch
+/// cities' baskets, a house's wealth across the baskets of its home hub + offices.
+/// (Pure presentation: the underlying wealth dynamics are untouched.)
+#[tauri::command]
+pub fn campaign_reserves(db: State<'_, WorldDb>) -> Result<ReservesPayload, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(ReservesPayload { cities: vec![], banks: vec![], houses: vec![] }) };
+    let n = sim.hubs.len();
+    let metal_name = |m: u8| match m { 1 => "gold", 2 => "electrum", 3 => "bronze", _ => "silver" }.to_string();
+    // Per-coin metadata (name/colour/metal) keyed by issuing-mint hub INDEX.
+    let coin_meta = |k: usize| -> Option<(String, String, String)> {
+        let h = sim.hubs.get(k)?;
+        if h.coin_name.is_empty() { return None; }
+        let color = if h.council_house >= 0 { distinct_color(h.council_house as usize) } else { distinct_color(k) };
+        Some((h.coin_name.clone(), color, metal_name(h.coin_metal)))
+    };
+    // Blend a set of (hub, weight) presences into a normalized coin→share basket.
+    let blend = |presence: &[(usize, f32)], main_hub: Option<usize>| -> Vec<ReserveSlice> {
+        let mut w: std::collections::HashMap<usize, f32> = std::collections::HashMap::new();
+        for &(hub, wt) in presence {
+            if hub >= n || wt <= 0.0 { continue; }
+            for &(k, share) in &sim.hubs[hub].coin_basket { *w.entry(k as usize).or_insert(0.0) += share * wt; }
+        }
+        let tot: f32 = w.values().sum::<f32>().max(1e-6);
+        let main_coin = main_hub.and_then(|h| sim.hubs.get(h)).map(|h| h.settle_coin).unwrap_or(-1);
+        let mut slices: Vec<ReserveSlice> = w.into_iter().filter_map(|(k, v)| {
+            let (coin_name, color, metal) = coin_meta(k)?;
+            Some(ReserveSlice {
+                coin_name, color, metal, share: v / tot,
+                primary: k as i32 == main_coin,
+                mint: main_hub == Some(k),
+            })
+        }).collect();
+        slices.sort_by(|a, b| b.share.partial_cmp(&a.share).unwrap_or(std::cmp::Ordering::Equal));
+        slices.truncate(6);
+        slices
+    };
+
+    // Cities — their explicit basket.
+    let mut cities: Vec<ReserveHolder> = Vec::new();
+    for (i, h) in sim.hubs.iter().enumerate() {
+        if h.is_estate || h.population < 1.0 || h.coin_basket.is_empty() { continue; }
+        let total = h.tw_house + h.tw_local + h.tw_guild;
+        let slices = blend(&[(i, 1.0)], Some(i));
+        if slices.is_empty() { continue; }
+        cities.push(ReserveHolder { kind: "city".into(), name: h.name.clone(), seat: String::new(), total, slices });
+    }
+    cities.sort_by(|a, b| b.total.partial_cmp(&a.total).unwrap_or(std::cmp::Ordering::Equal));
+    cities.truncate(40);
+
+    // Banks — specie attributed across seat (heavy) + branch cities' baskets.
+    let mut banks: Vec<ReserveHolder> = Vec::new();
+    for b in sim.banks.iter().filter(|b| !b.defunct) {
+        let seat = b.seat as usize;
+        let mut presence: Vec<(usize, f32)> = vec![(seat, 2.0)];
+        for &br in &b.branches { if br as usize != seat { presence.push((br as usize, 1.0)); } }
+        let slices = blend(&presence, Some(seat));
+        if slices.is_empty() { continue; }
+        banks.push(ReserveHolder {
+            kind: "bank".into(), name: b.name.clone(),
+            seat: sim.hubs.get(seat).map(|h| h.name.clone()).unwrap_or_default(),
+            total: b.reserves, slices,
+        });
+    }
+    banks.sort_by(|a, b| b.total.partial_cmp(&a.total).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Houses — wealth attributed across home hub (heavy) + offices + bailos.
+    let mut houses: Vec<ReserveHolder> = Vec::new();
+    for h in sim.houses.iter().filter(|h| !h.defunct && h.wealth > 1.0) {
+        let home = h.hub as usize;
+        let mut presence: Vec<(usize, f32)> = vec![(home, 2.0)];
+        for &o in &h.offices { if o as usize != home { presence.push((o as usize, 1.0)); } }
+        for &b in &h.bailos { if b as usize != home { presence.push((b as usize, 1.0)); } }
+        let slices = blend(&presence, Some(home));
+        if slices.is_empty() { continue; }
+        houses.push(ReserveHolder {
+            kind: "house".into(), name: h.name.clone(),
+            seat: sim.hubs.get(home).map(|x| x.name.clone()).unwrap_or_default(),
+            total: h.wealth, slices,
+        });
+    }
+    houses.sort_by(|a, b| b.total.partial_cmp(&a.total).unwrap_or(std::cmp::Ordering::Equal));
+    houses.truncate(40);
+
+    Ok(ReservesPayload { cities, banks, houses })
 }
 
 /// DLC 3.5 · one bank's balance sheet + reach, for the Coin & Credit panel.
@@ -4166,6 +4616,10 @@ pub struct PlagueCityBrief {
     pub y: f32,
     pub name: String,
     pub deaths: u32,
+    /// SIR · people who fell ill in this strike (`ill` ≥ `deaths`).
+    #[serde(default)] pub ill: u32,
+    /// SIR · people who fell ill and survived (`ill − deaths`).
+    #[serde(default)] pub recovered: u32,
     /// Population that survived the strike (immediate aftermath).
     pub pop: u32,
     /// Still under quarantine right now.
@@ -4189,6 +4643,9 @@ pub struct EpidemicBrief {
     pub end_year: u32,
     pub active: bool,
     pub total_dead: u32,
+    /// SIR · total people who fell ill / recovered across the whole outbreak.
+    #[serde(default)] pub total_ill: u32,
+    #[serde(default)] pub total_recovered: u32,
     /// Plague category: 1 = Great Plague (rare, reaches ~4000 km along the lanes),
     /// 2 = Regional (reaches one further city), 3 = Local outbreak (stays put).
     pub category: u8,
@@ -4216,6 +4673,11 @@ pub fn campaign_get_epidemics(db: State<'_, WorldDb>) -> Result<Vec<EpidemicBrie
         let end = strikes.iter().map(|s| s.until_tick).max().unwrap_or(0);
         let active = strikes.iter().any(|s| s.until_tick > sim.tick);
         let total_dead: f32 = strikes.iter().map(|s| s.deaths).sum();
+        // SIR totals. Legacy strikes stored no `infected` (0) → fall back to deaths so
+        // the ill count is never below the death toll.
+        let ill_of = |s: &crate::sim::tick::PlagueStrike| s.infected.max(s.deaths);
+        let total_ill: f32 = strikes.iter().map(|s| ill_of(s)).sum();
+        let total_recovered: f32 = (total_ill - total_dead).max(0.0);
         // The outbreak's category = the (most severe) category recorded on its strikes
         // (legacy strikes stored 0 → treat as local cat-3).
         let category = strikes.iter().map(|s| if s.category == 0 { 3 } else { s.category })
@@ -4231,6 +4693,8 @@ pub fn campaign_get_epidemics(db: State<'_, WorldDb>) -> Result<Vec<EpidemicBrie
             y: sim.hubs.get(s.hub as usize).map(|h| h.y).unwrap_or(0.0),
             name: name(s.hub),
             deaths: s.deaths.round() as u32,
+            ill: ill_of(s).round() as u32,
+            recovered: (ill_of(s) - s.deaths).max(0.0).round() as u32,
             pop: s.pop_at.round() as u32,
             active: s.until_tick > sim.tick,
             from_name: if s.source >= 0 { name(s.source as u32) } else { String::new() },
@@ -4253,6 +4717,8 @@ pub fn campaign_get_epidemics(db: State<'_, WorldDb>) -> Result<Vec<EpidemicBrie
             end_year: end / TICKS_PER_YEAR,
             active,
             total_dead: total_dead.round() as u32,
+            total_ill: total_ill.round() as u32,
+            total_recovered: total_recovered.round() as u32,
             category,
             disease,
             transmission,
@@ -4485,6 +4951,8 @@ pub struct CitySchematic {
     pub population: u32,
     pub coin_name: String,
     pub coin_trust: f32,
+    /// Metal the city's coin is struck in ("gold" | "silver" | "electrum" | "bronze").
+    pub coin_metal: String,
     pub council: String,
     pub buildings: Vec<SchematicBuilding>,
     pub estates: Vec<SchematicEstate>,
@@ -4538,6 +5006,7 @@ pub fn campaign_get_schematics(db: State<'_, WorldDb>) -> Result<Vec<CitySchemat
             hub: h.id, name: h.name.clone(), x: h.x, y: h.y,
             population: h.population as u32,
             coin_name: h.coin_name.clone(), coin_trust: h.coin_trust,
+            coin_metal: match h.coin_metal { 1 => "gold", 2 => "electrum", 3 => "bronze", _ => "silver" }.to_string(),
             council, buildings, estates, banks_seated, bank_branches,
         });
     }

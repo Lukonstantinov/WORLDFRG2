@@ -273,7 +273,14 @@ export interface CultureBrief {
   mobility: number;   // 0..1 travel-proneness (≥0.7 = merchant diaspora)
   top_cities: [string, number][];
   houses: string[];
+  family?: string;    // language family (Italic, Semitic, …) or "Creole (A · B)"
+  origin?: string;    // static origin card (Cultures 2.0)
+  kit?: number;       // costume/appearance kit 0..17 (-1 unknown); for figure art
+  kit2?: number;      // creole: second parent kit (blend), else -1
+  desired_goods?: string[]; // goods this people prizes (cultural taste)
 }
+/** Coarse "where a people lives" raster (Peoples-panel mini-map; mirrors the goods preview). */
+export interface CulturePresenceGrid { width: number; height: number; data: number[]; land: number[] }
 /** One backer of a colony venture (city / house / bank). */
 export interface ColonyBackerRow { kind: number; name: string; color: string; share: number }
 /** One civic supply contract feeding a colony. */
@@ -480,6 +487,17 @@ export interface CoinShare {
   reserve: boolean; // a foreign reserve coin circulating here
 }
 
+/** A sub-cap hinterland village that markets through a town (satellite trade). */
+export interface HinterlandVillage { name: string; population: number; x: number; y: number }
+/** Cultures 2.0 · a resident people's contentment in a city (prized-goods supply). */
+export interface CultureMood {
+  name: string;
+  share: number;         // 0..1 of the city's population
+  satisfaction: number;  // 0..1 mean availability of its prized goods
+  color: [number, number, number];
+  met: string[];         // prized goods well-supplied here
+  unmet: string[];       // prized goods scarce/dear here
+}
 export interface HubDetail {
   id: number;
   name: string;
@@ -525,6 +543,8 @@ export interface HubDetail {
   culture?: string;
   /** #23 · minority quarters [people, population share 0..1], grown by in-migration. */
   minorities?: [string, number][];
+  /** Cultures 2.0 · per-people contentment here (are their prized goods supplied?). */
+  culture_moods?: CultureMood[];
   /** Foreign merchant offices hosted in this settlement. */
   offices_here?: OfficeHere[];
   /** Market flow: in-flight shipments arriving / departing (ranked by value). */
@@ -541,6 +561,8 @@ export interface HubDetail {
   government?: Government | null;
   treasury?: number;                 // retained civic treasury
   finance?: CityFinance | null;      // treasury books (current + prev)
+  public_health?: number;            // hospices/quarantine level 0..0.6 (cuts plague deaths)
+  satellites?: HinterlandVillage[];  // sub-cap villages that market through this town
   war_with?: string;                 // polis at war with ("" = peace)
   coin_name?: string;
   coin_trust?: number;
@@ -1196,6 +1218,79 @@ export interface CurrencyBrief {
   held_in: number;      // how many settlements hold this coin
 }
 
+/** v2.0 · a MINT/polis fused into one card for the unified "Coin & Mints" tab —
+ *  the civic polis (treasury, tariffs, council, war) plus its coin. `coin_name`
+ *  empty = a council seat that mints no coin yet. */
+export interface MintBrief {
+  hub: number;
+  city: string;
+  x: number;
+  y: number;
+  population: number;
+  // civic
+  treasury: number;
+  tariff_export: number;
+  tariff_import: number;
+  council: string;
+  council_archetype: string;
+  council_color: string;
+  war_with: string;
+  // coin
+  coin_name: string;
+  issuer: string;
+  metal: string;         // "gold" | "silver" | "electrum" | "bronze"
+  trust: number;
+  fineness: number;
+  value: number;
+  strength: number;      // headline 0..100 (fineness × acceptance)
+  throughput: number;
+  is_reserve: boolean;
+  circulating: number;
+  held_in: number;
+  abroad: number;        // holders outside the home market
+  // v2.0 monetary loop + reform
+  price_level: number;   // local CPI index (1.0 = par)
+  bullion: string;       // "ample" | "tight" | "scarce" — coin-supply limiting factor
+  has_mint: boolean;     // holds the right of the mint (charter)
+  under_mandate: boolean; // honest-money mandate active (no debasement)
+  reformed: boolean;      // has reformed its coinage at least once
+}
+
+/** v2.0 · one dated entry in the monetary chronicle (Shocks timeline). */
+export interface MonetaryEvent {
+  year: number;
+  tick: number;
+  kind: string;   // coinage | reform | run | bank | crash
+  city: string;
+  value: number;
+  text: string;
+}
+
+/** v2.0 · one coin in a holder's currency reserves (a donut slice). */
+export interface ReserveSlice {
+  coin_name: string;
+  color: string;
+  metal: string;
+  share: number;    // 0..1
+  primary: boolean; // the holder's main/settlement coin
+  mint: boolean;    // the holder's own city mints this coin
+}
+
+/** v2.0 · one holder (city / bank / house) and its currency reserve composition. */
+export interface ReserveHolder {
+  kind: string;     // "city" | "bank" | "house"
+  name: string;
+  seat: string;     // home/seat city ("" for a city)
+  total: number;    // reserves/wealth (grain-eq)
+  slices: ReserveSlice[];
+}
+
+export interface ReservesPayload {
+  cities: ReserveHolder[];
+  banks: ReserveHolder[];
+  houses: ReserveHolder[];
+}
+
 /** One settlement's use of a coin — for the coin-usage overlay + per-coin chart. */
 export interface CoinUseCity {
   coin: number;          // issuing-mint hub id (which coin this city settles in)
@@ -1205,8 +1300,11 @@ export interface CoinUseCity {
   x: number;
   y: number;
   volume: number;        // trade settled in this coin at this city
+  share: number;         // this coin's share of the city's basket 0..1
   mint: boolean;         // this city is the coin's own mint
-  reserve_reach: boolean; // a foreign reserve coin circulating here
+  primary: boolean;      // this coin is the city's MAIN settlement currency
+  reserve_reach: boolean; // a foreign reserve coin circulating here (held, not primary)
+  color: string;         // stable per-coin colour (its council's arms)
 }
 
 /** One bank's balance sheet + reach. */
@@ -1301,6 +1399,7 @@ export interface CityFinance {
   spent_civic: number;
   spent_war: number;
   spent_works: number;
+  spent_health?: number; // hospices / quarantine (public health)
   reparations_out: number;
   prev?: CityFinance | null;
 }
@@ -1341,6 +1440,8 @@ export interface PlagueCityBrief {
   y: number;
   name: string;
   deaths: number;
+  ill?: number;       // SIR · fell ill in this strike (>= deaths)
+  recovered?: number; // SIR · fell ill and survived (ill - deaths)
   pop: number;      // survivors at the strike
   active: boolean;  // still under quarantine
   from_name: string; // carried from (""=spontaneous origin)
@@ -1357,6 +1458,8 @@ export interface EpidemicBrief {
   end_year: number;
   active: boolean;
   total_dead: number;
+  total_ill?: number;       // SIR · total fell ill across the outbreak
+  total_recovered?: number; // SIR · total recovered across the outbreak
   /** 1 = Great Plague (rare, spreads ~4000 km along the lanes), 2 = Regional (reaches
    *  one further city), 3 = Local outbreak (stays put). */
   category: number;
@@ -1455,6 +1558,7 @@ export interface CitySchematic {
   population: number;
   coin_name: string;
   coin_trust: number;
+  coin_metal: string;   // "gold" | "silver" | "electrum" | "bronze"
   council: string;
   buildings: SchematicBuilding[];
   estates: SchematicEstate[];
@@ -1505,6 +1609,15 @@ export interface RiverData {
   tributary?: boolean; // ends at a confluence with a larger stream (not the sea)
   order?: number; // Strahler-ish stream order (1 = headwater creek)
   meander?: number; // 0..1 render meander scale (0 = steep/straight, 1 = flat floodplain)
+  /** True meander geometry — a smoothed, sub-cell render polyline (cell-index
+   *  coords, same convention as `points`) computed physically in the backend
+   *  (winds on flat lowlands, straight on steep headwaters, clamped to the valley).
+   *  Drawn in place of the cosmetic meander when present. Empty/absent on old
+   *  saves → the frontend falls back to `meanderPath(points)`. */
+  render?: [number, number][];
+  /** Braided anabranches (thin secondary channels) on a great river's widest,
+   *  flattest reaches — drawn faint beside the trunk. */
+  braids?: [number, number][][];
 }
 
 /** A city sitting on a river reach (Hydrology dashboard). Mirrors Rust `RiverCityInfo`. */
@@ -1550,11 +1663,29 @@ export interface RiverNode {
   riparian: string; // bankside vegetation phrase
   water: string;    // water character (clarity/sediment/productivity)
   wildlife: string; // charismatic riverine wildlife beyond fish
-  story: string;    // unique multi-sentence NatGeo-style account of the system
+  story: string;    // trunk: SUMMARY lede of the whole course · tributary: short account
+  climate_journey: string; // biomes crossed source→mouth ("temperate forest, then …")
+  zones: RiverZone[];      // upper / middle / lower-delta reaches (trunks only)
   species: FishSpecies[]; // signature fish, one per river zone the reach spans
   profile: number[]; // elevation (m), source → mouth
   cities: RiverCityInfo[];
   children: RiverNode[];
+}
+
+/** A tributary joining a river at a given distance downstream. Mirrors Rust. */
+export interface TribJoin { name: string; km: number; }
+
+/** One reach of a trunk river — upper / middle / lower-delta. Mirrors Rust `RiverZoneOut`. */
+export interface RiverZone {
+  kind: "upper" | "middle" | "delta";
+  label: string;      // "Upper river" | "Middle river" | "Delta / Estuary / Lower course"
+  start_km: number;
+  end_km: number;
+  biome: string;      // dominant biome of this reach
+  koppen: string;     // dominant Köppen code (tooltip)
+  character: string;  // short width/speed phrase
+  story: string;
+  tributaries: TribJoin[];
 }
 
 /** One classified lake with its limnological + ecological profile (Hydrology
@@ -1578,6 +1709,7 @@ export interface LakeNode {
   wildlife: string;
   endemism: string;
   blurb: string;        // one-line flavour description
+  species: FishSpecies[]; // signature fish (variable roster by type × band)
   story: string;        // unique multi-sentence NatGeo-style account
   inflows: string[];    // feeder river names
   outflow: string;      // draining river name ("" = terminal)
@@ -1589,6 +1721,14 @@ export interface LakeNode {
 export interface LakeData {
   cells: [number, number][];
   elevation: number;
+  /** 0 = normal depression-filled basin · 1 = oxbow/backwater cut off from a
+   *  meandering river (drawn as a still green-blue backwater). */
+  kind?: number;
+  /** True terminal salt lake (arid, no outflow) — tinted pink on the map. */
+  endorheic?: boolean;
+  /** Approximate salinity (ppt); ~0.2 fresh, 12-120+ for a salt lake. Drives the
+   *  brackish→saline→hypersaline pink tint. */
+  salinity_ppt?: number;
 }
 
 /** A signature fish species on a river reach. `slug` keys an illustration at

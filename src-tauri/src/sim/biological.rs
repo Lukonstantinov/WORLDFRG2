@@ -710,6 +710,43 @@ pub fn compute_reef_risk(buf: &mut WorldBuffer) {
 /// and reproduce the original behavior exactly; custom goods use their declarative
 /// `Envelope`. Disabled goods leave a zeroed column. One tile column is written
 /// per spec (the count is no longer capped at `GOODS_COUNT`).
+/// Terminal SALT lakes are evaporite salt factories (Bonneville, Uyuni, Assal).
+/// For each endorheic lake whose brine reaches salt-production strength, write the
+/// brine into the persisted salinity column (so the salinity layer surfaces the
+/// inland playa) and force strong SALT production on the pan cells and their
+/// immediate evaporite shore. Coastal solar-salt belts are still placed by the
+/// normal good pass; this adds the inland lake source, wiring salt lakes into the
+/// economy. No-op if the world has no salt good or no salt lakes.
+pub fn apply_salt_pans(buf: &mut WorldBuffer, lakes: &[super::rivers::Lake], specs: &[GoodSpec]) {
+    let salt_slot = match specs.iter().position(|s| builtin_index_of(&s.id) == Some(GOOD_SALT)) {
+        Some(s) => s,
+        None => return,
+    };
+    if buf.goods.len() <= salt_slot { return; }
+    let h = buf.height as i32;
+    let have_sal = !buf.salinity.is_empty();
+    let shore_u8 = super::rivers::salinity_to_u8(super::rivers::SALT_PRODUCTION_PPT);
+    for lk in lakes {
+        if !lk.endorheic || lk.salinity_ppt < super::rivers::SALT_PRODUCTION_PPT { continue; }
+        let pan_u8 = super::rivers::salinity_to_u8(lk.salinity_ppt);
+        for &(x, y) in &lk.cells {
+            let ci = buf.idx(x, y);
+            if have_sal { buf.salinity[ci] = buf.salinity[ci].max(pan_u8); }
+            buf.goods[salt_slot][ci] = buf.goods[salt_slot][ci].max(230);
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                let nx = buf.wrap_x(x as i32 + dx);
+                let ny = y as i32 + dy;
+                if ny < 0 || ny >= h { continue; }
+                let ni = buf.idx(nx, ny as u32);
+                if buf.terrain[ni] == 1 {
+                    buf.goods[salt_slot][ni] = buf.goods[salt_slot][ni].max(180);
+                    if have_sal { buf.salinity[ni] = buf.salinity[ni].max(shore_u8); }
+                }
+            }
+        }
+    }
+}
+
 pub fn compute_trade_goods(
     buf: &mut WorldBuffer, _rivers: &[River], seed: u64, gem_deposits: u32,
     climate_strictness: f32, specs: &[GoodSpec],
@@ -1607,5 +1644,51 @@ mod tests {
         let overlap = ta.intersection(&tb).count();
         // Largely disjoint: the two minerals' richest provinces mostly don't coincide.
         assert!(overlap < ta.len() / 2, "provinces overlap too much: {overlap}/{}", ta.len());
+    }
+
+    /// A terminal salt lake must (a) produce SALT on its pan + shore and (b) write
+    /// its brine into the salinity column; a freshwater lake does neither.
+    #[test]
+    fn salt_pans_make_salt_and_brine() {
+        use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
+        use crate::sim::rivers::Lake;
+        use crate::sim::goods_spec::{default_list, builtin_index_of};
+
+        let (w, h) = (20u32, 12u32);
+        let n = (w * h) as usize;
+        let mut buf = WorldBuffer {
+            cols: ColumnSet::ALL, width: w, height: h, tiles_x: 1, tiles_y: 1,
+            equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0,
+            terrain: vec![1u8; n], elevation: vec![0.1f32; n], sea_depth: vec![0.0; n],
+            is_shelf: vec![0; n], is_shelf_edge: vec![0; n], locked_bits: Vec::new(),
+            plate_index: Vec::new(), boundary_type: Vec::new(), is_volcanic: Vec::new(),
+            temperature: Vec::new(), precipitation: vec![120.0; n],
+            koppen: vec![super::super::koppen::BWK; n],
+            soil_type: Vec::new(), fertility: Vec::new(), fishery: Vec::new(),
+            current_type: Vec::new(), wind_vx: Vec::new(), wind_vy: Vec::new(),
+            current_vx: Vec::new(), current_vy: Vec::new(), distance_to_ocean: Vec::new(),
+            habitability: Vec::new(), salinity: vec![0u8; n], shark_risk: Vec::new(),
+            goods: Vec::new(), shipworm_risk: Vec::new(), storm_base: Vec::new(),
+            reef_risk: Vec::new(), disease_risk: Vec::new(),
+        };
+        let specs = default_list();
+        buf.goods = vec![vec![0u8; n]; specs.len()];
+        let salt_slot = specs.iter().position(|s| builtin_index_of(&s.id) == Some(super::GOOD_SALT)).unwrap();
+
+        let salt_lake = Lake { cells: vec![(10, 6), (11, 6)], elevation: 0.1, kind: 0, endorheic: true, salinity_ppt: 120.0 };
+        super::apply_salt_pans(&mut buf, &[salt_lake], &specs);
+        let ci = buf.idx(10, 6);
+        assert_eq!(buf.goods[salt_slot][ci], 230, "salt produced on the pan");
+        assert_eq!(buf.salinity[ci], 255, "hypersaline brine written to the column");
+        // A shore cell got the weaker evaporite-flat production.
+        let shore = buf.idx(9, 6);
+        assert!(buf.goods[salt_slot][shore] >= 180, "shore evaporite flats make salt");
+
+        // A freshwater lake produces neither (its cell was untouched above).
+        let fi = buf.idx(2, 2);
+        let fresh = Lake { cells: vec![(2, 2)], elevation: 0.1, kind: 0, endorheic: false, salinity_ppt: 0.2 };
+        super::apply_salt_pans(&mut buf, &[fresh], &specs);
+        assert_eq!(buf.goods[salt_slot][fi], 0, "no salt at a freshwater lake");
+        assert_eq!(buf.salinity[fi], 0, "no brine at a freshwater lake");
     }
 }

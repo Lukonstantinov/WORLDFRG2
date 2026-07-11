@@ -153,6 +153,21 @@ function meanderPath(pts: [number, number][], seed: number, order: number, world
   return out;
 }
 const LAKE_COLOR = "rgba(51, 153, 221, 0.7)";
+/** Oxbow / backwater lake — a stiller, weedier green-blue than open lake water. */
+const OXBOW_COLOR = "rgba(64, 150, 150, 0.72)";
+/** Lake fill by character: oxbow backwater, then a brine ramp toward the vivid
+ *  pink of a hypersaline lake (halophile / Dunaliella bloom — Lake Retba, the
+ *  Great Salt Lake north arm), else open blue water. */
+function lakeFill(lake: LakeData): string {
+  if (lake.kind === 1) return OXBOW_COLOR;
+  const s = lake.salinity_ppt ?? 0;
+  if (lake.endorheic || s >= 1) {
+    if (s >= 120) return "rgba(216, 90, 134, 0.78)";  // hypersaline — vivid pink
+    if (s >= 35) return "rgba(201, 122, 150, 0.74)";  // saline — pale rose
+    return "rgba(70, 150, 158, 0.72)";                // brackish — steely teal
+  }
+  return LAKE_COLOR;
+}
 
 const SETTLEMENT_COLORS: Record<string, string> = {
   capital: "#ffd700",
@@ -251,6 +266,10 @@ export class OverlayManager {
   /** 🌊 Hydrology · per-river-index glow colour (branch / order scheme); missing
    *  entries fall back to the default cyan. */
   private riverHighlightColors: Record<number, string> = {};
+  /** 🌊 Hydrology · index (into `lakes`) of the selected lake to glow; -1 = none.
+   *  When set, every other lake dims so the chosen basin stands out. */
+  private lakeHighlight = -1;
+  setLakeHighlight(idx: number | null) { this.lakeHighlight = idx ?? -1; }
   /** #37 · per-hub local price premium for the selected good (1 = par with the
    *  world base value; <1 cheap/abundant, >1 dear/scarce). */
   private goodScarcity: { x: number; y: number; premium: number }[] = [];
@@ -323,7 +342,7 @@ export class OverlayManager {
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
-    speculation: false,
+    speculation: false, coinDominance: false,
     houseControl: false, merchantRoutes: false, futures: false,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
   };
@@ -515,12 +534,18 @@ export class OverlayManager {
           }
         }
       } else {
-        // Ribbon (and focus) — a stroked path whose width tracks volume.
+        // Ribbon (and focus) — a stroked path whose width tracks volume, drawn as a
+        // DASH-DOT line ( -•-•-• ) so migration reads distinctly from solid trade lanes,
+        // with an arrowhead into the destination city.
         ctx.strokeStyle = this.rgba(col, focused ? Math.min(1, fade + 0.25) : fade * 0.85);
         ctx.lineWidth = Math.max(0.6, (focused ? 2.2 : 1.0 + volN * 2.4) * inv);
         ctx.lineJoin = "round"; ctx.lineCap = "round";
+        // dash · gap · dot(~0, rendered as a round cap) · gap → the "-•-•-•" pattern.
+        const dash = 2.4 * inv, gap = 1.7 * inv;
+        ctx.setLineDash([dash, gap, 0.01, gap]);
         this.tracePath(ctx, path);
         ctx.stroke();
+        ctx.setLineDash([]); // reset so it doesn't leak into other overlays
         // Arrowhead at the destination.
         const n = path.length;
         const [px, py] = path[n - 2], [qx, qy] = path[n - 1];
@@ -1014,9 +1039,17 @@ export class OverlayManager {
   private riverPath(river: RiverData, id: number, order: number): [number, number][] {
     const cached = this.meanderCache.get(river.points);
     if (cached) return cached;
-    const [sx, sy] = river.points[0];
-    const seed = ((sx * 73856093) ^ (sy * 19349663) ^ (id * 83492791)) >>> 0;
-    const path = meanderPath(river.points, seed, order, this.worldW || 0, river.meander ?? 1);
+    // Prefer the backend's TRUE meander geometry (physically clamped to the valley,
+    // straight in the headwaters, winding on the lowlands). Only fall back to the
+    // cosmetic client-side meander for old saves that predate the `render` field.
+    let path: [number, number][];
+    if (river.render && river.render.length >= 2) {
+      path = river.render;
+    } else {
+      const [sx, sy] = river.points[0];
+      const seed = ((sx * 73856093) ^ (sy * 19349663) ^ (id * 83492791)) >>> 0;
+      path = meanderPath(river.points, seed, order, this.worldW || 0, river.meander ?? 1);
+    }
     this.meanderCache.set(river.points, path);
     return path;
   }
@@ -1053,12 +1086,23 @@ export class OverlayManager {
     }
 
     if (this.visibility.lakes && this.lakes.length > 0) {
-      ctx.fillStyle = LAKE_COLOR;
-      for (const lake of this.lakes) {
-        for (const [x, y] of lake.cells) {
-          ctx.fillRect(x, y, 1, 1);
+      const lhl = this.lakeHighlight;
+      const hasLakeHL = lhl >= 0 && lhl < this.lakes.length;
+      this.lakes.forEach((lake, li) => {
+        const isSel = hasLakeHL && li === lhl;
+        // Oxbow backwater · salt-lake brine tint · else open blue water. When a
+        // lake is selected in the Hydrology panel, dim the others so it stands out.
+        ctx.globalAlpha = hasLakeHL ? (isSel ? 1 : 0.28) : 1;
+        ctx.fillStyle = lakeFill(lake);
+        for (const [x, y] of lake.cells) ctx.fillRect(x, y, 1, 1);
+        // Bright wash over the selected basin so it reads as picked (cheap — one
+        // extra fill pass, no per-cell shadow).
+        if (isSel) {
+          ctx.fillStyle = "rgba(220, 240, 255, 0.5)";
+          for (const [x, y] of lake.cells) ctx.fillRect(x, y, 1, 1);
         }
-      }
+      });
+      ctx.globalAlpha = 1;
     }
 
     if (this.visibility.rivers && this.rivers.length > 0) {
@@ -1086,6 +1130,17 @@ export class OverlayManager {
         ctx.globalAlpha = hasHL ? (isHL ? 0.95 : 0.22) : 0.85;
         ctx.strokeStyle = riverShade(river.major);
         ctx.lineWidth = riverW;
+        // Braided anabranches first (faint, thin), so the main stem draws over them
+        // and they read as side-channels splitting around sandbar islands.
+        if (river.braids && river.braids.length > 0) {
+          ctx.save();
+          ctx.globalAlpha = (hasHL ? (isHL ? 0.6 : 0.14) : 0.5);
+          ctx.lineWidth = Math.max(0.6, riverW * 0.55);
+          for (const strand of river.braids) {
+            if (strand.length >= 2) strokeSmoothPath(ctx, strand);
+          }
+          ctx.restore();
+        }
         // Meander + Catmull-Rom smoothing so the drainage lines read as natural
         // winding channels rather than the straight diagonal grid-lines the
         // steepest-descent flow produces on flats.
@@ -1346,7 +1401,11 @@ export class OverlayManager {
       this.renderHouseControlLayer(ctx);
     }
 
-    // Coin-usage overlay: tint settlements that settle in the selected coin.
+    // Monetary-dominance map: tint EVERY settlement by the coin it settles in.
+    if (this.visibility.coinDominance && this.coinUse.length > 0) {
+      this.renderCoinDominance(ctx);
+    }
+    // Coin-usage drill-down: a selected coin's territory (primary / held / reserve).
     if (this.coinOverlayHub != null && this.coinUse.length > 0) {
       this.renderCoinUsage(ctx);
     }
@@ -2145,30 +2204,104 @@ export class OverlayManager {
   /** Tint every settlement by its use of the selected coin: the mint city brightest,
    *  heavy users solid gold, light users dim gold, reserve-reach a dashed green ring.
    *  Cities that use a DIFFERENT coin are left as small grey dots. */
+  /** All-coins MONETARY-DOMINANCE map: every settlement filled with the colour of
+   *  the coin it settles in (its `primary` currency). A city that has flipped to a
+   *  FOREIGN coin (a reserve currency that took its market) gets a bright ring, so
+   *  reserve-currency incursions read at a glance; each coin's own mint is starred. */
+  private renderCoinDominance(ctx: CanvasRenderingContext2D) {
+    const inv = 1 / Math.sqrt(this.currentScale);
+    const prim = this.coinUse.filter((u) => u.primary);
+    let maxVol = 0;
+    for (const u of prim) maxVol = Math.max(maxVol, u.volume);
+    const base = Math.max(2, 3.6 * inv);
+    ctx.lineCap = "round";
+    for (const u of prim) {
+      const t = maxVol > 0 ? u.volume / maxVol : 0;
+      const r = u.mint ? base * 2.0 : base * (0.9 + 0.9 * t);
+      const cx = u.x + 0.5, cy = u.y + 0.5;
+      // Fill by the settling coin's colour.
+      ctx.fillStyle = u.color || "#c9a227";
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+      if (u.mint) {
+        // A mint — the capital of its currency: bright outline.
+        ctx.strokeStyle = "#fff3c0"; ctx.globalAlpha = 0.95; ctx.lineWidth = Math.max(0.7, 1.3 * inv);
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      } else {
+        // A foreign coin settles here → a reserve currency has taken this market.
+        ctx.strokeStyle = "#eaf2ff"; ctx.globalAlpha = 0.7; ctx.lineWidth = Math.max(0.5, 0.9 * inv);
+        ctx.beginPath(); ctx.arc(cx, cy, r + 1.2 * inv, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** Convex hull (monotone chain) of {x,y} points — the coin's "territory" shape. */
+  private convexHull(pts: { x: number; y: number }[]): { x: number; y: number }[] {
+    if (pts.length < 3) return pts.slice();
+    const p = pts.slice().sort((a, b) => a.x - b.x || a.y - b.y);
+    const cross = (o: any, a: any, b: any) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    const lower: any[] = [];
+    for (const q of p) { while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop(); lower.push(q); }
+    const upper: any[] = [];
+    for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop(); upper.push(q); }
+    lower.pop(); upper.pop();
+    return lower.concat(upper);
+  }
+
+  /** Single-coin DRILL-DOWN: the selected coin's reach in THREE tiers — PRIMARY
+   *  (its home turf: bold coins inside a translucent territory hull), RESERVE-reach
+   *  (held abroad as a reserve: green dashed rings) and HELD-only (a minor basket
+   *  holding: faint dots). Shows both how far a coin has spread and where it rules. */
   private renderCoinUsage(ctx: CanvasRenderingContext2D) {
     const inv = 1 / Math.sqrt(this.currentScale);
     const cities = this.coinUse.filter((u) => u.coin === this.coinOverlayHub);
     let maxVol = 0;
     for (const u of cities) maxVol = Math.max(maxVol, u.volume);
     const base = Math.max(2, 4 * inv);
+
+    // Territory hull around the PRIMARY cities (the coin's core turf).
+    const primary = cities.filter((u) => u.primary);
+    const coinColor = cities[0]?.color || "#c9a227";
+    if (primary.length >= 3) {
+      const hull = this.convexHull(primary.map((u) => ({ x: u.x + 0.5, y: u.y + 0.5 })));
+      if (hull.length >= 3) {
+        ctx.beginPath();
+        ctx.moveTo(hull[0].x, hull[0].y);
+        for (let i = 1; i < hull.length; i++) ctx.lineTo(hull[i].x, hull[i].y);
+        ctx.closePath();
+        ctx.fillStyle = coinColor; ctx.globalAlpha = 0.10; ctx.fill();
+        ctx.strokeStyle = coinColor; ctx.globalAlpha = 0.4;
+        ctx.lineWidth = Math.max(0.6, 1.1 * inv);
+        ctx.setLineDash([Math.max(2, 4 * inv), Math.max(1.5, 3 * inv)]); ctx.stroke(); ctx.setLineDash([]);
+      }
+    }
+
     ctx.lineCap = "round";
     for (const u of cities) {
       const t = maxVol > 0 ? u.volume / maxVol : 0;
-      const r = u.mint ? base * 2.0 : base * (1.0 + 0.8 * t);
       const cx = u.x + 0.5, cy = u.y + 0.5;
-      if (u.reserve_reach) {
+      if (u.primary) {
+        // Home turf — a bold struck coin sized by volume.
+        const r = u.mint ? base * 2.0 : base * (1.0 + 0.8 * t);
+        ctx.fillStyle = u.mint ? "#f6df85" : coinColor;
+        ctx.globalAlpha = u.mint ? 1 : 0.7 + 0.3 * t;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = u.mint ? "#fff3c0" : "#12202f"; ctx.globalAlpha = 0.9;
+        ctx.lineWidth = Math.max(0.5, (u.mint ? 1.1 : 0.7) * inv);
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      } else if (u.reserve_reach) {
+        // Held abroad as a reserve — a green dashed ring (not its primary money).
+        const r = base * (1.0 + 0.5 * t);
         ctx.strokeStyle = "#37a05a"; ctx.globalAlpha = 0.9;
         ctx.lineWidth = Math.max(0.8, 1.4 * inv);
         ctx.setLineDash([Math.max(1.5, 3 * inv), Math.max(1.5, 2 * inv)]);
-        ctx.beginPath(); ctx.arc(cx, cy, r + 3 * inv, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx, cy, r + 2 * inv, 0, Math.PI * 2); ctx.stroke();
         ctx.setLineDash([]);
-      }
-      ctx.fillStyle = u.mint ? "#f0d77a" : t > 0.55 ? "#c9a227" : "#7a6320";
-      ctx.globalAlpha = u.mint ? 1 : 0.55 + 0.4 * t;
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
-      if (u.mint) {
-        ctx.strokeStyle = "#fff3c0"; ctx.globalAlpha = 0.9; ctx.lineWidth = Math.max(0.6, 1 * inv);
-        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      } else {
+        // Minor basket holding — a faint dot.
+        ctx.fillStyle = coinColor; ctx.globalAlpha = 0.28 + 0.25 * t;
+        ctx.beginPath(); ctx.arc(cx, cy, Math.max(1, base * 0.7), 0, Math.PI * 2); ctx.fill();
       }
     }
     ctx.globalAlpha = 1;
@@ -3561,6 +3694,7 @@ export class OverlayManager {
     this.travelRoute = [];
     this.riverHighlight = new Set();
     this.riverHighlightColors = {};
+    this.lakeHighlight = -1;
     this.goodScarcity = [];
     this.toponyms = [];
     this.fisheryBanks = [];

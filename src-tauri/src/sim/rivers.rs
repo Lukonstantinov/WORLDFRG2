@@ -1,4 +1,5 @@
 use super::world_buffer::WorldBuffer;
+use super::elevation::fbm_noise;
 use std::collections::{BinaryHeap, VecDeque};
 use std::cmp::Ordering;
 
@@ -44,6 +45,23 @@ pub struct River {
     /// Defaults to 1.0 so pre-existing saves render exactly as before.
     #[serde(default = "one_f32")]
     pub meander: f32,
+    /// TRUE meander geometry — a smoothed, sub-cell render polyline (cell-index
+    /// coordinates, same convention as `points`) that winds through the flat
+    /// lowlands and runs straight down steep headwaters. Computed physically in
+    /// `build_meander_path` (per-vertex gradient → slowness, amplitude clamped to
+    /// the valley floor, wavelength ∝ channel width, noise-jittered so bends read
+    /// organic). The frontend draws THIS when present; `points` stays the true
+    /// cell path used by settlement/ecology logic. Empty on old saves → the
+    /// frontend falls back to its cosmetic meander of `points`.
+    #[serde(default)]
+    pub render: Vec<(f32, f32)>,
+    /// BRAIDED anabranches — thin secondary channels that split off and rejoin the
+    /// main stem on the widest, flattest reaches of a great river (the
+    /// sandbar-island braid of the lower Mississippi / Brahmaputra). Each is a
+    /// short sub-cell strand (cell-index coords) drawn faint beside the trunk.
+    /// Empty for small/steep rivers and old saves.
+    #[serde(default)]
+    pub braids: Vec<Vec<(f32, f32)>>,
 }
 
 fn one_f32() -> f32 { 1.0 }
@@ -53,6 +71,87 @@ fn one_f32() -> f32 { 1.0 }
 pub struct Lake {
     pub cells: Vec<(u32, u32)>,
     pub elevation: f32,
+    /// Lake origin: 0 = a normal depression-filled basin (`detect_lakes`), 1 = an
+    /// OXBOW / backwater cut off from a meandering river (`extract_oxbows`). Drives
+    /// a distinct render + its own limnology (still, weedy backwater ecology).
+    #[serde(default)]
+    pub kind: u8,
+    /// True terminal SALT lake — an arid basin with no river outflow, where the sun
+    /// alone empties it and brine concentrates (Caspian / Great Salt Lake / playa).
+    /// Set by `classify_salt_lakes`; drives the pink brine tint, salt-good
+    /// production and the salt-shore settlement draw.
+    #[serde(default)]
+    pub endorheic: bool,
+    /// Approximate salinity in parts-per-thousand — ~0.2 for a freshwater lake,
+    /// 12-120+ for a terminal salt lake (shallower & more arid = more concentrated).
+    #[serde(default)]
+    pub salinity_ppt: f32,
+}
+
+/// Salinity (PSU) window the persisted `salinity` u8 column encodes — must match
+/// `query_commands` and `ocean.rs` so a salt-lake value round-trips consistently.
+pub const SAL_MIN_PSU: f32 = 28.0;
+pub const SAL_MAX_PSU: f32 = 42.0;
+/// Encode a salinity in ppt into the u8 salinity-column value (clamped to window).
+pub fn salinity_to_u8(ppt: f32) -> u8 {
+    (((ppt - SAL_MIN_PSU) / (SAL_MAX_PSU - SAL_MIN_PSU)).clamp(0.0, 1.0) * 255.0).round() as u8
+}
+/// A terminal salt lake is considered salt-PRODUCING once its brine reaches at
+/// least seawater strength (~35 ppt); milder brackish basins do not make salt.
+pub const SALT_PRODUCTION_PPT: f32 = 35.0;
+
+/// Classify each lake's SALINITY in place: a lake with no river outflow sitting in
+/// an arid (BW/BS) basin is a terminal salt lake; the sun alone empties it and
+/// brine concentrates (shallower → stronger). Mirrors the Hydrology panel's
+/// limnology so the map, the goods layer and the panel all agree. Freshwater lakes
+/// are left at ~0.2 ppt. `rivers` supplies outflow detection (a river resuming at
+/// the shore = the lake drains, so it is NOT terminal).
+pub fn classify_salt_lakes(buf: &WorldBuffer, lakes: &mut [Lake], rivers: &[River]) {
+    use crate::sim::koppen;
+    let have_koppen = !buf.koppen.is_empty();
+    // Cells at/near a lake, mapped to their lake index, for outflow attachment.
+    let mut lake_of: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for (li, lk) in lakes.iter().enumerate() {
+        for &(x, y) in &lk.cells { lake_of.insert(buf.idx(x, y), li); }
+    }
+    let near_lake = |x: u32, y: u32| -> Option<usize> {
+        if let Some(&l) = lake_of.get(&buf.idx(x, y)) { return Some(l); }
+        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+            let nx = buf.wrap_x(x as i32 + dx);
+            let ny = y as i32 + dy;
+            if ny < 0 || ny >= buf.height as i32 { continue; }
+            if let Some(&l) = lake_of.get(&buf.idx(nx, ny as u32)) { return Some(l); }
+        }
+        None
+    };
+    // A river whose SOURCE resumes at a lake shore = that lake's outflow.
+    let mut has_outflow = vec![false; lakes.len()];
+    for r in rivers {
+        if r.points.len() < 2 { continue; }
+        let (sx, sy) = r.points[0];
+        if let Some(l) = near_lake(sx, sy) { has_outflow[l] = true; }
+    }
+    for (li, lk) in lakes.iter_mut().enumerate() {
+        let n = lk.cells.len().max(1);
+        let mut arid_cells = 0usize;
+        let mut max_depth = 0.0f32;
+        for &(x, y) in &lk.cells {
+            let ci = buf.idx(x, y);
+            if have_koppen && matches!(buf.koppen[ci],
+                koppen::BWH | koppen::BWK | koppen::BSH | koppen::BSK) { arid_cells += 1; }
+            max_depth = max_depth.max((lk.elevation - buf.elevation[ci]).max(0.0));
+        }
+        let arid = arid_cells as f32 / n as f32 > 0.4;
+        let endorheic = arid && !has_outflow[li];
+        lk.endorheic = endorheic;
+        lk.salinity_ppt = if endorheic {
+            let depth_m = (max_depth * 8848.0 * 3.0 + 2.0).clamp(2.0, 1600.0);
+            crate::sim::aquatic::lake_salinity_ppt(
+                crate::sim::aquatic::LakeKind::SaltEndorheic, depth_m)
+        } else {
+            0.2
+        };
+    }
 }
 
 /// D8 flow directions (index of downhill neighbor, or special values)
@@ -413,10 +512,303 @@ pub fn extract_rivers(
             if mouth_kind == 2 { delta.clear(); }
         }
 
-        rivers.push(River { points, width, major, navigable, mouth_kind, delta, tributary, order, meander });
+        // TRUE meander geometry (sub-cell render polyline) — winds on flat
+        // lowlands, straight in the steep headwaters, clamped to the valley floor.
+        let mseed = (s as u64).wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(0x51ED);
+        let render = build_meander_path(buf, &points, width, discharge, threshold as f32, mseed);
+        // Braided anabranches on the widest, flattest reaches of a great river.
+        let braids = build_braids(buf, &render, width, order, mseed ^ 0xB2A1);
+
+        rivers.push(River { points, width, major, navigable, mouth_kind, delta, tributary, order, meander, render, braids });
     }
 
     rivers
+}
+
+/// Build the sub-cell MEANDER RENDER PATH for one river reach. Smooths the D8
+/// staircase into a flowing centreline, then displaces it into physically-motivated
+/// meanders whose amplitude grows where the river SLOWS (low local gradient) and
+/// shrinks to zero on steep headwaters, clamped to the flat valley floor so the
+/// channel never climbs the hillside. Wavelength ≈ 10-14× channel width (real
+/// meander geometry) and is noise-jittered, and a weak second harmonic makes the
+/// bends asymmetric, so the result reads organic rather than as a mechanical sine
+/// wave. Coordinates are CELL-INDEX space (same as `points`); X is rewrapped.
+fn build_meander_path(
+    buf: &WorldBuffer, points: &[(u32, u32)],
+    width_cells: f32, discharge: f32, threshold: f32, seed: u64,
+) -> Vec<(f32, f32)> {
+    let n = points.len();
+    if n < 4 {
+        return points.iter().map(|&(x, y)| (x as f32, y as f32)).collect();
+    }
+    let w = buf.width as f32;
+    let h = buf.height;
+
+    // ── Unroll X across the wrap seam so the meander math stays continuous ──
+    let mut cx = vec![points[0].0 as f32; n];
+    for k in 1..n {
+        let prev = cx[k - 1];
+        let raw = points[k].0 as f32;
+        let mut best = raw;
+        let mut bd = (raw - prev).abs();
+        for m in [-1.0f32, 1.0] {
+            let c = raw + m * w;
+            if (c - prev).abs() < bd { bd = (c - prev).abs(); best = c; }
+        }
+        cx[k] = best;
+    }
+    let mut cy: Vec<f32> = points.iter().map(|&(_, y)| y as f32).collect();
+
+    // ── Smooth the 8-neighbour staircase (windowed passes, endpoints anchored) ──
+    for _ in 0..2 {
+        let (sx, sy) = (cx.clone(), cy.clone());
+        for k in 1..n - 1 {
+            cx[k] = sx[k - 1] * 0.25 + sx[k] * 0.5 + sx[k + 1] * 0.25;
+            cy[k] = sy[k - 1] * 0.25 + sy[k] * 0.5 + sy[k + 1] * 0.25;
+        }
+    }
+
+    let sample_elev = |fx: f32, fy: f32| -> f32 {
+        let xi = buf.wrap_x(fx.round() as i32);
+        let yi = (fy.round() as i32).clamp(0, h as i32 - 1) as u32;
+        buf.elevation[buf.idx(xi, yi)]
+    };
+    let is_land = |fx: f32, fy: f32| -> bool {
+        let xi = buf.wrap_x(fx.round() as i32);
+        let yi = (fy.round() as i32).clamp(0, h as i32 - 1) as u32;
+        buf.terrain[buf.idx(xi, yi)] == 1
+    };
+
+    const STEEP_G: f32 = 0.004;    // ≥ this gradient/cell → straight (slowness 0)
+    const FLAT_G: f32 = 0.0005;    // ≤ this → free to meander (slowness 1)
+    const VALLEY_RISE: f32 = 0.0016; // ~14 m rise marks the valley wall
+    let max_reach = 22i32;
+    let base_wav = (width_cells * 12.0).clamp(5.0, 60.0);
+    let _ = (discharge, threshold); // size is already encoded in channel width
+
+    let mut out = vec![(0.0f32, 0.0f32); n];
+    out[0] = (cx[0], cy[0]);
+    out[n - 1] = (cx[n - 1], cy[n - 1]);
+    let mut phase = {
+        let s = (seed & 0xFFFF_FFFF) as f32;
+        ((s * 12.9898).sin() * 43758.545).fract().abs() * std::f32::consts::TAU
+    };
+    for k in 1..n - 1 {
+        let (px, py) = (cx[k - 1], cy[k - 1]);
+        let (x, y) = (cx[k], cy[k]);
+        let (nx, ny) = (cx[k + 1], cy[k + 1]);
+        let (mut tx, mut ty) = (nx - px, ny - py);
+        let tl = (tx * tx + ty * ty).sqrt().max(1e-4);
+        tx /= tl; ty /= tl;
+        let (nrx, nry) = (-ty, tx); // left normal
+
+        // Slowness from local gradient over a ±win window.
+        let win = 3usize.min(k).min(n - 1 - k);
+        let e_up = sample_elev(cx[k - win], cy[k - win]);
+        let e_dn = sample_elev(cx[k + win], cy[k + win]);
+        let grad = (e_up - e_dn).max(0.0) / (2.0 * win as f32).max(1.0);
+        let mut slow = ((1.0 - (grad - FLAT_G) / (STEEP_G - FLAT_G)) as f32).clamp(0.0, 1.0);
+        slow = slow * slow * (3.0 - 2.0 * slow);
+
+        // Advance meander phase along arc length, wavelength noise-jittered.
+        let jit = fbm_noise(x * 0.05 + 3.1, y * 0.05 + 7.7, seed ^ 0xA53F, 3, 2.0, 0.5);
+        let wav = base_wav * (0.75 + 0.5 * jit);
+        let seg = ((x - px).powi(2) + (y - py).powi(2)).sqrt();
+        phase += seg * (std::f32::consts::TAU / wav);
+
+        let mut off = 0.0f32;
+        if slow > 0.12 {
+            // Measure the flat valley half-width on each bank so the meander is
+            // clamped to the valley floor — the channel never climbs the hillside
+            // (this is what keeps the bends looking natural). A valley wall is
+            // rising ground, the sea, or the map edge.
+            let base_e = sample_elev(x, y);
+            let mut half = max_reach as f32;
+            for sgn in [-1.0f32, 1.0] {
+                let mut d = 1.0;
+                while d <= max_reach as f32 {
+                    let (sxp, syp) = (x + nrx * sgn * d, y + nry * sgn * d);
+                    if syp < 0.0 || syp >= h as f32 || !is_land(sxp, syp)
+                        || sample_elev(sxp, syp) > base_e + VALLEY_RISE {
+                        half = half.min(d - 1.0);
+                        break;
+                    }
+                    d += 1.0;
+                }
+            }
+            // Amplitude ≈ 0.22× wavelength (channel width already encodes river
+            // size), never more than ~0.7 of the flat half-width.
+            let amp = slow * (base_wav * 0.22).min(half * 0.7);
+            // Primary bend + weak second harmonic → asymmetric, non-sinusoidal.
+            off = amp * (phase.sin() + 0.28 * (2.0 * phase + 0.7).sin());
+            // Final safety clamp to the measured corridor.
+            let lim = (half * 0.85).max(0.0);
+            off = off.clamp(-lim, lim);
+        }
+        let ry = (y + nry * off).clamp(0.0, h as f32 - 1.0);
+        out[k] = (x + nrx * off, ry);
+    }
+
+    // Rewrap X into [0, w).
+    for p in out.iter_mut() {
+        let mut xx = p.0 % w;
+        if xx < 0.0 { xx += w; }
+        p.0 = xx;
+    }
+    out
+}
+
+/// Build BRAIDED anabranches for a great river's widest, flattest reaches — thin
+/// secondary channels that split off and rejoin the main stem around a sandbar
+/// island. Only for large rivers (order ≥ 5); each strand bows a modest, valley-
+/// clamped amount to one side over a short run, tapering in and out so it reads as
+/// a splitting channel, not a parallel line. Conservative (≤ 3 strands/river) so
+/// the effect enriches the great trunks without cluttering the map.
+fn build_braids(buf: &WorldBuffer, render: &[(f32, f32)], width_cells: f32, order: u8, _seed: u64) -> Vec<Vec<(f32, f32)>> {
+    let n = render.len();
+    if order < 5 || width_cells < 1.6 || n < 44 { return Vec::new(); }
+    let w = buf.width as f32;
+    let h = buf.height;
+
+    let sample_elev = |fx: f32, fy: f32| -> f32 {
+        let xi = buf.wrap_x(fx.round() as i32);
+        let yi = (fy.round() as i32).clamp(0, h as i32 - 1) as u32;
+        buf.elevation[buf.idx(xi, yi)]
+    };
+    let is_land = |fx: f32, fy: f32| -> bool {
+        let xi = buf.wrap_x(fx.round() as i32);
+        let yi = (fy.round() as i32).clamp(0, h as i32 - 1) as u32;
+        buf.terrain[buf.idx(xi, yi)] == 1
+    };
+
+    const STEEP_G: f32 = 0.004;
+    const FLAT_G: f32 = 0.0005;
+    let island = 14usize;                 // strand length in vertices
+    let side_amp = (width_cells * 0.9).clamp(1.5, 4.0);
+    let mut out: Vec<Vec<(f32, f32)>> = Vec::new();
+    let mut side = 1.0f32;                 // alternate banks
+    let mut k = n / 6;
+    while k + island < n && out.len() < 3 {
+        // Local slowness (flatness) at the strand's midpoint.
+        let m = k + island / 2;
+        let a = sample_elev(render[m - 3].0, render[m - 3].1);
+        let b = sample_elev(render[m + 3].0, render[m + 3].1);
+        let grad = (a - b).abs() / 6.0;
+        let slow = ((1.0 - (grad - FLAT_G) / (STEEP_G - FLAT_G)) as f32).clamp(0.0, 1.0);
+        if slow < 0.6 { k += 6; continue; }
+
+        // Build the strand: offset each vertex perpendicular to the local flow,
+        // with a sine envelope so it splits from and rejoins the trunk. Bail out
+        // if it would leave the flat valley (rising ground / sea / edge).
+        let mut strand: Vec<(f32, f32)> = Vec::with_capacity(island + 1);
+        let mut ok = true;
+        for j in 0..=island {
+            let idx = k + j;
+            let (px, py) = render[idx.saturating_sub(1)];
+            let (nx, ny) = render[(idx + 1).min(n - 1)];
+            let (mut tx, mut ty) = (nx - px, ny - py);
+            let tl = (tx * tx + ty * ty).sqrt().max(1e-4);
+            tx /= tl; ty /= tl;
+            let (nrx, nry) = (-ty, tx);
+            let env = (std::f32::consts::PI * j as f32 / island as f32).sin(); // 0..1..0
+            let off = side * side_amp * env;
+            let (sx, sy) = (render[idx].0 + nrx * off, render[idx].1 + nry * off);
+            if sy < 0.0 || sy >= h as f32 || !is_land(sx, sy) { ok = false; break; }
+            let mut xx = sx % w; if xx < 0.0 { xx += w; }
+            strand.push((xx, sy));
+        }
+        if ok && strand.len() >= island {
+            out.push(strand);
+            side = -side;         // next island splits the other bank
+            k += island * 2;      // leave a gap before the next braid
+        } else {
+            k += 6;
+        }
+    }
+    out
+}
+
+/// Detect OXBOW / backwater lakes cut off from strongly meandering reaches. Scans
+/// each river's meander render path for apexes that swing far from the straight
+/// chord — which only happens on flat lowland reaches, since the meander amplitude
+/// is zero on steep ground — and lays down a small crescent of still water on the
+/// OUTER bank: an abandoned meander loop. Conservative on purpose (only sizeable
+/// rivers, strong bends, land cells not already channel/lake, ≤2 per river) so the
+/// map gains the occasional characterful backwater rather than clutter. Emitted
+/// lakes carry `kind = 1` so the limnology layer gives them still-water ecology.
+pub fn extract_oxbows(rivers: &[River], buf: &WorldBuffer, existing: &[Lake]) -> Vec<Lake> {
+    let w = buf.width;
+    let h = buf.height;
+    let total = buf.total();
+    let wf = w as f32;
+
+    // Occupied = existing lake cells + every river channel cell, so an oxbow never
+    // overlaps real water or the live channel it split off from.
+    let mut occupied = vec![false; total];
+    for lk in existing { for &(x, y) in &lk.cells { occupied[buf.idx(x, y)] = true; } }
+    for r in rivers { for &(x, y) in &r.points { occupied[buf.idx(x, y)] = true; } }
+
+    let mut out: Vec<Lake> = Vec::new();
+    for r in rivers {
+        if r.order < 3 { continue; }        // only real rivers grow oxbows
+        let path = &r.render;
+        let n = path.len();
+        if n < 12 { continue; }
+        // Unroll X for continuous chord math across the wrap seam.
+        let mut ux = vec![path[0].0; n];
+        for k in 1..n {
+            let prev = ux[k - 1];
+            let raw = path[k].0;
+            let mut best = raw;
+            let mut bd = (raw - prev).abs();
+            for m in [-wf, wf] {
+                let c = raw + m;
+                if (c - prev).abs() < bd { bd = (c - prev).abs(); best = c; }
+            }
+            ux[k] = best;
+        }
+        let q = 5usize;
+        let mut made = 0u8;
+        let mut k = q;
+        while k + q < n {
+            let (ax, ay) = (ux[k - q], path[k - q].1);
+            let (bx, by) = (ux[k + q], path[k + q].1);
+            let (cxp, cyp) = (ux[k], path[k].1);
+            let (ex, ey) = (bx - ax, by - ay);
+            let el = (ex * ex + ey * ey).sqrt().max(1e-3);
+            // Signed perpendicular distance of the apex from the chord.
+            let dev = ((cxp - ax) * (-ey) + (cyp - ay) * ex) / el;
+            if dev.abs() >= 4.0 {
+                let (nrx, nry) = (-ey / el, ex / el); // left-normal unit
+                let s = dev.signum();
+                let mut cells: Vec<(u32, u32)> = Vec::new();
+                for j in (k - q)..=(k + q) {
+                    // Push the loop ~2 cells past the channel apex onto the outer bank.
+                    let fx = ux[j] + nrx * s * 2.0;
+                    let fy = path[j].1 + nry * s * 2.0;
+                    let xi = buf.wrap_x(fx.round() as i32);
+                    let yi = (fy.round() as i32).clamp(0, h as i32 - 1) as u32;
+                    let idx = buf.idx(xi, yi);
+                    if buf.terrain[idx] == 1 && !occupied[idx] && !cells.contains(&(xi, yi)) {
+                        cells.push((xi, yi));
+                    }
+                }
+                let _ = ay;
+                if cells.len() >= 4 {
+                    let mut se = 0.0;
+                    for &(x, y) in &cells { se += buf.elevation[buf.idx(x, y)]; occupied[buf.idx(x, y)] = true; }
+                    let elev = se / cells.len() as f32;
+                    out.push(Lake { cells, elevation: elev, kind: 1, endorheic: false, salinity_ppt: 0.2 });
+                    made += 1;
+                    if made >= 2 { break; }
+                    k += 2 * q; // one bend → one oxbow
+                    continue;
+                }
+            }
+            k += 1;
+        }
+    }
+    out
 }
 
 /// Detect lakes from the depression-filled surface.
@@ -475,7 +867,7 @@ pub fn detect_lakes(buf: &WorldBuffer, filled: &[f32], fill_depth: f32, max_cell
             // `max_cells` (giant flooded basins are usually artefacts).
             if cells.len() >= 2 && cells.len() <= max_cells {
                 let elevation = sum_elev / cells.len() as f32;
-                lakes.push(Lake { cells, elevation });
+                lakes.push(Lake { cells, elevation, kind: 0, endorheic: false, salinity_ppt: 0.0 });
             }
         }
     }
@@ -583,5 +975,93 @@ mod tests {
         assert!(trunks >= 1, "expected at least one trunk reaching the sea");
         assert!(tribs >= 1, "expected tributary segments, got {} rivers ({} trunks)",
             rivers.len(), trunks);
+        // Every extracted river now carries a meander render path of matching length.
+        for r in &rivers {
+            assert_eq!(r.render.len(), r.points.len(), "render path mirrors the cell path");
+        }
+    }
+
+    /// A river crossing a FLAT floodplain must actually meander — its render path
+    /// swings off the straight centreline — while its endpoints stay pinned to the
+    /// true source/mouth, and the path length matches the input.
+    #[test]
+    fn meander_bends_on_flat_ground() {
+        let (w, h) = (80u32, 40u32);
+        let n = (w * h) as usize;
+        let buf = synth(w, h, vec![1u8; n], vec![0.1f32; n]); // all land, dead flat
+        let pts: Vec<(u32, u32)> = (5..70).map(|x| (x, 20)).collect();
+        let render = build_meander_path(&buf, &pts, 2.5, 4000.0, 20.0, 12345);
+
+        assert_eq!(render.len(), pts.len(), "render mirrors the cell path");
+        assert!((render[0].0 - 5.0).abs() < 0.001 && (render[0].1 - 20.0).abs() < 0.001,
+            "source endpoint pinned");
+        assert!((render[render.len() - 1].1 - 20.0).abs() < 0.001, "mouth endpoint pinned");
+        let max_dev = render.iter().map(|&(_, y)| (y - 20.0).abs()).fold(0.0f32, f32::max);
+        assert!(max_dev > 0.8, "a flat reach must visibly meander: {max_dev}");
+        // Every vertex stays finite and on the map.
+        for &(x, y) in &render {
+            assert!(x.is_finite() && y.is_finite() && x >= 0.0 && x < w as f32 && y >= 0.0 && y < h as f32,
+                "render vertex in bounds: ({x},{y})");
+        }
+    }
+
+    /// A steep headwater reach must NOT meander (channel pinned to the fall line).
+    #[test]
+    fn steep_reach_stays_straight() {
+        let (w, h) = (80u32, 40u32);
+        let n = (w * h) as usize;
+        // Steep ramp: 0.02 rise per cell in x ≫ the STEEP_G threshold.
+        let elev: Vec<f32> = (0..n).map(|i| 0.02 + (i as u32 % w) as f32 * 0.02).collect();
+        let buf = synth(w, h, vec![1u8; n], elev);
+        // Source high (large x) → mouth low (small x): a real downhill reach.
+        let pts: Vec<(u32, u32)> = (5..70).rev().map(|x| (x, 20)).collect();
+        let render = build_meander_path(&buf, &pts, 2.5, 4000.0, 20.0, 999);
+        let max_dev = render.iter().map(|&(_, y)| (y - 20.0).abs()).fold(0.0f32, f32::max);
+        assert!(max_dev < 0.35, "steep ground stays near-straight: {max_dev}");
+    }
+
+    /// Oxbows must be well-formed (land, kind=1) and never panic, even on a wildly
+    /// meandering flat reach.
+    #[test]
+    fn oxbows_are_land_backwaters() {
+        let (w, h) = (120u32, 60u32);
+        let n = (w * h) as usize;
+        let buf = synth(w, h, vec![1u8; n], vec![0.1f32; n]);
+        let pts: Vec<(u32, u32)> = (5..110).map(|x| (x, 30)).collect();
+        let render = build_meander_path(&buf, &pts, 3.0, 8000.0, 20.0, 7);
+        let river = River {
+            points: pts, width: 3.0, major: true, navigable: true, mouth_kind: 0,
+            delta: vec![], tributary: false, order: 5, meander: 1.0, render, braids: vec![],
+        };
+        let oxbows = extract_oxbows(&[river], &buf, &[]);
+        for lk in &oxbows {
+            assert_eq!(lk.kind, 1, "oxbow tagged as backwater");
+            assert!(lk.cells.len() >= 4, "oxbow has a real footprint");
+            for &(x, y) in &lk.cells {
+                assert_eq!(buf.terrain[buf.idx(x, y)], 1, "oxbow cell is land");
+            }
+        }
+    }
+
+    /// A great river on a broad flat plain grows braided anabranches that stay on
+    /// land and inside the map; a small river grows none.
+    #[test]
+    fn braids_only_on_great_flat_rivers() {
+        let (w, h) = (140u32, 60u32);
+        let n = (w * h) as usize;
+        let buf = synth(w, h, vec![1u8; n], vec![0.1f32; n]);
+        let pts: Vec<(u32, u32)> = (5..130).map(|x| (x, 30)).collect();
+        let render = build_meander_path(&buf, &pts, 3.0, 9000.0, 20.0, 3);
+
+        let braids = build_braids(&buf, &render, 3.0, 6, 55);
+        assert!(!braids.is_empty(), "a great flat river should braid");
+        for strand in &braids {
+            for &(x, y) in strand {
+                assert!(x >= 0.0 && x < w as f32 && y >= 0.0 && y < h as f32, "braid in bounds");
+                assert_eq!(buf.terrain[buf.idx(x.round() as u32 % w, y.round() as u32)], 1, "braid on land");
+            }
+        }
+        // A small creek (low order, thin) never braids.
+        assert!(build_braids(&buf, &render, 1.0, 2, 55).is_empty(), "creeks do not braid");
     }
 }

@@ -1,11 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useUIStore } from "../state/uiStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useViewportStore } from "../state/viewportStore";
-import { campaignGetCultures } from "../bridge/tauri";
-import type { CultureBrief } from "../types";
+import { campaignGetCultures, campaignGetCulturePresence, campaignGetCultureHistory, campaignGetMigrationRoutes } from "../bridge/tauri";
+import type { CultureBrief, MigrationRouteBrief } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
+import { CultureFigures } from "./CultureFigures";
+import { CoatOfArms, houseColor } from "./CoatOfArms";
+import { GOOD_DEFS } from "../goods";
 import { T, SERIF } from "./chronicleTheme";
+
+const GOOD_BY_NAME = new Map(GOOD_DEFS.map((g) => [g.name, g]));
 
 /** #1/#23 · The PEOPLES panel — the living cultures of the world. A two-pane census:
  *  every people (with its colour), its population, homelands and merchant houses;
@@ -89,19 +94,70 @@ export function PeoplesPanel() {
             {!sel && <div style={hint}>Select a people to see its homelands, houses and spread — and to colour the map.</div>}
             {sel && (
               <>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                   <span style={{ width: 16, height: 16, borderRadius: 4, background: rgb(sel.color), border: "1px solid rgba(0,0,0,0.4)" }} />
                   <span style={{ fontFamily: SERIF, color: T.ink, fontSize: 16, fontWeight: 700 }}>{sel.name}</span>
+                  {sel.family?.startsWith("Creole") && <span style={creoleBadge}>✶ creole people</span>}
                   {sel.mobility >= 0.7 && (
                     <span style={diasporaBadge}>⚓ merchant diaspora</span>
                   )}
                 </div>
+                {/* Language family + STATIC origin card (Cultures 2.0). */}
+                {sel.family && (
+                  <div style={{ color: T.inkDim, fontSize: 10.5, marginBottom: 6 }}>
+                    Language family: <b style={{ color: T.inkMid }}>{sel.family}</b>
+                  </div>
+                )}
+                {sel.origin && (
+                  <div style={{ fontFamily: SERIF, fontStyle: "italic", color: T.inkMid, fontSize: 12,
+                    lineHeight: 1.5, marginBottom: 10, padding: "7px 9px", background: T.card,
+                    border: `1px solid ${T.lineSoft}`, borderRadius: 6 }}>
+                    {sel.origin}
+                  </div>
+                )}
+                {/* Full-body figures in national dress (man + woman; creole blends parents). */}
+                {sel.kit != null && sel.kit >= 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={sectionHdr}>In national dress</div>
+                    <CultureFigures name={sel.name} kit={sel.kit} kit2={sel.kit2} color={sel.color} />
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
                   <Tile label="People" value={fmtNum(sel.population)} />
                   <Tile label="Homelands" value={String(sel.towns)} color="#7fd0a0" />
                   <Tile label="Present in" value={String(sel.presence)} color="#7fb0e0" />
                   <Tile label="Mobility" value={`${Math.round(sel.mobility * 100)}%`} color={sel.mobility >= 0.7 ? "#e0b060" : T.inkMid} />
                 </div>
+
+                {/* Cultural taste — the goods this people prizes and its markets seek. */}
+                {(sel.desired_goods?.length ?? 0) > 0 && (
+                  <>
+                    <div style={sectionHdr}>Prizes &amp; seeks</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
+                      {sel.desired_goods!.map((g) => {
+                        const d = GOOD_BY_NAME.get(g);
+                        return (
+                          <span key={g} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11,
+                            color: T.inkMid, border: `1px solid ${T.lineSoft}`, background: T.card, borderRadius: 12, padding: "2px 8px" }}>
+                            <span>{d?.emoji ?? "•"}</span>{d?.label ?? g}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+
+                {/* Where they live — a mini world map (toggle), same look as the goods preview. */}
+                {sel.kit != null && sel.kit >= 0 && (
+                  <CulturePresence name={sel.name} color={sel.color} />
+                )}
+
+                {/* Population over time — sampled every 6 months. */}
+                <CulturePopChart name={sel.name} color={sel.color} tick={snapshot?.clock?.tick ?? 0} />
+
+                {/* Migration — where this people is moving (from the live migration flows). */}
+                <CultureMigration name={sel.name} color={sel.color}
+                  hubs={snapshot?.hubs ?? []} tick={snapshot?.clock?.tick ?? 0} />
 
                 <div style={sectionHdr}>Chief cities</div>
                 {sel.top_cities.length === 0 ? <div style={hint}>—</div> : sel.top_cities.map(([name, pop]) => (
@@ -117,9 +173,13 @@ export function PeoplesPanel() {
                 {sel.houses.length === 0 ? (
                   <div style={hint}>No trading houses of this people (yet).</div>
                 ) : (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
                     {sel.houses.map((h) => (
-                      <span key={h} style={housePill}>{h}</span>
+                      <span key={h} style={{ ...housePill, display: "inline-flex", alignItems: "center", gap: 5, paddingLeft: 4 }}>
+                        <CoatOfArms name={h} size={16} />
+                        <span style={{ width: 8, height: 8, borderRadius: 2, background: houseColor(h), border: "1px solid rgba(0,0,0,0.35)" }} />
+                        {h}
+                      </span>
                     ))}
                   </div>
                 )}
@@ -134,6 +194,139 @@ export function PeoplesPanel() {
             )}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** A toggleable mini world-map of where a people lives — homeland territory brightest,
+ *  live cities lit too. Drawn exactly like the Goods Editor's suitability preview. */
+function CulturePresence({ name, color }: { name: string; color: [number, number, number] }) {
+  const [show, setShow] = useState(false);
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    if (!show) return;
+    let cancelled = false;
+    campaignGetCulturePresence(name).then((grid) => {
+      const cv = ref.current;
+      if (cancelled || !cv || grid.width === 0) return;
+      cv.width = grid.width; cv.height = grid.height;
+      const ctx = cv.getContext("2d"); if (!ctx) return;
+      const img = ctx.createImageData(grid.width, grid.height);
+      for (let p = 0; p < grid.data.length; p++) {
+        const v = grid.data[p] / 255;
+        const isLand = grid.land[p] === 1;
+        const o = p * 4;
+        const bR = isLand ? 26 : 8, bG = isLand ? 32 : 11, bB = isLand ? 42 : 16;
+        img.data[o] = Math.round(bR + color[0] * v);
+        img.data[o + 1] = Math.round(bG + color[1] * v);
+        img.data[o + 2] = Math.round(bB + color[2] * v);
+        img.data[o + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show, name]);
+  return (
+    <div style={{ marginBottom: 11 }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginBottom: 5,
+        color: T.inkDim, fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>
+        <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)}
+          style={{ accentColor: "#9b7ad0", width: 11, height: 11 }} />
+        Where they live
+      </label>
+      {show && (
+        <>
+          <canvas ref={ref} style={{ width: "100%", height: 118, imageRendering: "pixelated",
+            border: `1px solid ${T.lineSoft}`, borderRadius: 5, background: "#06090d", display: "block" }} />
+          <div style={{ color: T.inkFaint, fontSize: 9, marginTop: 3 }}>
+            Bright = homeland &amp; cities where this people lives · faint = other land.
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function fmtK(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  if (n >= 1_000) return Math.round(n / 1_000) + "k";
+  return String(Math.round(n));
+}
+
+/** Population of one people over time — a line chart sampled every 6 months. */
+function CulturePopChart({ name, color, tick }: { name: string; color: [number, number, number]; tick: number }) {
+  const [pts, setPts] = useState<[number, number][]>([]);
+  useEffect(() => {
+    let ok = true;
+    campaignGetCultureHistory(name).then((r) => { if (ok) setPts(r); }).catch(() => {});
+    return () => { ok = false; };
+  }, [name, tick]);
+  if (pts.length < 2) return null;
+  const w = 260, h = 82, pad = 4;
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const y1 = Math.max(...ys, 1);
+  const sx = (x: number) => pad + (x1 > x0 ? (x - x0) / (x1 - x0) : 0) * (w - 2 * pad);
+  const sy = (y: number) => (h - pad) - (y / y1) * (h - 2 * pad);
+  const rgb = `rgb(${color[0]},${color[1]},${color[2]})`;
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${sx(p[0]).toFixed(1)} ${sy(p[1]).toFixed(1)}`).join(" ");
+  const area = `${line} L${sx(x1).toFixed(1)} ${h - pad} L${sx(x0).toFixed(1)} ${h - pad} Z`;
+  const now = pts[pts.length - 1][1];
+  return (
+    <div style={{ marginBottom: 11 }}>
+      <div style={{ ...sectionHdr, display: "flex", justifyContent: "space-between" }}>
+        <span>Population over time</span>
+        <span style={{ color: rgb, fontWeight: 700 }}>{fmtK(now)}</span>
+      </div>
+      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: 82, display: "block" }}>
+        <path d={area} fill={rgb} opacity={0.14} />
+        <path d={line} fill="none" stroke={rgb} strokeWidth={1.6} />
+        <circle cx={sx(x1)} cy={sy(now)} r={2.4} fill={rgb} />
+        <text x={pad} y={h - 1} fill={T.inkFaint} fontSize={7}>Yr {Math.round(x0)}</text>
+        <text x={w - pad} y={h - 1} fill={T.inkFaint} fontSize={7} textAnchor="end">Yr {Math.round(x1)}</text>
+        <text x={pad} y={9} fill={T.inkFaint} fontSize={7}>{fmtK(y1)}</text>
+      </svg>
+      <div style={{ color: T.inkFaint, fontSize: 9, marginTop: 1 }}>Sampled every 6 months.</div>
+    </div>
+  );
+}
+
+/** Migration — where this people is moving now, aggregated from live migration flows. */
+function CultureMigration({ name, color, hubs, tick }: {
+  name: string; color: [number, number, number]; hubs: { id: number; name: string }[]; tick: number;
+}) {
+  const [routes, setRoutes] = useState<MigrationRouteBrief[]>([]);
+  useEffect(() => {
+    let ok = true;
+    campaignGetMigrationRoutes().then((r) => { if (ok) setRoutes(r); }).catch(() => {});
+    return () => { ok = false; };
+  }, [tick]);
+  const dests = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const r of routes) if (r.culture === name && r.to_hub >= 0) m.set(r.to_hub, (m.get(r.to_hub) ?? 0) + r.volume);
+    return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  }, [routes, name]);
+  const total = dests.reduce((s, [, v]) => s + v, 0);
+  const rgb = `rgb(${color[0]},${color[1]},${color[2]})`;
+  const nameOf = (i: number) => hubs[i]?.name ?? `#${i}`;
+  return (
+    <div style={{ marginBottom: 11 }}>
+      <div style={sectionHdr}>Where they move</div>
+      {dests.length === 0 ? (
+        <div style={{ color: T.inkFaint, fontSize: 10 }}>No recent migration of this people.</div>
+      ) : (
+        <>
+          <div style={{ fontSize: 10, color: T.inkDim, marginBottom: 3 }}>{fmtK(total)} recently on the move →</div>
+          {dests.map(([hub, vol]) => (
+            <div key={hub} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, padding: "2px 2px" }}>
+              <span style={{ width: 6, height: 6, borderRadius: 3, background: rgb, flex: "0 0 auto" }} />
+              <span style={{ flex: 1, color: T.inkMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nameOf(hub)}</span>
+              <span style={{ color: rgb }}>{fmtK(vol)}</span>
+            </div>
+          ))}
+        </>
       )}
     </div>
   );
@@ -178,6 +371,10 @@ const mapBtn: React.CSSProperties = {
 };
 const diasporaBadge: React.CSSProperties = {
   fontSize: 9.5, color: "#e0b060", border: "1px solid #6a5426", background: "#241d0c",
+  borderRadius: 10, padding: "1px 7px",
+};
+const creoleBadge: React.CSSProperties = {
+  fontSize: 9.5, color: "#c8a0e0", border: "1px solid #4a3466", background: "#1e1430",
   borderRadius: 10, padding: "1px 7px",
 };
 const housePill: React.CSSProperties = {

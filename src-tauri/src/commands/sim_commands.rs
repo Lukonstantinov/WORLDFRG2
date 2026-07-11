@@ -104,8 +104,14 @@ pub fn sim_rivers_hydrology(
     let hydro = rivers::compute_hydrology(&buf);
     // Lakes first: rivers must terminate at lake shores (not draw across them),
     // so channel extraction needs to know which cells are open lake water.
-    let lakes = rivers::detect_lakes(&buf, &hydro.filled, lake_fill_depth, max_cells);
+    let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, lake_fill_depth, max_cells);
     let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, river_density, river_width, &lakes);
+    // Oxbow backwaters cut off from the meandering lowland reaches (real lakes).
+    let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
+    lakes.extend(oxbows);
+    // Tag terminal salt lakes (endorheic + arid) so the overlay tints them and the
+    // Hydrology panel, goods and settlements agree on the brine.
+    rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
 
     // Store rivers as serialized state for rendering
     // (Rivers are overlays, not per-cell data stored in tiles)
@@ -181,7 +187,68 @@ pub fn sim_biological(
     biological::compute_reef_risk(&mut buf);
     biological::compute_trade_goods(&mut buf, &river_data, seed, gem_deposits, climate_strictness, &goods);
 
+    // Terminal salt lakes → brine into the salinity column + inland salt-pan
+    // production. Lakes are re-derived here (this phase does not receive them).
+    let hydro = rivers::compute_hydrology(&buf);
+    let lake_max = (buf.total() / 2000).max(20);
+    let mut salt_lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
+    rivers::classify_salt_lakes(&buf, &mut salt_lakes, &river_data);
+    biological::apply_salt_pans(&mut buf, &salt_lakes, &goods);
+
     buf.save(&conn, "Biological (sharks, shipworms, storms, reefs & trade goods)")
+}
+
+/// One-click REFRESH of hydrology → biology on an existing world, WITHOUT
+/// re-rolling elevation/climate or relocating settlements. Re-runs the rivers &
+/// lakes pass (so a world made before the meander/oxbow/salt work gains true
+/// meanders, oxbow backwaters and classified salt lakes), the soil/fertility pass
+/// (delta floodplain abundance + delta fisheries) and the biological pass (trade
+/// goods + inland salt-pan production). The human map (settlements) is left
+/// untouched — use "Complete from Landmass" if you want cities re-placed too.
+#[tauri::command]
+pub fn sim_refresh_hydrology_biology(
+    seed: u64,
+    river_density: f32,
+    river_width: f32,
+    lake_fill_depth: f32,
+    lake_max_fraction: f32,
+    gem_deposits: u32,
+    climate_strictness: f32,
+    db: State<'_, WorldDb>,
+) -> Result<SimRiversResult, String> {
+    db.clear_caches();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?;
+    let mut buf = WorldBuffer::load(&conn)?; // ALL columns (writes soil/fert/goods/salinity/…)
+
+    // Phase 5: rivers → lakes → oxbows → salt classification.
+    let hydro = rivers::compute_hydrology(&buf);
+    let max_cells = (((buf.total() as f32) * lake_max_fraction.clamp(0.000002, 0.05)) as usize).max(4);
+    let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, lake_fill_depth, max_cells);
+    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, river_density, river_width, &lakes);
+    let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
+    lakes.extend(oxbows);
+    rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
+
+    // Phase 6: soil & fertility (incl. delta floodplain abundance + delta fisheries).
+    soil::classify_soil(&mut buf);
+    soil::apply_volcanic_apron(&mut buf);
+    soil::apply_alluvial_override(&mut buf, &extracted_rivers);
+    fertility::compute_fertility(&mut buf, &extracted_rivers);
+    fertility::compute_fisheries(&mut buf, &extracted_rivers);
+
+    // Phase 8: biological — hazards, trade goods, and inland salt pans.
+    let goods = crate::commands::goods_commands::load_world_goods(&conn);
+    biological::compute_disease_risk(&mut buf, &extracted_rivers);
+    biological::compute_shark_risk(&mut buf, &extracted_rivers);
+    biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
+    biological::compute_storm_base(&mut buf);
+    biological::compute_reef_risk(&mut buf);
+    biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, gem_deposits, climate_strictness, &goods);
+    biological::apply_salt_pans(&mut buf, &lakes, &goods);
+
+    let modified = buf.save(&conn, "Refresh hydrology & biology")?;
+    Ok(SimRiversResult { modified, rivers: extracted_rivers, lakes })
 }
 
 /// Run all simulations in sequence (full world generation pipeline).
@@ -226,8 +293,11 @@ pub fn sim_run_all(
     // extraction can stop rivers at lake shores instead of crossing the water.
     let hydro = rivers::compute_hydrology(&buf);
     let lake_max = (buf.total() / 2000).max(20);
-    let lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
+    let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
     let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0, &lakes);
+    let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
+    lakes.extend(oxbows);
+    rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
 
     // Phase 6: Soil & fertility
     soil::classify_soil(&mut buf);
@@ -239,7 +309,9 @@ pub fn sim_run_all(
     // Phase 7: Settlements
     biological::compute_disease_risk(&mut buf, &extracted_rivers);
     // Organic culture map first, so settlements are named in their region's culture.
-    let cmap = crate::sim::cultures::compute_culture_map(&buf, seed);
+    let desired_cultures = crate::db::metadata::get_meta(&conn, "culture_count").ok().flatten()
+        .and_then(|s| s.parse::<usize>().ok()).filter(|&n| n >= 1);
+    let cmap = crate::sim::cultures::compute_culture_map(&buf, seed, desired_cultures);
     crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
     let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
     let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed, 0.55, None);
@@ -252,6 +324,8 @@ pub fn sim_run_all(
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
     biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
+    // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
+    biological::apply_salt_pans(&mut buf, &lakes, &goods);
 
     let modified = buf.save(&conn, "Full world generation")?;
 
@@ -350,8 +424,11 @@ pub fn sim_run_all_from_terrain(
     // extraction can stop rivers at lake shores instead of crossing the water.
     let hydro = rivers::compute_hydrology(&buf);
     let lake_max = (buf.total() / 2000).max(20);
-    let lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
+    let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
     let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0, &lakes);
+    let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
+    lakes.extend(oxbows);
+    rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
 
     // Phase 6: Soil & fertility
     soil::classify_soil(&mut buf);
@@ -363,7 +440,9 @@ pub fn sim_run_all_from_terrain(
     // Phase 7: Settlements
     biological::compute_disease_risk(&mut buf, &extracted_rivers);
     // Organic culture map first, so settlements are named in their region's culture.
-    let cmap = crate::sim::cultures::compute_culture_map(&buf, seed);
+    let desired_cultures = crate::db::metadata::get_meta(&conn, "culture_count").ok().flatten()
+        .and_then(|s| s.parse::<usize>().ok()).filter(|&n| n >= 1);
+    let cmap = crate::sim::cultures::compute_culture_map(&buf, seed, desired_cultures);
     crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
     let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
     let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed, 0.55, None);
@@ -376,6 +455,8 @@ pub fn sim_run_all_from_terrain(
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
     biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
+    // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
+    biological::apply_salt_pans(&mut buf, &lakes, &goods);
 
     let modified = buf.save(&conn, "Full generation from template")?;
 
@@ -450,7 +531,9 @@ pub fn sim_generate_settlements(
     biological::compute_disease_risk(&mut buf, &river_data);
     // Organic culture map — compute + store + activate BEFORE naming settlements so
     // each town is named in its region's (mutated) culture.
-    let cmap = crate::sim::cultures::compute_culture_map(&buf, seed);
+    let desired_cultures = crate::db::metadata::get_meta(&conn, "culture_count").ok().flatten()
+        .and_then(|s| s.parse::<usize>().ok()).filter(|&n| n >= 1);
+    let cmap = crate::sim::cultures::compute_culture_map(&buf, seed, desired_cultures);
     crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
     let habitability = settlements::compute_habitability(&buf, &river_data, &lakes);
     let result = settlements::generate_settlements(

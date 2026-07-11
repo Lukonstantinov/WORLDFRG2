@@ -154,6 +154,39 @@ pub fn compute_fertility(buf: &mut WorldBuffer, rivers: &[River]) {
             buf.fertility[idx] = (score * temp_gate).clamp(0.0, 1.0);
         }
     }
+
+    // ── Delta floodplain abundance ── The land fringing a great river's DELTA is
+    // the richest farmland on Earth (Nile, Ganges-Brahmaputra, Mekong, Po): annual
+    // silt, a high water table and easy irrigation. Lift fertility on land cells
+    // within a few cells of any delta fan, so deltas are both a cradle of life and
+    // a strong settlement draw (fertility feeds habitability).
+    let mut delta_dist = vec![u32::MAX; buf.total()];
+    let mut dq = std::collections::VecDeque::new();
+    for river in rivers {
+        if river.mouth_kind != 1 { continue; }
+        for &(dx, dy) in &river.delta {
+            let idx = buf.idx(dx, dy);
+            if delta_dist[idx] != 0 { delta_dist[idx] = 0; dq.push_back((dx, dy)); }
+        }
+    }
+    let delta_reach = 4u32;
+    while let Some((x, y)) = dq.pop_front() {
+        let idx = buf.idx(x, y);
+        let d = delta_dist[idx];
+        if d >= delta_reach { continue; }
+        for &(dx, dy) in &[(-1i32, 0), (1, 0), (0, -1i32), (0, 1)] {
+            let nx = buf.wrap_x(x as i32 + dx);
+            let ny = buf.clamp_y(y as i32 + dy);
+            let ni = buf.idx(nx, ny);
+            if delta_dist[ni] > d + 1 { delta_dist[ni] = d + 1; dq.push_back((nx, ny)); }
+        }
+    }
+    for i in 0..buf.total() {
+        if buf.terrain[i] != 1 || delta_dist[i] == u32::MAX { continue; }
+        // Strong at the water's edge, fading inland; never lowers existing fertility.
+        let boost = 0.35 * (-(delta_dist[i] as f32).powi(2) / 8.0).exp();
+        buf.fertility[i] = (buf.fertility[i] + boost).clamp(0.0, 1.0);
+    }
 }
 
 /// Compute fishery productivity for sea cells from four real-world drivers:
@@ -191,6 +224,17 @@ pub fn compute_fisheries(buf: &mut WorldBuffer, rivers: &[River]) {
                     if l > load[ni] { load[ni] = l; }
                     if dist[ni] != 0 { dist[ni] = 0; queue.push_back((nx, ny)); }
                 }
+            }
+        }
+        // A DELTA is an outsized nursery: seed its whole braided/marsh fan with a
+        // strong nutrient load so the fishery blooms across the delta, not just at
+        // a single mouth cell (the "enlarged river ecosystem").
+        if river.mouth_kind == 1 {
+            for &(dx, dy) in &river.delta {
+                let ni = buf.idx(dx, dy);
+                if buf.terrain[ni] != 0 { continue; }
+                if load[ni] < 1.0 { load[ni] = 1.0; }
+                if dist[ni] != 0 { dist[ni] = 0; queue.push_back((dx, dy)); }
             }
         }
     }

@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useUIStore } from "../state/uiStore";
 import { useWorldStore } from "../state/worldStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { campaignGetHub, campaignGetColony, campaignWarehouses, campaignFuturesLanes, campaignGetProvisioning } from "../bridge/tauri";
-import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief } from "../types";
+import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement, CultureMood } from "../types";
+import { settlementStory } from "../settlementStory";
 import { GOOD_DEFS } from "../goods";
 const HP_GOOD_EMOJI: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.emoji]));
 import { climatePhrase } from "./climate";
@@ -14,6 +15,7 @@ import { YearChronicle } from "./YearChronicle";
 import type { HouseBrief } from "../types";
 import { SettlementScene } from "./SettlementScene";
 import { FlowsView } from "./FlowsView";
+import { CultureDonut } from "./CultureDonut";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 /** DLC 4 · grade colour ramp (Coarse→Exquisite) for the quality labels. */
@@ -501,14 +503,33 @@ export function HubPanel() {
       {/* ════════════ OVERVIEW ════════════ */}
       {tab === "summary" && (
         <>
-          <div style={statGrid}>
-            <Stat label="Throughput" value={fmt(hub.throughput ?? 0)} />
-            <Stat label="Exports →" value={fmt(hub.exports ?? 0)} />
-            <Stat label="← Imports" value={fmt(hub.imports ?? 0)} />
-            <Stat label="Partners" value={String(hub.partners ?? 0)} />
-            <Stat label="Wealth" value={`${Math.round(hub.wealth * 100)}%`} />
-            <Stat label="Population" value={(detail?.population ?? hub.population).toLocaleString()} />
-          </div>
+          {/* During a live campaign the stats come from the running simulation, not
+              the frozen worldgen snapshot (which never moves once play begins). The
+              worldgen figures are shown only before a campaign starts. */}
+          {campActive && detail ? (
+            <>
+              <div style={statGrid}>
+                <Stat label="Sold →" value={fmt(detail.sold ?? 0)} />
+                <Stat label="← Bought" value={fmt(detail.bought ?? 0)} />
+                <Stat label="By sea" value={fmt(detail.in_by_sea ?? 0)} />
+                <Stat label="By land" value={fmt(detail.in_by_land ?? 0)} />
+                <Stat label="Wealth" value={fmt((detail.trade_wealth ?? 0) + (detail.grain_wealth ?? 0))} />
+                <Stat label="Population" value={detail.population.toLocaleString()} />
+              </div>
+              <div style={{ fontSize: 9, color: "#5a7088", margin: "3px 2px 0", letterSpacing: "0.03em" }}>
+                live · recent trade this year
+              </div>
+            </>
+          ) : (
+            <div style={statGrid}>
+              <Stat label="Throughput" value={fmt(hub.throughput ?? 0)} />
+              <Stat label="Exports →" value={fmt(hub.exports ?? 0)} />
+              <Stat label="← Imports" value={fmt(hub.imports ?? 0)} />
+              <Stat label="Partners" value={String(hub.partners ?? 0)} />
+              <Stat label="Wealth" value={`${Math.round(hub.wealth * 100)}%`} />
+              <Stat label="Population" value={hub.population.toLocaleString()} />
+            </div>
+          )}
           {detail && (detail.estate_kind ?? 0) > 0 && (
             <div style={estateBox}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
@@ -586,6 +607,16 @@ export function HubPanel() {
 
           {/* Character summary */}
           <div style={blurbBox}>{peopleSummary(hub, labelFor, topHub?.name, isTop)}</div>
+
+          {/* Satellite villages: sub-cap hinterland settlements that market through this
+              town — how the small villages join the trade network. */}
+          {(detail?.satellites?.length ?? 0) > 0 && (
+            <SatelliteVillages villages={detail!.satellites!} />
+          )}
+
+          {/* Site & story — what the town stands on and lives by (river/reach/lake,
+              trade role, delta abundance). Worldgen-static, shown always. */}
+          <SettlementStoryBox x={hub.x} y={hub.y} name={hub.name} stars={stars} />
         </>
       )}
 
@@ -1058,28 +1089,27 @@ export function HubPanel() {
               in-migration (each fades as newcomers assimilate). */}
           {detail?.culture && (
             <>
-              <div style={sectionHdr}>Peoples</div>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 4 }}>
-                <span style={{ color: "#cfe2f6", fontSize: 12, fontWeight: 700 }}>{detail.culture}</span>
-                <span style={{ color: "#7a90a8", fontSize: 10 }}>
-                  majority{(() => {
-                    const m = (detail.minorities ?? []).reduce((a, [, s]) => a + s, 0);
-                    return m > 0.005 ? ` · ${Math.round((1 - Math.min(m, 0.95)) * 100)}%` : "";
-                  })()}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={sectionHdr}>Peoples</div>
+                <span onClick={() => useUIStore.getState().setShowImmigration(true)} title="Migration & immigration for this city"
+                  style={{ fontSize: 9, color: "#9ab0c8", cursor: "pointer", border: "1px solid #2a3a4a", borderRadius: 10, padding: "1px 7px" }}>
+                  🧭 Migration
                 </span>
               </div>
-              {(detail.minorities ?? []).filter(([, s]) => s > 0.005).length > 0 ? (
-                (detail.minorities ?? []).filter(([, s]) => s > 0.005).map(([people, share]) => (
-                  <div key={people} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                    <span style={{ width: 90, color: "#c8b6e0", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{people}</span>
-                    <div style={{ flex: 1, height: 7, borderRadius: 3, background: "#0a1018", overflow: "hidden" }}>
-                      <div style={{ width: `${Math.round(Math.min(share, 0.95) * 100)}%`, height: "100%", background: "#9a6fd0" }} />
-                    </div>
-                    <span style={{ width: 34, textAlign: "right", color: "#9ab0c8", fontSize: 10 }}>{Math.round(share * 100)}%</span>
+              {/* Culture composition as a circular diagram: majority + minority quarters. */}
+              <CultureDonut majority={detail.culture} minorities={(detail.minorities ?? []) as [string, number][]} />
+              {(detail.minorities ?? []).filter(([, s]) => s > 0.005).length === 0 && (
+                <div style={{ color: "#7a90a8", fontSize: 10, marginBottom: 2 }}>No minority quarters — a homogeneous population.</div>
+              )}
+              {/* Contentment of peoples — are each culture's prized goods supplied here? */}
+              {(detail.culture_moods?.length ?? 0) > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={sectionHdr}>Contentment — is what they crave supplied?</div>
+                  {detail.culture_moods!.map((m) => <CultureMoodRow key={m.name} m={m} />)}
+                  <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 3 }}>
+                    Unmet cravings feed unrest — a large discontented people grows restive.
                   </div>
-                ))
-              ) : (
-                <div style={{ color: "#7a90a8", fontSize: 10, marginBottom: 2 }}>No minority quarters — homogeneous population.</div>
+                </div>
               )}
             </>
           )}
@@ -1441,11 +1471,73 @@ function CityFinances({ detail }: { detail: HubDetail }) {
             <Line label="To the people" amt={f.spent_civic} neg />
             <Line label="War effort" amt={f.spent_war} neg />
             <Line label="Public works" amt={f.spent_works} neg />
+            <Line label="Hospices / quarantine" amt={f.spent_health ?? 0} neg />
             <Line label="Reparations paid" amt={f.reparations_out} neg />
           </div>
         </div>
       )}
+      {/* Public health: a rich council funds hospices/quarantine → fewer plague deaths. */}
+      {(detail.public_health ?? 0) > 0.02 && (
+        <div style={{ marginTop: 5, fontSize: 9.5, color: "#8ab0a0", display: "flex", alignItems: "center", gap: 6 }}>
+          <span title="Hospices & quarantine spending. Higher = far fewer die in a plague, and longer immunity afterward.">
+            ⚕ Public health
+          </span>
+          <div style={{ flex: 1, height: 6, background: "#20302a", borderRadius: 3, overflow: "hidden", maxWidth: 120 }}>
+            <div style={{ width: `${Math.round(((detail.public_health ?? 0) / 0.6) * 100)}%`, height: "100%", background: "#5aa880" }} />
+          </div>
+          <span style={{ color: "#7a9a8a" }}>−{Math.round((detail.public_health ?? 0) * 100)}% plague deaths</span>
+        </div>
+      )}
     </>
+  );
+}
+
+/** Satellite villages: the sub-cap hinterland settlements that market through this town.
+ *  How the small villages "join the trade" — connected to a real hub, not left inert. */
+function SatelliteVillages({ villages }: { villages: NonNullable<HubDetail["satellites"]> }) {
+  const [open, setOpen] = useState(false);
+  const totalPop = villages.reduce((a, v) => a + v.population, 0);
+  const sorted = [...villages].sort((a, b) => b.population - a.population);
+  return (
+    <div style={{ margin: "6px 0", padding: "6px 8px", background: "rgba(20,30,22,0.5)", border: "1px solid #24382a", borderRadius: 6 }}>
+      <div onClick={() => setOpen((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 10.5 }}>
+        <span style={{ color: "#8fbf90", fontSize: 9 }}>{open ? "▾" : "▸"}</span>
+        <span style={{ color: "#a8d0a8", fontWeight: 600 }}>🏘 Market town for {villages.length} village{villages.length === 1 ? "" : "s"}</span>
+        <span style={{ flex: 1 }} />
+        <span style={{ color: "#7a9a7a" }}>{Math.round(totalPop).toLocaleString()} hinterland folk</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 5, display: "flex", flexWrap: "wrap", gap: "2px 10px" }}>
+          {sorted.slice(0, 24).map((v, i) => (
+            <span key={i} style={{ fontSize: 9.5, color: "#9ab0a0", minWidth: 110 }}>
+              {v.name} <span style={{ color: "#6a806a" }}>{v.population.toLocaleString()}</span>
+            </span>
+          ))}
+          {sorted.length > 24 && <span style={{ fontSize: 9.5, color: "#6a806a" }}>+{sorted.length - 24} more…</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One resident people's contentment: a face by satisfaction + the prized goods this
+ *  city supplies (met) or leaves them craving (unmet). */
+function CultureMoodRow({ m }: { m: CultureMood }) {
+  const rgb = `rgb(${m.color[0]},${m.color[1]},${m.color[2]})`;
+  const s = m.satisfaction;
+  const face = s >= 0.66 ? "😀" : s >= 0.5 ? "🙂" : s >= 0.38 ? "😐" : "☹️";
+  const fc = s >= 0.66 ? "#7fd0a0" : s >= 0.5 ? "#bcd08a" : s >= 0.38 ? "#e0c060" : "#e08a6a";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 2px", fontSize: 11 }}>
+      <span style={{ width: 9, height: 9, borderRadius: 2, background: rgb, flex: "0 0 auto", border: "1px solid rgba(0,0,0,0.4)" }} />
+      <span style={{ width: 84, color: "#cfe2f6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
+      <span style={{ fontSize: 13 }} title={`${Math.round(s * 100)}% of what they crave is supplied`}>{face}</span>
+      <span style={{ flex: 1, minWidth: 0, textAlign: "right", color: "#8aa0b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {m.unmet.length > 0
+          ? <span style={{ color: fc }}>craves {m.unmet.map((g) => HP_GOOD_EMOJI[g] ?? g).join(" ")}</span>
+          : <span style={{ color: "#7fa090" }}>content {m.met.slice(0, 3).map((g) => HP_GOOD_EMOJI[g] ?? "").join(" ")}</span>}
+      </span>
+    </div>
   );
 }
 
@@ -1619,6 +1711,31 @@ function MultiSeriesChart({ series, min, max, fmt }: {
 
 /** A fuller character sketch: climate & terrain, what the people are known for and
  *  their social character, population/scale, and a touch of founding history. */
+/** "Site & story" — the settlement's account of the river/reach or lake it stands
+ *  on, its trade role, and (for a delta town) the abundance of life at the mouth.
+ *  Reads the world's rivers/toponyms/lakes; renders nothing if there's no story. */
+function SettlementStoryBox({ x, y, name, stars }: { x: number; y: number; name: string; stars: number }) {
+  const settlements = useWorldStore((s) => s.settlements);
+  const rivers = useWorldStore((s) => s.rivers);
+  const lakes = useWorldStore((s) => s.lakes);
+  const toponyms = useWorldStore((s) => s.toponyms);
+  const meta = useWorldStore((s) => s.meta);
+  const worldW = meta?.grid_width ?? 0;
+  const story = useMemo(() => {
+    const size: Settlement["size"] = stars >= 5 ? "capital" : stars >= 4 ? "city" : stars >= 3 ? "town" : stars >= 2 ? "village" : "outpost";
+    const found = settlements.find((s) => s.x === x && s.y === y);
+    const st: Settlement = found ?? { id: "", x, y, name, size, population: 0, score: 0 };
+    return settlementStory(st, rivers, toponyms, lakes, worldW);
+  }, [x, y, name, stars, settlements, rivers, toponyms, lakes, worldW]);
+  if (!story.text) return null;
+  return (
+    <>
+      <div style={{ ...sectionHdr, marginTop: 8 }}>Site &amp; story</div>
+      <div style={{ ...blurbBox, fontStyle: "italic" }}>{story.text}</div>
+    </>
+  );
+}
+
 function peopleSummary(hub: EconHub, labelFor: (id: string) => string, topName?: string, isTop?: boolean): string {
   const known = hub.monopolies && hub.monopolies.length > 0
     ? hub.monopolies.map(labelFor)

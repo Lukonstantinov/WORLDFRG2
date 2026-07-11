@@ -59,6 +59,8 @@ export function PlaguePanel() {
   if (!open) return null;
 
   const totalDead = rows.reduce((s, e) => s + e.total_dead, 0);
+  const totalIll = rows.reduce((s, e) => s + (e.total_ill ?? e.total_dead), 0);
+  const totalRecovered = rows.reduce((s, e) => s + (e.total_recovered ?? 0), 0);
   const activeCount = rows.filter((e) => e.active).length;
   const focusCity = (hubIdx: number) => {
     const id = snapshot?.hubs?.[hubIdx]?.id;
@@ -76,7 +78,6 @@ export function PlaguePanel() {
       <div style={{ display: "flex", gap: 8, marginBottom: 6, fontSize: 10, color: "#9c8080" }}>
         <span>{rows.length} outbreak{rows.length === 1 ? "" : "s"}</span>
         <span>· {activeCount} active</span>
-        <span>· {totalDead.toLocaleString()} dead</span>
         <span style={{ flex: 1 }} />
         <label style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer" }} data-no-drag>
           <input type="checkbox" checked={showZones} onChange={(e) => setOverlayVisible("plagueZones", e.target.checked)}
@@ -84,6 +85,26 @@ export function PlaguePanel() {
           <span>Show on map</span>
         </label>
       </div>
+
+      {/* SIR tally across all outbreaks: how many fell ill, died, and recovered. */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+        <SirStat label="fell ill" value={totalIll} color="#d8b060" />
+        <SirStat label="died" value={totalDead} color="#e07a5a" />
+        <SirStat label="recovered" value={totalRecovered} color="#7aa86a" />
+      </div>
+
+      {/* How plagues work — the mechanics, so the numbers are legible. */}
+      <details style={{ marginBottom: 6 }} data-no-drag>
+        <summary style={{ fontSize: 10, color: "#a88888", cursor: "pointer" }}>How plagues work</summary>
+        <div style={{ fontSize: 9, color: "#8c7070", lineHeight: 1.5, padding: "3px 2px 0" }}>
+          A disease breaks out in a city, kills a share of its people, and shuts the gates under
+          <b> quarantine</b> (trade suspended). It then travels the <b>trade lanes only</b> — Local
+          outbreaks stay put, Regional reach one more city, a Great Plague spreads ~4000&nbsp;km along
+          the network. Survivors gain <b>immunity</b> for years (stronger for smallpox/plague, weak for
+          flu/cholera, so those recur). Wealthy cities that fund <b>hospices/quarantine</b> lose fewer
+          people and resist longer. <i>Ill</i> = caught it; <i>recovered</i> = ill who survived.
+        </div>
+      </details>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }} data-no-drag>
         {SORTS.map((s) => (
@@ -169,8 +190,13 @@ export function PlaguePanel() {
                         {c.active && <span style={{ color: "#ff8a6a" }}> · quarantined</span>}
                         {c.from_name && <span style={{ color: "#6a5050" }}> ← {c.from_name}</span>}
                       </span>
-                      <span style={{ color: "#e08a6a", minWidth: 44, textAlign: "right" }}>{c.deaths.toLocaleString()} †</span>
-                      <span style={{ color: "#7a8a6a", minWidth: 40, textAlign: "right" }}>{c.pop.toLocaleString()} ✚</span>
+                      {c.ill != null && c.ill > c.deaths && (
+                        <span style={{ color: "#c8a860", minWidth: 42, textAlign: "right" }} title="fell ill">{c.ill.toLocaleString()} ⚕</span>
+                      )}
+                      <span style={{ color: "#e08a6a", minWidth: 44, textAlign: "right" }} title="died">{c.deaths.toLocaleString()} †</span>
+                      {c.recovered != null && c.recovered > 0 && (
+                        <span style={{ color: "#7aa86a", minWidth: 42, textAlign: "right" }} title="recovered">{c.recovered.toLocaleString()} ✚</span>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -179,6 +205,17 @@ export function PlaguePanel() {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/** One SIR tally chip (fell ill / died / recovered) for the panel header. */
+function SirStat({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div style={{ flex: 1, textAlign: "center", padding: "3px 2px", borderRadius: 5,
+      background: "#1a0e0e", border: "1px solid #2a1818" }}>
+      <div style={{ color, fontSize: 13, fontWeight: 700 }}>{value.toLocaleString()}</div>
+      <div style={{ color: "#8c7070", fontSize: 8 }}>{label}</div>
     </div>
   );
 }

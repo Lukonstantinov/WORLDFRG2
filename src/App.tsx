@@ -16,8 +16,7 @@ import { CityRankingPanel } from "./ui/CityRankingPanel";
 import { GoodFlowPanel } from "./ui/GoodFlowPanel";
 import { GoodsBrowserPanel } from "./ui/GoodsBrowserPanel";
 import { HousesPanel } from "./ui/HousesPanel";
-import { SpeculationPanel } from "./ui/SpeculationPanel";
-import { CoinCreditPanel } from "./ui/CoinCreditPanel";
+import { MoneyFinancePanel } from "./ui/MoneyFinancePanel";
 import { ItineraryPanel } from "./ui/ItineraryPanel";
 import { GoodsCodexPanel } from "./ui/GoodsCodexPanel";
 import { EconomyDashboardPanel } from "./ui/EconomyDashboardPanel";
@@ -28,6 +27,7 @@ import { ColonialPanel } from "./ui/ColonialPanel";
 import { BankPanel } from "./ui/BankPanel";
 import { NewsFeedPanel } from "./ui/NewsFeedPanel";
 import { PlaguePanel } from "./ui/PlaguePanel";
+import { ImmigrationPanel } from "./ui/ImmigrationPanel";
 import { GuildsPanel } from "./ui/GuildsPanel";
 import { FiguresPanel } from "./ui/FiguresPanel";
 import { LandmarksPanel } from "./ui/LandmarksPanel";
@@ -333,7 +333,7 @@ export default function App() {
         if (ov.economy && ov.economy.hubs.length) setEconomy(ov.economy);
         // #26 · toponyms (river/peak/lake/region names) — load them on OPEN so the
         // layer works in a campaign (they were only fetched in the Toponyms step).
-        try { const tp = await getToponyms(); if (tp.length) setToponyms(tp); } catch { /* none saved */ }
+        try { const tp = await getToponyms(); if (tp.length) { setToponyms(tp); useUIStore.getState().setOverlayVisible("toponyms", true); } } catch { /* none saved */ }
         // Restore the persisted wizard progress; older saves never wrote it, so
         // fall back to inferring completion from which data is present.
         const restored = [
@@ -408,7 +408,7 @@ export default function App() {
       const ov = await getOverlays();
       setSettlements(ov.settlements ?? []);
       setEconomy(ov.economy && ov.economy.hubs.length ? ov.economy : null);
-      try { const tp = await getToponyms(); if (tp.length) setToponyms(tp); } catch { /* none saved */ }
+      try { const tp = await getToponyms(); if (tp.length) { setToponyms(tp); useUIStore.getState().setOverlayVisible("toponyms", true); } } catch { /* none saved */ }
       const restored = parseProgress(info.campaign_progress);
       const ui = useUIStore.getState();
       const worldSteps = Object.entries(ui.stepCompleted)
@@ -605,8 +605,7 @@ export default function App() {
           <GoodFlowPanel />
           <GoodsBrowserPanel />
           <HousesPanel />
-          <SpeculationPanel />
-          <CoinCreditPanel />
+          <MoneyFinancePanel />
           <ItineraryPanel />
           <GoodsCodexPanel />
           <EconomyDashboardPanel />
@@ -617,6 +616,7 @@ export default function App() {
           <BankPanel />
           <NewsFeedPanel />
           <PlaguePanel />
+          <ImmigrationPanel />
           <GuildsPanel />
           <FiguresPanel />
           <LandmarksPanel />

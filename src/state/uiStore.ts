@@ -117,10 +117,8 @@ interface UIStore {
   /** Merchant-houses panel open. */
   showHouses: boolean;
   showCityRanking: boolean;
-  /** DLC 3 · the Speculation & Poleis (finance) panel open. */
-  showSpeculation: boolean;
-  /** DLC 3.5 · the Coin & Credit (currencies / banks / crashes / schematics) panel. */
-  showCoinCredit: boolean;
+  /** v2.0 · the unified Money & Finance panel (mints · banks · bubbles · shocks · schematics). */
+  showMoneyFinance: boolean;
   /** #23 · Itinerary / travel-time panel open. */
   showItinerary: boolean;
   /** Atlas 2.0 · the World Atlas (world graphs / city census / timeline) panel. */
@@ -154,6 +152,9 @@ interface UIStore {
   /** 🌊 Hydrology: per-river-index glow colour (branch / order scheme). Missing
    *  entries fall back to the default cyan glow. */
   riverHighlightColors: Record<number, string> | null;
+  /** 🌊 Hydrology: index of the lake selected in the Lakes tab to glow on the map
+   *  (others dim), or null. */
+  lakeHighlight: number | null;
   /** Goods Codex: the good whose provenance/history/scarcity is shown, or null. */
   codexGood: string | null;
   /** Colonial Office — empire-wide colony/outpost roster + founding-gate diagnostics. */
@@ -168,6 +169,8 @@ interface UIStore {
   showNews: boolean;
   /** Phase 6 · Plagues & Epidemics panel open. */
   showPlagues: boolean;
+  /** Migration & Immigration panel open (per selected city). */
+  showImmigration: boolean;
   /** Phase 6 · Guilds & Crafts panel open. */
   showGuilds: boolean;
   /** Phase 6 · Notable Figures panel open. */
@@ -233,7 +236,6 @@ interface UIStore {
   setGoodDetail: (id: string | null) => void;
   setShowHouses: (v: boolean) => void;
   setShowCityRanking: (v: boolean) => void;
-  setShowSpeculation: (v: boolean) => void;
   setShowItinerary: (v: boolean) => void;
   setShowAtlas: (v: boolean) => void;
   setShowPeoples: (v: boolean) => void;
@@ -249,14 +251,16 @@ interface UIStore {
   setTravelRoute: (pts: [number, number][] | null) => void;
   setRiverHighlight: (ids: number[] | null) => void;
   setRiverHighlightColors: (c: Record<number, string> | null) => void;
+  setLakeHighlight: (idx: number | null) => void;
   setCodexGood: (g: string | null) => void;
-  setShowCoinCredit: (v: boolean) => void;
+  setShowMoneyFinance: (v: boolean) => void;
   setShowColonial: (v: boolean) => void;
   setShowBank: (v: boolean) => void;
   setSelectedBankIdx: (i: number | null) => void;
   setShowBankIcons: (v: boolean) => void;
   setShowNews: (v: boolean) => void;
   setShowPlagues: (v: boolean) => void;
+  setShowImmigration: (v: boolean) => void;
   setShowGuilds: (v: boolean) => void;
   setShowFigures: (v: boolean) => void;
   setShowLandmarks: (v: boolean) => void;
@@ -304,7 +308,7 @@ export const useUIStore = create<UIStore>((set) => ({
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false,
-    speculation: false,
+    speculation: false, coinDominance: false,
     houseControl: false, merchantRoutes: false, futures: false, dynamicFlow: false, tradeHeat: false,
     tradeBasins: false, migrations: true,
     colonies: true,
@@ -341,8 +345,7 @@ export const useUIStore = create<UIStore>((set) => ({
   goodDetailId: null,
   showHouses: false,
   showCityRanking: false,
-  showSpeculation: false,
-  showCoinCredit: false,
+  showMoneyFinance: false,
   showItinerary: false,
   showAtlas: false,
   showPeoples: false,
@@ -358,6 +361,7 @@ export const useUIStore = create<UIStore>((set) => ({
   travelRoute: null,
   riverHighlight: null,
   riverHighlightColors: null,
+  lakeHighlight: null,
   codexGood: null,
   showColonial: false,
   showBank: false,
@@ -365,6 +369,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showBankIcons: false,
   showNews: false,
   showPlagues: false,
+  showImmigration: false,
   showGuilds: false,
   showFigures: false,
   showLandmarks: false,
@@ -457,8 +462,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setGoodDetail: (id) => set({ goodDetailId: id }),
   setShowHouses: (v) => set({ showHouses: v }),
   setShowCityRanking: (v) => set({ showCityRanking: v }),
-  setShowSpeculation: (v) => set({ showSpeculation: v }),
-  setShowCoinCredit: (v) => set({ showCoinCredit: v }),
+  setShowMoneyFinance: (v) => set({ showMoneyFinance: v }),
   setShowItinerary: (v) => set({ showItinerary: v }),
   setShowAtlas: (v) => set({ showAtlas: v }),
   setShowPeoples: (v) => set({ showPeoples: v }),
@@ -474,6 +478,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setTravelRoute: (pts) => set({ travelRoute: pts }),
   setRiverHighlight: (ids) => set({ riverHighlight: ids }),
   setRiverHighlightColors: (c) => set({ riverHighlightColors: c }),
+  setLakeHighlight: (idx) => set({ lakeHighlight: idx }),
   setCodexGood: (g) => set({ codexGood: g }),
   setShowColonial: (v) => set({ showColonial: v }),
   setShowBank: (v) => set({ showBank: v }),
@@ -481,6 +486,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowBankIcons: (v) => set({ showBankIcons: v }),
   setShowNews: (v) => set({ showNews: v }),
   setShowPlagues: (v) => set({ showPlagues: v }),
+  setShowImmigration: (v) => set({ showImmigration: v }),
   setShowGuilds: (v) => set({ showGuilds: v }),
   setShowFigures: (v) => set({ showFigures: v }),
   setShowLandmarks: (v) => set({ showLandmarks: v }),

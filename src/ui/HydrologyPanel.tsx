@@ -199,6 +199,22 @@ export function HydrologyPanel() {
                     {sel.story && <div style={storyBox}><Hl text={sel.story} names={[sel.name, sel.counterpart]} /></div>}
                   </div>}
 
+                  {/* The river's course, told in three reaches (trunks only). */}
+                  {sel.zones && sel.zones.length > 0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={subLabel}>The river's course · source → sea</div>
+                      {sel.climate_journey && (
+                        <div style={{ fontSize: 11, color: "#93a9be", margin: "1px 0 8px", lineHeight: 1.5 }}>
+                          🌍 <b style={{ color: "#9fc0da", fontWeight: 600 }}>Through the climates: </b>
+                          <Hl text={sel.climate_journey} names={[]} />
+                        </div>
+                      )}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                        {sel.zones.map((z) => <ZoneCard key={z.kind} z={z} names={[sel.name, sel.counterpart]} focusOn={focusOn} />)}
+                      </div>
+                    </div>
+                  )}
+
                   {sel.species && sel.species.length > 0 && (
                     <div style={{ marginTop: 9 }}>
                       <div style={subLabel}>🐟 Fish of this river · source → mouth</div>
@@ -256,17 +272,24 @@ function TabBtn({ on, onClick, children }: { on: boolean; onClick: () => void; c
   );
 }
 
-/** A checkbox that toggles an on-map toponym label layer (river/lake names). */
+/** A checkbox that toggles an on-map toponym label layer (river/lake names).
+ *  The checkbox reflects ACTUAL visibility (the master `toponyms` layer AND this
+ *  feature-kind must both be on), and turning it on always enables the master —
+ *  otherwise the box could read "checked" while the layer stayed hidden, so a
+ *  single click confusingly hid an already-hidden layer. */
 function LabelToggle({ keyName, label }: { keyName: string; label: string }) {
-  const on = useUIStore((s) => s.overlayVisibility[keyName] !== false);
-  const master = useUIStore((s) => s.overlayVisibility.toponyms);
+  const kindOn = useUIStore((s) => s.overlayVisibility[keyName] !== false);
+  const master = useUIStore((s) => s.overlayVisibility.toponyms !== false);
+  const hasNames = useWorldStore((s) => s.toponyms.length > 0);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
+  const on = master && kindOn;
   return (
-    <label data-no-drag title={master ? "" : "Generate place names (Toponyms step) to show labels"}
-      style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, color: "#9fb6cc", cursor: "pointer", whiteSpace: "nowrap" }}>
+    <label data-no-drag title={hasNames ? "" : "Generate place names (Toponyms step) to show labels"}
+      style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, color: hasNames ? "#9fb6cc" : "#5f7488", cursor: "pointer", whiteSpace: "nowrap" }}>
       <input type="checkbox" checked={on} onChange={(e) => {
         setOverlayVisible(keyName, e.target.checked);
-        if (e.target.checked && !master) setOverlayVisible("toponyms", true);
+        // Turning any kind on enables the shared master layer.
+        if (e.target.checked) setOverlayVisible("toponyms", true);
       }} />
       {label}
     </label>
@@ -285,6 +308,12 @@ function LakesTab({ lakes, rivers, focusOn }: {
   const [sort, setSort] = useState<LakeSort>("area");
   const [kind, setKind] = useState<string>("all");
   const [openId, setOpenId] = useState<number | null>(null);
+  const setLakeHighlight = useUIStore((s) => s.setLakeHighlight);
+
+  // Glow the opened lake on the map (others dim); clear when none is open or the
+  // Lakes tab unmounts.
+  useEffect(() => { setLakeHighlight(openId); }, [openId, setLakeHighlight]);
+  useEffect(() => () => setLakeHighlight(null), [setLakeHighlight]);
 
   useEffect(() => {
     if (lakes.length === 0) { setNodes([]); return; }
@@ -387,6 +416,14 @@ function LakeDetail({ lk, focusOn }: { lk: LakeNode; focusOn: (x: number, y: num
       <EcoRow icon="🐟" label="Fish" text={lk.fish} />
       <EcoRow icon="🦩" label="Wildlife" text={lk.wildlife} />
       <EcoRow icon="🧬" label="Endemism" text={lk.endemism} />
+      {lk.species && lk.species.length > 0 && (
+        <div style={{ marginTop: 9 }}>
+          <div style={subLabel}>🐟 Signature fish of this lake</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {lk.species.map((sp) => <LakeFishPlate key={sp.slug} sp={sp} />)}
+          </div>
+        </div>
+      )}
       {(lk.inflows.length > 0 || lk.outflow) && (
         <EcoRow icon="↳" label="Drainage"
           names={[...lk.inflows, lk.outflow]}
@@ -550,6 +587,65 @@ function FishPlate({ sp }: { sp: FishSpecies }) {
   );
 }
 
+// ── Lake fish plate ── same illustration/emoji-fallback as rivers, but no river
+// zone label (lakes aren't zoned source→mouth); shows the real-world model fish.
+function LakeFishPlate({ sp }: { sp: FishSpecies }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div style={{ display: "flex", gap: 9, alignItems: "center", background: "#0a1620",
+      border: "1px solid #14283a", borderRadius: 7, padding: "6px 8px" }}>
+      <div style={{ width: 90, height: 50, flex: "0 0 auto", borderRadius: 5, overflow: "hidden",
+        background: "radial-gradient(130% 100% at 30% 20%, #14304a, #0a1620 70%)", display: "grid", placeItems: "center" }}>
+        {!failed
+          ? <img src={`/fish/${sp.slug}.png`} alt={sp.name} onError={() => setFailed(true)}
+              style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+          : <span style={{ fontSize: 24, opacity: 0.6 }}>🐟</span>}
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 650, color: "#e6f2fb" }}>
+          {sp.name}
+          <span style={{ fontSize: 9.5, color: "#7d94ab", marginLeft: 6, fontWeight: 500 }}>~ {sp.real}</span>
+        </div>
+        <div style={{ fontSize: 10, fontStyle: "italic", color: "#7fae8f" }}>{sp.binomial}</div>
+        <div style={{ fontSize: 10.5, color: "#93a9be", marginTop: 1 }}>{sp.blurb}</div>
+      </div>
+    </div>
+  );
+}
+
+// ── River course reach card (upper / middle / lower-delta) ──
+const ZONE_KIND_ICON: Record<string, string> = { upper: "🏔", middle: "🌾", delta: "🐟" };
+function ZoneCard({ z, names, focusOn }: {
+  z: import("../types").RiverZone; names: string[]; focusOn: (x: number, y: number) => void;
+}) {
+  return (
+    <div style={{ border: "1px solid #16283a", borderRadius: 7, background: "#0a1620", padding: "7px 9px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+        <span style={{ fontSize: 13 }}>{ZONE_KIND_ICON[z.kind] ?? "🌊"}</span>
+        <span style={{ fontWeight: 700, color: "#d6e8f6", fontSize: 12 }}>{z.label}</span>
+        <span style={{ color: "#5f7a95", fontSize: 10, fontVariantNumeric: "tabular-nums" }}>
+          {fmt(z.start_km)}–{fmt(z.end_km)} km
+        </span>
+        <span style={{ flex: 1 }} />
+        <span title={`Köppen ${z.koppen}`} style={{ color: "#7fd6a6", fontSize: 10, fontWeight: 600, cursor: "help" }}>{z.biome}</span>
+      </div>
+      <div style={{ fontSize: 10.5, color: "#8aa0b8", fontStyle: "italic", margin: "2px 0 4px" }}>{z.character}</div>
+      <div style={{ fontSize: 11.5, lineHeight: 1.55, color: "#c2d6ea" }}>
+        <Hl text={z.story} names={names} />
+      </div>
+      {z.tributaries.length > 0 && (
+        <div style={{ marginTop: 5, display: "flex", flexWrap: "wrap", gap: 5 }}>
+          {z.tributaries.map((t, i) => (
+            <span key={i} style={{ ...chip, color: "#89cbe0" }} title={`joins ${fmt(t.km)} km from the source`}>
+              ⑂ {t.name} <span style={{ color: "#5f7a95" }}>@ {fmt(t.km)} km</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── River filter helpers ──
 type RiverFilter = "all" | "navigable" | "major" | "delta" | "estuary";
 function matchesRiverFilter(r: RiverNode, f: RiverFilter): boolean {
@@ -611,7 +707,8 @@ function Snip({ node, byId, names, colors, onLocate }: {
   const sx = (x: number) => ((x - minx) / bw) * VW;
   const sy = (y: number) => ((y - miny) / bh) * VH;
   const cities = subtreeCities(node).slice(0, 14);
-  const trunkPts = byId.get(node.id)?.points ?? [];
+  const trunkRd = byId.get(node.id);
+  const trunkPts = (trunkRd?.render && trunkRd.render.length >= 2 ? trunkRd.render : trunkRd?.points) ?? [];
 
   return (
     <div style={{ position: "relative" }}>
@@ -623,7 +720,8 @@ function Snip({ node, byId, names, colors, onLocate }: {
         {/* tributaries (thin) — coloured by the chosen scheme */}
         {ids.map((id, i) => {
           if (id === node.id) return null;
-          const pts = byId.get(id)?.points ?? [];
+          const rd = byId.get(id);
+          const pts = (rd?.render && rd.render.length >= 2 ? rd.render : rd?.points) ?? [];
           if (pts.length < 2) return null;
           return <polyline key={i} points={pts.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ")}
             fill="none" stroke={colors[id] ?? "#57a6cf"} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" opacity={0.95} />;

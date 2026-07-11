@@ -123,6 +123,12 @@ export function MapCanvas() {
   const goodRegionsRef = useRef<import("../types").GoodRegion[]>([]);
   const overlayVisibilityRef = useRef(overlayVisibility);
   overlayVisibilityRef.current = overlayVisibility;
+  // Unified clickable-settlement candidates — EXACTLY the dots the map draws: every
+  // live campaign hub PLUS every worldgen/hinterland settlement below the sim cap
+  // (deduped by position, live hub wins). Both hover and click hit-test against this
+  // ONE list so the ring shines on — and a click selects — the dot under the cursor,
+  // never a farther live hub (fixes the "another becomes shiny / can't click" bug).
+  const clickCandidatesRef = useRef<{ x: number; y: number; id: number; colony: number }[]>([]);
 
   /** Mark canvas as needing a repaint */
   const requestRender = useCallback(() => {
@@ -459,6 +465,30 @@ export function MapCanvas() {
     om.drawSettlements(liveSettlements);
     requestRender();
   }, [rivers, lakes, liveSettlements, requestRender]);
+
+  // Rebuild the unified clickable-settlement candidate list whenever the live sim or
+  // the frozen economy changes. Live hubs first (they carry live population/colony
+  // state); then every OTHER worldgen/hinterland settlement by position, so sub-cap
+  // villages — drawn but not simulated — are just as hoverable/clickable as live hubs.
+  useEffect(() => {
+    const posKey = (x: number, y: number) => `${Math.round(x)},${Math.round(y)}`;
+    const list: { x: number; y: number; id: number; colony: number }[] = [];
+    const seen = new Set<string>();
+    if (campaignSnapshot?.active) {
+      for (const h of campaignSnapshot.hubs) {
+        if (h.is_estate) continue;
+        list.push({ x: h.x, y: h.y, id: h.id, colony: h.colony_kind ?? 0 });
+        seen.add(posKey(h.x, h.y));
+      }
+    }
+    if (economy) {
+      for (const h of economy.hubs) {
+        if (seen.has(posKey(h.x, h.y))) continue;
+        list.push({ x: h.x, y: h.y, id: h.id, colony: 0 });
+      }
+    }
+    clickCandidatesRef.current = list;
+  }, [economy, campaignSnapshot]);
 
   // Colony & house-outpost markers + their routed supply lanes (from the live sim
   // hubs; settlement colonies kind 1, house outposts kind 2).
@@ -922,10 +952,13 @@ export function MapCanvas() {
   // Coin-usage overlay: when a coin is selected in the Currencies panel, fetch the
   // per-city settlement snapshot and tint the map by use of that coin.
   const coinOverlayHub = useUIStore((s) => s.coinOverlayHub);
+  const coinDominanceOn = overlayVisibility.coinDominance ?? false;
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om) return;
-    if (coinOverlayHub == null || !campaignSnapshot?.active) {
+    // Fetch the per-city coin snapshot when EITHER the all-coins dominance map is on
+    // or a coin is selected for drill-down; the same data feeds both renders.
+    if ((coinOverlayHub == null && !coinDominanceOn) || !campaignSnapshot?.active) {
       om.setCoinUsage([], null); requestRender(); return;
     }
     let alive = true;
@@ -933,7 +966,7 @@ export function MapCanvas() {
       .then((u) => { if (alive) { om.setCoinUsage(u, coinOverlayHub); requestRender(); } })
       .catch(() => {});
     return () => { alive = false; };
-  }, [coinOverlayHub, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
+  }, [coinOverlayHub, coinDominanceOn, campaignSnapshot?.active, campaignSnapshot?.clock.tick, requestRender]);
 
   // #23 · the chosen itinerary route, pushed from the Itinerary panel via uiStore.
   const travelRoute = useUIStore((s) => s.travelRoute);
@@ -954,6 +987,15 @@ export function MapCanvas() {
     om.setRiverHighlight(riverHighlight, riverHighlightColors);
     requestRender();
   }, [riverHighlight, riverHighlightColors, requestRender]);
+
+  // 🌊 Hydrology · the lake selected in the Lakes tab glows; others dim.
+  const lakeHighlight = useUIStore((s) => s.lakeHighlight);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setLakeHighlight(lakeHighlight);
+    requestRender();
+  }, [lakeHighlight, requestRender]);
 
   // #26 · geographic toponym labels, pushed from the world store.
   const toponyms = useWorldStore((s) => s.toponyms);
@@ -1228,37 +1270,20 @@ export function MapCanvas() {
               return;
             }
           }
-          // Hit-test the LIVE campaign hubs when a campaign is running (they include the
-          // in-campaign colonies/outposts the frozen economy snapshot lacks); otherwise
-          // the economy hubs. A click on a colony/outpost also opens the Colonial Office.
-          const snap = campaignSnapshotRef.current;
-          const hubList: { id: number; x: number; y: number; colony_kind?: number; is_estate?: boolean }[] =
-            snap?.active ? snap.hubs.filter((h) => !h.is_estate) : econ.hubs;
+          // Hit-test the SAME unified candidate list the map draws — live hubs AND
+          // sub-cap worldgen/hinterland villages, deduped by position (live hub wins).
+          // Picking the truly-nearest dot means every drawn settlement is selectable and
+          // a click never gets captured by a farther live hub. Markers are drawn at the
+          // cell CENTRE (h.x+0.5), so hit-test the centre (else every click reads half a
+          // cell up-left). A click on a colony/outpost also opens the Colonial Office.
+          const cands = clickCandidatesRef.current;
           let best = -1; let bestD = thresh * thresh; let bestColony = 0;
-          for (const h of hubList) {
-            // Markers are DRAWN at the cell CENTRE (h.x+0.5), so hit-test the centre
-            // too — comparing against the cell corner offset every click half a cell
-            // up-left ("clicking slightly left").
+          for (const h of cands) {
             let dx = Math.abs(h.x + 0.5 - wx);
             if (dx > m.grid_width / 2) dx = m.grid_width - dx;
             const dy = h.y + 0.5 - wy;
             const d = dx * dx + dy * dy;
-            if (d < bestD) { bestD = d; best = h.id; bestColony = h.colony_kind ?? 0; }
-          }
-          // Fallback: the campaign sim only keeps the strongest ~250 settlements as
-          // LIVE hubs, but the map still draws EVERY worldgen settlement. Those extra
-          // dots were pure visuals — unclickable — because the hit-test scanned only
-          // the live hubs. Also scan the full frozen `econ.hubs` so every visible
-          // settlement is clickable; HubPanel renders their worldgen data even without
-          // a live campaign detail. Live hubs keep priority (checked first / smaller D).
-          if (best < 0 && snap?.active) {
-            for (const h of econ.hubs) {
-              let dx = Math.abs(h.x + 0.5 - wx);
-              if (dx > m.grid_width / 2) dx = m.grid_width - dx;
-              const dy = h.y + 0.5 - wy;
-              const d = dx * dx + dy * dy;
-              if (d < bestD) { bestD = d; best = h.id; bestColony = 0; }
-            }
+            if (d < bestD) { bestD = d; best = h.id; bestColony = h.colony; }
           }
           if (best >= 0) {
             setSelectedHub(best);
@@ -1357,12 +1382,12 @@ export function MapCanvas() {
     // click will select (inspection tools, not while painting/panning).
     const hoverTool = activeToolRef.current === "select" || activeToolRef.current === "pan";
     if (hoverTool && !isPaintingRef.current && e.buttons === 0) {
-      const snap = campaignSnapshotRef.current;
-      const econ = economyRef.current;
-      const hubList = snap?.active ? snap.hubs.filter((h) => !h.is_estate) : (econ?.hubs ?? []);
+      // Hit-test the SAME unified list the map draws, so the shine lands on the dot
+      // under the cursor (live hub OR sub-cap village), never a farther live hub.
+      const cands = clickCandidatesRef.current;
       const thresh = Math.max(6, m.grid_width * 0.012);
       let best = -1; let bx = 0; let by = 0; let bestD = thresh * thresh;
-      for (const h of hubList) {
+      for (const h of cands) {
         let dx = Math.abs(h.x + 0.5 - wx);
         if (dx > m.grid_width / 2) dx = m.grid_width - dx;
         const dy = h.y + 0.5 - wy;

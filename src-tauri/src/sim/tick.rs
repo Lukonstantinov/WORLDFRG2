@@ -223,6 +223,54 @@ const SMALL_CITY_POP: f32 = 10_000.0;
 const SMALL_CITY_GROWTH_MULT: f32 = 5.0;
 /// …and is this many times LESS likely to be struck by a plague (user rule).
 const SMALL_CITY_PLAGUE_RESIST: f32 = 3.0;
+/// ── HOSPICES / QUARANTINE (public health): a prosperous city's council funds public
+/// health, which CUTS plague mortality and LENGTHENS post-outbreak immunity — a rich
+/// city spends coin so fewer of its people die. All bounded so treasuries never crater.
+/// Max mortality reduction at full funding (0.6 = a fully-provisioned city loses 60%
+/// fewer people to a strike).
+const HOSPICE_MAX_LEVEL: f32 = 0.6;
+/// A council needs at least this much treasury before it funds public health.
+const HOSPICE_MIN_TREASURY: f32 = 30.0;
+/// Yearly easing of `public_health` toward its prosperity-set target (~4-8y to build).
+const HOSPICE_EASE: f32 = 0.25;
+/// Slice of treasury a funding council spends on public health each year (bounded,
+/// comparable to the ~8% civic skim → recorded in `finance.spent_health`).
+const HOSPICE_TREASURY_SKIM: f32 = 0.04;
+/// Public health lapses this much per year when a council can't afford it.
+const HOSPICE_DECAY: f32 = 0.05;
+/// ── HINTERLAND VILLAGES: sub-cap settlements aren't full hubs, but each markets
+/// through its nearest live town (a satellite trade tie). The town earns a small,
+/// bounded civic toll from that hinterland trade (grain-eq per villager per year).
+/// Bounded by `civic_pool`'s decay sink → cannot inflate wealth.
+const HINTERLAND_TOLL: f32 = 0.01;
+/// ── ETHNOGENESIS (Cultures 2.0): a large, long-resident minority blends with the
+/// local majority into a NEW creole people. Bounded so only a handful arise per campaign.
+const CREOLE_MAX: usize = 24;              // global cap on live creole peoples
+const CREOLE_MIN_POP: f32 = 4_000.0;       // only sizeable cities spawn creoles
+const CREOLE_MIN_MINORITY: f32 = 0.30;     // the minority must be at least this share
+const CREOLE_YEARLY_CHANCE: f32 = 0.08;    // per eligible city per year
+const CREOLE_SEED_FRAC: f32 = 0.5;         // share of the minority that becomes the creole
+/// Cultures 2.0 · migration HOMOPHILY: bonus to a destination's opportunity per unit
+/// of the migrant's culture already present there (people move toward their own kin).
+/// Small vs the opportunity scale so it nudges, not dominates.
+const HOMOPHILY_PULL: f32 = 0.15;
+/// Cultures 2.0 · a large, UNASSIMILATED minority adds this much to a city's unrest
+/// target at full (one-culture-minority) blend — modest, feeds the existing clamped
+/// unrest/revolt system so a big disaffected quarter can stir trouble over years.
+const MINORITY_UNREST: f32 = 0.06;
+/// Cultures 2.0 · ethnic-APPEARANCE affinity: minorities of the same appearance group
+/// (climate/dress) as the majority assimilate this much faster even across language
+/// families — "people who look alike blend a little more easily". Small, bounded.
+const APPEARANCE_ASSIM_BONUS: f32 = 1.3;
+/// Cultures 2.0 · CULTURAL TASTE: a good a resident people PRIZES gets this much extra
+/// local demand, scaled by that people's population share — so a Norse city craves furs,
+/// an Arab one incense. Bounded (capped total) so the economy stays stable.
+const CULTURE_DESIRE_BOOST: f32 = 0.4;
+const CULTURE_DESIRE_MAX: f32 = 0.5;
+/// Cultures 2.0 · when a city cannot supply its resident peoples the goods they PRIZE,
+/// that discontent adds to unrest — weighted by how large (pop share) the craving group
+/// is. At full, city-wide unmet craving adds this much to the unrest target. Bounded.
+const CULTURE_UNREST: f32 = 0.18;
 /// ── SATELLITE cities (Ostia→Rome, Piraeus→Athens, Westminster/Southwark→London):
 /// a LARGE metropolis whose council can fund it spins off a SHORT-RANGE satellite
 /// to serve a concrete NEED it can't fit inside itself — a PORT (inland/large hub
@@ -720,9 +768,6 @@ const ESTATE_TAX_RATE: f32 = 0.10;
 /// flows to the people via the civic pool, as before). Gives cities real capital
 /// to field wars and public works.
 const TREASURY_TAX_SHARE: f32 = 0.35;
-/// Yearly inflation — coin debasement + rising prices steadily eat the real value
-/// of a hoarded fortune (applied once a year to every house's wealth).
-const INFLATION_PER_YEAR: f32 = 0.015;
 /// PUBLIC WORKS: a city whose civic treasury (`civic_pool`, fed by trade taxes,
 /// guild dues and endowments) has grown past a per-capita threshold spends it on
 /// the common good — erecting a useful building outright, or, once well-built,
@@ -784,6 +829,74 @@ pub fn coin_value(fineness: f32, trust: f32) -> f32 {
     let f = if fineness <= 0.0 { 1.0 } else { fineness };
     f * (0.7 + 0.5 * trust.clamp(0.0, 1.0))
 }
+
+/// v2.0 · a coin's single headline STRENGTH (0..100) — the one number the Money
+/// panel leads with, built from its two drivers (fineness × acceptance). A
+/// fully-trusted, full-bodied coin scores 100; debasement OR distrust drag it down.
+pub fn coin_strength(fineness: f32, trust: f32) -> f32 {
+    let f = (if fineness <= 0.0 { 1.0 } else { fineness }).clamp(0.0, 1.0);
+    100.0 * trust.clamp(0.0, 1.0) * (0.55 + 0.45 * f)
+}
+
+// ── v2.0 · closed monetary loop (quantity-theory-lite inflation) ─────────────
+/// Baseline monetary inflation every economy carries (a mild ~1.5% drift), so even
+/// sound money still levies an inflation-tax on hoarded fortunes (as the old flat
+/// rate did) — debasement/money growth then adds ON TOP.
+const INFL_BASE: f32 = 0.015;
+/// Debasement pass-through: a coin cut to fineness `f` adds `(1−f)·K` to prices.
+const INFL_DEBASE_K: f32 = 0.10;
+/// Money-growth pass-through: a coin whose circulation grew `g` YoY adds `g·K`.
+const INFL_MONEY_K: f32 = 0.10;
+/// Real-output growth that soaks up money each year (the deflationary offset).
+const INFL_REAL_GROWTH: f32 = 0.005;
+/// Bounds on a single year's local inflation (keeps price levels + the wealth
+/// inflation-tax finite; always a small positive drift, capped so it can't blow up).
+const INFL_MIN: f32 = 0.002;
+const INFL_MAX: f32 = 0.06;
+
+// ── v2.0 · recoinage / reform ────────────────────────────────────────────────
+/// A council reforms its coinage only when fineness has slipped below this.
+const REFORM_FINENESS_FLOOR: f32 = 0.90;
+/// …and trust has fallen below this (the coin is visibly failing).
+const REFORM_TRUST_FLOOR: f32 = 0.50;
+/// Cost of a reform (recall + re-strike), as a fraction of the seat's throughput —
+/// paid from the treasury, so only a solvent polis can afford honest money.
+const REFORM_COST_FRAC: f32 = 0.6;
+/// Immediate confidence restored by re-minting at full fineness.
+const REFORM_TRUST_BUMP: f32 = 0.15;
+/// Years a council must wait between reforms, and years its honest-money mandate
+/// holds fineness at 1.0 afterwards.
+const REFORM_COOLDOWN_YEARS: u32 = 8;
+const REFORM_MANDATE_YEARS: u32 = 6;
+
+// ── v2.0 · bank runs (idiosyncratic, outside a systemic crash) ───────────────
+/// Fraction of deposits a fragile bank bleeds in a run, scaled by how far its
+/// reserve ratio has fallen below `BANK_RUN_RATIO`.
+const BANK_RUN_WITHDRAW: f32 = 0.18;
+
+// ── v2.0 · bullion-limited minting (mint regulation) ─────────────────────────
+/// Bullion (weighted gold+silver output) a region needs per unit of coin demand
+/// (throughput) to sustain FULL-BODIED coin. Below this ratio the mint is forced
+/// to stretch its metal — fineness is capped down (endogenous debasement from
+/// scarcity, not choice). Lenient so only genuinely bullion-poor regions bind.
+const MINT_BULLION_DEMAND: f32 = 0.04;
+/// Gold is far denser in value than silver — weight it in the bullion tally.
+const MINT_GOLD_WEIGHT: f32 = 3.0;
+/// The lowest fineness bullion scarcity alone can force (a bullion-starved mint
+/// still strikes a passable, if base-heavy, coin — it imports/short-weights, it
+/// does not collapse). Full bullion supply lifts the cap to 1.0.
+const MINT_FINENESS_FLOOR: f32 = 0.85;
+
+// ── v2.0 · mint charter (minting as a privilege) ─────────────────────────────
+/// A council seat earns the RIGHT OF THE MINT only once it is a real commercial
+/// centre: its trade throughput must clear this fraction of the world's busiest
+/// hub, AND its population this fraction of the largest — so tiny council seats
+/// don't each strike their own coin. Relative, so it adapts to any world.
+const MINT_CHARTER_THROUGH_FRAC: f32 = 0.08;
+const MINT_CHARTER_POP_FRAC: f32 = 0.05;
+/// One-time cost to establish the mint (paid from the treasury) — a city must be
+/// solvent enough to fund the minting house.
+const MINT_CHARTER_COST: f32 = 30.0;
 
 // ── DLC 4 · Good quality ─────────────────────────────────────────────────────
 /// Value multiplier a good's quality earns: coarse goods trade at a discount,
@@ -1104,6 +1217,35 @@ pub struct TickHub {
     /// Last year's mint fineness — so the coinage pass can read a sudden DEBASEMENT
     /// (a cut vs last year) and dock trust accordingly. 0 on old saves → no penalty.
     #[serde(default)] pub mint_fineness_prev: f32,
+    // ── v2.0 · closed monetary loop (debasement/money-supply → local prices) ──
+    /// Local PRICE LEVEL index (1.0 = par at campaign start). Compounds each year by
+    /// the inflation of this city's settle-coin (debasement + money growth − real
+    /// output growth), so a debased-coin city visibly gets dearer. 0/absent → 1.0.
+    #[serde(default)] pub price_level: f32,
+    /// Last year's money supply (Σ throughput × basket-share) for the coin THIS hub
+    /// issues — lets the price loop read year-on-year money growth. 0 on old saves.
+    #[serde(default)] pub coin_circ_prev: f32,
+    // ── v2.0 · recoinage / reform ──
+    /// Tick of this polis's last coinage REFORM (call-in + re-mint at full fineness).
+    /// Gates a reform cooldown so a council can't reform every year. 0 = never.
+    #[serde(default)] pub last_reform_tick: u32,
+    /// Until this tick the council upholds an HONEST-MONEY mandate after a reform:
+    /// `decide_polis_policy` holds mint fineness at 1.0 (no debasement) until it
+    /// lapses, after which cheap-money pressure can creep back. 0 = no mandate.
+    #[serde(default)] pub reform_until: u32,
+    /// v2.0 · the monetary METAL this polis strikes its coin in, from the bullion
+    /// its trade region can reach: 0 = silver (default/imported), 1 = gold,
+    /// 2 = electrum (both gold & silver), 3 = bronze/billon (only base metal).
+    #[serde(default)] pub coin_metal: u8,
+    /// v2.0 · bullion capacity ratio = regional bullion output ÷ coin demand. ≥1
+    /// means metal is ample (fineness can be full); <1 means the mint is stretched
+    /// and bullion scarcity is forcing debasement (surfaced as the "limiting factor").
+    #[serde(default)] pub mint_bullion_ratio: f32,
+    /// v2.0 · whether this polis holds the RIGHT OF THE MINT (a charter). Minting is
+    /// a privilege of substantial commercial centres, not automatic for every council
+    /// seat — a city earns it once it is large & busy enough and pays to establish a
+    /// mint. Grandfathered true for any city that already struck a coin.
+    #[serde(default)] pub has_mint: bool,
     // ── DLC 4 · Good QUALITY (per producing settlement / estate / manufactory) ──
     /// Per-good production quality 0..1 at THIS hub (Coarse→Exquisite). Seeded so it
     /// varies by settlement; manufactures climb via learning-by-doing and can be
@@ -1147,6 +1289,10 @@ pub struct TickHub {
     /// Plague IMMUNITY: the city cannot be struck by (or carry) a plague until this
     /// tick — earned by surviving an outbreak. `#[serde(default)]` → old saves = 0.
     #[serde(default)] pub plague_immune_until: u32,
+    /// PUBLIC HEALTH (hospices / quarantine), 0..`HOSPICE_MAX_LEVEL`. A prosperous
+    /// council funds it (drawing on treasury → `finance.spent_health`); it cuts the
+    /// death toll of a plague strike and lengthens the immunity earned. `#[serde(default)]`.
+    #[serde(default)] pub public_health: f32,
     /// Colony food LIFELINE: dedicated supply ships the metropolis/backers keep on the
     /// grain run to this colony (invested in when the colony runs short, to make the
     /// supply steady). `#[serde(default)]` → old saves = 0.
@@ -1642,6 +1788,10 @@ pub struct HinterlandTown {
     pub population: f32,
     pub koppen: u8,
     pub coastal: bool,
+    /// Satellite trade tie: the nearest LIVE hub this village markets through (its
+    /// produce flows to that town, and it buys from it). Assigned lazily in
+    /// `hinterland_pass`; `-1` until linked. `#[serde(default)]` → old saves relink.
+    #[serde(default = "neg_one_i32")] pub parent_hub: i32,
 }
 
 /// A migration flow drawn STRICTLY along the trade-route network: `path` is the routed
@@ -1656,6 +1806,31 @@ pub struct MigrationRoute {
     pub tick: u32,
     pub from_hub: i32,
     pub to_hub: i32,
+}
+
+/// Cultures 2.0 · a CREOLE people — a new culture born of sustained blending in one
+/// city (ethnogenesis). It carries a synthesized name drawn from BOTH parent peoples'
+/// word-banks and its own static origin card, then lives like any other culture
+/// (spreading, assimilating). Registered on the sim so queries can show its lore.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Creole {
+    pub name: String,       // synthesized blended name (e.g. "Novvik")
+    pub family: String,     // "Creole (ParentA · ParentB)"
+    pub origin: String,     // static origin card
+    pub color: [u8; 3],
+    pub born_tick: u32,
+    pub birthplace: String, // the city where it arose
+    /// Parent kits (appearance/dress blend for the figure art). `#[serde(default)]`.
+    #[serde(default)] pub kit_a: u8,
+    #[serde(default)] pub kit_b: u8,
+}
+
+/// Cultures 2.0 · a 6-monthly snapshot of every living people's total population, for
+/// the Peoples-panel population line chart. `t` is the sample time in YEARS (fractional).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CultureHistSample {
+    pub t: f32,
+    pub pops: Vec<(String, f32)>,
 }
 
 /// Batch 1 · one row of the ERA-SCRUBBER ring: the world as it stood at the end
@@ -1880,6 +2055,8 @@ pub struct CityFinance {
     pub spent_civic: f32,     // distributed to the people (civic pool)
     pub spent_war: f32,       // war-chest spending (armies, blockade)
     pub spent_works: f32,     // public works / buildings
+    #[serde(default)]
+    pub spent_health: f32,    // hospices / quarantine (public health) — cuts plague deaths
     pub reparations_out: f32, // reparations paid after a lost war
     /// Last completed year, snapshotted at New Year for the panel.
     pub prev: Option<Box<CityFinance>>,
@@ -2169,6 +2346,12 @@ pub struct PlagueStrike {
     /// Which DISEASE this is (index into `DISEASES`). serde-default 0 = Bubonic Plague.
     #[serde(default)]
     pub disease: u8,
+    /// SIR observability · how many people fell ILL in this strike (`infected` ≥ `deaths`;
+    /// `recovered = infected − deaths`). Derived from `deaths / case-fatality-rate`, so a
+    /// mild disease infects many and kills few. Pure observability — does not affect the
+    /// sim. `#[serde(default)]` → old saves load with 0 (readers fall back to `deaths`).
+    #[serde(default)]
+    pub infected: f32,
 }
 
 /// Phase 4 (flavour) · a HOLY CITY / great temple. Once a year its pilgrimage
@@ -2193,7 +2376,7 @@ impl CityFinance {
             + self.seigniorage + self.war_levy + self.reparations_in
     }
     pub fn spend_total(&self) -> f32 {
-        self.spent_civic + self.spent_war + self.spent_works + self.reparations_out
+        self.spent_civic + self.spent_war + self.spent_works + self.spent_health + self.reparations_out
     }
 }
 
@@ -2326,6 +2509,13 @@ pub struct CampaignSim {
     /// economic coupling), so it never affects the dynamics guardrails.
     #[serde(default)]
     pub hub_minorities: Vec<Vec<(String, f32)>>,
+    /// Cultures 2.0 · creole peoples born of blending during the campaign (ethnogenesis).
+    /// `#[serde(default)]` → old saves load with none.
+    #[serde(default)]
+    pub creoles: Vec<Creole>,
+    /// Cultures 2.0 · 6-monthly per-people population samples (capped) for the line chart.
+    #[serde(default)]
+    pub culture_history: Vec<CultureHistSample>,
     /// Consecutive UNPROFITABLE years per MANUFACTORY (hub-indexed). A works idle
     /// for 4 years is shut down + partly sold back to its owner. serde-default.
     #[serde(default)]
@@ -2553,12 +2743,30 @@ impl CampaignSim {
             // Mint: a prosperous, banking-led council "cuts the coin fine" to lend
             // cheap (fineness eases down); others slowly restore full-bodied coin.
             let prosperous = self.hubs[h].trade_wealth > 0.5;
-            let target = if arch == ARCH_BANKING && prosperous { 0.88 }
+            // v2.0 · a post-reform HONEST-MONEY mandate bars debasement until it lapses.
+            let under_mandate = self.hubs[h].reform_until > self.tick;
+            let target = if under_mandate { 1.0 }
+                else if arch == ARCH_BANKING && prosperous { 0.88 }
                 else if prosperous { 0.96 } else { 1.0 };
             let f = self.hubs[h].mint_fineness;
             self.hubs[h].mint_fineness = f + (target - f) * 0.5;
             // Retained treasury: skim ~8% of the circulating civic pool.
             self.hubs[h].treasury += self.hubs[h].civic_pool * 0.08;
+            // Hospices & quarantine (public health): a council with treasury headroom funds
+            // public health, easing it toward a prosperity-set target and spending a small,
+            // bounded slice of treasury (recorded in `finance.spent_health`). When a council
+            // can't afford it, the provision lapses. This is the lever by which a WEALTHY
+            // city buys down its plague mortality — coin spent so fewer of its people die.
+            let ph = self.hubs[h].public_health;
+            if self.hubs[h].treasury > HOSPICE_MIN_TREASURY {
+                let target = self.hubs[h].trade_wealth.clamp(0.0, 1.0) * HOSPICE_MAX_LEVEL;
+                self.hubs[h].public_health = (ph + (target - ph) * HOSPICE_EASE).clamp(0.0, HOSPICE_MAX_LEVEL);
+                let cost = self.hubs[h].treasury * HOSPICE_TREASURY_SKIM;
+                self.hubs[h].treasury -= cost;
+                self.hubs[h].finance.spent_health += cost;
+            } else {
+                self.hubs[h].public_health = (ph - HOSPICE_DECAY).max(0.0);
+            }
         }
     }
 
@@ -2803,6 +3011,51 @@ impl CampaignSim {
         DENOMS[i]
     }
 
+    /// v2.0 · the monetary METAL a mint strikes, from the bullion its trade region
+    /// can reach: gold if a gold province lies in the region, silver if silver hills,
+    /// electrum where both are plentiful and balanced, bronze/billon where only base
+    /// metal (copper/tin) is available (0 silver · 1 gold · 2 electrum · 3 bronze).
+    fn coin_metal_for(&self, hub: usize, gi: Option<usize>, si: Option<usize>,
+                      ci: Option<usize>, ti: Option<usize>) -> u8 {
+        let region = self.hubs[hub].component;
+        let (mut g, mut s, mut base) = (0.0f32, 0.0f32, 0.0f32);
+        for h in &self.hubs {
+            if h.is_estate || h.component != region { continue; }
+            if let Some(i) = gi { g += h.production.get(i).copied().unwrap_or(0.0); }
+            if let Some(i) = si { s += h.production.get(i).copied().unwrap_or(0.0); }
+            if let Some(i) = ci { base += h.production.get(i).copied().unwrap_or(0.0); }
+            if let Some(i) = ti { base += h.production.get(i).copied().unwrap_or(0.0); }
+        }
+        let (has_g, has_s) = (g > EPS, s > EPS);
+        if has_g && has_s {
+            // Both metals in reach → a balanced supply is struck as electrum, else
+            // the region coins its dominant precious metal.
+            if g.min(s) > 0.25 * g.max(s) { 2 } else if g >= s { 1 } else { 0 }
+        } else if has_g { 1 }
+        else if has_s { 0 }
+        else if base > EPS { 3 }
+        else { 0 } // no precious metal in the region → assume imported silver specie
+    }
+
+    /// v2.0 · the ceiling bullion supply puts on a mint's fineness. A region flush
+    /// with gold/silver relative to its coin demand can strike full-bodied money
+    /// (cap → 1.0); a bullion-poor region minting beyond its metal is forced to
+    /// debase (cap → `MINT_FINENESS_FLOOR`). Returns the cap in [floor, 1.0] plus
+    /// the raw capacity ratio (for the panel's "limiting factor" read).
+    fn mint_bullion_cap(&self, hub: usize, gi: Option<usize>, si: Option<usize>) -> (f32, f32) {
+        let region = self.hubs[hub].component;
+        let (mut bull, mut demand) = (0.0f32, 0.0f32);
+        for h in &self.hubs {
+            if h.is_estate || h.component != region { continue; }
+            if let Some(i) = gi { bull += h.production.get(i).copied().unwrap_or(0.0) * MINT_GOLD_WEIGHT; }
+            if let Some(i) = si { bull += h.production.get(i).copied().unwrap_or(0.0); }
+            demand += h.tw_house + h.tw_local + h.tw_guild;
+        }
+        let cr = if demand > EPS { bull / (demand * MINT_BULLION_DEMAND) } else { 1.0 };
+        let cap = (MINT_FINENESS_FLOOR + (1.0 - MINT_FINENESS_FLOOR) * cr.clamp(0.0, 1.0)).clamp(MINT_FINENESS_FLOOR, 1.0);
+        (cap, cr)
+    }
+
     /// DLC 3.5 · Coinage — once a year each council seat mints a NAMED coin and
     /// updates its acceptance ("trust"): sticky reputation built from full-bodied
     /// minting, a deep treasury, trade wealth, civic stability and throughput, and
@@ -2814,18 +3067,46 @@ impl CampaignSim {
         // Normalizers across all council seats.
         let mut max_treasury = 1.0f32;
         let mut max_through = 1.0f32;
+        let mut max_pop = 1.0f32;
         for h in 0..n {
             if self.hubs[h].is_estate { continue; }
             max_treasury = max_treasury.max(self.hubs[h].treasury);
             max_through = max_through.max(self.hub_throughput(h));
+            max_pop = max_pop.max(self.hubs[h].population);
         }
+        // Good indices for the monetary metals (computed once) → per-mint metal.
+        let gi = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("gold"));
+        let si = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("silver"));
+        let cui = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("copper"));
+        let tii = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("tin"));
         let tick = self.tick;
         for h in 0..n {
             if self.hubs[h].is_estate { continue; }
             let fineness = if self.hubs[h].mint_fineness <= 0.0 { 1.0 } else { self.hubs[h].mint_fineness };
             let council = self.hubs[h].council_house;
-            // A council seat with no coin yet starts minting one.
-            if council >= 0 && self.hubs[h].coin_name.is_empty() {
+            // v2.0 · MINT CHARTER — minting is a privilege. Grandfather any city that
+            // already struck a coin; otherwise a council seat earns the right of the
+            // mint only once it is a substantial commercial centre (busy AND large)
+            // and can pay to establish the mint-house.
+            if !self.hubs[h].has_mint {
+                if !self.hubs[h].coin_name.is_empty() {
+                    self.hubs[h].has_mint = true; // pre-existing coin keeps its mint
+                } else if council >= 0 {
+                    let busy = self.hub_throughput(h) >= MINT_CHARTER_THROUGH_FRAC * max_through;
+                    let big = self.hubs[h].population >= MINT_CHARTER_POP_FRAC * max_pop;
+                    if busy && big && self.hubs[h].treasury >= MINT_CHARTER_COST {
+                        self.hubs[h].treasury -= MINT_CHARTER_COST;
+                        self.hubs[h].has_mint = true;
+                        let city = self.hubs[h].name.clone();
+                        self.journal.push(JournalEntry {
+                            tick, kind: "charter".into(), hub: h as i32, good: -1, value: MINT_CHARTER_COST,
+                            text: format!("{} is granted the right of the mint and establishes a mint-house", city),
+                        });
+                    }
+                }
+            }
+            // A chartered council seat with no coin yet strikes its first.
+            if council >= 0 && self.hubs[h].has_mint && self.hubs[h].coin_name.is_empty() {
                 let denom = self.coin_denomination(h);
                 let city = self.hubs[h].name.clone();
                 self.hubs[h].coin_name = format!("{} of {}", denom, city);
@@ -2842,6 +3123,15 @@ impl CampaignSim {
                 self.hubs[h].mint_fineness_prev = fineness;
                 continue;
             }
+            // v2.0 · pick the metal from the region's reachable bullion.
+            self.hubs[h].coin_metal = self.coin_metal_for(h, gi, si, cui, tii);
+            // v2.0 · MINT REGULATION — regional bullion caps how full-bodied the coin
+            // can be. A bullion-poor mint striking beyond its metal is forced to debase
+            // (fineness capped down); an ample region can strike full-bodied coin.
+            let (bcap, bratio) = self.mint_bullion_cap(h, gi, si);
+            self.hubs[h].mint_bullion_ratio = bratio;
+            if self.hubs[h].mint_fineness > bcap { self.hubs[h].mint_fineness = bcap; }
+            let fineness = if self.hubs[h].mint_fineness <= 0.0 { 1.0 } else { self.hubs[h].mint_fineness };
             // Trust target — each term in 0..1.
             let through = self.hub_throughput(h);
             let t_fine = fineness.clamp(0.0, 1.0);
@@ -2998,6 +3288,87 @@ impl CampaignSim {
         }
     }
 
+    /// v2.0 · close the monetary loop. Each year, turn every coin's DEBASEMENT and
+    /// MONEY-SUPPLY growth into a real inflation rate (quantity-theory-lite:
+    /// π ≈ debasement + money growth − real output growth), compound each city's
+    /// `price_level` by the inflation of the coin it settles in, and RETURN the
+    /// per-hub inflation rate so the caller can levy the matching inflation-tax on
+    /// resident fortunes. A debased-coin city now visibly gets dearer AND erodes its
+    /// hoards faster — the seigniorage the mint skimmed is paid back as an inflation
+    /// tax on the people who hold the coin.
+    fn update_price_levels(&mut self) -> Vec<f32> {
+        let n = self.hubs.len();
+        // 1) Money supply per issuing coin (hub INDEX) = Σ holders' throughput×share.
+        let mut m: Vec<f32> = vec![0.0; n];
+        for h in 0..n {
+            if self.hubs[h].is_estate { continue; }
+            let thru = self.hubs[h].tw_house + self.hubs[h].tw_local + self.hubs[h].tw_guild;
+            for &(k, share) in &self.hubs[h].coin_basket {
+                if (k as usize) < n { m[k as usize] += thru * share; }
+            }
+        }
+        // 2) Per-coin inflation from debasement + money growth − real growth.
+        let mut coin_infl: Vec<f32> = vec![0.0; n];
+        for c in 0..n {
+            if self.hubs[c].coin_name.is_empty() { self.hubs[c].coin_circ_prev = m[c]; continue; }
+            let fine = if self.hubs[c].mint_fineness <= 0.0 { 1.0 } else { self.hubs[c].mint_fineness };
+            let mprev = if self.hubs[c].coin_circ_prev <= EPS { m[c].max(EPS) } else { self.hubs[c].coin_circ_prev };
+            let mgrow = ((m[c] - mprev) / mprev).clamp(-0.5, 0.5);
+            coin_infl[c] = (INFL_BASE + INFL_DEBASE_K * (1.0 - fine).max(0.0) + INFL_MONEY_K * mgrow - INFL_REAL_GROWTH)
+                .clamp(INFL_MIN, INFL_MAX);
+            self.hubs[c].coin_circ_prev = m[c];
+        }
+        // 3) Per-hub local inflation = its settle-coin's inflation (barter → base),
+        //    compounded into the price level (bounded so a long campaign stays finite).
+        let mut hub_infl: Vec<f32> = vec![INFL_BASE; n];
+        for h in 0..n {
+            if self.hubs[h].is_estate { continue; }
+            let sc = self.hubs[h].settle_coin;
+            let infl = if sc >= 0 && (sc as usize) < n && !self.hubs[sc as usize].coin_name.is_empty() {
+                coin_infl[sc as usize]
+            } else { INFL_BASE };
+            if self.hubs[h].price_level <= 0.0 { self.hubs[h].price_level = 1.0; }
+            self.hubs[h].price_level = (self.hubs[h].price_level * (1.0 + infl)).clamp(0.1, 1000.0);
+            hub_infl[h] = infl;
+        }
+        hub_infl
+    }
+
+    /// v2.0 · recoinage / reform. A council whose coin has slipped — fineness below
+    /// `REFORM_FINENESS_FLOOR` AND trust below `REFORM_TRUST_FLOOR` — CALLS IN the
+    /// debased coin and re-mints at full fineness, if its treasury can bear the cost
+    /// and it hasn't reformed within the cooldown. Confidence partly recovers at
+    /// once, the price level eases, and an HONEST-MONEY mandate then bars further
+    /// debasement for a few years (after which cheap-money pressure can creep back).
+    fn maybe_reform_coinage(&mut self, _year: u32) {
+        let tick = self.tick;
+        let year = self.year();
+        let n = self.hubs.len();
+        for h in 0..n {
+            if self.hubs[h].is_estate || self.hubs[h].coin_name.is_empty() { continue; }
+            let fine = if self.hubs[h].mint_fineness <= 0.0 { 1.0 } else { self.hubs[h].mint_fineness };
+            if fine >= REFORM_FINENESS_FLOOR || self.hubs[h].coin_trust >= REFORM_TRUST_FLOOR { continue; }
+            if self.hubs[h].last_reform_tick != 0
+                && tick < self.hubs[h].last_reform_tick + REFORM_COOLDOWN_YEARS * TICKS_PER_YEAR { continue; }
+            let cost = self.hub_throughput(h) * REFORM_COST_FRAC;
+            if self.hubs[h].treasury < cost { continue; }
+            self.hubs[h].treasury -= cost;
+            self.hubs[h].mint_fineness = 1.0;
+            self.hubs[h].mint_fineness_prev = 1.0; // the re-mint is not read as a debasement
+            self.hubs[h].coin_trust = (self.hubs[h].coin_trust + REFORM_TRUST_BUMP).clamp(0.0, 1.0);
+            self.hubs[h].price_level = (self.hubs[h].price_level * 0.92).max(0.5);
+            self.hubs[h].last_reform_tick = tick;
+            self.hubs[h].reform_until = tick + REFORM_MANDATE_YEARS * TICKS_PER_YEAR;
+            let cn = self.hubs[h].coin_name.clone();
+            let city = self.hubs[h].name.clone();
+            self.journal.push(JournalEntry {
+                tick, kind: "reform".into(), hub: h as i32, good: -1, value: cost,
+                text: format!("{} reforms the {} — the debased coin is called in and re-struck at full fineness", city, cn),
+            });
+            let _ = year;
+        }
+    }
+
     fn update_banks(&mut self, _year: u32) {
         let tick = self.tick;
         // 1) Charter new banks — only once the age of banking has opened (year 20).
@@ -3145,6 +3516,24 @@ impl CampaignSim {
             // 2) Depositor interest (a cost paid from reserves).
             let dep_cost = self.banks[bi].deposits * BANK_DEPOSIT_RATE;
             self.banks[bi].reserves -= dep_cost;
+            // 2b) v2.0 · IDIOSYNCRATIC BANK RUN. A bank whose reserve ratio has slipped
+            //     below the fragility floor faces withdrawals as depositors lose
+            //     confidence — even absent a systemic panic. The run drains reserves
+            //     (scaled by how far below the floor it is) and can tip a stressed bank
+            //     into failure on its own; a sound, well-reserved bank never sees one.
+            let rr = self.banks[bi].reserve_ratio();
+            if rr < BANK_RUN_RATIO && self.banks[bi].deposits > EPS {
+                let severity = ((BANK_RUN_RATIO - rr) / BANK_RUN_RATIO).clamp(0.0, 1.0);
+                let withdraw = (self.banks[bi].deposits * BANK_RUN_WITHDRAW * (0.5 + severity))
+                    .min(self.banks[bi].deposits);
+                self.banks[bi].reserves -= withdraw;
+                self.banks[bi].deposits = (self.banks[bi].deposits - withdraw).max(0.0);
+                self.banks[bi].events.push(HouseEvent { tick, kind: "run".into(),
+                    text: format!("depositors withdraw {:.0} in a run on the bank", withdraw) });
+                self.journal.push(JournalEntry { tick, kind: "run".into(), hub: seat as i32,
+                    good: -1, value: withdraw,
+                    text: format!("Run on {}: depositors pull {:.0} as confidence cracks", self.banks[bi].name, withdraw) });
+            }
             // 3) Dividend the bank's net spread to the owning house.
             let owner = self.banks[bi].house as usize;
             let profit = interest_income - dep_cost;
@@ -4396,13 +4785,20 @@ impl CampaignSim {
                 self.classify_hubs();
             }
             if tick % TICKS_PER_YEAR == 0 {
+                // v2.0 · close the monetary loop: turn each coin's debasement +
+                // money growth into a real per-city inflation rate and compound the
+                // local price level. The inflation-tax below is then levied at the
+                // resident city's rate (debased-coin cities erode fortunes faster).
+                let hub_infl = self.update_price_levels();
                 // Yearly inflation erodes every fortune's real value, recorded in the
                 // year that is now closing — then archive it for the Accountant.
                 for hi in 0..self.houses.len() {
                     if self.houses[hi].defunct {
                         continue;
                     }
-                    let infl = self.houses[hi].wealth.max(0.0) * INFLATION_PER_YEAR;
+                    let rate = hub_infl.get(self.houses[hi].hub as usize).copied()
+                        .unwrap_or(INFL_BASE).max(0.0); // deflation never ADDS wealth
+                    let infl = self.houses[hi].wealth.max(0.0) * rate;
                     self.houses[hi].wealth -= infl;
                     if hi < self.house_ledger.len() {
                         self.house_ledger[hi].inflation += infl;
@@ -4433,6 +4829,8 @@ impl CampaignSim {
                 // engine reads the closed year, and HIGH-tier bubbles may POP into a
                 // regional crash.
                 self.decide_coinage(yr);
+                // v2.0 · a council whose coin has failed may REFORM it (call-in + re-mint).
+                self.maybe_reform_coinage(yr);
                 self.update_currency_baskets();
                 self.update_banks(yr);
                 self.update_wars(yr);
@@ -4527,6 +4925,36 @@ impl CampaignSim {
                     any_fashion = true;
                 }
             }
+            // Cultural taste: precompute each hub's desired-good demand lifts (from its
+            // resident peoples, weighted by pop share; capped). Applied after substitution
+            // + fashion so the prized good genuinely pulls more demand.
+            let name_to_g: std::collections::HashMap<&str, usize> =
+                self.goods.iter().enumerate().map(|(g, tg)| (tg.name.as_str(), g)).collect();
+            let mut culture_goods: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+            let mut hub_desire: Vec<Vec<(usize, f32)>> = vec![Vec::new(); n];
+            for h in 0..n {
+                if self.hubs[h].is_estate { continue; }
+                let maj = self.hub_culture.get(h).cloned().unwrap_or_default();
+                let minsum: f32 = self.hub_minorities.get(h)
+                    .map(|m| m.iter().map(|(_, s)| *s).sum()).unwrap_or(0.0);
+                let mut present: Vec<(String, f32)> = Vec::new();
+                if !maj.is_empty() && maj != "—" { present.push((maj, (1.0 - minsum).clamp(0.0, 1.0))); }
+                if let Some(mins) = self.hub_minorities.get(h) {
+                    for (c, s) in mins { if *s > 0.02 { present.push((c.clone(), *s)); } }
+                }
+                let mut boost: std::collections::HashMap<usize, f32> = std::collections::HashMap::new();
+                for (c, share) in present {
+                    if !culture_goods.contains_key(&c) {
+                        let gis: Vec<usize> = self.culture_desired_goods(&c).iter()
+                            .filter_map(|nm| name_to_g.get(nm).copied()).collect();
+                        culture_goods.insert(c.clone(), gis);
+                    }
+                    for &gi in &culture_goods[&c] {
+                        *boost.entry(gi).or_insert(0.0) += share * CULTURE_DESIRE_BOOST;
+                    }
+                }
+                hub_desire[h] = boost.into_iter().map(|(gi, b)| (gi, b.min(CULTURE_DESIRE_MAX))).collect();
+            }
             for h in 0..n {
                 for g in 0..ng {
                     needs[h][g] = self.base_need(h, g);
@@ -4560,6 +4988,8 @@ impl CampaignSim {
                         if fashion_mult[g] != 1.0 { needs[h][g] *= fashion_mult[g]; }
                     }
                 }
+                // Cultural taste: the resident peoples' prized goods pull extra demand.
+                for &(gi, b) in &hub_desire[h] { needs[h][gi] *= 1.0 + b; }
                 // Eat down stock; track unmet demand per need-tier for the
                 // "% population lacking goods" graph (basic / comfort / luxury).
                 let mut tier_need = [0.0f32; 3];
@@ -4902,11 +5332,23 @@ impl CampaignSim {
                 let so = &self.hubs[h].society;
                 ((so.commoner_wealth / (so.commoner_wealth + 1.5)).clamp(0.0, 1.0), so.inequality)
             };
+            // Cultures 2.0 · a large minority stirs unrest ONLY in a city that is already
+            // struggling (dearth/famine/low mood) — a content, prosperous melting pot stays
+            // calm. Bounded and small, so it can seed a revolt over years without runaway.
+            let largest_min = self.hub_minorities.get(h)
+                .map(|m| m.iter().fold(0.0f32, |a, (_, s)| a.max(*s))).unwrap_or(0.0);
+            let stress = (lackb + starv + (1.0 - mood) * 0.5).clamp(0.0, 1.0);
+            let minority_unrest = MINORITY_UNREST * largest_min.clamp(0.0, 1.0) * stress;
+            // Cultures 2.0 · unmet cultural cravings stoke unrest (pop-weighted): a city
+            // that never supplies its peoples the goods they prize grows restive.
+            let cult_discontent = self.cultural_discontent(h);
             let target = (0.42 * (1.0 - mood)
                 + 0.30 * ineq
                 + 0.32 * lackb
                 + 0.22 * starv
                 + if atwar { 0.12 } else { 0.0 }
+                + minority_unrest
+                + CULTURE_UNREST * cult_discontent
                 - 0.30 * welfare
                 - 0.18 * prosp).clamp(0.0, 1.0);
             let u = {
@@ -6447,8 +6889,13 @@ impl CampaignSim {
             && hash01(self.seed, tick as u64 ^ 0x5A1717, hub as u64) > 1.0 / SMALL_CITY_PLAGUE_RESIST {
             return;
         }
+        // Public health (hospices/quarantine) buys down the DEATH toll — the same people
+        // still fall ill, but a well-provisioned city nurses more of them through.
+        let ph = self.hubs[hub].public_health.clamp(0.0, HOSPICE_MAX_LEVEL);
+        let base_mag = mag.clamp(0.0, 0.6);
+        let mag_eff = (base_mag * (1.0 - ph)).clamp(0.0, 0.6);
         let pre = self.hubs[hub].population.max(0.0);
-        self.hubs[hub].population *= 1.0 - mag.clamp(0.0, 0.6);
+        self.hubs[hub].population *= 1.0 - mag_eff;
         let post = self.hubs[hub].population.max(0.0);
         // Lockdown (trade restriction) length scales with severity: a local outbreak is
         // a brief quarantine; a great plague shuts the gates for months.
@@ -6467,8 +6914,10 @@ impl CampaignSim {
         // Immunity window scaled by the DISEASE (some, like flu/cholera, confer little
         // lasting immunity so they recur; smallpox/measles/plague confer strong immunity).
         let dimm = DISEASES.get(disease as usize).map(|s| s.immunity).unwrap_or(1.0);
+        // Public health also lengthens the immunity earned (better convalescence + lasting
+        // quarantine discipline) — a well-provisioned city resists the next visitation longer.
         let immune_span = ((PLAGUE_IMMUNITY_BASE_YEARS * TICKS_PER_YEAR as f32
-            + lock as f32 * PLAGUE_IMMUNITY_LOCK_MULT) * dimm) as u32;
+            + lock as f32 * PLAGUE_IMMUNITY_LOCK_MULT) * dimm * (1.0 + ph)) as u32;
         self.hubs[hub].plague_immune_until = tick + lock + immune_span;
         // Observability record (Plagues panel + map). Spontaneous → a new outbreak;
         // contagion → inherits the source hub's outbreak id + origin + disease.
@@ -6476,10 +6925,21 @@ impl CampaignSim {
             Some((src, ob, org, _dz)) => (src as i32, ob, org),
             None => { let ob = self.next_outbreak; self.next_outbreak += 1; (-1, ob, hub as u32) }
         };
+        // SIR split (observability): infer how many fell ILL from the deaths and the
+        // disease's case-fatality rate (its `dead_hi` reads as CFR-per-case). A mild
+        // disease (low CFR) infects many and kills few; a lethal one infects nearer the
+        // death toll. `recovered = infected − deaths` is derived by readers.
+        let deaths = (pre - post).max(0.0);
+        let cfr = DISEASES.get(disease as usize).map(|s| s.dead_hi).unwrap_or(0.5).clamp(0.03, 0.7);
+        // `infected` reflects the UNMITIGATED attack (hospices cut deaths, not infections),
+        // so a city with public health shows the same ill count but more recovered, fewer
+        // dead — the visible payoff of its spending.
+        let base_deaths = pre * base_mag;
+        let infected = (base_deaths / cfr).clamp(deaths, pre * 0.9);
         self.epidemics.push(PlagueStrike {
-            hub: hub as u32, source, outbreak, deaths: (pre - post).max(0.0),
+            hub: hub as u32, source, outbreak, deaths,
             pop_at: post, start_tick: tick, until_tick: tick + lock,
-            category, origin_hub: origin, disease,
+            category, origin_hub: origin, disease, infected,
         });
         if self.epidemics.len() > 400 { let d = self.epidemics.len() - 400; self.epidemics.drain(0..d); }
         let city = self.hubs[hub].name.clone();
@@ -6972,6 +7432,10 @@ impl CampaignSim {
         // (population expansion) that can grow into a city of its own. The age of
         // colonisation only opens once the world has matured — from YEAR 50 onward,
         // and only when the wealth/population/site conditions are actually met.
+        // Cultures 2.0 · sample every people's population twice a year for the line chart.
+        if self.tick % (TICKS_PER_YEAR / 2) == 0 {
+            self.sample_culture_history();
+        }
         if self.tick % 365 == 0 {
             // Yearly social mobility: strata shift with prosperity / hardship.
             self.update_society();
@@ -6991,6 +7455,10 @@ impl CampaignSim {
             self.economic_migration_pass();
             self.diaspora_pass();
             self.assimilation_pass();
+            // Cultures 2.0 · sustained blending in a city can birth a new creole people.
+            self.ethnogenesis_pass(self.tick / TICKS_PER_YEAR);
+            // Connect sub-cap villages to the trade network via their nearest market town.
+            self.hinterland_pass();
             // House trade outposts from year 30 (rich house, heavy cost); full
             // settlement colonies from year 50 (joint-stock, food lifeline).
             if expansion_ok && self.tick >= BASE_START_TICK {
@@ -7169,14 +7637,14 @@ impl CampaignSim {
             estate_kind: kind, estate_tier: 1, last_upgrade_tick: self.tick, owner_house, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0, has_mint: false,
             // DLC 4 · seed the new estate's quality (length ng) so it's graded from
             // day one — a manufactory (kind 6) starts as a humble workshop and learns.
             quality: { let mut q = vec![0.0f32; ng]; if g0 < ng { q[g0] = if kind == 6 { 0.34 } else { 0.46 }; } q },
             stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
         });
         // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
@@ -8066,16 +8534,226 @@ impl CampaignSim {
         }
     }
 
-    /// Yearly assimilation: minority quarters slowly blend into the majority.
-    fn assimilation_pass(&mut self) {
-        for list in self.hub_minorities.iter_mut() {
-            for e in list.iter_mut() { e.1 *= 1.0 - MINORITY_ASSIM_RATE; }
-            list.retain(|(_, s)| *s > 0.005);
-            if list.len() > 5 {
-                list.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-                list.truncate(5);
+    /// Yearly HINTERLAND pass: connect every sub-cap village to the trade network by
+    /// tying it to its nearest live market town (satellite trade), and let that town
+    /// earn a small, bounded civic toll from the hinterland trade. This is how villages
+    /// below the sim cap "join the economy" without becoming O(n²) full hubs — they feed
+    /// a real hub and show up in its books, instead of sitting inert and disconnected.
+    fn hinterland_pass(&mut self) {
+        let n = self.hubs.len();
+        if self.hinterland.is_empty() || n == 0 { return; }
+        // (Re)assign each village its nearest live market town — only when unlinked or
+        // its town has died (cheap no-op once every village is settled on a live hub).
+        for ti in 0..self.hinterland.len() {
+            let cur = self.hinterland[ti].parent_hub;
+            let ok = cur >= 0 && (cur as usize) < n
+                && !self.hubs[cur as usize].is_estate && !self.hubs[cur as usize].abandoned;
+            if ok { continue; }
+            let (vx, vy) = (self.hinterland[ti].x, self.hinterland[ti].y);
+            let mut best = (-1i32, f32::MAX);
+            for h in 0..n {
+                if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+                let mut dx = (self.hubs[h].x - vx).abs();
+                if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
+                let dy = self.hubs[h].y - vy;
+                let d = dx * dx + dy * dy;
+                if d < best.1 { best = (h as i32, d); }
+            }
+            self.hinterland[ti].parent_hub = best.0;
+        }
+        // Market toll: each town earns a small civic income from its satellite villages.
+        for ti in 0..self.hinterland.len() {
+            let p = self.hinterland[ti].parent_hub;
+            if p < 0 || (p as usize) >= n { continue; }
+            self.hubs[p as usize].civic_pool += self.hinterland[ti].population * HINTERLAND_TOLL;
+        }
+    }
+
+    /// Cultures 2.0 · snapshot every living people's total population (majority share +
+    /// minority quarters) for the population line chart. Called twice a year; capped.
+    fn sample_culture_history(&mut self) {
+        use std::collections::HashMap;
+        self.ensure_hub_cultures(); // self-heal so the very first sample has cultures
+        let mut pops: HashMap<String, f32> = HashMap::new();
+        for i in 0..self.hubs.len() {
+            let h = &self.hubs[i];
+            if h.is_estate || h.abandoned || h.population < 1.0 { continue; }
+            let pop = h.population.max(0.0);
+            let minsum: f32 = self.hub_minorities.get(i).map(|m| m.iter().map(|(_, s)| *s).sum()).unwrap_or(0.0);
+            if let Some(maj) = self.hub_culture.get(i) {
+                if !maj.is_empty() && maj != "—" {
+                    *pops.entry(maj.clone()).or_insert(0.0) += pop * (1.0 - minsum).clamp(0.0, 1.0);
+                }
+            }
+            if let Some(mins) = self.hub_minorities.get(i) {
+                for (c, s) in mins { if *s > 0.005 { *pops.entry(c.clone()).or_insert(0.0) += pop * *s; } }
             }
         }
+        let t = self.tick as f32 / TICKS_PER_YEAR as f32;
+        let mut entries: Vec<(String, f32)> = pops.into_iter().filter(|(_, p)| *p >= 1.0).collect();
+        entries.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        self.culture_history.push(CultureHistSample { t, pops: entries });
+        if self.culture_history.len() > 220 {
+            let d = self.culture_history.len() - 220;
+            self.culture_history.drain(0..d);
+        }
+    }
+
+    /// Cultures 2.0 · population-weighted CULTURAL DISCONTENT in a city (0..1): how much
+    /// of its resident peoples' prized-good demand goes unmet (goods scarce/dear here),
+    /// weighted by each people's population share — a big people whose cravings never
+    /// arrive weighs heavily. Feeds the unrest target.
+    pub(crate) fn cultural_discontent(&self, h: usize) -> f32 {
+        let maj = self.hub_culture.get(h).cloned().unwrap_or_default();
+        let minsum: f32 = self.hub_minorities.get(h)
+            .map(|m| m.iter().map(|(_, s)| *s).sum()).unwrap_or(0.0);
+        let mut present: Vec<(String, f32)> = Vec::new();
+        if !maj.is_empty() && maj != "—" { present.push((maj, (1.0 - minsum).clamp(0.0, 1.0))); }
+        if let Some(mins) = self.hub_minorities.get(h) {
+            for (c, s) in mins { if *s > 0.02 { present.push((c.clone(), *s)); } }
+        }
+        let (mut num, mut den) = (0.0f32, 0.0f32);
+        for (c, share) in present {
+            let desired = self.culture_desired_goods(&c);
+            if desired.is_empty() { continue; }
+            let (mut d, mut cnt) = (0.0f32, 0u32);
+            for nm in &desired {
+                if let Some(g) = self.goods.iter().position(|tg| &tg.name == nm) {
+                    let base = self.goods[g].base_value.max(0.01);
+                    let price = self.hubs[h].price.get(g).copied().unwrap_or(base).max(0.01);
+                    let avail = (base * 1.3 / price).clamp(0.0, 1.0);
+                    d += 1.0 - avail; cnt += 1;
+                }
+            }
+            if cnt > 0 { num += share * (d / cnt as f32); den += share; }
+        }
+        if den > 0.0 { (num / den).clamp(0.0, 1.0) } else { 0.0 }
+    }
+
+    /// Good ids a culture PRIZES (creole → both parents' tastes; hearth culture → its
+    /// kit's tastes). Empty for an unknown/legacy culture.
+    pub(crate) fn culture_desired_goods(&self, culture: &str) -> Vec<&'static str> {
+        if let Some(cr) = self.creoles.iter().find(|c| c.name == culture) {
+            let mut v = crate::sim::cultures::kit_desired_goods(cr.kit_a as usize).to_vec();
+            for g in crate::sim::cultures::kit_desired_goods(cr.kit_b as usize) {
+                if !v.contains(g) { v.push(g); }
+            }
+            return v;
+        }
+        crate::sim::cultures::kit_of_people(culture)
+            .map(|k| crate::sim::cultures::kit_desired_goods(k).to_vec())
+            .unwrap_or_default()
+    }
+
+    /// The language FAMILY of a live culture (creole registry first, then the worldgen
+    /// hearth kit). "" for an unknown/legacy culture.
+    pub(crate) fn culture_family(&self, name: &str) -> String {
+        if name.is_empty() || name == "—" { return String::new(); }
+        if let Some(cr) = self.creoles.iter().find(|c| c.name == name) { return cr.family.clone(); }
+        crate::sim::cultures::kit_of_people(name)
+            .map(|k| crate::sim::cultures::KITS[k].lang_family.to_string())
+            .unwrap_or_default()
+    }
+
+    /// Cultures 2.0 · Yearly assimilation — minority quarters blend into the majority,
+    /// FASTER when they share a language family with the local majority (mutual
+    /// intelligibility) and in big, prosperous "melting-pot" cities; SLOWER across
+    /// distant families. Keeps the composition alive and bounded.
+    fn assimilation_pass(&mut self) {
+        let n = self.hubs.len();
+        for h in 0..n.min(self.hub_minorities.len()) {
+            if self.hub_minorities[h].is_empty() { continue; }
+            let maj_name = self.hub_culture.get(h).cloned().unwrap_or_default();
+            let maj_fam = self.culture_family(&maj_name);
+            let maj_env = crate::sim::cultures::people_env(&maj_name);
+            // Prestige / melting-pot pressure: large, wealthy cities assimilate faster.
+            let prestige = (self.hubs[h].population / 20_000.0).clamp(0.0, 1.0) * 0.5
+                + self.hubs[h].trade_wealth.clamp(0.0, 1.0) * 0.5;
+            let mins = std::mem::take(&mut self.hub_minorities[h]);
+            let mut kept: Vec<(String, f32)> = Vec::with_capacity(mins.len());
+            for (c, s) in mins {
+                let fam = self.culture_family(&c);
+                let related = !fam.is_empty() && !maj_fam.is_empty() && fam == maj_fam;
+                // Same family → 2×; distant family → 0.6×; unknown → 1×. Prestige adds up to +100%.
+                let kin = if fam.is_empty() || maj_fam.is_empty() { 1.0 }
+                    else if related { 2.0 } else { 0.6 };
+                // Light ETHNIC-APPEARANCE tie: peoples of the same appearance group (climate/
+                // dress) blend a little more readily even across language families.
+                let look = match (maj_env, crate::sim::cultures::people_env(&c)) {
+                    (Some(a), Some(b)) if a == b && !related => APPEARANCE_ASSIM_BONUS,
+                    _ => 1.0,
+                };
+                let rate = (MINORITY_ASSIM_RATE * kin * look * (1.0 + prestige)).clamp(0.0, 0.25);
+                let ns = s * (1.0 - rate);
+                if ns > 0.005 { kept.push((c, ns)); }
+            }
+            kept.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            kept.truncate(5);
+            self.hub_minorities[h] = kept;
+        }
+    }
+
+    /// Cultures 2.0 · Ethnogenesis — where a large minority has long shared a city with
+    /// the majority, the two blend into a NEW creole people with a synthesized name and
+    /// its own origin card. Bounded (a global cap + a low yearly chance), so a handful
+    /// of creoles arise over a long campaign rather than a flood.
+    fn ethnogenesis_pass(&mut self, year: u32) {
+        if self.creoles.len() >= CREOLE_MAX { return; }
+        let tick = self.tick;
+        let n = self.hubs.len();
+        for h in 0..n.min(self.hub_minorities.len()) {
+            if self.creoles.len() >= CREOLE_MAX { break; }
+            if self.hubs[h].is_estate || self.hubs[h].abandoned || self.hubs[h].population < CREOLE_MIN_POP { continue; }
+            // Largest minority quarter here.
+            let (mut bi, mut bs) = (usize::MAX, 0.0f32);
+            for (i, (_, s)) in self.hub_minorities[h].iter().enumerate() {
+                if *s > bs { bs = *s; bi = i; }
+            }
+            if bi == usize::MAX || bs < CREOLE_MIN_MINORITY { continue; }
+            if hash01(self.seed, tick as u64 ^ 0xE7_1409E5, h as u64) > CREOLE_YEARLY_CHANCE { continue; }
+            let maj = self.hub_culture.get(h).cloned().unwrap_or_default();
+            let minc = self.hub_minorities[h][bi].0.clone();
+            if maj.is_empty() || maj == "—" || maj == minc { continue; }
+            // Don't re-spawn a creole already born of this same pair.
+            let pair_fam = format!("Creole ({} · {})", maj, minc);
+            if self.creoles.iter().any(|c| c.family == pair_fam) { continue; }
+            let (name, color, kit_a, kit_b) = self.synth_creole_name(&maj, &minc, h, year);
+            if name.is_empty() || self.creoles.iter().any(|c| c.name == name) { continue; }
+            // Seed: half the minority quarter becomes the creole (intermarriage with locals).
+            let take = bs * CREOLE_SEED_FRAC;
+            self.hub_minorities[h][bi].1 -= take;
+            self.hub_minorities[h].push((name.clone(), take));
+            let mob = crate::sim::cultures::people_mobility(&name);
+            let temperament = if mob >= 0.6 { "an outward-looking people, quick to take to the trade roads" }
+                else { "a settled people, rooted where they were born" };
+            let origin = format!(
+                "{name} — a creole people born in {place} around year {year}, where {maj} and {minc} quarters blended into one; {temperament}.",
+                name = name, place = self.hubs[h].name, year = year, maj = maj, minc = minc, temperament = temperament);
+            self.creoles.push(Creole {
+                name: name.clone(), family: pair_fam, origin, color,
+                born_tick: tick, birthplace: self.hubs[h].name.clone(), kit_a, kit_b,
+            });
+            self.journal.push(JournalEntry {
+                tick, kind: "ethnogenesis".into(), hub: h as i32, good: -1, value: take,
+                text: format!("A new people, the {}, is born in {} as {} and {} blend into one.",
+                    name, self.hubs[h].name, maj, minc) });
+        }
+    }
+
+    /// Synthesize a creole's name + colour + parent kits from its two parent peoples.
+    /// Falls back to default kits when a parent isn't a worldgen hearth (creole-of-creole).
+    fn synth_creole_name(&self, a: &str, b: &str, h: usize, year: u32) -> (String, [u8; 3], u8, u8) {
+        use crate::sim::cultures as cul;
+        let ka = cul::kit_of_people(a).unwrap_or(0);
+        let kb = cul::kit_of_people(b).unwrap_or(1);
+        let seed = cul::hash64(self.seed ^ (h as u64).wrapping_mul(0x9E3779B97F4A7C15) ^ ((year as u64) << 12));
+        let name = cul::blend_name(ka, kb, seed);
+        let ca = cul::color_of_people(a).unwrap_or([170, 130, 190]);
+        let cb = cul::color_of_people(b).unwrap_or([130, 170, 150]);
+        let color = [((ca[0] as u16 + cb[0] as u16) / 2) as u8,
+            ((ca[1] as u16 + cb[1] as u16) / 2) as u8,
+            ((ca[2] as u16 + cb[2] as u16) / 2) as u8];
+        (name, color, ka as u8, kb as u8)
     }
 
     /// #23 · Yearly economic migration: within a trade component, people drift from
@@ -8100,6 +8778,7 @@ impl CampaignSim {
             // city→city→city across the network over successive years, so every migration
             // line lies exactly on a real trade route. (User: "no migration except via
             // trade routes.") Pick the best-opportunity direct neighbour.
+            let src_culture = self.hub_culture.get(src).cloned().unwrap_or_default();
             let mut dest = (usize::MAX, src_opp); // must beat the home city's own opportunity
             if let Some(nbrs) = self.neighbors.get(src) {
                 for &bn in nbrs {
@@ -8107,7 +8786,10 @@ impl CampaignSim {
                     if d >= n || d == src { continue; }
                     let o = &self.hubs[d];
                     if o.is_estate || o.abandoned || o.food_balance < 0.0 { continue; }
-                    if opp[d] > dest.1 { dest = (d, opp[d]); }
+                    // Cultures 2.0 · HOMOPHILY: kin already settled at a destination make it
+                    // more attractive — people prefer to move where their own people are.
+                    let o_eff = opp[d] + HOMOPHILY_PULL * self.culture_share_at(d, &src_culture);
+                    if o_eff > dest.1 { dest = (d, o_eff); }
                 }
             }
             let Some(di) = (dest.0 != usize::MAX).then_some(dest.0) else { continue; };
@@ -8115,7 +8797,7 @@ impl CampaignSim {
             let movers = (src_pop * ECON_MIG_FRAC).clamp(10.0, 800.0);
             if movers >= src_pop * 0.5 { continue; }
             // STRICT: people move only if a trade-route chain connects the two cities.
-            let culture = self.hub_culture.get(src).cloned().unwrap_or_default();
+            let culture = src_culture;
             if !self.emit_migration_route(src, di, &culture, movers) { continue; }
             self.hubs[src].population -= movers;
             self.hubs[di].population += movers;
@@ -8386,11 +9068,11 @@ impl CampaignSim {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0, has_mint: false,
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
         });
         self.routes_dirty = true;
@@ -9090,11 +9772,11 @@ impl CampaignSim {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0, has_mint: false,
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
             reserve_food: 30.0, reserve_cap: 365.0, supply_years: 0.0, colony_founded_tick: self.tick,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
         });
         self.total_foundings += 1; // Atlas 2.0 lifecycle counter (colony ventures too)
@@ -11330,11 +12012,11 @@ mod tests {
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: 0, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0, has_mint: false,
             quality: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
         }
     }
@@ -11361,7 +12043,7 @@ mod tests {
             last_month_pop: 0.0, last_month_index: 0.0, seed_house_count: 0,
             fleets_migrated: true, tech_factor: 1.0, percap_migrated: true, society_migrated: false,
             house_ledger: Vec::new(), house_ledger_prev: Vec::new(), house_barred: Vec::new(),
-            colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], council_bought_month: vec![], hub_patron: vec![], colony_supply: vec![],
+            colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], culture_history: vec![], council_bought_month: vec![], hub_patron: vec![], colony_supply: vec![],
             hub_culture: vec![], hub_minorities: vec![], estate_idle_years: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
             recent_trades: vec![],
@@ -12256,6 +12938,9 @@ mod tests {
                 h.dominant_seat = true;     // controls its seat → becomes the council
                 s.houses.push(h);
             }
+            // v2.0 · minting is now chartered (a paid privilege) — seed each seat a
+            // treasury it can draw on to establish its mint-house.
+            for hh in s.hubs.iter_mut() { hh.treasury = 200.0; }
             s.rebuild_routes();
             s
         };
