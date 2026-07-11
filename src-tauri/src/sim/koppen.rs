@@ -653,10 +653,53 @@ pub fn classify_koppen(buf: &mut WorldBuffer) {
     // Pass 2: apply current-driven overrides (can extend a zone past its band)
     apply_current_overrides(buf);
 
-    // Pass 3: majority filter to dissolve thin "zebra" stripes that arise when
-    // the aridity threshold flips between adjacent latitude rows (3→5 passes to
-    // clean up the diagonal climate banding the user flagged).
+    // Pass 3: dissolve cell-by-cell CHECKERBOARDS first (a perfect checkerboard is
+    // stable under the 3×3 majority filter below — each cell keeps its four
+    // diagonal same-class neighbours — so it needs its own cardinal-neighbour pass),
+    // then run the majority filter to clean up thin "zebra" stripes that arise when
+    // the aridity / dry-season threshold flips between adjacent cells.
+    break_koppen_checkerboards(buf, 3);
     smooth_koppen(buf, 5);
+}
+
+/// Dissolve cell-by-cell checkerboards and 1-cell speckle by CARDINAL-neighbour
+/// vote. A checkerboard cell has all four of its N/S/E/W neighbours in the *other*
+/// class (its own class survives only on the diagonals), so the 3×3 majority filter
+/// can never break it. Here, if at least three of the four cardinal land-neighbours
+/// agree on a single class different from the cell's own, the cell adopts it — which
+/// collapses checkerboards and thin diagonal stripes in a couple of passes while
+/// leaving genuine zone interiors (whose cardinals mostly match) untouched.
+fn break_koppen_checkerboards(buf: &mut WorldBuffer, passes: u32) {
+    let w = buf.width;
+    let h = buf.height;
+    for _ in 0..passes {
+        let src = buf.koppen.clone();
+        for y in 0..h {
+            for x in 0..w {
+                let idx = buf.idx(x, y);
+                if buf.terrain[idx] != 1 { continue; }
+                let self_code = src[idx];
+                let mut counts: [u8; 33] = [0; 33];
+                for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                    let ny = y as i32 + dy;
+                    if ny < 0 || ny >= h as i32 { continue; }
+                    let ni = buf.widx(x as i32 + dx, ny);
+                    if buf.terrain[ni] != 1 { continue; }
+                    let c = src[ni];
+                    if c == 0 || c > 32 { continue; }
+                    counts[c as usize] += 1;
+                }
+                let mut best = self_code;
+                let mut best_n = 0u8;
+                for (c, &n) in counts.iter().enumerate() {
+                    if n > best_n { best_n = n; best = c as u8; }
+                }
+                if best != self_code && best_n >= 3 {
+                    buf.koppen[idx] = best;
+                }
+            }
+        }
+    }
 }
 
 /// Replace each land cell whose class is a small minority among its 3×3

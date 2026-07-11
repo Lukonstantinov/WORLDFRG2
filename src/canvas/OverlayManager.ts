@@ -152,7 +152,10 @@ function meanderPath(pts: [number, number][], seed: number, order: number, world
   }
   return out;
 }
-const LAKE_COLOR = "rgba(51, 153, 221, 0.7)";
+// Freshwater lake — a brighter, more saturated cyan-blue at higher opacity so
+// open water reads as clean, glinting water rather than a pale wash of the land
+// showing through (the "make lakes shinier" note).
+const LAKE_COLOR = "rgba(58, 176, 238, 0.86)";
 /** Oxbow / backwater lake — a stiller, weedier green-blue than open lake water. */
 const OXBOW_COLOR = "rgba(64, 150, 150, 0.72)";
 /** Lake fill by character: oxbow backwater, then a brine ramp toward the vivid
@@ -1095,10 +1098,21 @@ export class OverlayManager {
         ctx.globalAlpha = hasLakeHL ? (isSel ? 1 : 0.28) : 1;
         ctx.fillStyle = lakeFill(lake);
         for (const [x, y] of lake.cells) ctx.fillRect(x, y, 1, 1);
+        // SHEEN: a faint light-blue glint across the upper third of the basin so
+        // open water reads as glossy/reflective rather than a flat blue slab.
+        // Skip oxbows (weedy backwaters) — only open freshwater lakes glint.
+        if (lake.kind !== 1 && lake.cells.length >= 4) {
+          let minY = Infinity, maxY = -Infinity;
+          for (const [, y] of lake.cells) { if (y < minY) minY = y; if (y > maxY) maxY = y; }
+          const sheenCut = minY + (maxY - minY) * 0.34;
+          ctx.fillStyle = "rgba(225, 245, 255, 0.28)";
+          for (const [x, y] of lake.cells) if (y <= sheenCut) ctx.fillRect(x, y, 1, 1);
+        }
         // Bright wash over the selected basin so it reads as picked (cheap — one
-        // extra fill pass, no per-cell shadow).
+        // extra fill pass, no per-cell shadow). Kept lighter than before so a
+        // picked lake still reads as vivid water, not a washed-out pale patch.
         if (isSel) {
-          ctx.fillStyle = "rgba(220, 240, 255, 0.5)";
+          ctx.fillStyle = "rgba(210, 236, 255, 0.34)";
           for (const [x, y] of lake.cells) ctx.fillRect(x, y, 1, 1);
         }
       });
@@ -1122,11 +1136,11 @@ export class OverlayManager {
         if (river.points.length < 2) return;
         const isHL = hasHL && hl.has(i);
         // Width scales with the river's Strahler order (headwater creek → great
-        // trunk): order 1 ≈ 1 px, a high-order trunk ≈ 2.6 px, zoom-compensated.
-        // Width never balloons into a blob.
+        // trunk): a creek ≈ 0.8 px, a high-order trunk ≈ 1.9 px, zoom-compensated.
+        // Kept deliberately thin — the old (1.2–2.8 px) band read as fat ribbons.
         const ord = river.order ?? (river.major ? 4 : 1);
-        const baseW = 0.9 + Math.min(ord, 6) * 0.32;
-        const riverW = Math.max(0.8, Math.min(3, baseW) * inv);
+        const baseW = 0.55 + Math.min(ord, 6) * 0.22;
+        const riverW = Math.max(0.5, Math.min(2.2, baseW) * inv);
         ctx.globalAlpha = hasHL ? (isHL ? 0.95 : 0.22) : 0.85;
         ctx.strokeStyle = riverShade(river.major);
         ctx.lineWidth = riverW;

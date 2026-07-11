@@ -360,11 +360,38 @@ pub fn extract_rivers(
     }
     let area_ratio = (w * h) as f32 / 64800.0;
     let base = (40.0 * area_ratio.sqrt()).max(20.0);
-    // density 0 → 3× threshold (sparse), 0.5 → 1.7×, 1 → 0.4×, 1.5 → 0.1× (very
-    // dense — many small tributaries become rivers). Floor low so the high end
-    // really does spawn a large number of small streams.
-    let density_mult = (3.0 - 2.6 * density).max(0.1);
+    // density 0 → 3× threshold (sparse), 0.5 → 1.9×, 1 → 0.7×, 1.5 → 0.25× (dense).
+    // Floors raised from the old (0.4×/0.1×) values so the network stays legible —
+    // the previous low floor let the whole map fill with a woven mat of streams
+    // (the "spaghetti" the user flagged). Fewer, better-defined channels now.
+    let density_mult = (3.0 - 2.3 * density).max(0.25);
     let threshold = (base * density_mult).max(4.0) as u32;
+
+    // ── CLIMATE-WEIGHTED per-cell channel threshold ──────────────────────────
+    // Rivers are a function of the local water balance, not just drainage area:
+    // wet climates (rainforest, humid temperate) sprout many perennial channels,
+    // while arid basins swallow their runoff to evaporation and carry almost none
+    // (the Sahara has a vast catchment but scarcely any rivers). So the flow a
+    // channel must carry to "count" scales UP in dry cells and DOWN in wet ones.
+    // A river flowing off a wet upland INTO a desert simply falls below the higher
+    // desert threshold and stops there — the realistic "river vanishes into the
+    // sands" ending, handled for free by the downstream channel test.
+    let use_koppen = !buf.koppen.is_empty();
+    let cell_thresh: Vec<u32> = (0..total).map(|i| {
+        if buf.terrain[i] != 1 { return u32::MAX; }
+        let p = buf.precipitation[i].max(40.0);
+        // precip 1400+ → ~0.6× (wet, dense), 700 → ~1.0×, 250 → ~1.8×, 100 → ~2.6×.
+        let mut m = (900.0 / p).clamp(0.55, 2.8);
+        if use_koppen {
+            match buf.koppen[i] {
+                crate::sim::koppen::BWH | crate::sim::koppen::BWK => m *= 1.7, // true desert: rivers rare
+                crate::sim::koppen::BSH | crate::sim::koppen::BSK => m *= 1.3, // steppe: sparse
+                crate::sim::koppen::AF | crate::sim::koppen::AM => m *= 0.82,  // rainforest: dense
+                _ => {}
+            }
+        }
+        ((threshold as f32) * m).max(4.0) as u32
+    }).collect();
 
     // ── Build the channel network ────────────────────────────────────────────
     // A channel cell is land (not a permanent ice cap) carrying at least
@@ -376,7 +403,7 @@ pub fn extract_rivers(
         buf.terrain[i] == 1
             && !is_lake[i]
             && buf.koppen[i] != crate::sim::koppen::EF
-            && acc[i] >= threshold
+            && acc[i] >= cell_thresh[i]
     };
 
     // For each channel cell D: its channel inflow count, and `main_child` = the
@@ -410,7 +437,6 @@ pub fn extract_rivers(
     // stream (a tributary — the junction cell is appended so the line connects).
     let mut rivers = Vec::new();
     let major_len = (w as f32 * 0.10).max(60.0);
-    let use_koppen = !buf.koppen.is_empty();
     for s in 0..total {
         if !is_channel(s) || up_count[s] != 0 { continue; }
 
@@ -464,7 +490,7 @@ pub fn extract_rivers(
         let discharge = outlet_acc * runoff * (1.0 - 0.45 * arid_frac);
         let len_term = (length / (220.0 * area_ratio.sqrt())).min(1.5) * 0.4;
         let raw = (discharge / threshold as f32).max(0.0).ln_1p() * 0.62 + 0.7 + len_term;
-        let width = (raw * width_scale).clamp(0.8, 3.4);
+        let width = (raw * width_scale).clamp(0.6, 2.6);
 
         // Strahler-ish order from discharge (1 = creek). Ranks branches for
         // rendering / settlement scoring without a full stream-order pass.
@@ -582,8 +608,12 @@ fn build_meander_path(
     const STEEP_G: f32 = 0.004;    // ≥ this gradient/cell → straight (slowness 0)
     const FLAT_G: f32 = 0.0005;    // ≤ this → free to meander (slowness 1)
     const VALLEY_RISE: f32 = 0.0016; // ~14 m rise marks the valley wall
-    let max_reach = 22i32;
-    let base_wav = (width_cells * 12.0).clamp(5.0, 60.0);
+    // Keep the meander corridor tight: a smaller valley probe + longer, lower-
+    // amplitude bends. The old ±22-cell reach with 0.22·wavelength amplitude let
+    // rivers wander far enough to weave into one another (the "spaghetti" look);
+    // gentle broad bends read as natural meanders without the tangle.
+    let max_reach = 10i32;
+    let base_wav = (width_cells * 16.0).clamp(8.0, 44.0);
     let _ = (discharge, threshold); // size is already encoded in channel width
 
     let mut out = vec![(0.0f32, 0.0f32); n];
@@ -636,13 +666,14 @@ fn build_meander_path(
                     d += 1.0;
                 }
             }
-            // Amplitude ≈ 0.22× wavelength (channel width already encodes river
-            // size), never more than ~0.7 of the flat half-width.
-            let amp = slow * (base_wav * 0.22).min(half * 0.7);
+            // Amplitude ≈ 0.13× wavelength (channel width already encodes river
+            // size), never more than ~0.45 of the flat half-width — kept modest so
+            // adjacent rivers keep their own corridors instead of weaving together.
+            let amp = slow * (base_wav * 0.13).min(half * 0.45);
             // Primary bend + weak second harmonic → asymmetric, non-sinusoidal.
-            off = amp * (phase.sin() + 0.28 * (2.0 * phase + 0.7).sin());
+            off = amp * (phase.sin() + 0.22 * (2.0 * phase + 0.7).sin());
             // Final safety clamp to the measured corridor.
-            let lim = (half * 0.85).max(0.0);
+            let lim = (half * 0.6).max(0.0);
             off = off.clamp(-lim, lim);
         }
         let ry = (y + nry * off).clamp(0.0, h as f32 - 1.0);
