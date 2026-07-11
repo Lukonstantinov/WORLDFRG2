@@ -257,6 +257,12 @@ const CREOLE_SEED_FRAC: f32 = 0.5;         // share of the minority that becomes
 const SPLINTER_YEARLY_CHANCE: f32 = 0.012; // rare base rate; scaled UP by isolation (distance + few trade ties)
 const SPLINTER_MIN_SHARE: f32 = 0.6;       // the parent must clearly dominate the city
 const SPLINTER_SEED_FRAC: f32 = 0.45;      // share of the local majority that becomes the daughter
+/// EXPEDITIONS — a wealthy house with a fleet occasionally mounts an expedition to a
+/// far, isolated settlement the trade network doesn't normally reach: casual merchants
+/// arriving in a remote outpost on rare occasions. Delivers goods (relieving a little of
+/// the outpost's scarcity) at a modest cost to the house (reach/prestige, not profit).
+const EXPEDITION_MIN_WEALTH: f32 = 200.0;  // only a substantial house can fund one
+const EXPEDITION_YEARLY_CHANCE: f32 = 0.04; // per eligible house per year (× fleet size)
 /// Cultures 2.0 · migration HOMOPHILY: bonus to a destination's opportunity per unit
 /// of the migrant's culture already present there (people move toward their own kin).
 /// Small vs the opportunity scale so it nudges, not dominates.
@@ -7559,6 +7565,8 @@ impl CampaignSim {
             self.splinter_pass(self.tick / TICKS_PER_YEAR);
             // Connect sub-cap villages to the trade network via their nearest market town.
             self.hinterland_pass();
+            // Rare merchant expeditions reach the far, isolated outposts trade misses.
+            self.expedition_pass(self.tick / TICKS_PER_YEAR);
             // House trade outposts from year 30 (rich house, heavy cost); full
             // settlement colonies from year 50 (joint-stock, food lifeline).
             if expansion_ok && self.tick >= BASE_START_TICK {
@@ -8862,6 +8870,46 @@ impl CampaignSim {
                 tick, kind: "ethnogenesis".into(), hub: h as i32, good: -1, value: take,
                 text: format!("A new people, the {}, is born in {} as {} and {} blend into one.",
                     name, self.hubs[h].name, maj, minc) });
+        }
+    }
+
+    /// EXPEDITIONS — a wealthy, fleet-owning house rarely mounts an expedition to a far
+    /// isolated settlement (≤1 trade tie) that the network doesn't normally reach: the
+    /// "casual merchants arriving on rare occasions" a remote outpost sees. It delivers a
+    /// batch of the house's specialty good (relieving a little local scarcity) at a modest
+    /// cost to the house (reach & prestige, not profit). Bounded and rare.
+    fn expedition_pass(&mut self, year: u32) {
+        let tick = self.tick;
+        let n = self.hubs.len();
+        let ng = self.goods.len();
+        if ng == 0 { return; }
+        let remotes: Vec<usize> = (0..n).filter(|&h|
+            !self.hubs[h].is_estate && !self.hubs[h].abandoned
+            && self.hubs[h].population > 50.0
+            && self.neighbors.get(h).map(|v| v.len()).unwrap_or(0) <= 1
+        ).collect();
+        if remotes.is_empty() { return; }
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct || self.houses[hi].is_guild { continue; }
+            let fleet = self.houses[hi].fleet_sea + self.houses[hi].fleet_river + self.houses[hi].fleet_caravan;
+            if fleet == 0 || self.houses[hi].wealth < EXPEDITION_MIN_WEALTH { continue; }
+            let chance = EXPEDITION_YEARLY_CHANCE * (1.0 + (fleet as f32).min(6.0) * 0.15);
+            if hash01(self.seed, tick as u64 ^ 0xE59_ED17, hi as u64) > chance { continue; }
+            let pick = (crate::sim::cultures::hash64(self.seed ^ (hi as u64) ^ ((year as u64) << 8)) as usize) % remotes.len();
+            let t = remotes[pick];
+            if t == self.houses[hi].hub as usize { continue; }
+            let g = self.houses[hi].spec.first().copied().filter(|&g| g < ng).unwrap_or(0);
+            let pop = self.hubs[t].population.max(0.0);
+            let batch = (pop * 0.02).clamp(2.0, 60.0);
+            let price = self.hubs[t].price.get(g).copied().unwrap_or(self.goods[g].base_value).max(EPS);
+            if g < self.hubs[t].stock.len() { self.hubs[t].stock[g] += batch; }
+            // The expedition COSTS the house (reach, not profit) — bounded, only reduces wealth.
+            let cost = (batch * price * 0.05).min(self.houses[hi].wealth.max(0.0) * 0.02);
+            self.houses[hi].wealth -= cost;
+            let (gn, hn, tn) = (self.goods[g].name.clone(), self.houses[hi].name.clone(), self.hubs[t].name.clone());
+            self.journal.push(JournalEntry {
+                tick, kind: "expedition".into(), hub: t as i32, good: g as i32, value: batch,
+                text: format!("An expedition of {hn} reaches the remote {tn}, trading {gn}, in year {year}.") });
         }
     }
 
