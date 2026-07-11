@@ -1255,11 +1255,45 @@ pub fn campaign_get_culture_presence(name: String, db: State<'_, WorldDb>) -> Re
     let n = (cw * ch) as usize;
     let mut data = vec![0u8; n];
     let mut land = vec![0u8; n];
-    // Homeland raster: this people's hearth cells brightest, other land dim.
+    // ── Land mask from the REAL terrain, downsampled to the coarse raster ──
+    // MAJOR landmasses only: a coarse cell counts as land when a meaningful share
+    // (≥28%) of its fine cells are land, so continents and sizeable islands show
+    // while tiny specks drop out. This is what makes the minimap resemble the
+    // uploaded world (the old mask came from culture assignment, so uninhabited
+    // islands were invisible).
+    if let Ok(buf) = crate::sim::world_buffer::WorldBuffer::load_with(
+        &conn, crate::sim::world_buffer::ColumnSet::TERRAIN)
+    {
+        let (ww, wh) = (buf.width, buf.height);
+        let mut land_cnt = vec![0u32; n];
+        let mut tot_cnt = vec![0u32; n];
+        for y in 0..wh {
+            for x in 0..ww {
+                let cx = (x as u64 * cw as u64 / ww.max(1) as u64).min(cw as u64 - 1) as u32;
+                let cy = (y as u64 * ch as u64 / wh.max(1) as u64).min(ch as u64 - 1) as u32;
+                let ci = (cy * cw + cx) as usize;
+                tot_cnt[ci] += 1;
+                if buf.terrain[buf.idx(x, y)] == 1 { land_cnt[ci] += 1; }
+            }
+        }
+        for ci in 0..n {
+            if tot_cnt[ci] > 0 && land_cnt[ci] as f32 / tot_cnt[ci] as f32 >= 0.28 {
+                land[ci] = 1; data[ci] = 40;
+            }
+        }
+    } else {
+        // Fallback (terrain not loadable): the old culture-assignment land mask.
+        for (ci, &id) in map.ids.iter().enumerate().take(n) {
+            if id != 255 { land[ci] = 1; data[ci] = 40; }
+        }
+    }
+    // Homeland raster: this people's hearth cells brightest (lit even on a minor
+    // island the terrain threshold skipped, since a hearth means people live there).
     let home = map.hearths.iter().position(|h| h.people == name);
-    for (ci, &id) in map.ids.iter().enumerate().take(n) {
-        if id != 255 { land[ci] = 1; data[ci] = 40; }
-        if let Some(hi) = home { if id as usize == hi { data[ci] = 255; } }
+    if let Some(hi) = home {
+        for (ci, &id) in map.ids.iter().enumerate().take(n) {
+            if id as usize == hi { data[ci] = 255; land[ci] = 1; }
+        }
     }
     // Live spread: light up coarse cells around cities where the people lives now.
     if let Some(sim) = get_sim(&db, &conn)? {
