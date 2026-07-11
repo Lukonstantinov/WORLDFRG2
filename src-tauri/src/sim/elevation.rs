@@ -316,7 +316,12 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
             // the ranges into ridge-and-valley relief.
             let vridge = ridged_multifractal(rx * 1.9, ry * 1.9, seed.wrapping_add(0x5A1F), 5, 2.0, 2.0);
             let carve = (1.0 - vridge).powi(2) * 0.16 * e;
-            elevation[idx] = (e - carve).clamp(0.01, 1.5);
+            // Fine dendritic drainage: a small ABSOLUTE incision everywhere so
+            // even lowland interiors get subtle channels for rivers to bed into
+            // (matches the template path; keeps plains from sheet-flowing).
+            let dridge = ridged_multifractal(rx * 3.4, ry * 3.4, seed.wrapping_add(0x0DDA), 4, 2.0, 2.0);
+            let fine_carve = (1.0 - dridge).powi(2) * 0.045;
+            elevation[idx] = (e - carve - fine_carve).clamp(0.01, 1.5);
         }
     }
 
@@ -731,8 +736,12 @@ pub fn generate_elevation_from_terrain(
             // Medium features (mountain ranges)
             let medium = fbm_noise(wnx * med_scale, wny * med_scale, seed.wrapping_add(31337), 4, 2.2, 0.45);
 
-            // Small features (hills)
-            let small = fbm_noise(wnx * 6.0, wny * 6.0, seed.wrapping_add(65521), 3, 2.0, 0.4);
+            // Small features (hills) — two scales so interiors keep fine
+            // texture the river router can follow into natural channels instead
+            // of sheet-flowing across a smooth plain.
+            let small_a = fbm_noise(wnx * 6.0, wny * 6.0, seed.wrapping_add(65521), 3, 2.0, 0.4);
+            let small_b = fbm_noise(wnx * 13.0, wny * 13.0, seed.wrapping_add(0xF19E), 3, 2.0, 0.42);
+            let small = small_a * 0.62 + small_b * 0.38;
 
             // Ridged multifractal — elongated ridge lines (the key for mountain chains).
             // Frequency set by mountain_spread (narrow peaks ↔ wide ranges).
@@ -748,9 +757,18 @@ pub fn generate_elevation_from_terrain(
             // highlands get dissected into ridge-and-valley relief while
             // lowlands stay broad. This is what was missing — "almost no valleys".
             let vridge = ridged_multifractal(wnx * ridge_scale * 1.8, wny * ridge_scale * 1.8, seed.wrapping_add(0x5A1F), 5, 2.0, 2.0);
-            let carve = (1.0 - vridge).powi(2) * (0.12 + 0.20 * roughness) * combined;
+            let carve = (1.0 - vridge).powi(2) * (0.14 + 0.22 * roughness) * combined;
 
-            elevation[idx] = (combined - carve).clamp(0.01, 1.0);
+            // ── Fine dendritic drainage (moderate, natural) ─────────────────
+            // A high-frequency inverted ridged field carves shallow valleys
+            // EVERYWHERE — a small ABSOLUTE incision independent of local height,
+            // so broad lowland interiors also get subtle channels for rivers to
+            // bed into. Without it, plains stayed too flat and rivers ran straight
+            // or braided across sheet-flow terrain.
+            let dridge = ridged_multifractal(wnx * ridge_scale * 3.1, wny * ridge_scale * 3.1, seed.wrapping_add(0x0DDA), 4, 2.0, 2.0);
+            let fine_carve = (1.0 - dridge).powi(2) * (0.035 + 0.05 * roughness);
+
+            elevation[idx] = (combined - carve - fine_carve).clamp(0.01, 1.0);
         }
     }
 
@@ -924,8 +942,11 @@ pub fn generate_elevation_ridged(
             // ridge-and-valley relief instead of smooth domes.
             let vridge = ridged_multifractal(rx * 2.1, ry * 2.1, seed.wrapping_add(0x5A1F), 5, 2.0, 2.0);
             let carve = (1.0 - vridge).powi(2) * (0.14 + 0.20 * roughness) * e;
+            // Fine dendritic drainage everywhere (see generate_elevation_from_terrain).
+            let dridge = ridged_multifractal(rx * 3.6, ry * 3.6, seed.wrapping_add(0x0DDA), 4, 2.0, 2.0);
+            let fine_carve = (1.0 - dridge).powi(2) * (0.035 + 0.05 * roughness);
 
-            elevation[idx] = (e - carve).clamp(0.01, 1.5);
+            elevation[idx] = (e - carve - fine_carve).clamp(0.01, 1.5);
         }
     }
 

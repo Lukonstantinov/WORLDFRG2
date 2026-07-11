@@ -107,38 +107,77 @@ fn render_full_res(
     layers: &[String],
     db: &State<'_, WorldDb>,
 ) -> Result<Vec<RawTileImage>, String> {
+    // The "terrain" hillshade layer needs each tile's cardinal neighbours to
+    // shade slopes continuously across tile boundaries (otherwise a faint grid
+    // of tile seams appears). Pull the neighbour ring only when that layer is
+    // requested; other layers render purely from their own tile.
+    let needs_neighbors = layers.iter().any(|l| l == "terrain");
+
+    // Deduped set of tiles to fetch: the requested tiles, plus (for terrain) the
+    // 4 cardinal neighbours of each so the halo has real edge data.
+    let mut want: HashSet<(i32, i32)> = tiles.iter().copied().collect();
+    if needs_neighbors {
+        for &(tx, ty) in &tiles {
+            want.insert((tx - 1, ty));
+            want.insert((tx + 1, ty));
+            want.insert((tx, ty - 1));
+            want.insert((tx, ty + 1));
+        }
+    }
+
     // Fetch the compressed blobs + versions under the lock (cheap memcpy), then
     // release it so the CPU-bound decompress → render runs in parallel off-lock
     // instead of serializing every tile behind the DB mutex.
-    let raw: Vec<(i32, i32, i64, Option<Vec<u8>>)> = {
+    let raw: Vec<((i32, i32), i64, Option<Vec<u8>>)> = {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
-        tiles
+        want
             .iter()
             .map(|&(tx, ty)| {
                 let bv = tile_store::load_blob_with_version(&conn, tx, ty, 0)
                     .map_err(|e| e.to_string())?;
                 Ok(match bv {
-                    Some((version, blob)) => (tx, ty, version, Some(blob)),
-                    None => (tx, ty, 0, None),
+                    Some((version, blob)) => ((tx, ty), version, Some(blob)),
+                    None => ((tx, ty), 0, None),
                 })
             })
             .collect::<Result<Vec<_>, String>>()?
     };
 
-    let results = raw
-        .par_iter()
-        .flat_map_iter(|(tx, ty, version, blob)| {
+    // Decompress everything (requested + neighbours) in parallel, off-lock.
+    let decoded: HashMap<(i32, i32), (i64, TileData)> = raw
+        .into_par_iter()
+        .map(|(coord, version, blob)| {
             let tile = match blob {
-                Some(b) => TileData::decompress(b),
+                Some(b) => TileData::decompress(&b),
                 None => TileData::new_sea(),
+            };
+            (coord, (version, tile))
+        })
+        .collect();
+
+    let results = tiles
+        .par_iter()
+        .flat_map_iter(|&(tx, ty)| {
+            let (version, tile) = decoded
+                .get(&(tx, ty))
+                .expect("requested tile always decoded");
+            let neighbors = if needs_neighbors {
+                tile_image::TileNeighbors {
+                    north: decoded.get(&(tx, ty - 1)).map(|(_, t)| t),
+                    south: decoded.get(&(tx, ty + 1)).map(|(_, t)| t),
+                    west: decoded.get(&(tx - 1, ty)).map(|(_, t)| t),
+                    east: decoded.get(&(tx + 1, ty)).map(|(_, t)| t),
+                }
+            } else {
+                tile_image::TileNeighbors::default()
             };
             layers.iter().enumerate().map(move |(li, layer)| {
                 RawTileImage {
-                    tx: *tx,
-                    ty: *ty,
+                    tx,
+                    ty,
                     layer_idx: li as u8,
                     version: *version,
-                    rgba: tile_image::render_tile(&tile, layer),
+                    rgba: tile_image::render_tile_with_neighbors(tile, layer, &neighbors),
                 }
             }).collect::<Vec<_>>()
         })

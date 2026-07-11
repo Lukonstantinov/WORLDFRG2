@@ -553,6 +553,61 @@ fn render_disease(tile: &TileData, rgba: &mut [u8]) {
 }
 
 fn render_terrain_hillshade(tile: &TileData, rgba: &mut [u8]) {
+    // No neighbour tiles available (supertile / crop paths): fall back to
+    // within-tile slopes. Edge pixels replicate, which is what produced the
+    // faint tile-seam grid at LOD 0 — the neighbour-aware path below removes it.
+    render_terrain_hillshade_halo(tile, &TileNeighbors::default(), rgba);
+}
+
+/// Cardinal neighbour tiles for a seam-free hillshade slope stencil. Missing
+/// neighbours (world edge / not loaded) fall back to edge replication.
+#[derive(Default)]
+pub struct TileNeighbors<'a> {
+    pub north: Option<&'a TileData>, // ty - 1 (up, y decreases)
+    pub south: Option<&'a TileData>, // ty + 1 (down)
+    pub west: Option<&'a TileData>,  // tx - 1 (left)
+    pub east: Option<&'a TileData>,  // tx + 1 (right)
+}
+
+/// Elevation at a tile-local coordinate that may step ONE cell outside the tile
+/// (x or y == -1 or SIZE). Out-of-range reads pull the adjacent neighbour tile's
+/// edge line so the slope is continuous across tile boundaries; if the neighbour
+/// is absent the value replicates the tile's own edge (old behaviour).
+#[inline]
+fn halo_elev(tile: &TileData, n: &TileNeighbors, x: isize, y: isize) -> f32 {
+    let sz = SIZE as isize;
+    if x < 0 {
+        let yy = y.clamp(0, sz - 1) as usize;
+        return n
+            .west
+            .map(|t| t.elevation[yy * SIZE + (SIZE - 1)])
+            .unwrap_or(tile.elevation[yy * SIZE]);
+    }
+    if x >= sz {
+        let yy = y.clamp(0, sz - 1) as usize;
+        return n
+            .east
+            .map(|t| t.elevation[yy * SIZE])
+            .unwrap_or(tile.elevation[yy * SIZE + (SIZE - 1)]);
+    }
+    if y < 0 {
+        let xx = x as usize;
+        return n
+            .north
+            .map(|t| t.elevation[(SIZE - 1) * SIZE + xx])
+            .unwrap_or(tile.elevation[xx]);
+    }
+    if y >= sz {
+        let xx = x as usize;
+        return n
+            .south
+            .map(|t| t.elevation[xx])
+            .unwrap_or(tile.elevation[(SIZE - 1) * SIZE + xx]);
+    }
+    tile.elevation[y as usize * SIZE + x as usize]
+}
+
+fn render_terrain_hillshade_halo(tile: &TileData, n: &TileNeighbors, rgba: &mut [u8]) {
     // Directional light from NW (azimuth 315, altitude 45 degrees)
     let az = 315.0_f32.to_radians();
     let alt = 45.0_f32.to_radians();
@@ -577,11 +632,13 @@ fn render_terrain_hillshade(tile: &TileData, rgba: &mut [u8]) {
             }
 
             let e = tile.elevation[i];
-            // Compute slope using neighbors within tile
-            let left = if x > 0 { tile.elevation[i - 1] } else { e };
-            let right = if x < SIZE - 1 { tile.elevation[i + 1] } else { e };
-            let up = if y > 0 { tile.elevation[i - SIZE] } else { e };
-            let down = if y < SIZE - 1 { tile.elevation[i + SIZE] } else { e };
+            // Slope from neighbours, reaching into adjacent tiles at the edges so
+            // there is no derivative discontinuity at 128-cell tile boundaries.
+            let (xi, yi) = (x as isize, y as isize);
+            let left = halo_elev(tile, n, xi - 1, yi);
+            let right = halo_elev(tile, n, xi + 1, yi);
+            let up = halo_elev(tile, n, xi, yi - 1);
+            let down = halo_elev(tile, n, xi, yi + 1);
 
             let dzdx = (right - left) * 50.0; // scale factor for visible relief
             let dzdy = (down - up) * 50.0;
@@ -602,6 +659,19 @@ fn render_terrain_hillshade(tile: &TileData, rgba: &mut [u8]) {
             rgba[offset + 2] = (bb as f32 * shade) as u8;
             rgba[offset + 3] = 255;
         }
+    }
+}
+
+/// Like `render_tile`, but for the "terrain" hillshade layer it uses the given
+/// cardinal neighbour tiles to compute seam-free slopes. All other layers ignore
+/// the neighbours and render identically to `render_tile`.
+pub fn render_tile_with_neighbors(tile: &TileData, layer: &str, n: &TileNeighbors) -> Vec<u8> {
+    if layer == "terrain" {
+        let mut rgba = vec![0u8; PIXEL_COUNT * 4];
+        render_terrain_hillshade_halo(tile, n, &mut rgba);
+        rgba
+    } else {
+        render_tile(tile, layer)
     }
 }
 
