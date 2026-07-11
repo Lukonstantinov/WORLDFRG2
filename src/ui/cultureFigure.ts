@@ -10,7 +10,13 @@ export interface FigureOpts {
   seed: number;         // per-individual seed (drives every random roll)
   kit2?: number;        // creole: second parent kit (blends palette/dress/headwear)
   variant?: number;     // extra roll offset (e.g. re-roll button) — folded into seed
+  occasion?: Occasion;  // dress register: everyday (casual, trousers) vs ceremonial (robes, finery). Default "national".
 }
+
+/** Dress register. "national" = the default costume-plate; "everyday" = casual
+ *  working dress (trousers/short tunic, plain, no cloak); "ceremonial" = finery
+ *  (long robe, cloak, jewels, richer trim). */
+export type Occasion = "national" | "everyday" | "ceremonial";
 
 type Garment = "tunic" | "robe" | "toga" | "thobe" | "kaftan";
 type Gown = "gown" | "stola" | "sari" | "robe";
@@ -81,30 +87,51 @@ interface Look {
   skin: string; skinS: string; hair: string; robe: string; robeS: string; robeL: string;
   trim: string; cloth2: string; gm: Garment; gf: Gown; head: Head; motif: Motif;
   beard: boolean; cloak: boolean; longHair: boolean; build: number; jewel: boolean; staff: boolean;
+  trousers: boolean;      // wears trousers/short tunic (vs a long draped garment)
+  sash: boolean;          // waist sash drawn (dropped for plain everyday wear)
 }
 
 function rollLook(base: Kit, o: FigureOpts, r: () => number): Look {
   const female = o.sex === "f";
+  const occ: Occasion = o.occasion ?? "national";
   const ramp = SKIN[base.env];
   // weight toward the middle of the ramp so extremes are rarer
   const si = Math.min(ramp.length - 1, Math.floor((r() * 0.6 + r() * 0.6) / 1.2 * ramp.length));
   const skin = shade(ramp[si], (r() - 0.5) * 0.06);
   const hair = pick(r, base.hairs);
   const robe0 = pick(r, base.robes);
-  const robe = shade(robe0, (r() - 0.5) * 0.1);
+  // Everyday clothes are plainer/earthier; ceremonial keeps the bright dyes.
+  const robe = shade(robe0, (r() - 0.5) * 0.1 + (occ === "everyday" ? -0.1 : 0));
   const heads = female ? base.headsF : base.heads;
   const head: Head = heads.length ? pick(r, heads) : "none";
+  // National dress keeps the kit's default garment. Everyday men wear trousers +
+  // a short tunic almost everywhere (working dress); ceremonial puts everyone in a
+  // long robe. `tunicLike` cultures (Norse/Celtic…) already wore trousers.
+  const kitTunic = base.gm === "tunic" && !female;
+  const trousers = occ === "everyday" ? !female
+    : occ === "ceremonial" ? false
+    : kitTunic;
+  // Cloaks: rare in everyday, near-certain in ceremonial finery.
+  const cloak = occ === "everyday" ? false
+    : occ === "ceremonial" ? r() < 0.9
+    : r() < base.cloak;
+  const jewelBase = female ? 0.7 : 0.2;
+  const jewel = occ === "everyday" ? r() < jewelBase * 0.3
+    : occ === "ceremonial" ? r() < Math.min(1, jewelBase + 0.4)
+    : r() < jewelBase;
   return {
     skin, skinS: shade(skin, -0.16), hair,
     robe, robeS: shade(robe, -0.16), robeL: shade(robe, 0.13),
     trim: pick(r, base.trims), cloth2: pick(r, base.cloth2),
-    gm: base.gm, gf: base.gf, head, motif: base.motif,
+    gm: base.gm, gf: base.gf, head, motif: occ === "everyday" ? "plain" : base.motif,
     beard: !female && base.beardable && r() < 0.55,
-    cloak: r() < base.cloak,
+    cloak,
     longHair: female ? r() < 0.8 : r() < 0.25,
     build: 0.92 + r() * 0.18,
-    jewel: female ? r() < 0.7 : r() < 0.2,
-    staff: !female && r() < 0.18,
+    jewel,
+    staff: !female && r() < (occ === "ceremonial" ? 0.4 : occ === "everyday" ? 0.06 : 0.18),
+    trousers,
+    sash: occ !== "everyday" || r() < 0.4,
   };
 }
 
@@ -134,7 +161,7 @@ function figure(L: Look, sex: "m" | "f"): string {
   if (L.cloak) P.push(`<path d="M${shL - 2} ${shY} Q${cx} ${shY + 8} ${shR + 2} ${shY} L${shR + 10} ${hemY - 6} Q${cx} ${hemY + 8} ${shL - 10} ${hemY - 6} Z" fill="${shade(cloth2, -0.15)}" opacity="0.9"/>`);
 
   // ── lower body ──
-  const tunicLike = L.gm === "tunic" && !female;
+  const tunicLike = L.trousers && !female;
   if (tunicLike) {
     // trousers + boots
     const lw = 12 * L.build;
@@ -171,8 +198,8 @@ function figure(L: Look, sex: "m" | "f"): string {
   }
   // collar / shoulders
   P.push(`<path d="M${shL} ${shY} Q${cx} ${shY - 8} ${shR} ${shY}" fill="none" stroke="${trim}" stroke-width="2.6" opacity="0.7"/>`);
-  // waist sash
-  P.push(`<path d="M${cx - 19} ${waistY - 3} Q${cx} ${waistY + 5} ${cx + 19} ${waistY - 3} L${cx + 19} ${waistY + 7} Q${cx} ${waistY + 15} ${cx - 19} ${waistY + 7} Z" fill="${cloth2}"/>`);
+  // waist sash (dropped for plain everyday wear)
+  if (L.sash) P.push(`<path d="M${cx - 19} ${waistY - 3} Q${cx} ${waistY + 5} ${cx + 19} ${waistY - 3} L${cx + 19} ${waistY + 7} Q${cx} ${waistY + 15} ${cx - 19} ${waistY + 7} Z" fill="${cloth2}"/>`);
 
   // ── arms (wide sleeves for robe/hanfu, narrow for tunic) ──
   const wide = (L.gm === "robe" || L.gm === "kaftan" || L.gm === "thobe");
