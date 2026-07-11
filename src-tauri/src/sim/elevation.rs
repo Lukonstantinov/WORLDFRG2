@@ -678,6 +678,20 @@ pub fn generate_elevation_from_terrain(
     // cordillera). Spans roughly med_scale×1.7 … med_scale×0.6.
     let ridge_scale = med_scale * (1.7 - spread * 1.1);
 
+    // ── ABSOLUTE-wavelength interior relief (measured in CELLS, not map fractions).
+    // The `scale`-based fields above tie every feature to the map size, so the
+    // interior of a large continent spans barely one noise period and comes out a
+    // smooth dome — which the hypsometric redistribution then flattens into a
+    // uniform "green blob" (the user's report). These absolute-frequency belts +
+    // hills add ranges and texture whose COUNT scales with continent AREA (the same
+    // trick as generate_elevation_ridged), so interiors are never featureless.
+    let f_belt_abs = 1.0 / 540.0;                     // orogenic-belt spacing (cells)
+    let f_range_abs = 1.0 / (120.0 + spread * 230.0); // ridge wavelength (cells)
+    let f_hill_abs = 1.0 / 52.0;                       // fine hills (cells)
+    let warp_abs = 1.4 + roughness * 1.4;
+    let ridge_amp_abs = 0.35 + density * 0.55;
+    let hill_amp_abs = 0.05 + roughness * 0.12;
+
     // ── Step 1a: distance-from-coast for every land cell ────────────────
     // Computed up front so interior cells can be lifted into a broad
     // continental rise — otherwise low-frequency noise leaves whole
@@ -751,8 +765,32 @@ pub fn generate_elevation_from_terrain(
             // Frequency set by mountain_spread (narrow peaks ↔ wide ranges).
             let ridge = ridged_multifractal(wnx * ridge_scale, wny * ridge_scale, seed.wrapping_add(48271), 6, 2.1, 2.0);
 
-            // Combine with normalized weights (WF1 generateBaseHeightmap).
-            let combined = large * n_large + medium * n_medium + small * n_small + ridge * n_ridge;
+            // Absolute-wavelength interior relief (cell-frequency belts + hills), so
+            // even a huge continent interior gets ranges and texture instead of a
+            // smooth dome. Belt-masked so ranges concentrate into plausible orogenic
+            // bands rather than blanketing the whole interior.
+            let ax = x as f32;
+            let ay = y as f32;
+            let belt_raw = fbm_noise(ax * f_belt_abs + 11.0, ay * f_belt_abs + 4.0,
+                                     seed.wrapping_add(0xB317), 4, 2.0, 0.5);
+            let mut belt = ((belt_raw - 0.46) / 0.26).clamp(0.0, 1.0);
+            belt = belt * belt * (3.0 - 2.0 * belt); // smoothstep
+            let (arx, ary) = warped_coords(ax * f_range_abs, ay * f_range_abs,
+                                           seed.wrapping_add(0x9E37), warp_abs);
+            let ridge_abs = ridged_multifractal(arx, ary, seed.wrapping_add(0x48271), 7, 2.1, 2.0);
+            let hill_abs = fbm_noise(ax * f_hill_abs, ay * f_hill_abs,
+                                     seed.wrapping_add(0xFEED), 3, 2.0, 0.45);
+            let abs_relief = ridge_abs * belt * ridge_amp_abs + hill_abs * hill_amp_abs;
+
+            // Combine with normalized weights (WF1 generateBaseHeightmap), then fold
+            // in the absolute-scale interior relief. The map-scaled part keeps the
+            // continental-scale structure (where it's high vs low); the absolute part
+            // supplies the local ranges/hills that break up the interior. Normalize +
+            // redistribution downstream only care about the RELATIVE pattern, so this
+            // injects real rank variation into interiors → visible relief after
+            // redistribution instead of one flat band.
+            let combined = large * n_large + medium * n_medium + small * n_small
+                + ridge * n_ridge + abs_relief * 0.55;
 
             // ── Valley incision ─────────────────────────────────────────────
             // A second ridged field at higher frequency, INVERTED, carves
@@ -1178,6 +1216,64 @@ mod tests {
         let mut b = vec![flat; n];
         apply_micro_relief(&mut b, &terrain, w, h, 777);
         assert_eq!(a, b, "micro-relief must be reproducible for a given seed");
+    }
+
+    /// A LARGE continent interior must not read as a flat "green blob": the
+    /// template elevation model must give deep-interior cells genuine relief
+    /// (ranges/hills), not just the ±2 m micro-relief floor. Guards the
+    /// absolute-wavelength interior-relief injection in generate_elevation_from_terrain.
+    #[test]
+    fn template_interior_is_not_a_flat_blob() {
+        use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
+        let (w, h) = (180u32, 140u32);
+        let n = (w * h) as usize;
+        // A big landmass with a 4-cell sea frame (so coast-distance is well defined).
+        let mut terrain = vec![1u8; n];
+        for y in 0..h {
+            for x in 0..w {
+                if x < 4 || x >= w - 4 || y < 4 || y >= h - 4 {
+                    terrain[(y * w + x) as usize] = 0;
+                }
+            }
+        }
+        let mut buf = WorldBuffer {
+            cols: ColumnSet::ALL, width: w, height: h, tiles_x: 1, tiles_y: 1,
+            equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0,
+            terrain: terrain.clone(), elevation: vec![0.0; n],
+            sea_depth: vec![0.0; n], is_shelf: vec![0u8; n], is_shelf_edge: vec![0u8; n],
+            locked_bits: Vec::new(), plate_index: Vec::new(), boundary_type: Vec::new(),
+            is_volcanic: Vec::new(), temperature: Vec::new(), precipitation: Vec::new(),
+            koppen: Vec::new(), soil_type: Vec::new(), fertility: Vec::new(), fishery: Vec::new(),
+            current_type: Vec::new(), wind_vx: Vec::new(), wind_vy: Vec::new(),
+            current_vx: Vec::new(), current_vy: Vec::new(), distance_to_ocean: Vec::new(),
+            habitability: Vec::new(), salinity: Vec::new(), shark_risk: Vec::new(),
+            goods: Vec::new(), shipworm_risk: Vec::new(), storm_base: Vec::new(),
+            reef_risk: Vec::new(), disease_risk: Vec::new(),
+        };
+        generate_elevation_from_terrain(&mut buf, 12345, 0.5, 0.5, 0.5, 0.5);
+
+        // Deep interior = well away from the coast (central band). A genuine range-
+        // and-hill interior has many cells with real local slope; a flat dome has
+        // almost none beyond the ~2 m dither floor.
+        let floor = 2.0 / 8848.0;
+        let mut interior = 0usize;
+        let mut relieved = 0usize;
+        for y in 30..h - 30 {
+            for x in 30..w - 30 {
+                let i = (y * w + x) as usize;
+                interior += 1;
+                let mut slope = 0.0f32;
+                for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                    let ni = ((y as i32 + dy) as u32 * w + (x as i32 + dx) as u32) as usize;
+                    slope = slope.max((buf.elevation[i] - buf.elevation[ni]).abs());
+                }
+                if slope > floor * 6.0 { relieved += 1; } // > ~12 m/cell = real relief
+            }
+        }
+        let frac = relieved as f32 / interior as f32;
+        assert!(frac > 0.15,
+            "continent interior reads as a flat blob: only {:.1}% of interior cells have relief",
+            frac * 100.0);
     }
 
     /// Sloped ground should get MORE relief than flat ground (rolling hills), so
