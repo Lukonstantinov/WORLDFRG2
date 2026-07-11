@@ -1440,17 +1440,26 @@ pub fn campaign_get_cultures(db: State<'_, WorldDb>) -> Result<Vec<CultureBrief>
 /// is brightest; live cities where the people is present are lit too (majority brighter
 /// than a minority quarter), so migration/diaspora shows.
 #[derive(serde::Serialize)]
-pub struct CulturePresenceGrid { pub width: u32, pub height: u32, pub data: Vec<u8>, pub land: Vec<u8> }
+pub struct CulturePresenceGrid {
+    pub width: u32, pub height: u32, pub data: Vec<u8>, pub land: Vec<u8>,
+    /// Per coarse cell: 1 = this people is DOMINANT here (its homeland, or the local
+    /// majority of a city); 0 = merely present as a minority quarter (or other land).
+    /// The panel draws dominant areas at full colour and non-dominant at ~30%.
+    #[serde(default)] pub dominant: Vec<u8>,
+}
 
 #[tauri::command]
 pub fn campaign_get_culture_presence(name: String, db: State<'_, WorldDb>) -> Result<CulturePresenceGrid, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     crate::sim::cultures::ensure_active(&conn);
-    let map = match crate::sim::cultures::active() { Some(m) => m, None => return Ok(CulturePresenceGrid { width: 0, height: 0, data: vec![], land: vec![] }) };
+    let map = match crate::sim::cultures::active() { Some(m) => m, None => return Ok(CulturePresenceGrid { width: 0, height: 0, data: vec![], land: vec![], dominant: vec![] }) };
     let (cw, ch) = (map.cw, map.ch);
     let n = (cw * ch) as usize;
     let mut data = vec![0u8; n];
     let mut land = vec![0u8; n];
+    // 1 where this people is DOMINANT (homeland / local majority), 0 where it's only
+    // a minority presence — drives the full-vs-30% opacity split on the minimap.
+    let mut dominant = vec![0u8; n];
     // ── Land mask from the REAL terrain, downsampled to the coarse raster ──
     // MAJOR landmasses only: a coarse cell counts as land when a meaningful share
     // (≥28%) of its fine cells are land, so continents and sizeable islands show
@@ -1488,7 +1497,7 @@ pub fn campaign_get_culture_presence(name: String, db: State<'_, WorldDb>) -> Re
     let home = map.hearths.iter().position(|h| h.people == name);
     if let Some(hi) = home {
         for (ci, &id) in map.ids.iter().enumerate().take(n) {
-            if id as usize == hi { data[ci] = 255; land[ci] = 1; }
+            if id as usize == hi { data[ci] = 255; land[ci] = 1; dominant[ci] = 1; } // homeland = dominant
         }
     }
     // Live spread: light up coarse cells around cities where the people lives now.
@@ -1505,15 +1514,17 @@ pub fn campaign_get_culture_presence(name: String, db: State<'_, WorldDb>) -> Re
             let ci = coarse(h.x, h.y);
             if ci >= n { continue; }
             if sim.hub_culture.get(i).map(|c| c == &name).unwrap_or(false) {
-                land[ci] = 1; data[ci] = 255;
+                land[ci] = 1; data[ci] = 255; dominant[ci] = 1; // local MAJORITY = dominant
             } else if let Some(mins) = sim.hub_minorities.get(i) {
                 if let Some((_, s)) = mins.iter().find(|(c, _)| c == &name) {
+                    // Minority quarter: present but NOT dominant (unless this cell is
+                    // already the people's homeland/majority elsewhere).
                     if *s >= 0.05 { land[ci] = 1; data[ci] = data[ci].max((120.0 + *s * 130.0).min(240.0) as u8); }
                 }
             }
         }
     }
-    Ok(CulturePresenceGrid { width: cw, height: ch, data, land })
+    Ok(CulturePresenceGrid { width: cw, height: ch, data, land, dominant })
 }
 
 #[derive(serde::Serialize)]

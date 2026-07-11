@@ -292,7 +292,7 @@ export interface NotablePerson {
   city: string; wealth: number; alive: boolean; cities: NotableCity[];
 }
 /** Coarse "where a people lives" raster (Peoples-panel mini-map; mirrors the goods preview). */
-export interface CulturePresenceGrid { width: number; height: number; data: number[]; land: number[] }
+export interface CulturePresenceGrid { width: number; height: number; data: number[]; land: number[]; dominant?: number[] }
 /** One backer of a colony venture (city / house / bank). */
 export interface ColonyBackerRow { kind: number; name: string; color: string; share: number }
 /** One civic supply contract feeding a colony. */

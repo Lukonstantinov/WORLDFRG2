@@ -303,9 +303,17 @@ function CulturePresence({ name, color }: { name: string; color: [number, number
       cv.width = grid.width; cv.height = grid.height;
       const ctx = cv.getContext("2d"); if (!ctx) return;
       const img = ctx.createImageData(grid.width, grid.height);
+      const dom = grid.dominant;
       for (let p = 0; p < grid.data.length; p++) {
-        const v = grid.data[p] / 255;
+        const raw = grid.data[p];
         const isLand = grid.land[p] === 1;
+        const isDominant = dom ? dom[p] === 1 : raw >= 250;
+        // Intensity: full colour where this people is DOMINANT (homeland / local
+        // majority); a faint ~30% wash where it's only a MINORITY presence; a dim
+        // backdrop for other land. This makes "where they rule" read apart from
+        // "where they merely live among others".
+        let v = raw / 255;
+        if (!isDominant && raw > 40) v = Math.min(v, 0.3); // non-dominant presence → ~30%
         const o = p * 4;
         const bR = isLand ? 26 : 8, bG = isLand ? 32 : 11, bB = isLand ? 42 : 16;
         img.data[o] = Math.round(bR + color[0] * v);
@@ -331,7 +339,8 @@ function CulturePresence({ name, color }: { name: string; color: [number, number
           <canvas ref={ref} style={{ width: "100%", height: 118, imageRendering: "pixelated",
             border: `1px solid ${T.lineSoft}`, borderRadius: 5, background: "#06090d", display: "block" }} />
           <div style={{ color: T.inkFaint, fontSize: 9, marginTop: 3 }}>
-            Bright = homeland &amp; cities where this people lives · faint = other land.
+            Full colour = where this people is <b>dominant</b> (homeland &amp; majority) · faint
+            wash = where it lives as a <b>minority</b> · dim = other land.
           </div>
         </>
       )}
