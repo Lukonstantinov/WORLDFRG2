@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useUIStore } from "../state/uiStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useViewportStore } from "../state/viewportStore";
-import { campaignGetCultures, campaignGetCulturePresence, campaignGetCultureHistory, campaignGetMigrationRoutes } from "../bridge/tauri";
-import type { CultureBrief, MigrationRouteBrief } from "../types";
+import { campaignGetCultures, campaignGetCulturePresence, campaignGetCultureHistory, campaignGetMigrationRoutes, campaignGetCultureNotables } from "../bridge/tauri";
+import type { CultureBrief, MigrationRouteBrief, NotablePerson } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 import { CultureFigures } from "./CultureFigures";
 import { CoatOfArms, houseColor } from "./CoatOfArms";
@@ -241,6 +241,10 @@ export function PeoplesPanel() {
                 <CultureMigration name={sel.name} color={sel.color}
                   hubs={snapshot?.hubs ?? []} tick={snapshot?.clock?.tick ?? 0} />
 
+                {/* Notable people — magnates & dynastic heads, with clickable cities. */}
+                <NotablePeople name={sel.name} tick={snapshot?.clock?.tick ?? 0}
+                  onLocate={(x, y) => setSearchPin(x, y)} />
+
                 <div style={sectionHdr}>Chief cities</div>
                 {sel.top_cities.length === 0 ? <div style={hint}>—</div> : sel.top_cities.map(([name, pop]) => (
                   <div key={name} onClick={() => { const h = snapshot?.hubs.find((x) => x.name === name); if (h) setSearchPin(h.x, h.y); }}
@@ -375,6 +379,57 @@ function CulturePopChart({ name, color, tick }: { name: string; color: [number, 
         <text x={pad} y={9} fill={T.inkFaint} fontSize={7}>{fmtK(y1)}</text>
       </svg>
       <div style={{ color: T.inkFaint, fontSize: 9, marginTop: 1 }}>Sampled every 6 months.</div>
+    </div>
+  );
+}
+
+/** Notable people — the great merchant magnates / dynastic heads of this culture,
+ *  with a short bio and the cities they reached (clickable to locate on the map). */
+function NotablePeople({ name, tick, onLocate }: {
+  name: string; tick: number; onLocate: (x: number, y: number) => void;
+}) {
+  const [people, setPeople] = useState<NotablePerson[]>([]);
+  useEffect(() => {
+    let ok = true;
+    campaignGetCultureNotables(name).then((r) => { if (ok) setPeople(r); }).catch(() => {});
+    return () => { ok = false; };
+  }, [name, tick]);
+  if (people.length === 0) return null;
+  return (
+    <div style={{ marginBottom: 11 }}>
+      <div style={sectionHdr}>Notable people</div>
+      {people.map((p, i) => (
+        <div key={i} style={{ padding: "6px 0", borderBottom: `1px solid ${T.lineSoft}` }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+            <span style={{ fontFamily: SERIF, color: p.alive ? T.ink : T.inkDim, fontSize: 13, fontWeight: 700,
+              fontStyle: p.alive ? "normal" : "italic" }}>{p.name}</span>
+            <span style={{ color: T.inkFaint, fontSize: 10 }}>· {p.house}</span>
+            {!p.alive && <span style={{ color: T.inkFaint, fontSize: 9 }}>✝</span>}
+          </div>
+          <div style={{ color: T.inkFaint, fontSize: 9.5, marginBottom: 2 }}>{p.era}</div>
+          <div style={{ fontFamily: SERIF, fontStyle: "italic", color: T.inkMid, fontSize: 11.5, lineHeight: 1.45 }}>
+            {p.known_for}.
+          </div>
+          {p.cities.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3, alignItems: "center" }}>
+              <span style={{ color: T.inkFaint, fontSize: 9.5 }}>
+                {p.cities.length > 1 ? "seat & reach:" : "seat:"}
+              </span>
+              {p.cities.map((c, ci) => (
+                <span key={ci} onClick={() => onLocate(c.x, c.y)}
+                  title={c.role === "seat" ? "Home seat — click to locate" : "A city this house reached — click to locate"}
+                  style={{ cursor: "pointer", fontSize: 10.5, color: c.role === "seat" ? "#e6cf9a" : "#7fb0e0",
+                    border: `1px solid ${c.role === "seat" ? "#e6cf9a55" : "#7fb0e055"}`, borderRadius: 10, padding: "1px 7px" }}>
+                  {c.role === "seat" ? "★ " : "→ "}{c.name}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+      <div style={{ color: T.inkFaint, fontSize: 9, marginTop: 3 }}>
+        Great merchant houses of this people — their magnates, monopolies and the cities their agents reached.
+      </div>
     </div>
   );
 }

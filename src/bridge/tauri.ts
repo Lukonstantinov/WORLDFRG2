@@ -682,6 +682,11 @@ export async function campaignGetCulturePresence(name: string): Promise<import("
   return invoke("campaign_get_culture_presence", { name });
 }
 
+/** Notable people (merchant magnates / dynastic heads) of one people. */
+export async function campaignGetCultureNotables(name: string): Promise<import("../types").NotablePerson[]> {
+  return invoke("campaign_get_culture_notables", { name });
+}
+
 /** 6-monthly population series [year, population] for one people (line chart). */
 export async function campaignGetCultureHistory(name: string): Promise<[number, number][]> {
   return invoke("campaign_get_culture_history", { name });

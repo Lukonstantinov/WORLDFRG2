@@ -1516,6 +1516,95 @@ pub fn campaign_get_culture_presence(name: String, db: State<'_, WorldDb>) -> Re
     Ok(CulturePresenceGrid { width: cw, height: ch, data, land })
 }
 
+#[derive(serde::Serialize)]
+pub struct NotableCity { pub name: String, pub x: f32, pub y: f32, pub role: String }
+
+/// One notable figure of a people — a merchant magnate / dynastic head, grounded in
+/// the live house registry (real names, cities, wealth and deeds).
+#[derive(serde::Serialize)]
+pub struct NotablePerson {
+    pub name: String,       // the head of family (individual)
+    pub house: String,      // their house
+    pub era: String,        // when they lived / flourished
+    pub known_for: String,  // what they are remembered for
+    pub city: String,       // their seat city
+    pub wealth: f64,
+    pub alive: bool,        // their house still endures
+    pub cities: Vec<NotableCity>, // seat + the cities they reached (offices) — clickable
+}
+
+/// Notable people of a culture — its great merchant houses' heads: who they were,
+/// when they lived, what they did (trade monopolies, banking, ruling councils), their
+/// seat city and the far cities their agents reached (a form of migration/expansion).
+/// Grounded entirely in the live house registry.
+#[tauri::command]
+pub fn campaign_get_culture_notables(name: String, db: State<'_, WorldDb>) -> Result<Vec<NotablePerson>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let year_of = |t: u32| (t / crate::sim::tick::TICKS_PER_YEAR) as i64;
+    let cur_year = year_of(sim.tick);
+    let good_name = |g: usize| sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
+    let hub_of = |hi: u32| sim.hubs.get(hi as usize);
+
+    // Private houses (not civic guilds) seated in a city of this culture.
+    let mut cand: Vec<&crate::sim::tick::House> = sim.houses.iter().filter(|hh| {
+        !hh.is_guild && sim.hub_culture.get(hh.hub as usize).map(|c| c == &name).unwrap_or(false)
+    }).collect();
+    // Magnates first: political power + prestige + (log) wealth.
+    cand.sort_by(|a, b| {
+        let s = |h: &crate::sim::tick::House| h.political_power + h.prestige * 0.5 + (h.wealth.max(0.0)).ln_1p() * 0.1;
+        s(b).partial_cmp(&s(a)).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let richest = cand.iter().map(|h| h.wealth).fold(0.0f32, f32::max);
+
+    let mut out = Vec::new();
+    for hh in cand.into_iter().take(8) {
+        let seat = hub_of(hh.hub);
+        let city = seat.map(|s| s.name.clone()).unwrap_or_default();
+        let head = if hh.head_name.is_empty() { hh.name.clone() } else { hh.head_name.clone() };
+        let founded = year_of(hh.founded_tick);
+        let era = if hh.defunct {
+            format!("of old — the house rose about year {founded}, now passed into memory")
+        } else {
+            format!("flourishing by year {cur_year} — {} generation(s) of the line", hh.generation.max(1))
+        };
+        // Deeds — trade, banking, politics, dominion.
+        let mut deeds: Vec<String> = Vec::new();
+        if richest > 0.0 && hh.wealth >= richest * 0.999 {
+            deeds.push(format!("the richest magnate of the {name}"));
+        }
+        deeds.push(match hh.archetype {
+            1 => "master of a great merchant fleet".to_string(),
+            2 => "a banking magnate whose credit financed whole cities".to_string(),
+            3 => format!("a power behind the council of {city}"),
+            _ => "head of a great trading dynasty".to_string(),
+        });
+        let monos: Vec<String> = hh.mono_ever.iter().take(3).map(|&g| good_name(g)).filter(|s| !s.is_empty()).collect();
+        if !monos.is_empty() { deeds.push(format!("held the {} trade in his grip", monos.join(", "))); }
+        let chs: Vec<String> = hh.charters.iter().take(2).map(|&g| good_name(g)).filter(|s| !s.is_empty()).collect();
+        if !chs.is_empty() { deeds.push(format!("won a civic charter on {}", chs.join(", "))); }
+        if hh.dominant_seat && !city.is_empty() { deeds.push(format!("ruled the commerce of {city}")); }
+        let known_for = deeds.join("; ");
+
+        // Cities: seat (home) + offices the house reached (its agents' migration/expansion).
+        let mut cities: Vec<NotableCity> = Vec::new();
+        if let Some(s) = seat { cities.push(NotableCity { name: s.name.clone(), x: s.x, y: s.y, role: "seat".into() }); }
+        let mut office_hubs: Vec<u32> = hh.offices.clone();
+        for &(o, _) in &hh.office_leases { if !office_hubs.contains(&o) { office_hubs.push(o); } }
+        for &o in office_hubs.iter().take(6) {
+            if o == hh.hub { continue; }
+            if let Some(s) = hub_of(o) {
+                cities.push(NotableCity { name: s.name.clone(), x: s.x, y: s.y, role: "office".into() });
+            }
+        }
+        out.push(NotablePerson {
+            name: head, house: hh.name.clone(), era, known_for, city,
+            wealth: hh.wealth.max(0.0) as f64, alive: !hh.defunct, cities,
+        });
+    }
+    Ok(out)
+}
+
 /// The 6-monthly population series for one people (for the Peoples-panel line chart).
 /// Returns `[year, population]` points in time order.
 #[tauri::command]

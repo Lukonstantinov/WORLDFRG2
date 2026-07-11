@@ -286,6 +286,11 @@ export interface CultureBrief {
 }
 export interface CultureTraitBrief { name: string; emoji: string; blurb: string }
 export interface CultureRelation { name: string; kind: string } // kin|friendly|rival|hostile
+export interface NotableCity { name: string; x: number; y: number; role: string } // seat|office
+export interface NotablePerson {
+  name: string; house: string; era: string; known_for: string;
+  city: string; wealth: number; alive: boolean; cities: NotableCity[];
+}
 /** Coarse "where a people lives" raster (Peoples-panel mini-map; mirrors the goods preview). */
 export interface CulturePresenceGrid { width: number; height: number; data: number[]; land: number[] }
 /** One backer of a colony venture (city / house / bank). */
