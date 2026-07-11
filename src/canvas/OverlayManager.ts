@@ -1136,11 +1136,11 @@ export class OverlayManager {
         if (river.points.length < 2) return;
         const isHL = hasHL && hl.has(i);
         // Width scales with the river's Strahler order (headwater creek → great
-        // trunk): a creek ≈ 0.8 px, a high-order trunk ≈ 1.9 px, zoom-compensated.
-        // Kept deliberately thin — the old (1.2–2.8 px) band read as fat ribbons.
+        // trunk): a creek ≈ 0.55, a high-order trunk ≈ 1.3, zoom-compensated. Kept
+        // deliberately thin — earlier bands still read as fat ribbons on close zoom.
         const ord = river.order ?? (river.major ? 4 : 1);
-        const baseW = 0.55 + Math.min(ord, 6) * 0.22;
-        const riverW = Math.max(0.5, Math.min(2.2, baseW) * inv);
+        const baseW = 0.4 + Math.min(ord, 6) * 0.15;
+        const riverW = Math.max(0.4, Math.min(1.5, baseW) * inv);
         ctx.globalAlpha = hasHL ? (isHL ? 0.95 : 0.22) : 0.85;
         ctx.strokeStyle = riverShade(river.major);
         ctx.lineWidth = riverW;

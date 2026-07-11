@@ -367,43 +367,23 @@ pub fn extract_rivers(
     let density_mult = (3.0 - 2.3 * density).max(0.25);
     let threshold = (base * density_mult).max(4.0) as u32;
 
-    // ── CLIMATE-WEIGHTED per-cell channel threshold ──────────────────────────
-    // Rivers are a function of the local water balance, not just drainage area:
-    // wet climates (rainforest, humid temperate) sprout many perennial channels,
-    // while arid basins swallow their runoff to evaporation and carry almost none
-    // (the Sahara has a vast catchment but scarcely any rivers). So the flow a
-    // channel must carry to "count" scales UP in dry cells and DOWN in wet ones.
-    // A river flowing off a wet upland INTO a desert simply falls below the higher
-    // desert threshold and stops there — the realistic "river vanishes into the
-    // sands" ending, handled for free by the downstream channel test.
     let use_koppen = !buf.koppen.is_empty();
-    let cell_thresh: Vec<u32> = (0..total).map(|i| {
-        if buf.terrain[i] != 1 { return u32::MAX; }
-        let p = buf.precipitation[i].max(40.0);
-        // precip 1400+ → ~0.6× (wet, dense), 700 → ~1.0×, 250 → ~1.8×, 100 → ~2.6×.
-        let mut m = (900.0 / p).clamp(0.55, 2.8);
-        if use_koppen {
-            match buf.koppen[i] {
-                crate::sim::koppen::BWH | crate::sim::koppen::BWK => m *= 1.7, // true desert: rivers rare
-                crate::sim::koppen::BSH | crate::sim::koppen::BSK => m *= 1.3, // steppe: sparse
-                crate::sim::koppen::AF | crate::sim::koppen::AM => m *= 0.82,  // rainforest: dense
-                _ => {}
-            }
-        }
-        ((threshold as f32) * m).max(4.0) as u32
-    }).collect();
 
     // ── Build the channel network ────────────────────────────────────────────
     // A channel cell is land (not a permanent ice cap) carrying at least
-    // `threshold` accumulated flow. These form drainage FORESTS rooted at the
-    // sea. We walk them as trees so every TRIBUTARY is emitted as its own
-    // segment, not silently discarded at each confluence (the old tracer only
-    // ever followed the single largest upstream branch — hence "no tributaries").
+    // `threshold` accumulated flow — a UNIFORM threshold, deliberately. A per-cell
+    // (climate-weighted) threshold truncates rivers mid-course: a channel that
+    // flows into a drier, higher-threshold cell before its accumulation catches up
+    // is cut off, leaving a dangling stub on open land (the "river got truncated"
+    // bug). With a single threshold, every channel runs unbroken to its true outlet
+    // (sea / lake / confluence). Climate density instead prunes WHOLE small streams
+    // in arid catchments after extraction (see the arid-tributary drop below), which
+    // thins desert rivers without ever cutting a river in half.
     let is_channel = |i: usize| -> bool {
         buf.terrain[i] == 1
             && !is_lake[i]
             && buf.koppen[i] != crate::sim::koppen::EF
-            && acc[i] >= cell_thresh[i]
+            && acc[i] >= threshold
     };
 
     // For each channel cell D: its channel inflow count, and `main_child` = the
@@ -505,6 +485,14 @@ pub fn extract_rivers(
         // rendering / settlement scoring without a full stream-order pass.
         let order = (((outlet_acc / threshold as f32).max(1.0).log2().floor() as i32) + 1)
             .clamp(1, 7) as u8;
+
+        // ── CLIMATE DENSITY (whole-river prune) ── Deserts carry few rivers: an arid
+        // basin swallows its runoff to evaporation. Drop small headwater/low-order
+        // streams whose reach is mostly arid, so dry regions read sparse while wet
+        // regions keep their fine drainage. Never touches a river that reaches the
+        // sea, nor any sizeable (order ≥ 3) river — trunks fed from wet uplands still
+        // cross the desert to the coast (the Nile), so nothing is cut mid-course.
+        if !is_mouth && order <= 2 && arid_frac > 0.55 { continue; }
 
         // ── Meander scale (gradient-gated) ── mean channel gradient over the reach
         // in normalized-elevation units per cell: steep headwaters run straight
@@ -1047,6 +1035,20 @@ mod tests {
                     (x - end.0).abs() < 0.05 && (y - end.1).abs() < 0.05)
             });
             assert!(joined, "tributary {ti} ends at {:?} but no trunk shares that point", end);
+        }
+        // RULE 3 — a trunk must REACH THE SEA, never truncate on open land: its last
+        // cell is adjacent to ocean. (With a uniform channel threshold, a river can
+        // only stop at the sea, a lake shore, or a confluence — this world has no
+        // lakes, so every trunk must be a river mouth.)
+        for (ti, t) in rivers.iter().enumerate() {
+            if t.tributary { continue; }
+            let (lx, ly) = *t.points.last().unwrap();
+            let touches_sea = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
+                let nx = buf.wrap_x(lx as i32 + dx);
+                let ny = ly as i32 + dy;
+                ny >= 0 && ny < buf.height as i32 && buf.terrain[buf.idx(nx, ny as u32)] == 0
+            });
+            assert!(touches_sea, "trunk {ti} ends at {:?} without reaching the sea (truncated)", (lx, ly));
         }
     }
 
