@@ -387,6 +387,12 @@ export function HubPanel() {
       {/* ════════════ CITY / ESTATE SCHEMATIC ════════════ */}
       {tab === "city" && detail && (
         <>
+          {!detail.is_estate && (
+            <>
+              <div style={{ ...sectionHdr, marginBottom: 4 }}>City plan</div>
+              <CityView detail={detail} />
+            </>
+          )}
           <SettlementScene detail={detail} />
           {detail.coin_basket && detail.coin_basket.length > 0 ? (
             <CurrencyBasket basket={detail.coin_basket} />
@@ -637,15 +643,6 @@ export function HubPanel() {
               <span style={{ color: "#6a86a6" }}>Monopolies: </span>
               {hub.monopolies.map((m) => `${iconFor(m)} ${labelFor(m)}`).join(", ")}
             </div>
-          )}
-
-          {/* Isometric city view — the settlement's generated plan, quarters washed
-              by owner, buildings marked as landmarks */}
-          {detail && !detail.is_estate && (detail.buildings?.length ?? 0) > 0 && (
-            <>
-              <div style={{ ...sectionHdr, marginTop: 6 }}>The city</div>
-              <CityView detail={detail} />
-            </>
           )}
 
           {/* Ward grid — buildings tinted by their owning faction (control at a glance) */}

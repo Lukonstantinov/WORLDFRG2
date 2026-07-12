@@ -33,7 +33,8 @@ function tileDims(N: number) {
 // place of the procedural iso block; a missing sprite falls back to the drawn
 // building, so the view always renders. Owner colour keeps reading via the ground
 // wash + the heraldic flag, so fixed-palette sprites still show who controls what.
-const SPRITE_BASE = "/city-sprites/"; // public/city-sprites/<stem>.png (like /fish/)
+const SPRITE_BASE = "/city-sprites/"; // public/city-sprites/<stem>.svg|png (like /fish/)
+const SPRITE_EXTS = [".svg", ".png"];  // shipped templates are SVG; a PNG pack also works
 /** Building label → sprite file stem in public/city-sprites/<stem>.png.
  *  Edit these to match the filenames in your pack. */
 const SPRITE_MAP: Record<string, string> = {
@@ -52,9 +53,14 @@ function loadSprite(stem: string, onReady: () => void): HTMLImageElement | null 
   if (cur === "loading" || cur === "error") return null;
   spriteCache.set(stem, "loading");
   const img = new Image();
+  let ext = 0;
   img.onload = () => { spriteCache.set(stem, img); onReady(); };
-  img.onerror = () => { spriteCache.set(stem, "error"); };
-  img.src = `${SPRITE_BASE}${stem}.png`;
+  img.onerror = () => {
+    ext += 1;
+    if (ext < SPRITE_EXTS.length) { img.src = `${SPRITE_BASE}${stem}${SPRITE_EXTS[ext]}`; }
+    else { spriteCache.set(stem, "error"); }
+  };
+  img.src = `${SPRITE_BASE}${stem}${SPRITE_EXTS[0]}`;
   return null;
 }
 
