@@ -100,6 +100,14 @@ const REVOLT_REDISTRIB: f32 = 0.15;
 const REVOLT_BAN_YEARS: u32 = 12;
 /// Production hit (hub-wide) while a riot / revolt event is active.
 const RIOT_PROD_HIT: f32 = 0.22;
+/// Fraction of accumulated grievance retained through a CALM year (unrest below the
+/// riot line). < 1 so a single good harvest doesn't erase years of resentment, but
+/// a sustained recovery does eventually cool a city off.
+const GRIEVANCE_COOL: f32 = 0.6;
+/// Accumulated grievance (in riot-years) at which a chronically-rioting city boils
+/// over into a REVOLT on its own — the slow-burn path to revolution, distinct from
+/// the acute `REVOLT_UNREST` spike. ~this many years simmering at the riot line.
+const GRIEVANCE_REVOLT: f32 = 1.5;
 const REVOLT_PROD_HIT: f32 = 0.40;
 /// Global productivity drift: technology/agronomy improve output ~1.5%/yr,
 /// applied as COMPOUND growth — each year multiplies the running index by
@@ -2167,6 +2175,11 @@ pub struct Society {
     /// (defaults to 0 = no ban, so the default index 0 is never consulted).
     #[serde(default)] pub ousted_house: i32,
     #[serde(default)] pub ousted_until: u32,
+    /// Accumulated GRIEVANCE (in riot-years): rises while unrest simmers at riot
+    /// level, bleeds off in calm years. A city that riots year after year without
+    /// relief eventually boils over into a revolt even absent one acute spike —
+    /// chronic misery, not just a sudden shock. Reset by the catharsis of a revolt.
+    #[serde(default)] pub grievance: f32,
 }
 
 /// DLC 4 · profession classes for a `Pop` (Victoria-style social roles).
@@ -5770,7 +5783,23 @@ impl CampaignSim {
                 so.unrest = so.unrest.clamp(0.0, 1.0);
                 so.unrest
             };
-            if u >= REVOLT_UNREST && self.hubs[h].council_house >= 0 {
+            // Grievance memory: a year at (or above) the riot line adds to the city's
+            // accumulated resentment; a calm year bleeds it off. Chronic, repeated
+            // rioting therefore ratchets toward a revolt even without one acute spike.
+            let grievance = {
+                let so = &mut self.hubs[h].society;
+                if u >= RIOT_UNREST {
+                    so.grievance += (u - RIOT_UNREST) / (1.0 - RIOT_UNREST);
+                } else {
+                    so.grievance *= GRIEVANCE_COOL;
+                }
+                so.grievance
+            };
+            // A revolt fires on an acute spike (REVOLT_UNREST) OR when slow-burn
+            // grievance boils over. It topples & bars a seated council; where the seat
+            // already stands vacant (e.g. the ruling house went bankrupt in the hard
+            // times) it is a leaderless uprising — chronic misery erupts regardless.
+            if u >= REVOLT_UNREST || grievance >= GRIEVANCE_REVOLT {
                 self.trigger_revolt(h);
             } else if u >= RIOT_UNREST {
                 let rioting = self.active_events.iter().any(|e| e.hub == h as i32 && e.kind == "riot");
@@ -5828,8 +5857,9 @@ impl CampaignSim {
             kind: "revolt".into(), hub: h as i32, good: -1,
             magnitude: REVOLT_PROD_HIT, until_tick: tick + 120,
         });
-        // Catharsis: the explosion vents the accumulated pressure.
+        // Catharsis: the explosion vents the accumulated pressure and resentment.
         self.hubs[h].society.unrest = 0.25;
+        self.hubs[h].society.grievance = 0.0;
         self.journal.push(JournalEntry {
             tick, kind: "revolt".into(), hub: h as i32, good: -1, value: 1.0,
             text: if oname.is_empty() { format!("A popular revolt convulses {}", hubname) }
