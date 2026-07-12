@@ -1,0 +1,54 @@
+# City building sprites (isometric pack drop-in)
+
+The settlement panel's **city view** (`src/ui/CityView.tsx`) renders each building
+as an isometric structure. It will use a **PNG sprite** for a building type when
+one is present here, and fall back to the procedural iso building when it is
+absent — so the app works with or without the artwork (same pattern as
+`public/fish/`).
+
+## How to add a pack
+
+Drop one transparent PNG per building type into this folder, named by the
+building's **sprite stem**. The panel loads `/city-sprites/<stem>.png`.
+
+```
+public/city-sprites/guildhall.png
+public/city-sprites/workshop.png
+public/city-sprites/granary.png
+public/city-sprites/warehouse.png
+public/city-sprites/shipyard.png
+public/city-sprites/fondaco.png
+public/city-sprites/cathedral.png
+public/city-sprites/temple.png
+public/city-sprites/citadel.png
+public/city-sprites/palace.png
+public/city-sprites/council_hall.png
+public/city-sprites/mint.png
+public/city-sprites/bank.png
+public/city-sprites/harbor.png
+public/city-sprites/house.png        # the common-house fill tile
+```
+
+The label → stem map lives in `SPRITE_MAP` at the top of `CityView.tsx`; rename
+stems there if your pack uses different filenames. Any building whose sprite is
+missing simply keeps its procedural iso block, so you can add tiles one at a time.
+
+## Art conventions (so sprites line up)
+
+- **Isometric, 2:1** (true iso), facing the same direction as the panel's tiles.
+- **Transparent background.**
+- Draw the building so its **footprint fills the tile and its base sits at the
+  bottom-centre** of the image — the renderer anchors the sprite's bottom to the
+  tile's front and scales it to the tile width (landmarks ≈ 2.2× tile width,
+  the common house ≈ 1.35×). Roughly **256×384 px** works well.
+- Owner colour is **not** baked into the sprite: it keeps reading through the
+  quarter's ground wash and the heraldic flag the panel draws on top, so a single
+  neutral sprite per type serves every faction.
+
+## CC0 packs to start from
+
+- Kenney — https://kenney.nl/assets (search "isometric"); all CC0.
+- Screaming Brain Studios — "Isometric Tiles · Town Pack" (CC0), itch.io.
+
+Pick tiles by eye for each building type, rename them to the stems above (or
+update `SPRITE_MAP`), and the city view uses them automatically.

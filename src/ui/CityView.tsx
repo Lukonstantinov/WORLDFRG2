@@ -27,6 +27,37 @@ function tileDims(N: number) {
   return { tw, th, hs: tw / REF_TW }; // hs scales building heights with tile size
 }
 
+// ── PNG SPRITE PACK support ─────────────────────────────────────────────────
+// Drop an isometric building pack into `public/city-sprites/` as one PNG per
+// building type (see the map below). When a sprite is present it is blitted in
+// place of the procedural iso block; a missing sprite falls back to the drawn
+// building, so the view always renders. Owner colour keeps reading via the ground
+// wash + the heraldic flag, so fixed-palette sprites still show who controls what.
+const SPRITE_BASE = "/city-sprites/"; // public/city-sprites/<stem>.png (like /fish/)
+/** Building label → sprite file stem in public/city-sprites/<stem>.png.
+ *  Edit these to match the filenames in your pack. */
+const SPRITE_MAP: Record<string, string> = {
+  Guildhall: "guildhall", Workshop: "workshop", Granary: "granary", Warehouse: "warehouse",
+  Shipyard: "shipyard", Fondaco: "fondaco", Cathedral: "cathedral", Temple: "temple",
+  Citadel: "citadel", Palace: "palace", "Council Hall": "council_hall", Mint: "mint",
+  Bank: "bank", Harbor: "harbor", house: "house",
+};
+type SpriteState = HTMLImageElement | "loading" | "error";
+const spriteCache = new Map<string, SpriteState>();
+/** Return a ready sprite image, or null while it loads / if it's absent. Calls
+ *  `onReady` once when a fresh image finishes loading so the canvas can redraw. */
+function loadSprite(stem: string, onReady: () => void): HTMLImageElement | null {
+  const cur = spriteCache.get(stem);
+  if (cur instanceof HTMLImageElement) return cur;
+  if (cur === "loading" || cur === "error") return null;
+  spriteCache.set(stem, "loading");
+  const img = new Image();
+  img.onload = () => { spriteCache.set(stem, img); onReady(); };
+  img.onerror = () => { spriteCache.set(stem, "error"); };
+  img.src = `${SPRITE_BASE}${stem}.png`;
+  return null;
+}
+
 /** Per-type landmark height → each building reads as a distinct silhouette
  *  (a guildhall towers, a granary squats, a shipyard hugs the shore). */
 function landmarkHeight(label: string): number {
@@ -159,6 +190,8 @@ function nearWater(c: Cell, isWater: (i: number, j: number) => boolean, N: numbe
 export function CityView({ detail }: { detail: HubDetail }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [hover, setHover] = useState<BuildingInfo | null>(null);
+  const [spriteTick, setSpriteTick] = useState(0); // bumped when a pack sprite loads
+  const bumpRef = useRef(() => setSpriteTick((t) => t + 1));
   const planRef = useRef<ReturnType<typeof generate> | null>(null);
   const geomRef = useRef<{ ox: number; oy: number; tw: number; th: number } | null>(null);
 
@@ -185,6 +218,7 @@ export function CityView({ detail }: { detail: HubDetail }) {
     geomRef.current = { ox, oy, tw, th };
     const iso = (i: number, j: number): [number, number] => [ox + (i - j) * tw / 2, oy + (i + j) * th / 2];
 
+    const getImg = (stem: string) => loadSprite(stem, bumpRef.current);
     // Painter's order: far tiles (small i+j) first.
     const order = [...cells].sort((a, b) => (a.i + a.j) - (b.i + b.j));
     for (const c of order) {
@@ -194,9 +228,9 @@ export function CityView({ detail }: { detail: HubDetail }) {
       // Ground washed strongly toward the ward owner's colour → bold quarters.
       const g = mix([58, 74, 60], wardCol, 0.44);
       drawGround(ctx, cx, cy, tw, th, shade(g, 1.0), shade(g, 0.78));
-      if (c.height > 0) drawTile(ctx, cx, cy, c.height * hs, tw, th, wardCol, c.building);
+      if (c.height > 0) drawTile(ctx, cx, cy, c.height * hs, tw, th, wardCol, c.building, getImg);
     }
-  }, [detail]);
+  }, [detail, spriteTick]);
 
   const onMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const plan = planRef.current, geom = geomRef.current, canvas = canvasRef.current;
@@ -283,12 +317,48 @@ function archetypeOf(label: string): Arche {
   return "pitch";
 }
 
-/** Draw ONE building as a small isometric structure — walls in the owner's colour,
- *  a roof whose SHAPE reads the building type (pitch / dome / battlement / flat),
- *  and a landmark flag in the owner's colour. This is the SPRITE-SLOT: swap the
- *  body for a Kenney iso sprite blit and nothing else in the system changes.
- *  Common houses are small pitched cottages; landmarks fill the tile. */
+/** Draw ONE building: a PNG sprite from the pack if one is present, otherwise the
+ *  procedural iso structure. Owner colour still reads via the ground wash + flag. */
 function drawTile(ctx: CanvasRenderingContext2D, cx: number, cy: number, h: number,
+  tw: number, th: number, wardCol: [number, number, number],
+  building: BuildingInfo | undefined, getImg: (stem: string) => HTMLImageElement | null) {
+  const stem = building ? SPRITE_MAP[building.label] : SPRITE_MAP.house;
+  const img = stem ? getImg(stem) : null;
+  if (img) { drawSprite(ctx, img, cx, cy, tw, th, building); return; }
+  drawProcedural(ctx, cx, cy, h, tw, th, wardCol, building);
+}
+
+/** Blit a pack sprite anchored on the tile's front, sized to the tile. A landmark
+ *  keeps its heraldic flag + emoji chip so ownership and identity still read. */
+function drawSprite(ctx: CanvasRenderingContext2D, img: HTMLImageElement, cx: number, cy: number,
+  tw: number, th: number, building?: BuildingInfo) {
+  const scale = building ? 2.2 : 1.35;              // landmarks bigger than houses
+  const w = tw * scale;
+  const hgt = w * (img.height / Math.max(1, img.width));
+  const dx = cx - w / 2;
+  const dy = (cy + th / 2) - hgt + th * 0.12;       // sit the base on the tile front
+  ctx.drawImage(img, dx, dy, w, hgt);
+  if (building) {
+    const topY = dy + hgt * 0.06;
+    const poleH = Math.max(7, tw * 0.32), pw = Math.max(5, tw * 0.22);
+    ctx.strokeStyle = "#1b2833"; ctx.lineWidth = 1.1;
+    ctx.beginPath(); ctx.moveTo(cx, topY); ctx.lineTo(cx, topY - poleH); ctx.stroke();
+    poly(ctx, [[cx, topY - poleH], [cx + pw, topY - poleH + 3], [cx, topY - poleH + 6]], building.color);
+    const chipR = Math.max(6.5, Math.min(10, tw * 0.24));
+    const fontPx = Math.max(9, Math.min(14, Math.round(tw * 0.34)));
+    const ey = topY - poleH - chipR - 1;
+    ctx.beginPath(); ctx.arc(cx, ey, chipR, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(9,14,20,0.85)"; ctx.fill();
+    ctx.strokeStyle = building.color; ctx.lineWidth = 1.2; ctx.stroke();
+    ctx.font = `${fontPx}px system-ui, sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(building.emoji || "🏛️", cx, ey + 0.5);
+  }
+}
+
+/** The procedural iso building (fallback when no pack sprite is present) — walls in
+ *  the owner's colour, a roof whose SHAPE reads the building type, and a flag. */
+function drawProcedural(ctx: CanvasRenderingContext2D, cx: number, cy: number, h: number,
   tw: number, th: number, wardCol: [number, number, number], building?: BuildingInfo) {
   const isLandmark = !!building;
   const s = isLandmark ? 1.0 : 0.62;
