@@ -1975,6 +1975,28 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 if dd <= max_link2 { uf_union(&mut parent, i, j); }
             }
         }
+        // Rescue tiny/lone components: a settlement whose cluster has < 3 real hubs
+        // can't sustain a market and appears as a dead "cosmetic" dot that never
+        // trades (rebuild_routes marks it unreachable). Fuse each into the nearest
+        // SUBSTANTIAL market (any distance) so every city is on a trading network.
+        {
+            let mut roots = vec![0usize; nn];
+            for i in 0..nn { roots[i] = uf_find(&mut parent, i); }
+            let mut size: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+            for &i in &real { *size.entry(roots[i]).or_default() += 1; }
+            let big: Vec<usize> = real.iter().cloned()
+                .filter(|&i| size.get(&roots[i]).copied().unwrap_or(0) >= 3).collect();
+            if !big.is_empty() {
+                let mut unions: Vec<(usize, usize)> = Vec::new();
+                for &i in &real {
+                    if size.get(&roots[i]).copied().unwrap_or(0) >= 3 { continue; }
+                    let mut bj = None; let mut bd = f32::INFINITY;
+                    for &j in &big { let d = d2(i, j); if d < bd { bd = d; bj = Some(j); } }
+                    if let Some(j) = bj { unions.push((i, j)); }
+                }
+                for (i, j) in unions { uf_union(&mut parent, i, j); }
+            }
+        }
     }
     for i in 0..nn {
         hubs[i].component = uf_find(&mut parent, i) as u32;
@@ -2180,6 +2202,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         tech_factor: 1.0,
         percap_migrated: true, // hubs seeded with base_per_capita directly
         society_migrated: false, // strata seeded on first advance (seed_society)
+        components_rescued: true, // start-time component build already fused tiny clusters
         house_ledger: Vec::new(),
         house_ledger_prev: Vec::new(),
         house_barred: Vec::new(),
@@ -3392,8 +3415,8 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         )).collect(),
         patron: sim.hub_patron.get(hi).copied().filter(|&p| p >= 0)
             .and_then(|p| sim.houses.get(p as usize)).map(|h| h.name.clone()).unwrap_or_default(),
-        culture: sim.hub_culture.get(hi).cloned().unwrap_or_default(),
-        minorities: sim.hub_minorities.get(hi).cloned().unwrap_or_default(),
+        culture: sim.hub_people_display(hi).0,
+        minorities: sim.hub_people_display(hi).1,
         culture_moods: {
             // How content is each resident people here — are its prized goods well-supplied?
             let name_to_g: std::collections::HashMap<&str, usize> =

@@ -2445,6 +2445,11 @@ pub struct CampaignSim {
     /// One-time migration flag: seed each hub's social `society` strata on first advance.
     #[serde(default)]
     pub society_migrated: bool,
+    /// One-time migration flag: fuse tiny/lone trade components (isolated "cosmetic"
+    /// cities that could never trade) into the nearest substantial market. Applies the
+    /// campaign_start connectivity rescue to older in-progress saves too.
+    #[serde(default)]
+    pub components_rescued: bool,
     /// Global productivity multiplier — slow technological / agronomic improvement.
     /// Grows ~1.5%/yr (bumper events lift production further, locally + temporarily).
     /// `serde(default)` yields 0.0 on old saves → treated as 1.0 in `advance`.
@@ -4339,6 +4344,42 @@ impl CampaignSim {
         }
     }
 
+    /// Fuse tiny/lone trade components (< 3 real hubs) into the nearest substantial
+    /// market's component, so no settlement is a dead "cosmetic" dot that can never
+    /// trade. Estates follow their parent hub. Caller sets `routes_dirty`.
+    fn rescue_tiny_components(&mut self) {
+        let n = self.hubs.len();
+        if n == 0 { return; }
+        let world_w = self.world_w;
+        let real: Vec<usize> = (0..n).filter(|&i| !self.hubs[i].is_estate).collect();
+        let mut size: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+        for &i in &real { *size.entry(self.hubs[i].component).or_default() += 1; }
+        let big: Vec<usize> = real.iter().cloned()
+            .filter(|&i| size.get(&self.hubs[i].component).copied().unwrap_or(0) >= 3).collect();
+        if big.is_empty() { return; }
+        let d2 = |a: usize, b: usize, hubs: &Vec<TickHub>| -> f32 {
+            let mut dx = (hubs[a].x - hubs[b].x).abs();
+            if world_w > 1.0 { dx = dx.min(world_w - dx); }
+            let dy = hubs[a].y - hubs[b].y;
+            dx * dx + dy * dy
+        };
+        let mut reassign: Vec<(usize, u32)> = Vec::new();
+        for &i in &real {
+            if size.get(&self.hubs[i].component).copied().unwrap_or(0) >= 3 { continue; }
+            let mut bj = None; let mut bd = f32::INFINITY;
+            for &j in &big { let d = d2(i, j, &self.hubs); if d < bd { bd = d; bj = Some(j); } }
+            if let Some(j) = bj { reassign.push((i, self.hubs[j].component)); }
+        }
+        for (i, comp) in reassign { self.hubs[i].component = comp; }
+        // Estates ride their parent hub's (possibly new) component.
+        for i in 0..n {
+            if self.hubs[i].is_estate {
+                let p = self.hubs[i].parent;
+                if p >= 0 && (p as usize) < n { self.hubs[i].component = self.hubs[p as usize].component; }
+            }
+        }
+    }
+
     pub fn rebuild_routes(&mut self) {
         let n = self.hubs.len();
         let mut days = vec![f32::INFINITY; n * n];
@@ -4750,6 +4791,14 @@ impl CampaignSim {
                 self.seed_society(h);
             }
             self.society_migrated = true;
+        }
+        // Rescue isolated "cosmetic" cities on older saves: a settlement whose trade
+        // component is tiny (< 3 real hubs) can never trade (rebuild_routes marks it
+        // unreachable). Fuse each into the nearest substantial market's component.
+        if !self.components_rescued {
+            self.rescue_tiny_components();
+            self.components_rescued = true;
+            self.routes_dirty = true;
         }
         // Phase 4 (flavour) · seed seasonal trade fairs once (population-scored, since
         // routes/neighbours aren't built until the tick loop below).
@@ -7558,6 +7607,8 @@ impl CampaignSim {
             self.economic_migration_pass();
             self.diaspora_pass();
             self.assimilation_pass();
+            // Whoever now holds the plurality becomes the city's majority people.
+            self.rebalance_hub_majorities();
             // Cultures 2.0 · sustained blending in a city can birth a new creole people.
             self.ethnogenesis_pass(self.tick / TICKS_PER_YEAR);
             // Cultures 3.0 · a far-flung, isolated community can splinter into a new
@@ -8525,19 +8576,84 @@ impl CampaignSim {
         if self.hub_culture.len() < n { self.hub_culture.resize(n, String::new()); }
         if self.hub_minorities.len() < n { self.hub_minorities.resize(n, Vec::new()); }
         let map = crate::sim::cultures::active();
+        let real = |c: &str| !c.is_empty() && c != "—";
         for i in 0..n {
-            if !self.hub_culture[i].is_empty() { continue; }
+            // Reassign empty AND stuck "—" hubs (a hub seeded "—" before the culture
+            // map existed used to keep it forever → small cities with no people).
+            if real(&self.hub_culture[i]) { continue; }
+            // 1) inherit the founding settlement's people
             let founder = self.hubs[i].founder_hub;
-            if founder >= 0 && (founder as usize) < n
-                && self.hub_culture.get(founder as usize).map(|c| !c.is_empty()).unwrap_or(false) {
-                self.hub_culture[i] = self.hub_culture[founder as usize].clone();
-            } else if let Some(m) = &map {
+            if founder >= 0 && (founder as usize) < n {
+                let fc = self.hub_culture[founder as usize].clone();
+                if real(&fc) { self.hub_culture[i] = fc; continue; }
+            }
+            // 2) the culture hearth whose region this cell falls in
+            if let Some(m) = &map {
                 if let Some(h) = m.hearth_at(self.hubs[i].x as u32, self.hubs[i].y as u32) {
-                    self.hub_culture[i] = h.people.clone();
+                    if real(&h.people) { self.hub_culture[i] = h.people.clone(); continue; }
                 }
             }
-            if self.hub_culture[i].is_empty() { self.hub_culture[i] = "—".into(); }
+            // 3) fallback: the nearest already-cultured hub, so NO settlement is left
+            //    without a people (fixes small towns showing no culture at all).
+            let (hx, hy) = (self.hubs[i].x, self.hubs[i].y);
+            let mut best: Option<(f32, String)> = None;
+            for j in 0..n {
+                if j == i { continue; }
+                let c = &self.hub_culture[j];
+                if !real(c) { continue; }
+                let dx = self.hubs[j].x - hx; let dy = self.hubs[j].y - hy;
+                let d = dx * dx + dy * dy;
+                if best.as_ref().map(|(bd, _)| d < *bd).unwrap_or(true) { best = Some((d, c.clone())); }
+            }
+            self.hub_culture[i] = best.map(|(_, c)| c).unwrap_or_else(|| "—".into());
         }
+    }
+
+    /// Cultures · the city's MAJORITY people is whoever actually has the largest share
+    /// (plurality). After migration/assimilation a minority quarter can outgrow the
+    /// old majority — when it does, promote it and demote the former majority to a
+    /// quarter, so the "majority" the UI shows is always the dominant people (fixes a
+    /// founding people staying nominal majority at 2% while incomers hold 74%).
+    fn rebalance_hub_majorities(&mut self) {
+        let n = self.hubs.len();
+        for h in 0..n.min(self.hub_minorities.len()) {
+            if self.hub_minorities[h].is_empty() { continue; }
+            let maj = match self.hub_culture.get(h) {
+                Some(c) if !c.is_empty() && c != "—" => c.clone(),
+                _ => continue,
+            };
+            let minsum: f32 = self.hub_minorities[h].iter().map(|(_, s)| *s).sum();
+            let maj_share = (1.0 - minsum).clamp(0.0, 1.0);
+            // largest minority quarter
+            let mut bi = 0usize; let mut bshare = -1.0f32;
+            for (i, (_, s)) in self.hub_minorities[h].iter().enumerate() {
+                if *s > bshare { bshare = *s; bi = i; }
+            }
+            if bshare > maj_share + 1e-4 {
+                let new_maj = self.hub_minorities[h][bi].0.clone();
+                self.hub_minorities[h].remove(bi);
+                if maj_share > 0.005 { self.hub_minorities[h].push((maj, maj_share)); }
+                self.hub_culture[h] = new_maj;
+                self.hub_minorities[h].sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            }
+        }
+    }
+
+    /// The city's people composition for DISPLAY: the plurality people as the
+    /// majority + the rest as minority quarters (shares ~sum to 1). Read-only, so
+    /// the panel shows the true dominant people even before the next yearly
+    /// `rebalance_hub_majorities` has run on an in-progress save.
+    pub(crate) fn hub_people_display(&self, h: usize) -> (String, Vec<(String, f32)>) {
+        let maj = self.hub_culture.get(h).cloned().unwrap_or_default();
+        let mins = self.hub_minorities.get(h).cloned().unwrap_or_default();
+        if maj.is_empty() || maj == "—" { return (maj, mins); }
+        let minsum: f32 = mins.iter().map(|(_, s)| *s).sum();
+        let mut all: Vec<(String, f32)> = Vec::with_capacity(mins.len() + 1);
+        all.push((maj, (1.0 - minsum).clamp(0.0, 1.0)));
+        for (c, s) in mins { all.push((c, s)); }
+        all.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let top = all.remove(0);
+        (top.0, all)
     }
 
     /// Migrants carry their home culture. Where it differs from the destination's
@@ -12288,6 +12404,7 @@ mod tests {
             k: 0.6, margin: 0.05, need_scale: 1.0, world_w: 100.0, world_h: 100.0, last_tick_ms: 0.0,
             last_month_pop: 0.0, last_month_index: 0.0, seed_house_count: 0,
             fleets_migrated: true, tech_factor: 1.0, percap_migrated: true, society_migrated: false,
+            components_rescued: true,
             house_ledger: Vec::new(), house_ledger_prev: Vec::new(), house_barred: Vec::new(),
             colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], culture_history: vec![], council_bought_month: vec![], hub_patron: vec![], colony_supply: vec![],
             hub_culture: vec![], hub_minorities: vec![], estate_idle_years: vec![],
