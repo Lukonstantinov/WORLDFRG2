@@ -784,11 +784,18 @@ export function MapCanvas() {
       requestRender();
       return;
     }
-    campaignGetTradeFlow(rivers.map((r) => ({ points: r.points })), bioParams.tradeReach, bioParams.maxCrossing)
-      .then((trunks) => {
-        om.drawDynamicFlow(trunks, meta.grid_width);
-        requestRender();
-      }).catch(() => {});
+    // Debounced: this is an expensive coarse-grid routing recompute. Fast-forwarding
+    // through years fires the year key repeatedly; a trailing debounce collapses the
+    // burst into ONE fetch after the year settles, so it never stalls the year-tick
+    // frame (the year-start lag). ~400 ms is imperceptible when you pause to look.
+    const t = window.setTimeout(() => {
+      campaignGetTradeFlow(rivers.map((r) => ({ points: r.points })), bioParams.tradeReach, bioParams.maxCrossing)
+        .then((trunks) => {
+          om.drawDynamicFlow(trunks, meta.grid_width);
+          requestRender();
+        }).catch(() => {});
+    }, 400);
+    return () => window.clearTimeout(t);
   }, [overlayVisibility.dynamicFlow, campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365), meta, rivers, bioParams.tradeReach, bioParams.maxCrossing, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Caravan corridors — long river/terrain-routed hauls owned by houses, strung
@@ -801,11 +808,19 @@ export function MapCanvas() {
       requestRender();
       return;
     }
-    campaignGetCorridors(rivers.map((r) => ({ points: r.points })), bioParams.tradeReach, bioParams.maxCrossing)
-      .then((corridors) => {
-        om.drawTradeCorridors(corridors, meta.grid_width);
-        requestRender();
-      }).catch(() => {});
+    // Debounced like the dynamic-flow overlay above: campaign_get_corridors runs up
+    // to 24 coarse-grid Dijkstra routes, the single biggest new year-boundary cost.
+    // A trailing debounce collapses a fast-forward burst into one recompute so it
+    // stops stuttering every year. (Superseded later by the event-driven corridor
+    // cache in EXPEDITIONS_CORRIDORS_PLAN.md.)
+    const t = window.setTimeout(() => {
+      campaignGetCorridors(rivers.map((r) => ({ points: r.points })), bioParams.tradeReach, bioParams.maxCrossing)
+        .then((corridors) => {
+          om.drawTradeCorridors(corridors, meta.grid_width);
+          requestRender();
+        }).catch(() => {});
+    }, 400);
+    return () => window.clearTimeout(t);
   }, [overlayVisibility.campaignCorridors, campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365), meta, rivers, bioParams.tradeReach, bioParams.maxCrossing, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Political influence — product of the Political step (9).
