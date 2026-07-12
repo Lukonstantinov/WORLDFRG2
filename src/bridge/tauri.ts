@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { WorldMeta, OpenWorldResult, CampaignInfo, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, CultureRegion, TradeMatrix, TradeTrunk, TradeCorridor, PoliticalCenter, GoodSpec, EconomySnapshot } from "../types";
+import type { WorldMeta, OpenWorldResult, CampaignInfo, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, CultureRegion, TradeMatrix, TradeTrunk, TradeCorridor, PoliticalCenter, GoodSpec, EconomySnapshot, ExpeditionsPayload } from "../types";
 
 export async function newWorld(name: string, gridWidth: number, gridHeight: number): Promise<WorldMeta> {
   return invoke("new_world", { name, gridWidth, gridHeight });
@@ -344,6 +344,11 @@ export async function campaignGetCorridors(
     reach,
     maxCrossing,
   });
+}
+
+/** Live financed expeditions crawling toward distant lands + recent failed ✕'s. */
+export async function campaignGetExpeditions(): Promise<ExpeditionsPayload> {
+  return invoke("campaign_get_expeditions");
 }
 
 export interface FisheryBank {

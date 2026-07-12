@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useCampaignStore } from "../state/campaignStore";
 import { useUIStore } from "../state/uiStore";
-import { campaignGetColonies, campaignColonyGates, campaignGetColony } from "../bridge/tauri";
-import type { ColonySummary, ColonyGateStatus, ColonyDetail } from "../types";
+import { campaignGetColonies, campaignColonyGates, campaignGetColony, campaignGetExpeditions, campaignGetCorridors } from "../bridge/tauri";
+import type { ColonySummary, ColonyGateStatus, ColonyDetail, ExpeditionView, TradeCorridor } from "../types";
 import { useFloatingWindow } from "./useFloatingWindow";
 
 // Colours mirror OverlayManager.ts (settlementColony / houseOutpost) + the app theme.
@@ -43,6 +43,9 @@ export function ColonialPanel() {
   const [gates, setGates] = useState<ColonyGateStatus | null>(null);
   const [sel, setSel] = useState<number | null>(null);
   const [detail, setDetail] = useState<ColonyDetail | null>(null);
+  const [expeditions, setExpeditions] = useState<ExpeditionView[]>([]);
+  const [failedCount, setFailedCount] = useState(0);
+  const [corridors, setCorridors] = useState<TradeCorridor[]>([]);
 
   // Closing the panel clears the map's colony↔metropolis highlight line.
   useEffect(() => { if (!open) setColonyHighlight(null); }, [open, setColonyHighlight]);
@@ -51,6 +54,10 @@ export function ColonialPanel() {
     if (!open || !active) return;
     campaignGetColonies().then(setColonies).catch(() => setColonies([]));
     campaignColonyGates().then(setGates).catch(() => setGates(null));
+    campaignGetExpeditions().then((p) => { setExpeditions(p.active); setFailedCount(p.failed.length); })
+      .catch(() => { setExpeditions([]); setFailedCount(0); });
+    // Established corridors (event-driven); permissive reach for the roster list.
+    campaignGetCorridors([], 0, 1.0).then(setCorridors).catch(() => setCorridors([]));
   }, [open, active, tick]);
 
   // A click on a colony ON THE MAP selects that hub globally — mirror it into the panel
@@ -89,7 +96,7 @@ export function ColonialPanel() {
   return (
     <div data-draggable style={{ ...panel, ...rootStyle }}>
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
-        <span>🏛 Colonial Office</span>
+        <span>🏛 Colonial Office & Expeditions</span>
         <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
       </div>
 
@@ -110,6 +117,9 @@ export function ColonialPanel() {
           </div>
 
           <div style={scroll}>
+            <ExpeditionsSection expeditions={expeditions} failedCount={failedCount} corridors={corridors}
+              onFocus={(x, y) => { setColonyHighlight({ ax: x, ay: y, bx: x, by: y }); }} />
+
             {colonies.length === 0 && <GateCard gates={gates} />}
 
             {groups.map((g, gi) => (
@@ -133,6 +143,90 @@ export function ColonialPanel() {
 
             {sel != null && detail && <DetailCard detail={detail} colony={colonies.find((c) => c.id === sel)} />}
           </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+const HAZARD_LABEL = ["fever", "the climate", "a native raid", "a storm", "shipwreck", "starvation", "bandits"];
+
+/** Expeditions & Corridors — the ventures crawling toward distant lands (financed,
+ *  hazard-culled, some failing), and the corridors they've proven. Merged into the
+ *  Colonial Office because a corridor is how a remote settlement network is born. */
+function ExpeditionsSection({ expeditions, failedCount, corridors, onFocus }: {
+  expeditions: ExpeditionView[]; failedCount: number; corridors: TradeCorridor[];
+  onFocus: (x: number, y: number) => void;
+}) {
+  if (expeditions.length === 0 && corridors.length === 0 && failedCount === 0) {
+    return (
+      <div style={{ ...card, marginTop: 0 }}>
+        <div style={{ fontWeight: 700, color: "#dce8f6", marginBottom: 2 }}>⛵ Expeditions & Corridors</div>
+        <div style={{ fontSize: 10.5, color: "#7a90a8", lineHeight: 1.5 }}>
+          From year 15, wealthy houses fund ventures toward distant, unconnected cities. Most early
+          attempts are lost to fever, storms or native raids; only after several proven round-trips does
+          a lasting corridor open — founding port &amp; caravanserai villages along it. Turn on the
+          <b style={{ color: "#cfe0f4" }}> ⛵ Expeditions</b> overlay to watch them travel.
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ ...card, marginTop: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+        <span style={{ fontWeight: 700, color: "#dce8f6" }}>⛵ Expeditions &amp; Corridors</span>
+        <span style={{ fontSize: 9.5, color: "#7a90a8" }}>
+          {expeditions.length} en route · {corridors.length} corridors · {failedCount} lost
+        </span>
+      </div>
+
+      {expeditions.map((e) => {
+        const col = e.outbound ? "#e0b24a" : "#5fc8a8";
+        const survived = Math.round(e.survived * 100);
+        const fleet = e.ships > e.caravans ? `${e.ships} ships` : `${e.caravans} caravans`;
+        const last = e.hazards[0];
+        return (
+          <div key={e.id} style={{ ...expRow }} onClick={() => onFocus(e.x, e.y)}>
+            <span style={{ width: 9, height: 9, borderRadius: e.ships > e.caravans ? 2 : "50%", background: col, flex: "0 0 auto", marginTop: 3 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 11, color: "#dce8f6", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {e.origin} → {e.dest}
+              </div>
+              <div style={{ fontSize: 9.5, color: "#8aa6c0" }}>
+                {e.leader} · {fleet} · {e.good || "goods"} · {e.outbound ? "outbound" : "returning"}
+              </div>
+              <div style={{ ...bar, marginTop: 3 }}>
+                <i style={{ width: `${Math.round(e.progress * 100)}%`, background: col, display: "block", height: "100%", borderRadius: 5 }} />
+              </div>
+              <div style={{ fontSize: 9, color: survived < 50 ? WARN : "#6a86a6", marginTop: 1 }}>
+                {survived}% of the fleet survives{last ? ` · last struck by ${HAZARD_LABEL[last[2]] ?? "peril"}` : ""}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      {corridors.length > 0 && (
+        <>
+          <div style={{ ...sec, marginTop: 8 }}>Established corridors</div>
+          {corridors.map((c, i) => {
+            const ports = c.waystations.filter((w) => w.kind === 3).length;
+            const cara = c.waystations.filter((w) => w.kind === 2).length;
+            return (
+              <div key={i} style={{ display: "flex", gap: 7, padding: "4px 4px", alignItems: "flex-start" }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: c.color, flex: "0 0 auto", marginTop: 3 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 10.5, color: "#cfe0f4", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {c.origin} ↔ {c.dest}
+                  </div>
+                  <div style={{ fontSize: 9.5, color: "#7a90a8" }}>
+                    {c.owner} · {c.good || "trade"} · {Math.round(c.km).toLocaleString()} km
+                    {ports > 0 && ` · ⚓${ports}`}{cara > 0 && ` · 🐫${cara}`}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </>
       )}
     </div>
@@ -339,6 +433,10 @@ const rowS: React.CSSProperties = {
   background: "rgba(12,18,26,0.55)", border: "1px solid #16242f", borderRadius: 8,
 };
 const rowSel: React.CSSProperties = { borderColor: COLONY_VIOLET, boxShadow: `0 0 0 1px ${COLONY_VIOLET} inset` };
+const expRow: React.CSSProperties = {
+  display: "flex", gap: 8, padding: "6px 6px", margin: "3px 0", cursor: "pointer",
+  background: "rgba(12,18,26,0.5)", border: "1px solid #16242f", borderRadius: 7,
+};
 const bar: React.CSSProperties = { height: 6, borderRadius: 5, background: "#16242f", overflow: "hidden" };
 const card: React.CSSProperties = {
   marginTop: 6, padding: "8px 10px", background: "rgba(12,18,26,0.6)",

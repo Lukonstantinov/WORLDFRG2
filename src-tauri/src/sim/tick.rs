@@ -2458,6 +2458,110 @@ impl CityFinance {
     }
 }
 
+// ── Expeditions & Corridors (docs/EXPEDITIONS_CORRIDORS_PLAN.md) ─────────────
+// A permanent trade corridor is EARNED: a wealthy house finances a risky
+// expedition toward a distant, unconnected, valuable city; hazards cull it; only
+// after several successful round-trips does the route become an established
+// corridor, at which point port / caravanserai villages are founded along it.
+/// Expeditions open from ~year 15 (the world has matured enough for reach).
+const EXP_START_TICK: u32 = 15 * TICKS_PER_YEAR;
+/// A house needs this much wealth to bankroll a venture (they are expensive).
+const EXP_MIN_HOUSE_WEALTH: f32 = 60.0;
+/// Max simultaneously-active ventures (keeps the tick + overlay bounded).
+const EXP_MAX_ACTIVE: usize = 10;
+/// Reference haul (cells-equivalent) the fleet-size formula scales against.
+const EXP_REF_KM: f32 = 2200.0;
+/// Outfitting cost per transport unit (caravan/ship), before terrain/sea risk.
+const EXP_UNIT_COST: f32 = 2.4;
+/// Minimum straight-line separation (fraction of world width) for a venture —
+/// corridors are LONG hauls, not next-door ties.
+const EXP_MIN_GAP_FRAC: f32 = 0.14;
+/// Successful round-trips AND cumulative profit needed to establish a corridor
+/// (MODERATE: a couple of proven, profitable round-trips prove the route).
+const EXP_MIN_SUCCESSES: u16 = 2;
+const EXP_EST_PROFIT: f32 = 10.0;
+/// Prospect ledger is dropped if abandoned this long (keeps the vec bounded).
+const EXP_PROSPECT_TTL: u32 = 30 * TICKS_PER_YEAR;
+/// A day's-march spacing (km) for caravanserais on the land legs of a corridor.
+const EXP_DAY_MARCH_KM: f32 = 380.0;
+/// Recent failed-venture markers kept for the map ✕ overlay.
+const EXP_FAILED_CAP: usize = 60;
+/// Base per-tick hazard intensity (MODERATE difficulty: ~half of early ventures
+/// are expected to fail before a route is proven).
+const EXP_HAZARD_BASE: f32 = 0.014;
+/// Human labels for `HazardEvent.kind`, indexed 0..=6.
+const HAZARD_LABEL: [&str; 7] = [
+    "fever", "the climate", "a native raid", "a storm", "shipwreck", "starvation", "bandits",
+];
+
+/// One peril that struck an expedition mid-journey (drives the struggle narrative
+/// and the failed-attempt map markers). `kind`: 0 illness · 1 climate · 2 native
+/// raid · 3 storm · 4 shipwreck · 5 starvation · 6 bandits.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct HazardEvent {
+    pub tick: u32,
+    pub x: f32,
+    pub y: f32,
+    pub kind: u8,
+    /// Fraction of the fleet lost to this event (0..1).
+    pub losses: f32,
+}
+
+/// A financed trading venture toward a distant, not-yet-connected city. Travels
+/// visibly over months; hazards cull it; a total loss is a Failed attempt.
+/// `status`: 0 en-route (outbound) · 1 arrived · 2 returning · 3 succeeded · 4 failed.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Expedition {
+    pub id: u32,
+    pub house: u32,          // backer (house index)
+    pub leader: String,      // "Doran of House Vell"
+    pub origin: u32,         // origin hub id
+    pub dest: u32,           // destination hub id
+    pub ox: f32, pub oy: f32,
+    pub dx: f32, pub dy: f32,
+    pub launched_tick: u32,
+    pub travel_ticks: u32,   // one-way duration
+    pub pos: f32,            // 0..1 progress along the CURRENT leg
+    pub outbound: bool,      // heading out (true) vs returning home (false)
+    pub caravans: u16,
+    pub ships: u16,
+    pub good: u16,           // chief cargo good index
+    pub cargo_qty: f32,      // units bought at origin
+    pub cost: f32,           // capital committed (registered)
+    pub revenue: f32,        // banked on arrival/return
+    pub arrived_frac: f32,   // surviving fraction of the fleet (1 → 0)
+    pub status: u8,
+    pub hazards: Vec<HazardEvent>,
+}
+
+/// The attempt ledger for a city-pair (a<b by id): a corridor is established only
+/// after repeated proven success, so failures accumulate here first.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct RouteProspect {
+    pub a: u32,
+    pub b: u32,
+    pub attempts: u16,
+    pub successes: u16,
+    pub cum_profit: f32,
+    pub last_tick: u32,
+    pub established: bool,
+}
+
+/// An established, permanent trade corridor (event-driven — recorded once, so the
+/// overlay no longer recomputes routes every year). Carries the founding story.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Corridor {
+    pub a: u32,              // hub id (origin / backer's home side)
+    pub b: u32,              // hub id (destination)
+    pub owner: i32,          // backing house index (−1 civic)
+    pub good: u16,           // chief commodity the corridor carries
+    pub founded_tick: u32,
+    pub attempts: u16,       // ventures it took to prove the route
+    pub successes: u16,
+    pub ports: Vec<u32>,          // founded port-village hub ids (coast)
+    pub caravanserais: Vec<u32>,  // founded caravanserai-village hub ids (inland)
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CampaignSim {
     pub seed: u64,
@@ -2741,6 +2845,22 @@ pub struct CampaignSim {
     /// founding fault — the campaign always keeps moving forward. `#[serde(default)]`.
     #[serde(default)]
     pub expansion_frozen_until: u32,
+    /// Expeditions & Corridors — financed ventures currently en route / returning.
+    /// Appended LAST → `#[serde(default)]` so old `.campaign` saves load with none.
+    #[serde(default)]
+    pub expeditions: Vec<Expedition>,
+    /// Per-pair attempt ledgers (a corridor is earned over several tries).
+    #[serde(default)]
+    pub route_prospects: Vec<RouteProspect>,
+    /// Recent FAILED-venture markers (for the map ✕), bounded to `EXP_FAILED_CAP`.
+    #[serde(default)]
+    pub failed_expeditions: Vec<HazardEvent>,
+    /// Established permanent corridors (event-driven overlay source).
+    #[serde(default)]
+    pub corridors: Vec<Corridor>,
+    /// Next expedition id to hand out.
+    #[serde(default)]
+    pub next_expedition_id: u32,
 }
 
 /// Deterministic 0..1 hash of three mixed inputs (splitmix64).
@@ -7729,6 +7849,9 @@ impl CampaignSim {
         // (population expansion) that can grow into a city of its own. The age of
         // colonisation only opens once the world has matured — from YEAR 50 onward,
         // and only when the wealth/population/site conditions are actually met.
+        // Expeditions crawl toward distant lands EVERY tick (cheap when none active),
+        // rolling hazards and, once a route is proven, establishing a corridor.
+        self.expedition_travel_pass();
         // Cultures 2.0 · sample every people's population twice a year for the line chart.
         if self.tick % (TICKS_PER_YEAR / 2) == 0 {
             self.sample_culture_history();
@@ -7765,6 +7888,10 @@ impl CampaignSim {
             self.hinterland_pass();
             // Rare merchant expeditions reach the far, isolated outposts trade misses.
             self.expedition_pass(self.tick / TICKS_PER_YEAR);
+            // Financed EXPEDITIONS toward distant unconnected cities — the way a
+            // permanent trade corridor is earned (hazards, failed attempts, then
+            // port/caravanserai villages). See docs/EXPEDITIONS_CORRIDORS_PLAN.md.
+            self.expedition_launch_pass(expansion_ok);
             // House trade outposts from year 30 (rich house, heavy cost); full
             // settlement colonies from year 50 (joint-stock, food lifeline).
             if expansion_ok && self.tick >= BASE_START_TICK {
@@ -10076,6 +10203,310 @@ impl CampaignSim {
                 });
             }
         }
+    }
+
+    // ── Expeditions & Corridors ──────────────────────────────────────────────
+    // (docs/EXPEDITIONS_CORRIDORS_PLAN.md) A corridor is EARNED: a house finances
+    // a venture toward a distant unconnected city; hazards cull it; several proven
+    // round-trips establish the route + found port/caravanserai villages.
+
+    /// Climate hostility 0..1 of a Köppen zone — the deadly ground a venture crosses.
+    fn koppen_peril(k: u8) -> f32 {
+        use crate::sim::koppen::*;
+        match k {
+            BWH | BWK => 0.90,           // desert — heat, thirst
+            ET | EF => 0.85,             // polar — cold
+            AF | AM | AW => 0.60,        // tropical — disease
+            BSH | BSK => 0.45,           // steppe — raiders
+            _ => 0.20,
+        }
+    }
+
+    /// Which peril struck (0 illness·1 climate·2 raid·3 storm·4 wreck·5 starvation·6 bandits).
+    fn pick_hazard_kind(sea: bool, ko: u8, kd: u8, r: f32) -> u8 {
+        use crate::sim::koppen::*;
+        if sea { return if r < 0.5 { 3 } else { 4 }; }
+        let desert = matches!(ko, BWH | BWK) || matches!(kd, BWH | BWK);
+        let tropical = matches!(ko, AF | AM | AW) || matches!(kd, AF | AM | AW);
+        if desert { if r < 0.5 { 1 } else { 5 } }
+        else if tropical { if r < 0.6 { 0 } else { 2 } }
+        else if r < 0.4 { 2 } else if r < 0.7 { 6 } else { 1 }
+    }
+
+    fn corridor_exists(&self, a: usize, b: usize) -> bool {
+        let (lo, hi) = ((a.min(b)) as u32, (a.max(b)) as u32);
+        self.corridors.iter().any(|c| c.a.min(c.b) == lo && c.a.max(c.b) == hi)
+    }
+
+    /// Find (or create) the attempt ledger for a city-pair; returns its index.
+    fn prospect_idx(&mut self, a: usize, b: usize) -> usize {
+        let (lo, hi) = ((a.min(b)) as u32, (a.max(b)) as u32);
+        if let Some(i) = self.route_prospects.iter().position(|p| p.a == lo && p.b == hi) {
+            return i;
+        }
+        self.route_prospects.push(RouteProspect { a: lo, b: hi, ..Default::default() });
+        self.route_prospects.len() - 1
+    }
+
+    /// YEARLY: prune finished ventures + stale prospects, then let a wealthy house
+    /// or two bankroll a new expedition toward a distant, unconnected, valuable city.
+    fn expedition_launch_pass(&mut self, expansion_ok: bool) {
+        let tick = self.tick;
+        // Keep finished ventures ~3 years for the map/panel, then drop them.
+        self.expeditions.retain(|e| e.status <= 2
+            || tick.saturating_sub(e.launched_tick) < 3 * TICKS_PER_YEAR);
+        self.route_prospects.retain(|p| p.established
+            || tick.saturating_sub(p.last_tick) < EXP_PROSPECT_TTL);
+        if !expansion_ok || tick < EXP_START_TICK { return; }
+        if self.expeditions.iter().filter(|e| e.status <= 2).count() >= EXP_MAX_ACTIVE { return; }
+        let n = self.hubs.len();
+        let min_gap = self.world_w * EXP_MIN_GAP_FRAC;
+        let mut backers: Vec<usize> = (0..self.houses.len())
+            .filter(|&h| !self.houses[h].defunct && !self.houses[h].is_guild
+                && self.houses[h].wealth >= EXP_MIN_HOUSE_WEALTH)
+            .collect();
+        if backers.is_empty() { return; }
+        backers.sort_by(|&x, &y| self.houses[y].wealth
+            .partial_cmp(&self.houses[x].wealth).unwrap_or(std::cmp::Ordering::Equal));
+        let mut launched = 0u32;
+        for &hi in backers.iter().take(6) {
+            if launched >= 2 { break; }
+            if self.expeditions.iter().filter(|e| e.status <= 2).count() >= EXP_MAX_ACTIVE { break; }
+            if hash01(self.seed, tick as u64 ^ 0xE79E, hi as u64) > 0.35 { continue; }
+            let origin = self.houses[hi].hub as usize;
+            if origin >= n || self.hubs[origin].is_estate || self.hubs[origin].abandoned { continue; }
+            // A costly foreign venture is only mounted from a PROSPEROUS, well-fed
+            // seat — a starving or unstable city has no surplus to gamble on reach.
+            if self.hubs[origin].starving > 0.35 || self.hubs[origin].sent_prosperity < 0.35 { continue; }
+            // Target: a far, populous, unconnected city (fatigued by past failures).
+            let mut best = (usize::MAX, 0.0f32);
+            for d in 0..n {
+                if d == origin { continue; }
+                let hd = &self.hubs[d];
+                if hd.is_estate || hd.abandoned || hd.population < 400.0 { continue; }
+                let dist = self.hub_cell_dist(origin, d);
+                if dist < min_gap { continue; }
+                if self.corridor_exists(origin, d) { continue; }
+                let (lo, hiid) = ((origin.min(d)) as u32, (origin.max(d)) as u32);
+                let (attempts, successes) = self.route_prospects.iter()
+                    .find(|p| p.a == lo && p.b == hiid)
+                    .map(|p| (p.attempts, p.successes)).unwrap_or((0, 0));
+                // A route with prior SUCCESSES is worth finishing (cement it into a
+                // corridor); only FAILED attempts fatigue the appetite.
+                let promise = 1.0 + successes as f32 * 0.9;
+                let fatigue = 1.0 / (1.0 + attempts.saturating_sub(successes) as f32 * 0.5);
+                let jitter = 0.7 + 0.6 * hash01(self.seed, d as u64, (tick as u64) ^ (hi as u64));
+                let score = hd.population.sqrt() * (dist / min_gap) * fatigue * promise * jitter;
+                if score > best.1 { best = (d, score); }
+            }
+            let Some(dest) = (best.0 != usize::MAX).then_some(best.0) else { continue };
+            self.launch_expedition(hi, origin, dest);
+            launched += 1;
+        }
+    }
+
+    /// Outfit + register + dispatch one expedition (cost debited from the house).
+    fn launch_expedition(&mut self, hi: usize, origin: usize, dest: usize) {
+        let tick = self.tick;
+        let ng = self.goods.len();
+        // Chief export of the origin = the cargo.
+        let (mut good, mut bestp) = (0usize, 0.0f32);
+        let plen = self.hubs[origin].production.len().min(ng);
+        for g in 0..plen {
+            let p = self.hubs[origin].production[g];
+            if p > bestp { bestp = p; good = g; }
+        }
+        let dist = self.hub_cell_dist(origin, dest);
+        let km = dist * EARTH_EQUATOR_KM / self.world_w.max(1.0);
+        let wealth = self.houses[hi].wealth;
+        let rand = 0.7 + 0.6 * hash01(self.seed, tick as u64, (origin as u64) ^ ((dest as u64) << 16));
+        let units = (((km / EXP_REF_KM) * (wealth / 80.0).clamp(0.3, 3.0) * 4.0) * rand)
+            .round().clamp(2.0, 24.0) as u16;
+        let sea_route = self.hubs[origin].coastal && self.hubs[dest].coastal;
+        let (ships, caravans) = if sea_route { (units, 0u16) } else { (0u16, units) };
+        let cost = units as f32 * EXP_UNIT_COST
+            * (1.0 + Self::koppen_peril(self.hubs[dest].koppen) + if sea_route { 0.3 } else { 0.0 });
+        let cargo_qty = units as f32 * 3.0;
+        self.houses[hi].wealth -= cost;
+        let travel = (dist * self.days_per_cell).round().clamp(18.0, 320.0) as u32;
+        let leader = {
+            let h = &self.houses[hi];
+            let head = if h.head_name.is_empty() { h.name.clone() } else { h.head_name.clone() };
+            format!("{} of {}", head, h.name)
+        };
+        let id = self.next_expedition_id;
+        self.next_expedition_id = self.next_expedition_id.wrapping_add(1);
+        let (ox, oy) = (self.hubs[origin].x, self.hubs[origin].y);
+        let (dx, dy) = (self.hubs[dest].x, self.hubs[dest].y);
+        let (on, dn) = (self.hubs[origin].name.clone(), self.hubs[dest].name.clone());
+        self.journal.push(JournalEntry {
+            tick, kind: "expedition".into(), hub: origin as i32, good: good as i32, value: -cost,
+            text: format!("{} funds an expedition from {} to {} — {} {}",
+                leader, on, dn, units, if sea_route { "ships" } else { "caravans" }),
+        });
+        self.expeditions.push(Expedition {
+            id, house: hi as u32, leader, origin: origin as u32, dest: dest as u32,
+            ox, oy, dx, dy, launched_tick: tick, travel_ticks: travel, pos: 0.0, outbound: true,
+            caravans, ships, good: good as u16, cargo_qty, cost, revenue: 0.0,
+            arrived_frac: 1.0, status: 0, hazards: Vec::new(),
+        });
+    }
+
+    /// EVERY TICK (cheap when idle): advance ventures, roll hazards, resolve
+    /// arrivals/returns, and establish a corridor once a route is proven.
+    fn expedition_travel_pass(&mut self) {
+        if self.expeditions.is_empty() { return; }
+        let tick = self.tick;
+        let seed = self.seed;
+        for ei in 0..self.expeditions.len() {
+            let mut e = self.expeditions[ei].clone();
+            if e.status >= 3 { continue; }
+            let origin = e.origin as usize;
+            let dest = e.dest as usize;
+            let good = e.good as usize;
+            let owner = e.house as usize;
+            let ko = self.hubs.get(origin).map(|h| h.koppen).unwrap_or(0);
+            let kd = self.hubs.get(dest).map(|h| h.koppen).unwrap_or(0);
+            let sea = e.ships > e.caravans;
+            // advance along the active leg
+            let step = 1.0 / e.travel_ticks.max(1) as f32;
+            e.pos += step;
+            let t = e.pos.clamp(0.0, 1.0);
+            let (sx, sy, gx, gy) = if e.outbound { (e.ox, e.oy, e.dx, e.dy) } else { (e.dx, e.dy, e.ox, e.oy) };
+            let (cx, cy) = (sx + (gx - sx) * t, sy + (gy - sy) * t);
+            // hazard roll
+            let climate = (Self::koppen_peril(ko) + Self::koppen_peril(kd)) * 0.5;
+            let peril = EXP_HAZARD_BASE * (0.7 + 1.3 * climate + if sea { 0.5 } else { 0.3 });
+            let roll = hash01(seed, (tick as u64) ^ (e.id as u64).wrapping_mul(0x2545F4914F6CDD1D),
+                (e.pos * 997.0) as u64);
+            if roll < peril {
+                let kr = hash01(seed, e.id as u64, tick as u64 ^ 0x51ED);
+                let kind = Self::pick_hazard_kind(sea, ko, kd, kr);
+                let loss = 0.12 + 0.34 * hash01(seed, e.id as u64 ^ 0xA5, tick as u64);
+                e.arrived_frac -= loss;
+                e.hazards.push(HazardEvent { tick, x: cx, y: cy, kind, losses: loss.min(1.0) });
+                if e.arrived_frac <= 0.0 {
+                    e.arrived_frac = 0.0;
+                    e.status = 4;
+                    self.failed_expeditions.push(HazardEvent { tick, x: cx, y: cy, kind, losses: 1.0 });
+                    if self.failed_expeditions.len() > EXP_FAILED_CAP {
+                        let ov = self.failed_expeditions.len() - EXP_FAILED_CAP;
+                        self.failed_expeditions.drain(0..ov);
+                    }
+                    let pi = self.prospect_idx(origin, dest);
+                    self.route_prospects[pi].attempts = self.route_prospects[pi].attempts.saturating_add(1);
+                    self.route_prospects[pi].last_tick = tick;
+                    let (on, dn) = (self.hubs.get(origin).map(|h| h.name.clone()).unwrap_or_default(),
+                                    self.hubs.get(dest).map(|h| h.name.clone()).unwrap_or_default());
+                    self.journal.push(JournalEntry { tick, kind: "expedition".into(), hub: origin as i32,
+                        good: -1, value: 0.0,
+                        text: format!("{}'s expedition to {} is lost ({})", e.leader, dn,
+                            HAZARD_LABEL[kind as usize]) });
+                    let _ = on;
+                    self.expeditions[ei] = e;
+                    continue;
+                }
+            }
+            // arrival / return
+            if e.pos >= 1.0 {
+                if e.outbound {
+                    let base = self.goods.get(good).map(|g| g.base_value).unwrap_or(1.0).max(0.2);
+                    e.revenue = e.cargo_qty * base * 2.2 * e.arrived_frac;
+                    e.outbound = false;
+                    e.pos = 0.0;
+                    e.status = 2; // returning
+                } else {
+                    e.status = 3; // succeeded (banked on return)
+                    let profit = e.revenue - e.cost;
+                    if owner < self.houses.len() && !self.houses[owner].defunct {
+                        self.houses[owner].wealth += e.revenue;
+                    }
+                    let pi = self.prospect_idx(origin, dest);
+                    self.route_prospects[pi].attempts = self.route_prospects[pi].attempts.saturating_add(1);
+                    self.route_prospects[pi].successes = self.route_prospects[pi].successes.saturating_add(1);
+                    self.route_prospects[pi].cum_profit += profit;
+                    self.route_prospects[pi].last_tick = tick;
+                    let est = !self.route_prospects[pi].established
+                        && self.route_prospects[pi].successes >= EXP_MIN_SUCCESSES
+                        && self.route_prospects[pi].cum_profit >= EXP_EST_PROFIT;
+                    let (att, suc) = (self.route_prospects[pi].attempts, self.route_prospects[pi].successes);
+                    let dn = self.hubs.get(dest).map(|h| h.name.clone()).unwrap_or_default();
+                    self.journal.push(JournalEntry { tick, kind: "expedition".into(), hub: dest as i32,
+                        good: good as i32, value: profit,
+                        text: format!("{}'s expedition to {} returns ({}% of the fleet survived)",
+                            e.leader, dn, (e.arrived_frac * 100.0) as i32) });
+                    if est {
+                        self.route_prospects[pi].established = true;
+                        self.establish_corridor(origin, dest, owner, good as u16, att, suc);
+                    }
+                }
+            }
+            self.expeditions[ei] = e;
+        }
+    }
+
+    /// Establish a permanent corridor + found its port (coast) / caravanserai (land)
+    /// villages on real geographic sites near the route. Culture assigned at founding.
+    fn establish_corridor(&mut self, origin: usize, dest: usize, owner: usize,
+        good: u16, attempts: u16, successes: u16) {
+        let tick = self.tick;
+        let (ox, oy) = (self.hubs[origin].x, self.hubs[origin].y);
+        let (dx, dy) = (self.hubs[dest].x, self.hubs[dest].y);
+        let km = self.hub_cell_dist(origin, dest) * EARTH_EQUATOR_KM / self.world_w.max(1.0);
+        let sea_route = self.hubs[origin].coastal && self.hubs[dest].coastal;
+        // Count is FORMULA-driven + randomised (not fixed spacing).
+        let n_port = if sea_route {
+            1 + (hash01(self.seed, tick as u64, origin as u64) < 0.4) as u32
+        } else { 0 };
+        let n_car = if sea_route { 0 } else {
+            (km / EXP_DAY_MARCH_KM * (0.75 + 0.5 * hash01(self.seed, tick as u64 ^ 0xCA, dest as u64)))
+                .floor().clamp(0.0, 3.0) as u32
+        };
+        let total = n_port + n_car;
+        let culture = self.hub_culture.get(origin).cloned().unwrap_or_default();
+        let (mut ports, mut caravanserais) = (Vec::new(), Vec::new());
+        for i in 0..total {
+            let want_coastal = i < n_port; // ports first (the sea landfalls)
+            let f = (i as f32 + 1.0) / (total as f32 + 1.0);
+            let (mx, my) = (ox + (dx - ox) * f, oy + (dy - oy) * f);
+            let mut best = (usize::MAX, f32::MAX);
+            for (si, s) in self.colonizable.iter().enumerate() {
+                if s.coastal != want_coastal { continue; }
+                let d2 = (s.x - mx).powi(2) + (s.y - my).powi(2);
+                if d2 < best.1 { best = (si, d2); }
+            }
+            if best.0 == usize::MAX { continue; }
+            if best.1.sqrt() > self.world_w * 0.10 { continue; } // must be near the route
+            let site = self.colonizable.swap_remove(best.0);
+            let idx = self.create_organic_town(origin, &site, CARAVAN_SEED_POP);
+            if self.hub_culture.len() <= idx { self.hub_culture.resize(idx + 1, String::new()); }
+            if !culture.is_empty() { self.hub_culture[idx] = culture.clone(); }
+            let nm = self.hubs[idx].name.clone();
+            let hid = self.hubs[idx].id;
+            self.total_foundings += 1;
+            if want_coastal {
+                ports.push(hid);
+                self.journal.push(JournalEntry { tick, kind: "founding".into(), hub: idx as i32,
+                    good: -1, value: CARAVAN_SEED_POP,
+                    text: format!("The port of {} is founded on the new sea-road", nm) });
+            } else {
+                caravanserais.push(hid);
+                self.journal.push(JournalEntry { tick, kind: "founding".into(), hub: idx as i32,
+                    good: -1, value: CARAVAN_SEED_POP,
+                    text: format!("A caravanserai rises at {} along the new corridor", nm) });
+            }
+        }
+        let owner_name = self.houses.get(owner).map(|h| h.name.clone()).unwrap_or_else(|| "a house".into());
+        let good_name = self.goods.get(good as usize).map(|g| g.name.clone()).unwrap_or_default();
+        let (on, dn) = (self.hubs[origin].name.clone(), self.hubs[dest].name.clone());
+        self.journal.push(JournalEntry { tick, kind: "corridor".into(), hub: origin as i32,
+            good: good as i32, value: successes as f32,
+            text: format!("After {} ventures, {} opens a lasting {} corridor from {} to {}",
+                attempts, owner_name, good_name, on, dn) });
+        self.corridors.push(Corridor {
+            a: origin as u32, b: dest as u32, owner: owner as i32, good,
+            founded_tick: tick, attempts, successes, ports, caravanserais,
+        });
     }
 
     /// CARAVANSERAIS: found a waystation near the midpoint of a long INLAND trade tie
@@ -12656,6 +13087,8 @@ mod tests {
             epidemics: vec![],
             next_outbreak: 0,
             expansion_frozen_until: 0,
+            expeditions: vec![], route_prospects: vec![], failed_expeditions: vec![],
+            corridors: vec![], next_expedition_id: 0,
         };
         s.rebuild_routes();
         s
@@ -12736,6 +13169,47 @@ mod tests {
     /// start founding at OUTPOST_START_TICK (= year 30), and founding APPENDS a hub
     /// mid-tick. With colonization sites seeded and houses rich enough to clear the
     /// outpost wealth bar, the world grows past year 30 — exercising every per-hub
+    /// Expeditions must actually run end-to-end: a financed venture launches,
+    /// travels, resolves, and over repeated proven round-trips a permanent corridor
+    /// is established (with its founding recorded). Guards against the mechanic being
+    /// inert (never launching) or never converging on a corridor.
+    #[test]
+    fn expeditions_launch_travel_and_establish_a_corridor() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        // Two distant cities (world_w 100 → 45-cell gap ≫ the 14% min) that trade
+        // should want to connect, plus a house rich enough to bankroll ventures.
+        let hubs = vec![
+            hub(0, 5.0, 50.0, 1500.0, vec![80.0, 40.0], 0),
+            hub(1, 50.0, 50.0, 1500.0, vec![60.0, 30.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.houses = vec![house_at(0, vec![1], 4)];
+        s.houses[0].wealth = 5000.0;
+        s.tick = 15 * TICKS_PER_YEAR;
+        let mut launched_any = false;
+        // ~40 years: relaunch toward the same city whenever idle, tick the travel.
+        for _ in 0..(40 * TICKS_PER_YEAR) {
+            if !s.corridors.is_empty() { break; }
+            if s.expeditions.iter().all(|e| e.status >= 3) {
+                s.launch_expedition(0, 0, 1);
+                launched_any = true;
+                s.houses[0].wealth = s.houses[0].wealth.max(2000.0); // keep it solvent for the test
+            }
+            s.expedition_travel_pass();
+            s.tick += 1;
+        }
+        assert!(launched_any, "no expedition ever launched");
+        assert!(!s.route_prospects.is_empty(), "a venture completed but no prospect ledger formed");
+        assert!(!s.corridors.is_empty(),
+            "repeated successful ventures never established a corridor (prospect: {:?})",
+            s.route_prospects.first());
+        let c = &s.corridors[0];
+        assert!(c.successes >= EXP_MIN_SUCCESSES, "corridor established below the success bar");
+    }
+
     /// loop against a freshly-appended hub. Must not panic (index/overflow) for 50y.
     #[test]
     fn outposts_and_colonies_past_year_30_dont_crash() {

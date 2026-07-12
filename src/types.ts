@@ -531,6 +531,31 @@ export interface TradeCorridor {
   points: [number, number][];
   waystations: CorridorWaystation[];
 }
+/** A live financed expedition crawling toward a distant city (the way a corridor is
+ *  earned). Carries the fleet, cargo, leader, survival and its struggle log. */
+export interface ExpeditionView {
+  id: number;
+  leader: string;
+  origin: string;
+  dest: string;
+  x: number;
+  y: number;
+  ox: number; oy: number;
+  dx: number; dy: number;
+  progress: number;     // 0..1 over the whole round trip
+  outbound: boolean;
+  status: number;       // 0 en-route · 1 arrived · 2 returning
+  caravans: number;
+  ships: number;
+  good: string;
+  survived: number;     // fraction of the fleet still alive
+  cost: number;
+  launched_year: number;
+  hazards: [number, number, number][]; // recent (x, y, kind)
+}
+/** A recent failed venture, for the map ✕ overlay. */
+export interface ExpeditionFail { x: number; y: number; kind: number }
+export interface ExpeditionsPayload { active: ExpeditionView[]; failed: ExpeditionFail[] }
 /** A settlement building resolved with WHO owns/controls it, for the ward grid. */
 export interface BuildingInfo {
   label: string;

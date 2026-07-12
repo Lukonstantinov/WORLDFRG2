@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity } from "../types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail } from "../types";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "../goods";
 import { drawGoodIcon } from "./goodIcons";
 import { latLineY } from "./projection";
@@ -311,6 +311,8 @@ export class OverlayManager {
   private tradeTrunks: TradeTrunk[] = [];
   private dynamicTrunks: TradeTrunk[] = [];
   private tradeCorridorList: TradeCorridor[] = [];
+  private expeditions: ExpeditionView[] = [];
+  private expeditionFails: ExpeditionFail[] = [];
   private merchantRoutes: MerchantRoute[] = [];
   private futuresLanes: FuturesLane[] = [];
   private selectedFuturesLane: FuturesLane | null = null;
@@ -347,7 +349,7 @@ export class OverlayManager {
     markers: false, wind: false, currents: false, latLines: false,
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
-    politicalInfluence: false, chokepoints: false, tradeCorridors: false, campaignCorridors: false,
+    politicalInfluence: false, chokepoints: false, tradeCorridors: false, campaignCorridors: false, expeditions: false,
     speculation: false, coinDominance: false,
     houseControl: false, merchantRoutes: false, futures: false,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
@@ -923,6 +925,12 @@ export class OverlayManager {
     if (gridW > 0) this.worldW = gridW;
   }
 
+  drawExpeditions(active: ExpeditionView[], failed: ExpeditionFail[], gridW: number) {
+    this.expeditions = active;
+    this.expeditionFails = failed;
+    if (gridW > 0) this.worldW = gridW;
+  }
+
   drawMerchantRoutes(routes: MerchantRoute[], gridW: number) {
     this.merchantRoutes = routes;
     if (gridW > 0) this.worldW = gridW;
@@ -1367,6 +1375,9 @@ export class OverlayManager {
     }
     if (this.visibility.campaignCorridors && this.tradeCorridorList.length > 0) {
       this.renderTradeCorridors(ctx);
+    }
+    if (this.visibility.expeditions && (this.expeditions.length > 0 || this.expeditionFails.length > 0)) {
+      this.renderExpeditions(ctx);
     }
 
     if (this.visibility.tradeRoutes && this.tradeRoutes.length > 0) {
@@ -2717,6 +2728,82 @@ export class OverlayManager {
     ctx.setLineDash([]);
   }
 
+  /** Expeditions: financed ventures crawling toward distant, unconnected cities.
+   *  Each draws its intended track (faint), a caravan/ship marker at the current
+   *  position (sized by fleet, coloured by heading — amber outbound, teal
+   *  returning), a survival ring, and recent hazard sparks. Recent FAILED ventures
+   *  drop a red ✕ at the loss site. This is "attempts on the map" made literal. */
+  private renderExpeditions(ctx: CanvasRenderingContext2D) {
+    const W = this.worldW;
+    const inv = 1 / Math.sqrt(this.currentScale);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    // 1) Failed ventures — faded red ✕ at the loss site.
+    const fr = Math.max(1.1, 2.4 * inv);
+    ctx.strokeStyle = "#e2544b";
+    ctx.globalAlpha = 0.7;
+    ctx.lineWidth = Math.max(0.5, 1.1 * inv);
+    for (const f of this.expeditionFails) {
+      const x = f.x + 0.5, y = f.y + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(x - fr, y - fr); ctx.lineTo(x + fr, y + fr);
+      ctx.moveTo(x + fr, y - fr); ctx.lineTo(x - fr, y + fr);
+      ctx.stroke();
+    }
+    // 2) Active ventures.
+    for (const e of this.expeditions) {
+      const sea = e.ships > e.caravans;
+      const col = e.outbound ? "#e0b24a" : "#5fc8a8";
+      // intended track (origin → dest), faint + dashed.
+      const dash = Math.max(1.5, 3 * inv);
+      const seam = W > 0 && Math.abs((e.ox + 0.5) - (e.dx + 0.5)) > W / 2;
+      if (!seam) {
+        ctx.globalAlpha = 0.28;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = Math.max(0.4, 0.7 * inv);
+        ctx.setLineDash([dash, dash]);
+        ctx.beginPath();
+        ctx.moveTo(e.ox + 0.5, e.oy + 0.5);
+        ctx.lineTo(e.dx + 0.5, e.dy + 0.5);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      // recent hazard sparks along the track.
+      ctx.globalAlpha = 0.8;
+      ctx.fillStyle = "#e2544b";
+      const hr = Math.max(0.6, 1.1 * inv);
+      for (const h of e.hazards) {
+        ctx.beginPath(); ctx.arc(h[0] + 0.5, h[1] + 0.5, hr, 0, Math.PI * 2); ctx.fill();
+      }
+      // the venture marker at the current position.
+      const cx = e.x + 0.5, cy = e.y + 0.5;
+      const r = Math.max(1.4, (2.2 + Math.min(6, e.caravans + e.ships) * 0.25) * inv);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = col;
+      ctx.strokeStyle = "#10161f";
+      ctx.lineWidth = Math.max(0.3, 0.6 * inv);
+      ctx.beginPath();
+      if (sea) {                 // ship ◆ diamond
+        ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy); ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy); ctx.closePath();
+      } else {                   // caravan ● circle
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      }
+      ctx.fill(); ctx.stroke();
+      // survival ring: red arc = fraction already lost.
+      const lost = 1 - Math.max(0, Math.min(1, e.survived));
+      if (lost > 0.02) {
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = "#e2544b";
+        ctx.lineWidth = Math.max(0.5, 1.0 * inv);
+        ctx.beginPath();
+        ctx.arc(cx, cy, r + 1.2 * inv, -Math.PI / 2, -Math.PI / 2 + lost * Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
+  }
+
   /** The futures layer: each active contract as a DASHED, DIRECTED lane from the
    *  producer/warehouse city (square) to the buyer city (ring). Colour & weight rise
    *  with term (1yr faint → 7yr bold gold); a suspended (quarantined) lane greys out;
@@ -3852,6 +3939,8 @@ export class OverlayManager {
     this.tradeTrunks = [];
     this.dynamicTrunks = [];
     this.tradeCorridorList = [];
+    this.expeditions = [];
+    this.expeditionFails = [];
     this.politicalCenters = [];
     this.specCenters = [];
     this.houses = [];

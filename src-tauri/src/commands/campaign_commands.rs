@@ -2311,6 +2311,11 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         epidemics: vec![],
         next_outbreak: 0,
         expansion_frozen_until: 0,
+        expeditions: vec![],
+        route_prospects: vec![],
+        failed_expeditions: vec![],
+        corridors: vec![],
+        next_expedition_id: 0,
     };
     // Backfill the colonization pool if the saved economy predates the feature (its
     // `colonizable_sites` deserialized to the serde default — empty). Without this a

@@ -10,7 +10,7 @@ import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useSettingsStore } from "../state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes } from "../bridge/tauri";
 import type { MerchantRoute, FuturesLane, Toponym } from "../types";
 import { goodOverlayKey, GOOD_DEFS } from "../goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "../types";
@@ -822,6 +822,23 @@ export function MapCanvas() {
     }, 400);
     return () => window.clearTimeout(t);
   }, [overlayVisibility.campaignCorridors, campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365), meta, rivers, bioParams.tradeReach, bioParams.maxCrossing, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Expeditions — financed ventures crawling toward distant cities + recent failed
+  // ✕'s. Cheap read (no routing), so it refreshes every tick to show them moving.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !meta) return;
+    if (!overlayVisibility.expeditions || !campaignSnapshot?.active) {
+      om.drawExpeditions([], [], meta.grid_width);
+      requestRender();
+      return;
+    }
+    campaignGetExpeditions()
+      .then((p) => {
+        om.drawExpeditions(p.active, p.failed, meta.grid_width);
+        requestRender();
+      }).catch(() => {});
+  }, [overlayVisibility.expeditions, campaignSnapshot?.active, campaignSnapshot?.clock.tick, meta, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Political influence — product of the Political step (9).
   useEffect(() => {

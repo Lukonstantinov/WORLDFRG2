@@ -2702,7 +2702,11 @@ pub fn campaign_get_corridors(
     let sim = match crate::commands::campaign_commands::get_sim(&db, &conn)? {
         Some(s) => s, None => return Ok(vec![]),
     };
-    if sim.flow_year.is_empty() { return Ok(vec![]); }
+    // Event-driven: corridors are the ESTABLISHED routes earned by expeditions
+    // (docs/EXPEDITIONS_CORRIDORS_PLAN.md), not the top-N yearly flows. There are
+    // only a handful, so routing them is cheap — this is what removes the year-tick
+    // recompute storm the old flow_year source caused.
+    if sim.corridors.is_empty() { return Ok(vec![]); }
     let world = db.cached_tiles_with_conn(&conn)?;
     // Same river/terrain-prone coarse grid the trade routes ride.
     let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h,
@@ -2727,8 +2731,13 @@ pub fn campaign_get_corridors(
         if hh.wealth > e.1 { *e = (hi, hh.wealth); }
     }
 
-    // Strongest ties first; one corridor per unordered city pair.
-    let mut flows = sim.flow_year.clone();
+    // The established corridors (as id-pairs with a volume proxy = successful
+    // ventures) — routed geographically below, strongest first.
+    let mut flows: Vec<(u32, u32, f32)> = sim.corridors.iter().filter_map(|c| {
+        let a = sim.hubs.get(c.a as usize)?;
+        let b = sim.hubs.get(c.b as usize)?;
+        Some((a.id, b.id, (c.successes.max(1)) as f32))
+    }).collect();
     flows.sort_by(|x, y| y.2.partial_cmp(&x.2).unwrap_or(std::cmp::Ordering::Equal));
     let mut seen: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
     let mut corridors: Vec<TradeCorridor> = Vec::new();
@@ -2793,6 +2802,79 @@ pub fn campaign_get_corridors(
         });
     }
     Ok(corridors)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Expeditions — financed ventures crawling toward distant lands (the way a
+// corridor is earned). Read-only projection of the live sim for the map + panel.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One live venture for the map/panel: current position, progress, fleet, cargo,
+/// leader, survival + recent hazards (the struggle story).
+#[derive(Serialize)]
+pub struct ExpeditionView {
+    pub id: u32,
+    pub leader: String,
+    pub origin: String,
+    pub dest: String,
+    pub x: f32,
+    pub y: f32,
+    pub ox: f32, pub oy: f32,   // origin (for drawing the intended track)
+    pub dx: f32, pub dy: f32,   // destination
+    pub progress: f32,          // 0..1 over the whole round trip
+    pub outbound: bool,
+    pub status: u8,             // 0 en-route · 1 arrived · 2 returning
+    pub caravans: u16,
+    pub ships: u16,
+    pub good: String,
+    pub survived: f32,          // fraction of the fleet still alive
+    pub cost: f32,
+    pub launched_year: u32,
+    pub hazards: Vec<[f32; 3]>, // recent (x, y, kind) struggles
+}
+
+/// A recent FAILED venture, for the map ✕ overlay.
+#[derive(Serialize)]
+pub struct ExpeditionFail {
+    pub x: f32,
+    pub y: f32,
+    pub kind: u8,
+}
+
+#[derive(Serialize)]
+pub struct ExpeditionsPayload {
+    pub active: Vec<ExpeditionView>,
+    pub failed: Vec<ExpeditionFail>,
+}
+
+#[tauri::command]
+pub fn campaign_get_expeditions(db: State<'_, WorldDb>) -> Result<ExpeditionsPayload, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match crate::commands::campaign_commands::get_sim(&db, &conn)? {
+        Some(s) => s, None => return Ok(ExpeditionsPayload { active: vec![], failed: vec![] }),
+    };
+    let mut active = Vec::new();
+    for e in sim.expeditions.iter() {
+        if e.status >= 3 { continue; } // en-route / arrived / returning only
+        let t = e.pos.clamp(0.0, 1.0);
+        let (sx, sy, gx, gy) = if e.outbound { (e.ox, e.oy, e.dx, e.dy) } else { (e.dx, e.dy, e.ox, e.oy) };
+        let (x, y) = (sx + (gx - sx) * t, sy + (gy - sy) * t);
+        let progress = if e.outbound { t * 0.5 } else { 0.5 + t * 0.5 };
+        let origin = sim.hubs.get(e.origin as usize).map(|h| h.name.clone()).unwrap_or_default();
+        let dest = sim.hubs.get(e.dest as usize).map(|h| h.name.clone()).unwrap_or_default();
+        let good = sim.goods.get(e.good as usize).map(|g| g.name.clone()).unwrap_or_default();
+        let hazards = e.hazards.iter().rev().take(6).map(|h| [h.x, h.y, h.kind as f32]).collect();
+        active.push(ExpeditionView {
+            id: e.id, leader: e.leader.clone(), origin, dest,
+            x, y, ox: e.ox, oy: e.oy, dx: e.dx, dy: e.dy,
+            progress, outbound: e.outbound, status: e.status,
+            caravans: e.caravans, ships: e.ships, good,
+            survived: e.arrived_frac, cost: e.cost, launched_year: e.launched_tick / 365, hazards,
+        });
+    }
+    let failed = sim.failed_expeditions.iter().rev().take(40)
+        .map(|h| ExpeditionFail { x: h.x, y: h.y, kind: h.kind }).collect();
+    Ok(ExpeditionsPayload { active, failed })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
