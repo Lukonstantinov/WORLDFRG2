@@ -35,6 +35,15 @@ function tileDims(N: number) {
 // wash + the heraldic flag, so fixed-palette sprites still show who controls what.
 const SPRITE_BASE = "/city-sprites/"; // public/city-sprites/<stem>.svg|png (like /fish/)
 const SPRITE_EXTS = [".svg", ".png"];  // shipped templates are SVG; a PNG pack also works
+// Uniform sprite CELL (shared with scripts/gen_city_sprites.mjs): a 128×220 canvas
+// whose footprint (width 100, base bottom-vertex at sprite y=185) maps onto exactly
+// ONE grid tile — so every building is the same footprint and tiles cleanly.
+const SP_VB_W = 128, SP_VB_H = 220, SP_FOOT_W = 100, SP_BASE_Y = 185;
+// Sprite-space Y of each building's flag anchor (its roof peak) — mirrors gen script.
+const SPRITE_PEAK: Record<string, number> = {
+  house: 114, guildhall: 86, workshop: 102, granary: 88, warehouse: 107, shipyard: 122,
+  fondaco: 96, cathedral: 20, temple: 96, citadel: 42, palace: 92, council_hall: 42, mint: 104, bank: 102, harbor: 74,
+};
 /** Building label → sprite file stem in public/city-sprites/<stem>.png.
  *  Edit these to match the filenames in your pack. */
 const SPRITE_MAP: Record<string, string> = {
@@ -338,15 +347,16 @@ function drawTile(ctx: CanvasRenderingContext2D, cx: number, cy: number, h: numb
  *  keeps its heraldic flag + emoji chip so ownership and identity still read. */
 function drawSprite(ctx: CanvasRenderingContext2D, img: HTMLImageElement, cx: number, cy: number,
   tw: number, th: number, building?: BuildingInfo) {
-  const scale = building ? 2.2 : 1.35;              // landmarks bigger than houses
-  const w = tw * scale;
-  const hgt = w * (img.height / Math.max(1, img.width));
-  const dx = cx - w / 2;
-  const dy = (cy + th / 2) - hgt + th * 0.12;       // sit the base on the tile front
+  // Uniform blit: the sprite's footprint (width SP_FOOT_W, base at SP_BASE_Y) maps
+  // onto exactly one tile, so all buildings are the same size on the grid.
+  const s = tw / SP_FOOT_W;
+  const w = SP_VB_W * s, hgt = SP_VB_H * s;
+  const dx = cx - (SP_VB_W / 2) * s;
+  const dy = (cy + th / 2) - SP_BASE_Y * s;
   ctx.drawImage(img, dx, dy, w, hgt);
   if (building) {
-    const topY = dy + hgt * 0.06;
-    const poleH = Math.max(7, tw * 0.32), pw = Math.max(5, tw * 0.22);
+    const topY = dy + (SPRITE_PEAK[building.label] ?? 96) * s; // roof peak
+    const poleH = Math.max(8, tw * 0.34), pw = Math.max(5, tw * 0.22);
     ctx.strokeStyle = "#1b2833"; ctx.lineWidth = 1.1;
     ctx.beginPath(); ctx.moveTo(cx, topY); ctx.lineTo(cx, topY - poleH); ctx.stroke();
     poly(ctx, [[cx, topY - poleH], [cx + pw, topY - poleH + 3], [cx, topY - poleH + 6]], building.color);
