@@ -1058,6 +1058,32 @@ const CRASH_CONTAGION_RUN: f32 = 0.20;
 // ── DLC 3.5 · Economic war (a wealth sink + conflict) ───────────────────────
 /// At most this many wars run at once (wars are rare, dramatic events).
 const MAX_ACTIVE_WARS: usize = 2;
+// ── War GOALS — what the victor takes (beyond the one-off plunder). ──────────
+/// Sack-and-go: only the immediate reparations (legacy behaviour).
+const WAR_GOAL_PLUNDER: u8 = 0;
+/// The loser is made a tributary — recurring yearly payments for a term.
+const WAR_GOAL_TRIBUTE: u8 = 1;
+/// The victor's ruling house is granted a BAILO (commercial foothold) in the loser.
+const WAR_GOAL_TRADE_RIGHTS: u8 = 2;
+/// The victor annexes the loser — its ruling house is installed on the loser's
+/// council (a bailo makes it stick through the yearly council recompute).
+const WAR_GOAL_ANNEX: u8 = 3;
+/// Years a defeated city pays tribute to its overlord.
+const TRIBUTE_YEARS: u32 = 10;
+/// Yearly tribute as a fraction of the tributary's treasury (bounded — moves money,
+/// never mints it, so the economy stays within the dynamics-test envelope).
+const TRIBUTE_RATE: f32 = 0.06;
+/// Hard cap on a single year's tribute payment (× city_size_factor).
+const TRIBUTE_CAP: f32 = 40.0;
+/// Short label for a war goal (journal / Wars log).
+pub fn war_goal_label(goal: u8) -> &'static str {
+    match goal {
+        WAR_GOAL_TRIBUTE => "for tribute",
+        WAR_GOAL_TRADE_RIGHTS => "for trade rights",
+        WAR_GOAL_ANNEX => "for annexation",
+        _ => "for plunder",
+    }
+}
 /// Yearly chance a new war is declared (when below the cap).
 const WAR_DECLARE_CHANCE: f32 = 0.10;
 /// Yearly forced levy on each resident house's wealth → the city war chest. The
@@ -1222,6 +1248,11 @@ pub struct TickHub {
     #[serde(default)] pub war_since: u32,
     /// Accumulated war effort / morale this side has mustered (war chest spent).
     #[serde(default)] pub war_effort: f32,
+    /// TRIBUTARY state: the overlord hub this city owes tribute to (−1 = free), set
+    /// when it loses a war whose goal was Tribute. Cleared when the term lapses.
+    #[serde(default = "neg_one_i32")] pub tribute_to: i32,
+    /// Tick the tribute obligation lapses.
+    #[serde(default)] pub tribute_until: u32,
     // ── DLC 3.5 · Coinage (the "Venice ducat") ──
     /// The NAMED coin this polis mints ("" = it issues none — only council seats do).
     #[serde(default)] pub coin_name: String,
@@ -1754,6 +1785,10 @@ pub struct War {
     pub levies: f32,       // total raised from houses across both sides
     pub cargo_lost: u32,
     pub cause: String,
+    /// What the war is FOR — decides what the victor takes at resolution (beyond the
+    /// one-off plunder): 0 plunder · 1 tribute · 2 trade rights · 3 annexation.
+    /// `#[serde(default)]` → old saves load as plunder.
+    #[serde(default)] pub goal: u8,
 }
 
 /// DLC 3.5 · a concluded war, for the Wars log.
@@ -3963,11 +3998,75 @@ impl CampaignSim {
         spend
     }
 
+    /// Apply a resolved war's GOAL — the victor's lasting spoils beyond the one-off
+    /// plunder. Returns a short clause appended to the journal / Wars-log text.
+    /// Trade rights & annexation both work through the BAILO primitive (a foreign
+    /// governing foothold), so the winner's house is seated on the loser's council
+    /// by the ordinary yearly recompute and the control transfer sticks.
+    fn apply_war_goal(&mut self, win: usize, lose: usize, goal: u8, tick: u32, _yr: u32) -> String {
+        let (wn, ln) = (self.hubs[win].name.clone(), self.hubs[lose].name.clone());
+        // The victor's ruling family: its council head, else its richest resident.
+        let ruler = {
+            let c = self.hubs[win].council_house;
+            if c >= 0 && (c as usize) < self.houses.len() { Some(c as usize) }
+            else { self.strongest_house_at(win) }
+        };
+        let grant_bailo = |me: &mut Self, hi: usize| {
+            if !me.houses[hi].bailos.contains(&(lose as u32)) {
+                me.houses[hi].bailos.push(lose as u32);
+            }
+        };
+        match goal {
+            WAR_GOAL_TRIBUTE => {
+                self.hubs[lose].tribute_to = win as i32;
+                self.hubs[lose].tribute_until = tick + TRIBUTE_YEARS * TICKS_PER_YEAR;
+                format!("; {} is made a tributary of {} for {} years", ln, wn, TRIBUTE_YEARS)
+            }
+            WAR_GOAL_TRADE_RIGHTS => {
+                if let Some(hi) = ruler {
+                    grant_bailo(self, hi);
+                    let hn = self.houses[hi].name.clone();
+                    format!("; {} wins trade rights in {} — a bailo for {}", wn, ln, hn)
+                } else { String::new() }
+            }
+            WAR_GOAL_ANNEX => {
+                if let Some(hi) = ruler {
+                    grant_bailo(self, hi);
+                    self.hubs[lose].council_house = hi as i32;
+                    self.hubs[lose].coin_trust = (self.hubs[lose].coin_trust - 0.15).max(0.0);
+                    let hn = self.houses[hi].name.clone();
+                    format!("; {} is annexed by {} — {} installed on its council", ln, wn, hn)
+                } else {
+                    format!("; {} is annexed by {}", ln, wn)
+                }
+            }
+            _ => String::new(),
+        }
+    }
+
     /// DLC 3.5 · the economic-war engine. Once a year: wage & resolve active wars
     /// (levies, war-chest spending, trade blockade, reparations) and occasionally
     /// declare a new one between rival poleis. Deterministic.
     fn update_wars(&mut self, yr: u32) {
         let tick = self.tick;
+        // Tributaries pay their overlords first — a bounded treasury→treasury
+        // transfer (never minted), lapsing when the term ends.
+        for h in 0..self.hubs.len() {
+            let to = self.hubs[h].tribute_to;
+            if to < 0 { continue; }
+            if tick >= self.hubs[h].tribute_until || to as usize >= self.hubs.len() {
+                self.hubs[h].tribute_to = -1;
+                continue;
+            }
+            let to = to as usize;
+            let cap = TRIBUTE_CAP * self.city_size_factor(h);
+            let pay = (self.hubs[h].treasury.max(0.0) * TRIBUTE_RATE).min(cap);
+            if pay <= EPS { continue; }
+            self.hubs[h].treasury -= pay;
+            self.hubs[to].treasury += pay;
+            self.hubs[h].finance.reparations_out += pay;
+            self.hubs[to].finance.reparations_in += pay;
+        }
         let mut ended: Vec<usize> = Vec::new();
         for wi in 0..self.wars.len() {
             let (a, b) = (self.wars[wi].a as usize, self.wars[wi].b as usize);
@@ -4001,11 +4100,14 @@ impl CampaignSim {
                 self.hubs[lose].coin_trust = (self.hubs[lose].coin_trust - 0.15).max(0.0);
                 self.hubs[a].war_with = -1;
                 self.hubs[b].war_with = -1;
+                // The victor claims the war's GOAL — its lasting spoils (tribute /
+                // trade rights / annexation), beyond the one-off plunder above.
+                let spoils = self.apply_war_goal(win, lose, self.wars[wi].goal, tick, yr);
                 let (an, bn) = (self.hubs[a].name.clone(), self.hubs[b].name.clone());
                 let (wn, ln) = (self.hubs[win].name.clone(), self.hubs[lose].name.clone());
                 let text = format!(
-                    "The war of {} and {} ends in year {}: {} prevails, {} pays {:.0} in reparations.",
-                    an, bn, yr, wn, ln, rep);
+                    "The war of {} and {} ends in year {}: {} prevails, {} pays {:.0} in reparations{}.",
+                    an, bn, yr, wn, ln, rep, spoils);
                 self.journal.push(JournalEntry { tick, kind: "war".into(), hub: win as i32, good: -1,
                     value: rep, text: text.clone() });
                 self.war_log.push(WarRecord {
@@ -4069,6 +4171,23 @@ impl CampaignSim {
         }
         let Some((a, b, cause)) = best else { return };
         let (a, b) = if a < b { (a, b) } else { (b, a) };
+        // A WAR GOAL — what the aggressor is after. Rival councils fight for political
+        // supremacy (annexation / trade rights); a plain trade dispute is fought for
+        // tribute or plunder. A lopsided match leans toward annexation (the strong
+        // swallow the weak); an even one toward tribute. Deterministic.
+        let pow = |me: &Self, h: usize| me.hubs[h].population.max(1.0) * (me.hubs[h].treasury.max(0.0) + 5.0);
+        let (pa, pb) = (pow(self, a), pow(self, b));
+        let ratio = pa.max(pb) / pa.min(pb).max(1.0);
+        let g = hash01(self.seed, self.tick as u64 ^ 0x60A15, (a * 131 + b) as u64);
+        let goal = if cause == "rival councils" {
+            if ratio >= 2.0 && g < 0.6 { WAR_GOAL_ANNEX } else { WAR_GOAL_TRADE_RIGHTS }
+        } else if ratio >= 2.5 && g < 0.4 {
+            WAR_GOAL_ANNEX
+        } else if g < 0.6 {
+            WAR_GOAL_TRIBUTE
+        } else {
+            WAR_GOAL_PLUNDER
+        };
         self.hubs[a].war_with = b as i32;
         self.hubs[b].war_with = a as i32;
         self.hubs[a].war_since = self.tick;
@@ -4076,11 +4195,11 @@ impl CampaignSim {
         let (an, bn) = (self.hubs[a].name.clone(), self.hubs[b].name.clone());
         self.journal.push(JournalEntry {
             tick: self.tick, kind: "war".into(), hub: a as i32, good: -1, value: 0.0,
-            text: format!("{} declares war on {} ({})", an, bn, cause),
+            text: format!("{} declares war on {} ({} · {})", an, bn, cause, war_goal_label(goal)),
         });
         self.wars.push(War {
             a: a as u32, b: b as u32, start_tick: self.tick,
-            chest_a: 0.0, chest_b: 0.0, levies: 0.0, cargo_lost: 0, cause: cause.into(),
+            chest_a: 0.0, chest_b: 0.0, levies: 0.0, cargo_lost: 0, cause: cause.into(), goal,
         });
     }
 
@@ -7795,7 +7914,7 @@ impl CampaignSim {
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: kind, estate_tier: 1, last_upgrade_tick: self.tick, owner_house, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
-            finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
+            finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, tribute_to: -1, tribute_until: 0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0, has_mint: false,
             // DLC 4 · seed the new estate's quality (length ng) so it's graded from
             // day one — a manufactory (kind 6) starts as a humble workshop and learns.
@@ -9429,7 +9548,7 @@ impl CampaignSim {
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
-            finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
+            finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, tribute_to: -1, tribute_until: 0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0, has_mint: false,
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
@@ -10133,7 +10252,7 @@ impl CampaignSim {
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
-            finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
+            finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, tribute_to: -1, tribute_until: 0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0, has_mint: false,
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
@@ -10620,7 +10739,8 @@ impl CampaignSim {
         self.hubs[a].war_since = self.tick;
         self.hubs[b].war_since = self.tick;
         self.wars.push(War { a: a as u32, b: b as u32, start_tick: self.tick,
-            chest_a: 0.0, chest_b: 0.0, levies: 0.0, cargo_lost: 0, cause: "independence".into() });
+            chest_a: 0.0, chest_b: 0.0, levies: 0.0, cargo_lost: 0, cause: "independence".into(),
+            goal: WAR_GOAL_PLUNDER });
         let (cn, mn) = (self.hubs[colony].name.clone(), self.hubs[metro].name.clone());
         self.journal.push(JournalEntry { tick: self.tick, kind: "war".into(), hub: colony as i32,
             good: -1, value: 0.0, text: format!("{} rises in a war of independence against {}", cn, mn) });
@@ -12373,7 +12493,7 @@ mod tests {
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: 0, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
-            finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0,
+            finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, tribute_to: -1, tribute_until: 0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, mint_bullion_ratio: 1.0, has_mint: false,
             quality: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
@@ -13391,7 +13511,7 @@ mod tests {
         s.hubs[0].treasury = 50.0; s.hubs[1].treasury = 20.0;
         s.hubs[0].war_with = 1; s.hubs[1].war_with = 0;
         s.wars.push(War { a: 0, b: 1, start_tick: 0, chest_a: 0.0, chest_b: 0.0,
-            levies: 0.0, cargo_lost: 0, cause: "test".into() });
+            levies: 0.0, cargo_lost: 0, cause: "test".into(), goal: WAR_GOAL_PLUNDER });
         let w0 = s.houses[0].wealth;
         s.tick = 0;
         s.update_wars(0); // wage one year — levy, no resolve
@@ -13402,6 +13522,40 @@ mod tests {
         assert_eq!(s.war_log.len(), 1, "war resolved into the log");
         assert!(s.hubs[0].war_with < 0 && s.hubs[1].war_with < 0, "war state cleared");
         assert!(s.war_log[0].levies_total > 0.0, "levies recorded");
+    }
+
+    #[test]
+    fn war_goals_transfer_control_and_tribute_is_bounded() {
+        // A resolved war's GOAL takes lasting spoils: annexation seats the victor's
+        // ruling house on the loser's council (via a bailo); tribute is a bounded,
+        // term-limited treasury transfer that the overlord receives in full.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 10.0, 10.0, 10000.0, vec![100.0], 0), // victor
+            hub(1, 14.0, 10.0, 9000.0, vec![90.0], 0),   // loser
+        ];
+        let mut s = sim(hubs, goods);
+        s.houses.push(house_at(0, vec![0], 2)); // house 0 rules hub 0
+        s.houses.push(house_at(1, vec![0], 2)); // house 1 rules hub 1
+        s.hubs[0].council_house = 0;
+        s.hubs[1].council_house = 1;
+        // ── Annexation: hub 1's council passes to hub 0's ruling house. ──
+        let clause = s.apply_war_goal(0, 1, WAR_GOAL_ANNEX, 0, 0);
+        assert_eq!(s.hubs[1].council_house, 0, "loser's council is installed with the victor's house");
+        assert!(s.houses[0].bailos.contains(&1), "victor's house gains a bailo in the loser");
+        assert!(clause.contains("annexed"), "the annexation is narrated");
+        // ── Tribute: bounded, term-limited treasury transfer. ──
+        s.hubs[1].treasury = 1000.0;
+        s.hubs[0].treasury = 0.0;
+        s.apply_war_goal(0, 1, WAR_GOAL_TRIBUTE, 0, 0);
+        assert_eq!(s.hubs[1].tribute_to, 0, "loser owes tribute to the victor");
+        assert!(s.hubs[1].tribute_until > 0, "tribute has a term");
+        let t0 = s.hubs[1].treasury;
+        s.update_wars(1); // a tribute year
+        let paid = t0 - s.hubs[1].treasury;
+        assert!(paid > 0.0, "tribute is paid");
+        assert!(paid <= TRIBUTE_CAP * s.city_size_factor(1) + 1e-3, "tribute is capped");
+        assert!((s.hubs[0].treasury - paid).abs() < 1e-2, "the overlord receives exactly the tribute");
     }
 
     #[test]
