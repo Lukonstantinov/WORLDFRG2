@@ -505,6 +505,39 @@ pub struct OfficialRow {
 #[derive(Serialize, Clone)]
 pub struct InfluenceRow { pub name: String, pub color: String, pub pct: f32 }
 
+/// A single building in a settlement, resolved with WHO owns/controls it so the
+/// ward-grid panel can tint each tile by its owning faction. `owner_kind` is
+/// "house" (a resident merchant family), "civic" (the city/polis itself) or
+/// "fondaco" (a foreign diaspora quarter's own trade house). `color` is a hex
+/// tint — the house's heraldic colour (matching `family_influence`), the civic
+/// slate, or the diaspora people's hearth colour. Resolved every query, so the
+/// grid recolours live as houses rise/fall and control shifts.
+#[derive(Serialize, Clone)]
+pub struct BuildingInfo {
+    pub label: String,
+    pub effect: String,
+    pub emoji: String,
+    pub owner: String,
+    pub owner_kind: String,
+    pub color: String,
+}
+
+/// Civic (city-owned) building tint — a neutral slate that reads as "the commons".
+const CIVIC_TINT: &str = "#7a8aa0";
+
+/// `[r,g,b]` → `#rrggbb`.
+fn rgb_hex(c: [u8; 3]) -> String { format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]) }
+
+/// Emoji for a building label (mirrors the frontend fallback so the payload is
+/// self-describing).
+fn building_emoji(label: &str) -> &'static str {
+    match label {
+        "Granary" => "🌾", "Warehouse" => "📦", "Shipyard" => "⚓",
+        "Guildhall" => "🏛️", "Workshop" => "🔨", "Fondaco" => "🏯",
+        _ => "🏗️",
+    }
+}
+
 /// One enacted-law log row (rendered text).
 #[derive(Serialize, Clone)]
 pub struct LawRow { pub year: u32, pub text: String }
@@ -589,8 +622,13 @@ pub struct HubDetail {
     #[serde(default)] pub estate_kind: u8,
     #[serde(default)] pub estate_owner: String,
     #[serde(default)] pub estate_good: String,
-    /// Buildings erected here: (name, one-line effect) — for the inspector.
+    /// Buildings erected here: (name, one-line effect) — legacy flat list (kept
+    /// for compatibility; the panel now renders `buildings`).
     #[serde(default)] pub structures: Vec<(String, String)>,
+    /// Ward-grid buildings, each resolved with its owning faction + tint colour so
+    /// the settlement panel can show WHO controls what (houses / civic / diaspora
+    /// fondaco). Recomputed every query → recolours live with the campaign.
+    #[serde(default)] pub buildings: Vec<BuildingInfo>,
     /// Trade-base patron: the merchant house developing this city as a base of
     /// operations (empty = none). See docs/TRADE_BASE_MECHANIC_PLAN.md.
     #[serde(default)] pub patron: String,
@@ -3413,6 +3451,47 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             crate::sim::tick::structure_label(s).to_string(),
             crate::sim::tick::structure_effect(s).to_string(),
         )).collect(),
+        buildings: {
+            // Resident merchant families here, richest first — COMMERCIAL buildings
+            // (shipyard/guildhall/workshop) are attributed to them round-robin, so a
+            // multi-house city reads as a patchwork of owner colours; civic works
+            // (granary/warehouse) stay the commons' slate. Resolved live, so tiles
+            // recolour as houses rise/fall.
+            let mut residents: Vec<(usize, f32)> = sim.houses.iter().enumerate()
+                .filter(|(_, hh)| !hh.defunct && hh.hub as usize == hi)
+                .map(|(idx, hh)| (idx, hh.wealth))
+                .collect();
+            residents.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            let mut out: Vec<BuildingInfo> = Vec::new();
+            let mut comm = 0usize;
+            for &s in &hub.structures {
+                let label = crate::sim::tick::structure_label(s).to_string();
+                let effect = crate::sim::tick::structure_effect(s).to_string();
+                let civic = matches!(s, 1 | 2); // Granary / Warehouse
+                let (owner, owner_kind, color) = if civic || residents.is_empty() {
+                    ("Civic".to_string(), "civic".to_string(), CIVIC_TINT.to_string())
+                } else {
+                    let (hidx, _) = residents[comm % residents.len()];
+                    comm += 1;
+                    (sim.houses[hidx].name.clone(), "house".to_string(), distinct_color(hidx))
+                };
+                out.push(BuildingInfo { emoji: building_emoji(&label).to_string(), label, effect, owner, owner_kind, color });
+            }
+            // A FONDACO per significant diaspora quarter — a foreign people's own
+            // trade house, tinted by that people's hearth colour.
+            for (people, share) in sim.hub_people_display(hi).1 {
+                if share < 0.05 { continue; }
+                let color = crate::sim::cultures::color_of_people(&people)
+                    .map(rgb_hex).unwrap_or_else(|| CIVIC_TINT.to_string());
+                out.push(BuildingInfo {
+                    emoji: building_emoji("Fondaco").to_string(),
+                    label: "Fondaco".to_string(),
+                    effect: format!("{} quarter · {:.0}% of the city", people, share * 100.0),
+                    owner: people, owner_kind: "fondaco".to_string(), color,
+                });
+            }
+            out
+        },
         patron: sim.hub_patron.get(hi).copied().filter(|&p| p >= 0)
             .and_then(|p| sim.houses.get(p as usize)).map(|h| h.name.clone()).unwrap_or_default(),
         culture: sim.hub_people_display(hi).0,

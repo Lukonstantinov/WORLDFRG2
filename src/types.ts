@@ -510,6 +510,15 @@ export interface CultureMood {
   met: string[];         // prized goods well-supplied here
   unmet: string[];       // prized goods scarce/dear here
 }
+/** A settlement building resolved with WHO owns/controls it, for the ward grid. */
+export interface BuildingInfo {
+  label: string;
+  effect: string;
+  emoji: string;
+  owner: string;
+  owner_kind: "house" | "civic" | "fondaco" | string;
+  color: string;         // hex tint (house heraldry / civic slate / people hearth)
+}
 export interface HubDetail {
   id: number;
   name: string;
@@ -547,8 +556,11 @@ export interface HubDetail {
   estate_kind?: number;
   estate_owner?: string;
   estate_good?: string;
-  /** Buildings erected here: [name, one-line effect]. */
+  /** Buildings erected here: [name, one-line effect]. Legacy flat list. */
   structures?: [string, string][];
+  /** Ward-grid buildings, each resolved with its owning faction + tint colour
+   *  (house heraldry / civic slate / diaspora fondaco). Recolours live. */
+  buildings?: BuildingInfo[];
   /** Trade-base patron: the merchant house developing this city as a base (empty = none). */
   patron?: string;
   /** #23 · majority people of this settlement. */

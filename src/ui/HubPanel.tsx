@@ -4,7 +4,7 @@ import { useWorldStore } from "../state/worldStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { campaignGetHub, campaignGetColony, campaignWarehouses, campaignFuturesLanes, campaignGetProvisioning } from "../bridge/tauri";
-import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement, CultureMood } from "../types";
+import type { EconHub, HubCurrency, HubDetail, WarehouseInfo, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement, CultureMood, BuildingInfo } from "../types";
 import { settlementStory } from "../settlementStory";
 import { GOOD_DEFS } from "../goods";
 const HP_GOOD_EMOJI: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.emoji]));
@@ -50,8 +50,74 @@ const GUILD_COLOR = "#4a6a8a";  // organised merchant guilds (slate blue)
 const ESTATE_EMOJI: Record<number, string> = { 1: "🌾", 2: "⛏️", 3: "🌿", 4: "🎣", 5: "🍇", 6: "🏭" };
 const ESTATE_LABEL: Record<number, string> = { 1: "Farm", 2: "Mine", 3: "Plantation", 4: "Fishery", 5: "Vineyard", 6: "Manufactory" };
 const STRUCT_EMOJI: Record<string, string> = {
-  Granary: "🌾", Warehouse: "📦", Shipyard: "⚓", Guildhall: "🏛️", Workshop: "🔨",
+  Granary: "🌾", Warehouse: "📦", Shipyard: "⚓", Guildhall: "🏛️", Workshop: "🔨", Fondaco: "🏯",
 };
+
+/** Hex colour → rgba() with alpha (for translucent tile fills). */
+function hexA(hex: string, a: number): string {
+  const h = (hex || "#7a8aa0").replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16) || 122;
+  const g = parseInt(h.slice(2, 4), 16) || 138;
+  const b = parseInt(h.slice(4, 6), 16) || 160;
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+/** The WARD GRID — every building shown as a tile tinted by its owning faction
+ *  (house heraldry / civic slate / diaspora fondaco), so a mixed city reads as a
+ *  patchwork of who controls what. Click a tile for its owner + effect; the legend
+ *  tallies the owners. Fully driven by `detail.buildings`, which the backend
+ *  re-resolves every query → the colours track the live campaign. */
+function WardGrid({ buildings }: { buildings: BuildingInfo[] }) {
+  const [sel, setSel] = useState<number | null>(null);
+  if (!buildings || buildings.length === 0) {
+    return <div style={emptyTxt}>No buildings yet.</div>;
+  }
+  const owners = new Map<string, { color: string; count: number }>();
+  for (const b of buildings) {
+    const e = owners.get(b.owner) ?? { color: b.color, count: 0 };
+    e.count++; owners.set(b.owner, e);
+  }
+  const s = sel !== null ? buildings[sel] : null;
+  return (
+    <>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 5, margin: "3px 0 5px" }}>
+        {buildings.map((b, i) => (
+          <div key={i} onClick={() => setSel(sel === i ? null : i)}
+            title={`${b.label} — ${b.owner} · ${b.effect}`}
+            style={{ width: 44, height: 41, borderRadius: 6, cursor: "pointer",
+              background: hexA(b.color, 0.22), border: `1.5px solid ${b.color}`,
+              boxShadow: sel === i ? `0 0 0 2px ${b.color}` : "none",
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1 }}>
+            <span style={{ fontSize: 15, lineHeight: 1 }}>{b.emoji || STRUCT_EMOJI[b.label] || "🏗️"}</span>
+            <span style={{ fontSize: 7.5, color: "#cfe0f4", maxWidth: 42, overflow: "hidden",
+              textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.label}</span>
+          </div>
+        ))}
+      </div>
+      {s && (
+        <div style={{ fontSize: 10, background: "#0d1622", border: "1px solid #24405e",
+          borderRadius: 6, padding: "5px 7px", margin: "0 0 5px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 14 }}>{s.emoji || "🏗️"}</span>
+            <span style={{ color: "#cdbb88", fontWeight: 700 }}>{s.label}</span>
+            <span style={{ flex: 1 }} />
+            <span style={{ width: 9, height: 9, borderRadius: 2, background: s.color, display: "inline-block" }} />
+            <span style={{ color: s.color, fontWeight: 600 }}>{s.owner}</span>
+          </div>
+          <div style={{ color: "#7fbf9a", marginTop: 2 }}>{s.effect}</div>
+        </div>
+      )}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: 9, color: "#9ab0c8" }}>
+        {[...owners.entries()].map(([name, o]) => (
+          <span key={name} style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: o.color, display: "inline-block" }} />
+            {name} <span style={{ color: "#6a86a6" }}>×{o.count}</span>
+          </span>
+        ))}
+      </div>
+    </>
+  );
+}
 
 /** Donut chart dividing a settlement's TRADE AMOUNT between the merchant houses
  *  and — always present — the unaffiliated local merchants and the merchant
@@ -569,18 +635,11 @@ export function HubPanel() {
             </div>
           )}
 
-          {/* Buildings (structures) the city has erected */}
-          {detail && (detail.structures?.length ?? 0) > 0 && (
+          {/* Ward grid — buildings tinted by their owning faction (control at a glance) */}
+          {detail && (detail.buildings?.length ?? 0) > 0 && (
             <>
-              <div style={{ ...sectionHdr, marginTop: 6 }}>Buildings</div>
-              {detail.structures!.map(([nm, eff], i) => (
-                <div key={i} style={{ display: "flex", gap: 6, alignItems: "baseline", fontSize: 10, padding: "1px 2px" }}>
-                  <span style={{ fontSize: 12 }}>{STRUCT_EMOJI[nm] ?? "🏗️"}</span>
-                  <span style={{ color: "#cdbb88", fontWeight: 700 }}>{nm}</span>
-                  <span style={{ flex: 1 }} />
-                  <span style={{ color: "#7fbf9a" }}>{eff}</span>
-                </div>
-              ))}
+              <div style={{ ...sectionHdr, marginTop: 6 }}>Buildings &amp; control</div>
+              <WardGrid buildings={detail.buildings!} />
             </>
           )}
 
@@ -905,20 +964,9 @@ export function HubPanel() {
               </div>
             );})}
 
-          {/* Buildings in the city itself (granary, warehouse, …) with effects */}
-          <div style={{ ...sectionHdr, marginTop: 8 }}>Buildings</div>
-          {(detail?.structures?.length ?? 0) === 0 ? (
-            <div style={emptyTxt}>{detail ? "No civic buildings yet." : "—"}</div>
-          ) : (
-            detail!.structures!.map(([nm, eff], i) => (
-              <div key={i} style={{ display: "flex", gap: 6, alignItems: "baseline", fontSize: 10, padding: "1px 2px" }}>
-                <span style={{ fontSize: 12 }}>{STRUCT_EMOJI[nm] ?? "🏗️"}</span>
-                <span style={{ color: "#cdbb88", fontWeight: 700, minWidth: 72 }}>{nm}</span>
-                <span style={{ flex: 1 }} />
-                <span style={{ color: "#7fbf9a" }}>{eff}</span>
-              </div>
-            ))
-          )}
+          {/* Ward grid — buildings tinted by their owning faction (control at a glance) */}
+          <div style={{ ...sectionHdr, marginTop: 8 }}>Buildings &amp; control</div>
+          <WardGrid buildings={detail?.buildings ?? []} />
         </>
       )}
 
