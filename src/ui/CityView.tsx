@@ -222,12 +222,19 @@ export function CityView({ detail }: { detail: HubDetail }) {
           style={{ display: "block", margin: "0 auto", imageRendering: "auto" }} />
       </div>
       {hover && (
-        <div style={{ fontSize: 11, color: "#cfe0f4", marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontSize: 13 }}>{hover.emoji}</span>
-          <span style={{ color: "#cdbb88", fontWeight: 700 }}>{hover.label}</span>
-          <span style={{ width: 9, height: 9, borderRadius: 2, background: hover.color, display: "inline-block" }} />
-          <span style={{ color: hover.color }}>{hover.owner}</span>
-          <span style={{ color: "#7fbf9a" }}>· {hover.effect}</span>
+        <div style={{ fontSize: 11, color: "#cfe0f4", marginTop: 4, background: "#0a121c",
+          border: "1px solid #24405e", borderRadius: 6, padding: "5px 8px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 13 }}>{hover.emoji}</span>
+            <span style={{ color: "#cdbb88", fontWeight: 700 }}>{hover.label}</span>
+            <span style={{ flex: 1 }} />
+            <span style={{ width: 9, height: 9, borderRadius: 2, background: hover.color, display: "inline-block" }} />
+            <span style={{ color: hover.color }}>{hover.owner}</span>
+          </div>
+          {BUILDING_INFO[hover.label] && (
+            <div style={{ color: "#9ab0c8", marginTop: 2, lineHeight: 1.4 }}>{BUILDING_INFO[hover.label]}</div>
+          )}
+          <div style={{ color: "#7fbf9a", marginTop: 2 }}>{hover.effect}</div>
         </div>
       )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: 9, color: "#9ab0c8", marginTop: 5 }}>
@@ -255,61 +262,113 @@ function drawGround(ctx: CanvasRenderingContext2D, cx: number, cy: number, tw: n
   ctx.strokeStyle = edge; ctx.lineWidth = 0.5; ctx.stroke();
 }
 
-/** One building block (procedural iso cube). This is the SPRITE-SLOT: replace the
- *  body with a Kenney iso sprite blit and the rest of the system is unchanged.
- *  Landmarks fill the whole tile in the owner's colour and carry an emoji chip;
- *  common houses are inset and muted so the marked buildings clearly dominate. */
+type Pt = [number, number];
+function poly(ctx: CanvasRenderingContext2D, pts: Pt[], fill: string) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+  ctx.fillStyle = fill; ctx.fill();
+}
+// Roof material palettes (silhouette + colour differ per building type).
+const ROOF_TILE: [number, number, number] = [156, 91, 69];   // terracotta pitch
+const ROOF_GOLD: [number, number, number] = [201, 162, 74];   // temple dome
+const ROOF_STONE: [number, number, number] = [112, 118, 124]; // citadel battlement
+const ROOF_SLATE: [number, number, number] = [92, 102, 112];  // flat storage roof
+type Arche = "pitch" | "dome" | "crenel" | "flat";
+function archetypeOf(label: string): Arche {
+  if (["Cathedral", "Temple", "Mint", "Bank"].includes(label)) return "dome";
+  if (["Citadel", "Palace", "Council Hall"].includes(label)) return "crenel";
+  if (["Granary", "Warehouse", "Harbor", "Shipyard"].includes(label)) return "flat";
+  return "pitch";
+}
+
+/** Draw ONE building as a small isometric structure — walls in the owner's colour,
+ *  a roof whose SHAPE reads the building type (pitch / dome / battlement / flat),
+ *  and a landmark flag in the owner's colour. This is the SPRITE-SLOT: swap the
+ *  body for a Kenney iso sprite blit and nothing else in the system changes.
+ *  Common houses are small pitched cottages; landmarks fill the tile. */
 function drawTile(ctx: CanvasRenderingContext2D, cx: number, cy: number, h: number,
   tw: number, th: number, wardCol: [number, number, number], building?: BuildingInfo) {
   const isLandmark = !!building;
-  // Landmarks fill the tile; houses are inset (smaller footprint) + muted.
   const s = isLandmark ? 1.0 : 0.62;
-  const base = isLandmark ? toRgb(building!.color) : mix([116, 112, 104], wardCol, 0.28);
-  const topC = shade(base, isLandmark ? 1.08 : 0.82);
+  const base = isLandmark ? toRgb(building!.color) : mix([120, 116, 108], wardCol, 0.3);
   const leftC = shade(base, isLandmark ? 0.55 : 0.5);
   const rightC = shade(base, isLandmark ? 0.78 : 0.66);
   const hw = (tw / 2) * s, hh = (th / 2) * s;
-  // top face
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - hh - h);
-  ctx.lineTo(cx + hw, cy - h);
-  ctx.lineTo(cx, cy + hh - h);
-  ctx.lineTo(cx - hw, cy - h);
-  ctx.closePath();
-  ctx.fillStyle = topC; ctx.fill();
-  // left face
-  ctx.beginPath();
-  ctx.moveTo(cx - hw, cy - h);
-  ctx.lineTo(cx, cy + hh - h);
-  ctx.lineTo(cx, cy + hh);
-  ctx.lineTo(cx - hw, cy);
-  ctx.closePath();
-  ctx.fillStyle = leftC; ctx.fill();
-  // right face
-  ctx.beginPath();
-  ctx.moveTo(cx + hw, cy - h);
-  ctx.lineTo(cx, cy + hh - h);
-  ctx.lineTo(cx, cy + hh);
-  ctx.lineTo(cx + hw, cy);
-  ctx.closePath();
-  ctx.fillStyle = rightC; ctx.fill();
-  if (isLandmark) {
-    // Owner banner (a crisp outline in the owner colour) around the roof.
-    ctx.strokeStyle = shade(base, 1.35); ctx.lineWidth = 1.6;
+  // Eave corners (roof base at wall height h) + ground corners.
+  const T: Pt = [cx, cy - hh - h], R: Pt = [cx + hw, cy - h], B: Pt = [cx, cy + hh - h], L: Pt = [cx - hw, cy - h];
+  const Rg: Pt = [cx + hw, cy], Bg: Pt = [cx, cy + hh], Lg: Pt = [cx - hw, cy];
+  // Walls (the two front faces).
+  poly(ctx, [L, B, Bg, Lg], leftC);
+  poly(ctx, [R, B, Bg, Rg], rightC);
+
+  const arche: Arche = isLandmark ? archetypeOf(building!.label) : "pitch";
+  const rh = Math.max(5, tw * 0.42);
+  let flagTopY = cy - hh - h; // where the flag pole roots (roof apex)
+  if (arche === "pitch") {
+    const A: Pt = [cx, cy - hh - h - rh];
+    const rl = shade(ROOF_TILE, 0.78), rr = shade(ROOF_TILE, 1.0);
+    poly(ctx, [A, T, L], rl); poly(ctx, [A, T, R], rr);   // back slopes
+    poly(ctx, [A, L, B], rl); poly(ctx, [A, R, B], rr);   // front slopes
+    flagTopY = A[1];
+  } else if (arche === "flat") {
+    poly(ctx, [T, R, B, L], shade(ROOF_SLATE, 1.0));
+    poly(ctx, [T, R, B, L], "rgba(0,0,0,0)");
+    ctx.strokeStyle = shade(ROOF_SLATE, 0.6); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(T[0], T[1]); ctx.lineTo(R[0], R[1]); ctx.lineTo(B[0], B[1]); ctx.lineTo(L[0], L[1]); ctx.closePath(); ctx.stroke();
+  } else if (arche === "crenel") {
+    poly(ctx, [T, R, B, L], shade(ROOF_STONE, 1.0));
+    const m = Math.max(2.5, tw * 0.12), mh = rh * 0.55;
+    for (const c of [L, B, R] as Pt[]) {
+      const [x, y] = c;
+      poly(ctx, [[x - m, y - mh], [x + m, y - mh], [x + m, y], [x - m, y]], shade(ROOF_STONE, 1.15)); // merlon face
+      poly(ctx, [[x - m, y - mh], [x, y - mh - m * 0.5], [x + m, y - mh], [x, y - mh + m * 0.5]], shade(ROOF_STONE, 1.3)); // cap
+    }
+    flagTopY = cy - hh - h - rh * 0.55;
+  } else { // dome
+    poly(ctx, [T, R, B, L], shade(base, 0.9)); // drum
     ctx.beginPath();
-    ctx.moveTo(cx, cy - hh - h); ctx.lineTo(cx + hw, cy - h);
-    ctx.lineTo(cx, cy + hh - h); ctx.lineTo(cx - hw, cy - h);
-    ctx.closePath(); ctx.stroke();
-    // Emoji chip — a dark disc so the marker pops off any roof colour. Chip +
-    // font scale with the tile but keep a legible floor on packed big cities.
-    const chipR = Math.max(7, Math.min(11, tw * 0.26));
-    const fontPx = Math.max(9, Math.min(15, Math.round(tw * 0.36)));
-    const ey = cy - h - 2;
+    ctx.ellipse(cx, cy - h - hh * 0.1, hw * 0.82, hh + rh, 0, 0, Math.PI * 2);
+    ctx.fillStyle = shade(ROOF_GOLD, 1.0); ctx.fill();
+    ctx.strokeStyle = shade(ROOF_GOLD, 0.65); ctx.lineWidth = 1; ctx.stroke();
+    flagTopY = cy - h - hh * 0.1 - (hh + rh);
+  }
+
+  if (isLandmark) {
+    // Owner flag: a short pole + a pennant in the owner's heraldic colour.
+    const poleH = Math.max(7, tw * 0.32);
+    const pw = Math.max(5, tw * 0.22);
+    ctx.strokeStyle = "#1b2833"; ctx.lineWidth = 1.1;
+    ctx.beginPath(); ctx.moveTo(cx, flagTopY); ctx.lineTo(cx, flagTopY - poleH); ctx.stroke();
+    poly(ctx, [[cx, flagTopY - poleH], [cx + pw, flagTopY - poleH + 3], [cx, flagTopY - poleH + 6]], building!.color);
+    // Small emoji chip above the flag for at-a-glance identification.
+    const chipR = Math.max(6.5, Math.min(10, tw * 0.24));
+    const fontPx = Math.max(9, Math.min(14, Math.round(tw * 0.34)));
+    const ey = flagTopY - poleH - chipR - 1;
     ctx.beginPath(); ctx.arc(cx, ey, chipR, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(9,14,20,0.82)"; ctx.fill();
-    ctx.strokeStyle = building!.color; ctx.lineWidth = 1.3; ctx.stroke();
+    ctx.fillStyle = "rgba(9,14,20,0.85)"; ctx.fill();
+    ctx.strokeStyle = building!.color; ctx.lineWidth = 1.2; ctx.stroke();
     ctx.font = `${fontPx}px system-ui, sans-serif`;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText(building!.emoji || "🏛️", cx, ey + 0.5);
   }
 }
+
+/** One-line lore/role for each building type — shown on hover + in the ward grid. */
+export const BUILDING_INFO: Record<string, string> = {
+  Guildhall: "Seat of the merchant guild; lowers freight on goods leaving the city.",
+  Workshop: "Artisans' works — raises the city's output of manufactured goods.",
+  Granary: "Public grain store; buffers famine and lifts food output.",
+  Warehouse: "Bonded storage that smooths supply and adds a little output.",
+  Shipyard: "Builds and berths the resident house's ships.",
+  Fondaco: "A foreign merchants' quarter and trade house — a diaspora enclave.",
+  Cathedral: "The city's great sanctuary; draws pilgrims and steadies civic mood.",
+  Temple: "A holy precinct; its festivals lift the people and draw the faithful.",
+  Citadel: "The fortified seat of power; defends the city and resists takeover.",
+  Palace: "The ruling house's grand residence and court.",
+  "Council Hall": "Where the polis council sits and sets tariff, mint and law.",
+  Mint: "Strikes the polis's own coin.",
+  Bank: "A counting-house extending credit across the trade network.",
+  Harbor: "Docks and quays working the city's sea trade.",
+};

@@ -14,7 +14,7 @@ import { CoinIcon } from "./CoinIcon";
 import { YearChronicle } from "./YearChronicle";
 import type { HouseBrief } from "../types";
 import { SettlementScene } from "./SettlementScene";
-import { CityView } from "./CityView";
+import { CityView, BUILDING_INFO } from "./CityView";
 import { FlowsView } from "./FlowsView";
 import { CultureDonut } from "./CultureDonut";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
@@ -105,6 +105,9 @@ function WardGrid({ buildings }: { buildings: BuildingInfo[] }) {
             <span style={{ width: 9, height: 9, borderRadius: 2, background: s.color, display: "inline-block" }} />
             <span style={{ color: s.color, fontWeight: 600 }}>{s.owner}</span>
           </div>
+          {BUILDING_INFO[s.label] && (
+            <div style={{ color: "#9ab0c8", marginTop: 2, lineHeight: 1.4 }}>{BUILDING_INFO[s.label]}</div>
+          )}
           <div style={{ color: "#7fbf9a", marginTop: 2 }}>{s.effect}</div>
         </div>
       )}
