@@ -510,6 +510,26 @@ export interface CultureMood {
   met: string[];         // prized goods well-supplied here
   unmet: string[];       // prized goods scarce/dear here
 }
+/** A waystation along a trade corridor (1 river-port · 2 caravanserai · 3 coastal
+ *  factory · 4 mountain-pass hospice). */
+export interface CorridorWaystation { x: number; y: number; kind: number }
+/** A campaign trade corridor — a long river/terrain-routed haul between a home city
+ *  and a distant one, owned by a house and strung with waystations. */
+export interface TradeCorridor {
+  origin: string;
+  dest: string;
+  owner: string;
+  color: string;
+  good: string;
+  volume: number;
+  km: number;
+  days: number;
+  land_legs: number;
+  river_legs: number;
+  sea_legs: number;
+  points: [number, number][];
+  waystations: CorridorWaystation[];
+}
 /** A settlement building resolved with WHO owns/controls it, for the ward grid. */
 export interface BuildingInfo {
   label: string;

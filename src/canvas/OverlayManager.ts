@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, CultureRegion, TradeTrunk, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity } from "../types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity } from "../types";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "../goods";
 import { drawGoodIcon } from "./goodIcons";
 import { latLineY } from "./projection";
@@ -310,6 +310,7 @@ export class OverlayManager {
   private goodMeta: Map<string, { icon: string; color: string }> | null = null;
   private tradeTrunks: TradeTrunk[] = [];
   private dynamicTrunks: TradeTrunk[] = [];
+  private tradeCorridorList: TradeCorridor[] = [];
   private merchantRoutes: MerchantRoute[] = [];
   private futuresLanes: FuturesLane[] = [];
   private selectedFuturesLane: FuturesLane | null = null;
@@ -346,7 +347,7 @@ export class OverlayManager {
     markers: false, wind: false, currents: false, latLines: false,
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
-    politicalInfluence: false, chokepoints: false, tradeCorridors: false,
+    politicalInfluence: false, chokepoints: false, tradeCorridors: false, campaignCorridors: false,
     speculation: false, coinDominance: false,
     houseControl: false, merchantRoutes: false, futures: false,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
@@ -917,6 +918,11 @@ export class OverlayManager {
     if (gridW > 0) this.worldW = gridW;
   }
 
+  drawTradeCorridors(corridors: TradeCorridor[], gridW: number) {
+    this.tradeCorridorList = corridors;
+    if (gridW > 0) this.worldW = gridW;
+  }
+
   drawMerchantRoutes(routes: MerchantRoute[], gridW: number) {
     this.merchantRoutes = routes;
     if (gridW > 0) this.worldW = gridW;
@@ -1358,6 +1364,9 @@ export class OverlayManager {
     }
     if (this.visibility.dynamicFlow && this.dynamicTrunks.length > 0) {
       this.renderDynamicFlow(ctx);
+    }
+    if (this.visibility.campaignCorridors && this.tradeCorridorList.length > 0) {
+      this.renderTradeCorridors(ctx);
     }
 
     if (this.visibility.tradeRoutes && this.tradeRoutes.length > 0) {
@@ -2643,6 +2652,71 @@ export class OverlayManager {
     ctx.setLineDash([]);
   }
 
+  /** Campaign trade CORRIDORS — each drawn as a dashed haul in its owner's colour,
+   *  strung with waystation beads shaped by leg terrain (◆ river-port · ■ caravanserai
+   *  · ● coastal factory · ▲ pass hospice). The owner colour matches the ward grid,
+   *  so a corridor reads as "House X's road" and its beads as that house's posts. */
+  private renderTradeCorridors(ctx: CanvasRenderingContext2D) {
+    const corridors = this.tradeCorridorList;
+    if (corridors.length === 0) return;
+    const W = this.worldW;
+    const inv = 1 / Math.sqrt(this.currentScale);
+    let maxVol = 0;
+    for (const c of corridors) maxVol = Math.max(maxVol, c.volume);
+    if (maxVol <= 0) maxVol = 1;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    const dash = Math.max(1.5, 3 * inv);
+    for (const c of corridors) {
+      const pts = c.points;
+      if (!pts || pts.length < 2) continue;
+      const norm = c.volume / maxVol;
+      const col = c.color || "#e0b24a";
+      // 1) The routed haul (dashed, width ∝ volume).
+      ctx.globalAlpha = 0.5 + 0.4 * norm;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = Math.max(0.5, (0.8 + norm * 3.2) * inv);
+      ctx.setLineDash([dash, dash]);
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i < pts.length; i++) {
+        const px = pts[i][0] + 0.5, py = pts[i][1] + 0.5;
+        if (i > 0 && W > 0 && Math.abs(px - (pts[i - 1][0] + 0.5)) > W / 2) {
+          ctx.stroke(); ctx.beginPath(); started = false; // wrap seam
+        }
+        if (!started) { ctx.moveTo(px, py); started = true; } else { ctx.lineTo(px, py); }
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // 2) Waystation beads — shaped by kind, filled in the owner's colour.
+      const r = Math.max(0.9, 2.0 * inv);
+      ctx.globalAlpha = 0.95;
+      ctx.fillStyle = col;
+      ctx.strokeStyle = "#10161f";
+      ctx.lineWidth = Math.max(0.3, 0.5 * inv);
+      for (const w of c.waystations) {
+        const x = w.x + 0.5, y = w.y + 0.5;
+        ctx.beginPath();
+        if (w.kind === 1) {            // river-port ◆ diamond
+          ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath();
+        } else if (w.kind === 2) {     // caravanserai ■ square
+          ctx.rect(x - r, y - r, r * 2, r * 2);
+        } else if (w.kind === 4) {     // pass hospice ▲ triangle
+          ctx.moveTo(x, y - r); ctx.lineTo(x + r, y + r); ctx.lineTo(x - r, y + r); ctx.closePath();
+        } else {                       // coastal factory ● circle
+          ctx.arc(x, y, r, 0, Math.PI * 2);
+        }
+        ctx.fill(); ctx.stroke();
+      }
+      // 3) Endpoint anchors (home + distant city).
+      ctx.beginPath(); ctx.arc(pts[0][0] + 0.5, pts[0][1] + 0.5, r * 1.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      const e = pts[pts.length - 1];
+      ctx.beginPath(); ctx.arc(e[0] + 0.5, e[1] + 0.5, r * 1.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
+  }
+
   /** The futures layer: each active contract as a DASHED, DIRECTED lane from the
    *  producer/warehouse city (square) to the buyer city (ring). Colour & weight rise
    *  with term (1yr faint → 7yr bold gold); a suspended (quarantined) lane greys out;
@@ -3777,6 +3851,7 @@ export class OverlayManager {
     this.goodRegions = [];
     this.tradeTrunks = [];
     this.dynamicTrunks = [];
+    this.tradeCorridorList = [];
     this.politicalCenters = [];
     this.specCenters = [];
     this.houses = [];

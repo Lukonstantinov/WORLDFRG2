@@ -10,7 +10,7 @@ import { useUIStore } from "../state/uiStore";
 import { useGoodsStore } from "../state/goodsStore";
 import { useCampaignStore } from "../state/campaignStore";
 import { useSettingsStore } from "../state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes } from "../bridge/tauri";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes } from "../bridge/tauri";
 import type { MerchantRoute, FuturesLane, Toponym } from "../types";
 import { goodOverlayKey, GOOD_DEFS } from "../goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "../types";
@@ -790,6 +790,23 @@ export function MapCanvas() {
         requestRender();
       }).catch(() => {});
   }, [overlayVisibility.dynamicFlow, campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365), meta, rivers, bioParams.tradeReach, bioParams.maxCrossing, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Caravan corridors — long river/terrain-routed hauls owned by houses, strung
+  // with waystations. Recomputed on the year tick (like the dynamic flow).
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !meta) return;
+    if (!overlayVisibility.campaignCorridors || !campaignSnapshot?.active) {
+      om.drawTradeCorridors([], meta.grid_width);
+      requestRender();
+      return;
+    }
+    campaignGetCorridors(rivers.map((r) => ({ points: r.points })), bioParams.tradeReach, bioParams.maxCrossing)
+      .then((corridors) => {
+        om.drawTradeCorridors(corridors, meta.grid_width);
+        requestRender();
+      }).catch(() => {});
+  }, [overlayVisibility.campaignCorridors, campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365), meta, rivers, bioParams.tradeReach, bioParams.maxCrossing, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Political influence — product of the Political step (9).
   useEffect(() => {
