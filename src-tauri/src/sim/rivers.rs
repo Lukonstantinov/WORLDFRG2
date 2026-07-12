@@ -240,9 +240,34 @@ pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
     let mut seq: u64 = 0;
     let mut order: Vec<usize> = Vec::with_capacity(total);
 
+    // ── Micro-relief: break the flat-plain drainage artefact ──────────────────
+    // On a genuinely flat surface the priority-flood's ε-tilt is a SINGLE uniform
+    // gradient away from the spill point, so every cell drains the same diagonal
+    // way → a fan of parallel, straight, look-alike "rivers" (the artefact the
+    // flat green interiors showed). Real plains have a few metres of gentle
+    // undulation that gathers runoff into a branching, dendritic tributary tree.
+    // Add a small multi-octave noise to the elevation the hydrology reads. Its
+    // amplitude (~5 m of the 8848 m range) is far below the ~18 m lake-fill
+    // threshold, so it invents no lakes or hills; where there is real relief it is
+    // negligible (rivers still follow the terrain), but on a flat it supplies the
+    // tie-breaking micro-topography that turns the parallel streaks into natural
+    // dendritic drainage. Deterministic (fixed seed) so a given world is stable.
+    const MICRO_RELIEF: f32 = 0.0006;   // ≈5 m; < 0.002 (~18 m) lake threshold
+    const MICRO_FREQ: f32 = 0.05;       // base feature ≈ 20 cells (finer octaves nest)
+    let elev: Vec<f32> = (0..total)
+        .map(|i| {
+            if buf.terrain[i] != 1 { return buf.elevation[i]; } // perturb land only
+            let x = (i % w as usize) as f32;
+            let y = (i / w as usize) as f32;
+            let n = crate::sim::elevation::fbm_noise(
+                x * MICRO_FREQ, y * MICRO_FREQ, 0x5CA1_AB1E, 4, 2.0, 0.5);
+            buf.elevation[i] + (n - 0.5) * 2.0 * MICRO_RELIEF
+        })
+        .collect();
+
     // Seed the flood with every sea cell — these are the drainage outlets.
     for i in 0..total {
-        filled[i] = buf.elevation[i];
+        filled[i] = elev[i];
         if buf.terrain[i] == 0 {
             visited[i] = true;
             flow_dir[i] = FLOW_SEA;
@@ -271,7 +296,7 @@ pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
             // is strictly increasing away from the outlet — no flats to strand
             // the drainage direction on. `flow_dir` here is provisional (the spill
             // parent); it is overwritten by the steepest-descent pass below.
-            let raised = buf.elevation[ni].max(c_filled + FILL_EPS);
+            let raised = elev[ni].max(c_filled + FILL_EPS);
             filled[ni] = raised;
             flow_dir[ni] = if c_is_sea { FLOW_SEA } else { idx as i32 };
             heap.push(FloodCell { elev: raised, seq, idx: ni });
