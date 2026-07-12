@@ -1192,6 +1192,10 @@ pub struct CultureBrief {
     #[serde(default = "true_bool")] pub alive: bool,
     /// Obituary shown for an extinct people (how/where they faded).
     #[serde(default)] pub obituary: String,
+    /// Cultures 2.0 · number of trade regions where THIS people's tongue is the
+    /// lingua franca (the regional trade language). >0 → a badge on the panel; can be
+    /// nonzero even for a vanished people (a legacy tongue that outlived them).
+    #[serde(default)] pub lingua_regions: u32,
 }
 fn neg_one_i32c() -> i32 { -1 }
 fn true_bool() -> bool { true }
@@ -1417,6 +1421,7 @@ pub fn campaign_get_cultures(db: State<'_, WorldDb>) -> Result<Vec<CultureBrief>
             }
         }
         let trait_ids = traits_of.get(&name).cloned().unwrap_or_default();
+        let lingua_regions = sim.lingua.iter().filter(|l| l.culture == name).count() as u32;
         CultureBrief {
             color: culture_color(&name),
             mobility: crate::sim::tick::CampaignSim::culture_mobility(&name),
@@ -1425,7 +1430,7 @@ pub fn campaign_get_cultures(db: State<'_, WorldDb>) -> Result<Vec<CultureBrief>
             traits: trait_briefs(&trait_ids),
             relations: relations_for(&name),
             wealth: *wealth_by.get(&name).unwrap_or(&0.0),
-            alive: true, obituary: String::new(),
+            alive: true, obituary: String::new(), lingua_regions,
             name,
         }
     }).collect();
@@ -1466,7 +1471,9 @@ pub fn campaign_get_cultures(db: State<'_, WorldDb>) -> Result<Vec<CultureBrief>
             desired_goods: vec![],
             traits: trait_briefs(&trait_ids),
             relations: vec![],
-            wealth: 0.0, alive: false, obituary, name,
+            wealth: 0.0, alive: false, obituary,
+            lingua_regions: sim.lingua.iter().filter(|l| l.culture == name).count() as u32,
+            name,
         });
     }
     Ok(out)
@@ -2275,6 +2282,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         migrations: vec![],
         migration_routes: vec![],
         creoles: vec![],
+        lingua: vec![],
         culture_history: vec![],
         council_bought_month: vec![],
         good_flow_accum: vec![],

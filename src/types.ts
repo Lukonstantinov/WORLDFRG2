@@ -283,6 +283,7 @@ export interface CultureBrief {
   wealth?: number;    // total wealth (for richest-cultures ranking)
   alive?: boolean;    // false = extinct (filed under Vanished peoples)
   obituary?: string;  // shown for extinct peoples
+  lingua_regions?: number; // # trade regions where this people's tongue is the lingua franca
 }
 export interface CultureTraitBrief { name: string; emoji: string; blurb: string }
 export interface CultureRelation { name: string; kind: string } // kin|friendly|rival|hostile

@@ -146,6 +146,14 @@ export function PeoplesPanel() {
                     Language family: <b style={{ color: T.inkMid }}>{sel.family}</b>
                   </div>
                 )}
+                {(sel.lingua_regions ?? 0) > 0 && (
+                  <div title="This people's tongue is the trade language of one or more regions — it eases assimilation there." style={{
+                    display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5, marginBottom: 6,
+                    padding: "3px 8px", borderRadius: 6, color: "#e0c98a",
+                    background: "rgba(203,162,74,0.12)", border: "1px solid rgba(203,162,74,0.4)" }}>
+                    🗣 <b>Lingua franca</b> — the trade tongue of {sel.lingua_regions} region{(sel.lingua_regions ?? 0) > 1 ? "s" : ""}
+                  </div>
+                )}
                 {sel.origin && (
                   <div style={{ fontFamily: SERIF, fontStyle: "italic", color: T.inkMid, fontSize: 12,
                     lineHeight: 1.5, marginBottom: 10, padding: "7px 9px", background: T.card,

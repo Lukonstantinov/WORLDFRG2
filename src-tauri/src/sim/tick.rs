@@ -370,6 +370,13 @@ const MIGRATION_MAX_KM: f32 = 3000.0;
 /// erased a slow trickle of newcomers almost as fast as it arrived — cities looked
 /// permanently monocultural).
 const MINORITY_ASSIM_RATE: f32 = 0.02;
+/// A culture must be the majority in at least this share of a trade region's cities
+/// (population-weighted) for its tongue to become the region's LINGUA FRANCA.
+const LINGUA_DOMINANCE: f32 = 0.34;
+/// Cross-family assimilation multiplier a shared lingua franca grants — a second-
+/// language bridge that lifts the 0.6× "distant family" kin toward parity, so
+/// minorities integrate faster where a trade tongue is spoken (without full kinship).
+const LINGUA_BRIDGE: f32 = 1.2;
 /// SUBSISTENCE FARMING — every land settlement grows its own staple food. Each tick a
 /// hub's cereal production is topped up to at least this fraction of its own food NEED,
 /// so an isolated town (no trade route reaching a producer) still feeds itself and is
@@ -1883,6 +1890,19 @@ pub struct Creole {
     #[serde(default)] pub kit_b: u8,
 }
 
+/// Cultures 2.0 · a trade region's LINGUA FRANCA — the trade tongue that the
+/// region's dominant urban culture spreads. Eases cross-family assimilation and
+/// lingers as a legacy tongue after that culture fades.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct LinguaFranca {
+    pub component: u32,     // the trade region this tongue serves
+    pub family: String,     // the language family that is the trade tongue
+    pub culture: String,    // the culture whose tongue it is (its origin people)
+    pub share: f32,         // the dominant culture's share of the region's cities (0..1)
+    pub since_year: u32,    // when this tongue became the region's lingua franca
+    pub legacy: bool,       // true once its origin culture no longer dominates (a relic tongue)
+}
+
 /// Cultures 2.0 · a 6-monthly snapshot of every living people's total population, for
 /// the Peoples-panel population line chart. `t` is the sample time in YEARS (fractional).
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -2576,6 +2596,12 @@ pub struct CampaignSim {
     /// `#[serde(default)]` → old saves load with none.
     #[serde(default)]
     pub creoles: Vec<Creole>,
+    /// Cultures 2.0 · the LINGUA FRANCA of each trade region (connectivity component):
+    /// the language family of the culture that dominates the region's cities becomes
+    /// its trade tongue. It eases cross-family assimilation there, and LINGERS after
+    /// the dominant culture fades (a legacy tongue). Recomputed yearly. serde-default.
+    #[serde(default)]
+    pub lingua: Vec<LinguaFranca>,
     /// Cultures 2.0 · 6-monthly per-people population samples (capped) for the line chart.
     #[serde(default)]
     pub culture_history: Vec<CultureHistSample>,
@@ -7725,6 +7751,8 @@ impl CampaignSim {
             self.ensure_hub_cultures();
             self.economic_migration_pass();
             self.diaspora_pass();
+            // Which trade tongue dominates each region (drives the assimilation bridge).
+            self.compute_lingua();
             self.assimilation_pass();
             // Whoever now holds the plurality becomes the city's majority people.
             self.rebalance_hub_majorities();
@@ -9019,10 +9047,71 @@ impl CampaignSim {
         crate::sim::cultures::kit_traits(kit, Self::culture_mobility(name), seed)
     }
 
+    /// The lingua-franca language family of a trade region, if one has emerged.
+    fn lingua_family_for(&self, comp: u32) -> Option<&str> {
+        self.lingua.iter().find(|l| l.component == comp).map(|l| l.family.as_str())
+    }
+
+    /// Cultures 2.0 · recompute each trade region's LINGUA FRANCA — the tongue of the
+    /// culture that dominates the region's cities (population-weighted). Emerges at
+    /// `LINGUA_DOMINANCE`; if no culture dominates any more, the old tongue LINGERS as
+    /// a legacy trade language (Latin after Rome) rather than vanishing.
+    fn compute_lingua(&mut self) {
+        use std::collections::HashMap;
+        let yr = self.tick / TICKS_PER_YEAR;
+        let mut tally: HashMap<u32, HashMap<String, f32>> = HashMap::new();
+        let mut total: HashMap<u32, f32> = HashMap::new();
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate { continue; }
+            let cul = self.hub_culture.get(h).cloned().unwrap_or_default();
+            if cul.is_empty() || cul == "—" { continue; }
+            let comp = self.hubs[h].component;
+            let w = self.hubs[h].population.max(0.0);
+            *tally.entry(comp).or_default().entry(cul).or_default() += w;
+            *total.entry(comp).or_default() += w;
+        }
+        let mut next: Vec<LinguaFranca> = Vec::new();
+        for (comp, cultures) in &tally {
+            let tot = total.get(comp).copied().unwrap_or(0.0).max(1.0);
+            let (best_cul, best_w) = cultures.iter()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(c, w)| (c.clone(), *w)).unwrap_or_default();
+            let share = best_w / tot;
+            let prev = self.lingua.iter().find(|l| l.component == *comp).cloned();
+            if share >= LINGUA_DOMINANCE {
+                let family = self.culture_family(&best_cul);
+                if family.is_empty() { continue; }
+                let (since, shifted) = match &prev {
+                    Some(p) if p.family == family => (p.since_year, false),
+                    _ => (yr, true),
+                };
+                if shifted {
+                    self.journal.push(JournalEntry {
+                        tick: self.tick, kind: "culture".into(), hub: -1, good: -1, value: share,
+                        text: format!("The tongue of {} becomes the trade language of its region.", best_cul),
+                    });
+                }
+                next.push(LinguaFranca { component: *comp, family, culture: best_cul, share, since_year: since, legacy: false });
+            } else if let Some(mut p) = prev {
+                // No culture dominates now → the established tongue lingers as a relic.
+                if !p.legacy {
+                    let cul = p.culture.clone();
+                    self.journal.push(JournalEntry {
+                        tick: self.tick, kind: "culture".into(), hub: -1, good: -1, value: share,
+                        text: format!("The {} tongue endures as the region's trade language though its people no longer rule.", cul),
+                    });
+                }
+                p.legacy = true; p.share = share;
+                next.push(p);
+            }
+        }
+        self.lingua = next;
+    }
+
     /// Cultures 2.0 · Yearly assimilation — minority quarters blend into the majority,
     /// FASTER when they share a language family with the local majority (mutual
     /// intelligibility) and in big, prosperous "melting-pot" cities; SLOWER across
-    /// distant families. Keeps the composition alive and bounded.
+    /// distant families. A regional LINGUA FRANCA bridges distant families. Bounded.
     fn assimilation_pass(&mut self) {
         let n = self.hubs.len();
         for h in 0..n.min(self.hub_minorities.len()) {
@@ -9030,6 +9119,10 @@ impl CampaignSim {
             let maj_name = self.hub_culture.get(h).cloned().unwrap_or_default();
             let maj_fam = self.culture_family(&maj_name);
             let maj_env = crate::sim::cultures::people_env(&maj_name);
+            // If the local majority speaks the region's trade tongue, that lingua franca
+            // bridges assimilation for everyone here — even distant language families.
+            let lingua_bridges = self.lingua_family_for(self.hubs[h].component)
+                .map(|lf| !lf.is_empty() && lf == maj_fam).unwrap_or(false);
             // Prestige / melting-pot pressure: large, wealthy cities assimilate faster.
             let prestige = (self.hubs[h].population / 20_000.0).clamp(0.0, 1.0) * 0.5
                 + self.hubs[h].trade_wealth.clamp(0.0, 1.0) * 0.5;
@@ -9039,8 +9132,12 @@ impl CampaignSim {
                 let fam = self.culture_family(&c);
                 let related = !fam.is_empty() && !maj_fam.is_empty() && fam == maj_fam;
                 // Same family → 2×; distant family → 0.6×; unknown → 1×. Prestige adds up to +100%.
-                let kin = if fam.is_empty() || maj_fam.is_empty() { 1.0 }
+                let mut kin: f32 = if fam.is_empty() || maj_fam.is_empty() { 1.0 }
                     else if related { 2.0 } else { 0.6 };
+                // A shared lingua franca lifts the distant-family penalty toward parity.
+                if lingua_bridges && !related && !fam.is_empty() {
+                    kin = kin.max(LINGUA_BRIDGE);
+                }
                 // Light ETHNIC-APPEARANCE tie: peoples of the same appearance group (climate/
                 // dress) blend a little more readily even across language families.
                 let look = match (maj_env, crate::sim::cultures::people_env(&c)) {
@@ -12526,7 +12623,7 @@ mod tests {
             fleets_migrated: true, tech_factor: 1.0, percap_migrated: true, society_migrated: false,
             components_rescued: true,
             house_ledger: Vec::new(), house_ledger_prev: Vec::new(), house_barred: Vec::new(),
-            colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], culture_history: vec![], council_bought_month: vec![], hub_patron: vec![], colony_supply: vec![],
+            colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], lingua: vec![], culture_history: vec![], council_bought_month: vec![], hub_patron: vec![], colony_supply: vec![],
             hub_culture: vec![], hub_minorities: vec![], estate_idle_years: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
             recent_trades: vec![],
@@ -13522,6 +13619,41 @@ mod tests {
         assert_eq!(s.war_log.len(), 1, "war resolved into the log");
         assert!(s.hubs[0].war_with < 0 && s.hubs[1].war_with < 0, "war state cleared");
         assert!(s.war_log[0].levies_total > 0.0, "levies recorded");
+    }
+
+    #[test]
+    fn lingua_franca_emerges_and_bridges_assimilation() {
+        // The tongue of the region's dominant culture becomes its trade language and
+        // eases assimilation across distant language families.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 10.0, 10.0, 10000.0, vec![100.0], 0),
+            hub(1, 14.0, 10.0, 9000.0, vec![90.0], 0),
+            hub(2, 18.0, 10.0, 3000.0, vec![80.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        let mk = |name: &str, fam: &str| Creole {
+            name: name.into(), family: fam.into(), origin: String::new(),
+            color: [1, 2, 3], born_tick: 0, birthplace: String::new(), kit_a: 0, kit_b: 0,
+        };
+        s.creoles.push(mk("Aquila", "Latin"));
+        s.creoles.push(mk("Borin", "Norse"));
+        // Aquila (Latin) is the majority of the region's cities → its tongue dominates.
+        s.hub_culture = vec!["Aquila".into(), "Aquila".into(), "Borin".into()];
+        s.compute_lingua();
+        let lf = s.lingua.iter().find(|l| l.component == 0).expect("a lingua franca emerged");
+        assert_eq!(lf.family, "Latin");
+        assert_eq!(lf.culture, "Aquila");
+
+        // A Borin (Norse — distant family) minority in a Latin-majority city assimilates
+        // FASTER with the lingua-franca bridge than without it.
+        let run = |s: &mut CampaignSim| { s.hub_minorities = vec![vec![("Borin".into(), 0.30)], vec![], vec![]]; s.assimilation_pass();
+            s.hub_minorities[0].iter().find(|(c, _)| c == "Borin").map(|(_, x)| *x).unwrap_or(0.0) };
+        let with_bridge = run(&mut s);
+        s.lingua.clear();
+        let without = run(&mut s);
+        assert!(with_bridge < without, "lingua franca speeds assimilation: {with_bridge} < {without}");
+        assert!(with_bridge < 0.30, "the quarter shrank");
     }
 
     #[test]
