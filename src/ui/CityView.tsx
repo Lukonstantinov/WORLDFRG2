@@ -14,9 +14,29 @@ import type { HubDetail, BuildingInfo } from "../types";
 // tiles later means only replacing that one function — the generator + layout are
 // unchanged.
 
-const TW = 30;   // iso tile width
-const TH = 15;   // iso tile height (2:1 iso)
 const CIVIC = "#7a8aa0";
+// Tile size is DYNAMIC: the plan is fit to a target width, so a small town gets
+// chunky tiles and a metropolis packs smaller ones — both fill the panel nicely.
+const REF_TW = 38;      // reference tile width the landmark heights are tuned to
+const TARGET_W = 320;   // target on-screen plan width (px) to fit the panel
+const TW_MIN = 16, TW_MAX = 48;
+/** Dynamic iso tile dims + height scale for a grid of `N` tiles across. */
+function tileDims(N: number) {
+  const tw = Math.max(TW_MIN, Math.min(TW_MAX, Math.round(TARGET_W / (N + 1))));
+  const th = Math.max(8, Math.round(tw / 2));
+  return { tw, th, hs: tw / REF_TW }; // hs scales building heights with tile size
+}
+
+/** Per-type landmark height → each building reads as a distinct silhouette
+ *  (a guildhall towers, a granary squats, a shipyard hugs the shore). */
+function landmarkHeight(label: string): number {
+  const H: Record<string, number> = {
+    Cathedral: 42, Temple: 42, Citadel: 36, Palace: 36, Guildhall: 34,
+    "Council Hall": 30, Mint: 28, Fondaco: 27, Workshop: 22, Bank: 24,
+    Warehouse: 17, Granary: 15, Harbor: 13, Shipyard: 13,
+  };
+  return H[label] ?? 24;
+}
 
 function hstr(s: string): number {
   let h = 2166136261 >>> 0;
@@ -59,7 +79,8 @@ function generate(detail: HubDetail) {
   owners.set("Civic", CIVIC);
   for (const b of detail.buildings || []) owners.set(b.owner, b.color);
   const factions = [...owners.entries()];
-  const K = Math.max(2, Math.min(6, factions.length));
+  // Fewer, chunkier quarters → each coloured district reads as a large area.
+  const K = Math.max(2, Math.min(4, factions.length));
 
   // Ward seeds — one per faction, scattered; each carries a quarter label.
   const wards: Ward[] = [];
@@ -112,14 +133,15 @@ function generate(detail: HubDetail) {
         + (wantHarbour ? nearWater(c, isWater, N) : 0) + jitter;
       if (score < bestScore) { bestScore = score; pick = c; }
     }
-    if (pick) { used.add(pick.j * N + pick.i); pick.building = b; pick.height = 15 + Math.min(14, buildings.length); }
+    if (pick) { used.add(pick.j * N + pick.i); pick.building = b; pick.height = landmarkHeight(b.label); }
   }
 
-  // Fill the rest of the land with common houses (short blocks, jittered height).
+  // Fill the rest of the land with common houses — kept LOW (well below any
+  // landmark) so the marked buildings clearly dominate.
   for (const c of land) {
     if (c.building) continue;
-    if (rand() < 0.22) continue; // gaps → streets/yards
-    c.height = 5 + Math.floor(rand() * 6);
+    if (rand() < 0.24) continue; // gaps → streets/yards
+    c.height = 4 + Math.floor(rand() * 5);
   }
 
   const walled = pop > 12000;
@@ -138,7 +160,7 @@ export function CityView({ detail }: { detail: HubDetail }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [hover, setHover] = useState<BuildingInfo | null>(null);
   const planRef = useRef<ReturnType<typeof generate> | null>(null);
-  const geomRef = useRef<{ ox: number; oy: number } | null>(null);
+  const geomRef = useRef<{ ox: number; oy: number; tw: number; th: number } | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -146,10 +168,11 @@ export function CityView({ detail }: { detail: HubDetail }) {
     const plan = generate(detail);
     planRef.current = plan;
     const { N, cells, wards } = plan;
+    const { tw, th, hs } = tileDims(N); // ← dynamic with city size
 
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const cssW = (N + 1) * TW;
-    const cssH = (N + 1) * TH + 40;
+    const cssW = (N + 1) * tw;
+    const cssH = (N + 1) * th + Math.round(46 * hs);
     canvas.width = cssW * dpr; canvas.height = cssH * dpr;
     canvas.style.width = cssW + "px"; canvas.style.height = cssH + "px";
     const ctx = canvas.getContext("2d");
@@ -158,23 +181,21 @@ export function CityView({ detail }: { detail: HubDetail }) {
     ctx.clearRect(0, 0, cssW, cssH);
 
     const ox = cssW / 2;
-    const oy = 24;
-    geomRef.current = { ox, oy };
-    const iso = (i: number, j: number): [number, number] => [ox + (i - j) * TW / 2, oy + (i + j) * TH / 2];
+    const oy = Math.round(28 * hs) + 4;
+    geomRef.current = { ox, oy, tw, th };
+    const iso = (i: number, j: number): [number, number] => [ox + (i - j) * tw / 2, oy + (i + j) * th / 2];
 
     // Painter's order: far tiles (small i+j) first.
     const order = [...cells].sort((a, b) => (a.i + a.j) - (b.i + b.j));
     for (const c of order) {
       const [cx, cy] = iso(c.i, c.j);
       const wardCol = toRgb(wards[c.ward].color);
-      if (c.water) { drawGround(ctx, cx, cy, "#1c3a4a", "#173040"); continue; }
-      // Ground washed toward the ward owner's colour.
-      const g = mix([58, 74, 60], wardCol, 0.28);
-      drawGround(ctx, cx, cy, shade(g, 1.0), shade(g, 0.8));
-      if (c.height > 0) drawTile(ctx, cx, cy, c.height, wardCol, c.building);
+      if (c.water) { drawGround(ctx, cx, cy, tw, th, "#1c3a4a", "#173040"); continue; }
+      // Ground washed strongly toward the ward owner's colour → bold quarters.
+      const g = mix([58, 74, 60], wardCol, 0.44);
+      drawGround(ctx, cx, cy, tw, th, shade(g, 1.0), shade(g, 0.78));
+      if (c.height > 0) drawTile(ctx, cx, cy, c.height * hs, tw, th, wardCol, c.building);
     }
-
-    // Endpoint-of-nothing: draw the quarter legend beneath handled in JSX.
   }, [detail]);
 
   const onMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -183,7 +204,7 @@ export function CityView({ detail }: { detail: HubDetail }) {
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left, my = e.clientY - rect.top;
     // Inverse iso (approximate to the tile under the cursor's base).
-    const a = (mx - geom.ox) / (TW / 2), b = (my - geom.oy) / (TH / 2);
+    const a = (mx - geom.ox) / (geom.tw / 2), b = (my - geom.oy) / (geom.th / 2);
     const i = Math.round((a + b) / 2), j = Math.round((b - a) / 2);
     if (i < 0 || j < 0 || i >= plan.N || j >= plan.N) { setHover(null); return; }
     setHover(plan.at(i, j).building ?? null);
@@ -223,28 +244,31 @@ export function CityView({ detail }: { detail: HubDetail }) {
 
 // ── Drawing primitives (the sprite-slot) ────────────────────────────────────
 /** A single iso ground diamond. */
-function drawGround(ctx: CanvasRenderingContext2D, cx: number, cy: number, top: string, edge: string) {
+function drawGround(ctx: CanvasRenderingContext2D, cx: number, cy: number, tw: number, th: number, top: string, edge: string) {
   ctx.beginPath();
-  ctx.moveTo(cx, cy - TH / 2);
-  ctx.lineTo(cx + TW / 2, cy);
-  ctx.lineTo(cx, cy + TH / 2);
-  ctx.lineTo(cx - TW / 2, cy);
+  ctx.moveTo(cx, cy - th / 2);
+  ctx.lineTo(cx + tw / 2, cy);
+  ctx.lineTo(cx, cy + th / 2);
+  ctx.lineTo(cx - tw / 2, cy);
   ctx.closePath();
   ctx.fillStyle = top; ctx.fill();
   ctx.strokeStyle = edge; ctx.lineWidth = 0.5; ctx.stroke();
 }
 
 /** One building block (procedural iso cube). This is the SPRITE-SLOT: replace the
- *  body with a Kenney iso sprite blit and the rest of the system is unchanged. */
+ *  body with a Kenney iso sprite blit and the rest of the system is unchanged.
+ *  Landmarks fill the whole tile in the owner's colour and carry an emoji chip;
+ *  common houses are inset and muted so the marked buildings clearly dominate. */
 function drawTile(ctx: CanvasRenderingContext2D, cx: number, cy: number, h: number,
-  wardCol: [number, number, number], building?: BuildingInfo) {
+  tw: number, th: number, wardCol: [number, number, number], building?: BuildingInfo) {
   const isLandmark = !!building;
-  // Roof colour: a warm neutral for common houses; the owner's colour for landmarks.
-  const base = isLandmark ? toRgb(building!.color) : mix([150, 140, 120], wardCol, 0.35);
-  const topC = shade(base, isLandmark ? 1.05 : 0.95);
-  const leftC = shade(base, 0.6);
-  const rightC = shade(base, 0.78);
-  const hw = TW / 2, hh = TH / 2;
+  // Landmarks fill the tile; houses are inset (smaller footprint) + muted.
+  const s = isLandmark ? 1.0 : 0.62;
+  const base = isLandmark ? toRgb(building!.color) : mix([116, 112, 104], wardCol, 0.28);
+  const topC = shade(base, isLandmark ? 1.08 : 0.82);
+  const leftC = shade(base, isLandmark ? 0.55 : 0.5);
+  const rightC = shade(base, isLandmark ? 0.78 : 0.66);
+  const hw = (tw / 2) * s, hh = (th / 2) * s;
   // top face
   ctx.beginPath();
   ctx.moveTo(cx, cy - hh - h);
@@ -270,14 +294,22 @@ function drawTile(ctx: CanvasRenderingContext2D, cx: number, cy: number, h: numb
   ctx.closePath();
   ctx.fillStyle = rightC; ctx.fill();
   if (isLandmark) {
-    // Owner banner (a thin outline in the owner colour) + the building's emoji.
-    ctx.strokeStyle = building!.color; ctx.lineWidth = 1.2;
+    // Owner banner (a crisp outline in the owner colour) around the roof.
+    ctx.strokeStyle = shade(base, 1.35); ctx.lineWidth = 1.6;
     ctx.beginPath();
     ctx.moveTo(cx, cy - hh - h); ctx.lineTo(cx + hw, cy - h);
     ctx.lineTo(cx, cy + hh - h); ctx.lineTo(cx - hw, cy - h);
     ctx.closePath(); ctx.stroke();
-    ctx.font = "11px system-ui, sans-serif";
+    // Emoji chip — a dark disc so the marker pops off any roof colour. Chip +
+    // font scale with the tile but keep a legible floor on packed big cities.
+    const chipR = Math.max(7, Math.min(11, tw * 0.26));
+    const fontPx = Math.max(9, Math.min(15, Math.round(tw * 0.36)));
+    const ey = cy - h - 2;
+    ctx.beginPath(); ctx.arc(cx, ey, chipR, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(9,14,20,0.82)"; ctx.fill();
+    ctx.strokeStyle = building!.color; ctx.lineWidth = 1.3; ctx.stroke();
+    ctx.font = `${fontPx}px system-ui, sans-serif`;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(building!.emoji || "🏛️", cx, cy - h - 1);
+    ctx.fillText(building!.emoji || "🏛️", cx, ey + 0.5);
   }
 }
