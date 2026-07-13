@@ -4,6 +4,8 @@ import { useUIStore } from "../state/uiStore";
 import { campaignGetBanks } from "../bridge/tauri";
 import type { BankBrief, BankSnapshot } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
+import { T, FZ, RADIUS } from "./chronicleTheme";
+import { Panel, PanelHeader, Tabs, Meter, EmptyNote } from "./kit";
 
 /** Dedicated Bank panel. Pick a bank from the list (or arrive here by clicking its
  *  icon on the map) and inspect:
@@ -14,7 +16,7 @@ import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
  *     fall are visible.
  *   • Deals — every live loan with its agreement terms, plus equity stakes held.
  *   • How it works — where a bank's money comes from and how to grow its net worth.
- *  All read straight from the live campaign sim. */
+ *  All read straight from the live campaign sim. Built on the shared UI kit (kit.tsx). */
 export function BankPanel() {
   const open = useUIStore((s) => s.showBank);
   const selIdx = useUIStore((s) => s.selectedBankIdx);
@@ -39,16 +41,13 @@ export function BankPanel() {
   const bank = banks[idx];
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
-      <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
-        <span>🏦 Banks</span>
-        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
-      </div>
+    <Panel width={430} maxHeight="82vh" style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
+      <PanelHeader icon="🏦" title="Banks" onDragStart={onPointerDown} onClose={close} />
 
-      {!active && <div style={empty}>Banks appear once a campaign is running.</div>}
+      {!active && <EmptyNote>Banks appear once a campaign is running.</EmptyNote>}
       {active && banks.length === 0 && (
-        <div style={empty}>No banks chartered yet — the age of banking opens around year 20,
-          once a wealthy house holds a trusted coin.</div>
+        <EmptyNote>No banks chartered yet — the age of banking opens around year 20,
+          once a wealthy house holds a trusted coin.</EmptyNote>
       )}
 
       {active && banks.length > 0 && (
@@ -57,15 +56,15 @@ export function BankPanel() {
           <div style={list}>
             {banks.map((b, i) => (
               <div key={i} onClick={() => pick(i)}
-                style={{ ...listRow, background: i === idx ? "#15243a" : "transparent",
+                style={{ ...listRow, background: i === idx ? T.accentSoft : "transparent",
                   opacity: b.defunct ? 0.5 : 1 }}>
                 <span style={{ width: 8, height: 8, borderRadius: 8, background: b.color, flex: "0 0 auto" }} />
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ color: i === idx ? "#cfe2f6" : "#aebfd4", fontSize: 10.5,
+                  <div style={{ color: i === idx ? T.ink : T.inkMid, fontSize: FZ.small,
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {b.name}{b.defunct ? " ✝" : ""}
                   </div>
-                  <div style={{ color: "#5f7a96", fontSize: 8.5 }}>
+                  <div style={{ color: T.inkDim, fontSize: FZ.micro }}>
                     {b.seat} · eq {fmt(b.equity)}
                   </div>
                 </div>
@@ -78,24 +77,18 @@ export function BankPanel() {
             {bank && (
               <>
                 <div style={{ padding: "6px 8px 2px" }}>
-                  <div style={{ color: "#dfeafc", fontSize: 12.5, fontWeight: 700 }}>
+                  <div style={{ color: T.ink, fontSize: FZ.base, fontWeight: 700 }}>
                     {bank.name}
                   </div>
-                  <div style={{ color: "#7f96b2", fontSize: 9.5 }}>
+                  <div style={{ color: T.inkMid, fontSize: FZ.tiny }}>
                     {bank.owner} · seat {bank.seat} · founded yr {bank.founded_year}
                     {bank.coin_name ? ` · banks in ${bank.coin_name}` : ""}
                   </div>
                 </div>
-                <div style={tabBar}>
-                  {([["overview", "Overview"], ["charts", "Charts"], ["deals", `Deals (${bank.loans.length + bank.stakes.length})`], ["info", "How it works"]] as const).map(([id, lbl]) => (
-                    <div key={id} onClick={() => setTab(id)}
-                      style={{ ...tabS, fontWeight: tab === id ? 700 : 400,
-                        color: tab === id ? "#cfe2f6" : "#6a86a6",
-                        borderBottom: tab === id ? "2px solid #5f97c0" : "2px solid transparent" }}>
-                      {lbl}
-                    </div>
-                  ))}
-                </div>
+                <Tabs<"overview" | "charts" | "deals" | "info">
+                  tabs={[["overview", "Overview"], ["charts", "Charts"], ["deals", `Deals (${bank.loans.length + bank.stakes.length})`], ["info", "How it works"]]}
+                  active={tab} onSelect={setTab} style={{ padding: "2px 8px 0" }}
+                />
                 <div style={scroll}>
                   {tab === "overview" && <Overview bank={bank} />}
                   {tab === "charts" && <Charts hist={bank.history} />}
@@ -107,7 +100,7 @@ export function BankPanel() {
           </div>
         </div>
       )}
-    </div>
+    </Panel>
   );
 }
 
@@ -131,8 +124,8 @@ function Overview({ bank }: { bank: BankBrief }) {
   return (
     <div>
       <div style={statGrid}>
-        <Stat label="Net worth" value={fmt(bank.equity)} accent="#7fcf9f" />
-        <Stat label="Reserve ratio" value={rrPct} accent={fragile ? "#e06a5a" : "#7fb0e0"} />
+        <Stat label="Net worth" value={fmt(bank.equity)} accent={T.goodInk} />
+        <Stat label="Reserve ratio" value={rrPct} accent={fragile ? T.badInk : "#7fb0e0"} />
         <Stat label="Interest earned" value={fmt(bank.interest_earned)} />
         <Stat label="Dividends" value={fmt(bank.dividends_earned)} />
         <Stat label="Write-offs" value={fmt(bank.losses)} accent="#e0906a" />
@@ -149,7 +142,7 @@ function Overview({ bank }: { bank: BankBrief }) {
         <>
           <SectionLabel>Recent</SectionLabel>
           {bank.events.slice(0, 8).map((e, i) => (
-            <div key={i} style={{ color: "#9fb4cc", fontSize: 9.5, padding: "1px 0" }}>• {e}</div>
+            <div key={i} style={{ color: T.inkMid, fontSize: FZ.tiny, padding: "1px 0" }}>• {e}</div>
           ))}
         </>
       )}
@@ -160,17 +153,15 @@ function Overview({ bank }: { bank: BankBrief }) {
 function BalanceColumn({ title, rows, total }: { title: string; rows: { label: string; v: number; c: string }[]; total: number }) {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ color: "#8fa6c2", fontSize: 9, marginBottom: 3 }}>{title}</div>
-      {rows.length === 0 && <div style={{ color: "#445268", fontSize: 9 }}>—</div>}
+      <div style={{ color: T.inkMid, fontSize: FZ.tiny, marginBottom: 3 }}>{title}</div>
+      {rows.length === 0 && <div style={{ color: T.inkFaint, fontSize: FZ.tiny }}>—</div>}
       {rows.map((r, i) => (
         <div key={i} style={{ marginBottom: 4 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#aebfd4" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: FZ.tiny, color: T.inkMid }}>
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.label}</span>
-            <span style={{ color: "#cfe2f6" }}>{fmt(r.v)}</span>
+            <span style={{ color: T.ink }}>{fmt(r.v)}</span>
           </div>
-          <div style={{ height: 6, background: "#101a26", borderRadius: 3, overflow: "hidden" }}>
-            <div style={{ width: `${(r.v / total) * 100}%`, height: "100%", background: r.c }} />
-          </div>
+          <Meter value={r.v} max={total} color={r.c} height={6} track={T.raised} />
         </div>
       ))}
     </div>
@@ -179,7 +170,7 @@ function BalanceColumn({ title, rows, total }: { title: string; rows: { label: s
 
 /* ── Charts: yearly line graphs ── */
 function Charts({ hist }: { hist: BankSnapshot[] }) {
-  if (hist.length < 2) return <div style={empty}>Charts appear after a couple of years of trading.</div>;
+  if (hist.length < 2) return <EmptyNote>Charts appear after a couple of years of trading.</EmptyNote>;
   const years = hist.map((h) => h.year);
   // Per-year income (difference successive cumulative values).
   const yearly = (pick: (h: BankSnapshot) => number) =>
@@ -215,21 +206,21 @@ function Chart({ title, years, series }: { title: string; years: number[]; serie
   return (
     <div style={{ marginBottom: 10 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <div style={{ color: "#8fa6c2", fontSize: 9.5 }}>{title}</div>
+        <div style={{ color: T.inkMid, fontSize: FZ.tiny }}>{title}</div>
         <div style={{ display: "flex", gap: 7 }}>
           {series.map((s) => (
-            <span key={s.label} style={{ color: s.color, fontSize: 8.5 }}>● {s.label}</span>
+            <span key={s.label} style={{ color: s.color, fontSize: FZ.micro }}>● {s.label}</span>
           ))}
         </div>
       </div>
-      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: "block", background: "#0b121c", borderRadius: 4, marginTop: 2 }}>
-        <text x={PADL} y={11} fill="#5a7290" fontSize={7}>{fmt(max)}</text>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: "block", background: T.card, borderRadius: 4, marginTop: 2 }}>
+        <text x={PADL} y={11} fill={T.inkDim} fontSize={7}>{fmt(max)}</text>
         {series.map((s) => (
           <polyline key={s.label} fill="none" stroke={s.color} strokeWidth={1.4}
             points={s.vals.map((v, i) => `${x(i)},${y(v)}`).join(" ")} />
         ))}
-        <text x={PADL} y={H - 2} fill="#5a7290" fontSize={7}>yr {years[0]}</text>
-        <text x={W - PADL} y={H - 2} fill="#5a7290" fontSize={7} textAnchor="end">yr {years[n - 1]}</text>
+        <text x={PADL} y={H - 2} fill={T.inkDim} fontSize={7}>yr {years[0]}</text>
+        <text x={W - PADL} y={H - 2} fill={T.inkDim} fontSize={7} textAnchor="end">yr {years[n - 1]}</text>
       </svg>
     </div>
   );
@@ -245,14 +236,14 @@ function Deals({ bank }: { bank: BankBrief }) {
   return (
     <div>
       <SectionLabel>Loans &amp; deals ({bank.loans.length})</SectionLabel>
-      {bank.loans.length === 0 && <div style={{ color: "#445268", fontSize: 9.5 }}>No loans on the books.</div>}
+      {bank.loans.length === 0 && <div style={{ color: T.inkFaint, fontSize: FZ.tiny }}>No loans on the books.</div>}
       {bank.loans.map((l, i) => (
         <div key={i} style={dealRow}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ color: "#cfe2f6", fontSize: 10 }}>{kindIcon[l.borrower_kind] ?? "•"} {l.borrower}</span>
-            <span style={{ color: "#e0c452", fontSize: 10 }}>{fmt(l.outstanding)}</span>
+            <span style={{ color: T.ink, fontSize: FZ.small }}>{kindIcon[l.borrower_kind] ?? "•"} {l.borrower}</span>
+            <span style={{ color: "#e0c452", fontSize: FZ.small }}>{fmt(l.outstanding)}</span>
           </div>
-          <div style={{ color: "#7f96b2", fontSize: 8.5 }}>
+          <div style={{ color: T.inkMid, fontSize: FZ.micro }}>
             {purposeLabel[l.purpose] ?? l.purpose} · {(l.rate * 100).toFixed(1)}%/mo ·
             {" "}{l.term_years.toFixed(0)}-yr term · from yr {l.start_year} · principal {fmt(l.principal)}
           </div>
@@ -260,14 +251,14 @@ function Deals({ bank }: { bank: BankBrief }) {
       ))}
 
       <SectionLabel>Equity stakes ({bank.stakes.length})</SectionLabel>
-      {bank.stakes.length === 0 && <div style={{ color: "#445268", fontSize: 9.5 }}>No equity stakes held.</div>}
+      {bank.stakes.length === 0 && <div style={{ color: T.inkFaint, fontSize: FZ.tiny }}>No equity stakes held.</div>}
       {bank.stakes.map((s, i) => (
         <div key={i} style={dealRow}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ color: "#cfe2f6", fontSize: 10 }}>🏭 {s.works}</span>
-            <span style={{ color: "#6fae8a", fontSize: 10 }}>{(s.share * 100).toFixed(0)}%</span>
+            <span style={{ color: T.ink, fontSize: FZ.small }}>🏭 {s.works}</span>
+            <span style={{ color: "#6fae8a", fontSize: FZ.small }}>{(s.share * 100).toFixed(0)}%</span>
           </div>
-          <div style={{ color: "#7f96b2", fontSize: 8.5 }}>{s.good} · book value {fmt(s.basis)}</div>
+          <div style={{ color: T.inkMid, fontSize: FZ.micro }}>{s.good} · book value {fmt(s.basis)}</div>
         </div>
       ))}
     </div>
@@ -277,7 +268,7 @@ function Deals({ bank }: { bank: BankBrief }) {
 /* ── Info: how a bank earns + grows ── */
 function Info({ bank }: { bank: BankBrief }) {
   return (
-    <div style={{ fontSize: 10, color: "#aebfd4", lineHeight: 1.5 }}>
+    <div style={{ fontSize: FZ.small, color: T.inkMid, lineHeight: 1.5 }}>
       <SectionLabel>Where the money comes from</SectionLabel>
       <p style={p}><b style={{ color: "#7fb0e0" }}>Loan interest.</b> The bank lends to merchant
         houses (trade), guilds (factories &amp; civic works), and city treasuries (public works) at
@@ -299,7 +290,7 @@ function Info({ bank }: { bank: BankBrief }) {
       </ul>
       <SectionLabel>This bank</SectionLabel>
       <p style={p}>
-        Net worth <b style={{ color: "#7fcf9f" }}>{fmt(bank.equity)}</b>. Lifetime interest {fmt(bank.interest_earned)},
+        Net worth <b style={{ color: T.goodInk }}>{fmt(bank.equity)}</b>. Lifetime interest {fmt(bank.interest_earned)},
         dividends {fmt(bank.dividends_earned)}, write-offs {fmt(bank.losses)}.
         {bank.reserve_ratio < 0.22 ? " ⚠ Reserve ratio is thin — vulnerable to a run." : " Reserves are sound."}
       </p>
@@ -310,14 +301,14 @@ function Info({ bank }: { bank: BankBrief }) {
 /* ── Bits ── */
 function Stat({ label, value, accent }: { label: string; value: string; accent?: string }) {
   return (
-    <div style={{ background: "#101a26", borderRadius: 4, padding: "4px 6px" }}>
-      <div style={{ color: "#6a86a6", fontSize: 8 }}>{label}</div>
-      <div style={{ color: accent ?? "#cfe2f6", fontSize: 12, fontWeight: 700 }}>{value}</div>
+    <div style={{ background: T.raised, borderRadius: RADIUS.sm, padding: "4px 6px" }}>
+      <div style={{ color: T.inkDim, fontSize: FZ.micro }}>{label}</div>
+      <div style={{ color: accent ?? T.ink, fontSize: FZ.base, fontWeight: 700 }}>{value}</div>
     </div>
   );
 }
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <div style={{ color: "#7fa0c4", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.5, margin: "9px 0 4px", fontWeight: 600 }}>{children}</div>;
+  return <div style={{ color: T.inkMid, fontSize: FZ.tiny, textTransform: "uppercase", letterSpacing: 0.5, margin: "9px 0 4px", fontWeight: 600 }}>{children}</div>;
 }
 
 function fmt(n: number): string {
@@ -326,33 +317,17 @@ function fmt(n: number): string {
   return n.toFixed(a >= 100 || a === 0 ? 0 : 1);
 }
 
-const panel: React.CSSProperties = {
-  position: "absolute", top: 60, right: 360, width: 430, maxHeight: "82vh",
-  display: "flex", flexDirection: "column",
-  background: "#0c141e", border: "1px solid #1e3450", borderRadius: 8,
-  boxShadow: "0 8px 28px rgba(0,0,0,0.5)", zIndex: 40,
-};
-const header: React.CSSProperties = {
-  display: "flex", justifyContent: "space-between", alignItems: "center",
-  padding: "8px 10px", borderBottom: "1px solid #1a2a3e",
-  color: "#cfe0f4", fontWeight: 700, fontSize: 12,
-};
 const list: React.CSSProperties = {
-  width: 130, flex: "0 0 auto", borderRight: "1px solid #16243a",
+  width: 130, flex: "0 0 auto", borderRight: `1px solid ${T.line}`,
   overflowY: "auto", padding: "4px 2px",
 };
 const listRow: React.CSSProperties = {
   display: "flex", alignItems: "center", gap: 5, padding: "4px 5px",
-  cursor: "pointer", borderRadius: 4,
+  cursor: "pointer", borderRadius: RADIUS.sm,
 };
-const tabBar: React.CSSProperties = {
-  display: "flex", gap: 2, padding: "2px 8px 0", borderBottom: "1px solid #1e2e42",
-};
-const tabS: React.CSSProperties = { padding: "4px 7px", cursor: "pointer", fontSize: 10 };
 const scroll: React.CSSProperties = { overflowY: "auto", padding: "6px 9px 12px" };
 const statGrid: React.CSSProperties = {
   display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5, marginBottom: 4,
 };
-const dealRow: React.CSSProperties = { padding: "4px 0", borderBottom: "1px solid #131e2a" };
-const empty: React.CSSProperties = { color: "#506080", fontSize: 11, padding: "14px 12px", lineHeight: 1.5 };
+const dealRow: React.CSSProperties = { padding: "4px 0", borderBottom: `1px solid ${T.lineSoft}` };
 const p: React.CSSProperties = { margin: "0 0 6px" };
