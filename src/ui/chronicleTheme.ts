@@ -63,3 +63,40 @@ export const cardStyle: CSSProperties = {
   borderRadius: 6,
   padding: "7px 9px",
 };
+
+// ── Additive layout tokens ───────────────────────────────────────────────────
+// Radius / shadow / spacing / font-size scales so the shared UI kit
+// (`src/ui/kit.tsx`) and every panel speak ONE visual language instead of each
+// hand-rolling its own hex + pixel values. Additive-only: existing `T`, `SERIF`
+// and the style helpers above are unchanged, so nothing that already imports
+// them breaks.
+
+/** Corner radii. `pill` = fully rounded (badges/chips). */
+export const RADIUS = { sm: 4, md: 6, lg: 8, pill: 999 } as const;
+
+/** Elevation shadows. `panel` = a floating window, `card` = a raised inset. */
+export const SHADOW = {
+  panel: "0 8px 28px rgba(0,0,0,0.5)",
+  card: "0 1px 0 rgba(255,255,255,0.02)",
+} as const;
+
+/** Spacing scale (px) — gaps, padding, margins. */
+export const SPACE = { xs: 3, sm: 5, md: 8, lg: 12, xl: 16 } as const;
+
+/** Font-size scale (px), from footnote to panel title. */
+export const FZ = {
+  micro: 8, tiny: 9, small: 10, body: 11, base: 12, head: 13, title: 15,
+} as const;
+
+/** Semantic → ink/fill token pairs, so a Badge/Meter picks a consistent colour
+ *  by MEANING rather than a panel guessing a hex. */
+export const TONE = {
+  neutral: { ink: T.inkMid, fill: T.raised, line: T.line },
+  good: { ink: T.goodInk, fill: "rgba(76,174,122,0.16)", line: "rgba(76,174,122,0.4)" },
+  warn: { ink: "#e6c06a", fill: "rgba(217,164,65,0.16)", line: "rgba(217,164,65,0.4)" },
+  bad: { ink: T.badInk, fill: "rgba(192,87,58,0.16)", line: "rgba(192,87,58,0.4)" },
+  gold: { ink: T.gold, fill: "rgba(216,178,74,0.14)", line: T.lineGold },
+  accent: { ink: "#8ec2ee", fill: T.accentSoft, line: "rgba(58,128,192,0.5)" },
+} as const;
+
+export type Tone = keyof typeof TONE;
