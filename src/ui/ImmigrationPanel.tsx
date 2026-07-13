@@ -4,13 +4,19 @@ import { useCampaignStore } from "../state/campaignStore";
 import { campaignGetMigrationRoutes } from "../bridge/tauri";
 import type { MigrationRouteBrief } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
+import { T, FZ, SPACE, RADIUS } from "./chronicleTheme";
+import { Panel, PanelHeader, PanelBody, EmptyNote } from "./kit";
 
 /** Migration & Immigration — for the SELECTED city: who is arriving (and from where),
  *  who is leaving (the diaspora out), and the net flow. Aggregated from the live
  *  migration routes (people move only along trade ties). Prosperous cities pull people
- *  in and raise births; struggling ones bleed people to richer neighbours. */
+ *  in and raise births; struggling ones bleed people to richer neighbours.
+ *  Built on the shared UI kit (src/ui/kit.tsx). */
 
 interface FlowRow { hub: number; name: string; volume: number; cultures: Set<string> }
+
+const IN = T.goodInk;
+const OUT = "#e0906a";
 
 export function ImmigrationPanel() {
   const open = useUIStore((s) => s.showImmigration);
@@ -60,47 +66,44 @@ export function ImmigrationPanel() {
   const jump = (i: number) => { const id = snapshot?.hubs?.[i]?.id; if (id != null) setSelectedHub(id); };
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 6, cursor: "move" }} onPointerDown={onPointerDown}>
-        <span style={{ color: "#bcd0e8", fontWeight: 700, fontSize: 13 }}>🧭 Migration &amp; Immigration</span>
-        <span style={{ flex: 1 }} />
-        <span data-no-drag onClick={close} title="Close" style={{ color: "#7088a0", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</span>
-      </div>
+    <Panel width={320} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
+      <PanelHeader icon="🧭" title="Migration & Immigration" onDragStart={onPointerDown} onClose={close} />
+      <PanelBody style={{ display: "flex", flexDirection: "column", flex: 1, padding: `${SPACE.md}px ${SPACE.lg}px ${SPACE.lg}px` }}>
+        {!active && <EmptyNote>Start the campaign to track migration.</EmptyNote>}
+        {active && simIdx < 0 && <EmptyNote>Select a city on the map to see its migration.</EmptyNote>}
 
-      {!active && <div style={empty}>Start the campaign to track migration.</div>}
-      {active && simIdx < 0 && <div style={empty}>Select a city on the map to see its migration.</div>}
+        {active && simIdx >= 0 && (
+          <>
+            <div style={{ color: T.ink, fontSize: FZ.base, fontWeight: 600, marginBottom: 4 }}>{cityName}</div>
+            <div style={{ display: "flex", gap: 6, marginBottom: SPACE.md }}>
+              <SignedStat label="arrived" value={arrivalsTotal} color={IN} sign="+" />
+              <SignedStat label="left" value={departuresTotal} color={OUT} sign="−" />
+              <SignedStat label="net" value={Math.abs(net)} color={net >= 0 ? IN : T.badInk} sign={net >= 0 ? "+" : "−"} />
+            </div>
 
-      {active && simIdx >= 0 && (
-        <>
-          <div style={{ color: "#dbe7f4", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{cityName}</div>
-          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-            <Stat label="arrived" value={arrivalsTotal} color="#6fc890" sign="+" />
-            <Stat label="left" value={departuresTotal} color="#e0906a" sign="−" />
-            <Stat label="net" value={Math.abs(net)} color={net >= 0 ? "#7fd0a8" : "#e07a6a"} sign={net >= 0 ? "+" : "−"} />
-          </div>
+            <FlowList title="Arriving from" rows={arrivals} accent={IN}
+              empty="No recent arrivals." onJump={jump} />
+            <div style={{ height: SPACE.md }} />
+            <FlowList title="Diaspora out — left for" rows={departures} accent={OUT}
+              empty="No recent departures." onJump={jump} />
 
-          <FlowList title="Arriving from" rows={arrivals} accent="#6fc890"
-            empty="No recent arrivals." onJump={jump} />
-          <div style={{ height: 8 }} />
-          <FlowList title="Diaspora out — left for" rows={departures} accent="#e0906a"
-            empty="No recent departures." onJump={jump} />
-
-          <div style={{ fontSize: 9, color: "#6a8098", marginTop: 8, lineHeight: 1.5 }}>
-            People move only along <b>trade routes</b>, drawn toward prosperous, well-fed cities (which
-            also see higher births). Newcomers form <b>minority quarters</b> that slowly assimilate — see
-            the culture donut in the city's People tab.
-          </div>
-        </>
-      )}
-    </div>
+            <div style={{ fontSize: FZ.tiny, color: T.inkDim, marginTop: SPACE.md, lineHeight: 1.5 }}>
+              People move only along <b>trade routes</b>, drawn toward prosperous, well-fed cities (which
+              also see higher births). Newcomers form <b>minority quarters</b> that slowly assimilate — see
+              the culture donut in the city's People tab.
+            </div>
+          </>
+        )}
+      </PanelBody>
+    </Panel>
   );
 }
 
-function Stat({ label, value, color, sign }: { label: string; value: number; color: string; sign: string }) {
+function SignedStat({ label, value, color, sign }: { label: string; value: number; color: string; sign: string }) {
   return (
-    <div style={{ flex: 1, textAlign: "center", padding: "4px 2px", borderRadius: 5, background: "#101820", border: "1px solid #1e2a36" }}>
-      <div style={{ color, fontSize: 14, fontWeight: 700 }}>{value > 0.5 ? `${sign}${Math.round(value).toLocaleString()}` : "0"}</div>
-      <div style={{ color: "#6a8098", fontSize: 8 }}>{label}</div>
+    <div style={{ flex: 1, textAlign: "center", padding: "4px 2px", borderRadius: RADIUS.sm, background: T.card, border: `1px solid ${T.lineSoft}` }}>
+      <div style={{ color, fontSize: FZ.base, fontWeight: 700 }}>{value > 0.5 ? `${sign}${Math.round(value).toLocaleString()}` : "0"}</div>
+      <div style={{ color: T.inkDim, fontSize: FZ.micro }}>{label}</div>
     </div>
   );
 }
@@ -110,17 +113,17 @@ function FlowList({ title, rows, accent, empty, onJump }: {
 }) {
   return (
     <div>
-      <div style={{ color: "#7a90a8", fontSize: 8.5, textTransform: "uppercase", marginBottom: 3 }}>{title}</div>
+      <div style={{ color: T.inkMid, fontSize: FZ.micro, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>{title}</div>
       {rows.length === 0 ? (
-        <div style={{ color: "#6a8098", fontSize: 10 }}>{empty}</div>
+        <div style={{ color: T.inkDim, fontSize: FZ.small }}>{empty}</div>
       ) : (
         rows.slice(0, 8).map((r) => (
           <div key={r.hub} onClick={() => onJump(r.hub)}
-            style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, padding: "2px 3px", cursor: "pointer" }}>
+            style={{ display: "flex", alignItems: "center", gap: 6, fontSize: FZ.small, padding: "2px 3px", cursor: "pointer" }}>
             <span style={{ width: 6, height: 6, borderRadius: 3, background: accent, flex: "0 0 auto" }} />
-            <span style={{ flex: 1, color: "#cfe2f6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
+            <span style={{ flex: 1, color: T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
             {r.cultures.size > 0 && (
-              <span style={{ color: "#8aa0b8", fontSize: 8.5, maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ color: T.inkMid, fontSize: FZ.micro, maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {[...r.cultures].slice(0, 2).join(", ")}
               </span>
             )}
@@ -131,11 +134,3 @@ function FlowList({ title, rows, accent, empty, onJump }: {
     </div>
   );
 }
-
-const panel: React.CSSProperties = {
-  position: "absolute", top: 70, right: 12, width: 320, maxHeight: "72%",
-  display: "flex", flexDirection: "column",
-  border: "1px solid #24323e", borderRadius: 8, padding: "10px 12px", zIndex: 117,
-  boxShadow: "0 8px 30px rgba(0,0,0,0.5)",
-};
-const empty: React.CSSProperties = { color: "#6a8098", fontSize: 11, padding: "8px 2px" };
