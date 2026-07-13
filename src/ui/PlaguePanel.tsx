@@ -4,10 +4,13 @@ import { useCampaignStore } from "../state/campaignStore";
 import { campaignGetEpidemics } from "../bridge/tauri";
 import type { EpidemicBrief } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
+import { T, FZ, SPACE, RADIUS } from "./chronicleTheme";
+import { Panel, PanelHeader, PanelBody, Chip, EmptyNote } from "./kit";
 
 /** Phase 6 · Plagues & Epidemics — every outbreak (a contagion chain), sortable
  *  most→least deadly, expandable to its affected cities + contagion routes. Clicking
- *  a city focuses it on the map (and the plague overlay draws the spread). */
+ *  a city focuses it on the map (and the plague overlay draws the spread).
+ *  Built on the shared UI kit (src/ui/kit.tsx). */
 
 type Sort = "deadliest" | "cities" | "recent" | "active";
 const SORTS: { id: Sort; label: string }[] = [
@@ -68,154 +71,143 @@ export function PlaguePanel() {
   };
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 6, cursor: "move" }} onPointerDown={onPointerDown}>
-        <span style={{ color: "#e8c0c0", fontWeight: 700, fontSize: 13 }}>☠ Plagues &amp; Epidemics</span>
-        <span style={{ flex: 1 }} />
-        <span data-no-drag onClick={close} title="Close" style={{ color: "#a07070", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</span>
-      </div>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 6, fontSize: 10, color: "#9c8080" }}>
-        <span>{rows.length} outbreak{rows.length === 1 ? "" : "s"}</span>
-        <span>· {activeCount} active</span>
-        <span style={{ flex: 1 }} />
-        <label style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer" }} data-no-drag>
-          <input type="checkbox" checked={showZones} onChange={(e) => setOverlayVisible("plagueZones", e.target.checked)}
-            style={{ accentColor: "#c05050", width: 11, height: 11 }} />
-          <span>Show on map</span>
-        </label>
-      </div>
-
-      {/* SIR tally across all outbreaks: how many fell ill, died, and recovered. */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-        <SirStat label="fell ill" value={totalIll} color="#d8b060" />
-        <SirStat label="died" value={totalDead} color="#e07a5a" />
-        <SirStat label="recovered" value={totalRecovered} color="#7aa86a" />
-      </div>
-
-      {/* How plagues work — the mechanics, so the numbers are legible. */}
-      <details style={{ marginBottom: 6 }} data-no-drag>
-        <summary style={{ fontSize: 10, color: "#a88888", cursor: "pointer" }}>How plagues work</summary>
-        <div style={{ fontSize: 9, color: "#8c7070", lineHeight: 1.5, padding: "3px 2px 0" }}>
-          A disease breaks out in a city, kills a share of its people, and shuts the gates under
-          <b> quarantine</b> (trade suspended). It then travels the <b>trade lanes only</b> — Local
-          outbreaks stay put, Regional reach one more city, a Great Plague spreads ~4000&nbsp;km along
-          the network. Survivors gain <b>immunity</b> for years (stronger for smallpox/plague, weak for
-          flu/cholera, so those recur). Wealthy cities that fund <b>hospices/quarantine</b> lose fewer
-          people and resist longer. <i>Ill</i> = caught it; <i>recovered</i> = ill who survived.
+    <Panel width={340} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
+      <PanelHeader icon="☠" title="Plagues & Epidemics" onDragStart={onPointerDown} onClose={close} />
+      <PanelBody style={{ display: "flex", flexDirection: "column", flex: 1, padding: `${SPACE.md}px ${SPACE.lg}px ${SPACE.lg}px` }}>
+        <div style={{ display: "flex", gap: SPACE.md, marginBottom: SPACE.md, fontSize: FZ.small, color: T.inkMid, alignItems: "center" }}>
+          <span>{rows.length} outbreak{rows.length === 1 ? "" : "s"}</span>
+          <span>· {activeCount} active</span>
+          <span style={{ flex: 1 }} />
+          <label style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer" }} data-no-drag>
+            <input type="checkbox" checked={showZones} onChange={(e) => setOverlayVisible("plagueZones", e.target.checked)}
+              style={{ accentColor: T.bad, width: 11, height: 11 }} />
+            <span>Show on map</span>
+          </label>
         </div>
-      </details>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }} data-no-drag>
-        {SORTS.map((s) => (
-          <span key={s.id} onClick={() => setSort(s.id)}
-            style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, cursor: "pointer",
-              border: `1px solid ${sort === s.id ? "#c05858" : "#3a2626"}`,
-              background: sort === s.id ? "#301818" : "transparent",
-              color: sort === s.id ? "#f0cccc" : "#9c7676" }}>{s.label}</span>
-        ))}
-        <span onClick={() => setActiveOnly((v) => !v)}
-          style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, cursor: "pointer",
-            border: `1px solid ${activeOnly ? "#c05858" : "#3a2626"}`,
-            background: activeOnly ? "#301818" : "transparent",
-            color: activeOnly ? "#f0cccc" : "#9c7676" }}>Active only</span>
-      </div>
+        {/* SIR tally across all outbreaks: how many fell ill, died, and recovered. */}
+        <div style={{ display: "flex", gap: 6, marginBottom: SPACE.md }}>
+          <SirStat label="fell ill" value={totalIll} color={T.warn} />
+          <SirStat label="died" value={totalDead} color={T.badInk} />
+          <SirStat label="recovered" value={totalRecovered} color={T.goodInk} />
+        </div>
 
-      <div style={{ overflowY: "auto", flex: 1 }}>
-        {!active && <div style={empty}>Start the campaign to track epidemics.</div>}
-        {active && shown.length === 0 && <div style={empty}>No plagues recorded yet.</div>}
-        {shown.map((e) => {
-          const isOpen = expanded.has(e.id);
-          return (
-            <div key={e.id} style={{ borderBottom: "1px solid #2a1818" }}>
-              <div onClick={() => setExpanded((prev) => { const n = new Set(prev); n.has(e.id) ? n.delete(e.id) : n.add(e.id); return n; })}
-                style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 2px", cursor: "pointer" }}>
-                <span style={{ color: "#7a5656", fontSize: 9, width: 9 }}>{isOpen ? "▾" : "▸"}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: "#e8c8c8", fontSize: 11, fontWeight: 600 }}>
-                    {e.name} <CategoryTag category={e.category} />
-                    {e.transmission && (
-                      <span style={{ fontSize: 8, color: "#9ab0c8", border: "1px solid #2a3a4a", borderRadius: 8, padding: "0 5px", marginLeft: 3 }}>
-                        {e.transmission}
-                      </span>
-                    )}
-                    {e.active && <span style={{ color: "#ff8a6a", fontSize: 9 }}> ● active</span>}
-                  </div>
-                  <div style={{ color: "#8c6a6a", fontSize: 9 }}>
-                    Year {e.start_year}{e.end_year > e.start_year ? `–${e.end_year}` : ""} · {e.cities.length} cit{e.cities.length === 1 ? "y" : "ies"}
-                  </div>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ color: "#ff8a6a", fontSize: 12, fontWeight: 700 }}>{e.total_dead.toLocaleString()}</div>
-                  <div style={{ color: "#7a5656", fontSize: 8 }}>died</div>
-                </div>
-              </div>
-              {isOpen && (
-                <div style={{ paddingLeft: 14, paddingBottom: 5 }}>
-                  <div style={{ fontSize: 9, color: "#8c6a6a", marginBottom: 3 }}>
-                    Began in <b style={{ color: "#e8a0a0" }}>{e.origin_name}</b> · spread to {e.cities.length - 1} more
-                  </div>
-                  {/* Spread REPLAY: drag to trace how the plague travelled the trade
-                      lanes from its origin, city by city (plague-red on the map). */}
-                  {(() => {
-                    const maxOrder = e.cities.reduce((m, c) => Math.max(m, c.order), 0);
-                    if (maxOrder < 1) return null;
-                    const replaying = plagueReplay?.id === e.id;
-                    const step = replaying ? plagueReplay!.step : 0;
-                    return (
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "2px 0 5px", padding: "3px 5px", background: "#1a0e0e", border: "1px solid #3a2020", borderRadius: 5 }}>
-                        <span title="Trace the spread on the map"
-                          onClick={() => setPlagueReplay(replaying ? null : { id: e.id, step: 0 })}
-                          style={{ fontSize: 10, cursor: "pointer", color: replaying ? "#ff9a6a" : "#9c7676" }}>
-                          {replaying ? "■ stop" : "▶ trace"}
+        {/* How plagues work — the mechanics, so the numbers are legible. */}
+        <details style={{ marginBottom: SPACE.md }} data-no-drag>
+          <summary style={{ fontSize: FZ.small, color: T.inkMid, cursor: "pointer" }}>How plagues work</summary>
+          <div style={{ fontSize: FZ.tiny, color: T.inkDim, lineHeight: 1.5, padding: "3px 2px 0" }}>
+            A disease breaks out in a city, kills a share of its people, and shuts the gates under
+            <b> quarantine</b> (trade suspended). It then travels the <b>trade lanes only</b> — Local
+            outbreaks stay put, Regional reach one more city, a Great Plague spreads ~4000&nbsp;km along
+            the network. Survivors gain <b>immunity</b> for years (stronger for smallpox/plague, weak for
+            flu/cholera, so those recur). Wealthy cities that fund <b>hospices/quarantine</b> lose fewer
+            people and resist longer. <i>Ill</i> = caught it; <i>recovered</i> = ill who survived.
+          </div>
+        </details>
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: SPACE.md }} data-no-drag>
+          {SORTS.map((s) => (
+            <Chip key={s.id} on={sort === s.id} onClick={() => setSort(s.id)}>{s.label}</Chip>
+          ))}
+          <Chip on={activeOnly} onClick={() => setActiveOnly((v) => !v)}>Active only</Chip>
+        </div>
+
+        <div style={{ overflowY: "auto", flex: 1 }}>
+          {!active && <EmptyNote>Start the campaign to track epidemics.</EmptyNote>}
+          {active && shown.length === 0 && <EmptyNote>No plagues recorded yet.</EmptyNote>}
+          {shown.map((e) => {
+            const isOpen = expanded.has(e.id);
+            return (
+              <div key={e.id} style={{ borderBottom: `1px solid ${T.lineSoft}` }}>
+                <div onClick={() => setExpanded((prev) => { const n = new Set(prev); n.has(e.id) ? n.delete(e.id) : n.add(e.id); return n; })}
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 2px", cursor: "pointer" }}>
+                  <span style={{ color: T.inkDim, fontSize: FZ.tiny, width: 9 }}>{isOpen ? "▾" : "▸"}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: T.parchment, fontSize: FZ.body, fontWeight: 600 }}>
+                      {e.name} <CategoryTag category={e.category} />
+                      {e.transmission && (
+                        <span style={{ fontSize: FZ.micro, color: T.inkMid, border: `1px solid ${T.line}`, borderRadius: 8, padding: "0 5px", marginLeft: 3 }}>
+                          {e.transmission}
                         </span>
-                        <input type="range" min={0} max={maxOrder} step={1} value={step}
-                          onChange={(ev) => setPlagueReplay({ id: e.id, step: Number(ev.target.value) })}
-                          style={{ flex: 1, accentColor: "#c05050" }} />
-                        <span style={{ fontSize: 9, color: "#c8a8a8", minWidth: 54, textAlign: "right" }}>
-                          {step === 0 ? "origin" : `+${step} ${step === 1 ? "city" : "cities"}`}
-                        </span>
-                      </div>
-                    );
-                  })()}
-                  {/* Cities in SPREAD ORDER (origin first) — the contagion history. */}
-                  {e.cities.map((c) => (
-                    <div key={c.hub} onClick={() => focusCity(c.hub)}
-                      style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, padding: "2px 4px", cursor: "pointer" }}>
-                      <span style={{ color: "#7a5656", fontSize: 8, minWidth: 26 }}>
-                        {c.order === 0 ? "★ src" : `→ ${c.order}`}
-                      </span>
-                      <span style={{ flex: 1, color: "#c8a8a8" }}>
-                        {c.name} <span style={{ color: "#6a5050" }}>Yr{c.year}</span>
-                        {c.active && <span style={{ color: "#ff8a6a" }}> · quarantined</span>}
-                        {c.from_name && <span style={{ color: "#6a5050" }}> ← {c.from_name}</span>}
-                      </span>
-                      {c.ill != null && c.ill > c.deaths && (
-                        <span style={{ color: "#c8a860", minWidth: 42, textAlign: "right" }} title="fell ill">{c.ill.toLocaleString()} ⚕</span>
                       )}
-                      <span style={{ color: "#e08a6a", minWidth: 44, textAlign: "right" }} title="died">{c.deaths.toLocaleString()} †</span>
-                      {c.recovered != null && c.recovered > 0 && (
-                        <span style={{ color: "#7aa86a", minWidth: 42, textAlign: "right" }} title="recovered">{c.recovered.toLocaleString()} ✚</span>
-                      )}
+                      {e.active && <span style={{ color: T.badInk, fontSize: FZ.tiny }}> ● active</span>}
                     </div>
-                  ))}
+                    <div style={{ color: T.inkDim, fontSize: FZ.tiny }}>
+                      Year {e.start_year}{e.end_year > e.start_year ? `–${e.end_year}` : ""} · {e.cities.length} cit{e.cities.length === 1 ? "y" : "ies"}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ color: T.badInk, fontSize: FZ.base, fontWeight: 700 }}>{e.total_dead.toLocaleString()}</div>
+                    <div style={{ color: T.inkDim, fontSize: FZ.micro }}>died</div>
+                  </div>
                 </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
+                {isOpen && (
+                  <div style={{ paddingLeft: 14, paddingBottom: 5 }}>
+                    <div style={{ fontSize: FZ.tiny, color: T.inkDim, marginBottom: 3 }}>
+                      Began in <b style={{ color: T.badInk }}>{e.origin_name}</b> · spread to {e.cities.length - 1} more
+                    </div>
+                    {/* Spread REPLAY: drag to trace how the plague travelled the trade
+                        lanes from its origin, city by city (plague-red on the map). */}
+                    {(() => {
+                      const maxOrder = e.cities.reduce((m, c) => Math.max(m, c.order), 0);
+                      if (maxOrder < 1) return null;
+                      const replaying = plagueReplay?.id === e.id;
+                      const step = replaying ? plagueReplay!.step : 0;
+                      return (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "2px 0 5px", padding: "3px 5px", background: T.card, border: `1px solid ${T.line}`, borderRadius: RADIUS.sm }}>
+                          <span title="Trace the spread on the map" data-no-drag
+                            onClick={() => setPlagueReplay(replaying ? null : { id: e.id, step: 0 })}
+                            style={{ fontSize: FZ.small, cursor: "pointer", color: replaying ? T.badInk : T.inkMid }}>
+                            {replaying ? "■ stop" : "▶ trace"}
+                          </span>
+                          <input type="range" min={0} max={maxOrder} step={1} value={step} data-no-drag
+                            onChange={(ev) => setPlagueReplay({ id: e.id, step: Number(ev.target.value) })}
+                            style={{ flex: 1, accentColor: T.bad }} />
+                          <span style={{ fontSize: FZ.tiny, color: T.inkMid, minWidth: 54, textAlign: "right" }}>
+                            {step === 0 ? "origin" : `+${step} ${step === 1 ? "city" : "cities"}`}
+                          </span>
+                        </div>
+                      );
+                    })()}
+                    {/* Cities in SPREAD ORDER (origin first) — the contagion history. */}
+                    {e.cities.map((c) => (
+                      <div key={c.hub} onClick={() => focusCity(c.hub)}
+                        style={{ display: "flex", alignItems: "center", gap: 6, fontSize: FZ.small, padding: "2px 4px", cursor: "pointer" }}>
+                        <span style={{ color: T.inkDim, fontSize: FZ.micro, minWidth: 26 }}>
+                          {c.order === 0 ? "★ src" : `→ ${c.order}`}
+                        </span>
+                        <span style={{ flex: 1, color: T.inkMid }}>
+                          {c.name} <span style={{ color: T.inkFaint }}>Yr{c.year}</span>
+                          {c.active && <span style={{ color: T.badInk }}> · quarantined</span>}
+                          {c.from_name && <span style={{ color: T.inkFaint }}> ← {c.from_name}</span>}
+                        </span>
+                        {c.ill != null && c.ill > c.deaths && (
+                          <span style={{ color: T.warn, minWidth: 42, textAlign: "right" }} title="fell ill">{c.ill.toLocaleString()} ⚕</span>
+                        )}
+                        <span style={{ color: T.badInk, minWidth: 44, textAlign: "right" }} title="died">{c.deaths.toLocaleString()} †</span>
+                        {c.recovered != null && c.recovered > 0 && (
+                          <span style={{ color: T.goodInk, minWidth: 42, textAlign: "right" }} title="recovered">{c.recovered.toLocaleString()} ✚</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </PanelBody>
+    </Panel>
   );
 }
 
 /** One SIR tally chip (fell ill / died / recovered) for the panel header. */
 function SirStat({ label, value, color }: { label: string; value: number; color: string }) {
   return (
-    <div style={{ flex: 1, textAlign: "center", padding: "3px 2px", borderRadius: 5,
-      background: "#1a0e0e", border: "1px solid #2a1818" }}>
-      <div style={{ color, fontSize: 13, fontWeight: 700 }}>{value.toLocaleString()}</div>
-      <div style={{ color: "#8c7070", fontSize: 8 }}>{label}</div>
+    <div style={{ flex: 1, textAlign: "center", padding: "3px 2px", borderRadius: RADIUS.sm,
+      background: T.card, border: `1px solid ${T.lineSoft}` }}>
+      <div style={{ color, fontSize: FZ.head, fontWeight: 700 }}>{value.toLocaleString()}</div>
+      <div style={{ color: T.inkDim, fontSize: FZ.micro }}>{label}</div>
     </div>
   );
 }
@@ -224,22 +216,14 @@ function SirStat({ label, value, color }: { label: string; value: number; color:
  *  lanes), Cat 2 = Regional (reaches one further city), Cat 3 = Local outbreak. */
 function CategoryTag({ category }: { category: number }) {
   const meta = category === 1
-    ? { label: "Cat 1 · Great Plague", bg: "#4a1010", bd: "#c04040", fg: "#ffb0a0" }
+    ? { label: "Cat 1 · Great Plague", bg: "rgba(192,64,64,0.18)", bd: "#c04040", fg: "#ffb0a0" }
     : category === 2
-    ? { label: "Cat 2 · Regional", bg: "#3a2410", bd: "#b07030", fg: "#f0c890" }
-    : { label: "Cat 3 · Local", bg: "#25301a", bd: "#5a7040", fg: "#bcd8a0" };
+    ? { label: "Cat 2 · Regional", bg: "rgba(176,112,48,0.18)", bd: "#b07030", fg: "#f0c890" }
+    : { label: "Cat 3 · Local", bg: "rgba(90,112,64,0.18)", bd: "#5a7040", fg: "#bcd8a0" };
   return (
-    <span style={{ fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 10,
+    <span style={{ fontSize: FZ.micro, fontWeight: 700, padding: "1px 5px", borderRadius: 10,
       border: `1px solid ${meta.bd}`, background: meta.bg, color: meta.fg, whiteSpace: "nowrap" }}>
       {meta.label}
     </span>
   );
 }
-
-const panel: React.CSSProperties = {
-  position: "absolute", top: 70, right: 12, width: 340, maxHeight: "72%",
-  display: "flex", flexDirection: "column",
-  border: "1px solid #3a2020", borderRadius: 8, padding: "10px 12px", zIndex: 117,
-  boxShadow: "0 8px 30px rgba(0,0,0,0.5)",
-};
-const empty: React.CSSProperties = { color: "#8c6a6a", fontSize: 11, padding: "8px 2px" };

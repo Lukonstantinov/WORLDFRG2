@@ -4,10 +4,13 @@ import { useCampaignStore } from "../state/campaignStore";
 import { campaignGetJournal } from "../bridge/tauri";
 import type { JournalEntry } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
+import { T, FZ, SPACE } from "./chronicleTheme";
+import { Panel, PanelHeader, PanelBody, Chip, EmptyNote } from "./kit";
 
 /** Phase D · the filterable World News feed — a global, clickable view over the
  *  campaign chronicle (the same `journal` the per-city/house timelines read).
- *  Clicking an item focuses the relevant settlement. No playback controls. */
+ *  Clicking an item focuses the relevant settlement. No playback controls.
+ *  Built on the shared UI kit (src/ui/kit.tsx). */
 
 const CATS: { id: string; label: string; icon: string; kinds: string[] }[] = [
   { id: "all", label: "All", icon: "🗞", kinds: [] },
@@ -56,51 +59,37 @@ export function NewsFeedPanel() {
   if (!open) return null;
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 6, cursor: "move" }} onPointerDown={onPointerDown}>
-        <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 13 }}>🗞 World News</span>
-        <span style={{ flex: 1 }} />
-        <span data-no-drag onClick={close} title="Close" style={{ color: "#7090b0", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</span>
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
-        {CATS.map((c) => (
-          <span key={c.id} onClick={() => setCat(c.id)}
-            style={{ fontSize: 10.5, padding: "2px 8px", borderRadius: 20, cursor: "pointer",
-              border: `1px solid ${cat === c.id ? "#3a80c0" : "#22364c"}`,
-              background: cat === c.id ? "#11283f" : "transparent",
-              color: cat === c.id ? "#cfe2f6" : "#6a86a6" }}>
-            {c.icon} {c.label}
-          </span>
-        ))}
-      </div>
-      <div style={{ overflowY: "auto", flex: 1 }}>
-        {!active && <div style={empty}>Start the campaign to see world news.</div>}
-        {active && shown.length === 0 && <div style={empty}>Nothing in this category yet.</div>}
-        {shown.map((e, i) => {
-          const hub = e.hub >= 0 ? snapshot?.hubs?.[e.hub] : undefined;
-          return (
-            <div key={i} onClick={() => hub && setSelectedHub(hub.id)}
-              style={{ display: "flex", gap: 8, padding: "5px 2px", borderBottom: "1px dashed #18283a",
-                cursor: hub ? "pointer" : "default" }}>
-              <span style={{ fontSize: 13, width: 20, textAlign: "center" }}>{ICON[e.kind] ?? "•"}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ color: "#cfe0f4", fontSize: 10.5, lineHeight: 1.35 }}>{e.text}</div>
-                <div style={{ color: "#6a86a6", fontSize: 9 }}>
-                  Year {year(e.tick)}{hub ? ` · ${hub.name}` : ""}
+    <Panel width={320} maxHeight="70%" style={{ top: 70, right: 12, zIndex: 116, ...rootStyle }}>
+      <PanelHeader icon="🗞" title="World News" onDragStart={onPointerDown} onClose={close} />
+      <PanelBody style={{ display: "flex", flexDirection: "column", flex: 1, padding: `${SPACE.md}px ${SPACE.lg}px ${SPACE.lg}px` }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: SPACE.md }}>
+          {CATS.map((c) => (
+            <Chip key={c.id} on={cat === c.id} onClick={() => setCat(c.id)}>
+              {c.icon} {c.label}
+            </Chip>
+          ))}
+        </div>
+        <div style={{ overflowY: "auto", flex: 1 }}>
+          {!active && <EmptyNote>Start the campaign to see world news.</EmptyNote>}
+          {active && shown.length === 0 && <EmptyNote>Nothing in this category yet.</EmptyNote>}
+          {shown.map((e, i) => {
+            const hub = e.hub >= 0 ? snapshot?.hubs?.[e.hub] : undefined;
+            return (
+              <div key={i} onClick={() => hub && setSelectedHub(hub.id)}
+                style={{ display: "flex", gap: SPACE.md, padding: "5px 2px", borderBottom: `1px dashed ${T.lineSoft}`,
+                  cursor: hub ? "pointer" : "default" }}>
+                <span style={{ fontSize: FZ.head, width: 20, textAlign: "center" }}>{ICON[e.kind] ?? "•"}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: T.ink, fontSize: FZ.small, lineHeight: 1.35 }}>{e.text}</div>
+                  <div style={{ color: T.inkDim, fontSize: FZ.tiny }}>
+                    Year {year(e.tick)}{hub ? ` · ${hub.name}` : ""}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+            );
+          })}
+        </div>
+      </PanelBody>
+    </Panel>
   );
 }
-
-const panel: React.CSSProperties = {
-  position: "absolute", top: 70, right: 12, width: 320, maxHeight: "70%",
-  display: "flex", flexDirection: "column",
-  background: "rgba(12,18,26,0.97)", border: "1px solid #1e2e42", borderRadius: 8,
-  padding: "10px 12px", zIndex: 116, boxShadow: "0 8px 30px rgba(0,0,0,0.5)",
-};
-const empty: React.CSSProperties = { color: "#6a86a6", fontSize: 11, padding: "8px 2px" };

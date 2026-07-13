@@ -5,6 +5,8 @@ import { useGoodsStore } from "../state/goodsStore";
 import { campaignWarehouses } from "../bridge/tauri";
 import type { WarehouseInfo } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
+import { T, FZ, RADIUS } from "./chronicleTheme";
+import { Panel, PanelHeader, PanelBody, Meter, EmptyNote, FootNote } from "./kit";
 
 const TIER_NAME = ["pool", "Depot", "Storehouse", "Warehouse", "Entrepôt", "Grand Entrepôt"];
 const KIND_ICON: Record<string, string> = {
@@ -15,7 +17,8 @@ const KIND_ICON: Record<string, string> = {
 /** The Warehouses infographic — every house/guild depot in the world: where it sits,
  *  its tier & fill, the goods it holds and how many futures contracts it supplies.
  *  Click a depot to FOCUS its distribution: the 📜 Futures layer highlights every
- *  contract lane it sources (its outbound supply network), fading the rest. */
+ *  contract lane it sources (its outbound supply network), fading the rest.
+ *  Built on the shared UI kit (src/ui/kit.tsx). */
 export function WarehousesPanel() {
   const open = useUIStore((s) => s.showWarehouses);
   const setOpen = useUIStore((s) => s.setShowWarehouses);
@@ -55,35 +58,33 @@ export function WarehousesPanel() {
   };
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
-      <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
-        <span>🏬 Warehouses & Estates</span>
-        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={() => setOpen(false)}>✕</span>
-      </div>
-      <div style={{ padding: "6px 8px", borderBottom: "1px solid #1a2a3e" }}>
+    <Panel width={312} maxHeight="78vh" style={{ top: 60, right: 680, zIndex: 42, ...rootStyle }}>
+      <PanelHeader icon="🏬" title="Warehouses & Estates" onDragStart={onPointerDown} onClose={() => setOpen(false)} />
+      <div style={{ padding: "6px 8px", borderBottom: `1px solid ${T.line}`, flex: "0 0 auto" }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="filter house / city / good…"
-          style={{ width: "100%", boxSizing: "border-box", background: "#0a1018", border: "1px solid #23364c", borderRadius: 5, color: "#cfe0f4", fontSize: 11, padding: "3px 6px" }} />
+          data-no-drag
+          style={{ width: "100%", boxSizing: "border-box", background: T.card, border: `1px solid ${T.line}`, borderRadius: RADIUS.sm, color: T.ink, fontSize: FZ.body, padding: "3px 6px" }} />
       </div>
-      <div style={{ overflowY: "auto", padding: "2px 6px 10px" }}>
-        {!active && <div style={hint}>Begin the campaign (Step 11) to see warehouses.</div>}
-        {active && filtered.length === 0 && <div style={hint}>No house warehouses yet.</div>}
+      <PanelBody style={{ padding: "2px 6px 10px" }}>
+        {!active && <EmptyNote>Begin the campaign (Step 11) to see warehouses.</EmptyNote>}
+        {active && filtered.length === 0 && <EmptyNote>No house warehouses yet.</EmptyNote>}
         {filtered.map((r, i) => {
           const fill = r.capacity > 0 ? Math.min(1, r.used / r.capacity) : 0;
           return (
             <div key={i} onClick={() => focusDepot(r)}
               title="Focus this depot's contract distribution on the map"
-              style={{ padding: "4px 2px", borderBottom: "1px solid #131e2a", cursor: "pointer" }}>
+              style={{ padding: "4px 2px", borderBottom: `1px solid ${T.lineSoft}`, cursor: "pointer" }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: r.color, alignSelf: "center" }} />
-                <span style={{ color: "#e8d8b0", fontSize: 11, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 120 }}>{r.owner}</span>
-                {r.is_guild && <span style={{ fontSize: 8, color: "#7fd0c0" }}>GUILD</span>}
+                <span style={{ color: T.parchment, fontSize: FZ.body, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 120 }}>{r.owner}</span>
+                {r.is_guild && <span style={{ fontSize: FZ.micro, color: T.goodInk }}>GUILD</span>}
                 <span style={{ flex: 1 }} />
-                {r.contracts > 0 && <span style={{ color: "#ffcf3f", fontSize: 9 }} title="futures contracts supplied">📜 {r.contracts}</span>}
-                {r.damage > 0.05 && <span style={{ color: "#ff7a6a", fontSize: 9 }} title="storm/fire damage">🔥</span>}
+                {r.contracts > 0 && <span style={{ color: T.gold, fontSize: FZ.tiny }} title="futures contracts supplied">📜 {r.contracts}</span>}
+                {r.damage > 0.05 && <span style={{ color: T.badInk, fontSize: FZ.tiny }} title="storm/fire damage">🔥</span>}
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#9ab0c8", marginTop: 1 }}>
-                <span style={{ color: "#cfe0f4" }}>{r.city}</span>
-                <span style={{ color: "#6a86a6" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: FZ.small, color: T.inkMid, marginTop: 1 }}>
+                <span style={{ color: T.ink }}>{r.city}</span>
+                <span style={{ color: T.inkDim }}>
                   · {KIND_ICON[r.kind] ?? "🏬"} {r.kind === "warehouse"
                     ? `T${r.tier} ${TIER_NAME[r.tier] ?? ""}`
                     : `${r.kind}${r.tier > 0 ? ` T${r.tier}` : ""}`}
@@ -91,18 +92,16 @@ export function WarehousesPanel() {
               </div>
               {r.capacity > 0 ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
-                  <div style={{ flex: 1, height: 5, background: "#0a1018", borderRadius: 3, overflow: "hidden" }}>
-                    <div style={{ width: `${fill * 100}%`, height: "100%", background: fill > 0.85 ? "#e0a020" : "#5a9bd0" }} />
-                  </div>
-                  <span style={{ color: "#7a90a8", fontSize: 9, minWidth: 76, textAlign: "right" }}>{fmt(r.used)} / {fmt(r.capacity)}</span>
+                  <Meter value={fill} color={fill > 0.85 ? T.warn : T.accent} height={5} />
+                  <span style={{ color: T.inkMid, fontSize: FZ.tiny, minWidth: 76, textAlign: "right" }}>{fmt(r.used)} / {fmt(r.capacity)}</span>
                 </div>
               ) : (
-                <div style={{ fontSize: 9, color: "#7fb88a", marginTop: 1 }}>produces {fmt(r.used)}/yr</div>
+                <div style={{ fontSize: FZ.tiny, color: T.goodInk, marginTop: 1 }}>produces {fmt(r.used)}/yr</div>
               )}
               {r.goods.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 2 }}>
                   {r.goods.slice(0, 6).map(([g, v]) => (
-                    <span key={g} style={{ fontSize: 9, color: "#b8c8d8" }}>{goodMeta(g).icon} {fmt(v)}</span>
+                    <span key={g} style={{ fontSize: FZ.tiny, color: T.inkMid }}>{goodMeta(g).icon} {fmt(v)}</span>
                   ))}
                 </div>
               )}
@@ -110,24 +109,11 @@ export function WarehousesPanel() {
           );
         })}
         {filtered.length > 0 && (
-          <div style={{ color: "#56708e", fontSize: 9, marginTop: 5 }}>
+          <FootNote style={{ fontSize: FZ.tiny }}>
             {filtered.length} depots · click one to highlight its futures distribution
-          </div>
+          </FootNote>
         )}
-      </div>
-    </div>
+      </PanelBody>
+    </Panel>
   );
 }
-
-const hint: React.CSSProperties = { color: "#506080", fontSize: 11, padding: 10 };
-const panel: React.CSSProperties = {
-  position: "absolute", top: 60, right: 680, width: 312, maxHeight: "78vh",
-  display: "flex", flexDirection: "column",
-  background: "#0c141e", border: "1px solid #243a2e", borderRadius: 8,
-  boxShadow: "0 8px 28px rgba(0,0,0,0.5)", zIndex: 42,
-};
-const header: React.CSSProperties = {
-  display: "flex", justifyContent: "space-between", alignItems: "center",
-  padding: "8px 10px", borderBottom: "1px solid #1a2a3e",
-  color: "#9fe0b0", fontWeight: 700, fontSize: 12,
-};

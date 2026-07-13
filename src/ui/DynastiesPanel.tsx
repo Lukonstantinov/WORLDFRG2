@@ -4,9 +4,12 @@ import { useCampaignStore } from "../state/campaignStore";
 import { campaignGetDynasties } from "../bridge/tauri";
 import type { DynastiesPayload, HouseLink } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
+import { T, FZ, SPACE } from "./chronicleTheme";
+import { Panel, PanelHeader, PanelBody, Chip, EmptyNote } from "./kit";
 
 /** Phase 7 · Dynasties & Alliances — marriage alliances (💍) and feuds (🗡) between
- *  the great houses. Click a house to focus its seat; a map toggle draws the ties. */
+ *  the great houses. Click a house to focus its seat; a map toggle draws the ties.
+ *  Built on the shared UI kit (src/ui/kit.tsx). */
 
 type Tab = "alliances" | "feuds";
 
@@ -40,66 +43,51 @@ export function DynastiesPanel() {
   const stripHouse = (n: string) => n.replace(/^House /, "");
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 6, cursor: "move" }} onPointerDown={onPointerDown}>
-        <span style={{ color: "#e8c0c8", fontWeight: 700, fontSize: 13 }}>⚭ Dynasties &amp; Alliances</span>
-        <span style={{ flex: 1 }} />
-        <span data-no-drag onClick={close} title="Close" style={{ color: "#a07884", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</span>
-      </div>
+    <Panel width={330} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
+      <PanelHeader icon="⚭" title="Dynasties & Alliances" onDragStart={onPointerDown} onClose={close} />
+      <PanelBody style={{ display: "flex", flexDirection: "column", flex: 1, padding: `${SPACE.md}px ${SPACE.lg}px ${SPACE.lg}px` }}>
+        <div style={{ display: "flex", gap: SPACE.md, marginBottom: SPACE.md, fontSize: FZ.small, color: T.inkMid, alignItems: "center" }}>
+          <span>{data.alliances.length} alliance{data.alliances.length === 1 ? "" : "s"}</span>
+          <span>· {data.feuds.length} feud{data.feuds.length === 1 ? "" : "s"}</span>
+          <span style={{ flex: 1 }} />
+          <label style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer" }} data-no-drag>
+            <input type="checkbox" checked={showLinks} onChange={(e) => setOverlayVisible("dynastyLinks", e.target.checked)}
+              style={{ accentColor: T.accent, width: 11, height: 11 }} />
+            <span>Show on map</span>
+          </label>
+        </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 6, fontSize: 10, color: "#9c8088" }}>
-        <span>{data.alliances.length} alliance{data.alliances.length === 1 ? "" : "s"}</span>
-        <span>· {data.feuds.length} feud{data.feuds.length === 1 ? "" : "s"}</span>
-        <span style={{ flex: 1 }} />
-        <label style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer" }} data-no-drag>
-          <input type="checkbox" checked={showLinks} onChange={(e) => setOverlayVisible("dynastyLinks", e.target.checked)}
-            style={{ accentColor: "#c06078", width: 11, height: 11 }} />
-          <span>Show on map</span>
-        </label>
-      </div>
+        <div style={{ display: "flex", gap: 4, marginBottom: SPACE.md }} data-no-drag>
+          {(["alliances", "feuds"] as Tab[]).map((t) => (
+            <Chip key={t} on={tab === t} onClick={() => setTab(t)}>
+              {t === "alliances" ? "💍 Alliances" : "🗡 Feuds"}
+            </Chip>
+          ))}
+        </div>
 
-      <div style={{ display: "flex", gap: 4, marginBottom: 6 }} data-no-drag>
-        {(["alliances", "feuds"] as Tab[]).map((t) => (
-          <span key={t} onClick={() => setTab(t)}
-            style={{ fontSize: 10, padding: "2px 10px", borderRadius: 20, cursor: "pointer", textTransform: "capitalize",
-              border: `1px solid ${tab === t ? "#c06078" : "#3a2830"}`,
-              background: tab === t ? "#2a1820" : "transparent",
-              color: tab === t ? "#f0ccd4" : "#9c8088" }}>
-            {t === "alliances" ? "💍 Alliances" : "🗡 Feuds"}
-          </span>
-        ))}
-      </div>
-
-      <div style={{ overflowY: "auto", flex: 1 }}>
-        {!active && <div style={empty}>Start the campaign to trace the dynasties.</div>}
-        {active && rows.length === 0 && (
-          <div style={empty}>{tab === "alliances" ? "No marriage alliances yet." : "No active feuds."}</div>
-        )}
-        {rows.map((l: HouseLink, i) => (
-          <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 2px", borderBottom: "1px dashed #241820", fontSize: 11 }}>
-            <span style={{ width: 16, textAlign: "center" }}>{tab === "alliances" ? "💍" : "🗡"}</span>
-            <span onClick={() => focus(l.a_hub)} title={l.a_city}
-              style={{ color: "#e0c0c8", cursor: "pointer", flex: 1, textAlign: "right", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {stripHouse(l.a_name)}
-            </span>
-            <span style={{ color: tab === "alliances" ? "#d8b060" : "#c06060", fontSize: 12 }}>
-              {tab === "alliances" ? "⚭" : "⚔"}
-            </span>
-            <span onClick={() => focus(l.b_hub)} title={l.b_city}
-              style={{ color: "#e0c0c8", cursor: "pointer", flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
-              {stripHouse(l.b_name)}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
+        <div style={{ overflowY: "auto", flex: 1 }}>
+          {!active && <EmptyNote>Start the campaign to trace the dynasties.</EmptyNote>}
+          {active && rows.length === 0 && (
+            <EmptyNote>{tab === "alliances" ? "No marriage alliances yet." : "No active feuds."}</EmptyNote>
+          )}
+          {rows.map((l: HouseLink, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 2px", borderBottom: `1px dashed ${T.lineSoft}`, fontSize: FZ.body }}>
+              <span style={{ width: 16, textAlign: "center" }}>{tab === "alliances" ? "💍" : "🗡"}</span>
+              <span onClick={() => focus(l.a_hub)} title={l.a_city}
+                style={{ color: T.parchment, cursor: "pointer", flex: 1, textAlign: "right", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {stripHouse(l.a_name)}
+              </span>
+              <span style={{ color: tab === "alliances" ? T.gold : T.bad, fontSize: FZ.base }}>
+                {tab === "alliances" ? "⚭" : "⚔"}
+              </span>
+              <span onClick={() => focus(l.b_hub)} title={l.b_city}
+                style={{ color: T.parchment, cursor: "pointer", flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+                {stripHouse(l.b_name)}
+              </span>
+            </div>
+          ))}
+        </div>
+      </PanelBody>
+    </Panel>
   );
 }
-
-const panel: React.CSSProperties = {
-  position: "absolute", top: 70, right: 12, width: 330, maxHeight: "72%",
-  display: "flex", flexDirection: "column",
-  border: "1px solid #3a2830", borderRadius: 8, padding: "10px 12px", zIndex: 117,
-  boxShadow: "0 8px 30px rgba(0,0,0,0.5)",
-};
-const empty: React.CSSProperties = { color: "#9c8088", fontSize: 11, padding: "8px 2px" };

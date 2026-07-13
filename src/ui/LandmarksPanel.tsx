@@ -4,10 +4,12 @@ import { useCampaignStore } from "../state/campaignStore";
 import { campaignGetLandmarks } from "../bridge/tauri";
 import type { LandmarkBrief } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
+import { T, FZ, SPACE } from "./chronicleTheme";
+import { Panel, PanelHeader, PanelBody, Chip, EmptyNote } from "./kit";
 
 /** Phase 6 · Landmarks & Sacred Sites — the world's places of note (civic wonders,
  *  holy cities, fair towns, guildhalls), filterable by kind. Click → focus its city;
- *  a map toggle marks them all. */
+ *  a map toggle marks them all. Built on the shared UI kit (src/ui/kit.tsx). */
 
 const KIND_EMOJI: Record<string, string> = { wonder: "🗿", temple: "⛪", fair: "🎪", guildhall: "🏛" };
 const KIND_LABEL: Record<string, string> = { wonder: "Wonders", temple: "Holy cities", fair: "Fairs", guildhall: "Guildhalls" };
@@ -42,59 +44,49 @@ export function LandmarksPanel() {
   };
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 6, cursor: "move" }} onPointerDown={onPointerDown}>
-        <span style={{ color: "#bfe0d4", fontWeight: 700, fontSize: 13 }}>🗿 Landmarks &amp; Sacred Sites</span>
-        <span style={{ flex: 1 }} />
-        <span data-no-drag onClick={close} title="Close" style={{ color: "#70a090", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</span>
-      </div>
+    <Panel width={320} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
+      <PanelHeader
+        icon="🗿"
+        title="Landmarks & Sacred Sites"
+        onDragStart={onPointerDown}
+        onClose={close}
+      />
+      <PanelBody style={{ display: "flex", flexDirection: "column", flex: 1, padding: `${SPACE.md}px ${SPACE.lg}px ${SPACE.lg}px` }}>
+        <div style={{ display: "flex", gap: SPACE.md, marginBottom: SPACE.md, fontSize: FZ.small, color: T.inkMid, alignItems: "center" }}>
+          <span>{rows.length} places of note</span>
+          <span style={{ flex: 1 }} />
+          <label style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer" }} data-no-drag>
+            <input type="checkbox" checked={showMarks} onChange={(e) => setOverlayVisible("landmarks", e.target.checked)}
+              style={{ accentColor: T.accent, width: 11, height: 11 }} />
+            <span>Show on map</span>
+          </label>
+        </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 6, fontSize: 10, color: "#7f9c90" }}>
-        <span>{rows.length} places of note</span>
-        <span style={{ flex: 1 }} />
-        <label style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer" }} data-no-drag>
-          <input type="checkbox" checked={showMarks} onChange={(e) => setOverlayVisible("landmarks", e.target.checked)}
-            style={{ accentColor: "#40b090", width: 11, height: 11 }} />
-          <span>Show on map</span>
-        </label>
-      </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: SPACE.md }} data-no-drag>
+          {KINDS.map((k) => (
+            <Chip key={k} on={kind === k} onClick={() => setKind(k)}>
+              {k === "All" ? "All" : `${KIND_EMOJI[k]} ${KIND_LABEL[k]}`}
+            </Chip>
+          ))}
+        </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }} data-no-drag>
-        {KINDS.map((k) => (
-          <span key={k} onClick={() => setKind(k)}
-            style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, cursor: "pointer",
-              border: `1px solid ${kind === k ? "#40b090" : "#243a34"}`,
-              background: kind === k ? "#12281f" : "transparent",
-              color: kind === k ? "#cfeee0" : "#7f9c90" }}>
-            {k === "All" ? "All" : `${KIND_EMOJI[k]} ${KIND_LABEL[k]}`}
-          </span>
-        ))}
-      </div>
-
-      <div style={{ overflowY: "auto", flex: 1 }}>
-        {!active && <div style={empty}>Start the campaign to see landmarks.</div>}
-        {active && shown.length === 0 && <div style={empty}>No landmarks yet — advance time.</div>}
-        {shown.map((l, i) => (
-          <div key={i} onClick={() => focus(l.hub)}
-            style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 2px", borderBottom: "1px dashed #172622", cursor: "pointer" }}>
-            <span style={{ fontSize: 15, width: 20, textAlign: "center" }}>{KIND_EMOJI[l.kind] ?? "•"}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ color: "#d8ecdf", fontSize: 11, textTransform: "capitalize" }}>{l.label}</div>
-              <div style={{ color: "#7f9c90", fontSize: 9 }}>
-                {l.city}{l.detail ? ` · ${l.detail}` : ""}
+        <div style={{ overflowY: "auto", flex: 1 }}>
+          {!active && <EmptyNote>Start the campaign to see landmarks.</EmptyNote>}
+          {active && shown.length === 0 && <EmptyNote>No landmarks yet — advance time.</EmptyNote>}
+          {shown.map((l, i) => (
+            <div key={i} onClick={() => focus(l.hub)}
+              style={{ display: "flex", alignItems: "center", gap: SPACE.md, padding: "5px 2px", borderBottom: `1px dashed ${T.lineSoft}`, cursor: "pointer" }}>
+              <span style={{ fontSize: FZ.title, width: 20, textAlign: "center" }}>{KIND_EMOJI[l.kind] ?? "•"}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: T.ink, fontSize: FZ.body, textTransform: "capitalize" }}>{l.label}</div>
+                <div style={{ color: T.inkMid, fontSize: FZ.tiny }}>
+                  {l.city}{l.detail ? ` · ${l.detail}` : ""}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
-      </div>
-    </div>
+          ))}
+        </div>
+      </PanelBody>
+    </Panel>
   );
 }
-
-const panel: React.CSSProperties = {
-  position: "absolute", top: 70, right: 12, width: 320, maxHeight: "72%",
-  display: "flex", flexDirection: "column",
-  border: "1px solid #243a34", borderRadius: 8, padding: "10px 12px", zIndex: 117,
-  boxShadow: "0 8px 30px rgba(0,0,0,0.5)",
-};
-const empty: React.CSSProperties = { color: "#7f9c90", fontSize: 11, padding: "8px 2px" };

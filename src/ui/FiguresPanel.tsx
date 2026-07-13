@@ -4,10 +4,13 @@ import { useCampaignStore } from "../state/campaignStore";
 import { campaignGetFigures } from "../bridge/tauri";
 import type { FigureBrief } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
+import { T, FZ, SPACE } from "./chronicleTheme";
+import { Panel, PanelHeader, PanelBody, Chip, EmptyNote } from "./kit";
 
 /** Phase 6 · Notable Figures — the campaign's Great Lives (admirals, demagogues,
  *  master craftsmen, bankers, explorers), living first, filterable by role. Clicking
- *  a figure focuses their city; a map toggle marks the living. */
+ *  a figure focuses their city; a map toggle marks the living.
+ *  Built on the shared UI kit (src/ui/kit.tsx). */
 
 const ROLE_EMOJI: Record<string, string> = {
   "Admiral": "⚓", "Demagogue": "📢", "Master Craftsman": "⚒", "Great Banker": "🏦", "Explorer": "🧭",
@@ -50,69 +53,50 @@ export function FiguresPanel() {
   };
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 6, cursor: "move" }} onPointerDown={onPointerDown}>
-        <span style={{ color: "#d8c8f0", fontWeight: 700, fontSize: 13 }}>⚜️ Notable Figures</span>
-        <span style={{ flex: 1 }} />
-        <span data-no-drag onClick={close} title="Close" style={{ color: "#8a80a0", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</span>
-      </div>
+    <Panel width={320} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
+      <PanelHeader icon="⚜️" title="Notable Figures" onDragStart={onPointerDown} onClose={close} />
+      <PanelBody style={{ display: "flex", flexDirection: "column", flex: 1, padding: `${SPACE.md}px ${SPACE.lg}px ${SPACE.lg}px` }}>
+        <div style={{ display: "flex", gap: SPACE.md, marginBottom: SPACE.md, fontSize: FZ.small, color: T.inkMid, alignItems: "center" }}>
+          <span>{rows.length} figures</span><span>· {living} living</span>
+          <span style={{ flex: 1 }} />
+          <label style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer" }} data-no-drag>
+            <input type="checkbox" checked={showMarks} onChange={(e) => setOverlayVisible("figureMarks", e.target.checked)}
+              style={{ accentColor: T.accent, width: 11, height: 11 }} />
+            <span>Show on map</span>
+          </label>
+        </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 6, fontSize: 10, color: "#9088a0" }}>
-        <span>{rows.length} figures</span><span>· {living} living</span>
-        <span style={{ flex: 1 }} />
-        <label style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer" }} data-no-drag>
-          <input type="checkbox" checked={showMarks} onChange={(e) => setOverlayVisible("figureMarks", e.target.checked)}
-            style={{ accentColor: "#9070c0", width: 11, height: 11 }} />
-          <span>Show on map</span>
-        </label>
-      </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: SPACE.md }} data-no-drag>
+          {ROLES.map((r) => (
+            <Chip key={r} on={role === r} onClick={() => setRole(r)}>
+              {r === "All" ? "All" : (ROLE_EMOJI[r] ?? "") + " " + r.split(" ")[0]}
+            </Chip>
+          ))}
+          <Chip on={livingOnly} onClick={() => setLivingOnly((v) => !v)}>Living</Chip>
+        </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }} data-no-drag>
-        {ROLES.map((r) => (
-          <span key={r} onClick={() => setRole(r)}
-            style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, cursor: "pointer",
-              border: `1px solid ${role === r ? "#9070c0" : "#2e2640"}`,
-              background: role === r ? "#241a34" : "transparent",
-              color: role === r ? "#e0d0f4" : "#9088a0" }}>
-            {r === "All" ? "All" : (ROLE_EMOJI[r] ?? "") + " " + r.split(" ")[0]}
-          </span>
-        ))}
-        <span onClick={() => setLivingOnly((v) => !v)}
-          style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, cursor: "pointer",
-            border: `1px solid ${livingOnly ? "#9070c0" : "#2e2640"}`,
-            background: livingOnly ? "#241a34" : "transparent",
-            color: livingOnly ? "#e0d0f4" : "#9088a0" }}>Living</span>
-      </div>
-
-      <div style={{ overflowY: "auto", flex: 1 }}>
-        {!active && <div style={empty}>Start the campaign to see notable figures.</div>}
-        {active && shown.length === 0 && <div style={empty}>No figures yet — advance time.</div>}
-        {shown.map((f, i) => (
-          <div key={i} onClick={() => focus(f.hub)}
-            style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 2px", borderBottom: "1px dashed #201a2c", cursor: "pointer" }}>
-            <span style={{ fontSize: 15, width: 20, textAlign: "center", opacity: f.alive ? 1 : 0.5 }}>{ROLE_EMOJI[f.role] ?? "•"}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ color: f.alive ? "#e0d4f4" : "#9c94ac", fontSize: 11 }}>
-                {f.name} {!f.alive && <span style={{ color: "#6a6480", fontSize: 9 }}>†</span>}
+        <div style={{ overflowY: "auto", flex: 1 }}>
+          {!active && <EmptyNote>Start the campaign to see notable figures.</EmptyNote>}
+          {active && shown.length === 0 && <EmptyNote>No figures yet — advance time.</EmptyNote>}
+          {shown.map((f, i) => (
+            <div key={i} onClick={() => focus(f.hub)}
+              style={{ display: "flex", alignItems: "center", gap: SPACE.md, padding: "5px 2px", borderBottom: `1px dashed ${T.lineSoft}`, cursor: "pointer" }}>
+              <span style={{ fontSize: FZ.title, width: 20, textAlign: "center", opacity: f.alive ? 1 : 0.5 }}>{ROLE_EMOJI[f.role] ?? "•"}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: f.alive ? T.parchment : T.inkMid, fontSize: FZ.body }}>
+                  {f.name} {!f.alive && <span style={{ color: T.inkDim, fontSize: FZ.tiny }}>†</span>}
+                </div>
+                <div style={{ color: T.inkDim, fontSize: FZ.tiny }}>
+                  {f.role}{f.good_name ? ` · ${f.good_name}` : ""} · {f.city}
+                </div>
               </div>
-              <div style={{ color: "#8880a0", fontSize: 9 }}>
-                {f.role}{f.good_name ? ` · ${f.good_name}` : ""} · {f.city}
+              <div style={{ color: T.inkMid, fontSize: FZ.tiny, textAlign: "right" }}>
+                {f.alive ? `b. ${f.born_year}` : `${f.born_year}–${f.died_year}`}
               </div>
             </div>
-            <div style={{ color: "#9088b0", fontSize: 9, textAlign: "right" }}>
-              {f.alive ? `b. ${f.born_year}` : `${f.born_year}–${f.died_year}`}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
+          ))}
+        </div>
+      </PanelBody>
+    </Panel>
   );
 }
-
-const panel: React.CSSProperties = {
-  position: "absolute", top: 70, right: 12, width: 320, maxHeight: "72%",
-  display: "flex", flexDirection: "column",
-  border: "1px solid #2e2640", borderRadius: 8, padding: "10px 12px", zIndex: 117,
-  boxShadow: "0 8px 30px rgba(0,0,0,0.5)",
-};
-const empty: React.CSSProperties = { color: "#8880a0", fontSize: 11, padding: "8px 2px" };

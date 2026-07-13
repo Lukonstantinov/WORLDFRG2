@@ -5,11 +5,14 @@ import { useViewportStore } from "../state/viewportStore";
 import { computeItinerary } from "../bridge/tauri";
 import type { Itinerary, Settlement } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
+import { T, FZ, RADIUS } from "./chronicleTheme";
+import { Panel, PanelHeader, Meter, Button, EmptyNote } from "./kit";
 
 /** #23 · Travel-time / itinerary calculator. Pick an origin and a destination
  *  settlement, optionally forbid open-sea crossings, and get the realistic journey
  *  time by foot / horse / cart (water legs always go by boat/ship) over the same
- *  coarse cost grid trade uses. The routed polyline is drawn on the map. */
+ *  coarse cost grid trade uses. The routed polyline is drawn on the map.
+ *  Built on the shared UI kit (src/ui/kit.tsx). */
 export function ItineraryPanel() {
   const open = useUIStore((s) => s.showItinerary);
   const settlements = useWorldStore((s) => s.settlements);
@@ -65,8 +68,8 @@ export function ItineraryPanel() {
   const picker = (label: string, value: string, onChange: (v: string) => void, pin: string) => (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
       <span style={{ width: 14, textAlign: "center" }}>{pin}</span>
-      <span style={{ color: "#8aa0b8", fontSize: 10, width: 64 }}>{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)} style={select}>
+      <span style={{ color: T.inkMid, fontSize: FZ.small, width: 64 }}>{label}</span>
+      <select value={value} onChange={(e) => onChange(e.target.value)} data-no-drag style={select}>
         <option value="">— choose a settlement —</option>
         {sorted.map((s: Settlement) => (
           <option key={s.id} value={s.id}>{s.name}{s.size === "capital" ? " ★" : ""}</option>
@@ -76,33 +79,30 @@ export function ItineraryPanel() {
   );
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
-      <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
-        <span>🧭 Itinerary · travel time</span>
-        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
-      </div>
+    <Panel width={318} style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
+      <PanelHeader icon="🧭" title="Itinerary · travel time" onDragStart={onPointerDown} onClose={close} />
 
-      <div style={{ padding: "10px 12px" }}>
+      <div style={{ padding: "10px 12px", overflowY: "auto" }}>
         {settlements.length < 2 && (
-          <div style={empty}>Generate settlements first (Step 7) to plan a journey.</div>
+          <EmptyNote>Generate settlements first (Step 7) to plan a journey.</EmptyNote>
         )}
         {settlements.length >= 2 && (
           <>
             {picker("From", originId, setOriginId, "🟢")}
             {picker("To", destId, setDestId, "🔴")}
-            <label style={{ display: "flex", alignItems: "center", gap: 6, margin: "4px 0 8px", color: "#9ab0c8", fontSize: 10, cursor: "pointer" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, margin: "4px 0 8px", color: T.inkMid, fontSize: FZ.small, cursor: "pointer" }}>
               <input type="checkbox" checked={avoidSea} onChange={(e) => setAvoidSea(e.target.checked)}
-                style={{ accentColor: "#3a80c0" }} />
+                style={{ accentColor: T.accent }} />
               Avoid open-sea crossings (stay on one landmass)
             </label>
-            <button onClick={run} disabled={busy || !origin || !dest || origin.id === dest.id} style={btn}>
+            <Button variant="primary" onClick={run} disabled={busy || !origin || !dest || origin?.id === dest?.id} style={{ width: "100%", padding: 6 }}>
               {busy ? "Routing…" : "Plot journey"}
-            </button>
+            </Button>
 
-            {err && <div style={{ color: "#e08a8a", fontSize: 10, marginTop: 8 }}>{err}</div>}
+            {err && <div style={{ color: T.badInk, fontSize: FZ.small, marginTop: 8 }}>{err}</div>}
 
             {result && !result.reachable && (
-              <div style={{ color: "#e0b070", fontSize: 11, marginTop: 10 }}>
+              <div style={{ color: T.warn, fontSize: FZ.body, marginTop: 10 }}>
                 No overland/sea route found between these settlements
                 {avoidSea ? " without crossing open sea — try allowing sea crossings." : "."}
               </div>
@@ -111,14 +111,14 @@ export function ItineraryPanel() {
             {result && result.reachable && (
               <div style={{ marginTop: 12 }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
-                  <span style={{ color: "#cfe2f6", fontWeight: 700, fontSize: 13 }}>{fmtKm(result.km)}</span>
-                  <span style={{ color: "#7fa0c0", fontSize: 10 }}>· mostly {MODE[result.dominant_mode]}</span>
+                  <span style={{ color: T.parchment, fontWeight: 700, fontSize: FZ.head }}>{fmtKm(result.km)}</span>
+                  <span style={{ color: T.inkMid, fontSize: FZ.small }}>· mostly {MODE[result.dominant_mode]}</span>
                 </div>
 
-                <div style={breakdown}>
-                  {bar("Overland", result.land_km, result.km, "#c98a4a")}
-                  {bar("River", result.river_km, result.km, "#4a9ad0")}
-                  {bar("Sea", result.sea_km, result.km, "#3a7a9a")}
+                <div style={{ marginTop: 4 }}>
+                  {legBar("Overland", result.land_km, result.km, "#c98a4a")}
+                  {legBar("River", result.river_km, result.km, "#4a9ad0")}
+                  {legBar("Sea", result.sea_km, result.km, "#3a7a9a")}
                 </div>
 
                 <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
@@ -126,19 +126,19 @@ export function ItineraryPanel() {
                   {modeCard("🐎 By horse", result.days_horse)}
                   {modeCard("🛒 By cart", result.days_cart)}
                 </div>
-                <div style={{ color: "#5a6a80", fontSize: 9, marginTop: 8, lineHeight: 1.5 }}>
+                <div style={{ color: T.inkDim, fontSize: FZ.tiny, marginTop: 8, lineHeight: 1.5 }}>
                   Water legs travel by boat/ship; the mode only sets the land pace.
                   Terrain (relief, storms) already slows the affected legs.
                 </div>
-                <button onClick={() => origin && focusOn(origin.x, origin.y)} style={{ ...btn, marginTop: 8, background: "#16283a" }}>
+                <Button variant="ghost" onClick={() => origin && focusOn(origin.x, origin.y)} style={{ width: "100%", marginTop: 8, padding: 6 }}>
                   Center map on origin
-                </button>
+                </Button>
               </div>
             )}
           </>
         )}
       </div>
-    </div>
+    </Panel>
   );
 }
 
@@ -156,45 +156,25 @@ function fmtDays(d: number): string {
 
 function modeCard(label: string, days: number) {
   return (
-    <div style={{ background: "#0c1622", border: "1px solid #1a2a3e", borderRadius: 6, padding: "6px 4px", textAlign: "center" }}>
-      <div style={{ color: "#8aa0b8", fontSize: 9 }}>{label}</div>
-      <div style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12, marginTop: 2 }}>{fmtDays(days)}</div>
+    <div style={{ background: T.card, border: `1px solid ${T.lineSoft}`, borderRadius: RADIUS.md, padding: "6px 4px", textAlign: "center" }}>
+      <div style={{ color: T.inkMid, fontSize: FZ.tiny }}>{label}</div>
+      <div style={{ color: T.parchment, fontWeight: 700, fontSize: FZ.base, marginTop: 2 }}>{fmtDays(days)}</div>
     </div>
   );
 }
 
-function bar(label: string, km: number, total: number, color: string) {
-  const pct = total > 0 ? (km / total) * 100 : 0;
+function legBar(label: string, km: number, total: number, color: string) {
   if (km <= 0) return null;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-      <span style={{ width: 56, color: "#8aa0b8", fontSize: 9 }}>{label}</span>
-      <span style={{ flex: 1, height: 7, background: "#0a131d", borderRadius: 3, overflow: "hidden" }}>
-        <span style={{ display: "block", height: "100%", width: `${pct}%`, background: color }} />
-      </span>
-      <span style={{ width: 56, textAlign: "right", color: "#9ab0c8", fontSize: 9 }}>{fmtKm(km)}</span>
+      <span style={{ width: 56, color: T.inkMid, fontSize: FZ.tiny }}>{label}</span>
+      <Meter value={km} max={total} color={color} height={7} />
+      <span style={{ width: 56, textAlign: "right", color: T.inkMid, fontSize: FZ.tiny }}>{fmtKm(km)}</span>
     </div>
   );
 }
 
-const panel: React.CSSProperties = {
-  position: "absolute", top: 60, right: 360, width: 318,
-  display: "flex", flexDirection: "column",
-  background: "#0c141e", border: "1px solid #1e3450", borderRadius: 8,
-  boxShadow: "0 8px 28px rgba(0,0,0,0.5)", zIndex: 40,
-};
-const header: React.CSSProperties = {
-  display: "flex", justifyContent: "space-between", alignItems: "center",
-  padding: "8px 10px", borderBottom: "1px solid #1a2a3e",
-  color: "#cfe0f4", fontWeight: 700, fontSize: 12,
-};
 const select: React.CSSProperties = {
-  flex: 1, background: "#080c12", border: "1px solid #1e2e42", color: "#cfe0f4",
-  padding: "3px 5px", borderRadius: 4, fontSize: 11, minWidth: 0,
+  flex: 1, background: T.card, border: `1px solid ${T.line}`, color: T.ink,
+  padding: "3px 5px", borderRadius: RADIUS.sm, fontSize: FZ.body, minWidth: 0,
 };
-const btn: React.CSSProperties = {
-  width: "100%", padding: "6px", background: "#2060a0", color: "#fff", border: "none",
-  borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600,
-};
-const breakdown: React.CSSProperties = { marginTop: 4 };
-const empty: React.CSSProperties = { color: "#506080", fontSize: 11, padding: "8px 0" };

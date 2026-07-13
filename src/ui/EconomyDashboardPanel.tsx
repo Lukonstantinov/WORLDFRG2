@@ -6,12 +6,15 @@ import { useCampaignStore } from "../state/campaignStore";
 import { campaignGetInequality, campaignCityPriceIndex } from "../bridge/tauri";
 import type { InequalitySnapshot, CityPriceIndex } from "../types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
+import { T, FZ } from "./chronicleTheme";
+import { Panel, PanelHeader, Tabs, Meter, EmptyNote } from "./kit";
 
 /** #30/#29 · Economy Dashboard.
  *   • Price Index — a basket cost-of-living index per city from the worldgen
  *     market snapshot (price ÷ world base value, weighted toward necessities).
  *   • Inequality — Gini coefficient + a yearly trend, wealth concentration and
- *     house turnover, from the live campaign sim. */
+ *     house turnover, from the live campaign sim.
+ *   Built on the shared UI kit (src/ui/kit.tsx). */
 export function EconomyDashboardPanel() {
   const open = useUIStore((s) => s.showEconomyDashboard);
   const economy = useWorldStore((s) => s.economy);
@@ -82,47 +85,35 @@ export function EconomyDashboardPanel() {
   const close = () => useUIStore.getState().setShowEconomyDashboard(false);
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
-      <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
-        <span>📊 Economy Dashboard</span>
-        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
-      </div>
-      <div style={{ display: "flex", gap: 2, padding: "0 8px", borderBottom: "1px solid #1e2e42" }}>
-        {([["prices", "💰 Price Index"], ["ineq", "📊 Inequality"]] as const).map(([id, lbl]) => (
-          <div key={id} onClick={() => setTab(id)}
-            style={{ padding: "4px 9px", cursor: "pointer", fontSize: 11, fontWeight: tab === id ? 700 : 400,
-              color: tab === id ? "#cfe2f6" : "#6a86a6",
-              borderBottom: tab === id ? "2px solid #d8b24a" : "2px solid transparent" }}>
-            {lbl}
-          </div>
-        ))}
-      </div>
+    <Panel width={332} maxHeight="82vh" style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
+      <PanelHeader icon="📊" title="Economy Dashboard" onDragStart={onPointerDown} onClose={close} />
+      <Tabs<"prices" | "ineq">
+        tabs={[["prices", "💰 Price Index"], ["ineq", "📊 Inequality"]]}
+        active={tab} onSelect={setTab} style={{ padding: "0 8px" }}
+      />
 
       <div style={{ overflowY: "auto", padding: "8px 10px 12px", maxHeight: "66vh" }}>
         {/* PRICE INDEX */}
         {tab === "prices" && (
           <>
-            {!economy && !active && <div style={empty}>Run the Economy step (10) to compute market prices.</div>}
-            {(economy || active) && cities.length === 0 && <div style={empty}>No market price data yet.</div>}
+            {!economy && !active && <EmptyNote>Run the Economy step (10) to compute market prices.</EmptyNote>}
+            {(economy || active) && cities.length === 0 && <EmptyNote>No market price data yet.</EmptyNote>}
             {cities.length > 0 && (
               <>
-                <div style={{ color: "#8aa0b8", fontSize: 10, marginBottom: 6 }}>
+                <div style={{ color: T.inkMid, fontSize: FZ.small, marginBottom: 6 }}>
                   Basket cost of living — 100 = the world-standard price. Cheapest cities first.
                   {active && liveCities.length > 0
-                    ? <span style={{ color: "#7fd0a0" }}> · live (year {year})</span>
-                    : <span style={{ color: "#7a8aa0" }}> · worldgen snapshot</span>}
+                    ? <span style={{ color: T.goodInk }}> · live (year {year})</span>
+                    : <span style={{ color: T.inkDim }}> · worldgen snapshot</span>}
                 </div>
                 {cities.map((c) => {
                   const pct = ((c.index - idxLo) / span) * 100;
                   const dear = c.index >= 100;
                   return (
                     <div key={c.name} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-                      <span style={{ width: 96, color: "#bcd0e4", fontSize: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</span>
-                      <span style={{ flex: 1, height: 8, background: "#0a131d", borderRadius: 3, overflow: "hidden" }}>
-                        <span style={{ display: "block", height: "100%", width: `${Math.max(3, pct)}%`,
-                          background: dear ? "#d07a5a" : "#5aa0c0" }} />
-                      </span>
-                      <span style={{ width: 34, textAlign: "right", color: dear ? "#e0a080" : "#9fd0b0", fontSize: 10, fontWeight: 600 }}>
+                      <span style={{ width: 96, color: T.inkMid, fontSize: FZ.small, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</span>
+                      <Meter value={Math.max(3, pct)} max={100} height={8} color={dear ? "#d07a5a" : "#5aa0c0"} />
+                      <span style={{ width: 34, textAlign: "right", color: dear ? T.warn : T.goodInk, fontSize: FZ.small, fontWeight: 600 }}>
                         {Math.round(c.index)}
                       </span>
                     </div>
@@ -136,8 +127,8 @@ export function EconomyDashboardPanel() {
         {/* INEQUALITY */}
         {tab === "ineq" && (
           <>
-            {!active && <div style={empty}>Begin the campaign (Step 11) and let it run — inequality is read from the living economy.</div>}
-            {active && !ineq && <div style={empty}>Reading the houses…</div>}
+            {!active && <EmptyNote>Begin the campaign (Step 11) and let it run — inequality is read from the living economy.</EmptyNote>}
+            {active && !ineq && <EmptyNote>Reading the houses…</EmptyNote>}
             {active && ineq && (
               <>
                 <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
@@ -154,14 +145,14 @@ export function EconomyDashboardPanel() {
                 </div>
 
                 <div style={{ marginTop: 10 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#8aa0b8" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: FZ.small, color: T.inkMid }}>
                     <span>Social mobility (rank churn)</span>
-                    <span style={{ color: "#cfe2f6" }}>{Math.round(ineq.rank_churn * 100)}%</span>
+                    <span style={{ color: T.ink }}>{Math.round(ineq.rank_churn * 100)}%</span>
                   </div>
-                  <div style={{ height: 7, background: "#0a131d", borderRadius: 3, overflow: "hidden", marginTop: 3 }}>
-                    <span style={{ display: "block", height: "100%", width: `${Math.max(2, ineq.rank_churn * 100)}%`, background: "#7a9adf" }} />
+                  <div style={{ marginTop: 3 }}>
+                    <Meter value={Math.max(2, ineq.rank_churn * 100)} max={100} height={7} color="#7a9adf" />
                   </div>
-                  <div style={{ color: "#5a6a80", fontSize: 9, marginTop: 3 }}>
+                  <div style={{ color: T.inkDim, fontSize: FZ.tiny, marginTop: 3 }}>
                     How much the wealth pecking order reshuffled since last year — low = entrenched dynasties.
                   </div>
                 </div>
@@ -170,16 +161,16 @@ export function EconomyDashboardPanel() {
           </>
         )}
       </div>
-    </div>
+    </Panel>
   );
 }
 
 function Stat({ label, value, hint, big }: { label: string; value: string; hint?: string; big?: boolean }) {
   return (
-    <div style={{ flex: 1, background: "#0c1622", border: "1px solid #1a2a3e", borderRadius: 6, padding: "6px 8px" }}>
-      <div style={{ color: "#8aa0b8", fontSize: 9 }}>{label}</div>
-      <div style={{ color: "#e8dcc0", fontWeight: 700, fontSize: big ? 18 : 13, marginTop: 1 }}>{value}</div>
-      {hint && <div style={{ color: "#5a6a80", fontSize: 8.5, marginTop: 1 }}>{hint}</div>}
+    <div style={{ flex: 1, background: T.card, border: `1px solid ${T.lineSoft}`, borderRadius: 6, padding: "6px 8px" }}>
+      <div style={{ color: T.inkMid, fontSize: FZ.tiny }}>{label}</div>
+      <div style={{ color: T.parchment, fontWeight: 700, fontSize: big ? 18 : FZ.head, marginTop: 1 }}>{value}</div>
+      {hint && <div style={{ color: T.inkDim, fontSize: FZ.micro, marginTop: 1 }}>{hint}</div>}
     </div>
   );
 }
@@ -188,7 +179,7 @@ function Stat({ label, value, hint, big }: { label: string; value: string; hint?
 function GiniChart({ snap }: { snap: InequalitySnapshot }) {
   const s = snap.series;
   if (s.length < 2) {
-    return <div style={{ color: "#5a6a80", fontSize: 10, padding: "6px 0" }}>Gini trend appears after a few years of play.</div>;
+    return <div style={{ color: T.inkDim, fontSize: FZ.small, padding: "6px 0" }}>Gini trend appears after a few years of play.</div>;
   }
   const W = 300, H = 96, padL = 24, padR = 8, padT = 8, padB = 16;
   const y0 = snap.series[0].year, y1 = snap.series[s.length - 1].year;
@@ -197,32 +188,19 @@ function GiniChart({ snap }: { snap: InequalitySnapshot }) {
   const path = (sel: (p: typeof s[number]) => number) =>
     s.map((p, i) => `${i === 0 ? "M" : "L"}${xOf(i).toFixed(1)},${yOf(sel(p)).toFixed(1)}`).join(" ");
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ background: "#0a131d", border: "1px solid #16243a", borderRadius: 6 }}>
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 6 }}>
       {[0, 0.5, 1].map((g) => (
         <g key={g}>
-          <line x1={padL} x2={W - padR} y1={yOf(g)} y2={yOf(g)} stroke="#16243a" strokeWidth="1" />
-          <text x={2} y={yOf(g) + 3} fill="#5a6a80" fontSize="8">{g.toFixed(1)}</text>
+          <line x1={padL} x2={W - padR} y1={yOf(g)} y2={yOf(g)} stroke={T.line} strokeWidth="1" />
+          <text x={2} y={yOf(g) + 3} fill={T.inkDim} fontSize="8">{g.toFixed(1)}</text>
         </g>
       ))}
       <path d={path((p) => p.top10_share)} fill="none" stroke="#9a7acf" strokeWidth="1.2" opacity="0.7" strokeDasharray="3 2" />
-      <path d={path((p) => p.gini)} fill="none" stroke="#d8b24a" strokeWidth="1.8" />
-      <text x={padL} y={H - 4} fill="#6a86a6" fontSize="8">yr {y0}</text>
-      <text x={W - padR} y={H - 4} fill="#6a86a6" fontSize="8" textAnchor="end">yr {y1}</text>
-      <text x={W - padR} y={padT + 6} fill="#d8b24a" fontSize="8" textAnchor="end">Gini</text>
+      <path d={path((p) => p.gini)} fill="none" stroke={T.gold} strokeWidth="1.8" />
+      <text x={padL} y={H - 4} fill={T.inkDim} fontSize="8">yr {y0}</text>
+      <text x={W - padR} y={H - 4} fill={T.inkDim} fontSize="8" textAnchor="end">yr {y1}</text>
+      <text x={W - padR} y={padT + 6} fill={T.gold} fontSize="8" textAnchor="end">Gini</text>
       <text x={W - padR} y={padT + 15} fill="#9a7acf" fontSize="8" textAnchor="end">top 10%</text>
     </svg>
   );
 }
-
-const panel: React.CSSProperties = {
-  position: "absolute", top: 60, right: 360, width: 332, maxHeight: "82vh",
-  display: "flex", flexDirection: "column",
-  background: "#0c141e", border: "1px solid #1e3450", borderRadius: 8,
-  boxShadow: "0 8px 28px rgba(0,0,0,0.5)", zIndex: 40,
-};
-const header: React.CSSProperties = {
-  display: "flex", justifyContent: "space-between", alignItems: "center",
-  padding: "8px 10px", borderBottom: "1px solid #1a2a3e",
-  color: "#cfe0f4", fontWeight: 700, fontSize: 12,
-};
-const empty: React.CSSProperties = { color: "#506080", fontSize: 11, padding: "10px 0" };
