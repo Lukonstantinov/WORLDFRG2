@@ -79,7 +79,7 @@ impl ColumnSet {
     pub const SOIL: ColumnSet = ColumnSet(1 << 10);
     pub const FERTILITY: ColumnSet = ColumnSet(1 << 11);
     pub const FISHERY: ColumnSet = ColumnSet(1 << 12);
-    /// wind_vx + wind_vy
+    /// wind_vx + wind_vy + wind_speed
     pub const WIND: ColumnSet = ColumnSet(1 << 13);
     /// current_type + current_vx + current_vy
     pub const CURRENTS: ColumnSet = ColumnSet(1 << 14);
@@ -196,6 +196,10 @@ pub struct WorldBuffer {
     pub current_type: Vec<u8>,
     pub wind_vx: Vec<f32>,
     pub wind_vy: Vec<f32>,
+    /// Low-level wind speed (m/s, ~0-35) including jets. `wind_vx/vy` stay unit
+    /// direction vectors; this carries the intensity used by the Wind Speed layer
+    /// and the jet entrance-dry / exit-wet precipitation coupling.
+    pub wind_speed: Vec<f32>,
     pub current_vx: Vec<f32>,
     pub current_vy: Vec<f32>,
     pub distance_to_ocean: Vec<f32>,
@@ -276,6 +280,7 @@ impl WorldBuffer {
             current_type: u8s(ColumnSet::CURRENTS),
             wind_vx: f32s(ColumnSet::WIND, 0.0),
             wind_vy: f32s(ColumnSet::WIND, 0.0),
+            wind_speed: f32s(ColumnSet::WIND, 0.0),
             current_vx: f32s(ColumnSet::CURRENTS, 0.0),
             current_vy: f32s(ColumnSet::CURRENTS, 0.0),
             distance_to_ocean: f32s(ColumnSet::DIST_OCEAN, 1.0),
@@ -356,7 +361,7 @@ impl WorldBuffer {
                     copy_rows!(ColumnSet::SOIL => soil_type);
                     copy_rows!(ColumnSet::FERTILITY => fertility);
                     copy_rows!(ColumnSet::FISHERY => fishery);
-                    copy_rows!(ColumnSet::WIND => wind_vx, wind_vy);
+                    copy_rows!(ColumnSet::WIND => wind_vx, wind_vy, wind_speed);
                     copy_rows!(ColumnSet::CURRENTS => current_type, current_vx, current_vy);
                     copy_rows!(ColumnSet::DIST_OCEAN => distance_to_ocean);
                     copy_rows!(ColumnSet::HABITABILITY => habitability);
@@ -469,7 +474,7 @@ impl WorldBuffer {
             copy_rows!(ColumnSet::SOIL => soil_type);
             copy_rows!(ColumnSet::FERTILITY => fertility);
             copy_rows!(ColumnSet::FISHERY => fishery);
-            copy_rows!(ColumnSet::WIND => wind_vx, wind_vy);
+            copy_rows!(ColumnSet::WIND => wind_vx, wind_vy, wind_speed);
             copy_rows!(ColumnSet::CURRENTS => current_type, current_vx, current_vy);
             copy_rows!(ColumnSet::DIST_OCEAN => distance_to_ocean);
             copy_rows!(ColumnSet::HABITABILITY => habitability);
@@ -630,6 +635,7 @@ mod tests {
         crate::sim::temperature::compute_temperature(&mut buf);
         crate::sim::ocean::compute_upwelling_zones(&mut buf);
         crate::sim::ocean::apply_cold_shelf_cooling(&mut buf, &sea_freeze);
+        crate::sim::jets::compute_low_level_jets(&mut buf);
         crate::sim::precipitation::compute_precipitation(&mut buf);
         buf.save(&conn, "ocean").unwrap();
 

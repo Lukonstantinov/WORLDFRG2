@@ -1023,7 +1023,7 @@ mod tests {
             fertility: Vec::new(),
             fishery: Vec::new(),
             current_type: Vec::new(),
-            wind_vx: Vec::new(), wind_vy: Vec::new(),
+            wind_vx: Vec::new(), wind_vy: Vec::new(), wind_speed: Vec::new(),
             current_vx: Vec::new(), current_vy: Vec::new(),
             distance_to_ocean: Vec::new(),
             habitability: Vec::new(),

@@ -118,7 +118,7 @@ Run in order. Each phase depends on previous phases' data.
 | 2 | `sim_generate_terrain` | Elevation from plate boundaries + sea depth |
 | 2alt | `sim_generate_terrain_from_template` | Elevation from land shape (no plates) |
 | 2b | `sim_generate_shelves` | Continental shelf (configurable) |
-| 3 | `sim_ocean_atmosphere` | Wind → **salinity** → currents → distance_to_ocean → temperature → upwelling → precipitation |
+| 3 | `sim_ocean_atmosphere` | Wind → **salinity** → currents → distance_to_ocean → temperature → upwelling → **low-level jets** → precipitation |
 | 4 | `sim_classify_climate` | Köppen classification (22 zones) |
 | 5 | `sim_rivers_hydrology` | D8 flow → rivers → lakes (returns overlay data) |
 | 6 | `sim_soil_fertility` | Soil types → fertility → fisheries |
@@ -455,9 +455,10 @@ Mediterranean (Cs) only forms on **windward (west-facing) coasts** beside a cold
 offshore current (`cold_override` gated on `is_windward_ocean` + no warm influence);
 a warm-current **east** coast reads humid-subtropical (Cfa).
 
-### 8.7 Render layers (18) & paint tools (5)
+### 8.7 Render layers (19) & paint tools (5)
 land, elevation, terrain (hillshade), plates, shelf, fisheries, currents, temperature,
-precipitation, wind, climate, biomes, soil, fertility, ridges, salinity, shark, shipworm.
+precipitation, wind, **windspeed** (low-level wind intensity incl. jets), climate,
+biomes, soil, fertility, ridges, salinity, shark, shipworm.
 Paint: Pan, Paint Land (0/1), Elevation (f32 0-1), Paint Shelf (u8 0/1), Place Volcano (u8 0/1).
 
 ### 8.8 File operations

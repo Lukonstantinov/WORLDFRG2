@@ -1244,7 +1244,7 @@ mod tests {
             locked_bits: Vec::new(), plate_index: Vec::new(), boundary_type: Vec::new(),
             is_volcanic: Vec::new(), temperature: Vec::new(), precipitation: Vec::new(),
             koppen: Vec::new(), soil_type: Vec::new(), fertility: Vec::new(), fishery: Vec::new(),
-            current_type: Vec::new(), wind_vx: Vec::new(), wind_vy: Vec::new(),
+            current_type: Vec::new(), wind_vx: Vec::new(), wind_vy: Vec::new(), wind_speed: Vec::new(),
             current_vx: Vec::new(), current_vy: Vec::new(), distance_to_ocean: Vec::new(),
             habitability: Vec::new(), salinity: Vec::new(), shark_risk: Vec::new(),
             goods: Vec::new(), shipworm_risk: Vec::new(), storm_base: Vec::new(),

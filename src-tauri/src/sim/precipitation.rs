@@ -85,6 +85,16 @@ const MOUNTAIN_THRESHOLD: f32 = 0.19; // elevation counting as a ridge (~1700 m)
 const WINDWARD_STEPS: i32 = 12;
 const SHADOW_STEPS: i32 = 20;
 
+// ── Low-level-jet entrance/exit dynamics (jets.rs supplies buf.wind_speed) ──
+// A jet ENTRANCE (accelerating flow) diverges at low level and sweeps moisture
+// along before it can accumulate → the coast dries (Somali / Arabian coast). A
+// jet EXIT (decelerating flow) converges and is forced to rise → torrential
+// rainfall at the terminus (the Western-Ghats monsoon dump).
+const JET_MIN_SPEED: f32 = 8.0;      // below this a cell isn't in a jet
+const JET_ACCEL_SCALE: f32 = 6.0;    // along-flow Δspeed (m/s) that saturates the effect
+const JET_ENTRANCE_DRY: f32 = 0.55;  // max fraction of moisture removed at a strong entrance
+const JET_EXIT_WET_MAX: f32 = 750.0; // max convergence rainfall (mm/yr) at a strong exit
+
 /// Orographic precipitation multiplier for one land cell.
 /// 2.5 = windward uplift, 0.15..1.0 = leeward rain shadow (graduated), 1.0 = none.
 fn orographic_multiplier(buf: &WorldBuffer, x: u32, y: u32, wvx: f32, wvy: f32) -> f32 {
@@ -333,6 +343,53 @@ fn frontal_bonus(abs_lat: f32, near_ocean: bool) -> f32 {
     base * weight
 }
 
+/// Sample the low-level wind speed at a float position (nearest cell, x-wrapped,
+/// y-clamped).
+#[inline]
+fn sample_speed(buf: &WorldBuffer, fx: f32, fy: f32) -> f32 {
+    let x = buf.wrap_x(fx.round() as i32);
+    let y = buf.clamp_y(fy.round() as i32);
+    buf.wind_speed[buf.idx(x, y)]
+}
+
+/// Jet entrance/exit effect for one land cell: `(dry_mult, wet_bonus_mm)`.
+///
+/// Reads the along-flow gradient of `buf.wind_speed`. Where the flow accelerates
+/// downwind (jet entrance) it returns a drying multiplier < 1; where it
+/// decelerates (jet exit / terminus) it returns an additive convergence-rainfall
+/// bonus (mm/yr). Cells not in a jet (`speed < JET_MIN_SPEED`) are unaffected.
+fn jet_effect(buf: &WorldBuffer, x: u32, y: u32) -> (f32, f32) {
+    // No jet field loaded (e.g. an old save re-run without the jet step) → no-op.
+    if buf.wind_speed.is_empty() {
+        return (1.0, 0.0);
+    }
+    let i = buf.idx(x, y);
+    let s = buf.wind_speed[i];
+    if s < JET_MIN_SPEED {
+        return (1.0, 0.0);
+    }
+    let wvx = buf.wind_vx[i];
+    let wvy = buf.wind_vy[i];
+    let wl = (wvx * wvx + wvy * wvy).sqrt();
+    if wl < 0.01 {
+        return (1.0, 0.0);
+    }
+    let dx = wvx / wl;
+    let dy = wvy / wl;
+    let step = 2.0;
+    let s_down = sample_speed(buf, x as f32 + dx * step, y as f32 + dy * step);
+    let s_up = sample_speed(buf, x as f32 - dx * step, y as f32 - dy * step);
+    let accel = s_down - s_up; // >0 accelerating (entrance), <0 decelerating (exit)
+    let norm = (accel / JET_ACCEL_SCALE).clamp(-1.0, 1.0);
+    if norm > 0.0 {
+        (1.0 - JET_ENTRANCE_DRY * norm, 0.0)
+    } else {
+        // Exit dump scales with how deep into the jet the cell sits.
+        let strength = ((s - JET_MIN_SPEED) / 12.0).clamp(0.0, 1.0);
+        (1.0, JET_EXIT_WET_MAX * (-norm) * strength)
+    }
+}
+
 /// Compute annual precipitation (mm/yr) for every land cell.
 ///
 /// Faithful port of WF1 `computePrecipitation`. The crucial difference from the
@@ -481,8 +538,16 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
 
             let mut moisture = moisture_field[idx].max(MOISTURE_FLOOR);
 
-            // Orographic uplift / rain shadow.
-            moisture *= orographic_multiplier(buf, x, y, buf.wind_vx[idx], buf.wind_vy[idx]);
+            // Orographic uplift / rain shadow (captured so the jet-exit dump can
+            // be amplified where the decelerating jet slams into windward relief).
+            let oro = orographic_multiplier(buf, x, y, buf.wind_vx[idx], buf.wind_vy[idx]);
+            moisture *= oro;
+
+            // Low-level-jet entrance dries the coast (accelerating flow sweeps
+            // moisture away); the exit dumps it (evaluated below as an additive
+            // convergence bonus). Applied here to the moisture before drying terms.
+            let (jet_dry, jet_wet) = jet_effect(buf, x, y);
+            moisture *= jet_dry;
 
             // Coastal drying. Cold-current "fog deserts" (Atacama / Namib / coastal
             // Peru) are a SUBTROPICAL phenomenon: a cold current under the sinking
@@ -534,6 +599,12 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
             });
             p += frontal_bonus(abs_lat, near_ocean);
 
+            // Jet-exit convergence dump (the monsoon terminus), amplified where the
+            // decelerating jet is forced up windward relief (the Western Ghats).
+            if jet_wet > 0.0 {
+                p += jet_wet * (0.6 + 0.4 * oro.min(2.5));
+            }
+
             // Fine-grained spatial texture (±18%) so isobands aren't flat slabs.
             p *= 1.0 + 0.18 * fbm2(x as f32 / 6.5, y as f32 / 6.5, 28411);
 
@@ -583,5 +654,48 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
         } else {
             0.0
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
+    use crate::db::schema;
+    use rusqlite::Connection;
+
+    /// The core jet contract: an ACCELERATING cell (jet entrance) dries; a
+    /// DECELERATING cell (jet exit / terminus) gets a convergence rain bonus.
+    #[test]
+    fn jet_entrance_dries_exit_wets() {
+        let (w, h) = (40u32, 12u32);
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", w.to_string()), ("grid_height", h.to_string())] {
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                rusqlite::params![k, v],
+            ).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_OCEAN_ATMOSPHERE).unwrap();
+        // Uniform eastward flow. Speed ramps UP over x=0..20 (accelerating
+        // entrance) then DOWN over x=20..40 (decelerating exit).
+        for y in 0..h {
+            for x in 0..w {
+                let i = buf.idx(x, y);
+                buf.wind_vx[i] = 1.0;
+                buf.wind_vy[i] = 0.0;
+                let s = if x <= 20 { 4.0 + x as f32 } else { 24.0 - (x as f32 - 20.0) };
+                buf.wind_speed[i] = s.max(0.0);
+            }
+        }
+        // Entrance (x=10, accelerating): drying multiplier < 1, no wet bonus.
+        let (dry_e, wet_e) = jet_effect(&buf, 10, 6);
+        assert!(dry_e < 1.0, "entrance should dry the coast: {dry_e}");
+        assert_eq!(wet_e, 0.0);
+        // Exit (x=30, decelerating): full moisture kept, positive convergence dump.
+        let (dry_x, wet_x) = jet_effect(&buf, 30, 6);
+        assert_eq!(dry_x, 1.0);
+        assert!(wet_x > 0.0, "exit terminus should add rainfall: {wet_x}");
     }
 }

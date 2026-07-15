@@ -43,6 +43,7 @@ const layerGroups: { group: string; layers: { id: ActiveLayer; label: string }[]
       { id: "temperature", label: "Temperature" },
       { id: "precipitation", label: "Precipitation" },
       { id: "wind", label: "Wind" },
+      { id: "windspeed", label: "Wind Speed" },
     ],
   },
   {
