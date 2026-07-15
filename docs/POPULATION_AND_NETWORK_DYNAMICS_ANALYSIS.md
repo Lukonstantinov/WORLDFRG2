@@ -288,6 +288,33 @@ tagged to inputs.
 
 ---
 
+## 5c. Final implementation status (this pass)
+
+**Shipped to `main` (all 41 tick tests green):** growth engine (relative `trade_dev` → top
+cities ≥150k) · trade gravity (`hub_pull`) · procurement futures · resource colonies ·
+development-tier classifier + persistence/hysteresis + City-Stores exposure + satellite
+tier-gate · megacity primacy · Cold Start · hinterland growth · **pathfound campaign routes**
+(reusing the trade-route layer's cost grid).
+
+**The ONE item deliberately NOT hard-shipped — absolute food-capacity CAP:**
+- *Why held:* a hard food ceiling risks silently REGRESSING the just-shipped ≥150k growth
+  (a big trade city sits near `food_balance≈0`, which a naive cap misreads as "limit to
+  ~few× founding"), it needs per-site FERTILITY data the tile-free tick doesn't carry
+  (`founding_pop` is a weak proxy), and it can't be calibrated without an in-app run.
+- *Why it's OK for now:* the redesign's GOAL is already served by the existing `food_sec`
+  multiplier in `cap_mult` — a fed city (incl. one fed by imports/annona) grows; a
+  food-poor isolated one gets a low multiplier and stays small. The only unmet piece is
+  cosmetic (a food-poor town still reads "starving" rather than "small & content").
+- *To finish later (needs in-app tuning):* add per-hub `food_import_year` tracking at the
+  arrivals point, set `food_cap_pop = founding·LOCAL_FOOD_MULT + food_import_year/per_cap_need`
+  (absolute → not degenerate, megacity-compatible since imports lift it), then
+  `capacity = min(capacity, food_cap_pop)`; verify the ≥150k cities and `unrest_topples_councils`
+  both still hold.
+
+**Also not done:** hinterland → full live-hub PROMOTION (a grown village becoming simulated)
+— blocked because the tick has no per-site PRODUCTION potential for a promoted village; the
+yearly hinterland GROWTH (shipped) already removes the "frozen dots" feel.
+
 ## 6. Manufactured goods, procurement futures & traders seeking inputs
 
 ### 6.1 Finding: the catalog is rich, but little gets MADE
