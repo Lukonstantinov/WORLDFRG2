@@ -373,6 +373,7 @@ fn sample_supertile(
             out.storm_base[di] = src.storm_base[si];
             out.reef_risk[di] = src.reef_risk[si];
             out.disease_risk[di] = src.disease_risk[si];
+            out.wind_speed[di] = src.wind_speed[si];
         }
     }
 
