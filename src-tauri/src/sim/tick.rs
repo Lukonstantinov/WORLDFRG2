@@ -236,6 +236,15 @@ const POP_DECLINE_RATE: f32 = 0.0006;
 /// while lesser hubs earn proportionally less and stay small. Raised 15→20 so the top
 /// trade cities clear the 150k mark even at moderate food/prosperity.
 const TRADE_DEV_CAP: f32 = 20.0;
+/// ── MEGACITY primacy (the rare >1M capital) ──────────────────────────────────
+/// History's million-person cities (Rome, Chang'an, Venice as a mercantile apex) were
+/// political CAPITALS that could COMMAND tribute-grain and move it by secured WATER lanes.
+/// The regional capital — the top-treasury hub of a trade component — that is also
+/// water-connected (coastal) and a real trade hub earns a large extra growth headroom,
+/// breaking past the ordinary trade ceiling toward a million. One per region, gated on
+/// coast + trade-hub + being fed (the food_sec multiplier still applies), so it stays
+/// RARE: a hub only nears 1M when capital + water + trade + prosperity + food all coincide.
+const PRIMACY_DEV: f32 = 45.0;   // extra capacity-mult headroom for a qualifying capital
 /// ── Trade GRAVITY ── how strongly a big / high-class hub PULLS trade from farther
 /// afield and is preferred by merchants. A hub's `hub_pull` ≥ 1; its EFFECTIVE distance
 /// to every other city = real distance ÷ pull, so a great entrepôt enters the partner
@@ -7780,6 +7789,17 @@ impl CampaignSim {
             .filter(|h| !h.is_estate && !h.abandoned)
             .map(|h| h.trade_last_year)
             .fold(0.0f32, f32::max);
+        // MEGACITY primacy: the top-treasury hub of each trade component is its political
+        // CAPITAL. A capital that is also water-connected (coastal) and a real trade hub can
+        // command tribute-grain (annona) by secured water lanes and grow toward a million.
+        // Precompute each component's capital once (cheap; one per region → stays rare).
+        let mut comp_capital: std::collections::HashMap<u32, (f32, usize)> =
+            std::collections::HashMap::new();
+        for i in 0..n {
+            if self.hubs[i].is_estate || self.hubs[i].abandoned { continue; }
+            let e = comp_capital.entry(self.hubs[i].component).or_insert((f32::MIN, usize::MAX));
+            if self.hubs[i].treasury > e.0 { *e = (self.hubs[i].treasury, i); }
+        }
         for h in 0..n {
             // A dead settlement stays dead — the founding-pop floor below must
             // never resurrect an abandoned ruin (or a collapsed colony).
@@ -7918,8 +7938,16 @@ impl CampaignSim {
             let trade_dev = if world_max_trade > EPS {
                 TRADE_DEV_CAP * (self.hubs[h].trade_last_year / world_max_trade).clamp(0.0, 1.0)
             } else { 0.0 };
+            // MEGACITY primacy headroom: only for the regional CAPITAL (top treasury in its
+            // component) that is water-connected AND a real trade hub — it commands grain and
+            // can approach a million. Everyone else gets 0. The food_sec factor above still
+            // gates it, so an unfed capital can't balloon — it must actually be provisioned.
+            let primacy_dev = if self.hubs[h].coastal && self.hubs[h].hub_class >= 1
+                && comp_capital.get(&self.hubs[h].component).map(|&(_, i)| i == h).unwrap_or(false) {
+                PRIMACY_DEV
+            } else { 0.0 };
             let cap_mult = (0.35 + 1.30 * food_sec)
-                * (0.60 + 3.0 * prosperity * prosperity + trade_dev);
+                * (0.60 + 3.0 * prosperity * prosperity + trade_dev + primacy_dev);
             let capacity = (self.hubs[h].founding_pop * cap_mult)
                 .max(self.hubs[h].founding_pop * 0.15);
             // Logistic step: approach capacity from below, decline when above it.
