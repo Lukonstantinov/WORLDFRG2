@@ -390,5 +390,46 @@ once per year (bounded cost). *Not started — scheduled after slices 1b/2.*
 
 ---
 
+## 10. Settlement Development Ladder — 5-tier civilization progress bar *(DESIGN — pending approval)*
+
+A per-settlement **development tier (0–5)** shown as a 5-segment progress bar with
+milestones, expressing how *organised / civilised* a place is (distinct from `hub_class`,
+which is only its **commercial rank**; this ladder blends many pillars). A settlement
+advances by hitting milestones across pillars; the bar shows current tier + progress to the
+next, with a tooltip listing each milestone ✓/✗ and current value vs threshold.
+
+### Proposed tiers & milestones (illustrative thresholds, tunable)
+| Tier | Name | Population | Government / Stability | Trade | Warehouse | Civic buildings | Extra pillar |
+|------|------|-----------|------------------------|-------|-----------|-----------------|--------------|
+| 1 | **Hamlet** | founding | — | subsistence | — | — | — |
+| 2 | **Village** | ≥ 1,500 | not starving | ≥1 trade tie | Depot | — | — |
+| 3 | **Town** | ≥ 6,000 | council seated, unrest low | ≥2 partners / active market | Storehouse | ≥1 (granary/well) | a **guild** forms |
+| 4 | **City** | ≥ 25,000 | laws + officials, stable | trade hub (`hub_class`≥1) | Entrepôt | ≥3 | a **bank or mint** (finance) |
+| 5 | **Metropolis** | ≥ 100,000 | dominant/capital, very stable | entrepôt (`hub_class`=2) | Grand Entrepôt | many + high public health | own **coinage + satellites** (the §8 megacity conjunction) |
+
+### Pillars (user's list + "something else")
+Population · Government stability (`govt_type`, `officials`, `laws`, `society.unrest`,
+`sent_stability`) · Trade (`trade_last_year`, `hub_class`, partner count) · Warehouse
+(`capacity_tier` of the biggest depot) · Civic buildings (`structures` count, `civic_goods`
+granary, `public_health`) · **Extra pillar → propose Finance (bank/mint/coin) + Culture
+(guild / books / lingua-franca seat)**.
+
+### Mechanics
+- Recompute the tier **yearly** (alongside `classify_hubs`) with **hysteresis** (sustained
+  ~1 yr before promotion/demotion) so it's earned, not flickery. A tier can be **lost**
+  (decline, war, plague) — the bar can go down.
+- New state on `TickHub`: `dev_tier: u8` (+ optional `dev_progress: f32`), serde-defaulted.
+- Frontend: a `TierBar` in `HubPanel` (segments + milestone tooltip) and a small tier badge
+  on the map/settlement list.
+- **Open choice:** is a tier purely *descriptive*, or does it **gate abilities** (e.g. mint
+  unlocks at City, satellites at Metropolis)? — see approval questions.
+
+### Ties to the rest
+Tier 5 deliberately requires the megacity engine (§8), so the ladder and the >1M mechanic
+reinforce each other; the tier badge also gives the map an at-a-glance "how developed is
+this place" read that shifts over the centuries.
+
+---
+
 *File kept as the living design record for this work (per user: "keep info for the fix in
 the future"). Update with test trajectory numbers and decisions as they land.*
