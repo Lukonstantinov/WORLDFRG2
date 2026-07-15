@@ -44,12 +44,25 @@ check each item. Note anything off next to it; I'll use these notes to fix/tune.
 - [ ] No obvious economic blow-ups or crashes-to-zero across the board.
 - [ ] Performance still acceptable advancing many years.
 
+## E. New this round (verify)
+- [ ] **Megacity >1M:** over a long run, does the richest coastal capital of a large region
+      approach ~1M (only when fed + prosperous + a trade hub)? Others should NOT.
+- [ ] **Settlement tier badge** (Provision tab): shows Outpost→Emporium; stable (hysteresis),
+      can rise/fall over years.
+- [ ] **City Stores** (Provision tab): civic reserve + "riches in goods" value + food reserve
+      + richest goods held.
+- [ ] **Cold Start** (Chronicle panel, before the clock starts): "❄ Cold Start" zeroes
+      houses/banks/coin/wealth and shrinks cities; on unpause the economy + network rebuild
+      from nothing (guilds ~yr5, houses ~yr10).
+- [ ] **Hinterland breathes:** sub-cap village dots grow/shrink with their market over years
+      (not frozen). ⚙️ tune `HINTERLAND_BASE_CAP`/`HINTERLAND_GROWTH`.
+
 ## Known NOT-yet-done (so don't file these as bugs)
-- Pathfound routes ("never a straight line") — slice 2.
-- Food-capacity redesign (arid towns settling content at a small stable size) — slice 1b.
-- Megacity >1M engine (primacy + annona + satellites) — needs calibration on a real run.
-- Cold Start mode (zero-everything then build up) — slice 4 (frontend).
-- 5-tier settlement development ladder — pending design approval.
+- Pathfound routes ("never a straight line") — slice 2 (needs in-app perf + geometry check).
+- Food-capacity redesign (arid towns settling content) — needs an imported-food tracking
+  field; the naive version is degenerate (documented).
+- Tier ability-gating (guild/mint/coinage unlocks) — deferred (economy-regression risk blind).
+- Hinterland → full-hub PROMOTION (a grown village becoming a live simulated hub).
 
 ---
 *Fill in notes inline and hand back; I'll turn them into targeted fixes/tuning.*

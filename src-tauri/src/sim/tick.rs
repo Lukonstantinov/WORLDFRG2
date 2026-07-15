@@ -287,6 +287,13 @@ const HOSPICE_DECAY: f32 = 0.05;
 /// bounded civic toll from that hinterland trade (grain-eq per villager per year).
 /// Bounded by `civic_pool`'s decay sink → cannot inflate wealth.
 const HINTERLAND_TOLL: f32 = 0.01;
+/// Sub-cap villages are no longer FROZEN dots: each grows slowly (yearly) toward a modest
+/// local ceiling, lifted by a prosperous, well-fed parent market and pulled down when that
+/// market starves or dies — so the long tail of settlements breathes with the regional
+/// economy instead of sitting at a fixed census number forever.
+const HINTERLAND_BASE_CAP: f32 = 2_500.0; // a village's baseline ceiling (× market pull)
+const HINTERLAND_GROWTH: f32 = 0.03;      // ~3%/yr toward the ceiling under a thriving market
+const HINTERLAND_DECLINE: f32 = 0.05;     // yearly slip when the parent market fails/starves
 /// ── ETHNOGENESIS (Cultures 2.0): a large, long-resident minority blends with the
 /// local majority into a NEW creole people. Bounded so only a handful arise per campaign.
 const CREOLE_MAX: usize = 24;              // global cap on live creole peoples
@@ -9253,6 +9260,23 @@ impl CampaignSim {
             let p = self.hinterland[ti].parent_hub;
             if p < 0 || (p as usize) >= n { continue; }
             self.hubs[p as usize].civic_pool += self.hinterland[ti].population * HINTERLAND_TOLL;
+        }
+        // Villages BREATHE: grow toward a modest ceiling under a thriving, well-fed market,
+        // slip when their market starves or has died — so the sub-cap dots aren't frozen.
+        for ti in 0..self.hinterland.len() {
+            let p = self.hinterland[ti].parent_hub;
+            let (prosp, food, alive) = if p >= 0 && (p as usize) < n {
+                let hb = &self.hubs[p as usize];
+                (hb.sent_prosperity.clamp(0.0, 1.0), hb.sent_food.clamp(0.0, 1.0), !hb.abandoned && hb.starving < 0.5)
+            } else { (0.15, 0.4, false) };
+            let pop = self.hinterland[ti].population.max(1.0);
+            let cap = (HINTERLAND_BASE_CAP * (0.4 + 1.4 * prosp) * (0.5 + 0.5 * food)).max(50.0);
+            let np = if alive && pop < cap {
+                pop + HINTERLAND_GROWTH * pop * (1.0 - pop / cap)
+            } else {
+                pop * (1.0 - HINTERLAND_DECLINE)
+            };
+            self.hinterland[ti].population = np.clamp(0.0, cap.max(pop));
         }
     }
 
