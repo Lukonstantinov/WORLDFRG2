@@ -4811,6 +4811,33 @@ impl CampaignSim {
             scratch.sort_by(|x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
             neighbors[a] = scratch.iter().map(|&(b, _)| b).collect();
         }
+        // Local catchment: guarantee every hub also has its CATCHMENT_K nearest
+        // physical neighbours (ignoring hub_pull) so small towns near a large hub
+        // aren't crowded out of its dispatch targets by effective-distance ranking.
+        // Without this, large entrepôts only ship to other large hubs and small
+        // coastal towns like a harbour near a metropolis get zero throughput.
+        const CATCHMENT_K: usize = 8;
+        let mut catch_scratch: Vec<(u32, f32)> = Vec::with_capacity(n);
+        for a in 0..n {
+            if is_bound(a) { continue; }
+            catch_scratch.clear();
+            for b in 0..n {
+                if b == a { continue; }
+                if is_bound(b) && self.hubs[b].founder_hub as usize != a { continue; }
+                let d = self.days[a * n + b];
+                if d.is_finite() { catch_scratch.push((b as u32, d)); }
+            }
+            if catch_scratch.len() > CATCHMENT_K {
+                catch_scratch.select_nth_unstable_by(CATCHMENT_K,
+                    |x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
+                catch_scratch.truncate(CATCHMENT_K);
+            }
+            for &(b, _) in &catch_scratch {
+                if !neighbors[a].contains(&b) {
+                    neighbors[a].push(b);
+                }
+            }
+        }
         self.neighbors = neighbors;
     }
 
