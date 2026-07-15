@@ -7979,8 +7979,8 @@ impl CampaignSim {
                 && comp_capital.get(&self.hubs[h].component).map(|&(_, i)| i == h).unwrap_or(false) {
                 PRIMACY_DEV
             } else { 0.0 };
-            let cap_mult = (0.35 + 1.30 * food_sec)
-                * (0.60 + 3.0 * prosperity * prosperity + trade_dev + primacy_dev);
+            let cap_mult = (0.35 + 2.0 * food_sec)
+                * (0.60 + 5.0 * prosperity * prosperity + trade_dev + primacy_dev);
             let capacity = (self.hubs[h].founding_pop * cap_mult)
                 .max(self.hubs[h].founding_pop * 0.15);
             // Logistic step: approach capacity from below, decline when above it.
