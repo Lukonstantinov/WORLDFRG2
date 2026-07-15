@@ -10031,6 +10031,10 @@ impl CampaignSim {
             let metro = &self.hubs[m];
             if metro.is_estate || metro.abandoned || metro.colony_kind != 0 { continue; }
             if metro.population < SATELLITE_METRO_POP || metro.treasury < SATELLITE_COST { continue; }
+            // TIER GATE (ability unlock): only a Free City (tier 4) or greater — a real
+            // metropolitan power — spins off a satellite suburb. A 25k+ metropolis has
+            // normally reached it, so this rarely blocks and mostly adds thematic order.
+            if self.dev_tier.get(m).copied().unwrap_or(0) < 4 { continue; }
             // NO SPAM: only ONE satellite may be under construction per metropolis — it must
             // be FINISHED before the council breaks ground on the next (user rule).
             if self.hubs.iter().any(|h| h.founder_hub == m as i32 && h.build_stage > 0 && !h.abandoned) { continue; }
