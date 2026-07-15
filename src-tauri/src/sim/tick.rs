@@ -11266,6 +11266,61 @@ impl CampaignSim {
         }
     }
 
+    /// Settlement DEVELOPMENT tier (0..5): how *organised / advanced* a place is —
+    /// driven by INSTITUTIONS (government, trade sophistication, warehousing, civic
+    /// works and FINANCE), NOT raw population. A compact but sophisticated city-state
+    /// (Venice: own coin, banks, an entrepôt, deep institutions) outranks a larger but
+    /// institutionally shallow town. Population is only a *soft floor* so a hamlet can't
+    /// read as an emporium. Pure & read-only (safe to call anywhere); the yearly
+    /// classifier + ability-gating wrap this. Ladder (user-approved, renamable):
+    ///   1 Outpost · 2 Market · 3 Guild Town · 4 Free City · 5 Emporium.
+    pub fn development_tier(&self, h: usize) -> u8 {
+        let hub = &self.hubs[h];
+        if hub.abandoned || hub.is_estate || hub.population < 1.0 { return 0; }
+        let pop = hub.population;
+        // ── pillar signals ──
+        let stable    = hub.sent_stability >= 0.5 && hub.society.unrest < 0.5;
+        let has_govt  = hub.govt_type > 0 || !hub.officials.is_empty();
+        let has_laws  = !hub.laws.is_empty();
+        let civic     = hub.structures.len();
+        let health    = hub.public_health;
+        let trade_hub = hub.hub_class >= 1;      // classify_hubs: busy secondary market
+        let entrepot  = hub.hub_class >= 2;      // classify_hubs: apex sea entrepôt
+        // Biggest warehouse tier standing at this hub (0..5: Depot..Grand Entrepôt).
+        let wh_tier = self.warehouses.iter()
+            .filter(|w| w.hub as usize == h)
+            .map(|w| w.tier).max().unwrap_or(0);
+        // FINANCE sophistication: its own coinage / a mint / a banking stake.
+        let own_coin = !hub.coin_name.is_empty();
+        let finance  = hub.has_mint || own_coin || hub.stake_bank >= 0 || hub.main_bank >= 0;
+        // A guild seated in this settlement.
+        let has_guild = self.houses.iter()
+            .any(|hh| hh.is_guild && !hh.defunct && hh.hub as usize == h);
+        // ── tiers, top-down: institutional gates with LOW population floors ──
+        // 5 Emporium — an apex mercantile city: entrepôt, grand warehousing, its OWN
+        //   coinage + finance, deep civic institutions, stable government.
+        if pop >= 30_000.0 && entrepot && wh_tier >= 5 && own_coin && finance
+            && civic >= 4 && stable && has_govt && has_laws && health >= 0.4 {
+            return 5;
+        }
+        // 4 Free City — self-governing with laws, a trade hub, entrepôt-grade storage
+        //   and a bank/mint (finance arrives).
+        if pop >= 10_000.0 && trade_hub && wh_tier >= 4 && finance
+            && civic >= 3 && has_govt && has_laws && stable {
+            return 4;
+        }
+        // 3 Guild Town — a chartered town with a seated guild, real storage and a civic work.
+        if pop >= 3_000.0 && has_guild && wh_tier >= 2 && civic >= 1 && has_govt {
+            return 3;
+        }
+        // 2 Market — a functioning local market: some trade and at least a depot.
+        if pop >= 800.0 && (trade_hub || hub.trade_last_year > 0.0 || wh_tier >= 1) {
+            return 2;
+        }
+        // 1 Outpost — a bare founding settlement.
+        1
+    }
+
     /// Free a colony from its metropolis (drop dependency, the `(colony)` tag, charter
     /// and backers) and hand over CONTROL, Carthage-style:
     ///   • peaceful (via_war=false) → the FOUNDING HOUSE (the trade dynasty that built
@@ -13788,6 +13843,24 @@ mod tests {
         // Some council was barred by a revolt (the ban window was set).
         let banned = s.hubs.iter().any(|h| h.society.ousted_until > 0);
         assert!(banned, "a revolt should bar the toppled family from the council");
+    }
+
+    #[test]
+    fn development_tier_ranks_by_institutions() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 5000.0, vec![20.0], 0),
+            hub(1, 8.0, 0.0, 5000.0, vec![20.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        // A bare founding settlement is an Outpost (tier 1).
+        assert_eq!(s.development_tier(0), 1, "bare hub is an Outpost");
+        // A little trade lifts it to a Market (tier 2) — no population change needed.
+        s.hubs[0].trade_last_year = 10.0;
+        assert_eq!(s.development_tier(0), 2, "trade lifts it to a Market");
+        // An abandoned ruin reads as 0.
+        s.hubs[0].abandoned = true;
+        assert_eq!(s.development_tier(0), 0, "abandoned reads 0");
     }
 
     /// Colonisation MECHANISM (deterministic): from year 50, an eligible city founds

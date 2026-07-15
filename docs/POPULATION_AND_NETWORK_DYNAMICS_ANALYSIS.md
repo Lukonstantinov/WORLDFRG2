@@ -390,44 +390,50 @@ once per year (bounded cost). *Not started — scheduled after slices 1b/2.*
 
 ---
 
-## 10. Settlement Development Ladder — 5-tier civilization progress bar *(DESIGN — pending approval)*
+## 10. Settlement Development Ladder — 5-tier progress bar *(APPROVED — advancement-based)*
 
 A per-settlement **development tier (0–5)** shown as a 5-segment progress bar with
-milestones, expressing how *organised / civilised* a place is (distinct from `hub_class`,
-which is only its **commercial rank**; this ladder blends many pillars). A settlement
-advances by hitting milestones across pillars; the bar shows current tier + progress to the
-next, with a tooltip listing each milestone ✓/✗ and current value vs threshold.
+milestones. **Decision (user):** the tier expresses *advancement / sophistication*, **NOT raw
+population** — "Venice was more advanced than larger cities of its time." A compact,
+institutionally deep city-state outranks a bigger but shallow town. Population is only a
+**soft floor** (so a hamlet can't read as an emporium). Distinct from `hub_class` (commercial
+rank only); this blends institutions across pillars.
 
-### Proposed tiers & milestones (illustrative thresholds, tunable)
-| Tier | Name | Population | Government / Stability | Trade | Warehouse | Civic buildings | Extra pillar |
-|------|------|-----------|------------------------|-------|-----------|-----------------|--------------|
-| 1 | **Hamlet** | founding | — | subsistence | — | — | — |
-| 2 | **Village** | ≥ 1,500 | not starving | ≥1 trade tie | Depot | — | — |
-| 3 | **Town** | ≥ 6,000 | council seated, unrest low | ≥2 partners / active market | Storehouse | ≥1 (granary/well) | a **guild** forms |
-| 4 | **City** | ≥ 25,000 | laws + officials, stable | trade hub (`hub_class`≥1) | Entrepôt | ≥3 | a **bank or mint** (finance) |
-| 5 | **Metropolis** | ≥ 100,000 | dominant/capital, very stable | entrepôt (`hub_class`=2) | Grand Entrepôt | many + high public health | own **coinage + satellites** (the §8 megacity conjunction) |
+### Tiers & milestones (approved model; thresholds tunable)
+Names (user asked for a fresh set) → **1 Outpost · 2 Market · 3 Guild Town · 4 Free City ·
+5 Emporium** (renamable).
+| Tier | Name | Soft pop floor | Government | Trade | Warehouse | Civic | **Finance** |
+|------|------|----------------|-----------|-------|-----------|-------|-------------|
+| 1 | **Outpost** | founding | — | subsistence | — | — | — |
+| 2 | **Market** | ~800 | — | some trade (`trade_last_year`>0 / hub) | Depot | — | — |
+| 3 | **Guild Town** | ~3,000 | `govt_type`>0 / officials | — | Storehouse (≥T2) | ≥1 structure | seated **guild** |
+| 4 | **Free City** | ~10,000 | laws + officials, stable | trade hub (`hub_class`≥1) | Entrepôt (≥T4) | ≥3 | a **bank or mint** |
+| 5 | **Emporium** | ~30,000 | dominant/capital, very stable | entrepôt (`hub_class`=2) | Grand Entrepôt (T5) | ≥4 + `public_health`≥0.4 | **own coinage** + finance |
 
-### Pillars (user's list + "something else")
-Population · Government stability (`govt_type`, `officials`, `laws`, `society.unrest`,
-`sent_stability`) · Trade (`trade_last_year`, `hub_class`, partner count) · Warehouse
-(`capacity_tier` of the biggest depot) · Civic buildings (`structures` count, `civic_goods`
-granary, `public_health`) · **Extra pillar → propose Finance (bank/mint/coin) + Culture
-(guild / books / lingua-franca seat)**.
+Pillars: Government (`govt_type`/`officials`/`laws`/`sent_stability`/`society.unrest`) ·
+Trade (`hub_class`/`trade_last_year`) · Warehouse (biggest `capacity_tier` at the hub) ·
+Civic (`structures` count / `public_health`) · **Finance** (own coin / mint / bank stake —
+the approved extra pillar). Population enters only as the soft floor.
 
 ### Mechanics
-- Recompute the tier **yearly** (alongside `classify_hubs`) with **hysteresis** (sustained
-  ~1 yr before promotion/demotion) so it's earned, not flickery. A tier can be **lost**
-  (decline, war, plague) — the bar can go down.
-- New state on `TickHub`: `dev_tier: u8` (+ optional `dev_progress: f32`), serde-defaulted.
-- Frontend: a `TierBar` in `HubPanel` (segments + milestone tooltip) and a small tier badge
-  on the map/settlement list.
-- **Open choice:** is a tier purely *descriptive*, or does it **gate abilities** (e.g. mint
-  unlocks at City, satellites at Metropolis)? — see approval questions.
+- ✅ **Backend classifier shipped:** `CampaignSim::development_tier(h) -> u8` (pure,
+  read-only) implements the table above; unit-tested (`development_tier_ranks_by_institutions`).
+- ⏳ **Yearly + hysteresis:** wrap it in the yearly pass (beside `classify_hubs`) with a
+  sustained-year promotion/demotion so it's earned and can be LOST (decline/war/plague).
+  Needs a persisted `dev_tier`/`dev_momentum` (parallel Vec on `CampaignSim`, serde-default,
+  to avoid churning every `TickHub` literal).
+- ⏳ **Ability GATING (user: unlock abilities):** tiers gate what a settlement may do —
+  Guild Town → may seat guilds · Free City → may charter a bank/mint · Emporium → may issue
+  its own coinage, spawn satellites, run secured (annona) grain supply. *Design the gate so
+  the tier's finance MILESTONE ("a bank/mint arrived") is one step below the tier's UNLOCK
+  ("may charter its OWN coinage") — avoids circular "need X to get X."*
+- ⏳ **Frontend:** a `TierBar` in `HubPanel` (5 segments + milestone ✓/✗ tooltip with
+  current-vs-threshold) and a tier badge on the map/settlement list.
 
 ### Ties to the rest
-Tier 5 deliberately requires the megacity engine (§8), so the ladder and the >1M mechanic
-reinforce each other; the tier badge also gives the map an at-a-glance "how developed is
-this place" read that shifts over the centuries.
+Tier 5 (Emporium) overlaps the §8 megacity conjunction (finance + entrepôt + own coin +
+satellites), so the ladder and the >1M engine reinforce each other. The badge gives the map
+an at-a-glance "how developed" read that shifts over the centuries.
 
 ---
 
