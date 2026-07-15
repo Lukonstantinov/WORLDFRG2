@@ -2282,6 +2282,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         satellite_sites: vec![], // filled from tiles just after construction (below)
         hinterland: hinterland_towns,
         hub_patron: vec![],
+        dev_tier: vec![],
+        dev_momentum: vec![],
         hub_culture: vec![],
         hub_minorities: vec![],
         estate_idle_years: vec![],
@@ -3480,7 +3482,12 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         let top_goods: Vec<CivicGoodRow> = top_goods.into_iter().take(8).map(|(r, _)| r).collect();
         CityStores { reserve, reserve_value, food_reserve, top_goods, goods_value, goods_units }
     };
-    let dev_tier = sim.development_tier(hi);
+    // Prefer the PERSISTED (hysteresis) tier; fall back to a live compute for older saves
+    // or a hub not yet classified this run.
+    let dev_tier = match sim.dev_tier.get(hi).copied() {
+        Some(t) if t > 0 => t,
+        _ => sim.development_tier(hi),
+    };
     Ok(Some(HubDetail {
         id: hub.id,
         name: hub.name.clone(),

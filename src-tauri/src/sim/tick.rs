@@ -2740,6 +2740,13 @@ pub struct CampaignSim {
     /// See docs/TRADE_BASE_MECHANIC_PLAN.md.
     #[serde(default)]
     pub hub_patron: Vec<i32>,
+    /// Settlement DEVELOPMENT tier (0..5) per hub, persisted with hysteresis so it is
+    /// earned/lost over a year rather than flickering. Hub-indexed; resized each tick.
+    #[serde(default)]
+    pub dev_tier: Vec<u8>,
+    /// Hysteresis momentum for `dev_tier` (consecutive confirming half-years, ±).
+    #[serde(default)]
+    pub dev_momentum: Vec<i8>,
     /// Per-hub majority people/culture (hub-indexed; seeded from the worldgen
     /// culture map at campaign start, inherited by colonies). Resized each tick.
     #[serde(default)]
@@ -5206,11 +5213,14 @@ impl CampaignSim {
             self.house_ledger.resize(self.houses.len(), LedgerAcc::default());
             self.house_barred.resize(self.houses.len(), Vec::new());
             self.hub_patron.resize(self.hubs.len(), -1); // trade-base patronage (hub-indexed)
+            self.dev_tier.resize(self.hubs.len(), 0);
+            self.dev_momentum.resize(self.hubs.len(), 0);
             // Twice a year, re-rank hubs into commercial classes (trade hub / entrepôt)
             // from the trade that has actually flowed this period (user: entrepôts
             // change once per half-year). Hysteresis inside makes status earned/lost.
             if tick > 0 && tick % (TICKS_PER_YEAR / 2) == 0 {
                 self.classify_hubs();
+                self.classify_development();
             }
             if tick % TICKS_PER_YEAR == 0 {
                 // v2.0 · close the monetary loop: turn each coin's debasement +
@@ -11339,6 +11349,32 @@ impl CampaignSim {
         }
     }
 
+    /// Persist each hub's development tier with HYSTERESIS: a hub must confirm a higher
+    /// (or lower) tier over 2 half-year checks before it actually moves, so status is
+    /// earned/lost over ~a year and doesn't flicker. Stored in `dev_tier`; the panel reads
+    /// the persisted value. A tier CAN fall (decline, war, plague strip institutions).
+    fn classify_development(&mut self) {
+        let nn = self.hubs.len();
+        if self.dev_tier.len() != nn { self.dev_tier.resize(nn, 0); }
+        if self.dev_momentum.len() != nn { self.dev_momentum.resize(nn, 0); }
+        for i in 0..nn {
+            let desired = self.development_tier(i);
+            let cur = self.dev_tier[i];
+            if desired > cur {
+                let m = self.dev_momentum[i].max(0) + 1;
+                if m >= 2 { self.dev_tier[i] = cur + 1; self.dev_momentum[i] = 0; }
+                else { self.dev_momentum[i] = m; }
+            } else if desired < cur {
+                let m = self.dev_momentum[i].min(0) - 1;
+                if m <= -2 { self.dev_tier[i] = cur - 1; self.dev_momentum[i] = 0; }
+                else { self.dev_momentum[i] = m; }
+            } else {
+                let s = self.dev_momentum[i].signum();
+                self.dev_momentum[i] -= s;
+            }
+        }
+    }
+
     /// Settlement DEVELOPMENT tier (0..5): how *organised / advanced* a place is —
     /// driven by INSTITUTIONS (government, trade sophistication, warehousing, civic
     /// works and FINANCE), NOT raw population. A compact but sophisticated city-state
@@ -13297,7 +13333,7 @@ mod tests {
             fleets_migrated: true, tech_factor: 1.0, percap_migrated: true, society_migrated: false,
             components_rescued: true,
             house_ledger: Vec::new(), house_ledger_prev: Vec::new(), house_barred: Vec::new(),
-            colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], lingua: vec![], culture_history: vec![], council_bought_month: vec![], hub_patron: vec![], colony_supply: vec![],
+            colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], lingua: vec![], culture_history: vec![], council_bought_month: vec![], hub_patron: vec![], dev_tier: vec![], dev_momentum: vec![], colony_supply: vec![],
             hub_culture: vec![], hub_minorities: vec![], estate_idle_years: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
             recent_trades: vec![],
