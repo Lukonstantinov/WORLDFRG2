@@ -199,8 +199,82 @@ yr 50: towns 29  hungry 22  thriving 1     richest 417438
     (needs GUI — verify in-app on the user's 500-y campaign). Next: decouple "at food
     capacity (content, small)" from "starving (dying)" so structurally arid sites settle
     at a stable small size instead of perpetual famine pinning their growth signal.
-- Slices 2-4 (pathfound routes · procurement futures + trader-seeking · hinterland
-  wake/sleep + Cold Start): not started.
+- **Slice 3 — procurement futures (IN PROGRESS).**
+  - ✅ `form_contracts` now considers, beyond a house's speciality goods, any
+    **manufacturing INPUT the office-city is structurally short of** (`is_input` set ×
+    `production < 0.8·need`, with manufacturing demand already folded into `needs`). A
+    house therefore signs PROCUREMENT futures to keep a manufactory's raw supply steady.
+    Source selection / sizing / liability are unchanged, so a contract only forms when a
+    house network node can actually bridge input-source → workshop (safe by construction).
+  - ⏳ Trader input-seeking (bias outpost/resource-colony founding toward a scarce input)
+    and manufacturing-gate softening: planned below.
+
+---
+
+## 7. Thorough implementation plan (remaining slices)
+
+### Slice 1b — decouple "at food capacity" from "starving"  *(next, tick.rs)*
+**Problem:** `sent_food = 1 − starving`; a structurally food-poor site keeps `food_balance
+< 0` at any size (local food = per-capita × pop, so the deficit ratio is constant), so it
+racks up permanent famine that pins its growth signal low forever.
+**Steps:**
+1. In the growth block, gate capacity by a food-supported size:
+   `food_cap = (pop·(1 + food_balance)).max(founding_pop·0.15)` and
+   `capacity = capacity.min(food_cap)`. A city at its food limit then sits at `food_balance
+   ≈ 0` (content), not dying.
+2. Raise the famine trigger so only a *deep, sustained* deficit accrues `starving`
+   (e.g. `food_balance < −0.08`), decaying otherwise — arid sites settle small & stable.
+3. **Better fix (bigger):** cap LOCAL food production at an absolute hinterland carrying
+   capacity (fertility-derived) instead of scaling ∝ pop, so imports genuinely extend a
+   city beyond its fields. Defer unless (1)+(2) prove insufficient in-app.
+**Test:** dynamics green + eyeball that non-coastal hungry towns stabilise instead of
+oscillating to the floor.
+
+### Slice 2 — pathfound route-days matrix (never a straight line)  *(cross-file)*
+**Problem:** `rebuild_routes` uses Euclidean `dist × days_per_cell`.
+**Steps:**
+1. At campaign start (`campaign_commands.rs::start_campaign`, which HAS db/tile access),
+   build a real cost grid (reuse `query_commands::compute_trade_routes` machinery:
+   passes / rivers / coast-hugging / reach-limited sea) and pathfind route-days between
+   every pair of the 250 live hubs. Serialize as `base_days: Vec<f32>` + a stable
+   `hub_id → row` map on `CampaignSim`.
+2. `rebuild_routes` reads `base_days` for founding hubs; for hubs added mid-sim (colonies)
+   route **through the parent** (`days[new][x] = dist(new,parent) + base_days[parent][x]`)
+   — always a real chained path, never an arbitrary straight jump.
+3. Keep the component/reachability gate; "reachable" ⇔ finite pathfound days.
+4. Feed the same routed polylines to the campaign trade-route overlay so the map shows
+   real lanes.
+**Test:** dynamics green; spot-check a known mountain pair routes around, not through.
+
+### Slice 3b — trader input-seeking + resource colonies  *(tick.rs)*
+**Steps:**
+1. Per house, compute its **scarce manufacturing inputs** (offices where `is_input[g]` &
+   `production < need`). Cache yearly.
+2. **Dispatch priority:** bias arbitrage so a house ships a scarce input toward its own
+   starved workshop first.
+3. **New routes:** when the input's nearest producer is reachable but un-officed, bias
+   office expansion (`update_guilds_and_offices`) to plant an office there → a new lane.
+4. **Resource colony:** in `maybe_found_house_outpost`, when a scarce input matches a
+   colonizable site's `kind_hint`, prefer founding the outpost to produce THAT input
+   (resource colony), shipping it back to the workshop.
+**Test:** dynamics green; watch "contracts" and finished-good output rise; new outposts
+tagged to inputs.
+
+### Slice 3c — manufacturing robustness  *(tick.rs)*
+1. Warehouse-buffer inputs so a lean week doesn't zero output.
+2. Gently soften the labour gate (`(pop/median).max(FLOOR)`) so mid cities craft 1–2
+   secondary goods — keep big-city concentration for the high-labour luxuries.
+3. Emit a per-hub "limiting factor" (missing input / labour / demand) for the UI.
+
+### Slice 4 — hinterland wake/sleep + Cold Start  *(cross-file + frontend)*
+1. **Wake/sleep:** give `hinterland` towns a cheap yearly growth toward a small local cap;
+   when one crosses a threshold, promote it to a live `TickHub` (and demote a long-dead
+   hub to sleep) to keep the live set bounded.
+2. **Cold Start:** a new campaign-start flag that seeds tiny populations and **zeros** all
+   trade ties, warehouses, houses, coin, wealth and the route network; on unpause the
+   emergence order (merchants → guilds yr5 → houses yr10) rebuilds everything from nothing.
+   Backend command + a WorkflowPanel toggle; default start unchanged.
+**Test:** dynamics green; in-app cold-start run shows the network self-assembling.
 
 ---
 

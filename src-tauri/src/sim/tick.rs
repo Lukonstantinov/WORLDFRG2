@@ -6486,6 +6486,17 @@ impl CampaignSim {
         if self.days.len() != n * n { return; }
         let ng = self.goods.len();
         let tick = self.tick;
+        // Goods that are a RAW INPUT to some manufacturing recipe. A house will sign
+        // PROCUREMENT futures for these (beyond its own speciality) so a manufactory's
+        // raw supply stays steady — the "manufactures urged to hold futures for a
+        // stable goods flow" rule. Manufacturing demand is already folded into `needs`
+        // (add_manufacturing_demand), so a structural input shortfall shows as
+        // production < need at the working city.
+        let is_input: Vec<bool> = {
+            let mut s = vec![false; ng];
+            for g in 0..ng { for &(idx, _) in &self.goods[g].inputs { if idx < ng { s[idx] = true; } } }
+            s
+        };
         for hi in 0..self.houses.len() {
             if self.houses[hi].defunct || self.houses[hi].offices.is_empty() { continue; }
             if hash01(self.seed, tick as u64 ^ 0xC047, hi as u64) > CONTRACT_FORM_CHANCE { continue; }
@@ -6509,7 +6520,20 @@ impl CampaignSim {
                     || self.hubs[buyer].sent_prosperity < CONTRACT_BUYER_MIN_PROSPERITY {
                     continue;
                 }
-                for &g in &specs {
+                // Candidate goods = the house's specialities (it SELLS these) PLUS any
+                // manufacturing INPUT this office-city is structurally short of (it BUYS
+                // these to keep its workshops fed). The input branch is what turns a
+                // house into a raw-materials PROCUREMENT agent for the manufactory,
+                // giving finished-good production a stable input flow.
+                let mut cand = specs.clone();
+                for g in 0..ng {
+                    if !is_input[g] || self.goods[g].food || specs.contains(&g) { continue; }
+                    if needs[buyer][g] > EPS
+                        && self.hubs[buyer].production.get(g).copied().unwrap_or(0.0) < needs[buyer][g] * 0.8 {
+                        cand.push(g);
+                    }
+                }
+                for &g in &cand {
                     if g >= ng || self.goods[g].food { continue; }
                     // Structural deficit: the city produces well under its own need.
                     if self.hubs[buyer].production.get(g).copied().unwrap_or(0.0) >= needs[buyer][g] * 0.8 { continue; }
