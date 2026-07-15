@@ -546,6 +546,26 @@ pub struct LawRow { pub year: u32, pub text: String }
 #[derive(Serialize, Clone)]
 pub struct CivicGoodRow { pub name: String, pub amount: f32 }
 
+/// City STORES — the settlement's own goods reserve (the civic warehouse) plus the total
+/// goods physically held at the city across every pool, with grain-equivalent valuations.
+/// Lets the council/panel see at a glance how well-PROVISIONED (supplies, food buffer) and
+/// how RICH-IN-GOODS the city is — the basis for shortage-buffering and population planning.
+#[derive(Serialize, Clone, Default)]
+pub struct CityStores {
+    /// Civic (city-owned) warehouse contents — goods the government stockpiles, top by amount.
+    pub reserve: Vec<CivicGoodRow>,
+    /// Grain-eq value of the civic reserve.
+    pub reserve_value: f32,
+    /// Food held in the city's own stores (civic granary + dedicated food reserve), in units.
+    pub food_reserve: f32,
+    /// ALL goods physically held at the city (local merchant pool + house depots), top by value.
+    pub top_goods: Vec<CivicGoodRow>,
+    /// Grain-eq value of ALL goods held at the city — the city's "riches in goods".
+    pub goods_value: f32,
+    /// Total units of all goods held at the city.
+    pub goods_units: f32,
+}
+
 /// One coin in a city's currency basket (for the settlement-view pie).
 #[derive(Serialize)]
 pub struct CoinShare {
@@ -687,6 +707,11 @@ pub struct HubDetail {
     #[serde(default)] pub stolen_from: String,
     /// Colonies & outposts this city FOUNDED (its metropolis roster).
     #[serde(default)] pub related_colonies: Vec<ColonySummary>,
+    /// City STORES — civic warehouse + total goods held at the city, with valuations.
+    #[serde(default)] pub city_stores: CityStores,
+    /// Settlement DEVELOPMENT tier (0..5): 1 Outpost · 2 Market · 3 Guild Town ·
+    /// 4 Free City · 5 Emporium. Advancement (institutions), not raw size.
+    #[serde(default)] pub dev_tier: u8,
 }
 
 /// Abstract social strata of a settlement for the HubPanel "Society" block:
@@ -3419,6 +3444,43 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         })
     }).collect();
 
+    // ── City STORES: the civic warehouse + all goods physically at the city, valued in
+    //    the grain-eq numeraire (base_value), so the panel/council can read supplies + riches.
+    let city_stores = {
+        let val = |g: usize| sim.goods.get(g).map(|gd| gd.base_value.max(0.0)).unwrap_or(1.0);
+        // Civic (city-owned) reserve.
+        let mut reserve: Vec<CivicGoodRow> = hub.civic_goods.iter().enumerate()
+            .filter(|(_, &a)| a > 0.5)
+            .filter_map(|(g, &a)| sim.goods.get(g).map(|gd| CivicGoodRow { name: gd.name.clone(), amount: a }))
+            .collect();
+        reserve.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
+        let reserve_value: f32 = hub.civic_goods.iter().enumerate()
+            .map(|(g, &a)| a.max(0.0) * val(g)).sum();
+        reserve.truncate(8);
+        let food_reserve: f32 = (0..ng)
+            .filter(|&g| sim.goods.get(g).map(|gd| gd.food).unwrap_or(false))
+            .map(|g| hub.civic_goods.get(g).copied().unwrap_or(0.0).max(0.0)).sum::<f32>()
+            + hub.reserve_food.max(0.0);
+        // ALL goods held at the city = local merchant pool + every house/guild depot here.
+        let mut held: Vec<f32> = hub.stock.clone();
+        if held.len() < ng { held.resize(ng, 0.0); }
+        for w in &sim.warehouses {
+            if w.hub as usize == hi {
+                for g in 0..ng.min(w.stock.len()) { held[g] += w.stock[g].max(0.0); }
+            }
+        }
+        let goods_value: f32 = (0..ng).map(|g| held[g].max(0.0) * val(g)).sum();
+        let goods_units: f32 = held.iter().map(|q| q.max(0.0)).sum();
+        let mut top_goods: Vec<(CivicGoodRow, f32)> = (0..ng)
+            .filter(|&g| held[g] > 0.5)
+            .filter_map(|g| sim.goods.get(g)
+                .map(|gd| (CivicGoodRow { name: gd.name.clone(), amount: held[g] }, held[g] * val(g))))
+            .collect();
+        top_goods.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let top_goods: Vec<CivicGoodRow> = top_goods.into_iter().take(8).map(|(r, _)| r).collect();
+        CityStores { reserve, reserve_value, food_reserve, top_goods, goods_value, goods_units }
+    };
+    let dev_tier = sim.development_tier(hi);
     Ok(Some(HubDetail {
         id: hub.id,
         name: hub.name.clone(),
@@ -3565,6 +3627,8 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             .filter(|&ci| sim.hubs[ci].colony_kind != 0 && sim.hubs[ci].founder_hub == hi as i32)
             .map(|ci| colony_summary(&sim, ci))
             .collect(),
+        city_stores,
+        dev_tier,
     }))
 }
 

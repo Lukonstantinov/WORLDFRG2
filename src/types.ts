@@ -642,6 +642,17 @@ export interface HubDetail {
   stolen_good?: string;              // espionage: good whose technique this estate stole
   stolen_from?: string;              // city it was stolen from ("" = none)
   related_colonies?: ColonySummary[]; // colonies/outposts this city founded
+  city_stores?: CityStores;          // civic warehouse + all goods held at the city (+ value)
+  dev_tier?: number;                 // development tier 0..5 (Outpost..Emporium)
+}
+/** City stores: the civic (city-owned) warehouse + all goods held at the city, valued. */
+export interface CityStores {
+  reserve: CivicGoodRow[];   // civic warehouse contents, top by amount
+  reserve_value: number;     // grain-eq value of the civic reserve
+  food_reserve: number;      // food held in city stores (granary + reserve), units
+  top_goods: CivicGoodRow[]; // ALL goods held at the city, top by value
+  goods_value: number;       // grain-eq value of ALL goods at the city ("riches in goods")
+  goods_units: number;       // total units of all goods held at the city
 }
 /** DLC 3 · a polis seat's government: council house + fiscal policy + speculation. */
 export interface Government {

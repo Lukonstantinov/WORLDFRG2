@@ -1062,6 +1062,35 @@ export function HubPanel() {
               {" · "}reserve target {prov.reserve_target.toFixed(0)}/good
               {prov.bought_month > 0 && <> · <span style={{ color: "#7fd0a0" }}>secured {prov.bought_month.toFixed(0)} gr-eq this month</span></>}
             </div>
+            {detail.city_stores && (
+              <div style={{ padding: "8px 10px", borderRadius: 6, background: "#0c1622", border: "1px solid #1d3450" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#cfe0f4" }}>🏛 City Stores</span>
+                  {typeof detail.dev_tier === "number" && detail.dev_tier > 0 && (
+                    <span style={{ fontSize: 10, color: "#e8cf8a", border: "1px solid #4a3a12", borderRadius: 10, padding: "1px 8px" }}>
+                      Tier {detail.dev_tier} · {(["", "Outpost", "Market", "Guild Town", "Free City", "Emporium"][detail.dev_tier] ?? "")}
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 12, fontSize: 11, color: "#9ab0c8", flexWrap: "wrap" }}>
+                  <span>💰 Riches in goods: <b style={{ color: "#e8cf8a" }}>{Math.round(detail.city_stores.goods_value).toLocaleString()}</b> gr-eq</span>
+                  <span>📦 {Math.round(detail.city_stores.goods_units).toLocaleString()} units held</span>
+                  <span>🍞 Food reserve: <b style={{ color: "#7fd0a0" }}>{Math.round(detail.city_stores.food_reserve).toLocaleString()}</b></span>
+                  <span>🏛 Civic reserve: {Math.round(detail.city_stores.reserve_value).toLocaleString()} gr-eq</span>
+                </div>
+                {detail.city_stores.top_goods.length > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    <div style={{ fontSize: 10, color: "#7fb0e0", fontWeight: 600, marginBottom: 2 }}>Richest goods held here</div>
+                    {detail.city_stores.top_goods.slice(0, 6).map((g, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#a8bcd4" }}>
+                        <span>{HP_GOOD_EMOJI[g.name] ?? "📦"} {g.name}</span>
+                        <span>{Math.round(g.amount).toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <div style={{ fontSize: 11, color: "#7fb0e0", fontWeight: 600 }}>Secured in the civic warehouse</div>
             {prov.goods.length === 0 && (
               <div style={{ color: "#6a86a6", fontSize: 10 }}>Nothing secured yet — the council stocks up as goods arrive.</div>
