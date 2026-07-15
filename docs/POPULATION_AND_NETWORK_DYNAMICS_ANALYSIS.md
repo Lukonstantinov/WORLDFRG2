@@ -213,22 +213,28 @@ yr 50: towns 29  hungry 22  thriving 1     richest 417438
 
 ## 7. Thorough implementation plan (remaining slices)
 
-### Slice 1b — decouple "at food capacity" from "starving"  *(next, tick.rs)*
+### Slice 1b — decouple "at food capacity" from "starving"  *(BLOCKED on redesign)*
 **Problem:** `sent_food = 1 − starving`; a structurally food-poor site keeps `food_balance
 < 0` at any size (local food = per-capita × pop, so the deficit ratio is constant), so it
 racks up permanent famine that pins its growth signal low forever.
-**Steps:**
-1. In the growth block, gate capacity by a food-supported size:
-   `food_cap = (pop·(1 + food_balance)).max(founding_pop·0.15)` and
-   `capacity = capacity.min(food_cap)`. A city at its food limit then sits at `food_balance
-   ≈ 0` (content), not dying.
-2. Raise the famine trigger so only a *deep, sustained* deficit accrues `starving`
-   (e.g. `food_balance < −0.08`), decaying otherwise — arid sites settle small & stable.
-3. **Better fix (bigger):** cap LOCAL food production at an absolute hinterland carrying
-   capacity (fertility-derived) instead of scaling ∝ pop, so imports genuinely extend a
-   city beyond its fields. Defer unless (1)+(2) prove insufficient in-app.
-**Test:** dynamics green + eyeball that non-coastal hungry towns stabilise instead of
-oscillating to the floor.
+**⚠️ Attempt 1 (reverted — commit history):** gating capacity by
+`food_cap = pop·(1 + food_balance)` is **degenerate**. Because local food production scales
+∝ pop, `food_balance` is *scale-invariant* (`(per_capita_food − per_capita_need)/…`,
+independent of pop), so `food_cap` sits just under pop every tick and drives food-poor
+cities all the way to the floor instead of to an equilibrium — the same bug, relocated.
+It also silently relieved dearth (shrinking cities), which broke `unrest_topples_councils`
+(chronic-dearth revolt no longer fired). **Lesson: any food ceiling MUST be absolute, not
+∝ current pop.**
+**Correct approach (do this):**
+1. Give each hub an **absolute local food capacity** `food_hinterland` (fertility/climate
+   of its site, seeded at campaign start; a proxy is `founding_pop · LOCAL_FOOD_MULT`).
+   Cap LOCAL food *production* at that absolute number (not per-capita × pop).
+2. Then `food_cap_pop = (food_hinterland + food_imported) / per_capita_food_need` is a
+   real, pop-independent ceiling; `capacity = capacity.min(food_cap_pop)`. Now imports
+   genuinely extend a city past its fields, and a food-poor town settles at a stable small
+   size with `food_balance ≈ 0` (content), while still able to revolt on inequality.
+3. Only a deep, sustained deficit accrues `starving` (famine = shock, not equilibrium).
+**Test:** dynamics green AND `unrest_topples_councils` still fires (verify both).
 
 ### Slice 2 — pathfound route-days matrix (never a straight line)  *(cross-file)*
 **Problem:** `rebuild_routes` uses Euclidean `dist × days_per_cell`.
