@@ -230,8 +230,19 @@ const POP_DECLINE_RATE: f32 = 0.0006;
 /// over centuries, while an isolated/low-trade hub stays small. Reference &
 /// ceiling below are tuned so a top trade nexus reaches ≈30× its founding size.
 /// `trade_dev = clamp(trade_last_year / (founding_pop · REF), 0, CAP)`.
-const TRADE_DEV_REF: f32 = 6.0;    // trade-per-founder that scores 1.0 of headroom
-const TRADE_DEV_CAP: f32 = 15.0;   // max earned headroom added to the capacity mult
+/// Max earned headroom (capacity multiplier) a hub gains from TRADE EMINENCE. The
+/// busiest hub in the world earns the full amount (RELATIVE normalisation — see the
+/// growth block), so a great entrepôt of large founding size reaches ≈150k–300k people
+/// while lesser hubs earn proportionally less and stay small. Raised 15→20 so the top
+/// trade cities clear the 150k mark even at moderate food/prosperity.
+const TRADE_DEV_CAP: f32 = 20.0;
+/// ── Trade GRAVITY ── how strongly a big / high-class hub PULLS trade from farther
+/// afield and is preferred by merchants. A hub's `hub_pull` ≥ 1; its EFFECTIVE distance
+/// to every other city = real distance ÷ pull, so a great entrepôt enters the partner
+/// lists of cities twice as far away and wins more merchant dispatch.
+const HUB_PULL_CLASS: f32 = 0.7;        // per hub_class step (0 town · 1 trade hub · 2 entrepôt)
+const HUB_PULL_POP_REF: f32 = 50_000.0; // population giving +1.0 of pull (saturating)
+const HUB_PULL_MAX: f32 = 3.5;          // cap so one metropolis can't pull the whole world
 /// Net demographic drift (growth v2): a well-fed populace has a small birth
 /// surplus so the TOTAL world population can actually grow (not just redistribute
 /// via migration); dearth turns it negative. Applied on top of the logistic
@@ -4707,6 +4718,20 @@ impl CampaignSim {
     /// capped to `NEIGHBOR_K`). Estates are kept as candidates (they have a
     /// population that must still import food); the cap simply means dispatch
     /// never scans far-flung hubs, which is where the late-campaign cost went.
+    /// Trade GRAVITY of a hub (≥ 1): big / high-class markets pull trade from farther
+    /// afield. A hub's EFFECTIVE distance to others is real distance ÷ this, so a great
+    /// entrepôt appears "nearer" and enters the partner lists of cities much farther away,
+    /// and wins more merchant dispatch — the "large trade hubs attract trade from afar and
+    /// are more attractive to merchants" rule. Ordinary towns sit at ~1 (no distortion).
+    #[inline]
+    fn hub_pull(&self, b: usize) -> f32 {
+        let h = &self.hubs[b];
+        if h.is_estate || h.abandoned { return 1.0; }
+        let by_class = HUB_PULL_CLASS * h.hub_class as f32;
+        let by_pop = (h.population / HUB_PULL_POP_REF).clamp(0.0, 1.0);
+        (1.0 + by_class + by_pop).clamp(1.0, HUB_PULL_MAX)
+    }
+
     fn rebuild_neighbors(&mut self) {
         let n = self.hubs.len();
         let mut neighbors: Vec<Vec<u32>> = vec![Vec::new(); n];
@@ -4732,7 +4757,11 @@ impl CampaignSim {
                 // A bound satellite is hidden from everyone EXCEPT its own metropolis.
                 if is_bound(b) && self.hubs[b].founder_hub as usize != a { continue; }
                 let d = self.days[a * n + b];
-                if d.is_finite() { scratch.push((b as u32, d)); }
+                // Rank candidates by EFFECTIVE distance (real days ÷ the partner's trade
+                // gravity), so a big entrepôt far away out-ranks a small town nearby and
+                // makes the partner list even of distant cities. Freight elsewhere still
+                // uses the REAL `days`, so only WHO trades with whom changes, not the cost.
+                if d.is_finite() { scratch.push((b as u32, d / self.hub_pull(b))); }
             }
             // Partial-select the K nearest in O(n) (avoids an O(n log n) full sort of
             // every hub against every other on each estate add), then sort just those K.
@@ -6974,14 +7003,18 @@ impl CampaignSim {
                     let freight = self.good_freight(g, freight_rate * coin_disc[b], days);
                     let gap = pb - (pa + freight) - self.margin * base;
                     if gap > 0.0 {
-                        targets.push((b, gap, days));
+                        // GRAVITY: weight the profit by the destination's trade pull so
+                        // merchants prefer to supply the great markets (big entrepôts) —
+                        // they clear more volume and pay reliably. The real `gap`/`days`
+                        // still govern the actual sale; pull only orders the shortlist.
+                        targets.push((b, gap * self.hub_pull(b), days));
                     }
                 }
                 if targets.is_empty() {
                     continue;
                 }
                 targets.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal));
-                targets.truncate(3); // ship to the 3 hungriest reachable markets
+                targets.truncate(3); // ship to the 3 most attractive reachable markets
                 for (b, _gap, days) in targets {
                     if surplus <= EPS {
                         break;
@@ -7740,6 +7773,13 @@ impl CampaignSim {
     fn update_food_and_starvation(&mut self, needs: &[Vec<f32>]) {
         let n = self.hubs.len();
         let ng = self.goods.len();
+        // Busiest hub's realized trade this year — the reference for RELATIVE trade
+        // development below, so the top trade cities always earn the full growth
+        // headroom (and reach metropolis scale) regardless of the world's trade scale.
+        let world_max_trade = self.hubs.iter()
+            .filter(|h| !h.is_estate && !h.abandoned)
+            .map(|h| h.trade_last_year)
+            .fold(0.0f32, f32::max);
         for h in 0..n {
             // A dead settlement stays dead — the founding-pop floor below must
             // never resurrect an abandoned ruin (or a collapsed colony).
@@ -7870,9 +7910,14 @@ impl CampaignSim {
             // ~9× of its humble founding size (the old ceiling that stalled the world
             // at ~3.2M). An isolated/low-trade hub earns little headroom and stays
             // small — exactly the historical pattern (arid inland town vs. great port).
-            let trade_dev = (self.hubs[h].trade_last_year
-                / (self.hubs[h].founding_pop.max(1.0) * TRADE_DEV_REF))
-                .clamp(0.0, TRADE_DEV_CAP);
+            // RELATIVE trade eminence: a hub's share of the busiest hub's throughput,
+            // scaled to the full headroom cap. The world's top entrepôt earns the whole
+            // `TRADE_DEV_CAP`; lesser hubs earn proportionally less. This guarantees the
+            // leading trade cities reach metropolis scale (≥150k for a large-founding hub)
+            // no matter the absolute trade volume, instead of stalling when trade is thin.
+            let trade_dev = if world_max_trade > EPS {
+                TRADE_DEV_CAP * (self.hubs[h].trade_last_year / world_max_trade).clamp(0.0, 1.0)
+            } else { 0.0 };
             let cap_mult = (0.35 + 1.30 * food_sec)
                 * (0.60 + 3.0 * prosperity * prosperity + trade_dev);
             let capacity = (self.hubs[h].founding_pop * cap_mult)
