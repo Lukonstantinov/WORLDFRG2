@@ -2369,6 +2369,28 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
     Ok(build_snapshot(&sim))
 }
 
+/// COLD START: zero the just-started campaign's entire economic superstructure (houses,
+/// guilds, banks, coinage, warehouses, contracts, wealth, institutions) and reset every
+/// city to a small seed population, so that on unpause the world builds its trade network,
+/// finance and cities up from nothing — the "press a button to zero everything, then watch
+/// it grow" flow. Only valid on a fresh, unadvanced campaign (tick 0).
+#[tauri::command]
+pub fn campaign_cold_start(db: State<'_, WorldDb>) -> Result<CampaignSnapshot, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim_arc = get_sim(&db, &conn)?
+        .ok_or_else(|| "No campaign has been started to cold-start.".to_string())?;
+    let mut sim = (*sim_arc).clone();
+    if sim.tick != 0 {
+        return Err("Cold Start can only be applied to a fresh, unadvanced campaign — \
+                    start a new game first.".into());
+    }
+    sim.apply_cold_start();
+    sim.rebuild_routes();
+    set_sim(&db, &sim)?;
+    persist_campaign(&db, &conn)?;
+    Ok(build_snapshot(&sim))
+}
+
 /// Start a FRESH dynamic campaign on the SAME finalized world/economy — a "new game".
 /// A running campaign is never restarted in place; the caller must first SAVE the
 /// current run to its own `.campaign` file (so it's preserved). This then clears just

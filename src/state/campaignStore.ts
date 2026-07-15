@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { CampaignSnapshot, WorldEconomy, HouseBrief, CampaignDiagnostics } from "../types";
 import {
   campaignStartSim,
+  campaignColdStart,
   campaignNewGame,
   campaignAdvance,
   campaignGetState,
@@ -41,6 +42,10 @@ interface CampaignStore {
   refresh: () => Promise<void>;
   /** Seed a brand-new living-trade simulation. */
   start: (seed: number) => Promise<void>;
+  /** COLD START: zero the just-started campaign's economy (houses, banks, coin, wealth,
+   *  institutions) and reset cities to small seeds, so on unpause the world builds itself
+   *  up from nothing. Only valid on a fresh (tick 0) campaign. */
+  coldStart: () => Promise<void>;
   /** Start a NEW dynamic campaign on the same world — first SAVES the current running
    *  campaign to its own .campaign file (a running campaign is never wiped), then
    *  reseeds fresh. Returns false if the user cancelled the save dialog. */
@@ -100,6 +105,22 @@ export const useCampaignStore = create<CampaignStore>((set, get) => ({
     set({ busy: true, error: null });
     try {
       const snap = await campaignStartSim(seed);
+      const [we, houses, diag] = await Promise.all([
+        campaignGetWorldEconomy(), campaignGetHouses(), campaignDiagnostics(),
+      ]);
+      set({ snapshot: snap, worldEconomy: we, houses, diagnostics: diag });
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  coldStart: async () => {
+    if (get().busy) return;
+    set({ busy: true, error: null });
+    try {
+      const snap = await campaignColdStart();
       const [we, houses, diag] = await Promise.all([
         campaignGetWorldEconomy(), campaignGetHouses(), campaignDiagnostics(),
       ]);

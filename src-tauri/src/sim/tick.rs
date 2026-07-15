@@ -11375,6 +11375,60 @@ impl CampaignSim {
         }
     }
 
+    /// COLD START: wipe the entire economic superstructure so the world must build itself
+    /// up from nothing when unpaused — no merchant houses, guilds, banks, coinage,
+    /// warehouses, contracts, wars or trade flows, every hub reset to a small seed
+    /// population with zero wealth and no institutions. Geography, cultures, goods, routes
+    /// and production potential are KEPT, so on unpause cities discover partners, trade,
+    /// found houses/guilds/coin and grow organically (the existing emergence order). Only
+    /// meaningful on a fresh (tick 0) campaign; the command guards that.
+    pub fn apply_cold_start(&mut self) {
+        // Economic superstructure → gone.
+        self.houses.clear();
+        self.seed_house_count = 0;
+        self.warehouses.clear();
+        self.contracts.clear();
+        self.banks.clear();
+        self.crashes.clear();
+        self.wars.clear();
+        self.in_transit.clear();
+        self.migration_routes.clear();
+        self.colony_supply.clear();
+        self.epidemics.clear();
+        self.flow_year.clear();
+        self.flow_accum.clear();
+        self.dev_tier.clear();
+        self.dev_momentum.clear();
+        let ng = self.goods.len();
+        let base_prices: Vec<f32> = self.goods.iter().map(|g| g.base_value).collect();
+        for h in self.hubs.iter_mut() {
+            if h.is_estate { continue; }
+            // A humble seed population — cities GROW from this as trade builds.
+            h.population = (h.founding_pop * 0.35).max(200.0);
+            // Zero all wealth, coinage and institutions.
+            h.trade_wealth = 0.0; h.grain_wealth = 0.0; h.treasury = 0.0; h.civic_pool = 0.0;
+            h.export_earn = 0.0; h.import_spend = 0.0; h.in_by_sea = 0.0; h.in_by_land = 0.0;
+            h.coin_name = String::new(); h.has_mint = false; h.coin_trust = 0.0;
+            h.coin_basket = Vec::new(); h.settle_coin = -1; h.mint_fineness = 1.0;
+            h.hub_class = 0; h.class_momentum = 0;
+            h.owner_house = -1; h.council_house = -1; h.captor_house = -1;
+            h.main_bank = -1; h.stake_bank = -1;
+            h.govt_type = 0; h.officials.clear(); h.laws.clear();
+            h.war_with = -1; h.tribute_to = -1;
+            h.structures.clear();
+            h.civic_goods = vec![0.0; ng];
+            // Seed one tick of stock at the new size so prices start sane, prices at base.
+            h.stock = h.base_per_capita.iter().map(|&pc| (pc * h.population).max(0.0)).collect();
+            if h.stock.len() != ng { h.stock.resize(ng, 0.0); }
+            h.production = h.stock.clone();
+            h.price = base_prices.clone();
+            h.starving = 0.0; h.food_balance = 1.0;
+            h.sent_food = 0.7; h.sent_prosperity = 0.3; h.sent_stability = 0.8; h.mood = 0.55;
+            h.trade_last_year = 0.0;
+        }
+        self.routes_dirty = true;
+    }
+
     /// Settlement DEVELOPMENT tier (0..5): how *organised / advanced* a place is —
     /// driven by INSTITUTIONS (government, trade sophistication, warehousing, civic
     /// works and FINANCE), NOT raw population. A compact but sophisticated city-state

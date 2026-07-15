@@ -15,6 +15,7 @@ export function ChroniclePanel() {
   const error = useCampaignStore((s) => s.error);
   const refresh = useCampaignStore((s) => s.refresh);
   const start = useCampaignStore((s) => s.start);
+  const coldStart = useCampaignStore((s) => s.coldStart);
   const newGame = useCampaignStore((s) => s.newGame);
   const pause = useCampaignStore((s) => s.pause);
   const setStatus = useUIStore((s) => s.setStatus);
@@ -61,6 +62,23 @@ export function ChroniclePanel() {
           <button onClick={() => start(seed)} disabled={busy}
             style={{ ...beginBtn, opacity: busy ? 0.5 : 1 }}>
             {busy ? "Starting…" : "▶ Begin Campaign"}
+          </button>
+        </div>
+      )}
+
+      {active && clock && clock.tick === 0 && (
+        <div style={{ ...cardStyle, border: `1px solid ${T.goldDim}`, padding: "10px" }}>
+          <div style={{ fontFamily: SERIF, color: T.parchment, fontSize: 13, fontWeight: 700, marginBottom: 4 }}>
+            ❄ Cold Start (optional)
+          </div>
+          <div style={{ color: T.inkDim, fontSize: 11, lineHeight: 1.5, marginBottom: 8 }}>
+            Zero <b>everything</b> — merchant houses, guilds, banks, coinage, warehouses and
+            wealth — and reset every city to a small seed. On unpause the world rebuilds its
+            trade network, finance and cities from nothing. Only before the clock starts.
+          </div>
+          <button onClick={() => coldStart()} disabled={busy}
+            style={{ ...beginBtn, opacity: busy ? 0.5 : 1 }}>
+            {busy ? "Zeroing…" : "❄ Cold Start — build from nothing"}
           </button>
         </div>
       )}

@@ -653,6 +653,14 @@ export async function campaignNewGame(seed: number): Promise<CampaignSnapshot> {
   return invoke("campaign_new_game", { seed });
 }
 
+/** COLD START: zero the just-started campaign's entire economy (houses, guilds, banks,
+ *  coinage, warehouses, wealth, institutions) and reset every city to a small seed, so on
+ *  unpause the world builds its trade network and cities up from nothing. Only valid on a
+ *  fresh, unadvanced campaign (tick 0). */
+export async function campaignColdStart(): Promise<CampaignSnapshot> {
+  return invoke("campaign_cold_start", {});
+}
+
 /** Advance the sim by N days. The backend keeps the sim resident in memory and
  *  autosaves on a year/wall-clock cadence — call `campaignPersist` to force a flush. */
 export async function campaignAdvance(ticks: number): Promise<CampaignSnapshot> {
