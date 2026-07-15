@@ -206,8 +206,12 @@ yr 50: towns 29  hungry 22  thriving 1     richest 417438
     house therefore signs PROCUREMENT futures to keep a manufactory's raw supply steady.
     Source selection / sizing / liability are unchanged, so a contract only forms when a
     house network node can actually bridge input-source → workshop (safe by construction).
-  - ⏳ Trader input-seeking (bias outpost/resource-colony founding toward a scarce input)
-    and manufacturing-gate softening: planned below.
+  - ✅ *Resource colonies (slice 3b, part 1):* `maybe_found_house_outpost` now biases the
+    outpost's produced good toward a SCARCE manufacturing input the founder's own network
+    barely makes (`OUTPOST_INPUT_BIAS`), so a rich house plants a raw-materials resource
+    colony to feed its workshops — closing the loop with procurement futures. Tests green.
+  - ⏳ Remaining 3b (dispatch-priority + office-expansion toward scarce inputs) and
+    manufacturing-gate softening (3c): planned below.
 
 ---
 

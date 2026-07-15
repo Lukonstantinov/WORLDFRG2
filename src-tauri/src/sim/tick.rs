@@ -435,6 +435,10 @@ const OUTPOST_START_TICK: u32 = 30 * 365;
 const OUTPOST_FOUND_WEALTH: f32 = 100_000.0; // a house this rich may found one
 const OUTPOST_FOUND_COST: f32 = 70_000.0;    // heavy cost (debited from the house)
 const OUTPOST_MAX_POP: f32 = 800.0;          // a trade post stays small (hard pop cap)
+/// Score bonus that biases a house trade-outpost toward yielding a SCARCE manufacturing
+/// input its own workshops lack — turning the outpost into a raw-materials RESOURCE
+/// COLONY. Large enough to dominate the base per-capita score (which sits in 0..1).
+const OUTPOST_INPUT_BIAS: f32 = 1.0;
 /// A long-lived, thriving outpost (at the cap) whose wealthy house has held it this
 /// many years may MATURE into a full colony (Phoenician emporion → city: Gadir, Utica).
 const OUTPOST_GRADUATE_YEARS: u32 = 30;
@@ -8476,17 +8480,37 @@ impl CampaignSim {
         }
         let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return };
         let ng = self.goods.len();
-        // Good: prefer one the house's home makes that matches the site's kind hint.
+        // A good is a RAW manufacturing INPUT if some recipe consumes it. A house whose
+        // workshops are short of raws will preferentially plant a RESOURCE COLONY that
+        // yields such an input (then ship it home / to its manufacturing offices) — the
+        // "traders establish colonies to secure the goods their manufactories need" rule.
+        let is_input: Vec<bool> = {
+            let mut s = vec![false; ng];
+            for g in 0..ng { for &(idx, _) in &self.goods[g].inputs { if idx < ng { s[idx] = true; } } }
+            s
+        };
+        // Manufacturing-input goods the founder's own network (home + offices) makes far
+        // TOO LITTLE of relative to the raws its workshops draw — the scarce inputs worth
+        // reaching for. Uses base_per_capita (own output) as the cheap in-tick proxy.
+        let short_input = |g: usize, this: &Self| -> bool {
+            if !is_input[g] || this.goods[g].food { return false; }
+            let own = this.hubs[home].base_per_capita.get(g).copied().unwrap_or(0.0);
+            own < 0.02 // the house's own cities barely produce this raw → worth a colony
+        };
+        // Good: prefer one the house's home makes that matches the site's kind hint,
+        // but bias hard toward a SCARCE manufacturing input the site can yield.
         let (mut g0, mut gbest) = (usize::MAX, 0.0f32);
         for g in 0..ng {
             if estate_kind_for_good(&self.goods[g].name, self.goods[g].food) == self.colonizable[si].kind_hint {
-                let s = self.hubs[home].base_per_capita.get(g).copied().unwrap_or(0.0) + 0.001;
+                let mut s = self.hubs[home].base_per_capita.get(g).copied().unwrap_or(0.0) + 0.001;
+                if short_input(g, self) { s += OUTPOST_INPUT_BIAS; } // resource-colony pull
                 if s > gbest { gbest = s; g0 = g; }
             }
         }
         if g0 == usize::MAX {
             for g in 0..ng {
-                let pc = self.hubs[home].base_per_capita.get(g).copied().unwrap_or(0.0);
+                let mut pc = self.hubs[home].base_per_capita.get(g).copied().unwrap_or(0.0);
+                if short_input(g, self) { pc += OUTPOST_INPUT_BIAS; }
                 if pc > gbest { gbest = pc; g0 = g; }
             }
         }
