@@ -171,5 +171,62 @@ scale (what should 500 years look like?), (f) performance budget for more live h
 
 ---
 
+---
+
+## 6. Manufactured goods, procurement futures & traders seeking inputs
+
+### 6.1 Finding: the catalog is rich, but little gets MADE
+- A new world already ships **~25 manufactured goods** (`default_list()` = 45 builtins +
+  `default_custom_goods()`: cloth, metalware, refined_sugar, citrus_liqueur, linen,
+  cotton_cloth, silk_brocade, carpets, leather_goods, bronzeware, jewelry, brandy, mead,
+  perfume, soap, candles, books, furniture, ivory_carvings, statuary, …). So "not many
+  manufactured goods" is a **runtime production** problem, not a missing-catalog problem.
+- `manufacture_pass` (`tick.rs:4775`) makes good G at hub H only if **every recipe input
+  is physically in H's stock this tick**: `made = min(inputs_available/qty, labor_cap)`,
+  `labor_cap = (pop/median_pop)·labor`. Consequences:
+  1. **Inputs must already be there.** They arrive only via *opportunistic spot dispatch*
+     driven by `add_manufacturing_demand` (`:4873`) — which competes with all other demand
+     and fails whenever trade is thin, cities are hungry, or the (straight-line) reach is
+     short. No guaranteed input supply → stochastic, often-zero output.
+  2. **Multi-input recipes need ALL inputs at once.** Missing one → output 0.
+  3. **Big-city gated.** `labor_cap ∝ pop/median_pop`, so only large cities make real
+     volume; most cities (small, hungry) make ~nothing.
+- **Futures today are consumption-side only** (`form_contracts`, `tick.rs:6464`): a merchant
+  HOUSE supplies a *finished* good to a deficit *consumer* office-city. There is **no
+  procurement-side contract** guaranteeing a manufactory's INPUT inflow, and manufactories
+  themselves never initiate contracts.
+
+### 6.2 Plan: guarantee input flow + traders hunt for goods
+**A. Procurement (input-side) futures.** When a hub has manufacturing capacity for G but a
+   chronic INPUT shortfall of I (track a smoothed `input_lack[hub][I]`), a house with an
+   office there signs a *procurement* futures contract to buy I from the nearest reachable
+   surplus source — reusing the `form_contracts` machinery but with buyer-need = derived
+   manufacturing demand for I, flagged as an input contract. This is literally "manufactures
+   are urged to have futures contracts so there is a stable goods flow." Buyer of record =
+   the house (or the city council as fallback), so a manufactory's raws arrive on schedule.
+
+**B. Traders actively seek scarce input goods.** A house whose manufacturing (or whose
+   offices' manufactories) is starved of I will, in order of cost:
+   1. **prioritise dispatch/arbitrage** of I toward the starved manufacturing hub;
+   2. **open a new trade tie / route** to a reachable producer of I (real pathfound route,
+      §4.3) — this is where "new trade routes get established" comes from;
+   3. if no reachable source exists in-component, **sponsor an OUTPOST or resource COLONY**
+      at a site that produces I — tie outpost/colony site-selection to the *scarce input
+      good*, not just generic reach (extends the existing colony/outpost system).
+
+**C. Make manufacturing more robust.** Warehouse-buffer inputs so a lean week doesn't zero
+   output; optionally lower the big-city gate so mid cities craft secondary goods
+   (specialisation vs. spread — a design choice, see questions). Surface a per-hub
+   "why isn't X being made?" limiting-factor (missing input vs. labour vs. demand).
+
+### 6.3 Synergy with the population/network plan
+Procurement futures + trader-seeking **depend on the pathfound route matrix (§4.3)** so the
+new routes are real, not straight lines; resource colonies **feed the growth engine (§4)**
+by planting new population centres where a coveted input is produced. The "Cold Start" flow
+(§4.4) then lets this whole supply-chain web assemble itself from zero on unpause — exactly
+the "watch the world build trade and relations" experience.
+
+---
+
 *File kept as the living design record for this work (per user: "keep info for the fix in
 the future"). Update with test trajectory numbers and decisions as they land.*
