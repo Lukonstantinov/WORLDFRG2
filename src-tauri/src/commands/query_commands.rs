@@ -990,6 +990,108 @@ fn coarse_dijkstra(cc: &CoarseCost, start: usize, goal: usize) -> Option<Vec<usi
     if path.len() < 2 { None } else { Some(path) }
 }
 
+/// Single-source Dijkstra over the coarse cost grid returning the predecessor array,
+/// so many goals can be reconstructed from ONE run (the campaign route-days matrix).
+fn coarse_dijkstra_prev(cc: &CoarseCost, start: usize) -> Vec<usize> {
+    let cw = cc.cw;
+    let ch = cc.ch;
+    let cn = (cw * ch) as usize;
+    let mut dist = vec![i64::MAX; cn];
+    let mut prev = vec![usize::MAX; cn];
+    let mut heap: BinaryHeap<Reverse<(i64, usize)>> = BinaryHeap::new();
+    if start >= cn { return prev; }
+    dist[start] = 0;
+    heap.push(Reverse((0, start)));
+    while let Some(Reverse((d, u))) = heap.pop() {
+        if d > dist[u] { continue; }
+        let ux = (u as i32) % cw;
+        let uy = (u as i32) / cw;
+        for &(dx, dy, mult) in &COARSE_DIRS {
+            let ny = uy + dy;
+            if ny < 0 || ny >= ch { continue; }
+            let v = cc.cidx(ux + dx, ny);
+            let step = ((cc.cost[u] + cc.cost[v]) * 0.5 * mult * 100.0) as i64;
+            let nd = d.saturating_add(step.max(1));
+            if nd < dist[v] { dist[v] = nd; prev[v] = u; heap.push(Reverse((nd, v))); }
+        }
+    }
+    prev
+}
+
+/// Geometric length (in FINE cells) of the reconstructed least-cost path start→goal,
+/// or None if goal is unreachable. Used to convert a routed path into travel-days at the
+/// sim's own `days_per_cell` scale (so detours around mountains/seas lengthen a leg while
+/// open routes stay ≈ the straight-line time — economic calibration is preserved).
+fn coarse_path_len_cells(cc: &CoarseCost, prev: &[usize], start: usize, goal: usize) -> Option<f32> {
+    if goal == start { return Some(0.0); }
+    if goal >= prev.len() || prev[goal] == usize::MAX { return None; }
+    let cw = cc.cw;
+    let mut len = 0.0f32;
+    let mut cur = goal;
+    let mut guard = 0usize;
+    while cur != start {
+        let p = prev[cur];
+        if p == usize::MAX { return None; }
+        let (cx, cy) = ((cur as i32) % cw, (cur as i32) / cw);
+        let (px, py) = ((p as i32) % cw, (p as i32) / cw);
+        let mut dx = (cx - px).abs();
+        if dx > cw / 2 { dx = cw - dx; } // cylindrical wrap on X
+        let dy = cy - py;
+        len += ((dx * dx + dy * dy) as f32).sqrt();
+        cur = p;
+        guard += 1;
+        if guard > (cc.cw * cc.ch) as usize { return None; } // safety
+    }
+    Some(len * cc.f as f32)
+}
+
+/// Precompute the campaign's REAL pathfound route-days matrix (n·n) over the coarse cost
+/// grid: mountain passes, rivers, coast-hugging and sea crossings are all priced in, so
+/// campaign trade/migration follow real lanes and NEVER draw a straight line. Days are the
+/// routed path's cell-length × `days_per_cell` (the sim's own scale). Only same-`component`
+/// pairs are filled; everything else is `INFINITY` (matches the sim's trade regions). On
+/// any failure the caller falls back to the old Euclidean matrix.
+pub(crate) fn compute_route_days_matrix(
+    db: &WorldDb,
+    conn: &rusqlite::Connection,
+    hub_xy: &[(f32, f32)],
+    components: &[u32],
+    days_per_cell: f32,
+) -> Result<Vec<f32>, String> {
+    let n = hub_xy.len();
+    if n == 0 { return Ok(vec![]); }
+    let grid_w: u32 = metadata::get_meta(conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    if grid_w == 0 || grid_h == 0 { return Err("no grid".into()); }
+    let world = db.cached_tiles_with_conn(conn)?;
+    // Allow sea crossings (block_sea=false) and desert routes so islands/continents in one
+    // component connect; no seasonal closure. Rivers omitted (campaign has no overlay JSON).
+    let cc = cached_coarse_cost(db, &world, world.fingerprint, grid_w, grid_h, "", false, true, 0.0, -1, 12)?;
+    let cell = |x: f32, y: f32| -> usize {
+        let cx = ((x / cc.f as f32) as i32).clamp(0, cc.cw - 1);
+        let cy = ((y / cc.f as f32) as i32).clamp(0, cc.ch - 1);
+        (cy * cc.cw + cx) as usize
+    };
+    let nodes: Vec<usize> = hub_xy.iter().map(|&(x, y)| cell(x, y)).collect();
+    let mut days = vec![f32::INFINITY; n * n];
+    for a in 0..n {
+        days[a * n + a] = 0.0;
+        // Only run the (costly) Dijkstra if this hub shares a component with any other.
+        let has_partner = (0..n).any(|b| b != a && components[b] == components[a]);
+        if !has_partner { continue; }
+        let prev = coarse_dijkstra_prev(&cc, nodes[a]);
+        for b in 0..n {
+            if b == a || components[b] != components[a] { continue; }
+            if let Some(len) = coarse_path_len_cells(&cc, &prev, nodes[a], nodes[b]) {
+                days[a * n + b] = (len * days_per_cell).max(1.0);
+            }
+        }
+    }
+    Ok(days)
+}
+
 /// Is a path acceptable under the chosen trade reach?
 ///   reach 0 = global (any crossing) · 1 = coastal+short crossings (open-water
 ///   run capped at `max_crossing_frac` of the width) · 2 = continental (no sea).

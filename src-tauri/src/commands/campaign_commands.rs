@@ -2284,6 +2284,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         hub_patron: vec![],
         dev_tier: vec![],
         dev_momentum: vec![],
+        base_days: vec![],
+        base_n: 0,
         hub_culture: vec![],
         hub_minorities: vec![],
         estate_idle_years: vec![],
@@ -2359,6 +2361,23 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         let hub_xy: Vec<(f32, f32)> = sim.hubs.iter().map(|h| (h.x, h.y)).collect();
         if let Ok(sites) = recompute_satellite_sites(&db, &conn, &hub_xy) {
             sim.satellite_sites = sites;
+        }
+    }
+    // PATHFOUND routes: precompute the campaign's route-days matrix over the SAME coarse
+    // cost grid the trade-route layer uses (passes / rivers / coast-hugging / sea crossings),
+    // so campaign trade & migration follow real lanes, never straight lines. Best-effort —
+    // on any failure `rebuild_routes` falls back to the straight-line estimate.
+    {
+        let hub_xy: Vec<(f32, f32)> = sim.hubs.iter().map(|h| (h.x, h.y)).collect();
+        let comps: Vec<u32> = sim.hubs.iter().map(|h| h.component).collect();
+        match crate::commands::query_commands::compute_route_days_matrix(
+            &db, &conn, &hub_xy, &comps, sim.days_per_cell,
+        ) {
+            Ok(bd) if bd.len() == hub_xy.len() * hub_xy.len() => {
+                sim.base_n = hub_xy.len();
+                sim.base_days = bd;
+            }
+            _ => { /* keep Euclidean fallback */ }
         }
     }
     sim.rebuild_routes();

@@ -2823,6 +2823,13 @@ pub struct CampaignSim {
     /// serialized — rebuilt from positions + components after load.
     #[serde(skip)]
     pub days: Vec<f32>,
+    /// PATHFOUND base route-days for the founding hubs (`base_n` × `base_n`), computed once
+    /// at campaign start over the SAME coarse cost grid the trade-route LAYER uses (passes,
+    /// rivers, coast-hugging, sea crossings — the trade-route generation rules), so campaign
+    /// routes follow real lanes and never a straight line. Serialized (survives save/load);
+    /// hubs added later (colonies, index ≥ `base_n`) fall back to Euclidean via `rebuild_routes`.
+    #[serde(default)] pub base_days: Vec<f32>,
+    #[serde(default)] pub base_n: usize,
     /// Per-hub nearest reachable trade partners (hub indices), sorted nearest
     /// first, capped to `NEIGHBOR_K`. Dispatch only ever ships to the few
     /// hungriest of these, so scanning the full `n` per seller is pure waste —
@@ -4714,6 +4721,11 @@ impl CampaignSim {
 
     pub fn rebuild_routes(&mut self) {
         let n = self.hubs.len();
+        let bn = self.base_n;
+        // The precomputed PATHFOUND matrix (real lanes over the trade-route cost grid) is
+        // preferred for the founding hubs; hubs added later (colonies, index ≥ bn) and any
+        // pair the pathfinder couldn't connect fall back to the straight-line estimate.
+        let have_base = bn > 0 && self.base_days.len() == bn * bn;
         let mut days = vec![f32::INFINITY; n * n];
         for a in 0..n {
             days[a * n + a] = 0.0;
@@ -4721,13 +4733,17 @@ impl CampaignSim {
                 if self.hubs[a].component != self.hubs[b].component {
                     continue;
                 }
-                let mut dx = (self.hubs[a].x - self.hubs[b].x).abs();
-                if self.world_w > 1.0 {
-                    dx = dx.min(self.world_w - dx); // cylindrical wrap
-                }
-                let dy = self.hubs[a].y - self.hubs[b].y;
-                let dist = (dx * dx + dy * dy).sqrt();
-                let d = (dist * self.days_per_cell).max(1.0);
+                let d = if have_base && a < bn && b < bn && self.base_days[a * bn + b].is_finite() {
+                    self.base_days[a * bn + b]
+                } else {
+                    let mut dx = (self.hubs[a].x - self.hubs[b].x).abs();
+                    if self.world_w > 1.0 {
+                        dx = dx.min(self.world_w - dx); // cylindrical wrap
+                    }
+                    let dy = self.hubs[a].y - self.hubs[b].y;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    (dist * self.days_per_cell).max(1.0)
+                };
                 days[a * n + b] = d;
                 days[b * n + a] = d;
             }
@@ -13411,7 +13427,7 @@ mod tests {
             fleets_migrated: true, tech_factor: 1.0, percap_migrated: true, society_migrated: false,
             components_rescued: true,
             house_ledger: Vec::new(), house_ledger_prev: Vec::new(), house_barred: Vec::new(),
-            colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], lingua: vec![], culture_history: vec![], council_bought_month: vec![], hub_patron: vec![], dev_tier: vec![], dev_momentum: vec![], colony_supply: vec![],
+            colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], lingua: vec![], culture_history: vec![], council_bought_month: vec![], hub_patron: vec![], dev_tier: vec![], dev_momentum: vec![], base_days: vec![], base_n: 0, colony_supply: vec![],
             hub_culture: vec![], hub_minorities: vec![], estate_idle_years: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
             recent_trades: vec![],
