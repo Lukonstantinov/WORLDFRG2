@@ -1078,12 +1078,13 @@ pub(crate) fn compute_route_days_matrix(
     let mut days = vec![f32::INFINITY; n * n];
     for a in 0..n {
         days[a * n + a] = 0.0;
-        // Only run the (costly) Dijkstra if this hub shares a component with any other.
-        let has_partner = (0..n).any(|b| b != a && components[b] == components[a]);
-        if !has_partner { continue; }
+        // Run Dijkstra for every hub regardless of component so that sea lanes
+        // connect cities on different geographic components (separate continents).
+        // The component filter was the reason isolated continents could never trade
+        // even when the sea cost grid had a viable route between them.
         let prev = coarse_dijkstra_prev(&cc, nodes[a]);
         for b in 0..n {
-            if b == a || components[b] != components[a] { continue; }
+            if b == a { continue; }
             if let Some(len) = coarse_path_len_cells(&cc, &prev, nodes[a], nodes[b]) {
                 days[a * n + b] = (len * days_per_cell).max(1.0);
             }

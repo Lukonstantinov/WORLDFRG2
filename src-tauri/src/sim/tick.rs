@@ -4730,19 +4730,21 @@ impl CampaignSim {
         for a in 0..n {
             days[a * n + a] = 0.0;
             for b in (a + 1)..n {
-                if self.hubs[a].component != self.hubs[b].component {
-                    continue;
-                }
                 let d = if have_base && a < bn && b < bn && self.base_days[a * bn + b].is_finite() {
+                    // Pathfinder found a real route (possibly across continents via sea).
                     self.base_days[a * bn + b]
-                } else {
+                } else if self.hubs[a].component == self.hubs[b].component {
+                    // Same geographic component but no pathfound route: straight-line fallback.
                     let mut dx = (self.hubs[a].x - self.hubs[b].x).abs();
                     if self.world_w > 1.0 {
-                        dx = dx.min(self.world_w - dx); // cylindrical wrap
+                        dx = dx.min(self.world_w - dx);
                     }
                     let dy = self.hubs[a].y - self.hubs[b].y;
                     let dist = (dx * dx + dy * dy).sqrt();
                     (dist * self.days_per_cell).max(1.0)
+                } else {
+                    // Different components AND no pathfound sea route: unreachable.
+                    continue;
                 };
                 days[a * n + b] = d;
                 days[b * n + a] = d;
