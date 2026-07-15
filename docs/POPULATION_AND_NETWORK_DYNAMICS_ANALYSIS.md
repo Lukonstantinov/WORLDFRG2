@@ -339,5 +339,52 @@ the "watch the world build trade and relations" experience.
 
 ---
 
+## 8. The megacity engine (>1M) — historical analysis → sim design
+
+**Why it must be RARE.** Almost all premodern cities capped at 10k–100k; even great trade
+republics (Venice, Bruges) topped ~150–200k. Only a handful ever passed a million (Rome
+~1M; Han/Tang Chang'an, Song Kaifeng, Ming/Qing Beijing ~1M; Baghdad, Constantinople). A
+million-person city needs the **conjunction** of five engines — miss one and it falls back
+to ~150k. That conjunction being rare is exactly why >1M should be rare in the sim.
+
+| # | Historical engine | Current sim analogue | What to add |
+|---|---|---|---|
+| 1 | **Political primacy** — the capital *commands* tax/tribute grain, doesn't merely buy it (Rome's *annona*; Chinese tax-grain) | poleis treasury, `govt_type`, influence, wars/levies | **Capital/primacy multiplier** on carrying capacity for the dominant polis of a region (top treasury+influence): it can command tribute-grain, so its ceiling is far higher than a pure trade city's |
+| 2 | **Secured bulk grain by WATER from *multiple* breadbaskets** (sea lanes / Grand Canal; ~20× cheaper than land) | colony supply-ship lifeline (`designate_colony_supply`), bulk/perishable freight | **State grain fleet ("annona")**: a capital runs standing, secured supply from several water-connected surplus provinces; this is what LIFTS the food ceiling. Land-locked hubs can't do it → cap lower |
+| 3 | **Granary storage** against convoy breaks (*horrea*, state granaries) | `reserve_food` / `reserve_cap`, granary starvation guards | Scale reserve capacity with primacy/infrastructure so a great capital buffers months, not days |
+| 4 | **Constant in-migration** overcoming the urban "graveyard" (deaths>births in dense cities) | `economic_migration_pass` (homophily, trade-tie chains) | **Urban death-sink**: give large/dense cities a mild NEGATIVE natural rate, offset only by in-migration — makes migration the true growth engine of big cities (as in history) and keeps >1M dependent on a live catchment |
+| 5 | **Metropolitan system** — core + port/granary/workshop satellites as one unit (Rome+Ostia; Chang'an wards) | satellite construction (`SATELLITE_METRO_POP`=25k), absorption, hinterland | **Metro accounting**: a metropolis's satellites SHARE its food supply and their pop counts toward the metro's effective scale; a capital spins up more satellites as it grows |
+
+**The rule to encode:** capacity for a hub can exceed ~1M **only** when ALL of: it is a
+regional political CAPITAL (primacy) · it is WATER-connected (coastal/river/canal) · it runs
+a SECURED multi-source grain supply (annona) with granary buffers · it has a live in-migration
+CATCHMENT · it anchors a satellite SYSTEM. Encode each as a gate/multiplier so the product is
+almost never all-on — a handful of cities per world, exactly like history. This layers on top
+of the trade-earned ceiling already shipped (§5b slice 1): trade builds the great city; only
+imperial primacy + secured water-grain pushes the rare one past a million.
+
+**Dependencies:** needs the **absolute food-capacity redesign** (slice 1b) so the food ceiling
+is real and liftable by imports; needs the **pathfound route matrix** (slice 2) so "water-
+connected" and "secured lane" are meaningful; benefits from **dynamic hub roles** (§9) so
+"which city is the capital/entrepôt" is known each year.
+
+## 9. Dynamic yearly recalculation of hub roles (trade hubs · entrepôts · largest cities) — *FOR LATER*
+
+Today the hub roles (trade power, entrepôt status, political primacy, largest-city ranking)
+are computed **once** by the query-only worldgen passes (`compute_political`, `compute_economy`)
+and are effectively static in campaign mode. **Plan:** add a cheap **yearly** pass in `advance`
+(at New Year, alongside `sample_culture_history` / `flow_year`) that recomputes, from LIVE state:
+- **Largest cities** — rank by live `population`.
+- **Trade hubs** — rank by route-centrality × realized throughput (`trade_last_year`).
+- **Entrepôts** — hubs whose transit/re-export volume dominates their own consumption.
+- **Political primacy / capital** — top treasury + influence per region (component), feeding the
+  megacity primacy multiplier (§8).
+These feed: the growth ceiling (capital & entrepôt bonuses), coinage/mint eligibility, office
+expansion targets, and the map's hub styling — so the network's "important places" **shift over
+the centuries** as cities rise and fall, instead of being frozen at worldgen. Recompute cadence:
+once per year (bounded cost). *Not started — scheduled after slices 1b/2.*
+
+---
+
 *File kept as the living design record for this work (per user: "keep info for the fix in
 the future"). Update with test trajectory numbers and decisions as they land.*
