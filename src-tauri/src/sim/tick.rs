@@ -11284,6 +11284,7 @@ impl CampaignSim {
         let has_laws  = !hub.laws.is_empty();
         let civic     = hub.structures.len();
         let health    = hub.public_health;
+        let has_trade = hub.trade_last_year > 0.0;
         let trade_hub = hub.hub_class >= 1;      // classify_hubs: busy secondary market
         let entrepot  = hub.hub_class >= 2;      // classify_hubs: apex sea entrepôt
         // Biggest warehouse tier standing at this hub (0..5: Depot..Grand Entrepôt).
@@ -11296,25 +11297,33 @@ impl CampaignSim {
         // A guild seated in this settlement.
         let has_guild = self.houses.iter()
             .any(|hh| hh.is_guild && !hh.defunct && hh.hub as usize == h);
-        // ── tiers, top-down: institutional gates with LOW population floors ──
-        // 5 Emporium — an apex mercantile city: entrepôt, grand warehousing, its OWN
-        //   coinage + finance, deep civic institutions, stable government.
-        if pop >= 30_000.0 && entrepot && wh_tier >= 5 && own_coin && finance
-            && civic >= 4 && stable && has_govt && has_laws && health >= 0.4 {
+        // Count of true booleans — for "at least N of these" supporting-milestone gates.
+        let count = |bs: &[bool]| bs.iter().filter(|&&b| b).count();
+        // ── tiers, top-down. Each tier = a POPULATION FLOOR (soft) + a small REQUIRED
+        //    core + "at least N of M" SUPPORTING milestones, so there are several PATHS
+        //    to each tier and no single rare flag can hard-block it (keeps tiers actually
+        //    achievable while still meaning something). Advancement, not size, drives it.
+        //
+        // 5 Emporium — apex mercantile city: real trade eminence + finance, then 3 of the
+        //   deep-institution set (its own coin, grand storage, many civic works, laws,
+        //   stability, public health, a guild).
+        if pop >= 20_000.0 && (entrepot || trade_hub) && finance
+            && count(&[own_coin, wh_tier >= 4, civic >= 3, has_laws, stable,
+                       health >= 0.3, has_guild]) >= 3 {
             return 5;
         }
-        // 4 Free City — self-governing with laws, a trade hub, entrepôt-grade storage
-        //   and a bank/mint (finance arrives).
-        if pop >= 10_000.0 && trade_hub && wh_tier >= 4 && finance
-            && civic >= 3 && has_govt && has_laws && stable {
+        // 4 Free City — a trade hub that has attracted FINANCE, plus 2 supporting institutions.
+        if pop >= 7_000.0 && trade_hub && finance
+            && count(&[wh_tier >= 3, civic >= 2, has_guild, has_laws, stable]) >= 2 {
             return 4;
         }
-        // 3 Guild Town — a chartered town with a seated guild, real storage and a civic work.
-        if pop >= 3_000.0 && has_guild && wh_tier >= 2 && civic >= 1 && has_govt {
+        // 3 Guild Town — a governed town with a couple of real institutions.
+        if pop >= 2_000.0 && has_govt
+            && count(&[has_guild, wh_tier >= 1, civic >= 1, trade_hub]) >= 2 {
             return 3;
         }
-        // 2 Market — a functioning local market: some trade and at least a depot.
-        if pop >= 800.0 && (trade_hub || hub.trade_last_year > 0.0 || wh_tier >= 1) {
+        // 2 Market — a functioning local market: some trade, or at least a depot.
+        if pop >= 700.0 && (has_trade || wh_tier >= 1 || trade_hub) {
             return 2;
         }
         // 1 Outpost — a bare founding settlement.

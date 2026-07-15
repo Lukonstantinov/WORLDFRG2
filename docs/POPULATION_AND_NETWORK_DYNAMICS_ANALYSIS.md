@@ -399,21 +399,22 @@ institutionally deep city-state outranks a bigger but shallow town. Population i
 **soft floor** (so a hamlet can't read as an emporium). Distinct from `hub_class` (commercial
 rank only); this blends institutions across pillars.
 
-### Tiers & milestones (approved model; thresholds tunable)
-Names (user asked for a fresh set) → **1 Outpost · 2 Market · 3 Guild Town · 4 Free City ·
-5 Emporium** (renamable).
-| Tier | Name | Soft pop floor | Government | Trade | Warehouse | Civic | **Finance** |
-|------|------|----------------|-----------|-------|-----------|-------|-------------|
-| 1 | **Outpost** | founding | — | subsistence | — | — | — |
-| 2 | **Market** | ~800 | — | some trade (`trade_last_year`>0 / hub) | Depot | — | — |
-| 3 | **Guild Town** | ~3,000 | `govt_type`>0 / officials | — | Storehouse (≥T2) | ≥1 structure | seated **guild** |
-| 4 | **Free City** | ~10,000 | laws + officials, stable | trade hub (`hub_class`≥1) | Entrepôt (≥T4) | ≥3 | a **bank or mint** |
-| 5 | **Emporium** | ~30,000 | dominant/capital, very stable | entrepôt (`hub_class`=2) | Grand Entrepôt (T5) | ≥4 + `public_health`≥0.4 | **own coinage** + finance |
+### Tiers & milestones — ACHIEVABLE "core + N-of-M" model
+Names (fresh set) → **1 Outpost · 2 Market · 3 Guild Town · 4 Free City · 5 Emporium**.
+Each tier = a **soft population floor** + a small **required core** + **"at least N of M"
+supporting milestones**, so there are several PATHS and no single rare flag hard-blocks a
+tier. **Full human-readable requirements: `docs/SETTLEMENT_TIER_REQUIREMENTS.md`.**
+| Tier | Pop floor | Required core | Supporting (need N of M) |
+|------|-----------|---------------|--------------------------|
+| 2 Market | 700 | — | any 1 of {traded this year, a depot, trade-hub} |
+| 3 Guild Town | 2,000 | government | **2 of** {guild, warehouse, 1 civic, trade-hub} |
+| 4 Free City | 7,000 | trade-hub **+** finance | **2 of** {warehouse T3+, 2 civic, guild, laws, stable} |
+| 5 Emporium | 20,000 | (entrepôt or trade-hub) **+** finance | **3 of** {own coin, warehouse T4+, 3 civic, laws, stable, public health, guild} |
 
 Pillars: Government (`govt_type`/`officials`/`laws`/`sent_stability`/`society.unrest`) ·
 Trade (`hub_class`/`trade_last_year`) · Warehouse (biggest `capacity_tier` at the hub) ·
-Civic (`structures` count / `public_health`) · **Finance** (own coin / mint / bank stake —
-the approved extra pillar). Population enters only as the soft floor.
+Civic (`structures` count / `public_health`) · **Finance** (own coin / mint / bank stake).
+Population is only the soft floor. Implemented in `development_tier()`; unit-tested.
 
 ### Mechanics
 - ✅ **Backend classifier shipped:** `CampaignSim::development_tier(h) -> u8` (pure,
