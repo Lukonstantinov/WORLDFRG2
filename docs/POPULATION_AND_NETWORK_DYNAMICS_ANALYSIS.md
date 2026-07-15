@@ -162,14 +162,45 @@ yr 50: towns 29  hungry 22  thriving 1     richest 417438
 
 ---
 
-## 5. Open design questions (need the user's call)
+## 5. Decisions (locked)
 
-See the chat message — decisions on: (a) hub cap vs. dynamic wake/sleep, (b) whether to
-break the founding_pop ceiling, (c) precomputed pathfound matrix vs. keep straight-line,
-(d) whether Cold Start is a new mode or replaces default start, (e) target end-state pop
-scale (what should 500 years look like?), (f) performance budget for more live hubs.
+- **Growth model:** rising *earned* carrying capacity (land + trade throughput, ratchets
+  up) **AND** a generative net births−deaths term gated by food. *(Q1 = both.)*
+- **Static towns:** dynamic **wake/sleep** hinterland (grow slowly, graduate to live hubs).
+- **Routes:** **precompute a pathfound route-days matrix** at campaign start; tick reads it.
+- **Cold Start:** ship as a **new optional mode** (default start unchanged).
+- **Procurement futures:** a **merchant house** (house-first) signs input contracts.
+- **Input sourcing:** traders open **new pathfound routes AND found resource colonies**.
+- **Manufacturing spread:** keep concentration but **slightly lower the labour gate** so
+  mid cities craft 1–2 secondary goods.
+- **Sequencing:** **growth + food fix FIRST** (unblocks the stall), test, then routes →
+  procurement futures + trader-seeking → hinterland wake/sleep + Cold Start.
+- **Target scale (working goal, tunable):** over ~500 y expect a handful of cities at
+  200k–500k, total world pop rising into the tens of millions, 2–3 new (creole) cultures,
+  and a visibly denser real-route web. *(Confirm/adjust.)*
 
 ---
+
+---
+
+## 5b. Implementation status
+
+- **Slice 1 — growth + food (IN PROGRESS).**
+  - ✅ *Earned rising ceiling:* carrying capacity now ratchets with realized trade
+    (`trade_last_year`) via `trade_dev` — a busy entrepôt reaches ≈30× founding (was a
+    fixed ~9×), an isolated hub stays small. `tick.rs` growth block + new consts
+    `TRADE_DEV_REF`/`TRADE_DEV_CAP`.
+  - ✅ *Generative births−deaths:* net demographic drift (`BIRTH_RATE·food_sec −
+    DEATH_RATE_BASE`) added below capacity so the TOTAL pie can grow, not just
+    redistribute. Damped by remaining headroom → stays bounded/finite.
+  - ✅ Standing dynamics test green; wealth bounded (~423k), turnover intact.
+  - ⏳ *Caveat:* the synthetic test world is food-poor by construction (≈28/30 hungry),
+    so it can't visually showcase growth; real validation needs a full generated world
+    (needs GUI — verify in-app on the user's 500-y campaign). Next: decouple "at food
+    capacity (content, small)" from "starving (dying)" so structurally arid sites settle
+    at a stable small size instead of perpetual famine pinning their growth signal.
+- Slices 2-4 (pathfound routes · procurement futures + trader-seeking · hinterland
+  wake/sleep + Cold Start): not started.
 
 ---
 

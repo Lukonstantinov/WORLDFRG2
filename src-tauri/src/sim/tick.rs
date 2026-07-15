@@ -222,6 +222,22 @@ const COLONY_MIN_TRADE: f32 = 0.18;
 const POP_GROWTH_RATE: f32 = 0.0003;
 /// Daily decline rate when a city is above its carrying capacity.
 const POP_DECLINE_RATE: f32 = 0.0006;
+/// ── EARNED trade development (growth v2) ──────────────────────────────────────
+/// A hub's carrying capacity used to be a FIXED multiple of its frozen founding
+/// size (max ≈9×), so total world population asymptoted and stalled. It now
+/// RATCHETS with realized trade throughput (`trade_last_year`): a hub that grows
+/// into a busy entrepôt keeps earning headroom and can climb to metropolis scale
+/// over centuries, while an isolated/low-trade hub stays small. Reference &
+/// ceiling below are tuned so a top trade nexus reaches ≈30× its founding size.
+/// `trade_dev = clamp(trade_last_year / (founding_pop · REF), 0, CAP)`.
+const TRADE_DEV_REF: f32 = 6.0;    // trade-per-founder that scores 1.0 of headroom
+const TRADE_DEV_CAP: f32 = 15.0;   // max earned headroom added to the capacity mult
+/// Net demographic drift (growth v2): a well-fed populace has a small birth
+/// surplus so the TOTAL world population can actually grow (not just redistribute
+/// via migration); dearth turns it negative. Applied on top of the logistic
+/// approach-to-capacity, and only while below capacity, so wealth/pop stay bounded.
+const BIRTH_RATE: f32 = 0.00006;   // ~+2.2%/yr at full food security
+const DEATH_RATE_BASE: f32 = 0.00002; // ~-0.7%/yr baseline mortality
 /// Young settlement colonies grow this much faster organically (frontier boom).
 const POP_GROWTH_COLONY_MULT: f32 = 2.2;
 /// Below this population a settlement is a "small city" (user growth/disease rules).
@@ -7819,14 +7835,18 @@ impl CampaignSim {
             let pop = self.hubs[h].population;
             let food_sec = self.hubs[h].sent_food.clamp(0.0, 1.0); // 1 = well fed
             let prosperity = self.hubs[h].sent_prosperity.clamp(0.0, 1.0); // trade+grain wealth
-            // Capacity in multiples of the founding population (≈0.25× when poor &
-            // hungry, up to ≈2.7× for a rich, well-fed entrepôt).
-            // Capacity scales with FOOD security and (strongly) TRADE prosperity so a
-            // thriving hub keeps growing into a real city instead of stalling at a
-            // fixed ~2.7× of its humble founding size — the old ceiling froze every
-            // city ~year 50 and flat-lined trade. A rich, well-fed entrepôt can now
-            // reach ~9× its founding size; a poor isolated one stays small.
-            let cap_mult = (0.35 + 1.30 * food_sec) * (0.60 + 5.0 * prosperity * prosperity);
+            // Capacity in multiples of the founding population. FOOD security and
+            // TRADE prosperity gate the base; realized trade throughput adds a large,
+            // slowly-EARNED headroom on top (`trade_dev`) so a hub that becomes a busy
+            // entrepôt keeps growing into a metropolis instead of freezing at a fixed
+            // ~9× of its humble founding size (the old ceiling that stalled the world
+            // at ~3.2M). An isolated/low-trade hub earns little headroom and stays
+            // small — exactly the historical pattern (arid inland town vs. great port).
+            let trade_dev = (self.hubs[h].trade_last_year
+                / (self.hubs[h].founding_pop.max(1.0) * TRADE_DEV_REF))
+                .clamp(0.0, TRADE_DEV_CAP);
+            let cap_mult = (0.35 + 1.30 * food_sec)
+                * (0.60 + 3.0 * prosperity * prosperity + trade_dev);
             let capacity = (self.hubs[h].founding_pop * cap_mult)
                 .max(self.hubs[h].founding_pop * 0.15);
             // Logistic step: approach capacity from below, decline when above it.
@@ -7845,6 +7865,14 @@ impl CampaignSim {
             let trade_food_boost = 1.0 + TRADE_FOOD_GROWTH_BONUS * prosperity * food_sec;
             let rate = if pop < capacity { POP_GROWTH_RATE * colony_boom * small_boost * trade_food_boost } else { POP_DECLINE_RATE };
             let mut new_pop = pop + rate * pop * (1.0 - pop / capacity);
+            // Net demographic drift (births − deaths): a well-fed populace has a small
+            // birth surplus so the TOTAL world can grow (migration alone only reshuffles
+            // a fixed pie). Applied only BELOW capacity and damped by remaining headroom
+            // so it can't overshoot — total population stays bounded and finite.
+            if pop < capacity {
+                let net = BIRTH_RATE * food_sec - DEATH_RATE_BASE;
+                new_pop += net * pop * (1.0 - pop / capacity);
+            }
             // Famine empties a city faster than trade decline alone.
             if self.hubs[h].starving > 0.5 {
                 new_pop *= 1.0 - 0.0016 * (self.hubs[h].starving - 0.5);
