@@ -1,7 +1,7 @@
 use tauri::State;
 use crate::db::WorldDb;
 use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
-use crate::sim::{plates, elevation, ocean, temperature, precipitation, koppen, rivers, soil, fertility, settlements, biological, toponyms};
+use crate::sim::{plates, elevation, ocean, temperature, jets, precipitation, koppen, rivers, soil, fertility, settlements, biological, toponyms};
 use crate::db::metadata;
 
 /// Generate tectonic plates and derive landmass.
@@ -75,6 +75,10 @@ pub fn sim_ocean_atmosphere(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, S
     temperature::compute_temperature(&mut buf);
     ocean::compute_upwelling_zones(&mut buf);
     ocean::apply_cold_shelf_cooling(&mut buf, &sea_freeze);
+    // Low-level jets (Somali jet et al.) must precede precipitation: their
+    // entrance/exit acceleration reshapes where rain falls, and the Wind Speed
+    // layer reads the speed field they write.
+    jets::compute_low_level_jets(&mut buf);
     precipitation::compute_precipitation(&mut buf);
 
     buf.save(&conn, "Ocean & atmosphere simulation")
@@ -300,6 +304,10 @@ pub fn sim_run_all(
     temperature::compute_temperature(&mut buf);
     ocean::compute_upwelling_zones(&mut buf);
     ocean::apply_cold_shelf_cooling(&mut buf, &sea_freeze);
+    // Low-level jets (Somali jet et al.) must precede precipitation: their
+    // entrance/exit acceleration reshapes where rain falls, and the Wind Speed
+    // layer reads the speed field they write.
+    jets::compute_low_level_jets(&mut buf);
     precipitation::compute_precipitation(&mut buf);
 
     // Phase 4: Climate
@@ -439,6 +447,10 @@ pub fn sim_run_all_from_terrain(
     temperature::compute_temperature(&mut buf);
     ocean::compute_upwelling_zones(&mut buf);
     ocean::apply_cold_shelf_cooling(&mut buf, &sea_freeze);
+    // Low-level jets (Somali jet et al.) must precede precipitation: their
+    // entrance/exit acceleration reshapes where rain falls, and the Wind Speed
+    // layer reads the speed field they write.
+    jets::compute_low_level_jets(&mut buf);
     precipitation::compute_precipitation(&mut buf);
 
     // Phase 4: Climate

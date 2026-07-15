@@ -1739,10 +1739,12 @@ fn monsoon_climate_intensity(k: u8) -> f32 {
     }
 }
 
-/// Cluster the LAND areas under a monsoon-type climate (tropical monsoon Am,
-/// savanna Aw/As, and the dry-winter Cw*/Dw* types) into discrete regions — the
-/// seasonal wet-season flood belt. Shown on the Natural Disasters overlay
-/// alongside the cyclone (hurricane) zones. Mirrors `compute_storm_zones`.
+/// Cluster the LAND areas under the seasonal monsoon into discrete regions — the
+/// wet-season flood belt. Derived from the low-level-jet dynamics: heaviest where
+/// a decelerating onshore JET converges over the coast (jet exit), gated by
+/// onshore warm-sea flow, with the Köppen monsoon climates (Am/Cw*/Dw*) kept as a
+/// supporting signal. Shown on the Natural Disasters overlay alongside the cyclone
+/// (hurricane) zones. Mirrors `compute_storm_zones`.
 #[tauri::command]
 pub fn compute_monsoon_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -1758,6 +1760,29 @@ pub fn compute_monsoon_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, S
     let ch = ((grid_h + f - 1) / f) as i32;
     let mut risk = vec![0.0f32; (cw * ch) as usize];
 
+    // Monsoon intensity is now derived from the low-level-jet dynamics — the
+    // heavy wet-season rains land where a decelerating onshore JET converges over
+    // the coast (jet EXIT), so the overlay is built from: (a) jet-exit convergence
+    // gated by (b) onshore warm-sea flow, with the Köppen monsoon climates
+    // (Am/Cw*/Dw*) kept as a supporting signal so established monsoon regions still
+    // register even on worlds without a strong resolved jet.
+    const MONSOON_JET_MIN: f32 = 8.0;    // wind speed (m/s) below which a cell isn't a jet
+    const MONSOON_ACCEL_SCALE: f32 = 6.0; // along-flow Δspeed that saturates the exit signal
+    let gw = grid_w as i32;
+    let gh = grid_h as i32;
+    let km_per_cell = 40075.0f32 / grid_w as f32;
+    let onshore_range = ((800.0 / km_per_cell).round() as i32).max(10);
+
+    // Sample (terrain, current_type, wind_speed) at any global cell (x wraps).
+    let at = |wx: i32, wy: i32| -> Option<(u8, u8, f32)> {
+        if wy < 0 || wy >= gh { return None; }
+        let x = (((wx % gw) + gw) % gw) as u32;
+        let y = wy as u32;
+        let t = world.tile((x / TILE_SIZE) as i32, (y / TILE_SIZE) as i32);
+        let li = ((y % TILE_SIZE) * TILE_SIZE + (x % TILE_SIZE)) as usize;
+        Some((t.terrain[li], t.current_type[li], t.wind_speed[li]))
+    };
+
     let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
     let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
     for ty in 0..tiles_y as i32 {
@@ -1771,7 +1796,53 @@ pub fn compute_monsoon_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, S
                 for lx in 0..max_lx {
                     let ti = (ly * TILE_SIZE + lx) as usize;
                     if tile.terrain[ti] != 1 { continue; }
-                    let v = monsoon_climate_intensity(tile.koppen[ti]);
+                    let wx = (base_x + lx) as i32;
+                    let wy = (base_y + ly) as i32;
+                    let lat = world.latitude(wy as u32);
+
+                    // Köppen support (established monsoon climates).
+                    let kopp = monsoon_climate_intensity(tile.koppen[ti]);
+
+                    // Jet-exit convergence: the flow DECELERATES downwind (s_up > s_down).
+                    let s = tile.wind_speed[ti];
+                    let wvx = tile.wind_vx[ti];
+                    let wvy = tile.wind_vy[ti];
+                    let wl = (wvx * wvx + wvy * wvy).sqrt();
+                    let mut jet_exit = 0.0f32;
+                    if s >= MONSOON_JET_MIN && wl > 0.01 {
+                        let dx = wvx / wl;
+                        let dy = wvy / wl;
+                        let s_down = at((wx as f32 + dx * 2.0).round() as i32,
+                                        (wy as f32 + dy * 2.0).round() as i32)
+                            .map(|c| c.2).unwrap_or(0.0);
+                        let s_up = at((wx as f32 - dx * 2.0).round() as i32,
+                                      (wy as f32 - dy * 2.0).round() as i32)
+                            .map(|c| c.2).unwrap_or(s);
+                        let decel = ((s_up - s_down) / MONSOON_ACCEL_SCALE).clamp(0.0, 1.0);
+                        let strength = ((s - MONSOON_JET_MIN) / 12.0).clamp(0.0, 1.0);
+                        jet_exit = decel * strength;
+                    }
+
+                    // Onshore warm-sea flow on the equatorward / eastern fetch.
+                    let eqdir = if lat >= 0.0 { 1i32 } else { -1 };
+                    let mut onshore = 0.0f32;
+                    for &(dx, dy) in &[(0i32, eqdir), (1, eqdir), (1, 0)] {
+                        for step in 1..=onshore_range {
+                            match at(wx + dx * step, wy + dy * step) {
+                                None => break,
+                                Some((terr, ct, _)) => {
+                                    if terr == 0 {
+                                        let warm = if ct == 2 { 0.3 } else { 1.0 };
+                                        onshore = onshore
+                                            .max((1.0 - step as f32 / onshore_range as f32) * warm);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let v = (0.55 * kopp + 0.9 * jet_exit * onshore + 0.25 * onshore).min(1.0);
                     if v <= 0.0 { continue; }
                     let cx = ((base_x + lx) / f) as i32;
                     let cy = ((base_y + ly) / f) as i32;
@@ -5997,6 +6068,7 @@ mod river_system_tests {
             precipitation: vec![1200.0f32; n], koppen: vec![crate::sim::koppen::CFB; n],
             soil_type: Vec::new(), fertility: Vec::new(), fishery: Vec::new(),
             current_type: Vec::new(), wind_vx: Vec::new(), wind_vy: Vec::new(),
+            wind_speed: Vec::new(),
             current_vx: Vec::new(), current_vy: Vec::new(), distance_to_ocean: Vec::new(),
             habitability: Vec::new(), salinity: Vec::new(), shark_risk: Vec::new(),
             goods: Vec::new(), shipworm_risk: Vec::new(), storm_base: Vec::new(),

@@ -3,6 +3,7 @@ pub mod plates;
 pub mod elevation;
 pub mod ocean;
 pub mod temperature;
+pub mod jets;
 pub mod precipitation;
 pub mod koppen;
 pub mod rivers;

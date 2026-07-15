@@ -1625,7 +1625,7 @@ mod tests {
             plate_index: Vec::new(), boundary_type: Vec::new(), is_volcanic: Vec::new(),
             temperature: vec![5.0f32; n], precipitation: Vec::new(), koppen: Vec::new(),
             soil_type: Vec::new(), fertility: Vec::new(), fishery: Vec::new(),
-            current_type: vec![0u8; n], wind_vx: Vec::new(), wind_vy: Vec::new(),
+            current_type: vec![0u8; n], wind_vx: Vec::new(), wind_vy: Vec::new(), wind_speed: Vec::new(),
             current_vx: vec![0.0f32; n], current_vy: vec![0.0f32; n],
             distance_to_ocean: Vec::new(), habitability: Vec::new(),
             salinity: vec![128u8; n], shark_risk: Vec::new(), goods: Vec::new(),

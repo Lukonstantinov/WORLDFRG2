@@ -1665,7 +1665,7 @@ mod tests {
             temperature: Vec::new(), precipitation: vec![120.0; n],
             koppen: vec![super::super::koppen::BWK; n],
             soil_type: Vec::new(), fertility: Vec::new(), fishery: Vec::new(),
-            current_type: Vec::new(), wind_vx: Vec::new(), wind_vy: Vec::new(),
+            current_type: Vec::new(), wind_vx: Vec::new(), wind_vy: Vec::new(), wind_speed: Vec::new(),
             current_vx: Vec::new(), current_vy: Vec::new(), distance_to_ocean: Vec::new(),
             habitability: Vec::new(), salinity: vec![0u8; n], shark_risk: Vec::new(),
             goods: Vec::new(), shipworm_risk: Vec::new(), storm_base: Vec::new(),

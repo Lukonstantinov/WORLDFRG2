@@ -144,7 +144,7 @@ export type ActiveTool = "pan" | "select" | "paint" | "elevation" | "shelf" | "v
 export type ActiveLayer =
   | "land" | "elevation" | "climate" | "temperature" | "precipitation"
   | "soil" | "fertility" | "plates"
-  | "biomes" | "fisheries" | "terrain" | "shelf" | "ridges" | "wind" | "currents"
+  | "biomes" | "fisheries" | "terrain" | "shelf" | "ridges" | "wind" | "windspeed" | "currents"
   | "habitability" | "salinity" | "shark" | "shipworm" | "storm" | "reef" | "disease";
 
 export interface VectorSample {

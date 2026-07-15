@@ -23,6 +23,7 @@ pub fn render_tile(tile: &TileData, layer: &str) -> Vec<u8> {
         "shelf" => render_shelf(tile, &mut rgba),
         "ridges" => render_ridges(tile, &mut rgba),
         "wind" => render_wind(tile, &mut rgba),
+        "windspeed" => render_windspeed(tile, &mut rgba),
         "currents" => render_currents(tile, &mut rgba),
         "habitability" => render_habitability(tile, &mut rgba),
         "salinity" => render_salinity(tile, &mut rgba),
@@ -767,6 +768,49 @@ fn render_wind(tile: &TileData, rgba: &mut [u8]) {
             rgba[offset + 1] = g;
             rgba[offset + 2] = b;
         }
+        rgba[offset + 3] = 255;
+    }
+}
+
+/// Wind Speed layer: a filled low-level wind-intensity field (incl. jets like the
+/// Somali Jet) over the whole map, using the classic monsoon-map ramp
+/// (tan → yellow → orange → red) keyed on `wind_speed` (m/s), 0 → 30.
+fn render_windspeed(tile: &TileData, rgba: &mut [u8]) {
+    // Colour stops at 0,4,8,12,16,20,24,30 m/s — pale tan through deep red.
+    const STOPS: [(f32, (u8, u8, u8)); 8] = [
+        (0.0, (245, 240, 225)),  // near-calm: off-white
+        (4.0, (232, 224, 186)),  // pale tan
+        (8.0, (224, 205, 130)),  // tan
+        (12.0, (240, 220, 90)),  // yellow
+        (16.0, (240, 170, 55)),  // orange
+        (20.0, (226, 110, 40)),  // deep orange
+        (24.0, (200, 55, 40)),   // red
+        (30.0, (140, 20, 30)),   // deep red
+    ];
+    for i in 0..PIXEL_COUNT {
+        let offset = i * 4;
+        let s = tile.wind_speed[i].max(0.0);
+        // Find the bracketing stops and lerp.
+        let (mut r, mut g, mut b) = STOPS[STOPS.len() - 1].1;
+        for w in STOPS.windows(2) {
+            let (s0, c0) = w[0];
+            let (s1, c1) = w[1];
+            if s <= s1 {
+                let t = if s1 > s0 { ((s - s0) / (s1 - s0)).clamp(0.0, 1.0) } else { 0.0 };
+                let (rr, gg, bb) = lerp_rgb(c0, c1, t);
+                r = rr; g = gg; b = bb;
+                break;
+            }
+        }
+        // Darken land slightly so coastlines stay readable under the fill.
+        if tile.terrain[i] == 1 {
+            r = (r as f32 * 0.88) as u8;
+            g = (g as f32 * 0.88) as u8;
+            b = (b as f32 * 0.88) as u8;
+        }
+        rgba[offset] = r;
+        rgba[offset + 1] = g;
+        rgba[offset + 2] = b;
         rgba[offset + 3] = 255;
     }
 }

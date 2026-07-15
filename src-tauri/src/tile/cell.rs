@@ -36,7 +36,8 @@ pub struct TileData {
     pub shipworm_risk: Vec<u8>,   // sea: 0..255 shipworm (Teredo) hull-hazard. Serialized AFTER goods.
     pub storm_base: Vec<u8>,      // sea: 0..255 annual cyclone/storm potential (open ocean).
     pub reef_risk: Vec<u8>,       // sea: 0..255 reef/shoal wreck hazard (warm shallow coast).
-    pub disease_risk: Vec<u8>,    // land: 0..255 malaria/fever risk (warm-wet lowland). Serialized LAST.
+    pub disease_risk: Vec<u8>,    // land: 0..255 malaria/fever risk (warm-wet lowland).
+    pub wind_speed: Vec<f32>,     // low-level wind speed (m/s, ~0-35) incl. jets. Serialized LAST.
 }
 
 /// Number of trade-good sublayer fields stored per cell. See sim/biological.rs
@@ -90,6 +91,7 @@ impl TileData {
             storm_base: vec![0; N],
             reef_risk: vec![0; N],
             disease_risk: vec![0; N],
+            wind_speed: vec![0.0; N],
         }
     }
 
@@ -146,6 +148,10 @@ impl TileData {
         buf.extend_from_slice(&self.storm_base);
         buf.extend_from_slice(&self.reef_risk);
         buf.extend_from_slice(&self.disease_risk);
+        // Low-level wind speed (incl. jets). Appended after every prior column so
+        // older v2 blobs (which lack it) pad to zero on read and recompute on the
+        // next ocean-atmosphere run.
+        buf.extend_from_slice(bytemuck_f32(&self.wind_speed));
 
         zstd::encode_all(buf.as_slice(), 3).unwrap_or(buf)
     }
@@ -209,6 +215,9 @@ impl TileData {
         let storm_base = read_u8(&buf, &mut offset);
         let reef_risk = read_u8(&buf, &mut offset);
         let disease_risk = read_u8(&buf, &mut offset);
+        // wind_speed only exists in v2 blobs written after it was added; older
+        // blobs end above and this read pads to zero.
+        let wind_speed = read_f32(&buf, &mut offset);
 
         // Keep every stored good column (the count is variable and may exceed the
         // built-in GOODS_COUNT); pad up to GOODS_COUNT so code that indexes the
@@ -223,7 +232,7 @@ impl TileData {
             wind_vx, wind_vy, current_vx, current_vy,
             distance_to_ocean, habitability,
             salinity, shark_risk, goods, shipworm_risk,
-            storm_base, reef_risk, disease_risk,
+            storm_base, reef_risk, disease_risk, wind_speed,
         }
     }
 
@@ -249,7 +258,7 @@ impl TileData {
         merge!(C::SOIL => soil_type);
         merge!(C::FERTILITY => fertility);
         merge!(C::FISHERY => fishery);
-        merge!(C::WIND => wind_vx, wind_vy);
+        merge!(C::WIND => wind_vx, wind_vy, wind_speed);
         merge!(C::CURRENTS => current_type, current_vx, current_vy);
         merge!(C::DIST_OCEAN => distance_to_ocean);
         merge!(C::HABITABILITY => habitability);
