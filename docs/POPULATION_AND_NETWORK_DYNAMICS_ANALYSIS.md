@@ -1,0 +1,175 @@
+# Population, Growth & Trade-Network Dynamics — Analysis & Fix Plan
+
+*Analysis lens: historian · city-builder · social engineer. Scope: why population
+stalls, why some settlements never join the trade network, and how to make the
+world grow and stay interesting to watch.*
+
+---
+
+## 0. TL;DR — the three root causes
+
+1. **Population is mathematically capped.** Every city's carrying capacity is a
+   *fixed multiple of its `founding_pop`*, and that multiple maxes at ~9.24× (realistically
+   ~2–3×). `founding_pop` never changes. So total world population asymptotes to
+   `Σ(founding_pop) × cap_mult` and then **logistic growth drives the rate to zero**.
+   3.2M is not a bug in one city — it is the sum of all the ceilings. (`tick.rs:7829-7847`)
+
+2. **Only the top 250 settlements are "alive."** The rest are frozen `hinterland`
+   towns: drawn, clickable, counted in the census — but **never simulated, never grow,
+   never trade, never join the network** (`campaign_commands.rs:1787-1828`, census at
+   `:920-923`). That is exactly the "some settlements are static" complaint.
+
+3. **Trade routes are straight lines.** The campaign tick's route-days matrix is pure
+   **Euclidean distance × days_per_cell** between hubs within a connectivity component
+   (`tick.rs:4661-4683`). It ignores terrain, passes, coast-hugging and the coarse cost
+   grid. The real pathfinding routes live only in the read-only overlay
+   (`query_commands.rs::compute_trade_routes`) and are **never fed to the sim.**
+
+---
+
+## 1. Strong points (what's already good)
+
+- **Deterministic, tile-free tick.** Pure `(seed, tick)` math, no DB/global RNG, fast
+  and reproducible. Excellent substrate for a living economy.
+- **Rich emergent layers already exist:** logistic growth, food/starvation guards,
+  estates, houses/guilds, banks, coinage, wars, crashes, colonies, migration corridors,
+  satellites, epidemics.
+- **Migration already follows trade ties, not straight lines.** `economic_migration_pass`
+  (`tick.rs:9497`) moves people only to *direct trade-partner neighbours* with a
+  homophily pull — a genuinely good "social engineering" rule. It chains city→city over
+  years. (But it's zero-sum: see §2.)
+- **Cultures 2.0 exists:** minority quarters, creoles (`CREOLE_MIN_POP`), lingua franca
+  per component, culture history sampling — the machinery for "new cultures appear" is
+  present, just under-triggered.
+- **Connectivity is already continent-aware.** Components are built by geographic
+  K-nearest union (`COMP_K=6`, `max_link≈30% world width`) + worldgen corridors, with a
+  tiny-component rescue (`campaign_commands.rs:1974-2050`, `tick.rs:4628`). Wide ocean
+  gaps correctly stay separate markets.
+- **Limited-liability wealth guards** keep the economy bounded and finite (the standing
+  dynamics test hard-asserts this).
+
+## 2. Weak points (what blocks growth & a living map)
+
+### 2.1 The population ceiling (primary)
+```
+cap_mult = (0.35 + 1.30·food_sec) · (0.60 + 5.0·prosperity²)   // max ≈ 9.24×
+capacity = founding_pop · cap_mult                              // founding_pop is FROZEN
+new_pop  = pop + rate·pop·(1 − pop/capacity)                    // logistic → 0 at cap
+```
+- `founding_pop` is set once (500 / 2 000 / 10 000 by rank) and **never rises**. A city
+  cannot become a metropolis of 100k+ from a 10k founding — the hard ceiling is ~92k
+  even at impossible perfection, ~25-30k realistically.
+- `prosperity` and `food_sec` are **eased sentiments clamped to [0,1]** → bounded inputs
+  → bounded capacity → bounded world.
+- **Historian's verdict:** real premodern cities grew 10–100× over centuries as trade
+  hinterlands deepened; here a city's destiny is fixed on day 1.
+
+### 2.2 The 250-hub cap freezes the long tail
+- Settlements ranked 251+ are inert. They don't grow, don't trade, don't migrate, can't
+  be a migration destination, can't found colonies. On a large map this is *most* of the
+  world's places — permanently static dots.
+
+### 2.3 Straight-line routes
+- The sim's cost model is "as the crow flies." No mountain detour, no strait, no
+  coast-hugging. Migration/trade "lines" therefore cut across terrain. The proper
+  pathfinder exists but is overlay-only and never reaches the tick.
+
+### 2.4 Growth is redistributive, not generative
+- Migration is **zero-sum** (`hubs[src].pop -= movers; hubs[di].pop += movers`,
+  `tick.rs:9537-9538`). It concentrates people (good — centers emerge) but adds nothing
+  to the total. With every city near its cap, the world total is flat and migration just
+  shuffles a fixed pie.
+
+### 2.5 New cities/cultures are rare and small
+- Colonies gate on year ≥ 50, pop/wealth thresholds, and are founded ~yearly, each
+  starting at 500 and capped at the same `founding_pop` ceiling. Creoles need
+  `CREOLE_MIN_POP` + minority quarters that migration rarely builds up. So "new cultures
+  appear / new trade centers rise" happens too weakly to watch.
+
+---
+
+## 3. Why 500 years → 3.2M then flat (the mechanism, step by step)
+
+1. Day 0: `Σ founding_pop` across 250 live hubs (≈0.5–0.7M) + frozen hinterland.
+2. Logistic growth lifts each hub toward `founding_pop · cap_mult` (~2–3× realistic).
+3. Within ~50–100 years every hub is within a few % of its cap → `(1 − pop/cap) → 0` →
+   growth rate → 0.
+4. Migration reshuffles the now-fixed pie toward prosperous centers but can't grow it.
+5. Colonies add a trickle of new small (capped) hubs; hinterland never moves.
+6. **Total asymptotes.** 3.2M is the sum of all ceilings — stable by construction.
+
+### 3.1 Evidence from the standing dynamics test (50y, 30-town synthetic world)
+```
+yr  5: towns 30  hungry 23  thriving 1
+yr 20: towns 28  hungry 24  thriving 0
+yr 35: towns 28  hungry 20  thriving 0
+yr 50: towns 29  hungry 22  thriving 1     richest 417438
+```
+- **20–24 of ~30 towns are HUNGRY and 0–1 THRIVING for the entire run.** Both inputs to
+  the carrying-capacity formula are pinned low, so `cap_mult ≈ 1.0–1.3×` → cities barely
+  grow past founding. This is the stall mechanism made visible: it isn't only the fixed
+  ceiling, it's that **the economy keeps cities hungry and non-prosperous, holding
+  capacity at ~1× founding.**
+- Town count is flat (28–30) — no net new cities; houses do turn over (rise/defunct),
+  which is healthy. So the *economic churn* is alive but the *demographic engine* is not.
+- Takeaway: fixing growth needs BOTH (a) a rising/earned ceiling (§4.1) AND (b) getting
+  food security up so the existing logistic term actually has headroom to climb.
+
+---
+
+## 4. Fix direction (design)
+
+### 4.1 Break the founding-pop ceiling → capacity from *land + trade*, and let it ratchet
+- Recompute `capacity` from an **absolute site-carrying-capacity** (hinterland fertility,
+  water, coast) **plus a trade multiplier that grows with realized throughput/connectivity**,
+  not from a frozen founding number. Let a well-connected entrepôt's cap ratchet upward
+  as its trade network deepens (a slow, decaying "developed capacity" term), so a hub can
+  climb from 10k → 100k+ over centuries when it earns it.
+- Keep logistic form (bounded, stable) but make the ceiling *earned and rising*, not fixed.
+
+### 4.2 Make more (ideally all) settlements live
+- Options (pick per performance budget): raise the cap; or promote/demote hinterland ↔
+  live dynamically (a growing hinterland town "wakes up" into a real hub when it crosses a
+  threshold; a dead hub sleeps). Even a cheap "hinterland grows slowly toward its own small
+  cap and can graduate" removes the static-dot feel.
+
+### 4.3 Real routes into the tick (never a straight line)
+- **Precompute a pathfound route-days matrix once at campaign start** over the coarse cost
+  grid (passes / rivers / coast-hugging / reach-limited sea crossings — the same rules
+  `compute_trade_routes` already uses) and **serialize it**. The tick stays tile-free; it
+  just reads a real matrix instead of `dist × days_per_cell`. Neighbors, migration and
+  dispatch then all lie on real routes automatically.
+- This also fixes components: reachability = "finite pathfound days," so islands connect
+  only where a real sea route within reach exists.
+
+### 4.4 The "zero'fy & grow" campaign start (user's core request)
+- Add a **"Cold Start"** toggle/button at campaign start: set every hub to a small seed
+  population, **empty all trade ties, warehouses, houses, coin, wealth to zero**, and clear
+  the route network.
+- On unpause, cities **discover partners organically**: each tick a hub can open a trade
+  tie to a *reachable* partner (via the pathfound matrix) when the price gradient/ surplus
+  makes it worthwhile; ties strengthen with use and decay when unused. The route network
+  thus *emerges* rather than being handed over pre-built. Migration, houses, guilds, coin
+  then bootstrap on top exactly as the existing emergence-order intends (merchants → guilds
+  yr5 → houses yr10).
+
+### 4.5 Generative population + emergent culture
+- Add a small **net biological growth** term (births−deaths) gated by food security so the
+  total pie can actually grow, with famine/plague as the checks (already present). Migration
+  then *concentrates* real growth into trade/cultural centers.
+- Lower creole/minority thresholds so sustained migration mixing **spawns new cultures** at
+  big cosmopolitan hubs; let a dominant in-migrant culture flip a city's lingua franca.
+
+---
+
+## 5. Open design questions (need the user's call)
+
+See the chat message — decisions on: (a) hub cap vs. dynamic wake/sleep, (b) whether to
+break the founding_pop ceiling, (c) precomputed pathfound matrix vs. keep straight-line,
+(d) whether Cold Start is a new mode or replaces default start, (e) target end-state pop
+scale (what should 500 years look like?), (f) performance budget for more live hubs.
+
+---
+
+*File kept as the living design record for this work (per user: "keep info for the fix in
+the future"). Update with test trajectory numbers and decisions as they land.*
