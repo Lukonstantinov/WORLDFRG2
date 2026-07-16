@@ -151,6 +151,7 @@ export interface RidgeLine {
   height: number;
   character: number;
   erase: boolean;
+  noise: number;
 }
 export type ActiveLayer =
   | "land" | "elevation" | "climate" | "temperature" | "precipitation"

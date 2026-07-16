@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useUIStore } from "../../state/uiStore";
-import { simGenerateShelves, simGenerateTerrainFromTemplate, simGenerateTerrainRidged, simScaleElevation, simGenerateRidges } from "../../bridge/tauri";
+import { simGenerateShelves, simGenerateTerrainFromTemplate, simGenerateTerrainRidged, simScaleElevation, simGenerateRidges, undoAction } from "../../bridge/tauri";
 import { genBtn } from "./WorkflowPanel";
 
 interface Props {
@@ -115,6 +115,15 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
       setStatus(`Generated ${ridgeLines.length} ridge line${ridgeLines.length > 1 ? "s" : ""} — re-run Climate & Rivers to reflect the new relief`);
     } catch (err) { setStatus(`Error: ${err}`); }
     setSimRunning(false);
+  };
+
+  const handleUndoRidges = async () => {
+    if (simRunning) return;
+    try {
+      const modified = await undoAction();
+      if (modified) { invalidateTiles(); setStatus("Reverted last ridge generation"); }
+      else { setStatus("Nothing to undo"); }
+    } catch (err) { setStatus(`Undo failed: ${err}`); }
   };
 
   const handleRandomizeTerrain = () => {
@@ -242,6 +251,8 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
           `Peak ≈ ${Math.round(ridgeParams.height * 8848).toLocaleString()} m`)}
         {slider("Character", ridgeParams.character, 0, 1, 0.05, (v) => setRidgeParams({ character: v }),
           "Smooth rounded ↔ Rugged serrated")}
+        {slider("Erosion Noise", ridgeParams.noise, 0, 1, 0.05, (v) => setRidgeParams({ noise: v }),
+          "0 = clean oval  ↔  1 = heavily eroded irregular edge")}
         <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
           <button onClick={handleGenerateRidges} disabled={simRunning || !step1Done || ridgeLines.length === 0}
             style={{ ...genBtn, flex: 1, marginBottom: 0, textAlign: "center", background: "#3a2a18", color: "#e8c090" }}>
@@ -252,6 +263,10 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
             Clear
           </button>
         </div>
+        <button onClick={handleUndoRidges} disabled={simRunning}
+          style={{ ...genBtn, marginTop: 2, background: "#1a1a2a", color: "#9090d0", fontSize: 11 }}>
+          ↩ Revert Last Ridge Generation
+        </button>
       </div>
       <button onClick={() => setShowAdjust(!showAdjust)} disabled={simRunning || !step1Done} style={genBtn}>
         {showAdjust ? "\u25B2 Adjust Elevation" : "\u25BC Adjust Elevation"}

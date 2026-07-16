@@ -1519,7 +1519,7 @@ export function MapCanvas() {
       isErasingRef.current = e.shiftKey;
       ridgeDraftRef.current = [[wx, wy]];
       const p = ridgeParamsRef.current;
-      const draft = { points: [[wx, wy]] as [number, number][], width: p.width, height: p.height, character: p.character, erase: e.shiftKey };
+      const draft = { points: [[wx, wy]] as [number, number][], width: p.width, height: p.height, character: p.character, noise: p.noise, erase: e.shiftKey };
       overlayManagerRef.current?.setRidgeSketch([...ridgeLinesRef.current, draft]);
       requestRender();
     }
@@ -1596,7 +1596,7 @@ export function MapCanvas() {
         if (!last || Math.abs(last[0] - wx) + Math.abs(last[1] - wy) >= 1) {
           draft.push([wx, wy]);
           const p = ridgeParamsRef.current;
-          const line = { points: [...draft], width: p.width, height: p.height, character: p.character, erase: isErasingRef.current };
+          const line = { points: [...draft], width: p.width, height: p.height, character: p.character, noise: p.noise, erase: isErasingRef.current };
           overlayManagerRef.current?.setRidgeSketch([...ridgeLinesRef.current, line]);
           requestRender();
         }
@@ -1618,7 +1618,7 @@ export function MapCanvas() {
       ridgeDraftRef.current = [];
       if (draft.length >= 1) {
         const p = ridgeParamsRef.current;
-        addRidgeLine({ points: draft, width: p.width, height: p.height, character: p.character, erase: isErasingRef.current });
+        addRidgeLine({ points: draft, width: p.width, height: p.height, character: p.character, noise: p.noise, erase: isErasingRef.current });
       } else {
         overlayManagerRef.current?.setRidgeSketch(ridgeLinesRef.current);
         requestRender();

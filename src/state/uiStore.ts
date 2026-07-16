@@ -77,7 +77,7 @@ interface UIStore {
   /** Ridge-drawing tool: the transient (unsaved) lines drawn on the map, and the
    *  current pen settings (footprint width · peak height/opacity · ruggedness). */
   ridgeLines: RidgeLine[];
-  ridgeParams: { width: number; height: number; character: number };
+  ridgeParams: { width: number; height: number; character: number; noise: number };
   riverParams: RiverParamsState;
   bioParams: BioParamsState;
   showTradeMatrix: boolean;
@@ -227,7 +227,7 @@ interface UIStore {
   setTerrainParams: (p: Partial<TerrainParams>) => void;
   addRidgeLine: (line: RidgeLine) => void;
   clearRidgeLines: () => void;
-  setRidgeParams: (p: Partial<{ width: number; height: number; character: number }>) => void;
+  setRidgeParams: (p: Partial<{ width: number; height: number; character: number; noise: number }>) => void;
   setRiverParams: (p: Partial<RiverParamsState>) => void;
   setBioParams: (p: Partial<BioParamsState>) => void;
   setShowTradeMatrix: (v: boolean) => void;
@@ -331,7 +331,7 @@ export const useUIStore = create<UIStore>((set) => ({
   landmassSource: "none",
   terrainParams: { density: 0.5, height: 0.5, spread: 0.5, roughness: 0.4, seed: null },
   ridgeLines: [],
-  ridgeParams: { width: 8, height: 0.7, character: 0.5 },
+  ridgeParams: { width: 8, height: 0.7, character: 0.5, noise: 0.4 },
   riverParams: { density: 0.5, width: 1.0, lakeFillDepth: 0.006, lakeMaxFraction: 0.0001 },
   bioParams: { gemDeposits: 6, tradeReach: 1, maxCrossing: 0.3, desertRoutes: false, calendarMonths: 12, stormMonth: 0, economicRegions: 14, luxuryBias: 0.5, climateStrictness: 0.5, piracyLevel: 0, tradeSeason: 0 },
   showTradeMatrix: false,

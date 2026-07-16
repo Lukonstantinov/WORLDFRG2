@@ -1074,6 +1074,9 @@ pub struct RidgeLine {
     pub character: f32,
     #[serde(default)]
     pub erase: bool,
+    /// 0 = clean oval edge; 1 = heavily eroded/irregular boundary.
+    #[serde(default)]
+    pub noise: f32,
 }
 
 /// Turn hand-drawn ridge lines into natural mountain ranges. The line spine is
@@ -1102,6 +1105,9 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
     let mut peak = vec![0.0f32; n];
     let mut charc = vec![0.0f32; n];
     let mut erase = vec![false; n];
+    let mut noise_amt = vec![0.0f32; n];
+    let mut src_x = vec![0i32; n]; // nearest spine cell position (for Euclidean dist)
+    let mut src_y = vec![0i32; n];
     let mut queue: VecDeque<usize> = VecDeque::new();
 
     // ── 1. Rasterize every polyline into spine cells (BFS seeds) ──
@@ -1140,6 +1146,9 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
                 peak[i] = pk;
                 charc[i] = ch;
                 erase[i] = er;
+                noise_amt[i] = line.noise.clamp(0.0, 1.0);
+                src_x[i] = cx;
+                src_y[i] = cy;
                 queue.push_back(i);
             }
         }
@@ -1166,6 +1175,9 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
                 peak[ni] = peak[ci];
                 charc[ni] = charc[ci];
                 erase[ni] = erase[ci];
+                noise_amt[ni] = noise_amt[ci];
+                src_x[ni] = src_x[ci];
+                src_y[ni] = src_y[ci];
                 queue.push_back(ni);
             }
         }
@@ -1176,18 +1188,33 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
     let mut mask_terrain = vec![0u8; n];
     for i in 0..n {
         if terrain[i] != 1 || dist[i] == u16::MAX { continue; }
+        let x = (i % w as usize) as f32;
+        let y = (i / w as usize) as f32;
         let hw = half_w[i].max(1.0);
-        let t = 1.0 - dist[i] as f32 / hw;
+        // Euclidean distance to the nearest spine cell — gives a circular
+        // cross-section instead of the octagon from 8-connected BFS integers.
+        let mut dx = x - src_x[i] as f32;
+        let wf = w as f32;
+        if dx > wf * 0.5 { dx -= wf; } else if dx < -wf * 0.5 { dx += wf; }
+        let dy = y - src_y[i] as f32;
+        let dist_f = (dx * dx + dy * dy).sqrt();
+        // Noise displacement: shifts the effective distance per-cell so the
+        // footprint edge meanders rather than staying a clean oval.
+        let na = noise_amt[i];
+        let noise_disp = if na > 0.01 {
+            let f_n = 0.008 + charc[i] * 0.006;
+            let n01 = fbm_noise(x * f_n + 17.3, y * f_n + 5.1, seed.wrapping_add(0xC0FFEE), 4, 2.0, 0.5);
+            (n01 * 2.0 - 1.0) * na * hw * 0.55
+        } else { 0.0 };
+        let t = 1.0 - (dist_f + noise_disp).max(0.0) / hw;
         if t <= 0.0 { continue; }
         mask_terrain[i] = 1;
-        let profile = t * t * (3.0 - 2.0 * t); // rounded crest, fades to 0 at the toe
+        let profile = t * t * (3.0 - 2.0 * t);
         if erase[i] {
             // Flatten toward the low end so drawing over a range removes it.
             elevation[i] = (elevation[i] * (1.0 - profile * 0.9)).clamp(0.01, 1.0);
             continue;
         }
-        let x = (i % w as usize) as f32;
-        let y = (i / w as usize) as f32;
         // Ridged crest: break the spine into sub-peaks/passes. Frequency and
         // amplitude grow with character (smooth rounded ↔ serrated/rugged).
         let f = 0.05 + charc[i] * 0.10;
