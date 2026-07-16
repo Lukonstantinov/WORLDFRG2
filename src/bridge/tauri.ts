@@ -180,6 +180,16 @@ export async function simRunAll(seed: number, plateCount: number): Promise<impor
   return invoke("sim_run_all", { seed, plateCount });
 }
 
+/** Generate mountain ridges from hand-drawn ridge lines. Each line carries its
+ *  polyline spine, footprint width, peak height and ruggedness; the backend
+ *  widens them into eroded ranges, blended onto the existing elevation (land only). */
+export async function simGenerateRidges(
+  lines: import("../types").RidgeLine[],
+  seed: number,
+): Promise<[number, number][]> {
+  return invoke("sim_generate_ridges", { linesJson: JSON.stringify(lines), seed });
+}
+
 // ── #26 · Geographic toponyms (gated, editable) ──
 /** Generate culture-styled names for rivers/mountains/lakes/regions (gated on the
  *  Settlements + Rivers steps; errors otherwise). Returns & persists the list. */

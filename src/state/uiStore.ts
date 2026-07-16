@@ -15,7 +15,7 @@ function persistProgress(stepCompleted: Record<number, boolean>) {
   setProgress("world", JSON.stringify(world)).catch(() => {});
   setProgress("campaign", JSON.stringify(campaign)).catch(() => {});
 }
-import type { ActiveTool, ActiveLayer, WorkflowStep } from "../types";
+import type { ActiveTool, ActiveLayer, WorkflowStep, RidgeLine } from "../types";
 import { GOOD_DEFS, goodOverlayKey } from "../goods";
 
 type LandmassSource = "none" | "plates" | "template" | "painted";
@@ -74,6 +74,10 @@ interface UIStore {
   stretchToFit: boolean;
   landmassSource: LandmassSource;
   terrainParams: TerrainParams;
+  /** Ridge-drawing tool: the transient (unsaved) lines drawn on the map, and the
+   *  current pen settings (footprint width · peak height/opacity · ruggedness). */
+  ridgeLines: RidgeLine[];
+  ridgeParams: { width: number; height: number; character: number };
   riverParams: RiverParamsState;
   bioParams: BioParamsState;
   showTradeMatrix: boolean;
@@ -221,6 +225,9 @@ interface UIStore {
   setLandmassSource: (source: LandmassSource) => void;
   setStretchToFit: (v: boolean) => void;
   setTerrainParams: (p: Partial<TerrainParams>) => void;
+  addRidgeLine: (line: RidgeLine) => void;
+  clearRidgeLines: () => void;
+  setRidgeParams: (p: Partial<{ width: number; height: number; character: number }>) => void;
   setRiverParams: (p: Partial<RiverParamsState>) => void;
   setBioParams: (p: Partial<BioParamsState>) => void;
   setShowTradeMatrix: (v: boolean) => void;
@@ -323,6 +330,8 @@ export const useUIStore = create<UIStore>((set) => ({
   stretchToFit: true,
   landmassSource: "none",
   terrainParams: { density: 0.5, height: 0.5, spread: 0.5, roughness: 0.4, seed: null },
+  ridgeLines: [],
+  ridgeParams: { width: 8, height: 0.7, character: 0.5 },
   riverParams: { density: 0.5, width: 1.0, lakeFillDepth: 0.006, lakeMaxFraction: 0.0001 },
   bioParams: { gemDeposits: 6, tradeReach: 1, maxCrossing: 0.3, desertRoutes: false, calendarMonths: 12, stormMonth: 0, economicRegions: 14, luxuryBias: 0.5, climateStrictness: 0.5, piracyLevel: 0, tradeSeason: 0 },
   showTradeMatrix: false,
@@ -437,6 +446,12 @@ export const useUIStore = create<UIStore>((set) => ({
 
   setTerrainParams: (p) =>
     set((state) => ({ terrainParams: { ...state.terrainParams, ...p } })),
+
+  addRidgeLine: (line) =>
+    set((state) => ({ ridgeLines: [...state.ridgeLines, line] })),
+  clearRidgeLines: () => set({ ridgeLines: [] }),
+  setRidgeParams: (p) =>
+    set((state) => ({ ridgeParams: { ...state.ridgeParams, ...p } })),
 
   setRiverParams: (p) =>
     set((state) => ({ riverParams: { ...state.riverParams, ...p } })),

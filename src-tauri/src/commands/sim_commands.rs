@@ -407,6 +407,30 @@ pub fn sim_generate_terrain_ridged(
     buf.save(&conn, "Generate ridged elevation")
 }
 
+/// Generate mountain ridges from hand-drawn ridge lines.
+/// Each line carries its polyline spine, footprint width, peak height and
+/// ruggedness; the backend widens them into naturally eroded ranges, SCREEN-
+/// blended onto the existing elevation (works on a flat world too), LAND ONLY,
+/// with erosion confined to the new ridge footprints so existing terrain is kept.
+#[tauri::command]
+pub fn sim_generate_ridges(
+    lines_json: String,
+    seed: u64,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
+    let lines: Vec<elevation::RidgeLine> = serde_json::from_str(&lines_json)
+        .map_err(|e| format!("Invalid ridge lines: {e}"))?;
+    if lines.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
+    elevation::generate_ridges(&mut buf, seed, &lines);
+    buf.save(&conn, "Generate ridges")
+}
+
 /// Run full simulation pipeline while preserving existing terrain.
 /// For template-based worlds: elevation → shelves → ocean/atmo → climate → rivers → soil → settlements.
 #[tauri::command]

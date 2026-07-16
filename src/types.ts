@@ -140,7 +140,18 @@ export type PaintValue =
   | { type: "shelf"; value: number }
   | { type: "volcanic"; value: number };
 
-export type ActiveTool = "pan" | "select" | "paint" | "elevation" | "shelf" | "volcano";
+export type ActiveTool = "pan" | "select" | "paint" | "elevation" | "shelf" | "volcano" | "ridge";
+
+/** A hand-drawn mountain-ridge line: a polyline spine (world cells) whose stroke
+ *  width encodes the range's footprint width, opacity encodes peak height, and a
+ *  character parameter controls ruggedness. `erase` (Shift-draw) flattens instead. */
+export interface RidgeLine {
+  points: [number, number][];
+  width: number;
+  height: number;
+  character: number;
+  erase: boolean;
+}
 export type ActiveLayer =
   | "land" | "elevation" | "climate" | "temperature" | "precipitation"
   | "soil" | "fertility" | "plates"

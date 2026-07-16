@@ -94,6 +94,10 @@ export function MapCanvas() {
   const setSelectedGood = useUIStore((s) => s.setSelectedGood);
   const hubDisplay = useUIStore((s) => s.hubDisplay);
   const reachGood = useUIStore((s) => s.reachGood);
+  // Ridge-drawing tool: current pen settings, drawn lines, and the committer.
+  const ridgeParams = useUIStore((s) => s.ridgeParams);
+  const ridgeLines = useUIStore((s) => s.ridgeLines);
+  const addRidgeLine = useUIStore((s) => s.addRidgeLine);
 
   // Stable identity for the loaded world. Heavy effects (tile reloads + sim IPC)
   // key off this string rather than the `meta` object, so latitude-slider edits
@@ -119,6 +123,13 @@ export function MapCanvas() {
   campaignSnapshotRef.current = campaignSnapshot;
   const elevationValueRef = useRef(elevationValue);
   elevationValueRef.current = elevationValue;
+  // Ridge tool: live pen params + drawn lines (for callbacks), and the in-progress
+  // polyline being dragged (world cells), committed on pointer-up.
+  const ridgeParamsRef = useRef(ridgeParams);
+  ridgeParamsRef.current = ridgeParams;
+  const ridgeLinesRef = useRef(ridgeLines);
+  ridgeLinesRef.current = ridgeLines;
+  const ridgeDraftRef = useRef<[number, number][]>([]);
   // Good regions kept for click hit-testing (click a good belt → good-flow panel).
   const goodRegionsRef = useRef<import("../types").GoodRegion[]>([]);
   const overlayVisibilityRef = useRef(overlayVisibility);
@@ -1026,6 +1037,15 @@ export function MapCanvas() {
     requestRender();
   }, [travelRoute, requestRender]);
 
+  // Ridge-drawing tool: sync the committed drawn lines onto the overlay (the
+  // in-progress line is pushed directly during a drag).
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setRidgeSketch(ridgeLines);
+    requestRender();
+  }, [ridgeLines, requestRender]);
+
   // 🌊 Hydrology · the selected river system's subtree glows on the map, each
   // tributary in its own colour (branch / order scheme).
   const riverHighlight = useUIStore((s) => s.riverHighlight);
@@ -1466,7 +1486,7 @@ export function MapCanvas() {
     const tool = activeToolRef.current;
     // A finalized (locked) map is read-only — geography edits are disabled in the
     // UI (the backend also rejects them via ensure_unfrozen).
-    if (m.frozen && (tool === "paint" || tool === "elevation" || tool === "shelf" || tool === "volcano")) {
+    if (m.frozen && (tool === "paint" || tool === "elevation" || tool === "shelf" || tool === "volcano" || tool === "ridge")) {
       return;
     }
     if (tool === "paint" || tool === "elevation" || tool === "shelf") {
@@ -1488,8 +1508,22 @@ export function MapCanvas() {
           }).catch(console.error);
         }
       }
+    } else if (tool === "ridge") {
+      // Start a new ridge polyline (Shift = erase/flatten). Points accumulate on
+      // pointer-move and commit to the store on pointer-up; the in-progress line
+      // is pushed straight onto the overlay so it draws live.
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+      isPaintingRef.current = true;
+      isErasingRef.current = e.shiftKey;
+      ridgeDraftRef.current = [[wx, wy]];
+      const p = ridgeParamsRef.current;
+      const draft = { points: [[wx, wy]] as [number, number][], width: p.width, height: p.height, character: p.character, erase: e.shiftKey };
+      overlayManagerRef.current?.setRidgeSketch([...ridgeLinesRef.current, draft]);
+      requestRender();
     }
-  }, [applyBrush, setInspectedCell, setSelectedHub, setSelectedGood, refreshTiles]);
+  }, [applyBrush, setInspectedCell, setSelectedHub, setSelectedGood, refreshTiles, requestRender]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const viewport = viewportRef.current;
@@ -1530,7 +1564,9 @@ export function MapCanvas() {
     if (wx >= 0 && wx < m.grid_width && wy >= 0 && wy < m.grid_height) {
       const tool = activeToolRef.current;
       const erasing = e.shiftKey;
-      const modeLabel = tool === "elevation"
+      const modeLabel = tool === "ridge"
+        ? (erasing ? "Ridge erase (flatten)" : `Ridge ~${Math.round(ridgeParamsRef.current.height * 8848)}m, width ${ridgeParamsRef.current.width}`)
+        : tool === "elevation"
         ? (erasing ? "Erase elevation" : `Elevation ${Math.round(elevationValueRef.current * 8848)}m`)
         : (erasing ? "Erase (sea)" : "Paint land");
       setStatus(`Cell: (${wx}, ${wy}) | ${modeLabel}`);
@@ -1553,7 +1589,20 @@ export function MapCanvas() {
     }
 
     if (isPaintingRef.current) {
-      applyBrush(e);
+      if (activeToolRef.current === "ridge") {
+        // Extend the in-progress ridge line (throttle by ~1 cell of movement).
+        const draft = ridgeDraftRef.current;
+        const last = draft[draft.length - 1];
+        if (!last || Math.abs(last[0] - wx) + Math.abs(last[1] - wy) >= 1) {
+          draft.push([wx, wy]);
+          const p = ridgeParamsRef.current;
+          const line = { points: [...draft], width: p.width, height: p.height, character: p.character, erase: isErasingRef.current };
+          overlayManagerRef.current?.setRidgeSketch([...ridgeLinesRef.current, line]);
+          requestRender();
+        }
+      } else {
+        applyBrush(e);
+      }
     }
   }, [applyBrush, refreshTiles, setStatus, getBrushScreenRadius, getPaintMode, requestRender]);
 
@@ -1561,6 +1610,22 @@ export function MapCanvas() {
     const viewport = viewportRef.current;
     if (viewport) viewport.endPan();
     clearPaintOverlay();
+
+    // Ridge tool: commit the drawn polyline to the store (transient — one-shot).
+    if (isPaintingRef.current && activeToolRef.current === "ridge") {
+      isPaintingRef.current = false;
+      const draft = ridgeDraftRef.current;
+      ridgeDraftRef.current = [];
+      if (draft.length >= 1) {
+        const p = ridgeParamsRef.current;
+        addRidgeLine({ points: draft, width: p.width, height: p.height, character: p.character, erase: isErasingRef.current });
+      } else {
+        overlayManagerRef.current?.setRidgeSketch(ridgeLinesRef.current);
+        requestRender();
+      }
+      isErasingRef.current = false;
+      return;
+    }
 
     if (isPaintingRef.current && pendingCellsRef.current.size > 0) {
       isPaintingRef.current = false;
@@ -1595,12 +1660,13 @@ export function MapCanvas() {
 
     isPaintingRef.current = false;
     isErasingRef.current = false;
-  }, [refreshTiles]);
+  }, [refreshTiles, addRidgeLine, requestRender]);
 
   const getCursor = (): string => {
     if (activeTool === "pan") return "grab";
     if (activeTool === "select") return "pointer";
     if (activeTool === "paint" || activeTool === "elevation" || activeTool === "shelf") return "none";
+    if (activeTool === "ridge") return "crosshair";
     return "crosshair";
   };
 

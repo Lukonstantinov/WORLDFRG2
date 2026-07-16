@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail } from "../types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine } from "../types";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "../goods";
 import { drawGoodIcon } from "./goodIcons";
 import { latLineY } from "./projection";
@@ -263,6 +263,8 @@ export class OverlayManager {
   private tradeRoutes: TradeRoute[] = [];
   /** #23 · the single highlighted itinerary route (world cells), or empty. */
   private travelRoute: [number, number][] = [];
+  /** Ridge-drawing tool: transient drawn/in-progress ridge lines to sketch on the map. */
+  private ridgeSketch: RidgeLine[] = [];
   /** 🌊 Hydrology · indices (into `rivers`) of the selected system's subtree to
    *  glow on the map; empty = no selection (all rivers drawn normally). */
   private riverHighlight: Set<number> = new Set();
@@ -630,6 +632,11 @@ export class OverlayManager {
   /** Set (or clear with []) the highlighted point-to-point itinerary route. */
   drawTravelRoute(points: [number, number][]) {
     this.travelRoute = points;
+  }
+
+  /** Set (or clear with []) the hand-drawn ridge lines to sketch on the map. */
+  setRidgeSketch(lines: RidgeLine[]) {
+    this.ridgeSketch = lines;
   }
 
   /** 🌊 Set (or clear with null/[]) which rivers glow as the selected system,
@@ -1392,6 +1399,12 @@ export class OverlayManager {
       this.renderTravelRoute(ctx);
     }
 
+    // Ridge-drawing tool: sketch the user's drawn ridge lines (width ∝ footprint,
+    // opacity ∝ peak height). Always shown while lines exist (no visibility gate).
+    if (this.ridgeSketch.length > 0) {
+      this.renderRidgeSketch(ctx);
+    }
+
     // #37 · per-good scarcity: graduated discs at each hub, green where the good
     // is cheap/abundant through to red where it is dear/scarce.
     if (this.visibility.goodScarcity && this.goodScarcity.length > 0) {
@@ -1895,6 +1908,44 @@ export class OverlayManager {
     };
     pin(pts[0], "#46d07a");
     pin(pts[pts.length - 1], "#e85b5b");
+    ctx.globalAlpha = 1;
+  }
+
+  /** Ridge-drawing tool: sketch each drawn ridge line in world-cell space. The
+   *  stroke is `width*2` cells wide (the range's footprint) and its opacity tracks
+   *  the peak height; erase lines read cool/blue. Antimeridian seam split like the
+   *  trade/itinerary routes. */
+  private renderRidgeSketch(ctx: CanvasRenderingContext2D) {
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    const seamGap = 20;
+    for (const line of this.ridgeSketch) {
+      const pts = line.points;
+      if (pts.length < 1) continue;
+      const alpha = 0.2 + 0.7 * Math.max(0, Math.min(1, line.height));
+      // Footprint band (translucent) then a crisp spine thread on top.
+      const band = Math.max(1, line.width * 2);
+      const draw = (lw: number, a: number) => {
+        ctx.lineWidth = lw;
+        ctx.globalAlpha = a;
+        ctx.beginPath();
+        let started = false;
+        for (let i = 0; i < pts.length; i++) {
+          const [x, y] = pts[i];
+          if (i > 0 && Math.abs(x - pts[i - 1][0]) > seamGap) started = false;
+          if (!started) { ctx.moveTo(x + 0.5, y + 0.5); started = true; }
+          else ctx.lineTo(x + 0.5, y + 0.5);
+        }
+        // A single-point line still shows a dot.
+        if (pts.length === 1) { ctx.moveTo(pts[0][0] + 0.5, pts[0][1] + 0.5); ctx.lineTo(pts[0][0] + 0.5, pts[0][1] + 0.5); }
+        ctx.stroke();
+      };
+      ctx.strokeStyle = line.erase ? "#5aa0d8" : "#c98a4a";
+      draw(band, alpha * 0.35);
+      const spine = Math.max(0.8, 1.6 / Math.sqrt(this.currentScale));
+      ctx.strokeStyle = line.erase ? "#bfe0f5" : "#f0c890";
+      draw(spine, Math.min(1, alpha + 0.15));
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -3923,6 +3974,7 @@ export class OverlayManager {
     this.currentLines = [];
     this.tradeRoutes = [];
     this.travelRoute = [];
+    this.ridgeSketch = [];
     this.riverHighlight = new Set();
     this.riverHighlightColors = {};
     this.lakeHighlight = -1;

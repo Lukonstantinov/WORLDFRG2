@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useUIStore } from "../../state/uiStore";
-import { simGenerateShelves, simGenerateTerrainFromTemplate, simGenerateTerrainRidged, simScaleElevation } from "../../bridge/tauri";
+import { simGenerateShelves, simGenerateTerrainFromTemplate, simGenerateTerrainRidged, simScaleElevation, simGenerateRidges } from "../../bridge/tauri";
 import { genBtn } from "./WorkflowPanel";
 
 interface Props {
@@ -45,6 +45,14 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
   // without changing the world seed. Stored so it persists across steps.
   const terrainSeed = terrainParams.seed ?? seed;
   const setTerrainSeed = (v: number) => setTerrainParams({ seed: v });
+
+  // Ridge-drawing tool: draw lines → generate eroded ranges that follow them.
+  const activeTool = useUIStore((s) => s.activeTool);
+  const setTool = useUIStore((s) => s.setTool);
+  const ridgeParams = useUIStore((s) => s.ridgeParams);
+  const setRidgeParams = useUIStore((s) => s.setRidgeParams);
+  const ridgeLines = useUIStore((s) => s.ridgeLines);
+  const clearRidgeLines = useUIStore((s) => s.clearRidgeLines);
 
   // Elevation adjustment (scale + peak lock) — operates on already-generated
   // elevation, so the user can fine-tune relief without a full re-roll.
@@ -92,6 +100,22 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
 
   const handleGenerateElevation = () => runElevation(terrainSeed);
   const handleGenerateRidged = () => runElevation(terrainSeed, true);
+
+  const handleGenerateRidges = async () => {
+    if (simRunning) return;
+    if (!step1Done) { setStatus("Step 1 required: Create landmass first"); return; }
+    if (ridgeLines.length === 0) { setStatus("Draw at least one ridge line first"); return; }
+    setSimRunning(true);
+    setStatus("Generating ridges from drawn lines...");
+    try {
+      await simGenerateRidges(ridgeLines, terrainSeed);
+      invalidateTiles();
+      markStepCompleted(2);
+      clearRidgeLines();
+      setStatus(`Generated ${ridgeLines.length} ridge line${ridgeLines.length > 1 ? "s" : ""} — re-run Climate & Rivers to reflect the new relief`);
+    } catch (err) { setStatus(`Error: ${err}`); }
+    setSimRunning(false);
+  };
 
   const handleRandomizeTerrain = () => {
     const newSeed = Math.floor(Math.random() * 0xffffffff);
@@ -193,6 +217,42 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
         style={{ ...genBtn, background: "#1a2e1a", color: "#9cd09c" }}>
         🎲 Randomize Terrain (new seed)
       </button>
+
+      <div style={{ background: "#0a1018", border: "1px solid #3a2e20", borderRadius: 4, padding: 6, marginTop: 2 }}>
+        <div style={{ color: "#c98a4a", fontSize: 10, fontWeight: 600, marginBottom: 4 }}>
+          ✏️ Draw Mountain Ridges
+        </div>
+        <div style={{ color: "#506880", fontSize: 9, marginBottom: 5, lineHeight: 1.35 }}>
+          Draw lines where ranges should run, then Generate. Pen <b>width</b> = ridge
+          footprint, <b>height</b> = peak, <b>character</b> = ruggedness. Shift-drag
+          flattens (draw over a range to remove it). Ridges blend onto the existing
+          terrain and are eroded to look natural — works on a flat world too.
+        </div>
+        <button onClick={() => setTool(activeTool === "ridge" ? "select" : "ridge")}
+          disabled={!step1Done}
+          style={{ ...genBtn, textAlign: "center",
+            background: activeTool === "ridge" ? "#3a2a18" : "#1a1510",
+            color: activeTool === "ridge" ? "#f0c890" : "#c0a080",
+            border: activeTool === "ridge" ? "1px solid #7a5a30" : "1px solid #2e2418" }}>
+          {activeTool === "ridge" ? "✓ Drawing Ridges — click to stop" : "✏️ Draw Ridge Lines"}
+        </button>
+        {slider("Ridge Width", ridgeParams.width, 3, 40, 1, (v) => setRidgeParams({ width: v }),
+          "Footprint width (cells) — wider than the line")}
+        {slider("Ridge Height", ridgeParams.height, 0.1, 1.0, 0.05, (v) => setRidgeParams({ height: v }),
+          `Peak ≈ ${Math.round(ridgeParams.height * 8848).toLocaleString()} m`)}
+        {slider("Character", ridgeParams.character, 0, 1, 0.05, (v) => setRidgeParams({ character: v }),
+          "Smooth rounded ↔ Rugged serrated")}
+        <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+          <button onClick={handleGenerateRidges} disabled={simRunning || !step1Done || ridgeLines.length === 0}
+            style={{ ...genBtn, flex: 1, marginBottom: 0, textAlign: "center", background: "#3a2a18", color: "#e8c090" }}>
+            ⛰️ Generate Ridges{ridgeLines.length ? ` (${ridgeLines.length})` : ""}
+          </button>
+          <button onClick={() => clearRidgeLines()} disabled={ridgeLines.length === 0}
+            style={{ ...genBtn, marginBottom: 0, background: "#2a1818", color: "#c08080" }}>
+            Clear
+          </button>
+        </div>
+      </div>
       <button onClick={() => setShowAdjust(!showAdjust)} disabled={simRunning || !step1Done} style={genBtn}>
         {showAdjust ? "\u25B2 Adjust Elevation" : "\u25BC Adjust Elevation"}
       </button>

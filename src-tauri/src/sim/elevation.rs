@@ -1063,6 +1063,164 @@ pub fn scale_elevation(buf: &mut WorldBuffer, scale: f32, lock_above: f32) {
     }
 }
 
+/// A user-drawn ridge line: a polyline spine (world-cell coordinates) plus the
+/// footprint half-width (cells), peak height (0..1, opacity-coded) and character
+/// (0..1 ruggedness). `erase` inverts the effect (Shift-draw) to flatten a range.
+#[derive(Clone, serde::Deserialize)]
+pub struct RidgeLine {
+    pub points: Vec<(f32, f32)>,
+    pub width: f32,
+    pub height: f32,
+    pub character: f32,
+    #[serde(default)]
+    pub erase: bool,
+}
+
+/// Turn hand-drawn ridge lines into natural mountain ranges. The line spine is
+/// widened into a rounded ridge whose footprint width comes from `width` and
+/// whose peak height comes from `height`; the crest is broken into sub-peaks by
+/// the shared `ridged_multifractal` field (scaled by `character`), then the new
+/// range is carved by the SAME hydraulic + thermal erosion the other generators
+/// use. Reuses `hydraulic_erosion`/`thermal_erosion`/`ridged_multifractal`/
+/// `warped_coords` directly.
+///
+/// Design (see plan): SCREEN-blends onto existing elevation (so it also works on
+/// a flat world), LAND ONLY (ocean/coastline/depth/shelf untouched), and erosion
+/// is confined to the new ridge footprints by passing a MASKED terrain array —
+/// the erosion functions already skip cells where `terrain != 1`, so existing
+/// terrain outside the mask is left exactly as it was.
+pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
+    let w = buf.width;
+    let h = buf.height;
+    let n = buf.total();
+    if lines.is_empty() { return; }
+    let terrain = buf.terrain.clone();
+
+    // Per-cell ridge attributes, propagated outward from the spine by BFS.
+    let mut dist = vec![u16::MAX; n]; // cells to nearest spine (MAX = unreached)
+    let mut half_w = vec![0.0f32; n];
+    let mut peak = vec![0.0f32; n];
+    let mut charc = vec![0.0f32; n];
+    let mut erase = vec![false; n];
+    let mut queue: VecDeque<usize> = VecDeque::new();
+
+    // ── 1. Rasterize every polyline into spine cells (BFS seeds) ──
+    let mut max_half = 1.0f32;
+    for line in lines {
+        let half = line.width.max(1.0);
+        max_half = max_half.max(half);
+        let pk = line.height.clamp(0.0, 1.0);
+        let ch = line.character.clamp(0.0, 1.0);
+        let er = line.erase;
+        let pts = &line.points;
+        if pts.is_empty() { continue; }
+        let nseg = if pts.len() == 1 { 1 } else { pts.len() - 1 };
+        for seg in 0..nseg {
+            let (x0, y0) = pts[seg];
+            let (x1, y1) = if pts.len() == 1 { pts[0] } else { pts[seg + 1] };
+            let (dx, dy) = (x1 - x0, y1 - y0);
+            let len = (dx * dx + dy * dy).sqrt();
+            let steps = ((len * 2.0).ceil() as i32).max(1); // ~0.5-cell increments
+            for s in 0..=steps {
+                let t = s as f32 / steps as f32;
+                let cx = (x0 + dx * t).round() as i32;
+                let cy = (y0 + dy * t).round() as i32;
+                if cy < 0 || cy >= h as i32 { continue; }
+                let nx = buf.wrap_x(cx);
+                let i = buf.idx(nx, cy as u32);
+                if terrain[i] != 1 { continue; } // land only
+                if dist[i] == 0 {
+                    // Overlapping spine: keep the taller peak / wider footprint.
+                    if half > half_w[i] { half_w[i] = half; }
+                    if pk > peak[i] { peak[i] = pk; }
+                    continue;
+                }
+                dist[i] = 0;
+                half_w[i] = half;
+                peak[i] = pk;
+                charc[i] = ch;
+                erase[i] = er;
+                queue.push_back(i);
+            }
+        }
+    }
+    if queue.is_empty() { return; }
+
+    // ── 2. Multi-source BFS: carry the source attributes to each nearest cell,
+    // out to the widest footprint (cylinder-aware, X wraps / Y clamps). ──
+    let reach = (max_half * 1.5).ceil() as u16;
+    while let Some(ci) = queue.pop_front() {
+        let d = dist[ci];
+        if d >= reach { continue; }
+        let cx = (ci % w as usize) as i32;
+        let cy = (ci / w as usize) as i32;
+        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+            let ny = cy + dy;
+            if ny < 0 || ny >= h as i32 { continue; }
+            let nx = buf.wrap_x(cx + dx);
+            let ni = buf.idx(nx, ny as u32);
+            if terrain[ni] != 1 { continue; }
+            if dist[ni] > d + 1 {
+                dist[ni] = d + 1;
+                half_w[ni] = half_w[ci];
+                peak[ni] = peak[ci];
+                charc[ni] = charc[ci];
+                erase[ni] = erase[ci];
+                queue.push_back(ni);
+            }
+        }
+    }
+
+    // ── 3. Cross-ridge uplift profile + ridged crest, screen-blended in ──
+    let mut elevation = buf.elevation.clone();
+    let mut mask_terrain = vec![0u8; n];
+    for i in 0..n {
+        if terrain[i] != 1 || dist[i] == u16::MAX { continue; }
+        let hw = half_w[i].max(1.0);
+        let t = 1.0 - dist[i] as f32 / hw;
+        if t <= 0.0 { continue; }
+        mask_terrain[i] = 1;
+        let profile = t * t * (3.0 - 2.0 * t); // rounded crest, fades to 0 at the toe
+        if erase[i] {
+            // Flatten toward the low end so drawing over a range removes it.
+            elevation[i] = (elevation[i] * (1.0 - profile * 0.9)).clamp(0.01, 1.0);
+            continue;
+        }
+        let x = (i % w as usize) as f32;
+        let y = (i / w as usize) as f32;
+        // Ridged crest: break the spine into sub-peaks/passes. Frequency and
+        // amplitude grow with character (smooth rounded ↔ serrated/rugged).
+        let f = 0.05 + charc[i] * 0.10;
+        let (rx, ry) = warped_coords(x * f, y * f, seed.wrapping_add(0x81DE), 1.2 + charc[i]);
+        let ridge = ridged_multifractal(rx, ry, seed.wrapping_add(0x48271), 6, 2.1, 2.0);
+        let noise_factor = (1.0 - charc[i] * 0.55) + charc[i] * 1.1 * ridge;
+        let target = (peak[i] * profile * noise_factor).clamp(0.0, 1.0);
+        // Screen blend: full peak on flat ground, saturates ≤1 over existing peaks.
+        elevation[i] = (elevation[i] + target * (1.0 - elevation[i])).clamp(0.01, 1.0);
+    }
+
+    // ── 4. Localized erosion — a MASKED terrain confines droplets + thermal
+    // slump to the new footprints; the shared erosion functions do the carving. ──
+    let mask_count = mask_terrain.iter().filter(|&&m| m == 1).count();
+    if mask_count > 0 {
+        let mut char_sum = 0.0f32;
+        for i in 0..n { if mask_terrain[i] == 1 { char_sum += charc[i]; } }
+        let avg_char = char_sum / mask_count as f32;
+        // Droplet density comparable to the whole-map generators (which use a
+        // small fraction of a droplet per land cell) — enough to carve valleys
+        // into the new range without eroding the crest away.
+        let iters = ((mask_count as f32 * 0.6) as u32).clamp(1_000, 60_000);
+        hydraulic_erosion(&mut elevation, &mask_terrain, w, h, seed.wrapping_add(42), iters);
+        let passes = 2 + (avg_char * 3.0) as u32;
+        thermal_erosion(&mut elevation, &mask_terrain, w, h, passes);
+    }
+
+    // ── 5. Write back — land only; sea, coastline, depth & shelf untouched ──
+    for i in 0..n {
+        if terrain[i] == 1 { buf.elevation[i] = elevation[i].clamp(0.01, 1.0); }
+    }
+}
+
 /// Terrain-aware MICRO-RELIEF dither — guarantees there are no perfectly flat,
 /// mono-height plateaus while keeping genuine flats (floodplains, high tablelands)
 /// readable as flat. Two bands:
@@ -1297,5 +1455,60 @@ mod tests {
         let floor = 2.0 / 8848.0;
         assert!(max_dev > floor * 2.0, "slopes get rolling relief beyond the floor: {max_dev}");
         assert!(max_dev < 0.002, "…but still under the lake threshold: {max_dev}");
+    }
+
+    /// A single drawn ridge line on a FLAT all-land world must raise a band of
+    /// cells along the spine, leave cells far from the line near zero, keep the
+    /// ocean untouched, and produce only finite values in [0,1]. Guards
+    /// generate_ridges (footprint width, land-only, localized effect).
+    #[test]
+    fn ridge_line_raises_a_band_on_flat_world() {
+        use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
+        let (w, h) = (120u32, 80u32);
+        let n = (w * h) as usize;
+        // All land except a one-cell frame of sea, plus a sea column to prove the
+        // ridge never crosses water.
+        let mut terrain = vec![1u8; n];
+        for y in 0..h {
+            for x in 0..w {
+                if x == 0 || x == w - 1 || y == 0 || y == h - 1 {
+                    terrain[(y * w + x) as usize] = 0;
+                }
+            }
+        }
+        let mut buf = WorldBuffer {
+            cols: ColumnSet::ALL, width: w, height: h, tiles_x: 1, tiles_y: 1,
+            equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0,
+            terrain: terrain.clone(),
+            elevation: (0..n).map(|i| if terrain[i] == 1 { 0.01 } else { 0.0 }).collect(),
+            sea_depth: vec![0.0; n], is_shelf: vec![0u8; n], is_shelf_edge: vec![0u8; n],
+            locked_bits: Vec::new(), plate_index: Vec::new(), boundary_type: Vec::new(),
+            is_volcanic: Vec::new(), temperature: Vec::new(), precipitation: Vec::new(),
+            koppen: Vec::new(), soil_type: Vec::new(), fertility: Vec::new(), fishery: Vec::new(),
+            current_type: Vec::new(), wind_vx: Vec::new(), wind_vy: Vec::new(), wind_speed: Vec::new(),
+            current_vx: Vec::new(), current_vy: Vec::new(), distance_to_ocean: Vec::new(),
+            habitability: Vec::new(), salinity: Vec::new(), shark_risk: Vec::new(),
+            goods: Vec::new(), shipworm_risk: Vec::new(), storm_base: Vec::new(),
+            reef_risk: Vec::new(), disease_risk: Vec::new(), precip_summer_frac: Vec::new(),
+        };
+        // A horizontal ridge across the middle: half-width 6 cells, tall, moderate character.
+        let line = RidgeLine {
+            points: vec![(20.0, 40.0), (100.0, 40.0)],
+            width: 6.0, height: 0.9, character: 0.5, erase: false,
+        };
+        generate_ridges(&mut buf, 999, &[line]);
+
+        // Finite + bounded everywhere; ocean stays flat at 0.
+        for i in 0..n {
+            let e = buf.elevation[i];
+            assert!(e.is_finite() && (0.0..=1.0).contains(&e), "elevation out of range: {e}");
+            if terrain[i] == 0 { assert_eq!(e, 0.0, "ocean must stay untouched"); }
+        }
+        // The spine band is high; a row far from the line stays near the 0.01 floor.
+        let on_spine = buf.elevation[(40 * w + 60) as usize];
+        let far = buf.elevation[(12 * w + 60) as usize];
+        assert!(on_spine > 0.35, "ridge spine should be raised, got {on_spine}");
+        assert!(far < 0.1, "cells far from the line stay low, got {far}");
+        assert!(on_spine > far + 0.25, "spine must stand well above the surroundings");
     }
 }
