@@ -575,21 +575,52 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
                 moisture *= ENCLOSED_COAST_DRYING;
             }
 
+            // ── Convergence-rainfall gate ────────────────────────────────────
+            // The ITCZ and summer-monsoon terms below are ADDITIVE convergence
+            // rainfall. Convergence can only wring out moisture the low-level flow
+            // actually delivers, and only where the air is RISING — not where it is
+            // subsiding or being swept away. Previously these bonuses bypassed every
+            // local drying term, so the flat ITCZ (up to 1200 mm/yr) fell on
+            // hyper-arid coasts and interiors exactly as hard as on the wet Congo —
+            // turning the Somali/Arabian coast and the Saharan/Arabian interior into
+            // rainforest. Gate them by three physical brakes:
+            //   • advected-moisture availability — no imported vapour → no rain, so a
+            //     shifted-ITCZ / summer-heat-low excursion over the Sahara/Arabia
+            //     interior stays a DRY thermal trough, not the wet oceanic ITCZ;
+            //   • the descending branch of the Hadley cell (subsidence caps deep
+            //     convection across ~20–32°, Arabia's latitude);
+            //   • the same coastal suppressors already applied to the advected base —
+            //     jet-entrance divergence (the Somali jet sweeping moisture past the
+            //     coast), cold-current/upwelling coasts, and enclosed-sea coasts.
+            // The wet convergent monsoon regions (India, the Sahel, SE Asia, the
+            // Congo/Amazon) keep high availability, rising flow and no cold coast, so
+            // their gate stays ≈1 and they are unaffected.
+            let avail = ((moisture_field[idx] - MOISTURE_FLOOR) / 0.80).clamp(0.0, 1.0);
+            let conv_avail = 0.30 + 0.70 * avail;
+            let mut conv_suppress = jet_dry;
+            if cold_coast[idx] { conv_suppress *= 0.5; }
+            if enclosed_coast[idx] { conv_suppress *= ENCLOSED_COAST_DRYING; }
+            let itcz_gate = conv_avail * conv_suppress * (1.0 - 0.6 * hadley_inversion(abs_lat));
+
             let mut p = moisture * BASE_PRECIPITATION;
 
-            // Continental-shifted ITCZ.
-            p += itcz_bonus_shifted(lat, itcz_shift);
+            // Continental-shifted ITCZ (gated — see above).
+            p += itcz_bonus_shifted(lat, itcz_shift) * itcz_gate;
             // Subtropical high.
             p *= 1.0 - subtropical_penalty(abs_lat);
             // Monsoon: multiplicative interior penetration + a large ADDITIVE
             // coastal-belt load (the additive term is what actually wets the
             // continental subtropics — India etc. — that the advection base misses).
             p *= monsoon_multiplier(abs_lat, buf.distance_to_ocean[idx], land_frac_tropical);
-            // Additive monsoon — GATED to genuine onshore-flow regions so it never
-            // wets subtropical-high deserts (Sahara etc.).
+            // Additive monsoon — GATED to genuine onshore-flow regions AND damped by
+            // the local convection suppressors, so a jet-entrance / upwelling coast
+            // (the Somali/Arabian side of the monsoon) gets no dump even where the
+            // onshore geometry alone would fire it. India's jet-EXIT coast keeps
+            // conv_suppress≈1 and stays wet.
             if (5.0..=45.0).contains(&abs_lat) {
                 p += monsoon_bonus(abs_lat, buf.distance_to_ocean[idx], land_frac_tropical)
-                    * monsoon_onshore(buf, x, y, &sea_suppress);
+                    * monsoon_onshore(buf, x, y, &sea_suppress)
+                    * conv_suppress;
             }
             // Frontal storm tracks.
             let near_ocean = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
@@ -697,5 +728,84 @@ mod tests {
         let (dry_x, wet_x) = jet_effect(&buf, 30, 6);
         assert_eq!(dry_x, 1.0);
         assert!(wet_x > 0.0, "exit terminus should add rainfall: {wet_x}");
+    }
+
+    /// Regression for the "Arabia / Somalia reads as rainforest" bug. A strongly
+    /// NH-heavy world drives a large poleward ITCZ shift; before the convergence
+    /// gate, the flat additive ITCZ (up to 1200 mm/yr) then flooded the DRY-advection
+    /// NH subtropical interior (~20°, the Arabian latitude) just as hard as a wet
+    /// equatorial coast, pushing it to tropical-forest wetness. The gate ties that
+    /// additive ITCZ to advected-moisture availability and the descending Hadley
+    /// high, so the arid subtropical interior stays dry while a moist equatorial
+    /// coast stays wet.
+    #[test]
+    fn shifted_itcz_does_not_flood_dry_subtropics() {
+        let (w, h) = (24u32, 180u32);
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", w.to_string()), ("grid_height", h.to_string())] {
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                rusqlite::params![k, v],
+            ).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_OCEAN_ATMOSPHERE).unwrap();
+
+        // NH-heavy geography: everything from a little south of the equator up to the
+        // subtropics is a single wide continent; the SH is open ocean. This makes
+        // compute_itcz_shift return a strong positive (northward) shift — the exact
+        // condition that used to push the wet ITCZ band deep into the subtropics.
+        for y in 0..h {
+            let lat = buf.latitude(y);
+            for x in 0..w {
+                let i = buf.idx(x, y);
+                let land = lat > -4.0 && lat < 34.0;
+                buf.terrain[i] = if land { 1 } else { 0 };
+                buf.elevation[i] = if land { 0.05 } else { 0.0 };
+                // Northward onshore flow (screen −y is north here): the SH ocean feeds
+                // moisture onto the southern (equatorial) coast, which decays inland
+                // toward the subtropics — the real moisture-supply gradient.
+                buf.wind_vx[i] = 0.0;
+                buf.wind_vy[i] = -1.0;
+                // The SH source ocean carries a warm current (a strong moisture source);
+                // the equatorial coast is thus well-supplied, the far interior is not.
+                buf.current_type[i] = if land { 0 } else { 1 };
+                buf.wind_speed[i] = 4.0;
+            }
+        }
+        // distance_to_ocean: cheap approximation — degrees of latitude north of the
+        // southern coast, normalised. Enough for the monsoon/interior terms.
+        for y in 0..h {
+            let lat = buf.latitude(y);
+            for x in 0..w {
+                let i = buf.idx(x, y);
+                buf.distance_to_ocean[i] = if buf.terrain[i] == 1 {
+                    ((lat + 4.0) / 90.0).clamp(0.0, 1.0)
+                } else { 0.0 };
+            }
+        }
+
+        compute_precipitation(&mut buf);
+
+        // Sample a mid-continent column (far from the E/W wrap edges is irrelevant
+        // here since the whole band is land). Find rows nearest 3° and 22°.
+        let row_at = |target: f32| -> u32 {
+            (0..h).min_by(|&a, &b| {
+                (buf.latitude(a) - target).abs()
+                    .partial_cmp(&(buf.latitude(b) - target).abs()).unwrap()
+            }).unwrap()
+        };
+        let eq_row = row_at(3.0);
+        let sub_row = row_at(22.0);
+        let x = w / 2;
+        let eq_p = buf.precipitation[buf.idx(x, eq_row)];
+        let sub_p = buf.precipitation[buf.idx(x, sub_row)];
+
+        // The dry subtropical interior (Arabia's latitude) must be arid — nowhere
+        // near tropical-forest wetness — even though the ITCZ has shifted onto it.
+        assert!(sub_p < 700.0, "dry subtropical interior should stay arid, got {sub_p} mm");
+        // And it must be markedly drier than the moist equatorial belt (which the
+        // gate leaves wet).
+        assert!(eq_p > sub_p * 1.5, "equator {eq_p} should be far wetter than subtropics {sub_p}");
     }
 }
