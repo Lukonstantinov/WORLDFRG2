@@ -37,7 +37,8 @@ pub struct TileData {
     pub storm_base: Vec<u8>,      // sea: 0..255 annual cyclone/storm potential (open ocean).
     pub reef_risk: Vec<u8>,       // sea: 0..255 reef/shoal wreck hazard (warm shallow coast).
     pub disease_risk: Vec<u8>,    // land: 0..255 malaria/fever risk (warm-wet lowland).
-    pub wind_speed: Vec<f32>,     // low-level wind speed (m/s, ~0-35) incl. jets. Serialized LAST.
+    pub wind_speed: Vec<f32>,     // low-level wind speed (m/s, ~0-35) incl. jets.
+    pub precip_summer_frac: Vec<u8>, // land: summer share of annual precip ×255. Serialized LAST.
 }
 
 /// Number of trade-good sublayer fields stored per cell. See sim/biological.rs
@@ -92,6 +93,7 @@ impl TileData {
             reef_risk: vec![0; N],
             disease_risk: vec![0; N],
             wind_speed: vec![0.0; N],
+            precip_summer_frac: vec![0; N],
         }
     }
 
@@ -152,6 +154,10 @@ impl TileData {
         // older v2 blobs (which lack it) pad to zero on read and recompute on the
         // next ocean-atmosphere run.
         buf.extend_from_slice(bytemuck_f32(&self.wind_speed));
+        // Seasonality: summer share of annual precip (×255). New LAST column — older
+        // v2 blobs lack it and pad to zero on read (koppen.rs then falls back to its
+        // latitude-based seasonal_split until the next ocean-atmosphere run rewrites it).
+        buf.extend_from_slice(&self.precip_summer_frac);
 
         zstd::encode_all(buf.as_slice(), 3).unwrap_or(buf)
     }
@@ -218,6 +224,9 @@ impl TileData {
         // wind_speed only exists in v2 blobs written after it was added; older
         // blobs end above and this read pads to zero.
         let wind_speed = read_f32(&buf, &mut offset);
+        // precip_summer_frac (seasonality) is the newest LAST column; older blobs end
+        // above and this read pads to zero.
+        let precip_summer_frac = read_u8(&buf, &mut offset);
 
         // Keep every stored good column (the count is variable and may exceed the
         // built-in GOODS_COUNT); pad up to GOODS_COUNT so code that indexes the
@@ -233,6 +242,7 @@ impl TileData {
             distance_to_ocean, habitability,
             salinity, shark_risk, goods, shipworm_risk,
             storm_base, reef_risk, disease_risk, wind_speed,
+            precip_summer_frac,
         }
     }
 
@@ -268,6 +278,7 @@ impl TileData {
         merge!(C::STORM => storm_base);
         merge!(C::REEF => reef_risk);
         merge!(C::DISEASE => disease_risk);
+        merge!(C::SEASON => precip_summer_frac);
         if cols.has(C::GOODS) {
             self.goods.clone_from(&src.goods);
         }
@@ -291,6 +302,31 @@ fn read_u8(buf: &[u8], offset: &mut usize) -> Vec<u8> {
     let mut v = slice;
     v.resize(N, 0);
     v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The newest LAST column (precip_summer_frac) survives a compress→decompress
+    /// round-trip, and a blob truncated to before that column (an older save) still
+    /// decodes with the column padded to zero.
+    #[test]
+    fn precip_summer_frac_roundtrips_and_old_blob_pads_zero() {
+        let mut t = TileData::new_sea();
+        for i in 0..N { t.precip_summer_frac[i] = (i % 251) as u8; }
+        let round = TileData::decompress(&t.compress());
+        assert_eq!(round.precip_summer_frac, t.precip_summer_frac);
+
+        // Simulate an older v2 blob that ends before the new column by decompressing,
+        // dropping the trailing N bytes, and re-compressing: the read must pad to 0.
+        let raw = zstd::decode_all(t.compress().as_slice()).unwrap();
+        let truncated = &raw[..raw.len() - N];
+        let older = TileData::decompress(&zstd::encode_all(truncated, 3).unwrap());
+        assert!(older.precip_summer_frac.iter().all(|&v| v == 0));
+        // Everything before it still reads correctly (terrain/precip intact).
+        assert_eq!(older.terrain, t.terrain);
+    }
 }
 
 fn read_f32(buf: &[u8], offset: &mut usize) -> Vec<f32> {

@@ -93,9 +93,12 @@ impl ColumnSet {
     pub const STORM: ColumnSet = ColumnSet(1 << 21);
     pub const REEF: ColumnSet = ColumnSet(1 << 22);
     pub const DISEASE: ColumnSet = ColumnSet(1 << 23);
+    /// precip_summer_frac: per-land-cell summer share of annual precip (0..255).
+    /// Written by precipitation.rs (two-season advection), read by koppen.rs.
+    pub const SEASON: ColumnSet = ColumnSet(1 << 24);
 
     pub const NONE: ColumnSet = ColumnSet(0);
-    pub const ALL: ColumnSet = ColumnSet((1 << 24) - 1);
+    pub const ALL: ColumnSet = ColumnSet((1 << 25) - 1);
 
     // ── Per-phase masks (derived from a mechanical grep of `buf.<column>` in
     // each sim module — see the redesign plan). Each is the union of the columns
@@ -110,13 +113,15 @@ impl ColumnSet {
     /// ocean.rs + temperature.rs + precipitation.rs (phase 3 chain)
     pub const PHASE_OCEAN_ATMOSPHERE: ColumnSet = ColumnSet(
         Self::TERRAIN.0 | Self::ELEVATION.0 | Self::SHELF.0 | Self::WIND.0 | Self::CURRENTS.0
-            | Self::SALINITY.0 | Self::DIST_OCEAN.0 | Self::TEMPERATURE.0 | Self::PRECIPITATION.0,
+            | Self::SALINITY.0 | Self::DIST_OCEAN.0 | Self::TEMPERATURE.0 | Self::PRECIPITATION.0
+            | Self::SEASON.0, // precipitation.rs writes the summer-fraction column
     );
     /// koppen.rs
     pub const PHASE_CLIMATE: ColumnSet = ColumnSet(
         Self::TERRAIN.0 | Self::ELEVATION.0 | Self::TEMPERATURE.0 | Self::PRECIPITATION.0
             | Self::DIST_OCEAN.0 | Self::CURRENTS.0 | Self::WIND.0 | Self::KOPPEN.0
-            | Self::SHELF.0, // shelf seas don't count as open ocean for continentality
+            | Self::SHELF.0 // shelf seas don't count as open ocean for continentality
+            | Self::SEASON.0, // koppen.rs reads the summer-fraction split
     );
     /// rivers.rs (hydrology/lakes — read-only, no tile write-back).
     /// PRECIPITATION is needed by `extract_rivers` to size channels by discharge.
@@ -212,6 +217,7 @@ pub struct WorldBuffer {
     pub storm_base: Vec<u8>,       // sea: 0..255 annual storm/cyclone potential
     pub reef_risk: Vec<u8>,        // sea: 0..255 reef/shoal wreck hazard
     pub disease_risk: Vec<u8>,     // land: 0..255 malaria/fever risk
+    pub precip_summer_frac: Vec<u8>, // land: summer share of annual precip ×255 (seasonality)
 }
 
 impl WorldBuffer {
@@ -296,6 +302,7 @@ impl WorldBuffer {
             storm_base: u8s(ColumnSet::STORM),
             reef_risk: u8s(ColumnSet::REEF),
             disease_risk: u8s(ColumnSet::DISEASE),
+            precip_summer_frac: u8s(ColumnSet::SEASON),
         };
 
         // Fetch every tile's compressed blob serially (cheap memcpy under the
@@ -371,6 +378,7 @@ impl WorldBuffer {
                     copy_rows!(ColumnSet::STORM => storm_base);
                     copy_rows!(ColumnSet::REEF => reef_risk);
                     copy_rows!(ColumnSet::DISEASE => disease_risk);
+                    copy_rows!(ColumnSet::SEASON => precip_summer_frac);
                     if cols.has(ColumnSet::GOODS) {
                         for g in 0..tile.goods.len() {
                             buf.goods[g][wi0..wi0 + tile_w].copy_from_slice(&tile.goods[g][ti0..ti0 + tile_w]);
@@ -484,6 +492,7 @@ impl WorldBuffer {
             copy_rows!(ColumnSet::STORM => storm_base);
             copy_rows!(ColumnSet::REEF => reef_risk);
             copy_rows!(ColumnSet::DISEASE => disease_risk);
+            copy_rows!(ColumnSet::SEASON => precip_summer_frac);
             if self.cols.has(ColumnSet::GOODS) {
                 for g in 0..self.goods.len() {
                     tile.goods[g][ti0..ti0 + tile_w].copy_from_slice(&self.goods[g][wi0..wi0 + tile_w]);

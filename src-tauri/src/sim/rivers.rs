@@ -1033,7 +1033,7 @@ mod tests {
             shipworm_risk: Vec::new(),
             storm_base: Vec::new(),
             reef_risk: Vec::new(),
-            disease_risk: Vec::new(),
+            disease_risk: Vec::new(), precip_summer_frac: Vec::new(),
         }
     }
 

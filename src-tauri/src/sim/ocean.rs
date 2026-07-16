@@ -1,46 +1,47 @@
 use std::collections::VecDeque;
 use super::world_buffer::WorldBuffer;
 
-/// Compute wind belts based on latitude.
-/// Trade winds (0-30), Westerlies (30-60), Polar easterlies (60-90).
-/// Matches WF1 wind-belts.ts exactly.
-pub fn compute_wind_belts(buf: &mut WorldBuffer) {
+/// Prevailing surface-wind unit vector for a latitude, blended across the three
+/// belts (trades <30°, westerlies 30-60°, polar easterlies >60°). Factored out of
+/// `compute_wind_belts` so the seasonal-wind model (`seasonal.rs`) can build on the
+/// same annual-mean belt before adding its monsoon perturbation. `y` is down, so
+/// `+vy` is southward.
+pub fn belt_wind(lat: f32) -> (f32, f32) {
     // Smoothstep helper (0 below a, 1 above b, S-curve between).
     let smooth = |a: f32, b: f32, x: f32| -> f32 {
         let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
         t * t * (3.0 - 2.0 * t)
     };
+    let abs_lat = lat.abs();
+    let sign = if lat >= 0.0 { 1.0f32 } else { -1.0 }; // NH=1, SH=-1
+
+    // The three belt vectors (y is down, so +y is southward).
+    let trade = (-0.707f32, sign * 0.707); // toward equator + west
+    let west = (0.707f32, -sign * 0.707);  // toward pole + east
+    let polar = (-0.707f32, sign * 0.707); // toward equator + west
+
+    // Blend with transitions centered EXACTLY on the 30° and 60° latitude lines.
+    let to_west = smooth(26.0, 34.0, abs_lat);   // trades → westerlies @30°
+    let to_polar = smooth(56.0, 64.0, abs_lat);  // westerlies → polar @60°
+    let w_polar = to_polar;
+    let w_west = to_west * (1.0 - to_polar);
+    let w_trade = (1.0 - to_west).max(0.0);
+    let sumw = (w_trade + w_west + w_polar).max(1e-4);
+    let mut vx = (trade.0 * w_trade + west.0 * w_west + polar.0 * w_polar) / sumw;
+    let mut vy = (trade.1 * w_trade + west.1 * w_west + polar.1 * w_polar) / sumw;
+    // Renormalize to unit strength so moisture advection keeps full force right
+    // through the transition (no spurious dry/wet bands at 30°/60°).
+    let mag = (vx * vx + vy * vy).sqrt();
+    if mag > 0.2 { vx /= mag; vy /= mag; }
+    (vx, vy)
+}
+
+/// Compute wind belts based on latitude.
+/// Trade winds (0-30), Westerlies (30-60), Polar easterlies (60-90).
+/// Matches WF1 wind-belts.ts exactly.
+pub fn compute_wind_belts(buf: &mut WorldBuffer) {
     for y in 0..buf.height {
-        let lat = buf.latitude(y);
-        let abs_lat = lat.abs();
-        let sign = if lat >= 0.0 { 1.0f32 } else { -1.0 }; // NH=1, SH=-1
-
-        // The three belt vectors (y is down, so +y is southward).
-        let trade = (-0.707f32, sign * 0.707); // toward equator + west
-        let west = (0.707f32, -sign * 0.707);  // toward pole + east
-        let polar = (-0.707f32, sign * 0.707); // toward equator + west
-
-        // Blend with transitions centered EXACTLY on the 30° and 60° latitude
-        // lines (a ±4° smoothstep), so the wind-direction reversal lands on the
-        // drawn reference line rather than at a hard step that aliases between
-        // sampled arrow rows. The blend naturally dips to a calm wind in a thin
-        // band at each boundary — the real subtropical-high / subpolar-low calm
-        // belts — which is where the direction flips.
-        let to_west = smooth(26.0, 34.0, abs_lat);   // trades → westerlies @30°
-        let to_polar = smooth(56.0, 64.0, abs_lat);  // westerlies → polar @60°
-        let w_polar = to_polar;
-        let w_west = to_west * (1.0 - to_polar);
-        let w_trade = (1.0 - to_west).max(0.0);
-        let sumw = (w_trade + w_west + w_polar).max(1e-4);
-        let mut vx = (trade.0 * w_trade + west.0 * w_west + polar.0 * w_polar) / sumw;
-        let mut vy = (trade.1 * w_trade + west.1 * w_west + polar.1 * w_polar) / sumw;
-        // Renormalize to unit strength so moisture advection keeps full force right
-        // through the transition (no spurious dry/wet bands at 30°/60°). Only a
-        // sub-degree sliver at the exact boundary — where opposite belts cancel —
-        // stays calm; that razor edge is where the direction reverses, on the line.
-        let mag = (vx * vx + vy * vy).sqrt();
-        if mag > 0.2 { vx /= mag; vy /= mag; }
-
+        let (vx, vy) = belt_wind(buf.latitude(y));
         for x in 0..buf.width {
             let idx = buf.idx(x, y);
             buf.wind_vx[idx] = vx;
@@ -1630,7 +1631,7 @@ mod tests {
             distance_to_ocean: Vec::new(), habitability: Vec::new(),
             salinity: vec![128u8; n], shark_risk: Vec::new(), goods: Vec::new(),
             shipworm_risk: Vec::new(), storm_base: Vec::new(), reef_risk: Vec::new(),
-            disease_risk: Vec::new(),
+            disease_risk: Vec::new(), precip_summer_frac: Vec::new(),
         }
     }
 

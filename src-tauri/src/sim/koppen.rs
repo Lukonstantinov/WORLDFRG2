@@ -46,7 +46,7 @@ const EARTH_W: f32 = 3600.0;
 /// (maritime damping vs. lee/interior amplification) is applied separately by
 /// `seasonal_temps`, so that lee/east coasts keep their cold continental winters
 /// instead of being damped into mild oceanic types.
-fn seasonal_range_base(abs_lat: f32) -> f32 {
+pub(crate) fn seasonal_range_base(abs_lat: f32) -> f32 {
     // Smooth piecewise-linear ramp matching WF1 anchor points:
     //   lat 0→2  10→5  25→12  40→22  55→30  75→38
     if abs_lat < 10.0 {
@@ -444,11 +444,21 @@ fn classify_cell(buf: &WorldBuffer, x: u32, y: u32) -> u8 {
     let (t_coldest, t_warmest) = seasonal_temps(buf, x, y);
     let p12 = precip / 12.0;
 
-    // Smooth seasonal precipitation split
-    let (summer_mult, winter_mult) =
-        seasonal_split(abs_lat, windward_ocean, upwind_warm, near_ocean, winter_monsoon, cold_near);
-    let summer_wet = p12 * summer_mult;
-    let winter_wet = p12 * winter_mult;
+    // Seasonal precipitation split. Prefer the EMERGENT summer fraction produced by
+    // the two-season precipitation model (precipitation.rs writes precip_summer_frac
+    // = summer share of annual ×255). It averages to the annual (2·frac + 2·(1−frac)
+    // = 2), matching the old multiplier semantics. Fall back to the latitude-based
+    // `seasonal_split` only when the column is absent/zero (an old save mid-migration,
+    // before its next ocean-atmosphere run rewrites it).
+    let frac_raw = if buf.precip_summer_frac.is_empty() { 0 } else { buf.precip_summer_frac[idx] };
+    let (summer_wet, winter_wet) = if frac_raw > 0 {
+        let frac = frac_raw as f32 / 255.0;
+        (2.0 * frac * p12, 2.0 * (1.0 - frac) * p12)
+    } else {
+        let (sm, wm) =
+            seasonal_split(abs_lat, windward_ocean, upwind_warm, near_ocean, winter_monsoon, cold_near);
+        (p12 * sm, p12 * wm)
+    };
 
     // Aridity threshold
     let b_threshold = if summer_wet > winter_wet * 2.33 {
