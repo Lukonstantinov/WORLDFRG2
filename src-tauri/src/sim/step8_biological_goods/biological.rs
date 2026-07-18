@@ -1,19 +1,19 @@
-//! Phase 8 — Biological layer.
+﻿//! Phase 8 â€” Biological layer.
 //!
 //! Two persisted products:
-//!   • `shark_risk`  — habitat danger for "shark-infested" coastal water
+//!   â€¢ `shark_risk`  â€” habitat danger for "shark-infested" coastal water
 //!     (bull/tiger-shark style: warm, shallow, frequented coasts; brackish
 //!     river-mouth bonus). People-independent.
-//!   • `goods[GOOD_*]` — trade-good belt intensities derived from climate,
+//!   â€¢ `goods[GOOD_*]` â€” trade-good belt intensities derived from climate,
 //!     terrain, soil/fertility, coast and ocean productivity. Each good is a
 //!     separate sublayer (land and/or marine).
 //!
 //! All outputs are u8 (0..255). Tuning is expected to need a visual pass.
 
 use std::collections::VecDeque;
-use super::world_buffer::WorldBuffer;
-use super::rivers::River;
-use super::koppen::*;
+use crate::sim::world_buffer::WorldBuffer;
+use crate::sim::rivers::River;
+use crate::sim::koppen::*;
 use super::goods_spec::{builtin_index_of, id_salt, Distribution, Domain, Envelope, GoodSpec};
 use crate::tile::cell::GOODS_COUNT;
 
@@ -21,7 +21,7 @@ use crate::tile::cell::GOODS_COUNT;
 // built-in seed selection: built-ins pass `index * this`).
 const SEED_SALT_K: u64 = 0x9E3779B97F4A7C15;
 
-// ── Good indices (must match TileData.goods ordering + GOOD_NAMES) ──
+// â”€â”€ Good indices (must match TileData.goods ordering + GOOD_NAMES) â”€â”€
 pub const GOOD_SILK: usize = 0;
 pub const GOOD_WINE: usize = 1;
 pub const GOOD_OLIVEOIL: usize = 2;
@@ -43,7 +43,7 @@ pub const GOOD_WHEAT: usize = 17;
 pub const GOOD_IRON: usize = 18;
 pub const GOOD_COTTON: usize = 19;
 pub const GOOD_GEMSTONES: usize = 20;
-// ── Round-1 additions (21..29) ──
+// â”€â”€ Round-1 additions (21..29) â”€â”€
 pub const GOOD_HARDWOODS: usize = 21;   // tropical rainforest export wood
 pub const GOOD_HORSES: usize = 22;      // steppe / grassland horse country
 pub const GOOD_WOOL_FLEECE: usize = 23; // cool-wet oceanic sheep pasture
@@ -53,20 +53,20 @@ pub const GOOD_CACAO: usize = 26;       // wet tropical lowland
 pub const GOOD_COPPER: usize = 27;      // hill-country ore deposits
 pub const GOOD_TIN: usize = 28;         // montane ore deposits (bronze pair)
 pub const GOOD_GOLD: usize = 29;        // rare highland precious-metal deposits
-// ── New goods (30..32) ──
+// â”€â”€ New goods (30..32) â”€â”€
 pub const GOOD_CLOVES: usize = 30;      // tropical spice-island clove
 pub const GOOD_PEPPER: usize = 31;      // tropical wet-coast peppercorn
 pub const GOOD_PAPER: usize = 32;       // multi-source (papyrus/bamboo/manufactured)
-// ── Curated additions (33..37): two manufactured goods, two tropical cash
-// crops, one desert good. All land goods, appended LAST for save back-compat. ──
-pub const GOOD_CERAMICS: usize = 33;    // porcelain/pottery — clay + skilled cities
-pub const GOOD_GLASSWARE: usize = 34;   // glass — silica (coast/arid) + skilled cities
+// â”€â”€ Curated additions (33..37): two manufactured goods, two tropical cash
+// crops, one desert good. All land goods, appended LAST for save back-compat. â”€â”€
+pub const GOOD_CERAMICS: usize = 33;    // porcelain/pottery â€” clay + skilled cities
+pub const GOOD_GLASSWARE: usize = 34;   // glass â€” silica (coast/arid) + skilled cities
 pub const GOOD_TOBACCO: usize = 35;     // warm humid-subtropical cash crop
 pub const GOOD_INDIGO: usize = 36;      // hot wet tropical/subtropical dye crop (land)
 pub const GOOD_DATES: usize = 37;       // hot-desert oasis fruit
-// ── ~1400 curation additions (38..44): everyday staples so every climate has
+// â”€â”€ ~1400 curation additions (38..44): everyday staples so every climate has
 // an answer in each need category (cereal/protein/sweetener/livestock/drink).
-// Appended LAST for save back-compat. ──
+// Appended LAST for save back-compat. â”€â”€
 pub const GOOD_RICE: usize = 38;        // warm-wet paddy staple
 pub const GOOD_BARLEY: usize = 39;      // cool-belt grain (barley & rye)
 pub const GOOD_MILLET: usize = 40;      // steppe / arid-margin grain
@@ -134,7 +134,7 @@ pub const GOOD_DESIRE: [f32; GOODS_COUNT] = [
     0.80, 0.70, 0.50, 0.65, 0.45, 0.55, 0.50, // rice,barley,millet,herring,honey,hides,beer
 ];
 /// Default scarcity per good (0..1). 0.5 is neutral (no change to belt size).
-/// Higher = rarer (tighter seed/spread thresholds → a smaller belt). Most goods
+/// Higher = rarer (tighter seed/spread thresholds â†’ a smaller belt). Most goods
 /// ship neutral; cloves and paper are deliberately rarer (user request), and the
 /// two manufactured goods (ceramics/glassware) are uncommon city crafts.
 pub const GOOD_RARITY: [f32; GOODS_COUNT] = {
@@ -164,7 +164,7 @@ pub const GOOD_MARINE: [bool; GOODS_COUNT] = [
 
 /// Distribution model. true = UNLIMITED: the good fills *every* suitable area in
 /// the world (many producers). false = SEEDED: localized to one contiguous
-/// homeland (one main producer → clean trade monopolies). Gemstones use a
+/// homeland (one main producer â†’ clean trade monopolies). Gemstones use a
 /// separate deposit-placement path and ignore this flag.
 pub const GOOD_UNLIMITED: [bool; GOODS_COUNT] = [
     false, false, false, false, false, true,    // ..stockfish (unlimited fisheries)
@@ -174,16 +174,16 @@ pub const GOOD_UNLIMITED: [bool; GOODS_COUNT] = [
     true, true, false, false,                     // wheat+iron unlimited; cotton seeded; gemstones special
     false, false, false, false, false, false,     // hardwoods/horses/wools/ivory/cacao seeded
     false, false, false,                          // copper/tin/gold = deposit goods (flag unused)
-    false, false, false,                          // cloves(seeded), pepper(seeded), paper(seeded → rarer)
+    false, false, false,                          // cloves(seeded), pepper(seeded), paper(seeded â†’ rarer)
     false, false, false, false, false,            // ceramics, glassware, tobacco, indigo, dates (all seeded homelands)
     true, true, true, true, true, true, false,     // staples unlimited; beer = famed brewing homeland
 ];
 
 /// Goods whose demand is only realized in a large/open trade network: distant
 /// luxuries (incl. the two wool subtypes, which sit on different continents). In
-/// small or closed networks — and in the good's own producing homeland — desire
+/// small or closed networks â€” and in the good's own producing homeland â€” desire
 /// for these is discounted (you can't trade for, or don't prize, what's far or
-/// local). Staples (wheat, salt, timber, iron…) keep flat, universal demand.
+/// local). Staples (wheat, salt, timber, ironâ€¦) keep flat, universal demand.
 pub const GOOD_NETWORK_LUXURY: [bool; GOODS_COUNT] = [
     true,  false, false, false, true,  false, // silk, _, _, _, frankincense, _
     true,  true,  true,  false, false, true,  // spices, tea, coffee, _, _, amber
@@ -191,14 +191,14 @@ pub const GOOD_NETWORK_LUXURY: [bool; GOODS_COUNT] = [
     false, false, false, true,                 // _, _, _, gemstones
     true,  false, true,  true,  true,  true,   // hardwoods, _, wool_fleece, wool_llama, ivory, cacao
     false, false, true,                         // _, _, gold
-    true,  true,  true,                         // cloves, pepper, paper (paper now rare → a prized export)
+    true,  true,  true,                         // cloves, pepper, paper (paper now rare â†’ a prized export)
     true,  true,  true,  true,  false,          // ceramics, glassware, tobacco, indigo (luxuries); dates (staple)
     false, false, false, false, false, false, false, // everyday staples, never network luxuries
 ];
 
 /// Need category per good. Within a category, alternatives substitute for each
 /// other in the market's needs ladder (a city short of wheat buys rice or
-/// barley at a small penalty). 15 categories — see the redesign plan III.5.
+/// barley at a small penalty). 15 categories â€” see the redesign plan III.5.
 pub const GOOD_CATEGORY: [&str; GOODS_COUNT] = [
     "fiber", "drink", "oil", "sweetener", "aromatic", "protein",      // silk..stockfish
     "aromatic", "drink", "drink", "prestige", "construction", "prestige", // spices..amber
@@ -211,7 +211,7 @@ pub const GOOD_CATEGORY: [&str; GOODS_COUNT] = [
     "craft", "craft", "prestige", "dye", "sweetener",                  // ceramics..dates
     "cereal", "cereal", "cereal", "protein", "sweetener", "livestock", "drink", // rice..beer
 ];
-/// Needs ladder tier: 0 = basic need (food, fuel, salt, cloth…) filled first,
+/// Needs ladder tier: 0 = basic need (food, fuel, salt, clothâ€¦) filled first,
 /// 1 = comfort, 2 = luxury (filled last; price-elastic).
 pub const GOOD_NEED_TIER: [u8; GOODS_COUNT] = [
     2, 1, 1, 2, 2, 0,    // silk, wine, oliveoil, sugar, frankincense, stockfish
@@ -241,7 +241,7 @@ pub const GOOD_BASE_VALUE: [f32; GOODS_COUNT] = [
 ];
 
 /// Freight weight/volume multiplier per good (1.0 = a compact luxury like silk;
-/// 3-4 = a bulky low-value staple — timber, grain, ore — whose haulage eats its
+/// 3-4 = a bulky low-value staple â€” timber, grain, ore â€” whose haulage eats its
 /// value so it stays regional). Multiplies the per-day freight cost.
 pub const GOOD_BULK: [f32; GOODS_COUNT] = [
     1.0, 2.5, 2.2, 2.0, 1.0, 1.8,    // silk, wine, oliveoil, sugar, frankincense, stockfish
@@ -271,10 +271,10 @@ pub const GOOD_PERISH: [f32; GOODS_COUNT] = [
     0.02, 0.02, 0.02, 0.55, 0.0, 0.02, 0.04, // rice, barley, millet, herring(fresh-VERY perishable, eaten at origin; salt it to ship), honey, hides, beer
 ];
 
-// Mountains ≥3000 m wall off a good's spread across a continent.
-const MOUNTAIN_NORM: f32 = 3000.0 / 8848.0; // ≈ 0.339
+// Mountains â‰¥3000 m wall off a good's spread across a continent.
+const MOUNTAIN_NORM: f32 = 3000.0 / 8848.0; // â‰ˆ 0.339
 
-// Gemstone deposits form in old highland/mountainous terrain (≥ montane).
+// Gemstone deposits form in old highland/mountainous terrain (â‰¥ montane).
 const GEM_MIN_ELEV: f32 = 0.40;
 /// Stone names cycled across gemstone deposits (for InfoPanel / region labels).
 pub const GEM_STONES: [&str; 5] = ["Ruby", "Sapphire", "Emerald", "Diamond", "Topaz"];
@@ -314,7 +314,7 @@ pub fn deposit_params(g: usize) -> Option<DepositParams> {
     }
 }
 
-// ── Small scoring helpers ──────────────────────────────────────────────────
+// â”€â”€ Small scoring helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[inline]
 fn bell(x: f32, center: f32, width: f32) -> f32 {
@@ -339,7 +339,7 @@ fn band(x: f32, lo: f32, hi: f32, edge: f32) -> f32 {
 #[inline]
 fn q(v: f32) -> u8 { (v.clamp(0.0, 1.0) * 255.0) as u8 }
 
-// ── Shark waters ───────────────────────────────────────────────────────────
+// â”€â”€ Shark waters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Compute shark-habitat danger for sea cells. Warm, shallow, coastal water,
 /// strongest where prey (fisheries) and brackish river outflow concentrate
@@ -405,7 +405,7 @@ pub fn compute_shark_risk(buf: &mut WorldBuffer, rivers: &[River]) {
 
             // Warmth: bull/tiger sharks favour warm water; taper out of the cold.
             let t = buf.temperature[i];
-            let warmth = smoothstep(10.0, 23.0, t); // 0 ≤10°C, full ≥23°C
+            let warmth = smoothstep(10.0, 23.0, t); // 0 â‰¤10Â°C, full â‰¥23Â°C
 
             // Shallow, sunlit shelf water (prey + where people swim/fish).
             let shallow = if buf.is_shelf[i] == 1 {
@@ -434,7 +434,7 @@ pub fn compute_shark_risk(buf: &mut WorldBuffer, rivers: &[River]) {
     }
 }
 
-// ── Shipworms (Teredo) ───────────────────────────────────────────────────────
+// â”€â”€ Shipworms (Teredo) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Compute shipworm hull-hazard for sea cells. *Teredo navalis* riddles wooden
 /// ships in WARM, SHALLOW, COASTAL water and is worst where salinity is reduced
@@ -514,7 +514,7 @@ pub fn compute_shipworm_risk(buf: &mut WorldBuffer, rivers: &[River]) {
             };
 
             // Reduced salinity (estuary/brackish) is the shipworm's preferred
-            // habitat. salinity u8 0..255 ↔ 28..42 PSU, so low u8 = fresher.
+            // habitat. salinity u8 0..255 â†” 28..42 PSU, so low u8 = fresher.
             let fresher = (1.0 - buf.salinity[i] as f32 / 255.0).clamp(0.0, 1.0);
             let brackish = 0.45 + 0.55 * fresher + if river_mouth[i] { 0.35 } else { 0.0 };
 
@@ -524,12 +524,12 @@ pub fn compute_shipworm_risk(buf: &mut WorldBuffer, rivers: &[River]) {
     }
 }
 
-// ── Disease (malaria / fever) — land hazard ─────────────────────────────────
+// â”€â”€ Disease (malaria / fever) â€” land hazard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Per-LAND-cell malaria/fever risk: warm, wet, low-lying ground near standing
 /// water (river floodplains, coastal lagoons, marshy lowlands) breeds the
 /// mosquito vector. Highest in wet tropics/subtropics, ~0 in deserts, cool
-/// highlands and cold latitudes. Stored u8 0..255 — suppresses settlement and is
+/// highlands and cold latitudes. Stored u8 0..255 â€” suppresses settlement and is
 /// rendered as the Disease overlay. Depends only on climate/relief/water, so it
 /// is computed in the settlement phase (before habitability needs it).
 pub fn compute_disease_risk(buf: &mut WorldBuffer, rivers: &[River]) {
@@ -567,7 +567,7 @@ pub fn compute_disease_risk(buf: &mut WorldBuffer, rivers: &[River]) {
     for i in 0..n {
         if buf.terrain[i] != 1 { buf.disease_risk[i] = 0; continue; }
         let t = buf.temperature[i];
-        // Warm vector window: from ~15°C, fading out in extreme heat/aridity.
+        // Warm vector window: from ~15Â°C, fading out in extreme heat/aridity.
         let warmth = smoothstep(15.0, 22.0, t) * (1.0 - smoothstep(33.0, 40.0, t));
         // Standing water needs moisture; dry land breeds little.
         let wet = band(buf.precipitation[i], 700.0, 3000.0, 500.0);
@@ -575,7 +575,7 @@ pub fn compute_disease_risk(buf: &mut WorldBuffer, rivers: &[River]) {
         let lowland = 1.0 - smoothstep(0.12, 0.40, buf.elevation[i]);
         // Proximity to standing / fresh water.
         let water = if wd[i] == u32::MAX { 0.0 } else { 1.0 - wd[i] as f32 / max_d as f32 };
-        // Köppen reinforcement: wet tropics & humid subtropics are worst.
+        // KÃ¶ppen reinforcement: wet tropics & humid subtropics are worst.
         let clim = match buf.koppen[i] {
             1 | 2 => 1.0,        // Af / Am rainforest & monsoon
             3 | 23 => 0.85,      // Aw / As savanna (seasonal pools)
@@ -588,19 +588,19 @@ pub fn compute_disease_risk(buf: &mut WorldBuffer, rivers: &[River]) {
     }
 }
 
-// ── Storms / cyclones (open ocean) ───────────────────────────────────────────
+// â”€â”€ Storms / cyclones (open ocean) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Compute the **annual** storm/cyclone potential of every sea cell. Unlike the
 /// coastal shark/shipworm hazards, cyclones roam open water: the field is warm
-/// tropical SST × a cyclogenesis latitude band (≈8–30°, ~0 on the equator).
+/// tropical SST Ã— a cyclogenesis latitude band (â‰ˆ8â€“30Â°, ~0 on the equator).
 /// Seasonality is derived analytically at query time from this base + latitude
 /// (see `query_commands::compute_storm_zones`), so nothing per-month is stored.
 /// Seasonal multiplier (0..1) applied to `storm_base` at moon `month`
 /// (1..=`months`) for a cell at signed `lat` (north positive). Cyclone seasons
-/// are hemisphere-offset — the northern season peaks in late summer/autumn, the
-/// southern roughly half a year opposite — so there is always a calm hemisphere.
+/// are hemisphere-offset â€” the northern season peaks in late summer/autumn, the
+/// southern roughly half a year opposite â€” so there is always a calm hemisphere.
 /// Near the equator the season smears toward year-round. Derived analytically so
-/// nothing per-month is stored. `month <= 0` (or `months == 0`) → 1.0 (the
+/// nothing per-month is stored. `month <= 0` (or `months == 0`) â†’ 1.0 (the
 /// annual/combined peak).
 pub fn storm_season_phase(month: i32, months: u32, lat: f32) -> f32 {
     if months == 0 || month <= 0 { return 1.0; }
@@ -608,7 +608,7 @@ pub fn storm_season_phase(month: i32, months: u32, lat: f32) -> f32 {
     let peak = if lat >= 0.0 { 0.70 } else { 0.20 };                 // fraction of year
     let theta = 2.0 * std::f32::consts::PI * (m - peak);
     let season = theta.cos().max(0.0).powf(1.5);     // concentrate into ~half the year
-    let blend = smoothstep(0.0, 15.0, lat.abs());    // 0 at equator → 1 by 15°
+    let blend = smoothstep(0.0, 15.0, lat.abs());    // 0 at equator â†’ 1 by 15Â°
     (season * blend + 0.5 * (1.0 - blend)).clamp(0.0, 1.0)
 }
 
@@ -618,7 +618,7 @@ pub fn compute_storm_base(buf: &mut WorldBuffer) {
     for y in 0..h {
         let abs_lat = buf.abs_latitude(y);
         // Cyclogenesis belt: nothing right on the equator (weak Coriolis), peak
-        // through the subtropics, fading by ~30°.
+        // through the subtropics, fading by ~30Â°.
         let lat_band = band(abs_lat, 8.0, 30.0, 8.0);
         for x in 0..w {
             let i = buf.idx(x, y);
@@ -629,7 +629,7 @@ pub fn compute_storm_base(buf: &mut WorldBuffer) {
     }
 }
 
-// ── Reefs / shoals (warm shallow coast) ──────────────────────────────────────
+// â”€â”€ Reefs / shoals (warm shallow coast) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Compute static reef/shoal wreck hazard for sea cells: warm, very shallow,
 /// coastal water (coral-reef / atoll navigation danger). Mirrors the shark
@@ -693,17 +693,17 @@ pub fn compute_reef_risk(buf: &mut WorldBuffer) {
     }
 }
 
-// ── Trade goods ────────────────────────────────────────────────────────────
+// â”€â”€ Trade goods â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Compute every trade-good belt. Each good's raw climate/terrain suitability is
 /// scored, then **localized to a single contiguous region**: a suitability-
 /// weighted random seed is chosen (deterministic from the world seed) and the
 /// good spreads by flood-fill through suitable cells until it hits a boundary.
-/// For LAND goods the boundaries are sea/ocean and mountain ranges (≥3000 m); for
-/// MARINE goods there are no physical walls — the good spreads through coast/sea
+/// For LAND goods the boundaries are sea/ocean and mountain ranges (â‰¥3000 m); for
+/// MARINE goods there are no physical walls â€” the good spreads through coast/sea
 /// and stops where its environmental envelope (temperature / salinity / etc.,
 /// encoded in the score) makes it unviable. This gives each good one homeland
-/// (silk = one land, frankincense = one coast, pearls = one warm sea…) and a
+/// (silk = one land, frankincense = one coast, pearls = one warm seaâ€¦) and a
 /// clear single producer for the trade matrix.
 /// Generate every good's belt from the active (editable) spec list. Built-in
 /// goods (`builtin`, `scoring = None`) use the hardcoded scorer keyed by their id
@@ -717,7 +717,7 @@ pub fn compute_reef_risk(buf: &mut WorldBuffer) {
 /// immediate evaporite shore. Coastal solar-salt belts are still placed by the
 /// normal good pass; this adds the inland lake source, wiring salt lakes into the
 /// economy. No-op if the world has no salt good or no salt lakes.
-pub fn apply_salt_pans(buf: &mut WorldBuffer, lakes: &[super::rivers::Lake], specs: &[GoodSpec]) {
+pub fn apply_salt_pans(buf: &mut WorldBuffer, lakes: &[crate::sim::rivers::Lake], specs: &[GoodSpec]) {
     let salt_slot = match specs.iter().position(|s| builtin_index_of(&s.id) == Some(GOOD_SALT)) {
         Some(s) => s,
         None => return,
@@ -725,10 +725,10 @@ pub fn apply_salt_pans(buf: &mut WorldBuffer, lakes: &[super::rivers::Lake], spe
     if buf.goods.len() <= salt_slot { return; }
     let h = buf.height as i32;
     let have_sal = !buf.salinity.is_empty();
-    let shore_u8 = super::rivers::salinity_to_u8(super::rivers::SALT_PRODUCTION_PPT);
+    let shore_u8 = crate::sim::rivers::salinity_to_u8(crate::sim::rivers::SALT_PRODUCTION_PPT);
     for lk in lakes {
-        if !lk.endorheic || lk.salinity_ppt < super::rivers::SALT_PRODUCTION_PPT { continue; }
-        let pan_u8 = super::rivers::salinity_to_u8(lk.salinity_ppt);
+        if !lk.endorheic || lk.salinity_ppt < crate::sim::rivers::SALT_PRODUCTION_PPT { continue; }
+        let pan_u8 = crate::sim::rivers::salinity_to_u8(lk.salinity_ppt);
         for &(x, y) in &lk.cells {
             let ci = buf.idx(x, y);
             if have_sal { buf.salinity[ci] = buf.salinity[ci].max(pan_u8); }
@@ -766,8 +766,8 @@ pub fn compute_trade_goods(
     buf.goods.resize(specs.len().max(1), vec![0u8; n]);
 
     // Adaptive highland floor for ore/gem deposits. Their configured `min_elev`
-    // values are ABSOLUTE normalized heights (1.0 = 8848 m), so copper 0.30 ≈
-    // 2650 m, gold 0.45 ≈ 3980 m. On any world whose mountains don't reach those
+    // values are ABSOLUTE normalized heights (1.0 = 8848 m), so copper 0.30 â‰ˆ
+    // 2650 m, gold 0.45 â‰ˆ 3980 m. On any world whose mountains don't reach those
     // heights, the elevation gate produced ZERO candidates and the metals/gems
     // silently vanished from the map. Clamp each deposit floor to no higher than
     // the 72nd percentile of this world's land elevation, so the top ~28% of land
@@ -805,8 +805,8 @@ pub fn compute_trade_goods(
                 if suitability {
                     // Land deposit goods (salt/iron) score on land; MARINE deposit
                     // goods (e.g. ambergris) score on SEA cells. Previously this loop
-                    // skipped every non-land cell, so a marine deposit good — which
-                    // scores 0 on land — produced an all-zero candidate field and
+                    // skipped every non-land cell, so a marine deposit good â€” which
+                    // scores 0 on land â€” produced an all-zero candidate field and
                     // placed nothing (ambergris was invisible). Score the domain that
                     // the good actually lives in.
                     let marine_dep = matches!(spec.domain, Domain::Marine);
@@ -856,7 +856,7 @@ pub fn compute_trade_goods(
                 let mut thresh = if suitability { (0.30 + rare_bump).min(0.7) } else { 0.45 };
                 // Guarantee enough candidates to actually place `count` spaced
                 // deposits: if the noise threshold is too strict for this world,
-                // loosen it until at least ~4× the deposit count of cells qualify
+                // loosen it until at least ~4Ã— the deposit count of cells qualify
                 // (otherwise a sparse field placed nothing and the good vanished).
                 let want = (count as usize * 4).max(8);
                 while thresh > 0.12 && cand.iter().filter(|&&v| v >= thresh).count() < want {
@@ -905,8 +905,8 @@ pub fn compute_trade_goods(
 }
 
 /// Declarative envelope scorer for custom (and overridden) goods. Reproduces the
-/// house scoring style: domain gate × climate × temp/precip/elevation/lat bands ×
-/// fertility × coast bonus. Absent terms contribute a neutral 1.0.
+/// house scoring style: domain gate Ã— climate Ã— temp/precip/elevation/lat bands Ã—
+/// fertility Ã— coast bonus. Absent terms contribute a neutral 1.0.
 fn envelope_score(buf: &WorldBuffer, env: &Envelope, domain: Domain, x: u32, y: u32) -> f32 {
     let i = buf.idx(x, y);
     let land = buf.terrain[i] == 1;
@@ -951,10 +951,10 @@ fn envelope_score(buf: &WorldBuffer, env: &Envelope, domain: Domain, x: u32, y: 
     s.clamp(0.0, 1.0)
 }
 
-/// Fold the dry-winter / dry-summer-continental Köppen variants onto their humid
+/// Fold the dry-winter / dry-summer-continental KÃ¶ppen variants onto their humid
 /// (f) equivalents for GOODS scoring. The crops/animals don't care about winter
-/// dryness — a dry-winter continental zone (Dwb) grows the same goods as humid
-/// continental (Dfb) — but most `good_score` arms only list the f variants, so
+/// dryness â€” a dry-winter continental zone (Dwb) grows the same goods as humid
+/// continental (Dfb) â€” but most `good_score` arms only list the f variants, so
 /// the newly-introduced Cw*/Dw* zones came up empty. Mediterranean (Cs*) and
 /// tropical savanna (As) are climatically meaningful for their goods (olives,
 /// wine, etc.) and are deliberately NOT folded.
@@ -988,7 +988,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
     match g {
         GOOD_SILK => {
             // Sericulture is warm-temperate / humid-subtropical mulberry country
-            // (China's Yangtze, Bengal, the Levant) — NOT the cold northern
+            // (China's Yangtze, Bengal, the Levant) â€” NOT the cold northern
             // continental interior. Dropped DFA/DFB, warmed the temperature peak,
             // and added a |lat| cap so silk stays out of the high north.
             let clim = match k { CFA | CWA => 1.0, CSA | CWB => 0.5, CFB => 0.25, _ => 0.0 };
@@ -997,11 +997,11 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
                 * (0.4 + 0.6 * fert) * (1.0 - smoothstep(0.4, 0.7, elev))
         }
         GOOD_WINE => {
-            // Viticulture sits in a warm-temperate band (≈30–50°): Mediterranean
+            // Viticulture sits in a warm-temperate band (â‰ˆ30â€“50Â°): Mediterranean
             // cores, humid-subtropical and the warm oceanic margins. We score from
-            // Köppen WHERE it tags those zones, but also from the underlying
+            // KÃ¶ppen WHERE it tags those zones, but also from the underlying
             // CONDITIONS (warm-temperate, mid-latitude, sub-humid) so grapes still
-            // appear on a world whose Köppen classifier produced little explicit Cs.
+            // appear on a world whose KÃ¶ppen classifier produced little explicit Cs.
             let clim: f32 = match k { CSA | CSB => 1.0, CFA => 0.55, CFB | DSA | DSB => 0.40, _ => 0.0 };
             let med_like = bell(t, 15.0, 6.5) * band(p, 300.0, 1000.0, 500.0) * band(abs_lat, 30.0, 50.0, 9.0);
             let suit = clim.max(0.75 * med_like);
@@ -1009,7 +1009,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
             suit * (1.0 - smoothstep(0.55, 0.8, elev)) * hill
         }
         GOOD_OLIVEOIL => {
-            // Olives = hot dry summers, mild winters, ≈30–45°. Peaks in Köppen
+            // Olives = hot dry summers, mild winters, â‰ˆ30â€“45Â°. Peaks in KÃ¶ppen
             // Mediterranean; elsewhere fall back to the CONDITIONS (warm, dry-summer,
             // mid-latitude, low elevation, coastal preference) so olive country
             // still shows where the classifier didn't stamp an explicit Cs zone.
@@ -1071,7 +1071,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
             // then the broader temperate grasslands / humid-continental grain
             // belts (steppe margins, oceanic, warm continental). Unlimited.
             let clim = match k {
-                CSA | CSB => 1.0,                 // Mediterranean — prime wheat
+                CSA | CSB => 1.0,                 // Mediterranean â€” prime wheat
                 BSK | CFA | CFB => 0.7,           // steppe margin / humid-subtropical / oceanic
                 DFA | DFB | DSA | DSB => 0.6,     // continental grain belt
                 BSH | CWA => 0.4,                 // hot steppe / dry-winter subtropical
@@ -1084,7 +1084,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
         }
         GOOD_IRON => {
             // Ore in hill country and mountain margins (not the highest peaks, not
-            // the flats). Any non-frozen climate. Unlimited — many producers.
+            // the flats). Any non-frozen climate. Unlimited â€” many producers.
             let relief = band(elev, 0.30, 0.68, 0.16);
             let not_frozen = 1.0 - smoothstep(-6.0, 2.0, -t); // dampen tundra/ice
             let volcanic = if buf.is_volcanic[i] != 0 { 1.0 } else { 0.85 };
@@ -1113,13 +1113,13 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
                 * bell(t, 12.0, 12.0)
         }
         GOOD_WOOL_FLEECE => {
-            // Cool, wet oceanic uplands — sheep fleece.
+            // Cool, wet oceanic uplands â€” sheep fleece.
             let clim = match k { CFB | CFC => 1.0, CSB | DFB | ET => 0.5, CWB => 0.4, _ => 0.0 };
             clim * band(elev, 0.10, 0.50, 0.25) * band(p, 600.0, 1600.0, 500.0)
                 * band(t, 4.0, 14.0, 7.0)
         }
         GOOD_WOOL_LLAMA => {
-            // Dry-winter highland camelid wool — a distinct homeland (different
+            // Dry-winter highland camelid wool â€” a distinct homeland (different
             // continent) from fleece wool.
             let clim = match k { CWB | CWC => 1.0, BSK => 0.5, ET => 0.4, _ => 0.0 };
             clim * band(elev, 0.35, 0.70, 0.18) * band(abs_lat, 0.0, 40.0, 15.0)
@@ -1139,7 +1139,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
         }
         GOOD_CLOVES => {
             // Clove (Moluccas / Zanzibar): hot wet tropical, strongly coastal /
-            // island. Seeded → one fabled spice-island homeland.
+            // island. Seeded â†’ one fabled spice-island homeland.
             let clim = match k { AF | AM => 1.0, AW => 0.45, _ => 0.0 };
             let cst = if coast_near { 1.0 } else if coastland { 0.6 } else { 0.25 };
             clim * smoothstep(22.0, 27.0, t) * band(p, 1500.0, 3200.0, 700.0) * cst
@@ -1175,7 +1175,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
             papyrus.max(bamboo).max(manufactured)
         }
         GOOD_CERAMICS => {
-            // Porcelain / fine pottery — a *manufactured* good of skilled cities
+            // Porcelain / fine pottery â€” a *manufactured* good of skilled cities
             // sitting on good potter's clay (alluvial, well-watered lowland).
             // Climate-independent; driven by habitability (settlement skill) and
             // a clay proxy (fertility on low ground).
@@ -1184,7 +1184,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
             skill * clay
         }
         GOOD_GLASSWARE => {
-            // Glass — skilled cities working silica sand (coastal dunes / arid
+            // Glass â€” skilled cities working silica sand (coastal dunes / arid
             // quartz sand) with ample fuel. Settlement-driven + a sand proxy
             // (warm coast or desert margin).
             let skill = smoothstep(0.45, 0.78, buf.habitability[i]);
@@ -1194,20 +1194,20 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
         }
         GOOD_TOBACCO => {
             // Warm, humid-subtropical / tropical-savanna cash crop on fertile
-            // low ground. Seeded → one New-World-style plantation homeland.
+            // low ground. Seeded â†’ one New-World-style plantation homeland.
             let clim = match k { CFA | CWA => 1.0, AW | CSA => 0.5, BSH => 0.3, _ => 0.0 };
             clim * smoothstep(16.0, 22.0, t) * band(p, 700.0, 1600.0, 500.0)
                 * (1.0 - smoothstep(0.35, 0.6, elev)) * (0.4 + 0.6 * fert)
         }
         GOOD_INDIGO => {
-            // Indigo dye plant — hot, wet tropical/subtropical lowland. A LAND dye
+            // Indigo dye plant â€” hot, wet tropical/subtropical lowland. A LAND dye
             // distinct from the marine murex "dyes". Seeded.
             let clim = match k { AW | CWA => 1.0, AM | AF | CFA => 0.5, BSH => 0.3, _ => 0.0 };
             clim * smoothstep(19.0, 26.0, t) * band(p, 800.0, 2000.0, 600.0)
                 * (1.0 - smoothstep(0.35, 0.6, elev)) * (0.4 + 0.6 * fert)
         }
         GOOD_DATES => {
-            // Date palms — hot desert OASIS fruit: hot arid climate but locally
+            // Date palms â€” hot desert OASIS fruit: hot arid climate but locally
             // watered (fertility = oasis/wadi). Seeded.
             let clim = match k { BWH => 1.0, BSH => 0.7, BWK | BSK => 0.3, _ => 0.0 };
             let oasis = 0.25 + 0.75 * fert;
@@ -1224,7 +1224,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
             clim * warm * wet * low * (0.3 + 0.7 * fert)
         }
         GOOD_BARLEY => {
-            // Barley & rye: the cool-belt bread grains — they ripen where wheat
+            // Barley & rye: the cool-belt bread grains â€” they ripen where wheat
             // struggles (short summers, oceanic damp, continental cold). Unlimited.
             let clim = match k {
                 DFB | DFC => 1.0, CFB | DFA => 0.8, CSB | DSB | CFC => 0.5, ET => 0.15,
@@ -1244,7 +1244,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
         }
         GOOD_HONEY => {
             // Forest honey & beeswax: temperate woodland and meadow with a real
-            // flowering season. Unlimited — every wooded province keeps bees.
+            // flowering season. Unlimited â€” every wooded province keeps bees.
             let clim = match k {
                 CFB | DFA | DFB => 1.0, CFA | CWB => 0.7, CSA | CSB | DWB => 0.5,
                 DFC => 0.3, _ => 0.0,
@@ -1263,15 +1263,15 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
         }
         GOOD_BEER => {
             // Beer & ale: famed brewing towns in cool grain-and-water country
-            // (one renowned homeland — every village brews, only one exports).
+            // (one renowned homeland â€” every village brews, only one exports).
             let clim = match k { CFB | DFA | DFB => 1.0, CFA => 0.6, DSA | DSB => 0.4, _ => 0.0 };
             clim * bell(t, 9.0, 8.0) * smoothstep(450.0, 800.0, p)
                 * (0.4 + 0.6 * fert) * (1.0 - smoothstep(0.45, 0.7, elev))
         }
-        // ── Marine goods (no walls; the score envelope itself bounds the belt) ──
+        // â”€â”€ Marine goods (no walls; the score envelope itself bounds the belt) â”€â”€
         GOOD_HERRING => {
             // Everyday herring/sardine shoals: temperate shelf seas a step warmer
-            // and broader than the stockfish banks — the cheap fish of the
+            // and broader than the stockfish banks â€” the cheap fish of the
             // common table. Unlimited.
             if !sea_coastal { return 0.0; }
             let shelf = if buf.is_shelf[i] == 1 { 1.0 } else { 0.3 };
@@ -1280,7 +1280,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
             shelf * cool * fish * band(abs_lat, 35.0, 62.0, 10.0)
         }
         GOOD_STOCKFISH => {
-            // Stockfish (dried cod) comes off the rich NORTHERN fishing banks —
+            // Stockfish (dried cod) comes off the rich NORTHERN fishing banks â€”
             // it must track the actual fishery field, not blanket every cold
             // shelf. The hard fishery gate (no 0.3 floor) confines it to genuine
             // grounds (Lofoten / Grand Banks / North Sea style).
@@ -1311,7 +1311,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
         }
         GOOD_WHALING => {
             // Cold, productive high-latitude water (open sea allowed). Stops where
-            // the water warms below productivity — a temperature envelope.
+            // the water warms below productivity â€” a temperature envelope.
             let cold = 1.0 - smoothstep(3.0, 13.0, t);
             let prod = (0.4 + 0.8 * buf.fishery[i].clamp(0.0, 1.0)
                 + if buf.current_type[i] == 2 { 0.3 } else { 0.0 }).min(1.0);
@@ -1338,13 +1338,13 @@ fn localize_good(
     let n = buf.total();
     let mut out = vec![0u8; n];
 
-    // Rarity gently shifts the thresholds around the neutral 0.5 (rarer → harder
+    // Rarity gently shifts the thresholds around the neutral 0.5 (rarer â†’ harder
     // to seed and spread, so a smaller belt). At 0.5 these are the legacy values.
     let r = (rarity - 0.5).clamp(-0.5, 0.5);
     let seed_thresh = (0.45 + r * 0.30).clamp(0.20, 0.75);
     let spread_thresh = (0.22 + r * 0.20).clamp(0.10, 0.50);
     // Harsh rule for extreme-rare goods: hard-cap the homeland to a small patch, so
-    // a prized luxury (saffron, Tyrian purple, jade…) stays genuinely scarce no
+    // a prized luxury (saffron, Tyrian purple, jadeâ€¦) stays genuinely scarce no
     // matter how much suitable land exists.
     let cap: usize = if rarity > 0.78 {
         (((1.0 - rarity).max(0.05)) * 1800.0 + 30.0) as usize
@@ -1358,7 +1358,7 @@ fn localize_good(
         }
     };
 
-    // ── UNLIMITED goods: every suitable cell produces (many producers) ──
+    // â”€â”€ UNLIMITED goods: every suitable cell produces (many producers) â”€â”€
     if unlimited {
         for i in 0..n {
             if passable(i) && score[i] >= spread_thresh {
@@ -1385,11 +1385,11 @@ fn localize_good(
             let dy = (cy - ey) as f32;
             nd = nd.min((dx * dx + dy * dy).sqrt());
         }
-        (nd / disp_r).clamp(0.15, 1.0) // ~0.15 right on a rival homeland → 1.0 far away
+        (nd / disp_r).clamp(0.15, 1.0) // ~0.15 right on a rival homeland â†’ 1.0 far away
     };
 
-    // ── SEEDED goods: one contiguous homeland ──
-    // Deterministic weighted-random seed selection (× dispersion penalty).
+    // â”€â”€ SEEDED goods: one contiguous homeland â”€â”€
+    // Deterministic weighted-random seed selection (Ã— dispersion penalty).
     let gs = seed ^ salt;
     let mut best_seed = usize::MAX;
     let mut best_key = -1.0f32;
@@ -1435,7 +1435,7 @@ fn localize_good(
                 let ny = cy + dy * k;
                 if ny < 0 || ny >= h as i32 { break; }
                 let ni = buf.idx(nx, ny as u32);
-                if !passable(ni) { continue; } // still in the gap — keep probing
+                if !passable(ni) { continue; } // still in the gap â€” keep probing
                 if !visited[ni] && score[ni] >= spread_thresh {
                     visited[ni] = true;
                     queue.push_back(ni);
@@ -1451,9 +1451,9 @@ fn localize_good(
 /// candidate field `cand` (where `cand[i] >= thresh`), spaced apart and ranked by
 /// a deterministic weighted-random key. Each deposit is **mostly a single cell**
 /// (the abundance = its candidate weight); only occasionally (~25%) does a point
-/// grow into a small 1–2-cell rich cluster. Used for gems/metals (highland `cand`)
+/// grow into a small 1â€“2-cell rich cluster. Used for gems/metals (highland `cand`)
 /// and the suitability deposits salt/iron (climate/relief `cand`).
-/// Elevation value at percentile `p` (0..1) across LAND cells — e.g. p=0.72 ≈
+/// Elevation value at percentile `p` (0..1) across LAND cells â€” e.g. p=0.72 â‰ˆ
 /// the height only the upper quarter of land exceeds. Used to make ore/gem
 /// deposit elevation floors adapt to how mountainous a given world is, so
 /// metals/gems never disappear on a low-relief world. Returns 0.0 if no land.
@@ -1539,7 +1539,7 @@ fn place_deposits(buf: &WorldBuffer, seed: u64, count: u32, salt: u64, cand: &[f
 /// Grow a placed belt outward by `rings` cells at decaying intensity, so the
 /// good's production reaches **a bit further** than its core homeland (trade lets
 /// a region's staple spread to its near hinterland / along the coast). Modest by
-/// design — a couple of rings — and bounded by the same passability rule as the
+/// design â€” a couple of rings â€” and bounded by the same passability rule as the
 /// belt (sea/mountains for land goods). Deposit goods are not dilated.
 fn dilate_belt(buf: &WorldBuffer, out: &mut [u8], marine: bool, rings: u32, decay: f32) {
     let w = buf.width;
@@ -1567,7 +1567,7 @@ fn dilate_belt(buf: &WorldBuffer, out: &mut [u8], marine: bool, rings: u32, deca
     }
 }
 
-/// Deterministic hash → [0,1) (splitmix64-style finalizer).
+/// Deterministic hash â†’ [0,1) (splitmix64-style finalizer).
 fn hash01(mut x: u64) -> f32 {
     x ^= x >> 33;
     x = x.wrapping_mul(0xFF51AFD7ED558CCD);
@@ -1579,7 +1579,7 @@ fn hash01(mut x: u64) -> f32 {
 
 /// Downsampled suitability heatmap for one (possibly unsaved) good spec, used by
 /// the Goods Editor to preview where a good would place before a full regen.
-/// Returns a row-major `pw×ph` grid of u8 scores (0..255).
+/// Returns a row-major `pwÃ—ph` grid of u8 scores (0..255).
 pub fn preview_score_grid(buf: &WorldBuffer, spec: &GoodSpec, pw: u32, ph: u32) -> Vec<u8> {
     let builtin_idx = builtin_index_of(&spec.id);
     let mut out = vec![0u8; (pw * ph) as usize];
@@ -1618,7 +1618,7 @@ mod tests {
 
     /// The ore-province fix: each deposit good's candidate field is its OWN
     /// salt-seeded low-frequency noise, so two minerals rank DIFFERENT highland
-    /// cells highest — their deposits no longer all coincide on the tallest range
+    /// cells highest â€” their deposits no longer all coincide on the tallest range
     /// (the old pure-elevation candidate bug).
     #[test]
     fn ore_provinces_differ_by_salt() {
@@ -1663,7 +1663,7 @@ mod tests {
             is_shelf: vec![0; n], is_shelf_edge: vec![0; n], locked_bits: Vec::new(),
             plate_index: Vec::new(), boundary_type: Vec::new(), is_volcanic: Vec::new(),
             temperature: Vec::new(), precipitation: vec![120.0; n],
-            koppen: vec![super::super::koppen::BWK; n],
+            koppen: vec![crate::sim::koppen::BWK; n],
             soil_type: Vec::new(), fertility: Vec::new(), fishery: Vec::new(),
             current_type: Vec::new(), wind_vx: Vec::new(), wind_vy: Vec::new(), wind_speed: Vec::new(),
             current_vx: Vec::new(), current_vy: Vec::new(), distance_to_ocean: Vec::new(),
@@ -1692,3 +1692,9 @@ mod tests {
         assert_eq!(buf.salinity[fi], 0, "no brine at a freshwater lake");
     }
 }
+
+
+
+
+
+

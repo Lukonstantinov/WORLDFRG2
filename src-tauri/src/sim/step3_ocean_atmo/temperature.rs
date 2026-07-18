@@ -1,4 +1,4 @@
-use super::world_buffer::WorldBuffer;
+﻿use crate::sim::world_buffer::WorldBuffer;
 
 /// Compute temperature for all cells.
 /// Base from latitude bands + altitude lapse + current influence + coastal damping.
@@ -13,9 +13,9 @@ pub fn compute_temperature(buf: &mut WorldBuffer) {
 
         // Base annual-mean temperature from latitude bands. Tuned to real Earth
         // anchors so the mid-latitudes are warm enough to host temperate climates
-        // (the old curve put 50° at +4°C, ~7°C too cold, which forced oceanic /
+        // (the old curve put 50Â° at +4Â°C, ~7Â°C too cold, which forced oceanic /
         // Mediterranean / temperate zones into continental, polar or arid types):
-        //   0° → 30,  30° → 20,  45° → 12.5,  60° → 5,  75° → -12,  90° → -29.
+        //   0Â° â†’ 30,  30Â° â†’ 20,  45Â° â†’ 12.5,  60Â° â†’ 5,  75Â° â†’ -12,  90Â° â†’ -29.
         let base_temp = if abs_lat < 30.0 {
             30.0 - 0.333 * abs_lat
         } else if abs_lat < 60.0 {
@@ -29,17 +29,17 @@ pub fn compute_temperature(buf: &mut WorldBuffer) {
             let mut temp = base_temp;
 
             if buf.terrain[idx] == 1 {
-                // Altitude lapse rate: -5°C per 1000m (elevation is 0-1, max 8848m)
+                // Altitude lapse rate: -5Â°C per 1000m (elevation is 0-1, max 8848m)
                 let altitude_m = buf.elevation[idx] * 8848.0;
                 temp -= 5.0 * altitude_m / 1000.0;
 
                 // Coastal damping: only a coast exposed to OPEN ocean on the
-                // prevailing-wind upwind side is moderated toward 15°C. A lee /
-                // east coast — OR a coast fronted by a wide continental shelf
-                // (shelf water doesn't count as open ocean) — keeps its continental
+                // prevailing-wind upwind side is moderated toward 15Â°C. A lee /
+                // east coast â€” OR a coast fronted by a wide continental shelf
+                // (shelf water doesn't count as open ocean) â€” keeps its continental
                 // mean so it reads cold-winter Df/Dw instead of mild oceanic Cfb.
                 let ocean_dist = buf.distance_to_ocean[idx];
-                if ocean_dist < 0.1 && super::koppen::upwind_is_open_ocean(buf, x, y, 6) {
+                if ocean_dist < 0.1 && crate::sim::koppen::upwind_is_open_ocean(buf, x, y, 6) {
                     let coastal_factor = 1.0 - ocean_dist / 0.1;
                     temp = temp + (15.0 - temp) * 0.45 * coastal_factor;
                 }
@@ -54,9 +54,9 @@ pub fn compute_temperature(buf: &mut WorldBuffer) {
     // downwind of many ocean source cells doesn't stack a runaway anomaly,
     // then clamp the total per cell to a realistic maritime range before
     // applying it. (Earlier this added directly to temperature, letting
-    // dozens of ocean sources in the same row sum into +20°C-plus coasts.)
+    // dozens of ocean sources in the same row sum into +20Â°C-plus coasts.)
     //
-    // The thermal push now scales with the current's SPEED — a "volume" proxy.
+    // The thermal push now scales with the current's SPEED â€” a "volume" proxy.
     // A strong warm boundary current (Gulf Stream / Kuroshio) carries a large,
     // warm body of water and pushes its signal far inland; a slow drift carries
     // less and reaches a shorter distance. Cold currents are modelled with a
@@ -85,8 +85,8 @@ pub fn compute_temperature(buf: &mut WorldBuffer) {
             let vol = (speed / REF_SPEED).clamp(0.35, 1.3);
 
             let base_delta = match current_types[idx] {
-                1 => 3.4,  // warm — a warm current carries a larger heat anomaly
-                2 => -2.4, // cold — less thermal mass; aridity dominates its effect
+                1 => 3.4,  // warm â€” a warm current carries a larger heat anomaly
+                2 => -2.4, // cold â€” less thermal mass; aridity dominates its effect
                 _ => continue,
             };
             let delta = base_delta * vol;
@@ -127,3 +127,5 @@ pub fn compute_temperature(buf: &mut WorldBuffer) {
         }
     }
 }
+
+

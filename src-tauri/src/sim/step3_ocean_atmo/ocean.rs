@@ -1,8 +1,8 @@
-use std::collections::VecDeque;
-use super::world_buffer::WorldBuffer;
+﻿use std::collections::VecDeque;
+use crate::sim::world_buffer::WorldBuffer;
 
 /// Prevailing surface-wind unit vector for a latitude, blended across the three
-/// belts (trades <30°, westerlies 30-60°, polar easterlies >60°). Factored out of
+/// belts (trades <30Â°, westerlies 30-60Â°, polar easterlies >60Â°). Factored out of
 /// `compute_wind_belts` so the seasonal-wind model (`seasonal.rs`) can build on the
 /// same annual-mean belt before adding its monsoon perturbation. `y` is down, so
 /// `+vy` is southward.
@@ -20,9 +20,9 @@ pub fn belt_wind(lat: f32) -> (f32, f32) {
     let west = (0.707f32, -sign * 0.707);  // toward pole + east
     let polar = (-0.707f32, sign * 0.707); // toward equator + west
 
-    // Blend with transitions centered EXACTLY on the 30° and 60° latitude lines.
-    let to_west = smooth(26.0, 34.0, abs_lat);   // trades → westerlies @30°
-    let to_polar = smooth(56.0, 64.0, abs_lat);  // westerlies → polar @60°
+    // Blend with transitions centered EXACTLY on the 30Â° and 60Â° latitude lines.
+    let to_west = smooth(26.0, 34.0, abs_lat);   // trades â†’ westerlies @30Â°
+    let to_polar = smooth(56.0, 64.0, abs_lat);  // westerlies â†’ polar @60Â°
     let w_polar = to_polar;
     let w_west = to_west * (1.0 - to_polar);
     let w_trade = (1.0 - to_west).max(0.0);
@@ -30,7 +30,7 @@ pub fn belt_wind(lat: f32) -> (f32, f32) {
     let mut vx = (trade.0 * w_trade + west.0 * w_west + polar.0 * w_polar) / sumw;
     let mut vy = (trade.1 * w_trade + west.1 * w_west + polar.1 * w_polar) / sumw;
     // Renormalize to unit strength so moisture advection keeps full force right
-    // through the transition (no spurious dry/wet bands at 30°/60°).
+    // through the transition (no spurious dry/wet bands at 30Â°/60Â°).
     let mag = (vx * vx + vy * vy).sqrt();
     if mag > 0.2 { vx /= mag; vy /= mag; }
     (vx, vy)
@@ -50,7 +50,7 @@ pub fn compute_wind_belts(buf: &mut WorldBuffer) {
     }
 }
 
-// ── Speed constants ──────────────────────────────────────────────────────────
+// â”€â”€ Speed constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const SPEED_BOUNDARY_WEST: f32 = 2.2;    // Gulf Stream, Kuroshio, Agulhas
 const SPEED_BOUNDARY_EAST: f32 = 0.55;   // California, Canary, Benguela
 const SPEED_INTERIOR: f32 = 0.30;        // Sargasso Sea / mid-gyre return flow
@@ -60,7 +60,7 @@ const SPEED_ECC: f32 = 1.3;              // Equatorial Counter-Current (raised s
 const SPEED_ACC: f32 = 1.6;              // Antarctic Circumpolar Current
 const SPEED_SUBPOLAR: f32 = 0.65;        // Labrador / Irminger gyre
 
-// ── Bathymetry constants ──────────────────────────────────────────────────────
+// â”€â”€ Bathymetry constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const BATHY_STEER: f32 = 0.20;   // isobath-following strength
 const BATHY_RIDGE: f32 = 0.35;   // extra deflection around shallow ridges
 
@@ -68,7 +68,7 @@ const CIRCUMPOLAR_FRAC: f32 = 0.10;
 const DEFLECTION_PASSES: usize = 20;
 const DIR_NONE: u8 = 255;
 
-// ── Compass direction vectors ────────────────────────────────────────────────
+// â”€â”€ Compass direction vectors â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW
 const DIR_VEC: [(i32, i32); 8] = [
     ( 0, -1), // N
@@ -268,7 +268,7 @@ fn gyre_vector(
         return (SPEED_ACC, 0.0);
     }
 
-    let lat = super::world_buffer::lat_from_y(y as f32, grid_h as f32, equator_offset, lat_scale, lat_ratio);
+    let lat = crate::sim::world_buffer::lat_from_y(y as f32, grid_h as f32, equator_offset, lat_scale, lat_ratio);
     let abs_lat = lat.abs();
     let nh = lat >= 0.0;
 
@@ -333,10 +333,10 @@ fn gyre_vector(
 
     // Mid-latitude westerly DRIFT carries surface water poleward (Ekman + the
     // North Atlantic / North Pacific Drift): the warm water that leaves the
-    // western boundary turns east and crosses the basin angling ~25-30° poleward
+    // western boundary turns east and crosses the basin angling ~25-30Â° poleward
     // rather than running purely horizontal. Apply only on the poleward limb of
-    // the gyre (≥38°, where the zonal flow is eastward) and away from the coastal
-    // boundary currents, so the Sverdrup interior (20-38°, equatorward) is kept.
+    // the gyre (â‰¥38Â°, where the zonal flow is eastward) and away from the coastal
+    // boundary currents, so the Sverdrup interior (20-38Â°, equatorward) is kept.
     if wb_profile < 0.05 && eb_profile < 0.05 && abs_lat >= 38.0 && abs_lat < 62.0 {
         let env = (-((abs_lat - 46.0).powi(2)) / (2.0 * 12.0 * 12.0)).exp();
         vy += poleward * (0.32 + 0.34 * env) * width_factor;
@@ -352,41 +352,41 @@ fn gyre_vector(
     let band_speed: f32;
 
     if abs_lat < 2.0 {
-        // Equatorial Undercurrent — weak eastward
+        // Equatorial Undercurrent â€” weak eastward
         vx = 0.3;
         band_speed = SPEED_ECC * 0.5;
     } else if abs_lat <= 12.0 {
-        // Equatorial counter-current (NECC / SECC) — a distinct EASTWARD band
+        // Equatorial counter-current (NECC / SECC) â€” a distinct EASTWARD band
         // running against the trade-wind drift on either side of the equator.
-        // Strengthened and widened (≤12°) so it actually shows up as its own
+        // Strengthened and widened (â‰¤12Â°) so it actually shows up as its own
         // streamline between the two westward equatorial currents.
         let ecc_str = if nh { 1.0 } else { 0.85 };
         vx = ecc_str * ((std::f32::consts::PI * (abs_lat - 2.0) / 10.0).sin().max(0.0));
         band_speed = SPEED_ECC * ecc_str;
     } else if abs_lat < 20.0 {
-        // Trade wind drift — westward
+        // Trade wind drift â€” westward
         let trade_profile = 0.6 + 0.4 * ((std::f32::consts::PI * (abs_lat - 10.0) / 10.0).sin());
         vx = -trade_profile;
         band_speed = SPEED_EQUATORIAL;
     } else if abs_lat < 40.0 {
         // Smooth cosine transition trades -> westerlies. Centered so the
-        // westward→eastward flip lands on 30° — the trade/westerly WIND-BELT
-        // boundary (compute_wind_belts) — so the surface gyres line up with the
-        // wind that drives them and with the 30° latitude reference line.
-        let t = (abs_lat - 20.0) / 20.0; // t=0.5 at 30° → vx = 0
+        // westwardâ†’eastward flip lands on 30Â° â€” the trade/westerly WIND-BELT
+        // boundary (compute_wind_belts) â€” so the surface gyres line up with the
+        // wind that drives them and with the 30Â° latitude reference line.
+        let t = (abs_lat - 20.0) / 20.0; // t=0.5 at 30Â° â†’ vx = 0
         vx = -(t * std::f32::consts::PI).cos();
         band_speed = SPEED_EQUATORIAL * (1.0 - t) + SPEED_INTERIOR * t;
     } else if abs_lat < 60.0 {
-        // Westerly drift — eastward (matches the 30–60° westerly belt).
+        // Westerly drift â€” eastward (matches the 30â€“60Â° westerly belt).
         vx = 1.0;
         band_speed = SPEED_INTERIOR;
     } else {
-        // Polar easterlies — westward (matches the >60° belt).
+        // Polar easterlies â€” westward (matches the >60Â° belt).
         vx = -0.5;
         band_speed = SPEED_INTERIOR * 0.5;
     }
 
-    // At boundary currents, zonal flow fades — current runs N-S along coast
+    // At boundary currents, zonal flow fades â€” current runs N-S along coast
     let bdy_zonal_suppress = wb_profile.max(eb_profile * 0.6);
     let vx = vx * (1.0 - bdy_zonal_suppress.min(0.85));
 
@@ -424,7 +424,7 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
 
     // Build terrain bitmap for helper functions
     let terrain: Vec<u8> = buf.terrain.clone();
-    // Shelf mask — the continental shelf is treated as a current boundary like the
+    // Shelf mask â€” the continental shelf is treated as a current boundary like the
     // coast: currents are steered along the shelf break and carry NO flow over the
     // shelf itself (real boundary currents follow the continental slope, not the
     // shallow shelf). Cloned so we can read it while writing current vectors.
@@ -472,7 +472,7 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
                 circumpolar_active, circumpolar_row,
             );
 
-            // Bathymetry steering — rotate toward isobath direction
+            // Bathymetry steering â€” rotate toward isobath direction
             let mut final_vx = gvx;
             let mut final_vy = gvy;
             let gx = grad_x[i];
@@ -503,7 +503,7 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
             // velocity component pointing into land and renormalize back to the
             // original speed, so the current *turns to run along* the shelf/coast
             // instead of charging straight at it (real boundary currents hug the
-            // continental slope). gx/gy point up the depth gradient ≈ toward the
+            // continental slope). gx/gy point up the depth gradient â‰ˆ toward the
             // shallower water / coastline.
             let dval = depth_field[i];
             // Steer along the shore/shelf when within a few cells of land OR at the
@@ -612,7 +612,7 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
             }
 
             // Assign current type (warm/cold).
-            // Only MAJOR boundary currents carry a thermal signature — the
+            // Only MAJOR boundary currents carry a thermal signature â€” the
             // Gulf Stream / Kuroshio (warm, western boundary), the Canary /
             // Benguela / California (cold, eastern boundary), the subpolar
             // currents, and the ACC. Everything else is neutral, so climate
@@ -626,30 +626,30 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
             buf.current_type[i] = if circumpolar_active && y >= circumpolar_row {
                 2 // ACC (cold)
             } else if basin_pos < -0.5 && abs_lat > 18.0 && abs_lat < 42.0 && speed > 1.2 {
-                1 // warm western-boundary current. Capped at ~42° — the SEPARATION
+                1 // warm western-boundary current. Capped at ~42Â° â€” the SEPARATION
                   // latitude: a western-boundary current (Kuroshio/Gulf Stream)
                   // peels away from the coast here and crosses the basin as the
                   // eastward drift (extend_warm_tag carries the warm tag across).
                   // Poleward of this the western boundary is bathed by the COLD
-                  // subpolar return (Oyashio/Labrador) below — so Kamchatka,
+                  // subpolar return (Oyashio/Labrador) below â€” so Kamchatka,
                   // Hokkaido and Labrador read cold, not warm.
             } else if basin_pos > 0.45 && abs_lat > 23.0 && abs_lat < 48.0 && speed > 0.35 {
-                2 // cold eastern-boundary current. Floor raised to 23° (Tropic of
-                  // Cancer) so the whole tropical belt — e.g. the seas around the
-                  // Indian subcontinent — reads NEUTRAL/grey, never cold. Tropical
+                2 // cold eastern-boundary current. Floor raised to 23Â° (Tropic of
+                  // Cancer) so the whole tropical belt â€” e.g. the seas around the
+                  // Indian subcontinent â€” reads NEUTRAL/grey, never cold. Tropical
                   // currents (monsoon drift, equatorial) are not cold.
             } else if abs_lat >= 48.0 && abs_lat < 68.0 && basin_pos < -0.3 && speed > 0.45 {
-                2 // cold subpolar boundary current (Oyashio/Labrador). Onset at 48°
-                  // (Kamchatka ≈53° → cold ✓) leaves a NEUTRAL gap 42–48° on the W
-                  // boundary = the warm→cold transition after the warm current
-                  // separates at 42°, instead of snapping straight to cold blue.
+                2 // cold subpolar boundary current (Oyashio/Labrador). Onset at 48Â°
+                  // (Kamchatka â‰ˆ53Â° â†’ cold âœ“) leaves a NEUTRAL gap 42â€“48Â° on the W
+                  // boundary = the warmâ†’cold transition after the warm current
+                  // separates at 42Â°, instead of snapping straight to cold blue.
             } else {
                 0 // neutral
             };
         }
     }
 
-    // ── Phase 5: downstream thermal advection (Gulf Stream → North Atlantic Drift) ──
+    // â”€â”€ Phase 5: downstream thermal advection (Gulf Stream â†’ North Atlantic Drift) â”€â”€
     // The geometric tagging above only marks water warm while it hugs the western
     // boundary. In reality the warmth advects *with* the flow: the Gulf Stream /
     // Kuroshio turn poleward and cross the basin as the North Atlantic / North
@@ -661,7 +661,7 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
     // Only current_type is both read (as `base_type`) and later written, so it
     // needs a snapshot; current_vx/vy are read-only here, so we read them from
     // the buffer directly instead of cloning two full f32 fields (saves ~26 MB
-    // each — a meaningful chunk at large grid sizes).
+    // each â€” a meaningful chunk at large grid sizes).
     // Moderate-thermohaline coupling: salinity/density boosts current speed and
     // returns a reach multiplier for the warm conveyor (extends the downstream
     // warm tag toward high-latitude sinking zones). Requires compute_salinity to
@@ -674,12 +674,12 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
     // is the transition before warmth becomes cold.
     extend_cold_tag(buf);
 
-    // ── Phase 6: small-sea climate gate ──────────────────────────────────────
+    // â”€â”€ Phase 6: small-sea climate gate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Currents in small / marginal seas (Mediterranean / Red Sea / Persian Gulf
-    // scale) should not drive continental climate — only the great oceans carry a
+    // scale) should not drive continental climate â€” only the great oceans carry a
     // basin-scale thermal signal. Flood-fill connected ocean bodies and strip the
-    // warm/cold tag (→ neutral) from any body smaller than LARGE_SEA_FRAC of the
-    // world, so small seas affect neither temperature, precipitation nor Köppen.
+    // warm/cold tag (â†’ neutral) from any body smaller than LARGE_SEA_FRAC of the
+    // world, so small seas affect neither temperature, precipitation nor KÃ¶ppen.
     // The current vectors themselves are kept (they still render); only the
     // thermal classification is cleared.
     let large_min = ((n as f32) * 0.03) as usize;
@@ -715,7 +715,7 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
         }
     }
 
-    // ── Phase 7: clear flow over the continental shelf ────────────────────────
+    // â”€â”€ Phase 7: clear flow over the continental shelf â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Done LAST (after warm-tag advection has already carried warmth across the
     // basin, so coastal climate is unaffected): the rendered current arrows /
     // streamlines should stop at the shelf break and not draw over the shallow
@@ -728,9 +728,9 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Salinity & thermohaline coupling
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Salinity is stored as u8 (0..255) mapping a ~28-42 PSU range.
 const SAL_MIN_PSU: f32 = 28.0;
@@ -743,7 +743,7 @@ fn psu_to_u8(psu: f32) -> u8 {
 
 /// Sea-surface-temperature estimate purely from latitude. Used by the salinity
 /// model so it does NOT depend on the `temperature` field (which is computed
-/// *after* currents): that would create a salinity↔temperature↔current cycle.
+/// *after* currents): that would create a salinityâ†”temperatureâ†”current cycle.
 #[inline]
 fn sst_estimate(abs_lat: f32) -> f32 {
     let t = if abs_lat < 30.0 {
@@ -753,11 +753,11 @@ fn sst_estimate(abs_lat: f32) -> f32 {
     } else {
         5.5 - 0.25 * (abs_lat - 60.0)
     };
-    t.max(-2.0) // ocean water doesn't drop below ~-2°C
+    t.max(-2.0) // ocean water doesn't drop below ~-2Â°C
 }
 
 /// Latitude profile of ocean precipitation (0..1): ITCZ peak at the equator, a
-/// secondary mid-latitude storm-track maximum (~52°), dry subtropics in between.
+/// secondary mid-latitude storm-track maximum (~52Â°), dry subtropics in between.
 #[inline]
 fn ocean_precip_norm(abs_lat: f32) -> f32 {
     let itcz = (-(abs_lat * abs_lat) / (2.0 * 8.0 * 8.0)).exp();
@@ -765,19 +765,19 @@ fn ocean_precip_norm(abs_lat: f32) -> f32 {
     ((0.25 + itcz + storm) / 1.30).min(1.0)
 }
 
-/// Compute sea-surface salinity from evaporation − precipitation (wind- and
+/// Compute sea-surface salinity from evaporation âˆ’ precipitation (wind- and
 /// latitude-driven), coastal river/runoff freshening, and enclosed-sea
 /// concentration. Writes `buf.salinity` (u8) for sea cells; land stays 0.
 ///
 /// Drivers (real oceanography):
-///   • High where evaporation > precipitation: warm, windy, dry subtropics
-///     (the great subtropical salinity maxima ~20-35°).
-///   • Low where precipitation > evaporation: the equatorial ITCZ band and the
+///   â€¢ High where evaporation > precipitation: warm, windy, dry subtropics
+///     (the great subtropical salinity maxima ~20-35Â°).
+///   â€¢ Low where precipitation > evaporation: the equatorial ITCZ band and the
 ///     cool, wet high latitudes.
-///   • Freshened along coasts that receive heavy continental runoff (river
-///     proxy = adjacent land precipitation — keeps this self-contained in the
+///   â€¢ Freshened along coasts that receive heavy continental runoff (river
+///     proxy = adjacent land precipitation â€” keeps this self-contained in the
 ///     ocean step, before rivers are extracted).
-///   • Concentrated in narrow, warm, enclosed seas (Red Sea / Mediterranean /
+///   â€¢ Concentrated in narrow, warm, enclosed seas (Red Sea / Mediterranean /
 ///     Persian Gulf), which become hypersaline.
 pub fn compute_salinity(buf: &mut WorldBuffer) {
     let w = buf.width;
@@ -809,7 +809,7 @@ pub fn compute_salinity(buf: &mut WorldBuffer) {
                 + buf.wind_vy[i] * buf.wind_vy[i]).sqrt().clamp(0.0, 1.0);
             let evap = (0.35 + 0.65 * sst_norm) * (0.55 + 0.45 * wind_speed);
 
-            // E − P → salinity anomaly around the 35 PSU mean.
+            // E âˆ’ P â†’ salinity anomaly around the 35 PSU mean.
             let ep = evap - op;
             let mut s = 35.0 + ep * 5.5;
 
@@ -887,7 +887,7 @@ pub fn compute_salinity(buf: &mut WorldBuffer) {
 }
 
 /// Surface water-density index (0..1, higher = denser) from stored salinity and
-/// the latitude SST estimate. Cold + salty = dense (sinks). Transient — used by
+/// the latitude SST estimate. Cold + salty = dense (sinks). Transient â€” used by
 /// the current coupling, not persisted.
 fn density_index(buf: &WorldBuffer) -> Vec<f32> {
     let n = buf.total();
@@ -908,8 +908,8 @@ fn density_index(buf: &WorldBuffer) -> Vec<f32> {
 /// Apply the moderate-thermohaline coupling onto the already-generated current
 /// field: dense (cold + salty) water drives faster flow, and a strong
 /// high-latitude sinking ("deep-water formation") zone pulls the warm surface
-/// drift further downstream — the overturning conveyor. Returns a multiplier on
-/// the warm-advection reach so the caller can extend the Gulf-Stream→Europe tag.
+/// drift further downstream â€” the overturning conveyor. Returns a multiplier on
+/// the warm-advection reach so the caller can extend the Gulf-Streamâ†’Europe tag.
 fn apply_thermohaline(buf: &mut WorldBuffer) -> f32 {
     let n = buf.total();
     let density = density_index(buf);
@@ -922,7 +922,7 @@ fn apply_thermohaline(buf: &mut WorldBuffer) -> f32 {
     }
     let mean = if cnt > 0 { (sum / cnt as f64) as f32 } else { 0.5 };
 
-    // Per-cell density anomaly → mild speed boost (denser ⇒ stronger flow).
+    // Per-cell density anomaly â†’ mild speed boost (denser â‡’ stronger flow).
     for i in 0..n {
         if buf.terrain[i] != 0 { continue; }
         let boost = (1.0 + 0.4 * (density[i] - mean)).clamp(0.80, 1.25);
@@ -946,7 +946,7 @@ fn apply_thermohaline(buf: &mut WorldBuffer) -> f32 {
     1.0 + 0.6 * conveyor.clamp(0.0, 0.85)
 }
 
-/// Mean high-latitude (>50°) surface density — the strength of the overturning
+/// Mean high-latitude (>50Â°) surface density â€” the strength of the overturning
 /// "conveyor". Returned as a warm-advection reach multiplier (1.0..~1.6).
 fn thermohaline_reach(buf: &WorldBuffer) -> f32 {
     let density = density_index(buf);
@@ -964,7 +964,7 @@ fn thermohaline_reach(buf: &WorldBuffer) -> f32 {
 }
 
 /// Follow each warm boundary cell downstream along the current field and extend
-/// the warm `current_type` tag across the basin (Gulf Stream → North Atlantic
+/// the warm `current_type` tag across the basin (Gulf Stream â†’ North Atlantic
 /// Drift). `reach_mult` scales how far the warmth carries. Factored out so it can
 /// run both in `generate_ocean_currents` and again after salinity advection.
 fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
@@ -973,8 +973,8 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
     let n = buf.total();
     let base_type = buf.current_type.clone();
     let mut warm_add = vec![false; n];
-    // step_len 1.5 → this is ~0.9·w CELLS of reach (plenty to cross any basin),
-    // not 1.35·w. Capped down from 0.9 to bound pathological open-ocean traces
+    // step_len 1.5 â†’ this is ~0.9Â·w CELLS of reach (plenty to cross any basin),
+    // not 1.35Â·w. Capped down from 0.9 to bound pathological open-ocean traces
     // (the Pacific / Southern Ocean) that made the ocean step slow.
     let max_steps = (w as f32 * 0.6 * reach_mult) as usize;
     let step_len = 1.5f32;
@@ -1016,13 +1016,13 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
                 // in the N hemisphere. The gap this leaves at the bend is the
                 // neutral transition the user wanted before warmth turns to cold.
                 //
-                // Previously this broke on ANY equatorward lean (>0.30·mag) above
-                // 18°, which severed the warm tag at the subtropical gyre bend so the
+                // Previously this broke on ANY equatorward lean (>0.30Â·mag) above
+                // 18Â°, which severed the warm tag at the subtropical gyre bend so the
                 // cross-basin North Atlantic/Pacific Drift went grey before reaching
                 // the far coast. Now the tropical return limb still cuts off, but the
                 // broad mid-latitude eastward drift (which leans only gently) keeps
-                // its warmth all the way across — only a STRONG, sustained reversal
-                // (>0.60·mag) ends it at higher latitudes.
+                // its warmth all the way across â€” only a STRONG, sustained reversal
+                // (>0.60Â·mag) ends it at higher latitudes.
                 let nh = lat >= 0.0;
                 let equatorward_vy = if nh { vmy } else { -vmy }; // >0 = toward equator
                 let break_eq = if alat < 35.0 {
@@ -1057,9 +1057,9 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
                     if hl > 0.001 { hx /= hl; hy /= hl; }
                 }
                 // Western-boundary SEPARATION: a warm boundary current hugging the
-                // east coast of a continent (land a few cells to its WEST, −x)
+                // east coast of a continent (land a few cells to its WEST, âˆ’x)
                 // must peel off and run EAST across the basin once it reaches the
-                // separation latitude (~40°). Otherwise the warm tag rides the coast
+                // separation latitude (~40Â°). Otherwise the warm tag rides the coast
                 // all the way to the subpolar zone and warms Kamchatka / Labrador.
                 // The cross-basin drift then arrives at the FAR coast from open
                 // water (land to its EAST, not west), so this never fires there and
@@ -1075,10 +1075,10 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
                         // Peel OFF the coast: cancel the poleward (coast-hugging)
                         // component and push east into the basin so the current
                         // separates instead of riding the coast to the subpolar
-                        // zone (Kamchatka). It does NOT force a fixed heading —
+                        // zone (Kamchatka). It does NOT force a fixed heading â€”
                         // once off the coast (no land to the west) the natural
                         // field resumes and can still carry the warm drift poleward
-                        // up the FAR (eastern) coast (the Norwegian Current → warm
+                        // up the FAR (eastern) coast (the Norwegian Current â†’ warm
                         // Arctic approach), keeping that limb warm.
                         hx = hx.abs().max(0.5);
                         if nh { hy = hy.max(0.0); } else { hy = hy.min(0.0); }
@@ -1138,7 +1138,7 @@ fn extend_cold_tag(buf: &mut WorldBuffer) {
                 if mag < 0.05 { break; }
                 let alat = buf.latitude(yi as u32).abs();
                 // Tropical band stays NEUTRAL: a current only reads cold once it is
-                // out of the tropics (~22°, just shy of the Tropic of Cancer). This
+                // out of the tropics (~22Â°, just shy of the Tropic of Cancer). This
                 // keeps the seas around India / SE Asia grey rather than letting a
                 // cold tag advect down into the monsoon tropics.
                 if alat < 22.0 { break; }
@@ -1182,12 +1182,12 @@ pub fn advect_salinity_and_recouple(buf: &mut WorldBuffer) {
     let h = buf.height;
     let n = buf.total();
 
-    // Base E−P salinity to relax toward (keeps the subtropical source salty).
+    // Base Eâˆ’P salinity to relax toward (keeps the subtropical source salty).
     let base: Vec<f32> = buf.salinity.iter().map(|&s| s as f32).collect();
     let mut sal = base.clone();
 
     let dt = 3.3f32;       // cells advected per iteration (raised so fewer iters reach as far)
-    let iters = 11;        // more iterations → salt reaches further poleward
+    let iters = 11;        // more iterations â†’ salt reaches further poleward
     // Ping-pong between two buffers instead of cloning the whole grid every
     // iteration (16 full-grid clones were a big chunk of the ocean step's cost).
     let mut src = sal.clone();
@@ -1198,7 +1198,7 @@ pub fn advect_salinity_and_recouple(buf: &mut WorldBuffer) {
                 let i = buf.idx(x, y);
                 if buf.terrain[i] != 0 { continue; }
                 // Back-trace upstream along the current and take that salinity
-                // (semi-Lagrangian) → salt is carried in the flow direction.
+                // (semi-Lagrangian) â†’ salt is carried in the flow direction.
                 let vx = buf.current_vx[i];
                 let vy = buf.current_vy[i];
                 let px = x as f32 - vx * dt;
@@ -1211,7 +1211,7 @@ pub fn advect_salinity_and_recouple(buf: &mut WorldBuffer) {
                     let j = buf.idx(buf.wrap_x(xi), yi as u32);
                     if buf.terrain[j] != 0 { src[i] } else { src[j] }
                 };
-                // Weak relaxation to the E−P base so the advected salty tongue
+                // Weak relaxation to the Eâˆ’P base so the advected salty tongue
                 // persists much further up-current into the fresh north before it
                 // mixes back down (Gulf Stream salting the sub-polar North Atlantic).
                 sal[i] = 0.90 * up + 0.10 * base[i];
@@ -1219,9 +1219,9 @@ pub fn advect_salinity_and_recouple(buf: &mut WorldBuffer) {
         }
     }
     // Warm-conveyor salt signature: where a warm boundary current pushes into the
-    // fresher mid/high latitudes (current_type==1, abs_lat>32°), raise salinity
+    // fresher mid/high latitudes (current_type==1, abs_lat>32Â°), raise salinity
     // toward a salty subtropical-source value so the current reads as a visible
-    // salty corridor threading the fresher surrounding water — exactly the "salty
+    // salty corridor threading the fresher surrounding water â€” exactly the "salty
     // water pulled into the northern latitudes by the current" the map should show.
     let warm_psu = psu_to_u8(36.8) as f32;
     for y in 0..h {
@@ -1242,7 +1242,7 @@ pub fn advect_salinity_and_recouple(buf: &mut WorldBuffer) {
     }
 
     // Current-power boost from the salinity gradient (the imbalance that drives
-    // the flow). Steep salty↔fresh fronts strengthen the current there.
+    // the flow). Steep saltyâ†”fresh fronts strengthen the current there.
     let snap: Vec<f32> = buf.salinity.iter().map(|&s| s as f32).collect();
     for y in 0..h {
         for x in 0..w {
@@ -1264,33 +1264,33 @@ pub fn advect_salinity_and_recouple(buf: &mut WorldBuffer) {
     extend_warm_tag(buf, reach);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Cold shelf seas — seasonal sea ice as a high-latitude "refrigerator"
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Cold shelf seas â€” seasonal sea ice as a high-latitude "refrigerator"
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // Shallow, semi-enclosed seas at high latitude (Hudson Bay, the Baltic, the Sea
 // of Okhotsk) freeze over each winter and behave as a COLD RESERVOIR rather than
-// a maritime moderator. The ice caps the ocean→air heat flux (so the sea gives
-// NO winter warming — the maritime moderation switches off) and the cold melt
+// a maritime moderator. The ice caps the oceanâ†’air heat flux (so the sea gives
+// NO winter warming â€” the maritime moderation switches off) and the cold melt
 // pool chills the surrounding land into summer, dragging the local climate one or
-// two Köppen belts colder than latitude alone would give (the tundra fingers that
+// two KÃ¶ppen belts colder than latitude alone would give (the tundra fingers that
 // reach south of Hudson Bay).
 //
-// This is a four-term competition — winter cooling demand vs. the heat available
-// to resist it — NOT latitude+depth alone. A sea bathed by a warm current (the
-// Norwegian shelf, ice-free at >70°N) does not freeze, while Labrador freezes at
-// a lower latitude. The freeze index Φ ∈ [0,1] therefore is:
+// This is a four-term competition â€” winter cooling demand vs. the heat available
+// to resist it â€” NOT latitude+depth alone. A sea bathed by a warm current (the
+// Norwegian shelf, ice-free at >70Â°N) does not freeze, while Labrador freezes at
+// a lower latitude. The freeze index Î¦ âˆˆ [0,1] therefore is:
 //
-//   Φ = lat_gate                   net annual radiation deficit   smoothstep 45→62°
-//     · 1[is_shelf]                low heat capacity C = ρ·cp·H    (shallow shelf)
-//     · (1 − warm)                 no advective heat import        (no warm current near)
-//     · (0.55 + 0.45·brackish)     freezing point raised by low S  (Millero/UNESCO Tf)
-//     · (0.45 + 0.55·enclosure)    poor exchange with open ocean   (BFS to open water)
+//   Î¦ = lat_gate                   net annual radiation deficit   smoothstep 45â†’62Â°
+//     Â· 1[is_shelf]                low heat capacity C = ÏÂ·cpÂ·H    (shallow shelf)
+//     Â· (1 âˆ’ warm)                 no advective heat import        (no warm current near)
+//     Â· (0.55 + 0.45Â·brackish)     freezing point raised by low S  (Millero/UNESCO Tf)
+//     Â· (0.45 + 0.55Â·enclosure)    poor exchange with open ocean   (BFS to open water)
 //
-// Science anchors: seawater freezing point Tf ≈ −0.055·S (Millero/UNESCO, TEOS-10);
-// sea-ice albedo 0.5–0.85 vs 0.06 open water and the ice insulation flux cut
-// (Curry et al. 1995; Hill et al. 2019); the latent-heat reservoir ρ·Lf·h that
-// delays summer warming, measured as a >3 MJ m⁻³ Hudson Bay heat anomaly (Joly et
+// Science anchors: seawater freezing point Tf â‰ˆ âˆ’0.055Â·S (Millero/UNESCO, TEOS-10);
+// sea-ice albedo 0.5â€“0.85 vs 0.06 open water and the ice insulation flux cut
+// (Curry et al. 1995; Hill et al. 2019); the latent-heat reservoir ÏÂ·LfÂ·h that
+// delays summer warming, measured as a >3 MJ mâ»Â³ Hudson Bay heat anomaly (Joly et
 // al. 2010); NSIDC sea-ice background.
 
 /// Latitude onset/saturation of the seasonal-ice regime.
@@ -1305,14 +1305,14 @@ fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
 }
 
 /// Freezing point of seawater from stored salinity (linearized Millero/UNESCO,
-/// surface pressure): Tf ≈ −0.055·S. salinity is u8 over SAL_MIN..SAL_MAX PSU.
+/// surface pressure): Tf â‰ˆ âˆ’0.055Â·S. salinity is u8 over SAL_MIN..SAL_MAX PSU.
 #[inline]
 fn seawater_freezing_point(sal_u8: u8) -> f32 {
     let psu = SAL_MIN_PSU + (sal_u8 as f32 / 255.0) * (SAL_MAX_PSU - SAL_MIN_PSU);
     -0.055 * psu
 }
 
-/// True if a WARM current (type 1) runs within `r` cells — this keeps a shelf
+/// True if a WARM current (type 1) runs within `r` cells â€” this keeps a shelf
 /// ice-free despite high latitude (the Norwegian Current vs. Labrador contrast).
 fn warm_current_near(buf: &WorldBuffer, x: u32, y: u32, r: i32) -> bool {
     if buf.current_type.is_empty() { return false; }
@@ -1328,8 +1328,8 @@ fn warm_current_near(buf: &WorldBuffer, x: u32, y: u32, r: i32) -> bool {
 }
 
 /// BFS distance (in cells, capped) from every ocean cell to the nearest OPEN
-/// ocean — deep (non-shelf) water. An enclosed shelf basin is far from open water
-/// → poor heat exchange → freezes harder.
+/// ocean â€” deep (non-shelf) water. An enclosed shelf basin is far from open water
+/// â†’ poor heat exchange â†’ freezes harder.
 fn open_ocean_distance(buf: &WorldBuffer, cap: u16) -> Vec<u16> {
     let (w, h, n) = (buf.width, buf.height, buf.total());
     let mut dist = vec![u16::MAX; n];
@@ -1361,7 +1361,7 @@ fn open_ocean_distance(buf: &WorldBuffer, cap: u16) -> Vec<u16> {
     dist
 }
 
-/// Compute the seasonal-sea-ice freeze index Φ per ocean cell (see the section
+/// Compute the seasonal-sea-ice freeze index Î¦ per ocean cell (see the section
 /// header). Pure read; returns a world-sized f32 field (0 over land and over
 /// ice-free water). Requires shelf + salinity + currents to have been computed.
 pub fn compute_shelf_freeze(buf: &WorldBuffer) -> Vec<f32> {
@@ -1379,8 +1379,8 @@ pub fn compute_shelf_freeze(buf: &WorldBuffer) -> Vec<f32> {
             let i = buf.idx(x, y);
             if buf.terrain[i] != 0 || buf.is_shelf[i] == 0 { continue; }
             if warm_current_near(buf, x, y, 3) { continue; } // Norwegian-shelf exception
-            // Fresher water freezes at a warmer Tf → freezes more readily. Map the
-            // salinity-dependent Tf (−0.4 near-fresh .. −2.3 briny) to brackish 0..1.
+            // Fresher water freezes at a warmer Tf â†’ freezes more readily. Map the
+            // salinity-dependent Tf (âˆ’0.4 near-fresh .. âˆ’2.3 briny) to brackish 0..1.
             let tf = seawater_freezing_point(buf.salinity[i]);
             let brackish = ((tf + 2.3) / 1.9).clamp(0.0, 1.0);
             let encl = (open[i] as f32 / 12.0).clamp(0.0, 1.0);
@@ -1392,12 +1392,12 @@ pub fn compute_shelf_freeze(buf: &WorldBuffer) -> Vec<f32> {
 
 /// Ocean-current refinement from seasonal sea ice (brine rejection). A freezing
 /// shelf sea ejects salt and forms cold, dense water that sinks and is exported
-/// as a COLD current (Sea of Okhotsk → East Sakhalin Current → Oyashio; Labrador
-/// shelf → Labrador Current). We tag strongly-freezing shelf water as cold, then
+/// as a COLD current (Sea of Okhotsk â†’ East Sakhalin Current â†’ Oyashio; Labrador
+/// shelf â†’ Labrador Current). We tag strongly-freezing shelf water as cold, then
 /// trace a short cold plume downstream into the adjacent open ocean and give it a
 /// small speed boost (the dense-water outflow). This feeds the EXISTING cold-
 /// current climate machinery: the temperature current-influence pass, the
-/// precipitation cold-coast/monsoon terms, and Köppen. Call BEFORE
+/// precipitation cold-coast/monsoon terms, and KÃ¶ppen. Call BEFORE
 /// `compute_temperature` so those consumers see the new tags.
 pub fn reinforce_cold_shelf_currents(buf: &mut WorldBuffer, freeze: &[f32]) {
     let (w, h, n) = (buf.width, buf.height, buf.total());
@@ -1452,7 +1452,7 @@ pub fn reinforce_cold_shelf_currents(buf: &mut WorldBuffer, freeze: &[f32]) {
 
 /// Apply the seasonal-sea-ice cooling onto the temperature field: drag the frozen
 /// water's own annual mean toward its freezing point (ice + cold pool), and chill
-/// the adjacent land — the "refrigerator". The land term is accumulated then
+/// the adjacent land â€” the "refrigerator". The land term is accumulated then
 /// clamped (the upwelling pattern) so a shore ringed by ice on several sides can't
 /// stack an unphysical deep-freeze. Call AFTER `compute_temperature`, which
 /// rewrites the temperature field from scratch (an earlier cooling would be lost).
@@ -1470,7 +1470,7 @@ pub fn apply_cold_shelf_cooling(buf: &mut WorldBuffer, freeze: &[f32]) {
     }
 
     // (2) Chill the adjacent land. Reach ~3 cells, Gaussian falloff, clamped so a
-    //     fully ice-ringed shore reaches ~MAX_COOL (calibrated to the ~one-Köppen-
+    //     fully ice-ringed shore reaches ~MAX_COOL (calibrated to the ~one-KÃ¶ppen-
     //     belt / Joly-2010 Hudson Bay coastal cooling).
     const REACH: i32 = 3;
     const MAX_COOL: f32 = 8.0;
@@ -1514,8 +1514,8 @@ pub fn compute_upwelling_zones(buf: &mut WorldBuffer) {
     let h = buf.height;
     // Per-source cooling kept small and accumulated into a delta buffer that is
     // clamped before being applied. Previously each upwelling ocean cell wrote
-    // -6°C directly onto every land cell in its 5×5 footprint, so a coastal cell
-    // overlapped by several upwelling sources stacked -12/-18°C and froze into
+    // -6Â°C directly onto every land cell in its 5Ã—5 footprint, so a coastal cell
+    // overlapped by several upwelling sources stacked -12/-18Â°C and froze into
     // tundra (the "cold Mediterranean coast" artefact). Bound the total so a cool
     // upwelling coast (Peru / Namibia / California fog deserts) stays cool, not
     // glacial.
@@ -1613,8 +1613,8 @@ mod tests {
     use super::*;
     use crate::sim::world_buffer::ColumnSet;
 
-    /// Build a 16×12 all-land test world. With equator_offset 0.5 and unit lat
-    /// scaling, abs_lat(row) = 15·|6−row|, so row 2 = 60°N, row 6 = equator.
+    /// Build a 16Ã—12 all-land test world. With equator_offset 0.5 and unit lat
+    /// scaling, abs_lat(row) = 15Â·|6âˆ’row|, so row 2 = 60Â°N, row 6 = equator.
     fn land_world() -> WorldBuffer {
         let (w, h) = (16u32, 12u32);
         let n = (w * h) as usize;
@@ -1640,13 +1640,13 @@ mod tests {
         let i = buf.idx(x, y);
         buf.terrain[i] = 0;
         buf.is_shelf[i] = 1;
-        buf.salinity[i] = 40; // ~30 PSU, brackish → freezes readily
+        buf.salinity[i] = 40; // ~30 PSU, brackish â†’ freezes readily
     }
 
     #[test]
     fn shelf_freeze_index_gates_on_latitude_shelf_and_warm_current() {
         let mut buf = land_world();
-        // Enclosed cold shelf sea at 60°N (row 2), all-land surroundings.
+        // Enclosed cold shelf sea at 60Â°N (row 2), all-land surroundings.
         make_cold_sea(&mut buf, 5, 2);
         make_cold_sea(&mut buf, 6, 2);
         // A high-lat shelf sea bathed by a warm current (Norwegian-shelf analogue).
@@ -1654,7 +1654,7 @@ mod tests {
         make_cold_sea(&mut buf, 11, 2);
         let warm_idx = buf.idx(11, 2);
         buf.current_type[warm_idx] = 1; // warm current on the pair
-        // A tropical shelf sea (row 6, equator) — latitude gate should zero it.
+        // A tropical shelf sea (row 6, equator) â€” latitude gate should zero it.
         make_cold_sea(&mut buf, 5, 6);
 
         let phi = compute_shelf_freeze(&buf);
@@ -1668,8 +1668,8 @@ mod tests {
     #[test]
     fn cold_shelf_refrigerates_adjacent_land_and_tags_currents() {
         let mut buf = land_world();
-        // A sizeable enclosed high-latitude basin (rows 1-2 = 75°/60°N), like the
-        // real Hudson Bay — big enough that its shore is chilled from several sides.
+        // A sizeable enclosed high-latitude basin (rows 1-2 = 75Â°/60Â°N), like the
+        // real Hudson Bay â€” big enough that its shore is chilled from several sides.
         for y in 1..=2 {
             for x in 3..=7 {
                 make_cold_sea(&mut buf, x, y);
@@ -1682,11 +1682,11 @@ mod tests {
         assert_eq!(buf.current_type[buf.idx(5, 2)], 2, "frozen shelf tagged cold");
 
         apply_cold_shelf_cooling(&mut buf, &phi);
-        // The water's own annual mean is dragged well below the 5°C start toward
-        // its freezing point (not all the way — it's a seasonal, ~0.75·Φ pull).
+        // The water's own annual mean is dragged well below the 5Â°C start toward
+        // its freezing point (not all the way â€” it's a seasonal, ~0.75Â·Î¦ pull).
         assert!(buf.temperature[buf.idx(5, 2)] < 3.0, "frozen sea mean cooled: {}", buf.temperature[buf.idx(5, 2)]);
         // Land on the ice-facing shore (row 3, below the basin) is chilled well
-        // below the 5°C baseline (the refrigerator reaching inland).
+        // below the 5Â°C baseline (the refrigerator reaching inland).
         let shore = buf.idx(5, 3);
         assert!(buf.temperature[shore] < 4.0, "shore cooled: {}", buf.temperature[shore]);
         // Far-field land (the opposite side of the world) is untouched.
@@ -1694,3 +1694,5 @@ mod tests {
         assert_eq!(buf.temperature[far], 5.0, "distant land unaffected");
     }
 }
+
+

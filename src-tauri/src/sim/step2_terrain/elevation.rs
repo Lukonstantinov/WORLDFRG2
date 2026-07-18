@@ -1,10 +1,10 @@
-use rand::prelude::*;
+﻿use rand::prelude::*;
 use std::collections::VecDeque;
-use super::world_buffer::WorldBuffer;
+use crate::sim::world_buffer::WorldBuffer;
 
-// ── Seeded noise helpers ────────────────────────────────────────────────────
+// â”€â”€ Seeded noise helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-/// Integer hash → pseudo-random float in 0..1
+/// Integer hash â†’ pseudo-random float in 0..1
 fn hash_grid(x: i32, y: i32, seed: u64) -> f32 {
     let mut h = seed as i32;
     h = h.wrapping_mul(1).wrapping_add(x.wrapping_mul(374761393));
@@ -49,8 +49,8 @@ pub(crate) fn fbm_noise(x: f32, y: f32, seed: u64, octaves: u32, lacunarity: f32
     val / max_amp
 }
 
-/// Ridged multifractal noise — creates sharp ridge lines naturally.
-/// 1 - |2*noise - 1| produces v-shaped valleys → peaks.
+/// Ridged multifractal noise â€” creates sharp ridge lines naturally.
+/// 1 - |2*noise - 1| produces v-shaped valleys â†’ peaks.
 /// Successive octaves weighted by previous value for sub-ridges.
 fn ridged_multifractal(x: f32, y: f32, seed: u64, octaves: u32, lacunarity: f32, gain: f32) -> f32 {
     let mut val = 0.0f32;
@@ -73,14 +73,14 @@ fn ridged_multifractal(x: f32, y: f32, seed: u64, octaves: u32, lacunarity: f32,
     val / (octaves as f32 * 0.5)
 }
 
-/// Domain warping — distorts coordinates by noise for organic shapes
+/// Domain warping â€” distorts coordinates by noise for organic shapes
 fn warped_coords(x: f32, y: f32, seed: u64, strength: f32) -> (f32, f32) {
     let wx = fbm_noise(x + 5.2, y + 1.3, seed.wrapping_add(11111), 3, 2.0, 0.5) - 0.5;
     let wy = fbm_noise(x + 8.7, y + 2.9, seed.wrapping_add(22222), 3, 2.0, 0.5) - 0.5;
     (x + wx * strength, y + wy * strength)
 }
 
-// ── Erosion ─────────────────────────────────────────────────────────────────
+// â”€â”€ Erosion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Hydraulic erosion: droplet simulation for valleys and channels
 fn hydraulic_erosion(
@@ -217,14 +217,14 @@ fn thermal_erosion(
     }
 }
 
-// ── Public elevation generators ─────────────────────────────────────────────
+// â”€â”€ Public elevation generators â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Generate elevation from plate tectonics.
 ///
 /// v2: mountains are concentrated into OROGENIC BELTS that run along the
-/// convergent plate boundaries (where crust collides and thickens — the Andes /
+/// convergent plate boundaries (where crust collides and thickens â€” the Andes /
 /// Himalaya / Alps geometry), then carved into ridge-and-valley relief and
-/// matched to a realistic hypsometric curve — the same erosion + redistribution
+/// matched to a realistic hypsometric curve â€” the same erosion + redistribution
 /// pipeline the plate-free models use, so the plate path no longer produces
 /// blander terrain than "Complete from Landmass". The old model spread a uniform
 /// exponential bump from every convergent cell, which left ranges that didn't
@@ -236,9 +236,9 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
     let terrain = buf.terrain.clone();
     let have_boundary = !buf.boundary_type.is_empty();
 
-    // ── Orogenic front: distance (in cells) from the nearest convergent boundary
+    // â”€â”€ Orogenic front: distance (in cells) from the nearest convergent boundary
     // land cell. Ranges bloom here and fade inland. Transform boundaries add a
-    // weaker uplift (transpressional ranges). ──
+    // weaker uplift (transpressional ranges). â”€â”€
     let mut orogeny_dist = vec![u16::MAX; n];
     {
         let mut queue = VecDeque::new();
@@ -270,7 +270,7 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
     // fraction of a continent wide at any resolution.
     let belt_reach = (w as f32 * 0.045).clamp(14.0, 90.0);
 
-    // Absolute feature wavelengths (in cells) → feature COUNT scales with the map.
+    // Absolute feature wavelengths (in cells) â†’ feature COUNT scales with the map.
     let f_base = 1.0 / 760.0;   // broad continental swell
     let f_range = 1.0 / 210.0;  // ridge wavelength
     let f_hill = 1.0 / 52.0;    // fine hills
@@ -307,7 +307,7 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
             let mut e = base * 0.42 + ridge * belt * RIDGE_AMP + hill * HILL_AMP;
 
             // Divergent boundaries are rifts (continental rift valleys / nascent
-            // ocean) — pull the surface DOWN a little where crust is stretching.
+            // ocean) â€” pull the surface DOWN a little where crust is stretching.
             if have_boundary && buf.boundary_type[idx] == 2 {
                 e *= 0.7;
             }
@@ -325,7 +325,7 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
         }
     }
 
-    // ── Distance-from-coast (full flood) for the coastal falloff ──
+    // â”€â”€ Distance-from-coast (full flood) for the coastal falloff â”€â”€
     let mut coast_dist = vec![0u16; n];
     {
         let mut visited = vec![false; n];
@@ -363,7 +363,7 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
         }
     }
 
-    // ── Erosion (hydraulic droplets + thermal slump) then hypsometric match ──
+    // â”€â”€ Erosion (hydraulic droplets + thermal slump) then hypsometric match â”€â”€
     let hydro_iterations = ((n as f32 * 0.012) as u32).clamp(15_000, 90_000);
     hydraulic_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations);
     thermal_erosion(&mut elevation, &terrain, w, h, 3);
@@ -498,10 +498,10 @@ pub fn generate_shelves(
         }
     }
 
-    // ── Active vs passive margins ── An ACTIVE margin (a coast riding a
-    // convergent/transform plate boundary — the Pacific "Ring of Fire" geometry)
+    // â”€â”€ Active vs passive margins â”€â”€ An ACTIVE margin (a coast riding a
+    // convergent/transform plate boundary â€” the Pacific "Ring of Fire" geometry)
     // has a NARROW, steep shelf plunging to a trench; a PASSIVE margin (trailing
-    // edge, no nearby boundary — the Atlantic geometry) builds a BROAD shelf. We
+    // edge, no nearby boundary â€” the Atlantic geometry) builds a BROAD shelf. We
     // find ocean cells whose nearest coast is active and shrink their shelf.
     // Falls back to all-passive when no plate data is loaded (template worlds).
     let active_dist: Vec<u16> = if buf.boundary_type.is_empty() {
@@ -657,14 +657,14 @@ pub fn generate_elevation_from_terrain(
 
     let terrain = buf.terrain.clone();
 
-    // ── Step 1: Generate base heightmap from multi-layer noise ───────────
+    // â”€â”€ Step 1: Generate base heightmap from multi-layer noise â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let scale = w.max(h) as f32 / 8.0;
 
-    // Noise weights — density/height/roughness control the mix
+    // Noise weights â€” density/height/roughness control the mix
     let w_large = 0.55;
     let w_medium = 0.30;
     let w_small = 0.10 + roughness * 0.10;   // 0.10-0.20
-    let w_ridge = 0.15 + density * 0.20;      // 0.15-0.35 (more density → more ridges)
+    let w_ridge = 0.15 + density * 0.20;      // 0.15-0.35 (more density â†’ more ridges)
     let total_w = w_large + w_medium + w_small + w_ridge;
     let n_large = w_large / total_w;
     let n_medium = w_medium / total_w;
@@ -673,15 +673,15 @@ pub fn generate_elevation_from_terrain(
 
     let warp_strength = 0.3 + roughness * 0.3; // 0.3-0.6
     let med_scale = 2.5;
-    // Mountain spread → ridge frequency: narrow peaks (0) use a higher frequency
+    // Mountain spread â†’ ridge frequency: narrow peaks (0) use a higher frequency
     // (tight, isolated ranges), wide ranges (1) a lower frequency (broad, long
-    // cordillera). Spans roughly med_scale×1.7 … med_scale×0.6.
+    // cordillera). Spans roughly med_scaleÃ—1.7 â€¦ med_scaleÃ—0.6.
     let ridge_scale = med_scale * (1.7 - spread * 1.1);
 
-    // ── ABSOLUTE-wavelength interior relief (measured in CELLS, not map fractions).
+    // â”€â”€ ABSOLUTE-wavelength interior relief (measured in CELLS, not map fractions).
     // The `scale`-based fields above tie every feature to the map size, so the
     // interior of a large continent spans barely one noise period and comes out a
-    // smooth dome — which the hypsometric redistribution then flattens into a
+    // smooth dome â€” which the hypsometric redistribution then flattens into a
     // uniform "green blob" (the user's report). These absolute-frequency belts +
     // hills add ranges and texture whose COUNT scales with continent AREA (the same
     // trick as generate_elevation_ridged), so interiors are never featureless.
@@ -692,9 +692,9 @@ pub fn generate_elevation_from_terrain(
     let ridge_amp_abs = 0.35 + density * 0.55;
     let hill_amp_abs = 0.05 + roughness * 0.12;
 
-    // ── Step 1a: distance-from-coast for every land cell ────────────────
+    // â”€â”€ Step 1a: distance-from-coast for every land cell â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Computed up front so interior cells can be lifted into a broad
-    // continental rise — otherwise low-frequency noise leaves whole
+    // continental rise â€” otherwise low-frequency noise leaves whole
     // interiors near-flat and only the coasts show relief.
     let mut coast_dist = vec![0u16; n];
     {
@@ -710,7 +710,7 @@ pub fn generate_elevation_from_terrain(
             let cx = (ci % w as usize) as i32;
             let cy = (ci / w as usize) as i32;
             let d = coast_dist[ci];
-            // Full flood — no distance cap. The old `d >= 250` early-out left the
+            // Full flood â€” no distance cap. The old `d >= 250` early-out left the
             // deep interior of large continents unvisited (coast_dist stuck at 0),
             // so Step-2's coastal falloff multiplied those cells by 0.15 and
             // produced a flat low-elevation "green blob" with a sharp BFS-contour
@@ -754,15 +754,15 @@ pub fn generate_elevation_from_terrain(
             // Medium features (mountain ranges)
             let medium = fbm_noise(wnx * med_scale, wny * med_scale, seed.wrapping_add(31337), 4, 2.2, 0.45);
 
-            // Small features (hills) — two scales so interiors keep fine
+            // Small features (hills) â€” two scales so interiors keep fine
             // texture the river router can follow into natural channels instead
             // of sheet-flowing across a smooth plain.
             let small_a = fbm_noise(wnx * 6.0, wny * 6.0, seed.wrapping_add(65521), 3, 2.0, 0.4);
             let small_b = fbm_noise(wnx * 13.0, wny * 13.0, seed.wrapping_add(0xF19E), 3, 2.0, 0.42);
             let small = small_a * 0.62 + small_b * 0.38;
 
-            // Ridged multifractal — elongated ridge lines (the key for mountain chains).
-            // Frequency set by mountain_spread (narrow peaks ↔ wide ranges).
+            // Ridged multifractal â€” elongated ridge lines (the key for mountain chains).
+            // Frequency set by mountain_spread (narrow peaks â†” wide ranges).
             let ridge = ridged_multifractal(wnx * ridge_scale, wny * ridge_scale, seed.wrapping_add(48271), 6, 2.1, 2.0);
 
             // Absolute-wavelength interior relief (cell-frequency belts + hills), so
@@ -787,23 +787,23 @@ pub fn generate_elevation_from_terrain(
             // continental-scale structure (where it's high vs low); the absolute part
             // supplies the local ranges/hills that break up the interior. Normalize +
             // redistribution downstream only care about the RELATIVE pattern, so this
-            // injects real rank variation into interiors → visible relief after
+            // injects real rank variation into interiors â†’ visible relief after
             // redistribution instead of one flat band.
             let combined = large * n_large + medium * n_medium + small * n_small
                 + ridge * n_ridge + abs_relief * 0.55;
 
-            // ── Valley incision ─────────────────────────────────────────────
+            // â”€â”€ Valley incision â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             // A second ridged field at higher frequency, INVERTED, carves
             // dendritic valley networks between the ranges (the troughs the
             // erosion alone left too shallow). Scaled by the local height so
             // highlands get dissected into ridge-and-valley relief while
-            // lowlands stay broad. This is what was missing — "almost no valleys".
+            // lowlands stay broad. This is what was missing â€” "almost no valleys".
             let vridge = ridged_multifractal(wnx * ridge_scale * 1.8, wny * ridge_scale * 1.8, seed.wrapping_add(0x5A1F), 5, 2.0, 2.0);
             let carve = (1.0 - vridge).powi(2) * (0.14 + 0.22 * roughness) * combined;
 
-            // ── Fine dendritic drainage (moderate, natural) ─────────────────
+            // â”€â”€ Fine dendritic drainage (moderate, natural) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             // A high-frequency inverted ridged field carves shallow valleys
-            // EVERYWHERE — a small ABSOLUTE incision independent of local height,
+            // EVERYWHERE â€” a small ABSOLUTE incision independent of local height,
             // so broad lowland interiors also get subtle channels for rivers to
             // bed into. Without it, plains stayed too flat and rivers ran straight
             // or braided across sheet-flow terrain.
@@ -814,9 +814,9 @@ pub fn generate_elevation_from_terrain(
         }
     }
 
-    // ── Step 2: Coastal falloff — gentle shoreline taper that KEEPS coastal
+    // â”€â”€ Step 2: Coastal falloff â€” gentle shoreline taper that KEEPS coastal
     // mountains. The old falloff multiplied the outer ring down to 0.15, which
-    // flattened every coast into a plain — even active margins where a cordillera
+    // flattened every coast into a plain â€” even active margins where a cordillera
     // meets the sea (Andes, Norway, BC). Now the taper only pulls DOWN the low /
     // plain component: a genuine coastal ridge (high raw height) keeps most of its
     // elevation, while flats still ramp gently from the shore so there's no cliff.
@@ -825,27 +825,27 @@ pub fn generate_elevation_from_terrain(
         if terrain[i] != 1 { continue; }
         if coast_dist[i] < COAST_DIST {
             let ratio = coast_dist[i] as f32 / COAST_DIST as f32; // 0 shore .. 1 inland
-            let taper = 0.45 + 0.55 * ratio;                      // shore keeps ≥45%
+            let taper = 0.45 + 0.55 * ratio;                      // shore keeps â‰¥45%
             let ridge_keep = ((elevation[i] - 0.35) / 0.65).clamp(0.0, 1.0); // mountainous?
             let factor = taper.max(ridge_keep);
             elevation[i] *= factor;
         }
     }
 
-    // ── Step 3: Hydraulic erosion — droplet simulation ──────────────────
+    // â”€â”€ Step 3: Hydraulic erosion â€” droplet simulation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Scale iterations with world size (small worlds ~15K, large ~100K)
     let erosion_scale = 0.5 + roughness * 0.5; // rougher = more erosion detail
     let hydro_iterations = ((n as f32 * 0.015 * erosion_scale) as u32).clamp(15_000, 100_000);
     hydraulic_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations);
 
-    // ── Step 4: Thermal erosion — smooth sharp ridges ───────────────────
+    // â”€â”€ Step 4: Thermal erosion â€” smooth sharp ridges â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Fewer passes than before (2-4) so the carved valley networks aren't
-    // smoothed back out — thermal slump fills valleys, so over-applying it was a
+    // smoothed back out â€” thermal slump fills valleys, so over-applying it was a
     // second reason interiors read as flat.
     let thermal_passes = 2 + (roughness * 2.0) as u32; // 2-4 passes
     thermal_erosion(&mut elevation, &terrain, w, h, thermal_passes);
 
-    // ── Step 5: Normalize with realistic altitude distribution ──────────
+    // â”€â”€ Step 5: Normalize with realistic altitude distribution â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Power curve pushes most land lower, percentile cap prevents every world
     // from having an 8848m peak
     let mut max_h = 0.0f32;
@@ -858,13 +858,13 @@ pub fn generate_elevation_from_terrain(
             if terrain[i] == 1 { elevation[i] /= max_h; }
         }
         // Power curve: exponent controlled by height parameter
-        // Low height (0.1) → exponent 2.0 (very flat), high (1.0) → exponent 1.0 (tall peaks)
+        // Low height (0.1) â†’ exponent 2.0 (very flat), high (1.0) â†’ exponent 1.0 (tall peaks)
         let exponent = 2.0 - height;
         for i in 0..n {
             if terrain[i] == 1 { elevation[i] = elevation[i].powf(exponent); }
         }
         // Percentile cap: find 99.8th percentile and scale to target
-        // height parameter controls the target: 0.1 → cap at 0.4 (~3500m), 1.0 → cap at 0.95 (~8400m)
+        // height parameter controls the target: 0.1 â†’ cap at 0.4 (~3500m), 1.0 â†’ cap at 0.95 (~8400m)
         let target_cap = 0.35 + height * 0.60; // 0.35-0.95
         let mut sorted: Vec<f32> = (0..n)
             .filter(|&i| terrain[i] == 1)
@@ -881,8 +881,8 @@ pub fn generate_elevation_from_terrain(
             }
         }
 
-        // ── Step 5b: Histogram redistribution (WF1 redistributeElevation) ───
-        // This is what gives WF1 its realistic, fully-differentiated terrain —
+        // â”€â”€ Step 5b: Histogram redistribution (WF1 redistributeElevation) â”€â”€â”€
+        // This is what gives WF1 its realistic, fully-differentiated terrain â€”
         // it spreads land elevations across 1000 m bands to a target hypsometric
         // curve (preserving relative order), so interiors are never a flat patch.
         // The `height` slider interpolates the target between a low, coastal
@@ -891,7 +891,7 @@ pub fn generate_elevation_from_terrain(
         redistribute_elevation(&mut elevation, &terrain, n, &target);
     }
 
-    // ── Step 6: Terrain-aware micro-relief, then write back to buffer ────
+    // â”€â”€ Step 6: Terrain-aware micro-relief, then write back to buffer â”€â”€â”€â”€
     apply_micro_relief(&mut elevation, &terrain, w, h, seed.wrapping_add(0x31C7));
     for i in 0..n {
         if terrain[i] == 1 {
@@ -905,7 +905,7 @@ pub fn generate_elevation_from_terrain(
 /// Plate-free, WORLD-SIZE-AWARE elevation model. Unlike
 /// `generate_elevation_from_terrain` (whose feature size scales with the map, so
 /// big worlds get only a few giant ranges and look best with the flat preset),
-/// this model uses ABSOLUTE feature wavelengths measured in cells — so the number
+/// this model uses ABSOLUTE feature wavelengths measured in cells â€” so the number
 /// of mountain ranges grows with the map and a world-size map gets many dispersed
 /// ridged cordillera. Ranges are concentrated into plausible orogenic BELTS by a
 /// low-frequency mask (no plates needed), then carved by the same hydraulic +
@@ -927,16 +927,16 @@ pub fn generate_elevation_ridged(
     let roughness = noise_roughness.clamp(0.0, 1.0);
     let terrain = buf.terrain.clone();
 
-    // Absolute feature wavelengths (in cells) → feature COUNT scales with map size.
+    // Absolute feature wavelengths (in cells) â†’ feature COUNT scales with map size.
     let f_base = 1.0 / 760.0;                       // broad continental swells
     let f_belt = 1.0 / 540.0;                       // orogenic-belt spacing
-    let f_range = 1.0 / (120.0 + spread * 230.0);   // ridge wavelength (narrow↔broad)
+    let f_range = 1.0 / (120.0 + spread * 230.0);   // ridge wavelength (narrowâ†”broad)
     let f_hill = 1.0 / 52.0;                         // fine hills
     let warp = 1.4 + roughness * 1.4;
     let ridge_amp = 0.35 + density * 0.55;
     let hill_amp = 0.05 + roughness * 0.12;
 
-    // ── Distance-from-coast (full flood) for the coastal falloff below ──
+    // â”€â”€ Distance-from-coast (full flood) for the coastal falloff below â”€â”€
     let mut coast_dist = vec![0u16; n];
     {
         let mut visited = vec![false; n];
@@ -961,7 +961,7 @@ pub fn generate_elevation_ridged(
         }
     }
 
-    // ── Compose: continental base + belt-masked ridged ranges + fine hills ──
+    // â”€â”€ Compose: continental base + belt-masked ridged ranges + fine hills â”€â”€
     let mut elevation = vec![0.0f32; n];
     for y in 0..h {
         for x in 0..w {
@@ -993,8 +993,8 @@ pub fn generate_elevation_ridged(
         }
     }
 
-    // ── Coastal falloff that KEEPS coastal mountains (only the plain component is
-    // tapered toward the shore — see generate_elevation_from_terrain). ──
+    // â”€â”€ Coastal falloff that KEEPS coastal mountains (only the plain component is
+    // tapered toward the shore â€” see generate_elevation_from_terrain). â”€â”€
     const COAST_DIST: u16 = 4;
     for i in 0..n {
         if terrain[i] != 1 { continue; }
@@ -1007,14 +1007,14 @@ pub fn generate_elevation_ridged(
         }
     }
 
-    // ── Erosion (hydraulic droplets + thermal slump) ──
+    // â”€â”€ Erosion (hydraulic droplets + thermal slump) â”€â”€
     let erosion_scale = 0.5 + roughness * 0.5;
     let hydro_iterations = ((n as f32 * 0.015 * erosion_scale) as u32).clamp(15_000, 100_000);
     hydraulic_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations);
     let thermal_passes = 2 + (roughness * 2.0) as u32; // fewer passes so valleys survive
     thermal_erosion(&mut elevation, &terrain, w, h, thermal_passes);
 
-    // ── Normalize + hypsometric redistribution (realistic altitude spread) ──
+    // â”€â”€ Normalize + hypsometric redistribution (realistic altitude spread) â”€â”€
     let mut max_h = 0.0f32;
     for i in 0..n {
         if terrain[i] == 1 && elevation[i] > max_h { max_h = elevation[i]; }
@@ -1089,7 +1089,7 @@ pub struct RidgeLine {
 ///
 /// Design (see plan): SCREEN-blends onto existing elevation (so it also works on
 /// a flat world), LAND ONLY (ocean/coastline/depth/shelf untouched), and erosion
-/// is confined to the new ridge footprints by passing a MASKED terrain array —
+/// is confined to the new ridge footprints by passing a MASKED terrain array â€”
 /// the erosion functions already skip cells where `terrain != 1`, so existing
 /// terrain outside the mask is left exactly as it was.
 pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
@@ -1110,7 +1110,7 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
     let mut src_y = vec![0i32; n];
     let mut queue: VecDeque<usize> = VecDeque::new();
 
-    // ── 1. Rasterize every polyline into spine cells (BFS seeds) ──
+    // â”€â”€ 1. Rasterize every polyline into spine cells (BFS seeds) â”€â”€
     let mut max_half = 1.0f32;
     for line in lines {
         let half = line.width.max(1.0);
@@ -1155,8 +1155,8 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
     }
     if queue.is_empty() { return; }
 
-    // ── 2. Multi-source BFS: carry the source attributes to each nearest cell,
-    // out to the widest footprint (cylinder-aware, X wraps / Y clamps). ──
+    // â”€â”€ 2. Multi-source BFS: carry the source attributes to each nearest cell,
+    // out to the widest footprint (cylinder-aware, X wraps / Y clamps). â”€â”€
     let reach = (max_half * 1.5).ceil() as u16;
     while let Some(ci) = queue.pop_front() {
         let d = dist[ci];
@@ -1183,7 +1183,7 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
         }
     }
 
-    // ── 3. Cross-ridge uplift profile + ridged crest, screen-blended in ──
+    // â”€â”€ 3. Cross-ridge uplift profile + ridged crest, screen-blended in â”€â”€
     let mut elevation = buf.elevation.clone();
     let mut mask_terrain = vec![0u8; n];
     for i in 0..n {
@@ -1191,7 +1191,7 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
         let x = (i % w as usize) as f32;
         let y = (i / w as usize) as f32;
         let hw = half_w[i].max(1.0);
-        // Euclidean distance to the nearest spine cell — gives a circular
+        // Euclidean distance to the nearest spine cell â€” gives a circular
         // cross-section instead of the octagon from 8-connected BFS integers.
         let mut dx = x - src_x[i] as f32;
         let wf = w as f32;
@@ -1216,25 +1216,25 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
             continue;
         }
         // Ridged crest: break the spine into sub-peaks/passes. Frequency and
-        // amplitude grow with character (smooth rounded ↔ serrated/rugged).
+        // amplitude grow with character (smooth rounded â†” serrated/rugged).
         let f = 0.05 + charc[i] * 0.10;
         let (rx, ry) = warped_coords(x * f, y * f, seed.wrapping_add(0x81DE), 1.2 + charc[i]);
         let ridge = ridged_multifractal(rx, ry, seed.wrapping_add(0x48271), 6, 2.1, 2.0);
         let noise_factor = (1.0 - charc[i] * 0.55) + charc[i] * 1.1 * ridge;
         let target = (peak[i] * profile * noise_factor).clamp(0.0, 1.0);
-        // Screen blend: full peak on flat ground, saturates ≤1 over existing peaks.
+        // Screen blend: full peak on flat ground, saturates â‰¤1 over existing peaks.
         elevation[i] = (elevation[i] + target * (1.0 - elevation[i])).clamp(0.01, 1.0);
     }
 
-    // ── 4. Localized erosion — a MASKED terrain confines droplets + thermal
-    // slump to the new footprints; the shared erosion functions do the carving. ──
+    // â”€â”€ 4. Localized erosion â€” a MASKED terrain confines droplets + thermal
+    // slump to the new footprints; the shared erosion functions do the carving. â”€â”€
     let mask_count = mask_terrain.iter().filter(|&&m| m == 1).count();
     if mask_count > 0 {
         let mut char_sum = 0.0f32;
         for i in 0..n { if mask_terrain[i] == 1 { char_sum += charc[i]; } }
         let avg_char = char_sum / mask_count as f32;
         // Droplet density comparable to the whole-map generators (which use a
-        // small fraction of a droplet per land cell) — enough to carve valleys
+        // small fraction of a droplet per land cell) â€” enough to carve valleys
         // into the new range without eroding the crest away.
         let iters = ((mask_count as f32 * 0.6) as u32).clamp(1_000, 60_000);
         hydraulic_erosion(&mut elevation, &mask_terrain, w, h, seed.wrapping_add(42), iters);
@@ -1242,30 +1242,30 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
         thermal_erosion(&mut elevation, &mask_terrain, w, h, passes);
     }
 
-    // ── 5. Write back — land only; sea, coastline, depth & shelf untouched ──
+    // â”€â”€ 5. Write back â€” land only; sea, coastline, depth & shelf untouched â”€â”€
     for i in 0..n {
         if terrain[i] == 1 { buf.elevation[i] = elevation[i].clamp(0.01, 1.0); }
     }
 }
 
-/// Terrain-aware MICRO-RELIEF dither — guarantees there are no perfectly flat,
+/// Terrain-aware MICRO-RELIEF dither â€” guarantees there are no perfectly flat,
 /// mono-height plateaus while keeping genuine flats (floodplains, high tablelands)
 /// readable as flat. Two bands:
-///   • FLOOR  (~±2 m): a fine, per-cell dither applied EVERYWHERE, so no two
-///     adjacent land cells ever hold the exact same height — the "very minor
+///   â€¢ FLOOR  (~Â±2 m): a fine, per-cell dither applied EVERYWHERE, so no two
+///     adjacent land cells ever hold the exact same height â€” the "very minor
 ///     fluctuation" the map should always have.
-///   • RELIEF (~±14 m): a rolling, few-cell undulation gated by LOCAL SLOPE, so
+///   â€¢ RELIEF (~Â±14 m): a rolling, few-cell undulation gated by LOCAL SLOPE, so
 ///     hillsides and mountain flanks get rolling texture while low-slope surfaces
-///     (floodplains AND high plateaus) stay smooth — a real high desert/steppe
+///     (floodplains AND high plateaus) stay smooth â€” a real high desert/steppe
 ///     reads as a tableland, and lowland floodplains stay flat enough for rivers
 ///     to meander across them (see rivers.rs meander pass).
 /// Runs on the finished (redistributed) surface, in normalized-elevation units,
 /// with amplitudes far below the ~18 m lake-fill threshold so it never spawns
-/// spurious lakes, yet far above the 9 mm drainage ε so drainage is unaffected.
+/// spurious lakes, yet far above the 9 mm drainage Îµ so drainage is unaffected.
 fn apply_micro_relief(elevation: &mut [f32], terrain: &[u8], w: u32, h: u32, seed: u64) {
     const MAX_ELEV: f32 = 8848.0;
-    let floor_amp = 2.0 / MAX_ELEV;    // ~±2 m everywhere
-    let relief_amp = 14.0 / MAX_ELEV;  // ~±14 m on true slopes
+    let floor_amp = 2.0 / MAX_ELEV;    // ~Â±2 m everywhere
+    let relief_amp = 14.0 / MAX_ELEV;  // ~Â±14 m on true slopes
     // Local slope (normalized units per cell) at which RELIEF saturates: ~53 m/cell.
     let slope_ref = 53.0 / MAX_ELEV;
     let s_fine = seed.wrapping_add(0x00D1_7737);
@@ -1292,7 +1292,7 @@ fn apply_micro_relief(elevation: &mut [f32], terrain: &[u8], w: u32, h: u32, see
             rough = rough * rough * (3.0 - 2.0 * rough); // smoothstep 0..1
             let ax = x as f32;
             let ay = y as f32;
-            // Fine per-cell dither (−1..1) and a rolling few-cell undulation (−1..1).
+            // Fine per-cell dither (âˆ’1..1) and a rolling few-cell undulation (âˆ’1..1).
             let fine = (fbm_noise(ax * 0.9 + 0.3, ay * 0.9 + 0.7, s_fine, 2, 2.0, 0.5) - 0.5) * 2.0;
             let roll = (fbm_noise(ax * 0.16 + 0.9, ay * 0.16 + 0.2, s_roll, 3, 2.0, 0.5) - 0.5) * 2.0;
             let delta = floor_amp * fine + relief_amp * rough * roll;
@@ -1350,7 +1350,7 @@ fn redistribute_elevation(elevation: &mut [f32], terrain: &[u8], n: usize, targe
             cell_idx += 1;
         }
     }
-    // Any leftover cells (rounding) → top band.
+    // Any leftover cells (rounding) â†’ top band.
     let last_min = (8.0 * 1000.0) / MAX_ELEV;
     while cell_idx < total_land {
         elevation[land_indices[cell_idx]] = (last_min + 0.01).min(1.0);
@@ -1362,8 +1362,8 @@ fn redistribute_elevation(elevation: &mut [f32], terrain: &[u8], n: usize, targe
 mod tests {
     use super::*;
 
-    /// Micro-relief must (1) leave no perfectly flat mono-plateau — a uniform
-    /// input comes out with adjacent cells differing — while (2) staying tiny
+    /// Micro-relief must (1) leave no perfectly flat mono-plateau â€” a uniform
+    /// input comes out with adjacent cells differing â€” while (2) staying tiny
     /// (well under the ~18 m lake-fill threshold, and on a FLAT surface under the
     /// ~2 m floor since no slope means no rolling relief), and (3) be deterministic.
     #[test]
@@ -1376,7 +1376,7 @@ mod tests {
         let mut a = vec![flat; n];
         apply_micro_relief(&mut a, &terrain, w, h, 777);
 
-        // (2) bounded: a flat surface has zero slope → only the ~2 m floor applies.
+        // (2) bounded: a flat surface has zero slope â†’ only the ~2 m floor applies.
         let floor = 2.0 / 8848.0;
         let lake_thresh = 0.002; // ~18 m
         let mut max_dev = 0.0f32;
@@ -1397,7 +1397,7 @@ mod tests {
         let pairs = (h * (w - 1)) as usize;
         assert!(differ as f32 / pairs as f32 > 0.99, "flats must not stay mono-height: {differ}/{pairs}");
 
-        // (3) deterministic: same seed → identical result.
+        // (3) deterministic: same seed â†’ identical result.
         let mut b = vec![flat; n];
         apply_micro_relief(&mut b, &terrain, w, h, 777);
         assert_eq!(a, b, "micro-relief must be reproducible for a given seed");
@@ -1405,7 +1405,7 @@ mod tests {
 
     /// A LARGE continent interior must not read as a flat "green blob": the
     /// template elevation model must give deep-interior cells genuine relief
-    /// (ranges/hills), not just the ±2 m micro-relief floor. Guards the
+    /// (ranges/hills), not just the Â±2 m micro-relief floor. Guards the
     /// absolute-wavelength interior-relief injection in generate_elevation_from_terrain.
     #[test]
     fn template_interior_is_not_a_flat_blob() {
@@ -1481,7 +1481,7 @@ mod tests {
         }}
         let floor = 2.0 / 8848.0;
         assert!(max_dev > floor * 2.0, "slopes get rolling relief beyond the floor: {max_dev}");
-        assert!(max_dev < 0.002, "…but still under the lake threshold: {max_dev}");
+        assert!(max_dev < 0.002, "â€¦but still under the lake threshold: {max_dev}");
     }
 
     /// A single drawn ridge line on a FLAT all-land world must raise a band of
@@ -1539,3 +1539,4 @@ mod tests {
         assert!(on_spine > far + 0.25, "spine must stand well above the surroundings");
     }
 }
+

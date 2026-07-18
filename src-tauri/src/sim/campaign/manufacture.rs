@@ -1,25 +1,25 @@
-//! Shared production-chain resolver.
+﻿//! Shared production-chain resolver.
 //!
 //! Pre-modern wealth was made as much by *transforming* imported raws into
-//! finished exports (wool→cloth, ore→arms, raw→refined sugar) as by sitting on a
+//! finished exports (woolâ†’cloth, oreâ†’arms, rawâ†’refined sugar) as by sitting on a
 //! resource. `Distribution::Manufactured` goods carry a recipe (`GoodSpec.inputs`)
 //! and have NO per-cell belt; this pass turns a hub's input stocks into finished
-//! output, concentrated in big cities (labor ∝ population).
+//! output, concentrated in big cities (labor âˆ population).
 //!
 //! It runs in two places on the SAME `GoodSpec` definitions:
-//!   • worldgen — `compute_economy` calls it on the static per-hub production
+//!   â€¢ worldgen â€” `compute_economy` calls it on the static per-hub production
 //!     vectors before the market solves, so manufactured goods flow as exports.
-//!   • campaign — `tick.rs` runs the same logic per tick for manufactory estates.
+//!   â€¢ campaign â€” `tick.rs` runs the same logic per tick for manufactory estates.
 //!
 //! Pure & deterministic (no DB / RNG). Topologically orders manufactured goods by
-//! recipe depth so multi-stage chains (raw→intermediate→finished) resolve, and
+//! recipe depth so multi-stage chains (rawâ†’intermediateâ†’finished) resolve, and
 //! refuses cycles / missing inputs (those recipes are disabled with a warning).
 
-use super::goods_spec::{Distribution, GoodSpec};
+use crate::sim::goods_spec::{Distribution, GoodSpec};
 use std::collections::HashMap;
 
 /// Transform per-hub production in place: consume recipe inputs and add finished
-/// `Manufactured` goods, scaled by each hub's labor capacity (∝ population).
+/// `Manufactured` goods, scaled by each hub's labor capacity (âˆ population).
 ///
 /// `prod[hub][good]` is the production vector (indexed parallel to `specs`).
 /// `hub_pop[hub]` is the hub population. Returns human-readable warnings for any
@@ -45,7 +45,7 @@ pub fn apply_manufacturing(
             continue;
         }
         if spec.inputs.is_empty() {
-            // Manufactured but no recipe → nothing to make; leave at zero.
+            // Manufactured but no recipe â†’ nothing to make; leave at zero.
             continue;
         }
         let mut resolved = Vec::with_capacity(spec.inputs.len());
@@ -56,7 +56,7 @@ pub fn apply_manufacturing(
                 None => {
                     ok = false;
                     warnings.push(format!(
-                        "{}: recipe input '{}' is unknown — recipe disabled",
+                        "{}: recipe input '{}' is unknown â€” recipe disabled",
                         spec.id, inp.good
                     ));
                     break;
@@ -72,13 +72,13 @@ pub fn apply_manufacturing(
     }
 
     // Topologically order the manufactured goods by recipe depth (raws first) so a
-    // chain that feeds another chain (e.g. refined good → liqueur) resolves in one
+    // chain that feeds another chain (e.g. refined good â†’ liqueur) resolves in one
     // pass. Kahn-style over the manufactured-good subgraph; a leftover set = cycle.
     let order = match topo_order(&recipes) {
         Ok(o) => o,
         Err(cyclic) => {
             for g in &cyclic {
-                warnings.push(format!("{}: recipe is part of a cycle — disabled", specs[*g].id));
+                warnings.push(format!("{}: recipe is part of a cycle â€” disabled", specs[*g].id));
                 recipes.remove(g);
             }
             // Re-order the acyclic remainder.
@@ -86,13 +86,13 @@ pub fn apply_manufacturing(
         }
     };
 
-    // Median population → labor scale, so big cities out-manufacture villages.
+    // Median population â†’ labor scale, so big cities out-manufacture villages.
     let median_pop = median(hub_pop).max(1.0);
 
     // Fungible input substitutes: for each input good in a FUNGIBLE category
-    // (interchangeable as an ingredient — e.g. bay salt vs rock salt both cure
+    // (interchangeable as an ingredient â€” e.g. bay salt vs rock salt both cure
     // fish), the other enabled goods of that category can stand in when the named
-    // input is short. NOT applied to structural inputs like metals (gold ≠ iron).
+    // input is short. NOT applied to structural inputs like metals (gold â‰  iron).
     let subs = fungible_substitutes(specs);
 
     for (h, pv) in prod.iter_mut().enumerate() {
@@ -163,11 +163,11 @@ pub fn apply_manufacturing(
 /// deliberately narrow so structural inputs (metals, fibres) are NOT swapped.
 pub fn is_fungible_input_category(cat: &str) -> bool {
     // "preservative" = salt types (curing); "gem" = the split gemstone types, so a
-    // jeweller's "gemstones" input is satisfied by ruby / sapphire / emerald / … .
+    // jeweller's "gemstones" input is satisfied by ruby / sapphire / emerald / â€¦ .
     matches!(cat, "preservative" | "gem")
 }
 
-/// Map each good index in a fungible input category → the OTHER enabled goods of
+/// Map each good index in a fungible input category â†’ the OTHER enabled goods of
 /// that category that may substitute for it as a recipe input.
 fn fungible_substitutes(specs: &[GoodSpec]) -> HashMap<usize, Vec<usize>> {
     let mut out: HashMap<usize, Vec<usize>> = HashMap::new();
@@ -189,11 +189,11 @@ fn fungible_substitutes(specs: &[GoodSpec]) -> HashMap<usize, Vec<usize>> {
 }
 
 /// Kahn topological sort over the manufactured-good dependency subgraph. An edge
-/// input→output exists when an input is itself a manufactured good in the set.
+/// inputâ†’output exists when an input is itself a manufactured good in the set.
 /// Returns the order (deps first) or `Err(cyclic_nodes)` if a cycle remains.
 fn topo_order(recipes: &HashMap<usize, Vec<(usize, f32)>>) -> Result<Vec<usize>, Vec<usize>> {
     // In-degree = how many of a good's inputs are themselves manufactured goods in
-    // the set (edges from raws don't count — raws are always available first).
+    // the set (edges from raws don't count â€” raws are always available first).
     let mut indeg: HashMap<usize, usize> = HashMap::new();
     for (&g, inputs) in recipes {
         let d = inputs.iter().filter(|(idx, _)| recipes.contains_key(idx)).count();
@@ -275,12 +275,12 @@ mod tests {
         apply_manufacturing(&mut prod, &specs, &pops);
         assert!(prod[0][1] > 0.0, "wool hub manufactured cloth");
         assert!(prod[0][0] < 10.0, "wool was consumed");
-        assert_eq!(prod[1][1], 0.0, "no wool → no cloth");
+        assert_eq!(prod[1][1], 0.0, "no wool â†’ no cloth");
     }
 
     #[test]
     fn multi_stage_chain_resolves_in_one_pass() {
-        // raw cane → refined sugar → liqueur, all at one big hub.
+        // raw cane â†’ refined sugar â†’ liqueur, all at one big hub.
         let specs = vec![
             raw("cane"),
             made("sugar", vec![("cane", 1.0)]),
@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn a_cycle_is_rejected_without_panicking() {
-        // a ← b, b ← a : both manufactured, mutual dependency.
+        // a â† b, b â† a : both manufactured, mutual dependency.
         let specs = vec![
             made("a", vec![("b", 1.0)]),
             made("b", vec![("a", 1.0)]),
@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn salt_substitutes_within_preservative_category() {
-        // salted_herring ← herring + salt; the hub holds herring + BAY salt only
+        // salted_herring â† herring + salt; the hub holds herring + BAY salt only
         // (no rock salt). Bay salt must stand in (both are "preservative").
         let mut salt = raw("salt"); salt.category = "preservative".into();
         let mut bay = raw("bay_salt"); bay.category = "preservative".into();
@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn metals_do_not_substitute_as_inputs() {
-        // metalware ← iron; the hub has only GOLD (also category 'metal'). Gold must
+        // metalware â† iron; the hub has only GOLD (also category 'metal'). Gold must
         // NOT stand in for structural iron.
         let mut iron = raw("iron"); iron.category = "metal".into();
         let mut gold = raw("gold"); gold.category = "metal".into();
@@ -333,7 +333,7 @@ mod tests {
         let mut prod = vec![vec![0.0, 10.0, 0.0]]; // only gold
         let pops = vec![1000.0];
         apply_manufacturing(&mut prod, &specs, &pops);
-        assert_eq!(prod[0][2], 0.0, "no iron → no metalware (gold does not substitute)");
+        assert_eq!(prod[0][2], 0.0, "no iron â†’ no metalware (gold does not substitute)");
     }
 
     #[test]
@@ -346,3 +346,4 @@ mod tests {
         assert!(prod[0][1] > prod[1][1], "the larger city manufactures more cloth");
     }
 }
+

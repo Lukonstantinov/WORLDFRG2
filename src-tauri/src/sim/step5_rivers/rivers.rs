@@ -1,5 +1,5 @@
-use super::world_buffer::WorldBuffer;
-use super::elevation::fbm_noise;
+﻿use crate::sim::world_buffer::WorldBuffer;
+use crate::sim::elevation::fbm_noise;
 use std::collections::{BinaryHeap, VecDeque};
 use std::cmp::Ordering;
 
@@ -45,17 +45,17 @@ pub struct River {
     /// Defaults to 1.0 so pre-existing saves render exactly as before.
     #[serde(default = "one_f32")]
     pub meander: f32,
-    /// TRUE meander geometry — a smoothed, sub-cell render polyline (cell-index
+    /// TRUE meander geometry â€” a smoothed, sub-cell render polyline (cell-index
     /// coordinates, same convention as `points`) that winds through the flat
     /// lowlands and runs straight down steep headwaters. Computed physically in
-    /// `build_meander_path` (per-vertex gradient → slowness, amplitude clamped to
-    /// the valley floor, wavelength ∝ channel width, noise-jittered so bends read
+    /// `build_meander_path` (per-vertex gradient â†’ slowness, amplitude clamped to
+    /// the valley floor, wavelength âˆ channel width, noise-jittered so bends read
     /// organic). The frontend draws THIS when present; `points` stays the true
-    /// cell path used by settlement/ecology logic. Empty on old saves → the
+    /// cell path used by settlement/ecology logic. Empty on old saves â†’ the
     /// frontend falls back to its cosmetic meander of `points`.
     #[serde(default)]
     pub render: Vec<(f32, f32)>,
-    /// BRAIDED anabranches — thin secondary channels that split off and rejoin the
+    /// BRAIDED anabranches â€” thin secondary channels that split off and rejoin the
     /// main stem on the widest, flattest reaches of a great river (the
     /// sandbar-island braid of the lower Mississippi / Brahmaputra). Each is a
     /// short sub-cell strand (cell-index coords) drawn faint beside the trunk.
@@ -76,19 +76,19 @@ pub struct Lake {
     /// a distinct render + its own limnology (still, weedy backwater ecology).
     #[serde(default)]
     pub kind: u8,
-    /// True terminal SALT lake — an arid basin with no river outflow, where the sun
+    /// True terminal SALT lake â€” an arid basin with no river outflow, where the sun
     /// alone empties it and brine concentrates (Caspian / Great Salt Lake / playa).
     /// Set by `classify_salt_lakes`; drives the pink brine tint, salt-good
     /// production and the salt-shore settlement draw.
     #[serde(default)]
     pub endorheic: bool,
-    /// Approximate salinity in parts-per-thousand — ~0.2 for a freshwater lake,
+    /// Approximate salinity in parts-per-thousand â€” ~0.2 for a freshwater lake,
     /// 12-120+ for a terminal salt lake (shallower & more arid = more concentrated).
     #[serde(default)]
     pub salinity_ppt: f32,
 }
 
-/// Salinity (PSU) window the persisted `salinity` u8 column encodes — must match
+/// Salinity (PSU) window the persisted `salinity` u8 column encodes â€” must match
 /// `query_commands` and `ocean.rs` so a salt-lake value round-trips consistently.
 pub const SAL_MIN_PSU: f32 = 28.0;
 pub const SAL_MAX_PSU: f32 = 42.0;
@@ -102,7 +102,7 @@ pub const SALT_PRODUCTION_PPT: f32 = 35.0;
 
 /// Classify each lake's SALINITY in place: a lake with no river outflow sitting in
 /// an arid (BW/BS) basin is a terminal salt lake; the sun alone empties it and
-/// brine concentrates (shallower → stronger). Mirrors the Hydrology panel's
+/// brine concentrates (shallower â†’ stronger). Mirrors the Hydrology panel's
 /// limnology so the map, the goods layer and the panel all agree. Freshwater lakes
 /// are left at ~0.2 ppt. `rivers` supplies outflow detection (a river resuming at
 /// the shore = the lake drains, so it is NOT terminal).
@@ -171,7 +171,7 @@ pub struct Hydrology {
     pub flow_dir: Vec<i32>,
     /// Upstream contributing-cell count (flow accumulation).
     pub acc: Vec<u32>,
-    /// Depression-filled elevation surface (≥ original elevation).
+    /// Depression-filled elevation surface (â‰¥ original elevation).
     pub filled: Vec<f32>,
 }
 
@@ -206,17 +206,17 @@ impl PartialOrd for FloodCell {
 }
 
 /// Tiny elevation increment applied to every cell as the priority flood spills
-/// across it (Barnes "Priority-Flood+ε"). Raising each newly reached cell to
+/// across it (Barnes "Priority-Flood+Îµ"). Raising each newly reached cell to
 /// *just above* its spill parent removes flats entirely: the filled surface is
 /// strictly monotonic toward the sea, so steepest-descent drainage is always
 /// well-defined and points down the true outlet direction instead of following
-/// the flood's BFS ring (which cut straight across basins — the old "rivers
+/// the flood's BFS ring (which cut straight across basins â€” the old "rivers
 /// don't follow the terrain" artefact). 1e-6 in normalized-elevation units is
 /// ~9 mm of the 8848 m range, negligible against relief and the ~18 m lake
 /// threshold, but enough to survive f32 rounding across long flats.
 const FILL_EPS: f32 = 1e-6;
 
-/// Priority-flood hydrology (Barnes et al. + ε): fill depressions, then assign a
+/// Priority-flood hydrology (Barnes et al. + Îµ): fill depressions, then assign a
 /// STEEPEST-DESCENT drainage direction on the filled surface and accumulate flow
 /// downstream.
 ///
@@ -224,9 +224,9 @@ const FILL_EPS: f32 = 1e-6;
 /// filled elevation, raising each newly reached cell to just above the spill
 /// level (`FILL_EPS`). This guarantees every land cell has a strictly monotonic
 /// path to the sea, and any cell raised meaningfully above its true elevation
-/// marks a filled depression — i.e. a lake. Flow direction is then taken as the
+/// marks a filled depression â€” i.e. a lake. Flow direction is then taken as the
 /// lowest of the eight filled neighbours, so on genuine slopes it tracks the
-/// real gradient and across former flats it points down the ε-tilt toward the
+/// real gradient and across former flats it points down the Îµ-tilt toward the
 /// outlet.
 pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
     let w = buf.width;
@@ -240,10 +240,10 @@ pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
     let mut seq: u64 = 0;
     let mut order: Vec<usize> = Vec::with_capacity(total);
 
-    // ── Micro-relief: break the flat-plain drainage artefact ──────────────────
-    // On a genuinely flat surface the priority-flood's ε-tilt is a SINGLE uniform
+    // â”€â”€ Micro-relief: break the flat-plain drainage artefact â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // On a genuinely flat surface the priority-flood's Îµ-tilt is a SINGLE uniform
     // gradient away from the spill point, so every cell drains the same diagonal
-    // way → a fan of parallel, straight, look-alike "rivers" (the artefact the
+    // way â†’ a fan of parallel, straight, look-alike "rivers" (the artefact the
     // flat green interiors showed). Real plains have a few metres of gentle
     // undulation that gathers runoff into a branching, dendritic tributary tree.
     // Add a small multi-octave noise to the elevation the hydrology reads. Its
@@ -252,8 +252,8 @@ pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
     // negligible (rivers still follow the terrain), but on a flat it supplies the
     // tie-breaking micro-topography that turns the parallel streaks into natural
     // dendritic drainage. Deterministic (fixed seed) so a given world is stable.
-    const MICRO_RELIEF: f32 = 0.0006;   // ≈5 m; < 0.002 (~18 m) lake threshold
-    const MICRO_FREQ: f32 = 0.05;       // base feature ≈ 20 cells (finer octaves nest)
+    const MICRO_RELIEF: f32 = 0.0006;   // â‰ˆ5 m; < 0.002 (~18 m) lake threshold
+    const MICRO_FREQ: f32 = 0.05;       // base feature â‰ˆ 20 cells (finer octaves nest)
     let elev: Vec<f32> = (0..total)
         .map(|i| {
             if buf.terrain[i] != 1 { return buf.elevation[i]; } // perturb land only
@@ -265,7 +265,7 @@ pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
         })
         .collect();
 
-    // Seed the flood with every sea cell — these are the drainage outlets.
+    // Seed the flood with every sea cell â€” these are the drainage outlets.
     for i in 0..total {
         filled[i] = elev[i];
         if buf.terrain[i] == 0 {
@@ -292,8 +292,8 @@ pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
             if buf.terrain[ni] != 1 { continue; } // only land drains
 
             visited[ni] = true;
-            // Raise to just above the spill level (ε-tilt) so the filled surface
-            // is strictly increasing away from the outlet — no flats to strand
+            // Raise to just above the spill level (Îµ-tilt) so the filled surface
+            // is strictly increasing away from the outlet â€” no flats to strand
             // the drainage direction on. `flow_dir` here is provisional (the spill
             // parent); it is overwritten by the steepest-descent pass below.
             let raised = elev[ni].max(c_filled + FILL_EPS);
@@ -304,12 +304,12 @@ pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
         }
     }
 
-    // ── Steepest-descent drainage on the filled surface ──────────────────────
+    // â”€â”€ Steepest-descent drainage on the filled surface â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Replace the flood's spill-tree parent with the genuinely lowest of the
     // eight filled neighbours. On real slopes this follows the terrain gradient;
-    // on ε-tilted former flats the lowest neighbour is the one toward the outlet.
+    // on Îµ-tilted former flats the lowest neighbour is the one toward the outlet.
     // A sea neighbour (filled == 0) always wins, so coastal cells drain to the
-    // sea. The ε guarantee means every reached land cell has a strictly lower
+    // sea. The Îµ guarantee means every reached land cell has a strictly lower
     // neighbour, so the direction is defined and the graph stays acyclic.
     for &idx in &order {
         if buf.terrain[idx] != 1 { continue; }
@@ -334,7 +334,7 @@ pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
     // Flow accumulation: each land cell contributes itself, propagated
     // downstream. `order` is outlet-first, so iterating it in reverse visits
     // every cell before its (earlier-popped) downstream target.
-    // Ice-cap (Köppen EF) cells are permanent ice sheets: their precipitation is
+    // Ice-cap (KÃ¶ppen EF) cells are permanent ice sheets: their precipitation is
     // locked up as ice rather than liquid runoff, so they contribute nothing to
     // flow accumulation. A drainage basin of pure ice therefore stays below the
     // river threshold (no polar rivers); mixed basins are truncated at the ice
@@ -375,7 +375,7 @@ pub fn extract_rivers(
     // where it meets a lake and resume at the outlet, never draw a line straight
     // across the basin (the "river crosses the lake" artefact). Flow accumulation
     // still passes through the filled basin, so the outflow reach is sized by the
-    // full upstream catchment — the river, the lake and its outflow read as one
+    // full upstream catchment â€” the river, the lake and its outflow read as one
     // connected system, just not one line over the water.
     let mut is_lake = vec![false; total];
     for lk in lakes {
@@ -385,8 +385,8 @@ pub fn extract_rivers(
     }
     let area_ratio = (w * h) as f32 / 64800.0;
     let base = (40.0 * area_ratio.sqrt()).max(20.0);
-    // density 0 → 3× threshold (sparse), 0.5 → 1.9×, 1 → 0.7×, 1.5 → 0.25× (dense).
-    // Floors raised from the old (0.4×/0.1×) values so the network stays legible —
+    // density 0 â†’ 3Ã— threshold (sparse), 0.5 â†’ 1.9Ã—, 1 â†’ 0.7Ã—, 1.5 â†’ 0.25Ã— (dense).
+    // Floors raised from the old (0.4Ã—/0.1Ã—) values so the network stays legible â€”
     // the previous low floor let the whole map fill with a woven mat of streams
     // (the "spaghetti" the user flagged). Fewer, better-defined channels now.
     let density_mult = (3.0 - 2.3 * density).max(0.25);
@@ -394,9 +394,9 @@ pub fn extract_rivers(
 
     let use_koppen = !buf.koppen.is_empty();
 
-    // ── Build the channel network ────────────────────────────────────────────
+    // â”€â”€ Build the channel network â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // A channel cell is land (not a permanent ice cap) carrying at least
-    // `threshold` accumulated flow — a UNIFORM threshold, deliberately. A per-cell
+    // `threshold` accumulated flow â€” a UNIFORM threshold, deliberately. A per-cell
     // (climate-weighted) threshold truncates rivers mid-course: a channel that
     // flows into a drier, higher-threshold cell before its accumulation catches up
     // is cut off, leaving a dangling stub on open land (the "river got truncated"
@@ -436,16 +436,16 @@ pub fn extract_rivers(
         main_child[i] = best_ni;
     }
 
-    // CONFLUENCE cells — a channel with two or more channel inflows (its main-stem
+    // CONFLUENCE cells â€” a channel with two or more channel inflows (its main-stem
     // child plus at least one tributary head). A tributary segment ENDS on exactly
     // such a cell (the appended junction), while the main stem passes THROUGH it as
     // an interior vertex. So the trunk's meander must be pinned to the cell centre
     // here; otherwise the trunk's rendered line wanders off-centre while the
-    // tributary's endpoint stays on the centre — the visible "rivers don't join"
+    // tributary's endpoint stays on the centre â€” the visible "rivers don't join"
     // gap. Anchoring the confluence on the trunk makes both meet exactly.
     let confluence: Vec<bool> = (0..total).map(|i| up_count[i] >= 2).collect();
 
-    // Global channel occupancy — every cell that carries a river. The meander pass
+    // Global channel occupancy â€” every cell that carries a river. The meander pass
     // uses it to wall each river's bends off its neighbours so render paths never
     // cross (the drainage tree itself never crosses; this keeps the cosmetic render
     // faithful to that).
@@ -454,7 +454,7 @@ pub fn extract_rivers(
     // Walk one polyline per SOURCE (a channel cell with no channel inflow). Each
     // walk runs downstream while it stays the main branch, ending either at the
     // sea (a trunk river) or at the confluence where it merges into a larger
-    // stream (a tributary — the junction cell is appended so the line connects).
+    // stream (a tributary â€” the junction cell is appended so the line connects).
     let mut rivers = Vec::new();
     let major_len = (w as f32 * 0.10).max(60.0);
     for s in 0..total {
@@ -489,7 +489,7 @@ pub fn extract_rivers(
         };
         let outlet_acc = acc[outlet] as f32;
 
-        // ── Physical river width = DISCHARGE ── drainage area × runoff, cut back
+        // â”€â”€ Physical river width = DISCHARGE â”€â”€ drainage area Ã— runoff, cut back
         // in arid climates (a desert river is a thin wadi even with a big
         // catchment). Log-scaled so a great trunk reads distinctly wider than a
         // headwater stream while staying inside a narrow render band.
@@ -517,33 +517,33 @@ pub fn extract_rivers(
         let order = (((outlet_acc / threshold as f32).max(1.0).log2().floor() as i32) + 1)
             .clamp(1, 7) as u8;
 
-        // ── CLIMATE DENSITY (whole-river prune) ── Deserts carry few rivers: an arid
+        // â”€â”€ CLIMATE DENSITY (whole-river prune) â”€â”€ Deserts carry few rivers: an arid
         // basin swallows its runoff to evaporation. Drop small headwater/low-order
         // streams whose reach is mostly arid, so dry regions read sparse while wet
         // regions keep their fine drainage. Never touches a river that reaches the
-        // sea, nor any sizeable (order ≥ 3) river — trunks fed from wet uplands still
+        // sea, nor any sizeable (order â‰¥ 3) river â€” trunks fed from wet uplands still
         // cross the desert to the coast (the Nile), so nothing is cut mid-course.
         if !is_mouth && order <= 2 && arid_frac > 0.55 { continue; }
 
-        // ── Meander scale (gradient-gated) ── mean channel gradient over the reach
+        // â”€â”€ Meander scale (gradient-gated) â”€â”€ mean channel gradient over the reach
         // in normalized-elevation units per cell: steep headwaters run straight
         // down the fall line, flat lowland reaches are free to meander. Map a steep
-        // gradient (≥ ~0.004/cell ≈ 35 m/cell of the 8848 m range) to 0 amplitude
-        // and a near-flat one (≤ ~0.0005/cell) to full amplitude, so the render
+        // gradient (â‰¥ ~0.004/cell â‰ˆ 35 m/cell of the 8848 m range) to 0 amplitude
+        // and a near-flat one (â‰¤ ~0.0005/cell) to full amplitude, so the render
         // stops wiggling rivers across the highlands (the "doesn't follow the
         // terrain" artefact) and only bends them on true floodplains.
         let src_e = buf.elevation[buf.idx(points[0].0, points[0].1)];
         let out_e = buf.elevation[outlet];
         let grad_per_cell = (src_e - out_e).max(0.0) / length.max(1.0);
         let meander = (1.0 - (grad_per_cell - 0.0005) / (0.004 - 0.0005)).clamp(0.0, 1.0);
-        // MAJOR = a long trunk OR a high-order channel → darker render shade.
+        // MAJOR = a long trunk OR a high-order channel â†’ darker render shade.
         let major = length >= major_len || order >= 4;
         // Navigable = enough discharge to float a barge (a real inland highway).
         let navigable = discharge >= threshold as f32 * 5.0 && width >= 1.8;
         let tributary = !is_mouth;
 
-        // ── Mouth landform (trunks only): depositional DELTA on a flat shallow
-        // coast vs drowned ESTUARY on a steeper one. ──
+        // â”€â”€ Mouth landform (trunks only): depositional DELTA on a flat shallow
+        // coast vs drowned ESTUARY on a steeper one. â”€â”€
         let mut mouth_kind = 0u8;
         let mut delta: Vec<(u32, u32)> = Vec::new();
         if is_mouth && outlet_acc >= threshold as f32 * 3.0 {
@@ -566,7 +566,7 @@ pub fn extract_rivers(
             if mouth_kind == 2 { delta.clear(); }
         }
 
-        // TRUE meander geometry (sub-cell render polyline) — winds on flat
+        // TRUE meander geometry (sub-cell render polyline) â€” winds on flat
         // lowlands, straight in the steep headwaters, clamped to the valley floor.
         let mseed = (s as u64).wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(0x51ED);
         let render = build_meander_path(buf, &points, width, discharge, threshold as f32, mseed, &confluence, &channel_cell);
@@ -583,7 +583,7 @@ pub fn extract_rivers(
 /// staircase into a flowing centreline, then displaces it into physically-motivated
 /// meanders whose amplitude grows where the river SLOWS (low local gradient) and
 /// shrinks to zero on steep headwaters, clamped to the flat valley floor so the
-/// channel never climbs the hillside. Wavelength ≈ 10-14× channel width (real
+/// channel never climbs the hillside. Wavelength â‰ˆ 10-14Ã— channel width (real
 /// meander geometry) and is noise-jittered, and a weak second harmonic makes the
 /// bends asymmetric, so the result reads organic rather than as a mechanical sine
 /// wave. Coordinates are CELL-INDEX space (same as `points`); X is rewrapped.
@@ -599,12 +599,12 @@ fn build_meander_path(
     let w = buf.width as f32;
     let h = buf.height;
 
-    // This river's OWN channel cells — so the "neighbouring river = wall" clamp
+    // This river's OWN channel cells â€” so the "neighbouring river = wall" clamp
     // below doesn't wall a river against itself where it curves back near its path.
     let own: std::collections::HashSet<usize> =
         points.iter().map(|&(x, y)| buf.idx(x, y)).collect();
     // Does (fx,fy) sit on ANOTHER river's channel? Such cells act as valley walls
-    // for the meander, so a river can never swing its bends across a neighbour — the
+    // for the meander, so a river can never swing its bends across a neighbour â€” the
     // true drainage paths form a non-crossing forest, and this keeps the RENDER
     // paths non-crossing too (the "rivers intersect" weave the user flagged).
     let blocks_other = |fx: f32, fy: f32| -> bool {
@@ -615,7 +615,7 @@ fn build_meander_path(
         channel_cell.get(idx).copied().unwrap_or(false) && !own.contains(&idx)
     };
 
-    // ── Unroll X across the wrap seam so the meander math stays continuous ──
+    // â”€â”€ Unroll X across the wrap seam so the meander math stays continuous â”€â”€
     let mut cx = vec![points[0].0 as f32; n];
     for k in 1..n {
         let prev = cx[k - 1];
@@ -629,7 +629,7 @@ fn build_meander_path(
         cx[k] = best;
     }
     let mut cy: Vec<f32> = points.iter().map(|&(_, y)| y as f32).collect();
-    // Exact (unrolled) cell centres before smoothing/meandering — used to PIN any
+    // Exact (unrolled) cell centres before smoothing/meandering â€” used to PIN any
     // confluence vertex so the trunk passes dead-centre through a junction, meeting
     // the tributary whose endpoint is anchored to the same cell.
     let ux0 = cx.clone();
@@ -641,9 +641,9 @@ fn build_meander_path(
         }
     };
 
-    // ── Smooth the 8-neighbour staircase (windowed passes, endpoints anchored) ──
-    // 4 passes (was 2) so the D8 staircase's abrupt 45°/90° corners round out into a
-    // flowing centreline — sharp near-right-angle kinks in the render were the
+    // â”€â”€ Smooth the 8-neighbour staircase (windowed passes, endpoints anchored) â”€â”€
+    // 4 passes (was 2) so the D8 staircase's abrupt 45Â°/90Â° corners round out into a
+    // flowing centreline â€” sharp near-right-angle kinks in the render were the
     // "unnatural steep turns" the user flagged.
     for _ in 0..4 {
         let (sx, sy) = (cx.clone(), cy.clone());
@@ -665,18 +665,18 @@ fn build_meander_path(
         buf.terrain[buf.idx(xi, yi)] == 1
     };
 
-    const STEEP_G: f32 = 0.004;    // ≥ this gradient/cell → straight (slowness 0)
-    const FLAT_G: f32 = 0.0005;    // ≤ this → free to meander (slowness 1)
+    const STEEP_G: f32 = 0.004;    // â‰¥ this gradient/cell â†’ straight (slowness 0)
+    const FLAT_G: f32 = 0.0005;    // â‰¤ this â†’ free to meander (slowness 1)
     const VALLEY_RISE: f32 = 0.0016; // ~14 m rise marks the valley wall
     // Keep the meander corridor tight: a smaller valley probe + longer, lower-
-    // amplitude bends. The old ±22-cell reach with 0.22·wavelength amplitude let
+    // amplitude bends. The old Â±22-cell reach with 0.22Â·wavelength amplitude let
     // rivers wander far enough to weave into one another (the "spaghetti" look);
     // gentle broad bends read as natural meanders without the tangle.
     let max_reach = 10i32;
-    // Meander wavelength follows the geomorphic scaling law λ ≈ 11·w (Leopold &
+    // Meander wavelength follows the geomorphic scaling law Î» â‰ˆ 11Â·w (Leopold &
     // Wolman): one full S-curve spans about eleven channel widths. `width_cells`
     // is the channel's render width, so a great trunk winds in long broad bends and
-    // a creek in short tight ones — the physically-correct relationship, computed
+    // a creek in short tight ones â€” the physically-correct relationship, computed
     // here in the BACKEND (the frontend just draws this path, no cosmetic meander).
     let base_wav = (width_cells * 11.0).clamp(7.0, 40.0);
     let _ = (discharge, threshold); // size is already encoded in channel width
@@ -700,7 +700,7 @@ fn build_meander_path(
         tx /= tl; ty /= tl;
         let (nrx, nry) = (-ty, tx); // left normal
 
-        // Slowness from local gradient over a ±win window.
+        // Slowness from local gradient over a Â±win window.
         let win = 3usize.min(k).min(n - 1 - k);
         let e_up = sample_elev(cx[k - win], cy[k - win]);
         let e_dn = sample_elev(cx[k + win], cy[k + win]);
@@ -717,7 +717,7 @@ fn build_meander_path(
         let mut off = 0.0f32;
         if slow > 0.12 {
             // Measure the flat valley half-width on each bank so the meander is
-            // clamped to the valley floor — the channel never climbs the hillside
+            // clamped to the valley floor â€” the channel never climbs the hillside
             // (this is what keeps the bends looking natural). A valley wall is
             // rising ground, the sea, or the map edge.
             let base_e = sample_elev(x, y);
@@ -727,7 +727,7 @@ fn build_meander_path(
                 while d <= max_reach as f32 {
                     let (sxp, syp) = (x + nrx * sgn * d, y + nry * sgn * d);
                     // Wall the meander at: the map edge, the sea, rising valley wall,
-                    // OR another river's channel — so bends never swing across a
+                    // OR another river's channel â€” so bends never swing across a
                     // neighbouring river (no render-path crossings).
                     if syp < 0.0 || syp >= h as f32 || !is_land(sxp, syp)
                         || sample_elev(sxp, syp) > base_e + VALLEY_RISE
@@ -738,11 +738,11 @@ fn build_meander_path(
                     d += 1.0;
                 }
             }
-            // Amplitude ≈ 0.11× wavelength (channel width already encodes river
-            // size), never more than ~0.4 of the flat half-width — kept modest so
+            // Amplitude â‰ˆ 0.11Ã— wavelength (channel width already encodes river
+            // size), never more than ~0.4 of the flat half-width â€” kept modest so
             // adjacent rivers keep their own corridors instead of weaving together.
             let amp = slow * (base_wav * 0.11).min(half * 0.4);
-            // Primary bend + weak second harmonic → asymmetric, non-sinusoidal.
+            // Primary bend + weak second harmonic â†’ asymmetric, non-sinusoidal.
             off = amp * (phase.sin() + 0.22 * (2.0 * phase + 0.7).sin());
             // Final safety clamp to the measured corridor.
             let lim = (half * 0.5).max(0.0);
@@ -752,7 +752,7 @@ fn build_meander_path(
         out[k] = (x + nrx * off, ry);
     }
 
-    // ── Post-smooth the displaced path to round any remaining sharp turns ──
+    // â”€â”€ Post-smooth the displaced path to round any remaining sharp turns â”€â”€
     // The meander displacement (and the pinned confluence vertices) can leave the
     // occasional cusp / near-right-angle corner; a couple of light windowed passes
     // (endpoints + confluence anchors held fixed so connections survive) ease those
@@ -775,11 +775,11 @@ fn build_meander_path(
     out
 }
 
-/// Build BRAIDED anabranches for a great river's widest, flattest reaches — thin
+/// Build BRAIDED anabranches for a great river's widest, flattest reaches â€” thin
 /// secondary channels that split off and rejoin the main stem around a sandbar
-/// island. Only for large rivers (order ≥ 5); each strand bows a modest, valley-
+/// island. Only for large rivers (order â‰¥ 5); each strand bows a modest, valley-
 /// clamped amount to one side over a short run, tapering in and out so it reads as
-/// a splitting channel, not a parallel line. Conservative (≤ 3 strands/river) so
+/// a splitting channel, not a parallel line. Conservative (â‰¤ 3 strands/river) so
 /// the effect enriches the great trunks without cluttering the map.
 fn build_braids(buf: &WorldBuffer, render: &[(f32, f32)], width_cells: f32, order: u8, _seed: u64) -> Vec<Vec<(f32, f32)>> {
     let n = render.len();
@@ -847,10 +847,10 @@ fn build_braids(buf: &WorldBuffer, render: &[(f32, f32)], width_cells: f32, orde
 
 /// Detect OXBOW / backwater lakes cut off from strongly meandering reaches. Scans
 /// each river's meander render path for apexes that swing far from the straight
-/// chord — which only happens on flat lowland reaches, since the meander amplitude
-/// is zero on steep ground — and lays down a small crescent of still water on the
+/// chord â€” which only happens on flat lowland reaches, since the meander amplitude
+/// is zero on steep ground â€” and lays down a small crescent of still water on the
 /// OUTER bank: an abandoned meander loop. Conservative on purpose (only sizeable
-/// rivers, strong bends, land cells not already channel/lake, ≤2 per river) so the
+/// rivers, strong bends, land cells not already channel/lake, â‰¤2 per river) so the
 /// map gains the occasional characterful backwater rather than clutter. Emitted
 /// lakes carry `kind = 1` so the limnology layer gives them still-water ecology.
 pub fn extract_oxbows(rivers: &[River], buf: &WorldBuffer, existing: &[Lake]) -> Vec<Lake> {
@@ -918,7 +918,7 @@ pub fn extract_oxbows(rivers: &[River], buf: &WorldBuffer, existing: &[Lake]) ->
                     out.push(Lake { cells, elevation: elev, kind: 1, endorheic: false, salinity_ppt: 0.2 });
                     made += 1;
                     if made >= 2 { break; }
-                    k += 2 * q; // one bend → one oxbow
+                    k += 2 * q; // one bend â†’ one oxbow
                     continue;
                 }
             }
@@ -933,7 +933,7 @@ pub fn extract_oxbows(rivers: &[River], buf: &WorldBuffer, existing: &[Lake]) ->
 /// meaningfully above its true terrain (i.e. a filled depression).
 ///
 /// `fill_depth` (0..1, in normalized-elevation units): minimum fill before a
-/// depression counts — raising it keeps only genuinely deep basins, shrinking
+/// depression counts â€” raising it keeps only genuinely deep basins, shrinking
 /// the lake count/extent. `max_cells`: connected basins larger than this are
 /// dropped (run-away flooded interiors that read as implausible inland seas).
 pub fn detect_lakes(buf: &WorldBuffer, filled: &[f32], fill_depth: f32, max_cells: usize) -> Vec<Lake> {
@@ -1037,7 +1037,7 @@ mod tests {
         }
     }
 
-    /// Item 2: every drainage step must go DOWNHILL on the filled surface — the
+    /// Item 2: every drainage step must go DOWNHILL on the filled surface â€” the
     /// flow direction follows the elevation, never routes uphill.
     #[test]
     fn flow_follows_elevation_downhill() {
@@ -1096,7 +1096,7 @@ mod tests {
         for r in &rivers {
             assert_eq!(r.render.len(), r.points.len(), "render path mirrors the cell path");
         }
-        // RULE 2 — a tributary must VISUALLY JOIN the stream it flows into: its last
+        // RULE 2 â€” a tributary must VISUALLY JOIN the stream it flows into: its last
         // render vertex (the confluence) must coincide with a render vertex of some
         // OTHER river (the trunk anchors that confluence to the same cell centre).
         // This guards the "rivers don't join together" gap.
@@ -1109,9 +1109,9 @@ mod tests {
             });
             assert!(joined, "tributary {ti} ends at {:?} but no trunk shares that point", end);
         }
-        // RULE 3 — a trunk must REACH THE SEA, never truncate on open land: its last
+        // RULE 3 â€” a trunk must REACH THE SEA, never truncate on open land: its last
         // cell is adjacent to ocean. (With a uniform channel threshold, a river can
-        // only stop at the sea, a lake shore, or a confluence — this world has no
+        // only stop at the sea, a lake shore, or a confluence â€” this world has no
         // lakes, so every trunk must be a river mouth.)
         for (ti, t) in rivers.iter().enumerate() {
             if t.tributary { continue; }
@@ -1125,8 +1125,8 @@ mod tests {
         }
     }
 
-    /// A river crossing a FLAT floodplain must actually meander — its render path
-    /// swings off the straight centreline — while its endpoints stay pinned to the
+    /// A river crossing a FLAT floodplain must actually meander â€” its render path
+    /// swings off the straight centreline â€” while its endpoints stay pinned to the
     /// true source/mouth, and the path length matches the input.
     #[test]
     fn meander_bends_on_flat_ground() {
@@ -1154,10 +1154,10 @@ mod tests {
     fn steep_reach_stays_straight() {
         let (w, h) = (80u32, 40u32);
         let n = (w * h) as usize;
-        // Steep ramp: 0.02 rise per cell in x ≫ the STEEP_G threshold.
+        // Steep ramp: 0.02 rise per cell in x â‰« the STEEP_G threshold.
         let elev: Vec<f32> = (0..n).map(|i| 0.02 + (i as u32 % w) as f32 * 0.02).collect();
         let buf = synth(w, h, vec![1u8; n], elev);
-        // Source high (large x) → mouth low (small x): a real downhill reach.
+        // Source high (large x) â†’ mouth low (small x): a real downhill reach.
         let pts: Vec<(u32, u32)> = (5..70).rev().map(|x| (x, 20)).collect();
         let render = build_meander_path(&buf, &pts, 2.5, 4000.0, 20.0, 999, &[], &[]);
         let max_dev = render.iter().map(|&(_, y)| (y - 20.0).abs()).fold(0.0f32, f32::max);
@@ -1171,14 +1171,14 @@ mod tests {
     fn meander_does_not_cross_a_neighbour() {
         let (w, h) = (80u32, 40u32);
         let n = (w * h) as usize;
-        let buf = synth(w, h, vec![1u8; n], vec![0.1f32; n]); // flat → wants to meander
+        let buf = synth(w, h, vec![1u8; n], vec![0.1f32; n]); // flat â†’ wants to meander
         // Our river along y=20; a neighbouring river's channel along y=23.
         let pts: Vec<(u32, u32)> = (5..70).map(|x| (x, 20)).collect();
         let mut channel = vec![false; n];
         for x in 5..70u32 { channel[(23 * w + x) as usize] = true; }
         let render = build_meander_path(&buf, &pts, 2.5, 4000.0, 20.0, 12345, &[], &channel);
         // The neighbour sits at y=23 (3 cells away); the bend must stay comfortably
-        // on our side of the gap — never reach the midpoint, let alone cross.
+        // on our side of the gap â€” never reach the midpoint, let alone cross.
         let max_y = render.iter().map(|&(_, y)| y).fold(0.0f32, f32::max);
         assert!(max_y < 21.5, "meander swung toward the neighbour river (max y {max_y}); would cross");
     }
@@ -1228,3 +1228,5 @@ mod tests {
         assert!(build_braids(&buf, &render, 1.0, 2, 55).is_empty(), "creeks do not braid");
     }
 }
+
+

@@ -1,12 +1,12 @@
-use super::world_buffer::WorldBuffer;
+﻿use crate::sim::world_buffer::WorldBuffer;
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Low-level jets (the Somali / Findlater jet and its cousins)
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // `compute_wind_belts` (ocean.rs) writes only a UNIT direction field. This step
-// derives the low-level wind SPEED (m/s, ~0-35) — the intensity shown on the Wind
-// Speed layer — and, crucially, resolves where the flow ACCELERATES into a jet.
+// derives the low-level wind SPEED (m/s, ~0-35) â€” the intensity shown on the Wind
+// Speed layer â€” and, crucially, resolves where the flow ACCELERATES into a jet.
 //
 // A low-level jet forms where a broad flow is CHANNELED and concentrated by
 // terrain: cross-equatorial / monsoon flow running alongside a meridional
@@ -51,8 +51,8 @@ fn gauss(x: f32, mu: f32, sigma: f32) -> f32 {
 }
 
 /// Base low-level wind speed (m/s) from the latitude wind belts: weak doldrums at
-/// the ITCZ, brisk trades ~15°, a subtropical-high calm near 30°, strong
-/// westerlies ~50°, tapering toward the pole.
+/// the ITCZ, brisk trades ~15Â°, a subtropical-high calm near 30Â°, strong
+/// westerlies ~50Â°, tapering toward the pole.
 fn base_speed(abs_lat: f32) -> f32 {
     let doldrums = 2.5;
     let trades = 6.0 * gauss(abs_lat, 15.0, 9.0);
@@ -120,7 +120,7 @@ pub fn compute_low_level_jets(buf: &mut WorldBuffer) {
         buf.wind_speed = vec![0.0; n];
     }
 
-    // ── Pass 1: base speed × terrain × channeling (barrier / gap / monsoon) ──
+    // â”€â”€ Pass 1: base speed Ã— terrain Ã— channeling (barrier / gap / monsoon) â”€â”€
     let mut speed = vec![0.0f32; n];
     for y in 0..h {
         let abs_lat = buf.abs_latitude(y);
@@ -140,8 +140,8 @@ pub fn compute_low_level_jets(buf: &mut WorldBuffer) {
                 // Perpendicular sides of the flow.
                 let left = wall_proximity(buf, x, y, -dy, dx, barrier_steps);
                 let right = wall_proximity(buf, x, y, dy, -dx, barrier_steps);
-                let gap = left.min(right); // pinched both sides → venturi
-                let barrier = left.max(right) * (1.0 - gap); // one-sided wall → barrier jet
+                let gap = left.min(right); // pinched both sides â†’ venturi
+                let barrier = left.max(right) * (1.0 - gap); // one-sided wall â†’ barrier jet
                 let mut mult = 1.0 + BARRIER_GAIN * barrier + GAP_GAIN * gap;
                 // Warm-sea monsoon inflow strengthens the tropical jet.
                 mult += MONSOON_GAIN * monsoon_inflow(buf, x, y, inflow_range);
@@ -151,7 +151,7 @@ pub fn compute_low_level_jets(buf: &mut WorldBuffer) {
         }
     }
 
-    // ── Pass 2: stream the fast jet core downstream along the flow ──
+    // â”€â”€ Pass 2: stream the fast jet core downstream along the flow â”€â”€
     // A jet is a coherent tongue: carry the accelerated core forward (max-blend
     // with the upwind speed, mildly decayed) so the Somali-jet-style core reaches
     // its downwind terminus instead of dying at the barrier's end.
@@ -180,7 +180,7 @@ pub fn compute_low_level_jets(buf: &mut WorldBuffer) {
         std::mem::swap(&mut src, &mut dst);
     }
 
-    // ── Pass 3: light isotropic smooth so the tongue reads as a coherent band ──
+    // â”€â”€ Pass 3: light isotropic smooth so the tongue reads as a coherent band â”€â”€
     let mut b = vec![0.0f32; n];
     for _ in 0..2 {
         for y in 0..h {
@@ -215,7 +215,7 @@ mod tests {
 
     /// Build a buffer with a meridional highland wall down the middle and open
     /// sea to its east, plus a uniform northward flow with a slight eastward
-    /// lean — the Somali-jet geometry — and check a fast jet forms hugging the
+    /// lean â€” the Somali-jet geometry â€” and check a fast jet forms hugging the
     /// wall and that speed accelerates then decelerates along the flow.
     #[test]
     fn barrier_spins_up_a_jet() {
@@ -239,7 +239,7 @@ mod tests {
                     buf.terrain[i] = 1;
                     buf.elevation[i] = 0.4;
                 }
-                // Northward flow (screen −y) leaning slightly east, unit length.
+                // Northward flow (screen âˆ’y) leaning slightly east, unit length.
                 let (vx, vy) = (0.25f32, -0.97f32);
                 let l = (vx * vx + vy * vy).sqrt();
                 buf.wind_vx[i] = vx / l;
@@ -258,3 +258,4 @@ mod tests {
         assert!(near > 9.0, "barrier jet core too weak: {near} m/s");
     }
 }
+

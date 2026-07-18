@@ -1,7 +1,7 @@
-//! #26 · Geographic toponyms — culture-appropriate names for the world's natural
+﻿//! #26 Â· Geographic toponyms â€” culture-appropriate names for the world's natural
 //! features (rivers, mountains, lakes) and its regions. Names are drawn from the
 //! same deterministic culture-name machinery used for settlements (`super::names`
-//! → `super::cultures`), so a river takes its name from the people whose land it
+//! â†’ `super::cultures`), so a river takes its name from the people whose land it
 //! runs through. Generation is OPTIONAL and GATED: it requires an active culture
 //! map (the Settlements step), and the caller refuses to run before then.
 //!
@@ -9,8 +9,8 @@
 //! rename any entry afterwards (the edited list is saved back).
 
 use super::names;
-use super::rivers::{Lake, River};
-use super::world_buffer::WorldBuffer;
+use crate::sim::rivers::{Lake, River};
+use crate::sim::world_buffer::WorldBuffer;
 
 /// A named geographic feature. `kind`: "river" | "mountain" | "lake" | "region".
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -22,7 +22,7 @@ pub struct Toponym {
 }
 
 /// Normalized elevation above which a local maximum is considered a named peak.
-/// (MOUNTAIN_NORM ≈ 0.339 ≈ 3000 m; a named peak sits well above the snow line.)
+/// (MOUNTAIN_NORM â‰ˆ 0.339 â‰ˆ 3000 m; a named peak sits well above the snow line.)
 const PEAK_MIN_ELEV: f32 = 0.52;
 /// Half-window (cells) for the local-maximum / prominence test.
 const PEAK_WINDOW: i32 = 6;
@@ -37,11 +37,11 @@ const MIN_LAKE_CELLS: usize = 6;
 pub fn generate(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake]) -> Vec<Toponym> {
     let (w, h) = (buf.width, buf.height);
     let mut out: Vec<Toponym> = Vec::new();
-    // Every drawn feature name must be unique across the whole world — no two
+    // Every drawn feature name must be unique across the whole world â€” no two
     // rivers/lakes/peaks share a label (the "same name in several places" bug).
     let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    // ── Regions: one per culture hearth (its homeland name) ──
+    // â”€â”€ Regions: one per culture hearth (its homeland name) â”€â”€
     if let Some(map) = super::cultures::active() {
         for hh in &map.hearths {
             if hh.people.is_empty() { continue; }
@@ -50,7 +50,7 @@ pub fn generate(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake]) -> Vec<Topo
         }
     }
 
-    // ── Rivers: name the larger ones at their midpoint, styled by local culture ──
+    // â”€â”€ Rivers: name the larger ones at their midpoint, styled by local culture â”€â”€
     // Prefer major/navigable rivers; fall back to the longest if none are flagged.
     let mut river_idx: Vec<usize> = (0..rivers.len())
         .filter(|&i| rivers[i].major || rivers[i].navigable)
@@ -70,7 +70,7 @@ pub fn generate(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake]) -> Vec<Topo
         }
     }
 
-    // ── Lakes: name the larger basins at their centroid ──
+    // â”€â”€ Lakes: name the larger basins at their centroid â”€â”€
     for (n, lake) in lakes.iter().enumerate() {
         if lake.cells.len() < MIN_LAKE_CELLS { continue; }
         let (mut sx, mut sy) = (0u64, 0u64);
@@ -81,7 +81,7 @@ pub fn generate(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake]) -> Vec<Topo
         }
     }
 
-    // ── Mountains: prominent local elevation maxima ──
+    // â”€â”€ Mountains: prominent local elevation maxima â”€â”€
     let mut peaks: Vec<(u32, u32, f32)> = Vec::new();
     let idx = |x: u32, y: u32| (y * w + x) as usize;
     let mut y = PEAK_WINDOW as u32;
@@ -157,3 +157,5 @@ fn feature_name(x: u32, y: u32, w: u32, h: u32, salt: u32) -> String {
     let (kit, ms) = names::resolve_kit(x, y, w, h);
     super::cultures::place_name(kit, ms, sx, sy)
 }
+
+

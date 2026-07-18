@@ -1,10 +1,10 @@
-use super::world_buffer::WorldBuffer;
-use super::rivers::River;
+﻿use crate::sim::world_buffer::WorldBuffer;
+use crate::sim::rivers::River;
 use super::soil::*;
 
 /// Compute fertility score for all land cells.
-/// score = 0.30×SOIL_BASE + 0.20×precipScore + 0.15×tempScore
-///       + 0.20×riverProx + 0.10×coastScore + 0.05×volcanicBonus
+/// score = 0.30Ã—SOIL_BASE + 0.20Ã—precipScore + 0.15Ã—tempScore
+///       + 0.20Ã—riverProx + 0.10Ã—coastScore + 0.05Ã—volcanicBonus
 /// Matches WF1 fertility-score.ts algorithm.
 pub fn compute_fertility(buf: &mut WorldBuffer, rivers: &[River]) {
     let w = buf.width;
@@ -62,7 +62,7 @@ pub fn compute_fertility(buf: &mut WorldBuffer, rivers: &[River]) {
 
             // Soil base score
             let soil_base = match buf.soil_type[idx] {
-                SOIL_VOLCANIC_ASH => 0.97, // young ash — the richest soil of all
+                SOIL_VOLCANIC_ASH => 0.97, // young ash â€” the richest soil of all
                 SOIL_ALLUVIAL => 0.92,
                 SOIL_ANDISOL => 0.85,
                 SOIL_MOLLISOL => 0.90,
@@ -93,7 +93,7 @@ pub fn compute_fertility(buf: &mut WorldBuffer, rivers: &[River]) {
                 (0.90 - (p - 1500.0) / 1500.0 * 0.40).max(0.50)
             };
 
-            // Temperature score (optimal 10-25°C)
+            // Temperature score (optimal 10-25Â°C)
             let t = buf.temperature[idx];
             let temp_score = if t < -10.0 {
                 0.0
@@ -135,10 +135,10 @@ pub fn compute_fertility(buf: &mut WorldBuffer, rivers: &[River]) {
 
             // Cold-climate gate. Temperature is only 15% of the weighted sum, so
             // a frozen tundra/ice cell with a coast or a river still scored a
-            // moderate fertility — the map showed "very fertile" polar regions.
+            // moderate fertility â€” the map showed "very fertile" polar regions.
             // Multiply the whole score down toward zero in genuinely cold
             // climates: nothing grows where the growing season never thaws.
-            // Köppen E (tundra/ice) is forced to ~0; the ramp keeps cool-
+            // KÃ¶ppen E (tundra/ice) is forced to ~0; the ramp keeps cool-
             // temperate land (subpolar forest, boreal margins) usable.
             let k = buf.koppen[idx];
             let temp_gate = if k == 21 || k == 22 {
@@ -146,7 +146,7 @@ pub fn compute_fertility(buf: &mut WorldBuffer, rivers: &[River]) {
             } else if t <= -8.0 {
                 0.0
             } else if t < 3.0 {
-                (t + 8.0) / 11.0                      // 0 at -8°C → 1 at 3°C
+                (t + 8.0) / 11.0                      // 0 at -8Â°C â†’ 1 at 3Â°C
             } else {
                 1.0
             };
@@ -155,7 +155,7 @@ pub fn compute_fertility(buf: &mut WorldBuffer, rivers: &[River]) {
         }
     }
 
-    // ── Delta floodplain abundance ── The land fringing a great river's DELTA is
+    // â”€â”€ Delta floodplain abundance â”€â”€ The land fringing a great river's DELTA is
     // the richest farmland on Earth (Nile, Ganges-Brahmaputra, Mekong, Po): annual
     // silt, a high water table and easy irrigation. Lift fertility on land cells
     // within a few cells of any delta fan, so deltas are both a cradle of life and
@@ -190,13 +190,13 @@ pub fn compute_fertility(buf: &mut WorldBuffer, rivers: &[River]) {
 }
 
 /// Compute fishery productivity for sea cells from four real-world drivers:
-///   1. Upwelling & cold currents — cold eastern-boundary / subpolar flow over a
+///   1. Upwelling & cold currents â€” cold eastern-boundary / subpolar flow over a
 ///      shelf is the planet's richest fishing ground (anchovy/sardine grounds).
-///   2. Shelf depth & sunlight — shallow continental shelves sit in the photic
+///   2. Shelf depth & sunlight â€” shallow continental shelves sit in the photic
 ///      zone; deep open ocean is a biological desert.
-///   3. River nutrient outflow — estuaries/plumes fertilise coastal water; the
+///   3. River nutrient outflow â€” estuaries/plumes fertilise coastal water; the
 ///      effect scales with the contributing river's size and fades out to sea.
-///   4. Latitude / temperature — cold-temperate & subpolar shelves out-produce
+///   4. Latitude / temperature â€” cold-temperate & subpolar shelves out-produce
 ///      warm tropical water (with a small warm-shallow reef bonus).
 /// The drivers are blended into a continuous 0..1 field (no more 0.2/0.7 steps).
 pub fn compute_fisheries(buf: &mut WorldBuffer, rivers: &[River]) {
@@ -204,8 +204,8 @@ pub fn compute_fisheries(buf: &mut WorldBuffer, rivers: &[River]) {
     let h = buf.height;
     let total = buf.total();
 
-    // ── River-nutrient plume: BFS out from each mouth, decaying with distance,
-    //    weighted by the river's width (a proxy for discharge/nutrient load). ──
+    // â”€â”€ River-nutrient plume: BFS out from each mouth, decaying with distance,
+    //    weighted by the river's width (a proxy for discharge/nutrient load). â”€â”€
     let mut nutrient = vec![0.0f32; total];
     let max_plume = 6u32;
     let mut dist = vec![u32::MAX; total];
@@ -264,13 +264,13 @@ pub fn compute_fisheries(buf: &mut WorldBuffer, rivers: &[River]) {
     for y in 0..h {
         let abs_lat = buf.latitude(y).abs();
         // Latitude productivity curve: peaks in the cold-temperate / subpolar
-        // band (~45–60°), tapers toward the warm tropics and the frozen poles.
+        // band (~45â€“60Â°), tapers toward the warm tropics and the frozen poles.
         let lat_prod = if abs_lat < 40.0 {
-            0.35 + 0.45 * (abs_lat / 40.0)            // 0.35 → 0.80
+            0.35 + 0.45 * (abs_lat / 40.0)            // 0.35 â†’ 0.80
         } else if abs_lat < 62.0 {
             0.80 + 0.20 * (1.0 - (abs_lat - 50.0).abs() / 12.0).max(0.0) // peak ~1.0
         } else if abs_lat < 78.0 {
-            0.80 - 0.45 * ((abs_lat - 62.0) / 16.0)   // 0.80 → 0.35
+            0.80 - 0.45 * ((abs_lat - 62.0) / 16.0)   // 0.80 â†’ 0.35
         } else {
             0.30
         };
@@ -299,7 +299,7 @@ pub fn compute_fisheries(buf: &mut WorldBuffer, rivers: &[River]) {
                 continue;
             }
 
-            // 1. Upwelling & cold currents — only meaningful over/near the shelf.
+            // 1. Upwelling & cold currents â€” only meaningful over/near the shelf.
             let mut upwell = 0.0f32;
             if buf.current_type[idx] == 2 {
                 upwell += 0.45;
@@ -324,3 +324,5 @@ pub fn compute_fisheries(buf: &mut WorldBuffer, rivers: &[River]) {
         }
     }
 }
+
+

@@ -1,6 +1,6 @@
-//! Freshwater ecology — river flow-regime + fish assemblage, and lake
+﻿//! Freshwater ecology â€” river flow-regime + fish assemblage, and lake
 //! limnological classification + descriptions. Everything here is derived from
-//! data the world sim already computes (Köppen climate, temperature, gradient,
+//! data the world sim already computes (KÃ¶ppen climate, temperature, gradient,
 //! discharge, salinity, elevation, volcanism, plate boundaries) and mapped to
 //! REAL Earth taxa and real-world analogs, matching the "use real-world river
 //! reference" design brief.
@@ -8,10 +8,10 @@
 //! Pure & deterministic: functions take plain scalars (aggregated from the
 //! WorldBuffer by the query layer) so they can be unit-tested without a world.
 
-use super::koppen;
+use crate::sim::koppen;
 
-/// Broad thermal band a freshwater body sits in, from mean annual air temp (°C).
-/// Drives which fish families are plausible (cold salmonids ↔ warm cichlids).
+/// Broad thermal band a freshwater body sits in, from mean annual air temp (Â°C).
+/// Drives which fish families are plausible (cold salmonids â†” warm cichlids).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Band {
     Tropical,
@@ -29,27 +29,27 @@ pub fn band_from_temp(t: f32) -> Band {
     else { Band::Polar }
 }
 
-/// A river's hydrological *regime* — the shape of its year, driven by the
-/// dominant Köppen class of its basin. Returns a short human phrase.
+/// A river's hydrological *regime* â€” the shape of its year, driven by the
+/// dominant KÃ¶ppen class of its basin. Returns a short human phrase.
 pub fn river_regime(dominant_koppen: u8, band: Band) -> String {
     use koppen::*;
     match dominant_koppen {
-        AF | AM => "perennial tropical — steady, high year-round flow".into(),
-        AW => "tropical flood-pulse — a strong wet-season flood, a lean dry season".into(),
+        AF | AM => "perennial tropical â€” steady, high year-round flow".into(),
+        AW => "tropical flood-pulse â€” a strong wet-season flood, a lean dry season".into(),
         BWH | BWK | BSH | BSK =>
-            "arid — ephemeral flow between storms, or an 'exotic' river fed from wetter uplands".into(),
+            "arid â€” ephemeral flow between storms, or an 'exotic' river fed from wetter uplands".into(),
         CSA | CSB =>
-            "Mediterranean — winter floods and a parched summer low".into(),
+            "Mediterranean â€” winter floods and a parched summer low".into(),
         CWA | CWB =>
-            "subtropical monsoonal — summer-rain fed, high in the wet monsoon".into(),
+            "subtropical monsoonal â€” summer-rain fed, high in the wet monsoon".into(),
         CFA | CFB | CFC =>
-            "perennial temperate — rain-fed and reliable all year".into(),
+            "perennial temperate â€” rain-fed and reliable all year".into(),
         DFA | DFB | DWA | DWB =>
-            "continental — a strong spring snowmelt freshet, ice cover in winter".into(),
+            "continental â€” a strong spring snowmelt freshet, ice cover in winter".into(),
         DFC | DFD | DWC | DWD =>
-            "nival subarctic — snowmelt-dominated, frozen much of the year".into(),
+            "nival subarctic â€” snowmelt-dominated, frozen much of the year".into(),
         ET | EF =>
-            "nival polar — a brief summer melt, ice-bound the rest of the year".into(),
+            "nival polar â€” a brief summer melt, ice-bound the rest of the year".into(),
         _ => match band {
             Band::Tropical => "perennial tropical flow".into(),
             Band::WarmTemperate => "warm-temperate, largely perennial".into(),
@@ -60,9 +60,9 @@ pub fn river_regime(dominant_koppen: u8, band: Band) -> String {
     }
 }
 
-/// A river's fish assemblage as a prose sentence, built from thermal band ×
-/// channel gradient (rheophilic headwater vs limnophilic lowland) × size
-/// (discharge → megafish) × mouth type (diadromous runs from an estuary).
+/// A river's fish assemblage as a prose sentence, built from thermal band Ã—
+/// channel gradient (rheophilic headwater vs limnophilic lowland) Ã— size
+/// (discharge â†’ megafish) Ã— mouth type (diadromous runs from an estuary).
 /// `gradient_m_per_km` and `discharge_m3s` come straight from the dashboard math;
 /// `estuary` is true for a tidal/drowned mouth (mouth_kind == 2) or a big delta.
 pub fn river_fish(band: Band, gradient_m_per_km: f32, discharge_m3s: f32, estuary: bool) -> String {
@@ -118,7 +118,7 @@ pub fn river_fish(band: Band, gradient_m_per_km: f32, discharge_m3s: f32, estuar
     format!("{core}{mega}{run}")
 }
 
-/// Water character — clarity / sediment / productivity, the way a limnologist
+/// Water character â€” clarity / sediment / productivity, the way a limnologist
 /// would tag the water itself. Tropical rivers split into the classic
 /// whitewater / blackwater / clearwater triad (Amazon terminology).
 pub fn river_water(band: Band, steep: bool, arid: bool) -> String {
@@ -127,9 +127,9 @@ pub fn river_water(band: Band, steep: bool, arid: bool) -> String {
     }
     match band {
         Band::Tropical => if steep {
-            "clearwater — cool, transparent and low in nutrients off the shield rock".into()
+            "clearwater â€” cool, transparent and low in nutrients off the shield rock".into()
         } else {
-            "whitewater — silt-laden and café-au-lait, fertile with Andean-style sediment".into()
+            "whitewater â€” silt-laden and cafÃ©-au-lait, fertile with Andean-style sediment".into()
         },
         Band::WarmTemperate => "warm and moderately productive, clouding after rain".into(),
         Band::CoolTemperate => "cool, clear and well-oxygenated".into(),
@@ -138,7 +138,7 @@ pub fn river_water(band: Band, steep: bool, arid: bool) -> String {
     }
 }
 
-/// Riverine wildlife beyond fish — the charismatic fauna a naturalist would list.
+/// Riverine wildlife beyond fish â€” the charismatic fauna a naturalist would list.
 pub fn river_wildlife(band: Band, great: bool) -> String {
     match band {
         Band::Tropical => if great {
@@ -167,9 +167,9 @@ pub fn river_riparian(band: Band, arid: bool) -> String {
     }
 }
 
-// ───────────────────── National-Geographic river narrative ───────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ National-Geographic river narrative â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-/// Deterministic splitmix64 — a tiny PRNG so every river's write-up is UNIQUE yet
+/// Deterministic splitmix64 â€” a tiny PRNG so every river's write-up is UNIQUE yet
 /// reproducible (seeded from the river's own id/position). Two hydrologically
 /// identical rivers still read differently because their seeds differ.
 struct Rng(u64);
@@ -188,7 +188,7 @@ impl Rng {
     fn chance(&mut self, p: u64) -> bool { self.next() % 100 < p }
 }
 
-/// Everything the narrative weaves together — the river's own numbers plus the
+/// Everything the narrative weaves together â€” the river's own numbers plus the
 /// ecology phrases already computed. Borrowed so no allocation is forced.
 pub struct RiverStoryFacts<'a> {
     pub name: &'a str,
@@ -244,12 +244,12 @@ pub fn river_story(f: &RiverStoryFacts) -> String {
     let mut r = Rng(f.seed ^ 0x5149_5645_5200_0001);
     let mut s = String::new();
 
-    // ── 1 · Opening: name, scale, source, course, mouth ──
+    // â”€â”€ 1 Â· Opening: name, scale, source, course, mouth â”€â”€
     let opener = r.pick(&[
         "The {N} is {S}, rising {SRC} and running some {L} km before {M}.",
         "Rising {SRC}, the {N} gathers itself into {S}, threading {L} km down to the coast before {M}.",
         "{S_cap}, the {N} runs roughly {L} km from its birth {SRC} to where it ends {M}.",
-        "Born {SRC}, the {N} — {S} — winds {L} km across the land, at last {M}.",
+        "Born {SRC}, the {N} â€” {S} â€” winds {L} km across the land, at last {M}.",
     ]);
     let mut para = opener
         .replace("{N}", f.name)
@@ -260,7 +260,7 @@ pub fn river_story(f: &RiverStoryFacts) -> String {
         .replace("{M}", mouth_phrase(f.mouth_kind));
     s.push_str(&para);
 
-    // ── 2 · Regime + water character ──
+    // â”€â”€ 2 Â· Regime + water character â”€â”€
     para = r.pick(&[
         " Its waters are {REGIME}; {WATER}.",
         " Fed by a flow that is {REGIME}, it runs {WATER}.",
@@ -268,7 +268,7 @@ pub fn river_story(f: &RiverStoryFacts) -> String {
     ]).replace("{REGIME}", f.regime).replace("{WATER}", f.water);
     s.push_str(&para);
 
-    // ── 3 · Banks + wildlife ──
+    // â”€â”€ 3 Â· Banks + wildlife â”€â”€
     para = r.pick(&[
         " Along its banks grow {RIP}, alive with {WILD}.",
         " {RIP_cap} crowd the shore, where one finds {WILD}.",
@@ -277,7 +277,7 @@ pub fn river_story(f: &RiverStoryFacts) -> String {
       .replace("{RIP}", f.riparian).replace("{WILD}", f.wildlife);
     s.push_str(&para);
 
-    // ── 4 · Fish (the ichthyology) ──
+    // â”€â”€ 4 Â· Fish (the ichthyology) â”€â”€
     para = r.pick(&[
         " In its depths swim {FISH}.",
         " The river's fish are {FISH}.",
@@ -285,7 +285,7 @@ pub fn river_story(f: &RiverStoryFacts) -> String {
     ]).replace("{FISH}", f.fish);
     s.push_str(&para);
 
-    // ── 5 · System scale (tributaries) — only if it's a real network ──
+    // â”€â”€ 5 Â· System scale (tributaries) â€” only if it's a real network â”€â”€
     if f.trib_total >= 2 {
         para = r.pick(&[
             " Gathering {T} named tributaries, it drains a wide basin.",
@@ -295,11 +295,11 @@ pub fn river_story(f: &RiverStoryFacts) -> String {
         s.push_str(&para);
     }
 
-    // ── 6 · Human use + real-world comparison ──
+    // â”€â”€ 6 Â· Human use + real-world comparison â”€â”€
     let human = if f.navigable {
         r.pick(&[
             " Barges work its navigable length, and {C} cities stand on its banks.",
-            " It is navigable far inland — a highway of trade linking {C} riverside cities.",
+            " It is navigable far inland â€” a highway of trade linking {C} riverside cities.",
         ])
     } else {
         r.pick(&[
@@ -329,9 +329,9 @@ fn cap_first(s: &str) -> String {
     }
 }
 
-// ───────────────── Segmented river journey (upper / middle / delta) ───────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Segmented river journey (upper / middle / delta) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-/// Plain-language BIOME for a Köppen code — for the river's climate journey and
+/// Plain-language BIOME for a KÃ¶ppen code â€” for the river's climate journey and
 /// per-zone stories (readable, with the raw code available via `koppen_code`).
 pub fn koppen_to_biome(k: u8) -> &'static str {
     use koppen::*;
@@ -355,20 +355,20 @@ pub fn koppen_to_biome(k: u8) -> &'static str {
     }
 }
 
-/// The raw Köppen code string (shown in a tooltip alongside the biome name).
+/// The raw KÃ¶ppen code string (shown in a tooltip alongside the biome name).
 pub fn koppen_code(k: u8) -> &'static str {
     use koppen::*;
     match k {
         AF => "Af", AM => "Am", AW => "Aw", BWH => "BWh", BWK => "BWk", BSH => "BSh", BSK => "BSk",
         CSA => "Csa", CSB => "Csb", CWA => "Cwa", CWB => "Cwb", CFA => "Cfa", CFB => "Cfb", CFC => "Cfc",
         DFA => "Dfa", DFB => "Dfb", DFC => "Dfc", DFD => "Dfd", DWA => "Dwa", DWB => "Dwb", DWC => "Dwc", DWD => "Dwd",
-        ET => "ET", EF => "EF", _ => "—",
+        ET => "ET", EF => "EF", _ => "â€”",
     }
 }
 
 /// Facts for one reach (upper / middle / lower-delta) of a river's course.
 pub struct ZoneFacts<'a> {
-    pub kind: u8,                 // 0 upper · 1 middle · 2 lower/delta
+    pub kind: u8,                 // 0 upper Â· 1 middle Â· 2 lower/delta
     pub name: &'a str,
     pub biome: &'a str,          // dominant biome of this reach
     pub fish: &'a str,           // reach-appropriate fish prose
@@ -378,7 +378,7 @@ pub struct ZoneFacts<'a> {
     pub seed: u64,
 }
 
-/// A UNIQUE, seeded 2-3 sentence account of ONE reach of a river — its character,
+/// A UNIQUE, seeded 2-3 sentence account of ONE reach of a river â€” its character,
 /// the biome it crosses, its fish, and any tributaries that join along it.
 pub fn zone_story(f: &ZoneFacts) -> String {
     let mut r = Rng(f.seed ^ 0x20E5_0000_0000_0001);
@@ -396,7 +396,7 @@ pub fn zone_story(f: &ZoneFacts) -> String {
         ]),
         _ => match f.mouth_kind {
             1 => r.pick(&[
-                "Near the sea the {N} fans into a broad delta amid {B} — a teeming maze of reed, channel and tidal flat.",
+                "Near the sea the {N} fans into a broad delta amid {B} â€” a teeming maze of reed, channel and tidal flat.",
                 "At its mouth the {N} splits into a marshy delta over {B}, alive with fish, fowl and rustling reed-beds.",
             ]),
             2 => r.pick(&[
@@ -437,14 +437,14 @@ pub struct RiverSummaryFacts<'a> {
     pub seed: u64,
 }
 
-/// The SUMMARY lede — a short synthesis of the whole course (scale, birth, the
+/// The SUMMARY lede â€” a short synthesis of the whole course (scale, birth, the
 /// climate journey, mouth), the replacement for the old single story blob.
 pub fn river_summary(f: &RiverSummaryFacts) -> String {
     let mut r = Rng(f.seed ^ 0x5010_0000_0000_0001);
     let mut s = String::new();
     let opener = r.pick(&[
         "The {N} is {S}, rising {SRC} and running some {L} km {M}.",
-        "Rising {SRC}, the {N} — {S} — threads {L} km {M}.",
+        "Rising {SRC}, the {N} â€” {S} â€” threads {L} km {M}.",
         "{S_cap}, the {N} runs about {L} km from its birth {SRC} to where it ends {M}.",
     ]);
     s.push_str(&opener
@@ -495,7 +495,7 @@ fn join_and(items: &[String]) -> String {
     }
 }
 
-// ─────────────────────────────── Lakes ───────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Lakes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Limnological lake type. Ordered by how distinctive the signal is; the
 /// classifier tests them roughly in this priority.
@@ -545,12 +545,12 @@ pub struct LakeFacts {
     pub volcanic: bool,       // volcanic cell in/around the basin
     pub on_boundary: bool,    // sits on a plate boundary (rift/graben)
     pub endorheic: bool,      // no outflow river
-    pub arid: bool,           // basin lies in a BW/BS Köppen zone
+    pub arid: bool,           // basin lies in a BW/BS KÃ¶ppen zone
     pub elongated: bool,      // long/narrow footprint (graben-like)
 }
 
 /// Classify a lake into a real limnological type from its facts (priority order:
-/// caldera → rift → terminal salt → glacial → great-tropical → lowland → tarn).
+/// caldera â†’ rift â†’ terminal salt â†’ glacial â†’ great-tropical â†’ lowland â†’ tarn).
 pub fn classify_lake(f: &LakeFacts) -> LakeKind {
     if f.volcanic && f.max_depth_m >= 40.0 && f.area_km2 <= 400.0 {
         return LakeKind::Crater;
@@ -579,12 +579,12 @@ pub fn lake_thermal(kind: LakeKind, band: Band, max_depth_m: f32) -> String {
         LakeKind::SaltEndorheic => "warm, well-mixed and evaporation-driven".into(),
         LakeKind::TropicalGreat => "warm, wind-mixed, only briefly stratifying".into(),
         _ => match band {
-            Band::Tropical => "warm-monomictic — never cools enough to fully turn over".into(),
+            Band::Tropical => "warm-monomictic â€” never cools enough to fully turn over".into(),
             Band::WarmTemperate | Band::CoolTemperate =>
-                if max_depth_m >= 40.0 { "dimictic — turns over each spring and autumn".into() }
-                else { "warm-polymictic — mixed by the wind through the season".into() },
+                if max_depth_m >= 40.0 { "dimictic â€” turns over each spring and autumn".into() }
+                else { "warm-polymictic â€” mixed by the wind through the season".into() },
             Band::Boreal | Band::Polar =>
-                if max_depth_m >= 60.0 { "cold-monomictic — mixes once a year under a summer sun".into() }
+                if max_depth_m >= 60.0 { "cold-monomictic â€” mixes once a year under a summer sun".into() }
                 else { "ice-covered much of the year, mixing briefly after thaw".into() },
         },
     }
@@ -609,7 +609,7 @@ pub fn lake_fish(kind: LakeKind, band: Band) -> String {
     match kind {
         LakeKind::SaltEndorheic => match band {
             Band::Tropical | Band::WarmTemperate =>
-                "brine shrimp and salt-tolerant tilapia and cyprinodonts — or lifeless where it turns hypersaline".into(),
+                "brine shrimp and salt-tolerant tilapia and cyprinodonts â€” or lifeless where it turns hypersaline".into(),
             _ => "a few salt-tolerant whitefish and sticklebacks, or barren brine".into(),
         },
         LakeKind::Rift => match band {
@@ -619,7 +619,7 @@ pub fn lake_fish(kind: LakeKind, band: Band) -> String {
                 "relict deep-water sculpins and endemic whitefish, and in the coldest a lone freshwater seal".into(),
         },
         LakeKind::Crater =>
-            "sparse and isolated — a handful of hardy, often endemic fish, if any at all".into(),
+            "sparse and isolated â€” a handful of hardy, often endemic fish, if any at all".into(),
         LakeKind::TropicalGreat =>
             "a cichlid flock, tilapia and lungfish crowd the productive shallows".into(),
         LakeKind::Glacial => "lake trout, whitefish, char, pike and perch".into(),
@@ -661,23 +661,23 @@ pub fn lake_wildlife(kind: LakeKind, band: Band) -> String {
     }
 }
 
-/// Endemism note — how much of the fauna is unique to this water.
+/// Endemism note â€” how much of the fauna is unique to this water.
 pub fn lake_endemism(kind: LakeKind, band: Band) -> String {
     match kind {
         LakeKind::Rift => if band == Band::Tropical {
-            "extreme — hundreds of cichlid species evolved here and nowhere else".into()
+            "extreme â€” hundreds of cichlid species evolved here and nowhere else".into()
         } else {
-            "high — ancient isolation has bred relict species found only in these depths".into()
+            "high â€” ancient isolation has bred relict species found only in these depths".into()
         },
-        LakeKind::TropicalGreat => "high — a young but explosive cichlid radiation".into(),
-        LakeKind::Crater => "moderate — isolation breeds the occasional unique form".into(),
-        LakeKind::SaltEndorheic => "low — only a few hardy specialists tolerate the brine".into(),
-        _ => "low — a familiar, widespread fauna".into(),
+        LakeKind::TropicalGreat => "high â€” a young but explosive cichlid radiation".into(),
+        LakeKind::Crater => "moderate â€” isolation breeds the occasional unique form".into(),
+        LakeKind::SaltEndorheic => "low â€” only a few hardy specialists tolerate the brine".into(),
+        _ => "low â€” a familiar, widespread fauna".into(),
     }
 }
 
-/// Rough salinity (parts per thousand) — near-fresh for most, high for terminal
-/// salt lakes (shallower & more arid → more concentrated). Seawater ≈ 35 ppt.
+/// Rough salinity (parts per thousand) â€” near-fresh for most, high for terminal
+/// salt lakes (shallower & more arid â†’ more concentrated). Seawater â‰ˆ 35 ppt.
 pub fn lake_salinity_ppt(kind: LakeKind, max_depth_m: f32) -> f32 {
     match kind {
         LakeKind::SaltEndorheic => {
@@ -693,19 +693,19 @@ pub fn lake_blurb(kind: LakeKind, band: Band) -> String {
     let analog = lake_analog(kind, band);
     match kind {
         LakeKind::Crater =>
-            format!("A drowned volcanic caldera in the mould of {analog} — round, deep and startlingly clear."),
+            format!("A drowned volcanic caldera in the mould of {analog} â€” round, deep and startlingly clear."),
         LakeKind::Rift =>
-            format!("An ancient rift lake like {analog} — long, immensely deep, and a cradle of life found nowhere else."),
+            format!("An ancient rift lake like {analog} â€” long, immensely deep, and a cradle of life found nowhere else."),
         LakeKind::SaltEndorheic =>
-            format!("A terminal salt lake in the character of {analog} — rivers run in and none run out; only the sun lets it go."),
+            format!("A terminal salt lake in the character of {analog} â€” rivers run in and none run out; only the sun lets it go."),
         LakeKind::Glacial =>
             format!("A cold, clear lake carved by ice, in the family of {analog}."),
         LakeKind::TropicalGreat =>
-            format!("A vast, shallow tropical lake like {analog} — warm, teeming and wind-stirred."),
+            format!("A vast, shallow tropical lake like {analog} â€” warm, teeming and wind-stirred."),
         LakeKind::Lowland =>
-            format!("A broad, shallow lowland lake in the character of {analog} — green and warm in summer, reed-fringed all round."),
+            format!("A broad, shallow lowland lake in the character of {analog} â€” green and warm in summer, reed-fringed all round."),
         LakeKind::Tarn =>
-            format!("A small, cold upland tarn — clear, quiet and sparsely peopled by fish."),
+            format!("A small, cold upland tarn â€” clear, quiet and sparsely peopled by fish."),
     }
 }
 
@@ -728,7 +728,7 @@ pub struct LakeStoryFacts<'a> {
     pub seed: u64,
 }
 
-/// A UNIQUE, seeded National-Geographic-style account of a lake — no two of the
+/// A UNIQUE, seeded National-Geographic-style account of a lake â€” no two of the
 /// same type read alike.
 pub fn lake_story(f: &LakeStoryFacts) -> String {
     let mut r = Rng(f.seed ^ 0x1A4E_0000_0000_0001u64);
@@ -746,7 +746,7 @@ pub fn lake_story(f: &LakeStoryFacts) -> String {
     s.push_str(&r.pick(&[
         "The {N} is {SZ}, {DP}.",
         "{SZ_cap}, {DP}, the {N} lies cupped in the land.",
-        "The {N} — {SZ} — is {DP}.",
+        "The {N} â€” {SZ} â€” is {DP}.",
     ]).replace("{N}", f.name)
       .replace("{SZ_cap}", cap_first(size).as_str())
       .replace("{SZ}", size).replace("{DP}", depthw));
@@ -774,7 +774,7 @@ pub fn lake_story(f: &LakeStoryFacts) -> String {
     // Hydrology: inflow/outflow.
     if f.endorheic {
         s.push_str(&r.pick(&[
-            " Rivers run in but none run out — the sun alone empties it, and salt gathers year on year.",
+            " Rivers run in but none run out â€” the sun alone empties it, and salt gathers year on year.",
             " It is a terminal basin: fed from {IN} directions, drained by none, slowly turning to brine.",
         ]).replace("{IN}", &f.inflow_count.max(1).to_string()));
     } else if !f.outflow.is_empty() {
@@ -795,12 +795,12 @@ pub fn lake_story(f: &LakeStoryFacts) -> String {
     s
 }
 
-// ───────────────────── Signature fish species (river zonation) ───────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Signature fish species (river zonation) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // A curated catalogue of named freshwater fish, one roster per river ZONE
 // (0 = upper/headwater, 1 = middle river, 2 = lower/delta), each suited to a set
 // of thermal bands. A river reach is assigned one signature species per zone it
 // spans (see `assign_river_fish`), giving a biologically-correct longitudinal
-// succession (trout up top → barbel in the middle → sturgeon & shad at the mouth).
+// succession (trout up top â†’ barbel in the middle â†’ sturgeon & shad at the mouth).
 // `slug` is the stable key the frontend uses to look up an illustration
 // (`public/fish/<slug>.png`), falling back to a drawn silhouette if absent.
 #[derive(Clone, Copy)]
@@ -816,42 +816,42 @@ pub struct FishSpec {
 
 use Band::*;
 pub const SIGNATURE_FISH: &[FishSpec] = &[
-    // ── Zone 0 · upper / headwater ──
+    // â”€â”€ Zone 0 Â· upper / headwater â”€â”€
     FishSpec{slug:"silverfin-trout",name:"Silverfin Trout",binomial:"Salmo argentiventris",zone:0,real:"brown trout",blurb:"the classic cold-water game fish of clean gravelly streams.",bands:&[CoolTemperate,Boreal]},
     FishSpec{slug:"frostscale-grayling",name:"Frostscale Grayling",binomial:"Thymallus gelidus",zone:0,real:"grayling",blurb:"the sail-finned 'lady of the stream', an insect-hunter of clean water.",bands:&[CoolTemperate,Boreal]},
     FishSpec{slug:"stonecling-bullhead",name:"Stonecling Bullhead",binomial:"Cottus rupicola",zone:0,real:"bullhead sculpin",blurb:"a pebble-coloured bottom-lurker of stony riffles.",bands:&[CoolTemperate,Boreal,WarmTemperate]},
     FishSpec{slug:"torrent-loach",name:"Torrent Loach",binomial:"Nemacheilus torrentis",zone:0,real:"stone loach",blurb:"a barbelled bottom-forager of clean gravel.",bands:&[CoolTemperate,WarmTemperate]},
     FishSpec{slug:"ribbon-dace",name:"Ribbon Dace",binomial:"Leuciscus vittatus",zone:0,real:"dace",blurb:"a quick silver shoaling fish of running water.",bands:&[CoolTemperate,WarmTemperate]},
     FishSpec{slug:"redflank-char",name:"Redflank Char",binomial:"Salvelinus rubrimarga",zone:0,real:"Arctic char",blurb:"a jewel-bellied cold-water salmonid of the highest reaches.",bands:&[Boreal,CoolTemperate]},
-    // ── Zone 1 · middle river ──
+    // â”€â”€ Zone 1 Â· middle river â”€â”€
     FishSpec{slug:"goldvein-barbel",name:"Goldvein Barbel",binomial:"Barbus auritenuis",zone:1,real:"barbel",blurb:"a barbelled bottom-feeder of warm gravel runs.",bands:&[WarmTemperate,CoolTemperate]},
     FishSpec{slug:"bronze-chub",name:"Bronze Chub",binomial:"Squalius aeneus",zone:1,real:"chub",blurb:"a bold, broad-headed opportunist of the middle river.",bands:&[WarmTemperate,CoolTemperate]},
     FishSpec{slug:"sailback-asp",name:"Sailback Asp",binomial:"Aspius rapax",zone:1,real:"asp",blurb:"a hard-hunting open-water predator of the mid-river.",bands:&[WarmTemperate,CoolTemperate]},
     FishSpec{slug:"whiskered-wels",name:"Whiskered Wels",binomial:"Silurus paludis",zone:1,real:"wels catfish",blurb:"a giant nocturnal catfish of deep slow pools.",bands:&[WarmTemperate]},
     FishSpec{slug:"marbled-perch",name:"Marbled Perch",binomial:"Perca marmorata",zone:1,real:"perch",blurb:"a barred, spiny-finned ambush predator.",bands:&[WarmTemperate,CoolTemperate,Boreal]},
     FishSpec{slug:"gravel-nase",name:"Gravel Nase",binomial:"Chondrostoma lithos",zone:1,real:"nase",blurb:"an algae-scraping shoaler with a black underslung mouth.",bands:&[WarmTemperate,CoolTemperate]},
-    // ── Zone 2 · lower / delta / estuary ──
+    // â”€â”€ Zone 2 Â· lower / delta / estuary â”€â”€
     FishSpec{slug:"broadscale-bream",name:"Broadscale Bream",binomial:"Abramis latus",zone:2,real:"bream",blurb:"a deep, slab-sided bottom-forager of slow water.",bands:&[WarmTemperate,CoolTemperate]},
     FishSpec{slug:"marsh-carp",name:"Marsh Carp",binomial:"Cyprinus paludis",zone:2,real:"carp",blurb:"a hardy, barbelled omnivore of warm still reaches.",bands:&[WarmTemperate]},
     FishSpec{slug:"reedwater-zander",name:"Reedwater Zander",binomial:"Sander stagni",zone:2,real:"zander",blurb:"a glassy-eyed, fanged predator of turbid lower rivers.",bands:&[WarmTemperate,CoolTemperate]},
     FishSpec{slug:"silt-sturgeon",name:"Silt Sturgeon",binomial:"Acipenser magnus",zone:2,real:"sturgeon",blurb:"an armoured, ancient bottom-feeder that runs up from the sea.",bands:&[WarmTemperate,CoolTemperate,Boreal]},
     FishSpec{slug:"silverback-eel",name:"Silverback Eel",binomial:"Anguilla vitrea",zone:2,real:"eel",blurb:"a snake-bodied migrant that breeds far out in the ocean.",bands:&[WarmTemperate,CoolTemperate]},
     FishSpec{slug:"tidewater-shad",name:"Tidewater Shad",binomial:"Alosa aestuaria",zone:2,real:"shad",blurb:"a silver herring that runs up from the sea to spawn.",bands:&[WarmTemperate,CoolTemperate,Boreal]},
-    // ── Tropical roster (Af/Am/Aw) ──
+    // â”€â”€ Tropical roster (Af/Am/Aw) â”€â”€
     FishSpec{slug:"emberscale-tetra",name:"Emberscale Tetra",binomial:"Hyphessobrycon cataractae",zone:0,real:"tetra",blurb:"a jewel-bright shoaling characin of clear tropical headwaters.",bands:&[Tropical]},
     FishSpec{slug:"golden-pacu",name:"Golden Pacu",binomial:"Piaractus auratus",zone:1,real:"pacu",blurb:"a deep-bodied, seed-crushing herbivore of the tropical main river.",bands:&[Tropical]},
     FishSpec{slug:"sabertooth-payara",name:"Sabertooth Payara",binomial:"Hydrolycus dentex",zone:1,real:"payara",blurb:"a fanged silver predator of fast tropical rivers.",bands:&[Tropical]},
     FishSpec{slug:"king-arapaima",name:"King Arapaima",binomial:"Arapaima regalis",zone:2,real:"arapaima",blurb:"a giant air-breathing behemoth of tropical floodplains.",bands:&[Tropical]},
     FishSpec{slug:"emperor-cichlid",name:"Emperor Cichlid",binomial:"Cichla imperator",zone:2,real:"peacock bass",blurb:"a barred, eye-spotted cichlid of warm lowland rivers.",bands:&[Tropical,WarmTemperate]},
     FishSpec{slug:"whiskered-redtail",name:"Whiskered Redtail",binomial:"Phractocephalus igneus",zone:2,real:"redtail catfish",blurb:"a huge red-tailed catfish of the tropical lower river.",bands:&[Tropical]},
-    // ── Boreal / subarctic roster (Dfc/Dwc/ET) ──
+    // â”€â”€ Boreal / subarctic roster (Dfc/Dwc/ET) â”€â”€
     FishSpec{slug:"silverpike-taimen",name:"Silverpike Taimen",binomial:"Hucho borealis",zone:0,real:"taimen",blurb:"a giant cold-river salmonid, the 'river tiger' of the north.",bands:&[Boreal,CoolTemperate]},
     FishSpec{slug:"broad-whitefish",name:"Broad Whitefish",binomial:"Coregonus latus",zone:0,real:"whitefish",blurb:"a silvery cold-water shoaler of northern rivers and lakes.",bands:&[Boreal,Polar,CoolTemperate]},
     FishSpec{slug:"arctic-grayling",name:"Arctic Grayling",binomial:"Thymallus arcticus",zone:0,real:"Arctic grayling",blurb:"a sail-finned grayling of clear subarctic streams.",bands:&[Boreal,Polar]},
     FishSpec{slug:"boreal-burbot",name:"Boreal Burbot",binomial:"Lota borealis",zone:1,real:"burbot",blurb:"an eel-shaped freshwater cod of cold, deep water.",bands:&[Boreal,CoolTemperate]},
     FishSpec{slug:"northern-pike",name:"Northern Pike",binomial:"Esox borealis",zone:1,real:"pike",blurb:"a long-jawed ambush predator of northern rivers.",bands:&[Boreal,CoolTemperate]},
     FishSpec{slug:"blackfin-char",name:"Blackfin Char",binomial:"Salvelinus ater",zone:2,real:"char",blurb:"a dark, pale-spotted char of the coldest reaches.",bands:&[Boreal,Polar]},
-    // ── Continental / lowland variety (Dfa/Dfb → cool-temperate & boreal) ──
+    // â”€â”€ Continental / lowland variety (Dfa/Dfb â†’ cool-temperate & boreal) â”€â”€
     // A deep bench so neighbouring continental rivers roll DIFFERENT rosters.
     FishSpec{slug:"marble-trout",name:"Dappled Marble Trout",binomial:"Salmo marmoratus",zone:0,real:"marble trout",blurb:"a marble-patterned trout of cold, clear headwaters.",bands:&[CoolTemperate,WarmTemperate]},
     FishSpec{slug:"rustscale-roach",name:"Rustscale Roach",binomial:"Rutilus ferrugineus",zone:1,real:"roach",blurb:"a red-finned silver shoaler, the commonest fish of the middle river.",bands:&[CoolTemperate,WarmTemperate,Boreal]},
@@ -863,20 +863,20 @@ pub const SIGNATURE_FISH: &[FishSpec] = &[
     FishSpec{slug:"redwing-rudd",name:"Redwing Rudd",binomial:"Scardinius rubellus",zone:2,real:"rudd",blurb:"a golden, red-finned fish of warm weedy backwaters.",bands:&[CoolTemperate,WarmTemperate,Boreal]},
     FishSpec{slug:"thornback-ruffe",name:"Thornback Ruffe",binomial:"Gymnocephalus spinosus",zone:2,real:"ruffe",blurb:"a small, spiny bottom-percid of turbid lower rivers.",bands:&[CoolTemperate,Boreal]},
     FishSpec{slug:"mussel-bitterling",name:"Mussel Bitterling",binomial:"Rhodeus amarus",zone:2,real:"bitterling",blurb:"a thumb-sized fish that lays its eggs inside living freshwater mussels.",bands:&[WarmTemperate,CoolTemperate]},
-    // ── Migratory / megafish (RESERVED — only added to great trunks / estuaries) ──
+    // â”€â”€ Migratory / megafish (RESERVED â€” only added to great trunks / estuaries) â”€â”€
     FishSpec{slug:"greatmaw-catfish",name:"Greatmaw Catfish",binomial:"Silurus giganteus",zone:2,real:"giant catfish",blurb:"a vast, whiskered predator that patrols the deep main channel.",bands:&[WarmTemperate,CoolTemperate,Boreal]},
     FishSpec{slug:"silverleap-salmon",name:"Silverleap Salmon",binomial:"Salmo saliens",zone:2,real:"salmon",blurb:"a silver anadromous salmonid that leaps upriver from the sea to spawn.",bands:&[CoolTemperate,Boreal,Polar]},
     FishSpec{slug:"delta-mullet",name:"Delta Mullet",binomial:"Mugil deltae",zone:2,real:"grey mullet",blurb:"a silver, salt-tolerant grazer that pushes up from the brackish delta.",bands:&[Tropical,WarmTemperate]},
     FishSpec{slug:"brackish-snook",name:"Brackish Snook",binomial:"Centropomus aestuarii",zone:2,real:"snook",blurb:"a line-flanked estuary ambusher running between salt and fresh.",bands:&[Tropical,WarmTemperate]},
-    // ── Tropical variety (Af/Am/Aw middle & delta) ──
+    // â”€â”€ Tropical variety (Af/Am/Aw middle & delta) â”€â”€
     FishSpec{slug:"cataract-loach",name:"Cataract Hillstream Loach",binomial:"Sewellia cataractae",zone:0,real:"hillstream loach",blurb:"a sucker-bellied loach clinging to rocks in swift tropical headwaters.",bands:&[Tropical]},
     FishSpec{slug:"silver-bocachico",name:"Silver Bocachico",binomial:"Prochilodus argenteus",zone:1,real:"bocachico",blurb:"a detritus-grazing shoaler that migrates in vast silver runs.",bands:&[Tropical]},
     FishSpec{slug:"redhook-myleus",name:"Redhook Silver Dollar",binomial:"Myloplus rubripinnis",zone:1,real:"silver dollar",blurb:"a disc-bodied, red-finned relative of the pacu of tropical rivers.",bands:&[Tropical]},
     FishSpec{slug:"painted-eartheater",name:"Painted Eartheater",binomial:"Geophagus pictus",zone:2,real:"eartheater cichlid",blurb:"a sand-sifting cichlid of warm lowland channels and delta pools.",bands:&[Tropical,WarmTemperate]},
 ];
 
-/// Arid-river / oasis roster (BW/BS Köppen). Kept separate so it is only drawn
-/// for reaches flagged arid — a desert river shows barbs and pupfish, not trout.
+/// Arid-river / oasis roster (BW/BS KÃ¶ppen). Kept separate so it is only drawn
+/// for reaches flagged arid â€” a desert river shows barbs and pupfish, not trout.
 /// Bands span hot to cold deserts.
 pub const ARID_FISH: &[FishSpec] = &[
     FishSpec{slug:"wadi-killifish",name:"Wadi Killifish",binomial:"Nothobranchius wadi",zone:0,real:"annual killifish",blurb:"a jewel-coloured killifish that races the drying season.",bands:&[Tropical,WarmTemperate]},
@@ -921,21 +921,21 @@ pub fn assign_river_fish(band: Band, source_kind: &str, mouth_kind: u8, discharg
     out
 }
 
-// ─────────────── Full per-REACH assemblage (one roster per upper/middle/delta) ─
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Full per-REACH assemblage (one roster per upper/middle/delta) â”€
 // Where `assign_river_fish` returns one signature species per zone the whole
 // river spans, this returns the FULL assemblage a naturalist would list for a
 // SINGLE reach (upper / middle / delta), so the panel can show every fish that
 // lives there. Ecologically correct + seed-varied so neighbouring continental
 // rivers roll different rosters (the user's "add variety for continental").
 //
-//  * base pool  — every catalogued species of this zone×band, MINUS the reserved
+//  * base pool  â€” every catalogued species of this zoneÃ—band, MINUS the reserved
 //    migrants below; a seed-shuffled subset is taken so rivers differ.
-//  * megafish   — sturgeon / giant catfish (arapaima & redtail in the tropics)
+//  * megafish   â€” sturgeon / giant catfish (arapaima & redtail in the tropics)
 //    ONLY on a `great` trunk's middle & delta.
-//  * diadromous — salmon / shad / eel (mullet & snook in the tropics) ONLY at an
+//  * diadromous â€” salmon / shad / eel (mullet & snook in the tropics) ONLY at an
 //    `estuary`/delta reach.
 
-/// Reserved migrant slugs — kept OUT of the base pool so a small river's delta
+/// Reserved migrant slugs â€” kept OUT of the base pool so a small river's delta
 /// doesn't sprout sturgeon or salmon; re-added only for great/estuary reaches.
 fn is_reserved_migrant(slug: &str) -> bool {
     matches!(slug,
@@ -974,7 +974,7 @@ fn shuffle_take<'a>(cands: &mut Vec<&'a FishSpec>, r: &mut Rng, n: usize) -> Vec
     out
 }
 
-/// The full fish assemblage of ONE reach. `zone` 0 upper · 1 middle · 2 delta;
+/// The full fish assemblage of ONE reach. `zone` 0 upper Â· 1 middle Â· 2 delta;
 /// `great` = a big trunk (megafish), `estuary` = tidal/delta mouth (diadromous runs).
 pub fn assign_reach_fish(band: Band, zone: u8, great: bool, estuary: bool, arid: bool, seed: u64) -> Vec<&'static FishSpec> {
     if arid {
@@ -1021,19 +1021,19 @@ pub fn reach_fish_prose(species: &[&FishSpec]) -> String {
     join_and(&uniq)
 }
 
-// ───────────────────── Signature fish species (lake rosters) ─────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Signature fish species (lake rosters) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Lake-only species (cichlid flocks, the freshwater seal, brine shrimp, lake
-// trout…), reusing the same FishSpec shape so the frontend plate machinery is
-// shared. `zone` is repurposed as a rough depth niche (0 shallows · 1 open water ·
+// troutâ€¦), reusing the same FishSpec shape so the frontend plate machinery is
+// shared. `zone` is repurposed as a rough depth niche (0 shallows Â· 1 open water Â·
 // 2 deep) and is not shown for lakes. River-roster slugs are reused directly where
-// a species also lives in lakes (pike, perch, whitefish, char, bream, tench…), so
+// a species also lives in lakes (pike, perch, whitefish, char, bream, tenchâ€¦), so
 // only genuinely lake-signature fish are added here.
 pub const LAKE_FISH: &[FishSpec] = &[
     // Rift / great-lake cichlid flock (tropical)
     FishSpec{slug:"mosaic-cichlid",name:"Mosaic Cichlid",binomial:"Haplochromis tessellatus",zone:0,real:"haplochromine cichlid",blurb:"one of an explosive flock of jewel-coloured cichlids found in this lake alone.",bands:&[Tropical]},
     FishSpec{slug:"azure-mbuna",name:"Azure Mbuna",binomial:"Maylandia azurea",zone:0,real:"mbuna cichlid",blurb:"a rock-grazing cichlid in electric blue, endemic to the rocky shore.",bands:&[Tropical]},
     FishSpec{slug:"marsh-lungfish",name:"Marsh Lungfish",binomial:"Protopterus paludis",zone:2,real:"lungfish",blurb:"an air-gulping relic that survives the dry season buried in mud.",bands:&[Tropical,WarmTemperate]},
-    // Deep rift (cold) — relict fauna + the freshwater seal
+    // Deep rift (cold) â€” relict fauna + the freshwater seal
     FishSpec{slug:"abyss-sculpin",name:"Abyss Sculpin",binomial:"Cottus abyssalis",zone:2,real:"deep-water sculpin",blurb:"a relict sculpin of the cold, lightless depths.",bands:&[Boreal,CoolTemperate]},
     FishSpec{slug:"silver-nerpa",name:"Silver Nerpa",binomial:"Pusa argentea",zone:1,real:"freshwater seal",blurb:"the world's only wholly freshwater seal, hauling out on the ice.",bands:&[Boreal,CoolTemperate]},
     FishSpec{slug:"pallid-omul",name:"Pallid Omul",binomial:"Coregonus pallidus",zone:1,real:"omul whitefish",blurb:"an endemic whitefish shoaling in the cold open water.",bands:&[Boreal,CoolTemperate,Polar]},
@@ -1044,7 +1044,7 @@ pub const LAKE_FISH: &[FishSpec] = &[
     FishSpec{slug:"goldshoal-tilapia",name:"Goldshoal Tilapia",binomial:"Oreochromis auratus",zone:0,real:"tilapia",blurb:"a hardy, prolific cichlid crowding the warm, productive shallows.",bands:&[Tropical,WarmTemperate]},
     FishSpec{slug:"reed-tench",name:"Reed Tench",binomial:"Tinca palustris",zone:0,real:"tench",blurb:"an olive, slime-scaled bottom-fish of warm, weedy shallows.",bands:&[WarmTemperate,CoolTemperate]},
     // Salt / hypersaline
-    FishSpec{slug:"brine-shrimp",name:"Brine Shrimp",binomial:"Artemia salina",zone:1,real:"brine shrimp",blurb:"not a fish at all — a tiny crustacean that reddens the brine and feeds the flamingoes.",bands:&[Tropical,WarmTemperate,CoolTemperate,Boreal,Polar]},
+    FishSpec{slug:"brine-shrimp",name:"Brine Shrimp",binomial:"Artemia salina",zone:1,real:"brine shrimp",blurb:"not a fish at all â€” a tiny crustacean that reddens the brine and feeds the flamingoes.",bands:&[Tropical,WarmTemperate,CoolTemperate,Boreal,Polar]},
     FishSpec{slug:"lakeshore-pupfish",name:"Lakeshore Pupfish",binomial:"Cyprinodon lacustris",zone:0,real:"pupfish",blurb:"a thumb-sized survivor of hot, salty desert water.",bands:&[Tropical,WarmTemperate]},
 ];
 
@@ -1054,7 +1054,7 @@ fn fish_by_slug(slug: &str) -> Option<&'static FishSpec> {
     SIGNATURE_FISH.iter().chain(ARID_FISH).chain(LAKE_FISH).find(|f| f.slug == slug)
 }
 
-/// Assign a lake's signature fish — a VARIABLE-length roster keyed to lake type ×
+/// Assign a lake's signature fish â€” a VARIABLE-length roster keyed to lake type Ã—
 /// thermal band (a rift lake shows a flock of several, a tarn one, a hypersaline
 /// lake only brine shrimp). Deterministic; band-filtered so no fish appears out of
 /// its climate. Returns `&'static FishSpec`, empty only for a truly barren water.
@@ -1135,7 +1135,7 @@ mod tests {
         assert!(delta.iter().any(|f| f.real == "giant catfish" || f.real == "sturgeon"),
             "a great trunk has megafish");
         for f in &delta { assert!(f.bands.contains(&Band::CoolTemperate)); }
-        // A small plain headwater is a short list — no sturgeon, no salmon.
+        // A small plain headwater is a short list â€” no sturgeon, no salmon.
         let up = assign_reach_fish(Band::CoolTemperate, 0, false, false, false, 3);
         assert!(!up.is_empty() && up.iter().all(|f| f.zone == 0));
         assert!(!up.iter().any(|f| is_reserved_migrant(f.slug)), "no migrants in a plain headwater");
@@ -1145,7 +1145,7 @@ mod tests {
     }
 
     /// Dump the whole fish catalogue to JSON for the standalone HTML gallery
-    /// generator (`scripts/gen_fish_gallery.mjs`). Ignored by default — run with
+    /// generator (`scripts/gen_fish_gallery.mjs`). Ignored by default â€” run with
     /// `cargo test --lib emit_fish_catalogue -- --ignored --nocapture` to refresh.
     #[test]
     #[ignore]
@@ -1245,7 +1245,7 @@ mod tests {
 
     #[test]
     fn biome_and_code_agree() {
-        use super::super::koppen;
+        use crate::sim::koppen;
         assert_eq!(koppen_to_biome(koppen::DFC), "boreal taiga");
         assert_eq!(koppen_code(koppen::DFC), "Dfc");
         assert_eq!(koppen_to_biome(koppen::CSA), "Mediterranean scrub");
@@ -1253,14 +1253,14 @@ mod tests {
 
     #[test]
     fn lake_fish_vary_by_type_and_band() {
-        // A tropical rift lake shows a multi-species cichlid flock…
+        // A tropical rift lake shows a multi-species cichlid flockâ€¦
         let rift = assign_lake_fish(LakeKind::Rift, Band::Tropical, 0.2);
         assert!(rift.len() >= 3, "rift lake shows a flock: {}", rift.len());
         assert!(rift.iter().any(|f| f.real.contains("cichlid")), "rift flock has cichlids");
-        // …a tarn shows a single cold-water fish…
+        // â€¦a tarn shows a single cold-water fishâ€¦
         let tarn = assign_lake_fish(LakeKind::Tarn, Band::Boreal, 0.2);
         assert_eq!(tarn.len(), 1, "a tarn is a one-fish water");
-        // …and a hypersaline lake shows only brine shrimp (no fish).
+        // â€¦and a hypersaline lake shows only brine shrimp (no fish).
         let brine = assign_lake_fish(LakeKind::SaltEndorheic, Band::WarmTemperate, 150.0);
         assert_eq!(brine.len(), 1, "hypersaline: brine shrimp only");
         assert_eq!(brine[0].slug, "brine-shrimp");
@@ -1281,3 +1281,6 @@ mod tests {
         assert_eq!(classify_lake(&f), LakeKind::TropicalGreat);
     }
 }
+
+
+

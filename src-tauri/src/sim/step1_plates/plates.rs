@@ -1,5 +1,5 @@
-use rand::prelude::*;
-use super::world_buffer::WorldBuffer;
+﻿use rand::prelude::*;
+use crate::sim::world_buffer::WorldBuffer;
 
 /// Boundary types
 const BOUNDARY_NONE: u8 = 0;
@@ -175,3 +175,4 @@ pub fn invert_terrain(buf: &mut WorldBuffer) {
         }
     }
 }
+

@@ -1,7 +1,7 @@
-use super::seasonal;
-use super::world_buffer::WorldBuffer;
+﻿use super::seasonal;
+use crate::sim::world_buffer::WorldBuffer;
 
-// ── Local value-noise (keeps moisture flow from following dead-straight rays) ──
+// â”€â”€ Local value-noise (keeps moisture flow from following dead-straight rays) â”€â”€
 fn hash2(x: i32, y: i32, seed: u32) -> f32 {
     let mut h = seed as i32;
     h = h.wrapping_add(x.wrapping_mul(374761393));
@@ -34,19 +34,19 @@ fn fbm2(x: f32, y: f32, seed: u32) -> f32 {
     ((a * 0.65 + b * 0.35) - 0.5) * 2.0
 }
 
-// ── Constants (ported from WF1 precipitation.ts / itcz.ts / orographic-lift.ts) ──
+// â”€â”€ Constants (ported from WF1 precipitation.ts / itcz.ts / orographic-lift.ts) â”€â”€
 const BASE_PRECIPITATION: f32 = 800.0;
 
 // Per-packet heading fan-out (radians) so the discrete wind belts don't lay
 // down identical straight diagonal rays.
 const MEANDER_TURN: f32 = 0.85;
 
-// Earth's circumference (km) — used to translate moisture-decay distances
+// Earth's circumference (km) â€” used to translate moisture-decay distances
 // expressed in real km into a per-cell decay that is independent of grid
 // resolution. The previous fixed FWDA_STEPS=60 / decay 0.935-0.960 were tuned
 // for a tiny grid; on the 3600-wide default a moisture packet died after ~60
 // cells (~660 km) so every continental interior beyond that collapsed to the
-// 0.04 floor → instant desert. The Amazon, the US/Asian interiors etc. all
+// 0.04 floor â†’ instant desert. The Amazon, the US/Asian interiors etc. all
 // dried out. We now scale the travel distance and per-cell decay to the grid.
 const EARTH_CIRCUMFERENCE_KM: f32 = 40075.0;
 // Moisture e-folding distances (km): how far inland precip falls to 1/e of its
@@ -61,17 +61,17 @@ const EFOLD_TROP_KM: f32 = 1300.0;
 const MOISTURE_FLOOR: f32 = 0.09;
 
 // Coastal drying
-const COLD_COAST_DRYING: f32 = 0.35; // cold-current coast → fog desert
-const UPWELLING_DRYING: f32 = 0.60;  // upwelling-cooled coast → extra drying
+const COLD_COAST_DRYING: f32 = 0.35; // cold-current coast â†’ fog desert
+const UPWELLING_DRYING: f32 = 0.60;  // upwelling-cooled coast â†’ extra drying
 
-// ── Enclosed subtropical sea suppression (Red Sea / Persian Gulf effect) ──
+// â”€â”€ Enclosed subtropical sea suppression (Red Sea / Persian Gulf effect) â”€â”€
 // Warm but narrow seas sitting under the Hadley-cell subtropical high evaporate
 // enormous amounts of water yet produce almost no rain. Three barriers combine:
-//   1. Sinking subtropical-high air (the descending Hadley branch near ~30°)
+//   1. Sinking subtropical-high air (the descending Hadley branch near ~30Â°)
 //      compresses and warms, capping any convection.
 //   2. The surrounding deserts blow a hot, dry inversion lid over the marine
 //      boundary layer, trapping humidity at the surface.
-//   3. The basin is narrow — air crosses too fast to load the moisture needed to
+//   3. The basin is narrow â€” air crosses too fast to load the moisture needed to
 //      break the high.
 // We model this by suppressing the moisture such basins *emit* (and drying their
 // immediate coasts) so Red-Sea / Persian-Gulf-style seas stay hyper-arid and
@@ -86,13 +86,13 @@ const MOUNTAIN_THRESHOLD: f32 = 0.19; // elevation counting as a ridge (~1700 m)
 const WINDWARD_STEPS: i32 = 12;
 const SHADOW_STEPS: i32 = 20;
 
-// ── Low-level-jet entrance/exit dynamics (jets.rs supplies buf.wind_speed) ──
+// â”€â”€ Low-level-jet entrance/exit dynamics (jets.rs supplies buf.wind_speed) â”€â”€
 // A jet ENTRANCE (accelerating flow) diverges at low level and sweeps moisture
-// along before it can accumulate → the coast dries (Somali / Arabian coast). A
-// jet EXIT (decelerating flow) converges and is forced to rise → torrential
+// along before it can accumulate â†’ the coast dries (Somali / Arabian coast). A
+// jet EXIT (decelerating flow) converges and is forced to rise â†’ torrential
 // rainfall at the terminus (the Western-Ghats monsoon dump).
 const JET_MIN_SPEED: f32 = 8.0;      // below this a cell isn't in a jet
-const JET_ACCEL_SCALE: f32 = 6.0;    // along-flow Δspeed (m/s) that saturates the effect
+const JET_ACCEL_SCALE: f32 = 6.0;    // along-flow Î”speed (m/s) that saturates the effect
 const JET_ENTRANCE_DRY: f32 = 0.55;  // max fraction of moisture removed at a strong entrance
 const JET_EXIT_WET_MAX: f32 = 750.0; // max convergence rainfall (mm/yr) at a strong exit
 
@@ -111,7 +111,7 @@ fn orographic_multiplier(buf: &WorldBuffer, x: u32, y: u32, wvx: f32, wvy: f32) 
         let by = (y as f32 - ndy * step as f32).round() as i32;
         if by < 0 || by >= h { break; }
         let bi = buf.idx(buf.wrap_x(bx), by as u32);
-        if buf.terrain[bi] == 0 { break; } // open ocean upstream → no shadow
+        if buf.terrain[bi] == 0 { break; } // open ocean upstream â†’ no shadow
         if buf.elevation[bi] > MOUNTAIN_THRESHOLD {
             return 0.15 + 0.85 * (((step - 1) as f32 / SHADOW_STEPS as f32).sqrt());
         }
@@ -123,14 +123,14 @@ fn orographic_multiplier(buf: &WorldBuffer, x: u32, y: u32, wvx: f32, wvy: f32) 
         let fy = (y as f32 + ndy * step as f32).round() as i32;
         if fy < 0 || fy >= h { break; }
         let fi = buf.idx(buf.wrap_x(fx), fy as u32);
-        if buf.terrain[fi] == 0 { break; } // ocean downwind → no windward uplift
+        if buf.terrain[fi] == 0 { break; } // ocean downwind â†’ no windward uplift
         if buf.elevation[fi] > MOUNTAIN_THRESHOLD { return 2.5; }
     }
 
     1.0
 }
 
-/// ITCZ latitude shift from land distribution (monsoon asymmetry). Range ±12°.
+/// ITCZ latitude shift from land distribution (monsoon asymmetry). Range Â±12Â°.
 fn compute_itcz_shift(buf: &WorldBuffer) -> f32 {
     let (mut nh_land, mut sh_land, mut nh_total, mut sh_total) = (0.0f32, 0.0, 0.0, 0.0);
     for y in 0..buf.height {
@@ -156,9 +156,9 @@ fn compute_itcz_shift(buf: &WorldBuffer) -> f32 {
 
 /// Shifted ITCZ precipitation bonus (mm/yr) at a latitude.
 ///
-/// Widened taper (was full ≤5°, zero by 12°). The ITCZ migrates seasonally
+/// Widened taper (was full â‰¤5Â°, zero by 12Â°). The ITCZ migrates seasonally
 /// across a broad tropical band, so the annual-mean wet zone reaches well past
-/// ±12° in continental monsoon regions — that band is what keeps tropical
+/// Â±12Â° in continental monsoon regions â€” that band is what keeps tropical
 /// rainforest/savanna interiors (Amazon, Congo, the Sahel margin) wet instead
 /// of collapsing to desert once they sit beyond pure trade-wind advection.
 fn itcz_bonus_shifted(lat: f32, shift: f32) -> f32 {
@@ -169,8 +169,8 @@ fn itcz_bonus_shifted(lat: f32, shift: f32) -> f32 {
 }
 
 /// Strength (0..1) of the subtropical-high sinking-air inversion by latitude.
-/// Peaks across the descending branch of the Hadley cell (~20-32°), tapering to
-/// zero by 12° (where the ITCZ takes over) and 38° (where the mid-latitude storm
+/// Peaks across the descending branch of the Hadley cell (~20-32Â°), tapering to
+/// zero by 12Â° (where the ITCZ takes over) and 38Â° (where the mid-latitude storm
 /// track takes over). This is what lets a warm enclosed sea here suppress rain.
 fn hadley_inversion(abs_lat: f32) -> f32 {
     if abs_lat <= 12.0 || abs_lat >= 38.0 { 0.0 }
@@ -182,8 +182,8 @@ fn hadley_inversion(abs_lat: f32) -> f32 {
 /// Per-ocean-cell suppression factor (0..1) for warm enclosed subtropical seas.
 /// Combines the Hadley-inversion strength at the cell's latitude with how
 /// *narrow* the basin is (measured as the shorter of its N-S / E-W open-water
-/// span). Wide open ocean → 0 (normal moisture); a narrow strait under the
-/// subtropical high → near 1 (heavily suppressed). Land cells stay 0.
+/// span). Wide open ocean â†’ 0 (normal moisture); a narrow strait under the
+/// subtropical high â†’ near 1 (heavily suppressed). Land cells stay 0.
 fn compute_enclosed_suppression(buf: &WorldBuffer, km_per_cell: f32) -> Vec<f32> {
     let w = buf.width;
     let h = buf.height;
@@ -230,7 +230,7 @@ fn compute_enclosed_suppression(buf: &WorldBuffer, km_per_cell: f32) -> Vec<f32>
     sup
 }
 
-/// Subtropical-high fractional drying (0..0.70), peak near 28°.
+/// Subtropical-high fractional drying (0..0.70), peak near 28Â°.
 fn subtropical_penalty(abs_lat: f32) -> f32 {
     let dist = (abs_lat - 28.0).abs();
     if dist >= 10.0 { 0.0 } else { 0.70 * (1.0 - dist / 10.0) }
@@ -254,17 +254,17 @@ fn monsoon_multiplier(abs_lat: f32, dist_ocean: f32, land_frac_tropical: f32) ->
 
 /// Dedicated monsoon ADDITIVE bonus (mm/yr). The multiplicative `monsoon_multiplier`
 /// can only scale an existing base, so where the downwind-advection base is near
-/// zero (continental subtropics in the easterly trades — e.g. the Indian
+/// zero (continental subtropics in the easterly trades â€” e.g. the Indian
 /// subcontinent) it left the land as desert. The summer monsoon instead draws a
 /// large, fresh moisture load off the warm seas onto the land, so it is modelled
-/// as an ADDITIVE term over the 5–45° coastal belt: strongest on/near the coast,
+/// as an ADDITIVE term over the 5â€“45Â° coastal belt: strongest on/near the coast,
 /// reaching inland on big continents. This wets India, SE Asia, E China and the
 /// Japan / E-Asian seaboard; the dry-winter seasonal split (koppen.rs) then turns
 /// these into proper monsoon climates (Aw/Am, Cwa/Cwb, Dwa/Dwb).
 fn monsoon_bonus(abs_lat: f32, dist_ocean: f32, land_frac_tropical: f32) -> f32 {
     if abs_lat < 5.0 || abs_lat > 45.0 { return 0.0; }
-    // Latitude weight: full across the core monsoon belt (12–28°), ramping in from
-    // 5° and fading out by 45° (so the E-Asian / Japan monsoon still reaches).
+    // Latitude weight: full across the core monsoon belt (12â€“28Â°), ramping in from
+    // 5Â° and fading out by 45Â° (so the E-Asian / Japan monsoon still reaches).
     let lat_w = if abs_lat < 12.0 { (abs_lat - 5.0) / 7.0 }
         else if abs_lat <= 28.0 { 1.0 }
         else { (1.0 - (abs_lat - 28.0) / 17.0).max(0.0) };
@@ -273,7 +273,7 @@ fn monsoon_bonus(abs_lat: f32, dist_ocean: f32, land_frac_tropical: f32) -> f32 
     let prox = if dist_ocean < 0.03 { 0.75 }
         else if dist_ocean < 0.28 { 1.0 }
         else { (1.0 - (dist_ocean - 0.28) * 1.1).max(0.0) };
-    // Continentality: a big landmass drives a stronger monsoon (land–sea thermal
+    // Continentality: a big landmass drives a stronger monsoon (landâ€“sea thermal
     // contrast); small islands get only a mild boost.
     let cont = (0.45 + land_frac_tropical * 2.4).min(1.25);
     const MONSOON_BONUS_MAX: f32 = 850.0;
@@ -281,12 +281,12 @@ fn monsoon_bonus(abs_lat: f32, dist_ocean: f32, land_frac_tropical: f32) -> f32 
 }
 
 /// Onshore-monsoon GATE (0..1). A monsoon only fires where summer flow blows OFF a
-/// warm sea ONTO the land — i.e. there is a warm ocean on the cell's EQUATORWARD
+/// warm sea ONTO the land â€” i.e. there is a warm ocean on the cell's EQUATORWARD
 /// and/or EASTERN side within reach (the Indian/SE-Asian/E-Asian geometry). This
 /// excludes subtropical-high deserts (the Sahara, Arabia, the Atacama/Namib/W-Australia
-/// coasts) whose moisture source is blocked — so the monsoon term no longer turns
+/// coasts) whose moisture source is blocked â€” so the monsoon term no longer turns
 /// dry land green. A cold current offshore (cold-upwelling desert coast) counts for
-/// little. Cheap: only the 5–45° belt calls it, scanning a few short rays.
+/// little. Cheap: only the 5â€“45Â° belt calls it, scanning a few short rays.
 fn monsoon_onshore(buf: &WorldBuffer, x: u32, y: u32, sea_suppress: &[f32]) -> f32 {
     let lat = buf.latitude(y);
     let h = buf.height as i32;
@@ -295,14 +295,14 @@ fn monsoon_onshore(buf: &WorldBuffer, x: u32, y: u32, sea_suppress: &[f32]) -> f
     // ~MONSOON_FETCH_KM away. The old fixed 28-cell reach was only ~310 km on a
     // 3600-wide grid, so a continental interior (the Indian Deccan, the N-China
     // plain) never "saw" the ocean and stayed desert. ~800 km reaches India's
-    // interior while still leaving the Sahara dry — its nearest warm equatorward
+    // interior while still leaving the Sahara dry â€” its nearest warm equatorward
     // ocean (the Gulf of Guinea) is >1500 km away past the Sahel, and its west
     // coast is the cold Canary upwelling (discounted below).
     const MONSOON_FETCH_KM: f32 = 800.0;
     let km_per_cell = EARTH_CIRCUMFERENCE_KM / buf.width as f32;
     let range = ((MONSOON_FETCH_KM / km_per_cell) as i32).max(12);
     let mut best = 0.0f32;
-    // Equatorward (S), equatorward-east (SE), equatorward-west (SW — the Indian /
+    // Equatorward (S), equatorward-east (SE), equatorward-west (SW â€” the Indian /
     // Western-Ghats summer monsoon blows from the south-west), and due-east rays.
     for &(dx, dy) in &[(0i32, eqdir), (1, eqdir), (-1, eqdir), (1, 0)] {
         for s in 1..=range {
@@ -312,7 +312,7 @@ fn monsoon_onshore(buf: &WorldBuffer, x: u32, y: u32, sea_suppress: &[f32]) -> f
             let ni = buf.idx(nx, ny as u32);
             if buf.terrain[ni] == 0 {
                 // Enclosed/suppressed warm seas (Red Sea, Persian Gulf) sit under
-                // the Hadley subtropical-high inversion and supply NO monsoon — skip
+                // the Hadley subtropical-high inversion and supply NO monsoon â€” skip
                 // them as a source so East Sahara / Arabia stay dry, while India's
                 // open Arabian Sea / Bay of Bengal still fires the monsoon.
                 if sea_suppress[ni] > 0.4 { continue; }
@@ -326,7 +326,7 @@ fn monsoon_onshore(buf: &WorldBuffer, x: u32, y: u32, sea_suppress: &[f32]) -> f
     best
 }
 
-/// Frontal precipitation bonus (mm/yr) at mid-latitude storm tracks (30-66°).
+/// Frontal precipitation bonus (mm/yr) at mid-latitude storm tracks (30-66Â°).
 ///
 /// Extratropical cyclones deliver year-round precipitation across the whole
 /// mid-latitude belt regardless of the prevailing-wind direction, which is what
@@ -334,7 +334,7 @@ fn monsoon_onshore(buf: &WorldBuffer, x: u32, y: u32, sea_suppress: &[f32]) -> f
 /// humid even though the westerlies put the ocean *downwind* of them. The pure
 /// downwind-advection model can't supply that moisture, so the storm-track term
 /// is the main thing standing between a realistic temperate belt and a runaway
-/// band of steppe. Broadened (was 35-60°) and strengthened accordingly.
+/// band of steppe. Broadened (was 35-60Â°) and strengthened accordingly.
 fn frontal_bonus(abs_lat: f32, near_ocean: bool) -> f32 {
     if abs_lat < 30.0 || abs_lat > 66.0 { return 0.0; }
     let weight = if abs_lat < 45.0 { (abs_lat - 30.0) / 15.0 }
@@ -360,7 +360,7 @@ fn sample_speed(buf: &WorldBuffer, fx: f32, fy: f32) -> f32 {
 /// decelerates (jet exit / terminus) it returns an additive convergence-rainfall
 /// bonus (mm/yr). Cells not in a jet (`speed < JET_MIN_SPEED`) are unaffected.
 fn jet_effect(buf: &WorldBuffer, x: u32, y: u32) -> (f32, f32) {
-    // No jet field loaded (e.g. an old save re-run without the jet step) → no-op.
+    // No jet field loaded (e.g. an old save re-run without the jet step) â†’ no-op.
     if buf.wind_speed.is_empty() {
         return (1.0, 0.0);
     }
@@ -418,7 +418,7 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
     // moisture-emission suppression under the Hadley subtropical high.
     let sea_suppress = compute_enclosed_suppression(buf, km_per_cell);
 
-    // Annual-mean land-asymmetry ITCZ shift; each season migrates ±MIGRATE toward
+    // Annual-mean land-asymmetry ITCZ shift; each season migrates Â±MIGRATE toward
     // its summer hemisphere on top of this.
     let itcz_asym = compute_itcz_shift(buf);
 
@@ -455,9 +455,9 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
         }
     }
 
-    // ── Two seasonal wind states (thermal land–sea low/high) ──────────────────
-    // Boreal summer (sun_sign +1 ≈ July: NH summer / SH winter) and boreal winter
-    // (−1 ≈ January). Each derives its own onshore/offshore monsoon flow, its own
+    // â”€â”€ Two seasonal wind states (thermal landâ€“sea low/high) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Boreal summer (sun_sign +1 â‰ˆ July: NH summer / SH winter) and boreal winter
+    // (âˆ’1 â‰ˆ January). Each derives its own onshore/offshore monsoon flow, its own
     // moisture advection and its own ITCZ position; summing the two half-year loads
     // gives an annual field whose seasonality is EMERGENT rather than faked.
     let hsn = seasonal::compute_seasonal_wind(buf, 1.0);  // high-sun-north
@@ -482,7 +482,7 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
     let p_hsn = blur_land(buf, p_hsn, 18);
     let p_hss = blur_land(buf, p_hss, 18);
 
-    // ── Combine → annual precip + summer fraction ─────────────────────────────
+    // â”€â”€ Combine â†’ annual precip + summer fraction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     for y in 0..h {
         let lat = buf.latitude(y);
         for x in 0..w {
@@ -542,7 +542,7 @@ fn season_precip(
     // disagrees with the annual mean (monsoon geography), but stay in a sane band.
     const SEASON_SCALE: f32 = 0.5;
 
-    // ── Pass 1: forward moisture advection on the seasonal wind → MAX field ──
+    // â”€â”€ Pass 1: forward moisture advection on the seasonal wind â†’ MAX field â”€â”€
     let mut moisture_field = vec![0.0f32; n];
     for y in 0..h {
         for x in 0..w {
@@ -557,8 +557,8 @@ fn season_precip(
             let ndy = wvy / wl;
 
             let init_moisture = match buf.current_type[idx] {
-                1 => 1.7, // warm current → much more moisture carried inland
-                2 => 0.4, // cold current → far less (coastal desert downwind)
+                1 => 1.7, // warm current â†’ much more moisture carried inland
+                2 => 0.4, // cold current â†’ far less (coastal desert downwind)
                 _ => 1.0,
             };
             let init_moisture = init_moisture * (1.0 - ENCLOSED_SUPPRESS_STRENGTH * ctx.sea_suppress[idx]);
@@ -576,7 +576,7 @@ fn season_precip(
                 let cy = fy.round() as i32;
                 if cy < 0 || cy >= h as i32 { break; }
                 let ci = buf.idx(buf.wrap_x(fx.round() as i32), cy as u32);
-                if buf.terrain[ci] == 0 { break; } // hit ocean again → packet ends
+                if buf.terrain[ci] == 0 { break; } // hit ocean again â†’ packet ends
                 let t_lat = buf.latitude(cy as u32).abs();
                 let trop_blend = if t_lat < 15.0 { 1.0 }
                     else if t_lat < 30.0 { (30.0 - t_lat) / 15.0 } else { 0.0 };
@@ -596,7 +596,7 @@ fn season_precip(
         }
     }
 
-    // ── Pass 2: climatic adjustments per land cell ──────────────────────────
+    // â”€â”€ Pass 2: climatic adjustments per land cell â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let mut precip = vec![0.0f32; n];
     for y in 0..h {
         let lat = buf.latitude(y);
@@ -609,18 +609,18 @@ fn season_precip(
 
             // SEASON_SCALE applied to the moisture BASE only: the two seasons sum
             // to the annual base (0.5+0.5=1). ITCZ/monsoon bonuses are NOT
-            // scaled here because they only fire in one season anyway — their
+            // scaled here because they only fire in one season anyway â€” their
             // annual sum already equals the old model's full-year value.
             let mut moisture = moisture_field[idx].max(MOISTURE_FLOOR) * SEASON_SCALE;
 
             // Orographic uplift / rain shadow on the SEASONAL wind (windward flips
-            // between monsoon seasons — the Western-Ghats summer dump).
+            // between monsoon seasons â€” the Western-Ghats summer dump).
             let oro = orographic_multiplier(buf, x, y, wind_vx[idx], wind_vy[idx]);
             moisture *= oro;
 
             // Low-level jet: entrance dries, exit dumps. Uses the annual jet field
             // (the Somali jet is a boreal-summer feature; keeping it both seasons
-            // slightly over-dries the already-dry winter coast — acceptable).
+            // slightly over-dries the already-dry winter coast â€” acceptable).
             let (jet_dry, jet_wet) = jet_effect(buf, x, y);
             moisture *= jet_dry;
 
@@ -642,11 +642,11 @@ fn season_precip(
                 moisture *= ENCLOSED_COAST_DRYING;
             }
 
-            // ── Convergence-rainfall gate (see the annual-model note in git history):
+            // â”€â”€ Convergence-rainfall gate (see the annual-model note in git history):
             // the additive ITCZ/monsoon terms can only rain out moisture the flow
             // delivers, only where air rises, and are capped hard under the Hadley
-            // subtropical high — so a shifted-ITCZ excursion over the Sahara/Arabia
-            // interior stays a dry thermal trough. Hadley coefficient raised 0.6→0.75
+            // subtropical high â€” so a shifted-ITCZ excursion over the Sahara/Arabia
+            // interior stays a dry thermal trough. Hadley coefficient raised 0.6â†’0.75
             // to push the subtropical interior toward true (but not bone-dry) desert.
             let avail = ((moisture_field[idx] - MOISTURE_FLOOR) / 0.80).clamp(0.0, 1.0);
             // Tropical ITCZ conv_avail floor: raised to 0.65 only for cells that
@@ -654,8 +654,8 @@ fn season_precip(
             // EQUATORWARD side. That is where local ocean evaporation directly
             // sustains deep convection (Nigeria coast / Gulf of Guinea, Congo
             // coast, Amazon mouth). Interior land cells and coasts whose
-            // equatorward direction hits land before open ocean — Somalia, the
-            // Red Sea coast — keep the standard 0.30 floor and rely on advected
+            // equatorward direction hits land before open ocean â€” Somalia, the
+            // Red Sea coast â€” keep the standard 0.30 floor and rely on advected
             // moisture + monsoon_bonus to produce rainfall. This prevents the
             // Horn of Africa from becoming wet (its equatorward scan hits Kenya
             // land for >1000 km before reaching ocean).
@@ -674,36 +674,70 @@ fn season_precip(
                 if near_warm_eq { 0.65 } else { 0.30 }
             } else { 0.30 };
             let conv_avail = conv_floor + (1.0 - conv_floor) * avail;
-            let mut conv_suppress = jet_dry;
+            // FIX 1 â€” quadratic jet suppression on convective terms.
+            // In a jet entrance, low-level DIVERGENCE prevents deep convection
+            // non-linearly: even when moisture is present, the ascending motion
+            // needed for the ITCZ and monsoon is shut off. Linear (jet_dry)
+            // only removed 55% of convective rainfall at the Somali coast;
+            // squaring it drops that to ~80%, which is physically correct for
+            // a strong entrance (divergence inhibition is exponential).
+            let mut conv_suppress = if jet_dry < 1.0 { jet_dry * jet_dry } else { 1.0 };
             if ctx.cold_coast[idx] { conv_suppress *= 0.5; }
             if ctx.enclosed_coast[idx] { conv_suppress *= ENCLOSED_COAST_DRYING; }
+            // FIX 2 â€” proxy for seasonal Somali-jet upwelling.
+            // The Somali Current reverses in boreal summer into one of Earth's
+            // strongest upwellings (SSTs 14-18Â°C). The annual-mean ocean model
+            // cannot capture this â€” it averages to warm/neutral. Where a strong
+            // jet entrance (jet_dry < 0.65) sits below 20Â° latitude, simulate
+            // the same moisture-removal and convective suppression that a cold
+            // coast would produce.  Gated to exclude cells already flagged cold.
+            let has_jet_upwelling = !ctx.cold_coast[idx] && jet_dry < 0.65 && abs_lat < 20.0;
+            if has_jet_upwelling {
+                moisture *= COLD_COAST_DRYING;
+                conv_suppress *= 0.5;
+            }
             // Hadley inversion weakened in LOCAL SUMMER: the subtropical high
             // retreats poleward and the monsoon thermal trough takes over
-            // (India, West Africa, SE Asia monsoon belt 15-32°N/S). The full
+            // (India, West Africa, SE Asia monsoon belt 15-32Â°N/S). The full
             // inversion strength only applies in local winter when the STH is
             // at its equatorward limit. Factor 0.25 in summer preserves just
             // enough subsidence to keep true subtropical deserts dry while
             // allowing the monsoon trough to fire rainfall over India etc.
             let hadley_summer_factor = if local_summer { 0.25 } else { 1.0 };
+            // FIX 3 â€” extend Hadley gate into the 8-12Â° eastern dry corridor.
+            // The Horn of Africa / Arabian-Sea coast at 8-12Â°N sits under
+            // Hadley-like dry subsidence (the Indian Ocean subtropical high
+            // expands into this band), NOT under ITCZ convergence. The standard
+            // hadley_inversion() cutoff at 12Â° misses this. The extension only
+            // fires where conv_floor â‰¤ 0.30 (no warm equatorial ocean to the
+            // south within 300 km) â€” this targets eastern Africa/Horn without
+            // touching Nigeria/West Africa, which has warm Gulf of Guinea to
+            // its south and therefore conv_floor = 0.65.
+            let hadley_ext = if abs_lat > 8.0 && abs_lat < 12.0 && conv_floor <= 0.30 {
+                (abs_lat - 8.0) / 4.0
+            } else {
+                0.0
+            };
+            let hadley_total = (hadley_inversion(abs_lat) + hadley_ext).min(1.0);
             let itcz_gate = conv_avail * conv_suppress
-                * (1.0 - 0.75 * hadley_inversion(abs_lat) * hadley_summer_factor);
+                * (1.0 - 0.75 * hadley_total * hadley_summer_factor);
 
             let mut p = moisture * BASE_PRECIPITATION;
 
             // Seasonally-migrated ITCZ (gated).
             p += itcz_bonus_shifted(lat, itcz_shift) * itcz_gate;
 
-            // Subtropical high — a SUMMER phenomenon (the descending Hadley branch
+            // Subtropical high â€” a SUMMER phenomenon (the descending Hadley branch
             // parks over the subtropics in the warm season). Weighted stronger in the
             // local summer / weaker in winter so a dry-summer (Mediterranean) split
-            // can emerge; the two-season average ≈ the annual penalty.
+            // can emerge; the two-season average â‰ˆ the annual penalty.
             let sub_pen = (subtropical_penalty(abs_lat) * if local_summer { 1.35 } else { 0.55 }).min(0.9);
             p *= 1.0 - sub_pen;
 
             // Monsoon interior penetration (multiplicative).
             p *= monsoon_multiplier(abs_lat, buf.distance_to_ocean[idx], ctx.land_frac_tropical);
 
-            // Additive summer monsoon — LOCAL-SUMMER ONLY, gated to onshore-flow
+            // Additive summer monsoon â€” LOCAL-SUMMER ONLY, gated to onshore-flow
             // regions and damped by the convection suppressors. This is what makes the
             // wet season wet and the dry season dry (the emergent Aw/Am/Cwa split);
             // the Somali/Arabian jet-entrance coast stays dry via conv_suppress.
@@ -713,7 +747,7 @@ fn season_precip(
                     * conv_suppress;
             }
 
-            // Frontal storm tracks — a WINTER-dominant source (extratropical cyclones
+            // Frontal storm tracks â€” a WINTER-dominant source (extratropical cyclones
             // are strongest in the cold season), so a mid-latitude west coast gets its
             // dry-summer Mediterranean rhythm; the annual average is preserved.
             let near_ocean = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
@@ -723,7 +757,7 @@ fn season_precip(
             });
             // Frontal and jet-exit terms fire in BOTH seasons, so they are
             // scaled by SEASON_SCALE here to prevent doubling in the annual sum
-            // (0.7·S + 1.3·S = 2·0.5 = 1.0 annual ✓).
+            // (0.7Â·S + 1.3Â·S = 2Â·0.5 = 1.0 annual âœ“).
             p += frontal_bonus(abs_lat, near_ocean)
                 * if local_summer { 0.7 } else { 1.3 }
                 * SEASON_SCALE;
@@ -733,7 +767,7 @@ fn season_precip(
                 p += jet_wet * (0.6 + 0.4 * oro.min(2.5)) * SEASON_SCALE;
             }
 
-            // Fine-grained spatial texture (±18%).
+            // Fine-grained spatial texture (Â±18%).
             p *= 1.0 + 0.18 * fbm2(x as f32 / 6.5, y as f32 / 6.5, 28411);
 
             // No SEASON_SCALE here: already applied per-term above.
@@ -824,7 +858,7 @@ mod tests {
     /// Regression for the "Arabia / Somalia reads as rainforest" bug. A strongly
     /// NH-heavy world drives a large poleward ITCZ shift; before the convergence
     /// gate, the flat additive ITCZ (up to 1200 mm/yr) then flooded the DRY-advection
-    /// NH subtropical interior (~20°, the Arabian latitude) just as hard as a wet
+    /// NH subtropical interior (~20Â°, the Arabian latitude) just as hard as a wet
     /// equatorial coast, pushing it to tropical-forest wetness. The gate ties that
     /// additive ITCZ to advected-moisture availability and the descending Hadley
     /// high, so the arid subtropical interior stays dry while a moist equatorial
@@ -844,7 +878,7 @@ mod tests {
 
         // NH-heavy geography: everything from a little south of the equator up to the
         // subtropics is a single wide continent; the SH is open ocean. This makes
-        // compute_itcz_shift return a strong positive (northward) shift — the exact
+        // compute_itcz_shift return a strong positive (northward) shift â€” the exact
         // condition that used to push the wet ITCZ band deep into the subtropics.
         for y in 0..h {
             let lat = buf.latitude(y);
@@ -853,9 +887,9 @@ mod tests {
                 let land = lat > -4.0 && lat < 34.0;
                 buf.terrain[i] = if land { 1 } else { 0 };
                 buf.elevation[i] = if land { 0.05 } else { 0.0 };
-                // Northward onshore flow (screen −y is north here): the SH ocean feeds
+                // Northward onshore flow (screen âˆ’y is north here): the SH ocean feeds
                 // moisture onto the southern (equatorial) coast, which decays inland
-                // toward the subtropics — the real moisture-supply gradient.
+                // toward the subtropics â€” the real moisture-supply gradient.
                 buf.wind_vx[i] = 0.0;
                 buf.wind_vy[i] = -1.0;
                 // The SH source ocean carries a warm current (a strong moisture source);
@@ -864,7 +898,7 @@ mod tests {
                 buf.wind_speed[i] = 4.0;
             }
         }
-        // distance_to_ocean: cheap approximation — degrees of latitude north of the
+        // distance_to_ocean: cheap approximation â€” degrees of latitude north of the
         // southern coast, normalised. Enough for the monsoon/interior terms.
         for y in 0..h {
             let lat = buf.latitude(y);
@@ -879,7 +913,7 @@ mod tests {
         compute_precipitation(&mut buf);
 
         // Sample a mid-continent column (far from the E/W wrap edges is irrelevant
-        // here since the whole band is land). Find rows nearest 3° and 22°.
+        // here since the whole band is land). Find rows nearest 3Â° and 22Â°.
         let row_at = |target: f32| -> u32 {
             (0..h).min_by(|&a, &b| {
                 (buf.latitude(a) - target).abs()
@@ -892,14 +926,14 @@ mod tests {
         let eq_p = buf.precipitation[buf.idx(x, eq_row)];
         let sub_p = buf.precipitation[buf.idx(x, sub_row)];
 
-        // The dry subtropical interior (Arabia's latitude) must be arid — nowhere
-        // near tropical-forest wetness — even though the ITCZ has shifted onto it.
+        // The dry subtropical interior (Arabia's latitude) must be arid â€” nowhere
+        // near tropical-forest wetness â€” even though the ITCZ has shifted onto it.
         assert!(sub_p < 700.0, "dry subtropical interior should stay arid, got {sub_p} mm");
         // And it must be markedly drier than the moist equatorial belt (which the
         // gate leaves wet).
         assert!(eq_p > sub_p * 1.5, "equator {eq_p} should be far wetter than subtropics {sub_p}");
 
-        // Global land-precip mean must stay in a plausible band — the two-season sum
+        // Global land-precip mean must stay in a plausible band â€” the two-season sum
         // is allowed to shift for realism but must not collapse or explode (which
         // would give rivers/fertility a degenerate field).
         let (mut sum, mut cnt) = (0.0f64, 0u64);
@@ -913,7 +947,7 @@ mod tests {
     /// Emergent seasonality: a tropical monsoon coast fed by a warm equatorward sea
     /// must come out SUMMER-WET (high summer fraction), while the dry subtropical
     /// interior under the descending Hadley high has no strong wet season. This is
-    /// what drives the emergent Aw/Am (vs Af) and BWh Köppen assignments.
+    /// what drives the emergent Aw/Am (vs Af) and BWh KÃ¶ppen assignments.
     #[test]
     fn monsoon_coast_is_summer_wet() {
         let (w, h) = (24u32, 180u32);
@@ -947,9 +981,10 @@ mod tests {
             }).unwrap()
         };
         let x = w / 2;
-        // A near-coastal tropical row draws the summer monsoon → summer-weighted.
+        // A near-coastal tropical row draws the summer monsoon â†’ summer-weighted.
         let coast = buf.idx(x, row_at(12.0));
         let frac = buf.precip_summer_frac[coast] as f32 / 255.0;
         assert!(frac > 0.55, "tropical monsoon coast should be summer-wet, frac={frac}");
     }
 }
+

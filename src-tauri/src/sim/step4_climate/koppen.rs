@@ -1,6 +1,6 @@
-use super::world_buffer::WorldBuffer;
+﻿use crate::sim::world_buffer::WorldBuffer;
 
-/// Köppen climate classification codes (1-based, 0=none)
+/// KÃ¶ppen climate classification codes (1-based, 0=none)
 pub const AF: u8 = 1;   // Tropical rainforest
 pub const AM: u8 = 2;   // Tropical monsoon
 pub const AW: u8 = 3;   // Tropical savanna
@@ -23,7 +23,7 @@ pub const DSB: u8 = 19; // Mediterranean-influenced warm continental
 pub const DSC: u8 = 20; // Mediterranean-influenced subarctic
 pub const ET: u8 = 21;  // Tundra
 pub const EF: u8 = 22;  // Ice cap
-// Dry-season variants added so the full Köppen set is representable.
+// Dry-season variants added so the full KÃ¶ppen set is representable.
 pub const AS: u8 = 23;  // Tropical savanna, dry summer
 pub const CWA: u8 = 24; // Monsoon-influenced humid subtropical (dry winter)
 pub const CWB: u8 = 25; // Subtropical highland (dry winter)
@@ -48,7 +48,7 @@ const EARTH_W: f32 = 3600.0;
 /// instead of being damped into mild oceanic types.
 pub(crate) fn seasonal_range_base(abs_lat: f32) -> f32 {
     // Smooth piecewise-linear ramp matching WF1 anchor points:
-    //   lat 0→2  10→5  25→12  40→22  55→30  75→38
+    //   lat 0â†’2  10â†’5  25â†’12  40â†’22  55â†’30  75â†’38
     if abs_lat < 10.0 {
         2.0 + abs_lat * 0.3
     } else if abs_lat < 25.0 {
@@ -64,8 +64,8 @@ pub(crate) fn seasonal_range_base(abs_lat: f32) -> f32 {
 
 /// Is the prevailing-wind UPWIND side ocean within `reach` cells? True windward
 /// (marine-exposed) coasts weather from the sea and stay mild; lee coasts have
-/// land upwind and stay continental. Wind belt: trades (<30°) and polar
-/// easterlies (≥60°) come from the east; westerlies (30-60°) come from the west.
+/// land upwind and stay continental. Wind belt: trades (<30Â°) and polar
+/// easterlies (â‰¥60Â°) come from the east; westerlies (30-60Â°) come from the west.
 pub(crate) fn upwind_is_ocean(buf: &WorldBuffer, x: u32, y: u32, reach: i32) -> bool {
     let lat = buf.latitude(y);
     let abs_lat = lat.abs();
@@ -95,7 +95,7 @@ pub(crate) fn upwind_is_ocean(buf: &WorldBuffer, x: u32, y: u32, reach: i32) -> 
 }
 
 /// Like `upwind_is_ocean`, but a continental-SHELF sea cell does NOT count as
-/// ocean — only deep/open water does. A broad shallow shelf is thermally sluggish
+/// ocean â€” only deep/open water does. A broad shallow shelf is thermally sluggish
 /// and (in this model) carries no current, so it shouldn't moderate the climate of
 /// the land behind it: wide-shelf coasts stay continental instead of reading
 /// oceanic. Used only for temperature moderation / continentality (not for the
@@ -129,11 +129,11 @@ pub(crate) fn upwind_is_open_ocean(buf: &WorldBuffer, x: u32, y: u32, reach: i32
     false
 }
 
-/// True if a cold ocean current runs within 2 cells (sharpens coastal winters —
+/// True if a cold ocean current runs within 2 cells (sharpens coastal winters â€”
 /// e.g. the Oyashio off Kamchatka, the Labrador off Hudson Bay).
 fn cold_current_near(buf: &WorldBuffer, x: u32, y: u32) -> bool {
     // The currents column isn't loaded in every phase (e.g. settlements); without
-    // it there's nothing to test — skip rather than index an empty buffer (panic).
+    // it there's nothing to test â€” skip rather than index an empty buffer (panic).
     if buf.current_type.is_empty() { return false; }
     for dy in -2i32..=2 {
         for dx in -2i32..=2 {
@@ -150,8 +150,8 @@ fn cold_current_near(buf: &WorldBuffer, x: u32, y: u32) -> bool {
 }
 
 /// Continentality multiplier on the latitude base range. Maritime-exposed coasts
-/// (ocean upwind) get a damped range → mild winters (oceanic Cfb). Lee coasts and
-/// interiors keep the full continental range → cold winters. This is the fix that
+/// (ocean upwind) get a damped range â†’ mild winters (oceanic Cfb). Lee coasts and
+/// interiors keep the full continental range â†’ cold winters. This is the fix that
 /// lets Df/Dw climates form on mid-latitude EAST coasts (Vladivostok, Kamchatka,
 /// Hudson Bay) instead of reading as mild oceanic.
 fn continentality(buf: &WorldBuffer, x: u32, y: u32) -> f32 {
@@ -169,9 +169,9 @@ fn continentality(buf: &WorldBuffer, x: u32, y: u32) -> f32 {
     c
 }
 
-/// Coldest- and warmest-month temperatures at a cell: annual mean ± a
+/// Coldest- and warmest-month temperatures at a cell: annual mean Â± a
 /// continentality-aware seasonal range (winter dips more than summer rises).
-/// The single source of truth for Köppen's C↔D split and the settlement winter
+/// The single source of truth for KÃ¶ppen's Câ†”D split and the settlement winter
 /// gate, so they stay consistent.
 pub(crate) fn seasonal_temps(buf: &WorldBuffer, x: u32, y: u32) -> (f32, f32) {
     let idx = buf.idx(x, y);
@@ -181,7 +181,7 @@ pub(crate) fn seasonal_temps(buf: &WorldBuffer, x: u32, y: u32) -> (f32, f32) {
     (t - range * 0.55, t + range * 0.45)
 }
 
-/// Estimate months with temperature above 10°C from warmest/coldest month.
+/// Estimate months with temperature above 10Â°C from warmest/coldest month.
 fn months_above_10(t_coldest: f32, t_warmest: f32) -> f32 {
     if t_warmest < 10.0 { return 0.0; }
     if t_coldest >= 10.0 { return 12.0; }
@@ -194,7 +194,7 @@ fn months_above_10(t_coldest: f32, t_warmest: f32) -> f32 {
     (12.0 / std::f32::consts::PI) * ratio.acos()
 }
 
-/// Approximate number of months above 10 °C at a cell — a continuous
+/// Approximate number of months above 10 Â°C at a cell â€” a continuous
 /// growing-season proxy (0..12) reused by the settlement carrying-capacity model.
 /// Mirrors the t_coldest/t_warmest derivation in `classify_cell`.
 pub(crate) fn growing_season_months(buf: &WorldBuffer, x: u32, y: u32) -> f32 {
@@ -245,7 +245,7 @@ fn is_upwind_warm_current(buf: &WorldBuffer, x: u32, y: u32) -> bool {
             if buf.terrain[ni] == 0 {
                 if buf.current_type[ni] == 1 { return true; }
             } else if s > 1 {
-                // Hit land beyond the immediate neighbour → stop probing this ray.
+                // Hit land beyond the immediate neighbour â†’ stop probing this ray.
                 break;
             }
         }
@@ -255,36 +255,36 @@ fn is_upwind_warm_current(buf: &WorldBuffer, x: u32, y: u32) -> bool {
 
 /// East-Asian-style winter-dry monsoon detector. The continental winter monsoon
 /// (the Siberian High pumping cold, bone-dry air offshore) gives mid-latitude
-/// East Asia its arid winters, while the summer monsoon brings the year's rain —
-/// the only mechanism that produces Köppen's dry-winter `w` third letter at
+/// East Asia its arid winters, while the summer monsoon brings the year's rain â€”
+/// the only mechanism that produces KÃ¶ppen's dry-winter `w` third letter at
 /// continental latitudes (Dwa/Dwb/Dwc/Dwd in Manchuria, Korea, NE China, SE
 /// Siberia). Fires on a lee/east coast or near-interior of a large continent (the
 /// prevailing westerlies arrive over LAND, not ocean) that still has a warm/
-/// neutral sea within reach to its EAST / SOUTH-EAST — the summer monsoon's
+/// neutral sea within reach to its EAST / SOUTH-EAST â€” the summer monsoon's
 /// moisture source. West coasts (westerlies off the ocean) and cold-current
 /// coasts never qualify.
 fn winter_dry_monsoon(buf: &WorldBuffer, x: u32, y: u32) -> bool {
     let lat = buf.latitude(y);
     let abs_lat = lat.abs();
-    // LOCKED to the subtropics (23–45°). The dry-winter monsoon climates (Cw*/Dw*)
-    // belong to the subtropical/warm-temperate east-coast band — NOT the cold
+    // LOCKED to the subtropics (23â€“45Â°). The dry-winter monsoon climates (Cw*/Dw*)
+    // belong to the subtropical/warm-temperate east-coast band â€” NOT the cold
     // high-mid latitudes. This hard cap keeps "Continental Forest (dry winter)"
-    // (Dwb) out of places like 52°N (which must read humid-continental Dfb).
+    // (Dwb) out of places like 52Â°N (which must read humid-continental Dfb).
     if abs_lat < 23.0 || abs_lat > 45.0 { return false; }
     // (1) DEEP continental interior on the windward (westerly) side. The Siberian-
     //     High winter monsoon only builds over a giant landmass, so there must be
     //     NO ocean upwind within a *continental* reach (~1700 km). This is the key
-    //     test that excludes small continents — Europe has the Atlantic close to
+    //     test that excludes small continents â€” Europe has the Atlantic close to
     //     its west, and islands (Japan) have sea upwind, so they never qualify;
     //     only a true east coast of a vast continent (NE Asia) passes.
     let big = (buf.width / 24).max(20) as i32;
     // Use OPEN ocean: a shallow marginal/shelf sea on the windward side (e.g. the
-    // Yellow Sea west of Korea) must NOT disqualify a genuine monsoon east coast —
+    // Yellow Sea west of Korea) must NOT disqualify a genuine monsoon east coast â€”
     // only deep open ocean upwind (the Atlantic west of Europe) does.
     if upwind_is_open_ocean(buf, x, y, big) { return false; }
     // (2) A LARGE OPEN OCEAN to the east / equatorward-east (the summer monsoon
     //     source). Small / enclosed seas (Mediterranean, Black, Caspian) don't
-    //     count — they hit a far shore quickly, so the open-water run is short.
+    //     count â€” they hit a far shore quickly, so the open-water run is short.
     let eqdir = if lat >= 0.0 { 1i32 } else { -1 }; // toward the equator
     let h = buf.height as i32;
     let reach = (buf.width / 45).max(10) as i32;     // first-contact within ~800 km
@@ -332,7 +332,7 @@ fn seasonal_split(
     cold_near: bool,
 ) -> (f32, f32) {
     // East-Asian continental winter monsoon: bone-dry winters (Siberian High) +
-    // a wet summer monsoon. This is the ONLY split that clears Köppen's
+    // a wet summer monsoon. This is the ONLY split that clears KÃ¶ppen's
     // winter<summer/3 dry-winter test at continental latitudes, so it's what
     // turns NE Asia into Cwa/Cwb and Dwa/Dwb/Dwc/Dwd instead of Cfa/Dfb. The
     // contrast eases a touch at the cold poleward edge.
@@ -343,7 +343,7 @@ fn seasonal_split(
 
     // Equatorial: nearly even
     if abs_lat < 10.0 {
-        let t = abs_lat / 10.0; // 0 at equator, 1 at 10°
+        let t = abs_lat / 10.0; // 0 at equator, 1 at 10Â°
         let summer = 1.05 + t * 0.55; // ramps from 1.05 to 1.60
         let winter = 0.95 - t * 0.55;
         return (summer, winter);
@@ -360,7 +360,7 @@ fn seasonal_split(
     // Subtropical to mid-latitude (25-45): depends on wind/ocean
     if abs_lat < 45.0 {
         // Smooth transition from trades to westerlies influence
-        let t = (abs_lat - 25.0) / 20.0; // 0 at 25°, 1 at 45°
+        let t = (abs_lat - 25.0) / 20.0; // 0 at 25Â°, 1 at 45Â°
         // Trade influence fades, westerly influence grows
         let trade_influence = 1.0 - t;
         let westerly_influence = t;
@@ -368,17 +368,17 @@ fn seasonal_split(
         if windward_ocean && !upwind_warm && cold_near && abs_lat >= 30.0 {
             // Mediterranean pattern: the subtropical high parks over west-facing
             // coasts in summer (dry) while the winter westerlies bring the rain.
-            // REQUIRES a cold offshore current — real Cs sits beside the cold
+            // REQUIRES a cold offshore current â€” real Cs sits beside the cold
             // eastern-boundary currents (California, Canary, Humboldt, Benguela,
             // W-Australian). This keeps Mediterranean OFF warm/neutral marginal-sea
             // east coasts like Korea (Yellow Sea), which were wrongly reading Csa.
-            // The previous split only became dry enough to satisfy Köppen's
-            // summer<winter/3 test within a sliver near 45°, so Cs almost never
-            // appeared. Ramp the dry-summer strength in quickly from 30° so Cs
-            // covers its real ~30–45° band (Iberia, California, Chile, Cape, SW
+            // The previous split only became dry enough to satisfy KÃ¶ppen's
+            // summer<winter/3 test within a sliver near 45Â°, so Cs almost never
+            // appeared. Ramp the dry-summer strength in quickly from 30Â° so Cs
+            // covers its real ~30â€“45Â° band (Iberia, California, Chile, Cape, SW
             // Australia).
-            // Ramp the dry summer in from ~30° (was effectively ~32°) and dry it a
-            // touch harder, so the whole 30–45° windward band clears Köppen's
+            // Ramp the dry summer in from ~30Â° (was effectively ~32Â°) and dry it a
+            // touch harder, so the whole 30â€“45Â° windward band clears KÃ¶ppen's
             // summer<winter/3 test and reads Cs.
             let med = ((abs_lat - 29.0) / 3.0).clamp(0.0, 1.0);
             let summer = (0.52 - 0.36 * med).max(0.15);
@@ -387,18 +387,18 @@ fn seasonal_split(
         }
 
         if windward_ocean && upwind_warm {
-            // Warm current → year-round moisture
+            // Warm current â†’ year-round moisture
             return (0.80, 1.20);
         }
 
         if near_ocean && westerly_influence > 0.3 {
-            // Near coast but NOT windward — i.e. *east* coasts in the westerly
+            // Near coast but NOT windward â€” i.e. *east* coasts in the westerly
             // belt (ocean lies downwind to the east). These are humid
-            // subtropical / oceanic (Cfa/Cfb), with NO dry summer — frequently
+            // subtropical / oceanic (Cfa/Cfb), with NO dry summer â€” frequently
             // summer-wet (monsoonal east coasts: SE USA, E China, SE Brazil, E
-            // Australia). The old split made winter strongly dominant near 45°
-            // (summer 0.40 / winter 1.60), which tripped Köppen's dry-summer
-            // test and put *Mediterranean* on east coasts. Keep summer ≳ winter
+            // Australia). The old split made winter strongly dominant near 45Â°
+            // (summer 0.40 / winter 1.60), which tripped KÃ¶ppen's dry-summer
+            // test and put *Mediterranean* on east coasts. Keep summer â‰³ winter
             // so these never read as Cs; the Mediterranean (dry-summer) pattern
             // is reserved for the windward west-coast branch above.
             let summer = 1.30 * trade_influence + 1.05 * westerly_influence;
@@ -416,7 +416,7 @@ fn seasonal_split(
     (1.10, 0.85)
 }
 
-/// Classify a single land cell's Köppen zone.
+/// Classify a single land cell's KÃ¶ppen zone.
 fn classify_cell(buf: &WorldBuffer, x: u32, y: u32) -> u8 {
     let idx = buf.idx(x, y);
     let temp = buf.temperature[idx];
@@ -446,7 +446,7 @@ fn classify_cell(buf: &WorldBuffer, x: u32, y: u32) -> u8 {
 
     // Seasonal precipitation split. Prefer the EMERGENT summer fraction produced by
     // the two-season precipitation model (precipitation.rs writes precip_summer_frac
-    // = summer share of annual ×255). It averages to the annual (2·frac + 2·(1−frac)
+    // = summer share of annual Ã—255). It averages to the annual (2Â·frac + 2Â·(1âˆ’frac)
     // = 2), matching the old multiplier semantics. Fall back to the latitude-based
     // `seasonal_split` only when the column is absent/zero (an old save mid-migration,
     // before its next ocean-atmosphere run rewrites it).
@@ -471,7 +471,7 @@ fn classify_cell(buf: &WorldBuffer, x: u32, y: u32) -> u8 {
 
     let n_months_10 = months_above_10(t_coldest, t_warmest);
 
-    // Precipitation seasonality (third Köppen letter f / s / w).
+    // Precipitation seasonality (third KÃ¶ppen letter f / s / w).
     //   s = dry summer, w = dry winter, f = no marked dry season.
     // A simplified but symmetric ratio test (a season < 1/3 of the other) so the
     // full s/w/f variety can actually appear.
@@ -484,10 +484,10 @@ fn classify_cell(buf: &WorldBuffer, x: u32, y: u32) -> u8 {
     let extreme_cold = t_coldest < -38.0;        // d
 
     // Highland (H): genuine high-elevation alpine climate, independent of the
-    // temperature/precip class. The treeline falls with latitude — tropical peaks
-    // stay forested/temperate much higher than polar ones — so use a
+    // temperature/precip class. The treeline falls with latitude â€” tropical peaks
+    // stay forested/temperate much higher than polar ones â€” so use a
     // latitude-adjusted threshold instead of a blanket 0.55. This frees temperate
-    // and Mediterranean UPLANDS (≈0.42–0.55) to read Cfb / CSb (highland-
+    // and Mediterranean UPLANDS (â‰ˆ0.42â€“0.55) to read Cfb / CSb (highland-
     // Mediterranean) instead of being swallowed by H, while tropical summits still
     // need to be genuinely high before turning alpine.
     let treeline = (0.62 - abs_lat * 0.0030).clamp(0.42, 0.62);
@@ -553,11 +553,11 @@ fn classify_cell(buf: &WorldBuffer, x: u32, y: u32) -> u8 {
 
 /// Soft latitude plausibility guardrails.
 ///
-/// Real Köppen is set by temperature/precipitation, but threshold artefacts let
+/// Real KÃ¶ppen is set by temperature/precipitation, but threshold artefacts let
 /// implausible zones slip through (the classic "temperate broadleaf forest on
 /// the equator"). These clamps forbid the clearly-impossible cases while leaving
 /// the borderline ones to the current-override pass, which can still extend a
-/// zone poleward (Gulf-Stream style). Mountains (high elevation) are exempt —
+/// zone poleward (Gulf-Stream style). Mountains (high elevation) are exempt â€”
 /// they legitimately host cold climates at any latitude.
 fn latitude_guardrail(code: u8, abs_lat: f32, elevation: f32, precip: f32, temp: f32) -> u8 {
     // Above the treeline we don't second-guess the classifier.
@@ -565,9 +565,9 @@ fn latitude_guardrail(code: u8, abs_lat: f32, elevation: f32, precip: f32, temp:
 
     // MONSOON LATITUDE LOCK: the dry-winter monsoon climates (Cw*/Dw*) belong to
     // the subtropical/warm-temperate east-coast band. They must NEVER appear in
-    // the cold high-mid latitudes (e.g. Dwb at 52°N over Europe). Above 45° demote
+    // the cold high-mid latitudes (e.g. Dwb at 52Â°N over Europe). Above 45Â° demote
     // any dry-winter class to its no-dry-season (f) equivalent. (winter_dry_monsoon
-    // is already capped at 45° upstream; this is a hard backstop on the output.)
+    // is already capped at 45Â° upstream; this is a hard backstop on the output.)
     if abs_lat > 45.0 {
         match code {
             CWA => return CFA,
@@ -591,7 +591,7 @@ fn latitude_guardrail(code: u8, abs_lat: f32, elevation: f32, precip: f32, temp:
     let is_subarctic = matches!(code, DFC | DFD | DWC | DWD | DSC | DSD);
     let is_polar = code == ET || code == EF;
 
-    // Deep tropics (<12°): no temperate/continental forest. Reclassify by moisture.
+    // Deep tropics (<12Â°): no temperate/continental forest. Reclassify by moisture.
     if abs_lat < 12.0 && (is_temperate || is_continental) {
         let b_thresh = 20.0 * temp + 140.0;
         if precip < b_thresh * 0.5 { return BWH; }
@@ -602,7 +602,7 @@ fn latitude_guardrail(code: u8, abs_lat: f32, elevation: f32, precip: f32, temp:
     }
 
     // Tropical zones can't sit in the mid-latitudes. Allow a little overshoot
-    // (monsoon/savanna reach ~30°); beyond that, demote toward subtropical.
+    // (monsoon/savanna reach ~30Â°); beyond that, demote toward subtropical.
     if abs_lat > 32.0 && is_tropical {
         let b_thresh = 20.0 * temp + 140.0;
         if precip < b_thresh { return if temp >= 18.0 { BSH } else { BSK }; }
@@ -611,10 +611,10 @@ fn latitude_guardrail(code: u8, abs_lat: f32, elevation: f32, precip: f32, temp:
 
     // Cold-computed cells in the tropics / subtropics are an over-cooling
     // artefact (upwelling + cold-current coasts pull the annual mean down). Real
-    // such coasts are cool deserts, steppe or mild temperate zones — *never*
-    // subarctic or polar. The old guardrail bumped polar→DFC all the way down to
-    // 38°, so an over-cooled tropical coast (ET) became subarctic (Dfc) — the
-    // "subarctic climate on a tropical coastline" bug. Below ~25° demote any
+    // such coasts are cool deserts, steppe or mild temperate zones â€” *never*
+    // subarctic or polar. The old guardrail bumped polarâ†’DFC all the way down to
+    // 38Â°, so an over-cooled tropical coast (ET) became subarctic (Dfc) â€” the
+    // "subarctic climate on a tropical coastline" bug. Below ~25Â° demote any
     // polar/continental class by moisture instead (cool desert / steppe / mild
     // temperate, like coastal Peru or Namibia).
     if abs_lat < 25.0 && (is_polar || is_continental) {
@@ -624,10 +624,10 @@ fn latitude_guardrail(code: u8, abs_lat: f32, elevation: f32, precip: f32, temp:
         return CFA;
     }
 
-    // Between 25-38° a cold-current / upwelling coast can still over-cool into
+    // Between 25-38Â° a cold-current / upwelling coast can still over-cool into
     // polar or *subarctic*. Those are impossible at sea level in the subtropics
     // (the teal "subarctic next to a hot desert" coastal strip). Demote by
-    // moisture to a cool desert / steppe / oceanic class instead — the real
+    // moisture to a cool desert / steppe / oceanic class instead â€” the real
     // Atacama / Namib / Benguela-coast outcome.
     if abs_lat < 38.0 && (is_polar || is_subarctic) {
         let b_thresh = 20.0 * temp + 140.0;
@@ -639,7 +639,7 @@ fn latitude_guardrail(code: u8, abs_lat: f32, elevation: f32, precip: f32, temp:
     code
 }
 
-/// Classify Köppen climate zones for all land cells, then apply current overrides.
+/// Classify KÃ¶ppen climate zones for all land cells, then apply current overrides.
 pub fn classify_koppen(buf: &mut WorldBuffer) {
     let w = buf.width;
     let h = buf.height;
@@ -664,8 +664,8 @@ pub fn classify_koppen(buf: &mut WorldBuffer) {
     apply_current_overrides(buf);
 
     // Pass 3: dissolve cell-by-cell CHECKERBOARDS first (a perfect checkerboard is
-    // stable under the 3×3 majority filter below — each cell keeps its four
-    // diagonal same-class neighbours — so it needs its own cardinal-neighbour pass),
+    // stable under the 3Ã—3 majority filter below â€” each cell keeps its four
+    // diagonal same-class neighbours â€” so it needs its own cardinal-neighbour pass),
     // then run the majority filter to clean up thin "zebra" stripes that arise when
     // the aridity / dry-season threshold flips between adjacent cells.
     break_koppen_checkerboards(buf, 3);
@@ -674,9 +674,9 @@ pub fn classify_koppen(buf: &mut WorldBuffer) {
 
 /// Dissolve cell-by-cell checkerboards and 1-cell speckle by CARDINAL-neighbour
 /// vote. A checkerboard cell has all four of its N/S/E/W neighbours in the *other*
-/// class (its own class survives only on the diagonals), so the 3×3 majority filter
+/// class (its own class survives only on the diagonals), so the 3Ã—3 majority filter
 /// can never break it. Here, if at least three of the four cardinal land-neighbours
-/// agree on a single class different from the cell's own, the cell adopts it — which
+/// agree on a single class different from the cell's own, the cell adopts it â€” which
 /// collapses checkerboards and thin diagonal stripes in a couple of passes while
 /// leaving genuine zone interiors (whose cardinals mostly match) untouched.
 fn break_koppen_checkerboards(buf: &mut WorldBuffer, passes: u32) {
@@ -712,7 +712,7 @@ fn break_koppen_checkerboards(buf: &mut WorldBuffer, passes: u32) {
     }
 }
 
-/// Replace each land cell whose class is a small minority among its 3×3
+/// Replace each land cell whose class is a small minority among its 3Ã—3
 /// neighbourhood with the locally dominant class. Removes single-cell stripes
 /// without blurring genuine zone boundaries.
 fn smooth_koppen(buf: &mut WorldBuffer, passes: u32) {
@@ -751,11 +751,11 @@ fn smooth_koppen(buf: &mut WorldBuffer, passes: u32) {
     }
 }
 
-/// Apply warm/cold current influence on coastal Köppen zones.
+/// Apply warm/cold current influence on coastal KÃ¶ppen zones.
 ///
 /// Influence is accumulated from each current source into a continuous float
 /// field (walking downwind onto land), then **blurred** before being thresholded
-/// and applied. The previous version overwrote Köppen directly along each
+/// and applied. The previous version overwrote KÃ¶ppen directly along each
 /// source's discretized downwind ray; adjacent sources produced parallel rays
 /// that read as a diagonal "zebra" of (e.g.) Mediterranean cells. Smearing the
 /// influence into a smooth coastal band first removes the rays while keeping the
@@ -828,7 +828,7 @@ fn apply_current_overrides(buf: &mut WorldBuffer) {
         }
     }
 
-    // ── Hard rule: kill Mediterranean (Cs) on warm-current / lee coasts ───────
+    // â”€â”€ Hard rule: kill Mediterranean (Cs) on warm-current / lee coasts â”€â”€â”€â”€â”€â”€â”€
     // A real Mediterranean climate sits on a WINDWARD (west-facing) coast beside a
     // COLD offshore current. Any Cs cell that carries ANY warm-current influence
     // (even weak, below the override threshold) OR that is not a windward coast
@@ -914,3 +914,4 @@ fn cold_override(k: u8, target_lat: f32, windward: bool) -> Option<u8> {
         _ => None,
     }
 }
+

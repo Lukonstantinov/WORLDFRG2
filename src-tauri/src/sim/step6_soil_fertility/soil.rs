@@ -1,5 +1,5 @@
-use super::world_buffer::WorldBuffer;
-use super::koppen::*;
+﻿use crate::sim::world_buffer::WorldBuffer;
+use crate::sim::koppen::*;
 
 /// Soil type codes (1-based, 0=none)
 pub const SOIL_OXISOL: u8 = 1;    // Tropical weathered
@@ -10,12 +10,12 @@ pub const SOIL_SPODOSOL: u8 = 5;  // Boreal/podzol
 pub const SOIL_ARIDISOL: u8 = 6;  // Desert/dry
 pub const SOIL_HISTOSOL: u8 = 7;  // Organic/peat
 pub const SOIL_ENTISOL: u8 = 8;   // Young/undeveloped
-pub const SOIL_ANDISOL: u8 = 9;   // Volcanic (weathered ash apron — very fertile)
+pub const SOIL_ANDISOL: u8 = 9;   // Volcanic (weathered ash apron â€” very fertile)
 pub const SOIL_GELISOL: u8 = 10;  // Permafrost
 pub const SOIL_ALLUVIAL: u8 = 11; // River-deposited
-pub const SOIL_VOLCANIC_ASH: u8 = 12; // Young volcanic ash at the vent — richest of all
+pub const SOIL_VOLCANIC_ASH: u8 = 12; // Young volcanic ash at the vent â€” richest of all
 
-/// Classify soil types based on Köppen climate.
+/// Classify soil types based on KÃ¶ppen climate.
 /// Matches WF1 soil-types.ts algorithm.
 pub fn classify_soil(buf: &mut WorldBuffer) {
     for i in 0..buf.total() {
@@ -32,7 +32,7 @@ pub fn classify_soil(buf: &mut WorldBuffer) {
             continue;
         }
 
-        // Köppen-based classification
+        // KÃ¶ppen-based classification
         buf.soil_type[i] = match buf.koppen[i] {
             AF | AM => SOIL_OXISOL,
             AW => SOIL_ULTISOL,
@@ -51,7 +51,7 @@ pub fn classify_soil(buf: &mut WorldBuffer) {
 
 /// Lay down a fertile Andisol apron of weathered volcanic ash around each vent.
 /// Cells within a short radius of a volcanic cell (but not volcanic themselves)
-/// get ash-fallout soil — unless they are already river alluvium or ice. Run
+/// get ash-fallout soil â€” unless they are already river alluvium or ice. Run
 /// after `classify_soil`, before `apply_alluvial_override` (rivers win over ash).
 pub fn apply_volcanic_apron(buf: &mut WorldBuffer) {
     let w = buf.width as i32;
@@ -81,10 +81,10 @@ pub fn apply_volcanic_apron(buf: &mut WorldBuffer) {
 
 /// Override soil to alluvial near major rivers.
 /// Rivers data provides proximity information.
-pub fn apply_alluvial_override(buf: &mut WorldBuffer, rivers: &[super::rivers::River]) {
+pub fn apply_alluvial_override(buf: &mut WorldBuffer, rivers: &[crate::sim::rivers::River]) {
     for river in rivers {
         // Alluvium forms along the lower course of any sizeable river, and along
-        // MOST of a navigable trunk — its floodplain is the historic breadbasket
+        // MOST of a navigable trunk â€” its floodplain is the historic breadbasket
         // (the Nile/Indus/Mesopotamia geometry) and where valley towns cluster.
         if river.width < 2.0 && !river.navigable { continue; }
 
@@ -108,3 +108,7 @@ pub fn apply_alluvial_override(buf: &mut WorldBuffer, rivers: &[super::rivers::R
         }
     }
 }
+
+
+
+

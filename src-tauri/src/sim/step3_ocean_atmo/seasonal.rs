@@ -1,37 +1,37 @@
-use super::koppen::seasonal_range_base;
+﻿use crate::sim::koppen::seasonal_range_base;
 use super::ocean::belt_wind;
-use super::world_buffer::WorldBuffer;
+use crate::sim::world_buffer::WorldBuffer;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Two-season winds via a thermal land–sea low/high (the surface consequence of
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Two-season winds via a thermal landâ€“sea low/high (the surface consequence of
 // the thermal-wind relation)
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // A single annual-mean wind field cannot reverse between seasons, so real monsoon
 // behaviour (wet summer coast, dry winter, the reason a warm-sea desert coast like
-// Somalia/Arabia stays arid) cannot emerge. We model two insolation states —
-// boreal summer (`sun_sign = +1`, ≈ July: NH warms, SH cools) and boreal winter
-// (`sun_sign = -1`, ≈ January) — and in each derive the surface wind as the belt
+// Somalia/Arabia stays arid) cannot emerge. We model two insolation states â€”
+// boreal summer (`sun_sign = +1`, â‰ˆ July: NH warms, SH cools) and boreal winter
+// (`sun_sign = -1`, â‰ˆ January) â€” and in each derive the surface wind as the belt
 // wind PLUS a monsoon perturbation that blows down the seasonal pressure gradient
-// toward the thermal low (hot land in summer → onshore inflow; cold land in winter
-// → offshore outflow).
+// toward the thermal low (hot land in summer â†’ onshore inflow; cold land in winter
+// â†’ offshore outflow).
 //
-// The raw thermal-wind equation ∂v_g/∂ln p = −(R_d/f)·k×∇T gives vertical shear and
-// is singular at the equator (f→0), exactly the monsoon belt, so it can't be used
-// directly in a single-layer model. Its SURFACE consequence — a thermal low over
-// hot land driving cross-isobaric inflow — is what we implement, from fields we
+// The raw thermal-wind equation âˆ‚v_g/âˆ‚ln p = âˆ’(R_d/f)Â·kÃ—âˆ‡T gives vertical shear and
+// is singular at the equator (fâ†’0), exactly the monsoon belt, so it can't be used
+// directly in a single-layer model. Its SURFACE consequence â€” a thermal low over
+// hot land driving cross-isobaric inflow â€” is what we implement, from fields we
 // already have (temperature seasonal amplitude, distance_to_ocean, land geometry).
 
 /// Monsoon-perturbation gain: converts the smoothed seasonal thermal anomaly's
-/// spatial gradient (°C per sampling step) into a wind-vector contribution. Tuned so
-/// a strong land–sea contrast (a coast in high summer) can fully reverse the local
+/// spatial gradient (Â°C per sampling step) into a wind-vector contribution. Tuned so
+/// a strong landâ€“sea contrast (a coast in high summer) can fully reverse the local
 /// coastal wind (onshore monsoon) while a flat interior/open-ocean field leaves the
 /// prevailing belt untouched.
 const MONSOON_WIND_GAIN: f32 = 0.10;
 /// Cap on the perturbation magnitude (in belt-wind units) so the monsoon can turn
 /// the wind but the planetary belts still dominate the global circulation.
 const MONSOON_WIND_CAP: f32 = 1.4;
-/// Half-separation (cells) used to sample the thermal gradient — a couple of cells
+/// Half-separation (cells) used to sample the thermal gradient â€” a couple of cells
 /// so a one-cell-wide coast still yields a stable gradient after smoothing.
 const GRAD_STEP: i32 = 2;
 /// Seasonal ITCZ migration amplitude (degrees) toward the summer hemisphere. The
@@ -44,11 +44,11 @@ pub struct SeasonalWind {
     pub vy: Vec<f32>,
 }
 
-/// Seasonal near-surface temperature anomaly (°C, relative to the annual mean) at a
-/// cell for insolation state `sun_sign` (+1 boreal summer, −1 boreal winter). Land
+/// Seasonal near-surface temperature anomaly (Â°C, relative to the annual mean) at a
+/// cell for insolation state `sun_sign` (+1 boreal summer, âˆ’1 boreal winter). Land
 /// carries most of the swing (amplified in continental interiors); the ocean barely
-/// moves. The land–sea DIFFERENCE in this field is the monsoon's pressure engine:
-/// warm anomaly → thermal low, cool anomaly → thermal high.
+/// moves. The landâ€“sea DIFFERENCE in this field is the monsoon's pressure engine:
+/// warm anomaly â†’ thermal low, cool anomaly â†’ thermal high.
 pub fn season_temp_anomaly(buf: &WorldBuffer, x: u32, y: u32, sun_sign: f32) -> f32 {
     let idx = buf.idx(x, y);
     let lat = buf.latitude(y);
@@ -80,7 +80,7 @@ pub fn compute_seasonal_wind(buf: &WorldBuffer, sun_sign: f32) -> SeasonalWind {
     let h = buf.height;
     let n = buf.total();
 
-    // ── Thermal-anomaly (∝ −pressure) field, then smooth ──
+    // â”€â”€ Thermal-anomaly (âˆ âˆ’pressure) field, then smooth â”€â”€
     let mut anom = vec![0.0f32; n];
     for y in 0..h {
         for x in 0..w {
@@ -109,7 +109,7 @@ pub fn compute_seasonal_wind(buf: &WorldBuffer, sun_sign: f32) -> SeasonalWind {
     }
     let anom = a;
 
-    // ── Belt wind + monsoon perturbation ──
+    // â”€â”€ Belt wind + monsoon perturbation â”€â”€
     let mut vx = vec![0.0f32; n];
     let mut vy = vec![0.0f32; n];
     for y in 0..h {
@@ -124,8 +124,8 @@ pub fn compute_seasonal_wind(buf: &WorldBuffer, sun_sign: f32) -> SeasonalWind {
         let (st, ct) = theta.sin_cos();
         for x in 0..w {
             let i = buf.idx(x, y);
-            // ∇anom via a fixed-step central difference (points toward warmer / lower
-            // pressure — the direction surface air is drawn).
+            // âˆ‡anom via a fixed-step central difference (points toward warmer / lower
+            // pressure â€” the direction surface air is drawn).
             let gx = sample_anom(&anom, buf, x as i32 + GRAD_STEP, y as i32)
                 - sample_anom(&anom, buf, x as i32 - GRAD_STEP, y as i32);
             let gy = sample_anom(&anom, buf, x as i32, y as i32 + GRAD_STEP)
@@ -172,7 +172,7 @@ mod tests {
     use rusqlite::Connection;
 
     /// A hot summer continent beside a cool ocean must bend the coastal wind ONSHORE
-    /// in summer and OFFSHORE in winter — the monsoon reversal.
+    /// in summer and OFFSHORE in winter â€” the monsoon reversal.
     #[test]
     fn thermal_low_reverses_coastal_wind() {
         let (w, h) = (16u32, 160u32);
@@ -206,12 +206,14 @@ mod tests {
         let summer = compute_seasonal_wind(&buf, 1.0); // NH summer
         let winter = compute_seasonal_wind(&buf, -1.0); // NH winter
         let i = buf.idx(x, row);
-        // North is −y here (latitude increases as y decreases). Summer flow should
+        // North is âˆ’y here (latitude increases as y decreases). Summer flow should
         // gain a northward (onshore, toward the hot interior) component vs winter.
         assert!(
             summer.vy[i] < winter.vy[i],
-            "summer wind should turn more onshore (−y) than winter: summer {} winter {}",
+            "summer wind should turn more onshore (âˆ’y) than winter: summer {} winter {}",
             summer.vy[i], winter.vy[i]
         );
     }
 }
+
+
