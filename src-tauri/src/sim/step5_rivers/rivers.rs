@@ -1018,7 +1018,7 @@ mod tests {
             is_volcanic: Vec::new(),
             temperature: Vec::new(),
             precipitation: vec![1200.0f32; n], // wet, so channels form
-            koppen: vec![super::super::koppen::CFB; n], // temperate, not EF/arid
+            koppen: vec![crate::sim::koppen::CFB; n], // temperate, not EF/arid
             soil_type: Vec::new(),
             fertility: Vec::new(),
             fishery: Vec::new(),

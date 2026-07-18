@@ -130,28 +130,55 @@ fn orographic_multiplier(buf: &WorldBuffer, x: u32, y: u32, wvx: f32, wvy: f32) 
     1.0
 }
 
-/// ITCZ latitude shift from land distribution (monsoon asymmetry). Range Â±12Â°.
-fn compute_itcz_shift(buf: &WorldBuffer) -> f32 {
-    let (mut nh_land, mut sh_land, mut nh_total, mut sh_total) = (0.0f32, 0.0, 0.0, 0.0);
-    for y in 0..buf.height {
-        let lat = buf.latitude(y);
-        let abs_lat = lat.abs();
-        if abs_lat > 30.0 { continue; }
-        let weight = 1.0 - abs_lat / 30.0;
-        for x in 0..buf.width {
-            let is_land = buf.terrain[buf.idx(x, y)] == 1;
-            if lat >= 0.0 {
-                nh_total += weight;
-                if is_land { nh_land += weight; }
-            } else {
-                sh_total += weight;
-                if is_land { sh_land += weight; }
-            }
+/// Per-column ITCZ latitude shift from local land distribution.
+///
+/// The ITCZ position varies strongly by longitude: it migrates to 15-20 deg N
+/// over West Africa / the Sahel (drawn by the Saharan heat low) but stays
+/// near 5-8 deg N over the Indian Ocean east of Africa, and near 5-10 deg N
+/// over the open Pacific. A single global shift treats every longitude the
+/// same and over-rains eastern tropical Africa relative to western Africa.
+///
+/// Here we compute a per-column raw shift (same NH/SH land-fraction formula
+/// applied to each x-column) then smooth over a +/-30 deg longitude window so
+/// continental-scale patterns emerge without single-cell noise. Each cell in
+/// season_precip uses its own column's shift.
+fn compute_itcz_shift_zonal(buf: &WorldBuffer) -> Vec<f32> {
+    let w = buf.width;
+    let h = buf.height;
+    // Smoothing window: approx 30 deg longitude at any grid size (min 8 cells).
+    let radius = ((w as f32 * 30.0 / 360.0) as i32).max(8);
+
+    // Pass 1: raw per-column shift.
+    let mut raw = vec![0.0f32; w as usize];
+    for x in 0..w {
+        let (mut nh_l, mut sh_l, mut nh_t, mut sh_t) = (0.0f32, 0.0, 0.0, 0.0);
+        for y in 0..h {
+            let lat = buf.latitude(y);
+            let abs_lat = lat.abs();
+            if abs_lat > 30.0 { continue; }
+            let wt = 1.0 - abs_lat / 30.0;
+            let land = buf.terrain[buf.idx(x, y)] == 1;
+            if lat >= 0.0 { nh_t += wt; if land { nh_l += wt; } }
+            else          { sh_t += wt; if land { sh_l += wt; } }
+        }
+        if nh_t > 0.0 && sh_t > 0.0 {
+            raw[x as usize] = ((nh_l / nh_t - sh_l / sh_t) * 20.0).clamp(-12.0, 12.0);
         }
     }
-    if nh_total == 0.0 || sh_total == 0.0 { return 0.0; }
-    let diff = nh_land / nh_total - sh_land / sh_total;
-    (diff * 20.0).clamp(-12.0, 12.0)
+
+    // Pass 2: triangular-weighted smoothing over +/-radius columns (x wraps).
+    let mut out = vec![0.0f32; w as usize];
+    for x in 0..w {
+        let (mut sum, mut wsum) = (0.0f32, 0.0f32);
+        for d in -radius..=radius {
+            let nx = buf.wrap_x(x as i32 + d);
+            let wt = 1.0 - d.unsigned_abs() as f32 / (radius + 1) as f32;
+            sum += raw[nx as usize] * wt;
+            wsum += wt;
+        }
+        out[x as usize] = sum / wsum;
+    }
+    out
 }
 
 /// Shifted ITCZ precipitation bonus (mm/yr) at a latitude.
@@ -418,9 +445,11 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
     // moisture-emission suppression under the Hadley subtropical high.
     let sea_suppress = compute_enclosed_suppression(buf, km_per_cell);
 
-    // Annual-mean land-asymmetry ITCZ shift; each season migrates Â±MIGRATE toward
-    // its summer hemisphere on top of this.
-    let itcz_asym = compute_itcz_shift(buf);
+    // Per-column ITCZ shift (zonal variation): each longitude gets its own
+    // NH/SH land-fraction shift, smoothed over ~30 deg of longitude.
+    // The seasonal migration (+/-MIGRATE) is kept separate and added per-cell
+    // inside season_precip so the column shift is reused across both seasons.
+    let itcz_col = compute_itcz_shift_zonal(buf);
 
     // Tropical land fraction (for monsoon strength).
     let (mut trop_land, mut trop_total) = (0.0f32, 0.0f32);
@@ -474,8 +503,8 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
         fwda_steps,
     };
     // Half-year precipitation for each insolation state (pre-blur, land cells only).
-    let p_hsn = season_precip(buf, &hsn.vx, &hsn.vy, 1.0, itcz_asym + migrate, &ctx);
-    let p_hss = season_precip(buf, &hss.vx, &hss.vy, -1.0, itcz_asym - migrate, &ctx);
+    let p_hsn = season_precip(buf, &hsn.vx, &hsn.vy, 1.0, &itcz_col,  migrate, &ctx);
+    let p_hss = season_precip(buf, &hss.vx, &hss.vy, -1.0, &itcz_col, -migrate, &ctx);
 
     // Blur each seasonal field (dissolves the advection "zebra") before combining,
     // so the derived summer fraction is as smooth as the annual total.
@@ -530,7 +559,8 @@ fn season_precip(
     wind_vx: &[f32],
     wind_vy: &[f32],
     sun_sign: f32,
-    itcz_shift: f32,
+    itcz_col: &[f32],  // per-column base ITCZ shift (zonal variation)
+    migrate: f32,       // seasonal ITCZ migration (+ve = NH summer)
     ctx: &SeasonCtx,
 ) -> Vec<f32> {
     let w = buf.width;
@@ -607,9 +637,12 @@ fn season_precip(
             let idx = buf.idx(x, y);
             if buf.terrain[idx] != 1 { precip[idx] = 0.0; continue; }
 
+            // Per-column ITCZ shift: the column's land-asymmetry base + seasonal migration.
+            let itcz_shift = itcz_col[x as usize] + migrate;
+
             // SEASON_SCALE applied to the moisture BASE only: the two seasons sum
             // to the annual base (0.5+0.5=1). ITCZ/monsoon bonuses are NOT
-            // scaled here because they only fire in one season anyway â€” their
+            // scaled here because they only fire in one season anyway - their
             // annual sum already equals the old model's full-year value.
             let mut moisture = moisture_field[idx].max(MOISTURE_FLOOR) * SEASON_SCALE;
 
@@ -755,12 +788,27 @@ fn season_precip(
                 if ny < 0 || ny >= h as i32 { return false; }
                 buf.terrain[buf.idx(buf.wrap_x(x as i32 + dx), ny as u32)] == 0
             });
-            // Frontal and jet-exit terms fire in BOTH seasons, so they are
-            // scaled by SEASON_SCALE here to prevent doubling in the annual sum
-            // (0.7Â·S + 1.3Â·S = 2Â·0.5 = 1.0 annual âœ“).
-            p += frontal_bonus(abs_lat, near_ocean)
-                * if local_summer { 0.7 } else { 1.3 }
-                * SEASON_SCALE;
+            // Frontal storm tracks: fire in BOTH seasons but with a latitude-
+            // dependent summer suppression in the 28-47 deg band where the
+            // subtropical high expands poleward in local summer and physically
+            // blocks the westerly storm track (the Mediterranean mechanism).
+            // Peak blocking near 37 deg; zero outside 28-47 deg. Annual sum
+            // preserved: (summer + winter) scale = 2.0 at every latitude.
+            //
+            //   |  lat   | summer scale | winter scale |
+            //   | <28    |     0.70     |     1.30     |  (unchanged)
+            //   |  37    |     0.10     |     1.90     |  (peak suppression)
+            //   |  47+   |     0.70     |     1.30     |  (unchanged)
+            let frontal_sub_block = if abs_lat >= 28.0 && abs_lat <= 47.0 {
+                if abs_lat < 37.0 { (abs_lat - 28.0) / 9.0 }
+                else              { (47.0 - abs_lat) / 10.0 }
+            } else { 0.0_f32 };
+            let frontal_scale = if local_summer {
+                0.70 - 0.60 * frontal_sub_block   // 0.70 -> 0.10 at peak
+            } else {
+                1.30 + 0.60 * frontal_sub_block   // 1.30 -> 1.90 at peak
+            };
+            p += frontal_bonus(abs_lat, near_ocean) * frontal_scale * SEASON_SCALE;
 
             // Jet-exit convergence dump (monsoon terminus), amplified up windward relief.
             if jet_wet > 0.0 {
