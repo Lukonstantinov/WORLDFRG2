@@ -649,17 +649,44 @@ fn season_precip(
             // interior stays a dry thermal trough. Hadley coefficient raised 0.6→0.75
             // to push the subtropical interior toward true (but not bone-dry) desert.
             let avail = ((moisture_field[idx] - MOISTURE_FLOOR) / 0.80).clamp(0.0, 1.0);
-            // Deep tropics: the ITCZ is thermally/convectively driven from warm
-            // ocean surface heat, not from prior large-scale moisture advection
-            // (the trade winds blow AWAY from the W-African coast rather than
-            // onshore). Allow a higher floor so ITCZ rainfall fires reliably in
-            // the 0-15° band even when advected moisture is low.
-            let conv_floor = if abs_lat < 15.0 { 0.65 } else { 0.30 };
+            // Tropical ITCZ conv_avail floor: raised to 0.65 only for cells that
+            // have warm (not cold, not enclosed) ocean within ~300 km to their
+            // EQUATORWARD side. That is where local ocean evaporation directly
+            // sustains deep convection (Nigeria coast / Gulf of Guinea, Congo
+            // coast, Amazon mouth). Interior land cells and coasts whose
+            // equatorward direction hits land before open ocean — Somalia, the
+            // Red Sea coast — keep the standard 0.30 floor and rely on advected
+            // moisture + monsoon_bonus to produce rainfall. This prevents the
+            // Horn of Africa from becoming wet (its equatorward scan hits Kenya
+            // land for >1000 km before reaching ocean).
+            let conv_floor = if abs_lat < 15.0 {
+                let ey = if lat >= 0.0 { 1i32 } else { -1i32 };
+                let km_pc = EARTH_CIRCUMFERENCE_KM / buf.width as f32;
+                let eq_range = ((300.0 / km_pc) as i32).max(3).min(30);
+                let near_warm_eq = (1..=eq_range).any(|s| {
+                    let ny = y as i32 + ey * s;
+                    if ny < 0 || ny >= h as i32 { return false; }
+                    let ni = buf.idx(x, ny as u32);
+                    buf.terrain[ni] == 0          // ocean cell
+                        && buf.current_type[ni] != 2  // not cold upwelling
+                        && ctx.sea_suppress[ni] < 0.3 // not enclosed subtropical sea
+                });
+                if near_warm_eq { 0.65 } else { 0.30 }
+            } else { 0.30 };
             let conv_avail = conv_floor + (1.0 - conv_floor) * avail;
             let mut conv_suppress = jet_dry;
             if ctx.cold_coast[idx] { conv_suppress *= 0.5; }
             if ctx.enclosed_coast[idx] { conv_suppress *= ENCLOSED_COAST_DRYING; }
-            let itcz_gate = conv_avail * conv_suppress * (1.0 - 0.75 * hadley_inversion(abs_lat));
+            // Hadley inversion weakened in LOCAL SUMMER: the subtropical high
+            // retreats poleward and the monsoon thermal trough takes over
+            // (India, West Africa, SE Asia monsoon belt 15-32°N/S). The full
+            // inversion strength only applies in local winter when the STH is
+            // at its equatorward limit. Factor 0.25 in summer preserves just
+            // enough subsidence to keep true subtropical deserts dry while
+            // allowing the monsoon trough to fire rainfall over India etc.
+            let hadley_summer_factor = if local_summer { 0.25 } else { 1.0 };
+            let itcz_gate = conv_avail * conv_suppress
+                * (1.0 - 0.75 * hadley_inversion(abs_lat) * hadley_summer_factor);
 
             let mut p = moisture * BASE_PRECIPITATION;
 
