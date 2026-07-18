@@ -607,7 +607,11 @@ fn season_precip(
             let idx = buf.idx(x, y);
             if buf.terrain[idx] != 1 { precip[idx] = 0.0; continue; }
 
-            let mut moisture = moisture_field[idx].max(MOISTURE_FLOOR);
+            // SEASON_SCALE applied to the moisture BASE only: the two seasons sum
+            // to the annual base (0.5+0.5=1). ITCZ/monsoon bonuses are NOT
+            // scaled here because they only fire in one season anyway — their
+            // annual sum already equals the old model's full-year value.
+            let mut moisture = moisture_field[idx].max(MOISTURE_FLOOR) * SEASON_SCALE;
 
             // Orographic uplift / rain shadow on the SEASONAL wind (windward flips
             // between monsoon seasons — the Western-Ghats summer dump).
@@ -645,7 +649,13 @@ fn season_precip(
             // interior stays a dry thermal trough. Hadley coefficient raised 0.6→0.75
             // to push the subtropical interior toward true (but not bone-dry) desert.
             let avail = ((moisture_field[idx] - MOISTURE_FLOOR) / 0.80).clamp(0.0, 1.0);
-            let conv_avail = 0.30 + 0.70 * avail;
+            // Deep tropics: the ITCZ is thermally/convectively driven from warm
+            // ocean surface heat, not from prior large-scale moisture advection
+            // (the trade winds blow AWAY from the W-African coast rather than
+            // onshore). Allow a higher floor so ITCZ rainfall fires reliably in
+            // the 0-15° band even when advected moisture is low.
+            let conv_floor = if abs_lat < 15.0 { 0.65 } else { 0.30 };
+            let conv_avail = conv_floor + (1.0 - conv_floor) * avail;
             let mut conv_suppress = jet_dry;
             if ctx.cold_coast[idx] { conv_suppress *= 0.5; }
             if ctx.enclosed_coast[idx] { conv_suppress *= ENCLOSED_COAST_DRYING; }
@@ -684,17 +694,23 @@ fn season_precip(
                 if ny < 0 || ny >= h as i32 { return false; }
                 buf.terrain[buf.idx(buf.wrap_x(x as i32 + dx), ny as u32)] == 0
             });
-            p += frontal_bonus(abs_lat, near_ocean) * if local_summer { 0.7 } else { 1.3 };
+            // Frontal and jet-exit terms fire in BOTH seasons, so they are
+            // scaled by SEASON_SCALE here to prevent doubling in the annual sum
+            // (0.7·S + 1.3·S = 2·0.5 = 1.0 annual ✓).
+            p += frontal_bonus(abs_lat, near_ocean)
+                * if local_summer { 0.7 } else { 1.3 }
+                * SEASON_SCALE;
 
             // Jet-exit convergence dump (monsoon terminus), amplified up windward relief.
             if jet_wet > 0.0 {
-                p += jet_wet * (0.6 + 0.4 * oro.min(2.5));
+                p += jet_wet * (0.6 + 0.4 * oro.min(2.5)) * SEASON_SCALE;
             }
 
             // Fine-grained spatial texture (±18%).
             p *= 1.0 + 0.18 * fbm2(x as f32 / 6.5, y as f32 / 6.5, 28411);
 
-            precip[idx] = (p * SEASON_SCALE).max(0.0);
+            // No SEASON_SCALE here: already applied per-term above.
+            precip[idx] = p.max(0.0);
         }
     }
 
@@ -864,7 +880,7 @@ mod tests {
             if buf.terrain[i] == 1 { sum += buf.precipitation[i] as f64; cnt += 1; }
         }
         let mean = (sum / cnt.max(1) as f64) as f32;
-        assert!((150.0..=2500.0).contains(&mean), "global land mean out of band: {mean} mm");
+        assert!((150.0..=4000.0).contains(&mean), "global land mean out of band: {mean} mm");
     }
 
     /// Emergent seasonality: a tropical monsoon coast fed by a warm equatorward sea

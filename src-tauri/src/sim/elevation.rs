@@ -1521,7 +1521,7 @@ mod tests {
         // A horizontal ridge across the middle: half-width 6 cells, tall, moderate character.
         let line = RidgeLine {
             points: vec![(20.0, 40.0), (100.0, 40.0)],
-            width: 6.0, height: 0.9, character: 0.5, erase: false,
+            width: 6.0, height: 0.9, character: 0.5, erase: false, noise: 0.0,
         };
         generate_ridges(&mut buf, 999, &[line]);
 
