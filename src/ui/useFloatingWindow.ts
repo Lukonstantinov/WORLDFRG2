@@ -3,7 +3,7 @@ import { useRef, useState, useCallback } from "react";
 /** A distinct, faint tint per floating window so the different sub-panels are easy
  *  to tell apart at a glance (they all share the same dark base otherwise). Each is
  *  a near-opaque dark colour with a subtle hue so text stays readable. Mirrored in
- *  docs/mockups/floating-window-tints.html. */
+ *  docs/mockups/_archive/floating-window-tints.html. */
 export const PANEL_TINTS = {
   settlement: "rgba(12,18,26,0.97)", // 🏙 Settlement window — neutral slate (base)
   house: "rgba(28,20,12,0.97)",     // ⚜️ House detail popup — bronze

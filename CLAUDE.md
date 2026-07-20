@@ -486,7 +486,7 @@ CLIMATE_CORRELATION_BRAINSTORM.md ← Real-climate correlation & biology proposa
 FINANCE_POLIS_SPECULATION_PLAN.md ← DLC 3: finance, the polis & speculation
 SOCIAL_ECONOMIC_WEALTH_PROPOSAL.md← Social/economic/wealth analysis & proposals
 SYSTEMS_21_PROPOSALS.md           ← Systems 2.1: perf · manufactories · banks · houses
-FUTURES_CONTRACTS_PLAN.md         ← (root) Futures contracts design
+FUTURES_CONTRACTS_PLAN.md         ← Futures contracts design
 HERALDRY_AND_NAMES_VARIANTS.md    ← Heraldry, house names & guilds variants
 ```
 **Expansion systems**
@@ -498,8 +498,10 @@ ROADMAP_BATCHES.md                       ← The 24 picked features, batched
 VICTORIA2_DLC_IMPLEMENTATION.md          ← Victoria-2 layer, DLC-by-DLC
 VICTORIA2_REDESIGN_PROPOSAL.md           ← Victoria-2-style UI/UX redesign
 ```
-Root also has: `BIOLOGICAL_STEP_PLAN.md`, `C_BATCH_PLAN.md`,
-`FIFTEENTH_BATCH_PLAN.md`, `PORTING_REFERENCE.md`, `README.md`.
+`docs/` also has: `BIOLOGICAL_STEP_PLAN.md`, `C_BATCH_PLAN.md`,
+`FIFTEENTH_BATCH_PLAN.md`, `PORTING_REFERENCE.md`. Historical HTML/SVG mockups are
+archived under `docs/mockups/_archive/`; a stray reference image lives in
+`docs/reference/`. The repo root now holds only `README.md` and `CLAUDE.md`.
 
 ---
 

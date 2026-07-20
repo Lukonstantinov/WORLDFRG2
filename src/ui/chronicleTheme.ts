@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 /** Chronicle (campaign) design tokens — the ONE visual language for the campaign
  *  shell: the top HUD, the World Ledger rail and (progressively) the floating
  *  windows. Change a colour here, not inline. Mirrored in
- *  docs/mockups/chronicle-shell-redesign.html. */
+ *  docs/mockups/_archive/chronicle-shell-redesign.html. */
 export const T = {
   // Surfaces (darkest → most raised)
   bg: "#0b1420",
