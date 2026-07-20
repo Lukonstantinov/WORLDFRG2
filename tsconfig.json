@@ -11,7 +11,7 @@
       "@state/*": ["src/state/*"],
       "@canvas/*": ["src/canvas/*"],
       "@ui/*": ["src/ui/*"],
-      "@bridge": ["src/bridge/tauri"],
+      "@bridge": ["src/bridge/index"],
       "@types": ["src/types"],
       "@goods": ["src/goods"],
       "@app/*": ["src/*"]

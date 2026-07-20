@@ -14,8 +14,8 @@ export default defineConfig(async () => ({
   clearScreen: false,
   resolve: {
     alias: [
-      { find: /^@bridge$/, replacement: r("./src/bridge/tauri.ts") },
-      { find: /^@types$/, replacement: r("./src/types.ts") },
+      { find: /^@bridge$/, replacement: r("./src/bridge/index.ts") },
+      { find: /^@types$/, replacement: r("./src/types/index.ts") },
       { find: /^@goods$/, replacement: r("./src/goods.ts") },
       { find: "@state", replacement: r("./src/state") },
       { find: "@canvas", replacement: r("./src/canvas") },
