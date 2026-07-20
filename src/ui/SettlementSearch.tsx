@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
-import { useWorldStore } from "../state/worldStore";
-import { useViewportStore } from "../state/viewportStore";
-import type { Settlement } from "../types";
+import { useWorldStore } from "@state/worldStore";
+import { useViewportStore } from "@state/viewportStore";
+import type { Settlement } from "@types";
 
 /** Header search box: type a settlement name → live prefix-matched results with
  *  population, culture and region; ↑/↓ + Enter or click flies the camera there

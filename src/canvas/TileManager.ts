@@ -1,4 +1,4 @@
-import { getTilesPacked } from "../bridge/tauri";
+import { getTilesPacked } from "@bridge";
 
 const TILE_SIZE = 128;
 /** Max supertiles per `get_tiles` invoke — keeps each IPC payload bounded

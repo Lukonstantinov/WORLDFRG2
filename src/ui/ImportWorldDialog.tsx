@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { importWorldLayers, getOverlays } from "../bridge/tauri";
-import { useWorldStore } from "../state/worldStore";
-import { useViewportStore } from "../state/viewportStore";
-import { useUIStore } from "../state/uiStore";
+import { importWorldLayers, getOverlays } from "@bridge";
+import { useWorldStore } from "@state/worldStore";
+import { useViewportStore } from "@state/viewportStore";
+import { useUIStore } from "@state/uiStore";
 
 const GROUPS: { id: string; label: string; desc: string }[] = [
   { id: "terrain", label: "Terrain & Elevation", desc: "land/sea, elevation, sea depth, shelves, plates, volcanoes" },

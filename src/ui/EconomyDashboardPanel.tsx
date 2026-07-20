@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useWorldStore } from "../state/worldStore";
-import { useGoodsStore } from "../state/goodsStore";
-import { useCampaignStore } from "../state/campaignStore";
-import { campaignGetInequality, campaignCityPriceIndex } from "../bridge/tauri";
-import type { InequalitySnapshot, CityPriceIndex } from "../types";
+import { useUIStore } from "@state/uiStore";
+import { useWorldStore } from "@state/worldStore";
+import { useGoodsStore } from "@state/goodsStore";
+import { useCampaignStore } from "@state/campaignStore";
+import { campaignGetInequality, campaignCityPriceIndex } from "@bridge";
+import type { InequalitySnapshot, CityPriceIndex } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 import { T, FZ } from "./chronicleTheme";
 import { Panel, PanelHeader, Tabs, Meter, EmptyNote } from "./kit";

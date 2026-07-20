@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useCampaignStore } from "../state/campaignStore";
-import { campaignGetLandmarks } from "../bridge/tauri";
-import type { LandmarkBrief } from "../types";
+import { useUIStore } from "@state/uiStore";
+import { useCampaignStore } from "@state/campaignStore";
+import { campaignGetLandmarks } from "@bridge";
+import type { LandmarkBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 import { T, FZ, SPACE } from "./chronicleTheme";
 import { Panel, PanelHeader, PanelBody, Chip, EmptyNote } from "./kit";

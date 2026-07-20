@@ -6,6 +6,16 @@
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@state/*": ["src/state/*"],
+      "@canvas/*": ["src/canvas/*"],
+      "@ui/*": ["src/ui/*"],
+      "@bridge": ["src/bridge/tauri"],
+      "@types": ["src/types"],
+      "@goods": ["src/goods"],
+      "@app/*": ["src/*"]
+    },
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "moduleDetection": "force",

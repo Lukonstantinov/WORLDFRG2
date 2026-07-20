@@ -4,7 +4,7 @@
 // Generated on the frontend from the already-loaded rivers / toponyms / lakes so
 // it works before a campaign, mirroring the river/lake NatGeo stories.
 
-import type { Settlement, RiverData, Toponym, LakeData } from "./types";
+import type { Settlement, RiverData, Toponym, LakeData } from "@types";
 
 /** Deterministic PRNG (mulberry32) so a settlement's story is stable per seed. */
 function mulberry32(seed: number) {

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useCampaignStore } from "../state/campaignStore";
-import { useGoodsStore } from "../state/goodsStore";
-import { campaignWarehouses } from "../bridge/tauri";
-import type { WarehouseInfo } from "../types";
+import { useUIStore } from "@state/uiStore";
+import { useCampaignStore } from "@state/campaignStore";
+import { useGoodsStore } from "@state/goodsStore";
+import { campaignWarehouses } from "@bridge";
+import type { WarehouseInfo } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 import { T, FZ, RADIUS } from "./chronicleTheme";
 import { Panel, PanelHeader, PanelBody, Meter, EmptyNote, FootNote } from "./kit";

@@ -1,5 +1,5 @@
-import { useUIStore } from "../state/uiStore";
-import { useGoodsStore } from "../state/goodsStore";
+import { useUIStore } from "@state/uiStore";
+import { useGoodsStore } from "@state/goodsStore";
 
 /** Details for a clicked FUTURES contract lane (the futures map layer): which house
  *  or guild guarantees the supply, the good and monthly volume, the source →

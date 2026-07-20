@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useCampaignStore } from "../state/campaignStore";
-import { campaignCityRanking } from "../bridge/tauri";
-import type { CityRank } from "../types";
+import { useUIStore } from "@state/uiStore";
+import { useCampaignStore } from "@state/campaignStore";
+import { campaignCityRanking } from "@bridge";
+import type { CityRank } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 import { T, FZ } from "./chronicleTheme";
 import { Panel, PanelHeader, PanelBody, Meter, EmptyNote, FootNote } from "./kit";

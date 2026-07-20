@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useWorldStore } from "../state/worldStore";
-import { useViewportStore } from "../state/viewportStore";
-import { getRiverSystems, getLakeSystems, renderWorldCrop } from "../bridge/tauri";
-import type { RiverNode, RiverData, LakeNode, FishSpecies, Toponym } from "../types";
+import { useUIStore } from "@state/uiStore";
+import { useWorldStore } from "@state/worldStore";
+import { useViewportStore } from "@state/viewportStore";
+import { getRiverSystems, getLakeSystems, renderWorldCrop } from "@bridge";
+import type { RiverNode, RiverData, LakeNode, FishSpecies, Toponym } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 /** 🌊 Hydrology dashboard — every river system with full hydrological stats.

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useWorldStore } from "../state/worldStore";
-import { computeTradeMatrix, exportTradeData } from "../bridge/tauri";
-import type { TradeMatrix } from "../types";
-import { useGoodsStore } from "../state/goodsStore";
+import { useUIStore } from "@state/uiStore";
+import { useWorldStore } from "@state/worldStore";
+import { computeTradeMatrix, exportTradeData } from "@bridge";
+import type { TradeMatrix } from "@types";
+import { useGoodsStore } from "@state/goodsStore";
 
 /** Color a net balance: green = surplus/export, red = deficit/import. */
 function netColor(v: number): string {

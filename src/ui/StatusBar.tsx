@@ -1,5 +1,5 @@
-import { useUIStore } from "../state/uiStore";
-import { useWorldStore } from "../state/worldStore";
+import { useUIStore } from "@state/uiStore";
+import { useWorldStore } from "@state/worldStore";
 
 export function StatusBar() {
   const statusText = useUIStore((s) => s.statusText);

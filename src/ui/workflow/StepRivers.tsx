@@ -1,6 +1,6 @@
-import { useUIStore } from "../../state/uiStore";
-import { useWorldStore } from "../../state/worldStore";
-import { simRiversHydrology, simRefreshHydrologyBiology } from "../../bridge/tauri";
+import { useUIStore } from "@state/uiStore";
+import { useWorldStore } from "@state/worldStore";
+import { simRiversHydrology, simRefreshHydrologyBiology } from "@bridge";
 import { genBtn } from "./WorkflowPanel";
 
 interface Props {

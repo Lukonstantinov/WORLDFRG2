@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useGoodsStore } from "../state/goodsStore";
-import { previewGoodScore } from "../bridge/tauri";
+import { useUIStore } from "@state/uiStore";
+import { useGoodsStore } from "@state/goodsStore";
+import { previewGoodScore } from "@bridge";
 import { koppenName, koppenHex, koppenRgb } from "./climate";
-import { goodCategory } from "../goods";
-import { commodityHistory } from "../commodityHistory";
-import type { GoodSpec } from "../types";
+import { goodCategory } from "@goods";
+import { commodityHistory } from "@app/commodityHistory";
+import type { GoodSpec } from "@types";
 
 const panel: React.CSSProperties = {
   position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1200,

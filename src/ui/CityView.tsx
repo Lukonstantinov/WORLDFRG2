@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { HubDetail, BuildingInfo } from "../types";
+import type { HubDetail, BuildingInfo } from "@types";
 
 // ── Isometric city view ─────────────────────────────────────────────────────
 // Every settlement generates a bird's-eye ISOMETRIC plan of itself, deterministic

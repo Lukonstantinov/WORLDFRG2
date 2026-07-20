@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
-import { useGoodsStore } from "../state/goodsStore";
-import type { HubDetail } from "../types";
+import { useGoodsStore } from "@state/goodsStore";
+import type { HubDetail } from "@types";
 import { sceneFromDetail, renderSettlement, fmtPop } from "./settlementArt";
 
 /** The City / Estate tab: an isometric building schematic (climate ground +

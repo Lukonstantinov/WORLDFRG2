@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { useUIStore } from "../../state/uiStore";
-import { useWorldStore } from "../../state/worldStore";
-import { useViewportStore } from "../../state/viewportStore";
+import { useUIStore } from "@state/uiStore";
+import { useWorldStore } from "@state/worldStore";
+import { useViewportStore } from "@state/viewportStore";
 import { simRunAll, simRunAllFromTerrain, finalizeWorld, saveWorldAs, persistOverlays, getWorldMeta,
-  computePolitical, computeEconomy, computeSettlementDevelopment } from "../../bridge/tauri";
-import type { Settlement, RiverData } from "../../types";
+  computePolitical, computeEconomy, computeSettlementDevelopment } from "@bridge";
+import type { Settlement, RiverData } from "@types";
 import { StepLandmass } from "./StepLandmass";
 import { StepElevation } from "./StepElevation";
 import { StepOceanAtmo } from "./StepOceanAtmo";

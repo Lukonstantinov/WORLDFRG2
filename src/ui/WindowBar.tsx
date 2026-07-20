@@ -1,4 +1,4 @@
-import { useUIStore } from "../state/uiStore";
+import { useUIStore } from "@state/uiStore";
 
 /** A floating top bar of toggle chips for EVERY window + the workflow panel and
  *  toolbar — so the user can pop windows on/off and strip the UI down to a clean

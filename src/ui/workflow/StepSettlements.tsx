@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { useUIStore } from "../../state/uiStore";
-import { useWorldStore } from "../../state/worldStore";
-import { useViewportStore } from "../../state/viewportStore";
-import { simGenerateSettlements, setCultureCount as saveCultureCount, getCultureCount } from "../../bridge/tauri";
+import { useUIStore } from "@state/uiStore";
+import { useWorldStore } from "@state/worldStore";
+import { useViewportStore } from "@state/viewportStore";
+import { simGenerateSettlements, setCultureCount as saveCultureCount, getCultureCount } from "@bridge";
 import { genBtn } from "./WorkflowPanel";
 
 interface Props {

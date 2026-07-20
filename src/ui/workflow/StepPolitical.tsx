@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { useUIStore } from "../../state/uiStore";
-import { useWorldStore } from "../../state/worldStore";
-import { computePolitical } from "../../bridge/tauri";
-import type { PoliticalCenter } from "../../types";
-import { GOOD_DEFS } from "../../goods";
+import { useUIStore } from "@state/uiStore";
+import { useWorldStore } from "@state/worldStore";
+import { computePolitical } from "@bridge";
+import type { PoliticalCenter } from "@types";
+import { GOOD_DEFS } from "@goods";
 import { genBtn } from "./WorkflowPanel";
 
 interface Props {

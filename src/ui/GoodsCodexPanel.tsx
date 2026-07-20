@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useWorldStore } from "../state/worldStore";
-import { useGoodsStore } from "../state/goodsStore";
-import { useCampaignStore } from "../state/campaignStore";
-import { campaignGetWorldEconomy } from "../bridge/tauri";
-import type { EconChain, WorldGoodPrice } from "../types";
-import { commodityHistory } from "../commodityHistory";
+import { useUIStore } from "@state/uiStore";
+import { useWorldStore } from "@state/worldStore";
+import { useGoodsStore } from "@state/goodsStore";
+import { useCampaignStore } from "@state/campaignStore";
+import { campaignGetWorldEconomy } from "@bridge";
+import type { EconChain, WorldGoodPrice } from "@types";
+import { commodityHistory } from "@app/commodityHistory";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 /** #35/#36/#37 · Goods Codex. For a chosen good:

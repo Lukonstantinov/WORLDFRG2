@@ -1,4 +1,4 @@
-import { useUIStore } from "../state/uiStore";
+import { useUIStore } from "@state/uiStore";
 
 const LAND_BANDS = [
   { label: "8848m", color: "#ffffff" },

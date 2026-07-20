@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useCampaignStore } from "../state/campaignStore";
-import { useViewportStore } from "../state/viewportStore";
-import { campaignGetCultures, campaignGetCulturePresence, campaignGetCultureHistory, campaignGetMigrationRoutes, campaignGetCultureNotables } from "../bridge/tauri";
-import type { CultureBrief, MigrationRouteBrief, NotablePerson } from "../types";
+import { useUIStore } from "@state/uiStore";
+import { useCampaignStore } from "@state/campaignStore";
+import { useViewportStore } from "@state/viewportStore";
+import { campaignGetCultures, campaignGetCulturePresence, campaignGetCultureHistory, campaignGetMigrationRoutes, campaignGetCultureNotables } from "@bridge";
+import type { CultureBrief, MigrationRouteBrief, NotablePerson } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 import { CultureFigures } from "./CultureFigures";
 import { CoatOfArms, houseColor } from "./CoatOfArms";
-import { GOOD_DEFS } from "../goods";
+import { GOOD_DEFS } from "@goods";
 import { T, SERIF } from "./chronicleTheme";
 
 const GOOD_BY_NAME = new Map(GOOD_DEFS.map((g) => [g.name, g]));

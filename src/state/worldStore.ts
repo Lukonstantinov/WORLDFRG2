@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { WorldMeta, RiverData, LakeData, Settlement, EconomySnapshot, Toponym, RiverNode, LakeNode } from "../types";
+import type { WorldMeta, RiverData, LakeData, Settlement, EconomySnapshot, Toponym, RiverNode, LakeNode } from "@types";
 
 /** Live latitude framing, kept SEPARATE from `meta` on purpose. Dragging the
  *  Latitude Frame sliders mutates only this slice so the lat-line overlay tracks

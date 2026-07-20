@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useCampaignStore, SPEED_TICKS, type CampaignSpeed } from "../state/campaignStore";
-import { useUIStore } from "../state/uiStore";
+import { useCampaignStore, SPEED_TICKS, type CampaignSpeed } from "@state/campaignStore";
+import { useUIStore } from "@state/uiStore";
 import { T, SERIF } from "./chronicleTheme";
 
 /** The Chronicle HUD — a Paradox-style command bar docked to the top of the map.

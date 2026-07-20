@@ -1,5 +1,5 @@
-import { useUIStore } from "../../state/uiStore";
-import { simOceanAtmosphere } from "../../bridge/tauri";
+import { useUIStore } from "@state/uiStore";
+import { simOceanAtmosphere } from "@bridge";
 import { genBtn } from "./WorkflowPanel";
 
 interface Props {

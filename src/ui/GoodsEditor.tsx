@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { useGoodsStore } from "../state/goodsStore";
-import { useUIStore } from "../state/uiStore";
-import { previewGoodScore } from "../bridge/tauri";
-import type { GoodSpec, GoodDomain, GoodDistribution, GoodEnvelope, RecipeInput } from "../types";
+import { useGoodsStore } from "@state/goodsStore";
+import { useUIStore } from "@state/uiStore";
+import { previewGoodScore } from "@bridge";
+import type { GoodSpec, GoodDomain, GoodDistribution, GoodEnvelope, RecipeInput } from "@types";
 
 const DOMAINS: GoodDomain[] = ["marine", "coastal", "continental", "island"];
 const CATEGORIES = ["cereal", "protein", "oil", "fiber", "drink", "sweetener", "preservative", "metal", "construction", "dye", "aromatic", "craft", "prestige", "livestock", "manufacture", "misc"] as const;

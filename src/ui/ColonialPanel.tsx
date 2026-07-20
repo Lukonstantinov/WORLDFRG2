@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { useCampaignStore } from "../state/campaignStore";
-import { useUIStore } from "../state/uiStore";
-import { campaignGetColonies, campaignColonyGates, campaignGetColony, campaignGetExpeditions, campaignGetCorridors } from "../bridge/tauri";
-import type { ColonySummary, ColonyGateStatus, ColonyDetail, ExpeditionView, TradeCorridor } from "../types";
+import { useCampaignStore } from "@state/campaignStore";
+import { useUIStore } from "@state/uiStore";
+import { campaignGetColonies, campaignColonyGates, campaignGetColony, campaignGetExpeditions, campaignGetCorridors } from "@bridge";
+import type { ColonySummary, ColonyGateStatus, ColonyDetail, ExpeditionView, TradeCorridor } from "@types";
 import { useFloatingWindow } from "./useFloatingWindow";
 
 // Colours mirror OverlayManager.ts (settlementColony / houseOutpost) + the app theme.

@@ -1,8 +1,8 @@
 import { useMemo } from "react";
-import { useGoodsStore } from "../state/goodsStore";
-import { useUIStore } from "../state/uiStore";
-import { goodCategory, CATEGORY_ORDER } from "../goods";
-import type { GoodSpec } from "../types";
+import { useGoodsStore } from "@state/goodsStore";
+import { useUIStore } from "@state/uiStore";
+import { goodCategory, CATEGORY_ORDER } from "@goods";
+import type { GoodSpec } from "@types";
 
 const panel: React.CSSProperties = {
   position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1100,

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { campaignGetCultures } from "../bridge/tauri";
+import { campaignGetCultures } from "@bridge";
 
 /** A per-city culture pie/donut: the composition of a settlement's population as its
  *  majority people plus every minority quarter (grown by in-migration, faded by

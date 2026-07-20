@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useWorldStore } from "../state/worldStore";
-import { useGoodsStore } from "../state/goodsStore";
-import type { EconChain, EconHub } from "../types";
+import { useUIStore } from "@state/uiStore";
+import { useWorldStore } from "@state/worldStore";
+import { useGoodsStore } from "@state/goodsStore";
+import type { EconChain, EconHub } from "@types";
 import { koppenName } from "./climate";
 
 const MODE_LABEL = ["overland", "maritime", "river"];

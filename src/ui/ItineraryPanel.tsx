@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useWorldStore } from "../state/worldStore";
-import { useViewportStore } from "../state/viewportStore";
-import { computeItinerary } from "../bridge/tauri";
-import type { Itinerary, Settlement } from "../types";
+import { useUIStore } from "@state/uiStore";
+import { useWorldStore } from "@state/worldStore";
+import { useViewportStore } from "@state/viewportStore";
+import { computeItinerary } from "@bridge";
+import type { Itinerary, Settlement } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 import { T, FZ, RADIUS } from "./chronicleTheme";
 import { Panel, PanelHeader, Meter, Button, EmptyNote } from "./kit";

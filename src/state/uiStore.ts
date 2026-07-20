@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { setProgress } from "../bridge/tauri";
-import type { MerchantRoute, FuturesLane } from "../types";
+import { setProgress } from "@bridge";
+import type { MerchantRoute, FuturesLane } from "@types";
 
 /** Persist step completion: steps 1-6 travel with the world file, 7-10 with
  *  the campaign. Fire-and-forget — a failed write only loses the checkmarks. */
@@ -15,8 +15,8 @@ function persistProgress(stepCompleted: Record<number, boolean>) {
   setProgress("world", JSON.stringify(world)).catch(() => {});
   setProgress("campaign", JSON.stringify(campaign)).catch(() => {});
 }
-import type { ActiveTool, ActiveLayer, WorkflowStep, RidgeLine } from "../types";
-import { GOOD_DEFS, goodOverlayKey } from "../goods";
+import type { ActiveTool, ActiveLayer, WorkflowStep, RidgeLine } from "@types";
+import { GOOD_DEFS, goodOverlayKey } from "@goods";
 
 type LandmassSource = "none" | "plates" | "template" | "painted";
 

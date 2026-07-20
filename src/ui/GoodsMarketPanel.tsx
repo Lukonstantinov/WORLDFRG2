@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useCampaignStore } from "../state/campaignStore";
-import { useUIStore } from "../state/uiStore";
-import { campaignGetGoods } from "../bridge/tauri";
-import { GOOD_DEFS } from "../goods";
-import type { GoodMarketRow } from "../types";
+import { useCampaignStore } from "@state/campaignStore";
+import { useUIStore } from "@state/uiStore";
+import { campaignGetGoods } from "@bridge";
+import { GOOD_DEFS } from "@goods";
+import type { GoodMarketRow } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 import { T, FZ } from "./chronicleTheme";
 import { Panel, PanelHeader, PanelBody, Chip, EmptyNote } from "./kit";

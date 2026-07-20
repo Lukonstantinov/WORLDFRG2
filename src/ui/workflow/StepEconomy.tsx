@@ -1,6 +1,6 @@
-import { useUIStore } from "../../state/uiStore";
-import { useWorldStore } from "../../state/worldStore";
-import { computeEconomy, computeSettlementDevelopment } from "../../bridge/tauri";
+import { useUIStore } from "@state/uiStore";
+import { useWorldStore } from "@state/worldStore";
+import { computeEconomy, computeSettlementDevelopment } from "@bridge";
 import { genBtn } from "./WorkflowPanel";
 
 interface Props {

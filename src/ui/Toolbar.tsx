@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useGoodsStore } from "../state/goodsStore";
-import type { ActiveTool, ActiveLayer } from "../types";
-import { GOOD_DEFS, goodOverlayKey, goodCategory, CATEGORY_ORDER } from "../goods";
+import { useUIStore } from "@state/uiStore";
+import { useGoodsStore } from "@state/goodsStore";
+import type { ActiveTool, ActiveLayer } from "@types";
+import { GOOD_DEFS, goodOverlayKey, goodCategory, CATEGORY_ORDER } from "@goods";
 import { LatitudeControl } from "./LatitudeControl";
 
 const tools: { id: ActiveTool; label: string; icon: string; tip: string }[] = [

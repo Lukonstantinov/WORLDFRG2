@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useCampaignStore } from "../state/campaignStore";
-import { campaignGetMigrationRoutes } from "../bridge/tauri";
-import type { MigrationRouteBrief } from "../types";
+import { useUIStore } from "@state/uiStore";
+import { useCampaignStore } from "@state/campaignStore";
+import { campaignGetMigrationRoutes } from "@bridge";
+import type { MigrationRouteBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 import { T, FZ, SPACE, RADIUS } from "./chronicleTheme";
 import { Panel, PanelHeader, PanelBody, EmptyNote } from "./kit";

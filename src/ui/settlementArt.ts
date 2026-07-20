@@ -1,7 +1,7 @@
 // Isometric settlement / estate schematic renderer (ported from the mockup).
 // Pure DOM/SVG — populates a given <svg> element. Fed by HubDetail, so it costs
 // nothing on the sim hot path (rendered once when a settlement tab is opened).
-import type { HubDetail } from "../types";
+import type { HubDetail } from "@types";
 
 const NS = "http://www.w3.org/2000/svg";
 type G = SVGElement;

@@ -1,5 +1,5 @@
-import { useUIStore } from "../state/uiStore";
-import { useGoodsStore } from "../state/goodsStore";
+import { useUIStore } from "@state/uiStore";
+import { useGoodsStore } from "@state/goodsStore";
 
 /** Details for a clicked merchant route (the merchant map layer): which family or
  *  guild runs it, between which cities, and the goods it carries each way — the

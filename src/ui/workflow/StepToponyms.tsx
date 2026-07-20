@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { useUIStore } from "../../state/uiStore";
-import { useWorldStore } from "../../state/worldStore";
-import { simGenerateToponyms, saveToponyms, getToponyms } from "../../bridge/tauri";
-import type { Toponym } from "../../types";
+import { useUIStore } from "@state/uiStore";
+import { useWorldStore } from "@state/worldStore";
+import { simGenerateToponyms, saveToponyms, getToponyms } from "@bridge";
+import type { Toponym } from "@types";
 import { genBtn } from "./WorkflowPanel";
 
 const KIND_ICON: Record<Toponym["kind"], string> = {

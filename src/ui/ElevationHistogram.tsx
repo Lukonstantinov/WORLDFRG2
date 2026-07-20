@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { getElevationDistribution, type ElevationBand } from "../bridge/tauri";
-import { useWorldStore } from "../state/worldStore";
-import { useViewportStore } from "../state/viewportStore";
+import { getElevationDistribution, type ElevationBand } from "@bridge";
+import { useWorldStore } from "@state/worldStore";
+import { useViewportStore } from "@state/viewportStore";
 
 const BAND_COLORS = [
   "#387632", "#4a8a3c", "#6a9e3c", "#aaa03c", "#c4a040",

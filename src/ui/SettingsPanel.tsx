@@ -1,4 +1,4 @@
-import { useSettingsStore, COLOR_PRESETS, type PresetKey } from "../state/settingsStore";
+import { useSettingsStore, COLOR_PRESETS, type PresetKey } from "@state/settingsStore";
 import { LINE_COLOR_DEFAULTS, type LineColorKey } from "../canvas/OverlayManager";
 
 /** Top-screen Appearance settings: recolour every trade/connection overlay line.

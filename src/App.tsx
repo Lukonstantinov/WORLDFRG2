@@ -44,12 +44,12 @@ import { SettingsPanel } from "./ui/SettingsPanel";
 import { WindowBar } from "./ui/WindowBar";
 import { CampaignTopBar } from "./ui/CampaignTopBar";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
-import { useWorldStore } from "./state/worldStore";
-import { useUIStore } from "./state/uiStore";
-import { useViewportStore } from "./state/viewportStore";
-import { useGoodsStore } from "./state/goodsStore";
-import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, persistOverlays, getOverlays, saveCampaignAs, openCampaign, newCampaign, finalizeWorld, getAppearance, getToponyms } from "./bridge/tauri";
-import { useSettingsStore } from "./state/settingsStore";
+import { useWorldStore } from "@state/worldStore";
+import { useUIStore } from "@state/uiStore";
+import { useViewportStore } from "@state/viewportStore";
+import { useGoodsStore } from "@state/goodsStore";
+import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, persistOverlays, getOverlays, saveCampaignAs, openCampaign, newCampaign, finalizeWorld, getAppearance, getToponyms } from "@bridge";
+import { useSettingsStore } from "@state/settingsStore";
 
 const EXPORTABLE_LAYERS: { id: string; label: string }[] = [
   { id: "land", label: "Land / Sea" },

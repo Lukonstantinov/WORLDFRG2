@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useWorldStore } from "../state/worldStore";
-import { getCellInfo } from "../bridge/tauri";
-import type { CellInfo } from "../types";
-import { GOOD_DEFS } from "../goods";
-import { settlementStory } from "../settlementStory";
+import { useUIStore } from "@state/uiStore";
+import { useWorldStore } from "@state/worldStore";
+import { getCellInfo } from "@bridge";
+import type { CellInfo } from "@types";
+import { GOOD_DEFS } from "@goods";
+import { settlementStory } from "@app/settlementStory";
 
 const goodLabel = (name: string) => {
   const d = GOOD_DEFS.find((g) => g.name === name);

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CampaignSnapshot, WorldEconomy, HouseBrief, CampaignDiagnostics } from "../types";
+import type { CampaignSnapshot, WorldEconomy, HouseBrief, CampaignDiagnostics } from "@types";
 import {
   campaignStartSim,
   campaignColdStart,
@@ -11,7 +11,7 @@ import {
   campaignDiagnostics,
   campaignPersist,
   saveCampaignAs,
-} from "../bridge/tauri";
+} from "@bridge";
 
 /** Auto-advance step size for the campaign clock. */
 export type CampaignSpeed = "week" | "month" | "year";

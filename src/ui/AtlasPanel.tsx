@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useCampaignStore } from "../state/campaignStore";
-import { useViewportStore } from "../state/viewportStore";
-import { campaignGetJournal, campaignGetTradeBasins, campaignGetEraFrame } from "../bridge/tauri";
-import type { CampaignHubBrief, JournalEntry, TradeBasin } from "../types";
+import { useUIStore } from "@state/uiStore";
+import { useCampaignStore } from "@state/campaignStore";
+import { useViewportStore } from "@state/viewportStore";
+import { campaignGetJournal, campaignGetTradeBasins, campaignGetEraFrame } from "@bridge";
+import type { CampaignHubBrief, JournalEntry, TradeBasin } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 import { T, SERIF } from "./chronicleTheme";
 

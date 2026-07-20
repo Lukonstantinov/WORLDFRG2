@@ -1,9 +1,9 @@
 import { create } from "zustand";
-import type { GoodSpec } from "../types";
+import type { GoodSpec } from "@types";
 import {
   getGoodsSpec, setGoodsSpec, getGoodsLibrary, saveGoodsLibrary, defaultGoods,
-} from "../bridge/tauri";
-import { GOOD_DEFS } from "../goods";
+} from "@bridge";
+import { GOOD_DEFS } from "@goods";
 
 /** Fallback metadata from the static defaults (used before specs are fetched). */
 const FALLBACK = new Map(GOOD_DEFS.map((g) => [g.name, g]));

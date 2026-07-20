@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { LINE_COLOR_DEFAULTS, type LineColorKey, setLineColors } from "../canvas/OverlayManager";
-import { setAppearance } from "../bridge/tauri";
+import { setAppearance } from "@bridge";
 
 /** Adjustable appearance settings — the user-editable overlay/connection-line
  *  palette. Persisted to localStorage (per-machine default) and, when a world /

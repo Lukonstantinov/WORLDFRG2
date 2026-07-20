@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
-import { useCampaignStore } from "../state/campaignStore";
-import { useUIStore } from "../state/uiStore";
+import { useCampaignStore } from "@state/campaignStore";
+import { useUIStore } from "@state/uiStore";
 import {
   campaignGetMints, campaignGetBanks, campaignGetCrashes, campaignGetSchematics,
   campaignGetWars, campaignCoinUsage, campaignGetSpeculation, campaignMonetaryChronicle,
   campaignReserves,
-} from "../bridge/tauri";
+} from "@bridge";
 import type {
   MintBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload,
   HouseBrief, SpecCenter, MonetaryEvent, ReservesPayload, ReserveHolder,
-} from "../types";
+} from "@types";
 import { CoinIcon, type CoinMetal } from "./CoinIcon";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 

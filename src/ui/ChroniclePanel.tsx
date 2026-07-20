@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useCampaignStore } from "../state/campaignStore";
-import { useUIStore } from "../state/uiStore";
+import { useCampaignStore } from "@state/campaignStore";
+import { useUIStore } from "@state/uiStore";
 import { T, SERIF, sectionHdr, cardStyle } from "./chronicleTheme";
 
 /** The Chronicle's left rail — the WORLD LEDGER. Pure reading matter: the

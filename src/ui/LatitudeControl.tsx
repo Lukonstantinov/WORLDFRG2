@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { useWorldStore } from "../state/worldStore";
-import { useUIStore } from "../state/uiStore";
-import { setLatitudeConfig } from "../bridge/tauri";
+import { useWorldStore } from "@state/worldStore";
+import { useUIStore } from "@state/uiStore";
+import { setLatitudeConfig } from "@bridge";
 
 /** Format a signed latitude (degrees) as e.g. "45°N", "0°", "30°S". */
 function fmtLat(lat: number): string {

@@ -4,16 +4,16 @@ import { TileViewport } from "../canvas/TileViewport";
 import { TileManager } from "../canvas/TileManager";
 import { OverlayManager, type ColonyMarker } from "../canvas/OverlayManager";
 import { createPaintOverlay, drawCursorRing, paintStamp, clearPaintOverlay } from "../canvas/PaintOverlay";
-import { useWorldStore } from "../state/worldStore";
-import { useViewportStore } from "../state/viewportStore";
-import { useUIStore } from "../state/uiStore";
-import { useGoodsStore } from "../state/goodsStore";
-import { useCampaignStore } from "../state/campaignStore";
-import { useSettingsStore } from "../state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes } from "../bridge/tauri";
-import type { MerchantRoute, FuturesLane, Toponym } from "../types";
-import { goodOverlayKey, GOOD_DEFS } from "../goods";
-import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "../types";
+import { useWorldStore } from "@state/worldStore";
+import { useViewportStore } from "@state/viewportStore";
+import { useUIStore } from "@state/uiStore";
+import { useGoodsStore } from "@state/goodsStore";
+import { useCampaignStore } from "@state/campaignStore";
+import { useSettingsStore } from "@state/settingsStore";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes } from "@bridge";
+import type { MerchantRoute, FuturesLane, Toponym } from "@types";
+import { goodOverlayKey, GOOD_DEFS } from "@goods";
+import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types";
 
 /** Largest box with the world's aspect ratio that fits inside the pane. */
 function fitBox(paneW: number, paneH: number, gridW: number, gridH: number) {

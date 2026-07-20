@@ -3,9 +3,9 @@
  *  is visible), the routes a good came along (from/to + share), and the top partner
  *  cities. Selecting a good or a partner highlights the routes on the map. */
 import { useEffect, useMemo, useState } from "react";
-import { campaignTradeFlows } from "../bridge/tauri";
-import type { TradeFlows } from "../types";
-import { GOOD_DEFS } from "../goods";
+import { campaignTradeFlows } from "@bridge";
+import type { TradeFlows } from "@types";
+import { GOOD_DEFS } from "@goods";
 
 type Seg = { ax: number; ay: number; bx: number; by: number; dir: number; w: number };
 

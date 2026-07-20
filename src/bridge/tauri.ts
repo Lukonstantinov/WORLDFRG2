@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { WorldMeta, OpenWorldResult, CampaignInfo, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, CultureRegion, TradeMatrix, TradeTrunk, TradeCorridor, PoliticalCenter, GoodSpec, EconomySnapshot, ExpeditionsPayload } from "../types";
+import type { WorldMeta, OpenWorldResult, CampaignInfo, TileResponse, CellInfo, PaintValue, VectorSample, SharkZone, GoodRegion, CultureRegion, TradeMatrix, TradeTrunk, TradeCorridor, PoliticalCenter, GoodSpec, EconomySnapshot, ExpeditionsPayload } from "@types";
 
 export async function newWorld(name: string, gridWidth: number, gridHeight: number): Promise<WorldMeta> {
   return invoke("new_world", { name, gridWidth, gridHeight });
@@ -648,7 +648,7 @@ export async function importWorldLayers(path: string, groups: string[]): Promise
 }
 
 // ── DLC 1 "Living Trade" tick simulation ──
-import type { CampaignSnapshot, JournalEntry, WorldEconomy, TradeBasin, EraFrame, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, MintBrief, MonetaryEvent, ReservesPayload, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow, PopBrief, EpidemicBrief, GuildBrief, FigureBrief, LandmarkBrief, DynastiesPayload, CultureBrief, SatelliteBrief, MigrationRouteBrief, ProvisioningBrief } from "../types";
+import type { CampaignSnapshot, JournalEntry, WorldEconomy, TradeBasin, EraFrame, HubDetail, ColonyDetail, ColonySummary, ColonyGateStatus, HouseBrief, HouseHistory, HouseLedger, CampaignDiagnostics, MerchantRoute, FuturesLane, WarehouseInfo, CityRank, SpecCenter, PolisBrief, TradeFlows, CurrencyBrief, MintBrief, MonetaryEvent, ReservesPayload, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload, GoodMarketRow, PopBrief, EpidemicBrief, GuildBrief, FigureBrief, LandmarkBrief, DynastiesPayload, CultureBrief, SatelliteBrief, MigrationRouteBrief, ProvisioningBrief } from "@types";
 
 /** Seed a fresh living-trade sim from the static economy snapshot (step 10). A RUNNING
  *  campaign is never restarted by this — it returns the current sim unchanged. */

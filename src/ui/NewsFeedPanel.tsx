@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useCampaignStore } from "../state/campaignStore";
-import { campaignGetJournal } from "../bridge/tauri";
-import type { JournalEntry } from "../types";
+import { useUIStore } from "@state/uiStore";
+import { useCampaignStore } from "@state/campaignStore";
+import { campaignGetJournal } from "@bridge";
+import type { JournalEntry } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 import { T, FZ, SPACE } from "./chronicleTheme";
 import { Panel, PanelHeader, PanelBody, Chip, EmptyNote } from "./kit";

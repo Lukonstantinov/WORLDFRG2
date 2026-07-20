@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { useCampaignStore } from "../state/campaignStore";
-import { useUIStore } from "../state/uiStore";
-import { campaignGetBanks } from "../bridge/tauri";
-import type { BankBrief, BankSnapshot } from "../types";
+import { useCampaignStore } from "@state/campaignStore";
+import { useUIStore } from "@state/uiStore";
+import { campaignGetBanks } from "@bridge";
+import type { BankBrief, BankSnapshot } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 import { T, FZ, RADIUS } from "./chronicleTheme";
 import { Panel, PanelHeader, Tabs, Meter, EmptyNote } from "./kit";

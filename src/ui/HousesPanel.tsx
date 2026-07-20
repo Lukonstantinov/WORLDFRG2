@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { useCampaignStore } from "../state/campaignStore";
-import { useUIStore } from "../state/uiStore";
+import { useCampaignStore } from "@state/campaignStore";
+import { useUIStore } from "@state/uiStore";
 import { CoatOfArms } from "./CoatOfArms";
 import { CoinIcon } from "./CoinIcon";
 import { YearChronicle } from "./YearChronicle";
-import { GOOD_DEFS } from "../goods";
-import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks } from "../bridge/tauri";
-import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief } from "../types";
+import { GOOD_DEFS } from "@goods";
+import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks } from "@bridge";
+import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
 
 const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));

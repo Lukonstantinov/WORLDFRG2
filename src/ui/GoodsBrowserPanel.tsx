@@ -1,9 +1,9 @@
 import { useMemo, useRef, useState, useEffect } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useWorldStore } from "../state/worldStore";
-import { useGoodsStore } from "../state/goodsStore";
-import { useViewportStore } from "../state/viewportStore";
-import { goodCategory, CATEGORY_ORDER } from "../goods";
+import { useUIStore } from "@state/uiStore";
+import { useWorldStore } from "@state/worldStore";
+import { useGoodsStore } from "@state/goodsStore";
+import { useViewportStore } from "@state/viewportStore";
+import { goodCategory, CATEGORY_ORDER } from "@goods";
 
 /** Browsable catalogue of EVERY trade good, opened from the toolbar (independent
  *  of clicking the map). Pick a good → every place it originates (each producing

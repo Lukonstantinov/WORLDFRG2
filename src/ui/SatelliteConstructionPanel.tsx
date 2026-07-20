@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { useUIStore } from "../state/uiStore";
-import { useCampaignStore } from "../state/campaignStore";
-import { campaignGetSatellite } from "../bridge/tauri";
-import type { SatelliteBrief } from "../types";
+import { useUIStore } from "@state/uiStore";
+import { useCampaignStore } from "@state/campaignStore";
+import { campaignGetSatellite } from "@bridge";
+import type { SatelliteBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "./useFloatingWindow";
-import { GOOD_DEFS } from "../goods";
+import { GOOD_DEFS } from "@goods";
 import { T, FZ, RADIUS } from "./chronicleTheme";
 import { Panel, Meter } from "./kit";
 
