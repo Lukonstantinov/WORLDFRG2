@@ -1,0 +1,593 @@
+//! read_trade commands — split from the former monolithic campaign_commands.rs.
+//! `use super::*` inherits the shared imports, structs and helpers kept in mod.rs.
+use super::*;
+
+
+#[tauri::command]
+pub fn campaign_get_trade_basins(db: State<'_, WorldDb>) -> Result<Vec<TradeBasin>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    if sim.flow_year.is_empty() { return Ok(vec![]); }
+    if let Ok(memo) = BASINS_MEMO.lock() {
+        if let Some((seed, tick, cached)) = memo.as_ref() {
+            if *seed == sim.seed && *tick == sim.tick {
+                return Ok(cached.clone());
+            }
+        }
+    }
+    let idx_of: std::collections::HashMap<u32, usize> = sim.hubs.iter().enumerate()
+        .filter(|(_, h)| !h.is_estate && !h.abandoned && h.population >= 1.0)
+        .map(|(i, h)| (h.id, i))
+        .collect();
+    let mut edges: std::collections::HashMap<usize, Vec<(usize, f32)>> =
+        std::collections::HashMap::new();
+    for &(a, b, v) in &sim.flow_year {
+        let (Some(&ia), Some(&ib)) = (idx_of.get(&a), idx_of.get(&b)) else { continue };
+        edges.entry(ia).or_default().push((ib, v));
+        edges.entry(ib).or_default().push((ia, v));
+    }
+    let n = sim.hubs.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    for (&i, list) in edges.iter() {
+        let mut l = list.clone();
+        l.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal));
+        for &(j, _) in l.iter().take(2) {
+            let (ri, rj) = (uf_find(&mut parent, i), uf_find(&mut parent, j));
+            if ri != rj { parent[ri] = rj; }
+        }
+    }
+    let mut comp: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+    for &i in edges.keys() {
+        let r = uf_find(&mut parent, i);
+        comp.entry(r).or_default().push(i);
+    }
+    let mut internal: std::collections::HashMap<usize, f32> = std::collections::HashMap::new();
+    for &(a, b, v) in &sim.flow_year {
+        let (Some(&ia), Some(&ib)) = (idx_of.get(&a), idx_of.get(&b)) else { continue };
+        let (ra, rb) = (uf_find(&mut parent, ia), uf_find(&mut parent, ib));
+        if ra == rb { *internal.entry(ra).or_insert(0.0) += v; }
+    }
+    let (w, hgt) = (sim.world_w as u32, sim.world_h());
+    let ng = sim.goods.len();
+    let mut basins: Vec<TradeBasin> = comp.into_iter()
+        .filter(|(_, m)| m.len() >= 2)
+        .map(|(root, members)| {
+            let cx = members.iter().map(|&i| sim.hubs[i].x).sum::<f32>() / members.len() as f32;
+            let cy = members.iter().map(|&i| sim.hubs[i].y).sum::<f32>() / members.len() as f32;
+            let top = members.iter()
+                .max_by(|&&a, &&b| sim.hubs[a].trade_last_year
+                    .partial_cmp(&sim.hubs[b].trade_last_year).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|&i| sim.hubs[i].name.clone()).unwrap_or_default();
+            // Top goods from the per-hub per-good yearly ledger (empty pre-ledger).
+            let mut totals = vec![0.0f32; ng];
+            for &i in &members {
+                for g in 0..ng {
+                    totals[g] += sim.hub_good_trade.get(i * ng + g).copied().unwrap_or(0.0);
+                }
+            }
+            let mut order: Vec<usize> = (0..ng).collect();
+            order.sort_by(|&x, &y| totals[y].partial_cmp(&totals[x]).unwrap_or(std::cmp::Ordering::Equal));
+            let top_goods: Vec<String> = order.into_iter().take(2)
+                .filter(|&g| totals[g] > 0.0)
+                .map(|g| sim.goods[g].name.clone()).collect();
+            TradeBasin {
+                name: crate::sim::names::region_name(cx.max(0.0) as u32, cy.max(0.0) as u32, w, hgt),
+                volume: internal.get(&root).copied().unwrap_or(0.0),
+                hub_ids: members.iter().map(|&i| sim.hubs[i].id).collect(),
+                pts: members.iter().map(|&i| [sim.hubs[i].x, sim.hubs[i].y]).collect(),
+                cx, cy,
+                top_city: top,
+                top_goods,
+            }
+        })
+        .collect();
+    basins.sort_by(|a, b| b.volume.partial_cmp(&a.volume).unwrap_or(std::cmp::Ordering::Equal));
+    basins.truncate(12);
+    if let Ok(mut memo) = BASINS_MEMO.lock() {
+        *memo = Some((sim.seed, sim.tick, basins.clone()));
+    }
+    Ok(basins)
+}
+
+
+/// Batch 1 · per-good Trade Heat: each living town's LAST-YEAR throughput of one
+/// good (by name), as `[x, y, volume]` points for the heat overlay.
+#[tauri::command]
+pub fn campaign_get_good_heat(good: String, db: State<'_, WorldDb>) -> Result<Vec<[f32; 3]>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let ng = sim.goods.len();
+    let Some(g) = sim.goods.iter().position(|x| x.name == good) else { return Ok(vec![]) };
+    if sim.hub_good_trade.is_empty() { return Ok(vec![]); }
+    Ok(sim.hubs.iter().enumerate()
+        .filter(|(_, h)| !h.is_estate && !h.abandoned)
+        .filter_map(|(i, h)| {
+            let v = sim.hub_good_trade.get(i * ng + g).copied().unwrap_or(0.0);
+            (v > 0.0).then(|| [h.x, h.y, v])
+        })
+        .collect())
+}
+
+
+#[tauri::command]
+pub fn campaign_get_era_frame(year: u32, db: State<'_, WorldDb>) -> Result<Option<EraFrame>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(None) };
+    let Some(frame) = sim.year_frames.iter().find(|f| f.year == year) else { return Ok(None) };
+    let year_end_tick = (year + 1) * 365;
+    let hubs = frame.pop.iter().enumerate()
+        .filter(|(_, &p)| p >= 0.0) // -1 = estate marker
+        .map(|(i, &p)| {
+            let h = &sim.hubs[i];
+            EraHub {
+                x: h.x, y: h.y, name: h.name.clone(),
+                population: p,
+                trade: frame.trade.get(i).copied().unwrap_or(0.0),
+                dead: (h.died_tick > 0 && h.died_tick <= year_end_tick) || p < 100.0,
+                is_new: h.founded_tick > 0 && h.founded_tick <= year_end_tick
+                    && year_end_tick - h.founded_tick < 15 * 365,
+            }
+        })
+        .collect();
+    Ok(Some(EraFrame { year, hubs }))
+}
+
+
+/// DLC 4 · every good's quality rating + produced/traded totals (the Goods window).
+#[tauri::command]
+pub fn campaign_get_goods(db: State<'_, WorldDb>) -> Result<Vec<GoodMarketRow>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let ng = sim.goods.len();
+    let mut produced = vec![0.0f32; ng];
+    let mut q_sum = vec![0.0f32; ng];
+    let mut q_w = vec![0.0f32; ng];
+    let mut best = vec![(0.0f32, usize::MAX); ng]; // (quality, hub idx)
+    let mut n_prod = vec![0u32; ng];
+    // Per good × grade-tier: produced + #producers (traded filled from cargo below).
+    let mut tier_prod = vec![[0.0f32; 5]; ng];
+    let mut tier_traded = vec![[0.0f32; 5]; ng];
+    let mut tier_n = vec![[0u32; 5]; ng];
+    for (hi, h) in sim.hubs.iter().enumerate() {
+        for g in 0..ng {
+            let p = h.production.get(g).copied().unwrap_or(0.0);
+            if p <= 0.0 { continue; }
+            let q = h.quality.get(g).copied().unwrap_or(0.0);
+            produced[g] += p; q_sum[g] += q * p; q_w[g] += p; n_prod[g] += 1;
+            let t = grade_tier(q);
+            tier_prod[g][t] += p; tier_n[g][t] += 1;
+            if q > best[g].0 { best[g] = (q, hi); }
+        }
+    }
+    let mut traded = vec![0.0f32; ng];
+    for s in &sim.in_transit {
+        if s.good >= ng { continue; }
+        let amt = s.amount.max(0.0);
+        traded[s.good] += amt;
+        // Bucket the cargo by the ORIGIN hub's grade for the good (where it was made).
+        let oq = sim.hubs.get(s.from as usize).and_then(|h| h.quality.get(s.good).copied()).unwrap_or(0.0);
+        tier_traded[s.good][grade_tier(oq)] += amt;
+    }
+    let mut out: Vec<GoodMarketRow> = (0..ng).filter(|&g| produced[g] > 0.0 || traded[g] > 0.0).map(|g| {
+        let avg = if q_w[g] > 0.0 { q_sum[g] / q_w[g] } else { 0.0 };
+        let best_city = if best[g].1 != usize::MAX { sim.hubs[best[g].1].name.clone() } else { String::new() };
+        let grades: Vec<GradeBucket> = (0..5).rev()
+            .filter(|&t| tier_prod[g][t] > 0.0 || tier_traded[g][t] > 0.0)
+            .map(|t| GradeBucket {
+                grade: GRADE_NAMES[t].to_string(),
+                produced: tier_prod[g][t], traded: tier_traded[g][t], n_producers: tier_n[g][t],
+            }).collect();
+        GoodMarketRow {
+            good: sim.goods[g].name.clone(),
+            best_quality: best[g].0,
+            best_grade: crate::sim::tick::quality_grade(best[g].0).to_string(),
+            best_city,
+            avg_quality: avg,
+            produced: produced[g],
+            traded: traded[g],
+            n_producers: n_prod[g],
+            manufactured: !sim.goods[g].inputs.is_empty(),
+            grades,
+        }
+    }).collect();
+    out.sort_by(|a, b| b.produced.partial_cmp(&a.produced).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(out)
+}
+
+
+/// Aggregate the live in-transit cargo into per-holder, per-city-pair routes for
+/// the merchant map layer — so the player can see which families/guilds are
+/// running which corridors and what they carry each way (round-trip info).
+#[tauri::command]
+pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRoute>, String> {
+    use std::collections::HashMap;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    struct Agg { vol: f32, sea: bool, out: HashMap<usize, f32>, ret: HashMap<usize, f32> }
+    let mut groups: HashMap<(usize, u32, u32), Agg> = HashMap::new();
+    for s in &sim.in_transit {
+        if s.owner < 0 { continue; }
+        let (lo, hi) = (s.from.min(s.to), s.from.max(s.to));
+        let e = groups.entry((s.owner as usize, lo, hi))
+            .or_insert_with(|| Agg { vol: 0.0, sea: false, out: HashMap::new(), ret: HashMap::new() });
+        let amt = s.amount.max(0.0);
+        e.vol += amt;
+        e.sea |= s.sea;
+        if s.from == lo { *e.out.entry(s.good).or_insert(0.0) += amt; }
+        else { *e.ret.entry(s.good).or_insert(0.0) += amt; }
+    }
+    let gname = |g: usize| sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
+    // Estates are INTERNAL to their parent city — collapse an estate endpoint to
+    // its parent so the map draws routes between cities, never to estate dots.
+    let city_of = |h: u32| -> u32 {
+        match sim.hubs.get(h as usize) {
+            Some(x) if x.is_estate && x.parent >= 0 => x.parent as u32,
+            _ => h,
+        }
+    };
+    let hname = |h: u32| sim.hubs.get(city_of(h) as usize).map(|x| x.name.clone()).unwrap_or_default();
+    let pos = |h: u32| sim.hubs.get(city_of(h) as usize).map(|x| [x.x, x.y]).unwrap_or([0.0, 0.0]);
+    let sort_goods = |m: HashMap<usize, f32>| {
+        let mut v: Vec<(String, f32)> = m.into_iter().map(|(g, vol)| (gname(g), vol)).collect();
+        v.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal));
+        v
+    };
+    let mut out: Vec<MerchantRoute> = groups.into_iter().map(|((owner, lo, hi), a)| {
+        let h = sim.houses.get(owner);
+        MerchantRoute {
+            a: pos(lo), b: pos(hi), a_name: hname(lo), b_name: hname(hi),
+            holder: h.map(|x| x.name.clone()).unwrap_or_default(),
+            color: distinct_color(owner),
+            is_guild: h.map(|x| x.is_guild).unwrap_or(false),
+            sea: a.sea, volume: a.vol,
+            out_goods: sort_goods(a.out), ret_goods: sort_goods(a.ret),
+        }
+    }).collect();
+    out.sort_by(|x, y| y.volume.partial_cmp(&x.volume).unwrap_or(std::cmp::Ordering::Equal));
+    out.truncate(150);
+    Ok(out)
+}
+
+
+/// Expose the active futures contracts as directional supply lanes for the map's
+/// Futures overlay (source city → buyer city).
+#[tauri::command]
+pub fn campaign_futures_lanes(db: State<'_, WorldDb>) -> Result<Vec<FuturesLane>, String> {
+    use crate::sim::tick::TICKS_PER_YEAR;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    // Estate endpoints collapse to their parent city so lanes connect cities.
+    let city_of = |h: u32| -> u32 {
+        match sim.hubs.get(h as usize) {
+            Some(x) if x.is_estate && x.parent >= 0 => x.parent as u32,
+            _ => h,
+        }
+    };
+    let hname = |h: u32| sim.hubs.get(city_of(h) as usize).map(|x| x.name.clone()).unwrap_or_default();
+    let pos = |h: u32| sim.hubs.get(city_of(h) as usize).map(|x| [x.x, x.y]).unwrap_or([0.0, 0.0]);
+    let tick = sim.tick;
+    let mut out: Vec<FuturesLane> = sim.contracts.iter().map(|c| {
+        let h = sim.houses.get(c.seller_house as usize);
+        // % fulfilled = delivered vs what was DUE by now (monthly_qty × months elapsed).
+        let months = (tick.min(c.end_tick).saturating_sub(c.start_tick)) as f32 / 30.0;
+        let due = (c.monthly_qty * months).max(1e-6);
+        let base_value = sim.goods.get(c.good).map(|x| x.base_value).unwrap_or(1.0);
+        FuturesLane {
+            a: pos(c.source_hub), b: pos(c.buyer_hub),
+            a_name: hname(c.source_hub), b_name: hname(c.buyer_hub),
+            holder: h.map(|x| x.name.clone()).unwrap_or_default(),
+            color: distinct_color(c.seller_house as usize),
+            is_guild: h.map(|x| x.is_guild).unwrap_or(false),
+            good: sim.goods.get(c.good).map(|x| x.name.clone()).unwrap_or_default(),
+            qty: c.monthly_qty, term: c.term_years,
+            end_year: c.end_tick / TICKS_PER_YEAR,
+            suspended: c.suspended_until > tick,
+            delivered: c.delivered,
+            fulfilled_pct: (c.delivered / due * 100.0).clamp(0.0, 100.0),
+            value: c.delivered * base_value,
+            sealed_at: hname(c.buyer_hub),
+        }
+    }).collect();
+    out.sort_by(|x, y| y.qty.partial_cmp(&x.qty).unwrap_or(std::cmp::Ordering::Equal));
+    out.truncate(200);
+    Ok(out)
+}
+
+
+/// All house/guild warehouses (largest stock first) for the Warehouses panel.
+#[tauri::command]
+pub fn campaign_warehouses(db: State<'_, WorldDb>) -> Result<Vec<WarehouseInfo>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let gname = |g: usize| sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
+    let mut out: Vec<WarehouseInfo> = sim.warehouses.iter().filter(|w| w.owner >= 0).map(|w| {
+        let h = sim.houses.get(w.owner as usize);
+        let hub = sim.hubs.get(w.hub as usize);
+        let mut goods: Vec<(String, f32)> = w.stock.iter().enumerate()
+            .filter(|(_, &s)| s > 0.01)
+            .map(|(g, &s)| (gname(g), s)).collect();
+        goods.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        goods.truncate(8);
+        let contracts = sim.contracts.iter()
+            .filter(|c| c.seller_house == w.owner as u32 && c.source_hub == w.hub).count() as u32;
+        WarehouseInfo {
+            kind: "warehouse".into(),
+            owner: h.map(|x| x.name.clone()).unwrap_or_default(),
+            color: distinct_color(w.owner as usize),
+            is_guild: h.map(|x| x.is_guild).unwrap_or(false),
+            city: hub.map(|x| x.name.clone()).unwrap_or_default(),
+            x: hub.map(|x| x.x).unwrap_or(0.0),
+            y: hub.map(|x| x.y).unwrap_or(0.0),
+            tier: w.tier,
+            capacity: w.capacity,
+            used: w.stock.iter().sum(),
+            goods,
+            contracts,
+            damage: w.damage,
+        }
+    }).collect();
+    // Estates & manufactories — the production sites that FEED the warehouses. Listed
+    // alongside the depots so the player sees the whole asset chain in one place.
+    let kind_label = |k: u8| -> &'static str {
+        match k { 1 => "farm", 2 => "mine", 3 => "plantation", 4 => "fishery",
+                  5 => "vineyard", 6 => "manufactory", _ => "estate" }
+    };
+    for hub in sim.hubs.iter().filter(|h| h.is_estate && h.owner_house >= 0) {
+        let oi = hub.owner_house as usize;
+        let h = sim.houses.get(oi);
+        let mut goods: Vec<(String, f32)> = hub.production.iter().enumerate()
+            .filter(|(_, &p)| p > 0.01)
+            .map(|(g, &p)| (gname(g), p)).collect();
+        goods.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        goods.truncate(8);
+        let parent = sim.hubs.get(hub.parent.max(0) as usize).map(|x| x.name.clone()).unwrap_or_default();
+        out.push(WarehouseInfo {
+            kind: kind_label(hub.estate_kind).into(),
+            owner: h.map(|x| x.name.clone()).unwrap_or_default(),
+            color: distinct_color(oi),
+            is_guild: h.map(|x| x.is_guild).unwrap_or(false),
+            city: if parent.is_empty() { hub.name.clone() } else { format!("{} (by {})", hub.name, parent) },
+            x: hub.x, y: hub.y,
+            tier: hub.estate_tier,
+            capacity: 0.0, // estates produce rather than store
+            used: hub.production.iter().sum(),
+            goods,
+            contracts: 0,
+            damage: 0.0,
+        });
+    }
+    out.sort_by(|a, b| b.used.partial_cmp(&a.used).unwrap_or(std::cmp::Ordering::Equal));
+    out.truncate(400);
+    Ok(out)
+}
+
+
+/// Live ranking of the wealthiest / busiest trading cities, with each city's share
+/// of all world trade — top to bottom.
+#[tauri::command]
+pub fn campaign_city_ranking(db: State<'_, WorldDb>) -> Result<Vec<CityRank>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let trade_of = |h: &TickHub| (h.export_earn + h.import_spend).max(0.0);
+    let total: f32 = sim.hubs.iter().filter(|h| !h.is_estate).map(trade_of).sum::<f32>().max(1e-6);
+    let mut out: Vec<CityRank> = sim.hubs.iter().filter(|h| !h.is_estate).map(|h| {
+        let trade = trade_of(h);
+        CityRank {
+            id: h.id, name: h.name.clone(), population: h.population.max(0.0) as u32,
+            wealth: h.grain_wealth + h.trade_wealth, trade, pct_world: trade / total * 100.0,
+        }
+    }).collect();
+    out.sort_by(|a, b| b.trade.partial_cmp(&a.trade).unwrap_or(std::cmp::Ordering::Equal));
+    out.truncate(40);
+    Ok(out)
+}
+
+
+#[tauri::command]
+pub fn campaign_diagnostics(db: State<'_, WorldDb>) -> Result<Option<CampaignDiagnostics>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let Some(sim) = get_sim(&db, &conn)? else { return Ok(None) };
+    let active: Vec<&crate::sim::tick::House> = sim.houses.iter().filter(|h| !h.defunct).collect();
+    let (mut fs, mut fr, mut fc, mut wealth) = (0u32, 0u32, 0u32, 0.0f32);
+    for h in &active {
+        fs += h.fleet_sea; fr += h.fleet_river; fc += h.fleet_caravan; wealth += h.wealth;
+    }
+    let controlled = build_house_briefs(&sim).iter()
+        .filter(|h| !h.defunct).map(|h| h.controls.len() as u32).sum();
+    Ok(Some(CampaignDiagnostics {
+        tick: sim.tick,
+        year: sim.tick / 365,
+        in_transit: sim.in_transit.len() as u32,
+        shipments_last: sim.diag_shipments,
+        by_house: sim.diag_by_house,
+        by_guild: sim.diag_by_guild,
+        lost_last: sim.diag_lost,
+        volume_last: sim.diag_volume,
+        houses_active: active.len() as u32,
+        houses_defunct: (sim.houses.len() - active.len()) as u32,
+        fleet_sea: fs, fleet_river: fr, fleet_caravan: fc,
+        controlled_settlements: controlled,
+        total_house_wealth: wealth,
+    }))
+}
+
+
+/// Phase 6 · the Guilds & Crafts panel: every craft guild, highest quality first.
+/// Exceptional crafts carry a place-brand so they read as distinct goods.
+#[tauri::command]
+pub fn campaign_get_guilds(db: State<'_, WorldDb>) -> Result<Vec<GuildBrief>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let (gw, gh) = (sim.world_w as u32, (sim.world_w * 0.5) as u32);
+    let mut out: Vec<GuildBrief> = sim.guilds.iter().filter_map(|g| {
+        let (hub, good) = (g.hub as usize, g.good as usize);
+        let h = sim.hubs.get(hub)?;
+        let spec = sim.goods.get(good)?;
+        let quality = h.quality.get(good).copied().unwrap_or(0.0);
+        let exceptional = quality >= GUILD_EXCEPTIONAL;
+        let culture = crate::sim::names::culture_label(
+            h.x.max(0.0) as u32, h.y.max(0.0) as u32, gw, gh).to_string();
+        // Brand by the city (a place of renown, like Murano glass).
+        let brand = if exceptional { format!("{} {}", h.name, spec.name) } else { String::new() };
+        Some(GuildBrief {
+            hub: g.hub, x: h.x, y: h.y, city: h.name.clone(),
+            good: g.good, good_name: spec.name.clone(),
+            quality, output: h.production.get(good).copied().unwrap_or(0.0),
+            strength: g.strength, hall: g.hall,
+            luxury: spec.need_tier >= 2,
+            exceptional, brand, culture,
+        })
+    }).collect();
+    out.sort_by(|a, b| b.quality.partial_cmp(&a.quality).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(out)
+}
+
+
+/// DLC 3.5 · per-city schematics for every real city (non-estate), largest first.
+#[tauri::command]
+pub fn campaign_get_schematics(db: State<'_, WorldDb>) -> Result<Vec<CitySchematic>, String> {
+    use crate::sim::tick::{structure_label, structure_effect};
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let estate_label = |k: u8| match k {
+        1 => "Farm", 2 => "Mine", 3 => "Plantation", 4 => "Fishery", 5 => "Vineyard", 6 => "Manufactory",
+        _ => "Estate",
+    };
+    let mut out: Vec<CitySchematic> = Vec::new();
+    for (i, h) in sim.hubs.iter().enumerate() {
+        if h.is_estate || h.population < 1.0 { continue; }
+        let buildings = h.structures.iter().map(|&s| SchematicBuilding {
+            label: structure_label(s).to_string(), effect: structure_effect(s).to_string(),
+        }).collect();
+        // Estates parented to this city.
+        let estates = sim.hubs.iter()
+            .filter(|e| e.is_estate && e.parent == i as i32)
+            .map(|e| {
+                let owner = if e.owner_house >= 0 {
+                    sim.houses.get(e.owner_house as usize).map(|x| x.name.clone()).unwrap_or_default()
+                } else { "City".into() };
+                let good = e.base_per_capita.iter().enumerate()
+                    .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                    .and_then(|(g, _)| sim.goods.get(g)).map(|x| x.name.clone()).unwrap_or_default();
+                SchematicEstate {
+                    label: estate_label(e.estate_kind).to_string(),
+                    tier: e.estate_tier.max(1), owner, good,
+                }
+            }).collect();
+        let banks_seated = sim.banks.iter()
+            .filter(|b| !b.defunct && b.seat as usize == i)
+            .map(|b| b.name.clone()).collect();
+        let bank_branches = sim.banks.iter()
+            .filter(|b| !b.defunct && b.seat as usize != i && b.branches.contains(&(i as u32)))
+            .map(|b| b.name.clone()).collect();
+        let council = if h.council_house >= 0 {
+            sim.houses.get(h.council_house as usize).map(|x| x.name.clone()).unwrap_or_default()
+        } else { String::new() };
+        out.push(CitySchematic {
+            hub: h.id, name: h.name.clone(), x: h.x, y: h.y,
+            population: h.population as u32,
+            coin_name: h.coin_name.clone(), coin_trust: h.coin_trust,
+            coin_metal: match h.coin_metal { 1 => "gold", 2 => "electrum", 3 => "bronze", _ => "silver" }.to_string(),
+            council, buildings, estates, banks_seated, bank_branches,
+        });
+    }
+    out.sort_by(|a, b| b.population.cmp(&a.population));
+    Ok(out)
+}
+
+
+#[tauri::command]
+pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<TradeFlows>, String> {
+    use std::collections::HashMap;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let Some(sim) = get_sim(&db, &conn)? else { return Ok(None) };
+    // `log_trade` records flows by ARRAY INDEX (the sim's internal hub key), not by
+    // the external settlement `id` the UI passes — so resolve the index here and work
+    // in index space throughout. (Mismatching the two showed the wrong, cross-ocean
+    // partner and made most cities look like they had no trade at all.)
+    let Some(hi) = sim.hubs.iter().position(|h| h.id == id) else { return Ok(None) };
+    let hidx = hi as u32;
+    let (hub_x, hub_y) = (sim.hubs[hi].x, sim.hubs[hi].y);
+    // Estates/manufactories are NOT independent partners — fold them into their
+    // PARENT settlement so the partner list shows real cities, not "House X
+    // Manufactory" rows (#17). `pos` resolves the (folded) settlement's name/coords.
+    let city_of = |idx: u32| -> u32 {
+        match sim.hubs.get(idx as usize) {
+            Some(x) if x.is_estate && x.parent >= 0 => x.parent as u32,
+            _ => idx,
+        }
+    };
+    let pos = |idx: u32| sim.hubs.get(city_of(idx) as usize).map(|h| (h.name.clone(), h.x, h.y));
+
+    // ── Per-good last-year in/out + per-(good,partner,dir) route amounts ──
+    let mut g_in: HashMap<u32, f32> = HashMap::new();
+    let mut g_out: HashMap<u32, f32> = HashMap::new();
+    let mut g_partners: HashMap<u32, std::collections::HashSet<u32>> = HashMap::new();
+    let mut route_amt: HashMap<(u32, u32, u8), f32> = HashMap::new(); // (good,partner,dir)→amt
+    let mut partner_vol: HashMap<u32, f32> = HashMap::new();
+    let mut partner_goods: HashMap<u32, HashMap<u32, f32>> = HashMap::new(); // partner→good→amt
+    for f in sim.trade_last.iter().filter(|f| f.hub == hidx) {
+        let partner = city_of(f.partner); // fold estates/manufactories into their settlement
+        if partner == hidx { continue; }  // skip self-trade after folding (own estate)
+        if f.dir == 0 { *g_in.entry(f.good).or_insert(0.0) += f.amount; }
+        else { *g_out.entry(f.good).or_insert(0.0) += f.amount; }
+        g_partners.entry(f.good).or_default().insert(partner);
+        *route_amt.entry((f.good, partner, f.dir)).or_insert(0.0) += f.amount;
+        *partner_vol.entry(partner).or_insert(0.0) += f.amount;
+        *partner_goods.entry(partner).or_default().entry(f.good).or_insert(0.0) += f.amount;
+    }
+
+    // ── Goods list: union of last-year flows + historical series ──
+    let mut hist_by_good: HashMap<u32, &Vec<f32>> = HashMap::new();
+    // `trade_hist` is keyed by the sim's ARRAY INDEX (`hidx`), exactly like `trade_last`
+    // above — NOT the external settlement `id`. Filtering by `id` here left the history
+    // empty whenever id≠index, so the avg showed "0.0/yr" and a "0-yr trend" even though
+    // last-year flows (3.4k) were present.
+    for h in sim.trade_hist.iter().filter(|h| h.hub == hidx) { hist_by_good.insert(h.good, &h.vols); }
+    let mut good_ids: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    for &g in g_in.keys().chain(g_out.keys()) { good_ids.insert(g); }
+    for &g in hist_by_good.keys() { good_ids.insert(g); }
+    let mut goods: Vec<TradeFlowGood> = good_ids.into_iter().map(|g| {
+        let history: Vec<f32> = hist_by_good.get(&g).map(|v| (*v).clone()).unwrap_or_default();
+        let avg = if history.is_empty() { 0.0 } else { history.iter().sum::<f32>() / history.len() as f32 };
+        let iv = g_in.get(&g).copied().unwrap_or(0.0);
+        let ov = g_out.get(&g).copied().unwrap_or(0.0);
+        TradeFlowGood {
+            good: g,
+            name: sim.goods.get(g as usize).map(|x| x.name.clone()).unwrap_or_default(),
+            avg_volume: avg,
+            last_volume: iv + ov,
+            in_volume: iv, out_volume: ov,
+            route_count: g_partners.get(&g).map(|s| s.len() as u32).unwrap_or(0),
+            history,
+        }
+    }).collect();
+    goods.sort_by(|a, b| b.avg_volume.partial_cmp(&a.avg_volume).unwrap_or(std::cmp::Ordering::Equal));
+
+    // ── Routes (per good, ranked; pct of that good's total flow) ──
+    let mut good_total: HashMap<u32, f32> = HashMap::new();
+    for (&(g, _, _), &amt) in &route_amt { *good_total.entry(g).or_insert(0.0) += amt; }
+    let mut routes: Vec<TradeRouteFlow> = route_amt.iter().filter_map(|(&(g, partner, dir), &amount)| {
+        let (pname, px, py) = pos(partner)?;
+        let tot = good_total.get(&g).copied().unwrap_or(0.0).max(1e-6);
+        Some(TradeRouteFlow {
+            good: g, partner, partner_name: pname, px, py, dir, amount,
+            pct: amount / tot * 100.0,
+        })
+    }).collect();
+    routes.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
+
+    // ── Top partner cities (share of all this city's trade) ──
+    let total_vol: f32 = partner_vol.values().sum::<f32>().max(1e-6);
+    let mut partners: Vec<TradePartner> = partner_vol.iter().filter_map(|(&p, &vol)| {
+        let (pname, px, py) = pos(p)?;
+        let mut gs: Vec<(u32, f32)> = partner_goods.get(&p).map(|m| m.iter().map(|(&g, &a)| (g, a)).collect()).unwrap_or_default();
+        gs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let goods = gs.iter().take(4).filter_map(|(g, _)| sim.goods.get(*g as usize).map(|x| x.name.clone())).collect();
+        Some(TradePartner { hub: p, name: pname, px, py, volume: vol, pct: vol / total_vol * 100.0, goods })
+    }).collect();
+    partners.sort_by(|a, b| b.volume.partial_cmp(&a.volume).unwrap_or(std::cmp::Ordering::Equal));
+    partners.truncate(12);
+
+    Ok(Some(TradeFlows { hub: id, hub_x, hub_y, goods, routes, partners }))
+}
