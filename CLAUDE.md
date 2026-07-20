@@ -479,6 +479,8 @@ Save/Open via SQLite backup API (`.worldforge` / `.campaign`); Export Heightmap
 
 **World / trade / architecture**
 ```
+FEATURES_AND_PROPOSALS.md         ← Feature catalog, step-by-step generation, per-step
+                                    improvement ideas & campaign-integration proposals
 REDESIGN_AND_DLC_PLAN.md          ← World/trade split, perf overhaul & DLC master plan
 IMPLEMENTATION_PLAN.md            ← Redesign implementation plan & status
 PERFORMANCE_OPTIMIZATION_PLAN.md  ← Campaign performance & stability plan
