@@ -7,7 +7,7 @@ on top of it (merchant houses, banks, coinage, wars, plagues, colonies).
 **Stack:** Tauri 2 (Rust) · React 18 · PixiJS 8 · Zustand · SQLite (rusqlite) · zstd
 **Layout:** `WorkflowPanel (left) | Map (center) | Toolbar (right) | StatusBar (bottom)`
 **Two halves:** a **World** pipeline (`sim/*.rs`, frozen on finalize) and a
-**Campaign** simulation (`sim/tick.rs`, ~14.6k lines).
+**Campaign** simulation (`sim/campaign/tick/`, ~15k lines split by theme).
 
 ---
 
@@ -32,7 +32,7 @@ cargo test --lib simulate_decades_reports_dynamics -- --nocapture  # WATCH the l
 ## 2. STANDING RULES (non-negotiable)
 
 ### 2.1 Always iterate & test the simulation
-After ANY change touching `sim/tick.rs` (economy, houses, banks, coinage, war,
+After ANY change touching `sim/campaign/tick/` (economy, houses, banks, coinage, war,
 crashes, trade) you MUST run the living simulation and read the dynamics, not just
 type-check. The world is meant to be DYNAMIC — houses rise and go **defunct**,
 banks are chartered and **fail**, poleis mint coin, wars flare, crashes ripple.
@@ -65,7 +65,7 @@ to `main`** so the live app always reflects the latest work.
 
 ### 3.1 Data flow
 ```
-UI action → bridge/tauri.ts (invoke) → commands/*.rs → sim/*.rs or paint/*.rs
+UI action → bridge/ (invoke) → commands/*.rs → sim/*.rs or paint/*.rs
   → WorldBuffer (flat world arrays) → tile_store (SQLite) → tile_image.rs (render)
   → RGBA → TileManager.ts → PixiJS sprites
 ```
@@ -144,7 +144,7 @@ dominant color (4-bit quantization → bright=ocean or color-distance threshold)
 
 ---
 
-## 5. The Campaign Simulation (`sim/tick.rs`)
+## 5. The Campaign Simulation (`sim/campaign/tick/`)
 
 A `CampaignSim` is seeded once at campaign start (from the static economy
 snapshot: hubs, per-good production, goods spec, connectivity) then advanced one
@@ -209,16 +209,19 @@ commands/
   sim_commands.rs               ← Tauri wrappers for sim phases (per-phase ColumnSet masks)
   paint_commands.rs             ← Paint strokes (land/elev/shelf/volcano)
   tile_commands.rs              ← get_tiles / get_tiles_packed (RGBA fetch), LOD
-  query_commands.rs             ← Read-only overlays + coarse routing: cell_info, trade
-                                  routes/matrix/trunks, political, fishery banks, good/
-                                  culture regions, monsoon/reef/storm zones, coarse cost
-                                  grid, trade flow, compute_itinerary (#23 travel-time)
-  campaign_commands.rs          ← finalize/unfreeze, new/save/open campaign, start/advance/
-                                  state, and ALL campaign read queries (hubs, houses,
-                                  poleis, currencies, banks, crashes, wars, colonies,
-                                  dynasties, guilds, epidemics, migration, satellites,
-                                  futures, warehouses, figures, landmarks, inequality…).
-                                  get_sim() loads the CampaignSim blob
+  query_commands/               ← Read-only overlays + coarse routing (split into a folder;
+                                  mod.rs keeps shared use/structs/helpers + `pub use <child>::*`
+                                  so external paths query_commands::* are unchanged):
+      cell.rs · routing.rs        cell_info; trade routes/matrix/trunks + compute_itinerary
+      overlays.rs · political.rs  shark/shipworm/reef/storm/monsoon + good/culture regions;
+      economy.rs · flow.rs        political ranking; market economy; dynamic trade flow
+  campaign_commands/            ← finalize/unfreeze, campaign lifecycle + ALL campaign read
+                                  queries. Split into a folder (mod.rs re-exports children;
+                                  campaign_commands::* paths unchanged):
+      lifecycle.rs                finalize/new/save/open/progress/persist/start/advance/state
+      read_hubs.rs · read_money.rs  hubs/journal/houses; coin/bank/crash/war/inequality/poleis
+      read_people.rs · read_colonies.rs  cultures/pops/figures/dynasties; colonies/migration
+      read_trade.rs               goods/routes/futures/warehouses/guilds/schematics/diagnostics
   goods_commands.rs             ← Goods spec CRUD, default_custom_goods, backfill
   import_commands.rs            ← import_world_layers (layered world import)
   template_commands.rs          ← Image → land/sea detection (4-bit quantization)
@@ -246,32 +249,31 @@ paint/
 import/mod.rs                   ← TileData::merge_columns (layer-group import)
 history/mod.rs · undo.rs        ← Tile-level undo/redo journal
 
-sim/
-  mod.rs                        ← Sim module declarations
+sim/                            ← organised into per-phase step folders; mod.rs re-exports
+                                  each leaf module so paths stay sim::plates, sim::tick, …
+  mod.rs                        ← Sim module declarations + `pub use` re-exports
   world_buffer.rs               ← WorldBuffer: flat arrays + per-phase ColumnSet masks
-  plates.rs                     ← Ph1: Voronoi plate tectonics
-  elevation.rs                  ← Ph2: plate-based + template-based elevation
-  ocean.rs                      ← Ph3a: wind belts, currents, upwelling, salinity, thermohaline
-  temperature.rs                ← Ph3b: latitude + lapse + current influence
-  precipitation.rs              ← Ph3c: moisture advection, ITCZ, orographic
-  koppen.rs                     ← Ph4: 22 Köppen climate zones
-  rivers.rs                     ← Ph5: D8 flow, rivers, lakes
-  aquatic.rs                    ← Freshwater ecology: river flow-regime + fish assemblage,
-                                  lake limnology (real Earth taxa/analogs). Pure scalars
-  soil.rs                       ← Ph6a: 11 soil types from climate
-  fertility.rs                  ← Ph6b: fertility scoring, fisheries
-  settlements.rs                ← Ph7: habitability → city placement (Settlement struct)
-  biological.rs                 ← Ph8: shark/shipworm risk + trade-good belts + deposits
-  cultures.rs                   ← Organic culture/peoples map (names houses/guilds by culture)
-  toponyms.rs                   ← #26 culture-styled river/mountain/lake/region names
-  names.rs                      ← Deterministic place/family/head name generation
-  goods_spec.rs                 ← GoodSpec (category/tier/base_value/bulk/perishable/
-                                  inputs/labor), 45 builtins
-  manufacture.rs                ← Shared production-chain resolver (apply_manufacturing:
-                                  DAG topo, labor∝pop)
-  market.rs                     ← Market equilibrium solver (stocks → grain-eq prices →
-                                  arbitrage; bulk/perish freight)
-  tick.rs                       ← THE CAMPAIGN TICK SIM (~14.6k lines). See §5.
+  step1_plates/plates.rs        ← Ph1: Voronoi plate tectonics
+  step2_terrain/elevation.rs    ← Ph2: plate-based + template-based elevation
+  step3_ocean_atmo/             ← Ph3: ocean.rs (winds/currents/upwelling/salinity/thermohaline)
+                                  · temperature.rs · jets.rs · seasonal.rs · precipitation.rs
+  step4_climate/koppen.rs       ← Ph4: 22 Köppen climate zones
+  step5_rivers/                 ← Ph5: rivers.rs (D8 flow/rivers/lakes) · aquatic.rs
+                                  (freshwater ecology: fish assemblage, lake limnology)
+  step6_soil_fertility/         ← Ph6: soil.rs (11 soil types) · fertility.rs (fisheries)
+  step7_settlements/settlements.rs ← Ph7: habitability → city placement (Settlement struct)
+  step8_biological_goods/       ← Ph8: biological.rs (shark/shipworm + belts + deposits)
+                                  · goods_spec.rs (GoodSpec, 45 builtins)
+  shared/                       ← cultures.rs (organic peoples map) · toponyms.rs (#26 names)
+                                  · names.rs (deterministic place/family/head names)
+  campaign/                     ← the campaign half:
+      market.rs                   Market equilibrium solver (stocks → grain-eq prices)
+      manufacture.rs              Shared production-chain resolver (DAG topo, labor∝pop)
+      tick/                       THE CAMPAIGN TICK SIM (~15k lines, split by theme). See §5.
+                                  mod.rs = structs/consts/free-fns/advance()/impl Bank/…/
+                                  residual impl CampaignSim; methods grouped into money/war/
+                                  disease/colonies/polis/cities/houses/production child impls
+                                  (pub(crate), `use super::*`); tests.rs = the dynamics tests
 ```
 
 ---
@@ -281,11 +283,16 @@ sim/
 ```
 main.tsx                        ← React entry / mount
 App.tsx                         ← Layout, header, file dialogs, NewWorldDialog, mounts panels
-types.ts                        ← ALL shared TS types (mirror Rust serde structs)
-goods.ts                        ← GOOD_DEFS (names/emoji) shared metadata
-commodityHistory.ts             ← #36 real-world commodity-history cards
-settlementStory.ts              ← Settlement narrative/flavor text
-bridge/tauri.ts                 ← ALL IPC invoke wrappers (one per Rust command)
+types/                          ← ALL shared TS types (mirror Rust serde structs), split
+                                  world.ts/campaign.ts/goods.ts + index.ts barrel (@types)
+goods.ts                        ← GOOD_DEFS (names/emoji) shared metadata (@goods)
+commodityHistory.ts             ← #36 real-world commodity-history cards (@app/commodityHistory)
+settlementStory.ts              ← Settlement narrative/flavor text (@app/settlementStory)
+bridge/                         ← ALL IPC invoke wrappers (one per Rust command), split
+                                  world/query/campaign/goods.ts + types.ts + index.ts (@bridge)
+
+Path aliases (tsconfig + vite): @state @canvas @ui @bridge @types @goods @app/*.
+Import cross-cutting modules via alias, not deep-relative paths.
 
 state/  (Zustand)
   worldStore.ts                 ← meta, rivers, lakes, settlements
@@ -305,7 +312,7 @@ canvas/
   projection.ts                 ← lat/lon ↔ world-cell projection helpers
   goodIcons.ts                  ← good → emoji/texture for overlays
 
-ui/  — map & world
+ui/world/  — map & world
   MapCanvas.tsx                 ← PixiJS canvas, pointer events, painting, draws every overlay
   Toolbar.tsx                   ← Tools, layer selector, overlay toggles (RIGHT side)
   StatusBar.tsx · WindowBar.tsx ← Bottom status / window chrome
@@ -319,7 +326,7 @@ ui/  — map & world
   ErrorBoundary.tsx             ← React error boundary
   useFloatingWindow.ts          ← Floating/dockable window hook
 
-ui/  — goods
+ui/goods/  — goods
   GoodsEditor.tsx               ← Goods builder (distribution/value/bulk/perish + recipes)
   GoodsChainReview.tsx          ← Pre-generation planted-vs-manufactured review + recipe DAG
   GoodsBrowserPanel/GoodDetailPanel/GoodFlowPanel.tsx ← browser/detail/flow views
@@ -329,7 +336,7 @@ ui/  — goods
   MerchantRoutePanel.tsx        ← Click-through merchant route inspector
   ItineraryPanel.tsx            ← #23 travel-time tool (origin/dest, per-mode days, route overlay)
 
-ui/  — campaign / economy
+ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, settlementArt)
   CampaignTopBar.tsx            ← Campaign era / advance controls
   HubPanel.tsx                  ← Settlement detail (Summary/Trade/Estates/People + City finances,
                                   Transit, year-grouped Chronicle). ~2k lines
@@ -356,7 +363,7 @@ ui/  — campaign / economy
   YearChronicle.tsx             ← SHARED year-grouped expandable chronicle
   cultureFigure.ts · chronicleTheme.ts · settlementArt.ts ← helpers/themes/art
 
-ui/  — heraldry
+ui/heraldry/  — heraldry
   CoatOfArms.tsx                ← Deterministic house heraldry (houseColor + shield SVG)
   CoinIcon.tsx                  ← Heraldic minted coin (coat of arms on gold disc + value tint)
 
@@ -514,6 +521,6 @@ archived under `docs/mockups/_archive/`; a stray reference image lives in
 5. **Rendering is server-side** — Rust renders RGBA, frontend only displays.
 6. **Cylindrical wrapping** — X wraps, Y clamps; all BFS/paint/sim respect it.
 7. **New tile fields append LAST** — v2 self-describing blobs; trailing reads pad zeros (old saves load).
-8. **Every `#[tauri::command]` is registered in `lib.rs`** and gets a wrapper in `bridge/tauri.ts`.
-9. **New TS types mirror Rust serde structs** in `types.ts`.
+8. **Every `#[tauri::command]` is registered in `lib.rs`** and gets a wrapper in `bridge/` (via the @bridge barrel).
+9. **New TS types mirror Rust serde structs** in `types/` (world/campaign/goods).
 10. **After any `tick.rs` change** → run the dynamics test (§2.1). **After any verified change** → push to `main` (§2.2).
