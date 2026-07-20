@@ -217,6 +217,131 @@ fn thermal_erosion(
     }
 }
 
+// â”€â”€ Isostasy â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Fraction of the (flexurally smoothed) eroded thickness that floats back up.
+const ISOSTATIC_REBOUND: f32 = 0.30;
+// Flexural smoothing radius in cells (isostasy responds to loads over a broad area,
+// not one cell) â€” the removed thickness is box-blurred over this radius.
+const ISOSTATIC_RADIUS: i32 = 6;
+// Max buoyant lift (fraction of local height) for crust sitting on a thick root at a
+// convergent / transform boundary; fades to 0 over ROOT_REACH cells.
+const ROOT_BUOYANCY: f32 = 0.12;
+const ROOT_REACH: u16 = 8;
+
+/// Separable box blur with cylindrical X wrap and clamped Y (poles). Radius in cells.
+fn box_blur_wrap(src: &[f32], w: u32, h: u32, radius: i32) -> Vec<f32> {
+    let wi = w as i32;
+    let hi = h as i32;
+    let win = (2 * radius + 1) as f32;
+    let mut tmp = vec![0.0f32; src.len()];
+    for y in 0..hi {
+        let row = (y as u32 * w) as usize;
+        for x in 0..wi {
+            let mut sum = 0.0f32;
+            for dx in -radius..=radius {
+                let xx = (((x + dx) % wi) + wi) % wi;
+                sum += src[row + xx as usize];
+            }
+            tmp[row + x as usize] = sum / win;
+        }
+    }
+    let mut out = vec![0.0f32; src.len()];
+    for y in 0..hi {
+        for x in 0..wi {
+            let mut sum = 0.0f32;
+            for dy in -radius..=radius {
+                let yy = (y + dy).clamp(0, hi - 1);
+                sum += tmp[(yy as u32 * w) as usize + x as usize];
+            }
+            out[(y as u32 * w) as usize + x as usize] = sum / win;
+        }
+    }
+    out
+}
+
+/// BFS distance (in cells, capped at `max_reach`) from the nearest convergent (1) or
+/// transform (3) boundary land cell. `u16::MAX` where no boundary is in reach or where
+/// there is no plate data (template worlds pass an empty `boundary_type`).
+fn convergent_distance(
+    terrain: &[u8], boundary_type: &[u8], w: u32, h: u32, max_reach: u16,
+) -> Vec<u16> {
+    let n = terrain.len();
+    let mut dist = vec![u16::MAX; n];
+    if boundary_type.len() != n {
+        return dist;
+    }
+    let mut q: VecDeque<usize> = VecDeque::new();
+    for i in 0..n {
+        if terrain[i] == 1 && (boundary_type[i] == 1 || boundary_type[i] == 3) {
+            dist[i] = 0;
+            q.push_back(i);
+        }
+    }
+    let wi = w as i32;
+    let hi = h as i32;
+    while let Some(i) = q.pop_front() {
+        let d = dist[i];
+        if d >= max_reach {
+            continue;
+        }
+        let x = (i as u32 % w) as i32;
+        let y = (i as u32 / w) as i32;
+        for (dx, dy) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+            let nx = (((x + dx) % wi) + wi) % wi;
+            let ny = y + dy;
+            if ny < 0 || ny >= hi {
+                continue;
+            }
+            let ni = (ny as u32 * w + nx as u32) as usize;
+            if terrain[ni] == 1 && dist[ni] == u16::MAX {
+                dist[ni] = d + 1;
+                q.push_back(ni);
+            }
+        }
+    }
+    dist
+}
+
+/// Isostatic adjustment, applied AFTER erosion and BEFORE the rank-based hypsometric
+/// redistribution. Two effects the erosion pipeline otherwise ignores:
+///  1. **Erosional rebound** â€” stripping material unloads the crust, which floats back
+///     up. We re-add `ISOSTATIC_REBOUND` Ã— the *smoothed* eroded thickness so ancient,
+///     heavily dissected uplands (shields, old plateaus) keep gentle elevation instead
+///     of grinding down to the hypsometric floor.
+///  2. **Mountain roots** â€” crust thickened at a convergent/transform boundary sits on a
+///     deep buoyant root and resists erosion; nearby cells get a small height-scaled lift.
+///
+/// Because `redistribute_elevation` is rank-based, this changes *which* cells rank high
+/// (favouring rooted / heavily-eroded uplands) while the target histogram is preserved.
+fn isostatic_adjust(
+    elevation: &mut [f32], terrain: &[u8], boundary_type: &[u8], pre_erosion: &[f32],
+    w: u32, h: u32,
+) {
+    let n = elevation.len();
+    // 1. Erosional rebound.
+    let mut removed = vec![0.0f32; n];
+    for i in 0..n {
+        if terrain[i] == 1 {
+            removed[i] = (pre_erosion[i] - elevation[i]).max(0.0);
+        }
+    }
+    let smoothed = box_blur_wrap(&removed, w, h, ISOSTATIC_RADIUS);
+    for i in 0..n {
+        if terrain[i] == 1 {
+            elevation[i] += ISOSTATIC_REBOUND * smoothed[i];
+        }
+    }
+    // 2. Mountain roots (skipped when there is no plate data).
+    let root_dist = convergent_distance(terrain, boundary_type, w, h, ROOT_REACH);
+    for i in 0..n {
+        if terrain[i] != 1 || root_dist[i] >= ROOT_REACH {
+            continue;
+        }
+        let prox = 1.0 - root_dist[i] as f32 / ROOT_REACH as f32; // 1 at boundary â†’ 0 at reach
+        elevation[i] += ROOT_BUOYANCY * prox * elevation[i];
+    }
+}
+
 // â”€â”€ Public elevation generators â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Generate elevation from plate tectonics.
@@ -365,8 +490,12 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
 
     // â”€â”€ Erosion (hydraulic droplets + thermal slump) then hypsometric match â”€â”€
     let hydro_iterations = ((n as f32 * 0.012) as u32).clamp(15_000, 90_000);
+    let pre_erosion = elevation.clone();
     hydraulic_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations);
     thermal_erosion(&mut elevation, &terrain, w, h, 3);
+    // Isostatic adjustment (erosional rebound + mountain roots) before the rank-based
+    // hypsometric redistribution reshapes the histogram.
+    isostatic_adjust(&mut elevation, &terrain, &buf.boundary_type, &pre_erosion, w, h);
 
     let mut max_h = 0.0f32;
     for i in 0..n {
@@ -836,6 +965,7 @@ pub fn generate_elevation_from_terrain(
     // Scale iterations with world size (small worlds ~15K, large ~100K)
     let erosion_scale = 0.5 + roughness * 0.5; // rougher = more erosion detail
     let hydro_iterations = ((n as f32 * 0.015 * erosion_scale) as u32).clamp(15_000, 100_000);
+    let pre_erosion = elevation.clone();
     hydraulic_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations);
 
     // â”€â”€ Step 4: Thermal erosion â€” smooth sharp ridges â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -844,6 +974,7 @@ pub fn generate_elevation_from_terrain(
     // second reason interiors read as flat.
     let thermal_passes = 2 + (roughness * 2.0) as u32; // 2-4 passes
     thermal_erosion(&mut elevation, &terrain, w, h, thermal_passes);
+    isostatic_adjust(&mut elevation, &terrain, &buf.boundary_type, &pre_erosion, w, h);
 
     // â”€â”€ Step 5: Normalize with realistic altitude distribution â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Power curve pushes most land lower, percentile cap prevents every world
@@ -1010,9 +1141,11 @@ pub fn generate_elevation_ridged(
     // â”€â”€ Erosion (hydraulic droplets + thermal slump) â”€â”€
     let erosion_scale = 0.5 + roughness * 0.5;
     let hydro_iterations = ((n as f32 * 0.015 * erosion_scale) as u32).clamp(15_000, 100_000);
+    let pre_erosion = elevation.clone();
     hydraulic_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations);
     let thermal_passes = 2 + (roughness * 2.0) as u32; // fewer passes so valleys survive
     thermal_erosion(&mut elevation, &terrain, w, h, thermal_passes);
+    isostatic_adjust(&mut elevation, &terrain, &buf.boundary_type, &pre_erosion, w, h);
 
     // â”€â”€ Normalize + hypsometric redistribution (realistic altitude spread) â”€â”€
     let mut max_h = 0.0f32;
@@ -1537,6 +1670,63 @@ mod tests {
         assert!(on_spine > 0.35, "ridge spine should be raised, got {on_spine}");
         assert!(far < 0.1, "cells far from the line stay low, got {far}");
         assert!(on_spine > far + 0.25, "spine must stand well above the surroundings");
+    }
+
+    /// Isostatic rebound must lift a heavily-eroded upland back up (partially,
+    /// never past its pre-erosion height), only ever ADD on land, and be
+    /// deterministic. Boundary data is empty here so this isolates the erosional
+    /// rebound from the mountain-root term.
+    #[test]
+    fn isostatic_rebound_lifts_eroded_uplands() {
+        let (w, h) = (64u32, 48u32);
+        let n = (w * h) as usize;
+        let terrain = vec![1u8; n]; // all land, to isolate isostasy
+
+        // A central raised plateau over a low plain.
+        let mut elevation = vec![0.05f32; n];
+        for y in 12..36u32 {
+            for x in 16..48u32 {
+                elevation[(y * w + x) as usize] = 0.9;
+            }
+        }
+        let pre = elevation.clone();
+
+        // Erode it hard.
+        hydraulic_erosion(&mut elevation, &terrain, w, h, 7, 40_000);
+        thermal_erosion(&mut elevation, &terrain, w, h, 4);
+        let eroded = elevation.clone();
+
+        // Rebound only (empty boundary_type disables the root term).
+        let mut adjusted = eroded.clone();
+        isostatic_adjust(&mut adjusted, &terrain, &[], &pre, w, h);
+
+        let plateau: Vec<usize> = (0..n)
+            .filter(|&i| {
+                let x = i as u32 % w;
+                let y = i as u32 / w;
+                (16..48).contains(&x) && (12..36).contains(&y)
+            })
+            .collect();
+        let mean = |v: &[f32], idxs: &[usize]| {
+            idxs.iter().map(|&i| v[i]).sum::<f32>() / idxs.len() as f32
+        };
+        let m_eroded = mean(&eroded, &plateau);
+        let m_adj = mean(&adjusted, &plateau);
+        let m_pre = mean(&pre, &plateau);
+
+        // 1. Rebound raises the eroded upland.
+        assert!(m_adj > m_eroded, "rebound should raise eroded uplands: {m_adj} !> {m_eroded}");
+        // 2. But only a fraction is re-added — never above the pre-erosion height.
+        assert!(m_adj <= m_pre + 1e-3, "rebound must not exceed pre-erosion: {m_adj} > {m_pre}");
+        // 3. Finite everywhere and only ever ADDS on land.
+        for i in 0..n {
+            assert!(adjusted[i].is_finite(), "non-finite elevation at {i}");
+            assert!(adjusted[i] >= eroded[i] - 1e-6, "isostasy must not lower land at {i}");
+        }
+        // 4. Deterministic.
+        let mut again = eroded.clone();
+        isostatic_adjust(&mut again, &terrain, &[], &pre, w, h);
+        assert_eq!(again, adjusted, "isostatic_adjust must be deterministic");
     }
 }
 
