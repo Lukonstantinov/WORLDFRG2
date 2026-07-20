@@ -1,6 +1,6 @@
 import { useUIStore } from "@state/uiStore";
 import { simClassifyClimate } from "@bridge";
-import { genBtn } from "./WorkflowPanel";
+import { genBtn } from "@ui/workflow/WorkflowPanel";
 
 interface Props {
   seed: number;

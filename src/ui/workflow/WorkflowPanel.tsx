@@ -5,17 +5,17 @@ import { useViewportStore } from "@state/viewportStore";
 import { simRunAll, simRunAllFromTerrain, finalizeWorld, saveWorldAs, persistOverlays, getWorldMeta,
   computePolitical, computeEconomy, computeSettlementDevelopment } from "@bridge";
 import type { Settlement, RiverData } from "@types";
-import { StepLandmass } from "./StepLandmass";
-import { StepElevation } from "./StepElevation";
-import { StepOceanAtmo } from "./StepOceanAtmo";
-import { StepClimate } from "./StepClimate";
-import { StepRivers } from "./StepRivers";
-import { StepSoilResources } from "./StepSoilResources";
-import { StepSettlements } from "./StepSettlements";
-import { StepBiological } from "./StepBiological";
-import { StepPolitical } from "./StepPolitical";
-import { StepEconomy } from "./StepEconomy";
-import { StepToponyms } from "./StepToponyms";
+import { StepLandmass } from "@ui/workflow/StepLandmass";
+import { StepElevation } from "@ui/workflow/StepElevation";
+import { StepOceanAtmo } from "@ui/workflow/StepOceanAtmo";
+import { StepClimate } from "@ui/workflow/StepClimate";
+import { StepRivers } from "@ui/workflow/StepRivers";
+import { StepSoilResources } from "@ui/workflow/StepSoilResources";
+import { StepSettlements } from "@ui/workflow/StepSettlements";
+import { StepBiological } from "@ui/workflow/StepBiological";
+import { StepPolitical } from "@ui/workflow/StepPolitical";
+import { StepEconomy } from "@ui/workflow/StepEconomy";
+import { StepToponyms } from "@ui/workflow/StepToponyms";
 
 const STEP_INFO = [
   { step: 1, label: "Landmass", desc: "Paint your landmasses, load an image template, or generate from plates." },

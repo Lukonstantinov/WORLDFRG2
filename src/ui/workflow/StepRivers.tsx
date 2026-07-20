@@ -1,7 +1,7 @@
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import { simRiversHydrology, simRefreshHydrologyBiology } from "@bridge";
-import { genBtn } from "./WorkflowPanel";
+import { genBtn } from "@ui/workflow/WorkflowPanel";
 
 interface Props {
   seed: number;

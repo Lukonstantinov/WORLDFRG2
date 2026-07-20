@@ -104,7 +104,7 @@ export async function simRiversHydrology(
   riverWidth: number,
   lakeFillDepth: number,
   lakeMaxFraction: number,
-): Promise<import("../types").SimRiversResult> {
+): Promise<import("@types").SimRiversResult> {
   return invoke("sim_rivers_hydrology", { riverDensity, riverWidth, lakeFillDepth, lakeMaxFraction });
 }
 
@@ -127,7 +127,7 @@ export async function simScaleElevation(
 
 export async function simGenerateSettlements(
   seed: number, riversJson: string, realism?: number, maxSettlements?: number
-): Promise<import("../types").SimSettlementsResult> {
+): Promise<import("@types").SimSettlementsResult> {
   return invoke("sim_generate_settlements", { seed, riversJson, realism, maxSettlements });
 }
 
@@ -144,7 +144,7 @@ export async function simRefreshHydrologyBiology(
   seed: number, riverDensity: number, riverWidth: number,
   lakeFillDepth: number, lakeMaxFraction: number,
   gemDeposits: number, climateStrictness: number,
-): Promise<import("../types").SimRiversResult> {
+): Promise<import("@types").SimRiversResult> {
   return invoke("sim_refresh_hydrology_biology", {
     seed, riverDensity, riverWidth, lakeFillDepth, lakeMaxFraction, gemDeposits, climateStrictness,
   });
@@ -176,7 +176,7 @@ export async function simGenerateTerrainRidged(
   });
 }
 
-export async function simRunAll(seed: number, plateCount: number): Promise<import("../types").SimRunAllResult> {
+export async function simRunAll(seed: number, plateCount: number): Promise<import("@types").SimRunAllResult> {
   return invoke("sim_run_all", { seed, plateCount });
 }
 
@@ -184,7 +184,7 @@ export async function simRunAll(seed: number, plateCount: number): Promise<impor
  *  polyline spine, footprint width, peak height and ruggedness; the backend
  *  widens them into eroded ranges, blended onto the existing elevation (land only). */
 export async function simGenerateRidges(
-  lines: import("../types").RidgeLine[],
+  lines: import("@types").RidgeLine[],
   seed: number,
 ): Promise<[number, number][]> {
   return invoke("sim_generate_ridges", { linesJson: JSON.stringify(lines), seed });
@@ -196,18 +196,18 @@ export async function simGenerateRidges(
 export async function simGenerateToponyms(
   rivers: { points: [number, number][] }[],
   lakes: { cells: [number, number][] }[],
-): Promise<import("../types").Toponym[]> {
+): Promise<import("@types").Toponym[]> {
   return invoke("sim_generate_toponyms", {
     riversJson: JSON.stringify(rivers),
     lakesJson: JSON.stringify(lakes),
   });
 }
 /** Persist a user-edited toponym list (renames). */
-export async function saveToponyms(toponyms: import("../types").Toponym[]): Promise<void> {
+export async function saveToponyms(toponyms: import("@types").Toponym[]): Promise<void> {
   return invoke("save_toponyms", { toponymsJson: JSON.stringify(toponyms) });
 }
 /** Load the persisted toponym list (empty until generated). */
-export async function getToponyms(): Promise<import("../types").Toponym[]> {
+export async function getToponyms(): Promise<import("@types").Toponym[]> {
   return invoke("get_toponyms");
 }
 
@@ -217,7 +217,7 @@ export async function simRunAllFromTerrain(
   mountainHeight: number,
   mountainSpread: number,
   noiseRoughness: number,
-): Promise<import("../types").SimRunAllResult> {
+): Promise<import("@types").SimRunAllResult> {
   return invoke("sim_run_all_from_terrain", {
     seed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness,
   });
@@ -235,9 +235,9 @@ export async function renderWorldCrop(
  *  with per-river stats, elevation profile, cities-on-river and Earth counterpart.
  *  Pass the world's rivers + settlements from the store. */
 export async function getRiverSystems(
-  rivers: import("../types").RiverData[],
+  rivers: import("@types").RiverData[],
   settlements: { x: number; y: number; name?: string; size?: string }[],
-): Promise<import("../types").RiverNode[]> {
+): Promise<import("@types").RiverNode[]> {
   return invoke("get_river_systems", {
     riversJson: JSON.stringify(rivers),
     settlementsJson: JSON.stringify(settlements),
@@ -246,9 +246,9 @@ export async function getRiverSystems(
 
 /** Classified lakes with their limnological + ecological profiles (Lakes tab). */
 export async function getLakeSystems(
-  lakes: import("../types").LakeData[],
-  rivers: import("../types").RiverData[],
-): Promise<import("../types").LakeNode[]> {
+  lakes: import("@types").LakeData[],
+  rivers: import("@types").RiverData[],
+): Promise<import("@types").LakeNode[]> {
   return invoke("get_lake_systems", {
     lakesJson: JSON.stringify(lakes),
     riversJson: JSON.stringify(rivers),
@@ -321,7 +321,7 @@ export async function computeItinerary(
   rivers: { points: [number, number][] }[],
   reach: number,
   desertRoutes: boolean,
-): Promise<import("../types").Itinerary> {
+): Promise<import("@types").Itinerary> {
   return invoke("compute_itinerary", {
     fromX, fromY, toX, toY,
     riversJson: JSON.stringify(rivers),
@@ -535,9 +535,9 @@ export async function getEconomy(): Promise<EconomySnapshot> {
  *  saved world re-opens with its trade & settlement layers intact. The economy
  *  snapshot is already persisted by computeEconomy. */
 export async function persistOverlays(
-  settlements: import("../types").Settlement[],
-  rivers: import("../types").RiverData[],
-  lakes: import("../types").LakeData[],
+  settlements: import("@types").Settlement[],
+  rivers: import("@types").RiverData[],
+  lakes: import("@types").LakeData[],
 ): Promise<void> {
   return invoke("persist_overlays", {
     settlementsJson: JSON.stringify(settlements),
@@ -547,9 +547,9 @@ export async function persistOverlays(
 }
 
 export interface OverlaysState {
-  settlements: import("../types").Settlement[];
-  rivers: import("../types").RiverData[];
-  lakes: import("../types").LakeData[];
+  settlements: import("@types").Settlement[];
+  rivers: import("@types").RiverData[];
+  lakes: import("@types").LakeData[];
   economy: EconomySnapshot;
 }
 
@@ -561,8 +561,8 @@ export async function getOverlays(): Promise<OverlaysState> {
 /** Trade-development feedback: grow each settlement by its hub's trade wealth
  *  (one-way, bounded). Returns the updated settlement list. */
 export async function computeSettlementDevelopment(
-  settlements: import("../types").Settlement[],
-): Promise<import("../types").Settlement[]> {
+  settlements: import("@types").Settlement[],
+): Promise<import("@types").Settlement[]> {
   return invoke("compute_settlement_development", {
     settlementsJson: JSON.stringify(settlements),
   });
@@ -713,12 +713,12 @@ export async function campaignGetCultures(): Promise<CultureBrief[]> {
 }
 
 /** Coarse "where this people lives" raster for the Peoples-panel mini-map. */
-export async function campaignGetCulturePresence(name: string): Promise<import("../types").CulturePresenceGrid> {
+export async function campaignGetCulturePresence(name: string): Promise<import("@types").CulturePresenceGrid> {
   return invoke("campaign_get_culture_presence", { name });
 }
 
 /** Notable people (merchant magnates / dynastic heads) of one people. */
-export async function campaignGetCultureNotables(name: string): Promise<import("../types").NotablePerson[]> {
+export async function campaignGetCultureNotables(name: string): Promise<import("@types").NotablePerson[]> {
   return invoke("campaign_get_culture_notables", { name });
 }
 
@@ -774,7 +774,7 @@ export async function campaignGetWorldEconomy(): Promise<WorldEconomy> {
 }
 
 /** #30 · live per-city cost-of-living basket index from the running campaign. */
-export async function campaignCityPriceIndex(): Promise<import("../types").CityPriceIndex[]> {
+export async function campaignCityPriceIndex(): Promise<import("@types").CityPriceIndex[]> {
   return invoke("campaign_city_price_index");
 }
 
@@ -784,7 +784,7 @@ export async function campaignGetHouses(): Promise<HouseBrief[]> {
 }
 
 /** #29 · wealth-inequality (Gini) + social-mobility snapshot from the live sim. */
-export async function campaignGetInequality(): Promise<import("../types").InequalitySnapshot> {
+export async function campaignGetInequality(): Promise<import("@types").InequalitySnapshot> {
   return invoke("campaign_get_inequality");
 }
 

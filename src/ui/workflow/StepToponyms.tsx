@@ -3,7 +3,7 @@ import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import { simGenerateToponyms, saveToponyms, getToponyms } from "@bridge";
 import type { Toponym } from "@types";
-import { genBtn } from "./WorkflowPanel";
+import { genBtn } from "@ui/workflow/WorkflowPanel";
 
 const KIND_ICON: Record<Toponym["kind"], string> = {
   river: "\u{1F30A}", mountain: "\u{1F3D4}\u{FE0F}", lake: "\u{1F4A7}", region: "\u{1F3F3}\u{FE0F}",

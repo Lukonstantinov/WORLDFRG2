@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { simGenerateShelves, simGenerateTerrainFromTemplate, simGenerateTerrainRidged, simScaleElevation, simGenerateRidges, undoAction } from "@bridge";
-import { genBtn } from "./WorkflowPanel";
+import { genBtn } from "@ui/workflow/WorkflowPanel";
 
 interface Props {
   seed: number;

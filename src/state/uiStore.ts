@@ -141,7 +141,7 @@ interface UIStore {
   heatGood: string | null;
   /** Batch 1 · era scrubber: when set, the map's markers + heat show this past
    *  year instead of the live world (set from the Atlas year slider). */
-  eraFrame: import("../types").EraFrame | null;
+  eraFrame: import("@types").EraFrame | null;
   /** #30/#29 · Economy Dashboard (price index / inequality) panel open. */
   showEconomyDashboard: boolean;
   /** 🌊 Hydrology dashboard (river systems) panel open. */
@@ -251,7 +251,7 @@ interface UIStore {
   setColonyHighlight: (l: { ax: number; ay: number; bx: number; by: number } | null) => void;
   setPlagueReplay: (r: { id: number; step: number } | null) => void;
   setHeatGood: (g: string | null) => void;
-  setEraFrame: (f: import("../types").EraFrame | null) => void;
+  setEraFrame: (f: import("@types").EraFrame | null) => void;
   setShowEconomyDashboard: (v: boolean) => void;
   setShowHydrology: (v: boolean) => void;
   setShowGoodsCodex: (v: boolean) => void;

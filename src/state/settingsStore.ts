@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { LINE_COLOR_DEFAULTS, type LineColorKey, setLineColors } from "../canvas/OverlayManager";
+import { LINE_COLOR_DEFAULTS, type LineColorKey, setLineColors } from "@canvas/OverlayManager";
 import { setAppearance } from "@bridge";
 
 /** Adjustable appearance settings — the user-editable overlay/connection-line

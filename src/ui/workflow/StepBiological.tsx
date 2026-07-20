@@ -3,7 +3,7 @@ import { useWorldStore } from "@state/worldStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { simBiological } from "@bridge";
 import { GOOD_DEFS, goodOverlayKey } from "@goods";
-import { genBtn } from "./WorkflowPanel";
+import { genBtn } from "@ui/workflow/WorkflowPanel";
 
 interface Props {
   seed: number;

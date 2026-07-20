@@ -10,7 +10,7 @@
  *  reference adoption.
  */
 import type { CSSProperties, ReactNode, PointerEvent } from "react";
-import { T, SERIF, RADIUS, SHADOW, SPACE, FZ, TONE, type Tone } from "./chronicleTheme";
+import { T, SERIF, RADIUS, SHADOW, SPACE, FZ, TONE, type Tone } from "@ui/campaign/chronicleTheme";
 
 // ── Panel shell ──────────────────────────────────────────────────────────────
 
