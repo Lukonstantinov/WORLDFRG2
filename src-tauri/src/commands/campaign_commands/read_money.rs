@@ -217,6 +217,7 @@ pub fn campaign_get_mints(db: State<'_, WorldDb>) -> Result<Vec<MintBrief>, Stri
                 trust: h.coin_trust,
                 fineness,
                 value: if has_coin { coin_value(h.mint_fineness, h.coin_trust) } else { 0.0 },
+                exchange: if has_coin { crate::sim::tick::coin_exchange(h.coin_metal, fineness, h.coin_trust) } else { 0.0 },
                 strength: if has_coin { coin_strength(fineness, h.coin_trust) } else { 0.0 },
                 throughput,
                 is_reserve: has_coin && h.coin_trust >= 0.55,
@@ -239,6 +240,16 @@ pub fn campaign_get_mints(db: State<'_, WorldDb>) -> Result<Vec<MintBrief>, Stri
             .then(b.treasury.partial_cmp(&a.treasury).unwrap_or(std::cmp::Ordering::Equal))
     });
     Ok(out)
+}
+
+
+/// A3 · one coin's yearly BIOGRAPHY — the fineness/trust/value/price-level series
+/// (oldest→newest) for the Money panel sparklines. `hub` is the mint's hub id.
+#[tauri::command]
+pub fn campaign_coin_history(db: State<'_, WorldDb>, hub: u32) -> Result<Vec<crate::sim::tick::CoinSnapshot>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    Ok(sim.hubs.iter().find(|h| h.id == hub).map(|h| h.coin_history.clone()).unwrap_or_default())
 }
 
 

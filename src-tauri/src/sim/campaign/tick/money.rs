@@ -214,7 +214,19 @@ impl CampaignSim {
             let (a, b) = (f.hub as usize, f.partner as usize);
             if a < n && b < n && a != b { *partner_vol[a].entry(b).or_insert(0.0) += f.amount; }
         }
-        let attr = |h: &TickHub| (coin_value(h.mint_fineness, h.coin_trust) * h.coin_trust).max(EPS);
+        // v2.1 · attractiveness is trust×value with a MODEST metal reserve-preference:
+        // high-value-density gold (and electrum) coins are the natural international
+        // reserve money (florin/ducat were gold), so they spread & hold a little better;
+        // base-metal billon is shunned as a store of value. The FULL bimetallic ratio
+        // lives in the exchange value, not here — so a silver-minting city keeps its own
+        // silver as daily money (home bias) while gold coins accrue as its RESERVES.
+        let attr = |h: &TickHub| {
+            let metal_pref = match h.coin_metal {
+                1 => COIN_METAL_GOLD_PREF, 2 => COIN_METAL_ELECTRUM_PREF,
+                3 => COIN_METAL_BRONZE_PREF, _ => 1.0,
+            };
+            (coin_value(h.mint_fineness, h.coin_trust) * h.coin_trust * metal_pref).max(EPS)
+        };
         let mints = |h: &TickHub| !h.coin_name.is_empty() && h.coin_trust >= BANK_FOUND_COIN_TRUST;
         let mut new_baskets: Vec<Vec<(u32, f32)>> = vec![Vec::new(); n];
         let mut new_main: Vec<i32> = vec![-1; n];
@@ -650,9 +662,21 @@ impl CampaignSim {
         } else {
             (-1i32, seat as i32, "treasury")
         };
+        // v2.1 · ENDOGENOUS rate — priced per loan instead of a flat house rate:
+        //   base × (1 + scarcity·K_s + risk·K_r) + panic premium, capped.
+        //   • scarcity = how little lending headroom is left (tight credit → dearer);
+        //   • risk = borrower/purpose risk premium (a city treasury is safest, a
+        //     speculative works dearest); • panic = a crunch premium at a stressed seat.
+        let scarcity = 1.0 - (headroom / (self.banks[bi].reserves * BANK_RESERVE_MULT).max(EPS)).clamp(0.0, 1.0);
+        let risk = match purpose {
+            "treasury" => 0.0, "guild_civic" => 0.15, "trade" => 0.45, "guild_factory" => 0.60, _ => 0.40,
+        };
+        let panic_prem = if self.hub_in_panic(seat) { BANK_LOAN_RATE * BANK_RATE_PANIC } else { 0.0 };
+        let rate = (BANK_LOAN_RATE * (1.0 + BANK_RATE_SCARCITY * scarcity + BANK_RATE_RISK * risk) + panic_prem)
+            .clamp(BANK_LOAN_RATE, BANK_LOAN_RATE_MAX);
         self.banks[bi].loans.push(Loan {
             borrower_house: bh, borrower_polis: bp,
-            principal: amt, outstanding: amt, rate: BANK_LOAN_RATE,
+            principal: amt, outstanding: amt, rate,
             start_tick: tick, term_ticks: 1825, purpose: purpose.into(),
         });
         self.banks[bi].notes_issued += amt;
@@ -823,6 +847,52 @@ impl CampaignSim {
         for h in pops {
             if h >= self.hubs.len() || self.hub_in_panic(h) { continue; }
             self.trigger_regional_crash(h, 0, "bubble burst");
+        }
+    }
+
+
+    /// A3 · push a yearly coin-biography snapshot for every mint, marking the year's
+    /// notable monetary event. Called once a year AFTER the basket/reform/crash passes
+    /// so circulation, fineness, reform state and any crash are all settled.
+    pub(crate) fn snapshot_coins(&mut self, year: u32) {
+        let n = self.hubs.len();
+        let tick = self.tick;
+        // Per-coin circulation (by mint hub INDEX) from this year's baskets.
+        let mut circ: Vec<f32> = vec![0.0; n];
+        for h in 0..n {
+            if self.hubs[h].is_estate { continue; }
+            let thru = self.hubs[h].tw_house + self.hubs[h].tw_local + self.hubs[h].tw_guild;
+            for &(k, share) in &self.hubs[h].coin_basket {
+                if (k as usize) < n { circ[k as usize] += thru * share; }
+            }
+        }
+        for h in 0..n {
+            if self.hubs[h].is_estate || self.hubs[h].coin_name.is_empty() { continue; }
+            let fine = if self.hubs[h].mint_fineness <= 0.0 { 1.0 } else { self.hubs[h].mint_fineness };
+            let trust = self.hubs[h].coin_trust;
+            let prev_fine = self.hubs[h].coin_history.last().map(|s| s.fineness);
+            let region = self.hubs[h].component;
+            let crashed = self.crashes.iter().any(|c| c.year == year && c.component == region);
+            let reformed = self.hubs[h].last_reform_tick != 0
+                && tick < self.hubs[h].last_reform_tick + TICKS_PER_YEAR;
+            let event = if prev_fine.is_none() { "first".to_string() }
+                else if reformed { "reform".to_string() }
+                else if fine + 0.005 < prev_fine.unwrap() { "debasement".to_string() }
+                else if crashed { "crash".to_string() }
+                else { String::new() };
+            let snap = CoinSnapshot {
+                year, fineness: fine, trust,
+                value: coin_value(fine, trust),
+                exchange: coin_exchange(self.hubs[h].coin_metal, fine, trust),
+                strength: coin_strength(fine, trust),
+                price_level: if self.hubs[h].price_level <= 0.0 { 1.0 } else { self.hubs[h].price_level },
+                circulating: circ[h],
+                metal: self.hubs[h].coin_metal,
+                event,
+            };
+            self.hubs[h].coin_history.push(snap);
+            let len = self.hubs[h].coin_history.len();
+            if len > COIN_HISTORY_CAP { self.hubs[h].coin_history.drain(0..len - COIN_HISTORY_CAP); }
         }
     }
 }

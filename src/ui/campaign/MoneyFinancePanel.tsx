@@ -6,11 +6,11 @@ import { CoinMiniMap, CoinMiniMapLegend } from "@ui/campaign/CoinMiniMap";
 import {
   campaignGetMints, campaignGetBanks, campaignGetCrashes, campaignGetSchematics,
   campaignGetWars, campaignCoinUsage, campaignGetSpeculation, campaignMonetaryChronicle,
-  campaignReserves,
+  campaignReserves, campaignCoinHistory,
 } from "@bridge";
 import type {
   MintBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload,
-  HouseBrief, SpecCenter, MonetaryEvent, ReservesPayload, ReserveHolder,
+  HouseBrief, SpecCenter, MonetaryEvent, ReservesPayload, ReserveHolder, CoinSnapshot,
 } from "@types";
 import { CoinIcon, type CoinMetal } from "@ui/heraldry/CoinIcon";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
@@ -310,8 +310,10 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, b
   const [open, setOpen] = useState(false);
   const hasCoin = !!m.coin_name;
   const debased = m.fineness < 0.999;
-  const xrate = hasCoin && topCoin && topCoin.hub !== m.hub && topCoin.value > 0
-    ? m.value / topCoin.value : null;
+  // v2.1 · exchange rate is now METAL-AWARE (gold ≈ 13× silver of equal fineness),
+  // read from the intrinsic exchange value rather than the fineness×trust index.
+  const xrate = hasCoin && topCoin && topCoin.hub !== m.hub && topCoin.exchange > 0
+    ? m.exchange / topCoin.exchange : null;
   // Strength → color: red (weak) → gold → green (reserve-grade).
   const sc = m.strength;
   const strengthColor = m.is_reserve ? "#37a05a" : sc >= 40 ? "#c8a23a" : "#d08a3a";
@@ -403,7 +405,8 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, b
                 <Stat label="Abroad" value={`${m.abroad}`} hint="holders outside the home market (reserve reach)" />
                 <Stat label="Money supply" value={fmtk(m.circulating)} hint="Σ over holders of (trade volume × this coin's basket share) — now a live driver of local prices" />
                 <Stat label="Prices" value={`×${cpi.toFixed(2)}`} hint="local price level (CPI): 1.0 at start, rises with debasement + money growth" />
-                {xrate && <Stat label={`vs ${topCoin!.coin_name.split(" ")[0]}`} value={`${xrate.toFixed(2)}×`} hint={`1 ${m.coin_name} ≈ ${xrate.toFixed(2)} ${topCoin!.coin_name} (by value)`} />}
+                <Stat label="Specie" value={`${m.exchange.toFixed(1)}ag`} hint="Intrinsic metal value in the silver-coin numeraire (silver = 1). A gold coin ≈ 13× a silver one of equal fineness — this is the metal it actually contains." />
+                {xrate && <Stat label={`vs ${topCoin!.coin_name.split(" ")[0]}`} value={`${xrate.toFixed(2)}×`} hint={`1 ${m.coin_name} ≈ ${xrate.toFixed(2)} ${topCoin!.coin_name} by METAL content (bimetallic rate)`} />}
               </div>
               <div style={{ color: "#8aa8c8", marginBottom: 4 }}>
                 {debased ? "⚠ Debased coin — " : m.value >= 1.05 ? "★ Hard premium coin — " : "Sound coin — "}
@@ -431,6 +434,7 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, b
                   <CoinMiniMapLegend />
                 </div>
               )}
+              <CoinBiography hub={m.hub} open={open} />
               <CoinUsageChart usage={usage} />
             </>
           ) : (
@@ -525,6 +529,80 @@ function CoinUsageChart({ usage }: { usage: CoinUseCity[] }) {
 function chipS(on: boolean): React.CSSProperties {
   return { fontSize: 11, padding: "1px 7px", borderRadius: 4, cursor: "pointer",
     border: `1px solid ${on ? "#3a80c0" : "#24364e"}`, background: on ? "#19324a" : "transparent", color: on ? "#cfe2f6" : "#7fa0c4" };
+}
+
+// ── A3 · Coin biography — the yearly fineness/trust/price history sparklines ───
+const EVENT_MARK: Record<string, { icon: string; color: string; label: string }> = {
+  first: { icon: "⚒", color: "#c0b088", label: "first struck" },
+  charter: { icon: "⚒", color: "#c0b088", label: "mint chartered" },
+  debasement: { icon: "✂", color: "#e0a020", label: "debased" },
+  reform: { icon: "⚖", color: "#7fd0a0", label: "reformed" },
+  crash: { icon: "📉", color: "#e6303a", label: "crash" },
+};
+
+/** The coin's story over the years: fineness (metal content) and trust (acceptance)
+ *  on a 0–100% axis, the local price level as a secondary line, and monetary events
+ *  (debasements ✂, reforms ⚖, crashes 📉) marked on the timeline. Fetched lazily when
+ *  the mint card is expanded. */
+function CoinBiography({ hub, open }: { hub: number; open: boolean }) {
+  const [hist, setHist] = useState<CoinSnapshot[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    campaignCoinHistory(hub).then((h) => { if (alive) setHist(h); }).catch(() => {});
+    return () => { alive = false; };
+  }, [open, hub]);
+  if (!open || hist.length < 2) {
+    return !open ? null : (
+      <div style={{ color: "#56708e", fontSize: 9, marginTop: 7 }}>The coin's history builds year by year — advance the campaign to grow its biography.</div>
+    );
+  }
+  const W = 344, H = 74, pad = 4;
+  const y0 = hist[0].year, y1 = hist[hist.length - 1].year;
+  const span = Math.max(1, y1 - y0);
+  const sx = (yr: number) => pad + ((yr - y0) / span) * (W - 2 * pad);
+  const sy = (v01: number) => H - pad - v01 * (H - 2 * pad); // 0..1 → bottom..top
+  const line = (sel: (s: CoinSnapshot) => number) =>
+    hist.map((s, i) => `${i === 0 ? "M" : "L"}${sx(s.year).toFixed(1)},${sy(sel(s)).toFixed(1)}`).join("");
+  const pMin = Math.min(...hist.map((s) => s.price_level));
+  const pMax = Math.max(...hist.map((s) => s.price_level));
+  const pNorm = (p: number) => (pMax > pMin ? (p - pMin) / (pMax - pMin) : 0.5);
+  const events = hist.filter((s) => s.event && EVENT_MARK[s.event]);
+  return (
+    <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid #1b2a3c" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+        <span style={{ color: "#8aa8c8", fontSize: 10, fontWeight: 700, flex: 1 }}>Coin biography · y{y0}–y{y1}</span>
+        <span style={{ color: "#8ab0d0", fontSize: 8 }}>▬ fineness</span>
+        <span style={{ color: "#c8a23a", fontSize: 8 }}>▬ trust</span>
+        <span style={{ color: "#e0a880", fontSize: 8 }}>┈ prices</span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block", background: "#0a121c", borderRadius: 5, border: "1px solid #16273a" }}>
+        {[0.25, 0.5, 0.75].map((g) => <line key={g} x1={pad} y1={sy(g)} x2={W - pad} y2={sy(g)} stroke="#12202e" strokeWidth={0.5} />)}
+        {/* price level (secondary, dashed, min-max normalized) */}
+        <path d={hist.map((s, i) => `${i === 0 ? "M" : "L"}${sx(s.year).toFixed(1)},${sy(pNorm(s.price_level)).toFixed(1)}`).join("")}
+          fill="none" stroke="#e0a880" strokeWidth={1} strokeDasharray="3 2" opacity={0.7} />
+        <path d={line((s) => s.trust)} fill="none" stroke="#c8a23a" strokeWidth={1.3} />
+        <path d={line((s) => s.fineness)} fill="none" stroke="#8ab0d0" strokeWidth={1.3} />
+        {/* event markers */}
+        {events.map((s, i) => {
+          const m = EVENT_MARK[s.event];
+          return (
+            <g key={i}>
+              <line x1={sx(s.year)} y1={pad} x2={sx(s.year)} y2={H - pad} stroke={m.color} strokeWidth={0.6} opacity={0.5} strokeDasharray="1 2" />
+              <text x={sx(s.year)} y={12} fontSize={9} fill={m.color} textAnchor="middle">{m.icon}</text>
+            </g>
+          );
+        })}
+      </svg>
+      {events.length > 0 && (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 8.5, color: "#7e93ab", marginTop: 3 }}>
+          {[...new Set(events.map((e) => e.event))].map((ev) => (
+            <span key={ev}><span style={{ color: EVENT_MARK[ev].color }}>{EVENT_MARK[ev].icon}</span> {EVENT_MARK[ev].label}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Reserves (currency composition per holder: cities / banks / houses) ───────

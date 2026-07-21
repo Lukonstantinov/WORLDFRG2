@@ -574,6 +574,11 @@ export interface CityRank {
   wealth: number;
   trade: number;
   pct_world: number;
+  // C1 · prosperity composite + its stock/broad-based components.
+  prosperity: number;
+  treasury: number;
+  commoner_wealth: number;
+  inequality: number;
 }
 /** One active merchant route for the campaign merchant map layer. */
 export interface MerchantRoute {
@@ -1141,6 +1146,7 @@ export interface MintBrief {
   trust: number;
   fineness: number;
   value: number;
+  exchange: number;      // v2.1 metal-aware intrinsic exchange value (silver = 1)
   strength: number;      // headline 0..100 (fineness × acceptance)
   throughput: number;
   is_reserve: boolean;
@@ -1153,6 +1159,20 @@ export interface MintBrief {
   has_mint: boolean;     // holds the right of the mint (charter)
   under_mandate: boolean; // honest-money mandate active (no debasement)
   reformed: boolean;      // has reformed its coinage at least once
+}
+
+/** A3 · one yearly point in a coin's biography (Money panel sparklines). */
+export interface CoinSnapshot {
+  year: number;
+  fineness: number;
+  trust: number;
+  value: number;
+  exchange: number;
+  strength: number;
+  price_level: number;
+  circulating: number;
+  metal: number;
+  event: string;   // "" | "first" | "charter" | "debasement" | "reform" | "crash"
 }
 
 /** v2.0 · one dated entry in the monetary chronicle (Shocks timeline). */

@@ -131,6 +131,7 @@ pub fn run() {
             campaign_commands::campaign_trade_flows,
             campaign_commands::campaign_get_currencies,
             campaign_commands::campaign_get_mints,
+            campaign_commands::campaign_coin_history,
             campaign_commands::campaign_monetary_chronicle,
             campaign_commands::campaign_coin_usage,
             campaign_commands::campaign_reserves,

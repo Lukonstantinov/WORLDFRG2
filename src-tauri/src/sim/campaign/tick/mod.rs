@@ -915,6 +915,33 @@ pub fn coin_value(fineness: f32, trust: f32) -> f32 {
     f * (0.7 + 0.5 * trust.clamp(0.0, 1.0))
 }
 
+// ── v2.1 · BIMETALLISM — metal-weight-aware exchange ─────────────────────────
+/// The historical gold:silver value ratio: a gold coin is worth ~this many silver
+/// coins of equal weight & fineness (the medieval/Renaissance band was ~10–15:1).
+pub const GOLD_SILVER_RATIO: f32 = 13.0;
+/// v2.1 · the INTRINSIC specie value of one coin, in the silver-coin numeraire
+/// (a full-bodied silver coin = 1.0). Driven by the metal struck × its fineness —
+/// so a gold Ducat is worth ~`GOLD_SILVER_RATIO`× a silver Florin of equal fineness,
+/// electrum sits between, and bronze/billon is token money. This is the metal a coin
+/// actually contains; cross-coin exchange rates derive from it (was previously
+/// ignored — coins traded purely on fineness×trust, so gold and silver mis-priced 1:1).
+pub fn coin_specie(metal: u8, fineness: f32) -> f32 {
+    let f = (if fineness <= 0.0 { 1.0 } else { fineness }).clamp(0.0, 1.0);
+    let m = match metal {
+        1 => GOLD_SILVER_RATIO,                 // gold
+        2 => 0.5 * (GOLD_SILVER_RATIO + 1.0),   // electrum (gold+silver alloy)
+        3 => 0.08,                              // bronze/billon — token money
+        _ => 1.0,                               // silver standard
+    };
+    m * f
+}
+/// v2.1 · a coin's metal-aware EXCHANGE value: its intrinsic specie worth times a
+/// small acceptance agio (a trusted coin trades a touch above, a distrusted one
+/// below, its metal content). This is the number cross-coin rates are read from.
+pub fn coin_exchange(metal: u8, fineness: f32, trust: f32) -> f32 {
+    coin_specie(metal, fineness) * (0.9 + 0.2 * trust.clamp(0.0, 1.0))
+}
+
 /// v2.0 · a coin's single headline STRENGTH (0..100) — the one number the Money
 /// panel leads with, built from its two drivers (fineness × acceptance). A
 /// fully-trusted, full-bodied coin scores 100; debasement OR distrust drag it down.
@@ -935,9 +962,12 @@ const INFL_MONEY_K: f32 = 0.10;
 /// Real-output growth that soaks up money each year (the deflationary offset).
 const INFL_REAL_GROWTH: f32 = 0.005;
 /// Bounds on a single year's local inflation (keeps price levels + the wealth
-/// inflation-tax finite; always a small positive drift, capped so it can't blow up).
+/// inflation-tax finite). v2.1 · widened the UPPER tail so genuine monetary crises
+/// bite: a badly-debased, over-issued coin now runs real inflation up to 9%/yr. The
+/// small positive floor is kept unchanged — it doubles as the inflation-tax floor that
+/// helps bound hoarded fortunes, so lowering it into deflation is deliberately avoided.
 const INFL_MIN: f32 = 0.002;
-const INFL_MAX: f32 = 0.06;
+const INFL_MAX: f32 = 0.09;
 
 // ── v2.0 · recoinage / reform ────────────────────────────────────────────────
 /// A council reforms its coinage only when fineness has slipped below this.
@@ -970,7 +1000,7 @@ const MINT_GOLD_WEIGHT: f32 = 3.0;
 /// The lowest fineness bullion scarcity alone can force (a bullion-starved mint
 /// still strikes a passable, if base-heavy, coin — it imports/short-weights, it
 /// does not collapse). Full bullion supply lifts the cap to 1.0.
-const MINT_FINENESS_FLOOR: f32 = 0.85;
+const MINT_FINENESS_FLOOR: f32 = 0.72;
 
 // ── v2.0 · mint charter (minting as a privilege) ─────────────────────────────
 /// A council seat earns the RIGHT OF THE MINT only once it is a real commercial
@@ -1061,6 +1091,11 @@ const RESERVE_TRUST_MIN: f32 = 0.55;
 const COIN_BASKET_N: usize = 4;           // max coins tracked per city
 const COIN_ADOPT_EASE: f32 = 0.18;        // yearly easing of basket shares toward target
 const COIN_HOME_BIAS: f32 = 3.0;          // weight multiplier for the city's own mint
+// v2.1 · reserve-preference multipliers by struck metal (a modest edge — the full
+// bimetallic value ratio lives in `coin_exchange`, not in adoption).
+const COIN_METAL_GOLD_PREF: f32 = 1.35;     // gold — the reserve/prestige money
+const COIN_METAL_ELECTRUM_PREF: f32 = 1.20; // electrum (gold+silver alloy)
+const COIN_METAL_BRONZE_PREF: f32 = 0.70;   // bronze/billon — shunned as a store of value
 const COIN_FLIP_MARGIN: f32 = 1.08;       // a rival must lead the main coin by this to flip
 /// Seigniorage (to the issuing polis treasury) per unit of trade circulating in its
 /// coin abroad, and a tiny prestige bump to the issuing council house. Small so the
@@ -1085,9 +1120,18 @@ const BANK_FOUND_COIN_TRUST: f32 = 0.40;
 /// remaining 10k is the establishment / charter cost paid to the seat polis.
 const BANK_FOUND_PRICE: f32 = 50_000.0;
 const BANK_FOUND_RESERVE: f32 = 40_000.0;
-/// Monthly interest a bank charges on loans / pays on deposits.
+/// BASE monthly interest a bank charges on loans / pays on deposits.
 const BANK_LOAN_RATE: f32 = 0.012;
 const BANK_DEPOSIT_RATE: f32 = 0.006;
+// ── v2.1 · ENDOGENOUS loan pricing (rate set per origination, not flat) ──────
+/// How much tight credit (little lending headroom left) lifts the loan rate.
+const BANK_RATE_SCARCITY: f32 = 0.9;
+/// How much a riskier borrower/purpose lifts the loan rate (risk premium).
+const BANK_RATE_RISK: f32 = 0.6;
+/// Extra premium charged while the seat is in a financial panic (credit crunch).
+const BANK_RATE_PANIC: f32 = 0.7;
+/// Ceiling on the priced monthly loan rate (≈ a punishing ~40%/yr in a crunch).
+const BANK_LOAN_RATE_MAX: f32 = 0.028;
 /// Fractional reserve: notes/credit may run up to this multiple of specie reserves.
 const BANK_RESERVE_MULT: f32 = 3.0;
 /// Below this reserve ratio (reserves ÷ liabilities) a bank is fragile → run risk.
@@ -1098,6 +1142,8 @@ const BANK_BRANCH_VALUE: f32 = 2.0;
 const BANK_STAKE_SHARE: f32 = 0.25;
 /// Years of yearly balance-sheet snapshots kept per bank (bounds save size).
 const BANK_HISTORY_CAP: usize = 60;
+/// A3 · years of yearly coin-biography snapshots kept per mint (bounds save size).
+const COIN_HISTORY_CAP: usize = 80;
 /// Capital value of a manufactory per tier; a stake costs `share × tier × this`.
 const BANK_STAKE_VALUE_PER_TIER: f32 = 40_000.0;
 
@@ -1353,6 +1399,9 @@ pub struct TickHub {
     /// its trade region can reach: 0 = silver (default/imported), 1 = gold,
     /// 2 = electrum (both gold & silver), 3 = bronze/billon (only base metal).
     #[serde(default)] pub coin_metal: u8,
+    /// A3 · yearly coin-biography snapshots (fineness/trust/value/price over time)
+    /// for the Money panel sparklines. Capped at `COIN_HISTORY_CAP`. serde-defaulted.
+    #[serde(default)] pub coin_history: Vec<CoinSnapshot>,
     /// v2.0 · bullion capacity ratio = regional bullion output ÷ coin demand. ≥1
     /// means metal is ample (fineness can be full); <1 means the mint is stretched
     /// and bullion scarcity is forcing debasement (surfaced as the "limiting factor").
@@ -1789,6 +1838,25 @@ pub struct BankSnapshot {
     pub interest_cum: f32,
     pub dividends_cum: f32,
     pub losses_cum: f32,
+}
+
+/// A3 · a yearly snapshot of a COIN's monetary state — drives the coin-biography
+/// sparklines in the Money panel (fineness / trust / value / price level over time,
+/// annotated with the year's monetary event).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CoinSnapshot {
+    pub year: u32,
+    pub fineness: f32,
+    pub trust: f32,
+    pub value: f32,        // coin_value agio index
+    pub exchange: f32,     // v2.1 metal-aware intrinsic exchange value (silver = 1)
+    pub strength: f32,     // 0..100 headline
+    pub price_level: f32,  // local CPI at the mint
+    pub circulating: f32,  // Σ holders' throughput × basket share
+    pub metal: u8,
+    /// The notable monetary event that year at this mint: "" | "charter" | "first" |
+    /// "debasement" | "reform" | "crash". Placed as a marker on the timeline.
+    pub event: String,
 }
 
 impl Bank {
@@ -3610,6 +3678,9 @@ impl CampaignSim {
                 // Fold the year's trade flows into the Flows-subtab detail + trend graphs.
                 self.fold_trade_year();
                 self.maybe_pop_bubbles(yr);
+                // A3 · snapshot each coin's yearly state (after crashes settle) for the
+                // Money panel's coin-biography sparklines.
+                self.snapshot_coins(yr);
                 self.roll_city_finances(yr);
                 // Phase 4 (flavour) · raise/retire notable figures (Great Lives).
                 self.raise_notable_figures(yr);

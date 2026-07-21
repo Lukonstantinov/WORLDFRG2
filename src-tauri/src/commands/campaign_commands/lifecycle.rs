@@ -400,6 +400,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 last_reform_tick: 0,
                 reform_until: 0,
                 coin_metal: 0,
+                coin_history: Vec::new(),
                 mint_bullion_ratio: 1.0,
                 has_mint: false,
                 quality: Vec::new(),
