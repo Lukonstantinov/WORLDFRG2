@@ -2356,6 +2356,29 @@ export class OverlayManager {
     for (const u of prim) maxVol = Math.max(maxVol, u.volume);
     const base = Math.max(2, 3.6 * inv);
     ctx.lineCap = "round";
+
+    // Currency ZONES: a translucent territory hull per coin (its primary cities),
+    // so the map reads as contiguous monetary regions rather than loose dots.
+    const byCoin = new Map<number, { x: number; y: number }[]>();
+    const coinColor = new Map<number, string>();
+    for (const u of prim) {
+      if (!byCoin.has(u.coin)) { byCoin.set(u.coin, []); coinColor.set(u.coin, u.color || "#c9a227"); }
+      byCoin.get(u.coin)!.push({ x: u.x + 0.5, y: u.y + 0.5 });
+    }
+    for (const [coin, pts] of byCoin) {
+      if (pts.length < 3) continue;
+      const hull = this.convexHull(pts);
+      if (hull.length < 3) continue;
+      ctx.beginPath();
+      ctx.moveTo(hull[0].x, hull[0].y);
+      for (let i = 1; i < hull.length; i++) ctx.lineTo(hull[i].x, hull[i].y);
+      ctx.closePath();
+      ctx.fillStyle = coinColor.get(coin) || "#c9a227";
+      ctx.globalAlpha = 0.08; ctx.fill();
+      ctx.globalAlpha = 0.28; ctx.lineWidth = Math.max(0.5, 0.9 * inv);
+      ctx.setLineDash([Math.max(2, 4 * inv), Math.max(1.5, 3 * inv)]); ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.globalAlpha = 1;
     for (const u of prim) {
       const t = maxVol > 0 ? u.volume / maxVol : 0;
       const r = u.mint ? base * 2.0 : base * (0.9 + 0.9 * t);
