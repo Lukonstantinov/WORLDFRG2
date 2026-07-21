@@ -1952,6 +1952,15 @@ pub struct MintBrief {
     pub under_mandate: bool,
     /// This mint has reformed its coinage at least once.
     pub reformed: bool,
+    // ── B3 · civic public debt (the Monte) ──
+    /// Principal the city owes its bondholders (0 = no public debt).
+    #[serde(default)] pub debt_principal: f32,
+    /// The annual coupon rate the city pays on its bonds.
+    #[serde(default)] pub debt_coupon: f32,
+    /// Debt as a multiple of yearly throughput — the fiscal-burden read (≥3 = crisis).
+    #[serde(default)] pub debt_ratio: f32,
+    /// Number of distinct bondholders (patrician houses funding the debt).
+    #[serde(default)] pub debt_holders: u32,
 }
 
 /// v2.0 · one entry in the MONETARY CHRONICLE — the dated story of money (mints,
@@ -2041,6 +2050,8 @@ pub struct BankBrief {
     /// Book value of equity stakes + cumulative stake dividends collected.
     pub stake_book: f32,
     pub dividends_earned: f32,
+    /// B4 · cumulative bills-of-exchange (FX-spread) income.
+    #[serde(default)] pub bills_income: f32,
     /// Seat coordinates (cell space) — for the bank icon on the map.
     pub seat_x: f32,
     pub seat_y: f32,

@@ -22,7 +22,7 @@
             estate_kind: 0, estate_tier: 0, last_upgrade_tick: 0, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, tribute_to: -1, tribute_until: 0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, coin_history: Vec::new(), mint_bullion_ratio: 1.0, has_mint: false,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, coin_history: Vec::new(), debt_principal: 0.0, debt_coupon: 0.0, debt_holders: Vec::new(), mint_bullion_ratio: 1.0, has_mint: false,
             quality: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
@@ -263,7 +263,7 @@
             name: "Banco".into(), house: 0, seat: 0, founded_tick: 0, defunct: false,
             reserves: 80.0, loans: vec![], real_estate: 1.0, deposits: 0.0, notes_issued: 0.0,
             branches: vec![0], prestige: 0.6, interest_earned: 0.0, losses: 0.0, stakes: vec![],
-            dividends_earned: 0.0, history: vec![], events: vec![],
+            dividends_earned: 0.0, bills_income: 0.0, history: vec![], events: vec![],
         });
         s.rebuild_routes();
         let hubs0 = s.hubs.len();
@@ -437,8 +437,12 @@
                     .filter(|h| !h.is_estate && !h.abandoned && h.starving > 0.5).count();
                 let thriving = s.hubs.iter().filter(|h| !h.is_estate && !h.abandoned
                     && h.mood > 0.55 && h.starving < 0.1).count();
+                // B3/B4 · public-debt engagement + bills-of-exchange income (realism batch).
+                let debt_cities = s.hubs.iter().filter(|h| h.debt_principal > 0.0).count();
+                let debt_total: f32 = s.hubs.iter().map(|h| h.debt_principal).sum();
+                let bills: f32 = s.banks.iter().map(|b| b.bills_income).sum();
                 eprintln!(
-                    "yr {yr:2}: houses {active}↑/{defunct}✝  banks {banks}  coins {coins} (trust {:.0}%)  wars {}  crashes {}  richest {rich:.0}  contracts {contracts}  offices {offices}  colonies {colonies}  outposts {outposts}  towns {towns_alive} (+{}/−{}) hungry {hungry} thriving {thriving}  finest {} {:.0}%  thefts {thefts}",
+                    "yr {yr:2}: houses {active}↑/{defunct}✝  banks {banks}  coins {coins} (trust {:.0}%)  wars {}  crashes {}  richest {rich:.0}  debt {debt_cities}c/{debt_total:.0}  bills {bills:.0}  contracts {contracts}  offices {offices}  colonies {colonies}  outposts {outposts}  towns {towns_alive} (+{}/−{}) hungry {hungry} thriving {thriving}  finest {} {:.0}%  thefts {thefts}",
                     top_trust * 100.0, s.wars.len(), s.crashes.len(),
                     s.total_foundings, s.total_abandonments,
                     s.goods[finest.1].name, finest.0 * 100.0,
@@ -739,7 +743,7 @@
         s.banks.push(Bank {
             name: "Banco di Test".into(), house: 0, seat: 0, founded_tick: 0, defunct: false,
             reserves: 50.0, loans: vec![], real_estate: 1.0, deposits: 0.0, notes_issued: 0.0,
-            branches: vec![0], prestige: 0.6, interest_earned: 0.0, losses: 0.0, stakes: vec![], dividends_earned: 0.0, history: vec![], events: vec![],
+            branches: vec![0], prestige: 0.6, interest_earned: 0.0, losses: 0.0, stakes: vec![], dividends_earned: 0.0, bills_income: 0.0, history: vec![], events: vec![],
         });
         // A second, non-backer house (seated elsewhere) → the charter should bar it.
         let mut other = house_at(1, vec![3], 2);
@@ -878,7 +882,7 @@
             reserves: 30.0, loans: vec![Loan { borrower_house: -1, borrower_polis: 1, principal: 10.0,
                 outstanding: 10.0, rate: 0.01, start_tick: 0, term_ticks: 3650, purpose: "colony".into() }],
             real_estate: 1.0, deposits: 0.0, notes_issued: 0.0, branches: vec![0], prestige: 0.5,
-            interest_earned: 0.0, losses: 0.0, stakes: vec![], dividends_earned: 0.0, history: vec![], events: vec![],
+            interest_earned: 0.0, losses: 0.0, stakes: vec![], dividends_earned: 0.0, bills_income: 0.0, history: vec![], events: vec![],
         });
         s.tick = 55 * 365;
         s.colony_pass();
@@ -1074,7 +1078,7 @@
         let mk_bank = |name: &str, reserves: f32, deposits: f32, notes: f32| Bank {
             name: name.into(), house: 0, seat: 0, founded_tick: 0, defunct: false,
             reserves, loans: vec![], real_estate: 100.0, deposits, notes_issued: notes,
-            branches: vec![0], prestige: 0.5, interest_earned: 0.0, losses: 0.0, stakes: vec![], dividends_earned: 0.0, history: vec![], events: vec![],
+            branches: vec![0], prestige: 0.5, interest_earned: 0.0, losses: 0.0, stakes: vec![], dividends_earned: 0.0, bills_income: 0.0, history: vec![], events: vec![],
         };
         // Two soundly-capitalised banks and one fragile (reserves ≪ liabilities).
         s.banks.push(mk_bank("Banco Solido", 5000.0, 1000.0, 1000.0));   // ratio 2.5

@@ -230,6 +230,10 @@ pub fn campaign_get_mints(db: State<'_, WorldDb>) -> Result<Vec<MintBrief>, Stri
                 has_mint: h.has_mint,
                 under_mandate: h.reform_until > sim.tick,
                 reformed: h.last_reform_tick != 0,
+                debt_principal: h.debt_principal,
+                debt_coupon: h.debt_coupon,
+                debt_ratio: if throughput > 1e-6 { h.debt_principal / throughput } else { 0.0 },
+                debt_holders: h.debt_holders.len() as u32,
             }
         })
         .collect();
@@ -462,7 +466,7 @@ pub fn campaign_get_banks(db: State<'_, WorldDb>) -> Result<Vec<BankBrief>, Stri
             equity: b.equity(), reserve_ratio: b.reserve_ratio(),
             n_loans: b.loans.iter().filter(|l| l.outstanding > 0.01).count() as u32,
             interest_earned: b.interest_earned, losses: b.losses,
-            stake_book: b.stake_book(), dividends_earned: b.dividends_earned,
+            stake_book: b.stake_book(), dividends_earned: b.dividends_earned, bills_income: b.bills_income,
             seat_x, seat_y,
             branches, events,
             history: b.history.clone(), loans, stakes,

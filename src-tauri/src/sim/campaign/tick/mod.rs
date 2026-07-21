@@ -1144,6 +1144,42 @@ const BANK_STAKE_SHARE: f32 = 0.25;
 const BANK_HISTORY_CAP: usize = 60;
 /// A3 · years of yearly coin-biography snapshots kept per mint (bounds save size).
 const COIN_HISTORY_CAP: usize = 80;
+// ── B4 · bills of exchange (FX-spread bank income) ───────────────────────────
+/// The fee a bank captures on cross-coin settlement between two branch markets,
+/// as a fraction of (relative exchange gap × the lighter market's throughput). Small
+/// — it is a friction on trade, and flows out through dividends + the wealth tax.
+const BILL_FEE: f32 = 0.0016;
+/// Monthly cap on a single bank's bills income (keeps FX profit bounded).
+const BILL_INCOME_CAP: f32 = 8.0;
+// ── B3 · civic PUBLIC DEBT (the Monte / Casa di San Giorgio) ─────────────────
+/// Public-debt markets open once civic institutions have matured (~year 15).
+const DEBT_START_TICK: u32 = 15 * 365;
+/// The sticky annual coupon a city pays its bondholders (~5–6%, the Monte's band).
+const DEBT_COUPON: f32 = 0.055;
+/// The STANDING public debt a mature commercial city funds, as a multiple of its
+/// yearly throughput — the Monte was a permanent institution, not just a war measure.
+const DEBT_TARGET_RATIO: f32 = 0.6;
+/// Most a city grows its debt toward the target in one year (× throughput).
+const DEBT_ISSUE_STEP: f32 = 0.15;
+/// Serviceability gate: a city only issues if (treasury + proceeds) covers this many
+/// years of the resulting coupon — so it never borrows past what it can service.
+const DEBT_SERVICE_COVER: f32 = 4.0;
+/// Debt is issued up to this multiple of the city's yearly throughput (hard cap).
+const DEBT_MAX_RATIO: f32 = 2.0;
+/// Above this debt-to-throughput ratio the city can no longer service it → a haircut.
+/// Set high so a default is a genuine fiscal COLLAPSE (throughput has cratered under a
+/// standing debt), not a routine event — otherwise the trust hit cascades into banking.
+const DEBT_DEFAULT_RATIO: f32 = 5.0;
+/// Fraction of principal wiped from every holder in a debt default.
+const DEBT_HAIRCUT: f32 = 0.3;
+/// Trust hit to the city's coin when it defaults on its bonds (credit-standing loss).
+/// Small — a debt default dents the coin, it does not by itself topple the banks.
+const DEBT_DEFAULT_TRUST_HIT: f32 = 0.04;
+/// A city deleverages (retires principal, returning capital to holders) once its debt
+/// runs past this multiple of the target ratio — heading OFF a default while it can.
+const DEBT_DELEVERAGE_RATIO: f32 = 1.6;
+/// Max distinct bondholders tracked per city (bounds save size; new lenders merge).
+const DEBT_HOLDER_CAP: usize = 8;
 /// Capital value of a manufactory per tier; a stake costs `share × tier × this`.
 const BANK_STAKE_VALUE_PER_TIER: f32 = 40_000.0;
 
@@ -1402,6 +1438,16 @@ pub struct TickHub {
     /// A3 · yearly coin-biography snapshots (fineness/trust/value/price over time)
     /// for the Money panel sparklines. Capped at `COIN_HISTORY_CAP`. serde-defaulted.
     #[serde(default)] pub coin_history: Vec<CoinSnapshot>,
+    // ── B3 · civic PUBLIC DEBT (the Monte / Casa di San Giorgio) ──
+    /// Principal the city owes its bondholders (funded civic debt). A council raises
+    /// it when the treasury runs short (war, public works) instead of failing; it is
+    /// serviced by a yearly coupon and can be haircut in a fiscal crisis. 0 = no debt.
+    #[serde(default)] pub debt_principal: f32,
+    /// The sticky annual coupon rate the city pays its bondholders (the Monte paid ~5%).
+    #[serde(default)] pub debt_coupon: f32,
+    /// Who holds the debt: `(kind 0 = house · 1 = bank, index, amount lent)`. Coupons
+    /// are paid pro-rata; a default haircuts every holder. Capped at `DEBT_HOLDER_CAP`.
+    #[serde(default)] pub debt_holders: Vec<(u8, u32, f32)>,
     /// v2.0 · bullion capacity ratio = regional bullion output ÷ coin demand. ≥1
     /// means metal is ample (fineness can be full); <1 means the mint is stretched
     /// and bullion scarcity is forcing debasement (surfaced as the "limiting factor").
@@ -1817,6 +1863,9 @@ pub struct Bank {
     #[serde(default)] pub stakes: Vec<BankStake>,
     /// Cumulative stake dividends collected (income, for the ledger / chart).
     #[serde(default)] pub dividends_earned: f32,
+    /// B4 · cumulative BILLS-OF-EXCHANGE (FX-spread) income — earned settling trade
+    /// across the bank's branch cities when they use DIFFERENT coins. serde-defaulted.
+    #[serde(default)] pub bills_income: f32,
     /// Yearly balance-sheet snapshots for the Bank panel's history charts.
     #[serde(default)] pub history: Vec<BankSnapshot>,
     pub events: Vec<HouseEvent>,
@@ -3673,6 +3722,9 @@ impl CampaignSim {
                 self.update_currency_baskets();
                 self.update_banks(yr);
                 self.update_wars(yr);
+                // B3 · civic public debt (Monte): service coupons, default if over-levered,
+                // and issue fresh bonds where the treasury is short (post-war financing).
+                self.update_public_debt(yr);
                 self.maybe_steal_quality(yr);
                 self.compute_speculation(yr);
                 // Fold the year's trade flows into the Flows-subtab detail + trend graphs.

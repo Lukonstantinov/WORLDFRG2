@@ -389,6 +389,12 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, b
             ⛏ {m.bullion}
           </span>
         )}
+        {m.debt_principal > 0 && (
+          <span style={{ color: m.debt_ratio >= 3 ? "#e0a880" : "#9ab0c8" }}
+            title={`Civic public debt (Monte): ${fmtk(m.debt_principal)} owed to ${m.debt_holders} bondholder(s) at ${(m.debt_coupon * 100).toFixed(1)}% · ${m.debt_ratio.toFixed(1)}× yearly trade${m.debt_ratio >= 3 ? " — fiscal strain" : ""}`}>
+            📜 debt {fmtk(m.debt_principal)} ({m.debt_ratio.toFixed(1)}×)
+          </span>
+        )}
         {m.war_with && <span style={{ color: "#e88" }}>⚔ {m.war_with}</span>}
       </div>
 
@@ -421,6 +427,11 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, b
               <Explain label="Bullion supply" value={m.bullion} text={m.bullion === "ample"
                 ? "The region has gold/silver to spare — the mint can strike full-bodied coin. Bullion is not the binding constraint here."
                 : `Coin SUPPLY is limited by the region's ${m.metal} bullion. Minting beyond the metal forces debasement — fineness is capped down, so scarce bullion is the hard limit on how sound this coin can be.`} />
+              {m.debt_principal > 0 && (
+                <Explain label="Public debt (Monte)"
+                  value={`${fmtk(m.debt_principal)} @ ${(m.debt_coupon * 100).toFixed(1)}% · ${m.debt_ratio.toFixed(1)}×`}
+                  text={`Funded civic debt held by ${m.debt_holders} patrician bondholder(s) — a permanent institution (like Venice's Monte) that finances public works, servicing a yearly coupon from the treasury. At ${m.debt_ratio.toFixed(1)}× yearly trade it is ${m.debt_ratio >= 3 ? "STRAINED — a fiscal collapse would force a haircut on the bonds" : "comfortably serviceable"}.`} />
+              )}
               {worldW > 0 && usage.length > 0 && (
                 <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid #1b2a3c" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
@@ -882,6 +893,7 @@ function BankCard({ b, house }: { b: BankBrief; house?: HouseBrief }) {
         </span>
         <span>{b.n_loans} loans</span>
         <span style={{ color: "#80c890" }} title="Cumulative interest earned">+{fmtk(b.interest_earned)}</span>
+        {b.bills_income > 0.01 && <span style={{ color: "#9ac0e0" }} title="Cumulative bills-of-exchange (FX-spread) income — earned settling trade across branch cities that use different coins">⇄{fmtk(b.bills_income)}</span>}
         {b.losses > 0.01 && <span style={{ color: "#e08080" }} title="Losses written off">−{fmtk(b.losses)}</span>}
       </div>
       {b.branches.length > 0 && (

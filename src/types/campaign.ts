@@ -1159,6 +1159,11 @@ export interface MintBrief {
   has_mint: boolean;     // holds the right of the mint (charter)
   under_mandate: boolean; // honest-money mandate active (no debasement)
   reformed: boolean;      // has reformed its coinage at least once
+  // B3 · civic public debt (the Monte)
+  debt_principal: number; // principal owed to bondholders (0 = no public debt)
+  debt_coupon: number;    // annual coupon rate paid
+  debt_ratio: number;     // debt ÷ yearly throughput (≥3 = fiscal strain)
+  debt_holders: number;   // number of patrician bondholders
 }
 
 /** A3 · one yearly point in a coin's biography (Money panel sparklines). */
@@ -1249,6 +1254,7 @@ export interface BankBrief {
   losses: number;
   stake_book: number;
   dividends_earned: number;
+  bills_income: number;   // B4 · cumulative bills-of-exchange (FX-spread) income
   seat_x: number;
   seat_y: number;
   branches: string[];
