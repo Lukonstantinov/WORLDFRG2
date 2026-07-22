@@ -96,6 +96,31 @@ const JET_ACCEL_SCALE: f32 = 6.0;    // along-flow Î”speed (m/s) that saturat
 const JET_ENTRANCE_DRY: f32 = 0.55;  // max fraction of moisture removed at a strong entrance
 const JET_EXIT_WET_MAX: f32 = 750.0; // max convergence rainfall (mm/yr) at a strong exit
 
+// ── Clausius–Clapeyron moisture capacity ────────────────────────────────────
+// Saturation vapour pressure rises exponentially with temperature, so warm air
+// holds far more water vapour than cold air. Physically this is why the deep
+// tropics (Amazon, Congo, SE Asia) stay wet hundreds of km inland while cold
+// continental interiors dry out fast: a warm moist air parcel can travel further
+// before it rains itself out. We fold this into the moisture-advection depletion —
+// the parcel loses a smaller fraction of its moisture per step in warm air.
+
+/// Fraction (0..1) of a moisture parcel's per-step depletion that warm air resists,
+/// from the Clausius–Clapeyron (Tetens) saturation curve, referenced to 0 °C so it
+/// is a pure warm-air BOOST: 0 at/below freezing, rising toward CC_STRENGTH in the
+/// hot tropics. (Referencing to 0 °C also means the depletion is unchanged wherever
+/// the temperature field is 0 — e.g. isolated unit tests — so it only adds physics
+/// in the real pipeline where temperature has been computed.)
+const CC_STRENGTH: f32 = 0.5;
+#[inline]
+fn cc_retain_frac(t_c: f32) -> f32 {
+    if t_c <= 0.0 {
+        return 0.0;
+    }
+    let e_sat = |t: f32| 6.11 * (17.27 * t / (t + 237.3)).exp();
+    let ratio = (1.0 - e_sat(0.0) / e_sat(t_c)).clamp(0.0, 1.0);
+    CC_STRENGTH * ratio
+}
+
 /// Orographic precipitation multiplier for one land cell.
 /// 2.5 = windward uplift, 0.15..1.0 = leeward rain shadow (graduated), 1.0 = none.
 fn orographic_multiplier(buf: &WorldBuffer, x: u32, y: u32, wvx: f32, wvy: f32) -> f32 {
@@ -611,6 +636,12 @@ fn season_precip(
                 let trop_blend = if t_lat < 15.0 { 1.0 }
                     else if t_lat < 30.0 { (30.0 - t_lat) / 15.0 } else { 0.0 };
                 let decay = ctx.decay_base + (ctx.decay_trop - ctx.decay_base) * trop_blend;
+                // Clausius–Clapeyron: warm air holds more moisture, so the parcel
+                // depletes MORE SLOWLY over warm land (decay pushed toward 1) — the
+                // conserved-moisture reason tropical rainforest reaches far inland.
+                // Zero effect at/below 0 °C, so the depletion is unchanged in the cold.
+                let cc = cc_retain_frac(buf.temperature[ci]);
+                let decay = decay + (1.0 - decay) * cc;
                 m *= decay;
                 let x0 = fx.floor() as i32;
                 let y0 = fy.floor() as i32;
@@ -1033,6 +1064,33 @@ mod tests {
         let coast = buf.idx(x, row_at(12.0));
         let frac = buf.precip_summer_frac[coast] as f32 / 255.0;
         assert!(frac > 0.55, "tropical monsoon coast should be summer-wet, frac={frac}");
+    }
+
+    /// Clausius–Clapeyron retention: zero at/below freezing (so cold-temperature
+    /// unit worlds are unaffected), strictly increasing with warmth, bounded.
+    #[test]
+    fn cc_retain_is_gated_and_monotonic() {
+        assert_eq!(cc_retain_frac(-5.0), 0.0);
+        assert_eq!(cc_retain_frac(0.0), 0.0);
+        assert!(cc_retain_frac(10.0) > 0.0);
+        assert!(cc_retain_frac(25.0) > cc_retain_frac(10.0));
+        assert!(cc_retain_frac(40.0) <= CC_STRENGTH + 1e-6);
+    }
+
+    /// Direct check that the Clausius–Clapeyron retention makes a moisture parcel
+    /// deplete more slowly over warm land than cold: for the same distance-decay,
+    /// the warm-adjusted retained fraction exceeds the cold one. (The end-to-end
+    /// pipeline effect — deeper tropical moisture penetration — rides on this; a
+    /// synthetic single-continent unit world can't exercise it because season_precip
+    /// advects on the DERIVED seasonal winds, not a hand-set wind field.)
+    #[test]
+    fn cc_retention_slows_warm_air_depletion() {
+        let decay = 0.90f32; // an arbitrary per-step distance decay
+        let warm = decay + (1.0 - decay) * cc_retain_frac(28.0);
+        let cold = decay + (1.0 - decay) * cc_retain_frac(0.0);
+        assert!(warm > cold, "warm decay {warm} should exceed cold decay {cold}");
+        assert!((cold - decay).abs() < 1e-6, "cold (<=0 °C) leaves the decay unchanged");
+        assert!(warm < 1.0, "retention never fully stops depletion");
     }
 }
 
