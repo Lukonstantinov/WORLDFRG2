@@ -81,10 +81,14 @@ const ENCLOSED_SUPPRESS_STRENGTH: f32 = 0.85; // max fraction of emitted moistur
 const ENCLOSED_NARROW_KM: f32 = 1400.0;       // seas narrower than this read as "enclosed"
 const ENCLOSED_COAST_DRYING: f32 = 0.45;      // extra drying on land bordering such seas
 
-// Orographic
+// Orographic. Reaches are expressed in KM (resolution-independent) and converted to
+// cells per grid inside `orographic_multiplier`: the upslope-uplift zone is a
+// relatively narrow band just windward of a range, while the rain shadow reaches
+// far downwind — the Patagonian / Great-Plains lee steppe stays dry for hundreds of
+// km east of the cordillera.
 const MOUNTAIN_THRESHOLD: f32 = 0.19; // elevation counting as a ridge (~1700 m)
-const WINDWARD_STEPS: i32 = 12;
-const SHADOW_STEPS: i32 = 20;
+const WINDWARD_KM: f32 = 220.0;       // upslope-enhancement fetch windward of a range
+const SHADOW_KM: f32 = 500.0;         // rain-shadow reach downwind of a range
 
 // â”€â”€ Low-level-jet entrance/exit dynamics (jets.rs supplies buf.wind_speed) â”€â”€
 // A jet ENTRANCE (accelerating flow) diverges at low level and sweeps moisture
@@ -130,20 +134,26 @@ fn orographic_multiplier(buf: &WorldBuffer, x: u32, y: u32, wvx: f32, wvy: f32) 
     let ndy = wvy / wind_len;
     let h = buf.height as i32;
 
-    // Leeward (rain shadow): walk upwind for a recently crossed mountain.
-    for step in 1..=SHADOW_STEPS {
+    // Resolution-independent reaches (km → cells for this grid).
+    let km_per_cell = EARTH_CIRCUMFERENCE_KM / buf.width as f32;
+    let shadow_steps = ((SHADOW_KM / km_per_cell).round() as i32).max(6);
+    let windward_steps = ((WINDWARD_KM / km_per_cell).round() as i32).max(4);
+
+    // Leeward (rain shadow): walk upwind for a recently crossed mountain. The shadow
+    // is deepest right behind the crest and recovers with distance downwind.
+    for step in 1..=shadow_steps {
         let bx = (x as f32 - ndx * step as f32).round() as i32;
         let by = (y as f32 - ndy * step as f32).round() as i32;
         if by < 0 || by >= h { break; }
         let bi = buf.idx(buf.wrap_x(bx), by as u32);
         if buf.terrain[bi] == 0 { break; } // open ocean upstream â†’ no shadow
         if buf.elevation[bi] > MOUNTAIN_THRESHOLD {
-            return 0.15 + 0.85 * (((step - 1) as f32 / SHADOW_STEPS as f32).sqrt());
+            return 0.15 + 0.85 * (((step - 1) as f32 / shadow_steps as f32).sqrt());
         }
     }
 
     // Windward: walk downwind for an approaching mountain.
-    for step in 1..=WINDWARD_STEPS {
+    for step in 1..=windward_steps {
         let fx = (x as f32 + ndx * step as f32).round() as i32;
         let fy = (y as f32 + ndy * step as f32).round() as i32;
         if fy < 0 || fy >= h { break; }
@@ -808,7 +818,8 @@ fn season_precip(
             if local_summer && (5.0..=45.0).contains(&abs_lat) {
                 p += monsoon_bonus(abs_lat, buf.distance_to_ocean[idx], ctx.land_frac_tropical)
                     * monsoon_onshore(buf, x, y, ctx.sea_suppress)
-                    * conv_suppress;
+                    * conv_suppress
+                    * oro; // upslope enhances (Western Ghats), lee shadows (Deccan)
             }
 
             // Frontal storm tracks â€” a WINTER-dominant source (extratropical cyclones
@@ -839,7 +850,13 @@ fn season_precip(
             } else {
                 1.30 + 0.60 * frontal_sub_block   // 1.30 -> 1.90 at peak
             };
-            p += frontal_bonus(abs_lat, near_ocean) * frontal_scale * SEASON_SCALE;
+            // Orographic control of the FRONTAL storm-track rain — the key to the
+            // Andes: at these westerly latitudes the extratropical cyclones are the
+            // dominant moisture source, so uplift soaks the windward slope (the wet
+            // Chilean coast / Norway / BC / South Island) while the rain shadow keeps
+            // the lee bone-dry (the Argentine Patagonian steppe & pampas). Previously
+            // this term ignored `oro`, so the lee stayed as wet as the windward side.
+            p += frontal_bonus(abs_lat, near_ocean) * frontal_scale * SEASON_SCALE * oro;
 
             // Jet-exit convergence dump (monsoon terminus), amplified up windward relief.
             if jet_wet > 0.0 {
@@ -1075,6 +1092,48 @@ mod tests {
         assert!(cc_retain_frac(10.0) > 0.0);
         assert!(cc_retain_frac(25.0) > cc_retain_frac(10.0));
         assert!(cc_retain_frac(40.0) <= CC_STRENGTH + 1e-6);
+    }
+
+    /// The Andes rain shadow: at a westerly latitude (~45°), a meridional mountain
+    /// ridge with ocean to its west must leave the WINDWARD (west) side far wetter
+    /// than the LEE (east) side — the wet Chilean coast vs. the dry Argentine steppe.
+    /// This guards the fix that made the dominant frontal storm-track rain respect
+    /// the orographic uplift / rain shadow (previously it bypassed it).
+    #[test]
+    fn meridional_ridge_shadows_its_lee() {
+        let (w, h) = (48u32, 120u32);
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", w.to_string()), ("grid_height", h.to_string())] {
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                rusqlite::params![k, v],
+            ).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_OCEAN_ATMOSPHERE).unwrap();
+        // Ocean west of x=8; a tall N–S cordillera at x=12; land everywhere else.
+        // (The westerlies at 45° blow eastward, off the western ocean onto the range.)
+        for y in 0..h {
+            for x in 0..w {
+                let i = buf.idx(x, y);
+                let ocean = x < 8;
+                buf.terrain[i] = if ocean { 0 } else { 1 };
+                buf.elevation[i] = if x == 12 { 0.5 } else if ocean { 0.0 } else { 0.06 };
+            }
+        }
+        crate::sim::ocean::compute_distance_to_ocean(&mut buf);
+        compute_precipitation(&mut buf);
+
+        // Sample the westerly belt (~45°N).
+        let row = (0..h).min_by(|&a, &b| {
+            (buf.latitude(a) - 45.0).abs().partial_cmp(&(buf.latitude(b) - 45.0).abs()).unwrap()
+        }).unwrap();
+        let windward = buf.precipitation[buf.idx(10, row)]; // just west of the crest
+        let lee = buf.precipitation[buf.idx(16, row)];       // just east of the crest
+        assert!(
+            windward > lee * 2.5,
+            "windward slope {windward} mm should soak vs the rain-shadow lee {lee} mm"
+        );
     }
 
     /// Direct check that the Clausius–Clapeyron retention makes a moisture parcel
