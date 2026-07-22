@@ -252,6 +252,29 @@ fn precompute_basin_dist_ns(terrain: &[u8], w: u32, h: u32) -> (Vec<u16>, Vec<u1
     (dist_n, dist_s)
 }
 
+/// Interior Sverdrup meridional velocity (NORTHWARD positive) at a latitude,
+/// derived from the curl of the belt wind stress over a β-plane — the physically
+/// correct interior of a wind-driven gyre. Belt winds are ~zonal, so the vertical
+/// wind-stress curl is ≈ −∂τ_x/∂y and the Sverdrup relation βV = curl(τ)/ρ gives
+/// `V ∝ (−∂τ_x/∂φ)/cosφ` (the planet radius cancels between the curl and β = 2Ω
+/// cosφ/R). This makes the sign and latitude structure of the gyre interior EMERGE
+/// from the wind shear — subtropical interior equatorward, subpolar interior
+/// poleward — instead of the old hand-tuned `subtrop_env`/`subpol_env` envelopes.
+/// Normalized to ~unit peak so it drops into the existing velocity scale.
+fn sverdrup_interior_north(lat: f32) -> f32 {
+    // Zonal wind stress τ_x ∝ speed² · (signed zonal unit wind). base_speed carries
+    // the trade/westerly/polar speed profile; belt_wind's x-component carries the
+    // sign (easterly trades & polar easterlies negative, westerlies positive).
+    let tau_x = |l: f32| -> f32 {
+        let s = crate::sim::jets::base_speed(l.abs());
+        s * s * belt_wind(l).0
+    };
+    let dl = 1.5f32; // finite-difference half-step in degrees
+    let dtau_dphi = (tau_x(lat + dl) - tau_x(lat - dl)) / (2.0 * dl.to_radians());
+    let cosphi = lat.to_radians().cos().max(0.15); // guard the pole
+    (-dtau_dphi / cosphi / 300.0).clamp(-1.3, 1.3)
+}
+
 /// Core gyre-aware current vector for one ocean cell.
 /// Direct port of WF1 current-generator.ts gyreVector().
 fn gyre_vector(
@@ -317,18 +340,17 @@ fn gyre_vector(
         vy += poleward * eb_profile * subpol_env * 0.8 * width_factor;
     }
 
-    // Interior Sverdrup drift
-    if abs_b < 0.75 && abs_lat > 5.0 && abs_lat < 50.0 {
-        let interior_weight = 1.0 - abs_b / 0.75;
+    // Interior Sverdrup drift — now DERIVED from wind-stress curl over a β-plane
+    // (see `sverdrup_interior_north`) rather than the old hand-tuned subtropical-
+    // equatorward + subpolar-poleward envelopes. One term covers both gyres and both
+    // hemispheres: its sign emerges from the belt-wind shear. `subtrop_env`/`subpol_env`
+    // are no longer used for the interior (they remain for the boundary terms above).
+    if abs_b < 0.75 && abs_lat > 5.0 && abs_lat < 68.0 {
+        let interior_weight = (1.0 - abs_b / 0.75).max(0.0);
         let ns_suppress = (ns_extent / 25.0).min(1.0);
-        let sverdrup = equatorward * interior_weight * subtrop_env * 0.40 * width_factor * ns_suppress;
-        vy += sverdrup;
-    }
-
-    // Subpolar interior: gentle poleward drift
-    if abs_b < 0.6 && abs_lat >= 45.0 && abs_lat < 68.0 {
-        let interior_weight = 1.0 - abs_b / 0.6;
-        vy += poleward * interior_weight * subpol_env * 0.20 * width_factor;
+        // v_north is +northward; screen y is DOWN, so northward flow is −vy.
+        let v_north = sverdrup_interior_north(lat);
+        vy += -v_north * 0.5 * interior_weight * width_factor * ns_suppress;
     }
 
     // Mid-latitude westerly DRIFT carries surface water poleward (Ekman + the
@@ -1657,6 +1679,20 @@ pub fn compute_distance_to_ocean(buf: &mut WorldBuffer) {
 mod tests {
     use super::*;
     use crate::sim::world_buffer::ColumnSet;
+
+    /// The wind-stress-curl Sverdrup interior reverses sense between the subtropical
+    /// and subpolar gyres, and is antisymmetric across the equator — emergent from
+    /// the belt-wind shear, not hand-coded.
+    #[test]
+    fn sverdrup_interior_reverses_between_gyres() {
+        // NH subtropical interior flows EQUATORWARD (southward → v_north < 0);
+        // NH subpolar interior flows POLEWARD (northward → v_north > 0).
+        assert!(sverdrup_interior_north(25.0) < 0.0, "NH subtropical interior should be equatorward");
+        assert!(sverdrup_interior_north(55.0) > 0.0, "NH subpolar interior should be poleward");
+        // SH mirror (northward = equatorward there; southward = poleward).
+        assert!(sverdrup_interior_north(-25.0) > 0.0, "SH subtropical interior should be equatorward");
+        assert!(sverdrup_interior_north(-55.0) < 0.0, "SH subpolar interior should be poleward");
+    }
 
     /// Build a 16Ã—12 all-land test world. With equator_offset 0.5 and unit lat
     /// scaling, abs_lat(row) = 15Â·|6âˆ’row|, so row 2 = 60Â°N, row 6 = equator.

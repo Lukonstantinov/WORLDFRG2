@@ -53,7 +53,7 @@ fn gauss(x: f32, mu: f32, sigma: f32) -> f32 {
 /// Base low-level wind speed (m/s) from the latitude wind belts: weak doldrums at
 /// the ITCZ, brisk trades ~15Â°, a subtropical-high calm near 30Â°, strong
 /// westerlies ~50Â°, tapering toward the pole.
-fn base_speed(abs_lat: f32) -> f32 {
+pub(crate) fn base_speed(abs_lat: f32) -> f32 {
     let doldrums = 2.5;
     let trades = 6.0 * gauss(abs_lat, 15.0, 9.0);
     let westerlies = 9.0 * gauss(abs_lat, 50.0, 13.0);
