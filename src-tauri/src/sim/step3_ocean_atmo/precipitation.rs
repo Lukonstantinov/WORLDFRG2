@@ -292,10 +292,19 @@ fn compute_enclosed_suppression(buf: &WorldBuffer, km_per_cell: f32) -> Vec<f32>
     sup
 }
 
-/// Subtropical-high fractional drying (0..0.70), peak near 28Â°.
+/// Subtropical-high fractional drying (0..0.82), peak near 26°.
+/// The old ±10° window around 28° gave <14% suppression at 20°N (Yemen/Oman)
+/// — nowhere near enough to produce desert there. The real subtropical high
+/// belt extends from 13° to 42°, centred on ~26°, with the Arabian/Saharan
+/// desert corridor running 15-32°N. Widened accordingly; max raised to 0.82.
 fn subtropical_penalty(abs_lat: f32) -> f32 {
-    let dist = (abs_lat - 28.0).abs();
-    if dist >= 10.0 { 0.0 } else { 0.70 * (1.0 - dist / 10.0) }
+    if abs_lat < 13.0 || abs_lat > 42.0 { return 0.0; }
+    let frac = if abs_lat <= 26.0 {
+        (abs_lat - 13.0) / 13.0  // 0→1 across 13-26°
+    } else {
+        (42.0 - abs_lat) / 16.0  // 1→0 across 26-42°
+    };
+    0.82 * frac
 }
 
 /// Monsoon multiplier (1.0..2.0) for continental tropical interiors.
@@ -766,7 +775,9 @@ fn season_precip(
             // jet entrance (jet_dry < 0.65) sits below 20Â° latitude, simulate
             // the same moisture-removal and convective suppression that a cold
             // coast would produce.  Gated to exclude cells already flagged cold.
-            let has_jet_upwelling = !ctx.cold_coast[idx] && jet_dry < 0.65 && abs_lat < 20.0;
+            // Extended to 28° — Omani/Yemeni coasts (22-26°N) sit in the same
+            // Somali-jet divergence zone as the Horn; they should be equally arid.
+            let has_jet_upwelling = !ctx.cold_coast[idx] && jet_dry < 0.65 && abs_lat < 28.0;
             if has_jet_upwelling {
                 moisture *= COLD_COAST_DRYING;
                 conv_suppress *= 0.5;
@@ -788,8 +799,10 @@ fn season_precip(
             // south within 300 km) â€” this targets eastern Africa/Horn without
             // touching Nigeria/West Africa, which has warm Gulf of Guinea to
             // its south and therefore conv_floor = 0.65.
-            let hadley_ext = if abs_lat > 8.0 && abs_lat < 12.0 && conv_floor <= 0.30 {
-                (abs_lat - 8.0) / 4.0
+            // Extended to 16° so Aden/Djibouti (12-16°N, blocked from equatorial
+            // ocean by the Somali coast) are also arid, not just the Horn <12°.
+            let hadley_ext = if abs_lat > 8.0 && abs_lat < 16.0 && conv_floor <= 0.30 {
+                (abs_lat - 8.0) / 8.0
             } else {
                 0.0
             };
@@ -812,14 +825,22 @@ fn season_precip(
             // Monsoon interior penetration (multiplicative).
             p *= monsoon_multiplier(abs_lat, buf.distance_to_ocean[idx], ctx.land_frac_tropical);
 
-            // Additive summer monsoon â€” LOCAL-SUMMER ONLY, gated to onshore-flow
+            // Additive summer monsoon — LOCAL-SUMMER ONLY, gated to onshore-flow
             // regions and damped by the convection suppressors. This is what makes the
-            // wet season wet and the dry season dry (the emergent Aw/Am/Cwa split);
-            // the Somali/Arabian jet-entrance coast stays dry via conv_suppress.
+            // wet season wet and the dry season dry (the emergent Aw/Am/Cwa split).
+            // The Hadley inversion lid (hadley_total) also suppresses the monsoon bonus:
+            // even where surface onshore flow is present (Arabia faces the Indian Ocean),
+            // the descending Hadley column physically prevents the deep convective towers
+            // needed for monsoon rainfall — this is the key difference between India
+            // (low hadley_total, ITCZ migrates in) and Arabia (peak hadley, lid stays on).
+            // Use hadley_total (which includes hadley_ext for the Horn/Aden gap) so the
+            // full inversion is accounted for, not just the latitude-based portion.
             if local_summer && (5.0..=45.0).contains(&abs_lat) {
+                let monsoon_hadley_block = (1.0 - 0.90 * hadley_total).max(0.0);
                 p += monsoon_bonus(abs_lat, buf.distance_to_ocean[idx], ctx.land_frac_tropical)
                     * monsoon_onshore(buf, x, y, ctx.sea_suppress)
                     * conv_suppress
+                    * monsoon_hadley_block
                     * oro; // upslope enhances (Western Ghats), lee shadows (Deccan)
             }
 
