@@ -209,6 +209,11 @@ export async function campaignMonetaryChronicle(): Promise<MonetaryEvent[]> {
   return invoke("campaign_monetary_chronicle");
 }
 
+/** A3 · one coin's yearly biography (fineness/trust/value/price series), oldest→newest. */
+export async function campaignCoinHistory(hub: number): Promise<CoinSnapshot[]> {
+  return invoke("campaign_coin_history", { hub });
+}
+
 /** v2.0 · currency reserves per holder (cities / banks / houses) for the Reserves donuts. */
 export async function campaignReserves(): Promise<ReservesPayload> {
   return invoke("campaign_reserves");

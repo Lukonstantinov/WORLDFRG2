@@ -370,11 +370,26 @@ pub fn campaign_city_ranking(db: State<'_, WorldDb>) -> Result<Vec<CityRank>, St
     let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
     let trade_of = |h: &TickHub| (h.export_earn + h.import_spend).max(0.0);
     let total: f32 = sim.hubs.iter().filter(|h| !h.is_estate).map(trade_of).sum::<f32>().max(1e-6);
+    // C1 · normalizers for the prosperity composite (max over living cities).
+    let mut max_trade = 1e-6f32; let mut max_treas = 1e-6f32; let mut max_comm = 1e-6f32;
+    for h in sim.hubs.iter().filter(|h| !h.is_estate) {
+        max_trade = max_trade.max(trade_of(h));
+        max_treas = max_treas.max(h.treasury.max(0.0));
+        max_comm = max_comm.max(h.society.commoner_wealth.max(0.0));
+    }
     let mut out: Vec<CityRank> = sim.hubs.iter().filter(|h| !h.is_estate).map(|h| {
         let trade = trade_of(h);
+        let commoner_wealth = h.society.commoner_wealth.max(0.0);
+        let inequality = h.society.inequality.clamp(0.0, 1.0);
+        // Weighted, normalized blend — flow, public stock, broad prosperity, equity.
+        let prosperity = 0.42 * (trade / max_trade)
+            + 0.20 * (h.treasury.max(0.0) / max_treas)
+            + 0.26 * (commoner_wealth / max_comm)
+            + 0.12 * (1.0 - inequality);
         CityRank {
             id: h.id, name: h.name.clone(), population: h.population.max(0.0) as u32,
             wealth: h.grain_wealth + h.trade_wealth, trade, pct_world: trade / total * 100.0,
+            prosperity, treasury: h.treasury, commoner_wealth, inequality,
         }
     }).collect();
     out.sort_by(|a, b| b.trade.partial_cmp(&a.trade).unwrap_or(std::cmp::Ordering::Equal));

@@ -1764,6 +1764,14 @@ pub struct CityRank {
     pub wealth: f32,      // grain + trade wealth
     pub trade: f32,       // throughput (value bought + sold)
     pub pct_world: f32,   // share of all world trade (%)
+    // C1 · a single honest PROSPERITY composite: flow (trade) + public stock
+    // (treasury) + broad-based prosperity (commoner wealth) + equity (1 − inequality),
+    // each normalized across cities. Lets the panel rank "richest" honestly instead of
+    // conflating it with trade VOLUME alone.
+    #[serde(default)] pub prosperity: f32,
+    #[serde(default)] pub treasury: f32,
+    #[serde(default)] pub commoner_wealth: f32,
+    #[serde(default)] pub inequality: f32,
 }
 
 /// Trade diagnostics — a snapshot to answer "is trade actually moving?".
@@ -1920,6 +1928,10 @@ pub struct MintBrief {
     pub trust: f32,
     pub fineness: f32,
     pub value: f32,
+    /// v2.1 · metal-aware INTRINSIC exchange value (silver-coin numeraire = 1): a gold
+    /// coin ≈ GOLD_SILVER_RATIO× a silver one of equal fineness. Cross-coin rates read
+    /// from this, so a Ducat and a Florin no longer mis-exchange 1:1.
+    #[serde(default)] pub exchange: f32,
     /// Single headline 0..100 (fineness × acceptance) — the number the card leads with.
     pub strength: f32,
     pub throughput: f32,
@@ -1940,6 +1952,15 @@ pub struct MintBrief {
     pub under_mandate: bool,
     /// This mint has reformed its coinage at least once.
     pub reformed: bool,
+    // ── B3 · civic public debt (the Monte) ──
+    /// Principal the city owes its bondholders (0 = no public debt).
+    #[serde(default)] pub debt_principal: f32,
+    /// The annual coupon rate the city pays on its bonds.
+    #[serde(default)] pub debt_coupon: f32,
+    /// Debt as a multiple of yearly throughput — the fiscal-burden read (≥3 = crisis).
+    #[serde(default)] pub debt_ratio: f32,
+    /// Number of distinct bondholders (patrician houses funding the debt).
+    #[serde(default)] pub debt_holders: u32,
 }
 
 /// v2.0 · one entry in the MONETARY CHRONICLE — the dated story of money (mints,
@@ -2029,6 +2050,8 @@ pub struct BankBrief {
     /// Book value of equity stakes + cumulative stake dividends collected.
     pub stake_book: f32,
     pub dividends_earned: f32,
+    /// B4 · cumulative bills-of-exchange (FX-spread) income.
+    #[serde(default)] pub bills_income: f32,
     /// Seat coordinates (cell space) — for the bank icon on the map.
     pub seat_x: f32,
     pub seat_y: f32,

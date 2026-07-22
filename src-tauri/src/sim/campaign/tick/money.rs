@@ -214,7 +214,19 @@ impl CampaignSim {
             let (a, b) = (f.hub as usize, f.partner as usize);
             if a < n && b < n && a != b { *partner_vol[a].entry(b).or_insert(0.0) += f.amount; }
         }
-        let attr = |h: &TickHub| (coin_value(h.mint_fineness, h.coin_trust) * h.coin_trust).max(EPS);
+        // v2.1 · attractiveness is trust×value with a MODEST metal reserve-preference:
+        // high-value-density gold (and electrum) coins are the natural international
+        // reserve money (florin/ducat were gold), so they spread & hold a little better;
+        // base-metal billon is shunned as a store of value. The FULL bimetallic ratio
+        // lives in the exchange value, not here — so a silver-minting city keeps its own
+        // silver as daily money (home bias) while gold coins accrue as its RESERVES.
+        let attr = |h: &TickHub| {
+            let metal_pref = match h.coin_metal {
+                1 => COIN_METAL_GOLD_PREF, 2 => COIN_METAL_ELECTRUM_PREF,
+                3 => COIN_METAL_BRONZE_PREF, _ => 1.0,
+            };
+            (coin_value(h.mint_fineness, h.coin_trust) * h.coin_trust * metal_pref).max(EPS)
+        };
         let mints = |h: &TickHub| !h.coin_name.is_empty() && h.coin_trust >= BANK_FOUND_COIN_TRUST;
         let mut new_baskets: Vec<Vec<(u32, f32)>> = vec![Vec::new(); n];
         let mut new_main: Vec<i32> = vec![-1; n];
@@ -412,7 +424,7 @@ impl CampaignSim {
                 deposits: 0.0, notes_issued: 0.0,
                 branches: vec![seat as u32], prestige: self.houses[hi].prestige,
                 interest_earned: 0.0, losses: 0.0,
-                stakes: Vec::new(), dividends_earned: 0.0, history: Vec::new(),
+                stakes: Vec::new(), dividends_earned: 0.0, bills_income: 0.0, history: Vec::new(),
                 events: Vec::new(),
             };
             bank.events.push(HouseEvent { tick, kind: "founded".into(),
@@ -557,6 +569,37 @@ impl CampaignSim {
                 self.banks[bi].reserves -= dividend;
                 self.houses[owner].wealth += dividend;
             }
+            // 3b) B4 · BILLS OF EXCHANGE — FX-spread income. The bank profits from
+            //     settling trade across its branch cities when they use DIFFERENT coins:
+            //     the wider the metal-value gap between the two coins, and the busier the
+            //     lighter of the two markets, the larger the fee it captures. This is the
+            //     historical core of merchant banking (the Medici/Fugger earned on the
+            //     bill, not usury) and rewards a WIDE branch network spanning currencies.
+            let branches = self.banks[bi].branches.clone();
+            if branches.len() >= 2 {
+                let nh = self.hubs.len();
+                let mut fx = 0.0f32;
+                for i in 0..branches.len() {
+                    for j in (i + 1)..branches.len() {
+                        let (a, b) = (branches[i] as usize, branches[j] as usize);
+                        if a >= nh || b >= nh { continue; }
+                        let (ca, cb) = (self.hubs[a].settle_coin, self.hubs[b].settle_coin);
+                        if ca < 0 || cb < 0 || ca == cb { continue; }
+                        let (ca, cb) = (ca as usize, cb as usize);
+                        if ca >= nh || cb >= nh { continue; }
+                        let ea = coin_exchange(self.hubs[ca].coin_metal, self.hubs[ca].mint_fineness, self.hubs[ca].coin_trust);
+                        let eb = coin_exchange(self.hubs[cb].coin_metal, self.hubs[cb].mint_fineness, self.hubs[cb].coin_trust);
+                        let gap = (ea - eb).abs() / ea.max(eb).max(EPS);
+                        let vol = self.hub_throughput(a).min(self.hub_throughput(b));
+                        fx += gap * vol * BILL_FEE;
+                    }
+                }
+                let fx = fx.min(BILL_INCOME_CAP);
+                if fx > 0.0 {
+                    self.banks[bi].reserves += fx;
+                    self.banks[bi].bills_income += fx;
+                }
+            }
             // 4) New lending + equity investment (only in calm times).
             if !panicked { self.bank_maybe_lend(bi); self.bank_maybe_invest(bi); }
             // 5) Attract deposits.
@@ -650,9 +693,21 @@ impl CampaignSim {
         } else {
             (-1i32, seat as i32, "treasury")
         };
+        // v2.1 · ENDOGENOUS rate — priced per loan instead of a flat house rate:
+        //   base × (1 + scarcity·K_s + risk·K_r) + panic premium, capped.
+        //   • scarcity = how little lending headroom is left (tight credit → dearer);
+        //   • risk = borrower/purpose risk premium (a city treasury is safest, a
+        //     speculative works dearest); • panic = a crunch premium at a stressed seat.
+        let scarcity = 1.0 - (headroom / (self.banks[bi].reserves * BANK_RESERVE_MULT).max(EPS)).clamp(0.0, 1.0);
+        let risk = match purpose {
+            "treasury" => 0.0, "guild_civic" => 0.15, "trade" => 0.45, "guild_factory" => 0.60, _ => 0.40,
+        };
+        let panic_prem = if self.hub_in_panic(seat) { BANK_LOAN_RATE * BANK_RATE_PANIC } else { 0.0 };
+        let rate = (BANK_LOAN_RATE * (1.0 + BANK_RATE_SCARCITY * scarcity + BANK_RATE_RISK * risk) + panic_prem)
+            .clamp(BANK_LOAN_RATE, BANK_LOAN_RATE_MAX);
         self.banks[bi].loans.push(Loan {
             borrower_house: bh, borrower_polis: bp,
-            principal: amt, outstanding: amt, rate: BANK_LOAN_RATE,
+            principal: amt, outstanding: amt, rate,
             start_tick: tick, term_ticks: 1825, purpose: purpose.into(),
         });
         self.banks[bi].notes_issued += amt;
@@ -823,6 +878,176 @@ impl CampaignSim {
         for h in pops {
             if h >= self.hubs.len() || self.hub_in_panic(h) { continue; }
             self.trigger_regional_crash(h, 0, "bubble burst");
+        }
+    }
+
+
+    /// A3 · push a yearly coin-biography snapshot for every mint, marking the year's
+    /// notable monetary event. Called once a year AFTER the basket/reform/crash passes
+    /// so circulation, fineness, reform state and any crash are all settled.
+    pub(crate) fn snapshot_coins(&mut self, year: u32) {
+        let n = self.hubs.len();
+        let tick = self.tick;
+        // Per-coin circulation (by mint hub INDEX) from this year's baskets.
+        let mut circ: Vec<f32> = vec![0.0; n];
+        for h in 0..n {
+            if self.hubs[h].is_estate { continue; }
+            let thru = self.hubs[h].tw_house + self.hubs[h].tw_local + self.hubs[h].tw_guild;
+            for &(k, share) in &self.hubs[h].coin_basket {
+                if (k as usize) < n { circ[k as usize] += thru * share; }
+            }
+        }
+        for h in 0..n {
+            if self.hubs[h].is_estate || self.hubs[h].coin_name.is_empty() { continue; }
+            let fine = if self.hubs[h].mint_fineness <= 0.0 { 1.0 } else { self.hubs[h].mint_fineness };
+            let trust = self.hubs[h].coin_trust;
+            let prev_fine = self.hubs[h].coin_history.last().map(|s| s.fineness);
+            let region = self.hubs[h].component;
+            let crashed = self.crashes.iter().any(|c| c.year == year && c.component == region);
+            let reformed = self.hubs[h].last_reform_tick != 0
+                && tick < self.hubs[h].last_reform_tick + TICKS_PER_YEAR;
+            let event = if prev_fine.is_none() { "first".to_string() }
+                else if reformed { "reform".to_string() }
+                else if fine + 0.005 < prev_fine.unwrap() { "debasement".to_string() }
+                else if crashed { "crash".to_string() }
+                else { String::new() };
+            let snap = CoinSnapshot {
+                year, fineness: fine, trust,
+                value: coin_value(fine, trust),
+                exchange: coin_exchange(self.hubs[h].coin_metal, fine, trust),
+                strength: coin_strength(fine, trust),
+                price_level: if self.hubs[h].price_level <= 0.0 { 1.0 } else { self.hubs[h].price_level },
+                circulating: circ[h],
+                metal: self.hubs[h].coin_metal,
+                event,
+            };
+            self.hubs[h].coin_history.push(snap);
+            let len = self.hubs[h].coin_history.len();
+            if len > COIN_HISTORY_CAP { self.hubs[h].coin_history.drain(0..len - COIN_HISTORY_CAP); }
+        }
+    }
+
+
+    /// B3 · civic PUBLIC DEBT (the Monte / Casa di San Giorgio). Once a year each
+    /// council seat: (1) SERVICES its bonds — pays the coupon to holders (a stable
+    /// return that pulls patrician capital out of risky trade into the public funds);
+    /// (2) DEFAULTS with a haircut when the debt has outgrown what its trade can
+    /// service (holders' claims are cut and the coin's credit-standing suffers); and
+    /// (3) ISSUES fresh bonds when the treasury is short (war / public works), sold to
+    /// its richest resident house — turning private wealth into a claim on the city.
+    /// Issuance and coupons are pure transfers (house <-> treasury), so the wealth
+    /// invariant is untouched; a default only forgoes future coupons + claim value.
+    /// Holders are houses only for now (bank-held sovereign debt needs its own asset
+    /// class on the balance sheet).
+    pub(crate) fn update_public_debt(&mut self, _year: u32) {
+        let tick = self.tick;
+        if tick < DEBT_START_TICK { return; }
+        let year = self.year();
+        let n = self.hubs.len();
+        for h in 0..n {
+            if self.hubs[h].is_estate || self.hubs[h].population < 1.0 || self.hubs[h].council_house < 0 { continue; }
+            let throughput = self.hub_throughput(h).max(EPS);
+
+            // 1) SERVICE the coupon (treasury → bondholders, pro-rata).
+            if self.hubs[h].debt_principal > EPS {
+                if self.hubs[h].debt_coupon <= 0.0 { self.hubs[h].debt_coupon = DEBT_COUPON; }
+                let coupon = self.hubs[h].debt_principal * self.hubs[h].debt_coupon;
+                if self.hubs[h].treasury >= coupon {
+                    self.hubs[h].treasury -= coupon;
+                    let holders = self.hubs[h].debt_holders.clone();
+                    let total: f32 = holders.iter().map(|x| x.2).sum::<f32>().max(EPS);
+                    for (kind, idx, amt) in holders {
+                        if kind != 0 { continue; }
+                        if let Some(ho) = self.houses.get_mut(idx as usize) {
+                            if !ho.defunct { ho.wealth += coupon * (amt / total); }
+                        }
+                    }
+                }
+            }
+
+            // 1b) DELEVERAGE — if the debt has grown heavy relative to trade (usually
+            //     because throughput fell), the city retires principal out of a healthy
+            //     treasury, RETURNING capital to holders, rather than sliding to default.
+            let target = DEBT_TARGET_RATIO * throughput;
+            if self.hubs[h].debt_principal > target * DEBT_DELEVERAGE_RATIO && self.hubs[h].treasury > 0.0 {
+                let retire = (self.hubs[h].debt_principal - target)
+                    .min(self.hubs[h].treasury * 0.3).max(0.0);
+                if retire > EPS {
+                    let holders = self.hubs[h].debt_holders.clone();
+                    let total: f32 = holders.iter().map(|x| x.2).sum::<f32>().max(EPS);
+                    for (kind, idx, amt) in &holders {
+                        if *kind != 0 { continue; }
+                        if let Some(ho) = self.houses.get_mut(*idx as usize) {
+                            if !ho.defunct { ho.wealth += retire * (amt / total); } // capital returned
+                        }
+                    }
+                    for hd in self.hubs[h].debt_holders.iter_mut() { hd.2 *= 1.0 - retire / (total.max(EPS)); }
+                    self.hubs[h].treasury -= retire;
+                    self.hubs[h].debt_principal -= retire;
+                }
+            }
+
+            // 2) DEFAULT / haircut when debt overwhelms the city's capacity to service.
+            if self.hubs[h].debt_principal > EPS
+                && self.hubs[h].debt_principal / throughput > DEBT_DEFAULT_RATIO {
+                let cut = self.hubs[h].debt_principal * DEBT_HAIRCUT;
+                for hd in self.hubs[h].debt_holders.iter_mut() { hd.2 *= 1.0 - DEBT_HAIRCUT; }
+                self.hubs[h].debt_principal -= cut;
+                self.hubs[h].coin_trust = (self.hubs[h].coin_trust - DEBT_DEFAULT_TRUST_HIT).max(0.0);
+                let city = self.hubs[h].name.clone();
+                self.journal.push(JournalEntry {
+                    tick, kind: "debt".into(), hub: h as i32, good: -1, value: cut,
+                    text: format!("{} restructures its public debt — bondholders take a {:.0}% haircut ({:.0} written down)",
+                        city, DEBT_HAIRCUT * 100.0, cut),
+                });
+            }
+
+            // 3) ISSUE toward a STANDING public debt (a permanent civic institution,
+            //    like Venice's Monte) that funds PUBLIC WORKS — the proceeds flow to the
+            //    city's people (civic pool), so the borrowing does real work rather than
+            //    piling in the treasury. Gated on serviceability: a council only issues
+            //    as far as it can pay the resulting coupon out of its treasury income.
+            let target = DEBT_TARGET_RATIO * throughput;
+            let cap_headroom = DEBT_MAX_RATIO * throughput - self.hubs[h].debt_principal;
+            if self.hubs[h].debt_principal < target && cap_headroom > 1.0 {
+                // Richest non-defunct resident (private) house here subscribes.
+                let mut buyer = (usize::MAX, 0.0f32);
+                for (hi, ho) in self.houses.iter().enumerate() {
+                    if ho.defunct || ho.is_guild || ho.hub as usize != h { continue; }
+                    if ho.wealth > buyer.1 { buyer = (hi, ho.wealth); }
+                }
+                if buyer.0 != usize::MAX && buyer.1 > 50.0 {
+                    let step = (target - self.hubs[h].debt_principal)
+                        .min(throughput * DEBT_ISSUE_STEP).min(buyer.1 * 0.3).min(cap_headroom);
+                    let coupon = if self.hubs[h].debt_coupon > 0.0 { self.hubs[h].debt_coupon } else { DEBT_COUPON };
+                    let new_coupon = (self.hubs[h].debt_principal + step) * coupon;
+                    // Serviceability: the treasury must be able to carry the new coupon.
+                    if step > 1.0 && self.hubs[h].treasury > new_coupon * DEBT_SERVICE_COVER {
+                        self.houses[buyer.0].wealth -= step;
+                        self.hubs[h].civic_pool += step;          // proceeds → public works → the people
+                        self.hubs[h].finance.spent_works += step;
+                        self.hubs[h].debt_coupon = coupon;
+                        let fresh = self.hubs[h].debt_principal <= EPS;
+                        self.hubs[h].debt_principal += step;
+                        // Merge into the buyer's holding (or add, capped).
+                        let bidx = buyer.0 as u32;
+                        if let Some(hd) = self.hubs[h].debt_holders.iter_mut().find(|x| x.0 == 0 && x.1 == bidx) {
+                            hd.2 += step;
+                        } else if self.hubs[h].debt_holders.len() < DEBT_HOLDER_CAP {
+                            self.hubs[h].debt_holders.push((0, bidx, step));
+                        }
+                        if fresh {
+                            let (city, house) = (self.hubs[h].name.clone(), self.houses[buyer.0].name.clone());
+                            self.journal.push(JournalEntry {
+                                tick, kind: "debt".into(), hub: h as i32, good: -1, value: step,
+                                text: format!("{} opens a public debt (Monte) at {:.1}% — {} subscribes {:.0}",
+                                    city, coupon * 100.0, house, step),
+                            });
+                        }
+                    }
+                }
+            }
+            let _ = year;
         }
     }
 }

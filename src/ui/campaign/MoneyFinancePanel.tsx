@@ -1,14 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useCampaignStore } from "@state/campaignStore";
 import { useUIStore } from "@state/uiStore";
+import { useWorldStore } from "@state/worldStore";
+import { CoinMiniMap, CoinMiniMapLegend } from "@ui/campaign/CoinMiniMap";
 import {
   campaignGetMints, campaignGetBanks, campaignGetCrashes, campaignGetSchematics,
   campaignGetWars, campaignCoinUsage, campaignGetSpeculation, campaignMonetaryChronicle,
-  campaignReserves,
+  campaignReserves, campaignCoinHistory,
 } from "@bridge";
 import type {
   MintBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload,
-  HouseBrief, SpecCenter, MonetaryEvent, ReservesPayload, ReserveHolder,
+  HouseBrief, SpecCenter, MonetaryEvent, ReservesPayload, ReserveHolder, CoinSnapshot,
 } from "@types";
 import { CoinIcon, type CoinMetal } from "@ui/heraldry/CoinIcon";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
@@ -28,7 +30,10 @@ export function MoneyFinancePanel() {
   const houses = useCampaignStore((s) => s.houses);
   const tick = snapshot?.clock?.tick ?? 0;
   const active = !!snapshot?.active;
-  const [tab, setTab] = useState<"mints" | "reserves" | "banks" | "bubbles" | "shocks" | "schem">("mints");
+  const meta = useWorldStore((s) => s.meta);
+  const worldW = meta?.grid_width ?? 0;
+  const worldH = meta?.grid_height ?? 0;
+  const [tab, setTab] = useState<"summary" | "mints" | "reserves" | "banks" | "bubbles" | "shocks" | "schem">("summary");
   const [mints, setMints] = useState<MintBrief[]>([]);
   const [banks, setBanks] = useState<BankBrief[]>([]);
   const [crashes, setCrashes] = useState<CrashRecord[]>([]);
@@ -61,7 +66,15 @@ export function MoneyFinancePanel() {
 
   const coined = mints.filter((m) => m.coin_name);
   const topCoin = coined[0];
+  // Unique coin-holding city positions — the "coined world" backdrop for minimaps.
+  const backdrop = useMemo(() => {
+    const seen = new Set<number>();
+    const out: { x: number; y: number }[] = [];
+    for (const u of coinUse) { if (!seen.has(u.city)) { seen.add(u.city); out.push({ x: u.x, y: u.y }); } }
+    return out;
+  }, [coinUse]);
   const tabs = [
+    ["summary", "✦ Overview"],
     ["mints", "🪙 Coin & Mints"],
     ["reserves", "💰 Reserves"],
     ["banks", "🏦 Banks"],
@@ -89,6 +102,12 @@ export function MoneyFinancePanel() {
 
       {!active && <div style={empty}>Begin the campaign (Step 11) and let it run — coinage, banks and the monetary story form over the years.</div>}
 
+      {active && tab === "summary" && (
+        <SummaryTab mints={mints} coinUse={coinUse} crashes={crashes} wars={wars}
+          worldW={worldW} worldH={worldH} backdrop={backdrop} year={Math.floor(tick / 365)}
+          onOpen={(t) => setTab(t)} setCoinOverlay={setCoinOverlay} />
+      )}
+
       {active && tab === "mints" && (
         <div style={scroll}>
           {mints.length === 0 && <div style={empty}>No poleis yet — council seats mint their first coin at New Year.</div>}
@@ -103,6 +122,7 @@ export function MoneyFinancePanel() {
           {mints.map((m, i) => (
             <MintCard key={m.hub} m={m} rank={i + 1} topCoin={topCoin}
               usage={coinUse.filter((u) => u.coin === m.hub)}
+              worldW={worldW} worldH={worldH} backdrop={backdrop}
               onMap={coinOverlay === m.hub}
               toggleMap={() => setCoinOverlay(coinOverlay === m.hub ? null : m.hub)} />
           ))}
@@ -151,6 +171,116 @@ const fmtk = (v: number) => {
   return v.toFixed(a < 10 ? 1 : 0);
 };
 
+// ── A4 · Overview — the friendly monetary "home" screen ───────────────────────
+type SummaryProps = {
+  mints: MintBrief[]; coinUse: CoinUseCity[]; crashes: CrashRecord[]; wars: WarsPayload;
+  worldW: number; worldH: number; backdrop: { x: number; y: number }[]; year: number;
+  onOpen: (t: "mints" | "banks" | "bubbles" | "shocks") => void;
+  setCoinOverlay: (hub: number | null) => void;
+};
+
+/** The landing view: one line of "monetary weather", the leading coins as big cards
+ *  with their spread minimaps, and a jump-off to the detail tabs. All existing data. */
+function SummaryTab({ mints, coinUse, crashes, wars, worldW, worldH, backdrop, year, onOpen, setCoinOverlay }: SummaryProps) {
+  const coined = mints.filter((m) => m.coin_name);
+  const reserves = coined.filter((m) => m.is_reserve);
+  const debased = coined.filter((m) => m.fineness < 0.999);
+  const activeWars = wars.active.length;
+  const lastCrash = crashes.length ? crashes.reduce((a, b) => (b.year > a.year ? b : a)) : undefined;
+  const freshCrash = lastCrash && year - lastCrash.year <= 5 ? lastCrash : undefined;
+  const citiesCoined = backdrop.length;
+
+  // Monetary weather: stormy (war / fresh crash) → unsettled (debasement) → sound.
+  const weather = activeWars > 0 || freshCrash
+    ? { icon: "⛈", color: "#e06868", bg: "#25141a",
+        text: activeWars > 0
+          ? `${activeWars} war${activeWars > 1 ? "s" : ""} straining the treasuries${lastCrash ? ` · last crash ${lastCrash.origin_name} (y${lastCrash.year})` : ""}.`
+          : `A crash struck ${lastCrash!.origin_name} in y${lastCrash!.year} — credit is still healing.` }
+    : debased.length > 0
+    ? { icon: "🌥", color: "#e0b060", bg: "#241f12",
+        text: `${debased.length} coin${debased.length > 1 ? "s" : ""} running debased — watch the inflation tax.` }
+    : coined.length > 0
+    ? { icon: "☀", color: "#6fce9a", bg: "#122019",
+        text: `The money is sound — ${reserves.length} reserve coin${reserves.length === 1 ? "" : "s"} accepted across borders.` }
+    : { icon: "◌", color: "#7e93ab", bg: "#121a24",
+        text: "No coin struck yet — councils mint their first at New Year." };
+
+  return (
+    <div style={scroll}>
+      {/* Monetary weather banner */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", marginBottom: 8,
+        background: weather.bg, border: `1px solid ${weather.color}44`, borderRadius: 7 }}>
+        <span style={{ fontSize: 22 }}>{weather.icon}</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ color: weather.color, fontWeight: 700, fontSize: 11 }}>State of the money</div>
+          <div style={{ color: "#c0d0e0", fontSize: 10, lineHeight: 1.4 }}>{weather.text}</div>
+        </div>
+      </div>
+
+      {/* Quick stats */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+        <Stat label="Coins struck" value={`${coined.length}`} hint="council seats minting a named coin" />
+        <Stat label="Reserve coins" value={`${reserves.length}`} hint="accepted abroad (trust ≥ 55%)" />
+        <Stat label="Cities on coin" value={`${citiesCoined}`} hint="settlements holding coined money (rest barter)" />
+        <Stat label="Crashes" value={`${crashes.length}`} hint="regional financial crashes on record" />
+      </div>
+
+      {coined.length === 0 && (
+        <div style={empty}>Once councils mint, the leading currencies and their reach appear here.</div>
+      )}
+
+      {/* Leading currencies with their spread minimaps */}
+      {coined.slice(0, 3).map((m, i) => {
+        const usage = coinUse.filter((u) => u.coin === m.hub);
+        const strengthColor = m.is_reserve ? "#37a05a" : m.strength >= 40 ? "#c8a23a" : "#d08a3a";
+        return (
+          <div key={m.hub} style={{ ...card, cursor: "pointer" }} onClick={() => onOpen("mints")}
+            title="Open the full mint card">
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ color: "#6a86a6", fontSize: 10, width: 14 }}>#{i + 1}</span>
+              <CoinIcon issuer={m.issuer || m.city} value={m.value} metal={m.metal as CoinMetal} size={26} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                  <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.coin_name}</span>
+                  {m.is_reserve && <span style={{ color: "#37a05a", fontSize: 8.5, fontWeight: 700 }}>RESERVE</span>}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
+                  <span style={{ flex: 1, height: 6, background: "#141f2c", borderRadius: 3, overflow: "hidden" }}>
+                    <span style={{ display: "block", height: "100%", width: `${Math.max(3, Math.min(100, m.strength))}%`, background: strengthColor }} />
+                  </span>
+                  <span style={{ color: strengthColor, fontSize: 10, fontWeight: 700 }}>{m.strength.toFixed(0)}</span>
+                  <span style={{ color: METAL_COLOR[m.metal] ?? "#9ab0c8", fontSize: 8.5, textTransform: "capitalize" }}>◈ {m.metal}</span>
+                </div>
+              </div>
+            </div>
+            {worldW > 0 && usage.length > 0 && (
+              <div style={{ marginTop: 6 }}
+                onClick={(e) => { e.stopPropagation(); setCoinOverlay(m.hub); }} title="Show this coin on the big map">
+                <CoinMiniMap usage={usage} worldW={worldW} worldH={worldH} backdrop={backdrop} width={340} />
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, fontSize: 8.5, color: "#7e93ab", marginTop: 4 }}>
+              <span>held in {m.held_in} {m.held_in === 1 ? "city" : "cities"}</span>
+              {m.abroad > 0 && <span style={{ color: "#6fce9a" }}>{m.abroad} abroad</span>}
+              <span>prices ×{m.price_level.toFixed(2)}</span>
+            </div>
+          </div>
+        );
+      })}
+
+      {coined.length > 0 && <CoinMiniMapLegend />}
+
+      {/* Jump-offs */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+        <span onClick={() => onOpen("mints")} style={chipS(false)}>🪙 All mints ({coined.length})</span>
+        <span onClick={() => onOpen("banks")} style={chipS(false)}>🏦 Banks</span>
+        <span onClick={() => onOpen("bubbles")} style={chipS(false)}>🫧 Bubbles</span>
+        <span onClick={() => onOpen("shocks")} style={chipS(false)}>⚔ Shocks{activeWars ? ` (${activeWars})` : ""}</span>
+      </div>
+    </div>
+  );
+}
+
 /** Tint for the metal label (matches the struck-coin palettes). */
 const METAL_COLOR: Record<string, string> = {
   gold: "#e8c452", silver: "#c4cdd8", electrum: "#dcd083", bronze: "#c07f45",
@@ -174,13 +304,16 @@ function DriverBar({ label, frac, color, text }: { label: string; frac: number; 
 }
 
 /** v2.0 · the unified MINT card — polis + coin in one, headline strength + 2 drivers. */
-function MintCard({ m, rank, topCoin, usage, onMap, toggleMap }:
-  { m: MintBrief; rank: number; topCoin?: MintBrief; usage: CoinUseCity[]; onMap: boolean; toggleMap: () => void }) {
+function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, backdrop }:
+  { m: MintBrief; rank: number; topCoin?: MintBrief; usage: CoinUseCity[]; onMap: boolean; toggleMap: () => void;
+    worldW: number; worldH: number; backdrop: { x: number; y: number }[] }) {
   const [open, setOpen] = useState(false);
   const hasCoin = !!m.coin_name;
   const debased = m.fineness < 0.999;
-  const xrate = hasCoin && topCoin && topCoin.hub !== m.hub && topCoin.value > 0
-    ? m.value / topCoin.value : null;
+  // v2.1 · exchange rate is now METAL-AWARE (gold ≈ 13× silver of equal fineness),
+  // read from the intrinsic exchange value rather than the fineness×trust index.
+  const xrate = hasCoin && topCoin && topCoin.hub !== m.hub && topCoin.exchange > 0
+    ? m.exchange / topCoin.exchange : null;
   // Strength → color: red (weak) → gold → green (reserve-grade).
   const sc = m.strength;
   const strengthColor = m.is_reserve ? "#37a05a" : sc >= 40 ? "#c8a23a" : "#d08a3a";
@@ -256,6 +389,12 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap }:
             ⛏ {m.bullion}
           </span>
         )}
+        {m.debt_principal > 0 && (
+          <span style={{ color: m.debt_ratio >= 3 ? "#e0a880" : "#9ab0c8" }}
+            title={`Civic public debt (Monte): ${fmtk(m.debt_principal)} owed to ${m.debt_holders} bondholder(s) at ${(m.debt_coupon * 100).toFixed(1)}% · ${m.debt_ratio.toFixed(1)}× yearly trade${m.debt_ratio >= 3 ? " — fiscal strain" : ""}`}>
+            📜 debt {fmtk(m.debt_principal)} ({m.debt_ratio.toFixed(1)}×)
+          </span>
+        )}
         {m.war_with && <span style={{ color: "#e88" }}>⚔ {m.war_with}</span>}
       </div>
 
@@ -272,7 +411,8 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap }:
                 <Stat label="Abroad" value={`${m.abroad}`} hint="holders outside the home market (reserve reach)" />
                 <Stat label="Money supply" value={fmtk(m.circulating)} hint="Σ over holders of (trade volume × this coin's basket share) — now a live driver of local prices" />
                 <Stat label="Prices" value={`×${cpi.toFixed(2)}`} hint="local price level (CPI): 1.0 at start, rises with debasement + money growth" />
-                {xrate && <Stat label={`vs ${topCoin!.coin_name.split(" ")[0]}`} value={`${xrate.toFixed(2)}×`} hint={`1 ${m.coin_name} ≈ ${xrate.toFixed(2)} ${topCoin!.coin_name} (by value)`} />}
+                <Stat label="Specie" value={`${m.exchange.toFixed(1)}ag`} hint="Intrinsic metal value in the silver-coin numeraire (silver = 1). A gold coin ≈ 13× a silver one of equal fineness — this is the metal it actually contains." />
+                {xrate && <Stat label={`vs ${topCoin!.coin_name.split(" ")[0]}`} value={`${xrate.toFixed(2)}×`} hint={`1 ${m.coin_name} ≈ ${xrate.toFixed(2)} ${topCoin!.coin_name} by METAL content (bimetallic rate)`} />}
               </div>
               <div style={{ color: "#8aa8c8", marginBottom: 4 }}>
                 {debased ? "⚠ Debased coin — " : m.value >= 1.05 ? "★ Hard premium coin — " : "Sound coin — "}
@@ -287,6 +427,25 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap }:
               <Explain label="Bullion supply" value={m.bullion} text={m.bullion === "ample"
                 ? "The region has gold/silver to spare — the mint can strike full-bodied coin. Bullion is not the binding constraint here."
                 : `Coin SUPPLY is limited by the region's ${m.metal} bullion. Minting beyond the metal forces debasement — fineness is capped down, so scarce bullion is the hard limit on how sound this coin can be.`} />
+              {m.debt_principal > 0 && (
+                <Explain label="Public debt (Monte)"
+                  value={`${fmtk(m.debt_principal)} @ ${(m.debt_coupon * 100).toFixed(1)}% · ${m.debt_ratio.toFixed(1)}×`}
+                  text={`Funded civic debt held by ${m.debt_holders} patrician bondholder(s) — a permanent institution (like Venice's Monte) that finances public works, servicing a yearly coupon from the treasury. At ${m.debt_ratio.toFixed(1)}× yearly trade it is ${m.debt_ratio >= 3 ? "STRAINED — a fiscal collapse would force a haircut on the bonds" : "comfortably serviceable"}.`} />
+              )}
+              {worldW > 0 && usage.length > 0 && (
+                <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid #1b2a3c" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                    <span style={{ color: "#8aa8c8", fontSize: 10, fontWeight: 700, flex: 1 }}>Where it circulates</span>
+                    <span onClick={(e) => { e.stopPropagation(); toggleMap(); }} title="Highlight this coin on the main map"
+                      style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, cursor: "pointer",
+                        border: `1px solid ${onMap ? "#3a80c0" : "#24364e"}`, background: onMap ? "#19324a" : "transparent",
+                        color: onMap ? "#cfe2f6" : "#7fa0c4" }}>📍 big map</span>
+                  </div>
+                  <CoinMiniMap usage={usage} worldW={worldW} worldH={worldH} backdrop={backdrop} />
+                  <CoinMiniMapLegend />
+                </div>
+              )}
+              <CoinBiography hub={m.hub} open={open} />
               <CoinUsageChart usage={usage} />
             </>
           ) : (
@@ -381,6 +540,80 @@ function CoinUsageChart({ usage }: { usage: CoinUseCity[] }) {
 function chipS(on: boolean): React.CSSProperties {
   return { fontSize: 11, padding: "1px 7px", borderRadius: 4, cursor: "pointer",
     border: `1px solid ${on ? "#3a80c0" : "#24364e"}`, background: on ? "#19324a" : "transparent", color: on ? "#cfe2f6" : "#7fa0c4" };
+}
+
+// ── A3 · Coin biography — the yearly fineness/trust/price history sparklines ───
+const EVENT_MARK: Record<string, { icon: string; color: string; label: string }> = {
+  first: { icon: "⚒", color: "#c0b088", label: "first struck" },
+  charter: { icon: "⚒", color: "#c0b088", label: "mint chartered" },
+  debasement: { icon: "✂", color: "#e0a020", label: "debased" },
+  reform: { icon: "⚖", color: "#7fd0a0", label: "reformed" },
+  crash: { icon: "📉", color: "#e6303a", label: "crash" },
+};
+
+/** The coin's story over the years: fineness (metal content) and trust (acceptance)
+ *  on a 0–100% axis, the local price level as a secondary line, and monetary events
+ *  (debasements ✂, reforms ⚖, crashes 📉) marked on the timeline. Fetched lazily when
+ *  the mint card is expanded. */
+function CoinBiography({ hub, open }: { hub: number; open: boolean }) {
+  const [hist, setHist] = useState<CoinSnapshot[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    campaignCoinHistory(hub).then((h) => { if (alive) setHist(h); }).catch(() => {});
+    return () => { alive = false; };
+  }, [open, hub]);
+  if (!open || hist.length < 2) {
+    return !open ? null : (
+      <div style={{ color: "#56708e", fontSize: 9, marginTop: 7 }}>The coin's history builds year by year — advance the campaign to grow its biography.</div>
+    );
+  }
+  const W = 344, H = 74, pad = 4;
+  const y0 = hist[0].year, y1 = hist[hist.length - 1].year;
+  const span = Math.max(1, y1 - y0);
+  const sx = (yr: number) => pad + ((yr - y0) / span) * (W - 2 * pad);
+  const sy = (v01: number) => H - pad - v01 * (H - 2 * pad); // 0..1 → bottom..top
+  const line = (sel: (s: CoinSnapshot) => number) =>
+    hist.map((s, i) => `${i === 0 ? "M" : "L"}${sx(s.year).toFixed(1)},${sy(sel(s)).toFixed(1)}`).join("");
+  const pMin = Math.min(...hist.map((s) => s.price_level));
+  const pMax = Math.max(...hist.map((s) => s.price_level));
+  const pNorm = (p: number) => (pMax > pMin ? (p - pMin) / (pMax - pMin) : 0.5);
+  const events = hist.filter((s) => s.event && EVENT_MARK[s.event]);
+  return (
+    <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid #1b2a3c" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+        <span style={{ color: "#8aa8c8", fontSize: 10, fontWeight: 700, flex: 1 }}>Coin biography · y{y0}–y{y1}</span>
+        <span style={{ color: "#8ab0d0", fontSize: 8 }}>▬ fineness</span>
+        <span style={{ color: "#c8a23a", fontSize: 8 }}>▬ trust</span>
+        <span style={{ color: "#e0a880", fontSize: 8 }}>┈ prices</span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block", background: "#0a121c", borderRadius: 5, border: "1px solid #16273a" }}>
+        {[0.25, 0.5, 0.75].map((g) => <line key={g} x1={pad} y1={sy(g)} x2={W - pad} y2={sy(g)} stroke="#12202e" strokeWidth={0.5} />)}
+        {/* price level (secondary, dashed, min-max normalized) */}
+        <path d={hist.map((s, i) => `${i === 0 ? "M" : "L"}${sx(s.year).toFixed(1)},${sy(pNorm(s.price_level)).toFixed(1)}`).join("")}
+          fill="none" stroke="#e0a880" strokeWidth={1} strokeDasharray="3 2" opacity={0.7} />
+        <path d={line((s) => s.trust)} fill="none" stroke="#c8a23a" strokeWidth={1.3} />
+        <path d={line((s) => s.fineness)} fill="none" stroke="#8ab0d0" strokeWidth={1.3} />
+        {/* event markers */}
+        {events.map((s, i) => {
+          const m = EVENT_MARK[s.event];
+          return (
+            <g key={i}>
+              <line x1={sx(s.year)} y1={pad} x2={sx(s.year)} y2={H - pad} stroke={m.color} strokeWidth={0.6} opacity={0.5} strokeDasharray="1 2" />
+              <text x={sx(s.year)} y={12} fontSize={9} fill={m.color} textAnchor="middle">{m.icon}</text>
+            </g>
+          );
+        })}
+      </svg>
+      {events.length > 0 && (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 8.5, color: "#7e93ab", marginTop: 3 }}>
+          {[...new Set(events.map((e) => e.event))].map((ev) => (
+            <span key={ev}><span style={{ color: EVENT_MARK[ev].color }}>{EVENT_MARK[ev].icon}</span> {EVENT_MARK[ev].label}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Reserves (currency composition per holder: cities / banks / houses) ───────
@@ -660,6 +893,7 @@ function BankCard({ b, house }: { b: BankBrief; house?: HouseBrief }) {
         </span>
         <span>{b.n_loans} loans</span>
         <span style={{ color: "#80c890" }} title="Cumulative interest earned">+{fmtk(b.interest_earned)}</span>
+        {b.bills_income > 0.01 && <span style={{ color: "#9ac0e0" }} title="Cumulative bills-of-exchange (FX-spread) income — earned settling trade across branch cities that use different coins">⇄{fmtk(b.bills_income)}</span>}
         {b.losses > 0.01 && <span style={{ color: "#e08080" }} title="Losses written off">−{fmtk(b.losses)}</span>}
       </div>
       {b.branches.length > 0 && (
