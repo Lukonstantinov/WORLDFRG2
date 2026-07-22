@@ -677,29 +677,26 @@ fn season_precip(
         }
     }
 
-    // ── Pass 1b: Hadley subsidence moisture sink ────────────────────────────────
-    // The descending Hadley branch compresses and heats arriving air, dramatically
-    // lowering relative humidity so that even parcels carrying significant moisture
-    // produce little to no precipitation. This is the physical reason Arabia and the
-    // Sahara are desert despite being hit by the summer monsoon surface flow: the
-    // wind IS there (streamlines show SW flow), but the subsidence lid kills
-    // convection and heats the parcel above its dew point.
-    // Applied directly to moisture_field so that both the base (p=moisture*800) AND
-    // the ITCZ/frontal terms (which also scale off moisture) see the reduction.
-    // Only the subtropical belt (subtropical_penalty > 0, i.e., 13-42°N/S) is touched;
-    // tropical land (ITCZ belt, West Africa, Amazon) and high-lat land are unaffected.
+    // ── Pass 1b: Hadley subsidence moisture sink — geography-aware ─────────────
+    // The Hadley inversion physically prevents precipitating moisture from accumulating
+    // over subtropical land. But India and Arabia are at the SAME latitude — the key
+    // difference is whether the monsoon trough REPLACES the Hadley high in summer
+    // (India: strong onshore flow → monsoon trough; Arabia: weak/blocked onshore →
+    // Hadley lid stays on). Gate the sink by monsoon_onshore so the sink only fires
+    // strongly where the monsoon cannot overcome the subsidence.
+    // (monsoon_onshore): India west coast ~0.8–1.0 (warm Arabian Sea directly upwind);
+    //   Arabia 0.0–0.3 (S ray breaks at Gulf of Aden; cold Somali current zeros E ray).
+    // Power-1.5 curve: onshore=0.8 → gate factor (1-0.8)^1.5=0.03 → almost no sink;
+    //   onshore=0.1 → (0.9)^1.5=0.855 → near-full sink.
     for y in 0..h {
         let sub_sink = subtropical_penalty(buf.latitude(y).abs());
         if sub_sink <= 0.0 { continue; }
-        // In local summer the Hadley high is strongest (retreats slightly poleward
-        // but the land heats MORE, increasing the thermal inversion lid).
-        // Apply in both seasons to keep the annual total realistic; summer is
-        // handled more strongly than winter by using a mild seasonal weight.
-        let sink_frac = 0.80 * sub_sink; // up to 0.80×0.82 = 0.66 reduction at peak
         for x in 0..w {
             let idx = buf.idx(x, y);
             if buf.terrain[idx] != 1 { continue; }
-            // Compress the excess above the floor (keeps a minimum MOISTURE_FLOOR).
+            let onshore = monsoon_onshore(buf, x, y, ctx.sea_suppress);
+            let onshore_gate = (1.0_f32 - onshore).powf(1.5);
+            let sink_frac = 0.75 * sub_sink * onshore_gate;
             let excess = (moisture_field[idx] - MOISTURE_FLOOR).max(0.0);
             moisture_field[idx] = MOISTURE_FLOOR + excess * (1.0 - sink_frac);
         }
@@ -856,20 +853,20 @@ fn season_precip(
             // Additive summer monsoon — LOCAL-SUMMER ONLY, gated to onshore-flow
             // regions and damped by the convection suppressors. This is what makes the
             // wet season wet and the dry season dry (the emergent Aw/Am/Cwa split).
-            // The Hadley inversion lid (hadley_total) also suppresses the monsoon bonus:
-            // even where surface onshore flow is present (Arabia faces the Indian Ocean),
-            // the descending Hadley column physically prevents the deep convective towers
-            // needed for monsoon rainfall — this is the key difference between India
-            // (low hadley_total, ITCZ migrates in) and Arabia (peak hadley, lid stays on).
-            // Use hadley_total (which includes hadley_ext for the Horn/Aden gap) so the
-            // full inversion is accounted for, not just the latitude-based portion.
+            // Hadley block is now geography-aware via monsoon_onshore: where the trough
+            // is active (high onshore → India), effective Hadley ≈ 0 → full bonus.
+            // Where onshore is absent (Arabia, Sahara), effective Hadley = full →
+            // monsoon bonus blocked. India (onshore≈0.9): 87% of bonus passes.
+            // Arabia (onshore≈0.1): only 17% of bonus passes.
             if local_summer && (5.0..=45.0).contains(&abs_lat) {
-                let monsoon_hadley_block = (1.0 - 0.90 * hadley_total).max(0.0);
+                let onshore = monsoon_onshore(buf, x, y, ctx.sea_suppress);
+                let effective_hadley = hadley_total * (1.0 - 0.85 * onshore);
+                let monsoon_hadley_block = (1.0 - 0.90 * effective_hadley).max(0.0);
                 p += monsoon_bonus(abs_lat, buf.distance_to_ocean[idx], ctx.land_frac_tropical)
-                    * monsoon_onshore(buf, x, y, ctx.sea_suppress)
+                    * onshore
                     * conv_suppress
                     * monsoon_hadley_block
-                    * oro; // upslope enhances (Western Ghats), lee shadows (Deccan)
+                    * oro;
             }
 
             // Frontal storm tracks â€” a WINTER-dominant source (extratropical cyclones
