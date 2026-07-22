@@ -1405,7 +1405,9 @@ export function MapCanvas() {
         const rect = containerRef.current?.getBoundingClientRect();
         if (rect) {
           const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
-          const thresh = Math.max(6, m.grid_width * 0.012);
+          // Screen-space hit radius: ~10px regardless of zoom, capped at 8 world cells
+          // so clicking 5 cm away never accidentally selects a settlement when zoomed in.
+          const thresh = Math.min(8, 10 / viewport.scaleX);
           // A bank icon takes click priority when bank icons are shown → open the Bank panel.
           if (useUIStore.getState().showBankIcons) {
             const bi = overlayManagerRef.current?.bankIconAt(wx, wy, thresh) ?? -1;

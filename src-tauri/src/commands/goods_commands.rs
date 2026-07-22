@@ -95,6 +95,27 @@ pub fn preview_good_score(spec: GoodSpec, db: State<'_, WorldDb>) -> Result<Prev
     Ok(PreviewGrid { width: pw, height: ph, data, land })
 }
 
+/// Lightweight land/sea mask at 220×110 for minimaps — loads only TERRAIN.
+/// Returns `{width, height, data: [], land}` where `land[i]` is 1 for land, 0 for sea.
+#[tauri::command]
+pub fn preview_land_grid(db: State<'_, WorldDb>) -> Result<PreviewGrid, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    use crate::sim::world_buffer::ColumnSet;
+    let buf = crate::sim::world_buffer::WorldBuffer::load_with(&conn, ColumnSet::TERRAIN)?;
+    let (pw, ph) = (220u32, 110u32);
+    let mut land = vec![0u8; (pw * ph) as usize];
+    if buf.width > 0 && buf.height > 0 {
+        for py in 0..ph {
+            for px in 0..pw {
+                let x = (px * buf.width / pw).min(buf.width - 1);
+                let y = (py * buf.height / ph).min(buf.height - 1);
+                land[(py * pw + px) as usize] = if buf.terrain[buf.idx(x, y)] == 1 { 1 } else { 0 };
+            }
+        }
+    }
+    Ok(PreviewGrid { width: pw, height: ph, data: vec![], land })
+}
+
 fn library_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;

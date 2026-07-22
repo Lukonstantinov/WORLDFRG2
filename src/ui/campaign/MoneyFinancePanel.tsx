@@ -6,7 +6,7 @@ import { CoinMiniMap, CoinMiniMapLegend } from "@ui/campaign/CoinMiniMap";
 import {
   campaignGetMints, campaignGetBanks, campaignGetCrashes, campaignGetSchematics,
   campaignGetWars, campaignCoinUsage, campaignGetSpeculation, campaignMonetaryChronicle,
-  campaignReserves, campaignCoinHistory,
+  campaignReserves, campaignCoinHistory, previewLandGrid,
 } from "@bridge";
 import type {
   MintBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload,
@@ -43,6 +43,13 @@ export function MoneyFinancePanel() {
   const [bubbles, setBubbles] = useState<SpecCenter[]>([]);
   const [chronicle, setChronicle] = useState<MonetaryEvent[]>([]);
   const [reserves, setReserves] = useState<ReservesPayload>({ cities: [], banks: [], houses: [] });
+  const [landGrid, setLandGrid] = useState<{ width: number; height: number; land: number[] } | null>(null);
+
+  // Land grid for minimaps — fetch once when the panel opens (world doesn't change while open).
+  useEffect(() => {
+    if (!open) return;
+    previewLandGrid().then(setLandGrid).catch(() => {});
+  }, [open]);
 
   useEffect(() => {
     if (!open || !active) return;
@@ -61,18 +68,21 @@ export function MoneyFinancePanel() {
   const showRiskOverlay = () => useUIStore.getState().setOverlayVisible("speculation", true);
 
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.coin);
-  if (!open) return null;
-  const close = () => useUIStore.getState().setShowMoneyFinance(false);
 
-  const coined = mints.filter((m) => m.coin_name);
-  const topCoin = coined[0];
   // Unique coin-holding city positions — the "coined world" backdrop for minimaps.
+  // MUST be before any early return to satisfy the Rules of Hooks.
   const backdrop = useMemo(() => {
     const seen = new Set<number>();
     const out: { x: number; y: number }[] = [];
     for (const u of coinUse) { if (!seen.has(u.city)) { seen.add(u.city); out.push({ x: u.x, y: u.y }); } }
     return out;
   }, [coinUse]);
+
+  if (!open) return null;
+  const close = () => useUIStore.getState().setShowMoneyFinance(false);
+
+  const coined = mints.filter((m) => m.coin_name);
+  const topCoin = coined[0];
   const tabs = [
     ["summary", "✦ Overview"],
     ["mints", "🪙 Coin & Mints"],
@@ -105,7 +115,7 @@ export function MoneyFinancePanel() {
       {active && tab === "summary" && (
         <SummaryTab mints={mints} coinUse={coinUse} crashes={crashes} wars={wars}
           worldW={worldW} worldH={worldH} backdrop={backdrop} year={Math.floor(tick / 365)}
-          onOpen={(t) => setTab(t)} setCoinOverlay={setCoinOverlay} />
+          onOpen={(t) => setTab(t)} setCoinOverlay={setCoinOverlay} landGrid={landGrid} />
       )}
 
       {active && tab === "mints" && (
@@ -123,7 +133,7 @@ export function MoneyFinancePanel() {
             <MintCard key={m.hub} m={m} rank={i + 1} topCoin={topCoin}
               usage={coinUse.filter((u) => u.coin === m.hub)}
               worldW={worldW} worldH={worldH} backdrop={backdrop}
-              onMap={coinOverlay === m.hub}
+              onMap={coinOverlay === m.hub} landGrid={landGrid}
               toggleMap={() => setCoinOverlay(coinOverlay === m.hub ? null : m.hub)} />
           ))}
         </div>
@@ -172,16 +182,18 @@ const fmtk = (v: number) => {
 };
 
 // ── A4 · Overview — the friendly monetary "home" screen ───────────────────────
+type LandGrid = { width: number; height: number; land: number[] } | null;
 type SummaryProps = {
   mints: MintBrief[]; coinUse: CoinUseCity[]; crashes: CrashRecord[]; wars: WarsPayload;
   worldW: number; worldH: number; backdrop: { x: number; y: number }[]; year: number;
   onOpen: (t: "mints" | "banks" | "bubbles" | "shocks") => void;
   setCoinOverlay: (hub: number | null) => void;
+  landGrid: LandGrid;
 };
 
 /** The landing view: one line of "monetary weather", the leading coins as big cards
  *  with their spread minimaps, and a jump-off to the detail tabs. All existing data. */
-function SummaryTab({ mints, coinUse, crashes, wars, worldW, worldH, backdrop, year, onOpen, setCoinOverlay }: SummaryProps) {
+function SummaryTab({ mints, coinUse, crashes, wars, worldW, worldH, backdrop, year, onOpen, setCoinOverlay, landGrid }: SummaryProps) {
   const coined = mints.filter((m) => m.coin_name);
   const reserves = coined.filter((m) => m.is_reserve);
   const debased = coined.filter((m) => m.fineness < 0.999);
@@ -256,7 +268,7 @@ function SummaryTab({ mints, coinUse, crashes, wars, worldW, worldH, backdrop, y
             {worldW > 0 && usage.length > 0 && (
               <div style={{ marginTop: 6 }}
                 onClick={(e) => { e.stopPropagation(); setCoinOverlay(m.hub); }} title="Show this coin on the big map">
-                <CoinMiniMap usage={usage} worldW={worldW} worldH={worldH} backdrop={backdrop} width={340} />
+                <CoinMiniMap usage={usage} worldW={worldW} worldH={worldH} backdrop={backdrop} width={340} landGrid={landGrid} />
               </div>
             )}
             <div style={{ display: "flex", gap: 10, fontSize: 8.5, color: "#7e93ab", marginTop: 4 }}>
@@ -304,9 +316,9 @@ function DriverBar({ label, frac, color, text }: { label: string; frac: number; 
 }
 
 /** v2.0 · the unified MINT card — polis + coin in one, headline strength + 2 drivers. */
-function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, backdrop }:
+function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, backdrop, landGrid }:
   { m: MintBrief; rank: number; topCoin?: MintBrief; usage: CoinUseCity[]; onMap: boolean; toggleMap: () => void;
-    worldW: number; worldH: number; backdrop: { x: number; y: number }[] }) {
+    worldW: number; worldH: number; backdrop: { x: number; y: number }[]; landGrid: LandGrid }) {
   const [open, setOpen] = useState(false);
   const hasCoin = !!m.coin_name;
   const debased = m.fineness < 0.999;
@@ -441,7 +453,7 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, b
                         border: `1px solid ${onMap ? "#3a80c0" : "#24364e"}`, background: onMap ? "#19324a" : "transparent",
                         color: onMap ? "#cfe2f6" : "#7fa0c4" }}>📍 big map</span>
                   </div>
-                  <CoinMiniMap usage={usage} worldW={worldW} worldH={worldH} backdrop={backdrop} />
+                  <CoinMiniMap usage={usage} worldW={worldW} worldH={worldH} backdrop={backdrop} landGrid={landGrid} />
                   <CoinMiniMapLegend />
                 </div>
               )}

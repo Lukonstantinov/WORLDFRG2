@@ -1,27 +1,66 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { CoinUseCity } from "@types";
 
-/** A1 · a self-contained SVG "spread map" for ONE coin — its geographic footprint
- *  at a glance, without toggling the big map overlay. Reuses the three-tier visual
- *  language of the on-map coin-usage overlay (OverlayManager.renderCoinUsage):
+/** A1 · a self-contained minimap for ONE coin — its geographic footprint
+ *  at a glance, without toggling the big map overlay. A canvas layer draws
+ *  the land/sea background (same technique as the goods GoodDetailPanel); the
+ *  SVG layer on top shows the three-tier coin usage:
  *    • PRIMARY turf  — filled disc sized by volume (its own MINT is a bright star);
  *      the primary cities are wrapped in a translucent "territory" hull.
  *    • RESERVE reach — held abroad as a reserve coin: a green ring.
  *    • HELD-only     — a minor basket holding: a faint dot.
  *  `backdrop` (all coin-holding cities) is drawn as faint specks so the coin's reach
- *  reads against the whole coined world. Pure presentation over existing data. */
+ *  reads against the whole coined world. `landGrid` (from previewLandGrid) draws the
+ *  world's coastline so the distribution is clearly readable over terrain. */
 export function CoinMiniMap({
-  usage, worldW, worldH, width = 172, backdrop = [],
+  usage, worldW, worldH, width = 172, backdrop = [], landGrid = null,
 }: {
   usage: CoinUseCity[];
   worldW: number;
   worldH: number;
   width?: number;
   backdrop?: { x: number; y: number }[];
+  landGrid?: { width: number; height: number; land: number[] } | null;
 }) {
   const H = worldW > 0 ? Math.max(72, Math.min(150, width * (worldH / worldW))) : 96;
   const sx = (x: number) => (worldW > 0 ? (x / worldW) * width : 0);
   const sy = (y: number) => (worldH > 0 ? (y / worldH) * H : 0);
+
+  // Canvas ref for the land/sea background layer.
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Paint land/sea whenever landGrid or display size changes.
+  useEffect(() => {
+    const cv = canvasRef.current;
+    if (!cv || !landGrid || landGrid.land.length === 0) return;
+    const { width: gw, height: gh, land } = landGrid;
+    cv.width = Math.round(width);
+    cv.height = Math.round(H);
+    const ctx = cv.getContext("2d");
+    if (!ctx) return;
+    const img = ctx.createImageData(cv.width, cv.height);
+    const isLand = (x: number, y: number) => x >= 0 && x < gw && y >= 0 && y < gh ? land[y * gw + x] === 1 : false;
+    for (let py = 0; py < cv.height; py++) {
+      for (let px = 0; px < cv.width; px++) {
+        const gx = Math.min(gw - 1, Math.floor(px * gw / cv.width));
+        const gy = Math.min(gh - 1, Math.floor(py * gh / cv.height));
+        const cell = land[gy * gw + gx];
+        const o = (py * cv.width + px) * 4;
+        if (cell === 1) {
+          // Land — dark olive so dots stay legible on top.
+          const coast = !isLand(gx - 1, gy) || !isLand(gx + 1, gy) || !isLand(gx, gy - 1) || !isLand(gx, gy + 1);
+          img.data[o] = coast ? 68 : 38;
+          img.data[o + 1] = coast ? 80 : 48;
+          img.data[o + 2] = coast ? 58 : 34;
+          img.data[o + 3] = 255;
+        } else {
+          // Sea — dark navy.
+          img.data[o] = 8; img.data[o + 1] = 14; img.data[o + 2] = 26; img.data[o + 3] = 255;
+        }
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  }, [landGrid, width, H]);
 
   const primary = useMemo(() => usage.filter((u) => u.primary), [usage]);
   const maxVol = useMemo(() => Math.max(1e-6, ...usage.map((u) => u.volume)), [usage]);
@@ -40,10 +79,14 @@ export function CoinMiniMap({
   if (worldW <= 0 || worldH <= 0) return null;
 
   return (
-    <svg viewBox={`0 0 ${width} ${H}`} width="100%" style={{ display: "block", borderRadius: 5, background: "#0a121c", border: "1px solid #16273a" }}>
+    <div style={{ position: "relative", display: "block", borderRadius: 5, overflow: "hidden", border: "1px solid #16273a", background: "#0a121c" }}>
+      {/* Land/sea background canvas — painted by the useEffect above */}
+      <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "auto" }} />
+      {/* SVG dots layer floated on top of the canvas */}
+    <svg viewBox={`0 0 ${width} ${H}`} width="100%" style={{ display: "block", position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}>
       {/* faint graticule so the frame reads as a map */}
-      <line x1={width / 2} y1={0} x2={width / 2} y2={H} stroke="#12202e" strokeWidth={0.6} />
-      <line x1={0} y1={H / 2} x2={width} y2={H / 2} stroke="#12202e" strokeWidth={0.6} />
+      <line x1={width / 2} y1={0} x2={width / 2} y2={H} stroke="#ffffff" strokeOpacity={0.06} strokeWidth={0.6} />
+      <line x1={0} y1={H / 2} x2={width} y2={H / 2} stroke="#ffffff" strokeOpacity={0.06} strokeWidth={0.6} />
 
       {/* backdrop: every coin-holding city, faint — the coined world for context */}
       {backdrop.map((c, i) => (
@@ -73,6 +116,7 @@ export function CoinMiniMap({
         return <circle key={i} cx={cx} cy={cy} r={1.3} fill={coinColor} fillOpacity={0.32 + 0.25 * t} />;
       })}
     </svg>
+    </div>
   );
 }
 

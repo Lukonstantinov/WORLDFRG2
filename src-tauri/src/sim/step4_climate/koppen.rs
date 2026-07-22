@@ -680,7 +680,7 @@ pub fn classify_koppen(buf: &mut WorldBuffer) {
     // then run the majority filter to clean up thin "zebra" stripes that arise when
     // the aridity / dry-season threshold flips between adjacent cells.
     break_koppen_checkerboards(buf, 3);
-    smooth_koppen(buf, 5);
+    smooth_koppen(buf, 8);
 }
 
 /// Dissolve cell-by-cell checkerboards and 1-cell speckle by CARDINAL-neighbour

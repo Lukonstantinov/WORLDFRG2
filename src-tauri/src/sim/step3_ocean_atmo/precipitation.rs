@@ -373,13 +373,14 @@ fn monsoon_onshore(buf: &WorldBuffer, x: u32, y: u32, sea_suppress: &[f32]) -> f
             if ny < 0 || ny >= h { break; }
             let ni = buf.idx(nx, ny as u32);
             if buf.terrain[ni] == 0 {
-                // Enclosed/suppressed warm seas (Red Sea, Persian Gulf) sit under
-                // the Hadley subtropical-high inversion and supply NO monsoon â€” skip
-                // them as a source so East Sahara / Arabia stay dry, while India's
-                // open Arabian Sea / Bay of Bengal still fires the monsoon.
-                if sea_suppress[ni] > 0.4 { continue; }
-                // Warm/neutral sea is a good moisture source; a cold current is not.
-                let warm = if buf.current_type[ni] == 2 { 0.30 } else { 1.0 };
+                // Enclosed/suppressed seas (Red Sea, Persian Gulf, Gulf of Aden) sit
+                // under the Hadley inversion and block the monsoon pathway — STOP the
+                // ray here (a `continue` wrongly let the ray find open ocean beyond
+                // the enclosed sea and made Arabia/Yemen wet despite the drying gate).
+                if sea_suppress[ni] > 0.4 { break; }
+                // Cold-current coasts (Somali/Canary/Humboldt) produce coastal deserts,
+                // not monsoon — they supply zero monsoon moisture.
+                let warm = if buf.current_type[ni] == 2 { 0.0 } else { 1.0 };
                 best = best.max((1.0 - s as f32 / range as f32) * warm);
                 break; // first usable sea cell along the ray decides it
             }
