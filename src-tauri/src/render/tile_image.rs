@@ -13,6 +13,8 @@ pub fn render_tile(tile: &TileData, layer: &str) -> Vec<u8> {
         "elevation" => render_elevation(tile, &mut rgba),
         "climate" => render_climate(tile, &mut rgba),
         "temperature" => render_temperature(tile, &mut rgba),
+        "sst" => render_sst(tile, &mut rgba),
+        "snow" => render_snow(tile, &mut rgba),
         "precipitation" => render_precipitation(tile, &mut rgba),
         "soil" => render_soil(tile, &mut rgba),
         "fertility" => render_fertility(tile, &mut rgba),
@@ -199,6 +201,47 @@ fn render_temperature(tile: &TileData, rgba: &mut [u8]) {
         rgba[offset + 1] = g;
         rgba[offset + 2] = b;
         rgba[offset + 3] = 255;
+    }
+}
+
+/// Sea-surface temperature (ocean only): same blue→yellow→red ramp as the land
+/// temperature layer, so warm/cold currents read at a glance. Land is transparent.
+fn render_sst(tile: &TileData, rgba: &mut [u8]) {
+    for i in 0..PIXEL_COUNT {
+        let offset = i * 4;
+        if tile.terrain[i] != 0 || tile.sst.is_empty() {
+            rgba[offset + 3] = 0;
+            continue;
+        }
+        let t = ((tile.sst[i] + 5.0) / 40.0).clamp(0.0, 1.0);
+        let (r, g, b) = if t < 0.5 {
+            lerp_rgb((0, 0, 200), (200, 200, 50), t * 2.0)
+        } else {
+            lerp_rgb((200, 200, 50), (200, 0, 0), (t - 0.5) * 2.0)
+        };
+        rgba[offset] = r;
+        rgba[offset + 1] = g;
+        rgba[offset + 2] = b;
+        rgba[offset + 3] = 255;
+    }
+}
+
+/// Annual snow-cover fraction (land only): transparent where snow-free, ramping to
+/// opaque white at perennial cover. Highlights tundra / ice-cap / cold-continental
+/// margins produced by the ice-albedo feedback.
+fn render_snow(tile: &TileData, rgba: &mut [u8]) {
+    for i in 0..PIXEL_COUNT {
+        let offset = i * 4;
+        if tile.terrain[i] != 1 || tile.snow_frac.is_empty() {
+            rgba[offset + 3] = 0;
+            continue;
+        }
+        let s = tile.snow_frac[i] as f32 / 255.0;
+        // Pale-blue-white snow; alpha scales with cover so thin snow reads faint.
+        rgba[offset] = (200.0 + 55.0 * s) as u8;
+        rgba[offset + 1] = (210.0 + 45.0 * s) as u8;
+        rgba[offset + 2] = 255;
+        rgba[offset + 3] = (s * 235.0) as u8;
     }
 }
 

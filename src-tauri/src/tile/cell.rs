@@ -38,7 +38,11 @@ pub struct TileData {
     pub reef_risk: Vec<u8>,       // sea: 0..255 reef/shoal wreck hazard (warm shallow coast).
     pub disease_risk: Vec<u8>,    // land: 0..255 malaria/fever risk (warm-wet lowland).
     pub wind_speed: Vec<f32>,     // low-level wind speed (m/s, ~0-35) incl. jets.
-    pub precip_summer_frac: Vec<u8>, // land: summer share of annual precip ×255. Serialized LAST.
+    pub precip_summer_frac: Vec<u8>, // land: summer share of annual precip ×255.
+    // ── Thermal-realism columns (energy-balance seasonality), appended LAST ──
+    pub seasonal_amp: Vec<u8>,    // land: seasonal half-range of monthly temp (°C ×4, 0..63.75).
+    pub sst: Vec<f32>,            // sea: annual-mean sea-surface temperature (°C).
+    pub snow_frac: Vec<u8>,       // land: annual snow-cover fraction ×255. Serialized LAST.
 }
 
 /// Number of trade-good sublayer fields stored per cell. See sim/biological.rs
@@ -94,6 +98,9 @@ impl TileData {
             disease_risk: vec![0; N],
             wind_speed: vec![0.0; N],
             precip_summer_frac: vec![0; N],
+            seasonal_amp: vec![0; N],
+            sst: vec![0.0; N],
+            snow_frac: vec![0; N],
         }
     }
 
@@ -154,10 +161,16 @@ impl TileData {
         // older v2 blobs (which lack it) pad to zero on read and recompute on the
         // next ocean-atmosphere run.
         buf.extend_from_slice(bytemuck_f32(&self.wind_speed));
-        // Seasonality: summer share of annual precip (×255). New LAST column — older
-        // v2 blobs lack it and pad to zero on read (koppen.rs then falls back to its
-        // latitude-based seasonal_split until the next ocean-atmosphere run rewrites it).
+        // Seasonality: summer share of annual precip (×255). Older v2 blobs lack it
+        // and pad to zero on read (koppen.rs then falls back to its latitude-based
+        // seasonal_split until the next ocean-atmosphere run rewrites it).
         buf.extend_from_slice(&self.precip_summer_frac);
+        // Thermal-realism columns (energy-balance seasonality). Appended after every
+        // prior column so older v2 blobs pad them to zero on read and recompute on the
+        // next ocean-atmosphere run. Order: seasonal_amp (u8), sst (f32), snow_frac (u8).
+        buf.extend_from_slice(&self.seasonal_amp);
+        buf.extend_from_slice(bytemuck_f32(&self.sst));
+        buf.extend_from_slice(&self.snow_frac);
 
         zstd::encode_all(buf.as_slice(), 3).unwrap_or(buf)
     }
@@ -224,9 +237,13 @@ impl TileData {
         // wind_speed only exists in v2 blobs written after it was added; older
         // blobs end above and this read pads to zero.
         let wind_speed = read_f32(&buf, &mut offset);
-        // precip_summer_frac (seasonality) is the newest LAST column; older blobs end
-        // above and this read pads to zero.
+        // precip_summer_frac (seasonality); older blobs end above and this read pads zero.
         let precip_summer_frac = read_u8(&buf, &mut offset);
+        // Thermal-realism columns are the newest LAST columns; older blobs end above
+        // and these reads pad to zero (recomputed on the next ocean-atmosphere run).
+        let seasonal_amp = read_u8(&buf, &mut offset);
+        let sst = read_f32(&buf, &mut offset);
+        let snow_frac = read_u8(&buf, &mut offset);
 
         // Keep every stored good column (the count is variable and may exceed the
         // built-in GOODS_COUNT); pad up to GOODS_COUNT so code that indexes the
@@ -242,7 +259,7 @@ impl TileData {
             distance_to_ocean, habitability,
             salinity, shark_risk, goods, shipworm_risk,
             storm_base, reef_risk, disease_risk, wind_speed,
-            precip_summer_frac,
+            precip_summer_frac, seasonal_amp, sst, snow_frac,
         }
     }
 
@@ -279,6 +296,9 @@ impl TileData {
         merge!(C::REEF => reef_risk);
         merge!(C::DISEASE => disease_risk);
         merge!(C::SEASON => precip_summer_frac);
+        merge!(C::SEASON_AMP => seasonal_amp);
+        merge!(C::SST => sst);
+        merge!(C::SNOW => snow_frac);
         if cols.has(C::GOODS) {
             self.goods.clone_from(&src.goods);
         }
@@ -308,22 +328,36 @@ fn read_u8(buf: &[u8], offset: &mut usize) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    /// The newest LAST column (precip_summer_frac) survives a compress→decompress
-    /// round-trip, and a blob truncated to before that column (an older save) still
-    /// decodes with the column padded to zero.
+    /// The newest LAST columns survive a compress→decompress round-trip, and a blob
+    /// truncated to before them (an older save) still decodes with the columns padded
+    /// to zero. Covers precip_summer_frac + the thermal-realism columns.
     #[test]
     fn precip_summer_frac_roundtrips_and_old_blob_pads_zero() {
         let mut t = TileData::new_sea();
-        for i in 0..N { t.precip_summer_frac[i] = (i % 251) as u8; }
+        for i in 0..N {
+            t.precip_summer_frac[i] = (i % 251) as u8;
+            t.seasonal_amp[i] = (i % 249) as u8;
+            t.sst[i] = (i % 37) as f32 - 2.0;
+            t.snow_frac[i] = (i % 253) as u8;
+        }
         let round = TileData::decompress(&t.compress());
         assert_eq!(round.precip_summer_frac, t.precip_summer_frac);
+        assert_eq!(round.seasonal_amp, t.seasonal_amp);
+        assert_eq!(round.sst, t.sst);
+        assert_eq!(round.snow_frac, t.snow_frac);
 
-        // Simulate an older v2 blob that ends before the new column by decompressing,
-        // dropping the trailing N bytes, and re-compressing: the read must pad to 0.
+        // Simulate an older v2 blob that ends before ALL the new columns by
+        // decompressing, dropping their trailing bytes, and re-compressing: the reads
+        // must pad to 0. Trailing layout: seasonal_amp(N u8) + sst(N f32) + snow_frac(N u8),
+        // preceded by precip_summer_frac(N u8).
         let raw = zstd::decode_all(t.compress().as_slice()).unwrap();
-        let truncated = &raw[..raw.len() - N];
+        let trailing = N + N * 4 + N + N; // snow + sst + seasonal_amp + precip_summer_frac
+        let truncated = &raw[..raw.len() - trailing];
         let older = TileData::decompress(&zstd::encode_all(truncated, 3).unwrap());
         assert!(older.precip_summer_frac.iter().all(|&v| v == 0));
+        assert!(older.seasonal_amp.iter().all(|&v| v == 0));
+        assert!(older.sst.iter().all(|&v| v == 0.0));
+        assert!(older.snow_frac.iter().all(|&v| v == 0));
         // Everything before it still reads correctly (terrain/precip intact).
         assert_eq!(older.terrain, t.terrain);
     }

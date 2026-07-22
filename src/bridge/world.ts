@@ -11,14 +11,16 @@ export async function getWorldMeta(): Promise<WorldMeta | null> {
   return invoke("get_world_meta");
 }
 
-/** Persist the latitude framing (equator position + expansion). The next run of
- *  any simulation phase generates against these latitudes. */
+/** Persist the latitude framing (equator position + expansion) and axial tilt. The
+ *  next run of any simulation phase generates against these latitudes; the seasonal
+ *  temperature model reads the obliquity. `obliquity` defaults to Earth's 23.44°. */
 export async function setLatitudeConfig(
   equatorOffset: number,
   latScale: number,
   latRatio: number,
+  obliquity = 23.44,
 ): Promise<WorldMeta> {
-  return invoke("set_latitude_config", { equatorOffset, latScale, latRatio });
+  return invoke("set_latitude_config", { equatorOffset, latScale, latRatio, obliquity });
 }
 
 /** How many cultures the world starts with (0 = auto by land area). */

@@ -889,14 +889,59 @@ pub fn compute_salinity(buf: &mut WorldBuffer) {
 /// Surface water-density index (0..1, higher = denser) from stored salinity and
 /// the latitude SST estimate. Cold + salty = dense (sinks). Transient â€” used by
 /// the current coupling, not persisted.
+/// Sea-surface-temperature anomaly (°C) a current imparts, scaled by its speed as a
+/// "volume" proxy. Mirrors the land current-influence in `temperature.rs` so the
+/// ocean and the coasts it warms/cools tell the same story. Warm western-boundary
+/// currents (Gulf Stream / Kuroshio) raise SST; cold eastern-boundary / subpolar
+/// currents lower it.
+#[inline]
+fn current_sst_anomaly(current_type: u8, speed: f32) -> f32 {
+    let vol = (speed / 1.4).clamp(0.35, 1.3);
+    match current_type {
+        1 => 3.0 * vol,  // warm
+        2 => -2.2 * vol, // cold
+        _ => 0.0,
+    }
+}
+
+/// Actual sea-surface temperature (°C) at an ocean cell: the latitude estimate plus
+/// the local current anomaly. This CLOSES THE LOOP — the currents that were just
+/// generated feed back into the SST the density/thermohaline coupling reads, rather
+/// than density being driven by latitude alone.
+#[inline]
+fn cell_sst(buf: &WorldBuffer, x: u32, y: u32) -> f32 {
+    let i = buf.idx(x, y);
+    let speed = (buf.current_vx[i] * buf.current_vx[i] + buf.current_vy[i] * buf.current_vy[i]).sqrt();
+    sst_estimate(buf.abs_latitude(y)) + current_sst_anomaly(buf.current_type[i], speed)
+}
+
+/// Persist the annual-mean SST field (latitude + current anomaly) for ocean cells so
+/// it can be rendered and inspected. Call after the current tags are final (after
+/// `advect_salinity_and_recouple`). Land stays 0.
+pub fn compute_sst(buf: &mut WorldBuffer) {
+    if buf.sst.is_empty() {
+        return;
+    }
+    let (w, h) = (buf.width, buf.height);
+    for y in 0..h {
+        for x in 0..w {
+            let i = buf.idx(x, y);
+            buf.sst[i] = if buf.terrain[i] == 0 { cell_sst(buf, x, y) } else { 0.0 };
+        }
+    }
+}
+
+/// Surface water-density index (0..1, higher = denser) from stored salinity and the
+/// current-influenced SST (`cell_sst`). Cold + salty = dense (sinks). Transient —
+/// used by the current coupling, not persisted.
 fn density_index(buf: &WorldBuffer) -> Vec<f32> {
     let n = buf.total();
     let mut d = vec![0.0f32; n];
     for y in 0..buf.height {
-        let sst_norm = ((sst_estimate(buf.abs_latitude(y)) + 2.0) / 30.0).clamp(0.0, 1.0);
         for x in 0..buf.width {
             let i = buf.idx(x, y);
             if buf.terrain[i] != 0 { continue; }
+            let sst_norm = ((cell_sst(buf, x, y) + 2.0) / 30.0).clamp(0.0, 1.0);
             let sal_norm = buf.salinity[i] as f32 / 255.0;
             // Weight salinity and (inverse) temperature roughly equally.
             d[i] = (0.55 * sal_norm + 0.55 * (1.0 - sst_norm)).clamp(0.0, 1.0);
@@ -1620,7 +1665,7 @@ mod tests {
         let n = (w * h) as usize;
         WorldBuffer {
             cols: ColumnSet::ALL, width: w, height: h, tiles_x: 1, tiles_y: 1,
-            equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0,
+            equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0, obliquity: 23.44,
             terrain: vec![1u8; n], elevation: vec![0.1; n], sea_depth: vec![0.0; n],
             is_shelf: vec![0u8; n], is_shelf_edge: vec![0u8; n], locked_bits: Vec::new(),
             plate_index: Vec::new(), boundary_type: Vec::new(), is_volcanic: Vec::new(),
@@ -1631,7 +1676,7 @@ mod tests {
             distance_to_ocean: Vec::new(), habitability: Vec::new(),
             salinity: vec![128u8; n], shark_risk: Vec::new(), goods: Vec::new(),
             shipworm_risk: Vec::new(), storm_base: Vec::new(), reef_risk: Vec::new(),
-            disease_risk: Vec::new(), precip_summer_frac: Vec::new(),
+            disease_risk: Vec::new(), precip_summer_frac: Vec::new(), seasonal_amp: Vec::new(), sst: Vec::new(), snow_frac: Vec::new(),
         }
     }
 

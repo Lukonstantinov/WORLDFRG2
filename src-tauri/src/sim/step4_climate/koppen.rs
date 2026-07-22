@@ -175,9 +175,20 @@ fn continentality(buf: &WorldBuffer, x: u32, y: u32) -> f32 {
 /// gate, so they stay consistent.
 pub(crate) fn seasonal_temps(buf: &WorldBuffer, x: u32, y: u32) -> (f32, f32) {
     let idx = buf.idx(x, y);
-    let abs_lat = buf.latitude(y).abs();
-    let range = seasonal_range_base(abs_lat) * continentality(buf, x, y);
     let t = buf.temperature[idx];
+    // Prefer the PHYSICALLY-DERIVED seasonal span (warmest−coldest month) from the
+    // energy-balance model (temperature.rs writes seasonal_amp = span × SEASON_AMP_SCALE
+    // from insolation × heat-capacity attenuation). Fall back to the old latitude-
+    // parametric range only when the column is absent/zero — an old save mid-migration,
+    // before its next ocean-atmosphere run rewrites it (identical to the precip_summer_frac
+    // fallback below).
+    let amp_raw = if buf.seasonal_amp.is_empty() { 0 } else { buf.seasonal_amp[idx] };
+    let range = if amp_raw > 0 {
+        amp_raw as f32 / crate::sim::world_buffer::SEASON_AMP_SCALE
+    } else {
+        let abs_lat = buf.latitude(y).abs();
+        seasonal_range_base(abs_lat) * continentality(buf, x, y)
+    };
     (t - range * 0.55, t + range * 0.45)
 }
 

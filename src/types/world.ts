@@ -11,6 +11,9 @@ export interface WorldMeta {
   lat_scale: number;
   /** Line-spacing ratio (gap 30→60 ÷ gap 0→30); shared with the simulation. */
   lat_ratio: number;
+  /** Axial tilt (obliquity, degrees) driving seasonality. 23.44 = Earth-like;
+   *  higher = more extreme seasons; 0 = no seasons. */
+  obliquity: number;
   /** True once the world's geography is finalized (campaign steps unlocked). */
   frozen: boolean;
 }
@@ -96,6 +99,7 @@ export interface RidgeLine {
 }
 export type ActiveLayer =
   | "land" | "elevation" | "climate" | "temperature" | "precipitation"
+  | "sst" | "snow"
   | "soil" | "fertility" | "plates"
   | "biomes" | "fisheries" | "terrain" | "shelf" | "ridges" | "wind" | "windspeed" | "currents"
   | "habitability" | "salinity" | "shark" | "shipworm" | "storm" | "reef" | "disease";

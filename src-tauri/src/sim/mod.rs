@@ -13,6 +13,7 @@ pub use step2_terrain::elevation;
 //    ocean → temperature → jets → seasonal → precipitation
 pub mod step3_ocean_atmo;
 pub use step3_ocean_atmo::ocean;
+pub use step3_ocean_atmo::insolation;
 pub use step3_ocean_atmo::temperature;
 pub use step3_ocean_atmo::jets;
 pub use step3_ocean_atmo::seasonal;

@@ -64,6 +64,9 @@ pub fn sim_ocean_atmosphere(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, S
     ocean::compute_salinity(&mut buf);
     ocean::generate_ocean_currents(&mut buf);
     ocean::advect_salinity_and_recouple(&mut buf);
+    // Close the SST loop: the currents just generated now feed back into the stored
+    // sea-surface-temperature field (latitude + current anomaly) used by rendering.
+    ocean::compute_sst(&mut buf);
     ocean::compute_distance_to_ocean(&mut buf);
     // Seasonal sea ice on shallow high-latitude shelf seas (Hudson Bay / Okhotsk):
     // compute the freeze index once, let it reinforce cold currents (brine
@@ -75,6 +78,12 @@ pub fn sim_ocean_atmosphere(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, S
     temperature::compute_temperature(&mut buf);
     ocean::compute_upwelling_zones(&mut buf);
     ocean::apply_cold_shelf_cooling(&mut buf, &sea_freeze);
+    // Energy-balance seasonality: derive the seasonal temperature span from insolation
+    // × heat-capacity attenuation (replaces the fabricated latitude range Köppen used),
+    // then apply a bounded ice/snow-albedo cooling feedback. Runs after all mean-
+    // temperature adjustments so it reads the final annual mean.
+    temperature::compute_seasonal_amplitude(&mut buf);
+    temperature::apply_ice_albedo_feedback(&mut buf);
     // Low-level jets (Somali jet et al.) must precede precipitation: their
     // entrance/exit acceleration reshapes where rain falls, and the Wind Speed
     // layer reads the speed field they write.
@@ -293,6 +302,9 @@ pub fn sim_run_all(
     ocean::compute_salinity(&mut buf);
     ocean::generate_ocean_currents(&mut buf);
     ocean::advect_salinity_and_recouple(&mut buf);
+    // Close the SST loop: the currents just generated now feed back into the stored
+    // sea-surface-temperature field (latitude + current anomaly) used by rendering.
+    ocean::compute_sst(&mut buf);
     ocean::compute_distance_to_ocean(&mut buf);
     // Seasonal sea ice on shallow high-latitude shelf seas (Hudson Bay / Okhotsk):
     // compute the freeze index once, let it reinforce cold currents (brine
@@ -304,6 +316,12 @@ pub fn sim_run_all(
     temperature::compute_temperature(&mut buf);
     ocean::compute_upwelling_zones(&mut buf);
     ocean::apply_cold_shelf_cooling(&mut buf, &sea_freeze);
+    // Energy-balance seasonality: derive the seasonal temperature span from insolation
+    // × heat-capacity attenuation (replaces the fabricated latitude range Köppen used),
+    // then apply a bounded ice/snow-albedo cooling feedback. Runs after all mean-
+    // temperature adjustments so it reads the final annual mean.
+    temperature::compute_seasonal_amplitude(&mut buf);
+    temperature::apply_ice_albedo_feedback(&mut buf);
     // Low-level jets (Somali jet et al.) must precede precipitation: their
     // entrance/exit acceleration reshapes where rain falls, and the Wind Speed
     // layer reads the speed field they write.
@@ -460,6 +478,9 @@ pub fn sim_run_all_from_terrain(
     ocean::compute_salinity(&mut buf);
     ocean::generate_ocean_currents(&mut buf);
     ocean::advect_salinity_and_recouple(&mut buf);
+    // Close the SST loop: the currents just generated now feed back into the stored
+    // sea-surface-temperature field (latitude + current anomaly) used by rendering.
+    ocean::compute_sst(&mut buf);
     ocean::compute_distance_to_ocean(&mut buf);
     // Seasonal sea ice on shallow high-latitude shelf seas (Hudson Bay / Okhotsk):
     // compute the freeze index once, let it reinforce cold currents (brine
@@ -471,6 +492,12 @@ pub fn sim_run_all_from_terrain(
     temperature::compute_temperature(&mut buf);
     ocean::compute_upwelling_zones(&mut buf);
     ocean::apply_cold_shelf_cooling(&mut buf, &sea_freeze);
+    // Energy-balance seasonality: derive the seasonal temperature span from insolation
+    // × heat-capacity attenuation (replaces the fabricated latitude range Köppen used),
+    // then apply a bounded ice/snow-albedo cooling feedback. Runs after all mean-
+    // temperature adjustments so it reads the final annual mean.
+    temperature::compute_seasonal_amplitude(&mut buf);
+    temperature::apply_ice_albedo_feedback(&mut buf);
     // Low-level jets (Somali jet et al.) must precede precipitation: their
     // entrance/exit acceleration reshapes where rain falls, and the Wind Speed
     // layer reads the speed field they write.

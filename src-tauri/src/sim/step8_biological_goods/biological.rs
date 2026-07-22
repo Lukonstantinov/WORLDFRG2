@@ -1658,7 +1658,7 @@ mod tests {
         let n = (w * h) as usize;
         let mut buf = WorldBuffer {
             cols: ColumnSet::ALL, width: w, height: h, tiles_x: 1, tiles_y: 1,
-            equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0,
+            equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0, obliquity: 23.44,
             terrain: vec![1u8; n], elevation: vec![0.1f32; n], sea_depth: vec![0.0; n],
             is_shelf: vec![0; n], is_shelf_edge: vec![0; n], locked_bits: Vec::new(),
             plate_index: Vec::new(), boundary_type: Vec::new(), is_volcanic: Vec::new(),
@@ -1669,7 +1669,7 @@ mod tests {
             current_vx: Vec::new(), current_vy: Vec::new(), distance_to_ocean: Vec::new(),
             habitability: Vec::new(), salinity: vec![0u8; n], shark_risk: Vec::new(),
             goods: Vec::new(), shipworm_risk: Vec::new(), storm_base: Vec::new(),
-            reef_risk: Vec::new(), disease_risk: Vec::new(), precip_summer_frac: Vec::new(),
+            reef_risk: Vec::new(), disease_risk: Vec::new(), precip_summer_frac: Vec::new(), seasonal_amp: Vec::new(), sst: Vec::new(), snow_frac: Vec::new(),
         };
         let specs = default_list();
         buf.goods = vec![vec![0u8; n]; specs.len()];

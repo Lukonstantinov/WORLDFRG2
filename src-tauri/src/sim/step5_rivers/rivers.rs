@@ -1006,7 +1006,7 @@ mod tests {
             cols: ColumnSet::ALL,
             width: w, height: h,
             tiles_x: 1, tiles_y: 1,
-            equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0,
+            equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0, obliquity: 23.44,
             terrain,
             elevation,
             sea_depth,
@@ -1033,7 +1033,7 @@ mod tests {
             shipworm_risk: Vec::new(),
             storm_base: Vec::new(),
             reef_risk: Vec::new(),
-            disease_risk: Vec::new(), precip_summer_frac: Vec::new(),
+            disease_risk: Vec::new(), precip_summer_frac: Vec::new(), seasonal_amp: Vec::new(), sst: Vec::new(), snow_frac: Vec::new(),
         }
     }
 

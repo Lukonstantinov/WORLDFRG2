@@ -42,15 +42,19 @@ export function LatitudeControl() {
   const equatorOffset = latConfig.equatorOffset;
   const latScale = latConfig.latScale;
   const lineRatio = latConfig.lineRatio;
+  // Axial tilt lives on the world meta (it drives the simulation, not the overlay).
+  const obliquity = meta?.obliquity ?? 23.44;
 
   // Local text for the number boxes so typing is free; the displayed value
   // resyncs whenever the underlying frame changes (slider drag, reset, commit).
   const [eqStr, setEqStr] = useState("");
   const [expStr, setExpStr] = useState("");
   const [ratioStr, setRatioStr] = useState("");
+  const [tiltStr, setTiltStr] = useState("");
   useEffect(() => { setEqStr(String(Math.round(equatorOffset * 100))); }, [equatorOffset]);
   useEffect(() => { setExpStr(String(Math.round(latScale * 100))); }, [latScale]);
   useEffect(() => { setRatioStr(lineRatio.toFixed(2)); }, [lineRatio]);
+  useEffect(() => { setTiltStr(obliquity.toFixed(1)); }, [obliquity]);
 
   if (!meta) return null;
 
@@ -65,23 +69,29 @@ export function LatitudeControl() {
   // live values so a release after a drag commits the final position.
   const commitLive = () => {
     const { equatorOffset: eq, latScale: scale, lineRatio: r } = useWorldStore.getState().latConfig;
-    setLatitudeConfig(eq, scale, r).then(setMeta).catch(() => {});
+    setLatitudeConfig(eq, scale, r, obliquity).then(setMeta).catch(() => {});
   };
 
   const setEquatorPct = (pct: number, persist: boolean) => {
     const eq = clamp(pct, 0, 100) / 100;
     apply(eq, latScale, lineRatio);
-    if (persist) setLatitudeConfig(eq, latScale, lineRatio).then(setMeta).catch(() => {});
+    if (persist) setLatitudeConfig(eq, latScale, lineRatio, obliquity).then(setMeta).catch(() => {});
   };
   const setExpansionPct = (pct: number, persist: boolean) => {
     const scale = clamp(pct, 25, 400) / 100;
     apply(equatorOffset, scale, lineRatio);
-    if (persist) setLatitudeConfig(equatorOffset, scale, lineRatio).then(setMeta).catch(() => {});
+    if (persist) setLatitudeConfig(equatorOffset, scale, lineRatio, obliquity).then(setMeta).catch(() => {});
   };
   const setRatio = (r: number, persist: boolean) => {
     const ratio = clamp(r, 0.5, 5);
     apply(equatorOffset, latScale, ratio);
-    if (persist) setLatitudeConfig(equatorOffset, latScale, ratio).then(setMeta).catch(() => {});
+    if (persist) setLatitudeConfig(equatorOffset, latScale, ratio, obliquity).then(setMeta).catch(() => {});
+  };
+  // Axial tilt persists straight to metadata (it changes the simulation, not the
+  // live overlay), then updates meta so the seasonal model re-runs against it.
+  const setTilt = (deg: number) => {
+    const tilt = clamp(deg, 0, 80);
+    setLatitudeConfig(equatorOffset, latScale, lineRatio, tilt).then(setMeta).catch(() => {});
   };
 
   const commitEq = () => {
@@ -99,13 +109,18 @@ export function LatitudeControl() {
     if (Number.isFinite(v)) setRatio(v, true);
     else setRatioStr(lineRatio.toFixed(2));
   };
+  const commitTilt = () => {
+    const v = parseFloat(tiltStr);
+    if (Number.isFinite(v)) setTilt(v);
+    else setTiltStr(obliquity.toFixed(1));
+  };
   const onEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") (e.target as HTMLInputElement).blur();
   };
 
   const reset = () => {
     apply(0.5, 1, 1);
-    setLatitudeConfig(0.5, 1, 1).then(setMeta).catch(() => {});
+    setLatitudeConfig(0.5, 1, 1, obliquity).then(setMeta).catch(() => {});
   };
 
   const topLat = latAt(0, equatorOffset, latScale);
@@ -173,6 +188,34 @@ export function LatitudeControl() {
         Line proportion = gap(30→60) ÷ gap(0→30). The map image is not changed,
         but the SIMULATION now uses this too — re-run from Ocean &amp; Atmosphere
         so currents/climate land on the lines.
+      </div>
+
+      <div style={{ ...row, marginTop: 8 }}>
+        <span style={lbl}>Axial tilt</span>
+        <span style={val}>{obliquity.toFixed(1)}°</span>
+      </div>
+      <div style={ctrlRow}>
+        <input
+          type="range" min={0} max={80} step={0.5} value={obliquity}
+          onChange={(e) => setTiltStr(String(e.target.value))}
+          onPointerUp={(e) => setTilt(Number((e.target as HTMLInputElement).value))}
+          onKeyUp={(e) => setTilt(Number((e.target as HTMLInputElement).value))}
+          style={range}
+        />
+        <input
+          value={tiltStr} onChange={(e) => setTiltStr(e.target.value)}
+          onBlur={commitTilt} onKeyDown={onEnter} inputMode="decimal" style={numInput}
+        />
+      </div>
+      <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+        <button style={chip(Math.abs(obliquity - 0) < 1e-3)} onClick={() => setTilt(0)}>None 0°</button>
+        <button style={chip(Math.abs(obliquity - 23.44) < 0.05)} onClick={() => setTilt(23.44)}>Earth 23.4°</button>
+        <button style={chip(Math.abs(obliquity - 45) < 0.05)} onClick={() => setTilt(45)}>Extreme 45°</button>
+      </div>
+      <div style={hint}>
+        Axial tilt drives the seasons: 0° = no seasons anywhere, 23.4° = Earth-like,
+        higher = harsher winters/summers (tropics reach the poles past 45°). Re-run
+        Ocean &amp; Atmosphere → Climate to apply.
       </div>
 
       <div style={readout}>

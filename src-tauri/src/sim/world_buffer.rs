@@ -15,6 +15,17 @@ pub const DEFAULT_LAT_SCALE: f32 = 1.0;
 /// as the drawn latitude lines so every latitude-dependent layer lands exactly on
 /// the lines (see `lat_from_y`, frontend `latLineY`).
 pub const DEFAULT_LAT_RATIO: f32 = 1.0;
+/// Axial tilt (obliquity, degrees) driving the seasonal insolation cycle. Earth's
+/// 23.44° by default; higher values give more extreme seasons (and push the tropic/
+/// polar circles toward the poles/equator), 0° gives no seasons at all. Read from
+/// world metadata so the energy-balance seasonality (`temperature.rs`) responds to it.
+pub const DEFAULT_OBLIQUITY: f32 = 23.44;
+
+/// Encoding scale for the `seasonal_amp` column: stored `u8 = span_°C × 2` (so the
+/// full seasonal span, warmest−coldest month, is representable up to ~127 °C at
+/// 0.5 °C resolution — enough headroom for extreme high-obliquity worlds). Shared by
+/// `temperature.rs` (writer) and `koppen.rs` (reader) so the encoding stays in sync.
+pub const SEASON_AMP_SCALE: f32 = 2.0;
 
 /// Map a cell row `y` to latitude in degrees given a configurable equator
 /// position and latitude scale.
@@ -96,9 +107,20 @@ impl ColumnSet {
     /// precip_summer_frac: per-land-cell summer share of annual precip (0..255).
     /// Written by precipitation.rs (two-season advection), read by koppen.rs.
     pub const SEASON: ColumnSet = ColumnSet(1 << 24);
+    /// seasonal_amp: per-land-cell seasonal half-range of monthly temperature
+    /// (°C ×4). Written by temperature.rs (energy-balance seasonality), read by
+    /// koppen.rs::seasonal_temps for the C/D/E split & growing-season proxy.
+    pub const SEASON_AMP: ColumnSet = ColumnSet(1 << 25);
+    /// sst: per-sea-cell annual-mean sea-surface temperature (°C). Written by
+    /// ocean.rs (latitude estimate + current anomaly), used by the thermohaline
+    /// density coupling and an optional render layer.
+    pub const SST: ColumnSet = ColumnSet(1 << 26);
+    /// snow_frac: per-land-cell annual snow-cover fraction (×255). Written by
+    /// temperature.rs (ice-albedo feedback), used for the optional snow layer.
+    pub const SNOW: ColumnSet = ColumnSet(1 << 27);
 
     pub const NONE: ColumnSet = ColumnSet(0);
-    pub const ALL: ColumnSet = ColumnSet((1 << 25) - 1);
+    pub const ALL: ColumnSet = ColumnSet((1 << 28) - 1);
 
     // ── Per-phase masks (derived from a mechanical grep of `buf.<column>` in
     // each sim module — see the redesign plan). Each is the union of the columns
@@ -114,14 +136,16 @@ impl ColumnSet {
     pub const PHASE_OCEAN_ATMOSPHERE: ColumnSet = ColumnSet(
         Self::TERRAIN.0 | Self::ELEVATION.0 | Self::SHELF.0 | Self::WIND.0 | Self::CURRENTS.0
             | Self::SALINITY.0 | Self::DIST_OCEAN.0 | Self::TEMPERATURE.0 | Self::PRECIPITATION.0
-            | Self::SEASON.0, // precipitation.rs writes the summer-fraction column
+            | Self::SEASON.0 // precipitation.rs writes the summer-fraction column
+            | Self::SEASON_AMP.0 | Self::SST.0 | Self::SNOW.0, // energy-balance seasonality
     );
     /// koppen.rs
     pub const PHASE_CLIMATE: ColumnSet = ColumnSet(
         Self::TERRAIN.0 | Self::ELEVATION.0 | Self::TEMPERATURE.0 | Self::PRECIPITATION.0
             | Self::DIST_OCEAN.0 | Self::CURRENTS.0 | Self::WIND.0 | Self::KOPPEN.0
             | Self::SHELF.0 // shelf seas don't count as open ocean for continentality
-            | Self::SEASON.0, // koppen.rs reads the summer-fraction split
+            | Self::SEASON.0 // koppen.rs reads the summer-fraction split
+            | Self::SEASON_AMP.0, // koppen.rs reads the energy-balance seasonal amplitude
     );
     /// rivers.rs (hydrology/lakes — read-only, no tile write-back).
     /// PRECIPITATION is needed by `extract_rivers` to size channels by discharge.
@@ -139,7 +163,8 @@ impl ColumnSet {
     pub const PHASE_SETTLEMENTS: ColumnSet = ColumnSet(
         Self::PHASE_RIVERS.0 | Self::VOLCANIC.0 | Self::DIST_OCEAN.0 | Self::PRECIPITATION.0
             | Self::TEMPERATURE.0 | Self::FERTILITY.0 | Self::FISHERY.0 | Self::HABITABILITY.0
-            | Self::DISEASE.0,
+            | Self::DISEASE.0
+            | Self::SEASON_AMP.0, // growing_season_months() -> seasonal_temps() reads it
     );
     /// biological.rs (sharks/shipworms/storms/reefs/goods — phase 8)
     pub const PHASE_BIOLOGICAL: ColumnSet = ColumnSet(
@@ -182,6 +207,9 @@ pub struct WorldBuffer {
     pub lat_scale: f32,
     /// Latitude-line spacing ratio shared with the overlay (see `lat_from_y`).
     pub lat_ratio: f32,
+    /// Axial tilt (obliquity, degrees) driving the seasonal insolation cycle. See
+    /// `DEFAULT_OBLIQUITY`. Loaded from world metadata.
+    pub obliquity: f32,
     // Per-cell data
     pub terrain: Vec<u8>,
     pub elevation: Vec<f32>,
@@ -218,6 +246,10 @@ pub struct WorldBuffer {
     pub reef_risk: Vec<u8>,        // sea: 0..255 reef/shoal wreck hazard
     pub disease_risk: Vec<u8>,     // land: 0..255 malaria/fever risk
     pub precip_summer_frac: Vec<u8>, // land: summer share of annual precip ×255 (seasonality)
+    // ── Thermal realism (energy-balance seasonality) ──
+    pub seasonal_amp: Vec<u8>,     // land: seasonal half-range of monthly temp (°C ×4)
+    pub sst: Vec<f32>,             // sea: annual-mean sea-surface temperature (°C)
+    pub snow_frac: Vec<u8>,        // land: annual snow-cover fraction ×255
 }
 
 impl WorldBuffer {
@@ -249,6 +281,9 @@ impl WorldBuffer {
         let lat_ratio: f32 = metadata::get_meta(conn, "lat_ratio")
             .ok().flatten().and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_LAT_RATIO);
+        let obliquity: f32 = metadata::get_meta(conn, "obliquity_deg")
+            .ok().flatten().and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_OBLIQUITY);
 
         let total = (width * height) as usize;
         let tiles_x = (width + TILE_SIZE - 1) / TILE_SIZE;
@@ -268,6 +303,7 @@ impl WorldBuffer {
             equator_offset,
             lat_scale,
             lat_ratio,
+            obliquity,
             terrain: u8s(ColumnSet::TERRAIN),
             elevation: f32s(ColumnSet::ELEVATION, 0.0),
             sea_depth: f32s(ColumnSet::SEA_DEPTH, 0.0),
@@ -303,6 +339,9 @@ impl WorldBuffer {
             reef_risk: u8s(ColumnSet::REEF),
             disease_risk: u8s(ColumnSet::DISEASE),
             precip_summer_frac: u8s(ColumnSet::SEASON),
+            seasonal_amp: u8s(ColumnSet::SEASON_AMP),
+            sst: f32s(ColumnSet::SST, 0.0),
+            snow_frac: u8s(ColumnSet::SNOW),
         };
 
         // Fetch every tile's compressed blob serially (cheap memcpy under the
@@ -379,6 +418,9 @@ impl WorldBuffer {
                     copy_rows!(ColumnSet::REEF => reef_risk);
                     copy_rows!(ColumnSet::DISEASE => disease_risk);
                     copy_rows!(ColumnSet::SEASON => precip_summer_frac);
+                    copy_rows!(ColumnSet::SEASON_AMP => seasonal_amp);
+                    copy_rows!(ColumnSet::SST => sst);
+                    copy_rows!(ColumnSet::SNOW => snow_frac);
                     if cols.has(ColumnSet::GOODS) {
                         for g in 0..tile.goods.len() {
                             buf.goods[g][wi0..wi0 + tile_w].copy_from_slice(&tile.goods[g][ti0..ti0 + tile_w]);
@@ -493,6 +535,9 @@ impl WorldBuffer {
             copy_rows!(ColumnSet::REEF => reef_risk);
             copy_rows!(ColumnSet::DISEASE => disease_risk);
             copy_rows!(ColumnSet::SEASON => precip_summer_frac);
+            copy_rows!(ColumnSet::SEASON_AMP => seasonal_amp);
+            copy_rows!(ColumnSet::SST => sst);
+            copy_rows!(ColumnSet::SNOW => snow_frac);
             if self.cols.has(ColumnSet::GOODS) {
                 for g in 0..self.goods.len() {
                     tile.goods[g][ti0..ti0 + tile_w].copy_from_slice(&self.goods[g][wi0..wi0 + tile_w]);

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use crate::db::{WorldDb, metadata, tile_store};
-use crate::sim::world_buffer::{DEFAULT_EQUATOR_OFFSET, DEFAULT_LAT_SCALE, DEFAULT_LAT_RATIO};
+use crate::sim::world_buffer::{DEFAULT_EQUATOR_OFFSET, DEFAULT_LAT_SCALE, DEFAULT_LAT_RATIO, DEFAULT_OBLIQUITY};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WorldMeta {
@@ -18,14 +18,20 @@ pub struct WorldMeta {
     /// the SAME ratio as the drawn lines so every latitude-dependent layer lands
     /// on the lines. 1.0 = even.
     pub lat_ratio: f32,
+    /// Axial tilt (obliquity, degrees) driving the seasonal insolation cycle.
+    /// 23.44 = Earth-like; higher = more extreme seasons; 0 = no seasons.
+    #[serde(default = "default_obliquity")]
+    pub obliquity: f32,
     /// True once `finalize_world` froze the geography (campaign steps unlocked).
     #[serde(default)]
     pub frozen: bool,
 }
 
-/// Read the latitude framing from metadata, falling back to the defaults for
-/// worlds saved before the feature existed.
-pub fn read_lat_config(conn: &rusqlite::Connection) -> (f32, f32, f32) {
+fn default_obliquity() -> f32 { DEFAULT_OBLIQUITY }
+
+/// Read the latitude framing + axial tilt from metadata, falling back to the
+/// defaults for worlds saved before each feature existed.
+pub fn read_lat_config(conn: &rusqlite::Connection) -> (f32, f32, f32, f32) {
     let equator_offset = metadata::get_meta(conn, "equator_offset")
         .ok().flatten().and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_EQUATOR_OFFSET);
@@ -35,7 +41,10 @@ pub fn read_lat_config(conn: &rusqlite::Connection) -> (f32, f32, f32) {
     let lat_ratio = metadata::get_meta(conn, "lat_ratio")
         .ok().flatten().and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_LAT_RATIO);
-    (equator_offset, lat_scale, lat_ratio)
+    let obliquity = metadata::get_meta(conn, "obliquity_deg")
+        .ok().flatten().and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_OBLIQUITY);
+    (equator_offset, lat_scale, lat_ratio, obliquity)
 }
 
 #[tauri::command]
@@ -68,6 +77,9 @@ pub fn new_world(
         .map_err(|e| e.to_string())?;
     metadata::set_meta(&conn, "lat_ratio", &DEFAULT_LAT_RATIO.to_string())
         .map_err(|e| e.to_string())?;
+    // Default axial tilt: Earth-like 23.44°.
+    metadata::set_meta(&conn, "obliquity_deg", &DEFAULT_OBLIQUITY.to_string())
+        .map_err(|e| e.to_string())?;
 
     // Initialize tiles
     tile_store::init_tiles(&conn, grid_width, grid_height).map_err(|e| e.to_string())?;
@@ -80,6 +92,7 @@ pub fn new_world(
         equator_offset: DEFAULT_EQUATOR_OFFSET,
         lat_scale: DEFAULT_LAT_SCALE,
         lat_ratio: DEFAULT_LAT_RATIO,
+        obliquity: DEFAULT_OBLIQUITY,
         frozen: false,
     })
 }
@@ -111,6 +124,7 @@ pub fn set_latitude_config(
     equator_offset: f32,
     lat_scale: f32,
     lat_ratio: f32,
+    obliquity: f32,
     db: State<'_, WorldDb>,
 ) -> Result<WorldMeta, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -118,12 +132,18 @@ pub fn set_latitude_config(
     let equator_offset = equator_offset.clamp(0.0, 1.0);
     let lat_scale = lat_scale.clamp(0.25, 4.0);
     let lat_ratio = lat_ratio.clamp(0.5, 5.0);
+    // Obliquity 0..80°: 0 removes seasons entirely; >45° gives extreme (tropics-
+    // reach-the-pole) seasonality. The insolation model stays well-defined across
+    // the whole range.
+    let obliquity = obliquity.clamp(0.0, 80.0);
 
     metadata::set_meta(&conn, "equator_offset", &equator_offset.to_string())
         .map_err(|e| e.to_string())?;
     metadata::set_meta(&conn, "lat_scale", &lat_scale.to_string())
         .map_err(|e| e.to_string())?;
     metadata::set_meta(&conn, "lat_ratio", &lat_ratio.to_string())
+        .map_err(|e| e.to_string())?;
+    metadata::set_meta(&conn, "obliquity_deg", &obliquity.to_string())
         .map_err(|e| e.to_string())?;
 
     let name = metadata::get_meta(&conn, "name").map_err(|e| e.to_string())?
@@ -143,6 +163,7 @@ pub fn set_latitude_config(
         equator_offset,
         lat_scale,
         lat_ratio,
+        obliquity,
         frozen: crate::commands::campaign_commands::is_frozen(&conn),
     })
 }
@@ -166,7 +187,7 @@ pub fn get_world_meta(db: State<'_, WorldDb>) -> Result<Option<WorldMeta>, Strin
         .parse()
         .map_err(|e: std::num::ParseIntError| e.to_string())?;
 
-    let (equator_offset, lat_scale, lat_ratio) = read_lat_config(&conn);
+    let (equator_offset, lat_scale, lat_ratio, obliquity) = read_lat_config(&conn);
 
     Ok(Some(WorldMeta {
         name,
@@ -176,6 +197,7 @@ pub fn get_world_meta(db: State<'_, WorldDb>) -> Result<Option<WorldMeta>, Strin
         equator_offset,
         lat_scale,
         lat_ratio,
+        obliquity,
         frozen: crate::commands::campaign_commands::is_frozen(&conn),
     }))
 }

@@ -1,4 +1,6 @@
-﻿use crate::sim::world_buffer::WorldBuffer;
+﻿use crate::sim::world_buffer::{WorldBuffer, SEASON_AMP_SCALE};
+use super::insolation;
+use std::f32::consts::PI;
 
 /// Compute temperature for all cells.
 /// Base from latitude bands + altitude lapse + current influence + coastal damping.
@@ -125,6 +127,210 @@ pub fn compute_temperature(buf: &mut WorldBuffer) {
         if buf.terrain[i] == 1 {
             buf.temperature[i] += temp_delta[i].clamp(-5.0, 6.5);
         }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Energy-balance seasonality
+// ────────────────────────────────────────────────────────────────────────────
+//
+// The annual-mean `temperature` field above is kept as the Earth-calibrated
+// baseline. What was fabricated before is the SEASONAL SWING — the coldest/warmest
+// month split that drives Köppen's C/D/E boundaries. Here we derive that swing
+// physically: the seasonal amplitude of the incoming sunlight (`insolation.rs`)
+// attenuated by the surface's heat capacity (a slab responding to a sinusoidal
+// forcing). Land responds fast → big swing near the solstices; a maritime coast is
+// a deep, slow mixed layer → the swing is damped and lagged. Continentality (how
+// far a cell is from open ocean upwind) sets the effective heat capacity, so the
+// cold-winter interiors / lee coasts emerge instead of being imposed.
+
+/// Calibration: °C of seasonal temperature span per (W/m²) of seasonal insolation
+/// amplitude, at full (land) response. Tuned so a deep continental interior at ~55°
+/// reaches a ~44 °C warmest−coldest span (Earth-like) — keeping downstream Köppen in
+/// the same regime the old parametric range produced.
+const K_SEASONAL: f32 = 0.20;
+/// Thermal response time (years) of a maritime column (deep mixed layer): a long τ
+/// heavily damps and lags the seasonal cycle (mild oceanic coasts).
+const TAU_MARITIME: f32 = 0.57;
+/// Thermal response time (years) of a continental column (shallow land slab): a
+/// short τ lets the surface nearly follow the insolation (large continental swing).
+const TAU_CONTINENTAL: f32 = 0.03;
+
+/// Fraction of the year a cell spends below `thresh` °C, given its coldest/warmest
+/// month under a sinusoidal seasonal cycle. Used for snow-cover / ice-albedo.
+fn year_frac_below(coldest: f32, warmest: f32, thresh: f32) -> f32 {
+    if warmest <= thresh { return 1.0; }
+    if coldest >= thresh { return 0.0; }
+    let mean = (coldest + warmest) * 0.5;
+    let amp = (warmest - coldest) * 0.5;
+    if amp < 1e-3 { return if mean < thresh { 1.0 } else { 0.0 }; }
+    // T(t) = mean + amp·sin(2πt); fraction of the cycle with T < thresh.
+    let r = ((thresh - mean) / amp).clamp(-1.0, 1.0);
+    (0.5 + r.asin() / PI).clamp(0.0, 1.0)
+}
+
+/// Compute the physically-derived seasonal temperature span (warmest−coldest month,
+/// °C) for every land cell and write it to `buf.seasonal_amp` (encoded ×
+/// `SEASON_AMP_SCALE`). Call right after `compute_temperature`; consumed by
+/// `koppen::seasonal_temps`. Requires `distance_to_ocean` + `is_shelf` + the world's
+/// `obliquity` to be available (all in the ocean-atmosphere column set).
+pub fn compute_seasonal_amplitude(buf: &mut WorldBuffer) {
+    if buf.seasonal_amp.is_empty() {
+        return;
+    }
+    let w = buf.width;
+    let h = buf.height;
+    let omega = 2.0 * PI; // annual angular frequency (yr⁻¹), τ measured in years
+
+    // Per-row seasonal insolation amplitude ΔQ (W/m²) for this world's tilt.
+    let dq: Vec<f32> = (0..h)
+        .map(|y| insolation::insolation_stats(buf.latitude(y), buf.obliquity).1)
+        .collect();
+
+    for y in 0..h {
+        let dqy = dq[y as usize];
+        for x in 0..w {
+            let idx = buf.idx(x, y);
+            if buf.terrain[idx] != 1 {
+                buf.seasonal_amp[idx] = 0;
+                continue;
+            }
+            let dist = buf.distance_to_ocean[idx].clamp(0.0, 1.0);
+            // Continentality 0 (maritime, ocean upwind) .. 1 (deep interior / lee).
+            // A shelf sea upwind does NOT count as open ocean, so wide-shelf coasts
+            // stay continental — same signal koppen::continentality uses.
+            let maritime = crate::sim::koppen::upwind_is_open_ocean(buf, x, y, 6);
+            let cont = if maritime {
+                (dist / 0.20).clamp(0.0, 1.0)
+            } else {
+                (0.55 + 0.45 * dist).clamp(0.0, 1.0)
+            };
+            // Effective heat-capacity → thermal response time → slab attenuation of
+            // the seasonal cycle. gain = 1/√(1+(ωτ)²) (standard forced-slab response).
+            let tau = TAU_MARITIME + (TAU_CONTINENTAL - TAU_MARITIME) * cont;
+            let wt = omega * tau;
+            let gain = 1.0 / (1.0 + wt * wt).sqrt();
+            let span = K_SEASONAL * dqy * gain;
+            buf.seasonal_amp[idx] = (span * SEASON_AMP_SCALE).clamp(0.0, 255.0) as u8;
+        }
+    }
+}
+
+/// Bounded ice/snow-albedo feedback. From each land cell's coldest/warmest month
+/// (annual mean ± its seasonal span) derive the annual snow-cover fraction, store it
+/// in `buf.snow_frac`, and cool the cell in proportion — a snow surface reflects far
+/// more sunlight than bare ground, so a cold cell absorbs less and gets colder. A
+/// single bounded pass (no runaway); it sharpens the tundra / ice-cap / cold-
+/// continental margins. Call after `compute_seasonal_amplitude`.
+pub fn apply_ice_albedo_feedback(buf: &mut WorldBuffer) {
+    if buf.snow_frac.is_empty() {
+        return;
+    }
+    // Max extra cooling (°C) at perennial snow cover.
+    const ALB_MAX_COOL: f32 = 4.0;
+    let w = buf.width;
+    let h = buf.height;
+    for y in 0..h {
+        for x in 0..w {
+            let idx = buf.idx(x, y);
+            if buf.terrain[idx] != 1 {
+                buf.snow_frac[idx] = 0;
+                continue;
+            }
+            let span = if buf.seasonal_amp.is_empty() {
+                0.0
+            } else {
+                buf.seasonal_amp[idx] as f32 / SEASON_AMP_SCALE
+            };
+            let t = buf.temperature[idx];
+            let coldest = t - span * 0.55;
+            let warmest = t + span * 0.45;
+            let snow = year_frac_below(coldest, warmest, 0.0);
+            buf.snow_frac[idx] = (snow * 255.0).clamp(0.0, 255.0) as u8;
+            buf.temperature[idx] = t - ALB_MAX_COOL * snow;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
+    use crate::db::schema;
+    use rusqlite::Connection;
+
+    fn buf_of(w: u32, h: u32) -> WorldBuffer {
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", w.to_string()), ("grid_height", h.to_string())] {
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                rusqlite::params![k, v],
+            )
+            .unwrap();
+        }
+        WorldBuffer::load_with(&conn, ColumnSet::PHASE_OCEAN_ATMOSPHERE).unwrap()
+    }
+
+    /// A deep continental interior must swing far more than a maritime coast at the
+    /// SAME latitude — the emergent continentality the fabricated range only faked.
+    #[test]
+    fn interior_swings_more_than_coast() {
+        let (w, h) = (40u32, 120u32);
+        let mut buf = buf_of(w, h);
+        // A bounded NH continent: lat ~10..60 AND the middle half of the longitudes,
+        // so open ocean lies to the WEST (x < w/4). At 45° the westerlies blow off
+        // that ocean, so the west coast (x = w/4) is maritime while the interior
+        // (x = w/2) is > reach cells from any ocean and stays continental.
+        for y in 0..h {
+            let lat = buf.latitude(y);
+            for x in 0..w {
+                let i = buf.idx(x, y);
+                let land = lat > 10.0 && lat < 60.0 && x >= w / 4 && x < 3 * w / 4;
+                buf.terrain[i] = if land { 1 } else { 0 };
+                buf.elevation[i] = if land { 0.05 } else { 0.0 };
+            }
+        }
+        crate::sim::ocean::compute_distance_to_ocean(&mut buf);
+        compute_seasonal_amplitude(&mut buf);
+
+        let row = (0..h)
+            .min_by(|&a, &b| {
+                (buf.latitude(a) - 45.0).abs().partial_cmp(&(buf.latitude(b) - 45.0).abs()).unwrap()
+            })
+            .unwrap();
+        let coast = buf.seasonal_amp[buf.idx(w / 4, row)] as f32 / SEASON_AMP_SCALE;
+        let interior = buf.seasonal_amp[buf.idx(w / 2, row)] as f32 / SEASON_AMP_SCALE;
+        assert!(
+            interior > coast * 1.6,
+            "interior span {interior} should dwarf maritime-coast span {coast} at 45°"
+        );
+        assert!(interior > 15.0, "45° continental span looks too small: {interior} °C");
+    }
+
+    /// The ice-albedo feedback is bounded and only cools cold, snowy cells.
+    #[test]
+    fn ice_albedo_is_bounded_and_gated() {
+        let (w, h) = (8u32, 8u32);
+        let mut buf = buf_of(w, h);
+        for i in 0..(w * h) as usize {
+            buf.terrain[i] = 1;
+            buf.seasonal_amp[i] = (10.0 * SEASON_AMP_SCALE) as u8; // ±~5 °C swing
+        }
+        // A warm cell (no snow) and a frozen cell (perennial snow).
+        let warm = buf.idx(1, 1);
+        let cold = buf.idx(5, 5);
+        buf.temperature[warm] = 25.0;
+        buf.temperature[cold] = -20.0;
+        apply_ice_albedo_feedback(&mut buf);
+        assert_eq!(buf.snow_frac[warm], 0, "warm cell carries no snow");
+        assert_eq!(buf.temperature[warm], 25.0, "warm cell not cooled");
+        assert!(buf.snow_frac[cold] > 250, "frozen cell is snow-covered");
+        assert!(
+            (buf.temperature[cold] - (-24.0)).abs() < 0.01,
+            "frozen cell cooled by the full bounded amount: {}",
+            buf.temperature[cold]
+        );
     }
 }
 

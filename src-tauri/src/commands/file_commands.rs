@@ -94,7 +94,7 @@ pub fn open_world(
         .and_then(|s| s.parse().ok())
         .unwrap_or(180);
 
-    let (equator_offset, lat_scale, lat_ratio) =
+    let (equator_offset, lat_scale, lat_ratio, obliquity) =
         crate::commands::world_commands::read_lat_config(&conn);
 
     Ok(OpenWorldResult {
@@ -106,6 +106,7 @@ pub fn open_world(
             equator_offset,
             lat_scale,
             lat_ratio,
+            obliquity,
             frozen: crate::commands::campaign_commands::is_frozen(&conn),
         },
         legacy,
