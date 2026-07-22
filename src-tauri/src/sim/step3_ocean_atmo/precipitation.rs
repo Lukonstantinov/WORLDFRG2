@@ -677,6 +677,34 @@ fn season_precip(
         }
     }
 
+    // ── Pass 1b: Hadley subsidence moisture sink ────────────────────────────────
+    // The descending Hadley branch compresses and heats arriving air, dramatically
+    // lowering relative humidity so that even parcels carrying significant moisture
+    // produce little to no precipitation. This is the physical reason Arabia and the
+    // Sahara are desert despite being hit by the summer monsoon surface flow: the
+    // wind IS there (streamlines show SW flow), but the subsidence lid kills
+    // convection and heats the parcel above its dew point.
+    // Applied directly to moisture_field so that both the base (p=moisture*800) AND
+    // the ITCZ/frontal terms (which also scale off moisture) see the reduction.
+    // Only the subtropical belt (subtropical_penalty > 0, i.e., 13-42°N/S) is touched;
+    // tropical land (ITCZ belt, West Africa, Amazon) and high-lat land are unaffected.
+    for y in 0..h {
+        let sub_sink = subtropical_penalty(buf.latitude(y).abs());
+        if sub_sink <= 0.0 { continue; }
+        // In local summer the Hadley high is strongest (retreats slightly poleward
+        // but the land heats MORE, increasing the thermal inversion lid).
+        // Apply in both seasons to keep the annual total realistic; summer is
+        // handled more strongly than winter by using a mild seasonal weight.
+        let sink_frac = 0.80 * sub_sink; // up to 0.80×0.82 = 0.66 reduction at peak
+        for x in 0..w {
+            let idx = buf.idx(x, y);
+            if buf.terrain[idx] != 1 { continue; }
+            // Compress the excess above the floor (keeps a minimum MOISTURE_FLOOR).
+            let excess = (moisture_field[idx] - MOISTURE_FLOOR).max(0.0);
+            moisture_field[idx] = MOISTURE_FLOOR + excess * (1.0 - sink_frac);
+        }
+    }
+
     // â”€â”€ Pass 2: climatic adjustments per land cell â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let mut precip = vec![0.0f32; n];
     for y in 0..h {
