@@ -807,33 +807,42 @@ fn season_precip(
                 moisture *= COLD_COAST_DRYING;
                 conv_suppress *= 0.5;
             }
-            // Hadley inversion weakened in LOCAL SUMMER: the subtropical high
-            // retreats poleward and the monsoon thermal trough takes over
-            // (India, West Africa, SE Asia monsoon belt 15-32Â°N/S). The full
-            // inversion strength only applies in local winter when the STH is
-            // at its equatorward limit. Factor 0.25 in summer preserves just
-            // enough subsidence to keep true subtropical deserts dry while
-            // allowing the monsoon trough to fire rainfall over India etc.
-            let hadley_summer_factor = if local_summer { 0.25 } else { 1.0 };
-            // FIX 3 â€” extend Hadley gate into the 8-12Â° eastern dry corridor.
-            // The Horn of Africa / Arabian-Sea coast at 8-12Â°N sits under
-            // Hadley-like dry subsidence (the Indian Ocean subtropical high
-            // expands into this band), NOT under ITCZ convergence. The standard
-            // hadley_inversion() cutoff at 12Â° misses this. The extension only
-            // fires where conv_floor â‰¤ 0.30 (no warm equatorial ocean to the
-            // south within 300 km) â€” this targets eastern Africa/Horn without
-            // touching Nigeria/West Africa, which has warm Gulf of Guinea to
-            // its south and therefore conv_floor = 0.65.
-            // Extended to 16° so Aden/Djibouti (12-16°N, blocked from equatorial
-            // ocean by the Somali coast) are also arid, not just the Horn <12°.
-            let hadley_ext = if abs_lat > 8.0 && abs_lat < 16.0 && conv_floor <= 0.30 {
-                (abs_lat - 8.0) / 8.0
+            // Compute monsoon_onshore early — needed for both hadley_summer_factor
+            // and the monsoon bonus additive term below. Zero outside the monsoon
+            // belt (5-45°) and in local winter (when the monsoon is off).
+            let onshore = if local_summer && (5.0..=45.0).contains(&abs_lat) {
+                monsoon_onshore(buf, x, y, ctx.sea_suppress)
             } else {
                 0.0
             };
-            let hadley_total = (hadley_inversion(abs_lat) + hadley_ext).min(1.0);
+            // Hadley high weakens in LOCAL SUMMER only where onshore monsoon flow
+            // actually replaces it (India, West Africa coast). Over Arabia and the
+            // Horn of Africa, onshore flow is blocked (enclosed seas suppressed,
+            // Somali jet divergence, cold upwelling) — the land heats but no
+            // moisture trough forms, so the Hadley high persists at near-full
+            // strength. onshore=1 → factor 0.25 (monsoon trough dominates);
+            // onshore=0 → factor 1.0 (Hadley stays on = desert/semi-arid).
+            let hadley_summer_factor = if local_summer {
+                0.25 + 0.75 * (1.0 - onshore)
+            } else {
+                1.0
+            };
+            // Dry corridor at 7-17° (Horn of Africa / Gulf of Aden coast).
+            // Arid due to Somali jet divergence + blocked equatorial ocean, NOT
+            // the standard Hadley high. Driest in boreal summer (peak jet season)
+            // so it must NOT be weakened by hadley_summer_factor — kept separate.
+            // Bell curve peaking at 12°N (Horn tip) for strong suppression.
+            let hadley_ext = if abs_lat > 7.0 && abs_lat < 17.0 && conv_floor <= 0.30 {
+                (1.0 - ((abs_lat - 12.0) / 5.0).abs()).max(0.0) * 0.80
+            } else {
+                0.0
+            };
+            // hadley_inversion * summer_factor: main subtropical-high gate (weakens
+            // where monsoon trough fires). hadley_ext is additive and season-
+            // independent (Somali-jet / eastern-Africa dry corridor).
+            let hadley_total = (hadley_inversion(abs_lat) * hadley_summer_factor + hadley_ext).min(1.0);
             let itcz_gate = conv_avail * conv_suppress
-                * (1.0 - 0.75 * hadley_total * hadley_summer_factor);
+                * (1.0 - 0.75 * hadley_total);
 
             let mut p = moisture * BASE_PRECIPITATION;
 
@@ -859,7 +868,6 @@ fn season_precip(
             // monsoon bonus blocked. India (onshore≈0.9): 87% of bonus passes.
             // Arabia (onshore≈0.1): only 17% of bonus passes.
             if local_summer && (5.0..=45.0).contains(&abs_lat) {
-                let onshore = monsoon_onshore(buf, x, y, ctx.sea_suppress);
                 let effective_hadley = hadley_total * (1.0 - 0.85 * onshore);
                 let monsoon_hadley_block = (1.0 - 0.90 * effective_hadley).max(0.0);
                 p += monsoon_bonus(abs_lat, buf.distance_to_ocean[idx], ctx.land_frac_tropical)
