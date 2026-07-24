@@ -673,6 +673,35 @@ pub fn place_name(kit: usize, ms: u64, x: u32, y: u32) -> String {
     cap_first(&mutate(&raw, ms))
 }
 
+/// A province's OWN name (a *land*, not a town), deterministic from its seat cell
+/// and culture kit. `bucket` sets the length: 0 very short (1 syllable — *Ab*, *Ou*),
+/// 1 short (2 — *Velk*, *Toma*), 2 medium (2–3 — *Kadresh*, *Serelu*), 3 long/compound
+/// (hyphenated double root — *Gennma-moa*, *Ashkar-Vel*). Syllables come from the
+/// kit so the name fits the local people.
+pub fn province_name(kit: usize, ms: u64, x: u32, y: u32, bucket: u8) -> String {
+    let k = &KITS[kit.min(KITS.len() - 1)];
+    let base = hash64((x as u64).wrapping_mul(0x27D4_EB2F) ^ (y as u64).wrapping_mul(0x1656_67B1) ^ 0x50B0_1234);
+    let clean = |s: String| -> String { s.split_whitespace().collect::<Vec<_>>().join("") };
+    let raw = match bucket {
+        0 => {
+            // one short syllable: onset (+ a short vowel ending sometimes)
+            let on = pick(k.on, base);
+            if base % 3 == 0 { on.to_string() } else { format!("{}{}", on, pick(k.mid, base >> 8)) }
+        }
+        1 => format!("{}{}", pick(k.on, base), pick(k.end, base >> 16)),
+        3 => {
+            let a = clean(format!("{}{}{}", pick(k.on, base), pick(k.mid, base >> 8), pick(k.end, base >> 16)));
+            let b = clean(format!("{}{}", pick(k.on, base >> 24), pick(k.end, base >> 32)));
+            format!("{}-{}", cap_first(&a), b.to_lowercase())
+        }
+        _ => format!("{}{}{}", pick(k.on, base), pick(k.mid, base >> 8), pick(k.end, base >> 16)),
+    };
+    let raw = clean(raw);
+    // Strip a trailing '-' artefact and re-capitalise after mutation.
+    let name = cap_first(&mutate(&raw.trim_matches('-').to_string(), ms));
+    if name.is_empty() { cap_first(&mutate(pick(k.on, base), ms)) } else { name }
+}
+
 /// Hydronym (water-word) suiting a kit's environment, so a river reads with a
 /// culturally-flavoured "river" element — Persian *rud*, Arabic *nahr*, Sanskrit
 /// *nadi*, Greek *potamos*, Celtic *avon*, Norse *elv* … Kept per-`Env` (five

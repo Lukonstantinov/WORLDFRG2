@@ -695,3 +695,76 @@ pub fn get_toponyms(db: State<'_, WorldDb>) -> Result<Vec<toponyms::Toponym>, St
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default())
 }
+
+// ── Province partition (runs AFTER settlements; a separate layer) ──────────────
+
+#[derive(serde::Serialize)]
+pub struct SimProvincesResult {
+    pub provinces: Vec<crate::sim::provinces::Province>,
+    /// Downsampled per-cell province id for the map overlay (row-major, `NO_PROVINCE`
+    /// = sea/no-data). `raster_w`×`raster_h`, capped so the payload stays small.
+    pub raster: Vec<u16>,
+    pub raster_w: u32,
+    pub raster_h: u32,
+    pub grid_w: u32,
+    pub grid_h: u32,
+}
+
+/// Partition all land into provinces (watershed / cost-flood). Seeds from the
+/// settlements passed in, so this MUST run after the settlement step. Persists the
+/// province list to `metadata["provinces"]` and returns it plus a downsampled id
+/// raster for rendering. `granularity` 0..1: coarse (few large) → fine (many).
+#[tauri::command]
+pub fn sim_generate_provinces(
+    settlements_json: String,
+    rivers_json: String,
+    granularity: Option<f32>,
+    db: State<'_, WorldDb>,
+) -> Result<SimProvincesResult, String> {
+    db.clear_caches();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let buf = WorldBuffer::load(&conn)?; // all columns: terrain/elev/koppen/fertility/goods/…
+    let w = buf.width; let h = buf.height;
+    if w == 0 || h == 0 { return Err("world grid not initialised".into()); }
+
+    let river_data: Vec<rivers::River> = serde_json::from_str(&rivers_json).unwrap_or_default();
+    let settle: Vec<settlements::Settlement> = serde_json::from_str(&settlements_json).unwrap_or_default();
+
+    // Lakes (overlay data, recomputed) — used as impassable divides in the flood.
+    let hydro = rivers::compute_hydrology(&buf);
+    let lake_max = (buf.total() / 2000).max(20);
+    let lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
+
+    let (provinces, province_id) = crate::sim::provinces::generate_provinces(
+        &buf, &river_data, &lakes, &settle, granularity.unwrap_or(0.5));
+
+    // Persist the province list (frozen partition; campaign state layers on top later).
+    metadata::set_meta(&conn, "provinces",
+        &serde_json::to_string(&provinces).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+
+    // Downsample the id map for transport / overlay (cap the long side ≈ 384 cells).
+    let cap = 384u32;
+    let step = ((w.max(h) + cap - 1) / cap).max(1);
+    let rw = (w + step - 1) / step;
+    let rh = (h + step - 1) / step;
+    let mut raster = vec![crate::sim::provinces::NO_PROVINCE; (rw * rh) as usize];
+    for ry in 0..rh {
+        for rx in 0..rw {
+            let sx = (rx * step).min(w - 1);
+            let sy = (ry * step).min(h - 1);
+            raster[(ry * rw + rx) as usize] = province_id[(sy * w + sx) as usize];
+        }
+    }
+
+    Ok(SimProvincesResult { provinces, raster, raster_w: rw, raster_h: rh, grid_w: w, grid_h: h })
+}
+
+/// Read back the stored province list (for reopening a world / panel refresh).
+#[tauri::command]
+pub fn get_provinces(db: State<'_, WorldDb>) -> Result<Vec<crate::sim::provinces::Province>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    Ok(metadata::get_meta(&conn, "provinces").map_err(|e| e.to_string())?
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default())
+}

@@ -89,6 +89,8 @@ pub fn run() {
             sim_commands::sim_generate_toponyms,
             sim_commands::save_toponyms,
             sim_commands::get_toponyms,
+            sim_commands::sim_generate_provinces,
+            sim_commands::get_provinces,
             sim_commands::sim_run_all,
             file_commands::save_world_as,
             campaign_commands::finalize_world,

@@ -53,3 +53,4 @@ pub mod shared;
 pub use shared::names;
 pub use shared::cultures;
 pub use shared::toponyms;
+pub use shared::provinces;
