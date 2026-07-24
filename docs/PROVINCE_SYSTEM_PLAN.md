@@ -7,9 +7,9 @@ goods, and interacts with the settlements that stand in it — an Europa-Univers
 style political/economic substrate grafted onto WorldForge 2's existing World +
 Campaign split.*
 
-Status: **Phase 1 shipped · Phase 2a (safe foundation) shipped · Phase 2b (migration
-rewire) + Phase 3 (control) pending.** Extends the settlement model reviewed in
-`SETTLEMENT_BELIEVABILITY_ANALYSIS.md`.
+Status: **Phase 1 shipped · Phase 2a shipped · Phase 2b (living demography) shipped ·
+Phase 2c (deeper demography, §7.2) + Phase 3 (control) pending.** Extends the
+settlement model reviewed in `SETTLEMENT_BELIEVABILITY_ANALYSIS.md`.
 
 **Implemented so far** (branch `claude/settlement-generation-analysis-wwr0ox`):
 - **Phase 1** — `sim/shared/provinces.rs` cost-flood partition (coasts/islands +
@@ -25,6 +25,12 @@ rewire) + Phase 3 (control) pending.** Extends the settlement model reviewed in
   open; `campaign_province_state` (read-only join: baseline rural + live urban per
   province from the running sim); panel shows live urban during a campaign. The
   standing dynamics test still passes (economy untouched).
+- **Phase 2b (living demography, gated)** — the province countryside is now a living
+  reservoir that feeds the cities: rural natural increase → carrying capacity,
+  urban-graveyard mortality on the largest cities, and opportunity-weighted
+  rural→urban migration carrying culture. See §7.1. A dedicated test proves cities
+  grow via migration while total population stays finite/bounded; the standing
+  dynamics test (no provinces) is unchanged and green.
 
 ---
 
@@ -311,6 +317,59 @@ Two-tier population stock: **province = rural reservoir, settlement = urban core
 
 All of this lands in `sim/campaign/tick/` → the standing dynamics test (§2.1) is
 mandatory for Phase 2.
+
+### 7.1 Shipped in Phase 2b (living demography, gated)
+
+The whole layer is **gated on a seeded province partition**, so a world without
+provinces — and the dynamics test, which never seeds one — runs exactly as before
+(base economy untouched, verified green).
+
+- **Rural reservoir** — `CampaignSim.prov_rural/prov_cap/prov_culture/prov_seat/
+  hub_province/prov_net_mig` (all serde-defaulted). Seeded at campaign start from the
+  stored partition; each hub mapped to its province via the raster (nearest-seat
+  fallback); colonies/swarm towns self-heal their membership.
+- **`province_demography_pass`** (yearly): (1) rural **natural increase** toward the
+  land's carrying capacity with a Malthusian check above it; (2) **urban-graveyard
+  mortality** on the largest cities (crowding + endemic disease, eased by public
+  health) so a metropolis genuinely depends on a fed hinterland; (3) **opportunity-
+  weighted rural→urban migration** (prosperity · fed · commercial standing) that
+  **carries the province's culture** into the city.
+- Read-out: `campaign_province_state` reports the live rural pool + net migration;
+  the panel shows rural drawdown and a "↗ N/yr to cities" source line.
+
+### 7.2 Rethought — candidate additions (Phase 2c+)
+
+Ideas surfaced while building 2b, ranked by believability-per-effort:
+
+1. **Damp the intrinsic urban birth surplus when provinces exist** so migration
+   becomes the *primary* engine of urban growth (a fuller urban-graveyard model),
+   not an additive bonus on top of the daily logistic. The safest next tuning step.
+2. **Land improvement / assarting** — a province near prosperous, peaceful cities
+   slowly raises its rural *capacity* (forest clearance, drainage, terracing: the
+   medieval great clearances, Dutch polders). Rich regions support denser
+   countrysides over centuries; war/plague/abandonment degrade it back.
+3. **Grain hinterland contract** — a city draws food from its own province first
+   (cheap) before importing, so a big city in a poor province (a desert port) is
+   structurally import-dependent and fragile. Couples province agriculture to the
+   existing food-balance/starvation loop.
+4. **Jacqueries** — province-level peasant revolts triggered by famine + heavy urban
+   grain extraction; they cut the province's output and migrant flow, hurting the
+   extracting city (1358 Jacquerie, the German Peasants' War, 1381).
+5. **Route-bound migration corridors** — rural migrants move province→province along
+   the adjacency/trade graph toward opportunity (not teleporting), drawing the
+   existing migration arrows; a plague or blockade on the road starves a metropolis
+   of migrants.
+6. **Reversion to wilderness** — when a province's cities die and its rural pool
+   collapses, it reverts toward frontier and its improved land degrades; later
+   resettlement restarts the cycle (ties to the abandon/resettle system).
+7. **Demographic identity in the panel** — label each province's role from its net
+   migration and trend: *breadbasket source*, *migrant-sink metropolis region*,
+   *emptying frontier* — and chart its population over time.
+8. **Rural culture as the ethnic wellspring** — since migrants carry province culture
+   into cities, a city surrounded by culture-X provinces should trend X-majority over
+   centuries regardless of its founding people (cities absorbing their hinterland).
+   2b lays the mechanism (culture-carrying migration); 2c would let it actually tip
+   the city majority via the existing rebalance/assimilation passes.
 
 ---
 
