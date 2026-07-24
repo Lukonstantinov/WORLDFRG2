@@ -1,30 +1,45 @@
 ﻿use crate::sim::world_buffer::{WorldBuffer, SEASON_AMP_SCALE};
-use super::insolation;
+use super::{insolation, ebm};
 use std::f32::consts::PI;
 
+/// Earth-calibrated base annual-mean temperature (°C) at sea level for a latitude.
+/// Tuned to real Earth anchors so the mid-latitudes are warm enough to host
+/// temperate climates:
+///   0° → 30,  30° → 20,  45° → 12.5,  60° → 5,  75° → -12,  90° → -29.
+/// The planetary energy budget (`ebm.rs`) is layered on as an anomaly on top of
+/// this, so at Earth parameters the curve is used unchanged.
+#[inline]
+pub(crate) fn earth_base_curve(abs_lat: f32) -> f32 {
+    if abs_lat < 30.0 {
+        30.0 - 0.333 * abs_lat
+    } else if abs_lat < 60.0 {
+        20.0 - 0.5 * (abs_lat - 30.0)
+    } else {
+        5.0 - 1.15 * (abs_lat - 60.0)
+    }
+}
+
 /// Compute temperature for all cells.
-/// Base from latitude bands + altitude lapse + current influence + coastal damping.
-/// Matches WF1 temperature.ts algorithm.
+/// Base from latitude bands + planetary energy-budget anomaly + altitude lapse +
+/// current influence + coastal damping. Matches WF1 temperature.ts algorithm plus
+/// the anomaly-coupled energy balance (`ebm.rs`).
 pub fn compute_temperature(buf: &mut WorldBuffer) {
     let w = buf.width;
     let h = buf.height;
+
+    // Planetary energy-budget anomaly: how much this world's tilt / stellar
+    // luminosity / greenhouse / rotation shift the zonal-mean temperature away
+    // from Earth's. Exactly zero at Earth parameters (Earth calibration intact).
+    let ebm_anom = ebm::EbmAnomaly::for_world(
+        buf.obliquity, buf.solar_lum, buf.greenhouse, buf.rotation_rate,
+    );
 
     for y in 0..h {
         let lat = buf.latitude(y);
         let abs_lat = lat.abs();
 
-        // Base annual-mean temperature from latitude bands. Tuned to real Earth
-        // anchors so the mid-latitudes are warm enough to host temperate climates
-        // (the old curve put 50Â° at +4Â°C, ~7Â°C too cold, which forced oceanic /
-        // Mediterranean / temperate zones into continental, polar or arid types):
-        //   0Â° â†’ 30,  30Â° â†’ 20,  45Â° â†’ 12.5,  60Â° â†’ 5,  75Â° â†’ -12,  90Â° â†’ -29.
-        let base_temp = if abs_lat < 30.0 {
-            30.0 - 0.333 * abs_lat
-        } else if abs_lat < 60.0 {
-            20.0 - 0.5 * (abs_lat - 30.0)
-        } else {
-            5.0 - 1.15 * (abs_lat - 60.0)
-        };
+        // Earth base curve + the planetary anomaly for this latitude.
+        let base_temp = earth_base_curve(abs_lat) + ebm_anom.sample(lat);
 
         for x in 0..w {
             let idx = buf.idx(x, y);

@@ -21,6 +21,33 @@ pub const DEFAULT_LAT_RATIO: f32 = 1.0;
 /// world metadata so the energy-balance seasonality (`temperature.rs`) responds to it.
 pub const DEFAULT_OBLIQUITY: f32 = 23.44;
 
+// ── Planetary state (energy budget + general circulation) ───────────────────
+// These four drive the *emergent* climate through the anomaly-coupled energy-
+// balance model (`ebm.rs`) and the rotation-driven general circulation
+// (`circulation.rs`). At their Earth defaults every downstream field is
+// bit-for-bit what it was before these existed (the anomaly is zero), so old
+// saves and the Earth calibration are untouched; changing one shifts the climate
+// by the physically-correct amount. All read from world metadata.
+//
+/// Planetary rotation rate as a multiple of Earth's. Sets the Coriolis strength
+/// and therefore the width of the Hadley cell / the latitudes of the wind &
+/// pressure belts and the number of circulation cells. <1 = slow rotator (wide
+/// Hadley, deserts & subtropical highs pushed poleward, fewer/broader belts);
+/// >1 = fast rotator (narrow banded circulation).
+pub const DEFAULT_ROTATION_RATE: f32 = 1.0;
+/// Stellar irradiance at the planet as a multiple of Earth's solar constant
+/// (1361 W/m²). Scales total insolation → global-mean temperature. <1 = a fainter
+/// star / wider orbit (colder); >1 = a brighter star / closer orbit (hotter).
+pub const DEFAULT_SOLAR_LUM: f32 = 1.0;
+/// Greenhouse factor as a multiple of Earth's. Scales the long-wave trapping
+/// (lowers the effective outgoing-radiation intercept), i.e. the atmosphere's
+/// CO₂/H₂O warming. 1.0 = Earth; >1 warms the whole planet and flattens the
+/// equator-pole gradient; <1 cools it (snowball at the low end).
+pub const DEFAULT_GREENHOUSE: f32 = 1.0;
+/// Orbital eccentricity (0 = circular). With `perihelion` it sets the asymmetry
+/// between the hemispheres' season lengths/intensities. Earth ≈ 0.0167.
+pub const DEFAULT_ECCENTRICITY: f32 = 0.0167;
+
 /// Encoding scale for the `seasonal_amp` column: stored `u8 = span_°C × 2` (so the
 /// full seasonal span, warmest−coldest month, is representable up to ~127 °C at
 /// 0.5 °C resolution — enough headroom for extreme high-obliquity worlds). Shared by
@@ -210,6 +237,15 @@ pub struct WorldBuffer {
     /// Axial tilt (obliquity, degrees) driving the seasonal insolation cycle. See
     /// `DEFAULT_OBLIQUITY`. Loaded from world metadata.
     pub obliquity: f32,
+    /// Planetary rotation rate (× Earth). Drives the general circulation belts. See
+    /// `DEFAULT_ROTATION_RATE`.
+    pub rotation_rate: f32,
+    /// Stellar irradiance (× Earth solar constant). See `DEFAULT_SOLAR_LUM`.
+    pub solar_lum: f32,
+    /// Greenhouse factor (× Earth). See `DEFAULT_GREENHOUSE`.
+    pub greenhouse: f32,
+    /// Orbital eccentricity. See `DEFAULT_ECCENTRICITY`.
+    pub eccentricity: f32,
     // Per-cell data
     pub terrain: Vec<u8>,
     pub elevation: Vec<f32>,
@@ -284,6 +320,20 @@ impl WorldBuffer {
         let obliquity: f32 = metadata::get_meta(conn, "obliquity_deg")
             .ok().flatten().and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_OBLIQUITY);
+        // Planetary state (all optional; old saves default to Earth so their
+        // anomaly is zero and every field loads exactly as before).
+        let rotation_rate: f32 = metadata::get_meta(conn, "rotation_rate")
+            .ok().flatten().and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_ROTATION_RATE);
+        let solar_lum: f32 = metadata::get_meta(conn, "solar_lum")
+            .ok().flatten().and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_SOLAR_LUM);
+        let greenhouse: f32 = metadata::get_meta(conn, "greenhouse")
+            .ok().flatten().and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_GREENHOUSE);
+        let eccentricity: f32 = metadata::get_meta(conn, "eccentricity")
+            .ok().flatten().and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_ECCENTRICITY);
 
         let total = (width * height) as usize;
         let tiles_x = (width + TILE_SIZE - 1) / TILE_SIZE;
@@ -304,6 +354,10 @@ impl WorldBuffer {
             lat_scale,
             lat_ratio,
             obliquity,
+            rotation_rate,
+            solar_lum,
+            greenhouse,
+            eccentricity,
             terrain: u8s(ColumnSet::TERRAIN),
             elevation: f32s(ColumnSet::ELEVATION, 0.0),
             sea_depth: f32s(ColumnSet::SEA_DEPTH, 0.0),

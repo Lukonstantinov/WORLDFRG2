@@ -26,6 +26,8 @@ pub fn run() {
             world_commands::new_world,
             world_commands::get_world_meta,
             world_commands::set_latitude_config,
+            world_commands::get_planet_config,
+            world_commands::set_planet_config,
             world_commands::set_culture_count,
             world_commands::get_culture_count,
             tile_commands::get_tiles,
