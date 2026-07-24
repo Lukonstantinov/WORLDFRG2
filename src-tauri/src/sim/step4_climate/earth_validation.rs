@@ -23,11 +23,14 @@ use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
 use crate::sim::{ocean, temperature, jets, precipitation, koppen, elevation};
 use rusqlite::Connection;
 
-const W: usize = 360;
-const H: usize = 180;
+// 0.5° grid — the Köppen-Geiger reference's native resolution, so no reference
+// downsampling, and the cell-based reaches in the ocean/continentality model sit
+// closer to their real (km) footprint than a coarse 1° grid would.
+const W: usize = 720;
+const H: usize = 360;
 
-static ELEV_I16: &[u8] = include_bytes!("fixtures/earth_elev_360x180.i16");
-static KOPPEN_U8: &[u8] = include_bytes!("fixtures/earth_koppen_360x180.u8");
+static ELEV_I16: &[u8] = include_bytes!("fixtures/earth_elev_720x360.i16");
+static KOPPEN_U8: &[u8] = include_bytes!("fixtures/earth_koppen_720x360.u8");
 
 /// Köppen main class (perceptual axis) for a WF2 köppen code. Highland (H) is
 /// mapped to E for scoring — WF2 emits it on cold high terrain the reference (which
@@ -139,7 +142,7 @@ fn earth_koppen_agreement() {
 
     let main_pct = 100.0 * w_main / w_total;
     let exact_pct = 100.0 * w_exact / w_total;
-    println!("\n═══ Earth Köppen validation (360×180, area-weighted) ═══");
+    println!("\n═══ Earth Köppen validation ({W}×{H}, area-weighted) ═══");
     println!("  main-class agreement : {main_pct:.1}%  (A/B/C/D/E)");
     println!("  exact-zone agreement : {exact_pct:.1}%");
     println!("  by reference main class:");
@@ -168,6 +171,6 @@ fn earth_koppen_agreement() {
 }
 
 /// The regression floor for area-weighted main-class agreement. Calibrated just
-/// under the measured baseline (62.5% at introduction); bump it up as the model
-/// improves so it always guards the current fidelity.
-const EARTH_MAIN_FLOOR: f64 = 60.0;
+/// under the measured baseline (66.2% at 0.5° after the storm-track fix); bump it
+/// up as the model improves so it always guards the current fidelity.
+const EARTH_MAIN_FLOOR: f64 = 63.0;
