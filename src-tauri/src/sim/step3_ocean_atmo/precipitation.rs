@@ -348,7 +348,12 @@ fn monsoon_bonus(abs_lat: f32, dist_ocean: f32, land_frac_tropical: f32) -> f32 
     // Continentality: a big landmass drives a stronger monsoon (landâ€“sea thermal
     // contrast); small islands get only a mild boost.
     let cont = (0.45 + land_frac_tropical * 2.4).min(1.25);
-    const MONSOON_BONUS_MAX: f32 = 850.0;
+    // The wettest monsoon coasts (India's west coast, Bengal, SE Asia) take
+    // 2000-3000 mm in the wet half-year, so the summer draw has to be large; the
+    // gating (onshore-flow only, convection-suppressed, Hadley-blocked) keeps it off
+    // the subtropical deserts where onshore ≈ 0. Raised from 850 so the archetypal
+    // monsoon (India/SE Asia) reads as a monsoon climate rather than steppe/desert.
+    const MONSOON_BONUS_MAX: f32 = 1150.0;
     MONSOON_BONUS_MAX * lat_w * prox * cont
 }
 

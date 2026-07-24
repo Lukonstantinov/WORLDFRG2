@@ -174,3 +174,55 @@ fn earth_koppen_agreement() {
 /// under the measured baseline (66.2% at 0.5° after the storm-track fix); bump it
 /// up as the model improves so it always guards the current fidelity.
 const EARTH_MAIN_FLOOR: f64 = 63.0;
+
+/// Named-region spot checks — regional regression protection for the archetypal
+/// climates a player would immediately judge (the deserts, the equatorial
+/// rainforests, the monsoon belt). Prints a per-site table (gen vs real Köppen +
+/// summer-precip fraction) and asserts the UNAMBIGUOUS facts so a change that turns
+/// the Sahara green or the Amazon into steppe fails the build.
+///
+/// Known-soft regions NOT yet asserted (the current tuning frontier — see the
+/// module report): the wet monsoon subtropics (Bangladesh, S China, SE-US) still
+/// come out too dry because the onshore-monsoon *detection* under-fires there, so
+/// they read arid. Fixing that is the next accuracy step; until then they are
+/// printed but not gated.
+#[test]
+fn earth_named_region_spot_checks() {
+    let (buf, reference) = run_earth();
+    let cell = |lat: f32, lon: f32| -> usize {
+        let y = ((90.0 - lat) * 2.0).round() as usize;
+        let x = ((lon + 180.0) * 2.0).round() as usize;
+        (y.min(H - 1)) * W + x.min(W - 1)
+    };
+    // (name, lat, lon, expected main class or 0 = print-only)
+    let sites: [(&str, f32, f32, u8); 12] = [
+        ("Sahara 23N13E", 23.0, 13.0, b'B'),
+        ("Arabia 22N47E", 22.0, 47.0, b'B'),
+        ("Amazon 3S60W", -3.0, -60.0, b'A'),
+        ("Congo 0N20E", 0.0, 20.0, b'A'),
+        ("Indonesia 0N114E", 0.0, 114.0, b'A'),
+        ("SEAsia-Vietnam 11N106E", 11.0, 106.0, b'A'),
+        // Printed but not yet gated (too-dry monsoon subtropics — see doc comment):
+        ("India-Mumbai 19N73E", 19.0, 73.0, 0),
+        ("Bangladesh 24N90E", 24.0, 90.0, 0),
+        ("China-South 25N113E", 25.0, 113.0, 0),
+        ("SE-US 34N84W", 34.0, -84.0, 0),
+        ("NWEurope 52N5E", 52.0, 5.0, 0),
+        ("Med-Rome 42N12E", 42.0, 12.0, 0),
+    ];
+    println!("\n─── Earth named-region spot checks ───");
+    for (nm, la, lo, want) in sites {
+        let i = cell(la, lo);
+        let gl = main_letter(buf.koppen[i]);
+        let rl = main_letter(reference[i]);
+        let sf = if buf.precip_summer_frac.is_empty() { 0 } else { buf.precip_summer_frac[i] };
+        println!(
+            "  {:24} gen={} ref={} precip={:5.0}mm summer={:3.0}% T={:5.1}°",
+            nm, gl as char, rl as char, buf.precipitation[i], sf as f32 / 2.55, buf.temperature[i]
+        );
+        if want != 0 {
+            assert_eq!(gl, want, "{nm}: expected main class {}, got {}", want as char, gl as char);
+        }
+    }
+    println!("──────────────────────────────────────\n");
+}
