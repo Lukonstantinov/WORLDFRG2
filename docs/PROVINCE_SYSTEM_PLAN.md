@@ -7,8 +7,24 @@ goods, and interacts with the settlements that stand in it — an Europa-Univers
 style political/economic substrate grafted onto WorldForge 2's existing World +
 Campaign split.*
 
-Status: **planning**. No code changed yet. Supersedes nothing; extends the
-settlement model reviewed in `SETTLEMENT_BELIEVABILITY_ANALYSIS.md`.
+Status: **Phase 1 shipped · Phase 2a (safe foundation) shipped · Phase 2b (migration
+rewire) + Phase 3 (control) pending.** Extends the settlement model reviewed in
+`SETTLEMENT_BELIEVABILITY_ANALYSIS.md`.
+
+**Implemented so far** (branch `claude/settlement-generation-analysis-wwr0ox`):
+- **Phase 1** — `sim/shared/provinces.rs` cost-flood partition (coasts/islands +
+  watershed divides + trunk-river crossings + border noise + surviving enclaves);
+  `cultures::province_name` (own variable-length names); `sim_generate_provinces`
+  (runs after settlements, persists `metadata["provinces"]`) + `get_provinces`.
+  Frontend: Province types, bridge, `worldStore`, **ProvincePanel (Variant B)** with
+  sort/filter + goods-as-quality + analog + generated history, culture-tinted map
+  overlay with natural borders, `🗺 Provinces` WindowBar chip. `cargo check` + `tsc`
+  clean.
+- **Phase 2a (safe foundation, no dynamics change)** — raster persisted to
+  `metadata["province_raster"]`; `get_province_layer` restores list + overlay on world
+  open; `campaign_province_state` (read-only join: baseline rural + live urban per
+  province from the running sim); panel shows live urban during a campaign. The
+  standing dynamics test still passes (economy untouched).
 
 ---
 
