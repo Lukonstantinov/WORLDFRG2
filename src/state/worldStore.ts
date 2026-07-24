@@ -1,5 +1,8 @@
 import { create } from "zustand";
-import type { WorldMeta, RiverData, LakeData, Settlement, EconomySnapshot, Toponym, RiverNode, LakeNode } from "@types";
+import type { WorldMeta, RiverData, LakeData, Settlement, EconomySnapshot, Toponym, RiverNode, LakeNode, Province } from "@types";
+
+/** Downsampled per-cell province-id raster for the map overlay (65535 = sea). */
+export interface ProvinceRaster { data: number[]; w: number; h: number; gridW: number; gridH: number; }
 
 /** Live latitude framing, kept SEPARATE from `meta` on purpose. Dragging the
  *  Latitude Frame sliders mutates only this slice so the lat-line overlay tracks
@@ -34,6 +37,10 @@ interface WorldStore {
    *  was never run (fallback hydronyms + reach-break markers). */
   riverSystems: RiverNode[];
   lakeSystems: LakeNode[];
+  /** Province partition (a separate layer, generated after settlements). */
+  provinces: Province[];
+  /** Downsampled province-id raster for the map overlay (null until generated). */
+  provinceRaster: ProvinceRaster | null;
   setMeta: (meta: WorldMeta) => void;
   /** Update only the live latitude framing while dragging the sliders. Does NOT
    *  touch `meta`, so heavy meta-keyed effects stay quiet during the drag. */
@@ -47,6 +54,7 @@ interface WorldStore {
   setToponyms: (toponyms: Toponym[]) => void;
   setRiverSystems: (riverSystems: RiverNode[]) => void;
   setLakeSystems: (lakeSystems: LakeNode[]) => void;
+  setProvinces: (provinces: Province[], raster?: ProvinceRaster | null) => void;
   clear: () => void;
 }
 
@@ -70,6 +78,8 @@ export const useWorldStore = create<WorldStore>((set) => ({
   toponyms: [],
   riverSystems: [],
   lakeSystems: [],
+  provinces: [],
+  provinceRaster: null,
   // Setting meta reseeds the live latitude framing so the two stay in sync on
   // world load and after a persisted slider change.
   setMeta: (meta) => set({ meta, isLoaded: true, latConfig: latFromMeta(meta) }),
@@ -82,6 +92,7 @@ export const useWorldStore = create<WorldStore>((set) => ({
   setToponyms: (toponyms) => set({ toponyms }),
   setRiverSystems: (riverSystems) => set({ riverSystems }),
   setLakeSystems: (lakeSystems) => set({ lakeSystems }),
+  setProvinces: (provinces, raster) => set(raster !== undefined ? { provinces, provinceRaster: raster } : { provinces }),
   clear: () =>
-    set({ meta: null, isLoaded: false, latConfig: DEFAULT_LAT, rivers: [], lakes: [], settlements: [], settlementsBaseline: [], economy: null, toponyms: [], riverSystems: [], lakeSystems: [] }),
+    set({ meta: null, isLoaded: false, latConfig: DEFAULT_LAT, rivers: [], lakes: [], settlements: [], settlementsBaseline: [], economy: null, toponyms: [], riverSystems: [], lakeSystems: [], provinces: [], provinceRaster: null }),
 }));

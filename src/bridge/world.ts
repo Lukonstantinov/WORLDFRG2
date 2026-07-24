@@ -367,3 +367,23 @@ export async function getAppearance(): Promise<string | null> {
 export async function importWorldLayers(path: string, groups: string[]): Promise<[number, number][]> {
   return invoke("import_world_layers", { path, groups });
 }
+
+/** Partition all land into provinces (watershed / cost-flood). Runs AFTER the
+ *  settlement step (settlements seed it). Persists the province list and returns
+ *  it plus a downsampled per-cell id raster for the map overlay. */
+export async function simGenerateProvinces(
+  settlements: import("@types").Settlement[],
+  rivers: import("@types").RiverData[],
+  granularity?: number,
+): Promise<import("@types").SimProvincesResult> {
+  return invoke("sim_generate_provinces", {
+    settlementsJson: JSON.stringify(settlements),
+    riversJson: JSON.stringify(rivers),
+    granularity,
+  });
+}
+
+/** Read back the stored province list (reopening a world / panel refresh). */
+export async function getProvinces(): Promise<import("@types").Province[]> {
+  return invoke("get_provinces");
+}

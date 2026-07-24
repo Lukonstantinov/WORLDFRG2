@@ -146,6 +146,8 @@ interface UIStore {
   showEconomyDashboard: boolean;
   /** 🌊 Hydrology dashboard (river systems) panel open. */
   showHydrology: boolean;
+  /** 🗺 Provinces panel (watershed administrative regions) open. */
+  showProvinces: boolean;
   /** #35/#36/#37 · Goods Codex (provenance / history / scarcity) panel open. */
   showGoodsCodex: boolean;
   /** Itinerary routed polyline (world cells) to draw on the map, or null. */
@@ -254,6 +256,7 @@ interface UIStore {
   setEraFrame: (f: import("@types").EraFrame | null) => void;
   setShowEconomyDashboard: (v: boolean) => void;
   setShowHydrology: (v: boolean) => void;
+  setShowProvinces: (v: boolean) => void;
   setShowGoodsCodex: (v: boolean) => void;
   setTravelRoute: (pts: [number, number][] | null) => void;
   setRiverHighlight: (ids: number[] | null) => void;
@@ -319,6 +322,7 @@ export const useUIStore = create<UIStore>((set) => ({
     houseControl: false, merchantRoutes: false, futures: false, dynamicFlow: false, tradeHeat: false,
     tradeBasins: false, migrations: true,
     colonies: true,
+    provinces: false, provinceBorders: false,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
     travelRoute: false, goodScarcity: false, toponyms: false, riverBreaks: true,
     // Per-feature-type toponym label toggles (gated under the master `toponyms`).
@@ -366,6 +370,7 @@ export const useUIStore = create<UIStore>((set) => ({
   eraFrame: null,
   showEconomyDashboard: false,
   showHydrology: false,
+  showProvinces: false,
   showGoodsCodex: false,
   travelRoute: null,
   riverHighlight: null,
@@ -489,6 +494,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setEraFrame: (f) => set({ eraFrame: f }),
   setShowEconomyDashboard: (v) => set({ showEconomyDashboard: v }),
   setShowHydrology: (v) => set({ showHydrology: v }),
+  setShowProvinces: (v) => set({ showProvinces: v }),
   setShowGoodsCodex: (v) => set({ showGoodsCodex: v }),
   setTravelRoute: (pts) => set({ travelRoute: pts }),
   setRiverHighlight: (ids) => set({ riverHighlight: ids }),

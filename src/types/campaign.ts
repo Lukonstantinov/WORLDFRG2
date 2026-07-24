@@ -1764,3 +1764,43 @@ export interface SimSettlementsResult {
   modified: [number, number][];
   settlements: Settlement[];
 }
+
+/** A good a province's land can yield, with an environmental-suitability QUALITY
+ *  (0..1) — never an amount. Mirrors the Rust `ProvinceGood`. */
+export interface ProvinceGood {
+  good: number;    // good index (→ GOOD_DEFS)
+  quality: number; // 0..1 suitability → quality stars
+}
+
+/** A province — a watershed/cost-flood administrative region. Mirrors the Rust
+ *  `Province` struct (serde default snake_case, so keys stay snake_case). */
+export interface Province {
+  id: number;
+  name: string;            // its OWN generated name (variable length), not the seat's
+  seat_x: number;
+  seat_y: number;
+  cells: number;           // area in cells
+  area_km2: number;        // latitude-aware real area
+  island: number;
+  neighbors: number[];
+  koppen: number;          // plurality climate zone
+  elevation_class: number; // 0 lowland · 1 hill · 2 upland
+  mean_fertility: number;
+  coastal: boolean;
+  goods: ProvinceGood[];
+  culture: string;         // founding plurality (campaign may shift it via migration)
+  rural_pop: number;       // baseline countryside population
+  analog: string;          // "looks most like…" real-world regions
+  settlements: string[];   // settlement ids inside (seat first)
+}
+
+/** Result of `sim_generate_provinces`: the province list + a downsampled per-cell
+ *  id raster for the map overlay (`65535` = sea/no-data). */
+export interface SimProvincesResult {
+  provinces: Province[];
+  raster: number[];
+  raster_w: number;
+  raster_h: number;
+  grid_w: number;
+  grid_h: number;
+}

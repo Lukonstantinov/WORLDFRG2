@@ -21,6 +21,7 @@ import { ItineraryPanel } from "@ui/goods/ItineraryPanel";
 import { GoodsCodexPanel } from "@ui/goods/GoodsCodexPanel";
 import { EconomyDashboardPanel } from "@ui/campaign/EconomyDashboardPanel";
 import { HydrologyPanel } from "@ui/world/HydrologyPanel";
+import { ProvincePanel } from "@ui/world/ProvincePanel";
 import { AtlasPanel } from "@ui/campaign/AtlasPanel";
 import { PeoplesPanel } from "@ui/campaign/PeoplesPanel";
 import { ColonialPanel } from "@ui/campaign/ColonialPanel";
@@ -610,6 +611,7 @@ export default function App() {
           <GoodsCodexPanel />
           <EconomyDashboardPanel />
           <HydrologyPanel />
+          <ProvincePanel />
           <AtlasPanel />
           <PeoplesPanel />
           <ColonialPanel />

@@ -18,6 +18,7 @@ export function WindowBar() {
     { label: "🔀 Trade", on: s.showTradeMatrix, set: s.setShowTradeMatrix },
     { label: "🧭 Itinerary", on: s.showItinerary, set: s.setShowItinerary },
     { label: "🌊 Hydrology", on: s.showHydrology, set: s.setShowHydrology },
+    { label: "🗺 Provinces", on: s.showProvinces, set: s.setShowProvinces },
     { label: "📊 Economy", on: s.showEconomyDashboard, set: s.setShowEconomyDashboard },
     { label: "📖 Codex", on: s.showGoodsCodex, set: s.setShowGoodsCodex },
   ];
