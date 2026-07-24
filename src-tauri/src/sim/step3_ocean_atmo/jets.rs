@@ -1,4 +1,5 @@
 ﻿use crate::sim::world_buffer::WorldBuffer;
+use super::circulation::Circulation;
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Low-level jets (the Somali / Findlater jet and its cousins)
@@ -51,13 +52,21 @@ fn gauss(x: f32, mu: f32, sigma: f32) -> f32 {
 }
 
 /// Base low-level wind speed (m/s) from the latitude wind belts: weak doldrums at
-/// the ITCZ, brisk trades ~15Â°, a subtropical-high calm near 30Â°, strong
-/// westerlies ~50Â°, tapering toward the pole.
-pub(crate) fn base_speed(abs_lat: f32) -> f32 {
+/// the ITCZ, brisk trades in the trade belt, a subtropical-high calm at the Hadley
+/// edge, strong westerlies in the mid-latitudes, tapering toward the pole. The belt
+/// centres and widths follow the planet's general circulation (`circulation.rs`):
+/// on Earth the trades peak ~15°, the calm sits at the 30° Hadley edge and the
+/// westerlies peak ~50°, but a faster/slower rotator moves them.
+pub(crate) fn base_speed(abs_lat: f32, circ: &Circulation) -> f32 {
+    let bs = circ.belt_scale();
+    let fs = circ.front_scale();
     let doldrums = 2.5;
-    let trades = 6.0 * gauss(abs_lat, 15.0, 9.0);
-    let westerlies = 9.0 * gauss(abs_lat, 50.0, 13.0);
-    let calm = 3.0 * gauss(abs_lat, 30.0, 5.5); // horse-latitude dip
+    // Trades peak at half the Hadley-edge latitude (15° on Earth).
+    let trades = 6.0 * gauss(abs_lat, 0.5 * circ.hadley_edge, 9.0 * bs);
+    // Westerlies peak between the two belts — exactly 50° on Earth (⁵⁰⁄₆₀·front).
+    let westerlies = 9.0 * gauss(abs_lat, (50.0 / 60.0) * circ.polar_front, 13.0 * fs);
+    // Horse-latitude calm sits on the Hadley edge (30° on Earth).
+    let calm = 3.0 * gauss(abs_lat, circ.hadley_edge, 5.5 * bs);
     (doldrums + trades + westerlies - calm).max(1.5)
 }
 
@@ -120,11 +129,13 @@ pub fn compute_low_level_jets(buf: &mut WorldBuffer) {
         buf.wind_speed = vec![0.0; n];
     }
 
+    let circ = Circulation::for_world(buf);
+
     // â”€â”€ Pass 1: base speed Ã— terrain Ã— channeling (barrier / gap / monsoon) â”€â”€
     let mut speed = vec![0.0f32; n];
     for y in 0..h {
         let abs_lat = buf.abs_latitude(y);
-        let base = base_speed(abs_lat);
+        let base = base_speed(abs_lat, &circ);
         for x in 0..w {
             let i = buf.idx(x, y);
             let wvx = buf.wind_vx[i];

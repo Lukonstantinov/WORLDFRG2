@@ -1,5 +1,6 @@
 ﻿use crate::sim::koppen::seasonal_range_base;
 use super::ocean::belt_wind;
+use super::circulation::Circulation;
 use crate::sim::world_buffer::WorldBuffer;
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -110,11 +111,12 @@ pub fn compute_seasonal_wind(buf: &WorldBuffer, sun_sign: f32) -> SeasonalWind {
     let anom = a;
 
     // â”€â”€ Belt wind + monsoon perturbation â”€â”€
+    let circ = Circulation::for_world(buf);
     let mut vx = vec![0.0f32; n];
     let mut vy = vec![0.0f32; n];
     for y in 0..h {
         let lat = buf.latitude(y);
-        let (bvx, bvy) = belt_wind(lat);
+        let (bvx, bvy) = belt_wind(lat, &circ);
         // Coriolis rotation of the cross-isobaric inflow: 0 at the equator (pure
         // down-gradient), growing to a partial deflection by mid-latitudes. Sign is
         // hemisphere-dependent (surface air spirals into a low counter-clockwise in
