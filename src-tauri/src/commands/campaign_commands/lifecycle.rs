@@ -801,6 +801,12 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         failed_expeditions: vec![],
         corridors: vec![],
         next_expedition_id: 0,
+        prov_rural: vec![],
+        prov_cap: vec![],
+        prov_culture: vec![],
+        prov_seat: vec![],
+        hub_province: vec![],
+        prov_net_mig: vec![],
     };
     // Backfill the colonization pool if the saved economy predates the feature (its
     // `colonizable_sites` deserialized to the serde default — empty). Without this a
@@ -839,9 +845,75 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
     sim.rebuild_routes();
     sim.ensure_hub_cultures(); // seed each hub's majority people from the culture map
     sim.seed_initial_guilds(); // civic guilds for cities already ≥ 50k people
+    // Provinces (Phase 2b): seed the rural reservoir from the stored partition so the
+    // countryside can feed the cities. No-op when no province layer was generated.
+    seed_campaign_provinces(&conn, &mut sim);
     set_sim(&db, &sim)?;
     persist_campaign(&db, &conn)?; // write the fresh campaign to the DB immediately
     Ok(build_snapshot(&sim))
+}
+
+/// Load the stored province partition + raster and seed the campaign's rural
+/// demography (per-province reservoir, capacity, culture, seat) and each hub's
+/// province membership. Does nothing if no province layer exists — so campaigns on
+/// worlds without provinces run exactly as before.
+fn seed_campaign_provinces(conn: &Connection, sim: &mut CampaignSim) {
+    let provs: Vec<crate::sim::provinces::Province> = match metadata::get_meta(conn, "provinces") {
+        Ok(Some(s)) => serde_json::from_str(&s).unwrap_or_default(),
+        _ => return,
+    };
+    if provs.is_empty() { return; }
+    let (rw, _rh, gw, gh, raster): (u32, u32, u32, u32, Vec<u16>) =
+        match metadata::get_meta(conn, "province_raster") {
+            Ok(Some(s)) => serde_json::from_str(&s).unwrap_or((0, 0, 0, 0, Vec::new())),
+            _ => (0, 0, 0, 0, Vec::new()),
+        };
+    let n = provs.iter().map(|p| p.id as usize + 1).max().unwrap_or(0);
+    let mut rural = vec![0.0f32; n];
+    let mut cap = vec![0.0f32; n];
+    let mut culture = vec![String::new(); n];
+    let mut seat = vec![[0.0f32; 2]; n];
+    for p in &provs {
+        let i = p.id as usize;
+        // The land's rural CAPACITY comes from its food potential (same baseline the
+        // panel shows); start the countryside partly filled so it has room to grow.
+        cap[i] = (p.rural_pop as f32).max(50.0);
+        rural[i] = cap[i] * 0.6;
+        culture[i] = p.culture.clone();
+        seat[i] = [p.seat_x as f32, p.seat_y as f32];
+    }
+    // Map each existing hub to its province via the raster (exact); fall back to
+    // nearest seat when the raster is missing.
+    let step = if gw == 0 { 1 } else { ((gw.max(gh) + 383) / 384).max(1) };
+    let hub_prov: Vec<i32> = sim.hubs.iter().map(|h| {
+        if !raster.is_empty() && gw > 0 && gh > 0 {
+            let hx = (h.x.max(0.0) as u32).min(gw - 1);
+            let hy = (h.y.max(0.0) as u32).min(gh - 1);
+            let ri = ((hy / step) * rw + (hx / step)) as usize;
+            if let Some(&pid) = raster.get(ri) {
+                if pid != crate::sim::provinces::NO_PROVINCE { return pid as i32; }
+            }
+        }
+        nearest_seat(&seat, h.x, h.y, sim.world_w)
+    }).collect();
+    sim.prov_rural = rural;
+    sim.prov_cap = cap;
+    sim.prov_culture = culture;
+    sim.prov_seat = seat;
+    sim.hub_province = hub_prov;
+    sim.prov_net_mig = vec![0.0; n];
+}
+
+/// Nearest province seat to (x,y), cylindrical in X. -1 if no seats.
+fn nearest_seat(seat: &[[f32; 2]], x: f32, y: f32, world_w: f32) -> i32 {
+    let mut best = (-1i32, f32::INFINITY);
+    for (i, s) in seat.iter().enumerate() {
+        let mut dx = (s[0] - x).abs();
+        if world_w > 1.0 && dx > world_w / 2.0 { dx = world_w - dx; }
+        let d = dx * dx + (s[1] - y) * (s[1] - y);
+        if d < best.1 { best = (i as i32, d); }
+    }
+    best.0
 }
 
 

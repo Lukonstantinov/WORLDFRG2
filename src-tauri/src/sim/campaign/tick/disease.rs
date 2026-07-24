@@ -433,6 +433,10 @@ impl CampaignSim {
             self.sample_culture_history();
         }
         if self.tick % 365 == 0 {
+            // Phase 2b · watershed demography: the province countryside grows and feeds
+            // its cities (migration carries culture); big cities pay a graveyard mortality.
+            // No-op unless a province layer was seeded into the campaign.
+            self.province_demography_pass();
             // Yearly social mobility: strata shift with prosperity / hardship.
             self.update_society();
             // Then the people may stir: unrest builds, riots flare, revolts topple

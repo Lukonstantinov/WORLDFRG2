@@ -73,6 +73,106 @@ impl CampaignSim {
     }
 
 
+    /// Phase 2b · WATERSHED DEMOGRAPHY (yearly). The province countryside is a living
+    /// population reservoir: it grows toward the land's carrying capacity, then sheds its
+    /// surplus into the cities that stand in (and administer) it — carrying its people's
+    /// CULTURE with them. The largest cities also pay an "urban graveyard" mortality
+    /// (crowding + endemic disease), so a metropolis genuinely DEPENDS on a fed hinterland
+    /// to hold its numbers. Entirely gated on a seeded province layer, so a world without
+    /// provinces (and the dynamics test) is unaffected.
+    pub(crate) fn province_demography_pass(&mut self) {
+        let np = self.prov_rural.len();
+        if np == 0 { return; }
+        // Self-heal membership for any hubs founded since the last pass (colonies,
+        // swarm towns, resettled ruins) so they join their province's reservoir.
+        if self.hub_province.len() < self.hubs.len() {
+            let start = self.hub_province.len();
+            let assigns: Vec<i32> = (start..self.hubs.len())
+                .map(|h| self.province_at(self.hubs[h].x, self.hubs[h].y)).collect();
+            self.hub_province.resize(self.hubs.len(), -1);
+            for (i, h) in (start..self.hubs.len()).enumerate() { self.hub_province[h] = assigns[i]; }
+        }
+        self.prov_net_mig = vec![0.0; np];
+        // 1. Rural natural increase toward capacity (Malthusian check above it).
+        for p in 0..np {
+            let cap = self.prov_cap.get(p).copied().unwrap_or(0.0).max(1.0);
+            let r = self.prov_rural[p];
+            if r < cap {
+                self.prov_rural[p] = (r + RURAL_GROWTH * r * (1.0 - r / cap)).max(0.0);
+            } else {
+                self.prov_rural[p] = (r * (1.0 - 0.004)).max(cap * 0.5);
+            }
+        }
+        // 2. Urban graveyard: the biggest cities lose a little population naturally each
+        //    year (crowding + disease), softened by public health. Migration (below) is
+        //    what lets them hold and grow.
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            let pop = self.hubs[h].population;
+            if pop <= URBAN_CROWD_FLOOR { continue; }
+            let crowd = ((pop - URBAN_CROWD_FLOOR) / 120_000.0).clamp(0.0, 1.0);
+            let health = self.hubs[h].public_health.clamp(0.0, 1.0);
+            let mort = URBAN_CROWDING_MORTALITY * crowd * (1.0 - 0.6 * health);
+            self.hubs[h].population = (pop * (1.0 - mort)).max(1.0);
+        }
+        // 3. Rural → urban migration, per province, weighted by each city's OPPORTUNITY
+        //    (prosperity · fed · commercial standing). People flow to where life is better.
+        // Group live member hubs per province.
+        let mut members: Vec<Vec<usize>> = vec![Vec::new(); np];
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned || self.hubs[h].population < 1.0 { continue; }
+            if let Some(&pid) = self.hub_province.get(h) {
+                if pid >= 0 && (pid as usize) < np { members[pid as usize].push(h); }
+            }
+        }
+        for p in 0..np {
+            if members[p].is_empty() { continue; }
+            let cap = self.prov_cap[p].max(1.0);
+            let r = self.prov_rural[p];
+            if r < 20.0 { continue; }
+            // Opportunity pull per member city.
+            let mut pulls: Vec<(usize, f32)> = Vec::with_capacity(members[p].len());
+            let mut total = 0.0f32;
+            for &h in &members[p] {
+                let hub = &self.hubs[h];
+                let prosp = hub.sent_prosperity.clamp(0.0, 1.0);
+                let fed = (1.0 - hub.starving).clamp(0.0, 1.0);
+                let pull = (0.15 + prosp) * fed * (1.0 + 0.4 * hub.hub_class as f32);
+                if pull > 0.0 { pulls.push((h, pull)); total += pull; }
+            }
+            if total <= 0.0 { continue; }
+            // Out-migration: a fraction of the pool, larger the fuller the countryside is.
+            let pressure = (r / cap).clamp(0.0, 1.0);
+            let out = (r * RURAL_MIGRATION_RATE * (0.3 + 0.7 * pressure)).min(r * 0.5);
+            if out < 1.0 { continue; }
+            let culture = self.prov_culture.get(p).cloned().unwrap_or_default();
+            for (h, pull) in pulls {
+                let share = out * pull / total;
+                if share < 0.5 { continue; }
+                self.hubs[h].population += share;
+                // Migrants carry the province's people into the city (culture mixing).
+                if !culture.is_empty() { self.add_minority(h, &culture, share); }
+            }
+            self.prov_rural[p] -= out;
+            self.prov_net_mig[p] = -out; // the countryside is a net source this year
+        }
+    }
+
+    /// The province id a world cell (x,y) falls in, via the nearest seat (used to place
+    /// campaign-founded hubs). -1 when no province layer is seeded.
+    pub(crate) fn province_at(&self, x: f32, y: f32) -> i32 {
+        if self.prov_seat.is_empty() { return -1; }
+        let mut best = (-1i32, f32::INFINITY);
+        for (i, s) in self.prov_seat.iter().enumerate() {
+            let mut dx = (s[0] - x).abs();
+            if self.world_w > 1.0 && dx > self.world_w / 2.0 { dx = self.world_w - dx; }
+            let d = dx * dx + (s[1] - y) * (s[1] - y);
+            if d < best.1 { best = (i as i32, d); }
+        }
+        best.0
+    }
+
+
     /// Update each hub's mood and its three drivers (food / prosperity /
     /// stability), easing toward a target so the mood drifts rather than jumps.
     pub(crate) fn update_sentiment(&mut self) {

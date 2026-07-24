@@ -105,7 +105,7 @@ export function ProvincePanel() {
       const urban = urbanOf.get(p.id) ?? 0;
       switch (sort) {
         case "area": return p.area_km2;
-        case "rural": return p.rural_pop;
+        case "rural": return live?.get(p.id)?.rural_pop ?? p.rural_pop;
         case "urban": return urban;
         case "quality": return p.goods[0]?.quality ?? 0;
         case "fertility": return p.mean_fertility;
@@ -114,7 +114,7 @@ export function ProvincePanel() {
     };
     list.sort((a, b) => (desc ? val(b) - val(a) : val(a) - val(b)));
     return list;
-  }, [provinces, cultureFilter, cityFilter, goodFilter, sort, desc, urbanOf]);
+  }, [provinces, cultureFilter, cityFilter, goodFilter, sort, desc, urbanOf, live]);
 
   const selected = useMemo(
     () => provinces.find((p) => p.id === selId) ?? rows[0] ?? null,
@@ -243,8 +243,13 @@ export function ProvincePanel() {
                     </div>
 
                     <Row k="Area" v={`${fmt(selected.area_km2)} km²`} />
-                    <Row k="Rural" v={fmt(selected.rural_pop)} />
+                    <Row k="Rural" v={fmt(live?.get(selected.id)?.rural_pop ?? selected.rural_pop)} />
                     <Row k="Urban" v={urban ? fmt(urban) : "—"} />
+                    {(() => {
+                      const nm = live?.get(selected.id)?.net_migration ?? 0;
+                      if (nm >= 0) return null;
+                      return <Row k="Migration" v={`↗ ${fmt(-nm)}/yr to cities`} />;
+                    })()}
                     <Row k="Total" v={fmt(totalPop(selected))} />
                     <Row k="Fertility" v={selected.mean_fertility.toFixed(2)} />
 

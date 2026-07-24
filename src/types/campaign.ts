@@ -1800,6 +1800,7 @@ export interface ProvinceLive {
   rural_pop: number;
   urban_pop: number;
   hub_count: number;
+  net_migration: number; // <0 = countryside is a source (people leaving for cities)
 }
 
 /** Result of `sim_generate_provinces`: the province list + a downsampled per-cell

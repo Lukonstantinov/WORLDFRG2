@@ -799,6 +799,9 @@ pub struct ProvinceLive {
     pub rural_pop: u32,
     pub urban_pop: u32,
     pub hub_count: u32,
+    /// Net migration this year: negative = the countryside is a SOURCE (people
+    /// leaving for the cities), ~0 = settled. (Phase 2b.)
+    pub net_migration: i32,
 }
 
 #[tauri::command]
@@ -814,9 +817,15 @@ pub fn campaign_province_state(db: State<'_, WorldDb>) -> Result<Vec<ProvinceLiv
             .unwrap_or((0, 0, 0, 0, Vec::new()));
     let mut urban = std::collections::HashMap::<u16, u32>::new();
     let mut hubs = std::collections::HashMap::<u16, u32>::new();
+    // Live rural pool (Phase 2b): read the sim's per-province reservoir when present,
+    // else fall back to each province's static baseline.
+    let mut live_rural: Vec<f32> = Vec::new();
+    let mut net_mig: Vec<f32> = Vec::new();
     if !raster.is_empty() && gw > 0 && gh > 0 {
         let step = ((gw.max(gh) + 383) / 384).max(1);
         if let Some(sim) = crate::commands::campaign_commands::get_sim(&db, &conn)? {
+            if !sim.prov_rural.is_empty() { live_rural = sim.prov_rural.clone(); }
+            net_mig = sim.prov_net_mig.clone();
             for hub in sim.hubs.iter() {
                 if hub.is_estate || hub.abandoned || hub.population < 1.0 { continue; }
                 let hx = (hub.x.max(0.0) as u32).min(gw - 1);
@@ -833,8 +842,9 @@ pub fn campaign_province_state(db: State<'_, WorldDb>) -> Result<Vec<ProvinceLiv
     }
     Ok(provinces.iter().map(|p| ProvinceLive {
         id: p.id,
-        rural_pop: p.rural_pop,
+        rural_pop: live_rural.get(p.id as usize).map(|&r| r.max(0.0) as u32).unwrap_or(p.rural_pop),
         urban_pop: urban.get(&p.id).copied().unwrap_or(0),
         hub_count: hubs.get(&p.id).copied().unwrap_or(0),
+        net_migration: net_mig.get(p.id as usize).map(|&m| m as i32).unwrap_or(0),
     }).collect())
 }

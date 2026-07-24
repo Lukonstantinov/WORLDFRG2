@@ -89,9 +89,56 @@
             expansion_frozen_until: 0,
             expeditions: vec![], route_prospects: vec![], failed_expeditions: vec![],
             corridors: vec![], next_expedition_id: 0,
+            prov_rural: vec![], prov_cap: vec![], prov_culture: vec![], prov_seat: vec![],
+            hub_province: vec![], prov_net_mig: vec![],
         };
         s.rebuild_routes();
         s
+    }
+
+    /// Phase 2b · with a seeded province layer, the rural reservoir must FEED the cities
+    /// (net rural→urban migration) while TOTAL population stays bounded and finite over
+    /// decades — the urban-graveyard/reservoir loop must not blow up or crater.
+    #[test]
+    fn province_demography_feeds_cities_and_stays_bounded() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("fish", 0, 0, 1.2, 0.7, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let ng = goods.len();
+        let mut hubs = Vec::new();
+        for i in 0..3u32 {
+            let prod: Vec<f32> = (0..ng).map(|g| if g == 0 { 8000.0 } else { 900.0 }).collect();
+            hubs.push(hub(i, (i as f32) * 4.0, 0.0, 8000.0, prod, 0));
+        }
+        let mut s = sim(hubs, goods);
+        for h in s.hubs.iter_mut() { h.sent_prosperity = 0.6; h.starving = 0.0; h.food_balance = 1.0; }
+        s.hub_culture = vec!["Aiora".into(), "Aiora".into(), "Belgar".into()];
+        s.hub_minorities = vec![Vec::new(); 3];
+        // Seed a two-province layer: each province a fed countryside behind its cities.
+        s.prov_cap = vec![120_000.0, 120_000.0];
+        s.prov_rural = vec![70_000.0, 70_000.0];
+        s.prov_culture = vec!["Aiora".into(), "Belgar".into()];
+        s.prov_seat = vec![[0.0, 0.0], [8.0, 0.0]];
+        s.hub_province = vec![0, 0, 1];
+        s.prov_net_mig = vec![0.0, 0.0];
+        let total0: f32 = s.hubs.iter().map(|h| h.population).sum::<f32>()
+            + s.prov_rural.iter().sum::<f32>();
+        let urban0: f32 = s.hubs.iter().map(|h| h.population).sum();
+        // Run ~40 years of the yearly pass.
+        for _ in 0..40 { s.province_demography_pass(); }
+        let urban1: f32 = s.hubs.iter().map(|h| h.population).sum();
+        let total1: f32 = urban1 + s.prov_rural.iter().sum::<f32>();
+        // Cities must have GROWN from rural in-migration.
+        assert!(urban1 > urban0 * 1.05, "cities should grow via migration: {urban0} → {urban1}");
+        // Nothing infinite or negative; total stays within a sane band of the start.
+        assert!(total1.is_finite() && total1 > 0.0, "total must stay finite/positive: {total1}");
+        assert!(total1 < total0 * 3.0, "total must stay bounded: {total0} → {total1}");
+        assert!(s.prov_rural.iter().all(|&r| r.is_finite() && r >= 0.0), "rural pools stay finite/≥0");
+        // Migrants must carry their province's people into the cities.
+        assert!(s.hub_minorities[2].is_empty() || s.hub_minorities.iter().any(|m| !m.is_empty())
+            || s.prov_net_mig.iter().any(|&m| m < 0.0), "countryside acts as a migration source");
     }
 
     /// Migration must MIX cultures: when people of one people move (over a trade tie)

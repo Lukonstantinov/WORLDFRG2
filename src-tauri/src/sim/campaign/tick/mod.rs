@@ -258,6 +258,21 @@ const HUB_PULL_MAX: f32 = 3.5;          // cap so one metropolis can't pull the 
 /// approach-to-capacity, and only while below capacity, so wealth/pop stay bounded.
 const BIRTH_RATE: f32 = 0.00006;   // ~+2.2%/yr at full food security
 const DEATH_RATE_BASE: f32 = 0.00002; // ~-0.7%/yr baseline mortality
+// ── Provinces (Phase 2b · watershed demography) ─ all gated on a seeded province
+//    layer, so the dynamics test (which never seeds provinces) is untouched. ──
+/// Yearly rural natural increase toward the province's carrying capacity (pre-modern
+/// countryside grows slowly, then hits a Malthusian ceiling).
+const RURAL_GROWTH: f32 = 0.010;
+/// Yearly share of a province's rural pool that migrates to its cities at full
+/// pressure (a fuller countryside pushes harder; a stagnant one barely sheds people).
+const RURAL_MIGRATION_RATE: f32 = 0.030;
+/// Max yearly natural DECLINE of the very largest cities from crowding + endemic
+/// disease (the "urban graveyard"): absent in-migration a metropolis shrinks, so it
+/// depends on a fed hinterland. Public health mitigates it.
+const URBAN_CROWDING_MORTALITY: f32 = 0.012;
+/// Above this population the urban-graveyard mortality begins to bite (ramps to full
+/// by ~+120k over it).
+const URBAN_CROWD_FLOOR: f32 = 25_000.0;
 /// Young settlement colonies grow this much faster organically (frontier boom).
 const POP_GROWTH_COLONY_MULT: f32 = 2.2;
 /// Below this population a settlement is a "small city" (user growth/disease rules).
@@ -3052,6 +3067,23 @@ pub struct CampaignSim {
     /// Next expedition id to hand out.
     #[serde(default)]
     pub next_expedition_id: u32,
+    // ── Provinces (Phase 2b · watershed demography) ─────────────────────────────
+    // All serde-defaulted → old saves AND the dynamics test (which never seeds
+    // provinces) load with these EMPTY, and every province routine early-returns on
+    // empty, so the base economy is completely unchanged unless a world's province
+    // partition has been seeded into the campaign (real games via campaign_start_sim).
+    /// Rural (countryside) population per province id — the migration reservoir.
+    #[serde(default)] pub prov_rural: Vec<f32>,
+    /// Rural carrying capacity per province id (from the land's food potential).
+    #[serde(default)] pub prov_cap: Vec<f32>,
+    /// Province majority culture (the identity migrants carry into the cities).
+    #[serde(default)] pub prov_culture: Vec<String>,
+    /// Province seat (x,y), for assigning campaign-founded hubs by nearest seat.
+    #[serde(default)] pub prov_seat: Vec<[f32; 2]>,
+    /// Each hub's province id (-1 = unknown / unmapped).
+    #[serde(default)] pub hub_province: Vec<i32>,
+    /// Rolling net migration per province this year (source<0 / sink>0), for the panel.
+    #[serde(default)] pub prov_net_mig: Vec<f32>,
 }
 
 /// Deterministic 0..1 hash of three mixed inputs (splitmix64).
