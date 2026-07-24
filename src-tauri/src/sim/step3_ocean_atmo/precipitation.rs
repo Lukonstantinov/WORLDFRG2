@@ -409,11 +409,18 @@ fn monsoon_onshore(buf: &WorldBuffer, x: u32, y: u32, sea_suppress: &[f32]) -> f
 /// is the main thing standing between a realistic temperate belt and a runaway
 /// band of steppe. Broadened (was 35-60Â°) and strengthened accordingly.
 fn frontal_bonus(abs_lat: f32, near_ocean: bool) -> f32 {
-    if abs_lat < 30.0 || abs_lat > 66.0 { return 0.0; }
-    let weight = if abs_lat < 45.0 { (abs_lat - 30.0) / 15.0 }
+    if abs_lat < 25.0 || abs_lat > 66.0 { return 0.0; }
+    // Ramp in from the subtropical margin (25°) so humid-subtropical (Cfa) and the
+    // Mediterranean fringe get their storm-track / winter-cyclone moisture — the
+    // real reason those zones are temperate rather than arid. Full across the core
+    // storm track (42–52°), tapering to the polar front. The summer half of this is
+    // still blocked over the subtropics by the Mediterranean/subtropical-high term
+    // in season_precip, so widening it adds mostly WINTER rain and does not flood
+    // the summer subtropical deserts.
+    let weight = if abs_lat < 42.0 { (abs_lat - 25.0) / 17.0 }
         else if abs_lat <= 52.0 { 1.0 }
         else { (1.0 - (abs_lat - 52.0) / 14.0).max(0.0) };
-    let base = if near_ocean { 550.0 } else { 360.0 };
+    let base = if near_ocean { 600.0 } else { 430.0 };
     base * weight
 }
 
@@ -816,9 +823,11 @@ fn season_precip(
             // jet entrance (jet_dry < 0.65) sits below 20Â° latitude, simulate
             // the same moisture-removal and convective suppression that a cold
             // coast would produce.  Gated to exclude cells already flagged cold.
-            // Extended to 28° — Omani/Yemeni coasts (22-26°N) sit in the same
-            // Somali-jet divergence zone as the Horn; they should be equally arid.
-            let has_jet_upwelling = !ctx.cold_coast[idx] && jet_dry < 0.65 && abs_lat < 28.0;
+            // The drying belt is the tropics/subtropics generally (jet entrances
+            // over warm coasts): expressed in belt-space latitude so it follows the
+            // planet's circulation instead of a fixed Earth degree. On Earth
+            // (belt_scale = 1) this is the same 28° that fits the Somali/Arabian coast.
+            let has_jet_upwelling = !ctx.cold_coast[idx] && jet_dry < 0.65 && abl < 28.0;
             if has_jet_upwelling {
                 moisture *= COLD_COAST_DRYING;
                 conv_suppress *= 0.5;
@@ -843,13 +852,14 @@ fn season_precip(
             } else {
                 1.0
             };
-            // Dry corridor at 7-17° (Horn of Africa / Gulf of Aden coast).
-            // Arid due to Somali jet divergence + blocked equatorial ocean, NOT
-            // the standard Hadley high. Driest in boreal summer (peak jet season)
-            // so it must NOT be weakened by hadley_summer_factor — kept separate.
-            // Bell curve peaking at 12°N (Horn tip) for strong suppression.
-            let hadley_ext = if abs_lat > 7.0 && abs_lat < 17.0 && conv_floor <= 0.30 {
-                (1.0 - ((abs_lat - 12.0) / 5.0).abs()).max(0.0) * 0.80
+            // Dry corridor in the outer-tropics where a jet diverges over a coast
+            // whose equatorward fetch is blocked by land (the conv_floor<=0.30 gate —
+            // the Horn-of-Africa / Gulf-of-Aden geometry). Arid from jet divergence +
+            // blocked equatorial ocean, NOT the standard Hadley high, so it is kept
+            // separate from hadley_summer_factor. Expressed in belt-space latitude
+            // (a bell peaking at 12° on Earth) so it rides the circulation.
+            let hadley_ext = if abl > 7.0 && abl < 17.0 && conv_floor <= 0.30 {
+                (1.0 - ((abl - 12.0) / 5.0).abs()).max(0.0) * 0.80
             } else {
                 0.0
             };

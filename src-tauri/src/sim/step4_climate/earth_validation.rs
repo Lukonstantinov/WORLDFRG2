@@ -110,6 +110,10 @@ fn earth_koppen_agreement() {
     let mut w_exact = 0.0f64; // area-weighted exact-zone matches
     // Per-reference-main-class agreement, to see WHERE it agrees/disagrees.
     let mut per_ref: std::collections::BTreeMap<u8, (f64, f64)> = std::collections::BTreeMap::new();
+    // Confusion: reference main letter → generated main letter (area weight).
+    let letters = [b'A', b'B', b'C', b'D', b'E'];
+    let li = |l: u8| letters.iter().position(|&c| c == l).unwrap_or(5);
+    let mut confusion = [[0.0f64; 6]; 5]; // [ref][gen], col 5 = H/other
 
     for y in 0..H {
         let lat = buf.latitude(y as u32);
@@ -129,6 +133,7 @@ fn earth_koppen_agreement() {
             let ent = per_ref.entry(rl).or_insert((0.0, 0.0));
             ent.0 += wt * m;
             ent.1 += wt;
+            if li(rl) < 5 { confusion[li(rl)][li(gl).min(5)] += wt; }
         }
     }
 
@@ -140,6 +145,16 @@ fn earth_koppen_agreement() {
     println!("  by reference main class:");
     for (letter, (hit, tot)) in &per_ref {
         println!("    {}: {:.1}%  (weight {:.0})", *letter as char, 100.0 * hit / tot, tot);
+    }
+    println!("  confusion  ref↓ gen→   A     B     C     D     E     H/·");
+    for (r, row) in confusion.iter().enumerate() {
+        let tot: f64 = row.iter().sum();
+        if tot <= 0.0 { continue; }
+        print!("    {}          ", letters[r] as char);
+        for v in row.iter() {
+            print!("{:5.0}% ", 100.0 * v / tot);
+        }
+        println!();
     }
     println!("════════════════════════════════════════════════════════\n");
 
