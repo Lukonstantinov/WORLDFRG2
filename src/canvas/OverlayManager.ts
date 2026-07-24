@@ -161,6 +161,18 @@ const OXBOW_COLOR = "rgba(64, 150, 150, 0.72)";
 /** Lake fill by character: oxbow backwater, then a brine ramp toward the vivid
  *  pink of a hypersaline lake (halophile / Dunaliella bloom — Lake Retba, the
  *  Great Salt Lake north arm), else open blue water. */
+/** Deterministic province tint keyed by CULTURE, so provinces of one people read
+ *  as a colour family (the EU4-style political map). */
+function cultureColor(culture: string): string {
+  let h = 2166136261 >>> 0;
+  const s = culture || "—";
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  const hue = h % 360;
+  const sat = 45 + (h >>> 9) % 25;   // 45–70%
+  const lig = 42 + (h >>> 17) % 14;  // 42–56%
+  return `hsl(${hue}, ${sat}%, ${lig}%)`;
+}
+
 function lakeFill(lake: LakeData): string {
   if (lake.kind === 1) return OXBOW_COLOR;
   const s = lake.salinity_ppt ?? 0;
@@ -244,6 +256,8 @@ export class OverlayManager {
   private heatPoints: { x: number; y: number; v: number }[] = [];
   /** Atlas 2.0 · named trade basins (member positions hulled + labelled). */
   private basins: { name: string; pts: [number, number][]; cx: number; cy: number }[] = [];
+  private provinceRaster: { data: number[]; w: number; h: number; gridW: number; gridH: number } | null = null;
+  private provinceFill: string[] = [];
   /** Atlas 2.0 · refugee roads (age01 = 0 fresh … 1 faded out). */
   private migrations: { fx: number; fy: number; tx: number; ty: number; age: number }[] = [];
   /** Settlement (cell coords) currently under the cursor — drawn as a shiny ring. */
@@ -385,6 +399,18 @@ export class OverlayManager {
   drawTradeHeat(pts: { x: number; y: number; v: number }[]) { this.heatPoints = pts; }
   /** Atlas 2.0 · set the named trade basins. */
   drawTradeBasins(b: { name: string; pts: [number, number][]; cx: number; cy: number }[]) { this.basins = b; }
+
+  /** Province partition overlay: a downsampled per-cell province-id raster + a
+   *  per-province fill colour (keyed by culture) for the political/goods map. */
+  updateProvinces(
+    raster: { data: number[]; w: number; h: number; gridW: number; gridH: number } | null,
+    provinces: { id: number; culture: string }[],
+  ) {
+    this.provinceRaster = raster;
+    const fill: string[] = [];
+    for (const p of provinces) fill[p.id] = cultureColor(p.culture);
+    this.provinceFill = fill;
+  }
   /** Atlas 2.0 · set the refugee roads (age01 0 = fresh, 1 = fully faded). */
   drawMigrations(m: { fx: number; fy: number; tx: number; ty: number; age: number }[]) { this.migrations = m; }
 
@@ -1106,9 +1132,54 @@ export class OverlayManager {
   }
 
   /** Render all overlays to a 2D context (called within viewport transform) */
+  /** Draw the province partition: culture-tinted fills + dark natural borders,
+   *  from the downsampled id raster (canvas is already in world-cell space). */
+  private renderProvinces(ctx: CanvasRenderingContext2D) {
+    const r = this.provinceRaster;
+    if (!r) return;
+    const { data, w, h, gridW, gridH } = r;
+    const sx = gridW / w;
+    const sy = gridH / h;
+    const NO = 65535;
+    // Fills.
+    ctx.globalAlpha = 0.34;
+    for (let ry = 0; ry < h; ry++) {
+      for (let rx = 0; rx < w; rx++) {
+        const id = data[ry * w + rx];
+        if (id === NO) continue;
+        ctx.fillStyle = this.provinceFill[id] ?? "#7a8a99";
+        ctx.fillRect(rx * sx, ry * sy, sx + 0.6, sy + 0.6);
+      }
+    }
+    ctx.globalAlpha = 1;
+    // Borders: an edge wherever the province id changes (right / down neighbour).
+    ctx.strokeStyle = "rgba(8, 14, 20, 0.7)";
+    ctx.lineWidth = Math.max(0.5, 1.4 / Math.sqrt(this.currentScale));
+    ctx.beginPath();
+    for (let ry = 0; ry < h; ry++) {
+      for (let rx = 0; rx < w; rx++) {
+        const id = data[ry * w + rx];
+        if (id === NO) continue;
+        if (rx + 1 < w && data[ry * w + rx + 1] !== id) {
+          const x = (rx + 1) * sx;
+          ctx.moveTo(x, ry * sy); ctx.lineTo(x, (ry + 1) * sy);
+        }
+        if (ry + 1 < h && data[(ry + 1) * w + rx] !== id) {
+          const y = (ry + 1) * sy;
+          ctx.moveTo(rx * sx, y); ctx.lineTo((rx + 1) * sx, y);
+        }
+      }
+    }
+    ctx.stroke();
+  }
+
   render(ctx: CanvasRenderingContext2D) {
     // Fresh label-collision map each frame (settlement + toponym passes share it).
     this.placedLabels = [];
+    // Provinces underlie everything (a base political/economic layer).
+    if (this.visibility.provinces && this.provinceRaster) {
+      this.renderProvinces(ctx);
+    }
     // Trade-region territories first (under everything else) so markers/routes
     // stay legible on top.
     if (this.visibility.tradeRegions && this.econRegions.length > 0) {

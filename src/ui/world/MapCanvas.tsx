@@ -53,6 +53,8 @@ export function MapCanvas() {
   const rivers = useWorldStore((s) => s.rivers);
   const lakes = useWorldStore((s) => s.lakes);
   const settlements = useWorldStore((s) => s.settlements);
+  const provinces = useWorldStore((s) => s.provinces);
+  const provinceRaster = useWorldStore((s) => s.provinceRaster);
   const economy = useWorldStore((s) => s.economy);
   const setEconomy = useWorldStore((s) => s.setEconomy);
   const activeLayer = useUIStore((s) => s.activeLayer);
@@ -715,6 +717,20 @@ export function MapCanvas() {
     om.setGoodMeta(new Map(goodsSpecs.map((g) => [g.id, { icon: g.icon, color: g.color }])));
     requestRender();
   }, [goodsSpecs, requestRender]);
+
+  // Province partition overlay (a separate layer, generated after settlements).
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.updateProvinces(
+      provinceRaster ? {
+        data: provinceRaster.data, w: provinceRaster.w, h: provinceRaster.h,
+        gridW: provinceRaster.gridW, gridH: provinceRaster.gridH,
+      } : null,
+      provinces.map((p) => ({ id: p.id, culture: p.culture })),
+    );
+    requestRender();
+  }, [provinces, provinceRaster, requestRender]);
 
   // Region↔region trade flows (routed + bundled trunks) — a product of the
   // Biological-Trade step, gated by the chosen trade reach.
