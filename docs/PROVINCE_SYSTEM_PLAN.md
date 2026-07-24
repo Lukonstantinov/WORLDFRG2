@@ -71,12 +71,19 @@ pub struct Province {
     pub mean_fertility: f32,
     pub food_capacity: f32,       // Σ compute_food_capacity → rural carrying capacity
     pub elevation_class: u8,      // 0 lowland · 1 hill · 2 upland
-    // ── economy (static potential) ──
-    pub primary_good: i32,        // dominant trade-good belt
-    pub minor_goods: Vec<u8>,
+    // ── economy — WHICH goods + WHAT QUALITY, never an "amount" ──
+    // Each good the province's land can yield, with an environmental-suitability
+    // QUALITY 0..1 (Phase 1: from the belt's good_score / fertility here; Phase 2:
+    // refined by real producer `quality`). The panel shows goods + quality stars,
+    // not tonnages.
+    pub goods: Vec<ProvinceGood>, // { good: u8, quality: f32 }, best-first
     // ── people (static baseline; campaign overrides live) ──
     pub culture0: String,         // founding plurality culture (hearth map)
     pub rural_pop0: u32,          // baseline rural population at finalize
+    // ── flavour (deterministic, generated) ──
+    pub analog: String,           // "looks most like…" real-world regions (§4.2)
+    // `history` short narrative is generated on the frontend (like settlementStory.ts)
+    // so it can weave in live culture/goods; see §4.2.
 }
 ```
 
@@ -94,9 +101,10 @@ pub struct ProvinceState {
     pub minorities: Vec<(String, f32)>,
     pub seat_hub: i32,            // hub id of the current seat, -1 if frontier
     pub town_hubs: Vec<u32>,      // all live settlements in the province
-    pub owner: i32,               // controlling polis/state (Phase 3), -1 = none
     pub unrest: f32,              // rural jacquerie pressure (Phase 2/3)
-    pub goods_output: Vec<f32>,   // realized primary-sector production
+    pub goods_quality: Vec<f32>,  // live producer quality per good (refines the static)
+    // NOTE: no `owner` field yet — provinces are UNOWNED for now (user decision).
+    // Political control is deferred to a later phase and deliberately left out.
 }
 ```
 
@@ -132,9 +140,13 @@ Substrate: the hydrology pass already yields per-cell **`flow_dir`** (`FLOW_SEA`
 4. **Grow — cost-flood** (multi-source Dijkstra from seeds). Step cost cheap
    within-basin/downhill; **expensive to cross** a ridgeline (filled-elevation gap), a
    **wide/navigable trunk river**, or a coast. Borders snap to watersheds, big rivers,
-   coasts. Wrap-aware.
+   coasts. Wrap-aware. A small **per-cell noise term** (deterministic value-noise) is
+   added to the step cost so borders **wobble organically** instead of tracing a clean
+   Voronoi/gradient line — see §4.3 for why this matters and how enclaves arise.
 5. **De-sliver.** Merge sub-threshold provinces into the neighbour they share the most
-   border with; deterministic tie-break by lowest id.
+   border with; deterministic tie-break by lowest id. Merging is by **shared-border
+   length, not simple connectivity**, so detached pockets are *not* forcibly
+   reattached — genuine **enclaves/exclaves** survive (§4.3).
 6. **Aggregate** static stats from the cells (§3.1); give the province **its own name**
    (§4.1).
 7. **Extract borders** — cells whose neighbour differs in `province_id` are border
@@ -165,6 +177,59 @@ Sinitic one Sinitic); a small chance of a **geographic suffix** in the local ton
 provinces collide, salt the loser's hash and regenerate. Implemented as
 `cultures::province_name(kit, seed, length_bucket)` alongside the existing name
 generators.
+
+### 4.2 History & real-world analog — the historian's blurb
+
+Each province carries two pieces of deterministic flavour:
+
+- **`analog`** — *"looks most like…"* a curated list of real-world regions, matched
+  from the province's `(koppen, elevation_class, coastal, primary good)` archetype.
+  Several examples per archetype so it reads rich, e.g.:
+  - **Mediterranean coast + wine/olives →** *Provence · Tuscany · the Levant coast ·
+    coastal Anatolia · Catalonia · the Peloponnese.*
+  - **Great river lowland + wheat/rice →** *the Nile Delta · the Po valley · the
+    Ganges plain · Mesopotamia · the Mekong · the lower Yangtze.*
+  - **Semi-arid hills + horses/wool →** *the Anatolian plateau · the Iberian meseta ·
+    the Iranian highlands · the Kazakh steppe · the Maghreb high plains.*
+  - **Cold conifer coast + stockfish/furs/timber →** *Norway · Newfoundland · the
+    Baltic shore · Hokkaidō · coastal Alaska · Kamchatka.*
+  - **Tropical wet + spices/sugar →** *Java · Kerala · the Caribbean · coastal Brazil ·
+    the Guinea coast · Sri Lanka.*
+  - **Desert oasis + dates/salt →** *the Saharan oases · the Arabian Nejd · the
+    Taklamakan rim · the Atacama · the Nile beyond the cataracts.*
+  - **Alpine upland + ore/gems →** *the Alps · the Andes · the Caucasus · the
+    Carpathians · the Ethiopian highlands · the Harz.*
+  - **Temperate oceanic plain + cloth/wheat →** *Flanders · the Île-de-France · the
+    English Midlands · the North German plain · the Ohio country.*
+  - **Savanna + grain/cattle/gold →** *the Sahel · the East African highlands · the
+    Deccan · the Llanos · the Guinea savanna.*
+  - (Extendable — the table is a plain match list; add archetypes freely.)
+- **`history`** — a 1–3 sentence account generated **on the frontend** (like
+  `settlementStory.ts`) so it can weave in *live* facts: the province's culture (and
+  whether it arrived by migration), its founding vs current majority, its signature
+  good and terrain, and whether it is a frontier, a crowded heartland, or a
+  contested march. Deterministic per seed; regenerates as culture shifts.
+
+### 4.3 Organic borders & enclaves — no straight lines
+
+Real administrative borders are jagged and occasionally discontinuous; a clean
+Voronoi map looks artificial. Three things keep ours believable, taking real
+provincial borders as the reference (German *Länder*, Swiss cantons, the old HRE,
+Italian *comuni*):
+
+- **Natural tracing.** The cost-flood already follows ridgelines, rivers and coasts,
+  which are themselves irregular — so borders inherit real terrain crinkle, not
+  geometry.
+- **Border noise (§4-step 4).** A small deterministic noise term on the crossing cost
+  makes the divide **wobble** a cell or two either side of the exact gradient, killing
+  any residual straight/Voronoi feel.
+- **Enclaves & exclaves.** Provinces are **not required to be simply-connected.** A
+  pocket that is cheapest-reached from a *distant* seat (an upland basin that drains
+  the "wrong" way, a valley town's hinterland across a trunk river) is left attached to
+  that seat, producing genuine enclaves — the *Büsingen / Baarle / Llívia / Campione /
+  Kaliningrad* pattern. A rare explicit pass can also gift a small detached pocket to a
+  province whose **culture or drainage** dominates it though it sits inside a neighbour.
+  Kept **rare and flavourful**, deterministic, wrap-aware.
 
 ---
 
@@ -250,16 +315,20 @@ provinces have 0–1 city**, multi-city only in genuinely dense breadbaskets.
 primary trade good (the goods map) · population (choropleth) · political owner (Phase
 3).
 
-### 9.2 Province panel (sortable + filterable)
-A `ProvincePanel` reading the live province array. **Sorts:** area, rural/urban/total
-population, primary-good amount, fertility. **Filters:** culture, climate,
-empty/frontier vs has-city, specific good. Row click → highlight on map + inspector.
-Layout variant chosen separately (see the schematic variants).
+### 9.2 Province panel — **Variant B "Split"** (approved)
+A `ProvincePanel`: a narrow ranked/filterable **list rail** on the left + a rich
+**detail card** on the right for the selected province.
+- **Sorts:** area, rural / urban / total population, **good quality**, fertility.
+  *(No good "amount" — provinces show WHICH goods and at WHAT QUALITY, never tonnage.)*
+- **Filters:** culture, climate, empty/frontier vs has-city, specific good.
+- Row click → highlight province on map + fill the detail card.
 
-### 9.3 Inspector
-Extend `InfoPanel` / add a province detail card: name, culture (+minorities), area,
-rural/urban/total pop, settlements (seat marked), primary/minor goods, fertility,
-climate, owner.
+### 9.3 Detail card (right pane of Variant B)
+Shows: name (own, variable-length) · **culture + minorities** (migration-driven, can
+differ from the founding culture) · area · rural / urban / total population · settlements
+(seat marked, subordinates listed) · **goods with quality stars** (no amount) · mean
+fertility · climate / terrain · **real-world analog** ("looks most like…") · **short
+history**. **No owner field** — provinces are unowned for now.
 
 ---
 
@@ -309,11 +378,17 @@ laid in Phase 1–2; simulation later. Cores/claims optional.
 
 ---
 
-## 14. Open decisions
+## 14. Decisions (locked) & open items
 
+**Locked (user):**
+- Panel layout = **Variant B "Split"** (list rail + detail card).
+- Goods shown as **which goods + quality**, never an amount/tonnage.
+- Culture is **migration-driven** and may differ from the founding culture.
+- **No province owner** yet (political control fully deferred).
+- Provinces carry a **short history** + a **real-world analog** blurb (§4.2).
+- Borders must be **organic (noise) with occasional enclaves/exclaves** (§4.3).
+- Provinces have **their own variable-length names** (§4.1).
+
+**Open:**
 1. Granularity: fixed default vs user slider (§8) — leaning **slider**.
-2. Panel layout — **pending variant approval** (ledger table / split list+card /
-   map-driven HUD).
-3. Which info fields ship by default in the panel vs inspector — pending the
-   include/exclude pass.
-4. km² conversion: expose real areas (lat-aware cell area) or abstract "size" units.
+2. km² conversion: expose real areas (lat-aware cell area) or abstract "size" units.
