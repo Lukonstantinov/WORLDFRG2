@@ -49,7 +49,7 @@ import { useWorldStore } from "@state/worldStore";
 import { useUIStore } from "@state/uiStore";
 import { useViewportStore } from "@state/viewportStore";
 import { useGoodsStore } from "@state/goodsStore";
-import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, persistOverlays, getOverlays, saveCampaignAs, openCampaign, newCampaign, finalizeWorld, getAppearance, getToponyms } from "@bridge";
+import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, persistOverlays, getOverlays, saveCampaignAs, openCampaign, newCampaign, finalizeWorld, getAppearance, getToponyms, getProvinceLayer } from "@bridge";
 import { useSettingsStore } from "@state/settingsStore";
 
 const EXPORTABLE_LAYERS: { id: string; label: string }[] = [
@@ -283,6 +283,7 @@ export default function App() {
   const setRivers = useWorldStore((s) => s.setRivers);
   const setLakes = useWorldStore((s) => s.setLakes);
   const setSettlements = useWorldStore((s) => s.setSettlements);
+  const setProvinces = useWorldStore((s) => s.setProvinces);
   const setEconomy = useWorldStore((s) => s.setEconomy);
   const setToponyms = useWorldStore((s) => s.setToponyms);
   const showWorkflow = useUIStore((s) => s.showWorkflow);
@@ -335,6 +336,14 @@ export default function App() {
         // #26 · toponyms (river/peak/lake/region names) — load them on OPEN so the
         // layer works in a campaign (they were only fetched in the Toponyms step).
         try { const tp = await getToponyms(); if (tp.length) { setToponyms(tp); useUIStore.getState().setOverlayVisible("toponyms", true); } } catch { /* none saved */ }
+        // Province partition — restore the list + overlay raster if one was generated.
+        try {
+          const pl = await getProvinceLayer();
+          if (pl.provinces?.length) {
+            setProvinces(pl.provinces, pl.raster?.length
+              ? { data: pl.raster, w: pl.raster_w, h: pl.raster_h, gridW: pl.grid_w, gridH: pl.grid_h } : null);
+          }
+        } catch { /* none saved */ }
         // Restore the persisted wizard progress; older saves never wrote it, so
         // fall back to inferring completion from which data is present.
         const restored = [

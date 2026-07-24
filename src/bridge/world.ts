@@ -387,3 +387,13 @@ export async function simGenerateProvinces(
 export async function getProvinces(): Promise<import("@types").Province[]> {
   return invoke("get_provinces");
 }
+
+/** Read back the full province layer (list + downsampled raster) on world open. */
+export async function getProvinceLayer(): Promise<import("@types").SimProvincesResult> {
+  return invoke("get_province_layer");
+}
+
+/** Live per-province campaign state (read-only join: baseline rural + live urban). */
+export async function campaignProvinceState(): Promise<import("@types").ProvinceLive[]> {
+  return invoke("campaign_province_state");
+}

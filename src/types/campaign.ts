@@ -1794,6 +1794,14 @@ export interface Province {
   settlements: string[];   // settlement ids inside (seat first)
 }
 
+/** Live per-province campaign state (read-only): baseline rural + current urban. */
+export interface ProvinceLive {
+  id: number;
+  rural_pop: number;
+  urban_pop: number;
+  hub_count: number;
+}
+
 /** Result of `sim_generate_provinces`: the province list + a downsampled per-cell
  *  id raster for the map overlay (`65535` = sea/no-data). */
 export interface SimProvincesResult {

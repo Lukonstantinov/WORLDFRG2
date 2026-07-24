@@ -1,10 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
-import { simGenerateProvinces } from "@bridge";
+import { simGenerateProvinces, campaignProvinceState } from "@bridge";
 import { GOOD_DEFS } from "@goods";
 import { koppenName } from "@ui/world/climate";
-import type { Province } from "@types";
+import type { Province, ProvinceLive } from "@types";
 
 // ── Variant B "Split": a ranked/filterable list rail + a rich detail card. ──
 
@@ -61,18 +61,34 @@ export function ProvincePanel() {
   const [selId, setSelId] = useState<number | null>(null);
   const [granularity, setGranularity] = useState(0.5);
   const [busy, setBusy] = useState(false);
+  const [live, setLive] = useState<Map<number, ProvinceLive> | null>(null);
 
-  // Urban population per province = Σ population of its settlements.
+  // When open, pull LIVE campaign state (read-only). If a campaign is running its
+  // hubs report real urban populations; otherwise we fall back to the worldgen sum.
+  useEffect(() => {
+    if (!open) return;
+    campaignProvinceState()
+      .then((rows) => {
+        const hasLive = rows.some((r) => r.urban_pop > 0 || r.hub_count > 0);
+        setLive(hasLive ? new Map(rows.map((r) => [r.id, r])) : null);
+      })
+      .catch(() => setLive(null));
+  }, [open, provinces]);
+
+  // Urban population per province: live campaign hubs when available, else Σ of the
+  // worldgen settlements standing in the province.
   const urbanOf = useMemo(() => {
     const byId = new Map(settlements.map((s) => [s.id, s.population]));
     const m = new Map<number, number>();
     for (const p of provinces) {
+      const liveU = live?.get(p.id)?.urban_pop;
+      if (liveU !== undefined) { m.set(p.id, liveU); continue; }
       let u = 0;
       for (const id of p.settlements) u += byId.get(id) ?? 0;
       m.set(p.id, u);
     }
     return m;
-  }, [provinces, settlements]);
+  }, [provinces, settlements, live]);
 
   const cultures = useMemo(
     () => Array.from(new Set(provinces.map((p) => p.culture).filter(Boolean))).sort(),

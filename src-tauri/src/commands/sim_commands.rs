@@ -757,6 +757,11 @@ pub fn sim_generate_provinces(
         }
     }
 
+    // Persist the downsampled raster too, so the layer survives a reload and the
+    // campaign can map hubs → provinces (read-only foundation).
+    let raster_blob = serde_json::to_string(&(rw, rh, w, h, &raster)).map_err(|e| e.to_string())?;
+    metadata::set_meta(&conn, "province_raster", &raster_blob).map_err(|e| e.to_string())?;
+
     Ok(SimProvincesResult { provinces, raster, raster_w: rw, raster_h: rh, grid_w: w, grid_h: h })
 }
 
@@ -767,4 +772,69 @@ pub fn get_provinces(db: State<'_, WorldDb>) -> Result<Vec<crate::sim::provinces
     Ok(metadata::get_meta(&conn, "provinces").map_err(|e| e.to_string())?
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default())
+}
+
+/// Read back the FULL province layer (list + downsampled id raster) so reopening a
+/// world restores both the panel and the map overlay without recomputing.
+#[tauri::command]
+pub fn get_province_layer(db: State<'_, WorldDb>) -> Result<SimProvincesResult, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let provinces: Vec<crate::sim::provinces::Province> =
+        metadata::get_meta(&conn, "provinces").map_err(|e| e.to_string())?
+            .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    let (raster_w, raster_h, grid_w, grid_h, raster): (u32, u32, u32, u32, Vec<u16>) =
+        metadata::get_meta(&conn, "province_raster").map_err(|e| e.to_string())?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or((0, 0, 0, 0, Vec::new()));
+    Ok(SimProvincesResult { provinces, raster, raster_w, raster_h, grid_w, grid_h })
+}
+
+/// One province's LIVE campaign state (read-only): baseline rural population plus the
+/// urban population currently standing in it (Σ of live hubs mapped through the
+/// province raster). Pure join over the stored partition + the live sim — it does NOT
+/// touch the tick, so the economy dynamics are unchanged.
+#[derive(serde::Serialize)]
+pub struct ProvinceLive {
+    pub id: u16,
+    pub rural_pop: u32,
+    pub urban_pop: u32,
+    pub hub_count: u32,
+}
+
+#[tauri::command]
+pub fn campaign_province_state(db: State<'_, WorldDb>) -> Result<Vec<ProvinceLive>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let provinces: Vec<crate::sim::provinces::Province> =
+        metadata::get_meta(&conn, "provinces").map_err(|e| e.to_string())?
+            .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    if provinces.is_empty() { return Ok(vec![]); }
+    let (rw, _rh, gw, gh, raster): (u32, u32, u32, u32, Vec<u16>) =
+        metadata::get_meta(&conn, "province_raster").map_err(|e| e.to_string())?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or((0, 0, 0, 0, Vec::new()));
+    let mut urban = std::collections::HashMap::<u16, u32>::new();
+    let mut hubs = std::collections::HashMap::<u16, u32>::new();
+    if !raster.is_empty() && gw > 0 && gh > 0 {
+        let step = ((gw.max(gh) + 383) / 384).max(1);
+        if let Some(sim) = crate::commands::campaign_commands::get_sim(&db, &conn)? {
+            for hub in sim.hubs.iter() {
+                if hub.is_estate || hub.abandoned || hub.population < 1.0 { continue; }
+                let hx = (hub.x.max(0.0) as u32).min(gw - 1);
+                let hy = (hub.y.max(0.0) as u32).min(gh - 1);
+                let ri = ((hy / step) * rw + (hx / step)) as usize;
+                if let Some(&pid) = raster.get(ri) {
+                    if pid != crate::sim::provinces::NO_PROVINCE {
+                        *urban.entry(pid).or_insert(0) += hub.population.max(0.0) as u32;
+                        *hubs.entry(pid).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+    }
+    Ok(provinces.iter().map(|p| ProvinceLive {
+        id: p.id,
+        rural_pop: p.rural_pop,
+        urban_pop: urban.get(&p.id).copied().unwrap_or(0),
+        hub_count: hubs.get(&p.id).copied().unwrap_or(0),
+    }).collect())
 }
