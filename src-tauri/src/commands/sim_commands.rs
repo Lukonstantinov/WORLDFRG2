@@ -789,6 +789,169 @@ pub fn get_province_layer(db: State<'_, WorldDb>) -> Result<SimProvincesResult, 
     Ok(SimProvincesResult { provinces, raster, raster_w, raster_h, grid_w, grid_h })
 }
 
+/// A single stat row for a building's hover card (label + preformatted value).
+#[derive(serde::Serialize)]
+pub struct PStat { pub label: String, pub value: String }
+
+/// A building standing in a province, with its position (world cells) and full stats
+/// for the hover tooltip. `kind`: 0 estate · 1 manufactory · 2 warehouse · 3 bank · 4 mint.
+#[derive(serde::Serialize)]
+pub struct PBuilding {
+    pub kind: u8,
+    pub name: String,
+    pub x: f32,
+    pub y: f32,
+    pub stats: Vec<PStat>,
+}
+
+/// A live settlement standing in a province (for the mini-map + list).
+#[derive(serde::Serialize)]
+pub struct PSettlement {
+    pub name: String,
+    pub x: f32,
+    pub y: f32,
+    pub population: u32,
+    pub seat: bool,
+    pub hub_class: u8,
+    pub dev_tier: u8,
+}
+
+/// The full detail of ONE province for the subwindow: live settlements + all the
+/// buildings mapped into it (estates, manufactories, warehouses, banks, mints).
+/// Read-only join over the stored partition + the live sim — does NOT touch the tick.
+#[derive(serde::Serialize)]
+pub struct ProvinceDetail {
+    pub id: u16,
+    pub rural_pop: u32,
+    pub urban_pop: u32,
+    pub net_migration: i32,
+    pub settlements: Vec<PSettlement>,
+    pub buildings: Vec<PBuilding>,
+}
+
+#[tauri::command]
+pub fn campaign_province_detail(id: u16, db: State<'_, WorldDb>) -> Result<Option<ProvinceDetail>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let (rw, _rh, gw, gh, raster): (u32, u32, u32, u32, Vec<u16>) =
+        match metadata::get_meta(&conn, "province_raster").map_err(|e| e.to_string())? {
+            Some(s) => serde_json::from_str(&s).unwrap_or((0, 0, 0, 0, Vec::new())),
+            None => return Ok(None),
+        };
+    if raster.is_empty() || gw == 0 || gh == 0 { return Ok(None); }
+    let Some(sim) = crate::commands::campaign_commands::get_sim(&db, &conn)? else { return Ok(None); };
+    let step = ((gw.max(gh) + 383) / 384).max(1);
+    let prov_of = |x: f32, y: f32| -> i32 {
+        let hx = (x.max(0.0) as u32).min(gw - 1);
+        let hy = (y.max(0.0) as u32).min(gh - 1);
+        raster.get(((hy / step) * rw + (hx / step)) as usize)
+            .map(|&p| if p == crate::sim::provinces::NO_PROVINCE { -1 } else { p as i32 })
+            .unwrap_or(-1)
+    };
+    let house_name = |hi: i32| -> String {
+        if hi >= 0 { sim.houses.get(hi as usize).map(|h| h.name.clone()).unwrap_or_default() }
+        else { "—".into() }
+    };
+    let main_good = |prod: &[f32]| -> Option<usize> {
+        prod.iter().enumerate().filter(|(_, &v)| v > 0.0)
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).map(|(i, _)| i)
+    };
+    let stars = |q: f32| -> String {
+        let n = (q * 5.0).round().clamp(0.0, 5.0) as usize;
+        format!("{}{}", "★".repeat(n), "☆".repeat(5 - n))
+    };
+
+    // Settlements (live non-estate hubs mapped to this province) — seat = largest.
+    let mut settlements: Vec<PSettlement> = Vec::new();
+    let mut seat_pop = -1.0f32; let mut seat_i = usize::MAX;
+    for (i, h) in sim.hubs.iter().enumerate() {
+        if h.is_estate || h.abandoned || h.population < 1.0 { continue; }
+        if prov_of(h.x, h.y) != id as i32 { continue; }
+        if h.population > seat_pop { seat_pop = h.population; seat_i = i; }
+        settlements.push(PSettlement {
+            name: h.name.clone(), x: h.x, y: h.y, population: h.population.max(0.0) as u32,
+            seat: false, hub_class: h.hub_class,
+            dev_tier: sim.dev_tier.get(i).copied().unwrap_or(0),
+        });
+    }
+    if seat_i != usize::MAX {
+        let sname = sim.hubs[seat_i].name.clone();
+        if let Some(s) = settlements.iter_mut().find(|s| s.name == sname) { s.seat = true; }
+    }
+
+    // Buildings.
+    let mut buildings: Vec<PBuilding> = Vec::new();
+    for (i, h) in sim.hubs.iter().enumerate() {
+        if !h.is_estate || h.abandoned { continue; }
+        if prov_of(h.x, h.y) != id as i32 { continue; }
+        // Manufactory vs raw estate: a hub with recipe-driven output reads as a works.
+        let mg = main_good(&h.production);
+        let is_works = mg.map(|g| !sim.goods[g].inputs.is_empty()).unwrap_or(false);
+        let kind = if is_works { 1 } else { 0 };
+        let goodn = mg.map(|g| sim.goods[g].name.clone()).unwrap_or_else(|| "—".into());
+        let q = mg.map(|g| h.quality.get(g).copied().unwrap_or(0.0)).unwrap_or(0.0);
+        let mut stats = vec![
+            PStat { label: "Type".into(), value: crate::sim::tick::estate_kind_label(h.estate_kind).into() },
+            PStat { label: "Produces".into(), value: goodn },
+            PStat { label: "Quality".into(), value: stars(q) },
+            PStat { label: "Tier".into(), value: format!("{}", h.estate_tier) },
+            PStat { label: "Owner".into(), value: house_name(h.owner_house) },
+            PStat { label: "Workers".into(), value: format!("{}", h.population.max(0.0) as u32) },
+        ];
+        if h.damage > 0.01 { stats.push(PStat { label: "Damage".into(), value: format!("{:.0}%", h.damage * 100.0) }); }
+        buildings.push(PBuilding {
+            kind, x: h.x, y: h.y,
+            name: if h.name.is_empty() { crate::sim::tick::estate_kind_label(h.estate_kind).into() } else { h.name.clone() },
+            stats,
+        });
+    }
+    for w in &sim.warehouses {
+        let Some(hub) = sim.hubs.get(w.hub as usize) else { continue };
+        if prov_of(hub.x, hub.y) != id as i32 { continue; }
+        let total: f32 = w.stock.iter().sum();
+        buildings.push(PBuilding {
+            kind: 2, x: hub.x, y: hub.y, name: format!("Depot at {}", hub.name),
+            stats: vec![
+                PStat { label: "Owner".into(), value: house_name(w.owner) },
+                PStat { label: "Tier".into(), value: format!("{}", w.tier) },
+                PStat { label: "Capacity".into(), value: format!("{:.0}", w.capacity) },
+                PStat { label: "Stored".into(), value: format!("{:.0}", total) },
+            ],
+        });
+    }
+    for b in &sim.banks {
+        if b.defunct { continue; }
+        let Some(hub) = sim.hubs.get(b.seat as usize) else { continue };
+        if prov_of(hub.x, hub.y) != id as i32 { continue; }
+        buildings.push(PBuilding {
+            kind: 3, x: hub.x, y: hub.y, name: b.name.clone(),
+            stats: vec![
+                PStat { label: "Reserves".into(), value: format!("{:.0}", b.reserves) },
+                PStat { label: "Deposits".into(), value: format!("{:.0}", b.deposits) },
+                PStat { label: "Loans".into(), value: format!("{}", b.loans.len()) },
+                PStat { label: "House".into(), value: house_name(b.house as i32) },
+            ],
+        });
+    }
+    for h in sim.hubs.iter() {
+        if !h.has_mint || h.abandoned { continue; }
+        if prov_of(h.x, h.y) != id as i32 { continue; }
+        buildings.push(PBuilding {
+            kind: 4, x: h.x, y: h.y,
+            name: if h.coin_name.is_empty() { format!("Mint at {}", h.name) } else { h.coin_name.clone() },
+            stats: vec![
+                PStat { label: "Coin".into(), value: if h.coin_name.is_empty() { "—".into() } else { h.coin_name.clone() } },
+                PStat { label: "At".into(), value: h.name.clone() },
+            ],
+        });
+    }
+
+    let urban: u32 = settlements.iter().map(|s| s.population).sum();
+    let rural = sim.prov_rural.get(id as usize).map(|&r| r.max(0.0) as u32)
+        .unwrap_or(0);
+    let net = sim.prov_net_mig.get(id as usize).map(|&m| m as i32).unwrap_or(0);
+    Ok(Some(ProvinceDetail { id, rural_pop: rural, urban_pop: urban, net_migration: net, settlements, buildings }))
+}
+
 /// One province's LIVE campaign state (read-only): baseline rural population plus the
 /// urban population currently standing in it (Σ of live hubs mapped through the
 /// province raster). Pure join over the stored partition + the live sim — it does NOT

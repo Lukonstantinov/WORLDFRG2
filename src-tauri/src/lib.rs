@@ -93,6 +93,7 @@ pub fn run() {
             sim_commands::get_provinces,
             sim_commands::get_province_layer,
             sim_commands::campaign_province_state,
+            sim_commands::campaign_province_detail,
             sim_commands::sim_run_all,
             file_commands::save_world_as,
             campaign_commands::finalize_world,

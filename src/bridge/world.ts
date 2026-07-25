@@ -397,3 +397,9 @@ export async function getProvinceLayer(): Promise<import("@types").SimProvincesR
 export async function campaignProvinceState(): Promise<import("@types").ProvinceLive[]> {
   return invoke("campaign_province_state");
 }
+
+/** Full detail of one province (live settlements + all buildings on it) for the
+ *  province subwindow. Returns null when no campaign / province layer exists. */
+export async function campaignProvinceDetail(id: number): Promise<import("@types").ProvinceDetail | null> {
+  return invoke("campaign_province_detail", { id });
+}

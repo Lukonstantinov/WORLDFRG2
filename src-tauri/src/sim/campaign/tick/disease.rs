@@ -48,6 +48,19 @@ impl CampaignSim {
         let pre = self.hubs[hub].population.max(0.0);
         self.hubs[hub].population *= 1.0 - mag_eff;
         let post = self.hubs[hub].population.max(0.0);
+        // Phase 2c · the plague also ravages the surrounding COUNTRYSIDE: the struck
+        // hub's province loses a slice of its rural reservoir (gated on a seeded
+        // province layer, so the base economy / dynamics test is untouched). The rural
+        // toll is lighter than the packed city's — fields are less crowded.
+        if !self.prov_rural.is_empty() {
+            if let Some(&pid) = self.hub_province.get(hub) {
+                if pid >= 0 {
+                    if let Some(r) = self.prov_rural.get_mut(pid as usize) {
+                        *r = (*r * (1.0 - mag_eff * 0.5)).max(0.0);
+                    }
+                }
+            }
+        }
         // Lockdown (trade restriction) length scales with severity: a local outbreak is
         // a brief quarantine; a great plague shuts the gates for months.
         let jitter = hash01(self.seed, tick as u64 ^ 0x10CC, hub as u64);

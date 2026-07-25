@@ -900,7 +900,7 @@ fn estate_kind_for_good(name: &str, food: bool) -> u8 {
 }
 
 /// Short label for an estate kind (for journal text + the inspector).
-fn estate_kind_label(kind: u8) -> &'static str {
+pub fn estate_kind_label(kind: u8) -> &'static str {
     match kind {
         1 => "Farm", 2 => "Mine", 3 => "Plantation", 4 => "Fishery", 5 => "Vineyard",
         6 => "Manufactory", _ => "Estate",

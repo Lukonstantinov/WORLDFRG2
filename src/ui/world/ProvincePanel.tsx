@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
-import { simGenerateProvinces, campaignProvinceState } from "@bridge";
+import { simGenerateProvinces, campaignProvinceState, campaignProvinceDetail } from "@bridge";
 import { GOOD_DEFS } from "@goods";
 import { koppenName } from "@ui/world/climate";
-import type { Province, ProvinceLive } from "@types";
+import { ProvinceMiniMap } from "@ui/world/ProvinceMiniMap";
+import type { Province, ProvinceLive, ProvinceDetail, PSettlement } from "@types";
 
 // ── Variant B "Split": a ranked/filterable list rail + a rich detail card. ──
 
@@ -62,6 +63,8 @@ export function ProvincePanel() {
   const [granularity, setGranularity] = useState(0.5);
   const [busy, setBusy] = useState(false);
   const [live, setLive] = useState<Map<number, ProvinceLive> | null>(null);
+  const [detail, setDetail] = useState<ProvinceDetail | null>(null);
+  const provinceRaster = useWorldStore((s) => s.provinceRaster);
 
   // When open, pull LIVE campaign state (read-only). If a campaign is running its
   // hubs report real urban populations; otherwise we fall back to the worldgen sum.
@@ -120,6 +123,31 @@ export function ProvincePanel() {
     () => provinces.find((p) => p.id === selId) ?? rows[0] ?? null,
     [provinces, selId, rows],
   );
+
+  // Fetch the selected province's live detail (settlements + buildings) for the
+  // subwindow. Null when no campaign is running (falls back to worldgen settlements).
+  useEffect(() => {
+    if (!open || !selected) { setDetail(null); return; }
+    let stale = false;
+    campaignProvinceDetail(selected.id)
+      .then((d) => { if (!stale) setDetail(d); })
+      .catch(() => { if (!stale) setDetail(null); });
+    return () => { stale = true; };
+  }, [open, selected?.id, provinces]);
+
+  // Mini-map inputs: live campaign settlements+buildings when available, else the
+  // worldgen settlements standing in the province (no buildings before a campaign).
+  const miniSettlements: PSettlement[] = useMemo(() => {
+    if (detail && detail.id === selected?.id) return detail.settlements;
+    if (!selected) return [];
+    const ids = new Set(selected.settlements);
+    const inProv = settlements.filter((s) => ids.has(s.id));
+    const maxPop = inProv.reduce((m, s) => Math.max(m, s.population), 0);
+    return inProv.map((s) => ({
+      name: s.name, x: s.x, y: s.y, population: s.population,
+      seat: s.population === maxPop && maxPop > 0, hub_class: s.hubClass ?? 0, dev_tier: 0,
+    }));
+  }, [detail, selected, settlements]);
 
   const generate = async () => {
     if (busy) return;
@@ -252,6 +280,14 @@ export function ProvincePanel() {
                     })()}
                     <Row k="Total" v={fmt(totalPop(selected))} />
                     <Row k="Fertility" v={selected.mean_fertility.toFixed(2)} />
+
+                    <div style={{ marginTop: 10, marginBottom: 4, opacity: 0.8, fontWeight: 600 }}>Holdings</div>
+                    <ProvinceMiniMap
+                      province={selected}
+                      raster={provinceRaster}
+                      settlements={miniSettlements}
+                      buildings={detail && detail.id === selected.id ? detail.buildings : []}
+                    />
 
                     <div style={{ marginTop: 10, marginBottom: 4, opacity: 0.8, fontWeight: 600 }}>Goods (quality)</div>
                     {selected.goods.length === 0 ? (

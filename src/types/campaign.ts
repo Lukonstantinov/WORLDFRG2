@@ -1803,6 +1803,29 @@ export interface ProvinceLive {
   net_migration: number; // <0 = countryside is a source (people leaving for cities)
 }
 
+/** One stat row for a building's hover card. */
+export interface PStat { label: string; value: string }
+
+/** A building standing in a province (kind: 0 estate · 1 manufactory · 2 warehouse ·
+ *  3 bank · 4 mint), with world-cell position + full hover stats. */
+export interface PBuilding { kind: number; name: string; x: number; y: number; stats: PStat[] }
+
+/** A live settlement in a province (for the mini-map + list). */
+export interface PSettlement {
+  name: string; x: number; y: number; population: number;
+  seat: boolean; hub_class: number; dev_tier: number;
+}
+
+/** Full detail of one province for the subwindow. */
+export interface ProvinceDetail {
+  id: number;
+  rural_pop: number;
+  urban_pop: number;
+  net_migration: number;
+  settlements: PSettlement[];
+  buildings: PBuilding[];
+}
+
 /** Result of `sim_generate_provinces`: the province list + a downsampled per-cell
  *  id raster for the map overlay (`65535` = sea/no-data). */
 export interface SimProvincesResult {
