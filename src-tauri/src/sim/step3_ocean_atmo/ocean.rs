@@ -1,12 +1,16 @@
 ﻿use std::collections::VecDeque;
 use crate::sim::world_buffer::WorldBuffer;
+use super::circulation::Circulation;
 
 /// Prevailing surface-wind unit vector for a latitude, blended across the three
-/// belts (trades <30Â°, westerlies 30-60Â°, polar easterlies >60Â°). Factored out of
-/// `compute_wind_belts` so the seasonal-wind model (`seasonal.rs`) can build on the
-/// same annual-mean belt before adding its monsoon perturbation. `y` is down, so
-/// `+vy` is southward.
-pub fn belt_wind(lat: f32) -> (f32, f32) {
+/// belts (trades → westerlies → polar easterlies). The belt boundaries come from
+/// the planet's general circulation (`circulation.rs`): the trade→westerly
+/// boundary sits at `circ.hadley_edge` (30° on Earth) and the westerly→polar
+/// boundary at `circ.polar_front` (60° on Earth), so a faster/slower rotator moves
+/// the wind belts. Factored out of `compute_wind_belts` so the seasonal-wind model
+/// (`seasonal.rs`) can build on the same annual-mean belt before adding its monsoon
+/// perturbation. `y` is down, so `+vy` is southward.
+pub fn belt_wind(lat: f32, circ: &Circulation) -> (f32, f32) {
     // Smoothstep helper (0 below a, 1 above b, S-curve between).
     let smooth = |a: f32, b: f32, x: f32| -> f32 {
         let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
@@ -20,9 +24,13 @@ pub fn belt_wind(lat: f32) -> (f32, f32) {
     let west = (0.707f32, -sign * 0.707);  // toward pole + east
     let polar = (-0.707f32, sign * 0.707); // toward equator + west
 
-    // Blend with transitions centered EXACTLY on the 30Â° and 60Â° latitude lines.
-    let to_west = smooth(26.0, 34.0, abs_lat);   // trades â†’ westerlies @30Â°
-    let to_polar = smooth(56.0, 64.0, abs_lat);  // westerlies â†’ polar @60Â°
+    // Blend with transitions centred on the circulation's belt boundaries (30°/60°
+    // on Earth). The ±4° half-width scales with the belt so the transition stays
+    // proportionally sharp on wider/narrower circulations.
+    let hw_h = 4.0 * circ.belt_scale();
+    let hw_f = 4.0 * circ.front_scale();
+    let to_west = smooth(circ.hadley_edge - hw_h, circ.hadley_edge + hw_h, abs_lat);
+    let to_polar = smooth(circ.polar_front - hw_f, circ.polar_front + hw_f, abs_lat);
     let w_polar = to_polar;
     let w_west = to_west * (1.0 - to_polar);
     let w_trade = (1.0 - to_west).max(0.0);
@@ -40,8 +48,9 @@ pub fn belt_wind(lat: f32) -> (f32, f32) {
 /// Trade winds (0-30), Westerlies (30-60), Polar easterlies (60-90).
 /// Matches WF1 wind-belts.ts exactly.
 pub fn compute_wind_belts(buf: &mut WorldBuffer) {
+    let circ = Circulation::for_world(buf);
     for y in 0..buf.height {
-        let (vx, vy) = belt_wind(buf.latitude(y));
+        let (vx, vy) = belt_wind(buf.latitude(y), &circ);
         for x in 0..buf.width {
             let idx = buf.idx(x, y);
             buf.wind_vx[idx] = vx;
@@ -261,13 +270,14 @@ fn precompute_basin_dist_ns(terrain: &[u8], w: u32, h: u32) -> (Vec<u16>, Vec<u1
 /// from the wind shear — subtropical interior equatorward, subpolar interior
 /// poleward — instead of the old hand-tuned `subtrop_env`/`subpol_env` envelopes.
 /// Normalized to ~unit peak so it drops into the existing velocity scale.
-fn sverdrup_interior_north(lat: f32) -> f32 {
+fn sverdrup_interior_north(lat: f32, circ: &Circulation) -> f32 {
     // Zonal wind stress τ_x ∝ speed² · (signed zonal unit wind). base_speed carries
     // the trade/westerly/polar speed profile; belt_wind's x-component carries the
-    // sign (easterly trades & polar easterlies negative, westerlies positive).
+    // sign (easterly trades & polar easterlies negative, westerlies positive). Both
+    // are circulation-aware, so the wind-driven interior drift follows the belts.
     let tau_x = |l: f32| -> f32 {
-        let s = crate::sim::jets::base_speed(l.abs());
-        s * s * belt_wind(l).0
+        let s = crate::sim::jets::base_speed(l.abs(), circ);
+        s * s * belt_wind(l, circ).0
     };
     let dl = 1.5f32; // finite-difference half-step in degrees
     let dtau_dphi = (tau_x(lat + dl) - tau_x(lat - dl)) / (2.0 * dl.to_radians());
@@ -286,12 +296,18 @@ fn gyre_vector(
     lat_ratio: f32,
     circumpolar_active: bool,
     circumpolar_row: u32,
+    circ: &Circulation,
 ) -> (f32, f32) {
     if circumpolar_active && y >= circumpolar_row {
         return (SPEED_ACC, 0.0);
     }
 
-    let lat = crate::sim::world_buffer::lat_from_y(y as f32, grid_h as f32, equator_offset, lat_scale, lat_ratio);
+    let lat_true = crate::sim::world_buffer::lat_from_y(y as f32, grid_h as f32, equator_offset, lat_scale, lat_ratio);
+    // Surface gyres are wind-driven, so their subtropical/subpolar bands track the
+    // wind belts. Work the band logic in the circulation's "belt-space" latitude
+    // (true latitude ÷ belt_scale) so the gyres widen/narrow with the Hadley cell;
+    // at Earth belt_scale = 1 so this is exactly the true latitude.
+    let lat = circ.belt_lat(lat_true);
     let abs_lat = lat.abs();
     let nh = lat >= 0.0;
 
@@ -349,7 +365,9 @@ fn gyre_vector(
         let interior_weight = (1.0 - abs_b / 0.75).max(0.0);
         let ns_suppress = (ns_extent / 25.0).min(1.0);
         // v_north is +northward; screen y is DOWN, so northward flow is −vy.
-        let v_north = sverdrup_interior_north(lat);
+        // Sverdrup uses the TRUE latitude (its belt_wind/base_speed rescale
+        // internally — passing belt-space here would double-count the scaling).
+        let v_north = sverdrup_interior_north(lat_true, circ);
         vy += -v_north * 0.5 * interior_weight * width_factor * ns_suppress;
     }
 
@@ -471,6 +489,9 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
         }
     }
 
+    // The general circulation sets the wind belts that drive the gyres.
+    let circ = Circulation::for_world(buf);
+
     // Phase 2: assign gyre-aware base directions
     let mut dir = vec![DIR_NONE; n];
     let mut gyre_vx = vec![0.0f32; n];
@@ -491,7 +512,7 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
             let (gvx, gvy) = gyre_vector(
                 x, y, dist_w[i], dist_e[i], dist_n[i], dist_s[i],
                 h, buf.equator_offset, buf.lat_scale, buf.lat_ratio,
-                circumpolar_active, circumpolar_row,
+                circumpolar_active, circumpolar_row, &circ,
             );
 
             // Bathymetry steering â€” rotate toward isobath direction
@@ -1687,11 +1708,12 @@ mod tests {
     fn sverdrup_interior_reverses_between_gyres() {
         // NH subtropical interior flows EQUATORWARD (southward → v_north < 0);
         // NH subpolar interior flows POLEWARD (northward → v_north > 0).
-        assert!(sverdrup_interior_north(25.0) < 0.0, "NH subtropical interior should be equatorward");
-        assert!(sverdrup_interior_north(55.0) > 0.0, "NH subpolar interior should be poleward");
+        let c = Circulation::earth();
+        assert!(sverdrup_interior_north(25.0, &c) < 0.0, "NH subtropical interior should be equatorward");
+        assert!(sverdrup_interior_north(55.0, &c) > 0.0, "NH subpolar interior should be poleward");
         // SH mirror (northward = equatorward there; southward = poleward).
-        assert!(sverdrup_interior_north(-25.0) > 0.0, "SH subtropical interior should be equatorward");
-        assert!(sverdrup_interior_north(-55.0) < 0.0, "SH subpolar interior should be poleward");
+        assert!(sverdrup_interior_north(-25.0, &c) > 0.0, "SH subtropical interior should be equatorward");
+        assert!(sverdrup_interior_north(-55.0, &c) < 0.0, "SH subpolar interior should be poleward");
     }
 
     /// Build a 16Ã—12 all-land test world. With equator_offset 0.5 and unit lat
@@ -1702,6 +1724,7 @@ mod tests {
         WorldBuffer {
             cols: ColumnSet::ALL, width: w, height: h, tiles_x: 1, tiles_y: 1,
             equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0, obliquity: 23.44,
+            rotation_rate: 1.0, solar_lum: 1.0, greenhouse: 1.0, eccentricity: 0.0167,
             terrain: vec![1u8; n], elevation: vec![0.1; n], sea_depth: vec![0.0; n],
             is_shelf: vec![0u8; n], is_shelf_edge: vec![0u8; n], locked_bits: Vec::new(),
             plate_index: Vec::new(), boundary_type: Vec::new(), is_volcanic: Vec::new(),

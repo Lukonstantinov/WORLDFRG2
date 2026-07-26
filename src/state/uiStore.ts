@@ -315,6 +315,7 @@ export const useUIStore = create<UIStore>((set) => ({
   overlayVisibility: {
     rivers: true, lakes: true, settlements: true,
     markers: false, wind: false, currents: false, latLines: false,
+    itcz: false, windBelts: false,
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false, campaignCorridors: false, expeditions: false,

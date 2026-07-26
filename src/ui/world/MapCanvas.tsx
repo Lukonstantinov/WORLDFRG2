@@ -10,7 +10,7 @@ import { useUIStore } from "@state/uiStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useSettingsStore } from "@state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes } from "@bridge";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes } from "@bridge";
 import type { MerchantRoute, FuturesLane, Toponym } from "@types";
 import { goodOverlayKey, GOOD_DEFS } from "@goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types";
@@ -685,6 +685,12 @@ export function MapCanvas() {
     // they're fetched here (world/version), not in the seasonal storm-month effect.
     computeMonsoonZones().then((zones) => {
       om.drawMonsoonZones(zones);
+      requestRender();
+    }).catch(() => {});
+    // Climate bands: ITCZ line + circulation belts (subtropical high / polar front),
+    // positioned by the rotation-driven Circulation model.
+    computeClimateBands().then((bands) => {
+      om.setClimateBands(bands);
       requestRender();
     }).catch(() => {});
     // Peoples / culture territories (organic hearth map) for the Peoples overlay.
@@ -1421,7 +1427,9 @@ export function MapCanvas() {
         const rect = containerRef.current?.getBoundingClientRect();
         if (rect) {
           const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
-          const thresh = Math.max(6, m.grid_width * 0.012);
+          // Screen-space hit radius: ~10px regardless of zoom, capped at 8 world cells
+          // so clicking 5 cm away never accidentally selects a settlement when zoomed in.
+          const thresh = Math.min(8, 10 / viewport.scaleX);
           // A bank icon takes click priority when bank icons are shown → open the Bank panel.
           if (useUIStore.getState().showBankIcons) {
             const bi = overlayManagerRef.current?.bankIconAt(wx, wy, thresh) ?? -1;

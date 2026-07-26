@@ -1659,6 +1659,7 @@ mod tests {
         let mut buf = WorldBuffer {
             cols: ColumnSet::ALL, width: w, height: h, tiles_x: 1, tiles_y: 1,
             equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0, obliquity: 23.44,
+            rotation_rate: 1.0, solar_lum: 1.0, greenhouse: 1.0, eccentricity: 0.0167,
             terrain: vec![1u8; n], elevation: vec![0.1f32; n], sea_depth: vec![0.0; n],
             is_shelf: vec![0; n], is_shelf_edge: vec![0; n], locked_bits: Vec::new(),
             plate_index: Vec::new(), boundary_type: Vec::new(), is_volcanic: Vec::new(),

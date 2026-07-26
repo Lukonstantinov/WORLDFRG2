@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useWorldStore } from "@state/worldStore";
 import { useUIStore } from "@state/uiStore";
-import { setLatitudeConfig } from "@bridge";
+import { setLatitudeConfig, getPlanetConfig, setPlanetConfig, type PlanetConfig } from "@bridge";
 
 /** Format a signed latitude (degrees) as e.g. "45°N", "0°", "30°S". */
 function fmtLat(lat: number): string {
@@ -55,6 +55,15 @@ export function LatitudeControl() {
   useEffect(() => { setExpStr(String(Math.round(latScale * 100))); }, [latScale]);
   useEffect(() => { setRatioStr(lineRatio.toFixed(2)); }, [lineRatio]);
   useEffect(() => { setTiltStr(obliquity.toFixed(1)); }, [obliquity]);
+
+  // Planetary state (energy budget + circulation). Loaded once from the backend;
+  // each control persists via set_planet_config and prompts a re-run.
+  const [planet, setPlanet] = useState<PlanetConfig | null>(null);
+  useEffect(() => { getPlanetConfig().then(setPlanet).catch(() => {}); }, [meta?.name]);
+  const commitPlanet = (next: PlanetConfig) => {
+    setPlanet(next); // optimistic
+    setPlanetConfig(next).then(setPlanet).catch(() => {});
+  };
 
   if (!meta) return null;
 
@@ -218,6 +227,44 @@ export function LatitudeControl() {
         Ocean &amp; Atmosphere → Climate to apply.
       </div>
 
+      {planet && (
+        <div style={{ marginTop: 12, borderTop: "1px solid #1a2330", paddingTop: 8 }}>
+          <div style={header}>Planet</div>
+          <PlanetSlider
+            label="Rotation" unit="× Earth" value={planet.rotationRate}
+            min={0.25} max={4} step={0.05} digits={2}
+            onChange={(v) => commitPlanet({ ...planet, rotationRate: v })}
+            presets={[["Slow ½×", 0.5], ["Earth 1×", 1], ["Fast 2×", 2]]}
+            hint="Sets the wind belts / Hadley cell: slower = wider tropics, deserts &amp; storm tracks pushed poleward, fewer bands; faster = tighter banding."
+          />
+          <PlanetSlider
+            label="Greenhouse" unit="× Earth" value={planet.greenhouse}
+            min={0} max={3} step={0.05} digits={2}
+            onChange={(v) => commitPlanet({ ...planet, greenhouse: v })}
+            presets={[["Icehouse ½×", 0.5], ["Earth 1×", 1], ["Hothouse 2×", 2]]}
+            hint="Global warming from atmospheric trapping: higher warms the whole planet and flattens the equator-pole gradient; low enough tips toward a snowball."
+          />
+          <PlanetSlider
+            label="Sunlight" unit="× Earth" value={planet.solarLum}
+            min={0.5} max={1.6} step={0.01} digits={2}
+            onChange={(v) => commitPlanet({ ...planet, solarLum: v })}
+            presets={[["Dim 0.9×", 0.9], ["Earth 1×", 1], ["Bright 1.1×", 1.1]]}
+            hint="Stellar irradiance (a fainter/brighter star or a wider/closer orbit): scales total insolation and the global-mean temperature."
+          />
+          <PlanetSlider
+            label="Eccentricity" unit="" value={planet.eccentricity}
+            min={0} max={0.4} step={0.005} digits={3}
+            onChange={(v) => commitPlanet({ ...planet, eccentricity: v })}
+            presets={[["Circular 0", 0], ["Earth .017", 0.0167], ["High .2", 0.2]]}
+            hint="Orbit shape: higher makes one hemisphere's seasons shorter &amp; sharper than the other's."
+          />
+          <div style={hint}>
+            These drive the energy-balance climate &amp; the circulation belts. At Earth
+            values the world is unchanged. Re-run Ocean &amp; Atmosphere → Climate to apply.
+          </div>
+        </div>
+      )}
+
       <div style={readout}>
         Visible: {fmtLat(topLat)} &rarr; {fmtLat(botLat)}
       </div>
@@ -263,4 +310,44 @@ function chip(active: boolean): React.CSSProperties {
     background: active ? "#1a3a5a" : "#0d1219",
     color: active ? "#c0ddf0" : "#5a7090", fontWeight: active ? 600 : 400,
   };
+}
+
+/** One planetary-state control: a stepped slider (commits on release) with a live
+ *  value readout and preset chips. Drives the energy-balance climate + circulation. */
+function PlanetSlider(props: {
+  label: string; unit: string; value: number;
+  min: number; max: number; step: number; digits: number;
+  onChange: (v: number) => void;
+  presets: [string, number][];
+  hint: string;
+}) {
+  const { label, unit, value, min, max, step, digits, onChange, presets, hint: h } = props;
+  // Local slider position so dragging is smooth; commit only on release.
+  const [live, setLive] = useState(value);
+  useEffect(() => { setLive(value); }, [value]);
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={row}>
+        <span style={lbl}>{label}</span>
+        <span style={val}>{live.toFixed(digits)}{unit ? ` ${unit}` : ""}</span>
+      </div>
+      <div style={ctrlRow}>
+        <input
+          type="range" min={min} max={max} step={step} value={live}
+          onChange={(e) => setLive(Number(e.target.value))}
+          onPointerUp={(e) => onChange(Number((e.target as HTMLInputElement).value))}
+          onKeyUp={(e) => onChange(Number((e.target as HTMLInputElement).value))}
+          style={range}
+        />
+      </div>
+      <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+        {presets.map(([plabel, pval]) => (
+          <button key={plabel} style={chip(Math.abs(value - pval) < step / 2)} onClick={() => onChange(pval)}>
+            {plabel}
+          </button>
+        ))}
+      </div>
+      <div style={hint}>{h}</div>
+    </div>
+  );
 }

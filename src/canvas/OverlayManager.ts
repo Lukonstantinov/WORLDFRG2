@@ -1,4 +1,5 @@
 import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine } from "@types";
+import type { ClimateBands } from "@bridge";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "@goods";
 import { drawGoodIcon } from "./goodIcons";
 import { latLineY } from "./projection";
@@ -208,6 +209,11 @@ const COLD_CURRENT = "#3399ee";
 const NEUTRAL_CURRENT = "#9bb0c0";
 const WIND_COLOR = "#aaccee";
 const LAT_LINE_COLOR = "#cccc66";
+// Climate-band overlay colours: ITCZ rain line (cyan), subtropical-high dry belts
+// (amber), polar-front storm tracks (blue).
+const ITCZ_COLOR = "#39d6e0";
+const SUBTROPICAL_COLOR = "#e0a83a";
+const POLAR_FRONT_COLOR = "#6a9cf0";
 const FISHERY_BANK = "#39d3c0"; // grand-bank fishing ground (teal)
 
 /** Adjustable trade/connection-line colours — seeded with the historical defaults
@@ -359,10 +365,13 @@ export class OverlayManager {
   private reachChains: EconChain[] = [];
   private reachHubs: [number, number][] = [];
   private latLinesData: { gridW: number; gridH: number; equatorOffset: number; latScale: number; lineRatio: number } | null = null;
+  /** Circulation bands (ITCZ line + subtropical-high / polar-front belts). */
+  private climateBands: ClimateBands | null = null;
 
   private visibility: Record<string, boolean> = {
     rivers: true, lakes: true, settlements: true,
     markers: false, wind: false, currents: false, latLines: false,
+    itcz: false, windBelts: false,
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false, campaignCorridors: false, expeditions: false,
@@ -914,6 +923,11 @@ export class OverlayManager {
     this.stormZones = zones;
   }
 
+  /** Circulation bands (ITCZ line + subtropical-high / polar-front belts). */
+  setClimateBands(bands: ClimateBands | null) {
+    this.climateBands = bands;
+  }
+
   drawMonsoonZones(zones: SharkZone[]) {
     this.monsoonZones = zones;
   }
@@ -1345,6 +1359,66 @@ export class OverlayManager {
         ctx.fillText(label, 4, y + fontSize + 1);
       }
       ctx.globalAlpha = 1;
+    }
+
+    // ── Climate bands: circulation belts (subtropical high / polar front) and the
+    // ITCZ rain line. All positioned in the SAME latitude framing as the lat lines,
+    // and driven by the rotation-based Circulation model, so they shift when the
+    // Planet panel changes the rotation/greenhouse. ──
+    if ((this.visibility.windBelts || this.visibility.itcz) && this.climateBands && this.latLinesData) {
+      const { gridW, gridH, equatorOffset, latScale, lineRatio } = this.latLinesData;
+      const cb = this.climateBands;
+      const fontSize = Math.max(9, 9 / this.currentScale);
+      const lw = Math.max(0.5, 1.0 / this.currentScale);
+      ctx.font = `${fontSize}px sans-serif`;
+
+      // Horizontal belt line at a fixed latitude with a right-aligned label.
+      const belt = (lat: number, color: string, label: string, dash: number[]) => {
+        const y = latLineY(lat, gridH, equatorOffset, latScale, lineRatio);
+        if (y < 0 || y > gridH) return;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lw;
+        ctx.setLineDash(dash.map((d) => d / this.currentScale));
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(gridW, y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = color;
+        ctx.fillText(label, 4, y - 2);
+      };
+
+      if (this.visibility.windBelts) {
+        ctx.globalAlpha = 0.75;
+        const he = cb.hadley_edge, pf = cb.polar_front;
+        // Subtropical highs (the dry / desert belts) — warm amber.
+        belt(he, SUBTROPICAL_COLOR, `Subtropical High ${he.toFixed(0)}° (dry)`, [6, 4]);
+        belt(-he, SUBTROPICAL_COLOR, `Subtropical High ${he.toFixed(0)}° (dry)`, [6, 4]);
+        // Polar fronts (the storm tracks) — cool blue.
+        belt(pf, POLAR_FRONT_COLOR, `Polar Front ${pf.toFixed(0)}° (storms)`, [6, 4]);
+        belt(-pf, POLAR_FRONT_COLOR, `Polar Front ${pf.toFixed(0)}° (storms)`, [6, 4]);
+        ctx.globalAlpha = 1;
+      }
+
+      // ITCZ — the wavy convergence / heavy-rain line (per-column latitude, so it
+      // bows poleward over the continents and equatorward over the oceans).
+      if (this.visibility.itcz && cb.itcz.length > 0) {
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = ITCZ_COLOR;
+        ctx.lineWidth = Math.max(0.8, 1.8 / this.currentScale);
+        const step = Math.max(1, Math.floor(cb.width / 720));
+        ctx.beginPath();
+        let started = false;
+        for (let x = 0; x < cb.width; x += step) {
+          const y = latLineY(cb.itcz[x], gridH, equatorOffset, latScale, lineRatio);
+          if (!started) { ctx.moveTo(x + 0.5, y); started = true; } else { ctx.lineTo(x + 0.5, y); }
+        }
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = ITCZ_COLOR;
+        const y0 = latLineY(cb.itcz[0], gridH, equatorOffset, latScale, lineRatio);
+        ctx.fillText("ITCZ (convergence / rains)", 4, y0 - 2);
+      }
     }
 
     // Fishery grand banks: large translucent teal discs over rich grounds.
@@ -4097,5 +4171,6 @@ export class OverlayManager {
     this.reachHubs = [];
     this.supplyChain = null;
     this.latLinesData = null;
+    this.climateBands = null;
   }
 }

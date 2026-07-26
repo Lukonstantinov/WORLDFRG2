@@ -23,6 +23,48 @@ export async function setLatitudeConfig(
   return invoke("set_latitude_config", { equatorOffset, latScale, latRatio, obliquity });
 }
 
+/** Planetary state driving the emergent climate (energy budget + circulation). */
+export interface PlanetConfig {
+  /** Rotation rate (× Earth). Sets the wind-belt / Hadley-cell latitudes. */
+  rotationRate: number;
+  /** Stellar irradiance (× Earth solar constant). Global-mean temperature. */
+  solarLum: number;
+  /** Greenhouse factor (× Earth). Global warming + equator-pole gradient. */
+  greenhouse: number;
+  /** Orbital eccentricity (0 = circular). Hemispheric season asymmetry. */
+  eccentricity: number;
+}
+
+/** Rust serde emits snake_case; map it to our camelCase shape. */
+interface PlanetConfigRaw {
+  rotation_rate: number;
+  solar_lum: number;
+  greenhouse: number;
+  eccentricity: number;
+}
+const fromRawPlanet = (r: PlanetConfigRaw): PlanetConfig => ({
+  rotationRate: r.rotation_rate,
+  solarLum: r.solar_lum,
+  greenhouse: r.greenhouse,
+  eccentricity: r.eccentricity,
+});
+
+/** Read the world's planetary state (all default to Earth). */
+export async function getPlanetConfig(): Promise<PlanetConfig> {
+  return fromRawPlanet(await invoke<PlanetConfigRaw>("get_planet_config"));
+}
+
+/** Persist the planetary state. The next run of Ocean & Atmosphere → Climate
+ *  generates against it (energy-balance temperature + rotation-driven belts). */
+export async function setPlanetConfig(cfg: PlanetConfig): Promise<PlanetConfig> {
+  return fromRawPlanet(await invoke<PlanetConfigRaw>("set_planet_config", {
+    rotationRate: cfg.rotationRate,
+    solarLum: cfg.solarLum,
+    greenhouse: cfg.greenhouse,
+    eccentricity: cfg.eccentricity,
+  }));
+}
+
 /** How many cultures the world starts with (0 = auto by land area). */
 export async function setCultureCount(count: number): Promise<void> {
   return invoke("set_culture_count", { count });

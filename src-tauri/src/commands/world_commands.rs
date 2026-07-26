@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use crate::db::{WorldDb, metadata, tile_store};
-use crate::sim::world_buffer::{DEFAULT_EQUATOR_OFFSET, DEFAULT_LAT_SCALE, DEFAULT_LAT_RATIO, DEFAULT_OBLIQUITY};
+use crate::sim::world_buffer::{DEFAULT_EQUATOR_OFFSET, DEFAULT_LAT_SCALE, DEFAULT_LAT_RATIO, DEFAULT_OBLIQUITY,
+    DEFAULT_ROTATION_RATE, DEFAULT_SOLAR_LUM, DEFAULT_GREENHOUSE, DEFAULT_ECCENTRICITY};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WorldMeta {
@@ -79,6 +80,16 @@ pub fn new_world(
         .map_err(|e| e.to_string())?;
     // Default axial tilt: Earth-like 23.44°.
     metadata::set_meta(&conn, "obliquity_deg", &DEFAULT_OBLIQUITY.to_string())
+        .map_err(|e| e.to_string())?;
+    // Default planetary state: Earth (so the anomaly-coupled climate physics is
+    // zero and the generator reproduces the Earth calibration out of the box).
+    metadata::set_meta(&conn, "rotation_rate", &DEFAULT_ROTATION_RATE.to_string())
+        .map_err(|e| e.to_string())?;
+    metadata::set_meta(&conn, "solar_lum", &DEFAULT_SOLAR_LUM.to_string())
+        .map_err(|e| e.to_string())?;
+    metadata::set_meta(&conn, "greenhouse", &DEFAULT_GREENHOUSE.to_string())
+        .map_err(|e| e.to_string())?;
+    metadata::set_meta(&conn, "eccentricity", &DEFAULT_ECCENTRICITY.to_string())
         .map_err(|e| e.to_string())?;
 
     // Initialize tiles
@@ -166,6 +177,71 @@ pub fn set_latitude_config(
         obliquity,
         frozen: crate::commands::campaign_commands::is_frozen(&conn),
     })
+}
+
+// ── Planetary state (energy budget + general circulation) ───────────────────
+// Kept separate from the latitude framing so the Planet panel reads/writes it on
+// its own. All four fields default to Earth, so a world that never touched them
+// generates exactly as before (the anomaly-coupled physics is zero at Earth).
+
+/// The planetary knobs that drive the emergent climate (see `world_buffer.rs`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct PlanetConfig {
+    /// Rotation rate (× Earth). Width of the Hadley cell / wind-belt latitudes.
+    pub rotation_rate: f32,
+    /// Stellar irradiance (× Earth solar constant). Global-mean temperature.
+    pub solar_lum: f32,
+    /// Greenhouse factor (× Earth). Global warming + equator-pole gradient.
+    pub greenhouse: f32,
+    /// Orbital eccentricity (0 = circular). Hemispheric season asymmetry.
+    pub eccentricity: f32,
+}
+
+/// Read the planetary state from metadata, defaulting each field to Earth.
+pub fn read_planet_config(conn: &rusqlite::Connection) -> PlanetConfig {
+    let get = |k: &str, d: f32| metadata::get_meta(conn, k)
+        .ok().flatten().and_then(|s| s.parse().ok()).unwrap_or(d);
+    PlanetConfig {
+        rotation_rate: get("rotation_rate", DEFAULT_ROTATION_RATE),
+        solar_lum: get("solar_lum", DEFAULT_SOLAR_LUM),
+        greenhouse: get("greenhouse", DEFAULT_GREENHOUSE),
+        eccentricity: get("eccentricity", DEFAULT_ECCENTRICITY),
+    }
+}
+
+/// Current planetary state (for the Planet panel to show).
+#[tauri::command]
+pub fn get_planet_config(db: State<'_, WorldDb>) -> Result<PlanetConfig, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    Ok(read_planet_config(&conn))
+}
+
+/// Update the planetary state. Persisted to metadata so the next run of Ocean &
+/// Atmosphere → Climate generates against it. Values clamped to sane ranges.
+#[tauri::command]
+pub fn set_planet_config(
+    rotation_rate: f32,
+    solar_lum: f32,
+    greenhouse: f32,
+    eccentricity: f32,
+    db: State<'_, WorldDb>,
+) -> Result<PlanetConfig, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    // Rotation 0.25×..4×: slower than ¼ Earth degenerates to a single Hadley cell
+    // we don't model; faster than 4× bands finer than the grid resolves.
+    let cfg = PlanetConfig {
+        rotation_rate: rotation_rate.clamp(0.25, 4.0),
+        // 0.5×..1.6× the solar constant brackets the circumstellar habitable zone.
+        solar_lum: solar_lum.clamp(0.5, 1.6),
+        // 0×..3× Earth's greenhouse: 0 ≈ airless/snowball, 3 ≈ deep hothouse.
+        greenhouse: greenhouse.clamp(0.0, 3.0),
+        eccentricity: eccentricity.clamp(0.0, 0.4),
+    };
+    metadata::set_meta(&conn, "rotation_rate", &cfg.rotation_rate.to_string()).map_err(|e| e.to_string())?;
+    metadata::set_meta(&conn, "solar_lum", &cfg.solar_lum.to_string()).map_err(|e| e.to_string())?;
+    metadata::set_meta(&conn, "greenhouse", &cfg.greenhouse.to_string()).map_err(|e| e.to_string())?;
+    metadata::set_meta(&conn, "eccentricity", &cfg.eccentricity.to_string()).map_err(|e| e.to_string())?;
+    Ok(cfg)
 }
 
 #[tauri::command]

@@ -23,6 +23,11 @@ export async function previewGoodScore(spec: GoodSpec): Promise<{ width: number;
   return invoke("preview_good_score", { spec });
 }
 
+/** Lightweight 220×110 land/sea mask for minimaps — no heavy column loading. */
+export async function previewLandGrid(): Promise<{ width: number; height: number; land: number[] }> {
+  return invoke("preview_land_grid");
+}
+
 /** The global good library (editing template for new worlds). */
 export async function getGoodsLibrary(): Promise<GoodSpec[]> {
   return invoke("get_goods_library");
