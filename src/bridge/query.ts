@@ -83,6 +83,22 @@ export async function computeMonsoonZones(): Promise<SharkZone[]> {
   return invoke("compute_monsoon_zones");
 }
 
+/** Latitude bands of the general circulation for the Climate Bands overlay: the
+ *  ITCZ rain line (per-column, migrates over land) plus the subtropical-high
+ *  (desert) and polar-front (storm-track) belt latitudes, which move with the
+ *  planet's rotation/greenhouse (Planet panel). */
+export interface ClimateBands {
+  width: number;
+  itcz: number[];       // per-column ITCZ latitude (°N), length = width
+  hadley_edge: number;  // subtropical-high latitude (°), ~30 on Earth
+  polar_front: number;  // polar-front / storm-track latitude (°), ~60 on Earth
+  cells: number;        // circulation cells per hemisphere
+}
+
+export async function computeClimateBands(): Promise<ClimateBands> {
+  return invoke("compute_climate_bands");
+}
+
 /** One-shot fetch of the *static* map overlays (wind/current vectors +
  *  streamlines, fishery banks, shark/shipworm/reef zones, trade-good regions) in
  *  a single IPC round-trip backed by one shared tile-cache read. Storm zones are

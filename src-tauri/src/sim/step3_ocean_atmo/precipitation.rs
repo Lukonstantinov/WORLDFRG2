@@ -178,7 +178,7 @@ fn orographic_multiplier(buf: &WorldBuffer, x: u32, y: u32, wvx: f32, wvy: f32) 
 /// applied to each x-column) then smooth over a +/-30 deg longitude window so
 /// continental-scale patterns emerge without single-cell noise. Each cell in
 /// season_precip uses its own column's shift.
-fn compute_itcz_shift_zonal(buf: &WorldBuffer) -> Vec<f32> {
+pub(crate) fn compute_itcz_shift_zonal(buf: &WorldBuffer) -> Vec<f32> {
     let w = buf.width;
     let h = buf.height;
     // Smoothing window: approx 30 deg longitude at any grid size (min 8 cells).

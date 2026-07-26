@@ -1101,3 +1101,50 @@ pub fn get_lake_systems(
         serde_json::from_str(&rivers_json).unwrap_or_default();
     Ok(build_lake_systems(&buf, &lakes, &rivers))
 }
+
+/// Latitude bands of the general circulation — the ITCZ rain line plus the
+/// subtropical-high (desert) and polar-front (storm-track) belts — for the Climate
+/// Bands overlay. The belt latitudes come from the rotation-driven `Circulation`
+/// model, so they move when the Planet panel changes rotation/greenhouse/sunlight;
+/// the ITCZ line is the per-column land-asymmetry position (it migrates poleward
+/// over the continents, equatorward over the oceans, exactly as on Earth).
+#[derive(Debug, Serialize)]
+pub struct ClimateBands {
+    /// Grid width (the ITCZ polyline has one latitude per column).
+    pub width: u32,
+    /// Per-column ITCZ latitude (degrees, +N). Length = `width`.
+    pub itcz: Vec<f32>,
+    /// Subtropical-high / Hadley-edge latitude (degrees). Dry desert belt. ~30° on Earth.
+    pub hadley_edge: f32,
+    /// Polar-front / storm-track latitude (degrees). ~60° on Earth.
+    pub polar_front: f32,
+    /// Circulation cells per hemisphere (3 on Earth).
+    pub cells: u32,
+}
+
+/// Compute the climate-band overlay data (ITCZ line + circulation belts).
+#[tauri::command]
+pub fn compute_climate_bands(db: State<'_, WorldDb>) -> Result<ClimateBands, String> {
+    use crate::sim::world_buffer::{WorldBuffer, ColumnSet};
+    use crate::sim::circulation::Circulation;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    if grid_w == 0 || grid_h == 0 {
+        return Ok(ClimateBands { width: 0, itcz: vec![], hadley_edge: 30.0, polar_front: 60.0, cells: 3 });
+    }
+    // Terrain drives the per-column ITCZ shift (land-fraction asymmetry); the planet
+    // state (loaded into the buffer) drives the circulation belts.
+    let buf = WorldBuffer::load_with(&conn, ColumnSet::TERRAIN)?;
+    let itcz = crate::sim::precipitation::compute_itcz_shift_zonal(&buf);
+    let circ = Circulation::for_world(&buf);
+    Ok(ClimateBands {
+        width: grid_w,
+        itcz,
+        hadley_edge: circ.hadley_edge,
+        polar_front: circ.polar_front,
+        cells: circ.cells,
+    })
+}

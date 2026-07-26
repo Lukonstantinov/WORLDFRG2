@@ -61,6 +61,17 @@ const layerGroups: { group: string; layers: { id: ActiveLayer; label: string }[]
   },
 ];
 
+// Climate-circulation overlays (the winds, the ITCZ rain line, the belt latitudes
+// and the reference lat lines) — grouped together since they all describe the
+// atmosphere/circulation and respond to the Planet panel.
+const climateOverlays = [
+  { id: "itcz", label: "\u{1F327} ITCZ (rain line)" },
+  { id: "windBelts", label: "\u{1F9ED} Circulation Belts" },
+  { id: "wind", label: "Wind" },
+  { id: "currents", label: "Currents" },
+  { id: "latLines", label: "Lat Lines" },
+];
+
 const overlayTypes = [
   { id: "rivers", label: "Rivers" },
   { id: "lakes", label: "Lakes" },
@@ -73,9 +84,6 @@ const overlayTypes = [
   { id: "tradeFlows", label: "Trade Flows" },
   { id: "fisheryBanks", label: "Fishery Banks" },
   { id: "markers", label: "Volcanoes" },
-  { id: "wind", label: "Wind" },
-  { id: "currents", label: "Currents" },
-  { id: "latLines", label: "Lat Lines" },
 ];
 
 // Biological / political sublayer overlays (grouped separately).
@@ -128,6 +136,11 @@ export function Toolbar() {
   const setShowBankIcons = useUIStore((s) => s.setShowBankIcons);
   const setGoodDetail = useUIStore((s) => s.setGoodDetail);
   const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({});
+  // Collapsible top-level sections (the big lists start collapsed to declutter).
+  const [openSection, setOpenSection] = useState<Record<string, boolean>>({
+    Layers: true, Overlays: true, Climate: true, Biological: false, "Trade Goods": false, View: true,
+  });
+  const toggleSection = (k: string) => setOpenSection((s) => ({ ...s, [k]: !s[k] }));
   const bioParams = useUIStore((s) => s.bioParams);
   const setBioParams = useUIStore((s) => s.setBioParams);
   const hubDisplay = useUIStore((s) => s.hubDisplay);
@@ -215,8 +228,8 @@ export function Toolbar() {
 
       {/* Layers */}
       <div style={section}>
-        <div style={sectionHeader}>Layers</div>
-        {layerGroups.map((group) => (
+        <SectionHead title="Layers" open={openSection.Layers} onToggle={() => toggleSection("Layers")} />
+        {openSection.Layers && layerGroups.map((group) => (
           <div key={group.group} style={{ marginBottom: 4 }}>
             <div style={groupLabel}>{group.group}</div>
             {group.layers.map((l) => (
@@ -256,7 +269,8 @@ export function Toolbar() {
 
       {/* Overlays */}
       <div style={section}>
-        <div style={sectionHeader}>Overlays</div>
+        <SectionHead title="Overlays" open={openSection.Overlays} onToggle={() => toggleSection("Overlays")} />
+        {openSection.Overlays && (<>
         {/* The trade map means different things per mode: in Forge the routes/flows
             are the worldgen equilibrium *preview* (potential); in Chronicle the
             routes remain but flow activity is the *live* simulated volume. */}
@@ -307,6 +321,34 @@ export function Toolbar() {
           />
           <span style={{ color: showBankIcons ? "#b0c8e0" : "#5a6a80" }}>{"\u{1F3E6}"} Banks</span>
         </label>
+        </>)}
+      </div>
+
+      {/* Climate circulation overlays (ITCZ line + rotation-driven belts + winds).
+          Sits beside the Planet panel below, since both describe the atmosphere. */}
+      <div style={section}>
+        <SectionHead title="Climate" open={openSection.Climate} onToggle={() => toggleSection("Climate")} />
+        {openSection.Climate && (
+          <div>
+            <div style={{ fontSize: 9, color: "#5a7390", marginBottom: 4, lineHeight: 1.4 }}>
+              Circulation bands from the Planet settings — the ITCZ rain line and the
+              subtropical-high / polar-front belts move with rotation &amp; warmth.
+            </div>
+            {climateOverlays.map((o) => (
+              <label key={o.id} style={checkboxRow}>
+                <input
+                  type="checkbox"
+                  checked={!!overlayVisibility[o.id]}
+                  onChange={() => toggleOverlay(o.id)}
+                  style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
+                />
+                <span style={{ color: overlayVisibility[o.id] ? "#b0c8e0" : "#5a6a80" }}>
+                  {o.label}
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Dynamic latitude framing (move equator / expand 0–60 bands) */}
@@ -314,7 +356,8 @@ export function Toolbar() {
 
       {/* Biological / political hazard + influence sublayers */}
       <div style={section}>
-        <div style={sectionHeader}>Biological</div>
+        <SectionHead title="Biological" open={openSection.Biological} onToggle={() => toggleSection("Biological")} />
+        {openSection.Biological && (<>
         {bioOverlays.map((o) => (
           <label key={o.id} style={checkboxRow}>
             <input
@@ -366,12 +409,14 @@ export function Toolbar() {
             onChange={(e) => setHubDisplay({ intensity: parseFloat(e.target.value) })}
             style={{ width: "100%", accentColor: "#3a86d6" }} />
         </div>
+        </>)}
       </div>
 
       {/* Trade-good belts (each good is a separate sublayer toggle). Driven by the
           world's editable spec list, falling back to the static defaults. */}
       <div style={section}>
-        <div style={sectionHeader}>Trade Goods</div>
+        <SectionHead title="Trade Goods" open={openSection["Trade Goods"]} onToggle={() => toggleSection("Trade Goods")} />
+        {openSection["Trade Goods"] && (<>
         <button
           onClick={() => setShowGoodsBrowser(true)}
           style={{ width: "100%", marginBottom: 6, padding: "4px 6px", fontSize: 10,
@@ -435,13 +480,15 @@ export function Toolbar() {
             </div>
           );
         })}
+        </>)}
       </div>
 
       <div style={divider} />
 
       {/* View */}
       <div style={section}>
-        <div style={sectionHeader}>View</div>
+        <SectionHead title="View" open={openSection.View} onToggle={() => toggleSection("View")} />
+        {openSection.View && (
         <label style={checkboxRow}>
           <input
             type="checkbox"
@@ -453,7 +500,22 @@ export function Toolbar() {
             Stretch to fill
           </span>
         </label>
+        )}
       </div>
+    </div>
+  );
+}
+
+/** Clickable, collapsible section header with a caret. */
+function SectionHead({ title, open, onToggle }: { title: string; open: boolean; onToggle: () => void }) {
+  return (
+    <div
+      onClick={onToggle}
+      style={{ ...sectionHeader, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", userSelect: "none" }}
+      title={open ? "Collapse" : "Expand"}
+    >
+      <span>{title}</span>
+      <span style={{ fontSize: 8 }}>{open ? "▼" : "▶"}</span>
     </div>
   );
 }
