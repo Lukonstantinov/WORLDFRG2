@@ -807,6 +807,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         prov_seat: vec![],
         hub_province: vec![],
         prov_net_mig: vec![],
+        prov_neighbors: vec![],
     };
     // Backfill the colonization pool if the saved economy predates the feature (its
     // `colonizable_sites` deserialized to the serde default — empty). Without this a
@@ -873,8 +874,10 @@ fn seed_campaign_provinces(conn: &Connection, sim: &mut CampaignSim) {
     let mut cap = vec![0.0f32; n];
     let mut culture = vec![String::new(); n];
     let mut seat = vec![[0.0f32; 2]; n];
+    let mut neighbors = vec![Vec::new(); n];
     for p in &provs {
         let i = p.id as usize;
+        neighbors[i] = p.neighbors.clone();
         // The land's rural CAPACITY comes from its food potential (same baseline the
         // panel shows); start the countryside partly filled so it has room to grow.
         cap[i] = (p.rural_pop as f32).max(50.0);
@@ -902,6 +905,7 @@ fn seed_campaign_provinces(conn: &Connection, sim: &mut CampaignSim) {
     sim.prov_seat = seat;
     sim.hub_province = hub_prov;
     sim.prov_net_mig = vec![0.0; n];
+    sim.prov_neighbors = neighbors;
 }
 
 /// Nearest province seat to (x,y), cylindrical in X. -1 if no seats.

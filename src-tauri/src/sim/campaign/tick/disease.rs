@@ -200,6 +200,25 @@ impl CampaignSim {
             } else if let Some(v) = self.neighbors.get(src) {
                 for &x in v { consider(self, x as usize, &mut best); }
             }
+            // OVERLAND vector (Phase 2c): a plague also creeps across the COUNTRYSIDE from
+            // one province into the next — so it reaches an adjacent province's city even
+            // when the two aren't trade partners. Gated on a seeded province layer, and it
+            // reuses every guard in `consider` (distance, immunity, outbreak memory, mode).
+            if !self.prov_neighbors.is_empty() {
+                let sp = self.hub_province.get(src).copied().unwrap_or(-1);
+                if sp >= 0 {
+                    if let Some(neigh) = self.prov_neighbors.get(sp as usize) {
+                        if !neigh.is_empty() {
+                            for h in 0..n {
+                                let hp = self.hub_province.get(h).copied().unwrap_or(-1);
+                                if hp >= 0 && neigh.contains(&(hp as u16)) {
+                                    consider(self, h, &mut best);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if best.0 != usize::MAX {
                 self.strike_plague(best.0, EPIDEMIC_CONTAGION_MAG, cat, disease, Some((src, outbreak, origin, disease)));
                 new_infections += 1;

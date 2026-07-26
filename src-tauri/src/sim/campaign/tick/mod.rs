@@ -3084,6 +3084,9 @@ pub struct CampaignSim {
     #[serde(default)] pub hub_province: Vec<i32>,
     /// Rolling net migration per province this year (source<0 / sink>0), for the panel.
     #[serde(default)] pub prov_net_mig: Vec<f32>,
+    /// Province adjacency (id → neighbouring province ids), for OVERLAND plague spread
+    /// across the countryside from one province to the next.
+    #[serde(default)] pub prov_neighbors: Vec<Vec<u16>>,
 }
 
 /// Deterministic 0..1 hash of three mixed inputs (splitmix64).

@@ -341,6 +341,12 @@ provinces — and the dynamics test, which never seeds one — runs exactly as b
 
 Ideas surfaced while building 2b, ranked by believability-per-effort:
 
+0. **Shipped** — buildings→province linkage (`campaign_province_detail`: estates,
+   manufactories, warehouses, banks, mints mapped into each province, surfaced in the
+   C-1 subwindow with custom minimalist icons + hover stats); plague→countryside
+   (a strike ravages the province rural pool); **cross-province plague hop** (a
+   plague creeps overland into an *adjacent* province's city via seeded
+   `prov_neighbors`, reusing every spread guard). All gated on a seeded partition.
 1. **Damp the intrinsic urban birth surplus when provinces exist** so migration
    becomes the *primary* engine of urban growth (a fuller urban-graveyard model),
    not an additive bonus on top of the daily logistic. The safest next tuning step.

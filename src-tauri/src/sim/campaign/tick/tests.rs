@@ -90,7 +90,7 @@
             expeditions: vec![], route_prospects: vec![], failed_expeditions: vec![],
             corridors: vec![], next_expedition_id: 0,
             prov_rural: vec![], prov_cap: vec![], prov_culture: vec![], prov_seat: vec![],
-            hub_province: vec![], prov_net_mig: vec![],
+            hub_province: vec![], prov_net_mig: vec![], prov_neighbors: vec![],
         };
         s.rebuild_routes();
         s
