@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import { useViewportStore } from "@state/viewportStore";
-import { simGenerateSettlements, setCultureCount as saveCultureCount, getCultureCount } from "@bridge";
+import { simGenerateSettlements, simGenerateProvinces, setCultureCount as saveCultureCount, getCultureCount } from "@bridge";
 import { genBtn } from "@ui/workflow/WorkflowPanel";
 
 interface Props {
@@ -24,7 +24,12 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
   const settlementCap = useUIStore((s) => s.settlementCap);
   const setSettlementCap = useUIStore((s) => s.setSettlementCap);
   const focusOn = useViewportStore((s) => s.focusOn);
-  const { rivers, settlements, setSettlements } = useWorldStore();
+  const { rivers, settlements, setSettlements, setProvinces, provinces } = useWorldStore();
+
+  // Province partition — generated straight from this step (seeds off the settlements
+  // above). Borders follow rivers / lakes / mountain ranges (see sim/shared/provinces.rs).
+  const [provGranularity, setProvGranularity] = useState(0.5);
+  const [provBusy, setProvBusy] = useState(false);
 
   // Cultures 2.0 · how many cultures/peoples the world starts with (0 = auto by land
   // area). Persisted to world metadata so the culture map picks it up at generation.
@@ -63,6 +68,28 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
       setStatus(`${result.settlements.length} sites: ${capitals} capitals, ${cities} cities, ${towns} towns, ${villages} villages`);
     } catch (err) { setStatus(`Error: ${err}`); }
     setSimRunning(false);
+  };
+
+  const handleGenerateProvinces = async () => {
+    if (provBusy || simRunning) return;
+    if (settlements.length === 0) {
+      setStatus("Find settlements first — provinces seed from them");
+      return;
+    }
+    setProvBusy(true);
+    setStatus("Partitioning the land into provinces…");
+    try {
+      const res = await simGenerateProvinces(settlements, rivers, provGranularity);
+      setProvinces(res.provinces, {
+        data: res.raster, w: res.raster_w, h: res.raster_h, gridW: res.grid_w, gridH: res.grid_h,
+      });
+      setOverlayVisible("provinces", true);
+      setStatus(`Generated ${res.provinces.length} provinces`);
+    } catch (e) {
+      setStatus(`Province generation failed: ${e}`);
+    } finally {
+      setProvBusy(false);
+    }
   };
 
   const dot = (size: string) =>
@@ -151,9 +178,26 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
       </div>
 
       {settlements.length > 0 && (
-        <div style={{ color: "#4a6a4a", fontSize: 10, marginTop: 4, padding: "4px 6px",
-          background: "#0e1a12", borderRadius: 3, border: "1px solid #1a3020" }}>
-          Next: open <strong style={{ color: "#6a9a6a" }}>🗺 Provinces</strong> (top bar) to partition the land into watershed provinces.
+        <div style={{ marginTop: 6, padding: "6px 7px", background: "#0e1a12", borderRadius: 4,
+          border: "1px solid #1a3020", display: "flex", flexDirection: "column", gap: 5 }}>
+          <div style={{ color: "#6a9a6a", fontSize: 10, fontWeight: 600 }}>🗺 Provinces — partition the land</div>
+          <div style={{ color: "#4a6a4a", fontSize: 9, lineHeight: 1.4 }}>
+            Splits the land into provinces whose borders follow rivers, lakes and
+            mountain ranges (lowland plains divide organically). Seeds from the
+            settlements above — open the Provinces panel (top bar) to inspect them.
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ color: "#607090", fontSize: 10 }}>Granularity</span>
+            <input type="range" min={0} max={1} step={0.05} value={provGranularity}
+              onChange={(e) => setProvGranularity(parseFloat(e.target.value))} style={{ flex: 1 }} />
+            <span style={{ width: 66, color: "#8090b0", fontSize: 9, textAlign: "right" }}>
+              {provGranularity < 0.34 ? "few · large" : provGranularity > 0.66 ? "many · small" : "balanced"}
+            </span>
+          </div>
+          <button onClick={handleGenerateProvinces} disabled={provBusy || simRunning}
+            style={{ ...genBtn, marginBottom: 0, background: "#183024", color: "#8fd0a0", textAlign: "center" }}>
+            {provBusy ? "Partitioning…" : provinces.length ? `Regenerate Provinces (${provinces.length})` : "Generate Provinces"}
+          </button>
         </div>
       )}
     </div>

@@ -2,13 +2,15 @@
 //! and settlements (the EU4-style political/economic map). Runs AFTER the
 //! settlement step (settlements seed the partition) and is a SEPARATE layer.
 //!
-//! The land is split into provinces whose borders follow natural features:
+//! The land is split into provinces whose borders follow VISIBLE natural features:
 //! - **coasts / islands** — each land connected-component is partitioned on its own,
 //!   so no province spans open sea;
-//! - **drainage divides** — the cost-flood pays to climb ridgelines, so borders fall
-//!   on watersheds (rivers stay at a province's heart, not on its edge);
-//! - **trunk rivers** — a wide / navigable river is expensive to cross, so it can act
-//!   as a frontier;
+//! - **mountain ranges** — genuinely high ground is expensive to traverse, so borders
+//!   settle along mountain spines. This is NOT a watershed partition: a minor uphill
+//!   step on lowlands is free, so provinces grow organically across plains until they
+//!   actually meet a range (only real mountains divide, not every drainage divide);
+//! - **rivers & lakes** — a wide / navigable river is expensive to cross and lakes are
+//!   impassable, so both act as frontiers between neighbouring provinces;
 //! - **organic noise** — a small per-edge noise term wobbles borders off any clean
 //!   Voronoi/gradient line, and provinces are NOT forced simply-connected, so genuine
 //!   enclaves/exclaves survive.
@@ -199,14 +201,17 @@ pub fn generate_provinces(
         dist[sc as usize] = 0.0;
         heap.push(HeapItem { cost: 0.0, cell: sc, owner: oi as u32 });
     }
-    const K_RIDGE: f64 = 9.0;   // pay to climb divides → borders on watersheds
+    // Mountains are the divider, NOT watersheds: crossing genuinely high ground costs
+    // extra (borders settle on ranges), but a minor uphill step on lowlands is free (so
+    // provinces grow organically across plains until they hit a river, lake, or range).
+    const K_MOUNTAIN: f64 = 18.0;    // cost per unit elevation above the range threshold
+    const MOUNT_THRESH: f32 = 0.26;  // ≈2300 m — foothills begin to divide, high ranges wall
     while let Some(HeapItem { cost, cell, owner: ow }) = heap.pop() {
         let ci = cell as usize;
         if cost > dist[ci] { continue; }
         if owner[ci] != ow { continue; }
         let cx = (cell % w) as i32;
         let cy = (cell / w) as i32;
-        let ce = buf.elevation[ci];
         for dy in -1i32..=1 {
             for dx in -1i32..=1 {
                 if dx == 0 && dy == 0 { continue; }
@@ -215,10 +220,15 @@ pub fn generate_provinces(
                 let ni = buf.widx(cx + dx, ny);
                 if buf.terrain[ni] != 1 || is_lake[ni] { continue; }
                 let diag = if dx != 0 && dy != 0 { 1.4142 } else { 1.0 };
-                let climb = ((buf.elevation[ni] - ce).max(0.0) as f64) * K_RIDGE;
-                let rivp = river_cross[ni] as f64;
-                let noise = (hash2(cell as u64, ni as u64) % 1000) as f64 / 1000.0 * 0.45;
-                let nc = cost + diag + climb + rivp + noise;
+                // Absolute high-elevation cost — a mountain wall, not a drainage divide.
+                // Lowlands (elev ≤ threshold) add nothing, so plains stay Voronoi-organic.
+                let em = buf.elevation[ni];
+                let mountain = if em > MOUNT_THRESH {
+                    ((em - MOUNT_THRESH) as f64) * K_MOUNTAIN
+                } else { 0.0 };
+                let rivp = river_cross[ni] as f64;   // wide/navigable rivers = frontiers
+                let noise = (hash2(cell as u64, ni as u64) % 1000) as f64 / 1000.0 * 0.35;
+                let nc = cost + diag + mountain + rivp + noise;
                 if nc < dist[ni] {
                     dist[ni] = nc;
                     owner[ni] = ow;
@@ -264,22 +274,28 @@ pub fn generate_provinces(
     let mut cell_count = vec![0u32; n_seeds];
     for &o in owner.iter() { if o != u32::MAX { cell_count[o as usize] += 1; } }
     let min_cells = ((spacing * spacing) / 6).max(6) as u32;
-    // shared-border tallies for small provinces
     let mut remap: Vec<u32> = (0..n_seeds as u32).collect();
-    for p in 0..n_seeds {
-        if cell_count[p] == 0 || cell_count[p] >= min_cells { continue; }
-        let mut shared = std::collections::HashMap::<u32, u32>::new();
-        for c in 0..total {
-            if owner[c] != p as u32 { continue; }
-            let cx = (c as u32 % w) as i32; let cy = (c as u32 / w) as i32;
-            for &(dx, dy) in &[(-1i32,0i32),(1,0),(0,-1),(0,1)] {
-                let ny = cy + dy; if ny < 0 || ny >= hi { continue; }
-                let ni = buf.widx(cx + dx, ny);
-                let o = owner[ni];
-                if o != u32::MAX && o != p as u32 { *shared.entry(o).or_insert(0) += 1; }
-            }
+    // Provinces below the area floor get folded into the neighbour they share the most
+    // border with. PERF: this used to rescan ALL cells once per small province — an
+    // O(n_small × total) trap that dominated generation on large worlds (hundreds of
+    // slivers × 6.5 M cells). Now it's a SINGLE O(total) pass: for every cell owned by a
+    // small province, tally its cross-border neighbours into that province's map.
+    let is_small: Vec<bool> = cell_count.iter().map(|&c| c > 0 && c < min_cells).collect();
+    let mut shared: Vec<std::collections::HashMap<u32, u32>> =
+        (0..n_seeds).map(|_| std::collections::HashMap::new()).collect();
+    for c in 0..total {
+        let o = owner[c];
+        if o == u32::MAX || !is_small[o as usize] { continue; }
+        let cx = (c as u32 % w) as i32; let cy = (c as u32 / w) as i32;
+        for &(dx, dy) in &[(-1i32,0i32),(1,0),(0,-1),(0,1)] {
+            let ny = cy + dy; if ny < 0 || ny >= hi { continue; }
+            let no = owner[buf.widx(cx + dx, ny)];
+            if no != u32::MAX && no != o { *shared[o as usize].entry(no).or_insert(0) += 1; }
         }
-        if let Some((&best, _)) = shared.iter().max_by_key(|(_, &v)| v) {
+    }
+    for p in 0..n_seeds {
+        if !is_small[p] { continue; }
+        if let Some((&best, _)) = shared[p].iter().max_by_key(|(_, &v)| v) {
             remap[p] = best;
         }
     }
