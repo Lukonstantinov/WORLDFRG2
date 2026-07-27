@@ -3743,7 +3743,7 @@ impl CampaignSim {
                 // DLC 3 · the polis council sets the coming year's tariff / mint
                 // policy, then the speculation why-engine reads the year that just
                 // closed (uses `house_ledger_prev` before the books are reset).
-                self.decide_polis_policy(yr);
+                self.run_polis_policy(yr);
                 // Government: seed regimes/key figures, bribery & intimidation, capture,
                 // regime change, civic granary (reads the influence/dominance just set).
                 self.update_government(yr);

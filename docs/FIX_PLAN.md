@@ -1,7 +1,7 @@
 # WorldForge 2 — Fix Plan
 
-**Status:** A1 (moisture recycling) implemented — see status note below. Rest of the
-plan not yet started.
+**Status:** A1 (moisture recycling) implemented; B2 (decide/apply split) started —
+see status notes below. Rest of the plan not yet started.
 **Baseline measured:** `cargo test --lib earth_ -- --nocapture` on commit `d53fdc9`.
 
 This plan is grounded in the Earth-validation harness, not in impressions. Every
@@ -301,6 +301,24 @@ Three tiers — **recommend tier 2**:
 
 **Gate:** with the AI supplying every choice, `simulate_decades_reports_dynamics` must
 produce bit-identical output to today. That is what proves the refactor was pure.
+
+**Status: started — `decide_polis_policy` split, pattern established.**
+`polis.rs::decide_polis_policy` (council seating, tariff stance, mint-fineness
+target, health-funding decision) is now `fn decide_polis_policy(&self, year) ->
+Vec<PolisChoice>` (pure, no mutation) + `fn apply_polis_policy(&mut self,
+choices)` (the only part that touches hub state), wired together by
+`run_polis_policy` at the sole call site in `mod.rs`. `PolisChoice` is the
+concrete `XChoice` the plan describes — a player who held a seat would call
+`apply_polis_policy` directly with their own choice instead of going through
+`decide_polis_policy`. Verified bit-identical: `simulate_decades_reports_
+dynamics` output diffed byte-for-byte against the pre-refactor baseline.
+
+**Not yet done:** `decide_coinage` (`money.rs`) and house dispatch/bank
+lending/colonisation/office leasing/war goals (`houses.rs`, `colonies.rs`,
+`war.rs`) are still monolithic `&mut self` AI+mutation functions — the same
+split needs repeating for each before B2 is actually "done." Given the size
+of those files (houses.rs alone is ~4k lines), each should get its own
+change + bit-identical-diff verification pass rather than one large sweep.
 
 ---
 

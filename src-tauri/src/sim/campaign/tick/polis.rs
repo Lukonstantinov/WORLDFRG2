@@ -2,6 +2,23 @@
 //! `use super::*` brings the struct, its fields, tuning consts and free helpers into scope.
 use super::*;
 
+/// One seat's polis-policy CHOICE for the coming year — the levers a council (or,
+/// eventually, a player who holds the seat) sets: who sits the council, the tariff
+/// schedule, the mint's fineness target, and whether treasury funds public health.
+/// `decide_polis_policy` computes these read-only from the AI's rules;
+/// `apply_polis_policy` is the only part that mutates hub state. Splitting the two
+/// (FIX_PLAN B2) is what lets a future player supply a `PolisChoice` directly in
+/// place of the AI's — the sim doesn't care which one produced it.
+pub(crate) struct PolisChoice {
+    council_house: i32,
+    tariff_export: f32,
+    tariff_import: f32,
+    /// Target mint fineness (0..1) the treasury eases toward this year.
+    mint_target: f32,
+    /// Whether treasury headroom funds public health this year (else it decays).
+    fund_health: bool,
+}
+
 impl CampaignSim {
 
     /// DLC 3 · Phase 0 — the POLIS as an actor. Once a year each seat city's
@@ -10,7 +27,10 @@ impl CampaignSim {
     /// levers feed both the live sim (tariffs are charged on trade) and the
     /// speculation engine (a debased mint = cheap money). Conservative + additive:
     /// hubs with no dominant house keep the global default rates.
-    pub(crate) fn decide_polis_policy(&mut self, _year: u32) {
+    ///
+    /// Pure AI proposal (reads `&self` only) — see `apply_polis_policy` for the
+    /// mutation and `run_polis_policy` for the combined call the tick loop uses.
+    pub(crate) fn decide_polis_policy(&self, _year: u32) -> Vec<PolisChoice> {
         let n = self.hubs.len();
         // Dominant council house per hub: the richest non-guild house that holds
         // its seat (`dominant_seat`) and is homed there.
@@ -39,10 +59,15 @@ impl CampaignSim {
                 }
             }
         }
+        let mut choices = Vec::with_capacity(n);
         for h in 0..n {
-            if self.hubs[h].is_estate { continue; }
-            self.hubs[h].council_house = council[h];
-            if self.hubs[h].mint_fineness <= 0.0 { self.hubs[h].mint_fineness = 1.0; }
+            if self.hubs[h].is_estate {
+                choices.push(PolisChoice {
+                    council_house: -1, tariff_export: 0.0, tariff_import: 0.0,
+                    mint_target: 1.0, fund_health: false,
+                });
+                continue;
+            }
             // A house that has CAPTURED this government (its key figures) sets the stance —
             // otherwise the council house does. Capture = policy in the captor's interest.
             let ruler = if self.hubs[h].captor_house >= 0 { self.hubs[h].captor_house } else { council[h] };
@@ -57,27 +82,43 @@ impl CampaignSim {
                 ARCH_SPECIALTY => (EXPORT_TAX_RATE * 1.1, IMPORT_TAX_RATE * 1.1),
                 _ => (EXPORT_TAX_RATE, IMPORT_TAX_RATE),
             };
-            self.hubs[h].tariff_export = exp;
-            self.hubs[h].tariff_import = imp;
             // Mint: a prosperous, banking-led council "cuts the coin fine" to lend
             // cheap (fineness eases down); others slowly restore full-bodied coin.
             let prosperous = self.hubs[h].trade_wealth > 0.5;
             // v2.0 · a post-reform HONEST-MONEY mandate bars debasement until it lapses.
             let under_mandate = self.hubs[h].reform_until > self.tick;
-            let target = if under_mandate { 1.0 }
+            let mint_target = if under_mandate { 1.0 }
                 else if arch == ARCH_BANKING && prosperous { 0.88 }
                 else if prosperous { 0.96 } else { 1.0 };
+            // Hospices & quarantine (public health): a council with treasury headroom funds
+            // public health; one that can't afford it lets the provision lapse. This is
+            // the lever by which a WEALTHY city buys down its plague mortality — coin
+            // spent so fewer of its people die.
+            let fund_health = self.hubs[h].treasury > HOSPICE_MIN_TREASURY;
+            choices.push(PolisChoice {
+                council_house: council[h], tariff_export: exp, tariff_import: imp,
+                mint_target, fund_health,
+            });
+        }
+        choices
+    }
+
+    /// Carries out a year's `PolisChoice`es — the only part of polis policy that
+    /// mutates hub state. See `decide_polis_policy`'s doc comment (FIX_PLAN B2).
+    pub(crate) fn apply_polis_policy(&mut self, choices: &[PolisChoice]) {
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate { continue; }
+            let c = &choices[h];
+            self.hubs[h].council_house = c.council_house;
+            if self.hubs[h].mint_fineness <= 0.0 { self.hubs[h].mint_fineness = 1.0; }
+            self.hubs[h].tariff_export = c.tariff_export;
+            self.hubs[h].tariff_import = c.tariff_import;
             let f = self.hubs[h].mint_fineness;
-            self.hubs[h].mint_fineness = f + (target - f) * 0.5;
+            self.hubs[h].mint_fineness = f + (c.mint_target - f) * 0.5;
             // Retained treasury: skim ~8% of the circulating civic pool.
             self.hubs[h].treasury += self.hubs[h].civic_pool * 0.08;
-            // Hospices & quarantine (public health): a council with treasury headroom funds
-            // public health, easing it toward a prosperity-set target and spending a small,
-            // bounded slice of treasury (recorded in `finance.spent_health`). When a council
-            // can't afford it, the provision lapses. This is the lever by which a WEALTHY
-            // city buys down its plague mortality — coin spent so fewer of its people die.
             let ph = self.hubs[h].public_health;
-            if self.hubs[h].treasury > HOSPICE_MIN_TREASURY {
+            if c.fund_health {
                 let target = self.hubs[h].trade_wealth.clamp(0.0, 1.0) * HOSPICE_MAX_LEVEL;
                 self.hubs[h].public_health = (ph + (target - ph) * HOSPICE_EASE).clamp(0.0, HOSPICE_MAX_LEVEL);
                 let cost = self.hubs[h].treasury * HOSPICE_TREASURY_SKIM;
@@ -87,6 +128,14 @@ impl CampaignSim {
                 self.hubs[h].public_health = (ph - HOSPICE_DECAY).max(0.0);
             }
         }
+    }
+
+    /// The tick loop's entry point: AI decides, sim applies. A future player-owned
+    /// seat would call `apply_polis_policy` directly with its own `PolisChoice`
+    /// instead of going through `decide_polis_policy` (FIX_PLAN B2).
+    pub(crate) fn run_polis_policy(&mut self, year: u32) {
+        let choices = self.decide_polis_policy(year);
+        self.apply_polis_policy(&choices);
     }
 
 
