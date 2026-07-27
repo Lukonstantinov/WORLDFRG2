@@ -186,12 +186,16 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
             settlements above — open the Provinces panel (top bar) to inspect them.
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ color: "#607090", fontSize: 10 }}>Granularity</span>
+            <span style={{ color: "#607090", fontSize: 10 }}>Province size</span>
             <input type="range" min={0} max={1} step={0.05} value={provGranularity}
               onChange={(e) => setProvGranularity(parseFloat(e.target.value))} style={{ flex: 1 }} />
-            <span style={{ width: 66, color: "#8090b0", fontSize: 9, textAlign: "right" }}>
+            <span style={{ width: 72, color: "#8090b0", fontSize: 9, textAlign: "right" }}>
               {provGranularity < 0.34 ? "few · large" : provGranularity > 0.66 ? "many · small" : "balanced"}
             </span>
+          </div>
+          <div style={{ color: "#4a6a4a", fontSize: 9 }}>
+            Drag right for smaller, more numerous provinces. Size also scales with the
+            land: bigger in polar / desert / mountain country, smaller in fertile land.
           </div>
           <button onClick={handleGenerateProvinces} disabled={provBusy || simRunning}
             style={{ ...genBtn, marginBottom: 0, background: "#183024", color: "#8fd0a0", textAlign: "center" }}>

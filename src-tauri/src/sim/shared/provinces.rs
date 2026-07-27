@@ -148,11 +148,15 @@ pub fn generate_provinces(
     //    scaled by HABITABILITY — dense (small provinces) in fertile temperate/tropical
     //    land, sparse (big provinces) in the hostile fringe: polar, cold taiga, desert
     //    and high mountain ranges. Granularity g sets the base spacing. ──
-    let cols = 12.0 + 46.0 * g;
+    // Granularity → number of province "columns" across the map. Wider range so the
+    // size slider spans genuinely large (g→0) to small (g→1) provinces.
+    let cols = 18.0 + 92.0 * g;
     let spacing = ((w as f32 / cols).round() as i32).max(4);
     // The finest separation (most habitable land); scales UP to ~3.8× in the least
-    // habitable land, so provinces there come out far larger.
-    let base_sep = (spacing as f32) * 0.5;
+    // habitable land, so provinces there come out far larger. FLOORED at 10 cells so
+    // even the most habitable land / highest granularity never shatters into a speckle
+    // of 1-cell provinces (the min province is then ≈100 cells).
+    let base_sep = ((spacing as f32) * 0.5).max(10.0);
     let hab_at = |i: usize| -> f32 {
         if buf.habitability.is_empty() { 0.5 } else { buf.habitability[i] as f32 / 255.0 }
     };

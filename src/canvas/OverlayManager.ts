@@ -1246,9 +1246,9 @@ export class OverlayManager {
     }
 
     // Province name labels at each seat, culled by the shared collision map so they
-    // don't pile up. Font is zoom-compensated and only shown once zoomed in enough
-    // for text to be legible (avoids a wall of overlapping names on the whole world).
-    if (this.provinceLabels.length > 0 && this.currentScale > 1.4) {
+    // don't pile up. Shown at a modest zoom (works in the campaign world view); the
+    // collision cull keeps it from becoming a wall of overlapping names.
+    if (this.provinceLabels.length > 0 && this.currentScale > 0.7) {
       const fs = Math.max(7, 11 / this.currentScale);
       ctx.font = `600 ${fs}px system-ui, sans-serif`;
       ctx.textAlign = "center";

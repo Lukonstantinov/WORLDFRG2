@@ -81,6 +81,9 @@ export function CampaignTopBar() {
     {
       key: "world", label: "🌍 World",
       items: [
+        // Opening Provinces also switches the province overlay on so the map matches.
+        { label: "🗺 Provinces", on: ui.showProvinces,
+          set: (v: boolean) => { ui.setShowProvinces(v); if (v) ui.setOverlayVisible("provinces", true); } },
         { label: "🏆 City Ranking", on: ui.showCityRanking, set: ui.setShowCityRanking },
         { label: "🏛 Colonial Office", on: ui.showColonial, set: ui.setShowColonial },
         { label: "🌊 Hydrology · Rivers", on: ui.showHydrology, set: ui.setShowHydrology },
