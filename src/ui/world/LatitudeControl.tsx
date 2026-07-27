@@ -231,12 +231,19 @@ export function LatitudeControl() {
         <div style={{ marginTop: 12, borderTop: "1px solid #1a2330", paddingTop: 8 }}>
           <div style={header}>Planet</div>
           <PlanetSlider
-            label="Rotation" unit="× Earth" value={planet.rotationRate}
+            label="Rotation" unit="× Earth" value={Math.abs(planet.rotationRate)}
             min={0.25} max={4} step={0.05} digits={2}
-            onChange={(v) => commitPlanet({ ...planet, rotationRate: v })}
+            onChange={(v) => commitPlanet({ ...planet, rotationRate: planet.rotationRate < 0 ? -v : v })}
             presets={[["Slow ½×", 0.5], ["Earth 1×", 1], ["Fast 2×", 2]]}
             hint="Sets the wind belts / Hadley cell: slower = wider tropics, deserts &amp; storm tracks pushed poleward, fewer bands; faster = tighter banding."
           />
+          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#5a7090", marginTop: 2, cursor: "pointer" }}>
+            <input type="checkbox" checked={planet.rotationRate < 0}
+              onChange={(e) => commitPlanet({ ...planet, rotationRate: Math.abs(planet.rotationRate) * (e.target.checked ? -1 : 1) })}
+              style={{ accentColor: "#3a80c0" }} />
+            Retrograde rotation (spins backwards — mirrors which coasts get warm/cold
+            boundary currents and which way the trade winds blow)
+          </label>
           <PlanetSlider
             label="Greenhouse" unit="× Earth" value={planet.greenhouse}
             min={0} max={3} step={0.05} digits={2}
@@ -257,6 +264,13 @@ export function LatitudeControl() {
             onChange={(v) => commitPlanet({ ...planet, eccentricity: v })}
             presets={[["Circular 0", 0], ["Earth .017", 0.0167], ["High .2", 0.2]]}
             hint="Orbit shape: higher makes one hemisphere's seasons shorter &amp; sharper than the other's."
+          />
+          <PlanetSlider
+            label="Dryness" unit="× Earth" value={planet.dryness}
+            min={0.3} max={3} step={0.05} digits={2}
+            onChange={(v) => commitPlanet({ ...planet, dryness: v })}
+            presets={[["Wet ½×", 0.5], ["Earth 1×", 1], ["Arid 2×", 2]]}
+            hint="Global precipitation multiplier: higher shrinks rainfall everywhere (deserts expand), lower expands rainforest/monsoon belts. A coarse knob, not a mechanism."
           />
           <div style={hint}>
             These drive the energy-balance climate &amp; the circulation belts. At Earth
@@ -313,8 +327,9 @@ function chip(active: boolean): React.CSSProperties {
 }
 
 /** One planetary-state control: a stepped slider (commits on release) with a live
- *  value readout and preset chips. Drives the energy-balance climate + circulation. */
-function PlanetSlider(props: {
+ *  value readout and preset chips. Drives the energy-balance climate + circulation.
+ *  Exported so other panels (the left-side World Characteristics step) can reuse it. */
+export function PlanetSlider(props: {
   label: string; unit: string; value: number;
   min: number; max: number; step: number; digits: number;
   onChange: (v: number) => void;

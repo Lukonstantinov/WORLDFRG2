@@ -1557,7 +1557,7 @@ mod tests {
         let mut buf = WorldBuffer {
             cols: ColumnSet::ALL, width: w, height: h, tiles_x: 1, tiles_y: 1,
             equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0, obliquity: 23.44,
-            rotation_rate: 1.0, solar_lum: 1.0, greenhouse: 1.0, eccentricity: 0.0167,
+            rotation_rate: 1.0, solar_lum: 1.0, greenhouse: 1.0, eccentricity: 0.0167, dryness: 1.0,
             terrain: terrain.clone(), elevation: vec![0.0; n],
             sea_depth: vec![0.0; n], is_shelf: vec![0u8; n], is_shelf_edge: vec![0u8; n],
             locked_bits: Vec::new(), plate_index: Vec::new(), boundary_type: Vec::new(),
@@ -1640,7 +1640,7 @@ mod tests {
         let mut buf = WorldBuffer {
             cols: ColumnSet::ALL, width: w, height: h, tiles_x: 1, tiles_y: 1,
             equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0, obliquity: 23.44,
-            rotation_rate: 1.0, solar_lum: 1.0, greenhouse: 1.0, eccentricity: 0.0167,
+            rotation_rate: 1.0, solar_lum: 1.0, greenhouse: 1.0, eccentricity: 0.0167, dryness: 1.0,
             terrain: terrain.clone(),
             elevation: (0..n).map(|i| if terrain[i] == 1 { 0.01 } else { 0.0 }).collect(),
             sea_depth: vec![0.0; n], is_shelf: vec![0u8; n], is_shelf_edge: vec![0u8; n],

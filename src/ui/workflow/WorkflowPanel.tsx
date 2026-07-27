@@ -16,8 +16,14 @@ import { StepBiological } from "@ui/workflow/StepBiological";
 import { StepPolitical } from "@ui/workflow/StepPolitical";
 import { StepEconomy } from "@ui/workflow/StepEconomy";
 import { StepToponyms } from "@ui/workflow/StepToponyms";
+import { StepWorldCharacteristics } from "@ui/workflow/StepWorldCharacteristics";
 
 const STEP_INFO = [
+  // Planet-scale knobs (rotation/retrograde, sunlight, greenhouse, eccentricity,
+  // dryness, axial tilt) drive EVERY later step's climate physics, so this comes
+  // first. Settings-only — there's nothing to "generate" here, so it always
+  // auto-completes (see StepWorldCharacteristics) and never blocks Continue.
+  { step: 0, label: "World Characteristics", desc: "Rotation (incl. retrograde), sunlight, greenhouse, eccentricity, dryness and axial tilt — these decide where the wind belts, deserts and seasons land, so set them before generating." },
   { step: 1, label: "Landmass", desc: "Paint your landmasses, load an image template, or generate from plates." },
   { step: 2, label: "Elevation", desc: "Generate terrain height. Mountains, coastlines, sea depth." },
   { step: 3, label: "Ocean & Atmosphere", desc: "Wind belts, ocean currents, temperature, and precipitation." },
@@ -303,7 +309,7 @@ export function WorkflowPanel() {
                 color: isActive ? "#c0d8f0" : isDone ? "#60a060" : "#607090",
                 fontWeight: isActive ? 600 : 400, fontSize: 12,
               }}>
-              <span style={{ minWidth: 16 }}>{isDone ? "\u2713" : locked ? "\ud83d\udd12" : `${step}.`}</span>
+              <span style={{ minWidth: 16 }}>{isDone ? "\u2713" : locked ? "\ud83d\udd12" : step === 0 ? "\u2699\ufe0f" : `${step}.`}</span>
               <span>{label}</span>
             </div>
 
@@ -312,6 +318,7 @@ export function WorkflowPanel() {
               <div style={{ marginTop: 6 }}>
                 <div style={{ color: "#506080", fontSize: 11, marginBottom: 6 }}>{desc}</div>
 
+                {step === 0 && <StepWorldCharacteristics />}
                 {step === 1 && <StepLandmass {...stepProps} />}
                 {step === 2 && <StepElevation {...stepProps} />}
                 {step === 3 && <StepOceanAtmo {...stepProps} />}
@@ -329,7 +336,7 @@ export function WorkflowPanel() {
                     (needs the economy built), which locks the world and enters
                     Chronicle. Every other step just continues. */}
                 <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
-                  {step > 1 && (
+                  {step !== stepOrder[0] && (
                     <button onClick={goBack} disabled={simRunning} style={navBtn}>
                       \u2190 Back
                     </button>

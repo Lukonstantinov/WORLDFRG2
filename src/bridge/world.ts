@@ -25,7 +25,9 @@ export async function setLatitudeConfig(
 
 /** Planetary state driving the emergent climate (energy budget + circulation). */
 export interface PlanetConfig {
-  /** Rotation rate (× Earth). Sets the wind-belt / Hadley-cell latitudes. */
+  /** Rotation rate (× Earth). Sign is direction: negative = retrograde (mirrors
+   *  the Coriolis-deflection direction in winds/currents; belt LATITUDE only
+   *  depends on magnitude, so it is unaffected by the sign). */
   rotationRate: number;
   /** Stellar irradiance (× Earth solar constant). Global-mean temperature. */
   solarLum: number;
@@ -33,6 +35,8 @@ export interface PlanetConfig {
   greenhouse: number;
   /** Orbital eccentricity (0 = circular). Hemispheric season asymmetry. */
   eccentricity: number;
+  /** Global aridity multiplier (1.0 = Earth/no-op). >1 = drier, <1 = wetter. */
+  dryness: number;
 }
 
 /** Rust serde emits snake_case; map it to our camelCase shape. */
@@ -41,12 +45,14 @@ interface PlanetConfigRaw {
   solar_lum: number;
   greenhouse: number;
   eccentricity: number;
+  dryness: number;
 }
 const fromRawPlanet = (r: PlanetConfigRaw): PlanetConfig => ({
   rotationRate: r.rotation_rate,
   solarLum: r.solar_lum,
   greenhouse: r.greenhouse,
   eccentricity: r.eccentricity,
+  dryness: r.dryness,
 });
 
 /** Read the world's planetary state (all default to Earth). */
@@ -62,6 +68,7 @@ export async function setPlanetConfig(cfg: PlanetConfig): Promise<PlanetConfig> 
     solarLum: cfg.solarLum,
     greenhouse: cfg.greenhouse,
     eccentricity: cfg.eccentricity,
+    dryness: cfg.dryness,
   }));
 }
 

@@ -18,11 +18,15 @@ pub fn belt_wind(lat: f32, circ: &Circulation) -> (f32, f32) {
     };
     let abs_lat = lat.abs();
     let sign = if lat >= 0.0 { 1.0f32 } else { -1.0 }; // NH=1, SH=-1
+    // Coriolis-deflection direction: +1 prograde (Earth-like), -1 retrograde.
+    // Flips ONLY the zonal (east/west) terms below — never `sign` above, which
+    // is the unrelated hemisphere (N/S) convention used for meridional flow.
+    let rot = circ.rotation_sign;
 
     // The three belt vectors (y is down, so +y is southward).
-    let trade = (-0.707f32, sign * 0.707); // toward equator + west
-    let west = (0.707f32, -sign * 0.707);  // toward pole + east
-    let polar = (-0.707f32, sign * 0.707); // toward equator + west
+    let trade = (-0.707f32 * rot, sign * 0.707); // toward equator + west
+    let west = (0.707f32 * rot, -sign * 0.707);  // toward pole + east
+    let polar = (-0.707f32 * rot, sign * 0.707); // toward equator + west
 
     // Blend with transitions centred on the circulation's belt boundaries (30°/60°
     // on Earth). The ±4° half-width scales with the belt so the transition stays
@@ -321,15 +325,20 @@ fn gyre_vector(
     let ns_factor = (ns_extent / 20.0).min(1.0);
     let width_factor = ew_factor.min(ns_factor);
     let abs_b = basin_pos.abs();
+    // Western intensification (Gulf-Stream-style boundary currents hugging the
+    // west coast) is itself a Coriolis effect — flip which side is
+    // "intensified" under retrograde rotation. `basin_dir` is `basin_pos` for
+    // prograde worlds (bit-identical to before) and its mirror for retrograde.
+    let basin_dir = basin_pos * circ.rotation_sign;
 
     // Boundary current profiles (exponential decay from coast)
-    let wb_profile = if basin_pos < -0.25 {
-        (-((1.0 + basin_pos) / 0.30).powi(2)).exp()
+    let wb_profile = if basin_dir < -0.25 {
+        (-((1.0 + basin_dir) / 0.30).powi(2)).exp()
     } else {
         0.0
     };
-    let eb_profile = if basin_pos > 0.15 {
-        (-((1.0 - basin_pos) / 0.45).powi(2)).exp()
+    let eb_profile = if basin_dir > 0.15 {
+        (-((1.0 - basin_dir) / 0.45).powi(2)).exp()
     } else {
         0.0
     };
@@ -665,10 +674,15 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
             let bw = dist_w[i] as f32;
             let be = dist_e[i] as f32;
             let basin_pos = (bw - be) / (bw.max(1.0) + be.max(1.0));
+            // Same Coriolis mirror as gyre_vector's basin_dir: the actual computed
+            // current speed spike (from Phase 2) already sits on the mirrored coast
+            // under retrograde rotation, so the thermal-tagging thresholds below
+            // must check the same mirrored side or they'd never fire.
+            let basin_dir = basin_pos * circ.rotation_sign;
 
             buf.current_type[i] = if circumpolar_active && y >= circumpolar_row {
                 2 // ACC (cold)
-            } else if basin_pos < -0.5 && abs_lat > 18.0 && abs_lat < 42.0 && speed > 1.2 {
+            } else if basin_dir < -0.5 && abs_lat > 18.0 && abs_lat < 42.0 && speed > 1.2 {
                 1 // warm western-boundary current. Capped at ~42Â° â€” the SEPARATION
                   // latitude: a western-boundary current (Kuroshio/Gulf Stream)
                   // peels away from the coast here and crosses the basin as the
@@ -676,12 +690,12 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
                   // Poleward of this the western boundary is bathed by the COLD
                   // subpolar return (Oyashio/Labrador) below â€” so Kamchatka,
                   // Hokkaido and Labrador read cold, not warm.
-            } else if basin_pos > 0.45 && abs_lat > 23.0 && abs_lat < 48.0 && speed > 0.35 {
+            } else if basin_dir > 0.45 && abs_lat > 23.0 && abs_lat < 48.0 && speed > 0.35 {
                 2 // cold eastern-boundary current. Floor raised to 23Â° (Tropic of
                   // Cancer) so the whole tropical belt â€” e.g. the seas around the
                   // Indian subcontinent â€” reads NEUTRAL/grey, never cold. Tropical
                   // currents (monsoon drift, equatorial) are not cold.
-            } else if abs_lat >= 48.0 && abs_lat < 68.0 && basin_pos < -0.3 && speed > 0.45 {
+            } else if abs_lat >= 48.0 && abs_lat < 68.0 && basin_dir < -0.3 && speed > 0.45 {
                 2 // cold subpolar boundary current (Oyashio/Labrador). Onset at 48Â°
                   // (Kamchatka â‰ˆ53Â° â†’ cold âœ“) leaves a NEUTRAL gap 42â€“48Â° on the W
                   // boundary = the warmâ†’cold transition after the warm current
@@ -1724,7 +1738,7 @@ mod tests {
         WorldBuffer {
             cols: ColumnSet::ALL, width: w, height: h, tiles_x: 1, tiles_y: 1,
             equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0, obliquity: 23.44,
-            rotation_rate: 1.0, solar_lum: 1.0, greenhouse: 1.0, eccentricity: 0.0167,
+            rotation_rate: 1.0, solar_lum: 1.0, greenhouse: 1.0, eccentricity: 0.0167, dryness: 1.0,
             terrain: vec![1u8; n], elevation: vec![0.1; n], sea_depth: vec![0.0; n],
             is_shelf: vec![0u8; n], is_shelf_edge: vec![0u8; n], locked_bits: Vec::new(),
             plate_index: Vec::new(), boundary_type: Vec::new(), is_volcanic: Vec::new(),

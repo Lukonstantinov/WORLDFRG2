@@ -619,6 +619,11 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
     let p_hsn = blur_land(buf, p_hsn, 18);
     let p_hss = blur_land(buf, p_hss, 18);
 
+    // Global aridity knob (see `DEFAULT_DRYNESS`): a coarse final multiplier,
+    // not a physical mechanism, so it's applied once here rather than inside
+    // `season_precip`'s per-term advection. 1.0 = Earth = exactly a no-op.
+    let dryness_mult = 1.0 / buf.dryness.max(0.05);
+
     // â”€â”€ Combine â†’ annual precip + summer fraction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     for y in 0..h {
         let lat = buf.latitude(y);
@@ -635,7 +640,7 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
             } else {
                 (p_hss[i], p_hsn[i])
             };
-            let annual = (summer + winter).clamp(0.0, 4000.0);
+            let annual = ((summer + winter) * dryness_mult).clamp(0.0, 4000.0);
             buf.precipitation[i] = annual;
             if !buf.precip_summer_frac.is_empty() {
                 let frac = if annual > 1.0 { (summer / (summer + winter)).clamp(0.0, 1.0) } else { 0.5 };

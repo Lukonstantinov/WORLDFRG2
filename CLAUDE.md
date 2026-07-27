@@ -143,16 +143,31 @@ world of the same grid size via `TileData::merge_columns`.
 > two-way at *province* granularity is item **B1** in `docs/FIX_PLAN.md`.
 
 ### 3.5 Planetary parameters
-A world carries four planetary knobs in `metadata`, read into `WorldBuffer`
-(`obliquity_deg`, `rotation_rate`, `solar_lum`, `greenhouse`; defaults in
-`world_commands.rs`, edited via `LatitudeControl.tsx`). They drive real physics:
-obliquity → the insolation integral, rotation → circulation-belt latitudes AND
-EBM heat transport, luminosity/greenhouse → the energy budget.
+A world carries planetary knobs in `metadata`, read into `WorldBuffer`
+(`obliquity_deg`, `rotation_rate`, `solar_lum`, `greenhouse`, `eccentricity`,
+`dryness`; defaults + clamps in `world_commands.rs::set_planet_config`, edited via
+`LatitudeControl.tsx` (right-side Toolbar) **and** `StepWorldCharacteristics.tsx`
+(left-side WorkflowPanel step 0 — settings-only, always advanceable, shown first
+since every later step's climate physics depends on these). They drive real
+physics: obliquity → the insolation integral, rotation → circulation-belt
+latitudes AND EBM heat transport, luminosity/greenhouse → the energy budget,
+dryness → a final global multiplier on annual precipitation (not a mechanism).
+
+`rotation_rate`'s **sign is the rotation direction**: negative = retrograde.
+Belt LATITUDE (`Circulation::hadley_edge`/`polar_front`) depends only on the
+magnitude (Held–Hou scaling), so it's unaffected; `Circulation::rotation_sign`
+carries the direction separately and flips just the Coriolis-DIRECTION terms
+downstream — the zonal (east/west) components of `belt_wind` in `ocean.rs`, and
+which coast gets the intensified/warm-tagged boundary current in
+`gyre_vector`/the current-type classification (`basin_dir = basin_pos *
+rotation_sign`). It must never touch the unrelated hemisphere-based (N/S) `sign`
+used for meridional flow and seasonal logic elsewhere in the same files.
 
 **At Earth values every one of them is a no-op by construction** — the EBM is solved
-twice and only the anomaly `T_world(φ) − T_earth(φ)` is applied, and `Circulation`
-returns exactly 30°/60°. That's what keeps the Earth calibration bit-for-bit intact
-while the knobs still move real physics. Preserve this property in any change here.
+twice and only the anomaly `T_world(φ) − T_earth(φ)` is applied, `Circulation`
+returns exactly 30°/60° with `rotation_sign = +1`, and `dryness`'s multiplier is
+exactly 1. That's what keeps the Earth calibration bit-for-bit intact while the
+knobs still move real physics. Preserve this property in any change here.
 
 ---
 
@@ -460,6 +475,10 @@ ui/heraldry/  — heraldry
 
 ui/workflow/
   WorkflowPanel.tsx             ← Generation wizard + "Run All" buttons
+  StepWorldCharacteristics.tsx  ← Step 0: planetary knobs (rotation/retrograde,
+                                  sunlight, greenhouse, eccentricity, dryness, axial
+                                  tilt) shown FIRST since they set the climate physics
+                                  every later step reads. Settings-only, always advanceable.
   Step*.tsx                     ← Landmass, Elevation, OceanAtmo, Climate, Rivers,
                                   SoilResources, Settlements, Biological, Economy,
                                   Political, Campaign, Toponyms (#26, gated)

@@ -47,6 +47,12 @@ pub const DEFAULT_GREENHOUSE: f32 = 1.0;
 /// Orbital eccentricity (0 = circular). With `perihelion` it sets the asymmetry
 /// between the hemispheres' season lengths/intensities. Earth ≈ 0.0167.
 pub const DEFAULT_ECCENTRICITY: f32 = 0.0167;
+/// Global aridity multiplier applied to the final annual precipitation total
+/// (`precipitation.rs`). 1.0 = Earth (no-op); >1 = a drier world (deserts
+/// expand), <1 = a wetter world (rainforest/monsoon belts expand). This is a
+/// coarse global knob, not a physical mechanism — it does not feed back into
+/// the moisture-advection/recycling budget, only the final total.
+pub const DEFAULT_DRYNESS: f32 = 1.0;
 
 /// Encoding scale for the `seasonal_amp` column: stored `u8 = span_°C × 2` (so the
 /// full seasonal span, warmest−coldest month, is representable up to ~127 °C at
@@ -246,6 +252,8 @@ pub struct WorldBuffer {
     pub greenhouse: f32,
     /// Orbital eccentricity. See `DEFAULT_ECCENTRICITY`.
     pub eccentricity: f32,
+    /// Global aridity multiplier. See `DEFAULT_DRYNESS`.
+    pub dryness: f32,
     // Per-cell data
     pub terrain: Vec<u8>,
     pub elevation: Vec<f32>,
@@ -334,6 +342,9 @@ impl WorldBuffer {
         let eccentricity: f32 = metadata::get_meta(conn, "eccentricity")
             .ok().flatten().and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_ECCENTRICITY);
+        let dryness: f32 = metadata::get_meta(conn, "dryness")
+            .ok().flatten().and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_DRYNESS);
 
         let total = (width * height) as usize;
         let tiles_x = (width + TILE_SIZE - 1) / TILE_SIZE;
@@ -358,6 +369,7 @@ impl WorldBuffer {
             solar_lum,
             greenhouse,
             eccentricity,
+            dryness,
             terrain: u8s(ColumnSet::TERRAIN),
             elevation: f32s(ColumnSet::ELEVATION, 0.0),
             sea_depth: f32s(ColumnSet::SEA_DEPTH, 0.0),

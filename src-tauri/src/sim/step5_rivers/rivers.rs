@@ -1007,7 +1007,7 @@ mod tests {
             width: w, height: h,
             tiles_x: 1, tiles_y: 1,
             equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0, obliquity: 23.44,
-            rotation_rate: 1.0, solar_lum: 1.0, greenhouse: 1.0, eccentricity: 0.0167,
+            rotation_rate: 1.0, solar_lum: 1.0, greenhouse: 1.0, eccentricity: 0.0167, dryness: 1.0,
             terrain,
             elevation,
             sea_depth,
