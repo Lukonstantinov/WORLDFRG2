@@ -1,8 +1,30 @@
 import { create } from "zustand";
-import type { WorldMeta, RiverData, LakeData, Settlement, EconomySnapshot, Toponym, RiverNode, LakeNode, Province } from "@types";
+import type { WorldMeta, RiverData, LakeData, Settlement, EconomySnapshot, Toponym, RiverNode, LakeNode, Province, SimProvincesResult } from "@types";
 
-/** Downsampled per-cell province-id raster for the map overlay (65535 = sea). */
-export interface ProvinceRaster { data: number[]; w: number; h: number; gridW: number; gridH: number; }
+/** Full-resolution per-cell province-id raster for the map overlay (65535 = sea).
+ *  `data` is grid_w×grid_h so borders are pixel-exact and follow the coastline. */
+export interface ProvinceRaster { data: Uint16Array; w: number; h: number; gridW: number; gridH: number; }
+
+/** Decode a province-generation result's RLE into a full-resolution ProvinceRaster.
+ *  Falls back to the coarse raster for pre-RLE worlds. Returns null if neither is set. */
+export function decodeProvinceRaster(res: SimProvincesResult): ProvinceRaster | null {
+  const gw = res.grid_w, gh = res.grid_h;
+  const rle = res.raster_rle;
+  if (rle && rle.length >= 2 && gw > 0 && gh > 0) {
+    const data = new Uint16Array(gw * gh);
+    let pos = 0;
+    for (let i = 0; i + 1 < rle.length; i += 2) {
+      const val = rle[i], cnt = rle[i + 1];
+      data.fill(val, pos, pos + cnt);
+      pos += cnt;
+    }
+    return { data, w: gw, h: gh, gridW: gw, gridH: gh };
+  }
+  if (res.raster && res.raster.length > 0) {
+    return { data: Uint16Array.from(res.raster), w: res.raster_w, h: res.raster_h, gridW: gw, gridH: gh };
+  }
+  return null;
+}
 
 /** Live latitude framing, kept SEPARATE from `meta` on purpose. Dragging the
  *  Latitude Frame sliders mutates only this slice so the lat-line overlay tracks

@@ -144,20 +144,40 @@ pub fn generate_provinces(
         }
     }
 
-    // ── Seeds: every settlement cell + a filler grid so empty land is covered and
-    //    the province count is controlled by granularity. ──
+    // ── Seeds: prominent settlements (MIN-SEPARATED so a dense cluster of towns does
+    //    not shatter into 25 tiny provinces) + a jittered filler scatter over the rest
+    //    of the land. Granularity g sets the target spacing. ──
+    let cols = 12.0 + 46.0 * g;
+    let spacing = ((w as f32 / cols).round() as i32).max(4);
+    // Minimum separation² enforced between ANY two seeds (settlements AND filler): keeps
+    // province sizes roughly uniform no matter how clustered the cities are.
+    let sep = (spacing as i64 * 3) / 5;                 // ≈0.6 × spacing
+    let sep2 = (sep * sep).max(1);
+    let too_close = |seeds: &[u32], bx: i32, by: i32| -> bool {
+        for &sc in seeds {
+            let sx = (sc % w) as i32; let sy = (sc / w) as i32;
+            let mut ddx = (sx - bx).abs(); if ddx > wi / 2 { ddx = wi - ddx; }
+            let dd = (ddx as i64) * (ddx as i64) + ((sy - by) as i64) * ((sy - by) as i64);
+            if dd < sep2 { return true; }
+        }
+        false
+    };
     let mut seed_cells: Vec<u32> = Vec::new();
     let mut is_seed = vec![false; total];
-    for s in settlements {
+    // Biggest cities first so the important ones win a seat; nearby smaller towns are
+    // absorbed into that province (a metro region = ONE province with several towns).
+    let mut sorted_settle: Vec<&Settlement> = settlements.iter().collect();
+    sorted_settle.sort_by(|a, b| b.population.cmp(&a.population));
+    for s in sorted_settle {
         let i = buf.idx(s.x.min(w - 1), s.y.min(h - 1));
-        if buf.terrain[i] == 1 && !is_seed[i] { is_seed[i] = true; seed_cells.push(i as u32); }
+        if buf.terrain[i] != 1 || is_seed[i] { continue; }
+        let bx = (i as u32 % w) as i32; let by = (i as u32 / w) as i32;
+        if too_close(&seed_cells, bx, by) { continue; }
+        is_seed[i] = true; seed_cells.push(i as u32);
     }
     // Filler seeds: a JITTERED, density-varied scatter so provinces come out organic
     // (varied size + off-lattice) instead of a regular Voronoi grid of squares. Coarse
     // (g→0) gives few large provinces, fine (g→1) many.
-    let cols = 12.0 + 46.0 * g;
-    let spacing = ((w as f32 / cols).round() as i32).max(4);
-    let half2 = (spacing / 2) * (spacing / 2);
     let jit = ((spacing as f32) * 0.42) as i64;        // seed jitter off the block centre
     let win = (spacing / 3).max(2);                     // fertile-cell search window
     let mut gy = (spacing / 2) as i32;
@@ -189,17 +209,11 @@ pub fn generate_provinces(
             }
             if best.0 != u32::MAX {
                 let bi = best.0 as usize;
-                // Skip if a settlement seed is already very close (keep towns as seats).
                 let bx = (bi as u32 % w) as i32;
                 let by = (bi as u32 / w) as i32;
-                let mut near = false;
-                for &sc in &seed_cells {
-                    let sx = (sc % w) as i32; let sy = (sc / w) as i32;
-                    let mut ddx = (sx - bx).abs(); if ddx > wi / 2 { ddx = wi - ddx; }
-                    let dd = ddx * ddx + (sy - by) * (sy - by);
-                    if dd < half2 { near = true; break; }
+                if !is_seed[bi] && !too_close(&seed_cells, bx, by) {
+                    is_seed[bi] = true; seed_cells.push(bi as u32);
                 }
-                if !near && !is_seed[bi] { is_seed[bi] = true; seed_cells.push(bi as u32); }
             }
             gx += spacing;
         }

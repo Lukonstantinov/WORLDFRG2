@@ -45,14 +45,17 @@ export function ProvinceMiniMap({
 }) {
   const [hover, setHover] = useState<Hover | null>(null);
 
-  // Extract the province's footprint from the downsampled raster → an SVG viewBox.
+  // Extract the province's footprint from the (full-res) raster → an SVG viewBox.
+  // Sample at a STRIDE so a full-resolution raster yields a bounded number of
+  // footprint squares (the mini-map is a rough shape, not a pixel-exact render).
   const geo = useMemo(() => {
     if (!raster) return null;
     const { data, w, h, gridW, gridH } = raster;
+    const stride = Math.max(1, Math.round(Math.max(w, h) / 200));
     let minx = w, miny = h, maxx = -1, maxy = -1;
     const cells: [number, number][] = [];
-    for (let ry = 0; ry < h; ry++) {
-      for (let rx = 0; rx < w; rx++) {
+    for (let ry = 0; ry < h; ry += stride) {
+      for (let rx = 0; rx < w; rx += stride) {
         if (data[ry * w + rx] !== province.id) continue;
         cells.push([rx, ry]);
         if (rx < minx) minx = rx; if (rx > maxx) maxx = rx;
@@ -60,19 +63,19 @@ export function ProvinceMiniMap({
       }
     }
     if (maxx < 0) return null;
-    const pad = 1;
+    const pad = stride;
     const ox = minx - pad, oy = miny - pad;
-    const vw = maxx - minx + 1 + 2 * pad, vh = maxy - miny + 1 + 2 * pad;
+    const vw = maxx - minx + stride + 2 * pad, vh = maxy - miny + stride + 2 * pad;
     // world-cell → raster-cell → local viewBox coords
     const toLocal = (x: number, y: number): [number, number] => [
       (x * w) / gridW - ox, (y * h) / gridH - oy,
     ];
-    return { cells, ox, oy, vw, vh, toLocal };
+    return { cells, ox, oy, vw, vh, toLocal, stride };
   }, [raster, province.id]);
 
   if (!geo) return <div style={{ opacity: 0.5, padding: 8 }}>map unavailable</div>;
 
-  const { cells, ox, oy, vw, vh, toLocal } = geo;
+  const { cells, ox, oy, vw, vh, toLocal, stride } = geo;
   const fill = "#3f6d55";
   const boxW = 240, boxH = Math.max(120, Math.round((240 * vh) / vw));
   // Settlement dot radius proportional to the province footprint so a 4-cell micro-
@@ -86,9 +89,9 @@ export function ProvinceMiniMap({
       <svg width={boxW} height={boxH} viewBox={`0 0 ${vw} ${vh}`}
         style={{ background: "#0a1620", border: "1px solid #1c3242", borderRadius: 6, flexShrink: 0 }}
         onMouseLeave={() => setHover(null)}>
-        {/* province footprint */}
+        {/* province footprint (each sample = one stride-sized square) */}
         {cells.map(([rx, ry], i) => (
-          <rect key={i} x={rx - ox} y={ry - oy} width={1.02} height={1.02} fill={fill} opacity={0.55} />
+          <rect key={i} x={rx - ox} y={ry - oy} width={stride * 1.05} height={stride * 1.05} fill={fill} opacity={0.55} />
         ))}
         {/* settlements */}
         {settlements.map((s, i) => {

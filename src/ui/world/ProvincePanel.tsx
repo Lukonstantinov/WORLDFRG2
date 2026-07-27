@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "@state/uiStore";
-import { useWorldStore } from "@state/worldStore";
+import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
 import { simGenerateProvinces, campaignProvinceState, campaignProvinceDetail } from "@bridge";
 import { GOOD_DEFS } from "@goods";
 import { koppenName } from "@ui/world/climate";
@@ -156,7 +156,7 @@ export function ProvincePanel() {
     setStatus("Partitioning land into provinces…");
     try {
       const res = await simGenerateProvinces(settlements, rivers, granularity);
-      setProvinces(res.provinces, { data: res.raster, w: res.raster_w, h: res.raster_h, gridW: res.grid_w, gridH: res.grid_h });
+      setProvinces(res.provinces, decodeProvinceRaster(res));
       setOverlayVisible("provinces", true);
       setSelId(res.provinces[0]?.id ?? null);
       setStatus(`Generated ${res.provinces.length} provinces`);

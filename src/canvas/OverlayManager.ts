@@ -174,10 +174,18 @@ function cultureColor(culture: string): string {
   return `hsl(${hue}, ${sat}%, ${lig}%)`;
 }
 
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  s /= 100; l /= 100;
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+}
+
 /** A DISTINCT random tint per province id (not per culture) so every province reads
  *  as its own colour and adjacent ones never blend into one blob. Deterministic +
- *  well-spread via an integer hash → the hue wheel. */
-function provinceColor(id: number): string {
+ *  well-spread via an integer hash → the hue wheel. Returns 0–255 RGB (for ImageData). */
+function provinceColorRGB(id: number): [number, number, number] {
   let h = (id + 1) >>> 0;
   h = Math.imul(h ^ (h >>> 16), 2246822519) >>> 0;
   h = Math.imul(h ^ (h >>> 13), 3266489917) >>> 0;
@@ -185,7 +193,7 @@ function provinceColor(id: number): string {
   const hue = h % 360;
   const sat = 55 + (h >>> 9) % 30;   // 55–85% — vivid so neighbours separate
   const lig = 46 + (h >>> 17) % 16;  // 46–62%
-  return `hsl(${hue}, ${sat}%, ${lig}%)`;
+  return hslToRgb(hue, sat, lig);
 }
 
 function lakeFill(lake: LakeData): string {
@@ -276,8 +284,11 @@ export class OverlayManager {
   private heatPoints: { x: number; y: number; v: number }[] = [];
   /** Atlas 2.0 · named trade basins (member positions hulled + labelled). */
   private basins: { name: string; pts: [number, number][]; cx: number; cy: number }[] = [];
-  private provinceRaster: { data: number[]; w: number; h: number; gridW: number; gridH: number } | null = null;
-  private provinceFill: string[] = [];
+  private provinceRaster: { data: ArrayLike<number>; w: number; h: number; gridW: number; gridH: number } | null = null;
+  /** Prebuilt full-res fill (composited ONCE → no cell grid) + border segments, so the
+   *  per-frame cost is just one blit + one stroke regardless of world size. */
+  private provinceCanvas: HTMLCanvasElement | null = null;
+  private provinceBorderPath: Path2D | null = null;
   /** Province name + seat position (world cells) for on-map labels. */
   private provinceLabels: { x: number; y: number; name: string }[] = [];
   /** Atlas 2.0 · refugee roads (age01 = 0 fresh … 1 faded out). */
@@ -428,22 +439,67 @@ export class OverlayManager {
   /** Province partition overlay: a downsampled per-cell province-id raster + a
    *  per-province fill colour (keyed by culture) for the political/goods map. */
   updateProvinces(
-    raster: { data: number[]; w: number; h: number; gridW: number; gridH: number } | null,
+    raster: { data: ArrayLike<number>; w: number; h: number; gridW: number; gridH: number } | null,
     provinces: { id: number; culture: string; name?: string; seat_x?: number; seat_y?: number }[],
   ) {
     this.provinceRaster = raster;
-    const fill: string[] = [];
+    const rgb: [number, number, number][] = [];
     const labels: { x: number; y: number; name: string }[] = [];
     for (const p of provinces) {
-      // Each province gets its OWN distinct random colour (not culture-shared).
-      fill[p.id] = provinceColor(p.id);
+      rgb[p.id] = provinceColorRGB(p.id);  // each province its OWN distinct colour
       if (p.name && p.seat_x !== undefined && p.seat_y !== undefined) {
         labels.push({ x: p.seat_x, y: p.seat_y, name: p.name });
       }
     }
-    this.provinceFill = fill;
     this.provinceLabels = labels;
     void cultureColor; // retained for the culture political map elsewhere
+    this.buildProvinceRender(rgb);
+  }
+
+  /** Rasterize province fills into an offscreen canvas ONCE (each cell one opaque
+   *  pixel → composited exactly once, so blitting it semi-transparent shows no cell
+   *  grid) and precompute the border segments as a Path2D in world-cell coordinates. */
+  private buildProvinceRender(rgb: [number, number, number][]) {
+    this.provinceCanvas = null;
+    this.provinceBorderPath = null;
+    const r = this.provinceRaster;
+    if (!r) return;
+    const { data, w, h, gridW, gridH } = r;
+    const NO = 65535;
+    const cv = document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    const ictx = cv.getContext("2d");
+    if (!ictx) return;
+    const img = ictx.createImageData(w, h);
+    const px = img.data;
+    for (let i = 0; i < w * h; i++) {
+      const id = data[i];
+      const c = id === NO ? undefined : rgb[id];
+      if (!c) { px[i * 4 + 3] = 0; continue; }
+      px[i * 4] = c[0]; px[i * 4 + 1] = c[1]; px[i * 4 + 2] = c[2]; px[i * 4 + 3] = 255;
+    }
+    ictx.putImageData(img, 0, 0);
+    this.provinceCanvas = cv;
+    // Borders: a segment wherever two LAND provinces meet (skip sea edges — the coast
+    // already reads from the base terrain). Coordinates are world cells (sx=sy=1 at
+    // full res). Built once; stroked each frame.
+    const sx = gridW / w, sy = gridH / h;
+    const path = new Path2D();
+    for (let ry = 0; ry < h; ry++) {
+      for (let rx = 0; rx < w; rx++) {
+        const id = data[ry * w + rx];
+        if (id === NO) continue;
+        if (rx + 1 < w) {
+          const n = data[ry * w + rx + 1];
+          if (n !== NO && n !== id) { const x = (rx + 1) * sx; path.moveTo(x, ry * sy); path.lineTo(x, (ry + 1) * sy); }
+        }
+        if (ry + 1 < h) {
+          const n = data[(ry + 1) * w + rx];
+          if (n !== NO && n !== id) { const y = (ry + 1) * sy; path.moveTo(rx * sx, y); path.lineTo((rx + 1) * sx, y); }
+        }
+      }
+    }
+    this.provinceBorderPath = path;
   }
   /** Atlas 2.0 · set the refugee roads (age01 0 = fresh, 1 = fully faded). */
   drawMigrations(m: { fx: number; fy: number; tx: number; ty: number; age: number }[]) { this.migrations = m; }
@@ -1170,55 +1226,24 @@ export class OverlayManager {
     return true;
   }
 
-  /** Render all overlays to a 2D context (called within viewport transform) */
-  /** Draw the province partition: culture-tinted fills + dark natural borders,
-   *  from the downsampled id raster (canvas is already in world-cell space). */
+  /** Draw the province partition: a single blit of the prebuilt full-res fill canvas
+   *  (composited once → NO cell grid, follows the coastline exactly) + the prebuilt
+   *  border path + seat name labels. Per-frame cost is O(1) in world size. */
   private renderProvinces(ctx: CanvasRenderingContext2D) {
     const r = this.provinceRaster;
-    if (!r) return;
-    const { data, w, h, gridW, gridH } = r;
-    const sx = gridW / w;
-    const sy = gridH / h;
-    const NO = 65535;
-    // Fills — each province its own distinct colour, semi-transparent over terrain.
+    if (!r || !this.provinceCanvas) return;
+    const { w, h, gridW, gridH } = r;
+    // Fills — one semi-transparent blit (each pixel already composited exactly once).
+    ctx.imageSmoothingEnabled = false;
     ctx.globalAlpha = 0.5;
-    for (let ry = 0; ry < h; ry++) {
-      for (let rx = 0; rx < w; rx++) {
-        const id = data[ry * w + rx];
-        if (id === NO) continue;
-        ctx.fillStyle = this.provinceFill[id] ?? "#7a8a99";
-        ctx.fillRect(rx * sx, ry * sy, sx + 0.6, sy + 0.6);
-      }
-    }
+    ctx.drawImage(this.provinceCanvas, 0, 0, w, h, 0, 0, gridW, gridH);
     ctx.globalAlpha = 1;
-    // Borders: an edge wherever two LAND provinces meet (both non-sea).
-    // Sea-adjacent edges are intentionally skipped — coastlines already read from
-    // the base terrain layer; drawing them here creates a dark fringe "in the sea".
-    // lineWidth in world-cell units = 1 screen pixel so borders stay crisp at all zoom.
-    ctx.strokeStyle = "rgba(8, 14, 20, 0.7)";
-    ctx.lineWidth = 1 / this.currentScale;
-    ctx.beginPath();
-    for (let ry = 0; ry < h; ry++) {
-      for (let rx = 0; rx < w; rx++) {
-        const id = data[ry * w + rx];
-        if (id === NO) continue;
-        if (rx + 1 < w) {
-          const rid = data[ry * w + rx + 1];
-          if (rid !== NO && rid !== id) {
-            const x = (rx + 1) * sx;
-            ctx.moveTo(x, ry * sy); ctx.lineTo(x, (ry + 1) * sy);
-          }
-        }
-        if (ry + 1 < h) {
-          const did = data[(ry + 1) * w + rx];
-          if (did !== NO && did !== id) {
-            const y = (ry + 1) * sy;
-            ctx.moveTo(rx * sx, y); ctx.lineTo((rx + 1) * sx, y);
-          }
-        }
-      }
+    // Borders — thin dark line between adjacent provinces (1 screen px at any zoom).
+    if (this.provinceBorderPath) {
+      ctx.strokeStyle = "rgba(8, 14, 20, 0.7)";
+      ctx.lineWidth = 1 / this.currentScale;
+      ctx.stroke(this.provinceBorderPath);
     }
-    ctx.stroke();
 
     // Province name labels at each seat, culled by the shared collision map so they
     // don't pile up. Font is zoom-compensated and only shown once zoomed in enough

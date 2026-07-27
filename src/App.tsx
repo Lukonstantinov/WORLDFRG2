@@ -45,7 +45,7 @@ import { SettingsPanel } from "@ui/SettingsPanel";
 import { WindowBar } from "@ui/world/WindowBar";
 import { CampaignTopBar } from "@ui/campaign/CampaignTopBar";
 import { ErrorBoundary } from "@ui/world/ErrorBoundary";
-import { useWorldStore } from "@state/worldStore";
+import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
 import { useUIStore } from "@state/uiStore";
 import { useViewportStore } from "@state/viewportStore";
 import { useGoodsStore } from "@state/goodsStore";
@@ -340,8 +340,7 @@ export default function App() {
         try {
           const pl = await getProvinceLayer();
           if (pl.provinces?.length) {
-            setProvinces(pl.provinces, pl.raster?.length
-              ? { data: pl.raster, w: pl.raster_w, h: pl.raster_h, gridW: pl.grid_w, gridH: pl.grid_h } : null);
+            setProvinces(pl.provinces, decodeProvinceRaster(pl));
           }
         } catch { /* none saved */ }
         // Restore the persisted wizard progress; older saves never wrote it, so

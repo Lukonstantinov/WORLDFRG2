@@ -1838,4 +1838,6 @@ export interface SimProvincesResult {
   raster_h: number;
   grid_w: number;
   grid_h: number;
+  /** Full-resolution province-id map, run-length encoded as [val, count, …]. */
+  raster_rle: number[];
 }

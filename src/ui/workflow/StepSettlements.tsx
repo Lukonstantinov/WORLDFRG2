@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useUIStore } from "@state/uiStore";
-import { useWorldStore } from "@state/worldStore";
+import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
 import { useViewportStore } from "@state/viewportStore";
 import { simGenerateSettlements, simGenerateProvinces, setCultureCount as saveCultureCount, getCultureCount } from "@bridge";
 import { genBtn } from "@ui/workflow/WorkflowPanel";
@@ -81,9 +81,7 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
     setStatus("Partitioning the land into provinces…");
     try {
       const res = await simGenerateProvinces(settlements, rivers, provGranularity);
-      setProvinces(res.provinces, {
-        data: res.raster, w: res.raster_w, h: res.raster_h, gridW: res.grid_w, gridH: res.grid_h,
-      });
+      setProvinces(res.provinces, decodeProvinceRaster(res));
       setOverlayVisible("provinces", true);
       setStatus(`Generated ${res.provinces.length} provinces`);
     } catch (e) {

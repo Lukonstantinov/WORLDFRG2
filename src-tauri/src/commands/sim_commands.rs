@@ -701,13 +701,34 @@ pub fn get_toponyms(db: State<'_, WorldDb>) -> Result<Vec<toponyms::Toponym>, St
 #[derive(serde::Serialize)]
 pub struct SimProvincesResult {
     pub provinces: Vec<crate::sim::provinces::Province>,
-    /// Downsampled per-cell province id for the map overlay (row-major, `NO_PROVINCE`
-    /// = sea/no-data). `raster_w`×`raster_h`, capped so the payload stays small.
+    /// Downsampled per-cell province id for the campaign hub→province mapping + the
+    /// mini-map (row-major, `NO_PROVINCE` = sea/no-data). Capped so the payload is small.
     pub raster: Vec<u16>,
     pub raster_w: u32,
     pub raster_h: u32,
     pub grid_w: u32,
     pub grid_h: u32,
+    /// FULL-RESOLUTION per-cell province id, run-length encoded for transport as a flat
+    /// `[value, count, value, count, …]` list (provinces are contiguous so this stays
+    /// tiny). Decoded on the frontend to a full grid_w×grid_h map → pixel-exact borders
+    /// that follow the coastline, with no cell grid.
+    pub raster_rle: Vec<u32>,
+}
+
+/// Run-length encode a full-resolution province-id map into a flat `[val, count, …]`
+/// list (val is the u16 id widened to u32; count is the run length).
+fn rle_encode_provinces(ids: &[u16]) -> Vec<u32> {
+    let mut out: Vec<u32> = Vec::new();
+    let mut i = 0usize;
+    while i < ids.len() {
+        let v = ids[i];
+        let mut n = 1u32;
+        while i + (n as usize) < ids.len() && ids[i + n as usize] == v { n += 1; }
+        out.push(v as u32);
+        out.push(n);
+        i += n as usize;
+    }
+    out
 }
 
 /// Partition all land into provinces (watershed / cost-flood). Seeds from the
@@ -763,7 +784,12 @@ pub fn sim_generate_provinces(
     let raster_blob = serde_json::to_string(&(rw, rh, w, h, &raster)).map_err(|e| e.to_string())?;
     metadata::set_meta(&conn, "province_raster", &raster_blob).map_err(|e| e.to_string())?;
 
-    Ok(SimProvincesResult { provinces, raster, raster_w: rw, raster_h: rh, grid_w: w, grid_h: h })
+    // Full-resolution RLE for the pixel-exact map overlay (survives reload).
+    let raster_rle = rle_encode_provinces(&province_id);
+    let rle_blob = serde_json::to_string(&(w, h, &raster_rle)).map_err(|e| e.to_string())?;
+    metadata::set_meta(&conn, "province_raster_rle", &rle_blob).map_err(|e| e.to_string())?;
+
+    Ok(SimProvincesResult { provinces, raster, raster_w: rw, raster_h: rh, grid_w: w, grid_h: h, raster_rle })
 }
 
 /// Read back the stored province list (for reopening a world / panel refresh).
@@ -787,7 +813,11 @@ pub fn get_province_layer(db: State<'_, WorldDb>) -> Result<SimProvincesResult, 
         metadata::get_meta(&conn, "province_raster").map_err(|e| e.to_string())?
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or((0, 0, 0, 0, Vec::new()));
-    Ok(SimProvincesResult { provinces, raster, raster_w, raster_h, grid_w, grid_h })
+    let (_rw, _rh, raster_rle): (u32, u32, Vec<u32>) =
+        metadata::get_meta(&conn, "province_raster_rle").map_err(|e| e.to_string())?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or((0, 0, Vec::new()));
+    Ok(SimProvincesResult { provinces, raster, raster_w, raster_h, grid_w, grid_h, raster_rle })
 }
 
 /// A single stat row for a building's hover card (label + preformatted value).
