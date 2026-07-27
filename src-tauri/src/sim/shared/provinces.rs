@@ -144,16 +144,25 @@ pub fn generate_provinces(
         }
     }
 
-    // ── Seeds: prominent settlements (MIN-SEPARATED so a dense cluster of towns does
-    //    not shatter into 25 tiny provinces) + a jittered filler scatter over the rest
-    //    of the land. Granularity g sets the target spacing. ──
+    // ── Seeds: prominent settlements + a jittered filler scatter, with seed DENSITY
+    //    scaled by HABITABILITY — dense (small provinces) in fertile temperate/tropical
+    //    land, sparse (big provinces) in the hostile fringe: polar, cold taiga, desert
+    //    and high mountain ranges. Granularity g sets the base spacing. ──
     let cols = 12.0 + 46.0 * g;
     let spacing = ((w as f32 / cols).round() as i32).max(4);
-    // Minimum separation² enforced between ANY two seeds (settlements AND filler): keeps
-    // province sizes roughly uniform no matter how clustered the cities are.
-    let sep = (spacing as i64 * 3) / 5;                 // ≈0.6 × spacing
-    let sep2 = (sep * sep).max(1);
-    let too_close = |seeds: &[u32], bx: i32, by: i32| -> bool {
+    // The finest separation (most habitable land); scales UP to ~3.8× in the least
+    // habitable land, so provinces there come out far larger.
+    let base_sep = (spacing as f32) * 0.5;
+    let hab_at = |i: usize| -> f32 {
+        if buf.habitability.is_empty() { 0.5 } else { buf.habitability[i] as f32 / 255.0 }
+    };
+    // Local min-separation² at a cell: small where habitable, large where hostile.
+    let local_sep2 = |i: usize| -> i64 {
+        let hostile = (1.0 - hab_at(i).clamp(0.0, 1.0)).powf(1.4);
+        let s = (base_sep * (1.0 + 2.8 * hostile)) as i64;
+        (s * s).max(1)
+    };
+    let too_close = |seeds: &[u32], bx: i32, by: i32, sep2: i64| -> bool {
         for &sc in seeds {
             let sx = (sc % w) as i32; let sy = (sc / w) as i32;
             let mut ddx = (sx - bx).abs(); if ddx > wi / 2 { ddx = wi - ddx; }
@@ -172,30 +181,26 @@ pub fn generate_provinces(
         let i = buf.idx(s.x.min(w - 1), s.y.min(h - 1));
         if buf.terrain[i] != 1 || is_seed[i] { continue; }
         let bx = (i as u32 % w) as i32; let by = (i as u32 / w) as i32;
-        if too_close(&seed_cells, bx, by) { continue; }
+        if too_close(&seed_cells, bx, by, local_sep2(i)) { continue; }
         is_seed[i] = true; seed_cells.push(i as u32);
     }
-    // Filler seeds: a JITTERED, density-varied scatter so provinces come out organic
-    // (varied size + off-lattice) instead of a regular Voronoi grid of squares. Coarse
-    // (g→0) gives few large provinces, fine (g→1) many.
-    let jit = ((spacing as f32) * 0.42) as i64;        // seed jitter off the block centre
-    let win = (spacing / 3).max(2);                     // fertile-cell search window
-    let mut gy = (spacing / 2) as i32;
+    // Filler seeds on a FINE base grid (finest = the habitable separation). The LOCAL
+    // separation rejects most candidates in hostile land → few, large provinces there,
+    // while habitable land keeps most → many, small provinces. Jittered off-lattice.
+    let bspacing = (base_sep as i32).max(4);
+    let jit = (base_sep * 0.42) as i64;
+    let win = (bspacing / 3).max(2);
+    let mut gy = bspacing / 2;
     while gy < hi {
         let mut gx = 0i32;
         while gx < wi {
-            // Hash the block → jitter the sample centre and vary density (skip ~1 in 6
-            // blocks so neighbours fuse into larger, irregular provinces — breaks the
-            // uniform lattice that made everything a checkerboard of equal squares).
             let hb = hash2(gx as u64, (gy as u64) ^ 0x51ED_A5A5);
             let span = (2 * jit + 1) as u64;
             let jx = (hb % span) as i64 - jit;
             let jy = ((hb >> 21) % span) as i64 - jit;
-            if (hb >> 42) % 6 == 0 { gx += spacing; continue; }   // density variation
             let cxb = gx + jx as i32;
             let cyb = gy + jy as i32;
-            // Pick the most fertile land cell in a SMALL window around the jittered
-            // centre (keeps the seed near the jittered point → off the lattice).
+            // Most fertile land cell in a small window around the jittered centre.
             let mut best = (u32::MAX, -1.0f32);
             for oy in -win..=win {
                 let cy = cyb + oy;
@@ -211,13 +216,13 @@ pub fn generate_provinces(
                 let bi = best.0 as usize;
                 let bx = (bi as u32 % w) as i32;
                 let by = (bi as u32 / w) as i32;
-                if !is_seed[bi] && !too_close(&seed_cells, bx, by) {
+                if !is_seed[bi] && !too_close(&seed_cells, bx, by, local_sep2(bi)) {
                     is_seed[bi] = true; seed_cells.push(bi as u32);
                 }
             }
-            gx += spacing;
+            gx += bspacing;
         }
-        gy += spacing;
+        gy += bspacing;
     }
     if seed_cells.is_empty() { return (Vec::new(), vec![NO_PROVINCE; total]); }
 
@@ -302,7 +307,9 @@ pub fn generate_provinces(
     //    it shares the most border with. One pass (deterministic). ──
     let mut cell_count = vec![0u32; n_seeds];
     for &o in owner.iter() { if o != u32::MAX { cell_count[o as usize] += 1; } }
-    let min_cells = ((spacing * spacing) / 6).max(6) as u32;
+    // Sliver floor keyed off the FINE (habitable) separation, not the coarse spacing,
+    // so the intentionally-small habitable provinces survive; only true slivers merge.
+    let min_cells = (((base_sep * base_sep) / 6.0) as u32).max(6);
     let mut remap: Vec<u32> = (0..n_seeds as u32).collect();
     // Provinces below the area floor get folded into the neighbour they share the most
     // border with. PERF: this used to rescan ALL cells once per small province — an
