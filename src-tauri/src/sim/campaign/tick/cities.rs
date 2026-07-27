@@ -300,9 +300,12 @@ impl CampaignSim {
 
 
     /// DLC 4 · derive typed `Pop` units for hub `h` from its `society` shares ×
-    /// population. Read-only foundation for the Nations & POPs layer — nothing
-    /// consumes these yet, so the economy is unchanged; refreshed yearly so the
-    /// future Population panel and (later) pop-driven demand can read them.
+    /// population. Refreshed yearly so the Population panel can read them, and
+    /// (FIX_PLAN B3) now a genuine INPUT to `update_unrest` rather than a pure
+    /// rendering of it: `militancy` is derived from THIS year's own need deficits
+    /// (not last year's `so.unrest`), so the profession-mix bias below carries
+    /// information `update_unrest`'s aggregate stats don't — an underclass-heavy
+    /// city reads more militant than a burgher-heavy one at the same inequality.
     pub(crate) fn derive_pops(&mut self, h: usize) {
         let hub = &self.hubs[h];
         if hub.is_estate || hub.population < 1.0 {
@@ -326,7 +329,13 @@ impl CampaignSim {
         let life = (1.0 - hub.lack_basic).clamp(0.0, 1.0);
         let every = (1.0 - hub.lack_comfort).clamp(0.0, 1.0);
         let lux = (1.0 - hub.lack_luxury).clamp(0.0, 1.0);
-        let base_mil = (so.unrest * 10.0).clamp(0.0, 10.0);
+        // Hardship this pop actually lives (not so.unrest — that would make
+        // militancy a pure rescaling of last year's unrest, telling
+        // update_unrest nothing it didn't already know).
+        let hardship = (hub.lack_basic.clamp(0.0, 1.0) * 0.5
+            + hub.starving.clamp(0.0, 1.0) * 0.35
+            + (1.0 - every) * 0.15).clamp(0.0, 1.0);
+        let base_mil = (hardship * 10.0).clamp(0.0, 10.0);
         let base_con = (so.inequality * 6.0).clamp(0.0, 10.0);
         let mut pops = Vec::with_capacity(9);
         for (prof, frac) in split {
@@ -377,6 +386,20 @@ impl CampaignSim {
             // Cultures 2.0 · unmet cultural cravings stoke unrest (pop-weighted): a city
             // that never supplies its peoples the goods they prize grows restive.
             let cult_discontent = self.cultural_discontent(h);
+            // DLC 4 · FIX_PLAN B3 — population-weighted militancy/consciousness (the
+            // typed Pop layer, derived this same tick by `update_society` above via
+            // `derive_pops`). Militancy adds the profession-MIX signal the aggregate
+            // stats above don't carry; consciousness (below) scales how fast chronic
+            // misery organizes into revolt.
+            let (pop_mil, pop_con) = {
+                let pops = &self.hubs[h].pops;
+                let total: f32 = pops.iter().map(|p| p.size).sum();
+                if total > 0.0 {
+                    let mil = pops.iter().map(|p| p.militancy * p.size).sum::<f32>() / total / 10.0;
+                    let con = pops.iter().map(|p| p.consciousness * p.size).sum::<f32>() / total / 10.0;
+                    (mil.clamp(0.0, 1.0), con.clamp(0.0, 1.0))
+                } else { (0.0, 0.0) }
+            };
             let target = (0.42 * (1.0 - mood)
                 + 0.30 * ineq
                 + 0.32 * lackb
@@ -384,6 +407,7 @@ impl CampaignSim {
                 + if atwar { 0.12 } else { 0.0 }
                 + minority_unrest
                 + CULTURE_UNREST * cult_discontent
+                + POP_MILITANCY_WEIGHT * pop_mil
                 - 0.30 * welfare
                 - 0.18 * prosp).clamp(0.0, 1.0);
             let u = {
@@ -395,10 +419,15 @@ impl CampaignSim {
             // Grievance memory: a year at (or above) the riot line adds to the city's
             // accumulated resentment; a calm year bleeds it off. Chronic, repeated
             // rioting therefore ratchets toward a revolt even without one acute spike.
+            // Consciousness scales the ACCRUAL rate (organized discontent boils over
+            // faster), not the cooling rate — a complacent populace still calms down
+            // at the same rate once conditions improve.
             let grievance = {
+                let con_scale = CONSCIOUSNESS_GRIEVANCE_MIN
+                    + (CONSCIOUSNESS_GRIEVANCE_MAX - CONSCIOUSNESS_GRIEVANCE_MIN) * pop_con;
                 let so = &mut self.hubs[h].society;
                 if u >= RIOT_UNREST {
-                    so.grievance += (u - RIOT_UNREST) / (1.0 - RIOT_UNREST);
+                    so.grievance += (u - RIOT_UNREST) / (1.0 - RIOT_UNREST) * con_scale;
                 } else {
                     so.grievance *= GRIEVANCE_COOL;
                 }

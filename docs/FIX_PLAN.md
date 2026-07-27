@@ -1,7 +1,8 @@
 # WorldForge 2 — Fix Plan
 
-**Status:** A1 (moisture recycling) implemented; B2 (decide/apply split) started —
-see status notes below. Rest of the plan not yet started.
+**Status:** A1 (moisture recycling) implemented; B2 (decide/apply split) started
+(polis/coinage/fleets done); B3 (Pops wired into unrest) first pass done — see
+status notes below. Rest of the plan not yet started.
 **Baseline measured:** `cargo test --lib earth_ -- --nocapture` on commit `d53fdc9`.
 **Revision 2:** B1 rescoped after verifying the province layer is already wired
 end-to-end (see B1); sequencing updated accordingly.
@@ -401,6 +402,42 @@ consumption baskets, `militancy` feeding unrest instead of the abstract shares,
 `consciousness` gating political events.
 
 **Gate:** dynamics test stays bounded; unrest/revolt frequency does not spike.
+
+**Status: militancy/consciousness wired in (first pass).** Two changes,
+both in `cities.rs`:
+
+1. **Broke the circularity.** `derive_pops`'s `militancy` used to be a pure
+   rescaling of last year's `so.unrest` (`base_mil = so.unrest * 10.0`) —
+   feeding that back into unrest would have told `update_unrest` nothing it
+   didn't already know. Now `militancy` derives from THIS year's own hardship
+   (`lack_basic`/`starving`/`lack_comfort`), independent of `so.unrest`, so the
+   per-profession bias already in the split (labourers/soldiers +1.5, elites
+   −2.0) carries genuine new information: population-weighted militancy now
+   reflects profession MIX, not just the aggregate stats.
+2. **Wired both into `update_unrest`.** Population-weighted militancy (0..1)
+   is a new small additive term (`POP_MILITANCY_WEIGHT = 0.10`) in the unrest
+   target — a city with the same inequality/wealth but an underclass-heavy
+   population now reads more unrest-prone, which the old formula (only
+   `ineq`/`welfare`, never the raw class shares) couldn't express. Population-
+   weighted consciousness (0..1) scales grievance ACCRUAL (not cooling) between
+   0.75×–1.25× (`CONSCIOUSNESS_GRIEVANCE_MIN/MAX`) — a more politically aware
+   populace organizes chronic misery into revolt-triggering grievance faster,
+   which is the "consciousness gating political events" the plan named.
+
+Per-profession consumption baskets (the plan's third suggested consumer) are
+NOT done — `needs_life/everyday/luxury` on `Pop` are still copies of the
+hub-aggregate `lack_basic/comfort/luxury`, not profession-differentiated.
+Left for a follow-up pass; the militancy/consciousness wiring was judged the
+higher-value, lower-risk piece to land first (it's what the plan's gate
+actually measures — unrest/revolt dynamics — while consumption baskets would
+touch `production.rs`'s demand model, a much larger blast radius).
+
+Verified: `cargo test --lib` — 115/116 pass (same pre-existing unrelated
+`meridional_ridge_shadows_its_lee` failure, nothing new); `unrest_topples_
+councils` (the dedicated revolt-mechanics test) still passes;
+`simulate_decades_reports_dynamics` stays bounded (wealth finite, houses/
+towns/coins turn over at a similar cadence to before — NOT bit-identical,
+since this is an intentional behavior change, not a refactor).
 
 ---
 

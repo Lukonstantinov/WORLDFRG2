@@ -108,6 +108,18 @@ const GRIEVANCE_COOL: f32 = 0.6;
 /// over into a REVOLT on its own — the slow-burn path to revolution, distinct from
 /// the acute `REVOLT_UNREST` spike. ~this many years simmering at the riot line.
 const GRIEVANCE_REVOLT: f32 = 1.5;
+/// DLC 4 · FIX_PLAN B3 — weight of the population-weighted `Pop.militancy` term
+/// in the unrest target. Small: the pops' own hardship term already overlaps with
+/// `lackb`/`starv` above, so this is meant to add only the profession-MIX signal
+/// (an underclass-heavy city reads more militant than a burgher-heavy one at the
+/// same inequality/wealth) rather than double-count hardship itself.
+const POP_MILITANCY_WEIGHT: f32 = 0.10;
+/// DLC 4 · FIX_PLAN B3 — how much population-weighted `Pop.consciousness` (0..1)
+/// scales grievance accrual: a more politically aware populace organizes chronic
+/// misery into revolt-triggering grievance faster. Bounded to [0.75, 1.25]× so a
+/// swing in consciousness nudges the slow-burn revolt path without dominating it.
+const CONSCIOUSNESS_GRIEVANCE_MIN: f32 = 0.75;
+const CONSCIOUSNESS_GRIEVANCE_MAX: f32 = 1.25;
 const REVOLT_PROD_HIT: f32 = 0.40;
 /// Global productivity drift: technology/agronomy improve output ~1.5%/yr,
 /// applied as COMPOUND growth — each year multiplies the running index by
