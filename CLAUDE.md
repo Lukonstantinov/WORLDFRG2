@@ -248,6 +248,16 @@ serde-defaulted so old saves load). Grouped by theme:
 - **Colonies & migration:** colonisation (settlement colonies + food lifeline supply
   ships), route-bound migration corridors, expeditions.
 - **Satellite construction:** a metropolis builds a suburb over ~10 years (with decay).
+- **Provinces (Phase 2b · watershed demography):** the ONLY campaign state carried at
+  world granularity. `campaign_start_sim` seeds `prov_rural` / `prov_cap` /
+  `prov_culture` / `prov_seat` / `prov_neighbors` and maps `hub_province` from the
+  `province_raster`; `province_demography_pass()` runs **yearly** (rural pools grow to
+  carrying capacity → migrate into cities), and `prov_neighbors` carries overland
+  plague hop. All `prov_*` fields are serde-defaulted and every routine early-returns
+  on empty, so the dynamics test (which seeds no provinces) is bit-identical. **This is
+  the pattern to extend for any world↔campaign feedback** (FIX_PLAN B1) — the carrier
+  and the yearly cadence already exist; what's missing is land state + a feedback edge
+  into production.
 
 Tests live in `tick/tests.rs` — incl. `simulate_decades_reports_dynamics`
 (the standing dynamics run) and `bench_campaign_tick` (ignored). See the DLC docs
