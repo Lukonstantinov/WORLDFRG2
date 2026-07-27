@@ -421,6 +421,21 @@ fn monsoon_onshore(buf: &WorldBuffer, x: u32, y: u32, sea_suppress: &[f32]) -> f
     // reach across an actual enclosed basin (Arabia/Yemen must stay blocked).
     const SUPPRESSED_PROBE_KM: f32 = 220.0;
     let probe_cells = ((SUPPRESSED_PROBE_KM / km_per_cell).round() as i32).max(2);
+    // Pre-scan the PRIMARY equatorward direction with a short probe to detect
+    // whether the direct moisture pathway is sealed by an enclosed subtropical sea
+    // (Gulf of Aden, Red Sea, Persian Gulf). If it is, diagonal rays that find
+    // open ocean beyond cannot deliver monsoon moisture across that barrier.
+    let short_probe = (range / 3).max(6);
+    let mut primary_blocked = false;
+    for s in 1..=short_probe {
+        let ny = y as i32 + eqdir * s;
+        if ny < 0 || ny >= h { break; }
+        let ni = buf.idx(x, ny as u32);
+        if buf.terrain[ni] == 0 {
+            if sea_suppress[ni] > 0.4 { primary_blocked = true; }
+            break;
+        }
+    }
     let mut best = 0.0f32;
     // Equatorward (S), equatorward-east (SE), equatorward-west (SW â€” the Indian /
     // Western-Ghats summer monsoon blows from the south-west), and due-east rays.
@@ -445,7 +460,11 @@ fn monsoon_onshore(buf: &WorldBuffer, x: u32, y: u32, sea_suppress: &[f32]) -> f
                 // Cold-current coasts (Somali/Canary/Humboldt) produce coastal deserts,
                 // not monsoon — they supply zero monsoon moisture.
                 let warm = if buf.current_type[ni] == 2 { 0.0 } else { 1.0 };
-                best = best.max((1.0 - s as f32 / range as f32) * warm);
+                let mut contrib = (1.0 - s as f32 / range as f32) * warm;
+                // Diagonal/lateral rays are blocked when the primary equatorward
+                // path is sealed by an enclosed sea (Arabia/Aden/Red Sea case).
+                if primary_blocked && dx != 0 { contrib *= 0.12; }
+                best = best.max(contrib);
                 break; // first usable sea cell along the ray decides it
             }
         }
@@ -890,7 +909,12 @@ fn season_precip(
                         && buf.current_type[ni] != 2  // not cold upwelling
                         && ctx.sea_suppress[ni] < 0.3 // not enclosed subtropical sea
                 });
-                if near_warm_eq { 0.65 } else { 0.30 }
+                // A strong jet entrance (low-level divergence) physically shuts off
+                // deep convection even when warm ocean lies equatorward — the Somali /
+                // Arabian coast case. Jet divergence sweeps moisture before it can
+                // accumulate, so the ITCZ cannot ignite despite the warm sea to the
+                // south. Gate the elevated floor on the jet NOT being a strong entrance.
+                if near_warm_eq && jet_dry >= 0.65 { 0.65 } else { 0.30 }
             } else { 0.30 };
             let conv_avail = conv_floor + (1.0 - conv_floor) * avail;
             // FIX 1 â€” quadratic jet suppression on convective terms.
@@ -1025,7 +1049,17 @@ fn season_precip(
             // Chilean coast / Norway / BC / South Island) while the rain shadow keeps
             // the lee bone-dry (the Argentine Patagonian steppe & pampas). Previously
             // this term ignored `oro`, so the lee stayed as wet as the windward side.
-            p += frontal_bonus(afl, near_ocean) * frontal_scale * SEASON_SCALE * oro;
+            // Deep continental interiors: extratropical cyclones lose moisture crossing
+            // upwind mountain barriers and long land fetches, so the storm-track rain
+            // weakens with distance from the ocean. Flat 430 mm/yr for all inland cells
+            // was making Central Asia / Kazakh steppe too wet (Dfb instead of BSk).
+            // Scale down linearly with distance_to_ocean; floor at 25% so the very
+            // deepest interiors still get a little cyclone moisture (Siberia is not a desert).
+            let frontal_cont = if near_ocean { 1.0 } else {
+                let d = buf.distance_to_ocean[idx];
+                (1.0 - 0.65 * d).max(0.25)
+            };
+            p += frontal_bonus(afl, near_ocean) * frontal_scale * SEASON_SCALE * oro * frontal_cont;
 
             // Jet-exit convergence dump (monsoon terminus), amplified up windward relief.
             if jet_wet > 0.0 {

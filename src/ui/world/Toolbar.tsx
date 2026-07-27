@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useGoodsStore } from "@state/goodsStore";
+import { useWorldStore } from "@state/worldStore";
 import type { ActiveTool, ActiveLayer } from "@types";
 import { GOOD_DEFS, goodOverlayKey, goodCategory, CATEGORY_ORDER } from "@goods";
 import { LatitudeControl } from "@ui/world/LatitudeControl";
@@ -138,7 +139,7 @@ export function Toolbar() {
   const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({});
   // Collapsible top-level sections (the big lists start collapsed to declutter).
   const [openSection, setOpenSection] = useState<Record<string, boolean>>({
-    Layers: true, Overlays: true, Climate: true, Biological: false, "Trade Goods": false, View: true,
+    Layers: true, Overlays: true, Climate: true, Biological: false, "Trade Goods": false, Provinces: false, View: true,
   });
   const toggleSection = (k: string) => setOpenSection((s) => ({ ...s, [k]: !s[k] }));
   const bioParams = useUIStore((s) => s.bioParams);
@@ -156,6 +157,9 @@ export function Toolbar() {
   const stretchToFit = useUIStore((s) => s.stretchToFit);
   const setStretchToFit = useUIStore((s) => s.setStretchToFit);
   const setShowGoodsBrowser = useUIStore((s) => s.setShowGoodsBrowser);
+  const showProvinces = useUIStore((s) => s.showProvinces);
+  const setShowProvinces = useUIStore((s) => s.setShowProvinces);
+  const provinces = useWorldStore((s) => s.provinces);
 
   const showBrush = activeTool === "paint" || activeTool === "elevation" || activeTool === "shelf";
 
@@ -481,6 +485,47 @@ export function Toolbar() {
           );
         })}
         </>)}
+      </div>
+
+      {/* Province partition overlay */}
+      <div style={section}>
+        <SectionHead title="Provinces" open={openSection.Provinces} onToggle={() => toggleSection("Provinces")} />
+        {openSection.Provinces && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <label style={checkboxRow}>
+              <input
+                type="checkbox"
+                checked={!!overlayVisibility.provinces}
+                onChange={() => toggleOverlay("provinces")}
+                style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
+                disabled={provinces.length === 0}
+              />
+              <span style={{ color: overlayVisibility.provinces ? "#b0c8e0" : "#5a6a80" }}>
+                🗺 Culture fill + borders
+              </span>
+            </label>
+            {provinces.length === 0 && (
+              <div style={{ fontSize: 9, color: "#5a7390", lineHeight: 1.4 }}>
+                No provinces yet. Open the Provinces window (top bar) after Step 7 to generate them.
+              </div>
+            )}
+            {provinces.length > 0 && (
+              <div style={{ fontSize: 9, color: "#5a7390" }}>
+                {provinces.length} provinces · click a cell to inspect
+              </div>
+            )}
+            <button
+              onClick={() => setShowProvinces(!showProvinces)}
+              style={{
+                padding: "3px 6px", fontSize: 10, borderRadius: 4, cursor: "pointer",
+                border: `1px solid ${showProvinces ? "#3a80c0" : "#1e2e42"}`,
+                background: showProvinces ? "#19324a" : "#0e1826",
+                color: showProvinces ? "#cfe2f6" : "#6a86a6",
+              }}>
+              {showProvinces ? "Close" : "Open"} Province Panel
+            </button>
+          </div>
+        )}
       </div>
 
       <div style={divider} />

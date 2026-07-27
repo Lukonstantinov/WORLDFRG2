@@ -1044,6 +1044,7 @@ export function HubPanel() {
       {/* ════════════ PROVISION (council right-of-first-buy / civic reserve) ════════════ */}
       {tab === "provision" && (() => {
         if (!prov) return <div style={{ color: "#6a86a6", fontSize: 11, padding: 6 }}>No provisioning data.</div>;
+        if (!detail) return null;
         return (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
             {/* First-buy status banner */}

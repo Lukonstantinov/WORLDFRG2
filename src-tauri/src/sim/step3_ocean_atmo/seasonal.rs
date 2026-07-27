@@ -37,7 +37,11 @@ const MONSOON_WIND_CAP: f32 = 1.4;
 const GRAD_STEP: i32 = 2;
 /// Seasonal ITCZ migration amplitude (degrees) toward the summer hemisphere. The
 /// annual-mean land-asymmetry shift is added on top of this per season.
-pub const ITCZ_SEASONAL_MIGRATE: f32 = 8.0;
+/// 10° is the working compromise: 8° left the SH-summer ITCZ too close to the
+/// equator to reach southern tropical Africa (Zimbabwe/Zambia rainy season);
+/// 12° pushed the SH-summer ITCZ past the equatorial Amazon (making that column's
+/// SH-summer drier than its NH-summer → spurious AS dry-savanna classification).
+pub const ITCZ_SEASONAL_MIGRATE: f32 = 10.0;
 
 /// A per-cell seasonal wind field for one insolation state.
 pub struct SeasonalWind {

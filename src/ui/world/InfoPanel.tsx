@@ -35,6 +35,16 @@ const KOPPEN_NAMES: Record<number, string> = {
   20: "Dsc - Mediterranean continental cold",
   21: "ET - Tundra",
   22: "EF - Ice cap",
+  23: "As - Tropical dry-summer savanna",
+  24: "Cwa - Monsoon subtropical",
+  25: "Cwb - Subtropical highland monsoon",
+  26: "Cwc - Cold subtropical highland monsoon",
+  27: "Dwa - Hot continental dry-winter",
+  28: "Dwb - Continental dry-winter",
+  29: "Dwc - Subarctic dry-winter",
+  30: "Dwd - Extreme subarctic dry-winter",
+  31: "Dsd - Subarctic dry-summer",
+  32: "H - Alpine highland",
 };
 
 const SOIL_NAMES: Record<number, string> = {

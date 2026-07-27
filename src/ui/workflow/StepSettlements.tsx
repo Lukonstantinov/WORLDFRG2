@@ -149,6 +149,13 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
         (climate 40% + fertility 20% + water 20% + terrain 10% + trade 10%).
         Cities are placed highest-probability first; dot size = settlement rank.
       </div>
+
+      {settlements.length > 0 && (
+        <div style={{ color: "#4a6a4a", fontSize: 10, marginTop: 4, padding: "4px 6px",
+          background: "#0e1a12", borderRadius: 3, border: "1px solid #1a3020" }}>
+          Next: open <strong style={{ color: "#6a9a6a" }}>🗺 Provinces</strong> (top bar) to partition the land into watershed provinces.
+        </div>
+      )}
     </div>
   );
 }
