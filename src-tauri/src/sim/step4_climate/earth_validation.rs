@@ -196,7 +196,7 @@ fn earth_named_region_spot_checks() {
         (y.min(H - 1)) * W + x.min(W - 1)
     };
     // (name, lat, lon, expected main class or 0 = print-only)
-    let sites: [(&str, f32, f32, u8); 12] = [
+    let sites: [(&str, f32, f32, u8); 15] = [
         ("Sahara 23N13E", 23.0, 13.0, b'B'),
         ("Arabia 22N47E", 22.0, 47.0, b'B'),
         ("Amazon 3S60W", -3.0, -60.0, b'A'),
@@ -210,6 +210,9 @@ fn earth_named_region_spot_checks() {
         ("SE-US 34N84W", 34.0, -84.0, 0),
         ("NWEurope 52N5E", 52.0, 5.0, 0),
         ("Med-Rome 42N12E", 42.0, 12.0, 0),
+        ("Somalia-Mogadishu 2N45E", 2.0, 45.0, 0),
+        ("Somalia-Hargeisa 9N44E", 9.0, 44.0, 0),
+        ("Somalia-Bosaso 11N49E", 11.0, 49.0, 0),
     ];
     println!("\n─── Earth named-region spot checks ───");
     for (nm, la, lo, want) in sites {
