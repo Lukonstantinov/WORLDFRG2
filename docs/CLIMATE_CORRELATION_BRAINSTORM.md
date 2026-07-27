@@ -1,10 +1,16 @@
 # WorldForge 2 — Real-Climate Correlation & Biology: 20 Proposals
 
+> **See also `FIX_PLAN.md`** — the climate model has since gained an energy-balance
+> model, astronomical insolation, rotation-derived circulation belts and an **Earth
+> validation harness**. Fidelity is now a measured number (main-class 66.2%,
+> exact-zone 29.0%), and the prioritised climate fixes live there. This document
+> remains a proposal menu; the fix plan is what's actually scheduled.
+
 **Theme:** help world *creators* see how their generated map correlates to real
 Earth climate, and enrich the world with real climate/biology information.
 
 **Grounding (already in the codebase):**
-- Full **Köppen** classification — 32 zone codes (`sim/koppen.rs`).
+- Full **Köppen** classification — 31 zone codes + highland (`sim/step4_climate/koppen.rs`).
 - Per-cell **temperature** + **seasonal range** (`seasonal_range_base`, `seasonal_temps`).
 - **Precipitation** (ITCZ / orographic / frontal model).
 - **Ocean currents**, **salinity** (incl. thermohaline + advection).
