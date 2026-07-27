@@ -171,9 +171,10 @@ fn earth_koppen_agreement() {
 }
 
 /// The regression floor for area-weighted main-class agreement. Calibrated just
-/// under the measured baseline (66.2% at 0.5° after the storm-track fix); bump it
-/// up as the model improves so it always guards the current fidelity.
-const EARTH_MAIN_FLOOR: f64 = 63.0;
+/// under the measured baseline (66.3% at 0.5° after FIX_PLAN A1 — conserved
+/// moisture-recycling + the delta-mouth monsoon-onshore fix); bump it up as the
+/// model improves so it always guards the current fidelity.
+const EARTH_MAIN_FLOOR: f64 = 65.0;
 
 /// Named-region spot checks — regional regression protection for the archetypal
 /// climates a player would immediately judge (the deserts, the equatorial

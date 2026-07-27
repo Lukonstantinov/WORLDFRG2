@@ -109,22 +109,51 @@ const JET_EXIT_WET_MAX: f32 = 750.0; // max convergence rainfall (mm/yr) at a st
 // before it rains itself out. We fold this into the moisture-advection depletion —
 // the parcel loses a smaller fraction of its moisture per step in warm air.
 
-/// Fraction (0..1) of a moisture parcel's per-step depletion that warm air resists,
-/// from the Clausius–Clapeyron (Tetens) saturation curve, referenced to 0 °C so it
-/// is a pure warm-air BOOST: 0 at/below freezing, rising toward CC_STRENGTH in the
-/// hot tropics. (Referencing to 0 °C also means the depletion is unchanged wherever
-/// the temperature field is 0 — e.g. isolated unit tests — so it only adds physics
-/// in the real pipeline where temperature has been computed.)
-const CC_STRENGTH: f32 = 0.5;
+/// Warm-air moisture-capacity ratio (0..1) from the Clausius–Clapeyron (Tetens)
+/// saturation curve, referenced to 0 °C: 0 at/below freezing, rising toward 1 in
+/// the hot tropics. Shared by the CC retention boost and the ET-recycling warmth
+/// gate below — both are "how much more moisture can warm air hold/evaporate."
 #[inline]
-fn cc_retain_frac(t_c: f32) -> f32 {
+fn tetens_warm_ratio(t_c: f32) -> f32 {
     if t_c <= 0.0 {
         return 0.0;
     }
     let e_sat = |t: f32| 6.11 * (17.27 * t / (t + 237.3)).exp();
-    let ratio = (1.0 - e_sat(0.0) / e_sat(t_c)).clamp(0.0, 1.0);
-    CC_STRENGTH * ratio
+    (1.0 - e_sat(0.0) / e_sat(t_c)).clamp(0.0, 1.0)
 }
+
+/// Fraction (0..1) of a moisture parcel's per-step depletion that warm air resists,
+/// 0 at/below freezing, rising toward CC_STRENGTH in the hot tropics. (Referencing
+/// to 0 °C means the depletion is unchanged wherever the temperature field is 0 —
+/// e.g. isolated unit tests — so it only adds physics in the real pipeline where
+/// temperature has been computed.)
+const CC_STRENGTH: f32 = 0.5;
+#[inline]
+fn cc_retain_frac(t_c: f32) -> f32 {
+    CC_STRENGTH * tetens_warm_ratio(t_c)
+}
+
+// ── Evapotranspiration moisture recycling (FIX_PLAN A1) ─────────────────────
+// Precipitation is not a one-way withdrawal from a travelling air parcel: rain
+// that falls on land re-evaporates (directly, and via plant transpiration) and
+// re-enters the same airflow, which is why continental interiors — the Amazon,
+// the Congo, monsoon Asia — stay wet hundreds to thousands of km beyond what a
+// single one-way advection-decay could deliver (~half of Amazon basin rainfall
+// is recycled local ET, not fresh oceanic supply). We model this along each
+// parcel's own advection path: of the moisture a step rains out, a fraction
+// re-enters the parcel rather than vanishing. Two gates keep it physical:
+//   - warmth: ET needs energy, so it is gated by the same Tetens warm-air ratio
+//     used for CC retention (0 at/below freezing, 1 in the deep tropics).
+//   - wetness: recycling needs something to recycle FROM. Gated by how much of
+//     the parcel's ORIGINAL supply has already rained out upwind (0 at the coast
+//     — nothing has fallen yet to recycle — rising toward 1 deep inland once the
+//     ground/canopy has been thoroughly wetted). This is what lets a moist
+//     coastal fringe "bootstrap" a self-sustaining wet interior while a parcel
+//     that started dry (little coastal rain) has nothing to recycle and stays dry.
+// The recycled fraction is strictly less than what rained out, so the parcel's
+// carried moisture still decreases monotonically along the path — bounded, no
+// runaway feedback.
+const ET_RECYCLE_MAX: f32 = 0.5;
 
 /// Orographic precipitation multiplier for one land cell.
 /// 2.5 = windward uplift, 0.15..1.0 = leeward rain shadow (graduated), 1.0 = none.
@@ -378,21 +407,38 @@ fn monsoon_onshore(buf: &WorldBuffer, x: u32, y: u32, sea_suppress: &[f32]) -> f
     const MONSOON_FETCH_KM: f32 = 800.0;
     let km_per_cell = EARTH_CIRCUMFERENCE_KM / buf.width as f32;
     let range = ((MONSOON_FETCH_KM / km_per_cell) as i32).max(12);
+    // A genuinely enclosed sea (Red Sea, Persian Gulf, Gulf of Aden) stays
+    // suppressed for its ENTIRE length — there is no nearby open water to find.
+    // A river-mouth/delta coast opening onto a huge bay (the Ganges-Brahmaputra
+    // mouth into the Bay of Bengal) can measure locally "narrow" right at the
+    // immediate coast (land close on both sides) even though the bay proper —
+    // one of Earth's great monsoon moisture sources — is wide open a short
+    // distance further out. Probe a SHORT extra distance past a suppressed hit
+    // for real open water before giving up; short enough that it does not
+    // reach across an actual enclosed basin (Arabia/Yemen must stay blocked).
+    const SUPPRESSED_PROBE_KM: f32 = 220.0;
+    let probe_cells = ((SUPPRESSED_PROBE_KM / km_per_cell).round() as i32).max(2);
     let mut best = 0.0f32;
     // Equatorward (S), equatorward-east (SE), equatorward-west (SW â€” the Indian /
     // Western-Ghats summer monsoon blows from the south-west), and due-east rays.
     for &(dx, dy) in &[(0i32, eqdir), (1, eqdir), (-1, eqdir), (1, 0)] {
+        let mut suppressed_at: Option<i32> = None;
         for s in 1..=range {
             let nx = buf.wrap_x(x as i32 + dx * s);
             let ny = y as i32 + dy * s;
             if ny < 0 || ny >= h { break; }
             let ni = buf.idx(nx, ny as u32);
             if buf.terrain[ni] == 0 {
-                // Enclosed/suppressed seas (Red Sea, Persian Gulf, Gulf of Aden) sit
-                // under the Hadley inversion and block the monsoon pathway — STOP the
-                // ray here (a `continue` wrongly let the ray find open ocean beyond
-                // the enclosed sea and made Arabia/Yemen wet despite the drying gate).
-                if sea_suppress[ni] > 0.4 { break; }
+                if sea_suppress[ni] > 0.4 {
+                    // Enclosed/suppressed water. Keep probing a short distance further
+                    // along the SAME ray for real open water (the delta-mouth case);
+                    // beyond the probe window, treat it as a genuinely enclosed basin
+                    // and stop (this is what keeps Arabia/Yemen blocked by the Red Sea
+                    // / Gulf of Aden, which stay suppressed far past the probe).
+                    let start = *suppressed_at.get_or_insert(s);
+                    if s - start >= probe_cells { break; }
+                    continue;
+                }
                 // Cold-current coasts (Somali/Canary/Humboldt) produce coastal deserts,
                 // not monsoon — they supply zero monsoon moisture.
                 let warm = if buf.current_type[ni] == 2 { 0.0 } else { 1.0 };
@@ -684,6 +730,17 @@ fn season_precip(
                 // Zero effect at/below 0 °C, so the depletion is unchanged in the cold.
                 let cc = cc_retain_frac(buf.temperature[ci]);
                 let decay = decay + (1.0 - decay) * cc;
+                // ET recycling: of what this step would rain out, a fraction
+                // re-enters the parcel instead of vanishing (see the module doc
+                // above `ET_RECYCLE_MAX`). Gated by local warmth and by how much
+                // of the parcel's original supply has already fallen upwind —
+                // both 0 near a dry coastal start, rising toward 1 deep in an
+                // already-wet warm interior. Expressed as a boost to the
+                // effective decay so it composes with the CC term above.
+                let warmth = tetens_warm_ratio(buf.temperature[ci]);
+                let wetness = (1.0 - m / init_moisture).clamp(0.0, 1.0);
+                let recycle = ET_RECYCLE_MAX * warmth * wetness;
+                let decay = decay + (1.0 - decay) * recycle;
                 m *= decay;
                 let x0 = fx.floor() as i32;
                 let y0 = fy.floor() as i32;
