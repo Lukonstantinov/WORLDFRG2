@@ -233,6 +233,61 @@ standalone at hub level if B1 slips.
 
 ---
 
+### A6. Ocean current fidelity — ACC dead on Earth-shaped worlds ⭐ cheap, isolated
+
+**Files:** `sim/step3_ocean_atmo/ocean.rs` (`generate_ocean_currents`, `gyre_vector`)
+
+Requested analysis: are currents "eligible and moving where they're supposed to,"
+and does their speed/direction correctly couple into precipitation/temperature via
+warm/cold tagging and salinity? Spot-checked named real currents through the Earth
+harness (`run_earth()`), each printed as `(current_type, vx, vy, speed, sst, salinity)`:
+
+- **Confirmed working:** Gulf Stream (35N70W) reads WARM, strongly poleward
+  (`v=(+0.37,-2.29)`, speed 2.32 — a vigorous boundary current), matching the real
+  current's direction and relative strength. Western-vs-eastern intensification
+  (`SPEED_BOUNDARY_WEST=2.2` vs `..._EAST=0.55`), the salinity→current-speed
+  feedback (`advect_salinity_and_recouple`'s gradient boost, ±30%) and the
+  current→temperature coupling (`temperature.rs`'s `vol.clamp(0.35, 1.3)` reach/
+  decay) are all present and directionally sound; the `vol` floor of 0.35 means
+  even a current-type cell with a locally near-zero vector (the tag can be smeared
+  a few cells wide by `extend_warm_tag`'s perpendicular corridor) still contributes
+  a non-zero, bounded thermal anomaly — not a bug, a deliberate guard.
+- **Confirmed broken: the Antarctic Circumpolar Current never activates on a
+  real Earth-shaped world.** `generate_ocean_currents` special-cases the ACC with
+  a single global gate: `circumpolar_active` requires the *entire* latitude row at
+  `y = height × (1 − CIRCUMPOLAR_FRAC)` (90% down, ≈72°S) to be 100% ocean at
+  *every* longitude before any cell anywhere gets the hardcoded eastward
+  `SPEED_ACC = 1.6` flow. On the real Earth fixture that row is 431/720 cells
+  (60%) **land** (Antarctica), so `circumpolar_active` is `false` for the whole
+  planet and every Southern Ocean cell falls through to the ordinary basin-based
+  `gyre_vector` path instead — which, sampled at 60°S/0°E, produces a weak
+  (`speed≈0.68`) and even westward (`vx=-0.29`) drift, the opposite direction of
+  the real ACC. This isn't a narrow-band placement quibble (moving the row
+  equatorward to the ACC's real ~50–60°S location would make the "whole row is
+  ocean" check fail even harder, since South America/Antarctica extend well
+  north of there in places) — the **gate design itself** silently disables the
+  entire mechanic on any world with a pole-covering or pole-adjacent continent,
+  which includes Earth.
+
+**Why not fixed here:** this session already spent six reverted attempts on a
+different Somalia-region ocean/wind fix (see the print-only Somalia spot checks
+in `earth_validation.rs`), each either failing to fix the target or regressing
+Amazon/Congo/Indonesia/SE-US. The ACC sits in the same file and the same
+current-classification code path, so a fix carries the same regression profile
+and deserves the same care — done here as **diagnosis only** (a throwaway
+`scratch_current_diagnostic` test was used to confirm this, then reverted; not
+committed). A safe fix would replace the whole-row boolean with a **per-cell**
+or **per-longitude-band** gate (e.g. "is this cell south of the nearest land at
+its own longitude, by some margin" rather than "is the entire ring clear"), then
+re-run `earth_koppen_agreement` to confirm the `E`-class row (99.1%, already
+near-ceiling) doesn't regress before landing it.
+
+**Gate:** `earth_koppen_agreement` main-class ≥ 65.0 (current floor) unchanged or
+improved, particularly the `E` row; a new print-only spot check near 55-60°S
+confirming eastward (`vx > 0`) flow once fixed.
+
+---
+
 ## Part B — One simulator
 
 ### B1. Two-way world ↔ campaign coupling via provinces ⭐ highest leverage
