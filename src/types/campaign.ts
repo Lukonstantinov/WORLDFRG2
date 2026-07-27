@@ -1685,9 +1685,12 @@ export interface Settlement {
   hubClass?: number; // 0 ordinary · 1 trade hub · 2 entrepôt (campaign, earned live)
 }
 
-/** #26 · a named geographic feature. Mirrors the Rust `Toponym` struct. */
+/** #26 · a named geographic feature. Mirrors the Rust `Toponym` struct.
+ *  `desert`/`forest`/`tundra` are large biome-region subnames — a contiguous
+ *  patch of the same broad biome, named separately from the culture-hearth
+ *  `region` so they can be toggled independently. */
 export interface Toponym {
-  kind: "river" | "mountain" | "lake" | "region";
+  kind: "river" | "mountain" | "lake" | "region" | "desert" | "forest" | "tundra";
   name: string;
   x: number;
   y: number;

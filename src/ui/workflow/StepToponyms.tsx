@@ -7,7 +7,21 @@ import { genBtn } from "@ui/workflow/WorkflowPanel";
 
 const KIND_ICON: Record<Toponym["kind"], string> = {
   river: "\u{1F30A}", mountain: "\u{1F3D4}\u{FE0F}", lake: "\u{1F4A7}", region: "\u{1F3F3}\u{FE0F}",
+  desert: "\u{1F3DC}\u{FE0F}", forest: "\u{1F332}", tundra: "\u{2744}\u{FE0F}",
 };
+
+// Order + label for the map-visibility subwindow (per-kind toggle for the
+// on-map labels, independent of the master "toponyms" overlay switch and of
+// the editable-list filter above).
+const VISIBILITY_KINDS: { kind: Toponym["kind"]; key: string; label: string }[] = [
+  { kind: "river", key: "toponymsRiver", label: "Rivers" },
+  { kind: "lake", key: "toponymsLake", label: "Lakes" },
+  { kind: "mountain", key: "toponymsMountain", label: "Mountains" },
+  { kind: "region", key: "toponymsRegion", label: "Homelands" },
+  { kind: "desert", key: "toponymsDesert", label: "Deserts" },
+  { kind: "forest", key: "toponymsForest", label: "Forests" },
+  { kind: "tundra", key: "toponymsTundra", label: "Tundra" },
+];
 
 /** #26 · optional, GATED toponym step. Names rivers/mountains/lakes/regions in the
  *  local culture's style; the list is editable (rename any feature) and persisted.
@@ -20,6 +34,9 @@ export function StepToponyms() {
   const markStepCompleted = useUIStore((s) => s.markStepCompleted);
   const stepCompleted = useUIStore((s) => s.stepCompleted);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
+  const overlayVisibility = useUIStore((s) => s.overlayVisibility);
+  const toggleOverlay = useUIStore((s) => s.toggleOverlay);
+  const [showVisibilityPanel, setShowVisibilityPanel] = useState(false);
   const rivers = useWorldStore((s) => s.rivers);
   const lakes = useWorldStore((s) => s.lakes);
   const toponyms = useWorldStore((s) => s.toponyms);
@@ -99,17 +116,50 @@ export function StepToponyms() {
         <>
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
             <Chip on={filter === ""} onClick={() => setFilter("")}>{`All ${toponyms.length}`}</Chip>
-            {(["region", "river", "mountain", "lake"] as const).map((k) =>
+            {(["region", "river", "mountain", "lake", "desert", "forest", "tundra"] as const).map((k) =>
               counts[k] ? (
                 <Chip key={k} on={filter === k} onClick={() => setFilter(k)}>{`${KIND_ICON[k]} ${counts[k]}`}</Chip>
               ) : null,
             )}
-            <label style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: "auto", color: "#7a98b8", fontSize: 10, cursor: "pointer" }}>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 4, color: "#7a98b8", fontSize: 10, cursor: "pointer" }}>
               <input type="checkbox" defaultChecked onChange={(e) => setOverlayVisible("toponyms", e.target.checked)}
                 style={{ accentColor: "#3a80c0" }} />
               labels
             </label>
+            <button onClick={() => setShowVisibilityPanel((v) => !v)}
+              style={{
+                marginLeft: "auto", fontSize: 10, padding: "2px 6px", borderRadius: 4, cursor: "pointer",
+                border: "1px solid #1e2e42", background: showVisibilityPanel ? "#19324a" : "#0c1622",
+                color: showVisibilityPanel ? "#cfe2f6" : "#7a98b8",
+              }}>
+              {showVisibilityPanel ? "Hide which show ▲" : "Which show on map ▼"}
+            </button>
           </div>
+
+          {/* Per-kind map-label visibility — untick a kind to hide just its
+              labels on the map (the master "labels" checkbox above still gates
+              all of them at once). */}
+          {showVisibilityPanel && (
+            <div style={{
+              display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 8px",
+              padding: "6px 8px", background: "#0c1622", border: "1px solid #1e2e42", borderRadius: 4,
+            }}>
+              {VISIBILITY_KINDS.map(({ kind, key, label }) => (
+                <label key={key} style={{ display: "flex", alignItems: "center", gap: 5, color: "#8aa0b8", fontSize: 10.5, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={overlayVisibility[key] !== false}
+                    onChange={() => toggleOverlay(key)}
+                    style={{ accentColor: "#3a80c0" }}
+                  />
+                  <span>{KIND_ICON[kind]} {label}{counts[kind] ? ` (${counts[kind]})` : ""}</span>
+                </label>
+              ))}
+            </div>
+          )}
 
           <div style={{ maxHeight: 240, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
             {shown.map(({ t, i }) => (

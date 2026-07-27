@@ -12,7 +12,10 @@ use super::names;
 use crate::sim::rivers::{Lake, River};
 use crate::sim::world_buffer::WorldBuffer;
 
-/// A named geographic feature. `kind`: "river" | "mountain" | "lake" | "region".
+/// A named geographic feature. `kind`: "river" | "mountain" | "lake" | "region" |
+/// "desert" | "forest" | "tundra" (the last three are large biome-region
+/// subnames — a contiguous patch of the same broad biome, named separately from
+/// the culture-hearth "region" so a player can toggle them independently).
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct Toponym {
     pub kind: String,
@@ -30,6 +33,13 @@ const PEAK_WINDOW: i32 = 6;
 const MAX_PEAKS: usize = 40;
 /// Minimum lake size (cells) to earn a name.
 const MIN_LAKE_CELLS: usize = 6;
+/// Minimum contiguous size (cells) for a biome patch to earn a subregion name —
+/// scaled by grid area below so a small painted world and a big generated one
+/// both get a sane number of named deserts/forests/tundras rather than either
+/// none or hundreds of tiny slivers.
+const MIN_BIOME_REGION_FRAC: f32 = 0.0015; // ~0.15% of the land grid
+/// Cap on named biome subregions (largest first) so the map isn't littered.
+const MAX_BIOME_REGIONS: usize = 25;
 
 /// Build the toponym list for a world. `rivers`/`lakes` come from the Rivers step
 /// (passed through from the frontend); peaks are scanned from `buf.elevation`;
@@ -115,7 +125,91 @@ pub fn generate(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake]) -> Vec<Topo
         }
     }
 
+    // -- Biome subregions: contiguous desert/forest/tundra patches, named
+    // separately from the culture-hearth "region" above so they can be toggled
+    // independently (large deserts/forests are landmarks in their own right,
+    // not tied to any one people's homeland).
+    for (n, (cat, cx, cy)) in find_biome_regions(buf).into_iter().enumerate() {
+        let suffix = match cat {
+            "desert" => "Desert",
+            "tundra" => "Tundra",
+            _ => "Forest",
+        };
+        if let Some(base) = unique_feature_name(cx, cy, w, h, 0x4444 ^ n as u32, &mut used) {
+            let name = format!("{base} {suffix}");
+            out.push(Toponym { kind: cat.into(), name, x: cx as f32, y: cy as f32 });
+        }
+    }
+
     out
+}
+
+/// Broad biome CATEGORY for a Köppen code + elevation — coarser than the full
+/// 32-code classification, grouped into the handful of buckets a namer would
+/// actually reach for on a map. `None` (savanna, Mediterranean scrub, dry
+/// continental, …) is deliberately left unnamed — those read as transitional,
+/// not a landmark region in their own right.
+fn biome_category(koppen: u8, elevation: f32) -> Option<&'static str> {
+    if elevation > 0.40 { return Some("tundra"); } // montane/alpine reads cold/bare
+    match koppen {
+        1 | 2 => Some("forest"),                                     // Af/Am rainforest/monsoon
+        4 | 5 | 6 | 7 => Some("desert"),                              // BWh/BWk/BSh/BSk
+        11 | 12 | 13 | 14 | 15 | 24 | 25 | 26 | 27 | 28 => Some("forest"), // Cf/Cw/Df/Dw forests
+        16 | 17 | 29 | 30 => Some("tundra"),                          // Dfc/Dfd/Dwc/Dwd taiga fringe
+        21 | 22 => Some("tundra"),                                    // ET/EF
+        _ => None,
+    }
+}
+
+/// Flood-fill contiguous same-category biome patches (desert/forest/tundra),
+/// returning `(category, centroid_x, centroid_y)` for each patch at or above
+/// `MIN_BIOME_REGION_FRAC` of the land grid, largest first, capped at
+/// `MAX_BIOME_REGIONS`. Cheap: one flood-fill pass over the grid with a visited
+/// bitmap, mirroring the same technique culture hearths use.
+fn find_biome_regions(buf: &WorldBuffer) -> Vec<(&'static str, u32, u32)> {
+    let (w, h) = (buf.width, buf.height);
+    let n = (w as usize) * (h as usize);
+    let idx = |x: u32, y: u32| (y * w + x) as usize;
+    let mut visited = vec![false; n];
+    let min_size = ((n as f32) * MIN_BIOME_REGION_FRAC).round().max(20.0) as usize;
+    let mut regions: Vec<(&'static str, u32, u32, usize)> = Vec::new();
+
+    for sy in 0..h {
+        for sx in 0..w {
+            let si = idx(sx, sy);
+            if visited[si] || buf.terrain[si] != 1 { continue; }
+            let Some(cat) = biome_category(buf.koppen[si], buf.elevation[si]) else {
+                visited[si] = true;
+                continue;
+            };
+            // BFS the connected component sharing this category.
+            let mut stack = vec![(sx, sy)];
+            visited[si] = true;
+            let (mut sumx, mut sumy, mut count) = (0u64, 0u64, 0usize);
+            while let Some((x, y)) = stack.pop() {
+                sumx += x as u64;
+                sumy += y as u64;
+                count += 1;
+                for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                    let ny = y as i32 + dy;
+                    if ny < 0 || ny >= h as i32 { continue; }
+                    let nx = buf.wrap_x(x as i32 + dx);
+                    let ni = idx(nx, ny as u32);
+                    if visited[ni] || buf.terrain[ni] != 1 { continue; }
+                    if biome_category(buf.koppen[ni], buf.elevation[ni]) != Some(cat) { continue; }
+                    visited[ni] = true;
+                    stack.push((nx, ny as u32));
+                }
+            }
+            if count >= min_size {
+                regions.push((cat, (sumx / count as u64) as u32, (sumy / count as u64) as u32, count));
+            }
+        }
+    }
+
+    regions.sort_by(|a, b| b.3.cmp(&a.3));
+    regions.truncate(MAX_BIOME_REGIONS);
+    regions.into_iter().map(|(cat, x, y, _)| (cat, x, y)).collect()
 }
 
 /// A culture-styled RIVER name at `(x,y)`, re-rolled until it's not already in

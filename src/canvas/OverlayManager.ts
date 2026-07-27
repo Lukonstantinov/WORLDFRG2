@@ -2124,31 +2124,46 @@ export class OverlayManager {
     ctx.globalAlpha = 1;
   }
 
-  /** #26 · draw toponym labels. Regions read as faint uppercase tracking; rivers/
+  /** #26 · draw toponym labels. Regions (culture hearths + the large desert/
+   *  forest/tundra biome subregions) read as faint uppercase tracking; rivers/
    *  peaks/lakes get a small kind-coloured dot + italic-ish name. Sizes are
    *  zoom-compensated and kept legible with a dark halo. */
   private renderToponyms(ctx: CanvasRenderingContext2D) {
     const inv = 1 / Math.sqrt(this.currentScale);
     const COLORS: Record<string, string> = {
       river: "#7fc8e0", mountain: "#d8c0a0", lake: "#9ad0e8", region: "#caa6e0",
+      desert: "#d8b878", forest: "#8fc088", tundra: "#a8c0cc",
     };
+    // Faint fill for the region-style (area) labels — same hue as COLORS, dimmed.
+    const FAINT_COLORS: Record<string, string> = {
+      region: "rgba(202,166,224,0.85)", desert: "rgba(216,184,120,0.85)",
+      forest: "rgba(143,192,136,0.85)", tundra: "rgba(168,192,204,0.85)",
+    };
+    // Region-style (faint uppercase, centroid, no collision check, no dot):
+    // the culture hearth AND the large biome subregions — all area labels, not
+    // point features.
+    const isRegionStyle = (kind: string) =>
+      kind === "region" || kind === "desert" || kind === "forest" || kind === "tundra";
     ctx.textBaseline = "middle";
     ctx.lineJoin = "round";
-    // Regions first (they always draw — faint homeland labels), then the point
+    // Region-style first (they always draw — faint area labels), then the point
     // features, which are dropped when they'd overlap an already-drawn label so a
     // cluster of nearby rivers/peaks doesn't stack names on one spot.
     const ordered = [...this.toponyms].sort((a, b) =>
-      (a.kind === "region" ? 0 : 1) - (b.kind === "region" ? 0 : 1));
+      (isRegionStyle(a.kind) ? 0 : 1) - (isRegionStyle(b.kind) ? 0 : 1));
     // Per-feature-type visibility (split toggles under the master `toponyms`).
     const kindVisible: Record<string, boolean> = {
       river: this.visibility.toponymsRiver !== false,
       lake: this.visibility.toponymsLake !== false,
       mountain: this.visibility.toponymsMountain !== false,
       region: this.visibility.toponymsRegion !== false,
+      desert: this.visibility.toponymsDesert !== false,
+      forest: this.visibility.toponymsForest !== false,
+      tundra: this.visibility.toponymsTundra !== false,
     };
     for (const t of ordered) {
       if (kindVisible[t.kind] === false) continue;
-      const region = t.kind === "region";
+      const region = isRegionStyle(t.kind);
       const fs = Math.max(6, Math.min(16, (region ? 13 : 9) * inv));
       const col = COLORS[t.kind] ?? "#cfe2f6";
       // Rivers read like an atlas: the name is set in italic and CURVES along the
@@ -2178,7 +2193,7 @@ export class OverlayManager {
       ctx.lineWidth = Math.max(0.6, 2.2 * inv);
       ctx.strokeStyle = "rgba(6,12,18,0.85)";
       ctx.strokeText(label, tx, t.y + 0.5);
-      ctx.fillStyle = region ? "rgba(202,166,224,0.85)" : col;
+      ctx.fillStyle = region ? (FAINT_COLORS[t.kind] ?? col) : col;
       ctx.fillText(label, tx, t.y + 0.5);
     }
     ctx.textAlign = "left";
