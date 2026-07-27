@@ -351,14 +351,32 @@ hub's final resulting values (plus the journal entries it generated) for
 `apply_coinage` to write verbatim — no branching left in `apply_coinage` at
 all. Also verified bit-identical against the same pre-refactor baseline.
 
-**Not yet done:** house dispatch/bank lending/colonisation/office leasing/war
-goals (`houses.rs`, `colonies.rs`, `war.rs`) are still monolithic `&mut self`
-AI+mutation functions — the same split needs repeating for each before B2 is
-actually "done." Given the size of those files (houses.rs alone is ~4k
-lines) and that `decide_coinage` already needed the local-shadow-state
-technique (not just polis's simpler decide-then-mutate), expect the house/war
-functions to need the same care — each should get its own change +
-bit-identical-diff verification pass rather than one large sweep.
+`houses.rs::manage_fleets` (per-house fleet upkeep/decay + buy-or-sell) is also
+split: `fn decide_fleets(&self) -> Vec<FleetChoice>` + `fn apply_fleets(&mut
+self, choices)`, wired by `manage_fleets` (kept as the tick-loop entry-point
+name since it was already the call site everyone uses). Each house's fleet
+choice is independent of every other house (unlike `decide_coinage`, no
+cross-hub coupling — only per-house sequential steps, e.g. upkeep debited
+before the buy/sell check reads the post-upkeep wealth), so this one used the
+same local-shadow-variable technique as `decide_coinage` but per-house rather
+than per-hub. Also verified bit-identical.
+
+**Not yet done — and NOT all safely splittable the same way:** looked at
+`houses.rs::maybe_house_invests` (estate/manufactory investment) next and
+found it does NOT fit this pattern cleanly — it appends new hubs
+(`create_estate` grows `self.hubs`), and later houses in the SAME tick's loop
+read `estate_count()` / per-city estate caps that include estates JUST BUILT
+by earlier houses in that same loop. That is cross-iteration coupling through
+a growing `Vec`, not the per-hub/per-house-local coupling `decide_coinage`/
+`decide_fleets` had — a naive decide-then-apply split would either have to
+replicate the entire sequential mutation inside "decide" (defeating the
+purpose) or risk changing which house gets which estate slot. Needs a
+purpose-built approach (e.g. decide computes proposals against a snapshot,
+apply resolves conflicts/order), not the same copy-paste as the other three.
+Bank lending/colonisation/office leasing (`houses.rs`, `colonies.rs`) and war
+goals (`war.rs`) are still unexamined for the same "safe to split?" question
+and remain monolithic `&mut self` AI+mutation functions — each needs its own
+change + bit-identical-diff verification pass rather than one large sweep.
 
 ---
 

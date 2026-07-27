@@ -2,6 +2,24 @@
 //! `use super::*` brings the struct, its fields, tuning consts and free helpers into scope.
 use super::*;
 
+/// One house's fleet CHOICE for the tick — the wealth/fleet-composition state
+/// it ends up in after upkeep, decay, and the buy-or-sell decision. Each house
+/// is independent (only reads its own fields plus the precomputed `used_sea`/
+/// `used_land` occupancy, both fixed before any house is processed), so unlike
+/// `decide_coinage` there is no cross-house sequencing to replay — just the
+/// per-house sequential steps (upkeep before the buy/sell check reads the
+/// post-upkeep wealth), captured here via local shadow variables.
+/// `decide_fleets` computes this read-only; `apply_fleets` writes it
+/// (FIX_PLAN B2 — a future player-run house would call `apply_fleets` with a
+/// hand-picked choice instead of going through `decide_fleets`).
+pub(crate) struct FleetChoice {
+    wealth: f32,
+    fleet_sea: u32,
+    fleet_river: u32,
+    fleet_caravan: u32,
+    fleet_cost_booked: f32,
+}
+
 impl CampaignSim {
 
     /// Deliver every DUE futures contract — runs BEFORE the spot `dispatch`, so the
@@ -2409,7 +2427,7 @@ impl CampaignSim {
     /// failing house with idle ships scraps one for a little cash. This capital
     /// churn — build-up, over-extension, loss, recovery — keeps the trade network
     /// perpetually shifting instead of settling into a static equilibrium.
-    pub(crate) fn manage_fleets(&mut self) {
+    pub(crate) fn decide_fleets(&self) -> Vec<FleetChoice> {
         let tick = self.tick;
         let nh = self.houses.len();
         let mut used_sea = vec![0i32; nh];
@@ -2420,67 +2438,101 @@ impl CampaignSim {
                 if oi < nh { if c.sea { used_sea[oi] += 1; } else { used_land[oi] += 1; } }
             }
         }
+        let mut out = Vec::with_capacity(nh);
         for hi in 0..nh {
-            if self.houses[hi].defunct { continue; }
+            if self.houses[hi].defunct {
+                out.push(FleetChoice {
+                    wealth: self.houses[hi].wealth, fleet_sea: self.houses[hi].fleet_sea,
+                    fleet_river: self.houses[hi].fleet_river, fleet_caravan: self.houses[hi].fleet_caravan,
+                    fleet_cost_booked: 0.0,
+                });
+                continue;
+            }
+            let mut wealth = self.houses[hi].wealth;
+            let mut fleet_sea = self.houses[hi].fleet_sea;
+            let mut fleet_river = self.houses[hi].fleet_river;
+            let mut fleet_caravan = self.houses[hi].fleet_caravan;
+            let mut fleet_cost_booked = 0.0f32;
             // Phase G: fleet upkeep (a steady sink scaling with fleet size) + slow
             // decay (an occasional vessel lost to wear), so a big fleet costs money
             // to keep and must be continually rebuilt.
-            let fleet_total =
-                self.houses[hi].fleet_sea + self.houses[hi].fleet_river + self.houses[hi].fleet_caravan;
+            let fleet_total = fleet_sea + fleet_river + fleet_caravan;
             if fleet_total > 0 {
                 let fleet_cost = fleet_total as f32 * SHIP_COST * FLEET_UPKEEP_FRAC;
-                self.houses[hi].wealth -= fleet_cost;
-                if hi < self.house_ledger.len() {
-                    self.house_ledger[hi].fleet_cost += fleet_cost;
-                }
+                wealth -= fleet_cost;
+                fleet_cost_booked += fleet_cost;
                 if hash01(self.seed, tick as u64 ^ 0x5EA1, hi as u64)
                     < FLEET_DECAY_CHANCE * fleet_total as f32
                 {
-                    if self.houses[hi].fleet_sea > 0 {
-                        self.houses[hi].fleet_sea -= 1;
-                    } else if self.houses[hi].fleet_caravan > 0 {
-                        self.houses[hi].fleet_caravan -= 1;
-                    } else if self.houses[hi].fleet_river > 0 {
-                        self.houses[hi].fleet_river -= 1;
+                    if fleet_sea > 0 {
+                        fleet_sea -= 1;
+                    } else if fleet_caravan > 0 {
+                        fleet_caravan -= 1;
+                    } else if fleet_river > 0 {
+                        fleet_river -= 1;
                     }
                 }
             }
             let coastal = self.hubs.get(self.houses[hi].hub as usize).map(|x| x.coastal).unwrap_or(false);
-            let w = self.houses[hi].wealth;
-            let sea_slots = self.houses[hi].fleet_sea as i32;
-            let land_slots = (self.houses[hi].fleet_river + self.houses[hi].fleet_caravan) as i32;
+            let w = wealth;
+            let sea_slots = fleet_sea as i32;
+            let land_slots = (fleet_river + fleet_caravan) as i32;
             let sea_busy = used_sea[hi] >= sea_slots;
             let land_busy = used_land[hi] >= land_slots;
             // Shipping dynasties build vessels at a discount.
             let disc = if self.houses[hi].archetype == ARCH_FLEET { FLEET_SHIP_DISCOUNT } else { 1.0 };
             // BUY: capital to spare and every vessel of the favoured kind is busy.
             if coastal && sea_busy && w > SHIP_COST * 2.5 {
-                self.houses[hi].wealth -= SHIP_COST * disc;
-                self.houses[hi].fleet_sea += 1;
+                wealth -= SHIP_COST * disc;
+                fleet_sea += 1;
             } else if !coastal && land_busy && w > CARAVAN_COST * 2.5 {
                 if hash01(self.seed, tick as u64 ^ 0x21B0, hi as u64) < 0.30 {
-                    self.houses[hi].wealth -= RIVER_COST * disc;
-                    self.houses[hi].fleet_river += 1;
+                    wealth -= RIVER_COST * disc;
+                    fleet_river += 1;
                 } else {
-                    self.houses[hi].wealth -= CARAVAN_COST * disc;
-                    self.houses[hi].fleet_caravan += 1;
+                    wealth -= CARAVAN_COST * disc;
+                    fleet_caravan += 1;
                 }
             } else if w < HOUSE_BRANCH_WEALTH * 0.15 {
                 // SELL: a struggling house with an idle vessel scraps it for cash.
-                if used_sea[hi] < sea_slots && self.houses[hi].fleet_sea > 0 {
-                    self.houses[hi].fleet_sea -= 1;
-                    self.houses[hi].wealth += SHIP_COST * 0.4;
+                if used_sea[hi] < sea_slots && fleet_sea > 0 {
+                    fleet_sea -= 1;
+                    wealth += SHIP_COST * 0.4;
                 } else if used_land[hi] < land_slots {
-                    if self.houses[hi].fleet_caravan > 0 {
-                        self.houses[hi].fleet_caravan -= 1;
-                        self.houses[hi].wealth += CARAVAN_COST * 0.4;
-                    } else if self.houses[hi].fleet_river > 0 {
-                        self.houses[hi].fleet_river -= 1;
-                        self.houses[hi].wealth += RIVER_COST * 0.4;
+                    if fleet_caravan > 0 {
+                        fleet_caravan -= 1;
+                        wealth += CARAVAN_COST * 0.4;
+                    } else if fleet_river > 0 {
+                        fleet_river -= 1;
+                        wealth += RIVER_COST * 0.4;
                     }
                 }
             }
+            out.push(FleetChoice { wealth, fleet_sea, fleet_river, fleet_caravan, fleet_cost_booked });
         }
+        out
+    }
+
+    /// Carries out a tick's `FleetChoice`s — the only part of fleet management
+    /// that mutates house state. See `decide_fleets`'s doc comment (FIX_PLAN B2).
+    pub(crate) fn apply_fleets(&mut self, choices: Vec<FleetChoice>) {
+        for (hi, c) in choices.into_iter().enumerate() {
+            self.houses[hi].wealth = c.wealth;
+            self.houses[hi].fleet_sea = c.fleet_sea;
+            self.houses[hi].fleet_river = c.fleet_river;
+            self.houses[hi].fleet_caravan = c.fleet_caravan;
+            if c.fleet_cost_booked != 0.0 && hi < self.house_ledger.len() {
+                self.house_ledger[hi].fleet_cost += c.fleet_cost_booked;
+            }
+        }
+    }
+
+    /// The tick loop's entry point: AI decides, sim applies. A future player-run
+    /// house would call `apply_fleets` directly with its own `FleetChoice` instead
+    /// of going through `decide_fleets` (FIX_PLAN B2).
+    pub(crate) fn manage_fleets(&mut self) {
+        let choices = self.decide_fleets();
+        self.apply_fleets(choices);
     }
 
 
