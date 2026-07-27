@@ -733,7 +733,7 @@ export function MapCanvas() {
         data: provinceRaster.data, w: provinceRaster.w, h: provinceRaster.h,
         gridW: provinceRaster.gridW, gridH: provinceRaster.gridH,
       } : null,
-      provinces.map((p) => ({ id: p.id, culture: p.culture })),
+      provinces.map((p) => ({ id: p.id, culture: p.culture, name: p.name, seat_x: p.seat_x, seat_y: p.seat_y })),
     );
     requestRender();
   }, [provinces, provinceRaster, requestRender]);

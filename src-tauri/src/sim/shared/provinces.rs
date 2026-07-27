@@ -152,21 +152,36 @@ pub fn generate_provinces(
         let i = buf.idx(s.x.min(w - 1), s.y.min(h - 1));
         if buf.terrain[i] == 1 && !is_seed[i] { is_seed[i] = true; seed_cells.push(i as u32); }
     }
-    // Filler-grid spacing: coarse (g→0) gives few large provinces, fine (g→1) many.
+    // Filler seeds: a JITTERED, density-varied scatter so provinces come out organic
+    // (varied size + off-lattice) instead of a regular Voronoi grid of squares. Coarse
+    // (g→0) gives few large provinces, fine (g→1) many.
     let cols = 12.0 + 46.0 * g;
     let spacing = ((w as f32 / cols).round() as i32).max(4);
     let half2 = (spacing / 2) * (spacing / 2);
+    let jit = ((spacing as f32) * 0.42) as i64;        // seed jitter off the block centre
+    let win = (spacing / 3).max(2);                     // fertile-cell search window
     let mut gy = (spacing / 2) as i32;
     while gy < hi {
         let mut gx = 0i32;
         while gx < wi {
-            // Pick the most fertile land cell in this block as the filler seed.
+            // Hash the block → jitter the sample centre and vary density (skip ~1 in 6
+            // blocks so neighbours fuse into larger, irregular provinces — breaks the
+            // uniform lattice that made everything a checkerboard of equal squares).
+            let hb = hash2(gx as u64, (gy as u64) ^ 0x51ED_A5A5);
+            let span = (2 * jit + 1) as u64;
+            let jx = (hb % span) as i64 - jit;
+            let jy = ((hb >> 21) % span) as i64 - jit;
+            if (hb >> 42) % 6 == 0 { gx += spacing; continue; }   // density variation
+            let cxb = gx + jx as i32;
+            let cyb = gy + jy as i32;
+            // Pick the most fertile land cell in a SMALL window around the jittered
+            // centre (keeps the seed near the jittered point → off the lattice).
             let mut best = (u32::MAX, -1.0f32);
-            for oy in 0..spacing {
-                let cy = gy + oy - spacing / 2;
+            for oy in -win..=win {
+                let cy = cyb + oy;
                 if cy < 0 || cy >= hi { continue; }
-                for ox in 0..spacing {
-                    let ci = buf.widx(gx + ox, cy);
+                for ox in -win..=win {
+                    let ci = buf.widx(cxb + ox, cy);
                     if buf.terrain[ci] != 1 { continue; }
                     let sc = buf.fertility[ci] + food[ci] * 0.01;
                     if sc > best.1 { best = (ci as u32, sc); }

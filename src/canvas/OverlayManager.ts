@@ -174,6 +174,20 @@ function cultureColor(culture: string): string {
   return `hsl(${hue}, ${sat}%, ${lig}%)`;
 }
 
+/** A DISTINCT random tint per province id (not per culture) so every province reads
+ *  as its own colour and adjacent ones never blend into one blob. Deterministic +
+ *  well-spread via an integer hash → the hue wheel. */
+function provinceColor(id: number): string {
+  let h = (id + 1) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 2246822519) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 3266489917) >>> 0;
+  h = (h ^ (h >>> 16)) >>> 0;
+  const hue = h % 360;
+  const sat = 55 + (h >>> 9) % 30;   // 55–85% — vivid so neighbours separate
+  const lig = 46 + (h >>> 17) % 16;  // 46–62%
+  return `hsl(${hue}, ${sat}%, ${lig}%)`;
+}
+
 function lakeFill(lake: LakeData): string {
   if (lake.kind === 1) return OXBOW_COLOR;
   const s = lake.salinity_ppt ?? 0;
@@ -264,6 +278,8 @@ export class OverlayManager {
   private basins: { name: string; pts: [number, number][]; cx: number; cy: number }[] = [];
   private provinceRaster: { data: number[]; w: number; h: number; gridW: number; gridH: number } | null = null;
   private provinceFill: string[] = [];
+  /** Province name + seat position (world cells) for on-map labels. */
+  private provinceLabels: { x: number; y: number; name: string }[] = [];
   /** Atlas 2.0 · refugee roads (age01 = 0 fresh … 1 faded out). */
   private migrations: { fx: number; fy: number; tx: number; ty: number; age: number }[] = [];
   /** Settlement (cell coords) currently under the cursor — drawn as a shiny ring. */
@@ -413,12 +429,21 @@ export class OverlayManager {
    *  per-province fill colour (keyed by culture) for the political/goods map. */
   updateProvinces(
     raster: { data: number[]; w: number; h: number; gridW: number; gridH: number } | null,
-    provinces: { id: number; culture: string }[],
+    provinces: { id: number; culture: string; name?: string; seat_x?: number; seat_y?: number }[],
   ) {
     this.provinceRaster = raster;
     const fill: string[] = [];
-    for (const p of provinces) fill[p.id] = cultureColor(p.culture);
+    const labels: { x: number; y: number; name: string }[] = [];
+    for (const p of provinces) {
+      // Each province gets its OWN distinct random colour (not culture-shared).
+      fill[p.id] = provinceColor(p.id);
+      if (p.name && p.seat_x !== undefined && p.seat_y !== undefined) {
+        labels.push({ x: p.seat_x, y: p.seat_y, name: p.name });
+      }
+    }
     this.provinceFill = fill;
+    this.provinceLabels = labels;
+    void cultureColor; // retained for the culture political map elsewhere
   }
   /** Atlas 2.0 · set the refugee roads (age01 0 = fresh, 1 = fully faded). */
   drawMigrations(m: { fx: number; fy: number; tx: number; ty: number; age: number }[]) { this.migrations = m; }
@@ -1155,8 +1180,8 @@ export class OverlayManager {
     const sx = gridW / w;
     const sy = gridH / h;
     const NO = 65535;
-    // Fills.
-    ctx.globalAlpha = 0.34;
+    // Fills — each province its own distinct colour, semi-transparent over terrain.
+    ctx.globalAlpha = 0.5;
     for (let ry = 0; ry < h; ry++) {
       for (let rx = 0; rx < w; rx++) {
         const id = data[ry * w + rx];
@@ -1194,6 +1219,26 @@ export class OverlayManager {
       }
     }
     ctx.stroke();
+
+    // Province name labels at each seat, culled by the shared collision map so they
+    // don't pile up. Font is zoom-compensated and only shown once zoomed in enough
+    // for text to be legible (avoids a wall of overlapping names on the whole world).
+    if (this.provinceLabels.length > 0 && this.currentScale > 1.4) {
+      const fs = Math.max(7, 11 / this.currentScale);
+      ctx.font = `600 ${fs}px system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "alphabetic";
+      ctx.lineJoin = "round";
+      for (const lb of this.provinceLabels) {
+        const tw = ctx.measureText(lb.name).width;
+        if (!this.reserveLabel(lb.x, lb.y, tw, fs)) continue;
+        ctx.lineWidth = Math.max(0.6, 2.2 / this.currentScale);
+        ctx.strokeStyle = "rgba(6, 10, 16, 0.85)";
+        ctx.strokeText(lb.name, lb.x, lb.y);
+        ctx.fillStyle = "rgba(240, 244, 250, 0.95)";
+        ctx.fillText(lb.name, lb.x, lb.y);
+      }
+    }
   }
 
   render(ctx: CanvasRenderingContext2D) {

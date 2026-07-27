@@ -18,6 +18,7 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
   const markStepCompleted = useUIStore((s) => s.markStepCompleted);
   const stepCompleted = useUIStore((s) => s.stepCompleted);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
+  const provincesVisible = useUIStore((s) => s.overlayVisibility.provinces ?? false);
   const setLayer = useUIStore((s) => s.setLayer);
   const settlementRealism = useUIStore((s) => s.settlementRealism);
   const setSettlementRealism = useUIStore((s) => s.setSettlementRealism);
@@ -198,6 +199,14 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
             style={{ ...genBtn, marginBottom: 0, background: "#183024", color: "#8fd0a0", textAlign: "center" }}>
             {provBusy ? "Partitioning…" : provinces.length ? `Regenerate Provinces (${provinces.length})` : "Generate Provinces"}
           </button>
+          {provinces.length > 0 && (
+            <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#8fbf9f", fontSize: 10, cursor: "pointer" }}>
+              <input type="checkbox" checked={provincesVisible}
+                onChange={(e) => setOverlayVisible("provinces", e.target.checked)}
+                style={{ accentColor: "#4a90d0", width: 12, height: 12 }} />
+              Show provinces on map
+            </label>
+          )}
         </div>
       )}
     </div>

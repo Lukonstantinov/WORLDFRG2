@@ -743,8 +743,9 @@ pub fn sim_generate_provinces(
         &serde_json::to_string(&provinces).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
 
-    // Downsample the id map for transport / overlay (cap the long side ≈ 384 cells).
-    let cap = 384u32;
+    // Downsample the id map for transport / overlay. A finer cap gives crisper
+    // province borders on the map (fewer stair-steps) at a modest payload cost.
+    let cap = 768u32;
     let step = ((w.max(h) + cap - 1) / cap).max(1);
     let rw = (w + step - 1) / step;
     let rh = (h + step - 1) / step;
@@ -832,18 +833,21 @@ pub struct ProvinceDetail {
 #[tauri::command]
 pub fn campaign_province_detail(id: u16, db: State<'_, WorldDb>) -> Result<Option<ProvinceDetail>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let (rw, _rh, gw, gh, raster): (u32, u32, u32, u32, Vec<u16>) =
+    let (rw, rh, gw, gh, raster): (u32, u32, u32, u32, Vec<u16>) =
         match metadata::get_meta(&conn, "province_raster").map_err(|e| e.to_string())? {
             Some(s) => serde_json::from_str(&s).unwrap_or((0, 0, 0, 0, Vec::new())),
             None => return Ok(None),
         };
-    if raster.is_empty() || gw == 0 || gh == 0 { return Ok(None); }
+    if raster.is_empty() || gw == 0 || gh == 0 || rw == 0 || rh == 0 { return Ok(None); }
     let Some(sim) = crate::commands::campaign_commands::get_sim(&db, &conn)? else { return Ok(None); };
-    let step = ((gw.max(gh) + 383) / 384).max(1);
+    // Map a world cell → raster cell by ratio (resolution-independent — works whatever
+    // downsample cap the raster was built at, so this never desyncs from generation).
     let prov_of = |x: f32, y: f32| -> i32 {
         let hx = (x.max(0.0) as u32).min(gw - 1);
         let hy = (y.max(0.0) as u32).min(gh - 1);
-        raster.get(((hy / step) * rw + (hx / step)) as usize)
+        let rx = (hx as u64 * rw as u64 / gw as u64) as u32;
+        let ry = (hy as u64 * rh as u64 / gh as u64) as u32;
+        raster.get((ry * rw + rx) as usize)
             .map(|&p| if p == crate::sim::provinces::NO_PROVINCE { -1 } else { p as i32 })
             .unwrap_or(-1)
     };
