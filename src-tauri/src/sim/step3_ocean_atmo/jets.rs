@@ -1,4 +1,5 @@
-﻿use crate::sim::world_buffer::WorldBuffer;
+﻿use rayon::prelude::*;
+use crate::sim::world_buffer::WorldBuffer;
 use super::circulation::Circulation;
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -132,8 +133,12 @@ pub fn compute_low_level_jets(buf: &mut WorldBuffer) {
     let circ = Circulation::for_world(buf);
 
     // â”€â”€ Pass 1: base speed Ã— terrain Ã— channeling (barrier / gap / monsoon) â”€â”€
+    // Row-parallel: each cell casts its own barrier/monsoon rays (~120 probes at
+    // 3600 wide) and writes only its own slot, so the rows are independent. This
+    // is the dominant cost of the jet field.
     let mut speed = vec![0.0f32; n];
-    for y in 0..h {
+    speed.par_chunks_mut(w as usize).enumerate().for_each(|(yy, row)| {
+        let y = yy as u32;
         let abs_lat = buf.abs_latitude(y);
         let base = base_speed(abs_lat, &circ);
         for x in 0..w {
@@ -158,43 +163,51 @@ pub fn compute_low_level_jets(buf: &mut WorldBuffer) {
                 mult += MONSOON_GAIN * monsoon_inflow(buf, x, y, inflow_range);
                 s *= mult;
             }
-            speed[i] = s.min(SPEED_CAP);
+            row[x as usize] = s.min(SPEED_CAP);
         }
-    }
+    });
 
     // â”€â”€ Pass 2: stream the fast jet core downstream along the flow â”€â”€
     // A jet is a coherent tongue: carry the accelerated core forward (max-blend
     // with the upwind speed, mildly decayed) so the Somali-jet-style core reaches
     // its downwind terminus instead of dying at the barrier's end.
     let prop_passes = ((PROPAGATE_KM / km_per_cell).round() as i32).clamp(6, 48);
+    // The upwind neighbour of a cell is a property of the (static) wind field, so
+    // resolve it ONCE instead of re-normalising the wind vector on all ~48 passes.
+    // `usize::MAX` marks "no upwind cell" (calm, or off the top/bottom edge).
+    let upwind: Vec<usize> = (0..n)
+        .into_par_iter()
+        .map(|i| {
+            let (x, y) = ((i % w as usize) as u32, (i / w as usize) as u32);
+            let (wvx, wvy) = (buf.wind_vx[i], buf.wind_vy[i]);
+            let wl = (wvx * wvx + wvy * wvy).sqrt();
+            if wl <= 0.05 { return usize::MAX; }
+            let ux = (x as f32 - wvx / wl).round() as i32;
+            let uy = (y as f32 - wvy / wl).round() as i32;
+            if uy < 0 || uy >= h as i32 { return usize::MAX; }
+            buf.idx(buf.wrap_x(ux), uy as u32)
+        })
+        .collect();
+
     let mut src = speed;
     let mut dst = vec![0.0f32; n];
     for _ in 0..prop_passes {
-        for y in 0..h {
-            for x in 0..w {
-                let i = buf.idx(x, y);
-                let wvx = buf.wind_vx[i];
-                let wvy = buf.wind_vy[i];
-                let wl = (wvx * wvx + wvy * wvy).sqrt();
-                let mut s = src[i];
-                if wl > 0.05 {
-                    let ux = (x as f32 - wvx / wl).round() as i32;
-                    let uy = (y as f32 - wvy / wl).round() as i32;
-                    if uy >= 0 && uy < h as i32 {
-                        let ui = buf.idx(buf.wrap_x(ux), uy as u32);
-                        s = s.max(src[ui] * PROPAGATE_DECAY);
-                    }
-                }
-                dst[i] = s;
+        dst.par_chunks_mut(w as usize).enumerate().for_each(|(yy, row)| {
+            let base = yy * w as usize;
+            for x in 0..w as usize {
+                let i = base + x;
+                let u = upwind[i];
+                row[x] = if u == usize::MAX { src[i] } else { src[i].max(src[u] * PROPAGATE_DECAY) };
             }
-        }
+        });
         std::mem::swap(&mut src, &mut dst);
     }
 
     // â”€â”€ Pass 3: light isotropic smooth so the tongue reads as a coherent band â”€â”€
     let mut b = vec![0.0f32; n];
     for _ in 0..2 {
-        for y in 0..h {
+        b.par_chunks_mut(w as usize).enumerate().for_each(|(yy, row)| {
+            let y = yy as u32;
             for x in 0..w {
                 let i = buf.idx(x, y);
                 let mut sum = src[i] * 2.0;
@@ -206,9 +219,9 @@ pub fn compute_low_level_jets(buf: &mut WorldBuffer) {
                     sum += src[ni];
                     cnt += 1.0;
                 }
-                b[i] = sum / cnt;
+                row[x as usize] = sum / cnt;
             }
-        }
+        });
         std::mem::swap(&mut src, &mut b);
     }
 

@@ -618,10 +618,24 @@ impl WorldBuffer {
         (y * self.width + x) as usize
     }
 
-    /// Wrap x coordinate for cylindrical topology
+    /// Wrap x coordinate for cylindrical topology.
+    ///
+    /// `width` is a runtime value, so the naive double-`%` form compiles to two
+    /// hardware integer divisions (~20-40 cycles each) — and this is called
+    /// millions of times per pass in the ocean/precipitation streamline loops,
+    /// where the argument is almost always already in range or at most one world
+    /// away. Handle those cases with a compare and a subtract; only a genuinely
+    /// far-out coordinate pays for the division. The result is unchanged.
     #[inline]
     pub fn wrap_x(&self, x: i32) -> u32 {
-        ((x % self.width as i32 + self.width as i32) % self.width as i32) as u32
+        let w = self.width as i32;
+        if x >= 0 {
+            if x < w { return x as u32; }
+            if x < 2 * w { return (x - w) as u32; }
+        } else if x >= -w {
+            return (x + w) as u32;
+        }
+        ((x % w + w) % w) as u32
     }
 
     /// Clamp y coordinate

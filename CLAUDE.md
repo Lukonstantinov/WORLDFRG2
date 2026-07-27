@@ -21,6 +21,8 @@ npx tsc --noEmit       # TypeScript type-check only
 cargo test --lib tick::tests                                   # campaign-sim unit + dynamics tests
 cargo test --lib simulate_decades_reports_dynamics -- --nocapture  # WATCH the living economy (5-yearly digest)
 cargo test --lib earth_ -- --nocapture                         # EARTH CLIMATE FIDELITY scorecard (§2.3)
+cargo test --release --lib bench_ocean_atmosphere -- --ignored --nocapture       # phase-3 ms breakdown (§8.9)
+cargo test --release --lib ocean_atmosphere_field_checksums -- --ignored --nocapture  # phase-3 bit-exactness
 ```
 
 > The full Tauri build needs GTK/WebKit system libs. On a headless Linux box:
@@ -360,6 +362,7 @@ sim/                            ← organised into per-phase step folders; mod.r
       temperature.rs              base curve + EBM anomaly + lapse + currents + coastal damping
       jets.rs · seasonal.rs       low-level jets (Somali) · two-season winds & monsoon
       precipitation.rs            advection-decay moisture + ITCZ/orographic/frontal/jet terms
+      bench.rs                    (test-only) phase-3 PERF harness + field checksums — see §8.9
   step4_climate/                ← Ph4: koppen.rs (31 zone codes + H) ·
       earth_validation.rs         THE EARTH FIDELITY GATE (§2.3) + fixtures/
   step5_rivers/                 ← Ph5: rivers.rs (priority-flood/rivers/lakes) · aquatic.rs
@@ -606,6 +609,44 @@ Save/Open via SQLite backup API (`.worldforge` / `.campaign`); Export Heightmap
 (16-bit grayscale PNG from elevation); Export Layers / trade data; Import Template
 (image → land/sea auto-detection).
 
+### 8.9 Phase-3 performance shape (read before touching `step3_ocean_atmo/`)
+Phase 3 runs on the **world** grid (6.5 M cells at the default 3600×1800, 26 M on
+"Large"), so a per-cell scan that looks harmless is an O(n·w) trap. `bench.rs`
+prints a per-sub-step millisecond breakdown; run it after any change here.
+
+Measured @ 3600×1800, release, 4 cores: **~16 s** (was ~100 s before the
+optimisation pass). The four costs that matter, and the rules they imply:
+
+| Sub-step | ms | Shape |
+|---|---|---|
+| `generate_ocean_currents` | ~5600 | warm/cold streamline tagging |
+| `advect_salinity_and_recouple` | ~4200 | a second `extend_warm_tag` |
+| `compute_precipitation` | ~2900 | per-cell moisture rays + 36 blur passes |
+| `compute_low_level_jets` | ~2200 | per-cell barrier rays + 48 propagate passes |
+
+1. **Never scan outward per cell.** Distance-to-land fields are linear sweeps
+   (`precompute_basin_dist`/`_ns`): a running counter per row/column, not a
+   search. The naive form cost 31 s of the old 100 s on its own.
+2. **The row loops are rayon-parallel** (`par_chunks_mut` over rows, or
+   `into_par_iter` over seed rows). Keep new passes writing only their own cell so
+   they stay that way. Where a pass is a monotone union or a max-reduction, it is
+   parallelised with relaxed atomics (`AtomicBool` for the tag corridors,
+   `AtomicU32::fetch_max` on the f32 bit pattern for the moisture field — valid
+   because moisture is never negative), which keeps the result bit-identical
+   regardless of scheduling.
+3. **The streamline tracers are latency-bound, not compute-bound.** They walk a
+   scattered index for hundreds of steps, so they read a packed `trace_view`
+   (one flag byte + one interleaved `[vx, vy]`) instead of four separate columns,
+   and they fold the tracer's x back into `[0, w)` every step so `wrap_x` stays on
+   its cheap in-range path.
+4. **Hoist anything loop-invariant out of a repeated pass** — the jet propagation
+   resolves each cell's upwind neighbour once, not on all 48 passes.
+
+The whole pass is **output-preserving**: `ocean_atmosphere_field_checksums` prints
+a checksum per phase-3 field, and every one is unchanged vs. the pre-optimisation
+code. Use it the same way for any future refactor here — the Earth gate scores
+agreement to 0.1 %, which cannot tell bit-exact from merely close.
+
 ---
 
 ## 9. Docs (`docs/`)
@@ -683,5 +724,6 @@ archived under `docs/mockups/_archive/`; a stray reference image lives in
 11. **Phase 3's order is duplicated** in `sim_commands.rs` and `earth_validation.rs` —
     change one, change both, or the fidelity gate stops testing the real pipeline.
 12. **After any `tick/` change** → run the dynamics test (§2.1). **After any
-    `step3_ocean_atmo/` or `step4_climate/` change** → run the Earth fidelity gate (§2.3).
+    `step3_ocean_atmo/` or `step4_climate/` change** → run the Earth fidelity gate (§2.3)
+    and re-read §8.9 (no per-cell outward scans; keep the row loops parallel).
     **After any verified change** → push to `main` (§2.2), and keep this file true (§2.4).

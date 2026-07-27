@@ -1,4 +1,6 @@
 ﻿use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
+use rayon::prelude::*;
 use crate::sim::world_buffer::WorldBuffer;
 use super::circulation::Circulation;
 
@@ -165,7 +167,9 @@ fn detect_passages(terrain: &[u8], w: u32, h: u32) -> Vec<f32> {
     let mut accel = vec![1.0f32; n];
     let max_scan: i32 = 12;
 
-    for y in 1..h - 1 {
+    accel.par_chunks_mut(w as usize).enumerate().for_each(|(yy, arow)| {
+        let y = yy as u32;
+        if y == 0 || y >= h - 1 { return; }
         for x in 0..w {
             let i = (y * w + x) as usize;
             if terrain[i] != 0 { continue; }
@@ -196,70 +200,88 @@ fn detect_passages(terrain: &[u8], w: u32, h: u32) -> Vec<f32> {
 
             let min_span = ns.min(ew);
             if min_span < 8 {
-                accel[i] = 1.0 + (1.0f32).min((8 - min_span) as f32 * 0.14);
+                arow[x as usize] = 1.0 + (1.0f32).min((8 - min_span) as f32 * 0.14);
             }
         }
-    }
+    });
     accel
 }
 
 /// Precompute west/east distances to nearest land for every ocean cell.
+///
+/// A **linear sweep**, not a per-cell search: `dist_w` at x is `1` when x−1 is
+/// land and `dist_w[x−1] + 1` otherwise, so one wrapped pass per row fills the
+/// whole row. (The obvious per-cell version scans up to w/2 cells in each
+/// direction, making the pass O(n·w) — ~10 s per call on a 3600×1800 world, and
+/// it is called twice per phase-3 run.) Results are identical: the value is still
+/// the distance to the nearest land westward, capped at the same `w/2` scan
+/// limit, and land cells keep the `scan_limit` filler the old loop left them.
 fn precompute_basin_dist(terrain: &[u8], w: u32, h: u32) -> (Vec<u16>, Vec<u16>) {
     let n = (w * h) as usize;
     let scan_limit = (w / 2) as u16;
     let mut dist_w = vec![scan_limit; n];
     let mut dist_e = vec![scan_limit; n];
+    let wu = w as usize;
 
-    for y in 0..h {
-        for x in 0..w {
-            let i = (y * w + x) as usize;
-            if terrain[i] != 0 { continue; }
-            let mut dw = scan_limit;
-            let mut de = scan_limit;
-            for d in 1..=scan_limit as i32 {
-                if dw == scan_limit {
-                    let nx = ((x as i32 - d + w as i32) % w as i32) as u32;
-                    if terrain[(y * w + nx) as usize] != 0 { dw = d as u16; }
-                }
-                if de == scan_limit {
-                    let nx = ((x as i32 + d) % w as i32) as u32;
-                    if terrain[(y * w + nx) as usize] != 0 { de = d as u16; }
-                }
-                if dw < scan_limit && de < scan_limit { break; }
-            }
-            dist_w[i] = dw;
-            dist_e[i] = de;
+    for y in 0..h as usize {
+        let row = &terrain[y * wu..(y + 1) * wu];
+        // An all-ocean row has no land in either direction — leave the filler.
+        let last_land = match row.iter().rposition(|&t| t != 0) {
+            Some(p) => p,
+            None => continue,
+        };
+        let dw = &mut dist_w[y * wu..(y + 1) * wu];
+        // Start just east of a known land cell so the running distance is seeded
+        // correctly, then walk the full row once, wrapping in x.
+        let mut run = 0u32;
+        for k in 0..wu {
+            let x = (last_land + 1 + k) % wu;
+            let prev = (x + wu - 1) % wu;
+            run = if row[prev] != 0 { 1 } else { run + 1 };
+            if row[x] == 0 { dw[x] = (run.min(scan_limit as u32)) as u16; }
+        }
+        let de = &mut dist_e[y * wu..(y + 1) * wu];
+        let mut run = 0u32;
+        for k in 0..wu {
+            let x = (last_land + wu - 1 - k) % wu;
+            let next = (x + 1) % wu;
+            run = if row[next] != 0 { 1 } else { run + 1 };
+            if row[x] == 0 { de[x] = (run.min(scan_limit as u32)) as u16; }
         }
     }
     (dist_w, dist_e)
 }
 
 /// Precompute north/south distances to nearest land for every ocean cell.
+///
+/// The same linear-sweep trick as `precompute_basin_dist`, run row-by-row (so the
+/// memory access stays sequential) instead of column-by-column: the north
+/// distance at row y is `1` when row y−1 is land and `north[y−1] + 1` otherwise.
+/// Y does not wrap — running off a pole counts as land, exactly as the old
+/// per-cell scan's `ny < 0` / `sy >= h` guards did.
 fn precompute_basin_dist_ns(terrain: &[u8], w: u32, h: u32) -> (Vec<u16>, Vec<u16>) {
     let n = (w * h) as usize;
     let scan_limit = (h / 2) as u16;
     let mut dist_n = vec![scan_limit; n];
     let mut dist_s = vec![scan_limit; n];
+    let (wu, hu) = (w as usize, h as usize);
 
-    for y in 0..h {
-        for x in 0..w {
-            let i = (y * w + x) as usize;
-            if terrain[i] != 0 { continue; }
-            let mut dn = scan_limit;
-            let mut ds = scan_limit;
-            for d in 1..=scan_limit as i32 {
-                if dn == scan_limit {
-                    let ny = y as i32 - d;
-                    if ny < 0 || terrain[(ny as u32 * w + x) as usize] != 0 { dn = d as u16; }
-                }
-                if ds == scan_limit {
-                    let sy = y as i32 + d;
-                    if sy >= h as i32 || terrain[(sy as u32 * w + x) as usize] != 0 { ds = d as u16; }
-                }
-                if dn < scan_limit && ds < scan_limit { break; }
-            }
-            dist_n[i] = dn;
-            dist_s[i] = ds;
+    // Uncapped running distances (capped only on write, so the recurrence stays exact).
+    let mut run = vec![0u16; wu];
+    for y in 0..hu {
+        for x in 0..wu {
+            // Off the top edge (y == 0) is a pole → treated as land at distance 1.
+            run[x] = if y == 0 || terrain[(y - 1) * wu + x] != 0 { 1 } else { run[x] + 1 };
+            let i = y * wu + x;
+            if terrain[i] == 0 { dist_n[i] = run[x].min(scan_limit); }
+        }
+    }
+    let mut run = vec![0u16; wu];
+    for y in (0..hu).rev() {
+        for x in 0..wu {
+            run[x] = if y + 1 >= hu || terrain[(y + 1) * wu + x] != 0 { 1 } else { run[x] + 1 };
+            let i = y * wu + x;
+            if terrain[i] == 0 { dist_s[i] = run[x].min(scan_limit); }
         }
     }
     (dist_n, dist_s)
@@ -506,15 +528,23 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
     let mut gyre_vx = vec![0.0f32; n];
     let mut gyre_vy = vec![0.0f32; n];
 
-    for y in 0..h {
+    // Row-parallel: each cell derives its own gyre vector from read-only fields
+    // (basin distances, bathymetry gradient, shelf mask) and writes only its own
+    // slot in the three output rows.
+    dir.par_chunks_mut(w as usize)
+        .zip(gyre_vx.par_chunks_mut(w as usize))
+        .zip(gyre_vy.par_chunks_mut(w as usize))
+        .enumerate()
+        .for_each(|(yy, ((dir_row, gvx_row), gvy_row))| {
+        let y = yy as u32;
         for x in 0..w {
             let i = (y * w + x) as usize;
             if terrain[i] != 0 { continue; }
 
             if circumpolar_active && y >= circumpolar_row {
-                dir[i] = 2; // E
-                gyre_vx[i] = SPEED_ACC;
-                gyre_vy[i] = 0.0;
+                dir_row[x as usize] = 2; // E
+                gvx_row[x as usize] = SPEED_ACC;
+                gvy_row[x as usize] = 0.0;
                 continue;
             }
 
@@ -594,15 +624,20 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
                 final_vy *= pa;
             }
 
-            gyre_vx[i] = final_vx;
-            gyre_vy[i] = final_vy;
-            dir[i] = vec_to_dir(final_vx, final_vy);
+            gvx_row[x as usize] = final_vx;
+            gvy_row[x as usize] = final_vy;
+            dir_row[x as usize] = vec_to_dir(final_vx, final_vy);
         }
-    }
+    });
 
-    // Phase 3: coastline deflection (20 passes)
+    // Phase 3: coastline deflection (up to 20 passes)
+    // A cell's new direction depends only on its OWN direction and the (fixed)
+    // terrain, never on a neighbour's — so the passes are a fixed-point iteration
+    // that normally settles after two or three. Stop as soon as a pass changes
+    // nothing rather than always grinding out all 20; the result is identical.
     let equator_row = buf.equator_row();
     for _pass in 0..DEFLECTION_PASSES {
+        let mut changed = false;
         for cy in 0..h {
             if circumpolar_active && cy >= circumpolar_row { continue; }
             let nh = cy < equator_row;
@@ -628,10 +663,12 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
                     if !deflected {
                         new_d = REVERSE[orig_d] as usize;
                     }
+                    if new_d != orig_d { changed = true; }
                     dir[i] = new_d as u8;
                 }
             }
         }
+        if !changed { break; }
     }
 
     // Phase 4: write output vectors with speed magnitude
@@ -1065,6 +1102,39 @@ fn thermohaline_reach(buf: &WorldBuffer) -> f32 {
     1.0 + 0.6 * conveyor.clamp(0.0, 0.85)
 }
 
+/// Per-cell flags the streamline tracers read, packed one byte per cell so a probe
+/// costs a single lookup instead of one into `terrain` plus one into the
+/// `current_type` snapshot. Bit 0 = land, bit 1 = warm (type 1), bit 2 = cold
+/// (type 2).
+const TF_LAND: u8 = 1;
+const TF_WARM: u8 = 2;
+const TF_COLD: u8 = 4;
+
+/// Build the packed inputs the tag tracers walk: a byte of flags per cell and the
+/// current vector as one interleaved `[vx, vy]` record.
+///
+/// The tracers are latency-bound, not compute-bound â€” each step chases a
+/// scattered index through `terrain`, the `current_type` snapshot, `current_vx`
+/// and `current_vy`, i.e. four separate multi-megabyte arrays and four cache
+/// misses. Collapsing them into one small byte array plus one interleaved vector
+/// array cuts that to two, and the corridor probes (which only need the flags)
+/// stay inside the array most likely to be resident.
+fn trace_view(buf: &WorldBuffer, base_type: &[u8]) -> (Vec<u8>, Vec<[f32; 2]>) {
+    let n = buf.total();
+    let mut flags = vec![0u8; n];
+    let mut vel = vec![[0.0f32; 2]; n];
+    flags
+        .par_iter_mut()
+        .zip(vel.par_iter_mut())
+        .enumerate()
+        .for_each(|(i, (f, v))| {
+            *f = if buf.terrain[i] != 0 { TF_LAND } else { 0 }
+                | match base_type[i] { 1 => TF_WARM, 2 => TF_COLD, _ => 0 };
+            *v = [buf.current_vx[i], buf.current_vy[i]];
+        });
+    (flags, vel)
+}
+
 /// Follow each warm boundary cell downstream along the current field and extend
 /// the warm `current_type` tag across the basin (Gulf Stream â†’ North Atlantic
 /// Drift). `reach_mult` scales how far the warmth carries. Factored out so it can
@@ -1074,7 +1144,14 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
     let h = buf.height;
     let n = buf.total();
     let base_type = buf.current_type.clone();
-    let mut warm_add = vec![false; n];
+    // Every seed traces its own streamline and only ever writes `true` into
+    // `warm_add`, reading nothing but the (immutable) terrain/current/base_type
+    // fields — so the seed loop is a pure union and can run row-parallel. Relaxed
+    // atomics keep the result bit-identical to the serial version regardless of
+    // how the rows are scheduled. This is the single most expensive loop in the
+    // ocean step (it runs twice, over every warm cell, for up to ~0.9·w steps).
+    let warm_add: Vec<AtomicBool> = (0..n).map(|_| AtomicBool::new(false)).collect();
+    let (flags, vel) = trace_view(buf, &base_type);
     // step_len 1.5 â†’ this is ~0.9Â·w CELLS of reach (plenty to cross any basin),
     // not 1.35Â·w. Capped down from 0.9 to bound pathological open-ocean traces
     // (the Pacific / Southern Ocean) that made the ocean step slow.
@@ -1085,8 +1162,9 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
     // threading between sparse warm rays (the user's "warm current becomes grey").
     // Widened so the broad cross-basin drift stays one coherent warm stream.
     let half_w = ((w as f32 / 150.0).round() as i32).clamp(1, 5);
+    let wf = w as f32;
 
-    for sy in 0..h {
+    (0..h).into_par_iter().for_each(|sy| {
         for sx in 0..w {
             let si = (sy * w + sx) as usize;
             if base_type[si] != 1 { continue; } // seed only on warm cells
@@ -1098,11 +1176,11 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
                 let yi = py.floor() as i32;
                 if yi < 0 || yi >= h as i32 { break; }
                 let i = buf.idx(buf.wrap_x(xi), yi as u32);
-                if buf.terrain[i] != 0 { break; }    // reached the coast
-                if base_type[i] == 2 { break; }       // ran into a cold current
+                let f = flags[i];
+                if f & TF_LAND != 0 { break; }  // reached the coast
+                if f & TF_COLD != 0 { break; }  // ran into a cold current
 
-                let vmx = buf.current_vx[i];
-                let vmy = buf.current_vy[i];
+                let [vmx, vmy] = vel[i];
                 let mag = (vmx * vmx + vmy * vmy).sqrt();
                 // The North Atlantic/Pacific Drift is a slow, broad flow; a 0.12
                 // floor cut the warm tag off mid-basin (the Gulf Stream went
@@ -1137,7 +1215,7 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
                 let hx0 = vmx / mag;
                 let hy0 = vmy / mag;
                 // Tag the cell plus a perpendicular corridor.
-                warm_add[i] = true;
+                warm_add[i].store(true, Ordering::Relaxed);
                 let (perp_x, perp_y) = (-hy0, hx0);
                 for k in 1..=half_w {
                     for sgn in [-1.0f32, 1.0] {
@@ -1145,7 +1223,9 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
                         let ny = (py + perp_y * k as f32 * sgn).floor() as i32;
                         if ny < 0 || ny >= h as i32 { continue; }
                         let ni = buf.idx(buf.wrap_x(nx), ny as u32);
-                        if buf.terrain[ni] == 0 && base_type[ni] != 2 { warm_add[ni] = true; }
+                        if flags[ni] & (TF_LAND | TF_COLD) == 0 {
+                            warm_add[ni].store(true, Ordering::Relaxed);
+                        }
                     }
                 }
 
@@ -1171,7 +1251,7 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
                     let mut land_west = false;
                     for d in 1..=5 {
                         let wx = buf.wrap_x(xi - d);
-                        if buf.terrain[buf.idx(wx, yi as u32)] != 0 { land_west = true; break; }
+                        if flags[buf.idx(wx, yi as u32)] & TF_LAND != 0 { land_west = true; break; }
                     }
                     if land_west {
                         // Peel OFF the coast: cancel the poleward (coast-hugging)
@@ -1190,12 +1270,19 @@ fn extend_warm_tag(buf: &mut WorldBuffer, reach_mult: f32) {
                 }
                 px += hx * step_len;
                 py += hy * step_len;
+                // Keep the tracer inside one world width. X is cylindrical, so
+                // every consumer of `px` below (`px.floor()`, the perpendicular
+                // corridor, the land-to-the-west probe) already goes through
+                // `wrap_x` — folding px here names the same cell, but it keeps the
+                // f32 small (no precision loss after thousands of steps) and keeps
+                // `wrap_x` on its cheap in-range path.
+                if px >= wf { px -= wf; } else if px < 0.0 { px += wf; }
             }
         }
-    }
+    });
 
     for i in 0..n {
-        if warm_add[i] && buf.terrain[i] == 0 {
+        if warm_add[i].load(Ordering::Relaxed) && buf.terrain[i] == 0 {
             buf.current_type[i] = 1;
         }
     }
@@ -1212,14 +1299,20 @@ fn extend_cold_tag(buf: &mut WorldBuffer) {
     let h = buf.height;
     let n = buf.total();
     let base_type = buf.current_type.clone();
-    let mut cold_add = vec![false; n];
+    // Row-parallel for the same reason as `extend_warm_tag`: the traces only
+    // union `true` into `cold_add` and read immutable fields. The circumpolar
+    // band makes this the hotter of the two — every ACC cell seeds a trace that
+    // runs uninterrupted around the world.
+    let cold_add: Vec<AtomicBool> = (0..n).map(|_| AtomicBool::new(false)).collect();
+    let (flags, vel) = trace_view(buf, &base_type);
     // Shorter reach + a single-cell-wide band than the warm corridor: cold currents
     // were over-tagged (too much blue), and tropical water must stay grey.
     let max_steps = (w as f32 * 0.30) as usize;
     let step_len = 1.5f32;
     let half_w = 1i32;
+    let wf = w as f32;
 
-    for sy in 0..h {
+    (0..h).into_par_iter().for_each(|sy| {
         for sx in 0..w {
             let si = (sy * w + sx) as usize;
             if base_type[si] != 2 { continue; } // seed on cold currents
@@ -1231,11 +1324,11 @@ fn extend_cold_tag(buf: &mut WorldBuffer) {
                 let yi = py.floor() as i32;
                 if yi < 0 || yi >= h as i32 { break; }
                 let i = buf.idx(buf.wrap_x(xi), yi as u32);
-                if buf.terrain[i] != 0 { break; }   // coast
-                if base_type[i] == 1 { break; }      // ran into a warm current
+                let f = flags[i];
+                if f & TF_LAND != 0 { break; }  // coast
+                if f & TF_WARM != 0 { break; }  // ran into a warm current
 
-                let vmx = buf.current_vx[i];
-                let vmy = buf.current_vy[i];
+                let [vmx, vmy] = vel[i];
                 let mag = (vmx * vmx + vmy * vmy).sqrt();
                 if mag < 0.05 { break; }
                 let alat = buf.latitude(yi as u32).abs();
@@ -1245,7 +1338,7 @@ fn extend_cold_tag(buf: &mut WorldBuffer) {
                 // cold tag advect down into the monsoon tropics.
                 if alat < 22.0 { break; }
 
-                cold_add[i] = true;
+                cold_add[i].store(true, Ordering::Relaxed);
                 let (hx, hy) = (vmx / mag, vmy / mag);
                 let (perp_x, perp_y) = (-hy, hx);
                 for k in 1..=half_w {
@@ -1254,17 +1347,20 @@ fn extend_cold_tag(buf: &mut WorldBuffer) {
                         let ny = (py + perp_y * k as f32 * sgn).floor() as i32;
                         if ny < 0 || ny >= h as i32 { continue; }
                         let ni = buf.idx(buf.wrap_x(nx), ny as u32);
-                        if buf.terrain[ni] == 0 && base_type[ni] != 1 { cold_add[ni] = true; }
+                        if flags[ni] & (TF_LAND | TF_WARM) == 0 {
+                            cold_add[ni].store(true, Ordering::Relaxed);
+                        }
                     }
                 }
                 px += hx * step_len;
                 py += hy * step_len;
+                if px >= wf { px -= wf; } else if px < 0.0 { px += wf; } // see extend_warm_tag
             }
         }
-    }
+    });
 
     for i in 0..n {
-        if cold_add[i] && buf.terrain[i] == 0 && buf.current_type[i] != 1 {
+        if cold_add[i].load(Ordering::Relaxed) && buf.terrain[i] == 0 && buf.current_type[i] != 1 {
             buf.current_type[i] = 2;
         }
     }
@@ -1295,7 +1391,8 @@ pub fn advect_salinity_and_recouple(buf: &mut WorldBuffer) {
     let mut src = sal.clone();
     for _ in 0..iters {
         std::mem::swap(&mut src, &mut sal); // read from `src`, write to `sal`
-        for y in 0..h {
+        sal.par_chunks_mut(w as usize).enumerate().for_each(|(yy, row)| {
+            let y = yy as u32;
             for x in 0..w {
                 let i = buf.idx(x, y);
                 if buf.terrain[i] != 0 { continue; }
@@ -1316,9 +1413,9 @@ pub fn advect_salinity_and_recouple(buf: &mut WorldBuffer) {
                 // Weak relaxation to the Eâˆ’P base so the advected salty tongue
                 // persists much further up-current into the fresh north before it
                 // mixes back down (Gulf Stream salting the sub-polar North Atlantic).
-                sal[i] = 0.90 * up + 0.10 * base[i];
+                row[x as usize] = 0.90 * up + 0.10 * base[i];
             }
-        }
+        });
     }
     // Warm-conveyor salt signature: where a warm boundary current pushes into the
     // fresher mid/high latitudes (current_type==1, abs_lat>32Â°), raise salinity
@@ -1728,6 +1825,70 @@ mod tests {
         // SH mirror (northward = equatorward there; southward = poleward).
         assert!(sverdrup_interior_north(-25.0, &c) > 0.0, "SH subtropical interior should be equatorward");
         assert!(sverdrup_interior_north(-55.0, &c) < 0.0, "SH subpolar interior should be poleward");
+    }
+
+    /// The linear basin-distance sweeps must agree with the obvious (but O(n·w))
+    /// per-cell search they replaced, on every cell of a randomised terrain —
+    /// including the wrapping x axis, the pole-counts-as-land y edges, all-ocean
+    /// rows/columns (no land at all → the scan-limit filler) and land cells
+    /// (which keep the filler rather than a real distance).
+    #[test]
+    fn basin_distances_match_the_naive_scan() {
+        for (w, h) in [(16u32, 12u32), (7, 9), (32, 8), (3, 3)] {
+            for seed in 0..8u32 {
+                let n = (w * h) as usize;
+                // A cheap deterministic hash → terrain, with two extreme cases:
+                // seed 0 = all ocean, seed 1 = a single land cell.
+                let terrain: Vec<u8> = (0..n)
+                    .map(|i| match seed {
+                        0 => 0,
+                        1 => (i == n / 2) as u8,
+                        _ => {
+                            let v = (i as u32)
+                                .wrapping_mul(2654435761)
+                                .wrapping_add(seed.wrapping_mul(97))
+                                .rotate_left(13);
+                            ((v >> 7) % 3 == 0) as u8
+                        }
+                    })
+                    .collect();
+
+                let sl_ew = (w / 2) as u16;
+                let sl_ns = (h / 2) as u16;
+                let (dw, de) = precompute_basin_dist(&terrain, w, h);
+                let (dn, ds) = precompute_basin_dist_ns(&terrain, w, h);
+
+                for y in 0..h {
+                    for x in 0..w {
+                        let i = (y * w + x) as usize;
+                        let (mut ew, mut ee, mut en, mut es) = (sl_ew, sl_ew, sl_ns, sl_ns);
+                        if terrain[i] == 0 {
+                            for d in 1..=sl_ew as i32 {
+                                let nx = ((x as i32 - d).rem_euclid(w as i32)) as u32;
+                                if ew == sl_ew && terrain[(y * w + nx) as usize] != 0 { ew = d as u16; }
+                                let nx = ((x as i32 + d).rem_euclid(w as i32)) as u32;
+                                if ee == sl_ew && terrain[(y * w + nx) as usize] != 0 { ee = d as u16; }
+                            }
+                            for d in 1..=sl_ns as i32 {
+                                let ny = y as i32 - d;
+                                if en == sl_ns && (ny < 0 || terrain[(ny as u32 * w + x) as usize] != 0) {
+                                    en = d as u16;
+                                }
+                                let sy = y as i32 + d;
+                                if es == sl_ns && (sy >= h as i32 || terrain[(sy as u32 * w + x) as usize] != 0) {
+                                    es = d as u16;
+                                }
+                            }
+                        }
+                        let at = format!("{w}x{h} seed{seed} cell({x},{y})");
+                        assert_eq!(dw[i], ew, "west  {at}");
+                        assert_eq!(de[i], ee, "east  {at}");
+                        assert_eq!(dn[i], en, "north {at}");
+                        assert_eq!(ds[i], es, "south {at}");
+                    }
+                }
+            }
+        }
     }
 
     /// Build a 16Ã—12 all-land test world. With equator_offset 0.5 and unit lat

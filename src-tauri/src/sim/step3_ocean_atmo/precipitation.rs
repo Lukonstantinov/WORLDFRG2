@@ -1,5 +1,7 @@
 ﻿use super::seasonal;
 use super::circulation::Circulation;
+use std::sync::atomic::{AtomicU32, Ordering};
+use rayon::prelude::*;
 use crate::sim::world_buffer::WorldBuffer;
 
 // â”€â”€ Local value-noise (keeps moisture flow from following dead-straight rays) â”€â”€
@@ -282,9 +284,10 @@ fn compute_enclosed_suppression(buf: &WorldBuffer, km_per_cell: f32, circ: &Circ
     let cap = ((ENCLOSED_NARROW_KM / km_per_cell).round() as i32).max(8);
     let mut sup = vec![0.0f32; buf.total()];
 
-    for y in 0..h {
+    sup.par_chunks_mut(w as usize).enumerate().for_each(|(yy, srow)| {
+        let y = yy as u32;
         let inv = hadley_inversion(circ.belt_lat(buf.latitude(y)).abs());
-        if inv <= 0.0 { continue; } // outside the subtropical-high band
+        if inv <= 0.0 { return; } // outside the subtropical-high band
         for x in 0..w {
             let idx = buf.idx(x, y);
             if buf.terrain[idx] != 0 { continue; } // ocean only
@@ -316,9 +319,9 @@ fn compute_enclosed_suppression(buf: &WorldBuffer, km_per_cell: f32, circ: &Circ
             // what defeats convection regardless of its long axis.
             let span = ew.min(ns);
             let narrow = ((cap - span) as f32 / cap as f32).clamp(0.0, 1.0);
-            sup[idx] = inv * narrow;
+            srow[x as usize] = inv * narrow;
         }
-    }
+    });
     sup
 }
 
@@ -573,23 +576,28 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
     // and enclosed-sea coast flag (borders a strongly suppressed subtropical sea).
     let mut cold_coast = vec![false; n];
     let mut enclosed_coast = vec![false; n];
-    for y in 0..h {
-        for x in 0..w {
-            let idx = buf.idx(x, y);
-            if buf.terrain[idx] != 1 { continue; }
-            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
-                let ny = y as i32 + dy;
-                if ny < 0 || ny >= h as i32 { continue; }
-                let ni = buf.idx(buf.wrap_x(x as i32 + dx), ny as u32);
-                if buf.terrain[ni] == 0 && buf.current_type[ni] == 2 {
-                    cold_coast[idx] = true;
-                }
-                if buf.terrain[ni] == 0 && sea_suppress[ni] > 0.4 {
-                    enclosed_coast[idx] = true;
+    cold_coast
+        .par_chunks_mut(w as usize)
+        .zip(enclosed_coast.par_chunks_mut(w as usize))
+        .enumerate()
+        .for_each(|(yy, (crow, erow))| {
+            let y = yy as u32;
+            for x in 0..w {
+                let idx = buf.idx(x, y);
+                if buf.terrain[idx] != 1 { continue; }
+                for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                    let ny = y as i32 + dy;
+                    if ny < 0 || ny >= h as i32 { continue; }
+                    let ni = buf.idx(buf.wrap_x(x as i32 + dx), ny as u32);
+                    if buf.terrain[ni] == 0 && buf.current_type[ni] == 2 {
+                        crow[x as usize] = true;
+                    }
+                    if buf.terrain[ni] == 0 && sea_suppress[ni] > 0.4 {
+                        erow[x as usize] = true;
+                    }
                 }
             }
-        }
-    }
+        });
 
     // â”€â”€ Two seasonal wind states (thermal landâ€“sea low/high) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Boreal summer (sun_sign +1 â‰ˆ July: NH summer / SH winter) and boreal winter
@@ -691,8 +699,13 @@ fn season_precip(
     const SEASON_SCALE: f32 = 0.5;
 
     // â”€â”€ Pass 1: forward moisture advection on the seasonal wind â†’ MAX field â”€â”€
-    let mut moisture_field = vec![0.0f32; n];
-    for y in 0..h {
+    // Every ocean cell launches an independent moisture packet and the field is a
+    // pure MAX reduction, so the emitters can run row-parallel. Moisture is never
+    // negative, and for non-negative floats the IEEE bit pattern orders the same
+    // way as the value â€” so `fetch_max` on the bits is exactly the f32 max, no
+    // matter which order the rows finish in.
+    let moisture_acc: Vec<AtomicU32> = (0..n).map(|_| AtomicU32::new(0)).collect();
+    (0..h).into_par_iter().for_each(|y| {
         for x in 0..w {
             let idx = buf.idx(x, y);
             if buf.terrain[idx] != 0 { continue; } // only ocean cells emit moisture
@@ -753,13 +766,15 @@ fn season_precip(
                     let ny = y0 + oy;
                     if ny < 0 || ny >= h as i32 { continue; }
                     let ti = buf.idx(buf.wrap_x(x0 + ox), ny as u32);
-                    if buf.terrain[ti] == 1 && m > moisture_field[ti] {
-                        moisture_field[ti] = m;
+                    if buf.terrain[ti] == 1 {
+                        moisture_acc[ti].fetch_max(m.to_bits(), Ordering::Relaxed);
                     }
                 }
             }
         }
-    }
+    });
+    let mut moisture_field: Vec<f32> =
+        moisture_acc.iter().map(|a| f32::from_bits(a.load(Ordering::Relaxed))).collect();
 
     // ── Pass 1b: Hadley subsidence moisture sink — geography-aware ─────────────
     // The Hadley inversion physically prevents precipitating moisture from accumulating
@@ -772,23 +787,28 @@ fn season_precip(
     //   Arabia 0.0–0.3 (S ray breaks at Gulf of Aden; cold Somali current zeros E ray).
     // Power-1.5 curve: onshore=0.8 → gate factor (1-0.8)^1.5=0.03 → almost no sink;
     //   onshore=0.1 → (0.9)^1.5=0.855 → near-full sink.
-    for y in 0..h {
+    moisture_field.par_chunks_mut(w as usize).enumerate().for_each(|(yy, row)| {
+        let y = yy as u32;
         let sub_sink = subtropical_penalty(ctx.circ.belt_lat(buf.latitude(y)).abs());
-        if sub_sink <= 0.0 { continue; }
+        if sub_sink <= 0.0 { return; }
         for x in 0..w {
             let idx = buf.idx(x, y);
             if buf.terrain[idx] != 1 { continue; }
             let onshore = monsoon_onshore(buf, x, y, ctx.sea_suppress);
             let onshore_gate = (1.0_f32 - onshore).powf(1.5);
             let sink_frac = 0.75 * sub_sink * onshore_gate;
-            let excess = (moisture_field[idx] - MOISTURE_FLOOR).max(0.0);
-            moisture_field[idx] = MOISTURE_FLOOR + excess * (1.0 - sink_frac);
+            let excess = (row[x as usize] - MOISTURE_FLOOR).max(0.0);
+            row[x as usize] = MOISTURE_FLOOR + excess * (1.0 - sink_frac);
         }
-    }
+    });
 
     // â”€â”€ Pass 2: climatic adjustments per land cell â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let mut precip = vec![0.0f32; n];
-    for y in 0..h {
+    // Row-parallel: every term reads immutable fields plus `moisture_field`, and
+    // writes only this cell's slot. `orographic_multiplier` / `jet_effect` /
+    // `monsoon_onshore` each walk a ray per cell, so this is the pass's real cost.
+    precip.par_chunks_mut(w as usize).enumerate().for_each(|(yy, prow)| {
+        let y = yy as u32;
         let lat = buf.latitude(y);
         let abs_lat = lat.abs();
         // Belt-space / front-space latitude (true ÷ belt_scale / front_scale): the
@@ -801,7 +821,7 @@ fn season_precip(
         let local_summer = sun_sign * if lat >= 0.0 { 1.0 } else { -1.0 } > 0.0;
         for x in 0..w {
             let idx = buf.idx(x, y);
-            if buf.terrain[idx] != 1 { precip[idx] = 0.0; continue; }
+            if buf.terrain[idx] != 1 { prow[x as usize] = 0.0; continue; }
 
             // Per-column ITCZ shift: the column's land-asymmetry base + seasonal migration.
             let itcz_shift = itcz_col[x as usize] + migrate;
@@ -1016,9 +1036,9 @@ fn season_precip(
             p *= 1.0 + 0.18 * fbm2(x as f32 / 6.5, y as f32 / 6.5, 28411);
 
             // No SEASON_SCALE here: already applied per-term above.
-            precip[idx] = p.max(0.0);
+            prow[x as usize] = p.max(0.0);
         }
-    }
+    });
 
     precip
 }
@@ -1033,10 +1053,11 @@ fn blur_land(buf: &WorldBuffer, field: Vec<f32>, passes: u32) -> Vec<f32> {
     let mut a = field;
     let mut b = vec![0.0f32; n];
     for _ in 0..passes {
-        for y in 0..h {
+        b.par_chunks_mut(w as usize).enumerate().for_each(|(yy, row)| {
+            let y = yy as u32;
             for x in 0..w {
                 let idx = buf.idx(x, y);
-                if buf.terrain[idx] != 1 { b[idx] = 0.0; continue; }
+                if buf.terrain[idx] != 1 { row[x as usize] = 0.0; continue; }
                 let mut sum = a[idx] * 2.0;
                 let mut cnt = 2.0f32;
                 for &(dx, dy) in &[
@@ -1050,9 +1071,9 @@ fn blur_land(buf: &WorldBuffer, field: Vec<f32>, passes: u32) -> Vec<f32> {
                     sum += a[ni];
                     cnt += 1.0;
                 }
-                b[idx] = sum / cnt;
+                row[x as usize] = sum / cnt;
             }
-        }
+        });
         std::mem::swap(&mut a, &mut b);
     }
     a
