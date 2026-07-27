@@ -2,6 +2,29 @@
 //! `use super::*` brings the struct, its fields, tuning consts and free helpers into scope.
 use super::*;
 
+/// One hub's coinage CHOICE for the year — the final field values a mint's
+/// council (or, eventually, a player who holds the charter) settles on, plus
+/// the journal entries that narrate how it got there. `decide_coinage` computes
+/// this read-only, replaying the same per-hub arithmetic the old monolithic
+/// function used but against LOCAL shadow copies instead of `self` (several of
+/// the terms below — trust, seigniorage — depend on a mutation earlier in the
+/// SAME hub's SAME year, e.g. a charter debit changing the treasury that year's
+/// trust target reads, so decide has to carry that shadow state through rather
+/// than mutate and re-read `self`). `apply_coinage` then just writes the final
+/// values — no branching left to do (FIX_PLAN B2).
+pub(crate) struct CoinageChoice {
+    has_mint: bool,
+    coin_name: String,
+    coin_trust: f32,
+    coin_metal: u8,
+    mint_bullion_ratio: f32,
+    mint_fineness: f32,
+    mint_fineness_prev: f32,
+    treasury: f32,
+    seigniorage_booked: f32,
+    journal: Vec<JournalEntry>,
+}
+
 impl CampaignSim {
 
     /// Deterministic coin denomination for a polis (Venice → ducat, Florence →
@@ -70,7 +93,10 @@ impl CampaignSim {
     /// docked when the council debases. Debasement also skims seigniorage into the
     /// treasury (mint profit now, at trust's expense later). The strongest coins
     /// become reserve currencies (see `coin_discount`).
-    pub(crate) fn decide_coinage(&mut self, _year: u32) {
+    ///
+    /// Pure AI proposal (reads `&self` only) — see `apply_coinage` for the
+    /// mutation and `run_coinage` for the combined call the tick loop uses.
+    pub(crate) fn decide_coinage(&self, _year: u32) -> Vec<CoinageChoice> {
         let n = self.hubs.len();
         // Normalizers across all council seats.
         let mut max_treasury = 1.0f32;
@@ -88,25 +114,46 @@ impl CampaignSim {
         let cui = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("copper"));
         let tii = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("tin"));
         let tick = self.tick;
+        let mut out = Vec::with_capacity(n);
         for h in 0..n {
-            if self.hubs[h].is_estate { continue; }
+            if self.hubs[h].is_estate {
+                out.push(CoinageChoice {
+                    has_mint: self.hubs[h].has_mint, coin_name: self.hubs[h].coin_name.clone(),
+                    coin_trust: self.hubs[h].coin_trust, coin_metal: self.hubs[h].coin_metal,
+                    mint_bullion_ratio: self.hubs[h].mint_bullion_ratio,
+                    mint_fineness: self.hubs[h].mint_fineness,
+                    mint_fineness_prev: self.hubs[h].mint_fineness_prev,
+                    treasury: self.hubs[h].treasury, seigniorage_booked: 0.0, journal: Vec::new(),
+                });
+                continue;
+            }
             let fineness = if self.hubs[h].mint_fineness <= 0.0 { 1.0 } else { self.hubs[h].mint_fineness };
             let council = self.hubs[h].council_house;
+            // Local shadow state — mutated below exactly as the old function
+            // mutated `self.hubs[h]`, so later terms in this SAME hub/year see
+            // the same values the original sequential mutation produced.
+            let mut has_mint = self.hubs[h].has_mint;
+            let mut coin_name = self.hubs[h].coin_name.clone();
+            let mut coin_trust = self.hubs[h].coin_trust;
+            let mut treasury = self.hubs[h].treasury;
+            let mut mint_fineness = self.hubs[h].mint_fineness;
+            let mut seigniorage_booked = 0.0f32;
+            let mut journal = Vec::new();
             // v2.0 · MINT CHARTER — minting is a privilege. Grandfather any city that
             // already struck a coin; otherwise a council seat earns the right of the
             // mint only once it is a substantial commercial centre (busy AND large)
             // and can pay to establish the mint-house.
-            if !self.hubs[h].has_mint {
-                if !self.hubs[h].coin_name.is_empty() {
-                    self.hubs[h].has_mint = true; // pre-existing coin keeps its mint
+            if !has_mint {
+                if !coin_name.is_empty() {
+                    has_mint = true; // pre-existing coin keeps its mint
                 } else if council >= 0 {
                     let busy = self.hub_throughput(h) >= MINT_CHARTER_THROUGH_FRAC * max_through;
                     let big = self.hubs[h].population >= MINT_CHARTER_POP_FRAC * max_pop;
-                    if busy && big && self.hubs[h].treasury >= MINT_CHARTER_COST {
-                        self.hubs[h].treasury -= MINT_CHARTER_COST;
-                        self.hubs[h].has_mint = true;
+                    if busy && big && treasury >= MINT_CHARTER_COST {
+                        treasury -= MINT_CHARTER_COST;
+                        has_mint = true;
                         let city = self.hubs[h].name.clone();
-                        self.journal.push(JournalEntry {
+                        journal.push(JournalEntry {
                             tick, kind: "charter".into(), hub: h as i32, good: -1, value: MINT_CHARTER_COST,
                             text: format!("{} is granted the right of the mint and establishes a mint-house", city),
                         });
@@ -114,36 +161,37 @@ impl CampaignSim {
                 }
             }
             // A chartered council seat with no coin yet strikes its first.
-            if council >= 0 && self.hubs[h].has_mint && self.hubs[h].coin_name.is_empty() {
+            if council >= 0 && has_mint && coin_name.is_empty() {
                 let denom = self.coin_denomination(h);
                 let city = self.hubs[h].name.clone();
-                self.hubs[h].coin_name = format!("{} of {}", denom, city);
-                self.hubs[h].coin_trust = 0.35;
-                let cn = self.hubs[h].coin_name.clone();
-                self.journal.push(JournalEntry {
+                coin_name = format!("{} of {}", denom, city);
+                coin_trust = 0.35;
+                journal.push(JournalEntry {
                     tick, kind: "coinage".into(), hub: h as i32, good: -1, value: 0.0,
-                    text: format!("{} mints the {}", city, cn),
+                    text: format!("{} mints the {}", city, coin_name),
                 });
             }
-            if self.hubs[h].coin_name.is_empty() {
+            if coin_name.is_empty() {
                 // No mint → any residual trust slowly bleeds away.
-                self.hubs[h].coin_trust *= 0.9;
-                self.hubs[h].mint_fineness_prev = fineness;
+                out.push(CoinageChoice {
+                    has_mint, coin_name, coin_trust: coin_trust * 0.9,
+                    coin_metal: self.hubs[h].coin_metal, mint_bullion_ratio: self.hubs[h].mint_bullion_ratio,
+                    mint_fineness, mint_fineness_prev: fineness, treasury, seigniorage_booked, journal,
+                });
                 continue;
             }
             // v2.0 · pick the metal from the region's reachable bullion.
-            self.hubs[h].coin_metal = self.coin_metal_for(h, gi, si, cui, tii);
+            let coin_metal = self.coin_metal_for(h, gi, si, cui, tii);
             // v2.0 · MINT REGULATION — regional bullion caps how full-bodied the coin
             // can be. A bullion-poor mint striking beyond its metal is forced to debase
             // (fineness capped down); an ample region can strike full-bodied coin.
             let (bcap, bratio) = self.mint_bullion_cap(h, gi, si);
-            self.hubs[h].mint_bullion_ratio = bratio;
-            if self.hubs[h].mint_fineness > bcap { self.hubs[h].mint_fineness = bcap; }
-            let fineness = if self.hubs[h].mint_fineness <= 0.0 { 1.0 } else { self.hubs[h].mint_fineness };
+            if mint_fineness > bcap { mint_fineness = bcap; }
+            let fineness = if mint_fineness <= 0.0 { 1.0 } else { mint_fineness };
             // Trust target — each term in 0..1.
             let through = self.hub_throughput(h);
             let t_fine = fineness.clamp(0.0, 1.0);
-            let t_treas = (self.hubs[h].treasury / max_treasury).clamp(0.0, 1.0);
+            let t_treas = (treasury / max_treasury).clamp(0.0, 1.0);
             let tw = self.hubs[h].trade_wealth;
             let t_trade = (tw / (tw.abs() + 1.0)).clamp(0.0, 1.0);
             let t_stab = self.hubs[h].sent_stability.clamp(0.0, 1.0);
@@ -154,14 +202,42 @@ impl CampaignSim {
             let prev = if self.hubs[h].mint_fineness_prev <= 0.0 { fineness } else { self.hubs[h].mint_fineness_prev };
             let debase = (prev - fineness).max(0.0);
             target = (target - debase * COIN_DEBASE_PENALTY).clamp(0.0, 1.0);
-            let tr = self.hubs[h].coin_trust;
-            self.hubs[h].coin_trust = (tr + (target - tr) * COIN_TRUST_EASE).clamp(0.0, 1.0);
+            coin_trust = (coin_trust + (target - coin_trust) * COIN_TRUST_EASE).clamp(0.0, 1.0);
             // Seigniorage from minting (esp. from debasement), scaled by throughput.
             let seign = through * (1.0 - fineness).max(0.0) * COIN_SEIGNIORAGE;
-            self.hubs[h].treasury += seign;
-            self.hubs[h].finance.seigniorage += seign;
-            self.hubs[h].mint_fineness_prev = fineness;
+            treasury += seign;
+            seigniorage_booked += seign;
+            out.push(CoinageChoice {
+                has_mint, coin_name, coin_trust, coin_metal, mint_bullion_ratio: bratio,
+                mint_fineness, mint_fineness_prev: fineness, treasury, seigniorage_booked, journal,
+            });
         }
+        out
+    }
+
+    /// Carries out a year's `CoinageChoice`s — the only part of coinage that
+    /// mutates hub state. See `decide_coinage`'s doc comment (FIX_PLAN B2).
+    pub(crate) fn apply_coinage(&mut self, choices: Vec<CoinageChoice>) {
+        for (h, c) in choices.into_iter().enumerate() {
+            self.hubs[h].has_mint = c.has_mint;
+            self.hubs[h].coin_name = c.coin_name;
+            self.hubs[h].coin_trust = c.coin_trust;
+            self.hubs[h].coin_metal = c.coin_metal;
+            self.hubs[h].mint_bullion_ratio = c.mint_bullion_ratio;
+            self.hubs[h].mint_fineness = c.mint_fineness;
+            self.hubs[h].mint_fineness_prev = c.mint_fineness_prev;
+            self.hubs[h].treasury = c.treasury;
+            self.hubs[h].finance.seigniorage += c.seigniorage_booked;
+            self.journal.extend(c.journal);
+        }
+    }
+
+    /// The tick loop's entry point: AI decides, sim applies. A future player-owned
+    /// mint would call `apply_coinage` directly with its own `CoinageChoice`
+    /// instead of going through `decide_coinage` (FIX_PLAN B2).
+    pub(crate) fn run_coinage(&mut self, year: u32) {
+        let choices = self.decide_coinage(year);
+        self.apply_coinage(choices);
     }
 
 

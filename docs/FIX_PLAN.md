@@ -313,12 +313,27 @@ concrete `XChoice` the plan describes — a player who held a seat would call
 `decide_polis_policy`. Verified bit-identical: `simulate_decades_reports_
 dynamics` output diffed byte-for-byte against the pre-refactor baseline.
 
-**Not yet done:** `decide_coinage` (`money.rs`) and house dispatch/bank
-lending/colonisation/office leasing/war goals (`houses.rs`, `colonies.rs`,
-`war.rs`) are still monolithic `&mut self` AI+mutation functions — the same
-split needs repeating for each before B2 is actually "done." Given the size
-of those files (houses.rs alone is ~4k lines), each should get its own
-change + bit-identical-diff verification pass rather than one large sweep.
+`money.rs::decide_coinage` (mint charter, first coin, metal choice, bullion-cap
+fineness clamp, trust target, seigniorage) is now split the same way:
+`fn decide_coinage(&self, year) -> Vec<CoinageChoice>` + `fn apply_coinage(&mut
+self, choices)`, wired by `run_coinage`. This one was more involved than the
+polis split: several terms (the trust target, seigniorage) depend on a
+mutation earlier in the SAME hub's SAME year (e.g. a charter debit changing
+the treasury that year's trust-target reads), so `decide_coinage` replays the
+exact per-hub arithmetic against LOCAL shadow variables (a local `treasury`,
+`coin_trust`, `mint_fineness`, …) instead of mutating `self`, and returns the
+hub's final resulting values (plus the journal entries it generated) for
+`apply_coinage` to write verbatim — no branching left in `apply_coinage` at
+all. Also verified bit-identical against the same pre-refactor baseline.
+
+**Not yet done:** house dispatch/bank lending/colonisation/office leasing/war
+goals (`houses.rs`, `colonies.rs`, `war.rs`) are still monolithic `&mut self`
+AI+mutation functions — the same split needs repeating for each before B2 is
+actually "done." Given the size of those files (houses.rs alone is ~4k
+lines) and that `decide_coinage` already needed the local-shadow-state
+technique (not just polis's simpler decide-then-mutate), expect the house/war
+functions to need the same care — each should get its own change +
+bit-identical-diff verification pass rather than one large sweep.
 
 ---
 

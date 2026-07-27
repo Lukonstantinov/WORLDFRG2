@@ -3751,7 +3751,7 @@ impl CampaignSim {
                 // seigniorage), banking houses charter/grow banks, the speculation
                 // engine reads the closed year, and HIGH-tier bubbles may POP into a
                 // regional crash.
-                self.decide_coinage(yr);
+                self.run_coinage(yr);
                 // v2.0 · a council whose coin has failed may REFORM it (call-in + re-mint).
                 self.maybe_reform_coinage(yr);
                 self.update_currency_baskets();
