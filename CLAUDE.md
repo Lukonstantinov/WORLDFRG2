@@ -6,8 +6,8 @@ on top of it (merchant houses, banks, coinage, wars, plagues, colonies).
 
 **Stack:** Tauri 2 (Rust) · React 18 · PixiJS 8 · Zustand · SQLite (rusqlite) · zstd
 **Layout:** `WorkflowPanel (left) | Map (center) | Toolbar (right) | StatusBar (bottom)`
-**Two halves:** a **World** pipeline (`sim/*.rs`, frozen on finalize) and a
-**Campaign** simulation (`sim/campaign/tick/`, ~15k lines split by theme).
+**Two halves:** a **World** pipeline (`sim/step*/`, frozen on finalize) and a
+**Campaign** simulation (`sim/campaign/tick/`, ~16.7k lines split by theme).
 
 ---
 
@@ -20,11 +20,16 @@ cargo check            # Rust type-check only (run from src-tauri/)
 npx tsc --noEmit       # TypeScript type-check only
 cargo test --lib tick::tests                                   # campaign-sim unit + dynamics tests
 cargo test --lib simulate_decades_reports_dynamics -- --nocapture  # WATCH the living economy (5-yearly digest)
+cargo test --lib earth_ -- --nocapture                         # EARTH CLIMATE FIDELITY scorecard (§2.3)
 ```
 
-> The full Tauri build needs GTK/WebKit system libs. On a headless Linux box,
-> `sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev` makes `cargo check`
-> / `cargo test` work (the GUI can't be launched, but the sim + types do compile).
+> The full Tauri build needs GTK/WebKit system libs. On a headless Linux box:
+> ```bash
+> sudo apt-get update            # REQUIRED first — a stale index 404s on the .debs
+> sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
+> ```
+> That makes `cargo check` / `cargo test` work (the GUI can't be launched, but the
+> sim + types do compile). A cold `cargo test` build takes ~6 min.
 > A **docs-only change** (like editing this file) needs no build.
 
 ---
@@ -44,7 +49,7 @@ cargo test --lib simulate_decades_reports_dynamics -- --nocapture
 Read the 5-yearly digest and sanity-check: wealth stays bounded (no 100k blow-ups,
 no negative craters — limited liability), houses turn over, banks/coins/wars/crashes
 actually occur. The test HARD-ASSERTS bounded + finite wealth and that turnover
-happens, so it fails if a change breaks the economy. Tune constants in `tick.rs`
+happens, so it fails if a change breaks the economy. Tune constants in `tick/mod.rs`
 (`WAR_*`, `WEALTH_TAX_*`, `BANK_*`, `COIN_*`, `CONTRACT_*`) and re-run until the
 dynamics read healthy. **Houses dying is expected and good — do not "fix" it away.**
 
@@ -53,11 +58,34 @@ Do NOT create HTML mockups/reports for visual changes. Keep the app on GitHub
 `main` up to date: after a change is implemented and verified, **commit and push
 to `main`** so the live app always reflects the latest work.
 
-- Verify first (Rust: `cargo check` + the dynamics test for `tick.rs`; frontend:
+- Verify first (Rust: `cargo check` + the dynamics test for `tick/`; frontend:
   `npx tsc --noEmit`), then `git add`, commit with a clear message, `git push`.
 - Keep commits scoped to a coherent change with a descriptive message.
 - Describe visual changes in prose (before/after in words); the running app on
   `main` is the source of truth, not a mockup file.
+
+### 2.3 Never regress Earth climate fidelity
+The climate pipeline is scored against the real **Köppen-Geiger** reference map
+(Kottek & Rubel, 0.5°) by `sim/step4_climate/earth_validation.rs`. After ANY change
+to `step3_ocean_atmo/` or `step4_climate/` you MUST run:
+
+```bash
+cargo test --lib earth_ -- --nocapture
+```
+
+It prints a scorecard + confusion matrix and HARD-ASSERTS a floor
+(`EARTH_MAIN_FLOOR`), so a change that breaks the global pattern fails the build.
+**Raise the floor after an improvement** so it always guards the current best.
+
+Measured baseline (commit `d53fdc9`): **main-class 66.2%**, **exact-zone 29.0%**.
+Track **exact-zone** — main-class is inflated by class E scoring 99.1% for free
+(polar is just "cold"). Known open errors and the plan to fix them: `docs/FIX_PLAN.md`.
+
+### 2.4 Keep this file true
+`CLAUDE.md` is what every future session reads first, so staleness compounds. When a
+change adds a module, a render layer, a sim phase or a tile column, update the
+relevant map in §4/§6/§7/§8 **in the same commit**. If you find a section that no
+longer matches the tree, fix it rather than working around it.
 
 ---
 
@@ -81,11 +109,13 @@ old blobs. Run-alls load ALL columns.
 - World grid divided into 128×128 cell tiles (`TILE_SIZE = 128` in `tile/coords.rs`).
 - **Cylindrical topology:** X wraps (`wrap_x`), Y clamps at poles (`clamp_y`). All
   BFS, painting, and simulation respect this.
-- Each tile carries 20+ columnar data fields (terrain, elevation, temperature, …
-  plus `salinity` u8, `shark_risk` u8, `goods: Vec<Vec<u8>>` of `GOODS_COUNT`=45
-  trade-good belts, then shipworm/storm/reef/disease u8). Blobs are **v2
-  self-describing** (`[0xF2][2][goods_count u16]`); new fields are **appended
-  last** so older `.worldforge` saves still load (trailing reads pad zeros).
+- Each tile carries 25+ columnar data fields. **Serialization order matters** — the
+  tail is, in order: `salinity` u8 · `shark_risk` u8 · `goods: Vec<Vec<u8>>`
+  (`GOODS_COUNT`=45 belts) · `shipworm_risk` · `storm_base` · `reef_risk` ·
+  `disease_risk` · `wind_speed` f32 · `precip_summer_frac` · `seasonal_amp` ·
+  `sst` f32 · `snow_frac` (**currently last**). Blobs are **v2 self-describing**
+  (`[0xF2][2][goods_count u16]`); new fields are **appended last** so older
+  `.worldforge` saves still load (trailing reads pad zeros).
 - Tiles stored as zstd-compressed blobs in SQLite.
 - Rendered **server-side** as RGBA → packed binary IPC (`get_tiles_packed`) →
   frontend canvas tiles (base64 `get_tiles` kept for compat). Frontend only
@@ -106,6 +136,24 @@ in-memory on open (`legacy=true` → the app offers to split). `import_world_lay
 copies layer groups (terrain/climate/hydrology/soil/hazards/goods) from another
 world of the same grid size via `TileData::merge_columns`.
 
+> **The interface is a ONE-WAY SNAPSHOT.** `campaign_start_sim` reads an
+> `EconomySnapshot` out of `metadata` and from that moment **the campaign never
+> touches a tile again**. This is deliberate (it's why 500-year runs are fast), but it
+> means climate can't affect history and history can't affect the land. Making it
+> two-way at *province* granularity is item **B1** in `docs/FIX_PLAN.md`.
+
+### 3.5 Planetary parameters
+A world carries four planetary knobs in `metadata`, read into `WorldBuffer`
+(`obliquity_deg`, `rotation_rate`, `solar_lum`, `greenhouse`; defaults in
+`world_commands.rs`, edited via `LatitudeControl.tsx`). They drive real physics:
+obliquity → the insolation integral, rotation → circulation-belt latitudes AND
+EBM heat transport, luminosity/greenhouse → the energy budget.
+
+**At Earth values every one of them is a no-op by construction** — the EBM is solved
+twice and only the anomaly `T_world(φ) − T_earth(φ)` is applied, and `Circulation`
+returns exactly 30°/60°. That's what keeps the Earth calibration bit-for-bit intact
+while the knobs still move real physics. Preserve this property in any change here.
+
 ---
 
 ## 4. The World Pipeline
@@ -118,16 +166,26 @@ Run in order. Each phase depends on previous phases' data.
 | 2 | `sim_generate_terrain` | Elevation from plate boundaries + sea depth |
 | 2alt | `sim_generate_terrain_from_template` | Elevation from land shape (no plates) |
 | 2b | `sim_generate_shelves` | Continental shelf (configurable) |
-| 3 | `sim_ocean_atmosphere` | Wind → **salinity** → currents → distance_to_ocean → temperature → upwelling → **low-level jets** → precipitation |
-| 4 | `sim_classify_climate` | Köppen classification (22 zones) |
-| 5 | `sim_rivers_hydrology` | D8 flow → rivers → lakes (returns overlay data) |
-| 6 | `sim_soil_fertility` | Soil types → fertility → fisheries |
+| 3 | `sim_ocean_atmosphere` | The full ocean/atmosphere chain — see the exact order below |
+| 4 | `sim_classify_climate` | Köppen classification (31 zone codes + H highland) |
+| 5 | `sim_rivers_hydrology` | Priority-flood (Barnes et al. + ε) → rivers → lakes → aquatic ecology |
+| 6 | `sim_soil_fertility` | Soil types (12) → fertility → fisheries |
 | 7 | `sim_generate_settlements` | Habitability scoring → city placement |
+| 7b | `sim_generate_provinces` | Watershed/cost-flood province partition (AFTER settlements) |
 | 8 | `sim_biological` | Shark + shipworm risk + trade-good belts (takes seed + gem_deposits) |
 | 9 | `compute_political` | (query-only) Re-rank settlements by trade power + influence discs |
 | 10 | `compute_economy` | (query-only) **Market equilibrium**: stock-based prices, barter, currency goods, wealth, chokepoints |
 | All | `sim_run_all` | Phases 1-8 from plates |
 | All | `sim_run_all_from_terrain` | Phases 2alt-8 keeping existing landmass |
+
+**Phase 3 runs this exact sequence** (`sim_commands.rs`; `earth_validation.rs` mirrors
+it — keep the two in sync):
+```
+wind_belts → salinity → currents → advect_salinity_and_recouple → sst
+  → distance_to_ocean → shelf_freeze → reinforce_cold_shelf_currents
+  → temperature → upwelling → cold_shelf_cooling
+  → seasonal_amplitude → ice_albedo_feedback → low_level_jets → precipitation
+```
 
 Extras: `sim_generate_terrain_ridged`, `sim_scale_elevation`, `sim_invert_terrain`,
 `sim_generate_toponyms` (#26, gated on cultures+rivers), `sim_refresh_hydrology_biology`.
@@ -190,10 +248,34 @@ serde-defaulted so old saves load). Grouped by theme:
 - **Colonies & migration:** colonisation (settlement colonies + food lifeline supply
   ships), route-bound migration corridors, expeditions.
 - **Satellite construction:** a metropolis builds a suburb over ~10 years (with decay).
+- **Provinces (Phase 2b · watershed demography):** the ONLY campaign state carried at
+  world granularity. `campaign_start_sim` seeds `prov_rural` / `prov_cap` /
+  `prov_culture` / `prov_seat` / `prov_neighbors` and maps `hub_province` from the
+  `province_raster`; `province_demography_pass()` runs **yearly** (rural pools grow to
+  carrying capacity → migrate into cities), and `prov_neighbors` carries overland
+  plague hop. All `prov_*` fields are serde-defaulted and every routine early-returns
+  on empty, so the dynamics test (which seeds no provinces) is bit-identical. **This is
+  the pattern to extend for any world↔campaign feedback** (FIX_PLAN B1) — the carrier
+  and the yearly cadence already exist; what's missing is land state + a feedback edge
+  into production.
 
-Tests live in `mod tests` at the bottom — incl. `simulate_decades_reports_dynamics`
+Tests live in `tick/tests.rs` — incl. `simulate_decades_reports_dynamics`
 (the standing dynamics run) and `bench_campaign_tick` (ignored). See the DLC docs
 in §9 for design detail.
+
+### 5.1 Known structural limits (read before extending)
+Three facts about the campaign that are easy to miss and shape any change here:
+
+- **One mutating verb.** Of 60+ campaign commands, exactly one mutates a running sim:
+  `campaign_advance(ticks)`. The UI is play/pause + week/month/year. Every AI
+  `decide_*` function is a *latent player verb* — see item B2 in `docs/FIX_PLAN.md`.
+- **Growth is exogenous.** `tech_factor *= 1.015^(1/365)` per tick is the entire
+  technology + growth model. There are no capital goods, no fuel inputs and no labour
+  market, so nothing in the economy can influence its own growth rate (Part C of the
+  fix plan). Don't mistake the finance layer for a growth engine — it redistributes.
+- **`Pop` is inert.** `hubs[h].pops` is written yearly in `cities.rs` and read ONLY by
+  `campaign_get_pops` for display; `militancy`/`consciousness` are computed and
+  discarded. The live social model is the abstract `Society` shares (item B3).
 
 ---
 
@@ -240,7 +322,7 @@ tile/
   lod.rs                        ← LOD supertile pyramid (lod 1-4)
 
 render/
-  mod.rs · tile_image.rs        ← 18 render layers (land, elevation, climate, …)
+  mod.rs · tile_image.rs        ← 25 render layers (land, elevation, climate, … see §8.7)
 
 paint/
   mod.rs · stroke.rs            ← PaintValue enum (terrain/elevation/shelf/volcanic)
@@ -255,21 +337,30 @@ sim/                            ← organised into per-phase step folders; mod.r
   world_buffer.rs               ← WorldBuffer: flat arrays + per-phase ColumnSet masks
   step1_plates/plates.rs        ← Ph1: Voronoi plate tectonics
   step2_terrain/elevation.rs    ← Ph2: plate-based + template-based elevation
-  step3_ocean_atmo/             ← Ph3: ocean.rs (winds/currents/upwelling/salinity/thermohaline)
-                                  · temperature.rs · jets.rs · seasonal.rs · precipitation.rs
-  step4_climate/koppen.rs       ← Ph4: 22 Köppen climate zones
-  step5_rivers/                 ← Ph5: rivers.rs (D8 flow/rivers/lakes) · aquatic.rs
+  step3_ocean_atmo/             ← Ph3 (the physics core — see §8.2):
+      ocean.rs                    winds · Sverdrup gyres · currents · salinity · thermohaline · SST
+      insolation.rs               astronomical daily-mean insolation (ANY obliquity)
+      ebm.rs                      1-D diffusive North–Budyko energy balance + ice-albedo
+      circulation.rs              Hadley edge / polar front derived from ROTATION rate
+      temperature.rs              base curve + EBM anomaly + lapse + currents + coastal damping
+      jets.rs · seasonal.rs       low-level jets (Somali) · two-season winds & monsoon
+      precipitation.rs            advection-decay moisture + ITCZ/orographic/frontal/jet terms
+  step4_climate/                ← Ph4: koppen.rs (31 zone codes + H) ·
+      earth_validation.rs         THE EARTH FIDELITY GATE (§2.3) + fixtures/
+  step5_rivers/                 ← Ph5: rivers.rs (priority-flood/rivers/lakes) · aquatic.rs
                                   (freshwater ecology: fish assemblage, lake limnology)
-  step6_soil_fertility/         ← Ph6: soil.rs (11 soil types) · fertility.rs (fisheries)
+  step6_soil_fertility/         ← Ph6: soil.rs (12 soil types) · fertility.rs (fisheries)
   step7_settlements/settlements.rs ← Ph7: habitability → city placement (Settlement struct)
   step8_biological_goods/       ← Ph8: biological.rs (shark/shipworm + belts + deposits)
-                                  · goods_spec.rs (GoodSpec, 45 builtins)
-  shared/                       ← cultures.rs (organic peoples map) · toponyms.rs (#26 names)
+                                  · goods_spec.rs (GoodSpec, 45 belts + ~21 manufactured)
+  shared/                       ← cultures.rs (organic peoples map + 14 traits) · toponyms.rs
                                   · names.rs (deterministic place/family/head names)
+                                  · provinces.rs (watershed/cost-flood partition — the
+                                    natural world↔campaign join layer, see FIX_PLAN B1)
   campaign/                     ← the campaign half:
       market.rs                   Market equilibrium solver (stocks → grain-eq prices)
       manufacture.rs              Shared production-chain resolver (DAG topo, labor∝pop)
-      tick/                       THE CAMPAIGN TICK SIM (~15k lines, split by theme). See §5.
+      tick/                       THE CAMPAIGN TICK SIM (~16.7k lines, by theme). See §5.
                                   mod.rs = structs/consts/free-fns/advance()/impl Bank/…/
                                   residual impl CampaignSim; methods grouped into money/war/
                                   disease/colonies/polis/cities/houses/production child impls
@@ -397,17 +488,39 @@ Trade routes/flows come from the **Biological-Trade step** (gated on step 8); th
 political layer from the **Political step** (9). Trade reach + max-crossing set in
 `StepBiological` (`uiStore.bioParams`).
 
-### 8.2 Key formulas
+### 8.2 Key formulas & the climate physics
 ```
-Temperature   T_base = 30-0.4|lat| (0-30°) | 18-0.7(|lat|-30) (30-60°) | -3-1.2(|lat|-60) (60-90°)
-              T_land = T_base - 5.0·(elev·8848)/1000     T_current = ±3°C (decaying inland)
-Precipitation advection decay 0.935-0.960/cell; ITCZ +400mm·exp(-lat²/50); orographic
-              +50mm/100m windward; frontal Gaussian @50°; cold-coast -35%; subtrop-high -30%;
-              clamp 50-3000 mm/yr
+Temperature   earth_base_curve(|lat|):  30-0.333|lat| (<30°) | 20-0.5(|lat|-30) (30-60°)
+                                        | 5-1.15(|lat|-60) (60-90°)          [Earth-calibrated]
+              T = earth_base_curve + EBM_anomaly(lat) - 5.0·(elev·8848)/1000
+                  + current influence (±3°C, decaying inland) + coastal damping
+              Coastal damping: only if ocean_dist<0.1 AND upwind_is_open_ocean → 45% toward 15°C
+Energy budget d/dx[D(1-x²)dT/dx] = A + B·T - I(x)·a(x,T),  x = sinφ     (North–Budyko)
+              OLR_A=201, OLR_B=2.09, D = 0.60·rotation^-0.7, ice-albedo step at -8°C
+              Applied as an ANOMALY vs Earth → exactly zero at Earth params
+Circulation   hadley_edge = 30·Ω^-0.65 · warmth^0.10   polar_front = 60·Ω^-0.40   (30/60 at Earth)
+Precipitation moisture advected from sea, e-folding EFOLD_MID_KM=1700 / EFOLD_TROP_KM=1300
+              (km-based → grid-resolution independent), MOISTURE_FLOOR=0.09;
+              + ITCZ / orographic (MOUNTAIN_THRESHOLD 0.19, windward 220km, shadow 500km)
+              / frontal / monsoon / jet entrance-dry + exit-wet;  cold-coast -35%, upwelling -60%
 Fertility     F = soil·0.30 + precip·0.20 + temp·0.15 + river_prox·0.20 + coast·0.10 + volcanic·0.05
 Fisheries     upwelling (shelf + cold current + equatorward flow) + river-mouth proximity
 Habitability  H = climate·0.40 + fertility·0.20 + water·0.20 + terrain·0.10 + trade·0.10
 ```
+
+**Ocean currents** are a gyre-aware relaxation, not a solve: the *interior* comes from
+the Sverdrup relation (curl of belt wind stress on a β-plane — sign and latitude
+structure EMERGE), while boundary speeds are prescribed constants
+(`SPEED_BOUNDARY_WEST` 2.2 vs `..._EAST` 0.55 = western intensification), then 20
+deflection passes + bathymetry steering. The field is **not divergence-free** and
+currents are **annual-mean only** even though the winds have two seasons.
+
+**Known fidelity gaps** (measured, with fixes planned — see `docs/FIX_PLAN.md`):
+moisture has no conserved budget and no evapotranspiration recycling, so continental
+interiors and the monsoon subtropics come out far too dry (`C→B` confusion 39%);
+maritime coasts under-damp, so the high-mid latitudes read too cold (`D→E` 40%);
+seasonality is only two states (July/January), so Köppen's `s`/`w`/`f` third letter
+comes from hand-coded detectors rather than from monthly extremes.
 
 ### 8.3 Salinity, sharks, shipworm
 - **Salinity** (`ocean.rs::compute_salinity`, before currents): `S = 35 +
@@ -434,7 +547,7 @@ Habitability  H = climate·0.40 + fertility·0.20 + water·0.20 + terrain·0.10 
 - **MANUFACTURED** (`Distribution::Manufactured`) — finished goods made in cities from
   a recipe (`GoodSpec.inputs`), no per-cell belt.
 
-**Chains + transport** (both worldgen `market.rs` and campaign `tick.rs` read ONE set
+**Chains + transport** (both worldgen `market.rs` and campaign `tick/` read ONE set
 of `GoodSpec` fields, all serde-defaulted):
 - **Transport:** `bulk` (freight mult) + `perishable` (extra freight/day).
   `freight_of = per_day·days·bulk + perishable·days`. Heavy/perishable stay regional.
@@ -462,10 +575,11 @@ Mediterranean (Cs) only forms on **windward (west-facing) coasts** beside a cold
 offshore current (`cold_override` gated on `is_windward_ocean` + no warm influence);
 a warm-current **east** coast reads humid-subtropical (Cfa).
 
-### 8.7 Render layers (19) & paint tools (5)
-land, elevation, terrain (hillshade), plates, shelf, fisheries, currents, temperature,
-precipitation, wind, **windspeed** (low-level wind intensity incl. jets), climate,
-biomes, soil, fertility, ridges, salinity, shark, shipworm.
+### 8.7 Render layers (25) & paint tools (5)
+land, elevation, terrain (hillshade), plates, shelf, ridges, fisheries, currents,
+**sst** (sea-surface temperature), temperature, precipitation, wind, **windspeed**
+(low-level wind intensity incl. jets), **snow** (annual snow-cover fraction), climate,
+biomes, soil, fertility, salinity, habitability, shark, shipworm, reef, storm, disease.
 Paint: Pan, Paint Land (0/1), Elevation (f32 0-1), Paint Shelf (u8 0/1), Place Volcano (u8 0/1).
 
 ### 8.8 File operations
@@ -477,6 +591,12 @@ Save/Open via SQLite backup API (`.worldforge` / `.campaign`); Export Heightmap
 
 ## 9. Docs (`docs/`)
 
+**START HERE — the current plan**
+```
+FIX_PLAN.md                       ← ⭐ Measured Earth-fidelity baseline + the prioritised
+                                    fix plan (climate · one-simulator · economy · society),
+                                    with a regression gate per item. Read before planning work.
+```
 **World / trade / architecture**
 ```
 FEATURES_AND_PROPOSALS.md         ← Feature catalog, step-by-step generation, per-step
@@ -507,10 +627,24 @@ ROADMAP_BATCHES.md                       ← The 24 picked features, batched
 VICTORIA2_DLC_IMPLEMENTATION.md          ← Victoria-2 layer, DLC-by-DLC
 VICTORIA2_REDESIGN_PROPOSAL.md           ← Victoria-2-style UI/UX redesign
 ```
+**Analyses & newer systems**
+```
+POPULATION_AND_NETWORK_DYNAMICS_ANALYSIS.md ← Growth/trade-network analysis & fix plan
+SETTLEMENT_BELIEVABILITY_ANALYSIS.md        ← Settlement generation believability review
+SETTLEMENT_TIER_REQUIREMENTS.md             ← Settlement development ladder (5 tiers)
+PROVINCE_SYSTEM_PLAN.md                     ← Province partition layer (see FIX_PLAN B1)
+GROWTH_AND_GRAVITY_SCHEMATICS.md            ← Growth & gravity model schematics
+CITY_STORES_PANEL_SCHEMATIC.md              ← City stores panel design
+IN_APP_VERIFICATION_CHECKLIST.md            ← Manual in-app verification checklist
+```
 `docs/` also has: `BIOLOGICAL_STEP_PLAN.md`, `C_BATCH_PLAN.md`,
 `FIFTEENTH_BATCH_PLAN.md`, `PORTING_REFERENCE.md`. Historical HTML/SVG mockups are
 archived under `docs/mockups/_archive/`; a stray reference image lives in
 `docs/reference/`. The repo root now holds only `README.md` and `CLAUDE.md`.
+
+> **Scope warning.** There are 30+ planning docs here and far more written-down ideas
+> than can be built. Most are proposals, NOT commitments — treat them as a menu, and
+> check `FIX_PLAN.md` for what's actually prioritised before starting new work.
 
 ---
 
@@ -525,4 +659,10 @@ archived under `docs/mockups/_archive/`; a stray reference image lives in
 7. **New tile fields append LAST** — v2 self-describing blobs; trailing reads pad zeros (old saves load).
 8. **Every `#[tauri::command]` is registered in `lib.rs`** and gets a wrapper in `bridge/` (via the @bridge barrel).
 9. **New TS types mirror Rust serde structs** in `types/` (world/campaign/goods).
-10. **After any `tick.rs` change** → run the dynamics test (§2.1). **After any verified change** → push to `main` (§2.2).
+10. **Earth params must stay a no-op** — the EBM anomaly and `Circulation` return zero /
+    exactly 30°-60° at Earth settings. Never let a planetary knob shift the Earth baseline.
+11. **Phase 3's order is duplicated** in `sim_commands.rs` and `earth_validation.rs` —
+    change one, change both, or the fidelity gate stops testing the real pipeline.
+12. **After any `tick/` change** → run the dynamics test (§2.1). **After any
+    `step3_ocean_atmo/` or `step4_climate/` change** → run the Earth fidelity gate (§2.3).
+    **After any verified change** → push to `main` (§2.2), and keep this file true (§2.4).

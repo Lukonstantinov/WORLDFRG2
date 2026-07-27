@@ -1,5 +1,12 @@
 # Future Systems — Initial Feature Plan
 
+> **See also `FIX_PLAN.md`.** Its Part C reaches the same conclusion this document's
+> Rank 1 does — labour markets and wages are foundational — but adds *why* the gap
+> bites: with no capital goods, no fuel inputs and no labour market, growth is a
+> single exogenous constant (`tech_factor *= 1.015/yr`) that nothing in the economy
+> can influence. The fix plan therefore treats capital + fuel + labour as **one
+> block**, since shipping any of the three alone leaves the loop open.
+
 Scope chosen by the user (by importance rank): **Rank 1 (all), Rank 2 (diplomacy/
 embargoes), Rank 3 (all), Rank 4 (money supply), Rank 8 reframed as a shadow
 economy that EMERGES from Rank 1.** Plus a **house-split** redesign.
