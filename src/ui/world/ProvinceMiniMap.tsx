@@ -75,6 +75,10 @@ export function ProvinceMiniMap({
   const { cells, ox, oy, vw, vh, toLocal } = geo;
   const fill = "#3f6d55";
   const boxW = 240, boxH = Math.max(120, Math.round((240 * vh) / vw));
+  // Settlement dot radius proportional to the province footprint so a 4-cell micro-
+  // province doesn't have dots bigger than itself, and a 500-cell province still
+  // shows legible markers. Clamped to a narrow range so they never disappear either.
+  const dotScale = Math.min(1.0, Math.max(0.35, 1.8 / Math.sqrt(cells.length)));
 
   return (
     <div style={{ display: "flex", gap: 10, position: "relative" }}>
@@ -89,7 +93,7 @@ export function ProvinceMiniMap({
         {/* settlements */}
         {settlements.map((s, i) => {
           const [lx, ly] = toLocal(s.x, s.y);
-          const r = s.seat ? 1.6 : 1.1;
+          const r = (s.seat ? 1.6 : 1.1) * dotScale;
           return (
             <g key={`s${i}`} transform={`translate(${lx} ${ly})`} style={{ cursor: "pointer" }}
               onMouseEnter={(e) => setHover({
@@ -100,8 +104,9 @@ export function ProvinceMiniMap({
               })}
               onMouseLeave={() => setHover(null)}>
               {s.seat
-                ? <path d="M0 -2.2 L0.7 -0.7 L2.2 -0.7 L1 0.4 L1.4 2 L0 1 L-1.4 2 L-1 0.4 L-2.2 -0.7 L-0.7 -0.7 Z"
-                    fill="#fff" stroke="#0a1620" strokeWidth={0.4} />
+                ? <path transform={`scale(${dotScale})`}
+                    d="M0 -2.2 L0.7 -0.7 L2.2 -0.7 L1 0.4 L1.4 2 L0 1 L-1.4 2 L-1 0.4 L-2.2 -0.7 L-0.7 -0.7 Z"
+                    fill="#fff" stroke="#0a1620" strokeWidth={0.4 / dotScale} />
                 : <circle r={r} fill="#e8eef4" stroke="#0a1620" strokeWidth={0.4} />}
             </g>
           );

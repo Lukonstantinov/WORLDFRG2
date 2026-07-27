@@ -723,7 +723,7 @@ pub fn sim_generate_provinces(
 ) -> Result<SimProvincesResult, String> {
     db.clear_caches();
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let buf = WorldBuffer::load(&conn)?; // all columns: terrain/elev/koppen/fertility/goods/…
+    let buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PROVINCES)?;
     let w = buf.width; let h = buf.height;
     if w == 0 || h == 0 { return Err("world grid not initialised".into()); }
 

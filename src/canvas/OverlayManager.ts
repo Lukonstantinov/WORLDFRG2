@@ -1166,21 +1166,30 @@ export class OverlayManager {
       }
     }
     ctx.globalAlpha = 1;
-    // Borders: an edge wherever the province id changes (right / down neighbour).
+    // Borders: an edge wherever two LAND provinces meet (both non-sea).
+    // Sea-adjacent edges are intentionally skipped — coastlines already read from
+    // the base terrain layer; drawing them here creates a dark fringe "in the sea".
+    // lineWidth in world-cell units = 1 screen pixel so borders stay crisp at all zoom.
     ctx.strokeStyle = "rgba(8, 14, 20, 0.7)";
-    ctx.lineWidth = Math.max(0.5, 1.4 / Math.sqrt(this.currentScale));
+    ctx.lineWidth = 1 / this.currentScale;
     ctx.beginPath();
     for (let ry = 0; ry < h; ry++) {
       for (let rx = 0; rx < w; rx++) {
         const id = data[ry * w + rx];
         if (id === NO) continue;
-        if (rx + 1 < w && data[ry * w + rx + 1] !== id) {
-          const x = (rx + 1) * sx;
-          ctx.moveTo(x, ry * sy); ctx.lineTo(x, (ry + 1) * sy);
+        if (rx + 1 < w) {
+          const rid = data[ry * w + rx + 1];
+          if (rid !== NO && rid !== id) {
+            const x = (rx + 1) * sx;
+            ctx.moveTo(x, ry * sy); ctx.lineTo(x, (ry + 1) * sy);
+          }
         }
-        if (ry + 1 < h && data[(ry + 1) * w + rx] !== id) {
-          const y = (ry + 1) * sy;
-          ctx.moveTo(rx * sx, y); ctx.lineTo((rx + 1) * sx, y);
+        if (ry + 1 < h) {
+          const did = data[(ry + 1) * w + rx];
+          if (did !== NO && did !== id) {
+            const y = (ry + 1) * sy;
+            ctx.moveTo(rx * sx, y); ctx.lineTo((rx + 1) * sx, y);
+          }
         }
       }
     }

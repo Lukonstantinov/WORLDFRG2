@@ -199,6 +199,15 @@ impl ColumnSet {
             | Self::DISEASE.0
             | Self::SEASON_AMP.0, // growing_season_months() -> seasonal_temps() reads it
     );
+    /// provinces.rs (watershed partition — phase 7b). Needs terrain/elevation for the
+    /// flood, koppen/fertility/fishery/disease/dist_ocean for food capacity + province
+    /// stats, temperature/season_amp for growing_season_months, goods for good quality,
+    /// shelf for upwind_is_open_ocean (optional — safe if empty).
+    pub const PHASE_PROVINCES: ColumnSet = ColumnSet(
+        Self::TERRAIN.0 | Self::ELEVATION.0 | Self::KOPPEN.0 | Self::SHELF.0
+            | Self::FERTILITY.0 | Self::FISHERY.0 | Self::DIST_OCEAN.0
+            | Self::TEMPERATURE.0 | Self::SEASON_AMP.0 | Self::DISEASE.0 | Self::GOODS.0,
+    );
     /// biological.rs (sharks/shipworms/storms/reefs/goods — phase 8)
     pub const PHASE_BIOLOGICAL: ColumnSet = ColumnSet(
         Self::TERRAIN.0 | Self::ELEVATION.0 | Self::SEA_DEPTH.0 | Self::SHELF.0 | Self::CURRENTS.0
