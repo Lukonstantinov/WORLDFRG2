@@ -219,6 +219,104 @@ fn koppen_spacing_mult(koppen: u8) -> f32 {
 /// islands, which is exactly what makes them read as a single region.
 const SEA_HOP: f64 = 5.0;
 
+/// Cap on a merged vast-biome province, as a fraction of the whole world's cells. A
+/// contiguous ice cap or great desert collapses into blocks no larger than this, so
+/// Antarctica reads as ~1-2 provinces and the Sahara as ~1, while a circum-continental
+/// tundra band still breaks into a handful rather than one hemisphere-spanning cell.
+const VAST_MERGE_CAP_FRAC: f64 = 0.08;
+
+/// True Köppen "vast, thinly-settled" class of a cell for the merge below:
+/// 1 = polar (ET tundra / EF ice cap), 2 = desert (BWh / BWk), 0 = neither.
+fn vast_biome_group(koppen: u8) -> u8 {
+    use crate::sim::koppen as kp;
+    match koppen {
+        kp::ET | kp::EF => 1,
+        kp::BWH | kp::BWK => 2,
+        _ => 0,
+    }
+}
+
+/// Collapse the vast, empty biomes AFTER the flood + sliver merge: union adjacent
+/// provinces that are the SAME vast class (polar or desert) on the SAME landmass, up to
+/// `VAST_MERGE_CAP_FRAC` of the world. The seed-density model already makes these sparse,
+/// but a whole ice cap is still tens of provinces because no per-cell separation is huge
+/// enough to swallow it — so this guarantees the "ice cap / great desert = a few solid
+/// blocks" outcome the seed spacing only approximates. Operates on `owner` (pre-compaction
+/// ids); deterministic (pairs sorted, union root = lower id).
+fn merge_vast_biomes(buf: &WorldBuffer, owner: &mut [u32], island: &[u32], total: usize) {
+    if buf.koppen.is_empty() { return; }
+    let Some(max_owner) = owner.iter().copied().filter(|&o| o != u32::MAX).max() else { return; };
+    let n = max_owner as usize + 1;
+    let w = buf.width;
+    let hi = buf.height as i32;
+    // Per-owner tallies: cells, polar cells, desert cells, one island id.
+    let mut cells = vec![0u32; n];
+    let mut polar = vec![0u32; n];
+    let mut desert = vec![0u32; n];
+    let mut isle = vec![u32::MAX; n];
+    for c in 0..total {
+        let o = owner[c];
+        if o == u32::MAX { continue; }
+        let oi = o as usize;
+        cells[oi] += 1;
+        isle[oi] = island[c];
+        match vast_biome_group(buf.koppen[c]) {
+            1 => polar[oi] += 1,
+            2 => desert[oi] += 1,
+            _ => {}
+        }
+    }
+    // An owner's group: needs a majority of its cells in that class (else 0).
+    let group = |oi: usize| -> u8 {
+        let t = cells[oi].max(1);
+        if polar[oi] * 2 > t { 1 } else if desert[oi] * 2 > t { 2 } else { 0 }
+    };
+    // Union-find over owners.
+    fn find(p: &mut [u32], x: u32) -> u32 {
+        let mut r = x;
+        while p[r as usize] != r { r = p[r as usize]; }
+        let mut c = x;
+        while p[c as usize] != r { let nx = p[c as usize]; p[c as usize] = r; c = nx; }
+        r
+    }
+    let mut parent: Vec<u32> = (0..n as u32).collect();
+    let mut sz = cells.clone();
+    let cap = (total as f64 * VAST_MERGE_CAP_FRAC) as u64;
+    // Adjacent same-group same-island owner pairs (right + down avoids duplicates).
+    let mut pairs: Vec<(u32, u32)> = Vec::new();
+    for c in 0..total {
+        let o = owner[c];
+        if o == u32::MAX { continue; }
+        let g = group(o as usize);
+        if g == 0 { continue; }
+        let cx = (c as u32 % w) as i32;
+        let cy = (c as u32 / w) as i32;
+        for &(dx, dy) in &[(1i32, 0i32), (0, 1)] {
+            let ny = cy + dy; if ny < 0 || ny >= hi { continue; }
+            let no = owner[buf.widx(cx + dx, ny)];
+            if no == u32::MAX || no == o { continue; }
+            if group(no as usize) == g && isle[o as usize] == isle[no as usize] {
+                let (a, b) = if o < no { (o, no) } else { (no, o) };
+                pairs.push((a, b));
+            }
+        }
+    }
+    pairs.sort_unstable();
+    pairs.dedup();
+    for (a, b) in pairs {
+        let ra = find(&mut parent, a);
+        let rb = find(&mut parent, b);
+        if ra == rb { continue; }
+        if sz[ra as usize] as u64 + sz[rb as usize] as u64 > cap { continue; }
+        let (root, child) = if ra < rb { (ra, rb) } else { (rb, ra) };
+        parent[child as usize] = root;
+        sz[root as usize] += sz[child as usize];
+    }
+    for o in owner.iter_mut() {
+        if *o != u32::MAX { *o = find(&mut parent, *o); }
+    }
+}
+
 struct HeapItem { cost: f64, cell: u32, owner: u32 }
 impl PartialEq for HeapItem { fn eq(&self, o: &Self) -> bool { self.cost == o.cost } }
 impl Eq for HeapItem {}
@@ -435,10 +533,23 @@ pub fn generate_provinces(
     //     genuinely continent-scale administrative blocks on Earth are stretched much
     //     further, so Antarctica reads as a few solid provinces, not a speckle.
     let have_koppen = !buf.koppen.is_empty();
+    let have_hab = !buf.habitability.is_empty();
+    // Hard minimum separation (≈100-cell smallest province) so the most habitable land
+    // gets genuinely SMALL provinces without shattering into a 1-cell speckle.
+    let min_sep = 10.0f32;
     let local_sep2 = |i: usize| -> i64 {
-        let hostile = (1.0 - hab_at(i).clamp(0.0, 1.0)).powf(1.4);
+        let hab = hab_at(i).clamp(0.0, 1.0);
+        let hostile = (1.0 - hab).powf(1.4);
         let km = if have_koppen { koppen_spacing_mult(buf.koppen[i]) } else { 1.0 };
-        let s = (base_sep * (1.0 + 3.0 * hostile) * km) as i64;
+        // Prime habitable land (hab > 0.6) is pulled BELOW the base spacing — smaller
+        // provinces in fertile heartlands — ramping in only for genuinely rich land so
+        // ordinary/moderate country keeps the base size; the hostile ramp + the Köppen
+        // biome factor stretch the barren extremes far apart, and the vast-biome merge
+        // then swallows the ice/desert. Gated on real habitability data existing.
+        let fertile_shrink = if have_hab {
+            1.0 - 0.4 * ((hab - 0.6) / 0.3).clamp(0.0, 1.0)
+        } else { 1.0 };
+        let s = (base_sep * (1.0 + 3.0 * hostile) * fertile_shrink * km).max(min_sep) as i64;
         (s * s).max(1)
     };
     let too_close = |seeds: &[u32], bx: i32, by: i32, sep2: i64| -> bool {
@@ -664,6 +775,13 @@ pub fn generate_provinces(
         while remap[o as usize] != o && guard < 8 { o = remap[o as usize]; guard += 1; }
         owner[c] = o;
     }
+
+    // Collapse the vast, empty biomes (polar ice/tundra, hot/cold desert) into a few
+    // huge blocks per landmass — an ice cap or great desert is otherwise still tens of
+    // small provinces, because no per-cell seed separation is large enough to swallow a
+    // whole continent-scale biome. Runs after the sliver merge, before compaction, so
+    // the existing stats/borders naturally describe the merged result.
+    merge_vast_biomes(buf, &mut owner, &island, total);
 
     // ── Compact province ids to 0..n and build per-cell id map. ──
     let mut old_to_new = std::collections::HashMap::<u32, u32>::new();
