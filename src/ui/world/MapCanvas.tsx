@@ -56,6 +56,7 @@ export function MapCanvas() {
   const provinces = useWorldStore((s) => s.provinces);
   const provinceRaster = useWorldStore((s) => s.provinceRaster);
   const selectedProvince = useUIStore((s) => s.selectedProvince);
+  const provinceOpacity = useUIStore((s) => s.provinceOpacity);
   const economy = useWorldStore((s) => s.economy);
   const setEconomy = useWorldStore((s) => s.setEconomy);
   const activeLayer = useUIStore((s) => s.activeLayer);
@@ -734,7 +735,12 @@ export function MapCanvas() {
         data: provinceRaster.data, w: provinceRaster.w, h: provinceRaster.h,
         gridW: provinceRaster.gridW, gridH: provinceRaster.gridH,
       } : null,
-      provinces.map((p) => ({ id: p.id, culture: p.culture, name: p.name, seat_x: p.seat_x, seat_y: p.seat_y })),
+      provinces.map((p) => ({
+        id: p.id, culture: p.culture, name: p.name, seat_x: p.seat_x, seat_y: p.seat_y,
+        // Label anchor + how much room the name has. Absent on pre-anchor worlds →
+        // the overlay falls back to the seat and derives a radius from the area.
+        label_x: p.label_x, label_y: p.label_y, label_r: p.label_r, cells: p.cells,
+      })),
     );
     requestRender();
   }, [provinces, provinceRaster, requestRender]);
@@ -746,6 +752,14 @@ export function MapCanvas() {
     om.setSelectedProvince(selectedProvince);
     requestRender();
   }, [selectedProvince, provinceRaster, requestRender]);
+
+  // Province fill opacity (fill only — borders/names/selection stay full strength).
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setProvinceOpacity(provinceOpacity);
+    requestRender();
+  }, [provinceOpacity, requestRender]);
 
   // Region↔region trade flows (routed + bundled trunks) — a product of the
   // Biological-Trade step, gated by the chosen trade reach.
@@ -853,8 +867,7 @@ export function MapCanvas() {
     // Debounced like the dynamic-flow overlay above: campaign_get_corridors runs up
     // to 24 coarse-grid Dijkstra routes, the single biggest new year-boundary cost.
     // A trailing debounce collapses a fast-forward burst into one recompute so it
-    // stops stuttering every year. (Superseded later by the event-driven corridor
-    // cache in EXPEDITIONS_CORRIDORS_PLAN.md.)
+    // stops stuttering every year. (Superseded later by the event-driven corridor cache.)
     const t = window.setTimeout(() => {
       campaignGetCorridors(rivers.map((r) => ({ points: r.points })), bioParams.tradeReach, bioParams.maxCrossing)
         .then((corridors) => {

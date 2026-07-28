@@ -153,6 +153,10 @@ interface UIStore {
   /** Province selected on the map (id), or null. Drives the map highlight and the
    *  inspector; setting it opens the inspector. */
   selectedProvince: number | null;
+  /** Opacity of the province colour FILL, 0..1. Borders, names and the selection
+   *  outline always draw at full strength, so winding this down leaves a clean
+   *  political outline over the terrain rather than removing the layer. */
+  provinceOpacity: number;
   /** #35/#36/#37 · Goods Codex (provenance / history / scarcity) panel open. */
   showGoodsCodex: boolean;
   /** Itinerary routed polyline (world cells) to draw on the map, or null. */
@@ -264,6 +268,7 @@ interface UIStore {
   setShowProvinces: (v: boolean) => void;
   setShowProvinceInspector: (v: boolean) => void;
   setSelectedProvince: (id: number | null) => void;
+  setProvinceOpacity: (v: number) => void;
   setShowGoodsCodex: (v: boolean) => void;
   setTravelRoute: (pts: [number, number][] | null) => void;
   setRiverHighlight: (ids: number[] | null) => void;
@@ -382,6 +387,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showProvinces: false,
   showProvinceInspector: false,
   selectedProvince: null,
+  provinceOpacity: 0.5,
   showGoodsCodex: false,
   travelRoute: null,
   riverHighlight: null,
@@ -511,6 +517,7 @@ export const useUIStore = create<UIStore>((set) => ({
   // the window state alone so closing the inspector doesn't drop the map highlight.
   setSelectedProvince: (id) =>
     set(id === null ? { selectedProvince: null } : { selectedProvince: id, showProvinceInspector: true }),
+  setProvinceOpacity: (v) => set({ provinceOpacity: Math.max(0, Math.min(1, v)) }),
   setShowGoodsCodex: (v) => set({ showGoodsCodex: v }),
   setTravelRoute: (pts) => set({ travelRoute: pts }),
   setRiverHighlight: (ids) => set({ riverHighlight: ids }),

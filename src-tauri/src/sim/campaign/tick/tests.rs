@@ -341,8 +341,7 @@
 
     /// A wealthy house develops an EXISTING under-traded small city into a TRADE BASE:
     /// it opens an office, builds a guildhall, seeds capital and takes the city under
-    /// its patronage — and patronage concludes once the city grows up. See
-    /// docs/TRADE_BASE_MECHANIC_PLAN.md.
+    /// its patronage — and patronage concludes once the city grows up.
     #[test]
     fn trade_base_development() {
         let goods = vec![

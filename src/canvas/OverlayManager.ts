@@ -294,8 +294,12 @@ export class OverlayManager {
   private selectedProvince: number | null = null;
   private selectedProvincePath: Path2D | null = null;
   private selectedProvinceSeat: { x: number; y: number } | null = null;
-  /** Province name + seat position (world cells) for on-map labels. */
-  private provinceLabels: { x: number; y: number; name: string }[] = [];
+  /** Province name + label anchor (world cells) + inscribed radius for on-map labels. */
+  private provinceLabels: { x: number; y: number; r: number; name: string }[] = [];
+  /** Opacity of the province colour FILL only — borders, names and the selection
+   *  outline are always drawn at full strength so the political map stays legible
+   *  however far the fill is faded back. */
+  private provinceOpacity = 0.5;
   /** Province id → seat cell, for marking the selected province's seat. */
   private provinceSeats: Map<number, { x: number; y: number }> = new Map();
   /** Atlas 2.0 · refugee roads (age01 = 0 fresh … 1 faded out). */
@@ -447,15 +451,27 @@ export class OverlayManager {
    *  per-province fill colour (keyed by culture) for the political/goods map. */
   updateProvinces(
     raster: { data: ArrayLike<number>; w: number; h: number; gridW: number; gridH: number } | null,
-    provinces: { id: number; culture: string; name?: string; seat_x?: number; seat_y?: number }[],
+    provinces: {
+      id: number; culture: string; name?: string; seat_x?: number; seat_y?: number;
+      label_x?: number; label_y?: number; label_r?: number; cells?: number;
+    }[],
   ) {
     this.provinceRaster = raster;
     const rgb: [number, number, number][] = [];
-    const labels: { x: number; y: number; name: string }[] = [];
+    const labels: { x: number; y: number; r: number; name: string }[] = [];
     for (const p of provinces) {
       rgb[p.id] = provinceColorRGB(p.id);  // each province its OWN distinct colour
-      if (p.name && p.seat_x !== undefined && p.seat_y !== undefined) {
-        labels.push({ x: p.seat_x, y: p.seat_y, name: p.name });
+      if (p.name) {
+        // Anchor on the pole of inaccessibility when the world carries one — it is
+        // always INSIDE the province, unlike a centroid, and unlike the seat (a city,
+        // often near an edge). Older worlds fall back to the seat with a radius
+        // estimated from the area, so their names still place sensibly.
+        const hasAnchor = p.label_x !== undefined && p.label_y !== undefined;
+        const x = hasAnchor ? p.label_x! : p.seat_x;
+        const y = hasAnchor ? p.label_y! : p.seat_y;
+        if (x === undefined || y === undefined) continue;
+        const r = p.label_r ?? (p.cells ? Math.sqrt(p.cells / Math.PI) * 0.6 : 4);
+        labels.push({ x, y, r: Math.max(0.5, r), name: p.name });
       }
     }
     this.provinceLabels = labels;
@@ -469,6 +485,9 @@ export class OverlayManager {
     // selected outline against it rather than leaving a stale path on screen.
     if (this.selectedProvince !== null) this.buildSelectedProvince();
   }
+
+  /** Opacity of the province colour fill, 0..1. Borders/names/selection are unaffected. */
+  setProvinceOpacity(v: number) { this.provinceOpacity = Math.max(0, Math.min(1, v)); }
 
   /** Highlight ONE province (the map click / list selection). `null` clears it. */
   setSelectedProvince(id: number | null) {
@@ -1293,11 +1312,16 @@ export class OverlayManager {
     const r = this.provinceRaster;
     if (!r || !this.provinceCanvas) return;
     const { w, h, gridW, gridH } = r;
-    // Fills — one semi-transparent blit (each pixel already composited exactly once).
+    // Fills — one blit at the user's opacity (each pixel already composited exactly
+    // once, so fading it never reveals a cell grid). Only the FILL is faded; the
+    // borders, names and selection outline below stay at full strength, so winding the
+    // slider down leaves a clean political outline over the terrain.
     ctx.imageSmoothingEnabled = false;
-    ctx.globalAlpha = 0.5;
-    ctx.drawImage(this.provinceCanvas, 0, 0, w, h, 0, 0, gridW, gridH);
-    ctx.globalAlpha = 1;
+    if (this.provinceOpacity > 0) {
+      ctx.globalAlpha = this.provinceOpacity;
+      ctx.drawImage(this.provinceCanvas, 0, 0, w, h, 0, 0, gridW, gridH);
+      ctx.globalAlpha = 1;
+    }
     // Borders — thin dark line between adjacent provinces (1 screen px at any zoom).
     if (this.provinceBorderPath) {
       ctx.strokeStyle = "rgba(8, 14, 20, 0.7)";
@@ -1329,23 +1353,36 @@ export class OverlayManager {
       }
     }
 
-    // Province name labels at each seat, culled by the shared collision map so they
-    // don't pile up. Shown at a modest zoom (works in the campaign world view); the
-    // collision cull keeps it from becoming a wall of overlapping names.
-    if (this.provinceLabels.length > 0 && this.currentScale > 0.7) {
-      const fs = Math.max(7, 11 / this.currentScale);
-      ctx.font = `600 ${fs}px system-ui, sans-serif`;
+    // Province names, centred on each province's inscribed circle and sized to it.
+    //
+    // Three deliberate departures from how this used to work:
+    //  · NO zoom gate. The old `currentScale > 0.7` meant that at the default world
+    //    view not one province was named — the layer's whole point, missing.
+    //  · NO shared collision cull. Each name is sized to fit inside its OWN province's
+    //    inscribed circle, and those circles are disjoint by construction, so names
+    //    cannot meaningfully overlap. The cull was silently dropping names that had
+    //    every right to be drawn.
+    //  · Font scales with the province, not with the zoom, so a great province reads
+    //    like one and a sliver does not shout. A readable floor keeps small provinces
+    //    legible; the only reason to skip a name now is that it genuinely does not fit.
+    if (this.provinceLabels.length > 0) {
       ctx.textAlign = "center";
-      ctx.textBaseline = "alphabetic";
+      ctx.textBaseline = "middle";   // with textAlign center → centred on both axes
       ctx.lineJoin = "round";
       for (const lb of this.provinceLabels) {
-        const tw = ctx.measureText(lb.name).width;
-        if (!this.reserveLabel(lb.x, lb.y, tw, fs)) continue;
-        ctx.lineWidth = Math.max(0.6, 2.2 / this.currentScale);
+        const diamPx = 2 * lb.r * this.currentScale;
+        // Proportional to the room available, clamped to a readable band.
+        const fsPx = Math.min(34, Math.max(9, diamPx * 0.42));
+        const fs = fsPx / this.currentScale;   // canvas is under a world transform
+        ctx.font = `600 ${fs}px system-ui, sans-serif`;
+        const twPx = ctx.measureText(lb.name).width * this.currentScale;
+        // The one remaining reason to hide a name: it cannot fit its own province.
+        if (twPx > diamPx * 1.6) continue;
+        ctx.lineWidth = Math.max(0.6, (fsPx * 0.2) / this.currentScale);
         ctx.strokeStyle = "rgba(6, 10, 16, 0.85)";
-        ctx.strokeText(lb.name, lb.x, lb.y);
+        ctx.strokeText(lb.name, lb.x + 0.5, lb.y + 0.5);
         ctx.fillStyle = "rgba(240, 244, 250, 0.95)";
-        ctx.fillText(lb.name, lb.x, lb.y);
+        ctx.fillText(lb.name, lb.x + 0.5, lb.y + 0.5);
       }
     }
   }

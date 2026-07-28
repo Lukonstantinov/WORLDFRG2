@@ -534,8 +534,8 @@ location logic beyond labour ∝ population.
 ### C3. Labour market and wages
 `labor` is proportional to population and free. There are no wages. `commoner_wealth`
 is *derived* from prosperity rather than *earned*, so the social strata cannot respond
-to economic conditions through the actual historical mechanism. (Already ranked #1 in
-`FUTURE_SYSTEMS_PLAN.md` — concur; it is the missing link between economy and society,
+to economic conditions through the actual historical mechanism. (It is the missing
+link between economy and society,
 and the natural partner to B3.)
 
 ### C4. Chain depth

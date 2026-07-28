@@ -478,7 +478,7 @@ pub struct HubDetail {
     /// fondaco). Recomputed every query → recolours live with the campaign.
     #[serde(default)] pub buildings: Vec<BuildingInfo>,
     /// Trade-base patron: the merchant house developing this city as a base of
-    /// operations (empty = none). See docs/TRADE_BASE_MECHANIC_PLAN.md.
+    /// operations (empty = none).
     #[serde(default)] pub patron: String,
     /// #23 · the majority PEOPLE of this settlement + its minority quarters
     /// `(people, population share)` — grown by in-migration of a different culture

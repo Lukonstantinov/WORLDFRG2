@@ -671,7 +671,7 @@ impl CampaignSim {
             // Break ground on the CONSTRUCTION project (10y, decay model — the role bias +
             // future-exploit production activate only on COMPLETION; the site just consumes
             // hauled supply while it's built). `colony_stage` parks the intended role until
-            // then. See docs/SATELLITE_CONSTRUCTION_AND_MIGRATION_PLAN.md.
+            // then.
             self.hubs[new].build_stage = 1;
             self.hubs[new].build_start_tick = tick;
             self.hubs[new].build_convoys = SAT_BUILD_CONVOYS;

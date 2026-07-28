@@ -81,7 +81,7 @@ pub fn campaign_get_corridors(
         Some(s) => s, None => return Ok(vec![]),
     };
     // Event-driven: corridors are the ESTABLISHED routes earned by expeditions
-    // (docs/EXPEDITIONS_CORRIDORS_PLAN.md), not the top-N yearly flows. There are
+    // by expeditions, not the top-N yearly flows. There are
     // only a handful, so routing them is cheap — this is what removes the year-tick
     // recompute storm the old flow_year source caused.
     if sim.corridors.is_empty() { return Ok(vec![]); }

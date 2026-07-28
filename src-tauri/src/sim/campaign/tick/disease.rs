@@ -502,7 +502,7 @@ impl CampaignSim {
             self.expedition_pass(self.tick / TICKS_PER_YEAR);
             // Financed EXPEDITIONS toward distant unconnected cities — the way a
             // permanent trade corridor is earned (hazards, failed attempts, then
-            // port/caravanserai villages). See docs/EXPEDITIONS_CORRIDORS_PLAN.md.
+            // port/caravanserai villages).
             self.expedition_launch_pass(expansion_ok);
             // House trade outposts from year 30 (rich house, heavy cost); full
             // settlement colonies from year 50 (joint-stock, food lifeline).
@@ -528,7 +528,7 @@ impl CampaignSim {
 
 
     // ── Expeditions & Corridors ──────────────────────────────────────────────
-    // (docs/EXPEDITIONS_CORRIDORS_PLAN.md) A corridor is EARNED: a house finances
+    // A corridor is EARNED: a house finances
     // a venture toward a distant unconnected city; hazards cull it; several proven
     // round-trips establish the route + found port/caravanserai villages.
 

@@ -1842,6 +1842,14 @@ export interface Province {
   rural_cap?: number;      // food_capacity as a population ceiling → saturation
   /** Neighbours with shared length + the feature dividing them, longest first. */
   neighbors_detail?: ProvinceBorder[];
+  /** Label anchor — the province's POLE OF INACCESSIBILITY (centre of its largest
+   *  inscribed circle), which is always inside the province, unlike a centroid. Falls
+   *  back to the seat on worlds generated before this existed. */
+  label_x?: number;
+  label_y?: number;
+  /** Radius of that inscribed circle in cells — how much room the name has, so the
+   *  renderer can size the label to the province rather than to the zoom level. */
+  label_r?: number;
 }
 
 /** Live per-province campaign state (read-only): baseline rural + current urban. */

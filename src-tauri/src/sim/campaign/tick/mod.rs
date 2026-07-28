@@ -498,8 +498,8 @@ const OUTPOST_INPUT_BIAS: f32 = 1.0;
 const OUTPOST_GRADUATE_YEARS: u32 = 30;
 /// …and its owning house must be at least this rich to make the investment.
 const OUTPOST_GRADUATE_WEALTH: f32 = 60_000.0;
-// ── Trade bases (houses develop EXISTING under-traded small cities). See
-//    docs/TRADE_BASE_MECHANIC_PLAN.md. The accessible cousin of the outpost: a house
+// ── Trade bases (houses develop EXISTING under-traded small cities).
+//    The accessible cousin of the outpost: a house
 //    invests influence + capital into a real settlement to bootstrap it into a node. ──
 const BASE_START_TICK: u32 = 10 * 365;        // bases open from ~year 10
 const BASE_INVEST_WEALTH: f32 = 40_000.0;     // a house this rich may develop a base
@@ -1553,8 +1553,7 @@ pub struct TickHub {
     /// (−); a tier changes only after 3 confirming years, so status doesn't flicker.
     #[serde(default)] pub class_momentum: i8,
     // ── Satellite CONSTRUCTION project (a metropolis builds this suburb over ~10y; all
-    //    serde-defaulted so 0 = "finished / not a construction site"). See
-    //    docs/SATELLITE_CONSTRUCTION_AND_MIGRATION_PLAN.md ──
+    //    serde-defaulted so 0 = "finished / not a construction site"). ──
     /// 0 = functional (not under construction); 1..=5 = current build stage
     /// (Survey · Foundations · Warehousing · Walls · Market).
     #[serde(default)] pub build_stage: u8,
@@ -2662,7 +2661,7 @@ impl CityFinance {
     }
 }
 
-// ── Expeditions & Corridors (docs/EXPEDITIONS_CORRIDORS_PLAN.md) ─────────────
+// ── Expeditions & Corridors ──────────────────────────────────────────────────
 // A permanent trade corridor is EARNED: a wealthy house finances a risky
 // expedition toward a distant, unconnected, valuable city; hazards cull it; only
 // after several successful round-trips does the route become an established
@@ -2888,7 +2887,6 @@ pub struct CampaignSim {
     pub records: WorldRecords,
     /// Trade-base patronage: the house developing each hub as a base (hub-indexed,
     /// −1 = none). Resized to `hubs` each tick. Empty on old saves (serde default).
-    /// See docs/TRADE_BASE_MECHANIC_PLAN.md.
     #[serde(default)]
     pub hub_patron: Vec<i32>,
     /// Settlement DEVELOPMENT tier (0..5) per hub, persisted with hysteresis so it is

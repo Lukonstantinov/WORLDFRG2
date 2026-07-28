@@ -980,8 +980,7 @@ impl CampaignSim {
     /// trade BASE — opening an office, building a guildhall + warehouse, seeding
     /// working capital and taking the city under its patronage so its modest surplus
     /// finally clears to market. The accessible, existing-settlement cousin of
-    /// `maybe_found_house_outpost`. At most one per call. See
-    /// docs/TRADE_BASE_MECHANIC_PLAN.md.
+    /// `maybe_found_house_outpost`. At most one per call.
     pub(crate) fn maybe_establish_trade_base(&mut self) {
         if self.hubs.is_empty() || self.houses.is_empty() { return; }
         self.hub_patron.resize(self.hubs.len(), -1);

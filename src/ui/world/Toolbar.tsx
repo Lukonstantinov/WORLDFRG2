@@ -160,6 +160,8 @@ export function Toolbar() {
   const showProvinces = useUIStore((s) => s.showProvinces);
   const setShowProvinces = useUIStore((s) => s.setShowProvinces);
   const provinces = useWorldStore((s) => s.provinces);
+  const provinceOpacity = useUIStore((s) => s.provinceOpacity);
+  const setProvinceOpacity = useUIStore((s) => s.setProvinceOpacity);
 
   const showBrush = activeTool === "paint" || activeTool === "elevation" || activeTool === "shelf";
 
@@ -512,6 +514,21 @@ export function Toolbar() {
             {provinces.length > 0 && (
               <div style={{ fontSize: 9, color: "#5a7390" }}>
                 {provinces.length} provinces · click a cell to inspect
+              </div>
+            )}
+            {/* Fill opacity — borders and names keep full strength, so winding this
+                to 0 leaves a clean political outline over the terrain. */}
+            {provinces.length > 0 && overlayVisibility.provinces && (
+              <div style={{ marginTop: 2 }}>
+                <div style={sliderRow}>
+                  <span style={sliderLabel}>Fill opacity</span>
+                  <span style={sliderValue}>{Math.round(provinceOpacity * 100)}%</span>
+                </div>
+                <input
+                  type="range" min={0} max={100} value={Math.round(provinceOpacity * 100)}
+                  onChange={(e) => setProvinceOpacity(Number(e.target.value) / 100)}
+                  style={rangeStyle}
+                />
               </div>
             )}
             <button

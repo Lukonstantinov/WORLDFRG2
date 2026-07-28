@@ -126,6 +126,16 @@ pub struct Province {
     #[serde(default)] pub rural_cap: u32,
     /// Neighbours with shared length + what feature divides them, longest first.
     #[serde(default)] pub neighbors_detail: Vec<ProvinceBorder>,
+    /// **Label anchor** — the province's POLE OF INACCESSIBILITY (the centre of its
+    /// largest inscribed circle), not its seat and not its centroid. The seat is a
+    /// city and often sits near an edge; a centroid can fall in a NEIGHBOUR when the
+    /// province is crescent- or hook-shaped. The pole is always inside the province,
+    /// which is what putting a name on the right land requires.
+    #[serde(default)] pub label_x: u32,
+    #[serde(default)] pub label_y: u32,
+    /// Radius of that inscribed circle, in cells — how much room the name has, so the
+    /// renderer can size the label to the province instead of to the zoom level.
+    #[serde(default)] pub label_r: f32,
 }
 
 /// Sea sentinel in the per-cell province-id map.
@@ -597,6 +607,9 @@ pub fn generate_provinces(
     // ── Stage 2: snap the border LINES onto the crests and channels. ──
     snap_borders_to_features(buf, &mut province_id, n, &ridge, &river_divide, &is_lake);
 
+    // ── Label anchors: the pole of inaccessibility per province (see `Province`). ──
+    let poles = compute_label_anchors(buf, &province_id, n);
+
     // ── Aggregate per-province stats. ──
     let ng = buf.goods.len();
     let n_kits = cultures::KITS.len().max(1);
@@ -713,6 +726,7 @@ pub fn generate_provinces(
     }
 
     let mut provinces: Vec<Province> = Vec::with_capacity(n);
+    let mut used_names: std::collections::HashSet<String> = std::collections::HashSet::new();
     for pid in 0..n {
         let a = &accs[pid];
         if a.cells == 0 { continue; }
@@ -777,10 +791,24 @@ pub fn generate_provinces(
         let culture = culture_shares.first().map(|c| c.0.clone())
             .unwrap_or_else(|| names::culture_label(sx, sy, w, h).to_string());
 
-        // Name (its own) + analog.
+        // Name (its OWN — a province is a land, not a town). The generator is a pure
+        // hash of the seat cell, so two provinces CAN collide; a province that shares
+        // its name with another does not really have one. Re-draw the loser from a
+        // salted position until the map is unique (deterministic: provinces are named
+        // in id order). See PROVINCE_SYSTEM_PLAN.md §4.1.
         let (kit, ms) = names::resolve_kit(sx, sy, w, h);
         let bucket = name_length_bucket(sx, sy);
-        let name = cultures::province_name(kit, ms, sx, sy, bucket);
+        let mut name = cultures::province_name(kit, ms, sx, sy, bucket);
+        if !used_names.insert(name.clone()) {
+            for salt in 1u32..40 {
+                let h2 = hash2(seat_cell as u64, salt as u64 ^ 0x9A5D_1CE7);
+                let jx = (h2 % 4096) as u32;
+                let jy = ((h2 >> 20) % 4096) as u32;
+                let b2 = ((h2 >> 44) % 4) as u8;
+                let cand = cultures::province_name(kit, ms, jx, jy, b2);
+                if used_names.insert(cand.clone()) { name = cand; break; }
+            }
+        }
         let analog = real_world_analog(koppen, elevation_class, a.coastal).to_string();
         let rural_pop = (a.food * 18.0).round().max(0.0) as u32;
         let neighbors_detail = borders[pid].clone();
@@ -823,11 +851,90 @@ pub fn generate_provinces(
             food_capacity: a.food as f32,
             rural_cap: (a.food * 18.0).round().max(0.0) as u32,
             neighbors_detail,
+            // Pole of inaccessibility; fall back to the seat if the province somehow
+            // yielded no interior cell (a 1-cell island).
+            label_x: if poles[pid].2 > 0.0 { poles[pid].0 } else { sx },
+            label_y: if poles[pid].2 > 0.0 { poles[pid].1 } else { sy },
+            label_r: poles[pid].2.max(0.5),
         });
     }
 
     rank_goods_worldwide(&mut provinces);
     (provinces, province_id)
+}
+
+/// Per-province **pole of inaccessibility**: the cell furthest from any boundary, plus
+/// the radius of the inscribed circle it centres. Returned as `(x, y, radius)` indexed
+/// by province id.
+///
+/// The boundary here is everything that ends the province: a different province, the
+/// sea, or a lake. Seeding all three means an island province's name lands inland
+/// rather than out on a headland, and the radius is real room for text in every
+/// direction.
+///
+/// One multi-source BFS over land — the same shape as the `d_border` sweep in
+/// `snap_borders_to_features`, but uncapped and including coast/lake edges. The
+/// 8-neighbour BFS measures CHEBYSHEV distance, which favours diagonally-elongated
+/// shapes slightly over a true Euclidean transform; for choosing where a label sits
+/// that is well within tolerance, and it wraps in X for free through `widx`.
+fn compute_label_anchors(buf: &WorldBuffer, province_id: &[u16], n: usize) -> Vec<(u32, u32, f32)> {
+    let w = buf.width;
+    let hi = buf.height as i32;
+    let total = buf.total();
+    let mut dist = vec![u32::MAX; total];
+    let mut queue: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
+
+    for c in 0..total {
+        let pid = province_id[c];
+        if pid == NO_PROVINCE { continue; }
+        let cx = (c as u32 % w) as i32;
+        let cy = (c as u32 / w) as i32;
+        let mut edge = false;
+        'e: for dy in -1i32..=1 {
+            let ny = cy + dy;
+            // The map's top/bottom are boundaries too — a label shouldn't ride the pole.
+            if ny < 0 || ny >= hi { edge = true; break 'e; }
+            for dx in -1i32..=1 {
+                if dx == 0 && dy == 0 { continue; }
+                if province_id[buf.widx(cx + dx, ny)] != pid { edge = true; break 'e; }
+            }
+        }
+        if edge { dist[c] = 0; queue.push_back(c as u32); }
+    }
+
+    while let Some(c) = queue.pop_front() {
+        let d = dist[c as usize];
+        let cx = (c % w) as i32;
+        let cy = (c / w) as i32;
+        let pid = province_id[c as usize];
+        for dy in -1i32..=1 {
+            let ny = cy + dy;
+            if ny < 0 || ny >= hi { continue; }
+            for dx in -1i32..=1 {
+                if dx == 0 && dy == 0 { continue; }
+                let ni = buf.widx(cx + dx, ny);
+                // Stay inside the province — the distance is to ITS OWN boundary.
+                if province_id[ni] != pid { continue; }
+                if dist[ni] > d + 1 { dist[ni] = d + 1; queue.push_back(ni as u32); }
+            }
+        }
+    }
+
+    // Furthest cell per province. Ties break on the lowest cell index so the anchor is
+    // deterministic (a province is usually widest over a plateau of equal distances).
+    let mut best = vec![(0u32, 0u32, 0f32, u32::MAX); n];
+    for c in 0..total {
+        let pid = province_id[c];
+        if pid == NO_PROVINCE { continue; }
+        let d = dist[c];
+        if d == u32::MAX { continue; }
+        let slot = &mut best[pid as usize];
+        // `slot.3` is the incumbent distance; u32::MAX marks "nothing chosen yet".
+        if slot.3 == u32::MAX || d > slot.3 {
+            *slot = ((c as u32) % w, (c as u32) / w, d as f32 + 0.5, d);
+        }
+    }
+    best.into_iter().map(|(x, y, r, _)| (x, y, r)).collect()
 }
 
 /// Mean of the best decile of a province's cells for one good, from a coarse
@@ -1110,12 +1217,16 @@ mod tests {
     const TW: u32 = 96;
     const TH: u32 = 64;
 
-    /// A blank all-land WorldBuffer of the test size, with uniform fertility and a
-    /// habitability that keeps the seed spacing in its normal range.
-    fn blank_world() -> WorldBuffer {
+    fn blank_world() -> WorldBuffer { blank_world_sized(TW, TH) }
+
+    /// A blank all-land WorldBuffer, with uniform fertility and a habitability that
+    /// keeps the seed spacing in its normal range. The seed separation has a hard floor
+    /// of 10 cells, so a test that needs MANY provinces has to ask for a bigger grid
+    /// rather than a higher granularity.
+    fn blank_world_sized(gw: u32, gh: u32) -> WorldBuffer {
         let conn = Connection::open_in_memory().unwrap();
         schema::create_tables(&conn).unwrap();
-        for (k, v) in [("grid_width", TW.to_string()), ("grid_height", TH.to_string())] {
+        for (k, v) in [("grid_width", gw.to_string()), ("grid_height", gh.to_string())] {
             conn.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
                 rusqlite::params![k, v]).unwrap();
         }
@@ -1301,6 +1412,84 @@ mod tests {
         assert!(river_rate > land_rate * 2.0,
             "a diagonal trunk must attract borders: {:.1}% of its cells are on a \
              province border vs {:.1}% of land overall", river_rate * 100.0, land_rate * 100.0);
+    }
+
+    /// A province's label anchor must land INSIDE that province — the whole point of
+    /// using the pole of inaccessibility rather than a centroid (which falls in a
+    /// neighbour whenever the province is crescent- or hook-shaped) or the seat (a
+    /// city, frequently near an edge). Its radius must also track the province's size,
+    /// so the renderer can scale the name to the land.
+    #[test]
+    fn label_anchor_is_inside_its_own_province_and_scales() {
+        let mut buf = blank_world();
+        for y in 0..TH {
+            for x in 0..TW {
+                let i = buf.idx(x, y);
+                if x < 3 || x > TW - 4 { buf.terrain[i] = 0; }
+                buf.elevation[i] = (((x * 5 + y * 3) % 13) as f32) / 50.0;
+            }
+        }
+        let towns = vec![settle("a", 20, 20, 9000), settle("b", 60, 44, 4000)];
+        let (provs, ids) = generate_provinces(&buf, &[], &[], &towns, 0.35);
+        assert!(provs.len() > 3, "need several provinces to compare, got {}", provs.len());
+
+        for p in &provs {
+            let i = buf.idx(p.label_x.min(TW - 1), p.label_y.min(TH - 1));
+            assert_eq!(ids[i], p.id,
+                "province {} '{}' anchors its label on province {} — wrong land",
+                p.id, p.name, ids[i]);
+            assert!(p.label_r > 0.0, "province {} has no inscribed radius", p.id);
+        }
+
+        // Bigger province ⇒ more room for its name. Compare the extremes rather than
+        // every pair: a long thin province can legitimately hold a small circle.
+        let mut by_area = provs.iter().collect::<Vec<_>>();
+        by_area.sort_by_key(|p| p.cells);
+        let (small, big) = (by_area[0], by_area[by_area.len() - 1]);
+        assert!(big.label_r > small.label_r,
+            "the largest province ({} cells, r={}) should have more label room than \
+             the smallest ({} cells, r={})", big.cells, big.label_r, small.cells, small.label_r);
+    }
+
+    /// A province that shares its name with another does not really have its own name.
+    #[test]
+    fn province_names_are_unique() {
+        // A big grid, because the seed separation floors at 10 cells — a crowded map is
+        // where the name hash actually collides.
+        let (gw, gh) = (220u32, 150u32);
+        let mut buf = blank_world_sized(gw, gh);
+        for y in 0..gh {
+            for x in 0..gw {
+                let i = buf.idx(x, y);
+                buf.elevation[i] = (((x * 7 + y * 13) % 11) as f32) / 60.0;
+            }
+        }
+        let towns = vec![settle("a", 12, 12, 9000), settle("b", 160, 90, 7000)];
+        let (provs, _) = generate_provinces(&buf, &[], &[], &towns, 1.0);
+        assert!(provs.len() > 20, "need a crowded map to exercise collisions, got {}", provs.len());
+        let mut seen = std::collections::HashSet::new();
+        for p in &provs {
+            assert!(!p.name.is_empty(), "province {} has no name", p.id);
+            assert!(seen.insert(p.name.clone()),
+                "duplicate province name '{}' (province {})", p.name, p.id);
+        }
+
+        // Prove the pass is not vacuous: recompute what the RAW generator would have
+        // produced for each seat and count how many names it would have doubled up.
+        let mut raw = std::collections::HashSet::new();
+        let mut collisions = 0;
+        for p in &provs {
+            let (kit, ms) = names::resolve_kit(p.seat_x, p.seat_y, gw, gh);
+            let bucket = name_length_bucket(p.seat_x, p.seat_y);
+            if !raw.insert(cultures::province_name(kit, ms, p.seat_x, p.seat_y, bucket)) {
+                collisions += 1;
+            }
+        }
+        eprintln!("names: {} provinces · {} raw collisions resolved by the salt pass",
+                  provs.len(), collisions);
+        assert!(collisions > 0,
+            "this map produced no raw name collisions, so it does not exercise the \
+             uniqueness pass — make the test map denser");
     }
 
     /// Every land cell must end up owned, and the new stats must be self-consistent —

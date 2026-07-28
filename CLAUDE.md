@@ -704,54 +704,55 @@ FIX_PLAN.md                       ← ⭐ Measured Earth-fidelity baseline + the
                                     fix plan (climate · one-simulator · economy · society),
                                     with a regression gate per item. Read before planning work.
 ```
+```
+PROVINCE_SYSTEM_PLAN.md           ← The province layer's design + status (see FIX_PLAN B1);
+                                    the shipped algorithm itself is §8.10 above
+```
 **World / trade / architecture**
 ```
 FEATURES_AND_PROPOSALS.md         ← Feature catalog, step-by-step generation, per-step
                                     improvement ideas & campaign-integration proposals
-REDESIGN_AND_DLC_PLAN.md          ← World/trade split, perf overhaul & DLC master plan
-IMPLEMENTATION_PLAN.md            ← Redesign implementation plan & status
-PERFORMANCE_OPTIMIZATION_PLAN.md  ← Campaign performance & stability plan
 TRADE_CARTOGRAPHY_SPEC.md         ← Trade cartography & good-flow spec
 TRADE_SYSTEM_REVIEW.md            ← Trade & economy system review
-TRADE_BASE_MECHANIC_PLAN.md       ← Houses develop small cities as bases
 trade-goods-and-hazards-design.md ← Goods & seasonal hazards design
 CLIMATE_CORRELATION_BRAINSTORM.md ← Real-climate correlation & biology proposals
 ```
-**Finance / economy DLCs**
+**Finance / economy / society**
 ```
-FINANCE_POLIS_SPECULATION_PLAN.md ← DLC 3: finance, the polis & speculation
 SOCIAL_ECONOMIC_WEALTH_PROPOSAL.md← Social/economic/wealth analysis & proposals
 SYSTEMS_21_PROPOSALS.md           ← Systems 2.1: perf · manufactories · banks · houses
-FUTURES_CONTRACTS_PLAN.md         ← Futures contracts design
 HERALDRY_AND_NAMES_VARIANTS.md    ← Heraldry, house names & guilds variants
 ```
-**Expansion systems**
+**Roadmap / UI direction**
 ```
-EXPEDITIONS_CORRIDORS_PLAN.md            ← Expeditions & corridors
-SATELLITE_CONSTRUCTION_AND_MIGRATION_PLAN.md ← Satellite build + route-bound migration
-FUTURE_SYSTEMS_PLAN.md                   ← Future systems feature plan
-ROADMAP_BATCHES.md                       ← The 24 picked features, batched
-VICTORIA2_DLC_IMPLEMENTATION.md          ← Victoria-2 layer, DLC-by-DLC
-VICTORIA2_REDESIGN_PROPOSAL.md           ← Victoria-2-style UI/UX redesign
+ROADMAP_BATCHES.md                ← The 24 picked features, batched
+VICTORIA2_DLC_IMPLEMENTATION.md   ← Victoria-2 layer, DLC-by-DLC
+VICTORIA2_REDESIGN_PROPOSAL.md    ← Victoria-2-style UI/UX redesign
 ```
-**Analyses & newer systems**
+**Analyses & schematics**
 ```
 POPULATION_AND_NETWORK_DYNAMICS_ANALYSIS.md ← Growth/trade-network analysis & fix plan
 SETTLEMENT_BELIEVABILITY_ANALYSIS.md        ← Settlement generation believability review
 SETTLEMENT_TIER_REQUIREMENTS.md             ← Settlement development ladder (5 tiers)
-PROVINCE_SYSTEM_PLAN.md                     ← Province partition layer (see FIX_PLAN B1)
 GROWTH_AND_GRAVITY_SCHEMATICS.md            ← Growth & gravity model schematics
 CITY_STORES_PANEL_SCHEMATIC.md              ← City stores panel design
 IN_APP_VERIFICATION_CHECKLIST.md            ← Manual in-app verification checklist
 ```
-`docs/` also has: `BIOLOGICAL_STEP_PLAN.md`, `C_BATCH_PLAN.md`,
-`FIFTEENTH_BATCH_PLAN.md`, `PORTING_REFERENCE.md`. Historical HTML/SVG mockups are
-archived under `docs/mockups/_archive/`; a stray reference image lives in
-`docs/reference/`. The repo root now holds only `README.md` and `CLAUDE.md`.
+`docs/` also has `PORTING_REFERENCE.md`. Historical HTML/SVG mockups are archived under
+`docs/mockups/_archive/`; a stray reference image lives in `docs/reference/`. The repo
+root holds only `README.md` and `CLAUDE.md`.
 
-> **Scope warning.** There are 30+ planning docs here and far more written-down ideas
-> than can be built. Most are proposals, NOT commitments — treat them as a menu, and
-> check `FIX_PLAN.md` for what's actually prioritised before starting new work.
+> **The old `*_PLAN.md` docs are gone.** Twelve superseded planning documents (redesign,
+> implementation, performance, finance/polis, futures, trade-base, satellite/migration,
+> expeditions/corridors, future-systems, biological-step, C-batch, fifteenth-batch) were
+> deleted — they described work that has long since shipped, and they were being read as
+> commitments. **The systems themselves are still in the code**; the code and this file
+> are now the record. If you need the original rationale for one of them it is in git
+> history: `git log --diff-filter=D --name-only -- docs/` finds the deleting commit, then
+> `git show <sha>^:docs/<file>`.
+>
+> **Scope warning.** What remains is still mostly proposals, NOT commitments — treat them
+> as a menu, and check `FIX_PLAN.md` for what's actually prioritised before new work.
 
 ---
 
