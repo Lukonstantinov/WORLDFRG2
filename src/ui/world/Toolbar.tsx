@@ -4,7 +4,6 @@ import { useGoodsStore } from "@state/goodsStore";
 import { useWorldStore } from "@state/worldStore";
 import type { ActiveTool, ActiveLayer } from "@types";
 import { GOOD_DEFS, goodOverlayKey, goodCategory, CATEGORY_ORDER } from "@goods";
-import { LatitudeControl } from "@ui/world/LatitudeControl";
 
 const tools: { id: ActiveTool; label: string; icon: string; tip: string }[] = [
   { id: "pan", label: "Pan", icon: "\u270B", tip: "Click-drag to pan the map" },
@@ -337,8 +336,10 @@ export function Toolbar() {
         {openSection.Climate && (
           <div>
             <div style={{ fontSize: 9, color: "#5a7390", marginBottom: 4, lineHeight: 1.4 }}>
-              Circulation bands from the Planet settings — the ITCZ rain line and the
+              Circulation bands from the planet settings — the ITCZ rain line and the
               subtropical-high / polar-front belts move with rotation &amp; warmth.
+              Set them in <b>Workflow step 0 · World Characteristics</b> (left panel),
+              which now holds every generation setting; this column is display only.
             </div>
             {climateOverlays.map((o) => (
               <label key={o.id} style={checkboxRow}>
@@ -357,8 +358,10 @@ export function Toolbar() {
         )}
       </div>
 
-      {/* Dynamic latitude framing (move equator / expand 0–60 bands) */}
-      <LatitudeControl />
+      {/* NOTE: the latitude framing and the planetary knobs used to live here.
+          They are GENERATION settings (they change what the simulation produces),
+          so they now live in one place on the LEFT, in Workflow step 0 "World
+          Characteristics". This column keeps display-only options. */}
 
       {/* Biological / political hazard + influence sublayers */}
       <div style={section}>

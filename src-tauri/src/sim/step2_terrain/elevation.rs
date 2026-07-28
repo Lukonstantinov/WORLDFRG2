@@ -1182,6 +1182,444 @@ pub fn generate_elevation_ridged(
     }
 }
 
+// ── Cordillera ──────────────────────────────────────────────────────────────
+
+/// One traced mountain spine: a continuous crest line plus the reference
+/// distance-from-coast it was traced along.
+struct Spine {
+    /// Crest cells in order along strike.
+    points: Vec<(u32, u32)>,
+    /// Distance-from-coast the crest holds — the reference that tells a cell
+    /// whether it sits on the seaward or the inland flank.
+    ref_coast: Vec<u16>,
+}
+
+/// Generate a **cordillera**: one or more long, continuous mountain chains that
+/// run parallel to a continental margin, in the manner of the Andes, the Rockies
+/// or the Sierra Madre.
+///
+/// This is structurally different from `generate_elevation_ridged`, which fills a
+/// blobby noise mask with isotropic ridged multifractal — statistically mountainous,
+/// but with no chain, no crest line, no consistent strike and no rain-shadow side.
+/// A cordillera has all four, and they are what a reader of the map actually sees:
+///
+/// 1. **A traced spine.** Crests are walked as polylines along an iso-contour of
+///    distance-from-coast, so the chain genuinely follows the coastline the way a
+///    subduction-margin orogen does, instead of being wherever noise happened to
+///    peak.
+/// 2. **A continental divide.** The spine is continuous, so rivers part along it
+///    and the drainage map inherits a real watershed backbone.
+/// 3. **Asymmetric flanks.** The seaward side drops steeply to a narrow coastal
+///    plain; the inland side lets down through a broad piedmont apron of
+///    foothills. (Andes: a few tens of km to the Pacific, hundreds into the
+///    Amazon basin.) The side is decided by comparing a cell's own
+///    distance-from-coast to the crest's.
+/// 4. **Parallel sub-ranges.** A cordillera is a *system* of ranges — Occidental,
+///    Central, Oriental — separated by high intermontane basins. A cross-strike
+///    modulation puts 2–3 sub-crests inside the envelope with plateaus between.
+///
+/// Along-strike the crest rises and falls, so the chain has summits and saddles
+/// (passes) rather than a uniform wall.
+///
+/// Sliders: `mountain_density` → number of chains and sub-ranges,
+/// `mountain_height` → summit altitude, `mountain_spread` → chain width and how
+/// far inland it sits, `noise_roughness` → crest serration and erosion depth.
+pub fn generate_elevation_cordillera(
+    buf: &mut WorldBuffer,
+    seed: u64,
+    mountain_density: f32,
+    mountain_height: f32,
+    mountain_spread: f32,
+    noise_roughness: f32,
+) {
+    let w = buf.width;
+    let h = buf.height;
+    let n = buf.total();
+    let density = mountain_density.clamp(0.0, 1.0);
+    let height = mountain_height.clamp(0.0, 1.0);
+    let spread = mountain_spread.clamp(0.0, 1.0);
+    let roughness = noise_roughness.clamp(0.0, 1.0);
+    let terrain = buf.terrain.clone();
+
+    // ── Distance-from-coast: the field the whole method is built on ──
+    let coast_dist = coast_distance(&terrain, w, h);
+
+    // ── Geometry, in CELLS, so a chain's proportions scale with the map ──
+    // Half-width of the high range itself, and of the foothill apron beyond it.
+    let crest_offset = 5.0 + spread * 22.0;      // how far inland the crest runs
+    let range_half = 4.0 + spread * 14.0;        // high-range half-width
+    let piedmont = range_half * (2.2 + spread * 1.8); // inland apron reach
+    let seaward = range_half * 0.85;             // steep seaward flank reach
+    let search_radius = (piedmont.max(seaward) + 4.0) as u16;
+
+    // ── Trace the chains ──
+    let spines = trace_spines(
+        &terrain, &coast_dist, w, h, seed, crest_offset, density,
+    );
+
+    // ── Distance to the nearest crest, carrying that crest's reference data ──
+    // A bounded multi-source BFS: cost is O(seeded area × search_radius), not
+    // O(world × spine length).
+    let mut sp_dist = vec![u16::MAX; n];
+    let mut sp_ref_coast = vec![0u16; n];
+    let mut sp_amp = vec![0.0f32; n];
+    {
+        let mut queue = VecDeque::new();
+        for sp in &spines {
+            let len = sp.points.len().max(1) as f32;
+            for (k, &(px, py)) in sp.points.iter().enumerate() {
+                let i = (py * w + px) as usize;
+                if terrain[i] != 1 || sp_dist[i] == 0 {
+                    continue;
+                }
+                // Along-strike height envelope: taper to nothing at both ends so
+                // a chain emerges from and sinks back into the lowlands, and
+                // undulate in between so it has summits and passes.
+                let t = k as f32 / len;
+                let taper = (t * std::f32::consts::PI).sin().max(0.0).powf(0.45);
+                let undulate = 0.72
+                    + 0.28 * fbm_noise(k as f32 / 26.0, 0.0, seed.wrapping_add(0xC0DE), 3, 2.0, 0.5);
+                sp_dist[i] = 0;
+                sp_ref_coast[i] = sp.ref_coast[k];
+                sp_amp[i] = taper * undulate;
+                queue.push_back(i);
+            }
+        }
+        while let Some(ci) = queue.pop_front() {
+            let d = sp_dist[ci];
+            if d >= search_radius {
+                continue;
+            }
+            let cx = (ci % w as usize) as i32;
+            let cy = (ci / w as usize) as i32;
+            for (dx, dy) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let ny = cy + dy;
+                if ny < 0 || ny >= h as i32 {
+                    continue;
+                }
+                let nx = ((cx + dx) % w as i32 + w as i32) % w as i32;
+                let ni = (ny as u32 * w + nx as u32) as usize;
+                if terrain[ni] != 1 || sp_dist[ni] <= d + 1 {
+                    continue;
+                }
+                sp_dist[ni] = d + 1;
+                sp_ref_coast[ni] = sp_ref_coast[ci];
+                sp_amp[ni] = sp_amp[ci];
+                queue.push_back(ni);
+            }
+        }
+    }
+
+    // ── Compose the elevation field ──
+    let f_hill = 1.0 / 46.0;
+    let f_crest = 1.0 / (18.0 + spread * 26.0); // serration wavelength along the crest
+    // Sub-range count: 1 at low density, up to 3 (Occidental/Central/Oriental).
+    let sub_ranges = 1.0 + (density * 2.2).floor();
+
+    let mut elevation = vec![0.0f32; n];
+    for y in 0..h {
+        for x in 0..w {
+            let idx = (y * w + x) as usize;
+            if terrain[idx] != 1 {
+                continue;
+            }
+            let ax = x as f32;
+            let ay = y as f32;
+
+            // Continental base: a low, broad swell so lowlands are not dead flat.
+            let base = fbm_noise(ax / 620.0 + 3.1, ay / 620.0 + 7.7, seed, 4, 2.0, 0.5) * 0.16;
+            let hill = fbm_noise(ax * f_hill, ay * f_hill, seed.wrapping_add(0xFEED), 3, 2.0, 0.45)
+                * (0.03 + roughness * 0.07);
+
+            let mut e = base + hill;
+
+            if sp_dist[idx] != u16::MAX && sp_amp[idx] > 0.0 {
+                let d = sp_dist[idx] as f32;
+                // Which flank? Seaward cells sit closer to the coast than the crest.
+                let seaward_side = (coast_dist[idx] as i32) < (sp_ref_coast[idx] as i32);
+                let reach = if seaward_side { seaward } else { piedmont };
+                let core = range_half;
+
+                // Cross-strike profile: a flat-topped crest zone, then a flank
+                // that falls off. The seaward flank uses a higher exponent, so it
+                // drops fast; the inland flank a lower one, so it lets down long.
+                let profile = if d <= core {
+                    1.0 - 0.18 * (d / core.max(1.0)).powi(2)
+                } else {
+                    let t = ((d - core) / (reach - core).max(1.0)).clamp(0.0, 1.0);
+                    let falloff = if seaward_side { 1.9 } else { 3.2 };
+                    (1.0 - t).powf(falloff) * 0.82
+                };
+                if profile > 0.0 {
+                    // Parallel sub-ranges: a cosine across strike puts extra
+                    // crests either side of the main divide, with intermontane
+                    // basins in the troughs between them.
+                    let phase = (d / core.max(1.0)) * std::f32::consts::PI * sub_ranges;
+                    let sub = 1.0 + 0.22 * phase.cos() * (1.0 - (d / reach).clamp(0.0, 1.0));
+                    // Crest serration along strike, so the divide is a saw of
+                    // summits rather than a smooth wall.
+                    let serr = ridged_multifractal(
+                        ax * f_crest, ay * f_crest, seed.wrapping_add(0x51DE), 5, 2.1, 2.0,
+                    );
+                    let serration = 0.80 + 0.40 * serr * (0.5 + roughness * 0.5);
+                    e += profile * sp_amp[idx] * sub * serration * 0.95;
+                }
+            }
+            elevation[idx] = e.max(0.01);
+        }
+    }
+
+    // ── Coastal taper that keeps a coastal range (see generate_elevation_from_terrain) ──
+    const COAST_D: u16 = 3;
+    for i in 0..n {
+        if terrain[i] != 1 || coast_dist[i] >= COAST_D {
+            continue;
+        }
+        let ratio = coast_dist[i] as f32 / COAST_D as f32;
+        let taper = 0.5 + 0.5 * ratio;
+        let ridge_keep = ((elevation[i] - 0.35) / 0.65).clamp(0.0, 1.0);
+        elevation[i] *= taper.max(ridge_keep);
+    }
+
+    // ── Erosion + the shared hypsometric pipeline ──
+    let erosion_scale = 0.5 + roughness * 0.5;
+    let hydro_iterations = ((n as f32 * 0.015 * erosion_scale) as u32).clamp(15_000, 100_000);
+    let pre_erosion = elevation.clone();
+    hydraulic_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations);
+    thermal_erosion(&mut elevation, &terrain, w, h, 2 + (roughness * 2.0) as u32);
+    isostatic_adjust(&mut elevation, &terrain, &buf.boundary_type, &pre_erosion, w, h);
+
+    normalize_and_redistribute(&mut elevation, &terrain, n, height, density);
+    apply_micro_relief(&mut elevation, &terrain, w, h, seed.wrapping_add(0x31C7));
+
+    for i in 0..n {
+        buf.elevation[i] = if terrain[i] == 1 { elevation[i] } else { 0.0 };
+    }
+}
+
+/// Cells to the nearest sea cell, for every land cell (full flood, 4-connected,
+/// X wrapping / Y clamping). Sea cells are 0.
+fn coast_distance(terrain: &[u8], w: u32, h: u32) -> Vec<u16> {
+    let n = terrain.len();
+    let mut dist = vec![0u16; n];
+    let mut visited = vec![false; n];
+    let mut queue = VecDeque::new();
+    for i in 0..n {
+        if terrain[i] != 1 {
+            visited[i] = true;
+            queue.push_back(i);
+        }
+    }
+    while let Some(ci) = queue.pop_front() {
+        let cx = (ci % w as usize) as i32;
+        let cy = (ci / w as usize) as i32;
+        let d = dist[ci];
+        for (dx, dy) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+            let ny = cy + dy;
+            if ny < 0 || ny >= h as i32 {
+                continue;
+            }
+            let nx = ((cx + dx) % w as i32 + w as i32) % w as i32;
+            let ni = (ny as u32 * w + nx as u32) as usize;
+            if visited[ni] {
+                continue;
+            }
+            visited[ni] = true;
+            dist[ni] = d.saturating_add(1);
+            queue.push_back(ni);
+        }
+    }
+    dist
+}
+
+/// Walk mountain crests along iso-contours of distance-from-coast.
+///
+/// This is what makes the result a *cordillera* rather than a noise field: the
+/// walker steps perpendicular to ∇(distance-from-coast), which is by construction
+/// parallel to the coastline, so the chain shadows the margin the way a
+/// subduction orogen does. A slow drift in the target offset and a noise term on
+/// the heading keep it from being a mechanical offset curve.
+fn trace_spines(
+    terrain: &[u8], coast_dist: &[u16], w: u32, h: u32,
+    seed: u64, crest_offset: f32, density: f32,
+) -> Vec<Spine> {
+    let n = terrain.len();
+    let land_cells = terrain.iter().filter(|&&t| t == 1).count();
+    if land_cells == 0 {
+        return Vec::new();
+    }
+    let mut rng = StdRng::seed_from_u64(seed ^ 0xC03D_1E5A_u64);
+
+    // How many chains to attempt: scale with land AREA so a big world gets more
+    // cordilleras rather than longer ones.
+    let target = ((land_cells as f32 / 90_000.0) * (0.7 + density * 1.6)).round();
+    let attempts = (target.clamp(1.0, 14.0) as usize) * 6;
+    // A cordillera is LONG: reject anything that peters out early, or the map
+    // fills with stubs.
+    let min_len = ((w.max(h) as f32) * 0.10).max(24.0) as usize;
+    let max_len = (w.max(h) as f32 * 1.2) as usize;
+
+    // Candidate starts: land cells sitting near the target offset from a coast.
+    let lo = (crest_offset * 0.6) as u16;
+    let hi = (crest_offset * 1.7) as u16 + 2;
+    let mut candidates: Vec<usize> = (0..n)
+        .filter(|&i| terrain[i] == 1 && coast_dist[i] >= lo && coast_dist[i] <= hi)
+        .collect();
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+    candidates.shuffle(&mut rng);
+
+    // Keep chains apart so they read as separate cordilleras.
+    let spacing = (crest_offset * 2.5).max(18.0);
+    let mut claimed: Vec<(f32, f32)> = Vec::new();
+    let mut spines = Vec::new();
+
+    for &start in candidates.iter().take(attempts) {
+        if spines.len() >= target.clamp(1.0, 14.0) as usize {
+            break;
+        }
+        let sx = (start % w as usize) as f32;
+        let sy = (start / w as usize) as f32;
+        // Reject a start too near an existing chain (X distance wraps).
+        if claimed.iter().any(|&(cx, cy)| {
+            let mut dx = (sx - cx).abs();
+            if dx > w as f32 / 2.0 {
+                dx = w as f32 - dx;
+            }
+            (dx * dx + (sy - cy) * (sy - cy)).sqrt() < spacing
+        }) {
+            continue;
+        }
+
+        // Walk both ways from the seed so the chain grows in both directions and
+        // the seed ends up mid-chain rather than at one end.
+        let dir0 = rng.gen_range(0.0f32..std::f32::consts::TAU);
+        let mut back = walk_spine(terrain, coast_dist, w, h, seed, sx, sy, dir0 + std::f32::consts::PI, max_len / 2);
+        let fwd = walk_spine(terrain, coast_dist, w, h, seed ^ 0x5A5A, sx, sy, dir0, max_len / 2);
+        back.reverse();
+        back.extend(fwd);
+
+        if back.len() < min_len {
+            continue;
+        }
+        let points: Vec<(u32, u32)> = back.iter().map(|&(p, _)| p).collect();
+        let ref_coast: Vec<u16> = back.iter().map(|&(_, c)| c).collect();
+        for &(px, py) in points.iter().step_by(12) {
+            claimed.push((px as f32, py as f32));
+        }
+        spines.push(Spine { points, ref_coast });
+    }
+    spines
+}
+
+/// Walk one direction along a coast-parallel contour, returning the cells
+/// crossed with the distance-from-coast each was at.
+fn walk_spine(
+    terrain: &[u8], coast_dist: &[u16], w: u32, h: u32, seed: u64,
+    mut x: f32, mut y: f32, mut heading: f32, max_steps: usize,
+) -> Vec<((u32, u32), u16)> {
+    let idx = |x: f32, y: f32| -> Option<usize> {
+        if y < 0.0 || y >= h as f32 {
+            return None;
+        }
+        let xi = ((x as i32 % w as i32) + w as i32) % w as i32;
+        Some(y as usize * w as usize + xi as usize)
+    };
+    let Some(i0) = idx(x, y) else { return Vec::new() };
+    // Hold the offset the seed started at, drifting slowly so the chain wanders
+    // toward and away from the coast instead of tracking it rigidly.
+    let mut target = coast_dist[i0] as f32;
+
+    let mut out = Vec::new();
+    let mut last: Option<usize> = None;
+    for step in 0..max_steps {
+        let Some(i) = idx(x, y) else { break };
+        if terrain[i] != 1 {
+            break;
+        }
+        if last != Some(i) {
+            out.push((((i % w as usize) as u32, (i / w as usize) as u32), coast_dist[i] as u16));
+            last = Some(i);
+        }
+
+        // ∇(distance-from-coast) by central differences; the contour direction is
+        // perpendicular to it.
+        let sample = |dx: i32, dy: i32| -> f32 {
+            match idx(x + dx as f32, y + dy as f32) {
+                Some(j) => coast_dist[j] as f32,
+                None => coast_dist[i] as f32,
+            }
+        };
+        let gx = sample(1, 0) - sample(-1, 0);
+        let gy = sample(0, 1) - sample(0, -1);
+        let glen = (gx * gx + gy * gy).sqrt();
+
+        if glen > 1e-3 {
+            // Two perpendiculars; take the one that keeps going the way we were.
+            let (px, py) = (-gy / glen, gx / glen);
+            let dot = px * heading.cos() + py * heading.sin();
+            let (px, py) = if dot >= 0.0 { (px, py) } else { (-px, -py) };
+            // Correction back toward the target offset, so the chain does not
+            // slide down the gradient into the sea or off into the interior.
+            let err = (target - coast_dist[i] as f32).clamp(-6.0, 6.0);
+            let cx = gx / glen * (err * 0.16);
+            let cy = gy / glen * (err * 0.16);
+            heading = (py + cy).atan2(px + cx);
+        }
+        // Organic wander, and a slow drift of the offset itself.
+        heading += (fbm_noise(step as f32 / 34.0, seed as f32 % 97.0, seed, 3, 2.0, 0.5) - 0.5) * 0.42;
+        target += (fbm_noise(step as f32 / 70.0, 11.0, seed.wrapping_add(7), 2, 2.0, 0.5) - 0.5) * 1.1;
+        target = target.clamp(2.0, 90.0);
+
+        x += heading.cos() * 1.6;
+        y += heading.sin() * 1.6;
+    }
+    out
+}
+
+/// Normalize to 0..1, apply the height exponent + p99.8 cap, then the shared
+/// hypsometric redistribution. Extracted so the cordillera path and the ridged
+/// path cannot drift apart in how they set final altitudes.
+fn normalize_and_redistribute(
+    elevation: &mut [f32], terrain: &[u8], n: usize, height: f32, density: f32,
+) {
+    let mut max_h = 0.0f32;
+    for i in 0..n {
+        if terrain[i] == 1 && elevation[i] > max_h {
+            max_h = elevation[i];
+        }
+    }
+    if max_h <= 0.0 {
+        return;
+    }
+    for i in 0..n {
+        if terrain[i] == 1 {
+            elevation[i] /= max_h;
+        }
+    }
+    let exponent = 2.0 - height;
+    for i in 0..n {
+        if terrain[i] == 1 {
+            elevation[i] = elevation[i].powf(exponent);
+        }
+    }
+    let target_cap = 0.35 + height * 0.60;
+    let mut sorted: Vec<f32> = (0..n).filter(|&i| terrain[i] == 1).map(|i| elevation[i]).collect();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    if !sorted.is_empty() {
+        let p998 = sorted[(sorted.len() as f32 * 0.998) as usize].max(0.01);
+        let cap_scale = target_cap / p998;
+        for i in 0..n {
+            if terrain[i] == 1 {
+                elevation[i] = (elevation[i] * cap_scale).clamp(0.01, 1.0);
+            }
+        }
+    }
+    let target = build_target_histogram(height, density);
+    redistribute_elevation(elevation, terrain, n, &target);
+}
+
 /// Scale every land cell's elevation by `scale` (0.5 = halve heights, 1.5 =
 /// raise 50%). If `lock_above` < 1.0, any cell at or above that normalized
 /// height keeps its value, so the highest peaks stay fixed while the rest of the
@@ -1495,6 +1933,185 @@ fn redistribute_elevation(elevation: &mut [f32], terrain: &[u8], n: usize, targe
 mod tests {
     use super::*;
 
+    use crate::sim::world_buffer::ColumnSet;
+
+    /// A rectangular continent inside a sea frame, for the coast-relative tests.
+    fn continent(w: u32, h: u32, margin: u32) -> WorldBuffer {
+        let n = (w * h) as usize;
+        let mut terrain = vec![1u8; n];
+        for y in 0..h {
+            for x in 0..w {
+                if x < margin || x >= w - margin || y < margin || y >= h - margin {
+                    terrain[(y * w + x) as usize] = 0;
+                }
+            }
+        }
+        WorldBuffer {
+            cols: ColumnSet::ALL, width: w, height: h, tiles_x: 1, tiles_y: 1,
+            equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0, obliquity: 23.44,
+            rotation_rate: 1.0, solar_lum: 1.0, greenhouse: 1.0, eccentricity: 0.0167, dryness: 1.0,
+            terrain, elevation: vec![0.0; n],
+            sea_depth: vec![0.0; n], is_shelf: vec![0u8; n], is_shelf_edge: vec![0u8; n],
+            locked_bits: Vec::new(), plate_index: Vec::new(), boundary_type: Vec::new(),
+            is_volcanic: Vec::new(), temperature: Vec::new(), precipitation: Vec::new(),
+            koppen: Vec::new(), soil_type: Vec::new(), fertility: Vec::new(), fishery: Vec::new(),
+            current_type: Vec::new(), wind_vx: Vec::new(), wind_vy: Vec::new(), wind_speed: Vec::new(),
+            current_vx: Vec::new(), current_vy: Vec::new(), distance_to_ocean: Vec::new(),
+            habitability: Vec::new(), salinity: Vec::new(), shark_risk: Vec::new(),
+            goods: Vec::new(), shipworm_risk: Vec::new(), storm_base: Vec::new(),
+            reef_risk: Vec::new(), disease_risk: Vec::new(), precip_summer_frac: Vec::new(),
+            seasonal_amp: Vec::new(), sst: Vec::new(), snow_frac: Vec::new(), biome: Vec::new(),
+        }
+    }
+
+    /// The defining property of a cordillera: its high ground forms a small number
+    /// of LONG CONNECTED chains, not a scatter of independent blobs. Measured as
+    /// the share of high cells that belong to the single largest connected
+    /// component — a chain concentrates them, isotropic ridged noise does not.
+    #[test]
+    fn cordillera_high_ground_forms_connected_chains() {
+        let (w, h) = (220u32, 150u32);
+        let mut buf = continent(w, h, 6);
+        generate_elevation_cordillera(&mut buf, 4242, 0.5, 0.7, 0.5, 0.4);
+
+        let n = (w * h) as usize;
+        // "High" = the top decile of land, so the test does not depend on the
+        // absolute altitudes the hypsometric redistribution happens to pick.
+        let mut land: Vec<f32> = (0..n).filter(|&i| buf.terrain[i] == 1).map(|i| buf.elevation[i]).collect();
+        assert!(!land.is_empty());
+        land.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let thresh = land[(land.len() as f32 * 0.90) as usize];
+
+        let high: Vec<bool> = (0..n).map(|i| buf.terrain[i] == 1 && buf.elevation[i] >= thresh).collect();
+        let total_high = high.iter().filter(|&&v| v).count();
+        assert!(total_high > 50, "expected a meaningful high-ground population");
+
+        // Largest 8-connected component of high ground.
+        let mut seen = vec![false; n];
+        let mut largest = 0usize;
+        for start in 0..n {
+            if !high[start] || seen[start] { continue; }
+            let mut size = 0usize;
+            let mut stack = vec![start];
+            seen[start] = true;
+            while let Some(ci) = stack.pop() {
+                size += 1;
+                let cx = (ci % w as usize) as i32;
+                let cy = (ci / w as usize) as i32;
+                for dy in -1i32..=1 {
+                    for dx in -1i32..=1 {
+                        if dx == 0 && dy == 0 { continue; }
+                        let ny = cy + dy;
+                        if ny < 0 || ny >= h as i32 { continue; }
+                        let nx = ((cx + dx) % w as i32 + w as i32) % w as i32;
+                        let ni = (ny as u32 * w + nx as u32) as usize;
+                        if high[ni] && !seen[ni] { seen[ni] = true; stack.push(ni); }
+                    }
+                }
+            }
+            largest = largest.max(size);
+        }
+        let share = largest as f32 / total_high as f32;
+        assert!(share > 0.30,
+            "cordillera high ground must form connected chains, not scattered blobs: \
+             largest component holds only {:.0}% of high cells", share * 100.0);
+    }
+
+    /// The property that actually separates a cordillera from ridged noise: its
+    /// crest RUNS PARALLEL TO THE MARGIN, so the high ground clusters at one
+    /// distance-from-coast. Isotropic ridged noise puts peaks wherever the noise
+    /// peaked, scattered across every distance from the shore. Measured as the
+    /// spread (standard deviation) of coast-distance over the top-decile cells,
+    /// on the SAME landmass with the SAME sliders and seed.
+    #[test]
+    fn cordillera_crest_runs_parallel_to_the_coast() {
+        let (w, h) = (220u32, 150u32);
+        let mut cord = continent(w, h, 6);
+        let mut noisy = continent(w, h, 6);
+        generate_elevation_cordillera(&mut cord, 4242, 0.5, 0.7, 0.5, 0.4);
+        generate_elevation_ridged(&mut noisy, 4242, 0.5, 0.7, 0.5, 0.4);
+
+        let coast = coast_distance(&cord.terrain, w, h);
+        let spread = |buf: &WorldBuffer| -> f64 {
+            let n = (w * h) as usize;
+            let mut land: Vec<f32> = (0..n).filter(|&i| buf.terrain[i] == 1).map(|i| buf.elevation[i]).collect();
+            land.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let thresh = land[(land.len() as f32 * 0.90) as usize];
+            let ds: Vec<f64> = (0..n)
+                .filter(|&i| buf.terrain[i] == 1 && buf.elevation[i] >= thresh)
+                .map(|i| coast[i] as f64)
+                .collect();
+            let mean = ds.iter().sum::<f64>() / ds.len() as f64;
+            (ds.iter().map(|d| (d - mean).powi(2)).sum::<f64>() / ds.len() as f64).sqrt()
+        };
+        let cord_spread = spread(&cord);
+        let noise_spread = spread(&noisy);
+        assert!(cord_spread < noise_spread * 0.80,
+            "a cordillera's crest must hug one distance from the coast: \
+             spread {cord_spread:.1} cells vs ridged noise {noise_spread:.1}");
+    }
+
+    /// The flanks must be ASYMMETRIC — the whole point of a subduction-margin
+    /// range. Averaged over the chain, the inland side lets down through a much
+    /// broader apron than the seaward side, so mean elevation stays higher
+    /// further from the crest on the inland side.
+    #[test]
+    fn cordillera_flanks_are_asymmetric() {
+        let (w, h) = (220u32, 150u32);
+        let mut buf = continent(w, h, 6);
+        generate_elevation_cordillera(&mut buf, 99, 0.5, 0.7, 0.6, 0.3);
+
+        let coast = coast_distance(&buf.terrain, w, h);
+        // Find the crest band: the coast-distance at which mean elevation peaks.
+        let max_d = *coast.iter().max().unwrap() as usize;
+        let mut sum = vec![0.0f64; max_d + 1];
+        let mut cnt = vec![0u32; max_d + 1];
+        for i in 0..(w * h) as usize {
+            if buf.terrain[i] != 1 { continue; }
+            let d = coast[i] as usize;
+            sum[d] += buf.elevation[i] as f64;
+            cnt[d] += 1;
+        }
+        let mean: Vec<f64> = (0..=max_d)
+            .map(|d| if cnt[d] > 0 { sum[d] / cnt[d] as f64 } else { 0.0 })
+            .collect();
+        let crest = (0..=max_d).max_by(|&a, &b| mean[a].partial_cmp(&mean[b]).unwrap()).unwrap();
+        assert!(crest > 2, "the crest must sit inland of the shoreline, got {crest}");
+
+        // Compare how fast the profile decays either side of the crest, over the
+        // same number of cells.
+        let reach = (crest.min(max_d - crest)).min(20);
+        assert!(reach >= 4, "need room either side of the crest to compare");
+        let seaward: f64 = (1..=reach).map(|k| mean[crest - k]).sum::<f64>() / reach as f64;
+        let inland: f64 = (1..=reach).map(|k| mean[crest + k]).sum::<f64>() / reach as f64;
+        assert!(inland > seaward * 1.10,
+            "inland piedmont must let down more gradually than the seaward scarp \
+             (inland mean {inland:.4} vs seaward {seaward:.4})");
+    }
+
+    /// Same seed and sliders must give exactly the same mountains — the spine
+    /// tracer uses an RNG and a shuffle, so this is the guard that it stays
+    /// deterministic.
+    #[test]
+    fn cordillera_is_deterministic() {
+        let (w, h) = (120u32, 90u32);
+        let mut a = continent(w, h, 5);
+        let mut b = continent(w, h, 5);
+        generate_elevation_cordillera(&mut a, 7, 0.6, 0.6, 0.4, 0.5);
+        generate_elevation_cordillera(&mut b, 7, 0.6, 0.6, 0.4, 0.5);
+        assert_eq!(a.elevation, b.elevation);
+    }
+
+    /// A world with no land at all must not panic or hang.
+    #[test]
+    fn cordillera_handles_an_all_sea_world() {
+        let (w, h) = (40u32, 30u32);
+        let mut buf = continent(w, h, 5);
+        for t in buf.terrain.iter_mut() { *t = 0; }
+        generate_elevation_cordillera(&mut buf, 1, 0.5, 0.5, 0.5, 0.5);
+        assert!(buf.elevation.iter().all(|&e| e == 0.0));
+    }
+
     /// Micro-relief must (1) leave no perfectly flat mono-plateau â€” a uniform
     /// input comes out with adjacent cells differing â€” while (2) staying tiny
     /// (well under the ~18 m lake-fill threshold, and on a FLAT surface under the
@@ -1567,7 +2184,7 @@ mod tests {
             current_vx: Vec::new(), current_vy: Vec::new(), distance_to_ocean: Vec::new(),
             habitability: Vec::new(), salinity: Vec::new(), shark_risk: Vec::new(),
             goods: Vec::new(), shipworm_risk: Vec::new(), storm_base: Vec::new(),
-            reef_risk: Vec::new(), disease_risk: Vec::new(), precip_summer_frac: Vec::new(), seasonal_amp: Vec::new(), sst: Vec::new(), snow_frac: Vec::new(),
+            reef_risk: Vec::new(), disease_risk: Vec::new(), precip_summer_frac: Vec::new(), seasonal_amp: Vec::new(), sst: Vec::new(), snow_frac: Vec::new(), biome: Vec::new(),
         };
         generate_elevation_from_terrain(&mut buf, 12345, 0.5, 0.5, 0.5, 0.5);
 
@@ -1651,7 +2268,7 @@ mod tests {
             current_vx: Vec::new(), current_vy: Vec::new(), distance_to_ocean: Vec::new(),
             habitability: Vec::new(), salinity: Vec::new(), shark_risk: Vec::new(),
             goods: Vec::new(), shipworm_risk: Vec::new(), storm_base: Vec::new(),
-            reef_risk: Vec::new(), disease_risk: Vec::new(), precip_summer_frac: Vec::new(), seasonal_amp: Vec::new(), sst: Vec::new(), snow_frac: Vec::new(),
+            reef_risk: Vec::new(), disease_risk: Vec::new(), precip_summer_frac: Vec::new(), seasonal_amp: Vec::new(), sst: Vec::new(), snow_frac: Vec::new(), biome: Vec::new(),
         };
         // A horizontal ridge across the middle: half-width 6 cells, tall, moderate character.
         let line = RidgeLine {

@@ -166,6 +166,20 @@ export async function simSoilFertility(riversJson: string): Promise<[number, num
   return invoke("sim_soil_fertility", { riversJson });
 }
 
+/** Phase 6b: classify ecological biomes (Köppen + climate/soil/relief + rivers
+ *  & lakes → the `biome` tile column). Purely descriptive — no later phase
+ *  scores off it, so re-running never moves a city or a trade belt. */
+export async function simClassifyBiomes(
+  riversJson: string, lakesJson: string,
+): Promise<[number, number][]> {
+  return invoke("sim_classify_biomes", { riversJson, lakesJson });
+}
+
+/** Per-biome land-cell counts for the Biomes legend (read-only). */
+export async function getBiomeStats(): Promise<import("@types").BiomeStat[]> {
+  return invoke("get_biome_stats");
+}
+
 export async function simGenerateShelves(
   seed: number, shelfWidth: number, noiseAmount: number,
   depthProfile: number, dropoffWidth: number
@@ -226,6 +240,22 @@ export async function simGenerateTerrainRidged(
   noiseRoughness: number,
 ): Promise<[number, number][]> {
   return invoke("sim_generate_terrain_ridged", {
+    seed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness,
+  });
+}
+
+/** Elevation model: a CORDILLERA — long continuous chains traced along the
+ *  continental margin, with a continental divide, asymmetric flanks (steep
+ *  seaward scarp, broad inland piedmont) and parallel sub-ranges. Keeps the
+ *  existing landmass. */
+export async function simGenerateTerrainCordillera(
+  seed: number,
+  mountainDensity: number,
+  mountainHeight: number,
+  mountainSpread: number,
+  noiseRoughness: number,
+): Promise<[number, number][]> {
+  return invoke("sim_generate_terrain_cordillera", {
     seed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness,
   });
 }

@@ -1,7 +1,31 @@
 import { useState } from "react";
 import { useUIStore } from "@state/uiStore";
-import { simGenerateShelves, simGenerateTerrainFromTemplate, simGenerateTerrainRidged, simScaleElevation, simGenerateRidges, undoAction } from "@bridge";
+import { simGenerateShelves, simGenerateTerrainFromTemplate, simGenerateTerrainRidged,
+  simGenerateTerrainCordillera, simScaleElevation, simGenerateRidges, undoAction } from "@bridge";
 import { genBtn } from "@ui/workflow/WorkflowPanel";
+
+/** The three elevation MODELS. Each reads the same four sliders below but builds
+ *  relief a fundamentally different way, so the choice belongs up front rather
+ *  than buried in a row of buttons. */
+type ElevMode = "shape" | "cordillera" | "ridged";
+
+const ELEV_MODES: { id: ElevMode; label: string; blurb: string }[] = [
+  {
+    id: "shape",
+    label: "Shape-based",
+    blurb: "Relief derived from the landmass itself — distance from the coast plus noise ridges. Broad continental swells, mountains wherever the shape suggests them. The safe general-purpose choice.",
+  },
+  {
+    id: "cordillera",
+    label: "Cordillera",
+    blurb: "Long continuous chains traced ALONG the coastline, like the Andes or the Rockies: an unbroken continental divide, a steep seaward scarp, a broad inland piedmont of foothills, and parallel sub-ranges with high basins between them. Gives the map a clear grain and a real rain-shadow side.",
+  },
+  {
+    id: "ridged",
+    label: "Ridged (scattered)",
+    blurb: "Ridged multifractal inside noise-defined orogenic belts. Many separate ranges with no shared strike — good for broken, tectonically chaotic worlds. Range count scales with map size.",
+  },
+];
 
 interface Props {
   seed: number;
@@ -46,6 +70,12 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
   const terrainSeed = terrainParams.seed ?? seed;
   const setTerrainSeed = (v: number) => setTerrainParams({ seed: v });
 
+  // Which elevation MODEL to build relief with. Persisted with the other terrain
+  // params so it survives switching workflow steps.
+  const elevMode: ElevMode = terrainParams.mode ?? "shape";
+  const setElevMode = (m: ElevMode) => setTerrainParams({ mode: m });
+  const activeMode = ELEV_MODES.find((m) => m.id === elevMode)!;
+
   // Ridge-drawing tool: draw lines → generate eroded ranges that follow them.
   const activeTool = useUIStore((s) => s.activeTool);
   const setTool = useUIStore((s) => s.setTool);
@@ -75,31 +105,28 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
   const step1Done = stepCompleted[1] === true;
   void landmassSource;
 
-  const runElevation = async (useSeed: number, ridged = false) => {
+  const runElevation = async (useSeed: number, mode: ElevMode = elevMode) => {
     if (simRunning) return;
     if (!step1Done) {
       setStatus("Step 1 required: Create landmass first");
       return;
     }
+    const modeInfo = ELEV_MODES.find((m) => m.id === mode)!;
     setSimRunning(true);
-    setStatus(ridged
-      ? "Generating world-scale ridged cordillera..."
-      : "Generating elevation from terrain shape...");
+    setStatus(`Generating ${modeInfo.label.toLowerCase()} elevation…`);
     try {
-      if (ridged) {
-        await simGenerateTerrainRidged(useSeed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness);
-      } else {
-        await simGenerateTerrainFromTemplate(useSeed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness);
-      }
+      const args = [useSeed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness] as const;
+      if (mode === "ridged") await simGenerateTerrainRidged(...args);
+      else if (mode === "cordillera") await simGenerateTerrainCordillera(...args);
+      else await simGenerateTerrainFromTemplate(...args);
       invalidateTiles();
       markStepCompleted(2);
-      setStatus(`Elevation & sea depth generated (seed ${useSeed})`);
+      setStatus(`${modeInfo.label} elevation & sea depth generated (seed ${useSeed}) — re-run Ocean & Atmosphere onward`);
     } catch (err) { setStatus(`Error: ${err}`); }
     setSimRunning(false);
   };
 
   const handleGenerateElevation = () => runElevation(terrainSeed);
-  const handleGenerateRidged = () => runElevation(terrainSeed, true);
 
   const handleGenerateRidges = async () => {
     if (simRunning) return;
@@ -184,6 +211,28 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
 
       <div style={{ background: "#0a1018", border: "1px solid #2a3a50", borderRadius: 4, padding: 6, marginBottom: 2 }}>
         <div style={{ color: "#6090b0", fontSize: 10, fontWeight: 600, marginBottom: 4 }}>
+          Generation Mode
+        </div>
+        <div style={{ display: "flex", gap: 3, marginBottom: 4 }}>
+          {ELEV_MODES.map((m) => (
+            <button key={m.id} onClick={() => setElevMode(m.id)} title={m.blurb}
+              style={{
+                flex: 1, padding: "4px 2px", borderRadius: 3, cursor: "pointer", fontSize: 9,
+                lineHeight: 1.15,
+                border: elevMode === m.id ? "1px solid #3a7ac0" : "1px solid #1e2e42",
+                background: elevMode === m.id ? "#1a3a5a" : "#0d1219",
+                color: elevMode === m.id ? "#c0ddf0" : "#6a8aaa",
+                fontWeight: elevMode === m.id ? 600 : 400,
+              }}>
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ color: "#5a7390", fontSize: 9, lineHeight: 1.4, marginBottom: 6 }}>
+          {activeMode.blurb}
+        </div>
+
+        <div style={{ color: "#6090b0", fontSize: 10, fontWeight: 600, marginBottom: 4 }}>
           Terrain Generation Settings
         </div>
         <div style={{ color: "#506880", fontSize: 9, marginBottom: 3 }}>Presets (click, then Generate):</div>
@@ -214,13 +263,9 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
         {slider("Noise Roughness", noiseRoughness, 0.0, 1.0, 0.05, setNoiseRoughness, "Smooth terrain \u2194 Rough terrain")}
       </div>
 
-      <button onClick={handleGenerateElevation} disabled={simRunning || !step1Done} style={genBtn}>
-        Generate Elevation (from terrain)
-      </button>
-      <button onClick={handleGenerateRidged} disabled={simRunning || !step1Done}
-        style={{ ...genBtn, background: "#221a2e", color: "#c8a8e0" }}
-        title="Plate-free, world-size-aware: many ridged ranges that scale with the map (best for large worlds)">
-        ⛰️ Generate Ridged Cordillera (world-scale)
+      <button onClick={handleGenerateElevation} disabled={simRunning || !step1Done}
+        style={{ ...genBtn, background: "#16324a", color: "#c8e2f8" }}>
+        ⛰️ Generate Elevation — {activeMode.label}
       </button>
       <button onClick={handleRandomizeTerrain} disabled={simRunning || !step1Done}
         style={{ ...genBtn, background: "#1a2e1a", color: "#9cd09c" }}>
@@ -310,10 +355,10 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
       )}
 
       <div style={{ color: "#405060", fontSize: 10, marginTop: 2 }}>
-        Elevation is generated from the land shape (coast distance + noise ridges),
-        fully controlled by the sliders above. Use 🎲 Randomize for a new seed with
-        the same settings, or the Elevation paint tool for manual mountains
-        (Shift+drag resets to 0 m).
+        All three modes keep your existing land/sea and are driven entirely by the
+        sliders above. Use 🎲 Randomize for a new seed with the same settings, draw
+        ridges by hand for specific ranges, or the Elevation paint tool for manual
+        mountains (Shift+drag resets to 0 m).
       </div>
     </div>
   );

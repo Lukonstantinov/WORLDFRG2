@@ -6,15 +6,18 @@
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
-    "baseUrl": ".",
+    // No "baseUrl": it is deprecated (TS5101) and made `npx tsc --noEmit` fail
+    // outright on TS 5.9+. Under moduleResolution "bundler" the "paths" below
+    // already resolve relative to this file, and Vite carries its own mirrored
+    // alias table (vite.config.ts), so nothing else depends on it.
     "paths": {
-      "@state/*": ["src/state/*"],
-      "@canvas/*": ["src/canvas/*"],
-      "@ui/*": ["src/ui/*"],
-      "@bridge": ["src/bridge/index"],
-      "@types": ["src/types"],
-      "@goods": ["src/goods"],
-      "@app/*": ["src/*"]
+      "@state/*": ["./src/state/*"],
+      "@canvas/*": ["./src/canvas/*"],
+      "@ui/*": ["./src/ui/*"],
+      "@bridge": ["./src/bridge/index"],
+      "@types": ["./src/types"],
+      "@goods": ["./src/goods"],
+      "@app/*": ["./src/*"]
     },
     "allowImportingTsExtensions": true,
     "isolatedModules": true,

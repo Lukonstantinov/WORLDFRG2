@@ -184,6 +184,70 @@ pub fn sim_soil_fertility(
     buf.save(&conn, "Soil & fertility")
 }
 
+/// Classify ecological biomes.
+/// Phase 6b: Köppen + the climate/soil/relief stack + rivers & lakes → `biome`.
+///
+/// Runs AFTER soil (it reads `soil_type` for the prairie/podzol/peat fingerprints)
+/// and needs rivers + lakes for the azonal wetland/riparian biomes. Purely
+/// descriptive — no later phase scores off the result.
+#[tauri::command]
+pub fn sim_classify_biomes(
+    rivers_json: String,
+    lakes_json: String,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_BIOME)?;
+
+    let river_data: Vec<rivers::River> = serde_json::from_str(&rivers_json).unwrap_or_default();
+    let lake_data: Vec<rivers::Lake> = serde_json::from_str(&lakes_json).unwrap_or_default();
+
+    crate::sim::biome::classify_biomes(&mut buf, &river_data, &lake_data);
+
+    buf.save(&conn, "Biome classification")
+}
+
+/// Per-biome land-cell counts for the legend, as `(code, name, group, cells)`.
+/// Read-only — no tile write-back, so it never dirties the world.
+#[tauri::command]
+pub fn get_biome_stats(db: State<'_, WorldDb>) -> Result<Vec<BiomeStat>, String> {
+    use crate::sim::biome::{biome_group, biome_name, BIOME_COUNT};
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let buf = WorldBuffer::load_with(&conn, ColumnSet::TERRAIN | ColumnSet::BIOME)?;
+
+    let mut counts = vec![0u32; BIOME_COUNT];
+    for i in 0..buf.total() {
+        if buf.terrain[i] != 1 {
+            continue;
+        }
+        let b = buf.biome[i] as usize;
+        if b < BIOME_COUNT {
+            counts[b] += 1;
+        }
+    }
+    Ok((1..BIOME_COUNT)
+        .filter(|&b| counts[b] > 0)
+        .map(|b| BiomeStat {
+            code: b as u8,
+            name: biome_name(b as u8).to_string(),
+            group: biome_group(b as u8).to_string(),
+            cells: counts[b],
+        })
+        .collect())
+}
+
+/// One biome's share of the world, for the Biomes legend.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BiomeStat {
+    pub code: u8,
+    pub name: String,
+    pub group: String,
+    pub cells: u32,
+}
+
 /// Run the biological phase: shark-habitat danger + trade-good belts.
 /// Phase 8: Sharks + trade goods (persisted u8 fields).
 #[tauri::command]
@@ -257,6 +321,10 @@ pub fn sim_refresh_hydrology_biology(
     soil::apply_alluvial_override(&mut buf, &extracted_rivers);
     fertility::compute_fertility(&mut buf, &extracted_rivers);
     fertility::compute_fisheries(&mut buf, &extracted_rivers);
+
+    // Phase 6b: Ecological biomes. After soil (it reads the soil fingerprints) and
+    // after rivers/lakes (they drive the azonal wetland & riparian biomes).
+    crate::sim::biome::classify_biomes(&mut buf, &extracted_rivers, &lakes);
 
     // Phase 8: biological — hazards, trade goods, and inland salt pans.
     let goods = crate::commands::goods_commands::load_world_goods(&conn);
@@ -348,6 +416,10 @@ pub fn sim_run_all(
     fertility::compute_fertility(&mut buf, &extracted_rivers);
     fertility::compute_fisheries(&mut buf, &extracted_rivers);
 
+    // Phase 6b: Ecological biomes. After soil (it reads the soil fingerprints) and
+    // after rivers/lakes (they drive the azonal wetland & riparian biomes).
+    crate::sim::biome::classify_biomes(&mut buf, &extracted_rivers, &lakes);
+
     // Phase 7: Settlements
     biological::compute_disease_risk(&mut buf, &extracted_rivers);
     // Organic culture map first, so settlements are named in their region's culture.
@@ -423,6 +495,29 @@ pub fn sim_generate_terrain_ridged(
     elevation::compute_sea_depth(&mut buf);
     elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
     buf.save(&conn, "Generate ridged elevation")
+}
+
+/// Elevation model: a **cordillera** — long continuous chains traced along the
+/// continental margin, with a continental divide, asymmetric flanks (steep
+/// seaward, broad inland piedmont) and parallel sub-ranges. Keeps the existing
+/// landmass. See `elevation::generate_elevation_cordillera`.
+#[tauri::command]
+pub fn sim_generate_terrain_cordillera(
+    seed: u64,
+    mountain_density: f32,
+    mountain_height: f32,
+    mountain_spread: f32,
+    noise_roughness: f32,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
+    elevation::generate_elevation_cordillera(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
+    elevation::compute_sea_depth(&mut buf);
+    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    buf.save(&conn, "Generate cordillera elevation")
 }
 
 /// Generate mountain ridges from hand-drawn ridge lines.
@@ -523,6 +618,10 @@ pub fn sim_run_all_from_terrain(
     soil::apply_alluvial_override(&mut buf, &extracted_rivers);
     fertility::compute_fertility(&mut buf, &extracted_rivers);
     fertility::compute_fisheries(&mut buf, &extracted_rivers);
+
+    // Phase 6b: Ecological biomes. After soil (it reads the soil fingerprints) and
+    // after rivers/lakes (they drive the azonal wetland & riparian biomes).
+    crate::sim::biome::classify_biomes(&mut buf, &extracted_rivers, &lakes);
 
     // Phase 7: Settlements
     biological::compute_disease_risk(&mut buf, &extracted_rivers);

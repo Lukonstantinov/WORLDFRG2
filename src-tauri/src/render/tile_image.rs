@@ -322,6 +322,16 @@ fn render_plates(tile: &TileData, rgba: &mut [u8]) {
     }
 }
 
+/// The Biomes layer: a per-biome base colour carrying a **procedural pattern
+/// fill**, in the tradition of a geological/vegetation survey sheet — canopy
+/// stipple for forest, tussock ticks for grassland, the standard horizontal
+/// dashes for marsh, ripples for a sand sea, crevasse lines for glacier ice.
+///
+/// Patterns are functions of the cell's position WITHIN the tile with periods
+/// that divide `TILE_SIZE` (128), so adjacent tiles line up without needing the
+/// renderer to know its own world coordinates. They are symbols, not surface
+/// texture: staying at a fixed pixel scale across the LOD pyramid is correct —
+/// it is exactly how a printed map's hatching behaves.
 fn render_biomes(tile: &TileData, rgba: &mut [u8]) {
     for i in 0..PIXEL_COUNT {
         let offset = i * 4;
@@ -329,50 +339,306 @@ fn render_biomes(tile: &TileData, rgba: &mut [u8]) {
             rgba[offset + 3] = 0;
             continue;
         }
-        let (r, g, b) = biome_color(tile.koppen[i], tile.elevation[i]);
-        rgba[offset] = r;
-        rgba[offset + 1] = g;
-        rgba[offset + 2] = b;
+        // Fall back to a Köppen-derived biome on a world generated before phase
+        // 6b existed (the column pads to zero), so the layer is never blank.
+        let b = if tile.biome[i] != 0 {
+            tile.biome[i]
+        } else {
+            koppen_fallback_biome(tile.koppen[i], tile.elevation[i])
+        };
+        let (r, g, b_) = biome_color(b);
+
+        let lx = (i % SIZE) as u32;
+        let ly = (i / SIZE) as u32;
+        // Pattern fill, plus a gentle hypsometric lift so relief still reads
+        // through the flat ecological colours.
+        let pattern = biome_pattern(b, lx, ly);
+        let relief = 1.0 + (tile.elevation[i].clamp(0.0, 1.0) - 0.2) * 0.18;
+        let k = (1.0 + pattern) * relief;
+
+        rgba[offset] = (r as f32 * k).clamp(0.0, 255.0) as u8;
+        rgba[offset + 1] = (g as f32 * k).clamp(0.0, 255.0) as u8;
+        rgba[offset + 2] = (b_ as f32 * k).clamp(0.0, 255.0) as u8;
         rgba[offset + 3] = 255;
     }
 }
 
-fn biome_color(koppen: u8, elevation: f32) -> (u8, u8, u8) {
-    // High elevation overrides.
-    // Elevation is normalized 0-1 over 8848m, so treeline (~3500m) ≈ 0.40 and
-    // permanent snow / nival (~5500m) ≈ 0.62. The previous 0.55/0.75 thresholds
-    // (≈4900m/6600m) almost never triggered, so mountains never showed up.
-    if elevation > 0.62 { return (220, 220, 230); } // alpine / nival (snow)
-    if elevation > 0.40 { return (160, 170, 150); } // montane (above treeline)
+/// Base colour per biome code. Greens darken with canopy closure, open country
+/// runs olive→straw→tan with aridity, wetlands hold a blue-green cast and the
+/// cryosphere is near-white, so the map reads correctly even in greyscale.
+fn biome_color(b: u8) -> (u8, u8, u8) {
+    use crate::sim::biome::*;
+    match b {
+        // Tropical forest
+        B_TROPICAL_RAINFOREST => (13, 74, 31),
+        B_TROPICAL_MOIST_FOREST => (28, 99, 44),
+        B_TROPICAL_SEASONAL_FOREST => (76, 124, 48),
+        B_CLOUD_FOREST => (46, 110, 92),
+        B_MANGROVE => (44, 88, 74),
+        // Tropical open
+        B_SAVANNA => (168, 168, 84),
+        B_THORN_SCRUB => (150, 138, 82),
+        // Temperate forest
+        B_TEMPERATE_RAINFOREST => (32, 92, 66),
+        B_TEMPERATE_DECIDUOUS => (74, 122, 52),
+        B_TEMPERATE_MIXED_FOREST => (62, 108, 60),
+        B_TEMPERATE_CONIFER => (44, 86, 62),
+        B_SUBTROPICAL_MOIST_FOREST => (58, 116, 54),
+        // Mediterranean
+        B_MEDITERRANEAN_WOODLAND => (124, 134, 70),
+        B_CHAPARRAL => (146, 138, 88),
+        // Boreal
+        B_TAIGA => (38, 76, 58),
+        B_FOREST_TUNDRA => (86, 106, 82),
+        // Grassland
+        B_TALLGRASS_PRAIRIE => (158, 164, 88),
+        B_SHORTGRASS_STEPPE => (176, 170, 108),
+        B_MONTANE_GRASSLAND => (140, 148, 96),
+        // Alpine
+        B_ALPINE_MEADOW => (126, 154, 110),
+        B_ALPINE_TUNDRA => (150, 156, 140),
+        B_ALPINE_DESERT => (166, 158, 146),
+        B_NIVAL => (206, 210, 216),
+        // Desert
+        B_HOT_DESERT => (216, 188, 130),
+        B_COASTAL_FOG_DESERT => (196, 186, 168),
+        B_COLD_DESERT => (186, 176, 148),
+        B_SEMI_DESERT => (192, 178, 126),
+        B_SALT_FLAT => (232, 228, 222),
+        B_DUNE_SEA => (228, 198, 138),
+        B_ROCKY_DESERT => (176, 152, 120),
+        // Polar
+        B_TUNDRA => (154, 166, 152),
+        B_POLAR_DESERT => (188, 192, 190),
+        B_ICE_SHEET => (238, 244, 250),
+        B_GLACIER => (214, 230, 244),
+        // Wetland & riparian
+        B_PEAT_BOG => (94, 100, 74),
+        B_GALLERY_FOREST => (52, 108, 58),
+        B_FLOODPLAIN_GRASSLAND => (120, 148, 78),
+        B_FRESHWATER_MARSH => (98, 130, 96),
+        B_SWAMP_FOREST => (48, 90, 62),
+        B_SALT_MARSH => (128, 140, 106),
+        B_OASIS => (60, 130, 70),
+        _ => (110, 118, 96),
+    }
+}
 
+/// Pattern classes. Several biomes share one — a taiga and a temperate conifer
+/// forest are both drawn with spires; their colours are what tell them apart.
+#[derive(Clone, Copy, PartialEq)]
+enum Pattern {
+    /// Flat wash — used where a pattern would only add noise (ice, salt flat
+    /// interior, bare polar desert).
+    None,
+    /// Clustered round blobs: closed broadleaf canopy.
+    Canopy,
+    /// Sparser canopy blobs: open woodland and seasonal forest.
+    OpenCanopy,
+    /// Small upward chevrons: needleleaf spires.
+    Spires,
+    /// Short vertical ticks in offset rows: grass sward.
+    Grass,
+    /// Sparse ticks with gaps: bunchgrass steppe.
+    Tussock,
+    /// Scattered small dots: scrub and thorn.
+    Scrub,
+    /// Fine sparse specks: desert gravel/sand grain.
+    Stipple,
+    /// Sinusoidal ripple bands: dune crests of an erg.
+    Dunes,
+    /// Angular broken speckle: hamada, scree and frost-shattered rock.
+    Rubble,
+    /// Horizontal broken dashes in rows — the standard cartographic wetland
+    /// symbol, and the reason a marsh is unmistakable on sight.
+    Marsh,
+    /// Marsh dashes plus stipple: peat and muskeg.
+    Bog,
+    /// Fine diagonal lines: glacier crevasses.
+    Crevasse,
+    /// Low-frequency mottle: tundra's patterned ground.
+    Mottle,
+    /// Polygonal cracking: a dried salt pan.
+    SaltPolygon,
+}
+
+fn biome_pattern_kind(b: u8) -> Pattern {
+    use crate::sim::biome::*;
+    match b {
+        B_TROPICAL_RAINFOREST | B_TROPICAL_MOIST_FOREST | B_CLOUD_FOREST
+        | B_TEMPERATE_RAINFOREST | B_SWAMP_FOREST | B_GALLERY_FOREST | B_OASIS => Pattern::Canopy,
+        B_TROPICAL_SEASONAL_FOREST | B_TEMPERATE_DECIDUOUS | B_TEMPERATE_MIXED_FOREST
+        | B_SUBTROPICAL_MOIST_FOREST | B_MEDITERRANEAN_WOODLAND => Pattern::OpenCanopy,
+        B_TEMPERATE_CONIFER | B_TAIGA | B_FOREST_TUNDRA => Pattern::Spires,
+        B_TALLGRASS_PRAIRIE | B_FLOODPLAIN_GRASSLAND | B_ALPINE_MEADOW
+        | B_MONTANE_GRASSLAND => Pattern::Grass,
+        B_SHORTGRASS_STEPPE | B_SAVANNA | B_SALT_MARSH => Pattern::Tussock,
+        B_THORN_SCRUB | B_CHAPARRAL | B_SEMI_DESERT => Pattern::Scrub,
+        B_HOT_DESERT | B_COLD_DESERT | B_COASTAL_FOG_DESERT | B_ALPINE_DESERT => Pattern::Stipple,
+        B_DUNE_SEA => Pattern::Dunes,
+        B_ROCKY_DESERT | B_ALPINE_TUNDRA | B_NIVAL => Pattern::Rubble,
+        B_MANGROVE | B_FRESHWATER_MARSH => Pattern::Marsh,
+        B_PEAT_BOG => Pattern::Bog,
+        B_GLACIER => Pattern::Crevasse,
+        B_TUNDRA => Pattern::Mottle,
+        B_SALT_FLAT => Pattern::SaltPolygon,
+        _ => Pattern::None,
+    }
+}
+
+/// Brightness delta in roughly [-0.16, +0.10] for the cell at tile-local
+/// `(lx, ly)`. Every period divides 128, so the fill is seamless tile-to-tile.
+fn biome_pattern(b: u8, lx: u32, ly: u32) -> f32 {
+    match biome_pattern_kind(b) {
+        Pattern::None => 0.0,
+
+        // Canopy: blobs on a staggered 8×8 lattice. Rows offset by 4 so the
+        // crowns interlock instead of forming visible columns.
+        Pattern::Canopy => blob(lx, ly, 8, 2.2, -0.15, 0.06),
+        Pattern::OpenCanopy => blob(lx, ly, 8, 1.5, -0.11, 0.05),
+
+        // Spires: a 2-px-wide upward wedge in each 8×8 cell — narrow at the top,
+        // wide at the base, which is what makes it read as a conifer and not a dot.
+        Pattern::Spires => {
+            let cy = ly % 8;
+            let cx = (lx + if (ly / 8) % 2 == 1 { 4 } else { 0 }) % 8;
+            let half_width = cy / 3; // 0 at the tip, 2 at the base
+            let on = cy >= 1 && cy <= 6 && (cx as i32 - 4).abs() <= half_width as i32;
+            if on { -0.14 } else { 0.04 }
+        }
+
+        // Grass: 2-px vertical ticks every 4 columns, rows offset every 8.
+        Pattern::Grass => {
+            let cx = (lx + if (ly / 8) % 2 == 1 { 2 } else { 0 }) % 4;
+            let cy = ly % 8;
+            if cx == 0 && cy >= 4 { -0.11 } else { 0.03 }
+        }
+        // Tussock: the same ticks, but only where the hash says a clump grew —
+        // bunchgrass with bare ground between.
+        Pattern::Tussock => {
+            let cx = (lx + if (ly / 8) % 2 == 1 { 4 } else { 0 }) % 8;
+            let cy = ly % 8;
+            if cx == 0 && cy >= 5 && hash01(lx / 8, ly / 8, 11) > 0.35 { -0.12 } else { 0.03 }
+        }
+
+        // Scrub: isolated 1-px dots on a sparse 8×8 lattice.
+        Pattern::Scrub => {
+            if lx % 8 == 3 && ly % 8 == 3 && hash01(lx / 8, ly / 8, 23) > 0.45 { -0.13 } else { 0.02 }
+        }
+
+        // Stipple: fine sand/gravel grain — a low-density speck field.
+        Pattern::Stipple => {
+            let h = hash01(lx, ly, 37);
+            if h > 0.93 { -0.10 } else if h < 0.06 { 0.06 } else { 0.0 }
+        }
+
+        // Dunes: sinusoidal crests running obliquely, as a real erg's do, with a
+        // sharp lee slope and a soft stoss slope.
+        Pattern::Dunes => {
+            let t = ((lx as f32 * 0.55 + ly as f32 * 0.28) * std::f32::consts::TAU / 16.0).sin();
+            if t > 0.55 { 0.08 } else { t * 0.10 - 0.02 }
+        }
+
+        // Rubble: angular clasts — a hash field thresholded hard so the specks
+        // have edges instead of fading.
+        Pattern::Rubble => {
+            let h = hash01(lx / 2, ly / 2, 53);
+            if h > 0.80 { -0.14 } else if h < 0.18 { 0.07 } else { 0.0 }
+        }
+
+        // Marsh: broken horizontal dashes in alternating offset rows — the
+        // conventional wetland hatch.
+        Pattern::Marsh => marsh_dash(lx, ly),
+        // Bog: the marsh hatch over a stipple of peat hummocks.
+        Pattern::Bog => {
+            let d = marsh_dash(lx, ly);
+            let h = if hash01(lx, ly, 71) > 0.88 { -0.06 } else { 0.0 };
+            d + h
+        }
+
+        // Crevasse: thin diagonal fractures across an otherwise clean ice field.
+        Pattern::Crevasse => {
+            let d = (lx + ly * 2) % 16;
+            if d == 0 && hash01(lx / 16, ly / 8, 89) > 0.4 { -0.12 } else { 0.02 }
+        }
+
+        // Mottle: broad, soft patches — frost-heave patterned ground.
+        Pattern::Mottle => (hash01(lx / 4, ly / 4, 97) - 0.5) * 0.13,
+
+        // Salt polygon: a coarse cracked lattice with slightly irregular cells.
+        Pattern::SaltPolygon => {
+            let on_edge = lx % 16 == 0 || ly % 16 == 0
+                || (lx % 16 == 8 && hash01(lx / 16, ly / 16, 103) > 0.5)
+                || (ly % 16 == 8 && hash01(lx / 16, ly / 16, 107) > 0.5);
+            if on_edge { -0.10 } else { 0.03 }
+        }
+    }
+}
+
+/// A round blob of radius `r` centred in each `period`×`period` lattice cell,
+/// with alternate rows offset by half a period so crowns interlock. Returns
+/// `inside` within the blob and `outside` between them.
+fn blob(lx: u32, ly: u32, period: u32, r: f32, inside: f32, outside: f32) -> f32 {
+    let half = period / 2;
+    let cx = (lx + if (ly / period) % 2 == 1 { half } else { 0 }) % period;
+    let cy = ly % period;
+    let dx = cx as f32 - half as f32;
+    let dy = cy as f32 - half as f32;
+    // Jitter the radius per lattice cell so the canopy is not a perfect grid.
+    let jitter = 0.75 + hash01(lx / period, ly / period, 17) * 0.5;
+    if dx * dx + dy * dy <= (r * jitter) * (r * jitter) { inside } else { outside }
+}
+
+/// Broken horizontal dashes in offset rows — the wetland hatch shared by marsh
+/// and bog.
+fn marsh_dash(lx: u32, ly: u32) -> f32 {
+    if ly % 4 != 1 {
+        return 0.02;
+    }
+    let seg = (lx + if (ly / 4) % 2 == 1 { 4 } else { 0 }) % 8;
+    if seg < 5 { -0.13 } else { 0.02 }
+}
+
+/// Deterministic hash in [0, 1) from two lattice coordinates and a salt. Pure
+/// integer mixing — no allocation, no float noise field, and identical on every
+/// platform.
+fn hash01(x: u32, y: u32, salt: u32) -> f32 {
+    let mut h = x
+        .wrapping_mul(0x9E37_79B9)
+        ^ y.wrapping_mul(0x85EB_CA6B)
+        ^ salt.wrapping_mul(0xC2B2_AE35);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2545_F491);
+    h ^= h >> 13;
+    (h & 0x00FF_FFFF) as f32 / 16_777_216.0
+}
+
+/// Best-effort biome for a world saved before phase 6b existed, so the Biomes
+/// layer still shows something sensible until the user re-runs the phase. This
+/// is the OLD Köppen-and-elevation mapping, kept only as a fallback.
+fn koppen_fallback_biome(koppen: u8, elevation: f32) -> u8 {
+    use crate::sim::biome::*;
+    if elevation > 0.62 { return B_NIVAL; }
+    if elevation > 0.40 { return B_ALPINE_TUNDRA; }
     match koppen {
-        1 => (0, 80, 20),        // Af - tropical rainforest (dark green)
-        2 => (20, 100, 40),      // Am - tropical monsoon forest
-        3 => (140, 170, 60),     // Aw - tropical savanna (yellow-green)
-        4 => (210, 190, 130),    // BWh - hot desert (tan)
-        5 => (190, 175, 140),    // BWk - cold desert
-        6 => (185, 175, 100),    // BSh - hot steppe (khaki)
-        7 => (170, 165, 110),    // BSk - cold steppe
-        8 | 9 | 10 => (120, 150, 60),  // Cs - Mediterranean scrubland
-        11 => (60, 120, 50),     // Cfa - subtropical forest
-        12 => (50, 110, 60),     // Cfb - temperate deciduous forest
-        13 => (40, 90, 55),      // Cfc - cool temperate forest
-        14 | 15 => (50, 100, 50), // Dfa/Dfb - mixed forest
-        16 | 17 => (30, 70, 50), // Dfc/Dfd - taiga / boreal forest (dark teal)
-        18 | 19 | 20 => (80, 110, 70), // Ds - dry continental
-        21 => (180, 190, 180),   // ET - tundra (grey-green)
-        22 => (230, 235, 240),   // EF - ice cap (near white)
-        23 => (150, 175, 70),    // As - savanna (dry summer)
-        24 => (60, 120, 50),     // Cwa - subtropical forest
-        25 => (55, 115, 60),     // Cwb - highland forest
-        26 => (45, 95, 58),      // Cwc - cool highland forest
-        27 => (55, 100, 50),     // Dwa - mixed forest
-        28 => (45, 90, 52),      // Dwb - mixed forest
-        29 => (32, 72, 50),      // Dwc - taiga
-        30 => (28, 60, 46),      // Dwd - taiga
-        31 => (80, 110, 70),     // Dsd - dry continental
-        32 => (205, 205, 215),   // H  - alpine
-        _ => (100, 120, 80),
+        1 => B_TROPICAL_RAINFOREST,
+        2 => B_TROPICAL_MOIST_FOREST,
+        3 | 23 => B_SAVANNA,
+        4 => B_HOT_DESERT,
+        5 => B_COLD_DESERT,
+        6 => B_THORN_SCRUB,
+        7 => B_SHORTGRASS_STEPPE,
+        8 | 9 | 10 => B_MEDITERRANEAN_WOODLAND,
+        11 | 24 => B_SUBTROPICAL_MOIST_FOREST,
+        12 | 25 => B_TEMPERATE_DECIDUOUS,
+        13 | 26 => B_TEMPERATE_MIXED_FOREST,
+        14 | 15 | 27 | 28 => B_TEMPERATE_MIXED_FOREST,
+        16 | 17 | 29 | 30 => B_TAIGA,
+        18 | 19 | 20 | 31 => B_SHORTGRASS_STEPPE,
+        21 => B_TUNDRA,
+        22 => B_ICE_SHEET,
+        32 => B_ALPINE_TUNDRA,
+        _ => B_TUNDRA,
     }
 }
 

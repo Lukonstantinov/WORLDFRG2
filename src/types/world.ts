@@ -56,7 +56,12 @@ export interface CellInfo {
   temperature: number;
   precipitation: number;
   koppen: number;
+  /** Display name for the cell's biome (classified column, else Köppen-derived). */
   biome: string;
+  /** Raw biome code (mirrors sim::biome); 0 = unclassified / sea. */
+  biome_code: number;
+  /** Coarse biome family ("Wetland & riparian", "Boreal", …); "" when unclassified. */
+  biome_group: string;
   soil_type: number;
   fertility: number;
   fishery: number;
@@ -138,3 +143,12 @@ export interface RiverParams {
 }
 
 export type WorkflowStep = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
+
+/** One biome's share of the world — mirrors the Rust `BiomeStat`. Feeds the
+ *  Biomes legend in the workflow panel. */
+export interface BiomeStat {
+  code: number;
+  name: string;
+  group: string;
+  cells: number;
+}

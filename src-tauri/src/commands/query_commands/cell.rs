@@ -32,7 +32,19 @@ pub fn get_cell_info(
     let elevation = tile.elevation[idx];
     let is_land = tile.terrain[idx] == 1;
 
-    let biome = koppen_to_biome(koppen, elevation, is_land);
+    // Prefer the classified biome column (phase 6b). Fall back to the old
+    // Köppen-derived name only for sea cells and worlds saved before that phase.
+    let biome_code = tile.biome[idx];
+    let biome = if is_land && biome_code != 0 {
+        crate::sim::biome::biome_name(biome_code).to_string()
+    } else {
+        koppen_to_biome(koppen, elevation, is_land)
+    };
+    let biome_group = if is_land && biome_code != 0 {
+        crate::sim::biome::biome_group(biome_code).to_string()
+    } else {
+        String::new()
+    };
 
     Ok(CellInfo {
         wx,
@@ -46,6 +58,8 @@ pub fn get_cell_info(
         precipitation: tile.precipitation[idx],
         koppen,
         biome,
+        biome_code,
+        biome_group,
         soil_type: tile.soil_type[idx],
         fertility: tile.fertility[idx],
         fishery: tile.fishery[idx],

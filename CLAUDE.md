@@ -115,7 +115,7 @@ old blobs. Run-alls load ALL columns.
   tail is, in order: `salinity` u8 · `shark_risk` u8 · `goods: Vec<Vec<u8>>`
   (`GOODS_COUNT`=45 belts) · `shipworm_risk` · `storm_base` · `reef_risk` ·
   `disease_risk` · `wind_speed` f32 · `precip_summer_frac` · `seasonal_amp` ·
-  `sst` f32 · `snow_frac` (**currently last**). Blobs are **v2 self-describing**
+  `sst` f32 · `snow_frac` · `biome` u8 (**currently last**). Blobs are **v2 self-describing**
   (`[0xF2][2][goods_count u16]`); new fields are **appended last** so older
   `.worldforge` saves still load (trailing reads pad zeros).
 - Tiles stored as zstd-compressed blobs in SQLite.
@@ -148,9 +148,13 @@ world of the same grid size via `TileData::merge_columns`.
 A world carries planetary knobs in `metadata`, read into `WorldBuffer`
 (`obliquity_deg`, `rotation_rate`, `solar_lum`, `greenhouse`, `eccentricity`,
 `dryness`; defaults + clamps in `world_commands.rs::set_planet_config`, edited via
-`LatitudeControl.tsx` (right-side Toolbar) **and** `StepWorldCharacteristics.tsx`
-(left-side WorkflowPanel step 0 — settings-only, always advanceable, shown first
-since every later step's climate physics depends on these). They drive real
+`StepWorldCharacteristics.tsx` (left-side WorkflowPanel step 0 — settings-only,
+always advanceable, shown first since every later step's climate physics depends
+on these). **Every generation setting lives there now**, in collapsible groups
+(Planet · Axis & Seasons · Water & Air · Latitude Frame); the right-side Toolbar
+is display-only. The old duplicate planet block + latitude control that lived in
+the Toolbar are gone — `LatitudeControl.tsx` was replaced by
+`ui/workflow/PlanetControls.tsx` (`PlanetSlider` + `LatitudeFrame`). They drive real
 physics: obliquity → the insolation integral, rotation → circulation-belt
 latitudes AND EBM heat transport, luminosity/greenhouse → the energy budget,
 dryness → a final global multiplier on annual precipitation (not a mechanism).
@@ -187,6 +191,7 @@ Run in order. Each phase depends on previous phases' data.
 | 4 | `sim_classify_climate` | Köppen classification (31 zone codes + H highland) |
 | 5 | `sim_rivers_hydrology` | Priority-flood (Barnes et al. + ε) → rivers → lakes → aquatic ecology |
 | 6 | `sim_soil_fertility` | Soil types (12) → fertility → fisheries |
+| 6b | `sim_classify_biomes` | **41 ecological biomes** (needs rivers+lakes) — see §8.12 |
 | 7 | `sim_generate_settlements` | Habitability scoring → city placement |
 | 7b | `sim_generate_provinces` | Cost-flood + feature-snap province partition (AFTER settlements) |
 | 8 | `sim_biological` | Shark + shipworm risk + trade-good belts (takes seed + gem_deposits) |
@@ -204,7 +209,8 @@ wind_belts → salinity → currents → advect_salinity_and_recouple → sst
   → seasonal_amplitude → ice_albedo_feedback → low_level_jets → precipitation
 ```
 
-Extras: `sim_generate_terrain_ridged`, `sim_scale_elevation`, `sim_invert_terrain`,
+Extras: `sim_generate_terrain_ridged`, **`sim_generate_terrain_cordillera`** (§8.13),
+`sim_scale_elevation`, `sim_invert_terrain`,
 `sim_generate_toponyms` (#26, gated on cultures+rivers), `sim_refresh_hydrology_biology`.
 
 **Two generation paths:**
@@ -339,7 +345,8 @@ tile/
   lod.rs                        ← LOD supertile pyramid (lod 1-4)
 
 render/
-  mod.rs · tile_image.rs        ← 25 render layers (land, elevation, climate, … see §8.7)
+  mod.rs · tile_image.rs        ← 25 render layers (land, elevation, climate, … see §8.7);
+                                  the biomes layer carries PROCEDURAL PATTERN FILLS (§8.12)
 
 paint/
   mod.rs · stroke.rs            ← PaintValue enum (terrain/elevation/shelf/volcanic)
@@ -368,6 +375,7 @@ sim/                            ← organised into per-phase step folders; mod.r
   step5_rivers/                 ← Ph5: rivers.rs (priority-flood/rivers/lakes) · aquatic.rs
                                   (freshwater ecology: fish assemblage, lake limnology)
   step6_soil_fertility/         ← Ph6: soil.rs (12 soil types) · fertility.rs (fisheries)
+                                  · biome.rs (Ph6b: 41 ECOLOGICAL BIOMES — see §8.12)
   step7_settlements/settlements.rs ← Ph7: habitability → city placement (Settlement struct)
   step8_biological_goods/       ← Ph8: biological.rs (shark/shipworm + belts + deposits)
                                   · goods_spec.rs (GoodSpec, 45 belts + ~21 manufactured)
@@ -439,7 +447,7 @@ ui/world/  — map & world
   StatusBar.tsx · WindowBar.tsx ← Bottom status / window chrome
   InfoPanel.tsx                 ← Right-click cell inspector
   ElevationLegend/Histogram.tsx ← Elevation legend + distribution chart
-  LatitudeControl.tsx           ← Latitude band config
+  (LatitudeControl.tsx removed — see ui/workflow/PlanetControls.tsx)
   climate.ts                    ← Köppen → human phrase helpers
   HydrologyPanel.tsx            ← Rivers/lakes + aquatic (fish assemblage, limnology)
   ProvincePanel.tsx             ← 🗺 Provinces BROWSER (sort/filter/compare + generate)
@@ -500,10 +508,17 @@ ui/heraldry/  — heraldry
 
 ui/workflow/
   WorkflowPanel.tsx             ← Generation wizard + "Run All" buttons
-  StepWorldCharacteristics.tsx  ← Step 0: planetary knobs (rotation/retrograde,
-                                  sunlight, greenhouse, eccentricity, dryness, axial
-                                  tilt) shown FIRST since they set the climate physics
+  StepWorldCharacteristics.tsx  ← Step 0: THE single home for every generation
+                                  setting, in collapsible groups — 🪐 Planet
+                                  (rotation/retrograde · sunlight · greenhouse ·
+                                  eccentricity) · 🌍 Axis & Seasons (axial tilt ·
+                                  calendar length) · 💧 Water & Air (dryness) ·
+                                  🧭 Latitude Frame (equator · expansion · line
+                                  proportion, moved here from the right Toolbar).
+                                  Shown FIRST since they set the climate physics
                                   every later step reads. Settings-only, always advanceable.
+  PlanetControls.tsx            ← Shared `PlanetSlider` + `LatitudeFrame` (replaces
+                                  the deleted ui/world/LatitudeControl.tsx)
   Step*.tsx                     ← Landmass, Elevation, OceanAtmo, Climate, Rivers,
                                   SoilResources, Settlements, Biological, Economy,
                                   Political, Campaign, Toponyms (#26, gated)
@@ -620,6 +635,8 @@ offshore current (`cold_override` gated on `is_windward_ocean` + no warm influen
 a warm-current **east** coast reads humid-subtropical (Cfa).
 
 ### 8.7 Render layers (25) & paint tools (5)
+The **biomes** layer is no longer a Köppen recolour — it reads the `biome` column
+and draws procedural pattern fills (§8.12).
 land, elevation, terrain (hillshade), plates, shelf, ridges, fisheries, currents,
 **sst** (sea-surface temperature), temperature, precipitation, wind, **windspeed**
 (low-level wind intensity incl. jets), **snow** (annual snow-cover fraction), climate,
@@ -744,6 +761,106 @@ Note `OverlayManager.rgba()` only understands `hsl()` and returns a hex unchange
 
 ---
 
+### 8.12 Biomes — the ecological layer (phase 6b)
+
+Köppen answers "what is the *climate* here"; it does not answer "what *grows*
+here". `sim/step6_soil_fertility/biome.rs` turns the climate stack into an actual
+vegetation map, writing the `biome` u8 tile column (**41 codes**, 0 = unclassified).
+
+**Three axes.** Two are Holdridge's, which is the right tool for exactly this job:
+
+- **Biotemperature** — the mean of the 12 monthly temperatures with each clamped
+  to 0–30 °C: heat plants can actually use. Frozen months contribute nothing;
+  heat above 30 °C buys no growth. Derived via `koppen::seasonal_temps` (the
+  documented single source of truth for the warm/cold split), so the biome
+  treeline agrees with Köppen's own C↔D boundary and the settlement winter gate.
+- **PET ratio** = `58.93 · biotemp / annual precip`. 1.0 is the humid/dry hinge,
+  >2 semi-arid, >4 arid. This is why a cold 300 mm cell comes out *steppe* while a
+  hot 300 mm cell comes out *desert*, with no special-casing.
+- **Seasonality** from Köppen's own `s`/`w`/`f` letter + `precip_summer_frac` —
+  what separates Mediterranean sclerophyll from evergreen temperate forest.
+
+**Precedence** (each overrides those below):
+```
+1. Cryosphere   permanent ice / nival rock — nothing grows, full stop
+2. Azonal water mangrove · salt marsh · marsh · swamp · peat bog · gallery forest
+                · oasis · floodplain · salt flat. LOCAL water beats regional
+                climate — this is the layer that makes rivers & lakes LEGIBLE.
+3. Altitudinal  above the CLIMATIC treeline (warmest month < 6.5 °C), so the
+                treeline falls from ~4000 m in the tropics to sea level at the
+                Arctic circle instead of sitting at a fixed elevation.
+4. Zonal        the Holdridge/Köppen life zone for the cell's own climate.
+```
+
+Four rules that are easy to get wrong here, all covered by `biome::tests`:
+
+- **The treeline is a TEMPERATURE, not an elevation.** The old layer used fixed
+  0.40/0.62 normalized-elevation cutoffs, which put alpine tundra on warm tropical
+  highlands and none on cold polar lowlands.
+- **The riparian corridor's WIDTH scales with aridity.** A riverbank in rainforest
+  looks like rainforest (reach 1, and the humid guard drops it entirely); in
+  desert the gallery/oasis strip is the only green for a hundred km (reach 6).
+  Repainting humid cells as "gallery forest" just adds noise.
+- **Mangroves are frost-bounded** (coldest month ≥ 5 °C), which is why they stop
+  near 30° on the real Earth; the same tidal flat carries salt marsh beyond that.
+- **`TIDAL_MAX_M` is 80 m, not a true tidal elevation.** A cell is 30–110 km
+  across, so the honest question is "is this a low depositional coast" — tightening
+  it toward real tidal heights empties the biome, since the elevation field's
+  coastal taper rarely lands a shore cell below ~40 m.
+
+**Descriptive only.** No later phase scores off `biome` — goods, fertility,
+habitability and settlement placement are untouched, so re-running it cannot move
+a city or a trade belt. Keep it that way unless FIX_PLAN B1 says otherwise.
+
+**Rendering** (`render/tile_image.rs`): the Biomes layer is a per-biome colour
+carrying a **procedural pattern fill**, in the tradition of a geological survey
+sheet — canopy blobs for broadleaf, chevron spires for conifer, tussock ticks for
+steppe, the standard horizontal dashes for marsh, sinusoidal ripples for a sand
+sea, crevasse lines for glacier ice, a cracked lattice for a salt pan. Two rules:
+
+- **Every pattern period must divide `TILE_SIZE` (128).** Patterns are functions
+  of the cell's position WITHIN the tile, so a divisor period is what makes them
+  line up tile-to-tile without the renderer knowing its world coordinates.
+- **They are SYMBOLS, not surface texture.** Holding a fixed pixel scale across
+  the LOD pyramid is correct — that is how printed map hatching behaves.
+
+`biome_color` (render) and `BIOME_SWATCH` (`StepSoilResources.tsx` legend) are
+two copies of the same palette — change one, change both, or the legend lies.
+A world saved before this phase pads the column to zero and falls back to
+`koppen_fallback_biome`, so the layer is never blank.
+
+### 8.13 Cordillera elevation (`generate_elevation_cordillera`)
+
+The third elevation MODEL, beside shape-based and ridged. `generate_elevation_ridged`
+fills noise-defined orogenic belts with isotropic ridged multifractal: statistically
+mountainous, but with no chain, no crest line, no consistent strike and no
+rain-shadow side. A cordillera has all four, and they are what a map reader sees.
+
+1. **A traced spine.** Crests are walked as polylines along an iso-contour of
+   distance-from-coast — the walker steps perpendicular to ∇(coast distance),
+   which is by construction parallel to the coastline, so the chain shadows the
+   margin the way a subduction orogen does. Noise on the heading plus a slow
+   drift of the target offset keep it off a mechanical offset curve.
+2. **A continental divide.** The spine is continuous, so rivers part along it and
+   the drainage map inherits a real watershed backbone.
+3. **Asymmetric flanks.** Seaward: a steep scarp (falloff exponent 1.9) to a
+   narrow coastal plain. Inland: a broad piedmont apron (exponent 3.2) over
+   ~2–4× the distance. The side is decided by comparing a cell's own
+   coast-distance to the crest's, carried outward by the BFS.
+4. **Parallel sub-ranges.** A cross-strike cosine puts 1–3 sub-crests inside the
+   envelope with intermontane basins between — Occidental / Central / Oriental.
+
+Along-strike the crest tapers to nothing at both ends and undulates between, so
+the chain emerges from the lowlands with summits and saddles rather than being a
+uniform wall.
+
+Guarded by `elevation::tests`: the crest's coast-distance **spread** must be
+under 80 % of the ridged generator's on the same landmass (the real
+chain-vs-noise discriminator — a plain connectivity metric saturates and does not
+discriminate), the inland flank must average >10 % higher than the seaward at
+equal distance, and the same seed must reproduce bit-identical elevation (the
+spine tracer uses an RNG **and** a shuffle).
+
 ## 9. Docs (`docs/`)
 
 **START HERE — the current plan**
@@ -823,3 +940,13 @@ root holds only `README.md` and `CLAUDE.md`.
     `step3_ocean_atmo/` or `step4_climate/` change** → run the Earth fidelity gate (§2.3)
     and re-read §8.9 (no per-cell outward scans; keep the row loops parallel).
     **After any verified change** → push to `main` (§2.2), and keep this file true (§2.4).
+13. **`biome` is descriptive** — nothing downstream may score off it (§8.12), and the
+    render palette has a twin in the legend that must move with it.
+14. **Generation settings go in the LEFT panel** (`StepWorldCharacteristics`, step 0);
+    the right-side Toolbar is display-only (opacity, palettes, overlay toggles). Never
+    reintroduce a duplicate control in both columns — that duplication is what made the
+    planet knobs and the latitude frame drift apart.
+15. **A step's gate must match its real data dependency**, not just the previous step.
+    Rivers (5) genuinely needs Köppen (4): channel width comes from mean precipitation
+    along the course and ice caps must not drain. A too-loose gate fails SILENTLY —
+    the pipeline still runs, it just produces a subtly wrong world.

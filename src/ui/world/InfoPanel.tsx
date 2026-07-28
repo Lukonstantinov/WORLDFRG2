@@ -205,6 +205,9 @@ export function InfoPanel() {
           {section("Terrain")}
           {row("Elevation", `${(info.elevation * 8848).toFixed(0)}m`)}
           {row("Biome", info.biome)}
+          {/* The coarse family ("Wetland & riparian", "Boreal", …) — only present
+              once phase 6b has classified this world. */}
+          {info.biome_group ? row("Biome group", info.biome_group) : null}
           {info.is_volcanic && row("Volcanic", "Yes")}
 
           {section("Climate")}

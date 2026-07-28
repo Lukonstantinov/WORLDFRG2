@@ -34,6 +34,7 @@ pub use step5_rivers::aquatic;
 pub mod step6_soil_fertility;
 pub use step6_soil_fertility::soil;
 pub use step6_soil_fertility::fertility;
+pub use step6_soil_fertility::biome;
 
 // ── Step 7 · Settlements ─────────────────────────────────────────────────────
 pub mod step7_settlements;

@@ -28,8 +28,21 @@ fn group_columns(group: &str) -> Option<ColumnSet> {
             | ColumnSet::PRECIPITATION
             | ColumnSet::KOPPEN
             | ColumnSet::SALINITY
-            | ColumnSet::DIST_OCEAN,
-        "soil" => ColumnSet::SOIL | ColumnSet::FERTILITY | ColumnSet::FISHERY,
+            | ColumnSet::DIST_OCEAN
+            // The seasonality/thermal columns are part of the SAME phase-3 output
+            // as temperature & precipitation. Leaving them out imported a world's
+            // new annual means on top of the old world's seasonal amplitude and
+            // summer-rain split, which is what Köppen's C↔D boundary and its
+            // s/w/f third letter are read from — so the imported climate map
+            // disagreed with the imported temperatures.
+            | ColumnSet::SEASON
+            | ColumnSet::SEASON_AMP
+            | ColumnSet::SST
+            | ColumnSet::SNOW,
+        // Biome is phase 6b: it derives from soil AND climate AND hydrology, so it
+        // travels with its own phase's group. A partial import leaves it stale
+        // until "Reclassify Biomes" is re-run (one click, step 6).
+        "soil" => ColumnSet::SOIL | ColumnSet::FERTILITY | ColumnSet::FISHERY | ColumnSet::BIOME,
         "hazards" => ColumnSet::SHARK
             | ColumnSet::SHIPWORM
             | ColumnSet::STORM

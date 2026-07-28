@@ -21,11 +21,22 @@ export function StepRivers({ seed, invalidateTiles }: Props) {
   const { rivers, lakes, setRivers, setLakes } = useWorldStore();
 
   const step2Done = stepCompleted[2] === true;
+  // Rivers depend on CLIMATE as well as relief, which the old step-2-only gate
+  // let you skip: `extract_rivers` sizes each channel from mean precipitation
+  // along its course (runoff = mean_p / 700 mm), damps discharge across arid
+  // Köppen zones, and refuses to seed flow on ice cap (EF) cells. Run it before
+  // step 4 and every river silently comes out at the clamped minimum width, with
+  // rivers draining the ice caps. So the real prerequisite is step 4.
+  const step4Done = stepCompleted[4] === true;
 
   const handleGenerate = async () => {
     if (simRunning) return;
     if (!step2Done) {
       setStatus("Step 2 required: Generate elevation first (rivers need slopes to flow)");
+      return;
+    }
+    if (!step4Done) {
+      setStatus("Step 4 required: Classify climate first — river width comes from precipitation, and ice caps must not drain");
       return;
     }
     setSimRunning(true);
@@ -89,6 +100,12 @@ export function StepRivers({ seed, invalidateTiles }: Props) {
           Complete Step 2 first (rivers need elevation data to flow downhill)
         </div>
       )}
+      {step2Done && !step4Done && (
+        <div style={{ color: "#cc6644", fontSize: 10, padding: "3px 6px", background: "#1a1410", borderRadius: 3 }}>
+          Complete Step 4 first — channel width comes from precipitation and ice
+          caps must not drain, so rivers cut before climate come out uniformly thin.
+        </div>
+      )}
 
       <div style={{ background: "#0a1018", border: "1px solid #2a3a50", borderRadius: 4, padding: 6, marginBottom: 2 }}>
         <div style={{ color: "#6090b0", fontSize: 10, fontWeight: 600, marginBottom: 4 }}>
@@ -106,7 +123,7 @@ export function StepRivers({ seed, invalidateTiles }: Props) {
         </div>
       </div>
 
-      <button onClick={handleGenerate} disabled={simRunning || !step2Done} style={genBtn}>
+      <button onClick={handleGenerate} disabled={simRunning || !step2Done || !step4Done} style={genBtn}>
         Generate Rivers & Lakes
       </button>
       {rivers.length > 0 && (
@@ -115,7 +132,7 @@ export function StepRivers({ seed, invalidateTiles }: Props) {
         </div>
       )}
 
-      <button onClick={handleRefresh} disabled={simRunning || !step2Done}
+      <button onClick={handleRefresh} disabled={simRunning || !step2Done || !step4Done}
         title="Re-run hydrology → soil/fertility → biology on the existing world: adds meanders, oxbow backwaters, salt lakes, delta abundance and salt/goods — without re-rolling terrain or moving settlements."
         style={{ ...genBtn, background: "#12222e", color: "#8fc0d8", border: "1px solid #244a60" }}>
         🔄 Refresh meanders, salt &amp; goods

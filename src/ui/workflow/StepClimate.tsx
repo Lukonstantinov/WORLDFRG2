@@ -8,7 +8,9 @@ interface Props {
   invalidateTiles: () => void;
 }
 
-const BIOME_LEGEND = [
+// The Köppen ZONE legend (this step classifies climate, not vegetation). The
+// ecological biome legend lives in step 6, where phase 6b classifies it.
+const KOPPEN_LEGEND = [
   { code: "Af", name: "Tropical Rainforest", color: "#0000ff", desc: "Hot and wet year-round, dense canopy forests" },
   { code: "Am", name: "Tropical Monsoon", color: "#0078ff", desc: "Seasonal heavy rains with short dry season" },
   { code: "Aw", name: "Tropical Savanna", color: "#46aafa", desc: "Distinct wet and dry seasons, grasslands with scattered trees" },
@@ -71,14 +73,22 @@ export function StepClimate({ invalidateTiles }: Props) {
           View Climate
         </button>
         <button onClick={() => setLayer("biomes")}
+          title="Biomes are classified in Step 6; before then this shows a Köppen-derived approximation."
           style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>
           View Biomes
         </button>
       </div>
 
-      <div style={{ color: "#607090", fontSize: 10, fontWeight: 600, marginTop: 4 }}>Biome Legend</div>
+      <div style={{ color: "#607090", fontSize: 10, fontWeight: 600, marginTop: 4 }}>
+        K{"\u00F6"}ppen Zone Legend
+      </div>
+      <div style={{ color: "#405060", fontSize: 9, lineHeight: 1.35 }}>
+        These are CLIMATE zones. The ecological biomes they feed (rainforest,
+        taiga, mangrove, steppe, gallery forest…) are classified in Step 6, once
+        rivers and soil exist.
+      </div>
       <div style={{ maxHeight: 160, overflowY: "auto", display: "flex", flexDirection: "column", gap: 1 }}>
-        {BIOME_LEGEND.map((b) => (
+        {KOPPEN_LEGEND.map((b) => (
           <div key={b.code} style={{ display: "flex", alignItems: "start", gap: 4, padding: "1px 0" }}>
             <div style={{
               width: 10, height: 10, borderRadius: 2, flexShrink: 0, marginTop: 1,

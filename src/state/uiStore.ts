@@ -26,6 +26,10 @@ export interface TerrainParams {
   spread: number;
   roughness: number;
   seed: number | null; // null = use world seed
+  /** Which elevation MODEL builds the relief. "shape" = coast-distance + noise
+   *  ridges; "cordillera" = continuous coast-parallel chains with a divide and
+   *  asymmetric flanks; "ridged" = scattered ridged-multifractal belts. */
+  mode: "shape" | "cordillera" | "ridged";
 }
 
 export interface RiverParamsState {
@@ -347,7 +351,7 @@ export const useUIStore = create<UIStore>((set) => ({
   layerOpacity: 1,
   stretchToFit: true,
   landmassSource: "none",
-  terrainParams: { density: 0.5, height: 0.5, spread: 0.5, roughness: 0.4, seed: null },
+  terrainParams: { density: 0.5, height: 0.5, spread: 0.5, roughness: 0.4, seed: null, mode: "shape" },
   ridgeLines: [],
   ridgeParams: { width: 8, height: 0.7, character: 0.5, noise: 0.4 },
   riverParams: { density: 0.5, width: 1.0, lakeFillDepth: 0.006, lakeMaxFraction: 0.0001 },

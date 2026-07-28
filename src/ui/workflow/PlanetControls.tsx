@@ -1,7 +1,21 @@
 import { useState, useEffect } from "react";
 import { useWorldStore } from "@state/worldStore";
 import { useUIStore } from "@state/uiStore";
-import { setLatitudeConfig, getPlanetConfig, setPlanetConfig, type PlanetConfig } from "@bridge";
+import { setLatitudeConfig } from "@bridge";
+
+/**
+ * Shared controls for the **World Characteristics** step (left WorkflowPanel).
+ *
+ * These were previously split across two columns: the planetary knobs existed
+ * BOTH here and in a duplicate block inside the right-side Toolbar, and the
+ * latitude framing existed only on the right — even though every one of them
+ * feeds the simulation and must be set before generating. They now live in one
+ * place, on the left, beside the generation steps that consume them.
+ *
+ * `PlanetSlider` is the shared control shape (stepped slider that commits on
+ * release + preset chips + a hint); `LatitudeFrame` is the latitude-framing
+ * block moved over from the Toolbar.
+ */
 
 /** Format a signed latitude (degrees) as e.g. "45°N", "0°", "30°S". */
 function fmtLat(lat: number): string {
@@ -19,20 +33,19 @@ function latAt(yFrac: number, equatorOffset: number, latScale: number): number {
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 /**
- * Controls the dynamic latitude framing. Every control has both a stepped slider
- * and a typed number box (commit on Enter / blur):
+ * Dynamic latitude framing. Every control has a stepped slider and a typed
+ * number box (commit on Enter / blur):
  *  - **Equator** (%) — moves the 0° line up/down; every band follows.
  *  - **Expansion** (%) — stretches the 0/30/60 bands apart; past 100% the poles
  *    fall off-canvas and are cropped.
- *  - **Line proportion** (×) — the spacing ratio between consecutive latitude
- *    lines (gap 30→60 ÷ gap 0→30): 1.0 = even, 2.4 = Mercator, tunable to match
- *    an already-distorted template. This one is display-only (lines move; the map
- *    raster and the simulation are untouched).
+ *  - **Line proportion** (×) — spacing ratio between consecutive latitude lines
+ *    (gap 30→60 ÷ gap 0→30): 1.0 = even, 2.4 = Mercator. Shared with the
+ *    SIMULATION (persisted as `lat_ratio`), not merely a drawing option.
  *
- * Equator/Expansion update the store live so the overlay tracks, and persist to
- * world metadata so the next sim run generates against the new latitudes.
+ * All three persist to world metadata, so the next sim run generates against
+ * the new latitudes.
  */
-export function LatitudeControl() {
+export function LatitudeFrame() {
   const meta = useWorldStore((s) => s.meta);
   const latConfig = useWorldStore((s) => s.latConfig);
   const setLatConfig = useWorldStore((s) => s.setLatConfig);
@@ -42,40 +55,24 @@ export function LatitudeControl() {
   const equatorOffset = latConfig.equatorOffset;
   const latScale = latConfig.latScale;
   const lineRatio = latConfig.lineRatio;
-  // Axial tilt lives on the world meta (it drives the simulation, not the overlay).
   const obliquity = meta?.obliquity ?? 23.44;
 
-  // Local text for the number boxes so typing is free; the displayed value
-  // resyncs whenever the underlying frame changes (slider drag, reset, commit).
   const [eqStr, setEqStr] = useState("");
   const [expStr, setExpStr] = useState("");
   const [ratioStr, setRatioStr] = useState("");
-  const [tiltStr, setTiltStr] = useState("");
   useEffect(() => { setEqStr(String(Math.round(equatorOffset * 100))); }, [equatorOffset]);
   useEffect(() => { setExpStr(String(Math.round(latScale * 100))); }, [latScale]);
   useEffect(() => { setRatioStr(lineRatio.toFixed(2)); }, [lineRatio]);
-  useEffect(() => { setTiltStr(obliquity.toFixed(1)); }, [obliquity]);
-
-  // Planetary state (energy budget + circulation). Loaded once from the backend;
-  // each control persists via set_planet_config and prompts a re-run.
-  const [planet, setPlanet] = useState<PlanetConfig | null>(null);
-  useEffect(() => { getPlanetConfig().then(setPlanet).catch(() => {}); }, [meta?.name]);
-  const commitPlanet = (next: PlanetConfig) => {
-    setPlanet(next); // optimistic
-    setPlanetConfig(next).then(setPlanet).catch(() => {});
-  };
 
   if (!meta) return null;
 
-  // Live overlay update (no IPC) — used while dragging. All three latitude
-  // params now live in latConfig, since the line proportion is shared with the
-  // simulation (persisted as lat_ratio).
+  // Live overlay update (no IPC) — used while dragging.
   const apply = (eq: number, scale: number, ratio: number) => {
     setLatConfig(eq, scale, ratio);
     setOverlayVisible("latLines", true);
   };
-  // Persist to the backend (slider release / typed value), reading the latest
-  // live values so a release after a drag commits the final position.
+  // Persist on slider release / typed value, reading the latest live values so a
+  // release after a drag commits the final position.
   const commitLive = () => {
     const { equatorOffset: eq, latScale: scale, lineRatio: r } = useWorldStore.getState().latConfig;
     setLatitudeConfig(eq, scale, r, obliquity).then(setMeta).catch(() => {});
@@ -96,12 +93,6 @@ export function LatitudeControl() {
     apply(equatorOffset, latScale, ratio);
     if (persist) setLatitudeConfig(equatorOffset, latScale, ratio, obliquity).then(setMeta).catch(() => {});
   };
-  // Axial tilt persists straight to metadata (it changes the simulation, not the
-  // live overlay), then updates meta so the seasonal model re-runs against it.
-  const setTilt = (deg: number) => {
-    const tilt = clamp(deg, 0, 80);
-    setLatitudeConfig(equatorOffset, latScale, lineRatio, tilt).then(setMeta).catch(() => {});
-  };
 
   const commitEq = () => {
     const v = parseFloat(eqStr);
@@ -118,11 +109,6 @@ export function LatitudeControl() {
     if (Number.isFinite(v)) setRatio(v, true);
     else setRatioStr(lineRatio.toFixed(2));
   };
-  const commitTilt = () => {
-    const v = parseFloat(tiltStr);
-    if (Number.isFinite(v)) setTilt(v);
-    else setTiltStr(obliquity.toFixed(1));
-  };
   const onEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") (e.target as HTMLInputElement).blur();
   };
@@ -136,9 +122,7 @@ export function LatitudeControl() {
   const botLat = latAt(1, equatorOffset, latScale);
 
   return (
-    <div style={{ padding: "6px 8px" }}>
-      <div style={header}>Latitude Frame</div>
-
+    <div>
       <div style={row}>
         <span style={lbl}>Equator</span>
         <span style={val}>{Math.round(equatorOffset * 100)}%</span>
@@ -193,116 +177,28 @@ export function LatitudeControl() {
         <button style={chip(Math.abs(lineRatio - 1) < 1e-3)} onClick={() => setRatio(1, true)}>Even 1.0×</button>
         <button style={chip(Math.abs(lineRatio - 2.4) < 1e-3)} onClick={() => setRatio(2.4, true)}>Mercator 2.4×</button>
       </div>
-      <div style={hint}>
-        Line proportion = gap(30→60) ÷ gap(0→30). The map image is not changed,
-        but the SIMULATION now uses this too — re-run from Ocean &amp; Atmosphere
-        so currents/climate land on the lines.
-      </div>
 
-      <div style={{ ...row, marginTop: 8 }}>
-        <span style={lbl}>Axial tilt</span>
-        <span style={val}>{obliquity.toFixed(1)}°</span>
-      </div>
-      <div style={ctrlRow}>
-        <input
-          type="range" min={0} max={80} step={0.5} value={obliquity}
-          onChange={(e) => setTiltStr(String(e.target.value))}
-          onPointerUp={(e) => setTilt(Number((e.target as HTMLInputElement).value))}
-          onKeyUp={(e) => setTilt(Number((e.target as HTMLInputElement).value))}
-          style={range}
-        />
-        <input
-          value={tiltStr} onChange={(e) => setTiltStr(e.target.value)}
-          onBlur={commitTilt} onKeyDown={onEnter} inputMode="decimal" style={numInput}
-        />
-      </div>
-      <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
-        <button style={chip(Math.abs(obliquity - 0) < 1e-3)} onClick={() => setTilt(0)}>None 0°</button>
-        <button style={chip(Math.abs(obliquity - 23.44) < 0.05)} onClick={() => setTilt(23.44)}>Earth 23.4°</button>
-        <button style={chip(Math.abs(obliquity - 45) < 0.05)} onClick={() => setTilt(45)}>Extreme 45°</button>
-      </div>
+      <div style={readout}>Visible: {fmtLat(topLat)} &rarr; {fmtLat(botLat)}</div>
       <div style={hint}>
-        Axial tilt drives the seasons: 0° = no seasons anywhere, 23.4° = Earth-like,
-        higher = harsher winters/summers (tropics reach the poles past 45°). Re-run
-        Ocean &amp; Atmosphere → Climate to apply.
-      </div>
-
-      {planet && (
-        <div style={{ marginTop: 12, borderTop: "1px solid #1a2330", paddingTop: 8 }}>
-          <div style={header}>Planet</div>
-          <PlanetSlider
-            label="Rotation" unit="× Earth" value={Math.abs(planet.rotationRate)}
-            min={0.25} max={4} step={0.05} digits={2}
-            onChange={(v) => commitPlanet({ ...planet, rotationRate: planet.rotationRate < 0 ? -v : v })}
-            presets={[["Slow ½×", 0.5], ["Earth 1×", 1], ["Fast 2×", 2]]}
-            hint="Sets the wind belts / Hadley cell: slower = wider tropics, deserts &amp; storm tracks pushed poleward, fewer bands; faster = tighter banding."
-          />
-          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#5a7090", marginTop: 2, cursor: "pointer" }}>
-            <input type="checkbox" checked={planet.rotationRate < 0}
-              onChange={(e) => commitPlanet({ ...planet, rotationRate: Math.abs(planet.rotationRate) * (e.target.checked ? -1 : 1) })}
-              style={{ accentColor: "#3a80c0" }} />
-            Retrograde rotation (spins backwards — mirrors which coasts get warm/cold
-            boundary currents and which way the trade winds blow)
-          </label>
-          <PlanetSlider
-            label="Greenhouse" unit="× Earth" value={planet.greenhouse}
-            min={0} max={3} step={0.05} digits={2}
-            onChange={(v) => commitPlanet({ ...planet, greenhouse: v })}
-            presets={[["Icehouse ½×", 0.5], ["Earth 1×", 1], ["Hothouse 2×", 2]]}
-            hint="Global warming from atmospheric trapping: higher warms the whole planet and flattens the equator-pole gradient; low enough tips toward a snowball."
-          />
-          <PlanetSlider
-            label="Sunlight" unit="× Earth" value={planet.solarLum}
-            min={0.5} max={1.6} step={0.01} digits={2}
-            onChange={(v) => commitPlanet({ ...planet, solarLum: v })}
-            presets={[["Dim 0.9×", 0.9], ["Earth 1×", 1], ["Bright 1.1×", 1.1]]}
-            hint="Stellar irradiance (a fainter/brighter star or a wider/closer orbit): scales total insolation and the global-mean temperature."
-          />
-          <PlanetSlider
-            label="Eccentricity" unit="" value={planet.eccentricity}
-            min={0} max={0.4} step={0.005} digits={3}
-            onChange={(v) => commitPlanet({ ...planet, eccentricity: v })}
-            presets={[["Circular 0", 0], ["Earth .017", 0.0167], ["High .2", 0.2]]}
-            hint="Orbit shape: higher makes one hemisphere's seasons shorter &amp; sharper than the other's."
-          />
-          <PlanetSlider
-            label="Dryness" unit="× Earth" value={planet.dryness}
-            min={0.3} max={3} step={0.05} digits={2}
-            onChange={(v) => commitPlanet({ ...planet, dryness: v })}
-            presets={[["Wet ½×", 0.5], ["Earth 1×", 1], ["Arid 2×", 2]]}
-            hint="Global precipitation multiplier: higher shrinks rainfall everywhere (deserts expand), lower expands rainforest/monsoon belts. A coarse knob, not a mechanism."
-          />
-          <div style={hint}>
-            These drive the energy-balance climate &amp; the circulation belts. At Earth
-            values the world is unchanged. Re-run Ocean &amp; Atmosphere → Climate to apply.
-          </div>
-        </div>
-      )}
-
-      <div style={readout}>
-        Visible: {fmtLat(topLat)} &rarr; {fmtLat(botLat)}
-      </div>
-      <div style={hint}>
+        Line proportion = gap(30→60) ÷ gap(0→30). The SIMULATION uses it too, so
+        currents and climate land on the lines. Bands past the poles are cropped.
         Re-run Ocean &amp; Atmosphere onward to generate against these latitudes.
-        Bands past the poles are cropped.
       </div>
       <button onClick={reset} style={resetBtn}>Reset to centered</button>
     </div>
   );
 }
 
-const header: React.CSSProperties = {
-  fontSize: 10, color: "#4a6a8a", textTransform: "uppercase", letterSpacing: 1.2,
-  marginBottom: 5, fontWeight: 600,
-};
-const row: React.CSSProperties = {
+// ── Shared control styles ────────────────────────────────────────────────────
+
+export const row: React.CSSProperties = {
   display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2,
 };
-const lbl: React.CSSProperties = { fontSize: 10, color: "#5a7090" };
-const val: React.CSSProperties = { fontSize: 10, color: "#8aa0c0", fontFamily: "monospace" };
-const ctrlRow: React.CSSProperties = { display: "flex", gap: 6, alignItems: "center" };
-const range: React.CSSProperties = { flex: 1, minWidth: 0, height: 4, cursor: "pointer" };
-const numInput: React.CSSProperties = {
+export const lbl: React.CSSProperties = { fontSize: 10, color: "#5a7090" };
+export const val: React.CSSProperties = { fontSize: 10, color: "#8aa0c0", fontFamily: "monospace" };
+export const ctrlRow: React.CSSProperties = { display: "flex", gap: 6, alignItems: "center" };
+export const range: React.CSSProperties = { flex: 1, minWidth: 0, height: 4, cursor: "pointer" };
+export const numInput: React.CSSProperties = {
   width: 50, flexShrink: 0, padding: "2px 4px", fontSize: 11, fontFamily: "monospace",
   background: "#0d1219", color: "#c0d8f0", border: "1px solid #1e2a38",
   borderRadius: 4, textAlign: "right",
@@ -310,14 +206,14 @@ const numInput: React.CSSProperties = {
 const readout: React.CSSProperties = {
   fontSize: 10, color: "#8aa0c0", fontFamily: "monospace", marginTop: 6,
 };
-const hint: React.CSSProperties = {
+export const hint: React.CSSProperties = {
   fontSize: 9, color: "#405060", marginTop: 4, lineHeight: 1.35,
 };
 const resetBtn: React.CSSProperties = {
   marginTop: 6, width: "100%", padding: "3px 0", fontSize: 10, cursor: "pointer",
   background: "#151d28", color: "#7088a0", border: "1px solid #1e2a38", borderRadius: 4,
 };
-function chip(active: boolean): React.CSSProperties {
+export function chip(active: boolean): React.CSSProperties {
   return {
     flex: 1, padding: "3px 0", fontSize: 10, cursor: "pointer", borderRadius: 4,
     border: active ? "1px solid #3a7ac0" : "1px solid #1e2a38",
@@ -327,8 +223,7 @@ function chip(active: boolean): React.CSSProperties {
 }
 
 /** One planetary-state control: a stepped slider (commits on release) with a live
- *  value readout and preset chips. Drives the energy-balance climate + circulation.
- *  Exported so other panels (the left-side World Characteristics step) can reuse it. */
+ *  value readout and preset chips. Drives the energy-balance climate + circulation. */
 export function PlanetSlider(props: {
   label: string; unit: string; value: number;
   min: number; max: number; step: number; digits: number;

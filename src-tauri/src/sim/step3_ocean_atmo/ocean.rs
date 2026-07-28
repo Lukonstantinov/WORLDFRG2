@@ -1910,7 +1910,7 @@ mod tests {
             distance_to_ocean: Vec::new(), habitability: Vec::new(),
             salinity: vec![128u8; n], shark_risk: Vec::new(), goods: Vec::new(),
             shipworm_risk: Vec::new(), storm_base: Vec::new(), reef_risk: Vec::new(),
-            disease_risk: Vec::new(), precip_summer_frac: Vec::new(), seasonal_amp: Vec::new(), sst: Vec::new(), snow_frac: Vec::new(),
+            disease_risk: Vec::new(), precip_summer_frac: Vec::new(), seasonal_amp: Vec::new(), sst: Vec::new(), snow_frac: Vec::new(), biome: Vec::new(),
         }
     }
 

@@ -29,7 +29,13 @@ pub struct CellInfo {
     pub temperature: f32,
     pub precipitation: f32,
     pub koppen: u8,
+    /// Display name for the cell's biome — the classified `biome` column when the
+    /// world has one, else the legacy Köppen-derived name.
     pub biome: String,
+    /// Raw biome code (`sim::biome`), 0 when unclassified / sea.
+    pub biome_code: u8,
+    /// Coarse biome family ("Wetland & riparian", "Boreal", …); empty when unclassified.
+    pub biome_group: String,
     pub soil_type: u8,
     pub fertility: f32,
     pub fishery: f32,
@@ -2748,7 +2754,7 @@ mod river_system_tests {
             current_vx: Vec::new(), current_vy: Vec::new(), distance_to_ocean: Vec::new(),
             habitability: Vec::new(), salinity: Vec::new(), shark_risk: Vec::new(),
             goods: Vec::new(), shipworm_risk: Vec::new(), storm_base: Vec::new(),
-            reef_risk: Vec::new(), disease_risk: Vec::new(), precip_summer_frac: Vec::new(), seasonal_amp: Vec::new(), sst: Vec::new(), snow_frac: Vec::new(),
+            reef_risk: Vec::new(), disease_risk: Vec::new(), precip_summer_frac: Vec::new(), seasonal_amp: Vec::new(), sst: Vec::new(), snow_frac: Vec::new(), biome: Vec::new(),
         }
     }
 

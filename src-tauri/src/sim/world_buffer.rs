@@ -151,9 +151,13 @@ impl ColumnSet {
     /// snow_frac: per-land-cell annual snow-cover fraction (×255). Written by
     /// temperature.rs (ice-albedo feedback), used for the optional snow layer.
     pub const SNOW: ColumnSet = ColumnSet(1 << 27);
+    /// biome: per-land-cell ecological biome code (see `sim::biome::Biome`).
+    /// Written by biome.rs (phase 6b), read by the biome render layer, the cell
+    /// inspector and toponyms. Descriptive only — no later phase scores off it.
+    pub const BIOME: ColumnSet = ColumnSet(1 << 28);
 
     pub const NONE: ColumnSet = ColumnSet(0);
-    pub const ALL: ColumnSet = ColumnSet((1 << 28) - 1);
+    pub const ALL: ColumnSet = ColumnSet((1 << 29) - 1);
 
     // ── Per-phase masks (derived from a mechanical grep of `buf.<column>` in
     // each sim module — see the redesign plan). Each is the union of the columns
@@ -209,6 +213,15 @@ impl ColumnSet {
             | Self::FERTILITY.0 | Self::FISHERY.0 | Self::DIST_OCEAN.0 | Self::HABITABILITY.0
             | Self::TEMPERATURE.0 | Self::SEASON_AMP.0 | Self::DISEASE.0 | Self::GOODS.0
             | Self::PRECIPITATION.0, // province rainfall/aridity stats for the inspector
+    );
+    /// biome.rs (ecological biome classification — phase 6b). Reads the full
+    /// climate/soil/relief stack plus rivers & lakes (passed in, not columns) and
+    /// writes only BIOME.
+    pub const PHASE_BIOME: ColumnSet = ColumnSet(
+        Self::TERRAIN.0 | Self::ELEVATION.0 | Self::KOPPEN.0 | Self::TEMPERATURE.0
+            | Self::PRECIPITATION.0 | Self::SEASON.0 | Self::SEASON_AMP.0 | Self::SNOW.0
+            | Self::SOIL.0 | Self::FERTILITY.0 | Self::DIST_OCEAN.0 | Self::SALINITY.0
+            | Self::SEA_DEPTH.0 | Self::WIND.0 | Self::CURRENTS.0 | Self::BIOME.0,
     );
     /// biological.rs (sharks/shipworms/storms/reefs/goods — phase 8)
     pub const PHASE_BIOLOGICAL: ColumnSet = ColumnSet(
@@ -305,6 +318,8 @@ pub struct WorldBuffer {
     pub seasonal_amp: Vec<u8>,     // land: seasonal half-range of monthly temp (°C ×4)
     pub sst: Vec<f32>,             // sea: annual-mean sea-surface temperature (°C)
     pub snow_frac: Vec<u8>,        // land: annual snow-cover fraction ×255
+    // ── Ecology ──
+    pub biome: Vec<u8>,            // land: ecological biome code (sim::biome::Biome)
 }
 
 impl WorldBuffer {
@@ -419,6 +434,7 @@ impl WorldBuffer {
             seasonal_amp: u8s(ColumnSet::SEASON_AMP),
             sst: f32s(ColumnSet::SST, 0.0),
             snow_frac: u8s(ColumnSet::SNOW),
+            biome: u8s(ColumnSet::BIOME),
         };
 
         // Fetch every tile's compressed blob serially (cheap memcpy under the
@@ -498,6 +514,7 @@ impl WorldBuffer {
                     copy_rows!(ColumnSet::SEASON_AMP => seasonal_amp);
                     copy_rows!(ColumnSet::SST => sst);
                     copy_rows!(ColumnSet::SNOW => snow_frac);
+                    copy_rows!(ColumnSet::BIOME => biome);
                     if cols.has(ColumnSet::GOODS) {
                         for g in 0..tile.goods.len() {
                             buf.goods[g][wi0..wi0 + tile_w].copy_from_slice(&tile.goods[g][ti0..ti0 + tile_w]);
@@ -615,6 +632,7 @@ impl WorldBuffer {
             copy_rows!(ColumnSet::SEASON_AMP => seasonal_amp);
             copy_rows!(ColumnSet::SST => sst);
             copy_rows!(ColumnSet::SNOW => snow_frac);
+            copy_rows!(ColumnSet::BIOME => biome);
             if self.cols.has(ColumnSet::GOODS) {
                 for g in 0..self.goods.len() {
                     tile.goods[g][ti0..ti0 + tile_w].copy_from_slice(&self.goods[g][wi0..wi0 + tile_w]);

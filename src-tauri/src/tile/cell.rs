@@ -42,7 +42,11 @@ pub struct TileData {
     // ── Thermal-realism columns (energy-balance seasonality), appended LAST ──
     pub seasonal_amp: Vec<u8>,    // land: seasonal half-range of monthly temp (°C ×4, 0..63.75).
     pub sst: Vec<f32>,            // sea: annual-mean sea-surface temperature (°C).
-    pub snow_frac: Vec<u8>,       // land: annual snow-cover fraction ×255. Serialized LAST.
+    pub snow_frac: Vec<u8>,       // land: annual snow-cover fraction ×255.
+    /// land: ecological biome code (see `sim::biome::Biome`). 0 = unclassified.
+    /// Derived from Köppen + temp/precip/seasonality/snow + soil + elevation +
+    /// slope + river/lake/coast proximity by phase 6b. Serialized LAST.
+    pub biome: Vec<u8>,
 }
 
 /// Number of trade-good sublayer fields stored per cell. See sim/biological.rs
@@ -101,6 +105,7 @@ impl TileData {
             seasonal_amp: vec![0; N],
             sst: vec![0.0; N],
             snow_frac: vec![0; N],
+            biome: vec![0; N],
         }
     }
 
@@ -171,6 +176,10 @@ impl TileData {
         buf.extend_from_slice(&self.seasonal_amp);
         buf.extend_from_slice(bytemuck_f32(&self.sst));
         buf.extend_from_slice(&self.snow_frac);
+        // Ecological biome code (phase 6b). Newest LAST column — older v2 blobs end
+        // above and pad it to zero on read, which renders as "unclassified" until
+        // the next Biomes run reclassifies.
+        buf.extend_from_slice(&self.biome);
 
         zstd::encode_all(buf.as_slice(), 3).unwrap_or(buf)
     }
@@ -244,6 +253,8 @@ impl TileData {
         let seasonal_amp = read_u8(&buf, &mut offset);
         let sst = read_f32(&buf, &mut offset);
         let snow_frac = read_u8(&buf, &mut offset);
+        // Biome is the newest LAST column; older blobs end above and it pads to zero.
+        let biome = read_u8(&buf, &mut offset);
 
         // Keep every stored good column (the count is variable and may exceed the
         // built-in GOODS_COUNT); pad up to GOODS_COUNT so code that indexes the
@@ -259,7 +270,7 @@ impl TileData {
             distance_to_ocean, habitability,
             salinity, shark_risk, goods, shipworm_risk,
             storm_base, reef_risk, disease_risk, wind_speed,
-            precip_summer_frac, seasonal_amp, sst, snow_frac,
+            precip_summer_frac, seasonal_amp, sst, snow_frac, biome,
         }
     }
 
@@ -299,6 +310,7 @@ impl TileData {
         merge!(C::SEASON_AMP => seasonal_amp);
         merge!(C::SST => sst);
         merge!(C::SNOW => snow_frac);
+        merge!(C::BIOME => biome);
         if cols.has(C::GOODS) {
             self.goods.clone_from(&src.goods);
         }
@@ -339,25 +351,29 @@ mod tests {
             t.seasonal_amp[i] = (i % 249) as u8;
             t.sst[i] = (i % 37) as f32 - 2.0;
             t.snow_frac[i] = (i % 253) as u8;
+            t.biome[i] = (i % 41) as u8;
         }
         let round = TileData::decompress(&t.compress());
         assert_eq!(round.precip_summer_frac, t.precip_summer_frac);
         assert_eq!(round.seasonal_amp, t.seasonal_amp);
         assert_eq!(round.sst, t.sst);
         assert_eq!(round.snow_frac, t.snow_frac);
+        assert_eq!(round.biome, t.biome);
 
         // Simulate an older v2 blob that ends before ALL the new columns by
         // decompressing, dropping their trailing bytes, and re-compressing: the reads
         // must pad to 0. Trailing layout: seasonal_amp(N u8) + sst(N f32) + snow_frac(N u8),
         // preceded by precip_summer_frac(N u8).
         let raw = zstd::decode_all(t.compress().as_slice()).unwrap();
-        let trailing = N + N * 4 + N + N; // snow + sst + seasonal_amp + precip_summer_frac
+        // biome + snow + sst + seasonal_amp + precip_summer_frac
+        let trailing = N + N + N * 4 + N + N;
         let truncated = &raw[..raw.len() - trailing];
         let older = TileData::decompress(&zstd::encode_all(truncated, 3).unwrap());
         assert!(older.precip_summer_frac.iter().all(|&v| v == 0));
         assert!(older.seasonal_amp.iter().all(|&v| v == 0));
         assert!(older.sst.iter().all(|&v| v == 0.0));
         assert!(older.snow_frac.iter().all(|&v| v == 0));
+        assert!(older.biome.iter().all(|&v| v == 0));
         // Everything before it still reads correctly (terrain/precip intact).
         assert_eq!(older.terrain, t.terrain);
     }
