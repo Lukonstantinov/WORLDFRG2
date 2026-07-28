@@ -409,17 +409,29 @@ state/  (Zustand)
   uiStore.ts                    ← tool, layer, workflow step, overlayVisibility, panel flags, bioParams
   goodsStore.ts                 ← goods spec being edited
   viewportStore.ts              ← camera state, tile invalidation
-  settingsStore.ts              ← app appearance/settings
+  settingsStore.ts              ← app appearance: the overlay-line palette AND the map
+                                  label typography (§8.11). Presets + localStorage +
+                                  per-world persistence via a VERSIONED envelope
+                                  `{v:2, lineColors, labels}` (the legacy flat colour
+                                  map still hydrates); edited in ui/SettingsPanel.tsx
 
 canvas/
   PixiApp.ts                    ← PixiJS 8 application init
   TileViewport.ts               ← Pan/zoom, screenToWorld, getVisibleTileRange
   TileManager.ts                ← LRU tile cache, base64→texture, sprite management
   OverlayManager.ts             ← ALL vector overlays (~4k lines: rivers, settlements, wind,
-                                  trunks, routes, dynamic flow, regions). visibility[type] gates each
+                                  trunks, routes, dynamic flow, regions). visibility[type] gates
+                                  each. Also holds the two live appearance registries the
+                                  Settings store drives: `lineColors` (overlay lines) and
+                                  `labelStyles` (map label typography — see §8.11)
   PaintOverlay.ts               ← Brush preview, paint stamps
   projection.ts                 ← lat/lon ↔ world-cell projection helpers
   goodIcons.ts                  ← good → emoji/texture for overlays
+
+ui/SettingsPanel.tsx            ← ⚙ Appearance modal, two tabs: Overlay lines (the line
+                                  palette) and Map labels (typography theme + per-class
+                                  face/colour, each row set in its OWN style so the list
+                                  doubles as a live specimen sheet). See §8.11.
 
 ui/world/  — map & world
   MapCanvas.tsx                 ← PixiJS canvas, pointer events, painting, draws every overlay
@@ -693,6 +705,42 @@ Measured by the tests: borders sit on a crest **3.1×** more often than chance, 
 diagonal trunk river is a border **3.3×** more often (both ≈1.0× before). The partition
 is also **deterministic** — `HashMap::iter().max_by_key` ties must stay broken on the
 key, or the same seed yields different maps across runs.
+
+### 8.11 Map label typography
+Place names used to be styled at each call site (~23 separate `ctx.font =` lines), so
+provinces and settlements came out in an IDENTICAL face and colour and water differed
+from rock only by tint. Every place-name class now resolves through **one registry** in
+`OverlayManager.ts`, the exact shape of the `lineColors` registry beside it:
+
+```
+LABEL_FONTS          4 system-font stacks (Windows → macOS → Linux). NO bundled fonts.
+LABEL_STYLE_DEFAULTS per class: family · weight · italic · caps · tracking · color · size
+labelStyles          the live registry the renderer reads each frame
+setLabelStyles()     partial override, called by settingsStore
+LABEL_THEMES         Mixed Contrast (default) · Classic Atlas · Engraved Antique · Modern Cartographic
+```
+
+`LabelKey` covers province · settlement · river · lake · mountain · desert · forest ·
+tundra · cultureRegion · peopleTerritory · tradeBasin. The default follows the atlas
+convention — **nature is serif and leans, human works are sans and stand upright**.
+Road names and river-break markers are deliberately NOT in the registry.
+
+Three rules for anyone touching this:
+
+- **Draw through `drawLabel` / `measureLabel`.** Never set `ctx.font` for a place name
+  again, or that class silently escapes the theme and the Settings panel.
+- **Tracking is drawn CHARACTER BY CHARACTER, never via `ctx.letterSpacing`.** That
+  property is effectively Chromium-only and Tauri runs WebKit2GTK on Linux and WKWebView
+  on macOS, so it would silently do nothing on two of three platforms. Manual drawing is
+  also what makes `measureLabel` exact.
+- **Measure the STYLED string when a label has to fit something.** Province names are
+  tracked capitals, far wider than the raw text; `renderProvinces` only draws a name that
+  fits its inscribed circle, so it degrades **tracked caps → untracked caps → mixed case
+  → hide** instead of hiding the moment the styled form overflows (§8.10's label anchor
+  work is undone otherwise).
+
+Note `OverlayManager.rgba()` only understands `hsl()` and returns a hex unchanged — use
+`labelAlpha()` for label colours, which are all hex.
 
 ---
 

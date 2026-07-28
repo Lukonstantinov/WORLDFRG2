@@ -275,6 +275,136 @@ export function setLineColors(partial: Partial<Record<LineColorKey, string>>) {
   Object.assign(lineColors, partial);
 }
 
+// ── Map label typography ──────────────────────────────────────────────────────
+// Every place name used to be styled at its own call site, so provinces and
+// settlements came out in an IDENTICAL font and colour — the two classes you most
+// need to tell apart — while rivers, lakes and peaks differed only by tint. This
+// registry gives each class one styled identity, following the cartographic
+// convention that a label's FACE tells you what kind of thing it names before you
+// read it: nature is serif and leans, human works are sans and stand upright.
+//
+// Same shape as `lineColors` above, so the Settings store drives both identically.
+
+/** System-font stacks: Windows → macOS → Linux, no bundled font files. */
+export const LABEL_FONTS = {
+  serifNature: `"Palatino Linotype", Palatino, "Book Antiqua", "URW Palladio L", Georgia, serif`,
+  sansHuman: `Candara, Optima, "Gill Sans MT", Carlito, "Segoe UI", system-ui, sans-serif`,
+  engraved: `"Copperplate Gothic Light", Copperplate, "Copperplate Gothic", "Trajan Pro", Georgia, serif`,
+  garamond: `Garamond, "EB Garamond", "Adobe Garamond Pro", "Book Antiqua", serif`,
+} as const;
+export type LabelFontKey = keyof typeof LABEL_FONTS;
+/** Friendly names for the Settings font dropdown. */
+export const LABEL_FONT_LABELS: Record<LabelFontKey, string> = {
+  serifNature: "Palatino (serif)",
+  sansHuman: "Candara (humanist sans)",
+  engraved: "Copperplate (engraved)",
+  garamond: "Garamond (old-style serif)",
+};
+
+export interface LabelStyle {
+  /** CSS font-family stack (one of `LABEL_FONTS`, or anything else). */
+  family: string;
+  weight: number;    // 400 · 600 · 700
+  italic: boolean;
+  caps: boolean;     // render the name uppercased
+  /** Letter-spacing in em. Drawn MANUALLY (see `drawLabel`) — `ctx.letterSpacing`
+   *  is Chromium-only in practice and Tauri runs WebKit on Linux and macOS. */
+  tracking: number;
+  color: string;
+  /** Multiplier on the class's existing base size (1 = exactly as before). */
+  size: number;
+}
+
+export type LabelKey =
+  | "province" | "settlement"
+  | "river" | "lake" | "mountain" | "desert" | "forest" | "tundra"
+  | "cultureRegion" | "peopleTerritory" | "tradeBasin";
+
+const F = LABEL_FONTS;
+/** The shipped baseline — the "Mixed Contrast" theme. */
+export const LABEL_STYLE_DEFAULTS: Record<LabelKey, LabelStyle> = {
+  // ── Human works: humanist sans, upright ──
+  province:        { family: F.sansHuman,  weight: 600, italic: false, caps: true,  tracking: 0.18, color: "#e8dcc0", size: 1 },
+  settlement:      { family: F.sansHuman,  weight: 600, italic: false, caps: false, tracking: 0,    color: "#f2f6fb", size: 1 },
+  // ── Water: serif, leaning ──
+  river:           { family: F.serifNature, weight: 400, italic: true,  caps: false, tracking: 0.04, color: "#7fc8e0", size: 1 },
+  lake:            { family: F.serifNature, weight: 400, italic: true,  caps: false, tracking: 0.04, color: "#9ad0e8", size: 1 },
+  // ── Land: serif, upright ──
+  mountain:        { family: F.serifNature, weight: 400, italic: false, caps: false, tracking: 0.02, color: "#d8a878", size: 1 },
+  desert:          { family: F.serifNature, weight: 700, italic: false, caps: true,  tracking: 0.22, color: "#d8b878", size: 1 },
+  forest:          { family: F.serifNature, weight: 700, italic: false, caps: true,  tracking: 0.22, color: "#8fc088", size: 1 },
+  tundra:          { family: F.serifNature, weight: 700, italic: false, caps: true,  tracking: 0.22, color: "#a8c0cc", size: 1 },
+  // ── People: sans, widely tracked caps (a people is not a place you can stand in) ──
+  cultureRegion:   { family: F.sansHuman,  weight: 700, italic: false, caps: true,  tracking: 0.30, color: "#caa6e0", size: 1 },
+  peopleTerritory: { family: F.sansHuman,  weight: 600, italic: false, caps: true,  tracking: 0.26, color: "#d8c2ea", size: 1 },
+  tradeBasin:      { family: F.serifNature, weight: 600, italic: true,  caps: false, tracking: 0.06, color: "#8fd0d8", size: 1 },
+};
+
+/** Coordinated theme presets — sparse overrides on the defaults, exactly like
+ *  `COLOR_PRESETS` in the settings store. */
+export const LABEL_THEMES: Record<string, Partial<Record<LabelKey, Partial<LabelStyle>>>> = {
+  // Nature serif/italic, human works sans. The default; no overrides needed.
+  "Mixed Contrast": {},
+  // One serif throughout — differentiated by case, tracking and slant alone.
+  "Classic Atlas": {
+    province: { family: F.serifNature }, settlement: { family: F.serifNature },
+    cultureRegion: { family: F.serifNature }, peopleTerritory: { family: F.serifNature },
+  },
+  // Copperplate for everything administrative/areal over a Garamond body.
+  "Engraved Antique": {
+    province: { family: F.engraved, tracking: 0.24 },
+    settlement: { family: F.engraved, caps: true, tracking: 0.10, size: 0.92 },
+    river: { family: F.garamond }, lake: { family: F.garamond },
+    mountain: { family: F.engraved, caps: true, tracking: 0.12 },
+    desert: { family: F.engraved }, forest: { family: F.engraved }, tundra: { family: F.engraved },
+    cultureRegion: { family: F.engraved, tracking: 0.36 },
+    peopleTerritory: { family: F.engraved, tracking: 0.30 },
+    tradeBasin: { family: F.garamond },
+  },
+  // Humanist sans throughout — the Ordnance-Survey register, cleanest zoomed out.
+  "Modern Cartographic": {
+    river: { family: F.sansHuman }, lake: { family: F.sansHuman },
+    mountain: { family: F.sansHuman }, desert: { family: F.sansHuman },
+    forest: { family: F.sansHuman }, tundra: { family: F.sansHuman },
+    tradeBasin: { family: F.sansHuman },
+  },
+};
+
+/** Live registry the renderer reads every frame. */
+export const labelStyles: Record<LabelKey, LabelStyle> =
+  Object.fromEntries(
+    (Object.keys(LABEL_STYLE_DEFAULTS) as LabelKey[]).map((k) => [k, { ...LABEL_STYLE_DEFAULTS[k] }]),
+  ) as Record<LabelKey, LabelStyle>;
+
+/** A colour with an alpha applied. `OverlayManager.rgba` only understands `hsl()`
+ *  and returns a hex untouched (so an alpha would be silently dropped) — the label
+ *  colours are all hex, so append the 2-digit alpha channel the way the rest of this
+ *  file does (`${col}1c`, `${col}66`). */
+export function labelAlpha(col: string, a: number): string {
+  if (col.startsWith("hsl(")) return col.replace("hsl(", "hsla(").replace(")", `,${a.toFixed(3)})`);
+  if (/^#[0-9a-f]{6}$/i.test(col)) {
+    return col + Math.round(Math.max(0, Math.min(1, a)) * 255).toString(16).padStart(2, "0");
+  }
+  return col;
+}
+
+/** Apply a partial typography override (from the Settings store). */
+export function setLabelStyles(partial: Partial<Record<LabelKey, Partial<LabelStyle>>>) {
+  for (const k of Object.keys(partial) as LabelKey[]) {
+    if (labelStyles[k]) Object.assign(labelStyles[k], partial[k]);
+  }
+}
+
+/** Merge a theme's sparse overrides onto the defaults into a full style set. */
+export function resolveLabelTheme(
+  theme: Partial<Record<LabelKey, Partial<LabelStyle>>>,
+): Record<LabelKey, LabelStyle> {
+  return Object.fromEntries(
+    (Object.keys(LABEL_STYLE_DEFAULTS) as LabelKey[])
+      .map((k) => [k, { ...LABEL_STYLE_DEFAULTS[k], ...(theme[k] ?? {}) }]),
+  ) as Record<LabelKey, LabelStyle>;
+}
+
 export class OverlayManager {
   private rivers: RiverData[] = [];
   private lakes: LakeData[] = [];
@@ -652,13 +782,10 @@ export class OverlayManager {
       ctx.stroke();
       ctx.setLineDash([]);
       const fs = Math.max(6, 11 * inv);
-      ctx.font = `600 ${fs}px Georgia, 'Times New Roman', serif`;
-      ctx.textAlign = "center";
-      ctx.lineWidth = Math.max(1.5, 2.5 * inv);
-      ctx.strokeStyle = "rgba(0,0,0,0.7)";
-      ctx.strokeText(b.name, b.cx + 0.5, b.cy - grow - 2 * inv);
-      ctx.fillStyle = col;
-      ctx.fillText(b.name, b.cx + 0.5, b.cy - grow - 2 * inv);
+      // The basin's own hue still wins over the class colour — a basin is identified
+      // by its tint elsewhere on the map, so only the FACE comes from the registry.
+      this.drawLabel(ctx, "tradeBasin", b.name, b.cx + 0.5, b.cy - grow - 2 * inv, fs,
+        "center", { color: col, halo: "rgba(0,0,0,0.7)", haloWidth: Math.max(1.5, 2.5 * inv) });
       ctx.textAlign = "left";
     });
   }
@@ -1296,6 +1423,86 @@ export class OverlayManager {
    *  `baseY`) if it doesn't collide with an already-placed one. Returns true and
    *  records the box when placed; false when it should be skipped. `w`/`h` are the
    *  text metrics in world (cell) units. A small pad keeps neighbours from kissing. */
+  // ── Map label typography helpers (see the `labelStyles` registry above) ──────
+  // Every place-name render site goes through these, so a class's face, case,
+  // tracking and colour live in ONE place instead of at ~23 scattered call sites.
+  //
+  // `px` is a size in the CURRENT canvas units — the callers already divide by
+  // `currentScale` where the context carries a world transform, so these helpers
+  // stay transform-agnostic.
+
+  /** The class's text as it should read (applies ALL-CAPS). */
+  private labelText(key: LabelKey, s: string): string {
+    return labelStyles[key].caps ? s.toUpperCase() : s;
+  }
+
+  /** CSS font string for a class at a given size. */
+  private labelFont(key: LabelKey, px: number): string {
+    const st = labelStyles[key];
+    return `${st.italic ? "italic " : ""}${st.weight} ${px * st.size}px ${st.family}`;
+  }
+
+  /** Width of a class's label INCLUDING tracking. The province fit-test depends on
+   *  this being exact — a tracked capital string is far wider than the raw text. */
+  private measureLabel(ctx: CanvasRenderingContext2D, key: LabelKey, raw: string, px: number): number {
+    const st = labelStyles[key];
+    const text = this.labelText(key, raw);
+    ctx.font = this.labelFont(key, px);
+    const base = ctx.measureText(text).width;
+    if (st.tracking === 0 || text.length < 2) return base;
+    return base + st.tracking * px * st.size * (text.length - 1);
+  }
+
+  /** Draw a class's label with its halo, honouring tracking. Returns the width drawn.
+   *
+   *  Tracking is applied by drawing CHARACTER BY CHARACTER rather than through
+   *  `ctx.letterSpacing`: that property is Chromium-only in practice, and Tauri runs
+   *  WebKit2GTK on Linux and WKWebView on macOS, so relying on it would silently drop
+   *  tracking on two of the three platforms. Drawing by hand also gives an exact
+   *  advance, which `measureLabel` needs. */
+  private drawLabel(
+    ctx: CanvasRenderingContext2D, key: LabelKey, raw: string,
+    x: number, y: number, px: number,
+    align: CanvasTextAlign = "left",
+    opts?: { color?: string; halo?: string; haloWidth?: number },
+  ): number {
+    const st = labelStyles[key];
+    const text = this.labelText(key, raw);
+    if (!text) return 0;
+    const size = px * st.size;
+    ctx.font = this.labelFont(key, px);
+    ctx.lineJoin = "round";
+    const halo = opts?.halo ?? "rgba(6,12,18,0.85)";
+    const haloW = opts?.haloWidth ?? Math.max(0.4, size * 0.2);
+    const fill = opts?.color ?? st.color;
+
+    const track = st.tracking * size;
+    const width = this.measureLabel(ctx, key, raw, px);
+    // No tracking → one fillText is both cheaper and better kerned.
+    if (track === 0 || text.length < 2) {
+      ctx.textAlign = align;
+      ctx.lineWidth = haloW; ctx.strokeStyle = halo; ctx.strokeText(text, x, y);
+      ctx.fillStyle = fill; ctx.fillText(text, x, y);
+      ctx.textAlign = "left";
+      return width;
+    }
+    // Tracked: lay out from a left origin derived from the requested alignment.
+    let cx = align === "center" ? x - width / 2 : align === "right" ? x - width : x;
+    ctx.textAlign = "left";
+    ctx.lineWidth = haloW; ctx.strokeStyle = halo;
+    for (const ch of text) {
+      ctx.strokeText(ch, cx, y);
+      cx += ctx.measureText(ch).width + track;
+    }
+    cx = align === "center" ? x - width / 2 : align === "right" ? x - width : x;
+    ctx.fillStyle = fill;
+    for (const ch of text) {
+      ctx.fillText(ch, cx, y);
+      cx += ctx.measureText(ch).width + track;
+    }
+    return width;
+  }
+
   private reserveLabel(cx: number, baseY: number, w: number, h: number): boolean {
     const pad = h * 0.18;
     const x0 = cx - w / 2 - pad, x1 = cx + w / 2 + pad;
@@ -1366,24 +1573,42 @@ export class OverlayManager {
     //    like one and a sliver does not shout. A readable floor keeps small provinces
     //    legible; the only reason to skip a name now is that it genuinely does not fit.
     if (this.provinceLabels.length > 0) {
-      ctx.textAlign = "center";
       ctx.textBaseline = "middle";   // with textAlign center → centred on both axes
-      ctx.lineJoin = "round";
+      const st = labelStyles.province;
       for (const lb of this.provinceLabels) {
         const diamPx = 2 * lb.r * this.currentScale;
         // Proportional to the room available, clamped to a readable band.
         const fsPx = Math.min(34, Math.max(9, diamPx * 0.42));
         const fs = fsPx / this.currentScale;   // canvas is under a world transform
-        ctx.font = `600 ${fs}px system-ui, sans-serif`;
-        const twPx = ctx.measureText(lb.name).width * this.currentScale;
-        // The one remaining reason to hide a name: it cannot fit its own province.
-        if (twPx > diamPx * 1.6) continue;
-        ctx.lineWidth = Math.max(0.6, (fsPx * 0.2) / this.currentScale);
-        ctx.strokeStyle = "rgba(6, 10, 16, 0.85)";
-        ctx.strokeText(lb.name, lb.x + 0.5, lb.y + 0.5);
-        ctx.fillStyle = "rgba(240, 244, 250, 0.95)";
-        ctx.fillText(lb.name, lb.x + 0.5, lb.y + 0.5);
+        const limit = diamPx * 1.6;
+        // The province style is tracked CAPITALS, which run far wider than the raw
+        // name — so rather than hiding a label the moment it overflows, shed the
+        // width-costly treatments one at a time first. Without this, adopting the
+        // typography would silently re-hide names that fit perfectly well before.
+        // The degraded treatments are applied by temporarily relaxing the shared
+        // style; `finally` guarantees it is put back even if a draw throws, so a
+        // single bad label can never leave every province mis-styled.
+        const saved = { caps: st.caps, tracking: st.tracking };
+        try {
+          let fits = false;
+          for (const step of [0, 1, 2] as const) {
+            if (step === 1) st.tracking = 0;                      // drop the tracking
+            if (step === 2) { st.caps = false; st.tracking = 0; } // drop the capitals too
+            if (this.measureLabel(ctx, "province", lb.name, fs) * this.currentScale <= limit) {
+              fits = true; break;
+            }
+          }
+          if (fits) {
+            this.drawLabel(ctx, "province", lb.name, lb.x + 0.5, lb.y + 0.5, fs, "center", {
+              halo: "rgba(6, 10, 16, 0.85)",
+              haloWidth: Math.max(0.6, (fsPx * 0.2) / this.currentScale),
+            });
+          }
+        } finally {
+          st.caps = saved.caps; st.tracking = saved.tracking;
+        }
       }
+      ctx.textAlign = "left";
     }
   }
 
@@ -1651,15 +1876,10 @@ export class OverlayManager {
       // People names at each territory's centroid (drawn after fills so labels
       // aren't covered by a neighbouring region's tint).
       const fs = Math.max(7, 13 / this.currentScale);
-      ctx.font = `${fs}px serif`;
-      ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       for (const r of this.cultureRegions) {
-        ctx.lineWidth = Math.max(0.6, 2.4 / this.currentScale);
-        ctx.strokeStyle = "rgba(0,0,0,0.75)";
-        ctx.strokeText(r.label, r.x, r.y);
-        ctx.fillStyle = "#f4ecd6";
-        ctx.fillText(r.label, r.x, r.y);
+        this.drawLabel(ctx, "peopleTerritory", r.label, r.x, r.y, fs, "center",
+          { halo: "rgba(0,0,0,0.75)", haloWidth: Math.max(0.6, 2.4 / this.currentScale) });
       }
       ctx.textAlign = "start";
       ctx.textBaseline = "alphabetic";
@@ -2330,15 +2550,15 @@ export class OverlayManager {
    *  zoom-compensated and kept legible with a dark halo. */
   private renderToponyms(ctx: CanvasRenderingContext2D) {
     const inv = 1 / Math.sqrt(this.currentScale);
-    const COLORS: Record<string, string> = {
-      river: "#7fc8e0", mountain: "#d8c0a0", lake: "#9ad0e8", region: "#caa6e0",
-      desert: "#d8b878", forest: "#8fc088", tundra: "#a8c0cc",
+    // Feature kind → its entry in the label typography registry, so face, case,
+    // tracking and colour all come from one editable place (see `labelStyles`).
+    const KEY: Record<string, LabelKey> = {
+      river: "river", lake: "lake", mountain: "mountain", region: "cultureRegion",
+      desert: "desert", forest: "forest", tundra: "tundra",
     };
-    // Faint fill for the region-style (area) labels — same hue as COLORS, dimmed.
-    const FAINT_COLORS: Record<string, string> = {
-      region: "rgba(202,166,224,0.85)", desert: "rgba(216,184,120,0.85)",
-      forest: "rgba(143,192,136,0.85)", tundra: "rgba(168,192,204,0.85)",
-    };
+    const COLORS: Record<string, string> = Object.fromEntries(
+      Object.entries(KEY).map(([k, key]) => [k, labelStyles[key].color]),
+    );
     // Region-style (faint uppercase, centroid, no collision check, no dot):
     // the culture hearth AND the large biome subregions — all area labels, not
     // point features.
@@ -2364,37 +2584,33 @@ export class OverlayManager {
     for (const t of ordered) {
       if (kindVisible[t.kind] === false) continue;
       const region = isRegionStyle(t.kind);
+      const key = KEY[t.kind] ?? "mountain";
       const fs = Math.max(6, Math.min(16, (region ? 13 : 9) * inv));
       const col = COLORS[t.kind] ?? "#cfe2f6";
       // Rivers read like an atlas: the name is set in italic and CURVES along the
       // channel, angled to the flow. Falls back to a point label if the reach is
       // too short/kinked or the label would collide.
       if (t.kind === "river" && this.drawRiverLabel(ctx, t, fs, col, inv)) continue;
-      ctx.font = `${region ? "700 " : ""}${fs}px -apple-system, Segoe UI, sans-serif`;
-      const label = region ? t.name.toUpperCase() : t.name;
       const dotR = Math.max(0.5, 1.4 * inv);
       const tx = t.x + 0.5 + (region ? 0 : dotR + 1.5 * inv);
       // Point features de-collide (regions bypass — they're a different, faint layer).
       if (!region) {
-        const wLbl = ctx.measureText(label).width;
+        const wLbl = this.measureLabel(ctx, key, t.name, fs);
         const x0 = tx - fs * 0.2, x1 = tx + wLbl + fs * 0.2;
         const y0 = t.y + 0.5 - fs * 0.7, y1 = t.y + 0.5 + fs * 0.7;
         if (this.labelCollides(x0, y0, x1, y1)) continue;
         this.placedLabels.push({ x0, y0, x1, y1 });
-      }
-      // Non-region features get a small locator dot.
-      if (!region) {
+        // Non-region features get a small locator dot.
         ctx.beginPath();
         ctx.arc(t.x + 0.5, t.y + 0.5, dotR, 0, Math.PI * 2);
         ctx.fillStyle = col;
         ctx.fill();
       }
-      ctx.textAlign = region ? "center" : "left";
-      ctx.lineWidth = Math.max(0.6, 2.2 * inv);
-      ctx.strokeStyle = "rgba(6,12,18,0.85)";
-      ctx.strokeText(label, tx, t.y + 0.5);
-      ctx.fillStyle = region ? (FAINT_COLORS[t.kind] ?? col) : col;
-      ctx.fillText(label, tx, t.y + 0.5);
+      this.drawLabel(ctx, key, t.name, tx, t.y + 0.5, fs, region ? "center" : "left", {
+        // Area labels stay deliberately faint — they sit under everything else.
+        color: region ? labelAlpha(labelStyles[key].color, 0.85) : undefined,
+        haloWidth: Math.max(0.6, 2.2 * inv),
+      });
     }
     ctx.textAlign = "left";
   }
@@ -2457,9 +2673,12 @@ export class OverlayManager {
     const n = pts.length;
     if (n < 3) return false;
 
-    ctx.font = `italic ${fs}px -apple-system, Segoe UI, sans-serif`;
-    const chars = [...t.name];
-    const sp = fs * 0.05;                       // extra letter spacing (atlas feel)
+    // Face, case and tracking come from the `river` label style; the curve logic
+    // below is unchanged (it already lays out character by character).
+    ctx.font = this.labelFont("river", fs);
+    const chars = [...this.labelText("river", t.name)];
+    const rst = labelStyles.river;
+    const sp = fs * rst.size * Math.max(0.05, rst.tracking);  // letter spacing (atlas feel)
     const widths = chars.map((c) => ctx.measureText(c).width);
     const W = widths.reduce((a, b) => a + b, 0) + sp * Math.max(0, chars.length - 1);
 
@@ -3962,18 +4181,14 @@ export class OverlayManager {
    *  from the markers so toggling names doesn't change the dots. */
   private renderHubNames(ctx: CanvasRenderingContext2D) {
     const fs = Math.max(5, 10 / this.currentScale);
-    ctx.font = `${fs}px sans-serif`;
-    ctx.textAlign = "center";
     ctx.textBaseline = "bottom";
-    ctx.lineWidth = Math.max(0.6, 2 / this.currentScale);
+    const haloWidth = Math.max(0.6, 2 / this.currentScale);
     for (const c of this.politicalCenters) {
       if (!c.name) continue;
       const x = c.x + 0.5;
       const y = c.y + 0.5 - Math.max(1.4, 3.6 / Math.sqrt(this.currentScale));
-      ctx.strokeStyle = "rgba(0,0,0,0.8)";
-      ctx.strokeText(c.name, x, y);
-      ctx.fillStyle = "#dCEBFF";
-      ctx.fillText(c.name, x, y);
+      this.drawLabel(ctx, "settlement", c.name, x, y, fs, "center",
+        { halo: "rgba(0,0,0,0.8)", haloWidth });
     }
     ctx.textAlign = "start";
     ctx.textBaseline = "alphabetic";
