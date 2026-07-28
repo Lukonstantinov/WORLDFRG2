@@ -57,6 +57,9 @@ export function MapCanvas() {
   const provinceRaster = useWorldStore((s) => s.provinceRaster);
   const selectedProvince = useUIStore((s) => s.selectedProvince);
   const provinceOpacity = useUIStore((s) => s.provinceOpacity);
+  const provinceFillMode = useUIStore((s) => s.provinceFillMode);
+  const provinceSingleColor = useUIStore((s) => s.provinceSingleColor);
+  const provinceBorderColor = useUIStore((s) => s.provinceBorderColor);
   const economy = useWorldStore((s) => s.economy);
   const setEconomy = useWorldStore((s) => s.setEconomy);
   const activeLayer = useUIStore((s) => s.activeLayer);
@@ -760,6 +763,18 @@ export function MapCanvas() {
     om.setProvinceOpacity(provinceOpacity);
     requestRender();
   }, [provinceOpacity, requestRender]);
+
+  // Province fill style: distinct-per-province vs one flat colour, + custom border.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setProvinceStyle({
+      fillMode: provinceFillMode,
+      singleColor: provinceSingleColor,
+      borderColor: provinceBorderColor,
+    });
+    requestRender();
+  }, [provinceFillMode, provinceSingleColor, provinceBorderColor, requestRender]);
 
   // Region↔region trade flows (routed + bundled trunks) — a product of the
   // Biological-Trade step, gated by the chosen trade reach.

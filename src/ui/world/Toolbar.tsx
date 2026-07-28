@@ -6,6 +6,23 @@ import type { ActiveTool, ActiveLayer } from "@types";
 import { GOOD_DEFS, goodOverlayKey, goodCategory, CATEGORY_ORDER } from "@goods";
 import { LatitudeControl } from "@ui/world/LatitudeControl";
 
+/** Best-effort CSS colour → #rrggbb for an <input type="color"> (which only takes
+ *  hex). Understands #rgb/#rrggbb and rgb()/rgba(); falls back to dark grey. */
+function hexOfBorder(css: string): string {
+  const s = css.trim();
+  if (s.startsWith("#")) {
+    const m = s.slice(1);
+    if (m.length === 3) return "#" + m.split("").map((c) => c + c).join("");
+    if (m.length >= 6) return "#" + m.slice(0, 6);
+  }
+  const m = s.match(/rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i);
+  if (m) {
+    const h = (n: string) => Math.max(0, Math.min(255, parseInt(n, 10))).toString(16).padStart(2, "0");
+    return "#" + h(m[1]) + h(m[2]) + h(m[3]);
+  }
+  return "#0a0e14";
+}
+
 const tools: { id: ActiveTool; label: string; icon: string; tip: string }[] = [
   { id: "pan", label: "Pan", icon: "\u270B", tip: "Click-drag to pan the map" },
   { id: "select", label: "Select", icon: "\u25CE", tip: "Click a cell to inspect it" },
@@ -162,6 +179,12 @@ export function Toolbar() {
   const provinces = useWorldStore((s) => s.provinces);
   const provinceOpacity = useUIStore((s) => s.provinceOpacity);
   const setProvinceOpacity = useUIStore((s) => s.setProvinceOpacity);
+  const provinceFillMode = useUIStore((s) => s.provinceFillMode);
+  const setProvinceFillMode = useUIStore((s) => s.setProvinceFillMode);
+  const provinceSingleColor = useUIStore((s) => s.provinceSingleColor);
+  const setProvinceSingleColor = useUIStore((s) => s.setProvinceSingleColor);
+  const provinceBorderColor = useUIStore((s) => s.provinceBorderColor);
+  const setProvinceBorderColor = useUIStore((s) => s.setProvinceBorderColor);
 
   const showBrush = activeTool === "paint" || activeTool === "elevation" || activeTool === "shelf";
 
@@ -529,6 +552,36 @@ export function Toolbar() {
                   onChange={(e) => setProvinceOpacity(Number(e.target.value) / 100)}
                   style={rangeStyle}
                 />
+                {/* Fill style: distinct colours vs one flat colour + a custom border,
+                    so the map can read as a clean single-tone political sheet. */}
+                <label style={{ ...checkboxRow, marginTop: 4 }}>
+                  <input
+                    type="checkbox"
+                    checked={provinceFillMode === "single"}
+                    onChange={(e) => setProvinceFillMode(e.target.checked ? "single" : "distinct")}
+                  />
+                  Single fill colour
+                </label>
+                <div style={{ display: "flex", gap: 10, marginTop: 2, alignItems: "center" }}>
+                  {provinceFillMode === "single" && (
+                    <label style={{ ...sliderLabel, display: "flex", alignItems: "center", gap: 4 }}>
+                      Fill
+                      <input
+                        type="color" value={provinceSingleColor}
+                        onChange={(e) => setProvinceSingleColor(e.target.value)}
+                        style={{ width: 24, height: 18, padding: 0, border: "none", background: "none" }}
+                      />
+                    </label>
+                  )}
+                  <label style={{ ...sliderLabel, display: "flex", alignItems: "center", gap: 4 }}>
+                    Border
+                    <input
+                      type="color" value={hexOfBorder(provinceBorderColor)}
+                      onChange={(e) => setProvinceBorderColor(e.target.value)}
+                      style={{ width: 24, height: 18, padding: 0, border: "none", background: "none" }}
+                    />
+                  </label>
+                </div>
               </div>
             )}
             <button
