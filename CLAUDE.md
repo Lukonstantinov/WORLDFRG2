@@ -188,7 +188,7 @@ Run in order. Each phase depends on previous phases' data.
 | 5 | `sim_rivers_hydrology` | Priority-flood (Barnes et al. + ε) → rivers → lakes → aquatic ecology |
 | 6 | `sim_soil_fertility` | Soil types (12) → fertility → fisheries |
 | 7 | `sim_generate_settlements` | Habitability scoring → city placement |
-| 7b | `sim_generate_provinces` | Watershed/cost-flood province partition (AFTER settlements) |
+| 7b | `sim_generate_provinces` | Cost-flood + feature-snap province partition (AFTER settlements) |
 | 8 | `sim_biological` | Shark + shipworm risk + trade-good belts (takes seed + gem_deposits) |
 | 9 | `compute_political` | (query-only) Re-rank settlements by trade power + influence discs |
 | 10 | `compute_economy` | (query-only) **Market equilibrium**: stock-based prices, barter, currency goods, wealth, chokepoints |
@@ -373,7 +373,7 @@ sim/                            ← organised into per-phase step folders; mod.r
                                   · goods_spec.rs (GoodSpec, 45 belts + ~21 manufactured)
   shared/                       ← cultures.rs (organic peoples map + 14 traits) · toponyms.rs
                                   · names.rs (deterministic place/family/head names)
-                                  · provinces.rs (watershed/cost-flood partition — the
+                                  · provinces.rs (TWO-STAGE partition — see §8.10; the
                                     natural world↔campaign join layer, see FIX_PLAN B1)
   campaign/                     ← the campaign half:
       market.rs                   Market equilibrium solver (stocks → grain-eq prices)
@@ -430,6 +430,16 @@ ui/world/  — map & world
   LatitudeControl.tsx           ← Latitude band config
   climate.ts                    ← Köppen → human phrase helpers
   HydrologyPanel.tsx            ← Rivers/lakes + aquatic (fish assemblage, limnology)
+  ProvincePanel.tsx             ← 🗺 Provinces BROWSER (sort/filter/compare + generate)
+  ProvinceInspector.tsx         ← 🏞 Dossier for ONE province, opened by CLICKING the map
+                                  (people/culture shares · land & climate · goods with
+                                  world rank · borders with feature + length · holdings).
+                                  Selection is two-way with ProvincePanel via
+                                  uiStore.selectedProvince; hit-test is a client-side
+                                  raster lookup in OverlayManager.provinceAt (no IPC)
+  ProvinceMiniMap.tsx           ← Province footprint + settlements/buildings (shared)
+  provinceStory.ts              ← Shared province prose/format helpers (stars, border
+                                  kinds, history) — used by BOTH province views
   ImportWorldDialog.tsx         ← Layered world import dialog
   SettlementSearch.tsx          ← Settlement name search/jump
   ErrorBoundary.tsx             ← React error boundary
@@ -646,6 +656,43 @@ The whole pass is **output-preserving**: `ocean_atmosphere_field_checksums` prin
 a checksum per phase-3 field, and every one is unchanged vs. the pre-optimisation
 code. Use it the same way for any future refactor here — the Earth gate scores
 agreement to 0.1 %, which cannot tell bit-exact from merely close.
+
+### 8.10 Province borders — why the partition has TWO stages
+`sim/shared/provinces.rs` (phase 7b) does **not** simply flood from seeds. It cannot:
+a cost-flood's border falls where two seeds' CUMULATIVE costs tie, so a barrier of
+penalty `P` merely displaces that tie-line by ≈`P/2` cells. Adding cost can bias a
+border toward a river or ridge but can **never pin it to one** — a feature a few cells
+off the tie-line is simply crossed. So:
+
+1. **Cost-flood (Dijkstra)** — sets province COUNT, SIZE and TOPOLOGY. Seeds are the
+   big settlements plus a habitability-scaled jittered scatter that prefers valleys.
+2. **`snap_borders_to_features`** — a **marker-controlled watershed** (Meyer flooding)
+   that re-places the border LINES. Erode each province by `SNAP_R`=3 → markers; build
+   a relief of `crest + trunk river`, plus a low `FLAT_ANCHOR` ridge along the flood's
+   own border so featureless terrain keeps the line it had; flood from the markers
+   always taking the lowest relief. Two floods therefore meet on the highest ground
+   between them — the crest, or the middle of the channel.
+
+Three rules that are easy to get wrong here, all covered by `provinces::tests`:
+
+- **The divider is a CREST, not an altitude.** `compute_ridge` scores how far a cell
+  stands above BOTH sides along some axis, sampled at radii 2 and 4 on lightly blurred
+  elevation. Absolute elevation (the old `(elev-0.26)*18`) makes a whole plateau
+  uniformly expensive — so it prefers no border line at all — and gives sub-2300 m
+  ranges exactly zero. Never sample prominence at ±1: the 3×3 blur spreads a narrow
+  ridge over three columns, and a broad range is flat at its own summit.
+- **Great rivers divide, small rivers unite.** Navigable/major trunks are a crossing
+  PENALTY; every lesser river is a step-cost DISCOUNT along its own cell, so a province
+  spreads through its valley and halts at the interfluves.
+- **Charge river/lake crossings on the EDGE, not the cell.** A channel traced by
+  following flow is an 8-connected staircase, and a diagonal step cuts clean between
+  two of its cells without entering either — which made diagonal rivers free. Both
+  floods inspect the two corner cells of a diagonal step.
+
+Measured by the tests: borders sit on a crest **3.1×** more often than chance, and a
+diagonal trunk river is a border **3.3×** more often (both ≈1.0× before). The partition
+is also **deterministic** — `HashMap::iter().max_by_key` ties must stay broken on the
+key, or the same seed yields different maps across runs.
 
 ---
 

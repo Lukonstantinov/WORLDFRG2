@@ -207,7 +207,8 @@ impl ColumnSet {
     pub const PHASE_PROVINCES: ColumnSet = ColumnSet(
         Self::TERRAIN.0 | Self::ELEVATION.0 | Self::KOPPEN.0 | Self::SHELF.0
             | Self::FERTILITY.0 | Self::FISHERY.0 | Self::DIST_OCEAN.0 | Self::HABITABILITY.0
-            | Self::TEMPERATURE.0 | Self::SEASON_AMP.0 | Self::DISEASE.0 | Self::GOODS.0,
+            | Self::TEMPERATURE.0 | Self::SEASON_AMP.0 | Self::DISEASE.0 | Self::GOODS.0
+            | Self::PRECIPITATION.0, // province rainfall/aridity stats for the inspector
     );
     /// biological.rs (sharks/shipworms/storms/reefs/goods — phase 8)
     pub const PHASE_BIOLOGICAL: ColumnSet = ColumnSet(

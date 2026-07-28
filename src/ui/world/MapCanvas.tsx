@@ -55,6 +55,7 @@ export function MapCanvas() {
   const settlements = useWorldStore((s) => s.settlements);
   const provinces = useWorldStore((s) => s.provinces);
   const provinceRaster = useWorldStore((s) => s.provinceRaster);
+  const selectedProvince = useUIStore((s) => s.selectedProvince);
   const economy = useWorldStore((s) => s.economy);
   const setEconomy = useWorldStore((s) => s.setEconomy);
   const activeLayer = useUIStore((s) => s.activeLayer);
@@ -737,6 +738,14 @@ export function MapCanvas() {
     );
     requestRender();
   }, [provinces, provinceRaster, requestRender]);
+
+  // The province picked on the map (or in the Provinces browser) — outline + seat.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setSelectedProvince(selectedProvince);
+    requestRender();
+  }, [selectedProvince, provinceRaster, requestRender]);
 
   // Region↔region trade flows (routed + bundled trunks) — a product of the
   // Biological-Trade step, gated by the chosen trade reach.
@@ -1488,6 +1497,17 @@ export function MapCanvas() {
           }
           if (hit) { setSelectedGood(r.good); return; }
         }
+      }
+
+      // Province selection — LAST, so a settlement, route, futures lane or good
+      // belt always wins the click; the province is what's underneath everything.
+      // Gated on the province layer being visible so it never hijacks ordinary map
+      // use. The full-resolution raster already lives on the client, so this is one
+      // array read, no IPC.
+      if (rect && overlayVisibilityRef.current.provinces) {
+        const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+        const pid = overlayManagerRef.current?.provinceAt(wx, wy) ?? null;
+        if (pid !== null) { useUIStore.getState().setSelectedProvince(pid); return; }
       }
     }
 

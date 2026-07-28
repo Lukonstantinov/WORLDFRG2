@@ -1773,10 +1773,34 @@ export interface SimSettlementsResult {
 export interface ProvinceGood {
   good: number;    // good index (→ GOOD_DEFS)
   quality: number; // 0..1 suitability → quality stars
+  /** World rank for this good, 1 = the finest land on the map. 0/absent on worlds
+   *  generated before ranking existed. */
+  rank?: number;
+  /** How many provinces yield this good at all (the "of N" in "#3 of N"). */
+  of?: number;
 }
 
-/** A province — a watershed/cost-flood administrative region. Mirrors the Rust
- *  `Province` struct (serde default snake_case, so keys stay snake_case). */
+/** What separates two neighbouring provinces where they touch. Mirrors the Rust
+ *  `BORDER_*` constants. */
+export const BORDER_OPEN = 0;
+export const BORDER_RIDGE = 1;
+export const BORDER_RIVER = 2;
+export const BORDER_LAKE = 3;
+
+/** One shared frontier: which neighbour, how long, and what natural feature runs
+ *  along it. Mirrors the Rust `ProvinceBorder`. */
+export interface ProvinceBorder {
+  neighbor: number;
+  cells: number;  // shared border length in cells
+  kind: number;   // BORDER_*
+}
+
+/** A province — a cost-flood + feature-snap administrative region. Mirrors the Rust
+ *  `Province` struct (serde default snake_case, so keys stay snake_case).
+ *
+ *  Everything below `settlements` is serde-defaulted on the Rust side and therefore
+ *  OPTIONAL here: a world saved before these stats existed loads with them absent,
+ *  and the panels must degrade rather than blank. */
 export interface Province {
   id: number;
   name: string;            // its OWN generated name (variable length), not the seat's
@@ -1791,10 +1815,33 @@ export interface Province {
   mean_fertility: number;
   coastal: boolean;
   goods: ProvinceGood[];
-  culture: string;         // founding plurality (campaign may shift it via migration)
+  culture: string;         // plurality over the province's cells (campaign may shift it)
   rural_pop: number;       // baseline countryside population
   analog: string;          // "looks most like…" real-world regions
   settlements: string[];   // settlement ids inside (seat first)
+
+  // ── appended + serde-defaulted (see the note above) ──
+  /** Climate mix: share of cells per Köppen code, largest first (top 4). */
+  koppen_shares?: [number, number][];
+  elev_min_m?: number;
+  elev_mean_m?: number;
+  elev_max_m?: number;
+  relief_m?: number;       // elev_max_m − elev_min_m
+  temp_mean?: number;      // °C
+  precip_mean?: number;    // mm/yr
+  season_amp?: number;     // °C, seasonal half-range
+  arid_frac?: number;      // share of cells in a desert/steppe Köppen class
+  disease_mean?: number;   // 0..1
+  coast_cells?: number;
+  river_cells?: number;
+  navigable_river?: boolean;
+  lake_cells?: number;     // lake cells on the province's own shore
+  /** Peoples present, share of cells each, plurality first. */
+  culture_shares?: [string, number][];
+  food_capacity?: number;  // Σ per-cell food capacity
+  rural_cap?: number;      // food_capacity as a population ceiling → saturation
+  /** Neighbours with shared length + the feature dividing them, longest first. */
+  neighbors_detail?: ProvinceBorder[];
 }
 
 /** Live per-province campaign state (read-only): baseline rural + current urban. */

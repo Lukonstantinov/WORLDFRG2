@@ -35,6 +35,24 @@ pub fn resolve_kit(x: u32, y: u32, w: u32, h: u32) -> (usize, u64) {
 /// The culture/people label governing a cell ("Norse", "Sinitic", …).
 pub fn culture_label(x: u32, y: u32, w: u32, h: u32) -> &'static str {
     let (kit, _) = resolve_kit(x, y, w, h);
+    kit_label(kit)
+}
+
+/// Culture-kit index at a cell, resolved against a **pre-fetched** active map.
+///
+/// [`resolve_kit`] re-takes the process-global `RwLock` and clones an `Arc` on
+/// every call, which is far too expensive inside a world-sized per-cell scan
+/// (millions of cells). Hoist `cultures::active()` out of the loop and pass the
+/// borrowed map here instead. Falls back to the same legacy grid as `resolve_kit`.
+pub fn kit_at_with(map: Option<&cultures::CultureMap>, x: u32, y: u32, w: u32, h: u32) -> usize {
+    if let Some(m) = map {
+        if let Some((k, _)) = m.kit_at(x, y) { return k; }
+    }
+    legacy_kit(x, y, w, h)
+}
+
+/// The culture/people label for a kit index (companion to [`kit_at_with`]).
+pub fn kit_label(kit: usize) -> &'static str {
     cultures::KITS[kit.min(cultures::KITS.len() - 1)].name
 }
 

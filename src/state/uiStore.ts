@@ -146,8 +146,13 @@ interface UIStore {
   showEconomyDashboard: boolean;
   /** 🌊 Hydrology dashboard (river systems) panel open. */
   showHydrology: boolean;
-  /** 🗺 Provinces panel (watershed administrative regions) open. */
+  /** 🗺 Provinces panel (the ranked/filterable browser) open. */
   showProvinces: boolean;
+  /** 🏞 Province Inspector (the click-to-open dossier for ONE province) open. */
+  showProvinceInspector: boolean;
+  /** Province selected on the map (id), or null. Drives the map highlight and the
+   *  inspector; setting it opens the inspector. */
+  selectedProvince: number | null;
   /** #35/#36/#37 · Goods Codex (provenance / history / scarcity) panel open. */
   showGoodsCodex: boolean;
   /** Itinerary routed polyline (world cells) to draw on the map, or null. */
@@ -257,6 +262,8 @@ interface UIStore {
   setShowEconomyDashboard: (v: boolean) => void;
   setShowHydrology: (v: boolean) => void;
   setShowProvinces: (v: boolean) => void;
+  setShowProvinceInspector: (v: boolean) => void;
+  setSelectedProvince: (id: number | null) => void;
   setShowGoodsCodex: (v: boolean) => void;
   setTravelRoute: (pts: [number, number][] | null) => void;
   setRiverHighlight: (ids: number[] | null) => void;
@@ -373,6 +380,8 @@ export const useUIStore = create<UIStore>((set) => ({
   showEconomyDashboard: false,
   showHydrology: false,
   showProvinces: false,
+  showProvinceInspector: false,
+  selectedProvince: null,
   showGoodsCodex: false,
   travelRoute: null,
   riverHighlight: null,
@@ -497,6 +506,11 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowEconomyDashboard: (v) => set({ showEconomyDashboard: v }),
   setShowHydrology: (v) => set({ showHydrology: v }),
   setShowProvinces: (v) => set({ showProvinces: v }),
+  setShowProvinceInspector: (v) => set({ showProvinceInspector: v }),
+  // Picking a province always brings its dossier up; clearing the selection leaves
+  // the window state alone so closing the inspector doesn't drop the map highlight.
+  setSelectedProvince: (id) =>
+    set(id === null ? { selectedProvince: null } : { selectedProvince: id, showProvinceInspector: true }),
   setShowGoodsCodex: (v) => set({ showGoodsCodex: v }),
   setTravelRoute: (pts) => set({ travelRoute: pts }),
   setRiverHighlight: (ids) => set({ riverHighlight: ids }),

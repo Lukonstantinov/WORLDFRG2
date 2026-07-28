@@ -7,7 +7,12 @@ import { koppenName } from "@ui/world/climate";
 import { ProvinceMiniMap } from "@ui/world/ProvinceMiniMap";
 import type { Province, ProvinceLive, ProvinceDetail, PSettlement } from "@types";
 
-// ── Variant B "Split": a ranked/filterable list rail + a rich detail card. ──
+import { ELEV_WORD, goodEmoji, goodLabel, provinceHistory, stars } from "@ui/world/provinceStory";
+
+// ── Variant B "Split": a ranked/filterable list rail + a rich detail card. The
+//    per-province dossier lives in ProvinceInspector (opened by a map click); this
+//    stays the BROWSER — sort, filter, compare. Selecting here drives the map
+//    highlight and the inspector, and a map click drives the selection here. ──
 
 type SortKey = "total" | "area" | "rural" | "urban" | "quality" | "fertility";
 const SORTS: { key: SortKey; label: string }[] = [
@@ -18,30 +23,6 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: "quality", label: "Good quality" },
   { key: "fertility", label: "Fertility" },
 ];
-
-const ELEV_WORD = ["lowland", "hill country", "upland"];
-
-function stars(q: number): string {
-  const n = Math.max(0, Math.min(5, Math.round(q * 5)));
-  return "★★★★★".slice(0, n) + "☆☆☆☆☆".slice(0, 5 - n);
-}
-function goodLabel(g: number): string { return GOOD_DEFS[g]?.label ?? `good ${g}`; }
-function goodEmoji(g: number): string { return GOOD_DEFS[g]?.emoji ?? "•"; }
-
-/** A short deterministic account of a province — terrain, people, signature good,
- *  and whether it is a frontier or a settled heartland. */
-function provinceHistory(p: Province, urban: number): string {
-  const terr = ELEV_WORD[p.elevation_class] ?? "country";
-  const clim = koppenName(p.koppen).toLowerCase();
-  const top = p.goods[0] ? goodLabel(p.goods[0].good).toLowerCase() : "mixed produce";
-  const coast = p.coastal ? "coast-fronting " : "";
-  const status = p.settlements.length === 0
-    ? `It stands as open frontier, its ${terr} still unclaimed by any town.`
-    : urban > p.rural_pop
-      ? `A crowded ${p.settlements.length > 1 ? "heartland of several towns" : "town-centred region"}, its people press on the land.`
-      : `A rural ${terr === "country" ? "province" : terr}, its folk work the fields and pastures.`;
-  return `${p.name} is a ${coast}${clim} ${terr} of the ${p.culture} people, long known for its ${top}. ${status}`;
-}
 
 export function ProvincePanel() {
   const open = useUIStore((s) => s.showProvinces);
@@ -60,6 +41,11 @@ export function ProvincePanel() {
   const [cityFilter, setCityFilter] = useState<"all" | "cities" | "frontier">("all");
   const [goodFilter, setGoodFilter] = useState<number>(-1);
   const [selId, setSelId] = useState<number | null>(null);
+  // Two-way with the map: clicking a province on the map moves this list's
+  // selection, and clicking a row here highlights it on the map + opens its dossier.
+  const mapSelection = useUIStore((s) => s.selectedProvince);
+  const setSelectedProvince = useUIStore((s) => s.setSelectedProvince);
+  useEffect(() => { if (mapSelection !== null) setSelId(mapSelection); }, [mapSelection]);
   const [granularity, setGranularity] = useState(0.5);
   const [busy, setBusy] = useState(false);
   const [live, setLive] = useState<Map<number, ProvinceLive> | null>(null);
@@ -239,7 +225,7 @@ export function ProvincePanel() {
               {rows.map((p) => {
                 const isSel = selected?.id === p.id;
                 return (
-                  <div key={p.id} onClick={() => setSelId(p.id)}
+                  <div key={p.id} onClick={() => { setSelId(p.id); setSelectedProvince(p.id); }}
                     style={{ padding: "6px 10px", cursor: "pointer", display: "flex", gap: 6,
                       background: isSel ? "#12293a" : "transparent",
                       borderLeft: isSel ? "3px solid #3d9bd4" : "3px solid transparent" }}>

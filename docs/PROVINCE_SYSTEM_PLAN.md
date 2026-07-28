@@ -1,15 +1,51 @@
 # Province System — Design & Implementation Plan
 
-*A watershed-based administrative layer between tiles and settlements: the land is
-partitioned into provinces whose borders follow natural features (drainage divides,
-trunk rivers, coasts, islands). Each province carries its own population, culture and
-goods, and interacts with the settlements that stand in it — an Europa-Universalis-
-style political/economic substrate grafted onto WorldForge 2's existing World +
-Campaign split.*
+*An administrative layer between tiles and settlements: the land is partitioned into
+provinces whose borders follow natural features (mountain crests, trunk rivers, coasts,
+islands). Each province carries its own population, culture and goods, and interacts
+with the settlements that stand in it — an Europa-Universalis-style political/economic
+substrate grafted onto WorldForge 2's existing World + Campaign split.*
+
+> **Note on "watershed".** This document was written around a drainage-divide
+> partition seeded from `flow_dir`/`acc`. What shipped is **not** that: the divider is
+> a CREST-PROMINENCE field, not a drainage divide, and the seeds are settlements plus a
+> habitability-scaled scatter, not sub-basin outlets. The visible property the
+> watershed framing was after — *borders on the ridgelines, rivers not straddled* — is
+> delivered instead by a second **marker-controlled watershed snap stage** over that
+> crest/river relief. See CLAUDE.md §8.10 and the module header of
+> `sim/shared/provinces.rs`; read §4 below as design intent, not as shipped code.
 
 Status: **Phase 1 shipped · Phase 2a shipped · Phase 2b (living demography) shipped ·
+Phase 1.5 (honest natural borders + the Province Inspector) shipped ·
 Phase 2c (deeper demography, §7.2) + Phase 3 (control) pending.** Extends the
 settlement model reviewed in `SETTLEMENT_BELIEVABILITY_ANALYSIS.md`.
+
+**Phase 1.5 — natural borders that actually are natural, plus map selection.** An audit
+found the partition did not do what its own header claimed. Fixed, each with a test in
+`provinces::tests`:
+- borders now ride **mountain CRESTS** (`compute_ridge` prominence), not absolute
+  altitude — so sub-2300 m ranges divide and high plateaus stop speckling. **3.1×** more
+  border cells sit on a crest than chance;
+- **great rivers divide, lesser rivers unite** (trunks are a crossing penalty, small
+  rivers a travel discount along their own valley, so the river ends up at the
+  province's spine — §4 step 3's original intent);
+- **diagonal rivers/lakes no longer leak.** A channel traced by following flow is an
+  8-connected staircase and a diagonal step cut clean between two of its cells without
+  entering either, so diagonal trunks cost *nothing* to cross. Crossings are now charged
+  on the EDGE. A diagonal trunk is a border **3.3×** more often than chance;
+- a **marker-controlled watershed snap stage** re-places the border lines onto those
+  features — a cost-flood alone can only bias a border by ≈P/2 cells, never pin it;
+- **determinism bug fixed**: two `HashMap::iter().max_by_key` reductions had no tie-break,
+  so the same seed could produce different partitions across runs;
+- province **culture is now the plurality over its cells** (it was sampled at the seat
+  cell alone) with minority shares; good **quality is a top-decile mean**, not the single
+  best cell, and carries a world **rank**;
+- new stats: elevation min/mean/max + relief, Köppen shares, temperature/rainfall/
+  seasonality/aridity/disease, coast & river length, carrying capacity, and
+  **neighbours with shared border LENGTH + which feature divides them**;
+- **map selection**: clicking a province opens `ProvinceInspector`, a dossier window;
+  selection is two-way with the Provinces browser and a Borders row walks to the
+  neighbour. Hit-testing reads the client-side raster — no new command, no IPC.
 
 **Implemented so far** (branch `claude/settlement-generation-analysis-wwr0ox`):
 - **Phase 1** — `sim/shared/provinces.rs` cost-flood partition (coasts/islands +

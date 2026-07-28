@@ -289,8 +289,15 @@ export class OverlayManager {
    *  per-frame cost is just one blit + one stroke regardless of world size. */
   private provinceCanvas: HTMLCanvasElement | null = null;
   private provinceBorderPath: Path2D | null = null;
+  /** The province picked on the map: its outline + seat, rebuilt only when the id
+   *  changes so per-frame cost stays O(1) however large the world is. */
+  private selectedProvince: number | null = null;
+  private selectedProvincePath: Path2D | null = null;
+  private selectedProvinceSeat: { x: number; y: number } | null = null;
   /** Province name + seat position (world cells) for on-map labels. */
   private provinceLabels: { x: number; y: number; name: string }[] = [];
+  /** Province id → seat cell, for marking the selected province's seat. */
+  private provinceSeats: Map<number, { x: number; y: number }> = new Map();
   /** Atlas 2.0 · refugee roads (age01 = 0 fresh … 1 faded out). */
   private migrations: { fx: number; fy: number; tx: number; ty: number; age: number }[] = [];
   /** Settlement (cell coords) currently under the cursor — drawn as a shiny ring. */
@@ -452,8 +459,61 @@ export class OverlayManager {
       }
     }
     this.provinceLabels = labels;
+    this.provinceSeats = new Map(
+      provinces.filter((p) => p.seat_x !== undefined && p.seat_y !== undefined)
+        .map((p) => [p.id, { x: p.seat_x!, y: p.seat_y! }]),
+    );
     void cultureColor; // retained for the culture political map elsewhere
     this.buildProvinceRender(rgb);
+    // The raster may have been replaced (regenerate / world open) — re-cut the
+    // selected outline against it rather than leaving a stale path on screen.
+    if (this.selectedProvince !== null) this.buildSelectedProvince();
+  }
+
+  /** Highlight ONE province (the map click / list selection). `null` clears it. */
+  setSelectedProvince(id: number | null) {
+    if (this.selectedProvince === id) return;
+    this.selectedProvince = id;
+    this.buildSelectedProvince();
+  }
+
+  /** Which province owns a world cell, or null on sea / no partition. The raster is
+   *  full-resolution, so this is a single array read — cheap enough for hit-testing
+   *  on every click with no IPC round-trip. */
+  provinceAt(wx: number, wy: number): number | null {
+    const r = this.provinceRaster;
+    if (!r) return null;
+    const rx = Math.floor((wx / r.gridW) * r.w);
+    const ry = Math.floor((wy / r.gridH) * r.h);
+    if (rx < 0 || ry < 0 || rx >= r.w || ry >= r.h) return null;
+    const id = r.data[ry * r.w + rx];
+    return id === 65535 ? null : id;
+  }
+
+  /** Cut the selected province's outline out of the raster once, in world cells. */
+  private buildSelectedProvince() {
+    this.selectedProvincePath = null;
+    this.selectedProvinceSeat = null;
+    const r = this.provinceRaster;
+    const id = this.selectedProvince;
+    if (!r || id === null) return;
+    const { data, w, h, gridW, gridH } = r;
+    const sx = gridW / w, sy = gridH / h;
+    const path = new Path2D();
+    // An edge wherever the province meets ANYTHING else — including sea, so the
+    // highlight traces the full coastline of an island province too.
+    for (let ry = 0; ry < h; ry++) {
+      for (let rx = 0; rx < w; rx++) {
+        if (data[ry * w + rx] !== id) continue;
+        const x0 = rx * sx, x1 = (rx + 1) * sx, y0 = ry * sy, y1 = (ry + 1) * sy;
+        if (rx === 0 || data[ry * w + rx - 1] !== id) { path.moveTo(x0, y0); path.lineTo(x0, y1); }
+        if (rx + 1 >= w || data[ry * w + rx + 1] !== id) { path.moveTo(x1, y0); path.lineTo(x1, y1); }
+        if (ry === 0 || data[(ry - 1) * w + rx] !== id) { path.moveTo(x0, y0); path.lineTo(x1, y0); }
+        if (ry + 1 >= h || data[(ry + 1) * w + rx] !== id) { path.moveTo(x0, y1); path.lineTo(x1, y1); }
+      }
+    }
+    this.selectedProvincePath = path;
+    this.selectedProvinceSeat = this.provinceSeats.get(id) ?? null;
   }
 
   /** Rasterize province fills into an offscreen canvas ONCE (each cell one opaque
@@ -1243,6 +1303,30 @@ export class OverlayManager {
       ctx.strokeStyle = "rgba(8, 14, 20, 0.7)";
       ctx.lineWidth = 1 / this.currentScale;
       ctx.stroke(this.provinceBorderPath);
+    }
+
+    // The picked province: a bright outline (dark halo underneath so it reads over
+    // any fill colour) + a ★ on its seat.
+    if (this.selectedProvincePath) {
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = "rgba(6, 12, 20, 0.85)";
+      ctx.lineWidth = 4 / this.currentScale;
+      ctx.stroke(this.selectedProvincePath);
+      ctx.strokeStyle = "rgba(255, 226, 138, 0.95)";
+      ctx.lineWidth = 1.8 / this.currentScale;
+      ctx.stroke(this.selectedProvincePath);
+      const seat = this.selectedProvinceSeat;
+      if (seat) {
+        const fs = Math.max(9, 15 / this.currentScale);
+        ctx.font = `${fs}px system-ui, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineWidth = Math.max(0.8, 3 / this.currentScale);
+        ctx.strokeStyle = "rgba(6, 10, 16, 0.9)";
+        ctx.strokeText("★", seat.x + 0.5, seat.y + 0.5);
+        ctx.fillStyle = "rgba(255, 226, 138, 0.98)";
+        ctx.fillText("★", seat.x + 0.5, seat.y + 0.5);
+      }
     }
 
     // Province name labels at each seat, culled by the shared collision map so they

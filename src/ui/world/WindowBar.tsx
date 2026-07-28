@@ -19,6 +19,11 @@ export function WindowBar() {
     { label: "🧭 Itinerary", on: s.showItinerary, set: s.setShowItinerary },
     { label: "🌊 Hydrology", on: s.showHydrology, set: s.setShowHydrology },
     { label: "🗺 Provinces", on: s.showProvinces, set: s.setShowProvinces },
+    // Reopens the dossier for the province last picked on the map. Only offered once
+    // something IS picked — the window has nothing to show otherwise.
+    ...(s.selectedProvince !== null
+      ? [{ label: "🏞 Province", on: s.showProvinceInspector, set: s.setShowProvinceInspector }]
+      : []),
     { label: "📊 Economy", on: s.showEconomyDashboard, set: s.setShowEconomyDashboard },
     { label: "📖 Codex", on: s.showGoodsCodex, set: s.setShowGoodsCodex },
   ];
