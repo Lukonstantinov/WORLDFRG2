@@ -171,6 +171,34 @@ const RIDGE_MIN_BORDER: f32 = 0.010;
 /// Belt-value histogram resolution for the robust good-quality statistic.
 const GOOD_BINS: usize = 16;
 
+/// Köppen-keyed province-size multiplier on the seed separation. The truly hostile
+/// biomes hold VAST, thinly-administered provinces on Earth — a single Nunavut,
+/// Siberian, Saharan or Antarctic district dwarfs a European county — so their
+/// separation is stretched far beyond what the habitability ramp alone gives.
+/// Combined with the (1 + 3·hostile) habitability ramp this reaches ≈10× the seed
+/// spacing (≈100× the AREA) of a fertile-lowland province, so an ice cap or great
+/// desert reads as a few huge blocks instead of a speckle of tiny cells.
+fn koppen_spacing_mult(koppen: u8) -> f32 {
+    use crate::sim::koppen as kp;
+    match koppen {
+        kp::EF => 3.4,                       // ice cap — Antarctic / Greenland interior
+        kp::ET => 2.6,                       // tundra
+        kp::DFD | kp::DWD => 2.4,            // extreme subarctic
+        kp::DFC | kp::DWC | kp::DSD => 2.0,  // subarctic taiga
+        kp::BWH | kp::BWK => 2.3,           // hot / cold desert
+        kp::BSH | kp::BSK => 1.5,           // semi-arid steppe
+        kp::H => 1.6,                        // high alpine
+        _ => 1.0,                            // temperate / tropical / Mediterranean
+    }
+}
+
+/// Per-step cost for the flood to HOP a continental-shelf sea cell, so a cluster of
+/// shelf-connected islands (an archipelago) merges into ONE province instead of each
+/// islet becoming its own. High enough that a real open-ocean strait (deep, non-shelf
+/// water) is never crossed — only the shallow water shared between neighbouring
+/// islands, which is exactly what makes them read as a single region.
+const SEA_HOP: f64 = 5.0;
+
 struct HeapItem { cost: f64, cell: u32, owner: u32 }
 impl PartialEq for HeapItem { fn eq(&self, o: &Self) -> bool { self.cost == o.cost } }
 impl Eq for HeapItem {}
@@ -381,9 +409,16 @@ pub fn generate_provinces(
         if buf.habitability.is_empty() { 0.5 } else { buf.habitability[i] as f32 / 255.0 }
     };
     // Local min-separation² at a cell: small where habitable, large where hostile.
+    // Two compounding levers give the wide (≈100× area) fertile→arctic size range:
+    //   · the habitability ramp (1 + 3·hostile): general "fewer people, bigger units";
+    //   · a Köppen biome multiplier: the ice caps, tundra, deserts and taiga that hold
+    //     genuinely continent-scale administrative blocks on Earth are stretched much
+    //     further, so Antarctica reads as a few solid provinces, not a speckle.
+    let have_koppen = !buf.koppen.is_empty();
     let local_sep2 = |i: usize| -> i64 {
         let hostile = (1.0 - hab_at(i).clamp(0.0, 1.0)).powf(1.4);
-        let s = (base_sep * (1.0 + 2.8 * hostile)) as i64;
+        let km = if have_koppen { koppen_spacing_mult(buf.koppen[i]) } else { 1.0 };
+        let s = (base_sep * (1.0 + 3.0 * hostile) * km) as i64;
         (s * s).max(1)
     };
     let too_close = |seeds: &[u32], bx: i32, by: i32, sep2: i64| -> bool {
@@ -457,6 +492,7 @@ pub fn generate_provinces(
     //    TOPOLOGY; the border LINES are re-placed afterwards by the snap stage. ──
     let mut owner = vec![u32::MAX; total];
     let mut dist = vec![f64::INFINITY; total];
+    let have_shelf = !buf.is_shelf.is_empty();
     let mut heap: BinaryHeap<HeapItem> = BinaryHeap::new();
     for (oi, &sc) in seed_cells.iter().enumerate() {
         owner[sc as usize] = oi as u32;
@@ -475,7 +511,14 @@ pub fn generate_provinces(
                 let ny = cy + dy;
                 if ny < 0 || ny >= hi { continue; }
                 let ni = buf.widx(cx + dx, ny);
-                if buf.terrain[ni] != 1 || is_lake[ni] { continue; }
+                // The flood normally runs on land, but it may also HOP a shelf-sea cell
+                // (shallow water shared between neighbouring islands) at a stiff flat
+                // cost, so a shelf-connected archipelago merges into one province rather
+                // than each islet becoming its own. Deep (non-shelf) ocean and lakes stay
+                // impassable, so real straits are never crossed.
+                let land = buf.terrain[ni] == 1;
+                let shelf_sea = have_shelf && buf.terrain[ni] == 0 && buf.is_shelf[ni] == 1;
+                if is_lake[ni] || (!land && !shelf_sea) { continue; }
                 let diagonal = dx != 0 && dy != 0;
                 // A river/lake traced by following flow one cell per step is an
                 // 8-connected STAIRCASE, and a diagonal step can cut clean between two
@@ -488,18 +531,26 @@ pub fn generate_provinces(
                 if let Some((ca, cb)) = corners {
                     if is_lake[ca] && is_lake[cb] { continue; }  // no squeezing past a lake
                 }
-                let mut step = if diagonal { 1.4142 } else { 1.0 };
-                if river_unite[ni] { step *= RIVER_UNITE; }
-                // Crest prominence divides; a weak absolute term keeps the great
-                // massifs bodily expensive.
-                let em = buf.elevation[ni];
-                let alt = if em > ALT_THRESH { ((em - ALT_THRESH) as f64) * K_ALT } else { 0.0 };
-                let crest = ridge_cost(ridge[ni]);
-                let mut cross = river_divide[ni] as f64;
-                if let Some((ca, cb)) = corners {
-                    let (pa, pb) = (river_divide[ca], river_divide[cb]);
-                    if pa > 0.0 && pb > 0.0 { cross += pa.min(pb) as f64; }
-                }
+                let base_step = if diagonal { 1.4142 } else { 1.0 };
+                // A shelf-sea hop carries only the flat crossing cost; land carries the
+                // full valley-unite / altitude / crest / river-divide terrain terms.
+                let (step, alt, crest, cross) = if land {
+                    let mut step = base_step;
+                    if river_unite[ni] { step *= RIVER_UNITE; }
+                    // Crest prominence divides; a weak absolute term keeps the great
+                    // massifs bodily expensive.
+                    let em = buf.elevation[ni];
+                    let alt = if em > ALT_THRESH { ((em - ALT_THRESH) as f64) * K_ALT } else { 0.0 };
+                    let crest = ridge_cost(ridge[ni]);
+                    let mut cross = river_divide[ni] as f64;
+                    if let Some((ca, cb)) = corners {
+                        let (pa, pb) = (river_divide[ca], river_divide[cb]);
+                        if pa > 0.0 && pb > 0.0 { cross += pa.min(pb) as f64; }
+                    }
+                    (step, alt, crest, cross)
+                } else {
+                    (base_step * SEA_HOP, 0.0, 0.0, 0.0)
+                };
                 let noise = (hash2(cell as u64, ni as u64) % 1000) as f64 / 1000.0 * 0.35;
                 let nc = cost + step + alt + crest + cross + noise;
                 if nc < dist[ni] {
@@ -509,6 +560,12 @@ pub fn generate_provinces(
                 }
             }
         }
+    }
+
+    // Shelf-sea cells were only conduits for island-merging: strip their ownership so
+    // the partition covers land only (the islands they linked already share one owner).
+    for c in 0..total {
+        if buf.terrain[c] != 1 || is_lake[c] { owner[c] = u32::MAX; }
     }
 
     // ── Any unowned land (tiny islands with no seed): give each unowned land
