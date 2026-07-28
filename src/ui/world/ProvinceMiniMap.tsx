@@ -45,27 +45,41 @@ export function ProvinceMiniMap({
 }) {
   const [hover, setHover] = useState<Hover | null>(null);
 
-  // Extract the province's footprint from the (full-res) raster → an SVG viewBox.
-  // Sample at a STRIDE so a full-resolution raster yields a bounded number of
-  // footprint squares (the mini-map is a rough shape, not a pixel-exact render).
+  // Extract the province's footprint from the raster → an SVG viewBox. To keep the
+  // SHAPE (and its proportions) faithful for a small province as well as a huge one,
+  // the sample stride is sized to THIS province's bounding box, not the whole map:
+  // pass 1 finds the bbox coarsely, pass 2 re-samples it at a per-province stride so
+  // every province renders at a similar ~130-cell fidelity instead of a coarse blob.
   const geo = useMemo(() => {
     if (!raster) return null;
     const { data, w, h, gridW, gridH } = raster;
-    const stride = Math.max(1, Math.round(Math.max(w, h) / 200));
+    // Pass 1 — coarse bbox.
+    const coarse = Math.max(1, Math.round(Math.max(w, h) / 300));
     let minx = w, miny = h, maxx = -1, maxy = -1;
-    const cells: [number, number][] = [];
-    for (let ry = 0; ry < h; ry += stride) {
-      for (let rx = 0; rx < w; rx += stride) {
+    for (let ry = 0; ry < h; ry += coarse) {
+      for (let rx = 0; rx < w; rx += coarse) {
         if (data[ry * w + rx] !== province.id) continue;
-        cells.push([rx, ry]);
         if (rx < minx) minx = rx; if (rx > maxx) maxx = rx;
         if (ry < miny) miny = ry; if (ry > maxy) maxy = ry;
       }
     }
     if (maxx < 0) return null;
+    // Widen by the coarse step so the fine pass doesn't clip the edges.
+    minx = Math.max(0, minx - coarse); miny = Math.max(0, miny - coarse);
+    maxx = Math.min(w - 1, maxx + coarse); maxy = Math.min(h - 1, maxy + coarse);
+    // Pass 2 — fine scan within the bbox at a province-relative stride.
+    const bw = maxx - minx + 1, bh = maxy - miny + 1;
+    const stride = Math.max(1, Math.round(Math.max(bw, bh) / 130));
+    const cells: [number, number][] = [];
+    for (let ry = miny; ry <= maxy; ry += stride) {
+      for (let rx = minx; rx <= maxx; rx += stride) {
+        if (data[ry * w + rx] === province.id) cells.push([rx, ry]);
+      }
+    }
+    if (cells.length === 0) return null;
     const pad = stride;
     const ox = minx - pad, oy = miny - pad;
-    const vw = maxx - minx + stride + 2 * pad, vh = maxy - miny + stride + 2 * pad;
+    const vw = bw + stride + 2 * pad, vh = bh + stride + 2 * pad;
     // world-cell → raster-cell → local viewBox coords
     const toLocal = (x: number, y: number): [number, number] => [
       (x * w) / gridW - ox, (y * h) / gridH - oy,
@@ -82,6 +96,10 @@ export function ProvinceMiniMap({
   // province doesn't have dots bigger than itself, and a 500-cell province still
   // shows legible markers. Clamped to a narrow range so they never disappear either.
   const dotScale = Math.min(1.0, Math.max(0.35, 1.8 / Math.sqrt(cells.length)));
+  // City size: marker scales with population (√, so a metropolis reads bigger than a
+  // hamlet without dwarfing it), normalised to the largest settlement in the province.
+  const maxPop = Math.max(1, ...settlements.map((s) => s.population || 1));
+  const popScale = (pop: number) => 0.55 + 1.1 * Math.sqrt((pop || 1) / maxPop);
 
   return (
     <div style={{ display: "flex", gap: 10, position: "relative" }}>
@@ -96,7 +114,8 @@ export function ProvinceMiniMap({
         {/* settlements */}
         {settlements.map((s, i) => {
           const [lx, ly] = toLocal(s.x, s.y);
-          const r = (s.seat ? 1.6 : 1.1) * dotScale;
+          const psc = popScale(s.population);
+          const r = (s.seat ? 1.6 : 1.1) * dotScale * psc;
           return (
             <g key={`s${i}`} transform={`translate(${lx} ${ly})`} style={{ cursor: "pointer" }}
               onMouseEnter={(e) => setHover({
@@ -107,9 +126,9 @@ export function ProvinceMiniMap({
               })}
               onMouseLeave={() => setHover(null)}>
               {s.seat
-                ? <path transform={`scale(${dotScale})`}
+                ? <path transform={`scale(${dotScale * psc})`}
                     d="M0 -2.2 L0.7 -0.7 L2.2 -0.7 L1 0.4 L1.4 2 L0 1 L-1.4 2 L-1 0.4 L-2.2 -0.7 L-0.7 -0.7 Z"
-                    fill="#fff" stroke="#0a1620" strokeWidth={0.4 / dotScale} />
+                    fill="#fff" stroke="#0a1620" strokeWidth={0.4 / (dotScale * psc)} />
                 : <circle r={r} fill="#e8eef4" stroke="#0a1620" strokeWidth={0.4} />}
             </g>
           );
