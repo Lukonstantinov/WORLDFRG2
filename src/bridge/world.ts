@@ -260,6 +260,36 @@ export async function simGenerateTerrainCordillera(
   });
 }
 
+/** The planetary settings a preview runs against. Passed explicitly (not read
+ *  from the world) so the UI can preview values mid-drag, before they commit. */
+export interface PreviewSettings {
+  obliquity: number;
+  rotationRate: number;
+  solarLum: number;
+  greenhouse: number;
+  eccentricity: number;
+  dryness: number;
+  equatorOffset: number;
+  latScale: number;
+  latRatio: number;
+}
+
+/** TIER 1 — the 1-D zonal profile (EBM temperature curve + seasonal envelope +
+ *  circulation belts). Microseconds, so it is safe to call on every drag. */
+export async function previewZonalProfile(
+  s: PreviewSettings,
+): Promise<import("@types").ZonalProfile> {
+  return invoke("preview_zonal_profile", { ...s });
+}
+
+/** TIER 2 — the real Ocean & Atmosphere → Köppen chain on a downsampled copy of
+ *  this world's landmass. A few hundred ms; put it behind a button. */
+export async function previewCoarseClimate(
+  s: PreviewSettings,
+): Promise<import("@types").CoarsePreview> {
+  return invoke("preview_coarse_climate", { ...s });
+}
+
 export async function simRunAll(seed: number, plateCount: number): Promise<import("@types").SimRunAllResult> {
   return invoke("sim_run_all", { seed, plateCount });
 }

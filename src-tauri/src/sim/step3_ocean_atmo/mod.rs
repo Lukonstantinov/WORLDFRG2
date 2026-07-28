@@ -6,4 +6,5 @@ pub mod temperature;
 pub mod jets;
 pub mod seasonal;
 pub mod precipitation;
+pub mod preview;
 mod bench;

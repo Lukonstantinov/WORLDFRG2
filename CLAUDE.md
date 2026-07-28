@@ -214,6 +214,9 @@ Extras: `sim_generate_terrain_ridged`, **`sim_generate_terrain_cordillera`** (§
 `sim_scale_elevation`, `sim_invert_terrain`,
 `sim_generate_toponyms` (#26, gated on cultures+rivers), `sim_refresh_hydrology_biology`.
 
+`preview_zonal_profile` / `preview_coarse_climate` are READ-ONLY previews of the
+planetary settings (§8.14) — they build a throwaway buffer and never write a tile.
+
 **Two generation paths:**
 - **From plates:** "Generate Full World" — everything from scratch.
 - **From template/paint:** "Complete from Landmass" — keeps user's land/sea,
@@ -330,6 +333,7 @@ commands/
       read_trade.rs               goods/routes/futures/warehouses/guilds/schematics/diagnostics
   goods_commands.rs             ← Goods spec CRUD, default_custom_goods, backfill
   import_commands.rs            ← import_world_layers (layered world import)
+  preview_commands.rs           ← preview_zonal_profile / preview_coarse_climate (§8.14)
   template_commands.rs          ← Image → land/sea detection (4-bit quantization)
   file_commands.rs              ← Save/open world (.worldforge), export heightmap/layers
 
@@ -370,6 +374,8 @@ sim/                            ← organised into per-phase step folders; mod.r
       temperature.rs              base curve + EBM anomaly + lapse + currents + coastal damping
       jets.rs · seasonal.rs       low-level jets (Somali) · two-season winds & monsoon
       precipitation.rs            advection-decay moisture + ITCZ/orographic/frontal/jet terms
+      preview.rs                  SETTINGS PREVIEW (§8.14): 1-D zonal profile + coarse
+                                  climate map — read-only, never touches a tile
       bench.rs                    (test-only) phase-3 PERF harness + field checksums — see §8.9
   step4_climate/                ← Ph4: koppen.rs (31 zone codes + H) ·
       earth_validation.rs         THE EARTH FIDELITY GATE (§2.3) + fixtures/
@@ -521,6 +527,11 @@ ui/workflow/
                                   them). Settings-only, always advanceable.
   PlanetControls.tsx            ← Shared `PlanetSlider` + `LatitudeFrame` (replaces
                                   the deleted ui/world/LatitudeControl.tsx)
+  ZonalStrip.tsx                ← Tier-1 preview: SVG latitude strip (temperature vs
+                                  Earth · seasonal envelope · belt markers · crop band)
+  ClimateMixPreview.tsx         ← Tier-2 preview: Köppen thumbnail + A/B/C/D/E mix
+  planetArchetypes.ts           ← 12 world archetypes (mild↔strong spans + dial) +
+                                  5 map-frame presets + the Earth-diff readout
   Step*.tsx                     ← Landmass, Elevation, OceanAtmo, Climate, Rivers,
                                   SoilResources, Settlements, Biological, Economy,
                                   Political, Campaign, Toponyms (#26, gated)
@@ -878,6 +889,53 @@ discriminate), the inland flank must average >10 % higher than the seaward at
 equal distance, and the same seed must reproduce bit-identical elevation (the
 spine tracer uses an RNG **and** a shuffle).
 
+### 8.14 Settings preview (`step3_ocean_atmo/preview.rs`)
+
+The planetary knobs are not self-explanatory — nobody knows what "rotation 0.6"
+does to a map. Two previews make them legible, split by cost:
+
+**Tier 1 · `zonal_profile`** — everything the knobs do that is purely a function
+of LATITUDE: the EBM temperature curve (with Earth ghosted behind it, so the user
+reads the ANOMALY), the seasonal envelope, and the belt edges. Two EBM solves plus
+closed-form `Circulation` = microseconds, so the UI recomputes it on every drag.
+It sees no land, so it can say how wide the desert BELT is but not where a desert
+lands.
+
+**Tier 2 · `coarse_climate_preview`** — the real phase-3 → Köppen chain on a
+downsampled copy of the user's own landmass (≤600 cells wide, ~1/36 the cells of a
+full run). Answers the question tier 1 cannot: where the deserts actually go, and
+what share of THIS world each climate takes. Land/sea is downsampled by MAJORITY
+VOTE, not point sampling — point sampling drops islands and severs isthmuses,
+which changes the ocean circulation the preview exists to show.
+
+Both build a throwaway in-memory `WorldBuffer` and never touch a tile, the DB, or
+the world's stored planetary state; the knobs arrive as command ARGUMENTS so the UI
+can preview values mid-drag, before they commit.
+
+Three rules:
+
+- **The phase-3 sequence is now duplicated in THREE places** — `sim_commands.rs`,
+  `earth_validation.rs` and here. Change one, change all three (extends rule 11).
+- **Archetype endpoints are MEASURED, not guessed.** `sweep_cooling_knobs`
+  (ignored) walks the cooling knobs; the ice-albedo collapse is abrupt — alive at
+  greenhouse 0.55 (−3.7 °C, 29 % polar), a total snowball at 0.50. `SNOWBALL_ICE_LINE`
+  = 52° puts the warning one to two steps ahead of that cliff, and the Ice House
+  archetype's strong end stops at 0.58 so its dial can never kill the world.
+  `archetypes_deliver_what_their_blurbs_promise` asserts each archetype's headline
+  claim, because the UI text makes promises the physics has to keep.
+- **Absolute percentages from the test's synthetic slab mean nothing.** It is a
+  flat rectangular continent with no orography, so its interior is far more arid
+  than any real world; only the DELTAS between rows are meaningful. The real
+  fidelity measure is the Earth scorecard (§2.3).
+
+Adding the preview surfaced a live bug in `koppen.rs`: the lowland latitude
+guardrails demote a cold low-latitude cell toward temperate, on the premise that
+it can only be cold by the cold-current/upwelling over-cooling artefact. That
+premise is false on a genuinely frozen world, where a snowball came out reading
+72 % "temperate" at −44 °C. `FROZEN_WORLD_TEMP` (−12 °C) exempts genuinely frigid
+cells; the value is the largest exemption that leaves the Earth scorecard
+bit-identical, and `koppen::guardrail_tests` guards both sides of it.
+
 ## 9. Docs (`docs/`)
 
 **START HERE — the current plan**
@@ -951,8 +1009,9 @@ root holds only `README.md` and `CLAUDE.md`.
 9. **New TS types mirror Rust serde structs** in `types/` (world/campaign/goods).
 10. **Earth params must stay a no-op** — the EBM anomaly and `Circulation` return zero /
     exactly 30°-60° at Earth settings. Never let a planetary knob shift the Earth baseline.
-11. **Phase 3's order is duplicated** in `sim_commands.rs` and `earth_validation.rs` —
-    change one, change both, or the fidelity gate stops testing the real pipeline.
+11. **Phase 3's order is duplicated** in `sim_commands.rs`, `earth_validation.rs` AND
+    `step3_ocean_atmo/preview.rs` — change one, change all three, or the fidelity gate
+    and the settings preview stop testing/showing the real pipeline.
 12. **After any `tick/` change** → run the dynamics test (§2.1). **After any
     `step3_ocean_atmo/` or `step4_climate/` change** → run the Earth fidelity gate (§2.3)
     and re-read §8.9 (no per-cell outward scans; keep the row loops parallel).

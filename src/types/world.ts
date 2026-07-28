@@ -152,3 +152,51 @@ export interface BiomeStat {
   group: string;
   cells: number;
 }
+
+/** One latitude's row in the zonal settings preview. Mirrors Rust `ZonalSample`. */
+export interface ZonalSample {
+  lat: number;
+  temp: number;
+  tempEarth: number;
+  summerMaritime: number;
+  winterMaritime: number;
+  summerContinental: number;
+  winterContinental: number;
+  /** Indicative Köppen main class 'A'..'E' — for colouring the strip only. */
+  zone: string;
+}
+
+/** The 1-D zonal preview: per-latitude traces + belt geometry + guardrails.
+ *  Mirrors Rust `ZonalProfile`. */
+export interface ZonalProfile {
+  samples: ZonalSample[];
+  hadleyEdge: number;
+  polarFront: number;
+  cells: number;
+  retrograde: boolean;
+  globalMean: number;
+  globalMeanEarth: number;
+  /** Lowest |latitude| with permanent ice; 90 = none. */
+  iceLine: number;
+  snowballRisk: boolean;
+  beltsCollapsed: boolean;
+  visibleTop: number;
+  visibleBottom: number;
+}
+
+/** The coarse climate preview: a Köppen thumbnail + the class mix it implies.
+ *  Mirrors Rust `CoarsePreview`. */
+export interface CoarsePreview {
+  width: number;
+  height: number;
+  /** Base64-encoded RGBA pixels, width × height × 4. */
+  rgba: string;
+  tropicalPct: number;
+  aridPct: number;
+  temperatePct: number;
+  continentalPct: number;
+  polarPct: number;
+  landCells: number;
+  meanTemp: number;
+  meanPrecip: number;
+}

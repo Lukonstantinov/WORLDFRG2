@@ -62,7 +62,10 @@ impl Circulation {
         Self::from_params(1.0, 1.0, 1.0)
     }
 
-    fn from_params(rotation_rate: f32, solar_lum: f32, greenhouse: f32) -> Self {
+    /// Derive the belts from raw planetary parameters. Public so the settings
+    /// PREVIEW (`preview.rs`) can show belt geometry for values the user has not
+    /// committed to the world yet.
+    pub fn from_params(rotation_rate: f32, solar_lum: f32, greenhouse: f32) -> Self {
         // Belt LATITUDE depends only on rotation MAGNITUDE (Held–Hou scaling);
         // direction is carried separately in `rotation_sign` below.
         let rot = rotation_rate.abs().clamp(0.1, 10.0);

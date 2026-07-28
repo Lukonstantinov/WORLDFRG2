@@ -592,6 +592,26 @@ fn latitude_guardrail(code: u8, abs_lat: f32, elevation: f32, precip: f32, temp:
         }
     }
 
+    // FROZEN-WORLD EXEMPTION. Every lowland demotion below rests on one premise:
+    // "a low-latitude cell at sea level cannot really be this cold, so it must be
+    // the cold-current / upwelling over-cooling artefact." That premise holds for
+    // an Earth-like energy budget, where the artefact is worth a few degrees on a
+    // cell that would otherwise be 15-25 °C. It is FALSE on a genuinely cold
+    // planet (low greenhouse / dim star), where a tropical cell is frigid because
+    // the whole world is frigid — and there the demotions would relabel an ice
+    // cap as humid subtropical, wiping the polar class off a snowball world.
+    //
+    // So: below this annual mean, the raw classification stands. −12 °C is chosen
+    // empirically as the largest exemption that leaves the Earth scorecard
+    // BIT-IDENTICAL (66.3 % / 29.1 %) — at −2 °C a handful of real Earth cells
+    // still wanted the demotion and main-class slipped 0.1 pp. No sea-level cell
+    // inside 38° latitude on Earth is that cold, while a frozen world's tropics
+    // sit far below it, so the guard separates the two cases cleanly.
+    const FROZEN_WORLD_TEMP: f32 = -12.0;
+    if temp < FROZEN_WORLD_TEMP {
+        return code;
+    }
+
     let is_tropical = matches!(code, AF | AM | AW | AS);
     let is_temperate = matches!(code,
         CSA | CSB | CSC | CFA | CFB | CFC | CWA | CWB | CWC);
@@ -926,3 +946,65 @@ fn cold_override(k: u8, target_lat: f32, windward: bool) -> Option<u8> {
     }
 }
 
+
+#[cfg(test)]
+mod guardrail_tests {
+    use super::*;
+
+    /// The lowland latitude guardrails exist to undo an Earth-calibrated
+    /// artefact: a cold current plus upwelling can pull a low-latitude coast
+    /// cold enough to classify as subarctic or polar, which is impossible at sea
+    /// level in the subtropics on Earth. They demote such a cell by moisture.
+    ///
+    /// That behaviour must be PRESERVED for a merely over-cooled cell…
+    #[test]
+    fn over_cooled_tropical_coast_is_still_demoted() {
+        // A 15 °C cell at 20° latitude that came out polar: the Benguela case.
+        // It must not stay polar.
+        let out = latitude_guardrail(ET, 20.0, 0.02, 400.0, 15.0);
+        assert_ne!(out, ET, "an over-cooled tropical coast must not read as tundra");
+        assert_ne!(out, EF);
+        // A subarctic misfire at 30° likewise.
+        let out2 = latitude_guardrail(DFC, 30.0, 0.02, 300.0, 12.0);
+        assert!(!matches!(out2, DFC | DFD | ET | EF),
+            "no subarctic strip beside a subtropical desert, got {out2}");
+    }
+
+    /// …and must NOT fire on a genuinely frozen world.
+    ///
+    /// The demotion assumes the cell is only cold by artefact. On a low-greenhouse
+    /// or dim-star world a tropical cell is frigid because the PLANET is frigid,
+    /// and demoting it relabelled ice caps as humid subtropical — a snowball world
+    /// came out reading 72 % "temperate" at −44 °C before this was fixed.
+    #[test]
+    fn frozen_world_keeps_its_ice_at_every_latitude() {
+        for lat in [0.0f32, 10.0, 20.0, 30.0, 37.0] {
+            let out = latitude_guardrail(EF, lat, 0.02, 200.0, -44.0);
+            assert_eq!(out, EF,
+                "a −44 °C cell at {lat}° is an ice cap, not a demotion candidate (got {out})");
+            let out2 = latitude_guardrail(ET, lat, 0.02, 200.0, -30.0);
+            assert_eq!(out2, ET,
+                "a −30 °C cell at {lat}° must stay tundra (got {out2})");
+        }
+    }
+
+    /// The exemption must not leak into the Earth-like range, or the artefact it
+    /// was written to fix comes back. −12 °C is the documented boundary.
+    #[test]
+    fn the_frozen_exemption_stops_short_of_earth_like_cells() {
+        // Just warmer than the exemption: still demoted (Earth behaviour).
+        let warm_side = latitude_guardrail(EF, 20.0, 0.02, 400.0, -11.0);
+        assert_ne!(warm_side, EF, "above the exemption the guardrail must still act");
+        // Just colder: left alone.
+        let cold_side = latitude_guardrail(EF, 20.0, 0.02, 400.0, -13.0);
+        assert_eq!(cold_side, EF, "below the exemption the raw class stands");
+    }
+
+    /// Highlands were already exempt and must stay so — an ice cap on a 5000 m
+    /// tropical peak is real, not an artefact.
+    #[test]
+    fn highlands_remain_exempt() {
+        let out = latitude_guardrail(EF, 5.0, 0.60, 900.0, 2.0);
+        assert_eq!(out, EF, "a high tropical summit keeps its ice");
+    }
+}

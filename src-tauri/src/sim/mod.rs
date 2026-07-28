@@ -20,6 +20,7 @@ pub use step3_ocean_atmo::temperature;
 pub use step3_ocean_atmo::jets;
 pub use step3_ocean_atmo::seasonal;
 pub use step3_ocean_atmo::precipitation;
+pub use step3_ocean_atmo::preview;
 
 // ── Step 4 · Climate Classification (Köppen) ─────────────────────────────────
 pub mod step4_climate;
