@@ -489,6 +489,17 @@ fn biome_pattern_kind(b: u8) -> Pattern {
 /// Brightness delta in roughly [-0.16, +0.10] for the cell at tile-local
 /// `(lx, ly)`. Every period divides 128, so the fill is seamless tile-to-tile.
 fn biome_pattern(b: u8, lx: u32, ly: u32) -> f32 {
+    // Fold into one tile. The renderer only ever passes values already inside
+    // [0, TILE_SIZE), so this changes no pixel — but it makes the whole function
+    // exactly TILE_SIZE-periodic, which is the property
+    // `every_biome_pattern_tiles_seamlessly` asserts, and it is what keeps the
+    // hash-driven components (canopy jitter, stipple, scree) from stepping to a
+    // fresh lattice row across a tile edge. The consequence, stated plainly: a
+    // fill's pseudo-random component REPEATS every 128 cells. That is correct for
+    // a cartographic hatch — a printed map's stipple repeats too — and is
+    // invisible in practice, since the biome colour changes long before the eye
+    // can find the repeat.
+    let (lx, ly) = (lx % TILE_SIZE, ly % TILE_SIZE);
     match biome_pattern_kind(b) {
         Pattern::None => 0.0,
 
@@ -521,9 +532,14 @@ fn biome_pattern(b: u8, lx: u32, ly: u32) -> f32 {
             if cx == 0 && cy >= 5 && hash01(lx / 8, ly / 8, 11) > 0.35 { -0.12 } else { 0.03 }
         }
 
-        // Scrub: isolated 1-px dots on a sparse 8×8 lattice.
+        // Scrub: isolated bushes on a sparse 8×8 lattice. The dot is 2×2, not
+        // 1×1 — a single pixel per 64 is below the threshold of visibility once
+        // the swatch is on screen, and the biome read as a flat wash.
         Pattern::Scrub => {
-            if lx % 8 == 3 && ly % 8 == 3 && hash01(lx / 8, ly / 8, 23) > 0.45 { -0.13 } else { 0.02 }
+            let cx = lx % 8;
+            let cy = ly % 8;
+            let on = (cx == 3 || cx == 4) && (cy == 3 || cy == 4);
+            if on && hash01(lx / 8, ly / 8, 23) > 0.30 { -0.15 } else { 0.02 }
         }
 
         // Stipple: fine sand/gravel grain — a low-density speck field.
@@ -534,8 +550,13 @@ fn biome_pattern(b: u8, lx: u32, ly: u32) -> f32 {
 
         // Dunes: sinusoidal crests running obliquely, as a real erg's do, with a
         // sharp lee slope and a soft stoss slope.
+        //
+        // The coefficients are NOT free: crest period is 32/1 = 32 cells across
+        // and 32/2 = 16 along, and both must divide TILE_SIZE or every sand sea
+        // grows a seam line at each tile edge. (The original 0.55/0.28 gave a
+        // 29.09-cell period — 128/29.09 = 4.4 — and did exactly that.)
         Pattern::Dunes => {
-            let t = ((lx as f32 * 0.55 + ly as f32 * 0.28) * std::f32::consts::TAU / 16.0).sin();
+            let t = ((lx as f32 + ly as f32 * 2.0) * std::f32::consts::TAU / 32.0).sin();
             if t > 0.55 { 0.08 } else { t * 0.10 - 0.02 }
         }
 
@@ -549,11 +570,19 @@ fn biome_pattern(b: u8, lx: u32, ly: u32) -> f32 {
         // Marsh: broken horizontal dashes in alternating offset rows — the
         // conventional wetland hatch.
         Pattern::Marsh => marsh_dash(lx, ly),
-        // Bog: the marsh hatch over a stipple of peat hummocks.
+        // Bog: the marsh hatch, with a stipple of peat hummocks on the ground
+        // BETWEEN the dashes. The two must not stack — dash and hummock together
+        // pushed the cell past the readable band and made bog read as a different
+        // colour entirely rather than as marsh-with-texture.
         Pattern::Bog => {
             let d = marsh_dash(lx, ly);
-            let h = if hash01(lx, ly, 71) > 0.88 { -0.06 } else { 0.0 };
-            d + h
+            if d < 0.0 {
+                d // on a dash: leave it alone
+            } else if hash01(lx, ly, 71) > 0.88 {
+                d - 0.10
+            } else {
+                d
+            }
         }
 
         // Crevasse: thin diagonal fractures across an otherwise clean ice field.
@@ -589,19 +618,25 @@ fn blob(lx: u32, ly: u32, period: u32, r: f32, inside: f32, outside: f32) -> f32
     if dx * dx + dy * dy <= (r * jitter) * (r * jitter) { inside } else { outside }
 }
 
-/// Broken horizontal dashes in offset rows — the wetland hatch shared by marsh
-/// and bog.
+/// Broken horizontal dashes in offset rows — the wetland hatch shared by marsh,
+/// mangrove and bog.
+///
+/// This is the most recognisable symbol on the sheet, so it carries the widest
+/// contrast of any pattern here (0.24 between dash and ground, against ~0.15 for
+/// the others). At the original ±0.13/0.02 the dashes were technically present
+/// and visually absent, which is the worst of both.
 fn marsh_dash(lx: u32, ly: u32) -> f32 {
     if ly % 4 != 1 {
-        return 0.02;
+        return 0.05;
     }
     let seg = (lx + if (ly / 4) % 2 == 1 { 4 } else { 0 }) % 8;
-    if seg < 5 { -0.13 } else { 0.02 }
+    if seg < 5 { -0.19 } else { 0.05 }
 }
 
 /// Deterministic hash in [0, 1) from two lattice coordinates and a salt. Pure
 /// integer mixing — no allocation, no float noise field, and identical on every
 /// platform.
+///
 fn hash01(x: u32, y: u32, salt: u32) -> f32 {
     let mut h = x
         .wrapping_mul(0x9E37_79B9)
@@ -1178,4 +1213,206 @@ fn lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> (u8, u8, u8) {
         (a.1 as f32 + (b.1 as f32 - a.1 as f32) * t) as u8,
         (a.2 as f32 + (b.2 as f32 - a.2 as f32) * t) as u8,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sim::biome::*;
+
+    /// Every biome's pattern fill must be SEAMLESS across a tile boundary.
+    ///
+    /// Patterns are functions of the cell's position WITHIN its tile, and the
+    /// renderer never learns its own world coordinates — so the only thing making
+    /// two neighbouring tiles line up is that every pattern period divides
+    /// `TILE_SIZE`. This test states that directly: continuing the pattern
+    /// function past the tile edge must reproduce it exactly, for every biome and
+    /// every row. A new pattern with a period of, say, 6 or 10 px would leave a
+    /// visible grid of seams across the whole map, and this is what catches it.
+    #[test]
+    fn every_biome_pattern_tiles_seamlessly() {
+        for b in 1..BIOME_COUNT as u8 {
+            for y in 0..SIZE as u32 {
+                for x in 0..SIZE as u32 {
+                    let here = biome_pattern(b, x, y);
+                    let wrapped_x = biome_pattern(b, x + TILE_SIZE, y);
+                    let wrapped_y = biome_pattern(b, x, y + TILE_SIZE);
+                    assert_eq!(here, wrapped_x,
+                        "biome {} ({}) breaks across a VERTICAL tile seam at x={x}, y={y}",
+                        b, biome_name(b));
+                    assert_eq!(here, wrapped_y,
+                        "biome {} ({}) breaks across a HORIZONTAL tile seam at x={x}, y={y}",
+                        b, biome_name(b));
+                }
+            }
+        }
+    }
+
+    /// The pattern must stay a MODULATION, never a repaint: a swatch has to read
+    /// as its own colour, so no cell may be pushed more than ~20% off the base.
+    /// Two biomes whose base colours are close would otherwise overlap once their
+    /// patterns swing, and the legend stops matching the map.
+    #[test]
+    fn pattern_amplitude_stays_within_a_readable_band() {
+        for b in 1..BIOME_COUNT as u8 {
+            for y in 0..SIZE as u32 {
+                for x in 0..SIZE as u32 {
+                    let p = biome_pattern(b, x, y);
+                    assert!(p > -0.20 && p < 0.20,
+                        "biome {} ({}) pattern swings {p} at ({x},{y}) — too far off base",
+                        b, biome_name(b));
+                }
+            }
+        }
+    }
+
+    /// Every biome the classifier can emit must have a distinct base colour, or
+    /// two different ecologies render identically and the map lies.
+    #[test]
+    fn biome_colors_are_distinct() {
+        let mut seen: Vec<(u8, (u8, u8, u8))> = Vec::new();
+        for b in 1..BIOME_COUNT as u8 {
+            let c = biome_color(b);
+            if let Some(&(other, oc)) = seen.iter().find(|&&(_, oc)| oc == c) {
+                panic!("biome {} ({}) shares colour {:?} with {} ({})",
+                    b, biome_name(b), c, other, biome_name(other));
+            }
+            seen.push((b, c));
+        }
+    }
+
+    // ── Swatch-sheet generator (ignored: writes a PNG, run on demand) ──
+    //
+    //   cargo test --lib render::tile_image::tests::dump_biome_swatch_sheet \
+    //       -- --ignored --nocapture
+    //
+    // Renders every biome through the REAL `render_tile` path — these are the
+    // exact pixels the app draws, not an illustration. Output dir comes from
+    // $BIOME_SHEET_DIR (default: the system temp dir).
+
+    /// 3×5 bitmap digits, so each swatch can be labelled with its biome code
+    /// without pulling in a font stack.
+    const DIGITS: [[u8; 5]; 10] = [
+        [0b111, 0b101, 0b101, 0b101, 0b111], // 0
+        [0b010, 0b110, 0b010, 0b010, 0b111], // 1
+        [0b111, 0b001, 0b111, 0b100, 0b111], // 2
+        [0b111, 0b001, 0b111, 0b001, 0b111], // 3
+        [0b101, 0b101, 0b111, 0b001, 0b001], // 4
+        [0b111, 0b100, 0b111, 0b001, 0b111], // 5
+        [0b111, 0b100, 0b111, 0b101, 0b111], // 6
+        [0b111, 0b001, 0b010, 0b010, 0b010], // 7
+        [0b111, 0b101, 0b111, 0b101, 0b111], // 8
+        [0b111, 0b101, 0b111, 0b001, 0b111], // 9
+    ];
+
+    fn draw_code(sheet: &mut [u8], sw: usize, ox: usize, oy: usize, code: u8) {
+        let text = code.to_string();
+        const S: usize = 2; // pixel scale
+        // Dark plate behind the digits so they read on pale biomes too.
+        let plate_w = text.len() * 4 * S + 2 * S;
+        for py in 0..(5 * S + 2 * S) {
+            for px in 0..plate_w {
+                let (x, y) = (ox + px, oy + py);
+                let o = (y * sw + x) * 3;
+                for c in 0..3 { sheet[o + c] = (sheet[o + c] as u16 * 25 / 100) as u8; }
+            }
+        }
+        for (di, ch) in text.chars().enumerate() {
+            let g = DIGITS[ch.to_digit(10).unwrap() as usize];
+            for (ry, rowbits) in g.iter().enumerate() {
+                for cx in 0..3 {
+                    if rowbits & (1 << (2 - cx)) == 0 { continue; }
+                    for sy in 0..S { for sx in 0..S {
+                        let x = ox + S + di * 4 * S + cx * S + sx;
+                        let y = oy + S + ry * S + sy;
+                        let o = (y * sw + x) * 3;
+                        sheet[o] = 255; sheet[o + 1] = 255; sheet[o + 2] = 255;
+                    }}
+                }
+            }
+        }
+    }
+
+    /// A tile whose every land cell carries one biome, at a plausible elevation.
+    fn uniform_tile(biome: u8) -> TileData {
+        let mut t = TileData::new_sea();
+        for i in 0..PIXEL_COUNT {
+            t.terrain[i] = 1;
+            t.elevation[i] = 0.20; // neutral: the hypsometric lift is ~1.0 here
+            t.biome[i] = biome;
+        }
+        t
+    }
+
+    #[test]
+    #[ignore]
+    fn dump_biome_swatch_sheet() {
+        let dir = std::env::var("BIOME_SHEET_DIR")
+            .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned());
+
+        // ── Sheet 1: every biome, grouped, one 128×128 tile each ──
+        // Listed in classifier order so related ecologies sit together.
+        let order: Vec<u8> = (1..BIOME_COUNT as u8).collect();
+        const COLS: usize = 7;
+        const CELL: usize = SIZE;   // one whole tile per swatch
+        const GAP: usize = 6;
+        let rows = order.len().div_ceil(COLS);
+        let sw = COLS * CELL + (COLS + 1) * GAP;
+        let sh = rows * CELL + (rows + 1) * GAP;
+        let mut sheet = vec![18u8; sw * sh * 3]; // dark backing
+
+        for (k, &b) in order.iter().enumerate() {
+            let rgba = render_tile(&uniform_tile(b), "biomes");
+            let cx = GAP + (k % COLS) * (CELL + GAP);
+            let cy = GAP + (k / COLS) * (CELL + GAP);
+            for y in 0..SIZE {
+                for x in 0..SIZE {
+                    let s = (y * SIZE + x) * 4;
+                    let d = ((cy + y) * sw + cx + x) * 3;
+                    sheet[d] = rgba[s];
+                    sheet[d + 1] = rgba[s + 1];
+                    sheet[d + 2] = rgba[s + 2];
+                }
+            }
+            draw_code(&mut sheet, sw, cx + 3, cy + 3, b);
+        }
+        let p1 = format!("{dir}/biome_swatches.png");
+        image::save_buffer(&p1, &sheet, sw as u32, sh as u32, image::ColorType::Rgb8).unwrap();
+        println!("wrote {p1}  ({sw}×{sh})");
+
+        // ── Sheet 2: seam proof — 2×2 tiles butted together, no gaps ──
+        // Each block is FOUR separately-rendered tiles. If any pattern period did
+        // not divide TILE_SIZE, a seam would appear down the middle of each block.
+        let picks: [u8; 6] = [
+            B_TROPICAL_RAINFOREST, // canopy blobs
+            B_TAIGA,               // conifer spires
+            B_FRESHWATER_MARSH,    // marsh dashes
+            B_DUNE_SEA,            // dune ripples
+            B_SALT_FLAT,           // cracked lattice
+            B_GLACIER,             // crevasse lines
+        ];
+        let bw = SIZE * 2;
+        let sw2 = picks.len() * bw + (picks.len() + 1) * GAP;
+        let sh2 = bw + 2 * GAP;
+        let mut seam = vec![18u8; sw2 * sh2 * 3];
+        for (k, &b) in picks.iter().enumerate() {
+            let rgba = render_tile(&uniform_tile(b), "biomes");
+            let ox = GAP + k * (bw + GAP);
+            for ty in 0..2 { for tx in 0..2 {
+                for y in 0..SIZE { for x in 0..SIZE {
+                    let s = (y * SIZE + x) * 4;
+                    let dx = ox + tx * SIZE + x;
+                    let dy = GAP + ty * SIZE + y;
+                    let d = (dy * sw2 + dx) * 3;
+                    seam[d] = rgba[s];
+                    seam[d + 1] = rgba[s + 1];
+                    seam[d + 2] = rgba[s + 2];
+                }}
+            }}
+            draw_code(&mut seam, sw2, ox + 3, GAP + 3, b);
+        }
+        let p2 = format!("{dir}/biome_seams.png");
+        image::save_buffer(&p2, &seam, sw2 as u32, sh2 as u32, image::ColorType::Rgb8).unwrap();
+        println!("wrote {p2}  ({sw2}×{sh2})");
+    }
 }

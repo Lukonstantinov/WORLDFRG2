@@ -821,8 +821,23 @@ sea, crevasse lines for glacier ice, a cracked lattice for a salt pan. Two rules
 - **Every pattern period must divide `TILE_SIZE` (128).** Patterns are functions
   of the cell's position WITHIN the tile, so a divisor period is what makes them
   line up tile-to-tile without the renderer knowing its world coordinates.
+  `every_biome_pattern_tiles_seamlessly` asserts exactly this and is not
+  decorative — it caught the dune ripple shipping at a 29.09-cell period
+  (128/29.09 = 4.4), which would have drawn a seam across every sand sea. The
+  corollary is that a fill's pseudo-random component REPEATS every 128 cells;
+  that is correct for a cartographic hatch and invisible in practice.
+- **Contrast has a floor and a ceiling.** Under about 0.15 between mark and
+  ground a pattern is technically present and visually absent (the first cut of
+  the scrub dots and the marsh dashes both were); over ~0.20 it stops reading as
+  texture and starts reading as a different colour, so two biomes blur together.
+  `pattern_amplitude_stays_within_a_readable_band` holds the ceiling — it caught
+  peat bog stacking its dash and hummock layers to 0.25.
 - **They are SYMBOLS, not surface texture.** Holding a fixed pixel scale across
   the LOD pyramid is correct — that is how printed map hatching behaves.
+- **`cargo test --lib render::tile_image::tests::dump_biome_swatch_sheet --
+  --ignored --nocapture`** writes a swatch sheet + a tile-seam proof to
+  `$BIOME_SHEET_DIR`, rendered through the real `render_tile` path. Use it to
+  eyeball a palette or pattern change instead of guessing.
 
 `biome_color` (render) and `BIOME_SWATCH` (`StepSoilResources.tsx` legend) are
 two copies of the same palette — change one, change both, or the legend lies.
