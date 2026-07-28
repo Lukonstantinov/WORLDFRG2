@@ -864,11 +864,12 @@ fn seed_campaign_provinces(conn: &Connection, sim: &mut CampaignSim) {
         _ => return,
     };
     if provs.is_empty() { return; }
-    let (rw, _rh, gw, gh, raster): (u32, u32, u32, u32, Vec<u16>) =
+    let (rw, _rh, gw, gh, mut raster): (u32, u32, u32, u32, Vec<u32>) =
         match metadata::get_meta(conn, "province_raster") {
             Ok(Some(s)) => serde_json::from_str(&s).unwrap_or((0, 0, 0, 0, Vec::new())),
             _ => (0, 0, 0, 0, Vec::new()),
         };
+    crate::sim::provinces::migrate_raster_sentinel(&mut raster);
     let n = provs.iter().map(|p| p.id as usize + 1).max().unwrap_or(0);
     let mut rural = vec![0.0f32; n];
     let mut cap = vec![0.0f32; n];

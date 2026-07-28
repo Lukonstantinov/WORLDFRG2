@@ -1,17 +1,20 @@
 import { create } from "zustand";
 import type { WorldMeta, RiverData, LakeData, Settlement, EconomySnapshot, Toponym, RiverNode, LakeNode, Province, SimProvincesResult } from "@types";
 
-/** Full-resolution per-cell province-id raster for the map overlay (65535 = sea).
- *  `data` is grid_w×grid_h so borders are pixel-exact and follow the coastline. */
-export interface ProvinceRaster { data: Uint16Array; w: number; h: number; gridW: number; gridH: number; }
+/** Full-resolution per-cell province-id raster for the map overlay (4294967295 = sea).
+ *  `data` is grid_w×grid_h so borders are pixel-exact and follow the coastline. Ids are
+ *  u32 (was u16) so a world with >65534 provinces doesn't wrap onto the sea sentinel. */
+export interface ProvinceRaster { data: Uint32Array; w: number; h: number; gridW: number; gridH: number; }
 
 /** Decode a province-generation result's RLE into a full-resolution ProvinceRaster.
- *  Falls back to the coarse raster for pre-RLE worlds. Returns null if neither is set. */
+ *  Falls back to the coarse raster for pre-RLE worlds. Returns null if neither is set.
+ *  (The backend migrates old u16 rasters to the u32 sentinel on read, so `val` here is
+ *  always the current NO_PROVINCE for sea.) */
 export function decodeProvinceRaster(res: SimProvincesResult): ProvinceRaster | null {
   const gw = res.grid_w, gh = res.grid_h;
   const rle = res.raster_rle;
   if (rle && rle.length >= 2 && gw > 0 && gh > 0) {
-    const data = new Uint16Array(gw * gh);
+    const data = new Uint32Array(gw * gh);
     let pos = 0;
     for (let i = 0; i + 1 < rle.length; i += 2) {
       const val = rle[i], cnt = rle[i + 1];
@@ -21,7 +24,7 @@ export function decodeProvinceRaster(res: SimProvincesResult): ProvinceRaster | 
     return { data, w: gw, h: gh, gridW: gw, gridH: gh };
   }
   if (res.raster && res.raster.length > 0) {
-    return { data: Uint16Array.from(res.raster), w: res.raster_w, h: res.raster_h, gridW: gw, gridH: gh };
+    return { data: Uint32Array.from(res.raster), w: res.raster_w, h: res.raster_h, gridW: gw, gridH: gh };
   }
   return null;
 }

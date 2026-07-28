@@ -3096,7 +3096,7 @@ pub struct CampaignSim {
     #[serde(default)] pub prov_net_mig: Vec<f32>,
     /// Province adjacency (id → neighbouring province ids), for OVERLAND plague spread
     /// across the countryside from one province to the next.
-    #[serde(default)] pub prov_neighbors: Vec<Vec<u16>>,
+    #[serde(default)] pub prov_neighbors: Vec<Vec<u32>>,
 }
 
 /// Deterministic 0..1 hash of three mixed inputs (splitmix64).

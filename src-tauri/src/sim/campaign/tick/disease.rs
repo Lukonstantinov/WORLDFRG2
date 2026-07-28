@@ -211,7 +211,7 @@ impl CampaignSim {
                         if !neigh.is_empty() {
                             for h in 0..n {
                                 let hp = self.hub_province.get(h).copied().unwrap_or(-1);
-                                if hp >= 0 && neigh.contains(&(hp as u16)) {
+                                if hp >= 0 && neigh.contains(&(hp as u32)) {
                                     consider(self, h, &mut best);
                                 }
                             }

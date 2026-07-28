@@ -673,7 +673,7 @@ export class OverlayManager {
     const ry = Math.floor((wy / r.gridH) * r.h);
     if (rx < 0 || ry < 0 || rx >= r.w || ry >= r.h) return null;
     const id = r.data[ry * r.w + rx];
-    return id === 65535 ? null : id;
+    return id === 0xffffffff ? null : id;
   }
 
   /** Cut the selected province's outline out of the raster once, in world cells. */
@@ -711,7 +711,7 @@ export class OverlayManager {
     const r = this.provinceRaster;
     if (!r) return;
     const { data, w, h, gridW, gridH } = r;
-    const NO = 65535;
+    const NO = 0xffffffff; // NO_PROVINCE sentinel (u32; the raster is Uint32Array)
     const cv = document.createElement("canvas");
     cv.width = w; cv.height = h;
     const ictx = cv.getContext("2d");

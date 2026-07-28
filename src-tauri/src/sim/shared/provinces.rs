@@ -62,7 +62,7 @@ pub const BORDER_LAKE: u8 = 3;
 /// along it. Longest frontier first.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProvinceBorder {
-    pub neighbor: u16,
+    pub neighbor: u32,
     /// Shared border length in cells (so a 1-cell touch is distinguishable from a
     /// 40-cell frontier).
     pub cells: u32,
@@ -73,14 +73,14 @@ pub struct ProvinceBorder {
 /// A province: a contiguous (mostly) patch of one island's land.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Province {
-    pub id: u16,
+    pub id: u32,
     pub name: String,              // its OWN generated name (variable length), not the seat's
     pub seat_x: u32,
     pub seat_y: u32,
     pub cells: u32,                // area in cells
     pub area_km2: u32,             // latitude-aware real area
     pub island: u32,               // land connected-component id (coast = hard border)
-    pub neighbors: Vec<u16>,
+    pub neighbors: Vec<u32>,
     // ── geography ──
     pub koppen: u8,                // plurality climate
     pub elevation_class: u8,       // 0 lowland · 1 hill · 2 upland
@@ -138,8 +138,28 @@ pub struct Province {
     #[serde(default)] pub label_r: f32,
 }
 
-/// Sea sentinel in the per-cell province-id map.
-pub const NO_PROVINCE: u16 = u16::MAX;
+/// Sea sentinel in the per-cell province-id map. u32 (not u16) so a world can hold
+/// more than 65 534 provinces without an id colliding with the sentinel — the cause of
+/// whole regions rendering as unowned "green" land on very fine / very large worlds.
+pub const NO_PROVINCE: u32 = u32::MAX;
+
+/// Old worlds stored the sea sentinel as `u16::MAX` (65535); new ones use `u32::MAX`.
+/// A raster that never mentions `u32::MAX` is the old format — remap its 65535 sentinel
+/// so callers (and the frontend) always see one `NO_PROVINCE` value. A world with
+/// >65534 provinces is only ever the NEW format, so a genuine id 65535 is never
+/// mistaken for sea. Call on any raster read back from a stored `.worldforge`.
+pub fn migrate_raster_sentinel(vals: &mut [u32]) {
+    if vals.iter().any(|&v| v == NO_PROVINCE) { return; }
+    for v in vals.iter_mut() { if *v == 65535 { *v = NO_PROVINCE; } }
+}
+
+/// Same, for the RLE `[val, count, val, count, …]` list — only the even (value) slots
+/// are ids, so a run length that happens to equal 65535 is left alone.
+pub fn migrate_rle_sentinel(rle: &mut [u32]) {
+    if rle.iter().step_by(2).any(|&v| v == NO_PROVINCE) { return; }
+    let mut i = 0;
+    while i < rle.len() { if rle[i] == 65535 { rle[i] = NO_PROVINCE; } i += 2; }
+}
 
 // ── Partition tuning ──────────────────────────────────────────────────────────
 /// Cost per unit of CREST PROMINENCE. Elevation is normalised by 8848 m, so ~250 m
@@ -298,7 +318,7 @@ pub fn generate_provinces(
     lakes: &[Lake],
     settlements: &[Settlement],
     granularity: f32,
-) -> (Vec<Province>, Vec<u16>) {
+) -> (Vec<Province>, Vec<u32>) {
     let w = buf.width;
     let h = buf.height;
     let wi = w as i32;
@@ -645,13 +665,13 @@ pub fn generate_provinces(
         owner[c] = o;
     }
 
-    // ── Compact province ids to 0..n and build per-cell u16 map. ──
-    let mut old_to_new = std::collections::HashMap::<u32, u16>::new();
+    // ── Compact province ids to 0..n and build per-cell id map. ──
+    let mut old_to_new = std::collections::HashMap::<u32, u32>::new();
     let mut province_id = vec![NO_PROVINCE; total];
     for c in 0..total {
         let o = owner[c];
         if o == u32::MAX { continue; }
-        let next = old_to_new.len() as u16;
+        let next = old_to_new.len() as u32;
         let nid = *old_to_new.entry(o).or_insert(next);
         province_id[c] = nid;
     }
@@ -698,7 +718,7 @@ pub fn generate_provinces(
     let cmap_ref = cmap.as_deref();
 
     // Per-pair frontier tally: (lo, hi) → [len per BORDER_* kind].
-    let mut pair_kinds: std::collections::HashMap<(u16, u16), [u32; 4]> =
+    let mut pair_kinds: std::collections::HashMap<(u32, u32), [u32; 4]> =
         std::collections::HashMap::new();
     let has_temp = !buf.temperature.is_empty();
     let has_precip = !buf.precipitation.is_empty();
@@ -869,11 +889,11 @@ pub fn generate_provinces(
         let analog = real_world_analog(koppen, elevation_class, a.coastal).to_string();
         let rural_pop = (a.food * 18.0).round().max(0.0) as u32;
         let neighbors_detail = borders[pid].clone();
-        let mut neighbors: Vec<u16> = neighbors_detail.iter().map(|b| b.neighbor).collect();
+        let mut neighbors: Vec<u32> = neighbors_detail.iter().map(|b| b.neighbor).collect();
         neighbors.sort_unstable();
 
         provinces.push(Province {
-            id: pid as u16,
+            id: pid as u32,
             name,
             seat_x: sx, seat_y: sy,
             cells: a.cells,
@@ -917,7 +937,61 @@ pub fn generate_provinces(
     }
 
     rank_goods_worldwide(&mut provinces);
+
+    // Split lakes down the middle: fill each lake cell with its nearest-shore province
+    // so a wide lake becomes a boundary that runs down its CENTRE (each side owns up to
+    // the midline), instead of an unowned hole. Done last, so it only refines the raster
+    // (borders, hit-testing, hub→province mapping) and leaves the land-only province
+    // stats above untouched.
+    assign_lakes_to_nearest(buf, &mut province_id, &is_lake);
+
     (provinces, province_id)
+}
+
+/// Fill lake cells by nearest-shore province (multi-source BFS from every province-
+/// owned cell that touches a lake, expanding only across lake water). Two fronts meet
+/// on the lake's medial axis, so a lake shared by two provinces is divided down its
+/// centre. Deterministic: the seed owner ties break on the lower province id, and the
+/// BFS front is FIFO from a scan-ordered seed list.
+fn assign_lakes_to_nearest(buf: &WorldBuffer, province_id: &mut [u32], is_lake: &[bool]) {
+    let w = buf.width;
+    let hi = buf.height as i32;
+    let total = province_id.len();
+    let mut assigned = vec![NO_PROVINCE; total];
+    let mut q: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
+    // Seed: each lake cell bordering province-owned land takes the (lowest-id) owner.
+    for c in 0..total {
+        if !is_lake[c] { continue; }
+        let cx = (c as u32 % w) as i32;
+        let cy = (c as u32 / w) as i32;
+        let mut best = NO_PROVINCE;
+        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+            let ny = cy + dy; if ny < 0 || ny >= hi { continue; }
+            let ni = buf.widx(cx + dx, ny);
+            if !is_lake[ni] {
+                let pid = province_id[ni];
+                if pid != NO_PROVINCE && pid < best { best = pid; }
+            }
+        }
+        if best != NO_PROVINCE { assigned[c] = best; q.push_back(c as u32); }
+    }
+    // BFS across lake interiors — nearest shore (in hops) wins each cell.
+    while let Some(cell) = q.pop_front() {
+        let owner = assigned[cell as usize];
+        let cx = (cell % w) as i32;
+        let cy = (cell / w) as i32;
+        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+            let ny = cy + dy; if ny < 0 || ny >= hi { continue; }
+            let ni = buf.widx(cx + dx, ny);
+            if is_lake[ni] && assigned[ni] == NO_PROVINCE {
+                assigned[ni] = owner;
+                q.push_back(ni as u32);
+            }
+        }
+    }
+    for c in 0..total {
+        if is_lake[c] && assigned[c] != NO_PROVINCE { province_id[c] = assigned[c]; }
+    }
 }
 
 /// Per-province **pole of inaccessibility**: the cell furthest from any boundary, plus
@@ -934,7 +1008,7 @@ pub fn generate_provinces(
 /// 8-neighbour BFS measures CHEBYSHEV distance, which favours diagonally-elongated
 /// shapes slightly over a true Euclidean transform; for choosing where a label sits
 /// that is well within tolerance, and it wraps in X for free through `widx`.
-fn compute_label_anchors(buf: &WorldBuffer, province_id: &[u16], n: usize) -> Vec<(u32, u32, f32)> {
+fn compute_label_anchors(buf: &WorldBuffer, province_id: &[u32], n: usize) -> Vec<(u32, u32, f32)> {
     let w = buf.width;
     let hi = buf.height as i32;
     let total = buf.total();
@@ -1057,7 +1131,7 @@ fn rank_goods_worldwide(provinces: &mut [Province]) {
 /// can lose its core and no fragment deeper than the snap radius can appear.
 fn snap_borders_to_features(
     buf: &WorldBuffer,
-    province_id: &mut [u16],
+    province_id: &mut [u32],
     n: usize,
     ridge: &[f32],
     river_divide: &[f32],
@@ -1126,7 +1200,7 @@ fn snap_borders_to_features(
     // marker so it cannot be dissolved by the snap.
     for p in 0..n {
         if marker_count[p] == 0 && rep_cell[p] != u32::MAX {
-            province_id[rep_cell[p] as usize] = p as u16;
+            province_id[rep_cell[p] as usize] = p as u32;
         }
     }
 
@@ -1183,7 +1257,7 @@ fn snap_borders_to_features(
                     if is_lake[ca] && is_lake[cb] { continue; }
                     if river_divide[ca] > 0.0 && river_divide[cb] > 0.0 { continue; }
                 }
-                province_id[ni] = ow as u16;
+                province_id[ni] = ow as u32;
                 heap.push(HeapItem { cost: relief_at(ni), cell: ni as u32, owner: ow });
             }
         }
@@ -1318,7 +1392,7 @@ mod tests {
     }
 
     /// Every land cell that touches a DIFFERENT province (4-dir) — the border line.
-    fn border_mask(buf: &WorldBuffer, ids: &[u16]) -> Vec<bool> {
+    fn border_mask(buf: &WorldBuffer, ids: &[u32]) -> Vec<bool> {
         let w = buf.width as i32;
         let h = buf.height as i32;
         let mut m = vec![false; ids.len()];

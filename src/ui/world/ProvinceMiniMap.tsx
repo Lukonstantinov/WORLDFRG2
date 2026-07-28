@@ -6,8 +6,6 @@ import type { ProvinceRaster } from "@state/worldStore";
 // buildings drawn with custom minimalist icons) beside a holdings list. Hovering any
 // icon reveals its name + full stats.
 
-const NO = 65535;
-
 // ── Custom minimalist building icons (tiny SVG, no emoji). kind: 0 estate ·
 //    1 manufactory · 2 warehouse · 3 bank · 4 mint. Drawn centred on (0,0). ──
 const B_COLOR = ["#7fb069", "#d98c40", "#5a9bd4", "#e3c14a", "#c9a24a"];

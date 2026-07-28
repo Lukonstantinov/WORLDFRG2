@@ -705,7 +705,7 @@ pub struct SimProvincesResult {
     pub provinces: Vec<crate::sim::provinces::Province>,
     /// Downsampled per-cell province id for the campaign hub→province mapping + the
     /// mini-map (row-major, `NO_PROVINCE` = sea/no-data). Capped so the payload is small.
-    pub raster: Vec<u16>,
+    pub raster: Vec<u32>,
     pub raster_w: u32,
     pub raster_h: u32,
     pub grid_w: u32,
@@ -718,15 +718,15 @@ pub struct SimProvincesResult {
 }
 
 /// Run-length encode a full-resolution province-id map into a flat `[val, count, …]`
-/// list (val is the u16 id widened to u32; count is the run length).
-fn rle_encode_provinces(ids: &[u16]) -> Vec<u32> {
+/// list (val is the province id; count is the run length).
+fn rle_encode_provinces(ids: &[u32]) -> Vec<u32> {
     let mut out: Vec<u32> = Vec::new();
     let mut i = 0usize;
     while i < ids.len() {
         let v = ids[i];
         let mut n = 1u32;
         while i + (n as usize) < ids.len() && ids[i + n as usize] == v { n += 1; }
-        out.push(v as u32);
+        out.push(v);
         out.push(n);
         i += n as usize;
     }
@@ -811,14 +811,16 @@ pub fn get_province_layer(db: State<'_, WorldDb>) -> Result<SimProvincesResult, 
     let provinces: Vec<crate::sim::provinces::Province> =
         metadata::get_meta(&conn, "provinces").map_err(|e| e.to_string())?
             .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-    let (raster_w, raster_h, grid_w, grid_h, raster): (u32, u32, u32, u32, Vec<u16>) =
+    let (raster_w, raster_h, grid_w, grid_h, mut raster): (u32, u32, u32, u32, Vec<u32>) =
         metadata::get_meta(&conn, "province_raster").map_err(|e| e.to_string())?
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or((0, 0, 0, 0, Vec::new()));
-    let (_rw, _rh, raster_rle): (u32, u32, Vec<u32>) =
+    crate::sim::provinces::migrate_raster_sentinel(&mut raster);
+    let (_rw, _rh, mut raster_rle): (u32, u32, Vec<u32>) =
         metadata::get_meta(&conn, "province_raster_rle").map_err(|e| e.to_string())?
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or((0, 0, Vec::new()));
+    crate::sim::provinces::migrate_rle_sentinel(&mut raster_rle);
     Ok(SimProvincesResult { provinces, raster, raster_w, raster_h, grid_w, grid_h, raster_rle })
 }
 
@@ -854,7 +856,7 @@ pub struct PSettlement {
 /// Read-only join over the stored partition + the live sim — does NOT touch the tick.
 #[derive(serde::Serialize)]
 pub struct ProvinceDetail {
-    pub id: u16,
+    pub id: u32,
     pub rural_pop: u32,
     pub urban_pop: u32,
     pub net_migration: i32,
@@ -863,13 +865,14 @@ pub struct ProvinceDetail {
 }
 
 #[tauri::command]
-pub fn campaign_province_detail(id: u16, db: State<'_, WorldDb>) -> Result<Option<ProvinceDetail>, String> {
+pub fn campaign_province_detail(id: u32, db: State<'_, WorldDb>) -> Result<Option<ProvinceDetail>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let (rw, rh, gw, gh, raster): (u32, u32, u32, u32, Vec<u16>) =
+    let (rw, rh, gw, gh, mut raster): (u32, u32, u32, u32, Vec<u32>) =
         match metadata::get_meta(&conn, "province_raster").map_err(|e| e.to_string())? {
             Some(s) => serde_json::from_str(&s).unwrap_or((0, 0, 0, 0, Vec::new())),
             None => return Ok(None),
         };
+    crate::sim::provinces::migrate_raster_sentinel(&mut raster);
     if raster.is_empty() || gw == 0 || gh == 0 || rw == 0 || rh == 0 { return Ok(None); }
     let Some(sim) = crate::commands::campaign_commands::get_sim(&db, &conn)? else { return Ok(None); };
     // Map a world cell → raster cell by ratio (resolution-independent — works whatever
@@ -994,7 +997,7 @@ pub fn campaign_province_detail(id: u16, db: State<'_, WorldDb>) -> Result<Optio
 /// touch the tick, so the economy dynamics are unchanged.
 #[derive(serde::Serialize)]
 pub struct ProvinceLive {
-    pub id: u16,
+    pub id: u32,
     pub rural_pop: u32,
     pub urban_pop: u32,
     pub hub_count: u32,
@@ -1010,12 +1013,13 @@ pub fn campaign_province_state(db: State<'_, WorldDb>) -> Result<Vec<ProvinceLiv
         metadata::get_meta(&conn, "provinces").map_err(|e| e.to_string())?
             .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     if provinces.is_empty() { return Ok(vec![]); }
-    let (rw, _rh, gw, gh, raster): (u32, u32, u32, u32, Vec<u16>) =
+    let (rw, _rh, gw, gh, mut raster): (u32, u32, u32, u32, Vec<u32>) =
         metadata::get_meta(&conn, "province_raster").map_err(|e| e.to_string())?
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or((0, 0, 0, 0, Vec::new()));
-    let mut urban = std::collections::HashMap::<u16, u32>::new();
-    let mut hubs = std::collections::HashMap::<u16, u32>::new();
+    crate::sim::provinces::migrate_raster_sentinel(&mut raster);
+    let mut urban = std::collections::HashMap::<u32, u32>::new();
+    let mut hubs = std::collections::HashMap::<u32, u32>::new();
     // Live rural pool (Phase 2b): read the sim's per-province reservoir when present,
     // else fall back to each province's static baseline.
     let mut live_rural: Vec<f32> = Vec::new();
