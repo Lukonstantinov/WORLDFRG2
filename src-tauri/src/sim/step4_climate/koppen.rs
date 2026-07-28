@@ -149,6 +149,35 @@ fn cold_current_near(buf: &WorldBuffer, x: u32, y: u32) -> bool {
     false
 }
 
+/// True if a WARM ocean current (type 1) runs within 2 cells — a coast bathed by a
+/// warm boundary/drift current (the North Atlantic Drift off NW Europe, the Kuroshio
+/// off Japan). The counterpart to `cold_current_near`: such a current imports oceanic
+/// heat that keeps winters mild and damps the seasonal swing toward maritime EVEN over
+/// a wide continental shelf, so the coast reads oceanic (Cfb) rather than continental
+/// (Dfb). A shelf defeats the heat-capacity moderation, but a warm current still does.
+pub(crate) fn warm_current_near(buf: &WorldBuffer, x: u32, y: u32) -> bool {
+    if buf.current_type.is_empty() { return false; }
+    for dy in -2i32..=2 {
+        for dx in -2i32..=2 {
+            let nx = buf.wrap_x(x as i32 + dx);
+            let ny = y as i32 + dy;
+            if ny < 0 || ny >= buf.height as i32 { continue; }
+            let ni = buf.idx(nx, ny as u32);
+            if buf.terrain[ni] == 0 && buf.current_type[ni] == 1 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// How far a nearby warm current pulls a coast's effective continentality toward
+/// maritime (multiplier on the continentality factor). Only fires where a warm
+/// current is adjacent, so interior and lee coasts are untouched. See
+/// `warm_current_near`; this is what keeps warm-current shelf coasts (NW Europe,
+/// Norway, BC) oceanic instead of drifting into cold-winter continental.
+pub(crate) const WARM_CURRENT_MARITIME: f32 = 0.5;
+
 /// Continentality multiplier on the latitude base range. Maritime-exposed coasts
 /// (ocean upwind) get a damped range â†’ mild winters (oceanic Cfb). Lee coasts and
 /// interiors keep the full continental range â†’ cold winters. This is the fix that
@@ -165,7 +194,12 @@ fn continentality(buf: &WorldBuffer, x: u32, y: u32) -> f32 {
     } else {
         1.0 // lee coast / interior / wide-shelf coast: full continental range
     };
-    if cold_current_near(buf, x, y) { c *= 1.12; }
+    // A warm current bathing the coast pulls it toward maritime (mild winters), even
+    // over a wide shelf; a cold current sharpens the winter. (This is only the
+    // fallback range — the primary path is temperature.rs::compute_seasonal_amplitude,
+    // which applies the same warm-current damping to the physical seasonal span.)
+    if warm_current_near(buf, x, y) { c *= WARM_CURRENT_MARITIME; }
+    else if cold_current_near(buf, x, y) { c *= 1.12; }
     c
 }
 

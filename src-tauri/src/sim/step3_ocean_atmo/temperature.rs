@@ -215,11 +215,22 @@ pub fn compute_seasonal_amplitude(buf: &mut WorldBuffer) {
             // A shelf sea upwind does NOT count as open ocean, so wide-shelf coasts
             // stay continental — same signal koppen::continentality uses.
             let maritime = crate::sim::koppen::upwind_is_open_ocean(buf, x, y, 6);
-            let cont = if maritime {
+            let mut cont = if maritime {
                 (dist / 0.20).clamp(0.0, 1.0)
             } else {
                 (0.55 + 0.45 * dist).clamp(0.0, 1.0)
             };
+            // A warm current bathing the coast imports oceanic heat that damps the
+            // seasonal swing toward maritime EVEN over a wide continental shelf — the
+            // North Atlantic / Pacific Drift is why NW Europe, Norway and coastal BC
+            // read oceanic (Cfb) instead of cold-winter continental (Dfb). The shelf
+            // defeats the passive heat-capacity moderation (`upwind_is_open_ocean`
+            // excludes shelf seas), so without this a warm-current shelf coast keeps a
+            // full continental swing. Gated to warm-current-adjacent cells, so lee /
+            // interior coasts (Vladivostok, Hudson Bay) stay fully continental.
+            if cont > 0.0 && crate::sim::koppen::warm_current_near(buf, x, y) {
+                cont *= crate::sim::koppen::WARM_CURRENT_MARITIME;
+            }
             // Effective heat-capacity → thermal response time → slab attenuation of
             // the seasonal cycle. gain = 1/√(1+(ωτ)²) (standard forced-slab response).
             let tau = TAU_MARITIME + (TAU_CONTINENTAL - TAU_MARITIME) * cont;
