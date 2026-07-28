@@ -149,8 +149,9 @@ A world carries planetary knobs in `metadata`, read into `WorldBuffer`
 (`obliquity_deg`, `rotation_rate`, `solar_lum`, `greenhouse`, `eccentricity`,
 `dryness`; defaults + clamps in `world_commands.rs::set_planet_config`, edited via
 `StepWorldCharacteristics.tsx` (left-side WorkflowPanel step 0 — settings-only,
-always advanceable, shown first since every later step's climate physics depends
-on these). **Every generation setting lives there now**, in collapsible groups
+always advanceable, shown **after Landmass**: every one of these is a decision
+about a map you can already see, and elevation ignores them, so their first
+reader is Ocean & Atmosphere (3)). **Every generation setting lives there now**, in collapsible groups
 (Planet · Axis & Seasons · Water & Air · Latitude Frame); the right-side Toolbar
 is display-only. The old duplicate planet block + latitude control that lived in
 the Toolbar are gone — `LatitudeControl.tsx` was replaced by
@@ -515,8 +516,9 @@ ui/workflow/
                                   calendar length) · 💧 Water & Air (dryness) ·
                                   🧭 Latitude Frame (equator · expansion · line
                                   proportion, moved here from the right Toolbar).
-                                  Shown FIRST since they set the climate physics
-                                  every later step reads. Settings-only, always advanceable.
+                                  Displayed AFTER Landmass (you judge these against
+                                  visible continents; nothing before step 3 reads
+                                  them). Settings-only, always advanceable.
   PlanetControls.tsx            ← Shared `PlanetSlider` + `LatitudeFrame` (replaces
                                   the deleted ui/world/LatitudeControl.tsx)
   Step*.tsx                     ← Landmass, Elevation, OceanAtmo, Climate, Rivers,
@@ -957,7 +959,9 @@ root holds only `README.md` and `CLAUDE.md`.
     **After any verified change** → push to `main` (§2.2), and keep this file true (§2.4).
 13. **`biome` is descriptive** — nothing downstream may score off it (§8.12), and the
     render palette has a twin in the legend that must move with it.
-14. **Generation settings go in the LEFT panel** (`StepWorldCharacteristics`, step 0);
+14. **Generation settings go in the LEFT panel** (`StepWorldCharacteristics`, step 0,
+    displayed after Landmass — step 0 renders a ⚙️ not a number, which is what lets it
+    sit out of numeric order without renumbering anyone's persisted `stepCompleted`);
     the right-side Toolbar is display-only (opacity, palettes, overlay toggles). Never
     reintroduce a duplicate control in both columns — that duplication is what made the
     planet knobs and the latitude frame drift apart.

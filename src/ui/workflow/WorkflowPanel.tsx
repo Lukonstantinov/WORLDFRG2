@@ -19,12 +19,16 @@ import { StepToponyms } from "@ui/workflow/StepToponyms";
 import { StepWorldCharacteristics } from "@ui/workflow/StepWorldCharacteristics";
 
 const STEP_INFO = [
-  // Planet-scale knobs (rotation/retrograde, sunlight, greenhouse, eccentricity,
-  // dryness, axial tilt) drive EVERY later step's climate physics, so this comes
-  // first. Settings-only — there's nothing to "generate" here, so it always
-  // auto-completes (see StepWorldCharacteristics) and never blocks Continue.
-  { step: 0, label: "World Characteristics", desc: "Rotation (incl. retrograde), sunlight, greenhouse, eccentricity, dryness and axial tilt — these decide where the wind belts, deserts and seasons land, so set them before generating." },
   { step: 1, label: "Landmass", desc: "Paint your landmasses, load an image template, or generate from plates." },
+  // World Characteristics sits AFTER Landmass on purpose. Every one of these
+  // knobs is a decision you make ABOUT a map you can already see — where the
+  // equator falls across your continents, how far the bands stretch, how hard
+  // the seasons bite. Asking for them on an empty canvas meant guessing. They
+  // are still upstream of everything that consumes them: elevation ignores them
+  // entirely, and their first reader is Ocean & Atmosphere (3).
+  // Settings-only — nothing to "generate", so it auto-completes (see
+  // StepWorldCharacteristics) and never blocks Continue.
+  { step: 0, label: "World Characteristics", desc: "Now that you can see your land: where the equator falls, how the world spins, how bright the sun is, how hard the seasons bite. These decide where the wind belts, deserts and seasons land — set them before Ocean & Atmosphere." },
   { step: 2, label: "Elevation", desc: "Generate terrain height. Mountains, coastlines, sea depth." },
   { step: 3, label: "Ocean & Atmosphere", desc: "Wind belts, ocean currents, temperature, and precipitation." },
   { step: 4, label: "Biomes & Climate", desc: "Classify K\u00F6ppen climate zones from temperature & precipitation." },
@@ -269,9 +273,14 @@ export function WorkflowPanel() {
 
       <div style={{ borderTop: "1px solid #1a2a40", margin: "2px 0" }} />
 
-      {/* Steps \u2014 Geography group (1-6) then Detail group (7-10): settlements,
-          trade goods, political & economy. ALL are generation and run in Forge;
-          finalizing after Economy hands the finished world to Chronicle. */}
+      {/* Steps \u2014 Geography group (1, 0, 2-6) then Detail group (7-10):
+          settlements, trade goods, political & economy. ALL are generation and run
+          in Forge; finalizing after Economy hands the finished world to Chronicle.
+          NOTE the display order: Landmass (1) comes first, then the settings-only
+          World Characteristics (0), then Elevation (2). Step 0 renders a \u2699\ufe0f
+          rather than a number precisely so it can sit out of numeric order without
+          reading as a mistake \u2014 and so its id (and everyone's persisted
+          stepCompleted map) never had to be renumbered. */}
       {STEP_INFO.map(({ step, label, desc }) => {
         const isActive = workflowStep === step;
         const isDone = stepCompleted[step] === true;

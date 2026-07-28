@@ -41,10 +41,11 @@ export function StepWorldCharacteristics() {
   const [planet, setPlanet] = useState<PlanetConfig | null>(null);
   useEffect(() => { getPlanetConfig().then(setPlanet).catch(() => {}); }, [meta?.name]);
 
-  // Collapsible sections. Planet + Axis open by default (the two most-used);
-  // the rest start collapsed so the step fits without scrolling.
+  // Collapsible sections. Planet and Latitude Frame open by default — those are
+  // the two you can only really judge against a map you can see, which is why
+  // this step now sits after Landmass. Axis and Water are one click away.
   const [open, setOpen] = useState<Record<string, boolean>>({
-    Planet: true, Axis: true, Water: false, Latitude: false,
+    Planet: true, Axis: false, Water: false, Latitude: true,
   });
   const toggle = (k: string) => setOpen((s) => ({ ...s, [k]: !s[k] }));
 
@@ -86,10 +87,13 @@ export function StepWorldCharacteristics() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ color: "#506080", fontSize: 10.5, lineHeight: 1.4, marginBottom: 2 }}>
-        Everything that decides where climate belts, deserts and seasons land lives
-        here — set it before generating Ocean &amp; Atmosphere. Changing one later
-        just means re-running from Step 3 onward. All default to Earth, where they
-        are exactly no-ops.
+        Your land is on the map — now decide the world it sits in. Everything that
+        governs where climate belts, deserts and seasons fall lives here, and all
+        of it is read first by <b>Ocean &amp; Atmosphere (3)</b>, so set it before
+        that. Elevation ignores these entirely, and changing one later just means
+        re-running from step 3 onward. All default to Earth, where they are exactly
+        no-ops. Drag <b>Equator</b> below and the latitude lines appear on the map
+        so you can place the tropics across your continents by eye.
       </div>
 
       {/* ── 🪐 Planet ── */}
