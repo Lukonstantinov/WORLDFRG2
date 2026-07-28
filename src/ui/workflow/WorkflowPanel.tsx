@@ -19,12 +19,13 @@ import { StepToponyms } from "@ui/workflow/StepToponyms";
 import { StepWorldCharacteristics } from "@ui/workflow/StepWorldCharacteristics";
 
 const STEP_INFO = [
-  // Planet-scale knobs (rotation/retrograde, sunlight, greenhouse, eccentricity,
-  // dryness, axial tilt) drive EVERY later step's climate physics, so this comes
-  // first. Settings-only — there's nothing to "generate" here, so it always
-  // auto-completes (see StepWorldCharacteristics) and never blocks Continue.
-  { step: 0, label: "World Characteristics", desc: "Rotation (incl. retrograde), sunlight, greenhouse, eccentricity, dryness and axial tilt — these decide where the wind belts, deserts and seasons land, so set them before generating." },
   { step: 1, label: "Landmass", desc: "Paint your landmasses, load an image template, or generate from plates." },
+  // Latitude framing + planet-scale knobs (rotation/retrograde, axial tilt, sunlight,
+  // greenhouse, eccentricity, dryness) drive EVERY later step's climate physics. It
+  // sits right AFTER Landmass — draw the continents first, then frame their latitudes.
+  // Settings-only, so it always auto-completes (see StepWorldCharacteristics) and never
+  // blocks Continue; it's still before Ocean & Atmosphere (3), the first step to read it.
+  { step: 0, label: "World Characteristics", desc: "Frame the latitudes (equator, band expansion, line proportion) and set the planet — rotation (incl. retrograde), axial tilt, sunlight, greenhouse, eccentricity, dryness. These decide where the wind belts, deserts and seasons land." },
   { step: 2, label: "Elevation", desc: "Generate terrain height. Mountains, coastlines, sea depth." },
   { step: 3, label: "Ocean & Atmosphere", desc: "Wind belts, ocean currents, temperature, and precipitation." },
   { step: 4, label: "Biomes & Climate", desc: "Classify K\u00F6ppen climate zones from temperature & precipitation." },

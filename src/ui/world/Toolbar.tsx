@@ -4,8 +4,6 @@ import { useGoodsStore } from "@state/goodsStore";
 import { useWorldStore } from "@state/worldStore";
 import type { ActiveTool, ActiveLayer } from "@types";
 import { GOOD_DEFS, goodOverlayKey, goodCategory, CATEGORY_ORDER } from "@goods";
-import { LatitudeControl } from "@ui/world/LatitudeControl";
-
 /** Best-effort CSS colour → #rrggbb for an <input type="color"> (which only takes
  *  hex). Understands #rgb/#rrggbb and rgb()/rgba(); falls back to dark grey. */
 function hexOfBorder(css: string): string {
@@ -379,9 +377,6 @@ export function Toolbar() {
           </div>
         )}
       </div>
-
-      {/* Dynamic latitude framing (move equator / expand 0–60 bands) */}
-      <LatitudeControl />
 
       {/* Biological / political hazard + influence sublayers */}
       <div style={section}>
