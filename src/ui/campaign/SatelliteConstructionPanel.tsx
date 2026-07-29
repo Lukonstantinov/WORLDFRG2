@@ -51,7 +51,7 @@ export function SatelliteConstructionPanel() {
   const barStyle: React.CSSProperties = { border: `1px solid ${T.line}`, borderRadius: 6 };
 
   return (
-    <Panel width={360} maxHeight="90vh" style={{ top: 12, right: 12, zIndex: 120, ...rootStyle }}>
+    <Panel onPointerDown={onPointerDown} width={360} maxHeight="90vh" style={{ top: 12, right: 12, zIndex: 120, ...rootStyle }}>
       <div style={{ overflowY: "auto", padding: "10px 12px" }}>
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", cursor: "move" }}

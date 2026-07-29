@@ -59,7 +59,7 @@ export function NewsFeedPanel() {
   if (!open) return null;
 
   return (
-    <Panel width={320} maxHeight="70%" style={{ top: 70, right: 12, zIndex: 116, ...rootStyle }}>
+    <Panel onPointerDown={onPointerDown} width={320} maxHeight="70%" style={{ top: 70, right: 12, zIndex: 116, ...rootStyle }}>
       <PanelHeader icon="🗞" title="World News" onDragStart={onPointerDown} onClose={close} />
       <PanelBody style={{ display: "flex", flexDirection: "column", flex: 1, padding: `${SPACE.md}px ${SPACE.lg}px ${SPACE.lg}px` }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: SPACE.md }}>

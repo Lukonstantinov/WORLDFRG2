@@ -85,7 +85,7 @@ export function HydrologyPanel() {
   const byId = new Map<number, RiverData>(rivers.map((r, i) => [i, r]));
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
+    <div data-draggable style={{ ...panel, ...rootStyle }} onPointerDown={onPointerDown}>
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>🌊 Hydrology</span>
         <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>

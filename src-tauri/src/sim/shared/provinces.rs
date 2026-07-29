@@ -195,19 +195,19 @@ const GOOD_BINS: usize = 16;
 /// biomes hold VAST, thinly-administered provinces on Earth — a single Nunavut,
 /// Siberian, Saharan or Antarctic district dwarfs a European county — so their
 /// separation is stretched far beyond what the habitability ramp alone gives.
-/// Combined with the (1 + 3·hostile) habitability ramp this reaches ≈10× the seed
-/// spacing (≈100× the AREA) of a fertile-lowland province, so an ice cap or great
+/// Combined with the (1 + 1.6·hostile) habitability ramp this reaches ≈6× the seed
+/// spacing (≈35× the AREA) of a fertile-lowland province, so an ice cap or great
 /// desert reads as a few huge blocks instead of a speckle of tiny cells.
 fn koppen_spacing_mult(koppen: u8) -> f32 {
     use crate::sim::koppen as kp;
     match koppen {
-        kp::EF => 3.4,                       // ice cap — Antarctic / Greenland interior
-        kp::ET => 2.6,                       // tundra
-        kp::DFD | kp::DWD => 2.4,            // extreme subarctic
-        kp::DFC | kp::DWC | kp::DSD => 2.0,  // subarctic taiga
-        kp::BWH | kp::BWK => 2.3,           // hot / cold desert
-        kp::BSH | kp::BSK => 1.5,           // semi-arid steppe
-        kp::H => 1.6,                        // high alpine
+        kp::EF => 3.0,                       // ice cap — Antarctic / Greenland interior
+        kp::ET => 2.2,                       // tundra
+        kp::DFD | kp::DWD => 2.0,            // extreme subarctic
+        kp::DFC | kp::DWC | kp::DSD => 1.6,  // subarctic taiga
+        kp::BWH | kp::BWK => 1.9,           // hot / cold desert
+        kp::BSH | kp::BSK => 1.05,          // semi-arid steppe — settled far denser than a true desert
+        kp::H => 1.4,                        // high alpine
         _ => 1.0,                            // temperate / tropical / Mediterranean
     }
 }
@@ -518,7 +518,7 @@ pub fn generate_provinces(
     // size slider spans genuinely large (g→0) to small (g→1) provinces.
     let cols = 18.0 + 92.0 * g;
     let spacing = ((w as f32 / cols).round() as i32).max(4);
-    // The finest separation (most habitable land); scales UP to ~3.8× in the least
+    // The finest separation (most habitable land); scales UP to ~2.6× in the least
     // habitable land, so provinces there come out far larger. FLOORED at 10 cells so
     // even the most habitable land / highest granularity never shatters into a speckle
     // of 1-cell provinces (the min province is then ≈100 cells).
@@ -528,7 +528,7 @@ pub fn generate_provinces(
     };
     // Local min-separation² at a cell: small where habitable, large where hostile.
     // Two compounding levers give the wide (≈100× area) fertile→arctic size range:
-    //   · the habitability ramp (1 + 3·hostile): general "fewer people, bigger units";
+    //   · the habitability ramp (1 + 1.6·hostile): general "fewer people, bigger units";
     //   · a Köppen biome multiplier: the ice caps, tundra, deserts and taiga that hold
     //     genuinely continent-scale administrative blocks on Earth are stretched much
     //     further, so Antarctica reads as a few solid provinces, not a speckle.
@@ -549,7 +549,7 @@ pub fn generate_provinces(
         let fertile_shrink = if have_hab {
             1.0 - 0.4 * ((hab - 0.6) / 0.3).clamp(0.0, 1.0)
         } else { 1.0 };
-        let s = (base_sep * (1.0 + 3.0 * hostile) * fertile_shrink * km).max(min_sep) as i64;
+        let s = (base_sep * (1.0 + 1.6 * hostile) * fertile_shrink * km).max(min_sep) as i64;
         (s * s).max(1)
     };
     let too_close = |seeds: &[u32], bx: i32, by: i32, sep2: i64| -> bool {
@@ -1704,8 +1704,10 @@ mod tests {
     #[test]
     fn province_names_are_unique() {
         // A big grid, because the seed separation floors at 10 cells — a crowded map is
-        // where the name hash actually collides.
-        let (gw, gh) = (220u32, 150u32);
+        // where the name hash actually collides. Sized large enough that the map yields
+        // several hundred provinces, so the birthday paradox forces raw name collisions
+        // the salt pass has to resolve, independent of the exact seed spacing.
+        let (gw, gh) = (600u32, 420u32);
         let mut buf = blank_world_sized(gw, gh);
         for y in 0..gh {
             for x in 0..gw {
@@ -1713,7 +1715,7 @@ mod tests {
                 buf.elevation[i] = (((x * 7 + y * 13) % 11) as f32) / 60.0;
             }
         }
-        let towns = vec![settle("a", 12, 12, 9000), settle("b", 160, 90, 7000)];
+        let towns = vec![settle("a", 12, 12, 9000), settle("b", 560, 380, 7000)];
         let (provs, _) = generate_provinces(&buf, &[], &[], &towns, 1.0);
         assert!(provs.len() > 20, "need a crowded map to exercise collisions, got {}", provs.len());
         let mut seen = std::collections::HashSet::new();

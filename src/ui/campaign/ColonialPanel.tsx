@@ -94,7 +94,7 @@ export function ColonialPanel() {
   const close = () => useUIStore.getState().setShowColonial(false);
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
+    <div data-draggable style={{ ...panel, ...rootStyle }} onPointerDown={onPointerDown}>
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>🏛 Colonial Office & Expeditions</span>
         <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>

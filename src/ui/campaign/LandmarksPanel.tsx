@@ -44,7 +44,7 @@ export function LandmarksPanel() {
   };
 
   return (
-    <Panel width={320} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
+    <Panel onPointerDown={onPointerDown} width={320} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
       <PanelHeader
         icon="🗿"
         title="Landmarks & Sacred Sites"

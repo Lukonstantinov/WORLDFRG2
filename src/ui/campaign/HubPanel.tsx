@@ -342,7 +342,7 @@ export function HubPanel() {
   ];
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle, width: tab === "trade" ? 600 : 360 }}>
+    <div data-draggable style={{ ...panel, ...rootStyle, width: tab === "trade" ? 600 : 360 }} onPointerDown={onPointerDown}>
       {/* ── Title + stats header (always visible; drag handle) ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, cursor: "move" }} onPointerDown={onPointerDown}>
         <div>

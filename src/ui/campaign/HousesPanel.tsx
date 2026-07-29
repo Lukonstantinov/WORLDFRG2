@@ -97,7 +97,7 @@ export function HousesPanel() {
   const nGuilds = active.filter((h) => h.is_guild).length;
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
+    <div data-draggable style={{ ...panel, ...rootStyle }} onPointerDown={onPointerDown}>
       {history && <HouseTimeline history={history} onClose={() => setHistory(null)} />}
       {selected && <HouseDetail h={selected} onClose={() => selectHouse(null)} onChronicle={openTimeline} />}
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
@@ -264,7 +264,7 @@ function HouseDetail({ h, onClose, onChronicle }:
     </div>
   );
   return (
-    <div data-draggable style={{ ...detailPanel, ...rootStyle }}>
+    <div data-draggable style={{ ...detailPanel, ...rootStyle }} onPointerDown={onPointerDown}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 3, cursor: "move" }} onPointerDown={onPointerDown}>
         <span style={{ width: 10, height: 10, borderRadius: 2, background: h.is_guild ? dull(h.color ?? "") : (h.color ?? "#888"), alignSelf: "center" }} />
         {h.owns_bank && <span title="This family owns a chartered bank" style={{ fontSize: 11 }}>🏦</span>}

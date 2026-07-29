@@ -79,7 +79,7 @@ export function ProvinceInspector() {
   const nd = p.neighbors_detail ?? [];
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
+    <div data-draggable style={{ ...panel, ...rootStyle }} onPointerDown={onPointerDown}>
       {/* Header (drag handle) */}
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <strong style={{ fontSize: 14 }}>🏞 {p.name}</strong>

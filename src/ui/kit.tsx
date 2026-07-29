@@ -17,11 +17,15 @@ import { T, SERIF, RADIUS, SHADOW, SPACE, FZ, TONE, type Tone } from "@ui/campai
 /** A floating-window surface. Merge the hook's `rootStyle` (position/tint) in via
  *  `style`; keep `data-draggable` on this node so the drag hook can find it. */
 export function Panel({
-  children, style, width, maxHeight = "78vh",
-}: { children: ReactNode; style?: CSSProperties; width?: number; maxHeight?: CSSProperties["maxHeight"] }) {
+  children, style, width, maxHeight = "78vh", onPointerDown,
+}: { children: ReactNode; style?: CSSProperties; width?: number; maxHeight?: CSSProperties["maxHeight"];
+  /** The drag hook's `onPointerDown` — pass it so the whole window body drags, not
+   *  just the header. Presses on interactive controls are ignored by the hook. */
+  onPointerDown?: (e: PointerEvent<HTMLElement>) => void }) {
   return (
     <div
       data-draggable
+      onPointerDown={onPointerDown}
       style={{
         position: "absolute",
         width,

@@ -61,7 +61,7 @@ export function PeoplesPanel() {
   if (!open) return null;
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
+    <div data-draggable style={{ ...panel, ...rootStyle }} onPointerDown={onPointerDown}>
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span style={{ fontFamily: SERIF, color: T.gold, fontWeight: 700, fontSize: 14, letterSpacing: 0.4 }}>
           👥 Peoples
@@ -237,10 +237,13 @@ export function PeoplesPanel() {
                   </>
                 )}
 
-                {/* Where they live — a mini world map (toggle), same look as the goods preview. */}
-                {sel.kit != null && sel.kit >= 0 && (
-                  <CulturePresence name={sel.name} color={sel.color} />
-                )}
+                {/* Where they live — a mini world map (toggle), same look as the goods
+                    preview. Fetched by NAME (campaign_get_culture_presence lights the
+                    terrain mask + live majority/minority cities), so it works even for a
+                    diaspora/creole people with 0 homelands whose kit can't be resolved
+                    (kit = -1). Gating it on kit was hiding the map for exactly those
+                    peoples (e.g. Punic). */}
+                <CulturePresence name={sel.name} color={sel.color} />
 
                 {/* Population over time — sampled every 6 months. */}
                 <CulturePopChart name={sel.name} color={sel.color} tick={snapshot?.clock?.tick ?? 0} />
