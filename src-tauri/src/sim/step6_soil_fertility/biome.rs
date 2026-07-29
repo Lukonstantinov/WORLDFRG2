@@ -981,6 +981,57 @@ mod tests {
         }
     }
 
+    /// BACK-COMPAT: a world saved before phase 6b existed has `seasonal_amp`,
+    /// `precip_summer_frac`, `snow_frac` and `biome` all padded to zero on load.
+    /// Classifying such a world must not panic and must not produce garbage — it
+    /// is exactly what happens the first time an existing `.worldforge` is opened
+    /// and the user presses Reclassify Biomes.
+    ///
+    /// The zero `seasonal_amp` is the interesting part: it sends
+    /// `koppen::seasonal_temps` down its latitude-parametric FALLBACK, which calls
+    /// `continentality` → `upwind_is_open_ocean` → the shelf column. That path
+    /// must survive here too, which is why PHASE_BIOME carries SHELF.
+    #[test]
+    fn an_old_save_with_no_seasonality_columns_still_classifies() {
+        let mut buf = world(48, 32);
+        // Exactly what an old blob decodes to.
+        for i in 0..buf.total() {
+            buf.seasonal_amp[i] = 0;
+            buf.precip_summer_frac[i] = 0;
+            buf.snow_frac[i] = 0;
+            buf.biome[i] = 0;
+        }
+        // A little sea so the coast/continentality paths are exercised.
+        for i in 0..(48 * 4) {
+            buf.terrain[i] = 0;
+        }
+        classify_biomes(&mut buf, &[], &[]);
+
+        let land: Vec<u8> = (0..buf.total())
+            .filter(|&i| buf.terrain[i] == 1)
+            .map(|i| buf.biome[i])
+            .collect();
+        assert!(!land.is_empty());
+        assert!(land.iter().all(|&b| b != B_NONE),
+            "every land cell must get a biome even with no seasonality columns");
+        assert!(land.iter().all(|&b| (b as usize) < BIOME_COUNT),
+            "no out-of-range code");
+    }
+
+    /// The same, with the shelf column absent entirely — the defensive path in
+    /// `upwind_is_open_ocean`. Guards against a future phase mask dropping SHELF.
+    #[test]
+    fn classification_survives_a_missing_shelf_column() {
+        let mut buf = world(32, 24);
+        for i in 0..buf.total() {
+            buf.seasonal_amp[i] = 0;
+        }
+        buf.is_shelf = Vec::new();
+        buf.is_shelf_edge = Vec::new();
+        classify_biomes(&mut buf, &[], &[]);
+        assert!(buf.biome.iter().any(|&b| b != B_NONE));
+    }
+
     /// Sea cells stay unclassified, and a river/lake-free world still classifies.
     #[test]
     fn sea_stays_unclassified_and_empty_hydrology_is_valid() {

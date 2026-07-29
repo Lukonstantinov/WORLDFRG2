@@ -221,7 +221,14 @@ impl ColumnSet {
         Self::TERRAIN.0 | Self::ELEVATION.0 | Self::KOPPEN.0 | Self::TEMPERATURE.0
             | Self::PRECIPITATION.0 | Self::SEASON.0 | Self::SEASON_AMP.0 | Self::SNOW.0
             | Self::SOIL.0 | Self::FERTILITY.0 | Self::DIST_OCEAN.0 | Self::SALINITY.0
-            | Self::SEA_DEPTH.0 | Self::WIND.0 | Self::CURRENTS.0 | Self::BIOME.0,
+            | Self::SEA_DEPTH.0 | Self::WIND.0 | Self::CURRENTS.0 | Self::BIOME.0
+            // SHELF matters on an OLD save: there `seasonal_amp` is still zero, so
+            // `koppen::seasonal_temps` falls back to its latitude-parametric range,
+            // which calls `continentality` → `upwind_is_open_ocean`. That routine
+            // skips its shelf test when the column is absent (it guards rather than
+            // panicking), so omitting SHELF would silently classify a broad-shelf
+            // coast differently here than the full pipeline does.
+            | Self::SHELF.0,
     );
     /// biological.rs (sharks/shipworms/storms/reefs/goods — phase 8)
     pub const PHASE_BIOLOGICAL: ColumnSet = ColumnSet(
