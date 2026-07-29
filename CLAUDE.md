@@ -21,6 +21,7 @@ npx tsc --noEmit       # TypeScript type-check only
 cargo test --lib tick::tests                                   # campaign-sim unit + dynamics tests
 cargo test --lib simulate_decades_reports_dynamics -- --nocapture  # WATCH the living economy (5-yearly digest)
 cargo test --lib earth_ -- --nocapture                         # EARTH CLIMATE FIDELITY scorecard (§2.3)
+cargo test --lib econ_ -- --nocapture                          # ECONOMY FIDELITY scorecard (§2.5)
 cargo test --release --lib bench_ocean_atmosphere -- --ignored --nocapture       # phase-3 ms breakdown (§8.9)
 cargo test --release --lib ocean_atmosphere_field_checksums -- --ignored --nocapture  # phase-3 bit-exactness
 ```
@@ -83,7 +84,54 @@ Measured baseline (commit `d53fdc9`): **main-class 66.2%**, **exact-zone 29.0%**
 Track **exact-zone** — main-class is inflated by class E scoring 99.1% for free
 (polar is just "cold"). Known open errors and the plan to fix them: `docs/FIX_PLAN.md`.
 
-### 2.4 Keep this file true
+### 2.4 Prompting rules — how work is commissioned here
+
+These are rules for whoever *directs* the work, and they exist because the git
+history shows the same failure repeatedly.
+
+- **Give a gate, not a goal.** "Improve the climate" is unfalsifiable. "Get `C→B`
+  below 30% without regressing the `B` or `E` rows; gate: `cargo test --lib earth_`"
+  cannot be faked and produces a durable result either way.
+- **Negative results are deliverables — write them down.** The `FIX_PLAN.md` A1
+  entry recording *"tried `MONSOON_WIND_GAIN` 0.10 → 0.22 → 0.40, helped Mumbai,
+  regressed the global score, reverted"* is worth more than most of the code around
+  it. A reverted attempt that isn't documented will simply be attempted again.
+- **A diagnosis is a complete task.** The A6 finding (the Antarctic Circumpolar
+  Current is silently disabled on every Earth-shaped world) changed zero lines and
+  was the most valuable output of its session. Commission measurement explicitly —
+  left alone, everyone prefers to write code.
+- **Never tune a constant without a gate that isn't the target.** Every reverted
+  attempt on record is the same shape: fix a spot check, regress the aggregate.
+  A spot-check win with an aggregate loss is a **revert**, not a judgement call.
+
+### 2.5 Never regress economy fidelity
+The campaign economy is scored against published pre-modern price, wage,
+urbanisation and inequality series by `sim/campaign/tick/economy_validation.rs`
+(Allen · Federico · Persson · De Vries · Alfani · Van Zanden). After ANY change to
+`tick/` you MUST run:
+
+```bash
+cargo test --lib econ_ -- --nocapture
+```
+
+Unlike the Earth gate, **most metrics are printed, not asserted** — a printed
+metric outside its historical band is a *finding*, not a build failure. Assertions
+cover only bands the model already satisfies, so they guard against regression
+rather than encoding aspiration. **Promote a printed metric to an assertion as the
+model earns it.**
+
+This is the counterpart to §2.3 and the reason the campaign half is knowable at
+all. Before it existed, 16.7k lines of economy were covered only by *mechanism*
+tests (does a contract deliver, does a bank fail, is output deterministic) — none
+of which asked whether a number resembled a real economy.
+
+### 2.6 Keep the scoreboard current
+`docs/SCOREBOARD.md` is the project held as ~12 numbers instead of 89k lines. It
+is the fastest way for any session — or the maintainer — to answer "is this
+good?". Append a row whenever a measured number moves. **Never edit an old row**;
+a scoreboard whose history is rewritten cannot show a regression.
+
+### 2.7 Keep this file true
 `CLAUDE.md` is what every future session reads first, so staleness compounds. When a
 change adds a module, a render layer, a sim phase or a tile column, update the
 relevant map in §4/§6/§7/§8 **in the same commit**. If you find a section that no
@@ -943,56 +991,75 @@ bit-identical, and `koppen::guardrail_tests` guards both sides of it.
 FIX_PLAN.md                       ← ⭐ Measured Earth-fidelity baseline + the prioritised
                                     fix plan (climate · one-simulator · economy · society),
                                     with a regression gate per item. Read before planning work.
+SCOREBOARD.md                     ← ⭐ The project held as ~12 NUMBERS instead of 89k lines:
+                                    both fidelity scorecards, test counts, perf, and an
+                                    explicit list of what is still UNMEASURED. See §2.6.
 ```
+
+**Live operational docs** (these describe the project as it is)
 ```
 PROVINCE_SYSTEM_PLAN.md           ← The province layer's design + status (see FIX_PLAN B1);
                                     the shipped algorithm itself is §8.10 above
+IN_APP_VERIFICATION_CHECKLIST.md  ← Manual in-app verification checklist
+PORTING_REFERENCE.md              ← Porting reference
 ```
-**World / trade / architecture**
-```
-FEATURES_AND_PROPOSALS.md         ← Feature catalog, step-by-step generation, per-step
-                                    improvement ideas & campaign-integration proposals
-TRADE_CARTOGRAPHY_SPEC.md         ← Trade cartography & good-flow spec
-TRADE_SYSTEM_REVIEW.md            ← Trade & economy system review
-trade-goods-and-hazards-design.md ← Goods & seasonal hazards design
-CLIMATE_CORRELATION_BRAINSTORM.md ← Real-climate correlation & biology proposals
-```
-**Finance / economy / society**
-```
-SOCIAL_ECONOMIC_WEALTH_PROPOSAL.md← Social/economic/wealth analysis & proposals
-SYSTEMS_21_PROPOSALS.md           ← Systems 2.1: perf · manufactories · banks · houses
-HERALDRY_AND_NAMES_VARIANTS.md    ← Heraldry, house names & guilds variants
-```
-**Roadmap / UI direction**
-```
-ROADMAP_BATCHES.md                ← The 24 picked features, batched
-VICTORIA2_DLC_IMPLEMENTATION.md   ← Victoria-2 layer, DLC-by-DLC
-VICTORIA2_REDESIGN_PROPOSAL.md    ← Victoria-2-style UI/UX redesign
-```
-**Analyses & schematics**
-```
-POPULATION_AND_NETWORK_DYNAMICS_ANALYSIS.md ← Growth/trade-network analysis & fix plan
-SETTLEMENT_BELIEVABILITY_ANALYSIS.md        ← Settlement generation believability review
-SETTLEMENT_TIER_REQUIREMENTS.md             ← Settlement development ladder (5 tiers)
-GROWTH_AND_GRAVITY_SCHEMATICS.md            ← Growth & gravity model schematics
-CITY_STORES_PANEL_SCHEMATIC.md              ← City stores panel design
-IN_APP_VERIFICATION_CHECKLIST.md            ← Manual in-app verification checklist
-```
-`docs/` also has `PORTING_REFERENCE.md`. Historical HTML/SVG mockups are archived under
-`docs/mockups/_archive/`; a stray reference image lives in `docs/reference/`. The repo
-root holds only `README.md` and `CLAUDE.md`.
 
-> **The old `*_PLAN.md` docs are gone.** Twelve superseded planning documents (redesign,
-> implementation, performance, finance/polis, futures, trade-base, satellite/migration,
-> expeditions/corridors, future-systems, biological-step, C-batch, fifteenth-batch) were
-> deleted — they described work that has long since shipped, and they were being read as
-> commitments. **The systems themselves are still in the code**; the code and this file
-> are now the record. If you need the original rationale for one of them it is in git
-> history: `git log --diff-filter=D --name-only -- docs/` finds the deleting commit, then
+**`docs/proposals/` — A MENU, NOT COMMITMENTS**
+
+Sixteen documents (feature catalogs, trade/cartography specs, Victoria-2 UI direction,
+settlement and population analyses, finance/heraldry variants, roadmap batches) live in
+`docs/proposals/`. They were being read by fresh sessions as a backlog to work through,
+and they are not one: they are far more good ideas than anyone can build.
+
+> **Do not start work from `docs/proposals/`.** Check `FIX_PLAN.md` for what is actually
+> prioritised and `SCOREBOARD.md` for what is actually measured. Reach into `proposals/`
+> only when a specific design question needs the original rationale.
+
+Historical HTML/SVG mockups are archived under `docs/mockups/_archive/`; a stray
+reference image lives in `docs/reference/`. The repo root holds only `README.md`
+and `CLAUDE.md`.
+
+> **Older `*_PLAN.md` docs are gone.** Twelve superseded planning documents were deleted —
+> they described work that has long since shipped and were being read as commitments.
+> **The systems themselves are still in the code**; the code and this file are now the
+> record. For the original rationale of one:
+> `git log --diff-filter=D --name-only -- docs/` finds the deleting commit, then
 > `git show <sha>^:docs/<file>`.
->
-> **Scope warning.** What remains is still mostly proposals, NOT commitments — treat them
-> as a menu, and check `FIX_PLAN.md` for what's actually prioritised before new work.
+
+---
+
+## 9b. Specialist agents (`.claude/agents/`)
+
+The project spans climatology, oceanography, economic history, demography, Rust
+performance, cartography, UI design, game design and desktop release engineering.
+No one person holds all nine. Each is defined as a **subagent with web + literature
+research tools**, so naming the domain in a task routes to the right expert
+automatically — "the biome palette looks muddy" reaches `cartographer`, "the panel
+hierarchy is flat" reaches `design`.
+
+| Agent | Domain | Advisory / can edit |
+|---|---|---|
+| `design` | UI/UX, panel hierarchy, onboarding, first-run comprehension | can edit |
+| `cartographer` | Map symbology, palettes, hatching, labels, legends | advisory |
+| `earth-systems` | Climate, atmosphere, ocean, landform physics (§8.2, Part A) | advisory |
+| `economic-history` | Prices, markets, money, banking, the economy oracle (§2.5) | advisory |
+| `historical-society` | Demography, plague, migration, strata, religion (Part D) | advisory |
+| `game-design` | Player agency, verbs, loops, legibility, pacing (B2) | advisory |
+| `frontend-engineer` | React/Pixi/Zustand, IPC bridge, type drift, FE tests | can edit |
+| `rust-performance` | Profiling, rayon, memory, bit-exactness (§8.9) | can edit |
+| `release-engineer` | Tauri packaging, signing, updater, CI, save compat | can edit |
+
+Three rules:
+
+- **Each agent file carries the constraints of its domain**, not just its expertise —
+  `cartographer` knows pattern periods must divide `TILE_SIZE`, `earth-systems` knows
+  Earth parameters must stay a no-op, `rust-performance` knows the Earth score cannot
+  prove bit-exactness. That embedded context is most of their value; keep it true as
+  the code changes, exactly as §2.7 requires of this file.
+- **Advisory agents research and recommend; they do not edit.** That keeps parallel
+  runs from colliding and keeps the decision with the maintainer.
+- **They are suppliers, not owners.** Scope authority, taste, and deciding what "good"
+  means stay with the maintainer — those are the roles that cannot be delegated.
 
 ---
 
@@ -1015,7 +1082,7 @@ root holds only `README.md` and `CLAUDE.md`.
 12. **After any `tick/` change** → run the dynamics test (§2.1). **After any
     `step3_ocean_atmo/` or `step4_climate/` change** → run the Earth fidelity gate (§2.3)
     and re-read §8.9 (no per-cell outward scans; keep the row loops parallel).
-    **After any verified change** → push to `main` (§2.2), and keep this file true (§2.4).
+    **After any verified change** → push to `main` (§2.2), and keep this file true (§2.7).
 13. **`biome` is descriptive** — nothing downstream may score off it (§8.12), and the
     render palette has a twin in the legend that must move with it.
 14. **Generation settings go in the LEFT panel** (`StepWorldCharacteristics`, step 0,
@@ -1024,7 +1091,15 @@ root holds only `README.md` and `CLAUDE.md`.
     the right-side Toolbar is display-only (opacity, palettes, overlay toggles). Never
     reintroduce a duplicate control in both columns — that duplication is what made the
     planet knobs and the latitude frame drift apart.
-15. **A step's gate must match its real data dependency**, not just the previous step.
+15. **Two fidelity oracles, not one.** `earth_validation.rs` scores the climate against
+    the real Köppen map (§2.3); `economy_validation.rs` scores the campaign against
+    published pre-modern series (§2.5). Run the one your change touches, every time.
+    An oracle exists so the maintainer does not have to be a climatologist *or* an
+    economic historian — that is the whole point, so don't route around it.
+16. **CI enforces the gates** (`.github/workflows/ci.yml`). Most commits here are
+    agent-authored and go straight to `main`, so gates that run only when someone
+    remembers protect nothing.
+17. **A step's gate must match its real data dependency**, not just the previous step.
     Rivers (5) genuinely needs Köppen (4): channel width comes from mean precipitation
     along the course and ice caps must not drain. A too-loose gate fails SILENTLY —
     the pipeline still runs, it just produces a subtly wrong world.

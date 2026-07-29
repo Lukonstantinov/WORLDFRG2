@@ -1,0 +1,92 @@
+name: CI
+
+# The four regression gates from docs/FIX_PLAN.md, enforced instead of remembered.
+# Most commits in this repository are agent-authored and push straight to `main`
+# (CLAUDE.md §2.2), so the gates only protect anything if something other than
+# goodwill runs them.
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  frontend:
+    name: TypeScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm install --no-audit --no-fund
+
+      # Gate 4 — the only thing standing between 33k lines of TS and a runtime error.
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Production build
+        run: npx vite build
+
+  backend:
+    name: Rust — gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `apt-get update` FIRST — a stale index 404s on the .debs (CLAUDE.md §1).
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Gate 3
+      - name: cargo check
+        working-directory: src-tauri
+        run: cargo check --all-targets
+
+      - name: clippy
+        working-directory: src-tauri
+        run: cargo clippy --lib -- -D warnings
+        continue-on-error: true # advisory until the existing lint debt is paid down
+
+      # Gate 1 — Earth climate fidelity. Hard-asserts EARTH_MAIN_FLOOR, so a change
+      # that breaks the global climate pattern fails the build here (CLAUDE.md §2.3).
+      - name: Earth climate fidelity
+        working-directory: src-tauri
+        run: cargo test --lib earth_ -- --nocapture
+
+      # Gate 2 — the living economy. Hard-asserts bounded + finite wealth and that
+      # house turnover happens (CLAUDE.md §2.1).
+      - name: Campaign dynamics
+        working-directory: src-tauri
+        run: cargo test --lib simulate_decades_reports_dynamics -- --nocapture
+
+      # Everything else: unit tests across sim, render, tile and db.
+      - name: Full library test suite
+        working-directory: src-tauri
+        run: cargo test --lib

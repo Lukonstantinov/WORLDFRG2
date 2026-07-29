@@ -1,12 +1,12 @@
     use super::*;
 
-    fn good(name: &str, cat: i32, tier: u8, val: f32, desire: f32, food: bool) -> TickGood {
+    pub(super) fn good(name: &str, cat: i32, tier: u8, val: f32, desire: f32, food: bool) -> TickGood {
         TickGood { name: name.into(), category: cat, need_tier: tier, base_value: val, desire, food,
             fungible_input: false,
             bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0, consumption_interval: 30.0 }
     }
 
-    fn hub(id: u32, x: f32, y: f32, pop: f32, prod: Vec<f32>, comp: u32) -> TickHub {
+    pub(super) fn hub(id: u32, x: f32, y: f32, pop: f32, prod: Vec<f32>, comp: u32) -> TickHub {
         let ng = prod.len();
         let base_per_capita: Vec<f32> = prod.iter().map(|&p| p / pop.max(1.0)).collect();
         TickHub {
@@ -31,7 +31,7 @@
         }
     }
 
-    fn house_at(hub: u32, spec: Vec<usize>, fleet_sea: u32) -> House {
+    pub(super) fn house_at(hub: u32, spec: Vec<usize>, fleet_sea: u32) -> House {
         House {
             name: format!("House{hub}"), hub, wealth: 50.0, prestige: 0.0, spec,
             monopoly: vec![], rivals: vec![], generation: 1, events: vec![],
@@ -45,7 +45,7 @@
         }
     }
 
-    fn sim(hubs: Vec<TickHub>, goods: Vec<TickGood>) -> CampaignSim {
+    pub(super) fn sim(hubs: Vec<TickHub>, goods: Vec<TickGood>) -> CampaignSim {
         let mut s = CampaignSim {
             seed: 42, tick: 0, goods, hubs, in_transit: vec![], houses: vec![],
             active_events: vec![], journal: vec![], days_per_cell: 0.2, freight_per_day: 0.01,

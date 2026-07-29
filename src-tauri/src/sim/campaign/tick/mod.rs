@@ -4840,5 +4840,9 @@ pub fn merchant_pops(h: &TickHub) -> (f32, f32, f32) {
 }
 
 #[cfg(test)]
-#[cfg(test)]
 mod tests;
+
+/// The economy fidelity gate — the campaign's counterpart to the Earth climate
+/// scorecard. See `economy_validation.rs` for the method and the sources.
+#[cfg(test)]
+mod economy_validation;
