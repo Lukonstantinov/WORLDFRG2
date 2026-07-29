@@ -1658,6 +1658,12 @@ export interface LakeData {
   /** Approximate salinity (ppt); ~0.2 fresh, 12-120+ for a salt lake. Drives the
    *  brackish→saline→hypersaline pink tint. */
   salinity_ppt?: number;
+  /** Bathymetry: per-cell water depth, index-parallel to `cells`, quantised 0-255 as a
+   *  fraction of `max_depth_m`. Absent on worlds generated before it existed — the
+   *  renderer then falls back to a distance-to-shore gradient. */
+  depth?: number[];
+  /** Deepest point of the basin in metres (the scale `depth` is a fraction of). */
+  max_depth_m?: number;
 }
 
 /** A signature fish species on a river reach. `slug` keys an illustration at

@@ -215,6 +215,70 @@ function lakeFill(lake: LakeData): string {
   return LAKE_COLOR;
 }
 
+/** Shoreline colour for a lake — a darker, fully-opaque relative of its own water, so
+ *  the bank reads as a drawn coastline rather than an anti-aliased edge of the fill. */
+function lakeShore(lake: LakeData): string {
+  if (lake.kind === 1) return "rgba(38, 92, 92, 0.95)";
+  const s = lake.salinity_ppt ?? 0;
+  if (lake.endorheic || s >= 1) {
+    if (s >= 120) return "rgba(140, 46, 84, 0.95)";
+    if (s >= 35) return "rgba(132, 68, 92, 0.95)";
+    return "rgba(34, 92, 100, 0.95)";
+  }
+  return "rgba(18, 84, 126, 0.95)";
+}
+
+/** Per-cell DEPTH 0..1 for a lake, index-parallel to `lake.cells`.
+ *
+ *  Prefers the real bathymetry the hydrology step now ships (`depth`, the water column
+ *  over the drowned basin floor). Worlds generated before that field existed fall back
+ *  to a distance-to-shore transform — a BFS inward from the bank — which is not the true
+ *  floor but produces the same "shallow rim, deep middle" reading, so an old save still
+ *  looks like a lake rather than a flat slab.
+ *
+ *  Cached per lake: this runs on every frame otherwise, and a big basin is thousands of
+ *  cells. */
+function lakeDepths(lake: LakeData, cache: WeakMap<LakeData, Float32Array>): Float32Array {
+  const hit = cache.get(lake);
+  if (hit) return hit;
+  const cells = lake.cells;
+  const out = new Float32Array(cells.length);
+  const packed = lake.depth;
+  if (packed && packed.length === cells.length) {
+    for (let i = 0; i < cells.length; i++) out[i] = packed[i] / 255;
+  } else {
+    // Distance-to-shore fallback. Index the cell set, then BFS from every cell that has
+    // a missing 4-neighbour (i.e. touches the bank).
+    const index = new Map<number, number>();
+    for (let i = 0; i < cells.length; i++) index.set(cells[i][0] * 100000 + cells[i][1], i);
+    const dist = new Int32Array(cells.length).fill(-1);
+    const queue: number[] = [];
+    for (let i = 0; i < cells.length; i++) {
+      const [x, y] = cells[i];
+      if (!index.has((x - 1) * 100000 + y) || !index.has((x + 1) * 100000 + y)
+        || !index.has(x * 100000 + (y - 1)) || !index.has(x * 100000 + (y + 1))) {
+        dist[i] = 0; queue.push(i);
+      }
+    }
+    let head = 0, maxD = 0;
+    while (head < queue.length) {
+      const i = queue[head++];
+      const [x, y] = cells[i];
+      const d = dist[i] + 1;
+      for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]] as const) {
+        const j = index.get(nx * 100000 + ny);
+        if (j === undefined || dist[j] >= 0) continue;
+        dist[j] = d; if (d > maxD) maxD = d;
+        queue.push(j);
+      }
+    }
+    const inv = maxD > 0 ? 1 / maxD : 0;
+    for (let i = 0; i < cells.length; i++) out[i] = Math.max(0, dist[i]) * inv;
+  }
+  cache.set(lake, out);
+  return out;
+}
+
 const SETTLEMENT_COLORS: Record<string, string> = {
   capital: "#ffd700",
   city: "#ff8844",
@@ -586,7 +650,28 @@ export class OverlayManager {
   private placedLabels: { x0: number; y0: number; x1: number; y1: number }[] = [];
 
   drawRivers(rivers: RiverData[]) { this.rivers = rivers; this.riverLabelCache.clear(); }
-  drawLakes(lakes: LakeData[]) { this.lakes = lakes; }
+  drawLakes(lakes: LakeData[]) {
+    this.lakes = lakes;
+    this.lakeCells = new WeakMap();
+    this.lakeDepthCache = new WeakMap();
+  }
+
+  /** Per-lake bathymetry + membership caches. Both are derived from the cell list, and
+   *  both are needed on EVERY frame (depth shading and the shoreline edge test), so they
+   *  are computed once per lake and dropped whenever the lake list is replaced. */
+  private lakeDepthCache: WeakMap<LakeData, Float32Array> = new WeakMap();
+  private lakeCells: WeakMap<LakeData, Set<number>> = new WeakMap();
+
+  /** Membership set of a lake's cells, keyed `x * 100000 + y`, built once per lake. */
+  private lakeCellIndex(lake: LakeData): Set<number> {
+    let s = this.lakeCells.get(lake);
+    if (!s) {
+      s = new Set<number>();
+      for (const [x, y] of lake.cells) s.add(x * 100000 + y);
+      this.lakeCells.set(lake, s);
+    }
+    return s;
+  }
   drawSettlements(settlements: Settlement[]) { this.settlements = settlements; }
   drawColonies(colonies: ColonyMarker[]) { this.colonies = colonies; }
   /** Atlas 2.0 · set the Trade Heat points (hub position + yearly throughput). */
@@ -1665,6 +1750,10 @@ export class OverlayManager {
     if (this.visibility.lakes && this.lakes.length > 0) {
       const lhl = this.lakeHighlight;
       const hasLakeHL = lhl >= 0 && lhl < this.lakes.length;
+      // Shoreline width in WORLD units that renders as a constant ~1.4 device pixels at
+      // any zoom — the map is drawn in world space, so a fixed lineWidth would balloon
+      // into a fat band as you zoom in. Clamped so the bank never swallows a small pond.
+      const shoreW = Math.min(0.5, 1.4 / this.currentScale);
       this.lakes.forEach((lake, li) => {
         const isSel = hasLakeHL && li === lhl;
         // Oxbow backwater · salt-lake brine tint · else open blue water. When a
@@ -1672,15 +1761,33 @@ export class OverlayManager {
         ctx.globalAlpha = hasLakeHL ? (isSel ? 1 : 0.28) : 1;
         ctx.fillStyle = lakeFill(lake);
         for (const [x, y] of lake.cells) ctx.fillRect(x, y, 1, 1);
-        // SHEEN: a faint light-blue glint across the upper third of the basin so
-        // open water reads as glossy/reflective rather than a flat blue slab.
-        // Skip oxbows (weedy backwaters) — only open freshwater lakes glint.
+        // BATHYMETRY: darken toward the deep water so the basin reads as a bowl. The
+        // shallows keep the base tint, so a shelving margin stays visible around the
+        // deep. One pass, alpha ∝ depth — cheaper and steadier than a per-cell colour.
+        const depths = lakeDepths(lake, this.lakeDepthCache);
+        if (lake.cells.length >= 3) {
+          ctx.fillStyle = "rgba(6, 34, 62, 0.55)";
+          for (let i = 0; i < lake.cells.length; i++) {
+            const d = depths[i];
+            if (d <= 0.05) continue;
+            ctx.globalAlpha = (hasLakeHL ? (isSel ? 1 : 0.28) : 1) * d * d * 0.75;
+            const [x, y] = lake.cells[i];
+            ctx.fillRect(x, y, 1, 1);
+          }
+          ctx.globalAlpha = hasLakeHL ? (isSel ? 1 : 0.28) : 1;
+        }
+        // SHEEN: a faint light-blue glint over the SHALLOWS so open water reads as
+        // glossy rather than a flat slab — and, together with the depth wash, as a
+        // lit rim around dark deep water. Skip oxbows (weedy backwaters).
         if (lake.kind !== 1 && lake.cells.length >= 4) {
           let minY = Infinity, maxY = -Infinity;
           for (const [, y] of lake.cells) { if (y < minY) minY = y; if (y > maxY) maxY = y; }
           const sheenCut = minY + (maxY - minY) * 0.34;
           ctx.fillStyle = "rgba(225, 245, 255, 0.28)";
-          for (const [x, y] of lake.cells) if (y <= sheenCut) ctx.fillRect(x, y, 1, 1);
+          for (let i = 0; i < lake.cells.length; i++) {
+            const [x, y] = lake.cells[i];
+            if (y <= sheenCut && depths[i] < 0.6) ctx.fillRect(x, y, 1, 1);
+          }
         }
         // Bright wash over the selected basin so it reads as picked (cheap — one
         // extra fill pass, no per-cell shadow). Kept lighter than before so a
@@ -1689,6 +1796,22 @@ export class OverlayManager {
           ctx.fillStyle = "rgba(210, 236, 255, 0.34)";
           for (const [x, y] of lake.cells) ctx.fillRect(x, y, 1, 1);
         }
+        // SHORELINE: a thin, crisp bank. Drawn as the boundary EDGES of the cell set —
+        // only those sides with no lake cell across them — so it traces the outline
+        // once instead of outlining every cell, which is what made lakes read as a
+        // grid of tiles. Islands within the lake get their bank for free.
+        ctx.strokeStyle = lakeShore(lake);
+        ctx.lineWidth = shoreW;
+        ctx.lineCap = "butt";
+        ctx.beginPath();
+        const inLake = this.lakeCellIndex(lake);
+        for (const [x, y] of lake.cells) {
+          if (!inLake.has((x - 1) * 100000 + y)) { ctx.moveTo(x, y); ctx.lineTo(x, y + 1); }
+          if (!inLake.has((x + 1) * 100000 + y)) { ctx.moveTo(x + 1, y); ctx.lineTo(x + 1, y + 1); }
+          if (!inLake.has(x * 100000 + (y - 1))) { ctx.moveTo(x, y); ctx.lineTo(x + 1, y); }
+          if (!inLake.has(x * 100000 + (y + 1))) { ctx.moveTo(x, y + 1); ctx.lineTo(x + 1, y + 1); }
+        }
+        ctx.stroke();
       });
       ctx.globalAlpha = 1;
     }

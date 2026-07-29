@@ -86,6 +86,45 @@ pub struct Lake {
     /// 12-120+ for a terminal salt lake (shallower & more arid = more concentrated).
     #[serde(default)]
     pub salinity_ppt: f32,
+    /// **Bathymetry.** Per-cell water depth, index-parallel to `cells`, quantised to
+    /// 0..255 as a fraction of `max_depth_m`. It is the real water column — the filled
+    /// lake surface minus the basin floor under that cell — so a lake reads as a bowl
+    /// (deep in the drowned valley, shallow over the shoulders) instead of a flat slab.
+    /// Quantised rather than stored as f32 because it is serialised per cell into the
+    /// world's metadata JSON.
+    ///
+    /// EMPTY on worlds generated before bathymetry existed; the renderer falls back to a
+    /// distance-to-shore gradient in that case, so old saves still shade sensibly.
+    #[serde(default)]
+    pub depth: Vec<u8>,
+    /// Deepest point of the basin, in metres — the scale `depth` is a fraction of.
+    #[serde(default)]
+    pub max_depth_m: f32,
+}
+
+/// Typical depth of an oxbow backwater, in metres — a cut-off meander is a shallow
+/// weedy channel, never a drowned valley.
+const OXBOW_DEPTH_M: f32 = 4.0;
+
+/// Metres of real elevation per unit of the normalised `elevation` field. Matches the
+/// lapse-rate conversion used across the climate pipeline.
+const ELEV_M: f32 = 8848.0;
+
+/// Quantise a per-cell water column (in normalised elevation units) into the `depth` /
+/// `max_depth_m` pair a `Lake` carries.
+fn pack_depths(col: &[f32]) -> (Vec<u8>, f32) {
+    let max = col.iter().copied().fold(0.0f32, f32::max);
+    if max <= 0.0 { return (vec![0; col.len()], 0.0); }
+    let depth = col.iter()
+        .map(|&d| ((d / max).clamp(0.0, 1.0) * 255.0).round() as u8)
+        .collect();
+    // The metre figure uses the SAME plausibility scaling as the Hydrology panel's
+    // limnology (`get_lake_systems`): a depression fill understates a real basin, which
+    // is deepened by its own inflow and rift/crater origin. Keeping the two in step
+    // matters — otherwise the map and the lake dossier quote different depths for the
+    // same water. The per-cell values are a fraction of this, so shading is unaffected.
+    let max_depth_m = (max * ELEV_M * 3.0 + 2.0).clamp(2.0, 1600.0);
+    (depth, max_depth_m)
 }
 
 /// Salinity (PSU) window the persisted `salinity` u8 column encodes â€” must match
@@ -915,7 +954,19 @@ pub fn extract_oxbows(rivers: &[River], buf: &WorldBuffer, existing: &[Lake]) ->
                     let mut se = 0.0;
                     for &(x, y) in &cells { se += buf.elevation[buf.idx(x, y)]; occupied[buf.idx(x, y)] = true; }
                     let elev = se / cells.len() as f32;
-                    out.push(Lake { cells, elevation: elev, kind: 1, endorheic: false, salinity_ppt: 0.2 });
+                    // An oxbow is a shallow abandoned channel, not a drowned basin: it is
+                    // deepest along its own axis and shoals toward both plugged ends.
+                    let n = cells.len() as f32;
+                    let column: Vec<f32> = (0..cells.len())
+                        .map(|i| {
+                            let t = (i as f32 + 0.5) / n;           // 0..1 along the loop
+                            let bow = 1.0 - (2.0 * t - 1.0).abs();  // 0 at the ends, 1 mid
+                            OXBOW_DEPTH_M / ELEV_M * (0.35 + 0.65 * bow)
+                        })
+                        .collect();
+                    let (depth, max_depth_m) = pack_depths(&column);
+                    out.push(Lake { cells, elevation: elev, kind: 1, endorheic: false, salinity_ppt: 0.2,
+                                    depth, max_depth_m });
                     made += 1;
                     if made >= 2 { break; }
                     k += 2 * q; // one bend â†’ one oxbow
@@ -956,6 +1007,7 @@ pub fn detect_lakes(buf: &WorldBuffer, filled: &[f32], fill_depth: f32, max_cell
 
             // BFS the connected filled region
             let mut cells = Vec::new();
+            let mut column: Vec<f32> = Vec::new();   // water depth per cell (normalised)
             let mut queue = VecDeque::new();
             queue.push_back((x, y));
             visited[idx] = true;
@@ -964,6 +1016,8 @@ pub fn detect_lakes(buf: &WorldBuffer, filled: &[f32], fill_depth: f32, max_cell
             while let Some((cx, cy)) = queue.pop_front() {
                 let ci = buf.idx(cx, cy);
                 cells.push((cx, cy));
+                // The bathymetry IS the fill: surface minus the drowned basin floor.
+                column.push((filled[ci] - buf.elevation[ci]).max(0.0));
                 sum_elev += filled[ci];
 
                 for &(dx, dy) in &D8 {
@@ -984,7 +1038,9 @@ pub fn detect_lakes(buf: &WorldBuffer, filled: &[f32], fill_depth: f32, max_cell
             // `max_cells` (giant flooded basins are usually artefacts).
             if cells.len() >= 2 && cells.len() <= max_cells {
                 let elevation = sum_elev / cells.len() as f32;
-                lakes.push(Lake { cells, elevation, kind: 0, endorheic: false, salinity_ppt: 0.0 });
+                let (depth, max_depth_m) = pack_depths(&column);
+                lakes.push(Lake { cells, elevation, kind: 0, endorheic: false, salinity_ppt: 0.0,
+                                  depth, max_depth_m });
             }
         }
     }
@@ -1227,6 +1283,42 @@ mod tests {
         }
         // A small creek (low order, thin) never braids.
         assert!(build_braids(&buf, &render, 1.0, 2, 55).is_empty(), "creeks do not braid");
+    }
+
+    /// A lake carries BATHYMETRY: per-cell depth parallel to its cells, deepest over the
+    /// drowned basin floor and shoaling toward the bank — which is what lets the map draw
+    /// it as a bowl rather than a flat blue slab.
+    #[test]
+    fn lakes_carry_depth_that_deepens_toward_the_middle() {
+        let (w, h) = (24u32, 24u32);
+        let n = (w * h) as usize;
+        // A conical pit in the middle of a plain: floor drops toward (12,12).
+        let mut elevation = vec![0.30f32; n];
+        for y in 8..17u32 {
+            for x in 8..17u32 {
+                let d = (((x as f32 - 12.0).powi(2) + (y as f32 - 12.0).powi(2)).sqrt()).min(4.0);
+                elevation[(y * w + x) as usize] = 0.10 + 0.04 * d;   // 0.10 centre → 0.26 rim
+            }
+        }
+        let buf = synth(w, h, vec![1u8; n], elevation.clone());
+        // The basin fills to its rim: the surface is flat, the floor is not.
+        let filled: Vec<f32> = (0..n).map(|i| elevation[i].max(0.26)).collect();
+        let lakes = detect_lakes(&buf, &filled, 0.001, 10_000);
+        let lake = lakes.iter().max_by_key(|l| l.cells.len()).expect("the pit should fill");
+
+        assert_eq!(lake.depth.len(), lake.cells.len(), "depth must be parallel to cells");
+        assert!(lake.max_depth_m > 0.0, "a filled basin has a depth");
+        // The deepest cell is the one over the lowest floor.
+        let deepest = lake.depth.iter().enumerate().max_by_key(|(_, &d)| d).map(|(i, _)| i).unwrap();
+        let (dx, dy) = lake.cells[deepest];
+        assert!((dx as i32 - 12).abs() <= 1 && (dy as i32 - 12).abs() <= 1,
+            "the deep should sit over the basin floor, got ({dx},{dy})");
+        // …and the bank is shallower than the middle.
+        let rim = lake.cells.iter().position(|&(x, y)| {
+            (x as i32 - 12).abs() >= 3 || (y as i32 - 12).abs() >= 3
+        }).expect("the lake should reach its rim");
+        assert!(lake.depth[rim] < lake.depth[deepest],
+            "shoal {} should be shallower than the deep {}", lake.depth[rim], lake.depth[deepest]);
     }
 }
 

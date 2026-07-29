@@ -1676,7 +1676,7 @@ mod tests {
         buf.goods = vec![vec![0u8; n]; specs.len()];
         let salt_slot = specs.iter().position(|s| builtin_index_of(&s.id) == Some(super::GOOD_SALT)).unwrap();
 
-        let salt_lake = Lake { cells: vec![(10, 6), (11, 6)], elevation: 0.1, kind: 0, endorheic: true, salinity_ppt: 120.0 };
+        let salt_lake = Lake { cells: vec![(10, 6), (11, 6)], elevation: 0.1, kind: 0, endorheic: true, salinity_ppt: 120.0, depth: vec![], max_depth_m: 0.0 };
         super::apply_salt_pans(&mut buf, &[salt_lake], &specs);
         let ci = buf.idx(10, 6);
         assert_eq!(buf.goods[salt_slot][ci], 230, "salt produced on the pan");
@@ -1687,7 +1687,7 @@ mod tests {
 
         // A freshwater lake produces neither (its cell was untouched above).
         let fi = buf.idx(2, 2);
-        let fresh = Lake { cells: vec![(2, 2)], elevation: 0.1, kind: 0, endorheic: false, salinity_ppt: 0.2 };
+        let fresh = Lake { cells: vec![(2, 2)], elevation: 0.1, kind: 0, endorheic: false, salinity_ppt: 0.2, depth: vec![], max_depth_m: 0.0 };
         super::apply_salt_pans(&mut buf, &[fresh], &specs);
         assert_eq!(buf.goods[salt_slot][fi], 0, "no salt at a freshwater lake");
         assert_eq!(buf.salinity[fi], 0, "no brine at a freshwater lake");

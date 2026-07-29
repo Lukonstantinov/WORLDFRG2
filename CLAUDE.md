@@ -185,10 +185,10 @@ Run in order. Each phase depends on previous phases' data.
 | 2b | `sim_generate_shelves` | Continental shelf (configurable) |
 | 3 | `sim_ocean_atmosphere` | The full ocean/atmosphere chain — see the exact order below |
 | 4 | `sim_classify_climate` | Köppen classification (31 zone codes + H highland) |
-| 5 | `sim_rivers_hydrology` | Priority-flood (Barnes et al. + ε) → rivers → lakes → aquatic ecology |
+| 5 | `sim_rivers_hydrology` | Priority-flood (Barnes et al. + ε) → rivers → lakes (+ per-cell bathymetry) → aquatic ecology |
 | 6 | `sim_soil_fertility` | Soil types (12) → fertility → fisheries |
 | 7 | `sim_generate_settlements` | Habitability scoring → city placement |
-| 7b | `sim_generate_provinces` | Cost-flood + feature-snap province partition (AFTER settlements) |
+| 7b | `sim_generate_provinces` | Climate-weighted equal-AREA province partition (AFTER settlements) |
 | 8 | `sim_biological` | Shark + shipworm risk + trade-good belts (takes seed + gem_deposits) |
 | 9 | `compute_political` | (query-only) Re-rank settlements by trade power + influence discs |
 | 10 | `compute_economy` | (query-only) **Market equilibrium**: stock-based prices, barter, currency goods, wealth, chokepoints |
@@ -239,6 +239,17 @@ serde-defaulted so old saves load). Grouped by theme:
   estates & manufactories, abstract houses, succession, fleets & voyage risk
   (`SEA/CARAVAN/RIVER_LOSS`), offices, contracts. Emergence order: local merchants
   → **guilds** (yr 5) → **houses** (yr 10); no cadet branches.
+- **EVERY settlement is alive (two tiers).** `campaign_start_sim` no longer drops the
+  settlements below its cap into an inert `hinterland` list (they were drawn and
+  clickable but had no market at all, so their panel showed frozen worldgen numbers
+  forever). The cap now picks a TIER: the top 400 by population are FULL hubs, and every
+  other settlement is a **market town** (`TickHub.market_town`) — a live market with
+  production, consumption, prices, stock, trade, population dynamics and a chronicle, a
+  short local partner list (`NEIGHBOR_K_TOWN`), and promotion to a full hub past
+  `MARKET_TOWN_PROMOTE` (`promote_market_towns`, yearly). Nothing is excluded by hand:
+  banks/guilds/councils are already population-gated. `hinterland` is kept and still runs
+  for saves that have one; new campaigns leave it empty. Tick cost is ~linear in hubs
+  (0.59 ms @160 · 1.55 @400 · 4.54 @1000, 24 goods — `bench_campaign_tick`).
 - **City lifecycle (Atlas 2.0):** organic founding/growth/absorption of towns;
   population sentiment, unrest & revolts; social strata + mobility; trade bases
   (houses develop under-traded small cities); council right-of-first-buy.
@@ -373,8 +384,8 @@ sim/                            ← organised into per-phase step folders; mod.r
                                   · goods_spec.rs (GoodSpec, 45 belts + ~21 manufactured)
   shared/                       ← cultures.rs (organic peoples map + 14 traits) · toponyms.rs
                                   · names.rs (deterministic place/family/head names)
-                                  · provinces.rs (TWO-STAGE partition — see §8.10; the
-                                    natural world↔campaign join layer, see FIX_PLAN B1)
+                                  · provinces.rs (THREE-STAGE equal-area partition — see
+                                    §8.10; the natural world↔campaign join layer, B1)
   campaign/                     ← the campaign half:
       market.rs                   Market equilibrium solver (stocks → grain-eq prices)
       manufacture.rs              Shared production-chain resolver (DAG topo, labor∝pop)
@@ -455,7 +466,14 @@ ui/world/  — map & world
   ImportWorldDialog.tsx         ← Layered world import dialog
   SettlementSearch.tsx          ← Settlement name search/jump
   ErrorBoundary.tsx             ← React error boundary
-  useFloatingWindow.ts          ← Floating/dockable window hook
+  useFloatingWindow.ts          ← Floating-window hook: per-panel tint + DRAG FROM
+                                  ANYWHERE. `dragRoot` goes on the window root (drag
+                                  starts after 4 px of travel, and never on a button /
+                                  input / tab / `[data-no-drag]`, so ordinary clicks are
+                                  untouched); `onPointerDown` is still the title-bar
+                                  handle and drags on contact. Text selection inside a
+                                  panel is off — that is the trade for grabbing a window
+                                  by any part of it.
 
 ui/goods/  — goods
   GoodsEditor.tsx               ← Goods builder (distribution/value/bulk/perish + recipes)
@@ -626,6 +644,26 @@ land, elevation, terrain (hillshade), plates, shelf, ridges, fisheries, currents
 biomes, soil, fertility, salinity, habitability, shark, shipworm, reef, storm, disease.
 Paint: Pan, Paint Land (0/1), Elevation (f32 0-1), Paint Shelf (u8 0/1), Place Volcano (u8 0/1).
 
+### 8.7b Lakes — thin shoreline + bathymetry
+Lakes are an OVERLAY (never baked into tiles), and they used to be drawn as one
+`fillRect(x, y, 1, 1)` per cell with no outline, so at zoom a lake read as a grid of
+tiles with a stair-stepped edge and a flat single colour. Now:
+
+- **Bathymetry is real data.** `Lake.depth` (u8 per cell, a fraction of `max_depth_m`)
+  is the water column — the filled lake surface minus the drowned basin floor — written
+  by `detect_lakes` in `step5_rivers/rivers.rs`. Oxbows get a shallow along-axis profile
+  instead (a cut-off meander is not a drowned valley). `max_depth_m` uses the SAME
+  plausibility scaling as the Hydrology panel's limnology, so the map and the lake
+  dossier quote the same depth. Both fields are serde-defaulted; a world generated
+  before them falls back to a client-side distance-to-shore gradient, so old saves still
+  shade as a bowl.
+- **The shoreline is a traced OUTLINE**, not per-cell edges: `OverlayManager` strokes
+  only those cell sides with no lake cell across them, at a width of `1.4 / scale` world
+  units so it stays ~1.4 device px at any zoom. Islands inside a lake get their bank for
+  free.
+- Depth/membership are derived per lake and cached in `WeakMap`s keyed by the lake
+  object (rebuilt in `drawLakes`) — both are needed every frame.
+
 ### 8.8 File operations
 Save/Open via SQLite backup API (`.worldforge` / `.campaign`); Export Heightmap
 (16-bit grayscale PNG from elevation); Export Layers / trade data; Import Template
@@ -669,15 +707,29 @@ a checksum per phase-3 field, and every one is unchanged vs. the pre-optimisatio
 code. Use it the same way for any future refactor here — the Earth gate scores
 agreement to 0.1 %, which cannot tell bit-exact from merely close.
 
-### 8.10 Province borders — why the partition has TWO stages
+### 8.10 Province borders — why the partition has THREE stages
 `sim/shared/provinces.rs` (phase 7b) does **not** simply flood from seeds. It cannot:
 a cost-flood's border falls where two seeds' CUMULATIVE costs tie, so a barrier of
 penalty `P` merely displaces that tie-line by ≈`P/2` cells. Adding cost can bias a
 border toward a river or ridge but can **never pin it to one** — a feature a few cells
-off the tie-line is simply crossed. So:
+off the tie-line is simply crossed. And a flood alone has no opinion about SIZE, so a
+seed boxed in by crests came out a sliver while a region holding one seed came out a
+continent. So:
 
 1. **Cost-flood (Dijkstra)** — sets province COUNT, SIZE and TOPOLOGY. Seeds are the
-   big settlements plus a habitability-scaled jittered scatter that prefers valleys.
+   big settlements plus a jittered scatter, Poisson-disk-rejected at the local
+   separation. Run `1 + BALANCE_PASSES` times with an ADDITIVE per-seed weight nudged by
+   `radius · ln(area/budget)` (an additively-weighted Voronoi), so sizes equalise while
+   borders still land on real features.
+1b. **`split_oversized` / `merge_undersized`** — the size guarantee. Everything is
+   measured against an **area budget in real km²**, derived from ONE primitive,
+   `side_cells` = province side at this latitude from `koppen_area_mult` (temperate 1× ·
+   steppe 2× · taiga/desert 4× · tundra/ice 5-6×) × a habitability ramp, floored at
+   `MIN_SEED_SEP`. Over `PROV_MAX_FRAC`=1.45 → split by a local farthest-point flood;
+   under `PROV_MIN_FRAC`=0.75 → merged into the longest shared frontier, ITERATIVELY
+   (the old single pass could terminate on a province that was itself under the floor).
+   `merge_polar_caps` then fuses the ice/tundra caps into ONE province per polar
+   landmass — the deliberate exception; deserts stay bounded by their 4× budget.
 2. **`snap_borders_to_features`** — a **marker-controlled watershed** (Meyer flooding)
    that re-places the border LINES. Erode each province by `SNAP_R`=3 → markers; build
    a relief of `crest + trunk river`, plus a low `FLAT_ANCHOR` ridge along the flood's
@@ -685,8 +737,17 @@ off the tie-line is simply crossed. So:
    always taking the lowest relief. Two floods therefore meet on the highest ground
    between them — the crest, or the middle of the channel.
 
-Three rules that are easy to get wrong here, all covered by `provinces::tests`:
+Rules that are easy to get wrong here, all covered by `provinces::tests`:
 
+- **Seeding, budget and floors must quote ONE number.** The separation, the balance
+  target, the split threshold and the merge floor all read `side_cells`, and the
+  `MIN_SEED_SEP` floor is applied INSIDE it. Flooring the separation but not the budget
+  leaves every province permanently "under budget" on a fine grid, and the merge stage
+  dutifully dissolves the map into a few blobs.
+- **Seed rejection must use the spatial hash.** It is not only a speed fix: with a
+  candidate walk coarser than the separation, the achieved density is set by the walk
+  rather than the rejection radius — by an amount that differs per climate, which
+  silently flattens the whole climate-size ladder.
 - **The divider is a CREST, not an altitude.** `compute_ridge` scores how far a cell
   stands above BOTH sides along some axis, sampled at radii 2 and 4 on lightly blurred
   elevation. Absolute elevation (the old `(elev-0.26)*18`) makes a whole plateau
@@ -702,9 +763,12 @@ Three rules that are easy to get wrong here, all covered by `provinces::tests`:
   floods inspect the two corner cells of a diagonal step.
 
 Measured by the tests: borders sit on a crest **3.1×** more often than chance, and a
-diagonal trunk river is a border **3.3×** more often (both ≈1.0× before). The partition
-is also **deterministic** — `HashMap::iter().max_by_key` ties must stay broken on the
-key, or the same seed yields different maps across runs.
+diagonal trunk river is a border **3.3×** more often (both ≈1.0× before). Sizes within
+one climate band spread **p90/p10 = 1.50** and the smallest province is **0.56×** the
+median (1.71 / 0.42 before the balance + split + merge stages). The partition is also
+**deterministic** — `HashMap::iter().max_by_key` ties must stay broken on the key, or the
+same seed yields different maps across runs. Generation cost ≈**5.5 s @ 1.6 M cells**
+(`bench_province_generation`, ignored); it is a one-time step, but watch it.
 
 ### 8.11 Map label typography
 Place names used to be styled at each call site (~23 separate `ctx.font =` lines), so
