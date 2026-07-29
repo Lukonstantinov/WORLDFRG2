@@ -1,8 +1,29 @@
 # Houses & Provinces — audit and design
 
-**Status: DESIGN. Nothing here is built.** Per `CLAUDE.md` §9 this lives in
-`docs/proposals/` because it is a menu, not a commitment. Every item carries a
-regression gate (§2.4) so it can be commissioned one piece at a time.
+**Status: PARTLY BUILT.** Per `CLAUDE.md` §9 this lives in `docs/proposals/` because it
+began as a menu, not a commitment. Every item carries a regression gate (§2.4).
+
+**Built** (see `CLAUDE.md` §5/§6/§7 for the shipped shape, which is authoritative):
+- The **House Dossier**'s five stability gauges and its liability breakdown
+  (`campaign_house_stability` → `HouseDossier.tsx` `HouseStandingView`), including the
+  solvency countdown. Four of five gauges are pure derivations, as designed.
+- **Feuds, elaborated** — cause, temperature, four stages, four endings, an episode log,
+  a per-house feud tab and a world feud board (`FeudsView`).
+- The **layered province plate** (six plates + toggles), the **year slider**, the four
+  Province Inspector **tabs**, and the province browser's live land sorts.
+- **Province land state and the B1 feedback edge** — land use, soil, tenure, rural
+  fiscality, rural unrest and revolt, multi-year works, per-province chronicle.
+- **Three control verbs** — dues, begin a work, abandon a work.
+
+**Deliberately EXCLUDED at the commissioner's direction:** the family-intrigue layer —
+`Scheme`, the exposure/secrecy mechanic, `dirt`/blackmail, and `Factor` (branch agents).
+Feuds carry the adversarial weight instead. §2.2 and §2.3 below are kept as written for
+the record; treat them as the design that was *not* taken, not as a backlog.
+
+**Not built, still open:** `heir_quality` / `cohesion` / `repute` as stored state (cohesion
+is derived on read instead), the Network map view, province transfer between polities
+(`prov_holder` exists but wars do not move it), culture drift, and persisting land state
+back to tiles so the MAP changes over centuries (FIX_PLAN B1's remaining item).
 
 Two commissions, answered in order:
 

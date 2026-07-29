@@ -293,6 +293,18 @@ on load, not serialized). Core day loop:
 Layered systems (all hooked at the yearly/monthly points inside `advance`, all
 serde-defaulted so old saves load). Grouped by theme:
 
+- **Feuds:** a quarrel between two houses is a first-class `Feud` (`tick/war.rs`), not a
+  name in a `rivals` list: a CAUSE (`FEUD_TRADE`/`SEAT`/`MARRIAGE`/`MARKET`/`SUCCESSION`),
+  an `intensity` that heats with real overlap (shared goods × shared cities) and cools
+  without it, four STAGES whose weapons differ (snub → undercut → market closure +
+  influence stripped → ships taken / counting-houses shut), and four ENDINGS —
+  `arbitrate_feuds` (a council both trade in imposes a settlement), marriage, ruin, or
+  simple neglect. `houses[].rivals` is kept in sync, so every pre-existing reader is
+  unchanged. Formation is the O(n²) pair scan and keeps the half-yearly cadence
+  (`update_rivalries`); temperature and flares run monthly over the bounded feud list
+  (`update_feuds`). **Feud prestige is capped** (`FEUD_PRESTIGE_CAP`) — prestige is
+  otherwise unbounded and feeds political power → charters → monopolies → wealth, and an
+  uncapped per-flare award drove the sustained-richest house from 298k to 1.9M.
 - **Living Trade (DLC 1):** production/consumption/price/dispatch/arrivals/events,
   estates & manufactories, abstract houses, succession, fleets & voyage risk
   (`SEA/CARAVAN/RIVER_LOSS`), offices, contracts. Emergence order: local merchants
@@ -323,16 +335,34 @@ serde-defaulted so old saves load). Grouped by theme:
 - **Colonies & migration:** colonisation (settlement colonies + food lifeline supply
   ships), route-bound migration corridors, expeditions.
 - **Satellite construction:** a metropolis builds a suburb over ~10 years (with decay).
-- **Provinces (Phase 2b · watershed demography):** the ONLY campaign state carried at
-  world granularity. `campaign_start_sim` seeds `prov_rural` / `prov_cap` /
-  `prov_culture` / `prov_seat` / `prov_neighbors` and maps `hub_province` from the
-  `province_raster`; `province_demography_pass()` runs **yearly** (rural pools grow to
-  carrying capacity → migrate into cities), and `prov_neighbors` carries overland
-  plague hop. All `prov_*` fields are serde-defaulted and every routine early-returns
-  on empty, so the dynamics test (which seeds no provinces) is bit-identical. **This is
-  the pattern to extend for any world↔campaign feedback** (FIX_PLAN B1) — the carrier
-  and the yearly cadence already exist; what's missing is land state + a feedback edge
-  into production.
+- **Provinces (Phase 2b · watershed demography + LAND STATE):** the ONLY campaign state
+  carried at world granularity, and the world↔campaign join (FIX_PLAN B1).
+  `campaign_start_sim` seeds `prov_rural` / `prov_cap` / `prov_culture` / `prov_seat` /
+  `prov_neighbors` and maps `hub_province` from the `province_raster`. Two yearly passes,
+  in this order (`disease.rs`, inside `tick % 365`):
+  1. `province_demography_pass()` — rural pools grow to carrying capacity → migrate into
+     cities carrying their culture; big cities pay an urban-graveyard mortality.
+  2. `province_land_pass(yr)` — the LAND: `prov_forest`/`prov_arable`/`prov_pasture`/
+     `prov_irrigated` (woodland cleared under population pressure, regrown when
+     abandoned), `prov_soil` (worn by cropping INTENSITY = people per unit arable,
+     rested back on fallow, floored at `PROV_SOIL_FLOOR`), `prov_works` (multi-year
+     clearance/drainage/irrigation/road, funded yearly, **stalling** when unpaid),
+     the harvest, `prov_tenure` drifting toward whoever actually holds estates, then
+     `prov_unrest` → revolt, and a yearly `prov_history` sample + `prov_events` entry.
+  **THE FEEDBACK EDGE** closes at step 6 of the land pass: `prov_surplus` is added to the
+  seat city's food `stock` and `prov_revenue` to its `treasury`. Rural fiscality did not
+  exist before — city treasuries came from tariffs and seigniorage alone.
+  `prov_neighbors` still carries the overland plague hop.
+  Two calibration invariants to preserve here:
+  - **The land multiplier is centred on 1.0** for ordinary land. The first cut averaged
+    ~0.7, which put gross output *below* rural subsistence on decent land, so no province
+    ever had a surplus and the feedback edge silently delivered nothing.
+  - **Land use is a partition.** `forest`/`arable`/`pasture` are shares of the SAME
+    province; any seeding path must keep their sum ≤ 1 (the fallback seeder once handed
+    out 1.13 of a province).
+  All `prov_*` fields are serde-defaulted and every routine early-returns on empty, so a
+  campaign without provinces — including the dynamics test — is **bit-identical**. That
+  gate is `province_land_pass_is_a_noop_without_provinces`.
 
 Tests live in `tick/tests.rs` — incl. `simulate_decades_reports_dynamics`
 (the standing dynamics run) and `bench_campaign_tick` (ignored). See the DLC docs
@@ -341,9 +371,12 @@ in §9 for design detail.
 ### 5.1 Known structural limits (read before extending)
 Three facts about the campaign that are easy to miss and shape any change here:
 
-- **One mutating verb.** Of 60+ campaign commands, exactly one mutates a running sim:
-  `campaign_advance(ticks)`. The UI is play/pause + week/month/year. Every AI
-  `decide_*` function is a *latent player verb* — see item B2 in `docs/FIX_PLAN.md`.
+- **Four mutating verbs** (was one). `campaign_advance(ticks)` plus the three province
+  control verbs — `campaign_set_province_tax`, `campaign_start_province_work`,
+  `campaign_cancel_province_work` (§5.2). Everything else of the 60+ campaign commands
+  is read-only, and every AI `decide_*` function is still a *latent player verb* — see
+  item B2 in `docs/FIX_PLAN.md`. The province verbs are the pattern to copy: validate,
+  call the same routine the AI would, persist.
 - **Growth is exogenous.** `tech_factor *= 1.015^(1/365)` per tick is the entire
   technology + growth model. There are no capital goods, no fuel inputs and no labour
   market, so nothing in the economy can influence its own growth rate (Part C of the
@@ -379,6 +412,13 @@ commands/
       read_hubs.rs · read_money.rs  hubs/journal/houses; coin/bank/crash/war/inequality/poleis
       read_people.rs · read_colonies.rs  cultures/pops/figures/dynasties; colonies/migration
       read_trade.rs               goods/routes/futures/warehouses/guilds/schematics/diagnostics
+      read_houses.rs              House Dossier reads: the five STABILITY gauges
+                                  (campaign_house_stability) + the FEUD board
+                                  (campaign_get_feuds). Four of five gauges are pure
+                                  derivations of state the sim already held.
+      province.rs                 province LAND state (campaign_province_land[_all]) +
+                                  the CONTROL VERBS — the only mutating campaign
+                                  commands besides campaign_advance (§5.1)
   goods_commands.rs             ← Goods spec CRUD, default_custom_goods, backfill
   import_commands.rs            ← import_world_layers (layered world import)
   preview_commands.rs           ← preview_zonal_profile / preview_coarse_climate (§8.14)
@@ -507,13 +547,29 @@ ui/world/  — map & world
   climate.ts                    ← Köppen → human phrase helpers
   HydrologyPanel.tsx            ← Rivers/lakes + aquatic (fish assemblage, limnology)
   ProvincePanel.tsx             ← 🗺 Provinces BROWSER (sort/filter/compare + generate)
-  ProvinceInspector.tsx         ← 🏞 Dossier for ONE province, opened by CLICKING the map
-                                  (people/culture shares · land & climate · goods with
-                                  world rank · borders with feature + length · holdings).
+  ProvinceInspector.tsx         ← 🏞 Dossier for ONE province, opened by CLICKING the map.
+                                  FOUR TABS (Land · People · Holdings · Chronicle) over
+                                  the layered survey plate, plus a YEAR SLIDER that
+                                  scrubs `ProvinceLand.history` — a plate that differs
+                                  between year 1 and year 500 is the visible proof the
+                                  two halves are one simulation. Holdings carries the
+                                  CONTROL verbs (dues slider, begin/abandon a work),
+                                  read-only on a province no town administers.
                                   Selection is two-way with ProvincePanel via
                                   uiStore.selectedProvince; hit-test is a client-side
                                   raster lookup in OverlayManager.provinceAt (no IPC)
-  ProvinceMiniMap.tsx           ← Province footprint + settlements/buildings (shared)
+  ProvinceMiniMap.tsx           ← The province SURVEY PLATE (shared): six toggleable
+                                  layers — relief · water · land use · tenure ·
+                                  holdings · borders — plus `PlateToggles` and
+                                  `soilWord`. The campaign holds land use and tenure as
+                                  SHARES, not a spatial layout, so those two plates
+                                  DITHER: each sampled cell takes a class from a stable
+                                  per-cell hash against the cumulative shares. Truthful
+                                  (proportions are exactly the model's), stable (a cell
+                                  keeps its class between years, so the slider shows
+                                  land CONVERTING rather than reshuffling), and it reads
+                                  as a hatch rather than as false precision. Never
+                                  invent a spatial layout the model does not hold
   provinceStory.ts              ← Shared province prose/format helpers (stars, border
                                   kinds, history) — used by BOTH province views
   ImportWorldDialog.tsx         ← Layered world import dialog
@@ -536,7 +592,16 @@ ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, 
   HubPanel.tsx                  ← Settlement detail (Summary/Trade/Estates/People + City finances,
                                   Transit, year-grouped Chronicle). ~2k lines
   CityView.tsx · SettlementScene.tsx ← Isometric city view + scene
-  HousesPanel/DynastiesPanel/GuildsPanel.tsx ← Merchant houses, dynasties, guilds
+  HousesPanel/DynastiesPanel/GuildsPanel.tsx ← Merchant houses, dynasties, guilds.
+                                  HousesPanel has a world ⚔ Feuds tab; its per-house
+                                  detail has ⚖ Standing and ⚔ Feuds subtabs
+  HouseDossier.tsx              ← The House Dossier's two views: `HouseStandingView`
+                                  (five stability gauges — solvency COUNTDOWN, liquidity
+                                  runway, concentration exposure, succession, cohesion —
+                                  plus liabilities) and `FeudsView` (cause · temperature
+                                  · stage · ending, with each feud's episode log).
+                                  Pips + a PHRASE, never a raw 0..1; a healthy gauge
+                                  stays quiet so the warning colour still means something
   BankPanel/MoneyFinancePanel.tsx ← Bank T-accounts, currencies/mints/monetary chronicle
   SpeculationPanel.tsx          ← DLC 3: Speculation why-chain / Poleis (treasury/tariff/mint/coin)
   CoinCreditPanel.tsx           ← Currencies / Banks / Wars / Crashes / Schematics tabs
@@ -1102,7 +1167,15 @@ Three rules:
 16. **CI enforces the gates** (`.github/workflows/ci.yml`). Most commits here are
     agent-authored and go straight to `main`, so gates that run only when someone
     remembers protect nothing.
-17. **A step's gate must match its real data dependency**, not just the previous step.
+17. **A share is not a layout.** Land use and tenure are per-province SHARES with no
+    spatial extent. Render them as a stable dithered mosaic (§7 `ProvinceMiniMap`), never
+    as an invented per-cell register — and keep the dither hash stable per cell, or the
+    year slider shows reshuffling instead of conversion.
+18. **Feud/prestige awards need a ceiling.** `prestige` is unbounded and feeds political
+    power → charters → monopolies → wealth. Any new per-event prestige award must be
+    capped and checked against `simulate_decades_reports_dynamics`' sustained-richest
+    figure; an uncapped one took it from 298k to 1.9M.
+19. **A step's gate must match its real data dependency**, not just the previous step.
     Rivers (5) genuinely needs Köppen (4): channel width comes from mean precipitation
     along the course and ice caps must not drain. A too-loose gate fails SILENTLY —
     the pipeline still runs, it just produces a subtly wrong world.

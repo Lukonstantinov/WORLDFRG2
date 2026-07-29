@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
-import { simGenerateProvinces, campaignProvinceState, campaignProvinceDetail } from "@bridge";
+import { simGenerateProvinces, campaignProvinceState, campaignProvinceDetail, campaignProvinceLandAll } from "@bridge";
 import { GOOD_DEFS } from "@goods";
 import { koppenName } from "@ui/world/climate";
-import { ProvinceMiniMap } from "@ui/world/ProvinceMiniMap";
-import type { Province, ProvinceLive, ProvinceDetail, PSettlement } from "@types";
+import { ProvinceMiniMap, soilWord } from "@ui/world/ProvinceMiniMap";
+import type { Province, ProvinceLive, ProvinceDetail, ProvinceLand, PSettlement } from "@types";
 
 import { ELEV_WORD, goodEmoji, goodLabel, provinceHistory, stars } from "@ui/world/provinceStory";
 
@@ -14,7 +14,8 @@ import { ELEV_WORD, goodEmoji, goodLabel, provinceHistory, stars } from "@ui/wor
 //    stays the BROWSER — sort, filter, compare. Selecting here drives the map
 //    highlight and the inspector, and a map click drives the selection here. ──
 
-type SortKey = "total" | "area" | "rural" | "urban" | "quality" | "fertility";
+type SortKey = "total" | "area" | "rural" | "urban" | "quality" | "fertility"
+  | "soil" | "surplus" | "unrest" | "woodland";
 const SORTS: { key: SortKey; label: string }[] = [
   { key: "total", label: "Total pop" },
   { key: "area", label: "Area" },
@@ -22,6 +23,12 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: "urban", label: "Urban" },
   { key: "quality", label: "Good quality" },
   { key: "fertility", label: "Fertility" },
+  // Live land state (FIX_PLAN B1) — only meaningful once a campaign has run a year,
+  // and the only sort keys here that CHANGE over a campaign.
+  { key: "soil", label: "Soil" },
+  { key: "surplus", label: "Surplus" },
+  { key: "unrest", label: "Unrest" },
+  { key: "woodland", label: "Woodland" },
 ];
 
 export function ProvincePanel() {
@@ -49,6 +56,7 @@ export function ProvincePanel() {
   const [granularity, setGranularity] = useState(0.5);
   const [busy, setBusy] = useState(false);
   const [live, setLive] = useState<Map<number, ProvinceLive> | null>(null);
+  const [lands, setLands] = useState<Map<number, ProvinceLand> | null>(null);
   const [detail, setDetail] = useState<ProvinceDetail | null>(null);
   const provinceRaster = useWorldStore((s) => s.provinceRaster);
 
@@ -62,6 +70,9 @@ export function ProvincePanel() {
         setLive(hasLive ? new Map(rows.map((r) => [r.id, r])) : null);
       })
       .catch(() => setLive(null));
+    campaignProvinceLandAll()
+      .then((rows) => setLands(rows.length > 0 ? new Map(rows.map((r) => [r.id, r])) : null))
+      .catch(() => setLands(null));
   }, [open, provinces]);
 
   // Urban population per province: live campaign hubs when available, else Σ of the
@@ -98,12 +109,16 @@ export function ProvincePanel() {
         case "urban": return urban;
         case "quality": return p.goods[0]?.quality ?? 0;
         case "fertility": return p.mean_fertility;
+        case "soil": return lands?.get(p.id)?.soil ?? -1;
+        case "surplus": return lands?.get(p.id)?.surplus ?? -1;
+        case "unrest": return lands?.get(p.id)?.unrest ?? -1;
+        case "woodland": return lands?.get(p.id)?.forest ?? -1;
         default: return p.rural_pop + urban;
       }
     };
     list.sort((a, b) => (desc ? val(b) - val(a) : val(a) - val(b)));
     return list;
-  }, [provinces, cultureFilter, cityFilter, goodFilter, sort, desc, urbanOf, live]);
+  }, [provinces, cultureFilter, cityFilter, goodFilter, sort, desc, urbanOf, live, lands]);
 
   const selected = useMemo(
     () => provinces.find((p) => p.id === selId) ?? rows[0] ?? null,
@@ -267,12 +282,32 @@ export function ProvincePanel() {
                     <Row k="Total" v={fmt(totalPop(selected))} />
                     <Row k="Fertility" v={selected.mean_fertility.toFixed(2)} />
 
+                    {/* Live land state (B1). Only present once a campaign has run a
+                        year — before then the browser shows the frozen geography only. */}
+                    {(() => {
+                      const L = lands?.get(selected.id);
+                      if (!L) return null;
+                      return (
+                        <>
+                          <Row k="Soil" v={`${soilWord(L.soil)} (${L.soil.toFixed(2)})`} />
+                          <Row k="Woodland" v={`${Math.round(L.forest * 100)}%`} />
+                          <Row k="Arable" v={`${Math.round(L.arable * 100)}%`} />
+                          <Row k="Surplus" v={`${Math.round(L.surplus).toLocaleString()} /yr`} />
+                          {L.unrest > 0.1 && (
+                            <Row k="Rural unrest" v={`${Math.round(L.unrest * 100)}%`} />
+                          )}
+                        </>
+                      );
+                    })()}
+
                     <div style={{ marginTop: 10, marginBottom: 4, opacity: 0.8, fontWeight: 600 }}>Holdings</div>
                     <ProvinceMiniMap
                       province={selected}
                       raster={provinceRaster}
                       settlements={miniSettlements}
                       buildings={detail && detail.id === selected.id ? detail.buildings : []}
+                      land={lands?.get(selected.id) ?? null}
+                      riverCells={selected.river_cells}
                     />
 
                     <div style={{ marginTop: 10, marginBottom: 4, opacity: 0.8, fontWeight: 600 }}>Goods (quality)</div>

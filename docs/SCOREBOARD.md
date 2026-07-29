@@ -22,10 +22,13 @@ scoreboard whose history is rewritten cannot show a regression.
 | Economy: grain price CV across cities | 2.10 | `ECON_SPATIAL_CV_FLOOR` = 0.01 | ⚠️ far above band (0.20–0.40) |
 | Economy: rank-size (Zipf) slope | −0.41 | band [−3.0, −0.15] | ⚠️ flatter than −0.8…−1.2 |
 | Economy: urban share drift (60 yr) | 0.100 → **0.997** | — | ❌ countryside empties completely |
-| Economy: house wealth Gini | 0.771 | `ECON_GINI_FLOOR` = 0.15 | ✅ in historical band |
-| Economy: house dissolutions / century | 277 | — | ⚠️ needs a denominator to interpret |
+| Economy: house wealth Gini | 0.828 | `ECON_GINI_FLOOR` = 0.15 | ✅ in historical band (0.60–0.85) |
+| Economy: house dissolutions / century | 312 | — | ⚠️ needs a denominator to interpret |
+| Dynamics: sustained richest house | 154 045 | `late_max < 1e6` | ✅ was 297 748 before the feud rework |
+| Dynamics: peak house wealth | 370 527 | finite + bounded | ⚠️ still an order above the "no 100k" ideal |
+| **Province land layer** | **unmeasured by either oracle** | own tests only | ⚠️ see below |
 | **Economy: tick determinism** | **FAILS** | `econ_scorecard_is_deterministic` | ❌ **open defect — see below** |
-| **Rust tests** | **159 pass, 0 fail** (8 ignored) | CI | ✅ |
+| **Rust tests** | **165 pass, 0 fail** (8 ignored) | CI | ✅ |
 | **Frontend tests** | **0** | *none* | ❌ 33k lines uncovered |
 | `cargo check` | clean | CI | ✅ |
 | `npx tsc --noEmit` | clean | CI | ✅ |
@@ -113,6 +116,28 @@ the `#[ignore]` from `econ_scorecard_is_deterministic`.
 
 ---
 
+## The province land layer is unmeasured by both oracles
+
+`province_land_pass` (FIX_PLAN B1) closes the world↔campaign feedback edge — a
+province's surplus reaches its seat city's granary and its dues reach that city's
+treasury. Neither fidelity oracle sees it:
+
+- **`simulate_decades_reports_dynamics` seeds no provinces**, by design. That is what
+  makes the land layer provably free of side effects on the base economy
+  (`province_land_pass_is_a_noop_without_provinces` asserts it), but it also means the
+  standing dynamics run says nothing about whether the land behaves.
+- **`economy_validation.rs` seeds no provinces either**, so urbanisation, grain prices
+  and real wages are all still measured on a world whose countryside is only a
+  population reservoir.
+
+What covers it today is four of its own tests (feedback edge + bounds, the no-op gate,
+works cost money and take years, unfunded work stalls). What would actually measure it
+is a province-seeded variant of the economy harness — the urban-share drift row above
+(0.100 → 0.997, the countryside emptying completely) is precisely the metric a working
+supply shed should move, and it is the obvious next thing to ask of this layer.
+
+---
+
 ## What is still unmeasured
 
 Being explicit about this matters as much as the table above — an unmeasured
@@ -138,4 +163,5 @@ subsystem is one you cannot have an opinion about.
 |---|---|---|---|---|---|---|
 | 2026-07-29 | `936a8a3`+ | 66.3% | 29.1% | 159 | 0 | Economy oracle added; CI added; scoreboard created |
 | 2026-07-29 | *this* | 66.3% | 29.1% | 159 | 0 | Harness calibrated to real campaign start; LOD sampler fixed; tick determinism defect found |
+| 2026-07-29 | *this* | 66.3% | 29.1% | 165 | 0 | Feuds elaborated (cause/stage/ending); province LAND state + B1 feedback edge; sustained richest 297 748 → 154 045; Gini 0.771 → 0.828 |
 | — | `d53fdc9` | 66.2% | 29.0% | — | 0 | FIX_PLAN baseline |

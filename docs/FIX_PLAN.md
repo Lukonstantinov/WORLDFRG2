@@ -344,6 +344,34 @@ considerably cheaper than its position in this plan suggests.
 provinces, so it must be bit-identical); `province_demography_feeds_cities_and_stays_bounded`
 still passes; per-tick cost unchanged within noise (`bench_campaign_tick`).
 
+**Status: land state + the feedback edge LANDED.** `province_land_pass(yr)` runs yearly
+right after `province_demography_pass` and carries `prov_forest` / `prov_arable` /
+`prov_pasture` / `prov_irrigated` / `prov_soil` / `prov_tenure` / `prov_tax` /
+`prov_arrears` / `prov_unrest` / `prov_surplus` / `prov_revenue` / `prov_holder` /
+`prov_works` / `prov_history` / `prov_events`, all serde-defaulted, all early-returning
+on an empty layer. The **feedback edge is closed**: `prov_surplus` is added to the seat
+city's food stock and `prov_revenue` to its treasury each year. Rural fiscality, rural
+unrest and rural revolt are new — all three were absent, and unrest in particular was a
+city-only property while every major pre-modern revolt was rural. Multi-year works
+(clearance / drainage / irrigation / road) reuse the satellite-construction funded-progress
+shape; unpaid work stalls rather than failing.
+
+Two calibration findings worth keeping:
+- **The land multiplier must be centred on 1.0** for ordinary land. The first cut
+  averaged ~0.7, which put gross output below rural subsistence on decent land — so no
+  province ever had a surplus and the feedback edge silently delivered nothing. A silent
+  zero is the failure mode to watch for in this whole item.
+- **Land use is a partition.** The fallback seeder could hand out forest 0.75 + arable
+  0.38 = 1.13 of one province.
+
+**Still open on B1:** (a) the climate-anomaly slot for A5 is NOT added; (b) land state is
+never persisted back to tiles, so the map itself still does not visibly change over
+centuries — the panel's year slider is the only place the change is legible;
+(c) **neither fidelity oracle seeds provinces**, so the whole layer is measured only by
+its own four tests. A province-seeded variant of `economy_validation.rs` is the obvious
+next step — the urban-share drift row (0.100 → 0.997) is exactly what a working supply
+shed should move.
+
 ---
 
 ### B2. Player agency — the decide/apply split ⭐ cheapest big win
@@ -382,6 +410,16 @@ Three tiers — **recommend tier 2**:
 
 **Gate:** with the AI supplying every choice, `simulate_decades_reports_dynamics` must
 produce bit-identical output to today. That is what proves the refactor was pure.
+
+**Status update — tier 1 has its first real verbs.** The campaign is no longer
+one-mutating-verb: `campaign_set_province_tax`, `campaign_start_province_work` and
+`campaign_cancel_province_work` mutate a running sim, wired to the Province Inspector's
+Holdings tab. They are deliberately the *observer+* tier, and they establish the shape
+for the rest: validate → call the same routine the AI would → `set_sim` + persist. Note
+these verbs act on a province rather than through a `decide_X`/`apply_X` pair, because
+the land pass had no AI decision to split — the tax rate and the works had no AI author
+to displace. The `decide_X`/`apply_X` split is still the pattern for anything that DOES
+have one.
 
 **Status: started — `decide_polis_policy` split, pattern established.**
 `polis.rs::decide_polis_policy` (council seating, tariff stance, mint-fineness

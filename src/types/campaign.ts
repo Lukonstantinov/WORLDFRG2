@@ -1896,3 +1896,154 @@ export interface SimProvincesResult {
   /** Full-resolution province-id map, run-length encoded as [val, count, …]. */
   raster_rle: number[];
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  House Dossier — stability gauges + the feud board
+//  (mirrors commands/campaign_commands/read_houses.rs)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One stability gauge. `phrase` is the product — a raw 0..1 tells a player nothing. */
+export interface Gauge {
+  /** "solvency" | "liquidity" | "exposure" | "succession" | "cohesion" */
+  key: string;
+  label: string;
+  /** 0..1, higher is healthier. */
+  score: number;
+  /** 1..5 pips, for comparing houses at a glance. */
+  pips: number;
+  phrase: string;
+  /** True when this is the gauge to worry about. */
+  warn: boolean;
+}
+
+/** One liability line behind the Solvency gauge. */
+export interface Liability { label: string; amount: number; note: string }
+
+/** The House Dossier header: five gauges plus the liabilities behind them. */
+export interface HouseStability {
+  idx: number;
+  name: string;
+  gauges: Gauge[];
+  monthly_burn: number;
+  liquid: number;
+  liabilities: Liability[];
+  liabilities_total: number;
+  /** Months already in the red (0 = solvent) and the limit before bankruptcy. */
+  debt_months: number;
+  debt_limit: number;
+  top_good_share: number;
+  top_good: string;
+  top_city_share: number;
+  top_city: string;
+  head_years: number;
+  head_span_years: number;
+  feuds_live: number;
+  feuds_hot: number;
+}
+
+/** One flare in a feud's history. */
+export interface FeudFlareRow {
+  year: number;
+  stage: string;
+  loser: string;
+  cost: number;
+  text: string;
+}
+
+/** A feud: who, why, how hot, and how it ended. */
+export interface FeudRow {
+  a: number;
+  b: number;
+  a_name: string;
+  b_name: string;
+  a_color: string;
+  b_color: string;
+  /** Already in prose — "the same trade", "a contested council". */
+  cause: string;
+  /** "cold rivalry" | "open feud" | "trade war" | "vendetta" */
+  stage: string;
+  stage_idx: number;
+  intensity: number;
+  good: string;
+  city: string;
+  started_year: number;
+  years: number;
+  flares: number;
+  damage_a: number;
+  damage_b: number;
+  /** "running" | "arbitrated" | "sealed by marriage" | "ended in ruin" | "cooled" */
+  outcome: string;
+  running: boolean;
+  ended_year: number;
+  log: FeudFlareRow[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Province LAND state (FIX_PLAN B1)
+//  (mirrors commands/campaign_commands/province.rs)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A house holding estates in a province — drives the tenure plate's colour blocks. */
+export interface ProvinceHolder {
+  house: number;
+  name: string;
+  color: string;
+  estates: number;
+}
+
+/** A land improvement under way. */
+export interface ProvinceWorkRow {
+  /** 0 clearance · 1 drainage · 2 irrigation · 3 road */
+  kind: number;
+  label: string;
+  progress: number;
+  years_left: number;
+  yearly_cost: number;
+  funder: string;
+  stalled: boolean;
+}
+
+/** One yearly sample — the series the province plate's time slider scrubs. */
+export interface ProvinceLandSample {
+  year: number;
+  rural: number;
+  urban: number;
+  forest: number;
+  arable: number;
+  pasture: number;
+  irrigated: number;
+  soil: number;
+  unrest: number;
+  surplus: number;
+}
+
+export interface ProvinceEventRow { year: number; kind: string; text: string }
+
+/** A province's mutable land state — everything that CHANGES over a campaign. */
+export interface ProvinceLand {
+  id: number;
+  forest: number;
+  arable: number;
+  pasture: number;
+  irrigated: number;
+  waste: number;
+  soil: number;
+  unrest: number;
+  rural: number;
+  rural_cap: number;
+  urban: number;
+  saturation: number;
+  surplus: number;
+  revenue: number;
+  arrears: number;
+  tax_rate: number;
+  tax_max: number;
+  /** [civic/crown, house/noble, temple, common] */
+  tenure: [number, number, number, number];
+  holders: ProvinceHolder[];
+  holder_hub: number;
+  holder_name: string;
+  works: ProvinceWorkRow[];
+  history: ProvinceLandSample[];
+  events: ProvinceEventRow[];
+}

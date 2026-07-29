@@ -1,6 +1,6 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
 import { invoke } from "@tauri-apps/api/core";
-import type { BankBrief, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FigureBrief, FuturesLane, GoodMarketRow, GuildBrief, HouseBrief, HouseHistory, HouseLedger, HubDetail, InequalitySnapshot, JournalEntry, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorldEconomy } from "@types";
+import type { BankBrief, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoodMarketRow, GuildBrief, HouseBrief, HouseHistory, HouseLedger, HouseStability, HubDetail, InequalitySnapshot, JournalEntry, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorldEconomy } from "@types";
 
 /** DLC 3.5 · the live campaign's dynamic trade-flow trunks (last year's actual
  *  shipped volume, routed over the cost grid + bundled; width ∝ volume). */
@@ -308,4 +308,46 @@ export async function campaignGetHouseHistory(name: string): Promise<HouseHistor
 /** "Is trade actually moving?" snapshot — null when no sim is running. */
 export async function campaignDiagnostics(): Promise<CampaignDiagnostics | null> {
   return invoke("campaign_diagnostics");
+}
+
+// ── House Dossier: stability gauges + the feud board ────────────────────────
+
+/** The five stability gauges + liability breakdown for one house. */
+export async function campaignHouseStability(idx: number): Promise<HouseStability | null> {
+  return invoke("campaign_house_stability", { idx });
+}
+
+/** Feuds, live first then settled. `house` < 0 = every feud in the world. */
+export async function campaignGetFeuds(house = -1): Promise<FeudRow[]> {
+  return invoke("campaign_get_feuds", { house });
+}
+
+// ── Province land state (FIX_PLAN B1) + the holder's control verbs ──────────
+
+/** One province's live land state, or null with no campaign / no province layer. */
+export async function campaignProvinceLand(id: number): Promise<ProvinceLand | null> {
+  return invoke("campaign_province_land", { id });
+}
+
+/** Every province's land state — what the browser sorts and filters on. */
+export async function campaignProvinceLandAll(): Promise<ProvinceLand[]> {
+  return invoke("campaign_province_land_all");
+}
+
+/** Set a province's rural tax rate. Rejects a province nobody administers. */
+export async function campaignSetProvinceTax(id: number, rate: number): Promise<number> {
+  return invoke("campaign_set_province_tax", { id, rate });
+}
+
+/** Begin a multi-year land improvement, funded by a city treasury or a house. */
+export async function campaignStartProvinceWork(
+  id: number, kind: number, funderHub = -1, funderHouse = -1,
+): Promise<string> {
+  return invoke("campaign_start_province_work",
+    { id, kind, funderHub, funderHouse });
+}
+
+/** Abandon a work in progress. What has been paid is sunk. */
+export async function campaignCancelProvinceWork(id: number, kind: number): Promise<void> {
+  return invoke("campaign_cancel_province_work", { id, kind });
 }

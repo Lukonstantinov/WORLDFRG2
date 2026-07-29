@@ -4,6 +4,7 @@ import { useUIStore } from "@state/uiStore";
 import { CoatOfArms } from "@ui/heraldry/CoatOfArms";
 import { CoinIcon } from "@ui/heraldry/CoinIcon";
 import { YearChronicle } from "@ui/campaign/YearChronicle";
+import { FeudsView, HouseStandingView } from "@ui/campaign/HouseDossier";
 import { GOOD_DEFS } from "@goods";
 import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks } from "@bridge";
 import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief } from "@types";
@@ -72,8 +73,9 @@ export function HousesPanel() {
   const houses = useCampaignStore((s) => s.houses);
   const diag = useCampaignStore((s) => s.diagnostics);
   const [history, setHistory] = useState<HouseHistory | null>(null);
-  const [tab, setTab] = useState<"houses" | "guilds">("houses");
+  const [tab, setTab] = useState<"houses" | "guilds" | "feuds">("houses");
   const [selected, setSelected] = useState<HouseBrief | null>(null);
+  const clockTick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
   const setSelectedHouse = useCampaignStore((s) => s.setSelectedHouse);
   // Focus a house: open its detail AND tell the map to highlight only it.
   const selectHouse = (h: HouseBrief | null) => {
@@ -106,7 +108,8 @@ export function HousesPanel() {
       </div>
       {/* Houses vs Guilds tabs */}
       <div style={{ display: "flex", gap: 2, padding: "0 8px", borderBottom: "1px solid #1e2e42" }}>
-        {([["houses", `👑 Houses (${nHouses})`], ["guilds", `🏛 Guilds (${nGuilds})`]] as const).map(([id, lbl]) => (
+        {([["houses", `👑 Houses (${nHouses})`], ["guilds", `🏛 Guilds (${nGuilds})`],
+           ["feuds", "⚔ Feuds"]] as const).map(([id, lbl]) => (
           <div key={id} onClick={() => setTab(id)}
             style={{ padding: "4px 9px", cursor: "pointer", fontSize: 11, fontWeight: tab === id ? 700 : 400,
               color: tab === id ? "#cfe2f6" : "#6a86a6",
@@ -115,7 +118,16 @@ export function HousesPanel() {
           </div>
         ))}
       </div>
-      {diag && <TradeDiagnostics diag={diag} />}
+      {diag && tab !== "feuds" && <TradeDiagnostics diag={diag} />}
+      {tab === "feuds" ? (
+        // The world's quarrels. A feud is no longer a name in a rival list: it has a
+        // cause, a temperature, a stage that decides which weapon comes out, and an
+        // ending — arbitrated by a council, sealed by a marriage, ended in ruin, or
+        // simply forgotten once the two families stopped getting in each other's way.
+        <div style={{ overflowY: "auto", padding: "6px 8px 10px" }}>
+          <FeudsView refreshKey={clockTick} />
+        </div>
+      ) : (
       <div style={{ overflowY: "auto", padding: "4px 8px 10px" }}>
         {houses.length === 0 && (
           <div style={empty}>Begin the campaign (Step 11) — trading families rise as goods start to move.</div>
@@ -224,6 +236,7 @@ export function HousesPanel() {
           </>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -236,7 +249,7 @@ function HouseDetail({ h, onClose, onChronicle }:
   const [routes, setRoutes] = useState<MerchantRoute[]>([]);
   const [ledger, setLedger] = useState<HouseLedger | null>(null);
   const [bank, setBank] = useState<BankBrief | null>(null);
-  const [view, setView] = useState<"summary" | "bank" | "ledger">("summary");
+  const [view, setView] = useState<"summary" | "standing" | "feuds" | "bank" | "ledger">("summary");
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.house);
   const tick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
   useEffect(() => {
@@ -292,16 +305,27 @@ function HouseDetail({ h, onClose, onChronicle }:
 
       {/* Subtabs — Accountant gets its own roomy view so expenses aren't clipped. */}
       <div style={{ display: "flex", gap: 4, margin: "7px 0 5px", borderBottom: "1px solid #1a2a3e" }}>
-        {(["summary", ...(bank ? ["bank" as const] : []), "ledger"] as const).map((t) => (
+        {(["summary", "standing", "feuds", ...(bank ? ["bank" as const] : []), "ledger"] as const).map((t) => (
           <div key={t} onClick={() => setView(t)} style={{
             fontSize: 10, padding: "3px 9px", cursor: "pointer",
             color: view === t ? "#e8dcc0" : "#7090b0", fontWeight: view === t ? 700 : 400,
             borderBottom: view === t ? "2px solid #c9a227" : "2px solid transparent",
-          }}>{t === "summary" ? "Summary" : t === "bank" ? "🏦 Bank" : `📒 Accountant${ledger && ledger.year > 0 ? ` · yr ${ledger.year}` : ""}`}</div>
+          }}>{t === "summary" ? "Summary"
+            : t === "standing" ? "⚖ Standing"
+            : t === "feuds" ? `⚔ Feuds${h.rivals.length > 0 ? ` (${h.rivals.length})` : ""}`
+            : t === "bank" ? "🏦 Bank"
+            : `📒 Accountant${ledger && ledger.year > 0 ? ` · yr ${ledger.year}` : ""}`}</div>
         ))}
       </div>
 
-      {view === "bank" && bank ? (
+      {view === "standing" ? (
+        // The five stability gauges. Everything here was already in the sim — the
+        // solvency countdown in particular has always decided whether this family
+        // lives, and was the one number the UI never showed.
+        <HouseStandingView idx={h.idx ?? 0} refreshKey={tick} />
+      ) : view === "feuds" ? (
+        <FeudsView house={h.idx ?? 0} refreshKey={tick} />
+      ) : view === "bank" && bank ? (
         <BankSheet b={bank} fmt={fmt} />
       ) : view === "summary" ? (
         <>
