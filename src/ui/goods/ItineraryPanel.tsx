@@ -40,7 +40,7 @@ export function ItineraryPanel() {
     if (!open) { setTravelRoute(null); }
   }, [open, setTravelRoute]);
 
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.route);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.route);
   if (!open) return null;
   const close = () => { setTravelRoute(null); useUIStore.getState().setShowItinerary(false); };
 
@@ -79,7 +79,7 @@ export function ItineraryPanel() {
   );
 
   return (
-    <Panel width={318} style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
+    <Panel {...dragRoot} width={318} style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
       <PanelHeader icon="🧭" title="Itinerary · travel time" onDragStart={onPointerDown} onClose={close} />
 
       <div style={{ padding: "10px 12px", overflowY: "auto" }}>

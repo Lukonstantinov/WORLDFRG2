@@ -31,7 +31,7 @@ export function BankPanel() {
     campaignGetBanks().then(setBanks).catch(() => setBanks([]));
   }, [open, active, tick]);
 
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.bank);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.bank);
   if (!open) return null;
   const close = () => useUIStore.getState().setShowBank(false);
   const pick = (i: number) => useUIStore.getState().setSelectedBankIdx(i);
@@ -41,7 +41,7 @@ export function BankPanel() {
   const bank = banks[idx];
 
   return (
-    <Panel width={430} maxHeight="82vh" style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
+    <Panel {...dragRoot} width={430} maxHeight="82vh" style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
       <PanelHeader icon="🏦" title="Banks" onDragStart={onPointerDown} onClose={close} />
 
       {!active && <EmptyNote>Banks appear once a campaign is running.</EmptyNote>}

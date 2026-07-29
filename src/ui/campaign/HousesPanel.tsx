@@ -86,7 +86,7 @@ export function HousesPanel() {
   const openTimeline = (name: string) => {
     campaignGetHouseHistory(name).then((h) => setHistory(h)).catch(() => setHistory(null));
   };
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.houses);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.houses);
   if (!open) return null;
 
   const active = houses.filter((h) => !h.defunct);
@@ -97,7 +97,7 @@ export function HousesPanel() {
   const nGuilds = active.filter((h) => h.is_guild).length;
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
+    <div data-draggable {...dragRoot} style={{ ...panel, ...rootStyle }}>
       {history && <HouseTimeline history={history} onClose={() => setHistory(null)} />}
       {selected && <HouseDetail h={selected} onClose={() => selectHouse(null)} onChronicle={openTimeline} />}
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
@@ -237,7 +237,7 @@ function HouseDetail({ h, onClose, onChronicle }:
   const [ledger, setLedger] = useState<HouseLedger | null>(null);
   const [bank, setBank] = useState<BankBrief | null>(null);
   const [view, setView] = useState<"summary" | "bank" | "ledger">("summary");
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.house);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.house);
   const tick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
   useEffect(() => {
     let alive = true;
@@ -264,7 +264,7 @@ function HouseDetail({ h, onClose, onChronicle }:
     </div>
   );
   return (
-    <div data-draggable style={{ ...detailPanel, ...rootStyle }}>
+    <div data-draggable {...dragRoot} style={{ ...detailPanel, ...rootStyle }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 3, cursor: "move" }} onPointerDown={onPointerDown}>
         <span style={{ width: 10, height: 10, borderRadius: 2, background: h.is_guild ? dull(h.color ?? "") : (h.color ?? "#888"), alignSelf: "center" }} />
         {h.owns_bank && <span title="This family owns a chartered bank" style={{ fontSize: 11 }}>🏦</span>}

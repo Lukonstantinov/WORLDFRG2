@@ -31,30 +31,62 @@ export const PANEL_TINTS = {
   province: "rgba(16,22,18,0.97)",  // 🏞 Province Inspector — moss-slate
 } as const;
 
-/** Make a floating panel DRAGGABLE by its header and TINTED so it's distinct.
+/** Anything that must keep its own pointer behaviour — a drag started on one of these
+ *  is a CLICK on the control, never a window move. Sliders/scrollers matter most: a
+ *  range input is dragged horizontally, which is exactly the gesture that would
+ *  otherwise carry the whole window off. `[data-no-drag]` stays the manual escape
+ *  hatch for anything else (a custom chart the panel wants to keep interactive). */
+const INTERACTIVE =
+  "button,a,input,textarea,select,option,label,summary," +
+  "[data-no-drag],[contenteditable=''],[contenteditable='true'],[role='button'],[role='tab'],[role='slider']";
+
+/** Pixels the pointer must travel before a press turns into a window drag. Below it
+ *  the gesture is still a plain click, so drag-anywhere never eats a button press on
+ *  a row, tab or list item that isn't one of the `INTERACTIVE` tags. */
+const DRAG_THRESHOLD = 4;
+
+/** Make a floating panel DRAGGABLE FROM ANYWHERE and TINTED so it's distinct.
  *
  *  Usage:
- *    const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.coin);
- *    <div data-draggable style={{ ...panel, ...rootStyle }}>
+ *    const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.coin);
+ *    <div data-draggable {...dragRoot} style={{ ...panel, ...rootStyle }}>
  *      <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>…
  *        <span data-no-drag onClick={close}>✕</span>
  *
- *  Until the first drag the panel keeps its CSS position; the first drag seeds from
- *  the live bounding box so it doesn't jump. Children marked `data-no-drag`
- *  (close buttons, tabs) don't start a drag. */
+ *  `dragRoot` goes on the window ROOT: pressing anywhere in the window body starts a
+ *  drag once the pointer has moved `DRAG_THRESHOLD` px, so a press that doesn't move
+ *  is still an ordinary click. Controls matching `INTERACTIVE` (and anything marked
+ *  `data-no-drag`) are excluded, and text selection inside the panel is off — that is
+ *  the trade made for being able to grab a window by any part of it.
+ *
+ *  `onPointerDown` is the HEADER handler and is unchanged: the title bar drags
+ *  immediately, with no threshold. Until the first drag the panel keeps its CSS
+ *  position; the first drag seeds from the live bounding box so it doesn't jump. */
 export function useFloatingWindow(tint: string) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const drag = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
 
-  const onPointerDown = useCallback((e: React.PointerEvent<HTMLElement>) => {
-    if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
+  /** Shared drag start. `threshold` px of travel are required before the window
+   *  actually moves (0 for the header, which drags on contact). */
+  const begin = useCallback((e: React.PointerEvent<HTMLElement>, threshold: number) => {
+    const target = e.target as HTMLElement;
+    if (target.closest(INTERACTIVE)) return;
     const root = (e.currentTarget as HTMLElement).closest("[data-draggable]") as HTMLElement | null;
     const r = root?.getBoundingClientRect();
-    drag.current = {
+    const start = {
       sx: e.clientX, sy: e.clientY,
       ox: pos?.x ?? r?.left ?? 0, oy: pos?.y ?? r?.top ?? 0,
     };
+    let armed = threshold <= 0;
+    if (armed) drag.current = start;
     const move = (ev: PointerEvent) => {
+      if (!armed) {
+        const dx = ev.clientX - start.sx;
+        const dy = ev.clientY - start.sy;
+        if (dx * dx + dy * dy < threshold * threshold) return;
+        armed = true;
+        drag.current = start;
+      }
       if (!drag.current) return;
       setPos({
         x: Math.max(0, drag.current.ox + ev.clientX - drag.current.sx),
@@ -68,12 +100,25 @@ export function useFloatingWindow(tint: string) {
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
-    e.preventDefault();
+    // Only the header suppresses the default immediately; the body must not, or the
+    // press would never reach the row/tab the user was actually clicking.
+    if (threshold <= 0) e.preventDefault();
   }, [pos]);
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLElement>) => begin(e, 0), [begin]);
+  const onRootPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLElement>) => begin(e, DRAG_THRESHOLD), [begin]);
 
   const rootStyle: React.CSSProperties = {
     background: tint,
+    // Drag-anywhere and text selection are mutually exclusive: a selection drag would
+    // otherwise paint a highlight under the moving window.
+    userSelect: "none",
+    WebkitUserSelect: "none",
     ...(pos ? { left: pos.x, top: pos.y, right: "auto", bottom: "auto" } : {}),
   };
-  return { rootStyle, onPointerDown };
+  /** Spread onto the window root to make the whole surface a drag handle. */
+  const dragRoot = { onPointerDown: onRootPointerDown };
+  return { rootStyle, onPointerDown, onRootPointerDown, dragRoot };
 }

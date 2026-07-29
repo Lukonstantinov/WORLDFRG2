@@ -35,7 +35,7 @@ export function LandmarksPanel() {
 
   const shown = useMemo(() => (kind === "All" ? rows : rows.filter((l) => l.kind === kind)), [rows, kind]);
 
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.landmarks);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.landmarks);
   if (!open) return null;
 
   const focus = (hubIdx: number) => {
@@ -44,7 +44,7 @@ export function LandmarksPanel() {
   };
 
   return (
-    <Panel width={320} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
+    <Panel {...dragRoot} width={320} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
       <PanelHeader
         icon="🗿"
         title="Landmarks & Sacred Sites"

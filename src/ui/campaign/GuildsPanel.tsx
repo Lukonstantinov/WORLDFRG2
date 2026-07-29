@@ -53,7 +53,7 @@ export function GuildsPanel() {
     return r;
   }, [rows, sort, luxuryOnly]);
 
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.guild);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.guild);
   if (!open) return null;
 
   const halls = rows.filter((g) => g.hall).length;
@@ -63,7 +63,7 @@ export function GuildsPanel() {
   };
 
   return (
-    <Panel width={320} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
+    <Panel {...dragRoot} width={320} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
       <PanelHeader icon="🏛" title="Guilds & Crafts" onDragStart={onPointerDown} onClose={close} />
       <PanelBody style={{ display: "flex", flexDirection: "column", flex: 1, padding: `${SPACE.md}px ${SPACE.lg}px ${SPACE.lg}px` }}>
         <div style={{ display: "flex", gap: SPACE.md, marginBottom: SPACE.md, fontSize: FZ.small, color: T.inkMid, alignItems: "center" }}>

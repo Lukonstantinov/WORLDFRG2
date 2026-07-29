@@ -60,13 +60,13 @@ export function ImmigrationPanel() {
   }, [routes, simIdx, snapshot]);
 
   const net = arrivalsTotal - departuresTotal;
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.immigration);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.immigration);
   if (!open) return null;
 
   const jump = (i: number) => { const id = snapshot?.hubs?.[i]?.id; if (id != null) setSelectedHub(id); };
 
   return (
-    <Panel width={320} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
+    <Panel {...dragRoot} width={320} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
       <PanelHeader icon="🧭" title="Migration & Immigration" onDragStart={onPointerDown} onClose={close} />
       <PanelBody style={{ display: "flex", flexDirection: "column", flex: 1, padding: `${SPACE.md}px ${SPACE.lg}px ${SPACE.lg}px` }}>
         {!active && <EmptyNote>Start the campaign to track migration.</EmptyNote>}

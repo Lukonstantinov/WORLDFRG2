@@ -32,7 +32,7 @@ export function PeoplesPanel() {
   const snapshot = useCampaignStore((s) => s.snapshot);
   const setSearchPin = useViewportStore((s) => s.setSearchPin);
   const [cultures, setCultures] = useState<CultureBrief[]>([]);
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.figures);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.figures);
 
   const active = snapshot?.active === true;
   const year = snapshot ? Math.floor(snapshot.clock.tick / 365) : 0;
@@ -61,7 +61,7 @@ export function PeoplesPanel() {
   if (!open) return null;
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
+    <div data-draggable {...dragRoot} style={{ ...panel, ...rootStyle }}>
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span style={{ fontFamily: SERIF, color: T.gold, fontWeight: 700, fontSize: 14, letterSpacing: 0.4 }}>
           👥 Peoples

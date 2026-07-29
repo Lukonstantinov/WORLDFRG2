@@ -43,7 +43,7 @@ export function FiguresPanel() {
     return r.slice(0, 200);
   }, [rows, role, livingOnly]);
 
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.figures);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.figures);
   if (!open) return null;
 
   const living = rows.filter((f) => f.alive).length;
@@ -53,7 +53,7 @@ export function FiguresPanel() {
   };
 
   return (
-    <Panel width={320} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
+    <Panel {...dragRoot} width={320} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
       <PanelHeader icon="⚜️" title="Notable Figures" onDragStart={onPointerDown} onClose={close} />
       <PanelBody style={{ display: "flex", flexDirection: "column", flex: 1, padding: `${SPACE.md}px ${SPACE.lg}px ${SPACE.lg}px` }}>
         <div style={{ display: "flex", gap: SPACE.md, marginBottom: SPACE.md, fontSize: FZ.small, color: T.inkMid, alignItems: "center" }}>

@@ -80,12 +80,12 @@ export function EconomyDashboardPanel() {
   const idxHi = cities.length ? cities[cities.length - 1].index : 100;
   const span = Math.max(1, idxHi - idxLo);
 
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.ranking);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.ranking);
   if (!open) return null;
   const close = () => useUIStore.getState().setShowEconomyDashboard(false);
 
   return (
-    <Panel width={332} maxHeight="82vh" style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
+    <Panel {...dragRoot} width={332} maxHeight="82vh" style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
       <PanelHeader icon="📊" title="Economy Dashboard" onDragStart={onPointerDown} onClose={close} />
       <Tabs<"prices" | "ineq">
         tabs={[["prices", "💰 Price Index"], ["ineq", "📊 Inequality"]]}

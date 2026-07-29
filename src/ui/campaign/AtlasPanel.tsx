@@ -66,7 +66,7 @@ export function AtlasPanel() {
     campaignGetEraFrame(y).then((f) => setEraFrame(f)).catch(() => {});
   };
 
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.atlas);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.atlas);
 
   const hubs = useMemo(() => (snapshot?.hubs ?? []).filter((h) => !h.is_estate), [snapshot]);
   const series = worldEconomy?.world_series ?? [];
@@ -138,7 +138,7 @@ export function AtlasPanel() {
   );
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
+    <div data-draggable {...dragRoot} style={{ ...panel, ...rootStyle }}>
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span style={{ fontFamily: SERIF, color: T.gold, fontWeight: 700, fontSize: 14, letterSpacing: 0.4 }}>
           🗺 World Atlas

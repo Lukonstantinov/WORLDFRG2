@@ -191,26 +191,60 @@ const RIDGE_MIN_BORDER: f32 = 0.010;
 /// Belt-value histogram resolution for the robust good-quality statistic.
 const GOOD_BINS: usize = 16;
 
-/// Köppen-keyed province-size multiplier on the seed separation. The truly hostile
-/// biomes hold VAST, thinly-administered provinces on Earth — a single Nunavut,
-/// Siberian, Saharan or Antarctic district dwarfs a European county — so their
-/// separation is stretched far beyond what the habitability ramp alone gives.
-/// Combined with the (1 + 3·hostile) habitability ramp this reaches ≈10× the seed
-/// spacing (≈100× the AREA) of a fertile-lowland province, so an ice cap or great
-/// desert reads as a few huge blocks instead of a speckle of tiny cells.
-fn koppen_spacing_mult(koppen: u8) -> f32 {
+/// Köppen-keyed province-size multiplier on the target AREA (not on the separation —
+/// see `target_area_km2`). The truly hostile biomes hold VAST, thinly-administered
+/// provinces on Earth — a single Nunavut, Siberian or Saharan district dwarfs a
+/// European county — so their area budget is a multiple of a temperate one. Compounded
+/// with the habitability ramp this reaches ≈15× the area of a fertile-lowland province.
+fn koppen_area_mult(koppen: u8) -> f64 {
     use crate::sim::koppen as kp;
     match koppen {
-        kp::EF => 3.4,                       // ice cap — Antarctic / Greenland interior
-        kp::ET => 2.6,                       // tundra
-        kp::DFD | kp::DWD => 2.4,            // extreme subarctic
-        kp::DFC | kp::DWC | kp::DSD => 2.0,  // subarctic taiga
-        kp::BWH | kp::BWK => 2.3,           // hot / cold desert
-        kp::BSH | kp::BSK => 1.5,           // semi-arid steppe
-        kp::H => 1.6,                        // high alpine
+        kp::EF => 6.0,                       // ice cap — Antarctic / Greenland interior
+        kp::ET => 5.0,                       // tundra
+        kp::DFD | kp::DWD => 4.0,            // extreme subarctic
+        kp::DFC | kp::DWC | kp::DSD => 3.2,  // subarctic taiga
+        kp::BWH | kp::BWK => 4.0,            // hot / cold desert
+        kp::BSH | kp::BSK => 2.0,            // semi-arid steppe
+        kp::H => 2.2,                        // high alpine
         _ => 1.0,                            // temperate / tropical / Mediterranean
     }
 }
+
+// ── Equal-area partition tuning (see the "three stages" note in the module header) ──
+/// A province is MERGED away when its real area falls below this fraction of its own
+/// climate budget, and SPLIT when it rises above `PROV_MAX_FRAC` of it. Together they
+/// are the guarantee the old single-pass sliver merge could not give: every province on
+/// a landmass big enough to hold one lands inside `[0.75, 1.45] × budget`. (Two
+/// exceptions by design: a small ISLAND is its own province however tiny, and the polar
+/// caps are merged whole — see `merge_polar_caps`.)
+const PROV_MIN_FRAC: f64 = 0.75;
+const PROV_MAX_FRAC: f64 = 1.45;
+/// Re-floods run after the first one, each with the seed weights nudged by how far
+/// that province's area missed its budget. Two is enough to pull the spread in hard
+/// (the merge/split stages clean up the tail); each pass costs one full Dijkstra.
+const BALANCE_PASSES: usize = 2;
+/// Step size for the seed-weight update, as a fraction of the first-order correction
+/// `radius · ln(area/budget)`. Below 1 so the iteration converges instead of ringing.
+const BALANCE_GAIN: f64 = 0.8;
+/// Clamp on a seed's accumulated weight, so one pathological seed (a province walled
+/// in by crests it cannot grow past) can't be pushed to a cost that swallows a region.
+const BALANCE_W_CAP: f64 = 80.0;
+/// Absolute floor on seed separation, in cells — the partition must never shatter into
+/// a speckle of near-single-cell provinces however fine the granularity or the climate.
+const MIN_SEED_SEP: f64 = 8.0;
+/// Poisson-disk separation as a fraction of the province SIDE. A saturated dart-throwing
+/// packing with minimum distance `s` settles at roughly one point per `1.4·s²` of area,
+/// so asking for a separation of `0.84 · side` is what actually yields provinces of
+/// `side²`. Getting this constant wrong doesn't just scale every province — it scales
+/// them by an amount that varies with how much of the map is at the separation floor,
+/// which is how the climate-size relationship gets flattened.
+const SEED_PACK: f64 = 0.84;
+/// Candidate-grid step for the filler scatter, as a fraction of the FINEST separation.
+/// Below 1 so the rejection radius (which knows the local climate) decides the density
+/// rather than the walk (which does not).
+const SEED_WALK_FRAC: f32 = 0.5;
+/// Most sub-provinces one over-budget province may be split into in a single pass.
+const MAX_SPLIT_PARTS: usize = 8;
 
 /// Per-step cost for the flood to HOP a continental-shelf sea cell, so a cluster of
 /// shelf-connected islands (an archipelago) merges into ONE province instead of each
@@ -219,40 +253,31 @@ fn koppen_spacing_mult(koppen: u8) -> f32 {
 /// islands, which is exactly what makes them read as a single region.
 const SEA_HOP: f64 = 5.0;
 
-/// Cap on a merged vast-biome province, as a fraction of the whole world's cells. A
-/// contiguous ice cap or great desert collapses into blocks no larger than this, so
-/// Antarctica reads as ~1-2 provinces and the Sahara as ~1, while a circum-continental
-/// tundra band still breaks into a handful rather than one hemisphere-spanning cell.
-const VAST_MERGE_CAP_FRAC: f64 = 0.08;
-
-/// True Köppen "vast, thinly-settled" class of a cell for the merge below:
-/// 1 = polar (ET tundra / EF ice cap), 2 = desert (BWh / BWk), 0 = neither.
-fn vast_biome_group(koppen: u8) -> u8 {
+/// True Köppen POLAR class of a cell: tundra (ET) or ice cap (EF). Hot/cold deserts are
+/// deliberately NOT in here — they now follow the ordinary climate area budget
+/// (`koppen_area_mult` ≈ 4× a temperate province), so a great desert reads as a handful
+/// of big provinces rather than one continent-sized blob.
+fn is_polar_koppen(koppen: u8) -> bool {
     use crate::sim::koppen as kp;
-    match koppen {
-        kp::ET | kp::EF => 1,
-        kp::BWH | kp::BWK => 2,
-        _ => 0,
-    }
+    matches!(koppen, kp::ET | kp::EF)
 }
 
-/// Collapse the vast, empty biomes AFTER the flood + sliver merge: union adjacent
-/// provinces that are the SAME vast class (polar or desert) on the SAME landmass, up to
-/// `VAST_MERGE_CAP_FRAC` of the world. The seed-density model already makes these sparse,
-/// but a whole ice cap is still tens of provinces because no per-cell separation is huge
-/// enough to swallow it — so this guarantees the "ice cap / great desert = a few solid
-/// blocks" outcome the seed spacing only approximates. Operates on `owner` (pre-compaction
-/// ids); deterministic (pairs sorted, union root = lower id).
-fn merge_vast_biomes(buf: &WorldBuffer, owner: &mut [u32], island: &[u32], total: usize) {
+/// Collapse the POLAR CAPS: union every adjacent pair of polar provinces on the same
+/// landmass, with NO area cap, so an ice cap / arctic waste is ONE province per polar
+/// landmass (Antarctica reads as a single territory, as does a Greenland-style cap).
+/// This is the one deliberate exception to the equal-area rule — it is administratively
+/// truer than slicing an ice sheet into equal districts, and it is what makes the
+/// climate budget elsewhere affordable. Operates on `owner` (pre-compaction ids);
+/// deterministic (pairs sorted, union root = lower id).
+fn merge_polar_caps(buf: &WorldBuffer, owner: &mut [u32], island: &[u32], total: usize) {
     if buf.koppen.is_empty() { return; }
     let Some(max_owner) = owner.iter().copied().filter(|&o| o != u32::MAX).max() else { return; };
     let n = max_owner as usize + 1;
     let w = buf.width;
     let hi = buf.height as i32;
-    // Per-owner tallies: cells, polar cells, desert cells, one island id.
+    // Per-owner tallies: cells, polar cells, one island id.
     let mut cells = vec![0u32; n];
     let mut polar = vec![0u32; n];
-    let mut desert = vec![0u32; n];
     let mut isle = vec![u32::MAX; n];
     for c in 0..total {
         let o = owner[c];
@@ -260,16 +285,11 @@ fn merge_vast_biomes(buf: &WorldBuffer, owner: &mut [u32], island: &[u32], total
         let oi = o as usize;
         cells[oi] += 1;
         isle[oi] = island[c];
-        match vast_biome_group(buf.koppen[c]) {
-            1 => polar[oi] += 1,
-            2 => desert[oi] += 1,
-            _ => {}
-        }
+        if is_polar_koppen(buf.koppen[c]) { polar[oi] += 1; }
     }
-    // An owner's group: needs a majority of its cells in that class (else 0).
+    // An owner counts as polar when a majority of its cells are.
     let group = |oi: usize| -> u8 {
-        let t = cells[oi].max(1);
-        if polar[oi] * 2 > t { 1 } else if desert[oi] * 2 > t { 2 } else { 0 }
+        if polar[oi] * 2 > cells[oi].max(1) { 1 } else { 0 }
     };
     // Union-find over owners.
     fn find(p: &mut [u32], x: u32) -> u32 {
@@ -280,8 +300,6 @@ fn merge_vast_biomes(buf: &WorldBuffer, owner: &mut [u32], island: &[u32], total
         r
     }
     let mut parent: Vec<u32> = (0..n as u32).collect();
-    let mut sz = cells.clone();
-    let cap = (total as f64 * VAST_MERGE_CAP_FRAC) as u64;
     // Adjacent same-group same-island owner pairs (right + down avoids duplicates).
     let mut pairs: Vec<(u32, u32)> = Vec::new();
     for c in 0..total {
@@ -307,13 +325,314 @@ fn merge_vast_biomes(buf: &WorldBuffer, owner: &mut [u32], island: &[u32], total
         let ra = find(&mut parent, a);
         let rb = find(&mut parent, b);
         if ra == rb { continue; }
-        if sz[ra as usize] as u64 + sz[rb as usize] as u64 > cap { continue; }
         let (root, child) = if ra < rb { (ra, rb) } else { (rb, ra) };
         parent[child as usize] = root;
-        sz[root as usize] += sz[child as usize];
     }
     for o in owner.iter_mut() {
         if *o != u32::MAX { *o = find(&mut parent, *o); }
+    }
+}
+
+/// Per-owner area accounting against the climate budget: how many km² it actually
+/// holds, and how many km² the land it holds says it *should* hold.
+struct AreaBook {
+    /// km² claimed per owner.
+    area: Vec<f64>,
+    /// Mean per-cell target (km²) over the land the owner holds — its BUDGET.
+    want: Vec<f64>,
+    /// Land cells per owner (0 ⇒ the id is unused).
+    cells: Vec<f64>,
+}
+
+/// Tally `area` / `want` / `cells` per owner id in one O(total) pass. Only true land
+/// counts: shelf-sea conduit cells and lake cells carry no area budget.
+fn tally_areas<F: Fn(usize) -> f64>(
+    buf: &WorldBuffer, owner: &[u32], n: usize, row_km2: &[f64], target_km2: &F,
+    is_lake: &[bool], total: usize,
+) -> AreaBook {
+    let w = buf.width as usize;
+    let mut book = AreaBook { area: vec![0.0; n], want: vec![0.0; n], cells: vec![0.0; n] };
+    for c in 0..total {
+        let o = owner[c];
+        if o == u32::MAX || buf.terrain[c] != 1 || is_lake[c] { continue; }
+        let oi = o as usize;
+        if oi >= n { continue; }
+        book.area[oi] += row_km2[c / w];
+        book.want[oi] += target_km2(c);
+        book.cells[oi] += 1.0;
+    }
+    for i in 0..n {
+        if book.cells[i] > 0.0 { book.want[i] /= book.cells[i]; }
+    }
+    book
+}
+
+/// **Stage 1b · split.** Any province holding more than `PROV_MAX_FRAC` of its own
+/// climate budget is cut into `round(area / budget)` parts by a local farthest-point
+/// flood *inside* that province, using the same crest/river costs as the main flood —
+/// so the new internal borders land on real features, exactly like the outer ones.
+///
+/// This is the half of the size guarantee the flood alone cannot provide: a region that
+/// happened to receive one seed (a long peninsula, an island bigger than one province,
+/// a basin walled off by mountains) has no neighbour to be balanced against, so no seed
+/// weight can shrink it. Polar-majority provinces are exempt — the caps are merged, not
+/// split (see `merge_polar_caps`).
+///
+/// Assigns part 0 the original id and mints one new id per extra part, pushing its seed
+/// cell onto `owner_seed` so naming still works. Deterministic: provinces are processed
+/// in id order and every tie is broken on the cell index.
+#[allow(clippy::too_many_arguments)]
+fn split_oversized<F: Fn(usize) -> f64>(
+    buf: &WorldBuffer, owner: &mut [u32], owner_seed: &mut Vec<u32>,
+    ridge: &[f32], river_divide: &[f32], river_unite: &[bool], is_lake: &[bool],
+    row_km2: &[f64], target_km2: &F, dcost: &mut [f64], total: usize,
+) {
+    let w = buf.width;
+    let hi = buf.height as i32;
+    let n0 = owner_seed.len();
+    let book = tally_areas(buf, owner, n0, row_km2, target_km2, is_lake, total);
+
+    // Which owners are over budget, and into how many parts. Polar-majority provinces
+    // are skipped (the caps merge instead).
+    let have_koppen = !buf.koppen.is_empty();
+    let mut polar = vec![0u32; n0];
+    if have_koppen {
+        for c in 0..total {
+            let o = owner[c];
+            if o == u32::MAX || (o as usize) >= n0 { continue; }
+            if is_polar_koppen(buf.koppen[c]) { polar[o as usize] += 1; }
+        }
+    }
+    let mut targets: Vec<(u32, usize)> = Vec::new();
+    for p in 0..n0 {
+        if book.cells[p] < 2.0 || book.want[p] <= 0.0 { continue; }
+        if polar[p] as f64 * 2.0 > book.cells[p] { continue; }
+        let ratio = book.area[p] / book.want[p];
+        if ratio <= PROV_MAX_FRAC { continue; }
+        let k = (ratio.round() as usize).clamp(2, MAX_SPLIT_PARTS);
+        targets.push((p as u32, k));
+    }
+    if targets.is_empty() { return; }
+
+    // `dcost` is the caller's finished main-flood distance array, reused as scratch — a
+    // second world-sized f64 buffer would cost 200 MB on a large world. Each split only
+    // ever touches (and then restores) the cells of the province it is cutting.
+    let mut cells: Vec<u32> = Vec::new();
+
+    for (p, k) in targets {
+        cells.clear();
+        for c in 0..total { if owner[c] == p { cells.push(c as u32); } }
+        if cells.len() < 4 { continue; }
+        let new_lo = owner_seed.len() as u32;
+        let new_hi = new_lo + (k as u32 - 1);
+        // Membership: a cell belongs to this split as long as it is the original owner
+        // or one of the parts minted for it. Checking the id RANGE means the local flood
+        // can write its assignment straight into `owner` with no extra world-sized array.
+        let mine = |o: u32| o == p || (o >= new_lo && o < new_hi);
+
+        // ── Seeds by farthest-point sampling: start from the province's first cell, then
+        //    repeatedly take the cell furthest (in hops, inside the province) from every
+        //    seed so far. Disconnected fragments have infinite hop distance and are
+        //    therefore picked first, which is exactly right — an enclave becomes its own
+        //    part rather than being cut off from its seed.
+        let mut seeds: Vec<u32> = vec![cells[0]];
+        while seeds.len() < k {
+            for &c in &cells { dcost[c as usize] = f64::INFINITY; }
+            let mut q: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
+            for &s in &seeds { dcost[s as usize] = 0.0; q.push_back(s); }
+            while let Some(c) = q.pop_front() {
+                let d = dcost[c as usize] + 1.0;
+                let cx = (c % w) as i32; let cy = (c / w) as i32;
+                for dy in -1i32..=1 {
+                    let ny = cy + dy;
+                    if ny < 0 || ny >= hi { continue; }
+                    for dx in -1i32..=1 {
+                        if dx == 0 && dy == 0 { continue; }
+                        let ni = buf.widx(cx + dx, ny);
+                        if !mine(owner[ni]) || dcost[ni] <= d { continue; }
+                        dcost[ni] = d;
+                        q.push_back(ni as u32);
+                    }
+                }
+            }
+            // Farthest cell; ties (and the whole unreachable set) break on cell index.
+            let mut best = (f64::NEG_INFINITY, u32::MAX);
+            for &c in &cells {
+                let d = dcost[c as usize];
+                let d = if d.is_finite() { d } else { f64::MAX };
+                if d > best.0 && !seeds.contains(&c) { best = (d, c); }
+            }
+            if best.1 == u32::MAX { break; }
+            seeds.push(best.1);
+        }
+        if seeds.len() < 2 { continue; }
+
+        // ── Local cost-flood from those seeds, same terrain terms as the main flood. ──
+        for &c in &cells { dcost[c as usize] = f64::INFINITY; }
+        let mut heap: BinaryHeap<HeapItem> = BinaryHeap::new();
+        for (si, &s) in seeds.iter().enumerate() {
+            // Part 0 keeps the province's own id; the rest get fresh ids.
+            let id = if si == 0 { p } else { new_lo + si as u32 - 1 };
+            if si > 0 { owner_seed.push(s); }
+            dcost[s as usize] = 0.0;
+            owner[s as usize] = id;
+            heap.push(HeapItem { cost: 0.0, cell: s, owner: id });
+        }
+        while let Some(HeapItem { cost, cell, owner: ow }) = heap.pop() {
+            let ci = cell as usize;
+            if cost > dcost[ci] || owner[ci] != ow { continue; }
+            let cx = (cell % w) as i32; let cy = (cell / w) as i32;
+            for dy in -1i32..=1 {
+                let ny = cy + dy;
+                if ny < 0 || ny >= hi { continue; }
+                for dx in -1i32..=1 {
+                    if dx == 0 && dy == 0 { continue; }
+                    let ni = buf.widx(cx + dx, ny);
+                    if !mine(owner[ni]) { continue; }
+                    let diagonal = dx != 0 && dy != 0;
+                    let corners = if diagonal {
+                        Some((buf.widx(cx + dx, cy), buf.widx(cx, ny)))
+                    } else { None };
+                    if let Some((ca, cb)) = corners {
+                        if is_lake[ca] && is_lake[cb] { continue; }
+                    }
+                    let mut step = if diagonal { 1.4142 } else { 1.0 };
+                    if river_unite[ni] { step *= RIVER_UNITE; }
+                    let em = buf.elevation[ni];
+                    let alt = if em > ALT_THRESH { ((em - ALT_THRESH) as f64) * K_ALT } else { 0.0 };
+                    let crest = ridge_cost(ridge[ni]);
+                    let mut cross = river_divide[ni] as f64;
+                    if let Some((ca, cb)) = corners {
+                        let (pa, pb) = (river_divide[ca], river_divide[cb]);
+                        if pa > 0.0 && pb > 0.0 { cross += pa.min(pb) as f64; }
+                    }
+                    let noise = (hash2(cell as u64, ni as u64) % 1000) as f64 / 1000.0 * 0.35;
+                    let nc = cost + step + alt + crest + cross + noise;
+                    if nc < dcost[ni] {
+                        dcost[ni] = nc;
+                        owner[ni] = ow;
+                        heap.push(HeapItem { cost: nc, cell: ni as u32, owner: ow });
+                    }
+                }
+            }
+        }
+        for &c in &cells { dcost[c as usize] = f64::INFINITY; }
+    }
+}
+
+/// **Stage 1c · merge.** Fold every province below `PROV_MIN_FRAC` of its budget into
+/// the neighbour it shares the most border with, ITERATIVELY: after each fold the merged
+/// area is re-checked, so a sliver that lands in another sliver keeps merging instead of
+/// surviving as a slightly-bigger sliver (the flaw in the old single-pass version, where
+/// a remap chain could terminate on a province that was itself under the floor).
+///
+/// A province with no land neighbour at all — a small island — is left alone: an island
+/// IS its province, however small, and there is nothing to merge it into.
+/// Deterministic: candidates are taken smallest-area first, and every tie is broken on
+/// the province id.
+fn merge_undersized<F: Fn(usize) -> f64>(
+    buf: &WorldBuffer, owner: &mut [u32], n: usize,
+    row_km2: &[f64], target_km2: &F, total: usize,
+) {
+    if n == 0 { return; }
+    let w = buf.width;
+    let hi = buf.height as i32;
+    // No lake mask needed here: lake and sea cells already carry `u32::MAX` as owner.
+    let mut area = vec![0.0f64; n];
+    let mut want_sum = vec![0.0f64; n];
+    let mut cells = vec![0.0f64; n];
+    // Shared border length per ordered pair, as one map per province.
+    let mut shared: Vec<std::collections::HashMap<u32, u32>> =
+        (0..n).map(|_| std::collections::HashMap::new()).collect();
+    for c in 0..total {
+        let o = owner[c];
+        if o == u32::MAX || (o as usize) >= n { continue; }
+        let oi = o as usize;
+        area[oi] += row_km2[c / w as usize];
+        want_sum[oi] += target_km2(c);
+        cells[oi] += 1.0;
+        let cx = (c as u32 % w) as i32; let cy = (c as u32 / w) as i32;
+        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+            let ny = cy + dy; if ny < 0 || ny >= hi { continue; }
+            let no = owner[buf.widx(cx + dx, ny)];
+            if no != u32::MAX && no != o && (no as usize) < n {
+                *shared[oi].entry(no).or_insert(0) += 1;
+            }
+        }
+    }
+
+    // Union-find over provinces; the surviving root is always the lower id.
+    let mut parent: Vec<u32> = (0..n as u32).collect();
+    fn find(p: &mut [u32], x: u32) -> u32 {
+        let mut r = x;
+        while p[r as usize] != r { r = p[r as usize]; }
+        let mut c = x;
+        while p[c as usize] != r { let nx = p[c as usize]; p[c as usize] = r; c = nx; }
+        r
+    }
+    let under = |area: &[f64], want_sum: &[f64], cells: &[f64], p: usize| -> bool {
+        if cells[p] < 1.0 { return false; }
+        let want = want_sum[p] / cells[p];
+        want > 0.0 && area[p] < PROV_MIN_FRAC * want
+    };
+
+    // Rounds, not one pass: each fold changes the area of the survivor, which can lift it
+    // over the floor (done) or leave it under (merge again next round).
+    const MAX_ROUNDS: usize = 12;
+    for _ in 0..MAX_ROUNDS {
+        let mut cand: Vec<u32> = (0..n as u32)
+            .filter(|&p| find(&mut parent, p) == p && under(&area, &want_sum, &cells, p as usize))
+            .collect();
+        if cand.is_empty() { break; }
+        // Smallest first, id as the tie-break — never `sort_by` on the float alone, or
+        // two equal-area slivers merge in an unspecified order.
+        cand.sort_by(|&a, &b| {
+            area[a as usize].partial_cmp(&area[b as usize]).unwrap_or(Ordering::Equal)
+                .then_with(|| a.cmp(&b))
+        });
+        let mut merged_any = false;
+        for p in cand {
+            let rp = find(&mut parent, p);
+            if rp != p || !under(&area, &want_sum, &cells, p as usize) { continue; }
+            // Best neighbour: longest shared frontier, then the SMALLER partner (so a
+            // sliver joins the modest neighbour it completes rather than the giant next
+            // door), then the lower id.
+            let entries: Vec<(u32, u32)> = shared[p as usize].iter().map(|(&k, &v)| (k, v)).collect();
+            let mut roots: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+            for (nid, len) in entries {
+                let rn = find(&mut parent, nid);
+                if rn == p { continue; }
+                *roots.entry(rn).or_insert(0) += len;
+            }
+            let mut ranked: Vec<(u32, u32)> = roots.into_iter().collect();
+            ranked.sort_by(|a, b| {
+                b.1.cmp(&a.1)
+                    .then_with(|| area[a.0 as usize].partial_cmp(&area[b.0 as usize]).unwrap_or(Ordering::Equal))
+                    .then_with(|| a.0.cmp(&b.0))
+            });
+            // No land neighbour ⇒ a small island, which IS its province. Leave it.
+            let Some(&(rn, _)) = ranked.first() else { continue };
+            let (root, child) = if rn < p { (rn, p) } else { (p, rn) };
+            parent[child as usize] = root;
+            area[root as usize] += area[child as usize];
+            want_sum[root as usize] += want_sum[child as usize];
+            cells[root as usize] += cells[child as usize];
+            area[child as usize] = 0.0; want_sum[child as usize] = 0.0; cells[child as usize] = 0.0;
+            // Fold the child's frontiers into the survivor's so the next round sees the
+            // merged province's real adjacency.
+            let child_edges: Vec<(u32, u32)> =
+                shared[child as usize].drain().collect();
+            for (nid, len) in child_edges {
+                if find(&mut parent, nid) == root as u32 { continue; }
+                *shared[root as usize].entry(nid).or_insert(0) += len;
+            }
+            merged_any = true;
+        }
+        if !merged_any { break; }
+    }
+
+    for o in owner.iter_mut() {
+        if *o != u32::MAX && (*o as usize) < n { *o = find(&mut parent, *o); }
     }
 }
 
@@ -510,54 +829,101 @@ pub fn generate_provinces(
         }
     }
 
-    // ── Seeds: prominent settlements + a jittered filler scatter, with seed DENSITY
-    //    scaled by HABITABILITY — dense (small provinces) in fertile temperate/tropical
-    //    land, sparse (big provinces) in the hostile fringe: polar, cold taiga, desert
-    //    and high mountain ranges. Granularity g sets the base spacing. ──
-    // Granularity → number of province "columns" across the map. Wider range so the
-    // size slider spans genuinely large (g→0) to small (g→1) provinces.
-    let cols = 18.0 + 92.0 * g;
-    let spacing = ((w as f32 / cols).round() as i32).max(4);
-    // The finest separation (most habitable land); scales UP to ~3.8× in the least
-    // habitable land, so provinces there come out far larger. FLOORED at 10 cells so
-    // even the most habitable land / highest granularity never shatters into a speckle
-    // of 1-cell provinces (the min province is then ≈100 cells).
-    let base_sep = ((spacing as f32) * 0.5).max(10.0);
+    // ── The AREA BUDGET: one number per cell, "how big should the province that owns
+    //    this cell be, in km²". Everything downstream — where seeds go, how the flood
+    //    is balanced, what gets merged and what gets split — is derived from it, so the
+    //    three stages can never disagree about the intended size. ──
+    //
+    // Granularity → number of province "columns" across the map, and hence the side of
+    // a temperate, fertile province in km at the equator.
+    let cols = 18.0 + 92.0 * g as f64;
+    let cell_km = 40075.0 / w as f64;             // width of one cell at the equator
+    let base_side_km = (40075.0 / cols) * 0.5;    // side of the SMALLEST (prime-land) province
+    // Real, latitude-aware area of one cell in each row. Province size is compared in
+    // km², not in cells: a cell near the pole covers a fraction of an equatorial one, so
+    // counting cells would make high-latitude provinces far smaller than they look.
+    let row_km2: Vec<f64> = (0..h)
+        .map(|y| {
+            let latr = (buf.latitude(y) as f64).to_radians();
+            cell_km * cell_km * latr.cos().max(0.05)
+        })
+        .collect();
     let hab_at = |i: usize| -> f32 {
         if buf.habitability.is_empty() { 0.5 } else { buf.habitability[i] as f32 / 255.0 }
     };
-    // Local min-separation² at a cell: small where habitable, large where hostile.
-    // Two compounding levers give the wide (≈100× area) fertile→arctic size range:
-    //   · the habitability ramp (1 + 3·hostile): general "fewer people, bigger units";
-    //   · a Köppen biome multiplier: the ice caps, tundra, deserts and taiga that hold
-    //     genuinely continent-scale administrative blocks on Earth are stretched much
-    //     further, so Antarctica reads as a few solid provinces, not a speckle.
     let have_koppen = !buf.koppen.is_empty();
     let have_hab = !buf.habitability.is_empty();
-    // Hard minimum separation (≈100-cell smallest province) so the most habitable land
-    // gets genuinely SMALL provinces without shattering into a 1-cell speckle.
-    let min_sep = 10.0f32;
+    // Target area at a cell — the product of two independent levers:
+    //   · CLIMATE (`koppen_area_mult`): the ice caps, tundra, deserts and taiga that hold
+    //     genuinely continent-scale administrative blocks on Earth get 2-6× the area;
+    //   · HABITABILITY: a general "fewer people ⇒ bigger units" ramp on top, so a barren
+    //     temperate upland is still larger than the fertile valley beside it.
+    let base_km2 = base_side_km * base_side_km;
+    // Province SIDE at a cell, in cells at this latitude — the one primitive everything
+    // else is derived from. The `MIN_SEED_SEP` floor is applied HERE, before the budget
+    // is read back off it, so a floored cell's budget matches the province the seeding
+    // can actually produce. (Flooring only the separation and not the budget would leave
+    // every province on a fine grid permanently "under budget", and the merge stage would
+    // dutifully dissolve the whole map into a few blobs.)
+    let side_cells = |i: usize| -> f64 {
+        let km = if have_koppen { koppen_area_mult(buf.koppen[i]) } else { 1.0 };
+        let hostile = if have_hab {
+            (1.0 - hab_at(i).clamp(0.0, 1.0) as f64).powf(1.4)
+        } else { 0.0 };
+        let want_km2 = base_km2 * km * (1.0 + 1.5 * hostile);
+        (want_km2 / row_km2[i / w as usize].max(1e-6)).sqrt().max(MIN_SEED_SEP)
+    };
+    // The AREA BUDGET at a cell, in km² — the size the province owning it is aiming for.
+    // Read straight back off `side_cells`, so seeding, balancing, splitting and merging
+    // are all quoting the same number.
+    let target_km2 = |i: usize| -> f64 {
+        let s = side_cells(i);
+        s * s * row_km2[i / w as usize]
+    };
+    // Seed separation: one province side, shaved slightly so the Poisson-disk rejection
+    // does not systematically overshoot the intended spacing.
     let local_sep2 = |i: usize| -> i64 {
-        let hab = hab_at(i).clamp(0.0, 1.0);
-        let hostile = (1.0 - hab).powf(1.4);
-        let km = if have_koppen { koppen_spacing_mult(buf.koppen[i]) } else { 1.0 };
-        // Prime habitable land (hab > 0.6) is pulled BELOW the base spacing — smaller
-        // provinces in fertile heartlands — ramping in only for genuinely rich land so
-        // ordinary/moderate country keeps the base size; the hostile ramp + the Köppen
-        // biome factor stretch the barren extremes far apart, and the vast-biome merge
-        // then swallows the ice/desert. Gated on real habitability data existing.
-        let fertile_shrink = if have_hab {
-            1.0 - 0.4 * ((hab - 0.6) / 0.3).clamp(0.0, 1.0)
-        } else { 1.0 };
-        let s = (base_sep * (1.0 + 3.0 * hostile) * fertile_shrink * km).max(min_sep) as i64;
+        let s = (side_cells(i) * SEED_PACK) as i64;
         (s * s).max(1)
     };
-    let too_close = |seeds: &[u32], bx: i32, by: i32, sep2: i64| -> bool {
-        for &sc in seeds {
-            let sx = (sc % w) as i32; let sy = (sc / w) as i32;
-            let mut ddx = (sx - bx).abs(); if ddx > wi / 2 { ddx = wi - ddx; }
-            let dd = (ddx as i64) * (ddx as i64) + ((sy - by) as i64) * ((sy - by) as i64);
-            if dd < sep2 { return true; }
+    // The finest separation anywhere (prime land at the equator) — the grid the filler
+    // scatter walks and the yardstick for "how far may the snap stage move a line".
+    let base_sep = ((base_side_km / cell_km) as f32).max(MIN_SEED_SEP as f32);
+    // ── Seed rejection, on a SPATIAL HASH. ──
+    // The scatter is a Poisson-disk: a candidate is kept only if no accepted seed lies
+    // within the local separation. Testing that against every seed accepted so far is
+    // O(seeds) per candidate — quadratic overall, and on a world-sized grid it was the
+    // single most expensive thing in the seeding. Bucketing seeds by a coarse grid makes
+    // it a scan of the few buckets the separation circle actually covers, which is what
+    // lets the candidate walk below be FINE enough for the separation (not the walk) to
+    // set the density. Without that the achieved spacing is the grid step, provinces come
+    // out well over budget, and — worse — by a factor that differs per climate, which
+    // silently flattens the whole climate-size relationship.
+    let bucket = (base_side_km / cell_km).max(MIN_SEED_SEP) as i32;
+    let bucket = bucket.max(4);
+    let bw = (wi + bucket - 1) / bucket;
+    let bh = (hi + bucket - 1) / bucket;
+    let mut buckets: Vec<Vec<u32>> = vec![Vec::new(); (bw * bh).max(1) as usize];
+    let bucket_of = |bx: i32, by: i32| -> usize {
+        let gx = (bx.rem_euclid(wi)) / bucket;
+        let gy = by.clamp(0, hi - 1) / bucket;
+        (gy * bw + gx) as usize
+    };
+    let too_close = |buckets: &[Vec<u32>], bx: i32, by: i32, sep2: i64| -> bool {
+        let r = ((sep2 as f64).sqrt() as i32 / bucket) + 1;
+        let gy0 = (by / bucket - r).max(0);
+        let gy1 = (by / bucket + r).min(bh - 1);
+        let gx0 = bx / bucket - r;
+        for gy in gy0..=gy1 {
+            for gxr in gx0..=(bx / bucket + r) {
+                let gx = gxr.rem_euclid(bw);
+                for &sc in &buckets[(gy * bw + gx) as usize] {
+                    let sx = (sc % w) as i32; let sy = (sc / w) as i32;
+                    let mut ddx = (sx - bx).abs(); if ddx > wi / 2 { ddx = wi - ddx; }
+                    let dd = (ddx as i64) * (ddx as i64) + ((sy - by) as i64) * ((sy - by) as i64);
+                    if dd < sep2 { return true; }
+                }
+            }
         }
         false
     };
@@ -571,17 +937,19 @@ pub fn generate_provinces(
         let i = buf.idx(s.x.min(w - 1), s.y.min(h - 1));
         if buf.terrain[i] != 1 || is_lake[i] || is_seed[i] { continue; }
         let bx = (i as u32 % w) as i32; let by = (i as u32 / w) as i32;
-        if too_close(&seed_cells, bx, by, local_sep2(i)) { continue; }
+        if too_close(&buckets, bx, by, local_sep2(i)) { continue; }
         is_seed[i] = true; seed_cells.push(i as u32);
+        buckets[bucket_of(bx, by)].push(i as u32);
     }
-    // Filler seeds on a FINE base grid (finest = the habitable separation). The LOCAL
+    // Filler seeds on a candidate grid FINER than the finest separation, so it is the
+    // local separation — not the walk — that decides how many seeds land. The LOCAL
     // separation rejects most candidates in hostile land → few, large provinces there,
     // while habitable land keeps most → many, small provinces. Jittered off-lattice.
     // The candidate score prefers a LESSER RIVER's valley, so valleys become province
     // CORES and the interfluves become the borders ("rivers unite").
-    let bspacing = (base_sep as i32).max(4);
+    let bspacing = ((base_sep * SEED_WALK_FRAC) as i32).max(3);
     let jit = (base_sep * 0.42) as i64;
-    let win = (bspacing / 3).max(2);
+    let win = (bspacing / 2).max(2);
     let mut gy = bspacing / 2;
     while gy < hi {
         let mut gx = 0i32;
@@ -609,8 +977,9 @@ pub fn generate_provinces(
                 let bi = best.0 as usize;
                 let bx = (bi as u32 % w) as i32;
                 let by = (bi as u32 / w) as i32;
-                if !is_seed[bi] && !too_close(&seed_cells, bx, by, local_sep2(bi)) {
+                if !is_seed[bi] && !too_close(&buckets, bx, by, local_sep2(bi)) {
                     is_seed[bi] = true; seed_cells.push(bi as u32);
+                    buckets[bucket_of(bx, by)].push(bi as u32);
                 }
             }
             gx += bspacing;
@@ -621,76 +990,126 @@ pub fn generate_provinces(
 
     // ── Multi-source cost-flood (Dijkstra) over land. Sets province COUNT, SIZE and
     //    TOPOLOGY; the border LINES are re-placed afterwards by the snap stage. ──
+    //
+    // The flood is run several times (see `BALANCE_PASSES`). Every pass is identical
+    // except for `weights`, an ADDITIVE handicap on each seed's starting cost: a seed
+    // whose province came out over its area budget starts the next pass deeper in debt,
+    // so its frontier meets its neighbours' earlier and it claims less. This is an
+    // additively-weighted (power-diagram) Voronoi, and it is the reason sizes can be
+    // equalised WITHOUT abandoning the terrain costs — a border still falls on the crest
+    // between two seeds, it just falls on a different crest. Weights are non-negative,
+    // so Dijkstra's correctness is untouched.
+    let have_shelf = !buf.is_shelf.is_empty();
     let mut owner = vec![u32::MAX; total];
     let mut dist = vec![f64::INFINITY; total];
-    let have_shelf = !buf.is_shelf.is_empty();
-    let mut heap: BinaryHeap<HeapItem> = BinaryHeap::new();
-    for (oi, &sc) in seed_cells.iter().enumerate() {
-        owner[sc as usize] = oi as u32;
-        dist[sc as usize] = 0.0;
-        heap.push(HeapItem { cost: 0.0, cell: sc, owner: oi as u32 });
-    }
-    while let Some(HeapItem { cost, cell, owner: ow }) = heap.pop() {
-        let ci = cell as usize;
-        if cost > dist[ci] { continue; }
-        if owner[ci] != ow { continue; }
-        let cx = (cell % w) as i32;
-        let cy = (cell / w) as i32;
-        for dy in -1i32..=1 {
-            for dx in -1i32..=1 {
-                if dx == 0 && dy == 0 { continue; }
-                let ny = cy + dy;
-                if ny < 0 || ny >= hi { continue; }
-                let ni = buf.widx(cx + dx, ny);
-                // The flood normally runs on land, but it may also HOP a shelf-sea cell
-                // (shallow water shared between neighbouring islands) at a stiff flat
-                // cost, so a shelf-connected archipelago merges into one province rather
-                // than each islet becoming its own. Deep (non-shelf) ocean and lakes stay
-                // impassable, so real straits are never crossed.
-                let land = buf.terrain[ni] == 1;
-                let shelf_sea = have_shelf && buf.terrain[ni] == 0 && buf.is_shelf[ni] == 1;
-                if is_lake[ni] || (!land && !shelf_sea) { continue; }
-                let diagonal = dx != 0 && dy != 0;
-                // A river/lake traced by following flow one cell per step is an
-                // 8-connected STAIRCASE, and a diagonal step can cut clean between two
-                // of its cells without entering either — which is why diagonal rivers
-                // used to cost nothing at all. Charge the crossing on the EDGE by
-                // inspecting the two corner cells the step passes between.
-                let corners = if diagonal {
-                    Some((buf.widx(cx + dx, cy), buf.widx(cx, ny)))
-                } else { None };
-                if let Some((ca, cb)) = corners {
-                    if is_lake[ca] && is_lake[cb] { continue; }  // no squeezing past a lake
-                }
-                let base_step = if diagonal { 1.4142 } else { 1.0 };
-                // A shelf-sea hop carries only the flat crossing cost; land carries the
-                // full valley-unite / altitude / crest / river-divide terrain terms.
-                let (step, alt, crest, cross) = if land {
-                    let mut step = base_step;
-                    if river_unite[ni] { step *= RIVER_UNITE; }
-                    // Crest prominence divides; a weak absolute term keeps the great
-                    // massifs bodily expensive.
-                    let em = buf.elevation[ni];
-                    let alt = if em > ALT_THRESH { ((em - ALT_THRESH) as f64) * K_ALT } else { 0.0 };
-                    let crest = ridge_cost(ridge[ni]);
-                    let mut cross = river_divide[ni] as f64;
+    let flood = |weights: &[f64], owner: &mut Vec<u32>, dist: &mut Vec<f64>| {
+        owner.iter_mut().for_each(|o| *o = u32::MAX);
+        dist.iter_mut().for_each(|d| *d = f64::INFINITY);
+        let mut heap: BinaryHeap<HeapItem> = BinaryHeap::new();
+        for (oi, &sc) in seed_cells.iter().enumerate() {
+            let w0 = weights.get(oi).copied().unwrap_or(0.0);
+            owner[sc as usize] = oi as u32;
+            dist[sc as usize] = w0;
+            heap.push(HeapItem { cost: w0, cell: sc, owner: oi as u32 });
+        }
+        while let Some(HeapItem { cost, cell, owner: ow }) = heap.pop() {
+            let ci = cell as usize;
+            if cost > dist[ci] { continue; }
+            if owner[ci] != ow { continue; }
+            let cx = (cell % w) as i32;
+            let cy = (cell / w) as i32;
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
+                    if dx == 0 && dy == 0 { continue; }
+                    let ny = cy + dy;
+                    if ny < 0 || ny >= hi { continue; }
+                    let ni = buf.widx(cx + dx, ny);
+                    // The flood normally runs on land, but it may also HOP a shelf-sea
+                    // cell (shallow water shared between neighbouring islands) at a stiff
+                    // flat cost, so a shelf-connected archipelago merges into one province
+                    // rather than each islet becoming its own. Deep (non-shelf) ocean and
+                    // lakes stay impassable, so real straits are never crossed.
+                    let land = buf.terrain[ni] == 1;
+                    let shelf_sea = have_shelf && buf.terrain[ni] == 0 && buf.is_shelf[ni] == 1;
+                    if is_lake[ni] || (!land && !shelf_sea) { continue; }
+                    let diagonal = dx != 0 && dy != 0;
+                    // A river/lake traced by following flow one cell per step is an
+                    // 8-connected STAIRCASE, and a diagonal step can cut clean between two
+                    // of its cells without entering either — which is why diagonal rivers
+                    // used to cost nothing at all. Charge the crossing on the EDGE by
+                    // inspecting the two corner cells the step passes between.
+                    let corners = if diagonal {
+                        Some((buf.widx(cx + dx, cy), buf.widx(cx, ny)))
+                    } else { None };
                     if let Some((ca, cb)) = corners {
-                        let (pa, pb) = (river_divide[ca], river_divide[cb]);
-                        if pa > 0.0 && pb > 0.0 { cross += pa.min(pb) as f64; }
+                        if is_lake[ca] && is_lake[cb] { continue; }  // no squeezing past a lake
                     }
-                    (step, alt, crest, cross)
-                } else {
-                    (base_step * SEA_HOP, 0.0, 0.0, 0.0)
-                };
-                let noise = (hash2(cell as u64, ni as u64) % 1000) as f64 / 1000.0 * 0.35;
-                let nc = cost + step + alt + crest + cross + noise;
-                if nc < dist[ni] {
-                    dist[ni] = nc;
-                    owner[ni] = ow;
-                    heap.push(HeapItem { cost: nc, cell: ni as u32, owner: ow });
+                    let base_step = if diagonal { 1.4142 } else { 1.0 };
+                    // A shelf-sea hop carries only the flat crossing cost; land carries the
+                    // full valley-unite / altitude / crest / river-divide terrain terms.
+                    let (step, alt, crest, cross) = if land {
+                        let mut step = base_step;
+                        if river_unite[ni] { step *= RIVER_UNITE; }
+                        // Crest prominence divides; a weak absolute term keeps the great
+                        // massifs bodily expensive.
+                        let em = buf.elevation[ni];
+                        let alt = if em > ALT_THRESH { ((em - ALT_THRESH) as f64) * K_ALT } else { 0.0 };
+                        let crest = ridge_cost(ridge[ni]);
+                        let mut cross = river_divide[ni] as f64;
+                        if let Some((ca, cb)) = corners {
+                            let (pa, pb) = (river_divide[ca], river_divide[cb]);
+                            if pa > 0.0 && pb > 0.0 { cross += pa.min(pb) as f64; }
+                        }
+                        (step, alt, crest, cross)
+                    } else {
+                        (base_step * SEA_HOP, 0.0, 0.0, 0.0)
+                    };
+                    let noise = (hash2(cell as u64, ni as u64) % 1000) as f64 / 1000.0 * 0.35;
+                    let nc = cost + step + alt + crest + cross + noise;
+                    if nc < dist[ni] {
+                        dist[ni] = nc;
+                        owner[ni] = ow;
+                        heap.push(HeapItem { cost: nc, cell: ni as u32, owner: ow });
+                    }
                 }
             }
         }
+    };
+
+    // ── Balance the flood against the area budget. Each pass: flood, measure every
+    //    province's real area against the mean budget of the land it holds, and nudge
+    //    the seed weight by the first-order correction `radius · ln(area/budget)` (the
+    //    extra cost that moves a frontier the right number of cells). ──
+    let ns = seed_cells.len();
+    let mut weights = vec![0.0f64; ns];
+    for pass in 0..=BALANCE_PASSES {
+        flood(&weights, &mut owner, &mut dist);
+        if pass == BALANCE_PASSES { break; }
+        let mut area = vec![0.0f64; ns];       // km² actually claimed
+        let mut budget = vec![0.0f64; ns];     // Σ per-cell target
+        let mut cells = vec![0.0f64; ns];
+        for c in 0..total {
+            let o = owner[c];
+            // Shelf-sea conduits are not land and must not count toward an area budget.
+            if o == u32::MAX || buf.terrain[c] != 1 || is_lake[c] { continue; }
+            let oi = o as usize;
+            area[oi] += row_km2[c / w as usize];
+            budget[oi] += target_km2(c);
+            cells[oi] += 1.0;
+        }
+        for s in 0..ns {
+            if cells[s] < 1.0 || area[s] <= 0.0 { continue; }
+            let want = budget[s] / cells[s];          // mean target over the land it holds
+            let radius = (cells[s] / std::f64::consts::PI).sqrt().max(1.0);
+            let err = (area[s] / want).ln();
+            weights[s] = (weights[s] + BALANCE_GAIN * radius * err)
+                .clamp(-BALANCE_W_CAP, BALANCE_W_CAP);
+        }
+        // Dijkstra needs non-negative starting costs. Only DIFFERENCES between weights
+        // affect where frontiers meet, so re-basing the whole set on its minimum is a
+        // no-op for the partition and keeps every start cost ≥ 0.
+        let lo = weights.iter().copied().fold(f64::INFINITY, f64::min);
+        if lo.is_finite() && lo != 0.0 { for x in weights.iter_mut() { *x -= lo; } }
     }
 
     // Shelf-sea cells were only conduits for island-merging: strip their ownership so
@@ -724,64 +1143,29 @@ pub fn generate_provinces(
             }
         }
     }
-    let n_seeds = seed_cells.len() + extra_seed_cell.len();
-    let seed_of = |oi: u32| -> u32 {
-        let oi = oi as usize;
-        if oi < seed_cells.len() { seed_cells[oi] } else { extra_seed_cell[oi - seed_cells.len()] }
-    };
+    // One seed cell per owner id, extended as the split stage below mints new ids.
+    let mut owner_seed: Vec<u32> = seed_cells.clone();
+    owner_seed.extend_from_slice(&extra_seed_cell);
 
-    // ── Merge slivers: a province below the area floor is folded into the neighbour
-    //    it shares the most border with. One pass (deterministic). ──
-    let mut cell_count = vec![0u32; n_seeds];
-    for &o in owner.iter() { if o != u32::MAX { cell_count[o as usize] += 1; } }
-    // Sliver floor keyed off the FINE (habitable) separation, not the coarse spacing,
-    // so the intentionally-small habitable provinces survive; only true slivers merge.
-    let min_cells = (((base_sep * base_sep) / 6.0) as u32).max(6);
-    let mut remap: Vec<u32> = (0..n_seeds as u32).collect();
-    // Provinces below the area floor get folded into the neighbour they share the most
-    // border with. PERF: this used to rescan ALL cells once per small province — an
-    // O(n_small × total) trap that dominated generation on large worlds (hundreds of
-    // slivers × 6.5 M cells). Now it's a SINGLE O(total) pass: for every cell owned by a
-    // small province, tally its cross-border neighbours into that province's map.
-    let is_small: Vec<bool> = cell_count.iter().map(|&c| c > 0 && c < min_cells).collect();
-    let mut shared: Vec<std::collections::HashMap<u32, u32>> =
-        (0..n_seeds).map(|_| std::collections::HashMap::new()).collect();
-    for c in 0..total {
-        let o = owner[c];
-        if o == u32::MAX || !is_small[o as usize] { continue; }
-        let cx = (c as u32 % w) as i32; let cy = (c as u32 / w) as i32;
-        for &(dx, dy) in &[(-1i32,0i32),(1,0),(0,-1),(0,1)] {
-            let ny = cy + dy; if ny < 0 || ny >= hi { continue; }
-            let no = owner[buf.widx(cx + dx, ny)];
-            if no != u32::MAX && no != o { *shared[o as usize].entry(no).or_insert(0) += 1; }
-        }
-    }
-    for p in 0..n_seeds {
-        if !is_small[p] { continue; }
-        // DETERMINISM: `HashMap` iteration order is randomised per process, so an
-        // un-broken `max_by_key` on the count alone made the same seed produce
-        // different partitions across runs whenever two neighbours tied. Break the tie
-        // on the neighbour id.
-        let best = shared[p].iter()
-            .max_by_key(|(&nid, &v)| (v, std::cmp::Reverse(nid)))
-            .map(|(&nid, _)| nid);
-        if let Some(best) = best { remap[p] = best; }
-    }
-    // Resolve remap chains, then relabel.
-    for c in 0..total {
-        if owner[c] == u32::MAX { continue; }
-        let mut o = owner[c];
-        let mut guard = 0;
-        while remap[o as usize] != o && guard < 8 { o = remap[o as usize]; guard += 1; }
-        owner[c] = o;
-    }
+    // ── Stage 1b · SPLIT what came out too big, then MERGE what came out too small.
+    //    The balanced flood gets most provinces close to budget, but it cannot fix two
+    //    cases on its own: a region holding a single seed (nothing to share with) comes
+    //    out as one giant, and a seed boxed in by crests comes out as a sliver. Splitting
+    //    and merging against the SAME budget closes both ends, which is what turns
+    //    "mostly even" into a guaranteed size band. ──
+    split_oversized(
+        buf, &mut owner, &mut owner_seed, &ridge, &river_divide, &river_unite,
+        &is_lake, &row_km2, &target_km2, &mut dist, total,
+    );
+    merge_undersized(buf, &mut owner, owner_seed.len(), &row_km2, &target_km2, total);
 
-    // Collapse the vast, empty biomes (polar ice/tundra, hot/cold desert) into a few
-    // huge blocks per landmass — an ice cap or great desert is otherwise still tens of
-    // small provinces, because no per-cell seed separation is large enough to swallow a
-    // whole continent-scale biome. Runs after the sliver merge, before compaction, so
-    // the existing stats/borders naturally describe the merged result.
-    merge_vast_biomes(buf, &mut owner, &island, total);
+    // Collapse the POLAR CAPS into one province per polar landmass — the deliberate
+    // exception to the size band (an ice sheet is one territory, not a grid of equal
+    // districts). Deserts are NOT merged here; their 4× climate budget already makes
+    // them large while keeping them bounded.
+    merge_polar_caps(buf, &mut owner, &island, total);
+
+    let seed_of = |oi: u32| -> u32 { owner_seed[oi as usize] };
 
     // ── Compact province ids to 0..n and build per-cell id map. ──
     let mut old_to_new = std::collections::HashMap::<u32, u32>::new();
@@ -1739,6 +2123,148 @@ mod tests {
         assert!(collisions > 0,
             "this map produced no raw name collisions, so it does not exercise the \
              uniqueness pass — make the test map denser");
+    }
+
+    /// **The size guarantee.** On uniform land every province should come out close to
+    /// the same real area: no slivers at the bottom, no continent at the top. This is
+    /// what the balanced flood + split + iterative merge exist for — a plain cost-flood
+    /// produced a long tail of tiny provinces wherever a seed was boxed in.
+    #[test]
+    fn province_areas_are_evenly_sized() {
+        // Wide enough that a cell is small compared with a province: `MIN_SEED_SEP` is a
+        // floor in CELLS, so on a coarse grid it binds everywhere and would make this
+        // test pass for the wrong reason.
+        let (gw, gh) = (480u32, 240u32);
+        let mut buf = blank_world_sized(gw, gh);
+        // Relief and fertility variation, so the flood's terrain costs really do vary
+        // (a perfectly flat world would come out even for trivial reasons).
+        for y in 0..gh {
+            for x in 0..gw {
+                let i = buf.idx(x, y);
+                buf.elevation[i] = (((x * 7 + y * 13) % 11) as f32) / 60.0;
+                buf.fertility[i] = (((x * 3 + y * 5) % 9) as f32) / 9.0;
+            }
+        }
+        let towns = vec![settle("a", 20, 20, 9000), settle("b", 300, 150, 7000)];
+        let (provs, _) = generate_provinces(&buf, &[], &[], &towns, 0.0);
+        assert!(provs.len() > 20, "need a populated map, got {}", provs.len());
+
+        let mut areas: Vec<f64> = provs.iter().map(|p| p.area_km2 as f64).collect();
+        areas.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let median = areas[areas.len() / 2];
+        let p10 = areas[areas.len() / 10];
+        let p90 = areas[areas.len() * 9 / 10];
+        let smallest = areas[0];
+        let largest = areas[areas.len() - 1];
+        eprintln!(
+            "areas km²: min {smallest:.0} · p10 {p10:.0} · median {median:.0} · p90 {p90:.0} · max {largest:.0} \
+             (p90/p10 = {:.2}, max/min = {:.2}, n = {})",
+            p90 / p10.max(1.0), largest / smallest.max(1.0), provs.len()
+        );
+        assert!(p10 >= 0.55 * median, "a tenth of provinces are slivers: p10 {p10:.0} vs median {median:.0}");
+        assert!(p90 <= 1.9 * median, "a tenth of provinces are giants: p90 {p90:.0} vs median {median:.0}");
+        // The absolute tail matters too — one 1-cell province is one too many.
+        assert!(smallest >= 0.30 * median,
+            "smallest province {smallest:.0} km² is a fragment beside the median {median:.0} km²");
+        assert!(largest <= 3.0 * median,
+            "largest province {largest:.0} km² dwarfs the median {median:.0} km²");
+    }
+
+    /// PERF harness — the partition now runs the cost-flood `1 + BALANCE_PASSES` times
+    /// plus a split and a merge, so its cost has to be watched:
+    ///   `cargo test --release --lib bench_province_generation -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_province_generation() {
+        use std::time::Instant;
+        let (gw, gh) = (1800u32, 900u32);
+        let mut buf = blank_world_sized(gw, gh);
+        for y in 0..gh {
+            for x in 0..gw {
+                let i = buf.idx(x, y);
+                // A continent-ish landmass with relief, so the flood does real work.
+                let land = ((x as f32 / gw as f32 * 6.28).sin() + (y as f32 / gh as f32 * 3.14).sin()) > -0.4;
+                buf.terrain[i] = if land { 1 } else { 0 };
+                // Real relief: two mountain belts crossing the continent plus noise, so
+                // the flood's crest/altitude costs vary the way they do on a real world.
+                let fx = x as f32 / gw as f32;
+                let fy = y as f32 / gh as f32;
+                let belt = ((fx * 9.0).sin() * 0.5 + (fy * 7.0 + fx * 3.0).sin() * 0.5).abs();
+                buf.elevation[i] = (belt.powf(3.0) * 0.75 + (((x * 7 + y * 13) % 23) as f32) / 300.0)
+                    .clamp(0.0, 1.0);
+                buf.koppen[i] = if y < gh / 8 || y > gh * 7 / 8 { crate::sim::koppen::ET }
+                                else if y < gh / 3 { crate::sim::koppen::BWH }
+                                else { crate::sim::koppen::CFB };
+            }
+        }
+        let towns: Vec<Settlement> = (0..120)
+            .map(|i| settle(&format!("t{i}"), (i * 37 % gw as usize) as u32,
+                            (i * 53 % gh as usize) as u32, 20_000 - i as u32 * 100))
+            .collect();
+        let t0 = Instant::now();
+        let (provs, _) = generate_provinces(&buf, &[], &[], &towns, 0.5);
+        let ms = t0.elapsed().as_secs_f64() * 1000.0;
+        // Spread WITHIN one climate band, at mirrored latitudes — comparing every
+        // province on the map would mostly measure the deliberate climate-size ladder.
+        let mut areas: Vec<f64> = provs.iter()
+            .filter(|p| p.koppen == crate::sim::koppen::CFB
+                && p.seat_y > gh * 40 / 100 && p.seat_y < gh * 60 / 100)
+            .map(|p| p.area_km2 as f64).collect();
+        areas.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let (p10, med, p90) = (areas[areas.len() / 10], areas[areas.len() / 2], areas[areas.len() * 9 / 10]);
+        eprintln!("[province-bench {gw}×{gh} = {} cells] {ms:.0} ms → {} provinces · \
+                   temperate-band n={} p10 {p10:.0} median {med:.0} p90 {p90:.0} \
+                   (p90/p10 {:.2}, min/med {:.2})",
+                  gw as usize * gh as usize, provs.len(), areas.len(),
+                  p90 / p10.max(1.0), areas[0] / med.max(1.0));
+    }
+
+    /// **Climate sets the size.** An arid band must hold provinces several times the area
+    /// of the temperate band beside it (Saharan district vs. Italian county) — while both
+    /// stay inside their own size band, which is what separates this from the old
+    /// "collapse the desert into one blob" rule.
+    #[test]
+    fn arid_provinces_are_larger_than_temperate_ones() {
+        let (gw, gh) = (480u32, 240u32);
+        let mut buf = blank_world_sized(gw, gh);
+        // Two land bands at MIRRORED latitudes — one hot desert, one oceanic temperate —
+        // with ocean elsewhere. Mirroring matters: province area is measured in real km²,
+        // so a band nearer a pole holds geographically smaller cells and the comparison
+        // would be measuring latitude rather than climate.
+        let (arid_lo, arid_hi) = (gh * 25 / 100, gh * 40 / 100);
+        let (temp_lo, temp_hi) = (gh * 60 / 100, gh * 75 / 100);
+        for y in 0..gh {
+            let arid = y >= arid_lo && y < arid_hi;
+            let temperate = y >= temp_lo && y < temp_hi;
+            for x in 0..gw {
+                let i = buf.idx(x, y);
+                buf.terrain[i] = if arid || temperate { 1 } else { 0 };
+                buf.elevation[i] = (((x * 7 + y * 13) % 11) as f32) / 60.0;
+                buf.koppen[i] = if arid { crate::sim::koppen::BWH } else { crate::sim::koppen::CFB };
+            }
+        }
+        let towns = vec![settle("a", 30, temp_lo + 4, 9000), settle("b", 300, arid_lo + 4, 7000)];
+        let (provs, _) = generate_provinces(&buf, &[], &[], &towns, 0.0);
+        assert!(provs.len() > 12, "need a populated map, got {}", provs.len());
+
+        let mean = |v: &[f64]| if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 };
+        let arid: Vec<f64> = provs.iter()
+            .filter(|p| p.koppen == crate::sim::koppen::BWH)
+            .map(|p| p.area_km2 as f64).collect();
+        let temperate: Vec<f64> = provs.iter()
+            .filter(|p| p.koppen == crate::sim::koppen::CFB)
+            .map(|p| p.area_km2 as f64).collect();
+        assert!(arid.len() >= 3 && temperate.len() >= 3,
+            "need both climates represented (arid {} · temperate {})", arid.len(), temperate.len());
+        let (ma, mt) = (mean(&arid), mean(&temperate));
+        eprintln!("mean area: arid {ma:.0} km² ({} provinces) · temperate {mt:.0} km² ({} provinces) — ratio {:.2}",
+                  arid.len(), temperate.len(), ma / mt.max(1.0));
+        assert!(ma > 2.0 * mt,
+            "the arid band should hold much larger provinces (arid {ma:.0} vs temperate {mt:.0})");
+        assert!(ma < 12.0 * mt,
+            "the arid band ran away to near-continental provinces (arid {ma:.0} vs temperate {mt:.0})");
+        // …but a desert is still a set of provinces, not one blob covering the band.
+        assert!(arid.len() >= 4, "the desert collapsed into {} province(s)", arid.len());
     }
 
     /// Every land cell must end up owned, and the new stats must be self-consistent —

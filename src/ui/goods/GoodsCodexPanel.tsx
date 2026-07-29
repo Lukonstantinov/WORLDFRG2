@@ -52,7 +52,7 @@ export function GoodsCodexPanel() {
     if (open && !codexGood && goodIds.length > 0) setCodexGood(goodIds[0]);
   }, [open, codexGood, goodIds, setCodexGood]);
 
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.goodbrowser);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.goodbrowser);
   if (!open) return null;
   const close = () => {
     setOverlayVisible("goodScarcity", false);
@@ -84,7 +84,7 @@ export function GoodsCodexPanel() {
   const toggleScarcity = () => setOverlayVisible("goodScarcity", !scarcityOn);
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
+    <div data-draggable {...dragRoot} style={{ ...panel, ...rootStyle }}>
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>📖 Goods Codex</span>
         <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>

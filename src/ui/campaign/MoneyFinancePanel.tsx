@@ -67,7 +67,7 @@ export function MoneyFinancePanel() {
   const setCoinOverlay = useUIStore((s) => s.setCoinOverlayHub);
   const showRiskOverlay = () => useUIStore.getState().setOverlayVisible("speculation", true);
 
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.coin);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.coin);
 
   // Unique coin-holding city positions — the "coined world" backdrop for minimaps.
   // MUST be before any early return to satisfy the Rules of Hooks.
@@ -94,7 +94,7 @@ export function MoneyFinancePanel() {
   ] as const;
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
+    <div data-draggable {...dragRoot} style={{ ...panel, ...rootStyle }}>
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>💰 Money &amp; Finance</span>
         <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>

@@ -20,7 +20,7 @@ export function HydrologyPanel() {
   const setRiverHighlight = useUIStore((s) => s.setRiverHighlight);
   const setRiverHighlightColors = useUIStore((s) => s.setRiverHighlightColors);
 
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.hydrology);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.hydrology);
 
   const [systems, setSystems] = useState<RiverNode[]>([]);
   const [loading, setLoading] = useState(false);
@@ -85,7 +85,7 @@ export function HydrologyPanel() {
   const byId = new Map<number, RiverData>(rivers.map((r, i) => [i, r]));
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
+    <div data-draggable {...dragRoot} style={{ ...panel, ...rootStyle }}>
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>🌊 Hydrology</span>
         <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>

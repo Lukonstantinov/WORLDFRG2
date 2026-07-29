@@ -29,7 +29,7 @@ export function ProvinceInspector() {
 
   const [detail, setDetail] = useState<ProvinceDetail | null>(null);
   const [live, setLive] = useState<ProvinceLive | null>(null);
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.province);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.province);
 
   const p = useMemo(
     () => provinces.find((q) => q.id === selectedId) ?? null,
@@ -79,7 +79,7 @@ export function ProvinceInspector() {
   const nd = p.neighbors_detail ?? [];
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
+    <div data-draggable {...dragRoot} style={{ ...panel, ...rootStyle }}>
       {/* Header (drag handle) */}
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <strong style={{ fontSize: 14 }}>🏞 {p.name}</strong>

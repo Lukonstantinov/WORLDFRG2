@@ -55,11 +55,11 @@ export function NewsFeedPanel() {
     return [...filtered].sort((a, b) => b.tick - a.tick).slice(0, 200);
   }, [entries, cat]);
 
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.news);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.news);
   if (!open) return null;
 
   return (
-    <Panel width={320} maxHeight="70%" style={{ top: 70, right: 12, zIndex: 116, ...rootStyle }}>
+    <Panel {...dragRoot} width={320} maxHeight="70%" style={{ top: 70, right: 12, zIndex: 116, ...rootStyle }}>
       <PanelHeader icon="🗞" title="World News" onDragStart={onPointerDown} onClose={close} />
       <PanelBody style={{ display: "flex", flexDirection: "column", flex: 1, padding: `${SPACE.md}px ${SPACE.lg}px ${SPACE.lg}px` }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: SPACE.md }}>

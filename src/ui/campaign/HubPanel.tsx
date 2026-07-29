@@ -267,7 +267,7 @@ export function HubPanel() {
     }
   }, [detail]);
 
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.settlement);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.settlement);
   if (selectedHub === null || !economy || isConstruction) return null;
   const econHub = economy.hubs.find((h) => h.id === selectedHub);
   // In-campaign-founded hubs (swarm towns, finished satellites, independent
@@ -342,7 +342,7 @@ export function HubPanel() {
   ];
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle, width: tab === "trade" ? 600 : 360 }}>
+    <div data-draggable {...dragRoot} style={{ ...panel, ...rootStyle, width: tab === "trade" ? 600 : 360 }}>
       {/* ── Title + stats header (always visible; drag handle) ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, cursor: "move" }} onPointerDown={onPointerDown}>
         <div>

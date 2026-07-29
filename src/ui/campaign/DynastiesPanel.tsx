@@ -33,7 +33,7 @@ export function DynastiesPanel() {
 
   const rows = useMemo(() => (tab === "alliances" ? data.alliances : data.feuds), [data, tab]);
 
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.dynasties);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.dynasties);
   if (!open) return null;
 
   const focus = (hubIdx: number) => {
@@ -43,7 +43,7 @@ export function DynastiesPanel() {
   const stripHouse = (n: string) => n.replace(/^House /, "");
 
   return (
-    <Panel width={330} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
+    <Panel {...dragRoot} width={330} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
       <PanelHeader icon="⚭" title="Dynasties & Alliances" onDragStart={onPointerDown} onClose={close} />
       <PanelBody style={{ display: "flex", flexDirection: "column", flex: 1, padding: `${SPACE.md}px ${SPACE.lg}px ${SPACE.lg}px` }}>
         <div style={{ display: "flex", gap: SPACE.md, marginBottom: SPACE.md, fontSize: FZ.small, color: T.inkMid, alignItems: "center" }}>

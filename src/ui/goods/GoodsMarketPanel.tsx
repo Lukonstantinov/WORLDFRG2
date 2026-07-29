@@ -71,13 +71,13 @@ export function GoodsMarketPanel() {
     return [...r].sort((a, b) => { const ka = key[sort](a), kb = key[sort](b); return ka < kb ? -1 : ka > kb ? 1 : 0; });
   }, [rows, sort, manuOnly, tradedOnly]);
 
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.goods);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.goods);
   if (!open) return null;
   const close = () => useUIStore.getState().setShowGoodsWindow(false);
   const maxProd = Math.max(1, ...view.map((x) => x.produced));
 
   return (
-    <Panel width={470} maxHeight="80vh" style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
+    <Panel {...dragRoot} width={470} maxHeight="80vh" style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
       <PanelHeader icon="📦" title="Goods of the World — quality & trade" onDragStart={onPointerDown} onClose={close} />
       {!active && <EmptyNote>Begin the campaign (Step 11) — goods grade up as the world trades.</EmptyNote>}
       {active && (

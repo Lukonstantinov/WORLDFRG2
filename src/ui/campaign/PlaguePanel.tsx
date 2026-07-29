@@ -58,7 +58,7 @@ export function PlaguePanel() {
     return r.slice(0, 120);
   }, [rows, sort, activeOnly]);
 
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.plague);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.plague);
   if (!open) return null;
 
   const totalDead = rows.reduce((s, e) => s + e.total_dead, 0);
@@ -71,7 +71,7 @@ export function PlaguePanel() {
   };
 
   return (
-    <Panel width={340} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
+    <Panel {...dragRoot} width={340} maxHeight="72%" style={{ top: 70, right: 12, zIndex: 117, ...rootStyle }}>
       <PanelHeader icon="☠" title="Plagues & Epidemics" onDragStart={onPointerDown} onClose={close} />
       <PanelBody style={{ display: "flex", flexDirection: "column", flex: 1, padding: `${SPACE.md}px ${SPACE.lg}px ${SPACE.lg}px` }}>
         <div style={{ display: "flex", gap: SPACE.md, marginBottom: SPACE.md, fontSize: FZ.small, color: T.inkMid, alignItems: "center" }}>

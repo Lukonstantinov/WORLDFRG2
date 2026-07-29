@@ -45,7 +45,7 @@ export function FuturesPanel() {
       || r.a_name.toLowerCase().includes(s) || r.b_name.toLowerCase().includes(s));
   }, [rows, q]);
 
-  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.futures);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(PANEL_TINTS.futures);
   if (!open) return null;
   const fmt = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
   const total = filtered.reduce((a, r) => a + r.qty, 0);
@@ -53,7 +53,7 @@ export function FuturesPanel() {
   const focusLabel = focus?.city ?? focus?.holder ?? focus?.good ?? null;
 
   return (
-    <Panel width={312} maxHeight="78vh" style={{ top: 60, right: 360, zIndex: 42, ...rootStyle }}>
+    <Panel {...dragRoot} width={312} maxHeight="78vh" style={{ top: 60, right: 360, zIndex: 42, ...rootStyle }}>
       <PanelHeader icon="📜" title="Futures Contracts" onDragStart={onPointerDown} onClose={() => setOpen(false)} />
       <div style={{ padding: "6px 8px", borderBottom: `1px solid ${T.line}`, display: "flex", gap: 6, alignItems: "center", flex: "0 0 auto" }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="filter city / good / house…" data-no-drag

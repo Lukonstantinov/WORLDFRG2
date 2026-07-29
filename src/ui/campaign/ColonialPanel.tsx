@@ -89,12 +89,12 @@ export function ColonialPanel() {
     return { settle: settle.length, outposts: outposts.length, autonomous, stressed, metros };
   }, [colonies]);
 
-  const { rootStyle, onPointerDown } = useFloatingWindow(COLONIAL_TINT);
+  const { rootStyle, onPointerDown, dragRoot } = useFloatingWindow(COLONIAL_TINT);
   if (!open) return null;
   const close = () => useUIStore.getState().setShowColonial(false);
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle }}>
+    <div data-draggable {...dragRoot} style={{ ...panel, ...rootStyle }}>
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>🏛 Colonial Office & Expeditions</span>
         <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
