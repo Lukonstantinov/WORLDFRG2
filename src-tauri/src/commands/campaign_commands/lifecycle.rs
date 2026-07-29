@@ -808,6 +808,22 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         hub_province: vec![],
         prov_net_mig: vec![],
         prov_neighbors: vec![],
+        feuds: vec![],
+        prov_forest: vec![],
+        prov_arable: vec![],
+        prov_pasture: vec![],
+        prov_irrigated: vec![],
+        prov_soil: vec![],
+        prov_tenure: vec![],
+        prov_tax: vec![],
+        prov_arrears: vec![],
+        prov_unrest: vec![],
+        prov_surplus: vec![],
+        prov_revenue: vec![],
+        prov_holder: vec![],
+        prov_works: vec![],
+        prov_history: vec![],
+        prov_events: vec![],
     };
     // Backfill the colonization pool if the saved economy predates the feature (its
     // `colonizable_sites` deserialized to the serde default — empty). Without this a
@@ -907,6 +923,64 @@ fn seed_campaign_provinces(conn: &Connection, sim: &mut CampaignSim) {
     sim.hub_province = hub_prov;
     sim.prov_net_mig = vec![0.0; n];
     sim.prov_neighbors = neighbors;
+    seed_province_land(&provs, n, sim);
+}
+
+/// B1 · seed each province's mutable LAND state from the geography the world half
+/// already computed. `CampaignSim::ensure_province_land` has a cap-based fallback for
+/// provinces that arrive without this (a mid-campaign partition, an older save), but
+/// the real Köppen/fertility/aridity figures give a far better starting landscape —
+/// a wet temperate valley starts wooded, a steppe starts open, and neither is a guess.
+fn seed_province_land(provs: &[crate::sim::provinces::Province], n: usize, sim: &mut CampaignSim) {
+    let mut forest = vec![0.0f32; n];
+    let mut arable = vec![0.0f32; n];
+    let mut pasture = vec![0.0f32; n];
+    let mut soil = vec![0.6f32; n];
+    let mut tenure = vec![[0.18f32, 0.10, 0.09, 0.63]; n];
+    for p in provs {
+        let i = p.id as usize;
+        if i >= n { continue; }
+        // Aridity is the first control on tree cover; the Köppen main class carries the
+        // rest (A wet-forested, B open, C/D forested, E barren).
+        let arid = p.arid_frac.clamp(0.0, 1.0);
+        let main = p.koppen_shares.first().map(|(k, _)| *k).unwrap_or(p.koppen);
+        let climate_wood = match main {
+            // Codes are Köppen zone ids; group by the class letter the id falls in.
+            k if k <= 3 => 0.78,   // A — tropical
+            k if k <= 8 => 0.16,   // B — arid
+            k if k <= 17 => 0.62,  // C — temperate
+            k if k <= 29 => 0.66,  // D — continental
+            _ => 0.06,             // E — polar / highland
+        };
+        let fert = p.mean_fertility.clamp(0.0, 1.0);
+        let upland = match p.elevation_class { 0 => 1.0, 1 => 0.85, _ => 0.6 };
+        forest[i] = (climate_wood * (1.0 - 0.7 * arid) * upland).clamp(0.02, 0.85);
+        // Cleared land at campaign start scales with how much of the province the
+        // countryside already works — good land is already partly under the plough.
+        arable[i] = (0.06 + 0.34 * fert * (1.0 - arid)).clamp(0.02, 0.45)
+            .min((1.0 - forest[i]).max(0.02));
+        pasture[i] = ((1.0 - forest[i] - arable[i]).max(0.0) * 0.55).clamp(0.0, 1.0);
+        soil[i] = (0.42 + 0.50 * fert).clamp(0.30, 0.95);
+        // A province with a big seat city has more of its land already in private and
+        // civic hands; a frontier is mostly common.
+        let settled = (p.settlements.len() as f32 / 4.0).clamp(0.0, 1.0);
+        tenure[i] = [0.14 + 0.12 * settled, 0.06 + 0.14 * settled, 0.08, 0.0];
+        tenure[i][3] = (1.0 - tenure[i][0] - tenure[i][1] - tenure[i][2]).clamp(0.0, 1.0);
+    }
+    sim.prov_forest = forest;
+    sim.prov_arable = arable;
+    sim.prov_pasture = pasture;
+    sim.prov_irrigated = vec![0.0; n];
+    sim.prov_soil = soil;
+    sim.prov_tenure = tenure;
+    sim.prov_tax = vec![0.12; n];
+    sim.prov_arrears = vec![0.0; n];
+    sim.prov_unrest = vec![0.0; n];
+    sim.prov_surplus = vec![0.0; n];
+    sim.prov_revenue = vec![0.0; n];
+    sim.prov_holder = vec![-1; n];
+    sim.prov_history = vec![Vec::new(); n];
+    sim.prov_events = vec![Vec::new(); n];
 }
 
 /// Nearest province seat to (x,y), cylindrical in X. -1 if no seats.

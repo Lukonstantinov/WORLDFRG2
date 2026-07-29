@@ -1785,8 +1785,10 @@ impl CampaignSim {
             let broke = hash01(self.seed, (yr as u64) ^ ((a as u64) << 20) ^ (b as u64), 0xF00D)
                 < MARRIAGE_BREAK_CHANCE;
             if broke && !self.houses[ua].defunct && !self.houses[ub].defunct {
-                if !self.houses[ua].rivals.contains(&ub) { self.houses[ua].rivals.push(ub); }
-                if !self.houses[ub].rivals.contains(&ua) { self.houses[ub].rivals.push(ua); }
+                // A soured match is its own kind of feud, and a hot one: it starts well
+                // above the temperature a mere trade rivalry does.
+                let (_, good, hub) = self.feud_overlap(ua, ub);
+                self.open_feud(ua, ub, FEUD_MARRIAGE, good, hub, 0.45);
                 let (na, nb) = (self.houses[ua].name.clone(), self.houses[ub].name.clone());
                 self.journal.push(JournalEntry {
                     tick: self.tick, kind: "feud".into(), hub: self.houses[ua].hub as i32,
@@ -1820,7 +1822,10 @@ impl CampaignSim {
         if a == b { return; }
         let (lo, hi) = if a < b { (a as u32, b as u32) } else { (b as u32, a as u32) };
         if self.alliances.contains(&(lo, hi)) { return; } // already wed
-        // End any feud, seal the alliance.
+        // End any feud, seal the alliance. A match is the classic way two merchant
+        // families ended a quarrel, so it is recorded as the feud's OUTCOME rather than
+        // just quietly dropping the rival entries.
+        if let Some(fi) = self.feud_between(a, b) { self.close_feud(fi, FEUD_WED); }
         self.houses[a].rivals.retain(|&r| r != b);
         self.houses[b].rivals.retain(|&r| r != a);
         self.alliances.push((lo, hi));
@@ -2240,7 +2245,12 @@ impl CampaignSim {
             // Local line's debt-based solvency check supersedes the old volume-based
             // dissolve (a house in the red ≥1yr goes bankrupt; guilds get bailouts).
             self.update_solvency();
+            // Feuds: heat/cool each live quarrel by how much the two houses still get
+            // in each other's way, re-derive its stage, and let it flare. Runs over the
+            // BOUNDED feud list, so unlike formation (below) it is not O(houses²).
+            self.update_feuds();
         }
+        // Feud FORMATION keeps the old half-yearly cadence — it is the O(n²) pair scan.
         if tick % 180 == 0 { self.update_rivalries(); }
     }
 
@@ -2775,6 +2785,9 @@ impl CampaignSim {
             }
         }
         self.warehouses.retain(|w| w.owner != hi as i32);
+        // Every quarrel this family was part of ends in its ruin — recorded as the
+        // feud's outcome so the survivor's record shows how it won.
+        self.end_feuds_of(hi);
         self.houses[hi].events.push(HouseEvent {
             tick, kind: "dissolved".into(),
             text: "Fell into ruin and was dissolved".into(),

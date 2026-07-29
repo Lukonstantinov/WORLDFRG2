@@ -469,6 +469,10 @@ impl CampaignSim {
             // its cities (migration carries culture); big cities pay a graveyard mortality.
             // No-op unless a province layer was seeded into the campaign.
             self.province_demography_pass();
+            // B1 · then the LAND itself: woodland cleared, soil worn or rested, works
+            // advanced, the harvest taken, dues collected — and the surplus delivered
+            // into the seat city's granary and treasury. Also a no-op without provinces.
+            self.province_land_pass(self.tick / TICKS_PER_YEAR);
             // Yearly social mobility: strata shift with prosperity / hardship.
             self.update_society();
             // Then the people may stir: unrest builds, riots flare, revolts topple

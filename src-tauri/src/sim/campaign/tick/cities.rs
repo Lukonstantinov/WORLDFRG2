@@ -162,6 +162,355 @@ impl CampaignSim {
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  PROVINCE LAND STATE  (FIX_PLAN B1 — the feedback edge)
+    //
+    //  `province_demography_pass` above moves PEOPLE from the countryside into the
+    //  cities. It does not move GRAIN, and nothing in the campaign ever reads the land
+    //  back. That is the gap B1 names: five centuries pass and the world is identical,
+    //  because the only thing the campaign knows about a province is how many people
+    //  stand on it.
+    //
+    //  This pass gives the land state that CHANGES and then feeds it back:
+    //
+    //    woodland ⇄ arable   population pressure clears forest; abandoned land regrows
+    //    soil                depletes under intensive cropping, recovers on fallow
+    //    surplus  ────────►  the seat city's FOOD STOCK (the feedback edge)
+    //    dues     ────────►  the holder's TREASURY (rural fiscality — the base every
+    //                        pre-modern polity actually ran on, and which this model
+    //                        previously lacked entirely: city treasuries came from
+    //                        tariffs and seigniorage alone)
+    //    unrest              from crowding, taxation and tenure concentration; every
+    //                        major pre-modern revolt was rural, and unrest here was
+    //                        a city-only property
+    //
+    //  Entirely gated on a seeded province layer — `prov_rural.is_empty()` returns at
+    //  once — so a campaign without provinces (including the dynamics test) is
+    //  bit-identical. Cost is O(provinces) once a year.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Yearly · the land is worked, worn, improved and taxed, and what it yields above
+    /// subsistence is delivered to the city that administers it.
+    pub(crate) fn province_land_pass(&mut self, yr: u32) {
+        let np = self.prov_rural.len();
+        if np == 0 { return; }
+        self.ensure_province_land(np);
+        let ng = self.goods.len();
+        // The staple the countryside actually grows and the city actually eats.
+        let food_good = (0..ng).find(|&g| self.goods[g].food);
+        // Urban population per province, for the tenure/holder logic and the sample.
+        let mut urban = vec![0.0f32; np];
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            if let Some(&pid) = self.hub_province.get(h) {
+                if pid >= 0 && (pid as usize) < np { urban[pid as usize] += self.hubs[h].population; }
+            }
+        }
+        for p in 0..np {
+            let cap = self.prov_cap[p].max(1.0);
+            let rural = self.prov_rural[p].max(0.0);
+            let pressure = (rural / cap).clamp(0.0, 2.0);
+
+            // ── 1. Land use. People with mouths to feed clear woodland; land nobody
+            //    works grows back. Clearance is bounded by what is left and by a floor
+            //    (the steep, the wet and the sacred are never fully cleared).
+            let forest = self.prov_forest[p];
+            let arable = self.prov_arable[p];
+            let want = (pressure - 0.55).max(0.0); // only a crowded countryside clears
+            let cleared = (PROV_CLEAR_RATE * want).min((forest - 0.05).max(0.0));
+            let abandoned = if pressure < 0.45 { PROV_REGROW_RATE * (0.45 - pressure) * 2.0 } else { 0.0 };
+            let regrow = abandoned.min((arable - 0.02).max(0.0));
+            self.prov_forest[p] = (forest - cleared + regrow).clamp(0.0, 1.0);
+            self.prov_arable[p] = (arable + cleared - regrow).clamp(0.0, 1.0);
+            // Pasture takes the slack between crop and wood.
+            self.prov_pasture[p] =
+                (1.0 - self.prov_forest[p] - self.prov_arable[p]).clamp(0.0, 1.0) * 0.55;
+
+            // ── 2. Soil. Cropping intensity is people per unit of arable, not raw
+            //    population — the same crowd on twice the land wears it half as fast,
+            //    which is why clearance buys time and irrigation buys more.
+            let arable_now = self.prov_arable[p].max(0.02);
+            let intensity = (pressure / (arable_now / 0.35).max(0.35)).clamp(0.0, 2.0);
+            let irr = self.prov_irrigated[p].clamp(0.0, 1.0);
+            let wear = PROV_DEPLETE * intensity * (1.0 - 0.45 * irr);
+            let heal = PROV_RECOVER * (1.0 - (intensity / 1.4).min(1.0));
+            self.prov_soil[p] = (self.prov_soil[p] - wear + heal).clamp(PROV_SOIL_FLOOR, 1.0);
+
+            // ── 3. Works under way (clearance / drainage / irrigation / road).
+            //    Handled per-province below so its progress lands before the harvest.
+            self.advance_province_works(p, yr);
+
+            // ── 4. The harvest. Land quality × soil condition × irrigation, against
+            //    what the countryside eats itself. A province whose soil is exhausted
+            //    and whose people are many produces NOTHING to spare — which is the
+            //    Malthusian squeeze the demography pass was already half-modelling.
+            // The multiplier is CENTRED ON 1.0 for ordinary land — soil in good heart and
+            // the province's typical share under the plough. Getting this wrong is not a
+            // flavour error: the first cut averaged ~0.7, which put gross output below
+            // rural subsistence on decent land, so NO province ever had a surplus and the
+            // feedback edge silently delivered nothing. The surplus share it now yields
+            // (~20-25% of gross on average land) is the band that supports the 10-20%
+            // urbanisation rates the economy oracle scores against.
+            let soil_term = 0.50 + 0.50 * self.prov_soil[p];
+            let arable_term = (arable_now / PROV_ARABLE_REFERENCE).clamp(0.30, 1.60);
+            let land = soil_term * arable_term * (1.0 + PROV_IRRIGATION_GAIN * irr);
+            let gross = rural * PROV_YIELD_PER_HEAD * land.clamp(0.15, 2.0);
+            let eaten = rural * PROV_SUBSISTENCE;
+            let surplus = (gross - eaten).max(0.0);
+            self.prov_surplus[p] = surplus;
+
+            // ── 5. Dues. The holder taxes the surplus; unrest and distance turn part
+            //    of it into arrears rather than revenue.
+            let rate = self.prov_tax[p].clamp(0.0, PROV_TAX_MAX);
+            let unrest = self.prov_unrest[p].clamp(0.0, 1.0);
+            let assessed = surplus * rate;
+            let evaded = assessed * (0.15 + 0.55 * unrest)
+                * if unrest > PROV_REVOLT_AT { PROV_REVOLT_LOSS } else { 0.35 };
+            let collected = (assessed - evaded).max(0.0);
+            self.prov_arrears[p] = (self.prov_arrears[p] + evaded) * 0.85; // old arrears fade
+            self.prov_revenue[p] = collected;
+
+            // ── 6. Delivery — THE FEEDBACK EDGE. What the land grew above subsistence
+            //    and above the tax reaches the seat city's granary; the dues reach its
+            //    treasury. This is the contado feeding its city, and it is the first
+            //    thing in the campaign that makes a hinterland matter as land rather
+            //    than as a population reservoir.
+            let holder = self.province_seat_hub(p);
+            if let Some(seat) = holder {
+                let to_market = (surplus - collected).max(0.0);
+                if let Some(fg) = food_good {
+                    if self.hubs[seat].stock.len() > fg {
+                        self.hubs[seat].stock[fg] += to_market;
+                    }
+                }
+                self.hubs[seat].treasury += collected;
+                self.prov_holder[p] = seat as i32;
+            } else {
+                self.prov_holder[p] = -1;
+            }
+
+            // ── 7. Tenure drifts toward who actually holds the land. Every estate a
+            //    house founds here converts common land into a private holding — the
+            //    engrossment that drove enclosure and the second serfdom alike. Slow,
+            //    and it eases back when houses withdraw.
+            {
+                let mut house_land = 0.0f32;
+                for h in 0..self.hubs.len() {
+                    if !self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+                    if self.hub_province.get(h).copied().unwrap_or(-1) != p as i32 { continue; }
+                    if self.hubs[h].owner_house >= 0 { house_land += 0.04; }
+                }
+                let target = house_land.min(0.60);
+                let t = &mut self.prov_tenure[p];
+                let shift = (target - t[1]) * 0.10;
+                t[1] = (t[1] + shift).clamp(0.0, 0.75);
+                // The commons absorb the change; civic and temple shares hold.
+                t[3] = (1.0 - t[0] - t[1] - t[2]).clamp(0.0, 1.0);
+            }
+
+            // ── 8. Unrest. Crowding, taxation beyond what is tolerated, a failed
+            //    harvest, and land concentrated in few hands. Calms when none apply.
+            let tenure = self.prov_tenure[p];
+            let concentration = (tenure[1] - 0.35).max(0.0); // house/noble share above a third
+            let dearth = if gross < eaten * 1.02 { 1.0 } else { 0.0 };
+            let crowd = (pressure - 1.0).max(0.0);
+            let up = PROV_UNREST_CROWD * crowd
+                + PROV_UNREST_TAX * (rate - PROV_TAX_TOLERATED).max(0.0)
+                + PROV_UNREST_DEARTH * dearth
+                + 0.25 * concentration;
+            let next = if up > 0.0 { unrest + up } else { unrest - PROV_UNREST_CALM };
+            self.prov_unrest[p] = next.clamp(0.0, 1.0);
+
+            // ── 9. Revolt. The countryside rises: dues stop, the seat's mood suffers,
+            //    and the province remembers it.
+            if self.prov_unrest[p] >= PROV_REVOLT_AT {
+                let roll = hash01(self.seed, yr as u64 ^ 0x5EED, p as u64);
+                if roll < 0.35 {
+                    self.prov_unrest[p] = (self.prov_unrest[p] - 0.30).max(0.0);
+                    self.prov_revenue[p] = 0.0;
+                    if let Some(seat) = holder {
+                        self.hubs[seat].sent_stability = (self.hubs[seat].sent_stability - 0.18).max(0.0);
+                        let (pn, sn) = (self.province_name(p), self.hubs[seat].name.clone());
+                        self.push_prov_event(p, yr, "revolt",
+                            format!("The countryside rose against {} — dues went uncollected", sn));
+                        self.journal.push(JournalEntry {
+                            tick: self.tick, kind: "revolt".into(), hub: seat as i32, good: -1,
+                            value: 0.0,
+                            text: format!("The countryside of {} rises against the dues of {}", pn, sn),
+                        });
+                    }
+                }
+            } else if dearth > 0.0 && rural > 40.0 {
+                let roll = hash01(self.seed, yr as u64 ^ 0xDEA2, p as u64);
+                if roll < 0.20 {
+                    let pn = self.province_name(p);
+                    self.push_prov_event(p, yr, "dearth",
+                        format!("A failed harvest in {} — the land fed no-one but itself", pn));
+                }
+            }
+
+            // ── 10. Sample the year for the panel's time slider.
+            let s = ProvSample {
+                year: yr, rural, urban: urban[p],
+                forest: self.prov_forest[p], arable: self.prov_arable[p],
+                pasture: self.prov_pasture[p], irrigated: self.prov_irrigated[p],
+                soil: self.prov_soil[p], unrest: self.prov_unrest[p],
+                surplus: self.prov_surplus[p],
+            };
+            let hist = &mut self.prov_history[p];
+            hist.push(s);
+            if hist.len() > PROV_HISTORY_CAP { let d = hist.len() - PROV_HISTORY_CAP; hist.drain(0..d); }
+        }
+    }
+
+    /// Grow the land-state vectors to `np` and seed any province that has none yet.
+    /// Called from the land pass rather than only at campaign start, so a province
+    /// layer joined mid-campaign (or a save written before this existed) fills in.
+    pub(crate) fn ensure_province_land(&mut self, np: usize) {
+        if self.prov_forest.len() >= np && self.prov_history.len() >= np { return; }
+        // Initial land use from what the world half already knows: fertile, wet, low
+        // country starts largely wooded with a modest clearing around the seat; arid or
+        // upland country starts open. `prov_cap` is the land's food potential, which is
+        // the best proxy the campaign holds for all of it.
+        let cap_max = self.prov_cap.iter().copied().fold(1.0f32, f32::max);
+        let seed_one = |p: usize, cap: f32| -> (f32, f32, f32) {
+            let quality = (cap / cap_max).clamp(0.0, 1.0);
+            let forest = (0.20 + 0.55 * quality).clamp(0.05, 0.80);
+            // Arable must fit in what the woodland leaves — the two are shares of the
+            // SAME province. Without this cap the fallback seeding could hand out
+            // forest 0.75 + arable 0.38 = 1.13 of a province, which
+            // `province_land_pass_feeds_the_seat_and_stays_bounded` catches.
+            let arable = (0.08 + 0.30 * quality).clamp(0.03, 0.45).min((1.0 - forest).max(0.02));
+            let soil = (0.55 + 0.35 * quality).clamp(0.35, 0.95);
+            (forest, arable, soil)
+        };
+        for p in self.prov_forest.len()..np {
+            let cap = self.prov_cap.get(p).copied().unwrap_or(1.0);
+            let (f, a, s) = seed_one(p, cap);
+            self.prov_forest.push(f);
+            self.prov_arable.push(a);
+            self.prov_pasture.push(((1.0 - f - a).max(0.0) * 0.55).clamp(0.0, 1.0));
+            self.prov_irrigated.push(0.0);
+            self.prov_soil.push(s);
+            // Tenure: mostly common land with a civic and a temple share, the
+            // house/noble share growing later as estates are actually founded here.
+            self.prov_tenure.push([0.18, 0.10, 0.09, 0.63]);
+            self.prov_tax.push(PROV_TAX_DEFAULT);
+            self.prov_arrears.push(0.0);
+            self.prov_unrest.push(0.0);
+            self.prov_surplus.push(0.0);
+            self.prov_revenue.push(0.0);
+            self.prov_holder.push(-1);
+        }
+        // The remaining vectors are plain per-province containers.
+        if self.prov_history.len() < np { self.prov_history.resize(np, Vec::new()); }
+        if self.prov_events.len() < np { self.prov_events.resize(np, Vec::new()); }
+    }
+
+    /// The hub that administers province `p`: its largest live member city. Returns
+    /// `None` for a province with no standing town (a frontier — nobody collects there).
+    pub(crate) fn province_seat_hub(&self, p: usize) -> Option<usize> {
+        let mut best: Option<(usize, f32)> = None;
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            if self.hub_province.get(h).copied().unwrap_or(-1) != p as i32 { continue; }
+            let pop = self.hubs[h].population;
+            // Ties break on the LOWER hub index so the seat is order-independent.
+            if best.map(|(_, bp)| pop > bp).unwrap_or(true) { best = Some((h, pop)); }
+        }
+        best.map(|(h, _)| h)
+    }
+
+    /// A province's display name — its seat city's, falling back to its culture. The
+    /// campaign does not carry the worldgen province names (they live in `metadata`),
+    /// so the chronicle names the place by the town that speaks for it.
+    pub(crate) fn province_name(&self, p: usize) -> String {
+        if let Some(h) = self.province_seat_hub(p) {
+            return format!("the {} country", self.hubs[h].name);
+        }
+        match self.prov_culture.get(p) {
+            Some(c) if !c.is_empty() => format!("the {} country", c),
+            _ => format!("province {}", p),
+        }
+    }
+
+    /// Append to a province's own chronicle (bounded).
+    pub(crate) fn push_prov_event(&mut self, p: usize, yr: u32, kind: &str, text: String) {
+        if self.prov_events.len() <= p { self.prov_events.resize(p + 1, Vec::new()); }
+        let v = &mut self.prov_events[p];
+        v.push(ProvEvent { year: yr, kind: kind.to_string(), text });
+        if v.len() > PROV_EVENTS_CAP { let d = v.len() - PROV_EVENTS_CAP; v.drain(0..d); }
+    }
+
+    /// Advance every land improvement under way in province `p`. Funded out of the
+    /// funder's treasury (a polis) or wealth (a house); unpaid work STALLS and slowly
+    /// decays rather than failing outright — the same forgiving shape the satellite
+    /// construction system uses, and for the same reason: a project the player cannot
+    /// see failing is a project they cannot learn from.
+    fn advance_province_works(&mut self, p: usize, yr: u32) {
+        let idx: Vec<usize> = self.prov_works.iter().enumerate()
+            .filter(|(_, w)| w.province as usize == p && w.progress < 1.0)
+            .map(|(i, _)| i).collect();
+        for wi in idx {
+            let kind = self.prov_works[wi].kind as usize;
+            if kind >= WORK_KINDS.len() { continue; }
+            let cost = WORK_COST[kind];
+            // Draw the year's cost. A polis pays from its treasury, a house from wealth.
+            let paid = {
+                let fh = self.prov_works[wi].funder_hub;
+                let fs = self.prov_works[wi].funder_house;
+                if fh >= 0 && (fh as usize) < self.hubs.len() && self.hubs[fh as usize].treasury >= cost {
+                    self.hubs[fh as usize].treasury -= cost; true
+                } else if fs >= 0 && (fs as usize) < self.houses.len()
+                    && self.houses[fs as usize].wealth >= cost * 1.5 {
+                    self.houses[fs as usize].wealth -= cost; true
+                } else { false }
+            };
+            if !paid {
+                let w = &mut self.prov_works[wi];
+                w.idle_years += 1;
+                if w.idle_years > 2 { w.progress = (w.progress - 0.05).max(0.0); }
+                continue;
+            }
+            let step = 1.0 / WORK_YEARS[kind].max(1.0);
+            let w = &mut self.prov_works[wi];
+            w.idle_years = 0;
+            w.progress = (w.progress + step).min(1.0);
+            if w.progress < 1.0 { continue; }
+            // Completed — apply the improvement to the land.
+            let k = w.kind;
+            match k {
+                WORK_CLEAR => {
+                    let take = self.prov_forest[p].min(0.10);
+                    self.prov_forest[p] -= take;
+                    self.prov_arable[p] = (self.prov_arable[p] + take).min(1.0);
+                }
+                WORK_DRAIN => {
+                    self.prov_arable[p] = (self.prov_arable[p] + 0.08).min(1.0);
+                    self.prov_soil[p] = (self.prov_soil[p] + 0.06).min(1.0);
+                }
+                WORK_IRRIGATE => {
+                    self.prov_irrigated[p] = (self.prov_irrigated[p] + 0.25).min(1.0);
+                }
+                _ => {
+                    // A made road: dues arrive instead of vanishing into arrears, and
+                    // the countryside is less sullen about paying them.
+                    self.prov_arrears[p] *= 0.5;
+                    self.prov_unrest[p] = (self.prov_unrest[p] - 0.08).max(0.0);
+                }
+            }
+            let pn = self.province_name(p);
+            let label = WORK_KINDS[k as usize];
+            self.push_prov_event(p, yr, label, format!("{} completed in {}", label, pn));
+            self.journal.push(JournalEntry {
+                tick: self.tick, kind: "public_works".into(),
+                hub: self.prov_works[wi].funder_hub, good: -1, value: 0.0,
+                text: format!("{} completed in {}", label, pn),
+            });
+        }
+        self.prov_works.retain(|w| w.progress < 1.0);
+    }
+
     /// The province id a world cell (x,y) falls in, via the nearest seat (used to place
     /// campaign-founded hubs). -1 when no province layer is seeded.
     pub(crate) fn province_at(&self, x: f32, y: f32) -> i32 {
@@ -537,7 +886,7 @@ impl CampaignSim {
     /// income balances the sinks instead of compounding without end.
     /// A city-size multiplier on a warehouse's keep — a depot in a great entrepôt
     /// costs far more (rents, wages, guards) than one in a market town.
-    pub(crate) fn city_size_factor(&self, hub: usize) -> f32 {
+    pub fn city_size_factor(&self, hub: usize) -> f32 {
         let pop = self.hubs.get(hub).map(|h| h.population).unwrap_or(30_000.0);
         (pop / 30_000.0).clamp(0.3, 4.0)
     }

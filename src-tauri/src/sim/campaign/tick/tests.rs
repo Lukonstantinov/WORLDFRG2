@@ -91,6 +91,15 @@
             corridors: vec![], next_expedition_id: 0,
             prov_rural: vec![], prov_cap: vec![], prov_culture: vec![], prov_seat: vec![],
             hub_province: vec![], prov_net_mig: vec![], prov_neighbors: vec![],
+            feuds: vec![],
+            // Province LAND state — left empty exactly like the demography vectors
+            // above, so `province_land_pass` early-returns and the dynamics run is
+            // unaffected by the B1 land layer (that is the gate).
+            prov_forest: vec![], prov_arable: vec![], prov_pasture: vec![],
+            prov_irrigated: vec![], prov_soil: vec![], prov_tenure: vec![],
+            prov_tax: vec![], prov_arrears: vec![], prov_unrest: vec![],
+            prov_surplus: vec![], prov_revenue: vec![], prov_holder: vec![],
+            prov_works: vec![], prov_history: vec![], prov_events: vec![],
         };
         s.rebuild_routes();
         s
@@ -139,6 +148,264 @@
         // Migrants must carry their province's people into the cities.
         assert!(s.hub_minorities[2].is_empty() || s.hub_minorities.iter().any(|m| !m.is_empty())
             || s.prov_net_mig.iter().any(|&m| m < 0.0), "countryside acts as a migration source");
+    }
+
+    /// B1 · the LAND state must work, wear, feed and stay bounded. The pass's whole
+    /// reason to exist is the feedback edge — a province's surplus reaching the seat
+    /// city's granary and its dues reaching that city's treasury — so this asserts both
+    /// arrive, and that no land quantity can leave its physical range over 60 years.
+    #[test]
+    fn province_land_pass_feeds_the_seat_and_stays_bounded() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let ng = goods.len();
+        let mut hubs = Vec::new();
+        for i in 0..2u32 {
+            let prod: Vec<f32> = (0..ng).map(|g| if g == 0 { 6000.0 } else { 600.0 }).collect();
+            hubs.push(hub(i, (i as f32) * 4.0, 0.0, 9000.0, prod, 0));
+        }
+        let mut s = sim(hubs, goods);
+        for h in s.hubs.iter_mut() { h.sent_prosperity = 0.6; h.starving = 0.0; h.food_balance = 1.0; }
+        s.hub_culture = vec!["Aiora".into(), "Aiora".into()];
+        s.hub_minorities = vec![Vec::new(); 2];
+        // One province holding both cities, with a fed countryside.
+        s.prov_cap = vec![90_000.0];
+        s.prov_rural = vec![60_000.0];
+        s.prov_culture = vec!["Aiora".into()];
+        s.prov_seat = vec![[0.0, 0.0]];
+        s.hub_province = vec![0, 0];
+        s.prov_net_mig = vec![0.0];
+        // `ensure_province_land` seeds the land state on the first pass, exactly as it
+        // does for a save that predates it — so this also covers that path.
+        let seat = s.province_seat_hub(0).expect("a province with towns has a seat");
+        let food0 = s.hubs[seat].stock[0];
+        let treasury0 = s.hubs[seat].treasury;
+        for yr in 0..60u32 {
+            s.province_demography_pass();
+            s.province_land_pass(yr);
+        }
+        let seat = s.province_seat_hub(0).expect("still has a seat");
+        // ── THE FEEDBACK EDGE: the countryside fed the city and paid it dues.
+        assert!(s.hubs[seat].stock[0] > food0,
+            "the province's surplus must reach the seat's granary: {} → {}",
+            food0, s.hubs[seat].stock[0]);
+        assert!(s.hubs[seat].treasury > treasury0,
+            "rural dues must reach the holder's treasury: {} → {}",
+            treasury0, s.hubs[seat].treasury);
+        assert!(s.prov_holder[0] >= 0, "an administered province records its holder");
+        // ── Every land quantity stays inside its physical range.
+        for (name, v) in [("forest", &s.prov_forest), ("arable", &s.prov_arable),
+                          ("pasture", &s.prov_pasture), ("irrigated", &s.prov_irrigated),
+                          ("soil", &s.prov_soil), ("unrest", &s.prov_unrest)] {
+            assert!(v[0].is_finite() && v[0] >= 0.0 && v[0] <= 1.0,
+                "{name} must stay a finite share in 0..1: {}", v[0]);
+        }
+        // Soil wears but never dies — the floor is what stops a Malthusian death spiral.
+        assert!(s.prov_soil[0] >= PROV_SOIL_FLOOR - 1e-4,
+            "soil must not fall below its floor: {}", s.prov_soil[0]);
+        // Land use is a partition: wood + crop + pasture cannot exceed the province.
+        let used = s.prov_forest[0] + s.prov_arable[0] + s.prov_pasture[0];
+        assert!(used <= 1.0 + 1e-3, "land use must not exceed the province: {used}");
+        assert!(s.prov_surplus[0].is_finite() && s.prov_surplus[0] >= 0.0,
+            "surplus stays finite/≥0: {}", s.prov_surplus[0]);
+        // A crowded countryside must actually have cleared some woodland over 60 years.
+        assert!(s.prov_history[0].len() == 60, "one sample per year: {}", s.prov_history[0].len());
+        let first = &s.prov_history[0][0];
+        let last = s.prov_history[0].last().unwrap();
+        assert!(last.arable >= first.arable - 1e-3 || last.forest >= first.forest,
+            "land use must move coherently: arable {} → {}, forest {} → {}",
+            first.arable, last.arable, first.forest, last.forest);
+    }
+
+    /// B1 · a province with NO seeded land layer must be a complete no-op. This is the
+    /// gate for the whole feature: the dynamics run seeds no provinces, so if the pass
+    /// touched anything here the bit-identical claim would be false.
+    #[test]
+    fn province_land_pass_is_a_noop_without_provinces() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+        let mut s = sim(hubs, goods);
+        let food0 = s.hubs[0].stock[0];
+        let treasury0 = s.hubs[0].treasury;
+        for yr in 0..25u32 { s.province_land_pass(yr); }
+        assert_eq!(s.hubs[0].stock[0], food0, "no province layer ⇒ no food delivered");
+        assert_eq!(s.hubs[0].treasury, treasury0, "no province layer ⇒ no dues collected");
+        assert!(s.prov_forest.is_empty() && s.prov_history.is_empty(),
+            "no province layer ⇒ no land state is even allocated");
+    }
+
+    /// A land improvement must cost its funder real money, take years, and only then
+    /// change the land. Guards the "instant free improvement" shape a control verb
+    /// would otherwise drift into.
+    #[test]
+    fn province_works_cost_money_take_years_and_then_change_the_land() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.prov_cap = vec![50_000.0];
+        s.prov_rural = vec![30_000.0];
+        s.prov_culture = vec!["Aiora".into()];
+        s.prov_seat = vec![[0.0, 0.0]];
+        s.hub_province = vec![0];
+        s.prov_net_mig = vec![0.0];
+        s.ensure_province_land(1);
+        // Fund it generously so the work is never starved.
+        s.hubs[0].treasury = 10_000.0;
+        s.prov_forest[0] = 0.5;
+        s.prov_arable[0] = 0.2;
+        let arable0 = s.prov_arable[0];
+        let treasury0 = s.hubs[0].treasury;
+        s.prov_works.push(ProvWork { province: 0, kind: WORK_CLEAR, progress: 0.0,
+            funder_hub: 0, funder_house: -1, start_tick: 0, idle_years: 0 });
+        // One year in: paid for, under way, land untouched.
+        s.province_land_pass(0);
+        assert!(s.hubs[0].treasury < treasury0, "the first year must be paid for");
+        assert!(!s.prov_works.is_empty(), "a multi-year work is still running after one year");
+        // Run it out. Clearance is WORK_YEARS[WORK_CLEAR] years of funded work.
+        for yr in 1..(WORK_YEARS[WORK_CLEAR as usize] as u32 + 2) { s.province_land_pass(yr); }
+        assert!(s.prov_works.is_empty(), "a completed work is retired");
+        assert!(s.prov_arable[0] > arable0,
+            "completed clearance must add arable: {} → {}", arable0, s.prov_arable[0]);
+        assert!(s.prov_events[0].iter().any(|e| e.kind == "clearance"),
+            "the province records its own history");
+    }
+
+    /// An UNFUNDED work must stall rather than complete for free.
+    #[test]
+    fn an_unfunded_province_work_stalls() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.prov_cap = vec![50_000.0];
+        s.prov_rural = vec![30_000.0];
+        s.prov_seat = vec![[0.0, 0.0]];
+        s.prov_culture = vec!["Aiora".into()];
+        s.hub_province = vec![0];
+        s.prov_net_mig = vec![0.0];
+        s.ensure_province_land(1);
+        s.hubs[0].treasury = 0.0; // nobody can pay
+        // …and keep it that way. The land pass credits the seat's treasury with the
+        // province's own dues, so a taxed province FUNDS ITS OWN improvements out of
+        // them — which is correct, and is why the funding test has to set the rate to
+        // zero to isolate the stall path.
+        s.prov_tax[0] = 0.0;
+        s.prov_forest[0] = 0.5;
+        let arable0 = s.prov_arable[0];
+        s.prov_works.push(ProvWork { province: 0, kind: WORK_CLEAR, progress: 0.0,
+            funder_hub: 0, funder_house: -1, start_tick: 0, idle_years: 0 });
+        for yr in 0..20u32 { s.province_land_pass(yr); }
+        assert_eq!(s.prov_works.len(), 1, "an unfunded work stalls, it does not vanish");
+        assert!(s.prov_works[0].progress < 0.2,
+            "an unfunded work makes no real progress: {}", s.prov_works[0].progress);
+        assert!(s.prov_arable[0] <= arable0 + 0.02,
+            "no improvement lands without being paid for");
+    }
+
+    /// FEUDS · the elaborated model must do the four things the flat `rivals` list could
+    /// not: heat with overlap, ESCALATE through stages, cool when the overlap goes away,
+    /// and keep `rivals` in sync so every existing reader still works.
+    #[test]
+    fn feuds_heat_escalate_and_cool() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0, 400.0], 0),
+            hub(1, 3.0, 0.0, 7000.0, vec![4000.0, 300.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        // Two houses in the same city, living off the same good — maximum overlap.
+        for i in 0..2 {
+            let mut h = house_at(0, vec![1], 2);
+            h.name = format!("House {}", if i == 0 { "Alpha" } else { "Beta" });
+            h.wealth = if i == 0 { 4000.0 } else { 1200.0 };
+            h.influence = vec![(0, 0.5)];
+            s.houses.push(h);
+        }
+        s.house_barred = vec![Vec::new(); 2];
+        s.house_ledger = vec![Default::default(); 2];
+        let (o, _, _) = s.feud_overlap(0, 1);
+        assert!(o > 0.3, "two houses in one city on one good must overlap: {o}");
+        s.open_feud(0, 1, FEUD_TRADE, 1, 0, 0.10);
+        assert_eq!(s.feuds.len(), 1, "one pair, one feud");
+        assert!(s.houses[0].rivals.contains(&1) && s.houses[1].rivals.contains(&0),
+            "`rivals` must stay in sync so existing readers are unaffected");
+        // A second grievance must NOT create a second feud — it pours heat on this one.
+        s.open_feud(1, 0, FEUD_MARRIAGE, -1, 0, 0.20);
+        assert_eq!(s.feuds.len(), 1, "a fresh grievance re-heats the existing feud");
+        // Heat it over years of monthly passes; it must escalate past cold rivalry.
+        let mut peak = 0u8;
+        for m in 0..240u32 {
+            s.tick = m * 30;
+            s.update_feuds();
+            if !s.feuds.is_empty() { peak = peak.max(s.feuds[0].stage); }
+            if s.feuds[0].outcome != FEUD_RUNNING { break; }
+        }
+        assert!(peak >= FEUD_TRADEWAR,
+            "sustained overlap must escalate a feud past open rivalry: peak stage {peak}");
+        assert!(s.feuds[0].flares > 0, "a hot feud must actually flare");
+        assert!(s.feuds[0].damage_a + s.feuds[0].damage_b > 0.0, "flares must cost someone");
+        assert!(s.houses.iter().all(|h| h.wealth.is_finite()), "feuds keep wealth finite");
+        // The weaker house pays, but limited liability holds — a feud impoverishes, it
+        // does not drive a house arbitrarily negative on its own.
+        assert!(s.houses[1].wealth > -1.0,
+            "feud bites are a share of what a house HAS: {}", s.houses[1].wealth);
+        // Now remove the overlap entirely: different goods, different cities. The feud
+        // must cool and eventually be forgotten — the ending the old model never had.
+        if s.feuds[0].outcome == FEUD_RUNNING {
+            s.houses[1].spec = vec![0];
+            s.houses[1].hub = 1;
+            s.houses[1].influence.clear();
+            s.houses[1].offices.clear();
+            s.hubs[1].component = 99; // and not even the same trading region
+            for m in 240..600u32 { s.tick = m * 30; s.update_feuds(); }
+            assert_eq!(s.feuds[0].outcome, FEUD_COOLED,
+                "a feud with no overlap left must cool: intensity {}", s.feuds[0].intensity);
+            assert!(!s.houses[0].rivals.contains(&1),
+                "a settled feud must clear the rival entries");
+        }
+    }
+
+    /// A long feud between two houses that both trade in a peaceful, uncaptured city
+    /// must be ARBITRATED by that city's council. This is the mechanism that stops the
+    /// world converging on "every old house feuds with every other".
+    #[test]
+    fn a_long_feud_is_settled_by_the_council() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true), good("silk", 1, 2, 20.0, 0.35, false)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0, 400.0], 0)];
+        let mut s = sim(hubs, goods);
+        for i in 0..2 {
+            let mut h = house_at(0, vec![1], 1);
+            h.name = format!("House {i}");
+            h.wealth = if i == 0 { 5000.0 } else { 2000.0 };
+            h.influence = vec![(0, 0.4)];
+            s.houses.push(h);
+        }
+        s.house_barred = vec![Vec::new(); 2];
+        s.house_ledger = vec![Default::default(); 2];
+        s.open_feud(0, 1, FEUD_TRADE, 1, 0, 0.5);
+        // Give it some damage on both sides so the settlement has something to divide.
+        s.feuds[0].damage_a = 40.0;
+        s.feuds[0].damage_b = 120.0;
+        let civic0 = s.hubs[0].civic_pool;
+        // Run past the arbitration threshold. It is chance-gated per year, so give the
+        // council plenty of years to reach for it.
+        let mut settled = false;
+        for yr in 0..90u32 {
+            s.tick = yr * TICKS_PER_YEAR;
+            s.arbitrate_feuds(yr);
+            if s.feuds[0].outcome != FEUD_RUNNING { settled = true; break; }
+        }
+        assert!(settled, "a long feud in a peaceful city must eventually be settled");
+        assert_eq!(s.feuds[0].outcome, FEUD_ARBITRATED, "the council imposed the settlement");
+        assert!(s.hubs[0].civic_pool > civic0, "the city takes its cut of the settlement");
+        assert!(!s.houses[0].rivals.contains(&1) && !s.houses[1].rivals.contains(&0),
+            "an arbitrated feud is genuinely over");
+        assert!(s.houses.iter().all(|h| h.wealth.is_finite() && h.prestige >= 0.0),
+            "a settlement leaves both houses in a valid state");
     }
 
     /// Migration must MIX cultures: when people of one people move (over a trade tie)

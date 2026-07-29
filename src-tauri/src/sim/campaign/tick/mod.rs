@@ -613,7 +613,7 @@ const OFFICE_BUY_DISCOUNT: f32 = 0.05;
 //    tolls (it passes its own gates). ──
 const OFFICE_LEASE_YEARS: u32 = 10;
 const OFFICE_LEASE_FEE: f32 = 6.0;   // upfront, scaled by host city size
-const OFFICE_LEASE_RENT: f32 = 0.05; // monthly, scaled by host city size
+pub const OFFICE_LEASE_RENT: f32 = 0.05; // monthly, scaled by host city size
 const NETWORK_TOLL_DISCOUNT: f32 = 0.5; // tax multiplier when both ends are own nodes
 /// Total source-buy discount is capped here (office + glut bargain).
 const MAX_BUY_DISCOUNT: f32 = 0.30;
@@ -751,9 +751,9 @@ const EARLY_WEALTH_TAX_YEARS: f32 = 20.0;
 /// sits in (`city_size_factor`). This is the floor that pushes an idle or
 /// over-extended house into DEBT — and, if unpaid for a year, into bankruptcy.
 /// (Fleet upkeep is still charged separately in `manage_fleets`.)
-const UPKEEP_WAREHOUSE_BASE: f32 = 0.30;
+pub const UPKEEP_WAREHOUSE_BASE: f32 = 0.30;
 /// An estate depot is cheaper to keep than a city warehouse (small rural store).
-const UPKEEP_ESTATE_FRAC: f32 = 0.5;
+pub const UPKEEP_ESTATE_FRAC: f32 = 0.5;
 // ── House-warehouse capacity tiers (single TOTAL capacity bands). A warehouse's
 //    tier is derived from its capacity by `capacity_tier`: Depot / Storehouse /
 //    Warehouse / Entrepôt / Grand Entrepôt. AI expansion raises capacity (promote);
@@ -769,7 +769,7 @@ const WH_MAX_CAP: f32 = 12_000.0;   // Tier 5 Grand Entrepôt ceiling
 //    proportional family overhead caps cash-hoarding and pushes capital into trade /
 //    depots / contracts. A new depot starts at Tier 1 and an AI house enlarges it
 //    when it stays full. ──
-const CAP_UPKEEP: f32 = 0.001;         // monthly upkeep per unit capacity (× city size)
+pub const CAP_UPKEEP: f32 = 0.001;         // monthly upkeep per unit capacity (× city size)
 const WEALTH_UPKEEP_RATE: f32 = 0.02;  // monthly overhead on wealth above the allowance
 const WEALTH_UPKEEP_FREE: f32 = 30.0;  // wealth free of the family overhead
 const WH_START_CAP: f32 = 600.0;       // a fresh depot starts a Tier-1 store
@@ -852,7 +852,7 @@ const GUILD_ENDOW_MAX: f32 = 0.5;
 const CIVIC_DECAY: f32 = 0.97;
 /// Monthly fleet upkeep as a fraction of a vessel's value (crew, repairs, berthing)
 /// — a steady sink that scales with how big a fleet the house runs.
-const FLEET_UPKEEP_FRAC: f32 = 0.05;
+pub const FLEET_UPKEEP_FRAC: f32 = 0.05;
 /// Per-vessel monthly chance of being lost to wear (rot, storms, breakdown) — the
 /// slow decay of ships & caravans, so fleets must be continually replaced.
 const FLEET_DECAY_CHANCE: f32 = 0.012;
@@ -1090,7 +1090,7 @@ const NEIGHBOR_K: usize = 32;
 /// real hubs in `self.hubs`, so an uncapped count quadratically slows every tick.
 const MAX_TOTAL_ESTATES: usize = 220;
 
-const SHIP_COST: f32 = 7.0;
+pub const SHIP_COST: f32 = 7.0;
 const RIVER_COST: f32 = 4.5;
 const CARAVAN_COST: f32 = 4.0;
 
@@ -2473,6 +2473,137 @@ const MARRIAGE_DOWRY_FRAC: f32 = 0.08;
 const MARRIAGE_DOWRY_CAP: f32 = 500.0;
 const MARRIAGE_BREAK_CHANCE: f32 = 0.04;
 
+// ── FEUDS ────────────────────────────────────────────────────────────────────────
+// A feud used to be a flat `rivals` list plus a 15%-per-half-year coin flip where the
+// weaker house paid 8% of its wealth. That is a tax, not a quarrel: it had no cause, no
+// memory, no escalation and no way to end except one side dying. The elaborated model
+// keeps `rivals` in sync (every existing reader is untouched) and adds the four things
+// a feud between merchant families actually has — a CAUSE, an INTENSITY that grows and
+// cools, STAGES whose weapons differ, and a SETTLEMENT.
+
+/// Why two houses fell out. Index into `FEUD_CAUSES`.
+pub const FEUD_TRADE: u8 = 0;      // both live off the same good in the same market
+pub const FEUD_SEAT: u8 = 1;       // both court the same city's council
+pub const FEUD_MARRIAGE: u8 = 2;   // a match soured
+pub const FEUD_MARKET: u8 = 3;     // one barred the other from a market
+pub const FEUD_SUCCESSION: u8 = 4; // a disputed inheritance / a poached branch
+pub const FEUD_CAUSES: [&str; 5] = [
+    "the same trade", "a contested council", "a broken match",
+    "a closed market", "a disputed inheritance",
+];
+
+/// Feud stages, in order. Each stage licenses a heavier weapon (see `feud_flare`).
+pub const FEUD_COLD: u8 = 0;     // mutual dislike; no action beyond lost goodwill
+pub const FEUD_OPEN: u8 = 1;     // undercutting — margin bleeds on the shared goods
+pub const FEUD_TRADEWAR: u8 = 2; // market closure + influence stripped in shared cities
+pub const FEUD_VENDETTA: u8 = 3; // sabotage: ships lost, offices burned
+pub const FEUD_STAGES: [&str; 4] = ["cold rivalry", "open feud", "trade war", "vendetta"];
+
+/// How a feud ended. 0 = still running.
+pub const FEUD_RUNNING: u8 = 0;
+pub const FEUD_ARBITRATED: u8 = 1; // a council both houses trade in imposed a settlement
+pub const FEUD_WED: u8 = 2;        // sealed by marriage
+pub const FEUD_RUINED: u8 = 3;     // one side went defunct
+pub const FEUD_COOLED: u8 = 4;     // contact lapsed; the quarrel was simply forgotten
+pub const FEUD_ENDINGS: [&str; 5] = ["running", "arbitrated", "sealed by marriage",
+    "ended in ruin", "cooled"];
+
+/// Intensity thresholds separating the four stages.
+const FEUD_STAGE_AT: [f32; 4] = [0.0, 0.30, 0.58, 0.82];
+/// Intensity gained per month of live contact, scaled by how much the two houses
+/// actually overlap (shared goods × shared cities).
+const FEUD_HEAT: f32 = 0.055;
+/// Monthly cooling when the two no longer touch the same trade or the same city.
+const FEUD_COOL: f32 = 0.035;
+/// Below this, a feud is forgotten (dropped, `rivals` cleaned up).
+const FEUD_FORGET: f32 = 0.04;
+/// Wealth the loser of a flare gives up, per stage. The old model charged a flat 8%
+/// every time; a cold rivalry now costs almost nothing and only a vendetta bites.
+///
+/// CALIBRATED, not chosen. The old flat bite was crude but it produced something worth
+/// keeping: a house that kept losing was ground DOWN and stayed down, so some cities
+/// had a poor ruling family and boiled over. The first cut of these numbers (peaking at
+/// 7.5%/flare) let a losing house out-compound its own feud — house wealth in
+/// `unrest_topples_councils` went from 676 at baseline to 309 596, every city came out
+/// prosperous, and the revolt the test exists to catch stopped happening. A sustained
+/// trade war has to beat the economy's own growth rate (~14%/yr in that scenario) or a
+/// feud is decoration. At the values below a trade war costs the loser ~14%/yr and a
+/// vendetta ~37%/yr, which restores divergence without touching the growth model.
+/// Gates: `unrest_topples_councils` AND `simulate_decades_reports_dynamics`.
+const FEUD_BITE: [f32; 4] = [0.005, 0.025, 0.060, 0.110];
+/// Chance per month that a live feud flares at all, per stage.
+const FEUD_FLARE_CHANCE: [f32; 4] = [0.04, 0.12, 0.20, 0.28];
+/// A council will impose a settlement on two houses that both trade in it once the
+/// feud has run this long and the city is not itself at war.
+const FEUD_ARBITRATE_YEARS: u32 = 12;
+/// Yearly chance an eligible feud is actually arbitrated.
+const FEUD_ARBITRATE_CHANCE: f32 = 0.22;
+/// Ceiling on prestige a house may reach THROUGH winning feuds. Prestige is otherwise
+/// unbounded and feeds political power, so feud winnings need their own stop.
+const FEUD_PRESTIGE_CAP: f32 = 1.2;
+/// Prestige a house loses when a council has to settle its quarrel for it.
+const FEUD_ARBITRATE_PRESTIGE: f32 = 0.04;
+/// Influence a trade-war stage strips from the loser in a contested city, per flare.
+const FEUD_INFLUENCE_STRIP: f32 = 0.06;
+/// Cap on simultaneous feuds tracked, so a 500-year run cannot grow this without bound.
+const FEUDS_CAP: usize = 400;
+/// Per-feud flare log cap (the panel shows a recent window).
+const FEUD_LOG_CAP: usize = 12;
+
+/// One flare in a feud's history — what happened, when, and what it cost.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct FeudFlare {
+    pub tick: u32,
+    /// Stage the feud was at when this happened (`FEUD_STAGES`).
+    pub stage: u8,
+    /// House that came off worse.
+    pub loser: u32,
+    /// Wealth the loser gave up (grain-eq).
+    pub cost: f32,
+    pub text: String,
+}
+
+/// A running quarrel between two merchant houses. Unlike the old symmetric `rivals`
+/// entry this is a first-class object with a cause, a temperature and an ending, so a
+/// feud can be shown, reasoned about, and settled.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Feud {
+    /// House indices, always stored with `a < b` so a pair has ONE feud.
+    pub a: u32,
+    pub b: u32,
+    /// `FEUD_*` cause code — why it began.
+    pub cause: u8,
+    /// The good the quarrel is over (−1 when it is not about a specific trade).
+    pub good: i32,
+    /// The city they contest (−1 when the quarrel is not local to one market).
+    pub hub: i32,
+    /// 0..1 temperature. Grows with live overlap, cools without it.
+    pub intensity: f32,
+    /// `FEUD_STAGES` index, derived from `intensity` (hysteretic — see `feud_stage`).
+    pub stage: u8,
+    pub started_tick: u32,
+    pub last_flare_tick: u32,
+    pub flares: u32,
+    /// Cumulative wealth each side has lost to the other over the feud's life.
+    pub damage_a: f32,
+    pub damage_b: f32,
+    /// `FEUD_RUNNING` while live; otherwise how it ended.
+    pub outcome: u8,
+    pub ended_tick: u32,
+    /// Recent flares (capped) — the feud's own chronicle.
+    pub log: Vec<FeudFlare>,
+}
+
+/// Stage for an intensity, with hysteresis: a feud must fall a clear margin below a
+/// threshold before it de-escalates, so a value sitting on the line does not oscillate
+/// between "trade war" and "open feud" every month.
+pub fn feud_stage(intensity: f32, current: u8) -> u8 {
+    let up = (0..4).rev().find(|&s| intensity >= FEUD_STAGE_AT[s]).unwrap_or(0) as u8;
+    if up >= current { return up; }
+    // De-escalate only once 0.06 below the stage the feud is currently holding.
+    if intensity < FEUD_STAGE_AT[current as usize] - 0.06 { up } else { current }
+}
+
 /// Phase 5 (flavour) · craft-guild tuning (bounded quality lift; a strike is a
 /// short, capped manufacture dent via the existing production-shock path).
 const GUILD_MAX: usize = 12;
@@ -3038,6 +3169,13 @@ pub struct CampaignSim {
     /// rekindles the feud. `#[serde(default)]` so old saves load with none.
     #[serde(default)]
     pub alliances: Vec<(u32, u32)>,
+    /// Live and settled FEUDS between houses. `houses[].rivals` is kept in sync with
+    /// the running ones, so every existing reader (war causes, marriage eligibility,
+    /// the Houses panel) is unchanged; this carries the cause/temperature/ending the
+    /// flat rival list could not. `#[serde(default)]` so old saves load with none and
+    /// rebuild their feuds from the current rival lists on the next pass.
+    #[serde(default)]
+    pub feuds: Vec<Feud>,
     /// Phase 5 (flavour) · craft guilds (one per manufacturing city), seeded once.
     #[serde(default)]
     pub guilds: Vec<CraftGuild>,
@@ -3097,6 +3235,143 @@ pub struct CampaignSim {
     /// Province adjacency (id → neighbouring province ids), for OVERLAND plague spread
     /// across the countryside from one province to the next.
     #[serde(default)] pub prov_neighbors: Vec<Vec<u32>>,
+
+    // ── Provinces · LAND STATE (FIX_PLAN B1's missing half) ─────────────────────
+    // `prov_rural` proved the pattern: a mutable per-province quantity the campaign
+    // advances yearly. These are the same pattern applied to the LAND, plus the
+    // feedback edge (`prov_surplus` → the seat city's food stock) that closes the
+    // world↔campaign loop. Every one is serde-defaulted and `province_land_pass`
+    // early-returns on empty, so a campaign without provinces — including the
+    // dynamics test — is bit-identical.
+    /// Woodland fraction 0..1. Falls as population clears land for the plough.
+    #[serde(default)] pub prov_forest: Vec<f32>,
+    /// Cropped fraction 0..1 — what is actually under the plough this year.
+    #[serde(default)] pub prov_arable: Vec<f32>,
+    /// Grazed fraction 0..1.
+    #[serde(default)] pub prov_pasture: Vec<f32>,
+    /// Irrigated share of the arable 0..1 — a durable improvement (`ProvWork`).
+    #[serde(default)] pub prov_irrigated: Vec<f32>,
+    /// Soil condition 0..1. Depletes under intensive cropping, recovers on fallow.
+    #[serde(default)] pub prov_soil: Vec<f32>,
+    /// Tenure shares — [civic/crown, house/noble, temple, common], summing to ~1.
+    #[serde(default)] pub prov_tenure: Vec<[f32; 4]>,
+    /// Rural tax rate 0..`PROV_TAX_MAX` set by the holder polis (or a player).
+    #[serde(default)] pub prov_tax: Vec<f32>,
+    /// Unpaid dues accumulated in bad years — collected later or written off.
+    #[serde(default)] pub prov_arrears: Vec<f32>,
+    /// Rural unrest 0..1 from crowding, taxation and tenure concentration.
+    #[serde(default)] pub prov_unrest: Vec<f32>,
+    /// Last year's food surplus delivered into the seat city's stock (grain-eq).
+    #[serde(default)] pub prov_surplus: Vec<f32>,
+    /// Last year's rural dues delivered to the holder's treasury (grain-eq).
+    #[serde(default)] pub prov_revenue: Vec<f32>,
+    /// The hub whose writ runs here (−1 = no seat / unadministered).
+    #[serde(default)] pub prov_holder: Vec<i32>,
+    /// Multi-year land improvements under way (clearance, drainage, irrigation, road).
+    #[serde(default)] pub prov_works: Vec<ProvWork>,
+    /// Yearly samples per province — what the Province panel's time slider scrubs.
+    #[serde(default)] pub prov_history: Vec<Vec<ProvSample>>,
+    /// Per-province chronicle (revolt, famine, clearance finished, …), capped.
+    #[serde(default)] pub prov_events: Vec<Vec<ProvEvent>>,
+}
+
+/// One yearly sample of a province's mutable state — the series behind the province
+/// plate's year slider and the Land tab's trend arrows.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ProvSample {
+    pub year: u32,
+    pub rural: f32,
+    pub urban: f32,
+    pub forest: f32,
+    pub arable: f32,
+    pub pasture: f32,
+    pub irrigated: f32,
+    pub soil: f32,
+    pub unrest: f32,
+    pub surplus: f32,
+}
+
+/// One entry in a province's own history. A city chronicle is a biography; a province
+/// chronicle is a history, which is why it belongs at this granularity.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ProvEvent {
+    pub year: u32,
+    /// "clearance" | "drainage" | "irrigation" | "road" | "revolt" | "dearth"
+    /// | "exhaustion" | "recovery" | "tax" | "holder".
+    pub kind: String,
+    pub text: String,
+}
+
+// ── Province land-state tuning ───────────────────────────────────────────────────
+/// Woodland cleared per year at full population pressure (fraction of the province).
+const PROV_CLEAR_RATE: f32 = 0.0035;
+/// Woodland regrowing per year on land nobody is working.
+const PROV_REGROW_RATE: f32 = 0.0022;
+/// Soil lost per year at full cropping intensity on unimproved land.
+const PROV_DEPLETE: f32 = 0.010;
+/// Soil recovered per year on fallow/lightly worked land.
+const PROV_RECOVER: f32 = 0.006;
+/// Floor soil condition can fall to — exhausted, not dead.
+const PROV_SOIL_FLOOR: f32 = 0.25;
+/// Grain-eq a unit of rural population yields per year on ORDINARY land (the land
+/// multiplier is centred on 1.0, so this is the typical figure, not a ceiling).
+const PROV_YIELD_PER_HEAD: f32 = 0.55;
+/// The arable share that counts as "ordinary" — the land multiplier's unit point.
+const PROV_ARABLE_REFERENCE: f32 = 0.28;
+/// Of that, what the countryside eats itself before anything reaches a city.
+const PROV_SUBSISTENCE: f32 = 0.42;
+/// Irrigation's multiplier on the irrigated share's yield.
+const PROV_IRRIGATION_GAIN: f32 = 0.45;
+/// Highest rural tax rate a holder may set.
+pub const PROV_TAX_MAX: f32 = 0.35;
+/// Default rate a newly seeded province is taxed at.
+const PROV_TAX_DEFAULT: f32 = 0.12;
+/// Unrest added per year per unit of (tax above the tolerated level).
+const PROV_UNREST_TAX: f32 = 0.9;
+/// Unrest added per year by crowding once rural population passes capacity.
+const PROV_UNREST_CROWD: f32 = 0.35;
+/// Unrest added per year by a failed harvest (surplus below subsistence).
+const PROV_UNREST_DEARTH: f32 = 0.30;
+/// Yearly unrest decay when nothing is wrong.
+const PROV_UNREST_CALM: f32 = 0.16;
+/// A revolt breaks out above this.
+const PROV_REVOLT_AT: f32 = 0.72;
+/// Share of a revolting province's dues that simply never arrive.
+const PROV_REVOLT_LOSS: f32 = 0.6;
+/// Tax the countryside tolerates before it resents it.
+const PROV_TAX_TOLERATED: f32 = 0.15;
+/// Yearly samples kept per province (500 years at 1/yr is fine; cap anyway).
+const PROV_HISTORY_CAP: usize = 600;
+const PROV_EVENTS_CAP: usize = 40;
+
+/// Kinds of multi-year land improvement. Deliberately mirrors the satellite-construction
+/// vocabulary (stage → progress → supply) rather than inventing a second project system.
+pub const WORK_CLEAR: u8 = 0;      // woodland → arable
+pub const WORK_DRAIN: u8 = 1;      // waste/marsh → arable, and a fever-risk cut
+pub const WORK_IRRIGATE: u8 = 2;   // raises the irrigated share
+pub const WORK_ROAD: u8 = 3;       // a made road to the seat — cheaper dues, less arrears
+pub const WORK_KINDS: [&str; 4] = ["clearance", "drainage", "irrigation", "road"];
+/// Years of funded work each kind takes.
+pub const WORK_YEARS: [f32; 4] = [6.0, 10.0, 8.0, 5.0];
+/// Yearly cost (grain-eq) drawn from the funding treasury, per kind.
+pub const WORK_COST: [f32; 4] = [40.0, 70.0, 55.0, 45.0];
+
+/// A land improvement under way in a province. Funded yearly out of the funder's
+/// treasury (a polis) or wealth (a house); starved work stalls rather than failing.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ProvWork {
+    pub province: u32,
+    /// `WORK_*`.
+    pub kind: u8,
+    /// 0..1 completion.
+    pub progress: f32,
+    /// Hub whose treasury pays (−1 = unfunded, so it stalls).
+    pub funder_hub: i32,
+    /// House paying instead, or −1.
+    pub funder_house: i32,
+    pub start_tick: u32,
+    /// Consecutive years the work went unpaid (decays progress past 2).
+    pub idle_years: u32,
 }
 
 /// Deterministic 0..1 hash of three mixed inputs (splitmix64).
@@ -3781,6 +4056,10 @@ impl CampaignSim {
                 self.roll_city_finances(yr);
                 // Phase 4 (flavour) · raise/retire notable figures (Great Lives).
                 self.raise_notable_figures(yr);
+                // Feuds · a council both houses trade in may impose a settlement on a
+                // long-running quarrel. Runs BEFORE marriages, so a feud the council
+                // settled this year is not also "sealed by marriage" in the same year.
+                self.arbitrate_feuds(yr);
                 // Phase 5 (flavour) · dynastic marriages/alliances between houses.
                 self.arrange_marriages(yr);
                 // Phase 5 (flavour) · craft guilds master their craft, strike, build.

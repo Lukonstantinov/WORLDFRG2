@@ -407,57 +407,440 @@ impl CampaignSim {
     }
 
 
-    /// Houses that specialize in the same good and sit in the same component become
-    /// rivals (competing for the same trade). A feud occasionally flares into a
-    /// Chronicle event with a mutual prestige/wealth cost.
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  FEUDS
+    //
+    //  The old model was one symmetric `rivals` entry plus a 15%-per-half-year roll
+    //  in which the weaker house lost 8% of its wealth. That is a tax on being poor:
+    //  it had no cause, no memory, no escalation, and no ending short of one side
+    //  dying. What follows keeps `rivals` in sync — every existing consumer (war
+    //  causes in `pick_war_pair`, marriage eligibility, the Houses panel) reads the
+    //  same field it always did — and adds the four things a quarrel between merchant
+    //  families actually has:
+    //
+    //    · a CAUSE      (`FEUD_TRADE` … `FEUD_SUCCESSION`) — feuds are ABOUT something
+    //    · an INTENSITY that heats with live overlap and cools without it
+    //    · STAGES whose weapons differ: a cold rivalry is words, a vendetta burns ships
+    //    · a SETTLEMENT — arbitration by a council, a marriage, ruin, or plain neglect
+    //
+    //  Historically this is the Italian/Hanseatic pattern: quarrels between trading
+    //  families were adjudicated by the commune they both traded in, because an open
+    //  feud between two big houses was a threat to the city's own commerce. A feud
+    //  that can only end when someone dies produces a world where every old house has
+    //  a dozen rivals; one that can be settled produces a world with a HISTORY.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Index of the live feud between `a` and `b`, if any (order-insensitive).
+    pub(crate) fn feud_between(&self, a: usize, b: usize) -> Option<usize> {
+        let (lo, hi) = if a < b { (a as u32, b as u32) } else { (b as u32, a as u32) };
+        self.feuds.iter().position(|f| f.a == lo && f.b == hi && f.outcome == FEUD_RUNNING)
+    }
+
+    /// How much two houses actually get in each other's way right now, plus the good
+    /// and the city the quarrel is most about. Overlap drives heating: two houses that
+    /// no longer trade the same goods in the same places stop feuding, which is what
+    /// lets a feud cool on its own.
+    pub(crate) fn feud_overlap(&self, a: usize, b: usize) -> (f32, i32, i32) {
+        if a >= self.houses.len() || b >= self.houses.len() { return (0.0, -1, -1); }
+        let (ha, hb) = (&self.houses[a], &self.houses[b]);
+        if ha.defunct || hb.defunct { return (0.0, -1, -1); }
+        // Shared trade: the goods both live off. The FIRST shared good names the feud.
+        let mut good = -1i32;
+        let mut shared_goods = 0u32;
+        for g in &ha.spec {
+            if hb.spec.contains(g) {
+                shared_goods += 1;
+                if good < 0 { good = *g as i32; }
+            }
+        }
+        // Shared ground: cities both stand in (seat, offices, bailos). The one where
+        // their combined influence is highest is the city the feud is about.
+        let nodes = |h: &House| -> Vec<u32> {
+            let mut v = Vec::with_capacity(1 + h.offices.len() + h.bailos.len());
+            v.push(h.hub);
+            v.extend(h.offices.iter().copied());
+            v.extend(h.bailos.iter().copied());
+            v
+        };
+        let (na, nb) = (nodes(ha), nodes(hb));
+        let inf_at = |h: &House, c: u32| h.influence.iter().find(|(x, _)| *x == c)
+            .map(|(_, v)| *v).unwrap_or(0.0);
+        let mut shared_cities = 0u32;
+        let mut hub = -1i32;
+        let mut best_inf = -1.0f32;
+        for &c in &na {
+            if !nb.contains(&c) { continue; }
+            shared_cities += 1;
+            let combined = inf_at(ha, c) + inf_at(hb, c);
+            // Ties break on the LOWER hub index so the choice is order-independent.
+            if combined > best_inf { best_inf = combined; hub = c as i32; }
+        }
+        // Same trading component is a weak tie on its own — it is what made the old
+        // model pair up every house on a continent. It counts, but only a little.
+        let same_component = self.hubs.get(ha.hub as usize).map(|h| h.component)
+            == self.hubs.get(hb.hub as usize).map(|h| h.component);
+        let overlap = (0.22 * shared_goods.min(3) as f32
+            + 0.30 * shared_cities.min(3) as f32
+            + if same_component { 0.10 } else { 0.0 }).clamp(0.0, 1.0);
+        (overlap, good, hub)
+    }
+
+    /// Open (or re-heat) a feud between two houses for a named reason. Every path that
+    /// creates bad blood — a soured match, a closed market, a contested council — comes
+    /// through here, so a feud always knows why it exists.
+    pub(crate) fn open_feud(&mut self, a: usize, b: usize, cause: u8, good: i32, hub: i32,
+                            heat: f32) {
+        if a == b || a >= self.houses.len() || b >= self.houses.len() { return; }
+        if self.houses[a].defunct || self.houses[b].defunct { return; }
+        let (lo, hi) = if a < b { (a as u32, b as u32) } else { (b as u32, a as u32) };
+        if let Some(fi) = self.feud_between(a, b) {
+            // Already quarrelling — a fresh grievance pours heat on the existing feud
+            // rather than starting a second one.
+            self.feuds[fi].intensity = (self.feuds[fi].intensity + heat).min(1.0);
+            let cur = self.feuds[fi].stage;
+            self.feuds[fi].stage = feud_stage(self.feuds[fi].intensity, cur);
+            return;
+        }
+        if self.feuds.iter().filter(|f| f.outcome == FEUD_RUNNING).count() >= FEUDS_CAP { return; }
+        self.feuds.push(Feud {
+            a: lo, b: hi, cause, good, hub,
+            intensity: heat.clamp(0.0, 1.0),
+            stage: feud_stage(heat, FEUD_COLD),
+            started_tick: self.tick, last_flare_tick: 0, flares: 0,
+            damage_a: 0.0, damage_b: 0.0,
+            outcome: FEUD_RUNNING, ended_tick: 0, log: Vec::new(),
+        });
+        if !self.houses[a].rivals.contains(&b) { self.houses[a].rivals.push(b); }
+        if !self.houses[b].rivals.contains(&a) { self.houses[b].rivals.push(a); }
+        let (na, nb) = (self.houses[a].name.clone(), self.houses[b].name.clone());
+        let why = FEUD_CAUSES.get(cause as usize).copied().unwrap_or("an old grievance");
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "feud".into(), hub: self.houses[a].hub as i32,
+            good, value: 0.0,
+            text: format!("{} and {} fall out over {}", na, nb, why),
+        });
+        for (h, other) in [(a, nb.clone()), (b, na.clone())] {
+            self.houses[h].events.push(HouseEvent {
+                tick: self.tick, kind: "feud".into(),
+                text: format!("Fell out with {} over {}", other, why),
+            });
+        }
+    }
+
+    /// Close a feud with a stated outcome, clearing the rival entries on both sides so
+    /// the rest of the sim sees the quarrel as genuinely over.
+    pub(crate) fn close_feud(&mut self, fi: usize, outcome: u8) {
+        if fi >= self.feuds.len() || self.feuds[fi].outcome != FEUD_RUNNING { return; }
+        let (a, b) = (self.feuds[fi].a as usize, self.feuds[fi].b as usize);
+        self.feuds[fi].outcome = outcome;
+        self.feuds[fi].ended_tick = self.tick;
+        if a < self.houses.len() { self.houses[a].rivals.retain(|&r| r != b); }
+        if b < self.houses.len() { self.houses[b].rivals.retain(|&r| r != a); }
+    }
+
+    /// Every feud a (now defunct) house was part of ends in its ruin. Called from
+    /// `dissolve_house` so a dead family does not leave live quarrels behind.
+    pub(crate) fn end_feuds_of(&mut self, hi: usize) {
+        let idx: Vec<usize> = self.feuds.iter().enumerate()
+            .filter(|(_, f)| f.outcome == FEUD_RUNNING
+                && (f.a as usize == hi || f.b as usize == hi))
+            .map(|(i, _)| i).collect();
+        for fi in idx { self.close_feud(fi, FEUD_RUINED); }
+    }
+
+    /// Half-yearly · FORMATION. Scan house pairs for a reason to fall out. This is the
+    /// only O(n²) part of the feud system and it keeps the old cadence; the per-feud
+    /// work below runs monthly over the bounded `feuds` list instead.
     pub(crate) fn update_rivalries(&mut self) {
         let n = self.houses.len();
+        // Old saves (and any state written before feuds existed) carry rival pairs with
+        // no feud object. Adopt them once, as trade feuds already part-way heated, so a
+        // loaded campaign does not silently lose its quarrels.
+        if self.feuds.is_empty() {
+            let mut adopt: Vec<(usize, usize)> = Vec::new();
+            for a in 0..n {
+                if self.houses[a].defunct { continue; }
+                for &b in &self.houses[a].rivals {
+                    if b > a && b < n && !self.houses[b].defunct { adopt.push((a, b)); }
+                }
+            }
+            for (a, b) in adopt {
+                let (_, good, hub) = self.feud_overlap(a, b);
+                self.open_feud(a, b, FEUD_TRADE, good, hub, 0.35);
+            }
+        }
         for a in 0..n {
             if self.houses[a].defunct { continue; }
             for b in (a + 1)..n {
                 if self.houses[b].defunct { continue; }
-                let shared = self.houses[a].spec.iter().any(|g| self.houses[b].spec.contains(g));
-                let same_region = self.houses[a].hub == self.houses[b].hub
-                    || self.hubs.get(self.houses[a].hub as usize).map(|h| h.component)
-                        == self.hubs.get(self.houses[b].hub as usize).map(|h| h.component);
-                if shared && same_region {
-                    if !self.houses[a].rivals.contains(&b) { self.houses[a].rivals.push(b); }
-                    if !self.houses[b].rivals.contains(&a) { self.houses[b].rivals.push(a); }
-                    // Feud flare: the weaker pays, occasionally logged.
-                    let roll = hash01(self.seed, self.tick as u64 ^ a as u64, b as u64);
-                    if roll < 0.15 {
-                        let (loser, winner) = if self.houses[a].wealth < self.houses[b].wealth {
-                            (a, b)
-                        } else { (b, a) };
-                        self.houses[loser].wealth *= 0.92;
-                        self.houses[winner].prestige += 0.03;
-                        if roll < 0.05 {
-                            let (ln, wn) = (self.houses[loser].name.clone(),
-                                self.houses[winner].name.clone());
-                            self.journal.push(JournalEntry {
-                                tick: self.tick, kind: "feud".into(),
-                                hub: self.houses[winner].hub as i32, good: -1, value: 0.0,
-                                text: format!("{} outmaneuvers {} in a bitter trade feud", wn, ln),
-                            });
-                            // Trade war: if the winner dominates its seat city and the
-                            // loser is not an embargo-immune guild, CLOSE that market to
-                            // the loser until it pays to regain its rights.
-                            if self.houses[winner].dominant_seat && !self.houses[loser].is_guild {
-                                let city = self.houses[winner].hub;
-                                let already = self.house_barred.get(loser).is_some_and(|v| v.contains(&city));
-                                if !already {
-                                    let cn = self.hubs.get(city as usize).map(|h| h.name.clone()).unwrap_or_default();
-                                    if let Some(v) = self.house_barred.get_mut(loser) { v.push(city); }
-                                    self.journal.push(JournalEntry {
-                                        tick: self.tick, kind: "trade_war".into(),
-                                        hub: city as i32, good: -1, value: 0.0,
-                                        text: format!("{} bars {} from the market of {}", wn, ln, cn),
-                                    });
-                                }
-                            }
+                if self.feud_between(a, b).is_some() { continue; }
+                // Allied houses do not start quarrels with each other.
+                let (lo, hi) = (a.min(b) as u32, a.max(b) as u32);
+                if self.alliances.contains(&(lo, hi)) { continue; }
+                let (overlap, good, hub) = self.feud_overlap(a, b);
+                if overlap < 0.30 { continue; } // brushing past each other is not a feud
+                // A contested COUNCIL is a sharper cause than mere competition: both
+                // families are courting the same city's seats.
+                let contested = hub >= 0 && {
+                    let inf = |h: usize| self.houses[h].influence.iter()
+                        .find(|(c, _)| *c as i32 == hub).map(|(_, v)| *v).unwrap_or(0.0);
+                    inf(a) >= 0.12 && inf(b) >= 0.12
+                };
+                let cause = if contested { FEUD_SEAT } else { FEUD_TRADE };
+                // Not every overlap becomes a quarrel — some houses simply coexist.
+                let roll = hash01(self.seed, self.tick as u64 ^ (a as u64) << 12, b as u64);
+                if roll > overlap * 0.55 { continue; }
+                self.open_feud(a, b, cause, good, hub, 0.10 + 0.20 * overlap);
+            }
+        }
+    }
+
+    /// Monthly · TEMPERATURE + FLARES. Runs over the bounded feud list: heat each live
+    /// feud by how much the two houses still get in each other's way, cool it when they
+    /// no longer do, re-derive the stage, and occasionally let it flare.
+    pub(crate) fn update_feuds(&mut self) {
+        if self.feuds.is_empty() { return; }
+        let tick = self.tick;
+        let mut forget: Vec<usize> = Vec::new();
+        for fi in 0..self.feuds.len() {
+            if self.feuds[fi].outcome != FEUD_RUNNING { continue; }
+            let (a, b) = (self.feuds[fi].a as usize, self.feuds[fi].b as usize);
+            if a >= self.houses.len() || b >= self.houses.len()
+                || self.houses[a].defunct || self.houses[b].defunct {
+                self.close_feud(fi, FEUD_RUINED);
+                continue;
+            }
+            let (overlap, good, hub) = self.feud_overlap(a, b);
+            {
+                let f = &mut self.feuds[fi];
+                if overlap > 0.0 {
+                    f.intensity = (f.intensity + FEUD_HEAT * overlap).min(1.0);
+                    // Keep the feud pointed at what it is currently about — two houses
+                    // whose quarrel has moved to a new market should say so.
+                    if good >= 0 { f.good = good; }
+                    if hub >= 0 { f.hub = hub; }
+                } else {
+                    f.intensity = (f.intensity - FEUD_COOL).max(0.0);
+                }
+                f.stage = feud_stage(f.intensity, f.stage);
+            }
+            if self.feuds[fi].intensity < FEUD_FORGET { forget.push(fi); continue; }
+            let stage = self.feuds[fi].stage as usize;
+            let roll = hash01(self.seed, tick as u64 ^ ((a as u64) << 20), b as u64);
+            if roll < FEUD_FLARE_CHANCE[stage] { self.feud_flare(fi); }
+        }
+        for fi in forget { self.close_feud(fi, FEUD_COOLED); }
+        // A settled feud is kept for the record but must not grow without bound.
+        if self.feuds.len() > FEUDS_CAP * 2 {
+            let drop = self.feuds.len() - FEUDS_CAP * 2;
+            let mut removed = 0usize;
+            self.feuds.retain(|f| {
+                if removed < drop && f.outcome != FEUD_RUNNING { removed += 1; false } else { true }
+            });
+        }
+    }
+
+    /// One flare. The stage decides the weapon — this is where the elaboration earns
+    /// its keep, because "what a feud DOES" now depends on how bad it has become.
+    fn feud_flare(&mut self, fi: usize) {
+        let tick = self.tick;
+        let (a, b) = (self.feuds[fi].a as usize, self.feuds[fi].b as usize);
+        let stage = self.feuds[fi].stage;
+        // The stronger house prevails — by wealth, with prestige and political weight
+        // counting for something (a poorer but better-connected family can win).
+        let power = |h: &House| h.wealth.max(0.0) + h.prestige * 400.0 + h.political_power * 600.0;
+        let (winner, loser) = if power(&self.houses[a]) >= power(&self.houses[b]) { (a, b) } else { (b, a) };
+        let (wn, ln) = (self.houses[winner].name.clone(), self.houses[loser].name.clone());
+        // Limited liability: a bite is a share of what the loser actually has, so a
+        // feud can impoverish a house but never drive it arbitrarily negative.
+        let bite = self.houses[loser].wealth.max(0.0) * FEUD_BITE[stage as usize];
+        self.houses[loser].wealth -= bite;
+        // Prestige is UNBOUNDED and feeds political power → charters → monopolies →
+        // wealth, so a per-flare award is a compounding loop, not flavour. The old
+        // model paid +0.03 at ~0.3 flares/yr ≈ 0.009/yr; paying +0.008..0.032 at up to
+        // 3.4 flares/yr came to ~0.11/yr, and the dynamics run's sustained-richest house
+        // went from 298k to 1.9M — a monopoly runaway driven entirely by feud prestige.
+        // Kept deliberately close to the old annual rate, and capped, so winning feuds
+        // makes a family respected without making it unassailable.
+        let gain = (0.002 + 0.002 * stage as f32).min(FEUD_PRESTIGE_CAP - self.houses[winner].prestige);
+        self.houses[winner].prestige += gain.max(0.0);
+        self.houses[loser].prestige = (self.houses[loser].prestige - 0.004 * stage as f32).max(0.0);
+        let good_name = {
+            let g = self.feuds[fi].good;
+            if g >= 0 { self.goods.get(g as usize).map(|x| x.name.clone()) } else { None }
+        };
+        let city = self.feuds[fi].hub;
+        let city_name = if city >= 0 {
+            self.hubs.get(city as usize).map(|h| h.name.clone()).unwrap_or_default()
+        } else { String::new() };
+
+        let text = match stage {
+            FEUD_COLD => match &good_name {
+                Some(g) => format!("{} snubs {} over the {} trade", wn, ln, g),
+                None => format!("{} snubs {} at the exchange", wn, ln),
+            },
+            FEUD_OPEN => {
+                // Undercutting: the loser's recent volume — the basis of its market
+                // share and monopolies — is cut back.
+                self.houses[loser].volume *= 0.94;
+                match &good_name {
+                    Some(g) => format!("{} undercuts {} in {}, taking the trade", wn, ln, g),
+                    None => format!("{} undercuts {} and takes its custom", wn, ln),
+                }
+            }
+            FEUD_TRADEWAR => {
+                self.houses[loser].volume *= 0.90;
+                // Strip the loser's standing in the contested city, and — where the
+                // winner governs it — close the market outright (the pre-existing
+                // trade-war path, now driven by a feud that EARNED it).
+                let mut barred_here = false;
+                if city >= 0 {
+                    let c = city as u32;
+                    if let Some(e) = self.houses[loser].influence.iter_mut().find(|(x, _)| *x == c) {
+                        e.1 = (e.1 - FEUD_INFLUENCE_STRIP).max(0.0);
+                    }
+                    let governs = self.hubs.get(c as usize)
+                        .map(|h| h.captor_house == winner as i32).unwrap_or(false)
+                        || (self.houses[winner].dominant_seat && self.houses[winner].hub == c);
+                    if governs && !self.houses[loser].is_guild {
+                        let already = self.house_barred.get(loser).is_some_and(|v| v.contains(&c));
+                        if !already {
+                            if let Some(v) = self.house_barred.get_mut(loser) { v.push(c); }
+                            barred_here = true;
                         }
                     }
                 }
+                if barred_here {
+                    self.journal.push(JournalEntry {
+                        tick, kind: "trade_war".into(), hub: city, good: -1, value: 0.0,
+                        text: format!("{} bars {} from the market of {}", wn, ln, city_name),
+                    });
+                    format!("{} bars {} from the market of {}", wn, ln, city_name)
+                } else if !city_name.is_empty() {
+                    format!("{} drives {} out of the {} trade", wn, ln, city_name)
+                } else {
+                    format!("{} shuts {} out of its markets", wn, ln)
+                }
+            }
+            _ => {
+                // Vendetta: property. A ship taken, or a foreign office forced shut —
+                // the two things that actually cost a merchant house its reach.
+                self.houses[loser].volume *= 0.88;
+                let pick = hash01(self.seed, tick as u64, (loser as u64) << 8);
+                let fleet = self.houses[loser].fleet_sea + self.houses[loser].fleet_river
+                    + self.houses[loser].fleet_caravan;
+                if fleet > 0 && pick < 0.6 {
+                    let sea = self.houses[loser].fleet_sea > 0;
+                    self.damage_fleet(loser, sea);
+                    format!("{} has a {} of {} taken at sea", wn,
+                        if sea { "ship" } else { "caravan" }, ln)
+                } else {
+                    // Force a foreign counting-house shut. Only a lease-free office can
+                    // be taken; a leased one is held open by its term, and one backing a
+                    // live contract stays open — the same rules the office system uses.
+                    let victim = self.houses[loser].offices.iter().copied().find(|&o| {
+                        (city < 0 || o as i32 == city)
+                            && !self.office_leased(loser, o)
+                            && !self.backs_active_contract(loser, o)
+                    });
+                    match victim {
+                        Some(off) => {
+                            let on = self.hubs.get(off as usize).map(|h| h.name.clone())
+                                .unwrap_or_default();
+                            self.houses[loser].offices.retain(|&o| o != off);
+                            self.houses[loser].bailos.retain(|&o| o != off);
+                            self.houses[loser].influence.retain(|&(c, _)| c != off);
+                            format!("{} forces {}'s counting-house in {} to close", wn, ln, on)
+                        }
+                        None => format!("{} sets its bravos on {}'s factors", wn, ln),
+                    }
+                }
+            }
+        };
+
+        {
+            let f = &mut self.feuds[fi];
+            f.flares += 1;
+            f.last_flare_tick = tick;
+            if loser as u32 == f.a { f.damage_a += bite; } else { f.damage_b += bite; }
+            f.log.push(FeudFlare { tick, stage, loser: loser as u32, cost: bite, text: text.clone() });
+            if f.log.len() > FEUD_LOG_CAP { let d = f.log.len() - FEUD_LOG_CAP; f.log.drain(0..d); }
+        }
+        // Only the loud stages reach the world chronicle; a cold snub belongs to the
+        // two families' own records, not to the history of the world.
+        if stage >= FEUD_TRADEWAR {
+            self.journal.push(JournalEntry {
+                tick, kind: "feud".into(), hub: self.houses[winner].hub as i32,
+                good: self.feuds[fi].good, value: bite, text: text.clone(),
+            });
+        }
+        self.houses[winner].events.push(HouseEvent { tick, kind: "feud".into(), text: text.clone() });
+        self.houses[loser].events.push(HouseEvent { tick, kind: "feud".into(), text });
+    }
+
+    /// Yearly · SETTLEMENT. A council both houses trade in has every reason to end a
+    /// long feud: two great families at open war in its market is the city's problem,
+    /// not just theirs. This is the mechanism the old model lacked entirely, and it is
+    /// what stops the world converging on "every old house feuds with every other".
+    pub(crate) fn arbitrate_feuds(&mut self, yr: u32) {
+        if self.feuds.is_empty() { return; }
+        let tick = self.tick;
+        let mut settle: Vec<(usize, usize, f32)> = Vec::new(); // feud, city, damages
+        for fi in 0..self.feuds.len() {
+            let f = &self.feuds[fi];
+            if f.outcome != FEUD_RUNNING { continue; }
+            if tick.saturating_sub(f.started_tick) < FEUD_ARBITRATE_YEARS * TICKS_PER_YEAR { continue; }
+            let city = f.hub;
+            if city < 0 { continue; }
+            let ci = city as usize;
+            // A city at war has other concerns; a captured one favours its captor
+            // instead of arbitrating.
+            match self.hubs.get(ci) {
+                Some(h) if h.war_with < 0 && h.captor_house < 0 && !h.abandoned => {}
+                _ => continue,
+            }
+            let roll = hash01(self.seed, yr as u64 ^ 0xA2B1, fi as u64);
+            if roll >= FEUD_ARBITRATE_CHANCE { continue; }
+            // The council fines the AGGRESSOR — the house that has taken less damage,
+            // i.e. the one that has been winning — and pays part to the injured party.
+            let (a, b) = (f.a as usize, f.b as usize);
+            let aggressor = if f.damage_a <= f.damage_b { a } else { b };
+            let injured = if aggressor == a { b } else { a };
+            let owed = (f.damage_a.max(f.damage_b) * 0.25)
+                .min(self.houses.get(aggressor).map(|h| h.wealth.max(0.0) * 0.10).unwrap_or(0.0));
+            settle.push((fi, ci, owed));
+            let _ = (aggressor, injured);
+        }
+        for (fi, ci, owed) in settle {
+            let (a, b) = (self.feuds[fi].a as usize, self.feuds[fi].b as usize);
+            let aggressor = if self.feuds[fi].damage_a <= self.feuds[fi].damage_b { a } else { b };
+            let injured = if aggressor == a { b } else { a };
+            if aggressor >= self.houses.len() || injured >= self.houses.len() { continue; }
+            self.houses[aggressor].wealth -= owed;
+            self.houses[injured].wealth += owed * 0.7;
+            if let Some(h) = self.hubs.get_mut(ci) { h.civic_pool += owed * 0.3; }
+            // Both lose a little standing: needing the council to settle your quarrel
+            // is not a good look for a great house.
+            for h in [a, b] {
+                self.houses[h].prestige = (self.houses[h].prestige - FEUD_ARBITRATE_PRESTIGE).max(0.0);
+            }
+            // The peace also lifts any market closure between them at that city.
+            let c = ci as u32;
+            for h in [a, b] {
+                if let Some(v) = self.house_barred.get_mut(h) { v.retain(|&x| x != c); }
+            }
+            self.close_feud(fi, FEUD_ARBITRATED);
+            let (an, bn) = (self.houses[a].name.clone(), self.houses[b].name.clone());
+            let cn = self.hubs.get(ci).map(|h| h.name.clone()).unwrap_or_default();
+            self.journal.push(JournalEntry {
+                tick, kind: "feud".into(), hub: ci as i32, good: -1, value: owed,
+                text: format!("The council of {} imposes a settlement on {} and {}", cn, an, bn),
+            });
+            for h in [a, b] {
+                self.houses[h].events.push(HouseEvent {
+                    tick, kind: "feud".into(),
+                    text: format!("The council of {} settled our quarrel", cn),
+                });
             }
         }
     }
