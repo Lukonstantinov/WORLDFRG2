@@ -496,7 +496,10 @@ impl CampaignSim {
             // Cultures 3.0 · a far-flung, isolated community can splinter into a new
             // daughter people of the same stock.
             self.splinter_pass(self.tick / TICKS_PER_YEAR);
-            // Connect sub-cap villages to the trade network via their nearest market town.
+            // A market town that has grown into a real city joins the full-hub tier.
+            self.promote_market_towns();
+            // Legacy saves only: connect their inert sub-cap villages to a market town.
+            // New campaigns have no `hinterland` — every settlement is a live hub.
             self.hinterland_pass();
             // Rare merchant expeditions reach the far, isolated outposts trade misses.
             self.expedition_pass(self.tick / TICKS_PER_YEAR);

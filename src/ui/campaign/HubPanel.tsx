@@ -357,6 +357,12 @@ export function HubPanel() {
             {inEconomy && <span style={{ color: "#6a86a6" }}>{`  ·  wealth rank #${wealthRank}/${economy.hubs.length}`}</span>}
             {hub.sea_access === false && <span style={{ color: "#6a86a6" }}>{"  ·  lake/inland"}</span>}
           </div>
+          {detail?.market_town && (
+            <div style={{ color: "#9ab0c8", fontSize: 10, marginTop: 2 }}
+              title="A market town: it produces, prices and trades with its local markets like any other settlement, but keeps no merchant house, bank or council of its own. It is promoted to a full city if it grows past ~6,000 souls.">
+              🏘 Market town · trades locally, no counting-house yet
+            </div>
+          )}
           {detail?.patron && (
             <div style={{ color: "#7fd0a0", fontSize: 10, marginTop: 2 }}
               title="A merchant house is developing this city as a trade base.">

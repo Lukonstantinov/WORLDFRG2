@@ -150,6 +150,32 @@ impl CampaignSim {
     }
 
 
+    /// Yearly: a MARKET TOWN (tier 2) that has grown past `MARKET_TOWN_PROMOTE` becomes a
+    /// full hub, so it can host merchant houses, a bank, a guild and a council like any
+    /// other city. This is the tier's escalator — a well-sited village on a good route
+    /// really can become a market city over a few generations, and nothing about the
+    /// tiering should stop it. Also widens its partner list on the next route rebuild.
+    pub(crate) fn promote_market_towns(&mut self) {
+        let mut promoted = Vec::new();
+        for h in 0..self.hubs.len() {
+            let hb = &self.hubs[h];
+            if !hb.market_town || hb.is_estate || hb.abandoned { continue; }
+            if hb.population < MARKET_TOWN_PROMOTE { continue; }
+            promoted.push(h);
+        }
+        if promoted.is_empty() { return; }
+        for h in promoted {
+            self.hubs[h].market_town = false;
+            let name = self.hubs[h].name.clone();
+            let pop = self.hubs[h].population.round() as i64;
+            self.journal.push(JournalEntry {
+                tick: self.tick, kind: "city".into(), hub: h as i32, good: -1, value: pop as f32,
+                text: format!("{name} has grown into a market city of {pop} souls and now keeps its own counting-house."),
+            });
+        }
+        self.routes_dirty = true;
+    }
+
     /// Yearly HINTERLAND pass: connect every sub-cap village to the trade network by
     /// tying it to its nearest live market town (satellite trade), and let that town
     /// earn a small, bounded civic toll from the hinterland trade. This is how villages
@@ -1319,6 +1345,8 @@ impl CampaignSim {
             id, x: site.x, y: site.y, name, population: pop, founding_pop: pop,
             stock: production.clone(), price: self.goods.iter().map(|g| g.base_value).collect(),
             production, grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
+            // A colony is run by its metropolis, not by the market-town tier.
+            market_town: false,
             is_estate: false, parent: -1, koppen: site.koppen, coastal: site.coastal, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5,
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,

@@ -13,7 +13,7 @@
             id, x, y, name: format!("H{id}"), population: pop, founding_pop: pop,
             stock: vec![0.0; ng], price: vec![1.0; ng], production: prod,
             grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
-            is_estate: false, parent: -1, koppen: 0, coastal: false, component: comp,
+            is_estate: false, market_town: false, parent: -1, koppen: 0, coastal: false, component: comp,
             export_earn: 0.0, import_spend: 0.0,
             mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5, sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(),
             in_by_sea: 0.0, in_by_land: 0.0,
@@ -943,6 +943,10 @@
     #[test]
     #[ignore]
     fn bench_campaign_tick() {
+        for n in [160u32, 400, 700, 1000] { bench_campaign_tick_n(n); }
+    }
+
+    fn bench_campaign_tick_n(nhubs: u32) {
         use std::time::Instant;
         let ng = 24usize;
         let goods: Vec<TickGood> = (0..ng)
@@ -950,11 +954,11 @@
                           1.0 + g as f32, 0.30 + 0.5 * ((g % 5) as f32 / 5.0), g < 6))
             .collect();
 
-        let nhubs = 160u32;
         let mut hubs = Vec::new();
+        let cols = 32u32;
         for i in 0..nhubs {
-            let x = (i % 16) as f32 * 6.0;
-            let y = (i / 16) as f32 * 6.0;
+            let x = (i % cols) as f32 * 6.0;
+            let y = (i / cols) as f32 * 6.0;
             let pop = 2000.0 + (i as f32 * 137.0) % 9000.0;
             let prod: Vec<f32> = (0..ng)
                 .map(|g| if (g + i as usize) % 7 == 0 { pop * 0.02 } else { pop * 0.002 })
@@ -1284,6 +1288,64 @@
         s.advance(1);
         let (p0, p1) = (s.hubs[0].production[0], s.hubs[1].production[0]);
         assert!(p0 > 0.0 && (p1 / p0 - 2.0).abs() < 0.05, "double pop ⇒ ~double output: {p0} {p1}");
+    }
+
+    /// **Market towns are ALIVE.** Every settlement below the full-hub rank is a live
+    /// tier-2 hub now, not the inert dot it used to be: it must actually trade with the
+    /// city beside it and its population must move. The old behaviour — a village that
+    /// was drawn and clickable but had no market at all, so its panel showed the same
+    /// frozen worldgen numbers for the whole campaign — is exactly what this guards.
+    #[test]
+    fn market_towns_trade_and_are_not_frozen() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("iron", i32::MAX, 1, 6.0, 0.45, false),
+        ];
+        // One food-poor city surrounded by four small grain-growing market towns.
+        let mut hubs = vec![hub(0, 20.0, 20.0, 30_000.0, vec![200.0, 40_000.0], 0)];
+        for i in 0..4u32 {
+            let mut t = hub(1 + i, 20.0 + 3.0 * (i as f32 + 1.0), 20.0, 600.0, vec![900.0, 0.0], 0);
+            t.market_town = true;
+            hubs.push(t);
+        }
+        let mut s = sim(hubs, goods);
+        s.rebuild_routes();
+        let pop_before: Vec<f32> = s.hubs.iter().map(|h| h.population).collect();
+        s.advance(365 * 2);
+
+        for i in 1..5usize {
+            let h = &s.hubs[i];
+            assert!(h.market_town, "town {i} should still be tier 2 at this size");
+            // It sells its grain to the city…
+            assert!(h.export_earn > 0.0, "market town {i} never sold anything (export_earn 0)");
+            // …and buys what it does not make. Measured as cumulative spend rather than
+            // standing stock: a village consumes an arriving cargo of iron quickly, so
+            // the stock at any one instant is a poor witness that trade happened.
+            assert!(h.import_spend > 0.0, "market town {i} never bought anything (import_spend 0)");
+            assert!(h.price[1].is_finite() && h.price[1] > 0.0,
+                "market town {i} has no live price for iron");
+            // …and it is not frozen: population moved off its founding value.
+            assert!((h.population - pop_before[i]).abs() > 1.0,
+                "market town {i} population is frozen at {}", h.population);
+        }
+        assert!(s.hubs[0].import_spend > 0.0, "the city should be buying the towns' grain");
+    }
+
+    /// A market town that grows into a city is PROMOTED to the full-hub tier, so the
+    /// tiering never caps a well-sited village's future.
+    #[test]
+    fn a_grown_market_town_is_promoted() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut town = hub(1, 24.0, 20.0, MARKET_TOWN_PROMOTE + 500.0, vec![4000.0], 0);
+        town.market_town = true;
+        let mut s = sim(vec![hub(0, 20.0, 20.0, 8_000.0, vec![500.0], 0), town], goods);
+        s.rebuild_routes();
+        assert!(s.hubs[1].market_town);
+        s.advance(365 + 5); // the promotion pass is yearly
+        assert!(!s.hubs[1].market_town,
+            "a town of {} should have been promoted to a full hub", s.hubs[1].population);
+        assert!(s.journal.iter().any(|j| j.kind == "city"),
+            "the promotion should be recorded in the chronicle");
     }
 
     #[test]

@@ -728,6 +728,9 @@ impl CampaignSim {
             id, x: site.x, y: site.y, name, population: pop, founding_pop: pop,
             stock: production.clone(), price: self.goods.iter().map(|g| g.base_value).collect(),
             production, grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
+            // A newly-founded town starts in the market-town tier and is promoted by
+            // `promote_market_towns` if it ever grows into a real city.
+            market_town: true,
             is_estate: false, parent: -1, koppen: site.koppen, coastal: site.coastal, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.62, sent_food: 0.7, sent_prosperity: 0.5,
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,

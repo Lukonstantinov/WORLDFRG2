@@ -1086,6 +1086,16 @@ pub fn structure_effect(id: u8) -> &'static str {
 /// dominant late-campaign cost as estates inflated `n`; capping to the nearest K
 /// keeps a Month step roughly flat regardless of total hub count.
 const NEIGHBOR_K: usize = 32;
+/// Partner list for a MARKET TOWN (tier 2). A village trades with the markets it can
+/// actually reach in a few days, not with entrepôts across the world, so its list is a
+/// short local one. This is also what keeps "every settlement is alive" affordable:
+/// dispatch is O(hubs × goods × partners), and the towns are the bulk of the hubs.
+const NEIGHBOR_K_TOWN: usize = 10;
+/// A market town this big has outgrown the tier and is promoted to a full hub — it can
+/// then host houses, banks, a guild and a council like any other city. One-way by
+/// design: a city that later shrinks keeps its institutions and declines as a city,
+/// which is what actually happens to a place that has been important.
+const MARKET_TOWN_PROMOTE: f32 = 6_000.0;
 /// Global ceiling on satellite production sites (estates + colonies). Estates are
 /// real hubs in `self.hubs`, so an uncapped count quadratically slows every tick.
 const MAX_TOTAL_ESTATES: usize = 220;
@@ -1318,6 +1328,17 @@ pub struct TickHub {
     /// 0 = fed, 1 = severe sustained food deficit.
     pub starving: f32,
     pub is_estate: bool,
+    /// **Tier 2 — a MARKET TOWN.** A live settlement below the full-hub rank: it
+    /// produces, consumes, prices, stocks and trades exactly like a full hub, but it
+    /// keeps a short local partner list and never hosts the big institutions (its size
+    /// already excludes it from banks, guilds, polis coinage and the rest, which are all
+    /// population-gated — the flag makes that explicit and keeps the partner scan cheap).
+    ///
+    /// This tier replaced the old inert `hinterland` dot, which was drawn and clickable
+    /// but had no market at all, so a sub-cap town showed frozen worldgen numbers forever.
+    /// A market town that grows past `MARKET_TOWN_PROMOTE` is promoted to a full hub.
+    /// Serde-defaults to `false`, so every hub in an existing save loads as a full hub.
+    #[serde(default)] pub market_town: bool,
     /// Parent hub INDEX for an estate (−1 otherwise).
     pub parent: i32,
     pub koppen: u8,
@@ -3455,9 +3476,11 @@ impl CampaignSim {
             }
             // Partial-select the K nearest in O(n) (avoids an O(n log n) full sort of
             // every hub against every other on each estate add), then sort just those K.
-            if scratch.len() > NEIGHBOR_K {
-                scratch.select_nth_unstable_by(NEIGHBOR_K, |x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
-                scratch.truncate(NEIGHBOR_K);
+            // A market town keeps a SHORT list — see `NEIGHBOR_K_TOWN`.
+            let k = if self.hubs[a].market_town { NEIGHBOR_K_TOWN } else { NEIGHBOR_K };
+            if scratch.len() > k {
+                scratch.select_nth_unstable_by(k, |x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
+                scratch.truncate(k);
             }
             scratch.sort_by(|x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
             neighbors[a] = scratch.iter().map(|&(b, _)| b).collect();

@@ -462,6 +462,9 @@ export interface HubDetail {
   related_colonies?: ColonySummary[]; // colonies/outposts this city founded
   city_stores?: CityStores;          // civic warehouse + all goods held at the city (+ value)
   dev_tier?: number;                 // development tier 0..5 (Outpost..Emporium)
+  /** Tier 2 — a live market town (trades, prices and grows, but keeps no houses,
+   *  bank or council of its own until it is promoted to a full hub). */
+  market_town?: boolean;
 }
 /** City stores: the civic (city-owned) warehouse + all goods held at the city, valued. */
 export interface CityStores {

@@ -436,6 +436,11 @@ pub struct HubDetail {
     pub koppen: u8,
     pub coastal: bool,
     pub is_estate: bool,
+    /// Tier 2 — a live MARKET TOWN rather than a full hub: it trades, prices and grows,
+    /// but hosts no houses/banks/council of its own until it is promoted. Serde-defaults
+    /// so a frontend built against an older payload still parses.
+    #[serde(default)]
+    pub market_town: bool,
     // sentiment
     pub mood: f32,
     pub sent_food: f32,

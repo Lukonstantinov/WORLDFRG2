@@ -557,6 +557,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             .collect(),
         city_stores,
         dev_tier,
+        market_town: hub.market_town,
     }))
 }
 

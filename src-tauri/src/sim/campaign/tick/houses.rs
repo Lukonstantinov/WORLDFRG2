@@ -536,6 +536,8 @@ impl CampaignSim {
             id, x, y, name, population: est_pop, founding_pop: est_pop,
             stock: vec![0.0; ng], price: self.goods.iter().map(|g| g.base_value).collect(),
             production, grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
+            // An estate is its own tier (`is_estate`), never a market town.
+            market_town: false,
             is_estate: true, parent, koppen, coastal, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5,
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,

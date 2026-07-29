@@ -261,16 +261,28 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         })
         .collect();
 
-    // ── Hubs ── (cap to the strongest 250 to bound tick cost + state size). Raised
-    // 150→250 so more notable cities are actually simulated — a "large" city ranked
-    // 151+ was rendered but not a live hub, so it couldn't be clicked/inspected.
+    // ── Hubs ── EVERY settlement is simulated. There used to be a hard cap of 250 live
+    // hubs, with everything below it captured as an inert `hinterland` dot: drawn and
+    // clickable, but with no market, no stock and no trade, so opening one showed frozen
+    // worldgen numbers for the whole campaign. Now the cap only chooses the TIER:
+    //   · rank < FULL_HUB_CAP → a full hub (houses, banks, polis, wars, the lot);
+    //   · the rest            → a MARKET TOWN (`TickHub::market_town`) — a live market
+    //     with production, prices, stock, trade and population dynamics, a short local
+    //     partner list, and promotion to a full hub if it grows (see
+    //     `promote_market_towns`).
+    // `HARD_HUB_CAP` remains only as a sanity bound on tick cost + state size; the
+    // settlement step itself caps at 1000, so it is normally not reached.
+    const FULL_HUB_CAP: usize = 400;
+    const HARD_HUB_CAP: usize = 1200;
     let mut order: Vec<usize> = (0..econ.hubs.len()).collect();
     order.sort_by(|&a, &b| econ.hubs[b].population.cmp(&econ.hubs[a].population));
-    // DECOUPLE: settlements ranked below the live cap aren't simulated, but they're
-    // still real places — captured as `hinterland` so they stay drawn/clickable AND
-    // their population is counted in the world census (fixes the Atlas undercount).
-    let overflow: Vec<usize> = order.iter().skip(250).copied().collect();
-    order.truncate(250);
+    // Only settlements beyond the HARD cap stay inert (there should normally be none).
+    let overflow: Vec<usize> = order.iter().skip(HARD_HUB_CAP).copied().collect();
+    order.truncate(HARD_HUB_CAP);
+    // Which worldgen ids are full hubs — captured BEFORE the index sort below, since the
+    // tier is by population rank, not by snapshot order.
+    let full_hub_ids: std::collections::HashSet<u32> =
+        order.iter().take(FULL_HUB_CAP).map(|&h| econ.hubs[h].id).collect();
     order.sort_unstable(); // keep snapshot index order stable
     // Tiered founding populations (user rule): every settlement starts HUMBLE and
     // grows — small towns begin at 500, medium at 2000, large at 10000 — and the
@@ -348,6 +360,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 food_balance: 1.0,
                 starving: 0.0,
                 is_estate: false,
+                market_town: !full_hub_ids.contains(&eh.id),
                 parent: -1,
                 koppen: eh.koppen,
                 coastal: eh.coastal,
