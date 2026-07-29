@@ -482,7 +482,8 @@ canvas/
   PixiApp.ts                    ← PixiJS 8 application init
   TileViewport.ts               ← Pan/zoom, screenToWorld, getVisibleTileRange
   TileManager.ts                ← LRU tile cache, base64→texture, sprite management
-  OverlayManager.ts             ← ALL vector overlays (~4k lines: rivers, settlements, wind,
+  OverlayManager.ts             ← ALL vector overlays, drawn in CANVAS 2D — not Pixi
+                                  (~4.6k lines: rivers, settlements, wind,
                                   trunks, routes, dynamic flow, regions). visibility[type] gates
                                   each. Also holds the two live appearance registries the
                                   Settings store drives: `lineColors` (overlay lines) and
@@ -1068,7 +1069,9 @@ Three rules:
 1. **Steps run in order** — each phase checks prerequisites, warns if missing.
 2. **WorldBuffer is the sim unit** — load all → compute → save; never per-cell during sim.
 3. **Undo is tile-level** — every stroke/phase journals prior tile state.
-4. **Overlays are separate from tiles** — PixiJS Graphics on OverlayManager, gated by `visibility[type]`.
+4. **Overlays are separate from tiles** — drawn on OverlayManager's own **Canvas 2D**
+   context (NOT PixiJS Graphics — Pixi draws the tile sprites only), gated by
+   `visibility[type]`.
 5. **Rendering is server-side** — Rust renders RGBA, frontend only displays.
 6. **Cylindrical wrapping** — X wraps, Y clamps; all BFS/paint/sim respect it.
 7. **New tile fields append LAST** — v2 self-describing blobs; trailing reads pad zeros (old saves load).

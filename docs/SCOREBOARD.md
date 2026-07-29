@@ -18,14 +18,14 @@ scoreboard whose history is rewritten cannot show a regression.
 | Earth C-class own accuracy | 32.8% | — | worst class |
 | Earth `C → B` confusion | 40% | — | largest single error |
 | Earth `D → E` confusion | 40% | — | second largest |
-| **Economy: price/distance gradient** | **0.069** | `ECON_INTEGRATION_FLOOR` = 0.05 | ✅ asserted (barely) |
-| Economy: grain price CV across cities | 0.372 | `ECON_SPATIAL_CV_FLOOR` = 0.01 | ✅ in historical band |
-| Economy: grain price CV within a city | 0.701 | — | ⚠️ above band (0.30–0.50) |
-| Economy: rank-size (Zipf) slope | −0.422 | band [−3.0, −0.15] | ⚠️ flatter than −0.8…−1.2 |
-| Economy: urban share drift (60 yr) | 0.100 → 0.183 | — | ⚠️ ~10× historical rate |
-| Economy: house dissolutions / century | 53.3 | — | ⚠️ vs 1–3 generations |
-| Economy: crisis-year share | 1.000 | — | ⚠️ permanent subsistence crisis |
-| **Rust tests** | **159 pass, 0 fail** (7 ignored) | CI | ✅ |
+| **Economy: price/distance gradient** | **−0.01** | *none* | ❌ distance does not move prices |
+| Economy: grain price CV across cities | 2.10 | `ECON_SPATIAL_CV_FLOOR` = 0.01 | ⚠️ far above band (0.20–0.40) |
+| Economy: rank-size (Zipf) slope | −0.41 | band [−3.0, −0.15] | ⚠️ flatter than −0.8…−1.2 |
+| Economy: urban share drift (60 yr) | 0.100 → **0.997** | — | ❌ countryside empties completely |
+| Economy: house wealth Gini | 0.771 | `ECON_GINI_FLOOR` = 0.15 | ✅ in historical band |
+| Economy: house dissolutions / century | 277 | — | ⚠️ needs a denominator to interpret |
+| **Economy: tick determinism** | **FAILS** | `econ_scorecard_is_deterministic` | ❌ **open defect — see below** |
+| **Rust tests** | **159 pass, 0 fail** (8 ignored) | CI | ✅ |
 | **Frontend tests** | **0** | *none* | ❌ 33k lines uncovered |
 | `cargo check` | clean | CI | ✅ |
 | `npx tsc --noEmit` | clean | CI | ✅ |
@@ -83,6 +83,36 @@ the climate model lives, and it is currently ungated. Adding an
 
 ---
 
+## ⚠️ Open defect: the campaign tick is not deterministic
+
+`CLAUDE.md` §5 states a tick is "pure & deterministic per `(seed, tick)`". **It is
+not, once the economy is actually trading.** Two identical reference worlds run in
+one process produce different scorecards.
+
+**Cause.** HashMap iteration order feeding **float accumulations**. Float addition
+is not associative, and Rust's `RandomState` gives every HashMap instance its own
+iteration order, so identical inputs fold to different sums. Two sites are fixed
+(`classify_hubs`'s `throughput`, and `flow_year`'s ordering — both `cities.rs`);
+the divergence shrank but did not vanish. Roughly a dozen accumulator maps remain
+in `houses.rs`, `disease.rs`, `colonies.rs` and `mod.rs`.
+
+**Why it hid for so long.** The existing determinism assertions in `tests.rs` run a
+world where `tests::sim()` hard-codes `need_scale = 1.0` — about **84× real
+demand**. Every hub sits in permanent famine, `dispatch` never sees a surplus, so
+almost nothing is traded and the accumulator maps stay nearly empty. Order cannot
+matter when there is nothing to order. Calibrating the reference world to real
+campaign-start conditions is what exposed it.
+
+**Consequence for this file.** Every economy number above is a single sample from a
+non-reproducible process. Treat them as indicative of magnitude, not as
+measurements, until determinism is restored. That is the first economy work to do.
+
+**Fix.** Audit every hash accumulator in `tick/`, sort by key before folding, and
+hold `simulate_decades_reports_dynamics` bit-identical at each step. Then remove
+the `#[ignore]` from `econ_scorecard_is_deterministic`.
+
+---
+
 ## What is still unmeasured
 
 Being explicit about this matters as much as the table above — an unmeasured
@@ -106,5 +136,6 @@ subsystem is one you cannot have an opinion about.
 
 | Date | Commit | Earth main | Earth exact | Rust tests | FE tests | Note |
 |---|---|---|---|---|---|---|
-| 2026-07-29 | *this* | 66.3% | 29.1% | 159 | 0 | Economy oracle added; CI added; scoreboard created |
+| 2026-07-29 | `936a8a3`+ | 66.3% | 29.1% | 159 | 0 | Economy oracle added; CI added; scoreboard created |
+| 2026-07-29 | *this* | 66.3% | 29.1% | 159 | 0 | Harness calibrated to real campaign start; LOD sampler fixed; tick determinism defect found |
 | — | `d53fdc9` | 66.2% | 29.0% | — | 0 | FIX_PLAN baseline |

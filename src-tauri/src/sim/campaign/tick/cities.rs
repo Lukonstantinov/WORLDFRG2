@@ -17,7 +17,11 @@ impl CampaignSim {
         }
         // Snapshot the year's per-pair trade volume, then reset the accumulator.
         if !self.flow_accum.is_empty() {
+            // Sorted for the same reason as `classify_hubs` below: this vector is
+            // serialized and read by the Dynamic Trade Flow overlay, so HashMap
+            // iteration order would make a saved campaign differ run-to-run.
             self.flow_year = self.flow_accum.iter().map(|(&(a, b), &v)| (a, b, v)).collect();
+            self.flow_year.sort_by_key(|&(a, b, _)| (a, b));
             self.flow_accum.clear();
         }
         // ── Atlas 2.0 · per-hub yearly throughput (Trade Heat / census) + the
@@ -875,7 +879,16 @@ impl CampaignSim {
         let nn = self.hubs.len();
         if nn == 0 { return; }
         let mut throughput = vec![0.0f32; nn];
-        for (&(a, b), &v) in self.flow_accum.iter() {
+        // DETERMINISM: `flow_accum` is a HashMap, and this is a FLOAT accumulation.
+        // Float addition is not associative, and Rust's RandomState gives every
+        // HashMap instance its own iteration order — so summing in map order made
+        // `throughput` (and therefore `score`, the sort, and every hub class that
+        // follows from it) differ between two runs of the same seed. Sort by key
+        // first: same numbers, same order, every time.
+        let mut flows: Vec<((u32, u32), f32)> =
+            self.flow_accum.iter().map(|(&k, &v)| (k, v)).collect();
+        flows.sort_by_key(|&(k, _)| k);
+        for ((a, b), v) in flows {
             if (a as usize) < nn { throughput[a as usize] += v; }
             if (b as usize) < nn { throughput[b as usize] += v; }
         }

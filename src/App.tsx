@@ -276,6 +276,93 @@ function NewWorldDialog({ onCreated }: { onCreated: () => void }) {
   );
 }
 
+/// Naming a new campaign. This exists because `window.prompt` is not implemented
+/// by ANY of Tauri's three webviews: WKWebView (macOS) and WebKit2GTK (Linux)
+/// require the host application to supply a text-input panel, and WebView2
+/// (Windows) has no prompt at all. It returns null everywhere, which the caller
+/// read as "user cancelled" — so starting a campaign silently did nothing.
+///
+/// Every other `prompt()` in this file is a FALLBACK inside a `catch` after
+/// `@tauri-apps/plugin-dialog` has been tried. This was the one place it was the
+/// only path. Keep it that way: never make `prompt`, `alert` or `confirm` the
+/// primary route to a feature.
+function NewCampaignDialog({
+  worldName,
+  onStart,
+  onCancel,
+}: {
+  worldName: string;
+  onStart: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(`${worldName} Campaign`);
+  const trimmed = name.trim();
+
+  return (
+    <div
+      style={{
+        position: "absolute", inset: 0, display: "flex",
+        alignItems: "center", justifyContent: "center",
+        background: "rgba(0,0,0,0.75)", zIndex: 100,
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onCancel();
+        if (e.key === "Enter" && trimmed) onStart(trimmed);
+      }}
+    >
+      <div style={{
+        background: "#111820", border: "1px solid #1e2e42",
+        borderRadius: 10, padding: "28px 32px", minWidth: 380,
+        boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
+      }}>
+        <h2 style={{ margin: "0 0 8px", color: "#c0d8f0", fontSize: 18, fontWeight: 600 }}>
+          New Campaign
+        </h2>
+        <p style={{ margin: "0 0 20px", color: "#5a7090", fontSize: 11, lineHeight: 1.5 }}>
+          The world's geography is kept. Settlements, economy and history start over.
+        </p>
+
+        <div style={{ marginBottom: 18 }}>
+          <label style={dialogLabel}>Campaign Name</label>
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            style={dialogInput}
+          />
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={onCancel}
+            style={{
+              flex: "0 0 auto", padding: "10px 18px", borderRadius: 6,
+              border: "1px solid #1e2e42", cursor: "pointer",
+              background: "#0d1219", color: "#5a7090", fontSize: 13,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => trimmed && onStart(trimmed)}
+            disabled={!trimmed}
+            style={{
+              flex: 1, padding: "10px 0", borderRadius: 6,
+              border: "none", cursor: trimmed ? "pointer" : "not-allowed",
+              background: trimmed ? "#2060a0" : "#1a3050",
+              color: trimmed ? "#fff" : "#54708f",
+              fontSize: 14, fontWeight: 600, letterSpacing: 0.3,
+              transition: "background 0.15s",
+            }}
+          >
+            Start Campaign
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const isLoaded = useWorldStore((s) => s.isLoaded);
   const meta = useWorldStore((s) => s.meta);
@@ -301,6 +388,7 @@ export default function App() {
   const [showExport, setShowExport] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showCampaignDialog, setShowCampaignDialog] = useState(false);
 
   const handleOpen = async () => {
     try {
@@ -465,13 +553,21 @@ export default function App() {
     }
   };
 
-  const handleNewCampaign = async () => {
+  const handleNewCampaign = () => {
     if (!meta?.frozen) {
       alert("Finalize the world first (World wizard, after step 6).");
       return;
     }
-    const name = prompt("Campaign name:", "New Campaign");
-    if (!name) return;
+    // NOT `prompt()`. Tauri does not implement window.prompt on any of its three
+    // webviews — WKWebView and WebKit2GTK need a host-implemented text panel that
+    // Tauri does not supply, and WebView2 has no prompt at all. It returns null,
+    // the `if (!name) return` swallowed it, and starting a campaign — half the
+    // product — was silently unreachable with no error shown.
+    setShowCampaignDialog(true);
+  };
+
+  const startCampaign = async (name: string) => {
+    setShowCampaignDialog(false);
     try {
       await newCampaign(name);
       // Fresh campaign: human data resets, world geography (steps 1-6) stays.
@@ -655,6 +751,13 @@ export default function App() {
       <GoodsChainReview />
       <GoodDetailPanel />
       {showDialog && <NewWorldDialog onCreated={() => setShowDialog(false)} />}
+      {showCampaignDialog && (
+        <NewCampaignDialog
+          worldName={meta?.name || "world"}
+          onStart={startCampaign}
+          onCancel={() => setShowCampaignDialog(false)}
+        />
+      )}
       {showExport && <ExportDialog name={meta?.name || "world"} onClose={() => setShowExport(false)} />}
       {showImport && <ImportWorldDialog onClose={() => setShowImport(false)} />}
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}

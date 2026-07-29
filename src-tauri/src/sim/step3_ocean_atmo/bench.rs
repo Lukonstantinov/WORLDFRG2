@@ -104,6 +104,11 @@ fn ocean_atmosphere_field_checksums() {
     println!("  precipitation     {:020}", fsum(&buf.precipitation));
     println!("  precip_summer     {:020}", usum(&buf.precip_summer_frac));
     println!("  seasonal_amp      {:020}", usum(&buf.seasonal_amp));
+    // snow_frac is in PHASE_OCEAN_ATMOSPHERE and written by apply_ice_albedo_feedback,
+    // so it is a SHIPPED phase-3 output. It was missing here, which left a hole in the
+    // gate: a refactor of the ice-albedo feedback could change a persisted column and
+    // still show every checksum unchanged.
+    println!("  snow_frac         {:020}", usum(&buf.snow_frac));
     println!("  distance_to_ocean {:020}", fsum(&buf.distance_to_ocean));
     println!("  shelf_freeze      {:020}", fsum(&freeze));
 }

@@ -374,6 +374,23 @@ fn sample_supertile(
             out.reef_risk[di] = src.reef_risk[si];
             out.disease_risk[di] = src.disease_risk[si];
             out.wind_speed[di] = src.wind_speed[si];
+            // Everything appended AFTER wind_speed was missing here, so the LOD
+            // pyramid served zeros for it. `biome` was the visible casualty:
+            // `TileData::new_sea` allocates the column non-empty and zeroed, so
+            // `render_biomes` saw valid-but-zero data and fell through to
+            // `koppen_fallback_biome` — the legacy 16-code mapping with the fixed
+            // elevation treeline that §8.12 exists to replace. Since `lodForScale`
+            // puts any scale < 0.5 at LOD ≥ 1, the 41-biome layer was invisible at
+            // the default world view. `sst` rendered a uniform 0 °C and `snow_frac`
+            // rendered fully transparent for the same reason.
+            //
+            // §3.3's rule is "new tile fields append LAST". This sampler is the
+            // second place that has to know — see the completeness test below.
+            out.precip_summer_frac[di] = src.precip_summer_frac[si];
+            out.seasonal_amp[di] = src.seasonal_amp[si];
+            out.sst[di] = src.sst[si];
+            out.snow_frac[di] = src.snow_frac[si];
+            out.biome[di] = src.biome[si];
         }
     }
 
@@ -403,6 +420,132 @@ pub fn get_tile_range(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `sample_supertile` must carry EVERY columnar field into the LOD pyramid.
+    ///
+    /// This is the second place that has to learn about a new tile column (§3.3's
+    /// "new fields append LAST" covers serialization; this covers the LOD sampler),
+    /// and it was silently missed for the five fields added after `wind_speed`:
+    /// `precip_summer_frac`, `seasonal_amp`, `sst`, `snow_frac` and `biome`.
+    ///
+    /// The failure was invisible rather than loud, which is what makes it worth a
+    /// test: `TileData::new_sea` allocates those columns non-empty and zeroed, so
+    /// the renderer received well-formed zeros and drew a plausible wrong map —
+    /// the 41-biome layer silently degraded to the legacy Köppen fallback at every
+    /// zoom below scale 0.5, which is the default world view.
+    ///
+    /// Method: fill a source tile with a DISTINCT non-zero value per column, sample
+    /// it at lod 1, and assert nothing arrives as zero. A newly appended column that
+    /// the sampler forgets fails here immediately.
+    #[test]
+    fn lod_sampler_carries_every_column() {
+        let n = (TILE_SIZE * TILE_SIZE) as usize;
+        let mut src = TileData::new_sea();
+
+        // Distinct sentinels so a mis-wired assignment (copying the wrong column)
+        // is caught as well as an omitted one.
+        src.terrain = vec![1u8; n];
+        src.elevation = vec![0.11f32; n];
+        src.sea_depth = vec![0.12f32; n];
+        src.is_shelf = vec![2u8; n];
+        src.is_shelf_edge = vec![3u8; n];
+        src.locked_bits = vec![4u16; n];
+        src.plate_index = vec![5u16; n];
+        src.boundary_type = vec![6u8; n];
+        src.is_volcanic = vec![7u8; n];
+        src.temperature = vec![0.13f32; n];
+        src.precipitation = vec![0.14f32; n];
+        src.koppen = vec![8u8; n];
+        src.soil_type = vec![9u8; n];
+        src.fertility = vec![0.15f32; n];
+        src.fishery = vec![0.16f32; n];
+        src.current_type = vec![10u8; n];
+        src.wind_vx = vec![0.17f32; n];
+        src.wind_vy = vec![0.18f32; n];
+        src.current_vx = vec![0.19f32; n];
+        src.current_vy = vec![0.20f32; n];
+        src.distance_to_ocean = vec![0.21f32; n];
+        src.habitability = vec![0.22f32; n];
+        src.salinity = vec![11u8; n];
+        src.shark_risk = vec![12u8; n];
+        for g in src.goods.iter_mut() {
+            *g = vec![13u8; n];
+        }
+        src.shipworm_risk = vec![14u8; n];
+        src.storm_base = vec![15u8; n];
+        src.reef_risk = vec![16u8; n];
+        src.disease_risk = vec![17u8; n];
+        src.wind_speed = vec![0.23f32; n];
+        src.precip_summer_frac = vec![18u8; n];
+        src.seasonal_amp = vec![19u8; n];
+        src.sst = vec![0.24f32; n];
+        src.snow_frac = vec![20u8; n];
+        src.biome = vec![21u8; n];
+
+        // A lod-1 supertile covers a 2×2 block of base tiles; fill all four so
+        // every sampled cell has a source.
+        let mut base: HashMap<(i32, i32), (i64, TileData)> = HashMap::new();
+        for by in 0..2 {
+            for bx in 0..2 {
+                base.insert((bx, by), (1i64, src.clone()));
+            }
+        }
+
+        let (out, _version) = sample_supertile(0, 0, 2, &base);
+
+        macro_rules! carried {
+            ($field:ident, $zero:expr) => {
+                assert!(
+                    out.$field.iter().all(|&v| v != $zero),
+                    concat!(
+                        "sample_supertile dropped `", stringify!($field),
+                        "` — the LOD pyramid will serve zeros for it at every zoom \
+                         below scale 0.5. Add the assignment in sample_supertile."
+                    )
+                );
+            };
+        }
+
+        carried!(terrain, 0);
+        carried!(elevation, 0.0);
+        carried!(sea_depth, 0.0);
+        carried!(is_shelf, 0);
+        carried!(is_shelf_edge, 0);
+        carried!(locked_bits, 0);
+        carried!(plate_index, 0);
+        carried!(boundary_type, 0);
+        carried!(is_volcanic, 0);
+        carried!(temperature, 0.0);
+        carried!(precipitation, 0.0);
+        carried!(koppen, 0);
+        carried!(soil_type, 0);
+        carried!(fertility, 0.0);
+        carried!(fishery, 0.0);
+        carried!(current_type, 0);
+        carried!(wind_vx, 0.0);
+        carried!(wind_vy, 0.0);
+        carried!(current_vx, 0.0);
+        carried!(current_vy, 0.0);
+        carried!(distance_to_ocean, 0.0);
+        carried!(habitability, 0.0);
+        carried!(salinity, 0);
+        carried!(shark_risk, 0);
+        carried!(shipworm_risk, 0);
+        carried!(storm_base, 0);
+        carried!(reef_risk, 0);
+        carried!(disease_risk, 0);
+        carried!(wind_speed, 0.0);
+        // The five that were actually missing.
+        carried!(precip_summer_frac, 0);
+        carried!(seasonal_amp, 0);
+        carried!(sst, 0.0);
+        carried!(snow_frac, 0);
+        carried!(biome, 0);
+
+        for (g, col) in out.goods.iter().enumerate() {
+            assert!(col.iter().all(|&v| v != 0), "sample_supertile dropped goods belt {g}");
+        }
+    }
 
     /// The packed format must parse back exactly (mirrors the TS parser in
     /// TileManager.ts — keep the two in sync).
