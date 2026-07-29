@@ -32,7 +32,9 @@ jobs:
           node-version: '22'
           cache: npm
 
-      - run: npm install --no-audit --no-fund
+      # `ci` not `install` — reproducible, and it fails loudly when the lockfile
+      # and package.json have drifted apart instead of silently repairing them.
+      - run: npm ci --no-audit --no-fund
 
       # Gate 4 — the only thing standing between 33k lines of TS and a runtime error.
       - name: Type-check
@@ -90,3 +92,28 @@ jobs:
       - name: Full library test suite
         working-directory: src-tauri
         run: cargo test --lib
+
+  # The product ships on Windows and macOS. Building only on Linux means a
+  # platform-specific compile or link failure (exactly the LNK2019 class noted in
+  # src-tauri/Cargo.toml) reaches customers before it reaches CI. This is a
+  # compile check, not a packaging job — cheap enough to run on every push.
+  cross-platform:
+    name: Compiles on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.os }}
+
+      - name: cargo check
+        working-directory: src-tauri
+        run: cargo check --all-targets

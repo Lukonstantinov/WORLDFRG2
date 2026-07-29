@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/nicotinetroll/turboroll/main/schema.json",
+  "$schema": "./gen/schemas/desktop-schema.json",
   "productName": "WorldForge 2",
   "version": "0.1.0",
   "identifier": "com.worldforge2.app",
