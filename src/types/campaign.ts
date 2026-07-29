@@ -1885,7 +1885,7 @@ export interface ProvinceDetail {
 }
 
 /** Result of `sim_generate_provinces`: the province list + a downsampled per-cell
- *  id raster for the map overlay (`65535` = sea/no-data). */
+ *  id raster for the map overlay (`4294967295` = sea/no-data; ids are u32). */
 export interface SimProvincesResult {
   provinces: Province[];
   raster: number[];

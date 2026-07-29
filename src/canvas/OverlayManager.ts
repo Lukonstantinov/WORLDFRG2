@@ -196,6 +196,14 @@ function provinceColorRGB(id: number): [number, number, number] {
   return hslToRgb(hue, sat, lig);
 }
 
+/** #rgb / #rrggbb → 0–255 RGB triple (for the single-colour province fill). */
+function hexToRgb(hex: string): [number, number, number] {
+  const m = hex.replace("#", "");
+  const s = m.length === 3 ? m.split("").map((c) => c + c).join("") : m;
+  const n = parseInt(s, 16) >>> 0;
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
 function lakeFill(lake: LakeData): string {
   if (lake.kind === 1) return OXBOW_COLOR;
   const s = lake.salinity_ppt ?? 0;
@@ -419,6 +427,15 @@ export class OverlayManager {
    *  per-frame cost is just one blit + one stroke regardless of world size. */
   private provinceCanvas: HTMLCanvasElement | null = null;
   private provinceBorderPath: Path2D | null = null;
+  /** Fill style: "distinct" = each province its own colour (default); "single" = every
+   *  province filled with `provinceSingleColor`, leaving only the (custom-coloured)
+   *  borders to read the partition. Driven by the Settings panel. */
+  private provinceFillMode: "distinct" | "single" = "distinct";
+  private provinceSingleColor = "#3a5a7c";
+  private provinceBorderColor = "rgba(8, 14, 20, 0.7)";
+  /** Province ids present in the current raster, so a live style change can recolour
+   *  the fill without re-fetching the partition. */
+  private provinceIdList: number[] = [];
   /** The province picked on the map: its outline + seat, rebuilt only when the id
    *  changes so per-frame cost stays O(1) however large the world is. */
   private selectedProvince: number | null = null;
@@ -587,10 +604,9 @@ export class OverlayManager {
     }[],
   ) {
     this.provinceRaster = raster;
-    const rgb: [number, number, number][] = [];
+    this.provinceIdList = provinces.map((p) => p.id);
     const labels: { x: number; y: number; r: number; name: string }[] = [];
     for (const p of provinces) {
-      rgb[p.id] = provinceColorRGB(p.id);  // each province its OWN distinct colour
       if (p.name) {
         // Anchor on the pole of inaccessibility when the world carries one — it is
         // always INSIDE the province, unlike a centroid, and unlike the seat (a city,
@@ -610,10 +626,31 @@ export class OverlayManager {
         .map((p) => [p.id, { x: p.seat_x!, y: p.seat_y! }]),
     );
     void cultureColor; // retained for the culture political map elsewhere
-    this.buildProvinceRender(rgb);
+    this.rebuildProvinceColors();
     // The raster may have been replaced (regenerate / world open) — re-cut the
     // selected outline against it rather than leaving a stale path on screen.
     if (this.selectedProvince !== null) this.buildSelectedProvince();
+  }
+
+  /** Rebuild the per-province fill colours from the current fill mode, then re-raster.
+   *  Cheap enough to call live from the Settings panel (no partition re-fetch). */
+  private rebuildProvinceColors() {
+    if (!this.provinceRaster) return;
+    const rgb: [number, number, number][] = [];
+    const single = hexToRgb(this.provinceSingleColor);
+    for (const id of this.provinceIdList) {
+      rgb[id] = this.provinceFillMode === "single" ? single : provinceColorRGB(id);
+    }
+    this.buildProvinceRender(rgb);
+  }
+
+  /** Province appearance from the Settings panel: a single flat fill (borders carry the
+   *  partition) vs each province its own colour, plus a custom border colour. */
+  setProvinceStyle(s: { fillMode?: "distinct" | "single"; singleColor?: string; borderColor?: string }) {
+    if (s.fillMode !== undefined) this.provinceFillMode = s.fillMode;
+    if (s.singleColor !== undefined) this.provinceSingleColor = s.singleColor;
+    if (s.borderColor !== undefined) this.provinceBorderColor = s.borderColor;
+    this.rebuildProvinceColors();
   }
 
   /** Opacity of the province colour fill, 0..1. Borders/names/selection are unaffected. */
@@ -636,7 +673,7 @@ export class OverlayManager {
     const ry = Math.floor((wy / r.gridH) * r.h);
     if (rx < 0 || ry < 0 || rx >= r.w || ry >= r.h) return null;
     const id = r.data[ry * r.w + rx];
-    return id === 65535 ? null : id;
+    return id === 0xffffffff ? null : id;
   }
 
   /** Cut the selected province's outline out of the raster once, in world cells. */
@@ -674,7 +711,7 @@ export class OverlayManager {
     const r = this.provinceRaster;
     if (!r) return;
     const { data, w, h, gridW, gridH } = r;
-    const NO = 65535;
+    const NO = 0xffffffff; // NO_PROVINCE sentinel (u32; the raster is Uint32Array)
     const cv = document.createElement("canvas");
     cv.width = w; cv.height = h;
     const ictx = cv.getContext("2d");
@@ -1531,7 +1568,7 @@ export class OverlayManager {
     }
     // Borders — thin dark line between adjacent provinces (1 screen px at any zoom).
     if (this.provinceBorderPath) {
-      ctx.strokeStyle = "rgba(8, 14, 20, 0.7)";
+      ctx.strokeStyle = this.provinceBorderColor;
       ctx.lineWidth = 1 / this.currentScale;
       ctx.stroke(this.provinceBorderPath);
     }

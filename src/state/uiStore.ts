@@ -161,6 +161,11 @@ interface UIStore {
    *  outline always draw at full strength, so winding this down leaves a clean
    *  political outline over the terrain rather than removing the layer. */
   provinceOpacity: number;
+  /** Province fill style: "distinct" = each its own colour; "single" = one flat colour
+   *  for every province so only the (custom-coloured) borders read the partition. */
+  provinceFillMode: "distinct" | "single";
+  provinceSingleColor: string;
+  provinceBorderColor: string;
   /** #35/#36/#37 · Goods Codex (provenance / history / scarcity) panel open. */
   showGoodsCodex: boolean;
   /** Itinerary routed polyline (world cells) to draw on the map, or null. */
@@ -273,6 +278,9 @@ interface UIStore {
   setShowProvinceInspector: (v: boolean) => void;
   setSelectedProvince: (id: number | null) => void;
   setProvinceOpacity: (v: number) => void;
+  setProvinceFillMode: (m: "distinct" | "single") => void;
+  setProvinceSingleColor: (hex: string) => void;
+  setProvinceBorderColor: (css: string) => void;
   setShowGoodsCodex: (v: boolean) => void;
   setTravelRoute: (pts: [number, number][] | null) => void;
   setRiverHighlight: (ids: number[] | null) => void;
@@ -392,6 +400,9 @@ export const useUIStore = create<UIStore>((set) => ({
   showProvinceInspector: false,
   selectedProvince: null,
   provinceOpacity: 0.5,
+  provinceFillMode: "distinct",
+  provinceSingleColor: "#3a5a7c",
+  provinceBorderColor: "rgba(8, 14, 20, 0.7)",
   showGoodsCodex: false,
   travelRoute: null,
   riverHighlight: null,
@@ -522,6 +533,9 @@ export const useUIStore = create<UIStore>((set) => ({
   setSelectedProvince: (id) =>
     set(id === null ? { selectedProvince: null } : { selectedProvince: id, showProvinceInspector: true }),
   setProvinceOpacity: (v) => set({ provinceOpacity: Math.max(0, Math.min(1, v)) }),
+  setProvinceFillMode: (m) => set({ provinceFillMode: m }),
+  setProvinceSingleColor: (hex) => set({ provinceSingleColor: hex }),
+  setProvinceBorderColor: (css) => set({ provinceBorderColor: css }),
   setShowGoodsCodex: (v) => set({ showGoodsCodex: v }),
   setTravelRoute: (pts) => set({ travelRoute: pts }),
   setRiverHighlight: (ids) => set({ riverHighlight: ids }),

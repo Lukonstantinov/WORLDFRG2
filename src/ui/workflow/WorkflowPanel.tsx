@@ -28,7 +28,7 @@ const STEP_INFO = [
   // entirely, and their first reader is Ocean & Atmosphere (3).
   // Settings-only — nothing to "generate", so it auto-completes (see
   // StepWorldCharacteristics) and never blocks Continue.
-  { step: 0, label: "World Characteristics", desc: "Now that you can see your land: where the equator falls, how the world spins, how bright the sun is, how hard the seasons bite. These decide where the wind belts, deserts and seasons land — set them before Ocean & Atmosphere." },
+  { step: 0, label: "World Characteristics", desc: "Now that you can see your land: frame the latitudes (equator, band expansion, line proportion) and set the planet — rotation (incl. retrograde), axial tilt, sunlight, greenhouse, eccentricity, dryness. These decide where the wind belts, deserts and seasons land, so set them before Ocean & Atmosphere." },
   { step: 2, label: "Elevation", desc: "Generate terrain height. Mountains, coastlines, sea depth." },
   { step: 3, label: "Ocean & Atmosphere", desc: "Wind belts, ocean currents, temperature, and precipitation." },
   { step: 4, label: "Biomes & Climate", desc: "Classify K\u00F6ppen climate zones from temperature & precipitation." },
