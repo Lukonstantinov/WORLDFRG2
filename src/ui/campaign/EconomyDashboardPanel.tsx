@@ -85,7 +85,7 @@ export function EconomyDashboardPanel() {
   const close = () => useUIStore.getState().setShowEconomyDashboard(false);
 
   return (
-    <Panel width={332} maxHeight="82vh" style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
+    <Panel onPointerDown={onPointerDown} width={332} maxHeight="82vh" style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
       <PanelHeader icon="📊" title="Economy Dashboard" onDragStart={onPointerDown} onClose={close} />
       <Tabs<"prices" | "ineq">
         tabs={[["prices", "💰 Price Index"], ["ineq", "📊 Inequality"]]}

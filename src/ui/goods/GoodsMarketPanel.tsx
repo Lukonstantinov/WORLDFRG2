@@ -77,7 +77,7 @@ export function GoodsMarketPanel() {
   const maxProd = Math.max(1, ...view.map((x) => x.produced));
 
   return (
-    <Panel width={470} maxHeight="80vh" style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
+    <Panel onPointerDown={onPointerDown} width={470} maxHeight="80vh" style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
       <PanelHeader icon="📦" title="Goods of the World — quality & trade" onDragStart={onPointerDown} onClose={close} />
       {!active && <EmptyNote>Begin the campaign (Step 11) — goods grade up as the world trades.</EmptyNote>}
       {active && (

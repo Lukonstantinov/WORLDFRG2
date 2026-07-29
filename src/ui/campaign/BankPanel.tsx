@@ -41,7 +41,7 @@ export function BankPanel() {
   const bank = banks[idx];
 
   return (
-    <Panel width={430} maxHeight="82vh" style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
+    <Panel onPointerDown={onPointerDown} width={430} maxHeight="82vh" style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
       <PanelHeader icon="🏦" title="Banks" onDragStart={onPointerDown} onClose={close} />
 
       {!active && <EmptyNote>Banks appear once a campaign is running.</EmptyNote>}

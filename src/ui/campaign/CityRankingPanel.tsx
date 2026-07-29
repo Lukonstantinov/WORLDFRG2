@@ -41,7 +41,7 @@ export function CityRankingPanel() {
   });
 
   return (
-    <Panel width={300} style={{ top: 60, right: 360, zIndex: 42, ...rootStyle }}>
+    <Panel onPointerDown={onPointerDown} width={300} style={{ top: 60, right: 360, zIndex: 42, ...rootStyle }}>
       <PanelHeader icon="🏆" title={mode === "prosperity" ? "Most Prosperous Cities" : "Busiest by Trade"}
         onDragStart={onPointerDown} onClose={() => setOpen(false)} />
       <PanelBody style={{ padding: "4px 8px 10px" }}>

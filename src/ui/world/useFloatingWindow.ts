@@ -31,44 +31,73 @@ export const PANEL_TINTS = {
   province: "rgba(16,22,18,0.97)",  // 🏞 Province Inspector — moss-slate
 } as const;
 
-/** Make a floating panel DRAGGABLE by its header and TINTED so it's distinct.
+/** Interactive descendants that must NEVER start a window drag — a press on any of
+ *  these should do its own thing (click, type, scroll a slider). Everything else in
+ *  the window body is fair game to grab, so the panel drags from anywhere. */
+const NO_DRAG_SEL =
+  "[data-no-drag], button, a, input, select, textarea, label, [role='button'], [contenteditable='true']";
+
+/** Marker set on the native event once a drag has been claimed, so having
+ *  `onPointerDown` on BOTH the root and the header (they share the bubbling event)
+ *  starts exactly one drag, not two. */
+type DragEvt = PointerEvent & { __wfDragClaimed?: boolean };
+
+/** Move this far (px, Manhattan) before a press becomes a DRAG. Under the threshold
+ *  the gesture is left alone, so plain clicks, row selection and text selection in the
+ *  body still work even though the whole window is draggable. */
+const DRAG_THRESHOLD = 4;
+
+/** Make a floating panel DRAGGABLE FROM ANYWHERE on its body and TINTED so it's
+ *  distinct.
  *
- *  Usage:
+ *  Usage — put `onPointerDown` on the ROOT (`data-draggable`) node, so a press
+ *  anywhere in the window can move it; the title bar keeps a `cursor: move` hint:
  *    const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.coin);
- *    <div data-draggable style={{ ...panel, ...rootStyle }}>
- *      <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>…
- *        <span data-no-drag onClick={close}>✕</span>
+ *    <div data-draggable style={{ ...panel, ...rootStyle }} onPointerDown={onPointerDown}>
+ *      <div style={{ ...header, cursor: "move" }}>…<span data-no-drag onClick={close}>✕</span>
  *
- *  Until the first drag the panel keeps its CSS position; the first drag seeds from
- *  the live bounding box so it doesn't jump. Children marked `data-no-drag`
- *  (close buttons, tabs) don't start a drag. */
+ *  Keeping `onPointerDown` on the header too is harmless (the per-event claim guard
+ *  dedupes). Presses on interactive controls (`NO_DRAG_SEL`) never start a drag, and
+ *  a small movement threshold preserves clicks / selection. Until the first drag the
+ *  panel keeps its CSS position; the first drag seeds from the live bounding box so
+ *  it doesn't jump. */
 export function useFloatingWindow(tint: string) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const drag = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
 
   const onPointerDown = useCallback((e: React.PointerEvent<HTMLElement>) => {
-    if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
+    const ne = e.nativeEvent as DragEvt;
+    if (ne.__wfDragClaimed) return;                       // already handled this event
+    if ((e.target as HTMLElement).closest(NO_DRAG_SEL)) return;
+    if (e.button !== 0) return;                            // primary button only
+    ne.__wfDragClaimed = true;
     const root = (e.currentTarget as HTMLElement).closest("[data-draggable]") as HTMLElement | null;
     const r = root?.getBoundingClientRect();
     drag.current = {
       sx: e.clientX, sy: e.clientY,
       ox: pos?.x ?? r?.left ?? 0, oy: pos?.y ?? r?.top ?? 0,
     };
+    let dragging = false;
     const move = (ev: PointerEvent) => {
-      if (!drag.current) return;
-      setPos({
-        x: Math.max(0, drag.current.ox + ev.clientX - drag.current.sx),
-        y: Math.max(0, drag.current.oy + ev.clientY - drag.current.sy),
-      });
+      const d = drag.current;
+      if (!d) return;
+      const dx = ev.clientX - d.sx, dy = ev.clientY - d.sy;
+      if (!dragging) {
+        if (Math.abs(dx) + Math.abs(dy) < DRAG_THRESHOLD) return; // stay a click until moved
+        dragging = true;
+        document.body.style.userSelect = "none";           // don't select text while dragging
+      }
+      ev.preventDefault();
+      setPos({ x: Math.max(0, d.ox + dx), y: Math.max(0, d.oy + dy) });
     };
     const up = () => {
       drag.current = null;
+      document.body.style.userSelect = "";
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
-    e.preventDefault();
   }, [pos]);
 
   const rootStyle: React.CSSProperties = {

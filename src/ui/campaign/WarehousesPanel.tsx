@@ -58,7 +58,7 @@ export function WarehousesPanel() {
   };
 
   return (
-    <Panel width={312} maxHeight="78vh" style={{ top: 60, right: 680, zIndex: 42, ...rootStyle }}>
+    <Panel onPointerDown={onPointerDown} width={312} maxHeight="78vh" style={{ top: 60, right: 680, zIndex: 42, ...rootStyle }}>
       <PanelHeader icon="🏬" title="Warehouses & Estates" onDragStart={onPointerDown} onClose={() => setOpen(false)} />
       <div style={{ padding: "6px 8px", borderBottom: `1px solid ${T.line}`, flex: "0 0 auto" }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="filter house / city / good…"

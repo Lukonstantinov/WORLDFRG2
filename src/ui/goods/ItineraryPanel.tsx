@@ -79,7 +79,7 @@ export function ItineraryPanel() {
   );
 
   return (
-    <Panel width={318} style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
+    <Panel onPointerDown={onPointerDown} width={318} style={{ top: 60, right: 360, zIndex: 40, ...rootStyle }}>
       <PanelHeader icon="🧭" title="Itinerary · travel time" onDragStart={onPointerDown} onClose={close} />
 
       <div style={{ padding: "10px 12px", overflowY: "auto" }}>
