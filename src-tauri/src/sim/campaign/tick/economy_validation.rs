@@ -884,6 +884,71 @@ fn econ_diagnose_house_turnover() {
     assert!(dead.len() + alive > 0, "the run produced no houses at all");
 }
 
+/// `HOUSE_MASTER_PLAN.md` §2.5 · "The foreign hand may never fire — MEASURE BEFORE
+/// BUILDING": before writing the mechanism (4.4, still un-attempted), count how
+/// often its two channels' conjunction actually exists over a long run.
+///
+///   Channel A — a RIVAL house holds an office/bailo in the city where our kin sits.
+///   Channel B — our kin holds a LEASE in a city a rival CONTROLS (`captor_house`).
+///
+/// "and that member is already disaffected" is read here as `loyalty < 0.4` — the
+/// same rough cut this codebase already uses elsewhere for a hostile kinsman
+/// (`crisis.rs`'s plot-leader pick). A diagnosis is a complete task per CLAUDE.md
+/// §2.4; this prints the finding and does not build the mechanism itself.
+#[test]
+#[ignore]
+fn econ_measure_foreign_hand_conjunction() {
+    let mut s = reference_world();
+    let years = 300u32;
+    let months = years * 12;
+    let mut samples = 0u64;
+    let mut conjunction = 0u64;
+    let mut disaffected_conjunction = 0u64;
+    for _ in 0..months {
+        s.advance(30);
+        for hi in 0..s.houses.len() {
+            if s.houses[hi].defunct || s.houses[hi].is_guild || s.houses[hi].kin.is_empty() { continue; }
+            let leases = s.houses[hi].office_leases.clone();
+            for k in &s.houses[hi].kin {
+                if k.role == 4 || k.role == 5 || k.posted < 0 { continue; }
+                let hub = k.posted as usize;
+                if hub >= s.hubs.len() { continue; }
+                samples += 1;
+                let channel_a = s.houses.iter().enumerate().any(|(oj, oh)| {
+                    oj != hi && !oh.defunct
+                        && (oh.offices.contains(&(hub as u32)) || oh.bailos.contains(&(hub as u32)))
+                });
+                let captor = s.hubs[hub].captor_house;
+                let channel_b = captor >= 0 && captor as usize != hi
+                    && leases.iter().any(|&(h, _)| h as usize == hub);
+                if channel_a || channel_b {
+                    conjunction += 1;
+                    if k.loyalty < 0.4 { disaffected_conjunction += 1; }
+                }
+            }
+        }
+    }
+    let centuries = years as f64 / 100.0;
+    println!();
+    println!("═══ 2.5 · foreign-hand conjunction ({years}-year reference world) ═══");
+    println!("  kin-months sampled (posted kin only)   {:>10}", samples);
+    println!("  channel A or B present                 {:>10}   {:>5.2}%",
+        conjunction, 100.0 * conjunction as f64 / samples.max(1) as f64);
+    println!("  … AND that kin already disaffected     {:>10}   {:>5.2}%",
+        disaffected_conjunction, 100.0 * disaffected_conjunction as f64 / samples.max(1) as f64);
+    println!("  ⇒ full-conjunction rate                {:>10.1} / century",
+        disaffected_conjunction as f64 / centuries);
+    println!("  Verdict: {}", if disaffected_conjunction as f64 / centuries < 5.0 {
+        "fires well under a handful of times a century — 4.4 would very likely ship as dead code. Leave it un-built."
+    } else {
+        "fires often enough to be worth building — revisit 4.4."
+    });
+    println!("═══════════════════════════════════════════════════════════════════");
+    println!();
+    // Diagnostic only — it must not fail the build, per §2.5's printed-metric rule.
+    assert!(samples > 0, "the run produced no posted kin at all to measure");
+}
+
 // ── Phase 0.4 · the inheritance gate ────────────────────────────────────────
 //
 //  `HOUSE_MASTER_PLAN` 0.4 gates the inheritance rule on one thing, and it is the

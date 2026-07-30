@@ -186,11 +186,21 @@ impl CampaignSim {
             text: format!("A succession crisis opens in {} — {}. {} against {}.",
                 house_name, cause_text, loyalist_name, plot_name),
         });
-        self.journal.push(JournalEntry {
-            tick, kind: "crisis".into(), hub: self.houses[hi].hub as i32, good: -1,
-            value: plot_support,
-            text: format!("{} rises against {} of {}", plot_name, head_name, house_name),
-        });
+        // Phase 2.4 · crisis SALIENCE (`HOUSE_MASTER_PLAN.md`: "the player cannot
+        // watch fourteen houses"). At ~14 houses and a crisis every ~15 years each,
+        // that's roughly one crisis a year somewhere — everything cannot surface.
+        // Only Tier 1-2 reaches the world news feed; Tier 3-4 (and an as-yet-
+        // untiered house, tier 0) is still fully recorded on the HOUSE's own
+        // chronicle above, just silent on the world stage, discoverable in the
+        // dossier — the same "a healthy gauge stays quiet" discipline everywhere
+        // else in this file.
+        if matches!(self.houses[hi].tier, 1 | 2) {
+            self.journal.push(JournalEntry {
+                tick, kind: "crisis".into(), hub: self.houses[hi].hub as i32, good: -1,
+                value: plot_support,
+                text: format!("{} rises against {} of {}", plot_name, head_name, house_name),
+            });
+        }
     }
 
     /// One quarterly round: the head picks an action in character, the roll
@@ -327,13 +337,19 @@ impl CampaignSim {
             }
         };
 
-        self.journal.push(JournalEntry {
-            tick, kind: "crisis".into(), hub: self.houses[hi].hub as i32, good: -1,
-            value: outcome as f32,
-            text: format!("the rising in {} is over — {}", house_name,
-                match outcome { CRISIS_PREVAILED => "the ruler prevails",
-                    CRISIS_DEPOSED => "the ruler is deposed", _ => "the house is dissolved" }),
-        });
+        // Phase 2.4 · salience, same rule as the opening — see that call site's
+        // comment. A DEPOSED/DISSOLVED outcome always still closes out fully on the
+        // house's own permanent record (`events` above, `crisis_history` below);
+        // only the world news feed is gated by tier.
+        if matches!(self.houses[hi].tier, 1 | 2) {
+            self.journal.push(JournalEntry {
+                tick, kind: "crisis".into(), hub: self.houses[hi].hub as i32, good: -1,
+                value: outcome as f32,
+                text: format!("the rising in {} is over — {}", house_name,
+                    match outcome { CRISIS_PREVAILED => "the ruler prevails",
+                        CRISIS_DEPOSED => "the ruler is deposed", _ => "the house is dissolved" }),
+            });
+        }
 
         let record = CrisisRecord {
             opened_tick: crisis.opened_tick, closed_tick: tick, cause: crisis.cause,

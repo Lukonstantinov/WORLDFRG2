@@ -428,7 +428,21 @@ serde-defaulted so old saves load). Grouped by theme:
   every succession candidate through `heir_is_female` exactly as `succeed_house`
   already does. Exposed via `campaign_get_house_crisis`; shown in the dossier's
   ⚠ Crisis tab (observation only — every choice is the AI's, per the source design's
-  own decision 2).
+  own decision 2). **Crisis salience**: a crisis opening or resolving only reaches
+  the world `journal` (news feed) for a Tier 1-2 house — Tier 3-4 (and a not-yet-
+  tiered house) still gets the event written IN FULL to its own chronicle, just
+  quiet on the world stage ("the player cannot watch fourteen houses"), the same
+  quiet-when-healthy discipline the stability gauges use.
+- **The foreign-hand measurement**: `economy_validation.rs::econ_measure_foreign_hand_
+  conjunction` (`#[ignore]`d, like `econ_diagnose_house_turnover`) instruments —
+  rather than builds — the "foreign hand" mechanism a source design proposed: it
+  counts, over a 300-year run, how often a posted kin's city sees a rival's office/
+  bailo (Channel A) or the house itself leasing in a city a rival controls (Channel
+  B), AND that kin is already reading as disaffected (`loyalty < 0.4`). Run it
+  yourself for the current verdict; the mechanism itself stays un-built until the
+  number says it's worth it — building it blind was exactly what the source design
+  warned against ("the prettiest piece of design in the series and the most likely
+  to ship as dead code").
 - **Consequences (Phase 4.1–4.3):** three independent additions, each gated on state
   the house already carries. `sim/campaign/tick/schism.rs::update_house_schisms`
   (monthly) reads a simplified `tension` proxy (mean kin loyalty · reach · feuds ·

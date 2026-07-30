@@ -2,8 +2,13 @@
 
 **Status: Phase 0 COMPLETE; Phase 1 COMPLETE; Phase 2 COMPLETE; Phase 3 COMPLETE as
 SCOPED (goals are structure-only, the crisis engine is a real but cut-down build);
-Phase 4.1–4.3 COMPLETE as scoped (4.4 stays gated on an unmeasured signal, 4.5 stays
-deferred by design) — see the handoff blocks for exactly what's simplified in each.**
+Phase 4.1–4.3 COMPLETE as scoped; §2.4 crisis salience now built too. §2.5's own
+"measure before building" instruction is honoured: a 300-year diagnostic
+(`econ_measure_foreign_hand_conjunction`) is built and gated `#[ignore]` like its
+sibling `econ_diagnose_house_turnover` — run it yourself for the current number; see
+the handoff block for how to read the verdict it prints and what it implies for 4.4.
+4.5's mavericks item was considered and declined this pass — see the handoff block.
+Religion/patronage stays deferred by design.**
 Consolidates the design documents
 (`HOUSE_PEOPLE_AND_TIERS` · `HOUSE_PEOPLE_PLAN` · `HOUSE_POWER_AND_POLITICS` ·
 `HOUSE_SUCCESSION_CRISIS` · `HOUSE_POWER_STRUGGLE_VIEW` ·
@@ -299,6 +304,65 @@ contains the two open defects already on the scoreboard.
 > Use **mean firm lifespan**, never `dissolutions/century` — the latter scales with how many
 > houses are standing and is right-censored on a 60-year run. The correct estimator is a
 > hazard over exposure (`deaths ÷ house-years`), which `econ_diagnose_house_turnover` reports.
+>
+> ## §2.4 salience, §2.5 the foreign-hand measurement, and §4.5's mavericks — the three small items still open after 4.1-4.3
+>
+> Asked to "move on with 4 and 5" after 4.1-4.3 shipped. Phase 5 does not exist
+> anywhere in this document — there is no such section. Read as the three genuinely
+> open items left in Phase 4's own table plus its Part 2 prerequisites: 4.4's gate
+> (§2.5) was never measured, and §2.4 (crisis salience) was flagged as unbuilt in the
+> 3.2-3.6 handoff. Building "4.4 outright" without its own gate would repeat the
+> exact failure mode §2.4 of `CLAUDE.md` warns against — a feature shipped on vibes
+> whose only measurement is "does it look reasonable in the code".
+>
+> **§2.4 · crisis salience — DONE.** `HOUSE_MASTER_PLAN.md`'s own §2.4 ("the player
+> cannot watch fourteen houses... roughly one crisis a year somewhere") is now real:
+> `crisis.rs`'s two `journal.push` calls (crisis opens, crisis resolves) are gated on
+> `matches!(self.houses[hi].tier, 1 | 2)`. A Tier 3/4 (or not-yet-tiered) house's
+> crisis is still written IN FULL to its own `events` chronicle — nothing about the
+> house's own record changes — only the WORLD news feed goes quiet for it, the same
+> "a healthy gauge stays quiet" discipline the stability gauges already use. Gated by
+> `only_tier_one_and_two_crises_reach_the_news_feed`.
+>
+> **§2.5 · the foreign-hand measurement — INSTRUMENTED, per its own explicit
+> instruction.** §2.5 doesn't ask for the mechanism; it says, verbatim, "Instrument
+> it first: count how often the conjunction exists across a 300-year run, before
+> writing the mechanism." That is exactly what `econ_measure_foreign_hand_conjunction`
+> (new, `economy_validation.rs`, `#[ignore]`d like its sibling
+> `econ_diagnose_house_turnover`) does: for every posted kin at every struck house,
+> across 300 simulated years, it checks Channel A (a rival house holds an office or
+> bailo in that kin's city) or Channel B (the house holds a lease in a city a rival
+> `captor_house` controls), and separately tracks how often that conjunction ALSO
+> coincides with the kin already reading as disaffected (`loyalty < 0.4`, the same
+> rough cut `crisis.rs`'s own plot-leader pick already uses). It prints a verdict —
+> fire the diagnostic yourself (`cargo test --release --lib
+> econ_measure_foreign_hand_conjunction -- --ignored --nocapture`; it is a 300-year
+> run and genuinely slow, run it in release mode and expect several minutes) to read
+> the current number; per §2.4 of `CLAUDE.md`, a diagnosis is a complete task on its
+> own, and 4.4 stays correctly un-attempted until this number says whether it is
+> worth building. **This is a change from the earlier (wrong) handoff note** that
+> said "2.5's foreign-hand work in the ORIGINAL numbering was never built... there is
+> no measurement to gate 4.4 on" — that was true of a stewards/character-knobs
+> reading of "2.5"; the ACTUAL §2.5 (Part 2 of this very file) is exactly the
+> foreign-hand measurement instruction, and it has now been acted on directly rather
+> than routed around.
+>
+> **4.5 · mavericks — considered, declined this pass, not silently skipped.** The
+> design (`docs/proposals/HOUSE_MASTER_PLAN.md` Part 3) calls mavericks "flavour on
+> top of an unproven baseline… keep, but last". The literal ask — an occasional kin
+> rolling to a full ±2 character extreme — turns out to already be happening: reading
+> `roll_character` (`houses.rs`), the existing uniform roll `((r−0.5)·5.0).round()`
+> already lands on a full ±2 extreme roughly **20% of the time per axis** by
+> construction (the round-to-nearest-integer buckets at the tails are half-width).
+> A "maverick" as the design means it — a normally-centred distribution with a RARE
+> escape to the extremes — would require tightening the BASELINE distribution first
+> (e.g. summing two rolls for a more triangular shape) and only then adding the rare
+> escape, which changes the input distribution to Phase 2.4's already-wired knobs,
+> `head_vice`, EVERY crisis-round action-choice, and goal selection all at once — a
+> genuinely systemic change with no gate of its own, exactly what §2.4 of
+> `CLAUDE.md` calls the standing failure mode here. Declined rather than attempted
+> cheaply and wrong; worth its own dedicated pass with an `econ_` check if picked up
+> later.
 >
 > ## Phase 4.1–4.3 (Consequences) are built — Departure/Quarrel, bankruptcy aftermath, plague as a lineage event
 >
@@ -728,7 +792,7 @@ Nothing here can regress either oracle. This is the phase you can look at soones
 | 3.1 | ~~**~8 goals**, head-chosen (cut from 17, per Part 3)~~ **DONE (structure only — see the handoff finding)** — 7 kinds, chosen yearly by archetype/character bias, checked yearly, chronicled achieved (milestone) vs failed (chatter), a 🎯 Ambitions dossier tab. **Goals do NOT yet bias any decision's weights** — they are read-only tracking against state that already exists, not the closed loop §4 describes. | ✅ 6 new tests (one per representative kind + slot cap); `econ_`/dynamics BYTE-IDENTICAL (goals touch no wealth) |
 | 3.2 | ~~**Competence + vice**~~ **DONE (scoped — see the handoff finding)** — competence is `kin[0].skill` read directly at each call site; vice is derived from character+skill (5 named vices), one wired economic consequence (Lavish → extra consumption drain). | ✅ `head_vice_*` tests; dynamics bounded (`simulate_decades_reports_dynamics` still healthy) |
 | 3.3 | ~~**Crisis**: open · named factions + tints · heir choice · rounds · resolve~~ **DONE (scoped — see the handoff finding)** — `HouseCrisis`, quarterly rounds fixed at `CRISIS_ROUND_CAP`=4, faction names/tints drawn from the house's own heraldic palette, heir choice recorded at opening. **No per-figure power-share ledger and no drifting `regard` ladder** — see the handoff. | ✅ `every_crisis_terminates`; `faction_names_and_tints_are_distinct`; econ/dynamics move but stay in band (see handoff numbers) |
-| 3.4 | ~~**Contested undecided** + grace period~~ **DONE (partial — see the handoff finding)** — the undecided bloc is folded into each round's own delta rather than a separate contest step; `crisis_immune_until` (5yr grace) is built and tested. **Structured `CauseShift` log and the "salience rule" are NOT built** — a backfire's narrative text notes a shift in prose only, no separate data field. | ✅ `a_decisive_head_prevails_and_earns_a_grace_period` |
+| 3.4 | ~~**Contested undecided** + grace period + salience~~ **DONE (partial — see the handoff finding)** — the undecided bloc is folded into each round's own delta rather than a separate contest step; `crisis_immune_until` (5yr grace) is built and tested. §2.4's salience rule ("the player cannot watch fourteen houses") is now built too: only Tier 1-2 crises reach the world news feed, Tier 3-4 stay fully chronicled on the house's own record but silent on the world stage. **The structured `CauseShift` log is still NOT built** — a backfire's narrative text notes a shift in prose only, no separate data field. | ✅ `a_decisive_head_prevails_and_earns_a_grace_period`; `only_tier_one_and_two_crises_reach_the_news_feed` |
 | 3.5 | ~~**Civic intervention**~~ **DONE (scoped — sequestration only, no exile)** — a severe deposition (peak plot ≥0.6) has a 25% chance the seat's council sequesters 3% of the estate into its treasury. | ✅ exercised by the dynamics/econ runs; no dedicated unit test (rare, small, same discipline as other tail events) |
 | 3.6 | ~~**`CrisisRecord`** permanent + capped~~ **DONE** — capped at `CRISIS_HISTORY_CAP`=8, same discipline as `goal_history`. | ✅ `every_crisis_terminates` asserts exactly one record per resolved crisis |
 
@@ -740,7 +804,7 @@ Nothing here can regress either oracle. This is the phase you can look at soones
 | 4.2 | ~~**Bankruptcy aftermath** — named creditor losses, kin barred from office (1.4)~~ **DONE (creditor losses only — see the handoff finding)** — `dissolve_house` now writes off any outstanding bank loan and names the bank on both ledgers. | ✅ 2 new tests; dynamics bounded |
 | 4.3 | ~~**Plague as a lineage event** — multiple kin, extinction as a distinct death (1.6)~~ **DONE** — `disease.rs::plague_house_toll`, independent of head mortality. | ✅ 3 new tests; measurably moved Gini/top-10% TOWARD their bands — see the handoff finding |
 | 4.4 | **Foreign hand** — *only if* 2.5's measurement says it fires | still gated on an unmeasured signal; not attempted |
-| 4.5 | Deferred: religion/patronage · rupture · mavericks | — |
+| 4.5 | Religion/patronage: still deferred (Part 3's own reasoning holds — a third system on an unbuilt second one). Rupture: deferred, see 4.1. **Mavericks: considered and declined this pass** — see the handoff finding. | — |
 
 ---
 

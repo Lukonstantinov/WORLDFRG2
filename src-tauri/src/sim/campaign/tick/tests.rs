@@ -3089,3 +3089,34 @@
         assert_eq!(s.houses[0].kin.len(), 2, "a house with no presence at the struck city loses no kin");
         assert!(!s.houses[0].defunct);
     }
+
+    // ── Phase 2.4 · crisis salience ──────────────────────────────────────────
+    /// Only Tier 1-2 crises reach the world news feed; a Tier 3-4 (or untiered)
+    /// house's crisis is still fully written to its OWN chronicle, just silent on
+    /// the world stage — "the player cannot watch fourteen houses".
+    #[test]
+    fn only_tier_one_and_two_crises_reach_the_news_feed() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+
+        let hubs = (0..1u32).map(|i| hub(i, 0.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut lowly = sim(hubs, goods.clone());
+        let mut h = discontented_house(0);
+        h.tier = 4;
+        lowly.houses.push(h);
+        lowly.tick = 0;
+        lowly.update_house_crises();
+        assert!(lowly.houses[0].crisis.is_some(), "a Tier 4 house can still open a crisis");
+        assert!(lowly.journal.iter().all(|j| j.kind != "crisis"), "but it must not reach the news feed");
+        assert!(lowly.houses[0].events.iter().any(|e| e.kind == "crisis_opened"),
+            "the house's OWN chronicle still records it in full");
+
+        let hubs = (0..1u32).map(|i| hub(i, 0.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut great = sim(hubs, goods);
+        let mut h2 = discontented_house(0);
+        h2.tier = 1;
+        great.houses.push(h2);
+        great.tick = 0;
+        great.update_house_crises();
+        assert!(great.houses[0].crisis.is_some());
+        assert!(great.journal.iter().any(|j| j.kind == "crisis"), "a Tier 1 house's crisis IS world news");
+    }
