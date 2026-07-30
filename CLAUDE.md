@@ -1072,11 +1072,17 @@ PORTING_REFERENCE.md              ← Porting reference
 
 **`docs/proposals/` — A MENU, NOT COMMITMENTS**
 
-Twenty-three documents (feature catalogs, trade/cartography specs, Victoria-2 UI
+Twenty-four documents (feature catalogs, trade/cartography specs, Victoria-2 UI
 direction, settlement and population analyses, finance/heraldry variants, roadmap
-batches, the house-intrigue + province-view design, the house tiers/kin/goals design
-and its build plan, and the house body-politic + succession-crisis + power-struggle
-+ faction-naming designs) live in `docs/proposals/`. They were being read by fresh sessions as a backlog to work through,
+batches, and the seven-part HOUSE design series — province view, tiers/kin/goals,
+body politic, succession crisis, power struggle, faction naming, and
+`HOUSE_MASTER_PLAN.md` which critiques and sequences the rest) live in
+`docs/proposals/`.
+
+> If you read only one of the house documents, read `HOUSE_MASTER_PLAN.md`. Its Part 0
+> records a **blocking measured finding**: a house currently lives ~12 years against a
+> historical 30–90, so the politics layer designed in the other six documents has no
+> substrate until turnover is fixed. They were being read by fresh sessions as a backlog to work through,
 and they are not one: they are far more good ideas than anyone can build.
 
 > **Do not start work from `docs/proposals/`.** Check `FIX_PLAN.md` for what is actually
