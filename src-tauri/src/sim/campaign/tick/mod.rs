@@ -21,6 +21,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::sim::inheritance::{InheritanceRule, LineRule};
+
 pub const TICKS_PER_YEAR: u32 = 365;
 pub const SEASONS: [&str; 4] = ["Spring", "Summer", "Autumn", "Winter"];
 
@@ -664,6 +666,33 @@ const BAILO_CONCESSION_TOLL: f32 = 0.10; // ×the normal tax rate
 // up to 3·SHIP_COST·FLEET_UPKEEP_FRAC ≈ 1.05/month, and `update_solvency` allows
 // twelve months in the red, so anything under ~13 is a house born to die.
 /// Share of the parent guild's wealth a separating family takes.
+// ── Phase 0.4 · succession & the law of inheritance ─────────────────────────
+/// Standing a house gains when a head who GREW the family is succeeded. A funeral is
+/// not an achievement, and heads now turn over two to three times a century, so the
+/// award is small and ceilinged (rule 18: prestige feeds political power → charters →
+/// monopolies → wealth, and every uncapped per-event award has run away here before).
+const SUCCESSION_PRESTIGE: f32 = 0.03;
+const SUCCESSION_PRESTIGE_CAP: f32 = 1.2;
+/// Age at accession by inheritance rule. An heir is not born on the day he inherits:
+/// an eldest son takes over in his thirties, the hearth-keeping youngest as a young
+/// man, an ELECTED elder ("the eldest capable") near sixty. Tenure is what remains of
+/// a life from there, which is why these three numbers — not the death age — are what
+/// makes ultimogeniture and seniority behave differently.
+const HEIR_AGE_ELDEST: f32 = 27.0;
+const HEIR_AGE_YOUNGEST: f32 = 17.0;
+const HEIR_AGE_ELECTED: f32 = 44.0;
+/// Age at death for someone who already survived to adulthood. Pre-modern life
+/// expectancy AT BIRTH was low because so many died as infants; a merchant who lived
+/// to hold a house commonly saw his sixties or seventies.
+const HEAD_DEATH_AGE_MIN: f32 = 54.0;
+const HEAD_DEATH_AGE_SPAN: f32 = 26.0;
+/// No head rules for less than this, even when the roll puts death right after
+/// accession — a three-week headship is a modelling artefact, not a generation.
+const MIN_TENURE_YEARS: f32 = 4.0;
+/// At most this many CO-HEIR houses may split off a single partible division, whatever
+/// the heir count says. The division is a family splitting, not a fan-out.
+const PARTIBLE_MAX_SPLIT: usize = 3;
+
 const HOUSE_SEED_GUILD_SHARE: f32 = 0.18;
 /// Below this the guild is too poor to endow a viable family — no house is founded.
 /// This is the brake that stops stillborn spawn churn at its source.
@@ -792,6 +821,11 @@ const WH_FULL_FRAC: f32 = 0.85;        // enlarge once fill ≥ this fraction
 const WH_STOCK_FRAC: f32 = 0.25;       // share of a good's local surplus a house stocks/mo
 const WEALTH_HISTORY_CAP: usize = 80;  // years of wealth samples kept per house
 const HOUSE_EVENTS_CAP: usize = 60;    // most-recent chronicle entries kept per house
+/// Ceiling on a house's MILESTONE entries — founding, successions, divisions, ruin.
+/// These are never evicted by chatter (see `is_house_milestone`); only a family that
+/// has outlived even this many milestones loses its oldest, and at ~4 per generation
+/// that is roughly a thousand years of history.
+const HOUSE_MILESTONE_CAP: usize = 120;
 // The GLOBAL event chronicle. Unlike the per-house / per-hub / bank histories (all
 // capped above/below), `self.journal` is appended from 30+ sites every tick and is
 // fully serialized into each year-boundary autosave. Left unbounded it grows without
@@ -1736,6 +1770,64 @@ pub struct HouseEvent {
     pub text: String,
 }
 
+/// One head of a house, from accession to death — a single link in the succession
+/// LINE. Written when a head takes over and closed when they die, so a house carries
+/// its own chronicle of who held it, for how long, at what age, and how the family
+/// fared under them.
+///
+/// This is a RECORD, not a model of a person: nothing in the tick reads it, and the
+/// `epithet` is derived at death from what measurably happened during the tenure. The
+/// kin roster (siblings, cousins, power shares — an actual family tree rather than a
+/// line of heads) is Phase 2 of `docs/proposals/HOUSE_MASTER_PLAN.md`.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct HouseHead {
+    pub name: String,
+    /// A woman held the house — decided by the culture's LINE RULE (`sim::inheritance`).
+    pub female: bool,
+    pub generation: u32,
+    /// Tick of accession, and of death (0 while this head still lives).
+    pub since: u32,
+    pub until: u32,
+    /// Age in years at accession and at death (0 while living). An heir is NOT born on
+    /// the day they inherit — they arrive at whatever age the inheritance rule implies
+    /// (a youngest son young, an elected elder old), and their tenure is what remains
+    /// of their life from there.
+    pub age_at_accession: u32,
+    pub age_at_death: u32,
+    /// House wealth at accession, and at death.
+    pub wealth_start: f32,
+    pub wealth_end: f32,
+    /// How they came to hold it: "founder" · "heir" · "co-heir" · "the hearth-keeper" ·
+    /// "eldest capable" · "sister's son" · "daughter of the house".
+    pub accession: String,
+    /// A by-name earned at death, derived from the tenure itself ("the Great", "the
+    /// Brief"). Empty for most heads — an epithet everyone has says nothing.
+    #[serde(default)] pub epithet: String,
+}
+
+/// A people's law of inheritance, resolved once from its language kit and kept for the
+/// life of the campaign. See `sim::inheritance` for what the codes mean and
+/// `docs/proposals/HOUSE_INHERITANCE_AND_TERRITORY.md` Part B for the assignment.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CultureRule {
+    pub culture: String,
+    /// `LineRule` code — who may inherit.
+    pub line: u8,
+    /// `InheritanceRule` code — how the estate divides.
+    pub rule: u8,
+}
+
+/// Is this house-event kind a MILESTONE — part of the family's permanent record —
+/// rather than chatter? Milestones survive the per-house chronicle cap; everything
+/// else is pruned oldest-first. The test of a milestone is simple: would a historian
+/// of this family still mention it in a century?
+pub fn is_house_milestone(kind: &str) -> bool {
+    matches!(kind,
+        "founded" | "succession" | "inheritance" | "archetype" | "monopoly"
+        | "control_gained" | "control_lost" | "branch" | "charter" | "bailo"
+        | "bankruptcy" | "dissolved" | "bank" | "marriage" | "loss")
+}
+
 /// A merchant family / trading house, with a named head of family who ages, dies
 /// and is succeeded by an heir. Houses compete for trade, hold monopolies, feud
 /// with rivals, and wield political power in their home city.
@@ -1833,6 +1925,16 @@ pub struct House {
     /// headquarters): it seats that city's council and runs a near-toll-free
     /// concession lane home. Soft-capped by the house's wealth/power.
     #[serde(default)] pub bailos: Vec<u32>,
+    // ── Succession (Phase 0.4 · the inheritance rule) ──
+    /// The current head is a woman. Decided by the seat culture's LINE RULE.
+    #[serde(default)] pub head_female: bool,
+    /// The current head's age in YEARS at accession. `head_since + head_lifespan` is
+    /// still the tick they die, but `head_lifespan` is now a TENURE (what is left of a
+    /// life that began long before the accession), not a whole lifetime.
+    #[serde(default)] pub head_age: u32,
+    /// The succession line: every head this house has had, oldest first. Append-only,
+    /// and read by nothing in the tick.
+    #[serde(default)] pub line: Vec<HouseHead>,
 }
 
 /// DLC 3.5 · one loan on a bank's books. An asset to the bank (interest income);
@@ -2945,6 +3047,12 @@ pub struct CampaignSim {
     /// founding logic tries to keep the world stocked up to.
     #[serde(default)]
     pub seed_house_count: u32,
+    /// Phase 0.4 · each people's LAW OF INHERITANCE, resolved once from its language
+    /// kit (see `sim::inheritance`) and then fixed for the campaign. Held here rather
+    /// than looked up per succession so a reloaded save cannot re-roll a culture's law,
+    /// and so the tick stays free of the worldgen culture map.
+    #[serde(default)]
+    pub culture_rules: Vec<CultureRule>,
     /// One-time migration flag: pre-fleet saves get a starting fleet seeded once.
     #[serde(default)]
     pub fleets_migrated: bool,
@@ -4033,8 +4141,25 @@ impl CampaignSim {
                     // Bound the family chronicle so a long campaign doesn't accumulate
                     // an unbounded event list per house (memory + save size). Keep the
                     // most recent — the timeline UI only shows a recent window anyway.
+                    // Prune the CHATTER — feud flares, lost caravans, warehouse fires —
+                    // oldest first. The family's MILESTONES are the record itself and are
+                    // never evicted by noise: before this, a house in a hot feud lost its
+                    // own founding and every succession inside a couple of years, so a
+                    // 500-year dynasty's chronicle read as three weeks of shipping
+                    // losses. (It also silently zeroed the Phase 0.4 division metric.)
                     let ev = &mut self.houses[hi].events;
-                    if ev.len() > HOUSE_EVENTS_CAP { let drop = ev.len() - HOUSE_EVENTS_CAP; ev.drain(0..drop); }
+                    if ev.len() > HOUSE_EVENTS_CAP {
+                        let mut over = ev.len() - HOUSE_EVENTS_CAP;
+                        ev.retain(|e| {
+                            if over == 0 || is_house_milestone(&e.kind) { return true; }
+                            over -= 1;
+                            false
+                        });
+                        if ev.len() > HOUSE_MILESTONE_CAP {
+                            let drop = ev.len() - HOUSE_MILESTONE_CAP;
+                            ev.drain(0..drop);
+                        }
+                    }
                 }
                 self.house_ledger_prev = self.house_ledger.clone();
                 let yr = tick / TICKS_PER_YEAR;
@@ -5007,12 +5132,6 @@ impl CampaignSim {
         let surname = house_name.strip_prefix("House ").unwrap_or(house_name);
         let (x, y) = (self.hubs[hub].x.max(0.0) as u32, self.hubs[hub].y.max(0.0) as u32);
         crate::sim::names::gen_head_name(x, y, self.world_w as u32, self.world_h(), surname, salt)
-    }
-
-    /// A lifetime in ticks (≈45–75 years) from a hashed roll.
-    fn roll_lifespan(&self, salt: u64) -> u32 {
-        let r = hash01(self.seed, self.tick as u64 ^ 0x11FE, salt);
-        ((45.0 + r * 30.0) * TICKS_PER_YEAR as f32) as u32
     }
 
     /// Phase 5 (flavour) · FASHION: a luxury good may become the rage of the season,

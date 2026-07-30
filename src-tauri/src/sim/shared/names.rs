@@ -85,6 +85,14 @@ pub fn gen_head_name(x: u32, y: u32, w: u32, h: u32, family: &str, salt: u64) ->
     cultures::head_name(kit, ms, family, salt, x, y)
 }
 
+/// A head-of-family personal name for the local culture, drawn from the female
+/// name-bank when `female` — used where the culture's line rule puts a woman at the
+/// head of the house (see `sim::inheritance`).
+pub fn gen_head_name_sexed(x: u32, y: u32, w: u32, h: u32, family: &str, salt: u64, female: bool) -> String {
+    let (kit, ms) = resolve_kit(x, y, w, h);
+    cultures::head_name_sexed(kit, ms, family, salt, x, y, female)
+}
+
 /// A culture-styled guild name for the city at `(x,y)` (e.g. "Collegium of
 /// Aquentia", "Suq of Madinah"), optionally tagged with its chief trade.
 pub fn gen_guild_name(x: u32, y: u32, w: u32, h: u32, city: &str, specialty: Option<&str>, salt: u64) -> String {

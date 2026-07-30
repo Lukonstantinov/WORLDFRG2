@@ -9,6 +9,35 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-30 (Phase 0.4 · inheritance)
+
+Only the numbers that MOVED. Everything else still reads as the 2026-07-29 table below.
+
+| Metric | Value | Gate | Status |
+|---|---|---|---|
+| **Economy: mean firm lifespan** | **36.8 yr** (was 96.9) | `econ_diagnose_house_turnover` | ✅ **inside the 30–90 band for the first time** |
+| Economy: lifespan excl. stillbirths | **147.0 yr** (was 193.8) | same | ❌ established firms still almost never fail — Phase 3's job |
+| Economy: house wealth Gini | **0.609** (was 0.853) | `ECON_GINI_FLOOR` = 0.15 | ✅ **back inside the 0.60–0.85 band**, at its floor |
+| Economy: top-10% wealth share | **0.422** (was 0.809) | — | ❌ **left the 0.60–0.90 band from below** — the merchant elite is now too flat |
+| Economy: houses alive at 60 yr | **42** (was 2) | — | ⚠️ the reference world finally HAS a merchant class |
+| Economy: house dissolutions / century | 46.7 (was 10.0) | — | ⚠️ stock-dependent — read the lifespan row instead |
+| **Inheritance rule is wired** | partible **18 divisions / 22 co-heirs**; primogeniture · ultimogeniture · seniority **0** | `econ_inheritance_rules_fragment_differently` | ✅ asserted |
+| Inheritance: houses ever founded | partible **88** · primogeniture **55** · ultimogeniture **49** · seniority **124** | same | ✅ the rule measurably changes fragmentation |
+| Inheritance: mean wealth per house | partible **120 325** · primogeniture **195 264** | same | ✅ same capital, spread thinner |
+| **Rust tests** | **171 pass, 0 fail** (4 ignored) | CI | ✅ |
+| Dynamics: sustained richest house | 154 045 — **unchanged** | `late_max < 1e6` | ✅ bit-identical (that world seeds no successions) |
+
+**Why so much moved at once.** The reference world was not reproducing campaign start:
+`tests::sim()`'s placeholder gave every seeded head a **274-year** lifespan, so not one
+of the ten houses ever reached a succession inside a 60-year run. Every number that
+depends on generational turnover — lifespan, Gini, top-10%, surviving houses — was
+measuring a world where merchant families were immortal. `calibrate_like_campaign_start`
+now runs the same two steps `campaign_start_sim` does (`ensure_culture_rules` +
+`seed_house_lines`). The old numbers were not wrong measurements; they were measurements
+of the wrong world.
+
+---
+
 ## Current state — 2026-07-29
 
 | Metric | Value | Gate | Status |
@@ -116,6 +145,77 @@ measurements, until determinism is restored. That is the first economy work to d
 **Fix.** Audit every hash accumulator in `tick/`, sort by key before folding, and
 hold `simulate_decades_reports_dynamics` bit-identical at each step. Then remove
 the `#[ignore]` from `econ_scorecard_is_deterministic`.
+
+---
+
+## Phase 0.4 · the law of inheritance — built, and two defects it exposed
+
+**What was built.** Two enums on the culture (`sim/shared/inheritance.rs`): a LINE rule
+(agnatic · agnatic-cognatic · absolute · enatic) and a DIVISION rule (partible ·
+primogeniture · ultimogeniture · seniority · matrilineal), assigned per language kit
+where the record is clear and seeded where it is not. They are read at one place —
+`succeed_house` — and decide three things: who inherits (the heir's sex, and the name
+bank they are drawn from), **how old they are when they do**, and whether the estate
+divides.
+
+**The age is the part that mattered most.** An heir was previously handed a fresh 45–75
+year "lifespan" as their TENURE, i.e. every head was effectively born on the day they
+inherited. They now inherit at an age the rule implies — an eldest son at ~27–45, a
+hearth-keeping youngest at ~17–31, an elected elder at ~44–62 — and rule for what
+remains of a life. That alone is what makes ultimogeniture and seniority behave
+differently from primogeniture without a single extra mechanism.
+
+**The gate.** `econ_inheritance_rules_fragment_differently` runs ONE world four times,
+changing only the law:
+
+| rule | houses ever | successions | divisions | co-heirs | mean wealth |
+|---|---|---|---|---|---|
+| partible | 88 | 61 | 18 | 22 | 120 325 |
+| primogeniture | 55 | 57 | 0 | 0 | 195 264 |
+| ultimogeniture | 49 | 45 | 0 | 0 | 164 205 |
+| seniority | 124 | 147 | 0 | 0 | 103 372 |
+
+Note what partible does **not** do: the top share and Gini do not fall, because a
+division adds small firms at the bottom as fast as it trims the top. What moves is mean
+wealth per house — the same capital spread over more houses. Seniority fragments by a
+different route entirely: short tenures → three times the successions → far more cadet
+branches.
+
+### Defect 1 — a house's chronicle was eating its own milestones
+
+`HOUSE_EVENTS_CAP` kept the 60 most recent events and dropped the oldest. In a hot feud
+a house generates dozens of flare entries a year, so **a family lost its own founding
+and every succession within a couple of years**. A 500-year dynasty's chronicle read as
+three weeks of shipping losses — and it silently zeroed the division metric above, which
+is how it was found. Milestones (founding, succession, division, monopoly, charter,
+ruin) are now never evicted by chatter; only chatter is pruned.
+
+This matters beyond the metric: `HOUSE_MASTER_PLAN` 2.3 concluded the chronicle IS the
+product for an observation-only game. It was being deleted.
+
+### Defect 2 — cadet branches were the new stillbirth path
+
+With successions actually firing, the turnover diagnosis was re-run with a breakdown by
+**how the dead house was founded** — and 19 of 35 deaths were cadet branches, 74% of
+which never traded, dead at a mean age of 8 years. `found_branch` endowed a branch with
+30% of the parent's wealth **and** `initial_fleet`'s two or three vessels it had never
+paid for. That is precisely the arithmetic Phase 0.2 found behind the original 12-year
+house, arriving through a second door. A branch now inherits capital only and buys hulls
+from it when its trade justifies them.
+
+Effect: mean firm lifespan **29.4 → 36.8 yr**, real-firm mean age at death 7.7 → 19.2.
+
+### What is still open here
+
+- Co-heir houses are **100% stillborn** when they die (8 of 28 deaths, mean age 7.2 yr)
+  and branches are still 86%. They have capital and no fleet, so the endowment is not
+  the cause this time — a new house appears to have no way to originate trade at its own
+  seat. That is the next turnover question, and it is a *diagnosis* task, not a constant
+  to tune.
+- **Top-10% wealth share fell out of band from below (0.422 vs 0.60–0.90).** The
+  merchant elite is now too flat. This is the mirror image of the Phase 0.2 finding and
+  points the same way: at Phase 3, which is supposed to make the top of the distribution
+  fragile rather than making the bottom crowded.
 
 ---
 

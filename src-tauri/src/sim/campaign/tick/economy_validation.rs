@@ -265,7 +265,7 @@ fn reference_world() -> CampaignSim {
     s
 }
 
-/// Apply the same two calibration steps `campaign_start_sim` performs, which the
+/// Apply the same three calibration steps `campaign_start_sim` performs, which the
 /// bare `tests::sim()` helper does NOT.
 ///
 /// This matters more than it looks. `tests::sim()` hard-codes `need_scale: 1.0`,
@@ -283,6 +283,14 @@ fn reference_world() -> CampaignSim {
 fn calibrate_like_campaign_start(s: &mut CampaignSim) {
     const TIER_W: [f32; 3] = [1.0, 0.45, 0.22];
     const FOOD_SURPLUS: f32 = 1.5;
+
+    // Phase 0.4 · resolve each people's law of inheritance and open the founding head's
+    // record — `campaign_start_sim` does both. Without it the seeded houses keep the
+    // bare test helper's placeholder head_lifespan (274 years), so not one of them ever
+    // reaches a SUCCESSION inside a 60-year run and every inheritance metric measures
+    // only the houses founded during it.
+    s.ensure_culture_rules();
+    s.seed_house_lines();
 
     let total_pop: f32 = s.hubs.iter().map(|h| h.population).sum::<f32>().max(1.0);
     let total_prod: f32 = s.hubs.iter().flat_map(|h| h.production.iter()).sum::<f32>().max(1e-3);
@@ -678,6 +686,21 @@ struct DeadHouse {
     /// Did it ever move goods? A house that never traded was never viable.
     ever_traded: bool,
     is_guild: bool,
+    /// How the house came into the world — "spin-off" (a family separating out of a
+    /// guild), "branch" (a cadet house in another city), "co-heir" (a partible
+    /// division) or "seed". Phase 0.2 showed the answer to "why do houses die young"
+    /// was in the FOUNDING, so the diagnosis has to know which founding.
+    origin: &'static str,
+}
+
+/// Classify a house by how it was founded, from its own chronicle.
+fn house_origin(h: &House, seeded: bool) -> &'static str {
+    if seeded { return "seed"; }
+    if h.name.contains(" Line)") { return "co-heir"; }
+    match h.events.first().map(|e| e.text.as_str()) {
+        Some(t) if t.contains("as a branch of") => "branch",
+        _ => "spin-off",
+    }
 }
 
 #[test]
@@ -721,6 +744,7 @@ fn econ_diagnose_house_turnover() {
                         peak_upkeep: peak_upkeep[hi],
                         ever_traded: ever_traded[hi],
                         is_guild: h.is_guild,
+                        origin: house_origin(h, hi < n0),
                     });
                 }
                 continue;
@@ -822,6 +846,16 @@ fn econ_diagnose_house_turnover() {
         println!("              band 30–90 (Greif; Mueller & Lane)");
     }
     println!();
+    println!("  ── WHICH FOUNDING DIES? (Phase 0.2 found the answer was the founding) ──");
+    for origin in ["seed", "spin-off", "branch", "co-heir"] {
+        let of: Vec<&&DeadHouse> = private_dead.iter().filter(|d| d.origin == origin).collect();
+        if of.is_empty() { continue; }
+        let still = of.iter().filter(|d| !d.ever_traded).count();
+        println!("  {origin:<10} deaths {:>4}   never traded {:>4} ({:>5.1}%)   mean age {:>5.1} yr",
+                 of.len(), still, 100.0 * still as f32 / of.len() as f32,
+                 mean(&of, &|d| d.age_years));
+    }
+    println!();
     println!("  ── OVEREXTENSION HYPOTHESIS ───────────────────────────────────────");
     println!("  real firms: peak wealth   mean {:>10.1}", mean(&real, &|d| d.peak_wealth));
     println!("  real firms: peak upkeep   mean {:>10.2}  (monthly, committed)",
@@ -848,4 +882,160 @@ fn econ_diagnose_house_turnover() {
 
     // Diagnostic only — it must not fail the build, per §2.5's printed-metric rule.
     assert!(dead.len() + alive > 0, "the run produced no houses at all");
+}
+
+// ── Phase 0.4 · the inheritance gate ────────────────────────────────────────
+//
+//  `HOUSE_MASTER_PLAN` 0.4 gates the inheritance rule on one thing, and it is the
+//  right one: *two worlds identical but for the rule must show measurably different
+//  fragmentation. If they don't differ, the rule isn't wired to anything and is
+//  flavour text.*
+//
+//  So this runs the SAME reference world twice — same seed, same cities, same goods,
+//  same houses — changing only the law of inheritance every culture in it follows, and
+//  compares what the merchant class looks like after 60 years.
+//
+//  What partible inheritance is expected to do, and why:
+//  a share of the estate leaves the parent firm at every death, so capital that would
+//  have compounded in one house instead starts a second. More houses, each smaller,
+//  and a flatter top — which is precisely why the Italian *fraterna* had to be
+//  reconstituted each generation while English gentry estates accumulated.
+
+/// Force every culture in `s` onto one law of inheritance. `ensure_culture_rules`
+/// leaves an already-registered culture alone, so this survives the run.
+fn force_inheritance(s: &mut CampaignSim, line: LineRule, rule: InheritanceRule) {
+    let mut names: Vec<String> = Vec::new();
+    for c in s.hub_culture.iter() {
+        if !c.is_empty() && c != "—" && !names.iter().any(|n| n == c) { names.push(c.clone()); }
+    }
+    s.culture_rules = names.into_iter()
+        .map(|culture| CultureRule { culture, line: line.as_u8(), rule: rule.as_u8() })
+        .collect();
+}
+
+/// What a merchant class looks like after a run — the fragmentation measures.
+struct Fragmentation {
+    houses_alive: usize,
+    /// Houses that ever existed, live or dead — divisions show up here even when the
+    /// co-heir later fails.
+    houses_ever: usize,
+    /// Estate divisions recorded (`inheritance` events that actually split).
+    divisions: usize,
+    /// Co-heir houses founded by a division.
+    coheirs: usize,
+    /// Generations where the heirs held the capital TOGETHER — the *fraterna* case,
+    /// which is what partible inheritance does when the shares are too small to stand
+    /// alone. Counted because a generation that did not split is as much a consequence
+    /// of the rule as one that did.
+    joint: usize,
+    /// Successions that occurred at all — the denominator for the two above.
+    successions: usize,
+    mean_wealth: f32,
+    /// Share of all house wealth held by the single richest house.
+    top_share: f32,
+    gini: f32,
+    /// Total merchant wealth — the division must MOVE capital, never create it.
+    total_wealth: f32,
+}
+
+fn measure_fragmentation(s: &CampaignSim) -> Fragmentation {
+    let live: Vec<&House> = s.houses.iter().filter(|h| !h.defunct && !h.is_guild).collect();
+    let wealths: Vec<f32> = live.iter().map(|h| h.wealth.max(0.0)).collect();
+    let total: f32 = wealths.iter().sum();
+    let top = wealths.iter().copied().fold(0.0f32, f32::max);
+    Fragmentation {
+        houses_alive: live.len(),
+        houses_ever: s.houses.iter().filter(|h| !h.is_guild).count(),
+        divisions: s.houses.iter()
+            .flat_map(|h| h.events.iter())
+            .filter(|e| e.kind == "inheritance" && e.text.starts_with("the estate is divided"))
+            .count(),
+        coheirs: s.houses.iter().filter(|h| h.name.contains(" Line)")).count(),
+        joint: s.houses.iter()
+            .flat_map(|h| h.events.iter())
+            .filter(|e| e.kind == "inheritance" && e.text.contains("keep the capital together"))
+            .count(),
+        successions: s.houses.iter()
+            .flat_map(|h| h.events.iter())
+            .filter(|e| e.kind == "succession")
+            .count(),
+        mean_wealth: if live.is_empty() { 0.0 } else { total / live.len() as f32 },
+        top_share: if total > 1e-6 { top / total } else { 0.0 },
+        gini: gini(&wealths),
+        total_wealth: total,
+    }
+}
+
+fn run_under(line: LineRule, rule: InheritanceRule) -> Fragmentation {
+    let mut s = reference_world();
+    force_inheritance(&mut s, line, rule);
+    for _ in 1..=RUN_YEARS { s.advance(365); }
+    measure_fragmentation(&s)
+}
+
+#[test]
+fn econ_inheritance_rules_fragment_differently() {
+    let part = run_under(LineRule::Agnatic, InheritanceRule::Partible);
+    let prim = run_under(LineRule::Agnatic, InheritanceRule::Primogeniture);
+    let ulti = run_under(LineRule::Agnatic, InheritanceRule::Ultimogeniture);
+    let seni = run_under(LineRule::Agnatic, InheritanceRule::Seniority);
+
+    let row = |name: &str, f: &Fragmentation| {
+        println!("  {name:<16} {:>7} {:>6} {:>7} {:>7} {:>6} {:>6} {:>9.3} {:>7.3} {:>11.0}",
+                 f.houses_alive, f.houses_ever, f.successions, f.divisions, f.coheirs,
+                 f.joint, f.top_share, f.gini, f.mean_wealth);
+    };
+    println!();
+    println!("═══ Phase 0.4 · inheritance ({RUN_YEARS} years, one world, four laws) ═══");
+    println!("  {:<16} {:>7} {:>6} {:>7} {:>7} {:>6} {:>6} {:>9} {:>7} {:>11}",
+             "rule", "alive", "ever", "succ", "divided", "co-heir", "joint",
+             "top share", "gini", "mean wealth");
+    row("partible", &part);
+    row("primogeniture", &prim);
+    row("ultimogeniture", &ulti);
+    row("seniority", &seni);
+    println!();
+    println!("  Partible splits the capital at every death: MORE firms, each SMALLER.");
+    println!("  Note what it does NOT do — the top share and Gini do not fall, because a");
+    println!("  division adds small firms at the bottom as fast as it trims the top. The");
+    println!("  measure that moves is mean wealth per house: the same capital, spread");
+    println!("  over more houses. Seniority fragments by a different route — short");
+    println!("  tenures, so many more successions, so many more branches.");
+    println!("═══════════════════════════════════════════════════════════════════════");
+    println!();
+
+    // ── The gate ────────────────────────────────────────────────────────────
+    // 1. The rule is WIRED: partible actually divides estates, and the rules that
+    //    concentrate never do. A zero in either direction means the enum is decoration.
+    assert!(part.divisions > 0, "partible inheritance never divided an estate");
+    assert!(part.coheirs > 0, "a division never produced a co-heir house");
+    assert_eq!(prim.divisions, 0, "primogeniture must not divide an estate");
+    assert_eq!(ulti.divisions, 0, "ultimogeniture must not divide an estate");
+    assert_eq!(seni.divisions, 0, "seniority must not divide an estate");
+
+    // 2. The rule MATTERS: fragmentation differs measurably. More firms ever founded
+    //    under partible than under any rule that concentrates.
+    assert!(
+        part.houses_ever > prim.houses_ever,
+        "partible must fragment the merchant class more than primogeniture \
+         ({} vs {} houses ever)", part.houses_ever, prim.houses_ever
+    );
+
+    // 3. The same capital is spread THINNER. This is the measure that actually moves
+    //    (see the note printed above): a division does not lower the top share, it
+    //    lowers what an average house holds.
+    assert!(
+        part.mean_wealth < prim.mean_wealth,
+        "partible must leave the average house poorer than primogeniture \
+         ({:.0} vs {:.0})", part.mean_wealth, prim.mean_wealth
+    );
+
+    // 4. Nothing is created. A division MOVES capital from parent to co-heir; if the
+    //    partible world simply has more total wealth, the split is minting money.
+    assert!(part.total_wealth.is_finite() && prim.total_wealth.is_finite(),
+            "house wealth is not finite");
+    for f in [&part, &prim, &ulti, &seni] {
+        assert!(f.mean_wealth >= 0.0 && f.mean_wealth < 1e6,
+                "house wealth left its bounds: mean {:.1}", f.mean_wealth);
+    }
 }

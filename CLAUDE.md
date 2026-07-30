@@ -305,6 +305,18 @@ serde-defaulted so old saves load). Grouped by theme:
   (`update_feuds`). **Feud prestige is capped** (`FEUD_PRESTIGE_CAP`) — prestige is
   otherwise unbounded and feeds political power → charters → monopolies → wealth, and an
   uncapped per-flare award drove the sustained-richest house from 298k to 1.9M.
+- **Succession & inheritance (Phase 0.4):** each people carries a **line rule** (who may
+  inherit) and a **division rule** (how the estate divides) resolved once from its language
+  kit into `culture_rules` (`sim/shared/inheritance.rs`, §8.15). `succeed_house` reads them
+  and they decide three things: the heir's SEX (and so which name-bank they are drawn
+  from), their AGE AT ACCESSION — an heir is not born on the day they inherit, so tenure is
+  what remains of a life, which is the entire difference between ultimogeniture and
+  seniority — and whether the estate DIVIDES (only `Partible` does; a share too small to
+  stand alone keeps the heirs together as one firm, the *fraterna*). Every house also keeps
+  a **succession line**: `House.line: Vec<HouseHead>`, one permanent record per head (name ·
+  sex · generation · age at accession and at death · wealth at each end · how they came in ·
+  an epithet derived at death). **Nothing in the tick reads the line** — it is the record the
+  chronicle is written from. A family TREE (siblings, cousins, power shares) is Phase 2.
 - **Living Trade (DLC 1):** production/consumption/price/dispatch/arrivals/events,
   estates & manufactories, abstract houses, succession, fleets & voyage risk
   (`SEA/CARAVAN/RIVER_LOSS`), offices, contracts. Emergence order: local merchants
@@ -474,7 +486,10 @@ sim/                            ← organised into per-phase step folders; mod.r
   step7_settlements/settlements.rs ← Ph7: habitability → city placement (Settlement struct)
   step8_biological_goods/       ← Ph8: biological.rs (shark/shipworm + belts + deposits)
                                   · goods_spec.rs (GoodSpec, 45 belts + ~21 manufactured)
-  shared/                       ← cultures.rs (organic peoples map + 14 traits) · toponyms.rs
+  shared/                       ← cultures.rs (organic peoples map + 14 traits + per-kit
+                                    male AND female given names) · inheritance.rs (the LAW
+                                    OF INHERITANCE — line rule + division rule per culture,
+                                    §8.15) · toponyms.rs
                                   · names.rs (deterministic place/family/head names)
                                   · provinces.rs (TWO-STAGE partition — see §8.10; the
                                     natural world↔campaign join layer, see FIX_PLAN B1)
@@ -1050,6 +1065,51 @@ premise is false on a genuinely frozen world, where a snowball came out reading
 cells; the value is the largest exemption that leaves the Earth scorecard
 bit-identical, and `koppen::guardrail_tests` guards both sides of it.
 
+### 8.15 The law of inheritance (`sim/shared/inheritance.rs`)
+
+Two enums on the CULTURE, read at exactly one place (`succeed_house`), which between them
+decide whether a merchant family accumulates across generations or is reconstituted at
+every death:
+
+* **`LineRule`** — Agnatic · AgnaticCognatic · Absolute · Enatic (who is eligible).
+* **`InheritanceRule`** — Partible · Primogeniture · Ultimogeniture · Seniority ·
+  Matrilineal (how the estate divides).
+
+Assigned per language kit where the record is clear (Roman *sui heredes* took equal
+shares; Celtic **tanistry** elected the eldest capable; the Mongol *otchigin* was the
+hearth-keeping youngest) and drawn from that same distribution for a culture whose kit is
+unknown, so a synthetic or legacy people still gets a historically-shaped law rather than a
+hard-coded one. Resolved ONCE into `CampaignSim.culture_rules` and never re-rolled, so a
+reloaded save cannot change a people's law.
+
+Four rules for anyone changing this:
+
+- **Matriliny is a seeded minority, not a named kit.** ~10% of peoples (22% of `Clannish`
+  ones — kin-bound descent groups are the documented precondition) come out
+  `Enatic + Matrilineal`, deterministically from the culture's own name. Assigning it to
+  one named kit would be a factual claim about a real people this model cannot support.
+- **The accession AGE is the mechanism, not the death age.** Ultimogeniture and
+  primogeniture both concentrate; what separates them is that the hearth-keeping youngest
+  takes over at ~17–31 and an elected tanist at ~44–62. Never "fix" tenure by touching the
+  death age — that erases the difference between three of the five rules.
+- **Only `Partible` divides.** Concentration is the ABSENCE of a split, and the gate
+  asserts the other four never divide. A division moves capital from parent to co-heir and
+  creates none; a co-heir inherits capital and **no fleet** (hulls it never paid for is the
+  exact arithmetic behind the original 12-year house — see `docs/SCOREBOARD.md`).
+- **Milestones are never pruned.** `HOUSE_EVENTS_CAP` prunes chatter (feud flares, lost
+  caravans) oldest-first; `is_house_milestone` kinds — founding, succession, division,
+  monopoly, charter, ruin — survive to `HOUSE_MILESTONE_CAP`. Before this a house in a hot
+  feud lost its own founding within two years, which is not a cosmetic loss: for an
+  observation-only game the chronicle is the product.
+
+Gate: `cargo test --lib econ_inheritance_rules_fragment_differently -- --nocapture` runs
+ONE world four times, changing only the law, and asserts the rule is wired (partible
+divides, the rest do not) and that it MATTERS (more houses ever founded, lower mean wealth
+per house). Note what it does *not* claim: the top share and Gini do not fall under
+partible, because a division adds small firms at the bottom as fast as it trims the top.
+
+---
+
 ## 9. Docs (`docs/`)
 
 **START HERE — the current plan**
@@ -1186,7 +1246,14 @@ Three rules:
     power → charters → monopolies → wealth. Any new per-event prestige award must be
     capped and checked against `simulate_decades_reports_dynamics`' sustained-richest
     figure; an uncapped one took it from 298k to 1.9M.
-19. **A step's gate must match its real data dependency**, not just the previous step.
+19. **An heir is not a newborn** (§8.15). `head_lifespan` is a TENURE — what remains of a
+    life that began at `head_age` — not a lifetime. Any new code that rolls a head's span
+    must roll an accession age with it, or ultimogeniture, seniority and primogeniture all
+    collapse into the same rule.
+20. **A house's milestones are permanent.** Chronicle pruning may only ever drop chatter
+    (`is_house_milestone` decides). The chronicle is the product for an observation-only
+    game; a cap that eats foundings and successions deletes it.
+21. **A step's gate must match its real data dependency**, not just the previous step.
     Rivers (5) genuinely needs Köppen (4): channel width comes from mean precipitation
     along the course and ice caps must not drain. A too-loose gate fails SILENTLY —
     the pipeline still runs, it just produces a subtly wrong world.

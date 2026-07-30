@@ -1,6 +1,6 @@
 # The house mechanism — critique, then the master plan
 
-**Status: Phase 0 built (except 0.4); Phases 1–5 are plan.** Consolidates the design documents
+**Status: Phase 0 COMPLETE (0.1–0.4); Phases 1–5 are plan.** Consolidates the design documents
 (`HOUSE_PEOPLE_AND_TIERS` · `HOUSE_PEOPLE_PLAN` · `HOUSE_POWER_AND_POLITICS` ·
 `HOUSE_SUCCESSION_CRISIS` · `HOUSE_POWER_STRUGGLE_VIEW` ·
 `HOUSE_FACTION_NAMING_AND_RECORD`) and reviews them cold before committing to build.
@@ -243,7 +243,32 @@ contains the two open defects already on the scoreboard.
 > | **0.1 diagnose turnover** | ✅ cause found exactly — the *founding endowment*, not ambition. `wealth: 1.0` + a 2–3 vessel fleet = ~1.4 months of runway at birth → dead at ≈13.4 months. Measured median age at death **1.1 yr**. **73% of dissolutions never traded.** My overextension hypothesis was **refuted**: corr(age, upkeep) = **+0.802**. |
 > | **0.2 fix turnover** | ✅ seed capital taken **from the parent guild** (which `maybe_found_house` already requires). Lifespan **~12 yr → 96.9 yr**. |
 > | **0.3 fix determinism** | ✅ four hash-order sites fixed (`money.rs`, `production.rs`, `mod.rs`, `colonies.rs`). `econ_scorecard_is_deterministic` **un-ignored** and passing. 166 tests. |
-> | **0.4 inheritance rule** | ❌ **NOT STARTED — this is the next task.** Design is in `HOUSE_INHERITANCE_AND_TERRITORY.md` Part B. |
+> | **0.4 inheritance rule** | ✅ **DONE.** `sim/shared/inheritance.rs` — a LINE rule and a DIVISION rule per culture, read at `succeed_house`. Gate `econ_inheritance_rules_fragment_differently` passes: partible **18 divisions / 22 co-heirs / 88 houses ever**, the three concentrating rules **0 divisions**, mean wealth per house 120k vs 195k. It also carries the **succession LINE** — a permanent per-head record (name · sex · age at accession and death · wealth at each end · how they came in · an epithet earned at death). |
+>
+> ## What Phase 0.4 changed, beyond the rule itself
+>
+> Three findings, all in `docs/SCOREBOARD.md`:
+>
+> 1. **An heir is not a newborn.** Every head used to be handed a fresh 45–75-year
+>    *lifespan* as their tenure. They now inherit at an age their culture's rule implies
+>    and rule for what remains of a life — which is the whole reason ultimogeniture (a
+>    young heir, long weak-opening tenures) and seniority (an elected elder, short ones)
+>    behave differently without any extra mechanism.
+> 2. **The reference world was not reproducing campaign start.** `tests::sim()`'s
+>    placeholder gave seeded heads a 274-year lifespan, so no house in the 60-year
+>    fidelity run ever reached a succession. Every turnover-dependent number was
+>    measuring a world of immortal merchants. Fixed in `calibrate_like_campaign_start`.
+> 3. **Two defects surfaced and were fixed**: a house's chronicle cap was evicting its
+>    own founding and successions under feud spam (milestones are now never pruned by
+>    chatter — and per 2.3 the chronicle IS the product); and cadet branches were being
+>    founded with a fleet they never paid for, the same arithmetic Phase 0.2 found,
+>    through a second door. Mean firm lifespan **96.9 → 36.8 yr, now inside the 30–90
+>    band for the first time**, and house wealth Gini **0.853 → 0.609, back in band**.
+>
+> **The one number that moved the wrong way:** top-10% wealth share **0.809 → 0.422**,
+> now out of band from BELOW. The merchant elite is too flat. This is the mirror of the
+> Phase 0.2 finding and points at the same place: Phase 3, whose job is to make the top
+> of the distribution fragile, not to make the bottom crowded.
 >
 > ## Two numbers that are OUT OF BAND, deliberately
 >
@@ -273,10 +298,15 @@ contains the two open defects already on the scoreboard.
 >
 > ## Recommended next step
 >
-> Either **0.4 (inheritance)**, which is self-contained and gated on showing measurably
-> different fragmentation between rules — or **Phase 1**, which is read-only, touches no
-> simulation, and cannot regress either oracle (tiers · culture-dress figure · expeditions
-> tab · chronicle-first dossier). Phase 1 is the one that produces something to look at.
+> **Phase 1** — and it is now the obvious one rather than a toss-up. Phase 0.4 wrote a
+> succession LINE for every house (who held it, at what age, how they came in, how the
+> family fared under them, and the by-name their tenure earned) and **nothing in the app
+> shows it**. Phase 1.4's chronicle-first dossier has a subject now. It is read-only,
+> touches no simulation and cannot regress either oracle.
+>
+> The two open questions Phase 0.4 leaves are both *diagnoses*, not code:
+> why a newly-founded house (co-heir or branch) so often never trades at all, and why the
+> top-10% wealth share fell out of band from below.
 >
 > ---
 >
@@ -304,7 +334,7 @@ contains the two open defects already on the scoreboard.
 | 0.1 | ~~**Diagnose house turnover.**~~ **DONE** Instrument dissolutions by cause (debt window / upkeep at zero wealth / early surcharge / never-viable spawns). Write the finding down even if no code changes. | A documented cause breakdown. Per §2.4 a diagnosis is a complete task. |
 | 0.2 | **Fix turnover** to land inside 1–3 generations. | `econ_` house dissolutions/century moves from ~312 toward **33–100**; Gini stays in 0.60–0.85; dynamics run still shows turnover (houses dying is good — 12-year houses are not) |
 | 0.3 | **Fix tick determinism.** Audit every hash accumulator in `tick/`, sort by key before folding. | `econ_scorecard_is_deterministic` un-ignored and passing; `simulate_decades_reports_dynamics` bit-identical at each step |
-| 0.4 | **Inheritance rule per culture** (partible / impartible). | dynamics bounded; measurably different fragmentation between the two rules — if it makes no difference the rule isn't wired to anything |
+| 0.4 | ~~**Inheritance rule per culture** (partible / impartible).~~ **DONE** — two axes (line + division), five division rules, the matrilineal minority, and the succession line record. | ✅ `econ_inheritance_rules_fragment_differently`; dynamics bit-identical; `econ_` bands held or improved |
 
 Phase 0 delivers no new UI. It is also the only phase that can make everything after it
 tunable.

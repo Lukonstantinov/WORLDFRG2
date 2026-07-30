@@ -1268,7 +1268,10 @@ impl CampaignSim {
             .filter(|&g| self.hubs[h].production[g] > 0.0).take(2).collect();
         if spec.is_empty() { spec.push(0); }
         let name = self.unique_family_name_for(h, tick as u64 ^ 0xBEEF);
-        let head = self.head_name_for(h, &name, tick as u64 ^ 0x2468);
+        let (line_rule, _) = self.rules_for_hub(h);
+        let female = crate::sim::inheritance::heir_is_female(line_rule, h as u64 ^ 0x2468, self.seed);
+        let head = self.head_name_sexed_for(h, &name, tick as u64 ^ 0x2468, female);
+        let (head_age, tenure) = self.roll_founder_tenure(h as u64 ^ 0x51);
         let founded = HouseEvent { tick, kind: "founded".into(),
             text: format!("{} rises to lead free {}", name, self.hubs[h].name) };
         let (fleet_sea, fleet_river, fleet_caravan) = Self::initial_fleet(self.hubs[h].coastal, false);
@@ -1280,14 +1283,16 @@ impl CampaignSim {
             mono_ever: Vec::new(), dominant_seat: true, prev_wealth: 5.0, worst_loss: 0.0,
             fleet_sea, fleet_river, fleet_caravan,
             head_name: head, head_since: tick,
-            head_lifespan: self.roll_lifespan(h as u64 ^ 0x51),
+            head_lifespan: tenure,
             founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
             archetype: pick_archetype(self.seed, tick as u64 ^ h as u64),
             charters: Vec::new(),
             is_guild: false, offices: vec![h as u32], trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
+            head_female: female, head_age, line: Vec::new(),
         });
+        self.found_head_record(idx, "founder");
         Some(idx)
     }
 
@@ -2131,6 +2136,9 @@ impl CampaignSim {
     /// a starting treasury and fleet sized to the city; acts in the city's interest.
     pub(crate) fn found_guild(&mut self, h: usize) {
         let tick = self.tick;
+        // A guildmaster holds an OFFICE, not a patrimony: the same tenure roll, but the
+        // guild itself never divides (see `divide_estate`).
+        let (guild_age, guild_term) = self.roll_founder_tenure(h as u64 ^ 0x6111);
         let coastal = self.hubs[h].coastal;
         let pop = self.hubs[h].population.max(1.0);
         let name = self.guild_name_for(h);
@@ -2150,13 +2158,16 @@ impl CampaignSim {
             mono_ever: Vec::new(), dominant_seat: false, prev_wealth: 0.0, worst_loss: 0.0,
             fleet_sea, fleet_river, fleet_caravan,
             head_name: format!("Guildmaster of {}", self.hubs[h].name),
-            head_since: tick, head_lifespan: self.roll_lifespan(h as u64 ^ 0x6111),
+            head_since: tick, head_lifespan: guild_term,
             founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
             archetype: ARCH_SPECIALTY, charters: Vec::new(),
             is_guild: true, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
+            head_female: false, head_age: guild_age, line: Vec::new(),
         });
+        let ni = self.houses.len() - 1;
+        self.found_head_record(ni, "founder");
     }
 
 
@@ -2257,13 +2268,30 @@ impl CampaignSim {
 
     /// Heir succession: new generation, a freshly-named head, a new lifespan, and
     /// occasionally the house splits a branch off into another city.
+    ///
+    /// Phase 0.4 · this is where the culture's LAW OF INHERITANCE is read. It decides
+    /// three things, and each of them is the historical payoff of the rule:
+    ///
+    /// * **who** — the line rule sets the heir's sex (`sim::inheritance::heir_is_female`);
+    /// * **how old** — an heir is not born on the day they inherit. An eldest son takes
+    ///   over in his thirties, a Mongol *otchigin* youngest as a young man, an elected
+    ///   tanist at sixty. Accession age sets the TENURE, so ultimogeniture gives long
+    ///   reigns that open weak and seniority gives a churn of short ones;
+    /// * **how much** — partible inheritance DIVIDES the estate among the heirs, which
+    ///   is the fragmentation the whole rule exists to produce. Every other rule
+    ///   concentrates, and concentration is simply the absence of a split.
     pub(crate) fn succeed_house(&mut self, hi: usize) {
         let tick = self.tick;
         let gen = self.houses[hi].generation + 1;
         let hub = self.houses[hi].hub as usize;
         let name = self.houses[hi].name.clone();
-        let heir = self.head_name_for(hub, &name, gen as u64 ^ 0x5151);
-        let lifespan = self.roll_lifespan(hi as u64 ^ gen as u64);
+        let (line_rule, inh) = self.rules_for_hub(hub);
+        // Close the outgoing head's record before the new one is written.
+        self.close_head_record(hi);
+        let female = crate::sim::inheritance::heir_is_female(
+            line_rule, (hi as u64) << 8 ^ gen as u64, self.seed);
+        let heir = self.head_name_sexed_for(hub, &name, gen as u64 ^ 0x5151, female);
+        let (age, lifespan) = self.roll_tenure(inh, hi as u64 ^ (gen as u64) << 16);
         // Archetype can PIVOT at a generational change to reflect what the family has
         // become: a rich lender (or one that owns a bank) turns merchant-banker; a big
         // shipper a fleet dynasty; a council power a political house; else a specialist.
@@ -2277,17 +2305,47 @@ impl CampaignSim {
             else { ARCH_SPECIALTY }
         };
         let old_arch = self.houses[hi].archetype;
+        // How this head came in — the rule's own phrase, and (for the matrilineal case)
+        // which of the two attested variants this house follows.
+        let avuncular = inh == InheritanceRule::Matrilineal
+            && crate::sim::inheritance::is_avunculate(hi as u64, self.seed);
+        let accession = match inh {
+            InheritanceRule::Ultimogeniture => "the hearth-keeper",
+            InheritanceRule::Seniority => "eldest capable",
+            InheritanceRule::Matrilineal if avuncular => "sister's son",
+            InheritanceRule::Matrilineal => "daughter of the house",
+            _ if female => "daughter of the house",
+            _ => "heir",
+        };
+        // A funeral is not an achievement. Standing is gained only where the LAST
+        // generation actually built something, and only up to a ceiling — prestige
+        // feeds political power → charters → monopolies → wealth (rule 18), and heads
+        // now turn over two to three times a century rather than once.
+        let grew = self.houses[hi].line.last().is_some_and(|p| p.wealth_end > p.wealth_start);
         {
             let h = &mut self.houses[hi];
             h.generation = gen;
             h.head_name = heir.clone();
             h.head_since = tick;
             h.head_lifespan = lifespan;
-            h.prestige += 0.05;
+            h.head_female = female;
+            h.head_age = age;
+            if grew && h.prestige < SUCCESSION_PRESTIGE_CAP {
+                h.prestige = (h.prestige + SUCCESSION_PRESTIGE).min(SUCCESSION_PRESTIGE_CAP);
+            }
             h.archetype = new_arch;
+            h.line.push(HouseHead {
+                name: heir.clone(), female, generation: gen,
+                since: tick, until: 0, age_at_accession: age, age_at_death: 0,
+                wealth_start: h.wealth, wealth_end: 0.0,
+                accession: accession.into(), epithet: String::new(),
+            });
             h.events.push(HouseEvent {
                 tick, kind: "succession".into(),
-                text: format!("{} succeeds as head (generation {})", heir, gen),
+                text: match accession {
+                    "heir" => format!("{} succeeds as head at {} (generation {})", heir, age, gen),
+                    a => format!("{} succeeds as head at {} — {} (generation {})", heir, age, a, gen),
+                },
             });
             if new_arch != old_arch {
                 h.events.push(HouseEvent {
@@ -2301,6 +2359,11 @@ impl CampaignSim {
             value: self.houses[hi].generation as f32,
             text: format!("{} succeeds as head of {}", heir, name),
         });
+        // ── The division ────────────────────────────────────────────────────────
+        // Partible inheritance splits the capital at every generation, which is why
+        // firms under it had to be RECONSTITUTED each time and why so many did not
+        // survive it. Every other rule leaves the estate whole.
+        if inh.divides() { self.divide_estate(hi, gen); }
         // A wealthy house founds a cadet BRANCH in a city it trades with. Lowered
         // to gen>=2 (was gen>=3 ≈ 150+ yrs, which essentially never happened in a
         // normal playthrough). Periodic branching also runs monthly (see
@@ -2313,6 +2376,283 @@ impl CampaignSim {
         }
     }
 
+
+    // ── Phase 0.4 · the law of inheritance ──────────────────────────────────────
+
+    /// Resolve each live people's law of inheritance ONCE and keep it. Called yearly
+    /// (and at campaign start) — a culture already in the registry is never re-read, so
+    /// a people's law is fixed for the life of the world even if the worldgen culture
+    /// map is unavailable on a later load.
+    pub(crate) fn ensure_culture_rules(&mut self) {
+        // Hub cultures first (deterministic hub order), then creoles as they arise.
+        let mut names: Vec<String> = Vec::new();
+        for c in self.hub_culture.iter() {
+            if c.is_empty() || c == "—" { continue; }
+            if !names.iter().any(|n| n == c) { names.push(c.clone()); }
+        }
+        for c in self.creoles.iter() {
+            if !names.iter().any(|n| *n == c.name) { names.push(c.name.clone()); }
+        }
+        for n in names {
+            if self.culture_rules.iter().any(|r| r.culture == n) { continue; }
+            // A creole reckons descent as its first parent did; a named people by its
+            // own language kit; anything else falls back to the kit distribution.
+            let kit = self.creoles.iter().find(|c| c.name == n).map(|c| c.kit_a as usize)
+                .or_else(|| crate::sim::cultures::kit_of_people(&n));
+            // Clannish (trait index 8) — kin-bound descent groups, the precondition for
+            // reckoning through the female line.
+            let clannish = kit.is_some_and(|k| {
+                crate::sim::cultures::kit_traits(k, 0.35, self.seed ^ k as u64).contains(&8)
+            });
+            let (line, rule) = crate::sim::inheritance::rules_for(&n, kit, clannish, self.seed);
+            self.culture_rules.push(CultureRule {
+                culture: n, line: line.as_u8(), rule: rule.as_u8(),
+            });
+        }
+    }
+
+    /// The law of inheritance in force at `hub` — its majority people's. Pure: an
+    /// unregistered culture resolves from its own name, so this is never undefined and
+    /// never depends on when `ensure_culture_rules` last ran.
+    pub(crate) fn rules_for_hub(&self, hub: usize) -> (LineRule, InheritanceRule) {
+        let culture = self.hub_culture.get(hub).cloned().unwrap_or_default();
+        if let Some(r) = self.culture_rules.iter().find(|r| r.culture == culture) {
+            return (LineRule::from_u8(r.line), InheritanceRule::from_u8(r.rule));
+        }
+        crate::sim::inheritance::rules_for(&culture, None, false, self.seed)
+    }
+
+    /// A head's name, drawn from the culture's female bank where the line rule puts a
+    /// woman at the head of the house.
+    pub(crate) fn head_name_sexed_for(&self, hub: usize, house_name: &str, salt: u64, female: bool) -> String {
+        if !female { return self.head_name_for(hub, house_name, salt); }
+        let surname = house_name.strip_prefix("House ").unwrap_or(house_name);
+        let (x, y) = (self.hubs[hub].x.max(0.0) as u32, self.hubs[hub].y.max(0.0) as u32);
+        crate::sim::names::gen_head_name_sexed(
+            x, y, self.world_w as u32, self.world_h(), surname, salt, true)
+    }
+
+    /// `(age at accession, tenure in ticks)` for an heir under `rule`.
+    ///
+    /// The point is that an heir is NOT a newborn: they inherit at whatever age the
+    /// rule implies and rule only for what remains of their life. An eldest son takes
+    /// over in his thirties; the Mongol *otchigin* — the hearth-keeping youngest — as a
+    /// young man, so his tenure is long but opens under a weak, inexperienced head; an
+    /// elected tanist is by definition the eldest capable, so his is short. That is the
+    /// whole difference between concentration rules that otherwise look identical.
+    pub(crate) fn roll_tenure(&self, rule: InheritanceRule, salt: u64) -> (u32, u32) {
+        let ra = hash01(self.seed, self.tick as u64 ^ 0x11FE, salt);
+        let rd = hash01(self.seed, self.tick as u64 ^ 0x2FED, salt ^ 0x5A5A);
+        let (lo, span) = match rule {
+            InheritanceRule::Ultimogeniture => (HEIR_AGE_YOUNGEST, 14.0),
+            InheritanceRule::Seniority => (HEIR_AGE_ELECTED, 18.0),
+            _ => (HEIR_AGE_ELDEST, 18.0),
+        };
+        let age = lo + ra * span;
+        // Age at death, for someone who has already survived to adulthood. Pre-modern
+        // life expectancy AT BIRTH was low because so many died as infants; a merchant
+        // who lived to hold a house commonly saw his sixties or seventies.
+        let death = (HEAD_DEATH_AGE_MIN + rd * HEAD_DEATH_AGE_SPAN).max(age + MIN_TENURE_YEARS);
+        (age as u32, ((death - age) * TICKS_PER_YEAR as f32) as u32)
+    }
+
+    /// Open the founding head's record on every house seeded at campaign start, and
+    /// bring each head into line with the seat culture's rule — a people that reckons
+    /// descent through its daughters must not be handed a founding roster of men.
+    /// Idempotent: a house that already has a line is left alone.
+    pub(crate) fn seed_house_lines(&mut self) {
+        for hi in 0..self.houses.len() {
+            if !self.houses[hi].line.is_empty() { continue; }
+            let hub = self.houses[hi].hub as usize;
+            if hub >= self.hubs.len() { continue; }
+            if !self.houses[hi].is_guild {
+                let (line_rule, _) = self.rules_for_hub(hub);
+                let female = crate::sim::inheritance::heir_is_female(
+                    line_rule, hi as u64 ^ 0x5EED, self.seed);
+                if female {
+                    let name = self.houses[hi].name.clone();
+                    self.houses[hi].head_name =
+                        self.head_name_sexed_for(hub, &name, 0x100 ^ hi as u64, true);
+                }
+                self.houses[hi].head_female = female;
+            }
+            // Always assign the tenure, never only when unset: the head fields on a
+            // freshly-seeded house are placeholders, and a house whose founder outlives
+            // the campaign never reaches a succession at all — which silently switches
+            // off everything downstream of one.
+            let (age, tenure) = self.roll_founder_tenure(hi as u64 ^ 0xA11);
+            self.houses[hi].head_age = age;
+            self.houses[hi].head_lifespan = tenure;
+            self.found_head_record(hi, "founder");
+        }
+    }
+
+    /// `(age, tenure ticks)` for a FOUNDER — a merchant who built the house, so already
+    /// established in life rather than an heir arriving by descent.
+    pub(crate) fn roll_founder_tenure(&self, salt: u64) -> (u32, u32) {
+        let ra = hash01(self.seed, self.tick as u64 ^ 0x30F1, salt);
+        let rd = hash01(self.seed, self.tick as u64 ^ 0x30F2, salt ^ 0x1234);
+        let age = 30.0 + ra * 16.0;
+        let death = (HEAD_DEATH_AGE_MIN + rd * HEAD_DEATH_AGE_SPAN).max(age + MIN_TENURE_YEARS);
+        (age as u32, ((death - age) * TICKS_PER_YEAR as f32) as u32)
+    }
+
+    /// Open the founding head's record on a brand-new house. A founder is a grown
+    /// merchant, not an heir — they take the house at the age they built it.
+    pub(crate) fn found_head_record(&mut self, hi: usize, accession: &str) {
+        let tick = self.tick;
+        let (name, female, age, wealth, generation) = {
+            let h = &self.houses[hi];
+            (h.head_name.clone(), h.head_female, h.head_age, h.wealth, h.generation)
+        };
+        self.houses[hi].line.push(HouseHead {
+            name, female, generation,
+            since: tick, until: 0, age_at_accession: age, age_at_death: 0,
+            wealth_start: wealth, wealth_end: 0.0,
+            accession: accession.into(), epithet: String::new(),
+        });
+    }
+
+    /// Close the outgoing head's record: death tick, age, closing wealth, and the
+    /// by-name their tenure earned. Descriptive only — derived from what measurably
+    /// happened, never fed back into the sim.
+    pub(crate) fn close_head_record(&mut self, hi: usize) {
+        let tick = self.tick;
+        let wealth = self.houses[hi].wealth;
+        let (start, since, age0) = match self.houses[hi].line.last() {
+            Some(p) => (p.wealth_start, p.since, p.age_at_accession),
+            // A house from a save written before the line existed: reconstruct the one
+            // record we can honestly write, from the head fields it does carry.
+            None => {
+                let h = &self.houses[hi];
+                let (nm, f, g, s, a) =
+                    (h.head_name.clone(), h.head_female, h.generation, h.head_since, h.head_age);
+                self.houses[hi].line.push(HouseHead {
+                    name: nm, female: f, generation: g, since: s, until: 0,
+                    age_at_accession: a, age_at_death: 0,
+                    wealth_start: wealth, wealth_end: 0.0,
+                    accession: "heir".into(), epithet: String::new(),
+                });
+                (wealth, s, a)
+            }
+        };
+        let years = tick.saturating_sub(since) / TICKS_PER_YEAR;
+        let epithet = Self::head_epithet(start, wealth, years, age0 + years,
+            hash01(self.seed, tick as u64 ^ 0xEB17, hi as u64));
+        if let Some(p) = self.houses[hi].line.last_mut() {
+            p.until = tick;
+            p.wealth_end = wealth;
+            p.age_at_death = age0 + years;
+            p.epithet = epithet;
+        }
+    }
+
+    /// The by-name a tenure earned. Most heads get NONE — an epithet everyone carries
+    /// says nothing about anyone, which is the same discipline the stability gauges
+    /// keep by staying quiet when healthy.
+    fn head_epithet(start: f32, end: f32, years: u32, age: u32, r: f32) -> String {
+        let grew = if start.abs() > 1e-3 { end / start } else { 1.0 };
+        let pick = |a: &'static str, b: &'static str| if r < 0.5 { a } else { b };
+        if years < 5 && end > 0.0 { return pick("the Brief", "the Untimely").into(); }
+        if grew >= 3.0 && years >= 12 { return pick("the Great", "the Magnificent").into(); }
+        if grew >= 1.8 { return pick("the Fortunate", "the Bold").into(); }
+        if grew <= 0.4 { return pick("the Unlucky", "the Prodigal").into(); }
+        if age >= 78 { return pick("the Old", "the Long-lived").into(); }
+        if years >= 30 && grew >= 1.0 { return pick("the Steady", "the Patient").into(); }
+        String::new()
+    }
+
+    /// PARTIBLE inheritance — the estate divides in equal shares among the heirs.
+    ///
+    /// Two outcomes, and both are historical. Where the shares are large enough to
+    /// stand alone the co-heirs set up as separate firms at the same seat, which is the
+    /// fragmentation partible inheritance is famous for. Where they are not, the
+    /// brothers keep the capital together and trade as one — the Italian *fraterna* —
+    /// and the house survives the generation whole. No money is created or destroyed
+    /// either way: a share leaves the parent exactly as it arrives at the co-heir.
+    pub(crate) fn divide_estate(&mut self, hi: usize, gen: u32) {
+        // A civic guild is not a family and has no estate to divide.
+        if self.houses[hi].is_guild || self.houses[hi].defunct { return; }
+        let wealth = self.houses[hi].wealth;
+        if wealth <= 0.0 { return; }
+        let heirs = crate::sim::inheritance::partible_heirs(hi as u64 ^ gen as u64, self.seed);
+        let share = wealth / heirs as f32;
+        let hub = self.houses[hi].hub as usize;
+        let tick = self.tick;
+        // Too small to stand alone → the heirs hold jointly. Recorded, because a
+        // generation that did NOT split is as much a consequence of the rule as one
+        // that did.
+        if share < HOUSE_SEED_MIN {
+            self.houses[hi].events.push(HouseEvent {
+                tick, kind: "inheritance".into(),
+                text: format!("the {} heirs keep the capital together and trade as one house", heirs),
+            });
+            return;
+        }
+        let live = self.houses.iter().filter(|h| !h.defunct && !h.is_guild).count();
+        let room = HOUSE_MAX_TOTAL.saturating_sub(live).min(PARTIBLE_MAX_SPLIT);
+        let splits = ((heirs - 1) as usize).min(room);
+        if splits == 0 { return; }
+        let parent = self.houses[hi].name.clone();
+        let spec = self.houses[hi].spec.clone();
+        let arch = self.houses[hi].archetype;
+        let (line_rule, inh) = self.rules_for_hub(hub);
+        for k in 0..splits {
+            let salt = (hi as u64) << 20 ^ (gen as u64) << 8 ^ k as u64;
+            let cname = self.coheir_name_for(&parent, k);
+            if self.houses.iter().any(|h| !h.defunct && h.name == cname) { continue; }
+            let female = crate::sim::inheritance::heir_is_female(line_rule, salt, self.seed);
+            let chead = self.head_name_sexed_for(hub, &cname, salt ^ 0xC0DE, female);
+            let (age, tenure) = self.roll_tenure(inh, salt ^ 0x7777);
+            self.houses[hi].wealth -= share;
+            let founded = HouseEvent {
+                tick, kind: "founded".into(),
+                text: format!("{} takes a co-heir's share of {} and sets up on their own account",
+                    chead, parent),
+            };
+            self.houses.push(House {
+                name: cname.clone(), hub: hub as u32, wealth: share, prestige: 0.05,
+                spec: spec.clone(), monopoly: vec![], rivals: vec![], generation: gen,
+                events: vec![founded], good_profit: Vec::new(), mono50: Vec::new(),
+                mono_ever: Vec::new(), dominant_seat: false, prev_wealth: share, worst_loss: 0.0,
+                // A co-heir's share is CAPITAL, not ships: the vessels stay with the
+                // parent firm. Founding a house with hulls it cannot crew is exactly the
+                // arithmetic that killed every new house before Phase 0.2.
+                fleet_sea: 0, fleet_river: 0, fleet_caravan: 0,
+                head_name: chead.clone(), head_since: tick, head_lifespan: tenure,
+                founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
+                archetype: arch, charters: Vec::new(),
+                is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
+                wealth_history: Vec::new(), office_leases: Vec::new(),
+                influence: Vec::new(), bailos: Vec::new(),
+                head_female: female, head_age: age, line: Vec::new(),
+            });
+            let ni = self.houses.len() - 1;
+            self.found_head_record(ni, "co-heir");
+            self.journal.push(JournalEntry {
+                tick, kind: "founding".into(), hub: hub as i32, good: -1, value: share,
+                text: format!("{} divides: {} takes a co-heir's share and opens their own house",
+                    parent, chead),
+            });
+        }
+        self.houses[hi].events.push(HouseEvent {
+            tick, kind: "inheritance".into(),
+            text: format!("the estate is divided in {} shares among the heirs", heirs),
+        });
+    }
+
+    /// A co-heir's house name — the same family, a distinguished line: "House Cassii
+    /// (the Younger Line)". Keeps the surname so the division reads as one family
+    /// splitting rather than a stranger appearing.
+    pub(crate) fn coheir_name_for(&self, parent_name: &str, k: usize) -> String {
+        const LINES: [&str; 3] = ["the Younger Line", "the Cadet Line", "the Lesser Line"];
+        // Keep the parent's name EXACTLY as it reads (it already carries whatever
+        // "House"/guild prefix its culture gave it) and distinguish the line — a second
+        // "House" prefix would read as a different family, which is the opposite of
+        // what a division is.
+        let base = parent_name.split(" (").next().unwrap_or(parent_name).trim();
+        format!("{} ({})", base, LINES[k.min(LINES.len() - 1)])
+    }
 
     /// A branch name that KEEPS the family identity: "House Cassii of <City>", so
     /// the same family visibly spreads across cities (instead of inventing an
@@ -2339,28 +2679,41 @@ impl CampaignSim {
         let split = self.houses[hi].wealth * 0.30;
         self.houses[hi].wealth -= split;
         let spec = self.houses[hi].spec.clone();
-        let bhead = self.head_name_for(dest, &bname, tick as u64 ^ hi as u64 ^ 0x9001);
+        let (line_rule, inh) = self.rules_for_hub(dest);
+        let bfemale = crate::sim::inheritance::heir_is_female(
+            line_rule, tick as u64 ^ hi as u64, self.seed);
+        let bhead = self.head_name_sexed_for(dest, &bname, tick as u64 ^ hi as u64 ^ 0x9001, bfemale);
+        let (bage, btenure) = self.roll_tenure(inh, dest as u64 ^ 0xCC);
         let founded = HouseEvent {
             tick, kind: "founded".into(),
             text: format!("Founded by {} as a branch of {} in {}", bhead, parent, self.hubs[dest].name),
         };
-        let (fleet_sea, fleet_river, fleet_caravan) =
-            Self::initial_fleet(self.hubs[dest].coastal, false);
         self.houses.push(House {
             name: bname.clone(), hub: dest as u32, wealth: split, prestige: 0.1,
             spec, monopoly: vec![], rivals: vec![hi], generation: 1,
             events: vec![founded], good_profit: Vec::new(), mono50: Vec::new(),
             mono_ever: Vec::new(), dominant_seat: false, prev_wealth: split, worst_loss: 0.0,
-            fleet_sea, fleet_river, fleet_caravan,
+            // A cadet branch is endowed with CAPITAL, not with hulls. It used to be
+            // handed `initial_fleet`'s two or three vessels it had never paid for and
+            // could not crew — and the diagnosis says that is what killed it: branches
+            // were 19 of 35 deaths, 74% of them houses that never traded at all, dead
+            // at a mean age of 8 years. That is the same arithmetic Phase 0.2 found
+            // behind the original 12-year house, arriving by a second door. It buys
+            // ships out of its own share, through `manage_fleets`, when its trade
+            // justifies them.
+            fleet_sea: 0, fleet_river: 0, fleet_caravan: 0,
             head_name: bhead.clone(), head_since: tick,
-            head_lifespan: self.roll_lifespan(dest as u64 ^ 0xCC),
+            head_lifespan: btenure,
             founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
             archetype: self.houses[hi].archetype, // a cadet branch keeps the family trade
             charters: Vec::new(),
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
+            head_female: bfemale, head_age: bage, line: Vec::new(),
         });
+        let ni = self.houses.len() - 1;
+        self.found_head_record(ni, "founder");
         self.journal.push(JournalEntry {
             tick, kind: "founding".into(), hub: dest as i32, good: -1, value: 0.0,
             text: format!("{} founds a branch of {} in {}", bhead, parent, self.hubs[dest].name),
@@ -2763,7 +3116,10 @@ impl CampaignSim {
         if seed_cap < HOUSE_SEED_MIN { return; }
         self.houses[gi_seed].wealth -= seed_cap;
         let name = self.unique_family_name_for(hub, tick as u64 ^ 0xF00D);
-        let head = self.head_name_for(hub, &name, tick as u64 ^ 0x1234);
+        let (line_rule, _) = self.rules_for_hub(hub);
+        let female = crate::sim::inheritance::heir_is_female(line_rule, hub as u64 ^ 0x1234, self.seed);
+        let head = self.head_name_sexed_for(hub, &name, tick as u64 ^ 0x1234, female);
+        let (head_age, tenure) = self.roll_founder_tenure(hub as u64 ^ 0x7E);
         self.journal.push(JournalEntry {
             tick, kind: "founding".into(), hub: hub as i32, good: spec[0] as i32, value: 0.0,
             text: format!("{} establishes {} on the {} trade", head, name,
@@ -2783,14 +3139,17 @@ impl CampaignSim {
             mono_ever: Vec::new(), dominant_seat: false, prev_wealth: seed_cap, worst_loss: 0.0,
             fleet_sea, fleet_river, fleet_caravan,
             head_name: head, head_since: tick,
-            head_lifespan: self.roll_lifespan(hub as u64 ^ 0x7E),
+            head_lifespan: tenure,
             founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
             archetype: pick_archetype(self.seed, tick as u64 ^ hub as u64),
             charters: Vec::new(),
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
+            head_female: female, head_age, line: Vec::new(),
         });
+        let ni = self.houses.len() - 1;
+        self.found_head_record(ni, "founder");
     }
 
 

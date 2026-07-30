@@ -679,7 +679,10 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
             fleet_caravan,
             head_name: head,
             head_since: 0,
-            head_lifespan: seed_lifespan(seed, h as u64),
+            // Assigned two steps below by `seed_house_lines`, once the seat's culture —
+            // and so its law of inheritance — is known: the accession age a rule implies
+            // is what sets the tenure (see `roll_tenure`).
+            head_lifespan: 0,
             founded_tick: 0,
             political_power: 0.0,
             volume: 0.0,
@@ -689,6 +692,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
+            head_female: false, head_age: 0, line: Vec::new(),
         });
     }
 
@@ -726,6 +730,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         last_month_pop: 0.0,
         last_month_index: 0.0,
         seed_house_count: houses_len,
+        culture_rules: Vec::new(),
         fleets_migrated: true, // new campaigns already seed fleets
         tech_factor: 1.0,
         percap_migrated: true, // hubs seeded with base_per_capita directly
@@ -861,6 +866,11 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
     }
     sim.rebuild_routes();
     sim.ensure_hub_cultures(); // seed each hub's majority people from the culture map
+    // Phase 0.4 · resolve each people's LAW OF INHERITANCE once (line + division rule),
+    // then open the founding head's record on every seeded house. Must run after the
+    // cultures are known: the seat's rule decides the head's sex and accession age.
+    sim.ensure_culture_rules();
+    sim.seed_house_lines();
     sim.seed_initial_guilds(); // civic guilds for cities already ≥ 50k people
     // Provinces (Phase 2b): seed the rural reservoir from the stored partition so the
     // countryside can feed the cities. No-op when no province layer was generated.

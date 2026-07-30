@@ -1005,16 +1005,6 @@ pub struct NotablePerson {
     pub cities: Vec<NotableCity>, // seat + the cities they reached (offices) — clickable
 }
 
-/// Deterministic initial head lifespan (≈45–75 years, in ticks).
-fn seed_lifespan(seed: u64, salt: u64) -> u32 {
-    let mut z = seed.wrapping_add(salt.wrapping_mul(0x9E3779B97F4A7C15));
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
-    z ^= z >> 31;
-    let r = (z >> 40) as f32 / (1u64 << 24) as f32;
-    ((45.0 + r * 30.0) * 365.0) as u32
-}
-
 fn uf_find(parent: &mut [usize], mut x: usize) -> usize {
     while parent[x] != x {
         parent[x] = parent[parent[x]];

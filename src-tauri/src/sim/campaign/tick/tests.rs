@@ -42,6 +42,7 @@
             is_guild: false, offices: vec![], trade_at: vec![], debt_since: 0,
             wealth_history: vec![], office_leases: vec![],
             influence: vec![], bailos: vec![],
+            head_female: false, head_age: 34, line: vec![],
         }
     }
 
@@ -51,6 +52,7 @@
             active_events: vec![], journal: vec![], days_per_cell: 0.2, freight_per_day: 0.01,
             k: 0.6, margin: 0.05, need_scale: 1.0, world_w: 100.0, world_h: 100.0, last_tick_ms: 0.0,
             last_month_pop: 0.0, last_month_index: 0.0, seed_house_count: 0,
+            culture_rules: vec![],
             fleets_migrated: true, tech_factor: 1.0, percap_migrated: true, society_migrated: false,
             components_rescued: true,
             house_ledger: Vec::new(), house_ledger_prev: Vec::new(), house_barred: Vec::new(),
@@ -1956,4 +1958,138 @@
         }
         assert!(last_delivered > 30.0 * 8.0, "delivered most months: {last_delivered}");
         assert!(s.contracts.is_empty(), "the contract reached term end and was retired (finished)");
+    }
+
+    // ── Phase 0.4 · the succession line ─────────────────────────────────────
+    /// A house keeps a RECORD of every head it has had: name, sex, the age they came
+    /// in at, the age they died at, and what the family was worth at each end. This is
+    /// the "who held it, and how did they do" the chronicle is written from, and it is
+    /// the first thing that would silently rot if a later phase rewrote succession.
+    #[test]
+    fn a_house_records_every_head_it_has_had() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let ng = goods.len();
+        let hubs = (0..3u32)
+            .map(|i| {
+                let prod: Vec<f32> = (0..ng).map(|g| if g == 0 { 9000.0 } else { 800.0 }).collect();
+                hub(i, (i as f32) * 5.0, 0.0, 9000.0, prod, 0)
+            })
+            .collect();
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["Aiora".into(); 3];
+        s.hub_minorities = vec![Vec::new(); 3];
+        // Primogeniture: the house stays whole, so the line is one unbroken sequence.
+        s.culture_rules = vec![CultureRule { culture: "Aiora".into(), line: 0, rule: 1 }];
+        // No fleet and deep pockets: this test is about the succession RECORD, and a
+        // house that goes bankrupt in year 20 (fleet upkeep on a three-city world) never
+        // reaches a second head to record.
+        let mut h = house_at(0, vec![1], 0);
+        h.wealth = 200_000.0;
+        s.houses.push(h);
+        s.seed_house_lines();
+        for _ in 0..90 { s.advance(365); }
+
+        let line = &s.houses[0].line;
+        assert!(
+            line.len() >= 3,
+            "90 years should span at least three heads, got {} (defunct={}, wealth={:.0}, \
+             head_lifespan={} yr)",
+            line.len(), s.houses[0].defunct, s.houses[0].wealth,
+            s.houses[0].head_lifespan / TICKS_PER_YEAR
+        );
+        let mut prev_until = 0;
+        for (i, p) in line.iter().enumerate() {
+            assert!(!p.name.is_empty(), "head {i} has no name");
+            assert!(p.age_at_accession >= 16, "head {i} inherited as a child: {}", p.age_at_accession);
+            assert!(p.since >= prev_until, "head {i} took over before their predecessor died");
+            if p.until > 0 {
+                assert!(p.until > p.since, "head {i} died before they acceded");
+                assert!(
+                    p.age_at_death > p.age_at_accession,
+                    "head {i} did not age in office ({} → {})", p.age_at_accession, p.age_at_death
+                );
+                let years = (p.until - p.since) / TICKS_PER_YEAR;
+                assert!(years >= 3, "head {i} held the house for {years} years — not a generation");
+                prev_until = p.until;
+            }
+        }
+        // The living head is the last link, and only the last link is open.
+        let last = line.last().unwrap();
+        assert_eq!(last.until, 0, "the living head's record must stay open");
+        assert_eq!(last.name, s.houses[0].head_name, "the line's last head is the house's head");
+        assert!(line[..line.len() - 1].iter().all(|p| p.until > 0), "an earlier head was left open");
+    }
+
+    /// The line rule decides who holds the house. Under an ENATIC culture — descent
+    /// through daughters — every head is a woman and is NAMED as one; under an agnatic
+    /// one, none are. If this ever silently produces men in a matrilineal people, the
+    /// whole rule is decoration.
+    #[test]
+    fn a_matrilineal_house_is_held_by_women() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32)
+            .map(|i| hub(i, (i as f32) * 5.0, 0.0, 9000.0, vec![9000.0], 0))
+            .collect();
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["Aiora".into(), "Belgar".into()];
+        s.hub_minorities = vec![Vec::new(); 2];
+        s.culture_rules = vec![
+            // Aiora: enatic + matrilineal. Belgar: agnatic + primogeniture.
+            CultureRule { culture: "Aiora".into(), line: 3, rule: 4 },
+            CultureRule { culture: "Belgar".into(), line: 0, rule: 1 },
+        ];
+        for hub_i in 0..2u32 {
+            let mut h = house_at(hub_i, vec![0], 1);
+            h.wealth = 2000.0;
+            s.houses.push(h);
+        }
+        s.seed_house_lines();
+        for _ in 0..70 { s.advance(365); }
+
+        let matri = &s.houses[0];
+        let agnat = &s.houses[1];
+        assert!(matri.line.len() >= 2, "the matrilineal house never succeeded");
+        assert!(
+            matri.line.iter().all(|p| p.female),
+            "a matrilineal house was held by a man: {:?}",
+            matri.line.iter().map(|p| (&p.name, p.female)).collect::<Vec<_>>()
+        );
+        assert!(matri.head_female, "the living matrilineal head must be a woman");
+        assert!(
+            agnat.line.iter().all(|p| !p.female),
+            "an agnatic house passed to a daughter: {:?}",
+            agnat.line.iter().map(|p| (&p.name, p.female)).collect::<Vec<_>>()
+        );
+        // The heir is named from the culture's own female bank, not a man's name.
+        assert!(matri.head_name != agnat.head_name, "both houses drew the same head name");
+    }
+
+    /// A guild is an office, not a family: its master turns over, but there is no
+    /// estate to divide, whatever the local law of inheritance says.
+    #[test]
+    fn a_guild_never_divides_its_estate() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32)
+            .map(|i| hub(i, (i as f32) * 5.0, 0.0, 9000.0, vec![9000.0], 0))
+            .collect();
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["Aiora".into(); 2];
+        s.hub_minorities = vec![Vec::new(); 2];
+        s.culture_rules = vec![CultureRule { culture: "Aiora".into(), line: 0, rule: 0 }]; // partible
+        let mut g = house_at(0, vec![0], 1);
+        g.is_guild = true;
+        g.wealth = 5000.0;
+        s.houses.push(g);
+        s.seed_house_lines();
+        let before = s.houses.len();
+        for _ in 0..60 { s.advance(365); }
+        assert!(s.houses[0].line.len() >= 2, "the guildmastership never turned over");
+        assert!(
+            !s.houses.iter().any(|h| h.name.contains(" Line)")),
+            "a guild spawned a co-heir house"
+        );
+        assert!(s.houses.len() >= before, "houses vanished");
     }

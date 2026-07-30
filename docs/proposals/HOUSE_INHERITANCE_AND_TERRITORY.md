@@ -1,7 +1,16 @@
 # Inheritance, women, and provinces as house territory
 
-**Status: PLAN. Nothing built.** Amends `HOUSE_MASTER_PLAN.md` after maintainer pushback.
-Read that document's Part 0 first — it carries the blocking finding.
+**Status: Part B BUILT (Phase 0.4); Parts A, C, D remain plan.** Amends
+`HOUSE_MASTER_PLAN.md` after maintainer pushback. Read that document's Part 0 first — it
+carries the blocking finding, and its handoff block carries the live state.
+
+> **Part B shipped** as `sim/shared/inheritance.rs` — both axes, all five division rules,
+> the seeded matrilineal minority (B.4, including the avunculate variant) and the kit
+> assignment of B.3 exactly as tabled. What it does NOT yet have is B.5's kin roster: the
+> rule acts on the ESTATE and on the succession LINE, not on a family tree of siblings and
+> cousins (that is Phase 2). Of Part C, only `Kin.sex` in spirit — a house's heads have a
+> sex and are named from their culture's own female name-bank — the widow and the dowry
+> direction are not built.
 
 ---
 

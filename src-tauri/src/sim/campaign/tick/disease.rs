@@ -488,6 +488,9 @@ impl CampaignSim {
             // #23 · Peoples: seed/settle cultures, drift people toward opportunity
             // (draws migration arrows), and slowly assimilate minority quarters.
             self.ensure_hub_cultures();
+            // Phase 0.4 · a people new to the world (a colony's creole, a resettled
+            // hub) gets its law of inheritance resolved here, once, and keeps it.
+            self.ensure_culture_rules();
             self.economic_migration_pass();
             self.diaspora_pass();
             // Which trade tongue dominates each region (drives the assimilation bridge).

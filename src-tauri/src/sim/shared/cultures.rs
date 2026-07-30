@@ -45,6 +45,11 @@ pub struct Kit {
     pub mid: &'static [&'static str],
     pub end: &'static [&'static str], // place-name endings
     pub given: &'static [&'static str],
+    /// Female given names. A house whose culture reckons descent through daughters
+    /// (see `sim::inheritance`) names its heads from here, so a matrilineal or
+    /// absolute-primogeniture line reads as one on the panel instead of silently
+    /// producing men.
+    pub given_f: &'static [&'static str],
     pub family: &'static [&'static str],
     pub guild: &'static [&'static str], // guild-style words
     pub epithet: &'static [&'static str],
@@ -58,6 +63,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","i","e","en","el","ar"],
         end: &["ium","a","entia","onium","aria","anum","ona","ina","etia","olum","estum","icum"],
         given: &["Marcus","Lucius","Gaius","Titus","Quintus","Publius","Aulus","Servius","Decimus","Gnaeus"],
+        given_f: &["Julia","Livia","Cornelia","Antonia","Claudia","Valeria","Aurelia","Octavia","Fulvia","Marcella"],
         family: &["Cassii","Valerii","Aurelii","Cornelii","Fabii","Julii","Aemilii","Flavii","Claudii","Marcii","Licinii","Domitii","Sergii","Manlii","Caecilii","Sempronii","Postumii","Hortensii","Pinarii","Furii","Atilii","Verginii","Antonii","Tullii","Calpurnii","Porcii","Junii","Livii","Octavii","Terentii","Papirii","Quinctii","Servilii","Aelii","Memmii","Mucii","Naevii","Plautii","Rutilii","Vibii","Curtii","Lutatii","Caninii","Herennii","Ostorii","Petronii"],
         guild: &["Collegium","Societas","Corpus","Negotiatores","Mercatura","Argentaria","Officina"],
         epithet: &["Magna","Augusta","Maior"] },
@@ -67,6 +73,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","a","i","o","ar","is"],
         end: &["os","on","aia","polis","andros","ia","ene","yssa","kos","thea","nthos","kleia"],
         given: &["Alexios","Theron","Nikias","Demetrios","Leonidas","Kallias","Philon","Lysandros","Kleon","Diodoros","Menandros","Xenon"],
+        given_f: &["Aspasia","Theano","Berenike","Arete","Lysandra","Melissa","Xanthippe","Eirene","Kleio","Phile"],
         family: &["Alkmaionidai","Philaidai","Bakchiadai","Kypselidai","Eumolpidai","Pelopidai","Kerykes","Aleuadai","Battiadai","Branchidai","Asklepiadai","Lykomidai","Gephyraioi","Praxiergidai","Salaminioi","Theodoridai","Hippeis","Eteoboutadai","Peisistratidai","Kodridai","Neleidai","Medontidai","Penthilidai","Aigeidai","Boutadai","Euneidai","Amynandridai","Phytalidai","Titakidai","Kynnidai","Pamphidai","Daidalidai","Kephalidai","Erysichthonidai"],
         guild: &["Emporion","Koinon","Synedrion","Thiasos","Eranos","Symmoria","Naukleroi"],
         epithet: &["Megale","Hypsele","Akra"] },
@@ -76,6 +83,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","a","i","o","ad","as"],
         end: &["ada","on","ath","qart","im","tis","uba","esh","ar","anto","umet","shama"],
         given: &["Hanno","Mago","Hamilcar","Bomilcar","Adherbal","Gisco","Hasdrubal","Maharbal","Bostar","Himilco","Eshmun","Zakarbaal"],
+        given_f: &["Elissa","Sophonisba","Arishat","Batbaal","Amatashtart","Himilce","Yzebel","Shiphrah"],
         family: &["Barcids","Magonids","Hannids","Gisconids","Melqartids","Bostarids","Tyrians","Sidonites","Eshmunids","Baalids","Gerids","Zakarbids","Hannonids","Adonids","Bodashtarids","Hannibaals","Carthalonids","Safotids","Hamilcarids","Hasdrubalids","Maharbalids","Himilcoids","Adherbalids","Saphonids","Abdmelqarts","Bomilcarids","Yadamilkids","Abibaalids","Ahirams","Mottonids","Gerastartids","Hannobaals","Bythiads","Iomilkids"],
         guild: &["Beth","Sokim","Miqdash","Mahanet","Tarsis","Kothon","Suffetim"],
         epithet: &["Rabba","Adir","the Great Harbour"] },
@@ -85,6 +93,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","a","i","an","ar","o"],
         end: &["gard","kana","dana","shahr","abad","stan","kert","vana","thra","spa","drava","mada"],
         given: &["Dariush","Kourosh","Bahram","Artashir","Kavus","Farrokh","Mithradat","Tiridat","Vologases","Narseh","Shapur","Hormizd"],
+        given_f: &["Atossa","Roxana","Parysatis","Amestris","Artystone","Shirin","Purandokht","Stateira","Rodogune","Azarmidokht"],
         family: &["Karen","Suren","Mihranids","Spandiyads","Varaz","Kanarang","Zarmihr","Achaemenids","Sasanids","Arsacids","Mehran","Pahlavids","Ispahbudhan","Zik","Aspahbadh","Andigan","Qaren","Dahae","Bawandids","Karinids","Sukhrids","Farrukhzads","Gondofarrids","Espahbadan","Dadbundadh","Sohaeids","Burzin","Mahgushnasp","Wahriz","Shahrbaraz","Mardanshah","Bistam","Vinduyih","Rashnu"],
         guild: &["Karwan","Anjoman","Bazaar","Rasta","Sarai","Kalantar","Ostandar"],
         epithet: &["Buzurg","the Great","Shahanshah"] },
@@ -94,6 +103,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","a","e","s","ar","en"],
         end: &["vik","fjord","by","heim","stad","nes","holm","berg","dal","oy","fell","gard"],
         given: &["Bjorn","Sigurd","Ragnar","Leif","Erik","Halfdan","Ulf","Harald","Knut","Ivar","Thorvald","Gunnar"],
+        given_f: &["Astrid","Gudrun","Sigrid","Thyra","Hallgerd","Freydis","Ingrid","Ragnhild","Bergthora","Unn"],
         family: &["Bjornsson","Sigurdarson","Ragnarsson","Ulfsson","Haraldsson","Knutsson","Ivarsson","Thorvaldsson","Gunnarsson","Eriksson","Haakonsson","Sturlung","Magnusson","Steinarsson","Vagnsson","Skjoldung","Yngling","Hlathir","Olafsson","Sveinsson","Asgrimsson","Ketilsson","Bardsson","Hroaldsson","Geirsson","Halldorsson","Egilsson","Snorrasson","Vifilsson","Ozurarson","Floksson","Arnesson","Hroarsson","Gormsson"],
         guild: &["Felag","Kaupang","Lag","Gildi","Stafnbui","Bryggja","Varda"],
         epithet: &["hinn Mikli","Storr","the Elder"] },
@@ -103,6 +113,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","a","y","wy","o","en"],
         end: &["dunon","briga","magos","ialon","duros","rix","vellaunum","acos","onna","ennon","bona","ritum"],
         given: &["Brennus","Vercingetor","Cathbad","Conall","Owain","Bran","Gwydion","Cunobel","Diviciac","Lugaid","Maelgwn","Tasciov"],
+        given_f: &["Boudica","Cartimandua","Medb","Rhiannon","Brigit","Eithne","Gwenllian","Sadb","Findabair","Creiddylad"],
         family: &["Brigantes","Catuvellauni","Arverni","Aedui","Iceni","Dumnonii","Carnutes","Senones","Parisii","Veneti","Cornovii","Boii","Atrebates","Trinovantes","Ordovices","Silures","Durotriges","Coritani","Helvetii","Sequani","Lingones","Bituriges","Volcae","Pictones","Santones","Allobroges","Treveri","Nervii","Morini","Cadurci","Vocontii","Turones","Redones","Namnetes","Cenomani"],
         guild: &["Comann","Margad","Tuath","Nemeton","Cuallacht","Aonach","Ceard"],
         epithet: &["Mor","Vellaunos","the Tall"] },
@@ -112,6 +123,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","a","i","u","an","ar"],
         end: &["ah","iyah","abad","iya","an","un","at","ir","ur","im","aniyah","ut"],
         given: &["Yusuf","Tariq","Khalid","Harun","Walid","Sayf","Nasir","Marwan","Qasim","Zayd","Salim","Umar"],
+        given_f: &["Fatima","Khadija","Aisha","Zaynab","Layla","Rabia","Sukayna","Hind","Asma","Ruqayya"],
         family: &["al-Kindi","al-Faruqi","al-Hashimi","al-Najjar","al-Saqr","al-Rashidi","al-Bakri","al-Tujari","al-Mansuri","al-Qaysi","al-Dimashqi","al-Sahili","al-Tanukhi","al-Ghassani","al-Lakhmi","al-Azdi","al-Qurashi","al-Tamimi","al-Farabi","al-Razi","al-Tabari","al-Maqdisi","al-Andalusi","al-Misri","al-Yamani","al-Hijazi","al-Baghdadi","al-Basri","al-Kufi","al-Wasiti","al-Halabi","al-Mawsili","al-Shaybani","al-Khazraji","al-Juhani"],
         guild: &["Suq","Funduq","Tujjar","Qaysariyya","Wakala","Hisba","Sinf"],
         epithet: &["al-Kubra","al-Azim","the Radiant"] },
@@ -121,6 +133,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","a","i","na","ra","va"],
         end: &["pura","nagar","gram","desha","vati","stan","khanda","loka","dvipa","ashtra","kshetra","palli"],
         given: &["Chandra","Vikrama","Ashoka","Harsha","Devanand","Rajendra","Samudra","Bhima","Arjun","Kalidasa","Surya","Indra"],
+        given_f: &["Prabhavati","Sanghamitra","Kumaradevi","Rajyashri","Malati","Ratnavali","Yashodhara","Amrapali","Lilavati","Devika"],
         family: &["Maurya","Gupta","Chola","Pallava","Kushana","Satavahana","Vakataka","Chalukya","Pandya","Rashtrakuta","Pala","Sena","Vardhana","Kadamba","Maitraka","Pratihara","Chahamana","Hoysala","Nanda","Shunga","Kanva","Kakatiya","Yadava","Paramara","Solanki","Tomara","Chandela","Gahadavala","Sisodia","Kalachuri","Ganga","Kamboja","Licchavi","Shilahara","Chera"],
         guild: &["Shreni","Nigama","Sangha","Puga","Gana","Vanik","Mahajana"],
         epithet: &["Maha","Uttama","the Golden"] },
@@ -130,6 +143,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","an","ing","ou","ai","ong"],
         end: &["zhou","jing","yang","an","cheng","fu","kou","shan","hai","ling","du","xi"],
         given: &["Zhao","Liang","Wen","Hui","Bo","Tai","Jun","Hong","Shen","Yuan","Kang","Ping"],
+        given_f: &["Wenji","Zhaojun","Qingzhao","Yuhuan","Xiulan","Meiyin","Ruilan","Lifen","Yanran","Shufen"],
         family: &["Wang","Li","Zhang","Chen","Liu","Yang","Huang","Zhou","Wu","Sun","Zheng","Xu","Lin","He","Gao","Luo","Song","Tang","Feng","Deng","Zhao","Qin","Han","Wei","Jin","Cao","Ma","Zhu","Hu","Guo","Lu","Cai","Ye","Pan","Du","Ding","Shen","Xie","Cheng","Fan"],
         guild: &["Hang","Hui","Shanghui","Gongsuo","Bang","Zihao","Piaohao"],
         epithet: &["Da","Sheng","the Great"] },
@@ -139,6 +153,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","o","i","a","os","e"],
         end: &["grad","gorod","sk","ovo","ica","yn","slav","mir","polye","ov","ino","ets"],
         given: &["Vladimir","Sviatoslav","Yaroslav","Mstislav","Rostislav","Bogdan","Dragomir","Radoslav","Miroslav","Vsevolod","Boris","Gleb"],
+        given_f: &["Olga","Ludmila","Rogneda","Predslava","Milena","Vasilisa","Dobrava","Bogdana","Radmila","Zlata"],
         family: &["Rurikids","Olgovichi","Monomakhi","Drevlyane","Krivichi","Vyatichi","Polyane","Radimichi","Dregovichi","Severyane","Volhynians","Berendei","Izyaslavichi","Vseslavichi","Rostislavichi","Glebovichi","Yuryevichi","Mstislavichi","Svyatoslavichi","Vladimirovichi","Vsevolodovichi","Davydovichi","Olegovichi","Igorevichi","Yaroslavichi","Bryachislavichi","Rogvolodichi","Vasilkovichi","Romanovichi","Andreevichi","Vyacheslavichi","Tverichi","Galichane","Tysyatskie"],
         guild: &["Bratstvo","Torg","Druzhina","Artel","Sotnya","Ryad","Gostiny"],
         epithet: &["Velikiy","Slavny","the Bold"] },
@@ -148,6 +163,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","a","i","te","tla","co"],
         end: &["titlan","tlan","co","pan","tepec","apan","huacan","calco","tzinco","mila","lan","oztoc"],
         given: &["Cuauhtemoc","Moctezuma","Tlacaelel","Itzcoatl","Axayacatl","Nezahual","Chimalpopoca","Tizoc","Acamapichtli","Xiuh","Tlaloc","Quetzal"],
+        given_f: &["Malinalli","Tecuichpoch","Xochitl","Papan","Ilancueitl","Atotoztli","Miyahuaxihuitl","Chimalma","Quiauhxochitl","Tiacapan"],
         family: &["Mexica","Tepaneca","Acolhua","Chichimeca","Tlaxcalteca","Totonac","Mixteca","Zapoteca","Huaxteca","Otomi","Tarasca","Mazahua","Culhua","Xochimilca","Chalca","Cuitlahuac","Mixquica","Cohuixca","Tlatelolca","Texcoca","Chimalpaneca","Matlatzinca","Coatlican","Amaquemeca","Tenanca","Iztapalapa","Coyohuaca","Azcapotzalca","Huexotzinca","Tultitlan","Tepeyacac","Coatlinchan","Acolman"],
         guild: &["Pochteca","Calpolli","Tianquiztli","Pochtlan","Oztomeca","Tealtianime"],
         epithet: &["Huey","Tlatoani","the Revered"] },
@@ -157,6 +173,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","a","i","y","an","ar"],
         end: &["kent","baliq","gar","tepe","shahr","oba","kol","tag","yurt","saray","bulaq","orda"],
         given: &["Bumin","Tengri","Bilge","Kultegin","Tonyukuk","Alp","Arslan","Bayan","Tarkhan","Subutai","Boru","Ertugrul"],
+        given_f: &["Terken","Altunay","Gulcicek","Sevinc","Aybike","Kutlug","Ilbike","Yaruk"],
         family: &["Ashina","Oguz","Kipchak","Karluk","Pecheneg","Khazar","Uyghur","Bashkir","Kimek","Tatar","Bulgar","Seljuk","Qarluq","Toquz","Onoq","Turgesh","Qangli","Yagma","Qarakhanid","Avar","Cuman","Khalaj","Chigil","Yabaku","Basmyl","Sabir","Utigur","Kutrigur","Bayandur","Salur","Yiwa","Afshar","Begdili","Chepni"],
         guild: &["Orda","Kervan","Lonca","Esnaf","Ahi","Bazirgan","Tamga"],
         epithet: &["Ulug","Khan","the Wolf"] },
@@ -167,6 +184,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","a","e","en","er","et"],
         end: &[" nefer","het","opolis","waset","meru","ankh","tep","hor","aset","ra","khet","tjenu"],
         given: &["Amenhotep","Ramesu","Sneferu","Khufu","Thutmose","Djedefre","Setna","Merenptah","Nectanebo","Psamtik","Ankhef","Nebamun"],
+        given_f: &["Nefertari","Hatshepsut","Tiye","Meritamun","Ankhesen","Henuttawy","Nodjmet","Nebet","Iset","Merit"],
         family: &["Amunids","Ptahmoset","Setiu","Nubkha","Ramessids","Sematawy","Ahmoside","Khaemwaset","Panhesy","Userkaf","Meritamun","Djehutis","Bakenkhonsu","Nebseny","Paankh","Iryhor"],
         guild: &["Per-hedj","Shena","Wabet","Kap","Hut-ka","Sesh","Menat"],
         epithet: &["the Golden","Neb-Maat","of the Two Lands"] },
@@ -176,6 +194,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","a","i","ou","en","er"],
         end: &["ir","zgou","ratin","mlal","nadn","ghir","zzou","went","sust","dagh","fella","runt"],
         given: &["Massin","Yugurt","Aksil","Tacfin","Idir","Gaya","Firmus","Takfarinas","Amayas","Izem","Yidir","Massinissa"],
+        given_f: &["Dihya","Tinhinan","Tala","Kella","Titrit","Tasekkurt","Yamina","Damya"],
         family: &["Zenata","Sanhaja","Masmuda","Nafusa","Kutama","Awraba","Miknasa","Houara","Luwata","Gomara","Barghawata","Iznagen","Ait-Atta","Iregwaten","Ihahan","Aitmzab"],
         guild: &["Amur","Taddart","Agadir","Jmaa","Souk","Taqbilt","Amghar"],
         epithet: &["Amenokal","the Free","of the Veil"] },
@@ -185,6 +204,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","a","i","no","shi","ma"],
         end: &["moto","gawa","saki","mura","oka","hara","tani","shima","dera","take","numa","bashi"],
         given: &["Takeru","Hiro","Masashi","Yorito","Kaneie","Sadao","Munenori","Tadashi","Michizane","Yoritomo","Kagemasa","Toshiie"],
+        given_f: &["Tomoe","Masako","Shizuka","Chiyo","Kaede","Sadako","Nene","Ginchiyo","Ichi","Yodo"],
         family: &["Fujiwara","Taira","Minamoto","Tachibana","Soga","Mononobe","Otomo","Abe","Hojo","Ashikaga","Hosokawa","Shimazu","Mori","Date","Uesugi","Takeda","Ii","Maeda"],
         guild: &["Za","Kumi","Toiya","Nakama","Kabu","Machishu","Kaisho"],
         epithet: &["no Kami","the Elder","Daimyo"] },
@@ -194,6 +214,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","a","u","in","gh","an"],
         end: &["baatar","gol","nuur","khan","balgas","tal","uul","sum","noor","tug","yin","dai"],
         given: &["Temujin","Jochi","Chagatai","Ogedei","Subedei","Mukhali","Borte","Kublai","Tolui","Batu","Hulegu","Berke"],
+        given_f: &["Borte","Sorghaghtani","Hoelun","Alaqai","Khutulun","Chabi","Toregene","Yesui","Yesugen","Oghul"],
         family: &["Borjigin","Kereyid","Naiman","Merkid","Tatar","Oirat","Khongirad","Jalair","Barlas","Manghud","Uriankhai","Besud","Tayichiud","Khori","Buryat","Dorbet"],
         guild: &["Ordu","Yam","Nokod","Kesig","Aimag","Khuraldai","Zud"],
         epithet: &["Khan","the Great Khan","Bagatur"] },
@@ -203,6 +224,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","a","i","na","pa","ri"],
         end: &["marca","pata","waman","tambo","huaca","raqay","cancha","pampa","yuq","llaqta","suyu","qucha"],
         given: &["Pachacuti","Atawallpa","Huayna","Tupac","Manco","Sinchi","Yupanqui","Wiraqucha","Amaru","Inti","Rumi","Kusi"],
+        given_f: &["Ocllo","Cusi","Chimpu","Rahua","Curi","Asarpay","Quilla","Sisa"],
         family: &["Inka","Chanka","Wanka","Chimu","Colla","Lupaca","Cañari","Chachapoya","Quilla","Ayarmaca","Wari","Tiwanaku","Moche","Nazca","Chincha","Yarovilca"],
         guild: &["Ayllu","Mita","Qhapaq","Kuraka","Chaski","Tampu","Qollqa"],
         epithet: &["Sapa","the Sun-Born","Qhapaq"] },
@@ -212,6 +234,7 @@ pub const KITS: &[Kit] = &[
         mid: &["","a","i","ou","an","ba"],
         end: &["adou","koro","dougou","ni","bara","fara","mba","sso","nkan","biri","tigi","fing"],
         given: &["Sundiata","Mansa","Sakura","Souleyman","Kankou","Fakoli","Tiramakan","Naré","Bakari","Kanku","Musa","Diata"],
+        given_f: &["Sogolon","Kankou","Nana","Aminata","Fatoumata","Djeneba","Maimouna","Sira"],
         family: &["Keita","Traore","Konate","Diarra","Cisse","Kouyate","Dembele","Sissoko","Koroma","Kamara","Diakite","Sanogo","Doumbia","Fofana","Diallo","Sacko"],
         guild: &["Ton","Djeli","Marka","Wangara","Dyula","Kafu","Numu"],
         epithet: &["Mansa","the Lion","Faama"] },
@@ -837,10 +860,18 @@ pub fn family_name(kit: usize, ms: u64, salt: u64, x: u32, y: u32) -> String {
 }
 
 pub fn head_name(kit: usize, ms: u64, family: &str, salt: u64, x: u32, y: u32) -> String {
+    head_name_sexed(kit, ms, family, salt, x, y, false)
+}
+
+/// As `head_name`, but drawing from the culture's female name-bank when `female`.
+/// Whether a house's heads are men or women is decided by the culture's LINE RULE
+/// (`sim::inheritance`), not here.
+pub fn head_name_sexed(kit: usize, ms: u64, family: &str, salt: u64, x: u32, y: u32, female: bool) -> String {
     let k = &KITS[kit.min(KITS.len() - 1)];
     let hh = hash64(0x4EAD ^ salt.wrapping_mul(0xBF58476D1CE4E5B9)
         ^ (x as u64).wrapping_mul(73856093) ^ (y as u64).wrapping_mul(19349663));
-    format!("{} {}", mutate(pick(k.given, hh), ms), family)
+    let bank = if female && !k.given_f.is_empty() { k.given_f } else { k.given };
+    format!("{} {}", mutate(pick(bank, hh), ms), family)
 }
 
 /// Culture-styled guild name: e.g. "Collegium of Aquentia (wine)".
