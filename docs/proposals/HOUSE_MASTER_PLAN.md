@@ -343,7 +343,7 @@ tunable.
 
 | # | Step | Gate |
 |---|---|---|
-| 1.1 | **Tiers** + list grouping (rank-banded, hysteresis, Tier 1 may be empty) | `tsc`; dynamics untouched |
+| 1.1 | ~~**Tiers** + list grouping (rank-banded, hysteresis, Tier 1 may be empty)~~ **DONE** — `assign_house_tiers` (`sim/campaign/tick/houses.rs`), `HousesPanel.tsx` groups by tier (3/4 collapsed by default). | ✅ `tsc` clean; dynamics bit-identical (`simulate_decades_reports_dynamics`); 3 new tests |
 | 1.2 | **Culture dress figure** on the dossier — reuse `cultureFigure.ts`, 3 house marks, register by tier | `tsc`; schematic renders clean |
 | 1.3 | **Expeditions tab** + province highlight (`Expedition.house` already exists) | `Expedition.dest_province` unread by the tick ⇒ dynamics bit-identical |
 | 1.4 | **Chronicle-first dossier** (2.3) + **positive-event markers** (2.2) | `tsc` |

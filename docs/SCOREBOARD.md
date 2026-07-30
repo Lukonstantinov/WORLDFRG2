@@ -9,6 +9,18 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-30 (Phase 1.1 · house tiers)
+
+Read-only, query-side classification — no economy number moves. `assign_house_tiers`
+bands every live private house into a rank (1 great .. 4 marginal) from state that
+already existed, with hysteresis on both the percentile cutoffs and Tier 1's absolute
+floor. `HousesPanel.tsx` groups the list by tier (3/4 collapsed by default, per
+`HOUSE_PEOPLE_AND_TIERS.md` §1's schematic). 58 `tick::` tests pass (was 55); dynamics
+and economy scorecards bit-identical to the Phase 0.4 numbers below — nothing downstream
+reads `tier`, by design.
+
+---
+
 ## Current state — 2026-07-30 (Phase 0.4 · inheritance)
 
 Only the numbers that MOVED. Everything else still reads as the 2026-07-29 table below.

@@ -305,6 +305,20 @@ serde-defaulted so old saves load). Grouped by theme:
   (`update_feuds`). **Feud prestige is capped** (`FEUD_PRESTIGE_CAP`) — prestige is
   otherwise unbounded and feeds political power → charters → monopolies → wealth, and an
   uncapped per-flare award drove the sustained-richest house from 298k to 1.9M.
+- **Tiers (Phase 1.1):** every live PRIVATE house (never a guild — a civic office isn't
+  a family competing for rank) carries a `tier` (1 great · 2 major · 3 lesser · 4
+  marginal) and a `standing` score, recomputed monthly by `assign_house_tiers`
+  (`tick/houses.rs`) from state that already existed: `standing = 0.30·rank_norm(wealth)
+  + 0.25·rank_norm(volume) + 0.20·reach + 0.15·seats + 0.10·rank_norm(prestige)`, where
+  `rank_norm` is a percentile among LIVE houses (so the tier means "where this family
+  stands among its peers", not an absolute number that means nothing as the world
+  grows). Tier 1 carries an ADDITIONAL absolute floor (`standing >= 0.55`) so a young,
+  undifferentiated world has an empty Tier 1 — a tier that's always occupied carries no
+  information. Both the percentile cutoffs and the Tier-1 floor carry their own
+  hysteresis (`TIER_PCT_DEAD_BAND`/`TIER1_STANDING_EXIT`) so a house sitting on a
+  boundary doesn't relabel every month; a tier RISE is chronicled as a milestone, a fall
+  is not (same asymmetry as `monopoly`/`monopoly_lost`). Purely a query-side
+  classification — nothing downstream reads `tier`, so the dynamics run is bit-identical.
 - **Succession & inheritance (Phase 0.4):** each people carries a **line rule** (who may
   inherit) and a **division rule** (how the estate divides) resolved once from its language
   kit into `culture_rules` (`sim/shared/inheritance.rs`, §8.15). `succeed_house` reads them

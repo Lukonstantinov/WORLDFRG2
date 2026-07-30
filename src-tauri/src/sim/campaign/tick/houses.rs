@@ -1290,7 +1290,7 @@ impl CampaignSim {
             is_guild: false, offices: vec![h as u32], trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: female, head_age, line: Vec::new(),
+            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0,
         });
         self.found_head_record(idx, "founder");
         Some(idx)
@@ -2164,7 +2164,7 @@ impl CampaignSim {
             is_guild: true, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: false, head_age: guild_age, line: Vec::new(),
+            head_female: false, head_age: guild_age, line: Vec::new(), tier: 0, standing: 0.0,
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -2233,6 +2233,9 @@ impl CampaignSim {
             self.apply_wealth_sinks();
             self.pay_to_regain_markets();
             self.recompute_monopolies_and_power();
+            // Phase 1.1 · reads political_power/monopoly/dominant_seat just refreshed
+            // above, so it must run after them.
+            self.assign_house_tiers();
             self.manage_fleets();
             self.update_structures();
             self.fund_public_works();
@@ -2376,6 +2379,112 @@ impl CampaignSim {
         }
     }
 
+
+    // ── Phase 1.1 · house tiers ──────────────────────────────────────────────────
+    // `HOUSE_PEOPLE_AND_TIERS.md` §1: one standing score built entirely from state that
+    // already exists, banded into a rank among LIVE peers (not an absolute number that
+    // means nothing as the world grows), with hysteresis so a house sitting near a
+    // boundary doesn't relabel every month.
+
+    /// Assign every live private house its `tier` (1 great .. 4 marginal) and its
+    /// `standing` score. Guilds are never tiered — a civic office is not a family
+    /// competing for rank. Called monthly alongside `recompute_monopolies_and_power`,
+    /// which by then has already refreshed `political_power`/`monopoly`/`dominant_seat`
+    /// for this same tick.
+    pub(crate) fn assign_house_tiers(&mut self) {
+        let tick = self.tick;
+        let live: Vec<usize> = (0..self.houses.len())
+            .filter(|&i| !self.houses[i].defunct && !self.houses[i].is_guild)
+            .collect();
+        let n = live.len();
+        if n == 0 { return; }
+
+        let wealths: Vec<f32> = live.iter().map(|&i| self.houses[i].wealth.max(0.0)).collect();
+        let volumes: Vec<f32> = live.iter().map(|&i| self.houses[i].volume.max(0.0)).collect();
+        let prestiges: Vec<f32> = live.iter().map(|&i| self.houses[i].prestige.max(0.0)).collect();
+        let wr = rank_norm(&wealths);
+        let vr = rank_norm(&volumes);
+        let pr = rank_norm(&prestiges);
+
+        let mut standings = vec![0.0f32; n];
+        for (k, &hi) in live.iter().enumerate() {
+            // reach: commercial influence already caps itself at 1 by construction.
+            let reach = self.houses[hi].influence.iter().map(|&(_, v)| v).sum::<f32>().clamp(0.0, 1.0);
+            // seats: captured city councils + Bailo seats + city charters.
+            let seats_raw = self.hubs.iter()
+                .filter(|h| !h.is_estate && (h.council_house == hi as i32 || h.captor_house == hi as i32))
+                .count()
+                + self.houses[hi].bailos.len() + self.houses[hi].charters.len();
+            let seats = (seats_raw as f32 / TIER_SEATS_SOFT_CAP).min(1.0);
+            let s = 0.30 * wr[k] + 0.25 * vr[k] + 0.20 * reach + 0.15 * seats + 0.10 * pr[k];
+            standings[k] = s.clamp(0.0, 1.0);
+        }
+
+        // Percentile position: 0 = the most prominent live house, 1 = the least.
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by(|&a, &b| standings[b].partial_cmp(&standings[a]).unwrap_or(std::cmp::Ordering::Equal));
+        let mut pct = vec![0.0f32; n];
+        for (rank, &k) in order.iter().enumerate() {
+            pct[k] = if n > 1 { rank as f32 / (n - 1) as f32 } else { 0.0 };
+        }
+
+        for k in 0..n {
+            let hi = live[k];
+            self.houses[hi].standing = standings[k];
+            let prev = self.houses[hi].tier;
+            let new_tier = if prev == 0 {
+                // First assignment for this house: no hysteresis, no chronicle.
+                Self::tier_band(pct[k], standings[k])
+            } else {
+                Self::tier_with_hysteresis(prev, pct[k], standings[k])
+            };
+            if new_tier != prev && prev != 0 {
+                let name = self.houses[hi].name.clone();
+                let (kind, text) = if new_tier < prev {
+                    ("tier_up".to_string(),
+                     format!("{} is now counted among the {} houses", name, TIER_NAMES[new_tier as usize]))
+                } else {
+                    ("tier_down".to_string(),
+                     format!("{} is no longer counted among the {} houses", name, TIER_NAMES[prev as usize]))
+                };
+                self.houses[hi].events.push(HouseEvent { tick, kind, text: text.clone() });
+                self.journal.push(JournalEntry {
+                    tick, kind: "tier".into(), hub: self.houses[hi].hub as i32, good: -1,
+                    value: new_tier as f32, text,
+                });
+            }
+            self.houses[hi].tier = new_tier;
+        }
+    }
+
+    /// The RAW tier a (percentile, standing) pair bands into, with no memory of what
+    /// tier the house held before. Used only for a house's first-ever assignment.
+    fn tier_band(pct: f32, standing: f32) -> u8 {
+        if pct < TIER_PCT_CUTS[0] && standing >= TIER1_STANDING_ENTER { 1 }
+        else if pct < TIER_PCT_CUTS[1] { 2 }
+        else if pct < TIER_PCT_CUTS[2] { 3 }
+        else { 4 }
+    }
+
+    /// The tier a house holds THIS month, given the tier it held last month. Only the
+    /// two percentile cutoffs bordering `prev`'s own band are widened by the dead band —
+    /// a house must cross a boundary it isn't already past to change tier, which is what
+    /// stops a score sitting near a cutoff from relabelling every month. Tier 1
+    /// additionally carries its own absolute-floor hysteresis (`TIER1_STANDING_ENTER`/
+    /// `_EXIT`), independent of rank.
+    fn tier_with_hysteresis(prev: u8, pct: f32, standing: f32) -> u8 {
+        let mut cuts = TIER_PCT_CUTS;
+        if (2..=4).contains(&prev) { cuts[(prev - 2) as usize] -= TIER_PCT_DEAD_BAND; }
+        if (1..=3).contains(&prev) { cuts[(prev - 1) as usize] += TIER_PCT_DEAD_BAND; }
+        let by_rank = if pct < cuts[0] { 1 } else if pct < cuts[1] { 2 }
+            else if pct < cuts[2] { 3 } else { 4 };
+        if by_rank == 1 {
+            let floor = if prev == 1 { TIER1_STANDING_EXIT } else { TIER1_STANDING_ENTER };
+            if standing >= floor { 1 } else { 2 }
+        } else {
+            by_rank
+        }
+    }
 
     // ── Phase 0.4 · the law of inheritance ──────────────────────────────────────
 
@@ -2625,7 +2734,7 @@ impl CampaignSim {
                 is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
                 wealth_history: Vec::new(), office_leases: Vec::new(),
                 influence: Vec::new(), bailos: Vec::new(),
-                head_female: female, head_age: age, line: Vec::new(),
+                head_female: female, head_age: age, line: Vec::new(), tier: 0, standing: 0.0,
             });
             let ni = self.houses.len() - 1;
             self.found_head_record(ni, "co-heir");
@@ -2710,7 +2819,7 @@ impl CampaignSim {
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: bfemale, head_age: bage, line: Vec::new(),
+            head_female: bfemale, head_age: bage, line: Vec::new(), tier: 0, standing: 0.0,
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -3146,7 +3255,7 @@ impl CampaignSim {
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: female, head_age, line: Vec::new(),
+            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0,
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");

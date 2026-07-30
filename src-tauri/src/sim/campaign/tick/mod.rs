@@ -666,6 +666,25 @@ const BAILO_CONCESSION_TOLL: f32 = 0.10; // ×the normal tax rate
 // up to 3·SHIP_COST·FLEET_UPKEEP_FRAC ≈ 1.05/month, and `update_solvency` allows
 // twelve months in the red, so anything under ~13 is a house born to die.
 /// Share of the parent guild's wealth a separating family takes.
+// ── Phase 1.1 · house tiers ──────────────────────────────────────────────────
+/// `HOUSE_PEOPLE_AND_TIERS.md` §1. Tier 1 additionally requires this absolute standing
+/// floor (not just rank) so a young world with no truly great house has an EMPTY Tier
+/// 1 — a tier that is always occupied carries no information.
+const TIER1_STANDING_ENTER: f32 = 0.55;
+/// Hysteresis on the Tier 1 floor: a house already inside only drops out below this,
+/// so it doesn't flicker across 0.55 forever.
+const TIER1_STANDING_EXIT: f32 = TIER1_STANDING_ENTER - 0.04;
+/// Percentile cutoffs among LIVE private houses (0 = the most prominent house, 1 = the
+/// least): top 8% Great, next 22% Major, next 40% Lesser, the rest Marginal.
+const TIER_PCT_CUTS: [f32; 3] = [0.08, 0.30, 0.70];
+/// Dead band applied to whichever cutoff(s) border a house's CURRENT tier, so a score
+/// sitting on a boundary doesn't relabel the house every month.
+const TIER_PCT_DEAD_BAND: f32 = 0.04;
+/// A house's combined captured-council + bailo + charter count is treated as "maxed"
+/// on the `seats` term of the standing score once it reaches this many.
+const TIER_SEATS_SOFT_CAP: f32 = 5.0;
+const TIER_NAMES: [&str; 5] = ["", "great", "major", "lesser", "marginal"];
+
 // ── Phase 0.4 · succession & the law of inheritance ─────────────────────────
 /// Standing a house gains when a head who GREW the family is succeeded. A funeral is
 /// not an achievement, and heads now turn over two to three times a century, so the
@@ -1817,6 +1836,27 @@ pub struct CultureRule {
     pub rule: u8,
 }
 
+/// Rank-normalise (percentile, 0..1, ties averaged) a slice of values, so a tier
+/// score reads "where this house stands among its LIVE peers" rather than an absolute
+/// number that means nothing as the world grows. Highest value → 1.0.
+pub fn rank_norm(values: &[f32]) -> Vec<f32> {
+    let n = values.len();
+    if n <= 1 { return vec![0.5; n]; }
+    let mut idx: Vec<usize> = (0..n).collect();
+    idx.sort_by(|&a, &b| values[a].partial_cmp(&values[b]).unwrap_or(std::cmp::Ordering::Equal));
+    let mut out = vec![0.0f32; n];
+    let mut i = 0;
+    while i < n {
+        let mut j = i;
+        while j + 1 < n && values[idx[j + 1]] == values[idx[i]] { j += 1; }
+        let avg_rank = (i + j) as f32 / 2.0;
+        let r = avg_rank / (n - 1) as f32;
+        for k in i..=j { out[idx[k]] = r; }
+        i = j + 1;
+    }
+    out
+}
+
 /// Is this house-event kind a MILESTONE — part of the family's permanent record —
 /// rather than chatter? Milestones survive the per-house chronicle cap; everything
 /// else is pruned oldest-first. The test of a milestone is simple: would a historian
@@ -1825,7 +1865,7 @@ pub fn is_house_milestone(kind: &str) -> bool {
     matches!(kind,
         "founded" | "succession" | "inheritance" | "archetype" | "monopoly"
         | "control_gained" | "control_lost" | "branch" | "charter" | "bailo"
-        | "bankruptcy" | "dissolved" | "bank" | "marriage" | "loss")
+        | "bankruptcy" | "dissolved" | "bank" | "marriage" | "loss" | "tier_up")
 }
 
 /// A merchant family / trading house, with a named head of family who ages, dies
@@ -1935,6 +1975,14 @@ pub struct House {
     /// The succession line: every head this house has had, oldest first. Append-only,
     /// and read by nothing in the tick.
     #[serde(default)] pub line: Vec<HouseHead>,
+    // ── Tiers (Phase 1.1) ──
+    /// Rank band among LIVE private houses: 1 great · 2 major · 3 lesser · 4 marginal ·
+    /// 0 not yet computed (no chronicle event fires off the sentinel). Never assigned to
+    /// a guild — a guild is a civic office, not a family competing for standing.
+    #[serde(default)] pub tier: u8,
+    /// The 0..1 score `assign_house_tiers` bands into a tier — printed on the dossier so
+    /// "why tier 2, not 1" is answerable, not asserted.
+    #[serde(default)] pub standing: f32,
 }
 
 /// DLC 3.5 · one loan on a bank's books. An asset to the bank (interest income);

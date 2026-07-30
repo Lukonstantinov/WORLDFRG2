@@ -695,6 +695,8 @@ export interface HouseBrief {
   coin_name?: string;            // the coin it mints (via its council seat), "" if none
   coin_value?: number;
   coin_trust?: number;
+  tier?: number;                 // 1 great · 2 major · 3 lesser · 4 marginal · 0 = unranked (guild, or too new)
+  standing?: number;             // 0..1 score the tier is banded from
 }
 /** One city a house operates in, for the influence-ranked "Active in" list. */
 export interface HouseCity {

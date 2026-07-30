@@ -1461,6 +1461,10 @@ pub struct HouseBrief {
     #[serde(default)] pub coin_name: String,
     #[serde(default)] pub coin_value: f32,
     #[serde(default)] pub coin_trust: f32,
+    /// Phase 1.1 · rank band among live private houses: 1 great .. 4 marginal, 0 if
+    /// never computed (a guild, or a house founded this tick before the monthly pass).
+    #[serde(default)] pub tier: u8,
+    #[serde(default)] pub standing: f32,
 }
 
 /// One city a house operates in, for the influence-ranked "Active in" list.
@@ -1672,6 +1676,8 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
             coin_name: coin_for_house.clone(),
             coin_value: coin_val_house,
             coin_trust: coin_trust_house,
+            tier: h.tier,
+            standing: h.standing,
         }
     }).collect();
     // Active first, then richest first.

@@ -42,7 +42,7 @@
             is_guild: false, offices: vec![], trade_at: vec![], debt_since: 0,
             wealth_history: vec![], office_leases: vec![],
             influence: vec![], bailos: vec![],
-            head_female: false, head_age: 34, line: vec![],
+            head_female: false, head_age: 34, line: vec![], tier: 0, standing: 0.0,
         }
     }
 
@@ -2092,4 +2092,88 @@
             "a guild spawned a co-heir house"
         );
         assert!(s.houses.len() >= before, "houses vanished");
+    }
+
+    // ── Phase 1.1 · house tiers ──────────────────────────────────────────────
+    /// Tiers are a RANK among live private houses, never assigned to a guild, and the
+    /// richest/most-powerful house should end up in the top band. This is deliberately
+    /// coarse — the exact cutoffs are re-derived every month — but a house with 50x the
+    /// wealth of its rivals ending up in Tier 4 would mean the formula is broken, not
+    /// just imprecise.
+    #[test]
+    fn house_tiers_rank_the_richest_house_highest() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..6u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 8000.0, vec![8000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["Aiora".into(); 6];
+        s.hub_minorities = vec![Vec::new(); 6];
+
+        let mut top = house_at(0, vec![0], 4);
+        top.wealth = 500_000.0;
+        top.volume = 500.0;
+        top.prestige = 1.0;
+        s.houses.push(top);
+        for i in 1..8u32 {
+            let mut h = house_at(i % 6, vec![0], 1);
+            h.wealth = 50.0 + i as f32;
+            h.volume = 1.0;
+            s.houses.push(h);
+        }
+        let mut g = house_at(0, vec![0], 0);
+        g.is_guild = true;
+        g.wealth = 999_999.0; // richer than everyone — must still get NO tier
+        s.houses.push(g);
+
+        s.assign_house_tiers();
+
+        let guild_idx = s.houses.len() - 1;
+        assert_eq!(s.houses[guild_idx].tier, 0, "a guild must never be tiered");
+        assert_eq!(s.houses[0].tier, 1, "the overwhelmingly richest house must be Tier 1");
+        assert!(s.houses[0].standing > s.houses[1].standing, "standing must track wealth/volume/prestige");
+        // Every OTHER live private house got some tier assigned (no zeros left over).
+        for h in s.houses.iter().take(guild_idx).skip(1) {
+            assert!((1..=4).contains(&h.tier), "house left untiered: tier={}", h.tier);
+        }
+    }
+
+    /// Tier 1 has an absolute floor, not just a percentile rank: on a young, undifferen-
+    /// tiated world (every house similarly small) nobody should clear it, so Tier 1 is
+    /// EMPTY. A tier that is always occupied carries no information (§1 of the design).
+    #[test]
+    fn tier_one_is_empty_on_an_undifferentiated_world() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..4u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 8000.0, vec![8000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["Aiora".into(); 4];
+        s.hub_minorities = vec![Vec::new(); 4];
+        for i in 0..10u32 {
+            let mut h = house_at(i % 4, vec![0], 1);
+            h.wealth = 40.0 + (i as f32); // a tight, undifferentiated spread
+            s.houses.push(h);
+        }
+        s.assign_house_tiers();
+        assert!(s.houses.iter().all(|h| h.tier != 1), "Tier 1 should be empty on a flat world");
+    }
+
+    /// Hysteresis: a house sitting right at a boundary must not flip tier on a
+    /// standing-neutral re-run — calling `assign_house_tiers` again with unchanged
+    /// state must reproduce the same tiers, not relitigate every boundary case.
+    #[test]
+    fn tier_assignment_is_stable_when_nothing_changed() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..5u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 8000.0, vec![8000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["Aiora".into(); 5];
+        s.hub_minorities = vec![Vec::new(); 5];
+        for i in 0..12u32 {
+            let mut h = house_at(i % 5, vec![0], 1);
+            h.wealth = 30.0 + (i as f32) * 17.0;
+            h.volume = i as f32;
+            s.houses.push(h);
+        }
+        s.assign_house_tiers();
+        let first: Vec<u8> = s.houses.iter().map(|h| h.tier).collect();
+        s.assign_house_tiers();
+        let second: Vec<u8> = s.houses.iter().map(|h| h.tier).collect();
+        assert_eq!(first, second, "tiers must not change with no underlying change");
     }
