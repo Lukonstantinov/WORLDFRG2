@@ -42,7 +42,7 @@
             is_guild: false, offices: vec![], trade_at: vec![], debt_since: 0,
             wealth_history: vec![], office_leases: vec![],
             influence: vec![], bailos: vec![],
-            head_female: false, head_age: 34, line: vec![], tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(),
+            head_female: false, head_age: 34, line: vec![], tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0,
         }
     }
 
@@ -2923,4 +2923,169 @@
             assert_ne!(c.loyalist_name, c.plot_name, "seed {seedn}: the two factions must not share a name");
             assert_ne!(c.loyalist_tint, c.plot_tint, "seed {seedn}: the two factions must not share a tincture");
         }
+    }
+
+    // ── Phase 4.1 · schism (Quarrel / Departure) ─────────────────────────────
+    fn tense_house(hub_id: u32, posted: i32) -> House {
+        let mut h = house_at(hub_id, vec![0], 1);
+        h.wealth = 500.0;
+        h.rivals = vec![90, 91, 92]; // feeds the tension formula's feud term only
+        h.kin = vec![
+            kin_at("Head", false, 0, [0, 0, 0, 0], 0.3, 0.6),
+            kin_at("Disloyal", false, 2, [0, 0, 0, 0], 0.05, 0.5),
+        ];
+        h.kin[1].posted = posted;
+        h
+    }
+
+    #[test]
+    fn a_quiet_house_never_schisms() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        let mut h = house_at(0, vec![0], 1);
+        h.kin = vec![kin_at("Head", false, 0, [0, 0, 0, 0], 1.0, 0.6), kin_at("Loyal", false, 2, [0, 0, 0, 0], 0.95, 0.6)];
+        s.houses.push(h);
+        s.tick = 0;
+        s.update_house_schisms();
+        assert!(s.houses[0].events.is_empty(), "high loyalty ⇒ no schism at all");
+    }
+
+    #[test]
+    fn a_disloyal_unposted_kin_can_only_quarrel_never_depart() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.houses.push(tense_house(0, -1)); // unposted ⇒ never eligible for Departure
+        let before_len = s.houses.len();
+        s.tick = 0;
+        s.update_house_schisms();
+        assert_eq!(s.houses.len(), before_len, "an unposted disloyal kin cannot depart");
+        assert!(s.houses[0].events.iter().any(|e| e.kind == "quarrel"));
+        assert!(!is_house_milestone("quarrel"), "a quarrel alone is chatter, not a milestone");
+    }
+
+    #[test]
+    fn a_posted_disloyal_kin_can_depart_and_found_a_rival_house() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut found = false;
+        for seedn in 0..60u64 {
+            let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+            let mut s = sim(hubs, goods.clone());
+            s.seed = seedn * 104729 + 7;
+            s.hub_culture = vec!["Aiora".into(); 2];
+            s.hub_minorities = vec![Vec::new(); 2];
+            s.houses.push(tense_house(0, 1)); // posted to a DIFFERENT hub than the seat
+            s.tick = 0;
+            let before = s.houses.len();
+            s.update_house_schisms();
+            if s.houses.len() > before {
+                found = true;
+                assert_eq!(s.houses[1].hub, 1, "the new house is founded AT the posted hub");
+                assert!(s.houses[0].rivals.contains(&1), "the parent gains the new house as a rival");
+                assert!(s.houses[1].rivals.contains(&0), "the new house starts as a rival right back");
+                assert_eq!(s.houses[0].kin.len(), 1, "the departing kin leaves the parent's roster");
+                assert!(s.houses[0].events.iter().any(|e| e.kind == "schism"));
+                assert!(is_house_milestone("schism"), "a departure is a permanent milestone");
+                break;
+            }
+        }
+        assert!(found, "over 60 seeds, at least one must roll a Departure");
+    }
+
+    // ── Phase 4.2 · bankruptcy aftermath ─────────────────────────────────────
+    #[test]
+    fn a_dissolved_house_leaves_a_named_creditor_loss() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..1u32).map(|i| hub(i, 0.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.houses.push(house_at(0, vec![0], 1));
+        s.banks.push(Bank {
+            name: "Banco Test".into(), house: 1, seat: 0, founded_tick: 0, defunct: false,
+            reserves: 80.0, loans: vec![Loan {
+                borrower_house: 0, borrower_polis: -1, principal: 100.0, outstanding: 80.0,
+                rate: 0.01, start_tick: 0, term_ticks: 1000, purpose: "trade".into(),
+            }], real_estate: 1.0, deposits: 0.0, notes_issued: 0.0,
+            branches: vec![0], prestige: 0.6, interest_earned: 0.0, losses: 0.0, stakes: vec![],
+            dividends_earned: 0.0, bills_income: 0.0, history: vec![], events: vec![],
+        });
+        s.dissolve_house(0);
+        assert_eq!(s.banks[0].loans[0].outstanding, 0.0, "the loan is written down to zero");
+        assert!((s.banks[0].losses - 80.0).abs() < 1e-3, "the bank's own write-off tally records the loss");
+        assert!(s.banks[0].events.iter().any(|e| e.kind == "bad_debt"), "the bank's own ledger names the write-off");
+        assert!(s.houses[0].events.iter().any(|e| e.kind == "dissolved" && e.text.contains("Banco Test")),
+            "the dissolved house's own record names its creditor");
+    }
+
+    #[test]
+    fn a_house_with_no_debt_dissolves_with_no_creditor_line() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..1u32).map(|i| hub(i, 0.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.houses.push(house_at(0, vec![0], 1));
+        s.dissolve_house(0);
+        let ev = s.houses[0].events.iter().find(|e| e.kind == "dissolved").unwrap();
+        assert!(!ev.text.contains("owed"), "no bank was owed anything ⇒ no fabricated creditor line");
+    }
+
+    // ── Phase 4.3 · plague as a lineage event ────────────────────────────────
+    #[test]
+    fn a_plague_can_kill_several_kin_at_once() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut found_multi = false;
+        for seedn in 0..40u64 {
+            let hubs = (0..1u32).map(|i| hub(i, 0.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+            let mut s = sim(hubs, goods.clone());
+            s.seed = seedn * 7919 + 3;
+            let mut h = house_at(0, vec![0], 1);
+            h.kin = vec![
+                kin_at("Head", false, 0, [0, 0, 0, 0], 1.0, 0.6),
+                kin_at("K1", false, 3, [0, 0, 0, 0], 1.0, 0.5),
+                kin_at("K2", false, 3, [0, 0, 0, 0], 1.0, 0.5),
+                kin_at("K3", false, 3, [0, 0, 0, 0], 1.0, 0.5),
+            ];
+            s.houses.push(h);
+            s.tick = 0;
+            s.plague_house_toll(0, 0.6, 1, "the Plague"); // category 1 = Great Plague, max severity
+            let live = s.houses[0].kin.iter().filter(|k| k.role != 5).count();
+            if !s.houses[0].defunct && live < 3 { found_multi = true; break; }
+        }
+        assert!(found_multi, "over 40 seeds at max severity, at least one visitation must kill >1 kin");
+    }
+
+    #[test]
+    fn a_plague_can_extinguish_a_house_independent_of_the_head() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut found = false;
+        for seedn in 0..200u64 {
+            let hubs = (0..1u32).map(|i| hub(i, 0.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+            let mut s = sim(hubs, goods.clone());
+            s.seed = seedn * 65537 + 13;
+            let mut h = house_at(0, vec![0], 1);
+            h.kin = vec![kin_at("Head", false, 0, [0, 0, 0, 0], 1.0, 0.6)];
+            s.houses.push(h);
+            s.tick = 0;
+            s.plague_house_toll(0, 0.6, 1, "the Plague");
+            if s.houses[0].defunct {
+                found = true;
+                assert!(s.houses[0].events.iter().any(|e| e.kind == "plague_extinction"));
+                assert!(is_house_milestone("plague_extinction"), "extinction is a permanent milestone");
+                break;
+            }
+        }
+        assert!(found, "over 200 seeds at max severity, at least one house must be extinguished");
+    }
+
+    #[test]
+    fn a_house_with_no_presence_at_the_struck_city_is_untouched() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        let mut h = house_at(1, vec![0], 1); // seated at hub 1, not the struck hub 0
+        h.kin = vec![kin_at("Head", false, 0, [0, 0, 0, 0], 1.0, 0.6), kin_at("K", false, 3, [0, 0, 0, 0], 1.0, 0.5)];
+        s.houses.push(h);
+        s.tick = 0;
+        for _ in 0..20 { s.plague_house_toll(0, 0.6, 1, "the Plague"); }
+        assert_eq!(s.houses[0].kin.len(), 2, "a house with no presence at the struck city loses no kin");
+        assert!(!s.houses[0].defunct);
     }

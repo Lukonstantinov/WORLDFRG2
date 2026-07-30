@@ -1928,7 +1928,8 @@ pub fn is_house_milestone(kind: &str) -> bool {
         "founded" | "succession" | "inheritance" | "archetype" | "monopoly"
         | "control_gained" | "control_lost" | "branch" | "charter" | "bailo"
         | "bankruptcy" | "dissolved" | "bank" | "marriage" | "loss" | "tier_up"
-        | "golden_age" | "dynasty" | "goal_achieved" | "deposed" | "crisis_survived")
+        | "golden_age" | "dynasty" | "goal_achieved" | "deposed" | "crisis_survived"
+        | "schism" | "plague_extinction")
 }
 
 /// Phase 3.1 · a checkable ambition (`HOUSE_PEOPLE_AND_TIERS.md` §4). A goal must be
@@ -2086,6 +2087,26 @@ pub const CIVIC_SEQUESTER_FRAC: f32 = 0.03;
 /// courting spend must not be large enough to move the econ scorecard.
 pub const CRISIS_BUYOFF_FRAC: f32 = 0.03;
 pub const CRISIS_BUYOFF_CAP: f32 = 15.0;
+
+/// Phase 4.1 · a house above this simplified `tension` reads (`crisis::house_tension`
+/// — a stand-in for `HOUSE_PEOPLE_AND_TIERS.md` §5's own formula, see that function's
+/// doc) quarrels or, more rarely, loses a posted kin to Departure.
+pub const SCHISM_TENSION_THRESHOLD: f32 = 0.55;
+/// Chance a qualifying, POSTED disloyal kin departs rather than merely quarrelling.
+pub const DEPARTURE_CHANCE: f32 = 0.35;
+pub const SCHISM_COOLDOWN_QUARREL_YEARS: u32 = 2;
+pub const SCHISM_COOLDOWN_DEPARTURE_YEARS: u32 = 6;
+/// The departing kin takes a smaller share than a wealthy cadet branch does
+/// (`HOUSE_BRANCH_WEALTH`'s `found_branch`, 30%) — Departure is a rupture, not an
+/// investment, so the parent isn't endowing it the way a deliberate expansion is.
+pub const DEPARTURE_WEALTH_FRAC: f32 = 0.25;
+
+/// Phase 4.3 · plague as a LINEAGE event (`HOUSE_MASTER_PLAN.md` 1.6), not just a
+/// population headcount. Independent of head mortality, which stays governed
+/// entirely by `head_lifespan`/succession — see `disease.rs::plague_house_toll`'s
+/// own doc for why extinction is a separate roll rather than "did the head also die".
+pub const PLAGUE_KIN_DEATH_CHANCE: f32 = 0.35;
+pub const PLAGUE_EXTINCTION_CHANCE: f32 = 0.03;
 
 /// A merchant family / trading house, with a named head of family who ages, dies
 /// and is succeeded by an heir. Houses compete for trade, hold monopolies, feud
@@ -2253,6 +2274,12 @@ pub struct House {
     /// `goal_history`: kept forever in spirit, truncated in practice so a centuries-old
     /// dynasty's record doesn't grow without bound.
     #[serde(default)] pub crisis_history: Vec<CrisisRecord>,
+    // ── Schism (Phase 4.1) ──
+    /// No new Quarrel/Departure may fire before this tick — without it a house that
+    /// just quarrelled would qualify again the very next month (the quarrel itself
+    /// lowers the disloyal kin's loyalty, which otherwise feeds tension right back
+    /// up), the same "must always terminate" lesson the crisis engine already needed.
+    #[serde(default)] pub schism_cooldown_until: u32,
 }
 
 /// DLC 3.5 · one loan on a bank's books. An asset to the bank (interest income);
@@ -5564,6 +5591,7 @@ mod cities;
 mod houses;
 pub use houses::{kin_power_shares, character_phrase};
 mod crisis;
+mod schism;
 mod production;
 
 /// Milestone journal kinds form a city/house's PERMANENT record and survive the

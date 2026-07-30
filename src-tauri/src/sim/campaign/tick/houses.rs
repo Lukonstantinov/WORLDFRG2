@@ -1290,7 +1290,7 @@ impl CampaignSim {
             is_guild: false, offices: vec![h as u32], trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(),
+            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0,
         });
         self.found_head_record(idx, "founder");
         Some(idx)
@@ -2188,7 +2188,7 @@ impl CampaignSim {
             is_guild: true, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: false, head_age: guild_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(),
+            head_female: false, head_age: guild_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0,
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -2292,6 +2292,9 @@ impl CampaignSim {
             // monthly call is a no-op for a house mid-crisis except on a quarter
             // boundary; opening a NEW crisis is checked here directly (monthly).
             self.update_house_crises();
+            // Phase 4.1 · a house under enough internal tension quarrels or, rarely,
+            // loses a posted kin to Departure — the same monthly cadence as crises.
+            self.update_house_schisms();
         }
         // Feud FORMATION keeps the old half-yearly cadence — it is the O(n²) pair scan.
         if tick % 180 == 0 { self.update_rivalries(); }
@@ -3174,7 +3177,7 @@ impl CampaignSim {
                 is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
                 wealth_history: Vec::new(), office_leases: Vec::new(),
                 influence: Vec::new(), bailos: Vec::new(),
-                head_female: female, head_age: age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(),
+                head_female: female, head_age: age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0,
             });
             let ni = self.houses.len() - 1;
             self.found_head_record(ni, "co-heir");
@@ -3259,7 +3262,7 @@ impl CampaignSim {
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: bfemale, head_age: bage, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(),
+            head_female: bfemale, head_age: bage, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0,
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -3698,7 +3701,7 @@ impl CampaignSim {
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(),
+            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0,
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -3725,9 +3728,45 @@ impl CampaignSim {
         // Every quarrel this family was part of ends in its ruin — recorded as the
         // feud's outcome so the survivor's record shows how it won.
         self.end_feuds_of(hi);
+        // Phase 4.2 · bankruptcy aftermath ("Bankruptcy has no aftermath" 1.4): a
+        // failure is an event with a TAIL, not a deletion. Any bank still owed money
+        // by this house writes the loss down (`Bank.losses`, already the balance
+        // sheet's own write-off tally) and the loss is NAMED on both sides. Every
+        // dissolution path (insolvency, a crisis outcome, plague extinction) funnels
+        // through this one function, so this is a single point of coverage for all
+        // of them. **Cut from the design's own "small" scope**: kin barred from
+        // office in that city for a period is NOT built — it would need new per-city
+        // state (a wide-blast-radius `TickHub` field, touching every hub-construction
+        // site the way the House-field patches already do for House) for a minor
+        // flavour detail the source doc itself calls small; not worth that risk here.
+        let mut creditors: Vec<(String, f32)> = Vec::new();
+        for b in self.banks.iter_mut() {
+            if b.defunct { continue; }
+            let mut lost = 0.0f32;
+            for l in b.loans.iter_mut() {
+                if l.borrower_house == hi as i32 && l.outstanding > 0.0 {
+                    lost += l.outstanding;
+                    l.outstanding = 0.0;
+                }
+            }
+            if lost > 0.0 {
+                b.losses += lost;
+                b.events.push(HouseEvent {
+                    tick, kind: "bad_debt".into(),
+                    text: format!("writes off {:.0} owed by {}, now dissolved", lost, name),
+                });
+                creditors.push((b.name.clone(), lost));
+            }
+        }
         self.houses[hi].events.push(HouseEvent {
             tick, kind: "dissolved".into(),
-            text: "Fell into ruin and was dissolved".into(),
+            text: if creditors.is_empty() {
+                "Fell into ruin and was dissolved".into()
+            } else {
+                format!("Fell into ruin and was dissolved, leaving {} owed to {}",
+                    creditors.iter().map(|(_, v)| format!("{:.0}", v)).collect::<Vec<_>>().join("+"),
+                    creditors.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>().join(", "))
+            },
         });
         self.journal.push(JournalEntry {
             tick, kind: "extinction".into(), hub, good: -1, value: 0.0,

@@ -1,8 +1,9 @@
 # The house mechanism — critique, then the master plan
 
 **Status: Phase 0 COMPLETE; Phase 1 COMPLETE; Phase 2 COMPLETE; Phase 3 COMPLETE as
-SCOPED (goals are structure-only, the crisis engine is a real but cut-down build —
-see the handoff blocks for exactly what's simplified); Phase 4–5 are plan.**
+SCOPED (goals are structure-only, the crisis engine is a real but cut-down build);
+Phase 4.1–4.3 COMPLETE as scoped (4.4 stays gated on an unmeasured signal, 4.5 stays
+deferred by design) — see the handoff blocks for exactly what's simplified in each.**
 Consolidates the design documents
 (`HOUSE_PEOPLE_AND_TIERS` · `HOUSE_PEOPLE_PLAN` · `HOUSE_POWER_AND_POLITICS` ·
 `HOUSE_SUCCESSION_CRISIS` · `HOUSE_POWER_STRUGGLE_VIEW` ·
@@ -298,6 +299,94 @@ contains the two open defects already on the scoreboard.
 > Use **mean firm lifespan**, never `dissolutions/century` — the latter scales with how many
 > houses are standing and is right-censored on a 60-year run. The correct estimator is a
 > hazard over exposure (`deaths ÷ house-years`), which `econ_diagnose_house_turnover` reports.
+>
+> ## Phase 4.1–4.3 (Consequences) are built — Departure/Quarrel, bankruptcy aftermath, plague as a lineage event
+>
+> Asked to implement "all 3 phases" in one pass — read as 4.1/4.2/4.3, the three
+> concrete, buildable items in Phase 4's table (4.4 is explicitly conditional on an
+> unmeasured signal from 2.5's foreign-hand work, which was never built, so it has no
+> trigger to gate on; 4.5 is explicitly "Deferred" in the table itself). Same
+> discipline as every batch in this file: build everything, run the full gate suite
+> once at the end.
+>
+> **4.1 — Departure schism** (`sim/campaign/tick/schism.rs`, new file). The design's
+> `tension` formula (`HOUSE_PEOPLE_AND_TIERS.md` §5) reads a `cohesion` gauge that
+> only exists as a READ-ONLY dossier computation (`campaign_house_stability`, not
+> reachable cheaply from inside the tick) — `house_tension` is a documented
+> stand-in built from state the tick already carries: mean kin loyalty, a
+> `stretch` term (offices+bailos), a feud-count term, and a passed-over-heir flag.
+> Monthly, a house above the threshold (and past its own cooldown) either QUARRELS
+> (common — the disloyal kin's own loyalty craters further, chronicled as chatter)
+> or, if that kin is POSTED to a real holding, DEPARTS with it to found a new rival
+> house (25% of parent wealth, reusing `found_branch`'s pattern with a forced
+> identity — the departing kinsman becomes the founder — the same technique
+> `crisis.rs::depose_and_succeed` already established). **Rupture (a full split by
+> line of descent) is NOT built** — this file's own Part 3 already recommended
+> deferring it behind Departure, and a schism-triggered Rupture is the same risk to
+> the wealth distribution by another door.
+>
+> **4.2 — Bankruptcy aftermath** (`dissolve_house`, extended in place). "Named
+> creditor losses" is real: any bank still owed money by a dissolving house writes
+> the loan down to zero, adds the loss to `Bank.losses` (the balance sheet's own
+> existing write-off tally — no new state needed), and BOTH sides of the ledger name
+> the other (the house's own "dissolved" event lists its creditor(s) and what they
+> lost; the bank gets a `bad_debt` event naming the house). Because every dissolution
+> path funnels through this one function — plain insolvency, a crisis's DISSOLVED
+> outcome, and 4.3's plague extinction below — this is a single point of coverage
+> for all of them. **"Kin barred from office in that city for a period" is NOT
+> built.** It would need new PER-CITY state (a `TickHub` field), and unlike the House
+> struct (which this series has patched at 7-8 call sites all along) a `TickHub`
+> field touches many more construction sites across world-gen, colony-founding and
+> satellite-founding code — real risk for a detail the source design itself calls
+> "small". Cut and documented rather than attempted cheaply and wrong.
+>
+> **4.3 — Plague as a lineage event** (`disease.rs::plague_house_toll`, hooked into
+> `strike_plague`). A struck house with real presence at the city (its seat, or any
+> kin posted there) can lose SEVERAL non-head kin in one visitation (each rolled
+> independently) or, rarely, be extinguished outright — a distinct chronicle kind
+> (`plague_extinction`, a new milestone) from ordinary bankruptcy. **Deliberately
+> INDEPENDENT of head mortality**, which stays governed entirely by
+> `head_lifespan`/succession: extinction is its own small, separate roll rather than
+> "did the head also happen to die", because reaching into that separate, already-
+> tested mechanism for a flavour feature was real regression risk for no real gain —
+> the player-visible outcome ("the family did not survive the plague") is identical
+> either way. "Wealth concentrates in survivors" (1.6's other historical claim) needed
+> NO extra code: fewer surviving kin simply means fewer co-heirs when Partible
+> inheritance next divides an estate (Phase 0.4's `divide_estate`), which is the
+> actual historical mechanism, not something this function should separately invent.
+>
+> ## A genuinely good measured result: 4.3 moved the ONE metric this whole series had left out of band
+>
+> Every earlier phase in this file was careful to say "byte-identical" or "moved but
+> stayed in band" — Phase 0.4 left **top-10% wealth share out of band from BELOW**
+> (0.809 → 0.422 when turnover was fixed) and flagged it as "Phase 3's job… to make
+> the top of the distribution fragile". Diffed against the pre-Phase-4 commit on the
+> real 60-year/30-city economy-oracle world: **top-10% wealth share 0.382 → 0.509**
+> (still below its 0.60–0.90 band, but now much nearer it) and **house wealth Gini
+> 0.607 → 0.698** (was already in its 0.60–0.85 band, now more centred rather than
+> hugging the floor). This is exactly the historically-documented mechanism 1.6
+> named — plague extinction removes weaker houses outright, concentrating the
+> survivors' share — showing up as a real number, not asserted. Also moved: **bank
+> failures/century 33.33 → 28.33**, **house dissolutions/century 46.67 → 41.67**,
+> **banks chartered 25 → 23**. Whole-lib test suite: **214 passed, 0 failed** (was
+> 206, +8: `a_quiet_house_never_schisms`,
+> `a_disloyal_unposted_kin_can_only_quarrel_never_depart`,
+> `a_posted_disloyal_kin_can_depart_and_found_a_rival_house`,
+> `a_dissolved_house_leaves_a_named_creditor_loss`,
+> `a_house_with_no_debt_dissolves_with_no_creditor_line`,
+> `a_plague_can_kill_several_kin_at_once`,
+> `a_plague_can_extinguish_a_house_independent_of_the_head`,
+> `a_house_with_no_presence_at_the_struck_city_is_untouched`). The small dynamics-test
+> world stays BYTE-IDENTICAL (its seeded houses have no kin roster — see Phase 0.4's
+> own finding — so `house_tension` and `plague_house_toll` both read "nothing to act
+> on" there, exactly the same no-op pattern every Kin-gated feature in this series
+> has kept). `cargo check`/`npx tsc --noEmit` both clean.
+>
+> **What's left of Phase 4**: 4.4 (foreign hand) stays gated on a signal nobody has
+> measured (2.5's foreign-hand work in the ORIGINAL numbering was never built — the
+> shipped 2.5 here is stewards, a different item entirely; there is no "2.5
+> measurement" to gate 4.4 on, so it remains correctly un-attempted, not overlooked).
+> 4.5 stays deferred by the plan's own design.
 >
 > ## Phase 3.2–3.6 (the crisis engine) is built — real, but cut down hard from the source designs
 >
@@ -647,10 +736,10 @@ Nothing here can regress either oracle. This is the phase you can look at soones
 
 | # | Step | Gate |
 |---|---|---|
-| 4.1 | **Departure schism** (holdings + wealth; wealth moves) | `econ_` Gini in 0.60–0.85; dissolutions must not spike |
-| 4.2 | **Bankruptcy aftermath** — named creditor losses, kin barred from office (1.4) | dynamics bounded |
-| 4.3 | **Plague as a lineage event** — multiple kin, extinction as a distinct death (1.6) | dynamics bounded; extinction rate small |
-| 4.4 | **Foreign hand** — *only if* 2.5's measurement says it fires | must NOT materially raise the deposition rate |
+| 4.1 | ~~**Departure schism** (holdings + wealth; wealth moves)~~ **DONE (Quarrel + Departure; Rupture deferred)** — `sim/campaign/tick/schism.rs`, monthly, gated on a simplified `tension` proxy + a per-house cooldown. | ✅ `econ_` Gini 0.60–0.85 held; 3 new tests |
+| 4.2 | ~~**Bankruptcy aftermath** — named creditor losses, kin barred from office (1.4)~~ **DONE (creditor losses only — see the handoff finding)** — `dissolve_house` now writes off any outstanding bank loan and names the bank on both ledgers. | ✅ 2 new tests; dynamics bounded |
+| 4.3 | ~~**Plague as a lineage event** — multiple kin, extinction as a distinct death (1.6)~~ **DONE** — `disease.rs::plague_house_toll`, independent of head mortality. | ✅ 3 new tests; measurably moved Gini/top-10% TOWARD their bands — see the handoff finding |
+| 4.4 | **Foreign hand** — *only if* 2.5's measurement says it fires | still gated on an unmeasured signal; not attempted |
 | 4.5 | Deferred: religion/patronage · rupture · mavericks | — |
 
 ---

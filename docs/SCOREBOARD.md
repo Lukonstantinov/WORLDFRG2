@@ -9,6 +9,38 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-30 (Phase 4.1–4.3 · Consequences)
+
+Asked to implement "all 3 phases" — read as the three concrete, buildable items in
+Phase 4's table (4.4 is explicitly conditional on an unmeasured signal, 4.5 is
+explicitly "Deferred" already). **4.1** Departure schism (new `schism.rs`): a house
+above a simplified `tension` proxy (mean kin loyalty · reach · feuds · a passed-over
+heir) monthly either Quarrels (common, chatter) or, if the disloyal kin is POSTED to
+a real holding, Departs with it to found a new rival house (Rupture stays deferred,
+per this file's own earlier call). **4.2** Bankruptcy aftermath: `dissolve_house` now
+writes off any outstanding bank loan and names the bank on both ledgers (kin barred
+from office was cut — would need new per-`TickHub` state for a detail the source
+design itself calls small). **4.3** Plague as a lineage event: a struck house can
+lose several kin at once or, rarely, be extinguished outright — independent of head
+mortality by design, documented in `plague_house_toll`'s own doc.
+
+**A genuinely good result, not just a bounded one**: 4.3 is the first change in this
+whole series to move **top-10% wealth share** — out of band since Phase 0.4 fixed
+turnover — TOWARD its band: **0.382 → 0.509** (still below 0.60–0.90, much nearer).
+**House wealth Gini 0.607 → 0.698** (stayed in its 0.60–0.85 band, now more centred).
+This is exactly the historically-documented mechanism (plague extinction removes
+weaker houses, concentrating survivors' share) showing up as a measured number.
+Also moved: bank failures/century 33.33 → 28.33, dissolutions/century 46.67 → 41.67,
+banks chartered 25 → 23. Whole-lib test suite: **214 passed, 0 failed** (was 206,
++8). The small dynamics-test world stays byte-identical (its seeded houses have no
+kin roster, so both new mechanisms read "nothing to act on"). `cargo check`/`npx tsc
+--noEmit` both clean.
+
+**Phase 4 is now complete as scoped: 4.1-4.3 built, 4.4 correctly left un-attempted
+(gated on a signal nobody measured), 4.5 deferred by the plan's own design.**
+
+---
+
 ## Current state — 2026-07-30 (Phase 3.2–3.6 · the crisis engine, real but cut down)
 
 Asked to implement "the last step" — the whole rest of Phase 3 — in one pass. New

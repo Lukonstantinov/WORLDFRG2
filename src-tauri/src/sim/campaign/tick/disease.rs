@@ -108,6 +108,10 @@ impl CampaignSim {
         if self.epidemics.len() > 400 { let d = self.epidemics.len() - 400; self.epidemics.drain(0..d); }
         let city = self.hubs[hub].name.clone();
         let dname = DISEASES.get(disease as usize).map(|s| s.name).unwrap_or("sickness");
+        // Phase 4.3 · plague as a LINEAGE event (1.6), not just a headcount — before
+        // the journal/chronicle text below so a house's own plague-death line lands
+        // the same tick as the city's own outbreak line.
+        self.plague_house_toll(hub, mag_eff, category, dname);
         let (kind, text) = match carried {
             Some((src, _, _, _)) => {
                 let from = self.hubs.get(src).map(|h| h.name.clone()).unwrap_or_default();
@@ -119,6 +123,76 @@ impl CampaignSim {
         };
         self.journal.push(JournalEntry {
             tick, kind, hub: hub as i32, good: -1, value: lock as f32, text });
+    }
+
+    /// Phase 4.3 · plague as a LINEAGE event, not just a population headcount —
+    /// `HOUSE_MASTER_PLAN.md` 1.6's finding that the Black Death ended whole
+    /// patrician lines and concentrated wealth in survivors. A struck house can lose
+    /// SEVERAL kin at once (each rolled independently — the historically documented
+    /// part) and, rarely, the whole family can be extinguished outright, a distinct
+    /// death from bankruptcy worth its own chronicle kind (`dissolve_house` handles
+    /// the mechanics either way; only the CAUSE differs here).
+    ///
+    /// Deliberately INDEPENDENT of head mortality, which stays governed entirely by
+    /// `head_lifespan`/succession — this function never touches `kin[0]` or
+    /// `head_lifespan`. The alternative (extinction only when the head is ALSO among
+    /// the dead) would need this function to reach into that separate, tested
+    /// mechanism and risk regressing it for a flavour feature; a small INDEPENDENT
+    /// extinction roll gets the same player-visible outcome ("the family did not
+    /// survive the plague") without that risk.
+    ///
+    /// "Wealth concentrates in survivors" (the design's other historical claim) needs
+    /// no extra code: fewer surviving kin mean fewer co-heirs when Partible
+    /// inheritance next divides the estate (Phase 0.4's own `divide_estate`), which
+    /// is the actual historical mechanism, not a redistribution this function should
+    /// invent.
+    pub(crate) fn plague_house_toll(&mut self, hub: usize, severity: f32, category: u8, disease_name: &str) {
+        if severity <= 0.0 { return; }
+        let tick = self.tick;
+        let seed = self.seed;
+        let home_hub = hub;
+        // Great Plague (1) is the deadliest visitation; Local (3) barely reaches a
+        // house at all.
+        let cat_mult = match category { 1 => 1.0, 2 => 0.5, _ => 0.2 };
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct || self.houses[hi].is_guild || self.houses[hi].kin.is_empty() { continue; }
+            let seat = self.houses[hi].hub as usize;
+            let present = seat == home_hub || self.houses[hi].kin.iter().any(|k| k.posted == home_hub as i32);
+            if !present { continue; }
+
+            let ext_roll = hash01(seed, hi as u64 ^ tick as u64, 0xE71C);
+            if ext_roll < PLAGUE_EXTINCTION_CHANCE * severity * cat_mult {
+                let name = self.houses[hi].name.clone();
+                self.houses[hi].events.push(HouseEvent {
+                    tick, kind: "plague_extinction".into(),
+                    text: format!("{} does not survive the {} — the line ends", name, disease_name),
+                });
+                self.dissolve_house(hi);
+                continue;
+            }
+
+            let mut died: Vec<String> = Vec::new();
+            for (ki, k) in self.houses[hi].kin.iter_mut().enumerate() {
+                if k.role == 0 || k.role == 4 || k.role == 5 { continue; }
+                let here = k.posted == home_hub as i32 || (k.posted < 0 && seat == home_hub);
+                if !here { continue; }
+                let roll = hash01(seed, hi as u64 ^ tick as u64, ki as u64 ^ 0xD1E5);
+                if roll < PLAGUE_KIN_DEATH_CHANCE * severity * cat_mult {
+                    k.role = 5;
+                    k.dies_tick = tick;
+                    died.push(k.name.clone());
+                }
+            }
+            if !died.is_empty() {
+                let name = self.houses[hi].name.clone();
+                let text = if died.len() == 1 {
+                    format!("{} of {} dies of the {}", died[0], name, disease_name)
+                } else {
+                    format!("{} of {} die of the {} — {}", died.len(), name, disease_name, died.join(", "))
+                };
+                self.houses[hi].events.push(HouseEvent { tick, kind: "plague_death".into(), text });
+            }
+        }
     }
 
 

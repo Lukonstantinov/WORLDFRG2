@@ -429,6 +429,34 @@ serde-defaulted so old saves load). Grouped by theme:
   already does. Exposed via `campaign_get_house_crisis`; shown in the dossier's
   ⚠ Crisis tab (observation only — every choice is the AI's, per the source design's
   own decision 2).
+- **Consequences (Phase 4.1–4.3):** three independent additions, each gated on state
+  the house already carries. `sim/campaign/tick/schism.rs::update_house_schisms`
+  (monthly) reads a simplified `tension` proxy (mean kin loyalty · reach · feuds ·
+  a passed-over heir — a documented stand-in for the design's own `cohesion` gauge,
+  which only exists read-only in `campaign_house_stability`) and, above threshold
+  and past a per-house cooldown, either QUARRELS (common, chatter — the disloyal
+  kin's own loyalty craters further) or, if that kin is POSTED to a real holding,
+  DEPARTS with it to found a new rival house (`departure_schism`, 25% of parent
+  wealth, forced identity reusing `found_branch`'s pattern) — **Rupture (a full
+  split by line of descent) is NOT built**, deferred behind Departure exactly as
+  this file's own §2.4 discipline and the master plan's Part 3 already called for.
+  `dissolve_house` (Phase 4.2) now writes off any outstanding BANK LOAN a
+  dissolving house still owes (`Bank.losses`, already the balance sheet's own
+  write-off tally) and names the bank on both ledgers — every dissolution path
+  (insolvency, a crisis's DISSOLVED outcome, plague extinction) funnels through
+  this one function, so it's a single point of coverage for all three. **Kin
+  barred from office is NOT built** — it would need new per-`TickHub` state, a
+  much wider blast radius than the House-field patches this whole series has used,
+  for a detail the source design itself calls small.
+  `disease.rs::plague_house_toll` (Phase 4.3, hooked into `strike_plague`) can kill
+  SEVERAL of a struck house's non-head kin at once, or — rarely, and via its own
+  INDEPENDENT roll, never by touching `head_lifespan`/succession — extinguish the
+  house outright (`plague_extinction`, a new milestone). This is the one change in
+  the whole series to move **top-10% wealth share** (out of band since Phase 0.4)
+  TOWARD its historical band rather than merely holding steady — plague extinction
+  removing weaker houses concentrates the survivors' share, exactly the
+  historically-documented mechanism, not asserted but measured (see
+  `docs/SCOREBOARD.md`).
 - **Succession & inheritance (Phase 0.4):** each people carries a **line rule** (who may
   inherit) and a **division rule** (how the estate divides) resolved once from its language
   kit into `culture_rules` (`sim/shared/inheritance.rs`, §8.15). `succeed_house` reads them
@@ -628,15 +656,19 @@ sim/                            ← organised into per-phase step folders; mod.r
   campaign/                     ← the campaign half:
       market.rs                   Market equilibrium solver (stocks → grain-eq prices)
       manufacture.rs              Shared production-chain resolver (DAG topo, labor∝pop)
-      tick/                       THE CAMPAIGN TICK SIM (~17.2k lines, by theme). See §5.
+      tick/                       THE CAMPAIGN TICK SIM (~17.5k lines, by theme). See §5.
                                   mod.rs = structs/consts/free-fns/advance()/impl Bank/…/
                                   residual impl CampaignSim; methods grouped into money/war/
-                                  disease/colonies/polis/cities/houses/production/crisis
-                                  child impls (pub(crate), `use super::*`); crisis.rs =
-                                  Phase 3.2-3.6, the succession-crisis engine (competence/
-                                  vice, named factions, quarterly rounds, resolution,
-                                  civic intervention, the permanent record — see §5);
-                                  tests.rs = the dynamics tests
+                                  disease/colonies/polis/cities/houses/production/crisis/
+                                  schism child impls (pub(crate), `use super::*`);
+                                  crisis.rs = Phase 3.2-3.6, the succession-crisis engine
+                                  (competence/vice, named factions, quarterly rounds,
+                                  resolution, civic intervention, the permanent record —
+                                  see §5); schism.rs = Phase 4.1, Quarrel/Departure (a
+                                  simplified `tension` proxy, monthly; Rupture deferred);
+                                  disease.rs also carries Phase 4.3's `plague_house_toll`
+                                  (kin mortality + extinction, independent of head
+                                  mortality); tests.rs = the dynamics tests
 ```
 
 ---
