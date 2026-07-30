@@ -50,9 +50,14 @@ export const DEFAULT_PLATES: PlateKey[] = ["relief", "water", "landuse", "holdin
 
 /** Land-use classes, with the colour each dithered cell takes. */
 const LANDUSE = [
-  { key: "arable", label: "arable", color: "#c8a94e" },
-  { key: "pasture", label: "pasture", color: "#7fa05a" },
-  { key: "forest", label: "woodland", color: "#2f6b46" },
+  // Value separation matters more than hue here: the first palette put a mid-olive
+  // arable against a mid-green wood, and at plate size the two were indistinguishable
+  // so a province that had cleared half its woodland looked unchanged. Arable is now
+  // a light stubble-gold and woodland a deep green — a clear light/dark split, which
+  // is how a printed land-use sheet separates them too.
+  { key: "arable", label: "arable", color: "#e0c46a" },
+  { key: "pasture", label: "pasture", color: "#8fae5e" },
+  { key: "forest", label: "woodland", color: "#245a3a" },
   { key: "waste", label: "moor & waste", color: "#6b6a5c" },
 ] as const;
 
@@ -65,10 +70,18 @@ const TENURE = [
   { key: "common", label: "common land", color: "#6f8f6a" },
 ] as const;
 
-/** Stable 0..1 hash of a cell. Keeps a cell's dithered class fixed across years and
- *  across renders, which is what makes the time slider show CONVERSION not reshuffling. */
-function cellHash(rx: number, ry: number, salt: number): number {
-  let h = (rx * 374761393 + ry * 668265263 + salt * 1442695041) | 0;
+/** Stable 0..1 hash of a PATCH of cells. Keeps a cell's dithered class fixed across
+ *  years and across renders, which is what makes the time slider show CONVERSION not
+ *  reshuffling.
+ *
+ *  `patch` quantises the coordinates so neighbouring cells share a class. Hashing each
+ *  cell independently (patch = 1) was the first cut and it rendered as television
+ *  static — technically the right proportions, visually unreadable, and nothing like a
+ *  survey sheet. Real land use comes in fields, so the dither is grouped into blocks a
+ *  few sampled cells across. */
+function cellHash(rx: number, ry: number, salt: number, patch = 1): number {
+  const px = Math.floor(rx / patch), py = Math.floor(ry / patch);
+  let h = (px * 374761393 + py * 668265263 + salt * 1442695041) | 0;
   h = (h ^ (h >>> 13)) * 1274126177 | 0;
   h = h ^ (h >>> 16);
   return ((h >>> 8) & 0xffff) / 0xffff;
@@ -191,6 +204,10 @@ export function ProvinceMiniMap({
     ? Math.min(0.5, riverCells / Math.max(1, province.cells))
     : 0;
 
+  // Dither patch size, in raster units: a few SAMPLED cells across (cells are `stride`
+  // apart), so the mosaic reads as fields regardless of how big the province is.
+  const patch = stride * 3;
+
   return (
     <div style={{ display: "flex", gap: 10, position: "relative", flexWrap: "wrap" }}>
       {/* The plate */}
@@ -205,7 +222,7 @@ export function ProvinceMiniMap({
 
         {/* 3 · land use — the plate that CHANGES over five centuries. */}
         {on("landuse") && luShares && cells.map(([rx, ry], i) => {
-          const c = LANDUSE[ditherClass(luShares, cellHash(rx, ry, 1))];
+          const c = LANDUSE[ditherClass(luShares, cellHash(rx, ry, 1, patch))];
           return (
             <rect key={`u${i}`} x={rx - ox} y={ry - oy} width={stride * 1.05} height={stride * 1.05}
               fill={c.color} opacity={0.75} />
@@ -214,7 +231,7 @@ export function ProvinceMiniMap({
 
         {/* 4 · tenure — who actually holds the land. */}
         {on("tenure") && tenure && cells.map(([rx, ry], i) => {
-          const k = ditherClass([...tenure], cellHash(rx, ry, 7));
+          const k = ditherClass([...tenure], cellHash(rx, ry, 7, patch));
           return (
             <rect key={`t${i}`} x={rx - ox} y={ry - oy} width={stride * 1.05} height={stride * 1.05}
               fill={tenureColor(k)} opacity={on("landuse") ? 0.45 : 0.7} />
@@ -223,7 +240,7 @@ export function ProvinceMiniMap({
 
         {/* 2 · water — a proportional scatter, honest about carrying no course. */}
         {on("water") && waterFrac > 0 && cells.map(([rx, ry], i) =>
-          cellHash(rx, ry, 23) < waterFrac ? (
+          cellHash(rx, ry, 23, stride) < waterFrac ? (
             <rect key={`w${i}`} x={rx - ox + stride * 0.2} y={ry - oy + stride * 0.35}
               width={stride * 0.7} height={stride * 0.28} rx={stride * 0.14}
               fill="#4a90c4" opacity={0.8} />

@@ -26,7 +26,11 @@ function GaugeCard({ g }: { g: Gauge }) {
   const color = g.warn ? "#e0a09a" : g.pips >= 4 ? "#9fe0b8" : "#cfe0f4";
   return (
     <div style={{
-      flex: "1 1 0", minWidth: 0, background: "#0d1622",
+      // Five gauges across a 460px panel gave each ~88px, which CLIPPED the phrase —
+      // and the phrase is the product ("in the red 7 of 12 months" became
+      // "in the red 7 of 12 months —…"). They now wrap to a 3+2 grid with a floor
+      // wide enough for the longest phrase the backend can emit.
+      flex: "1 1 132px", minWidth: 132, background: "#0d1622",
       border: `1px solid ${g.warn ? "#5a3630" : "#1e2e42"}`, borderRadius: 5,
       padding: "5px 6px",
     }} title={g.phrase}>
@@ -44,12 +48,9 @@ function GaugeCard({ g }: { g: Gauge }) {
           }} />
         ))}
       </div>
-      <div style={{
-        color, fontSize: 9, lineHeight: 1.25,
-        // Two lines, then ellipsis — the phrase is the product, so it gets the room.
-        display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-        overflow: "hidden",
-      }}>{g.phrase}</div>
+      {/* No clamp. A gauge that cannot say what is wrong is worse than no gauge, and
+          the card now wraps rather than truncating. */}
+      <div style={{ color, fontSize: 9, lineHeight: 1.25 }}>{g.phrase}</div>
     </div>
   );
 }
@@ -69,7 +70,7 @@ export function HouseStandingView({ idx, refreshKey }: { idx: number; refreshKey
   if (!st) return <div style={dim}>No standing figures for this family.</div>;
   return (
     <div>
-      <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
         {st.gauges.map((g) => <GaugeCard key={g.key} g={g} />)}
       </div>
 

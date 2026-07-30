@@ -21,3 +21,4 @@ Thumbs.db
 # Unrelated files that live in this folder but are not part of the project
 20260301 Molodezh Project/
 *.kra-autosave.png
+dev/dist-schematic/
