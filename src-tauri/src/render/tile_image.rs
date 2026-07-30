@@ -1166,9 +1166,19 @@ fn render_currents(tile: &TileData, rgba: &mut [u8]) {
             rgba[offset + 3] = 0; // land = transparent
             continue;
         }
-        let vx = tile.current_vx[i];
-        let vy = tile.current_vy[i];
-        let mag = (vx * vx + vy * vy).sqrt().clamp(0.0, 3.0) / 3.0;
+        // Boundary currents run along the continental slope, not over the shallow
+        // apron, so the drawn flow stops at the shelf break. This is a RENDERING
+        // choice and lives here deliberately: the simulation keeps a real velocity
+        // on shelf cells because upwelling, the current→coast temperature coupling
+        // and the SST anomaly all read that speed (see the note at the end of
+        // `ocean::generate_ocean_currents`).
+        let mag = if tile.is_shelf[i] != 0 {
+            0.0
+        } else {
+            let vx = tile.current_vx[i];
+            let vy = tile.current_vy[i];
+            (vx * vx + vy * vy).sqrt().clamp(0.0, 3.0) / 3.0
+        };
         let ct = tile.current_type[i];
 
         let (r, g, b) = match ct {

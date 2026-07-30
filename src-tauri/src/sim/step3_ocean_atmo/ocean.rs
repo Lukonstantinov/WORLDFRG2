@@ -809,17 +809,30 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
         }
     }
 
-    // â”€â”€ Phase 7: clear flow over the continental shelf â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // Done LAST (after warm-tag advection has already carried warmth across the
-    // basin, so coastal climate is unaffected): the rendered current arrows /
-    // streamlines should stop at the shelf break and not draw over the shallow
-    // shelf. Boundary currents run along the continental slope, not the apron.
-    for i in 0..n {
-        if shelf[i] == 1 {
-            buf.current_vx[i] = 0.0;
-            buf.current_vy[i] = 0.0;
-        }
-    }
+    // â”€â”€ NOTE: shelf flow is NOT cleared here â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // This used to end with a pass zeroing current_vx/vy on every shelf cell, so
+    // the rendered arrows would stop at the shelf break. Its comment claimed
+    // coastal climate was unaffected because it ran after warm-tag advection.
+    // That was true of `current_type` and FALSE of the SPEED, which three
+    // downstream consumers read:
+    //
+    //   • `compute_upwelling_zones` requires an EQUATORWARD `current_vy` on a cold
+    //     shelf cell. With shelf velocity zeroed that test could never be true, so
+    //     the entire upwelling mechanism — every cold fog desert: Atacama, Namib,
+    //     California, the Somali coast — was a silent no-op. Measured before the
+    //     fix: 4004 cold shelf cells in the 10-45° band, 0 of them moving, 0 land
+    //     cells cooled, 0.00 °C applied. See `earth_diagnose_upwelling_reachability`.
+    //   • `temperature.rs` derives `vol = (speed/1.4).clamp(0.35, 1.3)` and sets
+    //     BOTH the anomaly magnitude and its inland reach (24 + 42·vol cells) from
+    //     it. Zeroed shelf cells always contributed at the clamp FLOOR — and the
+    //     ocean cells nearest the coast are precisely the shelf cells, so the
+    //     current→coast coupling was weakest exactly where it should be strongest.
+    //   • `ocean.rs::sst_at` scales the SST anomaly by the same speed.
+    //
+    // The rendering intent is preserved where it belongs — `render_currents` in
+    // `render/tile_image.rs` draws shelf cells at zero magnitude, so the arrows
+    // still stop at the shelf break without the physics paying for it.
+    let _ = &shelf;
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

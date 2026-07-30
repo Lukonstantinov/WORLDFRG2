@@ -309,11 +309,11 @@ of the wrong world.
 
 | Metric | Value | Gate | Status |
 |---|---|---|---|
-| **Earth main-class agreement** | **66.3%** | `EARTH_MAIN_FLOOR` = 65.0 | ✅ asserted |
-| **Earth exact-zone agreement** | **29.1%** | *none* | ⚠️ ungated |
-| Earth C-class own accuracy | 32.8% | — | worst class |
-| Earth `C → B` confusion | 40% | — | largest single error |
-| Earth `D → E` confusion | 40% | — | second largest |
+| **Earth main-class agreement** | **67.4%** | `EARTH_MAIN_FLOOR` = 67.0 | ✅ asserted |
+| **Earth exact-zone agreement** | **30.0%** | *none* | ⚠️ ungated |
+| Earth C-class own accuracy | 33.2% | — | worst class |
+| Earth `C → B` confusion | 39% | — | largest single error |
+| Earth `D → E` confusion | 37% | — | second largest |
 | **Economy: price/distance gradient** | **−0.01** | *none* | ❌ distance does not move prices |
 | Economy: grain price CV across cities | 2.10 | `ECON_SPATIAL_CV_FLOOR` = 0.01 | ⚠️ far above band (0.20–0.40) |
 | Economy: rank-size (Zipf) slope | −0.41 | band [−3.0, −0.15] | ⚠️ flatter than −0.8…−1.2 |
@@ -620,6 +620,7 @@ subsystem is one you cannot have an opinion about.
 
 | Date | Commit | Earth main | Earth exact | Rust tests | FE tests | Note |
 |---|---|---|---|---|---|---|
+| 2026-07-30 | *this* | **67.4%** | **30.0%** | 225 | 0 | Shelf-velocity fix: `generate_ocean_currents` no longer zeroes current_vx/vy on shelf cells (a rendering concern moved to `render_currents`). `compute_upwelling_zones` was measurably DEAD — 0 usable sources, 0 cells cooled — and is now 3 428 sources / 872 cells / up to 4 °C. First Earth-score move since `d53fdc9`. Mumbai C→A and SE-US B→C now match reference; `D → E` 40%→37%. Floor raised 65.0 → 67.0 |
 | 2026-07-30 | *this* | 66.3% | 29.1% | 224 | 0 | House lineage tab + Compare window + figure variation + enlarged dossier window; outpost/expedition regional-reach fixes (see below) |
 | 2026-07-29 | `936a8a3`+ | 66.3% | 29.1% | 159 | 0 | Economy oracle added; CI added; scoreboard created |
 | 2026-07-29 | *this* | 66.3% | 29.1% | 159 | 0 | Harness calibrated to real campaign start; LOD sampler fixed; tick determinism defect found |

@@ -170,11 +170,75 @@ fn earth_koppen_agreement() {
     );
 }
 
+/// Does the upwelling-cooling step actually do anything? (Measured, not read.)
+///
+/// `ocean.rs::compute_upwelling_zones` is the mechanism behind every cold fog
+/// desert — Peru/Atacama, Namibia, California, and the Somali coast. It requires,
+/// per candidate ocean cell: `is_shelf == 1`, `current_type == 2`, and an
+/// EQUATORWARD flow read from `current_vy`.
+///
+/// The suspicion this test settles: `generate_ocean_currents` ends with a Phase 7
+/// that zeroes `current_vx/vy` on every shelf cell, for a stated RENDERING reason
+/// (arrows should stop at the shelf break). It runs long before this step, and
+/// nothing in between restores shelf velocity. If that is right, the `equatorward`
+/// test can never be true on a shelf cell, and the whole upwelling mechanism is
+/// unreachable — a silent no-op rather than a tuning problem.
+///
+/// Counts the land cells the step actually cools, and prints the same count for
+/// each precondition in isolation so the blocking one is named rather than
+/// guessed. `#[ignore]`d — a diagnostic.
+#[test]
+#[ignore]
+fn earth_diagnose_upwelling_reachability() {
+    let (mut buf, _reference) = run_earth();
+
+    // Preconditions, counted independently over all ocean cells in the step's own
+    // 10-45° latitude band.
+    let (mut in_band, mut shelf, mut shelf_cold, mut shelf_cold_moving, mut all_four) =
+        (0usize, 0usize, 0usize, 0usize, 0usize);
+    for y in 0..H as u32 {
+        let lat = buf.latitude(y);
+        if lat.abs() < 10.0 || lat.abs() > 45.0 { continue; }
+        for x in 0..W as u32 {
+            let i = buf.idx(x, y);
+            if buf.terrain[i] != 0 { continue; }
+            in_band += 1;
+            if buf.is_shelf[i] == 0 { continue; }
+            shelf += 1;
+            if buf.current_type[i] != 2 { continue; }
+            shelf_cold += 1;
+            let moving = buf.current_vy[i].abs() > 0.1;
+            if moving { shelf_cold_moving += 1; }
+            let equatorward = if lat > 0.0 { buf.current_vy[i] > 0.1 } else { buf.current_vy[i] < -0.1 };
+            if equatorward { all_four += 1; }
+        }
+    }
+
+    // End-to-end: how many land cells does the step actually change?
+    let before = buf.temperature.clone();
+    ocean::compute_upwelling_zones(&mut buf);
+    let cooled = before.iter().zip(buf.temperature.iter()).filter(|(a, b)| (**a - **b).abs() > 1e-6).count();
+    let max_drop = before.iter().zip(buf.temperature.iter())
+        .map(|(a, b)| a - b).fold(0.0f32, f32::max);
+
+    println!("\n─── Upwelling reachability (10-45° band) ───");
+    println!("  ocean cells in band                : {in_band}");
+    println!("  … of which shelf                   : {shelf}");
+    println!("  … and current_type == 2 (cold)     : {shelf_cold}");
+    println!("  … and |current_vy| > 0.1 (moving)  : {shelf_cold_moving}");
+    println!("  … and flowing EQUATORWARD (all 4)  : {all_four}   <- sources the step can use");
+    println!("  land cells actually cooled         : {cooled}");
+    println!("  largest cooling applied            : {max_drop:.2} °C");
+    println!("─────────────────────────────────────────────\n");
+}
+
 /// The regression floor for area-weighted main-class agreement. Calibrated just
-/// under the measured baseline (66.3% at 0.5° after FIX_PLAN A1 — conserved
-/// moisture-recycling + the delta-mouth monsoon-onshore fix); bump it up as the
-/// model improves so it always guards the current fidelity.
-const EARTH_MAIN_FLOOR: f64 = 65.0;
+/// under the measured baseline (67.4% at 0.5° after the shelf-velocity fix —
+/// `generate_ocean_currents` no longer zeroes shelf flow, which had made
+/// `compute_upwelling_zones` unreachable and pinned the current→coast thermal
+/// coupling to its clamp floor); bump it up as the model improves so it always
+/// guards the current fidelity.
+const EARTH_MAIN_FLOOR: f64 = 67.0;
 
 /// Why a subtropical cell came out wet or dry — the decision chain, not the total.
 ///
@@ -463,6 +527,73 @@ fn scratch_error_geography() {
     println!("\n  mean SST vs the moisture the model actually emits (init_moisture is 1.0 everywhere neutral):");
     for (l, sst, r) in by_lat {
         println!("    {:4.0} deg  SST {:5.1} C   e_sat ratio vs 15C = {:4.2}x", l, sst, r);
+    }
+    println!();
+}
+
+/// Are the ocean mechanisms actually eligible to fire? (A6-style liveness audit.)
+#[test]
+#[ignore]
+fn scratch_ocean_liveness() {
+    let (buf, _reference) = run_earth();
+    let (mut shelf_cells, mut shelf_moving, mut cold_shelf, mut upwell_ok) = (0, 0, 0, 0);
+    for y in 0..H { for x in 0..W {
+        let i = y*W+x;
+        if buf.terrain[i] != 0 || buf.is_shelf[i] == 0 { continue; }
+        shelf_cells += 1;
+        let sp = (buf.current_vx[i].powi(2) + buf.current_vy[i].powi(2)).sqrt();
+        if sp > 0.1 { shelf_moving += 1; }
+        if buf.current_type[i] == 2 { cold_shelf += 1; }
+        let lat = buf.latitude(y as u32);
+        if !(10.0..=45.0).contains(&lat.abs()) { continue; }
+        if buf.current_type[i] != 2 { continue; }
+        let eqw = if lat > 0.0 { buf.current_vy[i] > 0.1 } else { buf.current_vy[i] < -0.1 };
+        if eqw { upwell_ok += 1; }
+    }}
+    println!("\n─── ocean liveness ───");
+    println!("  shelf ocean cells                        : {shelf_cells}");
+    println!("  ...with |v| > 0.1 (needed by upwelling)  : {shelf_moving}");
+    println!("  ...tagged cold (current_type==2)         : {cold_shelf}");
+    println!("  cells passing ALL compute_upwelling_zones gates: {upwell_ok}");
+
+    // Current-speed histogram over open ocean.
+    let mut buckets = [0u32; 6];
+    let edges = [0.1f32, 0.3, 0.6, 1.0, 1.6, 99.0];
+    let (mut tot, mut sum) = (0u32, 0.0f64);
+    for i in 0..W*H {
+        if buf.terrain[i] != 0 || buf.is_shelf[i] == 1 { continue; }
+        let sp = (buf.current_vx[i].powi(2) + buf.current_vy[i].powi(2)).sqrt();
+        tot += 1; sum += sp as f64;
+        for (k, e) in edges.iter().enumerate() { if sp < *e { buckets[k] += 1; break; } }
+    }
+    println!("  open-ocean speed histogram (<0.1,<0.3,<0.6,<1.0,<1.6,>=1.6): {:?} of {} (mean {:.2})",
+        buckets, tot, sum / tot as f64);
+
+    // Warm/cold tag census by latitude band.
+    println!("\n  current_type census (open ocean):");
+    for (lo, hi) in [(0.0f32,15.0f32),(15.0,30.0),(30.0,45.0),(45.0,60.0),(60.0,90.0)] {
+        let (mut n, mut warm, mut cold) = (0u32, 0u32, 0u32);
+        for y in 0..H { for x in 0..W {
+            let i = y*W+x;
+            if buf.terrain[i] != 0 { continue; }
+            let al = buf.latitude(y as u32).abs();
+            if al < lo || al >= hi { continue; }
+            n += 1;
+            match buf.current_type[i] { 1 => warm += 1, 2 => cold += 1, _ => {} }
+        }}
+        println!("    {:2.0}-{:2.0} deg  n={:6}  warm {:4.1}%  cold {:4.1}%", lo, hi, n,
+            100.0*warm as f32/n as f32, 100.0*cold as f32/n as f32);
+    }
+
+    // Somali / Arabian sea sample.
+    println!("\n  Arabian Sea + Somali coast samples (lat, lon, type, speed, sst):");
+    for (la, lo) in [(5.0f32, 52.0f32), (10.0, 52.0), (12.0, 55.0), (15.0, 60.0), (18.0, 65.0), (20.0, 40.0)] {
+        let y = ((90.0 - la) * 2.0).round() as u32;
+        let x = ((lo + 180.0) * 2.0).round() as u32;
+        let i = buf.idx(x, y);
+        let sp = (buf.current_vx[i].powi(2) + buf.current_vy[i].powi(2)).sqrt();
+        println!("    {:5.1}N {:5.1}E  land={}  type={}  |v|={:.2}  sst={:5.1}",
+            la, lo, buf.terrain[i], buf.current_type[i], sp, buf.sst[i]);
     }
     println!();
 }

@@ -157,6 +157,49 @@ fn cc_retain_frac(t_c: f32) -> f32 {
 // runaway feedback.
 const ET_RECYCLE_MAX: f32 = 0.5;
 
+/// EXPERIMENT: signed east-west position of a land cell inside its continent.
+/// -1 = hard against the WEST coast (eastern flank of an ocean basin, where the
+/// subtropical anticyclone's descending branch is strongest), +1 = hard against
+/// the EAST coast (western flank of the high, where poleward moist flow runs).
+/// Two linear sweeps per row - no per-cell outward scan.
+fn compute_land_basin_pos(buf: &WorldBuffer) -> Vec<f32> {
+    let w = buf.width as usize;
+    let h = buf.height as usize;
+    let mut out = vec![0.0f32; w * h];
+    let big = (w as f32) * 2.0;
+    let mut dw = vec![big; w];
+    let mut de = vec![big; w];
+    for y in 0..h {
+        let row = y * w;
+        // west-going sweep (twice around for the x-wrap)
+        let mut d = big;
+        for k in 0..(2 * w) {
+            let x = k % w;
+            if buf.terrain[row + x] == 0 { d = 0.0; } else { d += 1.0; }
+            if k >= w { dw[x] = d; }
+        }
+        let mut d = big;
+        for k in 0..(2 * w) {
+            let x = (2 * w - 1 - k) % w;
+            if buf.terrain[row + x] == 0 { d = 0.0; } else { d += 1.0; }
+            if k >= w { de[x] = d; }
+        }
+        for x in 0..w {
+            out[row + x] = if buf.terrain[row + x] != 1 { 0.0 }
+                else { ((dw[x] - de[x]) / (dw[x] + de[x]).max(1.0)).clamp(-1.0, 1.0) };
+        }
+    }
+    out
+}
+
+/// EXPERIMENT amplitude of the east-west subsidence asymmetry.
+const SUBTROP_ASYM: f32 = 0.25;
+
+#[inline]
+fn subtrop_asym(basin_pos: f32) -> f32 {
+    (1.0 - SUBTROP_ASYM * basin_pos).clamp(0.2, 2.0)
+}
+
 /// Orographic precipitation multiplier for one land cell.
 /// 2.5 = windward uplift, 0.15..1.0 = leeward rain shadow (graduated), 1.0 = none.
 fn orographic_multiplier(buf: &WorldBuffer, x: u32, y: u32, wvx: f32, wvy: f32) -> f32 {
@@ -643,7 +686,9 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
     let hss = seasonal::compute_seasonal_wind(buf, -1.0); // high-sun-south
     let migrate = seasonal::ITCZ_SEASONAL_MIGRATE;
 
+    let basin_pos = compute_land_basin_pos(buf);
     let ctx = SeasonCtx {
+        basin_pos: &basin_pos,
         sea_suppress: &sea_suppress,
         cold_coast: &cold_coast,
         enclosed_coast: &enclosed_coast,
@@ -695,6 +740,7 @@ pub fn compute_precipitation(buf: &mut WorldBuffer) {
 
 /// Shared read-only context for a seasonal precipitation pass.
 struct SeasonCtx<'a> {
+    basin_pos: &'a [f32],
     sea_suppress: &'a [f32],
     cold_coast: &'a [bool],
     enclosed_coast: &'a [bool],
@@ -831,7 +877,7 @@ fn season_precip(
             if buf.terrain[idx] != 1 { continue; }
             let onshore = monsoon_onshore(buf, x, y, ctx.sea_suppress);
             let onshore_gate = (1.0_f32 - onshore).powf(1.5);
-            let sink_frac = 0.75 * sub_sink * onshore_gate;
+            let sink_frac = (0.75 * sub_sink * onshore_gate * subtrop_asym(ctx.basin_pos[idx])).min(0.95);
             let excess = (row[x as usize] - MOISTURE_FLOOR).max(0.0);
             row[x as usize] = MOISTURE_FLOOR + excess * (1.0 - sink_frac);
         }
@@ -1007,7 +1053,7 @@ fn season_precip(
             // parks over the subtropics in the warm season). Weighted stronger in the
             // local summer / weaker in winter so a dry-summer (Mediterranean) split
             // can emerge; the two-season average â‰ˆ the annual penalty.
-            let sub_pen = (subtropical_penalty(abl) * if local_summer { 1.35 } else { 0.55 }).min(0.9);
+            let sub_pen = (subtropical_penalty(abl) * subtrop_asym(ctx.basin_pos[idx]) * if local_summer { 1.35 } else { 0.55 }).min(0.9);
             p *= 1.0 - sub_pen;
 
             // Monsoon interior penetration (multiplicative).
