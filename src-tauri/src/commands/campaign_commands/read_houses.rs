@@ -391,3 +391,52 @@ pub fn campaign_get_feuds(house: i32, db: State<'_, WorldDb>) -> Result<Vec<Feud
     });
     Ok(rows)
 }
+
+// ── Phase 2.1/2.2/2.3 · the Kin roster ──────────────────────────────────────────
+
+/// One kin, for the dossier's 👪 Kin tab.
+#[derive(Serialize)]
+pub struct KinBrief {
+    pub name: String,
+    pub female: bool,
+    pub age: u32,
+    /// "head" | "heir" | "factor" | "idle" | "married out" | "dead".
+    pub role: String,
+    /// The holding they run, if `role == "factor"` (empty if unposted).
+    pub posted_name: String,
+    /// True if `posted_name` is family-run (this kin), else it's a hired factor —
+    /// resolved per-holding by `campaign_holding_authorship` below, not stored here.
+    pub loyalty: f32,
+    pub skill: f32,
+    /// A phrase, never four raw numbers (§3's own discipline) — e.g. "Bold, grasping,
+    /// and rooted at home." Empty for a middling, unremarkable character.
+    pub character_phrase: String,
+    /// Share of the house's internal "power" this kin holds, 0..100, summing to 100
+    /// across the roster (Phase 2.6) — head weighted highest, then role and skill.
+    pub power_share: f32,
+}
+
+/// This house's kin roster, for the dossier's 👪 Kin tab. Empty for a guild, or any
+/// house whose roster was never generated (both read as "no roster", not an error).
+#[tauri::command]
+pub fn campaign_get_house_kin(idx: u32, db: State<'_, WorldDb>) -> Result<Vec<KinBrief>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let Some(h) = sim.houses.get(idx as usize) else { return Ok(vec![]) };
+    let tick = sim.tick;
+    let shares = crate::sim::tick::kin_power_shares(&h.kin);
+    const ROLE_NAMES: [&str; 6] = ["head", "heir", "factor", "idle", "married out", "dead"];
+    Ok(h.kin.iter().zip(shares.iter()).map(|(k, &share)| {
+        let age = tick.saturating_sub(k.born_tick) / TICKS_PER_YEAR;
+        let posted_name = if k.posted >= 0 {
+            sim.hubs.get(k.posted as usize).map(|x| x.name.clone()).unwrap_or_default()
+        } else { String::new() };
+        KinBrief {
+            name: k.name.clone(), female: k.female, age,
+            role: ROLE_NAMES.get(k.role.min(5) as usize).copied().unwrap_or("idle").into(),
+            posted_name, loyalty: k.loyalty, skill: k.skill,
+            character_phrase: crate::sim::tick::character_phrase(k.character),
+            power_share: share,
+        }
+    }).collect())
+}

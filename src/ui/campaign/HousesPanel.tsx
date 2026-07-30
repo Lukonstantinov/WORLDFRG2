@@ -7,8 +7,8 @@ import { YearChronicle } from "@ui/campaign/YearChronicle";
 import { FeudsView, HouseStandingView } from "@ui/campaign/HouseDossier";
 import { cultureFigureSVG, cultureSeed, type Occasion } from "@ui/campaign/cultureFigure";
 import { GOOD_DEFS } from "@goods";
-import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks } from "@bridge";
-import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief } from "@types";
+import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks, campaignGetExpeditions, campaignGetHouseKin } from "@bridge";
+import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief, ExpeditionView, KinBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 
 const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
@@ -25,6 +25,16 @@ const TIER_META: Record<number, { glyph: string; name: string; band: string }> =
 /** A house whose tier isn't computed yet (founded since the last monthly pass) reads
  *  as Marginal — it hasn't proven anything yet, which is the honest starting point. */
 const tierOf = (h: HouseBrief) => (h.tier && h.tier >= 1 && h.tier <= 4 ? h.tier : 4);
+
+/** Phase 2.2 · holdings authorship — is this holding run by a POSTED kin (family) or
+ *  a hired factor? Returns the kin's given name if family-run, "" if hired (silent —
+ *  "hired" is the unremarkable default, same discipline as everywhere else here).
+ *  A snapshot from the roster's last generation (see `Kin.posted`'s own doc comment),
+ *  so it can occasionally lag a holding gained since — cosmetic, not a bug. */
+function familyRunAt(kin: KinBrief[], cityName: string): string {
+  const k = kin.find((x) => x.role === "factor" && x.posted_name === cityName);
+  return k ? k.name.split(" ")[0] : "";
+}
 
 /** Desaturate a house colour toward grey — guilds read DULL vs the vivid private
  *  houses, so the civic bodies are visually distinct. */
@@ -298,9 +308,11 @@ function HouseDetail({ h, onClose, onChronicle }:
   const [ledger, setLedger] = useState<HouseLedger | null>(null);
   const [bank, setBank] = useState<BankBrief | null>(null);
   const [chron, setChron] = useState<HouseHistory | null>(null);
+  const [expeds, setExpeds] = useState<ExpeditionView[]>([]);
+  const [kin, setKin] = useState<KinBrief[]>([]);
   // Chronicle-first (§2.3 of the design): the dossier has nothing for the player to
   // DECIDE, so the primary artefact is the family's record, not its balance sheet.
-  const [view, setView] = useState<"chronicle" | "summary" | "standing" | "feuds" | "bank" | "ledger">("chronicle");
+  const [view, setView] = useState<"chronicle" | "summary" | "kin" | "standing" | "feuds" | "bank" | "ledger" | "expeditions">("chronicle");
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.house);
   const tick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
   useEffect(() => {
@@ -312,6 +324,16 @@ function HouseDetail({ h, onClose, onChronicle }:
       campaignHouseLedger(h.idx).then((l) => { if (alive) setLedger(l); }).catch(() => {});
     }
     campaignGetHouseHistory(h.name).then((hh) => { if (alive) setChron(hh); }).catch(() => {});
+    // Phase 1.3 · this house's own live expeditions (Expedition.house already existed;
+    // dest_province is the one new field, so the tab can highlight where they're
+    // actually reaching for on the province plate).
+    if (h.idx !== undefined) {
+      campaignGetExpeditions().then((p) => {
+        if (alive) setExpeds(p.active.filter((e) => e.house === h.idx));
+      }).catch(() => {});
+      // Phase 2.1 · the kin roster (empty for a guild or an older save).
+      campaignGetHouseKin(h.idx).then((k) => { if (alive) setKin(k); }).catch(() => {});
+    }
     // Find this family's bank (if any) so we can show its balance-sheet subtab.
     if (h.owns_bank) {
       campaignGetBanks().then((bs) => {
@@ -395,13 +417,17 @@ function HouseDetail({ h, onClose, onChronicle }:
           record is the primary artefact). Accountant gets its own roomy view so
           expenses aren't clipped. */}
       <div style={{ display: "flex", gap: 4, margin: "7px 0 5px", borderBottom: "1px solid #1a2a3e", flexWrap: "wrap" }}>
-        {(["chronicle", "summary", "standing", "feuds", ...(bank ? ["bank" as const] : []), "ledger"] as const).map((t) => (
+        {(["chronicle", "summary", ...(kin.length > 0 ? ["kin" as const] : []),
+           ...(expeds.length > 0 ? ["expeditions" as const] : []),
+           "standing", "feuds", ...(bank ? ["bank" as const] : []), "ledger"] as const).map((t) => (
           <div key={t} onClick={() => setView(t)} style={{
             fontSize: 10, padding: "3px 9px", cursor: "pointer",
             color: view === t ? "#e8dcc0" : "#7090b0", fontWeight: view === t ? 700 : 400,
             borderBottom: view === t ? "2px solid #c9a227" : "2px solid transparent",
           }}>{t === "chronicle" ? "📜 Chronicle"
             : t === "summary" ? "Summary"
+            : t === "kin" ? `👪 Kin (${kin.length})`
+            : t === "expeditions" ? `🧭 Expeditions (${expeds.length})`
             : t === "standing" ? "⚖ Standing"
             : t === "feuds" ? `⚔ Feuds${h.rivals.length > 0 ? ` (${h.rivals.length})` : ""}`
             : t === "bank" ? "🏦 Bank"
@@ -411,6 +437,10 @@ function HouseDetail({ h, onClose, onChronicle }:
 
       {view === "chronicle" ? (
         <ChronicleTab h={h} chron={chron} onExpand={() => onChronicle(h.name)} fmt={fmt} />
+      ) : view === "kin" ? (
+        <KinTab kin={kin} />
+      ) : view === "expeditions" ? (
+        <ExpeditionsTab expeds={expeds} fmt={fmt} />
       ) : view === "standing" ? (
         // The five stability gauges. Everything here was already in the sim — the
         // solvency countdown in particular has always decided whether this family
@@ -451,8 +481,16 @@ function HouseDetail({ h, onClose, onChronicle }:
           ) : (
             h.cities && h.cities.length > 0 && <Row label="Active in">{h.cities.slice(0, 10).join(" · ")}</Row>
           )}
-          {h.offices && h.offices.length > 0 && <Row label="Offices">🏢 {h.offices.map(([nm]) => nm).join(" · ")}</Row>}
-          {h.estates && h.estates.length > 0 && <Row label="Estates">{h.estates.map(([g, c]) => `${goodIcon(g)} ${g} (${c})`).join(" · ")}</Row>}
+          {h.offices && h.offices.length > 0 && (
+            <Row label="Offices">
+              {h.offices.map(([nm]) => `${nm}${familyRunAt(kin, nm) ? ` 👪${familyRunAt(kin, nm)}` : ""}`).join(" · ")}
+            </Row>
+          )}
+          {h.estates && h.estates.length > 0 && (
+            <Row label="Estates">
+              {h.estates.map(([g, c]) => `${goodIcon(g)} ${g} (${c}${familyRunAt(kin, c) ? ` · 👪${familyRunAt(kin, c)}` : ""})`).join(" · ")}
+            </Row>
+          )}
           <Row label="Fleet">🚢 {h.fleet_sea ?? 0} · 🛶 {h.fleet_river ?? 0} · 🐫 {h.fleet_caravan ?? 0}</Row>
           {h.barred && h.barred.length > 0 && (
             <div style={{ fontSize: 9, marginTop: 3, color: "#e08a8a" }}>⚔ Barred from (trade war): {h.barred.join(" · ")}</div>
@@ -534,6 +572,111 @@ function ChronicleTab({ h, chron, onExpand, fmt }:
       <div onClick={onExpand} style={{ color: "#88a8c8", fontSize: 9, cursor: "pointer", marginTop: 6, textDecoration: "underline" }}>
         Expand chronicle (goods, colonies) →
       </div>
+    </div>
+  );
+}
+
+/** Phase 1.3 · this house's own live expeditions — leader, destination, progress,
+ *  fleet, and (clicking a row) the destination's PROVINCE highlighted on the map, so
+ *  a viewer can see what the venture is actually reaching for. Returned/failed
+ *  ventures are not shown here yet — they aren't recorded per-house, only in the
+ *  world journal and the map's ✕ overlay (`ColonialPanel`). */
+function ExpeditionsTab({ expeds, fmt }: { expeds: ExpeditionView[]; fmt: (v: number) => string }) {
+  const setSelectedProvince = useUIStore((s) => s.setSelectedProvince);
+  if (expeds.length === 0) {
+    return <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>No live expeditions right now.</div>;
+  }
+  return (
+    <div>
+      {expeds.map((e) => {
+        const kind = e.ships > 0 ? "⛵" : "🐫";
+        const leg = e.outbound ? "outbound" : "returning";
+        return (
+          <div key={e.id}
+            onClick={() => e.dest_province >= 0 && setSelectedProvince(e.dest_province)}
+            style={{ fontSize: 10, marginBottom: 6, borderBottom: "1px solid #131f2c", paddingBottom: 4,
+              cursor: e.dest_province >= 0 ? "pointer" : "default" }}
+            title={e.dest_province >= 0 ? "Show the destination province on the map" : undefined}>
+            <div style={{ color: "#cfe0f4" }}>
+              {kind} {e.leader} <span style={{ color: "#6a86a6" }}>→ {e.dest}</span>
+              {e.dest_province >= 0 && <span style={{ color: "#88a8c8" }}> 🗺</span>}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
+              <span style={{ color: "#9ab0c8", fontSize: 9, width: 62 }}>{leg}</span>
+              <div style={{ flex: 1, height: 4, background: "#0a1018", borderRadius: 3, overflow: "hidden" }}>
+                <div style={{ width: `${Math.round(e.progress * 100)}%`, height: "100%",
+                  background: e.outbound ? "#7fb0e0" : "#7fd0a0" }} />
+              </div>
+              <span style={{ color: "#7a90a8", fontSize: 9, width: 30, textAlign: "right" }}>
+                {Math.round(e.progress * 100)}%
+              </span>
+            </div>
+            <div style={{ color: "#9ab0c8", fontSize: 9, marginTop: 1 }}>
+              {e.ships > 0 && `${e.ships} ships `}{e.caravans > 0 && `${e.caravans} caravans `}
+              {goodIcon(e.good)} {e.good} · cost {fmt(e.cost)}
+              {e.survived < 1 && <span style={{ color: "#e0a09a" }}> · {Math.round(e.survived * 100)}% survived</span>}
+            </div>
+            {e.hazards.length > 0 && (
+              <div style={{ color: "#e0a09a", fontSize: 9 }}>⚠ {e.hazards.length} struggle{e.hazards.length > 1 ? "s" : ""} along the way</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Phase 2.1/2.3/2.6 · the family roster. The head is always kin[0] and reads bold;
+ *  everyone else shows their role, a character phrase (never four raw numbers — §3's
+ *  own discipline), loyalty/skill bars, and their share of the house's internal power
+ *  (§2.6, sums to 100 across the roster). A posted "factor" names the holding they
+ *  run. Nothing here is wired to any decision yet — Phase 2.4/2.5, unbuilt. */
+function KinTab({ kin }: { kin: KinBrief[] }) {
+  if (kin.length === 0) {
+    return <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>No roster on record.</div>;
+  }
+  const roleMark: Record<string, string> = {
+    head: "★", heir: "◆", factor: "◇", idle: "·", "married out": "✕", dead: "†",
+  };
+  const roleColor: Record<string, string> = {
+    head: "#e8dcc0", heir: "#cfe2f6", factor: "#9fb4cc", idle: "#7a90a8",
+    "married out": "#6a7a8a", dead: "#566",
+  };
+  return (
+    <div>
+      {kin.map((k, i) => (
+        <div key={i} style={{ padding: "4px 2px", borderBottom: "1px solid #131f2c" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+            <span style={{ width: 12, textAlign: "center", color: roleColor[k.role] ?? "#9ab0c8" }}>
+              {roleMark[k.role] ?? "·"}
+            </span>
+            <span style={{ color: roleColor[k.role] ?? "#9ab0c8", fontSize: 11, fontWeight: k.role === "head" ? 700 : 400 }}>
+              {k.name}
+            </span>
+            <span style={{ color: "#6a86a6", fontSize: 9 }}>{k.female ? "♀" : "♂"} {k.age}y</span>
+            <span style={{ flex: 1 }} />
+            <span style={{ color: "#7a90a8", fontSize: 9 }}>{k.role}{k.posted_name ? ` · ${k.posted_name}` : ""}</span>
+          </div>
+          {k.character_phrase && (
+            <div style={{ color: "#9ab0c8", fontSize: 9, marginTop: 1, fontStyle: "italic" }}>{k.character_phrase}</div>
+          )}
+          <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+              <span style={{ color: "#6a86a6", fontSize: 8 }}>loyal</span>
+              <div style={{ width: 36, height: 3, background: "#0a1018", borderRadius: 2, overflow: "hidden" }}>
+                <div style={{ width: `${Math.round(k.loyalty * 100)}%`, height: "100%", background: "#7fd0a0" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+              <span style={{ color: "#6a86a6", fontSize: 8 }}>skill</span>
+              <div style={{ width: 36, height: 3, background: "#0a1018", borderRadius: 2, overflow: "hidden" }}>
+                <div style={{ width: `${Math.round(k.skill * 100)}%`, height: "100%", background: "#7fb0e0" }} />
+              </div>
+            </div>
+            <span style={{ color: "#c9a227", fontSize: 8 }}>{k.power_share.toFixed(0)}% power</span>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

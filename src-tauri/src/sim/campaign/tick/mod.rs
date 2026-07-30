@@ -716,6 +716,9 @@ const MIN_TENURE_YEARS: f32 = 4.0;
 /// At most this many CO-HEIR houses may split off a single partible division, whatever
 /// the heir count says. The division is a family splitting, not a fan-out.
 const PARTIBLE_MAX_SPLIT: usize = 3;
+/// Chance an agnatic house's succession is instead held by a WIDOW REGENT — the one
+/// route to a female head a purely agnatic line otherwise has none of (Phase 2.1).
+const WIDOW_REGENCY_CHANCE: f32 = 0.08;
 
 const HOUSE_SEED_GUILD_SHARE: f32 = 0.18;
 /// Below this the guild is too poor to endow a viable family — no house is founded.
@@ -1829,6 +1832,39 @@ pub struct HouseHead {
     #[serde(default)] pub epithet: String,
 }
 
+/// Phase 2.1 · one member of a house's KIN roster — the shared substrate for three
+/// things `HOUSE_PEOPLE_AND_TIERS.md` §2 asks for at once: the head's character (§3,
+/// `kin[0]` IS the head), holdings authorship (§4 — a `posted` kin vs a hired factor),
+/// and, later, a schism's line of descent (§5, Phase 4/5, unbuilt). A house with an
+/// EMPTY roster — every save from before this phase, and any house whose generation
+/// skips it — behaves exactly as before: nothing in the tick reads `kin`.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct Kin {
+    pub name: String,
+    pub female: bool,
+    pub born_tick: u32,
+    /// 0 while alive.
+    #[serde(default)] pub dies_tick: u32,
+    /// 0 head · 1 heir · 2 factor (runs a holding) · 3 idle · 4 married out · 5 dead.
+    pub role: u8,
+    /// Hub of the holding this person runs, −1 = at the seat / unposted. A SNAPSHOT
+    /// taken when the roster was last (re)generated at founding/succession — not
+    /// continuously kept in sync with which holdings the house currently has, the same
+    /// way `wealth_history` is a periodic sample rather than a live mirror.
+    pub posted: i32,
+    /// Four culture-derived axes, −2..+2: caution↔boldness · honour↔greed ·
+    /// private↔civic · rooted↔expansive (§3). DISPLAY ONLY here — a phrase on the
+    /// dossier, nothing more. Wiring an axis to the real decision it names (Phase 2.4)
+    /// is future work; the gate for that phase is that an all-zero character leaves
+    /// the dynamics run bit-identical, which is trivially true while nothing reads it.
+    pub character: [i8; 4],
+    pub loyalty: f32,
+    pub skill: f32,
+    /// Index into the SAME house's `kin`, or −1 — the line of descent a schism would
+    /// split along (Phase 4/5, unbuilt).
+    #[serde(default = "neg_one_i32")] pub parent: i32,
+}
+
 /// A people's law of inheritance, resolved once from its language kit and kept for the
 /// life of the campaign. See `sim::inheritance` for what the codes mean and
 /// `docs/proposals/HOUSE_INHERITANCE_AND_TERRITORY.md` Part B for the assignment.
@@ -2012,6 +2048,10 @@ pub struct House {
     /// house — has already been chronicled, so it fires once per streak rather than at
     /// every qualifying succession after the third.
     #[serde(default)] pub dynasty_chronicled: bool,
+    // ── Kin (Phase 2.1/2.2/2.3) ──
+    /// The family roster. Empty for a guild (a civic office, not a family) and for any
+    /// house whose roster generation was skipped — both read as "no kin", not an error.
+    #[serde(default)] pub kin: Vec<Kin>,
 }
 
 /// DLC 3.5 · one loan on a bank's books. An asset to the bank (interest income);
@@ -3058,6 +3098,11 @@ pub struct Expedition {
     pub arrived_frac: f32,   // surviving fraction of the fleet (1 → 0)
     pub status: u8,
     pub hazards: Vec<HazardEvent>,
+    /// Phase 1.3 · the destination's PROVINCE (from `hub_province`), −1 if the
+    /// destination hub has none. Lets the house panel highlight where an expedition is
+    /// actually reaching for on the province plate, and makes a "reach ⟨province⟩"
+    /// goal (Phase 3, unbuilt) checkable once goals exist.
+    #[serde(default = "neg_one_i32")] pub dest_province: i32,
 }
 
 /// The attempt ledger for a city-pair (a<b by id): a corridor is established only
@@ -5279,6 +5324,7 @@ mod colonies;
 mod polis;
 mod cities;
 mod houses;
+pub use houses::{kin_power_shares, character_phrase};
 mod production;
 
 /// Milestone journal kinds form a city/house's PERMANENT record and survive the

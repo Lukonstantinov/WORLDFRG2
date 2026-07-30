@@ -1165,14 +1165,22 @@ pub struct TradeCorridor {
 // corridor is earned). Read-only projection of the live sim for the map + panel.
 // ─────────────────────────────────────────────────────────────────────────────
 
+fn neg_one_i32_qc() -> i32 { -1 }
+
 /// One live venture for the map/panel: current position, progress, fleet, cargo,
 /// leader, survival + recent hazards (the struggle story).
 #[derive(Serialize)]
 pub struct ExpeditionView {
     pub id: u32,
+    /// Backer house index — Phase 1.3, so the house panel can show this house's own
+    /// expeditions without parsing the `leader` string.
+    #[serde(default)] pub house: u32,
     pub leader: String,
     pub origin: String,
     pub dest: String,
+    /// Phase 1.3 · the destination's province (from `Expedition::dest_province`),
+    /// −1 if none — lets the panel highlight where it's actually reaching for.
+    #[serde(default = "neg_one_i32_qc")] pub dest_province: i32,
     pub x: f32,
     pub y: f32,
     pub ox: f32, pub oy: f32,   // origin (for drawing the intended track)

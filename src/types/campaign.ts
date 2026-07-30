@@ -353,9 +353,12 @@ export interface TradeCorridor {
  *  earned). Carries the fleet, cargo, leader, survival and its struggle log. */
 export interface ExpeditionView {
   id: number;
+  house: number;        // backer house index (Phase 1.3)
   leader: string;
   origin: string;
   dest: string;
+  dest_province: number; // -1 if none
+
   x: number;
   y: number;
   ox: number; oy: number;
@@ -779,6 +782,18 @@ export interface HeadBrief {
   wealth_end: number;
   accession: string;    // "founder" | "heir" | "co-heir" | "the hearth-keeper" | "eldest capable" | "sister's son" | "daughter of the house"
   epithet: string;      // "" if none earned
+}
+/** One member of a house's kin roster (Phase 2.1). */
+export interface KinBrief {
+  name: string;
+  female: boolean;
+  age: number;
+  role: string;          // "head" | "heir" | "factor" | "idle" | "married out" | "dead"
+  posted_name: string;   // the holding they run, if role == "factor" ("" if unposted)
+  loyalty: number;       // 0..1
+  skill: number;         // 0..1
+  character_phrase: string; // "" if unremarkable
+  power_share: number;   // 0..100, sums to 100 across the roster
 }
 export interface JournalEntry {
   tick: number;

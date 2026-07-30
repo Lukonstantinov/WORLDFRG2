@@ -9,6 +9,26 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-30 (Phase 1.3 + 2.1/2.2/2.3/2.6 · Phase 1 complete, Phase 2 half)
+
+Phase 1 is now fully shipped: **1.3** adds `Expedition.dest_province`, a 🧭 Expeditions
+dossier tab, and click-to-highlight on the province plate.
+
+Phase 2 (People) is half built, on purpose. Built and gated: **2.1** the `Kin` roster
+(`kin[0]` mirrors the head, 2–4 siblings per founding/succession, up to two posted to
+current holdings) plus the widow regency (an agnatic line's one route to a female
+head, `WIDOW_REGENCY_CHANCE`=8%); **2.2** holdings authorship (a family-run estate/
+office tags its posted kin's name in the Summary tab, silent = hired); **2.3**
+character as four culture-derived axes read into a phrase, wired to nothing; **2.6**
+`kin_power_shares` (role × skill × loyalty, always sums to exactly 100). **2.4**
+(character → real decisions) and **2.5** (stewards with skim/wage mechanics) were
+**deliberately not attempted** — both move house wealth directly and need `econ_`
+verification per knob as they're built, not a single check at the end. 67 `tick::`
+tests pass (was 61, +6); dynamics and economy scorecards bit-identical — nothing new
+here is read by any decision.
+
+---
+
 ## Current state — 2026-07-30 (Phase 1.2/1.4 · figure + chronicle-first dossier)
 
 Also read-only/query-side — no economy number moves. `HouseDetail`'s default tab is now

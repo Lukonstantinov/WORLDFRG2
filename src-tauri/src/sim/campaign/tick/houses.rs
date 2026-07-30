@@ -1290,7 +1290,7 @@ impl CampaignSim {
             is_guild: false, offices: vec![h as u32], trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false,
+            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(),
         });
         self.found_head_record(idx, "founder");
         Some(idx)
@@ -2164,7 +2164,7 @@ impl CampaignSim {
             is_guild: true, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: false, head_age: guild_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false,
+            head_female: false, head_age: guild_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(),
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -2291,8 +2291,18 @@ impl CampaignSim {
         let (line_rule, inh) = self.rules_for_hub(hub);
         // Close the outgoing head's record before the new one is written.
         self.close_head_record(hi);
-        let female = crate::sim::inheritance::heir_is_female(
+        let mut female = crate::sim::inheritance::heir_is_female(
             line_rule, (hi as u64) << 8 ^ gen as u64, self.seed);
+        // Phase 2.1 · the widow as a capable merchant
+        // (`HOUSE_INHERITANCE_AND_TERRITORY.md` Part C.1). A purely agnatic line never
+        // produces a female heir by descent — but in Italian and Hanseatic practice a
+        // widow could, and often did, hold and run the firm herself. Independent of
+        // whether a spouse is on the (still sparse) kin roster, since marriages aren't
+        // tracked yet: this gives agnatic houses the same occasional female regency
+        // every other line rule already has some route to.
+        let widow_regent = line_rule == LineRule::Agnatic
+            && hash01(self.seed, hi as u64 ^ gen as u64 ^ 0x715D, 0) < WIDOW_REGENCY_CHANCE;
+        if widow_regent { female = true; }
         let heir = self.head_name_sexed_for(hub, &name, gen as u64 ^ 0x5151, female);
         let (age, lifespan) = self.roll_tenure(inh, hi as u64 ^ (gen as u64) << 16);
         // Archetype can PIVOT at a generational change to reflect what the family has
@@ -2317,6 +2327,7 @@ impl CampaignSim {
             InheritanceRule::Seniority => "eldest capable",
             InheritanceRule::Matrilineal if avuncular => "sister's son",
             InheritanceRule::Matrilineal => "daughter of the house",
+            _ if widow_regent => "widow regent",
             _ if female => "daughter of the house",
             _ => "heir",
         };
@@ -2362,6 +2373,7 @@ impl CampaignSim {
             value: self.houses[hi].generation as f32,
             text: format!("{} succeeds as head of {}", heir, name),
         });
+        self.ensure_kin_roster(hi);
         // ── The division ────────────────────────────────────────────────────────
         // Partible inheritance splits the capital at every generation, which is why
         // firms under it had to be RECONSTITUTED each time and why so many did not
@@ -2657,6 +2669,76 @@ impl CampaignSim {
             wealth_start: wealth, wealth_end: 0.0,
             accession: accession.into(), epithet: String::new(),
         });
+        self.ensure_kin_roster(hi);
+    }
+
+    // ── Phase 2.1 · the Kin roster ───────────────────────────────────────────────
+
+    /// Four culture-derived axes, −2..+2 (§3): caution↔boldness · honour↔greed ·
+    /// private↔civic · rooted↔expansive. Deterministic on `salt`; DISPLAY ONLY —
+    /// nothing in the tick reads a `Kin.character`, so any roll here is safe.
+    fn roll_character(&self, salt: u64) -> [i8; 4] {
+        let mut out = [0i8; 4];
+        for (i, o) in out.iter_mut().enumerate() {
+            let r = hash01(self.seed, salt ^ 0xCACA_0000 ^ (i as u64) << 8, i as u64);
+            *o = ((r - 0.5) * 5.0).round().clamp(-2.0, 2.0) as i8;
+        }
+        out
+    }
+
+    /// (Re)generate a house's kin roster: `kin[0]` mirrors the current head, plus 2–4
+    /// siblings/adult children — some `posted` to the house's current holdings (up to
+    /// two, "factor" role), the rest `idle`. Called on every founding/succession, so
+    /// the roster stays a snapshot of "who's around right now" rather than drifting
+    /// stale for a family that never changes head. A guild gets no roster — it's a
+    /// civic office, not a family.
+    pub(crate) fn ensure_kin_roster(&mut self, hi: usize) {
+        if self.houses[hi].is_guild { return; }
+        let tick = self.tick;
+        let seed = self.seed;
+        let hub = self.houses[hi].hub as usize;
+        if hub >= self.hubs.len() { return; }
+        let (head_name, head_female, head_age, gen) = {
+            let h = &self.houses[hi];
+            (h.head_name.clone(), h.head_female, h.head_age, h.generation as u64)
+        };
+        let head_born = tick.saturating_sub((head_age as u32).saturating_mul(TICKS_PER_YEAR));
+        let mut roster = vec![Kin {
+            name: head_name, female: head_female, born_tick: head_born, dies_tick: 0,
+            role: 0, posted: -1,
+            character: self.roll_character((hi as u64) << 8 ^ gen << 20 ^ 0x4EAD),
+            loyalty: 1.0,
+            skill: 0.5 + hash01(seed, hi as u64 ^ gen ^ 0x5C11, 0) * 0.4,
+            parent: -1,
+        }];
+        // Up to two of the house's current holdings get a POSTED kin (a "factor" from
+        // the family); the house's own seat is never one — the head is already there.
+        let holdings: Vec<i32> = self.hubs.iter().enumerate()
+            .filter(|&(hi2, x)| x.is_estate && x.owner_house == hi as i32 && hi2 != hub)
+            .map(|(i, _)| i as i32)
+            .chain(self.houses[hi].offices.iter().copied().map(|o| o as i32).filter(|&o| o as usize != hub))
+            .take(2)
+            .collect();
+        let n_extra = 2 + (crate::sim::cultures::hash64(seed ^ (hi as u64) << 16 ^ gen) % 3) as usize;
+        for k in 0..n_extra {
+            let salt = (hi as u64) << 24 ^ gen << 8 ^ k as u64;
+            let kfemale = hash01(seed, salt ^ 0x5345, 0) < 0.5;
+            let surname = self.houses[hi].name.strip_prefix("House ").unwrap_or(&self.houses[hi].name).to_string();
+            let kname = self.head_name_sexed_for(hub, &surname, salt ^ 0x1D1D, kfemale);
+            let posted = holdings.get(k).copied().unwrap_or(-1);
+            let role: u8 = if posted >= 0 { 2 } else { 3 };
+            let age_years = 16.0 + hash01(seed, salt, 1) * 34.0;
+            roster.push(Kin {
+                name: kname, female: kfemale,
+                born_tick: tick.saturating_sub((age_years as u32).saturating_mul(TICKS_PER_YEAR)),
+                dies_tick: 0, role, posted,
+                character: self.roll_character(salt ^ 0x4EAD),
+                loyalty: 0.4 + hash01(seed, salt, 2) * 0.6,
+                skill: 0.3 + hash01(seed, salt, 3) * 0.6,
+                parent: 0,
+            });
+        }
+        self.houses[hi].kin = roster;
     }
 
     /// Close the outgoing head's record: death tick, age, closing wealth, and the
@@ -2796,7 +2878,7 @@ impl CampaignSim {
                 is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
                 wealth_history: Vec::new(), office_leases: Vec::new(),
                 influence: Vec::new(), bailos: Vec::new(),
-                head_female: female, head_age: age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false,
+                head_female: female, head_age: age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(),
             });
             let ni = self.houses.len() - 1;
             self.found_head_record(ni, "co-heir");
@@ -2881,7 +2963,7 @@ impl CampaignSim {
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: bfemale, head_age: bage, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false,
+            head_female: bfemale, head_age: bage, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(),
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -3317,7 +3399,7 @@ impl CampaignSim {
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false,
+            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(),
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -3353,4 +3435,68 @@ impl CampaignSim {
             text: format!("{} falls into ruin and is dissolved", name),
         });
     }
+}
+
+// ── Phase 2.6 · a house's internal power shares ──────────────────────────────────
+// Pure functions (no `&self`) so they're callable from a bridge command AND directly
+// gated by a test — the whole point of "power shares always sum to 100" is that it
+// must hold for ANY roster, not just ones the tick happens to produce.
+
+/// Per-kin power weight (before normalising): role first, then skill and loyalty as
+/// modest multipliers — a capable, loyal factor counts for more than an idle kin, but
+/// role is what mostly decides a hand in the family's affairs.
+const KIN_ROLE_WEIGHT: [f32; 6] = [3.0, 1.6, 1.2, 0.8, 0.0, 0.0]; // head·heir·factor·idle·married out·dead
+
+/// Each kin's share of the house's internal "power", 0..100, summing to exactly 100
+/// across the roster (or empty for an empty roster — there is no house to share power
+/// in). This is READ-ONLY: nothing in the tick consults it; it exists for the dossier.
+pub fn kin_power_shares(kin: &[Kin]) -> Vec<f32> {
+    if kin.is_empty() { return Vec::new(); }
+    let raw: Vec<f32> = kin.iter().map(|k| {
+        let w = KIN_ROLE_WEIGHT.get(k.role.min(5) as usize).copied().unwrap_or(0.0);
+        w * (0.5 + k.skill.clamp(0.0, 1.0) * 0.5) * (0.5 + k.loyalty.clamp(0.0, 1.0) * 0.5)
+    }).collect();
+    let total: f32 = raw.iter().sum();
+    if total <= 1e-9 {
+        // Every weight rounded to zero (an all-dead/married-out roster) — split evenly
+        // rather than divide by zero, so the invariant still holds.
+        let even = 100.0 / kin.len() as f32;
+        return vec![even; kin.len()];
+    }
+    let mut shares: Vec<f32> = raw.iter().map(|&r| r / total * 100.0).collect();
+    // Floating-point division won't sum to EXACTLY 100 — hand the residual to the
+    // largest share, which is where a rounding error is least noticeable.
+    let sum: f32 = shares.iter().sum();
+    if let Some((i, _)) = shares.iter().enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal)) {
+        shares[i] += 100.0 - sum;
+    }
+    shares
+}
+
+const CHAR_ADJ: [[&str; 4]; 4] = [
+    ["hoarding", "cautious", "bold", "reckless"],
+    ["scrupulous", "honourable", "grasping", "ruthless"],
+    ["close-fisted", "private", "civic-minded", "openhanded"],
+    ["insular", "rooted", "expansive", "far-reaching"],
+];
+
+/// A phrase from the four character axes (§3: "presented as a phrase, never four
+/// numbers" — the same discipline the stability gauges use). Only axes that read as
+/// notable (|value| >= 1) appear, most extreme first; a middling character says
+/// nothing, same as a healthy gauge staying quiet.
+pub fn character_phrase(c: [i8; 4]) -> String {
+    let mut notable: Vec<(usize, i8)> = c.iter().enumerate()
+        .filter(|&(_, &v)| v != 0).map(|(i, &v)| (i, v)).collect();
+    notable.sort_by(|a, b| b.1.abs().cmp(&a.1.abs()));
+    notable.truncate(3);
+    if notable.is_empty() { return String::new(); }
+    let words: Vec<&str> = notable.iter().map(|&(axis, v)| {
+        // v is one of {-2,-1,1,2} (0 filtered out above) -> index {0,1,2,3}.
+        let pole = if v > 0 { v + 1 } else { v + 2 } as usize;
+        CHAR_ADJ[axis][pole.min(3)]
+    }).collect();
+    let mut phrase = words.join(", ");
+    if let Some(ch) = phrase.get_mut(0..1) { ch.make_ascii_uppercase(); }
+    format!("{}.", phrase)
 }

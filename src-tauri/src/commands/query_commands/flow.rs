@@ -201,7 +201,8 @@ pub fn campaign_get_expeditions(db: State<'_, WorldDb>) -> Result<ExpeditionsPay
         let good = sim.goods.get(e.good as usize).map(|g| g.name.clone()).unwrap_or_default();
         let hazards = e.hazards.iter().rev().take(6).map(|h| [h.x, h.y, h.kind as f32]).collect();
         active.push(ExpeditionView {
-            id: e.id, leader: e.leader.clone(), origin, dest,
+            id: e.id, house: e.house, leader: e.leader.clone(), origin, dest,
+            dest_province: e.dest_province,
             x, y, ox: e.ox, oy: e.oy, dx: e.dx, dy: e.dy,
             progress, outbound: e.outbound, status: e.status,
             caravans: e.caravans, ships: e.ships, good,

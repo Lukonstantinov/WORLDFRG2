@@ -332,6 +332,28 @@ serde-defaulted so old saves load). Grouped by theme:
   so the events cap can't prune them. Two of the design's five positive events are
   deliberately NOT built: a great partnership needs alliance-linked tier rises, a legendary
   head needs goals (Phase 3, unbuilt) — both deferred, not built silently short.
+- **The `Kin` roster (Phase 2.1/2.2/2.3/2.6):** each non-guild house carries `kin:
+  Vec<Kin>`, (re)generated at every founding/succession by `ensure_kin_roster`.
+  `kin[0]` always mirrors the current head (role 0); 2–4 siblings follow, up to two
+  `posted` to the house's CURRENT holdings (role 2, "factor") — a SNAPSHOT taken at
+  generation time, not continuously synced to holdings gained since. Each kin carries
+  four culture-derived character axes (−2..+2: caution↔boldness · honour↔greed ·
+  private↔civic · rooted↔expansive), read into a phrase by `character_phrase`
+  (`sim::tick`) that names only the notable axes — nothing in the tick reads
+  `Kin.character` yet, wiring an axis to the decision it names is Phase 2.4,
+  deliberately deferred (see below). `kin_power_shares` (Phase 2.6) turns role × skill
+  × loyalty into a 0..100 share per kin that always sums to exactly 100
+  (`power_shares_always_sum_to_100`) — pure display, nothing else. **The widow as a
+  capable merchant**: a purely `Agnatic` line otherwise never produces a female head
+  (`heir_is_female` always returns false for it), so `succeed_house` rolls an
+  independent `WIDOW_REGENCY_CHANCE`=8% chance of a widow regent instead — the roster
+  doesn't yet track marriages, so this can't be conditioned on "is there actually a
+  widow". `HousesPanel`'s Summary tab tags a family-run holding with its posted kin's
+  name (silent = hired, the same "quiet unless it matters" rule as everywhere else
+  here); the dossier's 👪 Kin tab lists the full roster. **Phase 2.4 (character wired
+  to real decisions) and 2.5 (stewards with skim/wage mechanics) are NOT built** —
+  both would move house wealth directly and need `econ_` verification per knob as
+  they're built, not a single check at the end.
 - **Succession & inheritance (Phase 0.4):** each people carries a **line rule** (who may
   inherit) and a **division rule** (how the estate divides) resolved once from its language
   kit into `culture_rules` (`sim/shared/inheritance.rs`, §8.15). `succeed_house` reads them
@@ -453,8 +475,12 @@ commands/
       read_trade.rs               goods/routes/futures/warehouses/guilds/schematics/diagnostics
       read_houses.rs              House Dossier reads: the five STABILITY gauges
                                   (campaign_house_stability) + the FEUD board
-                                  (campaign_get_feuds). Four of five gauges are pure
-                                  derivations of state the sim already held.
+                                  (campaign_get_feuds) + the KIN roster
+                                  (campaign_get_house_kin, Phase 2.1). Four of five
+                                  gauges are pure derivations of state the sim already
+                                  held; kin_power_shares/character_phrase (Phase 2.6/
+                                  2.3) live in sim::tick so they're gated by tests, not
+                                  just called from here.
       province.rs                 province LAND state (campaign_province_land[_all]) +
                                   the CONTROL VERBS — the only mutating campaign
                                   commands besides campaign_advance (§5.1)
@@ -646,7 +672,11 @@ ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, 
                                   CHRONICLE-FIRST (Phase 1.4, the default tab):
                                   the Phase 0.4 succession line inline, then the
                                   year-grouped event log (`ChronicleTab`), before
-                                  Summary/⚖ Standing/⚔ Feuds/🏦 Bank/📒 Accountant
+                                  Summary (now tags family-run holdings, Phase 2.2)/
+                                  👪 Kin (the roster, Phase 2.1/2.3/2.6)/
+                                  🧭 Expeditions (this house's live ventures, click a
+                                  row to highlight its destination province, Phase 1.3)/
+                                  ⚖ Standing/⚔ Feuds/🏦 Bank/📒 Accountant
   HouseDossier.tsx              ← The House Dossier's two views: `HouseStandingView`
                                   (five stability gauges — solvency COUNTDOWN, liquidity
                                   runway, concentration exposure, succession, cohesion —

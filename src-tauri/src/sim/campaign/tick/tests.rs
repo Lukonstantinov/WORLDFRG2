@@ -42,7 +42,7 @@
             is_guild: false, offices: vec![], trade_at: vec![], debt_since: 0,
             wealth_history: vec![], office_leases: vec![],
             influence: vec![], bailos: vec![],
-            head_female: false, head_age: 34, line: vec![], tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false,
+            head_female: false, head_age: 34, line: vec![], tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(),
         }
     }
 
@@ -2272,4 +2272,143 @@
         }
         assert!(s.houses[0].dynasty_chronicled, "dynasty never fired after three growing heads");
         assert!(s.houses[0].events.iter().any(|e| e.kind == "dynasty"));
+    }
+
+    // ── Phase 2.1/2.6 · the Kin roster ──────────────────────────────────────
+    /// The founding head is always `kin[0]`, with role "head" and full loyalty — the
+    /// substrate §2 of the design promises ("the head IS kin[head]").
+    #[test]
+    fn kin_roster_seeds_the_head_as_kin_zero() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["Aiora".into(); 2];
+        s.hub_minorities = vec![Vec::new(); 2];
+        let h = house_at(0, vec![0], 1);
+        s.houses.push(h);
+        s.seed_house_lines();
+        let kin = &s.houses[0].kin;
+        assert!(!kin.is_empty(), "a founded private house must get a roster");
+        assert_eq!(kin[0].name, s.houses[0].head_name);
+        assert_eq!(kin[0].role, 0, "kin[0] must be role 0 (head)");
+        assert_eq!(kin[0].loyalty, 1.0);
+        assert!(kin.len() >= 3, "expected the head plus 2-4 siblings, got {}", kin.len());
+    }
+
+    /// A civic guild has no family — its roster must stay empty.
+    #[test]
+    fn a_guild_has_no_kin_roster() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["Aiora".into(); 2];
+        s.hub_minorities = vec![Vec::new(); 2];
+        let mut g = house_at(0, vec![0], 0);
+        g.is_guild = true;
+        s.houses.push(g);
+        s.seed_house_lines();
+        assert!(s.houses[0].kin.is_empty(), "a guild must never get a kin roster");
+    }
+
+    /// Clearing every house's kin roster after each succession must not move a single
+    /// wealth figure — proof `kin` is read by nothing in the tick (the master plan's
+    /// invariant `a_house_with_no_kin_is_bit_identical`).
+    #[test]
+    fn a_house_with_no_kin_is_bit_identical() {
+        let build = || {
+            let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true), good("silk", 1, 2, 20.0, 0.35, false)];
+            let ng = goods.len();
+            let hubs = (0..6u32).map(|i| {
+                let prod: Vec<f32> = (0..ng).map(|g| if g == 0 { 9000.0 } else { 700.0 }).collect();
+                hub(i, (i as f32) * 4.0, 0.0, 9000.0, prod, 0)
+            }).collect();
+            let mut s = sim(hubs, goods);
+            s.hub_culture = vec!["Aiora".into(); 6];
+            s.hub_minorities = vec![Vec::new(); 6];
+            for i in 0..4u32 {
+                let mut h = house_at(i, vec![1], 2);
+                h.wealth = 200.0 + i as f32 * 40.0;
+                s.houses.push(h);
+            }
+            s.seed_house_count = 4;
+            s.seed_house_lines();
+            s
+        };
+        let mut a = build();
+        let mut b = build();
+        for _ in 0..40 {
+            a.advance(365);
+            b.advance(365);
+            for h in b.houses.iter_mut() { h.kin.clear(); }
+        }
+        let wa: Vec<f32> = a.houses.iter().map(|h| h.wealth).collect();
+        let wb: Vec<f32> = b.houses.iter().map(|h| h.wealth).collect();
+        assert_eq!(wa, wb, "clearing the kin roster changed wealth — kin must not feed any decision");
+        assert_eq!(a.houses.len(), b.houses.len(), "clearing kin changed how many houses exist");
+    }
+
+    /// An agnatic line otherwise never produces a female head — the widow regency is
+    /// its one route to one, and it must actually fire (not just be dead code).
+    #[test]
+    fn widow_regency_occasionally_holds_an_agnatic_house() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..3u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["Aiora".into(); 3];
+        s.hub_minorities = vec![Vec::new(); 3];
+        s.culture_rules = vec![CultureRule { culture: "Aiora".into(), line: 0, rule: 1 }]; // agnatic + primogeniture
+        let mut h = house_at(0, vec![0], 0);
+        h.wealth = 1_000_000.0;
+        s.houses.push(h);
+        s.seed_house_lines();
+        let mut widow_terms = 0;
+        for gen in 0..60 {
+            s.tick = gen * 5 * TICKS_PER_YEAR;
+            s.houses[0].wealth *= 1.3;
+            s.succeed_house(0);
+            if s.houses[0].line.last().is_some_and(|p| p.accession == "widow regent") { widow_terms += 1; }
+        }
+        assert!(widow_terms > 0, "a widow regent never held an agnatic house over 60 successions");
+        assert!(widow_terms < 20, "widow regency fired far more than its ~8% rate: {widow_terms}/60");
+    }
+
+    /// Phase 2.6's own gate: whatever the roster looks like — empty, one dead kin,
+    /// a full mixed one — the power shares must sum to exactly 100 (or be empty for
+    /// an empty roster).
+    #[test]
+    fn power_shares_always_sum_to_100() {
+        use crate::sim::tick::kin_power_shares;
+        let mk = |role: u8, skill: f32, loyalty: f32| Kin {
+            name: "K".into(), female: false, born_tick: 0, dies_tick: 0, role, posted: -1,
+            character: [0; 4], loyalty, skill, parent: -1,
+        };
+        assert!(kin_power_shares(&[]).is_empty());
+
+        let one = kin_power_shares(&[mk(0, 0.7, 1.0)]);
+        assert_eq!(one.len(), 1);
+        assert!((one[0] - 100.0).abs() < 1e-3);
+
+        let mixed = kin_power_shares(&[
+            mk(0, 0.9, 1.0), mk(1, 0.5, 0.8), mk(2, 0.3, 0.4), mk(3, 0.1, 0.1),
+        ]);
+        assert!((mixed.iter().sum::<f32>() - 100.0).abs() < 1e-3, "shares: {mixed:?}");
+        assert!(mixed[0] > mixed[1] && mixed[1] > mixed[2], "head must outweigh heir must outweigh factor");
+
+        // Every kin dead/married-out (zero weight) — must still sum to 100 (even split).
+        let dead = kin_power_shares(&[mk(5, 0.0, 0.0), mk(4, 0.0, 0.0)]);
+        assert!((dead.iter().sum::<f32>() - 100.0).abs() < 1e-3, "shares: {dead:?}");
+    }
+
+    /// A character phrase names only the NOTABLE axes and stays empty for a middling
+    /// character — the same "quiet unless it matters" discipline as the stability
+    /// gauges.
+    #[test]
+    fn character_phrase_is_quiet_unless_notable() {
+        use crate::sim::tick::character_phrase;
+        assert_eq!(character_phrase([0, 0, 0, 0]), "");
+        let p = character_phrase([2, 2, 0, -2]);
+        assert!(!p.is_empty());
+        assert!(p.ends_with('.'));
+        let first = p.chars().next().unwrap();
+        assert!(first.is_uppercase(), "phrase must start capitalised: {p}");
     }

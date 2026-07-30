@@ -891,11 +891,12 @@ impl CampaignSim {
             text: format!("{} funds an expedition from {} to {} — {} {}",
                 leader, on, dn, units, if sea_route { "ships" } else { "caravans" }),
         });
+        let dest_province = self.hub_province.get(dest).copied().unwrap_or(-1);
         self.expeditions.push(Expedition {
             id, house: hi as u32, leader, origin: origin as u32, dest: dest as u32,
             ox, oy, dx, dy, launched_tick: tick, travel_ticks: travel, pos: 0.0, outbound: true,
             caravans, ships, good: good as u16, cargo_qty, cost, revenue: 0.0,
-            arrived_frac: 1.0, status: 0, hazards: Vec::new(),
+            arrived_frac: 1.0, status: 0, hazards: Vec::new(), dest_province,
         });
     }
 

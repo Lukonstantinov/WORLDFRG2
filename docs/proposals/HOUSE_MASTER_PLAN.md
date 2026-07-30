@@ -1,6 +1,8 @@
 # The house mechanism — critique, then the master plan
 
-**Status: Phase 0 COMPLETE (0.1–0.4); Phases 1–5 are plan.** Consolidates the design documents
+**Status: Phase 0 COMPLETE; Phase 1 COMPLETE; Phase 2 HALF built (2.1/2.2/2.3/2.6 done,
+2.4/2.5 deliberately deferred — see the handoff block); Phases 3–5 are plan.**
+Consolidates the design documents
 (`HOUSE_PEOPLE_AND_TIERS` · `HOUSE_PEOPLE_PLAN` · `HOUSE_POWER_AND_POLITICS` ·
 `HOUSE_SUCCESSION_CRISIS` · `HOUSE_POWER_STRUGGLE_VIEW` ·
 `HOUSE_FACTION_NAMING_AND_RECORD`) and reviews them cold before committing to build.
@@ -296,7 +298,53 @@ contains the two open defects already on the scoreboard.
 > houses are standing and is right-censored on a 60-year run. The correct estimator is a
 > hazard over exposure (`deaths ÷ house-years`), which `econ_diagnose_house_turnover` reports.
 >
-> ## Phase 1.1/1.2/1.4 are DONE — 1.3 (expeditions tab) is what's left of Phase 1
+> ## Phase 1 is COMPLETE. Phase 2 is HALF built — 2.4/2.5 deferred on purpose
+>
+> **1.3 (expeditions tab)** shipped: `Expedition.dest_province`, a 🧭 Expeditions dossier
+> tab (this house's own live ventures), click a row to highlight its destination
+> province. Phase 1 is now entirely done.
+>
+> **Phase 2 (People):** 2.1 (`Kin` roster + widow regency), 2.2 (holdings authorship),
+> 2.3 (character as a phrase, no effects) and 2.6 (power shares) are built. **2.4
+> (character wired to real decisions) and 2.5 (stewards with skim/wage mechanics) were
+> NOT attempted this pass — deliberately, not by running out of time.** Both move house
+> wealth directly, which means each needs its own `econ_` verification as it's built,
+> the same discipline every other economically-live change in this file has followed.
+> Building four knobs blind and finding out at the end whether the Gini/lifespan bands
+> survived would be exactly the failure mode §2.4 of `CLAUDE.md` warns against — a spot
+> win that risks an aggregate loss, discovered too late to cheaply revert.
+>
+> Four findings from this pass:
+>
+> 1. **`Kin.posted` is a snapshot, not a live mirror.** It's set when the roster is
+>    (re)generated — at founding and every succession — from whatever holdings the
+>    house owns AT THAT MOMENT. A holding gained between successions has no posted
+>    kin until the next one. Documented on the field itself and in the master-plan
+>    table rather than hidden; the alternative (keeping `posted` continuously
+>    synchronised with `hubs[].owner_house`/`offices`) is real additional machinery
+>    for a cosmetic display, and this project's own rule 4 (no half-finished
+>    abstractions) argues against building it speculatively.
+> 2. **The widow regency needed no roster dependency at all.** The design frames it as
+>    "if the head dies with no eligible heir, the widow becomes head" — but the kin
+>    roster doesn't yet track marriages, so "is there a widow" isn't answerable from
+>    state. Implemented instead as an independent small roll
+>    (`WIDOW_REGENCY_CHANCE`=8%) on purely agnatic successions, which is the one line
+>    rule that otherwise has zero route to a female head (agnatic-cognatic, absolute
+>    and enatic already produce one via `heir_is_female`). Gated by
+>    `widow_regency_occasionally_holds_an_agnatic_house` — it must fire, and it must
+>    stay rare.
+> 3. **Relations/modifiers (the rest of 2.6) has no state to derive from yet.** The
+>    design's "power shares + relations + modifiers" bundles three things; only power
+>    shares are pure functions of the roster alone. A kin's RELATION to another kin
+>    (rival, ally, married-in) needs the marriage/schism state Phase 2's own later
+>    items would add — building it now would mean inventing state Phase 4/5 might
+>    duplicate or contradict.
+> 4. **Holdings authorship folds naturally into the existing Summary tab** rather than
+>    needing a new view: an estate/office row now reads "Kelmar (Tanmo)" when family-run
+>    and stays unmarked when hired — the same "quiet unless it matters" rule the
+>    stability gauges and the character phrase both already follow.
+>
+> ## Phase 1.1/1.2/1.4 are DONE — 1.3 (expeditions tab) is what's left of Phase 1 (superseded — see above)
 >
 > Three findings from building the tier list, the dossier figure, and the
 > chronicle-first reorder:
@@ -367,7 +415,7 @@ tunable.
 |---|---|---|
 | 1.1 | ~~**Tiers** + list grouping (rank-banded, hysteresis, Tier 1 may be empty)~~ **DONE** — `assign_house_tiers` (`sim/campaign/tick/houses.rs`), `HousesPanel.tsx` groups by tier (3/4 collapsed by default). | ✅ `tsc` clean; dynamics bit-identical (`simulate_decades_reports_dynamics`); 3 new tests |
 | 1.2 | ~~**Culture dress figure** on the dossier — reuse `cultureFigure.ts`, 3 house marks, register by tier~~ **DONE** — mark 1 (garment recolour) simplified to a coloured frame around the portrait rather than touching the shared SVG renderer; marks 2 (CoatOfArms badge) and 3 (tier-register occasion) built as specified. | ✅ `tsc` clean |
-| 1.3 | **Expeditions tab** + province highlight (`Expedition.house` already exists) | `Expedition.dest_province` unread by the tick ⇒ dynamics bit-identical |
+| 1.3 | ~~**Expeditions tab** + province highlight (`Expedition.house` already exists)~~ **DONE** — `Expedition.dest_province`, an 🧭 Expeditions dossier tab, click-to-highlight on the province plate. | ✅ `tsc`; `dest_province` unread by the tick ⇒ dynamics bit-identical |
 | 1.4 | ~~**Chronicle-first dossier** (2.3) + **positive-event markers** (2.2)~~ **DONE** — Chronicle is now the FIRST/default dossier tab, showing the Phase 0.4 succession line inline plus the year-grouped event log. Finest hour + golden age + dynasty of merchants built; great partnership + legendary head deferred (see finding above). | ✅ `tsc`; 3 new `tick::` tests; dynamics bit-identical |
 
 Nothing here can regress either oracle. This is the phase you can look at soonest.
@@ -376,12 +424,12 @@ Nothing here can regress either oracle. This is the phase you can look at soones
 
 | # | Step | Gate |
 |---|---|---|
-| 2.1 | **`Kin` roster** with gender; widows may inherit (1.2) | no roster ⇒ bit-identical |
-| 2.2 | **Holdings authorship** — kin vs hired steward | as above |
-| 2.3 | **`Character`** on Kin/Official/Figure, culture-derived, phrase only — no effects | **all-zero character ⇒ bit-identical** |
-| 2.4 | **Character → knobs**, ±15% cap | dynamics bounded; `econ_` bands hold; all-zero still bit-identical |
-| 2.5 | **Stewards** — skill, wage, skim, poaching | dynamics bounded; `econ_` bands hold |
-| 2.6 | **Power shares + relations + modifiers**, read-only | `power_shares_always_sum_to_100` |
+| 2.1 | ~~**`Kin` roster** with gender; widows may inherit (1.2)~~ **DONE** — `kin[0]` mirrors the head, 2–4 siblings generated per founding/succession; an agnatic line's one route to a female head, `WIDOW_REGENCY_CHANCE`=8%. | ✅ `a_house_with_no_kin_is_bit_identical`; `widow_regency_occasionally_holds_an_agnatic_house` |
+| 2.2 | ~~**Holdings authorship** — kin vs hired steward~~ **DONE (simplified)** — `Kin.posted` is a SNAPSHOT taken at roster generation, not live-synced to holdings gained since (documented, not hidden); the Summary tab tags a family-run estate/office with the posted kin's name, silent (= hired) otherwise. | ✅ `tsc` |
+| 2.3 | ~~**`Character`** on Kin/Official/Figure, culture-derived, phrase only — no effects~~ **DONE (Kin only, not Official/Figure)** — four axes rolled per kin, `character_phrase` reads notable axes only (§3's own discipline), never wired to a decision. | ✅ `character_phrase_is_quiet_unless_notable`; trivially bit-identical (nothing reads `Kin.character`) |
+| 2.4 | **Character → knobs**, ±15% cap | ⏸ **DEFERRED** — see the finding below: this is the first Phase 2 item that touches real decisions, and needs iterative `econ_` verification per knob, not a single check at the end. |
+| 2.5 | **Stewards** — skill, wage, skim, poaching | ⏸ **DEFERRED** — same reason as 2.4: new economic mechanics (skim, wages) that move house wealth directly. |
+| 2.6 | ~~**Power shares** + relations + modifiers, read-only~~ **DONE (power shares only)** — `kin_power_shares` (role × skill × loyalty, normalised); relations/modifiers between kin not built (no marriage/feud-at-the-kin-level state to derive them from yet). | ✅ `power_shares_always_sum_to_100` |
 
 ## Phase 3 — Politics
 
