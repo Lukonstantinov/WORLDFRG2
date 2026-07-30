@@ -113,6 +113,7 @@ pub fn run() {
             campaign_commands::campaign_house_stability,
             campaign_commands::campaign_get_feuds,
             campaign_commands::campaign_get_house_kin,
+            campaign_commands::campaign_get_house_goals,
             sim_commands::sim_run_all,
             file_commands::save_world_as,
             campaign_commands::finalize_world,

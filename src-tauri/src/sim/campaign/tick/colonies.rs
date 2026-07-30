@@ -969,6 +969,16 @@ impl CampaignSim {
                     let profit = e.revenue - e.cost;
                     if owner < self.houses.len() && !self.houses[owner].defunct {
                         self.houses[owner].wealth += e.revenue;
+                        // Phase 3.1 · a GOAL_REACH_PROVINCE goal succeeds when a
+                        // BACKED expedition completes its round trip to the target
+                        // province. `update_house_goal`'s yearly pass reads this state
+                        // and does the actual closing/chronicling.
+                        for g in self.houses[owner].goals.iter_mut() {
+                            if g.kind == GOAL_REACH_PROVINCE && g.state == GOAL_PURSUING
+                                && g.target_province == e.dest_province {
+                                g.state = GOAL_ACHIEVED;
+                            }
+                        }
                     }
                     let pi = self.prospect_idx(origin, dest);
                     self.route_prospects[pi].attempts = self.route_prospects[pi].attempts.saturating_add(1);

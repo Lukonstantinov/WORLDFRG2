@@ -440,3 +440,72 @@ pub fn campaign_get_house_kin(idx: u32, db: State<'_, WorldDb>) -> Result<Vec<Ki
         }
     }).collect())
 }
+
+// ── Phase 3.1 · goals ────────────────────────────────────────────────────────────
+
+/// One ambition, active or historical, for the dossier's 🎯 Ambitions tab.
+#[derive(Serialize)]
+pub struct GoalBrief {
+    /// A phrase — "cornering the silk trade", never a raw kind code.
+    pub what: String,
+    /// 0 pursuing · 1 achieved · 2 failed · 3 abandoned.
+    pub state: u8,
+    pub set_year: u32,
+    pub deadline_year: u32,
+    /// 0..1 where the kind has an honest fraction (corner-trade/charter-bank hold
+    /// years); -1 where it doesn't (a binary goal, or the target-wealth kinds) — the
+    /// dossier shows a phrase there instead of a bar, never a fabricated percentage.
+    pub progress_frac: f32,
+}
+
+#[derive(Serialize)]
+pub struct GoalsBrief {
+    pub active: Vec<GoalBrief>,
+    /// Most recent first.
+    pub history: Vec<GoalBrief>,
+}
+
+fn goal_brief(sim: &CampaignSim, hi: usize, g: &crate::sim::tick::Goal) -> GoalBrief {
+    use crate::sim::tick::{GOAL_CORNER_TRADE, GOAL_CHARTER_BANK, GOAL_RESTORE_HOUSE,
+        GOAL_SEAT_COUNCIL, GOAL_RAISE_BAILO, GOAL_REACH_PROVINCE, GOAL_OUTLAST_RIVAL,
+        GOAL_HOLD_YEARS_TRADE, GOAL_HOLD_YEARS_BANK};
+    let gname = |g: usize| sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
+    let hname = |h: usize| sim.hubs.get(h).map(|x| x.name.clone()).unwrap_or_default();
+    let what = match g.kind {
+        GOAL_CORNER_TRADE => format!("cornering the {} trade", gname(g.target_good.max(0) as usize)),
+        GOAL_SEAT_COUNCIL => format!("seating the council of {}", hname(g.target_hub.max(0) as usize)),
+        GOAL_RAISE_BAILO => format!("raising a bailo at {}", hname(g.target_hub.max(0) as usize)),
+        GOAL_CHARTER_BANK => "chartering a bank".into(),
+        GOAL_REACH_PROVINCE => "reaching the far province".into(),
+        GOAL_OUTLAST_RIVAL => format!("outlasting {}",
+            sim.houses.get(g.target_house.max(0) as usize).map(|h| h.name.clone()).unwrap_or_default()),
+        GOAL_RESTORE_HOUSE => "restoring the house's former wealth".into(),
+        _ => "an ambition".into(),
+    };
+    let progress_frac = match g.kind {
+        GOAL_CORNER_TRADE => (g.progress / GOAL_HOLD_YEARS_TRADE).clamp(0.0, 1.0),
+        GOAL_CHARTER_BANK => (g.progress / GOAL_HOLD_YEARS_BANK).clamp(0.0, 1.0),
+        GOAL_RESTORE_HOUSE => {
+            let target = g.progress.max(1e-6);
+            (sim.houses.get(hi).map(|h| h.wealth).unwrap_or(0.0) / target).clamp(0.0, 1.0)
+        }
+        _ => -1.0,
+    };
+    GoalBrief {
+        what, state: g.state,
+        set_year: g.set_tick / TICKS_PER_YEAR, deadline_year: g.deadline_tick / TICKS_PER_YEAR,
+        progress_frac,
+    }
+}
+
+/// This house's ambitions, active and historical, for the dossier's 🎯 Ambitions tab.
+#[tauri::command]
+pub fn campaign_get_house_goals(idx: u32, db: State<'_, WorldDb>) -> Result<GoalsBrief, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(GoalsBrief { active: vec![], history: vec![] }) };
+    let hi = idx as usize;
+    let Some(h) = sim.houses.get(hi) else { return Ok(GoalsBrief { active: vec![], history: vec![] }) };
+    let active = h.goals.iter().map(|g| goal_brief(&sim, hi, g)).collect();
+    let history = h.goal_history.iter().rev().take(12).map(|g| goal_brief(&sim, hi, g)).collect();
+    Ok(GoalsBrief { active, history })
+}

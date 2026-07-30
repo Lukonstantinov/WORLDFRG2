@@ -795,6 +795,18 @@ export interface KinBrief {
   character_phrase: string; // "" if unremarkable
   power_share: number;   // 0..100, sums to 100 across the roster
 }
+/** One ambition, active or historical (Phase 3.1). */
+export interface GoalBrief {
+  what: string;          // "cornering the silk trade"
+  state: number;         // 0 pursuing · 1 achieved · 2 failed · 3 abandoned
+  set_year: number;
+  deadline_year: number;
+  progress_frac: number; // 0..1 where honest, -1 where the kind has no fraction to show
+}
+export interface GoalsBrief {
+  active: GoalBrief[];
+  history: GoalBrief[]; // most recent first
+}
 export interface JournalEntry {
   tick: number;
   kind: string;

@@ -1928,8 +1928,62 @@ pub fn is_house_milestone(kind: &str) -> bool {
         "founded" | "succession" | "inheritance" | "archetype" | "monopoly"
         | "control_gained" | "control_lost" | "branch" | "charter" | "bailo"
         | "bankruptcy" | "dissolved" | "bank" | "marriage" | "loss" | "tier_up"
-        | "golden_age" | "dynasty")
+        | "golden_age" | "dynasty" | "goal_achieved")
 }
+
+/// Phase 3.1 · a checkable ambition (`HOUSE_PEOPLE_AND_TIERS.md` §4). A goal must be
+/// able to SUCCEED or FAIL and be recorded, or it is decoration — the whole reason
+/// this is a struct with a `state` rather than a wish-list string.
+///
+/// `progress`'s meaning is PER-KIND (documented at each kind below), not a uniform
+/// 0..1 — the kinds don't share a single honest notion of "how close", and forcing
+/// one would either lie for some kinds or need a second field for others.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Goal {
+    pub kind: u8,
+    /// −1 when unused by this `kind`.
+    pub target_good: i32,
+    pub target_hub: i32,
+    pub target_house: i32,
+    pub target_province: i32,
+    pub set_tick: u32,
+    pub deadline_tick: u32,
+    pub progress: f32,
+    /// 0 pursuing · 1 achieved · 2 failed · 3 abandoned (the house holding it died).
+    pub state: u8,
+}
+
+/// `Goal.kind` — see each kind's success test in `update_house_goal` (houses.rs).
+/// Cut from the design's 17 to the 7 that reference systems already in this codebase
+/// (`HOUSE_MASTER_PLAN.md` Part 3): every one of these reads state that already
+/// exists, so none of them needed new sim machinery to become checkable.
+pub const GOAL_CORNER_TRADE: u8 = 0;   // monopoly >= 60% share, held 5 years running
+pub const GOAL_SEAT_COUNCIL: u8 = 1;   // captor_house/council_house == self, at the seat
+pub const GOAL_RAISE_BAILO: u8 = 2;    // an owned office becomes a bailo
+pub const GOAL_CHARTER_BANK: u8 = 3;   // owns a solvent bank, held 10 years running
+pub const GOAL_REACH_PROVINCE: u8 = 4; // an OWN expedition completes its round trip there
+pub const GOAL_OUTLAST_RIVAL: u8 = 5;  // a named rival goes defunct while this house lives
+pub const GOAL_RESTORE_HOUSE: u8 = 6;  // wealth climbs back to the peak it held when set
+
+pub const GOAL_PURSUING: u8 = 0;
+pub const GOAL_ACHIEVED: u8 = 1;
+pub const GOAL_FAILED: u8 = 2;
+pub const GOAL_ABANDONED: u8 = 3;
+
+/// A Tier 1 (great) house pursues two ambitions at once; everyone else, one — §4's
+/// own rule, and a cheap extra reason Tier 1 reads as more than a bigger number.
+pub const GOAL_SLOTS_TIER1: usize = 2;
+pub const GOAL_SLOTS_OTHER: usize = 1;
+/// Kept for the record even after leaving `goals` — capped so a centuries-old
+/// dynasty's history doesn't grow without bound.
+pub const GOAL_HISTORY_CAP: usize = 24;
+/// Years of continuous qualification `GOAL_CORNER_TRADE`/`GOAL_CHARTER_BANK` need.
+pub const GOAL_HOLD_YEARS_TRADE: f32 = 5.0;
+pub const GOAL_HOLD_YEARS_BANK: f32 = 10.0;
+/// Default deadline (years from `set_tick`) per kind, indexed by `Goal.kind`. Long
+/// enough that a goal spans a meaningful slice of a head's tenure without being
+/// unfalsifiable.
+pub const GOAL_DEADLINE_YEARS: [f32; 7] = [25.0, 15.0, 15.0, 20.0, 20.0, 25.0, 20.0];
 
 /// A merchant family / trading house, with a named head of family who ages, dies
 /// and is succeeded by an heir. Houses compete for trade, hold monopolies, feud
@@ -2073,6 +2127,16 @@ pub struct House {
     /// The family roster. Empty for a guild (a civic office, not a family) and for any
     /// house whose roster generation was skipped — both read as "no kin", not an error.
     #[serde(default)] pub kin: Vec<Kin>,
+    // ── Goals (Phase 3.1) ──
+    /// Active ambitions — 1, or 2 for a Tier 1 house (`GOAL_SLOTS_TIER1`). A goal
+    /// biases the WEIGHTS of decisions the house already makes; it never adds a new
+    /// action. Never set for a guild — a civic office has no personal ambition.
+    #[serde(default)] pub goals: Vec<Goal>,
+    /// Every goal that ever left `goals` (achieved, failed, or abandoned), oldest
+    /// first, capped at `GOAL_HISTORY_CAP`. The dossier's answer to "what has this
+    /// family tried, and how did it go" — a family with three failed ambitions reads
+    /// very differently from one with three achieved.
+    #[serde(default)] pub goal_history: Vec<Goal>,
 }
 
 /// DLC 3.5 · one loan on a bank's books. An asset to the bank (interest income);
@@ -4303,6 +4367,11 @@ impl CampaignSim {
                             ev.drain(0..drop);
                         }
                     }
+                    // Phase 3.1 · check standing ambitions, then take up a new one if
+                    // a slot is free. Order matters: a goal that just succeeded/failed
+                    // frees its slot the same year a new one can be chosen.
+                    self.update_house_goal(hi);
+                    self.choose_house_goal(hi);
                 }
                 self.house_ledger_prev = self.house_ledger.clone();
                 let yr = tick / TICKS_PER_YEAR;

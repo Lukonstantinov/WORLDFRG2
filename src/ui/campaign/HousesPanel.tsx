@@ -7,8 +7,8 @@ import { YearChronicle } from "@ui/campaign/YearChronicle";
 import { FeudsView, HouseStandingView } from "@ui/campaign/HouseDossier";
 import { cultureFigureSVG, cultureSeed, type Occasion } from "@ui/campaign/cultureFigure";
 import { GOOD_DEFS } from "@goods";
-import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks, campaignGetExpeditions, campaignGetHouseKin } from "@bridge";
-import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief, ExpeditionView, KinBrief } from "@types";
+import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks, campaignGetExpeditions, campaignGetHouseKin, campaignGetHouseGoals } from "@bridge";
+import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief, ExpeditionView, KinBrief, GoalsBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 
 const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
@@ -310,9 +310,10 @@ function HouseDetail({ h, onClose, onChronicle }:
   const [chron, setChron] = useState<HouseHistory | null>(null);
   const [expeds, setExpeds] = useState<ExpeditionView[]>([]);
   const [kin, setKin] = useState<KinBrief[]>([]);
+  const [goals, setGoals] = useState<GoalsBrief | null>(null);
   // Chronicle-first (§2.3 of the design): the dossier has nothing for the player to
   // DECIDE, so the primary artefact is the family's record, not its balance sheet.
-  const [view, setView] = useState<"chronicle" | "summary" | "kin" | "standing" | "feuds" | "bank" | "ledger" | "expeditions">("chronicle");
+  const [view, setView] = useState<"chronicle" | "summary" | "kin" | "goals" | "standing" | "feuds" | "bank" | "ledger" | "expeditions">("chronicle");
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.house);
   const tick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
   useEffect(() => {
@@ -333,6 +334,8 @@ function HouseDetail({ h, onClose, onChronicle }:
       }).catch(() => {});
       // Phase 2.1 · the kin roster (empty for a guild or an older save).
       campaignGetHouseKin(h.idx).then((k) => { if (alive) setKin(k); }).catch(() => {});
+      // Phase 3.1 · this house's ambitions, active and historical.
+      campaignGetHouseGoals(h.idx).then((g) => { if (alive) setGoals(g); }).catch(() => {});
     }
     // Find this family's bank (if any) so we can show its balance-sheet subtab.
     if (h.owns_bank) {
@@ -418,6 +421,7 @@ function HouseDetail({ h, onClose, onChronicle }:
           expenses aren't clipped. */}
       <div style={{ display: "flex", gap: 4, margin: "7px 0 5px", borderBottom: "1px solid #1a2a3e", flexWrap: "wrap" }}>
         {(["chronicle", "summary", ...(kin.length > 0 ? ["kin" as const] : []),
+           ...(goals && (goals.active.length > 0 || goals.history.length > 0) ? ["goals" as const] : []),
            ...(expeds.length > 0 ? ["expeditions" as const] : []),
            "standing", "feuds", ...(bank ? ["bank" as const] : []), "ledger"] as const).map((t) => (
           <div key={t} onClick={() => setView(t)} style={{
@@ -427,6 +431,7 @@ function HouseDetail({ h, onClose, onChronicle }:
           }}>{t === "chronicle" ? "📜 Chronicle"
             : t === "summary" ? "Summary"
             : t === "kin" ? `👪 Kin (${kin.length})`
+            : t === "goals" ? `🎯 Ambitions${goals && goals.active.length > 0 ? ` (${goals.active.length})` : ""}`
             : t === "expeditions" ? `🧭 Expeditions (${expeds.length})`
             : t === "standing" ? "⚖ Standing"
             : t === "feuds" ? `⚔ Feuds${h.rivals.length > 0 ? ` (${h.rivals.length})` : ""}`
@@ -439,6 +444,8 @@ function HouseDetail({ h, onClose, onChronicle }:
         <ChronicleTab h={h} chron={chron} onExpand={() => onChronicle(h.name)} fmt={fmt} />
       ) : view === "kin" ? (
         <KinTab kin={kin} />
+      ) : view === "goals" ? (
+        <GoalsTab goals={goals} />
       ) : view === "expeditions" ? (
         <ExpeditionsTab expeds={expeds} fmt={fmt} />
       ) : view === "standing" ? (
@@ -681,6 +688,61 @@ function KinTab({ kin }: { kin: KinBrief[] }) {
   );
 }
 
+/** Phase 3.1 · a house's ambitions — active first (with a progress bar where the
+ *  kind has an honest fraction, else just a phrase and a deadline), then achieved/
+ *  failed outcomes as ✓/✗ (§2.1's own rule: one headline per row, everything else a
+ *  phrase). A goal biases weights on decisions the house already makes; it's shown
+ *  here as a fact about the family, not something the player sets. */
+function GoalsTab({ goals }: { goals: GoalsBrief | null }) {
+  const year = useCampaignStore((s) => Math.floor((s.snapshot?.clock.tick ?? 0) / 365));
+  if (!goals || (goals.active.length === 0 && goals.history.length === 0)) {
+    return <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>No ambitions on record.</div>;
+  }
+  return (
+    <div>
+      {goals.active.length > 0 && (
+        <>
+          <div style={timelineHdr}>Pursuing</div>
+          {goals.active.map((g, i) => (
+            <div key={i} style={{ marginBottom: 6 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+                <span style={{ fontSize: 11 }}>🎯</span>
+                <span style={{ color: "#e8dcc0", fontSize: 11 }}>{g.what}</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ color: "#7a90a8", fontSize: 9 }}>by {g.deadline_year}</span>
+              </div>
+              {g.progress_frac >= 0 ? (
+                <div style={{ height: 4, background: "#0a1018", borderRadius: 3, overflow: "hidden", marginTop: 2 }}>
+                  <div style={{ width: `${Math.round(g.progress_frac * 100)}%`, height: "100%", background: "#c9a227" }} />
+                </div>
+              ) : (
+                <div style={{ color: "#6a86a6", fontSize: 9, marginTop: 1 }}>
+                  {g.deadline_year > year ? `${g.deadline_year - year} years left` : "due"}
+                </div>
+              )}
+            </div>
+          ))}
+        </>
+      )}
+      {goals.history.length > 0 && (
+        <>
+          <div style={{ ...timelineHdr, marginTop: goals.active.length > 0 ? 8 : 0 }}>Outcomes</div>
+          {goals.history.map((g, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 5, padding: "1px 0" }}>
+              <span style={{ color: g.state === 1 ? "#7fd0a0" : "#c98", fontSize: 10 }}>
+                {g.state === 1 ? "✓" : "✗"}
+              </span>
+              <span style={{ color: "#9ab0c8", fontSize: 10 }}>{g.what}</span>
+              <span style={{ flex: 1 }} />
+              <span style={{ color: "#6a86a6", fontSize: 9 }}>{g.set_year}–{g.deadline_year}</span>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 /** DLC 3.5 · a compact grid of a family's individual stats (top of the Summary). */
 function HouseStatGrid({ h, fmt }: { h: HouseBrief; fmt: (v: number) => string }) {
   const year = useCampaignStore((s) => Math.floor((s.snapshot?.clock.tick ?? 0) / 365));
@@ -908,12 +970,15 @@ const EVENT_ICON: Record<string, string> = {
   // Phase 1.1/1.4 · tiers + positive events (§2.2) — the mechanism otherwise only
   // produces decline; these give the chronicle something other than obituaries.
   tier_up: "⬆", golden_age: "☀", dynasty: "👑", inheritance: "📜",
+  // Phase 3.1 · goals.
+  goal_set: "🎯", goal_achieved: "✓", goal_failed: "✗",
 };
 const EVENT_COLOR: Record<string, string> = {
   founded: "#cfe0f4", succession: "#9ab0c8", monopoly: "#e0b060", monopoly_lost: "#b08a5a",
   control_gained: "#7fd0a0", control_lost: "#d88", loss: "#e08a5a",
   branch: "#9fe07a", dissolved: "#8a93a0", figure: "#e6c878", marriage: "#e6a6c8", piracy: "#c07070",
   tier_up: "#7fd0a0", golden_age: "#e6c878", dynasty: "#e6c878", inheritance: "#9ab0c8",
+  goal_set: "#9ab0c8", goal_achieved: "#7fd0a0", goal_failed: "#c98",
 };
 
 /** A house's chronicle as a vertical timeline: founding, successions, monopolies,

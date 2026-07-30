@@ -9,6 +9,35 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-30 (Phase 3.1 · goals, built as STRUCTURE only)
+
+Scoped Phase 3 down to **3.1 only** — the crisis engine (3.2–3.6: competence/vice,
+factions, resolution rounds, contested succession, civic intervention, CrisisRecord)
+is a bigger undertaking and was explicitly set aside, not attempted.
+
+**3.1** gives every non-guild house `goals: Vec<Goal>` (1 slot, 2 for Tier 1) plus a
+capped `goal_history`: 7 kinds (corner a trade good, seat a council, raise the Bailo
+tier, charter a bank, reach a province by expedition, outlast a named rival, restore
+peak wealth after a fall), chosen yearly biased by archetype + character axis, checked
+yearly, chronicled achieved (milestone, permanent) vs. failed/abandoned (chatter,
+prunable). `GOAL_REACH_PROVINCE` hooks the existing expedition-arrival pass rather
+than adding a new success channel. A 🎯 Ambitions dossier tab shows active (progress
+bar / deadline countdown) and past (✓/✗ list) goals.
+
+**Same honest gap as always with a "structure first" cut: goals do not yet bias
+anything.** Nothing in `decide_fleets`/`update_feuds`/`update_guilds_and_offices`/etc.
+reads a house's active goal to weight its choices — the master plan's §4 closed loop
+(goal → weighted decisions → outcome → new goal) is not built. This is pure tracking
+against state the sim already computes, so it is provably inert: goals touch no
+wealth, no decision, no probability. Verified BYTE-IDENTICAL on both the dynamics
+test and the economy-oracle scorecard (goals literally cannot move a number yet).
+78 `tick::` tests pass (was 72, +6 — one per representative goal kind plus the
+Tier-1-gets-two-slots case). Full scoping note in `HOUSE_MASTER_PLAN.md`'s handoff
+block, including the still-UNMEASURED 200-year achieve/fail-rate the design spec
+actually cares about.
+
+---
+
 ## Current state — 2026-07-30 (Phase 2.4/2.5 · Phase 2 now COMPLETE)
 
 Asked to build the two items the previous entry deliberately deferred, with a single

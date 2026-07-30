@@ -42,7 +42,7 @@
             is_guild: false, offices: vec![], trade_at: vec![], debt_since: 0,
             wealth_history: vec![], office_leases: vec![],
             influence: vec![], bailos: vec![],
-            head_female: false, head_age: 34, line: vec![], tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(),
+            head_female: false, head_age: 34, line: vec![], tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(),
         }
     }
 
@@ -2592,4 +2592,164 @@
         };
         assert!(poached_at(1) > 0, "the HIRED office (hub 1) was never poached over 2000 months");
         assert_eq!(poached_at(2), 0, "the FAMILY-posted office (hub 2) must never be poached");
+    }
+
+    // ── Phase 3.1 · goals ────────────────────────────────────────────────────
+    /// A house takes up a goal only when it has a free slot, and a Tier 1 house gets
+    /// TWO at once (§4's own rule) while everyone else gets one.
+    #[test]
+    fn tier_one_pursues_two_goals_everyone_else_one() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..3u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["Aiora".into(); 3];
+        s.hub_minorities = vec![Vec::new(); 3];
+        let mut h1 = house_at(0, vec![0], 1);
+        h1.tier = 1;
+        h1.wealth = 500.0;
+        h1.archetype = ARCH_SPECIALTY;
+        let mut h2 = house_at(1, vec![0], 1);
+        h2.tier = 3;
+        h2.wealth = 500.0;
+        h2.archetype = ARCH_SPECIALTY;
+        s.houses.push(h1);
+        s.houses.push(h2);
+        // Choosing repeatedly (as the yearly cadence would) must stop at the slot cap.
+        for _ in 0..5 { s.choose_house_goal(0); s.choose_house_goal(1); }
+        assert_eq!(s.houses[0].goals.len(), GOAL_SLOTS_TIER1, "Tier 1 must fill both slots");
+        assert_eq!(s.houses[1].goals.len(), GOAL_SLOTS_OTHER, "a non-Tier-1 house gets one slot");
+    }
+
+    /// CORNER_TRADE succeeds after the monopoly share holds >=60% for
+    /// GOAL_HOLD_YEARS_TRADE running years, and the streak RESETS the moment it dips.
+    #[test]
+    fn corner_trade_goal_succeeds_after_a_sustained_monopoly() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        let mut h = house_at(0, vec![0], 1);
+        h.wealth = 500.0;
+        s.houses.push(h);
+        s.houses[0].goals.push(Goal {
+            kind: GOAL_CORNER_TRADE, target_good: 0, target_hub: -1, target_house: -1, target_province: -1,
+            set_tick: 0, deadline_tick: 100 * TICKS_PER_YEAR, progress: 0.0, state: GOAL_PURSUING,
+        });
+        // A dip resets the streak before the real run.
+        s.houses[0].monopoly = vec![(0, 0.3)];
+        s.update_house_goal(0);
+        assert_eq!(s.houses[0].goals[0].progress, 0.0);
+        s.houses[0].monopoly = vec![(0, 0.65)];
+        for yr in 0..(GOAL_HOLD_YEARS_TRADE as u32 - 1) {
+            s.tick = yr * TICKS_PER_YEAR;
+            s.update_house_goal(0);
+            assert_eq!(s.houses[0].goals.len(), 1, "must not close before the hold period completes");
+        }
+        s.tick = (GOAL_HOLD_YEARS_TRADE as u32) * TICKS_PER_YEAR;
+        s.update_house_goal(0);
+        assert!(s.houses[0].goals.is_empty(), "the goal must close once achieved");
+        assert_eq!(s.houses[0].goal_history.len(), 1);
+        assert_eq!(s.houses[0].goal_history[0].state, GOAL_ACHIEVED);
+        assert!(s.houses[0].events.iter().any(|e| e.kind == "goal_achieved"));
+    }
+
+    /// A goal that never qualifies FAILS at its deadline — it doesn't just sit there
+    /// forever, and it doesn't silently vanish either.
+    #[test]
+    fn a_goal_fails_at_its_deadline_if_never_achieved() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        let mut h = house_at(0, vec![0], 1);
+        h.wealth = 500.0;
+        s.houses.push(h);
+        s.houses[0].goals.push(Goal {
+            kind: GOAL_SEAT_COUNCIL, target_good: -1, target_hub: 0, target_house: -1, target_province: -1,
+            set_tick: 0, deadline_tick: 5 * TICKS_PER_YEAR, progress: 0.0, state: GOAL_PURSUING,
+        });
+        s.tick = 4 * TICKS_PER_YEAR;
+        s.update_house_goal(0);
+        assert_eq!(s.houses[0].goals.len(), 1, "must not fail before its own deadline");
+        s.tick = 5 * TICKS_PER_YEAR;
+        s.update_house_goal(0);
+        assert!(s.houses[0].goals.is_empty());
+        assert_eq!(s.houses[0].goal_history[0].state, GOAL_FAILED);
+        assert!(s.houses[0].events.iter().any(|e| e.kind == "goal_failed"));
+        assert!(!is_house_milestone("goal_failed"), "a failed goal is chatter, not a milestone");
+        assert!(is_house_milestone("goal_achieved"), "an achieved goal IS a milestone");
+    }
+
+    /// RESTORE_HOUSE targets the peak wealth AT THE MOMENT THE GOAL WAS SET — not the
+    /// ever-rising all-time peak, which a house could never catch if it kept climbing.
+    #[test]
+    fn restore_house_goal_targets_the_peak_at_the_moment_it_was_set() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        let mut h = house_at(0, vec![0], 1);
+        h.wealth = 40.0;
+        h.peak_wealth = 100.0; // fell to 40% of peak — eligible
+        s.houses.push(h);
+        s.choose_house_goal(0);
+        assert_eq!(s.houses[0].goals.len(), 1, "a fallen house must pick up RESTORE_HOUSE");
+        assert_eq!(s.houses[0].goals[0].kind, GOAL_RESTORE_HOUSE);
+        assert_eq!(s.houses[0].goals[0].progress, 100.0, "the target must be the peak AT SET TIME");
+        // The all-time peak keeps climbing after the goal is set...
+        s.houses[0].peak_wealth = 400.0;
+        s.houses[0].wealth = 150.0; // above the ORIGINAL 100 target, but not the new peak
+        s.update_house_goal(0);
+        assert!(s.houses[0].goals.is_empty(), "must succeed against the OLD target, not the new peak");
+        assert_eq!(s.houses[0].goal_history[0].state, GOAL_ACHIEVED);
+    }
+
+    /// OUTLAST_RIVAL succeeds the moment the named rival goes defunct.
+    #[test]
+    fn outlast_rival_goal_succeeds_when_the_rival_dies() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        let mut h = house_at(0, vec![0], 1);
+        h.wealth = 500.0;
+        s.houses.push(h);
+        s.houses.push(house_at(1, vec![0], 1));
+        s.houses[0].goals.push(Goal {
+            kind: GOAL_OUTLAST_RIVAL, target_good: -1, target_hub: -1, target_house: 1, target_province: -1,
+            set_tick: 0, deadline_tick: 100 * TICKS_PER_YEAR, progress: 0.0, state: GOAL_PURSUING,
+        });
+        s.update_house_goal(0);
+        assert_eq!(s.houses[0].goals.len(), 1, "must not succeed while the rival lives");
+        s.houses[1].defunct = true;
+        s.update_house_goal(0);
+        assert!(s.houses[0].goals.is_empty());
+        assert_eq!(s.houses[0].goal_history[0].state, GOAL_ACHIEVED);
+    }
+
+    /// REACH_PROVINCE succeeds only through the expedition hook — a live round trip
+    /// to the target province — and never for an unrelated province.
+    #[test]
+    fn reach_province_goal_succeeds_only_via_a_backed_expeditions_return() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..3u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.hub_province = vec![0, 1, 2];
+        s.prov_seat = vec![[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]];
+        let mut h = house_at(0, vec![0], 1);
+        h.wealth = 500.0;
+        s.houses.push(h);
+        s.houses[0].goals.push(Goal {
+            kind: GOAL_REACH_PROVINCE, target_good: -1, target_hub: -1, target_house: -1, target_province: 2,
+            set_tick: 0, deadline_tick: 100 * TICKS_PER_YEAR, progress: 0.0, state: GOAL_PURSUING,
+        });
+        // An expedition that reaches the WRONG province must not satisfy the goal.
+        s.houses[0].wealth = 500.0;
+        s.launch_expedition(0, 0, 1); // dest_province = 1, not the target (2)
+        for _ in 0..400 { s.expedition_travel_pass(); }
+        assert_eq!(s.houses[0].goals.len(), 1, "the wrong province must not satisfy the goal");
+        // One that reaches the RIGHT province must.
+        s.houses[0].wealth = 500.0;
+        s.launch_expedition(0, 0, 2); // dest_province = 2, the target
+        for _ in 0..400 { s.expedition_travel_pass(); }
+        s.tick += 1; // let update_house_goal's next check see the externally-set state
+        s.update_house_goal(0);
+        assert!(s.houses[0].goals.is_empty(), "reaching the target province must close the goal");
+        assert_eq!(s.houses[0].goal_history.last().unwrap().state, GOAL_ACHIEVED);
     }

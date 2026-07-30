@@ -1,6 +1,8 @@
 # The house mechanism — critique, then the master plan
 
-**Status: Phase 0 COMPLETE; Phase 1 COMPLETE; Phase 2 COMPLETE; Phases 3–5 are plan.**
+**Status: Phase 0 COMPLETE; Phase 1 COMPLETE; Phase 2 COMPLETE; Phase 3.1 (goals)
+built as structure, not yet wired to bias decisions — see the handoff block; 3.2–5
+are plan.**
 Consolidates the design documents
 (`HOUSE_PEOPLE_AND_TIERS` · `HOUSE_PEOPLE_PLAN` · `HOUSE_POWER_AND_POLITICS` ·
 `HOUSE_SUCCESSION_CRISIS` · `HOUSE_POWER_STRUGGLE_VIEW` ·
@@ -297,6 +299,42 @@ contains the two open defects already on the scoreboard.
 > houses are standing and is right-censored on a 60-year run. The correct estimator is a
 > hazard over exposure (`deaths ÷ house-years`), which `econ_diagnose_house_turnover` reports.
 >
+> ## Phase 3.1 (goals) is built — as STRUCTURE, not yet the closed loop §4 describes
+>
+> Phase 0, 1 and 2 are complete. Phase 3 (Politics) is the big one — goals, competence/
+> vice, and a full multi-round crisis engine with named factions, civic intervention,
+> and a permanent record (3.2 through 3.6). Only **3.1 (goals)** is built so far; 3.2–3.6
+> are genuinely a different scale of work (a crisis engine, not a tracked ambition) and
+> deserve their own dedicated pass rather than being compressed into this one.
+>
+> **What 3.1 actually is.** Seven goal kinds (cut from the design's 17 to the ones that
+> reference systems already in this codebase — every one of monopoly tracking,
+> `council_house`/`captor_house`, `bailos`, bank solvency, expeditions with
+> `dest_province`, feuds, and `peak_wealth` already existed): corner the trade, seat
+> the council, raise a bailo, charter a bank, reach a province, outlast a rival, restore
+> the house. Chosen yearly, biased by archetype and the head's character axes; checked
+> yearly (or, for `GOAL_REACH_PROVINCE`, by a hook in `expedition_travel_pass` the
+> moment a backed expedition completes its round trip); achieved is a milestone, failed
+> is chatter, both chronicled and shown in a new 🎯 Ambitions dossier tab.
+>
+> **What 3.1 is NOT, and this matters**: §4 says "a goal biases the WEIGHTS of decisions
+> the AI already makes — it never adds a new action." As built, goals are read-only —
+> they TRACK toward success/failure against state the sim already produces, but nothing
+> in `decide_fleets`/`update_feuds`/`update_guilds_and_offices`/etc. reads a house's
+> active goal to weight its choices. That closed loop (a house pursuing "corner the silk
+> trade" actually trading more aggressively in silk BECAUSE of the goal) is not built.
+> This is why the gate came back byte-identical against the pre-3.1 economy scorecard —
+> not a bug, but a real gap between what's shipped and what §4 describes. Wiring the
+> bias in is the natural 3.1b, and it's exactly the kind of change 2.4/2.5's own finding
+> warns about: it moves wealth, so it needs its own `econ_` check as it's built, not
+> folded into a single end-of-session run.
+>
+> **The achieve/fail rate gate ("sane over 200 yrs") is UNMEASURED**, not passing —
+> building a 200-year long-run diagnostic (mirroring `econ_diagnose_house_turnover`'s
+> pattern) is the next honest step before trusting the 7 kinds' balance against each
+> other, and it was not built this pass. Recorded here so it isn't silently assumed
+> fine.
+>
 > ## Phase 1 and Phase 2 are BOTH COMPLETE
 >
 > The previous handoff deferred 2.4 (character → decisions) and 2.5 (stewards) because
@@ -487,7 +525,7 @@ Nothing here can regress either oracle. This is the phase you can look at soones
 
 | # | Step | Gate |
 |---|---|---|
-| 3.1 | **~8 goals**, head-chosen (cut from 17, per Part 3) | achieve/fail rate sane over 200 yrs |
+| 3.1 | ~~**~8 goals**, head-chosen (cut from 17, per Part 3)~~ **DONE (structure only — see the handoff finding)** — 7 kinds, chosen yearly by archetype/character bias, checked yearly, chronicled achieved (milestone) vs failed (chatter), a 🎯 Ambitions dossier tab. **Goals do NOT yet bias any decision's weights** — they are read-only tracking against state that already exists, not the closed loop §4 describes. | ✅ 6 new tests (one per representative kind + slot cap); `econ_`/dynamics BYTE-IDENTICAL (goals touch no wealth) |
 | 3.2 | **Competence + vice** | dynamics bounded; house death-rate must not spike |
 | 3.3 | **Crisis**: open · named factions + tints · heir choice · rounds · resolve | `every_crisis_terminates`; `faction_names_and_tints_are_distinct`; `allegiance_partitions_the_house`; deposition rate sane over 300 yrs |
 | 3.4 | **Contested undecided** + cause/stake shifts + grace period + **salience rule** (2.4) | courting spend must not move the econ scorecard |

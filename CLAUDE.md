@@ -376,6 +376,26 @@ serde-defaulted so old saves load). Grouped by theme:
   `an_empty_kin_roster_pays_no_steward_cost_and_is_never_poached` (renamed from
   `a_house_with_no_kin_is_bit_identical`, whose old premise Phase 2.4/2.5
   deliberately supersede for a house that DOES have a roster).
+- **Goals (Phase 3.1, structure only — see `docs/proposals/HOUSE_MASTER_PLAN.md`'s
+  handoff block):** a non-guild house carries `goals: Vec<Goal>` (1 slot, 2 for
+  Tier 1 — `GOAL_SLOTS_TIER1`) plus a capped `goal_history`. `choose_house_goal`
+  (yearly) picks ONE of 7 kinds (`GOAL_CORNER_TRADE`/`_SEAT_COUNCIL`/`_RAISE_BAILO`/
+  `_CHARTER_BANK`/`_REACH_PROVINCE`/`_OUTLAST_RIVAL`/`_RESTORE_HOUSE`) biased by
+  archetype and the head's character axes, when a slot is free. `update_house_goal`
+  (yearly) checks each active goal against state that ALREADY exists elsewhere in the
+  sim — a monopoly share, `council_house`/`captor_house`, `bailos`, bank solvency,
+  the rival's `defunct` flag, or (via a hook in `expedition_travel_pass`, the moment a
+  BACKED expedition completes its round trip) `dest_province` — and closes it
+  achieved (milestone) or failed-at-deadline (chatter) into `goal_history`.
+  `GOAL_RESTORE_HOUSE`'s `progress` field holds the TARGET wealth (the peak at the
+  moment the goal was SET, not the ever-rising all-time peak — a house could never
+  catch a moving target). **Goals are currently READ-ONLY tracking** — nothing in
+  `decide_fleets`/`update_feuds`/`update_guilds_and_offices`/etc. reads a house's
+  active goal to weight its choices, so this is NOT yet §4's "biases the weights of
+  decisions the AI already makes" closed loop. Wiring that in is real future work,
+  flagged (not silently assumed done) because it would move wealth and needs its own
+  `econ_` check as it's built, the same lesson Phase 2.4/2.5 already recorded.
+  Exposed via `campaign_get_house_goals`; shown in the dossier's 🎯 Ambitions tab.
 - **Succession & inheritance (Phase 0.4):** each people carries a **line rule** (who may
   inherit) and a **division rule** (how the estate divides) resolved once from its language
   kit into `culture_rules` (`sim/shared/inheritance.rs`, §8.15). `succeed_house` reads them
@@ -498,7 +518,8 @@ commands/
       read_houses.rs              House Dossier reads: the five STABILITY gauges
                                   (campaign_house_stability) + the FEUD board
                                   (campaign_get_feuds) + the KIN roster
-                                  (campaign_get_house_kin, Phase 2.1). Four of five
+                                  (campaign_get_house_kin, Phase 2.1) + AMBITIONS
+                                  (campaign_get_house_goals, Phase 3.1). Four of five
                                   gauges are pure derivations of state the sim already
                                   held; kin_power_shares/character_phrase (Phase 2.6/
                                   2.3) live in sim::tick so they're gated by tests, not
@@ -696,6 +717,10 @@ ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, 
                                   year-grouped event log (`ChronicleTab`), before
                                   Summary (now tags family-run holdings, Phase 2.2)/
                                   👪 Kin (the roster, Phase 2.1/2.3/2.6)/
+                                  🎯 Ambitions (active/history goals from 7 kinds —
+                                  chosen yearly by archetype/character bias, checked
+                                  yearly — READ-ONLY tracking, not yet wired to bias
+                                  any decision's weights, Phase 3.1)/
                                   🧭 Expeditions (this house's live ventures, click a
                                   row to highlight its destination province, Phase 1.3)/
                                   ⚖ Standing/⚔ Feuds/🏦 Bank/📒 Accountant

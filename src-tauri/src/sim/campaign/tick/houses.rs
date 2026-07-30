@@ -1290,7 +1290,7 @@ impl CampaignSim {
             is_guild: false, offices: vec![h as u32], trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(),
+            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(),
         });
         self.found_head_record(idx, "founder");
         Some(idx)
@@ -2188,7 +2188,7 @@ impl CampaignSim {
             is_guild: true, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: false, head_age: guild_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(),
+            head_female: false, head_age: guild_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(),
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -2791,6 +2791,247 @@ impl CampaignSim {
         1.0 + (v / 2.0) * CHARACTER_KNOB_CAP
     }
 
+    /// The head's raw character axis, 0 if no roster — used to BIAS which goal a
+    /// house picks (§4), not to modify a decision (that's `head_character_factor`).
+    fn head_axis(&self, hi: usize, axis: usize) -> i8 {
+        self.houses.get(hi).and_then(|h| h.kin.first())
+            .and_then(|k| k.character.get(axis).copied()).unwrap_or(0)
+    }
+
+    // ── Phase 3.1 · goals ──────────────────────────────────────────────────────
+    // §4: "a goal must be able to SUCCEED or FAIL and be recorded, or it is
+    // decoration." Chosen yearly if a house has a free slot; checked yearly against
+    // state that already exists elsewhere in the sim. A goal never adds a new
+    // action — it is read-only against everything except its own `progress`/`state`.
+
+    /// Give every live, non-guild house a chance to take up a new ambition if it has
+    /// a free slot (1, or `GOAL_SLOTS_TIER1` for a Tier 1 house). Called yearly.
+    pub(crate) fn choose_house_goal(&mut self, hi: usize) {
+        if self.houses[hi].defunct || self.houses[hi].is_guild { return; }
+        let slots = if self.houses[hi].tier == 1 { GOAL_SLOTS_TIER1 } else { GOAL_SLOTS_OTHER };
+        if self.houses[hi].goals.len() >= slots { return; }
+        let tick = self.tick;
+        let hub = self.houses[hi].hub as usize;
+        let seed = self.seed;
+
+        // Each candidate: (kind, target_good, target_hub, target_house, target_province, score).
+        let mut cand: Vec<(u8, i32, i32, i32, i32, f32)> = Vec::new();
+        let bold = self.head_axis(hi, 0) as f32;
+        let greed = self.head_axis(hi, 1) as f32;
+        let civic = self.head_axis(hi, 2) as f32;
+        let expansive = self.head_axis(hi, 3) as f32;
+
+        // Corner the trade: pick the house's own top specialty, if not already held.
+        if let Some(&g) = self.houses[hi].spec.first() {
+            let already = self.houses[hi].monopoly.iter().any(|&(mg, s)| mg == g && s >= 0.6);
+            if !already {
+                let score = 1.0 + greed.max(0.0) + if self.houses[hi].archetype == ARCH_SPECIALTY { 1.0 } else { 0.0 };
+                cand.push((GOAL_CORNER_TRADE, g as i32, -1, -1, -1, score));
+            }
+        }
+        // Seat the council of the house's own seat, if it doesn't already.
+        if self.hubs.get(hub).is_some_and(|h| h.council_house != hi as i32) {
+            let score = 1.0 + civic.max(0.0)
+                + if self.houses[hi].archetype == ARCH_POLITICAL { 1.5 } else { 0.0 };
+            cand.push((GOAL_SEAT_COUNCIL, -1, hub as i32, -1, -1, score));
+        }
+        // Raise a bailo: an owned office not yet one.
+        if let Some(&oh) = self.houses[hi].offices.iter().find(|&&o| !self.houses[hi].bailos.contains(&o)) {
+            let score = 1.0 + expansive.max(0.0)
+                + if self.houses[hi].archetype == ARCH_FLEET { 1.0 } else { 0.0 };
+            cand.push((GOAL_RAISE_BAILO, -1, oh as i32, -1, -1, score));
+        }
+        // Charter a bank (and hold it solvent for a decade) — only if it doesn't
+        // already own one.
+        if !self.banks.iter().any(|b| !b.defunct && b.house == hi as u32) {
+            let score = 1.0 + if self.houses[hi].archetype == ARCH_BANKING { 1.5 } else { 0.0 };
+            cand.push((GOAL_CHARTER_BANK, -1, -1, -1, -1, score));
+        }
+        // Reach a distant province — needs the province layer AND a bold/expansive
+        // pull, or it's just noise on a world that mostly doesn't use it.
+        if !self.prov_seat.is_empty() && (bold > 0.0 || expansive > 0.0) {
+            let home_prov = self.hub_province.get(hub).copied().unwrap_or(-1);
+            let n = self.prov_seat.len();
+            let roll = (crate::sim::cultures::hash64(seed ^ (hi as u64) << 8 ^ tick as u64) % n as u64) as i32;
+            if roll != home_prov {
+                let score = 0.5 + bold.max(0.0) + expansive.max(0.0);
+                cand.push((GOAL_REACH_PROVINCE, -1, -1, -1, roll, score));
+            }
+        }
+        // Outlast a rival: the hottest live feud this house is party to.
+        if let Some(rival) = self.hottest_rival(hi) {
+            let score = 0.5 + greed.max(0.0);
+            cand.push((GOAL_OUTLAST_RIVAL, -1, -1, rival as i32, -1, score));
+        }
+        // Restore the house: only eligible once it has genuinely fallen — half its
+        // own all-time peak or worse. A house that never fell has nothing to restore.
+        if self.houses[hi].peak_wealth > 0.0
+            && self.houses[hi].wealth < self.houses[hi].peak_wealth * 0.5 {
+            cand.push((GOAL_RESTORE_HOUSE, -1, -1, -1, -1, 2.0)); // urgent when eligible
+        }
+
+        if cand.is_empty() { return; }
+        // Highest score wins; a small deterministic jitter breaks ties without
+        // always favouring the first-listed kind.
+        let (kind, tg, th, thh, tp, _) = cand.into_iter()
+            .max_by(|a, b| {
+                let ja = a.5 + hash01(seed, tick as u64 ^ (hi as u64) << 16, a.0 as u64) * 0.3;
+                let jb = b.5 + hash01(seed, tick as u64 ^ (hi as u64) << 16, b.0 as u64) * 0.3;
+                ja.partial_cmp(&jb).unwrap_or(std::cmp::Ordering::Equal)
+            }).unwrap();
+        let deadline_years = GOAL_DEADLINE_YEARS.get(kind as usize).copied().unwrap_or(20.0);
+        // RESTORE_HOUSE's "progress" field holds the TARGET wealth (the peak at the
+        // moment the goal was set) — see the kind's own doc note in `update_house_goal`.
+        let progress0 = if kind == GOAL_RESTORE_HOUSE { self.houses[hi].peak_wealth } else { 0.0 };
+        self.houses[hi].goals.push(Goal {
+            kind, target_good: tg, target_hub: th, target_house: thh, target_province: tp,
+            set_tick: tick, deadline_tick: tick + (deadline_years * TICKS_PER_YEAR as f32) as u32,
+            progress: progress0, state: GOAL_PURSUING,
+        });
+        let text = self.goal_set_text(hi, kind, tg, th, thh, tp);
+        self.houses[hi].events.push(HouseEvent { tick, kind: "goal_set".into(), text: text.clone() });
+        self.journal.push(JournalEntry {
+            tick, kind: "goal_set".into(), hub: hub as i32, good: tg, value: 0.0, text,
+        });
+    }
+
+    /// The live rival this house feuds hottest with, if any.
+    fn hottest_rival(&self, hi: usize) -> Option<usize> {
+        self.feuds.iter()
+            .filter(|f| f.outcome == FEUD_RUNNING && (f.a as usize == hi || f.b as usize == hi))
+            .max_by(|a, b| a.intensity.partial_cmp(&b.intensity).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|f| if f.a as usize == hi { f.b as usize } else { f.a as usize })
+    }
+
+    fn goal_set_text(&self, hi: usize, kind: u8, tg: i32, th: i32, thh: i32, tp: i32) -> String {
+        let name = self.houses[hi].name.clone();
+        match kind {
+            GOAL_CORNER_TRADE => format!("{} sets its sights on cornering the {} trade", name,
+                self.goods.get(tg as usize).map(|g| g.name.as_str()).unwrap_or("local")),
+            GOAL_SEAT_COUNCIL => format!("{} resolves to seat the council of {}", name,
+                self.hubs.get(th as usize).map(|h| h.name.as_str()).unwrap_or("its seat")),
+            GOAL_RAISE_BAILO => format!("{} means to raise a bailo at {}", name,
+                self.hubs.get(th as usize).map(|h| h.name.as_str()).unwrap_or("its office")),
+            GOAL_CHARTER_BANK => format!("{} sets out to charter a bank of its own", name),
+            GOAL_REACH_PROVINCE => format!("{} vows to reach the far province beyond {}", name,
+                self.hubs.get(self.houses[hi].hub as usize).map(|h| h.name.as_str()).unwrap_or("home")),
+            GOAL_OUTLAST_RIVAL => format!("{} swears to outlast {}", name,
+                self.houses.get(thh as usize).map(|h| h.name.as_str()).unwrap_or("its rival")),
+            GOAL_RESTORE_HOUSE => format!("{} vows to restore the house to its former wealth", name),
+            _ => format!("{} takes up a new ambition", name),
+        }
+    }
+
+    /// Check one house's active goals for success/failure. Called yearly. `progress`
+    /// is advanced or reset per-kind; a goal that neither succeeds nor expires stays
+    /// `GOAL_PURSUING` untouched.
+    pub(crate) fn update_house_goal(&mut self, hi: usize) {
+        if self.houses[hi].goals.is_empty() { return; }
+        let tick = self.tick;
+        let mut done: Vec<usize> = Vec::new();
+        for gi in 0..self.houses[hi].goals.len() {
+            let (kind, tg, th, thh, tp, deadline, state) = {
+                let g = &self.houses[hi].goals[gi];
+                (g.kind, g.target_good, g.target_hub, g.target_house, g.target_province, g.deadline_tick, g.state)
+            };
+            let mut achieved = state == GOAL_ACHIEVED;
+            match kind {
+                GOAL_CORNER_TRADE => {
+                    let share = self.houses[hi].monopoly.iter()
+                        .find(|&&(g, _)| g as i32 == tg).map(|&(_, s)| s).unwrap_or(0.0);
+                    let g = &mut self.houses[hi].goals[gi];
+                    if share >= 0.6 { g.progress += 1.0; } else { g.progress = 0.0; }
+                    achieved = g.progress >= GOAL_HOLD_YEARS_TRADE;
+                }
+                GOAL_SEAT_COUNCIL => {
+                    achieved = self.hubs.get(th as usize)
+                        .is_some_and(|h| h.council_house == hi as i32 || h.captor_house == hi as i32);
+                }
+                GOAL_RAISE_BAILO => {
+                    achieved = self.houses[hi].bailos.contains(&(th as u32));
+                }
+                GOAL_CHARTER_BANK => {
+                    let solvent = self.banks.iter().any(|b| !b.defunct && b.house == hi as u32);
+                    let g = &mut self.houses[hi].goals[gi];
+                    if solvent { g.progress += 1.0; } else { g.progress = 0.0; }
+                    achieved = g.progress >= GOAL_HOLD_YEARS_BANK;
+                }
+                GOAL_REACH_PROVINCE => {
+                    // Achieved externally: `expedition_travel_pass` sets `state` to
+                    // GOAL_ACHIEVED directly the moment a BACKED expedition completes
+                    // its round trip to `target_province` (already captured above as
+                    // `achieved`). Nothing to poll here but the deadline.
+                    let _ = tp;
+                }
+                GOAL_OUTLAST_RIVAL => {
+                    achieved = self.houses.get(thh as usize).is_some_and(|r| r.defunct);
+                }
+                GOAL_RESTORE_HOUSE => {
+                    // `progress` holds the TARGET — the peak wealth at the moment the
+                    // goal was set, not a running counter.
+                    let target = self.houses[hi].goals[gi].progress;
+                    achieved = self.houses[hi].wealth >= target;
+                }
+                _ => {}
+            }
+            if achieved {
+                self.houses[hi].goals[gi].state = GOAL_ACHIEVED;
+                done.push(gi);
+            } else if tick >= deadline {
+                self.houses[hi].goals[gi].state = GOAL_FAILED;
+                done.push(gi);
+            }
+        }
+        for &gi in done.iter().rev() { self.close_goal(hi, gi); }
+    }
+
+    /// Close a goal — chronicle it (achieved is a MILESTONE, failed is chatter, same
+    /// asymmetry as `monopoly`/`monopoly_lost` and `tier_up`/`tier_down`), move it to
+    /// `goal_history`, and remove it from the active list.
+    fn close_goal(&mut self, hi: usize, gi: usize) {
+        let tick = self.tick;
+        let g = self.houses[hi].goals.remove(gi);
+        let name = self.houses[hi].name.clone();
+        let what = self.goal_kind_phrase(g.kind, g.target_good, g.target_hub, g.target_house);
+        if g.state == GOAL_ACHIEVED {
+            self.houses[hi].events.push(HouseEvent {
+                tick, kind: "goal_achieved".into(),
+                text: format!("{} achieves its ambition — {}", name, what),
+            });
+            self.journal.push(JournalEntry {
+                tick, kind: "goal_achieved".into(), hub: self.houses[hi].hub as i32, good: -1, value: 0.0,
+                text: format!("{} achieves its ambition: {}", name, what),
+            });
+        } else {
+            self.houses[hi].events.push(HouseEvent {
+                tick, kind: "goal_failed".into(),
+                text: format!("{} abandons hope of {}", name, what),
+            });
+        }
+        self.houses[hi].goal_history.push(g);
+        if self.houses[hi].goal_history.len() > GOAL_HISTORY_CAP {
+            let drop = self.houses[hi].goal_history.len() - GOAL_HISTORY_CAP;
+            self.houses[hi].goal_history.drain(0..drop);
+        }
+    }
+
+    fn goal_kind_phrase(&self, kind: u8, tg: i32, th: i32, thh: i32) -> String {
+        match kind {
+            GOAL_CORNER_TRADE => format!("cornering the {} trade",
+                self.goods.get(tg as usize).map(|g| g.name.as_str()).unwrap_or("local")),
+            GOAL_SEAT_COUNCIL => format!("seating the council of {}",
+                self.hubs.get(th as usize).map(|h| h.name.as_str()).unwrap_or("its seat")),
+            GOAL_RAISE_BAILO => format!("raising a bailo at {}",
+                self.hubs.get(th as usize).map(|h| h.name.as_str()).unwrap_or("its office")),
+            GOAL_CHARTER_BANK => "chartering a bank".into(),
+            GOAL_REACH_PROVINCE => "reaching the far province".into(),
+            GOAL_OUTLAST_RIVAL => format!("outlasting {}",
+                self.houses.get(thh as usize).map(|h| h.name.as_str()).unwrap_or("its rival")),
+            GOAL_RESTORE_HOUSE => "restoring the house's former wealth".into(),
+            _ => "its ambition".into(),
+        }
+    }
+
     /// Close the outgoing head's record: death tick, age, closing wealth, and the
     /// by-name their tenure earned. Descriptive only — derived from what measurably
     /// happened, never fed back into the sim.
@@ -2928,7 +3169,7 @@ impl CampaignSim {
                 is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
                 wealth_history: Vec::new(), office_leases: Vec::new(),
                 influence: Vec::new(), bailos: Vec::new(),
-                head_female: female, head_age: age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(),
+                head_female: female, head_age: age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(),
             });
             let ni = self.houses.len() - 1;
             self.found_head_record(ni, "co-heir");
@@ -3013,7 +3254,7 @@ impl CampaignSim {
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: bfemale, head_age: bage, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(),
+            head_female: bfemale, head_age: bage, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(),
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -3452,7 +3693,7 @@ impl CampaignSim {
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(),
+            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(),
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
