@@ -5,10 +5,11 @@ import { CoatOfArms } from "@ui/heraldry/CoatOfArms";
 import { CoinIcon } from "@ui/heraldry/CoinIcon";
 import { YearChronicle } from "@ui/campaign/YearChronicle";
 import { FeudsView, HouseStandingView } from "@ui/campaign/HouseDossier";
+import { HouseCompareWindow } from "@ui/campaign/HouseCompare";
 import { cultureFigureSVG, cultureSeed, type Occasion } from "@ui/campaign/cultureFigure";
 import { GOOD_DEFS } from "@goods";
-import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks, campaignGetExpeditions, campaignGetHouseKin, campaignGetHouseGoals, campaignGetHouseCrisis } from "@bridge";
-import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief, ExpeditionView, KinBrief, GoalsBrief, CrisisBrief } from "@types";
+import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks, campaignGetExpeditions, campaignGetHouseKin, campaignGetHouseGoals, campaignGetHouseCrisis, campaignGetHouseLineage } from "@bridge";
+import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief, ExpeditionView, KinBrief, GoalsBrief, CrisisBrief, HouseLineage, LineageNode } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 
 const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
@@ -98,6 +99,7 @@ export function HousesPanel() {
   const [history, setHistory] = useState<HouseHistory | null>(null);
   const [tab, setTab] = useState<"houses" | "guilds" | "feuds">("houses");
   const [selected, setSelected] = useState<HouseBrief | null>(null);
+  const [compareOpen, setCompareOpen] = useState(false);
   // Tier 3/4 collapse by default (§1 schematic) — that IS the "see who has the power
   // at a glance" the tiers exist for; expand either to browse the long tail.
   const [collapsedTiers, setCollapsedTiers] = useState<Record<number, boolean>>({ 3: true, 4: true });
@@ -217,13 +219,14 @@ export function HousesPanel() {
   return (
     <div data-draggable style={{ ...panel, ...rootStyle }} onPointerDown={onPointerDown}>
       {history && <HouseTimeline history={history} onClose={() => setHistory(null)} />}
-      {selected && <HouseDetail h={selected} onClose={() => selectHouse(null)} onChronicle={openTimeline} />}
+      {selected && <HouseDetail h={selected} onClose={() => selectHouse(null)} onChronicle={openTimeline} onSelectHouse={selectHouse} />}
+      {compareOpen && <HouseCompareWindow houses={houses} onClose={() => setCompareOpen(false)} />}
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>⚜️ Trading Families</span>
         <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
       </div>
       {/* Houses vs Guilds tabs */}
-      <div style={{ display: "flex", gap: 2, padding: "0 8px", borderBottom: "1px solid #1e2e42" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 2, padding: "0 8px", borderBottom: "1px solid #1e2e42" }}>
         {([["houses", `👑 Houses (${nHouses})`], ["guilds", `🏛 Guilds (${nGuilds})`],
            ["feuds", "⚔ Feuds"]] as const).map(([id, lbl]) => (
           <div key={id} onClick={() => setTab(id)}
@@ -233,6 +236,12 @@ export function HousesPanel() {
             {lbl}
           </div>
         ))}
+        <span style={{ flex: 1 }} />
+        <div data-no-drag onClick={() => setCompareOpen(true)} title="Compare two houses side by side"
+          style={{ padding: "3px 8px", cursor: "pointer", fontSize: 11, color: "#cfe2f6",
+            border: "1px solid #2e4864", borderRadius: 4, marginBottom: 3 }}>
+          ⚖ Compare
+        </div>
       </div>
       {diag && tab !== "feuds" && <TradeDiagnostics diag={diag} />}
       {tab === "feuds" ? (
@@ -302,8 +311,13 @@ export function HousesPanel() {
 /** Click-through detail for one house/guild: where it's active, its offices and
  *  estates, its fleet, and its TOP 5 routes (back & forth) with the goods it moves
  *  each way and the volume. */
-function HouseDetail({ h, onClose, onChronicle }:
-  { h: HouseBrief; onClose: () => void; onChronicle: (name: string) => void }) {
+function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
+  { h: HouseBrief; onClose: () => void; onChronicle: (name: string) => void; onSelectHouse: (h: HouseBrief) => void }) {
+  const allHouses = useCampaignStore((s) => s.houses);
+  const jumpTo = (idx: number) => {
+    const target = allHouses.find((x) => x.idx === idx);
+    if (target) onSelectHouse(target);
+  };
   const [routes, setRoutes] = useState<MerchantRoute[]>([]);
   const [ledger, setLedger] = useState<HouseLedger | null>(null);
   const [bank, setBank] = useState<BankBrief | null>(null);
@@ -312,9 +326,10 @@ function HouseDetail({ h, onClose, onChronicle }:
   const [kin, setKin] = useState<KinBrief[]>([]);
   const [goals, setGoals] = useState<GoalsBrief | null>(null);
   const [crisis, setCrisis] = useState<CrisisBrief | null>(null);
+  const [lineage, setLineage] = useState<HouseLineage | null>(null);
   // Chronicle-first (§2.3 of the design): the dossier has nothing for the player to
   // DECIDE, so the primary artefact is the family's record, not its balance sheet.
-  const [view, setView] = useState<"chronicle" | "summary" | "kin" | "goals" | "crisis" | "standing" | "feuds" | "bank" | "ledger" | "expeditions">("chronicle");
+  const [view, setView] = useState<"chronicle" | "summary" | "kin" | "goals" | "crisis" | "lineage" | "standing" | "feuds" | "bank" | "ledger" | "expeditions">("chronicle");
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.house);
   const tick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
   useEffect(() => {
@@ -339,6 +354,8 @@ function HouseDetail({ h, onClose, onChronicle }:
       campaignGetHouseGoals(h.idx).then((g) => { if (alive) setGoals(g); }).catch(() => {});
       // Phase 3.2-3.6 · the live succession struggle (if any) + past risings.
       campaignGetHouseCrisis(h.idx).then((c) => { if (alive) setCrisis(c); }).catch(() => {});
+      // Lineage: the chain this house descends from + what split off it directly.
+      campaignGetHouseLineage(h.idx).then((l) => { if (alive) setLineage(l); }).catch(() => {});
     }
     // Find this family's bank (if any) so we can show its balance-sheet subtab.
     if (h.owns_bank) {
@@ -375,18 +392,18 @@ function HouseDetail({ h, onClose, onChronicle }:
         {/* The figure — house identity is added as three marks: a coloured frame (the
             house's colour, standing in for the garment accent), a coat-of-arms badge
             at the shoulder, and the tier glyph. */}
-        <div style={{ position: "relative", width: 52, flex: "0 0 auto" }} title={`${TIER_META[tierOf(h)].name} · standing ${((h.standing ?? 0) * 100).toFixed(0)}%`}>
+        <div style={{ position: "relative", width: 130, flex: "0 0 auto" }} title={`${TIER_META[tierOf(h)].name} · standing ${((h.standing ?? 0) * 100).toFixed(0)}%`}>
           <div style={{
-            width: 52, height: 118, borderRadius: 4, overflow: "hidden", background: "#0a1119",
-            border: `2px solid ${h.is_guild ? dull(h.color ?? "") : (h.color ?? "#3a5570")}`,
-            boxShadow: h.tier === 1 ? "0 0 8px rgba(201,162,39,0.4)" : "none",
+            width: 130, height: 295, borderRadius: 6, overflow: "hidden", background: "#0a1119",
+            border: `3px solid ${h.is_guild ? dull(h.color ?? "") : (h.color ?? "#3a5570")}`,
+            boxShadow: h.tier === 1 ? "0 0 16px rgba(201,162,39,0.4)" : "none",
           }} dangerouslySetInnerHTML={{ __html: figureSvg }} />
-          <div style={{ position: "absolute", top: -4, right: -4 }}>
-            <CoatOfArms name={h.name} size={17} guild={h.is_guild} />
+          <div style={{ position: "absolute", top: -8, right: -8 }}>
+            <CoatOfArms name={h.name} size={34} guild={h.is_guild} />
           </div>
           {!h.is_guild && h.tier ? (
-            <div style={{ position: "absolute", bottom: -1, left: -1, fontSize: 10, color: "#c9a227",
-              background: "#0c141edd", borderRadius: "50%", width: 13, height: 13, lineHeight: "13px", textAlign: "center" }}>
+            <div style={{ position: "absolute", bottom: -2, left: -2, fontSize: 18, color: "#c9a227",
+              background: "#0c141edd", borderRadius: "50%", width: 26, height: 26, lineHeight: "26px", textAlign: "center" }}>
               {TIER_META[tierOf(h)].glyph}
             </div>
           ) : null}
@@ -426,6 +443,7 @@ function HouseDetail({ h, onClose, onChronicle }:
         {(["chronicle", "summary", ...(kin.length > 0 ? ["kin" as const] : []),
            ...(goals && (goals.active.length > 0 || goals.history.length > 0) ? ["goals" as const] : []),
            ...(crisis && (crisis.active || crisis.history.length > 0) ? ["crisis" as const] : []),
+           ...(lineage && (lineage.ancestors.length > 0 || lineage.offshoots.length > 0) ? ["lineage" as const] : []),
            ...(expeds.length > 0 ? ["expeditions" as const] : []),
            "standing", "feuds", ...(bank ? ["bank" as const] : []), "ledger"] as const).map((t) => (
           <div key={t} onClick={() => setView(t)} style={{
@@ -437,6 +455,7 @@ function HouseDetail({ h, onClose, onChronicle }:
             : t === "kin" ? `👪 Kin (${kin.length})`
             : t === "goals" ? `🎯 Ambitions${goals && goals.active.length > 0 ? ` (${goals.active.length})` : ""}`
             : t === "crisis" ? `⚠ Crisis${crisis?.active ? ` r${crisis.active.round}/${crisis.active.round_cap}` : ""}`
+            : t === "lineage" ? "🌳 Lineage"
             : t === "expeditions" ? `🧭 Expeditions (${expeds.length})`
             : t === "standing" ? "⚖ Standing"
             : t === "feuds" ? `⚔ Feuds${h.rivals.length > 0 ? ` (${h.rivals.length})` : ""}`
@@ -453,6 +472,8 @@ function HouseDetail({ h, onClose, onChronicle }:
         <GoalsTab goals={goals} />
       ) : view === "crisis" ? (
         <CrisisTab crisis={crisis} />
+      ) : view === "lineage" ? (
+        <LineageTab lineage={lineage} current={h} onJump={jumpTo} />
       ) : view === "expeditions" ? (
         <ExpeditionsTab expeds={expeds} fmt={fmt} />
       ) : view === "standing" ? (
@@ -778,7 +799,7 @@ function CrisisTab({ crisis }: { crisis: CrisisBrief | null }) {
             ⚠ SUCCESSION CRISIS · opened {c.opened_year} · round {c.round} of {c.round_cap}
           </div>
           <div style={{ color: "#9ab0c8", fontSize: 9, marginBottom: 4 }}>cause: {c.cause}</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: c.loyalist_tint }} />
@@ -789,6 +810,9 @@ function CrisisTab({ crisis }: { crisis: CrisisBrief | null }) {
               <div style={{ height: 5, background: "#0a1018", borderRadius: 3, marginTop: 2, overflow: "hidden" }}>
                 <div style={{ width: `${Math.round(c.head_support * 100)}%`, height: "100%", background: c.loyalist_tint }} />
               </div>
+              {c.head_motive && (
+                <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 3 }}>▸ {c.head_motive}</div>
+              )}
             </div>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -800,11 +824,13 @@ function CrisisTab({ crisis }: { crisis: CrisisBrief | null }) {
               <div style={{ height: 5, background: "#0a1018", borderRadius: 3, marginTop: 2, overflow: "hidden" }}>
                 <div style={{ width: `${Math.round(c.plot_support * 100)}%`, height: "100%", background: c.plot_tint }} />
               </div>
+              {c.plot_leader_name && (
+                <div style={{ color: "#c99", fontSize: 9, marginTop: 3 }}>
+                  ◆ {c.plot_leader_name} leads the plot{c.plot_leader_motive ? ` — ${c.plot_leader_motive}` : ""}
+                </div>
+              )}
             </div>
           </div>
-          {c.plot_leader_name && (
-            <div style={{ color: "#c99", fontSize: 9, marginTop: 4 }}>◆ {c.plot_leader_name} leads the plot</div>
-          )}
           {c.heir_choice !== 2 && (
             <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 1 }}>
               the heir {c.heir_choice === 0 ? "stood with the ruler" : "turned to the plot"}
@@ -844,6 +870,94 @@ function CrisisTab({ crisis }: { crisis: CrisisBrief | null }) {
                 {r.outcome === 1 ? "✓" : "✕"} {CRISIS_OUTCOME_LABEL[r.outcome] ?? ""}
                 {r.outcome !== 1 && r.successor ? ` — ${r.successor} takes the seat` : ""}
               </div>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+const ORIGIN_LABEL: Record<number, string> = {
+  0: "founded",
+  1: "chartered from a guild's own capital",
+  2: "a wealthy cadet branch",
+  3: "a co-heir's share, under Partible inheritance",
+  4: "departed in a schism",
+  5: "rose to rule a free city",
+};
+const ORIGIN_TAG: Record<number, { label: string; color: string }> = {
+  1: { label: "GUILD-SEEDED", color: "#c9a227" },
+  2: { label: "BRANCH", color: "#7fd0a0" },
+  3: { label: "DIVISION", color: "#7fb0d0" },
+  4: { label: "DEPARTED", color: "#e08a8a" },
+  5: { label: "INDEPENDENCE", color: "#c9a227" },
+};
+
+/** Phase 5-adjacent · a house's LINEAGE — the chain it descends from (root first)
+ *  and what split off it directly (branches, divisions, departures). Each row is a
+ *  fact already recorded on `House.origin_house`/`origin_kind`, read here rather
+ *  than reconstructed from chronicle text. Click a name to re-center the dossier on
+ *  that house — deep multi-generation trees are navigated one hop at a time rather
+ *  than fetched all at once. */
+function LineageTab({ lineage, current, onJump }:
+  { lineage: HouseLineage | null; current: HouseBrief; onJump: (idx: number) => void }) {
+  if (!lineage || (lineage.ancestors.length === 0 && lineage.offshoots.length === 0)) {
+    return <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>An original founding — no recorded ancestry or offshoots.</div>;
+  }
+  const Node = ({ n, self: isSelf }: { n: LineageNode; self?: boolean }) => (
+    <div
+      onClick={() => !isSelf && onJump(n.idx)}
+      style={{
+        display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 8px", borderRadius: 4,
+        cursor: isSelf ? "default" : "pointer",
+        background: isSelf ? "rgba(201,162,39,0.10)" : "transparent",
+        border: isSelf ? "1px solid #4a3d1e" : "1px solid transparent",
+      }}
+    >
+      <span style={{ width: 8, height: 8, borderRadius: 2, background: n.color, marginTop: 4, flex: "0 0 auto" }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ color: n.alive ? "#e8dcc0" : "#7a6a5a", fontWeight: isSelf ? 700 : 600, fontSize: 11 }}>
+            {n.name}{!n.alive ? " (defunct)" : ""}
+          </span>
+          {ORIGIN_TAG[n.origin_kind] && (
+            <span style={{ fontSize: 8.5, fontWeight: 700, color: ORIGIN_TAG[n.origin_kind].color,
+              border: `1px solid ${ORIGIN_TAG[n.origin_kind].color}55`, borderRadius: 8, padding: "0 5px" }}>
+              {ORIGIN_TAG[n.origin_kind].label}
+            </span>
+          )}
+          <span style={{ color: "#6a86a6", fontSize: 9 }}>{n.origin_year}</span>
+        </div>
+        <div style={{ color: "#9ab0c8", fontSize: 10, marginTop: 1, lineHeight: 1.4 }}>{n.origin_text}</div>
+      </div>
+    </div>
+  );
+  return (
+    <div>
+      {lineage.ancestors.length > 0 && (
+        <>
+          <div style={timelineHdr}>Descent ({lineage.ancestors.length} generation{lineage.ancestors.length === 1 ? "" : "s"})</div>
+          {lineage.ancestors.map((n, i) => (
+            <div key={n.idx} style={{ marginLeft: i * 14, borderLeft: i > 0 ? "1px dashed #2a3d52" : "none", paddingLeft: i > 0 ? 10 : 0 }}>
+              <Node n={n} />
+            </div>
+          ))}
+        </>
+      )}
+      <div style={{ marginLeft: lineage.ancestors.length * 14, borderLeft: lineage.ancestors.length > 0 ? "1px dashed #2a3d52" : "none", paddingLeft: lineage.ancestors.length > 0 ? 10 : 0, marginTop: 2 }}>
+        <Node n={{
+          idx: current.idx ?? -1, name: current.name, alive: !current.defunct,
+          tier: current.tier ?? 0, origin_kind: 0, origin_year: current.founded_year ?? 0,
+          origin_text: ORIGIN_LABEL[0], color: current.color ?? "#888",
+        }} self />
+      </div>
+      {lineage.offshoots.length > 0 && (
+        <>
+          <div style={{ ...timelineHdr, marginTop: 10 }}>Split off this house ({lineage.offshoots.length})</div>
+          {lineage.offshoots.map((n) => (
+            <div key={n.idx} style={{ marginLeft: 14, borderLeft: "1px dashed #2a3d52", paddingLeft: 10 }}>
+              <Node n={n} />
             </div>
           ))}
         </>
@@ -1043,9 +1157,9 @@ function WealthGraph({ data, startYear, yearly, fmt }:
 }
 
 const detailPanel: React.CSSProperties = {
-  position: "absolute", top: 60, right: 690, width: 290, maxHeight: "78vh", overflowY: "auto",
+  position: "absolute", top: 40, right: 690, width: 720, maxHeight: "88vh", overflowY: "auto",
   background: "#0c141e", border: "1px solid #24364e", borderRadius: 8,
-  padding: "9px 11px", boxShadow: "0 8px 28px rgba(0,0,0,0.55)", zIndex: 45,
+  padding: "12px 16px", boxShadow: "0 8px 28px rgba(0,0,0,0.55)", zIndex: 45,
 };
 
 const panel: React.CSSProperties = {

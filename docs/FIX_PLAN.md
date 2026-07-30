@@ -562,6 +562,24 @@ futures, warehouses and monopolies all redistribute an output whose growth rate 
 can influence. A house that corners a market or a polis that invests its treasury
 cannot move it, because it is not computed from anything.
 
+### C1a. Measured: the compounding is unbounded past ~100 years, not just past 60
+`simulate_decades_reports_dynamics` (the standing dynamics gate, §2.1) only runs a
+handful of decades, so nobody had watched this economy past ~60 years before. A
+150-year instrumented run of the reference world (`econ_diagnose_outpost_founding`,
+`economy_validation.rs`, `#[ignore]`d — built to diagnose an unrelated outpost-founding
+stall, but it happens to track richest-house wealth every month as a side effect) found
+the richest house's peak wealth landing in the **billions** by year 150 (four separate
+runs across small code changes: 402,665,734,144 · 29,200,267,264 · 4,405,119,488 — the
+exact figure moves with the constants, the ORDER OF MAGNITUDE past a century does not),
+against the project's own "no 100k blow-ups" ideal (§2.1) and the ~150k–370k peaks seen
+in the 60-year scorecard runs above. This is consistent with, not a new mechanism beyond,
+C1's diagnosis: `tech_factor` compounds 1.5%/yr forever with nothing to brake it, and at
+60 years (1.015^60 ≈ 2.4×) that's invisible; at 150 years (1.015^150 ≈ 9.1×) compounded
+through wealth-begets-wealth channels (interest, monopoly rents, feud/tier prestige) it
+is not. **Not fixed here** — flagged per §2.4 ("negative results are deliverables") as
+evidence for prioritising C1, and as a reason any future long-horizon dynamics run should
+watch peak wealth, not just assume the 60-year shape holds.
+
 ### C2. Fuel
 No coal, charcoal or firewood as an input to anything. Every pre-industrial manufacture
 that matters — glass, metalware, ceramics, salt-boiling, brewing, brick — is

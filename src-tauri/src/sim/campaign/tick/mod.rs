@@ -491,6 +491,11 @@ const OUTPOST_START_TICK: u32 = 30 * 365;
 const OUTPOST_FOUND_WEALTH: f32 = 100_000.0; // a house this rich may found one
 const OUTPOST_FOUND_COST: f32 = 70_000.0;    // heavy cost (debited from the house)
 const OUTPOST_MAX_POP: f32 = 800.0;          // a trade post stays small (hard pop cap)
+/// How many houses may each plant their OWN outpost in a single yearly call — several
+/// great houses can coexist in the same era, and each should reach for a site in ITS
+/// own region rather than the whole world waiting on a single richest house whose
+/// network may not even border whatever colonizable sites remain.
+const OUTPOST_MAX_PER_CALL: usize = 3;
 /// Score bonus that biases a house trade-outpost toward yielding a SCARCE manufacturing
 /// input its own workshops lack — turning the outpost into a raw-materials RESOURCE
 /// COLONY. Large enough to dominate the base per-capita score (which sits in 0..1).
@@ -1184,6 +1189,15 @@ const NEIGHBOR_K: usize = 32;
 /// Global ceiling on satellite production sites (estates + colonies). Estates are
 /// real hubs in `self.hubs`, so an uncapped count quadratically slows every tick.
 const MAX_TOTAL_ESTATES: usize = 220;
+/// Ordinary estates (`maybe_found_estate`, which runs far more often than a trade
+/// outpost is ever founded) stop at `MAX_TOTAL_ESTATES` minus this — the last slice
+/// of the shared budget is reserved so a saturated world can still occasionally
+/// plant an outpost. A diagnosed bug (150-year reference run): with no reservation,
+/// ordinary estates filled every one of the 220 slots by roughly year 40 and NO
+/// outpost ever founded again afterward, even with a wealthy house and unused
+/// `colonizable` sites — `maybe_found_house_outpost` shares the exact same global
+/// check and was starved forever, not merely rarely.
+const OUTPOST_RESERVED_ESTATES: usize = 20;
 
 pub const SHIP_COST: f32 = 7.0;
 const RIVER_COST: f32 = 4.5;
@@ -2108,6 +2122,16 @@ pub const DEPARTURE_WEALTH_FRAC: f32 = 0.25;
 pub const PLAGUE_KIN_DEATH_CHANCE: f32 = 0.35;
 pub const PLAGUE_EXTINCTION_CHANCE: f32 = 0.03;
 
+/// Lineage · `House.origin_kind`, read only when `origin_house >= 0`. Which of the
+/// game's house-creation paths produced this house — the Lineage tab's "why" for
+/// each node besides the founding text already on `events[0]`.
+pub const ORIGIN_NONE: u8 = 0;        // origin_house < 0: an original founding
+pub const ORIGIN_GUILD: u8 = 1;       // seeded from a guild's own capital (maybe_found_house)
+pub const ORIGIN_BRANCH: u8 = 2;      // a wealthy cadet branch (found_branch)
+pub const ORIGIN_DIVISION: u8 = 3;    // a co-heir's share under Partible inheritance (divide_estate)
+pub const ORIGIN_DEPARTURE: u8 = 4;   // a disloyal posted kin's schism (departure_schism)
+pub const ORIGIN_INDEPENDENCE: u8 = 5; // a fresh dynasty seated when a colony wins independence
+
 /// Phase 4.4 · the foreign hand (`HOUSE_POWER_STRUGGLE_VIEW.md` §2) — built ONLY
 /// after `econ_measure_foreign_hand_conjunction` (§2.5's own "measure before
 /// building" instruction) found the conjunction firing ~1229 times/century, far
@@ -2303,6 +2327,14 @@ pub struct House {
     /// lowers the disloyal kin's loyalty, which otherwise feeds tension right back
     /// up), the same "must always terminate" lesson the crisis engine already needed.
     #[serde(default)] pub schism_cooldown_until: u32,
+    // ── Lineage — where a house came from (−1 = an original founding) ──
+    /// The house this one was struck FROM, or −1. Set once at creation, never
+    /// changed — a house's origin is a fact about its founding, not something later
+    /// events (succession, crisis, its own schisms) can revise.
+    #[serde(default = "neg_one_i32")] pub origin_house: i32,
+    /// `ORIGIN_*` — which of the game's house-creation paths produced this one.
+    /// Meaningless when `origin_house < 0`.
+    #[serde(default)] pub origin_kind: u8,
 }
 
 /// DLC 3.5 · one loan on a bank's books. An asset to the bank (interest income);
@@ -3291,8 +3323,18 @@ const EXP_REF_KM: f32 = 2200.0;
 /// Outfitting cost per transport unit (caravan/ship), before terrain/sea risk.
 const EXP_UNIT_COST: f32 = 2.4;
 /// Minimum straight-line separation (fraction of world width) for a venture —
-/// corridors are LONG hauls, not next-door ties.
-const EXP_MIN_GAP_FRAC: f32 = 0.14;
+/// corridors are LONG hauls, not next-door ties. Player-reported + diagnosed: at the
+/// old 0.14 (≈5,600 km on an Earth-scale world — `EARTH_EQUATOR_KM`) EVERY venture
+/// already started beyond that floor, and the scoring formula below used to reward
+/// distance with no ceiling at all, so expeditions systematically reached for the
+/// far side of the map. Lowered so a venture can target a REGIONAL unconnected
+/// settlement, not only a hemisphere away.
+const EXP_MIN_GAP_FRAC: f32 = 0.035;
+/// Upper bound (fraction of world width) — companion to the floor above. Without
+/// one, `expedition_launch_pass`'s own scoring (which used to reward raw distance
+/// with no ceiling) had nothing stopping it from picking the single farthest
+/// reachable city every time.
+const EXP_MAX_GAP_FRAC: f32 = 0.22;
 /// Successful round-trips AND cumulative profit needed to establish a corridor
 /// (MODERATE: a couple of proven, profitable round-trips prove the route).
 const EXP_MIN_SUCCESSES: u16 = 2;

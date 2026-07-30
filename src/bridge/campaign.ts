@@ -1,6 +1,6 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
 import { invoke } from "@tauri-apps/api/core";
-import type { BankBrief, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodMarketRow, GuildBrief, HouseBrief, HouseHistory, HouseLedger, HouseStability, HubDetail, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorldEconomy } from "@types";
+import type { BankBrief, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodMarketRow, GuildBrief, HouseBrief, HouseHistory, HouseLedger, HouseLineage, HouseStability, HubDetail, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorldEconomy } from "@types";
 
 /** DLC 3.5 · the live campaign's dynamic trade-flow trunks (last year's actual
  *  shipped volume, routed over the cost grid + bundled; width ∝ volume). */
@@ -337,6 +337,11 @@ export async function campaignGetHouseGoals(idx: number): Promise<GoalsBrief> {
  *  record of past risings (Phase 3.2-3.6). */
 export async function campaignGetHouseCrisis(idx: number): Promise<CrisisBrief> {
   return invoke("campaign_get_house_crisis", { idx });
+}
+
+/** This house's lineage — the chain it descends from, and what split off it directly. */
+export async function campaignGetHouseLineage(idx: number): Promise<HouseLineage> {
+  return invoke("campaign_get_house_lineage", { idx });
 }
 
 // ── Province land state (FIX_PLAN B1) + the holder's control verbs ──────────

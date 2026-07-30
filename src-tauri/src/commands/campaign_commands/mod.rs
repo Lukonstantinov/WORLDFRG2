@@ -116,7 +116,7 @@ fn current_world_ref(conn: &Connection) -> Result<WorldRef, String> {
 // DLC 1 "Living Trade" — tick simulation commands.
 // ═══════════════════════════════════════════════════════════════════════════
 
-use crate::sim::tick::{CampaignSim, House, JournalEntry, SpecCenter, TickGood, TickHub};
+use crate::sim::tick::{CampaignSim, House, JournalEntry, ORIGIN_NONE, SpecCenter, TickGood, TickHub};
 use crate::commands::query_commands::EconomySnapshot;
 
 /// Compact clock for the Campaign Clock UI.

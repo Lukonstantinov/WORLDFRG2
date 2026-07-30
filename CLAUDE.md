@@ -519,6 +519,16 @@ serde-defaulted so old saves load). Grouped by theme:
   sex · generation · age at accession and at death · wealth at each end · how they came in ·
   an epithet derived at death). **Nothing in the tick reads the line** — it is the record the
   chronicle is written from. A family TREE (siblings, cousins, power shares) is Phase 2.
+  A separate axis — `House.origin_house: i32` (−1 = no known parent) + `origin_kind: u8`
+  (`ORIGIN_NONE`/`_GUILD`/`_BRANCH`/`_DIVISION`/`_DEPARTURE`/`_INDEPENDENCE`) — records
+  where the HOUSE ITSELF came from, set once at every construction site that creates a
+  `House` (guild-seeded founding, `found_branch`, a `divide_estate` co-heir, a
+  `departure_schism`, an independent `found_house_at`) and never mutated after. This is
+  INTER-house lineage (which house split from which, and why), distinct from `House.line`'s
+  INTRA-house succession (which head followed which). `campaign_get_house_lineage`
+  (`read_houses.rs`) walks the `origin_house` chain to the founding and lists this house's
+  own offshoots, surfaced in the dossier's 🌳 Lineage tab — the answer to "where did this
+  house come from, and why did it split."
 - **Living Trade (DLC 1):** production/consumption/price/dispatch/arrivals/events,
   estates & manufactories, abstract houses, succession, fleets & voyage risk
   (`SEA/CARAVAN/RIVER_LOSS`), offices, contracts. Emergence order: local merchants
@@ -547,7 +557,22 @@ serde-defaulted so old saves load). Grouped by theme:
 - **Diseases & population:** historical epidemics (plague), starvation death-spiral
   guards (food reserves / granaries), sentiment.
 - **Colonies & migration:** colonisation (settlement colonies + food lifeline supply
-  ships), route-bound migration corridors, expeditions.
+  ships), route-bound migration corridors, expeditions. **Financed expeditions
+  (`expedition_launch_pass`, `colonies.rs`) target a REGIONAL range, not just the
+  single farthest reachable city** — `EXP_MIN_GAP_FRAC`/`EXP_MAX_GAP_FRAC` bound the
+  destination distance (≈1,400–8,800 km on an Earth-scale world) and scoring peaks at
+  1.5× the floor (a bounded "sweet spot", not the old unbounded linear reward for
+  raw distance, which structurally could only ever pick the farthest city in range).
+  **House trade outposts (`maybe_found_house_outpost`) let SEVERAL wealthy houses
+  each plant their own regional post per call** (`OUTPOST_MAX_PER_CALL`=3, richest
+  first, each searching only its OWN home+offices network within `COLONY_MAX_KM`) —
+  the single-richest-house-only version silently stalled after founding one outpost
+  the moment that one house's network stopped bordering any remaining colonizable
+  site, even with sites and wealth both still available (see
+  `econ_diagnose_outpost_founding`, `economy_validation.rs`). Ordinary estates and
+  outposts also no longer compete for the same slots: `OUTPOST_RESERVED_ESTATES`=20
+  of `MAX_TOTAL_ESTATES` are held back so outpost founding can't be starved by the
+  much-more-frequent ordinary-estate path saturating the shared cap early.
 - **Satellite construction:** a metropolis builds a suburb over ~10 years (with decay).
 - **Provinces (Phase 2b · watershed demography + LAND STATE):** the ONLY campaign state
   carried at world granularity, and the world↔campaign join (FIX_PLAN B1).
@@ -632,7 +657,16 @@ commands/
                                   (campaign_get_house_kin, Phase 2.1) + AMBITIONS
                                   (campaign_get_house_goals, Phase 3.1) + the CRISIS
                                   (campaign_get_house_crisis, Phase 3.2-3.6 — the live
-                                  struggle + the permanent past-risings record). Four
+                                  struggle + the permanent past-risings record, each
+                                  side's brief now carrying a derived MOTIVE phrase —
+                                  `kin_motive`/`head_motive`, read from loyalty/role/
+                                  posted-hub/vice, no new persisted state) + LINEAGE
+                                  (campaign_get_house_lineage — walks `House.origin_house`
+                                  up to 64 hops to the founding, reversed root-first, plus
+                                  this house's own offshoots found by scanning for
+                                  `origin_house == this`; each hop's `origin_kind` says
+                                  WHY: guild-seeded / branch / Partible division /
+                                  Departure schism / independent founding). Four
                                   of five gauges are pure derivations of state the sim
                                   already held; kin_power_shares/character_phrase
                                   (Phase 2.6/2.3) and the whole crisis engine live in
@@ -845,10 +879,22 @@ ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, 
   HousesPanel/DynastiesPanel/GuildsPanel.tsx ← Merchant houses, dynasties, guilds.
                                   HousesPanel has a world ⚔ Feuds tab; the list is
                                   GROUPED BY TIER (Phase 1.1, Tier 3/4 collapsed by
-                                  default). Its per-house detail (`HouseDetail`) opens
-                                  on a portrait — `cultureFigureSVG` in the seat
-                                  culture's kit and the head's own sex, a coloured
-                                  frame standing in for a garment recolour, a
+                                  default). A ⚖ Compare button opens `HouseCompareWindow`
+                                  (`HouseCompare.tsx`) — a search-bar-driven two-house
+                                  side-by-side: ruler figures, every stat (standing ·
+                                  trade/transport · trading strategy · monopolies),
+                                  and a minimal `OperationsMap` plotting both houses'
+                                  seat/offices/controlled settlements so a rivalry's
+                                  footprint reads at a glance. Pure frontend aggregation
+                                  of `HouseBrief` fields already fetched — no new backend
+                                  command. Its per-house detail (`HouseDetail`) opens as
+                                  a BIG FLOATING WINDOW (~2.5x the old size, still
+                                  draggable) on a portrait — `cultureFigureSVG` in the
+                                  seat culture's kit and the head's own sex, now with
+                                  POSE (tilt/mirror) and ACCESSORY (pin) variation axes
+                                  on top of the existing build/skin-tone jitter, so two
+                                  heads read as two different people at a glance — a
+                                  coloured frame standing in for a garment recolour, a
                                   `CoatOfArms` badge at the shoulder, occasion set by
                                   tier (Phase 1.2) — and its subtabs are
                                   CHRONICLE-FIRST (Phase 1.4, the default tab):
@@ -856,15 +902,25 @@ ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, 
                                   year-grouped event log (`ChronicleTab`), before
                                   Summary (now tags family-run holdings, Phase 2.2)/
                                   👪 Kin (the roster, Phase 2.1/2.3/2.6)/
+                                  🌳 Lineage (`campaign_get_house_lineage` — the
+                                  ancestor chain read from `origin_house`/`origin_kind`
+                                  back to the founding, plus this house's own offshoots;
+                                  each hop tags WHY: guild-seeded, a branch, a Partible
+                                  division, or a Departure schism — the "where did this
+                                  house come from / why did it split" record, clickable
+                                  to jump the dossier to any ancestor or offshoot)/
                                   🎯 Ambitions (active/history goals from 7 kinds —
                                   chosen yearly by archetype/character bias, checked
                                   yearly — READ-ONLY tracking, not yet wired to bias
                                   any decision's weights, Phase 3.1)/
                                   ⚠ Crisis (only shown when a house has an open struggle
                                   or a past-risings record — two named factions in their
-                                  own heraldic tincture, a round-by-round log, the heir's
-                                  recorded choice, then the permanent "past risings" list;
-                                  observation only, Phase 3.2-3.6)/
+                                  own heraldic tincture, a round-by-round log with each
+                                  side's MOTIVE line (`head_motive`/`plot_leader_motive`,
+                                  derived from loyalty/role/posted-hub/vice — why this
+                                  particular kinsman backs the head or leads the plot),
+                                  the heir's recorded choice, then the permanent "past
+                                  risings" list; observation only, Phase 3.2-3.6)/
                                   🧭 Expeditions (this house's live ventures, click a
                                   row to highlight its destination province, Phase 1.3)/
                                   ⚖ Standing/⚔ Feuds/🏦 Bank/📒 Accountant

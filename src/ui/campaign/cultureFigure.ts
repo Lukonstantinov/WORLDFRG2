@@ -89,6 +89,12 @@ interface Look {
   beard: boolean; cloak: boolean; longHair: boolean; build: number; jewel: boolean; staff: boolean;
   trousers: boolean;      // wears trousers/short tunic (vs a long draped garment)
   sash: boolean;          // waist sash drawn (dropped for plain everyday wear)
+  // ── extra individuation (more variation, so a new head reads as a different
+  //    person at a glance rather than a re-tinted twin) ──
+  tilt: number;           // small whole-figure rotation, degrees (-4..4)
+  mirror: boolean;        // mirrored stance — faces/leans the other way
+  pin: boolean;           // a brooch/clasp at the chest, in a THIRD accent colour
+  pinColor: string;
 }
 
 function rollLook(base: Kit, o: FigureOpts, r: () => number): Look {
@@ -97,7 +103,7 @@ function rollLook(base: Kit, o: FigureOpts, r: () => number): Look {
   const ramp = SKIN[base.env];
   // weight toward the middle of the ramp so extremes are rarer
   const si = Math.min(ramp.length - 1, Math.floor((r() * 0.6 + r() * 0.6) / 1.2 * ramp.length));
-  const skin = shade(ramp[si], (r() - 0.5) * 0.06);
+  const skin = shade(ramp[si], (r() - 0.5) * 0.10);
   const hair = pick(r, base.hairs);
   const robe0 = pick(r, base.robes);
   // Everyday clothes are plainer/earthier; ceremonial keeps the bright dyes.
@@ -127,11 +133,15 @@ function rollLook(base: Kit, o: FigureOpts, r: () => number): Look {
     beard: !female && base.beardable && r() < 0.55,
     cloak,
     longHair: female ? r() < 0.8 : r() < 0.25,
-    build: 0.92 + r() * 0.18,
+    build: 0.88 + r() * 0.26,
     jewel,
     staff: !female && r() < (occ === "ceremonial" ? 0.4 : occ === "everyday" ? 0.06 : 0.18),
     trousers,
     sash: occ !== "everyday" || r() < 0.4,
+    tilt: (r() - 0.5) * 8,
+    mirror: r() < 0.5,
+    pin: r() < 0.3,
+    pinColor: pick(r, base.trims.length > 1 ? base.trims : [...base.trims, ...base.cloth2]),
   };
 }
 
@@ -200,6 +210,9 @@ function figure(L: Look, sex: "m" | "f"): string {
   P.push(`<path d="M${shL} ${shY} Q${cx} ${shY - 8} ${shR} ${shY}" fill="none" stroke="${trim}" stroke-width="2.6" opacity="0.7"/>`);
   // waist sash (dropped for plain everyday wear)
   if (L.sash) P.push(`<path d="M${cx - 19} ${waistY - 3} Q${cx} ${waistY + 5} ${cx + 19} ${waistY - 3} L${cx + 19} ${waistY + 7} Q${cx} ${waistY + 15} ${cx - 19} ${waistY + 7} Z" fill="${cloth2}"/>`);
+  // a chest brooch/clasp in a third accent colour — cheap, high-signal individuation
+  // so two heads of the same house read as different people, not re-tinted twins.
+  if (L.pin) P.push(`<path d="M${cx - 4} ${shY + 18} l4 -4 l4 4 l-4 4 z" fill="${L.pinColor}" stroke="${shade(L.pinColor, -0.3)}" stroke-width="0.6"/>`);
 
   // ── arms (wide sleeves for robe/hanfu, narrow for tunic) ──
   const wide = (L.gm === "robe" || L.gm === "kaftan" || L.gm === "thobe");
@@ -285,7 +298,11 @@ export function cultureFigureSVG(o: FigureOpts): string {
   }
   const seed = (Math.imul((o.seed >>> 0) ^ 0x9e3779b9, 2654435761) ^ ((o.variant ?? 0) * 0x85ebca6b) ^ (o.sex === "f" ? 0x1337 : 0)) >>> 0;
   const L = rollLook(base, o, rngFrom(seed));
-  return `<svg viewBox="0 0 120 340" width="100%" height="100%" preserveAspectRatio="xMidYMax meet" role="img" xmlns="http://www.w3.org/2000/svg">${figure(L, o.sex)}</svg>`;
+  // Pose variation: a small tilt + an occasional mirrored stance, around the
+  // figure's own vertical axis — cheap (one wrapping transform), but it's what
+  // makes a re-roll read as a different PERSON rather than the same pose re-tinted.
+  const mirrorX = L.mirror ? -1 : 1;
+  return `<svg viewBox="0 0 120 340" width="100%" height="100%" preserveAspectRatio="xMidYMax meet" role="img" xmlns="http://www.w3.org/2000/svg"><g transform="translate(60,170) scale(${mirrorX},1) rotate(${L.tilt.toFixed(2)}) translate(-60,-170)">${figure(L, o.sex)}</g></svg>`;
 }
 
 /** FNV-1a hash of a culture name → stable per-culture seed. */

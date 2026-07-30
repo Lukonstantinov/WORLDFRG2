@@ -827,6 +827,10 @@ export interface ActiveCrisisBrief {
   plot_name: string;
   plot_tint: string;
   plot_leader_name: string;
+  /** Why the plot leader stands where they do (derived, not stored). */
+  plot_leader_motive: string;
+  /** Why the ruler holds on. */
+  head_motive: string;
   heir_choice: number;  // 0 stood with the ruler · 1 turned to the plot · 2 no heir kin
   rounds: CrisisRoundBrief[];
   opened_year: number;
@@ -849,6 +853,21 @@ export interface CrisisBrief {
   active: ActiveCrisisBrief | null;
   history: CrisisRecordBrief[]; // most recent first
   secure_until_year: number;    // 0 if not currently immune
+}
+/** One house in a lineage chain (Phase 5-adjacent — the dossier's 🌳 Lineage tab). */
+export interface LineageNode {
+  idx: number;
+  name: string;
+  alive: boolean;
+  tier: number;         // 0 = not yet tiered (guild, or too new)
+  origin_kind: number;  // 0 founded/guild-charter · 1 guild-seed · 2 branch · 3 division · 4 departure · 5 independence
+  origin_year: number;
+  origin_text: string;  // the founding event's own chronicle text
+  color: string;
+}
+export interface HouseLineage {
+  ancestors: LineageNode[];  // root-first, NOT including this house
+  offshoots: LineageNode[];  // houses whose origin_house is this one
 }
 export interface JournalEntry {
   tick: number;

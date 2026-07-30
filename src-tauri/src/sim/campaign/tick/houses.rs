@@ -628,7 +628,10 @@ impl CampaignSim {
 
 
     pub(crate) fn maybe_found_estate(&mut self) {
-        if self.estate_count() >= MAX_TOTAL_ESTATES { return; }
+        // Reserve `OUTPOST_RESERVED_ESTATES` slots off the shared budget so ordinary
+        // estates (founded far more often than an outpost) cannot starve the outpost
+        // path entirely — see that constant's own doc for the diagnosed bug.
+        if self.estate_count() >= MAX_TOTAL_ESTATES.saturating_sub(OUTPOST_RESERVED_ESTATES) { return; }
         let n = self.hubs.len();
         let ng = self.goods.len();
         // Founder: a LARGE, commercially successful, non-estate city (rank by
@@ -736,8 +739,9 @@ impl CampaignSim {
             }
             // Global cap: upgrades (above) are always allowed (no new hub), but
             // building a NEW estate is blocked once the world is saturated — keeps
-            // the hub list (and every per-tick loop) bounded late-campaign.
-            if self.estate_count() >= MAX_TOTAL_ESTATES { continue; }
+            // the hub list (and every per-tick loop) bounded late-campaign. Reserves
+            // `OUTPOST_RESERVED_ESTATES` the same way the top-of-function gate does.
+            if self.estate_count() >= MAX_TOTAL_ESTATES.saturating_sub(OUTPOST_RESERVED_ESTATES) { continue; }
             // Build in the house's strongest trade partner (a city it actually works),
             // else at home. Skip estates themselves.
             let home = self.houses[hi].hub as usize;
@@ -825,27 +829,48 @@ impl CampaignSim {
     /// city) and is tagged `colony_kind = 2`.
     pub(crate) fn maybe_found_house_outpost(&mut self) {
         if self.colonizable.is_empty() || self.hubs.is_empty() { return; }
-        if self.estate_count() >= MAX_TOTAL_ESTATES { return; }
-        // Founder: the richest house, but only if it clears the (heavy) wealth bar —
-        // a trade outpost is the privilege of a truly great house.
-        let mut founder = -1i32;
-        let mut hw = OUTPOST_FOUND_WEALTH;
-        for (hi, hh) in self.houses.iter().enumerate() {
-            if hh.defunct { continue; }
-            if hh.wealth > hw { hw = hh.wealth; founder = hi as i32; }
+        // Founders: EVERY house that clears the (heavy) wealth bar, richest first —
+        // a trade outpost is the privilege of a truly great house, but an era can
+        // hold several such houses at once, and each plants its OWN regional post
+        // rather than the whole world waiting on a single wealthiest house whose
+        // home network may not even reach whatever sites remain. Capped per call
+        // so a rich crop of houses can't empty the colonizable pool in one year.
+        let mut candidates: Vec<(usize, f32)> = self.houses.iter().enumerate()
+            .filter(|(_, hh)| !hh.defunct && hh.wealth > OUTPOST_FOUND_WEALTH)
+            .map(|(hi, hh)| (hi, hh.wealth))
+            .collect();
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        let mut founded = 0usize;
+        for (hi, _) in candidates {
+            if founded >= OUTPOST_MAX_PER_CALL { break; }
+            if self.colonizable.is_empty() { break; }
+            if self.estate_count() >= MAX_TOTAL_ESTATES { break; }
+            if self.try_found_house_outpost(hi) { founded += 1; }
         }
-        if founder < 0 { return; }
-        let hi = founder as usize;
+    }
+
+    /// One house's attempt at planting a single trade outpost — see
+    /// `maybe_found_house_outpost` for why several houses each get a try per call.
+    fn try_found_house_outpost(&mut self, hi: usize) -> bool {
         let home = self.houses[hi].hub as usize;
-        if home >= self.hubs.len() { return; }
-        // Network nodes = home + offices (the relays).
+        if home >= self.hubs.len() { return false; }
+        // Network nodes = home + offices + the house's OWN ESTATES (the relays) — an
+        // estate is a real regional foothold (a plantation or mine already worked by
+        // this house's own factors), and is usually far more widely scattered than its
+        // handful of city offices. Without estates counted, a house with sprawling
+        // holdings but offices clustered near its seat could never reach a nearby
+        // frontier site its own estates already border — "the same region" the user
+        // wants outposts to cluster in IS the region a house's estates already work.
         let mut nodes = vec![(self.hubs[home].x, self.hubs[home].y)];
         for &off in &self.houses[hi].offices {
             if (off as usize) < self.hubs.len() {
                 nodes.push((self.hubs[off as usize].x, self.hubs[off as usize].y));
             }
         }
-        let cap = COLONY_MAX_KM * self.world_w / EARTH_EQUATOR_KM; // ≤ 5000 km from the metropolis
+        for h in self.hubs.iter().filter(|h| h.is_estate && h.owner_house == hi as i32) {
+            nodes.push((h.x, h.y));
+        }
+        let cap = COLONY_MAX_KM * self.world_w / EARTH_EQUATOR_KM; // ≤ 2500 km from the metropolis
         // Pick the best reachable site for a TRADE outpost: a house plants its
         // factory where the valuable trade goods are. Site trade-value dominates,
         // a coast (shippable) adds a bonus, and nearer is better. Fertility is
@@ -858,7 +883,7 @@ impl CampaignSim {
             let score = trade_score * (1.0 - d / cap);
             if score > bi.1 { bi = (i, score); }
         }
-        let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return };
+        let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return false };
         let ng = self.goods.len();
         // A good is a RAW manufacturing INPUT if some recipe consumes it. A house whose
         // workshops are short of raws will preferentially plant a RESOURCE COLONY that
@@ -894,9 +919,9 @@ impl CampaignSim {
                 if pc > gbest { gbest = pc; g0 = g; }
             }
         }
-        if g0 == usize::MAX { return; }
+        if g0 == usize::MAX { return false; }
         let cost = OUTPOST_FOUND_COST;
-        if self.houses[hi].wealth < cost { return; }
+        if self.houses[hi].wealth < cost { return false; }
         let site = self.colonizable.swap_remove(si);
         let kind = estate_kind_for_good(&self.goods[g0].name, self.goods[g0].food);
         let founder_max_pc = self.hubs[home].base_per_capita.iter().cloned().fold(0.0f32, f32::max).max(0.1);
@@ -905,7 +930,7 @@ impl CampaignSim {
         let component = self.hubs[home].component;          // joins the home trade web
         self.houses[hi].wealth -= cost;
         // parent = −1 keeps the outpost at its REMOTE site coords (not co-located).
-        self.create_estate(-1, site.x, site.y, g0, kind, founder, site.koppen, site.coastal,
+        self.create_estate(-1, site.x, site.y, g0, kind, hi as i32, site.koppen, site.coastal,
             component, est_pop, percap);
         let new = self.hubs.len() - 1;
         self.hubs[new].colony_kind = 2;
@@ -923,6 +948,7 @@ impl CampaignSim {
             tick: self.tick, kind: "colony".into(), hub: new as i32, good: g0 as i32, value: 2.0,
             text: format!("{} founds a trade outpost ({})", hname, self.goods[g0].name),
         });
+        true
     }
 
 
@@ -1291,6 +1317,7 @@ impl CampaignSim {
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
             head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0,
+            origin_house: -1, origin_kind: ORIGIN_INDEPENDENCE,
         });
         self.found_head_record(idx, "founder");
         Some(idx)
@@ -2188,7 +2215,7 @@ impl CampaignSim {
             is_guild: true, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: false, head_age: guild_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0,
+            head_female: false, head_age: guild_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0, origin_house: -1, origin_kind: ORIGIN_NONE,
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -3193,6 +3220,7 @@ impl CampaignSim {
                 wealth_history: Vec::new(), office_leases: Vec::new(),
                 influence: Vec::new(), bailos: Vec::new(),
                 head_female: female, head_age: age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0,
+                origin_house: hi as i32, origin_kind: ORIGIN_DIVISION,
             });
             let ni = self.houses.len() - 1;
             self.found_head_record(ni, "co-heir");
@@ -3278,6 +3306,7 @@ impl CampaignSim {
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
             head_female: bfemale, head_age: bage, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0,
+            origin_house: hi as i32, origin_kind: ORIGIN_BRANCH,
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -3717,6 +3746,7 @@ impl CampaignSim {
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
             head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0,
+            origin_house: gi_seed as i32, origin_kind: ORIGIN_GUILD,
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");

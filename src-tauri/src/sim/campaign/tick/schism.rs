@@ -116,6 +116,7 @@ impl CampaignSim {
             golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(),
             goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0,
             crisis_history: Vec::new(), schism_cooldown_until: 0,
+            origin_house: hi as i32, origin_kind: ORIGIN_DEPARTURE,
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "departure");

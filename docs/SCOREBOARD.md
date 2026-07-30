@@ -570,6 +570,33 @@ supply shed should move, and it is the obvious next thing to ask of this layer.
 
 ---
 
+## House trade outposts — measured, fixed, still not fully explained
+
+Player-reported: outposts basically never appeared over ordinary play. A 150-year
+instrumented run (`econ_diagnose_outpost_founding`, `#[ignore]`d) on the reference
+world found the wealth bar was never the blocker (cleared 96.8% of months) — two real
+structural bugs were: only the single richest house ever got a try each year, so the
+mechanism stalled for good the moment that ONE house's network stopped bordering a
+remaining site; and ordinary estates (founded far more often) could exhaust the shared
+`MAX_TOTAL_ESTATES` budget outposts draw from too. Fixed both (every qualifying house
+gets a try, richest first, up to `OUTPOST_MAX_PER_CALL`; `OUTPOST_RESERVED_ESTATES`
+holds back budget outposts can't be starved out of) and added a house's own estates as
+network anchors alongside home+offices. Confirmed in the standard 50-year dynamics
+gate: outposts now found at year 30 and reach 2 by year 35, where every prior scorecard
+run in this file shows a flat 0 for the whole window. The 150-year diagnostic itself
+still plateaus at 2 outposts after year 31 on this specific fixture — attributed to
+`reference_world()`'s colonizable sites sitting in one compact band disjoint from most
+hubs (a geometry no real generated world has), not re-tuned against blindly per §2.4 —
+left as an open item to confirm against a real generated world.
+
+Financed expeditions (`expedition_launch_pass`) were rewired the same session: the old
+scoring rewarded raw distance with no ceiling, so a corridor could only ever reach the
+single farthest city (structurally >5,600 km on an Earth-scale world). Now bounded to a
+regional ≈1,400–8,800 km band with a "sweet spot" peak near the floor, so several
+shorter corridors are viable instead of one maximal one.
+
+---
+
 ## What is still unmeasured
 
 Being explicit about this matters as much as the table above — an unmeasured
@@ -593,6 +620,7 @@ subsystem is one you cannot have an opinion about.
 
 | Date | Commit | Earth main | Earth exact | Rust tests | FE tests | Note |
 |---|---|---|---|---|---|---|
+| 2026-07-30 | *this* | 66.3% | 29.1% | 224 | 0 | House lineage tab + Compare window + figure variation + enlarged dossier window; outpost/expedition regional-reach fixes (see below) |
 | 2026-07-29 | `936a8a3`+ | 66.3% | 29.1% | 159 | 0 | Economy oracle added; CI added; scoreboard created |
 | 2026-07-29 | *this* | 66.3% | 29.1% | 159 | 0 | Harness calibrated to real campaign start; LOD sampler fixed; tick determinism defect found |
 | 2026-07-30 | *this* | 66.3% | 29.1% | 166 | 0 | Phase 0.3: tick determinism FIXED (4 hash-order sites); guard un-ignored |

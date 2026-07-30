@@ -535,9 +535,55 @@ pub struct ActiveCrisisBrief {
     pub plot_name: String,
     pub plot_tint: String,
     pub plot_leader_name: String,
+    /// Why the plot leader stands where they do — derived from their role/posting/
+    /// loyalty, since there's no stored per-figure reason (see `crisis.rs`'s own
+    /// module doc on why there's no drifting `regard` ladder to read one off).
+    pub plot_leader_motive: String,
+    /// Why the ruler holds on — derived from the house's own age/tenure/vice.
+    pub head_motive: String,
     pub heir_choice: u8,
     pub rounds: Vec<CrisisRoundBrief>,
     pub opened_year: u32,
+}
+
+/// A short, honest "why" for a kinsman's stance — derived from state that already
+/// exists (role, posting, loyalty), not a stored reason. The crisis engine has no
+/// per-figure regard ladder to read a reason off directly (see `crisis.rs`'s module
+/// doc), so this reads the same signals the engine itself used to pick a plot leader.
+fn kin_motive(sim: &CampaignSim, hi: usize, ki: i32) -> String {
+    if ki < 0 { return String::new(); }
+    let Some(h) = sim.houses.get(hi) else { return String::new(); };
+    let Some(k) = h.kin.get(ki as usize) else { return String::new(); };
+    let seat = h.hub as i32;
+    if k.loyalty < 0.15 { return "deeply estranged from the house".into(); }
+    if k.role == 1 && k.loyalty < 0.40 { return "passed over for the succession".into(); }
+    if k.posted >= 0 && k.posted != seat {
+        let where_ = sim.hubs.get(k.posted as usize).map(|x| x.name.as_str()).unwrap_or("a distant post");
+        return format!("kept far from the seat, at {where_}");
+    }
+    if k.role == 3 { return "idle at the seat, given little to run".into(); }
+    if k.loyalty < 0.35 { return "resents the house's direction".into(); }
+    "ambitious, and impatient for more".into()
+}
+
+/// Why the ruler holds on — the mirror of `kin_motive` for the head, from state the
+/// house already carries (tenure, whether it's grown under him, his vice).
+fn head_motive(sim: &CampaignSim, hi: usize) -> String {
+    let Some(h) = sim.houses.get(hi) else { return String::new(); };
+    let vice = sim.head_vice(hi);
+    if vice != crate::sim::tick::VICE_NONE {
+        return match vice {
+            crate::sim::tick::VICE_LAVISH => "lives beyond what the house can bear".into(),
+            crate::sim::tick::VICE_RECKLESS => "gambles the house's standing on his ventures".into(),
+            crate::sim::tick::VICE_RAPACIOUS => "presses feuds the house cannot afford".into(),
+            crate::sim::tick::VICE_MISERLY => "hoards, and the family goes without".into(),
+            _ => "keeps to himself, and the house grows insular".into(),
+        };
+    }
+    let years = sim.tick.saturating_sub(h.head_since) / TICKS_PER_YEAR;
+    if years < 5 { return "still new to the seat, and unproven".into(); }
+    let grew = h.line.last().is_some_and(|p| h.wealth > p.wealth_start);
+    if grew { "to hold what he has built".into() } else { "to keep what the family still has".into() }
 }
 
 /// One closed crisis from the permanent record, for the "past risings" list.
@@ -590,6 +636,8 @@ pub fn campaign_get_house_crisis(idx: u32, db: State<'_, WorldDb>) -> Result<Cri
         let plot_leader_name = if c.plot_leader >= 0 {
             h.kin.get(c.plot_leader as usize).map(|k| k.name.clone()).unwrap_or_default()
         } else { String::new() };
+        let plot_leader_motive = kin_motive(&sim, hi, c.plot_leader);
+        let head_motive = head_motive(&sim, hi);
         let head_support = c.head_support;
         let plot_support = c.plot_support;
         ActiveCrisisBrief {
@@ -599,7 +647,7 @@ pub fn campaign_get_house_crisis(idx: u32, db: State<'_, WorldDb>) -> Result<Cri
             undecided: (1.0 - head_support - plot_support).max(0.0),
             loyalist_name: c.loyalist_name.clone(), loyalist_tint: c.loyalist_tint.clone(),
             plot_name: c.plot_name.clone(), plot_tint: c.plot_tint.clone(),
-            plot_leader_name, heir_choice: c.heir_choice,
+            plot_leader_name, plot_leader_motive, head_motive, heir_choice: c.heir_choice,
             rounds: c.rounds.iter().map(|r| CrisisRoundBrief {
                 action: r.action, result: r.result, head_delta: r.head_delta, text: r.text.clone(),
             }).collect(),
@@ -617,4 +665,72 @@ pub fn campaign_get_house_crisis(idx: u32, db: State<'_, WorldDb>) -> Result<Cri
         h.crisis_immune_until / TICKS_PER_YEAR
     } else { 0 };
     Ok(CrisisBrief { active, history, secure_until_year })
+}
+
+// ── Lineage — where a house came from, and what split off it ─────────────────────
+
+/// One house in a lineage chain, for the dossier's 🌳 Lineage tab.
+#[derive(Serialize)]
+pub struct LineageNode {
+    pub idx: u32,
+    pub name: String,
+    pub alive: bool,
+    /// 0 = not yet tiered (guild, or too new).
+    pub tier: u8,
+    /// `ORIGIN_*` — meaningless (reads 0) on the root of the chain.
+    pub origin_kind: u8,
+    pub origin_year: u32,
+    /// The founding `HouseEvent`'s own text — already well-written, so the tab
+    /// reads it rather than duplicating a second "why" string.
+    pub origin_text: String,
+    pub color: String,
+}
+
+#[derive(Serialize)]
+pub struct HouseLineage {
+    /// Root-first chain of ancestors, NOT including this house itself.
+    pub ancestors: Vec<LineageNode>,
+    /// Houses whose `origin_house` points at THIS house — one level of offshoots
+    /// (branches, divisions, departures). Click through to re-center on one of
+    /// them for the next generation, rather than fetching a full deep tree.
+    pub offshoots: Vec<LineageNode>,
+}
+
+fn lineage_node(sim: &CampaignSim, idx: usize) -> LineageNode {
+    let h = &sim.houses[idx];
+    LineageNode {
+        idx: idx as u32, name: h.name.clone(), alive: !h.defunct, tier: h.tier,
+        origin_kind: h.origin_kind, origin_year: h.founded_tick / TICKS_PER_YEAR,
+        origin_text: h.events.first().map(|e| e.text.clone()).unwrap_or_default(),
+        color: distinct_color(idx),
+    }
+}
+
+/// This house's lineage: the chain of houses it descends from (root first) and the
+/// houses that split directly off IT. Read-only, mirrors `origin_house`/`origin_kind`
+/// exactly — no state beyond what `House` already carries.
+#[tauri::command]
+pub fn campaign_get_house_lineage(idx: u32, db: State<'_, WorldDb>) -> Result<HouseLineage, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let empty = || HouseLineage { ancestors: vec![], offshoots: vec![] };
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(empty()) };
+    let hi = idx as usize;
+    if sim.houses.get(hi).is_none() { return Ok(empty()); }
+
+    let mut ancestors = Vec::new();
+    let mut cur = sim.houses[hi].origin_house;
+    let mut guard = 0;
+    while cur >= 0 && (cur as usize) < sim.houses.len() && guard < 64 {
+        ancestors.push(lineage_node(&sim, cur as usize));
+        cur = sim.houses[cur as usize].origin_house;
+        guard += 1;
+    }
+    ancestors.reverse();
+
+    let offshoots = sim.houses.iter().enumerate()
+        .filter(|(i, h)| h.origin_house == idx as i32 && *i != hi)
+        .map(|(i, _)| lineage_node(&sim, i))
+        .collect();
+
+    Ok(HouseLineage { ancestors, offshoots })
 }

@@ -949,6 +949,78 @@ fn econ_measure_foreign_hand_conjunction() {
     assert!(samples > 0, "the run produced no posted kin at all to measure");
 }
 
+/// Player-reported: "no outposts are created" over the course of ordinary play.
+/// `maybe_found_house_outpost` (`houses.rs`) is gated on THREE things at once — a
+/// non-empty `colonizable` site pool, a founder wealthy enough (`OUTPOST_FOUND_WEALTH`
+/// = 100,000, `OUTPOST_FOUND_COST` = 70,000), and a reachable site within
+/// `COLONY_MAX_KM` of the founder's home/offices. Diagnose which of the three is
+/// actually the blocker before touching any constant, per CLAUDE.md §2.4.
+///
+/// **Two real bugs found and fixed** (neither was the wealth bar — it clears 96.8% of
+/// months): (1) only the SINGLE richest house ever got to try, each call, so the moment
+/// its own home+offices network stopped bordering a remaining site the mechanism stalled
+/// for good even with other wealthy, well-placed houses idle — fixed by letting every
+/// qualifying house attempt, richest first, up to `OUTPOST_MAX_PER_CALL` successes.
+/// (2) ordinary estates (founded far more often) could exhaust the shared
+/// `MAX_TOTAL_ESTATES` budget outposts also draw from — fixed by `OUTPOST_RESERVED_ESTATES`.
+/// A house's own ESTATES were also added as network anchors alongside home+offices (a
+/// plantation already worked nearby is a natural base for a regional exploitation post).
+///
+/// **What this diagnostic still shows, and why it's left alone:** on THIS synthetic
+/// fixture, founding still stops after year 31 (2 outposts) even with both fixes,
+/// because `reference_world()`'s `colonizable` sites sit in one compact band (y 40–56)
+/// disjoint from most hubs (y 0–36) — a geometry no real generated world has (frontier
+/// sites there are scattered broadly, not walled into one corner). Widening
+/// `COLONY_MAX_KM` to chase this one fixture's number would be tuning a constant against
+/// its own target metric with no independent gate (exactly what §2.4 warns against), and
+/// `COLONY_MAX_KM`=2500 is itself a prior deliberate "user rule" (see its own doc comment
+/// in `mod.rs`), not a stale default. Left as an open item: confirm in a REAL generated
+/// world via the app whether outposts now recur past the first founding wave; if they
+/// still stall there, the fixture's geometry is not the explanation and this needs
+/// another diagnostic pass against real site distribution.
+#[test]
+#[ignore]
+fn econ_diagnose_outpost_founding() {
+    let mut s = reference_world();
+    let years = 150u32;
+    let months = years * 12;
+    let mut richest_ever = 0.0f32;
+    let mut months_wealth_bar_cleared = 0u32;
+    let mut colonizable_over_time: Vec<(u32, usize)> = Vec::new();
+    let mut outposts_founded = 0u32;
+    let mut outpost_years: Vec<u32> = Vec::new();
+    let mut prev_outpost_hubs = 0usize;
+    for m in 0..months {
+        s.advance(30);
+        let richest = s.houses.iter().filter(|h| !h.defunct).map(|h| h.wealth).fold(0.0f32, f32::max);
+        richest_ever = richest_ever.max(richest);
+        if richest >= 100_000.0 { months_wealth_bar_cleared += 1; }
+        if m % 12 == 0 {
+            colonizable_over_time.push((m / 12, s.colonizable.len()));
+        }
+        let outpost_hubs = s.hubs.iter().filter(|h| h.colony_kind == 2).count();
+        if outpost_hubs > prev_outpost_hubs {
+            outposts_founded += (outpost_hubs - prev_outpost_hubs) as u32;
+            outpost_years.push(m / 12);
+        }
+        prev_outpost_hubs = outpost_hubs;
+    }
+    println!();
+    println!("═══ Outpost founding — {years}-year diagnostic ═══");
+    println!("  richest house's peak wealth ever    {:>10.0}   (bar: OUTPOST_FOUND_WEALTH = 100,000)", richest_ever);
+    println!("  months the bar was CLEARED           {:>10} / {} ({:.1}%)",
+        months_wealth_bar_cleared, months, 100.0 * months_wealth_bar_cleared as f64 / months as f64);
+    println!("  colonizable sites remaining, by decade:");
+    for (yr, n) in &colonizable_over_time {
+        if yr % 10 == 0 { println!("    year {yr:>4}: {n:>3} sites left"); }
+    }
+    println!("  outposts actually founded            {:>10}", outposts_founded);
+    println!("  founded in years: {:?}", outpost_years);
+    println!("═══════════════════════════════════════════════════════════════════");
+    println!();
+    assert!(months > 0, "diagnostic only — never fails the build");
+}
+
 // ── Phase 0.4 · the inheritance gate ────────────────────────────────────────
 //
 //  `HOUSE_MASTER_PLAN` 0.4 gates the inheritance rule on one thing, and it is the

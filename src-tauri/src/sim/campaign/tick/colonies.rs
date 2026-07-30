@@ -807,6 +807,7 @@ impl CampaignSim {
         if self.expeditions.iter().filter(|e| e.status <= 2).count() >= EXP_MAX_ACTIVE { return; }
         let n = self.hubs.len();
         let min_gap = self.world_w * EXP_MIN_GAP_FRAC;
+        let max_gap = self.world_w * EXP_MAX_GAP_FRAC;
         let mut backers: Vec<usize> = (0..self.houses.len())
             .filter(|&h| !self.houses[h].defunct && !self.houses[h].is_guild
                 && self.houses[h].wealth >= EXP_MIN_HOUSE_WEALTH)
@@ -831,7 +832,11 @@ impl CampaignSim {
                 let hd = &self.hubs[d];
                 if hd.is_estate || hd.abandoned || hd.population < 400.0 { continue; }
                 let dist = self.hub_cell_dist(origin, d);
-                if dist < min_gap { continue; }
+                // A venture reaches for a REGIONAL unconnected settlement, not a
+                // hemisphere away — bounded both sides (diagnosed: with no ceiling,
+                // scoring below used to reward raw distance forever, so ventures
+                // systematically reached for the single farthest reachable city).
+                if dist < min_gap || dist > max_gap { continue; }
                 if self.corridor_exists(origin, d) { continue; }
                 let (lo, hiid) = ((origin.min(d)) as u32, (origin.max(d)) as u32);
                 let (attempts, successes) = self.route_prospects.iter()
@@ -842,7 +847,12 @@ impl CampaignSim {
                 let promise = 1.0 + successes as f32 * 0.9;
                 let fatigue = 1.0 / (1.0 + attempts.saturating_sub(successes) as f32 * 0.5);
                 let jitter = 0.7 + 0.6 * hash01(self.seed, d as u64, (tick as u64) ^ (hi as u64));
-                let score = hd.population.sqrt() * (dist / min_gap) * fatigue * promise * jitter;
+                // Reach a sweet spot just past the near floor rather than maximising
+                // distance: peaks at ~1.5× the minimum gap, tapering both directions
+                // so a nearer prospect can still win on population/promise alone.
+                let ideal = min_gap * 1.5;
+                let reach = (1.0 - ((dist - ideal).abs() / (max_gap - min_gap).max(1.0)).min(1.0) * 0.7).max(0.3);
+                let score = hd.population.sqrt() * reach * fatigue * promise * jitter;
                 if score > best.1 { best = (d, score); }
             }
             let Some(dest) = (best.0 != usize::MAX).then_some(best.0) else { continue };
@@ -1143,7 +1153,7 @@ impl CampaignSim {
         // Best reachable FERTILE site (from the city; its prior colonies could relay
         // too, but the city alone is enough for v1).
         let nodes = vec![(self.hubs[founder].x, self.hubs[founder].y)];
-        let cap = COLONY_MAX_KM * self.world_w / EARTH_EQUATOR_KM; // ≤ 5000 km from the metropolis
+        let cap = COLONY_MAX_KM * self.world_w / EARTH_EQUATOR_KM; // ≤ 2500 km from the metropolis
         let founder_coastal = self.hubs[founder].coastal;
         let mut bi = (usize::MAX, 0.0f32);
         for (i, s) in self.colonizable.iter().enumerate() {
@@ -1260,7 +1270,7 @@ impl CampaignSim {
         let Some(founder) = (best.0 != usize::MAX).then_some(best.0) else { return };
         // Best reachable FERTILE (grain) site — fertility dominates, nearer is better.
         let nodes = vec![(self.hubs[founder].x, self.hubs[founder].y)];
-        let cap = COLONY_MAX_KM * self.world_w / EARTH_EQUATOR_KM; // ≤ 5000 km from the metropolis
+        let cap = COLONY_MAX_KM * self.world_w / EARTH_EQUATOR_KM; // ≤ 2500 km from the metropolis
         let mut bi = (usize::MAX, 0.0f32);
         for (i, s) in self.colonizable.iter().enumerate() {
             if s.fertility < COLONY_MIN_FERTILE { continue; } // must be farmable
