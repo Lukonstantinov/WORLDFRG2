@@ -1072,17 +1072,20 @@ PORTING_REFERENCE.md              ← Porting reference
 
 **`docs/proposals/` — A MENU, NOT COMMITMENTS**
 
-Twenty-four documents (feature catalogs, trade/cartography specs, Victoria-2 UI
+Twenty-five documents (feature catalogs, trade/cartography specs, Victoria-2 UI
 direction, settlement and population analyses, finance/heraldry variants, roadmap
-batches, and the seven-part HOUSE design series — province view, tiers/kin/goals,
-body politic, succession crisis, power struggle, faction naming, and
-`HOUSE_MASTER_PLAN.md` which critiques and sequences the rest) live in
-`docs/proposals/`.
+batches, and the eight-part HOUSE design series — province view · tiers/kin/goals ·
+body politic · succession crisis · power struggle · faction naming ·
+`HOUSE_MASTER_PLAN.md`, which critiques and sequences the rest ·
+`HOUSE_INHERITANCE_AND_TERRITORY.md`, which amends it) live in `docs/proposals/`.
 
-> If you read only one of the house documents, read `HOUSE_MASTER_PLAN.md`. Its Part 0
+> If you read only one of the house documents, read `HOUSE_MASTER_PLAN.md` and then
+> `HOUSE_INHERITANCE_AND_TERRITORY.md` (which amends it). Part 0 of the master plan
 > records a **blocking measured finding**: a house currently lives ~12 years against a
-> historical 30–90, so the politics layer designed in the other six documents has no
-> substrate until turnover is fixed. They were being read by fresh sessions as a backlog to work through,
+> historical 30–90, so the politics layer has no substrate until turnover is fixed. The
+> amendment adds the open risk that the too-rich and too-short-lived anomalies may be
+> **one bug (overextension) or in tension** — and if they are in tension, fixing lifespan
+> raises peak wealth and the phase boundary is wrong. They were being read by fresh sessions as a backlog to work through,
 and they are not one: they are far more good ideas than anyone can build.
 
 > **Do not start work from `docs/proposals/`.** Check `FIX_PLAN.md` for what is actually
