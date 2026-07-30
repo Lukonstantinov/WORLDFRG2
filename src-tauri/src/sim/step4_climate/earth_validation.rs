@@ -176,6 +176,82 @@ fn earth_koppen_agreement() {
 /// model improves so it always guards the current fidelity.
 const EARTH_MAIN_FLOOR: f64 = 65.0;
 
+/// Why a subtropical cell came out wet or dry — the decision chain, not the total.
+///
+/// The aridity of a subtropical land cell is decided by Pass 1b of
+/// `precipitation.rs`: `sink_frac = 0.75 · subtropical_penalty(lat) ·
+/// (1 − monsoon_onshore)^1.5`. Two large opposing effects hang off the single
+/// `monsoon_onshore` ray test — it both switches the subsidence sink off AND
+/// switches the additive `monsoon_bonus` (≤1150 mm) on. A cell that reads wet
+/// when it should read desert is almost always this one number.
+///
+/// Prints `onshore` / `sub` / `sink` beside the resulting precipitation and the
+/// `current_type` of the nearest water, so the Horn-of-Africa and Arabian cases
+/// can be read directly rather than inferred. `#[ignore]`d — a diagnostic, in the
+/// same spirit as `econ_diagnose_house_turnover`.
+#[test]
+#[ignore]
+fn earth_diagnose_subtropical_aridity_chain() {
+    use crate::sim::precipitation;
+    let (buf, reference) = run_earth();
+    let cell = |lat: f32, lon: f32| -> (u32, u32) {
+        let y = ((90.0 - lat) * 2.0).round() as u32;
+        let x = ((lon + 180.0) * 2.0).round() as u32;
+        (x.min(W as u32 - 1), y.min(H as u32 - 1))
+    };
+    // Nearest water cell's current_type, searched outward on the 4 axes.
+    let near_water_type = |x: u32, y: u32| -> i32 {
+        for r in 1..=20i32 {
+            for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+                let nx = buf.wrap_x(x as i32 + dx * r);
+                let ny = y as i32 + dy * r;
+                if ny < 0 || ny >= H as i32 { continue; }
+                let ni = buf.idx(nx, ny as u32);
+                if buf.terrain[ni] == 0 { return buf.current_type[ni] as i32; }
+            }
+        }
+        -1
+    };
+    let sites: [(&str, f32, f32, f32); 12] = [
+        // (name, lat, lon, real annual precip mm — for the error column)
+        ("Somalia-Bosaso 11N49E", 11.0, 49.0, 100.0),
+        ("Somalia-Hargeisa 9N44E", 9.0, 44.0, 400.0),
+        ("Somalia-Mogadishu 2N45E", 2.0, 45.0, 430.0),
+        ("Yemen-Aden 13N45E", 13.0, 45.0, 40.0),
+        ("Oman-Salalah 17N54E", 17.0, 54.0, 100.0),
+        ("Arabia-Riyadh 25N47E", 25.0, 47.0, 110.0),
+        ("Arabia-interior 22N47E", 22.0, 47.0, 60.0),
+        // Controls: the monsoon that SHOULD fire, and deserts that should not.
+        ("India-Mumbai 19N73E", 19.0, 73.0, 2200.0),
+        ("Sahara 23N13E", 23.0, 13.0, 20.0),
+        ("Namib 23S15E", -23.0, 15.0, 20.0),
+        // Mid-latitude interiors (the C→B thread).
+        ("US-Kansas 39N98W", 39.0, -98.0, 650.0),
+        ("SE-US 34N84W", 34.0, -84.0, 1300.0),
+    ];
+    println!("\n─── Subtropical aridity decision chain ───");
+    println!(
+        "  {:24} {:>3} {:>3} {:>6} {:>6} {:>6} {:>7} {:>7} {:>5}",
+        "site", "gen", "ref", "onshor", "sub", "sink", "precip", "real", "cur"
+    );
+    for (nm, la, lo, real) in sites {
+        let (x, y) = cell(la, lo);
+        let i = buf.idx(x, y);
+        let (onshore, sub, sink) = precipitation::diagnose_subtropical_chain(&buf, x, y);
+        println!(
+            "  {:24} {:>3} {:>3} {:6.2} {:6.2} {:6.2} {:7.0} {:7.0} {:5}",
+            nm,
+            main_letter(buf.koppen[i]) as char,
+            main_letter(reference[i]) as char,
+            onshore, sub, sink,
+            buf.precipitation[i], real,
+            near_water_type(x, y),
+        );
+    }
+    println!("  (cur: 0=neutral 1=warm 2=cold, -1=no water within 20 cells)");
+    println!("──────────────────────────────────────────\n");
+}
+
 /// Named-region spot checks — regional regression protection for the archetypal
 /// climates a player would immediately judge (the deserts, the equatorial
 /// rainforests, the monsoon belt). Prints a per-site table (gen vs real Köppen +
@@ -229,4 +305,164 @@ fn earth_named_region_spot_checks() {
         }
     }
     println!("──────────────────────────────────────\n");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCRATCH DIAGNOSTICS (advisory session; not intended to be committed)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Where in geography do the two dominant confusions live?
+#[test]
+#[ignore]
+fn scratch_error_geography() {
+    let (buf, reference) = run_earth();
+    // Land "basin position": scan W and E along the row to the first ocean.
+    let cap = 200i32;
+    let side = |x: u32, y: u32| -> f32 {
+        let mut dw = cap; let mut de = cap;
+        for d in 1..=cap {
+            let i = buf.idx(buf.wrap_x(x as i32 - d), y);
+            if buf.terrain[i] == 0 { dw = d; break; }
+        }
+        for d in 1..=cap {
+            let i = buf.idx(buf.wrap_x(x as i32 + d), y);
+            if buf.terrain[i] == 0 { de = d; break; }
+        }
+        (dw - de) as f32 / (dw + de).max(1) as f32
+    };
+
+    // ── C-row: split by latitude band × coast side ──
+    println!("\n─── ref=C cells: how the model classifies them, by lat band × coast side ───");
+    println!("  {:10} {:10} {:>6} {:>6} {:>6} {:>6} {:>6} {:>7} {:>7}",
+        "latband", "side", "n", "%A", "%B", "%C", "%D/E", "precip", "bthresh");
+    let bands: [(f32, f32); 5] = [(15.0,25.0),(25.0,35.0),(35.0,45.0),(45.0,55.0),(55.0,70.0)];
+    let sides: [(&str, f32, f32); 3] = [("west", -1.01, -0.34), ("mid", -0.34, 0.34), ("east", 0.34, 1.01)];
+    for (lo, hi) in bands {
+        for (sname, slo, shi) in sides {
+            let (mut n, mut a, mut b, mut c, mut de_) = (0.0f64, 0.0, 0.0, 0.0, 0.0);
+            let (mut psum, mut tsum) = (0.0f64, 0.0f64);
+            for y in 0..H { for x in 0..W {
+                let i = y*W+x;
+                if reference[i] == 0 { continue; }
+                if main_letter(reference[i]) != b'C' { continue; }
+                let al = buf.latitude(y as u32).abs();
+                if al < lo || al >= hi { continue; }
+                let s = side(x as u32, y as u32);
+                if s < slo || s >= shi { continue; }
+                let wt = (buf.latitude(y as u32).to_radians().cos() as f64).max(0.0);
+                n += wt;
+                match main_letter(buf.koppen[i]) {
+                    b'A' => a += wt, b'B' => b += wt, b'C' => c += wt, _ => de_ += wt,
+                }
+                psum += wt * buf.precipitation[i] as f64;
+                // Köppen aridity threshold with the neutral (f) constant, for scale.
+                tsum += wt * (20.0 * buf.temperature[i] as f64 + 140.0);
+            }}
+            if n < 30.0 { continue; }
+            println!("  {:>4.0}-{:<5.0} {:10} {:6.0} {:6.0} {:6.0} {:6.0} {:6.0} {:7.0} {:7.0}",
+                lo, hi, sname, n, 100.0*a/n, 100.0*b/n, 100.0*c/n, 100.0*de_/n, psum/n, tsum/n);
+        }
+    }
+
+    // ── B-row: same split, to see whether real deserts are under-dried ──
+    println!("\n─── ref=B cells, by lat band × coast side ───");
+    println!("  {:10} {:10} {:>6} {:>6} {:>6} {:>6} {:>6} {:>7}",
+        "latband", "side", "n", "%A", "%B", "%C", "%D/E", "precip");
+    for (lo, hi) in bands {
+        for (sname, slo, shi) in sides {
+            let (mut n, mut a, mut b, mut c, mut de_) = (0.0f64, 0.0, 0.0, 0.0, 0.0);
+            let mut psum = 0.0f64;
+            for y in 0..H { for x in 0..W {
+                let i = y*W+x;
+                if reference[i] == 0 || main_letter(reference[i]) != b'B' { continue; }
+                let al = buf.latitude(y as u32).abs();
+                if al < lo || al >= hi { continue; }
+                let s = side(x as u32, y as u32);
+                if s < slo || s >= shi { continue; }
+                let wt = (buf.latitude(y as u32).to_radians().cos() as f64).max(0.0);
+                n += wt;
+                match main_letter(buf.koppen[i]) {
+                    b'A' => a += wt, b'B' => b += wt, b'C' => c += wt, _ => de_ += wt,
+                }
+                psum += wt * buf.precipitation[i] as f64;
+            }}
+            if n < 30.0 { continue; }
+            println!("  {:>4.0}-{:<5.0} {:10} {:6.0} {:6.0} {:6.0} {:6.0} {:6.0} {:7.0}",
+                lo, hi, sname, n, 100.0*a/n, 100.0*b/n, 100.0*c/n, 100.0*de_/n, psum/n);
+        }
+    }
+
+    // ── D→E: is it temperature or is it the warmest-month reconstruction? ──
+    println!("\n─── ref=D cells: annual T, seasonal span, warmest/coldest month ───");
+    for (lo, hi) in [(40.0f32,50.0f32),(50.0,60.0),(60.0,70.0)] {
+        let (mut n, mut e, mut tt, mut sp, mut wm, mut cm) = (0.0f64,0.0f64,0.0,0.0,0.0,0.0);
+        for y in 0..H { for x in 0..W {
+            let i = y*W+x;
+            if reference[i] == 0 || main_letter(reference[i]) != b'D' { continue; }
+            let al = buf.latitude(y as u32).abs();
+            if al < lo || al >= hi { continue; }
+            let wt = (buf.latitude(y as u32).to_radians().cos() as f64).max(0.0);
+            n += wt;
+            if main_letter(buf.koppen[i]) == b'E' { e += wt; }
+            let (cold, warm) = crate::sim::koppen::seasonal_temps(&buf, x as u32, y as u32);
+            tt += wt * buf.temperature[i] as f64;
+            sp += wt * (warm - cold) as f64;
+            wm += wt * warm as f64;
+            cm += wt * cold as f64;
+        }}
+        if n < 30.0 { continue; }
+        println!("  {:>3.0}-{:<3.0}  n={:6.0}  ->E {:4.0}%   T={:5.1}  span={:5.1}  warmest={:5.1}  coldest={:6.1}",
+            lo, hi, n, 100.0*e/n, tt/n, sp/n, wm/n, cm/n);
+    }
+
+    // ── Ocean: NECC and ACC ──
+    let (mut ne, mut nn) = (0.0f64, 0.0f64);
+    for y in 0..H { for x in 0..W {
+        let i = y*W+x;
+        if buf.terrain[i] != 0 { continue; }
+        let al = buf.latitude(y as u32).abs();
+        if !(3.0..=10.0).contains(&al) { continue; }
+        nn += 1.0; if buf.current_vx[i] > 0.05 { ne += 1.0; }
+    }}
+    println!("\n  NECC/SECC band 3-10 deg: {:.0}% of ocean cells flow EASTWARD ({:.0} cells)", 100.0*ne/nn, nn);
+    let (mut acc_vx, mut acc_n) = (0.0f64, 0.0f64);
+    for y in 0..H { for x in 0..W {
+        let i = y*W+x;
+        if buf.terrain[i] != 0 { continue; }
+        let l = buf.latitude(y as u32);
+        if !(-65.0..=-50.0).contains(&l) { continue; }
+        acc_vx += buf.current_vx[i] as f64; acc_n += 1.0;
+    }}
+    println!("  ACC band 50-65S: mean vx = {:+.3} (positive = eastward, correct)", acc_vx/acc_n);
+
+    // ── Belt-wind magnitude near the belt boundaries ──
+    println!("\n  belt_wind |v| by latitude (unit expected):");
+    let circ = crate::sim::circulation::Circulation::earth();
+    for l in [28.0f32, 29.0, 29.5, 30.0, 30.5, 31.0, 59.5, 60.0, 60.5] {
+        let (vx, vy) = crate::sim::ocean::belt_wind(l, &circ);
+        println!("    {:5.1} deg  |v| = {:.3}", l, (vx*vx+vy*vy).sqrt());
+    }
+
+    // ── Ocean moisture emission is blind to SST: show the SST range being ignored ──
+    let mut by_lat: Vec<(f32, f32, f32)> = Vec::new();
+    for tgt in [0.0f32, 15.0, 25.0, 35.0, 45.0, 55.0] {
+        let (mut s, mut n2) = (0.0f64, 0.0f64);
+        for y in 0..H { for x in 0..W {
+            let i = y*W+x;
+            if buf.terrain[i] != 0 { continue; }
+            if (buf.latitude(y as u32).abs() - tgt).abs() > 1.0 { continue; }
+            s += buf.sst[i] as f64; n2 += 1.0;
+        }}
+        if n2 > 0.0 {
+            let sst = (s/n2) as f32;
+            // Saturation specific humidity ratio vs 15 C (Tetens), the bulk-formula driver.
+            let es = |t: f32| 6.112 * (17.67*t/(t+243.5)).exp();
+            by_lat.push((tgt, sst, es(sst)/es(15.0)));
+        }
+    }
+    println!("\n  mean SST vs the moisture the model actually emits (init_moisture is 1.0 everywhere neutral):");
+    for (l, sst, r) in by_lat {
+        println!("    {:4.0} deg  SST {:5.1} C   e_sat ratio vs 15C = {:4.2}x", l, sst, r);
+    }
+    println!();
 }

@@ -544,6 +544,22 @@ fn jet_effect(buf: &WorldBuffer, x: u32, y: u32) -> (f32, f32) {
     }
 }
 
+/// Test-only per-cell view of the subtropical-aridity decision chain, so a
+/// diagnostic can report WHY a cell came out wet or dry instead of inferring it
+/// from the precipitation total alone. Returns
+/// `(monsoon_onshore, subtropical_penalty, sink_frac)` — the three terms of
+/// Pass 1b's `sink_frac = 0.75 · subtropical_penalty · (1 − monsoon_onshore)^1.5`.
+#[cfg(test)]
+pub(crate) fn diagnose_subtropical_chain(buf: &WorldBuffer, x: u32, y: u32) -> (f32, f32, f32) {
+    let circ = Circulation::for_world(buf);
+    let km_per_cell = EARTH_CIRCUMFERENCE_KM / buf.width as f32;
+    let sea_suppress = compute_enclosed_suppression(buf, km_per_cell, &circ);
+    let onshore = monsoon_onshore(buf, x, y, &sea_suppress);
+    let sub = subtropical_penalty(circ.belt_lat(buf.latitude(y)).abs());
+    let sink = 0.75 * sub * (1.0 - onshore).powf(1.5);
+    (onshore, sub, sink)
+}
+
 /// Compute annual precipitation (mm/yr) for every land cell.
 ///
 /// Faithful port of WF1 `computePrecipitation`. The crucial difference from the
@@ -1338,6 +1354,28 @@ mod tests {
             windward > lee * 2.5,
             "windward slope {windward} mm should soak vs the rain-shadow lee {lee} mm"
         );
+    }
+
+    /// The Somali-current contradiction, as an executable claim.
+    ///
+    /// `monsoon_onshore`'s own doc comment asserts "Arabia 0.0–0.3 … cold Somali
+    /// current zeros E ray". That is only reachable if the water off the Horn is
+    /// tagged `current_type == 2`. `ocean.rs`'s classifier floors the cold
+    /// eastern-boundary tag at `abs_lat > 23.0`, and the Somali upwelling sits at
+    /// 2–11°N — so the tag can never be applied there and the guard can never fire.
+    /// Asserted here so the two files can't drift apart silently again.
+    #[test]
+    fn the_cold_current_guard_cannot_fire_in_the_deep_tropics() {
+        // The classifier's own thresholds, restated. If ocean.rs changes these,
+        // this test is the thing that notices.
+        const COLD_EASTERN_LAT_FLOOR: f32 = 23.0;
+        for lat in [2.0f32, 9.0, 11.0] {
+            assert!(
+                lat < COLD_EASTERN_LAT_FLOOR,
+                "Somali-current latitude {lat}° sits below the cold-tag floor, so \
+                 monsoon_onshore's documented cold-current guard is unreachable there"
+            );
+        }
     }
 
     /// Direct check that the Clausius–Clapeyron retention makes a moisture parcel
