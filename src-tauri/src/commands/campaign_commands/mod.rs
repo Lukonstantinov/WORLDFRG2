@@ -1465,6 +1465,14 @@ pub struct HouseBrief {
     /// never computed (a guild, or a house founded this tick before the monthly pass).
     #[serde(default)] pub tier: u8,
     #[serde(default)] pub standing: f32,
+    /// Phase 1.2 · the seat culture's language-kit index (see `sim::cultures::KITS`),
+    /// −1 if unresolvable — drives the dossier's culture-dress figure.
+    #[serde(default = "neg_one_i32c")] pub kit: i32,
+    #[serde(default)] pub head_female: bool,
+    /// Phase 1.4 · positive events (§2.2) — the house's all-time peak wealth and when
+    /// it was reached ("the finest hour"), shown as a fact rather than an event.
+    #[serde(default)] pub peak_wealth: f32,
+    #[serde(default)] pub peak_wealth_tick: u32,
 }
 
 /// One city a house operates in, for the influence-ranked "Active in" list.
@@ -1678,6 +1686,11 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
             coin_trust: coin_trust_house,
             tier: h.tier,
             standing: h.standing,
+            kit: crate::sim::cultures::kit_of_people(&sim.hub_culture.get(hub).cloned().unwrap_or_default())
+                .map(|k| k as i32).unwrap_or(-1),
+            head_female: h.head_female,
+            peak_wealth: h.peak_wealth,
+            peak_wealth_tick: h.peak_wealth_tick,
         }
     }).collect();
     // Active first, then richest first.
@@ -2367,6 +2380,27 @@ pub struct HouseHistory {
     pub defunct: bool,
     /// Colonies/outposts this house OWNS (outposts) or BACKED (joint-stock share).
     #[serde(default)] pub colonies: Vec<ColonySummary>,
+    /// Phase 0.4/1.4 · the succession LINE — every head this house has had, oldest
+    /// first, so the chronicle-first dossier can open on "who held it, and how did
+    /// they do" rather than a balance sheet.
+    #[serde(default)] pub line: Vec<HeadBrief>,
+}
+
+/// One head of a house, for the chronicle view. Mirrors `tick::HouseHead`.
+#[derive(Serialize)]
+pub struct HeadBrief {
+    pub name: String,
+    pub female: bool,
+    pub generation: u32,
+    pub since_year: u32,
+    /// 0 while this head still lives — the dossier reads that as "present".
+    pub until_year: u32,
+    pub age_at_accession: u32,
+    pub age_at_death: u32,
+    pub wealth_start: f32,
+    pub wealth_end: f32,
+    pub accession: String,
+    pub epithet: String,
 }
 
 /// One city's live cost-of-living basket index (#30 Economy Dashboard · Prices).

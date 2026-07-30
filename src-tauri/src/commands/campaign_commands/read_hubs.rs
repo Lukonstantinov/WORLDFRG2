@@ -565,6 +565,8 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
 #[tauri::command]
 pub fn campaign_get_houses(db: State<'_, WorldDb>) -> Result<Vec<HouseBrief>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    // Needed for the seat's culture kit (the dossier's culture-dress figure, Phase 1.2).
+    crate::sim::cultures::ensure_active(&conn);
     Ok(match get_sim(&db, &conn)? {
         Some(sim) => build_house_briefs(&sim),
         None => vec![],
@@ -699,6 +701,13 @@ pub fn campaign_get_house_history(name: String, db: State<'_, WorldDb>) -> Resul
         c.colony_kind != 0 && (c.owner_house == idx as i32
             || c.backers.iter().any(|(k, i, _)| *k == 1 && *i == idx as u32))
     }).map(|ci| colony_summary(&sim, ci)).collect();
+    let line: Vec<HeadBrief> = h.line.iter().map(|p| HeadBrief {
+        name: p.name.clone(), female: p.female, generation: p.generation,
+        since_year: year(p.since), until_year: if p.until > 0 { year(p.until) } else { 0 },
+        age_at_accession: p.age_at_accession, age_at_death: p.age_at_death,
+        wealth_start: p.wealth_start, wealth_end: p.wealth_end,
+        accession: p.accession.clone(), epithet: p.epithet.clone(),
+    }).collect();
     Ok(Some(HouseHistory {
         name: h.name.clone(),
         color: distinct_color(idx),
@@ -708,5 +717,6 @@ pub fn campaign_get_house_history(name: String, db: State<'_, WorldDb>) -> Resul
         top_goods,
         defunct: h.defunct,
         colonies,
+        line,
     }))
 }

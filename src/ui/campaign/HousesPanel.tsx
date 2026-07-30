@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useCampaignStore } from "@state/campaignStore";
 import { useUIStore } from "@state/uiStore";
 import { CoatOfArms } from "@ui/heraldry/CoatOfArms";
 import { CoinIcon } from "@ui/heraldry/CoinIcon";
 import { YearChronicle } from "@ui/campaign/YearChronicle";
 import { FeudsView, HouseStandingView } from "@ui/campaign/HouseDossier";
+import { cultureFigureSVG, cultureSeed, type Occasion } from "@ui/campaign/cultureFigure";
 import { GOOD_DEFS } from "@goods";
 import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks } from "@bridge";
 import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief } from "@types";
@@ -296,7 +297,10 @@ function HouseDetail({ h, onClose, onChronicle }:
   const [routes, setRoutes] = useState<MerchantRoute[]>([]);
   const [ledger, setLedger] = useState<HouseLedger | null>(null);
   const [bank, setBank] = useState<BankBrief | null>(null);
-  const [view, setView] = useState<"summary" | "standing" | "feuds" | "bank" | "ledger">("summary");
+  const [chron, setChron] = useState<HouseHistory | null>(null);
+  // Chronicle-first (§2.3 of the design): the dossier has nothing for the player to
+  // DECIDE, so the primary artefact is the family's record, not its balance sheet.
+  const [view, setView] = useState<"chronicle" | "summary" | "standing" | "feuds" | "bank" | "ledger">("chronicle");
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.house);
   const tick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
   useEffect(() => {
@@ -307,6 +311,7 @@ function HouseDetail({ h, onClose, onChronicle }:
     if (h.idx !== undefined) {
       campaignHouseLedger(h.idx).then((l) => { if (alive) setLedger(l); }).catch(() => {});
     }
+    campaignGetHouseHistory(h.name).then((hh) => { if (alive) setChron(hh); }).catch(() => {});
     // Find this family's bank (if any) so we can show its balance-sheet subtab.
     if (h.owns_bank) {
       campaignGetBanks().then((bs) => {
@@ -323,8 +328,42 @@ function HouseDetail({ h, onClose, onChronicle }:
       <div style={{ color: "#bcd0e4" }}>{children}</div>
     </div>
   );
+  // Phase 1.2 · the culture-dress figure. Seeded on the HEAD's own name (so it
+  // re-rolls at every succession — a new head is visibly a different person), wearing
+  // the seat culture's kit and the head's own sex (the line rule may put a woman at
+  // the head of the house — see sim::inheritance). Register follows tier: Tier 1 reads
+  // as finery before you read a number, Tier 3/4 as plain working dress.
+  const figureSvg = useMemo(() => {
+    const t = tierOf(h);
+    const occasion: Occasion = !h.tier ? "national" : t === 1 ? "ceremonial" : t >= 3 ? "everyday" : "national";
+    return cultureFigureSVG({
+      kit: h.kit ?? -1, sex: h.head_female ? "f" : "m",
+      seed: cultureSeed(h.head_name || h.name), occasion,
+    });
+  }, [h.kit, h.head_female, h.head_name, h.name, h.tier]);
   return (
     <div data-draggable style={{ ...detailPanel, ...rootStyle }} onPointerDown={onPointerDown}>
+      <div style={{ display: "flex", gap: 8 }}>
+        {/* The figure — house identity is added as three marks: a coloured frame (the
+            house's colour, standing in for the garment accent), a coat-of-arms badge
+            at the shoulder, and the tier glyph. */}
+        <div style={{ position: "relative", width: 52, flex: "0 0 auto" }} title={`${TIER_META[tierOf(h)].name} · standing ${((h.standing ?? 0) * 100).toFixed(0)}%`}>
+          <div style={{
+            width: 52, height: 118, borderRadius: 4, overflow: "hidden", background: "#0a1119",
+            border: `2px solid ${h.is_guild ? dull(h.color ?? "") : (h.color ?? "#3a5570")}`,
+            boxShadow: h.tier === 1 ? "0 0 8px rgba(201,162,39,0.4)" : "none",
+          }} dangerouslySetInnerHTML={{ __html: figureSvg }} />
+          <div style={{ position: "absolute", top: -4, right: -4 }}>
+            <CoatOfArms name={h.name} size={17} guild={h.is_guild} />
+          </div>
+          {!h.is_guild && h.tier ? (
+            <div style={{ position: "absolute", bottom: -1, left: -1, fontSize: 10, color: "#c9a227",
+              background: "#0c141edd", borderRadius: "50%", width: 13, height: 13, lineHeight: "13px", textAlign: "center" }}>
+              {TIER_META[tierOf(h)].glyph}
+            </div>
+          ) : null}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 3, cursor: "move" }} onPointerDown={onPointerDown}>
         <span style={{ width: 10, height: 10, borderRadius: 2, background: h.is_guild ? dull(h.color ?? "") : (h.color ?? "#888"), alignSelf: "center" }} />
         {h.owns_bank && <span title="This family owns a chartered bank" style={{ fontSize: 11 }}>🏦</span>}
@@ -349,15 +388,20 @@ function HouseDetail({ h, onClose, onChronicle }:
           </span>
         ) : null}
       </div>
+        </div>
+      </div>
 
-      {/* Subtabs — Accountant gets its own roomy view so expenses aren't clipped. */}
-      <div style={{ display: "flex", gap: 4, margin: "7px 0 5px", borderBottom: "1px solid #1a2a3e" }}>
-        {(["summary", "standing", "feuds", ...(bank ? ["bank" as const] : []), "ledger"] as const).map((t) => (
+      {/* Subtabs — Chronicle first (§2.3: the dossier has nothing to DECIDE, so the
+          record is the primary artefact). Accountant gets its own roomy view so
+          expenses aren't clipped. */}
+      <div style={{ display: "flex", gap: 4, margin: "7px 0 5px", borderBottom: "1px solid #1a2a3e", flexWrap: "wrap" }}>
+        {(["chronicle", "summary", "standing", "feuds", ...(bank ? ["bank" as const] : []), "ledger"] as const).map((t) => (
           <div key={t} onClick={() => setView(t)} style={{
             fontSize: 10, padding: "3px 9px", cursor: "pointer",
             color: view === t ? "#e8dcc0" : "#7090b0", fontWeight: view === t ? 700 : 400,
             borderBottom: view === t ? "2px solid #c9a227" : "2px solid transparent",
-          }}>{t === "summary" ? "Summary"
+          }}>{t === "chronicle" ? "📜 Chronicle"
+            : t === "summary" ? "Summary"
             : t === "standing" ? "⚖ Standing"
             : t === "feuds" ? `⚔ Feuds${h.rivals.length > 0 ? ` (${h.rivals.length})` : ""}`
             : t === "bank" ? "🏦 Bank"
@@ -365,7 +409,9 @@ function HouseDetail({ h, onClose, onChronicle }:
         ))}
       </div>
 
-      {view === "standing" ? (
+      {view === "chronicle" ? (
+        <ChronicleTab h={h} chron={chron} onExpand={() => onChronicle(h.name)} fmt={fmt} />
+      ) : view === "standing" ? (
         // The five stability gauges. Everything here was already in the sim — the
         // solvency countdown in particular has always decided whether this family
         // lives, and was the one number the UI never showed.
@@ -428,6 +474,66 @@ function HouseDetail({ h, onClose, onChronicle }:
       ) : (
         <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>No completed year yet — the first year's books appear after a full year passes.</div>
       )}
+    </div>
+  );
+}
+
+/** Phase 1.4 · the dossier's DEFAULT tab (§2.3): the family's record, not its balance
+ *  sheet — the succession line (who held it, at what age, how they came in, how the
+ *  family fared, and the by-name they earned) and the year-grouped chronicle, with the
+ *  positive events (§2.2) reading alongside the obituaries rather than being buried. */
+function ChronicleTab({ h, chron, onExpand, fmt }:
+  { h: HouseBrief; chron: HouseHistory | null; onExpand: () => void; fmt: (v: number) => string }) {
+  if (!chron) return <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>Loading…</div>;
+  const line = chron.line ?? [];
+  const peakYear = Math.floor((h.peak_wealth_tick ?? 0) / 365);
+  return (
+    <div>
+      <div style={{ color: "#9ab0c8", fontSize: 10, marginBottom: 6 }}>
+        {chron.founder || `Founded in year ${chron.founded_year}`}
+        {chron.defunct && <span style={{ color: "#d88" }}> · fallen</span>}
+      </div>
+
+      {/* Positive events (2.2) as a small highlight strip, not buried in the log. */}
+      {(h.peak_wealth ?? 0) > 0 && (
+        <div style={{ color: "#e6c878", fontSize: 9, marginBottom: 5 }} title="All-time peak wealth">
+          🏆 Finest hour: {fmt(h.peak_wealth ?? 0)}{peakYear > 0 ? ` in year ${peakYear}` : ""}
+        </div>
+      )}
+
+      {/* The succession line — Phase 0.4's record, first shown here. */}
+      {line.length > 0 && (
+        <>
+          <div style={timelineHdr}>Succession ({line.length} head{line.length > 1 ? "s" : ""})</div>
+          <div style={{ marginBottom: 8 }}>
+            {line.map((p, i) => {
+              const living = p.until_year === 0;
+              const grew = p.wealth_end > p.wealth_start;
+              return (
+                <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 5, padding: "1px 0", fontSize: 10 }}>
+                  <span style={{ width: 12, textAlign: "center" }}>{p.female ? "♀" : "♂"}</span>
+                  <span style={{ color: living ? "#e8dcc0" : "#9ab0c8", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {p.name}{p.epithet ? ` ${p.epithet}` : ""}
+                  </span>
+                  <span style={{ color: "#6a86a6", fontSize: 9 }}>
+                    gen {p.generation} · {p.since_year}{living ? "–present" : `–${p.until_year}`}
+                    {" "}({p.age_at_accession}{p.age_at_death > 0 ? `→${p.age_at_death}` : ""}y)
+                  </span>
+                  {!living && (
+                    <span style={{ color: grew ? "#9fe0a8" : "#e0a09a", fontSize: 9 }}>{grew ? "▲" : "▼"}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      <div style={timelineHdr}>Chronicle <span style={{ color: "#56708e", fontWeight: 400 }}>(click a year)</span></div>
+      <YearChronicle entries={chron.events} icons={EVENT_ICON} colors={EVENT_COLOR} />
+      <div onClick={onExpand} style={{ color: "#88a8c8", fontSize: 9, cursor: "pointer", marginTop: 6, textDecoration: "underline" }}>
+        Expand chronicle (goods, colonies) →
+      </div>
     </div>
   );
 }
@@ -656,11 +762,15 @@ const EVENT_ICON: Record<string, string> = {
   founded: "🏛", succession: "👤", monopoly: "💰", monopoly_lost: "💸",
   control_gained: "⚖", control_lost: "💔", branch: "🌿", loss: "⚠️", dissolved: "🪦",
   figure: "🎖", marriage: "💍", piracy: "🏴",
+  // Phase 1.1/1.4 · tiers + positive events (§2.2) — the mechanism otherwise only
+  // produces decline; these give the chronicle something other than obituaries.
+  tier_up: "⬆", golden_age: "☀", dynasty: "👑", inheritance: "📜",
 };
 const EVENT_COLOR: Record<string, string> = {
   founded: "#cfe0f4", succession: "#9ab0c8", monopoly: "#e0b060", monopoly_lost: "#b08a5a",
   control_gained: "#7fd0a0", control_lost: "#d88", loss: "#e08a5a",
   branch: "#9fe07a", dissolved: "#8a93a0", figure: "#e6c878", marriage: "#e6a6c8", piracy: "#c07070",
+  tier_up: "#7fd0a0", golden_age: "#e6c878", dynasty: "#e6c878", inheritance: "#9ab0c8",
 };
 
 /** A house's chronicle as a vertical timeline: founding, successions, monopolies,

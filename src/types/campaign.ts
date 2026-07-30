@@ -697,6 +697,10 @@ export interface HouseBrief {
   coin_trust?: number;
   tier?: number;                 // 1 great · 2 major · 3 lesser · 4 marginal · 0 = unranked (guild, or too new)
   standing?: number;             // 0..1 score the tier is banded from
+  kit?: number;                  // seat culture's language-kit index, -1 unresolvable — drives the dress figure
+  head_female?: boolean;
+  peak_wealth?: number;          // all-time peak wealth — "the house's finest hour"
+  peak_wealth_tick?: number;
 }
 /** One city a house operates in, for the influence-ranked "Active in" list. */
 export interface HouseCity {
@@ -760,6 +764,21 @@ export interface HouseHistory {
   top_goods: [string, number][]; // most profitable resources (name + cumulative profit)
   defunct: boolean;
   colonies?: ColonySummary[]; // colonies owned (outposts) or backed by this house
+  line?: HeadBrief[];         // the succession line — every head this house has had
+}
+/** One head of a house, for the chronicle view. */
+export interface HeadBrief {
+  name: string;
+  female: boolean;
+  generation: number;
+  since_year: number;
+  until_year: number;   // 0 = still living
+  age_at_accession: number;
+  age_at_death: number;
+  wealth_start: number;
+  wealth_end: number;
+  accession: string;    // "founder" | "heir" | "co-heir" | "the hearth-keeper" | "eldest capable" | "sister's son" | "daughter of the house"
+  epithet: string;      // "" if none earned
 }
 export interface JournalEntry {
   tick: number;

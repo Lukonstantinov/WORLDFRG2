@@ -1290,7 +1290,7 @@ impl CampaignSim {
             is_guild: false, offices: vec![h as u32], trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0,
+            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false,
         });
         self.found_head_record(idx, "founder");
         Some(idx)
@@ -2164,7 +2164,7 @@ impl CampaignSim {
             is_guild: true, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: false, head_age: guild_age, line: Vec::new(), tier: 0, standing: 0.0,
+            head_female: false, head_age: guild_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false,
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -2454,7 +2454,44 @@ impl CampaignSim {
                 });
             }
             self.houses[hi].tier = new_tier;
+            self.mark_positive_events(hi, new_tier);
         }
+    }
+
+    /// Phase 1.4 · the two positive events measurable from state `assign_house_tiers`
+    /// already touches this month. `HOUSE_PEOPLE_AND_TIERS.md` §2.2's other three
+    /// (a legendary head, a great partnership, the finest hour as a chronicled EVENT
+    /// rather than a fact) are deferred — the first needs goals (Phase 3, unbuilt), the
+    /// second needs alliance-linked tier rises (a bigger join than this pass does), and
+    /// spamming a peak-wealth event most months is worse than the obituary problem it's
+    /// meant to fix. Recording the fact (below) without an event is the honest partial.
+    fn mark_positive_events(&mut self, hi: usize, tier: u8) {
+        let tick = self.tick;
+        let wealth = self.houses[hi].wealth;
+
+        // ── The house's finest hour — a marker, never an event. ──────────────────
+        if wealth > self.houses[hi].peak_wealth {
+            self.houses[hi].peak_wealth = wealth;
+            self.houses[hi].peak_wealth_tick = tick;
+        }
+
+        // ── A golden age — Tier 1 held, wealth still rising, for a decade. ───────
+        let rising = wealth > self.houses[hi].wealth_last_check;
+        if tier == 1 && rising {
+            self.houses[hi].golden_age_months += 1;
+        } else {
+            self.houses[hi].golden_age_months = 0;
+            self.houses[hi].golden_age_chronicled = false;
+        }
+        if self.houses[hi].golden_age_months >= GOLDEN_AGE_MONTHS && !self.houses[hi].golden_age_chronicled {
+            self.houses[hi].golden_age_chronicled = true;
+            let name = self.houses[hi].name.clone();
+            self.houses[hi].events.push(HouseEvent {
+                tick, kind: "golden_age".into(),
+                text: format!("A golden age for {} — a decade at the height of its power", name),
+            });
+        }
+        self.houses[hi].wealth_last_check = wealth;
     }
 
     /// The RAW tier a (percentile, standing) pair bands into, with no memory of what
@@ -2654,6 +2691,31 @@ impl CampaignSim {
             p.age_at_death = age0 + years;
             p.epithet = epithet;
         }
+        self.maybe_chronicle_dynasty(hi);
+    }
+
+    /// "A dynasty of merchants" (§2.2) — three consecutive heads who EACH left the
+    /// house richer than they found it. Purely derived from `line`, which Phase 0.4
+    /// already writes; chronicled once per streak so it doesn't refire at every
+    /// qualifying succession after the third.
+    fn maybe_chronicle_dynasty(&mut self, hi: usize) {
+        let tick = self.tick;
+        let line = &self.houses[hi].line;
+        if line.len() < DYNASTY_HEADS { return; }
+        let recent = &line[line.len() - DYNASTY_HEADS..];
+        let streak = recent.iter().all(|p| p.until > 0 && p.wealth_end > p.wealth_start);
+        if !streak {
+            self.houses[hi].dynasty_chronicled = false;
+            return;
+        }
+        if self.houses[hi].dynasty_chronicled { return; }
+        self.houses[hi].dynasty_chronicled = true;
+        let name = self.houses[hi].name.clone();
+        self.houses[hi].events.push(HouseEvent {
+            tick, kind: "dynasty".into(),
+            text: format!("A dynasty of merchants — {} generations of {} in a row have left the house richer than they found it",
+                DYNASTY_HEADS, name),
+        });
     }
 
     /// The by-name a tenure earned. Most heads get NONE — an epithet everyone carries
@@ -2734,7 +2796,7 @@ impl CampaignSim {
                 is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
                 wealth_history: Vec::new(), office_leases: Vec::new(),
                 influence: Vec::new(), bailos: Vec::new(),
-                head_female: female, head_age: age, line: Vec::new(), tier: 0, standing: 0.0,
+                head_female: female, head_age: age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false,
             });
             let ni = self.houses.len() - 1;
             self.found_head_record(ni, "co-heir");
@@ -2819,7 +2881,7 @@ impl CampaignSim {
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: bfemale, head_age: bage, line: Vec::new(), tier: 0, standing: 0.0,
+            head_female: bfemale, head_age: bage, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false,
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -3255,7 +3317,7 @@ impl CampaignSim {
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0,
+            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false,
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");

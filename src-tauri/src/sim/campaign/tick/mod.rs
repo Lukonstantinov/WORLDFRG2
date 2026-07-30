@@ -684,6 +684,11 @@ const TIER_PCT_DEAD_BAND: f32 = 0.04;
 /// on the `seats` term of the standing score once it reaches this many.
 const TIER_SEATS_SOFT_CAP: f32 = 5.0;
 const TIER_NAMES: [&str; 5] = ["", "great", "major", "lesser", "marginal"];
+/// A decade (in months) of sustained Tier 1 + rising wealth → "a golden age" (§2.2).
+const GOLDEN_AGE_MONTHS: u32 = 120;
+/// "A dynasty of merchants" needs this many CONSECUTIVE closed heads in `line`, each
+/// leaving the house richer than they found it, before it's chronicled (§2.2).
+const DYNASTY_HEADS: usize = 3;
 
 // ── Phase 0.4 · succession & the law of inheritance ─────────────────────────
 /// Standing a house gains when a head who GREW the family is succeeded. A funeral is
@@ -1865,7 +1870,8 @@ pub fn is_house_milestone(kind: &str) -> bool {
     matches!(kind,
         "founded" | "succession" | "inheritance" | "archetype" | "monopoly"
         | "control_gained" | "control_lost" | "branch" | "charter" | "bailo"
-        | "bankruptcy" | "dissolved" | "bank" | "marriage" | "loss" | "tier_up")
+        | "bankruptcy" | "dissolved" | "bank" | "marriage" | "loss" | "tier_up"
+        | "golden_age" | "dynasty")
 }
 
 /// A merchant family / trading house, with a named head of family who ages, dies
@@ -1983,6 +1989,29 @@ pub struct House {
     /// The 0..1 score `assign_house_tiers` bands into a tier — printed on the dossier so
     /// "why tier 2, not 1" is answerable, not asserted.
     #[serde(default)] pub standing: f32,
+    // ── Positive events (Phase 1.4 · `HOUSE_PEOPLE_AND_TIERS.md` §2.2) ──
+    // The mechanism otherwise only produces decline (vices, feuds, ruin) — these give
+    // the chronicle something to say besides obituaries. All derived from state that
+    // already exists; only a marker each, per the design's own "no new state beyond a
+    // marker" rule.
+    /// All-time peak wealth, and the tick it was reached — "the house's finest hour",
+    /// kept forever. Never chronicled (a peak most months would spam the record); shown
+    /// on the dossier as a fact instead.
+    #[serde(default)] pub peak_wealth: f32,
+    #[serde(default)] pub peak_wealth_tick: u32,
+    /// Wealth as of the LAST monthly tier check — `assign_house_tiers`'s own tracker for
+    /// "is this house still rising", kept separate from `prev_wealth` (which
+    /// `recompute_monopolies_and_power` overwrites to the CURRENT figure before this
+    /// runs, so it can't answer the same question).
+    #[serde(default)] pub wealth_last_check: f32,
+    /// Consecutive MONTHS held at Tier 1 with wealth still rising — "a golden age" fires
+    /// once this reaches a decade (2.2). Resets the moment either condition breaks.
+    #[serde(default)] pub golden_age_months: u32,
+    #[serde(default)] pub golden_age_chronicled: bool,
+    /// "A dynasty of merchants" — three consecutive heads in `line` who each grew the
+    /// house — has already been chronicled, so it fires once per streak rather than at
+    /// every qualifying succession after the third.
+    #[serde(default)] pub dynasty_chronicled: bool,
 }
 
 /// DLC 3.5 · one loan on a bank's books. An asset to the bank (interest income);

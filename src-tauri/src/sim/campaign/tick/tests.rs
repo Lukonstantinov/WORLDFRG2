@@ -42,7 +42,7 @@
             is_guild: false, offices: vec![], trade_at: vec![], debt_since: 0,
             wealth_history: vec![], office_leases: vec![],
             influence: vec![], bailos: vec![],
-            head_female: false, head_age: 34, line: vec![], tier: 0, standing: 0.0,
+            head_female: false, head_age: 34, line: vec![], tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false,
         }
     }
 
@@ -2176,4 +2176,100 @@
         s.assign_house_tiers();
         let second: Vec<u8> = s.houses.iter().map(|h| h.tier).collect();
         assert_eq!(first, second, "tiers must not change with no underlying change");
+    }
+
+    // ── Phase 1.4 · positive events ─────────────────────────────────────────
+    /// "The house's finest hour" is a MARKER, not an event: it must never fall as
+    /// wealth swings up and down, and it must track the highest wealth ever reached,
+    /// not the current figure.
+    #[test]
+    fn peak_wealth_only_ever_rises() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..3u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 8000.0, vec![8000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["Aiora".into(); 3];
+        s.hub_minorities = vec![Vec::new(); 3];
+        let mut h = house_at(0, vec![0], 1);
+        h.wealth = 100.0;
+        s.houses.push(h);
+
+        s.houses[0].wealth = 100.0;
+        s.assign_house_tiers();
+        assert_eq!(s.houses[0].peak_wealth, 100.0);
+
+        s.houses[0].wealth = 500.0;
+        s.assign_house_tiers();
+        assert_eq!(s.houses[0].peak_wealth, 500.0, "peak must follow a rise");
+
+        s.houses[0].wealth = 40.0;
+        s.assign_house_tiers();
+        assert_eq!(s.houses[0].peak_wealth, 500.0, "peak must NOT fall with current wealth");
+    }
+
+    /// "A golden age" fires once a house has held Tier 1 with wealth rising for
+    /// GOLDEN_AGE_MONTHS straight, and resets the moment either condition breaks.
+    #[test]
+    fn golden_age_fires_after_a_sustained_tier_one_rise() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..3u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 8000.0, vec![8000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["Aiora".into(); 3];
+        s.hub_minorities = vec![Vec::new(); 3];
+        let mut top = house_at(0, vec![0], 4);
+        top.wealth = 1000.0;
+        top.volume = 500.0;
+        top.prestige = 1.0;
+        s.houses.push(top);
+        for i in 1..4u32 {
+            let mut h = house_at(i, vec![0], 1);
+            h.wealth = 10.0;
+            s.houses.push(h);
+        }
+        for month in 0..GOLDEN_AGE_MONTHS {
+            s.houses[0].wealth += 5.0; // keep it rising every check
+            s.assign_house_tiers();
+            if month + 1 < GOLDEN_AGE_MONTHS {
+                assert!(!s.houses[0].golden_age_chronicled, "fired too early at month {month}");
+            }
+        }
+        assert!(s.houses[0].golden_age_chronicled, "golden age never fired after a sustained rise");
+        assert!(s.houses[0].events.iter().any(|e| e.kind == "golden_age"));
+
+        // A dip resets the streak.
+        s.houses[0].golden_age_months = 0;
+        s.houses[0].golden_age_chronicled = false;
+        s.houses[0].wealth -= 1.0;
+        s.assign_house_tiers();
+        assert_eq!(s.houses[0].golden_age_months, 0, "a wealth dip must reset the streak");
+    }
+
+    /// "A dynasty of merchants" fires once three CONSECUTIVE heads have each left the
+    /// house richer than they found it, and only once per streak.
+    #[test]
+    fn dynasty_of_merchants_fires_after_three_growing_heads() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..3u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 8000.0, vec![8000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["Aiora".into(); 3];
+        s.hub_minorities = vec![Vec::new(); 3];
+        s.culture_rules = vec![CultureRule { culture: "Aiora".into(), line: 0, rule: 1 }]; // primogeniture
+        let mut h = house_at(0, vec![0], 0);
+        h.wealth = 1000.0; // deep pockets — this test is about succession, not solvency
+        s.houses.push(h);
+        s.seed_house_lines();
+
+        for _ in 0..3 {
+            // Advance the clock for real — `close_head_record` uses `tick=0` as its
+            // "still living" sentinel, so calling `succeed_house` back-to-back at
+            // tick 0 (as a real campaign never can, `head_lifespan` floors a tenure
+            // at MIN_TENURE_YEARS) would leave every record looking permanently open.
+            s.tick += 5 * TICKS_PER_YEAR;
+            // Double the wealth each generation — comfortably outgrows the 30% a
+            // gen>=2 succession may spin off into a cadet branch, so "richer than
+            // they found it" reflects real growth, not a test fixture racing a drain.
+            s.houses[0].wealth *= 2.0;
+            s.succeed_house(0);
+        }
+        assert!(s.houses[0].dynasty_chronicled, "dynasty never fired after three growing heads");
+        assert!(s.houses[0].events.iter().any(|e| e.kind == "dynasty"));
     }

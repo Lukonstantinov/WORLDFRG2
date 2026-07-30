@@ -296,13 +296,35 @@ contains the two open defects already on the scoreboard.
 > houses are standing and is right-censored on a 60-year run. The correct estimator is a
 > hazard over exposure (`deaths ÷ house-years`), which `econ_diagnose_house_turnover` reports.
 >
-> ## Recommended next step
+> ## Phase 1.1/1.2/1.4 are DONE — 1.3 (expeditions tab) is what's left of Phase 1
 >
-> **Phase 1** — and it is now the obvious one rather than a toss-up. Phase 0.4 wrote a
-> succession LINE for every house (who held it, at what age, how they came in, how the
-> family fared under them, and the by-name their tenure earned) and **nothing in the app
-> shows it**. Phase 1.4's chronicle-first dossier has a subject now. It is read-only,
-> touches no simulation and cannot regress either oracle.
+> Three findings from building the tier list, the dossier figure, and the
+> chronicle-first reorder:
+>
+> 1. **The "three house marks" plan needed one simplification.** Recolouring the
+>    garment's accent band inside `cultureFigure.ts` would mean threading a house
+>    colour through the shared SVG renderer also used by `PeoplesPanel` — real risk
+>    for a cosmetic win. Shipped instead as a coloured FRAME around the portrait,
+>    which reads the same ("of its culture, but distinct") without touching shared
+>    code. The coat-of-arms badge and tier-register occasion are exactly as designed.
+> 2. **The positive-event set (§2.2) had to be cut to what's honestly measurable.**
+>    **Finest hour** (a marker, never chronicled — spamming a peak-wealth event most
+>    months would be worse than the obituary problem it fixes) and **golden age**
+>    (Tier 1 held + wealth rising, a decade) are built and gated by tests. **Dynasty
+>    of merchants** is built too, but from `line` (Phase 0.4) rather than needing new
+>    state — three consecutive heads who each grew the house. **Great partnership**
+>    needs alliance-linked tier rises (a bigger join than this pass did) and
+>    **legendary head** needs goals (Phase 3, unbuilt) — both deferred, not built
+>    silently short.
+> 3. **`succeed_house`'s branch-on-succession can eat three generations of growth.**
+>    A rich house spinning off a cadet branch at every gen>=2 succession (30% of
+>    wealth) can make "three consecutive GROWING heads" genuinely hard to reach even
+>    in an economy that's compounding — worth knowing before reading the dynasty rate
+>    off a real campaign as a fidelity signal.
+>
+> Phase 1 is now Tiers · figure · chronicle-first — all shipped. **1.3 (expeditions
+> tab)** is the smallest of what's left: `Expedition.house` already exists; it needs
+> one new field (`dest_province`) for the province highlight and goal-checkability.
 >
 > The two open questions Phase 0.4 leaves are both *diagnoses*, not code:
 > why a newly-founded house (co-heir or branch) so often never trades at all, and why the
@@ -344,9 +366,9 @@ tunable.
 | # | Step | Gate |
 |---|---|---|
 | 1.1 | ~~**Tiers** + list grouping (rank-banded, hysteresis, Tier 1 may be empty)~~ **DONE** — `assign_house_tiers` (`sim/campaign/tick/houses.rs`), `HousesPanel.tsx` groups by tier (3/4 collapsed by default). | ✅ `tsc` clean; dynamics bit-identical (`simulate_decades_reports_dynamics`); 3 new tests |
-| 1.2 | **Culture dress figure** on the dossier — reuse `cultureFigure.ts`, 3 house marks, register by tier | `tsc`; schematic renders clean |
+| 1.2 | ~~**Culture dress figure** on the dossier — reuse `cultureFigure.ts`, 3 house marks, register by tier~~ **DONE** — mark 1 (garment recolour) simplified to a coloured frame around the portrait rather than touching the shared SVG renderer; marks 2 (CoatOfArms badge) and 3 (tier-register occasion) built as specified. | ✅ `tsc` clean |
 | 1.3 | **Expeditions tab** + province highlight (`Expedition.house` already exists) | `Expedition.dest_province` unread by the tick ⇒ dynamics bit-identical |
-| 1.4 | **Chronicle-first dossier** (2.3) + **positive-event markers** (2.2) | `tsc` |
+| 1.4 | ~~**Chronicle-first dossier** (2.3) + **positive-event markers** (2.2)~~ **DONE** — Chronicle is now the FIRST/default dossier tab, showing the Phase 0.4 succession line inline plus the year-grouped event log. Finest hour + golden age + dynasty of merchants built; great partnership + legendary head deferred (see finding above). | ✅ `tsc`; 3 new `tick::` tests; dynamics bit-identical |
 
 Nothing here can regress either oracle. This is the phase you can look at soonest.
 

@@ -319,6 +319,19 @@ serde-defaulted so old saves load). Grouped by theme:
   boundary doesn't relabel every month; a tier RISE is chronicled as a milestone, a fall
   is not (same asymmetry as `monopoly`/`monopoly_lost`). Purely a query-side
   classification — nothing downstream reads `tier`, so the dynamics run is bit-identical.
+- **Positive events (Phase 1.4):** the mechanism otherwise only produces decline (vices,
+  feuds, ruin) — these give the chronicle something else to say, each a MARKER on `House`
+  rather than new machinery. `assign_house_tiers` also tracks **the finest hour** (all-time
+  peak wealth + the tick it was reached — never chronicled, since a peak most months would
+  spam the record; shown as a fact instead) and **a golden age** (`golden_age_months`:
+  Tier 1 held with wealth still rising, chronicled once it reaches a decade,
+  `GOLDEN_AGE_MONTHS`, and resets the moment either condition breaks).
+  `close_head_record` (Phase 0.4) checks **a dynasty of merchants** — three consecutive
+  closed heads in `line` who each left the house richer than they found it — chronicled
+  once per streak (`dynasty_chronicled`). All three are milestones (`is_house_milestone`),
+  so the events cap can't prune them. Two of the design's five positive events are
+  deliberately NOT built: a great partnership needs alliance-linked tier rises, a legendary
+  head needs goals (Phase 3, unbuilt) — both deferred, not built silently short.
 - **Succession & inheritance (Phase 0.4):** each people carries a **line rule** (who may
   inherit) and a **division rule** (how the estate divides) resolved once from its language
   kit into `culture_rules` (`sim/shared/inheritance.rs`, §8.15). `succeed_house` reads them
@@ -622,8 +635,18 @@ ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, 
                                   Transit, year-grouped Chronicle). ~2k lines
   CityView.tsx · SettlementScene.tsx ← Isometric city view + scene
   HousesPanel/DynastiesPanel/GuildsPanel.tsx ← Merchant houses, dynasties, guilds.
-                                  HousesPanel has a world ⚔ Feuds tab; its per-house
-                                  detail has ⚖ Standing and ⚔ Feuds subtabs
+                                  HousesPanel has a world ⚔ Feuds tab; the list is
+                                  GROUPED BY TIER (Phase 1.1, Tier 3/4 collapsed by
+                                  default). Its per-house detail (`HouseDetail`) opens
+                                  on a portrait — `cultureFigureSVG` in the seat
+                                  culture's kit and the head's own sex, a coloured
+                                  frame standing in for a garment recolour, a
+                                  `CoatOfArms` badge at the shoulder, occasion set by
+                                  tier (Phase 1.2) — and its subtabs are
+                                  CHRONICLE-FIRST (Phase 1.4, the default tab):
+                                  the Phase 0.4 succession line inline, then the
+                                  year-grouped event log (`ChronicleTab`), before
+                                  Summary/⚖ Standing/⚔ Feuds/🏦 Bank/📒 Accountant
   HouseDossier.tsx              ← The House Dossier's two views: `HouseStandingView`
                                   (five stability gauges — solvency COUNTDOWN, liquidity
                                   runway, concentration exposure, succession, cohesion —

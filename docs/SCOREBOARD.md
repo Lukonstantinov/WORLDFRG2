@@ -9,6 +9,24 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-30 (Phase 1.2/1.4 · figure + chronicle-first dossier)
+
+Also read-only/query-side — no economy number moves. `HouseDetail`'s default tab is now
+Chronicle (§2.3), showing the Phase 0.4 succession line inline before the year-grouped
+event log. The dossier opens on a `cultureFigureSVG` portrait in the seat culture's kit
+and the head's own sex, tier-registered (ceremonial/national/everyday). Three positive
+events (§2.2) shipped as markers on `House`: finest hour (peak wealth, never chronicled),
+golden age (a decade at Tier 1 with wealth rising), dynasty of merchants (three
+consecutive heads who each grew the house, derived from Phase 0.4's `line`). 61 `tick::`
+tests pass (was 58); dynamics and economy scorecards bit-identical.
+
+**Finding:** `succeed_house`'s branch-on-succession (30% of wealth spun off at every
+gen>=2 succession) can make "three consecutive GROWING heads" genuinely hard to reach
+even in a compounding economy — worth knowing before reading the dynasty-fire rate off a
+real campaign as a fidelity signal.
+
+---
+
 ## Current state — 2026-07-30 (Phase 1.1 · house tiers)
 
 Read-only, query-side classification — no economy number moves. `assign_house_tiers`
