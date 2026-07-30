@@ -3120,3 +3120,83 @@
         assert!(great.houses[0].crisis.is_some());
         assert!(great.journal.iter().any(|j| j.kind == "crisis"), "a Tier 1 house's crisis IS world news");
     }
+
+    // ── Phase 4.4 · the foreign hand ─────────────────────────────────────────
+    #[test]
+    fn foreign_hand_never_moves_a_kin_with_no_rival_presence() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        let mut h = house_at(0, vec![0], 1);
+        h.kin = vec![kin_at("Head", false, 0, [0, 0, 0, 0], 1.0, 0.6), kin_at("Factor", false, 2, [0, 0, 0, 0], 0.9, 0.5)];
+        h.kin[1].posted = 1;
+        s.houses.push(h);
+        s.tick = 0;
+        s.apply_foreign_hand();
+        assert_eq!(s.houses[0].kin[1].loyalty, 0.9, "no rival presence anywhere ⇒ no change at all");
+    }
+
+    #[test]
+    fn channel_a_exposure_lowers_a_posted_kins_loyalty() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        let mut h = house_at(0, vec![0], 1);
+        h.kin = vec![kin_at("Head", false, 0, [0, 0, 0, 0], 1.0, 0.6), kin_at("Factor", false, 2, [0, 0, 0, 0], 0.9, 0.5)];
+        h.kin[1].posted = 1;
+        s.houses.push(h);
+        let mut rival = house_at(1, vec![0], 1);
+        rival.political_power = 0.8;
+        rival.offices = vec![1]; // an office at the kin's own posted hub
+        s.houses.push(rival);
+        s.tick = 0;
+        s.apply_foreign_hand();
+        assert!(s.houses[0].kin[1].loyalty < 0.9, "a rival's office in the kin's own city must nudge loyalty down");
+    }
+
+    #[test]
+    fn channel_b_exposure_via_a_controlled_lease_lowers_loyalty() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        let mut h = house_at(0, vec![0], 1);
+        h.kin = vec![kin_at("Head", false, 0, [0, 0, 0, 0], 1.0, 0.6), kin_at("Factor", false, 2, [0, 0, 0, 0], 0.9, 0.5)];
+        h.kin[1].posted = 1;
+        h.office_leases = vec![(1, 100_000)];
+        s.houses.push(h);
+        let mut rival = house_at(1, vec![0], 1);
+        rival.political_power = 0.8;
+        s.houses.push(rival);
+        s.hubs[1].captor_house = 1; // the rival CONTROLS the city we lease in
+        s.tick = 0;
+        s.apply_foreign_hand();
+        assert!(s.houses[0].kin[1].loyalty < 0.9, "leasing in a rival-controlled city must nudge loyalty down");
+    }
+
+    /// Even at MAXIMUM leverage (both channels, an active feud, a fully-weighted
+    /// rival), a single month's exposure can never itself manufacture hostility —
+    /// leverage deepens a grievance, it does not create one.
+    #[test]
+    fn foreign_hand_decay_is_small_and_bounded_in_a_single_month() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        let mut h = house_at(0, vec![0], 1);
+        h.kin = vec![kin_at("Head", false, 0, [0, 0, 0, 0], 1.0, 0.6), kin_at("Factor", false, 2, [0, 0, 0, 0], 1.0, 0.5)];
+        h.kin[1].posted = 1;
+        h.office_leases = vec![(1, 100_000)];
+        h.rivals = vec![1];
+        s.houses.push(h);
+        let mut rival = house_at(1, vec![0], 1);
+        rival.political_power = 1.0;
+        rival.offices = vec![1];
+        s.houses.push(rival);
+        s.hubs[1].captor_house = 1;
+        s.tick = 0;
+        s.apply_foreign_hand();
+        // Max leverage: (A+B channel weights, capped at 1.0) × rival_weight(1.0) ×
+        // (1 + 0.5·feud) = 1.0 × 1.5 = 1.5, so the true ceiling is 1.5× the base rate.
+        let drop = 1.0 - s.houses[0].kin[1].loyalty;
+        assert!(drop > 0.0 && drop <= FOREIGN_HAND_DECAY_RATE * 1.5 + 1e-4,
+            "a single month must stay within the small decay bound even at max leverage: dropped {drop}");
+    }

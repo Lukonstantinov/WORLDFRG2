@@ -1,14 +1,12 @@
 # The house mechanism — critique, then the master plan
 
 **Status: Phase 0 COMPLETE; Phase 1 COMPLETE; Phase 2 COMPLETE; Phase 3 COMPLETE as
-SCOPED (goals are structure-only, the crisis engine is a real but cut-down build);
-Phase 4.1–4.3 COMPLETE as scoped; §2.4 crisis salience now built too. §2.5's own
-"measure before building" instruction is honoured: a 300-year diagnostic
-(`econ_measure_foreign_hand_conjunction`) is built and gated `#[ignore]` like its
-sibling `econ_diagnose_house_turnover` — run it yourself for the current number; see
-the handoff block for how to read the verdict it prints and what it implies for 4.4.
-4.5's mavericks item was considered and declined this pass — see the handoff block.
-Religion/patronage stays deferred by design.**
+SCOPED; Phase 4 COMPLETE as scoped — 4.1 through 4.4 all built, 4.5's mavericks item
+considered and declined, religion/patronage stays deferred by design. §2.5's own
+"measure before building" instruction was honoured for 4.4: the 300-year diagnostic
+(`econ_measure_foreign_hand_conjunction`) measured the conjunction firing 1229
+times/century — the mechanism was then built, and the deposition/dissolution rate
+did NOT rise materially. See the handoff block for the full account.**
 Consolidates the design documents
 (`HOUSE_PEOPLE_AND_TIERS` · `HOUSE_PEOPLE_PLAN` · `HOUSE_POWER_AND_POLITICS` ·
 `HOUSE_SUCCESSION_CRISIS` · `HOUSE_POWER_STRUGGLE_VIEW` ·
@@ -304,6 +302,71 @@ contains the two open defects already on the scoreboard.
 > Use **mean firm lifespan**, never `dissolutions/century` — the latter scales with how many
 > houses are standing and is right-censored on a 60-year run. The correct estimator is a
 > hazard over exposure (`deaths ÷ house-years`), which `econ_diagnose_house_turnover` reports.
+>
+> ## 4.4 (the foreign hand) is built — the measurement said to, and the gate held
+>
+> The immediately preceding handoff block below measured `econ_measure_foreign_hand_
+> conjunction` in the background and left 4.4 un-attempted pending the result. The
+> result: **1229 full-conjunction occurrences per century** (89,784 posted-kin-months
+> sampled over 300 years; 27.66% show channel A or B present at all; 4.11% of THOSE
+> also coincide with the kin already reading as disaffected, `loyalty < 0.4`) — two
+> orders of magnitude past the "a handful a century" bar §2.5 itself set for whether
+> this was worth building. So it was built: `sim/campaign/tick/foreign_hand.rs`,
+> monthly, called right before the crisis/schism passes so the same month's pressure
+> already feeds their discontent/tension reads.
+>
+> **The mechanism, kept small on purpose.** Two channels (`HOUSE_POWER_STRUGGLE_VIEW.md`
+> §2): Channel A — any other live house holds an office or bailo in a posted kin's own
+> city; Channel B — our house itself leases in a city a rival `captor_house` CONTROLS
+> (the design's own "strong" channel — real dependency, not mere proximity). Leverage
+> = `(0.5·A + 0.8·B, capped at 1.0) × rival's political_power × (1 + 0.5·feud)`, and it
+> ONLY nudges that kin's `loyalty` down — small and bounded
+> (`FOREIGN_HAND_DECAY_RATE`=0.01/month at leverage 1.0, so even the worst case, both
+> channels plus an active feud plus a maximally powerful rival, is a 0.015/month
+> ceiling, asserted directly by `foreign_hand_decay_is_small_and_bounded_in_a_single_
+> month`). This is the literal test of the design's own promise: **"it CANNOT create
+> the plot... a loyal, contented member is not turned by a rival's bailo"** — a single
+> month can never move a fully-loyal kin far enough to matter; only YEARS of sustained
+> exposure compounds into something that changes an outcome, and even then it is only
+> ever deepening state (`house_tension`, crisis discontent) that ALSO has to clear its
+> own independent, unrelated thresholds.
+>
+> **Disclosure, scoped down from "always".** The design says the leverage is "always
+> disclosed" — a persistent, always-visible annotation. Building that literally would
+> need a new PER-KIN state field (another House-adjacent struct patch across every
+> construction site, the same blast-radius argument that cut 4.2's "kin barred from
+> office"). Shipped instead as an occasional chronicle event
+> (`FOREIGN_HAND_DISCLOSE_CHANCE`=0.06/month at leverage 1.0) naming the rival and the
+> channel — "eventually and occasionally visible" rather than a persistent dossier
+> annotation. The underlying effect (the loyalty decay) is UNCONDITIONAL regardless of
+> whether this roll fires, so the mechanism's real behaviour doesn't depend on the
+> flavour text firing.
+>
+> **The required gate held.** `HOUSE_POWER_STRUGGLE_VIEW.md` §7's own gate for this
+> item is explicit: "must NOT raise the deposition rate materially... measure the rate
+> with the channel off vs on." Diffed against the pre-4.4 commit on the real
+> 60-year/30-city economy-oracle world: **house dissolutions/century 41.67 → 40.00**
+> (down, not up), **banks chartered 23 → 24**, **house wealth Gini 0.698 → 0.693**,
+> **top-10% wealth share 0.509 → 0.497** — every number moved by less than the
+> run-to-run noise already visible between adjacent phases in this series, not a
+> material shift. The gate is satisfied: leverage colours outcomes, it does not drive
+> them.
+>
+> Whole-lib test suite: **219 passed, 0 failed** (was 215, +4:
+> `foreign_hand_never_moves_a_kin_with_no_rival_presence`,
+> `channel_a_exposure_lowers_a_posted_kins_loyalty`,
+> `channel_b_exposure_via_a_controlled_lease_lowers_loyalty`,
+> `foreign_hand_decay_is_small_and_bounded_in_a_single_month`). The small
+> dynamics-test world stays byte-identical (its seeded houses have no kin roster, the
+> same no-op pattern every Kin-gated feature in this series keeps). `cargo check`
+> clean.
+>
+> **Phase 4 is now complete as scoped**: 4.1, 4.2, 4.3, 4.4 all built (each
+> individually scoped down from its source design, every cut documented in its own
+> handoff block); 4.5 considered item-by-item (religion/patronage still correctly
+> deferred, Rupture deferred behind Departure since 4.1, mavericks declined this pass
+> for a documented distribution-risk reason). Nothing in Phase 4's own table remains
+> un-addressed.
 >
 > ## §2.4 salience, §2.5 the foreign-hand measurement, and §4.5's mavericks — the three small items still open after 4.1-4.3
 >
@@ -803,7 +866,7 @@ Nothing here can regress either oracle. This is the phase you can look at soones
 | 4.1 | ~~**Departure schism** (holdings + wealth; wealth moves)~~ **DONE (Quarrel + Departure; Rupture deferred)** — `sim/campaign/tick/schism.rs`, monthly, gated on a simplified `tension` proxy + a per-house cooldown. | ✅ `econ_` Gini 0.60–0.85 held; 3 new tests |
 | 4.2 | ~~**Bankruptcy aftermath** — named creditor losses, kin barred from office (1.4)~~ **DONE (creditor losses only — see the handoff finding)** — `dissolve_house` now writes off any outstanding bank loan and names the bank on both ledgers. | ✅ 2 new tests; dynamics bounded |
 | 4.3 | ~~**Plague as a lineage event** — multiple kin, extinction as a distinct death (1.6)~~ **DONE** — `disease.rs::plague_house_toll`, independent of head mortality. | ✅ 3 new tests; measurably moved Gini/top-10% TOWARD their bands — see the handoff finding |
-| 4.4 | **Foreign hand** — *only if* 2.5's measurement says it fires | still gated on an unmeasured signal; not attempted |
+| 4.4 | ~~**Foreign hand** — *only if* 2.5's measurement says it fires~~ **DONE — measurement said build it (1229/century)** — `sim/campaign/tick/foreign_hand.rs`, two channels, bounded monthly loyalty decay, occasional disclosure. | ✅ 4 new tests; deposition/dissolution rate did NOT rise materially (41.67 → 40.00/century) — see the handoff finding |
 | 4.5 | Religion/patronage: still deferred (Part 3's own reasoning holds — a third system on an unbuilt second one). Rupture: deferred, see 4.1. **Mavericks: considered and declined this pass** — see the handoff finding. | — |
 
 ---

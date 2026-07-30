@@ -9,6 +9,38 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-30 (Phase 4 complete: 4.4 foreign hand, 2.4 salience, 4.5 mavericks declined)
+
+**Measured before building, exactly as §2.5 demanded.** A new 300-year diagnostic
+(`econ_measure_foreign_hand_conjunction`, `#[ignore]`d) found the design's "foreign
+hand" trigger — a rival's office/bailo in a posted kin's city, or the house leasing
+in a city a rival controls, coinciding with that kin already reading disaffected —
+firing **1229 times/century** (89,784 kin-months sampled; 27.66% show either channel
+present, 4.11% of those also disaffected). Two orders of magnitude past "a handful a
+century", so the mechanism was built: `sim/campaign/tick/foreign_hand.rs`, a small
+bounded monthly loyalty decay (ceiling 0.015/month even at maximum leverage) plus an
+occasional named disclosure. **The design's own required gate held**: diffed against
+the pre-4.4 commit, house dissolutions/century moved 41.67 → 40.00 (down, not up) —
+leverage colours outcomes, it does not manufacture them.
+
+Also shipped in the same pass: **§2.4 crisis salience** (only Tier 1-2 crises reach
+the world news feed; Tier 3-4 stay fully chronicled on the house's own record, just
+quiet on the world stage). **§4.5 mavericks** was considered and explicitly
+DECLINED: `roll_character`'s existing uniform draw already lands on a full ±2
+extreme ~20% of the time per axis by construction, so a true "maverick" (a rare
+escape from an otherwise-centred distribution) would mean changing the baseline
+distribution every already-wired character knob, `head_vice`, crisis actions and
+goal selection reads — a systemic change with no gate of its own.
+
+Whole-lib test suite: **219 passed, 0 failed** (was 215, +4). `simulate_decades_
+reports_dynamics` stays byte-identical. `cargo check` clean.
+
+**Phase 4 (Consequences) is now complete as scoped: 4.1 through 4.4 all built, 4.5
+addressed item-by-item (2 correctly deferred, 1 declined with a documented reason).
+Phase 5 does not exist in `HOUSE_MASTER_PLAN.md` — there is no such section.**
+
+---
+
 ## Current state — 2026-07-30 (Phase 4.1–4.3 · Consequences)
 
 Asked to implement "all 3 phases" — read as the three concrete, buildable items in

@@ -2287,6 +2287,11 @@ impl CampaignSim {
             // in each other's way, re-derive its stage, and let it flare. Runs over the
             // BOUNDED feud list, so unlike formation (below) it is not O(houses²).
             self.update_feuds();
+            // Phase 4.4 · the foreign hand: a posted kin exposed to a rival's
+            // commercial footprint has their loyalty nudged down. Runs BEFORE the
+            // crisis/schism passes below so this month's pressure is already
+            // reflected in their discontent/tension reads, not a tick behind.
+            self.apply_foreign_hand();
             // Phase 3.3-3.6 · open/progress/resolve succession crises. Quarterly rounds
             // are gated inside on `(tick - opened_tick) % CRISIS_ROUND_TICKS`, so this
             // monthly call is a no-op for a house mid-crisis except on a quarter

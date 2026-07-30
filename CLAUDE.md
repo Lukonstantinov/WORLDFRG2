@@ -433,16 +433,26 @@ serde-defaulted so old saves load). Grouped by theme:
   tiered house) still gets the event written IN FULL to its own chronicle, just
   quiet on the world stage ("the player cannot watch fourteen houses"), the same
   quiet-when-healthy discipline the stability gauges use.
-- **The foreign-hand measurement**: `economy_validation.rs::econ_measure_foreign_hand_
-  conjunction` (`#[ignore]`d, like `econ_diagnose_house_turnover`) instruments —
-  rather than builds — the "foreign hand" mechanism a source design proposed: it
-  counts, over a 300-year run, how often a posted kin's city sees a rival's office/
-  bailo (Channel A) or the house itself leasing in a city a rival controls (Channel
-  B), AND that kin is already reading as disaffected (`loyalty < 0.4`). Run it
-  yourself for the current verdict; the mechanism itself stays un-built until the
-  number says it's worth it — building it blind was exactly what the source design
-  warned against ("the prettiest piece of design in the series and the most likely
-  to ship as dead code").
+- **The foreign hand (Phase 4.4, `sim/campaign/tick/foreign_hand.rs`)** — built ONLY
+  after `economy_validation.rs::econ_measure_foreign_hand_conjunction` (a 300-year
+  diagnostic, `#[ignore]`d like `econ_diagnose_house_turnover`) measured its trigger
+  firing 1229 times/century, far past the "handful a century" bar that would have
+  left it as dead code. Monthly, a posted kin whose city shows Channel A (a rival
+  house holds an office/bailo there) or Channel B (the house itself leases in a city
+  a rival `captor_house` controls — the "strong", real-dependency channel) has their
+  `loyalty` nudged down by a small, hard-bounded amount
+  (`FOREIGN_HAND_DECAY_RATE`=0.01/month at leverage 1.0, ceiling 0.015/month even at
+  max leverage — both channels, an active feud, a maximally powerful rival), scaled
+  by the rival's `political_power` and doubled in weight for an active feud.
+  **Leverage only deepens an existing grievance; it cannot manufacture one** — a
+  fully-loyal kin needs years of sustained exposure before it matters, and even then
+  it only feeds `house_tension`/crisis discontent, which still has to clear its own
+  independent threshold. An occasional chronicle event (`FOREIGN_HAND_DISCLOSE_
+  CHANCE`) names the rival — scoped down from the design's "always disclosed" (a
+  literal always would need a new persistent per-kin field, another House-adjacent
+  struct patch across every construction site). **The design's own required gate
+  held**: diffed against the pre-4.4 commit, house dissolutions/century moved DOWN
+  (41.67 → 40.00), not up — leverage colours outcomes, it does not drive them.
 - **Consequences (Phase 4.1–4.3):** three independent additions, each gated on state
   the house already carries. `sim/campaign/tick/schism.rs::update_house_schisms`
   (monthly) reads a simplified `tension` proxy (mean kin loyalty · reach · feuds ·
@@ -670,19 +680,27 @@ sim/                            ← organised into per-phase step folders; mod.r
   campaign/                     ← the campaign half:
       market.rs                   Market equilibrium solver (stocks → grain-eq prices)
       manufacture.rs              Shared production-chain resolver (DAG topo, labor∝pop)
-      tick/                       THE CAMPAIGN TICK SIM (~17.5k lines, by theme). See §5.
+      tick/                       THE CAMPAIGN TICK SIM (~17.6k lines, by theme). See §5.
                                   mod.rs = structs/consts/free-fns/advance()/impl Bank/…/
                                   residual impl CampaignSim; methods grouped into money/war/
                                   disease/colonies/polis/cities/houses/production/crisis/
-                                  schism child impls (pub(crate), `use super::*`);
-                                  crisis.rs = Phase 3.2-3.6, the succession-crisis engine
-                                  (competence/vice, named factions, quarterly rounds,
-                                  resolution, civic intervention, the permanent record —
-                                  see §5); schism.rs = Phase 4.1, Quarrel/Departure (a
-                                  simplified `tension` proxy, monthly; Rupture deferred);
-                                  disease.rs also carries Phase 4.3's `plague_house_toll`
-                                  (kin mortality + extinction, independent of head
-                                  mortality); tests.rs = the dynamics tests
+                                  schism/foreign_hand child impls (pub(crate), `use
+                                  super::*`); crisis.rs = Phase 3.2-3.6, the succession-
+                                  crisis engine (competence/vice, named factions,
+                                  quarterly rounds, resolution, civic intervention, the
+                                  permanent record — see §5); schism.rs = Phase 4.1,
+                                  Quarrel/Departure (a simplified `tension` proxy,
+                                  monthly; Rupture deferred); foreign_hand.rs = Phase
+                                  4.4, the two-channel rival-leverage loyalty decay —
+                                  built only after its own measured trigger rate
+                                  justified it (§5); disease.rs also carries Phase
+                                  4.3's `plague_house_toll` (kin mortality + extinction,
+                                  independent of head mortality); tests.rs = the
+                                  dynamics tests; economy_validation.rs carries the
+                                  `#[ignore]`d long-run diagnostics
+                                  (`econ_diagnose_house_turnover`,
+                                  `econ_measure_foreign_hand_conjunction`) alongside
+                                  the ECONOMY FIDELITY GATE (§2.5)
 ```
 
 ---

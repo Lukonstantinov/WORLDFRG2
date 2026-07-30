@@ -2108,6 +2108,29 @@ pub const DEPARTURE_WEALTH_FRAC: f32 = 0.25;
 pub const PLAGUE_KIN_DEATH_CHANCE: f32 = 0.35;
 pub const PLAGUE_EXTINCTION_CHANCE: f32 = 0.03;
 
+/// Phase 4.4 · the foreign hand (`HOUSE_POWER_STRUGGLE_VIEW.md` §2) — built ONLY
+/// after `econ_measure_foreign_hand_conjunction` (§2.5's own "measure before
+/// building" instruction) found the conjunction firing ~1229 times/century, far
+/// above the "a handful a century" bar that would have left it as dead code.
+/// Two channels, both concrete: A — a rival holds an office/bailo in our kin's
+/// city; B — our kin's house leases in a city that rival CONTROLS. Leverage
+/// DEEPENS an existing grievance (a small extra loyalty decay on the exposed kin)
+/// — it never creates one outright, so a loyal, contented kin is never meaningfully
+/// moved by it (see `apply_foreign_hand`'s own doc for the bound that guarantees this).
+pub const FOREIGN_HAND_CHANNEL_A_WEIGHT: f32 = 0.5;
+pub const FOREIGN_HAND_CHANNEL_B_WEIGHT: f32 = 0.8;
+/// Monthly loyalty decay at leverage = 1.0 (the maximum, both channels + a feud).
+/// Small and slow by construction — a single month's exposure should never itself
+/// manufacture a plot; it accumulates only under SUSTAINED dependency.
+pub const FOREIGN_HAND_DECAY_RATE: f32 = 0.01;
+/// Monthly chance, AT leverage = 1.0, that active leverage is disclosed as a
+/// chronicle line naming the rival. Scoped down from the design's "always
+/// disclosed" (a literal always would need a new persistent per-kin annotation
+/// field, another House-adjacent struct patch across every construction site) to
+/// "eventually and occasionally visible" — cheap, and the effect itself (the
+/// loyalty decay) is unconditional regardless of whether this roll fires.
+pub const FOREIGN_HAND_DISCLOSE_CHANCE: f32 = 0.06;
+
 /// A merchant family / trading house, with a named head of family who ages, dies
 /// and is succeeded by an heir. Houses compete for trade, hold monopolies, feud
 /// with rivals, and wield political power in their home city.
@@ -5592,6 +5615,7 @@ mod houses;
 pub use houses::{kin_power_shares, character_phrase};
 mod crisis;
 mod schism;
+mod foreign_hand;
 mod production;
 
 /// Milestone journal kinds form a city/house's PERMANENT record and survive the
