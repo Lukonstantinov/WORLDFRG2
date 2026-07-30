@@ -42,7 +42,7 @@
             is_guild: false, offices: vec![], trade_at: vec![], debt_since: 0,
             wealth_history: vec![], office_leases: vec![],
             influence: vec![], bailos: vec![],
-            head_female: false, head_age: 34, line: vec![], tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(),
+            head_female: false, head_age: 34, line: vec![], tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(),
         }
     }
 
@@ -2752,4 +2752,175 @@
         s.update_house_goal(0);
         assert!(s.houses[0].goals.is_empty(), "reaching the target province must close the goal");
         assert_eq!(s.houses[0].goal_history.last().unwrap().state, GOAL_ACHIEVED);
+    }
+
+    // ── Phase 3.2 · competence + vice ────────────────────────────────────────
+    fn kin_at(name: &str, female: bool, role: u8, character: [i8; 4], loyalty: f32, skill: f32) -> Kin {
+        Kin { name: name.into(), female, born_tick: 0, dies_tick: 0, role, posted: -1,
+              character, loyalty, skill, parent: -1 }
+    }
+
+    #[test]
+    fn head_vice_is_a_true_noop_with_no_roster_or_flat_character() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..1u32).map(|i| hub(i, 0.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.houses.push(house_at(0, vec![0], 1));
+        assert_eq!(s.head_vice(0), VICE_NONE, "no roster ⇒ no vice");
+        s.houses[0].kin.push(kin_at("Head", false, 0, [0, 0, 0, 0], 1.0, 0.9));
+        assert_eq!(s.head_vice(0), VICE_NONE, "flat character + high skill ⇒ no vice");
+    }
+
+    #[test]
+    fn head_vice_matches_the_designs_priority_order() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..1u32).map(|i| hub(i, 0.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.houses.push(house_at(0, vec![0], 1));
+        s.houses[0].kin.push(kin_at("Head", false, 0, [2, 0, 0, 0], 1.0, 0.9));
+        assert_eq!(s.head_vice(0), VICE_RECKLESS, "bold >= 2");
+        s.houses[0].kin[0] = kin_at("Head", false, 0, [0, 2, 0, 0], 1.0, 0.9);
+        assert_eq!(s.head_vice(0), VICE_RAPACIOUS, "greed >= 2");
+        s.houses[0].kin[0] = kin_at("Head", false, 0, [-2, 0, -1, 0], 1.0, 0.9);
+        assert_eq!(s.head_vice(0), VICE_MISERLY, "bold <= -2 and civic <= -1");
+        s.houses[0].kin[0] = kin_at("Head", false, 0, [0, 0, 0, -2], 1.0, 0.9);
+        assert_eq!(s.head_vice(0), VICE_PAROCHIAL, "rooted <= -2");
+        // Lavish is checked FIRST, so a head who also qualifies for another vice
+        // still reads as Lavish — matches the table's own priority order.
+        s.houses[0].kin[0] = kin_at("Head", false, 0, [-2, 0, 1, 0], 1.0, 0.3);
+        assert_eq!(s.head_vice(0), VICE_LAVISH, "civic >= 1 and skill <= 0.4, checked first");
+    }
+
+    /// The one wired economic consequence of a vice (§3.2's own scoping note):
+    /// Lavish adds a small extra drain in `apply_wealth_sinks`. A head with no vice
+    /// at the same starting wealth must NOT pay it.
+    #[test]
+    fn lavish_vice_costs_wealth_a_sober_head_does_not_pay() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        let mut lavish = house_at(0, vec![0], 1);
+        lavish.wealth = 1000.0;
+        lavish.kin.push(kin_at("Lavish", false, 0, [0, 0, 2, 0], 1.0, 0.3));
+        let mut sober = house_at(1, vec![0], 1);
+        sober.wealth = 1000.0;
+        sober.kin.push(kin_at("Sober", false, 0, [0, 0, 0, 0], 1.0, 0.9));
+        s.houses.push(lavish);
+        s.houses.push(sober);
+        s.apply_wealth_sinks();
+        assert!(s.houses[0].wealth < s.houses[1].wealth,
+            "a Lavish head must bleed more than an otherwise-identical sober one");
+    }
+
+    // ── Phase 3.3-3.6 · the crisis ───────────────────────────────────────────
+    fn discontented_house(hub_id: u32) -> House {
+        let mut h = house_at(hub_id, vec![0], 1);
+        h.wealth = 500.0;
+        h.wealth_history = vec![500.0, 50.0]; // sharp decline ⇒ falling_funds ~= 0.9
+        h.kin = vec![
+            kin_at("Head", false, 0, [0, 0, 0, 0], 1.0, 0.6),
+            kin_at("Rival", false, 2, [0, 0, 0, 0], 0.05, 0.7), // the plot leader
+        ];
+        h
+    }
+
+    /// A crisis opens, runs, and resolves within the fixed round cap — it can never
+    /// become the permanent state of a house. The design's own invariant name.
+    #[test]
+    fn every_crisis_terminates() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..1u32).map(|i| hub(i, 0.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.houses.push(discontented_house(0));
+        s.tick = 0;
+        s.update_house_crises();
+        assert!(s.houses[0].crisis.is_some(), "high discontent must open a crisis");
+        for q in 1..=(CRISIS_ROUND_CAP as u32 + 2) {
+            s.tick = q * CRISIS_ROUND_TICKS;
+            s.update_house_crises();
+            if let Some(c) = &s.houses[0].crisis {
+                assert!(c.round <= CRISIS_ROUND_CAP, "a crisis must never exceed the round cap");
+            }
+        }
+        assert!(s.houses[0].crisis.is_none(), "the crisis must have resolved by the round cap");
+        assert_eq!(s.houses[0].crisis_history.len(), 1, "a resolved crisis leaves exactly one record");
+    }
+
+    /// A crisis the plot is decisively winning depose the head — a new head is
+    /// installed, the old head's tenure closes, and the event is a permanent
+    /// milestone (never pruned by the chronicle cap).
+    #[test]
+    fn a_decisive_plot_deposes_the_head() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..1u32).map(|i| hub(i, 0.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        let mut h = discontented_house(0);
+        h.crisis = Some(HouseCrisis {
+            opened_tick: 0, cause: 0, plot_leader: 1, round: CRISIS_ROUND_CAP - 1,
+            head_support: 0.05, plot_support: 0.90, peak_plot: 0.90, rounds: Vec::new(),
+            loyalist_name: "the Old Council".into(), loyalist_tint: "#b32d2d".into(),
+            plot_name: "Rival's men".into(), plot_tint: "#2a5fa0".into(), heir_choice: 2,
+        });
+        s.houses.push(h);
+        s.tick = CRISIS_ROUND_TICKS;
+        s.update_house_crises();
+        assert!(s.houses[0].crisis.is_none());
+        assert_eq!(s.houses[0].crisis_history[0].outcome, CRISIS_DEPOSED);
+        assert_eq!(s.houses[0].head_name, "Rival", "the plot leader must take the seat");
+        assert!(s.houses[0].events.iter().any(|e| e.kind == "deposed"));
+        assert!(is_house_milestone("deposed"), "a deposition is a permanent milestone");
+    }
+
+    /// A crisis the head is decisively winning ends in survival, not deposition —
+    /// and a survivor earns the grace period that keeps a weak head from sitting in
+    /// permanent crisis (`HOUSE_FACTION_NAMING_AND_RECORD.md` §4).
+    #[test]
+    fn a_decisive_head_prevails_and_earns_a_grace_period() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..1u32).map(|i| hub(i, 0.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        let mut h = discontented_house(0);
+        let original_head = h.head_name.clone();
+        h.crisis = Some(HouseCrisis {
+            opened_tick: 0, cause: 0, plot_leader: 1, round: CRISIS_ROUND_CAP - 1,
+            head_support: 0.90, plot_support: 0.05, peak_plot: 0.30, rounds: Vec::new(),
+            loyalist_name: "the Old Council".into(), loyalist_tint: "#b32d2d".into(),
+            plot_name: "Rival's men".into(), plot_tint: "#2a5fa0".into(), heir_choice: 2,
+        });
+        s.houses.push(h);
+        s.tick = CRISIS_ROUND_TICKS;
+        s.update_house_crises();
+        assert!(s.houses[0].crisis.is_none());
+        assert_eq!(s.houses[0].crisis_history[0].outcome, CRISIS_PREVAILED);
+        assert_eq!(s.houses[0].head_name, original_head, "the ruler keeps the seat");
+        assert!(s.houses[0].crisis_immune_until > s.tick, "a survivor must earn a grace period");
+        assert!(s.houses[0].events.iter().any(|e| e.kind == "crisis_survived"));
+        assert!(is_house_milestone("crisis_survived"));
+        // The grace period must actually PREVENT a new crisis from opening.
+        s.houses[0].wealth_history = vec![500.0, 50.0];
+        s.update_house_crises();
+        assert!(s.houses[0].crisis.is_none(), "no new crisis may open inside the grace window");
+    }
+
+    /// Two independently-opened crises must never share a faction name or tincture —
+    /// the whole point of naming a faction after the house's own arms is that the
+    /// two camps read as visibly different parties.
+    #[test]
+    fn faction_names_and_tints_are_distinct() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        for seedn in 0..24u64 {
+            let hubs = (0..1u32).map(|i| hub(i, 0.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+            let mut s = sim(hubs, goods.clone());
+            s.seed = seedn * 7919 + 11;
+            let mut h = discontented_house(0);
+            h.name = format!("House Seed{seedn}");
+            h.head_name = format!("Head{seedn}");
+            h.kin[1].name = format!("Rival{seedn}");
+            s.houses.push(h);
+            s.tick = 0;
+            s.update_house_crises();
+            let c = s.houses[0].crisis.as_ref().expect("high discontent must open a crisis");
+            assert_ne!(c.loyalist_name, c.plot_name, "seed {seedn}: the two factions must not share a name");
+            assert_ne!(c.loyalist_tint, c.plot_tint, "seed {seedn}: the two factions must not share a tincture");
+        }
     }

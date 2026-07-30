@@ -807,6 +807,49 @@ export interface GoalsBrief {
   active: GoalBrief[];
   history: GoalBrief[]; // most recent first
 }
+/** One quarterly round of an active crisis (Phase 3.2-3.6). */
+export interface CrisisRoundBrief {
+  action: number;      // 0 concede · 1 buy off · 2 venture · 3 stand firm
+  result: number;      // -1 backfired · 0 no effect · +1 worked
+  head_delta: number;
+  text: string;
+}
+/** The house's OPEN succession crisis, if any. */
+export interface ActiveCrisisBrief {
+  cause: string;
+  round: number;
+  round_cap: number;
+  head_support: number;
+  plot_support: number;
+  undecided: number;
+  loyalist_name: string;
+  loyalist_tint: string;
+  plot_name: string;
+  plot_tint: string;
+  plot_leader_name: string;
+  heir_choice: number;  // 0 stood with the ruler · 1 turned to the plot · 2 no heir kin
+  rounds: CrisisRoundBrief[];
+  opened_year: number;
+}
+/** One closed crisis from the permanent record. */
+export interface CrisisRecordBrief {
+  opened_year: number;
+  closed_year: number;
+  cause: string;
+  loyalist_name: string;
+  loyalist_tint: string;
+  plot_name: string;
+  plot_tint: string;
+  rounds: number;
+  peak_plot: number;
+  outcome: number;      // 1 prevailed · 2 deposed · 3 dissolved
+  successor: string;
+}
+export interface CrisisBrief {
+  active: ActiveCrisisBrief | null;
+  history: CrisisRecordBrief[]; // most recent first
+  secure_until_year: number;    // 0 if not currently immune
+}
 export interface JournalEntry {
   tick: number;
   kind: string;

@@ -1290,7 +1290,7 @@ impl CampaignSim {
             is_guild: false, offices: vec![h as u32], trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(),
+            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(),
         });
         self.found_head_record(idx, "founder");
         Some(idx)
@@ -2188,7 +2188,7 @@ impl CampaignSim {
             is_guild: true, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: false, head_age: guild_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(),
+            head_female: false, head_age: guild_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(),
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -2287,6 +2287,11 @@ impl CampaignSim {
             // in each other's way, re-derive its stage, and let it flare. Runs over the
             // BOUNDED feud list, so unlike formation (below) it is not O(houses²).
             self.update_feuds();
+            // Phase 3.3-3.6 · open/progress/resolve succession crises. Quarterly rounds
+            // are gated inside on `(tick - opened_tick) % CRISIS_ROUND_TICKS`, so this
+            // monthly call is a no-op for a house mid-crisis except on a quarter
+            // boundary; opening a NEW crisis is checked here directly (monthly).
+            self.update_house_crises();
         }
         // Feud FORMATION keeps the old half-yearly cadence — it is the O(n²) pair scan.
         if tick % 180 == 0 { self.update_rivalries(); }
@@ -3169,7 +3174,7 @@ impl CampaignSim {
                 is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
                 wealth_history: Vec::new(), office_leases: Vec::new(),
                 influence: Vec::new(), bailos: Vec::new(),
-                head_female: female, head_age: age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(),
+                head_female: female, head_age: age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(),
             });
             let ni = self.houses.len() - 1;
             self.found_head_record(ni, "co-heir");
@@ -3254,7 +3259,7 @@ impl CampaignSim {
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: bfemale, head_age: bage, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(),
+            head_female: bfemale, head_age: bage, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(),
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -3693,7 +3698,7 @@ impl CampaignSim {
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(),
+            head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(),
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");

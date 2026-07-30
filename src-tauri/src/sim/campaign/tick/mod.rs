@@ -1928,7 +1928,7 @@ pub fn is_house_milestone(kind: &str) -> bool {
         "founded" | "succession" | "inheritance" | "archetype" | "monopoly"
         | "control_gained" | "control_lost" | "branch" | "charter" | "bailo"
         | "bankruptcy" | "dissolved" | "bank" | "marriage" | "loss" | "tier_up"
-        | "golden_age" | "dynasty" | "goal_achieved")
+        | "golden_age" | "dynasty" | "goal_achieved" | "deposed" | "crisis_survived")
 }
 
 /// Phase 3.1 · a checkable ambition (`HOUSE_PEOPLE_AND_TIERS.md` §4). A goal must be
@@ -1984,6 +1984,108 @@ pub const GOAL_HOLD_YEARS_BANK: f32 = 10.0;
 /// enough that a goal spans a meaningful slice of a head's tenure without being
 /// unfalsifiable.
 pub const GOAL_DEADLINE_YEARS: [f32; 7] = [25.0, 15.0, 15.0, 20.0, 20.0, 25.0, 20.0];
+
+/// Phase 3.2 · a NAMED consequence of character extremes plus low skill
+/// (`HOUSE_POWER_AND_POLITICS.md` §4) — derived from `kin[0]` alone, so there is no
+/// third random layer beyond the character already rolled at Phase 2.3. `0` = none.
+pub const VICE_NONE: u8 = 0;
+pub const VICE_LAVISH: u8 = 1;      // civic ≥ +1 and skill ≤ 0.4 — bleeds consumption
+pub const VICE_RECKLESS: u8 = 2;    // bold ≥ +2 — overreaches on ventures
+pub const VICE_RAPACIOUS: u8 = 3;   // greed ≥ +2 — escalates feuds it cannot win
+pub const VICE_MISERLY: u8 = 4;     // bold ≤ −2 and civic ≤ −1 — under-invests
+pub const VICE_PAROCHIAL: u8 = 5;   // rooted ≤ −2 — refuses expansion
+/// Lavish is the one vice this pass wires a direct wealth cost to (`apply_wealth_sinks`)
+/// — one concrete consequence, the same "one touchpoint, not every listed knob"
+/// discipline Phase 2.4 already used. The others feed `vice_severity` into crisis
+/// discontent/rolls only; see the Phase 3.2 handoff note for what's NOT wired.
+pub const VICE_LAVISH_DRAIN: f32 = 0.0015;
+
+/// Phase 3.3–3.6 · a succession crisis in progress. Opens when a house's discontent
+/// crosses a threshold; runs a fixed number of quarterly rounds; resolves into
+/// PREVAILED / DEPOSED / DISSOLVED. `HOUSE_SUCCESSION_CRISIS.md` +
+/// `HOUSE_FACTION_NAMING_AND_RECORD.md`, scoped down — see the Phase 3 handoff note
+/// in `docs/proposals/HOUSE_MASTER_PLAN.md` for exactly what was cut and why.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct HouseCrisis {
+    pub opened_tick: u32,
+    /// 0 falling funds · 1 failed ambitions · 2 the head's vice · 3 a hostile kinsman.
+    pub cause: u8,
+    /// Kin index of the challenger, or −1 = leaderless discontent (easier to survive).
+    pub plot_leader: i32,
+    pub round: u8,
+    pub head_support: f32,
+    pub plot_support: f32,
+    pub peak_plot: f32,
+    pub rounds: Vec<CrisisRound>,
+    /// Faction names + tints (`HOUSE_FACTION_NAMING_AND_RECORD.md` §1) — the
+    /// loyalists default to the house's own heraldic tincture; the plot's is picked
+    /// for contrast, so a player who learns the colour has learned the name.
+    pub loyalist_name: String,
+    pub loyalist_tint: String,
+    pub plot_name: String,
+    pub plot_tint: String,
+    /// The heir's recorded choice (`HOUSE_POWER_STRUGGLE_VIEW.md` §3): 0 stood with
+    /// the ruler · 1 turned to the plot · 2 no heir kin to choose at all.
+    pub heir_choice: u8,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CrisisRound {
+    pub tick: u32,
+    /// 0 concede a holding · 1 buy off the plot · 2 launch a venture · 3 stand firm.
+    pub action: u8,
+    /// −1 backfired · 0 no effect · +1 worked.
+    pub result: i8,
+    pub head_delta: f32,
+    pub text: String,
+}
+
+/// Phase 3.6 · the permanent, capped summary a crisis leaves behind once it closes —
+/// same discipline as the family chronicle: the struggle's live detail (`HouseCrisis`)
+/// is transient, but that it happened, over what, and how it ended is not.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CrisisRecord {
+    pub opened_tick: u32,
+    pub closed_tick: u32,
+    pub cause: u8,
+    pub loyalist_name: String,
+    pub loyalist_tint: String,
+    pub plot_name: String,
+    pub plot_tint: String,
+    pub rounds: u8,
+    pub peak_plot: f32,
+    /// 1 the ruler prevailed · 2 deposed · 3 the house dissolved in its own quarrel.
+    pub outcome: u8,
+    pub successor: String,
+}
+
+pub const CRISIS_PREVAILED: u8 = 1;
+pub const CRISIS_DEPOSED: u8 = 2;
+pub const CRISIS_DISSOLVED: u8 = 3;
+
+/// One quarter (`HOUSE_SUCCESSION_CRISIS.md` §2's cadence) — long enough that a
+/// round is a season, short enough that a ~1-year crisis reads as a run of them.
+pub const CRISIS_ROUND_TICKS: u32 = 90;
+/// Fixed at 4 rounds (~1 year) rather than the design's "3–5" — a fixed cap makes
+/// `every_crisis_terminates` trivial to assert and costs the story little.
+pub const CRISIS_ROUND_CAP: u8 = 4;
+/// Above this, discontent opens a crisis (subject to the grace period below).
+pub const CRISIS_DISCONTENT_THRESHOLD: f32 = 0.55;
+/// `HOUSE_FACTION_NAMING_AND_RECORD.md` §4 — a head who survives is safe for 5 years.
+pub const CRISIS_GRACE_YEARS: u32 = 5;
+pub const CRISIS_HISTORY_CAP: usize = 8;
+/// Phase 3.5 · civic intervention — chance the seat's council sequesters a slice of
+/// wealth into its own treasury after a severe (plot_support ≥ 0.6 at some point)
+/// deposition, amid the disorder. Kept small and rare on purpose (§3.5's own gate:
+/// dynamics must stay bounded) — this is colour on an already-resolved outcome, not
+/// a second wealth sink.
+pub const CIVIC_INTERVENTION_CHANCE: f32 = 0.25;
+pub const CIVIC_SEQUESTER_FRAC: f32 = 0.03;
+/// Cost of the "buy off the plot" action, as a fraction of wealth, hard-capped in
+/// absolute terms — `HOUSE_FACTION_NAMING_AND_RECORD.md` §2's own gate is that
+/// courting spend must not be large enough to move the econ scorecard.
+pub const CRISIS_BUYOFF_FRAC: f32 = 0.03;
+pub const CRISIS_BUYOFF_CAP: f32 = 15.0;
 
 /// A merchant family / trading house, with a named head of family who ages, dies
 /// and is succeeded by an heir. Houses compete for trade, hold monopolies, feud
@@ -2137,6 +2239,20 @@ pub struct House {
     /// family tried, and how did it go" — a family with three failed ambitions reads
     /// very differently from one with three achieved.
     #[serde(default)] pub goal_history: Vec<Goal>,
+    // ── Crisis (Phase 3.2–3.6) ──
+    /// The house's open succession crisis, if any — at most one at a time (a house
+    /// mid-struggle cannot also open a second). `None` for a guild (a civic office
+    /// has no throne to contest) and for the overwhelming majority of ticks, since a
+    /// crisis is a rare, discontent-triggered event, not a running gauge.
+    #[serde(default)] pub crisis: Option<HouseCrisis>,
+    /// A head who survives a crisis earns a grace period: no new crisis may open
+    /// before this tick (`HOUSE_FACTION_NAMING_AND_RECORD.md` §4) — without it a weak
+    /// head sits in permanent crisis and the mechanic stops meaning anything.
+    #[serde(default)] pub crisis_immune_until: u32,
+    /// Permanent, capped record of past crises (Phase 3.6) — the same discipline as
+    /// `goal_history`: kept forever in spirit, truncated in practice so a centuries-old
+    /// dynasty's record doesn't grow without bound.
+    #[serde(default)] pub crisis_history: Vec<CrisisRecord>,
 }
 
 /// DLC 3.5 · one loan on a bank's books. An asset to the bank (interest income);
@@ -4842,7 +4958,11 @@ impl CampaignSim {
             let pos = self.houses[hi].wealth.max(0.0);
             let consume_rate = if is_guild { GUILD_CIVIC_RATE }
                 else { HOUSE_CONSUMPTION_RATE * self.head_character_factor(hi, 2) };
-            let consumption = pos * consume_rate;
+            // Phase 3.2 · Lavish is the one vice this pass wires a direct wealth cost
+            // to — a small extra bleed on top of the character-scaled rate above, so
+            // the vice is a real (if small) annual cost rather than a label only.
+            let vice_rate = if !is_guild && self.head_vice(hi) == VICE_LAVISH { VICE_LAVISH_DRAIN } else { 0.0 };
+            let consumption = pos * (consume_rate + vice_rate);
 
             // ── Progressive civic endowment (the GUILD wealth ceiling) ──────────
             // A guild that hoards beyond a soft cap (scaled to its home city's size)
@@ -5443,6 +5563,7 @@ mod polis;
 mod cities;
 mod houses;
 pub use houses::{kin_power_shares, character_phrase};
+mod crisis;
 mod production;
 
 /// Milestone journal kinds form a city/house's PERMANENT record and survive the

@@ -1,8 +1,8 @@
 # The house mechanism — critique, then the master plan
 
-**Status: Phase 0 COMPLETE; Phase 1 COMPLETE; Phase 2 COMPLETE; Phase 3.1 (goals)
-built as structure, not yet wired to bias decisions — see the handoff block; 3.2–5
-are plan.**
+**Status: Phase 0 COMPLETE; Phase 1 COMPLETE; Phase 2 COMPLETE; Phase 3 COMPLETE as
+SCOPED (goals are structure-only, the crisis engine is a real but cut-down build —
+see the handoff blocks for exactly what's simplified); Phase 4–5 are plan.**
 Consolidates the design documents
 (`HOUSE_PEOPLE_AND_TIERS` · `HOUSE_PEOPLE_PLAN` · `HOUSE_POWER_AND_POLITICS` ·
 `HOUSE_SUCCESSION_CRISIS` · `HOUSE_POWER_STRUGGLE_VIEW` ·
@@ -299,6 +299,117 @@ contains the two open defects already on the scoreboard.
 > houses are standing and is right-censored on a 60-year run. The correct estimator is a
 > hazard over exposure (`deaths ÷ house-years`), which `econ_diagnose_house_turnover` reports.
 >
+> ## Phase 3.2–3.6 (the crisis engine) is built — real, but cut down hard from the source designs
+>
+> Asked to implement "the last step" in one pass, same discipline as every prior batch
+> here: build everything, check once at the end. This is the biggest single addition
+> in the series — a new `sim/campaign/tick/crisis.rs` (~470 lines) implementing
+> competence/vice (3.2), the crisis struggle with named factions (3.3), a folded-in
+> undecided contest + grace period (3.4), civic intervention (3.5), and the permanent
+> capped record (3.6). It consolidates FOUR source documents
+> (`HOUSE_POWER_AND_POLITICS.md`, `HOUSE_SUCCESSION_CRISIS.md`,
+> `HOUSE_POWER_STRUGGLE_VIEW.md`, `HOUSE_FACTION_NAMING_AND_RECORD.md`) that between
+> them describe a system several times the size of what's built here. Read the module
+> doc comment at the top of `crisis.rs` first — it states the two biggest cuts up
+> front, not buried in a design rationale nobody re-reads.
+>
+> ## The two cuts that matter most
+>
+> 1. **No per-figure power-share ledger.** The source design (`HOUSE_POWER_AND_POLITICS.md`
+>    §1) makes every prominent kinsman hold a numeric share of a 100% pie, with a
+>    `PowerModifier` log explaining every point gained or lost. **Not built.**
+>    `head_support`/`plot_support` on `HouseCrisis` are two abstract aggregate numbers
+>    derived from discontent at crisis-open time and nudged by each round's action —
+>    not a sum of named shares. This is the single biggest simplification: it is what
+>    let 3.2–3.6 ship in one pass instead of needing the ledger as a prerequisite.
+> 2. **No drifting `regard` ladder.** The source design (`HOUSE_SUCCESSION_CRISIS.md`
+>    §1) has every kinsman's relation to the head drift continuously year over year,
+>    with a reason attached to every move. **Not built.** Plot leadership instead
+>    reads each kin's existing STATIC `Kin.loyalty` roll (set once at
+>    `ensure_kin_roster` time) — the least-loyal live, non-head kinsman becomes the
+>    plot leader. This is honest but real: a house's plot leader today is whoever
+>    randomly rolled the lowest loyalty at the last founding/succession, not someone
+>    whose relationship visibly soured over years of being passed over.
+>
+> ## Smaller, deliberate cuts (each already recommended by this file or the source docs)
+>
+> - **The Split/schism outcome is not built.** `HOUSE_SUCCESSION_CRISIS.md`'s
+>   resolution table has four outcomes; only three ship (Prevailed / Deposed /
+>   Dissolved). This isn't a shortcut invented for this pass — Part 3 of THIS file
+>   already recommends deferring "Rupture (full house split by descent) behind
+>   Departure", and a crisis-triggered Split is the same risk to the wealth
+>   distribution by another door.
+> - **Only 4 of 6 head actions.** "Concede a holding", "buy off the plot", "launch a
+>   venture", "stand firm" are built; "marry a rival's line in" and "press a feud to a
+>   win" are cut because both need state this pass didn't add (a marriage-in mechanic,
+>   a way to target one SPECIFIC feud from crisis code) — matches the same
+>   "build what needs no new subsystem" discipline goals used to cut 17 kinds to 7.
+> - **Only 2 of 6 faction-naming patterns.** "Tincture + Charge" and "Leader's men" are
+>   built; the four culture-specific patterns (Brotherhood/Legitimist/Place/Grievance)
+>   need a culture-keyed word table this pass didn't build. Contrast and
+>   distinctness are still guaranteed (opposite-index tincture pick), just with less
+>   naming variety than the full design.
+> - **No structured `CauseShift`/stake-shift log.** A round's narrative TEXT can note a
+>   shift in prose ("the venture failed" implies the crisis is now about the ships,
+>   not the funds), but there's no separate `CauseShift` struct tracking it — the
+>   design's own decision 3 (`HOUSE_FACTION_NAMING_AND_RECORD.md`) is only partially
+>   honoured.
+> - **The "salience rule" referenced in the master-plan table (§2.4 of a source doc
+>   this pass didn't need to open) was not built at all** — there is no separate
+>   visibility gating beyond the dossier tab appearing only when a crisis exists.
+> - **No `allegiance_partitions_the_house` invariant.** That test's premise (every
+>   prominent figure sits in exactly one of three camps, summing to the pie) doesn't
+>   apply to a model with no per-figure ledger. In its place: `every_crisis_terminates`
+>   (round cap respected, exactly one crisis per house) and
+>   `faction_names_and_tints_are_distinct` (24-seed sweep, names/tints never collide) —
+>   both real invariants of what actually shipped, not the design's original two.
+> - **The crisis→deposition rate over 300 years is UNMEASURED**, same honest gap
+>   pattern as Phase 3.1's goal achieve/fail rate — a long-run diagnostic
+>   (`econ_diagnose_house_turnover`'s own pattern) would answer it and wasn't built
+>   this pass.
+>
+> ## A real bug this pass found and fixed: deposition could break the inheritance law
+>
+> The first cut of `pick_crisis_successor` picked whoever fit the crisis role (plot
+> leader, heir, prominent kinsman) with NO regard for the house's culture-mandated
+> `LineRule` — and a pre-existing test, `a_matrilineal_house_is_held_by_women`, caught
+> it immediately: a 70-year run put a MAN ("Titus") at the head of an Enatic
+> (matrilineal) house, because the deposed successor's sex came from whichever kin
+> happened to lead the plot, not from the culture's own law (Phase 0.4). Fixed by
+> computing the culture's expected sex the same way `succeed_house` already does
+> (`crate::sim::inheritance::heir_is_female`) and filtering every candidate against
+> it before falling back to a freshly-generated, correctly-sexed synthetic name. This
+> is the same class of bug Phase 2.5 found (a new mechanic silently breaking an
+> existing backward-compatibility/correctness invariant) and the same lesson: **the
+> existing test suite is what caught it, not review** — a reason the "check once at
+> the end" approach still needs the full suite run, not a partial one.
+>
+> ## Measured effect
+>
+> Diffed against the pre-3.2–3.6 commit on the real 60-year/30-city economy-oracle
+> world: **Gini 0.649 → 0.607** (stays inside the 0.60–0.85 band, though now nearer
+> its floor), **top-10% share 0.409 → 0.382** (already below its 0.60–0.90 band before
+> this pass — an existing, documented finding, not something this phase was expected
+> to fix, and it moved further from the band rather than into it — worth watching, not
+> yet alarming at this magnitude), **surviving houses 49 → 44**, **banks chartered
+> 23 → 25**, **bank failures/century 36.67 → 33.33**, **house dissolutions/century
+> unchanged at 46.67** (the Dissolved crisis outcome is "very rare" by design — its
+> absence from this number is expected, not a sign it never fires). The whole lib
+> test suite is **206 passed, 0 failed** (was 199, +7 new:
+> `every_crisis_terminates`, `faction_names_and_tints_are_distinct`,
+> `head_vice_is_a_true_noop_with_no_roster_or_flat_character`,
+> `head_vice_matches_the_designs_priority_order`,
+> `lavish_vice_costs_wealth_a_sober_head_does_not_pay`,
+> `a_decisive_plot_deposes_the_head`, `a_decisive_head_prevails_and_earns_a_grace_period`) —
+> verified by diffing the pre-pass commit's own `cargo test --lib` total, not just
+> eyeballing green. `simulate_decades_reports_dynamics` stays bounded (no blow-ups,
+> no craters). `cargo check`/`npx tsc --noEmit` both clean.
+>
+> A ⚠ Crisis dossier tab was added (`HousesPanel.tsx`): the live struggle (two
+> named factions in their own tinctures, a round log, the heir's recorded choice) plus
+> a permanent "past risings" list — read-only, matching decision 2 of
+> `HOUSE_SUCCESSION_CRISIS.md` ("observation only... the AI supplies every choice").
+>
 > ## Phase 3.1 (goals) is built — as STRUCTURE, not yet the closed loop §4 describes
 >
 > Phase 0, 1 and 2 are complete. Phase 3 (Politics) is the big one — goals, competence/
@@ -526,11 +637,11 @@ Nothing here can regress either oracle. This is the phase you can look at soones
 | # | Step | Gate |
 |---|---|---|
 | 3.1 | ~~**~8 goals**, head-chosen (cut from 17, per Part 3)~~ **DONE (structure only — see the handoff finding)** — 7 kinds, chosen yearly by archetype/character bias, checked yearly, chronicled achieved (milestone) vs failed (chatter), a 🎯 Ambitions dossier tab. **Goals do NOT yet bias any decision's weights** — they are read-only tracking against state that already exists, not the closed loop §4 describes. | ✅ 6 new tests (one per representative kind + slot cap); `econ_`/dynamics BYTE-IDENTICAL (goals touch no wealth) |
-| 3.2 | **Competence + vice** | dynamics bounded; house death-rate must not spike |
-| 3.3 | **Crisis**: open · named factions + tints · heir choice · rounds · resolve | `every_crisis_terminates`; `faction_names_and_tints_are_distinct`; `allegiance_partitions_the_house`; deposition rate sane over 300 yrs |
-| 3.4 | **Contested undecided** + cause/stake shifts + grace period + **salience rule** (2.4) | courting spend must not move the econ scorecard |
-| 3.5 | **Civic intervention** in crises — sequestration / exile of a faction (1.3) | dynamics bounded |
-| 3.6 | **`CrisisRecord`** permanent + capped | save-size growth bounded over 500 yrs |
+| 3.2 | ~~**Competence + vice**~~ **DONE (scoped — see the handoff finding)** — competence is `kin[0].skill` read directly at each call site; vice is derived from character+skill (5 named vices), one wired economic consequence (Lavish → extra consumption drain). | ✅ `head_vice_*` tests; dynamics bounded (`simulate_decades_reports_dynamics` still healthy) |
+| 3.3 | ~~**Crisis**: open · named factions + tints · heir choice · rounds · resolve~~ **DONE (scoped — see the handoff finding)** — `HouseCrisis`, quarterly rounds fixed at `CRISIS_ROUND_CAP`=4, faction names/tints drawn from the house's own heraldic palette, heir choice recorded at opening. **No per-figure power-share ledger and no drifting `regard` ladder** — see the handoff. | ✅ `every_crisis_terminates`; `faction_names_and_tints_are_distinct`; econ/dynamics move but stay in band (see handoff numbers) |
+| 3.4 | ~~**Contested undecided** + grace period~~ **DONE (partial — see the handoff finding)** — the undecided bloc is folded into each round's own delta rather than a separate contest step; `crisis_immune_until` (5yr grace) is built and tested. **Structured `CauseShift` log and the "salience rule" are NOT built** — a backfire's narrative text notes a shift in prose only, no separate data field. | ✅ `a_decisive_head_prevails_and_earns_a_grace_period` |
+| 3.5 | ~~**Civic intervention**~~ **DONE (scoped — sequestration only, no exile)** — a severe deposition (peak plot ≥0.6) has a 25% chance the seat's council sequesters 3% of the estate into its treasury. | ✅ exercised by the dynamics/econ runs; no dedicated unit test (rare, small, same discipline as other tail events) |
+| 3.6 | ~~**`CrisisRecord`** permanent + capped~~ **DONE** — capped at `CRISIS_HISTORY_CAP`=8, same discipline as `goal_history`. | ✅ `every_crisis_terminates` asserts exactly one record per resolved crisis |
 
 ## Phase 4 — Consequences
 

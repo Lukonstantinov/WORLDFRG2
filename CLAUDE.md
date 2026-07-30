@@ -396,6 +396,39 @@ serde-defaulted so old saves load). Grouped by theme:
   flagged (not silently assumed done) because it would move wealth and needs its own
   `econ_` check as it's built, the same lesson Phase 2.4/2.5 already recorded.
   Exposed via `campaign_get_house_goals`; shown in the dossier's 🎯 Ambitions tab.
+- **The crisis engine (Phase 3.2–3.6, `sim/campaign/tick/crisis.rs`) — real, but cut
+  down hard from four source design docs.** `head_vice` (3.2) derives one of 5 named
+  vices (Lavish/Reckless/Rapacious/Miserly/Parochial) purely from `kin[0]`'s
+  character+skill — no third random layer; Lavish is the one vice with a wired
+  economic cost (an extra `apply_wealth_sinks` drain). `update_house_crises` (3.3–3.6,
+  monthly) opens a `HouseCrisis` when a house's discontent (falling funds · failed
+  goals · vice · the least-loyal live kinsman's disloyalty) crosses
+  `CRISIS_DISCONTENT_THRESHOLD`, runs it a FIXED `CRISIS_ROUND_CAP`=4 quarterly rounds
+  (one every `CRISIS_ROUND_TICKS`=90 ticks) — the head picks an in-character action
+  (concede/buy off/venture/stand firm), a deterministic roll resolves it, the
+  undecided bloc is folded into the same delta (3.4) — then resolves PREVAILED
+  (grace period, `crisis_immune_until`) / DEPOSED (`depose_and_succeed`, reusing
+  `close_head_record`+`found_head_record`) / DISSOLVED (empty kin + insolvent only,
+  reuses `dissolve_house`; the design's fourth outcome, Split, is deliberately NOT
+  built — same call as Part 3's existing "defer Rupture behind Departure"). Faction
+  names/tints (3.3) are drawn from the SAME heraldic tincture/charge palette
+  `CoatOfArms.tsx` renders with (`houseColor`'s exact FNV hash, mirrored in Rust), so
+  a crisis's loyalist colour is provably the house's own arms colour, not a
+  coincidence; the plot gets the opposite-index tincture for a guaranteed contrast.
+  Civic intervention (3.5) is sequestration only (no exile): a severe deposition has
+  a small chance the seat's council skims a slice of the estate into its treasury.
+  `crisis_history: Vec<CrisisRecord>` (3.6) is a capped permanent record, same
+  discipline as `goal_history`. **Two things this build deliberately does NOT have**
+  (documented at the top of `crisis.rs`, not hidden): a per-figure power-share ledger
+  (`head_support`/`plot_support` are two abstract aggregate numbers, not a sum of
+  named shares) and a continuously-drifting `regard` ladder (plot leadership reads
+  each kin's existing static `Kin.loyalty` roll instead). **A deposed successor's SEX
+  must still obey the culture's `LineRule`** — the first cut didn't check this and a
+  70-year test caught a man taking a matrilineal house's seat; fixed by filtering
+  every succession candidate through `heir_is_female` exactly as `succeed_house`
+  already does. Exposed via `campaign_get_house_crisis`; shown in the dossier's
+  ⚠ Crisis tab (observation only — every choice is the AI's, per the source design's
+  own decision 2).
 - **Succession & inheritance (Phase 0.4):** each people carries a **line rule** (who may
   inherit) and a **division rule** (how the estate divides) resolved once from its language
   kit into `culture_rules` (`sim/shared/inheritance.rs`, §8.15). `succeed_house` reads them
@@ -519,11 +552,14 @@ commands/
                                   (campaign_house_stability) + the FEUD board
                                   (campaign_get_feuds) + the KIN roster
                                   (campaign_get_house_kin, Phase 2.1) + AMBITIONS
-                                  (campaign_get_house_goals, Phase 3.1). Four of five
-                                  gauges are pure derivations of state the sim already
-                                  held; kin_power_shares/character_phrase (Phase 2.6/
-                                  2.3) live in sim::tick so they're gated by tests, not
-                                  just called from here.
+                                  (campaign_get_house_goals, Phase 3.1) + the CRISIS
+                                  (campaign_get_house_crisis, Phase 3.2-3.6 — the live
+                                  struggle + the permanent past-risings record). Four
+                                  of five gauges are pure derivations of state the sim
+                                  already held; kin_power_shares/character_phrase
+                                  (Phase 2.6/2.3) and the whole crisis engine live in
+                                  sim::tick so they're gated by tests, not just called
+                                  from here.
       province.rs                 province LAND state (campaign_province_land[_all]) +
                                   the CONTROL VERBS — the only mutating campaign
                                   commands besides campaign_advance (§5.1)
@@ -592,11 +628,15 @@ sim/                            ← organised into per-phase step folders; mod.r
   campaign/                     ← the campaign half:
       market.rs                   Market equilibrium solver (stocks → grain-eq prices)
       manufacture.rs              Shared production-chain resolver (DAG topo, labor∝pop)
-      tick/                       THE CAMPAIGN TICK SIM (~16.7k lines, by theme). See §5.
+      tick/                       THE CAMPAIGN TICK SIM (~17.2k lines, by theme). See §5.
                                   mod.rs = structs/consts/free-fns/advance()/impl Bank/…/
                                   residual impl CampaignSim; methods grouped into money/war/
-                                  disease/colonies/polis/cities/houses/production child impls
-                                  (pub(crate), `use super::*`); tests.rs = the dynamics tests
+                                  disease/colonies/polis/cities/houses/production/crisis
+                                  child impls (pub(crate), `use super::*`); crisis.rs =
+                                  Phase 3.2-3.6, the succession-crisis engine (competence/
+                                  vice, named factions, quarterly rounds, resolution,
+                                  civic intervention, the permanent record — see §5);
+                                  tests.rs = the dynamics tests
 ```
 
 ---
@@ -721,6 +761,11 @@ ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, 
                                   chosen yearly by archetype/character bias, checked
                                   yearly — READ-ONLY tracking, not yet wired to bias
                                   any decision's weights, Phase 3.1)/
+                                  ⚠ Crisis (only shown when a house has an open struggle
+                                  or a past-risings record — two named factions in their
+                                  own heraldic tincture, a round-by-round log, the heir's
+                                  recorded choice, then the permanent "past risings" list;
+                                  observation only, Phase 3.2-3.6)/
                                   🧭 Expeditions (this house's live ventures, click a
                                   row to highlight its destination province, Phase 1.3)/
                                   ⚖ Standing/⚔ Feuds/🏦 Bank/📒 Accountant
@@ -1371,3 +1416,15 @@ Three rules:
     Rivers (5) genuinely needs Köppen (4): channel width comes from mean precipitation
     along the course and ice caps must not drain. A too-loose gate fails SILENTLY —
     the pipeline still runs, it just produces a subtly wrong world.
+22. **A house crisis must always terminate.** `HouseCrisis.round` may never exceed
+    `CRISIS_ROUND_CAP`, and a house holds at most one open crisis
+    (`every_crisis_terminates`). Without this an unresolved crisis becomes the
+    permanent state of a house and the politics layer silently stops meaning anything
+    — the same failure mode rule 18 guards for feud prestige.
+23. **A forced succession must still obey the culture's `LineRule`.** Any new code
+    path that installs a head OUTSIDE the normal `succeed_house` culture-rule pick
+    (a deposition, a compromise candidate, anything future work adds) must filter
+    candidates through `heir_is_female` first — the crisis engine shipped without
+    this once and a test caught a man taking a matrilineal house's seat within the
+    hour. "Who becomes head" and "which sex may hold the house" are different
+    questions; only the former is ever up for grabs.

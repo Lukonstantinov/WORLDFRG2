@@ -7,8 +7,8 @@ import { YearChronicle } from "@ui/campaign/YearChronicle";
 import { FeudsView, HouseStandingView } from "@ui/campaign/HouseDossier";
 import { cultureFigureSVG, cultureSeed, type Occasion } from "@ui/campaign/cultureFigure";
 import { GOOD_DEFS } from "@goods";
-import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks, campaignGetExpeditions, campaignGetHouseKin, campaignGetHouseGoals } from "@bridge";
-import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief, ExpeditionView, KinBrief, GoalsBrief } from "@types";
+import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks, campaignGetExpeditions, campaignGetHouseKin, campaignGetHouseGoals, campaignGetHouseCrisis } from "@bridge";
+import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief, ExpeditionView, KinBrief, GoalsBrief, CrisisBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 
 const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
@@ -311,9 +311,10 @@ function HouseDetail({ h, onClose, onChronicle }:
   const [expeds, setExpeds] = useState<ExpeditionView[]>([]);
   const [kin, setKin] = useState<KinBrief[]>([]);
   const [goals, setGoals] = useState<GoalsBrief | null>(null);
+  const [crisis, setCrisis] = useState<CrisisBrief | null>(null);
   // Chronicle-first (§2.3 of the design): the dossier has nothing for the player to
   // DECIDE, so the primary artefact is the family's record, not its balance sheet.
-  const [view, setView] = useState<"chronicle" | "summary" | "kin" | "goals" | "standing" | "feuds" | "bank" | "ledger" | "expeditions">("chronicle");
+  const [view, setView] = useState<"chronicle" | "summary" | "kin" | "goals" | "crisis" | "standing" | "feuds" | "bank" | "ledger" | "expeditions">("chronicle");
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.house);
   const tick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
   useEffect(() => {
@@ -336,6 +337,8 @@ function HouseDetail({ h, onClose, onChronicle }:
       campaignGetHouseKin(h.idx).then((k) => { if (alive) setKin(k); }).catch(() => {});
       // Phase 3.1 · this house's ambitions, active and historical.
       campaignGetHouseGoals(h.idx).then((g) => { if (alive) setGoals(g); }).catch(() => {});
+      // Phase 3.2-3.6 · the live succession struggle (if any) + past risings.
+      campaignGetHouseCrisis(h.idx).then((c) => { if (alive) setCrisis(c); }).catch(() => {});
     }
     // Find this family's bank (if any) so we can show its balance-sheet subtab.
     if (h.owns_bank) {
@@ -422,6 +425,7 @@ function HouseDetail({ h, onClose, onChronicle }:
       <div style={{ display: "flex", gap: 4, margin: "7px 0 5px", borderBottom: "1px solid #1a2a3e", flexWrap: "wrap" }}>
         {(["chronicle", "summary", ...(kin.length > 0 ? ["kin" as const] : []),
            ...(goals && (goals.active.length > 0 || goals.history.length > 0) ? ["goals" as const] : []),
+           ...(crisis && (crisis.active || crisis.history.length > 0) ? ["crisis" as const] : []),
            ...(expeds.length > 0 ? ["expeditions" as const] : []),
            "standing", "feuds", ...(bank ? ["bank" as const] : []), "ledger"] as const).map((t) => (
           <div key={t} onClick={() => setView(t)} style={{
@@ -432,6 +436,7 @@ function HouseDetail({ h, onClose, onChronicle }:
             : t === "summary" ? "Summary"
             : t === "kin" ? `👪 Kin (${kin.length})`
             : t === "goals" ? `🎯 Ambitions${goals && goals.active.length > 0 ? ` (${goals.active.length})` : ""}`
+            : t === "crisis" ? `⚠ Crisis${crisis?.active ? ` r${crisis.active.round}/${crisis.active.round_cap}` : ""}`
             : t === "expeditions" ? `🧭 Expeditions (${expeds.length})`
             : t === "standing" ? "⚖ Standing"
             : t === "feuds" ? `⚔ Feuds${h.rivals.length > 0 ? ` (${h.rivals.length})` : ""}`
@@ -446,6 +451,8 @@ function HouseDetail({ h, onClose, onChronicle }:
         <KinTab kin={kin} />
       ) : view === "goals" ? (
         <GoalsTab goals={goals} />
+      ) : view === "crisis" ? (
+        <CrisisTab crisis={crisis} />
       ) : view === "expeditions" ? (
         <ExpeditionsTab expeds={expeds} fmt={fmt} />
       ) : view === "standing" ? (
@@ -735,6 +742,108 @@ function GoalsTab({ goals }: { goals: GoalsBrief | null }) {
               <span style={{ color: "#9ab0c8", fontSize: 10 }}>{g.what}</span>
               <span style={{ flex: 1 }} />
               <span style={{ color: "#6a86a6", fontSize: 9 }}>{g.set_year}–{g.deadline_year}</span>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+const CRISIS_OUTCOME_LABEL: Record<number, string> = { 1: "the ruler prevailed", 2: "DEPOSED", 3: "DISSOLVED" };
+const CRISIS_ACTION_LABEL: Record<number, string> = {
+  0: "conceded a holding", 1: "bought off the plot", 2: "launched a venture", 3: "stood firm",
+};
+
+/** Phase 3.2-3.6 · the succession struggle — a compact reading of
+ *  `HOUSE_POWER_STRUGGLE_VIEW.md`'s window (two named factions in their own
+ *  tinctures, a round log, the heir's choice), plus the permanent record of past
+ *  risings. There is nothing here for the player to decide (observation only, per
+ *  `HOUSE_SUCCESSION_CRISIS.md` decision 2) — every choice is the AI's. */
+function CrisisTab({ crisis }: { crisis: CrisisBrief | null }) {
+  if (!crisis || (!crisis.active && crisis.history.length === 0)) {
+    return <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>No rising on record.</div>;
+  }
+  const c = crisis.active;
+  return (
+    <div>
+      {crisis.secure_until_year > 0 && (
+        <div style={{ color: "#7fd0a0", fontSize: 10, marginBottom: 6 }}>
+          🛡 secure until {crisis.secure_until_year} — the house will not rise again so soon
+        </div>
+      )}
+      {c && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ color: "#e08a8a", fontSize: 10, marginBottom: 2 }}>
+            ⚠ SUCCESSION CRISIS · opened {c.opened_year} · round {c.round} of {c.round_cap}
+          </div>
+          <div style={{ color: "#9ab0c8", fontSize: 9, marginBottom: 4 }}>cause: {c.cause}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: c.loyalist_tint }} />
+                <span style={{ color: "#e8dcc0", fontSize: 10 }}>{c.loyalist_name}</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ color: "#cfe0f4", fontSize: 10 }}>{Math.round(c.head_support * 100)}%</span>
+              </div>
+              <div style={{ height: 5, background: "#0a1018", borderRadius: 3, marginTop: 2, overflow: "hidden" }}>
+                <div style={{ width: `${Math.round(c.head_support * 100)}%`, height: "100%", background: c.loyalist_tint }} />
+              </div>
+            </div>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: c.plot_tint }} />
+                <span style={{ color: "#e8dcc0", fontSize: 10 }}>{c.plot_name}</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ color: "#cfe0f4", fontSize: 10 }}>{Math.round(c.plot_support * 100)}%</span>
+              </div>
+              <div style={{ height: 5, background: "#0a1018", borderRadius: 3, marginTop: 2, overflow: "hidden" }}>
+                <div style={{ width: `${Math.round(c.plot_support * 100)}%`, height: "100%", background: c.plot_tint }} />
+              </div>
+            </div>
+          </div>
+          {c.plot_leader_name && (
+            <div style={{ color: "#c99", fontSize: 9, marginTop: 4 }}>◆ {c.plot_leader_name} leads the plot</div>
+          )}
+          {c.heir_choice !== 2 && (
+            <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 1 }}>
+              the heir {c.heir_choice === 0 ? "stood with the ruler" : "turned to the plot"}
+            </div>
+          )}
+          {c.rounds.length > 0 && (
+            <div style={{ marginTop: 6 }}>
+              {c.rounds.map((r, i) => (
+                <div key={i} style={{ fontSize: 9, padding: "2px 0", borderTop: "1px solid #16202c" }}>
+                  <span style={{ color: r.result > 0 ? "#7fd0a0" : r.result < 0 ? "#e08a8a" : "#7a90a8" }}>
+                    {r.result > 0 ? "✓" : r.result < 0 ? "✗" : "○"}
+                  </span>{" "}
+                  <span style={{ color: "#9ab0c8" }}>{CRISIS_ACTION_LABEL[r.action] ?? "acted"} — {r.text}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {crisis.history.length > 0 && (
+        <>
+          <div style={timelineHdr}>Past risings ({crisis.history.length})</div>
+          {crisis.history.map((r, i) => (
+            <div key={i} style={{ marginBottom: 5, fontSize: 9 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ color: "#9ab0c8" }}>{r.opened_year}–{r.closed_year}</span>
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: r.loyalist_tint }} />
+                <span style={{ color: "#cfe0f4" }}>{r.loyalist_name}</span>
+                <span style={{ color: "#6a86a6" }}>vs</span>
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: r.plot_tint }} />
+                <span style={{ color: "#cfe0f4" }}>{r.plot_name}</span>
+              </div>
+              <div style={{ color: "#7a90a8", marginTop: 1 }}>
+                opened over {r.cause} · {r.rounds} rounds · peak plot {Math.round(r.peak_plot * 100)}%
+              </div>
+              <div style={{ color: r.outcome === 1 ? "#7fd0a0" : "#e08a8a", marginTop: 1 }}>
+                {r.outcome === 1 ? "✓" : "✕"} {CRISIS_OUTCOME_LABEL[r.outcome] ?? ""}
+                {r.outcome !== 1 && r.successor ? ` — ${r.successor} takes the seat` : ""}
+              </div>
             </div>
           ))}
         </>

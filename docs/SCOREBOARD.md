@@ -9,6 +9,53 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-30 (Phase 3.2–3.6 · the crisis engine, real but cut down)
+
+Asked to implement "the last step" — the whole rest of Phase 3 — in one pass. New
+`sim/campaign/tick/crisis.rs` (~470 lines) consolidates FOUR source design docs
+(`HOUSE_POWER_AND_POLITICS.md`, `HOUSE_SUCCESSION_CRISIS.md`,
+`HOUSE_POWER_STRUGGLE_VIEW.md`, `HOUSE_FACTION_NAMING_AND_RECORD.md`) into: **3.2**
+competence/vice (5 named vices derived from character+skill, Lavish wired to a real
+wealth cost); **3.3** the crisis itself — `HouseCrisis` opens on discontent, runs a
+FIXED 4 quarterly rounds, named factions drawn from the house's own heraldic
+tincture palette (mirrors `CoatOfArms.tsx::houseColor` bit-for-bit); **3.4** the
+undecided bloc folded into each round's delta + a 5-year survivor grace period;
+**3.5** civic intervention (a severe deposition risks the seat council sequestering
+a slice of the estate); **3.6** a capped permanent `CrisisRecord`, same discipline
+as `goal_history`.
+
+**Two cuts matter most, both documented in `crisis.rs`'s own module doc**: no
+per-figure power-share ledger (`head_support`/`plot_support` are two abstract
+aggregate numbers, not a sum of named shares) and no continuously-drifting `regard`
+ladder (plot leadership reads each kin's existing static `Kin.loyalty` roll
+instead). The Split/schism outcome is deliberately not built — consistent with this
+file's own Part 3 already recommending deferring "Rupture" behind Departure.
+
+**A real bug, caught by the existing suite, not by review**: the first cut of
+deposition succession ignored the culture's `LineRule` entirely, and
+`a_matrilineal_house_is_held_by_women` (a Phase 0.4 test) immediately failed — a
+70-year run put a man at the head of an enatic house. Fixed by filtering every
+crisis successor candidate through `heir_is_female`, the same guarantee
+`succeed_house` already gives every ordinary succession.
+
+Measured on the real 60-year/30-city economy-oracle world (diffed against the
+pre-pass commit): **house wealth Gini 0.649 → 0.607** (stays in the 0.60–0.85 band,
+nearer its floor), **top-10% share 0.409 → 0.382** (already below its 0.60–0.90 band
+before this pass — an existing finding, moved further from band rather than into
+it, worth watching), **surviving houses 49 → 44**, **banks chartered 23 → 25**,
+**bank failures/century 36.67 → 33.33**, **house dissolutions/century unchanged at
+46.67** (Dissolved is "very rare" by design). Whole-lib test suite **206 passed, 0
+failed** (was 199, +7). `simulate_decades_reports_dynamics` stays bounded. `cargo
+check`/`npx tsc --noEmit` both clean.
+
+**Phase 3 (Politics) is now complete AS SCOPED** — 3.1's goals remain read-only
+tracking (not wired to bias decision weights) and 3.2–3.6's crisis engine is real
+but missing the power-share ledger and regard drift described above. Both gaps are
+recorded, not hidden. The crisis→deposition rate over a long run is UNMEASURED,
+same honest-gap pattern as 3.1's own goal achieve/fail rate.
+
+---
+
 ## Current state — 2026-07-30 (Phase 3.1 · goals, built as STRUCTURE only)
 
 Scoped Phase 3 down to **3.1 only** — the crisis engine (3.2–3.6: competence/vice,

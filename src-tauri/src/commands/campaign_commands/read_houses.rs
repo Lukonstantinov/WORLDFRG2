@@ -509,3 +509,112 @@ pub fn campaign_get_house_goals(idx: u32, db: State<'_, WorldDb>) -> Result<Goal
     let history = h.goal_history.iter().rev().take(12).map(|g| goal_brief(&sim, hi, g)).collect();
     Ok(GoalsBrief { active, history })
 }
+
+// ── Phase 3.2-3.6 · the crisis ────────────────────────────────────────────────────
+
+/// One quarterly round of an active crisis, for the struggle window.
+#[derive(Serialize)]
+pub struct CrisisRoundBrief {
+    pub action: u8,
+    pub result: i8,
+    pub head_delta: f32,
+    pub text: String,
+}
+
+/// The house's OPEN crisis, if any, for the dossier's ⚔ Crisis tab.
+#[derive(Serialize)]
+pub struct ActiveCrisisBrief {
+    pub cause: String,
+    pub round: u8,
+    pub round_cap: u8,
+    pub head_support: f32,
+    pub plot_support: f32,
+    pub undecided: f32,
+    pub loyalist_name: String,
+    pub loyalist_tint: String,
+    pub plot_name: String,
+    pub plot_tint: String,
+    pub plot_leader_name: String,
+    pub heir_choice: u8,
+    pub rounds: Vec<CrisisRoundBrief>,
+    pub opened_year: u32,
+}
+
+/// One closed crisis from the permanent record, for the "past risings" list.
+#[derive(Serialize)]
+pub struct CrisisRecordBrief {
+    pub opened_year: u32,
+    pub closed_year: u32,
+    pub cause: String,
+    pub loyalist_name: String,
+    pub loyalist_tint: String,
+    pub plot_name: String,
+    pub plot_tint: String,
+    pub rounds: u8,
+    pub peak_plot: f32,
+    /// 1 prevailed · 2 deposed · 3 dissolved.
+    pub outcome: u8,
+    pub successor: String,
+}
+
+#[derive(Serialize)]
+pub struct CrisisBrief {
+    pub active: Option<ActiveCrisisBrief>,
+    /// Most recent first.
+    pub history: Vec<CrisisRecordBrief>,
+    /// If secure (past any active crisis and its own grace period), the year the
+    /// house becomes eligible for a new crisis again — 0 if not currently immune.
+    pub secure_until_year: u32,
+}
+
+fn crisis_cause_label(cause: u8) -> &'static str {
+    match cause {
+        0 => "years of falling funds",
+        1 => "a run of failed ambitions",
+        2 => "the head's own vice",
+        _ => "a hostile kinsman's discontent",
+    }
+}
+
+/// This house's crisis state — the live struggle (if any) plus its permanent
+/// record of past risings — for the dossier's ⚔ Crisis tab.
+#[tauri::command]
+pub fn campaign_get_house_crisis(idx: u32, db: State<'_, WorldDb>) -> Result<CrisisBrief, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let empty = || CrisisBrief { active: None, history: vec![], secure_until_year: 0 };
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(empty()) };
+    let hi = idx as usize;
+    let Some(h) = sim.houses.get(hi) else { return Ok(empty()) };
+
+    let active = h.crisis.as_ref().map(|c| {
+        let plot_leader_name = if c.plot_leader >= 0 {
+            h.kin.get(c.plot_leader as usize).map(|k| k.name.clone()).unwrap_or_default()
+        } else { String::new() };
+        let head_support = c.head_support;
+        let plot_support = c.plot_support;
+        ActiveCrisisBrief {
+            cause: crisis_cause_label(c.cause).into(),
+            round: c.round, round_cap: crate::sim::tick::CRISIS_ROUND_CAP,
+            head_support, plot_support,
+            undecided: (1.0 - head_support - plot_support).max(0.0),
+            loyalist_name: c.loyalist_name.clone(), loyalist_tint: c.loyalist_tint.clone(),
+            plot_name: c.plot_name.clone(), plot_tint: c.plot_tint.clone(),
+            plot_leader_name, heir_choice: c.heir_choice,
+            rounds: c.rounds.iter().map(|r| CrisisRoundBrief {
+                action: r.action, result: r.result, head_delta: r.head_delta, text: r.text.clone(),
+            }).collect(),
+            opened_year: c.opened_tick / TICKS_PER_YEAR,
+        }
+    });
+    let history = h.crisis_history.iter().rev().map(|r| CrisisRecordBrief {
+        opened_year: r.opened_tick / TICKS_PER_YEAR, closed_year: r.closed_tick / TICKS_PER_YEAR,
+        cause: crisis_cause_label(r.cause).into(),
+        loyalist_name: r.loyalist_name.clone(), loyalist_tint: r.loyalist_tint.clone(),
+        plot_name: r.plot_name.clone(), plot_tint: r.plot_tint.clone(),
+        rounds: r.rounds, peak_plot: r.peak_plot, outcome: r.outcome, successor: r.successor.clone(),
+    }).collect();
+    let secure_until_year = if h.crisis.is_none() && h.crisis_immune_until > sim.tick {
+        h.crisis_immune_until / TICKS_PER_YEAR
+    } else { 0 };
+    Ok(CrisisBrief { active, history, secure_until_year })
+}
