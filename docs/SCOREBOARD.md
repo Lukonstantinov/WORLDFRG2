@@ -22,8 +22,10 @@ scoreboard whose history is rewritten cannot show a regression.
 | Economy: grain price CV across cities | 2.10 | `ECON_SPATIAL_CV_FLOOR` = 0.01 | ⚠️ far above band (0.20–0.40) |
 | Economy: rank-size (Zipf) slope | −0.41 | band [−3.0, −0.15] | ⚠️ flatter than −0.8…−1.2 |
 | Economy: urban share drift (60 yr) | 0.100 → **0.997** | — | ❌ countryside empties completely |
-| Economy: house wealth Gini | 0.828 | `ECON_GINI_FLOOR` = 0.15 | ✅ in historical band (0.60–0.85) |
-| Economy: house dissolutions / century | 312 | — | ⚠️ needs a denominator to interpret |
+| Economy: house dissolutions / century | **10.0** (was 312) | — | ⚠️ superseded — use lifespan below |
+| **Economy: mean firm lifespan** | **~51–101 yr** (was ~12) | `econ_diagnose_house_turnover` | ⚠️ in band (30–90) but the RANGE is the determinism defect |
+| Economy: house wealth Gini | **0.853** (was 0.828) | `ECON_GINI_FLOOR` = 0.15 | ❌ **just left the 0.60–0.85 band** — the cost of fixing turnover |
+| Economy: top-10% wealth share | **0.809** (was 0.712) | — | ⚠️ in band (0.60–0.90), rising |
 | Dynamics: sustained richest house | 154 045 | `late_max < 1e6` | ✅ was 297 748 before the feud rework |
 | Dynamics: peak house wealth | 370 527 | finite + bounded | ⚠️ still an order above the "no 100k" ideal |
 | **Province land layer** | **unmeasured by either oracle** | own tests only | ⚠️ see below |
@@ -116,6 +118,52 @@ the `#[ignore]` from `econ_scorecard_is_deterministic`.
 
 ---
 
+## Phase 0.1 · house turnover — diagnosed, fixed, and the cost measured
+
+**The finding.** A house was born with `wealth: 1.0` and a two-to-three vessel fleet
+costing ~0.70–1.05/month. That is ~1.4 months of runway at birth, so it went negative in
+its second month, `update_solvency` ran its twelve-month clock, and it died at ≈13.4
+months. Measured median age at death: **1.1 years** — the arithmetic to two significant
+figures. **73% of all dissolutions were houses that never traded at all.** The
+`dissolutions/century` metric was therefore counting *stillbirths, not failures*.
+
+**My hypothesis was wrong.** I predicted overextension from ambition, i.e. a negative
+correlation between age at death and committed upkeep. Measured: **+0.802** — houses that
+committed more upkeep lived *longer*. The fatal commitment was the founding endowment, not
+accumulated ambition.
+
+**The fix.** Not a bigger constant. `maybe_found_house` already requires a guild at the
+hub, so the seed capital is taken **from that guild** — a family separating out with its
+share, as it historically did. Three properties: no money is created; a guild too poor to
+endow a viable family cannot spawn one (churn stopped at source); and the seed scales with
+how rich the local trade actually is.
+
+**Result:** mean firm lifespan **~12 yr → ~51–101 yr** (band 30–90); dissolutions/century
+312 → 10.
+
+**Two things this exposed, both worth more than the fix:**
+
+1. **`dissolutions/century` is the wrong metric.** It scales with how many houses are
+   standing, so the same mortality reads differently in a 20-house and a 50-house world.
+   And a 60-year run cannot observe a 90-year lifespan — the survivors are right-censored.
+   The correct estimator is a hazard over exposure: `deaths ÷ house-years lived`, using the
+   living houses' time instead of discarding it. That is what the lifespan row above reports.
+
+2. **The determinism defect blocks further tuning.** Three runs of the same test on the
+   same binary gave **11, 11, 6** deaths and lifespans of **51.1, 51.1, 101.2 yr** — a 2×
+   swing straddling the band boundary. Turnover cannot be tuned to a band whose measurement
+   moves by 2× between runs, so `econ_scorecard_is_deterministic` is now a *blocker*, not a
+   backlog item.
+
+**The cost, measured: `HOUSE_MASTER_PLAN`'s open risk was real.** Wealth Gini rose
+0.828 → **0.853**, just outside the 0.60–0.85 band, and the top-10% share rose
+0.712 → 0.809. Houses dying young *was* partly load-bearing: it was destroying wealth in an
+economy that compounds at 1.5%/yr with no other brake. So the two anomalies were **in
+tension, not one bug**, and the phase boundary in that plan is wrong — Phase 0.2 needs the
+Phase 3 crisis layer as its replacement brake, and the two must be co-tuned.
+
+---
+
 ## The province land layer is unmeasured by both oracles
 
 `province_land_pass` (FIX_PLAN B1) closes the world↔campaign feedback edge — a
@@ -163,5 +211,6 @@ subsystem is one you cannot have an opinion about.
 |---|---|---|---|---|---|---|
 | 2026-07-29 | `936a8a3`+ | 66.3% | 29.1% | 159 | 0 | Economy oracle added; CI added; scoreboard created |
 | 2026-07-29 | *this* | 66.3% | 29.1% | 159 | 0 | Harness calibrated to real campaign start; LOD sampler fixed; tick determinism defect found |
+| 2026-07-30 | *this* | 66.3% | 29.1% | 165 | 0 | Phase 0.1: firm lifespan ~12 → ~51–101 yr (seed capital from the parent guild); Gini 0.828 → 0.853 (left band — measured cost); determinism defect promoted to a blocker |
 | 2026-07-29 | *this* | 66.3% | 29.1% | 165 | 0 | Feuds elaborated (cause/stage/ending); province LAND state + B1 feedback edge; sustained richest 297 748 → 154 045; Gini 0.771 → 0.828 |
 | — | `d53fdc9` | 66.2% | 29.0% | — | 0 | FIX_PLAN baseline |

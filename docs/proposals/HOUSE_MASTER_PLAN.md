@@ -231,7 +231,28 @@ contains the two open defects already on the scoreboard.
 
 | # | Step | Gate |
 |---|---|---|
-| 0.1 | **Diagnose house turnover.** Instrument dissolutions by cause (debt window / upkeep at zero wealth / early surcharge / never-viable spawns). Write the finding down even if no code changes. | A documented cause breakdown. Per §2.4 a diagnosis is a complete task. |
+> ## ⚠ PHASE 0.1 AND 0.2 ARE DONE, AND THEY CHANGED THIS PLAN
+>
+> Measured (see `docs/SCOREBOARD.md` for the full write-up):
+> - The cause was **the founding endowment**, not ambition: `wealth: 1.0` plus a
+>   2–3 vessel fleet = ~1.4 months of runway at birth → dead at ≈13.4 months. Measured
+>   median age at death 1.1 yr. **73% of dissolutions were houses that never traded.**
+> - My overextension hypothesis was **refuted**: corr(age, committed upkeep) = **+0.802**.
+> - Fixed by taking seed capital **from the parent guild** (which `maybe_found_house`
+>   already requires). Lifespan **~12 yr → ~51–101 yr**.
+> - **`dissolutions/century` was the wrong metric** — stock-dependent and censored. Use
+>   the hazard estimator `deaths ÷ house-years`.
+> - **The open risk in Part E.2 was real.** Gini 0.828 → **0.853**, out of band. Houses
+>   dying young was partly load-bearing. The anomalies are **in tension, not one bug**, so
+>   **0.2 must be co-tuned with the Phase 3 crisis layer** — the phase boundary below is
+>   wrong as drawn.
+> - **0.3 (determinism) is now a BLOCKER, not a backlog item**: three runs of the same
+>   test gave lifespans of 51.1, 51.1 and 101.2 yr. Nothing here can be tuned to a band
+>   until that is fixed.
+>
+> **Revised order: 0.3 (determinism) → finish 0.2 with Phase 3 → 0.4.**
+
+| 0.1 | ~~**Diagnose house turnover.**~~ **DONE** Instrument dissolutions by cause (debt window / upkeep at zero wealth / early surcharge / never-viable spawns). Write the finding down even if no code changes. | A documented cause breakdown. Per §2.4 a diagnosis is a complete task. |
 | 0.2 | **Fix turnover** to land inside 1–3 generations. | `econ_` house dissolutions/century moves from ~312 toward **33–100**; Gini stays in 0.60–0.85; dynamics run still shows turnover (houses dying is good — 12-year houses are not) |
 | 0.3 | **Fix tick determinism.** Audit every hash accumulator in `tick/`, sort by key before folding. | `econ_scorecard_is_deterministic` un-ignored and passing; `simulate_decades_reports_dynamics` bit-identical at each step |
 | 0.4 | **Inheritance rule per culture** (partible / impartible). | dynamics bounded; measurably different fragmentation between the two rules — if it makes no difference the rule isn't wired to anything |

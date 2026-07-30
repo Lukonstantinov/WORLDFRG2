@@ -658,6 +658,19 @@ const BAILO_UPKEEP: f32 = 0.6; // monthly, ×city size
 /// The concession lane home from a Bailo pays only a token toll (extremely low, not free).
 const BAILO_CONCESSION_TOLL: f32 = 0.10; // ×the normal tax rate
 
+// ── House FOUNDING capital (Phase 0.1) ───────────────────────────────────────
+// A new family separates out of its city's guild and takes a share of that guild's
+// capital with it. Sized so it can survive its own first year: its initial fleet costs
+// up to 3·SHIP_COST·FLEET_UPKEEP_FRAC ≈ 1.05/month, and `update_solvency` allows
+// twelve months in the red, so anything under ~13 is a house born to die.
+/// Share of the parent guild's wealth a separating family takes.
+const HOUSE_SEED_GUILD_SHARE: f32 = 0.18;
+/// Below this the guild is too poor to endow a viable family — no house is founded.
+/// This is the brake that stops stillborn spawn churn at its source.
+const HOUSE_SEED_MIN: f32 = 26.0;
+/// Ceiling, so a fabulously rich guild does not mint an instant great house.
+const HOUSE_SEED_CAP_MAX: f32 = 320.0;
+
 // ── House archetypes ────────────────────────────────────────────────────────
 const ARCH_SPECIALTY: u8 = 0; // cheaper freight + fatter margin on specialty goods
 const ARCH_FLEET: u8 = 1;     // safer voyages, cheaper ships, longer reach

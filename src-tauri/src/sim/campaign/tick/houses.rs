@@ -2736,6 +2736,32 @@ impl CampaignSim {
         let spec: Vec<usize> = gi.into_iter().filter(|&g| self.hubs[hub].production[g] > 0.0)
             .take(2).collect();
         if spec.is_empty() { return; }
+        // ── SEED CAPITAL (Phase 0.1 fix) ─────────────────────────────────────
+        // A house used to be founded with `wealth: 1.0` AND a two-or-three vessel
+        // fleet. The arithmetic was fatal at birth: 2 hulls cost
+        // 2·SHIP_COST·FLEET_UPKEEP_FRAC = 0.70/month, so 1.0 of capital was ~1.4
+        // months of runway. The house went negative in its second month,
+        // `update_solvency` started its twelve-month clock, and it died at ≈13.4
+        // months. The measured median age at death was 1.1 years — the arithmetic to
+        // two significant figures. 73% of all dissolutions were houses that never
+        // traded at all, which is why the scorecard read ~307 dissolutions/century
+        // against Greif's 30–90-year firm: the metric was counting stillbirths, not
+        // failures. See `econ_diagnose_house_turnover`.
+        //
+        // The fix is not a bigger constant. `maybe_found_house` already REQUIRES a
+        // guild at the hub — a family separating out of it — so the capital comes
+        // FROM that guild, exactly as it historically did. Three properties follow:
+        // no money is created; a poor guild cannot spawn a house it can't endow (the
+        // churn is stopped at its source); and the seed is automatically scaled to
+        // how rich the local trade actually is.
+        let guild_i = self.houses.iter().position(|g| !g.defunct && g.is_guild
+            && g.hub as usize == hub);
+        let Some(gi_seed) = guild_i else { return };
+        let seed_cap = (self.houses[gi_seed].wealth * HOUSE_SEED_GUILD_SHARE)
+            .clamp(0.0, HOUSE_SEED_CAP_MAX);
+        // Too poor to launch a family that can survive its own first year → no house.
+        if seed_cap < HOUSE_SEED_MIN { return; }
+        self.houses[gi_seed].wealth -= seed_cap;
         let name = self.unique_family_name_for(hub, tick as u64 ^ 0xF00D);
         let head = self.head_name_for(hub, &name, tick as u64 ^ 0x1234);
         self.journal.push(JournalEntry {
@@ -2751,10 +2777,10 @@ impl CampaignSim {
         let (fleet_sea, fleet_river, fleet_caravan) =
             Self::initial_fleet(self.hubs[hub].coastal, false);
         self.houses.push(House {
-            name, hub: hub as u32, wealth: 1.0, prestige: 0.0, spec,
+            name, hub: hub as u32, wealth: seed_cap, prestige: 0.0, spec,
             monopoly: vec![], rivals: vec![], generation: 1,
             events: vec![founded], good_profit: Vec::new(), mono50: Vec::new(),
-            mono_ever: Vec::new(), dominant_seat: false, prev_wealth: 1.0, worst_loss: 0.0,
+            mono_ever: Vec::new(), dominant_seat: false, prev_wealth: seed_cap, worst_loss: 0.0,
             fleet_sea, fleet_river, fleet_caravan,
             head_name: head, head_since: tick,
             head_lifespan: self.roll_lifespan(hub as u64 ^ 0x7E),

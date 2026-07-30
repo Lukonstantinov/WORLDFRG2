@@ -640,3 +640,201 @@ fn econ_statistics_are_correct() {
     assert!((pearson(&xs, &ys) - 1.0).abs() < 1e-4, "perfect correlation must read 1");
     assert!((ols_slope(&xs, &ys) - 2.0).abs() < 1e-4, "slope must recover 2");
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  PHASE 0.1 · WHY DO HOUSES DIE SO YOUNG?  (diagnosis, not a gate)
+//
+//  The scorecard prints ~312 house dissolutions per century against Greif's 1–3
+//  generations (30–90 years). With ~37 houses surviving a 60-year run that implies a
+//  mean firm lifespan near TWELVE years — 2.5–7× too short. Every house design in
+//  `docs/proposals/HOUSE_*.md` assumes decades, so this is the blocking finding.
+//
+//  This harness answers the question the aggregate cannot: WHICH houses die, at what
+//  age, and had they ever been real firms? Per CLAUDE.md §2.4 a diagnosis is a complete
+//  task, so this is written to be read, not to pass.
+//
+//  Run: cargo test --lib econ_diagnose_house_turnover -- --ignored --nocapture
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// One dead house, as the diagnosis sees it.
+struct DeadHouse {
+    age_years: f32,
+    /// Peak wealth it ever reached — separates a failed firm from a stillborn one.
+    peak_wealth: f32,
+    /// Peak monthly upkeep it had committed (fleet + warehouse capacity + estates).
+    /// The overextension hypothesis predicts this correlates with dying young.
+    peak_upkeep: f32,
+    /// Did it ever move goods? A house that never traded was never viable.
+    ever_traded: bool,
+    is_guild: bool,
+}
+
+#[test]
+#[ignore]
+fn econ_diagnose_house_turnover() {
+    let mut s = reference_world();
+    let n0 = s.houses.len();
+    // Track, per house index, the peak figures while it is alive. Houses are appended
+    // and never removed (defunct is a flag), so index is a stable identity.
+    let mut peak_wealth: Vec<f32> = vec![f32::MIN; n0];
+    let mut peak_upkeep: Vec<f32> = vec![0.0; n0];
+    let mut ever_traded: Vec<bool> = vec![false; n0];
+    let mut born_tick: Vec<u32> = vec![0; n0];
+    let mut was_defunct: Vec<bool> = vec![false; n0];
+    let mut dead: Vec<DeadHouse> = Vec::new();
+    let mut founded = 0usize;
+
+    // Sample monthly so a house that lives one year is still observed.
+    let months = RUN_YEARS * 12;
+    for _ in 0..months {
+        s.advance(30);
+        // Grow the trackers for houses founded since the last sample.
+        while peak_wealth.len() < s.houses.len() {
+            peak_wealth.push(f32::MIN);
+            peak_upkeep.push(0.0);
+            ever_traded.push(false);
+            born_tick.push(s.tick);
+            was_defunct.push(false);
+            founded += 1;
+        }
+        for hi in 0..s.houses.len() {
+            let h = &s.houses[hi];
+            if h.defunct {
+                // Newly dead → record it once.
+                if !was_defunct[hi] {
+                    was_defunct[hi] = true;
+                    dead.push(DeadHouse {
+                        age_years: (s.tick.saturating_sub(born_tick[hi])) as f32
+                            / TICKS_PER_YEAR as f32,
+                        peak_wealth: peak_wealth[hi],
+                        peak_upkeep: peak_upkeep[hi],
+                        ever_traded: ever_traded[hi],
+                        is_guild: h.is_guild,
+                    });
+                }
+                continue;
+            }
+            peak_wealth[hi] = peak_wealth[hi].max(h.wealth);
+            if h.volume > 0.01 { ever_traded[hi] = true; }
+            // The committed monthly burn — the same terms `apply_wealth_sinks` and
+            // `manage_fleets` actually charge, which is what the overextension
+            // hypothesis is about.
+            let fleet = (h.fleet_sea + h.fleet_river + h.fleet_caravan) as f32
+                * SHIP_COST * FLEET_UPKEEP_FRAC;
+            let wh: f32 = s.warehouses.iter()
+                .filter(|w| w.owner == hi as i32)
+                .map(|w| CAP_UPKEEP * w.capacity * s.city_size_factor(w.hub as usize))
+                .sum();
+            let est = s.hubs.iter()
+                .filter(|x| x.is_estate && x.owner_house == hi as i32).count() as f32
+                * UPKEEP_WAREHOUSE_BASE * UPKEEP_ESTATE_FRAC;
+            peak_upkeep[hi] = peak_upkeep[hi].max(fleet + wh + est);
+        }
+    }
+
+    let centuries = RUN_YEARS as f32 / 100.0;
+    let alive = s.houses.iter().filter(|h| !h.defunct).count();
+    // ── The RIGHT estimator ────────────────────────────────────────────────────
+    // "Dissolutions per century" is the wrong metric to tune against: it scales with
+    // how many houses are standing, so the same mortality reads differently in a
+    // 20-house world and a 50-house one. And a 60-year run cannot directly observe a
+    // 30–90-year lifespan — most houses are still alive, i.e. RIGHT-CENSORED.
+    //
+    // The censoring-correct estimator is a hazard rate over EXPOSURE: total
+    // house-years actually lived (by the dead AND the living), against deaths.
+    //   hazard = deaths / house-years        implied mean lifespan = 1 / hazard
+    // That is stock-independent and uses the survivors' time instead of discarding it.
+    let mut exposure_years = 0.0f32;
+    for hi in 0..s.houses.len() {
+        if s.houses[hi].is_guild { continue; }
+        let end = if s.houses[hi].defunct {
+            // Approximate the death tick by the recorded age; good enough for a rate.
+            born_tick[hi] as f32
+                + dead.iter().map(|d| d.age_years).sum::<f32>() / dead.len().max(1) as f32
+                    * TICKS_PER_YEAR as f32
+        } else { s.tick as f32 };
+        exposure_years += ((end - born_tick[hi] as f32) / TICKS_PER_YEAR as f32).max(0.0);
+    }
+    let private_dead: Vec<&DeadHouse> = dead.iter().filter(|d| !d.is_guild).collect();
+    let stillborn: Vec<&&DeadHouse> = private_dead.iter().filter(|d| !d.ever_traded).collect();
+    let real: Vec<&&DeadHouse> = private_dead.iter().filter(|d| d.ever_traded).collect();
+
+    let mean = |v: &[&&DeadHouse], f: &dyn Fn(&DeadHouse) -> f32| -> f32 {
+        if v.is_empty() { return 0.0; }
+        v.iter().map(|d| f(d)).sum::<f32>() / v.len() as f32
+    };
+    let median_age = |v: &mut Vec<&&DeadHouse>| -> f32 {
+        if v.is_empty() { return 0.0; }
+        v.sort_by(|a, b| a.age_years.partial_cmp(&b.age_years).unwrap());
+        v[v.len() / 2].age_years
+    };
+
+    println!();
+    println!("═══ Phase 0.1 · why houses die young ({RUN_YEARS}-year reference world) ═══");
+    println!("  founded during the run      {:>8}", founded);
+    println!("  alive at the end            {:>8}", alive);
+    println!("  died (all)                  {:>8}", dead.len());
+    println!("  died (private houses)       {:>8}", private_dead.len());
+    println!("  dissolutions / century      {:>8.1}     (stock-dependent — see below)",
+             private_dead.len() as f32 / centuries);
+    println!("  house-years of exposure     {:>8.0}", exposure_years);
+    if exposure_years > 1.0 && !private_dead.is_empty() {
+        let hazard = private_dead.len() as f32 / exposure_years;
+        println!("  ⇒ MEAN FIRM LIFESPAN        {:>8.1} yr   band: 30–90 (Greif)",
+                 1.0 / hazard);
+        // Excluding stillbirths: the lifespan of houses that were ever real firms.
+        if !real.is_empty() {
+            let h2 = real.len() as f32 / exposure_years;
+            println!("    excluding stillbirths     {:>8.1} yr   ← the honest figure",
+                     1.0 / h2);
+        }
+    } else {
+        println!("  ⇒ MEAN FIRM LIFESPAN         no deaths — mortality is effectively zero");
+    }
+    println!();
+    println!("  ── THE KEY SPLIT ──────────────────────────────────────────────────");
+    println!("  NEVER TRADED (stillborn)    {:>8}   {:>5.1}% of deaths",
+             stillborn.len(),
+             100.0 * stillborn.len() as f32 / private_dead.len().max(1) as f32);
+    println!("  had traded (real failures)  {:>8}   {:>5.1}% of deaths",
+             real.len(),
+             100.0 * real.len() as f32 / private_dead.len().max(1) as f32);
+    println!();
+    {
+        let mut sb = stillborn.clone();
+        let mut rl = real.clone();
+        println!("  ── AGE AT DEATH (years) ───────────────────────────────────────────");
+        println!("  stillborn   mean {:>6.1}   median {:>6.1}",
+                 mean(&stillborn, &|d| d.age_years), median_age(&mut sb));
+        println!("  real firms  mean {:>6.1}   median {:>6.1}   ← THIS is the lifespan",
+                 mean(&real, &|d| d.age_years), median_age(&mut rl));
+        println!("              band 30–90 (Greif; Mueller & Lane)");
+    }
+    println!();
+    println!("  ── OVEREXTENSION HYPOTHESIS ───────────────────────────────────────");
+    println!("  real firms: peak wealth   mean {:>10.1}", mean(&real, &|d| d.peak_wealth));
+    println!("  real firms: peak upkeep   mean {:>10.2}  (monthly, committed)",
+             mean(&real, &|d| d.peak_upkeep));
+    // If dying young is overextension, age at death should fall as committed upkeep
+    // rises — i.e. a NEGATIVE correlation. A flat correlation refutes it.
+    if real.len() >= 5 {
+        let ages: Vec<f32> = real.iter().map(|d| d.age_years).collect();
+        let ups: Vec<f32> = real.iter().map(|d| d.peak_upkeep).collect();
+        let wls: Vec<f32> = real.iter().map(|d| d.peak_wealth).collect();
+        println!("  corr(age, peak upkeep)    {:>10.3}  negative ⇒ overextension kills",
+                 pearson(&ages, &ups));
+        println!("  corr(age, peak wealth)    {:>10.3}  positive ⇒ the rich live longer",
+                 pearson(&ages, &wls));
+    } else {
+        println!("  too few real failures to correlate ({} < 5)", real.len());
+    }
+    println!();
+    println!("  Every dissolution in the model comes from ONE site: update_solvency's");
+    println!("  \"a private house in the red for a full year is bankrupt\". There is no");
+    println!("  other death. So the question is only ever WHY wealth went negative.");
+    println!("═══════════════════════════════════════════════════════════════════════");
+    println!();
+
+    // Diagnostic only — it must not fail the build, per §2.5's printed-metric rule.
+    assert!(dead.len() + alive > 0, "the run produced no houses at all");
+}
