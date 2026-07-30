@@ -874,10 +874,14 @@ impl CampaignSim {
                             LedgerAcc::add_city(&mut self.house_ledger[oi].export_tax_by_city, a as u32, export_tax);
                             LedgerAcc::add_city(&mut self.house_ledger[oi].import_tax_by_city, b as u32, import_tax);
                         }
-                        // Track cumulative profit per good (for "most profitable resources").
+                        // Track cumulative profit + volume per good (the trade ledger:
+                        // "most profitable resources" + "goods moved the most").
                         let gp = &mut self.houses[oi].good_profit;
                         if gp.len() <= g { gp.resize(g + 1, 0.0); }
                         gp[g] += profit;
+                        let gv = &mut self.houses[oi].good_volume;
+                        if gv.len() <= g { gv.resize(g + 1, 0.0); }
+                        gv[g] += amount;
                         // Build the holder's trade ties at both ends (for offices).
                         self.bump_trade_at(oi, a, amount);
                         self.bump_trade_at(oi, b, amount);
@@ -988,6 +992,9 @@ impl CampaignSim {
         let gp = &mut self.houses[owner].good_profit;
         if gp.len() <= g { gp.resize(g + 1, 0.0); }
         gp[g] += profit;
+        let gv = &mut self.houses[owner].good_volume;
+        if gv.len() <= g { gv.resize(g + 1, 0.0); }
+        gv[g] += amount;
         // Diagnostics + throughput at both ends (house class).
         self.diag_shipments += 1;
         self.diag_by_house += 1;

@@ -35,7 +35,7 @@
         House {
             name: format!("House{hub}"), hub, wealth: 50.0, prestige: 0.0, spec,
             monopoly: vec![], rivals: vec![], generation: 1, events: vec![],
-            good_profit: vec![], mono50: vec![], mono_ever: vec![], dominant_seat: false,
+            good_profit: vec![], good_volume: vec![], mono50: vec![], mono_ever: vec![], dominant_seat: false,
             prev_wealth: 50.0, worst_loss: 0.0, fleet_sea, fleet_river: 0, fleet_caravan: 0,
             head_name: "Head".into(), head_since: 0, head_lifespan: 100_000, founded_tick: 0,
             political_power: 0.0, volume: 0.0, defunct: false, archetype: 1, charters: vec![],

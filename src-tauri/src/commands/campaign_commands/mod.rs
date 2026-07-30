@@ -1473,6 +1473,19 @@ pub struct HouseBrief {
     /// it was reached ("the finest hour"), shown as a fact rather than an event.
     #[serde(default)] pub peak_wealth: f32,
     #[serde(default)] pub peak_wealth_tick: u32,
+    /// The house's per-good trade ledger — the goods it has moved the most, richest
+    /// first by cumulative VOLUME, each carrying the amount shipped and the profit it
+    /// earned. Drives the Compare window's "goods traded most / most profitable trade"
+    /// with real numbers instead of just a name list. Up to 6 rows.
+    #[serde(default)] pub goods_ledger: Vec<GoodTradeRow>,
+}
+
+/// One good in a house's trade ledger: how much it has shipped and what it earned.
+#[derive(Serialize, Clone)]
+pub struct GoodTradeRow {
+    pub good: String,
+    pub volume: f32,  // cumulative amount shipped (grain-eq units)
+    pub profit: f32,  // cumulative profit earned on that good
 }
 
 /// One city a house operates in, for the influence-ranked "Active in" list.
@@ -1691,6 +1704,23 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
             head_female: h.head_female,
             peak_wealth: h.peak_wealth,
             peak_wealth_tick: h.peak_wealth_tick,
+            goods_ledger: {
+                // The goods this house has moved the most (by cumulative volume),
+                // each paired with the amount shipped and the profit it earned. The
+                // frontend reads "most traded" off the order and "most profitable"
+                // off the max profit — both with real numbers, not just a name.
+                let mut rows: Vec<GoodTradeRow> = h.good_volume.iter().enumerate()
+                    .filter(|(_, &v)| v > 0.0)
+                    .map(|(g, &v)| GoodTradeRow {
+                        good: gname(g),
+                        volume: v,
+                        profit: h.good_profit.get(g).copied().unwrap_or(0.0),
+                    })
+                    .collect();
+                rows.sort_by(|a, b| b.volume.partial_cmp(&a.volume).unwrap_or(std::cmp::Ordering::Equal));
+                rows.truncate(6);
+                rows
+            },
         }
     }).collect();
     // Active first, then richest first.

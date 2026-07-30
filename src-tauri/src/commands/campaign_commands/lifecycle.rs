@@ -669,6 +669,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
             generation: 1,
             events: vec![founded],
             good_profit: Vec::new(),
+            good_volume: Vec::new(),
             mono50: Vec::new(),
             mono_ever: Vec::new(),
             dominant_seat: false,

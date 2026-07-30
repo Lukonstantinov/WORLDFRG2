@@ -1305,7 +1305,7 @@ impl CampaignSim {
         self.houses.push(House {
             name, hub: h as u32, wealth: 5.0, prestige: 0.2, spec,
             monopoly: vec![], rivals: vec![], generation: 1,
-            events: vec![founded], good_profit: Vec::new(), mono50: Vec::new(),
+            events: vec![founded], good_profit: Vec::new(), good_volume: Vec::new(), mono50: Vec::new(),
             mono_ever: Vec::new(), dominant_seat: true, prev_wealth: 5.0, worst_loss: 0.0,
             fleet_sea, fleet_river, fleet_caravan,
             head_name: head, head_since: tick,
@@ -2205,7 +2205,7 @@ impl CampaignSim {
         self.houses.push(House {
             name, hub: h as u32, wealth: (pop / 1000.0).max(1.0), prestige: 0.2,
             spec: vec![], monopoly: vec![], rivals: vec![], generation: 1,
-            events: vec![founded], good_profit: Vec::new(), mono50: Vec::new(),
+            events: vec![founded], good_profit: Vec::new(), good_volume: Vec::new(), mono50: Vec::new(),
             mono_ever: Vec::new(), dominant_seat: false, prev_wealth: 0.0, worst_loss: 0.0,
             fleet_sea, fleet_river, fleet_caravan,
             head_name: format!("Guildmaster of {}", self.hubs[h].name),
@@ -3207,7 +3207,7 @@ impl CampaignSim {
             self.houses.push(House {
                 name: cname.clone(), hub: hub as u32, wealth: share, prestige: 0.05,
                 spec: spec.clone(), monopoly: vec![], rivals: vec![], generation: gen,
-                events: vec![founded], good_profit: Vec::new(), mono50: Vec::new(),
+                events: vec![founded], good_profit: Vec::new(), good_volume: Vec::new(), mono50: Vec::new(),
                 mono_ever: Vec::new(), dominant_seat: false, prev_wealth: share, worst_loss: 0.0,
                 // A co-heir's share is CAPITAL, not ships: the vessels stay with the
                 // parent firm. Founding a house with hulls it cannot crew is exactly the
@@ -3286,7 +3286,7 @@ impl CampaignSim {
         self.houses.push(House {
             name: bname.clone(), hub: dest as u32, wealth: split, prestige: 0.1,
             spec, monopoly: vec![], rivals: vec![hi], generation: 1,
-            events: vec![founded], good_profit: Vec::new(), mono50: Vec::new(),
+            events: vec![founded], good_profit: Vec::new(), good_volume: Vec::new(), mono50: Vec::new(),
             mono_ever: Vec::new(), dominant_seat: false, prev_wealth: split, worst_loss: 0.0,
             // A cadet branch is endowed with CAPITAL, not with hulls. It used to be
             // handed `initial_fleet`'s two or three vessels it had never paid for and
@@ -3734,7 +3734,7 @@ impl CampaignSim {
         self.houses.push(House {
             name, hub: hub as u32, wealth: seed_cap, prestige: 0.0, spec,
             monopoly: vec![], rivals: vec![], generation: 1,
-            events: vec![founded], good_profit: Vec::new(), mono50: Vec::new(),
+            events: vec![founded], good_profit: Vec::new(), good_volume: Vec::new(), mono50: Vec::new(),
             mono_ever: Vec::new(), dominant_seat: false, prev_wealth: seed_cap, worst_loss: 0.0,
             fleet_sea, fleet_river, fleet_caravan,
             head_name: head, head_since: tick,

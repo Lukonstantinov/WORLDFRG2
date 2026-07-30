@@ -2178,6 +2178,10 @@ pub struct House {
     #[serde(default)] pub events: Vec<HouseEvent>,
     /// Cumulative profit earned per good index — for "most profitable resources".
     #[serde(default)] pub good_profit: Vec<f32>,
+    /// Cumulative VOLUME shipped per good index — the goods this house moves the most,
+    /// paired with `good_profit` for the dossier/compare "trade ledger" (amounts seen
+    /// + most profitable). Credited beside `good_profit` at every trade site.
+    #[serde(default)] pub good_volume: Vec<f32>,
     /// Goods the house currently HOLDS a monopoly on (hysteresis: entered at
     /// >=50% share, only released when share falls below ~10%). Prevents the
     /// "won a monopoly" spam from share oscillating around the 50% line.

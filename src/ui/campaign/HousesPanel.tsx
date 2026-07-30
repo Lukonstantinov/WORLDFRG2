@@ -9,7 +9,7 @@ import { HouseCompareWindow } from "@ui/campaign/HouseCompare";
 import { cultureFigureSVG, cultureSeed, type Occasion } from "@ui/campaign/cultureFigure";
 import { GOOD_DEFS } from "@goods";
 import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks, campaignGetExpeditions, campaignGetHouseKin, campaignGetHouseGoals, campaignGetHouseCrisis, campaignGetHouseLineage } from "@bridge";
-import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief, ExpeditionView, KinBrief, GoalsBrief, CrisisBrief, HouseLineage, LineageNode } from "@types";
+import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief, ExpeditionView, KinBrief, GoalsBrief, CrisisBrief, HouseLineage, LineageNode, HeadBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 
 const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
@@ -26,6 +26,28 @@ const TIER_META: Record<number, { glyph: string; name: string; band: string }> =
 /** A house whose tier isn't computed yet (founded since the last monthly pass) reads
  *  as Marginal — it hasn't proven anything yet, which is the honest starting point. */
 const tierOf = (h: HouseBrief) => (h.tier && h.tier >= 1 && h.tier <= 4 ? h.tier : 4);
+
+/** Trait valence for the ruler's character words (from the sim's CHAR_ADJ table).
+ *  A merchant's disposition reads as an asset, a liability, or a neutral bent —
+ *  coloured green / red / grey so the head's character is legible at a glance. Words
+ *  match `character_phrase` (`sim::tick`); an unlisted word falls back to neutral. */
+const TRAIT_VALENCE: Record<string, 1 | 0 | -1> = {
+  // caution ↔ boldness
+  hoarding: -1, cautious: 0, bold: 1, reckless: -1,
+  // honour ↔ greed
+  scrupulous: 1, honourable: 1, grasping: -1, ruthless: -1,
+  // private ↔ civic
+  "close-fisted": -1, private: 0, "civic-minded": 1, openhanded: 1,
+  // rooted ↔ expansive
+  insular: -1, rooted: 0, expansive: 1, "far-reaching": 1,
+};
+const TRAIT_COLOR: Record<number, string> = { 1: "#7fd0a0", 0: "#9aa6b4", [-1]: "#e0857f" };
+const TRAIT_BG: Record<number, string> = { 1: "rgba(127,208,160,0.12)", 0: "rgba(154,166,180,0.10)", [-1]: "rgba(224,133,127,0.12)" };
+/** Split a `character_phrase` ("Bold, grasping, expansive.") into coloured chips. */
+function traitChips(phrase: string): { word: string; v: number }[] {
+  return phrase.replace(/\.\s*$/, "").split(",").map((w) => w.trim()).filter(Boolean)
+    .map((w) => ({ word: w, v: TRAIT_VALENCE[w.toLowerCase()] ?? 0 }));
+}
 
 /** Phase 2.2 · holdings authorship — is this holding run by a POSTED kin (family) or
  *  a hired factor? Returns the kin's given name if family-run, "" if hired (silent —
@@ -386,6 +408,14 @@ function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
       seed: cultureSeed(h.head_name || h.name), occasion,
     });
   }, [h.kit, h.head_female, h.head_name, h.name, h.tier]);
+  // The ruler card that fills the header beside the figure: who leads, for how long,
+  // their character read as coloured traits, and the family's two most recent deeds.
+  const head = kin.find((k) => k.role === "head") ?? kin[0];
+  const traits = head?.character_phrase ? traitChips(head.character_phrase) : [];
+  const recentEvents = useMemo(() => {
+    const evs = chron?.events ?? [];
+    return [...evs].sort((x, y) => y.year - x.year).slice(0, 3);
+  }, [chron]);
   return (
     <div data-draggable style={{ ...detailPanel, ...rootStyle }} onPointerDown={onPointerDown}>
       <div style={{ display: "flex", gap: 8 }}>
@@ -433,6 +463,49 @@ function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
           </span>
         ) : null}
       </div>
+
+      {/* The ruler card — fills the header beside the figure (previously blank): who
+          rules, how long, their character as coloured traits, and the latest deeds. */}
+      <div style={{ marginTop: 7, borderTop: "1px solid #1a2a3e", paddingTop: 6 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+          <span style={{ fontSize: 11 }}>👑</span>
+          <span style={{ color: "#e8dcc0", fontSize: 11, fontWeight: 600 }}>{h.head_name}</span>
+          <span style={{ color: "#8fa6be", fontSize: 9 }}>{h.head_female ? "♀" : "♂"}</span>
+          <span style={{ flex: 1 }} />
+          <span style={{ color: "#9ab0c8", fontSize: 9.5 }} title="Years the current head has led the house">
+            {h.head_age > 0 ? `has ruled ${h.head_age}y` : "newly acceded"}
+          </span>
+        </div>
+        {traits.length > 0 ? (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }} title="The ruler's character — green favours the house, red is a liability, grey neutral">
+            {traits.map((t, i) => (
+              <span key={i} style={{
+                fontSize: 9, color: TRAIT_COLOR[t.v], background: TRAIT_BG[t.v],
+                border: `1px solid ${TRAIT_COLOR[t.v]}44`, borderRadius: 8, padding: "1px 7px",
+                textTransform: "capitalize",
+              }}>{t.word}</span>
+            ))}
+          </div>
+        ) : (
+          <div style={{ color: "#6a7a8a", fontSize: 9, marginTop: 4, fontStyle: "italic" }}>
+            {h.is_guild ? "A civic guild — no single ruler's temperament." : "An even-tempered head — nothing marked."}
+          </div>
+        )}
+        {recentEvents.length > 0 && (
+          <div style={{ marginTop: 6 }}>
+            <div style={{ color: "#6a86a6", fontSize: 8.5, textTransform: "uppercase", letterSpacing: 0.4 }}>Latest</div>
+            {recentEvents.map((e, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 5, fontSize: 9.5, marginTop: 2 }}>
+                <span style={{ flex: "0 0 auto" }}>{EVENT_ICON[e.kind] ?? "·"}</span>
+                <span style={{ color: EVENT_COLOR[e.kind] ?? "#9ab0c8", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={e.text}>
+                  {e.text}
+                </span>
+                <span style={{ color: "#56708e", flex: "0 0 auto" }}>yr {e.year}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
         </div>
       </div>
 
@@ -443,7 +516,7 @@ function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
         {(["chronicle", "summary", ...(kin.length > 0 ? ["kin" as const] : []),
            ...(goals && (goals.active.length > 0 || goals.history.length > 0) ? ["goals" as const] : []),
            ...(crisis && (crisis.active || crisis.history.length > 0) ? ["crisis" as const] : []),
-           ...(lineage && (lineage.ancestors.length > 0 || lineage.offshoots.length > 0) ? ["lineage" as const] : []),
+           ...((lineage && (lineage.ancestors.length > 0 || lineage.offshoots.length > 0)) || (chron?.line?.length ?? 0) > 0 ? ["lineage" as const] : []),
            ...(expeds.length > 0 ? ["expeditions" as const] : []),
            "standing", "feuds", ...(bank ? ["bank" as const] : []), "ledger"] as const).map((t) => (
           <div key={t} onClick={() => setView(t)} style={{
@@ -473,7 +546,7 @@ function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
       ) : view === "crisis" ? (
         <CrisisTab crisis={crisis} />
       ) : view === "lineage" ? (
-        <LineageTab lineage={lineage} current={h} onJump={jumpTo} />
+        <LineageTab lineage={lineage} current={h} onJump={jumpTo} line={chron?.line ?? []} />
       ) : view === "expeditions" ? (
         <ExpeditionsTab expeds={expeds} fmt={fmt} />
       ) : view === "standing" ? (
@@ -557,6 +630,7 @@ function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
  *  positive events (§2.2) reading alongside the obituaries rather than being buried. */
 function ChronicleTab({ h, chron, onExpand, fmt }:
   { h: HouseBrief; chron: HouseHistory | null; onExpand: () => void; fmt: (v: number) => string }) {
+  const nowYear = useCampaignStore((s) => Math.floor((s.snapshot?.clock.tick ?? 0) / 365));
   if (!chron) return <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>Loading…</div>;
   const line = chron.line ?? [];
   const peakYear = Math.floor((h.peak_wealth_tick ?? 0) / 365);
@@ -582,6 +656,7 @@ function ChronicleTab({ h, chron, onExpand, fmt }:
             {line.map((p, i) => {
               const living = p.until_year === 0;
               const grew = p.wealth_end > p.wealth_start;
+              const ruled = Math.max(0, (living ? nowYear : p.until_year) - p.since_year);
               return (
                 <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 5, padding: "1px 0", fontSize: 10 }}>
                   <span style={{ width: 12, textAlign: "center" }}>{p.female ? "♀" : "♂"}</span>
@@ -590,7 +665,7 @@ function ChronicleTab({ h, chron, onExpand, fmt }:
                   </span>
                   <span style={{ color: "#6a86a6", fontSize: 9 }}>
                     gen {p.generation} · {p.since_year}{living ? "–present" : `–${p.until_year}`}
-                    {" "}({p.age_at_accession}{p.age_at_death > 0 ? `→${p.age_at_death}` : ""}y)
+                    {" "}· ruled {ruled}y
                   </span>
                   {!living && (
                     <span style={{ color: grew ? "#9fe0a8" : "#e0a09a", fontSize: 9 }}>{grew ? "▲" : "▼"}</span>
@@ -900,9 +975,11 @@ const ORIGIN_TAG: Record<number, { label: string; color: string }> = {
  *  than reconstructed from chronicle text. Click a name to re-center the dossier on
  *  that house — deep multi-generation trees are navigated one hop at a time rather
  *  than fetched all at once. */
-function LineageTab({ lineage, current, onJump }:
-  { lineage: HouseLineage | null; current: HouseBrief; onJump: (idx: number) => void }) {
-  if (!lineage || (lineage.ancestors.length === 0 && lineage.offshoots.length === 0)) {
+function LineageTab({ lineage, current, onJump, line }:
+  { lineage: HouseLineage | null; current: HouseBrief; onJump: (idx: number) => void; line: HeadBrief[] }) {
+  const nowYear = useCampaignStore((s) => Math.floor((s.snapshot?.clock.tick ?? 0) / 365));
+  const hasTree = !!lineage && (lineage.ancestors.length > 0 || lineage.offshoots.length > 0);
+  if (!hasTree && line.length === 0) {
     return <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>An original founding — no recorded ancestry or offshoots.</div>;
   }
   const Node = ({ n, self: isSelf }: { n: LineageNode; self?: boolean }) => (
@@ -935,31 +1012,73 @@ function LineageTab({ lineage, current, onJump }:
   );
   return (
     <div>
-      {lineage.ancestors.length > 0 && (
+      {hasTree && lineage && (
         <>
-          <div style={timelineHdr}>Descent ({lineage.ancestors.length} generation{lineage.ancestors.length === 1 ? "" : "s"})</div>
-          {lineage.ancestors.map((n, i) => (
-            <div key={n.idx} style={{ marginLeft: i * 14, borderLeft: i > 0 ? "1px dashed #2a3d52" : "none", paddingLeft: i > 0 ? 10 : 0 }}>
-              <Node n={n} />
-            </div>
-          ))}
+          {lineage.ancestors.length > 0 && (
+            <>
+              <div style={timelineHdr}>Descent ({lineage.ancestors.length} generation{lineage.ancestors.length === 1 ? "" : "s"})</div>
+              {lineage.ancestors.map((n, i) => (
+                <div key={n.idx} style={{ marginLeft: i * 14, borderLeft: i > 0 ? "1px dashed #2a3d52" : "none", paddingLeft: i > 0 ? 10 : 0 }}>
+                  <Node n={n} />
+                </div>
+              ))}
+            </>
+          )}
+          <div style={{ marginLeft: lineage.ancestors.length * 14, borderLeft: lineage.ancestors.length > 0 ? "1px dashed #2a3d52" : "none", paddingLeft: lineage.ancestors.length > 0 ? 10 : 0, marginTop: 2 }}>
+            <Node n={{
+              idx: current.idx ?? -1, name: current.name, alive: !current.defunct,
+              tier: current.tier ?? 0, origin_kind: 0, origin_year: current.founded_year ?? 0,
+              origin_text: ORIGIN_LABEL[0], color: current.color ?? "#888",
+            }} self />
+          </div>
+          {lineage.offshoots.length > 0 && (
+            <>
+              <div style={{ ...timelineHdr, marginTop: 10 }}>Split off this house ({lineage.offshoots.length})</div>
+              {lineage.offshoots.map((n) => (
+                <div key={n.idx} style={{ marginLeft: 14, borderLeft: "1px dashed #2a3d52", paddingLeft: 10 }}>
+                  <Node n={n} />
+                </div>
+              ))}
+            </>
+          )}
         </>
       )}
-      <div style={{ marginLeft: lineage.ancestors.length * 14, borderLeft: lineage.ancestors.length > 0 ? "1px dashed #2a3d52" : "none", paddingLeft: lineage.ancestors.length > 0 ? 10 : 0, marginTop: 2 }}>
-        <Node n={{
-          idx: current.idx ?? -1, name: current.name, alive: !current.defunct,
-          tier: current.tier ?? 0, origin_kind: 0, origin_year: current.founded_year ?? 0,
-          origin_text: ORIGIN_LABEL[0], color: current.color ?? "#888",
-        }} self />
-      </div>
-      {lineage.offshoots.length > 0 && (
+
+      {/* The house's own succession — every ruler it has had, with the years each
+          held the seat. The inter-house tree above answers "where did this house come
+          from"; this answers "who has led it". */}
+      {line.length > 0 && (
         <>
-          <div style={{ ...timelineHdr, marginTop: 10 }}>Split off this house ({lineage.offshoots.length})</div>
-          {lineage.offshoots.map((n) => (
-            <div key={n.idx} style={{ marginLeft: 14, borderLeft: "1px dashed #2a3d52", paddingLeft: 10 }}>
-              <Node n={n} />
-            </div>
-          ))}
+          <div style={{ ...timelineHdr, marginTop: hasTree ? 12 : 0 }}>
+            Rulers of this house ({line.length})
+          </div>
+          {line.map((p, i) => {
+            const living = p.until_year === 0;
+            const ruled = Math.max(0, (living ? nowYear : p.until_year) - p.since_year);
+            const grew = p.wealth_end > p.wealth_start;
+            return (
+              <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 6, padding: "2px 4px", fontSize: 10,
+                background: living ? "rgba(201,162,39,0.08)" : "transparent", borderRadius: 3 }}>
+                <span style={{ width: 14, textAlign: "center", color: "#8fa6be" }}>{p.female ? "♀" : "♂"}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: living ? "#e8dcc0" : "#c3d2e2", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {p.name}{p.epithet ? ` ${p.epithet}` : ""}
+                    {living && <span style={{ color: "#c9a227", fontSize: 8.5 }}> · reigning</span>}
+                  </div>
+                  <div style={{ color: "#6a86a6", fontSize: 8.5 }}>
+                    gen {p.generation} · {p.accession} · acceded age {p.age_at_accession}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right", flex: "0 0 auto" }}>
+                  <div style={{ color: "#c9a227", fontSize: 10, fontWeight: 600 }}>ruled {ruled}y</div>
+                  <div style={{ color: "#56708e", fontSize: 8.5 }}>
+                    {p.since_year}{living ? "–now" : `–${p.until_year}`}
+                    {!living && <span style={{ color: grew ? "#7fd0a0" : "#e0857f" }}> {grew ? "▲" : "▼"}</span>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </>
       )}
     </div>

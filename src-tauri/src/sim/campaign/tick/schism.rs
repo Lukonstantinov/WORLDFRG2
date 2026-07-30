@@ -101,7 +101,7 @@ impl CampaignSim {
         self.houses.push(House {
             name: bname.clone(), hub: dest as u32, wealth: split, prestige: 0.05,
             spec, monopoly: vec![], rivals: vec![hi], generation: 1,
-            events: vec![founded], good_profit: Vec::new(), mono50: Vec::new(),
+            events: vec![founded], good_profit: Vec::new(), good_volume: Vec::new(), mono50: Vec::new(),
             mono_ever: Vec::new(), dominant_seat: false, prev_wealth: split, worst_loss: 0.0,
             fleet_sea: 0, fleet_river: 0, fleet_caravan: 0,
             head_name: kin.name.clone(), head_since: tick, head_lifespan: tenure,

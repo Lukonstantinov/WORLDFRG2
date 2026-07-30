@@ -704,6 +704,13 @@ export interface HouseBrief {
   head_female?: boolean;
   peak_wealth?: number;          // all-time peak wealth — "the house's finest hour"
   peak_wealth_tick?: number;
+  goods_ledger?: GoodTradeRow[]; // goods moved the most (by volume) + profit each
+}
+/** One good in a house's trade ledger: cumulative amount shipped + profit earned. */
+export interface GoodTradeRow {
+  good: string;
+  volume: number;  // cumulative amount shipped (grain-eq units)
+  profit: number;  // cumulative profit earned on that good
 }
 /** One city a house operates in, for the influence-ranked "Active in" list. */
 export interface HouseCity {
