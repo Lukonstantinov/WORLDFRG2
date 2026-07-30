@@ -1072,10 +1072,10 @@ PORTING_REFERENCE.md              ← Porting reference
 
 **`docs/proposals/` — A MENU, NOT COMMITMENTS**
 
-Eighteen documents (feature catalogs, trade/cartography specs, Victoria-2 UI direction,
+Nineteen documents (feature catalogs, trade/cartography specs, Victoria-2 UI direction,
 settlement and population analyses, finance/heraldry variants, roadmap batches, the
-house-intrigue + province-view design, the house tiers/kin/goals design) live in
-`docs/proposals/`. They were being read by fresh sessions as a backlog to work through,
+house-intrigue + province-view design, the house tiers/kin/goals design and its build
+plan) live in `docs/proposals/`. They were being read by fresh sessions as a backlog to work through,
 and they are not one: they are far more good ideas than anyone can build.
 
 > **Do not start work from `docs/proposals/`.** Check `FIX_PLAN.md` for what is actually
