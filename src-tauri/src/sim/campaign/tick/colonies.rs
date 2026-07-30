@@ -228,10 +228,17 @@ impl CampaignSim {
             *total.entry(comp).or_default() += w;
         }
         let mut next: Vec<LinguaFranca> = Vec::new();
-        for (comp, cultures) in &tally {
+        // DETERMINISM: iterate components in KEY order (the Vec built below is kept), and
+        // break the max_by tie on the culture NAME — two peoples of equal weight would
+        // otherwise pick a different lingua franca depending on hash order.
+        let mut comps: Vec<u32> = tally.keys().copied().collect();
+        comps.sort_unstable();
+        for comp in &comps {
+            let cultures = &tally[comp];
             let tot = total.get(comp).copied().unwrap_or(0.0).max(1.0);
             let (best_cul, best_w) = cultures.iter()
-                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal)
+                    .then(b.0.cmp(a.0)))
                 .map(|(c, w)| (c.clone(), *w)).unwrap_or_default();
             let share = best_w / tot;
             let prev = self.lingua.iter().find(|l| l.component == *comp).cloned();

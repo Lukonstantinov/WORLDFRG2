@@ -4240,7 +4240,12 @@ impl CampaignSim {
                         *boost.entry(gi).or_insert(0.0) += share * CULTURE_DESIRE_BOOST;
                     }
                 }
-                hub_desire[h] = boost.into_iter().map(|(gi, b)| (gi, b.min(CULTURE_DESIRE_MAX))).collect();
+                // DETERMINISM: `hub_desire` is read as a Vec downstream, so building it
+                // in HashMap order makes its order vary run to run. Sort by good index.
+                let mut bs: Vec<(usize, f32)> = boost.into_iter()
+                    .map(|(gi, b)| (gi, b.min(CULTURE_DESIRE_MAX))).collect();
+                bs.sort_by_key(|&(gi, _)| gi);
+                hub_desire[h] = bs;
             }
             for h in 0..n {
                 for g in 0..ng {

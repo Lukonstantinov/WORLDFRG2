@@ -23,14 +23,15 @@ scoreboard whose history is rewritten cannot show a regression.
 | Economy: rank-size (Zipf) slope | −0.41 | band [−3.0, −0.15] | ⚠️ flatter than −0.8…−1.2 |
 | Economy: urban share drift (60 yr) | 0.100 → **0.997** | — | ❌ countryside empties completely |
 | Economy: house dissolutions / century | **10.0** (was 312) | — | ⚠️ superseded — use lifespan below |
-| **Economy: mean firm lifespan** | **~51–101 yr** (was ~12) | `econ_diagnose_house_turnover` | ⚠️ in band (30–90) but the RANGE is the determinism defect |
+| **Economy: mean firm lifespan** | **96.9 yr** (was ~12) | `econ_diagnose_house_turnover` | ⚠️ slightly ABOVE band (30–90) — now stable and measurable |
+| Economy: lifespan excl. stillbirths | **193.8 yr** | same | ❌ established firms now almost never fail — Phase 3's job |
 | Economy: house wealth Gini | **0.853** (was 0.828) | `ECON_GINI_FLOOR` = 0.15 | ❌ **just left the 0.60–0.85 band** — the cost of fixing turnover |
 | Economy: top-10% wealth share | **0.809** (was 0.712) | — | ⚠️ in band (0.60–0.90), rising |
 | Dynamics: sustained richest house | 154 045 | `late_max < 1e6` | ✅ was 297 748 before the feud rework |
 | Dynamics: peak house wealth | 370 527 | finite + bounded | ⚠️ still an order above the "no 100k" ideal |
 | **Province land layer** | **unmeasured by either oracle** | own tests only | ⚠️ see below |
-| **Economy: tick determinism** | **FAILS** | `econ_scorecard_is_deterministic` | ❌ **open defect — see below** |
-| **Rust tests** | **165 pass, 0 fail** (8 ignored) | CI | ✅ |
+| **Economy: tick determinism** | **PASSES** | `econ_scorecard_is_deterministic` (no longer ignored) | ✅ **fixed — 4 hash-order sites, see below** |
+| **Rust tests** | **166 pass, 0 fail** (8 ignored) | CI | ✅ |
 | **Frontend tests** | **0** | *none* | ❌ 33k lines uncovered |
 | `cargo check` | clean | CI | ✅ |
 | `npx tsc --noEmit` | clean | CI | ✅ |
@@ -149,11 +150,27 @@ how rich the local trade actually is.
    The correct estimator is a hazard over exposure: `deaths ÷ house-years lived`, using the
    living houses' time instead of discarding it. That is what the lifespan row above reports.
 
-2. **The determinism defect blocks further tuning.** Three runs of the same test on the
-   same binary gave **11, 11, 6** deaths and lifespans of **51.1, 51.1, 101.2 yr** — a 2×
-   swing straddling the band boundary. Turnover cannot be tuned to a band whose measurement
-   moves by 2× between runs, so `econ_scorecard_is_deterministic` is now a *blocker*, not a
-   backlog item.
+2. **The determinism defect blocked further tuning — and is now FIXED (Phase 0.3).**
+   Three runs of the same test on the same binary gave **11, 11, 6** deaths and lifespans of
+   **51.1, 51.1, 101.2 yr** — a 2× swing straddling the band boundary. Four sites were
+   folding or ordering by HashMap iteration order:
+
+   | Site | What it broke |
+   |---|---|
+   | `money.rs::update_currency_baskets` | summed a partner-volume map with `+=` and divided every basket weight by that total; float addition is not associative, so the coin basket flipped |
+   | `production.rs::fold_trade_year` | pushed new series onto `trade_hist` in map order; the peak sort is *stable*, so equal peaks kept insertion order and a different set survived truncation |
+   | `mod.rs` culture desire | built `hub_desire[h]` as a `Vec` from a map |
+   | `colonies.rs::update_lingua_franca` | iterated components in map order **and** resolved the dominant-culture `max_by` tie by hash order |
+
+   Each now iterates in key order with an explicit tie-break. Three identical runs
+   confirmed, and `econ_scorecard_is_deterministic` is **no longer ignored** — it is the
+   guard that stops the defect returning, and any new hash accumulator in `tick/` trips it.
+
+**Where turnover landed (final, deterministic).** Mean firm lifespan **96.9 yr** against
+the 30–90 band — the overshoot is deliberate and *not* being tuned away: the remaining gap
+is that **established firms almost never fail** (193.8 yr excluding stillbirths), and the
+honest fix for that is a failure mechanism (the Phase 3 crisis layer), not a smaller seed
+constant. Shrinking the seed would re-introduce the stillbirths that caused the original bug.
 
 **The cost, measured: `HOUSE_MASTER_PLAN`'s open risk was real.** Wealth Gini rose
 0.828 → **0.853**, just outside the 0.60–0.85 band, and the top-10% share rose
@@ -211,6 +228,7 @@ subsystem is one you cannot have an opinion about.
 |---|---|---|---|---|---|---|
 | 2026-07-29 | `936a8a3`+ | 66.3% | 29.1% | 159 | 0 | Economy oracle added; CI added; scoreboard created |
 | 2026-07-29 | *this* | 66.3% | 29.1% | 159 | 0 | Harness calibrated to real campaign start; LOD sampler fixed; tick determinism defect found |
-| 2026-07-30 | *this* | 66.3% | 29.1% | 165 | 0 | Phase 0.1: firm lifespan ~12 → ~51–101 yr (seed capital from the parent guild); Gini 0.828 → 0.853 (left band — measured cost); determinism defect promoted to a blocker |
+| 2026-07-30 | *this* | 66.3% | 29.1% | 166 | 0 | Phase 0.3: tick determinism FIXED (4 hash-order sites); guard un-ignored |
+| 2026-07-30 | *this* | 66.3% | 29.1% | 165 | 0 | Phase 0.1/0.2: firm lifespan ~12 → ~51–101 yr (seed capital from the parent guild); Gini 0.828 → 0.853 (left band — measured cost); determinism defect promoted to a blocker |
 | 2026-07-29 | *this* | 66.3% | 29.1% | 165 | 0 | Feuds elaborated (cause/stage/ending); province LAND state + B1 feedback edge; sustained richest 297 748 → 154 045; Gini 0.771 → 0.828 |
 | — | `d53fdc9` | 66.2% | 29.0% | — | 0 | FIX_PLAN baseline |

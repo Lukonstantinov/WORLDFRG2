@@ -585,12 +585,23 @@ fn econ_fidelity_scorecard() {
 /// its siblings stay nearly empty and the order cannot matter. Calibrating the
 /// reference world to real campaign-start conditions is what exposed it.
 ///
-/// Fixing this properly means auditing every hash accumulator in `tick/` and
-/// sorting by key before folding, with `simulate_decades_reports_dynamics` held
-/// bit-identical at each step. That is a focused piece of work, deliberately not
-/// rushed here.
+/// **FIXED.** Four sites were folding or ordering by HashMap iteration order:
+///
+/// 1. `money.rs::update_currency_baskets` — summed a partner-volume map with `+=`
+///    and divided every basket weight by that total. Float addition is not
+///    associative, so the total differed run to run and the coin basket flipped.
+/// 2. `production.rs::fold_trade_year` — pushed new `(hub, good)` series onto
+///    `trade_hist` in map order, and the peak sort is stable, so equal peaks kept
+///    insertion order and a different set survived truncation.
+/// 3. `mod.rs` culture desire — built `hub_desire[h]` as a `Vec` from a map.
+/// 4. `colonies.rs::update_lingua_franca` — iterated components in map order AND
+///    resolved the dominant-culture `max_by` tie by hash order.
+///
+/// Each now iterates in key order, with an explicit tie-break where a comparison
+/// could tie. `seed_trade_fairs` had already been fixed the same way. This test is
+/// no longer ignored: it is the guard that stops the defect coming back, and any new
+/// hash accumulator in `tick/` will trip it.
 #[test]
-#[ignore = "KNOWN FAILING: HashMap-order float accumulation in tick/ — see doc comment and docs/SCOREBOARD.md"]
 fn econ_scorecard_is_deterministic() {
     let mut a = reference_world();
     let mut b = reference_world();

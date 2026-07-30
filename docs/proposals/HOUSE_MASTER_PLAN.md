@@ -1,6 +1,6 @@
 # The house mechanism — critique, then the master plan
 
-**Status: PLAN. Nothing in this series is built.** Consolidates five design documents
+**Status: Phase 0 built (except 0.4); Phases 1–5 are plan.** Consolidates the design documents
 (`HOUSE_PEOPLE_AND_TIERS` · `HOUSE_PEOPLE_PLAN` · `HOUSE_POWER_AND_POLITICS` ·
 `HOUSE_SUCCESSION_CRISIS` · `HOUSE_POWER_STRUGGLE_VIEW` ·
 `HOUSE_FACTION_NAMING_AND_RECORD`) and reviews them cold before committing to build.
@@ -231,6 +231,55 @@ contains the two open defects already on the scoreboard.
 
 | # | Step | Gate |
 |---|---|---|
+> # ▶ HANDOFF · READ THIS FIRST
+>
+> **This file is the entry point for the house work.** Phase 0 is complete except 0.4.
+> Everything below Part 4 is the plan; this block is the live state.
+>
+> ## What is DONE (on `main`)
+>
+> | Step | Result |
+> |---|---|
+> | **0.1 diagnose turnover** | ✅ cause found exactly — the *founding endowment*, not ambition. `wealth: 1.0` + a 2–3 vessel fleet = ~1.4 months of runway at birth → dead at ≈13.4 months. Measured median age at death **1.1 yr**. **73% of dissolutions never traded.** My overextension hypothesis was **refuted**: corr(age, upkeep) = **+0.802**. |
+> | **0.2 fix turnover** | ✅ seed capital taken **from the parent guild** (which `maybe_found_house` already requires). Lifespan **~12 yr → 96.9 yr**. |
+> | **0.3 fix determinism** | ✅ four hash-order sites fixed (`money.rs`, `production.rs`, `mod.rs`, `colonies.rs`). `econ_scorecard_is_deterministic` **un-ignored** and passing. 166 tests. |
+> | **0.4 inheritance rule** | ❌ **NOT STARTED — this is the next task.** Design is in `HOUSE_INHERITANCE_AND_TERRITORY.md` Part B. |
+>
+> ## Two numbers that are OUT OF BAND, deliberately
+>
+> | Metric | Now | Band | Why it is left alone |
+> |---|---|---|---|
+> | Mean firm lifespan | **96.9 yr** | 30–90 | Established firms almost never fail (**193.8 yr** excluding stillbirths). The honest fix is a failure *mechanism* — the Phase 3 crisis layer — not a smaller seed constant. Shrinking the seed re-introduces the stillbirths that were the original bug. |
+> | House wealth Gini | **0.853** | 0.60–0.85 | Houses dying young was partly load-bearing: it destroyed wealth in an economy compounding at 1.5%/yr with no other brake. |
+>
+> **Consequence for the plan: Part E.2's open risk was real.** The too-rich and
+> too-short-lived anomalies are **in tension, not one bug**. So Phase 0.2 is *not finished
+> in isolation* — it must be co-tuned with Phase 3, whose revised gate is: move sustained
+> richest wealth toward 100 000 while holding Gini in 0.60–0.85 and lifespan in 30–90.
+> **The phase boundary drawn in Part 4 below is wrong as written.**
+>
+> ## How to measure anything here
+>
+> ```bash
+> cd src-tauri
+> cargo test --lib econ_diagnose_house_turnover -- --ignored --nocapture  # lifespan + causes
+> cargo test --lib econ_ -- --nocapture                                   # the economy oracle
+> cargo test --lib simulate_decades_reports_dynamics -- --nocapture       # the dynamics digest
+> ```
+>
+> Use **mean firm lifespan**, never `dissolutions/century` — the latter scales with how many
+> houses are standing and is right-censored on a 60-year run. The correct estimator is a
+> hazard over exposure (`deaths ÷ house-years`), which `econ_diagnose_house_turnover` reports.
+>
+> ## Recommended next step
+>
+> Either **0.4 (inheritance)**, which is self-contained and gated on showing measurably
+> different fragmentation between rules — or **Phase 1**, which is read-only, touches no
+> simulation, and cannot regress either oracle (tiers · culture-dress figure · expeditions
+> tab · chronicle-first dossier). Phase 1 is the one that produces something to look at.
+>
+> ---
+>
 > ## ⚠ PHASE 0.1 AND 0.2 ARE DONE, AND THEY CHANGED THIS PLAN
 >
 > Measured (see `docs/SCOREBOARD.md` for the full write-up):

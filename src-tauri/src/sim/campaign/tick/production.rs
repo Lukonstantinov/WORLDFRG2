@@ -1443,8 +1443,13 @@ impl CampaignSim {
             if h.vols.len() > TRADE_HIST_CAP { let d = h.vols.len() - TRADE_HIST_CAP; h.vols.drain(0..d); }
             seen.insert((h.hub, h.good));
         }
-        // Brand-new (hub,good) trades start a fresh series.
-        for (&(hub, good), &v) in &vol {
+        // Brand-new (hub,good) trades start a fresh series. DETERMINISM: pushing in
+        // HashMap order makes `trade_hist`'s order vary run to run, and the peak sort
+        // below is stable — so equal peaks keep insertion order and a different set
+        // survives the truncation. Iterate in key order.
+        let mut fresh: Vec<((u32, u32), f32)> = vol.iter().map(|(&k, &v)| (k, v)).collect();
+        fresh.sort_by_key(|&(k, _)| k);
+        for ((hub, good), v) in fresh {
             if !seen.contains(&(hub, good)) { self.trade_hist.push(TradeHist { hub, good, vols: vec![v] }); }
         }
         // Bound memory: if over the row cap, drop the deadest trades (lowest peak).
@@ -1452,7 +1457,10 @@ impl CampaignSim {
             self.trade_hist.sort_by(|a, b| {
                 let pa = a.vols.iter().cloned().fold(0.0f32, f32::max);
                 let pb = b.vols.iter().cloned().fold(0.0f32, f32::max);
+                // Tie-break on (hub, good) — without it two equally dead trades order
+                // by whatever the Vec happened to hold.
                 pb.partial_cmp(&pa).unwrap_or(std::cmp::Ordering::Equal)
+                    .then(a.hub.cmp(&b.hub)).then(a.good.cmp(&b.good))
             });
             self.trade_hist.truncate(TRADE_HIST_ROWS);
         }

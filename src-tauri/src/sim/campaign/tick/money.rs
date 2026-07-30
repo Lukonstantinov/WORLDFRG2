@@ -316,8 +316,15 @@ impl CampaignSim {
             if mints(&self.hubs[i]) {
                 *wmap.entry(i as u32).or_insert(0.0) += COIN_HOME_BIAS * attr(&self.hubs[i]);
             }
-            let totv: f32 = partner_vol[i].values().sum::<f32>().max(EPS);
-            for (&p, &v) in &partner_vol[i] {
+            // DETERMINISM: float addition is not associative, so summing a HashMap in
+            // its own iteration order gives a different total run to run — and that
+            // total then divides every weight below, so the coin basket flips. Iterate
+            // partners in KEY order instead. (See docs/SCOREBOARD.md.)
+            let mut partners: Vec<(usize, f32)> = partner_vol[i].iter()
+                .map(|(&k, &v)| (k, v)).collect();
+            partners.sort_by_key(|&(k, _)| k);
+            let totv: f32 = partners.iter().map(|&(_, v)| v).sum::<f32>().max(EPS);
+            for &(p, v) in &partners {
                 let frac = v / totv;
                 for &(c, share) in &self.hubs[p].coin_basket {
                     let cj = c as usize;
@@ -331,6 +338,9 @@ impl CampaignSim {
             }
             if wmap.is_empty() { continue; } // barter — no coin physically reaches here
             let mut tw: Vec<(u32, f32)> = wmap.into_iter().collect();
+            // Sort by key first so the weight sort below has a deterministic tie-break:
+            // two coins of equal weight must always order the same way.
+            tw.sort_by_key(|&(k, _)| k);
             tw.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
             tw.truncate(COIN_BASKET_N);
             let sum: f32 = tw.iter().map(|x| x.1).sum::<f32>().max(EPS);
