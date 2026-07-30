@@ -276,14 +276,28 @@ impl CampaignSim {
             //    thing in the campaign that makes a hinterland matter as land rather
             //    than as a population reservoir.
             let holder = self.province_seat_hub(p);
+            // Phase 5 (`HOUSE_INHERITANCE_AND_TERRITORY.md` Part D) · a house may hold
+            // this province's writ instead of the seat city (the Stato da Mar case).
+            // Released back to the city automatically the moment the holder is gone —
+            // `prov_holder_house` never points at a defunct house.
+            let house_holder = self.prov_holder_house.get(p).copied().unwrap_or(-1);
+            let house_holds = house_holder >= 0 && (house_holder as usize) < self.houses.len()
+                && !self.houses[house_holder as usize].defunct;
+            if !house_holds && house_holder >= 0 { self.prov_holder_house[p] = -1; }
             if let Some(seat) = holder {
+                // The land still physically feeds the seat city either way — only the
+                // MONETARY dues redirect to a house holder.
                 let to_market = (surplus - collected).max(0.0);
                 if let Some(fg) = food_good {
                     if self.hubs[seat].stock.len() > fg {
                         self.hubs[seat].stock[fg] += to_market;
                     }
                 }
-                self.hubs[seat].treasury += collected;
+                if house_holds {
+                    self.houses[house_holder as usize].wealth += collected;
+                } else {
+                    self.hubs[seat].treasury += collected;
+                }
                 self.prov_holder[p] = seat as i32;
             } else {
                 self.prov_holder[p] = -1;
@@ -328,7 +342,27 @@ impl CampaignSim {
                 if roll < 0.35 {
                     self.prov_unrest[p] = (self.prov_unrest[p] - 0.30).max(0.0);
                     self.prov_revenue[p] = 0.0;
-                    if let Some(seat) = holder {
+                    // Phase 5 · a house-held province's revolt costs the HOUSE, not the
+                    // seat's civic mood — prestige falls and a slice of wealth is lost,
+                    // the same "unrest is directed at the holder" the design asks for.
+                    if house_holds {
+                        let hi = house_holder as usize;
+                        self.houses[hi].prestige = (self.houses[hi].prestige - 0.10).max(0.0);
+                        let loss = (self.houses[hi].wealth.max(0.0) * 0.05).max(0.0);
+                        self.houses[hi].wealth -= loss;
+                        let (pn, hname) = (self.province_name(p), self.houses[hi].name.clone());
+                        self.houses[hi].events.push(HouseEvent {
+                            tick: self.tick, kind: "loss".into(),
+                            text: format!("the province of {} rises against {}'s rule", pn, hname),
+                        });
+                        self.push_prov_event(p, yr, "revolt",
+                            format!("The countryside rose against {}'s rule — dues went uncollected", hname));
+                        self.journal.push(JournalEntry {
+                            tick: self.tick, kind: "revolt".into(), hub: -1, good: -1,
+                            value: 0.0,
+                            text: format!("The countryside of {} rises against {}'s rule", pn, hname),
+                        });
+                    } else if let Some(seat) = holder {
                         self.hubs[seat].sent_stability = (self.hubs[seat].sent_stability - 0.18).max(0.0);
                         let (pn, sn) = (self.province_name(p), self.hubs[seat].name.clone());
                         self.push_prov_event(p, yr, "revolt",
@@ -360,6 +394,49 @@ impl CampaignSim {
             let hist = &mut self.prov_history[p];
             hist.push(s);
             if hist.len() > PROV_HISTORY_CAP { let d = hist.len() - PROV_HISTORY_CAP; hist.drain(0..d); }
+        }
+        self.maybe_grant_provinces(yr);
+    }
+
+    /// Phase 5 · the Stato da Mar case: a province with no house holder may be
+    /// GRANTED to whichever house already dominates its seat city — holds its
+    /// council/captor seat OR its bailo (the exact "seats" a house's `standing`
+    /// already counts in `assign_house_tiers`), is Tier 1-2, and the province is not
+    /// currently in open revolt. Deliberately narrow (see the constants' own doc):
+    /// this is a house's reach over its OWN seat's hinterland extending outward, not
+    /// a land-grab anywhere. Contesting a HELD province (war, a rival house) is
+    /// explicitly NOT built — `HOUSE_INHERITANCE_AND_TERRITORY.md` Part D's own "war
+    /// goals gain a territorial option" is a materially bigger item (new war-goal
+    /// machinery) than this pass's scope; a granted province is sticky until its
+    /// holder is gone.
+    pub(crate) fn maybe_grant_provinces(&mut self, yr: u32) {
+        let np = self.prov_holder_house.len();
+        for p in 0..np {
+            if self.prov_holder_house[p] >= 0 { continue; }
+            if self.prov_unrest.get(p).copied().unwrap_or(1.0) > PROV_GRANT_UNREST_MAX { continue; }
+            let Some(seat) = self.province_seat_hub(p) else { continue; };
+            let dominates = self.hubs.get(seat)
+                .is_some_and(|h| h.council_house >= 0 || h.captor_house >= 0);
+            if !dominates { continue; }
+            let (council, captor) = (self.hubs[seat].council_house, self.hubs[seat].captor_house);
+            let candidate = self.houses.iter().enumerate().find(|(hi, h)| {
+                !h.defunct && !h.is_guild && h.tier >= 1 && h.tier <= PROV_GRANT_TIER_MAX
+                    && (council == *hi as i32 || captor == *hi as i32 || h.bailos.contains(&(seat as u32)))
+            }).map(|(hi, _)| hi);
+            let Some(hi) = candidate else { continue; };
+            if hash01(self.seed, yr as u64 ^ 0x9A0D, p as u64) >= PROV_GRANT_CHANCE { continue; }
+            self.prov_holder_house[p] = hi as i32;
+            let (pn, hname) = (self.province_name(p), self.houses[hi].name.clone());
+            self.houses[hi].events.push(HouseEvent {
+                tick: self.tick, kind: "province_granted".into(),
+                text: format!("{} is granted the province of {} — its writ now runs beyond the city walls", hname, pn),
+            });
+            self.push_prov_event(p, yr, "granted",
+                format!("The province passes to {}'s administration", hname));
+            self.journal.push(JournalEntry {
+                tick: self.tick, kind: "province_granted".into(), hub: seat as i32, good: -1, value: 0.0,
+                text: format!("{} is granted the province of {}", hname, pn),
+            });
         }
     }
 
@@ -401,10 +478,15 @@ impl CampaignSim {
             self.prov_surplus.push(0.0);
             self.prov_revenue.push(0.0);
             self.prov_holder.push(-1);
+            self.prov_holder_house.push(-1);
         }
-        // The remaining vectors are plain per-province containers.
+        // The remaining vectors are plain per-province containers. `prov_holder_house`
+        // is included here too — an old save whose OTHER province vectors already
+        // reached `np` (so the loop above never ran) still needs it backfilled, since
+        // it's a field newer than the rest of the land layer.
         if self.prov_history.len() < np { self.prov_history.resize(np, Vec::new()); }
         if self.prov_events.len() < np { self.prov_events.resize(np, Vec::new()); }
+        if self.prov_holder_house.len() < np { self.prov_holder_house.resize(np, -1); }
     }
 
     /// The hub that administers province `p`: its largest live member city. Returns

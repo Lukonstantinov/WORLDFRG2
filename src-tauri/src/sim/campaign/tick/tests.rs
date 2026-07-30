@@ -101,6 +101,7 @@
             prov_irrigated: vec![], prov_soil: vec![], prov_tenure: vec![],
             prov_tax: vec![], prov_arrears: vec![], prov_unrest: vec![],
             prov_surplus: vec![], prov_revenue: vec![], prov_holder: vec![],
+            prov_holder_house: vec![],
             prov_works: vec![], prov_history: vec![], prov_events: vec![],
         };
         s.rebuild_routes();
@@ -3199,4 +3200,128 @@
         let drop = 1.0 - s.houses[0].kin[1].loyalty;
         assert!(drop > 0.0 && drop <= FOREIGN_HAND_DECAY_RATE * 1.5 + 1e-4,
             "a single month must stay within the small decay bound even at max leverage: dropped {drop}");
+    }
+
+    // ── Phase 5 · provinces as house territory ───────────────────────────────
+    /// `province_authority_is_not_assumed_to_be_a_city` (`HOUSE_INHERITANCE_AND_
+    /// TERRITORY.md` Part D's own invariant #7): a house may be GRANTED an
+    /// ungoverned province if it already holds the seat's bailo and is Tier 1-2.
+    #[test]
+    fn an_ungoverned_province_can_be_granted_to_a_dominant_house() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut found = false;
+        for seedn in 0..40u64 {
+            let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![9000.0], 0)];
+            let mut s = sim(hubs, goods.clone());
+            s.seed = seedn * 104729 + 3;
+            s.prov_cap = vec![9000.0];
+            s.prov_rural = vec![5000.0];
+            s.prov_culture = vec!["Aiora".into()];
+            s.prov_seat = vec![[0.0, 0.0]];
+            s.hub_province = vec![0];
+            s.prov_net_mig = vec![0.0];
+            s.ensure_province_land(1);
+            s.prov_unrest[0] = 0.0;
+            let mut h = house_at(0, vec![0], 1);
+            h.tier = 1;
+            s.houses.push(h);
+            s.hubs[0].captor_house = 0; // this house dominates its own seat's trade
+            s.maybe_grant_provinces(0);
+            if s.prov_holder_house[0] == 0 {
+                found = true;
+                assert!(s.houses[0].events.iter().any(|e| e.kind == "province_granted"));
+                assert!(is_house_milestone("province_granted"), "a grant is a permanent milestone");
+                break;
+            }
+        }
+        assert!(found, "over 40 seeds, a Tier-1 bailo-holding house must eventually be granted the province");
+    }
+
+    #[test]
+    fn a_house_with_no_dominance_at_the_seat_is_never_granted_the_province() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![9000.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.prov_cap = vec![9000.0];
+        s.prov_rural = vec![5000.0];
+        s.prov_culture = vec!["Aiora".into()];
+        s.prov_seat = vec![[0.0, 0.0]];
+        s.hub_province = vec![0];
+        s.prov_net_mig = vec![0.0];
+        s.ensure_province_land(1);
+        s.prov_unrest[0] = 0.0;
+        let mut h = house_at(0, vec![0], 1);
+        h.tier = 1; // Tier 1, but no bailo at the seat
+        s.houses.push(h);
+        for yr in 0..30 { s.maybe_grant_provinces(yr); }
+        assert_eq!(s.prov_holder_house[0], -1, "no bailo at the seat ⇒ never granted, however long it waits");
+    }
+
+    #[test]
+    fn a_house_held_provinces_dues_flow_to_the_house_not_the_city() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![9000.0], 0)];
+        let mut s = sim(hubs, goods);
+        for h in s.hubs.iter_mut() { h.sent_prosperity = 0.6; h.starving = 0.0; h.food_balance = 1.0; }
+        s.hub_culture = vec!["Aiora".into()];
+        s.hub_minorities = vec![Vec::new()];
+        s.prov_cap = vec![90_000.0];
+        s.prov_rural = vec![60_000.0];
+        s.prov_culture = vec!["Aiora".into()];
+        s.prov_seat = vec![[0.0, 0.0]];
+        s.hub_province = vec![0];
+        s.prov_net_mig = vec![0.0];
+        let mut h = house_at(0, vec![0], 1);
+        h.wealth = 100.0;
+        s.houses.push(h);
+        s.ensure_province_land(1);
+        s.prov_holder_house[0] = 0;
+        let treasury0 = s.hubs[0].treasury;
+        let wealth0 = s.houses[0].wealth;
+        for yr in 0..10u32 {
+            s.province_demography_pass();
+            s.province_land_pass(yr);
+        }
+        assert!(s.houses[0].wealth > wealth0,
+            "dues must reach the HOUSE holder's wealth: {} → {}", wealth0, s.houses[0].wealth);
+        assert!((s.hubs[0].treasury - treasury0).abs() < 1e-3,
+            "the city treasury must NOT also receive the dues: {} → {}", treasury0, s.hubs[0].treasury);
+    }
+
+    #[test]
+    fn a_dissolved_holders_province_reverts_to_city_administration() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![9000.0], 0)];
+        let mut s = sim(hubs, goods);
+        for h in s.hubs.iter_mut() { h.sent_prosperity = 0.6; h.starving = 0.0; h.food_balance = 1.0; }
+        s.hub_culture = vec!["Aiora".into()];
+        s.hub_minorities = vec![Vec::new()];
+        s.prov_cap = vec![90_000.0];
+        s.prov_rural = vec![60_000.0];
+        s.prov_culture = vec!["Aiora".into()];
+        s.prov_seat = vec![[0.0, 0.0]];
+        s.hub_province = vec![0];
+        s.prov_net_mig = vec![0.0];
+        let mut h = house_at(0, vec![0], 1);
+        h.defunct = true;
+        s.houses.push(h);
+        s.ensure_province_land(1);
+        s.prov_holder_house[0] = 0;
+        s.province_demography_pass();
+        s.province_land_pass(0);
+        assert_eq!(s.prov_holder_house[0], -1, "a defunct holder's province must revert to city administration");
+    }
+
+    #[test]
+    fn a_held_province_weighs_heavily_toward_a_higher_tier() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.houses.push(house_at(0, vec![0], 1));
+        s.houses.push(house_at(1, vec![0], 1));
+        s.prov_holder_house = vec![0]; // house 0 holds a province; house 1 holds none
+        s.assign_house_tiers();
+        assert!(s.houses[0].standing > s.houses[1].standing,
+            "an otherwise-identical house holding a province must stand higher: {} vs {}",
+            s.houses[0].standing, s.houses[1].standing);
     }

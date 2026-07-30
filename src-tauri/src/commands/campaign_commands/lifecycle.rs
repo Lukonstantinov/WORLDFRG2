@@ -826,6 +826,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         prov_surplus: vec![],
         prov_revenue: vec![],
         prov_holder: vec![],
+        prov_holder_house: vec![],
         prov_works: vec![],
         prov_history: vec![],
         prov_events: vec![],
@@ -989,6 +990,7 @@ fn seed_province_land(provs: &[crate::sim::provinces::Province], n: usize, sim: 
     sim.prov_surplus = vec![0.0; n];
     sim.prov_revenue = vec![0.0; n];
     sim.prov_holder = vec![-1; n];
+    sim.prov_holder_house = vec![-1; n];
     sim.prov_history = vec![Vec::new(); n];
     sim.prov_events = vec![Vec::new(); n];
 }

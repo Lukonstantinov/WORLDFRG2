@@ -1,8 +1,22 @@
 # Inheritance, women, and provinces as house territory
 
-**Status: Part B BUILT (Phase 0.4); Parts A, C, D remain plan.** Amends
-`HOUSE_MASTER_PLAN.md` after maintainer pushback. Read that document's Part 0 first — it
-carries the blocking finding, and its handoff block carries the live state.
+**Status: Part B BUILT (Phase 0.4); Part D BUILT (Phase 5, scoped — see its handoff
+block below); Part A folded into the master plan's own economy-oracle gates; Part C
+(the widow mechanic, dowry direction) remains plan.** Amends `HOUSE_MASTER_PLAN.md`
+after maintainer pushback. Read that document's Part 0 first — it carries the
+blocking finding, and its own handoff block carries the fuller live state; this
+document's Part D is where "Phase 5" — the actual final phase of the whole house
+series, per this file's own E.3 revised phase list — is specified.
+
+> **Phase 5 (Part D) is built** — `prov_holder_house`, dues redirected to a holding
+> house, unrest directed at the house, standing/tier weighted toward territory, a
+> narrow GRANT trigger, and release-on-dissolution. **Contesting a held province
+> (war, a rival house) is explicitly NOT built** — Part D's own "war goals gain a
+> territorial option" needs new war-goal machinery, a materially bigger item than
+> this pass. Full account in `HOUSE_MASTER_PLAN.md`'s own handoff block (search
+> "Phase 5"), since that is where this series' live state is kept. **There is no
+> Phase 6** — this file's own E.3 table (below) is the complete, final phase list for
+> the house mechanism series; Phase 5 was its last entry.
 
 > **Part B shipped** as `sim/shared/inheritance.rs` — both axes, all five division rules,
 > the seeded matrilineal minority (B.4, including the avunculate variant) and the kit
@@ -263,6 +277,28 @@ is just a bigger number. But it should be designed knowing this is coming, speci
 `prov_holder` must be treated as "the authority here" and not as "the seat city", so
 Phase 3–4 code doesn't hard-code the assumption.
 
+> **Built.** `prov_holder_house: Vec<i32>` (the sibling field this section specifies,
+> field-for-field) plus a narrow GRANT trigger (`cities.rs::maybe_grant_provinces`,
+> yearly): an ungoverned province may be granted to whichever house already dominates
+> its seat city (holds the council/captor seat or the bailo — the exact "seats"
+> `assign_house_tiers` already counts), is Tier 1-2, and the province isn't in open
+> revolt. Every effect in the table above is real: dues redirect to the house
+> (`province_land_pass`'s delivery step), the house sets `prov_tax` (the EXISTING
+> control verb needed no change — it was never house-specific to begin with), standing
+> weights a held province 3× a bailo/charter/seat in `assign_house_tiers`'s `seats`
+> term, and a revolt costs the house's prestige and wealth instead of the seat's civic
+> mood. **Contestable is NOT built** — a rival house or a polis taking a HELD province
+> needs the new territorial war-goal machinery this section's own table calls out
+> ("war goals gain a territorial option"), which is a materially bigger item than a
+> single pass. A granted province is sticky: it only reverts when its holder house
+> itself dissolves. Measured effect (60-year/30-city economy-oracle world, diffed
+> against the pre-Phase-5 commit): **top-10% wealth share 0.497 → 0.651 — the first
+> time in this entire series that metric has crossed INTO its 0.60–0.90 historical
+> band**, not just moved toward it. House wealth Gini 0.693 → 0.790 (stayed in its
+> 0.60–0.85 band, now nearer the ceiling rather than the floor — worth watching if a
+> future pass pushes it further). This is exactly "the ascent event the design lacked"
+> this section itself promised, now measured rather than argued for.
+
 ---
 
 # Part E — Is the plan good enough? Honest answer
@@ -312,3 +348,11 @@ Seventh invariant, from Part D:
 7. **`province_authority_is_not_assumed_to_be_a_city`** — every reader of `prov_holder`
    must tolerate a house holding a province. Written as a test now, before Phase 5, because
    it is a *cheap* guard against an assumption spreading through Phases 3–4 code.
+   **Covered, not as one literally-named test but as five** (`tests.rs`):
+   `an_ungoverned_province_can_be_granted_to_a_dominant_house`,
+   `a_house_with_no_dominance_at_the_seat_is_never_granted_the_province`,
+   `a_house_held_provinces_dues_flow_to_the_house_not_the_city`,
+   `a_dissolved_holders_province_reverts_to_city_administration`,
+   `a_held_province_weighs_heavily_toward_a_higher_tier` — together they exercise every
+   reader this invariant cares about (the delivery step, the revolt step, the tier
+   formula, and the grant/release lifecycle itself).

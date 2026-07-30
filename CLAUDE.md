@@ -481,6 +481,32 @@ serde-defaulted so old saves load). Grouped by theme:
   removing weaker houses concentrates the survivors' share, exactly the
   historically-documented mechanism, not asserted but measured (see
   `docs/SCOREBOARD.md`).
+- **Provinces as house territory (Phase 5, `docs/proposals/HOUSE_INHERITANCE_AND_
+  TERRITORY.md` Part D — the LAST phase of the house series; there is no Phase 6).**
+  A province's writ can belong to a HOUSE instead of a city — the Stato da Mar case.
+  `prov_holder_house: Vec<i32>` (`-1` = the ordinary case); `cities.rs::
+  province_land_pass`'s delivery step credits a holding house's `wealth` instead of
+  the seat's `treasury` (the GRAIN still reaches the seat's stock either way — only
+  the monetary dues redirect); a revolt on a house-held province costs that house
+  prestige and wealth instead of the seat's civic mood; `assign_house_tiers`
+  weights each held province 3× a bailo/charter/council seat in its existing `seats`
+  term ("standing rises steeply"). **Inheritable for free** — house-indexed, not
+  head-indexed, so ordinary succession, a crisis deposition, or a Partible division
+  all leave a held province with the same house; only the house's OWN dissolution
+  releases it (checked lazily in the yearly land pass). The GRANT trigger
+  (`maybe_grant_provinces`, yearly, narrow) required one real fix caught by
+  measurement, not review: it first required a bailo specifically at the province's
+  OWN seat and fired zero times on the real economy world (a house rarely bailos its
+  own home city); relaxed to council/captor-house-or-bailo — the same "seats" signal
+  `assign_house_tiers` already sums — and it became real. **Contesting a HELD
+  province (war, a rival house) is explicitly NOT built** — needs new territorial
+  war-goal machinery, the single largest remaining gap in the whole house series.
+  This is the change that finally moved **top-10% wealth share INTO its historical
+  band** (0.497 → 0.651) — not just toward it like Phase 4.3's plague extinction —
+  "the ascent event the design lacked," now measured (see `docs/SCOREBOARD.md`).
+  Exposed read-only to the frontend via the EXISTING `ProvinceLand` query (no new
+  command) — `holder_house: i32` alongside `holder_hub`, and `holder_name` reads as
+  the house's name when one holds the writ.
 - **Succession & inheritance (Phase 0.4):** each people carries a **line rule** (who may
   inherit) and a **division rule** (how the estate divides) resolved once from its language
   kit into `culture_rules` (`sim/shared/inheritance.rs`, §8.15). `succeed_house` reads them
@@ -614,7 +640,12 @@ commands/
                                   from here.
       province.rs                 province LAND state (campaign_province_land[_all]) +
                                   the CONTROL VERBS — the only mutating campaign
-                                  commands besides campaign_advance (§5.1)
+                                  commands besides campaign_advance (§5.1). Phase 5 ·
+                                  `ProvinceLand.holder_house` (−1 = a city administers)
+                                  alongside the existing `holder_hub`; `holder_name`
+                                  reads as the holding HOUSE's name when one holds
+                                  the writ — no new command, just a field added to
+                                  the existing query
   goods_commands.rs             ← Goods spec CRUD, default_custom_goods, backfill
   import_commands.rs            ← import_world_layers (layered world import)
   preview_commands.rs           ← preview_zonal_profile / preview_coarse_climate (§8.14)
@@ -769,7 +800,11 @@ ui/world/  — map & world
                                   between year 1 and year 500 is the visible proof the
                                   two halves are one simulation. Holdings carries the
                                   CONTROL verbs (dues slider, begin/abandon a work),
-                                  read-only on a province no town administers.
+                                  read-only on a province no town administers. Phase 5 ·
+                                  the "writ of {holder_name}" line, granary note and
+                                  works-funding note all read correctly whether a CITY
+                                  or a HOUSE holds the province's writ
+                                  (`ProvinceLand.holder_house`).
                                   Selection is two-way with ProvincePanel via
                                   uiStore.selectedProvince; hit-test is a client-side
                                   raster lookup in OverlayManager.provinceAt (no IPC)
@@ -1492,3 +1527,9 @@ Three rules:
     this once and a test caught a man taking a matrilineal house's seat within the
     hour. "Who becomes head" and "which sex may hold the house" are different
     questions; only the former is ever up for grabs.
+24. **Province authority is never assumed to be a city.** Any new code that reads
+    `prov_holder` (a hub) must also tolerate `prov_holder_house` (a house) holding
+    the same province instead — the Stato da Mar case (§5, Phase 5). A held
+    province is released only when its OWN holder house dissolves; nothing else
+    (a war, a rival) currently takes it away — that gap is deliberate and recorded,
+    not an oversight to silently work around.

@@ -9,6 +9,53 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-30 (Phase 5 complete: provinces as house territory — the house series is DONE)
+
+**Asked to "move on with phase 5 and 6" — neither exists in `HOUSE_MASTER_PLAN.md`.**
+Phase 5 ("Provinces as house territory", the Stato da Mar case) lives in
+`docs/proposals/HOUSE_INHERITANCE_AND_TERRITORY.md` Part D, whose own revised phase
+list runs 0 through 5 — **5 is the last phase in the whole house series; there is no
+Phase 6.** Built it: a house may hold a province's writ instead of a city
+(`prov_holder_house`), with dues redirected to the house, unrest directed at the
+house (prestige + wealth, not the city's mood), standing weighted 3× toward held
+territory, and a narrow GRANT trigger (a Tier 1-2 house already dominating its seat
+city may be granted its ungoverned hinterland, small yearly chance). A held
+province is inherited for free (house-indexed, not head-indexed) and released only
+when its holder dissolves. **Contesting a held province (war, a rival house) is
+explicitly NOT built** — needs new territorial war-goal machinery, the single
+largest remaining gap in the whole series.
+
+**The grant trigger needed one real fix, caught by measurement, not review**: the
+first cut required a bailo specifically at the province's own seat, and fired ZERO
+times on the real economy-oracle world (a house rarely bailos its own home city —
+a bailo is a foreign foothold). Relaxed to council/captor-house-or-bailo (the same
+signal `assign_house_tiers` already sums), and the effect became real.
+
+**A genuinely dramatic result — the first metric in this whole series to cross INTO
+its band, not just move toward it**: diffed against the pre-Phase-5 commit on the
+60-year/30-city economy-oracle world, **top-10% wealth share 0.497 → 0.651**, now
+inside its 0.60–0.90 historical band for the first time since Phase 0.4 first pushed
+it out of band (0.422) fixing turnover. **House wealth Gini 0.693 → 0.790** — stayed
+in its 0.60–0.85 band, now nearer the ceiling (worth watching in a longer run). Also
+moved: surviving houses 49 → 38, dissolutions/century 40.00 → 33.33, banks chartered
+24 → 21, bank failures/century 28.33 → 25.00.
+
+Also exposed to the frontend (no new command — the existing `ProvinceLand` query
+gained one field, `holder_house: i32`); `ProvinceInspector.tsx`'s existing
+writ/granary/works-funding text was updated to stay accurate for a house holder.
+
+Whole-lib test suite: **224 passed, 0 failed** (was 219, +5, covering Part D's own
+invariant #7, `province_authority_is_not_assumed_to_be_a_city`). The small
+dynamics-test world stays byte-identical (it seeds no provinces). `cargo check`/
+`npx tsc --noEmit` both clean.
+
+**The house mechanism series — Phases 0 through 5 — is now complete as scoped.**
+Two gaps remain across the whole series, both recorded rather than hidden: goals not
+yet biasing decision weights (Phase 3.1), and a held province not yet contestable
+(Phase 5). Everything else in the series' own tables is built.
+
+---
+
 ## Current state — 2026-07-30 (Phase 4 complete: 4.4 foreign hand, 2.4 salience, 4.5 mavericks declined)
 
 **Measured before building, exactly as §2.5 demanded.** A new 300-year diagnostic

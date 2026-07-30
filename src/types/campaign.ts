@@ -2133,6 +2133,9 @@ export interface ProvinceLand {
   tenure: [number, number, number, number];
   holders: ProvinceHolder[];
   holder_hub: number;
+  /** Phase 5 · a HOUSE whose writ runs here instead of a city's, -1 = the ordinary case. */
+  holder_house: number;
+  /** The seat city's name, or the holding house's name when one holds this province. */
   holder_name: string;
   works: ProvinceWorkRow[];
   history: ProvinceLandSample[];

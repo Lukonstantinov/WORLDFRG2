@@ -1929,7 +1929,7 @@ pub fn is_house_milestone(kind: &str) -> bool {
         | "control_gained" | "control_lost" | "branch" | "charter" | "bailo"
         | "bankruptcy" | "dissolved" | "bank" | "marriage" | "loss" | "tier_up"
         | "golden_age" | "dynasty" | "goal_achieved" | "deposed" | "crisis_survived"
-        | "schism" | "plague_extinction")
+        | "schism" | "plague_extinction" | "province_granted")
 }
 
 /// Phase 3.1 · a checkable ambition (`HOUSE_PEOPLE_AND_TIERS.md` §4). A goal must be
@@ -3761,6 +3761,12 @@ pub struct CampaignSim {
     #[serde(default)] pub prov_revenue: Vec<f32>,
     /// The hub whose writ runs here (−1 = no seat / unadministered).
     #[serde(default)] pub prov_holder: Vec<i32>,
+    /// Phase 5 (`HOUSE_INHERITANCE_AND_TERRITORY.md` Part D) · a HOUSE whose writ runs
+    /// here instead of a city's (−1 = none — the ordinary case, a city administers).
+    /// The Stato da Mar case: a merchant house granted a province collects its dues
+    /// directly. Every reader of `prov_holder` must keep tolerating a house holding a
+    /// province instead — see `province_authority_is_not_assumed_to_be_a_city`.
+    #[serde(default)] pub prov_holder_house: Vec<i32>,
     /// Multi-year land improvements under way (clearance, drainage, irrigation, road).
     #[serde(default)] pub prov_works: Vec<ProvWork>,
     /// Yearly samples per province — what the Province panel's time slider scrubs.
@@ -3837,6 +3843,17 @@ const PROV_TAX_TOLERATED: f32 = 0.15;
 /// Yearly samples kept per province (500 years at 1/yr is fine; cap anyway).
 const PROV_HISTORY_CAP: usize = 600;
 const PROV_EVENTS_CAP: usize = 40;
+
+/// Phase 5 (`HOUSE_INHERITANCE_AND_TERRITORY.md` Part D) · the Stato da Mar case — a
+/// house may be GRANTED an ungoverned-by-house province if it already holds the seat
+/// city's BAILO (the strongest reach a house has anywhere), is Tier 1-2, and the
+/// province is not currently in open revolt. Kept deliberately narrow: only a
+/// house already dominant in the seat can plausibly be granted its hinterland.
+const PROV_GRANT_TIER_MAX: u8 = 2;
+const PROV_GRANT_UNREST_MAX: f32 = 0.40;
+/// Yearly chance, once eligible, that the grant actually happens — so it reads as an
+/// event with a date, not an instant the moment eligibility is reached.
+const PROV_GRANT_CHANCE: f32 = 0.15;
 
 /// Kinds of multi-year land improvement. Deliberately mirrors the satellite-construction
 /// vocabulary (stage → progress → supply) rather than inventing a second project system.

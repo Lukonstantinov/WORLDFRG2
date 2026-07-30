@@ -161,7 +161,9 @@ export function ProvinceInspector() {
           {p.culture} · {ELEV_WORD[p.elevation_class] ?? "country"} · {koppenName(p.koppen)}
           {p.coastal ? " · coastal" : ""} · {fmt(p.area_km2)} km²
           {land && land.holder_name
-            ? <> · <span title="The city whose writ runs here">writ of {land.holder_name}</span></>
+            ? <> · <span title={land.holder_house >= 0
+                ? "A merchant house holds this province's writ — the Stato da Mar case"
+                : "The city whose writ runs here"}>writ of {land.holder_name}</span></>
             : land ? " · frontier" : ""}
         </div>
 
@@ -239,8 +241,11 @@ export function ProvinceInspector() {
                 <Row k="Dues collected" v={`${fmt(land.revenue)} /yr`} />
                 {land.arrears > 1 && <Row k="Arrears" v={fmt(land.arrears)} />}
                 <div style={{ opacity: 0.6, fontSize: 12, marginTop: 2 }}>
-                  What the land grows above what the countryside eats and the holder takes
-                  reaches {land.holder_name || "no city"}'s granary.
+                  {land.holder_house >= 0
+                    ? <>Grain still reaches the seat city's granary; the dues go instead
+                        to {land.holder_name}'s own treasury.</>
+                    : <>What the land grows above what the countryside eats and the
+                        holder takes reaches {land.holder_name || "no city"}'s granary.</>}
                 </div>
               </>
             ) : (
@@ -456,7 +461,7 @@ export function ProvinceInspector() {
                       })}
                     </div>
                     <div style={{ opacity: 0.55, fontSize: 12, marginTop: 3 }}>
-                      Funded from {land.holder_name}'s treasury, over years. Unpaid work
+                      Funded from {land.holder_house >= 0 ? "the seat city's" : `${land.holder_name}'s`} treasury, over years. Unpaid work
                       stalls rather than failing.
                     </div>
                   </>

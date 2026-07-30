@@ -2454,16 +2454,26 @@ impl CampaignSim {
         let wr = rank_norm(&wealths);
         let vr = rank_norm(&volumes);
         let pr = rank_norm(&prestiges);
+        // Phase 5 · a held province, precomputed once (not per-house — O(provinces)
+        // total instead of O(houses·provinces)). Weighted 3× a bailo/charter/council
+        // seat in the same `seats` term — "territory is the strongest tier input
+        // there is" (`HOUSE_INHERITANCE_AND_TERRITORY.md` Part D) — rather than a new
+        // top-level term, which would need its own weight recalibration across every
+        // already-measured tier distribution.
+        let mut territory = vec![0u32; self.houses.len()];
+        for &h in &self.prov_holder_house { if h >= 0 { territory[h as usize] += 1; } }
 
         let mut standings = vec![0.0f32; n];
         for (k, &hi) in live.iter().enumerate() {
             // reach: commercial influence already caps itself at 1 by construction.
             let reach = self.houses[hi].influence.iter().map(|&(_, v)| v).sum::<f32>().clamp(0.0, 1.0);
-            // seats: captured city councils + Bailo seats + city charters.
+            // seats: captured city councils + Bailo seats + city charters + provinces
+            // held (each weighted 3×, per the doc comment above).
             let seats_raw = self.hubs.iter()
                 .filter(|h| !h.is_estate && (h.council_house == hi as i32 || h.captor_house == hi as i32))
                 .count()
-                + self.houses[hi].bailos.len() + self.houses[hi].charters.len();
+                + self.houses[hi].bailos.len() + self.houses[hi].charters.len()
+                + territory[hi] as usize * 3;
             let seats = (seats_raw as f32 / TIER_SEATS_SOFT_CAP).min(1.0);
             let s = 0.30 * wr[k] + 0.25 * vr[k] + 0.20 * reach + 0.15 * seats + 0.10 * pr[k];
             standings[k] = s.clamp(0.0, 1.0);

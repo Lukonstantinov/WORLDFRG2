@@ -53,6 +53,12 @@ pub struct ProvinceLand {
     // ── administration ──
     /// Hub whose writ runs here, −1 = a frontier nobody collects from.
     pub holder_hub: i32,
+    /// Phase 5 · a HOUSE whose writ runs here instead, −1 = the ordinary case (a
+    /// city administers). The Stato da Mar case — see `HOUSE_INHERITANCE_AND_
+    /// TERRITORY.md` Part D.
+    pub holder_house: i32,
+    /// The seat city's name, or the holding HOUSE's name when one holds this
+    /// province instead.
     pub holder_name: String,
     /// Works under way.
     pub works: Vec<ProvinceWorkRow>,
@@ -153,7 +159,13 @@ fn build_province_land(sim: &CampaignSim, id: u32) -> Option<ProvinceLand> {
         })
     }).collect();
     let holder_hub = sim.prov_holder.get(p).copied().unwrap_or(-1);
-    let holder_name = if holder_hub >= 0 {
+    // Phase 5 · a HOUSE may hold this province's writ instead of the seat city (the
+    // Stato da Mar case) — `holder_house` names it explicitly, and `holder_name`
+    // reads as the house's own name rather than the city's when one does.
+    let holder_house = sim.prov_holder_house.get(p).copied().unwrap_or(-1);
+    let holder_name = if holder_house >= 0 {
+        sim.houses.get(holder_house as usize).map(|h| h.name.clone()).unwrap_or_default()
+    } else if holder_hub >= 0 {
         sim.hubs.get(holder_hub as usize).map(|h| h.name.clone()).unwrap_or_default()
     } else {
         // Not yet run a land pass — name the largest town anyway so the panel is not
@@ -191,7 +203,7 @@ fn build_province_land(sim: &CampaignSim, id: u32) -> Option<ProvinceLand> {
         tax_max: PROV_TAX_MAX,
         tenure: sim.prov_tenure.get(p).copied().unwrap_or([0.0; 4]),
         holders,
-        holder_hub, holder_name,
+        holder_hub, holder_house, holder_name,
         works,
         history: sim.prov_history.get(p).map(|v| v.iter().map(|s| ProvinceLandSample {
             year: s.year, rural: s.rural, urban: s.urban, forest: s.forest,

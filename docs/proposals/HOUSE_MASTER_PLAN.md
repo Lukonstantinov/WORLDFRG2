@@ -1,12 +1,15 @@
 # The house mechanism — critique, then the master plan
 
 **Status: Phase 0 COMPLETE; Phase 1 COMPLETE; Phase 2 COMPLETE; Phase 3 COMPLETE as
-SCOPED; Phase 4 COMPLETE as scoped — 4.1 through 4.4 all built, 4.5's mavericks item
-considered and declined, religion/patronage stays deferred by design. §2.5's own
-"measure before building" instruction was honoured for 4.4: the 300-year diagnostic
-(`econ_measure_foreign_hand_conjunction`) measured the conjunction firing 1229
-times/century — the mechanism was then built, and the deposition/dissolution rate
-did NOT rise materially. See the handoff block for the full account.**
+SCOPED; Phase 4 COMPLETE as scoped; Phase 5 COMPLETE as scoped — THE HOUSE MECHANISM
+SERIES IS NOW COMPLETE.** Phase 5 ("Provinces as house territory") lives in
+`docs/proposals/HOUSE_INHERITANCE_AND_TERRITORY.md` Part D, not in this file's own
+Part 4 table — that document's own revised phase list (its §E.3) is what actually
+runs 0 through 5, and 5 was its last entry: **there is no Phase 6**. See the handoff
+block below for what Phase 5 built, what it deliberately didn't (contesting a held
+province — needs new war-goal machinery), and a genuinely notable measured result:
+top-10% wealth share crossed INTO its historical band for the first time in this
+whole series.
 Consolidates the design documents
 (`HOUSE_PEOPLE_AND_TIERS` · `HOUSE_PEOPLE_PLAN` · `HOUSE_POWER_AND_POLITICS` ·
 `HOUSE_SUCCESSION_CRISIS` · `HOUSE_POWER_STRUGGLE_VIEW` ·
@@ -302,6 +305,109 @@ contains the two open defects already on the scoreboard.
 > Use **mean firm lifespan**, never `dissolutions/century` — the latter scales with how many
 > houses are standing and is right-censored on a 60-year run. The correct estimator is a
 > hazard over exposure (`deaths ÷ house-years`), which `econ_diagnose_house_turnover` reports.
+>
+> ## Phase 5 (Provinces as house territory) is built — the house mechanism series is now complete
+>
+> Asked to "move on with phase 5 and 6". Neither exists as a section in THIS file —
+> its own Part 4 table stops at 4.5. Searched the whole `docs/proposals/` tree:
+> `HOUSE_INHERITANCE_AND_TERRITORY.md` Part D specifies a "Phase 5" (its own §E.3
+> revised phase list runs 0 through 5, and 5 is the LAST entry — there is no Phase 6
+> anywhere in the house series; the only other "Phase 5/6" hits in the repo are
+> world-generation documents, `FEATURES_AND_PROPOSALS.md`'s rivers/soil steps and
+> `PORTING_REFERENCE.md`'s tectonics/ocean steps, unrelated to houses). So: built
+> Part D's Phase 5, and confirmed there is nothing left after it.
+>
+> **What Phase 5 is**: "Provinces as house territory — the Stato da Mar", named after
+> real precedent (the Maona di Chio, the Casa di San Giorgio administering Corsica,
+> Venice's Stato da Mar run by *bailo* and *provveditore* — this project already has
+> `bailos` on `House`). A province's writ can belong to a HOUSE instead of a city.
+>
+> **What's built**, field-for-field against Part D's own spec:
+> - `prov_holder_house: Vec<i32>` (mod.rs) — the exact sibling field the design
+>   specifies, `-1` = the ordinary case (a city administers).
+> - **Dues flow to the house** — `cities.rs::province_land_pass`'s delivery step now
+>   checks `prov_holder_house` and credits the holding house's `wealth` instead of the
+>   seat's `treasury`. The GRAIN still reaches the seat's stock either way — the land
+>   still physically feeds the city; only the monetary dues redirect.
+> - **The house sets `prov_tax`** — needed NO code change. `campaign_set_province_tax`
+>   was never city-specific to begin with (it only checks a seat exists), so it
+>   already worked for a house holder.
+> - **Standing rises steeply** — `assign_house_tiers`'s `seats` term now includes each
+>   held province at 3× the weight of a bailo/charter/council seat (folded into the
+>   EXISTING term rather than a new top-level one, which would need recalibrating
+>   across every already-measured tier distribution).
+> - **Unrest is directed at the house** — a revolt on a house-held province costs that
+>   house prestige and a wealth slice, chronicled on ITS OWN record, instead of
+>   touching the seat's civic mood.
+> - **Inheritable** — needed no extra code either: `prov_holder_house` is HOUSE-indexed,
+>   not head-indexed, so ordinary succession, a crisis deposition, or a Partible
+>   division all leave a held province with the same house by construction. Only the
+>   house's own end (dissolution) releases it — checked lazily in the yearly land pass
+>   rather than needing a hook in `dissolve_house`/`departure_schism` themselves.
+>
+> **The GRANT trigger — invented, since Part D describes the effects but not exactly
+> how a house comes to hold a province.** `cities.rs::maybe_grant_provinces` (yearly):
+> an ungoverned province may be granted to whichever house already dominates its seat
+> city (holds the council/captor seat OR the bailo there — the exact "seats"
+> `assign_house_tiers` already counts, so this is the same "already prominent"
+> signal, not an invented new one), is Tier 1-2, and the province isn't in open
+> revolt, at a small yearly chance once eligible. **First cut required a bailo
+> specifically at the province's own seat — and measured ZERO effect on the economy
+> scorecard**, because a house's OWN home city essentially never gets a bailo (a
+> bailo is a foreign foothold; a house is already established at home without
+> needing one). Relaxed to council/captor-house OR bailo, all three already summed
+> in the tier formula's own `seats_raw` — and the effect became real and large (see
+> below). Recorded because it's the same lesson as Phase 3.1's goals and Phase
+> 3.2-3.6's crisis: build the mechanism, then RUN the real scorecard before declaring
+> it done — a mechanism that compiles and passes its own unit tests can still be
+> economically inert.
+>
+> **What's deliberately NOT built**: contesting a HELD province. Part D's own table
+> lists "a polis or rival house may take it — war goals gain a territorial option,
+> which finally makes a war change the map rather than a ledger" as an effect — this
+> needs new war-goal machinery (a territorial war-goal kind, resolution logic, a map
+> consequence), which is a materially bigger item than fits in this pass. A granted
+> province is STICKY: nothing currently takes it away except its own holder's
+> dissolution. This is the single largest remaining gap in the whole house series if
+> anyone picks it up later.
+>
+> **A genuinely dramatic measured result** (60-year/30-city economy-oracle world,
+> diffed against the pre-Phase-5 commit): **top-10% wealth share 0.497 → 0.651 — the
+> FIRST TIME in this entire multi-phase series that metric has crossed INTO its
+> 0.60–0.90 historical band**, not merely moved toward it (Phase 0.4 first pushed it
+> out of band from below at 0.422; Phase 4.3's plague extinction moved it to 0.509;
+> this is what finally closes the gap). **House wealth Gini 0.693 → 0.790** — stayed
+> inside its 0.60–0.85 band, but now sits nearer the ceiling than the floor, which is
+> worth watching if territory grants continue compounding in a longer run. Also
+> moved: surviving houses 49 → 38, house dissolutions/century 40.00 → 33.33, banks
+> chartered 24 → 21, bank failures/century 28.33 → 25.00. This is exactly Part D's own
+> promised effect — "the ascent event the design lacked" — now measured, not argued.
+>
+> Also exposed read-only to the frontend (no new command — the existing
+> `ProvinceLand` struct/query gained one field): `holder_house: i32` alongside the
+> existing `holder_hub`, and `holder_name` now reads as the holding HOUSE's name
+> (not the city's) when one holds the province. `ProvinceInspector.tsx`'s existing
+> "writ of {holder_name}" line, granary note, and works-funding note were all updated
+> to stay accurate in both cases (grain still reaches the city's granary even when a
+> house holds the writ; only the dues and the tooltip wording change).
+>
+> Whole-lib test suite: **224 passed, 0 failed** (was 219, +5:
+> `an_ungoverned_province_can_be_granted_to_a_dominant_house`,
+> `a_house_with_no_dominance_at_the_seat_is_never_granted_the_province`,
+> `a_house_held_provinces_dues_flow_to_the_house_not_the_city`,
+> `a_dissolved_holders_province_reverts_to_city_administration`,
+> `a_held_province_weighs_heavily_toward_a_higher_tier` — together covering Part D's
+> own invariant #7, `province_authority_is_not_assumed_to_be_a_city`). The small
+> dynamics-test world stays byte-identical (it seeds no provinces at all, so
+> `province_land_pass`/`maybe_grant_provinces` both early-return — the same no-op
+> pattern every province-layer change in this project has kept since B1). `cargo
+> check`/`npx tsc --noEmit` both clean.
+>
+> **The house mechanism series (Phases 0 through 5) is now complete as scoped.**
+> Every phase shipped with its cuts documented rather than hidden; the two largest
+> remaining gaps for future work are goals not yet biasing decision weights (Phase
+> 3.1) and a held province not yet contestable (Phase 5, this block). Both are
+> recorded here and in `docs/SCOREBOARD.md`, not silently assumed done.
 >
 > ## 4.4 (the foreign hand) is built — the measurement said to, and the gate held
 >
