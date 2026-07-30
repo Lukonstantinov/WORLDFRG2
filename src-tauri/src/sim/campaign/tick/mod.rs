@@ -719,6 +719,27 @@ const PARTIBLE_MAX_SPLIT: usize = 3;
 /// Chance an agnatic house's succession is instead held by a WIDOW REGENT — the one
 /// route to a female head a purely agnatic line otherwise has none of (Phase 2.1).
 const WIDOW_REGENCY_CHANCE: f32 = 0.08;
+/// Phase 2.4 · the cap on how far a head's CHARACTER may move any single decision
+/// knob — §3's own number. At the axis extreme (±2) a knob moves by exactly this
+/// much; at 0 (no roster, or a neutral roll) it is a no-op, which is what keeps
+/// "all-zero character ⇒ bit-identical" true without a special case anywhere.
+const CHARACTER_KNOB_CAP: f32 = 0.15;
+// ── Phase 2.5 · stewards ─────────────────────────────────────────────────────
+// A HIRED factor — a holding with no `posted` kin — is "able, and skims" (§2 of the
+// design): a small fixed WAGE plus a small proportional SKIM, both scaled small
+// enough to sit well under the family-overhead/warehouse-upkeep sinks already in
+// place (OFFICE_LEASE_RENT=0.05, estate upkeep=0.15/month) rather than add a second
+// wealth tax on top of them.
+/// Monthly wage per hired (unposted) holding.
+const STEWARD_WAGE: f32 = 0.08;
+/// Monthly skim, per hired holding, as a fraction of the house's positive wealth.
+/// Capped at `STEWARD_SKIM_HOLDINGS_CAP` holdings so a house with many hired
+/// factors doesn't see the skim compound past a small efficiency loss.
+const STEWARD_SKIM_RATE: f32 = 0.0006;
+const STEWARD_SKIM_HOLDINGS_CAP: f32 = 3.0;
+/// Monthly chance a single hired (unposted) office is POACHED away by a rival —
+/// distinct from the ordinary "tie withered" closure.
+const STEWARD_POACH_CHANCE: f32 = 0.01;
 
 const HOUSE_SEED_GUILD_SHARE: f32 = 0.18;
 /// Below this the guild is too poor to endow a viable family — no house is founded.
@@ -4720,10 +4741,38 @@ impl CampaignSim {
             let mut upkeep = wh_upkeep[hi];
             upkeep += est_count[hi] as f32 * UPKEEP_WAREHOUSE_BASE * UPKEEP_ESTATE_FRAC;
 
+            // ── Stewards (Phase 2.5) — a HIRED factor is able, and skims ──────────
+            // Every holding without a POSTED kin running it (offices + owned estates,
+            // less however many kin are actually posted) costs a small wage, plus a
+            // small skim on positive wealth capped to a few holdings' worth. Guilds
+            // are civic offices, not families with stewards to hire. Gated on a
+            // NON-EMPTY roster: an old save (or a house that hasn't succeeded since
+            // Phase 2.1 shipped) has no roster and so no information about who's
+            // hired — treating that as "assume everything is hired" would invent a
+            // fact the model doesn't have and silently break the "no roster ⇒
+            // bit-identical" backward-compatibility invariant every earlier Kin
+            // sub-phase relies on. No roster reads as "nothing is known", not
+            // "everything is hired".
+            let mut steward_cost = 0.0f32;
+            if !is_guild && !self.houses[hi].kin.is_empty() {
+                let total_holdings = self.houses[hi].offices.len() as f32 + est_count[hi] as f32;
+                let posted = self.houses[hi].kin.iter().filter(|k| k.role == 2).count() as f32;
+                let hired = (total_holdings - posted).max(0.0);
+                if hired > 0.0 {
+                    steward_cost = hired * STEWARD_WAGE
+                        + self.houses[hi].wealth.max(0.0) * hired.min(STEWARD_SKIM_HOLDINGS_CAP) * STEWARD_SKIM_RATE;
+                }
+            }
+
             // ── Conspicuous consumption (spent INTO the home city's people) ──
             // Only a slice of POSITIVE wealth — a house in debt buys no feasts.
+            // Phase 2.4 · a CIVIC-minded head spends more of it into the city (which is
+            // what fuels `fund_public_works`), a PRIVATE one hoards more — axis 2, ±15%
+            // capped. Guilds are civic by construction already, so this only touches
+            // private houses.
             let pos = self.houses[hi].wealth.max(0.0);
-            let consume_rate = if is_guild { GUILD_CIVIC_RATE } else { HOUSE_CONSUMPTION_RATE };
+            let consume_rate = if is_guild { GUILD_CIVIC_RATE }
+                else { HOUSE_CONSUMPTION_RATE * self.head_character_factor(hi, 2) };
             let consumption = pos * consume_rate;
 
             // ── Progressive civic endowment (the GUILD wealth ceiling) ──────────
@@ -4763,7 +4812,7 @@ impl CampaignSim {
                 raw.min(pos * HOUSE_WEALTH_TAX_MAXFRAC)
             };
 
-            self.houses[hi].wealth -= upkeep + consumption + endowment + wealth_overhead + wealth_tax;
+            self.houses[hi].wealth -= upkeep + consumption + endowment + wealth_overhead + wealth_tax + steward_cost;
 
             if home < self.hubs.len() {
                 // Consumption + the family overhead + the guild's civic dues (upkeep)

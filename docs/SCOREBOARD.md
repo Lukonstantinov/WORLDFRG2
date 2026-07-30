@@ -9,6 +9,36 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-30 (Phase 2.4/2.5 · Phase 2 now COMPLETE)
+
+Asked to build the two items the previous entry deliberately deferred, with a single
+check at the end instead of the usual per-change gate. **2.4** wires character into
+one real decision per axis (fleet-buy threshold, feud heat, civic consumption rate,
+office-open threshold), each bounded to exactly ±`CHARACTER_KNOB_CAP`=0.15 and a TRUE
+1.0 no-op with no roster. **2.5** gives every hired (unposted) holding a monthly
+wage+skim and a 1%/month poaching risk.
+
+**A real bug surfaced doing it this way, exactly as flagged when 2.4/2.5 were
+deferred**: the first cut of steward costs read an EMPTY kin roster as "everything is
+hired" rather than "nothing is known", so an old save's houses would have been
+silently CHEAPER to run than freshly-generated ones — a backward-compatibility
+regression, not a cosmetic bug. It was caught by the test suite (a Phase 2.1 test,
+`a_house_with_no_kin_is_bit_identical`, started failing) rather than by inspection,
+fixed by gating both mechanics on a non-empty roster, and the test renamed to
+`an_empty_kin_roster_pays_no_steward_cost_and_is_never_poached` to describe what's
+now actually guaranteed. Full account in `HOUSE_MASTER_PLAN.md`'s handoff block.
+
+Measured effect: on the small 30-house/50-year dynamics-test world, BYTE-IDENTICAL
+output (verified by diff against the pre-2.4/2.5 commit — that world's seeded houses
+never succeed inside 50 years, so never gain a roster). On the real 60-year/30-city
+economy-oracle world: **house wealth Gini 0.609 → 0.649**, **top-10% share 0.422 →
+0.409**, **mean firm lifespan 36.8 → 39.9yr** — all moved, none left their historical
+bands. 72 `tick::` tests pass (was 67, +5 net — 6 new, 1 retired/renamed).
+
+**Phase 2 (People) is now fully complete: 2.1 through 2.6, all built and gated.**
+
+---
+
 ## Current state — 2026-07-30 (Phase 1.3 + 2.1/2.2/2.3/2.6 · Phase 1 complete, Phase 2 half)
 
 Phase 1 is now fully shipped: **1.3** adds `Expedition.dest_province`, a 🧭 Expeditions

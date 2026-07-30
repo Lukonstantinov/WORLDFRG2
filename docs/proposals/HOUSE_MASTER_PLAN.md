@@ -1,7 +1,6 @@
 # The house mechanism — critique, then the master plan
 
-**Status: Phase 0 COMPLETE; Phase 1 COMPLETE; Phase 2 HALF built (2.1/2.2/2.3/2.6 done,
-2.4/2.5 deliberately deferred — see the handoff block); Phases 3–5 are plan.**
+**Status: Phase 0 COMPLETE; Phase 1 COMPLETE; Phase 2 COMPLETE; Phases 3–5 are plan.**
 Consolidates the design documents
 (`HOUSE_PEOPLE_AND_TIERS` · `HOUSE_PEOPLE_PLAN` · `HOUSE_POWER_AND_POLITICS` ·
 `HOUSE_SUCCESSION_CRISIS` · `HOUSE_POWER_STRUGGLE_VIEW` ·
@@ -298,11 +297,64 @@ contains the two open defects already on the scoreboard.
 > houses are standing and is right-censored on a 60-year run. The correct estimator is a
 > hazard over exposure (`deaths ÷ house-years`), which `econ_diagnose_house_turnover` reports.
 >
-> ## Phase 1 is COMPLETE. Phase 2 is HALF built — 2.4/2.5 deferred on purpose
+> ## Phase 1 and Phase 2 are BOTH COMPLETE
 >
-> **1.3 (expeditions tab)** shipped: `Expedition.dest_province`, a 🧭 Expeditions dossier
-> tab (this house's own live ventures), click a row to highlight its destination
-> province. Phase 1 is now entirely done.
+> The previous handoff deferred 2.4 (character → decisions) and 2.5 (stewards) because
+> both move house wealth directly and the earlier passes here had all been checked
+> incrementally. Asked explicitly to build them anyway with a single check at the end,
+> they're now done, gated, and the bands held — but building them exposed one real
+> compatibility bug that the "check only at the end" approach could easily have missed
+> entirely, which is the whole reason that deferral existed in the first place. Recorded
+> in full below because it is the most important finding of this pass.
+>
+> ### The bug: "no roster" quietly became "assume it's all hired"
+>
+> The first cut of 2.5 read an EMPTY kin roster (every save from before Phase 2.1, or any
+> house that hasn't succeeded since) as "every holding is hired" — because an empty
+> roster trivially has no kin POSTED anywhere, so the wage/skim/poaching logic charged
+> the WORST case rather than recognising it had no information at all. This directly
+> contradicts the master plan's own invariant #2, `a_house_with_no_kin_is_bit_identical`,
+> and would have made an old save's houses suddenly and silently cheaper to run than a
+> freshly-generated one purely because their roster hadn't been (re)generated yet — a
+> real backward-compatibility regression, not a cosmetic one.
+>
+> **Caught by the test suite, not by inspection**: `hired_offices_cost_more_than_
+> family_run_ones` passed on the first run (a genuinely hired-vs-family comparison), but
+> the ORIGINAL `a_house_with_no_kin_is_bit_identical` — retained from Phase 2.1 — started
+> failing the moment 2.5 landed, because clearing a house's kin roster mid-run (its whole
+> test) now measurably cut its costs instead of leaving them untouched. That failure is
+> what surfaced the bug. Fixed by gating the ENTIRE steward mechanic (wage, skim,
+> poaching) on a non-empty roster: `!self.houses[hi].kin.is_empty()`. An absent roster
+> now means "nothing is known", never "assume the worst" — which also matches how every
+> other Kin-adjacent feature in this plan already treats an empty roster.
+>
+> The old invariant's name no longer describes what's true (a house WITH a roster is not
+> bit-identical to one without — that was the entire point of building 2.4/2.5), so it's
+> renamed `an_empty_kin_roster_pays_no_steward_cost_and_is_never_poached`, scoped to what
+> is actually still guaranteed.
+>
+> ### What else landed
+>
+> - **2.4** — one touchpoint per character axis (not all three the design lists per
+>   axis): boldness moves the fleet-buy affordability threshold, greed moves feud
+>   heating speed, civic-mindedness moves the consumption rate that funds
+>   `fund_public_works`, expansiveness moves the office-opening affordability threshold.
+>   Each capped at exactly ±15% (`CHARACTER_KNOB_CAP`) and a TRUE 1.0 no-op with no
+>   roster or an all-zero roll — not an approximation, gated by a dedicated test.
+> - **2.5** — a hired holding costs `STEWARD_WAGE` (fixed) + `STEWARD_SKIM_RATE`
+>   (proportional, capped to a few holdings' worth) per month, and can be
+>   `STEWARD_POACH_CHANCE`=1%/month POACHED — reusing the existing office-close
+>   machinery with a distinct event kind. A poached office may be immediately
+>   restaffed by the same pass's OPEN logic if the trade tie is still strong — realistic
+>   resilience, not a missing event, so the gate counts events directly rather than
+>   watching the office list for a hole that may not stay open.
+> - **Measured effect**: on the small 30-house/50-year dynamics-test world the change is
+>   BYTE-IDENTICAL (verified by diffing the printed output against the pre-2.4/2.5
+>   commit) — that world's seeded houses never succeed inside 50 years, so they never
+>   gain a roster, and newly-founded houses rarely accumulate offices fast enough to
+>   matter there. On the real 60-year/30-city economy-oracle world the effect is real:
+>   Gini 0.609→0.649, top-10% share 0.422→0.409, mean firm lifespan 36.8→39.9yr — all
+>   moved, none left their bands.
 >
 > **Phase 2 (People):** 2.1 (`Kin` roster + widow regency), 2.2 (holdings authorship),
 > 2.3 (character as a phrase, no effects) and 2.6 (power shares) are built. **2.4
@@ -424,11 +476,11 @@ Nothing here can regress either oracle. This is the phase you can look at soones
 
 | # | Step | Gate |
 |---|---|---|
-| 2.1 | ~~**`Kin` roster** with gender; widows may inherit (1.2)~~ **DONE** — `kin[0]` mirrors the head, 2–4 siblings generated per founding/succession; an agnatic line's one route to a female head, `WIDOW_REGENCY_CHANCE`=8%. | ✅ `a_house_with_no_kin_is_bit_identical`; `widow_regency_occasionally_holds_an_agnatic_house` |
+| 2.1 | ~~**`Kin` roster** with gender; widows may inherit (1.2)~~ **DONE** — `kin[0]` mirrors the head, 2–4 siblings generated per founding/succession; an agnatic line's one route to a female head, `WIDOW_REGENCY_CHANCE`=8%. | ✅ `an_empty_kin_roster_pays_no_steward_cost_and_is_never_poached`; `widow_regency_occasionally_holds_an_agnatic_house` |
 | 2.2 | ~~**Holdings authorship** — kin vs hired steward~~ **DONE (simplified)** — `Kin.posted` is a SNAPSHOT taken at roster generation, not live-synced to holdings gained since (documented, not hidden); the Summary tab tags a family-run estate/office with the posted kin's name, silent (= hired) otherwise. | ✅ `tsc` |
 | 2.3 | ~~**`Character`** on Kin/Official/Figure, culture-derived, phrase only — no effects~~ **DONE (Kin only, not Official/Figure)** — four axes rolled per kin, `character_phrase` reads notable axes only (§3's own discipline), never wired to a decision. | ✅ `character_phrase_is_quiet_unless_notable`; trivially bit-identical (nothing reads `Kin.character`) |
-| 2.4 | **Character → knobs**, ±15% cap | ⏸ **DEFERRED** — see the finding below: this is the first Phase 2 item that touches real decisions, and needs iterative `econ_` verification per knob, not a single check at the end. |
-| 2.5 | **Stewards** — skill, wage, skim, poaching | ⏸ **DEFERRED** — same reason as 2.4: new economic mechanics (skim, wages) that move house wealth directly. |
+| 2.4 | ~~**Character → knobs**, ±15% cap~~ **DONE** — one touchpoint per axis (not all three the design lists per axis): boldness → fleet-buy threshold, greed → feud heat, civic → consumption/civic-pool rate, expansive → office-open threshold. `head_character_factor` is a true 1.0 no-op with no roster or an all-zero character. | ✅ `character_factor_is_a_true_noop_at_zero`; `character_factor_is_bounded_and_directional`; `econ_` bands hold (Gini 0.649, lifespan 39.9yr) |
+| 2.5 | ~~**Stewards** — skill, wage, skim, poaching~~ **DONE** — a hired (unposted) holding costs a small wage + skim (`apply_wealth_sinks`) and can be POACHED (`update_guilds_and_offices`); gated on a NON-EMPTY roster so an old save with no roster pays nothing — see the finding below. | ✅ `hired_offices_cost_more_than_family_run_ones`; `poaching_occasionally_takes_a_hired_office_never_a_family_one`; `a_guild_has_no_steward_cost_or_poaching`; `econ_` bands hold |
 | 2.6 | ~~**Power shares** + relations + modifiers, read-only~~ **DONE (power shares only)** — `kin_power_shares` (role × skill × loyalty, normalised); relations/modifiers between kin not built (no marriage/feud-at-the-kin-level state to derive them from yet). | ✅ `power_shares_always_sum_to_100` |
 
 ## Phase 3 — Politics
@@ -459,7 +511,9 @@ Nothing here can regress either oracle. This is the phase you can look at soones
 Carried forward, to be written as tests as their phase lands:
 
 1. `power_shares_always_sum_to_100`
-2. `a_house_with_no_kin_is_bit_identical`
+2. `an_empty_kin_roster_pays_no_steward_cost_and_is_never_poached` (renamed from
+   `a_house_with_no_kin_is_bit_identical` when Phase 2.4/2.5 made a roster's PRESENCE,
+   not just its content, a real behavioural difference — see the handoff block)
 3. `every_crisis_terminates`
 4. `allegiance_partitions_the_house`
 5. `faction_names_and_tints_are_distinct`

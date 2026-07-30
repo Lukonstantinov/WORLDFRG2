@@ -611,10 +611,14 @@ impl CampaignSim {
                 continue;
             }
             let (overlap, good, hub) = self.feud_overlap(a, b);
+            // Phase 2.4 · the greedier of the two heads (axis 1) heats the quarrel
+            // faster; the more honourable cools it — averaged since a feud has two
+            // sides, ±15% capped.
+            let heat_mod = (self.head_character_factor(a, 1) + self.head_character_factor(b, 1)) / 2.0;
             {
                 let f = &mut self.feuds[fi];
                 if overlap > 0.0 {
-                    f.intensity = (f.intensity + FEUD_HEAT * overlap).min(1.0);
+                    f.intensity = (f.intensity + FEUD_HEAT * heat_mod * overlap).min(1.0);
                     // Keep the feud pointed at what it is currently about — two houses
                     // whose quarrel has moved to a new market should say so.
                     if good >= 0 { f.good = good; }

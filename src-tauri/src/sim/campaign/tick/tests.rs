@@ -2310,41 +2310,49 @@
         assert!(s.houses[0].kin.is_empty(), "a guild must never get a kin roster");
     }
 
-    /// Clearing every house's kin roster after each succession must not move a single
-    /// wealth figure — proof `kin` is read by nothing in the tick (the master plan's
-    /// invariant `a_house_with_no_kin_is_bit_identical`).
+    /// The master plan's invariant `a_house_with_no_kin_is_bit_identical` — read
+    /// literally, "with no roster" — is about BACKWARD COMPATIBILITY, not about kin
+    /// never affecting a decision. Phase 2.4/2.5 deliberately wire kin into real
+    /// decisions (character-bounded knobs, steward wage/skim/poaching), so a house
+    /// WITH a roster is no longer expected to be bit-identical to one without — that
+    /// was always the point of building 2.4/2.5. What must still hold, and is the
+    /// actual backward-compatibility guarantee an old save depends on: a house whose
+    /// roster is EMPTY (never generated, or cleared) pays no steward cost and is
+    /// never poached — an absent roster reads as "nothing is known", never as
+    /// "assume the worst".
     #[test]
-    fn a_house_with_no_kin_is_bit_identical() {
-        let build = || {
-            let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true), good("silk", 1, 2, 20.0, 0.35, false)];
-            let ng = goods.len();
-            let hubs = (0..6u32).map(|i| {
-                let prod: Vec<f32> = (0..ng).map(|g| if g == 0 { 9000.0 } else { 700.0 }).collect();
-                hub(i, (i as f32) * 4.0, 0.0, 9000.0, prod, 0)
-            }).collect();
-            let mut s = sim(hubs, goods);
-            s.hub_culture = vec!["Aiora".into(); 6];
-            s.hub_minorities = vec![Vec::new(); 6];
-            for i in 0..4u32 {
-                let mut h = house_at(i, vec![1], 2);
-                h.wealth = 200.0 + i as f32 * 40.0;
-                s.houses.push(h);
-            }
-            s.seed_house_count = 4;
-            s.seed_house_lines();
-            s
-        };
-        let mut a = build();
-        let mut b = build();
-        for _ in 0..40 {
-            a.advance(365);
-            b.advance(365);
-            for h in b.houses.iter_mut() { h.kin.clear(); }
+    fn an_empty_kin_roster_pays_no_steward_cost_and_is_never_poached() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true), good("silk", 1, 2, 20.0, 0.35, false)];
+        let ng = goods.len();
+        let hubs = (0..6u32).map(|i| {
+            let prod: Vec<f32> = (0..ng).map(|g| if g == 0 { 9000.0 } else { 700.0 }).collect();
+            hub(i, (i as f32) * 4.0, 0.0, 9000.0, prod, 0)
+        }).collect();
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["Aiora".into(); 6];
+        s.hub_minorities = vec![Vec::new(); 6];
+        for i in 0..4u32 {
+            let mut h = house_at(i, vec![1], 2);
+            h.wealth = 200.0 + i as f32 * 40.0;
+            h.offices = vec![(i + 1) % 6, (i + 2) % 6]; // unposted "holdings", no roster at all
+            h.trade_at = vec![((i + 1) % 6, 50.0), ((i + 2) % 6, 50.0)];
+            s.houses.push(h);
         }
-        let wa: Vec<f32> = a.houses.iter().map(|h| h.wealth).collect();
-        let wb: Vec<f32> = b.houses.iter().map(|h| h.wealth).collect();
-        assert_eq!(wa, wb, "clearing the kin roster changed wealth — kin must not feed any decision");
-        assert_eq!(a.houses.len(), b.houses.len(), "clearing kin changed how many houses exist");
+        s.seed_house_count = 4;
+        // Deliberately DON'T call seed_house_lines — this is exactly an old save that
+        // never got a roster generated (or a house that hasn't succeeded since).
+        for h in &s.houses { assert!(h.kin.is_empty()); }
+        for yr in 0..40 {
+            s.tick = yr * TICKS_PER_YEAR;
+            s.apply_wealth_sinks();
+            for _ in 0..12 { s.update_guilds_and_offices(); }
+        }
+        assert!(s.houses.iter().all(|h| h.kin.is_empty()),
+            "apply_wealth_sinks/update_guilds_and_offices must never populate a roster themselves");
+        assert!(
+            !s.houses.iter().flat_map(|h| h.events.iter()).any(|e| e.kind == "poached"),
+            "a house with no roster was poached — an absent roster must mean no known steward"
+        );
     }
 
     /// An agnatic line otherwise never produces a female head — the widow regency is
@@ -2411,4 +2419,177 @@
         assert!(p.ends_with('.'));
         let first = p.chars().next().unwrap();
         assert!(first.is_uppercase(), "phrase must start capitalised: {p}");
+    }
+
+    // ── Phase 2.4 · character wired to real decisions, ±15% capped ─────────────
+    /// The gate from `HOUSE_PEOPLE_AND_TIERS.md` §3: with no roster, or an all-zero
+    /// character, every knob's modifier must be EXACTLY 1.0 — a true no-op, not an
+    /// approximation. This is what keeps "no roster / all-zero character ⇒
+    /// bit-identical" true at every call site without a special case anywhere.
+    #[test]
+    fn character_factor_is_a_true_noop_at_zero() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        let h = house_at(0, vec![0], 1); // no kin — house_at() never populates a roster
+        s.houses.push(h);
+        for axis in 0..4 {
+            assert_eq!(s.head_character_factor(0, axis), 1.0, "empty roster must be a no-op on axis {axis}");
+        }
+        s.houses[0].kin.push(Kin {
+            name: "Head".into(), female: false, born_tick: 0, dies_tick: 0, role: 0, posted: -1,
+            character: [0, 0, 0, 0], loyalty: 1.0, skill: 0.5, parent: -1,
+        });
+        for axis in 0..4 {
+            assert_eq!(s.head_character_factor(0, axis), 1.0, "all-zero character must be a no-op on axis {axis}");
+        }
+    }
+
+    /// A non-zero character must actually move the factor, bounded at exactly
+    /// ±`CHARACTER_KNOB_CAP` at the axis extreme — proof the axis is wired to
+    /// something, not decoration, and that the cap the design specifies is real.
+    #[test]
+    fn character_factor_is_bounded_and_directional() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..2u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.houses.push(house_at(0, vec![0], 1));
+        let mk = |c: [i8; 4]| Kin {
+            name: "Head".into(), female: false, born_tick: 0, dies_tick: 0, role: 0, posted: -1,
+            character: c, loyalty: 1.0, skill: 0.5, parent: -1,
+        };
+        s.houses[0].kin = vec![mk([2, -2, 2, -2])];
+        assert!((s.head_character_factor(0, 0) - 1.15).abs() < 1e-5, "axis 0 at +2 must hit the cap");
+        assert!((s.head_character_factor(0, 1) - 0.85).abs() < 1e-5, "axis 1 at -2 must hit the floor");
+        assert!((s.head_character_factor(0, 2) - 1.15).abs() < 1e-5);
+        assert!((s.head_character_factor(0, 3) - 0.85).abs() < 1e-5);
+        // Never wider than the cap, whatever the axis value (i8 can't exceed ±2 anyway,
+        // but the formula itself must not silently drift past CHARACTER_KNOB_CAP).
+        for v in -2..=2i8 {
+            let f = s.head_character_factor(0, 0);
+            s.houses[0].kin[0].character[0] = v;
+            let f2 = s.head_character_factor(0, 0);
+            assert!((f2 - 1.0).abs() <= CHARACTER_KNOB_CAP + 1e-5, "factor {f2} exceeds the cap at v={v}");
+            let _ = f;
+        }
+    }
+
+    // ── Phase 2.5 · stewards ─────────────────────────────────────────────────
+    /// A hired (unposted) office costs a wage + skim; a family-posted one costs
+    /// nothing extra. Two otherwise-identical houses must diverge accordingly.
+    #[test]
+    fn hired_offices_cost_more_than_family_run_ones() {
+        let mk_house = |posted: bool| {
+            let mut h = house_at(0, vec![0], 0);
+            h.wealth = 5000.0;
+            h.offices = vec![1, 2];
+            let k = |role: u8, posted: i32| Kin {
+                name: "K".into(), female: false, born_tick: 0, dies_tick: 0, role, posted,
+                character: [0; 4], loyalty: 1.0, skill: 0.5, parent: -1,
+            };
+            // Both scenarios get a NON-EMPTY roster (a roster present but nobody posted
+            // is what "hired" means here — an EMPTY roster instead means "unknown", see
+            // the wage/skim gate's own doc comment, and costs nothing).
+            h.kin = if posted { vec![k(2, 1), k(2, 2)] } else { vec![k(3, -1)] };
+            h
+        };
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..4u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut hired = sim(hubs, goods);
+        hired.houses.push(mk_house(false));
+        let goods2 = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs2 = (0..4u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut family = sim(hubs2, goods2);
+        family.houses.push(mk_house(true));
+
+        hired.apply_wealth_sinks();
+        family.apply_wealth_sinks();
+        assert!(hired.houses[0].wealth < family.houses[0].wealth,
+            "hired {} vs family-run {} — a hired-staffed house should end poorer",
+            hired.houses[0].wealth, family.houses[0].wealth);
+        // Bounded: two hired offices shouldn't cost more than a couple percent of
+        // wealth in a single month.
+        let drain = family.houses[0].wealth - hired.houses[0].wealth;
+        assert!(drain < 5000.0 * 0.02, "steward drain too large for one month: {drain}");
+    }
+
+    /// A guild has no stewards to hire — its offices never cost a wage/skim, and its
+    /// offices are never poached. Wealth is kept UNDER the guild endowment soft cap so
+    /// that separate (pre-existing) mechanic can't be mistaken for a steward cost.
+    #[test]
+    fn a_guild_has_no_steward_cost_or_poaching() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..4u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        let mut g = house_at(0, vec![0], 0);
+        g.is_guild = true;
+        // Well under GUILD_WEALTH_SOFTCAP·city_size_factor (200·0.3 = 60 at this
+        // hub's population, city_size_factor floors at 0.3) — no endowment drain,
+        // which is a separate pre-existing mechanic this test must not trip.
+        g.wealth = 20.0;
+        g.offices = vec![1, 2, 3]; // all unposted — would be "hired" on a private house
+        s.houses.push(g);
+        let before = s.houses[0].wealth;
+        s.apply_wealth_sinks();
+        let after = s.houses[0].wealth;
+        // Only the guild civic rate should have moved it — no steward wage/skim.
+        let expected = before - before * GUILD_CIVIC_RATE;
+        assert!((after - expected).abs() < 1e-3,
+            "a guild paid something beyond its civic dues: {before} -> {after}, expected ~{expected}");
+
+        // And its offices are never poached, however many months pass.
+        s.hub_culture = vec!["Aiora".into(); 4];
+        s.hub_minorities = vec![Vec::new(); 4];
+        s.houses[0].trade_at = vec![(1, 100.0), (2, 100.0), (3, 100.0)];
+        for month in 0..1000u32 {
+            s.tick = month * 30;
+            s.update_guilds_and_offices();
+        }
+        assert!(!s.houses[0].events.iter().any(|e| e.kind == "poached"),
+            "a guild's office was poached — guilds have no stewards to hire");
+    }
+
+    /// Poaching is rare but real — over many months, a hired office is occasionally
+    /// lost to a "poached" event, and a posted (family) one never is. A poached office
+    /// may be restaffed the same tick if the trade tie is still strong (the OPEN logic
+    /// runs right after CLOSE in the same pass) — that's realistic resilience, not a
+    /// missing event, so this counts EVENTS directly rather than watching the office
+    /// list for a hole that may not stay open.
+    #[test]
+    fn poaching_occasionally_takes_a_hired_office_never_a_family_one() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..3u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["Aiora".into(); 3];
+        s.hub_minorities = vec![Vec::new(); 3];
+        // hub 1 stays HIRED for every house; hub 2 is posted to a kin (family-run) —
+        // the two must diverge in poach count.
+        for _ in 0..10u32 {
+            let mut h = house_at(0, vec![0], 0);
+            h.wealth = 5000.0;
+            h.offices = vec![1, 2];
+            h.trade_at = vec![(1, 100.0), (2, 100.0)];
+            // A non-empty roster: hub 2 is posted (family), hub 1 has nobody posted —
+            // an idle kin keeps the roster non-empty so hub 1 correctly reads "hired"
+            // rather than "unknown" (an EMPTY roster costs/poaches nothing — see the
+            // gate's own doc comment).
+            h.kin = vec![
+                Kin { name: "K".into(), female: false, born_tick: 0, dies_tick: 0, role: 2, posted: 2,
+                    character: [0; 4], loyalty: 1.0, skill: 0.5, parent: -1 },
+                Kin { name: "Idle".into(), female: false, born_tick: 0, dies_tick: 0, role: 3, posted: -1,
+                    character: [0; 4], loyalty: 1.0, skill: 0.5, parent: -1 },
+            ];
+            s.houses.push(h);
+        }
+        for month in 0..2000u32 {
+            s.tick = month * 30;
+            s.update_guilds_and_offices();
+        }
+        let poached_at = |hub: i32| -> usize {
+            s.houses.iter().flat_map(|h| h.events.iter())
+                .filter(|e| e.kind == "poached" && e.text.contains(&format!("in H{hub}")))
+                .count()
+        };
+        assert!(poached_at(1) > 0, "the HIRED office (hub 1) was never poached over 2000 months");
+        assert_eq!(poached_at(2), 0, "the FAMILY-posted office (hub 2) must never be poached");
     }

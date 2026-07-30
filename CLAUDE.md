@@ -339,21 +339,43 @@ serde-defaulted so old saves load). Grouped by theme:
   generation time, not continuously synced to holdings gained since. Each kin carries
   four culture-derived character axes (−2..+2: caution↔boldness · honour↔greed ·
   private↔civic · rooted↔expansive), read into a phrase by `character_phrase`
-  (`sim::tick`) that names only the notable axes — nothing in the tick reads
-  `Kin.character` yet, wiring an axis to the decision it names is Phase 2.4,
-  deliberately deferred (see below). `kin_power_shares` (Phase 2.6) turns role × skill
-  × loyalty into a 0..100 share per kin that always sums to exactly 100
-  (`power_shares_always_sum_to_100`) — pure display, nothing else. **The widow as a
-  capable merchant**: a purely `Agnatic` line otherwise never produces a female head
-  (`heir_is_female` always returns false for it), so `succeed_house` rolls an
-  independent `WIDOW_REGENCY_CHANCE`=8% chance of a widow regent instead — the roster
-  doesn't yet track marriages, so this can't be conditioned on "is there actually a
-  widow". `HousesPanel`'s Summary tab tags a family-run holding with its posted kin's
-  name (silent = hired, the same "quiet unless it matters" rule as everywhere else
-  here); the dossier's 👪 Kin tab lists the full roster. **Phase 2.4 (character wired
-  to real decisions) and 2.5 (stewards with skim/wage mechanics) are NOT built** —
-  both would move house wealth directly and need `econ_` verification per knob as
-  they're built, not a single check at the end.
+  (`sim::tick`) that names only the notable axes. `kin_power_shares` (Phase 2.6) turns
+  role × skill × loyalty into a 0..100 share per kin that always sums to exactly 100
+  (`power_shares_always_sum_to_100`). **The widow as a capable merchant**: a purely
+  `Agnatic` line otherwise never produces a female head (`heir_is_female` always
+  returns false for it), so `succeed_house` rolls an independent
+  `WIDOW_REGENCY_CHANCE`=8% chance of a widow regent instead — the roster doesn't yet
+  track marriages, so this can't be conditioned on "is there actually a widow".
+  `HousesPanel`'s Summary tab tags a family-run holding with its posted kin's name
+  (silent = hired, the same "quiet unless it matters" rule as everywhere else here);
+  the dossier's 👪 Kin tab lists the full roster.
+- **Character wired to decisions (Phase 2.4):** `head_character_factor(hi, axis)`
+  reads `kin[0]`'s character and returns a multiplier within ±`CHARACTER_KNOB_CAP`
+  (0.15) of 1.0 — a TRUE 1.0 no-op with no roster or an all-zero axis, never an
+  approximation, which is what keeps "no roster / all-zero character ⇒
+  bit-identical" true without a special case at any call site. One touchpoint per
+  axis (not all three `HOUSE_PEOPLE_AND_TIERS.md` §3 lists per axis): axis 0
+  (boldness) scales the fleet-buy affordability threshold in `decide_fleets`; axis 1
+  (greed) scales how fast a feud HEATS in `update_feuds` (averaged across both
+  houses in the quarrel); axis 2 (civic-mindedness) scales the private
+  consumption-into-civic-pool rate in `apply_wealth_sinks` — the same rate that
+  fuels `fund_public_works`; axis 3 (expansiveness) scales the office-opening
+  affordability threshold in `update_guilds_and_offices`.
+- **Stewards (Phase 2.5):** a holding with no POSTED kin running it is "hired", and
+  costs `STEWARD_WAGE` (fixed) + `STEWARD_SKIM_RATE` (proportional to wealth, capped
+  to `STEWARD_SKIM_HOLDINGS_CAP` holdings' worth) every month in `apply_wealth_sinks`,
+  and may be `STEWARD_POACH_CHANCE` (1%/month) POACHED away in
+  `update_guilds_and_offices` — reusing the office-close machinery with a distinct
+  `"poached"` event kind. A poached office can be immediately restaffed by the same
+  pass's OPEN logic if the trade tie is still strong — that's realistic resilience,
+  not a missing event. **Both mechanics are gated on a NON-EMPTY roster** —
+  `!self.houses[hi].kin.is_empty()`. This was a real bug the first time: reading an
+  EMPTY roster as "every holding is hired" (rather than "nothing is known") would
+  have made an old save's houses silently cheaper to run than a freshly-generated
+  one, breaking the master plan's own backward-compatibility invariant. Caught by
+  `an_empty_kin_roster_pays_no_steward_cost_and_is_never_poached` (renamed from
+  `a_house_with_no_kin_is_bit_identical`, whose old premise Phase 2.4/2.5
+  deliberately supersede for a house that DOES have a roster).
 - **Succession & inheritance (Phase 0.4):** each people carries a **line rule** (who may
   inherit) and a **division rule** (how the estate divides) resolved once from its language
   kit into `culture_rules` (`sim/shared/inheritance.rs`, §8.15). `succeed_house` reads them

@@ -2068,6 +2068,15 @@ impl CampaignSim {
                 if self.office_leased(hi, ohub) || self.backs_active_contract(hi, ohub) { continue; }
                 let vol = self.houses[hi].trade_at.iter()
                     .find(|(hb, _)| *hb == ohub).map(|(_, v)| *v).unwrap_or(0.0);
+                // Phase 2.5 · POACHING — a HIRED (unposted) office's steward is able,
+                // and can be lured away. A posted kin is loyal to the family and is
+                // never poached; a guild has no stewards to hire at all; NO ROSTER
+                // means no known steward to poach (same "no roster ⇒ bit-identical"
+                // reasoning as the wage/skim gate above).
+                let hired = !self.houses[hi].is_guild && !self.houses[hi].kin.is_empty()
+                    && !self.houses[hi].kin.iter().any(|k| k.role == 2 && k.posted == ohub as i32);
+                let poached = hired
+                    && hash01(self.seed, tick as u64 ^ 0xF0EA, ohub as u64 ^ (hi as u64) << 24) < STEWARD_POACH_CHANCE;
                 if broke || vol < close_floor {
                     self.houses[hi].offices.retain(|&x| x != ohub);
                     let cn = self.houses[hi].name.clone();
@@ -2079,6 +2088,18 @@ impl CampaignSim {
                     self.journal.push(JournalEntry {
                         tick, kind: "office_closed".into(), hub: ohub as i32, good: -1, value: 0.0,
                         text: format!("{} closes its office in {}", cn, city),
+                    });
+                } else if poached {
+                    self.houses[hi].offices.retain(|&x| x != ohub);
+                    let cn = self.houses[hi].name.clone();
+                    let city = self.hubs.get(ohub as usize).map(|x| x.name.clone()).unwrap_or_default();
+                    self.houses[hi].events.push(HouseEvent {
+                        tick, kind: "poached".into(),
+                        text: format!("{}'s steward in {} is lured away by a rival", cn, city),
+                    });
+                    self.journal.push(JournalEntry {
+                        tick, kind: "poached".into(), hub: ohub as i32, good: -1, value: 0.0,
+                        text: format!("{} loses its office in {} to a poached steward", cn, city),
                     });
                 }
             }
@@ -2099,7 +2120,10 @@ impl CampaignSim {
             if let Some((hb, _)) = cand {
                 // Cost scales with the host city's importance (population).
                 let cost = OFFICE_COST_BASE * (1.0 + self.hubs[hb].population / 50_000.0);
-                if self.houses[hi].wealth >= cost * 1.5 {
+                // Phase 2.4 · an EXPANSIVE head opens a foothold on a thinner cushion, a
+                // ROOTED one wants a fatter one first — axis 3, ±15% capped.
+                let afford_mult = 1.5 * self.head_character_factor(hi, 3).recip();
+                if self.houses[hi].wealth >= cost * afford_mult {
                     self.houses[hi].wealth -= cost;
                     self.houses[hi].offices.push(hb as u32);
                     let cn = self.houses[hi].name.clone();
@@ -2674,9 +2698,9 @@ impl CampaignSim {
 
     // ── Phase 2.1 · the Kin roster ───────────────────────────────────────────────
 
-    /// Four culture-derived axes, −2..+2 (§3): caution↔boldness · honour↔greed ·
-    /// private↔civic · rooted↔expansive. Deterministic on `salt`; DISPLAY ONLY —
-    /// nothing in the tick reads a `Kin.character`, so any roll here is safe.
+    /// Four culture-derived axes, −2..+2 (§3): 0 caution↔boldness · 1 honour↔greed ·
+    /// 2 private↔civic · 3 rooted↔expansive. Read by `head_character_factor` (Phase
+    /// 2.4) to bound-modify one real decision per axis.
     fn roll_character(&self, salt: u64) -> [i8; 4] {
         let mut out = [0i8; 4];
         for (i, o) in out.iter_mut().enumerate() {
@@ -2739,6 +2763,32 @@ impl CampaignSim {
             });
         }
         self.houses[hi].kin = roster;
+    }
+
+    // ── Phase 2.4 · character wired to a real decision, ±15% capped ─────────────
+    // Four axes, four touchpoints — one real decision each, per §3's own rule that an
+    // axis that doesn't move something is horoscope text. Deliberately ONE touchpoint
+    // per axis rather than all three the design lists (e.g. boldness ALSO names
+    // expedition launch odds and contract terms) — enough to prove the axis is wired,
+    // not decoration, without the larger surface area of every listed knob at once.
+    //
+    //   0 caution↔boldness   → the fleet-buy affordability threshold (`decide_fleets`)
+    //   1 honour↔greed       → how fast a feud HEATS (`update_feuds`)
+    //   2 private↔civic      → the house's conspicuous-consumption rate into its
+    //                          seat's civic pool (`apply_wealth_sinks`), which is what
+    //                          FUNDS `fund_public_works` in the first place
+    //   3 rooted↔expansive   → the affordability threshold for opening a new office
+    //                          (`update_guilds_and_offices`)
+    //
+    /// A bounded ±`CHARACTER_KNOB_CAP` modifier from the HEAD's own character
+    /// (`kin[0]`) on `axis`, as a multiplier centred on 1.0. Returns exactly 1.0 (a
+    /// true no-op, not an approximation) when there's no roster or the axis rolled 0
+    /// — which is what keeps "no roster / all-zero character ⇒ bit-identical" true
+    /// without any special-casing at the call sites.
+    pub(crate) fn head_character_factor(&self, hi: usize, axis: usize) -> f32 {
+        let Some(head) = self.houses.get(hi).and_then(|h| h.kin.first()) else { return 1.0; };
+        let v = head.character.get(axis).copied().unwrap_or(0) as f32;
+        1.0 + (v / 2.0) * CHARACTER_KNOB_CAP
     }
 
     /// Close the outgoing head's record: death tick, age, closing wealth, and the
@@ -3097,10 +3147,13 @@ impl CampaignSim {
             // Shipping dynasties build vessels at a discount.
             let disc = if self.houses[hi].archetype == ARCH_FLEET { FLEET_SHIP_DISCOUNT } else { 1.0 };
             // BUY: capital to spare and every vessel of the favoured kind is busy.
-            if coastal && sea_busy && w > SHIP_COST * 2.5 {
+            // Phase 2.4 · a bold head buys on thinner margins (a lower multiplier), a
+            // cautious one waits for a fatter cushion — axis 0, ±15% capped.
+            let buy_mult = 2.5 * self.head_character_factor(hi, 0).recip();
+            if coastal && sea_busy && w > SHIP_COST * buy_mult {
                 wealth -= SHIP_COST * disc;
                 fleet_sea += 1;
-            } else if !coastal && land_busy && w > CARAVAN_COST * 2.5 {
+            } else if !coastal && land_busy && w > CARAVAN_COST * buy_mult {
                 if hash01(self.seed, tick as u64 ^ 0x21B0, hi as u64) < 0.30 {
                     wealth -= RIVER_COST * disc;
                     fleet_river += 1;
