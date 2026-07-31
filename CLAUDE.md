@@ -249,7 +249,7 @@ Run in order. Each phase depends on previous phases' data.
 | 6b | `sim_classify_biomes` | **41 ecological biomes** (needs rivers+lakes) — see §8.12 |
 | 7 | `sim_generate_settlements` | Habitability scoring → city placement |
 | 7b | `sim_generate_provinces` | Cost-flood + feature-snap province partition (AFTER settlements) |
-| 8 | `sim_biological` | Shark + shipworm risk + trade-good belts (takes seed + gem_deposits) |
+| 8 | `sim_biological` | Shark + shipworm risk + trade-good belts + ORE DEPOSITS (§8.16; `gem_deposits` now means ORE DISTRICTS) |
 | 9 | `compute_political` | (query-only) Re-rank settlements by trade power + influence discs |
 | 10 | `compute_economy` | (query-only) **Market equilibrium**: stock-based prices, barter, currency goods, wealth, chokepoints |
 | All | `sim_run_all` | Phases 1-8 from plates |
@@ -880,7 +880,11 @@ sim/                            ← organised into per-phase step folders; mod.r
   step6_soil_fertility/         ← Ph6: soil.rs (12 soil types) · fertility.rs (fisheries)
                                   · biome.rs (Ph6b: 41 ECOLOGICAL BIOMES — see §8.12)
   step7_settlements/settlements.rs ← Ph7: habitability → city placement (Settlement struct)
-  step8_biological_goods/       ← Ph8: biological.rs (shark/shipworm + belts + deposits)
+  step8_biological_goods/       ← Ph8: biological.rs (shark/shipworm + belts)
+                                  · deposits.rs (THE ORE GEOLOGY — 11 deposit
+                                    models scored from plate boundaries/volcanism,
+                                    belt→district→working hierarchy, per-working
+                                    grade/extent/depth — see §8.16)
                                   · goods_spec.rs (GoodSpec, 45 belts + ~21 manufactured)
   shared/                       ← cultures.rs (organic peoples map + 14 traits + per-kit
                                     male AND female given names) · inheritance.rs (the LAW
@@ -1231,8 +1235,8 @@ comes from hand-coded detectors rather than from monthly extremes.
 - **SEEDED** (rest) — `localize_good` picks ONE weighted seed + flood-fills one
   homeland, with ~4% map-width island-jump. Land goods stop at mountains ≥3000 m
   (`MOUNTAIN_NORM`≈0.339); marine goods stop where the score envelope drops.
-- **GEMSTONES / metals (`Deposits`)** — discrete blobs (`place_deposits`), each with
-  its own per-mineral ore-province noise field gated by an elevation floor.
+- **GEMSTONES / metals / stone (`Deposits`)** — placed by REAL ORE GEOLOGY
+  (`step8_biological_goods/deposits.rs`, §8.16), not by an elevation floor.
 - **MANUFACTURED** (`Distribution::Manufactured`) — finished goods made in cities from
   a recipe (`GoodSpec.inputs`), no per-cell belt.
 
@@ -1433,8 +1437,10 @@ Four rules that are easy to get wrong here, all covered by `biome::tests`:
   Repainting humid cells as "gallery forest" just adds noise.
 - **Mangroves are frost-bounded** (coldest month ≥ 5 °C), which is why they stop
   near 30° on the real Earth; the same tidal flat carries salt marsh beyond that.
-- **`TIDAL_MAX_M` is 80 m, not a true tidal elevation.** A cell is 30–110 km
-  across, so the honest question is "is this a low depositional coast" — tightening
+- **`TIDAL_MAX_M` is 80 m, not a true tidal elevation.** A cell is ~11 km across at
+  the standard 3600×1800 grid (5.6 km on Large; `KM_EQUATOR / grid_w`), and a shore
+  cell's elevation is a coarse average over that,
+  so the honest question is "is this a low depositional coast" — tightening
   it toward real tidal heights empties the biome, since the elevation field's
   coastal taper rarely lands a shore cell below ~40 m.
 
@@ -1598,6 +1604,79 @@ partible, because a division adds small firms at the bottom as fast as it trims 
 
 ---
 
+### 8.16 Ore deposits — the geology (`step8_biological_goods/deposits.rs`)
+
+Ore geology is almost entirely a function of TECTONIC SETTING. That is the
+organising principle of the discipline, not flavour — and until this module landed
+the placer ignored it completely, deciding where a metal or gem went from an
+absolute elevation floor plus a per-good noise field. Phase 1 already computes
+`boundary_type`, `plate_index` and `is_volcanic`; phase 5 already computes rivers.
+None of it was read.
+
+A deposit good now carries a **`DepositModel`**, and the model decides placement:
+
+| Model | Scored from | Type localities |
+|---|---|---|
+| `VolcanicArc` | volcanism + convergent proximity (~25 cells ≈ the real arc-trench gap) | Potosí, Cyprus, Rio Tinto, Almadén |
+| `CollisionalOrogen` | high + rugged + convergent + **not** volcanic | Cornwall tin, the Erzgebirge, Muzo |
+| `Craton` | far from ANY boundary + low relief + interior | **Clifford's Rule** — economic kimberlite occurs only over thick Archean lithosphere |
+| `Rift` | divergent OR flood-basalt plateau | Kupferschiefer, the Deccan |
+| `CarbonatePlatform` | low + flat + old shallow sea | Mendips lead, Silesia zinc |
+| `ContactMetamorphic` | platform carbonate NEXT TO an orogen | Carrara, Mogok ruby, Sar-i-Sang lapis |
+| `EvaporiteBasin` | Köppen B + low + flat | Wieliczka, Hallstatt |
+| `Placer` | **derived** — walked downstream from a parent lode | Pactolus, Golconda, Ratnapura |
+| `Bog` | wet + low + flat + near water | medieval N-European bog iron |
+| `CoastalMarine` | shelf / beach / warm shallows | Baltic amber, Gulf pearls |
+| `Weathering` | **derived** — supergene alteration of a parent, arid | Nishapur turquoise |
+
+`deposits::default_model_for(id)` ships the correct model per mineral; a spec may
+override via `DepositSpec.model` / `placer_frac` / `parent`, all serde-defaulted.
+
+**The three-level hierarchy.** Real ore geology is described at three scales and the
+old placer collapsed all three into one cell: metallogenic BELT (100–1000 km, the
+setting field × per-mineral noise) → ore DISTRICT (10–60 km, `MIN_DISTRICT_SEP_KM`
+= 320) → WORKING (1–10 km = one cell). A cell is already ~11 km, i.e. FINER than a
+district, so clustering was never a cell-size problem — it was `min_sep = w*0.025`
+≈ 1000 km between single cells.
+
+**Per-working state** the u8 belt cannot carry, persisted to `metadata["deposits"]`
+exactly as the province list is: `grade` (→ the quality tier, so "tiers of gems"
+becomes possible), `extent` (weak…world-class), `depth` (surface / shallow / deep /
+**flooded**). The belt column is written as `grade × depth_workability`, so a deep
+rich body is visible but largely LOCKED — inventory for a mining industry that does
+not exist yet.
+
+Five rules for anyone changing this:
+
+- **A mineral must never silently vanish.** This is the failure mode this codebase
+  keeps hitting (`highland_cap` exists for the same reason). Two guards: the
+  threshold-loosening loop, and — when a world's plate geometry offers no ground at
+  all for a model — a forced fall back to the relief proxy. That is not
+  hypothetical: most divergent boundaries on any Earth-like world are OCEANIC, so
+  keying `Rift` strictly on the boundary emptied it, and
+  `no_shipped_mineral_places_nothing` caught it.
+- **Template worlds have NO plate data** (`boundary_type` is empty). Every model
+  degrades to a relief-and-continentality proxy;
+  `template_world_without_plates_still_places` guards it.
+- **Diamond belongs on flat cratons, not peaks.** The old spec said `min_elev: 0.55`
+  — the highest mountains — which is exactly backwards.
+  `diamond_lands_on_craton_not_on_peaks` guards it.
+- **A derived model needs its parent placed first.** `Weathering` minerals are run
+  in a SECOND pass after the main loop, rather than reordering it (which would
+  change every other good's placement seed order).
+- **`GeoContext` is built ONCE per world**, never per good — 45 goods × a full-grid
+  BFS would be a real cost. Its distance fields are multi-source BFS (a linear
+  sweep from all seeds at once), never an outward scan per cell (§8.9 rule 1).
+
+> **Known follow-on, NOT built:** nothing yet reads `grade` into the quality system
+> (`economy.rs:305` still derives a hub's gem quality from its SHARE OF WORLD
+> PRODUCTION, so a big cheap deposit reads as fine stones — backwards), and nothing
+> reads `depth` at all. A mine is still a substring match on the good's name
+> (`tick/mod.rs`) and is mechanically identical to a farm. See
+> `docs/DEPOSITS_AND_MINING_PLAN.md` slices 2 and 4.
+
+---
+
 ## 9. Docs (`docs/`)
 
 **START HERE — the current plan**
@@ -1614,6 +1693,13 @@ SCOREBOARD.md                     ← ⭐ The project held as ~12 NUMBERS instea
 ```
 PROVINCE_SYSTEM_PLAN.md           ← The province layer's design + status (see FIX_PLAN B1);
                                     the shipped algorithm itself is §8.10 above
+DEPOSITS_AND_MINING_PLAN.md       ← ⭐ APPROVED, SLICE 1 BUILT. Ore geology (§8.16,
+                                    done) → grade→quality rewire → txt goods import
+                                    → mining as an industry (depth gating, mine vs
+                                    quarry) → quarry window, mining settlements,
+                                    growing settlement catchment. Carries the
+                                    measured findings that motivated it and its own
+                                    "deliberately not built" list
 CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next three workstreams:
                                     the settlement panel rework · provinces (enclave fix,
                                     sizing, real-terrain view, goods & exploitation) ·

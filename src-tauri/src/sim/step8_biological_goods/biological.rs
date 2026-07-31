@@ -289,27 +289,23 @@ pub struct DepositParams {
     pub salt: u64,
     pub count_num: u32, // count = gem_deposits * count_num / count_den (min 1)
     pub count_den: u32,
-    /// `false` = highland deposit (candidates ranked purely by elevation, e.g.
-    /// gems/metals). `true` = suitability deposit: candidates come from the good's
-    /// own climate/relief score (e.g. salt's arid coast, iron's hill country), so
-    /// the scatter follows where the good actually belongs rather than the peaks.
-    pub suitability: bool,
 }
 
-/// Deposit parameters for goods placed as scattered sporadic deposits (mostly
-/// single-cell, occasionally a small rich cluster), else None (the good uses a
-/// continuous climate-scored belt instead). Highland deposits lock to elevation;
-/// suitability deposits (salt/iron) scatter through their climate/relief score.
+/// Deposit parameters for the six BUILT-IN deposit goods. Since the geological
+/// placer landed (`sim::deposits`) the only field placement still reads is `salt`
+/// — kept so a built-in mineral's district centres stay reproducible against the
+/// seed — plus the counts, which now mean ORE DISTRICTS rather than single cells.
+/// WHERE a mineral goes is decided by its `DepositModel`, not by `min_elev`.
 pub fn deposit_params(g: usize) -> Option<DepositParams> {
     match g {
-        GOOD_GEMSTONES => Some(DepositParams { min_elev: GEM_MIN_ELEV, salt: 0xA1B2C3D4E5F60718, count_num: 1, count_den: 1, suitability: false }),
-        GOOD_COPPER    => Some(DepositParams { min_elev: 0.30, salt: 0xC0FFEE_1234_5678, count_num: 1, count_den: 1, suitability: false }),
-        GOOD_TIN       => Some(DepositParams { min_elev: 0.35, salt: 0x7117_BEEF_D00D_F00D, count_num: 2, count_den: 3, suitability: false }),
-        GOOD_GOLD      => Some(DepositParams { min_elev: 0.45, salt: 0x901D_901D_901D_901D, count_num: 3, count_den: 2, suitability: false }),
+        GOOD_GEMSTONES => Some(DepositParams { min_elev: GEM_MIN_ELEV, salt: 0xA1B2C3D4E5F60718, count_num: 1, count_den: 1 }),
+        GOOD_COPPER    => Some(DepositParams { min_elev: 0.30, salt: 0xC0FFEE_1234_5678, count_num: 1, count_den: 1 }),
+        GOOD_TIN       => Some(DepositParams { min_elev: 0.35, salt: 0x7117_BEEF_D00D_F00D, count_num: 2, count_den: 3 }),
+        GOOD_GOLD      => Some(DepositParams { min_elev: 0.45, salt: 0x901D_901D_901D_901D, count_num: 3, count_den: 2 }),
         // Salt (arid-coast pans) and iron (hill country) are now scattered sporadic
         // deposits driven by their suitability score, not continuous belts.
-        GOOD_SALT      => Some(DepositParams { min_elev: 0.0, salt: 0x5A17_5A17_5A17_5A17, count_num: 6, count_den: 1, suitability: true }),
-        GOOD_IRON      => Some(DepositParams { min_elev: 0.0, salt: 0x1804_1804_1804_1804, count_num: 5, count_den: 1, suitability: true }),
+        GOOD_SALT      => Some(DepositParams { min_elev: 0.0, salt: 0x5A17_5A17_5A17_5A17, count_num: 6, count_den: 1 }),
+        GOOD_IRON      => Some(DepositParams { min_elev: 0.0, salt: 0x1804_1804_1804_1804, count_num: 5, count_den: 1 }),
         _ => None,
     }
 }
@@ -747,10 +743,15 @@ pub fn apply_salt_pans(buf: &mut WorldBuffer, lakes: &[crate::sim::rivers::Lake]
     }
 }
 
+/// Place every good's belt. Returns the discrete ORE WORKINGS (see `sim::deposits`)
+/// — the per-deposit grade / extent / depth that the u8 belt column cannot carry.
+/// The belt column is still written exactly as before, so every existing reader,
+/// the overlay and the v2 blob format are untouched (rule 7).
 pub fn compute_trade_goods(
-    buf: &mut WorldBuffer, _rivers: &[River], seed: u64, gem_deposits: u32,
+    buf: &mut WorldBuffer, rivers: &[River], seed: u64, gem_deposits: u32,
     climate_strictness: f32, specs: &[GoodSpec],
-) {
+) -> Vec<crate::sim::deposits::Deposit> {
+    use crate::sim::deposits::{self, DepositModel, GeoContext, MineralPlan};
     let w = buf.width;
     let h = buf.height;
     let n = buf.total();
@@ -765,19 +766,26 @@ pub fn compute_trade_goods(
     // goods, drop trailing columns that no longer exist).
     buf.goods.resize(specs.len().max(1), vec![0u8; n]);
 
-    // Adaptive highland floor for ore/gem deposits. Their configured `min_elev`
-    // values are ABSOLUTE normalized heights (1.0 = 8848 m), so copper 0.30 â‰ˆ
-    // 2650 m, gold 0.45 â‰ˆ 3980 m. On any world whose mountains don't reach those
-    // heights, the elevation gate produced ZERO candidates and the metals/gems
-    // silently vanished from the map. Clamp each deposit floor to no higher than
-    // the 72nd percentile of this world's land elevation, so the top ~28% of land
-    // is always eligible regardless of how tall the ranges are (the per-good
-    // province noise still scatters each mineral onto different uplands).
-    let highland_cap = land_elev_percentile(buf, 0.72);
 
     // Seed cells of the homelands placed so far, so each new Local good is pushed
     // to a DIFFERENT part of the continent (plausible spread, not all clustered).
     let mut placed_seeds: Vec<usize> = Vec::new();
+
+    // ── GEOLOGICAL CONTEXT for deposit goods ────────────────────────────────
+    // Built ONCE for the whole world (a per-good BFS across 45 goods would be a
+    // real cost) and only when some deposit good actually exists. Holds the shared
+    // distance fields every ore model reads; dropped before `save`.
+    let any_deposit = specs
+        .iter()
+        .any(|s| s.enabled && matches!(s.distribution, Distribution::Deposits));
+    let geo: Option<GeoContext> = any_deposit.then(|| GeoContext::build(buf, rivers));
+
+    // Every working placed so far, so a DERIVED mineral (turquoise weathering out
+    // of a copper body) can find its parent. Keyed by good id.
+    let mut placed_deposits: std::collections::BTreeMap<String, Vec<deposits::Deposit>> =
+        std::collections::BTreeMap::new();
+    // Deposit goods whose model is derived, deferred to a second pass below.
+    let mut derived_slots: Vec<usize> = Vec::new();
 
     for slot in 0..specs.len() {
         let spec = match specs.get(slot) {
@@ -788,81 +796,53 @@ pub fn compute_trade_goods(
 
         match spec.distribution {
             Distribution::Deposits => {
-                // Min-elevation / count are editable; the placement salt is derived
-                // (built-ins keep their original salt so output is unchanged).
-                let (min_elev, num, den) = spec.deposit
-                    .map(|d| (d.min_elev, d.count_num.max(1), d.count_den.max(1)))
-                    .unwrap_or((0.40, 1, 1));
+                // ── GEOLOGICAL PLACEMENT (see `sim::deposits`) ──────────────────
+                // A mineral's DEPOSIT MODEL — arc, orogen, craton, rift, platform,
+                // contact-metamorphic, evaporite, bog, coastal, placer, weathering —
+                // decides where it goes, from the plate boundaries and volcanism
+                // phase 1 already computed and this placer used to ignore entirely.
+                //
+                // Districts, not dots: the count below is now the number of ORE
+                // DISTRICTS, each of which scatters several workings across a real
+                // camp-sized radius.
+                let (num, den) = spec.deposit.as_ref()
+                    .map(|d| (d.count_num.max(1), d.count_den.max(1)))
+                    .unwrap_or((1, 1));
                 let dp = builtin_idx.and_then(deposit_params);
                 let salt = dp.map(|d| d.salt).unwrap_or_else(|| id_salt(&spec.id));
-                // Suitability deposits (salt/iron, or any custom deposit good with a
-                // scoring envelope) scatter through the good's own climate/relief
-                // score; highland deposits (gems/metals) rank candidates by elevation.
-                let suitability = dp.map(|d| d.suitability).unwrap_or(spec.scoring.is_some());
-                let count = (gem_deposits * num / den).max(1);
+                let (def_model, def_placer) = deposits::default_model_for(&spec.id);
+                let model = spec.deposit.as_ref().and_then(|d| d.model).unwrap_or(def_model);
+                let placer_frac = spec.deposit.as_ref()
+                    .and_then(|d| d.placer_frac)
+                    .unwrap_or(def_placer);
+                let parent = spec.deposit.as_ref()
+                    .and_then(|d| d.parent.clone())
+                    .or_else(|| deposits::default_parent_for(&spec.id).map(|s| s.to_string()));
 
-                let mut cand = vec![0.0f32; n];
-                if suitability {
-                    // Land deposit goods (salt/iron) score on land; MARINE deposit
-                    // goods (e.g. ambergris) score on SEA cells. Previously this loop
-                    // skipped every non-land cell, so a marine deposit good â€” which
-                    // scores 0 on land â€” produced an all-zero candidate field and
-                    // placed nothing (ambergris was invisible). Score the domain that
-                    // the good actually lives in.
-                    let marine_dep = matches!(spec.domain, Domain::Marine);
-                    for y in 0..h {
-                        for x in 0..w {
-                            let i = buf.idx(x, y);
-                            if marine_dep {
-                                if buf.terrain[i] != 0 { continue; }
-                            } else if buf.terrain[i] != 1 {
-                                continue;
-                            }
-                            cand[i] = shape(if let Some(env) = &spec.scoring {
-                                envelope_score(buf, env, spec.domain, x, y)
-                            } else if let Some(idx) = builtin_idx {
-                                good_score(buf, idx, x, y)
-                            } else { 0.0 });
-                        }
-                    }
-                } else {
-                    // Ore-province field: each deposit good lights up its OWN highland
-                    // ranges via a per-good low-frequency noise field (seed = the good's
-                    // salt), gated by the elevation floor. Previously `cand` was pure
-                    // elevation for every metal, so they all ranked highest on the single
-                    // tallest range and coincided. A mild elevation term keeps deposits
-                    // favouring uplands, but the *which range* is the good's own noise.
-                    let province_scale = spec.deposit.map(|d| d.province_scale).unwrap_or(0.06);
-                    let eff_min = min_elev.min(highland_cap);
-                    for y in 0..h {
-                        for x in 0..w {
-                            let i = buf.idx(x, y);
-                            if buf.terrain[i] == 1 && buf.elevation[i] >= eff_min {
-                                let p = crate::sim::elevation::fbm_noise(
-                                    x as f32 * province_scale, y as f32 * province_scale,
-                                    salt, 4, 2.0, 0.5,
-                                );
-                                cand[i] = (p * 0.85 + 0.15 * (buf.elevation[i] - eff_min)).clamp(0.0, 1.0);
-                            }
-                        }
-                    }
+                // A derived mineral needs its parent placed first — defer it.
+                if model.is_derived() && model != DepositModel::Placer {
+                    derived_slots.push(slot);
+                    buf.goods[slot] = vec![0u8; n];
+                    continue;
                 }
-                // Harsh rule for extreme-rare deposits: demand a stronger candidate
-                // (a stricter homeland) so prized stones/dyes stay scarce.
-                let rare_bump = if spec.rarity > 0.78 { (spec.rarity - 0.78) * 0.8 } else { 0.0 };
-                // Highland deposits now qualify only in the upper band of the good's
-                // ore-province field, so each mineral's deposits sit inside its own few
-                // provinces rather than scattering across every peak.
-                let mut thresh = if suitability { (0.30 + rare_bump).min(0.7) } else { 0.45 };
-                // Guarantee enough candidates to actually place `count` spaced
-                // deposits: if the noise threshold is too strict for this world,
-                // loosen it until at least ~4Ã— the deposit count of cells qualify
-                // (otherwise a sparse field placed nothing and the good vanished).
-                let want = (count as usize * 4).max(8);
-                while thresh > 0.12 && cand.iter().filter(|&&v| v >= thresh).count() < want {
-                    thresh -= 0.05;
-                }
-                buf.goods[slot] = place_deposits(buf, seed, count, salt, &cand, thresh);
+
+                let Some(ctx) = geo.as_ref() else {
+                    buf.goods[slot] = vec![0u8; n];
+                    continue;
+                };
+                let plan = MineralPlan {
+                    id: &spec.id,
+                    model,
+                    placer_frac,
+                    parent: parent.as_deref(),
+                    districts: (gem_deposits * num / den).max(1),
+                    salt,
+                    rarity: spec.rarity,
+                };
+                let placement = deposits::place_mineral(buf, ctx, rivers, &plan, &[], seed);
+                buf.goods[slot] = placement.belt;
+                placed_deposits.insert(spec.id.clone(), placement.deposits);
+                continue;
             }
             Distribution::Manufactured => {
                 // Made in cities from a recipe, not extracted from the land: no belt.
@@ -902,6 +882,55 @@ pub fn compute_trade_goods(
             }
         }
     }
+
+    // ── Second pass: DERIVED minerals ───────────────────────────────────────
+    // A weathering deposit is a DAUGHTER of another orebody — turquoise forms
+    // where copper-bearing rock alters in a desert — so it can only be placed once
+    // its parent exists. Deferred here rather than reordering the main loop, which
+    // would change every other good's placement seed order.
+    if let Some(ctx) = geo.as_ref() {
+        for slot in derived_slots {
+            let Some(spec) = specs.get(slot) else { continue };
+            let (def_model, def_placer) = deposits::default_model_for(&spec.id);
+            let model = spec.deposit.as_ref().and_then(|d| d.model).unwrap_or(def_model);
+            let placer_frac = spec.deposit.as_ref()
+                .and_then(|d| d.placer_frac).unwrap_or(def_placer);
+            let parent_id = spec.deposit.as_ref()
+                .and_then(|d| d.parent.clone())
+                .or_else(|| deposits::default_parent_for(&spec.id).map(|s| s.to_string()));
+            // A derived mineral with no parent on this map yields nothing — which is
+            // correct (no copper, no turquoise) and is reported, not silent.
+            let parent_deposits = parent_id
+                .as_deref()
+                .and_then(|p| placed_deposits.get(p))
+                .cloned()
+                .unwrap_or_default();
+            let (num, den) = spec.deposit.as_ref()
+                .map(|d| (d.count_num.max(1), d.count_den.max(1)))
+                .unwrap_or((1, 1));
+            let plan = MineralPlan {
+                id: &spec.id,
+                model,
+                placer_frac,
+                parent: parent_id.as_deref(),
+                districts: (gem_deposits * num / den).max(1),
+                salt: id_salt(&spec.id),
+                rarity: spec.rarity,
+            };
+            let placement =
+                deposits::place_mineral(buf, ctx, rivers, &plan, &parent_deposits, seed);
+            buf.goods[slot] = placement.belt;
+            placed_deposits.insert(spec.id.clone(), placement.deposits);
+        }
+    }
+
+    // Flatten into one world-wide working list, ordered by good id then position so
+    // the output is stable across runs (a BTreeMap iterates in key order).
+    let mut all: Vec<deposits::Deposit> = Vec::new();
+    for (_, v) in placed_deposits {
+        all.extend(v);
+    }
+    all
 }
 
 /// Declarative envelope scorer for custom (and overridden) goods. Reproduces the
@@ -1447,94 +1476,7 @@ fn localize_good(
     (out, Some(seed_cell))
 }
 
-/// Place a good as scattered **sporadic deposits**: `count` points seeded on the
-/// candidate field `cand` (where `cand[i] >= thresh`), spaced apart and ranked by
-/// a deterministic weighted-random key. Each deposit is **mostly a single cell**
-/// (the abundance = its candidate weight); only occasionally (~25%) does a point
-/// grow into a small 1â€“2-cell rich cluster. Used for gems/metals (highland `cand`)
-/// and the suitability deposits salt/iron (climate/relief `cand`).
-/// Elevation value at percentile `p` (0..1) across LAND cells â€” e.g. p=0.72 â‰ˆ
-/// the height only the upper quarter of land exceeds. Used to make ore/gem
-/// deposit elevation floors adapt to how mountainous a given world is, so
-/// metals/gems never disappear on a low-relief world. Returns 0.0 if no land.
-fn land_elev_percentile(buf: &WorldBuffer, p: f32) -> f32 {
-    let mut e: Vec<f32> = (0..buf.total())
-        .filter(|&i| buf.terrain[i] == 1)
-        .map(|i| buf.elevation[i])
-        .collect();
-    if e.is_empty() { return 0.0; }
-    let k = (((e.len() - 1) as f32) * p.clamp(0.0, 1.0)) as usize;
-    e.select_nth_unstable_by(k, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    e[k]
-}
 
-fn place_deposits(buf: &WorldBuffer, seed: u64, count: u32, salt: u64, cand: &[f32], thresh: f32) -> Vec<u8> {
-    let w = buf.width as i32;
-    let h = buf.height as i32;
-    let n = buf.total();
-    let mut out = vec![0u8; n];
-    if count == 0 { return out; }
-
-    // Candidate cells (above threshold), ranked by a deterministic weighted-random
-    // key so the same seed always picks the same deposits.
-    let gs = seed ^ salt;
-    let mut cands: Vec<(usize, f32)> = Vec::new();
-    for i in 0..n {
-        if cand[i] >= thresh {
-            let key = (cand[i] + 0.05) * hash01(gs ^ (i as u64).wrapping_mul(0x100000001B3));
-            cands.push((i, key));
-        }
-    }
-    if cands.is_empty() { return out; }
-    cands.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Sporadic but spaced, so deposits dot the map rather than clumping.
-    let min_sep = ((w as f32) * 0.025).max(3.0) as i32;
-    let wrap_dx = |a: i32, b: i32| -> i32 {
-        let mut d = (a - b).abs();
-        if d > w / 2 { d = w - d; }
-        d
-    };
-
-    let mut centers: Vec<(i32, i32)> = Vec::new();
-    for (i, _) in cands {
-        if centers.len() as u32 >= count { break; }
-        let cx = (i as i32) % w;
-        let cy = (i as i32) / w;
-        let far = centers.iter().all(|&(qx, qy)| {
-            let dx = wrap_dx(cx, qx);
-            let dy = cy - qy;
-            ((dx * dx + dy * dy) as f32).sqrt() >= min_sep as f32
-        });
-        if !far { continue; }
-        centers.push((cx, cy));
-
-        // Single-cell deposit; richer candidates read brighter (abundance).
-        let base_v = (0.55 + 0.45 * cand[i].clamp(0.0, 1.0)).clamp(0.0, 1.0);
-        if q(base_v) > out[i] { out[i] = q(base_v); }
-
-        // Rarely, a sporadic point is a richer multi-cell deposit (a few cells).
-        let roll = hash01(gs ^ 0x0D15EA5E ^ (i as u64).wrapping_mul(0x2545F4914F6CDD1D));
-        if roll < 0.25 {
-            let radius = if roll < 0.08 { 2 } else { 1 };
-            for dy in -radius..=radius {
-                for dx in -radius..=radius {
-                    if dx == 0 && dy == 0 { continue; }
-                    let d2 = (dx * dx + dy * dy) as f32;
-                    if d2 > (radius * radius) as f32 + 0.1 { continue; }
-                    let ny = cy + dy;
-                    if ny < 0 || ny >= h { continue; }
-                    let nx = buf.wrap_x(cx + dx);
-                    let ni = buf.idx(nx, ny as u32);
-                    if cand[ni] < thresh * 0.6 { continue; }
-                    let v = (0.45 + 0.4 * cand[ni].clamp(0.0, 1.0)).clamp(0.0, 1.0);
-                    if q(v) > out[ni] { out[ni] = q(v); }
-                }
-            }
-        }
-    }
-    out
-}
 
 /// Grow a placed belt outward by `rings` cells at decaying intensity, so the
 /// good's production reaches **a bit further** than its core homeland (trade lets

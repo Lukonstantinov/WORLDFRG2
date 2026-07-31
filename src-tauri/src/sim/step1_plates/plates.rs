@@ -1,11 +1,13 @@
 ﻿use rand::prelude::*;
 use crate::sim::world_buffer::WorldBuffer;
 
-/// Boundary types
-const BOUNDARY_NONE: u8 = 0;
-const BOUNDARY_CONVERGENT: u8 = 1;
-const BOUNDARY_DIVERGENT: u8 = 2;
-const BOUNDARY_TRANSFORM: u8 = 3;
+/// Boundary types. Public because the ORE-DEPOSIT placer (`sim::deposits`) reads
+/// `boundary_type` to decide a mineral's tectonic setting — arc / orogen / rift /
+/// craton — which is the organising principle of economic geology.
+pub const BOUNDARY_NONE: u8 = 0;
+pub const BOUNDARY_CONVERGENT: u8 = 1;
+pub const BOUNDARY_DIVERGENT: u8 = 2;
+pub const BOUNDARY_TRANSFORM: u8 = 3;
 
 struct Plate {
     cx: f32,

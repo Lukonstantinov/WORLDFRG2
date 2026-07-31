@@ -271,7 +271,14 @@ pub fn sim_biological(
     biological::compute_shipworm_risk(&mut buf, &river_data);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
-    biological::compute_trade_goods(&mut buf, &river_data, seed, gem_deposits, climate_strictness, &goods);
+    // The discrete ORE WORKINGS (grade / extent / depth per deposit) that the u8
+    // belt column cannot carry. Persisted alongside the tiles exactly as the
+    // province list is — the belt stays the source of truth for production and
+    // overlays; this is the record a mining industry and the quarry view read.
+    let ore = biological::compute_trade_goods(&mut buf, &river_data, seed, gem_deposits, climate_strictness, &goods);
+    metadata::set_meta(&conn, "deposits",
+        &serde_json::to_string(&ore).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
 
     // Terminal salt lakes → brine into the salinity column + inland salt-pan
     // production. Lakes are re-derived here (this phase does not receive them).
@@ -334,7 +341,10 @@ pub fn sim_refresh_hydrology_biology(
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
-    biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, gem_deposits, climate_strictness, &goods);
+    let ore = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, gem_deposits, climate_strictness, &goods);
+    metadata::set_meta(&conn, "deposits",
+        &serde_json::to_string(&ore).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
 
     let modified = buf.save(&conn, "Refresh hydrology & biology")?;
@@ -438,7 +448,10 @@ pub fn sim_run_all(
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
-    biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
+    let ore = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
+    metadata::set_meta(&conn, "deposits",
+        &serde_json::to_string(&ore).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
     // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
 
@@ -641,7 +654,10 @@ pub fn sim_run_all_from_terrain(
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
-    biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
+    let ore = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
+    metadata::set_meta(&conn, "deposits",
+        &serde_json::to_string(&ore).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
     // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
 

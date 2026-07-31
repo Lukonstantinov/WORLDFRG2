@@ -44,6 +44,7 @@ pub use step7_settlements::settlements;
 // ── Step 8 · Biological / Trade Goods ────────────────────────────────────────
 pub mod step8_biological_goods;
 pub use step8_biological_goods::biological;
+pub use step8_biological_goods::deposits;
 pub use step8_biological_goods::goods_spec;
 
 // ── Campaign Simulation ──────────────────────────────────────────────────────

@@ -56,7 +56,12 @@ fn default_province_scale() -> f32 {
 }
 
 /// Parameters for a `Deposits`-distributed good.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+///
+/// `model` / `placer_frac` / `parent` are the GEOLOGICAL half (see
+/// `sim::deposits`); `min_elev` and `province_scale` are the older purely
+/// elevation-and-noise knobs, kept because saved worlds carry them and because a
+/// user who wants the blunt instrument should still have it.
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DepositSpec {
     pub min_elev: f32,
     pub count_num: u32,
@@ -66,6 +71,22 @@ pub struct DepositSpec {
     /// the single tallest one. Larger = smaller, more scattered provinces.
     #[serde(default = "default_province_scale")]
     pub province_scale: f32,
+    /// The ore-forming environment this mineral belongs to. `None` = fall back to
+    /// `deposits::default_model_for(id)`, which is the geologically correct default
+    /// for every shipped mineral — so nobody has to author geology, and anybody can
+    /// override one mineral without touching the rest.
+    #[serde(default)]
+    pub model: Option<crate::sim::deposits::DepositModel>,
+    /// Share of this mineral's districts placed as river gravel BELOW a lode
+    /// district instead of in situ. `None` = the default for this mineral. High for
+    /// exactly the minerals history won from gravel first: gold, stream tin,
+    /// Golconda's diamonds, Ratnapura's sapphires.
+    #[serde(default)]
+    pub placer_frac: Option<f32>,
+    /// Parent good id for a DERIVED mineral (`Weathering`) — turquoise forms where
+    /// a copper orebody weathers in a desert. `None` = the shipped default.
+    #[serde(default)]
+    pub parent: Option<String>,
 }
 
 /// Declarative scoring envelope for custom (and overridden) goods. Every term is
@@ -272,6 +293,12 @@ pub fn default_list() -> Vec<GoodSpec> {
                     count_num: d.count_num,
                     count_den: d.count_den,
                     province_scale: default_province_scale(),
+                    // Left None so the geological default table
+                    // (`deposits::default_model_for`) drives placement. Setting it
+                    // here would freeze today's table into every saved world.
+                    model: None,
+                    placer_frac: None,
+                    parent: None,
                 }),
                 scoring: None,
                 category: GOOD_CATEGORY[g].to_string(),
@@ -353,7 +380,10 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             consumption_interval: if luxury { 180.0 } else { 60.0 },
         }
     }
-    let dep = |min_elev: f32, num: u32, den: u32| Some(DepositSpec { min_elev, count_num: num, count_den: den, province_scale: default_province_scale() });
+    let dep = |min_elev: f32, num: u32, den: u32| Some(DepositSpec {
+        min_elev, count_num: num, count_den: den, province_scale: default_province_scale(),
+        model: None, placer_frac: None, parent: None,
+    });
     let env = |climate: Vec<(u8, f32)>, temp: Option<[f32; 2]>, precip: Option<[f32; 3]>,
                elevation: Option<[f32; 3]>, abs_lat: Option<[f32; 3]>, fertility: f32, coast_bonus: f32| Envelope {
         climate, temp, precip, elevation, abs_lat, fertility, coast_bonus,
