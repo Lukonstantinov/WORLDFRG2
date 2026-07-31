@@ -1070,7 +1070,10 @@ fn econ_measure_foreign_hand_conjunction() {
 #[ignore]
 fn econ_measure_war_frequency() {
     let mut s = reference_world();
-    let years = 300u32;
+    // 150y, not 300 — war-driven house turnover keeps growing `s.houses`, and several
+    // per-tick passes scan it, so cost per year rises through the run; 150y already
+    // gives a solid per-century rate (the outpost diagnostic uses the same window).
+    let years = 150u32;
     // A `War` carries no id of its own; (a, b, start_tick) is the only stable identity,
     // so it doubles as the key for "have we already counted this one as started" and
     // for looking its goal/start-year back up once it disappears from `s.wars` (ended).
@@ -1082,8 +1085,13 @@ fn econ_measure_war_frequency() {
     let mut outcome_counts = [0u32; 4]; // plunder, tribute, trade rights, annex
     let mut cause_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
 
-    for yr in 0..years {
+    for _ in 0..years {
         s.advance(TICKS_PER_YEAR);
+        // The year label AFTER this advance — `s.tick / TICKS_PER_YEAR`, not the loop
+        // index, since a war that resolves during THIS call already reflects the tick
+        // this advance just reached (using the loop index instead undercounts every
+        // duration by exactly one year).
+        let cur_year = s.tick / TICKS_PER_YEAR;
         let cur_keys: std::collections::HashSet<(u32, u32, u32)> =
             s.wars.iter().map(|w| (w.a, w.b, w.start_tick)).collect();
         for w in &s.wars {
@@ -1096,7 +1104,7 @@ fn econ_measure_war_frequency() {
         }
         for key in prev_keys.difference(&cur_keys) {
             if let Some(&(goal, start_year)) = goal_of.get(key) {
-                durations.push(yr.saturating_sub(start_year));
+                durations.push(cur_year.saturating_sub(start_year));
                 outcome_counts[goal.min(3) as usize] += 1;
             }
         }

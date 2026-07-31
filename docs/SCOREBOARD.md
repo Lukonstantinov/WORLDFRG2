@@ -9,6 +9,73 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md 3.4f: war frequency measured)
+
+**3.4f — measure BEFORE tuning, the precedent Phase 4.4 set for the foreign hand.**
+`econ_measure_war_frequency` (`economy_validation.rs`, `#[ignore]`d, 150-year
+reference world) measures the EXISTING DLC 3.5 war mechanism — the baseline
+3.4a-e's score+preconditions redesign will be judged against, not a target in
+itself.
+
+```
+wars started                              9   →  6.00 / century
+wars resolved in the window               9
+mean duration                          2.0 yr   (every war resolves at the
+                                                  earliest eligible tick —
+                                                  `years >= 2` — see below)
+outcome mix     plunder 6   tribute 0   trade-rights 3   annex 0
+causes          independence 6   rival councils 3
+war-eligible cities (a council seat)     11
+structurally isolated (own component)     0   (0.0%)
+```
+
+**The headline finding: two-thirds of "wars" are not the mechanism 3.4a-c is
+about to redesign.** 6 of 9 are colony wars of independence
+(`declare_independence_war`, its own gate in `colonies.rs`), not
+`maybe_declare_war`'s rival-council/trade-dispute path — which fired only 3
+times in 150 years (2.0/century) despite a flat 10% yearly roll
+(`WAR_DECLARE_CHANCE`) whenever ≥2 eligible seats share a connectivity
+component. Zero cities were structurally isolated on this fixture, so the low
+rate is the trigger's own rarity (a rival pair + `hash01 < 0.10`, checked once a
+year), not §5.8's "no reachable rival" cause — worth re-confirming against a
+real generated world, since `reference_world()`'s 11 seats in one component is
+a much denser graph than most generated worlds will have.
+
+**Every resolved war ends at EXACTLY 2 years** — `update_wars` resolves the
+instant `years >= 2` is first true, weighted only by cumulative treasury +
+war-chest at that moment; there is no further escalation once eligible. This is
+the mechanism 3.4a (a proper score + quarterly rounds, exhaustion paths) exists
+to replace — a war that always resolves at its floor duration cannot show mean
+duration moving at all, so "mean duration" as measured here is really "the
+resolution floor," not a real distribution. That is itself useful context for
+judging 3.4a's post-redesign number.
+
+**A real bug was caught and fixed while building this diagnostic**: the first
+draft computed a war's duration from the loop's 0-indexed year counter instead
+of `s.tick / TICKS_PER_YEAR` taken AFTER that year's `advance()`, silently
+undercounting every duration by exactly one year (reported 1.0 yr instead of
+the true 2.0 yr). Caught by hand-checking `update_wars`' own `years >= 2` gate
+against the printed number, not by a test — recorded here per §2.4's "a
+diagnosis is a complete task" so the off-by-one doesn't reappear if this
+diagnostic is ever rewritten from scratch.
+
+Run originally at 300 years; killed and re-run at 150 after ~280s CPU with no
+sign of finishing — war-driven house turnover keeps growing `s.houses`, and
+several per-tick passes scan it, so cost per simulated year rises through a
+long run (a `rust-performance` question for another session, not this one).
+150 years already gives a clean per-century rate, matching the window
+`econ_diagnose_outpost_founding` already uses.
+
+Verified: `cargo check` clean, `simulate_decades_reports_dynamics`
+byte-identical to the pre-3.4f baseline (the diagnostic is `#[ignore]`d and
+touches no production path). No `econ_` re-run needed for the same reason — the
+change is a new test function only.
+
+**Not yet started:** 3.4a (war score + quarterly rounds), 3.4b (terms priced in
+score), 3.4c (casus belli incl. warmonger ruler + house-driven war), 3.4e
+(ledger/damage/blockade/boom), 3.4d (sack and purge — last, highest risk). See
+`docs/CITY_PROVINCE_WAR_PLAN.md` §7 for the full order.
+
 ## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md 3.3: state name/colour/borders)
 
 **3.3 — states.** A state is not new sim state: `compute_states`

@@ -838,8 +838,15 @@ sim/                            ← organised into per-phase step folders; mod.r
                                   dynamics tests; economy_validation.rs carries the
                                   `#[ignore]`d long-run diagnostics
                                   (`econ_diagnose_house_turnover`,
-                                  `econ_measure_foreign_hand_conjunction`) alongside
-                                  the ECONOMY FIDELITY GATE (§2.5)
+                                  `econ_measure_foreign_hand_conjunction`,
+                                  `econ_measure_war_frequency` — CITY_PROVINCE_WAR_
+                                  PLAN.md §3.4f, measures the PRE-3.4a–e war
+                                  mechanism: 6.0 wars/century, two-thirds of them
+                                  colony independence wars rather than
+                                  `maybe_declare_war`'s rival-city path, every
+                                  resolution landing at the 2-year floor — see
+                                  SCOREBOARD.md) alongside the ECONOMY FIDELITY
+                                  GATE (§2.5)
 ```
 
 ---
