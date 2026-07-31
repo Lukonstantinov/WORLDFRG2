@@ -1112,8 +1112,21 @@ pub fn get_lake_systems(
 pub struct ClimateBands {
     /// Grid width (the ITCZ polyline has one latitude per column).
     pub width: u32,
-    /// Per-column ITCZ latitude (degrees, +N). Length = `width`.
+    /// Per-column ITCZ latitude (degrees, +N), annual mean. Length = `width`.
     pub itcz: Vec<f32>,
+    /// Per-column ITCZ latitude at the two SEASONAL EXTREMES (degrees, +N).
+    ///
+    /// These are not decorative curves: they are the exact line
+    /// `seasonal::belt_wind_shifted` displaces the wind belts about in each
+    /// insolation state, so the band between them is the belt of land that changes
+    /// circulation regime between seasons — which is what a monsoon climate IS.
+    /// Both bulge poleward over continents, because `itcz_land_pull` measures the
+    /// summer hemisphere's subtropical land fraction per meridian: land–sea
+    /// contrast selects the LONGITUDE the convergence zone reaches furthest
+    /// poleward, which is why July runs far north over Asia and stays near 10°N
+    /// over the open Pacific.
+    pub itcz_july: Vec<f32>,
+    pub itcz_january: Vec<f32>,
     /// Subtropical-high / Hadley-edge latitude (degrees). Dry desert belt. ~30° on Earth.
     pub hadley_edge: f32,
     /// Polar-front / storm-track latitude (degrees). ~60° on Earth.
@@ -1133,16 +1146,32 @@ pub fn compute_climate_bands(db: State<'_, WorldDb>) -> Result<ClimateBands, Str
     let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     if grid_w == 0 || grid_h == 0 {
-        return Ok(ClimateBands { width: 0, itcz: vec![], hadley_edge: 30.0, polar_front: 60.0, cells: 3 });
+        return Ok(ClimateBands {
+            width: 0, itcz: vec![], itcz_july: vec![], itcz_january: vec![],
+            hadley_edge: 30.0, polar_front: 60.0, cells: 3,
+        });
     }
     // Terrain drives the per-column ITCZ shift (land-fraction asymmetry); the planet
     // state (loaded into the buffer) drives the circulation belts.
     let buf = WorldBuffer::load_with(&conn, ColumnSet::TERRAIN)?;
     let itcz = crate::sim::precipitation::compute_itcz_shift_zonal(&buf);
     let circ = Circulation::for_world(&buf);
+    // The two seasonal extremes, from the SAME helpers the seasonal wind field is
+    // built from — so the drawn convergence zone is provably the one the winds
+    // were displaced about, not a second, cosmetic model of it.
+    let pull_jul = crate::sim::seasonal::itcz_land_pull(&buf, 1.0);
+    let pull_jan = crate::sim::seasonal::itcz_land_pull(&buf, -1.0);
+    let itcz_july: Vec<f32> = (0..grid_w as usize)
+        .map(|x| crate::sim::seasonal::itcz_latitude(pull_jul[x], 1.0))
+        .collect();
+    let itcz_january: Vec<f32> = (0..grid_w as usize)
+        .map(|x| crate::sim::seasonal::itcz_latitude(pull_jan[x], -1.0))
+        .collect();
     Ok(ClimateBands {
         width: grid_w,
         itcz,
+        itcz_july,
+        itcz_january,
         hadley_edge: circ.hadley_edge,
         polar_front: circ.polar_front,
         cells: circ.cells,

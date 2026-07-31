@@ -13,22 +13,67 @@ use super::circulation::Circulation;
 /// (`seasonal.rs`) can build on the same annual-mean belt before adding its monsoon
 /// perturbation. `y` is down, so `+vy` is southward.
 pub fn belt_wind(lat: f32, circ: &Circulation) -> (f32, f32) {
+    belt_wind_shifted(lat, circ, 0.0)
+}
+
+/// Belt wind with the whole circulation displaced `shift_deg` toward the summer
+/// hemisphere — the seasonal migration of the ITCZ, carrying the Hadley cells and
+/// therefore the trade/westerly boundaries with it.
+///
+/// This is what makes a MONSOON. The historical picture of a monsoon as a giant
+/// land-sea breeze is not the modern one: a monsoon is the seasonal migration of
+/// the inter-tropical convergence zone, with land-sea contrast selecting the
+/// LONGITUDE at which the ITCZ reaches furthest poleward rather than supplying the
+/// driving force (Chao & Chen 2001; Gadgil 2003; Geen et al. 2020, Rev. Geophys.).
+///
+/// Two things fall out of the displacement, and the second is the important one:
+///
+/// 1. **The belts move.** A cell fixed in latitude can sit in the trades in one
+///    season and under the ITCZ in the other, so its wind changes BELT, not just
+///    magnitude.
+/// 2. **Cross-equatorial flow recurves.** The meridional direction is set by which
+///    side of the *displaced* ITCZ a cell sits on, while the Coriolis deflection is
+///    set by its TRUE latitude. Air that leaves the winter hemisphere as SE trades,
+///    crosses the equator, and finds itself equatorward of an ITCZ now at 10-15°N
+///    is still flowing poleward — but is deflected to the RIGHT instead of the
+///    left, and arrives as a SOUTHWESTERLY. That is the south-west monsoon, and it
+///    is why the Arabian Sea blows NE in January and SW in July.
+///
+/// Keeping those two sign conventions separate is the entire mechanism. Collapsing
+/// them back into one hemisphere flag reproduces the old field, which measured a
+/// maximum seasonal heading change of 8° at every monsoon site on Earth — i.e. no
+/// monsoon at all (`earth_diagnose_seasonal_wind_reversal`).
+///
+/// At `shift_deg = 0` this is bit-identical to the annual-mean field, which is what
+/// `compute_wind_belts` — and therefore the whole ocean-current model — still uses.
+pub fn belt_wind_shifted(lat: f32, circ: &Circulation, shift_deg: f32) -> (f32, f32) {
     // Smoothstep helper (0 below a, 1 above b, S-curve between).
     let smooth = |a: f32, b: f32, x: f32| -> f32 {
         let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
         t * t * (3.0 - 2.0 * t)
     };
-    let abs_lat = lat.abs();
-    let sign = if lat >= 0.0 { 1.0f32 } else { -1.0 }; // NH=1, SH=-1
+    // Position RELATIVE to the displaced ITCZ decides which belt a cell is in and
+    // which way its meridional flow runs: the belt structure is symmetric about the
+    // convergence zone, not about the geographic equator.
+    let rel = lat - shift_deg;
+    let abs_lat = rel.abs();
+    let sign = if rel >= 0.0 { 1.0f32 } else { -1.0 }; // which side of the ITCZ
     // Coriolis-deflection direction: +1 prograde (Earth-like), -1 retrograde.
-    // Flips ONLY the zonal (east/west) terms below — never `sign` above, which
-    // is the unrelated hemisphere (N/S) convention used for meridional flow.
     let rot = circ.rotation_sign;
+    // Coriolis HANDEDNESS follows the TRUE latitude. This is the term that must not
+    // be displaced with the belts, and separating it from `sign` is what turns
+    // cross-equatorial flow into a southwesterly instead of a northeasterly.
+    let cor = if lat >= 0.0 { 1.0f32 } else { -1.0 } * rot;
 
-    // The three belt vectors (y is down, so +y is southward).
-    let trade = (-0.707f32 * rot, sign * 0.707); // toward equator + west
-    let west = (0.707f32 * rot, -sign * 0.707);  // toward pole + east
-    let polar = (-0.707f32 * rot, sign * 0.707); // toward equator + west
+    // The three belt vectors (y is down, so +y is southward). The meridional
+    // component comes from `sign` (toward the ITCZ, or poleward away from it); the
+    // zonal component is that meridional flow turned by Coriolis — right in the
+    // northern hemisphere, left in the southern. With `shift_deg = 0`, `sign` and
+    // the true hemisphere agree and these collapse to exactly the original
+    // (∓0.707·rot, ±sign·0.707).
+    let trade = (-sign * cor * 0.707f32, sign * 0.707); // toward ITCZ + turned
+    let west = (sign * cor * 0.707f32, -sign * 0.707);  // toward pole + turned
+    let polar = (-sign * cor * 0.707f32, sign * 0.707); // toward ITCZ + turned
 
     // Blend with transitions centred on the circulation's belt boundaries (30°/60°
     // on Earth). The ±4° half-width scales with the belt so the transition stays

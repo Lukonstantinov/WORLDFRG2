@@ -89,7 +89,13 @@ export async function computeMonsoonZones(): Promise<SharkZone[]> {
  *  planet's rotation/greenhouse (Planet panel). */
 export interface ClimateBands {
   width: number;
-  itcz: number[];       // per-column ITCZ latitude (°N), length = width
+  itcz: number[];       // per-column ITCZ latitude (°N), annual mean, length = width
+  // The convergence zone at its two SEASONAL EXTREMES (°N per column). These are
+  // the exact lines the seasonal wind belts are displaced about, so the band
+  // between them is the land that changes circulation regime between seasons —
+  // which is what a monsoon climate is.
+  itcz_july: number[];
+  itcz_january: number[];
   hadley_edge: number;  // subtropical-high latitude (°), ~30 on Earth
   polar_front: number;  // polar-front / storm-track latitude (°), ~60 on Earth
   cells: number;        // circulation cells per hemisphere

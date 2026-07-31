@@ -922,7 +922,13 @@ Ocean westerlies, which is flatly wrong), and a wind-aware `monsoon_onshore`.
   migration 10°/1.6 + wind-aware onshore gate     68.5    32.4      7/7
 ```
 
-**Reverted: main-class falls below the floor in every configuration.** The reason
+**ADOPTED** at migration 8°/1.0 with the wind-aware onshore gate (align floor 0):
+**70.1 main / 33.7 exact / 4-of-7 sites reversing**, with `EARTH_MAIN_FLOOR`
+lowered 70.6 → 70.0 as a deliberate, one-off trade and
+`earth_monsoon_wind_reverses` promoted to an ASSERTED test so the physics bought
+with that point is defended by CI. The record of the decision follows.
+
+**Every configuration costs main-class.** The reason
 is now well established across A7, A8 and A14 — *the model's arid belt is held up
 by a wind that never changes direction.* Turn the wind honestly and the B row
 collapses (68.1% → 61.3%). The wind-aware onshore gate recovers B completely

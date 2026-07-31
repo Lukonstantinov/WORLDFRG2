@@ -911,7 +911,7 @@ fn value_noise(cx: i32, cy: i32, cw: i32, period: f32, seed: u64) -> f32 {
     a + (b - a) * sy
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Debug)]
 pub struct SharkZone {
     pub cells: Vec<[f32; 2]>, // coarse cell top-left world coords (the marked area)
     pub cell_size: f32,       // coarse cell size in world cells

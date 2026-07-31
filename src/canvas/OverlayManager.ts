@@ -1862,24 +1862,95 @@ export class OverlayManager {
         ctx.globalAlpha = 1;
       }
 
-      // ITCZ — the wavy convergence / heavy-rain line (per-column latitude, so it
-      // bows poleward over the continents and equatorward over the oceans).
+      // ITCZ — the convergence / heavy-rain line, drawn at BOTH seasonal extremes
+      // with the migration belt shaded between them. Each line is per-column, so it
+      // bows poleward over the continents and equatorward over the oceans; the band
+      // between them is the land that changes circulation regime between January
+      // and July, which is the definition of a monsoon climate.
       if (this.visibility.itcz && cb.itcz.length > 0) {
-        ctx.globalAlpha = 0.9;
+        const step = Math.max(1, Math.floor(cb.width / 720));
+        const yAt = (latDeg: number) =>
+          latLineY(latDeg, gridH, equatorOffset, latScale, lineRatio);
+        const hasSeasons =
+          cb.itcz_july?.length === cb.width && cb.itcz_january?.length === cb.width;
+        // Fall back to the single annual line on a world saved before the seasonal
+        // ITCZ existed, so an old save still draws something correct.
+        const julLats = hasSeasons ? cb.itcz_july : cb.itcz;
+        const janLats = hasSeasons ? cb.itcz_january : cb.itcz;
+
+        const trace = (lats: number[]) => {
+          ctx.beginPath();
+          let started = false;
+          for (let x = 0; x < cb.width; x += step) {
+            const y = yAt(lats[x]);
+            if (!started) { ctx.moveTo(x + 0.5, y); started = true; }
+            else { ctx.lineTo(x + 0.5, y); }
+          }
+          ctx.stroke();
+        };
+
+        if (hasSeasons) {
+          // The migration band: a low-opacity fill between the two lines, hatched
+          // with diagonal dashes so it reads as "this belt sweeps" rather than as a
+          // solid climate region of its own.
+          ctx.save();
+          ctx.beginPath();
+          let started = false;
+          for (let x = 0; x < cb.width; x += step) {
+            const y = yAt(julLats[x]);
+            if (!started) { ctx.moveTo(x + 0.5, y); started = true; }
+            else { ctx.lineTo(x + 0.5, y); }
+          }
+          for (let x = cb.width - 1 - ((cb.width - 1) % step); x >= 0; x -= step) {
+            ctx.lineTo(x + 0.5, yAt(janLats[x]));
+          }
+          ctx.closePath();
+          ctx.globalAlpha = 0.10;
+          ctx.fillStyle = ITCZ_COLOR;
+          ctx.fill();
+          // Diagonal hatch inside the band only.
+          ctx.clip();
+          ctx.globalAlpha = 0.22;
+          ctx.strokeStyle = ITCZ_COLOR;
+          ctx.lineWidth = Math.max(0.4, 0.9 / this.currentScale);
+          const hatch = Math.max(6, 14 / Math.sqrt(this.currentScale));
+          const yTop = yAt(90), yBot = yAt(-90);
+          const span = Math.abs(yBot - yTop) + cb.width;
+          ctx.beginPath();
+          for (let d = -span; d < cb.width + span; d += hatch) {
+            ctx.moveTo(d, Math.min(yTop, yBot));
+            ctx.lineTo(d + Math.abs(yBot - yTop), Math.max(yTop, yBot));
+          }
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        // July line — solid; January — dashed, so the pair reads without colour.
+        ctx.globalAlpha = 0.92;
         ctx.strokeStyle = ITCZ_COLOR;
         ctx.lineWidth = Math.max(0.8, 1.8 / this.currentScale);
-        const step = Math.max(1, Math.floor(cb.width / 720));
-        ctx.beginPath();
-        let started = false;
-        for (let x = 0; x < cb.width; x += step) {
-          const y = latLineY(cb.itcz[x], gridH, equatorOffset, latScale, lineRatio);
-          if (!started) { ctx.moveTo(x + 0.5, y); started = true; } else { ctx.lineTo(x + 0.5, y); }
+        ctx.setLineDash([]);
+        trace(julLats);
+        if (hasSeasons) {
+          ctx.setLineDash([
+            Math.max(3, 7 / Math.sqrt(this.currentScale)),
+            Math.max(2, 5 / Math.sqrt(this.currentScale)),
+          ]);
+          trace(janLats);
+          ctx.setLineDash([]);
         }
-        ctx.stroke();
+
         ctx.globalAlpha = 1;
         ctx.fillStyle = ITCZ_COLOR;
-        const y0 = latLineY(cb.itcz[0], gridH, equatorOffset, latScale, lineRatio);
-        ctx.fillText("ITCZ (convergence / rains)", 4, y0 - 2);
+        if (hasSeasons) {
+          // Plain fillText, like the other band annotations: these are overlay
+          // legends, not place names, so they stay out of the label registry
+          // (§8.11) exactly as road names and river-break markers do.
+          ctx.fillText("ITCZ July (summer rains)", 4, yAt(julLats[0]) - 2);
+          ctx.fillText("ITCZ January", 4, yAt(janLats[0]) - 2);
+        } else {
+          ctx.fillText("ITCZ (convergence / rains)", 4, yAt(cb.itcz[0]) - 2);
+        }
       }
     }
 

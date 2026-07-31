@@ -309,9 +309,9 @@ of the wrong world.
 
 | Metric | Value | Gate | Status |
 |---|---|---|---|
-| **Earth main-class agreement** | **70.8%** | `EARTH_MAIN_FLOOR` = 70.6 | ✅ asserted |
-| **Earth exact-zone agreement** | **32.8%** | `EARTH_EXACT_FLOOR` = 32.6 | ✅ asserted |
-| Earth C-class own accuracy | 31.5% | — | worst class |
+| **Earth main-class agreement** | **70.1%** | `EARTH_MAIN_FLOOR` = 70.0 | ✅ asserted |
+| **Earth exact-zone agreement** | **33.7%** | `EARTH_EXACT_FLOOR` = 33.5 | ✅ asserted |
+| Earth C-class own accuracy | 32.2% | — | worst class |
 | Earth `C → B` confusion | 39% | — | largest single error |
 | Earth `D → E` confusion | 18% | — | second largest |
 | **Economy: price/distance gradient** | **−0.01** | *none* | ❌ distance does not move prices |
@@ -620,6 +620,7 @@ subsystem is one you cannot have an opinion about.
 
 | Date | Commit | Earth main | Earth exact | Rust tests | FE tests | Note |
 |---|---|---|---|---|---|---|
+| 2026-07-31 | *this* | **70.1%** | **33.7%** | 227 | 0 | **Seasonal monsoon adopted (FIX_PLAN A14).** The wind belts now migrate with the ITCZ and cross-equatorial flow recurves, so monsoon winds actually reverse: 0/7 → 4/7 sites, now ASSERTED by `earth_monsoon_wind_reverses`. Exact-zone to its best ever. Main-class floor LOWERED 70.6 → 70.0 — the only lowering in this file's history, a deliberate trade (the arid belt had been propped up by a wind that never changed direction). ITCZ overlay now draws both seasonal lines with the migration band hatched between them |
 | 2026-07-31 | *this* | **70.8%** | **32.8%** | 226 | 0 | Continental seasonal span raised (`K_SEASONAL` 0.20 → 0.24). The generated warmest−coldest span at 60–70°N was 28.6 °C against a real 57–65 in Siberia, which made `Dfd`/`Dwd` *arithmetically impossible* (they need `t_coldest < −38 °C`). D row 58.5 → 70.8; `Dfd` and `Dsa` go from never-emitted to present. Cost is the C row (34.5 → 31.5) |
 | 2026-07-31 | *this* | **69.6%** | **31.9%** | 226 | 0 | Orographic uplift made a graded response to upslope RISE (Smith & Barstad `w = U·∇h`) instead of a binary `elevation > 1681 m` test. Measured: the Western Ghats, Appalachians and NZ Southern Alps cleared that threshold in ZERO cells, so three of the wettest orographic coasts on Earth produced no uplift at all. C row 33.0 → 34.5; Mumbai `B→A`, SE-US now C. Also adds a Köppen ZONE CENSUS: 5 zones are never emitted (all `Dw*`/`*d`) and H is 8.07% of land against 0% in the reference |
 | 2026-07-31 | *this* | **69.4%** | **31.8%** | 226 | 0 | Moisture emission scaled by SST via Clausius-Clapeyron (bulk formula). The source was a 3-valued step on `current_type` and, because only boundary currents poleward of ~18° carry a tag, it made the mid-latitudes the model's strongest moisture source and the equator its weakest — backwards. A row 83.8 → 85.1, exact-zone 31.6 → 31.8. Gain damped to 0.30 (sweep in the constant's doc comment). Two REVERTED negative results recorded in FIX_PLAN A7/A8 |

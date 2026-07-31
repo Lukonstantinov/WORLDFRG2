@@ -1,5 +1,5 @@
 ﻿use crate::sim::koppen::seasonal_range_base;
-use super::ocean::belt_wind;
+use super::ocean::belt_wind_shifted;
 use super::circulation::Circulation;
 use crate::sim::world_buffer::WorldBuffer;
 
@@ -42,6 +42,61 @@ const GRAD_STEP: i32 = 2;
 /// 12° pushed the SH-summer ITCZ past the equatorial Amazon (making that column's
 /// SH-summer drier than its NH-summer → spurious AS dry-savanna classification).
 pub const ITCZ_SEASONAL_MIGRATE: f32 = 10.0;
+
+/// Seasonal displacement (degrees) of the WIND belts toward the summer hemisphere —
+/// the migration that actually reverses a monsoon. See `ocean::belt_wind_shifted`.
+pub const MONSOON_BELT_MIGRATE: f32 = 8.0;
+
+/// How much further a summer-hemisphere CONTINENT pulls the ITCZ poleward, as a
+/// multiple of the base migration at a fully-land column.
+///
+/// The modern view's division of labour: the migration is the driver, and land-sea
+/// contrast selects the LONGITUDE at which the convergence zone reaches furthest
+/// poleward (Chao & Chen 2001; Geen et al. 2020). Over the oceans Earth's ITCZ
+/// reaches ~10°N in July; over Asia the monsoon trough reaches ~25-30°N, which is
+/// why the Bay of Bengal reverses and the central Pacific at the same latitude
+/// does not.
+pub const MONSOON_LAND_PULL: f32 = 1.0;
+
+/// Latitude (°) up to which the belts migrate at full amplitude, and the latitude
+/// by which the migration has died away entirely.
+///
+/// The seasonal excursion is a TROPICAL phenomenon: the ITCZ and the Hadley cells
+/// swing far, the polar front barely moves. Without this taper a uniform shift
+/// pushed the 55°S Southern Ocean across `polar_front` and reversed the westerlies
+/// there between seasons — measured, and flatly wrong.
+pub const MIGRATE_FULL_LAT: f32 = 30.0;
+pub const MIGRATE_ZERO_LAT: f32 = 50.0;
+
+/// Per-column land pull (0..1): the summer hemisphere's subtropical land fraction
+/// on each meridian. One O(w·h) sweep, no per-cell outward scan. Shared by the wind
+/// field and by the ITCZ overlay query so the drawn convergence zone is exactly the
+/// one the winds were built from.
+pub fn itcz_land_pull(buf: &WorldBuffer, sun_sign: f32) -> Vec<f32> {
+    let (w, h) = (buf.width, buf.height);
+    let mut pull = vec![0.0f32; w as usize];
+    let mut cnt = vec![0.0f32; w as usize];
+    for y in 0..h {
+        let lat = buf.latitude(y);
+        // Summer hemisphere only, across the belt the monsoon trough occupies.
+        if lat * sun_sign < 5.0 || lat.abs() > 35.0 { continue; }
+        for x in 0..w {
+            pull[x as usize] += (buf.terrain[buf.idx(x, y)] == 1) as i32 as f32;
+            cnt[x as usize] += 1.0;
+        }
+    }
+    for x in 0..w as usize {
+        if cnt[x] > 0.0 { pull[x] /= cnt[x]; }
+    }
+    pull
+}
+
+/// Latitude of the ITCZ on column `x` for insolation state `sun_sign`, in degrees.
+/// This IS the convergence zone the seasonal wind field is displaced about — the
+/// overlay draws this, not a decorative curve.
+pub fn itcz_latitude(land_pull_x: f32, sun_sign: f32) -> f32 {
+    MONSOON_BELT_MIGRATE * sun_sign * (1.0 + MONSOON_LAND_PULL * land_pull_x)
+}
 
 /// A per-cell seasonal wind field for one insolation state.
 pub struct SeasonalWind {
@@ -116,11 +171,22 @@ pub fn compute_seasonal_wind(buf: &WorldBuffer, sun_sign: f32) -> SeasonalWind {
 
     // â”€â”€ Belt wind + monsoon perturbation â”€â”€
     let circ = Circulation::for_world(buf);
+    // Displace the whole circulation toward the summer hemisphere. This — not the
+    // thermal-low perturbation below — is what reverses a monsoon wind. Before it
+    // existed, all seven of the real Earth's monsoon sites changed heading by at
+    // most 8° between January and July, so the model ran two seasons of rain on one
+    // season of wind (`earth_diagnose_seasonal_wind_reversal`).
+    let land_pull = itcz_land_pull(buf, sun_sign);
     let mut vx = vec![0.0f32; n];
     let mut vy = vec![0.0f32; n];
     for y in 0..h {
         let lat = buf.latitude(y);
-        let (bvx, bvy) = belt_wind(lat, &circ);
+        // The excursion is tropical: full amplitude to MIGRATE_FULL_LAT, gone by
+        // MIGRATE_ZERO_LAT, so the mid-latitude westerlies keep their heading.
+        let al = lat.abs();
+        let taper = if al <= MIGRATE_FULL_LAT { 1.0 } else {
+            ((MIGRATE_ZERO_LAT - al) / (MIGRATE_ZERO_LAT - MIGRATE_FULL_LAT)).max(0.0)
+        };
         // Coriolis rotation of the cross-isobaric inflow: 0 at the equator (pure
         // down-gradient), growing to a partial deflection by mid-latitudes. Sign is
         // hemisphere-dependent (surface air spirals into a low counter-clockwise in
@@ -130,6 +196,9 @@ pub fn compute_seasonal_wind(buf: &WorldBuffer, sun_sign: f32) -> SeasonalWind {
         let (st, ct) = theta.sin_cos();
         for x in 0..w {
             let i = buf.idx(x, y);
+            let (bvx, bvy) = belt_wind_shifted(
+                lat, &circ, itcz_latitude(land_pull[x as usize], sun_sign) * taper,
+            );
             // âˆ‡anom via a fixed-step central difference (points toward warmer / lower
             // pressure â€” the direction surface air is drawn).
             let gx = sample_anom(&anom, buf, x as i32 + GRAD_STEP, y as i32)

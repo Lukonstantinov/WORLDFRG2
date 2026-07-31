@@ -99,6 +99,29 @@ pub fn lat_from_y(y: f32, height: f32, equator_offset: f32, lat_scale: f32, lat_
     (dy.signum() * abs_lat).clamp(-90.0, 90.0)
 }
 
+/// Inverse of `lat_from_y`: the world row (fractional) at a given latitude.
+///
+/// Exact algebraic inverse, including the `lat_ratio` geometric band fan, so a
+/// latitude drawn from this lands on the same row the simulation reads that
+/// latitude from. Used by the ITCZ overlay, which must trace the very line the
+/// seasonal wind belts are displaced about.
+#[inline]
+pub fn y_from_lat(lat: f32, height: f32, equator_offset: f32, lat_scale: f32, lat_ratio: f32) -> f32 {
+    let scale = if lat_scale <= 1e-4 { 1.0 } else { lat_scale };
+    let equator_row = equator_offset * height;
+    let band = (height * scale / 6.0).max(1e-6);
+    let abs_lat = lat.abs().min(90.0);
+    let r = lat_ratio;
+    // Forward: abs_lat = 30·mag (r==1) or 30·ln(1+mag(r−1))/ln r. Solve for mag.
+    let mag = if (r - 1.0).abs() < 1e-4 {
+        abs_lat / 30.0
+    } else {
+        ((abs_lat / 30.0) * r.ln()).exp().mul_add(1.0, -1.0) / (r - 1.0)
+    };
+    let dy = mag * band;
+    equator_row - if lat >= 0.0 { dy } else { -dy }
+}
+
 /// Which WorldBuffer columns a simulation phase needs. A fully loaded buffer is
 /// ~2.7 GB at 7200×3600 (the 38+-column goods block alone is ~1 GB), but most
 /// phases touch a dozen columns — loading only those keeps peak RAM in check.
@@ -697,6 +720,11 @@ impl WorldBuffer {
     /// Get latitude in degrees (-90 to 90) from y coordinate, honouring the
     /// configurable equator position and expansion scale.
     #[inline]
+    /// World row (fractional) at a given latitude — inverse of `latitude`.
+    pub fn y_from_lat(&self, lat: f32) -> f32 {
+        y_from_lat(lat, self.height as f32, self.equator_offset, self.lat_scale, self.lat_ratio)
+    }
+
     pub fn latitude(&self, y: u32) -> f32 {
         lat_from_y(y as f32, self.height as f32, self.equator_offset, self.lat_scale, self.lat_ratio)
     }

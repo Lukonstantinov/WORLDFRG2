@@ -237,18 +237,29 @@ fn earth_diagnose_upwelling_reachability() {
     println!("─────────────────────────────────────────────\n");
 }
 
-/// The regression floor for area-weighted main-class agreement. Calibrated just
+/// The regression floor for area-weighted main-class agreement.
+///
+/// NOTE — this floor was LOWERED once, deliberately, from 70.6 to 70.0 when the
+/// seasonal monsoon wind reversal was adopted (FIX_PLAN A14). That is the only
+/// lowering in the file's history and it was a considered trade, not a
+/// convenience: the monsoon costs 0.7 main-class, all of it in the B row, because
+/// the model's arid belt had been partly held up by a wind that never changed
+/// direction. In exchange it raises EXACT-ZONE agreement — the figure §2.3 says to
+/// track — to its best ever, and it makes monsoon winds actually reverse, which
+/// `earth_monsoon_wind_reverses` now asserts independently of any score. Do not
+/// lower this again without the same kind of justification and an independent gate
+/// to show for it. Calibrated just
 /// under the measured baseline (69.2% at 0.5°, after the shelf-velocity fix, the
 /// subtropical basin-position asymmetry, and confining the snow-albedo cooling to
 /// the cold season); bump it up as the model improves so it always guards the
 /// current fidelity.
-const EARTH_MAIN_FLOOR: f64 = 70.6;
+const EARTH_MAIN_FLOOR: f64 = 70.0;
 
 /// The same guard for EXACT-ZONE agreement (31.6% measured). Main-class alone is
 /// not enough: E scores ~99% for free on a fifth of the weight, so a change can
 /// hold main-class flat while degrading the zone detail underneath it. Track this
 /// one — it is where the real state of the model lives (CLAUDE.md §2.3).
-const EARTH_EXACT_FLOOR: f64 = 32.6;
+const EARTH_EXACT_FLOOR: f64 = 33.5;
 
 /// Why a subtropical cell came out wet or dry — the decision chain, not the total.
 ///
@@ -453,8 +464,13 @@ fn earth_diagnose_orographic_responsiveness() {
     println!("──────────────────────────────────────────────────────────────\n");
 }
 
-/// Does the wind actually REVERSE between the two seasons, where the real Earth's
-/// does? (See the January/July surface-wind reference.)
+/// The wind must REVERSE between the two seasons where the real Earth's does.
+///
+/// ASSERTED, not merely printed. The seasonal monsoon migration (FIX_PLAN A14) was
+/// adopted at a deliberate cost of 0.7 main-class points, so the physics it buys
+/// has to be defended by CI or the trade was for nothing: this test is the thing
+/// that stops a future change from quietly flattening the wind field back out and
+/// reclaiming the score.
 ///
 /// A monsoon IS a seasonal wind reversal — that is the definition, from the Arabic
 /// *mawsim*, "season". Every named site below flips by roughly 180° between January
@@ -464,8 +480,7 @@ fn earth_diagnose_orographic_responsiveness() {
 /// between them, with a control set (mid-latitude westerlies, the trade cores) that
 /// should NOT reverse.
 #[test]
-#[ignore]
-fn earth_diagnose_seasonal_wind_reversal() {
+fn earth_monsoon_wind_reverses() {
     use crate::sim::seasonal::compute_seasonal_wind;
     let (buf, _r) = run_earth();
     let jul = compute_seasonal_wind(&buf, 1.0);  // boreal summer
@@ -516,6 +531,25 @@ fn earth_diagnose_seasonal_wind_reversal() {
     }
     println!("  monsoon sites reversing (Δ > 120°): {hits}/{want}");
     println!("────────────────────────────────────────────────────\n");
+    // Measured 4/7 at adoption. Held one below that so an unrelated change can
+    // shift a single marginal site without a spurious failure, while a flattened
+    // wind field (which scored 0/7) still fails loudly.
+    assert!(
+        hits >= 3,
+        "only {hits}/{want} monsoon sites reverse between January and July — the \
+         seasonal wind field has gone flat again (FIX_PLAN A14)"
+    );
+    for (nm, la, lo, should) in sites {
+        if should { continue; }
+        let i = cell(la, lo);
+        let mut d = (bearing(jul.vx[i], jul.vy[i]) - bearing(jan.vx[i], jan.vy[i])).abs();
+        if d > 180.0 { d = 360.0 - d; }
+        assert!(
+            d < 120.0,
+            "{nm} is not a monsoon region but reversed by {d:.0}° — the seasonal \
+             migration is leaking out of the tropics (check MIGRATE_ZERO_LAT)"
+        );
+    }
 }
 
 /// Named-region spot checks — regional regression protection for the archetypal
