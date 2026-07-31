@@ -380,3 +380,10 @@ export async function campaignCancelProvinceWork(id: number, kind: number): Prom
 export async function campaignProvinceGoods(id: number): Promise<import("@types").ProvinceGoodExploit[]> {
   return invoke("campaign_province_goods", { id });
 }
+
+/** §3.3 · every state currently formed — one region per tier 1-2 city holding at
+ *  least one province's writ. Pure derived read, empty with no campaign / no
+ *  province layer / no city has yet risen to tier 1-2. */
+export async function computeStates(): Promise<import("@types").StateRegion[]> {
+  return invoke("compute_states");
+}

@@ -59,6 +59,7 @@ const LABEL_GROUPS: { label: string; keys: { k: LabelKey; label: string }[] }[] 
     keys: [
       { k: "province", label: "Province" },
       { k: "settlement", label: "City / town" },
+      { k: "state", label: "State" },
     ],
   },
   {

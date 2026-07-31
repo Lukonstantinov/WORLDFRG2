@@ -172,6 +172,9 @@ pub struct HubBrief {
     /// Downsampled population history (≤30 points, oldest first) — the census
     /// sparkline. Empty until the hub has history samples.
     pub pop_spark: Vec<f32>,
+    /// CITY_PROVINCE_WAR_PLAN.md §3.2 · 1 great · 2 major · 3 lesser · 4 marginal ·
+    /// 0 = not yet assigned. §3.3 reads this to decide state eligibility (tier 1-2).
+    #[serde(default)] pub tier: u8,
 }
 
 /// What `campaign_start_sim` / `campaign_advance` / `campaign_get_state` return.
@@ -786,6 +789,7 @@ fn build_snapshot(sim: &CampaignSim) -> CampaignSnapshot {
                     let step = (h.history.len() / 30).max(1);
                     h.history.iter().step_by(step).map(|s| s.population).collect()
                 },
+                tier: h.tier,
             }
         })
         .collect();

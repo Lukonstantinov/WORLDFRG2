@@ -9,6 +9,43 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md 3.3: state name/colour/borders)
+
+**3.3 — states.** A state is not new sim state: `compute_states`
+(`campaign_commands/province.rs`) is a pure derived read over what 3.2 and Phase 5
+already carry — every province a tier 1-2 city holds the writ to (`prov_holder`,
+excluding a house-held writ per rule 24 — that's the house's territory, not a
+city's state), grouped by the world's own `province_raster` cells into one
+`StateRegion` per city. Nothing is persisted; a rerun cannot desync from the sim
+because nothing is stored to desync. Name is deterministically varied (bare city
+name / "X Republic" / "Republic of X" / "Duchy of X" / "Free City of X" / paired
+with the home province's people-name), hashed off the hub id so it's stable
+without being hand-authored. Colour reuses `distinct_color`'s golden-angle hue
+rotation but phase-shifted (+53°) and desaturated, so a state's tint is provably
+distinct from a house's heraldic colour even where a hub id and a house id
+happen to collide numerically — different index spaces. Rendered with the exact
+"cell cloud" technique `compute_culture_regions`/`drawCultureRegions` already
+uses for ethnic territories (`OverlayManager.drawStates`), gated behind a new
+Toolbar toggle (🏰 States), refreshed on year boundaries like the caravan-corridor
+overlay. A tier 3-4 or untiered town keeps self-administering its own province
+exactly as before; it simply never forms a state.
+
+This is where §3.2's own note said the "bit-identical to the dynamics test"
+guarantee would end — city tier now decides what the MAP draws. It does NOT mean
+the tick itself changed: `compute_states` reads `prov_holder`/`hub.tier` and
+writes nothing back, so the dynamics run stays byte-identical to the pre-3.3
+baseline (confirmed below), and no new `econ_` exposure exists because no new
+tick state was added.
+
+Verified against the full required gate set: `cargo check` clean (only
+pre-existing unused-constant warnings), `npx tsc --noEmit` clean,
+`simulate_decades_reports_dynamics` byte-identical year-by-year to the pre-3.3
+baseline (richest/houses/banks/wars/crashes/towns all match exactly).
+
+**Not yet started:** the whole abstract war system (3.4a–f), starting with 3.4f
+(measure war frequency before tuning anything). See `docs/CITY_PROVINCE_WAR_PLAN.md`
+§7 for the full order.
+
 ## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md 3.1 + 3.2: the city leader and city tiers)
 
 **3.1 — the office as a person.** `council_house`/`captor_house` already existed and

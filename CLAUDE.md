@@ -340,6 +340,26 @@ serde-defaulted so old saves load). Grouped by theme:
   why city tiers must run AFTER house tiers). **Query-side only at this step** — nothing
   downstream reads `hub.tier`/`hub.standing` yet, so the dynamics run stays bit-identical,
   exactly as house tiers shipped; §3.3 (state formation) is where that guarantee ends.
+- **States (`CITY_PROVINCE_WAR_PLAN.md` §3.3):** a state is not new sim state — it is a
+  PURE DERIVED READ (`compute_states`, `campaign_commands/province.rs`) over what §3.2
+  and Phase 5 already carry: every province whose writ a tier 1-2 city holds
+  (`prov_holder`, excluding a house-held writ — `prov_holder_house >= 0`, rule 24, is
+  the house's territory, not a city's state) grouped by that city's `province_raster`
+  cells into one `StateRegion`. A tier 3-4 or untiered town still self-administers its
+  own province exactly as before, it just never forms a state. Nothing is written back
+  to the sim, so this is where §3.2's "bit-identical to the dynamics test" note said the
+  guarantee would end (tier now decides what the MAP draws) while the tick itself stays
+  untouched — no new `econ_`/dynamics exposure from this step. Name is deterministically
+  varied (city alone / "X Republic" / "Duchy of X" / paired with the home province's
+  people-name) from a hash of the hub id, never geography-flavoured since the query has
+  no notion of coastal/riverine. Colour is `distinct_color`'s own golden-angle hue
+  rotation, phase-shifted (+53°) and desaturated so a state's tint can never be mistaken
+  for a house's heraldic colour even where a hub id and a house id numerically collide —
+  two different index spaces. Rendered client-side (`OverlayManager.drawStates`) with the
+  exact "cell cloud" technique `compute_culture_regions`/`drawCultureRegions` already
+  uses for ethnic territories — a fill + a boundary stroke over the coarse cells, no new
+  polygon-tracing machinery. Toggle: Toolbar → 🏰 States (`overlayVisibility.states`,
+  refreshed on year boundaries, the same cadence `campaignCorridors` uses).
 - **Positive events (Phase 1.4):** the mechanism otherwise only produces decline (vices,
   feuds, ruin) — these give the chronicle something else to say, each a MARKER on `House`
   rather than new machinery. `assign_house_tiers` also tracks **the finest hour** (all-time
@@ -725,7 +745,11 @@ commands/
                                   the writ — no new command, just a field added to
                                   the existing query. `campaign_province_goods` (§2.5)
                                   — the goods exploitation reading, a pure derived
-                                  read over `CampaignSim::province_good_*` (§5)
+                                  read over `CampaignSim::province_good_*` (§5).
+                                  `compute_states` (§3.3) — every tier 1-2 city's
+                                  writ as a territory (name/colour/cells), a pure
+                                  derived read over `prov_holder`/`province_raster`,
+                                  nothing persisted
   goods_commands.rs             ← Goods spec CRUD, default_custom_goods, backfill
   import_commands.rs            ← import_world_layers (layered world import)
   preview_commands.rs           ← preview_zonal_profile / preview_coarse_climate (§8.14)

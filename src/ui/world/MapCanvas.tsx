@@ -10,7 +10,7 @@ import { useUIStore } from "@state/uiStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useSettingsStore } from "@state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes } from "@bridge";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates } from "@bridge";
 import type { MerchantRoute, FuturesLane, Toponym } from "@types";
 import { goodOverlayKey, GOOD_DEFS } from "@goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types";
@@ -892,6 +892,23 @@ export function MapCanvas() {
     }, 400);
     return () => window.clearTimeout(t);
   }, [overlayVisibility.campaignCorridors, campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365), meta, rivers, bioParams.tradeReach, bioParams.maxCrossing, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // States (§3.3) — a tier 1-2 city's own writ, redrawn on year boundaries. City
+  // tier moves monthly and province holders move yearly, so a year-granularity
+  // refresh (like campaignCorridors above) is often enough without polling every tick.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !meta) return;
+    if (!overlayVisibility.states || !campaignSnapshot?.active) {
+      om.drawStates([]);
+      requestRender();
+      return;
+    }
+    computeStates().then((states) => {
+      om.drawStates(states);
+      requestRender();
+    }).catch(() => {});
+  }, [overlayVisibility.states, campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365), meta, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Expeditions — financed ventures crawling toward distant cities + recent failed
   // ✕'s. Cheap read (no routing), so it refreshes every tick to show them moving.

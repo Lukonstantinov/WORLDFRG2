@@ -44,6 +44,9 @@ export interface CampaignHubBrief {
   died_cause: string;
   /** Downsampled population history (≤30 points) — the census sparkline. */
   pop_spark: number[];
+  /** CITY_PROVINCE_WAR_PLAN.md §3.2 city tier: 1 great · 2 major · 3 lesser ·
+   *  4 marginal · 0 = not yet assigned. §3.3 reads tier 1-2 for state eligibility. */
+  tier: number;
 }
 /** Atlas 2.0 · one named trade basin (campaign_get_trade_basins). */
 export interface TradeBasin {
@@ -2212,4 +2215,21 @@ export interface ProvinceGoodExploit {
   /** Share of `actual` that leaves the province via trade rather than being
    *  consumed by the very population that produced it. */
   market_share: number;
+}
+
+/** CITY_PROVINCE_WAR_PLAN.md §3.3 · one state — a tier 1-2 city's own writ, made
+ *  into a territory. Pure derived read (compute_states) — nothing new is
+ *  persisted, so this cannot desync from the province/city-tier state it reads. */
+export interface StateRegion {
+  capital_hub: number;
+  name: string;
+  /** [r,g,b] — distinct from any house's heraldic colour (own hue phase). */
+  color: [number, number, number];
+  /** Coarse cell top-left world coords, same shape CultureRegion uses. */
+  cells: [number, number][];
+  cell_size: number;
+  /** Label centroid. */
+  x: number;
+  y: number;
+  province_count: number;
 }

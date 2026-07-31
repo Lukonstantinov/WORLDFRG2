@@ -400,3 +400,146 @@ pub fn campaign_province_goods(id: u32, db: State<'_, WorldDb>) -> Result<Vec<Pr
     out.sort_by(|a, b| b.actual.partial_cmp(&a.actual).unwrap_or(std::cmp::Ordering::Equal));
     Ok(out)
 }
+
+// ═════════════════════════════════════════════════════════════════════════════════
+//  STATES (CITY_PROVINCE_WAR_PLAN.md §3.3) — a city's writ made into a territory.
+//
+//  A state is not new sim state. It is a pure derived read over what already
+//  exists: which provinces a tier 1-2 city administers (`prov_holder` excluding
+//  `prov_holder_house` — rule 24, a house-held writ is the house's, not a city's
+//  state) and the world's own `province_raster` geometry. Nothing is persisted,
+//  so this cannot desync from the sim and costs nothing per tick — the same
+//  "display-time query, not a tick concern" argument `get_province_terrain_crop`
+//  makes for §2.3. A tier 3-4 or untiered town self-administers its own province
+//  exactly as before but never forms a state — §5.6 of the plan is explicit that
+//  this is where city tier stops being purely query-side (it now decides what the
+//  map draws), while remaining bit-identical to the dynamics test (no tick writes).
+// ═════════════════════════════════════════════════════════════════════════════════
+
+#[derive(Serialize, Clone)]
+pub struct StateRegion {
+    pub capital_hub: u32,
+    pub name: String,
+    pub color: [u8; 3],
+    pub cells: Vec<[f32; 2]>,
+    pub cell_size: f32,
+    /// Label centroid.
+    pub x: f32,
+    pub y: f32,
+    pub province_count: u32,
+}
+
+/// Deterministic, varied naming — sometimes just the city, sometimes the city
+/// dressed with a title, sometimes the city paired with its own hinterland's
+/// people-name. Never geography-flavoured ("Coast"/"March of the river") since
+/// nothing here knows whether the land is coastal or riverine.
+fn state_name(city: &str, culture: &str, seed: usize) -> String {
+    let mut variants = vec![
+        city.to_string(),
+        format!("{} Republic", city),
+        format!("Republic of {}", city),
+        format!("Duchy of {}", city),
+        format!("Free City of {}", city),
+        format!("{} Dominion", city),
+    ];
+    if !culture.is_empty() && culture != city {
+        variants.push(format!("{} and {}", city, culture));
+    }
+    let h = seed.wrapping_mul(2654435761).wrapping_add(0x9e3779b9);
+    variants[h % variants.len()].clone()
+}
+
+/// A state's territory tint — the same golden-angle hue rotation `distinct_color`
+/// (house heraldry) uses, phase-shifted and desaturated so a state's fill never
+/// reads as a house's coat-of-arms colour on the same map even when the indices
+/// collide (a city's hub id and a house's id are different index spaces, but nothing
+/// stops them being numerically equal).
+fn state_color(hub_id: usize) -> [u8; 3] {
+    let hue = (hub_id as f32 * 137.508 + 53.0) % 360.0;
+    let (s, l) = (0.40f32, 0.44f32);
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let hp = hue / 60.0;
+    let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+    let (r1, g1, b1) = match hp as i32 {
+        0 => (c, x, 0.0), 1 => (x, c, 0.0), 2 => (0.0, c, x),
+        3 => (0.0, x, c), 4 => (x, 0.0, c), _ => (c, 0.0, x),
+    };
+    let m = l - c / 2.0;
+    let to = |v: f32| ((v + m) * 255.0).round().clamp(0.0, 255.0) as u8;
+    [to(r1), to(g1), to(b1)]
+}
+
+/// Every state currently formed on the map — one region per tier 1-2 city that
+/// holds at least one province's writ. Empty on a world with no province layer or
+/// no campaign, exactly as `campaign_province_land_all` degrades.
+#[tauri::command]
+pub fn compute_states(db: State<'_, WorldDb>) -> Result<Vec<StateRegion>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let (rw, rh, gw, gh, mut raster): (u32, u32, u32, u32, Vec<u32>) =
+        match metadata::get_meta(&conn, "province_raster").map_err(|e| e.to_string())? {
+            Some(s) => serde_json::from_str(&s).unwrap_or((0, 0, 0, 0, Vec::new())),
+            None => return Ok(vec![]),
+        };
+    crate::sim::provinces::migrate_raster_sentinel(&mut raster);
+    if raster.is_empty() || gw == 0 || gh == 0 || rw == 0 || rh == 0 { return Ok(vec![]); }
+
+    let np = sim.prov_holder.len();
+    let mut capital_of_province: Vec<i32> = vec![-1; np];
+    for p in 0..np {
+        let holder_hub = sim.prov_holder.get(p).copied().unwrap_or(-1);
+        let holder_house = sim.prov_holder_house.get(p).copied().unwrap_or(-1);
+        if holder_house >= 0 || holder_hub < 0 { continue; }
+        let Some(hub) = sim.hubs.get(holder_hub as usize) else { continue };
+        if hub.abandoned || hub.is_estate { continue; }
+        if hub.tier == 0 || hub.tier > 2 { continue; }
+        capital_of_province[p] = holder_hub;
+    }
+    if !capital_of_province.iter().any(|&c| c >= 0) { return Ok(vec![]); }
+
+    let csx = gw as f32 / rw as f32;
+    let csy = gh as f32 / rh as f32;
+    let cell_size = csx.max(csy);
+    let mut by_hub: std::collections::HashMap<i32, Vec<[f32; 2]>> = std::collections::HashMap::new();
+    let mut prov_ids: std::collections::HashMap<i32, std::collections::HashSet<u32>> = std::collections::HashMap::new();
+    for ry in 0..rh {
+        for rx in 0..rw {
+            let idx = (ry * rw + rx) as usize;
+            let pid = raster.get(idx).copied().unwrap_or(crate::sim::provinces::NO_PROVINCE);
+            if pid == crate::sim::provinces::NO_PROVINCE { continue; }
+            let p = pid as usize;
+            if p >= capital_of_province.len() { continue; }
+            let cap = capital_of_province[p];
+            if cap < 0 { continue; }
+            by_hub.entry(cap).or_default().push([rx as f32 * csx, ry as f32 * csy]);
+            prov_ids.entry(cap).or_default().insert(pid);
+        }
+    }
+
+    let mut out: Vec<StateRegion> = Vec::new();
+    for (hub_id, cells) in by_hub {
+        if cells.is_empty() { continue; }
+        let hu = hub_id as usize;
+        let Some(hub) = sim.hubs.get(hu) else { continue };
+        let n = cells.len() as f32;
+        let (sx, sy) = cells.iter().fold((0.0f32, 0.0f32), |(ax, ay), c| (ax + c[0], ay + c[1]));
+        let home_p = sim.hub_province.get(hu).copied().unwrap_or(-1);
+        let culture = if home_p >= 0 {
+            sim.prov_culture.get(home_p as usize).cloned().unwrap_or_default()
+        } else { String::new() };
+        let name = state_name(&hub.name, &culture, hu);
+        let province_count = prov_ids.get(&hub_id).map(|s| s.len() as u32).unwrap_or(0);
+        out.push(StateRegion {
+            capital_hub: hub_id as u32,
+            name,
+            color: state_color(hu),
+            cell_size,
+            x: sx / n + cell_size * 0.5,
+            y: sy / n + cell_size * 0.5,
+            cells,
+            province_count,
+        });
+    }
+    out.sort_by(|a, b| b.cells.len().cmp(&a.cells.len()));
+    Ok(out)
+}
