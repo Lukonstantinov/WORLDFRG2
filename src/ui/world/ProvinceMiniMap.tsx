@@ -40,6 +40,13 @@ function reliefColor(elev: number, isLand: boolean): string {
 // exactly the model's shares), it is stable (the same cell keeps its class between
 // years, so scrubbing the time slider shows land genuinely converting rather than
 // reshuffling), and it reads as a cartographic fill rather than as false precision.
+//
+// §2.4 · the LAND-USE plate's placement (not tenure — who holds a field doesn't
+// correlate with its altitude) is further biased by real elevation: woodland and
+// waste favour higher ground, arable and pasture favour the flat, via a RANK
+// transform (`landUsePercentile`) rather than a direct threshold shift, so the
+// province's overall shares stay exact regardless of the bias — only the ORDER
+// cells are assigned to correlates with elevation.
 
 // ── Custom minimalist building icons (tiny SVG, no emoji). kind: 0 estate ·
 //    1 manufactory · 2 warehouse · 3 bank · 4 mint. Drawn centred on (0,0). ──
@@ -203,6 +210,12 @@ export function ProvinceMiniMap({
     return { cells, edge, ox, oy, vw, vh, toLocal, stride };
   }, [raster, province.id]);
 
+  // Dither patch size, in raster units: a few SAMPLED cells across (cells are
+  // `stride` apart), so the land-use/tenure mosaic reads as fields regardless of
+  // how big the province is. Computed here (not after the `!geo` return below)
+  // because the elevation-bias rank transform below is a hook and needs it too.
+  const patchSize = geo ? geo.stride * 3 : 1;
+
   // Real elevation/land samples (§2.3) — the relief plate's true base layer,
   // positioned by the SAME world→local transform the settlements/buildings use.
   const terrainSamples = useMemo(() => {
@@ -257,6 +270,44 @@ export function ProvinceMiniMap({
     return segs;
   }, [geo, raster, rivers, province.id]);
 
+  // Elevation-biased placement for the land-use dither (§2.4): woodland/waste
+  // favour higher elevation, arable/pasture favour flat land. Cells are grouped
+  // into the SAME patch the dither already quantises to (so fields read as
+  // blocks, not static), each patch gets one composite score (elevation + a
+  // little noise for texture within a band), and patches are RANKED rather than
+  // thresholded directly — so the set of percentiles handed to `ditherClass` is
+  // exactly a permutation of (0,1) and the province's overall shares stay exact
+  // regardless of the bias. Only the ORDER correlates with elevation; the class
+  // cutoffs still come from this year's real shares, which is what lets a cell's
+  // class change as the land actually converts (rule 17).
+  const landUsePercentile = useMemo(() => {
+    const m = new Map<string, number>();
+    if (!geo || geo.cells.length === 0) return m;
+    const worldOf = (rx: number, ry: number): [number, number] =>
+      raster ? [(rx * raster.gridW) / raster.w, (ry * raster.gridH) / raster.h] : [rx, ry];
+    const elevAt = (wx: number, wy: number): number => {
+      if (!terrain || terrain.cols === 0 || terrain.rows === 0) return 0.3; // neutral default
+      const c = Math.min(terrain.cols - 1, Math.max(0, Math.round((wx - terrain.ox) / terrain.stride)));
+      const r = Math.min(terrain.rows - 1, Math.max(0, Math.round((wy - terrain.oy) / terrain.stride)));
+      const i = r * terrain.cols + c;
+      return terrain.land[i] === 1 ? terrain.elevation[i] : 0.3;
+    };
+    const patchKeys = new Set<string>();
+    for (const [rx, ry] of geo.cells) {
+      patchKeys.add(`${Math.floor(rx / patchSize)},${Math.floor(ry / patchSize)}`);
+    }
+    const scored = [...patchKeys].map((key) => {
+      const [px, py] = key.split(",").map(Number);
+      const rx = px * patchSize, ry = py * patchSize;
+      const [wx, wy] = worldOf(rx, ry);
+      const noise = cellHash(rx, ry, 1, 1); // already patch-quantised via rx/ry above
+      return { key, score: terrain ? elevAt(wx, wy) * 0.8 + noise * 0.2 : noise };
+    });
+    scored.sort((a, b) => a.score - b.score);
+    scored.forEach((s, i) => m.set(s.key, (i + 0.5) / scored.length));
+    return m;
+  }, [geo, raster, terrain, patchSize]);
+
   if (!geo) return <div style={{ opacity: 0.5, padding: 8 }}>map unavailable</div>;
 
   const { cells, edge, ox, oy, vw, vh, toLocal, stride } = geo;
@@ -291,10 +342,6 @@ export function ProvinceMiniMap({
     ? Math.min(0.5, riverCells / Math.max(1, province.cells))
     : 0;
 
-  // Dither patch size, in raster units: a few SAMPLED cells across (cells are `stride`
-  // apart), so the mosaic reads as fields regardless of how big the province is.
-  const patch = stride * 3;
-
   return (
     <div style={{ display: "flex", gap: 10, position: "relative", flexWrap: "wrap" }}>
       {/* The plate */}
@@ -317,18 +364,23 @@ export function ProvinceMiniMap({
             fill="#3f6d55" opacity={on("landuse") && luShares ? 0.28 : 0.55} />
         ))}
 
-        {/* 3 · land use — the plate that CHANGES over five centuries. */}
+        {/* 3 · land use — the plate that CHANGES over five centuries. Placement is
+               the elevation-biased rank (§2.4), falling back to the plain patch
+               hash when a cell's patch key somehow isn't in the map. */}
         {on("landuse") && luShares && cells.map(([rx, ry], i) => {
-          const c = LANDUSE[ditherClass(luShares, cellHash(rx, ry, 1, patch))];
+          const key = `${Math.floor(rx / patchSize)},${Math.floor(ry / patchSize)}`;
+          const t = landUsePercentile.get(key) ?? cellHash(rx, ry, 1, patchSize);
+          const c = LANDUSE[ditherClass(luShares, t)];
           return (
             <rect key={`u${i}`} x={rx - ox} y={ry - oy} width={stride * 1.05} height={stride * 1.05}
               fill={c.color} opacity={0.75} />
           );
         })}
 
-        {/* 4 · tenure — who actually holds the land. */}
+        {/* 4 · tenure — who actually holds the land. Pure noise (not elevation-
+               biased — who holds a field doesn't correlate with its altitude). */}
         {on("tenure") && tenure && cells.map(([rx, ry], i) => {
-          const k = ditherClass([...tenure], cellHash(rx, ry, 7, patch));
+          const k = ditherClass([...tenure], cellHash(rx, ry, 7, patchSize));
           return (
             <rect key={`t${i}`} x={rx - ox} y={ry - oy} width={stride * 1.05} height={stride * 1.05}
               fill={tenureColor(k)} opacity={on("landuse") ? 0.45 : 0.7} />
