@@ -774,3 +774,68 @@ vs ~650 real). And an Eady-growth-rate storm track is **not buildable in this
 model**: `earth_base_curve` is piecewise-linear so its meridional derivative is a
 three-step function peaking at the pole, and a single-layer model has no static
 stability, so both terms of σ ≈ 0.31·(f/N)·|∂u/∂z| are unavailable.
+
+### A10. The Köppen zone census — five zones are never emitted
+
+`earth_diagnose_koppen_zone_census` (ignored) prints every zone's generated area
+share against the reference. Zones the model **never produces at all**:
+
+```
+  Dfd extreme subarctic     0.00 / 0.97 %      Dwb dry-winter cont.    0.00 / 0.82 %
+  Dwa dry-winter cont.      0.00 / 0.47 %      Dwd dry-winter extreme  0.00 / 0.08 %
+  Dsa dry-summer cont.      0.00 / 0.10 %      Dwc dry-winter subarc.  0.00 / 1.50 %
+```
+
+The pattern is not random. **Every missing zone is either `Dw*` or `*d`:**
+
+- **The whole dry-winter continental family is absent** (~2.9% of land — Manchuria,
+  Korea, north China, eastern Siberia). `w` requires `winter_wet < summer_wet / 3.0`
+  *and* survival to the C/D branch; the monsoon belt that should produce it is
+  classified `B` first (China-South reads B at 497 mm against a real ~1700).
+- **Both extreme-cold `d` zones are absent** because `extreme_cold` requires
+  `t_coldest < −38 °C` and the seasonal span cannot reach it: measured span at
+  60–70°N is 28.6 °C against a real 57–65 °C in Yakutsk/Verkhoyansk. Same root
+  cause as the D→E error — the model's continental seasonality is roughly half of
+  reality.
+
+Two more census findings worth acting on:
+
+- **`H` (highland) is 8.07% of generated land and 0.00% of the reference.** It is a
+  WF2 invention with no Köppen counterpart, scored as `E` by `main_letter`. Every
+  `H` cell over reference `C`/`D` terrain is therefore a guaranteed miss, and it is
+  a large part of why `ET` is over-emitted (9.91% vs 6.52%).
+- **Mediterranean is nearly missing**: `Csa` 0.12% against 1.94% — 6% of what it
+  should be. `Csb` 0.23×. Given §8.6 gates `Cs` on a windward coast beside a cold
+  current, the gate is very likely too strict.
+
+### A11. Orographic uplift was a step function of ABSOLUTE height — FIXED
+
+`orographic_multiplier` tested `elevation > MOUNTAIN_THRESHOLD` (0.19 ≈ 1681 m) and
+returned a flat 2.5. Measured on the real Earth fixture at 0.5°, cells clearing that
+threshold in a ~500 km box (of 81):
+
+```
+  Western Ghats      0   (max 1200 m)      NZ Southern Alps   0   (max 1663 m)
+  Appalachians       0   (max 1407 m)      Norway/Bergen      4   (max 2029 m)
+```
+
+Three of the wettest orographic coasts on Earth produced **no uplift whatsoever**,
+and an 1800 m range and the Himalaya were treated identically. A cell-mean
+elevation also falls as the grid coarsens, so an absolute threshold makes orography
+**resolution-dependent** — the Earth gate runs at 720×360 while the app defaults to
+3600×1800, so the gate and the shipped product disagreed about where mountains are.
+
+Replaced with a graded response to the upslope RISE along the wind
+(`w = U·∇h`, Smith & Barstad 2004), saturating at the old threshold so a
+full-height range is unchanged and only previously-invisible terrain gains.
+**69.4 → 69.6 main, 31.8 → 31.9 exact, C row 33.0 → 34.5.** Mumbai `B → A`,
+SE-US now `C`. Sweep of the saturating rise (main flat at 69.6 throughout):
+
+```
+  0.10  exact 31.7  C 35.8  B 67.1        0.19  exact 31.9  C 34.5  B 68.1  <- chosen
+  0.14  exact 31.8  C 35.0  B 67.6        0.25  exact 32.0  C 33.9  B 68.7
+```
+
+**Still open here:** the LEE/rain-shadow term is still the binary absolute test, and
+nothing in the orographic response depends on wind SPEED, though `w = U·∇h` says it
+should.

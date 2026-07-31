@@ -90,6 +90,16 @@ const ENCLOSED_COAST_DRYING: f32 = 0.45;      // extra drying on land bordering 
 // far downwind — the Patagonian / Great-Plains lee steppe stays dry for hundreds of
 // km east of the cordillera.
 const MOUNTAIN_THRESHOLD: f32 = 0.19; // elevation counting as a ridge (~1700 m)
+/// Upslope RISE (normalized elevation, ×8848 m) at which windward uplift saturates.
+/// Set to the old absolute threshold so a full-height range behaves exactly as
+/// before; anything shallower now scales down instead of vanishing.
+const OROG_RISE_FULL: f32 = 0.19;
+/// Windward multiplier at a saturating rise — the old flat value.
+const OROG_WINDWARD_MAX: f32 = 2.5;
+/// Test-only alias so the Earth diagnostics can report the threshold they are
+/// measuring against instead of hard-coding a copy of it.
+#[cfg(test)]
+pub(crate) const MOUNTAIN_THRESHOLD_PUB: f32 = MOUNTAIN_THRESHOLD;
 const WINDWARD_KM: f32 = 220.0;       // upslope-enhancement fetch windward of a range
 const SHADOW_KM: f32 = 500.0;         // rain-shadow reach downwind of a range
 
@@ -251,13 +261,41 @@ fn orographic_multiplier(buf: &WorldBuffer, x: u32, y: u32, wvx: f32, wvy: f32) 
     }
 
     // Windward: walk downwind for an approaching mountain.
+    //
+    // The trigger is the RISE the air has to climb, not an absolute altitude.
+    // Orographic precipitation is driven by the terrain-forced vertical velocity
+    // `w = U · ∇h` (Smith & Barstad 2004) — a slope term. The old test was
+    // `elevation > MOUNTAIN_THRESHOLD` (0.19 ≈ 1681 m) returning a flat 2.5, which
+    // is a step function of ABSOLUTE height and measurably wrong at both ends:
+    // an 1800 m range and the Himalaya got identical uplift, while every range
+    // below the threshold got none at all. Measured in a ~500 km box on the real
+    // Earth fixture at 0.5°, `cells above threshold` out of 81:
+    //
+    //   Western Ghats    0  (max 1200 m)     New Zealand Alps  0  (max 1663 m)
+    //   Appalachians     0  (max 1407 m)     Norway/Bergen     4  (max 2029 m)
+    //
+    // The Western Ghats and the Southern Alps are two of the wettest orographic
+    // coasts on Earth and the model gave them exactly nothing. Worse, a cell-mean
+    // elevation falls as the grid coarsens, so a fixed absolute threshold makes
+    // orography RESOLUTION-DEPENDENT — the Earth gate runs at 720×360 while the
+    // app defaults to 3600×1800, so the two disagree about where mountains are.
+    //
+    // A rise is scale-free in that sense and degrades gracefully: a 600 m coastal
+    // scarp now gets partial credit instead of nothing, and a full
+    // `OROG_RISE_FULL` climb still saturates at the original 2.5.
+    let own_elev = buf.elevation[buf.idx(x, y)];
+    let mut best_rise = 0.0f32;
     for step in 1..=windward_steps {
         let fx = (x as f32 + ndx * step as f32).round() as i32;
         let fy = (y as f32 + ndy * step as f32).round() as i32;
         if fy < 0 || fy >= h { break; }
         let fi = buf.idx(buf.wrap_x(fx), fy as u32);
-        if buf.terrain[fi] == 0 { break; } // ocean downwind â†’ no windward uplift
-        if buf.elevation[fi] > MOUNTAIN_THRESHOLD { return 2.5; }
+        if buf.terrain[fi] == 0 { break; } // ocean downwind → no windward uplift
+        best_rise = best_rise.max(buf.elevation[fi] - own_elev);
+    }
+    if best_rise > 0.0 {
+        let frac = (best_rise / OROG_RISE_FULL).min(1.0);
+        return 1.0 + (OROG_WINDWARD_MAX - 1.0) * frac;
     }
 
     1.0

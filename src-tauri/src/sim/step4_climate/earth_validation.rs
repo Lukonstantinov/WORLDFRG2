@@ -242,13 +242,13 @@ fn earth_diagnose_upwelling_reachability() {
 /// subtropical basin-position asymmetry, and confining the snow-albedo cooling to
 /// the cold season); bump it up as the model improves so it always guards the
 /// current fidelity.
-const EARTH_MAIN_FLOOR: f64 = 69.0;
+const EARTH_MAIN_FLOOR: f64 = 69.4;
 
 /// The same guard for EXACT-ZONE agreement (31.6% measured). Main-class alone is
 /// not enough: E scores ~99% for free on a fifth of the weight, so a change can
 /// hold main-class flat while degrading the zone detail underneath it. Track this
 /// one — it is where the real state of the model lives (CLAUDE.md §2.3).
-const EARTH_EXACT_FLOOR: f64 = 31.5;
+const EARTH_EXACT_FLOOR: f64 = 31.7;
 
 /// Why a subtropical cell came out wet or dry — the decision chain, not the total.
 ///
@@ -324,6 +324,133 @@ fn earth_diagnose_subtropical_aridity_chain() {
     }
     println!("  (cur: 0=neutral 1=warm 2=cold, -1=no water within 20 cells)");
     println!("──────────────────────────────────────────\n");
+}
+
+/// Which Köppen zones the model actually EMITS, against how much of the real Earth
+/// each one covers. A zone that never appears is invisible in the scorecard —
+/// exact-zone agreement just quietly loses that weight — so this is the only place
+/// a missing climate shows up as a number rather than as "the map looks wrong".
+///
+/// Prints every zone the reference contains, generated share vs reference share and
+/// the ratio, worst-served first. `#[ignore]`d diagnostic.
+#[test]
+#[ignore]
+fn earth_diagnose_koppen_zone_census() {
+    let (buf, reference) = run_earth();
+    let name = |c: u8| -> &'static str {
+        match c {
+            koppen::AF => "Af  tropical rainforest", koppen::AM => "Am  tropical monsoon",
+            koppen::AW => "Aw  tropical savanna",   koppen::AS => "As  tropical savanna (dry-s)",
+            koppen::BWH => "BWh hot desert",        koppen::BWK => "BWk cold desert",
+            koppen::BSH => "BSh hot steppe",        koppen::BSK => "BSk cold steppe",
+            koppen::CSA => "Csa Mediterranean hot", koppen::CSB => "Csb Mediterranean warm",
+            koppen::CSC => "Csc Mediterranean cool",koppen::CFA => "Cfa humid subtropical",
+            koppen::CFB => "Cfb oceanic",           koppen::CFC => "Cfc subpolar oceanic",
+            koppen::CWA => "Cwa dry-winter subtrop",koppen::CWB => "Cwb dry-winter highland",
+            koppen::CWC => "Cwc dry-winter cool",   koppen::DFA => "Dfa hot-summer continental",
+            koppen::DFB => "Dfb warm-summer cont.", koppen::DFC => "Dfc subarctic",
+            koppen::DFD => "Dfd extreme subarctic", koppen::DSA => "Dsa dry-summer cont.",
+            koppen::DSB => "Dsb dry-summer cont.",  koppen::DSC => "Dsc dry-summer subarctic",
+            koppen::DSD => "Dsd dry-summer extreme",koppen::DWA => "Dwa dry-winter cont.",
+            koppen::DWB => "Dwb dry-winter cont.",  koppen::DWC => "Dwc dry-winter subarctic",
+            koppen::DWD => "Dwd dry-winter extreme",koppen::ET => "ET  tundra",
+            koppen::EF => "EF  ice cap",            koppen::H => "H   highland (WF2-only)",
+            _ => "?",
+        }
+    };
+    let mut gen = std::collections::BTreeMap::<u8, f64>::new();
+    let mut re = std::collections::BTreeMap::<u8, f64>::new();
+    let mut total = 0.0f64;
+    for y in 0..H {
+        let wt = (buf.latitude(y as u32).to_radians().cos() as f64).max(0.0);
+        for x in 0..W {
+            let i = y * W + x;
+            if reference[i] == 0 { continue; }
+            total += wt;
+            *re.entry(reference[i]).or_default() += wt;
+            *gen.entry(buf.koppen[i]).or_default() += wt;
+        }
+    }
+    let mut rows: Vec<(f64, u8, f64, f64)> = re.iter().map(|(&c, &rw)| {
+        let gw = *gen.get(&c).unwrap_or(&0.0);
+        let rp = 100.0 * rw / total;
+        let gp = 100.0 * gw / total;
+        (if rp > 0.0 { gp / rp } else { 0.0 }, c, gp, rp)
+    }).collect();
+    rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    println!("\n─── Köppen zone census (area-weighted %, worst-served first) ───");
+    println!("  {:30} {:>7} {:>7} {:>7}", "zone", "gen%", "ref%", "gen/ref");
+    for (ratio, c, gp, rp) in &rows {
+        let flag = if *gp == 0.0 { "  ** NEVER EMITTED **" }
+            else if *ratio < 0.34 { "  << under" } else if *ratio > 3.0 { "  >> over" } else { "" };
+        println!("  {:30} {:7.2} {:7.2} {:7.2}{}", name(*c), gp, rp, ratio, flag);
+    }
+    // Zones the model emits that the reference never has here.
+    for (&c, &gw) in &gen {
+        if !re.contains_key(&c) && gw > 0.0 {
+            println!("  {:30} {:7.2} {:7.2}     n/a  ++ generated only",
+                name(c), 100.0 * gw / total, 0.0);
+        }
+    }
+    println!("───────────────────────────────────────────────────────────────\n");
+}
+
+/// Is precipitation actually responsive to ELEVATION, and at what threshold?
+///
+/// The WINDWARD term is now a graded response to the upslope RISE
+/// (`OROG_RISE_FULL`), but the LEE/rain-shadow term is still the original binary
+/// `elevation > MOUNTAIN_THRESHOLD` test. This prints, for the archetypal
+/// orographic coasts, the elevation the model actually sees in a ~500 km box and
+/// how much of it clears that absolute threshold — which is what the rain shadow
+/// still depends on, and what the windward term used to depend on.
+///
+/// The `cells>thr = 0` rows are the original finding: the Western Ghats (max
+/// 1200 m here), the Appalachians (1407 m) and the New Zealand Southern Alps
+/// (1663 m, just under) cleared it nowhere, so three of the world's wettest
+/// orographic coasts produced no uplift at all.
+#[test]
+#[ignore]
+fn earth_diagnose_orographic_responsiveness() {
+    use crate::sim::precipitation::MOUNTAIN_THRESHOLD_PUB as THRESH;
+    let (buf, _reference) = run_earth();
+    let cell = |lat: f32, lon: f32| -> (u32, u32) {
+        (((lon + 180.0) * 2.0).round() as u32 % W as u32,
+         (((90.0 - lat) * 2.0).round() as u32).min(H as u32 - 1))
+    };
+    let sites: [(&str, f32, f32); 8] = [
+        ("W-Ghats/Mumbai 19N73E", 19.0, 73.0),
+        ("Cascades/Seattle 47N122W", 47.0, -122.0),
+        ("S-Andes/Chile 41S73W", -41.0, -73.0),
+        ("Norway/Bergen 60N5E", 60.0, 5.0),
+        ("Appalachia 36N82W", 36.0, -82.0),
+        ("Himalaya-front 27N88E", 27.0, 88.0),
+        ("NZ-Southern-Alps 43S170E", -43.0, 170.0),
+        ("Cameroon-line 4N9E", 4.0, 9.0),
+    ];
+    println!("\n─── Orographic responsiveness (threshold {:.3} = {:.0} m) ───",
+        THRESH, THRESH * 8848.0);
+    println!("  {:26} {:>8} {:>8} {:>8} {:>7}", "site", "own_m", "max_m", "cells>thr", "precip");
+    for (nm, la, lo) in sites {
+        let (x, y) = cell(la, lo);
+        let i = buf.idx(x, y);
+        // Scan a 9-cell box (~500 km) for the highest land the orographic walk
+        // could plausibly meet, and count how much of it clears the threshold.
+        let (mut maxe, mut over) = (0.0f32, 0);
+        for dy in -4i32..=4 {
+            for dx in -4i32..=4 {
+                let ny = (y as i32 + dy).clamp(0, H as i32 - 1) as u32;
+                let ni = buf.idx(buf.wrap_x(x as i32 + dx), ny);
+                if buf.terrain[ni] != 1 { continue; }
+                maxe = maxe.max(buf.elevation[ni]);
+                if buf.elevation[ni] > THRESH { over += 1; }
+            }
+        }
+        println!("  {:26} {:8.0} {:8.0} {:8} {:7.0}",
+            nm, buf.elevation[i] * 8848.0, maxe * 8848.0, over, buf.precipitation[i]);
+    }
+    println!("  (cells>thr = of 81 in a ~500 km box; 0 means no LEE shadow can form.");
+    println!("   Windward uplift no longer needs this — it scales with upslope rise.)");
+    println!("──────────────────────────────────────────────────────────────\n");
 }
 
 /// Named-region spot checks — regional regression protection for the archetypal
