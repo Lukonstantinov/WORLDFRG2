@@ -689,6 +689,16 @@ const TIER_PCT_DEAD_BAND: f32 = 0.04;
 /// on the `seats` term of the standing score once it reaches this many.
 const TIER_SEATS_SOFT_CAP: f32 = 5.0;
 const TIER_NAMES: [&str; 5] = ["", "great", "major", "lesser", "marginal"];
+
+// ── CITY_PROVINCE_WAR_PLAN.md §3.2 · city tiers ─────────────────────────────────
+// Mirrors the house-tier constants directly above, one for one, for the same
+// reasons: an absolute Tier-1 floor so a young world has an empty Tier 1, and a
+// dead band so a score sitting on a boundary doesn't relabel every month.
+const CITY_TIER1_STANDING_ENTER: f32 = 0.55;
+const CITY_TIER1_STANDING_EXIT: f32 = CITY_TIER1_STANDING_ENTER - 0.04;
+const CITY_TIER_PCT_CUTS: [f32; 3] = [0.08, 0.30, 0.70];
+const CITY_TIER_PCT_DEAD_BAND: f32 = 0.04;
+const CITY_TIER_NAMES: [&str; 5] = ["", "great", "major", "lesser", "marginal"];
 /// A decade (in months) of sustained Tier 1 + rising wealth → "a golden age" (§2.2).
 const GOLDEN_AGE_MONTHS: u32 = 120;
 /// "A dynasty of merchants" needs this many CONSECUTIVE closed heads in `line`, each
@@ -1708,6 +1718,14 @@ pub struct TickHub {
     /// Why the settlement died ("famine" / "plague" / "war" / "disaster"),
     /// classified from its final decade at abandonment. Empty = alive.
     #[serde(default)] pub died_cause: String,
+    /// CITY_PROVINCE_WAR_PLAN.md §3.2 · 1 great · 2 major · 3 lesser · 4 marginal ·
+    /// 0 = not yet assigned (a brand-new settlement, or a world with no province
+    /// layer — see `assign_city_tiers`'s own early return). Mirrors `House.tier`
+    /// exactly, including the "0 = unassigned, never itself a real tier" convention.
+    #[serde(default)] pub tier: u8,
+    /// The percentile-ranked score behind `tier` — population+trade, treasury and
+    /// fiscal reach, territory administered, and the ruling house's own standing.
+    #[serde(default)] pub standing: f32,
 }
 
 /// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by

@@ -447,6 +447,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 died_tick: 0,
                 trade_last_year: 0.0,
                 died_cause: String::new(),
+                tier: 0,
+                standing: 0.0,
             }
         })
         .collect();

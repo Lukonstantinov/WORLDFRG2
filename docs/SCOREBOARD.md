@@ -9,6 +9,37 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md 3.1 + 3.2: the city leader and city tiers)
+
+**3.1 — the office as a person.** `council_house`/`captor_house` already existed and
+already compete for the seat (bribery/intimidation/capture in the existing
+`update_government`); what was missing was surfacing WHO holds it. `CityLeader`
+reads `kin[0]` of whichever office is stronger, reusing `character_phrase` and
+`head_vice` — both already built for the House Dossier but never exposed outside
+it. New `vice_label()` is the first thing that surfaces `head_vice` to the
+frontend at all. Pure read/display addition, no tick mutation.
+
+**3.2 — city tiers.** `TickHub` gains `tier`/`standing`, recomputed monthly by
+`assign_city_tiers` — a direct mirror of `assign_house_tiers` (same percentile
+cutoffs, same Tier-1 absolute floor, same hysteresis). Four axes: population,
+trade wealth, treasury, territory administered (rural population under provinces
+this city holds), and the ruling house's own standing. Query-side only at this
+step — nothing downstream reads the new fields, so the guarantee holds exactly as
+it did for house tiers. Four new tests (richest-city-ranks-highest, Tier-1-empty-
+on-a-flat-world, hysteresis stability, an-estate-is-never-tiered) all pass.
+
+Both steps verified against the full required gate set: `cargo check` clean,
+`econ_` 4/4 non-ignored passed with numbers UNCHANGED from the pre-3.1/3.2
+baseline, `simulate_decades_reports_dynamics` byte-identical, `npx tsc --noEmit`
+clean (3.1 only touched the frontend; 3.2 has no frontend surface yet — city
+tiers become visible once §3.3 turns them into state borders).
+
+**Not yet started:** 3.3 (state name/colour/borders — where city tiers stop being
+bit-identical) and the whole abstract war system (3.4a–f). See
+`docs/CITY_PROVINCE_WAR_PLAN.md` §7 for the full order.
+
+---
+
 ## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md: 1.3, 2.3, 2.4, 2.5 built)
 
 **1.3 — panel polish.** Smoothed the Trade tab's 360→600px width snap into a CSS

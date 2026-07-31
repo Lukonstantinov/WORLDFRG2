@@ -28,6 +28,7 @@
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
+            tier: 0, standing: 0.0,
         }
     }
 
@@ -3370,4 +3371,71 @@
         for yr in 10..20 { s.update_province_goods_pressure(yr); }
         assert!(s.prov_good_depletion[0] < d_before,
             "easing pressure must let depletion heal: {} should be < {d_before}", s.prov_good_depletion[0]);
+    }
+
+    // ── §3.2 · city tiers (mirrors the house-tier tests directly above in spirit) ──
+
+    /// A city with overwhelmingly more population, trade wealth and treasury than
+    /// its rivals must end up in the top band — deliberately coarse (the cutoffs are
+    /// re-derived every month), but a 60x-more-prominent city landing in Tier 4
+    /// would mean the formula is broken, not just imprecise.
+    #[test]
+    fn city_tiers_rank_the_most_prominent_city_highest() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut hubs: Vec<TickHub> =
+            (0..6u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 8000.0, vec![8000.0], 0)).collect();
+        hubs[0].population = 500_000.0;
+        hubs[0].trade_wealth = 50_000.0;
+        hubs[0].treasury = 20_000.0;
+        let mut s = sim(hubs, goods);
+        s.assign_city_tiers();
+        assert_eq!(s.hubs[0].tier, 1, "the overwhelmingly most prominent city must be Tier 1");
+        assert!(s.hubs[0].standing > s.hubs[1].standing, "standing must track population/wealth/treasury");
+        for h in s.hubs.iter().skip(1) {
+            assert!((1..=4).contains(&h.tier), "city left untiered: tier={}", h.tier);
+        }
+    }
+
+    /// Tier 1 has an absolute floor, not just a percentile rank: on a young,
+    /// undifferentiated world nobody should clear it, so Tier 1 is EMPTY.
+    #[test]
+    fn city_tier_one_is_empty_on_an_undifferentiated_world() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs: Vec<TickHub> = (0..5u32)
+            .map(|i| hub(i, (i as f32) * 4.0, 0.0, 8000.0 + i as f32 * 40.0, vec![8000.0], 0))
+            .collect();
+        let mut s = sim(hubs, goods);
+        s.assign_city_tiers();
+        assert!(s.hubs.iter().all(|h| h.tier != 1), "Tier 1 should be empty on a flat world");
+    }
+
+    /// Hysteresis: calling `assign_city_tiers` again with unchanged state must
+    /// reproduce the same tiers, not relitigate every boundary case.
+    #[test]
+    fn city_tier_assignment_is_stable_when_nothing_changed() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs: Vec<TickHub> = (0..7u32)
+            .map(|i| hub(i, (i as f32) * 4.0, 0.0, 3000.0 + i as f32 * 5000.0, vec![8000.0], 0))
+            .collect();
+        let mut s = sim(hubs, goods);
+        for (i, h) in s.hubs.iter_mut().enumerate() {
+            h.trade_wealth = i as f32 * 900.0;
+            h.treasury = i as f32 * 300.0;
+        }
+        s.assign_city_tiers();
+        let first: Vec<u8> = s.hubs.iter().map(|h| h.tier).collect();
+        s.assign_city_tiers();
+        let second: Vec<u8> = s.hubs.iter().map(|h| h.tier).collect();
+        assert_eq!(first, second, "tiers must not change with no underlying change");
+    }
+
+    /// An estate is never itself a rankable "city" — it must stay untiered.
+    #[test]
+    fn an_estate_is_never_tiered() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs: Vec<TickHub> = (0..3u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 8000.0, vec![8000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.hubs[2].is_estate = true;
+        s.assign_city_tiers();
+        assert_eq!(s.hubs[2].tier, 0, "an estate must never be tiered");
     }

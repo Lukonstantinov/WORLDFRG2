@@ -325,6 +325,21 @@ serde-defaulted so old saves load). Grouped by theme:
   boundary doesn't relabel every month; a tier RISE is chronicled as a milestone, a fall
   is not (same asymmetry as `monopoly`/`monopoly_lost`). Purely a query-side
   classification — nothing downstream reads `tier`, so the dynamics run is bit-identical.
+- **City leader & city tiers (`CITY_PROVINCE_WAR_PLAN.md` §3.1/§3.2):** the office as a
+  PERSON, not a new entity. `council_house`/`captor_house` already existed and already
+  compete for the seat (bribery/intimidation/capture in `update_government`); the
+  `CityLeader` read (`read_hubs.rs`) surfaces `kin[0]` of whichever office is stronger
+  (captor outranks a merely-dominant council) — head name, `character_phrase`, and
+  `head_vice` (both already built for the House Dossier, never exposed outside it before
+  this). `TickHub` carries its own `tier`/`standing`, recomputed monthly by
+  `assign_city_tiers` (`cities.rs`) — a direct mirror of `assign_house_tiers`, same
+  percentile cutoffs, same Tier-1 absolute floor, same hysteresis. Four axes: population,
+  trade wealth, treasury, territory administered (rural population under provinces this
+  city HOLDS via `prov_holder` — a house-held province, §5.9/rule 24, counts toward the
+  house instead), and the ruling house's own `standing` (read fresh each month, which is
+  why city tiers must run AFTER house tiers). **Query-side only at this step** — nothing
+  downstream reads `hub.tier`/`hub.standing` yet, so the dynamics run stays bit-identical,
+  exactly as house tiers shipped; §3.3 (state formation) is where that guarantee ends.
 - **Positive events (Phase 1.4):** the mechanism otherwise only produces decline (vices,
   feuds, ruin) — these give the chronicle something else to say, each a MARKER on `House`
   rather than new machinery. `assign_house_tiers` also tracks **the finest hour** (all-time

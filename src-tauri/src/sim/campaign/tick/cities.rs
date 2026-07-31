@@ -64,6 +64,114 @@ impl CampaignSim {
         self.update_records(yr.saturating_sub(1), trade_total);
     }
 
+    /// CITY_PROVINCE_WAR_PLAN.md §3.2 · city tiers, monthly, mirroring
+    /// `assign_house_tiers` one for one (percentile rank + hysteresis + an absolute
+    /// Tier-1 floor, so a young world has an EMPTY Tier 1 — a tier that's always
+    /// occupied carries no information). Four axes (§1.3): population, trade wealth,
+    /// treasury, territory administered (rural population under provinces THIS city
+    /// holds — `prov_holder`, the city case; a house-held province, §5.9, counts
+    /// toward the HOUSE not the city), and the ruling house's own standing (already
+    /// 0..1 from `assign_house_tiers`, so it needs no rank-norm of its own — this is
+    /// why 3.2 must run AFTER the house-tier refresh). **Query-side only at this
+    /// step**: nothing downstream reads `hub.tier`/`hub.standing` yet, so this is
+    /// provably bit-identical to the dynamics test, exactly as house tiers shipped
+    /// (§5.6 of the plan: 3.3 is where that guarantee ends, not before).
+    pub(crate) fn assign_city_tiers(&mut self) {
+        let tick = self.tick;
+        let live: Vec<usize> = (0..self.hubs.len())
+            .filter(|&h| !self.hubs[h].is_estate && !self.hubs[h].abandoned)
+            .collect();
+        let n = live.len();
+        if n == 0 { return; }
+
+        // Territory, precomputed once (O(provinces), not O(cities·provinces)).
+        let mut territory = vec![0.0f32; self.hubs.len()];
+        for p in 0..self.prov_holder.len() {
+            let h = self.prov_holder[p];
+            if h >= 0 {
+                territory[h as usize] += self.prov_rural.get(p).copied().unwrap_or(0.0);
+            }
+        }
+
+        let pops: Vec<f32> = live.iter().map(|&h| self.hubs[h].population.max(0.0)).collect();
+        let trades: Vec<f32> = live.iter()
+            .map(|&h| (self.hubs[h].grain_wealth + self.hubs[h].trade_wealth).max(0.0)).collect();
+        let treasuries: Vec<f32> = live.iter().map(|&h| self.hubs[h].treasury.max(0.0)).collect();
+        let territories: Vec<f32> = live.iter().map(|&h| territory[h]).collect();
+        let pr = rank_norm(&pops);
+        let tr = rank_norm(&trades);
+        let xr = rank_norm(&treasuries);
+        let gr = rank_norm(&territories);
+
+        let mut standings = vec![0.0f32; n];
+        for (k, &h) in live.iter().enumerate() {
+            // The office as a person (§3.1): captor outranks a merely-dominant council.
+            let leader_house = if self.hubs[h].captor_house >= 0 { self.hubs[h].captor_house }
+                else { self.hubs[h].council_house };
+            let leader_standing = leader_house.try_into().ok()
+                .and_then(|hi: usize| self.houses.get(hi))
+                .filter(|hh| !hh.defunct)
+                .map(|hh| hh.standing)
+                .unwrap_or(0.0);
+            let s = 0.20 * pr[k] + 0.15 * tr[k] + 0.25 * xr[k] + 0.20 * gr[k] + 0.20 * leader_standing;
+            standings[k] = s.clamp(0.0, 1.0);
+        }
+
+        // Percentile position: 0 = the most prominent live city, 1 = the least.
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by(|&a, &b| standings[b].partial_cmp(&standings[a]).unwrap_or(std::cmp::Ordering::Equal));
+        let mut pct = vec![0.0f32; n];
+        for (rank, &k) in order.iter().enumerate() {
+            pct[k] = if n > 1 { rank as f32 / (n - 1) as f32 } else { 0.0 };
+        }
+
+        for k in 0..n {
+            let h = live[k];
+            self.hubs[h].standing = standings[k];
+            let prev = self.hubs[h].tier;
+            let new_tier = if prev == 0 {
+                Self::city_tier_band(pct[k], standings[k])
+            } else {
+                Self::city_tier_with_hysteresis(prev, pct[k], standings[k])
+            };
+            // A tier RISE is chronicled (a milestone); a fall is not — the same
+            // asymmetry `assign_house_tiers` uses.
+            if new_tier != prev && prev != 0 && new_tier < prev {
+                let name = self.hubs[h].name.clone();
+                self.journal.push(JournalEntry {
+                    tick, kind: "city_tier".into(), hub: h as i32, good: -1, value: new_tier as f32,
+                    text: format!("{} is now counted among the {} cities", name, CITY_TIER_NAMES[new_tier as usize]),
+                });
+            }
+            self.hubs[h].tier = new_tier;
+        }
+    }
+
+    /// The RAW tier a (percentile, standing) pair bands into, with no memory of the
+    /// city's previous tier. Used only for a city's first-ever assignment.
+    fn city_tier_band(pct: f32, standing: f32) -> u8 {
+        if pct < CITY_TIER_PCT_CUTS[0] && standing >= CITY_TIER1_STANDING_ENTER { 1 }
+        else if pct < CITY_TIER_PCT_CUTS[1] { 2 }
+        else if pct < CITY_TIER_PCT_CUTS[2] { 3 }
+        else { 4 }
+    }
+
+    /// The tier a city holds THIS month, given the tier it held last month —
+    /// identical shape to `tier_with_hysteresis`, a separate function only because
+    /// the constants are city-scoped, not house-scoped.
+    fn city_tier_with_hysteresis(prev: u8, pct: f32, standing: f32) -> u8 {
+        let mut cuts = CITY_TIER_PCT_CUTS;
+        if (2..=4).contains(&prev) { cuts[(prev - 2) as usize] -= CITY_TIER_PCT_DEAD_BAND; }
+        if (1..=3).contains(&prev) { cuts[(prev - 1) as usize] += CITY_TIER_PCT_DEAD_BAND; }
+        let by_rank = if pct < cuts[0] { 1 } else if pct < cuts[1] { 2 }
+            else if pct < cuts[2] { 3 } else { 4 };
+        if by_rank == 1 {
+            let floor = if prev == 1 { CITY_TIER1_STANDING_EXIT } else { CITY_TIER1_STANDING_ENTER };
+            if standing >= floor { 1 } else { 2 }
+        } else {
+            by_rank
+        }
+    }
 
     /// Capacity tier (1..5) for a warehouse `capacity`; 0 = the uncapped −1 pool.
     #[inline]
@@ -1365,6 +1473,7 @@ impl CampaignSim {
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
+            tier: 0, standing: 0.0,
         });
         self.routes_dirty = true;
         self.hubs.len() - 1
