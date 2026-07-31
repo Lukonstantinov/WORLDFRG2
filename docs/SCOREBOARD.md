@@ -309,7 +309,7 @@ of the wrong world.
 
 | Metric | Value | Gate | Status |
 |---|---|---|---|
-| **Earth main-class agreement** | **70.1%** | `EARTH_MAIN_FLOOR` = 70.0 | ✅ asserted |
+| **Earth main-class agreement** | **70.2%** | `EARTH_MAIN_FLOOR` = 70.1 | ✅ asserted |
 | **Earth exact-zone agreement** | **39.0%** | `EARTH_EXACT_FLOOR` = 38.8 | ✅ asserted |
 | Earth C-class own accuracy | 32.2% | — | worst class |
 | Earth `C → B` confusion | 39% | — | largest single error |
@@ -620,6 +620,7 @@ subsystem is one you cannot have an opinion about.
 
 | Date | Commit | Earth main | Earth exact | Rust tests | FE tests | Note |
 |---|---|---|---|---|---|---|
+| 2026-07-31 | *this* | **70.2%** | 39.0% | 227 | 0 | Ocean evaporation's wind term was DEAD CODE — it read `|belt_wind|`, which is a unit vector, so the factor was identically 1.0. Now reads `jets::base_speed`, the real belt speed profile, as the bulk formula `E ∝ U·(q_s − q_a)` requires |
 | 2026-07-31 | *this* | 70.1% | **39.0%** | 227 | 0 | **Köppen no longer emits `H`.** Highland has no Köppen counterpart — the reference calls Tibet and the high Andes `ET`/`EF`/`Dwc` — so every `H` cell was unmatchable by construction. Exact-zone 33.7 → 39.0, the largest single move of the session, with main-class *identical* (it only ever sat on terrain the reference already calls polar). Alpine is unaffected on the Biomes layer, which has its own altitudinal band. Graded rain shadow tried and reverted (A15) |
 | 2026-07-31 | *this* | **70.1%** | **33.7%** | 227 | 0 | **Seasonal monsoon adopted (FIX_PLAN A14).** The wind belts now migrate with the ITCZ and cross-equatorial flow recurves, so monsoon winds actually reverse: 0/7 → 4/7 sites, now ASSERTED by `earth_monsoon_wind_reverses`. Exact-zone to its best ever. Main-class floor LOWERED 70.6 → 70.0 — the only lowering in this file's history, a deliberate trade (the arid belt had been propped up by a wind that never changed direction). ITCZ overlay now draws both seasonal lines with the migration band hatched between them |
 | 2026-07-31 | *this* | **70.8%** | **32.8%** | 226 | 0 | Continental seasonal span raised (`K_SEASONAL` 0.20 → 0.24). The generated warmest−coldest span at 60–70°N was 28.6 °C against a real 57–65 in Siberia, which made `Dfd`/`Dwd` *arithmetically impossible* (they need `t_coldest < −38 °C`). D row 58.5 → 70.8; `Dfd` and `Dsa` go from never-emitted to present. Cost is the C row (34.5 → 31.5) |

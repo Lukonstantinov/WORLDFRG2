@@ -986,3 +986,48 @@ absolute height keeps them but still loses, because a weak shadow cast by every
 minor rise dilutes the deep ones. A rain shadow behaves closer to a threshold
 phenomenon than uplift does: either the air crossed something tall enough to wring
 out, or it did not.
+
+### A16. Ocean evaporation's wind term was dead code — FIXED
+
+`compute_salinity` computed evaporation as
+`(0.35 + 0.65·sst_norm) · (0.55 + 0.45·wind_speed)`, taking `wind_speed` from
+`|(wind_vx, wind_vy)|`. But `belt_wind` returns a **unit** vector, so that
+magnitude was identically 1.0 and the entire wind factor was the constant 1.0 —
+dead code dressed as physics.
+
+Now reads `jets::base_speed(abs_lat, circ)`, the real belt speed profile (doldrums
+~2.5, trades ~8.5, westerlies ~11.5, a calm on the Hadley edge), normalised about a
+typical trade speed so the belt STRUCTURE enters while the term's calibrated scale
+is preserved. This is what the bulk aerodynamic formula
+`E = ρ·C_E·U·(q_s − q_a)` (Fairall et al. 2003) actually asks for.
+
+**70.1 → 70.2 main, exact-zone unchanged at 39.0.** Small, as expected — salinity
+feeds currents feeds SST, so the path to Köppen is indirect — but it replaces a
+constant with a real latitude structure, which matters more on a non-Earth world
+where the belts move.
+
+---
+
+## Remaining open items (measured, not attempted)
+
+Ranked by expected value. Everything above this line has been either fixed or
+tried-and-recorded; these have not been attempted at all.
+
+1. **`C → B` over-aridity, 32.2% C accuracy** — still the largest error, and now the
+   root of three other items: it blocks the whole `Dw` family (A13), it is why the
+   Horn cannot be dried (A8), and it is what made the honest wind field cost
+   main-class (A14). The subtropical subsidence term is not strong enough to hold
+   the arid belt on its own merits.
+2. **The Horn of Africa** — Bosaso ~3500 mm against a real ~100. Needs the
+   subsidence sink extended equatorward of 13° (A8).
+3. **Current speed does not set advection distance** — `extend_warm_tag` uses one
+   global `max_steps`. Should be per-seed and proportional to local speed
+   (`L = U·τ`, τ ≈ 3–9 months from the mixed-layer heat capacity).
+4. **Equatorial countercurrents are untyped** — `current_type` tags nothing below
+   18°, so the NECC/SECC have no thermal effect and no distinct render.
+5. **Shelf-aware `TAU_MARITIME`** — a 50 m shelf has 2–3× the seasonal SST swing of
+   an open mixed layer, and that is a C/D discriminator.
+6. **`Csa` Mediterranean at 0.17% against 1.94%** — the §8.6 windward-coast +
+   cold-current gate is very likely too strict.
+7. **The zero-wind ring at 30°/60° (A7)** — a real bug, still present, blocked
+   behind item 1.

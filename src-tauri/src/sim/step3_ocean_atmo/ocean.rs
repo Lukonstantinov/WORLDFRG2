@@ -945,20 +945,30 @@ pub fn compute_salinity(buf: &mut WorldBuffer) {
     let narrow_cells = ((w as f32) * 0.10).max(8.0);
 
     let mut psu = vec![0.0f32; n];
+    // The wind term in the evaporation formula below needs an actual SPEED. It used
+    // to read `|(wind_vx, wind_vy)|`, but `belt_wind` returns a UNIT vector, so that
+    // magnitude was identically 1.0 and the whole factor collapsed to a constant —
+    // dead code dressed as physics. `jets::base_speed` is the real belt speed
+    // profile (doldrums ~2.5, trades ~8.5, westerlies ~11.5, a calm on the Hadley
+    // edge), which is what the bulk aerodynamic formula E = ρ·C_E·U·(q_s − q_a)
+    // actually wants (Fairall et al. 2003).
+    let circ = Circulation::for_world(buf);
 
     for y in 0..h {
         let abs_lat = buf.abs_latitude(y);
         let sst = sst_estimate(abs_lat);
         let sst_norm = ((sst + 2.0) / 30.0).clamp(0.0, 1.0);
         let op = ocean_precip_norm(abs_lat);
+        // Normalised about a typical trade-wind speed so the belt STRUCTURE enters
+        // (windy westerlies evaporate more than the doldrums and the horse
+        // latitudes) while the term's overall scale stays where it was calibrated.
+        let wind_speed = (crate::sim::jets::base_speed(abs_lat, &circ) / 7.0).clamp(0.0, 1.6);
 
         for x in 0..w {
             let i = buf.idx(x, y);
             if terrain[i] != 0 { continue; }
 
             // Evaporation: warm + windy water evaporates fastest.
-            let wind_speed = (buf.wind_vx[i] * buf.wind_vx[i]
-                + buf.wind_vy[i] * buf.wind_vy[i]).sqrt().clamp(0.0, 1.0);
             let evap = (0.35 + 0.65 * sst_norm) * (0.55 + 0.45 * wind_speed);
 
             // E âˆ’ P â†’ salinity anomaly around the 35 PSU mean.

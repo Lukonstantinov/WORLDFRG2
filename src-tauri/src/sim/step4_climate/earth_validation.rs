@@ -254,7 +254,7 @@ fn earth_diagnose_upwelling_reachability() {
 /// subtropical basin-position asymmetry, and confining the snow-albedo cooling to
 /// the cold season); bump it up as the model improves so it always guards the
 /// current fidelity.
-const EARTH_MAIN_FLOOR: f64 = 70.0;
+const EARTH_MAIN_FLOOR: f64 = 70.1;
 
 /// The same guard for EXACT-ZONE agreement (31.6% measured). Main-class alone is
 /// not enough: E scores ~99% for free on a fifth of the weight, so a change can
