@@ -80,7 +80,13 @@ It prints a scorecard + confusion matrix and HARD-ASSERTS a floor
 (`EARTH_MAIN_FLOOR`), so a change that breaks the global pattern fails the build.
 **Raise the floor after an improvement** so it always guards the current best.
 
-Measured baseline (commit `d53fdc9`): **main-class 66.2%**, **exact-zone 29.0%**.
+Measured baseline: **main-class 70.1%**, **exact-zone 33.7%** (was 66.2 / 29.0 at
+`d53fdc9`). BOTH are now asserted — `EARTH_MAIN_FLOOR` **and** `EARTH_EXACT_FLOOR`.
+A third gate, `earth_monsoon_wind_reverses`, asserts the PHYSICS rather than the
+score: monsoon winds must reverse between the two seasons and the mid-latitude
+controls must not. It exists because the main-class floor was deliberately lowered
+once (70.6 → 70.0) to adopt the seasonal monsoon, and a point spent on realism has
+to be defended by something.
 Track **exact-zone** — main-class is inflated by class E scoring 99.1% for free
 (polar is just "cold"). Known open errors and the plan to fix them: `docs/FIX_PLAN.md`.
 
@@ -722,6 +728,10 @@ sim/                            ← organised into per-phase step folders; mod.r
       circulation.rs              Hadley edge / polar front derived from ROTATION rate
       temperature.rs              base curve + EBM anomaly + lapse + currents + coastal damping
       jets.rs · seasonal.rs       low-level jets (Somali) · two-season winds & monsoon
+                                  (`itcz_land_pull`/`itcz_latitude` — the ITCZ
+                                  position the belts are displaced about; shared
+                                  with the ITCZ overlay so the drawn line IS the
+                                  modelled one)
       precipitation.rs            advection-decay moisture + ITCZ/orographic/frontal/jet terms
       preview.rs                  SETTINGS PREVIEW (§8.14): 1-D zonal profile + coarse
                                   climate map — read-only, never touches a tile
@@ -996,6 +1006,11 @@ ui/workflow/
 - `compute_trade_matrix(...)` → settlement-cluster regions, per-good prod/demand/net +
   per-good `flows` + **routed & bundled `trunks`** (edge width ∝ volume). Sea-
   impassable pairs (under the reach) get no flow.
+- `compute_climate_bands` → the circulation belts + the **ITCZ at BOTH seasonal
+  extremes** (`itcz_july` / `itcz_january`, per column, from the same helpers the
+  seasonal wind is built from). The overlay draws July solid, January dashed, and
+  hatches the migration band between them at low opacity — that band is the land
+  which changes circulation regime between seasons, i.e. the monsoon belt.
 - `compute_political(...)` → settlements re-ranked by **trade power** (0.45·habitability
   + 0.30·route-centrality + 0.25·good-monopoly); influence discs sized by power (👑).
 
@@ -1023,6 +1038,20 @@ Fisheries     upwelling (shelf + cold current + equatorward flow) + river-mouth 
 Habitability  H = climate·0.40 + fertility·0.20 + water·0.20 + terrain·0.10 + trade·0.10
 ```
 
+**The monsoon is a MIGRATING ITCZ, not a land–sea breeze.** `belt_wind_shifted`
+displaces the whole circulation toward the summer hemisphere; the meridional
+direction comes from which side of the *displaced* ITCZ a cell sits on, while the
+Coriolis handedness comes from its **true** latitude. Keeping those two conventions
+separate is the entire mechanism — it is what makes cross-equatorial flow recurve
+into a real southwesterly. Land–sea contrast enters only as `MONSOON_LAND_PULL`,
+selecting the LONGITUDE the convergence zone reaches furthest poleward (Chao & Chen
+2001; Gadgil 2003; Geen et al. 2020). At `shift = 0` it is bit-identical to the
+annual-mean field, so the ocean-current model is untouched. Three rules: the
+migration must stay **tapered to the tropics** (a uniform shift reverses the
+Southern Ocean westerlies); `monsoon_onshore` must stay **wind-aware** (a purely
+geometric ray lets subtropical deserts switch off their own subsidence sink — the B
+row falls 68.1% → 61.3%); and `earth_monsoon_wind_reverses` must keep passing.
+
 **Ocean currents** are a gyre-aware relaxation, not a solve: the *interior* comes from
 the Sverdrup relation (curl of belt wind stress on a β-plane — sign and latitude
 structure EMERGE), while boundary speeds are prescribed constants
@@ -1030,7 +1059,8 @@ structure EMERGE), while boundary speeds are prescribed constants
 deflection passes + bathymetry steering. The field is **not divergence-free** and
 currents are **annual-mean only** even though the winds have two seasons.
 
-**Known fidelity gaps** (measured, with fixes planned — see `docs/FIX_PLAN.md`):
+**Known fidelity gaps** (measured, with fixes planned — see `docs/FIX_PLAN.md`
+A7–A14, which include three REVERTED attempts kept as negative results):
 moisture has no conserved budget and no evapotranspiration recycling, so continental
 interiors and the monsoon subtropics come out far too dry (`C→B` confusion 39%);
 maritime coasts under-damp, so the high-mid latitudes read too cold (`D→E` 40%);
