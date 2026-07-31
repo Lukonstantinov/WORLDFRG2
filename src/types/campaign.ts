@@ -503,6 +503,25 @@ export interface Government {
   family_influence: InfluenceRow[];
   laws: LawRow[];
   civic_goods: CivicGoodRow[];
+  /** CITY_PROVINCE_WAR_PLAN.md §3.1 · the office as a person — null when no house
+   *  holds either office (the ordinary early-campaign case). */
+  leader: CityLeader | null;
+}
+/** §3.1 · the head of whichever house runs this seat — reuses the existing
+ *  house-person stack, no new entity. */
+export interface CityLeader {
+  house: string;
+  house_color: string;
+  is_guild: boolean;
+  /** True when held by CAPTURE (a majority of control-weighted offices) rather
+   *  than merely being the dominant council house. */
+  is_captor: boolean;
+  head_name: string;
+  female: boolean;
+  /** "" for a middling character. */
+  character_phrase: string;
+  /** "" when the head has no vice. */
+  vice: string;
 }
 export interface OfficialRow {
   role: string;

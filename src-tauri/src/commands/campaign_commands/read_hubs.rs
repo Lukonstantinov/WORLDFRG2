@@ -310,6 +310,19 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         let soonest = hub.officials.iter().map(|o| o.term_end).min().unwrap_or(sim.tick);
         let next_election_years = ((soonest.saturating_sub(sim.tick)) / 365) as i32;
         let (captor, captor_color) = hname(hub.captor_house);
+        // §3.1 · the office as a person: captor (a majority CAPTURE) outranks a
+        // merely-dominant council, since it's the stronger real hold on the seat.
+        let leader_house = if hub.captor_house >= 0 { hub.captor_house } else { hub.council_house };
+        let leader = leader_house.try_into().ok()
+            .and_then(|hi: usize| sim.houses.get(hi).map(|h| (hi, h)))
+            .filter(|(_, h)| !h.defunct)
+            .and_then(|(hi, h)| h.kin.first().map(|head| CityLeader {
+                house: h.name.clone(), house_color: distinct_color(hi), is_guild: h.is_guild,
+                is_captor: hub.captor_house == hi as i32,
+                head_name: head.name.clone(), female: head.female,
+                character_phrase: crate::sim::tick::character_phrase(head.character),
+                vice: crate::sim::tick::vice_label(sim.head_vice(hi)).to_string(),
+            }));
         Some(Government {
             council, council_color, council_archetype, council_is_guild, council_power,
             tariff_export, tariff_import, tariff_default,
@@ -318,7 +331,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             spec_risk, spec_tier, spec_stars, spec_pattern, spec_drivers, spec_watch,
             govt_type: govt_type_name(hub.govt_type).to_string(),
             next_election_years, captor, captor_color,
-            officials, family_influence, laws, civic_goods,
+            officials, family_influence, laws, civic_goods, leader,
         })
     };
     // ── DLC 3.5 · Carrying trade ("transit"): in-flight shipments run by THIS

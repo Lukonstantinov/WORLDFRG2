@@ -2015,6 +2015,20 @@ pub const VICE_PAROCHIAL: u8 = 5;   // rooted ≤ −2 — refuses expansion
 /// discontent/rolls only; see the Phase 3.2 handoff note for what's NOT wired.
 pub const VICE_LAVISH_DRAIN: f32 = 0.0015;
 
+/// Display name for a vice code — CITY_PROVINCE_WAR_PLAN.md §3.1 is the first
+/// caller that surfaces `head_vice` to the frontend at all (previously it only
+/// fed the discontent/crisis roll internally), so this didn't need to exist until now.
+pub fn vice_label(v: u8) -> &'static str {
+    match v {
+        VICE_LAVISH => "lavish",
+        VICE_RECKLESS => "reckless",
+        VICE_RAPACIOUS => "rapacious",
+        VICE_MISERLY => "miserly",
+        VICE_PAROCHIAL => "parochial",
+        _ => "",
+    }
+}
+
 /// Phase 3.3–3.6 · a succession crisis in progress. Opens when a house's discontent
 /// crosses a threshold; runs a fixed number of quarterly rounds; resolves into
 /// PREVAILED / DEPOSED / DISSOLVED. `HOUSE_SUCCESSION_CRISIS.md` +

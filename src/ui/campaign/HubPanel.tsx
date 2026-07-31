@@ -445,6 +445,35 @@ export function HubPanel() {
         );
         return (
           <div style={{ fontSize: 11, color: "#c7d6e8" }}>
+            {/* §3.1 · the office as a PERSON — reuses the house-person stack
+                (kin, character, vice), no new entity. */}
+            {g.leader && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8,
+                padding: "5px 7px", background: "#0d1622", border: "1px solid #24405e", borderRadius: 6 }}>
+                <CoatOfArms name={g.leader.house} size={28} guild={g.leader.is_guild} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: "#f0e2c0", fontWeight: 700 }}>
+                    {g.leader.head_name}
+                    <span style={{ color: "#8aa0c0", fontWeight: 400 }}>
+                      {" "}· {g.leader.is_captor ? "ruling" : "leading"} {g.leader.house}
+                    </span>
+                  </div>
+                  {(g.leader.character_phrase || g.leader.vice) && (
+                    <div style={{ color: "#9ab0c8", fontSize: 10 }}>
+                      {g.leader.character_phrase}
+                      {g.leader.vice && (
+                        <span style={{ color: "#e6a07a" }}> {g.leader.character_phrase ? "· " : ""}{g.leader.vice}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <span style={{ fontSize: 9, color: g.leader.is_captor ? "#ff8a6a" : "#7fd0a0",
+                  border: `1px solid ${g.leader.is_captor ? "#5a3020" : "#1d4a30"}`, borderRadius: 10, padding: "1px 7px" }}>
+                  {g.leader.is_captor ? "captured" : "dominant"}
+                </span>
+              </div>
+            )}
+
             <div style={sectionHdr}>Council</div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
               {g.council !== "—"

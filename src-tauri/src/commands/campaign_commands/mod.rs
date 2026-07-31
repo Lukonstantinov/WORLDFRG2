@@ -314,6 +314,33 @@ pub struct Government {
     pub laws: Vec<LawRow>,
     /// The goods the government itself holds (civic granary/stockpile).
     pub civic_goods: Vec<CivicGoodRow>,
+    /// CITY_PROVINCE_WAR_PLAN.md §3.1 · the office as a PERSON — the head of
+    /// whichever house actually runs this seat. `None` when no house holds either
+    /// office (the ordinary early-campaign case). No new person entity: this is
+    /// `kin[0]` of `captor` (the stronger office — a majority-captured government)
+    /// or `council` (the softer, dominant-but-not-captured case), whichever is set.
+    #[serde(default)]
+    pub leader: Option<CityLeader>,
+}
+
+/// CITY_PROVINCE_WAR_PLAN.md §3.1 · the city leader — the head of the house that
+/// runs this seat's government, reusing the existing house-person stack (kin,
+/// character, vice) rather than a new entity.
+#[derive(Serialize, Clone, Default)]
+pub struct CityLeader {
+    pub house: String,
+    pub house_color: String,
+    pub is_guild: bool,
+    /// True when the house holds this seat by CAPTURE (a majority of its
+    /// control-weighted offices) rather than merely being its dominant council.
+    pub is_captor: bool,
+    pub head_name: String,
+    pub female: bool,
+    /// A phrase from the head's character axes ("Bold, civic-minded." or "" for a
+    /// middling character) — the same discipline the stability gauges use.
+    pub character_phrase: String,
+    /// "" when the head has none.
+    pub vice: String,
 }
 
 /// One government key figure for the Government subtab.
