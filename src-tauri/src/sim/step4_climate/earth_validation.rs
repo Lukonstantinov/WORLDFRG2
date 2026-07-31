@@ -242,13 +242,13 @@ fn earth_diagnose_upwelling_reachability() {
 /// subtropical basin-position asymmetry, and confining the snow-albedo cooling to
 /// the cold season); bump it up as the model improves so it always guards the
 /// current fidelity.
-const EARTH_MAIN_FLOOR: f64 = 69.4;
+const EARTH_MAIN_FLOOR: f64 = 70.6;
 
 /// The same guard for EXACT-ZONE agreement (31.6% measured). Main-class alone is
 /// not enough: E scores ~99% for free on a fifth of the weight, so a change can
 /// hold main-class flat while degrading the zone detail underneath it. Track this
 /// one — it is where the real state of the model lives (CLAUDE.md §2.3).
-const EARTH_EXACT_FLOOR: f64 = 31.7;
+const EARTH_EXACT_FLOOR: f64 = 32.6;
 
 /// Why a subtropical cell came out wet or dry — the decision chain, not the total.
 ///

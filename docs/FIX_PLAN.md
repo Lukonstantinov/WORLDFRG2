@@ -839,3 +839,45 @@ SE-US now `C`. Sweep of the saturating rise (main flat at 69.6 throughout):
 **Still open here:** the LEE/rain-shadow term is still the binary absolute test, and
 nothing in the orographic response depends on wind SPEED, though `w = U·∇h` says it
 should.
+
+### A12. Continental seasonality was half of reality — FIXED (unblocks two zones)
+
+`K_SEASONAL` 0.20 → 0.24. The generated warmest−coldest span at 60–70°N measured
+**28.6 °C** against a real 57 °C at Yakutsk and 65 °C at Verkhoyansk. Two
+consequences, and the first is the one that matters most:
+
+- **`Dfd` and `Dwd` were arithmetically impossible.** Both require
+  `t_coldest < −38 °C`. With a 28 °C span, `t_coldest = mean − 0.55·span` is at
+  most ~15 °C below the annual mean, so no plausible mean could reach −38. The
+  zones were not rare in the model; they were unreachable.
+- Same root cause as `D → E`: too narrow a span puts the warmest month under
+  Köppen's 10 °C polar line.
+
+**70.6 → 70.8 main, 31.9 → 32.8 exact, D row 58.5 → 70.8, `D → E` 30% → 18%.**
+`Dfd` 0.00 → 0.17%, `Dsa` 0.00 → 0.11%, `Dsb` 0.07 → 0.21% — three zones go from
+never-emitted (or near it) to present, which is the independent target the sweep
+was checked against rather than the score it was tuned on.
+
+**The cost is real and is the C row: 34.5% → 31.5%**, mostly `Cfb` (4.57 → 1.66%
+against a reference 3.50%) flipping to D as winters deepen. Beyond K = 0.24
+main-class keeps creeping to 71.0 while exact-zone collapses to 30.4 — the D row
+is bought straight out of C and E — so 0.24 is the joint maximum, not the
+main-class maximum.
+
+0.24 is still far short of the doubling the Siberian figures imply, so the
+under-swing is reduced, not fixed. Going further needs the C-row cost addressed
+first, most likely via `Cfb`'s maritime damping (`TAU_MARITIME`) rather than by
+backing off the continental span.
+
+### A13. Still-blocked zones after A12
+
+`Dwa`/`Dwb`/`Dwd` remain never-emitted and `Dwc` is at 0.01% against 1.50%. A12
+confirms this is **not** a seasonality problem — the whole `Dw` family is lost
+upstream, in the aridity test. The East Asian dry-winter belt is classified `B`
+before it can reach the C/D branch (China-South 25N113E reads `B` at 497 mm
+against a real ~1700), so the `w` third letter never gets a chance to apply. Fixing
+`Dw` means fixing the `C → B` over-aridity in the monsoon subtropics, i.e. it is
+downstream of A1/A9, not a separate item.
+
+Also still open from the census: `H` (highland) at 8.07% of generated land against
+0.00% of the reference, and `Csa` Mediterranean at 0.17% against 1.94%.

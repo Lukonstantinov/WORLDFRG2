@@ -160,10 +160,30 @@ pub fn compute_temperature(buf: &mut WorldBuffer) {
 // cold-winter interiors / lee coasts emerge instead of being imposed.
 
 /// Calibration: °C of seasonal temperature span per (W/m²) of seasonal insolation
-/// amplitude, at full (land) response. Tuned so a deep continental interior at ~55°
-/// reaches a ~44 °C warmest−coldest span (Earth-like) — keeping downstream Köppen in
-/// the same regime the old parametric range produced.
-const K_SEASONAL: f32 = 0.20;
+/// amplitude, at full (land) response.
+///
+/// Raised 0.20 → 0.24 because the model's continental seasonality was measurably
+/// about half of reality: the generated warmest−coldest span at 60–70°N was
+/// **28.6 °C** against a real 57 °C at Yakutsk and 65 °C at Verkhoyansk. That
+/// under-swing is why two Köppen zones could not exist at all — `Dfd`/`Dwd`
+/// require `t_coldest < −38 °C`, which a 28 °C span cannot reach at any plausible
+/// annual mean — and it is the same root cause as the `D → E` error, since a span
+/// that is too narrow puts the warmest month below Köppen's 10 °C polar line.
+///
+/// 0.24 is still well short of the doubling the Siberian figures imply, so this
+/// moves toward reality rather than past it. The sweep, with the target
+/// (`Dfd` appearing) checked independently of the score:
+///
+///   K      main   exact      C      D      E
+///   0.20   69.6   31.9   34.5   58.5   98.0
+///   0.22   70.3   32.5   33.0   65.0   97.0
+///   0.24   70.8   32.8   31.5   70.8   95.4   <- chosen
+///   0.26   70.9   31.9   30.1   75.1   93.2
+///   0.28   71.0   30.4   28.3   78.9   91.2
+///
+/// Beyond 0.24 main-class keeps creeping while exact-zone collapses — the D row is
+/// bought out of C and E. 0.24 takes the joint maximum of both headline metrics.
+const K_SEASONAL: f32 = 0.24;
 /// Thermal response time (years) of a maritime column (deep mixed layer): a long τ
 /// heavily damps and lags the seasonal cycle (mild oceanic coasts).
 const TAU_MARITIME: f32 = 0.57;

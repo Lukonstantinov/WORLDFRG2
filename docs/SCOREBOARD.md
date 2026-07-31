@@ -309,11 +309,11 @@ of the wrong world.
 
 | Metric | Value | Gate | Status |
 |---|---|---|---|
-| **Earth main-class agreement** | **69.6%** | `EARTH_MAIN_FLOOR` = 69.4 | ✅ asserted |
-| **Earth exact-zone agreement** | **31.9%** | `EARTH_EXACT_FLOOR` = 31.7 | ✅ asserted |
-| Earth C-class own accuracy | 34.5% | — | worst class |
+| **Earth main-class agreement** | **70.8%** | `EARTH_MAIN_FLOOR` = 70.6 | ✅ asserted |
+| **Earth exact-zone agreement** | **32.8%** | `EARTH_EXACT_FLOOR` = 32.6 | ✅ asserted |
+| Earth C-class own accuracy | 31.5% | — | worst class |
 | Earth `C → B` confusion | 39% | — | largest single error |
-| Earth `D → E` confusion | 30% | — | second largest |
+| Earth `D → E` confusion | 18% | — | second largest |
 | **Economy: price/distance gradient** | **−0.01** | *none* | ❌ distance does not move prices |
 | Economy: grain price CV across cities | 2.10 | `ECON_SPATIAL_CV_FLOOR` = 0.01 | ⚠️ far above band (0.20–0.40) |
 | Economy: rank-size (Zipf) slope | −0.41 | band [−3.0, −0.15] | ⚠️ flatter than −0.8…−1.2 |
@@ -620,6 +620,7 @@ subsystem is one you cannot have an opinion about.
 
 | Date | Commit | Earth main | Earth exact | Rust tests | FE tests | Note |
 |---|---|---|---|---|---|---|
+| 2026-07-31 | *this* | **70.8%** | **32.8%** | 226 | 0 | Continental seasonal span raised (`K_SEASONAL` 0.20 → 0.24). The generated warmest−coldest span at 60–70°N was 28.6 °C against a real 57–65 in Siberia, which made `Dfd`/`Dwd` *arithmetically impossible* (they need `t_coldest < −38 °C`). D row 58.5 → 70.8; `Dfd` and `Dsa` go from never-emitted to present. Cost is the C row (34.5 → 31.5) |
 | 2026-07-31 | *this* | **69.6%** | **31.9%** | 226 | 0 | Orographic uplift made a graded response to upslope RISE (Smith & Barstad `w = U·∇h`) instead of a binary `elevation > 1681 m` test. Measured: the Western Ghats, Appalachians and NZ Southern Alps cleared that threshold in ZERO cells, so three of the wettest orographic coasts on Earth produced no uplift at all. C row 33.0 → 34.5; Mumbai `B→A`, SE-US now C. Also adds a Köppen ZONE CENSUS: 5 zones are never emitted (all `Dw*`/`*d`) and H is 8.07% of land against 0% in the reference |
 | 2026-07-31 | *this* | **69.4%** | **31.8%** | 226 | 0 | Moisture emission scaled by SST via Clausius-Clapeyron (bulk formula). The source was a 3-valued step on `current_type` and, because only boundary currents poleward of ~18° carry a tag, it made the mid-latitudes the model's strongest moisture source and the equator its weakest — backwards. A row 83.8 → 85.1, exact-zone 31.6 → 31.8. Gain damped to 0.30 (sweep in the constant's doc comment). Two REVERTED negative results recorded in FIX_PLAN A7/A8 |
 | 2026-07-31 | *this* | **69.2%** | **31.6%** | 226 | 0 | Snow-albedo cooling confined to the COLD SEASON (it was lowering the annual mean, so `seasonal_temps` put the full 4 °C on July — and Köppen's D/E boundary IS the warmest month). D row 49.8 → 58.7, `D → E` 37% → 30%. Also documents the subtropical basin-position asymmetry (Miyasaka & Nakamura 2005) that entered `6d0aaa1` unreviewed. Floors 67.0 → 69.0; `EARTH_EXACT_FLOOR` added at 31.0 |
