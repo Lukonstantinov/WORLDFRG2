@@ -512,3 +512,14 @@ export async function campaignProvinceState(): Promise<import("@types").Province
 export async function campaignProvinceDetail(id: number): Promise<import("@types").ProvinceDetail | null> {
   return invoke("campaign_province_detail", { id });
 }
+
+/** A cropped elevation/land/biome sample grid over one province's bounding box —
+ *  the survey plate's real "relief" base layer (§2.3). `maxDim` bounds the longer
+ *  side of the returned grid (~130 matches the plate's own fidelity target).
+ *  Returns null when no province layer exists. */
+export async function getProvinceTerrainCrop(
+  provinceId: number,
+  maxDim = 130,
+): Promise<import("@types").ProvinceTerrainCrop | null> {
+  return invoke("get_province_terrain_crop", { provinceId, maxDim });
+}

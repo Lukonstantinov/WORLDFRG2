@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
-import { simGenerateProvinces, campaignProvinceState, campaignProvinceDetail, campaignProvinceLandAll } from "@bridge";
+import { simGenerateProvinces, campaignProvinceState, campaignProvinceDetail, campaignProvinceLandAll, getProvinceTerrainCrop } from "@bridge";
 import { GOOD_DEFS } from "@goods";
 import { koppenName } from "@ui/world/climate";
 import { ProvinceMiniMap, soilWord } from "@ui/world/ProvinceMiniMap";
-import type { Province, ProvinceLive, ProvinceDetail, ProvinceLand, PSettlement } from "@types";
+import type { Province, ProvinceLive, ProvinceDetail, ProvinceLand, ProvinceTerrainCrop, PSettlement } from "@types";
 
 import { ELEV_WORD, goodEmoji, goodLabel, provinceHistory, stars } from "@ui/world/provinceStory";
 
@@ -135,6 +135,18 @@ export function ProvincePanel() {
       .catch(() => { if (!stale) setDetail(null); });
     return () => { stale = true; };
   }, [open, selected?.id, provinces]);
+
+  // The survey plate's real terrain crop (§2.3) — world geography, independent of
+  // the campaign join above.
+  const [terrain, setTerrain] = useState<ProvinceTerrainCrop | null>(null);
+  useEffect(() => {
+    if (!open || !selected) { setTerrain(null); return; }
+    let stale = false;
+    getProvinceTerrainCrop(selected.id)
+      .then((t) => { if (!stale) setTerrain(t); })
+      .catch(() => { if (!stale) setTerrain(null); });
+    return () => { stale = true; };
+  }, [open, selected?.id]);
 
   // Mini-map inputs: live campaign settlements+buildings when available, else the
   // worldgen settlements standing in the province (no buildings before a campaign).
@@ -308,6 +320,8 @@ export function ProvincePanel() {
                       buildings={detail && detail.id === selected.id ? detail.buildings : []}
                       land={lands?.get(selected.id) ?? null}
                       riverCells={selected.river_cells}
+                      terrain={terrain}
+                      rivers={rivers}
                     />
 
                     <div style={{ marginTop: 10, marginBottom: 4, opacity: 0.8, fontWeight: 600 }}>Goods (quality)</div>

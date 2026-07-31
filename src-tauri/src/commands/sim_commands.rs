@@ -3,6 +3,7 @@ use crate::db::WorldDb;
 use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
 use crate::sim::{plates, elevation, ocean, temperature, jets, precipitation, koppen, rivers, soil, fertility, settlements, biological, toponyms};
 use crate::db::metadata;
+use crate::tile::coords::{TileCoord, TILE_SIZE};
 
 /// Generate tectonic plates and derive landmass.
 /// Phase 1: Plate tectonics → terrain
@@ -1088,6 +1089,99 @@ pub fn campaign_province_detail(id: u32, db: State<'_, WorldDb>) -> Result<Optio
         .unwrap_or(0);
     let net = sim.prov_net_mig.get(id as usize).map(|&m| m as i32).unwrap_or(0);
     Ok(Some(ProvinceDetail { id, rural_pop: rural, urban_pop: urban, net_migration: net, settlements, buildings }))
+}
+
+/// A cropped terrain sample grid over ONE province's bounding box: real elevation,
+/// land/sea and biome codes read straight from the world's own tiles — the base
+/// layer for the province survey plate (`ProvinceMiniMap`'s "relief" plate), which
+/// used to be a flat placeholder fill. CITY_PROVINCE_WAR_PLAN.md §2.3.
+///
+/// A read-only display-time query, not a tick concern — §5.4 of that plan: this is
+/// not a snapshot violation, it costs nothing per campaign year, and the campaign
+/// itself never touches a tile. River COURSES are deliberately not returned here:
+/// the frontend already holds the world's full river geometry (`worldStore.rivers`,
+/// loaded once at open) and can clip it to this province's own raster mask itself,
+/// so duplicating that data over IPC on every crop request would be pure waste.
+#[derive(serde::Serialize)]
+pub struct ProvinceTerrainCrop {
+    pub ox: i32,           // world-cell X origin of the sample grid
+    pub oy: i32,           // world-cell Y origin
+    pub stride: i32,       // world cells between samples
+    pub cols: u32,
+    pub rows: u32,
+    pub elevation: Vec<f32>, // cols*rows, row-major, 0..1 normalized elevation
+    pub land: Vec<u8>,       // cols*rows, 1 = land, 0 = sea/lake
+    pub biome: Vec<u8>,      // cols*rows, raw `sim::biome` code (0 = unclassified/sea)
+}
+
+#[tauri::command]
+pub fn get_province_terrain_crop(
+    province_id: u32,
+    max_dim: u32,
+    db: State<'_, WorldDb>,
+) -> Result<Option<ProvinceTerrainCrop>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let (rw, rh, gw, gh, mut raster): (u32, u32, u32, u32, Vec<u32>) =
+        match metadata::get_meta(&conn, "province_raster").map_err(|e| e.to_string())? {
+            Some(s) => serde_json::from_str(&s).unwrap_or((0, 0, 0, 0, Vec::new())),
+            None => return Ok(None),
+        };
+    crate::sim::provinces::migrate_raster_sentinel(&mut raster);
+    if raster.is_empty() || gw == 0 || gh == 0 || rw == 0 || rh == 0 { return Ok(None); }
+
+    // Bounding box in RASTER cells. The raster is already a small downsample
+    // (capped ~384 cells across in `sim_generate_provinces`), so a full scan for
+    // one province's footprint is cheap — no need for the two-pass coarse/fine
+    // search the frontend uses on the full-resolution province-ID mask.
+    let (mut minx, mut miny, mut maxx, mut maxy) = (rw as i64, rh as i64, -1i64, -1i64);
+    for ry in 0..rh {
+        for rx in 0..rw {
+            if raster[(ry * rw + rx) as usize] != province_id { continue; }
+            let (rxi, ryi) = (rx as i64, ry as i64);
+            if rxi < minx { minx = rxi; }
+            if ryi < miny { miny = ryi; }
+            if rxi > maxx { maxx = rxi; }
+            if ryi > maxy { maxy = ryi; }
+        }
+    }
+    if maxx < 0 { return Ok(None); }
+
+    // Raster bbox → world-cell bbox, padded a raster cell on each side so the crop
+    // doesn't clip the province's own edge.
+    let to_world_x = |rx: i64| -> i64 { (rx * gw as i64) / rw as i64 };
+    let to_world_y = |ry: i64| -> i64 { (ry * gh as i64) / rh as i64 };
+    let ox = to_world_x((minx - 1).max(0));
+    let oy = to_world_y((miny - 1).max(0));
+    let ex = (to_world_x((maxx + 2).min(rw as i64)) - 1).clamp(ox, gw as i64 - 1);
+    let ey = (to_world_y((maxy + 2).min(rh as i64)) - 1).clamp(oy, gh as i64 - 1);
+    let bw = (ex - ox + 1).max(1);
+    let bh = (ey - oy + 1).max(1);
+
+    let stride = (bw.max(bh) / (max_dim.max(1) as i64)).max(1) as i32;
+    let cols = (((bw - 1) / stride as i64) + 1).max(1) as u32;
+    let rows = (((bh - 1) / stride as i64) + 1).max(1) as u32;
+
+    let world = db.cached_tiles_with_conn(&conn)?;
+    let n = (cols * rows) as usize;
+    let mut elevation = vec![0.0f32; n];
+    let mut land = vec![0u8; n];
+    let mut biome = vec![0u8; n];
+    for r in 0..rows {
+        let wy = (oy + r as i64 * stride as i64).clamp(0, gh as i64 - 1) as u32;
+        for c in 0..cols {
+            let wx = (ox + c as i64 * stride as i64).clamp(0, gw as i64 - 1) as u32;
+            let tc = TileCoord::from_world(wx, wy);
+            let tile = world.tile(tc.tx, tc.ty);
+            let (lx, ly) = TileCoord::local(wx, wy);
+            let idx = (ly * TILE_SIZE + lx) as usize;
+            let i = (r * cols + c) as usize;
+            elevation[i] = tile.elevation[idx];
+            land[i] = tile.terrain[idx];
+            biome[i] = tile.biome[idx];
+        }
+    }
+
+    Ok(Some(ProvinceTerrainCrop { ox: ox as i32, oy: oy as i32, stride, cols, rows, elevation, land, biome }))
 }
 
 /// One province's LIVE campaign state (read-only): baseline rural population plus the

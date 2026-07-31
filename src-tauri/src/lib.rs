@@ -103,6 +103,7 @@ pub fn run() {
             sim_commands::get_province_layer,
             sim_commands::campaign_province_state,
             sim_commands::campaign_province_detail,
+            sim_commands::get_province_terrain_crop,
             // Province LAND state (FIX_PLAN B1) + the holder's control verbs.
             campaign_commands::campaign_province_land,
             campaign_commands::campaign_province_land_all,

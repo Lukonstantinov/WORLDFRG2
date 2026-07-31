@@ -4,6 +4,7 @@ import { useWorldStore } from "@state/worldStore";
 import {
   campaignCancelProvinceWork, campaignProvinceDetail, campaignProvinceLand,
   campaignProvinceState, campaignSetProvinceTax, campaignStartProvinceWork,
+  getProvinceTerrainCrop,
 } from "@bridge";
 import { koppenName } from "@ui/world/climate";
 import {
@@ -15,7 +16,7 @@ import {
   provinceHistory, stars,
 } from "@ui/world/provinceStory";
 import type {
-  Province, ProvinceDetail, ProvinceLand, ProvinceLive, PSettlement,
+  Province, ProvinceDetail, ProvinceLand, ProvinceLive, ProvinceTerrainCrop, PSettlement,
 } from "@types";
 
 /** 🏞 Province Inspector — the dossier for ONE province, opened by clicking the map
@@ -56,11 +57,13 @@ export function ProvinceInspector() {
   const provinces = useWorldStore((s) => s.provinces);
   const settlements = useWorldStore((s) => s.settlements);
   const provinceRaster = useWorldStore((s) => s.provinceRaster);
+  const worldRivers = useWorldStore((s) => s.rivers);
   const meta = useWorldStore((s) => s.meta);
 
   const [detail, setDetail] = useState<ProvinceDetail | null>(null);
   const [live, setLive] = useState<ProvinceLive | null>(null);
   const [land, setLand] = useState<ProvinceLand | null>(null);
+  const [terrain, setTerrain] = useState<ProvinceTerrainCrop | null>(null);
   const [tab, setTab] = useState<Tab>("land");
   const [plates, setPlates] = useState<PlateKey[]>(DEFAULT_PLATES);
   /** Index into `land.history`; null = today. The slider is the whole point of the
@@ -91,6 +94,18 @@ export function ProvinceInspector() {
       .catch(() => { if (!stale) setLand(null); });
     return () => { stale = true; };
   }, [open, p?.id, provinces, reload]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The survey plate's real terrain crop (§2.3) — independent of the campaign join
+  // above (world geography, not campaign state), so it fetches on province change
+  // alone and doesn't need to re-run on `reload`.
+  useEffect(() => {
+    if (!open || !p) { setTerrain(null); return; }
+    let stale = false;
+    getProvinceTerrainCrop(p.id)
+      .then((t) => { if (!stale) setTerrain(t); })
+      .catch(() => { if (!stale) setTerrain(null); });
+    return () => { stale = true; };
+  }, [open, p?.id]);
 
   // A different province resets the scrub — a year index means nothing across provinces.
   useEffect(() => { setScrub(null); }, [p?.id]);
@@ -178,6 +193,8 @@ export function ProvinceInspector() {
           plates={plates}
           width={280}
           riverCells={p.river_cells}
+          terrain={terrain}
+          rivers={worldRivers}
         />
         <div style={{ marginTop: 5 }}>
           <PlateToggles plates={plates} setPlates={setPlates}

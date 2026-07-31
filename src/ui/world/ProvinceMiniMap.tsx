@@ -1,6 +1,32 @@
 import { useMemo, useState } from "react";
-import type { PBuilding, PSettlement, Province, ProvinceLand, ProvinceLandSample } from "@types";
+import type { PBuilding, PSettlement, Province, ProvinceLand, ProvinceLandSample, ProvinceTerrainCrop, RiverData } from "@types";
 import type { ProvinceRaster } from "@state/worldStore";
+
+/** Hypsometric relief shading from a REAL elevation sample (§2.3) — sea a flat
+ *  blue (elevation isn't meaningful for sea depth here), land a low-to-high ramp
+ *  anchored at the map's old flat placeholder green so the plate doesn't jump in
+ *  hue at zero elevation, rising through olive/tan/brown to a pale peak. */
+function reliefColor(elev: number, isLand: boolean): string {
+  if (!isLand) return "#1e3a52";
+  const stops: [number, string][] = [
+    [0.00, "#3f6d55"], [0.15, "#5c7a4a"], [0.35, "#8a8248"],
+    [0.55, "#8a6a4a"], [0.75, "#8a8078"], [1.00, "#e8e4dc"],
+  ];
+  const e = Math.max(0, Math.min(1, elev));
+  let lo = stops[0], hi = stops[stops.length - 1];
+  for (let i = 0; i < stops.length - 1; i++) {
+    if (e >= stops[i][0] && e <= stops[i + 1][0]) { lo = stops[i]; hi = stops[i + 1]; break; }
+  }
+  const span = hi[0] - lo[0];
+  const t = span > 1e-6 ? (e - lo[0]) / span : 0;
+  const mix = (a: string, b: string, t: number) => {
+    const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
+    const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
+    const c = pa.map((v, i) => Math.round(v + (pb[i] - v) * t));
+    return `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+  };
+  return mix(lo[1], hi[1], t);
+}
 
 // The province SURVEY PLATE: a stack of toggleable layers over one province's
 // footprint, in the tradition of an estate map or a geological sheet — the same idiom
@@ -105,6 +131,7 @@ interface Hover { x: number; y: number; title: string; rows: [string, string][] 
 export function ProvinceMiniMap({
   province, raster, settlements, buildings,
   land, sample, plates = DEFAULT_PLATES, width = 240, riverCells,
+  terrain, rivers,
 }: {
   province: Province;
   raster: ProvinceRaster | null;
@@ -115,6 +142,12 @@ export function ProvinceMiniMap({
   /** A historical year's sample: when present the land plates show THAT year. */
   sample?: ProvinceLandSample | null;
   plates?: PlateKey[];
+  /** Real cropped elevation/land grid (§2.3) — the relief plate's true base layer.
+   *  Falls back to the old flat fill when absent (an older world, or still loading). */
+  terrain?: ProvinceTerrainCrop | null;
+  /** The world's full river geometry — clipped here to this province's own raster
+   *  mask, so a drawn course is honestly this province's own reach of the river. */
+  rivers?: RiverData[];
   width?: number;
   /** How many of the province's cells carry a river (drives the water plate's density). */
   riverCells?: number;
@@ -170,6 +203,60 @@ export function ProvinceMiniMap({
     return { cells, edge, ox, oy, vw, vh, toLocal, stride };
   }, [raster, province.id]);
 
+  // Real elevation/land samples (§2.3) — the relief plate's true base layer,
+  // positioned by the SAME world→local transform the settlements/buildings use.
+  const terrainSamples = useMemo(() => {
+    if (!geo || !terrain || terrain.cols <= 0 || terrain.rows <= 0) return [];
+    const out: { lx: number; ly: number; color: string }[] = [];
+    for (let r = 0; r < terrain.rows; r++) {
+      for (let c = 0; c < terrain.cols; c++) {
+        const wx = terrain.ox + c * terrain.stride;
+        const wy = terrain.oy + r * terrain.stride;
+        const i = r * terrain.cols + c;
+        const [lx, ly] = geo.toLocal(wx, wy);
+        out.push({ lx, ly, color: reliefColor(terrain.elevation[i], terrain.land[i] === 1) });
+      }
+    }
+    return out;
+  }, [geo, terrain]);
+  const terrainRectSize = raster && terrain
+    ? Math.max((terrain.stride * raster.w) / raster.gridW, (terrain.stride * raster.h) / raster.gridH)
+    : 0;
+
+  // Real river courses, clipped to this province's own raster mask — a run of
+  // points is kept whenever it (or an adjacent point) belongs to the province, so
+  // the drawn line reaches the border rather than stopping a cell short.
+  const riverSegments = useMemo(() => {
+    if (!geo || !raster || !rivers || rivers.length === 0) return [];
+    const { data, w: rw2, h: rh2, gridW, gridH } = raster;
+    const inProvince = (wx: number, wy: number): boolean => {
+      const rx = Math.min(rw2 - 1, Math.max(0, Math.round((wx * rw2) / gridW)));
+      const ry = Math.min(rh2 - 1, Math.max(0, Math.round((wy * rh2) / gridH)));
+      return data[ry * rw2 + rx] === province.id;
+    };
+    const segs: [number, number][][] = [];
+    for (const rv of rivers) {
+      const pts = rv.points;
+      if (!pts || pts.length < 2) continue;
+      let cur: [number, number][] = [];
+      for (let i = 0; i < pts.length; i++) {
+        const [wx, wy] = pts[i];
+        const here = inProvince(wx, wy);
+        const prevHere = i > 0 && inProvince(pts[i - 1][0], pts[i - 1][1]);
+        const nextHere = i < pts.length - 1 && inProvince(pts[i + 1][0], pts[i + 1][1]);
+        if (here || prevHere || nextHere) {
+          cur.push(geo.toLocal(wx, wy));
+        } else if (cur.length > 1) {
+          segs.push(cur); cur = [];
+        } else {
+          cur = [];
+        }
+      }
+      if (cur.length > 1) segs.push(cur);
+    }
+    return segs;
+  }, [geo, raster, rivers, province.id]);
+
   if (!geo) return <div style={{ opacity: 0.5, padding: 8 }}>map unavailable</div>;
 
   const { cells, edge, ox, oy, vw, vh, toLocal, stride } = geo;
@@ -214,8 +301,18 @@ export function ProvinceMiniMap({
       <svg width={boxW} height={boxH} viewBox={`0 0 ${vw} ${vh}`}
         style={{ background: "#0a1620", border: "1px solid #1c3242", borderRadius: 6, flexShrink: 0 }}
         onMouseLeave={() => setHover(null)}>
-        {/* 1 · relief — the ground. Also the fallback when no land layer exists. */}
-        {(on("relief") || !luShares) && cells.map(([rx, ry], i) => (
+        {/* 1 · relief — the ground. Real elevation/land when the crop has loaded
+               (§2.3); the old flat fill is the fallback while it loads or on a
+               world saved before this existed. */}
+        {(on("relief") || !luShares) && terrainSamples.length > 0 && (
+          <g opacity={on("landuse") && luShares ? 0.5 : 0.95}>
+            {terrainSamples.map((s, i) => (
+              <rect key={`rt${i}`} x={s.lx - terrainRectSize / 2} y={s.ly - terrainRectSize / 2}
+                width={terrainRectSize * 1.05} height={terrainRectSize * 1.05} fill={s.color} />
+            ))}
+          </g>
+        )}
+        {(on("relief") || !luShares) && terrainSamples.length === 0 && cells.map(([rx, ry], i) => (
           <rect key={`r${i}`} x={rx - ox} y={ry - oy} width={stride * 1.05} height={stride * 1.05}
             fill="#3f6d55" opacity={on("landuse") && luShares ? 0.28 : 0.55} />
         ))}
@@ -238,8 +335,15 @@ export function ProvinceMiniMap({
           );
         })}
 
-        {/* 2 · water — a proportional scatter, honest about carrying no course. */}
-        {on("water") && waterFrac > 0 && cells.map(([rx, ry], i) =>
+        {/* 2 · water — a REAL course when the world's river geometry is available
+               (§2.3), clipped to this province's own raster mask. Falls back to a
+               proportional scatter (honest about carrying no course) otherwise. */}
+        {on("water") && riverSegments.length > 0 && riverSegments.map((seg, i) => (
+          <polyline key={`wr${i}`} points={seg.map(([lx, ly]) => `${lx},${ly}`).join(" ")}
+            fill="none" stroke="#4a90c4" strokeWidth={Math.max(0.6, stride * 0.35)}
+            strokeLinecap="round" strokeLinejoin="round" opacity={0.85} />
+        ))}
+        {on("water") && riverSegments.length === 0 && waterFrac > 0 && cells.map(([rx, ry], i) =>
           cellHash(rx, ry, 23, stride) < waterFrac ? (
             <rect key={`w${i}`} x={rx - ox + stride * 0.2} y={ry - oy + stride * 0.35}
               width={stride * 0.7} height={stride * 0.28} rx={stride * 0.14}

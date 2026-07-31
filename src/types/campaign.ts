@@ -2001,6 +2001,18 @@ export interface ProvinceDetail {
   buildings: PBuilding[];
 }
 
+/** A cropped elevation/land/biome sample grid over one province's bounding box —
+ *  the survey plate's real "relief" base layer (§2.3). `elevation`/`land`/`biome`
+ *  are `cols*rows`, row-major; sample (c, r)'s world-cell position is
+ *  `(ox + c*stride, oy + r*stride)`. */
+export interface ProvinceTerrainCrop {
+  ox: number; oy: number; stride: number;
+  cols: number; rows: number;
+  elevation: number[];
+  land: number[];   // 1 = land, 0 = sea/lake
+  biome: number[];  // raw sim::biome code, 0 = unclassified/sea
+}
+
 /** Result of `sim_generate_provinces`: the province list + a downsampled per-cell
  *  id raster for the map overlay (`4294967295` = sea/no-data; ids are u32). */
 export interface SimProvincesResult {
