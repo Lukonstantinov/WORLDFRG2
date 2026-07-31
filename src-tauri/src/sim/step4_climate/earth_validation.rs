@@ -168,6 +168,11 @@ fn earth_koppen_agreement() {
         "Earth main-class Köppen agreement {main_pct:.1}% fell below the {EARTH_MAIN_FLOOR:.1}% \
          regression floor — a change has degraded the climate model's fidelity to Earth."
     );
+    assert!(
+        exact_pct >= EARTH_EXACT_FLOOR,
+        "Earth exact-zone Köppen agreement {exact_pct:.1}% fell below the {EARTH_EXACT_FLOOR:.1}% \
+         regression floor — the main class may look flat while the zone detail rots."
+    );
 }
 
 /// Does the upwelling-cooling step actually do anything? (Measured, not read.)
@@ -233,12 +238,17 @@ fn earth_diagnose_upwelling_reachability() {
 }
 
 /// The regression floor for area-weighted main-class agreement. Calibrated just
-/// under the measured baseline (67.4% at 0.5° after the shelf-velocity fix —
-/// `generate_ocean_currents` no longer zeroes shelf flow, which had made
-/// `compute_upwelling_zones` unreachable and pinned the current→coast thermal
-/// coupling to its clamp floor); bump it up as the model improves so it always
-/// guards the current fidelity.
-const EARTH_MAIN_FLOOR: f64 = 67.0;
+/// under the measured baseline (69.2% at 0.5°, after the shelf-velocity fix, the
+/// subtropical basin-position asymmetry, and confining the snow-albedo cooling to
+/// the cold season); bump it up as the model improves so it always guards the
+/// current fidelity.
+const EARTH_MAIN_FLOOR: f64 = 69.0;
+
+/// The same guard for EXACT-ZONE agreement (31.6% measured). Main-class alone is
+/// not enough: E scores ~99% for free on a fifth of the weight, so a change can
+/// hold main-class flat while degrading the zone detail underneath it. Track this
+/// one — it is where the real state of the model lives (CLAUDE.md §2.3).
+const EARTH_EXACT_FLOOR: f64 = 31.0;
 
 /// Why a subtropical cell came out wet or dry — the decision chain, not the total.
 ///
@@ -378,7 +388,7 @@ fn earth_named_region_spot_checks() {
 /// Where in geography do the two dominant confusions live?
 #[test]
 #[ignore]
-fn scratch_error_geography() {
+fn earth_diagnose_error_geography() {
     let (buf, reference) = run_earth();
     // Land "basin position": scan W and E along the row to the first ocean.
     let cap = 200i32;
@@ -534,7 +544,7 @@ fn scratch_error_geography() {
 /// Are the ocean mechanisms actually eligible to fire? (A6-style liveness audit.)
 #[test]
 #[ignore]
-fn scratch_ocean_liveness() {
+fn earth_diagnose_ocean_liveness() {
     let (buf, _reference) = run_earth();
     let (mut shelf_cells, mut shelf_moving, mut cold_shelf, mut upwell_ok) = (0, 0, 0, 0);
     for y in 0..H { for x in 0..W {

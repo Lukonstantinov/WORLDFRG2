@@ -273,7 +273,28 @@ pub fn apply_ice_albedo_feedback(buf: &mut WorldBuffer) {
             let warmest = t + span * 0.45;
             let snow = year_frac_below(coldest, warmest, 0.0);
             buf.snow_frac[idx] = (snow * 255.0).clamp(0.0, 255.0) as u8;
-            buf.temperature[idx] = t - ALB_MAX_COOL * snow;
+
+            // Snow-albedo cooling is a COLD-SEASON effect: it can only operate
+            // while snow is actually lying. Applying it to the annual mean alone
+            // used to push the whole seasonal cycle down, and `koppen::seasonal_
+            // temps` then reconstructs the warmest month as `mean + span·0.45` —
+            // so the full 4 °C landed on July, at 60-70°N, where there is no snow
+            // in July. Köppen's D/E boundary IS the warmest month (10 °C), so that
+            // misplacement was reading continental interiors as polar: measured
+            // `D → E` 37% with a D-row own-accuracy of 49.8%.
+            //
+            // Keep the annual-mean cooling and widen the seasonal span so the
+            // WARMEST month comes out exactly unchanged — i.e. put all of the
+            // cooling into the cold half of the year, which is where the physics
+            // puts it. `0.45` is `seasonal_temps`' own warm-side split; the two
+            // must stay in step, which `albedo_cooling_leaves_the_warmest_month_
+            // unchanged` asserts.
+            let cool = ALB_MAX_COOL * snow;
+            buf.temperature[idx] = t - cool;
+            if cool > 0.0 && !buf.seasonal_amp.is_empty() {
+                let widened = span + cool / 0.45;
+                buf.seasonal_amp[idx] = (widened * SEASON_AMP_SCALE).clamp(0.0, 255.0) as u8;
+            }
         }
     }
 }
@@ -358,6 +379,29 @@ mod tests {
             buf.temperature[cold]
         );
     }
+
+    /// The snow-albedo cooling must not move the WARMEST month.
+    ///
+    /// `apply_ice_albedo_feedback` lowers the annual mean and widens the seasonal
+    /// span by `cool / 0.45` to compensate. That `0.45` is `koppen::seasonal_temps`'
+    /// warm-side split, and the two live in different files — if either drifts, the
+    /// cooling silently starts landing on July again and continental interiors go
+    /// back to reading polar. This pins the relationship arithmetically.
+    #[test]
+    fn albedo_cooling_leaves_the_warmest_month_unchanged() {
+        // seasonal_temps: (coldest, warmest) = (t - range*0.55, t + range*0.45)
+        let warmest = |mean: f32, span: f32| mean + span * 0.45;
+        for &(mean, span, cool) in &[
+            (-5.8f32, 28.6f32, 4.0f32),  // the measured 60-70 deg N case
+            (0.5, 29.1, 2.5),
+            (5.5, 23.3, 1.0),
+        ] {
+            let before = warmest(mean, span);
+            let after = warmest(mean - cool, span + cool / 0.45);
+            assert!(
+                (before - after).abs() < 1e-4,
+                "warmest month moved {before} -> {after} (mean {mean}, span {span}, cool {cool})"
+            );
+        }
+    }
 }
-
-

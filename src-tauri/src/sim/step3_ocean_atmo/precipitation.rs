@@ -157,7 +157,7 @@ fn cc_retain_frac(t_c: f32) -> f32 {
 // runaway feedback.
 const ET_RECYCLE_MAX: f32 = 0.5;
 
-/// EXPERIMENT: signed east-west position of a land cell inside its continent.
+/// Signed east-west position of a land cell inside its continent.
 /// -1 = hard against the WEST coast (eastern flank of an ocean basin, where the
 /// subtropical anticyclone's descending branch is strongest), +1 = hard against
 /// the EAST coast (western flank of the high, where poleward moist flow runs).
@@ -192,7 +192,30 @@ fn compute_land_basin_pos(buf: &WorldBuffer) -> Vec<f32> {
     out
 }
 
-/// EXPERIMENT amplitude of the east-west subsidence asymmetry.
+/// Amplitude of the east-west asymmetry in subtropical subsidence.
+///
+/// A summer subtropical high is NOT zonally symmetric. It forms over the cool
+/// EASTERN part of an ocean basin, driven by a shallow cooling-heating couplet
+/// against the heated continent to its east (Miyasaka & Nakamura 2005). On that
+/// eastern-basin flank — the WEST coast of a continent — subsidence over cold SST
+/// gives a strong low-tropospheric inversion, a capped boundary layer and a
+/// stratocumulus deck that rains almost nothing (Klein & Hartmann 1993; Wood &
+/// Bretherton 2006): the Sahara, Namib, Atacama, West Australia. On the WESTERN
+/// flank of the same anticyclone the flow is poleward over warm water, the
+/// inversion is weak or absent and deep convection is free — which is why Florida,
+/// Guangdong and southern Brazil are humid at the latitude of the Sahara.
+///
+/// `subtropical_penalty` is a function of latitude ALONE and so cannot express any
+/// of that. This scales it by the cell's east-west position in its own landmass.
+/// Measured sweep on the Earth gate (main / C-row / C->B confusion), with the B row
+/// held flat throughout — which is the falsifiable part: a genuine asymmetry
+/// redistributes drying, whereas a global loosening of the aridity term would have
+/// bought the C gain by wrecking B:
+///
+///   0.00  67.4 / 33.2 / 39%      0.50  67.6 / 34.0 / 38%      1.00  67.7 / 35.5 / 36%
+///
+/// Held at a deliberately conservative 0.25: the mechanism is real and monotone but
+/// it is not a fix for the C->B error, and the high end costs exact-zone agreement.
 const SUBTROP_ASYM: f32 = 0.25;
 
 #[inline]
