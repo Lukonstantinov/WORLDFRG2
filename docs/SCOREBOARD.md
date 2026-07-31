@@ -9,6 +9,59 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md begun: Step 0 + 2.1 enclave fix + 2.2 sizing)
+
+**Step 0 — the economy oracle could see geography for the first time.** The
+60-year/30-city reference world's province layer was UNIFORM (5 identical
+provinces, seats on a straight line), so the fidelity scorecard could measure
+*levels* but never *dispersion* — it could not say why one province is rich and
+its neighbour poor. Seeded five geographically distinct provinces (fertile river
+lowland, wooded hills, arid steppe, temperate mix, marginal upland — varied
+capacity, forest/arable/soil, seat position) matched to real hub clusters. Added
+three printed (not asserted) diagnostics ahead of the mechanisms that will give
+them real meaning: province land-pressure CV **1.406**, province output-share CV
+**0.662** (both stand-ins for Workstream 2.5's exploitation/market-share ratios,
+which don't exist yet), wars started/century **1.67** (the existing DLC 3.5 rival-
+polis mechanism, ahead of §3.4's abstract state-war system). All existing `econ_`
+bands held; `simulate_decades_reports_dynamics` stayed bit-identical (it seeds no
+provinces).
+
+**2.1 — the enclave fix, reversing a documented Phase 1 decision (§5.1).** Seed
+rejection (`too_close`) tested only the CANDIDATE's own required separation, never
+the incumbent seed's — a fertile valley (small separation) sitting inside a desert
+or tundra region (large separation) passed a test the surrounding province would
+have failed. Fixed to `max(sep_candidate, sep_incumbent)`. Added a post-snap pass
+(`merge_enclaves`, run AFTER `snap_borders_to_features` per §5.3 — the snap itself
+can create or heal an enclave) that folds any province bordering exactly one
+neighbour into it, unless the province is its own island. New test
+`no_enclosed_province_survives_unless_its_own_island` passes; all 8 pre-existing
+`provinces::tests` (crest affinity, diagonal-river affinity, determinism, coverage)
+still pass.
+
+**2.2 — sizing, compressing the fertile↔hostile spread.** Measured baseline: the
+old constants produced a ≈169× area ratio between max-hostile (ice cap) and
+max-fertile land at the seed-separation level alone, before `VAST_MERGE_CAP_FRAC`
+enlarges hostile blocks further — in the "roughly 100×" range the plan named.
+Shrunk globally (`base_sep` multiplier 0.5 → 0.40) and compressed the spread from
+both ends: the habitability ramp 1+1.6·hostile → 1+1.0·hostile, every
+`koppen_spacing_mult` ceiling lowered (ice cap 3.0→2.0, tundra 2.2→1.7, desert
+1.9→1.5, etc.), and the fertile floor raised (0.6→0.75). New `#[ignore]`d
+diagnostic `province_size_distribution` measures the result on a synthetic zonal
+world: **hostile/fertile mean-area ratio ≈33×** — a real, measured compression,
+not just a paper one. Not a hard gate (no single "right" size exists; the
+maintainer judges this visually in the app) — determinism and the existing
+`provinces::tests` are the actual gate, and both hold.
+
+Whole-lib gates run: `cargo check --lib` clean · `provinces::tests` 9/9 passed ·
+`econ_` 4/4 non-ignored passed (incl. the new determinism check over the three new
+scorecard fields) · `simulate_decades_reports_dynamics` bit-identical.
+
+**Not yet started:** Workstream 1 (settlement panel rework), 2.3-2.5 (terrain crop,
+organic land use, goods/exploitation), Workstream 3 (politics/war). See
+`docs/CITY_PROVINCE_WAR_PLAN.md` §7 for the full order.
+
+---
+
 ## Current state — 2026-07-30 (Phase 5 complete: provinces as house territory — the house series is DONE)
 
 **Asked to "move on with phase 5 and 6" — neither exists in `HOUSE_MASTER_PLAN.md`.**

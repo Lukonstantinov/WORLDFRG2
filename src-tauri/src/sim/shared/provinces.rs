@@ -14,8 +14,12 @@
 //!   along its valley, so a province spreads up and down its own river and stops at the
 //!   interfluves. Lakes are impassable;
 //! - **organic noise** — a small per-edge noise term wobbles borders off any clean
-//!   Voronoi/gradient line, and provinces are NOT forced simply-connected, so genuine
-//!   enclaves/exclaves survive.
+//!   Voronoi/gradient line.
+//! - **no enclaves** (CITY_PROVINCE_WAR_PLAN.md §2.1, reversing this module's
+//!   original decision — see §5.1) — a province surrounded by a single neighbour
+//!   is merged into it, so a genuine enclave/exclave no longer survives UNLESS
+//!   the province is its own island: a landmass entirely its own still stands
+//!   alone, since that reads as history rather than as a generation artefact.
 //!
 //! ## Why there are two stages
 //!
@@ -198,16 +202,22 @@ const GOOD_BINS: usize = 16;
 /// Combined with the (1 + 1.6·hostile) habitability ramp this reaches ≈6× the seed
 /// spacing (≈35× the AREA) of a fertile-lowland province, so an ice cap or great
 /// desert reads as a few huge blocks instead of a speckle of tiny cells.
+/// CITY_PROVINCE_WAR_PLAN.md §2.2 · every ceiling here is lowered from its original
+/// value (ice cap 3.0, tundra 2.2, extreme subarctic 2.0, taiga 1.6, desert 1.9,
+/// alpine 1.4) to compress the fertile↔hostile size spread — see `local_sep2`'s own
+/// comment for the combined before/after ratio. Direction is unchanged: the vast,
+/// thinly-settled biomes still hold larger provinces than ordinary land, just not as
+/// extremely larger.
 fn koppen_spacing_mult(koppen: u8) -> f32 {
     use crate::sim::koppen as kp;
     match koppen {
-        kp::EF => 3.0,                       // ice cap — Antarctic / Greenland interior
-        kp::ET => 2.2,                       // tundra
-        kp::DFD | kp::DWD => 2.0,            // extreme subarctic
-        kp::DFC | kp::DWC | kp::DSD => 1.6,  // subarctic taiga
-        kp::BWH | kp::BWK => 1.9,           // hot / cold desert
+        kp::EF => 2.0,                       // ice cap — Antarctic / Greenland interior
+        kp::ET => 1.7,                       // tundra
+        kp::DFD | kp::DWD => 1.6,            // extreme subarctic
+        kp::DFC | kp::DWC | kp::DSD => 1.35, // subarctic taiga
+        kp::BWH | kp::BWK => 1.5,           // hot / cold desert
         kp::BSH | kp::BSK => 1.05,          // semi-arid steppe — settled far denser than a true desert
-        kp::H => 1.4,                        // high alpine
+        kp::H => 1.25,                       // high alpine
         _ => 1.0,                            // temperate / tropical / Mediterranean
     }
 }
@@ -518,20 +528,27 @@ pub fn generate_provinces(
     // size slider spans genuinely large (g→0) to small (g→1) provinces.
     let cols = 18.0 + 92.0 * g;
     let spacing = ((w as f32 / cols).round() as i32).max(4);
-    // The finest separation (most habitable land); scales UP to ~2.6× in the least
-    // habitable land, so provinces there come out far larger. FLOORED at 10 cells so
-    // even the most habitable land / highest granularity never shatters into a speckle
+    // CITY_PROVINCE_WAR_PLAN.md §2.2 · "shrink globally": 0.5 → 0.40 shrinks every
+    // province by ~35% in area (0.4² / 0.5² ≈ 0.64) at a fixed granularity, before
+    // the fertile/hostile spread below is even applied. FLOORED at 10 cells so even
+    // the most habitable land / highest granularity never shatters into a speckle
     // of 1-cell provinces (the min province is then ≈100 cells).
-    let base_sep = ((spacing as f32) * 0.5).max(10.0);
+    let base_sep = ((spacing as f32) * 0.40).max(10.0);
     let hab_at = |i: usize| -> f32 {
         if buf.habitability.is_empty() { 0.5 } else { buf.habitability[i] as f32 / 255.0 }
     };
     // Local min-separation² at a cell: small where habitable, large where hostile.
-    // Two compounding levers give the wide (≈100× area) fertile→arctic size range:
-    //   · the habitability ramp (1 + 1.6·hostile): general "fewer people, bigger units";
-    //   · a Köppen biome multiplier: the ice caps, tundra, deserts and taiga that hold
-    //     genuinely continent-scale administrative blocks on Earth are stretched much
-    //     further, so Antarctica reads as a few solid provinces, not a speckle.
+    // CITY_PROVINCE_WAR_PLAN.md §2.2 · the fertile→hostile spread used to run to
+    // ≈100× in area (measured: a max-hostile ice cap at old constants separated by
+    // ≈7.8·base_sep against a max-fertile plain at ≈0.6·base_sep, a 169× area ratio,
+    // BEFORE `VAST_MERGE_CAP_FRAC` merges hostile blocks further). Two levers drove
+    // it and both are compressed here, leaving the direction (hostile land holds
+    // genuinely larger administrative units, same as real Earth) but not the extreme:
+    //   · the habitability ramp, 1 + 1.6·hostile → 1 + 1.0·hostile;
+    //   · `koppen_spacing_mult`'s own ceiling, lowered per class (ice cap 3.0 → 2.0,
+    //     etc. — see the function). Fertile land is also pulled up (0.6 → 0.75 floor)
+    //     rather than only pulling hostile land down, so the compression narrows the
+    //     spread from both ends. New worst case ≈4·base_sep vs ≈0.75·base_sep ≈ 28×.
     let have_koppen = !buf.koppen.is_empty();
     let have_hab = !buf.habitability.is_empty();
     // Hard minimum separation (≈100-cell smallest province) so the most habitable land
@@ -544,19 +561,28 @@ pub fn generate_provinces(
         // Prime habitable land (hab > 0.6) is pulled BELOW the base spacing — smaller
         // provinces in fertile heartlands — ramping in only for genuinely rich land so
         // ordinary/moderate country keeps the base size; the hostile ramp + the Köppen
-        // biome factor stretch the barren extremes far apart, and the vast-biome merge
+        // biome factor stretch the barren extremes further, and the vast-biome merge
         // then swallows the ice/desert. Gated on real habitability data existing.
         let fertile_shrink = if have_hab {
-            1.0 - 0.4 * ((hab - 0.6) / 0.3).clamp(0.0, 1.0)
+            1.0 - 0.25 * ((hab - 0.6) / 0.3).clamp(0.0, 1.0)
         } else { 1.0 };
-        let s = (base_sep * (1.0 + 1.6 * hostile) * fertile_shrink * km).max(min_sep) as i64;
+        let s = (base_sep * (1.0 + 1.0 * hostile) * fertile_shrink * km).max(min_sep) as i64;
         (s * s).max(1)
     };
-    let too_close = |seeds: &[u32], bx: i32, by: i32, sep2: i64| -> bool {
+    // CITY_PROVINCE_WAR_PLAN.md §2.1 · SYMMETRIC separation. This used to test only
+    // the CANDIDATE's own required separation, never the incumbent seed's — so a
+    // fertile river valley (small `local_sep2`) sitting inside a desert or tundra
+    // region (large `local_sep2`) passed a test the surrounding province would have
+    // failed, which is the mechanism behind small provinces embedded in large ones.
+    // `max(sep2_candidate, sep2_incumbent)` is exactly `(max(sep_candidate,
+    // sep_incumbent))²` — squaring is monotonic over non-negative separations — so
+    // no square root is needed to take the max in the LINEAR (unsquared) sense.
+    let too_close = |seeds: &[u32], bx: i32, by: i32, sep2_candidate: i64| -> bool {
         for &sc in seeds {
             let sx = (sc % w) as i32; let sy = (sc / w) as i32;
             let mut ddx = (sx - bx).abs(); if ddx > wi / 2 { ddx = wi - ddx; }
             let dd = (ddx as i64) * (ddx as i64) + ((sy - by) as i64) * ((sy - by) as i64);
+            let sep2 = sep2_candidate.max(local_sep2(sc as usize));
             if dd < sep2 { return true; }
         }
         false
@@ -801,6 +827,34 @@ pub fn generate_provinces(
 
     // ── Stage 2: snap the border LINES onto the crests and channels. ──
     snap_borders_to_features(buf, &mut province_id, n, &ridge, &river_divide, &is_lake);
+
+    // ── Enclave fix (CITY_PROVINCE_WAR_PLAN.md §2.1) ── A province touching only
+    // ONE neighbour is a hole punched in that neighbour's territory — a
+    // generation artefact, not history — so fold it in, UNLESS it is genuinely a
+    // separate landmass (its own island; §5.1's narrowing of the original "let
+    // enclaves survive" decision). Must run AFTER the border snap above: the snap
+    // itself can create or heal an enclave, so measuring before it both misses
+    // some and wrongly merges others that the snap would have separated (§5.3).
+    merge_enclaves(&mut province_id, &island, n, buf);
+
+    // A merge can empty a province id, leaving a gap in the 0..n range the rest of
+    // this function (and `Province::id`, assigned straight from the loop index
+    // below) assumes is dense. Recompact, carrying the seed-cell lookup with it.
+    let mut remap2 = std::collections::HashMap::<u32, u32>::new();
+    for c in 0..total {
+        let p = province_id[c];
+        if p == NO_PROVINCE { continue; }
+        let next = remap2.len() as u32;
+        let nid = *remap2.entry(p).or_insert(next);
+        province_id[c] = nid;
+    }
+    let n = remap2.len();
+    if n == 0 { return (Vec::new(), province_id); }
+    let new_to_old = {
+        let mut nto = vec![0u32; n];
+        for (&old, &nid) in remap2.iter() { nto[nid as usize] = new_to_old[old as usize]; }
+        nto
+    };
 
     // ── Label anchors: the pole of inaccessibility per province (see `Province`). ──
     let poles = compute_label_anchors(buf, &province_id, n);
@@ -1227,6 +1281,67 @@ fn rank_goods_worldwide(provinces: &mut [Province]) {
                 g.of = of;
             }
         }
+    }
+}
+
+/// **Enclave fix (CITY_PROVINCE_WAR_PLAN.md §2.1).** A province bordering exactly
+/// one neighbour is folded into it, one deterministic pass — UNLESS every island
+/// the province touches belongs to it alone (a genuinely separate landmass is
+/// still allowed to be its own province; §5.1 narrows rather than drops the
+/// module's original "enclaves survive" decision). Operates on the
+/// already-compacted `province_id` (post-snap, see the call site's own comment
+/// for why snap must run first); an emptied id is simply skipped by the
+/// stats-aggregation loop below, so no recompaction is needed here.
+fn merge_enclaves(province_id: &mut [u32], island: &[u32], n: usize, buf: &WorldBuffer) {
+    if n == 0 { return; }
+    let w = buf.width;
+    let hi = buf.height as i32;
+    let total = province_id.len();
+
+    // Which island(s) does each province touch, and which provinces touch each island?
+    let mut island_of_prov: Vec<std::collections::HashSet<u32>> = vec![std::collections::HashSet::new(); n];
+    let mut provs_of_island: std::collections::HashMap<u32, std::collections::HashSet<u32>> =
+        std::collections::HashMap::new();
+    for c in 0..total {
+        let p = province_id[c];
+        if p == NO_PROVINCE { continue; }
+        let isl = island[c];
+        island_of_prov[p as usize].insert(isl);
+        provs_of_island.entry(isl).or_default().insert(p);
+    }
+
+    // Distinct bordering provinces (4-neighbour, cylindrical X-wrap via `widx`).
+    let mut neighbors: Vec<std::collections::HashSet<u32>> = vec![std::collections::HashSet::new(); n];
+    for c in 0..total {
+        let p = province_id[c];
+        if p == NO_PROVINCE { continue; }
+        let cx = (c as u32 % w) as i32;
+        let cy = (c as u32 / w) as i32;
+        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+            let ny = cy + dy;
+            if ny < 0 || ny >= hi { continue; }
+            let np = province_id[buf.widx(cx + dx, ny)];
+            if np != NO_PROVINCE && np != p { neighbors[p as usize].insert(np); }
+        }
+    }
+
+    let mut remap: Vec<u32> = (0..n as u32).collect();
+    for p in 0..n {
+        if neighbors[p].len() != 1 { continue; }
+        // Exempt: every island this province touches belongs to it and no one else.
+        let own_island = island_of_prov[p].iter()
+            .all(|isl| provs_of_island.get(isl).is_some_and(|s| s.len() == 1));
+        if own_island { continue; }
+        remap[p] = *neighbors[p].iter().next().unwrap();
+    }
+    // Resolve remap chains, then relabel every cell.
+    for c in 0..total {
+        let p = province_id[c];
+        if p == NO_PROVINCE { continue; }
+        let mut o = p;
+        let mut guard = 0;
+        while remap[o as usize] != o && guard < 8 { o = remap[o as usize]; guard += 1; }
+        province_id[c] = o;
     }
 }
 
@@ -1780,6 +1895,126 @@ mod tests {
             for g in &p.goods {
                 assert!(g.rank >= 1 && g.rank <= g.of, "good rank {} of {}", g.rank, g.of);
             }
+        }
+    }
+
+    /// CITY_PROVINCE_WAR_PLAN.md §2.1 · a province enclosed by exactly one
+    /// neighbour is a generation artefact (a hole punched in that neighbour's
+    /// territory), not history, and must be merged away — unless it stands on its
+    /// own island, which is not an enclave at all but a genuinely separate
+    /// landmass. A single connected landmass (no ocean carved here) means the
+    /// island exemption can never legitimately apply, so this map exercises the
+    /// merge directly.
+    #[test]
+    fn no_enclosed_province_survives_unless_its_own_island() {
+        let mut buf = blank_world();
+        for y in 0..TH {
+            for x in 0..TW {
+                let i = buf.idx(x, y);
+                buf.elevation[i] = (((x * 11 + y * 7) % 17) as f32) / 70.0;
+                buf.fertility[i] = (((x * 5 + y * 3) % 13) as f32) / 13.0;
+                buf.koppen[i] = ((x / 6 + y / 9) % 5 + 11) as u8;
+            }
+        }
+        let towns = vec![
+            settle("a", 10, 10, 9000), settle("b", 70, 15, 6000),
+            settle("c", 20, 50, 5000), settle("d", 80, 45, 7000),
+            settle("e", 45, 30, 4000),
+        ];
+        let (provs, _) = generate_provinces(&buf, &[], &[], &towns, 0.85);
+        assert!(provs.len() > 4, "need several provinces to exercise adjacency, got {}", provs.len());
+
+        let mut per_island: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+        for p in &provs { *per_island.entry(p.island).or_insert(0) += 1; }
+
+        for p in &provs {
+            if p.neighbors.len() == 1 {
+                let alone_on_island = per_island.get(&p.island).copied().unwrap_or(0) == 1;
+                assert!(alone_on_island,
+                    "province {} '{}' is enclosed by a single neighbour and is not \
+                     alone on its island (island {} holds {} provinces) — an enclave \
+                     survived the merge pass",
+                    p.id, p.name, p.island, per_island.get(&p.island).copied().unwrap_or(0));
+            }
+        }
+    }
+
+    /// CITY_PROVINCE_WAR_PLAN.md §2.2 · not a correctness gate — there is no single
+    /// "right" province count or size, and the maintainer judges this visually in
+    /// the app. A DIAGNOSTIC that prints the size distribution at a fixed
+    /// granularity on a zonal synthetic world (ice cap → tundra → taiga →
+    /// temperate, mirrored across the equator), so the fertile/hostile compression
+    /// documented in `local_sep2` and `koppen_spacing_mult` is visible as real
+    /// numbers rather than only the ratio derived on paper there. `#[ignore]`d like
+    /// the economy oracle's own long-run diagnostics — run explicitly:
+    /// `cargo test --lib province_size_distribution -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn province_size_distribution() {
+        use crate::sim::koppen as kp;
+        let (gw, gh) = (480u32, 320u32);
+        let mut buf = blank_world_sized(gw, gh);
+        for y in 0..gh {
+            // 0 at the equator, 0.5 at the poles.
+            let band = (y as f32 / gh as f32 - 0.5).abs();
+            let (code, hab): (u8, f32) = if band > 0.42 { (kp::EF, 0.05) }
+                else if band > 0.34 { (kp::ET, 0.15) }
+                else if band > 0.24 { (kp::DFC, 0.35) }
+                else if band > 0.14 { (kp::BWH, 0.30) }
+                else { (kp::CFA, 0.90) };
+            for x in 0..gw {
+                let i = buf.idx(x, y);
+                buf.koppen[i] = code;
+                buf.habitability[i] = hab * 255.0;
+                buf.fertility[i] = hab;
+                buf.elevation[i] = (((x * 7 + y * 5) % 11) as f32) / 90.0;
+            }
+        }
+        // Seat a town every ~40 cells along the equator so the flood has real seeds
+        // to grow provinces from without dictating their size itself.
+        let mut towns = Vec::new();
+        let mut gx = 20u32;
+        let mut tid = 0;
+        while gx < gw {
+            towns.push(settle(&format!("t{tid}"), gx, gh / 2, 6000));
+            gx += 40;
+            tid += 1;
+        }
+        let (provs, _) = generate_provinces(&buf, &[], &[], &towns, 0.5);
+        assert!(provs.len() > 4, "need several provinces to report on, got {}", provs.len());
+
+        let class_name = |k: u8| -> &'static str {
+            match k {
+                x if x == kp::EF => "ice cap",
+                x if x == kp::ET => "tundra",
+                x if x == kp::DFC => "taiga",
+                x if x == kp::BWH => "desert",
+                x if x == kp::CFA => "temperate",
+                _ => "mixed",
+            }
+        };
+        let mut by_class: std::collections::HashMap<&'static str, Vec<u32>> = std::collections::HashMap::new();
+        for p in &provs {
+            by_class.entry(class_name(p.koppen)).or_default().push(p.cells);
+        }
+        eprintln!("\n=== province_size_distribution ({} provinces, granularity 0.5) ===", provs.len());
+        let mut classes: Vec<_> = by_class.keys().copied().collect();
+        classes.sort();
+        let mut means: Vec<(&str, f64)> = Vec::new();
+        for cls in classes {
+            let cells = &by_class[cls];
+            let n = cells.len() as f64;
+            let mean = cells.iter().map(|&c| c as f64).sum::<f64>() / n;
+            let min = *cells.iter().min().unwrap();
+            let max = *cells.iter().max().unwrap();
+            eprintln!("  {cls:<10} n={:<4} mean={mean:>8.0} cells  min={min:<6} max={max:<6}", cells.len());
+            means.push((cls, mean));
+        }
+        if let (Some(hi), Some(lo)) = (
+            means.iter().map(|&(_, m)| m).fold(None, |a: Option<f64>, m| Some(a.map_or(m, |a| a.max(m)))),
+            means.iter().map(|&(_, m)| m).fold(None, |a: Option<f64>, m| Some(a.map_or(m, |a| a.min(m)))),
+        ) {
+            eprintln!("  hostile/fertile mean-area ratio ≈ {:.1}×", hi / lo.max(1.0));
         }
     }
 }
