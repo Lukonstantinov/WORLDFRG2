@@ -1470,6 +1470,14 @@ SCOREBOARD.md                     ← ⭐ The project held as ~12 NUMBERS instea
 ```
 PROVINCE_SYSTEM_PLAN.md           ← The province layer's design + status (see FIX_PLAN B1);
                                     the shipped algorithm itself is §8.10 above
+CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next three workstreams:
+                                    the settlement panel rework · provinces (enclave fix,
+                                    sizing, real-terrain view, goods & exploitation) ·
+                                    the political layer (city leader as a house office,
+                                    city tiers, the city-as-state, and war). Carries its
+                                    own caveat list (§5) — incl. that it REVERSES
+                                    PROVINCE_SYSTEM_PLAN's "enclaves survive" decision —
+                                    and its own "deliberately not built" list (§6)
 IN_APP_VERIFICATION_CHECKLIST.md  ← Manual in-app verification checklist
 PORTING_REFERENCE.md              ← Porting reference
 ```
