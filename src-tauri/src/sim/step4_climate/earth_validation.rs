@@ -33,8 +33,9 @@ static ELEV_I16: &[u8] = include_bytes!("fixtures/earth_elev_720x360.i16");
 static KOPPEN_U8: &[u8] = include_bytes!("fixtures/earth_koppen_720x360.u8");
 
 /// Köppen main class (perceptual axis) for a WF2 köppen code. Highland (H) is
-/// mapped to E for scoring — WF2 emits it on cold high terrain the reference (which
-/// has no highland class) labels mostly ET/EF or Dfc.
+/// mapped to E for scoring. The classifier no longer EMITS `H` (see `koppen.rs`) —
+/// the reference has no highland class, so every `H` cell was unmatchable — but the
+/// mapping is kept so a world saved before that change still scores.
 fn main_letter(code: u8) -> u8 {
     match code {
         koppen::AF | koppen::AM | koppen::AW | koppen::AS => b'A',
@@ -259,7 +260,7 @@ const EARTH_MAIN_FLOOR: f64 = 70.0;
 /// not enough: E scores ~99% for free on a fifth of the weight, so a change can
 /// hold main-class flat while degrading the zone detail underneath it. Track this
 /// one — it is where the real state of the model lives (CLAUDE.md §2.3).
-const EARTH_EXACT_FLOOR: f64 = 33.5;
+const EARTH_EXACT_FLOOR: f64 = 38.8;
 
 /// Why a subtropical cell came out wet or dry — the decision chain, not the total.
 ///

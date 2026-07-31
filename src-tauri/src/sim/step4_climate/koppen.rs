@@ -528,15 +528,24 @@ fn classify_cell(buf: &WorldBuffer, x: u32, y: u32) -> u8 {
     let warm_summer = !hot_summer && n_months_10 >= 4.0; // b
     let extreme_cold = t_coldest < -38.0;        // d
 
-    // Highland (H): genuine high-elevation alpine climate, independent of the
-    // temperature/precip class. The treeline falls with latitude â€” tropical peaks
-    // stay forested/temperate much higher than polar ones â€” so use a
-    // latitude-adjusted threshold instead of a blanket 0.55. This frees temperate
-    // and Mediterranean UPLANDS (â‰ˆ0.42â€“0.55) to read Cfb / CSb (highland-
-    // Mediterranean) instead of being swallowed by H, while tropical summits still
-    // need to be genuinely high before turning alpine.
-    let treeline = (0.62 - abs_lat * 0.0030).clamp(0.42, 0.62);
-    if elevation > treeline { return H; }
+    // Highland (H) is NOT emitted. It has no Köppen counterpart: the real
+    // Köppen-Geiger reference classifies Tibet, the Altiplano and the high Andes
+    // as ET / EF / Dwc, so every H cell was wrong by construction — it could never
+    // match, and it cost 3.2 points of exact-zone agreement (33.7% → 36.9%
+    // measured with it removed) while changing main-class by exactly nothing,
+    // because it only ever sat on terrain the reference already calls polar.
+    //
+    // Nothing ecological is lost. `biome.rs` carries its OWN altitudinal band
+    // (§8.12) keyed on the CLIMATIC treeline — warmest month below 6.5 °C — so
+    // alpine tundra and nival rock still appear on the Biomes layer, which is
+    // where a reader looks for "what grows here". The `H` constant and its render
+    // colour are kept so a world saved before this still displays.
+    //
+    // If a highland CLIMATE class is ever wanted back it must not overwrite the
+    // Köppen code: carry it as a separate flag beside the zone, so the map can
+    // show alpine shading without the classifier stating a falsehood.
+    let _ = elevation;
+
 
     // Polar (E)
     if t_warmest < 10.0 {

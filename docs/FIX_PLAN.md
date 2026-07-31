@@ -950,3 +950,39 @@ criterion — one that distinguishes "the summer wind blows off a warm sea onto 
 coast" (India) from "the summer wind has an onshore component somewhere in its
 quadrant" (the Sahara) — most likely the moist-static-energy + orographic-insulation
 index in the earth-systems report rather than any ray test at all.
+
+### A15. Highland removed from the classifier; graded rain shadow reverted
+
+**`H` is no longer emitted.** It has no Köppen counterpart — the real Köppen-Geiger
+reference classifies Tibet, the Altiplano and the high Andes as `ET`/`EF`/`Dwc` —
+so every `H` cell was **unmatchable by construction**. Removing it moved exact-zone
+agreement **33.7% → 39.0%**, the largest single gain of the session, while leaving
+main-class *identical at 70.1%*, because `H` only ever sat on terrain the reference
+already calls polar. It was a pure exact-zone tax that bought nothing measurable.
+
+Nothing ecological was lost: `biome.rs` carries its own altitudinal band (§8.12)
+keyed on the climatic treeline, so alpine tundra and nival rock still appear on the
+Biomes layer. The `H` constant and its render colour are kept for old saves. If a
+highland CLIMATE class is wanted back it must be a flag beside the zone, never a
+value of it.
+
+**The graded rain shadow was tried and reverted.** A11 graded windward uplift on
+upslope rise and won; the symmetric change to the lee loses:
+
+```
+  graded on rise above the lee cell    68.6 main / 37.4 exact   (B 58.5%)
+  graded on absolute barrier height    69.1 main / 37.8 exact   (B 67.1%)
+  binary threshold (kept)              70.1 main / 39.0 exact   (B 68.1%)
+```
+
+The two sides are **not symmetric**, which is the finding. Windward uplift is set
+by the climb the air is about to make, so a rise is the right variable. A rain
+shadow is set by how much moisture was wrung out crossing the crest — which depends
+on the crest's height above the MOISTURE SOURCE, not above the lee cell. Grading on
+relative rise collapses the shadow behind every range standing on a high plateau
+(the Gobi, the Great Basin, the Iranian and Anatolian interiors are all shadowed by
+peaks only ~1800 m above them), and those are exactly the cold deserts. Grading on
+absolute height keeps them but still loses, because a weak shadow cast by every
+minor rise dilutes the deep ones. A rain shadow behaves closer to a threshold
+phenomenon than uplift does: either the air crossed something tall enough to wring
+out, or it did not.

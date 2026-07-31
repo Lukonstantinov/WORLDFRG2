@@ -80,7 +80,7 @@ It prints a scorecard + confusion matrix and HARD-ASSERTS a floor
 (`EARTH_MAIN_FLOOR`), so a change that breaks the global pattern fails the build.
 **Raise the floor after an improvement** so it always guards the current best.
 
-Measured baseline: **main-class 70.1%**, **exact-zone 33.7%** (was 66.2 / 29.0 at
+Measured baseline: **main-class 70.1%**, **exact-zone 39.0%** (was 66.2 / 29.0 at
 `d53fdc9`). BOTH are now asserted — `EARTH_MAIN_FLOOR` **and** `EARTH_EXACT_FLOOR`.
 A third gate, `earth_monsoon_wind_reverses`, asserts the PHYSICS rather than the
 score: monsoon winds must reverse between the two seasons and the mid-latitude
@@ -243,7 +243,7 @@ Run in order. Each phase depends on previous phases' data.
 | 2alt | `sim_generate_terrain_from_template` | Elevation from land shape (no plates) |
 | 2b | `sim_generate_shelves` | Continental shelf (configurable) |
 | 3 | `sim_ocean_atmosphere` | The full ocean/atmosphere chain — see the exact order below |
-| 4 | `sim_classify_climate` | Köppen classification (31 zone codes + H highland) |
+| 4 | `sim_classify_climate` | Köppen classification (31 zone codes; **H highland is no longer emitted** — no Köppen counterpart, see FIX_PLAN A15) |
 | 5 | `sim_rivers_hydrology` | Priority-flood (Barnes et al. + ε) → rivers → lakes → aquatic ecology |
 | 6 | `sim_soil_fertility` | Soil types (12) → fertility → fisheries |
 | 6b | `sim_classify_biomes` | **41 ecological biomes** (needs rivers+lakes) — see §8.12 |
@@ -736,7 +736,7 @@ sim/                            ← organised into per-phase step folders; mod.r
       preview.rs                  SETTINGS PREVIEW (§8.14): 1-D zonal profile + coarse
                                   climate map — read-only, never touches a tile
       bench.rs                    (test-only) phase-3 PERF harness + field checksums — see §8.9
-  step4_climate/                ← Ph4: koppen.rs (31 zone codes + H) ·
+  step4_climate/                ← Ph4: koppen.rs (31 zone codes; H retired, A15) ·
       earth_validation.rs         THE EARTH FIDELITY GATE (§2.3) + fixtures/
   step5_rivers/                 ← Ph5: rivers.rs (priority-flood/rivers/lakes) · aquatic.rs
                                   (freshwater ecology: fish assemblage, lake limnology)

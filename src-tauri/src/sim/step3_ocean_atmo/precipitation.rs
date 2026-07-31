@@ -268,12 +268,27 @@ fn orographic_multiplier(buf: &WorldBuffer, x: u32, y: u32, wvx: f32, wvy: f32) 
 
     // Leeward (rain shadow): walk upwind for a recently crossed mountain. The shadow
     // is deepest right behind the crest and recovers with distance downwind.
+    // The rain shadow stays a BINARY test on the barrier's absolute height, and
+    // that is a measured choice, not an oversight. Grading it the way the windward
+    // term is graded was tried twice and lost both times (FIX_PLAN A15):
+    //
+    //   graded on rise above the lee cell    68.6 main / 37.4 exact  (B 58.5%)
+    //   graded on absolute barrier height    69.1 main / 37.8 exact  (B 67.1%)
+    //   binary (this)                        70.1 main / 39.0 exact  (B 68.1%)
+    //
+    // The first collapses the shadow behind every range standing on a high plateau
+    // — the Gobi, the Great Basin, the Iranian and Anatolian interiors — because a
+    // barrier 3000 m above sea level is only ~1800 m above the desert it shadows.
+    // The second keeps those but still loses, because a partial shadow cast by
+    // every low rise dilutes the deep ones. A rain shadow appears to be closer to a
+    // threshold phenomenon than uplift is: either the air crossed something tall
+    // enough to wring out, or it did not.
     for step in 1..=shadow_steps {
         let bx = (x as f32 - ndx * step as f32).round() as i32;
         let by = (y as f32 - ndy * step as f32).round() as i32;
         if by < 0 || by >= h { break; }
         let bi = buf.idx(buf.wrap_x(bx), by as u32);
-        if buf.terrain[bi] == 0 { break; } // open ocean upstream â†’ no shadow
+        if buf.terrain[bi] == 0 { break; } // open ocean upstream → no shadow
         if buf.elevation[bi] > MOUNTAIN_THRESHOLD {
             return 0.15 + 0.85 * (((step - 1) as f32 / shadow_steps as f32).sqrt());
         }
