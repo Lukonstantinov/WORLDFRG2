@@ -27,6 +27,8 @@ export function WarehousesPanel() {
   const setSelectedLane = useUIStore((s) => s.setSelectedFuturesLane);
   const active = useCampaignStore((s) => s.snapshot?.active ?? false);
   const tick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
+  const selectedHub = useUIStore((s) => s.selectedHub);
+  const hubs = useCampaignStore((s) => s.snapshot?.hubs);
   const goodMeta = useGoodsStore((s) => s.meta);
   const [rows, setRows] = useState<WarehouseInfo[]>([]);
   const [q, setQ] = useState("");
@@ -37,6 +39,15 @@ export function WarehousesPanel() {
     campaignWarehouses().then((r) => { if (alive) setRows(r); }).catch(() => {});
     return () => { alive = false; };
   }, [open, active, tick]);
+
+  // HubPanel hand-off: opened from a settlement's Estates/Depots tab → pre-filter
+  // to that city's name, the same "reads `selectedHub`" pattern ColonialPanel and
+  // ImmigrationPanel already use.
+  useEffect(() => {
+    if (!open || selectedHub == null) return;
+    const name = hubs?.find((h) => h.id === selectedHub)?.name;
+    if (name) setQ(name);
+  }, [open, selectedHub, hubs]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
