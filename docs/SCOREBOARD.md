@@ -9,6 +9,477 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md 3.4d: sack and purge — the last step, `CITY_PROVINCE_WAR_PLAN.md` COMPLETE)
+
+**What shipped.** The plan's own highest-risk item, deliberately built last:
+`apply_war_defeat_consequences` (`tick/war.rs`), fired from `resolve_war` on any
+decisive-enough defeat (`score_abs >= WAR_PRICE_TRIBUTE`, 40 — a marginal
+reparations-only win does not cascade into breaking houses). Two paths, both
+funnelling into the same `strip_holdings_at` + `house_is_ruined` check so
+neither invents parallel machinery:
+
+- **Enemy sack.** Every live non-guild house resident at the losing city
+  (`house.hub == lose`) risks losing its own estates THERE (up to
+  `WAR_SACK_MAX_ESTATES`=2, ownership passing to the city — `owner_house = -1`,
+  the same "confiscated" convention the resale market already uses), offices/
+  bailos/influence there, and any warehouse stock depot there — a per-house
+  roll (`WAR_SACK_CHANCE`=0.5), not a guarantee, since not every resident
+  family is equally exposed to a single sacking.
+- **Internal purge.** The city turns on whichever house actually financed the
+  losing war: the house-driven war's own `backer_house` (§3.4c) if this was
+  one, else the losing city's own ruling house (`council_house`/
+  `captor_house`) for an ordinary rival-council war — guaranteed once
+  triggered (a targeted political act, not a raid), stripped the same way
+  (up to `WAR_PURGE_MAX_ESTATES`=3) PLUS a wealth confiscation
+  (`WAR_PURGE_CONFISCATE_FRAC`=0.25) straight into the city's own treasury and
+  a real prestige/power cost (`WAR_PURGE_POWER_LOSS`=0.15).
+
+Either path may cascade to full dissolution through the EXISTING
+`dissolve_house` — no new cascade logic. `house_is_ruined` is a NEW check
+distinct from the ordinary insolvency test (`update_solvency`, which reads
+wealth alone): a war can strip a house's assets while it's still technically
+solvent for a while longer, and that house is ruined in every way that
+matters (no wealth AND no estates AND no offices anywhere) — the honest
+trigger for a war-driven collapse.
+
+**Gate results:** `cargo check` clean · `npx tsc --noEmit` clean (no frontend
+surface for this step — sack/purge journal entries already render through the
+existing chronicle) · `economic_war_levies_houses_and_resolves` and
+`every_war_terminates_within_the_round_cap` both pass ·
+`simulate_decades_reports_dynamics` hard-passes · `econ_` 4/4 non-ignored pass
+— **first attempt, no RNG-divergence regression this time** (unlike 3.4a-c's
+and 3.4e's own tuning rounds), because the severity gate keeps this path
+comparatively rare. `econ_fidelity_scorecard`'s wars/century held at 45.00
+(3.4e's own final value), consistent with sack/purge being a consequence of a
+war's END, not a new trigger on how often one starts.
+
+**`CITY_PROVINCE_WAR_PLAN.md` is now fully built end to end** — every item in
+its own §7 order (1.2/1.3 panel · 2.1–2.5 provinces · 3.1–3.3 politics ·
+3.4f/3.4a-c/3.4e/3.4d war) shipped and gated across this session. What remains
+is explicitly out of scope by the plan's own §6 ("deliberately not built"):
+territorial empires above the city-state, sieges/army movement, a rival house
+finishing an enemy under cover of war, land state persisted back to tiles, a
+per-cell quality field, the unexploited-opportunity view, and leagues/
+treaties/diplomacy (FIX_PLAN B4) — plus 3.4e's own voluntary-war-financing
+gap (lend to the chest, goods at a war premium) noted in its own entry above.
+
+## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md 3.4e: war ledger, damage, blockade, boom)
+
+**What shipped.** The four remaining §2 requirements from the plan, all reusing
+existing machinery rather than inventing new fields:
+
+- **War damage** (`war_damage_pass`, `tick/war.rs`): each belligerent's own
+  estates/manufactories can take war damage yearly (`WAR_DAMAGE_CHANCE`=0.15 —
+  see the tuning note below), writing straight into the EXISTING `TickHub.damage`
+  field — the same field a natural disaster uses. No new repair machinery
+  either: `estate_condition_pass` already repairs any nonzero `damage` whatever
+  its cause, funded by the owning house or the parent city's treasury exactly
+  as it already does for disasters. A house-owned estate's loss (in wealth
+  terms, via `estate_market_value`) is booked to that house's own Accountant
+  ledger.
+- **A real, persistent blockade.** The pre-existing `trade_wealth *= 0.8` line
+  was COSMETIC ONLY — `update_houses` recomputes `trade_wealth` fresh from
+  `export_earn`/`import_spend` every single day, so that multiply was silently
+  overwritten before a player could ever see its effect past the tick it ran on.
+  `export_earn` — the term that actually drives `trade_wealth` — now shrinks to
+  `WAR_BLOCKADE_EXPORT_MULT`=0.55 each year at war, which persists (decaying at
+  its own natural 3%/day rate) for the rest of the year between `update_wars`
+  calls. The old line is kept for its immediate display value.
+- **The neutral war boom.** A hub sharing a belligerent's trade component,
+  itself at peace, gets its own `export_earn` nudged (`WAR_BOOM_EXPORT_FRAC`=
+  0.12 proportional + `WAR_BOOM_EXPORT_FLAT`=5.0 flat floor) — exactly why a
+  house wants to supply a war it isn't fighting (§2).
+- **Ledger lines.** `LedgerAcc` gains `war_levy` (split OUT of the general
+  `civic_tax` field, which used to silently combine the progressive wealth tax
+  and war levies — a war's cost now reads as its own line, per "war must be
+  legible as money") and `war_damage`. Both are now included in
+  `HouseLedger.expense_total` (previously `civic_tax` wasn't even wired into the
+  Accountant view's total at all — a real pre-existing gap, not something this
+  session introduced) and rendered as their own ⚔-prefixed lines in
+  `HousesPanel.tsx`'s Accountant tab.
+
+**Not built, and why:** the plan's Houses row also describes VOLUNTARY war
+financing (lend to the chest, supply goods at a war premium) and "two houses
+backing opposite sides is a new feud cause." Neither is required by 3.4e's own
+step text ("Accountant lines for every war cost and gain; manufactory and
+estate damage through the existing `damage` field; blockade on belligerent
+routes; the neutral war boom") — only the FORCED levy exists today, which is
+what `war_levy` reports. Voluntary contracts are real future work, not silently
+folded in here.
+
+**A second RNG-divergence round, same shape as 3.4a-c's.** Shipped first with
+`WAR_DAMAGE_CHANCE`=0.35; `econ_inheritance_rules_fragment_differently` failed
+again ("partible must leave the average house poorer than primogeniture
+(172949 vs 160729)") — the SAME sensitivity 3.4a-c's own tuning already found:
+two 60-year sub-simulations sharing a seed but diverging in house/estate count
+from year one, so any new per-war-year `hash01` draw in a shared code path
+shifts which values each run consumes downstream. Lowered to 0.15 (still a
+real, recurring cost — just not rolled every single war-year) and the gate
+passed again. Left here as the explicit, named reason for that constant's
+value, so a future session doesn't raise it back toward 0.35 without knowing
+why it was lowered.
+
+**Gate results:** `cargo check` clean · `npx tsc --noEmit` clean ·
+`economic_war_levies_houses_and_resolves` and
+`every_war_terminates_within_the_round_cap` both pass ·
+`simulate_decades_reports_dynamics` hard-passes (wealth ∈ [-4.6, 757383.0],
+bounded/finite) · `econ_` 4/4 non-ignored pass (after the `WAR_DAMAGE_CHANCE`
+fix above). `econ_fidelity_scorecard`'s wars/century moved 45.0 → **41.67**
+(the stronger blockade/damage likely ending wars a little sooner on average) —
+still a real, frequent feature of city life, not chased further per the
+3.4a-c entry's own open pointer.
+
+## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md 3.4a-c: war score, terms priced in score, casus belli)
+
+**What shipped.** `sim/campaign/tick/war.rs` gets a real score-and-round engine on
+top of DLC 3.5's declare/wage/resolve skeleton:
+
+- **3.4a · score + quarterly rounds.** `War` gains `score` (−100..100, bidirectional),
+  `round`, `peak_effort_a/b`. Every year now catches up every quarterly round due
+  since `start_tick` (tick-driven, so a back-dated war still resolves correctly —
+  the same trick the crisis engine uses). Each round rolls a battle/raid/blockade
+  outcome biased by relative war-chest+treasury strength. Termination checks, in
+  order: decisive score (±100) → the three exhaustion paths (force broken, treasury
+  &credit spent, war weariness) → backers-withdraw (house wars only) → the round cap
+  (`WAR_ROUND_CAP`=12 quarters = 3 years) as the guarantee of last resort, mirroring
+  rule 22's discipline for the crisis engine. New test
+  `every_war_terminates_within_the_round_cap` asserts this the same way
+  `every_crisis_terminates` does.
+- **3.4b · terms priced in score.** `apply_war_goal` is now score-gated at §1.4's
+  table (reparations 10 · trade rights 25 · tribute 40 · a province 55 · annexation
+  90) — a new `WAR_GOAL_PROVINCE` goal reassigns one ordinary (non-house-held, rule
+  24) province's `prov_holder` to the victor. A win short of its declared goal's
+  price downgrades to the richest goal the final score actually affords; it never
+  upgrades on overperformance.
+- **3.4c · casus belli expanded.** A WARMONGER RULER (`head_character_factor` axis 0
+  on the council head) biases `WAR_DECLARE_CHANCE`. A HOUSE-DRIVEN WAR: the winner
+  of a vendetta-stage feud flare, if it holds its own city's council or captor seat,
+  may drag that whole city into a full state war on the loser's city instead of the
+  ordinary property damage — `declare_house_war`, gated on differing cities, neither
+  already at war, room under the war cap, and the new treasury/cooldown
+  preconditions below — with itself auto-committed as `backer_house`, whose own
+  insolvency is that war's backers-withdraw path.
+
+**The tuning story — a real negative-result chain, not a single clean pass.**
+Shipped first with `HOUSE_WAR_CHANCE`=0.20 and no other new preconditions:
+`econ_fidelity_scorecard` read **65.0 wars/century**, an order of magnitude past
+the §3.4f pre-3.4a-c baseline of 6.0/century measured for exactly this purpose.
+Four successive attempts, each a real precondition from §3.4f's own list
+("reach satisfied, a real grievance, sufficient treasury, council control"):
+
+1. `HOUSE_WAR_CHANCE` 0.20 → 0.025 (8×): 65.0 → 56.7/century. Barely moved —
+   proof the house-driven path was never the volume driver.
+2. `WAR_MIN_TREASURY`=80 added to both declaration paths: 56.7 → 56.7/century.
+   Zero effect — every candidate seat already cleared it.
+3. `war_cooldown_until` (new `TickHub` field, 5-year "no fresh grievance" cooldown
+   after ANY war, both belligerents): 56.7 → 50.0/century. Some effect.
+4. `WAR_MIN_ROUNDS_TO_RESOLVE`=4 (a full year must pass before the three
+   exhaustion paths — not a decisive score — may end a war): 50.0 → 50.0/century.
+   Zero effect again.
+
+Four preconditions on *declaring* a war, three of them near-inert, was the signal
+that the volume was never about how often a war started — it was about how fast
+one FINISHED and freed one of the two `MAX_ACTIVE_WARS` slots for the next. The
+round-outcome magnitudes (24/16/8/11 per quarterly roll) let a lopsided pair reach
+the decisive ±100 score in a handful of rounds. Halving them
+(→ 12/8/4/5.5) was the one change that actually moved the number: **50.0 → 45.0
+wars/century** — still well above the pre-3.4a-c baseline (a NEW war channel
+plus real casus belli SHOULD raise it), but no longer an order of magnitude off,
+and consistent with wars now being a real, if frequent, feature of city life
+rather than the rare set-piece the old flat-10%-chance mechanism produced.
+
+**The halving also fixed a real `econ_` regression, not just the frequency
+finding.** At 50 wars/century, `econ_inheritance_rules_fragment_differently`
+(Phase 0.4's own gate, unrelated to war on its face) FAILED outright: "partible
+must leave the average house poorer than primogeniture (141324 vs 109769)" — war
+had become frequent and fast enough that its own RNG divergence between the two
+60-year sub-simulations (partible vs primogeniture diverge in house count almost
+immediately, so they consume `hash01` draws differently from the first year) swamped
+the structural signal the assertion depends on. The same magnitude halving that
+brought the frequency down restored it: partible 150,940 < primogeniture 155,624,
+passing again. **A second, unplanned benefit measured in the same run: top-10%
+wealth share moved from 0.498 (out of its 0.60–0.90 band, unchanged from the
+pre-3.4a-c 0.491) to 0.671 — back in band**, the first time since early in this
+session's 3.1–3.3 work. Not the target of any of these changes — a side effect
+of war now being a real, survivable-but-costly wealth event.
+
+**Left as an open pointer, not chased further:** wars/century still reads well
+above 6.0/century, and reasoning (not yet directly instrumented) points at
+decisive-score resolution remaining the dominant path even after halving. A future
+session wanting to bring it down further should look at raising
+`WAR_SCORE_DECISIVE` or damping round magnitude again, informed by an actual
+per-war termination-reason histogram — not another blind precondition on
+declaration, which this session's four attempts already showed doesn't touch the
+real lever. Per CLAUDE.md §2.4, this negative-result chain is the deliverable,
+not a loose end to feel bad about.
+
+**Full gate set, final state:** `cargo check` clean · `npx tsc --noEmit` clean ·
+`econ_` 4/4 non-ignored passed (house wealth Gini 0.769, top-10% share 0.671 — both
+in band; house dissolutions/century 66.67, printed-only, no band) ·
+`simulate_decades_reports_dynamics` hard-passes (wealth ∈ [-4.6, 507320.7],
+bounded/finite, turnover happens) · `economic_war_levies_houses_and_resolves` and
+`every_war_terminates_within_the_round_cap` both pass. `WarBrief` (the Wars tab's
+existing active-war list) gained `score`/`round`/`goal_label`, shown as a small
+bidirectional meter in `MoneyFinancePanel.tsx` — the same "surface it the moment
+it's built" discipline the crisis engine's round log follows.
+
+**Not yet built:** 3.4e (accountant ledger lines, manufactory/estate damage,
+blockade, the neutral war boom) and 3.4d (sack and purge — deliberately last, the
+highest-risk item). See `docs/CITY_PROVINCE_WAR_PLAN.md` §7 for the order.
+
+## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md 3.4f: war frequency measured)
+
+**3.4f — measure BEFORE tuning, the precedent Phase 4.4 set for the foreign hand.**
+`econ_measure_war_frequency` (`economy_validation.rs`, `#[ignore]`d, 150-year
+reference world) measures the EXISTING DLC 3.5 war mechanism — the baseline
+3.4a-e's score+preconditions redesign will be judged against, not a target in
+itself.
+
+```
+wars started                              9   →  6.00 / century
+wars resolved in the window               9
+mean duration                          2.0 yr   (every war resolves at the
+                                                  earliest eligible tick —
+                                                  `years >= 2` — see below)
+outcome mix     plunder 6   tribute 0   trade-rights 3   annex 0
+causes          independence 6   rival councils 3
+war-eligible cities (a council seat)     11
+structurally isolated (own component)     0   (0.0%)
+```
+
+**The headline finding: two-thirds of "wars" are not the mechanism 3.4a-c is
+about to redesign.** 6 of 9 are colony wars of independence
+(`declare_independence_war`, its own gate in `colonies.rs`), not
+`maybe_declare_war`'s rival-council/trade-dispute path — which fired only 3
+times in 150 years (2.0/century) despite a flat 10% yearly roll
+(`WAR_DECLARE_CHANCE`) whenever ≥2 eligible seats share a connectivity
+component. Zero cities were structurally isolated on this fixture, so the low
+rate is the trigger's own rarity (a rival pair + `hash01 < 0.10`, checked once a
+year), not §5.8's "no reachable rival" cause — worth re-confirming against a
+real generated world, since `reference_world()`'s 11 seats in one component is
+a much denser graph than most generated worlds will have.
+
+**Every resolved war ends at EXACTLY 2 years** — `update_wars` resolves the
+instant `years >= 2` is first true, weighted only by cumulative treasury +
+war-chest at that moment; there is no further escalation once eligible. This is
+the mechanism 3.4a (a proper score + quarterly rounds, exhaustion paths) exists
+to replace — a war that always resolves at its floor duration cannot show mean
+duration moving at all, so "mean duration" as measured here is really "the
+resolution floor," not a real distribution. That is itself useful context for
+judging 3.4a's post-redesign number.
+
+**A real bug was caught and fixed while building this diagnostic**: the first
+draft computed a war's duration from the loop's 0-indexed year counter instead
+of `s.tick / TICKS_PER_YEAR` taken AFTER that year's `advance()`, silently
+undercounting every duration by exactly one year (reported 1.0 yr instead of
+the true 2.0 yr). Caught by hand-checking `update_wars`' own `years >= 2` gate
+against the printed number, not by a test — recorded here per §2.4's "a
+diagnosis is a complete task" so the off-by-one doesn't reappear if this
+diagnostic is ever rewritten from scratch.
+
+Run originally at 300 years; killed and re-run at 150 after ~280s CPU with no
+sign of finishing — war-driven house turnover keeps growing `s.houses`, and
+several per-tick passes scan it, so cost per simulated year rises through a
+long run (a `rust-performance` question for another session, not this one).
+150 years already gives a clean per-century rate, matching the window
+`econ_diagnose_outpost_founding` already uses.
+
+Verified: `cargo check` clean, `simulate_decades_reports_dynamics`
+byte-identical to the pre-3.4f baseline (the diagnostic is `#[ignore]`d and
+touches no production path). No `econ_` re-run needed for the same reason — the
+change is a new test function only.
+
+**Not yet started:** 3.4a (war score + quarterly rounds), 3.4b (terms priced in
+score), 3.4c (casus belli incl. warmonger ruler + house-driven war), 3.4e
+(ledger/damage/blockade/boom), 3.4d (sack and purge — last, highest risk). See
+`docs/CITY_PROVINCE_WAR_PLAN.md` §7 for the full order.
+
+## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md 3.3: state name/colour/borders)
+
+**3.3 — states.** A state is not new sim state: `compute_states`
+(`campaign_commands/province.rs`) is a pure derived read over what 3.2 and Phase 5
+already carry — every province a tier 1-2 city holds the writ to (`prov_holder`,
+excluding a house-held writ per rule 24 — that's the house's territory, not a
+city's state), grouped by the world's own `province_raster` cells into one
+`StateRegion` per city. Nothing is persisted; a rerun cannot desync from the sim
+because nothing is stored to desync. Name is deterministically varied (bare city
+name / "X Republic" / "Republic of X" / "Duchy of X" / "Free City of X" / paired
+with the home province's people-name), hashed off the hub id so it's stable
+without being hand-authored. Colour reuses `distinct_color`'s golden-angle hue
+rotation but phase-shifted (+53°) and desaturated, so a state's tint is provably
+distinct from a house's heraldic colour even where a hub id and a house id
+happen to collide numerically — different index spaces. Rendered with the exact
+"cell cloud" technique `compute_culture_regions`/`drawCultureRegions` already
+uses for ethnic territories (`OverlayManager.drawStates`), gated behind a new
+Toolbar toggle (🏰 States), refreshed on year boundaries like the caravan-corridor
+overlay. A tier 3-4 or untiered town keeps self-administering its own province
+exactly as before; it simply never forms a state.
+
+This is where §3.2's own note said the "bit-identical to the dynamics test"
+guarantee would end — city tier now decides what the MAP draws. It does NOT mean
+the tick itself changed: `compute_states` reads `prov_holder`/`hub.tier` and
+writes nothing back, so the dynamics run stays byte-identical to the pre-3.3
+baseline (confirmed below), and no new `econ_` exposure exists because no new
+tick state was added.
+
+Verified against the full required gate set: `cargo check` clean (only
+pre-existing unused-constant warnings), `npx tsc --noEmit` clean,
+`simulate_decades_reports_dynamics` byte-identical year-by-year to the pre-3.3
+baseline (richest/houses/banks/wars/crashes/towns all match exactly).
+
+**Not yet started:** the whole abstract war system (3.4a–f), starting with 3.4f
+(measure war frequency before tuning anything). See `docs/CITY_PROVINCE_WAR_PLAN.md`
+§7 for the full order.
+
+## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md 3.1 + 3.2: the city leader and city tiers)
+
+**3.1 — the office as a person.** `council_house`/`captor_house` already existed and
+already compete for the seat (bribery/intimidation/capture in the existing
+`update_government`); what was missing was surfacing WHO holds it. `CityLeader`
+reads `kin[0]` of whichever office is stronger, reusing `character_phrase` and
+`head_vice` — both already built for the House Dossier but never exposed outside
+it. New `vice_label()` is the first thing that surfaces `head_vice` to the
+frontend at all. Pure read/display addition, no tick mutation.
+
+**3.2 — city tiers.** `TickHub` gains `tier`/`standing`, recomputed monthly by
+`assign_city_tiers` — a direct mirror of `assign_house_tiers` (same percentile
+cutoffs, same Tier-1 absolute floor, same hysteresis). Four axes: population,
+trade wealth, treasury, territory administered (rural population under provinces
+this city holds), and the ruling house's own standing. Query-side only at this
+step — nothing downstream reads the new fields, so the guarantee holds exactly as
+it did for house tiers. Four new tests (richest-city-ranks-highest, Tier-1-empty-
+on-a-flat-world, hysteresis stability, an-estate-is-never-tiered) all pass.
+
+Both steps verified against the full required gate set: `cargo check` clean,
+`econ_` 4/4 non-ignored passed with numbers UNCHANGED from the pre-3.1/3.2
+baseline, `simulate_decades_reports_dynamics` byte-identical, `npx tsc --noEmit`
+clean (3.1 only touched the frontend; 3.2 has no frontend surface yet — city
+tiers become visible once §3.3 turns them into state borders).
+
+**Not yet started:** 3.3 (state name/colour/borders — where city tiers stop being
+bit-identical) and the whole abstract war system (3.4a–f). See
+`docs/CITY_PROVINCE_WAR_PLAN.md` §7 for the full order.
+
+---
+
+## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md: 1.3, 2.3, 2.4, 2.5 built)
+
+**1.3 — panel polish.** Smoothed the Trade tab's 360→600px width snap into a CSS
+transition; applied the house stability gauges' own "quiet when healthy" rule to
+the two treasury displays (grey+small when positive, a loud warning colour only
+when actually empty).
+
+**2.3 — the survey plate's real terrain.** New query command
+`get_province_terrain_crop(province_id, max_dim)` returns a cropped elevation/
+land/biome grid over a province's bbox, read from the world's cached tiles —
+replacing `ProvinceMiniMap`'s flat placeholder relief fill with real hypsometric
+shading. River courses are NOT re-sent by the backend — the frontend already
+holds the world's full river geometry (`worldStore.rivers`) and clips it to the
+province's own raster mask itself, so the water plate now draws a real course
+instead of a proportional scatter. Both fall back to the old placeholders when
+absent (old world / still loading).
+
+**2.4 — elevation-biased land use.** Reuses 2.3's terrain crop: the land-use
+dither's placement is now a RANKED composite (elevation + noise) rather than pure
+noise, so woodland/waste cluster uphill and arable/pasture on the flat — while the
+province's overall shares stay exactly exact (ranking, not threshold-shifting, is
+what preserves that). Tenure's dither is untouched by design.
+
+**2.5 — goods exploitation (the workstream's own "substantial/risk" item).** New
+frozen per-(province, good) belt score (`Province.good_belt`, world-side, an
+unfiltered mean unlike the existing top-6 quality shortlist) snapshotted once at
+campaign start. `potential`/`actual`/`exploitation`/`market_share` are PURE
+DERIVED reads — no new production, no touched prices — computed fresh from
+current land use, live hub+estate production, and the one piece of state that
+does persist: `prov_good_depletion`, updated yearly with an estate-kind-aware
+wear/heal rate (mine barely recovers, fishery recovers fast, vineyard doesn't
+deplete at all — plantation also nudges `prov_soil` down, a real cross-link). The
+yield constant is SELF-CALIBRATED per world (mirroring `need_scale`) so mean
+exploitation reads ≈1.0 on day one regardless of world size, rather than a single
+hand-picked constant that would silently read wrong on a differently-shaped
+world. New test `province_goods_exploitation_tracks_pressure_and_depletes`
+exercises the whole loop (calibration → sustained overexploitation → erosion →
+easing → healing) end to end. Because the pass only ever writes
+`prov_good_depletion`, it cannot move the `econ_` bands or the dynamics test by
+construction — verified, not just argued: both are byte-identical with this
+wired in. Exposed via `campaign_province_goods`; the Province Inspector's Land
+tab now shows the live reading in place of the frozen quality/rank list the
+moment a campaign is actually producing something (falls back to the frozen list
+pre-campaign).
+
+**Simplified / not built, flagged rather than hidden:** land-use category is a
+small hardcoded name table over the 45 shipped goods (`good_land_kind`), not a
+new `GoodSpec` schema field — an unrecognized/custom good defaults to
+unconstrained rather than guessed. §5.5's "keep a good listed while produced
+recently" caveat is simplified to "produced now OR depletion hasn't healed away"
+— no separate last-produced-year is tracked. Vineyard's "raises grade instead"
+positive half isn't tracked (only the "doesn't lose tonnage" half is). Estate
+tier's own "footprint + ceiling + grade" mechanics are untouched by this pass.
+
+Whole-lib gates run: `cargo check --lib` clean · `provinces::tests` unaffected ·
+new exploitation test passes · `econ_` 4/4 non-ignored passed, numbers unchanged
+from the pre-2.5 baseline · `simulate_decades_reports_dynamics` byte-identical ·
+`npx tsc --noEmit` clean.
+
+**Not yet started:** 2.5's own estate-tier depth, Workstream 3 (politics/war —
+city leader, city tiers, state name/colour/borders, the whole abstract war
+system). See `docs/CITY_PROVINCE_WAR_PLAN.md` §7 for the full order.
+
+---
+
+## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md begun: Step 0 + 2.1 enclave fix + 2.2 sizing)
+
+**Step 0 — the economy oracle could see geography for the first time.** The
+60-year/30-city reference world's province layer was UNIFORM (5 identical
+provinces, seats on a straight line), so the fidelity scorecard could measure
+*levels* but never *dispersion* — it could not say why one province is rich and
+its neighbour poor. Seeded five geographically distinct provinces (fertile river
+lowland, wooded hills, arid steppe, temperate mix, marginal upland — varied
+capacity, forest/arable/soil, seat position) matched to real hub clusters. Added
+three printed (not asserted) diagnostics ahead of the mechanisms that will give
+them real meaning: province land-pressure CV **1.406**, province output-share CV
+**0.662** (both stand-ins for Workstream 2.5's exploitation/market-share ratios,
+which don't exist yet), wars started/century **1.67** (the existing DLC 3.5 rival-
+polis mechanism, ahead of §3.4's abstract state-war system). All existing `econ_`
+bands held; `simulate_decades_reports_dynamics` stayed bit-identical (it seeds no
+provinces).
+
+**2.1 — the enclave fix, reversing a documented Phase 1 decision (§5.1).** Seed
+rejection (`too_close`) tested only the CANDIDATE's own required separation, never
+the incumbent seed's — a fertile valley (small separation) sitting inside a desert
+or tundra region (large separation) passed a test the surrounding province would
+have failed. Fixed to `max(sep_candidate, sep_incumbent)`. Added a post-snap pass
+(`merge_enclaves`, run AFTER `snap_borders_to_features` per §5.3 — the snap itself
+can create or heal an enclave) that folds any province bordering exactly one
+neighbour into it, unless the province is its own island. New test
+`no_enclosed_province_survives_unless_its_own_island` passes; all 8 pre-existing
+`provinces::tests` (crest affinity, diagonal-river affinity, determinism, coverage)
+still pass.
+
+**2.2 — sizing, compressing the fertile↔hostile spread.** Measured baseline: the
+old constants produced a ≈169× area ratio between max-hostile (ice cap) and
+max-fertile land at the seed-separation level alone, before `VAST_MERGE_CAP_FRAC`
+enlarges hostile blocks further — in the "roughly 100×" range the plan named.
+Shrunk globally (`base_sep` multiplier 0.5 → 0.40) and compressed the spread from
+both ends: the habitability ramp 1+1.6·hostile → 1+1.0·hostile, every
+`koppen_spacing_mult` ceiling lowered (ice cap 3.0→2.0, tundra 2.2→1.7, desert
+1.9→1.5, etc.), and the fertile floor raised (0.6→0.75). New `#[ignore]`d
+diagnostic `province_size_distribution` measures the result on a synthetic zonal
+world: **hostile/fertile mean-area ratio ≈33×** — a real, measured compression,
+not just a paper one. Not a hard gate (no single "right" size exists; the
+maintainer judges this visually in the app) — determinism and the existing
+`provinces::tests` are the actual gate, and both hold.
+
+Whole-lib gates run: `cargo check --lib` clean · `provinces::tests` 9/9 passed ·
+`econ_` 4/4 non-ignored passed (incl. the new determinism check over the three new
+scorecard fields) · `simulate_decades_reports_dynamics` bit-identical.
+
+**Not yet started:** Workstream 1 (settlement panel rework), 2.3-2.5 (terrain crop,
+organic land use, goods/exploitation), Workstream 3 (politics/war). See
+`docs/CITY_PROVINCE_WAR_PLAN.md` §7 for the full order.
+
+---
+
 ## Current state — 2026-07-30 (Phase 5 complete: provinces as house territory — the house series is DONE)
 
 **Asked to "move on with phase 5 and 6" — neither exists in `HOUSE_MASTER_PLAN.md`.**

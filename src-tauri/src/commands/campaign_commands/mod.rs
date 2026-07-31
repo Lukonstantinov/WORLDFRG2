@@ -172,6 +172,9 @@ pub struct HubBrief {
     /// Downsampled population history (≤30 points, oldest first) — the census
     /// sparkline. Empty until the hub has history samples.
     pub pop_spark: Vec<f32>,
+    /// CITY_PROVINCE_WAR_PLAN.md §3.2 · 1 great · 2 major · 3 lesser · 4 marginal ·
+    /// 0 = not yet assigned. §3.3 reads this to decide state eligibility (tier 1-2).
+    #[serde(default)] pub tier: u8,
 }
 
 /// What `campaign_start_sim` / `campaign_advance` / `campaign_get_state` return.
@@ -314,6 +317,33 @@ pub struct Government {
     pub laws: Vec<LawRow>,
     /// The goods the government itself holds (civic granary/stockpile).
     pub civic_goods: Vec<CivicGoodRow>,
+    /// CITY_PROVINCE_WAR_PLAN.md §3.1 · the office as a PERSON — the head of
+    /// whichever house actually runs this seat. `None` when no house holds either
+    /// office (the ordinary early-campaign case). No new person entity: this is
+    /// `kin[0]` of `captor` (the stronger office — a majority-captured government)
+    /// or `council` (the softer, dominant-but-not-captured case), whichever is set.
+    #[serde(default)]
+    pub leader: Option<CityLeader>,
+}
+
+/// CITY_PROVINCE_WAR_PLAN.md §3.1 · the city leader — the head of the house that
+/// runs this seat's government, reusing the existing house-person stack (kin,
+/// character, vice) rather than a new entity.
+#[derive(Serialize, Clone, Default)]
+pub struct CityLeader {
+    pub house: String,
+    pub house_color: String,
+    pub is_guild: bool,
+    /// True when the house holds this seat by CAPTURE (a majority of its
+    /// control-weighted offices) rather than merely being its dominant council.
+    pub is_captor: bool,
+    pub head_name: String,
+    pub female: bool,
+    /// A phrase from the head's character axes ("Bold, civic-minded." or "" for a
+    /// middling character) — the same discipline the stability gauges use.
+    pub character_phrase: String,
+    /// "" when the head has none.
+    pub vice: String,
 }
 
 /// One government key figure for the Government subtab.
@@ -759,6 +789,7 @@ fn build_snapshot(sim: &CampaignSim) -> CampaignSnapshot {
                     let step = (h.history.len() / 30).max(1);
                     h.history.iter().step_by(step).map(|s| s.population).collect()
                 },
+                tier: h.tier,
             }
         })
         .collect();
@@ -2143,6 +2174,14 @@ pub struct WarBrief {
     pub chest_b: f32,
     pub levies: f32,
     pub cause: String,
+    /// CITY_PROVINCE_WAR_PLAN.md §3.4a · bidirectional war score, −100..100.
+    /// Positive favours `a`. ±100 ends the war outright.
+    #[serde(default)] pub score: f32,
+    /// §3.4a · quarterly rounds fought so far (of `WAR_ROUND_CAP`'s backstop).
+    #[serde(default)] pub round: u16,
+    /// §3.4b · what the aggressor is fighting for, as a phrase — the same label
+    /// `war_goal_label` already uses in the journal.
+    #[serde(default)] pub goal_label: String,
 }
 #[derive(Serialize, Clone)]
 pub struct WarsPayload {
@@ -2378,6 +2417,13 @@ pub struct HouseLedger {
     pub events: f32,
     pub consumption: f32,
     pub inflation: f32,
+    /// §3.4e · forced war levy paid this year — split out of ordinary civic tax so
+    /// a war's cost reads as its own line, per the plan's own "war must be legible
+    /// as money" rule.
+    #[serde(default)] pub war_levy: f32,
+    /// §3.4e · wealth-equivalent loss when war damages one of this house's own
+    /// estates/manufactories (the existing `damage` field, no new mechanism).
+    #[serde(default)] pub war_damage: f32,
     pub expense_total: f32,
     pub net: f32,
     /// Monthly wealth samples through the year (for the Accountant's wealth graph).

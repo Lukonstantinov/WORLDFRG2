@@ -28,6 +28,7 @@
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
+            tier: 0, standing: 0.0, war_cooldown_until: 0,
         }
     }
 
@@ -103,6 +104,8 @@
             prov_surplus: vec![], prov_revenue: vec![], prov_holder: vec![],
             prov_holder_house: vec![],
             prov_works: vec![], prov_history: vec![], prov_events: vec![],
+            prov_good_belt: vec![], prov_good_depletion: vec![],
+            prov_good_yield_scale: 1.0,
         };
         s.rebuild_routes();
         s
@@ -1420,17 +1423,48 @@
         s.hubs[0].treasury = 50.0; s.hubs[1].treasury = 20.0;
         s.hubs[0].war_with = 1; s.hubs[1].war_with = 0;
         s.wars.push(War { a: 0, b: 1, start_tick: 0, chest_a: 0.0, chest_b: 0.0,
-            levies: 0.0, cargo_lost: 0, cause: "test".into(), goal: WAR_GOAL_PLUNDER });
+            levies: 0.0, cargo_lost: 0, cause: "test".into(), goal: WAR_GOAL_PLUNDER,
+            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1 });
         let w0 = s.houses[0].wealth;
         s.tick = 0;
-        s.update_wars(0); // wage one year — levy, no resolve
+        s.update_wars(0); // wage the first year — levy, no quarterly round due yet
         assert!(s.houses[0].wealth < w0, "war levy drained a resident house");
-        assert_eq!(s.war_log.len(), 0, "not resolved before 2 years");
-        s.tick = 2 * 365;
-        s.update_wars(2); // resolve
-        assert_eq!(s.war_log.len(), 1, "war resolved into the log");
+        assert_eq!(s.war_log.len(), 0, "no round has run yet, so nothing can have resolved");
+        // §3.4a · quarterly rounds now decide when it ends — not a fixed 2-year timer.
+        // Run out the round cap's own backstop (3 years) to observe the guaranteed end.
+        s.tick = (WAR_ROUND_CAP as u32 + 1) * WAR_ROUND_TICKS;
+        s.update_wars((WAR_ROUND_CAP as u32 + 1) * WAR_ROUND_TICKS / 365);
+        assert_eq!(s.war_log.len(), 1, "war resolved into the log by the round cap at the latest");
         assert!(s.hubs[0].war_with < 0 && s.hubs[1].war_with < 0, "war state cleared");
         assert!(s.war_log[0].levies_total > 0.0, "levies recorded");
+    }
+
+    #[test]
+    fn every_war_terminates_within_the_round_cap() {
+        // §1.4/rule 22's discipline applied to war: an open war must never become the
+        // permanent state of a city, so the round cap is the guarantee of last resort
+        // even when neither side ever decisively wins, exhausts, or grows weary.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut s = sim(vec![
+            hub(0, 10.0, 10.0, 10000.0, vec![100.0], 0),
+            hub(1, 14.0, 10.0, 9000.0, vec![90.0], 0),
+        ], goods);
+        for i in 0..2u32 { let mut h = house_at(i, vec![0], 2); h.wealth = 5000.0; s.houses.push(h); }
+        s.hubs[0].treasury = 5000.0; s.hubs[1].treasury = 5000.0;
+        s.hubs[0].mood = 0.9; s.hubs[1].mood = 0.9;
+        s.hubs[0].war_with = 1; s.hubs[1].war_with = 0;
+        s.wars.push(War { a: 0, b: 1, start_tick: 0, chest_a: 0.0, chest_b: 0.0,
+            levies: 0.0, cargo_lost: 0, cause: "test".into(), goal: WAR_GOAL_PLUNDER,
+            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1 });
+        for yr in 1..=(WAR_ROUND_CAP as u32 + 2) {
+            s.tick = yr * 365;
+            s.update_wars(yr);
+            assert!(s.wars.iter().all(|w| w.round <= WAR_ROUND_CAP),
+                "no war ever exceeds the round cap");
+            if s.wars.is_empty() { break; }
+        }
+        assert!(s.wars.is_empty(), "the war ended by the round cap at the latest");
+        assert_eq!(s.war_log.len(), 1, "its resolution is recorded");
     }
 
     #[test]
@@ -3324,4 +3358,115 @@
         assert!(s.houses[0].standing > s.houses[1].standing,
             "an otherwise-identical house holding a province must stand higher: {} vs {}",
             s.houses[0].standing, s.houses[1].standing);
+    }
+
+    /// CITY_PROVINCE_WAR_PLAN.md §2.5 · the whole exploitation loop: calibration
+    /// lands mean exploitation at ~1.0 on day one (by construction), sustained
+    /// overexploitation accumulates depletion and measurably erodes potential, and
+    /// easing off lets it heal back down.
+    #[test]
+    fn province_goods_exploitation_tracks_pressure_and_depletes() {
+        let goods = vec![good("timber", 0, 0, 1.0, 0.5, false)];
+        let hubs = vec![hub(0, 0.0, 0.0, 5000.0, vec![50.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.hub_province = vec![0];
+        s.prov_cap = vec![2000.0];
+        s.prov_forest = vec![0.5];
+        s.prov_arable = vec![0.2];
+        s.prov_pasture = vec![0.1];
+        s.prov_good_belt = vec![0.8]; // 1 province × 1 good ("timber" → forest-scaled)
+        s.prov_good_depletion = vec![0.0];
+        s.calibrate_province_good_yield();
+        assert!(s.prov_good_yield_scale.is_finite() && s.prov_good_yield_scale > 0.0,
+            "yield scale must calibrate to a finite positive number, got {}", s.prov_good_yield_scale);
+
+        let potential0 = s.province_good_potential(0, 0);
+        let actual0 = s.province_good_actual()[0];
+        assert!(potential0.is_finite() && potential0 > 0.0, "potential must be finite and positive");
+        assert!((actual0 - 50.0).abs() < 1e-3, "actual must equal the hub's own production, got {actual0}");
+        let exploit0 = actual0 / potential0;
+        assert!((exploit0 - 1.0).abs() < 0.05,
+            "self-calibration must land ~1.0 exploitation at campaign start, got {exploit0}");
+
+        // Sustained overexploitation: production far above what calibration expected.
+        s.hubs[0].production[0] = 400.0;
+        for yr in 0..10 { s.update_province_goods_pressure(yr); }
+        assert!(s.prov_good_depletion[0] > 0.0, "sustained overexploitation must accumulate depletion");
+        let potential_after = s.province_good_potential(0, 0);
+        assert!(potential_after < potential0,
+            "depletion must erode potential: {potential_after} should be < {potential0}");
+
+        // Ease off — depletion should start healing, not stay frozen at its peak.
+        s.hubs[0].production[0] = 5.0;
+        let d_before = s.prov_good_depletion[0];
+        for yr in 10..20 { s.update_province_goods_pressure(yr); }
+        assert!(s.prov_good_depletion[0] < d_before,
+            "easing pressure must let depletion heal: {} should be < {d_before}", s.prov_good_depletion[0]);
+    }
+
+    // ── §3.2 · city tiers (mirrors the house-tier tests directly above in spirit) ──
+
+    /// A city with overwhelmingly more population, trade wealth and treasury than
+    /// its rivals must end up in the top band — deliberately coarse (the cutoffs are
+    /// re-derived every month), but a 60x-more-prominent city landing in Tier 4
+    /// would mean the formula is broken, not just imprecise.
+    #[test]
+    fn city_tiers_rank_the_most_prominent_city_highest() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut hubs: Vec<TickHub> =
+            (0..6u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 8000.0, vec![8000.0], 0)).collect();
+        hubs[0].population = 500_000.0;
+        hubs[0].trade_wealth = 50_000.0;
+        hubs[0].treasury = 20_000.0;
+        let mut s = sim(hubs, goods);
+        s.assign_city_tiers();
+        assert_eq!(s.hubs[0].tier, 1, "the overwhelmingly most prominent city must be Tier 1");
+        assert!(s.hubs[0].standing > s.hubs[1].standing, "standing must track population/wealth/treasury");
+        for h in s.hubs.iter().skip(1) {
+            assert!((1..=4).contains(&h.tier), "city left untiered: tier={}", h.tier);
+        }
+    }
+
+    /// Tier 1 has an absolute floor, not just a percentile rank: on a young,
+    /// undifferentiated world nobody should clear it, so Tier 1 is EMPTY.
+    #[test]
+    fn city_tier_one_is_empty_on_an_undifferentiated_world() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs: Vec<TickHub> = (0..5u32)
+            .map(|i| hub(i, (i as f32) * 4.0, 0.0, 8000.0 + i as f32 * 40.0, vec![8000.0], 0))
+            .collect();
+        let mut s = sim(hubs, goods);
+        s.assign_city_tiers();
+        assert!(s.hubs.iter().all(|h| h.tier != 1), "Tier 1 should be empty on a flat world");
+    }
+
+    /// Hysteresis: calling `assign_city_tiers` again with unchanged state must
+    /// reproduce the same tiers, not relitigate every boundary case.
+    #[test]
+    fn city_tier_assignment_is_stable_when_nothing_changed() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs: Vec<TickHub> = (0..7u32)
+            .map(|i| hub(i, (i as f32) * 4.0, 0.0, 3000.0 + i as f32 * 5000.0, vec![8000.0], 0))
+            .collect();
+        let mut s = sim(hubs, goods);
+        for (i, h) in s.hubs.iter_mut().enumerate() {
+            h.trade_wealth = i as f32 * 900.0;
+            h.treasury = i as f32 * 300.0;
+        }
+        s.assign_city_tiers();
+        let first: Vec<u8> = s.hubs.iter().map(|h| h.tier).collect();
+        s.assign_city_tiers();
+        let second: Vec<u8> = s.hubs.iter().map(|h| h.tier).collect();
+        assert_eq!(first, second, "tiers must not change with no underlying change");
+    }
+
+    /// An estate is never itself a rankable "city" — it must stay untiered.
+    #[test]
+    fn an_estate_is_never_tiered() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs: Vec<TickHub> = (0..3u32).map(|i| hub(i, (i as f32) * 4.0, 0.0, 8000.0, vec![8000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.hubs[2].is_estate = true;
+        s.assign_city_tiers();
+        assert_eq!(s.hubs[2].tier, 0, "an estate must never be tiered");
     }

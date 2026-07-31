@@ -761,6 +761,22 @@ function ShocksTab({ wars, crashes, chronicle }:
           <div style={{ display: "flex", gap: 10, fontSize: 9, color: "#8aa8c8", marginTop: 2 }}>
             <span title="War chest spent by each side">chest {fmtk(w.chest_a)} / {fmtk(w.chest_b)}</span>
             <span style={{ color: "#e0b080" }} title="Total levied from resident houses">levied {fmtk(w.levies)}</span>
+            <span style={{ flex: 1 }} />
+            <span style={{ color: "#c8b078" }}>{w.goal_label}</span>
+            <span title="Quarterly rounds fought">round {w.round}</span>
+          </div>
+          {/* §3.4a · the war score — a bidirectional accumulator, positive favours the
+              first-named side. A quiet meter, the same "show it while it's live" rule
+              the crisis engine's round log already follows. */}
+          <div style={{ position: "relative", height: 5, background: "#1a2230", borderRadius: 3, marginTop: 4, overflow: "hidden" }}
+            title={`War score ${w.score.toFixed(0)} (±100 ends it outright)`}>
+            <div style={{
+              position: "absolute", top: 0, bottom: 0,
+              left: w.score >= 0 ? `${50 - Math.min(100, Math.abs(w.score)) / 2}%` : "50%",
+              width: `${Math.min(100, Math.abs(w.score)) / 2}%`,
+              background: w.score >= 0 ? "#7fb0e0" : "#e08a7f",
+            }} />
+            <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: "#3a4658" }} />
           </div>
         </div>
       ))}

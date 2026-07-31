@@ -47,9 +47,17 @@ found the partition did not do what its own header claimed. Fixed, each with a t
   selection is two-way with the Provinces browser and a Borders row walks to the
   neighbour. Hit-testing reads the client-side raster — no new command, no IPC.
 
+> **Note on enclaves.** §4.3 below and the "surviving enclaves" line just under this
+> note describe Phase 1 as shipped. `CITY_PROVINCE_WAR_PLAN.md` §2.1 REVERSES that
+> decision on the maintainer's explicit judgement: a province enclosed by a single
+> neighbour is now merged into it (an enclave read as a generation artefact, not
+> history), unless the province is genuinely its own island. Read §4.3 as the
+> original Phase 1 rationale, not the current behaviour.
+
 **Implemented so far** (branch `claude/settlement-generation-analysis-wwr0ox`):
 - **Phase 1** — `sim/shared/provinces.rs` cost-flood partition (coasts/islands +
-  watershed divides + trunk-river crossings + border noise + surviving enclaves);
+  watershed divides + trunk-river crossings + border noise; enclaves survived until
+  `CITY_PROVINCE_WAR_PLAN.md` §2.1 reversed that — see the note above);
   `cultures::province_name` (own variable-length names); `sim_generate_provinces`
   (runs after settlements, persists `metadata["provinces"]`) + `get_provinces`.
   Frontend: Province types, bridge, `worldStore`, **ProvincePanel (Variant B)** with
@@ -203,8 +211,10 @@ Substrate: the hydrology pass already yields per-cell **`flow_dir`** (`FLOW_SEA`
    Voronoi/gradient line — see §4.3 for why this matters and how enclaves arise.
 5. **De-sliver.** Merge sub-threshold provinces into the neighbour they share the most
    border with; deterministic tie-break by lowest id. Merging is by **shared-border
-   length, not simple connectivity**, so detached pockets are *not* forcibly
-   reattached — genuine **enclaves/exclaves** survive (§4.3).
+   length, not simple connectivity**. A later pass, added by `CITY_PROVINCE_WAR_PLAN.md`
+   §2.1 and run after the border-snap stage (CLAUDE.md §8.10), additionally merges any
+   province left bordering exactly one neighbour — an enclave — **unless it is its
+   own island** (§4.3, reversing this phase's original "enclaves survive" decision).
 6. **Aggregate** static stats from the cells (§3.1); give the province **its own name**
    (§4.1).
 7. **Extract borders** — cells whose neighbour differs in `province_id` are border
@@ -281,13 +291,15 @@ Italian *comuni*):
 - **Border noise (§4-step 4).** A small deterministic noise term on the crossing cost
   makes the divide **wobble** a cell or two either side of the exact gradient, killing
   any residual straight/Voronoi feel.
-- **Enclaves & exclaves.** Provinces are **not required to be simply-connected.** A
-  pocket that is cheapest-reached from a *distant* seat (an upland basin that drains
-  the "wrong" way, a valley town's hinterland across a trunk river) is left attached to
-  that seat, producing genuine enclaves — the *Büsingen / Baarle / Llívia / Campione /
-  Kaliningrad* pattern. A rare explicit pass can also gift a small detached pocket to a
-  province whose **culture or drainage** dominates it though it sits inside a neighbour.
-  Kept **rare and flavourful**, deterministic, wrap-aware.
+- **Enclaves & exclaves — REVERSED, see `CITY_PROVINCE_WAR_PLAN.md` §2.1/§5.1.**
+  Phase 1 originally left provinces free to be non-simply-connected: a pocket
+  cheapest-reached from a distant seat (an upland basin draining the "wrong" way, a
+  valley town's hinterland across a trunk river) stayed attached to that seat,
+  producing genuine enclaves — the *Büsingen / Baarle / Llívia / Campione /
+  Kaliningrad* pattern. On the maintainer's explicit judgement this now reads as a
+  generation artefact rather than history: a post-snap pass merges any province
+  bordering exactly one neighbour into it, **unless the province is its own
+  island** — a genuinely separate landmass still stands alone.
 
 ---
 
@@ -503,7 +515,10 @@ laid in Phase 1–2; simulation later. Cores/claims optional.
 - Culture is **migration-driven** and may differ from the founding culture.
 - **No province owner** yet (political control fully deferred).
 - Provinces carry a **short history** + a **real-world analog** blurb (§4.2).
-- Borders must be **organic (noise) with occasional enclaves/exclaves** (§4.3).
+- Borders must be **organic (noise)** (§4.3). Occasional enclaves/exclaves were a
+  locked Phase 1 decision; `CITY_PROVINCE_WAR_PLAN.md` §2.1 reversed it (see the
+  note at the top of §2) — an enclave now merges into its sole neighbour unless the
+  province is its own island.
 - Provinces have **their own variable-length names** (§4.1).
 
 **Open:**

@@ -103,12 +103,15 @@ pub fn run() {
             sim_commands::get_province_layer,
             sim_commands::campaign_province_state,
             sim_commands::campaign_province_detail,
+            sim_commands::get_province_terrain_crop,
             // Province LAND state (FIX_PLAN B1) + the holder's control verbs.
             campaign_commands::campaign_province_land,
             campaign_commands::campaign_province_land_all,
             campaign_commands::campaign_set_province_tax,
             campaign_commands::campaign_start_province_work,
             campaign_commands::campaign_cancel_province_work,
+            campaign_commands::campaign_province_goods,
+            campaign_commands::compute_states,
             // House Dossier: the stability gauges and the feud board.
             campaign_commands::campaign_house_stability,
             campaign_commands::campaign_get_feuds,

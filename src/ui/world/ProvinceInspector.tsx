@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import {
-  campaignCancelProvinceWork, campaignProvinceDetail, campaignProvinceLand,
+  campaignCancelProvinceWork, campaignProvinceDetail, campaignProvinceGoods, campaignProvinceLand,
   campaignProvinceState, campaignSetProvinceTax, campaignStartProvinceWork,
+  getProvinceTerrainCrop,
 } from "@bridge";
 import { koppenName } from "@ui/world/climate";
 import {
@@ -15,7 +16,7 @@ import {
   provinceHistory, stars,
 } from "@ui/world/provinceStory";
 import type {
-  Province, ProvinceDetail, ProvinceLand, ProvinceLive, PSettlement,
+  Province, ProvinceDetail, ProvinceGoodExploit, ProvinceLand, ProvinceLive, ProvinceTerrainCrop, PSettlement,
 } from "@types";
 
 /** 🏞 Province Inspector — the dossier for ONE province, opened by clicking the map
@@ -56,11 +57,14 @@ export function ProvinceInspector() {
   const provinces = useWorldStore((s) => s.provinces);
   const settlements = useWorldStore((s) => s.settlements);
   const provinceRaster = useWorldStore((s) => s.provinceRaster);
+  const worldRivers = useWorldStore((s) => s.rivers);
   const meta = useWorldStore((s) => s.meta);
 
   const [detail, setDetail] = useState<ProvinceDetail | null>(null);
   const [live, setLive] = useState<ProvinceLive | null>(null);
   const [land, setLand] = useState<ProvinceLand | null>(null);
+  const [terrain, setTerrain] = useState<ProvinceTerrainCrop | null>(null);
+  const [exploit, setExploit] = useState<ProvinceGoodExploit[]>([]);
   const [tab, setTab] = useState<Tab>("land");
   const [plates, setPlates] = useState<PlateKey[]>(DEFAULT_PLATES);
   /** Index into `land.history`; null = today. The slider is the whole point of the
@@ -78,7 +82,7 @@ export function ProvinceInspector() {
 
   // Live campaign join (settlements + buildings + the province's own rural/urban/land).
   useEffect(() => {
-    if (!open || !p) { setDetail(null); setLive(null); setLand(null); return; }
+    if (!open || !p) { setDetail(null); setLive(null); setLand(null); setExploit([]); return; }
     let stale = false;
     campaignProvinceDetail(p.id)
       .then((d) => { if (!stale) setDetail(d); })
@@ -89,8 +93,25 @@ export function ProvinceInspector() {
     campaignProvinceLand(p.id)
       .then((l) => { if (!stale) setLand(l); })
       .catch(() => { if (!stale) setLand(null); });
+    // §2.5 · the live exploitation reading, replacing the frozen "which goods +
+    // quality" list once a campaign is actually producing something here.
+    campaignProvinceGoods(p.id)
+      .then((g) => { if (!stale) setExploit(g); })
+      .catch(() => { if (!stale) setExploit([]); });
     return () => { stale = true; };
   }, [open, p?.id, provinces, reload]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The survey plate's real terrain crop (§2.3) — independent of the campaign join
+  // above (world geography, not campaign state), so it fetches on province change
+  // alone and doesn't need to re-run on `reload`.
+  useEffect(() => {
+    if (!open || !p) { setTerrain(null); return; }
+    let stale = false;
+    getProvinceTerrainCrop(p.id)
+      .then((t) => { if (!stale) setTerrain(t); })
+      .catch(() => { if (!stale) setTerrain(null); });
+    return () => { stale = true; };
+  }, [open, p?.id]);
 
   // A different province resets the scrub — a year index means nothing across provinces.
   useEffect(() => { setScrub(null); }, [p?.id]);
@@ -178,6 +199,8 @@ export function ProvinceInspector() {
           plates={plates}
           width={280}
           riverCells={p.river_cells}
+          terrain={terrain}
+          rivers={worldRivers}
         />
         <div style={{ marginTop: 5 }}>
           <PlateToggles plates={plates} setPlates={setPlates}
@@ -292,7 +315,26 @@ export function ProvinceInspector() {
             )}
 
             <Section title="Goods" />
-            {p.goods.length === 0 ? (
+            {land && exploit.length > 0 ? (
+              // §2.5 · LIVE exploitation — only what is actually produced here,
+              // no unexploited-opportunity view. Replaces the frozen quality/rank
+              // shortlist the moment a campaign is actually growing something.
+              exploit.map((g) => (
+                <div key={g.good} style={{ marginBottom: 5 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ width: 132 }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
+                    <span style={{ opacity: 0.7, fontSize: 12 }}>{fmt(g.actual)}/yr</span>
+                    <span style={{ flex: 1 }} />
+                    <span style={{ opacity: 0.6, fontSize: 12 }} title="share leaving the province via trade">
+                      {Math.round(g.market_share * 100)}% to market
+                    </span>
+                  </div>
+                  <Meter frac={Math.min(1, g.exploitation)} warn={g.exploitation > 1}
+                    label={`${Math.round(g.exploitation * 100)}% worked` +
+                      (g.depletion > 0.02 ? ` · ${Math.round(g.depletion * 100)}% depleted` : "")} />
+                </div>
+              ))
+            ) : p.goods.length === 0 ? (
               <div style={{ opacity: 0.5 }}>no notable produce</div>
             ) : p.goods.map((g) => (
               <div key={g.good} style={{ display: "flex", gap: 8, alignItems: "center", padding: "1px 0" }}>

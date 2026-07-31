@@ -504,6 +504,8 @@ pub fn campaign_get_wars(db: State<'_, WorldDb>) -> Result<WarsPayload, String> 
         start_year: w.start_tick / TICKS_PER_YEAR,
         years: sim.tick.saturating_sub(w.start_tick) / TICKS_PER_YEAR,
         chest_a: w.chest_a, chest_b: w.chest_b, levies: w.levies, cause: w.cause.clone(),
+        score: w.score, round: w.round,
+        goal_label: crate::sim::tick::war_goal_label(w.goal).to_string(),
     }).collect();
     let mut log = sim.war_log.clone();
     log.reverse();

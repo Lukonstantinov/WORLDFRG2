@@ -113,6 +113,21 @@ pub struct EconScorecard {
     pub crisis_year_share: f32,
     /// Mean real wage proxy: grain purchasable per unit of commoner wealth.
     pub real_wage_index: f32,
+    /// CV of land-use pressure (`prov_rural / prov_cap`) across provinces, final
+    /// year. Workstream 2.5 has not landed yet, so there is no true potential/
+    /// actual `exploitation` ratio per good to report; this is the best available
+    /// STAND-IN — how unevenly the countryside is worked — and Step 0's job is
+    /// only to make it non-zero. Promote/replace once 2.5 ships the real ratio.
+    pub prov_pressure_cv: f32,
+    /// CV of each province's share of total hub production value, final year. A
+    /// stand-in for 2.5's market ↔ local split and 3.x's regional market share —
+    /// how concentrated production is by region rather than by good.
+    pub prov_output_cv: f32,
+    /// Wars started (existing DLC 3.5 rival-polis economic war) per century over
+    /// the run, from `war_log`. A baseline reading of the CURRENT war mechanism,
+    /// ahead of the abstract state-war system §3.4 will add — 3.4f's own
+    /// diagnostic measures that system once it exists.
+    pub wars_per_century: f32,
 }
 
 // ── Statistics helpers ──────────────────────────────────────────────────────
@@ -189,8 +204,10 @@ fn top_share(values: &[f32], frac: f32) -> f32 {
 // ── The reference world ─────────────────────────────────────────────────────
 
 /// A deliberately ordinary world: 30 cities on a grid, six goods, ten merchant
-/// houses, free land to the south, and a seeded province layer behind the cities
-/// so urbanisation is measurable.
+/// houses, free land to the south, and a HETEROGENEOUS province layer behind the
+/// cities — five provinces of distinct geography (fertile lowland, wooded hills,
+/// arid steppe, temperate mix, marginal upland) — so urbanisation, exploitation
+/// and regional dispersion are all measurable, not just levels.
 ///
 /// It mirrors the world used by `simulate_decades_reports_dynamics` on purpose —
 /// the fidelity scorecard should describe the same economy the dynamics test
@@ -248,17 +265,64 @@ fn reference_world() -> CampaignSim {
     // this the urbanisation metric would read 100%, which is the single most
     // unhistorical number this model could print. Seeding it CORRECTLY is what
     // makes the measured drift away from it meaningful.
+    //
+    // Step 0 of CITY_PROVINCE_WAR_PLAN.md: this layer used to be UNIFORM — every
+    // province identical, seats on a straight line — which bounds the land pass
+    // but makes it impossible to measure DISPERSION (why one province is rich and
+    // its neighbour poor). Five provinces now carry distinct geography, each
+    // matched to one row of the hub grid (`i / 6`) so a province's seat sits near
+    // its own member cities instead of anywhere on the map.
     let nprov = 5usize;
     let urban_seed: f32 = s.hubs.iter().map(|h| h.population).sum();
     let rural_each = (urban_seed * 9.0 / nprov as f32).max(1.0);
-    s.prov_cap = vec![rural_each * 1.6; nprov];
-    s.prov_rural = vec![rural_each; nprov];
+    // [fertile river lowland · wooded hills · arid steppe · temperate mix · marginal upland]
+    let cap_mult: [f32; 5] = [2.6, 1.5, 0.6, 1.8, 1.5];
+    let fill_frac: [f32; 5] = [0.75, 0.55, 0.35, 0.60, 0.30];
+    let forest: [f32; 5] = [0.15, 0.70, 0.05, 0.40, 0.25];
+    let arable: [f32; 5] = [0.55, 0.12, 0.10, 0.30, 0.06];
+    let soil: [f32; 5] = [0.85, 0.65, 0.35, 0.60, 0.32];
+    let irrigated: [f32; 5] = [0.10, 0.0, 0.0, 0.05, 0.0];
+    let tenure: [[f32; 4]; 5] = [
+        [0.24, 0.16, 0.09, 0.51],
+        [0.16, 0.08, 0.09, 0.67],
+        [0.10, 0.04, 0.06, 0.80],
+        [0.18, 0.10, 0.09, 0.63],
+        [0.12, 0.05, 0.07, 0.76],
+    ];
+    let seats: [[f32; 2]; 5] = [
+        [20.0, 2.0],
+        [8.0, 11.0],
+        [35.0, 19.0],
+        [15.0, 29.0],
+        [30.0, 38.0],
+    ];
+    s.prov_cap = (0..nprov).map(|i| rural_each * cap_mult[i]).collect();
+    s.prov_rural = (0..nprov).map(|i| rural_each * cap_mult[i] * fill_frac[i]).collect();
     s.prov_culture = (0..nprov).map(|i| format!("Culture{i}")).collect();
-    s.prov_seat = (0..nprov).map(|i| [(i as f32) * 11.0, 20.0]).collect();
+    s.prov_seat = seats.to_vec();
     s.prov_net_mig = vec![0.0; nprov];
-    s.hub_province = (0..30).map(|i| (i % nprov) as i32).collect();
-    s.hub_culture = (0..30).map(|i| format!("Culture{}", i % nprov)).collect();
+    s.hub_province = (0..30).map(|i| (i / 6) as i32).collect();
+    s.hub_culture = (0..30).map(|i| format!("Culture{}", i / 6)).collect();
     s.hub_minorities = vec![Vec::new(); 30];
+    // Land-use/soil/tenure state `province_land_pass` indexes directly every year —
+    // must be pre-sized to `nprov` and heterogeneous, or `ensure_province_land`'s
+    // fallback (keyed only off `prov_cap`) would correlate forest and soil through a
+    // single quality scalar instead of varying independently the way real geography
+    // does (a fertile plain is not simply "less of the same" than a wooded hill).
+    s.prov_forest = forest.to_vec();
+    s.prov_arable = arable.to_vec();
+    s.prov_pasture = (0..nprov)
+        .map(|i| ((1.0 - forest[i] - arable[i]).max(0.0) * 0.55).clamp(0.0, 1.0))
+        .collect();
+    s.prov_irrigated = irrigated.to_vec();
+    s.prov_soil = soil.to_vec();
+    s.prov_tenure = tenure.to_vec();
+    s.prov_tax = vec![0.12; nprov];
+    s.prov_arrears = vec![0.0; nprov];
+    s.prov_unrest = vec![0.0; nprov];
+    s.prov_surplus = vec![0.0; nprov];
+    s.prov_revenue = vec![0.0; nprov];
+    s.prov_holder = vec![-1; nprov];
 
     calibrate_like_campaign_start(&mut s);
     s.rebuild_routes();
@@ -461,6 +525,29 @@ fn measure(s: &mut CampaignSim) -> EconScorecard {
         .collect();
     card.real_wage_index = mean(&wages);
 
+    // ── Regional dispersion (Step 0 — see the fields' own docs) ─────────────
+    let pressures: Vec<f32> = (0..s.prov_cap.len())
+        .map(|p| (s.prov_rural[p].max(0.0) / s.prov_cap[p].max(1.0)))
+        .filter(|x| x.is_finite())
+        .collect();
+    card.prov_pressure_cv = cv(&pressures);
+
+    if !s.hub_province.is_empty() {
+        let np = s.prov_cap.len().max(
+            s.hub_province.iter().copied().filter(|&p| p >= 0).map(|p| p as usize + 1).max().unwrap_or(0),
+        );
+        let mut prov_output = vec![0.0f32; np];
+        for h in 0..s.hubs.len() {
+            if s.hubs[h].is_estate || s.hubs[h].abandoned { continue; }
+            let pid = s.hub_province.get(h).copied().unwrap_or(-1);
+            if pid < 0 || pid as usize >= np { continue; }
+            prov_output[pid as usize] += s.hubs[h].production.iter().sum::<f32>();
+        }
+        card.prov_output_cv = cv(&prov_output);
+    }
+
+    card.wars_per_century = s.war_log.len() as f32 / centuries;
+
     card
 }
 
@@ -499,6 +586,13 @@ fn print_scorecard(c: &EconScorecard) {
              c.crisis_year_share);
     println!("  real wage index (grain-eq)      {:>9.3}     trend ≈ flat        Allen",
              c.real_wage_index);
+    println!("  ── Step 0 · regional dispersion (province layer now heterogeneous) ──");
+    println!("  province land-pressure CV       {:>9.3}     (exploitation stand-in, 2.5 pending)",
+             c.prov_pressure_cv);
+    println!("  province output-share CV        {:>9.3}     (market-share stand-in, 2.5 pending)",
+             c.prov_output_cv);
+    println!("  wars started / century          {:>9.2}     (current DLC 3.5 mechanism, 3.4 pending)",
+             c.wars_per_century);
     println!("════════════════════════════════════════════════════════════════════════════");
     println!("  Printed metrics outside their band are FINDINGS, not failures — see the");
     println!("  module docs. Promote one to an assertion when the model earns it.");
@@ -520,6 +614,17 @@ fn econ_fidelity_scorecard() {
     assert!(card.temporal_cv.is_finite(), "temporal CV not finite");
     assert!(card.zipf_slope.is_finite(), "zipf slope not finite");
     assert!(card.wealth_gini.is_finite(), "wealth gini not finite");
+    assert!(card.prov_pressure_cv.is_finite(), "province pressure CV not finite");
+    assert!(card.prov_output_cv.is_finite(), "province output CV not finite");
+    assert!(card.wars_per_century.is_finite(), "wars/century not finite");
+    // The whole point of Step 0: a heterogeneous layer must actually show
+    // dispersion, or the seeding change did nothing.
+    assert!(
+        card.prov_pressure_cv > 1e-3,
+        "provinces show no land-pressure dispersion (CV = {:.4}) — the layer is \
+         still effectively uniform",
+        card.prov_pressure_cv
+    );
 
     // ── Asserted structure ──────────────────────────────────────────────────
     // NOT asserted. On a correctly calibrated world the gradient measures ~0 —
@@ -633,6 +738,9 @@ fn econ_scorecard_is_deterministic() {
     same!(wealth_gini);
     same!(top10_share);
     same!(real_wage_index);
+    same!(prov_pressure_cv);
+    same!(prov_output_cv);
+    same!(wars_per_century);
 }
 
 /// Sanity check on the statistics themselves. A scorecard whose own maths is
@@ -947,6 +1055,95 @@ fn econ_measure_foreign_hand_conjunction() {
     println!();
     // Diagnostic only — it must not fail the build, per §2.5's printed-metric rule.
     assert!(samples > 0, "the run produced no posted kin at all to measure");
+}
+
+/// `CITY_PROVINCE_WAR_PLAN.md` §3.4f · "measure war frequency BEFORE tuning anything" —
+/// the same precedent Phase 4.4 set for the foreign hand. This measures the mechanism as
+/// it exists TODAY (DLC 3.5's `update_wars`/`maybe_declare_war`, a flat 10% yearly chance
+/// between two rival-council seats in the same connectivity component) — the baseline
+/// 3.4a–e's "score + gated preconditions" redesign will be judged against. §5.8: a low
+/// global war count may just mean most cities have no reachable rival, so this also
+/// reports the share of war-eligible cities that are structurally isolated (alone in
+/// their own connectivity component) — a low war count from THAT cause is not a broken
+/// trigger and must not be "fixed" by loosening the trigger itself.
+#[test]
+#[ignore]
+fn econ_measure_war_frequency() {
+    let mut s = reference_world();
+    // 150y, not 300 — war-driven house turnover keeps growing `s.houses`, and several
+    // per-tick passes scan it, so cost per year rises through the run; 150y already
+    // gives a solid per-century rate (the outpost diagnostic uses the same window).
+    let years = 150u32;
+    // A `War` carries no id of its own; (a, b, start_tick) is the only stable identity,
+    // so it doubles as the key for "have we already counted this one as started" and
+    // for looking its goal/start-year back up once it disappears from `s.wars` (ended).
+    let mut started: std::collections::HashSet<(u32, u32, u32)> = std::collections::HashSet::new();
+    let mut goal_of: std::collections::HashMap<(u32, u32, u32), (u8, u32)> = std::collections::HashMap::new();
+    let mut prev_keys: std::collections::HashSet<(u32, u32, u32)> = std::collections::HashSet::new();
+    let mut wars_started = 0u32;
+    let mut durations: Vec<u32> = Vec::new();
+    let mut outcome_counts = [0u32; 4]; // plunder, tribute, trade rights, annex
+    let mut cause_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+
+    for _ in 0..years {
+        s.advance(TICKS_PER_YEAR);
+        // The year label AFTER this advance — `s.tick / TICKS_PER_YEAR`, not the loop
+        // index, since a war that resolves during THIS call already reflects the tick
+        // this advance just reached (using the loop index instead undercounts every
+        // duration by exactly one year).
+        let cur_year = s.tick / TICKS_PER_YEAR;
+        let cur_keys: std::collections::HashSet<(u32, u32, u32)> =
+            s.wars.iter().map(|w| (w.a, w.b, w.start_tick)).collect();
+        for w in &s.wars {
+            let key = (w.a, w.b, w.start_tick);
+            if started.insert(key) {
+                wars_started += 1;
+                goal_of.insert(key, (w.goal, w.start_tick / TICKS_PER_YEAR));
+                *cause_counts.entry(w.cause.clone()).or_insert(0) += 1;
+            }
+        }
+        for key in prev_keys.difference(&cur_keys) {
+            if let Some(&(goal, start_year)) = goal_of.get(key) {
+                durations.push(cur_year.saturating_sub(start_year));
+                outcome_counts[goal.min(3) as usize] += 1;
+            }
+        }
+        prev_keys = cur_keys;
+    }
+
+    // §5.8 · war-eligible seats (the same filter `maybe_declare_war` itself applies)
+    // and how many of them share NO connectivity component with any other seat.
+    let seats: Vec<usize> = (0..s.hubs.len())
+        .filter(|&h| !s.hubs[h].is_estate && s.hubs[h].council_house >= 0 && s.hubs[h].population > 1.0)
+        .collect();
+    let isolated = seats.iter()
+        .filter(|&&h| !seats.iter().any(|&o| o != h && s.hubs[o].component == s.hubs[h].component))
+        .count();
+
+    let centuries = years as f64 / 100.0;
+    let mean_duration = if durations.is_empty() { 0.0 }
+        else { durations.iter().sum::<u32>() as f64 / durations.len() as f64 };
+
+    println!();
+    println!("═══ 3.4f · war frequency ({years}-year reference world, PRE-3.4a–e baseline) ═══");
+    println!("  wars started                            {:>10}", wars_started);
+    println!("  ⇒ wars / century                         {:>10.2}", wars_started as f64 / centuries);
+    println!("  wars resolved in the window              {:>10}", durations.len());
+    println!("  mean duration                            {:>10.1} yr", mean_duration);
+    println!("  outcome mix   plunder {:>4}   tribute {:>4}   trade-rights {:>4}   annex {:>4}",
+        outcome_counts[0], outcome_counts[1], outcome_counts[2], outcome_counts[3]);
+    let mut causes: Vec<(&String, &u32)> = cause_counts.iter().collect();
+    causes.sort_by(|a, b| b.1.cmp(a.1));
+    print!("  causes       ");
+    for (c, n) in &causes { print!(" {c} {n} "); }
+    println!();
+    println!("  war-eligible cities (a council seat)     {:>10}", seats.len());
+    println!("  structurally isolated (own component)    {:>10}   {:>5.1}%",
+        isolated, 100.0 * isolated as f64 / seats.len().max(1) as f64);
+    println!("═══════════════════════════════════════════════════════════════════════");
+    println!();
+    // Diagnostic only — it must not fail the build, per §2.5's printed-metric rule.
+    assert!(!seats.is_empty(), "the run produced no war-eligible cities at all");
 }
 
 /// Player-reported: "no outposts are created" over the course of ordinary play.

@@ -64,6 +64,114 @@ impl CampaignSim {
         self.update_records(yr.saturating_sub(1), trade_total);
     }
 
+    /// CITY_PROVINCE_WAR_PLAN.md §3.2 · city tiers, monthly, mirroring
+    /// `assign_house_tiers` one for one (percentile rank + hysteresis + an absolute
+    /// Tier-1 floor, so a young world has an EMPTY Tier 1 — a tier that's always
+    /// occupied carries no information). Four axes (§1.3): population, trade wealth,
+    /// treasury, territory administered (rural population under provinces THIS city
+    /// holds — `prov_holder`, the city case; a house-held province, §5.9, counts
+    /// toward the HOUSE not the city), and the ruling house's own standing (already
+    /// 0..1 from `assign_house_tiers`, so it needs no rank-norm of its own — this is
+    /// why 3.2 must run AFTER the house-tier refresh). **Query-side only at this
+    /// step**: nothing downstream reads `hub.tier`/`hub.standing` yet, so this is
+    /// provably bit-identical to the dynamics test, exactly as house tiers shipped
+    /// (§5.6 of the plan: 3.3 is where that guarantee ends, not before).
+    pub(crate) fn assign_city_tiers(&mut self) {
+        let tick = self.tick;
+        let live: Vec<usize> = (0..self.hubs.len())
+            .filter(|&h| !self.hubs[h].is_estate && !self.hubs[h].abandoned)
+            .collect();
+        let n = live.len();
+        if n == 0 { return; }
+
+        // Territory, precomputed once (O(provinces), not O(cities·provinces)).
+        let mut territory = vec![0.0f32; self.hubs.len()];
+        for p in 0..self.prov_holder.len() {
+            let h = self.prov_holder[p];
+            if h >= 0 {
+                territory[h as usize] += self.prov_rural.get(p).copied().unwrap_or(0.0);
+            }
+        }
+
+        let pops: Vec<f32> = live.iter().map(|&h| self.hubs[h].population.max(0.0)).collect();
+        let trades: Vec<f32> = live.iter()
+            .map(|&h| (self.hubs[h].grain_wealth + self.hubs[h].trade_wealth).max(0.0)).collect();
+        let treasuries: Vec<f32> = live.iter().map(|&h| self.hubs[h].treasury.max(0.0)).collect();
+        let territories: Vec<f32> = live.iter().map(|&h| territory[h]).collect();
+        let pr = rank_norm(&pops);
+        let tr = rank_norm(&trades);
+        let xr = rank_norm(&treasuries);
+        let gr = rank_norm(&territories);
+
+        let mut standings = vec![0.0f32; n];
+        for (k, &h) in live.iter().enumerate() {
+            // The office as a person (§3.1): captor outranks a merely-dominant council.
+            let leader_house = if self.hubs[h].captor_house >= 0 { self.hubs[h].captor_house }
+                else { self.hubs[h].council_house };
+            let leader_standing = leader_house.try_into().ok()
+                .and_then(|hi: usize| self.houses.get(hi))
+                .filter(|hh| !hh.defunct)
+                .map(|hh| hh.standing)
+                .unwrap_or(0.0);
+            let s = 0.20 * pr[k] + 0.15 * tr[k] + 0.25 * xr[k] + 0.20 * gr[k] + 0.20 * leader_standing;
+            standings[k] = s.clamp(0.0, 1.0);
+        }
+
+        // Percentile position: 0 = the most prominent live city, 1 = the least.
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by(|&a, &b| standings[b].partial_cmp(&standings[a]).unwrap_or(std::cmp::Ordering::Equal));
+        let mut pct = vec![0.0f32; n];
+        for (rank, &k) in order.iter().enumerate() {
+            pct[k] = if n > 1 { rank as f32 / (n - 1) as f32 } else { 0.0 };
+        }
+
+        for k in 0..n {
+            let h = live[k];
+            self.hubs[h].standing = standings[k];
+            let prev = self.hubs[h].tier;
+            let new_tier = if prev == 0 {
+                Self::city_tier_band(pct[k], standings[k])
+            } else {
+                Self::city_tier_with_hysteresis(prev, pct[k], standings[k])
+            };
+            // A tier RISE is chronicled (a milestone); a fall is not — the same
+            // asymmetry `assign_house_tiers` uses.
+            if new_tier != prev && prev != 0 && new_tier < prev {
+                let name = self.hubs[h].name.clone();
+                self.journal.push(JournalEntry {
+                    tick, kind: "city_tier".into(), hub: h as i32, good: -1, value: new_tier as f32,
+                    text: format!("{} is now counted among the {} cities", name, CITY_TIER_NAMES[new_tier as usize]),
+                });
+            }
+            self.hubs[h].tier = new_tier;
+        }
+    }
+
+    /// The RAW tier a (percentile, standing) pair bands into, with no memory of the
+    /// city's previous tier. Used only for a city's first-ever assignment.
+    fn city_tier_band(pct: f32, standing: f32) -> u8 {
+        if pct < CITY_TIER_PCT_CUTS[0] && standing >= CITY_TIER1_STANDING_ENTER { 1 }
+        else if pct < CITY_TIER_PCT_CUTS[1] { 2 }
+        else if pct < CITY_TIER_PCT_CUTS[2] { 3 }
+        else { 4 }
+    }
+
+    /// The tier a city holds THIS month, given the tier it held last month —
+    /// identical shape to `tier_with_hysteresis`, a separate function only because
+    /// the constants are city-scoped, not house-scoped.
+    fn city_tier_with_hysteresis(prev: u8, pct: f32, standing: f32) -> u8 {
+        let mut cuts = CITY_TIER_PCT_CUTS;
+        if (2..=4).contains(&prev) { cuts[(prev - 2) as usize] -= CITY_TIER_PCT_DEAD_BAND; }
+        if (1..=3).contains(&prev) { cuts[(prev - 1) as usize] += CITY_TIER_PCT_DEAD_BAND; }
+        let by_rank = if pct < cuts[0] { 1 } else if pct < cuts[1] { 2 }
+            else if pct < cuts[2] { 3 } else { 4 };
+        if by_rank == 1 {
+            let floor = if prev == 1 { CITY_TIER1_STANDING_EXIT } else { CITY_TIER1_STANDING_ENTER };
+            if standing >= floor { 1 } else { 2 }
+        } else {
+            by_rank
+        }
+    }
 
     /// Capacity tier (1..5) for a warehouse `capacity`; 0 = the uncapped −1 pool.
     #[inline]
@@ -398,6 +506,187 @@ impl CampaignSim {
         self.maybe_grant_provinces(yr);
     }
 
+    /// CITY_PROVINCE_WAR_PLAN.md §2.5 · a good's land-use category, from a small
+    /// name table over the shipped goods (`GOOD_NAMES`) — `TickGood` doesn't carry
+    /// the world half's `Domain`/`Distribution` classification, so this is a
+    /// pragmatic stand-in rather than a full schema addition. Unrecognized/custom
+    /// goods default to UNCONSTRAINED (share 1.0): never wrongly shrinking a good
+    /// we don't understand is safer than guessing wrong. 0 unconstrained (marine,
+    /// mineral, unknown) · 1 forest · 2 arable · 3 pasture.
+    fn good_land_kind(name: &str) -> u8 {
+        match name {
+            "timber" | "furs" | "hardwoods" | "honey" => 1,
+            "wheat" | "rice" | "barley" | "millet" | "cotton" | "sugar" | "tobacco"
+                | "indigo" | "dates" | "cacao" | "silk" | "wine" | "oliveoil" => 2,
+            "wool_fleece" | "wool_llama" | "horses" | "hides" => 3,
+            _ => 0,
+        }
+    }
+
+    /// The share of the province's land this good's potential scales by. Manufactured
+    /// goods (non-empty `inputs`) are excluded entirely by the CALLER — a manufactory
+    /// extracts nothing from the land (§1.2), so they never reach this at all.
+    fn province_good_land_share(&self, p: usize, g: usize) -> f32 {
+        let Some(name) = self.goods.get(g).map(|tg| tg.name.as_str()) else { return 1.0 };
+        match Self::good_land_kind(name) {
+            1 => self.prov_forest.get(p).copied().unwrap_or(0.3),
+            2 => self.prov_arable.get(p).copied().unwrap_or(0.2),
+            3 => self.prov_pasture.get(p).copied().unwrap_or(0.2),
+            _ => 1.0,
+        }
+        .clamp(0.02, 1.0)
+    }
+
+    /// Σ hub + estate production of every good, by province — a plain re-attribution
+    /// of production the day loop already computed (no new production, see §2.5's
+    /// own formula: "actual = production of hubs + estates here"). Flat `np * ng`.
+    pub(crate) fn province_good_actual(&self) -> Vec<f32> {
+        let ng = self.goods.len();
+        let np = if ng > 0 { self.prov_good_belt.len() / ng } else { 0 };
+        let mut out = vec![0.0f32; np * ng];
+        if np == 0 { return out; }
+        for (h, hub) in self.hubs.iter().enumerate() {
+            if hub.abandoned { continue; }
+            let p = self.hub_province.get(h).copied().unwrap_or(-1);
+            if p < 0 || p as usize >= np { continue; }
+            let base = p as usize * ng;
+            for g in 0..ng.min(hub.production.len()) {
+                out[base + g] += hub.production[g].max(0.0);
+            }
+        }
+        out
+    }
+
+    /// Raw capacity BEFORE the world calibration scalar and BEFORE depletion —
+    /// `belt_score · land carrying capacity (prov_cap, the best area proxy the
+    /// campaign holds) · live land-use share`. §5.2: scales the FROZEN belt by LIVE
+    /// land use every call, which is what lets clearing forest actually shrink
+    /// timber capacity instead of the exploitation layer being scenery.
+    fn province_good_potential_base(&self, p: usize, g: usize) -> f32 {
+        let ng = self.goods.len();
+        if ng == 0 { return 0.0; }
+        let belt = self.prov_good_belt.get(p * ng + g).copied().unwrap_or(0.0);
+        if belt <= 0.0 { return 0.0; }
+        let cap = self.prov_cap.get(p).copied().unwrap_or(0.0).max(0.0);
+        belt * cap * self.province_good_land_share(p, g)
+    }
+
+    /// The calibrated, depleted potential — what `exploitation = actual/potential`
+    /// (§2.5's query-time formula) divides by.
+    pub(crate) fn province_good_potential(&self, p: usize, g: usize) -> f32 {
+        let ng = self.goods.len();
+        if ng == 0 { return 0.0; }
+        let base = self.province_good_potential_base(p, g);
+        if base <= 0.0 { return 0.0; }
+        let depletion = self.prov_good_depletion.get(p * ng + g).copied().unwrap_or(0.0);
+        base * self.prov_good_yield_scale.max(0.01) * (1.0 - depletion.clamp(0.0, PROV_GOOD_DEPLETION_CAP))
+    }
+
+    /// Once, at campaign start (`lifecycle.rs`): scale the world-wide yield constant
+    /// so mean exploitation reads ≈1.0 on day one, whatever this particular world's
+    /// belt intensities and province sizes happen to be — the same self-calibration
+    /// `need_scale` already uses, so this doesn't need its own hand-picked constant
+    /// that would silently read wrong on a differently-shaped world.
+    pub(crate) fn calibrate_province_good_yield(&mut self) {
+        let ng = self.goods.len();
+        let np = if ng > 0 { self.prov_good_belt.len() / ng } else { 0 };
+        if np == 0 { self.prov_good_yield_scale = 1.0; return; }
+        let actual = self.province_good_actual();
+        let mut sum_actual = 0.0f64;
+        let mut sum_base = 0.0f64;
+        for p in 0..np {
+            for g in 0..ng {
+                let a = actual[p * ng + g];
+                if a <= 0.0 { continue; }
+                sum_actual += a as f64;
+                sum_base += self.province_good_potential_base(p, g) as f64;
+            }
+        }
+        self.prov_good_yield_scale = if sum_base > 1e-6 {
+            ((sum_actual / sum_base) as f32).clamp(0.02, 50.0)
+        } else { 1.0 };
+    }
+
+    /// Which estate KIND, if any, is this province's main producer of good `g` —
+    /// drives the kind-specific depletion behaviour below (§1.2: mine exhausts,
+    /// fishery collapses and recovers, plantation wears soil, vineyard doesn't lose
+    /// tonnage). 0 = no estate found (ordinary rural production; the default rate).
+    fn dominant_estate_kind(&self, p: usize, g: usize) -> u8 {
+        for (h, hub) in self.hubs.iter().enumerate() {
+            if !hub.is_estate || hub.abandoned { continue; }
+            if self.hub_province.get(h).copied().unwrap_or(-1) != p as i32 { continue; }
+            let main = hub.production.iter().enumerate()
+                .filter(|&(_, &v)| v > 0.0)
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal));
+            if let Some((mg, _)) = main {
+                if mg == g { return hub.estate_kind; }
+            }
+        }
+        0
+    }
+
+    /// §2.5 · the MARKET ↔ LOCAL split — what share of a province's production of
+    /// good `g` never enters trade at all, because the very population that grew it
+    /// consumes it. Reuses `base_need`, the real per-hub local-demand formula the
+    /// day loop itself prices against (not a reinvented estimate), summed over
+    /// every hub in the province. "Most output never enters trade" is the true
+    /// pre-modern picture (§2.5) — this is what lets the Goods tab show it honestly.
+    pub(crate) fn province_good_market_share(&self, p: usize, g: usize, actual: f32) -> f32 {
+        if actual <= EPS || g >= self.goods.len() { return 0.0; }
+        let mut local_demand = 0.0f32;
+        for (h, hub) in self.hubs.iter().enumerate() {
+            if hub.abandoned { continue; }
+            if self.hub_province.get(h).copied().unwrap_or(-1) != p as i32 { continue; }
+            local_demand += self.base_need(h, g);
+        }
+        ((actual - local_demand) / actual).clamp(0.0, 1.0)
+    }
+
+    /// §2.5 · once a year, right after the land pass so this year's forest/arable/
+    /// pasture are fresh: update the ONE piece of exploitation state that actually
+    /// needs memory — a per-(province, good) depletion multiplier — from how hard
+    /// each good is being worked. Reuses `prov_soil`'s own wear/heal SHAPE (erode
+    /// above 1.0 exploitation, recover below it); `potential`/`actual` themselves
+    /// stay pure derived reads (`province_good_potential`/`_actual` above), so
+    /// nothing about actual hub production, prices or the `econ_` bands changes —
+    /// this pass writes ONLY `prov_good_depletion` (and, for a plantation under
+    /// pressure, a small extra nudge to the ordinary `prov_soil`).
+    pub(crate) fn update_province_goods_pressure(&mut self, _yr: u32) {
+        let ng = self.goods.len();
+        let np = if ng > 0 { self.prov_good_belt.len() / ng } else { 0 };
+        if np == 0 { return; }
+        let actual = self.province_good_actual();
+        for p in 0..np {
+            for g in 0..ng {
+                let idx = p * ng + g;
+                if self.prov_good_belt.get(idx).copied().unwrap_or(0.0) <= 0.001 { continue; }
+                let potential = self.province_good_potential(p, g);
+                if potential <= EPS { continue; }
+                let exploitation = actual[idx] / potential;
+                let pressure = (exploitation - 1.0).max(0.0);
+                let ease = (1.0 - exploitation).max(0.0);
+                let kind = self.dominant_estate_kind(p, g);
+                let (wear_k, recover_k): (f32, f32) = match kind {
+                    2 => (1.3, 0.15), // mine — "exhausts": wears fast, almost never heals
+                    4 => (0.8, 2.2),  // fishery — "collapses and recovers": hard down, fast back
+                    5 => (0.0, 1.0),  // vineyard — doesn't lose tonnage under pressure
+                    _ => (1.0, 1.0),
+                };
+                let wear = PROV_GOOD_DEPLETE * pressure * wear_k;
+                let heal = PROV_GOOD_RECOVER * ease * recover_k;
+                let d = self.prov_good_depletion[idx];
+                self.prov_good_depletion[idx] = (d + wear - heal).clamp(0.0, PROV_GOOD_DEPLETION_CAP);
+                // "plantation wears soil" — a real cross-link into the ordinary soil
+                // condition, on top of the good's own depletion.
+                if kind == 3 && pressure > 0.0 {
+                    if let Some(s) = self.prov_soil.get_mut(p) {
+                        *s = (*s - PROV_DEPLETE * pressure * 0.5).max(PROV_SOIL_FLOOR);
+                    }
+                }
+            }
+        }
+    }
+
     /// Phase 5 · the Stato da Mar case: a province with no house holder may be
     /// GRANTED to whichever house already dominates its seat city — holds its
     /// council/captor seat OR its bailo (the exact "seats" a house's `standing`
@@ -487,6 +776,13 @@ impl CampaignSim {
         if self.prov_history.len() < np { self.prov_history.resize(np, Vec::new()); }
         if self.prov_events.len() < np { self.prov_events.resize(np, Vec::new()); }
         if self.prov_holder_house.len() < np { self.prov_holder_house.resize(np, -1); }
+        // §2.5 · flat `np * ng` arrays. A province that arrives via this fallback
+        // path (no `Province.good_belt` in hand — only `campaign_start_sim`'s own
+        // seeding has that) simply gets zero belt score everywhere, which the
+        // exploitation query already treats as "nothing known to grow here".
+        let ng = self.goods.len();
+        if self.prov_good_belt.len() < np * ng { self.prov_good_belt.resize(np * ng, 0.0); }
+        if self.prov_good_depletion.len() < np * ng { self.prov_good_depletion.resize(np * ng, 0.0); }
     }
 
     /// The hub that administers province `p`: its largest live member city. Returns
@@ -1177,6 +1473,7 @@ impl CampaignSim {
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
+            tier: 0, standing: 0.0, war_cooldown_until: 0,
         });
         self.routes_dirty = true;
         self.hubs.len() - 1

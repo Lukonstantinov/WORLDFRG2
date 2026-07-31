@@ -373,3 +373,17 @@ export async function campaignStartProvinceWork(
 export async function campaignCancelProvinceWork(id: number, kind: number): Promise<void> {
   return invoke("campaign_cancel_province_work", { id, kind });
 }
+
+/** §2.5 · every good this province actually produces, with its exploitation
+ *  reading (potential/actual/exploitation/depletion/market↔local split). Empty
+ *  with no campaign / no province layer / nothing produced here. */
+export async function campaignProvinceGoods(id: number): Promise<import("@types").ProvinceGoodExploit[]> {
+  return invoke("campaign_province_goods", { id });
+}
+
+/** §3.3 · every state currently formed — one region per tier 1-2 city holding at
+ *  least one province's writ. Pure derived read, empty with no campaign / no
+ *  province layer / no city has yet risen to tier 1-2. */
+export async function computeStates(): Promise<import("@types").StateRegion[]> {
+  return invoke("compute_states");
+}

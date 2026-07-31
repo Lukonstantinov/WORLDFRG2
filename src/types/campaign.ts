@@ -44,6 +44,9 @@ export interface CampaignHubBrief {
   died_cause: string;
   /** Downsampled population history (≤30 points) — the census sparkline. */
   pop_spark: number[];
+  /** CITY_PROVINCE_WAR_PLAN.md §3.2 city tier: 1 great · 2 major · 3 lesser ·
+   *  4 marginal · 0 = not yet assigned. §3.3 reads tier 1-2 for state eligibility. */
+  tier: number;
 }
 /** Atlas 2.0 · one named trade basin (campaign_get_trade_basins). */
 export interface TradeBasin {
@@ -503,6 +506,25 @@ export interface Government {
   family_influence: InfluenceRow[];
   laws: LawRow[];
   civic_goods: CivicGoodRow[];
+  /** CITY_PROVINCE_WAR_PLAN.md §3.1 · the office as a person — null when no house
+   *  holds either office (the ordinary early-campaign case). */
+  leader: CityLeader | null;
+}
+/** §3.1 · the head of whichever house runs this seat — reuses the existing
+ *  house-person stack, no new entity. */
+export interface CityLeader {
+  house: string;
+  house_color: string;
+  is_guild: boolean;
+  /** True when held by CAPTURE (a majority of control-weighted offices) rather
+   *  than merely being the dominant council house. */
+  is_captor: boolean;
+  head_name: string;
+  female: boolean;
+  /** "" for a middling character. */
+  character_phrase: string;
+  /** "" when the head has no vice. */
+  vice: string;
 }
 export interface OfficialRow {
   role: string;
@@ -755,6 +777,11 @@ export interface HouseLedger {
   events: number;
   consumption: number;
   inflation: number;
+  /** CITY_PROVINCE_WAR_PLAN.md §3.4e · forced war levy paid this year — its own
+   *  line, split out of ordinary civic tax. */
+  war_levy: number;
+  /** §3.4e · wealth-equivalent loss from war damage to this house's own estates. */
+  war_damage: number;
   expense_total: number;
   net: number;
   wealth_graph: number[];
@@ -1456,6 +1483,13 @@ export interface WarBrief {
   chest_b: number;
   levies: number;
   cause: string;
+  /** CITY_PROVINCE_WAR_PLAN.md §3.4a · bidirectional war score, −100..100 — positive
+   *  favours `a`. ±100 ends the war outright. */
+  score: number;
+  /** §3.4a · quarterly rounds fought so far (of the round cap's backstop). */
+  round: number;
+  /** §3.4b · what the aggressor is fighting for, as a phrase. */
+  goal_label: string;
 }
 /** A concluded war (the log). */
 export interface WarRecord {
@@ -2001,6 +2035,18 @@ export interface ProvinceDetail {
   buildings: PBuilding[];
 }
 
+/** A cropped elevation/land/biome sample grid over one province's bounding box —
+ *  the survey plate's real "relief" base layer (§2.3). `elevation`/`land`/`biome`
+ *  are `cols*rows`, row-major; sample (c, r)'s world-cell position is
+ *  `(ox + c*stride, oy + r*stride)`. */
+export interface ProvinceTerrainCrop {
+  ox: number; oy: number; stride: number;
+  cols: number; rows: number;
+  elevation: number[];
+  land: number[];   // 1 = land, 0 = sea/lake
+  biome: number[];  // raw sim::biome code, 0 = unclassified/sea
+}
+
 /** Result of `sim_generate_provinces`: the province list + a downsampled per-cell
  *  id raster for the map overlay (`4294967295` = sea/no-data; ids are u32). */
 export interface SimProvincesResult {
@@ -2166,4 +2212,36 @@ export interface ProvinceLand {
   works: ProvinceWorkRow[];
   history: ProvinceLandSample[];
   events: ProvinceEventRow[];
+}
+
+/** §2.5 · one good's exploitation reading in a province — a pure derived read
+ *  except `depletion`, which is the one piece of state that persists. */
+export interface ProvinceGoodExploit {
+  good: number;
+  potential: number;
+  actual: number;
+  /** actual / potential — below 1 is slack, above 1 is over-worked (the soft cap). */
+  exploitation: number;
+  /** 0..1 accumulated overexploitation pressure eroding potential. */
+  depletion: number;
+  /** Share of `actual` that leaves the province via trade rather than being
+   *  consumed by the very population that produced it. */
+  market_share: number;
+}
+
+/** CITY_PROVINCE_WAR_PLAN.md §3.3 · one state — a tier 1-2 city's own writ, made
+ *  into a territory. Pure derived read (compute_states) — nothing new is
+ *  persisted, so this cannot desync from the province/city-tier state it reads. */
+export interface StateRegion {
+  capital_hub: number;
+  name: string;
+  /** [r,g,b] — distinct from any house's heraldic colour (own hue phase). */
+  color: [number, number, number];
+  /** Coarse cell top-left world coords, same shape CultureRegion uses. */
+  cells: [number, number][];
+  cell_size: number;
+  /** Label centroid. */
+  x: number;
+  y: number;
+  province_count: number;
 }

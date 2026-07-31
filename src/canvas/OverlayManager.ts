@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine } from "@types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine, StateRegion } from "@types";
 import type { ClimateBands } from "@bridge";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "@goods";
 import { drawGoodIcon } from "./goodIcons";
@@ -326,7 +326,7 @@ export interface LabelStyle {
 export type LabelKey =
   | "province" | "settlement"
   | "river" | "lake" | "mountain" | "desert" | "forest" | "tundra"
-  | "cultureRegion" | "peopleTerritory" | "tradeBasin";
+  | "cultureRegion" | "peopleTerritory" | "tradeBasin" | "state";
 
 const F = LABEL_FONTS;
 /** The shipped baseline — the "Mixed Contrast" theme. */
@@ -346,6 +346,9 @@ export const LABEL_STYLE_DEFAULTS: Record<LabelKey, LabelStyle> = {
   cultureRegion:   { family: F.sansHuman,  weight: 700, italic: false, caps: true,  tracking: 0.30, color: "#caa6e0", size: 1 },
   peopleTerritory: { family: F.sansHuman,  weight: 600, italic: false, caps: true,  tracking: 0.26, color: "#d8c2ea", size: 1 },
   tradeBasin:      { family: F.serifNature, weight: 600, italic: true,  caps: false, tracking: 0.06, color: "#8fd0d8", size: 1 },
+  // ── Political: a sovereignty label — bold, gold, tracked wider than a mere
+  // ── settlement, since a state is a claim over land, not a place on it.
+  state:           { family: F.sansHuman,  weight: 800, italic: false, caps: true,  tracking: 0.24, color: "#e0c878", size: 1.05 },
 };
 
 /** Coordinated theme presets — sparse overrides on the defaults, exactly like
@@ -368,6 +371,7 @@ export const LABEL_THEMES: Record<string, Partial<Record<LabelKey, Partial<Label
     cultureRegion: { family: F.engraved, tracking: 0.36 },
     peopleTerritory: { family: F.engraved, tracking: 0.30 },
     tradeBasin: { family: F.garamond },
+    state: { family: F.engraved, tracking: 0.30 },
   },
   // Humanist sans throughout — the Ordnance-Survey register, cleanest zoomed out.
   "Modern Cartographic": {
@@ -510,6 +514,7 @@ export class OverlayManager {
   private reefZones: SharkZone[] = [];
   private goodRegions: GoodRegion[] = [];
   private cultureRegions: CultureRegion[] = [];
+  private stateRegions: StateRegion[] = [];
   /** Transient highlight pin (searched settlement) in world coords. */
   private searchPin: { wx: number; wy: number } | null = null;
   /** Per-good display metadata (icon/color) from the active editable spec; falls
@@ -1268,6 +1273,11 @@ export class OverlayManager {
     this.cultureRegions = regions;
   }
 
+  /** CITY_PROVINCE_WAR_PLAN.md §3.3 · a tier 1-2 city's writ, drawn as a territory. */
+  drawStates(states: StateRegion[]) {
+    this.stateRegions = states;
+  }
+
   /** Drop a transient highlight pin at a world cell (searched settlement). */
   setSearchPin(wx: number, wy: number) {
     this.searchPin = { wx, wy };
@@ -1987,6 +1997,25 @@ export class OverlayManager {
       ctx.textBaseline = "middle";
       for (const r of this.cultureRegions) {
         this.drawLabel(ctx, "peopleTerritory", r.label, r.x, r.y, fs, "center",
+          { halo: "rgba(0,0,0,0.75)", haloWidth: Math.max(0.6, 2.4 / this.currentScale) });
+      }
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+    }
+
+    // States (§3.3): a tier 1-2 city's own writ, tinted distinctly from any house's
+    // heraldic colour so a state's territory never reads as a merchant house's
+    // sphere. Drawn after peoples/before belts — a political claim over land the
+    // way `cultureRegions` reads an ethnic one.
+    if (this.visibility.states && this.stateRegions.length > 0) {
+      for (const r of this.stateRegions) {
+        const [sr, sg, sb] = r.color;
+        this.renderRegionMask(ctx, r.cells, r.cell_size, `rgb(${sr},${sg},${sb})`, "", r.x, r.y, 0.20);
+      }
+      const fs2 = Math.max(7, 13 / this.currentScale);
+      ctx.textBaseline = "middle";
+      for (const r of this.stateRegions) {
+        this.drawLabel(ctx, "state", r.name, r.x, r.y, fs2, "center",
           { halo: "rgba(0,0,0,0.75)", haloWidth: Math.max(0.6, 2.4 / this.currentScale) });
       }
       ctx.textAlign = "start";
