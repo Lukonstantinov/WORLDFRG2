@@ -341,7 +341,7 @@ export function HubPanel() {
   ];
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle, width: tab === "trade" ? 600 : 360 }} onPointerDown={onPointerDown}>
+    <div data-draggable style={{ ...panel, ...rootStyle, width: tab === "trade" ? 600 : 360, transition: "width 160ms ease" }} onPointerDown={onPointerDown}>
       {/* ── Title + stats header (always visible; drag handle) ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, cursor: "move" }} onPointerDown={onPointerDown}>
         <div>
@@ -541,7 +541,7 @@ export function HubPanel() {
             )}
 
             <div style={sectionHdr}>Treasury &amp; stores</div>
-            {govRow("City treasury", fmt(g.treasury))}
+            {govRow("City treasury", fmt(g.treasury), g.treasury <= 0.01)}
             {govRow("Circulating civic pool", fmt(g.civic_pool))}
             {g.civic_goods.length > 0 && (
               <>
@@ -1473,11 +1473,18 @@ function CityFinances({ detail }: { detail: HubDetail }) {
       </div>
     ) : null
   );
+  // Quiet when healthy — the same rule the house stability gauges follow (§1.3):
+  // a sound treasury reads as a small, grey fact; an empty or negative one is the
+  // second thing you see, so the warning colour still means something.
+  const treasuryOk = (detail.treasury ?? 0) > 0.01;
   return (
     <>
       <div style={{ ...sectionHdr, marginTop: 6 }}>City finances</div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, flexWrap: "wrap" }}>
-        <span style={{ color: "#d8c878", fontWeight: 700 }}>🏛 Treasury {fmtN(detail.treasury ?? 0)}</span>
+        <span style={{ color: treasuryOk ? "#8aa0b8" : "#ff8a6a", fontWeight: treasuryOk ? 400 : 700 }}
+          title={treasuryOk ? undefined : "the treasury is empty — spending is outrunning income"}>
+          🏛 Treasury {fmtN(detail.treasury ?? 0)}{!treasuryOk && " — empty"}
+        </span>
         {detail.coin_name ? (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "#d8c878" }}
             title={`${detail.coin_name} · value ${(detail.coin_value ?? 0).toFixed(2)}×`}>
