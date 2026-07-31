@@ -1057,6 +1057,87 @@ fn econ_measure_foreign_hand_conjunction() {
     assert!(samples > 0, "the run produced no posted kin at all to measure");
 }
 
+/// `CITY_PROVINCE_WAR_PLAN.md` §3.4f · "measure war frequency BEFORE tuning anything" —
+/// the same precedent Phase 4.4 set for the foreign hand. This measures the mechanism as
+/// it exists TODAY (DLC 3.5's `update_wars`/`maybe_declare_war`, a flat 10% yearly chance
+/// between two rival-council seats in the same connectivity component) — the baseline
+/// 3.4a–e's "score + gated preconditions" redesign will be judged against. §5.8: a low
+/// global war count may just mean most cities have no reachable rival, so this also
+/// reports the share of war-eligible cities that are structurally isolated (alone in
+/// their own connectivity component) — a low war count from THAT cause is not a broken
+/// trigger and must not be "fixed" by loosening the trigger itself.
+#[test]
+#[ignore]
+fn econ_measure_war_frequency() {
+    let mut s = reference_world();
+    let years = 300u32;
+    // A `War` carries no id of its own; (a, b, start_tick) is the only stable identity,
+    // so it doubles as the key for "have we already counted this one as started" and
+    // for looking its goal/start-year back up once it disappears from `s.wars` (ended).
+    let mut started: std::collections::HashSet<(u32, u32, u32)> = std::collections::HashSet::new();
+    let mut goal_of: std::collections::HashMap<(u32, u32, u32), (u8, u32)> = std::collections::HashMap::new();
+    let mut prev_keys: std::collections::HashSet<(u32, u32, u32)> = std::collections::HashSet::new();
+    let mut wars_started = 0u32;
+    let mut durations: Vec<u32> = Vec::new();
+    let mut outcome_counts = [0u32; 4]; // plunder, tribute, trade rights, annex
+    let mut cause_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+
+    for yr in 0..years {
+        s.advance(TICKS_PER_YEAR);
+        let cur_keys: std::collections::HashSet<(u32, u32, u32)> =
+            s.wars.iter().map(|w| (w.a, w.b, w.start_tick)).collect();
+        for w in &s.wars {
+            let key = (w.a, w.b, w.start_tick);
+            if started.insert(key) {
+                wars_started += 1;
+                goal_of.insert(key, (w.goal, w.start_tick / TICKS_PER_YEAR));
+                *cause_counts.entry(w.cause.clone()).or_insert(0) += 1;
+            }
+        }
+        for key in prev_keys.difference(&cur_keys) {
+            if let Some(&(goal, start_year)) = goal_of.get(key) {
+                durations.push(yr.saturating_sub(start_year));
+                outcome_counts[goal.min(3) as usize] += 1;
+            }
+        }
+        prev_keys = cur_keys;
+    }
+
+    // §5.8 · war-eligible seats (the same filter `maybe_declare_war` itself applies)
+    // and how many of them share NO connectivity component with any other seat.
+    let seats: Vec<usize> = (0..s.hubs.len())
+        .filter(|&h| !s.hubs[h].is_estate && s.hubs[h].council_house >= 0 && s.hubs[h].population > 1.0)
+        .collect();
+    let isolated = seats.iter()
+        .filter(|&&h| !seats.iter().any(|&o| o != h && s.hubs[o].component == s.hubs[h].component))
+        .count();
+
+    let centuries = years as f64 / 100.0;
+    let mean_duration = if durations.is_empty() { 0.0 }
+        else { durations.iter().sum::<u32>() as f64 / durations.len() as f64 };
+
+    println!();
+    println!("═══ 3.4f · war frequency ({years}-year reference world, PRE-3.4a–e baseline) ═══");
+    println!("  wars started                            {:>10}", wars_started);
+    println!("  ⇒ wars / century                         {:>10.2}", wars_started as f64 / centuries);
+    println!("  wars resolved in the window              {:>10}", durations.len());
+    println!("  mean duration                            {:>10.1} yr", mean_duration);
+    println!("  outcome mix   plunder {:>4}   tribute {:>4}   trade-rights {:>4}   annex {:>4}",
+        outcome_counts[0], outcome_counts[1], outcome_counts[2], outcome_counts[3]);
+    let mut causes: Vec<(&String, &u32)> = cause_counts.iter().collect();
+    causes.sort_by(|a, b| b.1.cmp(a.1));
+    print!("  causes       ");
+    for (c, n) in &causes { print!(" {c} {n} "); }
+    println!();
+    println!("  war-eligible cities (a council seat)     {:>10}", seats.len());
+    println!("  structurally isolated (own component)    {:>10}   {:>5.1}%",
+        isolated, 100.0 * isolated as f64 / seats.len().max(1) as f64);
+    println!("═══════════════════════════════════════════════════════════════════════");
+    println!();
+    // Diagnostic only — it must not fail the build, per §2.5's printed-metric rule.
+    assert!(!seats.is_empty(), "the run produced no war-eligible cities at all");
+}
+
 /// Player-reported: "no outposts are created" over the course of ordinary play.
 /// `maybe_found_house_outpost` (`houses.rs`) is gated on THREE things at once — a
 /// non-empty `colonizable` site pool, a founder wealthy enough (`OUTPOST_FOUND_WEALTH`
