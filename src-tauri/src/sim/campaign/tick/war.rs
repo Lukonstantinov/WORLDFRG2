@@ -16,7 +16,7 @@ impl CampaignSim {
             if levy <= EPS { continue; }
             self.houses[hi].wealth -= levy;
             total += levy;
-            if hi < self.house_ledger.len() { self.house_ledger[hi].civic_tax += levy; }
+            if hi < self.house_ledger.len() { self.house_ledger[hi].war_levy += levy; }
         }
         if hub < self.hubs.len() {
             self.hubs[hub].treasury += total;
@@ -34,6 +34,44 @@ impl CampaignSim {
         self.hubs[hub].finance.spent_war += spend;
         self.hubs[hub].war_effort += spend;
         spend
+    }
+
+
+    /// §3.4e · war damages one of `hub`'s own estates/manufactories this year —
+    /// reuses the EXISTING `TickHub.damage` field exactly as a natural disaster
+    /// would (see `estate_condition_pass`, which already repairs ANY nonzero
+    /// damage whatever its cause, so no new repair machinery is needed here).
+    /// Smaller than a single disaster (a siege nibbles, it doesn't level the
+    /// works) but recurs every year the war lasts. A house-owned estate's loss
+    /// is booked to that house's Accountant ledger (`war_damage`); a civic or
+    /// unowned works still takes the damage, just with no ledger line to book it
+    /// to — the journal entry is the record either way.
+    fn war_damage_pass(&mut self, hub: usize) {
+        if hash01(self.seed, self.tick as u64 ^ 0xDA3A9E, hub as u64) > WAR_DAMAGE_CHANCE { return; }
+        let candidates: Vec<usize> = (0..self.hubs.len())
+            .filter(|&ei| self.hubs[ei].is_estate && !self.hubs[ei].abandoned
+                && self.hubs[ei].parent == hub as i32
+                && self.hubs[ei].estate_tier > 0 && self.hubs[ei].damage < 0.8)
+            .collect();
+        if candidates.is_empty() { return; }
+        let pick = ((hash01(self.seed, self.tick as u64 ^ 0x9E57, hub as u64) * candidates.len() as f32) as usize)
+            .min(candidates.len() - 1);
+        let ei = candidates[pick];
+        let r = hash01(self.seed, self.tick as u64 ^ 0x0DA3, ei as u64);
+        let dmg = WAR_DAMAGE_MIN + r * (WAR_DAMAGE_MAX - WAR_DAMAGE_MIN);
+        let before = self.hubs[ei].damage;
+        self.hubs[ei].damage = (before + dmg).clamp(0.0, 1.0);
+        let inflicted = self.hubs[ei].damage - before;
+        if inflicted <= EPS { return; }
+        let owner = self.hubs[ei].owner_house;
+        if owner >= 0 && (owner as usize) < self.house_ledger.len() {
+            self.house_ledger[owner as usize].war_damage += inflicted * self.estate_market_value(ei);
+        }
+        let en = self.hubs[ei].name.clone();
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "war".into(), hub: hub as i32, good: -1, value: inflicted,
+            text: format!("War damages {} ({:.0}% harm)", en, inflicted * 100.0),
+        });
     }
 
 
@@ -271,11 +309,29 @@ impl CampaignSim {
             self.wars[wi].chest_a += spent_a;
             self.wars[wi].chest_b += spent_b;
             for &h in &[a, b] {
-                self.hubs[h].trade_wealth *= 0.8; // blockade bites commerce
+                // §3.4e · the real, PERSISTENT blockade. `trade_wealth` is recomputed
+                // fresh from `export_earn`/`import_spend` every single day
+                // (`update_houses`), so a one-off `trade_wealth *= 0.8` here is
+                // erased before a player could ever see it — kept for its immediate
+                // display value, but `export_earn` is what actually has to shrink for
+                // the blockade to bite for the rest of the year.
+                self.hubs[h].trade_wealth *= 0.8;
+                self.hubs[h].export_earn *= WAR_BLOCKADE_EXPORT_MULT;
                 self.active_events.push(ActiveEvent {
                     kind: "war".into(), hub: h as i32, good: -1,
                     magnitude: 0.4, until_tick: tick + TICKS_PER_YEAR,
                 });
+                self.war_damage_pass(h);
+            }
+            // §3.4e · the neutral WAR BOOM — a hub sharing a belligerent's trade
+            // component, itself at peace, profits from supplying the war. Exactly
+            // why a house wants to supply a war it is not fighting (§2).
+            for h in 0..self.hubs.len() {
+                if self.hubs[h].war_with >= 0 { continue; }
+                if self.hubs[h].component != self.hubs[a].component
+                    && self.hubs[h].component != self.hubs[b].component { continue; }
+                self.hubs[h].export_earn += self.hubs[h].export_earn.max(0.0) * WAR_BOOM_EXPORT_FRAC
+                    + WAR_BOOM_EXPORT_FLAT;
             }
             let effort_a = raised_a + spent_a;
             let effort_b = raised_b + spent_b;

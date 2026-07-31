@@ -777,6 +777,11 @@ export interface HouseLedger {
   events: number;
   consumption: number;
   inflation: number;
+  /** CITY_PROVINCE_WAR_PLAN.md §3.4e · forced war levy paid this year — its own
+   *  line, split out of ordinary civic tax. */
+  war_levy: number;
+  /** §3.4e · wealth-equivalent loss from war damage to this house's own estates. */
+  war_damage: number;
   expense_total: number;
   net: number;
   wealth_graph: number[];

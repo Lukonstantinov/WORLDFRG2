@@ -1185,7 +1185,8 @@ function LedgerView({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string }) 
     </div>
   );
   const anyExp = l.import_tax.length || l.export_tax.length || l.estate_tax || l.upkeep
-    || l.fleet_cost || l.lost_cargo || l.events || l.consumption || l.inflation;
+    || l.fleet_cost || l.lost_cargo || l.events || l.consumption || l.inflation
+    || l.war_levy || l.war_damage;
   return (
     <div style={{ padding: "2px 4px 6px", border: "1px solid #1b2a3c", borderRadius: 4, background: "#0a1119" }}>
       <div style={head}>Income</div>
@@ -1207,6 +1208,8 @@ function LedgerView({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string }) 
       {l.events > 0 && <Line label="Misfortune & fees" amt={l.events} neg />}
       {l.consumption > 0 && <Line label="Feasts & consumption" amt={l.consumption} neg />}
       {l.inflation > 0 && <Line label="Inflation" amt={l.inflation} neg />}
+      {l.war_levy > 0 && <Line label="⚔ War levy" amt={l.war_levy} neg />}
+      {l.war_damage > 0 && <Line label="⚔ War damage" amt={l.war_damage} neg />}
       <Sub label="Total spent" amt={-l.expense_total} color="#e0a0a0" />
 
       <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #24364e", marginTop: 5, paddingTop: 4 }}>

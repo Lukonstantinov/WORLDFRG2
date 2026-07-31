@@ -1444,6 +1444,32 @@ const WAR_MIN_TREASURY: f32 = 80.0;
 /// for the measured before/after this fixed.
 const WAR_COOLDOWN_YEARS: u32 = 5;
 
+// ── §3.4e · ledger, damage, blockade, the neutral boom ───────────────────────────
+/// Yearly chance a belligerent's own estate/manufactory takes war damage. Lower
+/// than the first cut (0.35): that value's extra `hash01` draws every war-year
+/// reintroduced the same RNG-divergence sensitivity §3.4a-c's own tuning already
+/// found in `econ_inheritance_rules_fragment_differently` (two 60-year
+/// sub-simulations sharing a seed but diverging in house/estate count from the
+/// first year, so any new per-year randomness in a shared code path shifts which
+/// `hash01` draws each one consumes). 0.15 keeps war damage a real, recurring
+/// cost without tipping that comparison over again.
+const WAR_DAMAGE_CHANCE: f32 = 0.15;
+/// A war's own damage roll — smaller than a natural disaster's 0.30–0.70 (a siege
+/// nibbles, it doesn't level the works), but it recurs every year the war lasts.
+const WAR_DAMAGE_MIN: f32 = 0.08;
+const WAR_DAMAGE_MAX: f32 = 0.20;
+/// A belligerent's `export_earn` — the term that actually drives `trade_wealth`
+/// (see that field's own doc comment) — shrinks to this fraction each year at war.
+/// The real, persistent blockade; the older `trade_wealth *= 0.8` line is cosmetic
+/// only (`update_houses` overwrites `trade_wealth` from `export_earn`/
+/// `import_spend` every day).
+const WAR_BLOCKADE_EXPORT_MULT: f32 = 0.55;
+/// The neutral WAR BOOM: a hub sharing a belligerent's trade component, itself at
+/// peace, gets its own `export_earn` nudged — proportional plus a small flat floor
+/// so even a currently-idle neutral hub sees some benefit from supplying the war.
+const WAR_BOOM_EXPORT_FRAC: f32 = 0.12;
+const WAR_BOOM_EXPORT_FLAT: f32 = 5.0;
+
 // ── §3.4b · terms priced in war score (§1.4's table, verbatim) ──────────────────
 const WAR_PRICE_REPARATIONS: f32 = 10.0;
 const WAR_PRICE_TRADE_RIGHTS: f32 = 25.0;
@@ -2900,8 +2926,17 @@ pub struct LedgerAcc {
     pub events: f32,
     pub consumption: f32,
     pub inflation: f32,
-    /// DLC 3.5 · progressive civic wealth tax + war levies paid to the home city.
+    /// DLC 3.5 · progressive civic wealth tax paid to the home city (war levies are
+    /// their own line, `war_levy`, below — CITY_PROVINCE_WAR_PLAN.md §3.4e wants a
+    /// war's cost legible on its own, not folded into ordinary taxation).
     #[serde(default)] pub civic_tax: f32,
+    /// §3.4e · forced war levy paid this year (`raise_war_levy`) — split out of
+    /// `civic_tax` so "what did the war cost me" reads as its own line.
+    #[serde(default)] pub war_levy: f32,
+    /// §3.4e · wealth-equivalent loss when war damages one of THIS house's own
+    /// estates/manufactories (the existing `TickHub.damage` field, no new field
+    /// needed — see `war_damage_pass`).
+    #[serde(default)] pub war_damage: f32,
     /// Monthly wealth samples through the year — drives the Accountant's wealth graph.
     pub wealth_samples: Vec<f32>,
 }

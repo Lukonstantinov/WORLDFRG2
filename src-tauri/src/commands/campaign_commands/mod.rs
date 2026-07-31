@@ -2417,6 +2417,13 @@ pub struct HouseLedger {
     pub events: f32,
     pub consumption: f32,
     pub inflation: f32,
+    /// §3.4e · forced war levy paid this year — split out of ordinary civic tax so
+    /// a war's cost reads as its own line, per the plan's own "war must be legible
+    /// as money" rule.
+    #[serde(default)] pub war_levy: f32,
+    /// §3.4e · wealth-equivalent loss when war damages one of this house's own
+    /// estates/manufactories (the existing `damage` field, no new mechanism).
+    #[serde(default)] pub war_damage: f32,
     pub expense_total: f32,
     pub net: f32,
     /// Monthly wealth samples through the year (for the Accountant's wealth graph).

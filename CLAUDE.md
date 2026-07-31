@@ -394,6 +394,26 @@ serde-defaulted so old saves load). Grouped by theme:
   design (a real casus belli SHOULD raise it) and left as an explicit open
   pointer for a future session, not chased further — see `docs/SCOREBOARD.md`'s
   dated entry for the full chain.
+- **War ledger, damage, blockade, boom (`CITY_PROVINCE_WAR_PLAN.md` §3.4e,
+  `tick/war.rs`):** all four reuse existing machinery rather than inventing new
+  fields. `war_damage_pass` writes straight into the EXISTING `TickHub.damage`
+  field a belligerent's own estate/manufactory can take yearly — the same field
+  a natural disaster uses, so `estate_condition_pass`'s existing funded-repair
+  pass handles recovery with no new code. The blockade is now REAL and
+  persistent, not cosmetic: the old `trade_wealth *= 0.8` line was silently
+  overwritten every day by `update_houses`'s fresh recompute from
+  `export_earn`/`import_spend` before a player could ever see it, so
+  `export_earn` — the term that actually drives `trade_wealth` — now shrinks
+  for a belligerent each year at war and decays back naturally. The neutral WAR
+  BOOM nudges `export_earn` for any hub sharing a belligerent's trade component
+  while itself at peace. `LedgerAcc` gains `war_levy` (split out of the general
+  `civic_tax`, which used to silently combine ordinary wealth tax and war
+  levies) and `war_damage`, both now wired into `HouseLedger.expense_total`
+  (previously `civic_tax` wasn't even included there — a real pre-existing gap)
+  and shown as their own ⚔ lines in the Accountant tab. Voluntary war financing
+  (lend to the chest, goods at a war premium) and a feud cause from opposing
+  war-backing are real future work, not silently folded in — 3.4e's own step
+  text only asks for ledger/damage/blockade/boom.
 - **Positive events (Phase 1.4):** the mechanism otherwise only produces decline (vices,
   feuds, ruin) — these give the chronicle something else to say, each a MARKER on `House`
   rather than new machinery. `assign_house_tiers` also tracks **the finest hour** (all-time

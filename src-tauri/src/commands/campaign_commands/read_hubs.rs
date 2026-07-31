@@ -629,7 +629,9 @@ pub fn campaign_house_ledger(db: State<'_, WorldDb>, house: usize) -> Result<Opt
         + led.lost_cargo
         + led.events
         + led.consumption
-        + led.inflation;
+        + led.inflation
+        + led.war_levy
+        + led.war_damage;
     // Warehouse = the home city's stored goods (what a warehouse fire destroys).
     let (warehouse, warehouse_city) = match sim.hubs.get(h.hub as usize) {
         Some(hb) => {
@@ -666,6 +668,8 @@ pub fn campaign_house_ledger(db: State<'_, WorldDb>, house: usize) -> Result<Opt
         events: led.events,
         consumption: led.consumption,
         inflation: led.inflation,
+        war_levy: led.war_levy,
+        war_damage: led.war_damage,
         expense_total,
         net: income_total - expense_total,
         wealth_graph: led.wealth_samples.clone(),
