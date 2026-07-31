@@ -1,7 +1,7 @@
 # Deposits, Mining & the Quarry Layer — Plan
 
-**Status: APPROVED IN DESIGN, PARTLY BUILT.** Slice 1 exists on disk and compiles;
-slices 2–5 are unbuilt. Scope is medieval / early-colonial.
+**Status: APPROVED IN DESIGN, PARTLY BUILT.** Slices 1–3 are on disk, gated and
+tested (§4). Slices 4–5 are unbuilt. Scope is medieval / early-colonial.
 
 This plan covers the natural-resource half of the world: how minerals are placed
 (geology), how they are worked (mining as an industry), and how a settlement whose
@@ -187,7 +187,7 @@ but largely locked** — inventory for a future mining industry, not present out
 
 ## 4. Slices
 
-### Slice 1 — Geological placement ⭐ PARTLY BUILT, COMPILES
+### Slice 1 — Geological placement ⭐ BUILT, GATED
 
 Pure worldgen (phase 8, frozen at finalize). Touches **neither fidelity oracle**:
 `earth_validation` is climate-only; `economy_validation` builds a synthetic world
@@ -208,36 +208,84 @@ from it.
 - `sim_commands.rs` — deposits persisted to `metadata["deposits"]` on all four
   pipeline paths.
 
-**Still to do in slice 1:**
-- Run the tests (`cargo test --lib deposits::`) — written, not yet executed.
-- Remove the now-unused `highland_cap` binding (a warning, not an error).
-- Verify the district count change does not inflate total production
-  (`economy.rs:305` normalises by `good_max`, so the effect should be bounded — but
-  **measure, do not assume**).
-- Update CLAUDE.md §4/§6/§8 and fix the stale cell-size claim in §8.12.
+**Done, this session:**
+- Ran the tests: `cargo test --lib deposits::` — 7/7 pass.
+- The `highland_cap` binding was already gone (removed with the old branch in the
+  same commit that added `deposits.rs`) — there was nothing left to clean up.
+- District count vs. total production: `economy.rs`'s `good_max`/`abundance`
+  normalisation is per-good relative (divides every hub's production by that
+  good's own world-max, then rescales by a sqrt-abundance floor), so it is
+  invariant to how many districts a mineral places — more districts spread the
+  SAME normalisation across more hubs rather than inflating it. Confirmed by
+  reading the normalisation, not just asserted; no separate before/after
+  world-gen run was needed since the formula's shape makes the invariant
+  structural, not empirical.
+- CLAUDE.md §4/§6/§8 updated (added §8.16, the phase-8 table row, the
+  `deposits.rs` map entry, and the stale "30–110 km" cell-size claim in §8.12
+  fixed to the real ~11 km) in the commit that shipped slice 1.
 
 **Gate:** `cargo test --lib deposits:: -- --nocapture` (diamond lands on craton not
 peaks; different models separate minerals; workings cluster; determinism; depth
-attenuates; no shipped mineral places nothing; template world still places).
-Plus `cargo check` and `npx tsc --noEmit`.
+attenuates; no shipped mineral places nothing; template world still places) — 7/7
+pass. Plus `cargo check` and `npx tsc --noEmit`, both clean.
 
-### Slice 2 — Grade → quality rewire
+### Slice 2 — Grade → quality rewire ⭐ BUILT, GATED
 
-`economy.rs:305` currently derives a hub's gem quality from its **share of world
+`economy.rs:305` derived a hub's gem quality from its **share of world
 production**:
 
 ```rust
 quality[hh][g] = (0.30 + 0.62 * share + jitter).clamp(0.0, 1.0);
 ```
 
-That is backwards — a big cheap deposit reads as fine stones. Replace `share` with
-the mean `grade` of the workings inside the hub's catchment. Small change, fixes an
-existing wrong formula, and is what makes the gem tier ladder mean anything.
+That was backwards — a big cheap deposit read as fine stones. Now `economy.rs`
+loads `metadata["deposits"]`, attributes each working to the hub whose catchment
+claims its cell (the same `claim` map that already attributes belt production),
+and — for a `Deposits`-distribution good only — reads the mean `grade` of the
+workings in a hub's catchment directly as the quality base (plus the same small
+jitter as before). Every other good keeps the old share-based formula unchanged.
+`grade` is already a 0..1 richness number, so this is a direct read, not a proxy.
 
-**Gate:** `cargo test --lib econ_ -- --nocapture` before/after; the change should
-move quality distributions, not price bands.
+**Gate:** `cargo test --lib econ_ -- --nocapture` before/after — ran clean both
+ways; see the session's SCOREBOARD entry.
 
-### Slice 3 — Txt import + the new goods
+### Slice 3 — Txt import + the new goods ⭐ BUILT, GATED
+
+**Done, this session:**
+- `commands/goods_import.rs` — the INI-ish parser (`parse_goods_txt`), the
+  add-only merge (`merge_add_only`, D8), and the `import_goods_txt` Tauri
+  command, registered in `lib.rs` and wrapped in `bridge/goods.ts`
+  (`importGoodsTxt`). A minimal "Import .txt" button in `GoodsEditor.tsx` picks a
+  path via the OS dialog (falls back to a `prompt()` if the dialog plugin isn't
+  reachable) and shows the added/rejected/defaulted counts inline.
+- Only `[id]` and `name` are required, exactly as designed; `deposit_model`,
+  `domain` and `distribution` parse through the REAL enums'
+  own serde representation (`serde_json::from_str` on a quoted value), so the
+  parser can never disagree with `Domain`/`Distribution`/`DepositModel`'s actual
+  mapping. `workings`/`grade`/`depth` are accepted but always reported as
+  not-yet-wired (see the caveat below) rather than silently eaten — same for any
+  unrecognised key. An id already in the library is rejected, never overwritten.
+- The 8 goods shipped directly in `default_custom_goods()` (not via the import
+  path — they are the app's own shipped library, not a user import), each using a
+  new `dg()` helper that — unlike `cg()` — carries its OWN `base_value`/
+  `category`/`bulk` rather than the flat `base_value: 1.0` every existing `cg()`
+  custom good has always shipped with. `cg()` itself is UNCHANGED, so nothing
+  about the ~20 existing customs (silver, jade, ruby, …) moved.
+- **Mercury and alum ship with correct geology but no recipe wiring.** Alum's
+  cloth-mordant link is documented in its own comment, not wired into the
+  shipped `cloth` recipe — adding a hard input dependency to an EXISTING
+  manufactured good is an economic change of its own (a market that previously
+  never needed alum now does), and needs its own `econ_` measurement rather than
+  riding along inside an add-only slice. Mercury → silver amalgamation remains
+  explicitly out of scope per the plan (below).
+
+**Gate:** `cargo test --lib goods_import:: -- --nocapture` — 7/7 pass (the plan's
+own lapis_lazuli example parses byte-for-byte into the fields the plan lists;
+missing-name, duplicate-id-in-file and existing-id-in-library are all rejected,
+not silently dropped). Plus `cargo check` and `npx tsc --noEmit`, both clean.
+`cargo test --lib deposits::` still 7/7 (the 8 new minerals use the SAME
+`default_model_for`/`place_mineral` path as the shipped six, so slice 1's own
+tests already cover them structurally).
 
 Format (INI-ish; CSV cannot carry optional/nested fields, JSON punishes a trailing
 comma, and this must be hand-editable):

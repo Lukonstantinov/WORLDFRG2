@@ -38,6 +38,21 @@ export async function saveGoodsLibrary(specs: GoodSpec[]): Promise<void> {
   return invoke("save_goods_library", { specs });
 }
 
+/** What happened importing a `.txt` goods file — always populated, even when
+ *  nothing was added, so the caller never has to guess at a silent failure. */
+export interface GoodsImportReport {
+  added: string[];
+  defaulted: [string, string][];
+  rejected: [string, string][];
+}
+
+/** Import a `.txt` goods file (INI-ish `[id]` sections) into the global
+ *  library. Add-only — an id already in the library is rejected, never
+ *  overwritten (see docs/DEPOSITS_AND_MINING_PLAN.md slice 3, decision D8). */
+export async function importGoodsTxt(path: string): Promise<GoodsImportReport> {
+  return invoke("import_goods_txt", { path });
+}
+
 /** Cluster every trade-good belt into labelled regions. */
 export async function computeGoodRegions(): Promise<GoodRegion[]> {
   return invoke("compute_good_regions");

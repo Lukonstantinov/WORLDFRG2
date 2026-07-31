@@ -298,14 +298,47 @@ pub fn compute_economy(
         if is_deposit[g] { a.max(0.6) } else { a }
     }).collect();
     let good_max: Vec<f32> = (0..gc).map(|g| prod.iter().map(|p| p[g]).fold(0.0f32, f32::max).max(1e-6)).collect();
-    // quality grade per hub/good: richer territory share → higher grade, with a
-    // small deterministic jitter so equal shares still differ between hubs/goods.
+
+    // DEPOSITS AND MINING PLAN slice 2: a deposit good's quality is the mean ORE
+    // GRADE of the workings inside a hub's catchment (§ "Slice 2 — grade → quality
+    // rewire"), not its share of world production. Share-based quality read
+    // backwards: a big cheap deposit (many low-grade workings summing to a large
+    // belt total) scored as fine stones. Grade already IS a 0..1 richness number
+    // (`Deposit::grade`), so this is a direct read, not a proxy.
+    let deposits: Vec<crate::sim::deposits::Deposit> = metadata::get_meta(&conn, "deposits")
+        .ok()
+        .flatten()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let good_slot: std::collections::HashMap<&str, usize> =
+        specs.iter().enumerate().map(|(i, s)| (s.id.as_str(), i)).collect();
+    let mut grade_sum = vec![vec![0.0f32; gc]; nn];
+    let mut grade_n = vec![vec![0u32; gc]; nn];
+    for d in &deposits {
+        let Some(&g) = good_slot.get(d.good.as_str()) else { continue };
+        let key = (d.y as u64) * (grid_w as u64) + d.x as u64;
+        if let Some(&(_, hh)) = claim.get(&key) {
+            if hh != u32::MAX {
+                grade_sum[hh as usize][g] += d.grade;
+                grade_n[hh as usize][g] += 1;
+            }
+        }
+    }
+
+    // quality grade per hub/good: a deposit good reads its workings' mean grade; any
+    // other good keeps the old richer-territory-share formula. Both get a small
+    // deterministic jitter so equal inputs still differ between hubs/goods.
     let mut quality = vec![vec![0.0f32; gc]; nn];
     for hh in 0..nn {
         for g in 0..gc {
             let share = prod[hh][g] / good_max[g];
             let jitter = hash01q((hh as u64).wrapping_mul(0x9E3779B1) ^ (g as u64).wrapping_mul(0x85EBCA77)) * 0.24 - 0.12;
-            quality[hh][g] = (0.30 + 0.62 * share + jitter).clamp(0.0, 1.0);
+            let base = if is_deposit[g] && grade_n[hh][g] > 0 {
+                grade_sum[hh][g] / grade_n[hh][g] as f32
+            } else {
+                0.30 + 0.62 * share
+            };
+            quality[hh][g] = (base + jitter).clamp(0.0, 1.0);
             // apply abundance scaling to production AFTER quality is read off share
             prod[hh][g] = prod[hh][g] / good_max[g] * abundance[g];
         }

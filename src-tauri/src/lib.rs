@@ -7,7 +7,7 @@ pub mod commands;
 pub mod sim;
 pub mod import;
 
-use commands::{world_commands, tile_commands, paint_commands, query_commands, template_commands, sim_commands, file_commands, goods_commands, campaign_commands, import_commands, preview_commands};
+use commands::{world_commands, tile_commands, paint_commands, query_commands, template_commands, sim_commands, file_commands, goods_commands, goods_import, campaign_commands, import_commands, preview_commands};
 use db::WorldDb;
 use tauri::Manager;
 
@@ -73,6 +73,7 @@ pub fn run() {
             goods_commands::preview_land_grid,
             goods_commands::get_goods_library,
             goods_commands::save_goods_library,
+            goods_import::import_goods_txt,
             template_commands::load_image_template,
             sim_commands::sim_generate_plates,
             sim_commands::sim_invert_terrain,

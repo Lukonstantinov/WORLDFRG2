@@ -824,6 +824,10 @@ commands/
                                   derived read over `prov_holder`/`province_raster`,
                                   nothing persisted
   goods_commands.rs             ← Goods spec CRUD, default_custom_goods, backfill
+  goods_import.rs                 ← DEPOSITS_AND_MINING_PLAN slice 3: the INI-ish
+                                  `.txt` goods importer (`import_goods_txt`) —
+                                  add-only (D8), always reports every default/
+                                  reject, never a silent drop
   import_commands.rs            ← import_world_layers (layered world import)
   preview_commands.rs           ← preview_zonal_profile / preview_coarse_climate (§8.14)
   template_commands.rs          ← Image → land/sea detection (4-bit quantization)
@@ -1668,12 +1672,33 @@ Five rules for anyone changing this:
   BFS would be a real cost. Its distance fields are multi-source BFS (a linear
   sweep from all seeds at once), never an outward scan per cell (§8.9 rule 1).
 
-> **Known follow-on, NOT built:** nothing yet reads `grade` into the quality system
-> (`economy.rs:305` still derives a hub's gem quality from its SHARE OF WORLD
-> PRODUCTION, so a big cheap deposit reads as fine stones — backwards), and nothing
-> reads `depth` at all. A mine is still a substring match on the good's name
-> (`tick/mod.rs`) and is mechanically identical to a farm. See
-> `docs/DEPOSITS_AND_MINING_PLAN.md` slices 2 and 4.
+**Slice 2 (built):** `economy.rs::compute_economy` now reads `metadata["deposits"]`
+and attributes each working to the hub whose catchment claims its cell (the same
+`claim` map the belt-production pass already builds), so a `Deposits`-distribution
+good's quality is the mean `grade` of the workings actually inside a hub's
+territory — not, as before, that hub's share of world production (which read
+backwards: a big cheap deposit scored as fine stones). Every other good keeps the
+old share-based formula.
+
+**Slice 3 (built):** an INI-ish `.txt` importer (`commands/goods_import.rs`,
+`import_goods_txt`, wired to a "Import .txt" button in the Goods Editor) adds
+minerals to the global library — ADD-ONLY, an id already present is rejected, never
+overwritten. Only `[id]` and `name` are required; `domain`/`distribution`/
+`deposit_model` parse through the real enums' own serde representation, so the
+parser can't disagree with the type. Eight new minerals ship in
+`default_custom_goods()` itself (not through the importer — they're the app's own
+library): mercury, alum, lapis_lazuli, turquoise, bog_iron, coal, garnet, carnelian
+— each exercising a model or mechanic the shipped six/gem-split never did (a
+near-single-source district count, a derived weathering mineral, a bog deposit an
+elevation floor could never place). Full detail, including what is deliberately
+NOT wired (mercury→silver amalgamation, alum→cloth as a hard recipe input — both
+real economic changes that need their own `econ_` measurement, not an add-only
+slice) in `docs/DEPOSITS_AND_MINING_PLAN.md` slice 3.
+
+> **Still not built:** nothing reads `depth` yet. A mine is still a substring
+> match on the good's name (`tick/mod.rs`) and is mechanically identical to a
+> farm — no mining capability, no depth gating, no mine-vs-quarry split. See
+> `docs/DEPOSITS_AND_MINING_PLAN.md` slice 4.
 
 ---
 
@@ -1693,11 +1718,13 @@ SCOREBOARD.md                     ← ⭐ The project held as ~12 NUMBERS instea
 ```
 PROVINCE_SYSTEM_PLAN.md           ← The province layer's design + status (see FIX_PLAN B1);
                                     the shipped algorithm itself is §8.10 above
-DEPOSITS_AND_MINING_PLAN.md       ← ⭐ APPROVED, SLICE 1 BUILT. Ore geology (§8.16,
-                                    done) → grade→quality rewire → txt goods import
+DEPOSITS_AND_MINING_PLAN.md       ← ⭐ APPROVED, SLICES 1-3 BUILT. Ore geology
+                                    (§8.16) + grade→quality rewire + txt goods
+                                    import & 8 new minerals — all done, all gated
                                     → mining as an industry (depth gating, mine vs
                                     quarry) → quarry window, mining settlements,
-                                    growing settlement catchment. Carries the
+                                    growing settlement catchment (slices 4-5,
+                                    unbuilt). Carries the
                                     measured findings that motivated it and its own
                                     "deliberately not built" list
 CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next three workstreams:

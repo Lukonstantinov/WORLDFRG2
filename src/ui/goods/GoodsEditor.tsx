@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useGoodsStore } from "@state/goodsStore";
 import { useUIStore } from "@state/uiStore";
-import { previewGoodScore } from "@bridge";
+import { previewGoodScore, importGoodsTxt } from "@bridge";
 import type { GoodSpec, GoodDomain, GoodDistribution, GoodEnvelope, RecipeInput } from "@types";
 
 const DOMAINS: GoodDomain[] = ["marine", "coastal", "continental", "island"];
@@ -59,6 +59,32 @@ export function GoodsEditor() {
     try { await fn(); setStatus(label); } catch (e) { setStatus(`Error: ${e}`); }
   };
 
+  // Import a .txt goods file (docs/DEPOSITS_AND_MINING_PLAN.md slice 3): pick a
+  // path via the OS dialog, import ADD-ONLY into the global library, then
+  // reload the editor from that library so new goods show up immediately.
+  const handleImportTxt = async () => {
+    try {
+      let path: string | null = null;
+      try {
+        const { open } = await import("@tauri-apps/plugin-dialog");
+        const result = await open({ filters: [{ name: "Goods", extensions: ["txt"] }], title: "Import goods .txt" });
+        if (result) path = result as string;
+      } catch {
+        const input = prompt("Enter path to a goods .txt file:");
+        if (input) path = input;
+      }
+      if (!path) return;
+      const report = await importGoodsTxt(path);
+      await loadFromLibrary();
+      const parts = [`${report.added.length} added`];
+      if (report.rejected.length) parts.push(`${report.rejected.length} rejected`);
+      if (report.defaulted.length) parts.push(`${report.defaulted.length} field(s) defaulted`);
+      setStatus(`Import: ${parts.join(", ")}${report.rejected.length ? " — " + report.rejected.map(([id, why]) => `${id}: ${why}`).join("; ") : ""}`);
+    } catch (e) {
+      setStatus(`Error: ${e}`);
+    }
+  };
+
   const enabledCount = specs.filter((s) => s.enabled).length;
 
   return (
@@ -74,6 +100,7 @@ export function GoodsEditor() {
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
           <button style={btn} onClick={addCustom}>+ Add custom</button>
           <button style={btn} onClick={act("Loaded global library", loadFromLibrary)}>Load library</button>
+          <button style={btn} title="Add-only: import an INI-ish .txt of new goods (never replaces an existing id)" onClick={handleImportTxt}>Import .txt</button>
           <button style={btn} onClick={act("Reset to defaults", resetDefaults)}>Reset to defaults</button>
           <button style={btn} title="Review planted vs manufactured goods + the recipe schematic" onClick={() => useUIStore.getState().openChainReview()}>⚙ Review chains</button>
           <div style={{ flex: 1 }} />

@@ -388,6 +388,35 @@ fn default_custom_goods() -> Vec<GoodSpec> {
                elevation: Option<[f32; 3]>, abs_lat: Option<[f32; 3]>, fertility: f32, coast_bonus: f32| Envelope {
         climate, temp, precip, elevation, abs_lat, fertility, coast_bonus,
     };
+    // A DEPOSIT good with its OWN base_value/category/bulk (DEPOSITS_AND_MINING_PLAN
+    // slice 3). `cg()` hardcodes base_value to 1.0 for every good that goes through
+    // it — fine for the existing customs, which never needed to sit at a different
+    // price band, but wrong for these eight, which are meant to carry real,
+    // differentiated values (lapis at 40, coal near nothing). `model`/`parent` are
+    // left to `deposits::default_model_for`/`default_parent_for`, which already
+    // carry the correct entry for every id below — that table was built with this
+    // slice in mind.
+    #[allow(clippy::too_many_arguments)]
+    fn dg(
+        id: &str, name: &str, icon: &str, color: &str, domain: Domain,
+        rarity: f32, desire: f32, luxury: bool, num: u32, den: u32,
+        category: &str, need_tier: u8, base_value: f32, bulk: f32, env: Envelope,
+    ) -> GoodSpec {
+        GoodSpec {
+            id: id.into(), name: name.into(), icon: icon.into(), color: color.into(),
+            enabled: true, domain, distribution: Distribution::Deposits, rarity, desire,
+            network_luxury: luxury, builtin: false,
+            deposit: Some(DepositSpec {
+                min_elev: 0.0, count_num: num, count_den: den,
+                province_scale: default_province_scale(),
+                model: None, placer_frac: None, parent: None,
+            }),
+            scoring: Some(env),
+            category: category.into(), need_tier, base_value, bulk, perishable: 0.0,
+            inputs: Vec::new(), labor: 1.0,
+            consumption_interval: if luxury { 180.0 } else { 45.0 },
+        }
+    }
 
     vec![
         // Note: grain & paper "types" already exist as per-cell SUBTYPES of the
@@ -443,6 +472,53 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         // Lead / tin-grey base metal (pewter, pipes, shot): low hills.
         cg("lead", "Lead", "\u{1F529}", "#8a8e96", Domain::Continental, Distribution::Deposits, 0.55, 0.40, false,
             dep(0.26, 2, 1), env(vec![], None, None, Some([0.26,0.85,0.16]), None, 0.0, 0.0)),
+
+        // ── DEPOSITS_AND_MINING_PLAN slice 3: eight minerals, each demonstrating a
+        //    deposit model or mechanic the shipped six/gem-split never exercised. ──
+        // Mercury: near-monopoly volcanic-arc cinnabar (Almadán, Idrija). High value,
+        // industrial rather than a luxury — amalgamation is a slice-4 mechanic, not
+        // built here; see docs/DEPOSITS_AND_MINING_PLAN.md slice 3's own caveat.
+        dg("mercury", "Mercury", "\u{1F4A7}", "#c0c4ca", Domain::Continental,
+            0.85, 0.40, false, 1, 2, "metal", 1, 20.0, 1.5,
+            env(vec![], None, None, Some([0.30,0.85,0.15]), None, 0.0, 0.0)),
+        // Alum: the cloth mordant of Tolfa (1462). The dyeing-chain link is
+        // historical flavour, not wired into the shipped `cloth` recipe this slice —
+        // adding a hard input dependency to an existing manufactured good needs its
+        // own econ_ measurement, which is slice 4 territory, not an add-only slice.
+        dg("alum", "Alum", "\u{2697}\u{FE0F}", "#e8e0c0", Domain::Continental,
+            0.50, 0.35, false, 1, 1, "craft", 1, 4.0, 2.0,
+            env(vec![], None, None, Some([0.25,0.80,0.15]), None, 0.0, 0.0)),
+        // Lapis lazuli: contact-metamorphic, and famously ONE source for four
+        // thousand years (Sar-i-Sang) — districts=1 at the default deposit slider.
+        dg("lapis_lazuli", "Lapis Lazuli", "\u{1F535}", "#26619c", Domain::Continental,
+            0.93, 0.60, true, 1, 6, "gem", 2, 40.0, 1.0,
+            env(vec![], None, None, Some([0.40,1.0,0.12]), None, 0.0, 0.0)),
+        // Turquoise: a DERIVED weathering mineral — supergene alteration of a
+        // copper body under an arid climate (Nishapur, Sinai). No independent
+        // search: `place_mineral` walks `default_parent_for("turquoise")` == copper.
+        dg("turquoise", "Turquoise", "\u{1F7E6}", "#30d5c8", Domain::Continental,
+            0.75, 0.50, true, 1, 3, "gem", 2, 18.0, 1.0,
+            env(vec![(4,1.0),(5,0.9),(6,0.8),(7,0.7)], None, None, Some([0.15,0.55,0.15]), None, 0.0, 0.0)),
+        // Bog iron: wetland precipitate iron, structurally impossible under an
+        // elevation-floor placer — the iron source of early medieval N. Europe.
+        dg("bog_iron", "Bog Iron", "\u{1FAA8}", "#5b4636", Domain::Continental,
+            0.35, 0.30, false, 2, 1, "metal", 1, 2.0, 3.5,
+            env(vec![(11,0.8),(12,1.0),(14,0.8),(15,0.9),(16,0.7)], None, None, Some([0.0,0.15,0.10]), None, 0.0, 0.0)),
+        // Coal: a sedimentary-basin measure alongside limestone, already referenced
+        // by `estate_kind_for_good`'s "coal" substring match but never a real good.
+        dg("coal", "Coal", "\u{26AB}", "#1c1c1c", Domain::Continental,
+            0.45, 0.35, false, 2, 1, "fuel", 0, 1.2, 3.0,
+            env(vec![], None, None, Some([0.0,0.30,0.15]), None, 0.0, 0.0)),
+        // Garnet: the bottom rung of the gem ladder — common orogenic gem gravel.
+        dg("garnet", "Garnet", "\u{2666}\u{FE0F}", "#8b0000", Domain::Continental,
+            0.45, 0.42, false, 2, 1, "gem", 1, 6.0, 1.0,
+            env(vec![], None, None, Some([0.30,0.80,0.16]), None, 0.0, 0.0)),
+        // Carnelian: agate's warm cousin, filling the same basalt amygdules — the
+        // great Khambhat bead trade.
+        dg("carnelian", "Carnelian", "\u{1F7E0}", "#b33009", Domain::Continental,
+            0.50, 0.40, false, 2, 1, "gem", 1, 5.0, 1.0,
+            env(vec![], None, None, Some([0.20,0.70,0.18]), None, 0.0, 0.0)),
+
         // ── Manufactured chain goods (the shipped recipe LIBRARY) — made in cities
         // from imported raws, no per-cell belt. The placement engine skips them; the
         // shared `apply_manufacturing` pass produces them at populous hubs that hold
