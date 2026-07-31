@@ -37,6 +37,121 @@ impl CampaignSim {
     }
 
 
+    /// §3.4d · houses broken by war, on a defeat severe enough to matter (gated by
+    /// the caller). Two independent paths, both funnelling into the SAME
+    /// `strip_holdings_at` + ruin check — neither invents new state:
+    ///
+    /// - ENEMY SACK: every live non-guild house resident (`house.hub == lose`) at
+    ///   the losing city risks losing what it holds THERE specifically (its own
+    ///   estates in that city, offices/bailos/influence there, warehouse stock
+    ///   there) — a roll per house, not a guarantee, since not every resident
+    ///   family is equally exposed.
+    /// - INTERNAL PURGE: the city turns on whichever house actually financed the
+    ///   losing war — the house-driven war's own `backer_house` (§3.4c) if this
+    ///   was one, else the losing city's own ruling house (`council_house`/
+    ///   `captor_house`) for an ordinary rival-council war — guaranteed (a
+    ///   targeted political act, not a raid), stripped the same way plus a
+    ///   confiscation of a share of its wealth straight into the city's own
+    ///   treasury and a real prestige/power cost.
+    ///
+    /// Either path may cascade to full dissolution through the EXISTING
+    /// `dissolve_house`, which already funnels every dissolution path and writes
+    /// off outstanding bank loans — no new cascade logic needed.
+    fn apply_war_defeat_consequences(&mut self, lose: usize, _win: usize, backer_house: i32, tick: u32) {
+        let ln = self.hubs[lose].name.clone();
+        let residents: Vec<usize> = (0..self.houses.len())
+            .filter(|&hi| !self.houses[hi].defunct && !self.houses[hi].is_guild
+                && self.houses[hi].hub as usize == lose)
+            .collect();
+        for hi in residents {
+            if hash01(self.seed, tick as u64 ^ 0x5AC4, hi as u64) > WAR_SACK_CHANCE { continue; }
+            let lost = self.strip_holdings_at(hi, lose, WAR_SACK_MAX_ESTATES);
+            if lost > EPS {
+                if hi < self.house_ledger.len() { self.house_ledger[hi].war_damage += lost; }
+                let hn = self.houses[hi].name.clone();
+                self.journal.push(JournalEntry {
+                    tick, kind: "war".into(), hub: lose as i32, good: -1, value: lost,
+                    text: format!("{} is sacked in the fall of {}, losing {:.0} in holdings", hn, ln, lost),
+                });
+                self.houses[hi].events.push(HouseEvent {
+                    tick, kind: "war".into(), text: format!("Sacked in the fall of {}", ln),
+                });
+            }
+            if self.house_is_ruined(hi) { self.dissolve_house(hi); }
+        }
+
+        let financier = if backer_house >= 0 { backer_house }
+            else { self.hubs[lose].council_house.max(self.hubs[lose].captor_house) };
+        if financier < 0 { return; }
+        let fi = financier as usize;
+        if fi >= self.houses.len() || self.houses[fi].defunct || self.houses[fi].is_guild { return; }
+        let stripped = self.strip_holdings_at(fi, lose, WAR_PURGE_MAX_ESTATES);
+        let confiscated = (self.houses[fi].wealth.max(0.0) * WAR_PURGE_CONFISCATE_FRAC).max(0.0);
+        self.houses[fi].wealth -= confiscated;
+        self.hubs[lose].treasury += confiscated;
+        self.houses[fi].political_power = (self.houses[fi].political_power - WAR_PURGE_POWER_LOSS).max(0.0);
+        let total = stripped + confiscated;
+        if total > EPS {
+            if fi < self.house_ledger.len() { self.house_ledger[fi].war_damage += total; }
+            let hn = self.houses[fi].name.clone();
+            self.journal.push(JournalEntry {
+                tick, kind: "war".into(), hub: lose as i32, good: -1, value: total,
+                text: format!("{} is purged and stripped of office in {} for financing the losing war", hn, ln),
+            });
+            self.houses[fi].events.push(HouseEvent {
+                tick, kind: "war".into(), text: format!("Purged in {} for financing the losing war", ln),
+            });
+        }
+        if self.house_is_ruined(fi) { self.dissolve_house(fi); }
+    }
+
+
+    /// Strip house `hi`'s holdings sited specifically at `city` — up to
+    /// `max_estates` of its own estates there (ownership passes to the city,
+    /// `owner_house = -1`, the same "confiscated" convention the resale market
+    /// uses), any office/bailo/influence it holds there, and any warehouse stock
+    /// depot at that city (stock is lost, not spilled to the local pool — it is
+    /// PLUNDERED, not liquidated). Returns the wealth-equivalent value stripped,
+    /// for the Accountant ledger and the journal.
+    fn strip_holdings_at(&mut self, hi: usize, city: usize, max_estates: usize) -> f32 {
+        let mut lost = 0.0f32;
+        let estates: Vec<usize> = (0..self.hubs.len())
+            .filter(|&ei| self.hubs[ei].is_estate && !self.hubs[ei].abandoned
+                && self.hubs[ei].owner_house == hi as i32 && self.hubs[ei].parent == city as i32)
+            .take(max_estates)
+            .collect();
+        for ei in estates {
+            lost += self.estate_market_value(ei);
+            self.hubs[ei].owner_house = -1;
+        }
+        let cu = city as u32;
+        self.houses[hi].offices.retain(|&o| o != cu);
+        self.houses[hi].bailos.retain(|&o| o != cu);
+        self.houses[hi].influence.retain(|&(c, _)| c != cu);
+        for w in self.warehouses.iter_mut() {
+            if w.owner == hi as i32 && w.hub == cu {
+                lost += w.stock.iter().sum::<f32>();
+                w.stock.iter_mut().for_each(|s| *s = 0.0);
+            }
+        }
+        lost
+    }
+
+
+    /// A house left with no wealth AND no productive assets/offices anywhere has
+    /// nothing left to rebuild from — the honest trigger for §3.4d's cascade into
+    /// `dissolve_house`, distinct from the ordinary insolvency check
+    /// (`update_solvency`) which reads wealth alone: a war can strip a house's
+    /// ASSETS while leaving it technically solvent for a while longer, and that
+    /// house is still ruined in every way that matters.
+    fn house_is_ruined(&self, hi: usize) -> bool {
+        if self.houses[hi].defunct || self.houses[hi].wealth > EPS { return false; }
+        let has_estate = self.hubs.iter().any(|h| h.is_estate && !h.abandoned && h.owner_house == hi as i32);
+        let has_office = !self.houses[hi].offices.is_empty() || !self.houses[hi].bailos.is_empty();
+        !has_estate && !has_office
+    }
+
+
     /// §3.4e · war damages one of `hub`'s own estates/manufactories this year —
     /// reuses the EXISTING `TickHub.damage` field exactly as a natural disaster
     /// would (see `estate_condition_pass`, which already repairs ANY nonzero
@@ -193,6 +308,7 @@ impl CampaignSim {
         let cause = self.wars[wi].cause.clone();
         let levies_total = self.wars[wi].levies;
         let start_tick = self.wars[wi].start_tick;
+        let backer_house = self.wars[wi].backer_house;
 
         let (win, lose, rep, spoils, awarded_goal) = match winner {
             Some(win) if score_abs >= WAR_PRICE_REPARATIONS => {
@@ -210,6 +326,13 @@ impl CampaignSim {
                     .into_iter().find(|&g| war_goal_price(g) <= score_abs).unwrap_or(WAR_GOAL_PLUNDER);
                 let awarded = if war_goal_price(declared_goal) <= score_abs { declared_goal } else { richest_affordable };
                 let spoils = self.apply_war_goal(win, lose, awarded, tick, yr);
+                // §3.4d · a defeat severe enough to have earned tribute (score ≥ 40)
+                // is severe enough to break houses over — sack + internal purge,
+                // deliberately the plan's own highest-risk item, gated so it does
+                // not fire on every white-peace-adjacent skirmish.
+                if score_abs >= WAR_PRICE_TRIBUTE {
+                    self.apply_war_defeat_consequences(lose, win, backer_house, tick);
+                }
                 (Some(win), Some(lose), rep, spoils, awarded)
             }
             // A winner was named but the score never reached the reparations floor

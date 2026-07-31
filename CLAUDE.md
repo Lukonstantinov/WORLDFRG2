@@ -414,6 +414,25 @@ serde-defaulted so old saves load). Grouped by theme:
   (lend to the chest, goods at a war premium) and a feud cause from opposing
   war-backing are real future work, not silently folded in — 3.4e's own step
   text only asks for ledger/damage/blockade/boom.
+- **Sack and purge (`CITY_PROVINCE_WAR_PLAN.md` §3.4d, `tick/war.rs`) — the last
+  step of the war workstream, and its own highest-risk item, built last on
+  purpose. `apply_war_defeat_consequences` fires from `resolve_war` only on a
+  decisive-enough defeat (`score_abs >= WAR_PRICE_TRIBUTE`). ENEMY SACK: every
+  live non-guild house resident at the losing city risks losing its own
+  estates there (ownership passes to the city, `owner_house = -1`, the same
+  convention the resale market uses), offices/bailos/influence there, and any
+  warehouse stock there — a per-house roll, not a guarantee. INTERNAL PURGE:
+  the city turns on whichever house actually financed the losing war (the
+  house-driven war's own `backer_house`, else the losing city's own ruling
+  house) — guaranteed once triggered, stripped the same way plus a wealth
+  confiscation into the city's treasury and a prestige/power cost. Both share
+  one helper, `strip_holdings_at`, and either may cascade to full dissolution
+  through the EXISTING `dissolve_house` — no new cascade logic. `house_is_
+  ruined` is new: distinct from ordinary insolvency (wealth alone), it checks
+  wealth AND estates AND offices, since a war can strip a house's assets while
+  it stays technically solvent a while longer. This completes `CITY_PROVINCE_
+  WAR_PLAN.md`'s entire §7 order — see `docs/SCOREBOARD.md`'s dated entry for
+  what remains explicitly out of scope by the plan's own §6.
 - **Positive events (Phase 1.4):** the mechanism otherwise only produces decline (vices,
   feuds, ruin) — these give the chronicle something else to say, each a MARKER on `House`
   rather than new machinery. `assign_house_tiers` also tracks **the finest hour** (all-time

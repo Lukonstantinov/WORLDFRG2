@@ -9,6 +9,60 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md 3.4d: sack and purge — the last step, `CITY_PROVINCE_WAR_PLAN.md` COMPLETE)
+
+**What shipped.** The plan's own highest-risk item, deliberately built last:
+`apply_war_defeat_consequences` (`tick/war.rs`), fired from `resolve_war` on any
+decisive-enough defeat (`score_abs >= WAR_PRICE_TRIBUTE`, 40 — a marginal
+reparations-only win does not cascade into breaking houses). Two paths, both
+funnelling into the same `strip_holdings_at` + `house_is_ruined` check so
+neither invents parallel machinery:
+
+- **Enemy sack.** Every live non-guild house resident at the losing city
+  (`house.hub == lose`) risks losing its own estates THERE (up to
+  `WAR_SACK_MAX_ESTATES`=2, ownership passing to the city — `owner_house = -1`,
+  the same "confiscated" convention the resale market already uses), offices/
+  bailos/influence there, and any warehouse stock depot there — a per-house
+  roll (`WAR_SACK_CHANCE`=0.5), not a guarantee, since not every resident
+  family is equally exposed to a single sacking.
+- **Internal purge.** The city turns on whichever house actually financed the
+  losing war: the house-driven war's own `backer_house` (§3.4c) if this was
+  one, else the losing city's own ruling house (`council_house`/
+  `captor_house`) for an ordinary rival-council war — guaranteed once
+  triggered (a targeted political act, not a raid), stripped the same way
+  (up to `WAR_PURGE_MAX_ESTATES`=3) PLUS a wealth confiscation
+  (`WAR_PURGE_CONFISCATE_FRAC`=0.25) straight into the city's own treasury and
+  a real prestige/power cost (`WAR_PURGE_POWER_LOSS`=0.15).
+
+Either path may cascade to full dissolution through the EXISTING
+`dissolve_house` — no new cascade logic. `house_is_ruined` is a NEW check
+distinct from the ordinary insolvency test (`update_solvency`, which reads
+wealth alone): a war can strip a house's assets while it's still technically
+solvent for a while longer, and that house is ruined in every way that
+matters (no wealth AND no estates AND no offices anywhere) — the honest
+trigger for a war-driven collapse.
+
+**Gate results:** `cargo check` clean · `npx tsc --noEmit` clean (no frontend
+surface for this step — sack/purge journal entries already render through the
+existing chronicle) · `economic_war_levies_houses_and_resolves` and
+`every_war_terminates_within_the_round_cap` both pass ·
+`simulate_decades_reports_dynamics` hard-passes · `econ_` 4/4 non-ignored pass
+— **first attempt, no RNG-divergence regression this time** (unlike 3.4a-c's
+and 3.4e's own tuning rounds), because the severity gate keeps this path
+comparatively rare. `econ_fidelity_scorecard`'s wars/century held at 45.00
+(3.4e's own final value), consistent with sack/purge being a consequence of a
+war's END, not a new trigger on how often one starts.
+
+**`CITY_PROVINCE_WAR_PLAN.md` is now fully built end to end** — every item in
+its own §7 order (1.2/1.3 panel · 2.1–2.5 provinces · 3.1–3.3 politics ·
+3.4f/3.4a-c/3.4e/3.4d war) shipped and gated across this session. What remains
+is explicitly out of scope by the plan's own §6 ("deliberately not built"):
+territorial empires above the city-state, sieges/army movement, a rival house
+finishing an enemy under cover of war, land state persisted back to tiles, a
+per-cell quality field, the unexploited-opportunity view, and leagues/
+treaties/diplomacy (FIX_PLAN B4) — plus 3.4e's own voluntary-war-financing
+gap (lend to the chest, goods at a war premium) noted in its own entry above.
+
 ## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md 3.4e: war ledger, damage, blockade, boom)
 
 **What shipped.** The four remaining §2 requirements from the plan, all reusing

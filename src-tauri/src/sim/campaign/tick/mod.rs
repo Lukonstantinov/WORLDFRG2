@@ -1470,6 +1470,18 @@ const WAR_BLOCKADE_EXPORT_MULT: f32 = 0.55;
 const WAR_BOOM_EXPORT_FRAC: f32 = 0.12;
 const WAR_BOOM_EXPORT_FLAT: f32 = 5.0;
 
+// ── §3.4d · houses broken by war (the plan's own highest-risk item, deliberately
+// last) — gated to a severe defeat (score ≥ WAR_PRICE_TRIBUTE) so it cannot fire on
+// every marginal skirmish. ──
+/// Per resident house at a sacked city, the chance it loses holdings there.
+const WAR_SACK_CHANCE: f32 = 0.5;
+const WAR_SACK_MAX_ESTATES: usize = 2;
+/// The purge targets ONE specific house (guaranteed once triggered), so it can
+/// afford to be a little more thorough than the scattershot sack.
+const WAR_PURGE_MAX_ESTATES: usize = 3;
+const WAR_PURGE_CONFISCATE_FRAC: f32 = 0.25;
+const WAR_PURGE_POWER_LOSS: f32 = 0.15;
+
 // ── §3.4b · terms priced in war score (§1.4's table, verbatim) ──────────────────
 const WAR_PRICE_REPARATIONS: f32 = 10.0;
 const WAR_PRICE_TRADE_RIGHTS: f32 = 25.0;
