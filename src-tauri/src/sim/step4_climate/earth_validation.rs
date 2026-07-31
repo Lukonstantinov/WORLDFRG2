@@ -453,6 +453,71 @@ fn earth_diagnose_orographic_responsiveness() {
     println!("──────────────────────────────────────────────────────────────\n");
 }
 
+/// Does the wind actually REVERSE between the two seasons, where the real Earth's
+/// does? (See the January/July surface-wind reference.)
+///
+/// A monsoon IS a seasonal wind reversal — that is the definition, from the Arabic
+/// *mawsim*, "season". Every named site below flips by roughly 180° between January
+/// and July on the real Earth: the Arabian Sea and the Bay of Bengal swing from NE
+/// to SW, the Somali coast from NE to a strong cross-equatorial SW jet, northern
+/// Australia from SE to NW. Prints the January and July headings and the angle
+/// between them, with a control set (mid-latitude westerlies, the trade cores) that
+/// should NOT reverse.
+#[test]
+#[ignore]
+fn earth_diagnose_seasonal_wind_reversal() {
+    use crate::sim::seasonal::compute_seasonal_wind;
+    let (buf, _r) = run_earth();
+    let jul = compute_seasonal_wind(&buf, 1.0);  // boreal summer
+    let jan = compute_seasonal_wind(&buf, -1.0); // boreal winter
+    let cell = |lat: f32, lon: f32| -> usize {
+        let y = (((90.0 - lat) * 2.0).round() as usize).min(H - 1);
+        let x = (((lon + 180.0) * 2.0).round() as usize) % W;
+        y * W + x
+    };
+    // Compass bearing (0 = wind blowing toward north, 90 = toward east).
+    let bearing = |vx: f32, vy: f32| -> f32 {
+        let d = vx.atan2(-vy).to_degrees();
+        if d < 0.0 { d + 360.0 } else { d }
+    };
+    let sites: [(&str, f32, f32, bool); 11] = [
+        // (name, lat, lon, SHOULD it reverse?)
+        ("Arabian Sea 15N65E",       15.0,  65.0, true),
+        ("Bay of Bengal 15N90E",     15.0,  90.0, true),
+        ("Somali coast 5N52E",        5.0,  52.0, true),
+        ("India-west-coast 15N74E",  15.0,  74.0, true),
+        ("SE Asia 15N100E",          15.0, 100.0, true),
+        ("N Australia 13S132E",     -13.0, 132.0, true),
+        ("W Africa/Sahel 12N0E",     12.0,   0.0, true),
+        // Controls — these should hold their heading all year.
+        ("N Atlantic westerlies 45N30W", 45.0, -30.0, false),
+        ("S Pacific trades 15S120W",    -15.0, -120.0, false),
+        ("Southern Ocean 55S0E",        -55.0,   0.0, false),
+        ("NE Pacific trades 15N150W",    15.0, -150.0, false),
+    ];
+    println!("\n─── Seasonal wind reversal (Jan vs Jul headings) ───");
+    println!("  {:30} {:>8} {:>8} {:>8}  {}", "site", "Jan", "Jul", "Δ°", "expected");
+    let (mut hits, mut want) = (0, 0);
+    for (nm, la, lo, should) in sites {
+        let i = cell(la, lo);
+        let bj = bearing(jan.vx[i], jan.vy[i]);
+        let bl = bearing(jul.vx[i], jul.vy[i]);
+        let mut d = (bl - bj).abs();
+        if d > 180.0 { d = 360.0 - d; }
+        let reversed = d > 120.0;
+        if should {
+            want += 1;
+            if reversed { hits += 1; }
+        }
+        println!("  {:30} {:8.0} {:8.0} {:8.0}  {}{}",
+            nm, bj, bl, d,
+            if should { "REVERSE" } else { "steady " },
+            if should == reversed { " ✓" } else { " ✗" });
+    }
+    println!("  monsoon sites reversing (Δ > 120°): {hits}/{want}");
+    println!("────────────────────────────────────────────────────\n");
+}
+
 /// Named-region spot checks — regional regression protection for the archetypal
 /// climates a player would immediately judge (the deserts, the equatorial
 /// rainforests, the monsoon belt). Prints a per-site table (gen vs real Köppen +

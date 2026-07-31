@@ -881,3 +881,66 @@ downstream of A1/A9, not a separate item.
 
 Also still open from the census: `H` (highland) at 8.07% of generated land against
 0.00% of the reference, and `Csa` Mediterranean at 0.17% against 1.94%.
+
+### A14. The two-season wind does not reverse — MEASURED, mechanism built and REVERTED
+
+`earth_diagnose_seasonal_wind_reversal` (ignored) compares the January and July
+headings at the real Earth's monsoon sites. On the shipped model:
+
+```
+  Arabian Sea 15N65E   Jan 225  Jul 225   Δ  0        N Australia 13S132E  Δ 2
+  Bay of Bengal 15N90E Jan 225  Jul 225   Δ  0        W Africa/Sahel 12N0E Δ 3
+  Somali coast 5N52E   Jan 225  Jul 225   Δ  0        SE Asia 15N100E      Δ 1
+  India west coast     Jan 228  Jul 221   Δ  8
+                                   monsoon sites reversing (Δ > 120°): 0/7
+```
+
+**The maximum seasonal heading change anywhere on Earth is 8°.** A monsoon IS a
+seasonal wind reversal — that is the word's definition — so the model has two
+seasons of *rain* running on one season of *wind*. `belt_wind(lat, circ)` takes no
+season argument; the only seasonal term is `seasonal.rs`'s thermal-low
+perturbation at `MONSOON_WIND_GAIN = 0.10`, which cannot turn a belt.
+
+This is also the wrong MECHANISM, not merely a weak one. The model implements the
+historical view of a monsoon as a giant land–sea breeze; the modern view is that a
+monsoon is the seasonal migration of the ITCZ, with land–sea contrast selecting the
+LONGITUDE the convergence zone reaches furthest poleward rather than supplying the
+force (Chao & Chen 2001; Gadgil 2003; Geen et al. 2020, *Rev. Geophys.*).
+
+**Built and measured:** `belt_wind_shifted(lat, circ, shift)` displacing the whole
+circulation toward the summer hemisphere, with the meridional direction taken from
+the side of the *displaced* ITCZ and the Coriolis handedness from the TRUE latitude
+— which reproduces cross-equatorial recurving into a genuine south-westerly. Plus a
+per-column land pull, a latitude taper (a uniform shift reversed the 55°S Southern
+Ocean westerlies, which is flatly wrong), and a wind-aware `monsoon_onshore`.
+
+```
+  configuration                                   main   exact   reversal
+  baseline (shipped)                              70.8    32.8      0/7
+  migration only, 10°/1.6                         68.7    32.3      7/7
+  migration 8°/1.0 + wind-aware onshore gate      70.1    33.7      4/7
+  migration 10°/1.6 + wind-aware onshore gate     68.5    32.4      7/7
+```
+
+**Reverted: main-class falls below the floor in every configuration.** The reason
+is now well established across A7, A8 and A14 — *the model's arid belt is held up
+by a wind that never changes direction.* Turn the wind honestly and the B row
+collapses (68.1% → 61.3%). The wind-aware onshore gate recovers B completely
+(back to 68.1%) and gives the best exact-zone agreement ever measured (33.7% vs
+32.8%), but then costs the A row (83.5% → 80.0%) by shutting the monsoon off over
+genuinely monsoonal tropics too.
+
+**This is the session's clearest open trade**, and it is not a tuning problem:
+
+- **For** adopting it: the physics is unambiguously right, it has an independent
+  non-score gate (0/7 → 4/7 sites reversing), and it improves exact-zone — the
+  metric CLAUDE.md §2.3 says to track, since main-class is inflated by E scoring
+  ~99% for free.
+- **Against**: main-class drops 0.7, carried entirely by the largest-weight class.
+
+Whoever picks this up should decide that question FIRST, before touching a
+constant. If the answer is to adopt, the follow-on work is a better onshore
+criterion — one that distinguishes "the summer wind blows off a warm sea onto this
+coast" (India) from "the summer wind has an onshore component somewhere in its
+quadrant" (the Sahara) — most likely the moist-static-energy + orographic-insulation
+index in the earth-systems report rather than any ray test at all.
