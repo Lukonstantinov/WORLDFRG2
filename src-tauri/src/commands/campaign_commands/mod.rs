@@ -2174,6 +2174,14 @@ pub struct WarBrief {
     pub chest_b: f32,
     pub levies: f32,
     pub cause: String,
+    /// CITY_PROVINCE_WAR_PLAN.md §3.4a · bidirectional war score, −100..100.
+    /// Positive favours `a`. ±100 ends the war outright.
+    #[serde(default)] pub score: f32,
+    /// §3.4a · quarterly rounds fought so far (of `WAR_ROUND_CAP`'s backstop).
+    #[serde(default)] pub round: u16,
+    /// §3.4b · what the aggressor is fighting for, as a phrase — the same label
+    /// `war_goal_label` already uses in the journal.
+    #[serde(default)] pub goal_label: String,
 }
 #[derive(Serialize, Clone)]
 pub struct WarsPayload {

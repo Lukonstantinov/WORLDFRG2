@@ -1478,6 +1478,13 @@ export interface WarBrief {
   chest_b: number;
   levies: number;
   cause: string;
+  /** CITY_PROVINCE_WAR_PLAN.md §3.4a · bidirectional war score, −100..100 — positive
+   *  favours `a`. ±100 ends the war outright. */
+  score: number;
+  /** §3.4a · quarterly rounds fought so far (of the round cap's backstop). */
+  round: number;
+  /** §3.4b · what the aggressor is fighting for, as a phrase. */
+  goal_label: string;
 }
 /** A concluded war (the log). */
 export interface WarRecord {

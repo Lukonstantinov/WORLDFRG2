@@ -360,6 +360,40 @@ serde-defaulted so old saves load). Grouped by theme:
   uses for ethnic territories — a fill + a boundary stroke over the coarse cells, no new
   polygon-tracing machinery. Toggle: Toolbar → 🏰 States (`overlayVisibility.states`,
   refreshed on year boundaries, the same cadence `campaignCorridors` uses).
+- **War score, terms and casus belli (`CITY_PROVINCE_WAR_PLAN.md` §3.4a-c,
+  `tick/war.rs`):** DLC 3.5's declare/wage/resolve skeleton gains a real
+  bidirectional `War.score` (−100..100) and quarterly rounds (tick-driven
+  catch-up, same trick the crisis engine uses). A round's outcome is biased by
+  relative war-chest+treasury strength; termination checks — in order — a
+  decisive score, the three exhaustion paths (force broken · treasury & credit
+  spent · war weariness), backers-withdraw (house wars only), then
+  `WAR_ROUND_CAP` (3 years) as the last-resort guarantee, exactly rule 22's
+  discipline applied to war (`every_war_terminates_within_the_round_cap` is the
+  crisis engine's own termination test, mirrored). §3.4b prices the victor's
+  terms in that final score (§1.4's table: reparations 10 · trade rights 25 ·
+  tribute 40 · a province 55 · annexation 90); a win short of its declared
+  goal's price downgrades to the richest the score affords, never upgrades. A
+  new `WAR_GOAL_PROVINCE` reassigns one ordinary (non-house-held, rule 24)
+  province's `prov_holder` to the victor. §3.4c: a WARMONGER RULER
+  (`head_character_factor` axis 0) biases the declare chance; a HOUSE-DRIVEN WAR
+  lets the winner of a vendetta-stage feud flare, if it holds its own city's
+  council or captor seat, drag that city into a full war on the loser's instead
+  of the ordinary property damage, auto-committed as `backer_house`.
+  **The tuning story is the deliverable as much as the mechanism**: shipped
+  naive it measured 65 wars/century against §3.4f's 6.0/century pre-3.4a-c
+  baseline; four successive declaration-side preconditions (`HOUSE_WAR_CHANCE`
+  cut 8×, a treasury floor, a 5-year post-war cooldown, a one-year floor before
+  exhaustion can end a war) landed at 50/century — proof the volume was never
+  about how often a war STARTED. Halving the per-round score-swing magnitude
+  (the only change that touched how fast one FINISHED) brought it to
+  45/century AND fixed a genuine `econ_inheritance_rules_fragment_differently`
+  regression the faster wars had caused (RNG divergence between two
+  60-year sub-simulations was swamping that gate's own wealth-comparison
+  signal) — and, unplanned, moved top-10% wealth share from 0.498 (out of its
+  0.60–0.90 band) to 0.671 (back in). Still above the pre-3.4a-c baseline by
+  design (a real casus belli SHOULD raise it) and left as an explicit open
+  pointer for a future session, not chased further — see `docs/SCOREBOARD.md`'s
+  dated entry for the full chain.
 - **Positive events (Phase 1.4):** the mechanism otherwise only produces decline (vices,
   feuds, ruin) — these give the chronicle something else to say, each a MARKER on `House`
   rather than new machinery. `assign_house_tiers` also tracks **the finest hour** (all-time

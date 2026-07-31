@@ -28,7 +28,7 @@
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
-            tier: 0, standing: 0.0,
+            tier: 0, standing: 0.0, war_cooldown_until: 0,
         }
     }
 
@@ -1423,17 +1423,48 @@
         s.hubs[0].treasury = 50.0; s.hubs[1].treasury = 20.0;
         s.hubs[0].war_with = 1; s.hubs[1].war_with = 0;
         s.wars.push(War { a: 0, b: 1, start_tick: 0, chest_a: 0.0, chest_b: 0.0,
-            levies: 0.0, cargo_lost: 0, cause: "test".into(), goal: WAR_GOAL_PLUNDER });
+            levies: 0.0, cargo_lost: 0, cause: "test".into(), goal: WAR_GOAL_PLUNDER,
+            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1 });
         let w0 = s.houses[0].wealth;
         s.tick = 0;
-        s.update_wars(0); // wage one year — levy, no resolve
+        s.update_wars(0); // wage the first year — levy, no quarterly round due yet
         assert!(s.houses[0].wealth < w0, "war levy drained a resident house");
-        assert_eq!(s.war_log.len(), 0, "not resolved before 2 years");
-        s.tick = 2 * 365;
-        s.update_wars(2); // resolve
-        assert_eq!(s.war_log.len(), 1, "war resolved into the log");
+        assert_eq!(s.war_log.len(), 0, "no round has run yet, so nothing can have resolved");
+        // §3.4a · quarterly rounds now decide when it ends — not a fixed 2-year timer.
+        // Run out the round cap's own backstop (3 years) to observe the guaranteed end.
+        s.tick = (WAR_ROUND_CAP as u32 + 1) * WAR_ROUND_TICKS;
+        s.update_wars((WAR_ROUND_CAP as u32 + 1) * WAR_ROUND_TICKS / 365);
+        assert_eq!(s.war_log.len(), 1, "war resolved into the log by the round cap at the latest");
         assert!(s.hubs[0].war_with < 0 && s.hubs[1].war_with < 0, "war state cleared");
         assert!(s.war_log[0].levies_total > 0.0, "levies recorded");
+    }
+
+    #[test]
+    fn every_war_terminates_within_the_round_cap() {
+        // §1.4/rule 22's discipline applied to war: an open war must never become the
+        // permanent state of a city, so the round cap is the guarantee of last resort
+        // even when neither side ever decisively wins, exhausts, or grows weary.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut s = sim(vec![
+            hub(0, 10.0, 10.0, 10000.0, vec![100.0], 0),
+            hub(1, 14.0, 10.0, 9000.0, vec![90.0], 0),
+        ], goods);
+        for i in 0..2u32 { let mut h = house_at(i, vec![0], 2); h.wealth = 5000.0; s.houses.push(h); }
+        s.hubs[0].treasury = 5000.0; s.hubs[1].treasury = 5000.0;
+        s.hubs[0].mood = 0.9; s.hubs[1].mood = 0.9;
+        s.hubs[0].war_with = 1; s.hubs[1].war_with = 0;
+        s.wars.push(War { a: 0, b: 1, start_tick: 0, chest_a: 0.0, chest_b: 0.0,
+            levies: 0.0, cargo_lost: 0, cause: "test".into(), goal: WAR_GOAL_PLUNDER,
+            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1 });
+        for yr in 1..=(WAR_ROUND_CAP as u32 + 2) {
+            s.tick = yr * 365;
+            s.update_wars(yr);
+            assert!(s.wars.iter().all(|w| w.round <= WAR_ROUND_CAP),
+                "no war ever exceeds the round cap");
+            if s.wars.is_empty() { break; }
+        }
+        assert!(s.wars.is_empty(), "the war ended by the round cap at the latest");
+        assert_eq!(s.war_log.len(), 1, "its resolution is recorded");
     }
 
     #[test]

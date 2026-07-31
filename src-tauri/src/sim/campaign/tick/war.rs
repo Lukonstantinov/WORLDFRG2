@@ -68,6 +68,33 @@ impl CampaignSim {
                     format!("; {} wins trade rights in {} — a bailo for {}", wn, ln, hn)
                 } else { String::new() }
             }
+            WAR_GOAL_PROVINCE => {
+                // §3.4b · take ONE province the loser held — short of the whole city.
+                // Only an ordinary city-administered province is up for grabs (rule 24:
+                // a house-held writ, `prov_holder_house >= 0`, belongs to that house,
+                // not to whichever city loses a war). The richest (most rural population)
+                // qualifying province is the prize.
+                let Some(hi) = ruler else { return String::new(); };
+                let prize = (0..self.prov_holder.len())
+                    .filter(|&p| self.prov_holder[p] == lose as i32
+                        && self.prov_holder_house.get(p).copied().unwrap_or(-1) < 0)
+                    .max_by(|&x, &y| self.prov_rural.get(x).copied().unwrap_or(0.0)
+                        .partial_cmp(&self.prov_rural.get(y).copied().unwrap_or(0.0)).unwrap());
+                match prize {
+                    Some(p) => {
+                        self.prov_holder[p] = win as i32;
+                        let pn = self.province_name(p);
+                        format!("; {} cedes {} to {}", ln, pn, wn)
+                    }
+                    // The loser held no ordinary province to cede — downgrade quietly to
+                    // the trade-rights clause rather than award nothing at all.
+                    None => {
+                        grant_bailo(self, hi);
+                        let hn = self.houses[hi].name.clone();
+                        format!("; {} had no province to cede — {} takes trade rights instead, a bailo for {}", ln, wn, hn)
+                    }
+                }
+            }
             WAR_GOAL_ANNEX => {
                 if let Some(hi) = ruler {
                     grant_bailo(self, hi);
@@ -84,9 +111,130 @@ impl CampaignSim {
     }
 
 
-    /// DLC 3.5 · the economic-war engine. Once a year: wage & resolve active wars
-    /// (levies, war-chest spending, trade blockade, reparations) and occasionally
-    /// declare a new one between rival poleis. Deterministic.
+    /// §3.4a · which named exhaustion path (if any) side `h` has hit this call —
+    /// "force broken" (this year's own war effort has collapsed against its own
+    /// past peak) or "treasury and credit spent" (state coffers AND resident
+    /// private wealth both drained). Neither invents a troop-count field; both
+    /// read state the tick already carries.
+    fn war_side_exhaustion(&self, h: usize, peak_effort: f32, effort_this_year: f32) -> Option<&'static str> {
+        let treasury = self.hubs[h].treasury.max(0.0);
+        let credit: f32 = self.houses.iter()
+            .filter(|house| !house.defunct && !house.is_guild && house.hub as usize == h)
+            .map(|house| house.wealth.max(0.0)).sum();
+        if treasury < WAR_FINANCIAL_EPS && credit < WAR_FINANCIAL_EPS {
+            return Some("treasury and credit spent");
+        }
+        if peak_effort > WAR_FINANCIAL_EPS && effort_this_year < peak_effort * WAR_FORCE_BROKEN_FRAC {
+            return Some("force broken");
+        }
+        None
+    }
+
+    /// §3.4a/b · a war has ended (by any path). Clears belligerency, awards
+    /// reparations + the score-priced goal (or a white peace below the reparations
+    /// price, §1.4's Outcomes row), logs it, and — for a colony's war of
+    /// independence — resolves freedom or a cooldown exactly as before.
+    /// `winner = None` is a mutual white peace: both sides are named but neither
+    /// gains — used when both belligerents hit the same exhaustion/weariness
+    /// condition in the same round, or the round cap closes an unresolved
+    /// near-deadlock.
+    fn resolve_war(&mut self, wi: usize, winner: Option<usize>, reason: &str, tick: u32, yr: u32) {
+        let a = self.wars[wi].a as usize;
+        let b = self.wars[wi].b as usize;
+        self.hubs[a].war_with = -1;
+        self.hubs[b].war_with = -1;
+        // §3.4f · "a real grievance" — neither side has one again until the cooldown
+        // lapses, so the same two cities cannot cycle straight back into a rematch.
+        let cooldown_until = tick + WAR_COOLDOWN_YEARS * TICKS_PER_YEAR;
+        self.hubs[a].war_cooldown_until = cooldown_until;
+        self.hubs[b].war_cooldown_until = cooldown_until;
+        let (an, bn) = (self.hubs[a].name.clone(), self.hubs[b].name.clone());
+        let score_abs = self.wars[wi].score.abs();
+        let declared_goal = self.wars[wi].goal;
+        let independence = self.wars[wi].cause == "independence";
+        let cause = self.wars[wi].cause.clone();
+        let levies_total = self.wars[wi].levies;
+        let start_tick = self.wars[wi].start_tick;
+
+        let (win, lose, rep, spoils, awarded_goal) = match winner {
+            Some(win) if score_abs >= WAR_PRICE_REPARATIONS => {
+                let lose = if win == a { b } else { a };
+                let rep = (self.hubs[lose].treasury.max(0.0) * 0.4).max(0.0);
+                self.hubs[lose].treasury -= rep;
+                self.hubs[win].treasury += rep;
+                self.hubs[win].finance.reparations_in += rep;
+                self.hubs[lose].finance.reparations_out += rep;
+                self.hubs[lose].coin_trust = (self.hubs[lose].coin_trust - 0.15).max(0.0);
+                // §3.4b · terms priced in score: the richest goal the FINAL score
+                // affords, capped by what was originally declared — overperforming
+                // never upgrades the war's own aim, it only guarantees reaching it.
+                let richest_affordable = [WAR_GOAL_ANNEX, WAR_GOAL_PROVINCE, WAR_GOAL_TRIBUTE, WAR_GOAL_TRADE_RIGHTS, WAR_GOAL_PLUNDER]
+                    .into_iter().find(|&g| war_goal_price(g) <= score_abs).unwrap_or(WAR_GOAL_PLUNDER);
+                let awarded = if war_goal_price(declared_goal) <= score_abs { declared_goal } else { richest_affordable };
+                let spoils = self.apply_war_goal(win, lose, awarded, tick, yr);
+                (Some(win), Some(lose), rep, spoils, awarded)
+            }
+            // A winner was named but the score never reached the reparations floor
+            // (10) — a WHITE PEACE: the fight happened, but nobody had anything
+            // worth taking.
+            _ => (None, None, 0.0, String::new(), WAR_GOAL_PLUNDER),
+        };
+        let _ = awarded_goal;
+
+        let text = match (win, lose) {
+            (Some(win), Some(lose)) => {
+                let (wn, ln) = (self.hubs[win].name.clone(), self.hubs[lose].name.clone());
+                format!("The war of {} and {} ends in year {} ({}): {} prevails, {} pays {:.0} in reparations{}.",
+                    an, bn, yr, reason, wn, ln, rep, spoils)
+            }
+            _ => format!("The war of {} and {} ends in year {} in a WHITE PEACE ({}) — neither side gains.",
+                an, bn, yr, reason),
+        };
+        self.journal.push(JournalEntry {
+            tick, kind: "war".into(), hub: win.map(|w| w as i32).unwrap_or(-1), good: -1,
+            value: rep, text: text.clone(),
+        });
+        self.war_log.push(WarRecord {
+            start_year: start_tick / TICKS_PER_YEAR, end_year: yr,
+            a_name: an, b_name: bn,
+            winner: win.map(|w| self.hubs[w].name.clone()).unwrap_or_else(|| "neither".into()),
+            loser: lose.map(|l| self.hubs[l].name.clone()).unwrap_or_else(|| "neither".into()),
+            reparations: rep, levies_total, cause, text,
+        });
+        if self.war_log.len() > WAR_LOG_CAP {
+            let drop = self.war_log.len() - WAR_LOG_CAP;
+            self.war_log.drain(0..drop);
+        }
+        // War of independence: the colony either wins free, or is brought to heel
+        // for 15 years before it may rebel again. A white peace (no clear winner)
+        // reads the same as failing to win outright — the colony stays a colony.
+        if independence {
+            let colony = if self.hubs[a].colony_kind == 1 { a }
+                else if self.hubs[b].colony_kind == 1 { b } else { usize::MAX };
+            if colony != usize::MAX {
+                if win == Some(colony) {
+                    self.make_colony_independent(colony, true);
+                } else {
+                    self.hubs[colony].indep_cooldown_until = tick + 15 * TICKS_PER_YEAR;
+                    let cn = self.hubs[colony].name.clone();
+                    self.journal.push(JournalEntry { tick, kind: "colony".into(), hub: colony as i32,
+                        good: -1, value: 0.0, text: format!("{}'s bid for independence is crushed; it remains a colony", cn) });
+                }
+            }
+        }
+    }
+
+
+    /// DLC 3.5 · the economic-war engine — §3.4a wraps it in a score + quarterly
+    /// rounds. Once a year: wage (levies, war-chest spending, trade blockade —
+    /// unchanged) and occasionally declare a new war. Then, since the LAST year
+    /// processed, run every quarterly round now due (`WAR_ROUND_TICKS` apart,
+    /// tick-driven rather than a fixed 4/call so a back-dated `start_tick` still
+    /// catches up correctly — the same trick the crisis engine and its own tests
+    /// rely on), each a battle/raid/blockade/occupation outcome that moves the
+    /// war's bidirectional score, checked after every round against: a decisive
+    /// score (±100), the four independent exhaustion paths (§1.4), and finally
+    /// the round cap — the termination guarantee of last resort. Deterministic.
     pub(crate) fn update_wars(&mut self, yr: u32) {
         let tick = self.tick;
         // Tributaries pay their overlords first — a bounded treasury→treasury
@@ -113,11 +261,15 @@ impl CampaignSim {
             if a >= self.hubs.len() || b >= self.hubs.len() {
                 ended.push(wi); continue;
             }
-            // Wage: levies on each side's houses, war-chest spending, trade blockade.
-            let lev = self.raise_war_levy(a) + self.raise_war_levy(b);
-            self.wars[wi].levies += lev;
-            self.wars[wi].chest_a += self.spend_war(a);
-            self.wars[wi].chest_b += self.spend_war(b);
+            // Wage: levies on each side's houses, war-chest spending, trade blockade —
+            // once a year, unchanged from before §3.4a.
+            let raised_a = self.raise_war_levy(a);
+            let raised_b = self.raise_war_levy(b);
+            self.wars[wi].levies += raised_a + raised_b;
+            let spent_a = self.spend_war(a);
+            let spent_b = self.spend_war(b);
+            self.wars[wi].chest_a += spent_a;
+            self.wars[wi].chest_b += spent_b;
             for &h in &[a, b] {
                 self.hubs[h].trade_wealth *= 0.8; // blockade bites commerce
                 self.active_events.push(ActiveEvent {
@@ -125,57 +277,82 @@ impl CampaignSim {
                     magnitude: 0.4, until_tick: tick + TICKS_PER_YEAR,
                 });
             }
-            // Resolve after >= 2 years, weighted by mustered effort + treasury.
-            let years = tick.saturating_sub(self.wars[wi].start_tick) / TICKS_PER_YEAR;
-            if years >= 2 {
-                let pa = self.wars[wi].chest_a + self.hubs[a].treasury + 1.0;
-                let pb = self.wars[wi].chest_b + self.hubs[b].treasury + 1.0;
-                let a_wins = hash01(self.seed, tick as u64 ^ 0xBA771E, wi as u64) < pa / (pa + pb);
-                let (win, lose) = if a_wins { (a, b) } else { (b, a) };
-                let rep = (self.hubs[lose].treasury.max(0.0) * 0.4).max(0.0);
-                self.hubs[lose].treasury -= rep;
-                self.hubs[win].treasury += rep;
-                self.hubs[win].finance.reparations_in += rep;
-                self.hubs[lose].finance.reparations_out += rep;
-                self.hubs[lose].coin_trust = (self.hubs[lose].coin_trust - 0.15).max(0.0);
-                self.hubs[a].war_with = -1;
-                self.hubs[b].war_with = -1;
-                // The victor claims the war's GOAL — its lasting spoils (tribute /
-                // trade rights / annexation), beyond the one-off plunder above.
-                let spoils = self.apply_war_goal(win, lose, self.wars[wi].goal, tick, yr);
-                let (an, bn) = (self.hubs[a].name.clone(), self.hubs[b].name.clone());
-                let (wn, ln) = (self.hubs[win].name.clone(), self.hubs[lose].name.clone());
-                let text = format!(
-                    "The war of {} and {} ends in year {}: {} prevails, {} pays {:.0} in reparations{}.",
-                    an, bn, yr, wn, ln, rep, spoils);
-                self.journal.push(JournalEntry { tick, kind: "war".into(), hub: win as i32, good: -1,
-                    value: rep, text: text.clone() });
-                self.war_log.push(WarRecord {
-                    start_year: self.wars[wi].start_tick / TICKS_PER_YEAR, end_year: yr,
-                    a_name: an, b_name: bn, winner: wn, loser: ln,
-                    reparations: rep, levies_total: self.wars[wi].levies,
-                    cause: self.wars[wi].cause.clone(), text,
-                });
-                if self.war_log.len() > WAR_LOG_CAP {
-                    let drop = self.war_log.len() - WAR_LOG_CAP;
-                    self.war_log.drain(0..drop);
-                }
-                // War of independence: the colony either wins free, or is brought to
-                // heel for 15 years before it may rebel again.
-                if self.wars[wi].cause == "independence" {
-                    let colony = if self.hubs[a].colony_kind == 1 { a }
-                        else if self.hubs[b].colony_kind == 1 { b } else { usize::MAX };
-                    if colony != usize::MAX {
-                        if colony == win {
-                            self.make_colony_independent(colony, true);
-                        } else {
-                            self.hubs[colony].indep_cooldown_until = tick + 15 * TICKS_PER_YEAR;
-                            let cn = self.hubs[colony].name.clone();
-                            self.journal.push(JournalEntry { tick, kind: "colony".into(), hub: colony as i32,
-                                good: -1, value: 0.0, text: format!("{}'s bid for independence is crushed; it remains a colony", cn) });
-                        }
+            let effort_a = raised_a + spent_a;
+            let effort_b = raised_b + spent_b;
+            self.wars[wi].peak_effort_a = self.wars[wi].peak_effort_a.max(effort_a);
+            self.wars[wi].peak_effort_b = self.wars[wi].peak_effort_b.max(effort_b);
+
+            // §3.4a · run every quarterly round now due.
+            let mut end: Option<(Option<usize>, &'static str)> = None;
+            loop {
+                let due = (self.wars[wi].round as u64 + 1) * WAR_ROUND_TICKS as u64;
+                if due > tick.saturating_sub(self.wars[wi].start_tick) as u64 { break; }
+                self.wars[wi].round += 1;
+                let strength_a = self.wars[wi].chest_a + self.hubs[a].treasury.max(0.0) + 1.0;
+                let strength_b = self.wars[wi].chest_b + self.hubs[b].treasury.max(0.0) + 1.0;
+                let bias = strength_a / (strength_a + strength_b);
+                let salt = ((wi as u64) << 16) ^ self.wars[wi].round as u64;
+                let roll_kind = hash01(self.seed, tick as u64 ^ 0x0A2D, salt);
+                // Occupation only reads once a side already holds a real advantage —
+                // it is the outcome of ALREADY winning, not a random opener.
+                let occupying = self.wars[wi].score.abs() > 40.0;
+                // §3.4a tuning (see WAR_MIN_ROUNDS_TO_RESOLVE's doc comment): the
+                // original 24/16/8/11 magnitudes let a lopsided pair reach the
+                // decisive ±100 score in a handful of rounds, which is what actually
+                // drove "wars started / century" to 50-65 despite four successive
+                // preconditions on DECLARING a war — the volume was never about how
+                // often a war started, only about how fast one finished. Halved so a
+                // decisive win takes roughly the whole round-cap window on average,
+                // matching the old fixed-2-year mechanism's rough pace.
+                let mag = if occupying && roll_kind < 0.20 { 12.0 }
+                    else if roll_kind < 0.45 { 8.0 }
+                    else if roll_kind < 0.75 { 4.0 }
+                    else { 5.5 };
+                let roll_dir = hash01(self.seed, tick as u64 ^ 0x7EED, salt ^ 0x51DE);
+                let delta = if roll_dir < bias { mag } else { -mag };
+                self.wars[wi].score = (self.wars[wi].score + delta).clamp(-100.0, 100.0);
+
+                if self.wars[wi].score.abs() >= WAR_SCORE_DECISIVE {
+                    let w = if self.wars[wi].score >= 0.0 { a } else { b };
+                    end = Some((Some(w), "decisive victory"));
+                } else if self.wars[wi].round < WAR_MIN_ROUNDS_TO_RESOLVE {
+                    // A real war takes at least a year to exhaust either side — see
+                    // `WAR_MIN_ROUNDS_TO_RESOLVE`'s own doc comment. Only a genuine
+                    // decisive score (above) may end it faster than that.
+                } else {
+                    let a_exh = self.war_side_exhaustion(a, self.wars[wi].peak_effort_a, effort_a);
+                    let b_exh = self.war_side_exhaustion(b, self.wars[wi].peak_effort_b, effort_b);
+                    let a_weary = self.hubs[a].mood < WAR_MOOD_WEARY_FLOOR;
+                    let b_weary = self.hubs[b].mood < WAR_MOOD_WEARY_FLOOR;
+                    let backer = self.wars[wi].backer_house;
+                    let backer_withdrew = backer >= 0 && self.houses.get(backer as usize)
+                        .map(|h| h.defunct || h.wealth <= WAR_BACKER_INSOLVENT).unwrap_or(true);
+                    if a_exh.is_some() && b_exh.is_some() {
+                        end = Some((None, a_exh.unwrap()));
+                    } else if let Some(r) = a_exh {
+                        end = Some((Some(b), r));
+                    } else if let Some(r) = b_exh {
+                        end = Some((Some(a), r));
+                    } else if a_weary && b_weary {
+                        end = Some((None, "war weariness"));
+                    } else if a_weary {
+                        end = Some((Some(b), "war weariness"));
+                    } else if b_weary {
+                        end = Some((Some(a), "war weariness"));
+                    } else if backer_withdrew {
+                        let backer_hub = self.houses.get(backer as usize).map(|h| h.hub);
+                        let w = if backer_hub == Some(a as u32) { b } else { a };
+                        end = Some((Some(w), "its backer's ruin"));
+                    } else if self.wars[wi].round >= WAR_ROUND_CAP {
+                        let w = if self.wars[wi].score.abs() < WAR_PRICE_REPARATIONS { None }
+                            else if self.wars[wi].score >= 0.0 { Some(a) } else { Some(b) };
+                        end = Some((w, "the round cap — neither side could finish it"));
                     }
                 }
+                if end.is_some() { break; }
+            }
+            if let Some((winner, reason)) = end {
+                self.resolve_war(wi, winner, reason, tick, yr);
                 ended.push(wi);
             }
         }
@@ -186,14 +363,19 @@ impl CampaignSim {
 
     /// Occasionally ignite a new economic war between two rival poleis in the same
     /// region, both at peace. Rival councils are the spark; prosperity is the prize.
+    /// §3.4c · a WARMONGER RULER (a bold council head, `head_character_factor` axis
+    /// 0) raises the odds a candidate pair actually comes to blows this year.
     pub(crate) fn maybe_declare_war(&mut self, yr: u32) {
         if self.wars.len() >= MAX_ACTIVE_WARS { return; }
-        if hash01(self.seed, self.tick as u64 ^ 0xDEC1A6E, yr as u64) > WAR_DECLARE_CHANCE { return; }
         let n = self.hubs.len();
-        // Candidate seats: real cities with a council, at peace.
+        // Candidate seats: real cities with a council, at peace, and — §3.4f's own
+        // "sufficient treasury" precondition — enough in the chest to field more
+        // than a single quarterly round before financial exhaustion ends it for free.
         let seats: Vec<usize> = (0..n).filter(|&h|
             !self.hubs[h].is_estate && self.hubs[h].war_with < 0
             && self.hubs[h].council_house >= 0 && self.hubs[h].population > 1.0
+            && self.hubs[h].treasury >= WAR_MIN_TREASURY
+            && self.hubs[h].war_cooldown_until <= self.tick
         ).collect();
         if seats.len() < 2 { return; }
         // Prefer a pair in the same region whose councils are rivals; else any pair.
@@ -212,6 +394,12 @@ impl CampaignSim {
         }
         let Some((a, b, cause)) = best else { return };
         let (a, b) = if a < b { (a, b) } else { (b, a) };
+        let boldness = |me: &Self, h: usize| -> f32 {
+            let c = me.hubs[h].council_house;
+            if c >= 0 { me.head_character_factor(c as usize, 0) } else { 1.0 }
+        };
+        let chance = WAR_DECLARE_CHANCE * ((boldness(self, a) + boldness(self, b)) / 2.0);
+        if hash01(self.seed, self.tick as u64 ^ 0xDEC1A6E, yr as u64) > chance { return; }
         // A WAR GOAL — what the aggressor is after. Rival councils fight for political
         // supremacy (annexation / trade rights); a plain trade dispute is fought for
         // tribute or plunder. A lopsided match leans toward annexation (the strong
@@ -241,6 +429,34 @@ impl CampaignSim {
         self.wars.push(War {
             a: a as u32, b: b as u32, start_tick: self.tick,
             chest_a: 0.0, chest_b: 0.0, levies: 0.0, cargo_lost: 0, cause: cause.into(), goal,
+            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1,
+        });
+    }
+
+
+    /// §3.4c · a house-driven war: the winner of a vendetta-stage feud, holding its
+    /// city's council or captor seat, drags that city into a full war against the
+    /// loser's city — with itself automatically committed as BACKER. Its own
+    /// insolvency is the "backers withdraw" exhaustion path for this particular war.
+    fn declare_house_war(&mut self, a: usize, b: usize, backer_house: usize, rival_house: usize) {
+        let (a, b) = if a < b { (a, b) } else { (b, a) };
+        self.hubs[a].war_with = b as i32;
+        self.hubs[b].war_with = a as i32;
+        self.hubs[a].war_since = self.tick;
+        self.hubs[b].war_since = self.tick;
+        let (an, bn) = (self.hubs[a].name.clone(), self.hubs[b].name.clone());
+        let hn = self.houses[backer_house].name.clone();
+        let rn = self.houses[rival_house].name.clone();
+        let text = format!("{}'s feud with {} drags {} into war against {}", hn, rn, an, bn);
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "war".into(), hub: a as i32, good: -1, value: 0.0, text,
+        });
+        self.wars.push(War {
+            a: a as u32, b: b as u32, start_tick: self.tick,
+            chest_a: 0.0, chest_b: 0.0, levies: 0.0, cargo_lost: 0,
+            cause: "a house's war".into(), goal: WAR_GOAL_TRADE_RIGHTS,
+            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0,
+            backer_house: backer_house as i32,
         });
     }
 
@@ -400,7 +616,8 @@ impl CampaignSim {
         self.hubs[b].war_since = self.tick;
         self.wars.push(War { a: a as u32, b: b as u32, start_tick: self.tick,
             chest_a: 0.0, chest_b: 0.0, levies: 0.0, cargo_lost: 0, cause: "independence".into(),
-            goal: WAR_GOAL_PLUNDER });
+            goal: WAR_GOAL_PLUNDER,
+            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1 });
         let (cn, mn) = (self.hubs[colony].name.clone(), self.hubs[metro].name.clone());
         self.journal.push(JournalEntry { tick: self.tick, kind: "war".into(), hub: colony as i32,
             good: -1, value: 0.0, text: format!("{} rises in a war of independence against {}", cn, mn) });
@@ -727,36 +944,60 @@ impl CampaignSim {
                 }
             }
             _ => {
-                // Vendetta: property. A ship taken, or a foreign office forced shut —
-                // the two things that actually cost a merchant house its reach.
-                self.houses[loser].volume *= 0.88;
-                let pick = hash01(self.seed, tick as u64, (loser as u64) << 8);
-                let fleet = self.houses[loser].fleet_sea + self.houses[loser].fleet_river
-                    + self.houses[loser].fleet_caravan;
-                if fleet > 0 && pick < 0.6 {
-                    let sea = self.houses[loser].fleet_sea > 0;
-                    self.damage_fleet(loser, sea);
-                    format!("{} has a {} of {} taken at sea", wn,
-                        if sea { "ship" } else { "caravan" }, ln)
+                // §3.4c · a HOUSE-DRIVEN WAR: the winner of a vendetta escalation, if it
+                // holds its OWN city's council or captor seat, may drag that whole city
+                // into a full state war on the loser's — "capturing a government is what
+                // lets a family spend a city's blood on its own quarrel" (§5's Tiers
+                // note). Gated on the two houses actually sitting in different cities,
+                // neither city already at war, and room under the active-war cap; the
+                // roll is drawn unconditionally so it stays deterministic regardless of
+                // which branch runs.
+                let wh = self.houses[winner].hub as usize;
+                let lh = self.houses[loser].hub as usize;
+                let can_escalate = wh != lh && wh < self.hubs.len() && lh < self.hubs.len()
+                    && self.hubs[wh].war_with < 0 && self.hubs[lh].war_with < 0
+                    && self.wars.len() < MAX_ACTIVE_WARS
+                    && self.hubs[wh].treasury >= WAR_MIN_TREASURY
+                    && self.hubs[wh].war_cooldown_until <= tick && self.hubs[lh].war_cooldown_until <= tick
+                    && (self.hubs[wh].council_house == winner as i32
+                        || self.hubs[wh].captor_house == winner as i32);
+                let war_roll = hash01(self.seed, tick as u64 ^ 0x9A5, ((winner as u64) << 8) ^ loser as u64);
+                if can_escalate && war_roll < HOUSE_WAR_CHANCE {
+                    self.declare_house_war(wh, lh, winner, loser);
+                    format!("{}'s feud with {} boils over into open war between {} and {}",
+                        wn, ln, self.hubs[wh].name, self.hubs[lh].name)
                 } else {
-                    // Force a foreign counting-house shut. Only a lease-free office can
-                    // be taken; a leased one is held open by its term, and one backing a
-                    // live contract stays open — the same rules the office system uses.
-                    let victim = self.houses[loser].offices.iter().copied().find(|&o| {
-                        (city < 0 || o as i32 == city)
-                            && !self.office_leased(loser, o)
-                            && !self.backs_active_contract(loser, o)
-                    });
-                    match victim {
-                        Some(off) => {
-                            let on = self.hubs.get(off as usize).map(|h| h.name.clone())
-                                .unwrap_or_default();
-                            self.houses[loser].offices.retain(|&o| o != off);
-                            self.houses[loser].bailos.retain(|&o| o != off);
-                            self.houses[loser].influence.retain(|&(c, _)| c != off);
-                            format!("{} forces {}'s counting-house in {} to close", wn, ln, on)
+                    // Vendetta: property. A ship taken, or a foreign office forced shut —
+                    // the two things that actually cost a merchant house its reach.
+                    self.houses[loser].volume *= 0.88;
+                    let pick = hash01(self.seed, tick as u64, (loser as u64) << 8);
+                    let fleet = self.houses[loser].fleet_sea + self.houses[loser].fleet_river
+                        + self.houses[loser].fleet_caravan;
+                    if fleet > 0 && pick < 0.6 {
+                        let sea = self.houses[loser].fleet_sea > 0;
+                        self.damage_fleet(loser, sea);
+                        format!("{} has a {} of {} taken at sea", wn,
+                            if sea { "ship" } else { "caravan" }, ln)
+                    } else {
+                        // Force a foreign counting-house shut. Only a lease-free office can
+                        // be taken; a leased one is held open by its term, and one backing a
+                        // live contract stays open — the same rules the office system uses.
+                        let victim = self.houses[loser].offices.iter().copied().find(|&o| {
+                            (city < 0 || o as i32 == city)
+                                && !self.office_leased(loser, o)
+                                && !self.backs_active_contract(loser, o)
+                        });
+                        match victim {
+                            Some(off) => {
+                                let on = self.hubs.get(off as usize).map(|h| h.name.clone())
+                                    .unwrap_or_default();
+                                self.houses[loser].offices.retain(|&o| o != off);
+                                self.houses[loser].bailos.retain(|&o| o != off);
+                                self.houses[loser].influence.retain(|&(c, _)| c != off);
+                                format!("{} forces {}'s counting-house in {} to close", wn, ln, on)
+                            }
+                            None => format!("{} sets its bravos on {}'s factors", wn, ln),
                         }
-                        None => format!("{} sets its bravos on {}'s factors", wn, ln),
                     }
                 }
             }

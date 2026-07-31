@@ -1358,6 +1358,11 @@ const WAR_GOAL_TRADE_RIGHTS: u8 = 2;
 /// The victor annexes the loser — its ruling house is installed on the loser's
 /// council (a bailo makes it stick through the yearly council recompute).
 const WAR_GOAL_ANNEX: u8 = 3;
+/// CITY_PROVINCE_WAR_PLAN.md §3.4b · the victor takes ONE province the loser held
+/// (`prov_holder` reassigned) — short of annexing the whole city. Reuses Phase 5's
+/// `prov_holder` exactly as a peacetime grant would; a house-held province
+/// (`prov_holder_house >= 0`, rule 24) is never up for grabs in a city-vs-city war.
+const WAR_GOAL_PROVINCE: u8 = 4;
 /// Years a defeated city pays tribute to its overlord.
 const TRIBUTE_YEARS: u32 = 10;
 /// Yearly tribute as a fraction of the tributary's treasury (bounded — moves money,
@@ -1370,11 +1375,13 @@ pub fn war_goal_label(goal: u8) -> &'static str {
     match goal {
         WAR_GOAL_TRIBUTE => "for tribute",
         WAR_GOAL_TRADE_RIGHTS => "for trade rights",
+        WAR_GOAL_PROVINCE => "for a province",
         WAR_GOAL_ANNEX => "for annexation",
         _ => "for plunder",
     }
 }
-/// Yearly chance a new war is declared (when below the cap).
+/// Yearly chance a new war is declared (when below the cap), before the §3.4c
+/// warmonger-ruler bias (`head_character_factor`, axis 0, ±`CHARACTER_KNOB_CAP`).
 const WAR_DECLARE_CHANCE: f32 = 0.10;
 /// Yearly forced levy on each resident house's wealth → the city war chest. The
 /// principal way war drains over-rich houses.
@@ -1382,6 +1389,92 @@ const WAR_LEVY_RATE: f32 = 0.12;
 /// Fraction of the treasury a belligerent burns on the war effort each year
 /// (consumed — the destructive cost of armies & blockade).
 const WAR_SPEND_RATE: f32 = 0.30;
+
+// ── CITY_PROVINCE_WAR_PLAN.md §3.4a · the score & round engine ──────────────────
+// Same shape as the succession-crisis engine (`crisis.rs`): a fixed round cap is
+// the termination guarantee of LAST RESORT (rule 22's discipline applied to war),
+// with faster, more legible paths expected to end most wars well before it.
+/// Ticks between quarterly rounds — identical cadence to `CRISIS_ROUND_TICKS`.
+const WAR_ROUND_TICKS: u32 = 90;
+/// Hard backstop: 3 years of quarterly rounds. A war older than this ends however
+/// the score currently reads, win, lose or stalemate.
+const WAR_ROUND_CAP: u16 = 12;
+/// |score| reaching this ends the war outright — a decisive victory.
+const WAR_SCORE_DECISIVE: f32 = 100.0;
+/// Rounds that must elapse before EXHAUSTION (any of the three non-decisive paths)
+/// may end a war — one calendar year. The old fixed-2-year mechanism enforced a
+/// floor on how fast a war could ever conclude; nothing here replaced it once
+/// resolution became per-round, so wars — mechanically capable of ending in their
+/// very first round via war weariness — were doing exactly that. Measured:
+/// `econ_fidelity_scorecard`'s "wars started / century" stayed near 50-65 through
+/// three different attempts at the DECLARATION side (tightening `HOUSE_WAR_CHANCE`,
+/// adding `WAR_MIN_TREASURY`, adding `war_cooldown_until`) — the volume was never
+/// about how often a war STARTED, it was about how fast one FINISHED and freed a
+/// slot for the next. A decisive score (±100, an actual curb-stomp) is exempt —
+/// this floor only gates the three exhaustion paths, not a real victory.
+const WAR_MIN_ROUNDS_TO_RESOLVE: u16 = 4;
+/// A belligerent whose `hub.mood` (already fed by the war's own "war" active-event
+/// hostility, §2's blockade note) falls this low sues for peace — WAR WEARINESS,
+/// one of §1.4's four independent exhaustion paths. Reuses existing sentiment
+/// machinery; no new field.
+const WAR_MOOD_WEARY_FLOOR: f32 = 0.30;
+/// TREASURY AND CREDIT SPENT: a side is exhausted once both its state treasury AND
+/// its resident houses' aggregate positive wealth fall below this.
+const WAR_FINANCIAL_EPS: f32 = 5.0;
+/// FORCE BROKEN: a side whose levy+spend this year falls under this fraction of the
+/// war's own best year for that side (`peak_effort_*`) has nothing left to field.
+const WAR_FORCE_BROKEN_FRAC: f32 = 0.10;
+/// BACKERS WITHDRAW (§3.4c house-driven wars only): the instigating house
+/// (`War.backer_house`) itself going insolvent ends its own war — its backing was
+/// the reason the war existed at all.
+const WAR_BACKER_INSOLVENT: f32 = 0.0;
+/// §3.4f's own precondition list ("reach satisfied, a real grievance, SUFFICIENT
+/// TREASURY, and — for a house-driven war — council control") named a war
+/// precondition the pre-3.4a candidate filter never actually checked. Without it,
+/// a threadbare city could be declared into a war it exhausted out of within the
+/// FIRST quarterly round — round-based resolution made that visible where the old
+/// fixed 2-year timer hid it. Measured: `econ_fidelity_scorecard`'s "wars started /
+/// century" read 65.0 with no floor at all, barely moved to 56.7 after tightening
+/// `HOUSE_WAR_CHANCE` 8× (0.20 → 0.025) — proof the volume was never the
+/// house-driven path, it was poor cities cycling through instant wars. This is the
+/// condition that actually needed tightening, per §3.4f's own rule.
+const WAR_MIN_TREASURY: f32 = 80.0;
+/// §3.4f/§3.4a · years after a war ends before either belligerent has "a real
+/// grievance" to fight again — see `TickHub.war_cooldown_until`'s own doc comment
+/// for the measured before/after this fixed.
+const WAR_COOLDOWN_YEARS: u32 = 5;
+
+// ── §3.4b · terms priced in war score (§1.4's table, verbatim) ──────────────────
+const WAR_PRICE_REPARATIONS: f32 = 10.0;
+const WAR_PRICE_TRADE_RIGHTS: f32 = 25.0;
+const WAR_PRICE_TRIBUTE: f32 = 40.0;
+const WAR_PRICE_PROVINCE: f32 = 55.0;
+const WAR_PRICE_ANNEX: f32 = 90.0;
+/// The war-score price of a goal — what the winner's final `|score|` must reach to
+/// be ENTITLED to demand it. A win that falls short of its own declared goal's price
+/// is downgraded to the richest goal the score actually affords (never upgraded —
+/// overperforming does not let a trade dispute escalate into an annexation).
+fn war_goal_price(goal: u8) -> f32 {
+    match goal {
+        WAR_GOAL_TRADE_RIGHTS => WAR_PRICE_TRADE_RIGHTS,
+        WAR_GOAL_TRIBUTE => WAR_PRICE_TRIBUTE,
+        WAR_GOAL_PROVINCE => WAR_PRICE_PROVINCE,
+        WAR_GOAL_ANNEX => WAR_PRICE_ANNEX,
+        _ => WAR_PRICE_REPARATIONS,
+    }
+}
+/// §3.4c · a feud whose winner holds its city's council/captor seat may escalate
+/// its worst (vendetta) flare into a full state war instead of the ordinary
+/// property damage — "capturing a government is what lets a family spend a city's
+/// blood on its own quarrel" (§5's Tiers note, the payoff of the whole leader design).
+/// §3.4f measured a PRE-3.4a–e baseline of 6.0 wars/century (rival-council path
+/// only). The first cut here used 0.20 and, compounded with `FEUD_FLARE_CHANCE`'s
+/// own 0.28/month at the vendetta stage across every feud that ever reaches it,
+/// measured 65.0 wars/century in `econ_fidelity_scorecard` — a war declared every
+/// ~19 months, an order of magnitude past plausible. Tightened per §3.4f's own
+/// rule ("tighten the conditions, do not add a rate limiter") rather than capping
+/// war count directly.
+const HOUSE_WAR_CHANCE: f32 = 0.025;
 
 /// One tradable good in the tick economy (mapped from the world's `GoodSpec`).
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -1726,6 +1819,14 @@ pub struct TickHub {
     /// The percentile-ranked score behind `tier` — population+trade, treasury and
     /// fiscal reach, territory administered, and the ruling house's own standing.
     #[serde(default)] pub standing: f32,
+    /// §3.4f/§3.4a · after a war ends (by ANY path), neither belligerent has a
+    /// fresh grievance to fight again on until this tick — "a real grievance" from
+    /// §3.4f's own precondition list. Without this, quick round-based resolution
+    /// let the same two cities cycle through back-to-back wars unrealistically
+    /// often (measured: 56.67 wars/century in `econ_fidelity_scorecard`, barely
+    /// moved by tightening `HOUSE_WAR_CHANCE` or adding `WAR_MIN_TREASURY` alone —
+    /// the churn was the same two war-eligible seats re-fighting, not new pairs).
+    #[serde(default)] pub war_cooldown_until: u32,
 }
 
 /// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by
@@ -2542,9 +2643,24 @@ pub struct War {
     pub cargo_lost: u32,
     pub cause: String,
     /// What the war is FOR — decides what the victor takes at resolution (beyond the
-    /// one-off plunder): 0 plunder · 1 tribute · 2 trade rights · 3 annexation.
-    /// `#[serde(default)]` → old saves load as plunder.
+    /// one-off plunder): 0 plunder · 1 tribute · 2 trade rights · 3 annexation ·
+    /// 4 a province (§3.4b). `#[serde(default)]` → old saves load as plunder.
     #[serde(default)] pub goal: u8,
+    /// §3.4a · bidirectional war score, −100..100. Positive favours `a`. Fed by
+    /// quarterly round outcomes; ±100 ends the war outright.
+    #[serde(default)] pub score: f32,
+    /// §3.4a · quarterly rounds elapsed — `WAR_ROUND_CAP` is the last-resort backstop.
+    #[serde(default)] pub round: u16,
+    /// §3.4a · the best single YEAR of combined levy+spend either side has managed
+    /// so far — the "force broken" exhaustion path reads a side's CURRENT year
+    /// against its own past peak, not an absolute threshold, so it scales with
+    /// however rich the belligerents are.
+    #[serde(default)] pub peak_effort_a: f32,
+    #[serde(default)] pub peak_effort_b: f32,
+    /// §3.4c · house-driven war: the house whose feud escalated into this war,
+    /// automatically committed as a backer. −1 for an ordinary rival-council war.
+    /// Its own insolvency is the BACKERS WITHDRAW exhaustion path.
+    #[serde(default = "neg_one_i32")] pub backer_house: i32,
 }
 
 /// DLC 3.5 · a concluded war, for the Wars log.

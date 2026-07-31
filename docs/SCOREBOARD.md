@@ -9,6 +9,104 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md 3.4a-c: war score, terms priced in score, casus belli)
+
+**What shipped.** `sim/campaign/tick/war.rs` gets a real score-and-round engine on
+top of DLC 3.5's declare/wage/resolve skeleton:
+
+- **3.4a · score + quarterly rounds.** `War` gains `score` (−100..100, bidirectional),
+  `round`, `peak_effort_a/b`. Every year now catches up every quarterly round due
+  since `start_tick` (tick-driven, so a back-dated war still resolves correctly —
+  the same trick the crisis engine uses). Each round rolls a battle/raid/blockade
+  outcome biased by relative war-chest+treasury strength. Termination checks, in
+  order: decisive score (±100) → the three exhaustion paths (force broken, treasury
+  &credit spent, war weariness) → backers-withdraw (house wars only) → the round cap
+  (`WAR_ROUND_CAP`=12 quarters = 3 years) as the guarantee of last resort, mirroring
+  rule 22's discipline for the crisis engine. New test
+  `every_war_terminates_within_the_round_cap` asserts this the same way
+  `every_crisis_terminates` does.
+- **3.4b · terms priced in score.** `apply_war_goal` is now score-gated at §1.4's
+  table (reparations 10 · trade rights 25 · tribute 40 · a province 55 · annexation
+  90) — a new `WAR_GOAL_PROVINCE` goal reassigns one ordinary (non-house-held, rule
+  24) province's `prov_holder` to the victor. A win short of its declared goal's
+  price downgrades to the richest goal the final score actually affords; it never
+  upgrades on overperformance.
+- **3.4c · casus belli expanded.** A WARMONGER RULER (`head_character_factor` axis 0
+  on the council head) biases `WAR_DECLARE_CHANCE`. A HOUSE-DRIVEN WAR: the winner
+  of a vendetta-stage feud flare, if it holds its own city's council or captor seat,
+  may drag that whole city into a full state war on the loser's city instead of the
+  ordinary property damage — `declare_house_war`, gated on differing cities, neither
+  already at war, room under the war cap, and the new treasury/cooldown
+  preconditions below — with itself auto-committed as `backer_house`, whose own
+  insolvency is that war's backers-withdraw path.
+
+**The tuning story — a real negative-result chain, not a single clean pass.**
+Shipped first with `HOUSE_WAR_CHANCE`=0.20 and no other new preconditions:
+`econ_fidelity_scorecard` read **65.0 wars/century**, an order of magnitude past
+the §3.4f pre-3.4a-c baseline of 6.0/century measured for exactly this purpose.
+Four successive attempts, each a real precondition from §3.4f's own list
+("reach satisfied, a real grievance, sufficient treasury, council control"):
+
+1. `HOUSE_WAR_CHANCE` 0.20 → 0.025 (8×): 65.0 → 56.7/century. Barely moved —
+   proof the house-driven path was never the volume driver.
+2. `WAR_MIN_TREASURY`=80 added to both declaration paths: 56.7 → 56.7/century.
+   Zero effect — every candidate seat already cleared it.
+3. `war_cooldown_until` (new `TickHub` field, 5-year "no fresh grievance" cooldown
+   after ANY war, both belligerents): 56.7 → 50.0/century. Some effect.
+4. `WAR_MIN_ROUNDS_TO_RESOLVE`=4 (a full year must pass before the three
+   exhaustion paths — not a decisive score — may end a war): 50.0 → 50.0/century.
+   Zero effect again.
+
+Four preconditions on *declaring* a war, three of them near-inert, was the signal
+that the volume was never about how often a war started — it was about how fast
+one FINISHED and freed one of the two `MAX_ACTIVE_WARS` slots for the next. The
+round-outcome magnitudes (24/16/8/11 per quarterly roll) let a lopsided pair reach
+the decisive ±100 score in a handful of rounds. Halving them
+(→ 12/8/4/5.5) was the one change that actually moved the number: **50.0 → 45.0
+wars/century** — still well above the pre-3.4a-c baseline (a NEW war channel
+plus real casus belli SHOULD raise it), but no longer an order of magnitude off,
+and consistent with wars now being a real, if frequent, feature of city life
+rather than the rare set-piece the old flat-10%-chance mechanism produced.
+
+**The halving also fixed a real `econ_` regression, not just the frequency
+finding.** At 50 wars/century, `econ_inheritance_rules_fragment_differently`
+(Phase 0.4's own gate, unrelated to war on its face) FAILED outright: "partible
+must leave the average house poorer than primogeniture (141324 vs 109769)" — war
+had become frequent and fast enough that its own RNG divergence between the two
+60-year sub-simulations (partible vs primogeniture diverge in house count almost
+immediately, so they consume `hash01` draws differently from the first year) swamped
+the structural signal the assertion depends on. The same magnitude halving that
+brought the frequency down restored it: partible 150,940 < primogeniture 155,624,
+passing again. **A second, unplanned benefit measured in the same run: top-10%
+wealth share moved from 0.498 (out of its 0.60–0.90 band, unchanged from the
+pre-3.4a-c 0.491) to 0.671 — back in band**, the first time since early in this
+session's 3.1–3.3 work. Not the target of any of these changes — a side effect
+of war now being a real, survivable-but-costly wealth event.
+
+**Left as an open pointer, not chased further:** wars/century still reads well
+above 6.0/century, and reasoning (not yet directly instrumented) points at
+decisive-score resolution remaining the dominant path even after halving. A future
+session wanting to bring it down further should look at raising
+`WAR_SCORE_DECISIVE` or damping round magnitude again, informed by an actual
+per-war termination-reason histogram — not another blind precondition on
+declaration, which this session's four attempts already showed doesn't touch the
+real lever. Per CLAUDE.md §2.4, this negative-result chain is the deliverable,
+not a loose end to feel bad about.
+
+**Full gate set, final state:** `cargo check` clean · `npx tsc --noEmit` clean ·
+`econ_` 4/4 non-ignored passed (house wealth Gini 0.769, top-10% share 0.671 — both
+in band; house dissolutions/century 66.67, printed-only, no band) ·
+`simulate_decades_reports_dynamics` hard-passes (wealth ∈ [-4.6, 507320.7],
+bounded/finite, turnover happens) · `economic_war_levies_houses_and_resolves` and
+`every_war_terminates_within_the_round_cap` both pass. `WarBrief` (the Wars tab's
+existing active-war list) gained `score`/`round`/`goal_label`, shown as a small
+bidirectional meter in `MoneyFinancePanel.tsx` — the same "surface it the moment
+it's built" discipline the crisis engine's round log follows.
+
+**Not yet built:** 3.4e (accountant ledger lines, manufactory/estate damage,
+blockade, the neutral war boom) and 3.4d (sack and purge — deliberately last, the
+highest-risk item). See `docs/CITY_PROVINCE_WAR_PLAN.md` §7 for the order.
+
 ## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md 3.4f: war frequency measured)
 
 **3.4f — measure BEFORE tuning, the precedent Phase 4.4 set for the foreign hand.**
