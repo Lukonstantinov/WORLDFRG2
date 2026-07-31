@@ -373,3 +373,10 @@ export async function campaignStartProvinceWork(
 export async function campaignCancelProvinceWork(id: number, kind: number): Promise<void> {
   return invoke("campaign_cancel_province_work", { id, kind });
 }
+
+/** §2.5 · every good this province actually produces, with its exploitation
+ *  reading (potential/actual/exploitation/depletion/market↔local split). Empty
+ *  with no campaign / no province layer / nothing produced here. */
+export async function campaignProvinceGoods(id: number): Promise<import("@types").ProvinceGoodExploit[]> {
+  return invoke("campaign_province_goods", { id });
+}

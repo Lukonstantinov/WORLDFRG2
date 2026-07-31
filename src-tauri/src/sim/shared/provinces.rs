@@ -140,6 +140,14 @@ pub struct Province {
     /// Radius of that inscribed circle, in cells — how much room the name has, so the
     /// renderer can size the label to the province instead of to the zoom level.
     #[serde(default)] pub label_r: f32,
+    /// CITY_PROVINCE_WAR_PLAN.md §2.5 · mean per-good belt intensity (0..1) over
+    /// EVERY good the world has (`buf.goods.len()` — indexed identically to
+    /// `load_world_goods`/`campaign.goods`, so the campaign can read this straight
+    /// with no remapping), unlike `goods` above which is a plurality shortlist
+    /// (top-decile quality, truncated to 6, filtered to a quality floor). This is
+    /// the frozen "belt_score" term `potential[prov][good]` scales by live land use
+    /// on top of — the whole reason it exists is to be UNFILTERED and per-good.
+    #[serde(default)] pub good_belt: Vec<f32>,
 }
 
 /// Sea sentinel in the per-cell province-id map. u32 (not u16) so a world can hold
@@ -1028,6 +1036,24 @@ pub fn generate_provinces(
             .then_with(|| x.good.cmp(&y.good)));
         goods.truncate(6);
 
+        // §2.5 · the UNFILTERED per-good belt mean over EVERY cell (not top-decile,
+        // and not restricted to the top 6) — the frozen "belt_score" the campaign's
+        // exploitation tracker scales by live land use. A good present on only part
+        // of the province correctly reads as a diluted low mean, not a spot value:
+        // `potential` is about the province's OWN average yield, not its best patch.
+        let bin_w = 256 / GOOD_BINS;
+        let good_belt: Vec<f32> = (0..ng)
+            .map(|gd| {
+                let hist = &a.goods_hist[gd * GOOD_BINS..(gd + 1) * GOOD_BINS];
+                let n: u64 = hist.iter().map(|&c| c as u64).sum();
+                if n == 0 { return 0.0; }
+                let sum: f64 = hist.iter().enumerate()
+                    .map(|(b, &c)| (b * bin_w + bin_w / 2) as f64 * c as f64)
+                    .sum();
+                ((sum / n as f64) as f32 / 255.0).clamp(0.0, 1.0)
+            })
+            .collect();
+
         // Culture: the PLURALITY over the province's cells (it used to be sampled at
         // the seat cell alone, which mislabels any province straddling a hearth edge).
         let mut culture_shares: Vec<(String, f32)> = (0..n_kits)
@@ -1105,6 +1131,7 @@ pub fn generate_provinces(
             label_x: if poles[pid].2 > 0.0 { poles[pid].0 } else { sx },
             label_y: if poles[pid].2 > 0.0 { poles[pid].1 } else { sy },
             label_r: poles[pid].2.max(0.5),
+            good_belt,
         });
     }
 

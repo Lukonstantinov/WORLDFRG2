@@ -2179,3 +2179,18 @@ export interface ProvinceLand {
   history: ProvinceLandSample[];
   events: ProvinceEventRow[];
 }
+
+/** §2.5 · one good's exploitation reading in a province — a pure derived read
+ *  except `depletion`, which is the one piece of state that persists. */
+export interface ProvinceGoodExploit {
+  good: number;
+  potential: number;
+  actual: number;
+  /** actual / potential — below 1 is slack, above 1 is over-worked (the soft cap). */
+  exploitation: number;
+  /** 0..1 accumulated overexploitation pressure eroding potential. */
+  depletion: number;
+  /** Share of `actual` that leaves the province via trade rather than being
+   *  consumed by the very population that produced it. */
+  market_share: number;
+}

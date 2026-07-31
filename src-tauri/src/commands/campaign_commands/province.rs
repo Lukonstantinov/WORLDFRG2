@@ -343,3 +343,60 @@ pub fn campaign_cancel_province_work(id: u32, kind: u8, db: State<'_, WorldDb>) 
     persist_campaign(&db, &conn)?;
     Ok(())
 }
+
+/// CITY_PROVINCE_WAR_PLAN.md §2.5 · one good's exploitation reading in a province.
+/// Pure derived read — `potential`/`actual`/`exploitation`/`market_share` are all
+/// recomputed fresh from current state every call; only `depletion` is persisted
+/// simulation state (see `update_province_goods_pressure`).
+#[derive(Serialize)]
+pub struct ProvinceGoodExploit {
+    pub good: u8,
+    /// What this land could yield at full, undepleted, appropriately-worked
+    /// capacity — belt score × live land-use share × the world's calibrated yield.
+    pub potential: f32,
+    /// Actual production of hubs + estates here this tick.
+    pub actual: f32,
+    /// `actual / potential`. Below 1.0 = slack; above 1.0 = the land is being
+    /// pushed past what it can sustainably give (the soft cap — see `depletion`).
+    pub exploitation: f32,
+    /// 0..1 accumulated overexploitation pressure eroding `potential` — a mine
+    /// that "exhausts" barely recovers, a fishery that "collapses and recovers"
+    /// bounces back fast, a vineyard doesn't accrue this at all (§1.2).
+    pub depletion: f32,
+    /// Share of `actual` that leaves the province via trade rather than being
+    /// consumed by the very population that produced it (§2.5's market↔local
+    /// split, from the real per-hub local-demand formula).
+    pub market_share: f32,
+}
+
+/// Every good this province actually produces (or has produced recently enough
+/// that depletion hasn't fully healed) — "only goods actually produced here," no
+/// unexploited-opportunity view (§1.2/§5.5). Sorted by output, largest first.
+#[tauri::command]
+pub fn campaign_province_goods(id: u32, db: State<'_, WorldDb>) -> Result<Vec<ProvinceGoodExploit>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let ng = sim.goods.len();
+    let np = if ng > 0 { sim.prov_good_belt.len() / ng } else { 0 };
+    let p = id as usize;
+    if p >= np { return Ok(vec![]); }
+    let actual_all = sim.province_good_actual();
+    let mut out = Vec::new();
+    for g in 0..ng {
+        let idx = p * ng + g;
+        let belt = sim.prov_good_belt.get(idx).copied().unwrap_or(0.0);
+        if belt <= 0.001 { continue; } // never producible here at all
+        let actual = actual_all.get(idx).copied().unwrap_or(0.0);
+        let depletion = sim.prov_good_depletion.get(idx).copied().unwrap_or(0.0);
+        // §5.5 (simplified — no separate "last produced" year is tracked): a good
+        // stays listed while it is producing now OR depletion hasn't healed away,
+        // which already covers a recently-worked-then-idled mine or fishery.
+        if actual <= 1e-4 && depletion <= 1e-4 { continue; }
+        let potential = sim.province_good_potential(p, g);
+        let exploitation = if potential > 1e-6 { actual / potential } else { 0.0 };
+        let market_share = sim.province_good_market_share(p, g, actual);
+        out.push(ProvinceGoodExploit { good: g as u8, potential, actual, exploitation, depletion, market_share });
+    }
+    out.sort_by(|a, b| b.actual.partial_cmp(&a.actual).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(out)
+}

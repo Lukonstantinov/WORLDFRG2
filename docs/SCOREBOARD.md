@@ -9,6 +9,71 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md: 1.3, 2.3, 2.4, 2.5 built)
+
+**1.3 — panel polish.** Smoothed the Trade tab's 360→600px width snap into a CSS
+transition; applied the house stability gauges' own "quiet when healthy" rule to
+the two treasury displays (grey+small when positive, a loud warning colour only
+when actually empty).
+
+**2.3 — the survey plate's real terrain.** New query command
+`get_province_terrain_crop(province_id, max_dim)` returns a cropped elevation/
+land/biome grid over a province's bbox, read from the world's cached tiles —
+replacing `ProvinceMiniMap`'s flat placeholder relief fill with real hypsometric
+shading. River courses are NOT re-sent by the backend — the frontend already
+holds the world's full river geometry (`worldStore.rivers`) and clips it to the
+province's own raster mask itself, so the water plate now draws a real course
+instead of a proportional scatter. Both fall back to the old placeholders when
+absent (old world / still loading).
+
+**2.4 — elevation-biased land use.** Reuses 2.3's terrain crop: the land-use
+dither's placement is now a RANKED composite (elevation + noise) rather than pure
+noise, so woodland/waste cluster uphill and arable/pasture on the flat — while the
+province's overall shares stay exactly exact (ranking, not threshold-shifting, is
+what preserves that). Tenure's dither is untouched by design.
+
+**2.5 — goods exploitation (the workstream's own "substantial/risk" item).** New
+frozen per-(province, good) belt score (`Province.good_belt`, world-side, an
+unfiltered mean unlike the existing top-6 quality shortlist) snapshotted once at
+campaign start. `potential`/`actual`/`exploitation`/`market_share` are PURE
+DERIVED reads — no new production, no touched prices — computed fresh from
+current land use, live hub+estate production, and the one piece of state that
+does persist: `prov_good_depletion`, updated yearly with an estate-kind-aware
+wear/heal rate (mine barely recovers, fishery recovers fast, vineyard doesn't
+deplete at all — plantation also nudges `prov_soil` down, a real cross-link). The
+yield constant is SELF-CALIBRATED per world (mirroring `need_scale`) so mean
+exploitation reads ≈1.0 on day one regardless of world size, rather than a single
+hand-picked constant that would silently read wrong on a differently-shaped
+world. New test `province_goods_exploitation_tracks_pressure_and_depletes`
+exercises the whole loop (calibration → sustained overexploitation → erosion →
+easing → healing) end to end. Because the pass only ever writes
+`prov_good_depletion`, it cannot move the `econ_` bands or the dynamics test by
+construction — verified, not just argued: both are byte-identical with this
+wired in. Exposed via `campaign_province_goods`; the Province Inspector's Land
+tab now shows the live reading in place of the frozen quality/rank list the
+moment a campaign is actually producing something (falls back to the frozen list
+pre-campaign).
+
+**Simplified / not built, flagged rather than hidden:** land-use category is a
+small hardcoded name table over the 45 shipped goods (`good_land_kind`), not a
+new `GoodSpec` schema field — an unrecognized/custom good defaults to
+unconstrained rather than guessed. §5.5's "keep a good listed while produced
+recently" caveat is simplified to "produced now OR depletion hasn't healed away"
+— no separate last-produced-year is tracked. Vineyard's "raises grade instead"
+positive half isn't tracked (only the "doesn't lose tonnage" half is). Estate
+tier's own "footprint + ceiling + grade" mechanics are untouched by this pass.
+
+Whole-lib gates run: `cargo check --lib` clean · `provinces::tests` unaffected ·
+new exploitation test passes · `econ_` 4/4 non-ignored passed, numbers unchanged
+from the pre-2.5 baseline · `simulate_decades_reports_dynamics` byte-identical ·
+`npx tsc --noEmit` clean.
+
+**Not yet started:** 2.5's own estate-tier depth, Workstream 3 (politics/war —
+city leader, city tiers, state name/colour/borders, the whole abstract war
+system). See `docs/CITY_PROVINCE_WAR_PLAN.md` §7 for the full order.
+
+---
+
 ## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md begun: Step 0 + 2.1 enclave fix + 2.2 sizing)
 
 **Step 0 — the economy oracle could see geography for the first time.** The

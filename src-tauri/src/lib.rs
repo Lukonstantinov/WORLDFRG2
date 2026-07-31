@@ -110,6 +110,7 @@ pub fn run() {
             campaign_commands::campaign_set_province_tax,
             campaign_commands::campaign_start_province_work,
             campaign_commands::campaign_cancel_province_work,
+            campaign_commands::campaign_province_goods,
             // House Dossier: the stability gauges and the feud board.
             campaign_commands::campaign_house_stability,
             campaign_commands::campaign_get_feuds,

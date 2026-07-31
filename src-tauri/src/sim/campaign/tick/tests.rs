@@ -103,6 +103,8 @@
             prov_surplus: vec![], prov_revenue: vec![], prov_holder: vec![],
             prov_holder_house: vec![],
             prov_works: vec![], prov_history: vec![], prov_events: vec![],
+            prov_good_belt: vec![], prov_good_depletion: vec![],
+            prov_good_yield_scale: 1.0,
         };
         s.rebuild_routes();
         s
@@ -3324,4 +3326,48 @@
         assert!(s.houses[0].standing > s.houses[1].standing,
             "an otherwise-identical house holding a province must stand higher: {} vs {}",
             s.houses[0].standing, s.houses[1].standing);
+    }
+
+    /// CITY_PROVINCE_WAR_PLAN.md §2.5 · the whole exploitation loop: calibration
+    /// lands mean exploitation at ~1.0 on day one (by construction), sustained
+    /// overexploitation accumulates depletion and measurably erodes potential, and
+    /// easing off lets it heal back down.
+    #[test]
+    fn province_goods_exploitation_tracks_pressure_and_depletes() {
+        let goods = vec![good("timber", 0, 0, 1.0, 0.5, false)];
+        let hubs = vec![hub(0, 0.0, 0.0, 5000.0, vec![50.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.hub_province = vec![0];
+        s.prov_cap = vec![2000.0];
+        s.prov_forest = vec![0.5];
+        s.prov_arable = vec![0.2];
+        s.prov_pasture = vec![0.1];
+        s.prov_good_belt = vec![0.8]; // 1 province × 1 good ("timber" → forest-scaled)
+        s.prov_good_depletion = vec![0.0];
+        s.calibrate_province_good_yield();
+        assert!(s.prov_good_yield_scale.is_finite() && s.prov_good_yield_scale > 0.0,
+            "yield scale must calibrate to a finite positive number, got {}", s.prov_good_yield_scale);
+
+        let potential0 = s.province_good_potential(0, 0);
+        let actual0 = s.province_good_actual()[0];
+        assert!(potential0.is_finite() && potential0 > 0.0, "potential must be finite and positive");
+        assert!((actual0 - 50.0).abs() < 1e-3, "actual must equal the hub's own production, got {actual0}");
+        let exploit0 = actual0 / potential0;
+        assert!((exploit0 - 1.0).abs() < 0.05,
+            "self-calibration must land ~1.0 exploitation at campaign start, got {exploit0}");
+
+        // Sustained overexploitation: production far above what calibration expected.
+        s.hubs[0].production[0] = 400.0;
+        for yr in 0..10 { s.update_province_goods_pressure(yr); }
+        assert!(s.prov_good_depletion[0] > 0.0, "sustained overexploitation must accumulate depletion");
+        let potential_after = s.province_good_potential(0, 0);
+        assert!(potential_after < potential0,
+            "depletion must erode potential: {potential_after} should be < {potential0}");
+
+        // Ease off — depletion should start healing, not stay frozen at its peak.
+        s.hubs[0].production[0] = 5.0;
+        let d_before = s.prov_good_depletion[0];
+        for yr in 10..20 { s.update_province_goods_pressure(yr); }
+        assert!(s.prov_good_depletion[0] < d_before,
+            "easing pressure must let depletion heal: {} should be < {d_before}", s.prov_good_depletion[0]);
     }

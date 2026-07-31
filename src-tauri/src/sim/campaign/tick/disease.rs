@@ -547,6 +547,9 @@ impl CampaignSim {
             // advanced, the harvest taken, dues collected — and the surplus delivered
             // into the seat city's granary and treasury. Also a no-op without provinces.
             self.province_land_pass(self.tick / TICKS_PER_YEAR);
+            // §2.5 · then the goods exploitation state — needs this year's fresh
+            // forest/arable/pasture, so it runs right after the land pass.
+            self.update_province_goods_pressure(self.tick / TICKS_PER_YEAR);
             // Yearly social mobility: strata shift with prosperity / hardship.
             self.update_society();
             // Then the people may stir: unrest builds, riots flare, revolts topple

@@ -831,6 +831,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         prov_works: vec![],
         prov_history: vec![],
         prov_events: vec![],
+        prov_good_belt: vec![],
+        prov_good_depletion: vec![],
+        prov_good_yield_scale: 1.0,
     };
     // Backfill the colonization pool if the saved economy predates the feature (its
     // `colonizable_sites` deserialized to the serde default — empty). Without this a
@@ -877,6 +880,11 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
     // Provinces (Phase 2b): seed the rural reservoir from the stored partition so the
     // countryside can feed the cities. No-op when no province layer was generated.
     seed_campaign_provinces(&conn, &mut sim);
+    // §2.5 · self-calibrate the goods-exploitation yield scalar against THIS world's
+    // own starting production, so mean exploitation reads ≈1.0 on day one regardless
+    // of world size or belt intensity (mirrors `need_scale`'s own calibration above).
+    // No-op (leaves the serde-default 1.0) when no province layer was generated.
+    sim.calibrate_province_good_yield();
     set_sim(&db, &sim)?;
     persist_campaign(&db, &conn)?; // write the fresh campaign to the DB immediately
     Ok(build_snapshot(&sim))
@@ -949,6 +957,13 @@ fn seed_province_land(provs: &[crate::sim::provinces::Province], n: usize, sim: 
     let mut pasture = vec![0.0f32; n];
     let mut soil = vec![0.6f32; n];
     let mut tenure = vec![[0.18f32, 0.10, 0.09, 0.63]; n];
+    // §2.5 · the frozen per-(province, good) belt score, flat `n * ng`. `good_belt`
+    // is indexed identically to `sim.goods` (both trace back to `load_world_goods`),
+    // so no remapping is needed — a province generated on an older world (no
+    // `good_belt`, serde-defaulted to empty) simply seeds zeros here, and the
+    // exploitation tracker's own early-return on an empty layer takes it from there.
+    let ng = sim.goods.len();
+    let mut good_belt = vec![0.0f32; n * ng];
     for p in provs {
         let i = p.id as usize;
         if i >= n { continue; }
@@ -978,6 +993,12 @@ fn seed_province_land(provs: &[crate::sim::provinces::Province], n: usize, sim: 
         let settled = (p.settlements.len() as f32 / 4.0).clamp(0.0, 1.0);
         tenure[i] = [0.14 + 0.12 * settled, 0.06 + 0.14 * settled, 0.08, 0.0];
         tenure[i][3] = (1.0 - tenure[i][0] - tenure[i][1] - tenure[i][2]).clamp(0.0, 1.0);
+        if ng > 0 {
+            let src = &p.good_belt;
+            for g in 0..ng {
+                good_belt[i * ng + g] = src.get(g).copied().unwrap_or(0.0);
+            }
+        }
     }
     sim.prov_forest = forest;
     sim.prov_arable = arable;
@@ -988,6 +1009,8 @@ fn seed_province_land(provs: &[crate::sim::provinces::Province], n: usize, sim: 
     sim.prov_tax = vec![0.12; n];
     sim.prov_arrears = vec![0.0; n];
     sim.prov_unrest = vec![0.0; n];
+    sim.prov_good_belt = good_belt;
+    sim.prov_good_depletion = vec![0.0; n * ng];
     sim.prov_surplus = vec![0.0; n];
     sim.prov_revenue = vec![0.0; n];
     sim.prov_holder = vec![-1; n];

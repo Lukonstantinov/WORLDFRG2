@@ -3819,7 +3819,31 @@ pub struct CampaignSim {
     #[serde(default)] pub prov_history: Vec<Vec<ProvSample>>,
     /// Per-province chronicle (revolt, famine, clearance finished, …), capped.
     #[serde(default)] pub prov_events: Vec<Vec<ProvEvent>>,
+    /// CITY_PROVINCE_WAR_PLAN.md §2.5 · the FROZEN per-(province, good) belt score
+    /// (0..1), flat `prov_count * goods.len()`, snapshotted once at campaign start
+    /// from `Province.good_belt` — the world half's own per-good land quality, never
+    /// touched again (the one-way snapshot, CLAUDE.md §3.4). `potential` scales this
+    /// by LIVE land use every query; the belt itself never changes.
+    #[serde(default)] pub prov_good_belt: Vec<f32>,
+    /// §2.5 · the ONE piece of exploitation state that actually accumulates in the
+    /// tick: a soft-cap pressure multiplier per (province, good), flat like
+    /// `prov_good_belt` above. Erodes `potential` when a good is over-worked, heals
+    /// when the pressure eases — reuses `prov_soil`'s own wear/heal SHAPE (see
+    /// `update_province_goods_pressure`). `potential`/`actual`/`exploitation`
+    /// themselves are NOT stored: they're cheap to derive fresh from current land
+    /// use + live hub production + this depletion term, so storing them would just
+    /// be a second, staler copy.
+    #[serde(default)] pub prov_good_depletion: Vec<f32>,
+    /// §2.5 · a SINGLE world-wide scalar, self-calibrated once at campaign start
+    /// (mirroring `need_scale`'s own calibration in `lifecycle.rs`) so that mean
+    /// exploitation reads ≈1.0 on the day the campaign begins, whatever the world's
+    /// size or belt intensities happen to be — no hand-tuned constant that would
+    /// silently read wrong on a world shaped differently from the one it was picked
+    /// against. Serde-defaults to 1.0 (a no-op) for a save from before this existed.
+    #[serde(default = "one_f32")] pub prov_good_yield_scale: f32,
 }
+
+fn one_f32() -> f32 { 1.0 }
 
 /// One yearly sample of a province's mutable state — the series behind the province
 /// plate's year slider and the Land tab's trend arrows.
@@ -3900,6 +3924,17 @@ const PROV_GRANT_UNREST_MAX: f32 = 0.40;
 /// Yearly chance, once eligible, that the grant actually happens — so it reads as an
 /// event with a date, not an instant the moment eligibility is reached.
 const PROV_GRANT_CHANCE: f32 = 0.15;
+
+// ── §2.5 goods exploitation tuning ──────────────────────────────────────────────
+/// Depletion added per year at full over-exploitation pressure (exploitation 2.0×
+/// potential), before the per-estate-kind rate multiplier. Same SHAPE as
+/// `PROV_DEPLETE`, its own constant because the two erode different things.
+const PROV_GOOD_DEPLETE: f32 = 0.05;
+/// Depletion recovered per year once pressure eases, before the kind multiplier.
+const PROV_GOOD_RECOVER: f32 = 0.03;
+/// Depletion can erode potential by at most this much — a hard-worked good never
+/// drops to literally zero (a soft cap that bites, never a hard stop, per §1.2).
+const PROV_GOOD_DEPLETION_CAP: f32 = 0.75;
 
 /// Kinds of multi-year land improvement. Deliberately mirrors the satellite-construction
 /// vocabulary (stage → progress → supply) rather than inventing a second project system.

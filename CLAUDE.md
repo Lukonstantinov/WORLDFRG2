@@ -608,6 +608,29 @@ serde-defaulted so old saves load). Grouped by theme:
   All `prov_*` fields are serde-defaulted and every routine early-returns on empty, so a
   campaign without provinces — including the dynamics test — is **bit-identical**. That
   gate is `province_land_pass_is_a_noop_without_provinces`.
+  **Goods exploitation (CITY_PROVINCE_WAR_PLAN.md §2.5):** `prov_good_belt` (flat
+  `prov_count × goods.len()`) is the FROZEN per-good belt score, snapshotted once from
+  the world's own `Province.good_belt` (an unfiltered, untruncated mean — `Province.goods`
+  above is a top-6 quality shortlist and cannot serve this). `potential`/`actual`/
+  `exploitation`/`market_share` (`cities.rs::province_good_*`) are pure DERIVED reads —
+  `potential = belt · prov_cap · live land-use share (forest/arable/pasture, by a small
+  name table over the shipped goods, `good_land_kind`) · a world-calibrated yield scalar
+  (`prov_good_yield_scale`, self-calibrated once at campaign start exactly like
+  `need_scale`, so mean exploitation reads ≈1.0 on day one whatever the world's size) ·
+  (1 − depletion)`; `actual` is a plain re-attribution of hub+estate production already
+  computed, not new production. The ONE piece of state that persists is
+  `prov_good_depletion` (flat, same shape), updated yearly in `update_province_goods_
+  pressure` right after the land pass, reusing `prov_soil`'s own wear/heal SHAPE with an
+  estate-KIND-aware rate (`dominant_estate_kind`): a mine barely recovers ("exhausts"), a
+  fishery recovers fast ("collapses and recovers"), a vineyard doesn't accrue depletion at
+  all (doesn't lose tonnage — the "raises grade instead" half is not tracked), a plantation
+  also nudges `prov_soil` down under pressure ("wears soil"). A manufactory is excluded
+  structurally, not by a special case — `Manufactured` goods have no belt score to begin
+  with. Exposed via `campaign_province_goods`; the Province Inspector's Land tab shows it
+  in place of the frozen quality/rank list the moment a campaign is actually producing
+  something. Because it only WRITES `prov_good_depletion` (never touches hub production,
+  stock or price), it cannot move the `econ_` bands or the dynamics test by construction —
+  verified, not just argued: both are bit-identical/unchanged with this pass wired in.
 
 Tests live in `tick/tests.rs` — incl. `simulate_decades_reports_dynamics`
 (the standing dynamics run) and `bench_campaign_tick` (ignored). See the DLC docs
@@ -685,7 +708,9 @@ commands/
                                   alongside the existing `holder_hub`; `holder_name`
                                   reads as the holding HOUSE's name when one holds
                                   the writ — no new command, just a field added to
-                                  the existing query
+                                  the existing query. `campaign_province_goods` (§2.5)
+                                  — the goods exploitation reading, a pure derived
+                                  read over `CampaignSim::province_good_*` (§5)
   goods_commands.rs             ← Goods spec CRUD, default_custom_goods, backfill
   import_commands.rs            ← import_world_layers (layered world import)
   preview_commands.rs           ← preview_zonal_profile / preview_coarse_climate (§8.14)
