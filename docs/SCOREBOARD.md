@@ -309,8 +309,8 @@ of the wrong world.
 
 | Metric | Value | Gate | Status |
 |---|---|---|---|
-| **Earth main-class agreement** | **69.2%** | `EARTH_MAIN_FLOOR` = 69.0 | ✅ asserted |
-| **Earth exact-zone agreement** | **31.6%** | `EARTH_EXACT_FLOOR` = 31.0 | ✅ asserted |
+| **Earth main-class agreement** | **69.4%** | `EARTH_MAIN_FLOOR` = 69.0 | ✅ asserted |
+| **Earth exact-zone agreement** | **31.8%** | `EARTH_EXACT_FLOOR` = 31.5 | ✅ asserted |
 | Earth C-class own accuracy | 33.0% | — | worst class |
 | Earth `C → B` confusion | 39% | — | largest single error |
 | Earth `D → E` confusion | 30% | — | second largest |
@@ -620,6 +620,7 @@ subsystem is one you cannot have an opinion about.
 
 | Date | Commit | Earth main | Earth exact | Rust tests | FE tests | Note |
 |---|---|---|---|---|---|---|
+| 2026-07-31 | *this* | **69.4%** | **31.8%** | 226 | 0 | Moisture emission scaled by SST via Clausius-Clapeyron (bulk formula). The source was a 3-valued step on `current_type` and, because only boundary currents poleward of ~18° carry a tag, it made the mid-latitudes the model's strongest moisture source and the equator its weakest — backwards. A row 83.8 → 85.1, exact-zone 31.6 → 31.8. Gain damped to 0.30 (sweep in the constant's doc comment). Two REVERTED negative results recorded in FIX_PLAN A7/A8 |
 | 2026-07-31 | *this* | **69.2%** | **31.6%** | 226 | 0 | Snow-albedo cooling confined to the COLD SEASON (it was lowering the annual mean, so `seasonal_temps` put the full 4 °C on July — and Köppen's D/E boundary IS the warmest month). D row 49.8 → 58.7, `D → E` 37% → 30%. Also documents the subtropical basin-position asymmetry (Miyasaka & Nakamura 2005) that entered `6d0aaa1` unreviewed. Floors 67.0 → 69.0; `EARTH_EXACT_FLOOR` added at 31.0 |
 | 2026-07-30 | *this* | **67.4%** | **30.0%** | 225 | 0 | Shelf-velocity fix: `generate_ocean_currents` no longer zeroes current_vx/vy on shelf cells (a rendering concern moved to `render_currents`). `compute_upwelling_zones` was measurably DEAD — 0 usable sources, 0 cells cooled — and is now 3 428 sources / 872 cells / up to 4 °C. First Earth-score move since `d53fdc9`. Mumbai C→A and SE-US B→C now match reference; `D → E` 40%→37%. Floor raised 65.0 → 67.0 |
 | 2026-07-30 | *this* | 66.3% | 29.1% | 224 | 0 | House lineage tab + Compare window + figure variation + enlarged dossier window; outpost/expedition regional-reach fixes (see below) |

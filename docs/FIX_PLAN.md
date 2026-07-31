@@ -691,3 +691,86 @@ it is currently ungated.
 The four too-dry spot checks (Mumbai, Bangladesh, China-South, SE-US) are printed but
 **not asserted**. Promote them to assertions as A1 fixes them — that converts the
 current tuning frontier into permanent protection.
+
+---
+
+### A7. The zero-wind ring at 30°/60° — REAL BUG, REVERTED (negative result)
+
+`ocean::belt_wind` builds its field by blending three belt vectors, but `west` is
+the exact negative of `trade` (and `polar` is identical to `trade`), so the blend
+collapses to a signed multiple of ONE vector whose magnitude passes through zero at
+each belt edge. A trailing `if mag > 0.2 { normalize }` guard then leaves every cell
+within ~±0.7° of `hadley_edge` / `polar_front` at its raw near-zero length, and the
+edge itself at exactly `(0, 0)`. Measured `|v|`: 1.000 at 28°, 0.186 at 29.5°,
+**0.000 at 30°**.
+
+This is not cosmetic. `compute_precipitation` skips an ocean emitter whose wind
+length is < 0.01, and `jets.rs` multiplies its base speed by the same length — so
+those rows emit no moisture and carry no jet, in both hemispheres. The comment on
+the guard claims it exists to prevent "spurious dry/wet bands at 30°/60°". It
+creates one.
+
+**Two fixes were tried and both were reverted.** Forcing the whole sub-guard band
+to unit length: **69.0 / 31.5**. Flooring only the exactly-zero rows at 0.15 —
+touching cells where the blend cancels to within 1e-4 and nothing else: **69.0 /
+31.4**. Baseline is 69.2 / 31.6. Both cost the same ~0.2 main-class and both move
+the same rows: **B 69.0 → 68.4, C 33.0 → 32.4.**
+
+**The finding is the number, not the fix.** The dead band sits exactly on the
+subtropical desert latitude, and restoring *any* wind there wets the deserts. Part
+of this model's arid belt is held up by an absence of wind rather than by
+`subtropical_penalty` — which is the same conclusion A9 reaches from the other
+direction. Fixing the ring honestly therefore requires the subsidence term to be
+strong enough to stand without it; it is not a standalone change. Do not re-attempt
+it in isolation — this is the second recorded attempt.
+
+### A8. Ekman-based cold-current tagging — REVERTED (negative result)
+
+`ocean.rs` decides "cold current" from basin side and latitude
+(`basin_dir > 0.45 && abs_lat > 23.0`). The Somali Current is the world's one cold
+WESTERN-boundary current, at 2–11°N, so it can never be tagged — which also makes
+`monsoon_onshore`'s own documented guard ("cold Somali current zeros E ray")
+unreachable code. Asserted by
+`precipitation::tests::the_cold_current_guard_cannot_fire_in_the_deep_tropics`.
+
+Replaced with the general physical criterion — offshore Ekman transport
+(`ekman · depth_gradient < 0`, handedness from hemisphere × `rotation_sign`),
+appended LAST in the classification chain so it could only add tags. Measured
+**68.4 / 31.2** against 69.2 / 31.6.
+
+The arid row *improved* (B 68.7 → 69.9), confirming the mechanism is real. The cost
+was the tropics: **A 83.8 → 79.1**, because the annual-mean wind off southwest
+India is alongshore, so the criterion fires there and kills the monsoon
+(Mumbai 874 → 643 mm, `A → B`, with `current_type = 2` on its coast). Real
+Indian-coast upwelling is a transient the seasonal model cannot separate from the
+monsoon that overwhelms it.
+
+**And it barely helped the target anyway**: Bosaso 3105 → 2734 mm against a real
+~100. The reason is the more important finding — `subtropical_penalty` is **zero
+below 13°**, so Pass 1b's sink is 0.00 across the whole Horn regardless of what the
+cold tag says, while `monsoon_bonus` fires from 5°. **The Horn is not a tagging
+problem. Between 5° and 13° the model has a monsoon source and no subsidence sink
+at all**, so nothing there can be dried by the mechanism that dries Arabia. Any real
+fix must extend the subsidence term equatorward, and that is a change to the
+latitude structure the Earth calibration is built on — not a local patch.
+
+### A9. Where the C→B error actually lives (measurement, no code)
+
+Area-weighted `ref = C` cells by latitude band × east/west position in the
+continent, `%B` being the error:
+
+```
+  15-25  west  66%    mid  72%    east  48%
+  25-35  west  60%    mid  81%    east  69%   <- 1621 wt, the largest single block
+  35-45  west   9%    mid  20%    east  27%
+  45-55  west   0%                            <- C error here is C->D/E, not C->B
+```
+
+**85% of all C→B error is equatorward of 35°; 64% of it is in the 25–35° band
+alone.** Poleward of 45° the C error is not aridity at all. Consequence for
+planning: the "cyclones funnel moisture into continental interiors" hypothesis is
+aimed at the wrong latitude — `US-Kansas 39N98W` is *already* classified C (250 mm
+vs ~650 real). And an Eady-growth-rate storm track is **not buildable in this
+model**: `earth_base_curve` is piecewise-linear so its meridional derivative is a
+three-step function peaking at the pole, and a single-layer model has no static
+stability, so both terms of σ ≈ 0.31·(f/N)·|∂u/∂z| are unavailable.

@@ -248,7 +248,7 @@ const EARTH_MAIN_FLOOR: f64 = 69.0;
 /// not enough: E scores ~99% for free on a fifth of the weight, so a change can
 /// hold main-class flat while degrading the zone detail underneath it. Track this
 /// one — it is where the real state of the model lives (CLAUDE.md §2.3).
-const EARTH_EXACT_FLOOR: f64 = 31.0;
+const EARTH_EXACT_FLOOR: f64 = 31.5;
 
 /// Why a subtropical cell came out wet or dry — the decision chain, not the total.
 ///

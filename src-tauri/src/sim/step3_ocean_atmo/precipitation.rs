@@ -626,6 +626,52 @@ pub(crate) fn diagnose_subtropical_chain(buf: &WorldBuffer, x: u32, y: u32) -> (
     (onshore, sub, sink)
 }
 
+/// How much moisture an ocean cell emits, relative to a 20 °C reference sea.
+///
+/// The bulk aerodynamic formula gives evaporation as
+/// `E = rho_a * C_E * U * (q_s(SST) - q_a)` (Fairall et al. 2003), and with marine
+/// relative humidity near-constant the whole SST dependence is carried by the
+/// saturation humidity `q_s`, which follows Clausius-Clapeyron. So the moisture a
+/// sea puts into the air is governed first of all by how WARM that sea is.
+///
+/// The emission term did not know the SST at all. It was a three-valued step on
+/// `current_type` (1.7 warm / 0.4 cold / 1.0 neutral), and because the classifier
+/// only tags boundary currents poleward of ~18 deg, the tag census runs 59.7% warm
+/// in the 30-45 deg band against 1.8% warm in the deep tropics. The model's
+/// strongest moisture source was therefore the mid-latitude ocean and its weakest
+/// was the equator -- the reverse of the physics, on a field whose own SST column
+/// says 27.8 C at the equator against 7.4 C at 55 deg.
+///
+/// This multiplies the existing tag-based term rather than replacing it: the tag
+/// still says "a warm boundary current carries more than the basin around it",
+/// which is true, and the SST factor supplies the zonal structure that was missing.
+///
+/// The full physical scaling is a gain of 1.0. It is damped here for a real reason
+/// and an empirical one, in that order: the tag term ALREADY encodes part of the
+/// SST signal (a warm current is warm water), so the full factor double-counts it;
+/// and the measured sweep shows the extra gain buying tropical accuracy out of the
+/// arid row, with exact-zone agreement falling as it rises:
+///
+///   gain   main   exact      A      B
+///   0.30   69.4   31.8   85.1   68.6      <- chosen
+///   0.45   69.4   31.7   85.7   68.4
+///   0.60   69.5   31.7   86.2   68.0
+///   0.75   69.5   31.6   86.5   67.7
+///   1.00   69.5   31.5   87.1   67.1
+///
+/// Main-class plateaus at 0.6 and above, so the higher gains buy nothing on the
+/// headline number while steadily costing exact-zone — the figure CLAUDE.md §2.3
+/// says to track, since E scores ~99% for free and inflates the main-class
+/// aggregate. 0.30 takes the best exact-zone and the least B damage.
+const SST_MOISTURE_GAIN: f32 = 0.3;
+
+#[inline]
+fn sst_moisture_factor(sst_c: f32) -> f32 {
+    let e_sat = |t: f32| 6.11 * (17.27 * t / (t + 237.3)).exp();
+    let ratio = e_sat(sst_c.clamp(-2.0, 35.0)) / e_sat(20.0);
+    (1.0 + SST_MOISTURE_GAIN * (ratio - 1.0)).clamp(0.25, 2.5)
+}
+
 /// Compute annual precipitation (mm/yr) for every land cell.
 ///
 /// Faithful port of WF1 `computePrecipitation`. The crucial difference from the
@@ -827,6 +873,19 @@ fn season_precip(
                 _ => 1.0,
             };
             let init_moisture = init_moisture * (1.0 - ENCLOSED_SUPPRESS_STRENGTH * ctx.sea_suppress[idx]);
+            // Clausius-Clapeyron scaling of the source on the cell's own SST.
+            // An exactly-zero SST means "not computed" here, not "a 0 °C sea":
+            // the column is allocated by `WorldBuffer::load_with` before
+            // `compute_sst` fills it, and an old save pads it with zeros. Same
+            // fallback convention as `koppen::seasonal_temps` uses for
+            // `seasonal_amp`. Without it, a unit test or a pre-SST save silently
+            // gets a uniform 0.78× source.
+            let sst_c = if buf.sst.is_empty() { 0.0 } else { buf.sst[idx] };
+            let init_moisture = if sst_c == 0.0 {
+                init_moisture
+            } else {
+                init_moisture * sst_moisture_factor(sst_c)
+            };
 
             let mut m = init_moisture;
             // Per-emitter fixed angular offset decorrelates the discrete wind belts'
