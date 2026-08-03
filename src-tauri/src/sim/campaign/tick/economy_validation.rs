@@ -1218,15 +1218,25 @@ fn econ_diagnose_outpost_founding() {
     assert!(months > 0, "diagnostic only — never fails the build");
 }
 
-/// Population growth v2 (`TECH_DEV_CAP`/`TECH_DEV_REF`, `disease.rs`): a hub's
-/// carrying capacity used to plateau once `trade_dev`/`primacy_dev` — both RELATIVE
-/// to the world's own busiest hub — stopped earning further headroom, so total
-/// world population hard-plateaued early even with centuries left in the campaign
-/// (reported: halts around 6M on a real campaign world). This measures the FIX: an
-/// earned, tech_factor-linked headroom that keeps rising for as long as the sim
-/// runs (bounded per-hub by a saturating exponential, so it can't run away), over a
-/// 300-year run — long enough to actually see whether growth keeps climbing or
-/// still plateaus, which a 60-year `RUN_YEARS` horizon cannot show.
+/// Population growth v2 (`WORLD_AGE_DEV_CAP`/`WORLD_AGE_DEV_REF_YEARS`,
+/// `disease.rs`): a hub's carrying capacity used to plateau once
+/// `trade_dev`/`primacy_dev` — both RELATIVE to the world's own busiest hub —
+/// stopped earning further headroom, so total world population hard-plateaued
+/// early even with centuries left in the campaign (reported: halts around 6M on a
+/// real campaign world). This measures the FIX: an earned, elapsed-time-linked
+/// headroom that keeps rising for as long as the sim runs (bounded per-hub by a
+/// saturating exponential, so it can't run away), over a 300-year run — long
+/// enough to actually see whether growth keeps climbing or still plateaus, which a
+/// 60-year `RUN_YEARS` horizon cannot show.
+///
+/// This diagnostic is also what CAUGHT a separate pre-existing bug: `tech_factor`
+/// (originally the intended driver here) reads flat at its floor (0.85) for the
+/// ENTIRE 300-year run — `roll_events`' adverse setbacks compound to roughly
+/// −4%/yr at their actual firing rate, outpacing the nominal +1.5%/yr growth
+/// drift, so `tech_factor` collapses within ~6 years of any campaign start and
+/// never recovers. That's flagged in `WORLD_AGE_DEV_CAP`'s own doc comment as a
+/// separate, NOT-bundled finding (it likely affects production broadly, not just
+/// population, and needs its own careful `econ_`-gated rebalance).
 #[test]
 #[ignore]
 fn econ_diagnose_population_growth() {
@@ -1236,16 +1246,16 @@ fn econ_diagnose_population_growth() {
     println!();
     println!("═══ Population growth — {years}-year diagnostic ═══");
     println!("  founding population (reference world, 30 hubs)   {:>10.0}", founding_total);
-    println!("  {:>5}  {:>12}  {:>8}  {:>10}  {:>10}", "year", "total pop", "× found.", "tech_factor", "avg tech_dev");
+    println!("  {:>5}  {:>12}  {:>8}  {:>10}  {:>10}", "year", "total pop", "× found.", "tech_factor", "world_age_dev");
     let mut last_total = founding_total;
     let mut last_sample_year = 0u32;
     for yr in 1..=years {
         s.advance(365);
         if yr % 25 == 0 || yr == years {
             let total: f32 = s.hubs.iter().filter(|h| !h.abandoned).map(|h| h.population).sum();
-            let tech_dev_now = 10.0 * (1.0 - (-(s.tech_factor - 1.0).max(0.0) / 6.0).exp());
+            let dev_now = 2.0 * (1.0 - (-(yr as f32) / 400.0).exp());
             println!("  {:>5}  {:>12.0}  {:>7.2}x  {:>10.2}  {:>10.2}",
-                yr, total, total / founding_total.max(1.0), s.tech_factor, tech_dev_now);
+                yr, total, total / founding_total.max(1.0), s.tech_factor, dev_now);
             let decades = ((yr - last_sample_year) as f32 / 10.0).max(0.1);
             let growth_per_decade = (total / last_total.max(1.0)).powf(1.0 / decades) - 1.0;
             if yr > 25 {

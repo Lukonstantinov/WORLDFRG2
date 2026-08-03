@@ -269,28 +269,54 @@ const PRIMACY_DEV: f32 = 45.0;   // extra capacity-mult headroom for a qualifyin
 /// `colony_pass`'s own bar (`supply_years >= 5.0`, an unbroken 5-year lifeline)
 /// so the extra headroom is EARNED — a colony that keeps starving never gets it.
 const COLONY_CAP_DEV: f32 = 15.0;
-/// ── EARNED technological headroom (keeps population growing across centuries) ──
+/// ── EARNED age-of-world headroom (keeps population growing across centuries) ──
 /// `trade_dev`/`primacy_dev` are both RELATIVE to the world's own busiest hub each
 /// tick — once every hub's relative trade share stabilizes (the whole economy
-/// scaling together via `tech_factor`), no hub earns further headroom and total
-/// world population plateaus even though centuries remain in the campaign.
-/// `tech_factor` itself keeps compounding (~1.5%/yr, `PROD_GROWTH_PER_YEAR`) for as
-/// long as the sim runs — it's the one quantity that never plateaus by
-/// construction — so it's used here as a slow, DAMPED source of extra capacity: a
-/// saturating exponential in `tech_factor`'s growth, so this term is always bounded
-/// (approaches but never exceeds `TECH_DEV_CAP`) even though `tech_factor` itself is
-/// unbounded. Applied to EVERY hub (not earned/rare like `trade_dev`/`primacy_dev`),
-/// so keep it modest — this is the term standing between "population grows for the
-/// whole campaign" and "population blows past the dynamics gate's bounded-wealth
-/// assert" if raised carelessly. Tuned + verified against a 300-year run — see
+/// scaling together), no hub earns further headroom and total world population
+/// plateaus even though centuries remain in the campaign.
+///
+/// This was originally keyed to `tech_factor` (documented as "the entire
+/// technology + growth model", nominally +1.5%/yr, `PROD_GROWTH_PER_YEAR`) — but
+/// measuring it (`econ_diagnose_population_growth`, 300-year run) found
+/// `tech_factor` ITSELF is a pre-existing, separate bug: `roll_events`' adverse
+/// setbacks (fire `PROD_FIRE_SETBACK` + drought/plague/fishery_collapse/embargo
+/// `PROD_EVENT_SETBACK`, at their actual ~36/yr firing rate) compound to roughly
+/// −4%/yr, which OUTPACES the +1.5%/yr growth drift despite the comment beside
+/// those constants claiming otherwise — so `tech_factor` collapses to its own
+/// floor (`TECH_FACTOR_FLOOR` = 0.85) within about 6 years of ANY campaign and
+/// stays pinned there permanently (confirmed: flat 0.85 for the entire 300-year
+/// diagnostic run). That almost certainly matters far beyond population (`tech`
+/// scales the whole world's daily production, mod.rs's day loop) but rebalancing
+/// event-setback/growth constants is its own separate, careful `econ_`-gated
+/// change — NOT bundled into this fix. Flagged, not silently patched.
+///
+/// So this headroom instead rides ELAPSED CAMPAIGN TIME (`self.tick`), which is
+/// unconditionally monotonic — a saturating exponential, so it's always bounded
+/// (approaches but never exceeds `WORLD_AGE_DEV_CAP`) while still rising for as
+/// long as the campaign runs. Applied to EVERY hub (not earned/rare like
+/// `trade_dev`/`primacy_dev`), so keep it modest — this is the term standing
+/// between "population grows for the whole campaign" and "population blows past
+/// the dynamics gate's bounded-wealth assert" if raised carelessly.
+///
+/// TUNING STORY (negative results kept, per CLAUDE.md §2.4): 10.0/150y and
+/// 8.0/400y BOTH tripped `simulate_decades_reports_dynamics`' sustained-runaway-
+/// wealth guard (`late_max < 1_000_000`) even though their OWN 50-year
+/// contribution is tiny (≤0.94 of a ≤5.60 bracket) — a uniform, EVERY-hub capacity
+/// nudge shifts population trajectories enough to change which single house ends
+/// up richest and by how much, highly non-linearly (a smaller nudge at 8.0/400y
+/// produced a WORSE outlier, 1.87M, than the larger one at 10.0/150y's 1.01M —
+/// the wealth-concentration feedback is chaotic-sensitive to this parameter, not
+/// monotonic). 2.0/400y passes clean (sustained-richest 267,702, well inside the
+/// old baseline's own range) — verified against a 300-year run — see
 /// `econ_diagnose_population_growth` (economy_validation.rs) and
-/// docs/SCOREBOARD.md.
-const TECH_DEV_CAP: f32 = 10.0;
-/// How much of `tech_factor`'s own growth (`tech_factor − 1`) it takes to earn
-/// ~63% of `TECH_DEV_CAP`. Larger = slower ramp (population takes longer to feel
-/// technological headroom); smaller = faster ramp (saturates, and stops helping,
-/// earlier in the campaign).
-const TECH_DEV_REF: f32 = 6.0;
+/// docs/SCOREBOARD.md. Landed conservative on purpose; raising it further needs
+/// its own iteration against this same gate, not a one-shot guess.
+const WORLD_AGE_DEV_CAP: f32 = 2.0;
+/// Years of campaign elapsed to earn ~63% of `WORLD_AGE_DEV_CAP`. Larger = slower
+/// ramp (population takes longer to feel this headroom, so it keeps room to grow
+/// later in a long campaign); smaller = faster ramp (saturates, and stops helping,
+/// earlier).
+const WORLD_AGE_DEV_REF_YEARS: f32 = 400.0;
 /// ── Trade GRAVITY ── how strongly a big / high-class hub PULLS trade from farther
 /// afield and is preferred by merchants. A hub's `hub_pull` ≥ 1; its EFFECTIVE distance
 /// to every other city = real distance ÷ pull, so a great entrepôt enters the partner
