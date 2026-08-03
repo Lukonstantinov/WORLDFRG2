@@ -257,6 +257,7 @@ fn reference_world() -> CampaignSim {
             trade_value: 0.2 + (i % 4) as f32 * 0.1,
             delta: false,
             chokepoint: false,
+            province: -1,
         });
     }
 

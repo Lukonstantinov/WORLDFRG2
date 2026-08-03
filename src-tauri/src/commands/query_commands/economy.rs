@@ -41,7 +41,8 @@ pub fn compute_economy(
     // Empty-land colonization candidates for the campaign (uses tile data here).
     let base_value: Vec<f32> = specs.iter().map(|s| s.base_value.max(0.0)).collect();
     let settle_xy: Vec<(f32, f32)> = settlements.iter().map(|s| (s.x as f32, s.y as f32)).collect();
-    let colonizable_sites = compute_colonizable_sites(&world, grid_w, grid_h, &settle_xy, &base_value);
+    let province_raster = read_province_raster(&conn);
+    let colonizable_sites = compute_colonizable_sites(&world, grid_w, grid_h, &settle_xy, &base_value, province_raster.as_ref());
 
     let wrap_dx = |a: i32, b: i32| -> i32 {
         let mut d = (a - b).abs();

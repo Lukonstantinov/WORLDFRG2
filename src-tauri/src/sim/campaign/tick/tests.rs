@@ -575,7 +575,7 @@
                 y: (k / 4) as f32 * 12.0 + 4.0,
                 koppen: 11, elevation: 0.2, fertility: 0.5, coastal: k % 2 == 0,
                 kind_hint: ((k % 5) + 1) as u8, trade_value: 0.4 + (k as f32 % 3.0) * 0.2,
-                delta: false, chokepoint: false,
+                delta: false, chokepoint: false, province: -1,
             });
         }
         // A bank so settlement colonies (which need a same-continent bank) can form too.
@@ -713,7 +713,7 @@
                 fertility: 0.45 + (i % 3) as f32 * 0.15,
                 coastal: i % 2 == 0, kind_hint: 1,
                 trade_value: 0.2 + (i % 4) as f32 * 0.1,
-                delta: false, chokepoint: false,
+                delta: false, chokepoint: false, province: -1,
             });
         }
         s.rebuild_routes();
@@ -839,7 +839,7 @@
         s.colonizable.push(ColonizeSite {
             x: 16.0, y: 10.0, koppen: 8, elevation: 0.1, fertility: 0.8,
             coastal: false, kind_hint: 1, trade_value: 0.3,
-            delta: false, chokepoint: false,
+            delta: false, chokepoint: false, province: -1,
         });
         // The swarm preconditions: crowded (2× founding), content, fed.
         s.hubs[0].population = s.hubs[0].founding_pop * 2.0;
@@ -1071,8 +1071,8 @@
         // Empty land near the cluster: a fertile site (→ settlement colony) and a
         // trade-rich poor coastal site (→ house outpost), both within the hop-reach cap.
         s.colonizable = vec![
-            ColonizeSite { x: 3.0, y: 3.0, koppen: 0, elevation: 0.2, fertility: 0.80, coastal: false, kind_hint: 1, trade_value: 0.10, delta: false, chokepoint: false },
-            ColonizeSite { x: 5.0, y: 2.0, koppen: 0, elevation: 0.1, fertility: 0.18, coastal: true, kind_hint: 4, trade_value: 0.60, delta: false, chokepoint: false },
+            ColonizeSite { x: 3.0, y: 3.0, koppen: 0, elevation: 0.2, fertility: 0.80, coastal: false, kind_hint: 1, trade_value: 0.10, delta: false, chokepoint: false, province: -1 },
+            ColonizeSite { x: 5.0, y: 2.0, koppen: 0, elevation: 0.1, fertility: 0.18, coastal: true, kind_hint: 4, trade_value: 0.60, delta: false, chokepoint: false, province: -1 },
         ];
         s.rebuild_routes();
         s.tick = COLONY_START_TICK; // open the age of colonisation

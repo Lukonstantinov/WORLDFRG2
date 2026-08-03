@@ -1607,6 +1607,19 @@ fn coarse_path_cost(cc: &CoarseCost, path: &[usize]) -> f32 {
     c
 }
 
+/// Read the world's province raster (rw, rh, raster), if a province layer has been
+/// generated — `None` on a world with no province layer yet. Same metadata key and
+/// shape `compute_states`/`campaign_province_land_all` already read; kept here as a
+/// shared helper so `compute_colonizable_sites`'s callers don't each re-derive it.
+pub(crate) fn read_province_raster(conn: &rusqlite::Connection) -> Option<(u32, u32, Vec<u32>)> {
+    let (rw, rh, _gw, _gh, mut raster): (u32, u32, u32, u32, Vec<u32>) =
+        metadata::get_meta(conn, "province_raster").ok().flatten()
+            .and_then(|s| serde_json::from_str(&s).ok())?;
+    if rw == 0 || rh == 0 || raster.is_empty() { return None; }
+    crate::sim::provinces::migrate_raster_sentinel(&mut raster);
+    Some((rw, rh, raster))
+}
+
 /// Precompute empty-land sites a wealthy house / large city can colonize with an
 /// estate during the campaign. A coarse single pass over tiles picks productive land
 /// a good distance from every settlement, spread out, tagged with a suggested estate
@@ -1617,9 +1630,23 @@ pub(crate) fn compute_colonizable_sites(
     grid_w: u32, grid_h: u32,
     settlements: &[(f32, f32)],
     base_value: &[f32],
+    province_raster: Option<&(u32, u32, Vec<u32>)>,
 ) -> Vec<crate::sim::tick::ColonizeSite> {
     use crate::sim::tick::ColonizeSite;
     if grid_w == 0 || grid_h == 0 { return vec![]; }
+    // Province lookup (rw × rh raster over the same world grid) — a site's province
+    // is a one-time snapshot at generation time, same "campaign never touches a tile
+    // again" discipline the rest of the province layer follows. None (no layer yet /
+    // not generated) leaves every site's province at -1 (unknown, never "empty").
+    let province_at = |wx: f32, wy: f32| -> i32 {
+        let Some((rw, rh, raster)) = province_raster else { return -1; };
+        if *rw == 0 || *rh == 0 || raster.is_empty() { return -1; }
+        let rx = ((wx / grid_w as f32) * *rw as f32) as u32;
+        let ry = ((wy / grid_h as f32) * *rh as f32) as u32;
+        let idx = (ry.min(rh - 1) * rw + rx.min(rw - 1)) as usize;
+        // NO_PROVINCE is u32::MAX, which bit-casts to -1 — already the "unknown" sentinel.
+        raster.get(idx).map(|&p| p as i32).unwrap_or(-1)
+    };
     let f = (grid_w / 120).max(2);
     let cw = ((grid_w + f - 1) / f) as i32;
     let ch = ((grid_h + f - 1) / f) as i32;
@@ -1715,7 +1742,7 @@ pub(crate) fn compute_colonizable_sites(
             cands.push((score, ColonizeSite {
                 x: wx, y: wy, koppen: koppen[ci], elevation: elev[ci],
                 fertility: fert[ci], coastal: cst, kind_hint, trade_value: tval[ci],
-                delta, chokepoint: choke,
+                delta, chokepoint: choke, province: province_at(wx, wy),
             }));
         }
     }
@@ -1799,7 +1826,7 @@ pub(crate) fn compute_satellite_sites(
             cands.push((score, ColonizeSite {
                 x: wx as f32, y: wy as f32, koppen: tile.koppen[ti], elevation: elev,
                 fertility: fert, coastal, kind_hint, trade_value: tv.min(1.0),
-                delta: false, chokepoint: false,
+                delta: false, chokepoint: false, province: -1, // always near an existing city
             }));
         }
     }

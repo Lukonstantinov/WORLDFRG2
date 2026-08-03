@@ -1157,6 +1157,18 @@ impl CampaignSim {
     }
 
 
+    /// Whether province `p` already has a LIVE settlement in it. `hub_province`
+    /// only covers hubs that existed at campaign start (colonies founded mid-
+    /// campaign never get an entry — a known, bounded imprecision: at worst this
+    /// under-detects "already settled" for a province a colony claimed earlier in
+    /// THIS run, which just makes the empty-province bonus fire a little more
+    /// often than strictly necessary, never incorrectly withholds it).
+    fn province_is_settled(&self, p: i32) -> bool {
+        if p < 0 { return true; }
+        self.hub_province.iter().enumerate()
+            .any(|(h, &hp)| hp == p && self.hubs.get(h).map(|x| !x.abandoned).unwrap_or(false))
+    }
+
     pub(crate) fn maybe_found_settlement_colony(&mut self) {
         if self.colonizable.is_empty() { return; }
         let n_settle = self.hubs.iter().filter(|h| h.colony_kind == 1 && !h.autonomous).count();
@@ -1196,7 +1208,15 @@ impl CampaignSim {
             let site_bonus = if s.coastal { 0.35 } else { 0.0 }
                 + if s.delta { 0.60 } else { 0.0 }
                 + if s.chokepoint { 0.80 } else { 0.0 };
-            let score = (0.25 + 0.35 * s.fertility + 1.0 * s.trade_value + site_bonus) * (1.0 - d / cap);
+            // EMPTY-PROVINCE bonus (user rule): a province with no settlement in it
+            // yet is a real gap on the map, worth reaching for over a marginally
+            // better site inside an already-settled one. `s.province` is a one-time
+            // snapshot from generation time (-1 = unknown, e.g. no province layer —
+            // never bonused, so a provinceless world is bit-identical to before).
+            let province_bonus = if s.province >= 0 && !self.province_is_settled(s.province) {
+                EMPTY_PROVINCE_FOUND_BONUS
+            } else { 0.0 };
+            let score = (0.25 + 0.35 * s.fertility + 1.0 * s.trade_value + site_bonus + province_bonus) * (1.0 - d / cap);
             if score > bi.1 { bi = (i, score); }
         }
         let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return };

@@ -1081,8 +1081,9 @@ fn recompute_colonizable(
     let specs = crate::commands::goods_commands::load_world_goods(conn);
     let base_value: Vec<f32> = specs.iter().map(|s| s.base_value.max(0.0)).collect();
     let world = db.cached_tiles_with_conn(conn)?;
+    let province_raster = crate::commands::query_commands::read_province_raster(conn);
     Ok(crate::commands::query_commands::compute_colonizable_sites(
-        &world, grid_w, grid_h, hub_xy, &base_value))
+        &world, grid_w, grid_h, hub_xy, &base_value, province_raster.as_ref()))
 }
 
 /// Recompute the NEAR-city satellite site pool from current tiles (≤500 km from a

@@ -231,6 +231,12 @@ const COLONY_FREIGHT_RATE: f32 = 0.12;
 // lifeline contracts cover the deficit. Outposts ignore fertility entirely.
 const COLONY_MIN_FERTILE: f32 = 0.12;
 const COLONY_MIN_TRADE: f32 = 0.18;
+/// Settlement-colony site scoring bonus (user rule: "urge to found settlements in
+/// the empty provinces") for a site in a province with no live settlement in it yet
+/// — comparable in weight to the delta/coastal site premiums above, so a real gap
+/// on the map competes with (but doesn't automatically beat) a genuinely better
+/// site inside land that's already settled.
+const EMPTY_PROVINCE_FOUND_BONUS: f32 = 0.6;
 /// Daily logistic population-growth rate below carrying capacity (~5%/yr peak at
 /// low population; eases to 0 at capacity). Was 0.0006 (~24%/yr — too fast).
 const POP_GROWTH_RATE: f32 = 0.0003;
@@ -2841,6 +2847,11 @@ pub struct ColonizeSite {
     /// Land→sea CHOKEPOINT (strait / isthmus / portage where cargo transships and
     /// tolls can be levied — Venice/Bruges/Constantinople-style prize sites).
     #[serde(default)] pub chokepoint: bool,
+    /// The world province this site falls in (a raster lookup at generation time),
+    /// or -1 if the world has no province layer yet (serde default — old saves and
+    /// worlds without a province layer read as "unknown", never "empty", so they
+    /// can't accidentally win the empty-province founding bonus below).
+    #[serde(default = "neg_one_i32")] pub province: i32,
 }
 
 /// A worldgen settlement that ranked BELOW the live-hub cap, so it is NOT
