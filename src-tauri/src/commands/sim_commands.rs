@@ -1234,7 +1234,10 @@ pub fn campaign_province_state(db: State<'_, WorldDb>) -> Result<Vec<ProvinceLiv
     let mut live_rural: Vec<f32> = Vec::new();
     let mut net_mig: Vec<f32> = Vec::new();
     if !raster.is_empty() && gw > 0 && gh > 0 {
-        let step = ((gw.max(gh) + 383) / 384).max(1);
+        // Must match the downsample cap `sim_generate_provinces` used to build the
+        // raster (`cap = 768u32` above) — see the matching comment in
+        // campaign_commands/lifecycle.rs::seed_campaign_provinces.
+        let step = ((gw.max(gh) + 767) / 768).max(1);
         if let Some(sim) = crate::commands::campaign_commands::get_sim(&db, &conn)? {
             if !sim.prov_rural.is_empty() { live_rural = sim.prov_rural.clone(); }
             net_mig = sim.prov_net_mig.clone();

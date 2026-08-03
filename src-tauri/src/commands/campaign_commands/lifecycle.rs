@@ -926,8 +926,12 @@ fn seed_campaign_provinces(conn: &Connection, sim: &mut CampaignSim) {
         seat[i] = [p.seat_x as f32, p.seat_y as f32];
     }
     // Map each existing hub to its province via the raster (exact); fall back to
-    // nearest seat when the raster is missing.
-    let step = if gw == 0 { 1 } else { ((gw.max(gh) + 383) / 384).max(1) };
+    // nearest seat when the raster is missing. This MUST match the downsample cap
+    // `sim_generate_provinces` used to build the raster (sim_commands.rs, `cap =
+    // 768u32`) — a mismatched cap recomputes the wrong step and silently misindexes
+    // most hubs into the wrong (or no) province, leaving the true province empty of
+    // members so `province_demography_pass` never migrates anyone into/out of it.
+    let step = if gw == 0 { 1 } else { ((gw.max(gh) + 767) / 768).max(1) };
     let hub_prov: Vec<i32> = sim.hubs.iter().map(|h| {
         if !raster.is_empty() && gw > 0 && gh > 0 {
             let hx = (h.x.max(0.0) as u32).min(gw - 1);
