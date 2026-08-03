@@ -912,7 +912,17 @@ const HOUSE_WEALTH_TAX_BASE: f32 = 0.004;    // monthly flat civic wealth tax
 // gently, so a great trading dynasty CAN climb into the hundreds of thousands (and
 // fund a trade outpost) — while the quadratic still bends the very richest back
 // before any millions-scale runaway. Was 8k / 5e-6 (which pinned the richest ~64k).
-const HOUSE_WEALTH_SOFTCAP: f32 = 60_000.0;  // wealth below this escapes the surcharge
+//
+// SCALED BY THE HOUSE'S OWN HOME-CITY SIZE (`city_size_factor`, 0.3x-4x on
+// population/30,000) at the call site — was a flat absolute number, which meant it
+// implicitly assumed a fixed economy size forever. `GUILD_WEALTH_SOFTCAP` already
+// scaled this way (a few lines below, in `apply_wealth_sinks`); the private-house
+// cap had been the one inconsistent case. Investigating population growth fixes
+// surfaced this: a genuinely bigger, healthier economy (which those fixes enable)
+// pushed a single house's wealth past this test's runaway guard even though the
+// house was proportionally no richer relative to its city than before — the
+// ceiling was tightening in real terms as the world grew, not staying constant.
+const HOUSE_WEALTH_SOFTCAP: f32 = 60_000.0;  // wealth below this escapes the surcharge, at city_size_factor = 1.0
 const HOUSE_WEALTH_TAX_QUAD: f32 = 3.0e-7;   // monthly quadratic surcharge on the overshoot
 const HOUSE_WEALTH_TAX_MAXFRAC: f32 = 0.4;   // never tax more than this share of wealth/month
 /// First-N-years surcharge: it is HARD to get rich early (founding generations), the
@@ -5429,7 +5439,11 @@ impl CampaignSim {
             // instead of running away to the millions. Capped per month so it can't
             // drive a house straight into debt. Flows to the polis TREASURY.
             let wealth_tax = if is_guild { 0.0 } else {
-                let over = (pos - HOUSE_WEALTH_SOFTCAP).max(0.0);
+                // Same city_size_factor scaling GUILD_WEALTH_SOFTCAP already uses above —
+                // a house's ceiling grows with its own home city instead of assuming a
+                // fixed economy size forever (see HOUSE_WEALTH_SOFTCAP's doc comment).
+                let softcap = HOUSE_WEALTH_SOFTCAP * self.city_size_factor(home);
+                let over = (pos - softcap).max(0.0);
                 let raw = (pos * HOUSE_WEALTH_TAX_BASE + over * over * HOUSE_WEALTH_TAX_QUAD) * early_mult;
                 raw.min(pos * HOUSE_WEALTH_TAX_MAXFRAC)
             };
