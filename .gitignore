@@ -18,6 +18,9 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Claude Code agent scratch (isolated git worktrees for background subagents)
+.claude/worktrees/
+
 # Unrelated files that live in this folder but are not part of the project
 20260301 Molodezh Project/
 *.kra-autosave.png
