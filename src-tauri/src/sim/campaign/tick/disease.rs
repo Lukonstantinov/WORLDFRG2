@@ -469,8 +469,15 @@ impl CampaignSim {
                 && comp_capital.get(&self.hubs[h].component).map(|&(_, i)| i == h).unwrap_or(false) {
                 PRIMACY_DEV
             } else { 0.0 };
+            // A settlement colony's founding_pop is tiny (6% of its founder's), so
+            // without earned headroom its capacity plateaus well under colony_pass's
+            // own 40k "city" threshold — it can never structurally get there. Award
+            // the same PROVEN bar colony_pass itself requires to advance a stage.
+            let colony_cap_dev = if self.hubs[h].colony_kind == 1 && self.hubs[h].supply_years >= 5.0 {
+                COLONY_CAP_DEV
+            } else { 0.0 };
             let cap_mult = (0.35 + 2.0 * food_sec)
-                * (0.60 + 5.0 * prosperity * prosperity + trade_dev + primacy_dev);
+                * (0.60 + 5.0 * prosperity * prosperity + trade_dev + primacy_dev + colony_cap_dev);
             let capacity = (self.hubs[h].founding_pop * cap_mult)
                 .max(self.hubs[h].founding_pop * 0.15);
             // Logistic step: approach capacity from below, decline when above it.

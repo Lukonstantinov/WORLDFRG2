@@ -259,6 +259,16 @@ const TRADE_DEV_CAP: f32 = 20.0;
 /// coast + trade-hub + being fed (the food_sec multiplier still applies), so it stays
 /// RARE: a hub only nears 1M when capital + water + trade + prosperity + food all coincide.
 const PRIMACY_DEV: f32 = 45.0;   // extra capacity-mult headroom for a qualifying capital
+/// ── PROVEN colony headroom ── a settlement colony's `founding_pop` is frozen at
+/// `COLONY_MIGRATION_FRAC` (6%) of its founder's population at the moment it's
+/// planted — typically only 1-2k people. Without extra headroom, `cap_mult`'s own
+/// ceiling (`food_sec` + `prosperity` terms alone, no `trade_dev`/`primacy_dev`,
+/// which a young colony realistically never earns) tops out ≈13×, so capacity
+/// plateaus around 15-25k — under `colony_pass`'s own 40k "city" stage threshold
+/// (`colonies.rs`), so a colony could never structurally reach it. Mirrors
+/// `colony_pass`'s own bar (`supply_years >= 5.0`, an unbroken 5-year lifeline)
+/// so the extra headroom is EARNED — a colony that keeps starving never gets it.
+const COLONY_CAP_DEV: f32 = 15.0;
 /// ── Trade GRAVITY ── how strongly a big / high-class hub PULLS trade from farther
 /// afield and is preferred by merchants. A hub's `hub_pull` ≥ 1; its EFFECTIVE distance
 /// to every other city = real distance ÷ pull, so a great entrepôt enters the partner
