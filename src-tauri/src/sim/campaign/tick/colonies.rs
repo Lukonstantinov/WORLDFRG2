@@ -273,10 +273,25 @@ impl CampaignSim {
     }
 
 
+    /// VIGOROUS YOUTH (see the doc comment on `CREOLE_VIGOR_YEARS` in `mod.rs`) — how
+    /// much of its birth vigor a creole culture has left, 1.0 at `born_tick` decaying
+    /// linearly to 0.0 by `CREOLE_VIGOR_YEARS` later. 0.0 for anything that isn't a
+    /// live creole (a hearth culture, an unknown name), so every call site is a true
+    /// no-op off the creole path.
+    pub(crate) fn creole_vigor(&self, name: &str) -> f32 {
+        let Some(cr) = self.creoles.iter().find(|c| c.name == name) else { return 0.0; };
+        let age_years = self.tick.saturating_sub(cr.born_tick) as f32 / TICKS_PER_YEAR as f32;
+        (1.0 - age_years / CREOLE_VIGOR_YEARS).clamp(0.0, 1.0)
+    }
+
+
     /// Cultures 2.0 · Yearly assimilation — minority quarters blend into the majority,
     /// FASTER when they share a language family with the local majority (mutual
     /// intelligibility) and in big, prosperous "melting-pot" cities; SLOWER across
     /// distant families. A regional LINGUA FRANCA bridges distant families. Bounded.
+    /// A freshly-formed creole majority/minority additionally carries its VIGOR bonus
+    /// (see `creole_vigor`) — it resists dissolving as a minority and, while it holds
+    /// a hub's majority, pulls other minorities into itself faster.
     pub(crate) fn assimilation_pass(&mut self) {
         let n = self.hubs.len();
         for h in 0..n.min(self.hub_minorities.len()) {
@@ -291,6 +306,8 @@ impl CampaignSim {
             // Prestige / melting-pot pressure: large, wealthy cities assimilate faster.
             let prestige = (self.hubs[h].population / 20_000.0).clamp(0.0, 1.0) * 0.5
                 + self.hubs[h].trade_wealth.clamp(0.0, 1.0) * 0.5;
+            // A vigorous young creole majority pulls its minorities in faster.
+            let maj_vigor = self.creole_vigor(&maj_name);
             let mins = std::mem::take(&mut self.hub_minorities[h]);
             let mut kept: Vec<(String, f32)> = Vec::with_capacity(mins.len());
             for (c, s) in mins {
@@ -313,7 +330,14 @@ impl CampaignSim {
                 // quarters intact (a real self-contained minority, e.g. a diaspora
                 // trading community); Assimilative peoples dissolve faster.
                 let resist = crate::sim::cultures::traits_resist_assimilation(&self.culture_trait_ids(&c));
-                let rate = (MINORITY_ASSIM_RATE * kin * look * resist * (1.0 + prestige)).clamp(0.0, 0.25);
+                let mut rate = (MINORITY_ASSIM_RATE * kin * look * resist * (1.0 + prestige)).clamp(0.0, 0.25);
+                // Vigorous young majority: pull minorities in faster (converts quicker).
+                if maj_vigor > 0.0 { rate *= 1.0 + (CREOLE_VIGOR_PULL - 1.0) * maj_vigor; }
+                // Vigorous young minority (the creole itself, still finding its feet
+                // somewhere it isn't yet the majority): resist being assimilated away.
+                let self_vigor = self.creole_vigor(&c);
+                if self_vigor > 0.0 { rate *= 1.0 - CREOLE_VIGOR_RESIST * self_vigor; }
+                let rate = rate.clamp(0.0, 0.25);
                 let ns = s * (1.0 - rate);
                 if ns > 0.005 { kept.push((c, ns)); }
             }

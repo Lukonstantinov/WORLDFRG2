@@ -362,6 +362,23 @@ const CREOLE_MIN_POP: f32 = 4_000.0;       // only sizeable cities spawn creoles
 const CREOLE_MIN_MINORITY: f32 = 0.30;     // the minority must be at least this share
 const CREOLE_YEARLY_CHANCE: f32 = 0.08;    // per eligible city per year
 const CREOLE_SEED_FRAC: f32 = 0.5;         // share of the minority that becomes the creole
+/// VIGOROUS YOUTH — a creole is born with none of a hearth culture's structural
+/// supports: no home province to keep feeding it via `province_demography_pass`'s
+/// rural→urban migration (that pass carries the OLD `prov_culture` — fixed at
+/// campaign start and never reassigned — into the very city a creole was just born
+/// in, every single year, forever; see `cities.rs::province_demography_pass`), and it
+/// starts as a small single-city minority quarter with no diaspora anywhere else. Left
+/// alone this is a structural headwind a hearth culture never faces, so a creole dies
+/// out almost as fast as it forms. A bounded, DECAYING bonus (linear to zero by
+/// `CREOLE_VIGOR_YEARS`, applied only inside `assimilation_pass`) gives a young
+/// creole a fighting chance: it resists being assimilated away while it is still a
+/// minority somewhere, and it pulls other minorities (including a reintroduced old
+/// majority) into itself faster while it holds a hub's majority. Fully decays to a
+/// no-op by maturity — an old creole is governed by exactly the same rules as any
+/// hearth culture (rule 18's "any new bonus needs a ceiling", applied here).
+const CREOLE_VIGOR_YEARS: f32 = 40.0;      // the bonus decays linearly to nothing over this span
+const CREOLE_VIGOR_RESIST: f32 = 0.5;      // at birth, halves its own assimilation-away rate
+const CREOLE_VIGOR_PULL: f32 = 1.8;        // at birth, ×1.8 its pull on minorities while majority
 /// Cultures 3.0 · SPLINTERING — a far-flung, isolated community of one people slowly
 /// drifts into a NEW daughter people of its own (American English from British, Afrikaans
 /// from Dutch). Same kit/appearance, a fresh unique name and its own origin card. Rare,
