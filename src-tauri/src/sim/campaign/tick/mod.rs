@@ -1062,9 +1062,24 @@ fn estate_kind_for_good(name: &str, food: bool) -> u8 {
     if n.contains("wine") || n.contains("grape") { return 5; }
     if n.contains("fish") || n.contains("pearl") || n.contains("whal")
         || n.contains("herring") || n.contains("stockfish") { return 4; }
+    // Mined/quarried goods — every `Distribution::Deposits` mineral this campaign
+    // ships (§8.16), not just the original six. `TickGood` (unlike the world-side
+    // `GoodSpec`) carries no `distribution` field, so this stays a name table —
+    // but it had gone stale: the gem-split (ruby/sapphire/emerald/diamond/
+    // amethyst/topaz/garnet/carnelian), tin, lead, marble, jade and the
+    // DEPOSITS_AND_MINING_PLAN slice-3 minerals (mercury, alum, lapis_lazuli,
+    // turquoise) all fell through to "any other cultivated trade good" below and
+    // got founded as a Plantation instead of a Mine — the wrong depletion curve
+    // in `dominant_estate_kind` (cities.rs §2.5: a mine barely recovers, a
+    // plantation just wears soil) and the wrong label in the UI/journal. Keep
+    // this in sync with `default_list()`/`default_custom_goods()`'s Deposits set.
     if n.contains("iron") || n.contains("gem") || n.contains("salt") || n.contains("amber")
         || n.contains("ore") || n.contains("stone") || n.contains("copper") || n.contains("silver")
-        || n.contains("gold") || n.contains("coal") { return 2; }
+        || n.contains("gold") || n.contains("coal") || n.contains("tin") || n.contains("lead")
+        || n.contains("marble") || n.contains("jade") || n.contains("lapis") || n.contains("turquoise")
+        || n.contains("mercury") || n.contains("alum") || n.contains("ruby") || n.contains("sapphire")
+        || n.contains("emerald") || n.contains("diamond") || n.contains("amethyst") || n.contains("topaz")
+        || n.contains("garnet") || n.contains("carnelian") { return 2; }
     if food { return 1; }
     // Any other cultivated trade good (silk, spices, cotton, sugar, tea, coffee, …).
     3

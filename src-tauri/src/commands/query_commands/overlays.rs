@@ -965,7 +965,18 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
         // Multi-type goods: wheat splits into grain species, paper into its three
         // sources — classified per cell from the coarse climate fields.
         let subtype_kind = match spec.id.as_str() { "wheat" => 1u8, "paper" => 2u8, _ => 0u8 };
-        let mut regions = cluster_cells(source_grid, cw, ch, f, 0.30, min_cells);
+        // Deposits (§8.16) carry `workable_intensity = grade · depth_workability`,
+        // and `depth_workability` alone is 0.35 (deep) or 0.15 (flooded) — so a
+        // deep/flooded working's belt byte routinely sits well under the 0.30 cut
+        // tuned for climate-belt goods that span close to 1.0. That silently broke
+        // this function's own "Deposit goods are scattered (keep every deposit)"
+        // comment above: a real, placed working just never clustered into a region,
+        // so "not all mining goods appear on the map" even though the working was
+        // genuinely placed and correctly counted by `campaign_province_goods`/
+        // `compute_economy`. Use a near-zero floor for Deposits so a working's mere
+        // presence — not its depth-discounted intensity — decides whether it draws.
+        let thresh = if matches!(spec.distribution, Distribution::Deposits) { 0.02 } else { 0.30 };
+        let mut regions = cluster_cells(source_grid, cw, ch, f, thresh, min_cells);
         regions.sort_by(|a, b| b.cells.len().cmp(&a.cells.len()));
         regions.truncate(max_keep);
         for c in regions {
