@@ -29,6 +29,7 @@ export const PANEL_TINTS = {
   hydrology: "rgba(10,22,30,0.97)", // 🌊 Hydrology — deep river-teal
   immigration: "rgba(14,20,26,0.97)", // 🧭 Migration & Immigration — dusk indigo
   province: "rgba(16,22,18,0.97)",  // 🏞 Province Inspector — moss-slate
+  war: "rgba(26,15,13,0.97)",       // ⚔ War Council — iron-crimson
 } as const;
 
 /** Interactive descendants that must NEVER start a window drag — a press on any of

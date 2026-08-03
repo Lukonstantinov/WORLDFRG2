@@ -193,6 +193,13 @@ interface UIStore {
   showNews: boolean;
   /** Phase 6 · Plagues & Epidemics panel open. */
   showPlagues: boolean;
+  /** DLC 3.5 §3.4 · the War Council panel — active wars, the concluded-war log
+   *  and aggregate war statistics, all in one dedicated window. */
+  showWar: boolean;
+  /** CITY_PROVINCE_WAR_PLAN.md §3.3 · the States panel — every formed state
+   *  (a tier 1-2 city's province writ) with its territory, population and
+   *  treasury, previously only visible as an unlabelled map tint. */
+  showStates: boolean;
   /** Migration & Immigration panel open (per selected city). */
   showImmigration: boolean;
   /** Phase 6 · Guilds & Crafts panel open. */
@@ -294,6 +301,8 @@ interface UIStore {
   setShowBankIcons: (v: boolean) => void;
   setShowNews: (v: boolean) => void;
   setShowPlagues: (v: boolean) => void;
+  setShowWar: (v: boolean) => void;
+  setShowStates: (v: boolean) => void;
   setShowImmigration: (v: boolean) => void;
   setShowGuilds: (v: boolean) => void;
   setShowFigures: (v: boolean) => void;
@@ -415,6 +424,8 @@ export const useUIStore = create<UIStore>((set) => ({
   showBankIcons: false,
   showNews: false,
   showPlagues: false,
+  showWar: false,
+  showStates: false,
   showImmigration: false,
   showGuilds: false,
   showFigures: false,
@@ -548,6 +559,8 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowBankIcons: (v) => set({ showBankIcons: v }),
   setShowNews: (v) => set({ showNews: v }),
   setShowPlagues: (v) => set({ showPlagues: v }),
+  setShowWar: (v) => set({ showWar: v }),
+  setShowStates: (v) => set({ showStates: v }),
   setShowImmigration: (v) => set({ showImmigration: v }),
   setShowGuilds: (v) => set({ showGuilds: v }),
   setShowFigures: (v) => set({ showFigures: v }),

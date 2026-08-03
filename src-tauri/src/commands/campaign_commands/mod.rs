@@ -2182,6 +2182,9 @@ pub struct WarBrief {
     /// §3.4b · what the aggressor is fighting for, as a phrase — the same label
     /// `war_goal_label` already uses in the journal.
     #[serde(default)] pub goal_label: String,
+    /// §3.4c · for a house-driven war, the house whose feud escalated into it —
+    /// `None` for an ordinary rival-council or independence war.
+    #[serde(default)] pub backer_house_name: Option<String>,
 }
 #[derive(Serialize, Clone)]
 pub struct WarsPayload {

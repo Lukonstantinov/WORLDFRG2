@@ -1490,6 +1490,8 @@ export interface WarBrief {
   round: number;
   /** §3.4b · what the aggressor is fighting for, as a phrase. */
   goal_label: string;
+  /** §3.4c · for a house-driven war, the house whose feud escalated into it. */
+  backer_house_name?: string | null;
 }
 /** A concluded war (the log). */
 export interface WarRecord {

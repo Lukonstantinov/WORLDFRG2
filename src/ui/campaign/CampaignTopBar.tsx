@@ -84,10 +84,13 @@ export function CampaignTopBar() {
         // Opening Provinces also switches the province overlay on so the map matches.
         { label: "🗺 Provinces", on: ui.showProvinces,
           set: (v: boolean) => { ui.setShowProvinces(v); if (v) ui.setOverlayVisible("provinces", true); } },
+        { label: "🏰 States", on: ui.showStates,
+          set: (v: boolean) => { ui.setShowStates(v); if (v) ui.setOverlayVisible("states", true); } },
         { label: "🏆 City Ranking", on: ui.showCityRanking, set: ui.setShowCityRanking },
         { label: "🏛 Colonial Office", on: ui.showColonial, set: ui.setShowColonial },
         { label: "🌊 Hydrology · Rivers", on: ui.showHydrology, set: ui.setShowHydrology },
         { label: "🗞 World News", on: ui.showNews, set: ui.setShowNews },
+        { label: "⚔ War Council", on: ui.showWar, set: ui.setShowWar },
       ],
     },
   ];

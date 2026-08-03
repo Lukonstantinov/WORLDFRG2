@@ -506,6 +506,9 @@ pub fn campaign_get_wars(db: State<'_, WorldDb>) -> Result<WarsPayload, String> 
         chest_a: w.chest_a, chest_b: w.chest_b, levies: w.levies, cause: w.cause.clone(),
         score: w.score, round: w.round,
         goal_label: crate::sim::tick::war_goal_label(w.goal).to_string(),
+        backer_house_name: if w.backer_house >= 0 {
+            sim.houses.get(w.backer_house as usize).map(|h| h.name.clone())
+        } else { None },
     }).collect();
     let mut log = sim.war_log.clone();
     log.reverse();
