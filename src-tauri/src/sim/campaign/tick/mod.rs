@@ -269,6 +269,28 @@ const PRIMACY_DEV: f32 = 45.0;   // extra capacity-mult headroom for a qualifyin
 /// `colony_pass`'s own bar (`supply_years >= 5.0`, an unbroken 5-year lifeline)
 /// so the extra headroom is EARNED — a colony that keeps starving never gets it.
 const COLONY_CAP_DEV: f32 = 15.0;
+/// ── EARNED technological headroom (keeps population growing across centuries) ──
+/// `trade_dev`/`primacy_dev` are both RELATIVE to the world's own busiest hub each
+/// tick — once every hub's relative trade share stabilizes (the whole economy
+/// scaling together via `tech_factor`), no hub earns further headroom and total
+/// world population plateaus even though centuries remain in the campaign.
+/// `tech_factor` itself keeps compounding (~1.5%/yr, `PROD_GROWTH_PER_YEAR`) for as
+/// long as the sim runs — it's the one quantity that never plateaus by
+/// construction — so it's used here as a slow, DAMPED source of extra capacity: a
+/// saturating exponential in `tech_factor`'s growth, so this term is always bounded
+/// (approaches but never exceeds `TECH_DEV_CAP`) even though `tech_factor` itself is
+/// unbounded. Applied to EVERY hub (not earned/rare like `trade_dev`/`primacy_dev`),
+/// so keep it modest — this is the term standing between "population grows for the
+/// whole campaign" and "population blows past the dynamics gate's bounded-wealth
+/// assert" if raised carelessly. Tuned + verified against a 300-year run — see
+/// `econ_diagnose_population_growth` (economy_validation.rs) and
+/// docs/SCOREBOARD.md.
+const TECH_DEV_CAP: f32 = 10.0;
+/// How much of `tech_factor`'s own growth (`tech_factor − 1`) it takes to earn
+/// ~63% of `TECH_DEV_CAP`. Larger = slower ramp (population takes longer to feel
+/// technological headroom); smaller = faster ramp (saturates, and stops helping,
+/// earlier in the campaign).
+const TECH_DEV_REF: f32 = 6.0;
 /// ── Trade GRAVITY ── how strongly a big / high-class hub PULLS trade from farther
 /// afield and is preferred by merchants. A hub's `hub_pull` ≥ 1; its EFFECTIVE distance
 /// to every other city = real distance ÷ pull, so a great entrepôt enters the partner

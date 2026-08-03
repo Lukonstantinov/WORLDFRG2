@@ -1218,6 +1218,51 @@ fn econ_diagnose_outpost_founding() {
     assert!(months > 0, "diagnostic only — never fails the build");
 }
 
+/// Population growth v2 (`TECH_DEV_CAP`/`TECH_DEV_REF`, `disease.rs`): a hub's
+/// carrying capacity used to plateau once `trade_dev`/`primacy_dev` — both RELATIVE
+/// to the world's own busiest hub — stopped earning further headroom, so total
+/// world population hard-plateaued early even with centuries left in the campaign
+/// (reported: halts around 6M on a real campaign world). This measures the FIX: an
+/// earned, tech_factor-linked headroom that keeps rising for as long as the sim
+/// runs (bounded per-hub by a saturating exponential, so it can't run away), over a
+/// 300-year run — long enough to actually see whether growth keeps climbing or
+/// still plateaus, which a 60-year `RUN_YEARS` horizon cannot show.
+#[test]
+#[ignore]
+fn econ_diagnose_population_growth() {
+    let mut s = reference_world();
+    let years = 300u32;
+    let founding_total: f32 = s.hubs.iter().map(|h| h.founding_pop).sum();
+    println!();
+    println!("═══ Population growth — {years}-year diagnostic ═══");
+    println!("  founding population (reference world, 30 hubs)   {:>10.0}", founding_total);
+    println!("  {:>5}  {:>12}  {:>8}  {:>10}  {:>10}", "year", "total pop", "× found.", "tech_factor", "avg tech_dev");
+    let mut last_total = founding_total;
+    let mut last_sample_year = 0u32;
+    for yr in 1..=years {
+        s.advance(365);
+        if yr % 25 == 0 || yr == years {
+            let total: f32 = s.hubs.iter().filter(|h| !h.abandoned).map(|h| h.population).sum();
+            let tech_dev_now = 10.0 * (1.0 - (-(s.tech_factor - 1.0).max(0.0) / 6.0).exp());
+            println!("  {:>5}  {:>12.0}  {:>7.2}x  {:>10.2}  {:>10.2}",
+                yr, total, total / founding_total.max(1.0), s.tech_factor, tech_dev_now);
+            let decades = ((yr - last_sample_year) as f32 / 10.0).max(0.1);
+            let growth_per_decade = (total / last_total.max(1.0)).powf(1.0 / decades) - 1.0;
+            if yr > 25 {
+                println!("      (+{:.1}%/decade since year {})", growth_per_decade * 100.0, last_sample_year);
+            }
+            last_total = total;
+            last_sample_year = yr;
+        }
+    }
+    println!("═══════════════════════════════════════════════════════════════════");
+    println!();
+    // Diagnostic only — never fails the build. The finding is in the printed table:
+    // read it for whether growth keeps climbing through year 300 (fixed) or flattens
+    // out well before then (still plateauing — needs more tuning).
+    assert!(years > 0, "diagnostic only — never fails the build");
+}
+
 // ── Phase 0.4 · the inheritance gate ────────────────────────────────────────
 //
 //  `HOUSE_MASTER_PLAN` 0.4 gates the inheritance rule on one thing, and it is the

@@ -476,8 +476,15 @@ impl CampaignSim {
             let colony_cap_dev = if self.hubs[h].colony_kind == 1 && self.hubs[h].supply_years >= 5.0 {
                 COLONY_CAP_DEV
             } else { 0.0 };
+            // EARNED technological headroom: unlike trade_dev/primacy_dev (relative to
+            // the world's busiest hub, so they plateau once relative shares settle),
+            // this rides tech_factor's own compounding growth — bounded per-hub by a
+            // saturating exponential, but never STOPS rising, so total world population
+            // keeps climbing across a long campaign instead of hard-plateauing early.
+            let tech_dev = TECH_DEV_CAP
+                * (1.0 - (-(self.tech_factor - 1.0).max(0.0) / TECH_DEV_REF).exp());
             let cap_mult = (0.35 + 2.0 * food_sec)
-                * (0.60 + 5.0 * prosperity * prosperity + trade_dev + primacy_dev + colony_cap_dev);
+                * (0.60 + 5.0 * prosperity * prosperity + trade_dev + primacy_dev + colony_cap_dev + tech_dev);
             let capacity = (self.hubs[h].founding_pop * cap_mult)
                 .max(self.hubs[h].founding_pop * 0.15);
             // Logistic step: approach capacity from below, decline when above it.
