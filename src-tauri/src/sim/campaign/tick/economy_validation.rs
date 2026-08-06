@@ -1429,3 +1429,111 @@ fn econ_inheritance_rules_fragment_differently() {
                 "house wealth left its bounds: mean {:.1}", f.mean_wealth);
     }
 }
+
+/// DIAGNOSTIC · HOW UNIQUE IS EACH CAMPAIGN? — runs the SAME reference world at N
+/// different `seed` values and reports, per outcome metric, the spread across seeds.
+///
+/// The campaign is deterministic per `(seed, tick)` and every stochastic decision
+/// routes through `hash01(seed, ..)`, so a fresh seed *does* re-roll every event.
+/// The question this measures is the one that actually matters for replay value:
+/// does re-rolling the events change the STORY, or only its details? A metric with a
+/// low coefficient of variation across seeds is one the world converges to no matter
+/// what happens — an outcome the player cannot influence and will see every game.
+///
+/// Read the CV column, not the means:
+///   CV < 0.10  the world always lands here — structurally fixed, not a random outcome
+///   CV 0.10-0.35  varies, but around one obvious central story
+///   CV > 0.35  genuinely different runs
+///
+/// Run: cargo test --release --lib econ_measure_seed_variance -- --ignored --nocapture
+#[test]
+#[ignore]
+fn econ_measure_seed_variance() {
+    const SEEDS: [u64; 8] = [42, 1337, 7, 90210, 555_555, 8_675_309, 2024, 31_415_926];
+    const YEARS: u32 = 100;
+
+    // One row per metric, one column per seed.
+    let names = [
+        "richest house", "mean house wealth", "houses ever", "houses defunct",
+        "top-10% share", "gini", "wars started", "banks founded", "banks failed",
+        "crashes", "coins minted", "colonies", "outposts", "cities founded",
+        "cities abandoned", "total population", "price index", "outbreaks",
+    ];
+    let mut cols: Vec<Vec<f32>> = vec![Vec::new(); names.len()];
+
+    for &sd in SEEDS.iter() {
+        let mut s = reference_world();
+        s.seed = sd;
+        // House archetypes in `reference_world` are assigned `i % 4` — deterministic,
+        // unlike the real `campaign_start_sim`, which draws them from
+        // `pick_archetype(seed, hub)`. Re-roll them here so this measures the same
+        // starting variability a real campaign has, not the harness's fixed spread.
+        for (i, h) in s.houses.iter_mut().enumerate() {
+            h.archetype = crate::sim::tick::pick_archetype(sd, i as u64);
+        }
+
+        let mut wars_started = 0u32;
+        let mut seen_wars: std::collections::HashSet<(u32, u32, u32)> =
+            std::collections::HashSet::new();
+        for _ in 0..YEARS {
+            s.advance(TICKS_PER_YEAR);
+            for w in &s.wars {
+                if seen_wars.insert((w.a, w.b, w.start_tick)) { wars_started += 1; }
+            }
+        }
+
+        let live: Vec<f32> = s.houses.iter().filter(|h| !h.defunct).map(|h| h.wealth).collect();
+        let defunct = s.houses.iter().filter(|h| h.defunct).count() as f32;
+        let richest = live.iter().copied().fold(0.0f32, f32::max);
+        // Outbreaks are journaled as "contagion"/"disaster", never "plague" — the
+        // first cut of this diagnostic counted a key that never exists and duly
+        // reported 0 plagues on every seed. `epidemics` is the real per-outbreak
+        // record, so count that instead.
+        let outbreaks = s.epidemics.len() as f32;
+        let pop: f32 = s.hubs.iter().filter(|h| !h.abandoned).map(|h| h.population).sum();
+        let cpi = mean(&s.hubs.iter().map(|h| h.price_level).collect::<Vec<_>>());
+
+        let row = [
+            richest,
+            mean(&live),
+            s.houses.len() as f32,
+            defunct,
+            top_share(&live, 0.10),
+            gini(&live),
+            wars_started as f32,
+            s.banks.len() as f32,
+            s.banks.iter().filter(|b| b.defunct).count() as f32,
+            s.crashes.len() as f32,
+            s.hubs.iter().filter(|h| !h.coin_name.is_empty()).count() as f32,
+            s.hubs.iter().filter(|h| h.colony_kind == 1).count() as f32,
+            s.hubs.iter().filter(|h| h.colony_kind == 2).count() as f32,
+            s.total_foundings as f32,
+            s.total_abandonments as f32,
+            pop,
+            cpi,
+            outbreaks,
+        ];
+        for (i, v) in row.iter().enumerate() { cols[i].push(*v); }
+    }
+
+    eprintln!("\n═══ SEED VARIANCE · {} seeds × {YEARS}y on one reference world ═══", SEEDS.len());
+    eprintln!("{:<20} {:>10} {:>10} {:>10} {:>7}  {}", "metric", "mean", "min", "max", "CV", "verdict");
+    let mut fixed = Vec::new();
+    for (i, n) in names.iter().enumerate() {
+        let m = mean(&cols[i]);
+        let lo = cols[i].iter().copied().fold(f32::INFINITY, f32::min);
+        let hi = cols[i].iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let c = cv(&cols[i]);
+        // A CV computed on a near-zero mean is noise, not signal (an outcome that
+        // happens 0 or 1 times across the whole run reports a huge CV and means
+        // nothing). Say so rather than let it read as "genuinely varies".
+        let verdict = if m.abs() < 1.0 { "too rare to judge" }
+                      else if c < 0.10 { fixed.push(*n); "FIXED — same every game" }
+                      else if c < 0.35 { "one central story" }
+                      else { "genuinely varies" };
+        eprintln!("{n:<20} {m:>10.2} {lo:>10.2} {hi:>10.2} {c:>7.3}  {verdict}");
+    }
+    eprintln!("\nStructurally fixed across every seed ({}/{}): {}",
+              fixed.len(), names.len(), fixed.join(", "));
+    eprintln!("These are the outcomes a new seed cannot change — the ceiling on replay value.\n");
+}
