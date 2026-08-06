@@ -1452,12 +1452,17 @@ fn econ_measure_seed_variance() {
     const SEEDS: [u64; 8] = [42, 1337, 7, 90210, 555_555, 8_675_309, 2024, 31_415_926];
     const YEARS: u32 = 100;
 
-    // One row per metric, one column per seed.
-    let names = [
-        "richest house", "mean house wealth", "houses ever", "houses defunct",
-        "top-10% share", "gini", "wars started", "banks founded", "banks failed",
-        "crashes", "coins minted", "colonies", "outposts", "cities founded",
-        "cities abandoned", "total population", "price index", "outbreaks",
+    // One row per metric, one column per seed. The bool is IS_RATIO: a metric whose
+    // natural range is 0..1 rather than a count. The near-zero guard below keys on it —
+    // without the distinction a legitimate gini of 0.75 gets dismissed as "too rare to
+    // judge" purely for being less than 1, which is exactly what the first cut did.
+    let names: [(&str, bool); 18] = [
+        ("richest house", false), ("mean house wealth", false), ("houses ever", false),
+        ("houses defunct", false), ("top-10% share", true), ("gini", true),
+        ("wars started", false), ("banks founded", false), ("banks failed", false),
+        ("crashes", false), ("coins minted", false), ("colonies", false),
+        ("outposts", false), ("cities founded", false), ("cities abandoned", false),
+        ("total population", false), ("price index", false), ("outbreaks", false),
     ];
     let mut cols: Vec<Vec<f32>> = vec![Vec::new(); names.len()];
 
@@ -1475,21 +1480,27 @@ fn econ_measure_seed_variance() {
         let mut wars_started = 0u32;
         let mut seen_wars: std::collections::HashSet<(u32, u32, u32)> =
             std::collections::HashSet::new();
+        // `s.epidemics` is DRAINED to its last 400 entries (`disease.rs`), so reading its
+        // length at the end of a 100y run measures the cap, not the outbreak count — the
+        // second cut of this diagnostic did exactly that and reported a perfect 400.00 on
+        // all 8 seeds with CV 0.000, a "finding" that was pure saturation. Tally outbreaks
+        // year by year from the journal instead (JOURNAL_CAP is 20_000, far above one
+        // year's entries, so nothing is lost between reads).
+        let mut outbreaks = 0u32;
         for _ in 0..YEARS {
+            let t0 = s.tick;
             s.advance(TICKS_PER_YEAR);
             for w in &s.wars {
                 if seen_wars.insert((w.a, w.b, w.start_tick)) { wars_started += 1; }
             }
+            outbreaks += s.journal.iter()
+                .filter(|e| e.tick >= t0 && (e.kind == "contagion" || e.kind == "disaster"))
+                .count() as u32;
         }
 
         let live: Vec<f32> = s.houses.iter().filter(|h| !h.defunct).map(|h| h.wealth).collect();
         let defunct = s.houses.iter().filter(|h| h.defunct).count() as f32;
         let richest = live.iter().copied().fold(0.0f32, f32::max);
-        // Outbreaks are journaled as "contagion"/"disaster", never "plague" — the
-        // first cut of this diagnostic counted a key that never exists and duly
-        // reported 0 plagues on every seed. `epidemics` is the real per-outbreak
-        // record, so count that instead.
-        let outbreaks = s.epidemics.len() as f32;
         let pop: f32 = s.hubs.iter().filter(|h| !h.abandoned).map(|h| h.population).sum();
         let cpi = mean(&s.hubs.iter().map(|h| h.price_level).collect::<Vec<_>>());
 
@@ -1511,7 +1522,7 @@ fn econ_measure_seed_variance() {
             s.total_abandonments as f32,
             pop,
             cpi,
-            outbreaks,
+            outbreaks as f32,
         ];
         for (i, v) in row.iter().enumerate() { cols[i].push(*v); }
     }
@@ -1519,15 +1530,15 @@ fn econ_measure_seed_variance() {
     eprintln!("\n═══ SEED VARIANCE · {} seeds × {YEARS}y on one reference world ═══", SEEDS.len());
     eprintln!("{:<20} {:>10} {:>10} {:>10} {:>7}  {}", "metric", "mean", "min", "max", "CV", "verdict");
     let mut fixed = Vec::new();
-    for (i, n) in names.iter().enumerate() {
+    for (i, (n, is_ratio)) in names.iter().enumerate() {
         let m = mean(&cols[i]);
         let lo = cols[i].iter().copied().fold(f32::INFINITY, f32::min);
         let hi = cols[i].iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let c = cv(&cols[i]);
-        // A CV computed on a near-zero mean is noise, not signal (an outcome that
+        // A CV computed on a near-zero COUNT is noise, not signal (an outcome that
         // happens 0 or 1 times across the whole run reports a huge CV and means
-        // nothing). Say so rather than let it read as "genuinely varies".
-        let verdict = if m.abs() < 1.0 { "too rare to judge" }
+        // nothing). Ratios are exempt — they live in 0..1 by construction.
+        let verdict = if !is_ratio && m.abs() < 1.0 { "too rare to judge" }
                       else if c < 0.10 { fixed.push(*n); "FIXED — same every game" }
                       else if c < 0.35 { "one central story" }
                       else { "genuinely varies" };
