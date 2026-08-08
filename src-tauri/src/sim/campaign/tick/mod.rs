@@ -1549,6 +1549,25 @@ const WAR_MIN_TREASURY: f32 = 80.0;
 /// grievance" to fight again — see `TickHub.war_cooldown_until`'s own doc comment
 /// for the measured before/after this fixed.
 const WAR_COOLDOWN_YEARS: u32 = 5;
+/// Geographic reach of a war, as a fraction of world width. Two cities can only go
+/// to war if their seats sit within this cylindrical straight-line distance of each
+/// other (on top of the existing same-`component` requirement). This is a
+/// pre-modern, pre-colonial world: a city cannot march an army — nor sustain a
+/// blockade — across an ocean or a continent, so a feud between two houses on
+/// opposite sides of the map must NOT boil over into a state war between their
+/// cities. Applies to BOTH the rival-council declaration path and the
+/// house-driven (`declare_house_war`) escalation, which previously had no
+/// geographic gate at all and was the main source of cross-continent wars.
+const WAR_MAX_DIST_FRAC: f32 = 0.16;
+/// How strongly a lopsided matchup ACCELERATES a war toward a decisive result.
+/// The per-round score swing is multiplied by `1 + this·imbalance`, where
+/// `imbalance` is 0 for an even match and 1 for a total mismatch. This is what
+/// breaks the "every war lasts the full round cap" symptom: a genuine curb-stomp
+/// (one side far richer) now reaches ±`WAR_SCORE_DECISIVE` in a handful of rounds
+/// and ends early, while an even match still grinds to the cap. Duration therefore
+/// VARIES with the matchup instead of being a uniform ~3-4 years, and the average
+/// pace of an even war is left where the halved magnitudes put it (§3.4a).
+const WAR_IMBALANCE_ESCALATION: f32 = 1.6;
 
 // ── §3.4e · ledger, damage, blockade, the neutral boom ───────────────────────────
 /// Yearly chance a belligerent's own estate/manufactory takes war damage. Lower

@@ -483,10 +483,17 @@ impl CampaignSim {
                 // often a war started, only about how fast one finished. Halved so a
                 // decisive win takes roughly the whole round-cap window on average,
                 // matching the old fixed-2-year mechanism's rough pace.
-                let mag = if occupying && roll_kind < 0.20 { 12.0 }
+                let mut mag = if occupying && roll_kind < 0.20 { 12.0 }
                     else if roll_kind < 0.45 { 8.0 }
                     else if roll_kind < 0.75 { 4.0 }
                     else { 5.5 };
+                // Duration varies with the MATCHUP (§3.4a / WAR_IMBALANCE_ESCALATION).
+                // A lopsided war escalates fast and ends decisively in a few rounds;
+                // an even one grinds toward the cap. Without this every war ran the
+                // full round cap (~3-4 yr) because the halved magnitudes could never
+                // reach the ±100 decisive score inside the window.
+                let imbalance = ((bias - 0.5).abs() * 2.0).clamp(0.0, 1.0);
+                mag *= 1.0 + WAR_IMBALANCE_ESCALATION * imbalance;
                 let roll_dir = hash01(self.seed, tick as u64 ^ 0x7EED, salt ^ 0x51DE);
                 let delta = if roll_dir < bias { mag } else { -mag };
                 self.wars[wi].score = (self.wars[wi].score + delta).clamp(-100.0, 100.0);
@@ -544,6 +551,19 @@ impl CampaignSim {
     /// region, both at peace. Rival councils are the spark; prosperity is the prize.
     /// §3.4c · a WARMONGER RULER (a bold council head, `head_character_factor` axis
     /// 0) raises the odds a candidate pair actually comes to blows this year.
+    /// True when two seats are close enough (and same trade component) to wage a
+    /// real war — see `WAR_MAX_DIST_FRAC`. Cylindrical in X. A pre-colonial city
+    /// cannot fight one an ocean away, so this gates every path that starts a war.
+    pub(crate) fn hubs_within_war_reach(&self, a: usize, b: usize) -> bool {
+        if a >= self.hubs.len() || b >= self.hubs.len() { return false; }
+        if self.hubs[a].component != self.hubs[b].component { return false; }
+        let mut dx = (self.hubs[a].x - self.hubs[b].x).abs();
+        if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
+        let dy = self.hubs[a].y - self.hubs[b].y;
+        let cap = self.world_w * WAR_MAX_DIST_FRAC;
+        dx * dx + dy * dy <= cap * cap
+    }
+
     pub(crate) fn maybe_declare_war(&mut self, yr: u32) {
         if self.wars.len() >= MAX_ACTIVE_WARS { return; }
         let n = self.hubs.len();
@@ -561,7 +581,9 @@ impl CampaignSim {
         let mut best: Option<(usize, usize, &'static str)> = None;
         for (ii, &a) in seats.iter().enumerate() {
             for &b in seats.iter().skip(ii + 1) {
-                if self.hubs[a].component != self.hubs[b].component { continue; }
+                // Same component AND within marching/blockade reach — a pre-colonial
+                // city cannot war one across an ocean or a continent.
+                if !self.hubs_within_war_reach(a, b) { continue; }
                 let ca = self.hubs[a].council_house as usize;
                 let cb = self.hubs[b].council_house as usize;
                 let rivals = self.houses.get(ca).map(|h| h.rivals.contains(&cb)).unwrap_or(false)
@@ -1136,6 +1158,12 @@ impl CampaignSim {
                 let can_escalate = wh != lh && wh < self.hubs.len() && lh < self.hubs.len()
                     && self.hubs[wh].war_with < 0 && self.hubs[lh].war_with < 0
                     && self.wars.len() < MAX_ACTIVE_WARS
+                    // A feud can span the map (houses share goods, not geography),
+                    // but a STATE war between their cities cannot — the two seats
+                    // must be within marching reach. This is the gate the
+                    // house-driven path was missing, and the main source of
+                    // cross-continent wars.
+                    && self.hubs_within_war_reach(wh, lh)
                     && self.hubs[wh].treasury >= WAR_MIN_TREASURY
                     && self.hubs[wh].war_cooldown_until <= tick && self.hubs[lh].war_cooldown_until <= tick
                     && (self.hubs[wh].council_house == winner as i32
