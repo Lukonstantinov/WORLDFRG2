@@ -15,6 +15,7 @@ import {
   ELEV_WORD, borderKind, cellsToKm, goodEmoji, goodLabel, provinceFrontiers,
   provinceHistory, stars,
 } from "@ui/world/provinceStory";
+import { GOOD_DEFS } from "@goods";
 import type {
   Province, ProvinceDetail, ProvinceGoodExploit, ProvinceLand, ProvinceLive, ProvinceTerrainCrop, PSettlement,
   ProvincePotential,
@@ -69,6 +70,8 @@ export function ProvinceInspector() {
   const [potential, setPotential] = useState<ProvincePotential | null>(null);
   const [goodSort, setGoodSort] = useState<"potential" | "quality">("quality");
   const [depositsOnly, setDepositsOnly] = useState(false);
+  // #9 · which belt goods are shown on the minimap "goods" plate (null = all).
+  const [goodFilter, setGoodFilter] = useState<Set<string> | null>(null);
   const [tab, setTab] = useState<Tab>("land");
   const [plates, setPlates] = useState<PlateKey[]>(DEFAULT_PLATES);
   /** Index into `land.history`; null = today. The slider is the whole point of the
@@ -141,12 +144,25 @@ export function ProvinceInspector() {
   // by both the Goods panel and the minimap's untapped-goods squares. Kept ABOVE the
   // early return below so the hook count is stable across renders (rules of hooks).
   const goodQ = useMemo(() => new Map((p?.goods ?? []).map((g) => [g.good, g])), [p?.goods]);
+  // Real quality (0..1): the province's full per-good grade (`good_quality`, best-patch
+  // suitability) is the primary source — it differentiates every good; the top-6
+  // shortlist rank and belt coverage are only fallbacks for pre-#9 worlds.
+  const qualityOf = useMemo(() => {
+    const gq = p?.good_quality;
+    return (good: number, belt: number) =>
+      (gq && gq[good] != null && gq[good] > 0 ? gq[good] : undefined)
+      ?? goodQ.get(good)?.quality ?? belt;
+  }, [p?.good_quality, goodQ]);
   const beltGoods = useMemo(() =>
     (potential?.goods ?? [])
       .filter((g) => !g.is_deposit)
-      .map((g) => ({ name: g.name, quality: goodQ.get(g.good)?.quality ?? g.belt }))
+      .map((g) => ({ good: g.good, name: g.name, quality: qualityOf(g.good, g.belt) }))
       .sort((a, b) => b.quality - a.quality),
-    [potential, goodQ]);
+    [potential, qualityOf]);
+  // The subset actually drawn on the minimap, after the legend filter.
+  const shownBeltGoods = useMemo(() =>
+    goodFilter ? beltGoods.filter((g) => goodFilter.has(g.name)) : beltGoods,
+    [beltGoods, goodFilter]);
 
   if (!open || !p) return null;
 
@@ -222,7 +238,7 @@ export function ProvinceInspector() {
           terrain={terrain}
           rivers={worldRivers}
           deposits={potential?.deposits ?? []}
-          beltGoods={beltGoods}
+          beltGoods={shownBeltGoods}
         />
         <div style={{ marginTop: 5 }}>
           <PlateToggles plates={plates} setPlates={setPlates}
@@ -232,6 +248,39 @@ export function ProvinceInspector() {
               ...(((potential?.deposits.length ?? 0) > 0 || beltGoods.length > 0) ? [] : (["goods"] as PlateKey[])),
             ]} />
         </div>
+
+        {/* #9 · goods legend + filter — the colour code of each good on the map, click
+            to show/hide it. Only when the "goods" plate is on and there are belt goods. */}
+        {plates.includes("goods") && beltGoods.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5, alignItems: "center" }}>
+            <span style={{ fontSize: 10, opacity: 0.6, marginRight: 2 }}>Goods:</span>
+            {beltGoods.map((g) => {
+              const shown = !goodFilter || goodFilter.has(g.name);
+              const col = GOOD_DEFS.find((d) => d.name === g.name)?.color ?? "#56c8d8";
+              return (
+                <button key={g.name} onClick={() => setGoodFilter((prev) => {
+                  const all = new Set(beltGoods.map((b) => b.name));
+                  const next = new Set(prev ?? all);
+                  if (next.has(g.name)) next.delete(g.name); else next.add(g.name);
+                  return next.size === all.size ? null : next;
+                })}
+                  title={`${goodLabel(g.good)} · quality ${Math.round(g.quality * 100)}% — click to ${shown ? "hide" : "show"}`}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, cursor: "pointer",
+                    padding: "1px 5px", borderRadius: 10, border: "1px solid #24384a",
+                    background: shown ? "#12202c" : "#0b141c", color: shown ? "#cfe0f4" : "#4a6076", opacity: shown ? 1 : 0.7 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 2, background: col, opacity: shown ? 1 : 0.35, flexShrink: 0 }} />
+                  {goodEmoji(g.good)} {goodLabel(g.good)}
+                  <span style={{ color: "#e3c14a", letterSpacing: 0.5, fontSize: 8 }}>{stars(g.quality)}</span>
+                </button>
+              );
+            })}
+            {goodFilter && (
+              <button onClick={() => setGoodFilter(null)} title="Show all goods"
+                style={{ fontSize: 10, cursor: "pointer", padding: "1px 6px", borderRadius: 10,
+                  border: "1px solid #3a4a2e", background: "#1a2416", color: "#9fd07a" }}>all</button>
+            )}
+          </div>
+        )}
 
         {/* Year slider — only meaningful once the campaign has run some years. */}
         {history.length > 1 && (
@@ -371,7 +420,7 @@ export function ProvinceInspector() {
               // Quality (0..1): the province's own per-good rank where it has one, else
               // belt coverage. Deposits use their mean ore grade.
               const qualOf = (g: typeof rows[number]) =>
-                g.is_deposit && g.workings > 0 ? g.mean_grade : (goodQ.get(g.good)?.quality ?? g.belt);
+                g.is_deposit && g.workings > 0 ? g.mean_grade : qualityOf(g.good, g.belt);
               const sorted = [...rows].sort((a, b) =>
                 goodSort === "quality" ? qualOf(b) - qualOf(a) : b.potential - a.potential);
               // Totals for the header: summed potential, mean quality, ore summary.

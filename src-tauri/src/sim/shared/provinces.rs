@@ -148,6 +148,12 @@ pub struct Province {
     /// the frozen "belt_score" term `potential[prov][good]` scales by live land use
     /// on top of — the whole reason it exists is to be UNFILTERED and per-good.
     #[serde(default)] pub good_belt: Vec<f32>,
+    /// Per-good QUALITY (0..1) over EVERY good — the top-decile suitability the
+    /// `goods` shortlist computes, but un-truncated and un-filtered, so the panel can
+    /// show a real, DIFFERENTIATED quality for every good (not just the top 6). Unlike
+    /// `good_belt` (a coverage mean that reads near-uniform for goods sharing a
+    /// province), this is the good's BEST-patch grade, which actually spreads.
+    #[serde(default)] pub good_quality: Vec<f32>,
 }
 
 /// Sea sentinel in the per-cell province-id map. u32 (not u16) so a world can hold
@@ -1429,6 +1435,18 @@ pub fn generate_provinces(
             })
             .collect();
 
+        // §9 · per-good QUALITY (0..1) for EVERY good — the SAME top-decile suitability
+        // the `goods` shortlist uses (a good's best-patch grade), un-truncated and
+        // un-filtered. Unlike `good_belt` (coverage, near-uniform for co-located
+        // goods), this actually differentiates, so the panel stops reading "3% quality"
+        // for everything.
+        let good_quality: Vec<f32> = (0..ng)
+            .map(|gd| {
+                let hist = &a.goods_hist[gd * GOOD_BINS..(gd + 1) * GOOD_BINS];
+                (top_decile_mean(hist, a.cells) / 255.0).clamp(0.0, 1.0)
+            })
+            .collect();
+
         // Culture: the PLURALITY over the province's cells (it used to be sampled at
         // the seat cell alone, which mislabels any province straddling a hearth edge).
         let mut culture_shares: Vec<(String, f32)> = (0..n_kits)
@@ -1507,6 +1525,7 @@ pub fn generate_provinces(
             label_y: if poles[pid].2 > 0.0 { poles[pid].1 } else { sy },
             label_r: poles[pid].2.max(0.5),
             good_belt,
+            good_quality,
         });
     }
 
