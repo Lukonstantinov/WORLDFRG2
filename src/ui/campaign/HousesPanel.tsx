@@ -7,7 +7,7 @@ import { YearChronicle } from "@ui/campaign/YearChronicle";
 import { FeudsView, HouseStandingView } from "@ui/campaign/HouseDossier";
 import { HouseCompareWindow } from "@ui/campaign/HouseCompare";
 import { cultureFigureSVG, cultureSeed, type Occasion } from "@ui/campaign/cultureFigure";
-import { GOOD_DEFS } from "@goods";
+import { GOOD_DEFS, clarifyGemLabel } from "@goods";
 import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks, campaignGetExpeditions, campaignGetHouseKin, campaignGetHouseGoals, campaignGetHouseCrisis, campaignGetHouseLineage } from "@bridge";
 import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief, ExpeditionView, KinBrief, GoalsBrief, CrisisBrief, HouseLineage, LineageNode, HeadBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
@@ -178,14 +178,14 @@ export function HousesPanel() {
           <div style={{ color: "#cdbb88", fontSize: 10, marginTop: 1, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
             {h.specialties.map((g) => (
               <span key={g} title={g} style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                <span style={{ fontSize: 11 }}>{goodIcon(g)}</span>{g}
+                <span style={{ fontSize: 11 }}>{goodIcon(g)}</span>{clarifyGemLabel(g, h.gem_variety)}
               </span>
             ))}
           </div>
         )}
         {h.top_goods && h.top_goods.length > 0 && (
           <div style={{ color: "#8fbf9a", fontSize: 10, marginTop: 1 }} title="Top goods this family is known for exporting (by profit)">
-            known for {h.top_goods.map((g) => `${goodIcon(g)} ${g}`).join(" · ")}
+            known for {h.top_goods.map((g) => `${goodIcon(g)} ${clarifyGemLabel(g, h.gem_variety)}`).join(" · ")}
           </div>
         )}
         {h.monopolies.length > 0 && (
@@ -1355,7 +1355,7 @@ function HouseTimeline({ history, onClose }: { history: HouseHistory; onClose: (
             {history.top_goods.map(([g, p]) => (
               <div key={g} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
                 <span style={{ fontSize: 12, width: 16 }}>{goodIcon(g)}</span>
-                <span style={{ color: "#cdbb88", fontSize: 10, width: 78, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g}</span>
+                <span style={{ color: "#cdbb88", fontSize: 10, width: 78, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{clarifyGemLabel(g, history.gem_variety)}</span>
                 <div style={{ flex: 1, height: 4, background: "#0a1018", borderRadius: 2, overflow: "hidden" }}>
                   <div style={{ width: `${(p / maxProfit) * 100}%`, height: "100%", background: "#c9a227" }} />
                 </div>

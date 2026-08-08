@@ -698,6 +698,7 @@ export interface HouseBrief {
   defunct: boolean;
   color?: string;                // stable distinct colour (hex) for this house
   seat?: [number, number];       // home-seat position (world cell coords)
+  gem_variety?: string;          // #8 · principal stone for this house's "gemstones" (else "")
   dominant?: boolean;            // controls at least one settlement (>=50% of its trade)
   controls?: [number, number][]; // settlements it controls (seat or remote outposts)
   partners?: [number, number][]; // trade-partner settlements (world coords)
@@ -800,6 +801,7 @@ export interface HouseHistory {
   events: HouseTimelineEvent[];
   top_goods: [string, number][]; // most profitable resources (name + cumulative profit)
   defunct: boolean;
+  gem_variety?: string;          // #8 · principal stone for this house's "gemstones"
   colonies?: ColonySummary[]; // colonies owned (outposts) or backed by this house
   line?: HeadBrief[];         // the succession line — every head this house has had
 }
@@ -1482,6 +1484,9 @@ export interface WarBrief {
   chest_a: number;
   chest_b: number;
   levies: number;
+  /** §3.4e · forced levies each side raised from its own resident houses. */
+  levies_a?: number;
+  levies_b?: number;
   cause: string;
   /** CITY_PROVINCE_WAR_PLAN.md §3.4a · bidirectional war score, −100..100 — positive
    *  favours `a`. ±100 ends the war outright. */
@@ -1492,6 +1497,21 @@ export interface WarBrief {
   goal_label: string;
   /** §3.4c · for a house-driven war, the house whose feud escalated into it. */
   backer_house_name?: string | null;
+  /** §3.4a · the quarterly rounds as a battle history (most recent last). */
+  battles?: WarBattle[];
+  /** Belligerent seats (world cell coords): a = ATTACKER (red), b = defender (blue). */
+  a_x?: number; a_y?: number; b_x?: number; b_y?: number;
+}
+
+/** One quarterly round of a war — a "battle" in the panel's history. */
+export interface WarBattle {
+  round: number;
+  year: number;
+  /** Side the round favoured: 0 = a (attacker), 1 = b (defender). */
+  favored: number;
+  delta: number;
+  score_after: number;
+  decisive: boolean;
 }
 /** A concluded war (the log). */
 export interface WarRecord {
@@ -2229,6 +2249,35 @@ export interface ProvinceGoodExploit {
   /** Share of `actual` that leaves the province via trade rather than being
    *  consumed by the very population that produced it. */
   market_share: number;
+}
+
+/** #9 · One good a province COULD yield (opportunity view), with richness. */
+export interface ProvinceGoodPotential {
+  good: number;
+  name: string;          // good id (map to label/emoji via GOOD_DEFS)
+  potential: number;     // live potential yield (belt × land-use × yield scale)
+  belt: number;          // frozen belt richness 0..1 (how good the LAND is)
+  actual: number;        // current production (0 = untapped)
+  is_deposit: boolean;   // an ore/mineral good (richness = deposit grade)
+  mean_grade: number;    // deposit goods: mean working grade 0..1
+  workings: number;      // deposit goods: number of ore workings in the province
+  best_depth: number;    // deposit goods: deepest present (0 surface … 3 flooded)
+}
+
+/** #9 · One ore working located in a province (real cell coords) for the minimap. */
+export interface ProvinceDepositDot {
+  good: string;
+  x: number;
+  y: number;
+  grade: number;
+  extent: number;
+  depth: number;
+}
+
+/** #9 · A province's full goods picture: potential goods + ore workings. */
+export interface ProvincePotential {
+  goods: ProvinceGoodPotential[];
+  deposits: ProvinceDepositDot[];
 }
 
 /** CITY_PROVINCE_WAR_PLAN.md §3.3 · one state — a tier 1-2 city's own writ, made

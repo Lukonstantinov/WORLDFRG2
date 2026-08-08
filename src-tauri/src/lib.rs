@@ -101,6 +101,7 @@ pub fn run() {
             sim_commands::get_toponyms,
             sim_commands::sim_generate_provinces,
             sim_commands::sim_merge_small_provinces,
+            sim_commands::sim_split_large_provinces,
             sim_commands::get_provinces,
             sim_commands::get_province_layer,
             sim_commands::campaign_province_state,
@@ -113,6 +114,7 @@ pub fn run() {
             campaign_commands::campaign_start_province_work,
             campaign_commands::campaign_cancel_province_work,
             campaign_commands::campaign_province_goods,
+            campaign_commands::campaign_province_potential,
             campaign_commands::compute_states,
             // House Dossier: the stability gauges and the feud board.
             campaign_commands::campaign_house_stability,

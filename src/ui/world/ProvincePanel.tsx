@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
-import { simGenerateProvinces, simMergeSmallProvinces, campaignProvinceState, campaignProvinceDetail, campaignProvinceLandAll, getProvinceTerrainCrop } from "@bridge";
+import { simGenerateProvinces, simMergeSmallProvinces, simSplitLargeProvinces, campaignProvinceState, campaignProvinceDetail, campaignProvinceLandAll, getProvinceTerrainCrop } from "@bridge";
 import { GOOD_DEFS } from "@goods";
 import { koppenName } from "@ui/world/climate";
 import { ProvinceMiniMap, soilWord } from "@ui/world/ProvinceMiniMap";
@@ -202,6 +202,27 @@ export function ProvincePanel() {
     }
   };
 
+  // Post-generation cleanup: split the oversized NON-POLAR provinces (huge deserts,
+  // steppes) into compact sub-provinces. Arctic/antarctic are left uniform. Repeatable.
+  const splitLarge = async () => {
+    if (busy || provinces.length === 0) return;
+    const before = provinces.length;
+    setBusy(true);
+    setStatus("Splitting large provinces…");
+    try {
+      const res = await simSplitLargeProvinces();
+      setProvinces(res.provinces, decodeProvinceRaster(res));
+      const added = res.provinces.length - before;
+      setSelId((id) => (res.provinces.some((p) => p.id === id) ? id : (res.provinces[0]?.id ?? null)));
+      setStatus(added > 0 ? `Split into ${added} more province${added === 1 ? "" : "s"}`
+                          : "No oversized non-polar provinces to split");
+    } catch (e) {
+      setStatus(`Split failed: ${e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!open) return null;
 
   const fmt = (n: number) => n.toLocaleString();
@@ -239,6 +260,12 @@ export function ProvincePanel() {
           <button onClick={mergeSmall} disabled={busy} title="Absorb the tiniest sliver provinces (never islands) into their largest neighbour"
             style={{ ...btn, background: busy ? "#1a2a38" : "#2a3d1d" }}>
             Merge small
+          </button>
+        )}
+        {provinces.length > 0 && (
+          <button onClick={splitLarge} disabled={busy} title="Split the oversized non-polar provinces (huge deserts/steppes) into smaller ones; arctic/antarctic left untouched"
+            style={{ ...btn, background: busy ? "#1a2a38" : "#3d2f1d" }}>
+            Split large
           </button>
         )}
       </div>

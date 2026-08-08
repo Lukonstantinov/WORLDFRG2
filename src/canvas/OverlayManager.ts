@@ -523,6 +523,8 @@ export class OverlayManager {
   private statesDirty = false;
   /** Transient highlight pin (searched settlement) in world coords. */
   private searchPin: { wx: number; wy: number } | null = null;
+  /** War highlight: attacker (red) + defender (blue) seats, lit from the War panel. */
+  private warHighlight: { ax: number; ay: number; bx: number; by: number } | null = null;
   /** Per-good display metadata (icon/color) from the active editable spec; falls
    *  back to the static GOOD_DEFS when absent. */
   private goodMeta: Map<string, { icon: string; color: string }> | null = null;
@@ -1360,6 +1362,14 @@ export class OverlayManager {
   }
   clearSearchPin() {
     this.searchPin = null;
+  }
+
+  /** Light the two cities of a war: `a` = attacker (red), `b` = defender (blue). */
+  setWarHighlight(ax: number, ay: number, bx: number, by: number) {
+    this.warHighlight = { ax, ay, bx, by };
+  }
+  clearWarHighlight() {
+    this.warHighlight = null;
   }
 
   setGoodMeta(meta: Map<string, { icon: string; color: string }>) {
@@ -2564,6 +2574,34 @@ export class OverlayManager {
       ctx.globalAlpha = 1;
       ctx.fillStyle = "#ffd86a";
       ctx.beginPath(); ctx.arc(cx, cy, Math.max(1, 1.6 * inv), 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+
+    // War highlight: the two belligerent cities, ATTACKER red and DEFENDER blue,
+    // joined by a clashing dashed line — "where the war is happening" (#6b).
+    if (this.warHighlight) {
+      const inv = 1 / Math.sqrt(this.currentScale);
+      const { ax, ay, bx, by } = this.warHighlight;
+      const acx = ax + 0.5, acy = ay + 0.5, bcx = bx + 0.5, bcy = by + 0.5;
+      ctx.save();
+      // The clash line between them.
+      ctx.strokeStyle = "rgba(230,210,160,0.7)";
+      ctx.lineWidth = Math.max(0.6, 1.6 * inv);
+      ctx.setLineDash([Math.max(2, 4 * inv), Math.max(2, 3 * inv)]);
+      ctx.beginPath(); ctx.moveTo(acx, acy); ctx.lineTo(bcx, bcy); ctx.stroke();
+      ctx.setLineDash([]);
+      const ring = (x: number, y: number, color: string) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = Math.max(0.8, 2.4 * inv);
+        ctx.beginPath(); ctx.arc(x, y, 8 * inv, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath(); ctx.arc(x, y, 12.5 * inv, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.arc(x, y, Math.max(1.2, 2 * inv), 0, Math.PI * 2); ctx.fill();
+      };
+      ring(acx, acy, "#ff5a4d");  // attacker
+      ring(bcx, bcy, "#4d9bff");  // defender
       ctx.restore();
     }
   }

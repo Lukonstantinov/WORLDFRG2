@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useCampaignStore } from "@state/campaignStore";
+import { useViewportStore } from "@state/viewportStore";
 import { campaignGetWars } from "@bridge";
 import type { WarsPayload, WarBrief, WarRecord } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
@@ -41,7 +42,9 @@ const TABS: readonly (readonly [Tab, string])[] = [
 
 export function WarPanel() {
   const open = useUIStore((s) => s.showWar);
-  const close = () => useUIStore.getState().setShowWar(false);
+  const setWarHighlight = useViewportStore((s) => s.setWarHighlight);
+  const clearWarHighlight = useViewportStore((s) => s.clearWarHighlight);
+  const close = () => { clearWarHighlight(); useUIStore.getState().setShowWar(false); };
   const setSelectedHub = useUIStore((s) => s.setSelectedHub);
   const snapshot = useCampaignStore((s) => s.snapshot);
   const tick = snapshot?.clock?.tick ?? 0;
@@ -55,12 +58,21 @@ export function WarPanel() {
     campaignGetWars().then(setWars).catch(() => setWars({ active: [], log: [] }));
   }, [open, active, tick]);
 
+  // Clear the map's war highlight whenever the panel closes/unmounts.
+  useEffect(() => { if (!open) clearWarHighlight(); }, [open, clearWarHighlight]);
+  useEffect(() => () => clearWarHighlight(), [clearWarHighlight]);
+
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.war);
   if (!open) return null;
 
   const focusHub = (name: string) => {
     const h = snapshot?.hubs.find((x) => x.name === name);
     if (h) setSelectedHub(h.id);
+  };
+  // Light both belligerent cities on the map: attacker (a) red, defender (b) blue.
+  const showWarOnMap = (w: WarBrief) => {
+    if (w.a_x == null) return;
+    setWarHighlight(w.a_x, w.a_y ?? 0, w.b_x ?? 0, w.b_y ?? 0);
   };
 
   return (
@@ -70,7 +82,7 @@ export function WarPanel() {
       <Tabs tabs={TABS} active={tab} onSelect={setTab} style={{ padding: "0 10px" }} />
       <PanelBody style={{ flex: 1 }}>
         {!active && <EmptyNote>Begin the campaign and let it run — the first wars flare from year 10 or so.</EmptyNote>}
-        {active && tab === "active" && <ActiveTab wars={wars.active} onFocus={focusHub} />}
+        {active && tab === "active" && <ActiveTab wars={wars.active} onFocus={focusHub} onShowMap={showWarOnMap} />}
         {active && tab === "history" && <HistoryTab log={wars.log} onFocus={focusHub} />}
         {active && tab === "records" && <RecordsTab wars={wars} />}
       </PanelBody>
@@ -79,29 +91,41 @@ export function WarPanel() {
 }
 
 // ── Active wars ────────────────────────────────────────────────────────────────
-function ActiveTab({ wars, onFocus }: { wars: WarBrief[]; onFocus: (name: string) => void }) {
+function ActiveTab({ wars, onFocus, onShowMap }: { wars: WarBrief[]; onFocus: (name: string) => void; onShowMap: (w: WarBrief) => void }) {
   if (wars.length === 0) return <EmptyNote>No wars underway — every polis is at peace.</EmptyNote>;
   return (
     <div>
-      {wars.map((w, i) => <ActiveWarCard key={i} w={w} onFocus={onFocus} />)}
+      {wars.map((w, i) => <ActiveWarCard key={i} w={w} onFocus={onFocus} onShowMap={onShowMap} />)}
     </div>
   );
 }
 
-function ActiveWarCard({ w, onFocus }: { w: WarBrief; onFocus: (name: string) => void }) {
+function ActiveWarCard({ w, onFocus, onShowMap }: { w: WarBrief; onFocus: (name: string) => void; onShowMap: (w: WarBrief) => void }) {
   const scoreAbs = Math.min(100, Math.abs(w.score));
   const favoursA = w.score >= 0;
   const roundFrac = Math.min(1, w.round / WAR_ROUND_CAP);
   return (
     <Card style={{ marginBottom: SPACE.md }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
-        <span onClick={() => onFocus(w.a)} title="Show on map"
-          style={{ color: favoursA ? T.badInk : T.ink, fontWeight: 700, fontSize: FZ.head, cursor: "pointer" }}>{w.a}</span>
+        <span onClick={() => onFocus(w.a)} title="Attacker — focus on map"
+          style={{ color: "#ff6a5d", fontWeight: 700, fontSize: FZ.head, cursor: "pointer" }}>{w.a}</span>
         <span style={{ color: T.inkDim, fontSize: FZ.body }}>⚔</span>
-        <span onClick={() => onFocus(w.b)} title="Show on map"
-          style={{ color: !favoursA ? T.badInk : T.ink, fontWeight: 700, fontSize: FZ.head, cursor: "pointer" }}>{w.b}</span>
+        <span onClick={() => onFocus(w.b)} title="Defender — focus on map"
+          style={{ color: "#5aa0ff", fontWeight: 700, fontSize: FZ.head, cursor: "pointer" }}>{w.b}</span>
         <span style={{ flex: 1 }} />
         <span style={{ color: T.inkDim, fontSize: FZ.tiny }}>since y{w.start_year} ({w.years}y)</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
+        <span style={{ fontSize: FZ.micro, color: "#ff6a5d" }}>● attacker</span>
+        <span style={{ fontSize: FZ.micro, color: "#5aa0ff" }}>● defender</span>
+        <span style={{ flex: 1 }} />
+        {w.a_x != null && (
+          <button onClick={() => onShowMap(w)} title="Light both cities on the map (attacker red, defender blue)"
+            style={{ fontSize: FZ.micro, cursor: "pointer", color: "#e6d2a0", background: "rgba(180,150,90,0.18)",
+              border: "1px solid rgba(180,150,90,0.4)", borderRadius: 10, padding: "1px 8px" }}>
+            ⚔ Show on map
+          </button>
+        )}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
         <span style={{ color: T.inkMid, fontSize: FZ.small, fontStyle: "italic" }}>{causeLabel(w.cause)}</span>
@@ -120,17 +144,39 @@ function ActiveWarCard({ w, onFocus }: { w: WarBrief; onFocus: (name: string) =>
             position: "absolute", top: 0, bottom: 0,
             left: favoursA ? `${50 - scoreAbs / 2}%` : "50%",
             width: `${scoreAbs / 2}%`,
-            background: favoursA ? "#7fb0e0" : "#e08a7f",
+            background: favoursA ? "#ff6a5d" : "#5aa0ff", // attacker red / defender blue
           }} />
           <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: T.line }} />
         </div>
       </div>
 
       <StatGrid cols={3} style={{ marginTop: SPACE.sm }}>
-        <Stat label="War chest" value={`${fmtk(w.chest_a)} / ${fmtk(w.chest_b)}`} hint="spent by each side" />
-        <Stat label="Levied" value={fmtk(w.levies)} hint="forced from resident houses" tone="warn" />
+        <Stat label="War chest" value={`${fmtk(w.chest_a)} / ${fmtk(w.chest_b)}`} hint="spent by each side (attacker / defender)" />
+        <Stat label="Levied" value={`${fmtk(w.levies_a ?? 0)} / ${fmtk(w.levies_b ?? 0)}`} hint="forced from each side's houses" tone="warn" />
         <Stat label="Round" value={`${w.round} / ${WAR_ROUND_CAP}`} hint="quarterly — the last-resort cap" />
       </StatGrid>
+
+      {/* §3.4a · the battle history — the quarterly rounds that moved the score. */}
+      {w.battles && w.battles.length > 0 && (
+        <div style={{ marginTop: SPACE.sm }}>
+          <div style={{ fontSize: FZ.micro, color: T.inkFaint, marginBottom: 2 }}>Recent battles</div>
+          {[...w.battles].slice(-6).reverse().map((bt, i) => {
+            const attackerWon = bt.favored === 0;
+            return (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: FZ.micro, padding: "1px 0" }}>
+                <span style={{ color: T.inkDim, width: 58 }}>y{bt.year} · r{bt.round}</span>
+                <span style={{ color: attackerWon ? "#ff6a5d" : "#5aa0ff", fontWeight: 600 }}>
+                  {bt.decisive ? "▲▲" : "▲"} {attackerWon ? w.a : w.b}
+                </span>
+                <span style={{ color: T.inkFaint }}>{bt.decisive ? "presses hard" : "gains ground"}</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ color: T.inkDim, fontVariantNumeric: "tabular-nums" }}>score {bt.score_after.toFixed(0)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {roundFrac >= 0.75 && (
         <FootNote>Nearing its round cap — if neither side breaks first, the war ends by exhaustion within {WAR_ROUND_CAP - w.round} more round{WAR_ROUND_CAP - w.round === 1 ? "" : "s"}.</FootNote>
       )}

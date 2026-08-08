@@ -501,6 +501,15 @@ export async function simMergeSmallProvinces(
   return invoke("sim_merge_small_provinces", { minCells });
 }
 
+/** Post-generation cleanup: split every NON-POLAR province larger than the threshold
+ *  into compact sub-provinces (arctic/antarctic left untouched). Returns the full
+ *  updated layer to reload in place. `maxCells` overrides the adaptive default. */
+export async function simSplitLargeProvinces(
+  maxCells?: number,
+): Promise<import("@types").SimProvincesResult> {
+  return invoke("sim_split_large_provinces", { maxCells });
+}
+
 /** Read back the stored province list (reopening a world / panel refresh). */
 export async function getProvinces(): Promise<import("@types").Province[]> {
   return invoke("get_provinces");

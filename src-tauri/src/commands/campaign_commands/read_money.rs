@@ -499,16 +499,24 @@ pub fn campaign_get_wars(db: State<'_, WorldDb>) -> Result<WarsPayload, String> 
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(WarsPayload { active: vec![], log: vec![] }) };
     let name = |h: u32| sim.hubs.get(h as usize).map(|x| x.name.clone()).unwrap_or_default();
-    let active = sim.wars.iter().map(|w| WarBrief {
-        a: name(w.a), b: name(w.b),
-        start_year: w.start_tick / TICKS_PER_YEAR,
-        years: sim.tick.saturating_sub(w.start_tick) / TICKS_PER_YEAR,
-        chest_a: w.chest_a, chest_b: w.chest_b, levies: w.levies, cause: w.cause.clone(),
-        score: w.score, round: w.round,
-        goal_label: crate::sim::tick::war_goal_label(w.goal).to_string(),
-        backer_house_name: if w.backer_house >= 0 {
-            sim.houses.get(w.backer_house as usize).map(|h| h.name.clone())
-        } else { None },
+    let seat = |h: u32| sim.hubs.get(h as usize).map(|x| (x.x, x.y)).unwrap_or((0.0, 0.0));
+    let active = sim.wars.iter().map(|w| {
+        let (ax, ay) = seat(w.a);
+        let (bx, by) = seat(w.b);
+        WarBrief {
+            a: name(w.a), b: name(w.b),
+            start_year: w.start_tick / TICKS_PER_YEAR,
+            years: sim.tick.saturating_sub(w.start_tick) / TICKS_PER_YEAR,
+            chest_a: w.chest_a, chest_b: w.chest_b, levies: w.levies,
+            levies_a: w.levies_a, levies_b: w.levies_b, cause: w.cause.clone(),
+            score: w.score, round: w.round,
+            goal_label: crate::sim::tick::war_goal_label(w.goal).to_string(),
+            backer_house_name: if w.backer_house >= 0 {
+                sim.houses.get(w.backer_house as usize).map(|h| h.name.clone())
+            } else { None },
+            battles: w.battles.clone(),
+            a_x: ax, a_y: ay, b_x: bx, b_y: by,
+        }
     }).collect();
     let mut log = sim.war_log.clone();
     log.reverse();

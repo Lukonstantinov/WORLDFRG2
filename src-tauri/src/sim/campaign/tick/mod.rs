@@ -1302,6 +1302,13 @@ pub fn structure_effect(id: u8) -> &'static str {
 /// dominant late-campaign cost as estates inflated `n`; capping to the nearest K
 /// keeps a Month step roughly flat regardless of total hub count.
 const NEIGHBOR_K: usize = 32;
+/// #4 · trade HORIZON, as a fraction of world width. The route matrix marks any pair
+/// of seats farther apart than this (cylindrical straight-line) as unreachable, even
+/// when the worldgen pathfinder found a sea lane between them. This is a pre-colonial,
+/// pre-oceanic-navigation economy: goods move regionally — around a sea, along a
+/// coast, overland — not on trans-oceanic lanes between continents. Generous enough
+/// to keep Mediterranean-/regional-scale sea trade while cutting the ocean crossings.
+const TRADE_MAX_DIST_FRAC: f32 = 0.24;
 /// Global ceiling on satellite production sites (estates + colonies). Estates are
 /// real hubs in `self.hubs`, so an uncapped count quadratically slows every tick.
 const MAX_TOTAL_ESTATES: usize = 220;
@@ -2839,6 +2846,13 @@ pub struct War {
     pub chest_a: f32,      // cumulative war-chest spent (effort) by each side
     pub chest_b: f32,
     pub levies: f32,       // total raised from houses across both sides
+    /// §3.4e · forced levies raised from each side's own resident houses, split out
+    /// so the panel can show what each belligerent has spent its families into.
+    #[serde(default)] pub levies_a: f32,
+    #[serde(default)] pub levies_b: f32,
+    /// §3.4a · the quarterly ROUNDS as a battle log — each round that shifted the
+    /// war score, so the panel reads as a campaign history rather than one number.
+    #[serde(default)] pub battles: Vec<WarBattle>,
     pub cargo_lost: u32,
     pub cause: String,
     /// What the war is FOR — decides what the victor takes at resolution (beyond the
@@ -2860,6 +2874,21 @@ pub struct War {
     /// automatically committed as a backer. −1 for an ordinary rival-council war.
     /// Its own insolvency is the BACKERS WITHDRAW exhaustion path.
     #[serde(default = "neg_one_i32")] pub backer_house: i32,
+}
+
+/// §3.4a · one quarterly round of a war — a "battle" for the panel's history.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct WarBattle {
+    pub round: u16,
+    pub year: u32,
+    /// Which side the round favoured: 0 = a (attacker), 1 = b (defender).
+    pub favored: u8,
+    /// Signed score swing this round (positive favours a).
+    pub delta: f32,
+    /// War score after this round (−100..100).
+    pub score_after: f32,
+    /// True when this round was an OCCUPATION-scale blow (the larger swing).
+    pub decisive: bool,
 }
 
 /// DLC 3.5 · a concluded war, for the Wars log.

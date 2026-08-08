@@ -181,7 +181,27 @@ export const useCampaignStore = create<CampaignStore>((set, get) => ({
     if (get().busy) return;
     set({ busy: true, error: null });
     try {
-      const snap = await campaignAdvance(ticks);
+      // Chunk a large advance (a full year = 365 ticks) into ~monthly steps, updating
+      // the snapshot and yielding to the event loop between each, so the clock/map
+      // progress visibly and the UI never appears frozen through the whole span. The
+      // heavy reads (economy/houses/diagnostics) still run once at the end. Total work
+      // is the same as a single call — this is purely about responsiveness (#5).
+      const CHUNK = 30;
+      let snap = get().snapshot;
+      if (ticks > CHUNK) {
+        let remaining = ticks;
+        while (remaining > 0) {
+          const step = Math.min(CHUNK, remaining);
+          snap = await campaignAdvance(step);
+          remaining -= step;
+          if (remaining > 0) {
+            set({ snapshot: snap });               // light mid-advance update
+            await new Promise((r) => setTimeout(r, 0)); // let React repaint
+          }
+        }
+      } else {
+        snap = await campaignAdvance(ticks);
+      }
       if (heavy) {
         const [we, houses, diag] = await Promise.all([
           campaignGetWorldEconomy(), campaignGetHouses(), campaignDiagnostics(),

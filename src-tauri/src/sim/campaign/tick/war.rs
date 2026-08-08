@@ -427,6 +427,8 @@ impl CampaignSim {
             let raised_a = self.raise_war_levy(a);
             let raised_b = self.raise_war_levy(b);
             self.wars[wi].levies += raised_a + raised_b;
+            self.wars[wi].levies_a += raised_a;
+            self.wars[wi].levies_b += raised_b;
             let spent_a = self.spend_war(a);
             let spent_b = self.spend_war(b);
             self.wars[wi].chest_a += spent_a;
@@ -497,6 +499,16 @@ impl CampaignSim {
                 let roll_dir = hash01(self.seed, tick as u64 ^ 0x7EED, salt ^ 0x51DE);
                 let delta = if roll_dir < bias { mag } else { -mag };
                 self.wars[wi].score = (self.wars[wi].score + delta).clamp(-100.0, 100.0);
+                // §3.4a · record the round as a "battle" for the panel's history.
+                let (b_round, b_score) = (self.wars[wi].round, self.wars[wi].score);
+                self.wars[wi].battles.push(WarBattle {
+                    round: b_round,
+                    year: tick / TICKS_PER_YEAR,
+                    favored: if delta >= 0.0 { 0 } else { 1 },
+                    delta,
+                    score_after: b_score,
+                    decisive: mag >= 10.0,
+                });
 
                 if self.wars[wi].score.abs() >= WAR_SCORE_DECISIVE {
                     let w = if self.wars[wi].score >= 0.0 { a } else { b };
@@ -629,7 +641,8 @@ impl CampaignSim {
         });
         self.wars.push(War {
             a: a as u32, b: b as u32, start_tick: self.tick,
-            chest_a: 0.0, chest_b: 0.0, levies: 0.0, cargo_lost: 0, cause: cause.into(), goal,
+            chest_a: 0.0, chest_b: 0.0, levies: 0.0, levies_a: 0.0, levies_b: 0.0,
+            battles: Vec::new(), cargo_lost: 0, cause: cause.into(), goal,
             score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1,
         });
     }
@@ -654,7 +667,8 @@ impl CampaignSim {
         });
         self.wars.push(War {
             a: a as u32, b: b as u32, start_tick: self.tick,
-            chest_a: 0.0, chest_b: 0.0, levies: 0.0, cargo_lost: 0,
+            chest_a: 0.0, chest_b: 0.0, levies: 0.0, levies_a: 0.0, levies_b: 0.0,
+            battles: Vec::new(), cargo_lost: 0,
             cause: "a house's war".into(), goal: WAR_GOAL_TRADE_RIGHTS,
             score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0,
             backer_house: backer_house as i32,
@@ -816,7 +830,8 @@ impl CampaignSim {
         self.hubs[a].war_since = self.tick;
         self.hubs[b].war_since = self.tick;
         self.wars.push(War { a: a as u32, b: b as u32, start_tick: self.tick,
-            chest_a: 0.0, chest_b: 0.0, levies: 0.0, cargo_lost: 0, cause: "independence".into(),
+            chest_a: 0.0, chest_b: 0.0, levies: 0.0, levies_a: 0.0, levies_b: 0.0,
+            battles: Vec::new(), cargo_lost: 0, cause: "independence".into(),
             goal: WAR_GOAL_PLUNDER,
             score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1 });
         let (cn, mn) = (self.hubs[colony].name.clone(), self.hubs[metro].name.clone());
@@ -892,6 +907,16 @@ impl CampaignSim {
             let combined = inf_at(ha, c) + inf_at(hb, c);
             // Ties break on the LOWER hub index so the choice is order-independent.
             if combined > best_inf { best_inf = combined; hub = c as i32; }
+        }
+        // A feud needs real CONTACT (#14): the two families must either share a city
+        // (seat / office / bailo) OR sit within trading reach of each other. Two
+        // houses that merely deal the same GOOD on opposite sides of the world have no
+        // quarrel to have — without this a shared commodity alone (0.22 × 2 goods =
+        // 0.44, over the 0.30 feud threshold) paired up houses an ocean apart. A feud
+        // that LOSES contact returns 0 here and so cools, which is correct.
+        if shared_cities == 0
+            && !self.hubs_within_war_reach(ha.hub as usize, hb.hub as usize) {
+            return (0.0, good, hub);
         }
         // Same trading component is a weak tie on its own — it is what made the old
         // model pair up every house on a continent. It counts, but only a little.

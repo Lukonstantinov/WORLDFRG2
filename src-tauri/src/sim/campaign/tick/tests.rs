@@ -1480,7 +1480,7 @@
         s.hubs[0].treasury = 50.0; s.hubs[1].treasury = 20.0;
         s.hubs[0].war_with = 1; s.hubs[1].war_with = 0;
         s.wars.push(War { a: 0, b: 1, start_tick: 0, chest_a: 0.0, chest_b: 0.0,
-            levies: 0.0, cargo_lost: 0, cause: "test".into(), goal: WAR_GOAL_PLUNDER,
+            levies: 0.0, levies_a: 0.0, levies_b: 0.0, battles: Vec::new(), cargo_lost: 0, cause: "test".into(), goal: WAR_GOAL_PLUNDER,
             score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1 });
         let w0 = s.houses[0].wealth;
         s.tick = 0;
@@ -1511,7 +1511,7 @@
         s.hubs[0].mood = 0.9; s.hubs[1].mood = 0.9;
         s.hubs[0].war_with = 1; s.hubs[1].war_with = 0;
         s.wars.push(War { a: 0, b: 1, start_tick: 0, chest_a: 0.0, chest_b: 0.0,
-            levies: 0.0, cargo_lost: 0, cause: "test".into(), goal: WAR_GOAL_PLUNDER,
+            levies: 0.0, levies_a: 0.0, levies_b: 0.0, battles: Vec::new(), cargo_lost: 0, cause: "test".into(), goal: WAR_GOAL_PLUNDER,
             score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1 });
         for yr in 1..=(WAR_ROUND_CAP as u32 + 2) {
             s.tick = yr * 365;

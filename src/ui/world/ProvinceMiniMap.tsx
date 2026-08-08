@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { PBuilding, PSettlement, Province, ProvinceLand, ProvinceLandSample, ProvinceTerrainCrop, RiverData } from "@types";
 import type { ProvinceRaster } from "@state/worldStore";
+import { GOOD_DEFS } from "@goods";
 
 /** Hypsometric relief shading from a REAL elevation sample (§2.3) — sea a flat
  *  blue (elevation isn't meaningful for sea depth here), land a low-to-high ramp
@@ -74,10 +75,10 @@ function BuildingGlyph({ kind, s }: { kind: number; s: number }) {
 }
 
 /** The plates, bottom-up. `relief` is the ground everything else reads against. */
-export type PlateKey = "relief" | "water" | "landuse" | "tenure" | "holdings" | "borders";
+export type PlateKey = "relief" | "water" | "landuse" | "tenure" | "holdings" | "borders" | "goods";
 export const PLATE_LABEL: Record<PlateKey, string> = {
   relief: "relief", water: "water", landuse: "land use",
-  tenure: "tenure", holdings: "holdings", borders: "borders",
+  tenure: "tenure", holdings: "holdings", borders: "borders", goods: "goods",
 };
 export const DEFAULT_PLATES: PlateKey[] = ["relief", "water", "landuse", "holdings", "borders"];
 
@@ -138,7 +139,7 @@ interface Hover { x: number; y: number; title: string; rows: [string, string][] 
 export function ProvinceMiniMap({
   province, raster, settlements, buildings,
   land, sample, plates = DEFAULT_PLATES, width = 240, riverCells,
-  terrain, rivers,
+  terrain, rivers, deposits = [], beltGoods = [],
 }: {
   province: Province;
   raster: ProvinceRaster | null;
@@ -158,6 +159,11 @@ export function ProvinceMiniMap({
   width?: number;
   /** How many of the province's cells carry a river (drives the water plate's density). */
   riverCells?: number;
+  /** #9 · ore workings in this province (world cell coords) for the deposits plate. */
+  deposits?: { good: string; x: number; y: number; grade: number; depth: number }[];
+  /** #9 · untapped surface/belt goods (no single cell) — drawn as quality-weighted
+   *  squares dithered across the province footprint on the deposits plate. */
+  beltGoods?: { name: string; quality: number }[];
 }) {
   const [hover, setHover] = useState<Hover | null>(null);
 
@@ -445,6 +451,50 @@ export function ProvinceMiniMap({
             </g>
           );
         })}
+        {/* 6a · untapped belt goods (#9) — quality-weighted squares dithered across the
+            province (a belt good has no single cell), colour by good, fill by quality.
+            Drawn UNDER the ore dots so real workings still read on top. */}
+        {on("goods") && beltGoods.length > 0 && (() => {
+          const total = beltGoods.reduce((s, b) => s + Math.max(0.05, b.quality), 0);
+          const step = Math.max(1, Math.floor(cells.length / 46)); // ~46 squares max
+          const sq = Math.max(0.7, stride * 0.75);
+          const out: React.ReactNode[] = [];
+          for (let ci = 0; ci < cells.length; ci += step) {
+            const [rx, ry] = cells[ci];
+            const t = cellHash(rx, ry, 7);
+            let acc = 0;
+            let pick = beltGoods[0];
+            for (const b of beltGoods) { acc += Math.max(0.05, b.quality) / total; if (t <= acc) { pick = b; break; } }
+            const col = GOOD_DEFS.find((g) => g.name === pick.name)?.color ?? "#56c8d8";
+            out.push(
+              <rect key={`bg${ci}`} x={rx - ox - sq / 2} y={ry - oy - sq / 2} width={sq} height={sq}
+                fill={col} opacity={0.22 + 0.6 * Math.max(0, Math.min(1, pick.quality))}
+                stroke="#0a1620" strokeWidth={0.25}>
+                <title>{pick.name} · quality {(pick.quality * 100).toFixed(0)}%</title>
+              </rect>,
+            );
+          }
+          return out;
+        })()}
+        {/* 6b · deposits (#9) — ore workings where they actually sit, coloured by good
+            and sized by grade, so the richest workings read at a glance. */}
+        {on("goods") && deposits.map((d, i) => {
+          const [lx, ly] = toLocal(d.x, d.y);
+          const col = GOOD_DEFS.find((g) => g.name === d.good)?.color ?? "#56c8d8";
+          const r = geo ? (0.9 + 1.6 * Math.min(1, Math.max(0, d.grade))) * Math.max(0.5, geo.stride * 0.5) : 2;
+          return (
+            <g key={`d${i}`} transform={`translate(${lx} ${ly})`} style={{ cursor: "pointer" }}
+              onMouseEnter={(e) => setHover({
+                x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY,
+                title: `${d.good} deposit`,
+                rows: [["grade", `${Math.round(d.grade * 100)}%`], ["depth", ["surface", "shallow", "deep", "flooded"][Math.max(0, Math.min(3, d.depth))]]],
+              })}
+              onMouseLeave={() => setHover(null)}>
+              <circle r={r} fill={col} stroke="#0a1620" strokeWidth={0.5} opacity={0.9} />
+              <circle r={r * 0.4} fill="#0a1620" opacity={0.55} />
+            </g>
+          );
+        })}
       </svg>
 
       {/* Legend for whichever land plate is on top, else the holdings list. */}
@@ -543,7 +593,7 @@ export function PlateToggles({ plates, setPlates, disabled = [] }: {
   /** Plates with no data behind them, shown greyed rather than hidden. */
   disabled?: PlateKey[];
 }) {
-  const keys: PlateKey[] = ["relief", "water", "landuse", "tenure", "holdings", "borders"];
+  const keys: PlateKey[] = ["relief", "water", "landuse", "tenure", "holdings", "borders", "goods"];
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
       {keys.map((k) => {
