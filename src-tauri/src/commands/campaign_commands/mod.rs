@@ -2195,6 +2195,9 @@ pub struct WarBrief {
     pub chest_a: f32,
     pub chest_b: f32,
     pub levies: f32,
+    /// §3.4e · forced levies each side raised from its own resident houses.
+    #[serde(default)] pub levies_a: f32,
+    #[serde(default)] pub levies_b: f32,
     pub cause: String,
     /// CITY_PROVINCE_WAR_PLAN.md §3.4a · bidirectional war score, −100..100.
     /// Positive favours `a`. ±100 ends the war outright.
@@ -2207,6 +2210,14 @@ pub struct WarBrief {
     /// §3.4c · for a house-driven war, the house whose feud escalated into it —
     /// `None` for an ordinary rival-council or independence war.
     #[serde(default)] pub backer_house_name: Option<String>,
+    /// §3.4a · the quarterly rounds as a battle history (most recent last).
+    #[serde(default)] pub battles: Vec<crate::sim::tick::WarBattle>,
+    /// Seat positions (world cell coords) of the two belligerents — a = ATTACKER
+    /// (drawn red), b = defender (drawn blue) — so the panel can light both cities.
+    #[serde(default)] pub a_x: f32,
+    #[serde(default)] pub a_y: f32,
+    #[serde(default)] pub b_x: f32,
+    #[serde(default)] pub b_y: f32,
 }
 #[derive(Serialize, Clone)]
 pub struct WarsPayload {

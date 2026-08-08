@@ -69,6 +69,7 @@ export function MapCanvas() {
   const tileVersion = useViewportStore((s) => s.tileVersion);
   const focusTarget = useViewportStore((s) => s.focusTarget);
   const searchPin = useViewportStore((s) => s.searchPin);
+  const warHighlight = useViewportStore((s) => s.warHighlight);
   const overlayVisibility = useUIStore((s) => s.overlayVisibility);
   const lineColors = useSettingsStore((s) => s.lineColors);
   const houses = useCampaignStore((s) => s.houses);
@@ -1084,6 +1085,16 @@ export function MapCanvas() {
     const t = setTimeout(() => { om.clearSearchPin(); requestRender(); }, 5000);
     return () => clearTimeout(t);
   }, [searchPin, requestRender]);
+
+  // War highlight: light the two belligerent cities (attacker red / defender blue)
+  // while a war is picked in the War Council; cleared when the panel clears it.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    if (warHighlight) om.setWarHighlight(warHighlight.ax, warHighlight.ay, warHighlight.bx, warHighlight.by);
+    else om.clearWarHighlight();
+    requestRender();
+  }, [warHighlight, requestRender]);
 
   // Coin-usage overlay: when a coin is selected in the Currencies panel, fetch the
   // per-city settlement snapshot and tint the map by use of that coin.

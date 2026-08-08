@@ -24,12 +24,18 @@ interface ViewportStore {
   // overlay restart its pulse animation each time a new pin is dropped.
   searchPin: { wx: number; wy: number; nonce: number } | null;
 
+  // A war highlight: the two belligerent seats — a = attacker (drawn red), b =
+  // defender (drawn blue) — lit on the map when a war is picked in the War Council.
+  warHighlight: { ax: number; ay: number; bx: number; by: number; nonce: number } | null;
+
   setScreen: (w: number, h: number) => void;
   setCamera: (x: number, y: number, scale: number) => void;
   invalidateTiles: () => void;
   focusOn: (wx: number, wy: number) => void;
   setSearchPin: (wx: number, wy: number) => void;
   clearSearchPin: () => void;
+  setWarHighlight: (ax: number, ay: number, bx: number, by: number) => void;
+  clearWarHighlight: () => void;
 }
 
 export const useViewportStore = create<ViewportStore>((set, get) => ({
@@ -42,6 +48,7 @@ export const useViewportStore = create<ViewportStore>((set, get) => ({
   tileVersion: 0,
   focusTarget: null,
   searchPin: null,
+  warHighlight: null,
 
   setScreen: (w, h) => set({ screenWidth: w, screenHeight: h }),
 
@@ -57,4 +64,7 @@ export const useViewportStore = create<ViewportStore>((set, get) => ({
   setSearchPin: (wx, wy) =>
     set((s) => ({ searchPin: { wx, wy, nonce: (s.searchPin?.nonce ?? 0) + 1 } })),
   clearSearchPin: () => set({ searchPin: null }),
+  setWarHighlight: (ax, ay, bx, by) =>
+    set((s) => ({ warHighlight: { ax, ay, bx, by, nonce: (s.warHighlight?.nonce ?? 0) + 1 } })),
+  clearWarHighlight: () => set({ warHighlight: null }),
 }));

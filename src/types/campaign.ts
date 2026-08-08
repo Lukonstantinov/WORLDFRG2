@@ -1484,6 +1484,9 @@ export interface WarBrief {
   chest_a: number;
   chest_b: number;
   levies: number;
+  /** §3.4e · forced levies each side raised from its own resident houses. */
+  levies_a?: number;
+  levies_b?: number;
   cause: string;
   /** CITY_PROVINCE_WAR_PLAN.md §3.4a · bidirectional war score, −100..100 — positive
    *  favours `a`. ±100 ends the war outright. */
@@ -1494,6 +1497,21 @@ export interface WarBrief {
   goal_label: string;
   /** §3.4c · for a house-driven war, the house whose feud escalated into it. */
   backer_house_name?: string | null;
+  /** §3.4a · the quarterly rounds as a battle history (most recent last). */
+  battles?: WarBattle[];
+  /** Belligerent seats (world cell coords): a = ATTACKER (red), b = defender (blue). */
+  a_x?: number; a_y?: number; b_x?: number; b_y?: number;
+}
+
+/** One quarterly round of a war — a "battle" in the panel's history. */
+export interface WarBattle {
+  round: number;
+  year: number;
+  /** Side the round favoured: 0 = a (attacker), 1 = b (defender). */
+  favored: number;
+  delta: number;
+  score_after: number;
+  decisive: boolean;
 }
 /** A concluded war (the log). */
 export interface WarRecord {
