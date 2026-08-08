@@ -2510,6 +2510,26 @@ pub struct House {
     #[serde(default)] pub volume: f32,
     /// Defunct (bankrupt / died out): kept for the record, not active.
     #[serde(default)] pub defunct: bool,
+    /// **CROWNED — left the merchant world, did NOT die** (`REALM_AND_GOVERNMENT_
+    /// PLAN.md` §5.1). A house that proclaims a realm hands its wealth and trade
+    /// assets to the crown and stops competing as a merchant family, but it is very
+    /// much alive: it is the dynasty. This is a SEPARATE flag from `defunct` on
+    /// purpose, and the distinction is not cosmetic —
+    ///   * `dissolve_house` is a LIQUIDATION (writes off outstanding bank loans as
+    ///     `Bank.losses`, releases held provinces, strips holdings, chronicles ruin),
+    ///     so routing a coronation through it would have a family celebrate its
+    ///     crowning by defaulting on its debts and losing its territory; and
+    ///   * `GOAL_OUTLAST_RIVAL` closes ACHIEVED when a named rival goes `defunct`,
+    ///     so crowning a house via that flag would hand every rival pursuing that
+    ///     goal an instant win — a family becomes a king and its enemies celebrate
+    ///     having outlived it.
+    /// Merchant-world passes filter on `is_merchant()` below, never on `!defunct`
+    /// alone; identity readers (arms, `line`, `origin_house` lineage, the chronicle)
+    /// are deliberately unaffected, which is what keeps a dynasty's origins legible
+    /// long after it stops trading.
+    #[serde(default)] pub crowned: bool,
+    /// The realm this house rules, or −1. 1:1 and permanent — one house, one realm.
+    #[serde(default = "neg_one_i32")] pub realm: i32,
     /// House archetype / specialization (0 trade-specialty · 1 fleet & logistics ·
     /// 2 banking & capital · 3 political & charters). Each grants standing bonuses.
     #[serde(default)] pub archetype: u8,
@@ -2635,6 +2655,22 @@ pub struct House {
     /// `ORIGIN_*` — which of the game's house-creation paths produced this one.
     /// Meaningless when `origin_house < 0`.
     #[serde(default)] pub origin_kind: u8,
+}
+
+impl House {
+    /// **The merchant-world predicate.** A house that still competes as a trading
+    /// family: alive AND not crowned. Every pass that treats a house as a merchant
+    /// — pricing, dispatch, fleets, offices, feuds, tiers, goals, banks, the wealth
+    /// tax — must filter on this rather than on `!defunct` alone, or a crowned house
+    /// keeps trading with a treasury it no longer owns
+    /// (`REALM_AND_GOVERNMENT_PLAN.md` §3.2).
+    ///
+    /// Readers of a house's IDENTITY (name, arms, `line`, `origin_house` lineage,
+    /// the chronicle) must NOT use this: a dynasty's record has to stay legible for
+    /// as long as the world remembers it, which is the whole reason `crowned` is not
+    /// `defunct`.
+    #[inline]
+    pub fn is_merchant(&self) -> bool { !self.defunct && !self.crowned }
 }
 
 /// DLC 3.5 · one loan on a bank's books. An asset to the bank (interest income);
@@ -4166,9 +4202,109 @@ pub struct CampaignSim {
     /// silently read wrong on a world shaped differently from the one it was picked
     /// against. Serde-defaults to 1.0 (a no-op) for a save from before this existed.
     #[serde(default = "one_f32")] pub prov_good_yield_scale: f32,
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  REALMS (`docs/REALM_AND_GOVERNMENT_PLAN.md`, R1) — THE THIRD AUTHORITY
+    //  LAYER. `prov_holder` says who ADMINISTERS a province and
+    //  `prov_holder_house` who is PAID by it (rule 24); `prov_realm` says who is
+    //  OBEYED there. All three are independent and all three must be tolerated by
+    //  any reader — a house-held writ inside a realm's borders stays legal
+    //  (`CITY_PROVINCE_WAR_PLAN.md` §5.9).
+    //
+    //  **Rule 25 · sovereignty is never assumed to exist.** `prov_realm == -1` is
+    //  the pre-state default. It is what every province looks like in year 1 and
+    //  what most of them still look like at year 500, so every routine here early-
+    //  returns on an empty `realms` list exactly as the land layer early-returns on
+    //  an empty `prov_rural`. That is what keeps a campaign without realms — which
+    //  includes `simulate_decades_reports_dynamics`, whose sim carries no province
+    //  layer at all — bit-identical.
+    // ═══════════════════════════════════════════════════════════════════════════
+    /// Every realm ever founded, live and fallen. Empty until the first
+    /// proclamation, which cannot happen before year 50 (R1b).
+    #[serde(default)] pub realms: Vec<Realm>,
+    /// Per-province sovereignty: an index into `realms`, or −1 for free land.
+    /// Sized alongside the rest of the land layer by `ensure_province_land`.
+    #[serde(default)] pub prov_realm: Vec<i32>,
 }
 
 fn one_f32() -> f32 { 1.0 }
+
+/// Realm rank — the realm ladder, which REPLACES the merchant tier ladder for a
+/// crowned house. Assigned like `assign_house_tiers`/`assign_city_tiers` (percentile
+/// among live realms + an absolute floor for the top rank + hysteresis), so a young
+/// world's realms are all city-states and "great power" means something. Unused until
+/// R1b founds the first realm.
+pub const REALM_CITY_STATE: u8 = 0;
+pub const REALM_KINGDOM: u8 = 1;
+pub const REALM_GREAT_POWER: u8 = 2;
+pub const REALM_HEGEMON: u8 = 3;
+
+/// How an annexed city is governed — the one policy that decides what a conquest
+/// keeps, how far the writ carries, and how likely a member is to make a separate
+/// peace (plan §3.4). Sticky: changing it is a reform with an unrest cost, never a
+/// toggle.
+pub const AUTONOMY_CENTRALIZED: u8 = 0;
+pub const AUTONOMY_CORE_PERIPHERY: u8 = 1;
+pub const AUTONOMY_AUTONOMOUS: u8 = 2;
+
+/// A city's standing inside a realm (`TickHub.realm_role`).
+pub const REALM_ROLE_SEAT: u8 = 0;
+pub const REALM_ROLE_SUBJECT: u8 = 1;
+pub const REALM_ROLE_TRIBUTARY: u8 = 2;
+pub const REALM_ROLE_OCCUPIED: u8 = 3;
+
+/// The hard floor on the first proclamation, in years. Not a trigger — after this
+/// date any house that meets the conditions may proclaim, and most never will.
+pub const REALM_YEAR_FLOOR: u32 = 50;
+
+/// One entry in a realm's own permanent record. Mirrors `HouseEvent`, and obeys the
+/// same discipline: milestones (founding, coronation, conquest, partition, fall) are
+/// never pruned — for an observation-only game the chronicle is the product (rule 20).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RealmEvent {
+    pub tick: u32,
+    pub kind: String,
+    pub text: String,
+}
+
+/// A COUNTRY. Founded when a house that already holds a city's government proclaims
+/// sovereignty (R1b); the house is then ELEVATED — its wealth and trade assets become
+/// the crown's and it leaves the merchant world, keeping only its identity as the
+/// dynasty (`House.crowned`, never `House.defunct` — see the plan's §5.1 for why that
+/// distinction is not cosmetic).
+///
+/// A realm's territory is the set of provinces whose sovereignty it holds, so a
+/// realm's border IS a province border, exactly as `StateRegion`'s already is.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Realm {
+    pub id: u32,
+    pub name: String,
+    /// The style of its ruler, drawn from the founding culture's own vocabulary
+    /// rather than a global word list — a Clannish steppe people should not produce
+    /// a "Republic".
+    pub title: String,
+    pub capital_hub: u32,
+    /// The dynasty. 1:1 with a `House` for the realm's whole life: a house that
+    /// gains a second sovereignty merges it into the realm it already has.
+    pub ruling_house: u32,
+    pub rank: u8,
+    pub autonomy: u8,
+    pub provinces: Vec<u32>,
+    pub cities: Vec<u32>,
+    pub vassals: Vec<u32>,
+    /// The crown's pot — the house's whole wealth at the coronation. There is no
+    /// second pot: the dynasty's money IS the realm's money.
+    pub treasury: f32,
+    /// Bank debt inherited from the house at the coronation, so a crown can default.
+    pub debts: f32,
+    pub legitimacy: f32,
+    pub cohesion: f32,
+    pub founded_tick: u32,
+    /// Set when the realm ends (partitioned, conquered, or the dynasty dies out);
+    /// the record is kept, exactly as a defunct house's is.
+    #[serde(default)] pub fallen_tick: u32,
+    #[serde(default)] pub events: Vec<RealmEvent>,
+}
 
 /// One yearly sample of a province's mutable state — the series behind the province
 /// plate's year slider and the Land tab's trend arrows.

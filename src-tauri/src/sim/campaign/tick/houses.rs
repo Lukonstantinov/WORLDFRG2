@@ -1318,7 +1318,7 @@ impl CampaignSim {
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
             head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0,
-            origin_house: -1, origin_kind: ORIGIN_INDEPENDENCE,
+            origin_house: -1, origin_kind: ORIGIN_INDEPENDENCE, crowned: false, realm: -1,
         });
         self.found_head_record(idx, "founder");
         Some(idx)
@@ -2216,7 +2216,7 @@ impl CampaignSim {
             is_guild: true, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: false, head_age: guild_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0, origin_house: -1, origin_kind: ORIGIN_NONE,
+            head_female: false, head_age: guild_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0, origin_house: -1, origin_kind: ORIGIN_NONE, crowned: false, realm: -1,
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -3224,7 +3224,7 @@ impl CampaignSim {
                 wealth_history: Vec::new(), office_leases: Vec::new(),
                 influence: Vec::new(), bailos: Vec::new(),
                 head_female: female, head_age: age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0,
-                origin_house: hi as i32, origin_kind: ORIGIN_DIVISION,
+                origin_house: hi as i32, origin_kind: ORIGIN_DIVISION, crowned: false, realm: -1,
             });
             let ni = self.houses.len() - 1;
             self.found_head_record(ni, "co-heir");
@@ -3310,7 +3310,7 @@ impl CampaignSim {
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
             head_female: bfemale, head_age: bage, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0,
-            origin_house: hi as i32, origin_kind: ORIGIN_BRANCH,
+            origin_house: hi as i32, origin_kind: ORIGIN_BRANCH, crowned: false, realm: -1,
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");
@@ -3750,7 +3750,7 @@ impl CampaignSim {
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
             head_female: female, head_age, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0,
-            origin_house: gi_seed as i32, origin_kind: ORIGIN_GUILD,
+            origin_house: gi_seed as i32, origin_kind: ORIGIN_GUILD, crowned: false, realm: -1,
         });
         let ni = self.houses.len() - 1;
         self.found_head_record(ni, "founder");

@@ -696,7 +696,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
             is_guild: false, offices: Vec::new(), trade_at: Vec::new(), debt_since: 0,
             wealth_history: Vec::new(), office_leases: Vec::new(),
             influence: Vec::new(), bailos: Vec::new(),
-            head_female: false, head_age: 0, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0, origin_house: -1, origin_kind: ORIGIN_NONE,
+            head_female: false, head_age: 0, line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0, origin_house: -1, origin_kind: ORIGIN_NONE, crowned: false, realm: -1,
         });
     }
 
@@ -837,6 +837,12 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         prov_good_belt: vec![],
         prov_good_depletion: vec![],
         prov_good_yield_scale: 1.0,
+        // Realms (R1). Seeded empty on EVERY campaign: a realm is proclaimed in play,
+        // never generated with the world, and cannot be before `REALM_YEAR_FLOOR`.
+        // `prov_realm` is sized alongside the rest of the land layer by
+        // `ensure_province_land`, so it stays −1 (free) for every province here.
+        realms: vec![],
+        prov_realm: vec![],
     };
     // Backfill the colonization pool if the saved economy predates the feature (its
     // `colonizable_sites` deserialized to the serde default — empty). Without this a

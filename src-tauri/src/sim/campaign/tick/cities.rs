@@ -776,6 +776,9 @@ impl CampaignSim {
         if self.prov_history.len() < np { self.prov_history.resize(np, Vec::new()); }
         if self.prov_events.len() < np { self.prov_events.resize(np, Vec::new()); }
         if self.prov_holder_house.len() < np { self.prov_holder_house.resize(np, -1); }
+        // Sovereignty (rule 25). −1 = free land, which is the default every province
+        // starts and most provinces end in — a realm only ever claims what it takes.
+        if self.prov_realm.len() < np { self.prov_realm.resize(np, -1); }
         // §2.5 · flat `np * ng` arrays. A province that arrives via this fallback
         // path (no `Province.good_belt` in hand — only `campaign_start_sim`'s own
         // seeding has that) simply gets zero belt score everywhere, which the

@@ -43,7 +43,7 @@
             is_guild: false, offices: vec![], trade_at: vec![], debt_since: 0,
             wealth_history: vec![], office_leases: vec![],
             influence: vec![], bailos: vec![],
-            head_female: false, head_age: 34, line: vec![], tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0, origin_house: -1, origin_kind: ORIGIN_NONE,
+            head_female: false, head_age: 34, line: vec![], tier: 0, standing: 0.0, peak_wealth: 0.0, peak_wealth_tick: 0, wealth_last_check: 0.0, golden_age_months: 0, golden_age_chronicled: false, dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(), crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0, origin_house: -1, origin_kind: ORIGIN_NONE, crowned: false, realm: -1,
         }
     }
 
@@ -106,6 +106,11 @@
             prov_works: vec![], prov_history: vec![], prov_events: vec![],
             prov_good_belt: vec![], prov_good_depletion: vec![],
             prov_good_yield_scale: 1.0,
+            // Realms — empty for the same reason the province vectors above are:
+            // a campaign with no province layer can never see a proclamation (a
+            // realm is founded on a province writ), so the realm layer is a
+            // structural no-op here and the dynamics run stays bit-identical.
+            realms: vec![], prov_realm: vec![],
         };
         s.rebuild_routes();
         s
@@ -240,6 +245,58 @@
         assert_eq!(s.hubs[0].treasury, treasury0, "no province layer ⇒ no dues collected");
         assert!(s.prov_forest.is_empty() && s.prov_history.is_empty(),
             "no province layer ⇒ no land state is even allocated");
+    }
+
+    /// R1 · the realm layer must be structurally inert until a realm is proclaimed
+    /// (`REALM_AND_GOVERNMENT_PLAN.md` rule 25 — sovereignty is never assumed to
+    /// exist). This is the counterpart of `province_land_pass_is_a_noop_without_
+    /// provinces` and it is what makes the standing dynamics run bit-identical
+    /// across R1: that sim carries NO province layer, and a realm can only ever be
+    /// founded on a province writ, so no proclamation is reachable there at all.
+    #[test]
+    fn the_realm_layer_is_inert_until_a_realm_is_proclaimed() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+        let mut s = sim(hubs, goods);
+        for yr in 0..60u32 { s.province_land_pass(yr); }
+        assert!(s.realms.is_empty(), "no province layer ⇒ no realm can be founded");
+        assert!(s.prov_realm.is_empty(), "no province layer ⇒ no sovereignty is allocated");
+
+        // With a province layer, sovereignty is ALLOCATED but stays free land. A realm
+        // claims territory; nothing hands it out at seeding time.
+        s.prov_cap = vec![50_000.0];
+        s.prov_rural = vec![30_000.0];
+        s.prov_culture = vec!["Aiora".into()];
+        s.prov_seat = vec![[0.0, 0.0]];
+        s.hub_province = vec![0];
+        s.province_land_pass(1);
+        assert_eq!(s.prov_realm, vec![-1], "a seeded province starts as free land");
+        assert!(s.realms.is_empty(), "seeding a province founds no realm");
+    }
+
+    /// R1 · `crowned` and `defunct` are different facts and must never be conflated
+    /// (`REALM_AND_GOVERNMENT_PLAN.md` §5.1). A crowned house is ALIVE — it is the
+    /// dynasty — so it keeps its identity while leaving the merchant world, which is
+    /// precisely what `dissolve_house`'s liquidation and `GOAL_OUTLAST_RIVAL`'s
+    /// "a rival went defunct" test must not be fooled into acting on.
+    #[test]
+    fn a_crowned_house_leaves_the_merchant_world_without_dying() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.found_house_at(0);
+        assert!(!s.houses.is_empty(), "a house is needed for this test");
+        assert!(s.houses[0].is_merchant(), "a new house competes as a merchant");
+
+        s.houses[0].crowned = true;
+        assert!(!s.houses[0].is_merchant(), "a crowned house has left the merchant world");
+        assert!(!s.houses[0].defunct, "…but it is NOT dead — it is the dynasty");
+        assert!(!s.houses[0].name.is_empty(), "its identity survives the coronation");
+
+        // And the two flags stay independent in the other direction.
+        let mut other = s.houses[0].clone();
+        other.crowned = false; other.defunct = true;
+        assert!(!other.is_merchant(), "a dead house is not a merchant either");
     }
 
     /// A land improvement must cost its funder real money, take years, and only then
