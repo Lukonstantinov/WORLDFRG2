@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { cultureFigureSVG, cultureSeed, type Occasion } from "@ui/campaign/cultureFigure";
+import { cultureFigureSVG, cultureSeed, CULTURE_KIT_COUNT, type Occasion } from "@ui/campaign/cultureFigure";
 
 const OCCASIONS: { key: Occasion; label: string }[] = [
   { key: "everyday", label: "Everyday" },
@@ -17,11 +17,16 @@ export function CultureFigures({ name, kit, kit2, color }: {
   const [roll, setRoll] = useState(0);
   const [occasion, setOccasion] = useState<Occasion>("national");
   const figs = useMemo(() => {
-    if (kit == null || kit < 0) return null;
     const base = cultureSeed(name);
+    // A synthetic / unknown people can arrive with no kit index (kit null or -1).
+    // Deriving a stable kit from the name means it still gets a fully-dressed
+    // figure instead of rendering blank — the "clothes not showing" case.
+    const useKit = (kit == null || kit < 0)
+      ? (base % CULTURE_KIT_COUNT + CULTURE_KIT_COUNT) % CULTURE_KIT_COUNT
+      : kit;
     return {
-      m: cultureFigureSVG({ kit, sex: "m", seed: base, kit2, variant: roll, occasion }),
-      f: cultureFigureSVG({ kit, sex: "f", seed: base ^ 0x9e37, kit2, variant: roll, occasion }),
+      m: cultureFigureSVG({ kit: useKit, sex: "m", seed: base, kit2, variant: roll, occasion }),
+      f: cultureFigureSVG({ kit: useKit, sex: "f", seed: base ^ 0x9e37, kit2, variant: roll, occasion }),
     };
   }, [name, kit, kit2, roll, occasion]);
   if (!figs) return null;
