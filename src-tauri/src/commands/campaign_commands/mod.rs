@@ -1448,6 +1448,10 @@ pub struct HouseBrief {
     #[serde(default)] pub color: String,
     /// Home-seat position (world cell coords) — where the family is based.
     #[serde(default)] pub seat: [f32; 2],
+    /// #8 · for a house that deals the generic (mixed) "gemstones" good, the principal
+    /// stone its home region yields (from `GEM_STONES`), so the UI can show
+    /// "Gemstones (Ruby)" rather than the bare category. Empty when it trades no gems.
+    #[serde(default)] pub gem_variety: String,
     /// True when this house holds >=50% of its seat city's merchant trade — i.e.
     /// it controls that settlement. Only controlled seats are tinted on the map.
     #[serde(default)] pub dominant: bool,
@@ -1666,6 +1670,22 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
             Some(c) => (c.coin_name.clone(), crate::sim::tick::coin_value(c.mint_fineness, c.coin_trust), c.coin_trust),
             None => (String::new(), 0.0, 0.0),
         };
+        // #8 · if this family deals the generic (mixed) "gemstones" good, name the
+        // principal stone its home region yields, so the UI can say "Gemstones (Ruby)"
+        // instead of a bare category the world has five specific members of.
+        let gem_variety = {
+            let gi = sim.goods.iter().position(|g| g.name == "gemstones");
+            let deals = gi.map_or(false, |g|
+                h.spec.contains(&g)
+                || h.good_profit.get(g).copied().unwrap_or(0.0) > 0.0
+                || h.monopoly.iter().any(|&(mg, _)| mg == g));
+            if deals {
+                let [sx, sy] = seat_pos(hub);
+                let hh = (sx as i64).wrapping_mul(73856093) ^ (sy as i64).wrapping_mul(19349663);
+                crate::sim::biological::GEM_STONES
+                    [(hh.unsigned_abs() as usize) % crate::sim::biological::GEM_STONES.len()].to_string()
+            } else { String::new() }
+        };
         HouseBrief {
             idx: hi as u32,
             name: h.name.clone(),
@@ -1692,6 +1712,7 @@ fn build_house_briefs(sim: &CampaignSim) -> Vec<HouseBrief> {
             defunct: h.defunct,
             color: distinct_color(hi), // stable per-house index → stable colour
             seat: seat_pos(hub),
+            gem_variety,
             dominant,
             controls,
             partners,
@@ -2458,6 +2479,8 @@ pub struct HouseHistory {
     pub events: Vec<HouseTimelineEvent>,
     pub top_goods: Vec<(String, f32)>, // most profitable resources (name + cumulative profit)
     pub defunct: bool,
+    /// #8 · principal stone for this house's generic "gemstones" trade (else "").
+    #[serde(default)] pub gem_variety: String,
     /// Colonies/outposts this house OWNS (outposts) or BACKED (joint-stock share).
     #[serde(default)] pub colonies: Vec<ColonySummary>,
     /// Phase 0.4/1.4 · the succession LINE — every head this house has had, oldest

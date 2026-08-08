@@ -8,7 +8,7 @@ import { useMemo, useState } from "react";
 import { CoatOfArms } from "@ui/heraldry/CoatOfArms";
 import { cultureFigureSVG, cultureSeed } from "@ui/campaign/cultureFigure";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
-import { GOOD_DEFS } from "@goods";
+import { GOOD_DEFS, clarifyGemLabel } from "@goods";
 import type { HouseBrief } from "@types";
 
 const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
@@ -170,7 +170,7 @@ function GoodsLedger({ h }: { h: HouseBrief }) {
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, padding: "1px 0", fontSize: 10.5 }}>
             <span style={{ width: 16, textAlign: "center" }}>{goodIcon(r.good)}</span>
             <span style={{ width: 88, color: top ? "#e6c878" : "#cfe0f4", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {r.good}{top ? " ★" : ""}
+              {clarifyGemLabel(r.good, h.gem_variety)}{top ? " ★" : ""}
             </span>
             <div style={{ flex: 1, height: 5, background: "#0f1822", borderRadius: 3, overflow: "hidden" }}>
               <div style={{ width: `${Math.round((r.volume / maxVol) * 100)}%`, height: "100%", background: h.color ?? "#6a86a6", opacity: 0.75 }} />
@@ -183,7 +183,7 @@ function GoodsLedger({ h }: { h: HouseBrief }) {
       })}
       {bestProfit.profit > 0 && (
         <div style={{ color: "#e6c878", fontSize: 9.5, marginTop: 3 }}>
-          ★ most profitable: {goodIcon(bestProfit.good)} {bestProfit.good} (+{fmt(bestProfit.profit)})
+          ★ most profitable: {goodIcon(bestProfit.good)} {clarifyGemLabel(bestProfit.good, h.gem_variety)} (+{fmt(bestProfit.profit)})
         </div>
       )}
     </div>
@@ -278,11 +278,11 @@ export function HouseCompareWindow({ houses, initialA, initialB, onClose }:
             {[a, b].map((h, i) => (
               <div key={i}>
                 <div style={{ color: "#9fd0c0" }}>{h.archetype_label ?? "—"}{h.archetype_perk ? ` · ${h.archetype_perk}` : ""}</div>
-                <div style={{ color: "#7a90a8", marginTop: 3 }}>Specialises in: {h.specialties.length ? h.specialties.join(", ") : "—"}</div>
-                <div style={{ color: "#7a90a8", marginTop: 2 }}>Best known for: {h.top_goods.length ? h.top_goods.slice(0, 4).join(", ") : "—"}</div>
+                <div style={{ color: "#7a90a8", marginTop: 3 }}>Specialises in: {h.specialties.length ? h.specialties.map((g) => clarifyGemLabel(g, h.gem_variety)).join(", ") : "—"}</div>
+                <div style={{ color: "#7a90a8", marginTop: 2 }}>Best known for: {h.top_goods.length ? h.top_goods.slice(0, 4).map((g) => clarifyGemLabel(g, h.gem_variety)).join(", ") : "—"}</div>
                 {h.monopolies.length > 0 && (
                   <div style={{ color: "#c9a227", marginTop: 2 }}>
-                    Monopolies: {h.monopolies.slice(0, 4).map(([g, s]) => `${g} (${Math.round(s * 100)}%)`).join(", ")}
+                    Monopolies: {h.monopolies.slice(0, 4).map(([g, s]) => `${clarifyGemLabel(g, h.gem_variety)} (${Math.round(s * 100)}%)`).join(", ")}
                   </div>
                 )}
               </div>

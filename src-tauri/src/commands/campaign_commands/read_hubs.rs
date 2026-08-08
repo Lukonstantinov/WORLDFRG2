@@ -725,6 +725,21 @@ pub fn campaign_get_house_history(name: String, db: State<'_, WorldDb>) -> Resul
         wealth_start: p.wealth_start, wealth_end: p.wealth_end,
         accession: p.accession.clone(), epithet: p.epithet.clone(),
     }).collect();
+    // #8 · principal stone for this house's generic "gemstones" trade — same
+    // GEM_STONES source + home-hub hash the HouseBrief uses, so both views agree.
+    let gem_variety = {
+        let gi = sim.goods.iter().position(|g| g.name == "gemstones");
+        let deals = gi.map_or(false, |g|
+            h.good_profit.get(g).copied().unwrap_or(0.0) > 0.0 || h.spec.contains(&g));
+        match (deals, sim.hubs.get(h.hub as usize)) {
+            (true, Some(hub)) => {
+                let hh = (hub.x as i64).wrapping_mul(73856093) ^ (hub.y as i64).wrapping_mul(19349663);
+                crate::sim::biological::GEM_STONES
+                    [(hh.unsigned_abs() as usize) % crate::sim::biological::GEM_STONES.len()].to_string()
+            }
+            _ => String::new(),
+        }
+    };
     Ok(Some(HouseHistory {
         name: h.name.clone(),
         color: distinct_color(idx),
@@ -733,6 +748,7 @@ pub fn campaign_get_house_history(name: String, db: State<'_, WorldDb>) -> Resul
         events,
         top_goods,
         defunct: h.defunct,
+        gem_variety,
         colonies,
         line,
     }))

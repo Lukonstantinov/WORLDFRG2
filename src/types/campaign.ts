@@ -698,6 +698,7 @@ export interface HouseBrief {
   defunct: boolean;
   color?: string;                // stable distinct colour (hex) for this house
   seat?: [number, number];       // home-seat position (world cell coords)
+  gem_variety?: string;          // #8 · principal stone for this house's "gemstones" (else "")
   dominant?: boolean;            // controls at least one settlement (>=50% of its trade)
   controls?: [number, number][]; // settlements it controls (seat or remote outposts)
   partners?: [number, number][]; // trade-partner settlements (world coords)
@@ -800,6 +801,7 @@ export interface HouseHistory {
   events: HouseTimelineEvent[];
   top_goods: [string, number][]; // most profitable resources (name + cumulative profit)
   defunct: boolean;
+  gem_variety?: string;          // #8 · principal stone for this house's "gemstones"
   colonies?: ColonySummary[]; // colonies owned (outposts) or backed by this house
   line?: HeadBrief[];         // the succession line — every head this house has had
 }

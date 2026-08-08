@@ -203,3 +203,14 @@ export function goodCategory(name: string): string {
   // to "Other" (the trailing catch-all group).
   return GOOD_CATEGORY[name] ?? "Other";
 }
+
+/** #8 · The generic "gemstones" good is the MIXED gem trade (the world also has
+ *  ruby/sapphire/emerald/diamond/topaz as distinct goods). When a house's principal
+ *  stone is known, clarify the bare category as e.g. "Gemstones (Ruby)". Any other
+ *  good is returned unchanged. Case-insensitive on the id/name. */
+export function clarifyGemLabel(name: string, gemVariety?: string): string {
+  if (gemVariety && name.trim().toLowerCase() === "gemstones") {
+    return `Gemstones (${gemVariety})`;
+  }
+  return name;
+}
