@@ -908,6 +908,16 @@ impl CampaignSim {
             // Ties break on the LOWER hub index so the choice is order-independent.
             if combined > best_inf { best_inf = combined; hub = c as i32; }
         }
+        // A feud needs real CONTACT (#14): the two families must either share a city
+        // (seat / office / bailo) OR sit within trading reach of each other. Two
+        // houses that merely deal the same GOOD on opposite sides of the world have no
+        // quarrel to have — without this a shared commodity alone (0.22 × 2 goods =
+        // 0.44, over the 0.30 feud threshold) paired up houses an ocean apart. A feud
+        // that LOSES contact returns 0 here and so cools, which is correct.
+        if shared_cities == 0
+            && !self.hubs_within_war_reach(ha.hub as usize, hb.hub as usize) {
+            return (0.0, good, hub);
+        }
         // Same trading component is a weak tie on its own — it is what made the old
         // model pair up every house on a continent. It counts, but only a little.
         let same_component = self.hubs.get(ha.hub as usize).map(|h| h.component)
