@@ -449,7 +449,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 died_cause: String::new(),
                 tier: 0,
                 standing: 0.0,
-                war_cooldown_until: 0,
+                war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0,
             }
         })
         .collect();

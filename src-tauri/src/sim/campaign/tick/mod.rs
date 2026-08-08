@@ -1997,6 +1997,16 @@ pub struct TickHub {
     /// moved by tightening `HOUSE_WAR_CHANCE` or adding `WAR_MIN_TREASURY` alone —
     /// the churn was the same two war-eligible seats re-fighting, not new pairs).
     #[serde(default)] pub war_cooldown_until: u32,
+    /// R1b · the tick THIS `captor_house` took hold (reset to `tick` every time
+    /// `update_government` step 4 changes who holds the seat — including to −1). A
+    /// proclamation requires ten years of CONTINUOUS capture, so a house that is
+    /// bribed out and back in a single year cannot chain two half-tenures into one.
+    #[serde(default)] pub captor_since: u32,
+    /// R1b · sovereignty: the realm this city belongs to, or −1 (free — rule 25).
+    #[serde(default = "neg_one_i32")] pub realm: i32,
+    /// `REALM_ROLE_*` — this city's standing inside `realm`. Meaningless when
+    /// `realm < 0`.
+    #[serde(default)] pub realm_role: u8,
 }
 
 /// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by
@@ -4285,6 +4295,29 @@ pub const REALM_ROLE_OCCUPIED: u8 = 3;
 /// The hard floor on the first proclamation, in years. Not a trigger — after this
 /// date any house that meets the conditions may proclaim, and most never will.
 pub const REALM_YEAR_FLOOR: u32 = 50;
+/// Years a house must hold `captor_house` CONTINUOUSLY before it may proclaim. Reset
+/// by `TickHub.captor_since` on any change of captor (`update_government` step 4), so
+/// a house bribed out and back in cannot chain two half-tenures into one.
+pub const REALM_CAPTOR_YEARS: u32 = 10;
+/// Tier ceiling on BOTH the house and its city at the moment of proclamation — the
+/// gate applies only here (`REALM_AND_GOVERNMENT_PLAN.md` §3.1), never afterward,
+/// which is what lets a realm keep a small capital indefinitely (the Karakorum rule,
+/// plan §1.3/§4.3).
+pub const REALM_PROCLAIM_TIER_MAX: u8 = 2;
+/// A treasury floor so a proclamation is not immediately followed by a manufactured
+/// bankruptcy — the new realm must be able to survive its first shock. Comparable in
+/// spirit to `WAR_MIN_TREASURY` (a hub's own war-affordability floor) but sized to a
+/// HOUSE's wealth scale, which runs far higher.
+pub const REALM_PROCLAIM_TREASURY_MIN: f32 = 500.0;
+/// A prestige floor — proclaiming sovereignty is a claim the house must have already
+/// partly earned, not a first move. `SUCCESSION_PRESTIGE_CAP`/`FEUD_PRESTIGE_CAP` both
+/// ceiling prestige at 1.2, so this asks for roughly a third of a house's ceiling.
+pub const REALM_PROCLAIM_PRESTIGE_MIN: f32 = 0.4;
+/// Base per-year chance once every other condition is met. Biased by the head's
+/// boldness (axis 0) and expansiveness (axis 3) — the same two axes `decide_fleets`
+/// and `update_guilds_and_offices` already read for a comparable "dare to commit"
+/// decision.
+pub const REALM_PROCLAIM_CHANCE: f32 = 0.06;
 
 /// One entry in a realm's own permanent record. Mirrors `HouseEvent`, and obeys the
 /// same discipline: milestones (founding, coronation, conquest, partition, fall) are
@@ -4573,6 +4606,10 @@ impl CampaignSim {
             let captor = tally.iter().find(|(_, &w)| w > total_w * 0.5).map(|(&hh, _)| hh).unwrap_or(-1);
             let prev = self.hubs[h].captor_house;
             self.hubs[h].captor_house = captor;
+            // R1b · the clock a proclamation's "held ≥ 10 years continuously" reads.
+            // Reset on ANY change — including losing the seat and later retaking it —
+            // so a house cannot chain two half-tenures into one long one.
+            if captor != prev { self.hubs[h].captor_since = tick; }
             // 5) Payoff on a fresh capture: a favoured-house charter + a trade-influence
             //    boost (its policy tilt is applied in `decide_polis_policy`).
             if captor >= 0 && captor != prev {
@@ -5550,7 +5587,12 @@ impl CampaignSim {
             1.0 + (EARLY_WEALTH_TAX_MULT - 1.0) * (1.0 - year / EARLY_WEALTH_TAX_YEARS)
         } else { 1.0 };
         for hi in 0..self.houses.len() {
-            if self.houses[hi].defunct {
+            // R1b · a crowned house has left the merchant world — its estates and
+            // fleets no longer draw upkeep against its own (now zeroed) wealth. What
+            // funds a realm's inherited holdings is a REALM-treasury concern, not
+            // built yet (`REALM_AND_GOVERNMENT_PLAN.md` R3); excluding it here is what
+            // keeps a coronation from being followed by a manufactured bankruptcy.
+            if !self.houses[hi].is_merchant() {
                 continue;
             }
             let home = self.houses[hi].hub as usize;
@@ -5688,7 +5730,13 @@ impl CampaignSim {
     fn update_solvency(&mut self) {
         let tick = self.tick;
         for hi in 0..self.houses.len() {
-            if self.houses[hi].defunct { continue; }
+            // R1b · a crowned house is never bankrupted through this path — its
+            // `wealth` was zeroed at the coronation (the pot moved whole to the
+            // realm treasury) and staying at exactly 0 must never read as insolvency.
+            // Routing a coronation into `dissolve_house` here would be the same trap
+            // `REALM_AND_GOVERNMENT_PLAN.md` §5.1 already names for `GOAL_OUTLAST_
+            // RIVAL` — a different call site, the same mistake.
+            if !self.houses[hi].is_merchant() { continue; }
             let w = self.houses[hi].wealth;
             if self.houses[hi].is_guild {
                 if w < 0.0 {
@@ -6209,6 +6257,7 @@ mod crisis;
 mod schism;
 mod foreign_hand;
 mod production;
+mod realms;
 
 /// Milestone journal kinds form a city/house's PERMANENT record and survive the
 /// rolling 25-year prune. Only the high-volume periodic samples — per-tick "price"

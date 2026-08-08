@@ -553,7 +553,7 @@ impl CampaignSim {
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
-            tier: 0, standing: 0.0, war_cooldown_until: 0,
+            tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0,
         });
         // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
         self.routes_dirty = true;
@@ -2474,7 +2474,9 @@ impl CampaignSim {
     pub(crate) fn assign_house_tiers(&mut self) {
         let tick = self.tick;
         let live: Vec<usize> = (0..self.houses.len())
-            .filter(|&i| !self.houses[i].defunct && !self.houses[i].is_guild)
+            // R1b · a crowned house has left the merchant world (`is_merchant`) —
+            // it ranks on the realm ladder instead, never the tier 1-4 one.
+            .filter(|&i| self.houses[i].is_merchant() && !self.houses[i].is_guild)
             .collect();
         let n = live.len();
         if n == 0 { return; }
@@ -2847,7 +2849,7 @@ impl CampaignSim {
 
     /// The head's raw character axis, 0 if no roster — used to BIAS which goal a
     /// house picks (§4), not to modify a decision (that's `head_character_factor`).
-    fn head_axis(&self, hi: usize, axis: usize) -> i8 {
+    pub(crate) fn head_axis(&self, hi: usize, axis: usize) -> i8 {
         self.houses.get(hi).and_then(|h| h.kin.first())
             .and_then(|k| k.character.get(axis).copied()).unwrap_or(0)
     }

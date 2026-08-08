@@ -28,7 +28,7 @@
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
-            tier: 0, standing: 0.0, war_cooldown_until: 0,
+            tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0,
         }
     }
 
@@ -297,6 +297,112 @@
         let mut other = s.houses[0].clone();
         other.crowned = false; other.defunct = true;
         assert!(!other.is_merchant(), "a dead house is not a merchant either");
+    }
+
+    /// R1b · `promote_house_to_realm` is the transfer at the heart of the coronation
+    /// (`REALM_AND_GOVERNMENT_PLAN.md` §3.2): the pot moves WHOLE (one pot, not two),
+    /// the house survives as the dynasty, and the seat's territory becomes the
+    /// realm's sovereignty.
+    #[test]
+    fn promote_house_to_realm_transfers_the_pot_and_leaves_the_house_alive() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.found_house_at(0);
+        let hi = 0usize;
+        s.houses[hi].wealth = 12_345.0;
+        s.prov_holder = vec![0];       // this hub administers province 0
+        s.prov_holder_house = vec![-1];
+        s.prov_realm = vec![-1];
+        s.hub_province = vec![0];
+        s.prov_culture = vec!["Aiora".into()];
+
+        let id = s.promote_house_to_realm(hi, 0, 60);
+
+        assert_eq!(s.realms.len(), 1, "exactly one realm is created");
+        let r = &s.realms[0];
+        assert_eq!(r.id, id);
+        assert_eq!(r.treasury, 12_345.0, "the pot moves WHOLE — one pot, not two");
+        assert_eq!(r.capital_hub, 0);
+        assert_eq!(r.ruling_house, hi as u32);
+        assert_eq!(r.provinces, vec![0], "the seat's administered province becomes sovereign territory");
+        assert_eq!(r.rank, REALM_CITY_STATE, "founds at the bottom of the ladder");
+        assert!(!r.name.is_empty() && !r.title.is_empty());
+
+        assert!(s.houses[hi].crowned, "the house is ELEVATED");
+        assert!(!s.houses[hi].defunct, "…never dissolved — see §5.1");
+        assert_eq!(s.houses[hi].realm, id as i32);
+        assert_eq!(s.houses[hi].wealth, 0.0, "the house's own pot is empty — it moved to the crown");
+        assert_eq!(s.houses[hi].tier, 0, "leaves the 1-4 merchant tier ladder");
+        assert!(!s.houses[hi].name.is_empty(), "identity survives");
+
+        assert_eq!(s.hubs[0].realm, id as i32);
+        assert_eq!(s.hubs[0].realm_role, REALM_ROLE_SEAT);
+        assert_eq!(s.prov_realm, vec![id as i32], "sovereignty is recorded on the province");
+    }
+
+    /// R1b · every precondition in §3.1 is load-bearing on its own: dropping any ONE
+    /// of them must suppress the proclamation. Checked directly against
+    /// `maybe_proclaim_realms` rather than by hunting for a seed that rolls the dice
+    /// favourably — the trigger's job here is the GATE, not the roll.
+    #[test]
+    fn realm_proclamation_respects_every_precondition() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+
+        let eligible = |s: &mut CampaignSim| {
+            s.hubs[0].captor_house = 0;
+            s.hubs[0].captor_since = 0; // held since tick 0
+            s.hubs[0].tier = 2;
+            s.houses[0].tier = 2;
+            s.houses[0].wealth = 10_000.0;
+            s.houses[0].prestige = 1.0;
+            s.prov_holder = vec![0];
+            s.prov_holder_house = vec![-1];
+            s.prov_realm = vec![-1];
+        };
+
+        // Before the hard floor: never, no matter how eligible otherwise.
+        let mut s = sim(hubs.clone(), goods.clone());
+        s.found_house_at(0);
+        s.tick = (REALM_YEAR_FLOOR - 1) * TICKS_PER_YEAR;
+        eligible(&mut s);
+        s.hubs[0].captor_since = s.tick.saturating_sub((REALM_CAPTOR_YEARS + 1) * TICKS_PER_YEAR);
+        s.maybe_proclaim_realms(REALM_YEAR_FLOOR - 1);
+        assert!(s.realms.is_empty(), "the hard floor is absolute");
+
+        // At/after the floor, but captured too recently: never.
+        let mut s = sim(hubs.clone(), goods.clone());
+        s.found_house_at(0);
+        s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR;
+        eligible(&mut s);
+        s.hubs[0].captor_since = s.tick; // captured THIS year — no tenure yet
+        s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+        assert!(s.realms.is_empty(), "captor tenure under REALM_CAPTOR_YEARS never proclaims");
+
+        // At/after the floor, tenure satisfied, but no province writ: never.
+        let mut s = sim(hubs.clone(), goods.clone());
+        s.found_house_at(0);
+        s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR;
+        eligible(&mut s);
+        s.hubs[0].captor_since = 0;
+        s.prov_holder = vec![-1]; // no city administers this province — the seat holds nothing
+        s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+        assert!(s.realms.is_empty(), "no province writ ⇒ no proclamation, regardless of everything else");
+
+        // Every condition satisfied — proclamation must be REACHABLE (rolled against
+        // a wide sweep of ticks so the assertion doesn't depend on one lucky seed).
+        let mut fired = false;
+        for t in 0..400u32 {
+            let mut s = sim(hubs.clone(), goods.clone());
+            s.found_house_at(0);
+            s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR + t;
+            eligible(&mut s);
+            s.hubs[0].captor_since = 0;
+            s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+            if !s.realms.is_empty() { fired = true; break; }
+        }
+        assert!(fired, "with every precondition met, a proclamation must be reachable");
     }
 
     /// A land improvement must cost its funder real money, take years, and only then
