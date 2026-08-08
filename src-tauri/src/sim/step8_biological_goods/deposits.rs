@@ -957,7 +957,38 @@ pub fn place_mineral(
         }
     }
     if ranked.is_empty() {
-        return Placement { belt, deposits: out };
+        // GUARANTEE placement (#10): this world's geology offered no cell above even
+        // the lowest threshold for this mineral's model, so a shipped stone would
+        // vanish from the ENTIRE world. Rather than return empty, place a few
+        // districts on the most model-plausible LAND available — the raw setting
+        // score with NO floor (best of the plate and relief-proxy readings), keeping
+        // only the top band so the fallback still lands on the right KIND of ground
+        // (diamond keeps preferring low-relief interior, so the craton test holds) and
+        // stays scarce. Only reached when normal placement finds nothing.
+        let mut relaxed = vec![0.0f32; n];
+        let mut maxs = 0.0f32;
+        for i in 0..n {
+            if buf.terrain[i] != 1 { continue; }
+            let s = ctx.setting_score_ex(buf, plan.model, i, ctx.have_plates)
+                .max(ctx.setting_score_ex(buf, plan.model, i, false));
+            relaxed[i] = s;
+            if s > maxs { maxs = s; }
+        }
+        let floor = (maxs * 0.5).max(0.001);
+        for i in 0..n {
+            if buf.terrain[i] == 1 && relaxed[i] >= floor {
+                cand[i] = relaxed[i].max(0.05);
+                let key = (cand[i] + 0.05)
+                    * hash01(gs ^ 0xFA11 ^ (i as u64).wrapping_mul(0x100000001B3));
+                ranked.push((i, key));
+            }
+        }
+        if ranked.is_empty() {
+            return Placement { belt, deposits: out };
+        }
+        // The per-working local gate is relative to `thresh`; drop it so a forced
+        // district's workings actually get written on this indifferent ground.
+        thresh = 0.0;
     }
     ranked.sort_by(|a, b| {
         b.1.partial_cmp(&a.1)
