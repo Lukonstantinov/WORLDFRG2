@@ -381,6 +381,14 @@ export async function campaignProvinceGoods(id: number): Promise<import("@types"
   return invoke("campaign_province_goods", { id });
 }
 
+/** #9 · The full goods PICTURE for a province: every good the land COULD yield (with
+ *  belt richness) whether or not it is worked today, plus the individual ore workings
+ *  and their grade/depth — so a province producing nothing still shows its potential
+ *  and its mineral deposits rather than "no notable produce". */
+export async function campaignProvincePotential(id: number): Promise<import("@types").ProvincePotential> {
+  return invoke("campaign_province_potential", { id });
+}
+
 /** §3.3 · every state currently formed — one region per tier 1-2 city holding at
  *  least one province's writ. Pure derived read, empty with no campaign / no
  *  province layer / no city has yet risen to tier 1-2. */

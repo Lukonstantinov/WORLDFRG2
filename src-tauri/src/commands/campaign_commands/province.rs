@@ -401,6 +401,125 @@ pub fn campaign_province_goods(id: u32, db: State<'_, WorldDb>) -> Result<Vec<Pr
     Ok(out)
 }
 
+/// #9 · One good this province COULD yield, whether or not it is worked today —
+/// the "unexploited opportunity" view `campaign_province_goods` deliberately omits.
+#[derive(Serialize)]
+pub struct ProvinceGoodPotential {
+    pub good: u8,
+    pub name: String,       // good id (frontend maps to label/emoji)
+    /// Live potential yield (belt × land-use share × world yield scale).
+    pub potential: f32,
+    /// Frozen belt richness 0..1 — how good the LAND is for this good, ignoring use.
+    pub belt: f32,
+    /// Actual production here this tick (0 = an untapped opportunity).
+    pub actual: f32,
+    /// An ore/mineral good (placed by real geology, richness = deposit grade).
+    pub is_deposit: bool,
+    /// For a deposit good: mean working grade in this province (0..1).
+    pub mean_grade: f32,
+    /// For a deposit good: number of ore workings of this good in the province.
+    pub workings: u32,
+    /// For a deposit good: the deepest/least-workable depth present (0 surface … 3 flooded).
+    pub best_depth: u8,
+}
+
+/// #9 · One ore working located in a province, for the survey-plate goods layer.
+#[derive(Serialize)]
+pub struct ProvinceDepositDot {
+    pub good: String,
+    pub x: u32,
+    pub y: u32,
+    pub grade: f32,
+    pub extent: u8,
+    pub depth: u8,
+}
+
+#[derive(Serialize)]
+pub struct ProvincePotential {
+    /// Every good the land here can yield (belt > 0), richest potential first.
+    pub goods: Vec<ProvinceGoodPotential>,
+    /// The individual ore workings inside this province (real cell coords), so the
+    /// minimap can plot where the deposits are.
+    pub deposits: Vec<ProvinceDepositDot>,
+}
+
+/// #9 · The full goods PICTURE for one province: what the land could yield (with
+/// richness), and where the ore workings actually sit — so a province that produces
+/// nothing today still shows its potential and its mineral deposits instead of a
+/// bare "no notable produce". Pure read; nothing is written.
+#[tauri::command]
+pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<ProvincePotential, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? {
+        Some(s) => s,
+        None => return Ok(ProvincePotential { goods: vec![], deposits: vec![] }),
+    };
+    let ng = sim.goods.len();
+    let np = if ng > 0 { sim.prov_good_belt.len() / ng } else { 0 };
+    let p = id as usize;
+    if p >= np { return Ok(ProvincePotential { goods: vec![], deposits: vec![] }); }
+    let actual_all = sim.province_good_actual();
+
+    // Which goods are ore/mineral deposits (richness = deposit grade, not a belt).
+    let specs = crate::commands::goods_commands::load_world_goods(&conn);
+    let is_deposit: std::collections::HashMap<String, bool> = specs.iter()
+        .map(|s| (s.id.clone(), matches!(s.distribution, crate::sim::goods_spec::Distribution::Deposits)))
+        .collect();
+
+    // Ore workings, attributed to a province via the downsampled raster.
+    let deposits: Vec<crate::sim::deposits::Deposit> = metadata::get_meta(&conn, "deposits")
+        .ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    let (rw, rh, gw, gh, mut raster): (u32, u32, u32, u32, Vec<u32>) =
+        metadata::get_meta(&conn, "province_raster").map_err(|e| e.to_string())?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or((0, 0, 0, 0, Vec::new()));
+    crate::sim::provinces::migrate_raster_sentinel(&mut raster);
+    let prov_at = |x: u32, y: u32| -> i32 {
+        if raster.is_empty() || gw == 0 || gh == 0 { return -1; }
+        let rx = ((x as u64 * rw as u64) / gw as u64).min(rw as u64 - 1) as usize;
+        let ry = ((y as u64 * rh as u64) / gh as u64).min(rh as u64 - 1) as usize;
+        match raster.get(ry * rw as usize + rx).copied() {
+            Some(v) if v != crate::sim::provinces::NO_PROVINCE => v as i32,
+            _ => -1,
+        }
+    };
+
+    // Aggregate deposits in this province by good, and collect the per-working dots.
+    let mut dots: Vec<ProvinceDepositDot> = Vec::new();
+    let mut agg: std::collections::HashMap<String, (f32, u32, u8)> = std::collections::HashMap::new(); // (grade_sum, n, max_depth)
+    for d in &deposits {
+        if prov_at(d.x, d.y) != id as i32 { continue; }
+        dots.push(ProvinceDepositDot { good: d.good.clone(), x: d.x, y: d.y, grade: d.grade, extent: d.extent, depth: d.depth });
+        let e = agg.entry(d.good.clone()).or_insert((0.0, 0, 0));
+        e.0 += d.grade; e.1 += 1; e.2 = e.2.max(d.depth);
+    }
+
+    let mut goods: Vec<ProvinceGoodPotential> = Vec::new();
+    for g in 0..ng {
+        let idx = p * ng + g;
+        let belt = sim.prov_good_belt.get(idx).copied().unwrap_or(0.0);
+        if belt <= 0.001 { continue; } // the land genuinely can't yield this
+        let name = sim.goods[g].name.clone();
+        let dep = is_deposit.get(&name).copied().unwrap_or(false);
+        let (mean_grade, workings, best_depth) = agg.get(&name)
+            .map(|&(s, n, bd)| (if n > 0 { s / n as f32 } else { 0.0 }, n, bd))
+            .unwrap_or((0.0, 0, 0));
+        goods.push(ProvinceGoodPotential {
+            good: g as u8,
+            name,
+            potential: sim.province_good_potential(p, g),
+            belt,
+            actual: actual_all.get(idx).copied().unwrap_or(0.0),
+            is_deposit: dep,
+            mean_grade, workings, best_depth,
+        });
+    }
+    // Richest potential first (a deposit good's richness is reflected in its belt).
+    goods.sort_by(|a, b| b.potential.partial_cmp(&a.potential).unwrap_or(std::cmp::Ordering::Equal)
+        .then(b.belt.partial_cmp(&a.belt).unwrap_or(std::cmp::Ordering::Equal)));
+    Ok(ProvincePotential { goods, deposits: dots })
+}
+
 // ═════════════════════════════════════════════════════════════════════════════════
 //  STATES (CITY_PROVINCE_WAR_PLAN.md §3.3) — a city's writ made into a territory.
 //

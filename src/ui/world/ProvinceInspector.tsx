@@ -3,7 +3,7 @@ import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import {
   campaignCancelProvinceWork, campaignProvinceDetail, campaignProvinceGoods, campaignProvinceLand,
-  campaignProvinceState, campaignSetProvinceTax, campaignStartProvinceWork,
+  campaignProvincePotential, campaignProvinceState, campaignSetProvinceTax, campaignStartProvinceWork,
   getProvinceTerrainCrop,
 } from "@bridge";
 import { koppenName } from "@ui/world/climate";
@@ -17,6 +17,7 @@ import {
 } from "@ui/world/provinceStory";
 import type {
   Province, ProvinceDetail, ProvinceGoodExploit, ProvinceLand, ProvinceLive, ProvinceTerrainCrop, PSettlement,
+  ProvincePotential,
 } from "@types";
 
 /** 🏞 Province Inspector — the dossier for ONE province, opened by clicking the map
@@ -65,6 +66,9 @@ export function ProvinceInspector() {
   const [land, setLand] = useState<ProvinceLand | null>(null);
   const [terrain, setTerrain] = useState<ProvinceTerrainCrop | null>(null);
   const [exploit, setExploit] = useState<ProvinceGoodExploit[]>([]);
+  const [potential, setPotential] = useState<ProvincePotential | null>(null);
+  const [goodSort, setGoodSort] = useState<"potential" | "richness">("potential");
+  const [depositsOnly, setDepositsOnly] = useState(false);
   const [tab, setTab] = useState<Tab>("land");
   const [plates, setPlates] = useState<PlateKey[]>(DEFAULT_PLATES);
   /** Index into `land.history`; null = today. The slider is the whole point of the
@@ -82,7 +86,7 @@ export function ProvinceInspector() {
 
   // Live campaign join (settlements + buildings + the province's own rural/urban/land).
   useEffect(() => {
-    if (!open || !p) { setDetail(null); setLive(null); setLand(null); setExploit([]); return; }
+    if (!open || !p) { setDetail(null); setLive(null); setLand(null); setExploit([]); setPotential(null); return; }
     let stale = false;
     campaignProvinceDetail(p.id)
       .then((d) => { if (!stale) setDetail(d); })
@@ -98,6 +102,10 @@ export function ProvinceInspector() {
     campaignProvinceGoods(p.id)
       .then((g) => { if (!stale) setExploit(g); })
       .catch(() => { if (!stale) setExploit([]); });
+    // #9 · the opportunity view — every good the land could yield + ore workings.
+    campaignProvincePotential(p.id)
+      .then((pot) => { if (!stale) setPotential(pot); })
+      .catch(() => { if (!stale) setPotential(null); });
     return () => { stale = true; };
   }, [open, p?.id, provinces, reload]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -201,12 +209,14 @@ export function ProvinceInspector() {
           riverCells={p.river_cells}
           terrain={terrain}
           rivers={worldRivers}
+          deposits={potential?.deposits ?? []}
         />
         <div style={{ marginTop: 5 }}>
           <PlateToggles plates={plates} setPlates={setPlates}
             disabled={[
               ...(land ? [] : (["landuse", "tenure"] as PlateKey[])),
               ...((p.river_cells ?? 0) > 0 ? [] : (["water"] as PlateKey[])),
+              ...((potential?.deposits.length ?? 0) > 0 ? [] : (["goods"] as PlateKey[])),
             ]} />
         </div>
 
@@ -314,41 +324,80 @@ export function ProvinceInspector() {
               </>
             )}
 
-            <Section title="Goods" />
-            {land && exploit.length > 0 ? (
-              // §2.5 · LIVE exploitation — only what is actually produced here,
-              // no unexploited-opportunity view. Replaces the frozen quality/rank
-              // shortlist the moment a campaign is actually growing something.
-              exploit.map((g) => (
-                <div key={g.good} style={{ marginBottom: 5 }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <span style={{ width: 132 }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
-                    <span style={{ opacity: 0.7, fontSize: 12 }}>{fmt(g.actual)}/yr</span>
-                    <span style={{ flex: 1 }} />
-                    <span style={{ opacity: 0.6, fontSize: 12 }} title="share leaving the province via trade">
-                      {Math.round(g.market_share * 100)}% to market
-                    </span>
+            {/* Currently worked — the LIVE production (§2.5), if any. */}
+            {land && exploit.length > 0 && (
+              <>
+                <Section title="Currently worked" />
+                {exploit.map((g) => (
+                  <div key={g.good} style={{ marginBottom: 5 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <span style={{ width: 132 }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
+                      <span style={{ opacity: 0.7, fontSize: 12 }}>{fmt(g.actual)}/yr</span>
+                      <span style={{ flex: 1 }} />
+                      <span style={{ opacity: 0.6, fontSize: 12 }} title="share leaving the province via trade">
+                        {Math.round(g.market_share * 100)}% to market
+                      </span>
+                    </div>
+                    <Meter frac={Math.min(1, g.exploitation)} warn={g.exploitation > 1}
+                      label={`${Math.round(g.exploitation * 100)}% worked` +
+                        (g.depletion > 0.02 ? ` · ${Math.round(g.depletion * 100)}% depleted` : "")} />
                   </div>
-                  <Meter frac={Math.min(1, g.exploitation)} warn={g.exploitation > 1}
-                    label={`${Math.round(g.exploitation * 100)}% worked` +
-                      (g.depletion > 0.02 ? ` · ${Math.round(g.depletion * 100)}% depleted` : "")} />
-                </div>
-              ))
-            ) : p.goods.length === 0 ? (
-              <div style={{ opacity: 0.5 }}>no notable produce</div>
-            ) : p.goods.map((g) => (
-              <div key={g.good} style={{ display: "flex", gap: 8, alignItems: "center", padding: "1px 0" }}>
-                <span style={{ width: 132 }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
-                <span style={{ color: "#e3c14a", letterSpacing: 1 }}>{stars(g.quality)}</span>
-                {g.rank ? (
-                  <span style={{ opacity: 0.65, fontSize: 12 }}>
-                    {g.rank === 1
-                      ? <b style={{ color: "#e3c14a" }}>finest in the world</b>
-                      : `#${g.rank} of ${g.of}`}
-                  </span>
-                ) : null}
-              </div>
-            ))}
+                ))}
+              </>
+            )}
+
+            {/* #9 · POTENTIAL & DEPOSITS — every good the land could yield (richest
+                first), so a province producing nothing still shows what's there. */}
+            {(() => {
+              const rows = (potential?.goods ?? []).filter((g) => !depositsOnly || g.is_deposit);
+              const sorted = [...rows].sort((a, b) =>
+                goodSort === "richness" ? b.belt - a.belt : b.potential - a.potential);
+              if (sorted.length === 0) {
+                return exploit.length === 0
+                  ? <><Section title="Goods" /><div style={{ opacity: 0.5 }}>no notable produce</div></>
+                  : null;
+              }
+              const maxPot = Math.max(1e-6, ...sorted.map((g) => (goodSort === "richness" ? g.belt : g.potential)));
+              return (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "10px 0 3px" }}>
+                    <Section title="Potential & deposits" />
+                    <span style={{ flex: 1 }} />
+                    <button onClick={() => setGoodSort((s) => s === "potential" ? "richness" : "potential")}
+                      title="Sort by live potential yield, or by raw land richness"
+                      style={sortBtn}>{goodSort === "potential" ? "by potential" : "by richness"}</button>
+                    <button onClick={() => setDepositsOnly((v) => !v)}
+                      title="Show only ore/mineral deposits"
+                      style={{ ...sortBtn, color: depositsOnly ? "#e3c14a" : "#7fa0bd" }}>💎 only</button>
+                  </div>
+                  {sorted.map((g) => {
+                    const val = goodSort === "richness" ? g.belt : g.potential;
+                    return (
+                      <div key={g.good} style={{ marginBottom: 4, opacity: g.actual > 1e-4 ? 1 : 0.92 }}>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          <span style={{ width: 132 }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
+                          {g.is_deposit && g.workings > 0 ? (
+                            <span style={{ color: "#e3c14a", letterSpacing: 1 }} title={`${g.workings} working${g.workings === 1 ? "" : "s"} · grade ${(g.mean_grade * 100).toFixed(0)}%`}>
+                              {stars(g.mean_grade)}
+                            </span>
+                          ) : null}
+                          <span style={{ flex: 1 }} />
+                          {g.is_deposit && g.workings > 0 && (
+                            <span style={{ opacity: 0.6, fontSize: 11 }}>{g.workings}× · {depthWord(g.best_depth)}</span>
+                          )}
+                          <span style={{ opacity: 0.5, fontSize: 11 }}>
+                            {g.actual > 1e-4 ? `${fmt(g.actual)}/yr` : "untapped"}
+                          </span>
+                        </div>
+                        <Meter frac={Math.min(1, val / maxPot)} label={
+                          goodSort === "richness" ? `richness ${(g.belt * 100).toFixed(0)}%`
+                                                  : `potential ${fmt(g.potential)}/yr`} />
+                      </div>
+                    );
+                  })}
+                </>
+              );
+            })()}
           </>
         )}
 
@@ -624,6 +673,16 @@ function Section({ title }: { title: string }) {
       borderBottom: "1px solid #22342a", paddingBottom: 2 }}>{title}</div>
   );
 }
+
+/** #9 · Deposit depth (0 surface … 3 flooded) → a word for the workings note. */
+function depthWord(d: number): string {
+  return ["surface", "shallow", "deep", "flooded"][Math.max(0, Math.min(3, d))];
+}
+
+const sortBtn: React.CSSProperties = {
+  background: "#12202c", border: "1px solid #24384a", color: "#7fa0bd",
+  borderRadius: 4, fontSize: 10, padding: "1px 6px", cursor: "pointer", whiteSpace: "nowrap",
+};
 
 function Row({ k, v, trend }: { k: string; v: string; trend?: "up" | "down" | null }) {
   return (

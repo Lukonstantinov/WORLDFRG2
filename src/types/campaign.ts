@@ -2233,6 +2233,35 @@ export interface ProvinceGoodExploit {
   market_share: number;
 }
 
+/** #9 · One good a province COULD yield (opportunity view), with richness. */
+export interface ProvinceGoodPotential {
+  good: number;
+  name: string;          // good id (map to label/emoji via GOOD_DEFS)
+  potential: number;     // live potential yield (belt × land-use × yield scale)
+  belt: number;          // frozen belt richness 0..1 (how good the LAND is)
+  actual: number;        // current production (0 = untapped)
+  is_deposit: boolean;   // an ore/mineral good (richness = deposit grade)
+  mean_grade: number;    // deposit goods: mean working grade 0..1
+  workings: number;      // deposit goods: number of ore workings in the province
+  best_depth: number;    // deposit goods: deepest present (0 surface … 3 flooded)
+}
+
+/** #9 · One ore working located in a province (real cell coords) for the minimap. */
+export interface ProvinceDepositDot {
+  good: string;
+  x: number;
+  y: number;
+  grade: number;
+  extent: number;
+  depth: number;
+}
+
+/** #9 · A province's full goods picture: potential goods + ore workings. */
+export interface ProvincePotential {
+  goods: ProvinceGoodPotential[];
+  deposits: ProvinceDepositDot[];
+}
+
 /** CITY_PROVINCE_WAR_PLAN.md §3.3 · one state — a tier 1-2 city's own writ, made
  *  into a territory. Pure derived read (compute_states) — nothing new is
  *  persisted, so this cannot desync from the province/city-tier state it reads. */
