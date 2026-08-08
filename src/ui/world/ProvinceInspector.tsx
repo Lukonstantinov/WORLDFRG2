@@ -67,7 +67,7 @@ export function ProvinceInspector() {
   const [terrain, setTerrain] = useState<ProvinceTerrainCrop | null>(null);
   const [exploit, setExploit] = useState<ProvinceGoodExploit[]>([]);
   const [potential, setPotential] = useState<ProvincePotential | null>(null);
-  const [goodSort, setGoodSort] = useState<"potential" | "richness">("potential");
+  const [goodSort, setGoodSort] = useState<"potential" | "quality">("quality");
   const [depositsOnly, setDepositsOnly] = useState(false);
   const [tab, setTab] = useState<Tab>("land");
   const [plates, setPlates] = useState<PlateKey[]>(DEFAULT_PLATES);
@@ -158,6 +158,17 @@ export function ProvinceInspector() {
   const koppenShares = p.koppen_shares ?? [];
   const nd = p.neighbors_detail ?? [];
 
+  // #9 · real per-good QUALITY (0..1) + world rank from the province's own shortlist
+  // (`p.goods`); `belt` (coverage) is the fallback for goods below the shortlist. Used
+  // by both the Goods panel and the minimap's untapped-goods squares.
+  const goodQ = useMemo(() => new Map((p.goods ?? []).map((g) => [g.good, g])), [p.goods]);
+  const beltGoods = useMemo(() =>
+    (potential?.goods ?? [])
+      .filter((g) => !g.is_deposit)
+      .map((g) => ({ name: g.name, quality: goodQ.get(g.good)?.quality ?? g.belt }))
+      .sort((a, b) => b.quality - a.quality),
+    [potential, goodQ]);
+
   // ── Control verbs. Only the holder may act, so a frontier province is read-only.
   const holderHub = land?.holder_hub ?? -1;
   const canAct = !!land && holderHub >= 0;
@@ -210,13 +221,14 @@ export function ProvinceInspector() {
           terrain={terrain}
           rivers={worldRivers}
           deposits={potential?.deposits ?? []}
+          beltGoods={beltGoods}
         />
         <div style={{ marginTop: 5 }}>
           <PlateToggles plates={plates} setPlates={setPlates}
             disabled={[
               ...(land ? [] : (["landuse", "tenure"] as PlateKey[])),
               ...((p.river_cells ?? 0) > 0 ? [] : (["water"] as PlateKey[])),
-              ...((potential?.deposits.length ?? 0) > 0 ? [] : (["goods"] as PlateKey[])),
+              ...(((potential?.deposits.length ?? 0) > 0 || beltGoods.length > 0) ? [] : (["goods"] as PlateKey[])),
             ]} />
         </div>
 
@@ -350,48 +362,71 @@ export function ProvinceInspector() {
                 first), so a province producing nothing still shows what's there. */}
             {(() => {
               const rows = (potential?.goods ?? []).filter((g) => !depositsOnly || g.is_deposit);
-              const sorted = [...rows].sort((a, b) =>
-                goodSort === "richness" ? b.belt - a.belt : b.potential - a.potential);
-              if (sorted.length === 0) {
+              if (rows.length === 0) {
                 return exploit.length === 0
                   ? <><Section title="Goods" /><div style={{ opacity: 0.5 }}>no notable produce</div></>
                   : null;
               }
-              const maxPot = Math.max(1e-6, ...sorted.map((g) => (goodSort === "richness" ? g.belt : g.potential)));
+              // Quality (0..1): the province's own per-good rank where it has one, else
+              // belt coverage. Deposits use their mean ore grade.
+              const qualOf = (g: typeof rows[number]) =>
+                g.is_deposit && g.workings > 0 ? g.mean_grade : (goodQ.get(g.good)?.quality ?? g.belt);
+              const sorted = [...rows].sort((a, b) =>
+                goodSort === "quality" ? qualOf(b) - qualOf(a) : b.potential - a.potential);
+              // Totals for the header: summed potential, mean quality, ore summary.
+              const totalPot = rows.reduce((s, g) => s + g.potential, 0);
+              const meanQ = rows.reduce((s, g) => s + qualOf(g), 0) / rows.length;
+              const dep = potential?.deposits ?? [];
+              const meanGrade = dep.length ? dep.reduce((s, d) => s + d.grade, 0) / dep.length : 0;
+              const bestDepth = dep.reduce((m, d) => Math.max(m, d.depth), 0);
               return (
                 <>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "10px 0 3px" }}>
                     <Section title="Potential & deposits" />
                     <span style={{ flex: 1 }} />
-                    <button onClick={() => setGoodSort((s) => s === "potential" ? "richness" : "potential")}
-                      title="Sort by live potential yield, or by raw land richness"
-                      style={sortBtn}>{goodSort === "potential" ? "by potential" : "by richness"}</button>
+                    <button onClick={() => setGoodSort((s) => s === "quality" ? "potential" : "quality")}
+                      title="Sort by land quality, or by potential yield"
+                      style={sortBtn}>{goodSort === "quality" ? "by quality" : "by potential"}</button>
                     <button onClick={() => setDepositsOnly((v) => !v)}
                       title="Show only ore/mineral deposits"
                       style={{ ...sortBtn, color: depositsOnly ? "#e3c14a" : "#7fa0bd" }}>💎 only</button>
                   </div>
+                  {/* TOTAL — the whole province's producible worth at a glance. */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 6px", marginBottom: 5,
+                    background: "#0e1a12", border: "1px solid #1e3327", borderRadius: 4, fontSize: 12 }}>
+                    <b style={{ color: "#8fd6a0" }}>TOTAL</b>
+                    <span>~{fmt(totalPot)}/yr potential</span>
+                    <span style={{ color: "#e3c14a", letterSpacing: 1 }} title={`mean land quality ${(meanQ * 100).toFixed(0)}%`}>{stars(meanQ)}</span>
+                    <span style={{ flex: 1 }} />
+                    {dep.length > 0 && (
+                      <span style={{ opacity: 0.75, fontSize: 11 }}>
+                        💎 {dep.length} deposit{dep.length === 1 ? "" : "s"} · grade {(meanGrade * 100).toFixed(0)}% · best {depthWord(bestDepth)}
+                      </span>
+                    )}
+                  </div>
                   {sorted.map((g) => {
-                    const val = goodSort === "richness" ? g.belt : g.potential;
+                    const q = qualOf(g);
+                    const pg = goodQ.get(g.good);
                     return (
-                      <div key={g.good} style={{ marginBottom: 4, opacity: g.actual > 1e-4 ? 1 : 0.92 }}>
+                      <div key={g.good} style={{ marginBottom: 4, opacity: g.actual > 1e-4 ? 1 : 0.94 }}>
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                           <span style={{ width: 132 }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
+                          <span style={{ color: "#e3c14a", letterSpacing: 1 }}
+                            title={g.is_deposit ? `mean ore grade ${(q * 100).toFixed(0)}%` : `land quality ${(q * 100).toFixed(0)}%`}>{stars(q)}</span>
                           {g.is_deposit && g.workings > 0 ? (
-                            <span style={{ color: "#e3c14a", letterSpacing: 1 }} title={`${g.workings} working${g.workings === 1 ? "" : "s"} · grade ${(g.mean_grade * 100).toFixed(0)}%`}>
-                              {stars(g.mean_grade)}
+                            <span style={{ opacity: 0.6, fontSize: 11 }}>{g.workings}× · {depthWord(g.best_depth)}</span>
+                          ) : pg?.rank ? (
+                            <span style={{ opacity: 0.6, fontSize: 11 }}>
+                              {pg.rank === 1 ? <b style={{ color: "#e3c14a" }}>finest in the world</b> : `#${pg.rank} of ${pg.of}`}
                             </span>
                           ) : null}
                           <span style={{ flex: 1 }} />
-                          {g.is_deposit && g.workings > 0 && (
-                            <span style={{ opacity: 0.6, fontSize: 11 }}>{g.workings}× · {depthWord(g.best_depth)}</span>
-                          )}
-                          <span style={{ opacity: 0.5, fontSize: 11 }}>
-                            {g.actual > 1e-4 ? `${fmt(g.actual)}/yr` : "untapped"}
+                          <span style={{ opacity: 0.55, fontSize: 11 }}>
+                            {fmt(g.potential)}/yr{g.actual <= 1e-4 && <span style={{ opacity: 0.6 }}> · untapped</span>}
                           </span>
                         </div>
-                        <Meter frac={Math.min(1, val / maxPot)} label={
-                          goodSort === "richness" ? `richness ${(g.belt * 100).toFixed(0)}%`
-                                                  : `potential ${fmt(g.potential)}/yr`} />
+                        <Meter frac={Math.min(1, q)} label={`quality ${(q * 100).toFixed(0)}% · potential ${fmt(g.potential)}/yr` +
+                          (g.actual > 1e-4 ? ` · ${fmt(g.actual)}/yr worked` : "")} />
                       </div>
                     );
                   })}

@@ -78,7 +78,7 @@ function BuildingGlyph({ kind, s }: { kind: number; s: number }) {
 export type PlateKey = "relief" | "water" | "landuse" | "tenure" | "holdings" | "borders" | "goods";
 export const PLATE_LABEL: Record<PlateKey, string> = {
   relief: "relief", water: "water", landuse: "land use",
-  tenure: "tenure", holdings: "holdings", borders: "borders", goods: "deposits",
+  tenure: "tenure", holdings: "holdings", borders: "borders", goods: "goods",
 };
 export const DEFAULT_PLATES: PlateKey[] = ["relief", "water", "landuse", "holdings", "borders"];
 
@@ -139,7 +139,7 @@ interface Hover { x: number; y: number; title: string; rows: [string, string][] 
 export function ProvinceMiniMap({
   province, raster, settlements, buildings,
   land, sample, plates = DEFAULT_PLATES, width = 240, riverCells,
-  terrain, rivers, deposits = [],
+  terrain, rivers, deposits = [], beltGoods = [],
 }: {
   province: Province;
   raster: ProvinceRaster | null;
@@ -161,6 +161,9 @@ export function ProvinceMiniMap({
   riverCells?: number;
   /** #9 · ore workings in this province (world cell coords) for the deposits plate. */
   deposits?: { good: string; x: number; y: number; grade: number; depth: number }[];
+  /** #9 · untapped surface/belt goods (no single cell) — drawn as quality-weighted
+   *  squares dithered across the province footprint on the deposits plate. */
+  beltGoods?: { name: string; quality: number }[];
 }) {
   const [hover, setHover] = useState<Hover | null>(null);
 
@@ -448,7 +451,32 @@ export function ProvinceMiniMap({
             </g>
           );
         })}
-        {/* 6 · deposits (#9) — ore workings where they actually sit, coloured by good
+        {/* 6a · untapped belt goods (#9) — quality-weighted squares dithered across the
+            province (a belt good has no single cell), colour by good, fill by quality.
+            Drawn UNDER the ore dots so real workings still read on top. */}
+        {on("goods") && beltGoods.length > 0 && (() => {
+          const total = beltGoods.reduce((s, b) => s + Math.max(0.05, b.quality), 0);
+          const step = Math.max(1, Math.floor(cells.length / 46)); // ~46 squares max
+          const sq = Math.max(0.7, stride * 0.75);
+          const out: React.ReactNode[] = [];
+          for (let ci = 0; ci < cells.length; ci += step) {
+            const [rx, ry] = cells[ci];
+            const t = cellHash(rx, ry, 7);
+            let acc = 0;
+            let pick = beltGoods[0];
+            for (const b of beltGoods) { acc += Math.max(0.05, b.quality) / total; if (t <= acc) { pick = b; break; } }
+            const col = GOOD_DEFS.find((g) => g.name === pick.name)?.color ?? "#56c8d8";
+            out.push(
+              <rect key={`bg${ci}`} x={rx - ox - sq / 2} y={ry - oy - sq / 2} width={sq} height={sq}
+                fill={col} opacity={0.22 + 0.6 * Math.max(0, Math.min(1, pick.quality))}
+                stroke="#0a1620" strokeWidth={0.25}>
+                <title>{pick.name} · quality {(pick.quality * 100).toFixed(0)}%</title>
+              </rect>,
+            );
+          }
+          return out;
+        })()}
+        {/* 6b · deposits (#9) — ore workings where they actually sit, coloured by good
             and sized by grade, so the richest workings read at a glance. */}
         {on("goods") && deposits.map((d, i) => {
           const [lx, ly] = toLocal(d.x, d.y);
