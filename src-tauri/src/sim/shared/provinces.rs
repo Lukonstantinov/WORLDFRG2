@@ -173,6 +173,212 @@ pub fn migrate_rle_sentinel(rle: &mut [u32]) {
     while i < rle.len() { if rle[i] == 65535 { rle[i] = NO_PROVINCE; } i += 2; }
 }
 
+/// POST-GENERATION cleanup (the "merge small provinces" button): fold every
+/// province smaller than `min_cells` into the neighbour it shares the most border
+/// with — UNLESS it is its OWN ISLAND (a whole landmass to itself reads as history,
+/// not a generation artefact; an island province has NO land neighbour, so it forms
+/// a singleton in the province-adjacency graph and is skipped automatically).
+///
+/// Operates on the stored full-resolution `province_id` map + the existing
+/// `Province` list. The larger SURVIVOR keeps its identity (name, goods, climate,
+/// culture, label anchor) and absorbs the small one's area, population and
+/// settlements; neighbours and shared-border lengths are recomputed from the merged
+/// raster, inheriting each frontier's feature kind from the pre-merge borders.
+/// Deterministic (pairs sorted, ties broken on id). Returns `(provinces,
+/// province_id)`; both are recompacted to a dense 0..m id range.
+/// `w`/`h` are the full-resolution grid dimensions of `province_id`.
+pub fn merge_small_provinces_wh(
+    province_id: &[u32],
+    provinces: &[Province],
+    min_cells: u32,
+    w: u32,
+    h: u32,
+) -> (Vec<Province>, Vec<u32>) {
+    let n = provinces.len();
+    let total = (w as usize) * (h as usize);
+    if n == 0 || province_id.len() != total || total == 0 {
+        return (provinces.to_vec(), province_id.to_vec());
+    }
+    let wi = w as i32;
+    let hi = h as i32;
+    let wrap_x = |x: i32| -> i32 { ((x % wi) + wi) % wi };
+    let at = |x: i32, y: i32| -> u32 { province_id[(y as usize) * (w as usize) + wrap_x(x) as usize] };
+
+    // ── Pass 1: cell counts + shared-border tally between adjacent provinces. ──
+    let mut count = vec![0u32; n];
+    // Unordered pair (lo,hi) → shared edge length.
+    let mut shared: std::collections::HashMap<(u32, u32), u32> = std::collections::HashMap::new();
+    for y in 0..hi {
+        for x in 0..wi {
+            let p = at(x, y);
+            if p == NO_PROVINCE || (p as usize) >= n { continue; }
+            count[p as usize] += 1;
+            // Right + down neighbours only (each interior edge counted once).
+            for &(dx, dy) in &[(1i32, 0i32), (0, 1)] {
+                let ny = y + dy;
+                if ny >= hi { continue; }
+                let q = at(x + dx, ny);
+                if q == NO_PROVINCE || q == p || (q as usize) >= n { continue; }
+                let key = if p < q { (p, q) } else { (q, p) };
+                *shared.entry(key).or_insert(0) += 1;
+            }
+        }
+    }
+
+    // ── Province-adjacency components: a province alone in its component is its own
+    //    island (no land neighbour), so it is never merged away. ──
+    let mut parent: Vec<u32> = (0..n as u32).collect();
+    fn find(p: &mut [u32], x: u32) -> u32 {
+        let mut r = x;
+        while p[r as usize] != r { r = p[r as usize]; }
+        let mut c = x;
+        while p[c as usize] != r { let nx = p[c as usize]; p[c as usize] = r; c = nx; }
+        r
+    }
+    for (&(a, b), _) in shared.iter() {
+        let ra = find(&mut parent, a);
+        let rb = find(&mut parent, b);
+        if ra != rb { parent[ra.max(rb) as usize] = ra.min(rb); }
+    }
+    let mut comp_size = vec![0u32; n];
+    for p in 0..n as u32 { let r = find(&mut parent, p); comp_size[r as usize] += 1; }
+    let own_island = |p: u32| -> bool { comp_size[find(&mut parent.clone(), p) as usize] <= 1 };
+
+    // Per-province neighbour lists (from the shared tally) for picking a merge target.
+    let mut neighbours: Vec<Vec<(u32, u32)>> = vec![Vec::new(); n]; // (neighbour, shared)
+    for (&(a, b), &len) in shared.iter() {
+        neighbours[a as usize].push((b, len));
+        neighbours[b as usize].push((a, len));
+    }
+
+    // ── Decide merges: every small, non-island province folds into the neighbour it
+    //    shares the most border with, PREFERRING one that itself survives. A union-find
+    //    whose ROOT is always the LARGEST province in the group (tie → lower id) makes
+    //    this acyclic by construction — mutually-small neighbours (A↔B) can no longer
+    //    form a chain cycle that leaves both unmerged. ──
+    let is_small = |p: u32| count[p as usize] > 0 && count[p as usize] < min_cells;
+    let mut uf: Vec<u32> = (0..n as u32).collect();
+    fn uf_find(u: &mut [u32], x: u32) -> u32 {
+        let mut r = x; while u[r as usize] != r { r = u[r as usize]; }
+        let mut c = x; while u[c as usize] != r { let nx = u[c as usize]; u[c as usize] = r; c = nx; }
+        r
+    }
+    let mut small_ids: Vec<u32> = (0..n as u32)
+        .filter(|&p| is_small(p) && !own_island(p) && !neighbours[p as usize].is_empty())
+        .collect();
+    small_ids.sort_unstable();
+    for &p in &small_ids {
+        // Prefer a NON-small neighbour; among the eligible, most shared border wins,
+        // ties broken on the higher neighbour id (deterministic).
+        let pick = |filter_small: bool| -> Option<u32> {
+            neighbours[p as usize].iter()
+                .filter(|&&(q, _)| !filter_small || !is_small(q))
+                .max_by_key(|&&(q, len)| (len, q))
+                .map(|&(q, _)| q)
+        };
+        let Some(q) = pick(true).or_else(|| pick(false)) else { continue };
+        let rp = uf_find(&mut uf, p);
+        let rq = uf_find(&mut uf, q);
+        if rp == rq { continue; }
+        // Root = larger province (tie: lower id), so the survivor holds the meaningful
+        // identity and the edge always points from smaller → larger (no cycle).
+        let root = if count[rp as usize] != count[rq as usize] {
+            if count[rp as usize] > count[rq as usize] { rp } else { rq }
+        } else if rp < rq { rp } else { rq };
+        let child = if root == rp { rq } else { rp };
+        uf[child as usize] = root;
+    }
+    // Fully compress so `uf[p]` is p's final survivor.
+    for p in 0..n as u32 { let r = uf_find(&mut uf, p); uf[p as usize] = r; }
+
+    // ── Recompact surviving ids to a dense 0..m range (ascending survivor id). ──
+    let mut old_to_new: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    let mut survivors: Vec<u32> = (0..n as u32).filter(|&p| uf[p as usize] == p).collect();
+    survivors.sort_unstable();
+    for (new, &old) in survivors.iter().enumerate() { old_to_new.insert(old, new as u32); }
+
+    // final id for any old province = new id of its survivor.
+    let final_id = |old: u32| -> u32 { old_to_new[&uf[old as usize]] };
+
+    // ── Rewrite the raster. ──
+    let mut new_pid = vec![NO_PROVINCE; total];
+    for c in 0..total {
+        let p = province_id[c];
+        if p == NO_PROVINCE || (p as usize) >= n { continue; }
+        new_pid[c] = final_id(p);
+    }
+
+    // ── Rebuild the Province list: survivor keeps identity, absorbs the merged. ──
+    let mut out: Vec<Province> = survivors.iter().map(|&old| {
+        let mut pr = provinces[old as usize].clone();
+        pr.id = old_to_new[&old];
+        pr.neighbors = Vec::new();
+        pr.neighbors_detail = Vec::new();
+        pr
+    }).collect();
+    // Absorb each merged province's additive fields into its survivor.
+    for old in 0..n as u32 {
+        if uf[old as usize] == old { continue; } // a survivor
+        let dst = old_to_new[&uf[old as usize]] as usize;
+        let src = &provinces[old as usize];
+        let d = &mut out[dst];
+        d.cells += src.cells;
+        d.area_km2 += src.area_km2;
+        d.rural_pop = d.rural_pop.saturating_add(src.rural_pop);
+        d.coast_cells += src.coast_cells;
+        d.river_cells += src.river_cells;
+        d.lake_cells += src.lake_cells;
+        d.coastal |= src.coastal;
+        d.navigable_river |= src.navigable_river;
+        d.food_capacity += src.food_capacity;
+        d.rural_cap = d.rural_cap.saturating_add(src.rural_cap);
+        for s in &src.settlements { if !d.settlements.contains(s) { d.settlements.push(s.clone()); } }
+    }
+
+    // ── Recompute neighbours + border lengths from the merged raster, inheriting each
+    //    frontier's feature kind from the pre-merge borders. ──
+    // Old pair → dominant kind (longest old border wins).
+    let mut old_kind: std::collections::HashMap<(u32, u32), (u8, u32)> = std::collections::HashMap::new();
+    for (old, pr) in provinces.iter().enumerate() {
+        for b in &pr.neighbors_detail {
+            let (a, c) = (old as u32, b.neighbor);
+            if (c as usize) >= n { continue; }
+            let key = if a < c { (a, c) } else { (c, a) };
+            let e = old_kind.entry(key).or_insert((BORDER_OPEN, 0));
+            if b.cells >= e.1 { *e = (b.kind, b.cells); }
+        }
+    }
+    // New pair → (shared length, inherited kind).
+    let mut new_shared: std::collections::HashMap<(u32, u32), u32> = std::collections::HashMap::new();
+    for (&(a, b), &len) in shared.iter() {
+        let (na, nb) = (final_id(a), final_id(b));
+        if na == nb { continue; } // now internal to one province
+        let key = if na < nb { (na, nb) } else { (nb, na) };
+        *new_shared.entry(key).or_insert(0) += len;
+    }
+    // Resolve each new pair's kind: the most severe kind among any old pair that maps
+    // into it (ridge/river/lake beat open), tie by longest.
+    let mut new_kind: std::collections::HashMap<(u32, u32), (u8, u32)> = std::collections::HashMap::new();
+    for (&(oa, ob), &(k, len)) in old_kind.iter() {
+        let (na, nb) = (final_id(oa), final_id(ob));
+        if na == nb { continue; }
+        let key = if na < nb { (na, nb) } else { (nb, na) };
+        let e = new_kind.entry(key).or_insert((BORDER_OPEN, 0));
+        if len >= e.1 { *e = (k, len); }
+    }
+    for (&(a, b), &len) in new_shared.iter() {
+        let kind = new_kind.get(&(a, b)).map(|&(k, _)| k).unwrap_or(BORDER_OPEN);
+        out[a as usize].neighbors_detail.push(ProvinceBorder { neighbor: b, cells: len, kind });
+        out[b as usize].neighbors_detail.push(ProvinceBorder { neighbor: a, cells: len, kind });
+    }
+    for pr in &mut out {
+        pr.neighbors_detail.sort_by(|x, y| y.cells.cmp(&x.cells).then(x.neighbor.cmp(&y.neighbor)));
+        pr.neighbors = pr.neighbors_detail.iter().map(|b| b.neighbor).collect();
+    }
+
+    (out, new_pid)
+}
+
 // ── Partition tuning ──────────────────────────────────────────────────────────
 /// Cost per unit of CREST PROMINENCE. Elevation is normalised by 8848 m, so ~250 m
 /// of prominence over one cell (≈0.028) costs ≈7.3 — comparable to a navigable
@@ -1926,6 +2132,76 @@ mod tests {
                 assert!(g.rank >= 1 && g.rank <= g.of, "good rank {} of {}", g.rank, g.of);
             }
         }
+    }
+
+    /// The post-generation "merge small provinces" button: every province below the
+    /// floor that has a not-below-floor neighbour must be gone afterwards, land
+    /// coverage must be identical, ids must stay dense, and a province standing on
+    /// its OWN island must survive however small it is.
+    #[test]
+    fn merging_small_provinces_removes_slivers_but_keeps_islands() {
+        let mut buf = blank_world();
+        for y in 0..TH {
+            for x in 0..TW {
+                let i = buf.idx(x, y);
+                // Ocean margin + a channel that detaches a small island block, so the
+                // island exemption is genuinely exercised.
+                if x < 3 || x > TW - 4 { buf.terrain[i] = 0; }
+                buf.elevation[i] = (((x * 5 + y * 3) % 13) as f32) / 50.0;
+            }
+        }
+        // A little island (columns 5..9, rows 5..9) fenced off by sea on all sides.
+        for y in 4..11 {
+            for x in 4..11 {
+                let i = buf.idx(x, y);
+                buf.terrain[i] = if (5..9).contains(&x) && (5..9).contains(&y) { 1 } else { 0 };
+            }
+        }
+        let towns = vec![settle("a", 40, 20, 9000), settle("b", 70, 44, 4000),
+                         settle("isle", 6, 6, 300)];
+        // Fine granularity → many small provinces to exercise the merge.
+        let (provs, ids) = generate_provinces(&buf, &[], &[], &towns, 1.0);
+        let w = buf.width; let h = buf.height;
+        let min_cells = 40u32;
+        let land_before = ids.iter().filter(|&&p| p != NO_PROVINCE).count();
+
+        let (merged, new_ids) = merge_small_provinces_wh(&ids, &provs, min_cells, w, h);
+
+        // Land coverage unchanged — the merge only relabels, never re-carves land/sea.
+        let land_after = new_ids.iter().filter(|&&p| p != NO_PROVINCE).count();
+        assert_eq!(land_before, land_after, "merge must not change which cells are land");
+        // Ids dense and consistent with the raster.
+        let mut cnt = vec![0u32; merged.len()];
+        for &p in &new_ids {
+            if p != NO_PROVINCE { assert!((p as usize) < merged.len()); cnt[p as usize] += 1; }
+        }
+        for pr in &merged {
+            assert_eq!(pr.cells, cnt[pr.id as usize], "stored cells must match raster after merge");
+            assert!(pr.neighbors.len() == pr.neighbors_detail.len());
+        }
+        // The guarantee: no surviving province is below the floor while touching a
+        // province that is NOT below the floor — those were exactly the ones to fold.
+        let below = |id: u32| cnt[id as usize] < min_cells;
+        for pr in &merged {
+            if !below(pr.id) { continue; }
+            for b in &pr.neighbors_detail {
+                assert!(below(b.neighbor),
+                    "small province {} ({} cells) still borders large province {} — should have merged",
+                    pr.id, pr.cells, b.neighbor);
+            }
+        }
+        // The island block survives as its own province (no land neighbour) even though
+        // it is far under the floor.
+        let isle_i = buf.idx(6, 6);
+        let isle_pid = new_ids[isle_i];
+        assert_ne!(isle_pid, NO_PROVINCE, "the island must still be owned");
+        let isle = merged.iter().find(|p| p.id == isle_pid).unwrap();
+        assert!(isle.neighbors.is_empty(), "an island province has no land neighbour");
+
+        // Deterministic.
+        let (merged2, new_ids2) = merge_small_provinces_wh(&ids, &provs, min_cells, w, h);
+        assert_eq!(merged.len(), merged2.len());
+        assert_eq!(new_ids, new_ids2);
     }
 
     /// CITY_PROVINCE_WAR_PLAN.md §2.1 · a province enclosed by exactly one

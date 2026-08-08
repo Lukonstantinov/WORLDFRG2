@@ -492,6 +492,15 @@ export async function simGenerateProvinces(
   });
 }
 
+/** Post-generation cleanup: fold every province smaller than the threshold into the
+ *  neighbour it shares the most border with (never an island). Returns the full
+ *  updated layer to reload in place. `minCells` overrides the adaptive default. */
+export async function simMergeSmallProvinces(
+  minCells?: number,
+): Promise<import("@types").SimProvincesResult> {
+  return invoke("sim_merge_small_provinces", { minCells });
+}
+
 /** Read back the stored province list (reopening a world / panel refresh). */
 export async function getProvinces(): Promise<import("@types").Province[]> {
   return invoke("get_provinces");

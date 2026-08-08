@@ -940,6 +940,90 @@ pub fn get_province_layer(db: State<'_, WorldDb>) -> Result<SimProvincesResult, 
     Ok(SimProvincesResult { provinces, raster, raster_w, raster_h, grid_w, grid_h, raster_rle })
 }
 
+/// POST-GENERATION cleanup: fold every province smaller than a cell threshold into
+/// the neighbour it shares the most border with (never an island province) and
+/// re-persist the partition. `min_cells` overrides the default, which is 20% of the
+/// median province size (floored at 30 cells) — small enough to spare the
+/// intentionally-compact fertile provinces, large enough to swallow the sliver
+/// artefacts. Returns the full updated layer so the frontend reloads it in place.
+#[tauri::command]
+pub fn sim_merge_small_provinces(
+    min_cells: Option<u32>,
+    db: State<'_, WorldDb>,
+) -> Result<SimProvincesResult, String> {
+    db.clear_caches();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let provinces: Vec<crate::sim::provinces::Province> =
+        metadata::get_meta(&conn, "provinces").map_err(|e| e.to_string())?
+            .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    if provinces.is_empty() {
+        return Err("No provinces to merge — generate the province layer first.".into());
+    }
+    // Full-resolution id map from the stored RLE (pixel-exact; the downsample would
+    // lose slivers, which are exactly what we are trying to measure and remove).
+    let (w, h, mut rle): (u32, u32, Vec<u32>) =
+        metadata::get_meta(&conn, "province_raster_rle").map_err(|e| e.to_string())?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .ok_or("province raster not found — regenerate the province layer")?;
+    crate::sim::provinces::migrate_rle_sentinel(&mut rle);
+    let total = (w as usize) * (h as usize);
+    if total == 0 { return Err("world grid not initialised".into()); }
+    let mut province_id = vec![crate::sim::provinces::NO_PROVINCE; total];
+    {
+        let mut idx = 0usize;
+        let mut i = 0usize;
+        while i + 1 < rle.len() {
+            let v = rle[i];
+            let cnt = rle[i + 1] as usize;
+            let end = (idx + cnt).min(total);
+            for slot in &mut province_id[idx..end] { *slot = v; }
+            idx += cnt;
+            i += 2;
+        }
+    }
+
+    // Default threshold: 20% of the median province size, floored at 30 cells.
+    let min_cells = min_cells.unwrap_or_else(|| {
+        let mut sizes: Vec<u32> = provinces.iter().map(|p| p.cells).filter(|&c| c > 0).collect();
+        if sizes.is_empty() { return 30; }
+        sizes.sort_unstable();
+        let median = sizes[sizes.len() / 2];
+        ((median as f32 * 0.20) as u32).max(30)
+    });
+
+    let (new_provinces, new_pid) = crate::sim::provinces::merge_small_provinces_wh(
+        &province_id, &provinces, min_cells, w, h);
+
+    // Persist the merged partition (list + downsampled raster + full-res RLE), exactly
+    // as `sim_generate_provinces` does, so a reload restores the cleaned layer.
+    metadata::set_meta(&conn, "provinces",
+        &serde_json::to_string(&new_provinces).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+
+    let cap = 768u32;
+    let step = ((w.max(h) + cap - 1) / cap).max(1);
+    let rw = (w + step - 1) / step;
+    let rh = (h + step - 1) / step;
+    let mut raster = vec![crate::sim::provinces::NO_PROVINCE; (rw * rh) as usize];
+    for ry in 0..rh {
+        for rx in 0..rw {
+            let sx = (rx * step).min(w - 1);
+            let sy = (ry * step).min(h - 1);
+            raster[(ry * rw + rx) as usize] = new_pid[(sy * w + sx) as usize];
+        }
+    }
+    let raster_blob = serde_json::to_string(&(rw, rh, w, h, &raster)).map_err(|e| e.to_string())?;
+    metadata::set_meta(&conn, "province_raster", &raster_blob).map_err(|e| e.to_string())?;
+    let raster_rle = rle_encode_provinces(&new_pid);
+    let rle_blob = serde_json::to_string(&(w, h, &raster_rle)).map_err(|e| e.to_string())?;
+    metadata::set_meta(&conn, "province_raster_rle", &rle_blob).map_err(|e| e.to_string())?;
+
+    Ok(SimProvincesResult {
+        provinces: new_provinces, raster, raster_w: rw, raster_h: rh,
+        grid_w: w, grid_h: h, raster_rle,
+    })
+}
+
 /// A single stat row for a building's hover card (label + preformatted value).
 #[derive(serde::Serialize)]
 pub struct PStat { pub label: String, pub value: String }

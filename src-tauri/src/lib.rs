@@ -100,6 +100,7 @@ pub fn run() {
             sim_commands::save_toponyms,
             sim_commands::get_toponyms,
             sim_commands::sim_generate_provinces,
+            sim_commands::sim_merge_small_provinces,
             sim_commands::get_provinces,
             sim_commands::get_province_layer,
             sim_commands::campaign_province_state,

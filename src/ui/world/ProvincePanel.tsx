@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
-import { simGenerateProvinces, campaignProvinceState, campaignProvinceDetail, campaignProvinceLandAll, getProvinceTerrainCrop } from "@bridge";
+import { simGenerateProvinces, simMergeSmallProvinces, campaignProvinceState, campaignProvinceDetail, campaignProvinceLandAll, getProvinceTerrainCrop } from "@bridge";
 import { GOOD_DEFS } from "@goods";
 import { koppenName } from "@ui/world/climate";
 import { ProvinceMiniMap, soilWord } from "@ui/world/ProvinceMiniMap";
@@ -180,6 +180,28 @@ export function ProvincePanel() {
     }
   };
 
+  // Post-generation cleanup: absorb the tiny sliver provinces (never islands) into
+  // their largest neighbour. Repeatable — each press folds the current crop of
+  // sub-threshold provinces.
+  const mergeSmall = async () => {
+    if (busy || provinces.length === 0) return;
+    const before = provinces.length;
+    setBusy(true);
+    setStatus("Merging small provinces…");
+    try {
+      const res = await simMergeSmallProvinces();
+      setProvinces(res.provinces, decodeProvinceRaster(res));
+      const removed = before - res.provinces.length;
+      setSelId((id) => (res.provinces.some((p) => p.id === id) ? id : (res.provinces[0]?.id ?? null)));
+      setStatus(removed > 0 ? `Merged ${removed} small province${removed === 1 ? "" : "s"} away`
+                            : "No small provinces to merge");
+    } catch (e) {
+      setStatus(`Merge failed: ${e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!open) return null;
 
   const fmt = (n: number) => n.toLocaleString();
@@ -213,6 +235,12 @@ export function ProvincePanel() {
         <button onClick={generate} disabled={busy} style={{ ...btn, background: busy ? "#1a2a38" : "#1d4d6b" }}>
           {busy ? "…" : provinces.length ? "Regenerate" : "Generate"}
         </button>
+        {provinces.length > 0 && (
+          <button onClick={mergeSmall} disabled={busy} title="Absorb the tiniest sliver provinces (never islands) into their largest neighbour"
+            style={{ ...btn, background: busy ? "#1a2a38" : "#2a3d1d" }}>
+            Merge small
+          </button>
+        )}
       </div>
 
       {provinces.length === 0 ? (
