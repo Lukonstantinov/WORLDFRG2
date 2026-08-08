@@ -136,6 +136,18 @@ export function ProvinceInspector() {
     }));
   }, [detail, p, settlements]);
 
+  // #9 · real per-good QUALITY (0..1) + world rank from the province's own shortlist
+  // (`p.goods`); `belt` (coverage) is the fallback for goods below the shortlist. Used
+  // by both the Goods panel and the minimap's untapped-goods squares. Kept ABOVE the
+  // early return below so the hook count is stable across renders (rules of hooks).
+  const goodQ = useMemo(() => new Map((p?.goods ?? []).map((g) => [g.good, g])), [p?.goods]);
+  const beltGoods = useMemo(() =>
+    (potential?.goods ?? [])
+      .filter((g) => !g.is_deposit)
+      .map((g) => ({ name: g.name, quality: goodQ.get(g.good)?.quality ?? g.belt }))
+      .sort((a, b) => b.quality - a.quality),
+    [potential, goodQ]);
+
   if (!open || !p) return null;
 
   const fmt = (n: number) => Math.round(n).toLocaleString();
@@ -157,17 +169,6 @@ export function ProvinceInspector() {
   const shares = p.culture_shares ?? [];
   const koppenShares = p.koppen_shares ?? [];
   const nd = p.neighbors_detail ?? [];
-
-  // #9 · real per-good QUALITY (0..1) + world rank from the province's own shortlist
-  // (`p.goods`); `belt` (coverage) is the fallback for goods below the shortlist. Used
-  // by both the Goods panel and the minimap's untapped-goods squares.
-  const goodQ = useMemo(() => new Map((p.goods ?? []).map((g) => [g.good, g])), [p.goods]);
-  const beltGoods = useMemo(() =>
-    (potential?.goods ?? [])
-      .filter((g) => !g.is_deposit)
-      .map((g) => ({ name: g.name, quality: goodQ.get(g.good)?.quality ?? g.belt }))
-      .sort((a, b) => b.quality - a.quality),
-    [potential, goodQ]);
 
   // ── Control verbs. Only the holder may act, so a frontier province is read-only.
   const holderHub = land?.holder_hub ?? -1;
