@@ -1302,6 +1302,13 @@ pub fn structure_effect(id: u8) -> &'static str {
 /// dominant late-campaign cost as estates inflated `n`; capping to the nearest K
 /// keeps a Month step roughly flat regardless of total hub count.
 const NEIGHBOR_K: usize = 32;
+/// #4 · trade HORIZON, as a fraction of world width. The route matrix marks any pair
+/// of seats farther apart than this (cylindrical straight-line) as unreachable, even
+/// when the worldgen pathfinder found a sea lane between them. This is a pre-colonial,
+/// pre-oceanic-navigation economy: goods move regionally — around a sea, along a
+/// coast, overland — not on trans-oceanic lanes between continents. Generous enough
+/// to keep Mediterranean-/regional-scale sea trade while cutting the ocean crossings.
+const TRADE_MAX_DIST_FRAC: f32 = 0.24;
 /// Global ceiling on satellite production sites (estates + colonies). Estates are
 /// real hubs in `self.hubs`, so an uncapped count quadratically slows every tick.
 const MAX_TOTAL_ESTATES: usize = 220;

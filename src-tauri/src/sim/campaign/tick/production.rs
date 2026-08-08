@@ -131,20 +131,28 @@ impl CampaignSim {
         // pair the pathfinder couldn't connect fall back to the straight-line estimate.
         let have_base = bn > 0 && self.base_days.len() == bn * bn;
         let mut days = vec![f32::INFINITY; n * n];
+        let reach_cap = self.world_w * TRADE_MAX_DIST_FRAC;
         for a in 0..n {
             days[a * n + a] = 0.0;
             for b in (a + 1)..n {
+                // #4 · the trade HORIZON. A pre-colonial economy does not run
+                // trans-oceanic lanes, so a pair farther apart than the reach cap is
+                // unreachable however the worldgen pathfinder connected it. Cheap
+                // cylindrical straight-line distance, computed once and reused.
+                let mut dx = (self.hubs[a].x - self.hubs[b].x).abs();
+                if self.world_w > 1.0 {
+                    dx = dx.min(self.world_w - dx);
+                }
+                let dy = self.hubs[a].y - self.hubs[b].y;
+                let dist = (dx * dx + dy * dy).sqrt();
+                if self.world_w > 1.0 && dist > reach_cap {
+                    continue; // beyond the regional trade horizon → no route
+                }
                 let d = if have_base && a < bn && b < bn && self.base_days[a * bn + b].is_finite() {
-                    // Pathfinder found a real route (possibly across continents via sea).
+                    // Pathfinder found a real regional route (within the horizon above).
                     self.base_days[a * bn + b]
                 } else if self.hubs[a].component == self.hubs[b].component {
                     // Same geographic component but no pathfound route: straight-line fallback.
-                    let mut dx = (self.hubs[a].x - self.hubs[b].x).abs();
-                    if self.world_w > 1.0 {
-                        dx = dx.min(self.world_w - dx);
-                    }
-                    let dy = self.hubs[a].y - self.hubs[b].y;
-                    let dist = (dx * dx + dy * dy).sqrt();
                     (dist * self.days_per_cell).max(1.0)
                 } else {
                     // Different components AND no pathfound sea route: unreachable.
