@@ -1988,6 +1988,10 @@ export interface Province {
   mean_fertility: number;
   coastal: boolean;
   goods: ProvinceGood[];
+  /** #9 · real per-good QUALITY 0..1 over EVERY good (best-patch suitability), so the
+   *  panel shows a differentiated quality for all goods, not just the top-6 shortlist.
+   *  Empty on worlds generated before this field — the UI falls back to the shortlist. */
+  good_quality?: number[];
   culture: string;         // plurality over the province's cells (campaign may shift it)
   rural_pop: number;       // baseline countryside population
   analog: string;          // "looks most like…" real-world regions

@@ -456,8 +456,10 @@ export function ProvinceMiniMap({
             Drawn UNDER the ore dots so real workings still read on top. */}
         {on("goods") && beltGoods.length > 0 && (() => {
           const total = beltGoods.reduce((s, b) => s + Math.max(0.05, b.quality), 0);
-          const step = Math.max(1, Math.floor(cells.length / 46)); // ~46 squares max
-          const sq = Math.max(0.7, stride * 0.75);
+          // Bigger, sparser squares so each reads clearly (the belt/surface goods, as
+          // opposed to the smaller ore-working dots drawn on top).
+          const step = Math.max(2, Math.floor(cells.length / 26)); // ~26 squares
+          const sq = Math.max(1.4, stride * 1.7);
           const out: React.ReactNode[] = [];
           for (let ci = 0; ci < cells.length; ci += step) {
             const [rx, ry] = cells[ci];
@@ -467,9 +469,9 @@ export function ProvinceMiniMap({
             for (const b of beltGoods) { acc += Math.max(0.05, b.quality) / total; if (t <= acc) { pick = b; break; } }
             const col = GOOD_DEFS.find((g) => g.name === pick.name)?.color ?? "#56c8d8";
             out.push(
-              <rect key={`bg${ci}`} x={rx - ox - sq / 2} y={ry - oy - sq / 2} width={sq} height={sq}
-                fill={col} opacity={0.22 + 0.6 * Math.max(0, Math.min(1, pick.quality))}
-                stroke="#0a1620" strokeWidth={0.25}>
+              <rect key={`bg${ci}`} x={rx - ox - sq / 2} y={ry - oy - sq / 2} width={sq} height={sq} rx={0.5}
+                fill={col} opacity={0.3 + 0.6 * Math.max(0, Math.min(1, pick.quality))}
+                stroke="#0a1620" strokeWidth={0.4}>
                 <title>{pick.name} · quality {(pick.quality * 100).toFixed(0)}%</title>
               </rect>,
             );
