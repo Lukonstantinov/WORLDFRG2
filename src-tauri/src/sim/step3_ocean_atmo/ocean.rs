@@ -875,9 +875,155 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
     //   • `ocean.rs::sst_at` scales the SST anomaly by the same speed.
     //
     // The rendering intent is preserved where it belongs — `render_currents` in
-    // `render/tile_image.rs` draws shelf cells at zero magnitude, so the arrows
-    // still stop at the shelf break without the physics paying for it.
+    // `render/tile_image.rs` draws shelf cells at zero magnitude, and the
+    // streamline overlay is traced by `trace_current_streamlines` (below), which
+    // terminates a line at the shelf break. So the arrows stop there without the
+    // physics paying for it.
     let _ = &shelf;
+}
+
+/// Trace ocean-current streamlines from an already-computed current field. Pure
+/// geometry, shared by the map overlay (`get_current_streamlines`) and the
+/// settings preview (`coarse_climate_preview`), so both draw currents the same
+/// way and both honour the shelf break.
+///
+/// A line is seeded only on OPEN ocean (never land, never the shallow shelf) and
+/// TERMINATES at land AND at the shelf break: boundary currents run along the
+/// continental slope, not over the apron, so the drawn flow stops there — the
+/// same rendering choice `render_currents` makes with `mag = 0` on shelf cells.
+/// The simulation still keeps a real velocity on shelf cells (upwelling / SST /
+/// the current→coast coupling read it); only the DRAWING stops at the break.
+///
+/// `shelf` may be empty (`len != w*h`), in which case only land terminates a
+/// line — callers without a shelf mask still get sensible streamlines.
+/// Each result is `(polyline in cell coords, ctype)` where ctype is
+/// 0 = neutral, 1 = warm, 2 = cold — no dependency on any API/serde struct.
+pub fn trace_current_streamlines(
+    vx: &[f32],
+    vy: &[f32],
+    ctype: &[u8],
+    terrain: &[u8],
+    shelf: &[u8],
+    w: u32,
+    h: u32,
+) -> Vec<(Vec<[f32; 2]>, u8)> {
+    let wi = w as i32;
+    let hi = h as i32;
+    let n = (w as usize) * (h as usize);
+    if vx.len() != n || vy.len() != n || ctype.len() != n || terrain.len() != n {
+        return Vec::new();
+    }
+    let has_shelf = shelf.len() == n;
+
+    let wrap_x = |x: i32| -> i32 { ((x % wi) + wi) % wi };
+    let idx = |x: i32, y: i32| -> usize { (y as usize) * (w as usize) + (wrap_x(x) as usize) };
+
+    // A streamline stops the moment its cell is land OR shelf (or off-grid N/S).
+    let is_blocked = |xi: i32, yi: i32| -> bool {
+        if yi < 0 || yi >= hi {
+            return true;
+        }
+        let i = idx(xi, yi);
+        terrain[i] == 1 || (has_shelf && shelf[i] != 0)
+    };
+    let sample = |fx: f32, fy: f32| -> (f32, f32, u8) {
+        let xi = fx.floor() as i32;
+        let yi = fy.floor() as i32;
+        if yi < 0 || yi >= hi {
+            return (0.0, 0.0, 0);
+        }
+        let i = idx(xi, yi);
+        (vx[i], vy[i], ctype[i])
+    };
+
+    // Integrate a streamline of family `fam` from (sx,sy) in `dir` (+1 fwd, -1 back).
+    let max_steps = 700usize;
+    let step_len = 1.5f32;
+    let min_points = 6usize;
+    let integrate = |sx: i32, sy: i32, dir: f32, fam: u8| -> Vec<[f32; 2]> {
+        let mut pts: Vec<[f32; 2]> = Vec::new();
+        let mut px = sx as f32 + 0.5;
+        let mut py = sy as f32 + 0.5;
+        for _ in 0..max_steps {
+            if is_blocked(px.floor() as i32, py.floor() as i32) {
+                break; // the line's own cell is land or shelf
+            }
+            let (svx, svy, sct) = sample(px, py);
+            let mag = (svx * svx + svy * svy).sqrt();
+            if mag < 0.05 {
+                break; // current died out
+            }
+            if fam != sct {
+                break; // changed family → end this line
+            }
+            pts.push([wrap_x(px.floor() as i32) as f32, py]);
+            let nx = px + dir * (svx / mag) * step_len;
+            let ny = py + dir * (svy / mag) * step_len;
+            if ny < 0.0 || ny >= hi as f32 {
+                break;
+            }
+            if is_blocked(nx.floor() as i32, ny.floor() as i32) {
+                break; // next step would cross the coast or the shelf break
+            }
+            px = nx;
+            py = ny;
+        }
+        pts
+    };
+
+    // Seed density scales with grid width, so the coarse preview and the full map
+    // come out at a similar visual density. Per-family so warm/cold/neutral each
+    // get their own corridors; neutral needs a lower floor (gyre limbs are slow).
+    let seed_step = (w / 90).clamp(6, 30) as i32;
+    let visited_cell = (w / 28).clamp(3, 12) as i32;
+    let families: [(u8, f32); 3] = [(1, 0.30), (2, 0.30), (0, 0.22)];
+
+    let mut out: Vec<(Vec<[f32; 2]>, u8)> = Vec::new();
+    for &(fam, mag_floor) in &families {
+        let mut visited = vec![false; n];
+        for sy in (0..hi).step_by(seed_step as usize) {
+            for sx in (0..wi).step_by(seed_step as usize) {
+                let i = idx(sx, sy);
+                if terrain[i] == 1 || (has_shelf && shelf[i] != 0) || ctype[i] != fam {
+                    continue;
+                }
+                if visited[i] {
+                    continue;
+                }
+                let mag = (vx[i] * vx[i] + vy[i] * vy[i]).sqrt();
+                if mag < mag_floor {
+                    continue;
+                }
+
+                let mut back = integrate(sx, sy, -1.0, fam);
+                back.reverse();
+                let fwd = integrate(sx, sy, 1.0, fam);
+                let mut line = back;
+                if !fwd.is_empty() {
+                    line.extend_from_slice(&fwd[1.min(fwd.len())..]);
+                }
+                if line.len() < min_points {
+                    continue;
+                }
+
+                for p in &line {
+                    let cx = p[0] as i32;
+                    let cy = p[1] as i32;
+                    for dy in -visited_cell..=visited_cell {
+                        let ny = cy + dy;
+                        if ny < 0 || ny >= hi {
+                            continue;
+                        }
+                        for dx in -visited_cell..=visited_cell {
+                            visited[idx(cx + dx, ny)] = true;
+                        }
+                    }
+                }
+                out.push((line, fam));
+            }
+        }
+    }
+    out
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

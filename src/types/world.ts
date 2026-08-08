@@ -199,4 +199,8 @@ export interface CoarsePreview {
   landCells: number;
   meanTemp: number;
   meanPrecip: number;
+  /** The rough major ocean-current streamlines this preview implies, in
+   *  thumbnail pixel coords — drawn over the Köppen thumbnail. `ctype`:
+   *  0 = neutral, 1 = warm, 2 = cold. Same shape as `Streamline`. */
+  streamlines: Streamline[];
 }

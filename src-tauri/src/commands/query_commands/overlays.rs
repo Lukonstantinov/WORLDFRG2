@@ -111,11 +111,16 @@ pub fn get_current_streamlines(
     let h = grid_h as i32;
     let n = (grid_w * grid_h) as usize;
 
-    // Load the full-resolution current field into flat arrays.
+    // Load the full-resolution current field into flat arrays. `is_shelf` is
+    // loaded too so the tracer can stop a streamline at the shelf break — the
+    // shallow apron carries a real velocity for the physics, but boundary
+    // currents are DRAWN running along the continental slope, not over it (the
+    // same choice `render_currents` makes with `mag = 0` on shelf cells).
     let mut vx = vec![0.0f32; n];
     let mut vy = vec![0.0f32; n];
     let mut ctype = vec![0u8; n];
     let mut terrain = vec![0u8; n];
+    let mut shelf = vec![0u8; n];
 
     let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
     let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
@@ -134,101 +139,21 @@ pub fn get_current_streamlines(
                     vy[gi] = tile.current_vy[ti];
                     ctype[gi] = tile.current_type[ti];
                     terrain[gi] = tile.terrain[ti];
-                }
-            }
-        }
-    }
-
-    let wrap_x = |x: i32| -> i32 { ((x % w) + w) % w };
-    let idx = |x: i32, y: i32| -> usize { (y as usize) * grid_w as usize + (wrap_x(x) as usize) };
-
-    // Nearest sample of the current vector at a float position.
-    let sample = |fx: f32, fy: f32| -> (f32, f32, u8, u8) {
-        let xi = fx.floor() as i32;
-        let yi = fy.floor() as i32;
-        if yi < 0 || yi >= h { return (0.0, 0.0, 0, 1); }
-        let i = idx(xi, yi);
-        (vx[i], vy[i], ctype[i], terrain[i])
-    };
-
-    // Does the current family `fam` accept a cell of `cell_type`?
-    //   fam 1 (warm)    → warm only
-    //   fam 2 (cold)    → cold only
-    //   fam 0 (neutral) → neutral only (equatorial / counter-current / gyre / drift)
-    let accepts = |fam: u8, cell_type: u8| -> bool { fam == cell_type };
-
-    // Seed density: spaced grid so we don't start a line in every cell.
-    let seed_step = (grid_w / 90).clamp(6, 30) as i32;
-    let visited_cell = (grid_w / 28).clamp(3, 12) as i32; // corridor half-spacing
-    let max_steps = 700usize;
-    let step_len = 1.5f32;
-    let min_points = 6usize;
-
-    let mut out: Vec<Streamline> = Vec::new();
-
-    // Integrate a streamline of family `fam` from (sx,sy) in `dir` (+1 fwd, -1 back).
-    // Stops at land (checking the *next* cell before stepping so the line never
-    // draws onto a continent) and when the current weakens or changes family.
-    let integrate = |sx: i32, sy: i32, dir: f32, fam: u8| -> Vec<[f32; 2]> {
-        let mut pts: Vec<[f32; 2]> = Vec::new();
-        let mut px = sx as f32 + 0.5;
-        let mut py = sy as f32 + 0.5;
-        for _ in 0..max_steps {
-            let (svx, svy, sct, sterr) = sample(px, py);
-            if sterr == 1 { break; }            // current's own cell is land
-            let mag = (svx * svx + svy * svy).sqrt();
-            if mag < 0.05 { break; }            // current died out
-            if !accepts(fam, sct) { break; }    // changed family → end this line
-            pts.push([wrap_x(px.floor() as i32) as f32, py]);
-            // Look ahead: if the next position is land or off-grid, stop here so
-            // the polyline terminates at the coast instead of crossing it.
-            let nx = px + dir * (svx / mag) * step_len;
-            let ny = py + dir * (svy / mag) * step_len;
-            if ny < 0.0 || ny >= h as f32 { break; }
-            let (_, _, _, nterr) = sample(nx, ny);
-            if nterr == 1 { break; }
-            px = nx;
-            py = ny;
-        }
-        pts
-    };
-
-    // Per-family seeding. Neutral lines need a lower magnitude floor so the
-    // equatorial currents and gyre return limbs (which are slower) still show.
-    let families: [(u8, f32); 3] = [(1, 0.30), (2, 0.30), (0, 0.22)];
-    for &(fam, mag_floor) in &families {
-        let mut visited = vec![false; n];
-        for sy in (0..h).step_by(seed_step as usize) {
-            for sx in (0..w).step_by(seed_step as usize) {
-                let i = idx(sx, sy);
-                if terrain[i] == 1 || ctype[i] != fam { continue; }
-                if visited[i] { continue; }
-                let mag = (vx[i] * vx[i] + vy[i] * vy[i]).sqrt();
-                if mag < mag_floor { continue; }
-
-                let mut back = integrate(sx, sy, -1.0, fam);
-                back.reverse();
-                let fwd = integrate(sx, sy, 1.0, fam);
-                let mut line = back;
-                if !fwd.is_empty() { line.extend_from_slice(&fwd[1.min(fwd.len())..]); }
-
-                if line.len() < min_points { continue; }
-
-                for p in &line {
-                    let cx = p[0] as i32;
-                    let cy = p[1] as i32;
-                    for dy in -visited_cell..=visited_cell {
-                        let ny = cy + dy;
-                        if ny < 0 || ny >= h { continue; }
-                        for dx in -visited_cell..=visited_cell {
-                            visited[idx(cx + dx, ny)] = true;
-                        }
+                    if !tile.is_shelf.is_empty() {
+                        shelf[gi] = tile.is_shelf[ti];
                     }
                 }
-                out.push(Streamline { points: line, ctype: fam });
             }
         }
     }
+    let _ = (w, h); // kept for readability; the tracer takes grid_w/grid_h
+
+    let out = crate::sim::ocean::trace_current_streamlines(
+        &vx, &vy, &ctype, &terrain, &shelf, grid_w, grid_h,
+    )
+    .into_iter()
+    .map(|(points, ctype)| Streamline { points, ctype })
+    .collect();
 
     Ok(out)
 }

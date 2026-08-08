@@ -20,6 +20,14 @@ const CLASSES = [
   { key: "polarPct", label: "Polar", color: "#e2e9f0" },
 ] as const;
 
+// Ocean-current colours — the same warm/cold/neutral convention the main map's
+// current overlay uses (OverlayManager WARM/COLD/NEUTRAL_CURRENT).
+const CURRENT_COLOR: Record<number, string> = {
+  0: "rgba(200, 214, 228, 0.55)", // neutral — equatorial / gyre limbs / drift
+  1: "#ee5533", // warm boundary current
+  2: "#3399ee", // cold boundary current / ACC
+};
+
 export function ClimateMixPreview({ preview }: { preview: CoarsePreview | null }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -38,6 +46,38 @@ export function ClimateMixPreview({ preview }: { preview: CoarsePreview | null }
     const img = ctx.createImageData(preview.width, preview.height);
     img.data.set(bytes);
     ctx.putImageData(img, 0, 0);
+
+    // Draw the rough major ocean currents ON TOP of the Köppen thumbnail. These
+    // are the currents this settings preview implies (traced from the same field
+    // that shaped the class mix); the real generation stage refines them. Points
+    // are already in thumbnail-pixel coords, so no transform is needed. Warm last
+    // so the red boundary currents read over the cold/neutral limbs.
+    const lines = preview.streamlines ?? [];
+    if (lines.length) {
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      // Line width is in canvas (coarse) pixels; the canvas is CSS-scaled up, so
+      // keep it sub-pixel-thin here to land ~1px on screen.
+      ctx.lineWidth = 0.5;
+      for (const type of [0, 2, 1]) {
+        ctx.strokeStyle = CURRENT_COLOR[type] ?? CURRENT_COLOR[0];
+        for (const line of lines) {
+          if (line.ctype !== type || line.points.length < 2) continue;
+          ctx.beginPath();
+          for (let i = 0; i < line.points.length; i++) {
+            const [x, y] = line.points[i];
+            // A wrapped streamline can jump the antimeridian; break the path so
+            // it doesn't draw a stripe straight across the map.
+            if (i > 0) {
+              const dx = Math.abs(x - line.points[i - 1][0]);
+              if (dx > preview.width / 2) { ctx.moveTo(x, y); continue; }
+            }
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        }
+      }
+    }
   }, [preview]);
 
   if (!preview) return null;
@@ -55,6 +95,16 @@ export function ClimateMixPreview({ preview }: { preview: CoarsePreview | null }
           border: "1px solid #1e2e42", borderRadius: 3, background: "#0a1018",
         }}
       />
+
+      {/* Ocean-current legend — only when the preview actually traced some. */}
+      {(preview.streamlines?.length ?? 0) > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4, fontSize: 9, color: "#6a819a" }}>
+          <span>Currents (est.):</span>
+          <LegendSwatch color="#ee5533" label="warm" />
+          <LegendSwatch color="#3399ee" label="cold" />
+          <LegendSwatch color="#9bb0c0" label="drift" />
+        </div>
+      )}
 
       {/* Stacked share bar */}
       <div style={{ display: "flex", height: 12, marginTop: 5, borderRadius: 2, overflow: "hidden" }}>
@@ -90,8 +140,19 @@ export function ClimateMixPreview({ preview }: { preview: CoarsePreview | null }
         <b>{Math.round(preview.meanPrecip)}</b> mm/yr over {preview.landCells.toLocaleString()} sampled
         cells. Run at {preview.width}×{preview.height} — the same physics as the
         real pass, at lower resolution, so small islands and narrow ranges are
-        smoothed away.
+        smoothed away. The overlaid currents are a rough estimate of the major
+        ocean currents — the real generation stage refines them under the full
+        rules.
       </div>
     </div>
+  );
+}
+
+function LegendSwatch({ color, label }: { color: string; label: string }) {
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
+      <span style={{ width: 12, height: 2, background: color, display: "inline-block", borderRadius: 1 }} />
+      {label}
+    </span>
   );
 }

@@ -261,6 +261,17 @@ pub fn zonal_profile(p: PreviewParams) -> ZonalProfile {
 
 // ─────────────────────────── Tier 2: coarse map ───────────────────────────
 
+/// One traced ocean-current streamline in COARSE-grid (thumbnail pixel) coords,
+/// so the frontend can draw it straight over the preview canvas. `ctype`:
+/// 0 = neutral, 1 = warm, 2 = cold — the same convention as the map overlay's
+/// `Streamline`. These are the ROUGH major currents this settings preview
+/// implies; the real generation stage refines them under the full rules.
+#[derive(Serialize)]
+pub struct PreviewStreamline {
+    pub points: Vec<[f32; 2]>,
+    pub ctype: u8,
+}
+
 /// The coarse climate preview: a thumbnail plus the class mix it implies.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -284,6 +295,13 @@ pub struct CoarsePreview {
     /// Mean land temperature (°C) and total mean annual precipitation (mm).
     pub mean_temp: f32,
     pub mean_precip: f32,
+    /// The major ocean-current streamlines the previewed field implies, in
+    /// thumbnail pixel coords. Drawn over the Köppen thumbnail so the user can
+    /// see the rough currents (and, by the class mix, how they shape the
+    /// climate) BEFORE the real generation stage runs. Traced from the same
+    /// `trace_current_streamlines` the map overlay uses, so they stop at the
+    /// shelf break identically.
+    pub streamlines: Vec<PreviewStreamline>,
 }
 
 /// Longest edge of the coarse preview grid. 1/6-ish of a default 3600×1800 world;
@@ -417,6 +435,17 @@ pub fn coarse_climate_preview(src: &WorldBuffer, p: PreviewParams) -> Result<Coa
         }
     }
 
+    // The rough major currents this world implies — traced from the field the
+    // chain just computed (and threw away until now). Coords are already in the
+    // coarse grid, i.e. thumbnail pixels, so the frontend draws them directly.
+    let streamlines = ocean::trace_current_streamlines(
+        &buf.current_vx, &buf.current_vy, &buf.current_type,
+        &buf.terrain, &buf.is_shelf, cw, ch,
+    )
+    .into_iter()
+    .map(|(points, ctype)| PreviewStreamline { points, ctype })
+    .collect();
+
     let pct = |v: f64| if land_w > 0.0 { (v / land_w * 100.0) as f32 } else { 0.0 };
     let n = land_cells.max(1) as f64;
 
@@ -432,6 +461,7 @@ pub fn coarse_climate_preview(src: &WorldBuffer, p: PreviewParams) -> Result<Coa
         land_cells,
         mean_temp: (tsum / n) as f32,
         mean_precip: (psum / n) as f32,
+        streamlines,
     })
 }
 
