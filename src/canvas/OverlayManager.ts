@@ -515,6 +515,12 @@ export class OverlayManager {
   private goodRegions: GoodRegion[] = [];
   private cultureRegions: CultureRegion[] = [];
   private stateRegions: StateRegion[] = [];
+  /** States are rendered EXACTLY like provinces: a prebuilt raster-resolution fill
+   *  canvas (each province cell tinted its state's colour) + a border path traced
+   *  along raster cell edges. Rebuilt only when the states or the raster change. */
+  private stateCanvas: HTMLCanvasElement | null = null;
+  private stateBorderPath: Path2D | null = null;
+  private statesDirty = false;
   /** Transient highlight pin (searched settlement) in world coords. */
   private searchPin: { wx: number; wy: number } | null = null;
   /** Per-good display metadata (icon/color) from the active editable spec; falls
@@ -635,6 +641,8 @@ export class OverlayManager {
     // The raster may have been replaced (regenerate / world open) — re-cut the
     // selected outline against it rather than leaving a stale path on screen.
     if (this.selectedProvince !== null) this.buildSelectedProvince();
+    // States are rendered on this raster, so a new raster invalidates them too.
+    this.statesDirty = true;
   }
 
   /** Rebuild the per-province fill colours from the current fill mode, then re-raster.
@@ -1273,9 +1281,77 @@ export class OverlayManager {
     this.cultureRegions = regions;
   }
 
-  /** CITY_PROVINCE_WAR_PLAN.md §3.3 · a tier 1-2 city's writ, drawn as a territory. */
+  /** CITY_PROVINCE_WAR_PLAN.md §3.3 · a tier 1-2 city's writ, drawn as a territory.
+   *  Rendered on the province raster so its border is the province border exactly. */
   drawStates(states: StateRegion[]) {
     this.stateRegions = states;
+    this.statesDirty = true;
+  }
+
+  /** Build the state fill canvas + border path from the province raster, tinting
+   *  exactly the cells of the provinces each state administers. Same technique as
+   *  `buildProvinceRender`/`buildSelectedProvince`, so state borders coincide with
+   *  province borders by construction (never an approximating cell cloud). */
+  private buildStateRender() {
+    this.statesDirty = false;
+    this.stateCanvas = null;
+    this.stateBorderPath = null;
+    const r = this.provinceRaster;
+    if (!r || this.stateRegions.length === 0) return;
+    const { data, w, h, gridW, gridH } = r;
+    const NO = 0xffffffff;
+    // pid → state colour (packed RGB, 0 = not in any state). One entry per province.
+    const stateColor = new Map<number, [number, number, number]>();
+    // A per-pid "which state" tag for border detection (0 = none; else index+1).
+    const stateTag = new Map<number, number>();
+    this.stateRegions.forEach((s, si) => {
+      for (const pid of s.province_ids) {
+        stateColor.set(pid, s.color);
+        stateTag.set(pid, si + 1);
+      }
+    });
+    if (stateColor.size === 0) return;
+
+    const cv = document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    const ictx = cv.getContext("2d");
+    if (!ictx) return;
+    const img = ictx.createImageData(w, h);
+    const px = img.data;
+    for (let i = 0; i < w * h; i++) {
+      const pid = data[i];
+      const col = pid === NO ? undefined : stateColor.get(pid);
+      const o = i * 4;
+      if (col) {
+        px[o] = col[0]; px[o + 1] = col[1]; px[o + 2] = col[2]; px[o + 3] = 255;
+      } else {
+        px[o + 3] = 0; // transparent — land with no state / sea
+      }
+    }
+    ictx.putImageData(img, 0, 0);
+    this.stateCanvas = cv;
+
+    // Border: an edge wherever a cell's STATE differs from its neighbour's (a
+    // different state, or none). Traced in world-cell coords, like the province path.
+    const sx = gridW / w, sy = gridH / h;
+    const tagAt = (rx: number, ry: number): number => {
+      if (rx < 0 || ry < 0 || rx >= w || ry >= h) return 0;
+      const pid = data[ry * w + rx];
+      return pid === NO ? 0 : (stateTag.get(pid) ?? 0);
+    };
+    const path = new Path2D();
+    for (let ry = 0; ry < h; ry++) {
+      for (let rx = 0; rx < w; rx++) {
+        const t = tagAt(rx, ry);
+        if (t === 0) continue;
+        const x0 = rx * sx, x1 = (rx + 1) * sx, y0 = ry * sy, y1 = (ry + 1) * sy;
+        if (tagAt(rx - 1, ry) !== t) { path.moveTo(x0, y0); path.lineTo(x0, y1); }
+        if (tagAt(rx + 1, ry) !== t) { path.moveTo(x1, y0); path.lineTo(x1, y1); }
+        if (tagAt(rx, ry - 1) !== t) { path.moveTo(x0, y0); path.lineTo(x1, y0); }
+        if (tagAt(rx, ry + 1) !== t) { path.moveTo(x0, y1); path.lineTo(x1, y1); }
+      }
+    }
+    this.stateBorderPath = path;
   }
 
   /** Drop a transient highlight pin at a world cell (searched settlement). */
@@ -2008,9 +2084,29 @@ export class OverlayManager {
     // sphere. Drawn after peoples/before belts — a political claim over land the
     // way `cultureRegions` reads an ethnic one.
     if (this.visibility.states && this.stateRegions.length > 0) {
-      for (const r of this.stateRegions) {
-        const [sr, sg, sb] = r.color;
-        this.renderRegionMask(ctx, r.cells, r.cell_size, `rgb(${sr},${sg},${sb})`, "", r.x, r.y, 0.20);
+      if (this.statesDirty) this.buildStateRender();
+      if (this.stateCanvas && this.provinceRaster) {
+        // Exact fill: blit the province-raster-resolution tint (each pixel
+        // composited once, so a semi-transparent blit shows no cell grid), then a
+        // heavier border stroke ALONG the province edges — the state outline IS the
+        // province outline.
+        const { w, h, gridW, gridH } = this.provinceRaster;
+        ctx.imageSmoothingEnabled = false;
+        ctx.globalAlpha = 0.30;
+        ctx.drawImage(this.stateCanvas, 0, 0, w, h, 0, 0, gridW, gridH);
+        ctx.globalAlpha = 1;
+        if (this.stateBorderPath) {
+          ctx.strokeStyle = "rgba(10, 14, 22, 0.7)";
+          ctx.lineWidth = 2.2 / this.currentScale;
+          ctx.stroke(this.stateBorderPath);
+        }
+      } else {
+        // Fallback (province raster not loaded yet): the old cell-cloud tint, so a
+        // state still shows rather than vanishing until the raster arrives.
+        for (const r of this.stateRegions) {
+          const [sr, sg, sb] = r.color;
+          this.renderRegionMask(ctx, r.cells, r.cell_size, `rgb(${sr},${sg},${sb})`, "", r.x, r.y, 0.20);
+        }
       }
       const fs2 = Math.max(7, 13 / this.currentScale);
       ctx.textBaseline = "middle";

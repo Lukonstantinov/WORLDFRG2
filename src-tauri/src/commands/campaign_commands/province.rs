@@ -427,6 +427,10 @@ pub struct StateRegion {
     pub x: f32,
     pub y: f32,
     pub province_count: u32,
+    /// The province ids this state administers. The frontend tints exactly these
+    /// cells of the province raster, so a state's border is the province border —
+    /// never an approximating "cell cloud".
+    pub province_ids: Vec<u32>,
 }
 
 /// Deterministic, varied naming — sometimes just the city, sometimes the city
@@ -528,7 +532,12 @@ pub fn compute_states(db: State<'_, WorldDb>) -> Result<Vec<StateRegion>, String
             sim.prov_culture.get(home_p as usize).cloned().unwrap_or_default()
         } else { String::new() };
         let name = state_name(&hub.name, &culture, hu);
-        let province_count = prov_ids.get(&hub_id).map(|s| s.len() as u32).unwrap_or(0);
+        let ids: Vec<u32> = prov_ids.get(&hub_id).map(|s| {
+            let mut v: Vec<u32> = s.iter().copied().collect();
+            v.sort_unstable();
+            v
+        }).unwrap_or_default();
+        let province_count = ids.len() as u32;
         out.push(StateRegion {
             capital_hub: hub_id as u32,
             name,
@@ -538,6 +547,7 @@ pub fn compute_states(db: State<'_, WorldDb>) -> Result<Vec<StateRegion>, String
             y: sy / n + cell_size * 0.5,
             cells,
             province_count,
+            province_ids: ids,
         });
     }
     out.sort_by(|a, b| b.cells.len().cmp(&a.cells.len()));

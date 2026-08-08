@@ -2246,4 +2246,7 @@ export interface StateRegion {
   x: number;
   y: number;
   province_count: number;
+  /** The province ids this state administers. The overlay tints exactly these
+   *  cells of the province raster, so a state's border IS the province border. */
+  province_ids: number[];
 }
