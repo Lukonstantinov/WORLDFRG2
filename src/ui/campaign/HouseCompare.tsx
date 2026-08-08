@@ -9,6 +9,7 @@ import { CoatOfArms } from "@ui/heraldry/CoatOfArms";
 import { cultureFigureSVG, cultureSeed } from "@ui/campaign/cultureFigure";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 import { GOOD_DEFS, clarifyGemLabel } from "@goods";
+import { useWorldStore } from "@state/worldStore";
 import type { HouseBrief } from "@types";
 
 const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
@@ -113,9 +114,78 @@ function OperationsMap({ a, b }: { a: HouseBrief; b: HouseBrief }) {
   (a.partners ?? []).slice(0, 20).forEach((p) => add(p, "partner", cA, "", 0));
   (b.partners ?? []).slice(0, 20).forEach((p) => add(p, "partner", cB, "", 1));
 
+  // The world basemap: a land/sea silhouette from the province raster (already loaded
+  // for the province overlay). Land = a real province id, sea = the NO_PROVINCE
+  // sentinel. Rendered once to a data URL and drawn behind the operations, so the
+  // cities sit on the actual world map rather than a bare bounding box.
+  const raster = useWorldStore((s) => s.provinceRaster);
+  const base = useMemo(() => {
+    if (!raster || raster.w === 0) return null;
+    const { data, w, h } = raster;
+    const cv = document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext("2d");
+    if (!ctx) return null;
+    const img = ctx.createImageData(w, h);
+    for (let i = 0; i < w * h; i++) {
+      const land = data[i] !== 0xffffffff;
+      const o = i * 4;
+      img.data[o] = land ? 32 : 8; img.data[o + 1] = land ? 44 : 12;
+      img.data[o + 2] = land ? 36 : 20; img.data[o + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    return { url: cv.toDataURL(), w, h, gridW: raster.gridW, gridH: raster.gridH };
+  }, [raster]);
+
   if (points.length === 0) {
     return <div style={{ color: "#56708e", fontSize: 10, textAlign: "center", padding: 20 }}>No located operations to plot.</div>;
   }
+
+  const seats = points.filter((p) => p.kind === "seat");
+  const seatOf = (owner: 0 | 1) => seats.find((s) => s.owner === owner);
+  // Connectors from each house's seat to everything it works — its trade network.
+  const spokes = points.filter((p) => p.kind !== "seat").map((p) => ({ p, s: seatOf(p.owner) }))
+    .filter((e): e is { p: Pt; s: Pt } => !!e.s);
+
+  // ── World-basemap layout (preferred): plot every operation at its TRUE world
+  //    position over the land silhouette, with connectors bowed into arcs so they
+  //    read as sea-lanes/roads rather than a straight ruler line. ──
+  if (base) {
+    const VBW = base.w, VBH = base.h;
+    const lx = (x: number) => (x / base.gridW) * VBW;
+    const ly = (y: number) => (y / base.gridH) * VBH;
+    const rFor = (kind: string) => (kind === "seat" ? VBW * 0.012 : kind === "office" ? VBW * 0.008 : kind === "controls" ? VBW * 0.008 : VBW * 0.005);
+    // Wrap-aware arc: a quadratic bow perpendicular to the seat→point chord.
+    const arc = (s: Pt, p: Pt) => {
+      const x1 = lx(s.x), y1 = ly(s.y), x2 = lx(p.x), y2 = ly(p.y);
+      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+      const dx = x2 - x1, dy = y2 - y1;
+      const bow = 0.14;
+      return `M${x1.toFixed(1)} ${y1.toFixed(1)} Q${(mx - dy * bow).toFixed(1)} ${(my + dx * bow).toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+    };
+    return (
+      <svg viewBox={`0 0 ${VBW} ${VBH}`} width="100%" height="240" preserveAspectRatio="xMidYMid meet"
+        style={{ background: "#06090d", borderRadius: 6, border: "1px solid #1c2b3c", display: "block" }}>
+        <image href={base.url} x={0} y={0} width={VBW} height={VBH} preserveAspectRatio="none" style={{ imageRendering: "pixelated" }} />
+        {spokes.map((e, i) => (
+          <path key={"l" + i} d={arc(e.s, e.p)} fill="none" stroke={e.p.color} strokeWidth={VBW * 0.0018} opacity={0.5} />
+        ))}
+        {points.map((p, i) => (
+          <g key={i}>
+            <circle cx={lx(p.x)} cy={ly(p.y)} r={rFor(p.kind)} fill={p.color}
+              opacity={p.kind === "partner" ? 0.55 : p.kind === "controls" ? 0.75 : 0.95}
+              stroke={p.kind === "seat" ? "#e8dcc0" : "#06090d"} strokeWidth={p.kind === "seat" ? VBW * 0.003 : VBW * 0.001} />
+            {p.kind === "seat" && (
+              <text x={lx(p.x) + rFor("seat") + 2} y={ly(p.y) + 3} fontSize={VBW * 0.016} fill="#eaf2fb"
+                stroke="#06090d" strokeWidth={VBW * 0.004} paintOrder="stroke">{p.label}</text>
+            )}
+          </g>
+        ))}
+      </svg>
+    );
+  }
+
+  // ── Fallback (no province raster loaded): the old two-house bounding-box scatter. ──
   const xs = points.map((p) => p.x), ys = points.map((p) => p.y);
   const pad = Math.max(4, (Math.max(...xs) - Math.min(...xs)) * 0.12, (Math.max(...ys) - Math.min(...ys)) * 0.12);
   const minX = Math.min(...xs) - pad, maxX = Math.max(...xs) + pad;
@@ -125,13 +195,6 @@ function OperationsMap({ a, b }: { a: HouseBrief; b: HouseBrief }) {
   const px = (x: number) => ((x - minX) / w) * VB;
   const py = (y: number) => ((y - minY) / h) * VB;
   const rFor = (kind: string) => (kind === "seat" ? 6 : kind === "office" ? 4 : kind === "controls" ? 4 : 2.4);
-  const seats = points.filter((p) => p.kind === "seat");
-  const seatOf = (owner: 0 | 1) => seats.find((s) => s.owner === owner);
-  // Spokes from each house's seat to everything it works, so the network reads even
-  // when two dots would otherwise sit alone in a big frame.
-  const spokes = points.filter((p) => p.kind !== "seat").map((p) => ({ p, s: seatOf(p.owner) }))
-    .filter((e): e is { p: Pt; s: Pt } => !!e.s);
-
   return (
     <svg viewBox={`0 0 ${VB} ${VB}`} width="100%" height="220" style={{ background: "#0a1119", borderRadius: 6, border: "1px solid #1c2b3c" }}>
       <rect x="1" y="1" width={VB - 2} height={VB - 2} fill="none" stroke="#16202c" />
