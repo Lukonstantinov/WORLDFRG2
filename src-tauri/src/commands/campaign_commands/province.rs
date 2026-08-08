@@ -521,24 +521,30 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════
-//  STATES (CITY_PROVINCE_WAR_PLAN.md §3.3) — a city's writ made into a territory.
+//  REALMS (`REALM_AND_GOVERNMENT_PLAN.md`, phase R1) — a proclaimed country made
+//  into a territory for the map.
 //
-//  A state is not new sim state. It is a pure derived read over what already
-//  exists: which provinces a tier 1-2 city administers (`prov_holder` excluding
-//  `prov_holder_house` — rule 24, a house-held writ is the house's, not a city's
-//  state) and the world's own `province_raster` geometry. Nothing is persisted,
-//  so this cannot desync from the sim and costs nothing per tick — the same
-//  "display-time query, not a tick concern" argument `get_province_terrain_crop`
-//  makes for §2.3. A tier 3-4 or untiered town self-administers its own province
-//  exactly as before but never forms a state — §5.6 of the plan is explicit that
-//  this is where city tier stops being purely query-side (it now decides what the
-//  map draws), while remaining bit-identical to the dynamics test (no tick writes).
+//  Through R1a/R1b a "state" was a pure DERIVED read: whichever provinces a tier
+//  1-2 city administered, grouped by that city, recomputed from scratch every call
+//  and never remembered. That derivation is gone. `sim.realms` + `sim.prov_realm`
+//  are now the source of truth — a realm is proclaimed once (`promote_house_to_
+//  realm`, `tick/realms.rs`) and persists in the save exactly like a house does, so
+//  a capital's tier later dropping below 2 no longer makes its realm vanish from
+//  the map (the Karakorum rule, plan §1.3/§4.3 — that guarantee was the entire
+//  point of moving off a derived read). This query still costs nothing per tick
+//  and cannot desync, for the same "display-time read" reason `get_province_
+//  terrain_crop` gives for §2.3 — it just now reads REAL state instead of
+//  recomputing an approximation of it.
 // ═════════════════════════════════════════════════════════════════════════════════
 
 #[derive(Serialize, Clone)]
 pub struct StateRegion {
     pub capital_hub: u32,
     pub name: String,
+    /// The ruler's style — "King", "Sovereign" — drawn at proclamation (placeholder
+    /// vocabulary; see `tick/realms.rs`'s module doc for the culture-derived namer
+    /// this is standing in for).
+    pub title: String,
     pub color: [u8; 3],
     pub cells: Vec<[f32; 2]>,
     pub cell_size: f32,
@@ -546,39 +552,31 @@ pub struct StateRegion {
     pub x: f32,
     pub y: f32,
     pub province_count: u32,
-    /// The province ids this state administers. The frontend tints exactly these
-    /// cells of the province raster, so a state's border is the province border —
-    /// never an approximating "cell cloud".
+    /// The province ids this realm holds. The frontend tints exactly these cells of
+    /// the province raster, so a realm's border is the province border — never an
+    /// approximating "cell cloud".
     pub province_ids: Vec<u32>,
+    /// `REALM_CITY_STATE`..`REALM_HEGEMON`.
+    pub rank: u8,
+    pub founded_tick: u32,
+    /// The ruling dynasty's name — the house that proclaimed this realm, ELEVATED
+    /// (`House.crowned`) rather than dissolved. Empty if the record is somehow gone
+    /// (should not happen; a realm's `ruling_house` index is never reused).
+    pub ruling_house: String,
+    pub legitimacy: f32,
+    pub cohesion: f32,
+    pub treasury: f32,
+    pub debts: f32,
 }
 
-/// Deterministic, varied naming — sometimes just the city, sometimes the city
-/// dressed with a title, sometimes the city paired with its own hinterland's
-/// people-name. Never geography-flavoured ("Coast"/"March of the river") since
-/// nothing here knows whether the land is coastal or riverine.
-fn state_name(city: &str, culture: &str, seed: usize) -> String {
-    let mut variants = vec![
-        city.to_string(),
-        format!("{} Republic", city),
-        format!("Republic of {}", city),
-        format!("Duchy of {}", city),
-        format!("Free City of {}", city),
-        format!("{} Dominion", city),
-    ];
-    if !culture.is_empty() && culture != city {
-        variants.push(format!("{} and {}", city, culture));
-    }
-    let h = seed.wrapping_mul(2654435761).wrapping_add(0x9e3779b9);
-    variants[h % variants.len()].clone()
-}
-
-/// A state's territory tint — the same golden-angle hue rotation `distinct_color`
-/// (house heraldry) uses, phase-shifted and desaturated so a state's fill never
-/// reads as a house's coat-of-arms colour on the same map even when the indices
-/// collide (a city's hub id and a house's id are different index spaces, but nothing
-/// stops them being numerically equal).
-fn state_color(hub_id: usize) -> [u8; 3] {
-    let hue = (hub_id as f32 * 137.508 + 53.0) % 360.0;
+/// A realm's territory tint — the same golden-angle hue rotation `distinct_color`
+/// (house heraldry) uses, phase-shifted and desaturated so a realm's fill never
+/// reads as a house's coat-of-arms colour on the same map even where a REALM id and
+/// a HOUSE id numerically collide — two different index spaces. Keyed on the
+/// realm's own id (stable for its whole life), not its capital hub, so a future
+/// capital move (the Karakorum rule) never reassigns the colour.
+fn state_color(realm_id: usize) -> [u8; 3] {
+    let hue = (realm_id as f32 * 137.508 + 53.0) % 360.0;
     let (s, l) = (0.40f32, 0.44f32);
     let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
     let hp = hue / 60.0;
@@ -592,13 +590,15 @@ fn state_color(hub_id: usize) -> [u8; 3] {
     [to(r1), to(g1), to(b1)]
 }
 
-/// Every state currently formed on the map — one region per tier 1-2 city that
-/// holds at least one province's writ. Empty on a world with no province layer or
-/// no campaign, exactly as `campaign_province_land_all` degrades.
+/// Every realm ever proclaimed and still standing (a fallen realm — `fallen_tick >
+/// 0` — is kept in `sim.realms` for the record, exactly as a defunct house is, but
+/// draws no territory). Empty on a world with no realms, no province layer, or no
+/// campaign, exactly as `campaign_province_land_all` degrades.
 #[tauri::command]
 pub fn compute_states(db: State<'_, WorldDb>) -> Result<Vec<StateRegion>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    if sim.realms.is_empty() { return Ok(vec![]); }
     let (rw, rh, gw, gh, mut raster): (u32, u32, u32, u32, Vec<u32>) =
         match metadata::get_meta(&conn, "province_raster").map_err(|e| e.to_string())? {
             Some(s) => serde_json::from_str(&s).unwrap_or((0, 0, 0, 0, Vec::new())),
@@ -607,66 +607,57 @@ pub fn compute_states(db: State<'_, WorldDb>) -> Result<Vec<StateRegion>, String
     crate::sim::provinces::migrate_raster_sentinel(&mut raster);
     if raster.is_empty() || gw == 0 || gh == 0 || rw == 0 || rh == 0 { return Ok(vec![]); }
 
-    let np = sim.prov_holder.len();
-    let mut capital_of_province: Vec<i32> = vec![-1; np];
-    for p in 0..np {
-        let holder_hub = sim.prov_holder.get(p).copied().unwrap_or(-1);
-        let holder_house = sim.prov_holder_house.get(p).copied().unwrap_or(-1);
-        if holder_house >= 0 || holder_hub < 0 { continue; }
-        let Some(hub) = sim.hubs.get(holder_hub as usize) else { continue };
-        if hub.abandoned || hub.is_estate { continue; }
-        if hub.tier == 0 || hub.tier > 2 { continue; }
-        capital_of_province[p] = holder_hub;
-    }
-    if !capital_of_province.iter().any(|&c| c >= 0) { return Ok(vec![]); }
-
     let csx = gw as f32 / rw as f32;
     let csy = gh as f32 / rh as f32;
     let cell_size = csx.max(csy);
-    let mut by_hub: std::collections::HashMap<i32, Vec<[f32; 2]>> = std::collections::HashMap::new();
-    let mut prov_ids: std::collections::HashMap<i32, std::collections::HashSet<u32>> = std::collections::HashMap::new();
+    let mut by_realm: std::collections::HashMap<u32, Vec<[f32; 2]>> = std::collections::HashMap::new();
+    let mut prov_ids: std::collections::HashMap<u32, std::collections::HashSet<u32>> = std::collections::HashMap::new();
     for ry in 0..rh {
         for rx in 0..rw {
             let idx = (ry * rw + rx) as usize;
             let pid = raster.get(idx).copied().unwrap_or(crate::sim::provinces::NO_PROVINCE);
             if pid == crate::sim::provinces::NO_PROVINCE { continue; }
             let p = pid as usize;
-            if p >= capital_of_province.len() { continue; }
-            let cap = capital_of_province[p];
-            if cap < 0 { continue; }
-            by_hub.entry(cap).or_default().push([rx as f32 * csx, ry as f32 * csy]);
-            prov_ids.entry(cap).or_default().insert(pid);
+            let rid = sim.prov_realm.get(p).copied().unwrap_or(-1);
+            if rid < 0 { continue; }
+            let rid = rid as u32;
+            by_realm.entry(rid).or_default().push([rx as f32 * csx, ry as f32 * csy]);
+            prov_ids.entry(rid).or_default().insert(pid);
         }
     }
 
     let mut out: Vec<StateRegion> = Vec::new();
-    for (hub_id, cells) in by_hub {
+    for realm in &sim.realms {
+        if realm.fallen_tick > 0 { continue; } // kept for the record, draws nothing
+        let Some(cells) = by_realm.get(&realm.id) else { continue }; // no mapped territory (shouldn't happen)
         if cells.is_empty() { continue; }
-        let hu = hub_id as usize;
-        let Some(hub) = sim.hubs.get(hu) else { continue };
         let n = cells.len() as f32;
         let (sx, sy) = cells.iter().fold((0.0f32, 0.0f32), |(ax, ay), c| (ax + c[0], ay + c[1]));
-        let home_p = sim.hub_province.get(hu).copied().unwrap_or(-1);
-        let culture = if home_p >= 0 {
-            sim.prov_culture.get(home_p as usize).cloned().unwrap_or_default()
-        } else { String::new() };
-        let name = state_name(&hub.name, &culture, hu);
-        let ids: Vec<u32> = prov_ids.get(&hub_id).map(|s| {
+        let ids: Vec<u32> = prov_ids.get(&realm.id).map(|s| {
             let mut v: Vec<u32> = s.iter().copied().collect();
             v.sort_unstable();
             v
         }).unwrap_or_default();
-        let province_count = ids.len() as u32;
+        let ruling_house = sim.houses.get(realm.ruling_house as usize)
+            .map(|h| h.name.clone()).unwrap_or_default();
         out.push(StateRegion {
-            capital_hub: hub_id as u32,
-            name,
-            color: state_color(hu),
+            capital_hub: realm.capital_hub,
+            name: realm.name.clone(),
+            title: realm.title.clone(),
+            color: state_color(realm.id as usize),
             cell_size,
             x: sx / n + cell_size * 0.5,
             y: sy / n + cell_size * 0.5,
-            cells,
-            province_count,
+            cells: cells.clone(),
+            province_count: ids.len() as u32,
             province_ids: ids,
+            rank: realm.rank,
+            founded_tick: realm.founded_tick,
+            ruling_house,
+            legitimacy: realm.legitimacy,
+            cohesion: realm.cohesion,
+            treasury: realm.treasury,
+            debts: realm.debts,
         });
     }
     out.sort_by(|a, b| b.cells.len().cmp(&a.cells.len()));

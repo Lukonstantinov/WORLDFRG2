@@ -2280,13 +2280,19 @@ export interface ProvincePotential {
   deposits: ProvinceDepositDot[];
 }
 
-/** CITY_PROVINCE_WAR_PLAN.md §3.3 · one state — a tier 1-2 city's own writ, made
- *  into a territory. Pure derived read (compute_states) — nothing new is
- *  persisted, so this cannot desync from the province/city-tier state it reads. */
+/** REALM_AND_GOVERNMENT_PLAN.md R1 · one proclaimed realm, made into a territory
+ *  for the map. `compute_states` now reads a REAL persisted `Realm` (`sim.realms`
+ *  + `prov_realm`) rather than deriving a "state" fresh from city tiers each call
+ *  — a capital's tier later dropping no longer erases it from the map. */
 export interface StateRegion {
   capital_hub: number;
   name: string;
-  /** [r,g,b] — distinct from any house's heraldic colour (own hue phase). */
+  /** The ruler's style — "King", "Sovereign" — placeholder vocabulary; see the
+   *  backend's `tick/realms.rs` module doc for the culture-derived namer this
+   *  stands in for. */
+  title: string;
+  /** [r,g,b] — distinct from any house's heraldic colour (own hue phase), keyed on
+   *  the realm's own id so a future capital move never reassigns the colour. */
   color: [number, number, number];
   /** Coarse cell top-left world coords, same shape CultureRegion uses. */
   cells: [number, number][];
@@ -2295,7 +2301,17 @@ export interface StateRegion {
   x: number;
   y: number;
   province_count: number;
-  /** The province ids this state administers. The overlay tints exactly these
-   *  cells of the province raster, so a state's border IS the province border. */
+  /** The province ids this realm holds. The overlay tints exactly these cells of
+   *  the province raster, so a realm's border IS the province border. */
   province_ids: number[];
+  /** 0 city-state · 1 kingdom · 2 great power · 3 hegemon. */
+  rank: number;
+  founded_tick: number;
+  /** The ruling dynasty's name — the house that proclaimed this realm, ELEVATED
+   *  rather than dissolved. */
+  ruling_house: string;
+  legitimacy: number;
+  cohesion: number;
+  treasury: number;
+  debts: number;
 }

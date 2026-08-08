@@ -112,7 +112,7 @@ const bioOverlays = [
   { id: "monsoonZones", label: "\u{1F327} Monsoon Areas" },
   { id: "politicalInfluence", label: "\u{1F535} Trade Hubs" },
   { id: "houseControl", label: "\u{2696} House Control" },
-  { id: "states", label: "\u{1F3F0} States" },
+  { id: "states", label: "\u{1F451} Realms" },
   { id: "merchantRoutes", label: "\u{1F6A2} Merchant Routes" },
   { id: "futures", label: "\u{1F4DC} Futures" },
   { id: "dynamicFlow", label: "\u{1F30A} Dynamic Trade Flow" },
