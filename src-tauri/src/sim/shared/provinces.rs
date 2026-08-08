@@ -223,7 +223,7 @@ fn koppen_spacing_mult(koppen: u8) -> f32 {
         kp::ET => 1.7,                       // tundra
         kp::DFD | kp::DWD => 1.6,            // extreme subarctic
         kp::DFC | kp::DWC | kp::DSD => 1.35, // subarctic taiga
-        kp::BWH | kp::BWK => 1.5,           // hot / cold desert
+        kp::BWH | kp::BWK => 1.25,          // hot / cold desert — still large, but subdivided
         kp::BSH | kp::BSK => 1.05,          // semi-arid steppe — settled far denser than a true desert
         kp::H => 1.25,                       // high alpine
         _ => 1.0,                            // temperate / tropical / Mediterranean
@@ -239,9 +239,12 @@ const SEA_HOP: f64 = 5.0;
 
 /// Cap on a merged vast-biome province, as a fraction of the whole world's cells. A
 /// contiguous ice cap or great desert collapses into blocks no larger than this, so
-/// Antarctica reads as ~1-2 provinces and the Sahara as ~1, while a circum-continental
-/// tundra band still breaks into a handful rather than one hemisphere-spanning cell.
-const VAST_MERGE_CAP_FRAC: f64 = 0.08;
+/// a great desert reads as a few big blocks rather than one hemisphere-spanning cell.
+/// Lowered from 0.08 (which let a single Saharan province swallow 8% of the entire
+/// world — far too large to read as an administered district): a great desert now
+/// breaks into ~2-3 blocks instead of one, and an ice cap into a handful, while still
+/// staying vastly larger than ordinary land.
+const VAST_MERGE_CAP_FRAC: f64 = 0.035;
 
 /// True Köppen "vast, thinly-settled" class of a cell for the merge below:
 /// 1 = polar (ET tundra / EF ice cap), 2 = desert (BWh / BWk), 0 = neither.
