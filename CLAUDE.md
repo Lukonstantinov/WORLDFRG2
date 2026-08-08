@@ -355,11 +355,16 @@ serde-defaulted so old saves load). Grouped by theme:
   no notion of coastal/riverine. Colour is `distinct_color`'s own golden-angle hue
   rotation, phase-shifted (+53°) and desaturated so a state's tint can never be mistaken
   for a house's heraldic colour even where a hub id and a house id numerically collide —
-  two different index spaces. Rendered client-side (`OverlayManager.drawStates`) with the
-  exact "cell cloud" technique `compute_culture_regions`/`drawCultureRegions` already
-  uses for ethnic territories — a fill + a boundary stroke over the coarse cells, no new
-  polygon-tracing machinery. Toggle: Toolbar → 🏰 States (`overlayVisibility.states`,
+  two different index spaces. Rendered client-side (`OverlayManager.drawStates`/
+  `buildStateRender`) **exactly on the province raster** — `StateRegion.province_ids`
+  names the provinces, the renderer tints those cells of the stored raster and traces
+  the border along raster cell EDGES, so a state's border IS a province border rather
+  than an approximating "cell cloud" (the first cut used `drawCultureRegions`' coarse-
+  cell technique; that was replaced because a state's frontier is a legal line, not a
+  density estimate). Toggle: Toolbar → 🏰 States (`overlayVisibility.states`,
   refreshed on year boundaries, the same cadence `campaignCorridors` uses).
+  **Next:** `docs/REALM_AND_GOVERNMENT_PLAN.md` replaces this derived read with a real
+  persisted `Realm` — approved, not yet built.
 - **War score, terms and casus belli (`CITY_PROVINCE_WAR_PLAN.md` §3.4a-c,
   `tick/war.rs`):** DLC 3.5's declare/wage/resolve skeleton gains a real
   bidirectional `War.score` (−100..100) and quarterly rounds (tick-driven
@@ -1735,6 +1740,26 @@ CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next thre
                                     own caveat list (§5) — incl. that it REVERSES
                                     PROVINCE_SYSTEM_PLAN's "enclaves survive" decision —
                                     and its own "deliberately not built" list (§6)
+REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ APPROVED, NOT YET BUILT. THE FIRST COUNTRIES:
+                                    a merchant house takes a city (`captor_house`,
+                                    already built), PROCLAIMS sovereignty after a
+                                    hard year-50 floor, and is elevated — its wealth
+                                    and trade assets become the crown's, the house
+                                    leaves the merchant world (`crowned`, never
+                                    `defunct` — §5.1) and becomes a dynasty with a
+                                    real GENEALOGY (persons, births, child mortality,
+                                    regency, succession by the culture's LineRule).
+                                    Realms hold provinces (`prov_realm`, a THIRD
+                                    authority layer above rule 24), tax them by
+                                    several historical kinds whose binding constraint
+                                    is COLLECTION not rates, mint coin, annex/
+                                    vassalize/enthrone by war, and FRAGMENT only
+                                    along their own family — which makes the shipped
+                                    `InheritanceRule` decide whether a people can
+                                    hold an empire at all. REVERSES
+                                    CITY_PROVINCE_WAR_PLAN §6's deferral of a realm
+                                    entity above cities. Carries its own caveats (§5)
+                                    and "deliberately not built" list (§6)
 IN_APP_VERIFICATION_CHECKLIST.md  ← Manual in-app verification checklist
 PORTING_REFERENCE.md              ← Porting reference
 ```
