@@ -158,13 +158,14 @@ export function StatesPanel() {
       <PanelHeader icon="👑" title="Realms" onDragStart={onPointerDown} onClose={close}
         right={rows.length > 0 ? <Badge tone="gold">{rows.length}</Badge> : undefined} />
       <PanelBody style={{ flex: 1 }}>
-        {!active && <EmptyNote>Begin the campaign — realms can be proclaimed from year 50, by a house that has held a city's government for a decade.</EmptyNote>}
+        {!active && <EmptyNote>Begin the campaign — realms can be proclaimed from year 50, by a house that has CAPTURED a city and can afford the founding cost.</EmptyNote>}
         {active && rows.length === 0 && (
           <EmptyNote>
-            No realm has been proclaimed yet. A house needs to hold a city's government (its captor, not merely a
-            council seat) continuously for ten years, be tier 2 or better itself in a tier 2-or-better city, hold
-            at least one province's writ, and have both the treasury and the prestige to risk it — and none of
-            this is possible before year 50. Most cities never proclaim; this is expected, especially on a young world.
+            No realm has been proclaimed yet. A house must have CAPTURED a city's government (be its captor, not
+            merely a council seat), be at least tier 2, hold at least one province's writ, and be able to SPEND the
+            realm's founding cost (200,000 — a great sum only the wealthiest houses ever hold) — and none of this
+            before year 50. The founding spend makes a crown a deliberate, rare act: on a young or modest-wealth
+            world, expect few or none.
           </EmptyNote>
         )}
         {active && rows.length > 0 && (

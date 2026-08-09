@@ -166,7 +166,7 @@ export function ProvinceMiniMap({
   deposits?: { good: string; x: number; y: number; grade: number; depth: number }[];
   /** #9 · untapped surface/belt goods (no single cell) — drawn as quality-weighted
    *  squares dithered across the province footprint on the deposits plate. */
-  beltGoods?: { name: string; quality: number }[];
+  beltGoods?: { name: string; quality: number; marine?: boolean }[];
 }) {
   const [hover, setHover] = useState<Hover | null>(null);
 
@@ -461,35 +461,55 @@ export function ProvinceMiniMap({
             place a few SYMBOLIC markers reading "produced here", quality-faded. Isolating a
             good shows a spread of just that good; showing all lays one marker per good like
             a legend on the map. Real per-cell locations only exist for DEPOSITS (plate 6b). */}
-        {on("goods") && beltGoods.length > 0 && cells.length > 0 && (() => {
+        {on("goods") && beltGoods.length > 0 && cells.length > 0 && raster && (() => {
           const isolated = beltGoods.length === 1;
           const shown = beltGoods.slice(0, isolated ? 1 : 12);
           const fs = Math.max(6, Math.min(14, stride * 2.6));
-          // A stable, well-spread cell for the k-th marker (Knuth multiplicative hash).
-          const pickCell = (k: number) => cells[Math.floor((k * 2654435761) % cells.length)];
           const out: React.ReactNode[] = [];
-          const marker = (g: { name: string; quality: number }, key: string, rx: number, ry: number) => {
+          const SEA = 4294967295; // NO_PROVINCE sentinel in the u32 raster
+          const rw = raster.w, rh = raster.h;
+          // COASTAL cells: a footprint cell with a SEA neighbour at stride distance — this
+          // is where a MARINE good (fisheries, whaling, pearls) belongs, never inland.
+          const coastCells = cells.filter(([rx, ry]) =>
+            raster.data[ry * rw + Math.max(0, rx - stride)] === SEA ||
+            raster.data[ry * rw + Math.min(rw - 1, rx + stride)] === SEA ||
+            raster.data[Math.max(0, ry - stride) * rw + rx] === SEA ||
+            raster.data[Math.min(rh - 1, ry + stride) * rw + rx] === SEA);
+          // Stable per-GOOD hash (FNV-1a) so different goods occupy DIFFERENT cells — the
+          // markers are symbols (the model holds one province-wide quality, not a layout),
+          // but keying position on the good makes each good read as its own scatter.
+          const goodSeed = (name: string) => {
+            let k = 2166136261;
+            for (let i = 0; i < name.length; i++) { k ^= name.charCodeAt(i); k = Math.imul(k, 16777619); }
+            return k >>> 0;
+          };
+          const marker = (g: { name: string; quality: number; marine?: boolean }, key: string, rx: number, ry: number) => {
             const emoji = GOOD_DEFS.find((d) => d.name === g.name)?.emoji ?? "•";
             return (
               <text key={key} x={rx - ox} y={ry - oy} fontSize={fs} textAnchor="middle"
                 dominantBaseline="central" opacity={0.5 + 0.5 * Math.max(0, Math.min(1, g.quality))}
                 style={{ paintOrder: "stroke", stroke: "#0a1620", strokeWidth: 0.6 }}>
-                <title>{g.name} · quality {(g.quality * 100).toFixed(0)}%</title>{emoji}
+                <title>{g.name} · quality {(g.quality * 100).toFixed(0)}%{g.marine ? " · sea/coast" : ""}</title>{emoji}
               </text>
             );
           };
+          const placeFor = (g: { name: string; quality: number; marine?: boolean }, count: number, keyBase: string) => {
+            // Marine goods only ever sit on the coast; a landlocked province with no coast
+            // shows none (rather than an illogical inland fishery).
+            const pool = g.marine ? coastCells : cells;
+            if (pool.length === 0) return;
+            const seed = goodSeed(g.name);
+            for (let i = 0; i < count; i++) {
+              const idx = ((seed + i * 2654435761) >>> 0) % pool.length;
+              const [rx, ry] = pool[idx];
+              out.push(marker(g, `${keyBase}${i}`, rx, ry));
+            }
+          };
           if (isolated) {
             const g = shown[0];
-            const marks = Math.max(3, Math.round(4 + 5 * g.quality));
-            for (let i = 0; i < marks; i++) {
-              const [rx, ry] = pickCell(i * 37 + 5);
-              out.push(marker(g, `bg${i}`, rx, ry));
-            }
+            placeFor(g, Math.max(3, Math.round(4 + 5 * g.quality)), "bg");
           } else {
-            shown.forEach((g, i) => {
-              const [rx, ry] = pickCell(i * 53 + 9);
-              out.push(marker(g, `bg${i}`, rx, ry));
-            });
+            shown.forEach((g, i) => placeFor(g, 1, `bg${i}_`));
           }
           return out;
         })()}

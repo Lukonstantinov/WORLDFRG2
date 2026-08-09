@@ -415,6 +415,9 @@ pub struct ProvinceGoodPotential {
     pub actual: f32,
     /// An ore/mineral good (placed by real geology, richness = deposit grade).
     pub is_deposit: bool,
+    /// A sea/coast good (fisheries, whaling, pearls, coral, …) — belongs on the
+    /// province's COAST, not its interior, so the survey plate can place it there.
+    pub is_marine: bool,
     /// For a deposit good: mean working grade in this province (0..1).
     pub mean_grade: f32,
     /// For a deposit good: number of ore workings of this good in the province.
@@ -465,6 +468,11 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
     let is_deposit: std::collections::HashMap<String, bool> = specs.iter()
         .map(|s| (s.id.clone(), matches!(s.distribution, crate::sim::goods_spec::Distribution::Deposits)))
         .collect();
+    // Sea/coast goods — placed on the province coast, not its interior.
+    use crate::sim::goods_spec::Domain;
+    let is_marine: std::collections::HashMap<String, bool> = specs.iter()
+        .map(|s| (s.id.clone(), matches!(s.domain, Domain::Marine | Domain::Coastal)))
+        .collect();
 
     // Ore workings, attributed to a province via the downsampled raster.
     let deposits: Vec<crate::sim::deposits::Deposit> = metadata::get_meta(&conn, "deposits")
@@ -501,6 +509,7 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
         if belt <= 0.001 { continue; } // the land genuinely can't yield this
         let name = sim.goods[g].name.clone();
         let dep = is_deposit.get(&name).copied().unwrap_or(false);
+        let mar = is_marine.get(&name).copied().unwrap_or(false);
         let (mean_grade, workings, best_depth) = agg.get(&name)
             .map(|&(s, n, bd)| (if n > 0 { s / n as f32 } else { 0.0 }, n, bd))
             .unwrap_or((0.0, 0, 0));
@@ -511,6 +520,7 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
             belt,
             actual: actual_all.get(idx).copied().unwrap_or(0.0),
             is_deposit: dep,
+            is_marine: mar,
             mean_grade, workings, best_depth,
         });
     }

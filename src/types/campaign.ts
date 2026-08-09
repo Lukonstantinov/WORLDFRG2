@@ -2263,6 +2263,7 @@ export interface ProvinceGoodPotential {
   belt: number;          // frozen belt richness 0..1 (how good the LAND is)
   actual: number;        // current production (0 = untapped)
   is_deposit: boolean;   // an ore/mineral good (richness = deposit grade)
+  is_marine: boolean;    // a sea/coast good — belongs on the province coast, not inland
   mean_grade: number;    // deposit goods: mean working grade 0..1
   workings: number;      // deposit goods: number of ore workings in the province
   best_depth: number;    // deposit goods: deepest present (0 surface … 3 flooded)

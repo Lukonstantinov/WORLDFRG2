@@ -156,7 +156,7 @@ export function ProvinceInspector() {
   const beltGoods = useMemo(() =>
     (potential?.goods ?? [])
       .filter((g) => !g.is_deposit)
-      .map((g) => ({ good: g.good, name: g.name, quality: qualityOf(g.good, g.belt) }))
+      .map((g) => ({ good: g.good, name: g.name, quality: qualityOf(g.good, g.belt), marine: g.is_marine }))
       .sort((a, b) => b.quality - a.quality),
     [potential, qualityOf]);
   // The subset actually drawn on the minimap, after the legend filter.
