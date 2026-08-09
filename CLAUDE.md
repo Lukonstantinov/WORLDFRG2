@@ -1001,7 +1001,13 @@ ui/world/  — map & world
                                   Display-only (rule 14); `MANAGED_OVERLAYS` is DERIVED
                                   from the plates, so a plate can only ever clear an
                                   overlay some plate uses
-  StatusBar.tsx · WindowBar.tsx ← Bottom status / window chrome
+  StatusBar.tsx · WindowBar.tsx ← Bottom status / window chrome. StatusBar carries the
+                                  HOVER READOUT (§8.18): lat/lon, cell and the ACTIVE
+                                  LAYER's own value with its unit, which is the map key
+                                  for every layer that has no exact legend
+  hoverReadout.ts               ← active layer + CellInfo → the readout string. Values
+                                  come from `get_cell_info`, never re-derived from a
+                                  pixel colour
   InfoPanel.tsx                 ← Right-click cell inspector
   LayerLegend.tsx               ← THE MAP KEY (§8.18) — exact, renderer-sourced keys
                                   for elevation · terrain · temperature · sst ·

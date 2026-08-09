@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { setProgress } from "@bridge";
-import type { MerchantRoute, FuturesLane } from "@types";
+import type { MerchantRoute, FuturesLane, CellInfo } from "@types";
 
 /** Persist step completion: steps 1-6 travel with the world file, 7-10 with
  *  the campaign. Fire-and-forget — a failed write only loses the checkmarks. */
@@ -78,6 +78,10 @@ interface UIStore {
    *  typography; picking a layer or flipping an overlay by hand clears this, so the
    *  chip stops claiming a plate the moment the view stops being one. */
   activeMapTheme: string | null;
+  /** StatusBar HOVER READOUT — the cell under the cursor. This is the map key for
+   *  the ~19 layers that have no legend of their own (§8.18): rather than invent a
+   *  colour scale for them, the bottom bar reports the real value under the cursor. */
+  hoverInfo: CellInfo | null;
   /** When true, the world is stretched to fill the canvas (no letterbox bars,
    *  but distorts aspect). When false, fit proportionally (undistorted). */
   stretchToFit: boolean;
@@ -254,6 +258,7 @@ interface UIStore {
   setOverlaysVisible: (types: string[], visible: boolean) => void;
   toggleOverlay: (type: string) => void;
   setLayerOpacity: (opacity: number) => void;
+  setHoverInfo: (c: CellInfo | null) => void;
   setLandmassSource: (source: LandmassSource) => void;
   setStretchToFit: (v: boolean) => void;
   setTerrainParams: (p: Partial<TerrainParams>) => void;
@@ -372,6 +377,7 @@ export const useUIStore = create<UIStore>((set) => ({
   },
   layerOpacity: 1,
   activeMapTheme: null,
+  hoverInfo: null,
   stretchToFit: true,
   landmassSource: "none",
   terrainParams: { density: 0.5, height: 0.5, spread: 0.5, roughness: 0.4, seed: null, mode: "shape" },
@@ -473,6 +479,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setSelectedChain: (id) => set({ selectedChain: id }),
   setSimRunning: (running) => set({ simRunning: running }),
   setLayerOpacity: (opacity) => set({ layerOpacity: opacity }),
+  setHoverInfo: (c) => set({ hoverInfo: c }),
 
   setOverlayVisible: (type, visible) =>
     set((state) => ({

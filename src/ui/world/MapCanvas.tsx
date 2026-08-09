@@ -10,7 +10,7 @@ import { useUIStore } from "@state/uiStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useSettingsStore } from "@state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates } from "@bridge";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo } from "@bridge";
 import type { MerchantRoute, FuturesLane, Toponym } from "@types";
 import { goodOverlayKey, GOOD_DEFS } from "@goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types";
@@ -1625,6 +1625,12 @@ export function MapCanvas() {
     }
   }, [applyBrush, setInspectedCell, setSelectedHub, setSelectedGood, refreshTiles, requestRender]);
 
+  // Hover-readout throttling state (see the block inside onPointerMove).
+  const lastHoverCellRef = useRef("");
+  const lastHoverAtRef = useRef(0);
+  const hoverSeqRef = useRef(0);
+  const setHoverInfo = useUIStore((s) => s.setHoverInfo);
+
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const viewport = viewportRef.current;
     const m = metaRef.current;
@@ -1636,6 +1642,25 @@ export function MapCanvas() {
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
     const { wx, wy } = viewport.screenToWorld(screenX, screenY);
+
+    // STATUSBAR HOVER READOUT (§8.18) — the map key for the layers that have no
+    // legend. De-duplicated by CELL and time-throttled, so a fast sweep costs one
+    // IPC every 60 ms rather than one per pixel; the sequence guard stops a slow
+    // reply from overwriting a newer cell's answer.
+    if (e.buttons === 0) {
+      const cx = Math.floor(wx);
+      const cy = Math.floor(wy);
+      const key = `${cx},${cy}`;
+      const now = performance.now();
+      if (key !== lastHoverCellRef.current && now - lastHoverAtRef.current > 60) {
+        lastHoverCellRef.current = key;
+        lastHoverAtRef.current = now;
+        const seq = ++hoverSeqRef.current;
+        getCellInfo(cx, cy)
+          .then((info) => { if (seq === hoverSeqRef.current) setHoverInfo(info); })
+          .catch(() => { /* off-grid or mid-regeneration: leave the last reading */ });
+      }
+    }
 
     // Hover shine: highlight the settlement under the cursor so it's clear what a
     // click will select (inspection tools, not while painting/panning).
