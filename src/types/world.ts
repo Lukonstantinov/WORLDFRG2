@@ -204,3 +204,27 @@ export interface CoarsePreview {
    *  0 = neutral, 1 = warm, 2 = cold. Same shape as `Streamline`. */
   streamlines: Streamline[];
 }
+
+/** RENDER PALETTES — served by `get_render_palettes` straight out of the Rust
+ *  renderer (`palette_commands.rs`), so the legend reads the SAME tables that paint
+ *  the pixels rather than keeping a copy that can drift. See CLAUDE.md §8.18. */
+export interface RampStop {
+  /** Position in the ramp's own units: metres · °C · normalised depth · or the
+   *  band's upper bound in mm for the classed precipitation scale. */
+  at: number;
+  color: string;
+}
+export interface ClassColor {
+  code: number;
+  color: string;
+}
+export interface RenderPalettes {
+  elevation: RampStop[];
+  bathymetry: RampStop[];
+  temperature: RampStop[];
+  precipitation: RampStop[];
+  koppen: ClassColor[];
+  biome: ClassColor[];
+  soil: ClassColor[];
+  elev_max_m: number;
+}

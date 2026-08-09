@@ -204,7 +204,7 @@ fn render_climate(tile: &TileData, rgba: &mut [u8]) {
     }
 }
 
-fn koppen_color(code: u8) -> (u8, u8, u8) {
+pub fn koppen_color(code: u8) -> (u8, u8, u8) {
     match code {
         1 => (0, 0, 255),       // Af - tropical rainforest
         2 => (0, 120, 255),     // Am - tropical monsoon
@@ -386,7 +386,7 @@ fn render_soil(tile: &TileData, rgba: &mut [u8]) {
     }
 }
 
-fn soil_color(code: u8) -> (u8, u8, u8) {
+pub fn soil_color(code: u8) -> (u8, u8, u8) {
     match code {
         1 => (180, 50, 50),    // oxisol
         2 => (200, 80, 60),    // ultisol
@@ -476,7 +476,7 @@ fn render_biomes(tile: &TileData, rgba: &mut [u8]) {
 /// Base colour per biome code. Greens darken with canopy closure, open country
 /// runs olive→straw→tan with aridity, wetlands hold a blue-green cast and the
 /// cryosphere is near-white, so the map reads correctly even in greyscale.
-fn biome_color(b: u8) -> (u8, u8, u8) {
+pub fn biome_color(b: u8) -> (u8, u8, u8) {
     use crate::sim::biome::*;
     match b {
         // Tropical forest

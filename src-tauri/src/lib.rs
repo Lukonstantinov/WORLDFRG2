@@ -7,7 +7,7 @@ pub mod commands;
 pub mod sim;
 pub mod import;
 
-use commands::{world_commands, tile_commands, paint_commands, query_commands, template_commands, sim_commands, file_commands, goods_commands, goods_import, campaign_commands, import_commands, preview_commands};
+use commands::{world_commands, tile_commands, paint_commands, query_commands, template_commands, sim_commands, file_commands, goods_commands, goods_import, campaign_commands, import_commands, preview_commands, palette_commands};
 use db::WorldDb;
 use tauri::Manager;
 
@@ -86,6 +86,7 @@ pub fn run() {
             sim_commands::sim_classify_climate,
             sim_commands::sim_rivers_hydrology,
             sim_commands::sim_soil_fertility,
+            palette_commands::get_render_palettes,
             preview_commands::preview_zonal_profile,
             preview_commands::preview_coarse_climate,
             sim_commands::sim_generate_terrain_cordillera,

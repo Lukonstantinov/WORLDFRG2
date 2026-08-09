@@ -835,6 +835,9 @@ commands/
                                   reject, never a silent drop
   import_commands.rs            ← import_world_layers (layered world import)
   preview_commands.rs           ← preview_zonal_profile / preview_coarse_climate (§8.14)
+  palette_commands.rs           ← get_render_palettes (§8.18) — serves the renderer's
+                                  OWN colour tables to the legend, so the key cannot
+                                  drift from the map. Read-only, touches no tile
   template_commands.rs          ← Image → land/sea detection (4-bit quantization)
   file_commands.rs              ← Save/open world (.worldforge), export heightmap/layers
 
@@ -959,6 +962,7 @@ state/  (Zustand)
   uiStore.ts                    ← tool, layer, workflow step, overlayVisibility, panel flags, bioParams
   goodsStore.ts                 ← goods spec being edited
   viewportStore.ts              ← camera state, tile invalidation
+  paletteStore.ts               ← The renderer's colour tables, fetched once (§8.18)
   settingsStore.ts              ← app appearance: the overlay-line palette AND the map
                                   label typography (§8.11). Presets + localStorage +
                                   per-world persistence via a VERSIONED envelope
@@ -999,7 +1003,11 @@ ui/world/  — map & world
                                   overlay some plate uses
   StatusBar.tsx · WindowBar.tsx ← Bottom status / window chrome
   InfoPanel.tsx                 ← Right-click cell inspector
-  ElevationLegend/Histogram.tsx ← Elevation legend + distribution chart
+  LayerLegend.tsx               ← THE MAP KEY (§8.18) — exact, renderer-sourced keys
+                                  for elevation · terrain · temperature · sst ·
+                                  precipitation · climate. Colours come from
+                                  `get_render_palettes`, never a local copy
+  ElevationHistogram.tsx        ← Elevation distribution chart
   (LatitudeControl.tsx removed — see ui/workflow/PlanetControls.tsx)
   climate.ts                    ← Köppen → human phrase helpers
   HydrologyPanel.tsx            ← Rivers/lakes + aquatic (fish assemblage, limnology)
@@ -1763,6 +1771,51 @@ plausible size with things that aren't biology. Six groups now: Terrain · Ocean
 Atmosphere · Climate & Biomes · Settlement · Hazards. `ridges` is reachable for the
 first time — it had always existed in `ActiveLayer` and in `render_tile`
 (`render_ridges`) but belonged to no group.
+
+---
+
+### 8.18 The palette is served, not copied (`commands/palette_commands.rs`)
+
+The legend used to keep **hand-maintained copies** of the renderer's colour tables —
+four of them, across three files, none checked against the Rust that paints the
+pixels. §8.12 already warned about this for `biome_color`/`BIOME_SWATCH`. They
+drifted anyway, in two measured ways:
+
+- **The Elevation layer's sea key ran BACKWARDS.** `ElevationLegend.SEA_BANDS` was
+  copied from `render_land`'s bathymetry, but `render_elevation` drew its own ramp
+  `(10+d·10, 25+d·30, 70+d·100)` — dark shelf *brightening* to abyss. Reading a
+  deep-ocean colour off the map and looking it up in the key landed you on "Shelf".
+- **The land bands implied a linear scale the ramp never had.** Six equal blocks
+  labelled 0/1500/3000/5000/7000/8848 m described stops that actually fell at
+  1327/3097/5309/7521 m.
+
+`get_render_palettes` serves `ELEVATION_STOPS`, `BATHYMETRY_STOPS`,
+`TEMPERATURE_STOPS`, `PRECIP_BANDS` and the Köppen/biome/soil class colours straight
+out of `tile_image.rs`. **This removes the second copy rather than testing it** — the
+legend cannot be wrong about the map without the map being wrong about itself.
+
+Three rules:
+
+- **Never reintroduce a hand-copied colour table in the frontend.** If a legend needs
+  a colour, it comes through `usePaletteStore`. A test comparing two copies only
+  catches drift after someone remembers to write it; having one copy cannot drift.
+- **A ramp is DATA, not a chain of branches.** Every continuous ramp goes through
+  `ramp_lookup` over a `(position, colour)` stop table, which is exactly what lets the
+  same constants serve both the renderer and the legend. A ramp written as `if e <
+  0.15 { … } else if …` cannot be served, and that is how the old drift started.
+- **Position a legend's labels at each stop's TRUE value**, never at even intervals —
+  even spacing is what made the old land key misreport by up to ~520 m.
+
+`LayerLegend.tsx` covers the six layers with an exact key (elevation · terrain ·
+temperature · sst · precipitation · climate). The layers whose ramps are still
+written inline in Rust are **deliberately left without a key** rather than given an
+invented one — a legend that guesses is how this broke the first time. They are
+served by the StatusBar hover readout, which reports the real value under the cursor.
+
+Guarded in Rust by `koppen_colors_are_distinct` (Dsc and Dsd shipped IDENTICAL, so
+two zones rendered as one), `elevation_ramp_is_monotone_in_lightness`,
+`bathymetry_darkens_with_depth`, `precipitation_bands_are_sequential_and_never_neutral`
+and `temperature_ramp_pivots_on_freezing`.
 
 ---
 

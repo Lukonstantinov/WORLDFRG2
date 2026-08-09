@@ -1,6 +1,6 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
 import { invoke } from "@tauri-apps/api/core";
-import type { CampaignInfo, CellInfo, EconomySnapshot, LakeData, LakeNode, OpenWorldResult, PaintValue, RidgeLine, RiverData, RiverNode, Settlement, SimRiversResult, SimRunAllResult, SimSettlementsResult, TileResponse, Toponym, WorldMeta } from "@types";
+import type { CampaignInfo, CellInfo, EconomySnapshot, LakeData, LakeNode, OpenWorldResult, PaintValue, RidgeLine, RiverData, RiverNode, Settlement, SimRiversResult, SimRunAllResult, SimSettlementsResult, TileResponse, Toponym, WorldMeta, RenderPalettes } from "@types";
 import type { ElevationBand, OverlayVectors, OverlaysState, Streamline } from "./types";
 
 export async function newWorld(name: string, gridWidth: number, gridHeight: number): Promise<WorldMeta> {
@@ -540,4 +540,11 @@ export async function getProvinceTerrainCrop(
   maxDim = 130,
 ): Promise<import("@types").ProvinceTerrainCrop | null> {
   return invoke("get_province_terrain_crop", { provinceId, maxDim });
+}
+
+/** The renderer's own colour tables (elevation · bathymetry · temperature ·
+ *  precipitation ramps, plus the Köppen/biome/soil class colours). The legend reads
+ *  these instead of keeping its own copy — see CLAUDE.md §8.18. */
+export async function getRenderPalettes(): Promise<RenderPalettes> {
+  return await invoke("get_render_palettes");
 }
