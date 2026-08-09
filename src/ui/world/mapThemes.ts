@@ -196,6 +196,44 @@ export function mapThemeById(id: string | null): MapTheme | undefined {
   return id ? MAP_THEMES.find((t) => t.id === id) : undefined;
 }
 
+/** The pipeline step each base layer's data comes from.
+ *
+ *  Selecting a layer whose phase hasn't run gives a blank or stale map with no
+ *  explanation — the app's single most confusing first-run moment. Knowing the step
+ *  lets the Toolbar dim the row and say what it is waiting for, which is the same
+ *  thing QGIS's "filter legend by map content" does for the same reason. */
+export const LAYER_REQUIRES: Record<ActiveLayer, number> = {
+  land: 1,
+  plates: 1,
+  elevation: 2,
+  terrain: 2,
+  ridges: 2,
+  shelf: 2,
+  currents: 3,
+  sst: 3,
+  salinity: 3,
+  temperature: 3,
+  precipitation: 3,
+  snow: 3,
+  wind: 3,
+  windspeed: 3,
+  climate: 4,
+  fisheries: 6,
+  biomes: 6,
+  soil: 6,
+  fertility: 6,
+  habitability: 7,
+  storm: 8,
+  reef: 8,
+  shark: 8,
+  shipworm: 8,
+  disease: 8,
+};
+
+export function layerReady(layer: ActiveLayer, stepCompleted: Record<number, boolean>): boolean {
+  return !!stepCompleted[LAYER_REQUIRES[layer] ?? 1];
+}
+
 /** Is this plate's data actually generated yet? */
 export function themeReady(theme: MapTheme, stepCompleted: Record<number, boolean>): boolean {
   return !!stepCompleted[theme.requires];
