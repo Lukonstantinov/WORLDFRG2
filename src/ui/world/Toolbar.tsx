@@ -4,6 +4,7 @@ import { useGoodsStore } from "@state/goodsStore";
 import { useWorldStore } from "@state/worldStore";
 import type { ActiveTool, ActiveLayer } from "@types";
 import { GOOD_DEFS, goodOverlayKey, goodCategory, CATEGORY_ORDER } from "@goods";
+import { MAP_THEMES, applyMapTheme, themeReady } from "./mapThemes";
 /** Best-effort CSS colour → #rrggbb for an <input type="color"> (which only takes
  *  hex). Understands #rgb/#rrggbb and rgb()/rgba(); falls back to dark grey. */
 function hexOfBorder(css: string): string {
@@ -30,34 +31,49 @@ const tools: { id: ActiveTool; label: string; icon: string; tip: string }[] = [
   { id: "volcano", label: "Volc", icon: "\u25C6", tip: "Click to place volcano, Shift = remove" },
 ];
 
+/** Layers grouped by what they actually ARE.
+ *
+ *  The previous grouping misfiled in both directions: "Biosphere" held `climate`
+ *  (Köppen is an atmospheric classification), `soil` (pedosphere) and
+ *  `habitability` (a human settlement score), while "Ocean" held four biological
+ *  layers plus `storm`, which is a cyclone belt and so atmospheric. The cause was
+ *  under-population — the app has only TWO genuinely biological non-hazard layers,
+ *  so a plausible-sized "Biosphere" group was made by sweeping in things that
+ *  aren't biology.
+ *
+ *  Two changes carry that fix. HAZARDS becomes its own group: the five risk fields
+ *  share one semantic ("where is it dangerous") and were split across two groups
+ *  for no reason. SETTLEMENT becomes its own group: `soil → fertility →
+ *  habitability` is literally the causal chain phases 6 and 7 compute.
+ *
+ *  `ridges` is listed here for the first time — it has always existed in
+ *  `ActiveLayer` and in `render_tile` (`render_ridges`), but belonged to no group,
+ *  so it was unreachable from the UI. */
 const layerGroups: { group: string; layers: { id: ActiveLayer; label: string }[] }[] = [
   {
-    group: "Physical",
+    group: "Terrain",
     layers: [
       { id: "land", label: "Land / Sea" },
       { id: "elevation", label: "Elevation" },
       { id: "terrain", label: "Hillshade" },
+      { id: "ridges", label: "Ridges" },
       { id: "plates", label: "Plates" },
+      { id: "shelf", label: "Continental Shelf" },
     ],
   },
   {
     group: "Ocean",
     layers: [
-      { id: "shelf", label: "Shelf" },
-      { id: "fisheries", label: "Fisheries" },
       { id: "currents", label: "Currents" },
+      { id: "sst", label: "Sea-Surface Temp" },
       { id: "salinity", label: "Salinity" },
-      { id: "shark", label: "Shark Waters" },
-      { id: "shipworm", label: "Shipworm Waters" },
-      { id: "storm", label: "Storm Belts" },
-      { id: "reef", label: "Reef Hazards" },
+      { id: "fisheries", label: "Fisheries" },
     ],
   },
   {
     group: "Atmosphere",
     layers: [
       { id: "temperature", label: "Temperature" },
-      { id: "sst", label: "Sea-Surface Temp" },
       { id: "precipitation", label: "Precipitation" },
       { id: "snow", label: "Snow Cover" },
       { id: "wind", label: "Wind" },
@@ -65,13 +81,27 @@ const layerGroups: { group: string; layers: { id: ActiveLayer; label: string }[]
     ],
   },
   {
-    group: "Biosphere",
+    group: "Climate & Biomes",
     layers: [
-      { id: "climate", label: "Climate" },
+      { id: "climate", label: "Climate (Köppen)" },
       { id: "biomes", label: "Biomes" },
+    ],
+  },
+  {
+    group: "Settlement",
+    layers: [
       { id: "soil", label: "Soil" },
       { id: "fertility", label: "Fertility" },
       { id: "habitability", label: "Habitability" },
+    ],
+  },
+  {
+    group: "Hazards",
+    layers: [
+      { id: "storm", label: "Storm Belts" },
+      { id: "reef", label: "Reef Hazards" },
+      { id: "shark", label: "Shark Waters" },
+      { id: "shipworm", label: "Shipworm Waters" },
       { id: "disease", label: "Disease (Malaria)" },
     ],
   },
@@ -152,10 +182,13 @@ export function Toolbar() {
   const showBankIcons = useUIStore((s) => s.showBankIcons);
   const setShowBankIcons = useUIStore((s) => s.setShowBankIcons);
   const setGoodDetail = useUIStore((s) => s.setGoodDetail);
+  const activeMapTheme = useUIStore((s) => s.activeMapTheme);
+  const stepCompleted = useUIStore((s) => s.stepCompleted);
+  const activePlate = MAP_THEMES.find((t) => t.id === activeMapTheme);
   const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({});
   // Collapsible top-level sections (the big lists start collapsed to declutter).
   const [openSection, setOpenSection] = useState<Record<string, boolean>>({
-    Layers: true, Overlays: true, Climate: true, Biological: false, "Trade Goods": false, Provinces: false, View: true,
+    Plates: true, Layers: true, Overlays: true, Climate: true, Biological: false, "Trade Goods": false, Provinces: false, View: true,
   });
   const toggleSection = (k: string) => setOpenSection((s) => ({ ...s, [k]: !s[k] }));
   const bioParams = useUIStore((s) => s.bioParams);
@@ -251,6 +284,48 @@ export function Toolbar() {
           />
         </div>
       )}
+
+      <div style={divider} />
+
+      {/* Map plates — a whole composition (base raster + overlays + label
+          typography), the way an atlas is actually organised. Display-only: a
+          plate sets what you SEE, never what the world IS (rule 14). */}
+      <div style={section}>
+        <SectionHead title="Plates" open={openSection.Plates} onToggle={() => toggleSection("Plates")} />
+        {openSection.Plates && (<>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3 }}>
+            {MAP_THEMES.map((t) => {
+              const ready = themeReady(t, stepCompleted);
+              const on = activeMapTheme === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => { if (ready) applyMapTheme(t); }}
+                  disabled={!ready}
+                  title={ready ? t.blurb : `Needs step ${t.requires} — not generated yet`}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5, overflow: "hidden",
+                    padding: "4px 6px", borderRadius: 4, fontSize: 10.5, textAlign: "left",
+                    cursor: ready ? "pointer" : "not-allowed",
+                    border: `1px solid ${on ? "#4a90d0" : "#20304a"}`,
+                    background: on ? "#1e3a58" : "#0e1826",
+                    color: !ready ? "#3d4c5e" : on ? "#cfe2f6" : "#7d97b0",
+                    fontWeight: on ? 600 : 400,
+                  }}
+                >
+                  <span style={{ fontSize: 12, lineHeight: 1, opacity: ready ? 1 : 0.5 }}>{t.glyph}</span>
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 9, color: "#5a7390", marginTop: 5, lineHeight: 1.45 }}>
+            {activePlate
+              ? activePlate.blurb
+              : "Custom view. A plate composes base layer, overlays and label typography together."}
+          </div>
+        </>)}
+      </div>
 
       <div style={divider} />
 

@@ -73,6 +73,11 @@ interface UIStore {
   simRunning: boolean;
   overlayVisibility: Record<string, boolean>;
   layerOpacity: number;
+  /** MAP PLATES (ui/world/mapThemes.ts) — the id of the applied plate, or null for
+   *  "Custom". A plate is a named composition of base layer + overlays + label
+   *  typography; picking a layer or flipping an overlay by hand clears this, so the
+   *  chip stops claiming a plate the moment the view stops being one. */
+  activeMapTheme: string | null;
   /** When true, the world is stretched to fill the canvas (no letterbox bars,
    *  but distorts aspect). When false, fit proportionally (undistorted). */
   stretchToFit: boolean;
@@ -366,6 +371,7 @@ export const useUIStore = create<UIStore>((set) => ({
     ...Object.fromEntries(GOOD_DEFS.map((g) => [goodOverlayKey(g.name), false])),
   },
   layerOpacity: 1,
+  activeMapTheme: null,
   stretchToFit: true,
   landmassSource: "none",
   terrainParams: { density: 0.5, height: 0.5, spread: 0.5, roughness: 0.4, seed: null, mode: "shape" },
@@ -450,7 +456,9 @@ export const useUIStore = create<UIStore>((set) => ({
         : { appMode: mode, workflowStep: (state.workflowStep === 11 ? 10 : state.workflowStep) as WorkflowStep }
     ),
   setTool: (tool) => set({ activeTool: tool }),
-  setLayer: (layer) => set({ activeLayer: layer }),
+  // Picking a layer or an overlay by hand means the view is no longer the plate
+  // that was applied — drop the label rather than let it go stale.
+  setLayer: (layer) => set({ activeLayer: layer, activeMapTheme: null }),
   setBrushRadius: (r) => set({ brushRadius: r }),
   setElevationValue: (v) => set({ elevationValue: v }),
   setStatus: (text) => set({ statusText: text }),
@@ -469,6 +477,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setOverlayVisible: (type, visible) =>
     set((state) => ({
       overlayVisibility: { ...state.overlayVisibility, [type]: visible },
+      activeMapTheme: null,
     })),
 
   // Bulk-set many overlay keys at once (e.g. a whole good category toggled from
@@ -477,7 +486,7 @@ export const useUIStore = create<UIStore>((set) => ({
     set((state) => {
       const next = { ...state.overlayVisibility };
       for (const t of types) next[t] = visible;
-      return { overlayVisibility: next };
+      return { overlayVisibility: next, activeMapTheme: null };
     }),
 
   toggleOverlay: (type) =>
@@ -486,6 +495,7 @@ export const useUIStore = create<UIStore>((set) => ({
         ...state.overlayVisibility,
         [type]: !state.overlayVisibility[type],
       },
+      activeMapTheme: null,
     })),
 
   setLandmassSource: (source) => set({ landmassSource: source }),
@@ -579,6 +589,7 @@ export const useUIStore = create<UIStore>((set) => ({
       workflowStep: step,
       activeLayer: defaults.layer,
       activeTool: defaults.tool,
+      activeMapTheme: null,
     });
   },
 

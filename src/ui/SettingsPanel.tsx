@@ -8,6 +8,8 @@ import {
   LABEL_STYLE_DEFAULTS, LABEL_FONTS, LABEL_FONT_LABELS,
   type LabelKey, type LabelFontKey,
 } from "@canvas/OverlayManager";
+import { useUIStore } from "@state/uiStore";
+import { MAP_THEMES, applyMapTheme, themeReady } from "@ui/world/mapThemes";
 
 /** Top-screen Appearance settings: recolour every trade/connection overlay line.
  *  Edits flow straight into the renderer (settingsStore → OverlayManager) and are
@@ -105,7 +107,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const { lineColors, preset, setLineColor, resetLineColor, resetAll, applyPreset,
     labelStyles, labelTheme, setLabelStyle, resetLabelStyle, applyLabelTheme, resetLabels } =
     useSettingsStore();
-  const [tab, setTab] = useState<"lines" | "labels">("lines");
+  const [tab, setTab] = useState<"plates" | "lines" | "labels">("plates");
 
   return (
     <div style={{
@@ -130,7 +132,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
         {/* Section tabs */}
         <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
-          {([["lines", "Overlay lines"], ["labels", "Map labels"]] as const).map(([id, lbl]) => (
+          {([["plates", "Map plates"], ["lines", "Overlay lines"], ["labels", "Map labels"]] as const).map(([id, lbl]) => (
             <button key={id} onClick={() => setTab(id)} style={{
               padding: "5px 12px", borderRadius: 7, fontSize: 12, cursor: "pointer",
               border: `1px solid ${tab === id ? "#2c5a86" : "#1e2e42"}`,
@@ -140,7 +142,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           ))}
         </div>
 
-        {tab === "labels" ? (
+        {tab === "plates" ? (
+          <PlateSection />
+        ) : tab === "labels" ? (
           <LabelSection
             labelStyles={labelStyles} labelTheme={labelTheme}
             setLabelStyle={setLabelStyle} resetLabelStyle={resetLabelStyle}
@@ -186,6 +190,68 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         )}
       </div>
     </div>
+  );
+}
+
+/** MAP PLATES — the full picker (the Toolbar carries a compact twin of this).
+ *
+ *  An atlas plate is a COMPOSITION, not a layer, so each row states what it
+ *  composes: how many overlays it lights, and which label typography it sets. A
+ *  plate whose data has not been generated yet reads dimmed with the step it is
+ *  waiting on rather than being hidden — you can see what the finished world will
+ *  offer before you have built it, which is the same "show the shape of the whole
+ *  pipeline" logic the workflow panel uses. */
+function PlateSection() {
+  const activeMapTheme = useUIStore((s) => s.activeMapTheme);
+  const stepCompleted = useUIStore((s) => s.stepCompleted);
+  return (
+    <>
+      <div style={{ color: muted, fontSize: 11, marginBottom: 12, lineHeight: 1.5 }}>
+        A plate sets the base layer, its overlays and the label typography together — the
+        way a published atlas is organised. Applying one changes only what you see; it
+        never alters the world.
+      </div>
+
+      {MAP_THEMES.map((t) => {
+        const ready = themeReady(t, stepCompleted);
+        const on = activeMapTheme === t.id;
+        return (
+          <div
+            key={t.id}
+            onClick={() => { if (ready) applyMapTheme(t); }}
+            style={{
+              display: "flex", gap: 10, alignItems: "flex-start",
+              padding: "9px 10px", marginBottom: 5, borderRadius: 8,
+              cursor: ready ? "pointer" : "not-allowed",
+              border: `1px solid ${on ? "#2c5a86" : "#17222f"}`,
+              background: on ? "#16293c" : "#0d1219",
+              opacity: ready ? 1 : 0.5,
+            }}
+          >
+            <span style={{
+              width: 26, height: 26, flex: "0 0 auto", borderRadius: 6,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 14, background: on ? "#1e3a58" : "#111b26",
+              border: `1px solid ${on ? "#3c6f9e" : "#1c2836"}`,
+              color: on ? "#cfe2f6" : "#6a86a6",
+            }}>{t.glyph}</span>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: on ? 600 : 500, color: on ? "#cfe2f6" : "#a8bed4" }}>
+                {t.name}
+              </div>
+              <div style={{ fontSize: 11, color: muted, lineHeight: 1.45, marginTop: 1 }}>
+                {t.blurb}
+              </div>
+              <div style={{ fontSize: 10, color: "#4d6480", marginTop: 4, fontFamily: "ui-monospace, monospace" }}>
+                {ready
+                  ? `${t.overlays.length} overlays${t.labelTheme ? ` · ${t.labelTheme} labels` : ""}`
+                  : `needs step ${t.requires}`}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </>
   );
 }
 
