@@ -301,6 +301,22 @@ fn render_supertiles(
 /// output cell (lx, ly) reads global cell (tx·s·128 + lx·s, ty·s·128 + ly·s).
 /// Every columnar field is copied so `render_tile` works unchanged for any
 /// layer. Returns the tile plus the max version of the covered base tiles.
+/// One global cell's `(terrain, elevation)` out of the loaded base tiles, or `None`
+/// when that tile isn't in the set (world edge / not loaded). Used by the supertile
+/// elevation average, which reads a whole s×s block rather than a single cell.
+fn read_base_cell(
+    base: &HashMap<(i32, i32), (i64, TileData)>,
+    gx: i32,
+    gy: i32,
+    t: i32,
+) -> Option<(u8, f32)> {
+    let (btx, bty) = (gx.div_euclid(t), gy.div_euclid(t));
+    let (sx, sy) = (gx.rem_euclid(t), gy.rem_euclid(t));
+    let (_, src) = base.get(&(btx, bty))?;
+    let si = (sy * t + sx) as usize;
+    Some((src.terrain[si], src.elevation[si]))
+}
+
 fn sample_supertile(
     tx: i32,
     ty: i32,
@@ -343,7 +359,38 @@ fn sample_supertile(
             let di = (ly * t + lx) as usize;
 
             out.terrain[di] = src.terrain[si];
-            out.elevation[di] = src.elevation[si];
+            // ELEVATION IS AREA-AVERAGED, every other column point-sampled.
+            //
+            // Relief at zoom-out used to be hillshaded from a DECIMATED DEM (every
+            // s-th cell), so it aliased: ridges dropped out between samples and
+            // sampling noise appeared as relief that isn't there. Area-averaging is
+            // what generalisation means at small scale — the same majority-vote vs
+            // point-sample lesson §8.14 already records for the coarse climate
+            // preview.
+            //
+            // The average is restricted to cells of the SAME terrain class as this
+            // output cell, so a coastal block cannot drag land elevation down toward
+            // sea level. `terrain` itself must stay point-sampled — fractional land
+            // is meaningless. Elevation is the only column whose meaning survives
+            // averaging at all.
+            out.elevation[di] = if s > 1 {
+                let want = src.terrain[si];
+                let mut sum = 0.0f32;
+                let mut cnt = 0u32;
+                for oy in 0..s {
+                    for ox in 0..s {
+                        if let Some((ter, ev)) = read_base_cell(base, gx + ox, gy + oy, t) {
+                            if ter == want {
+                                sum += ev;
+                                cnt += 1;
+                            }
+                        }
+                    }
+                }
+                if cnt > 0 { sum / cnt as f32 } else { src.elevation[si] }
+            } else {
+                src.elevation[si]
+            };
             out.sea_depth[di] = src.sea_depth[si];
             out.is_shelf[di] = src.is_shelf[si];
             out.is_shelf_edge[di] = src.is_shelf_edge[si];

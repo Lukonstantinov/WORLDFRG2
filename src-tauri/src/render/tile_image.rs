@@ -61,17 +61,8 @@ fn render_land(tile: &TileData, rgba: &mut [u8]) {
             rgba[offset + 2] = b;
             rgba[offset + 3] = 255;
         } else {
-            // Sea: bathymetry coloring matching WF1
-            let d = tile.sea_depth[i].clamp(0.0, 1.0);
-            let (r, g, b) = if d < 0.10 {
-                lerp_rgb((29, 120, 196), (26, 100, 180), d / 0.10)
-            } else if d < 0.25 {
-                lerp_rgb((26, 100, 180), (20, 74, 140), (d - 0.10) / 0.15)
-            } else if d < 0.65 {
-                lerp_rgb((20, 74, 140), (5, 15, 46), (d - 0.25) / 0.40)
-            } else {
-                lerp_rgb((5, 15, 46), (2, 5, 20), (d - 0.65) / 0.35)
-            };
+            // Sea: the shared bathymetry ramp (see BATHYMETRY_STOPS).
+            let (r, g, b) = bathymetry_color(tile.sea_depth[i]);
             rgba[offset] = r;
             rgba[offset + 1] = g;
             rgba[offset + 2] = b;
@@ -91,34 +82,97 @@ fn render_elevation(tile: &TileData, rgba: &mut [u8]) {
             rgba[offset + 2] = b;
             rgba[offset + 3] = 255;
         } else {
-            // Sea depth coloring
-            let d = tile.sea_depth[i].clamp(0.0, 1.0);
-            rgba[offset] = (10.0 + d * 10.0) as u8;
-            rgba[offset + 1] = (25.0 + d * 30.0) as u8;
-            rgba[offset + 2] = (70.0 + d * 100.0) as u8;
+            // Sea: the SHARED bathymetry ramp. This layer used to invert it —
+            // dark shelf brightening to abyss — which is what made its own legend
+            // wrong. See BATHYMETRY_STOPS.
+            let (r, g, b) = bathymetry_color(tile.sea_depth[i]);
+            rgba[offset] = r;
+            rgba[offset + 1] = g;
+            rgba[offset + 2] = b;
             rgba[offset + 3] = 255;
         }
     }
 }
 
-fn elevation_color(e: f32) -> (u8, u8, u8) {
-    // Green -> yellow -> brown -> white gradient
-    if e < 0.15 {
-        let t = e / 0.15;
-        lerp_rgb((56, 118, 50), (86, 148, 60), t)
-    } else if e < 0.35 {
-        let t = (e - 0.15) / 0.2;
-        lerp_rgb((86, 148, 60), (170, 160, 60), t)
-    } else if e < 0.6 {
-        let t = (e - 0.35) / 0.25;
-        lerp_rgb((170, 160, 60), (140, 100, 50), t)
-    } else if e < 0.85 {
-        let t = (e - 0.6) / 0.25;
-        lerp_rgb((140, 100, 50), (180, 170, 160), t)
-    } else {
-        let t = (e - 0.85) / 0.15;
-        lerp_rgb((180, 170, 160), (255, 255, 255), t)
+/// Highest elevation the normalised `elevation` column maps to (1.0 = Everest).
+pub const ELEV_MAX_M: f32 = 8848.0;
+
+/// Piecewise-linear lookup over `(x, colour)` stops, clamped at both ends. Stops
+/// must be sorted ascending on x. Every continuous ramp in this file goes through
+/// here, so a ramp is DATA (a stop table) rather than a chain of hand-written
+/// branches — which is what lets `palette_commands.rs` hand the exact same tables
+/// to the frontend legend instead of the legend keeping its own copy.
+pub fn ramp_lookup(x: f32, stops: &[(f32, (u8, u8, u8))]) -> (u8, u8, u8) {
+    if stops.is_empty() {
+        return (128, 128, 128);
     }
+    if x <= stops[0].0 {
+        return stops[0].1;
+    }
+    let last = stops[stops.len() - 1];
+    if x >= last.0 {
+        return last.1;
+    }
+    for w in stops.windows(2) {
+        let (x0, c0) = w[0];
+        let (x1, c1) = w[1];
+        if x <= x1 {
+            let span = x1 - x0;
+            let t = if span.abs() < f32::EPSILON { 0.0 } else { (x - x0) / span };
+            return lerp_rgb(c0, c1, t);
+        }
+    }
+    last.1
+}
+
+/// HYPSOMETRIC TINT on the conventional atlas breaks (0 · 200 · 500 · 1000 · 2000 ·
+/// 3000 · 5000 m), in METRES rather than in fractions of Everest.
+///
+/// Two properties matter here and both were wrong before:
+///
+/// 1. **The breaks are where land actually is.** The old anchors were linear in
+///    normalised elevation — 0.15/0.35/0.60/0.85, i.e. 1327/3097/5309/7521 m — so
+///    roughly the top two-thirds of the ramp served the few percent of land above
+///    3000 m while almost every inhabited lowland fell inside a single band.
+/// 2. **It is MONOTONE IN LIGHTNESS.** The old ramp ran L* 44 → 65 → back down to
+///    45 through its dark brown midband, so a shaded 5000 m ridge and a sunlit
+///    lowland resolved to the same value and height fought the hillshade for the
+///    same channel. Imhof's rule is the one applied here: higher is brighter.
+pub const ELEVATION_STOPS: [(f32, (u8, u8, u8)); 8] = [
+    (0.0, (76, 116, 80)),
+    (200.0, (124, 154, 94)),
+    (500.0, (172, 182, 112)),
+    (1000.0, (203, 194, 136)),
+    (2000.0, (219, 200, 155)),
+    (3000.0, (231, 210, 186)),
+    (5000.0, (241, 231, 222)),
+    (8848.0, (255, 255, 255)),
+];
+
+fn elevation_color(e: f32) -> (u8, u8, u8) {
+    ramp_lookup(e.clamp(0.0, 1.0) * ELEV_MAX_M, &ELEVATION_STOPS)
+}
+
+/// THE ONE BATHYMETRY RAMP (normalised depth 0 = shore, 1 = abyss).
+///
+/// `land`, `elevation` and `terrain` each used to carry their own sea colouring,
+/// and `elevation`'s ran the OPPOSITE WAY — `(10+d·10, 25+d·30, 70+d·100)`, i.e.
+/// dark on the shelf and BRIGHTENING with depth. The legend (correctly) described
+/// the shared bright-shelf-to-dark-abyss ramp, so reading a deep-ocean colour off
+/// the Elevation layer and looking it up in the key landed you on "Shelf".
+///
+/// Unifying on this one table fixes the key for all three layers at once, and
+/// keeps the physically sensible direction: deeper is darker.
+pub const BATHYMETRY_STOPS: [(f32, (u8, u8, u8)); 5] = [
+    (0.00, (29, 120, 196)),
+    (0.10, (26, 100, 180)),
+    (0.25, (20, 74, 140)),
+    (0.65, (5, 15, 46)),
+    (1.00, (2, 5, 20)),
+];
+
+fn bathymetry_color(depth: f32) -> (u8, u8, u8) {
+    ramp_lookup(depth.clamp(0.0, 1.0), &BATHYMETRY_STOPS)
 }
 
 fn render_climate(tile: &TileData, rgba: &mut [u8]) {
@@ -165,7 +219,7 @@ fn koppen_color(code: u8) -> (u8, u8, u8) {
         11 => (200, 255, 80),   // Cfa - humid subtropical
         12 => (100, 200, 100),  // Cfb - oceanic
         13 => (50, 150, 50),    // Cfc - subpolar oceanic
-        14 => (0, 255, 150),    // Dfa - hot-summer continental
+        14 => (0, 255, 255),    // Dfa - hot-summer continental
         15 => (55, 200, 255),   // Dfb - warm-summer continental
         16 => (0, 125, 125),    // Dfc - subarctic
         17 => (0, 70, 95),      // Dfd - extreme subarctic
@@ -182,21 +236,47 @@ fn koppen_color(code: u8) -> (u8, u8, u8) {
         28 => (120, 100, 205),  // Dwb - dry-winter warm continental
         29 => (95, 85, 170),    // Dwc - dry-winter subarctic
         30 => (70, 60, 130),    // Dwd - dry-winter extreme subarctic
-        31 => (150, 50, 150),   // Dsd - dry-summer extreme subarctic
+        // Dsd MUST differ from Dsc (20) — the two shipped identical at (150,50,150),
+        // so two distinct Köppen zones rendered as one colour. (150,100,150) is the
+        // published Kottek/Rubel value; codes 1-10 and 15-20 already follow that
+        // table exactly, so this was a transcription gap, not a design choice.
+        31 => (150, 100, 150),  // Dsd - dry-summer extreme subarctic
         32 => (185, 165, 185),  // H  - highland / alpine
         _ => (128, 128, 128),
     }
 }
 
+/// DIVERGING TEMPERATURE RAMP, PIVOTED EXACTLY AT 0 °C.
+///
+/// The freezing isotherm is the only semantically real break on a temperature map —
+/// it decides snow, ice, the Köppen C/D boundary and whether water moves — so it
+/// gets the palette's pale neutral. The old ramp put its light pivot at −5 °C and
+/// left 0 °C at an undistinguished orange-yellow, so the one line a reader looks
+/// for was invisible.
+///
+/// Taken in DEGREES, and shared by the land `temperature` layer and the ocean `sst`
+/// layer, so ONE COLOUR MEANS ONE TEMPERATURE across both plates. They previously
+/// shared a ramp over different domains (−40..30 vs −5..35), which meant identical
+/// colours silently denoted different temperatures depending on which layer you
+/// were looking at.
+pub const TEMPERATURE_STOPS: [(f32, (u8, u8, u8)); 7] = [
+    (-40.0, (5, 48, 97)),
+    (-25.0, (43, 110, 175)),
+    (-12.0, (110, 175, 215)),
+    (0.0, (247, 240, 225)),
+    (12.0, (250, 190, 140)),
+    (25.0, (222, 110, 70)),
+    (40.0, (140, 20, 35)),
+];
+
+fn temperature_color(celsius: f32) -> (u8, u8, u8) {
+    ramp_lookup(celsius, &TEMPERATURE_STOPS)
+}
+
 fn render_temperature(tile: &TileData, rgba: &mut [u8]) {
     for i in 0..PIXEL_COUNT {
         let offset = i * 4;
-        let t = ((tile.temperature[i] + 40.0) / 70.0).clamp(0.0, 1.0);
-        let (r, g, b) = if t < 0.5 {
-            lerp_rgb((0, 0, 200), (200, 200, 50), t * 2.0)
-        } else {
-            lerp_rgb((200, 200, 50), (200, 0, 0), (t - 0.5) * 2.0)
-        };
+        let (r, g, b) = temperature_color(tile.temperature[i]);
         rgba[offset] = r;
         rgba[offset + 1] = g;
         rgba[offset + 2] = b;
@@ -204,8 +284,11 @@ fn render_temperature(tile: &TileData, rgba: &mut [u8]) {
     }
 }
 
-/// Sea-surface temperature (ocean only): same blue→yellow→red ramp as the land
-/// temperature layer, so warm/cold currents read at a glance. Land is transparent.
+/// Sea-surface temperature (ocean only). Uses `temperature_color` on the SAME
+/// absolute-degree scale as the land temperature layer, so a colour read off this
+/// plate means the same temperature it would on that one — the two used to share a
+/// ramp stretched over different domains, which made them quietly incomparable.
+/// Land is transparent.
 fn render_sst(tile: &TileData, rgba: &mut [u8]) {
     for i in 0..PIXEL_COUNT {
         let offset = i * 4;
@@ -213,12 +296,7 @@ fn render_sst(tile: &TileData, rgba: &mut [u8]) {
             rgba[offset + 3] = 0;
             continue;
         }
-        let t = ((tile.sst[i] + 5.0) / 40.0).clamp(0.0, 1.0);
-        let (r, g, b) = if t < 0.5 {
-            lerp_rgb((0, 0, 200), (200, 200, 50), t * 2.0)
-        } else {
-            lerp_rgb((200, 200, 50), (200, 0, 0), (t - 0.5) * 2.0)
-        };
+        let (r, g, b) = temperature_color(tile.sst[i]);
         rgba[offset] = r;
         rgba[offset + 1] = g;
         rgba[offset + 2] = b;
@@ -245,6 +323,39 @@ fn render_snow(tile: &TileData, rgba: &mut [u8]) {
     }
 }
 
+/// PRECIPITATION IN CLASSED ATLAS BANDS (upper bound in mm/yr, ascending).
+///
+/// Rainfall is log-distributed and every published atlas CLASSES it rather than
+/// running a continuous ramp. The old ramp was worse than merely unclassed: it
+/// interpolated tan → blue straight through a neutral grey at ~1000 mm — a
+/// DIVERGING structure used for SEQUENTIAL data. Two consequences, both bad:
+/// 100→500 mm (the arid/semi-humid distinction that decides whether anyone can
+/// farm) separated by roughly a fifth of the colour distance that agronomically
+/// identical 2000→3000 mm received; and the value most temperate land takes
+/// rendered as the neutral grey that normally reads as "no data".
+///
+/// The scheme is sequential and monotone in lightness (a YlGnBu progression), so it
+/// stays readable in greyscale and under deuteranopia.
+pub const PRECIP_BANDS: [(f32, (u8, u8, u8)); 7] = [
+    (125.0, (255, 255, 217)),
+    (250.0, (237, 248, 177)),
+    (500.0, (199, 233, 180)),
+    (1000.0, (127, 205, 187)),
+    (2000.0, (65, 182, 196)),
+    (4000.0, (34, 94, 168)),
+    // Sentinel upper bound — finite so it survives JSON round-tripping to the legend.
+    (99_999.0, (12, 44, 132)),
+];
+
+fn precipitation_color(mm: f32) -> (u8, u8, u8) {
+    for &(upper, c) in PRECIP_BANDS.iter() {
+        if mm < upper {
+            return c;
+        }
+    }
+    PRECIP_BANDS[PRECIP_BANDS.len() - 1].1
+}
+
 fn render_precipitation(tile: &TileData, rgba: &mut [u8]) {
     for i in 0..PIXEL_COUNT {
         let offset = i * 4;
@@ -252,8 +363,7 @@ fn render_precipitation(tile: &TileData, rgba: &mut [u8]) {
             rgba[offset + 3] = 0;
             continue;
         }
-        let p = (tile.precipitation[i] / 3000.0).clamp(0.0, 1.0);
-        let (r, g, b) = lerp_rgb((200, 180, 100), (0, 50, 200), p);
+        let (r, g, b) = precipitation_color(tile.precipitation[i]);
         rgba[offset] = r;
         rgba[offset + 1] = g;
         rgba[offset + 2] = b;
@@ -962,6 +1072,11 @@ fn halo_elev(tile: &TileData, n: &TileNeighbors, x: isize, y: isize) -> f32 {
     tile.elevation[y as usize * SIZE + x as usize]
 }
 
+/// How dark a fully-shadowed slope may get, as a fraction of its own tint. Imhof's
+/// rule is that shadows stay LIGHT and keep their colour — the old 0.15 floor was a
+/// near-black multiply that destroyed hypsometric tint precisely on the mountains.
+const SHADOW_FLOOR: f32 = 0.55;
+
 fn render_terrain_hillshade_halo(tile: &TileData, n: &TileNeighbors, rgba: &mut [u8]) {
     // Directional light from NW (azimuth 315, altitude 45 degrees)
     let az = 315.0_f32.to_radians();
@@ -976,9 +1091,8 @@ fn render_terrain_hillshade_halo(tile: &TileData, n: &TileNeighbors, rgba: &mut 
             let offset = i * 4;
 
             if tile.terrain[i] == 0 {
-                // Sea: simple depth color
-                let d = tile.sea_depth[i].clamp(0.0, 1.0);
-                let (r, g, b) = lerp_rgb((29, 120, 196), (5, 15, 46), d);
+                // Sea: the shared bathymetry ramp (see BATHYMETRY_STOPS).
+                let (r, g, b) = bathymetry_color(tile.sea_depth[i]);
                 rgba[offset] = r;
                 rgba[offset + 1] = g;
                 rgba[offset + 2] = b;
@@ -1004,14 +1118,33 @@ fn render_terrain_hillshade_halo(tile: &TileData, n: &TileNeighbors, rgba: &mut 
             let ny = -dzdy / len;
             let nz = 1.0 / len;
 
-            // Lambertian shading
-            let shade = (nx * light_x + ny * light_y + nz * light_z).clamp(0.15, 1.0);
+            // Lambertian, NORMALISED so flat ground shades to exactly 1.0. Raw
+            // Lambertian gives flat land `sin(45°)` = 0.707, so the whole terrain
+            // layer rendered ~29% darker than the elevation layer showing the very
+            // same hypsometric colours.
+            let lambert = (nx * light_x + ny * light_y + nz * light_z) / light_z;
 
-            // Base elevation color modulated by shade
+            // AERIAL PERSPECTIVE (Imhof): shading contrast is LOW in the lowlands
+            // and rises with elevation, so a summit reads crisp while a plain stays
+            // soft and keeps its tint. The old code did the reverse — a flat 0.15
+            // shadow floor crushed mountain colour to 21% of its value, exactly
+            // where hypsometric tint carries the most information.
+            let contrast = 0.42 + 0.58 * e.clamp(0.0, 1.0);
+            let shade = (1.0 + (lambert - 1.0) * contrast).clamp(SHADOW_FLOOR, 1.30);
+
+            // Shadow is SKYLIGHT, and skylight is blue: a shaded slope should lose
+            // more red than blue rather than darkening to neutral grey.
+            let shadow = (1.0 - shade).max(0.0);
+            let (kr, kg, kb) = (
+                shade * (1.0 - 0.10 * shadow),
+                shade * (1.0 - 0.03 * shadow),
+                shade * (1.0 + 0.14 * shadow),
+            );
+
             let (br, bg, bb) = elevation_color(e);
-            rgba[offset] = (br as f32 * shade) as u8;
-            rgba[offset + 1] = (bg as f32 * shade) as u8;
-            rgba[offset + 2] = (bb as f32 * shade) as u8;
+            rgba[offset] = (br as f32 * kr).clamp(0.0, 255.0) as u8;
+            rgba[offset + 1] = (bg as f32 * kg).clamp(0.0, 255.0) as u8;
+            rgba[offset + 2] = (bb as f32 * kb).clamp(0.0, 255.0) as u8;
             rgba[offset + 3] = 255;
         }
     }
@@ -1229,6 +1362,125 @@ fn lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> (u8, u8, u8) {
 mod tests {
     use super::*;
     use crate::sim::biome::*;
+
+    /// Relative luminance (sRGB → linear → Y). Monotone with CIE L*, which is all
+    /// the ramp-ordering tests below need, and far cheaper than a full Lab convert.
+    fn luminance(c: (u8, u8, u8)) -> f32 {
+        let f = |v: u8| {
+            let s = v as f32 / 255.0;
+            if s <= 0.04045 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * f(c.0) + 0.7152 * f(c.1) + 0.0722 * f(c.2)
+    }
+
+    /// No two Köppen zones may share a colour.
+    ///
+    /// Dsc (20) and Dsd (31) shipped IDENTICAL at (150,50,150), so two distinct
+    /// zones rendered as one and no test noticed — the map simply lied about how
+    /// many climates it had. Equality is the right check here (unlike biomes, where
+    /// §8.12's pattern fills carry extra separation); Köppen is flat colour only.
+    #[test]
+    fn koppen_colors_are_distinct() {
+        let live: Vec<u8> = (1..=31).collect();
+        for (ai, &a) in live.iter().enumerate() {
+            for &b in live.iter().skip(ai + 1) {
+                assert_ne!(
+                    koppen_color(a),
+                    koppen_color(b),
+                    "Köppen codes {a} and {b} render as the same colour",
+                );
+            }
+        }
+    }
+
+    /// The hypsometric ramp must brighten monotonically with height.
+    ///
+    /// Imhof's rule: higher is brighter. The old ramp ran light → dark → light
+    /// through a brown midband, so a shaded high ridge and a sunlit lowland
+    /// resolved to the same value and elevation fought the hillshade for the same
+    /// channel. This is the gate on that never coming back.
+    #[test]
+    fn elevation_ramp_is_monotone_in_lightness() {
+        for w in ELEVATION_STOPS.windows(2) {
+            let (m0, c0) = w[0];
+            let (m1, c1) = w[1];
+            assert!(m1 > m0, "elevation stops must ascend in metres ({m0} → {m1})");
+            assert!(
+                luminance(c1) > luminance(c0),
+                "elevation ramp darkens from {m0}m to {m1}m ({:?} → {:?})",
+                c0,
+                c1,
+            );
+        }
+    }
+
+    /// Deeper water must render darker, on every layer that draws sea.
+    ///
+    /// `render_elevation` used to invert this — dark shelf brightening to abyss —
+    /// while the legend described the shared bright-shelf ramp, so the key was
+    /// backwards on exactly one layer.
+    #[test]
+    fn bathymetry_darkens_with_depth() {
+        for w in BATHYMETRY_STOPS.windows(2) {
+            let (d0, c0) = w[0];
+            let (d1, c1) = w[1];
+            assert!(d1 > d0, "bathymetry stops must ascend in depth");
+            assert!(
+                luminance(c1) < luminance(c0),
+                "bathymetry brightens from depth {d0} to {d1} ({:?} → {:?})",
+                c0,
+                c1,
+            );
+        }
+        // The three layers that draw sea must agree, or a single key cannot
+        // describe all of them — which is the defect this ramp was extracted to fix.
+        for d in [0.0f32, 0.2, 0.5, 0.9, 1.0] {
+            assert_eq!(bathymetry_color(d), ramp_lookup(d, &BATHYMETRY_STOPS));
+        }
+    }
+
+    /// A sequential ramp must never pass through a neutral grey — that is the
+    /// colour a reader takes for "no data", and it fell at ~1000 mm, the value most
+    /// temperate land actually has. Classed bands also have to stay ordered.
+    #[test]
+    fn precipitation_bands_are_sequential_and_never_neutral() {
+        for w in PRECIP_BANDS.windows(2) {
+            assert!(w[1].0 > w[0].0, "precipitation bands must ascend");
+            assert!(
+                luminance(w[1].1) < luminance(w[0].1),
+                "precipitation bands must darken as rainfall rises",
+            );
+        }
+        for &(upper, (r, g, b)) in PRECIP_BANDS.iter() {
+            let (mx, mn) = (r.max(g).max(b) as i32, r.min(g).min(b) as i32);
+            assert!(
+                mx - mn > 20,
+                "band below {upper}mm is near-neutral ({r},{g},{b}) — reads as 'no data'",
+            );
+        }
+    }
+
+    /// 0 °C is the only semantically real break on a temperature map (snow, ice, the
+    /// Köppen C/D boundary), so it must be the diverging ramp's own pivot — the
+    /// lightest stop — rather than landing mid-hue as it used to at −5 °C.
+    #[test]
+    fn temperature_ramp_pivots_on_freezing() {
+        let freezing = temperature_color(0.0);
+        let lum_zero = luminance(freezing);
+        for &(deg, c) in TEMPERATURE_STOPS.iter() {
+            if deg != 0.0 {
+                assert!(
+                    luminance(c) < lum_zero,
+                    "{deg}°C ({c:?}) is lighter than the 0°C pivot — the freezing line must be the pale band",
+                );
+            }
+        }
+        // Cold reads blue, warm reads red — the direction a reader assumes.
+        let cold = temperature_color(-30.0);
+        let warm = temperature_color(30.0);
+        assert!(cold.2 > cold.0, "sub-zero temperatures must read blue");
+        assert!(warm.0 > warm.2, "above-zero temperatures must read warm");
+    }
 
     /// Every biome's pattern fill must be SEAMLESS across a tile boundary.
     ///
