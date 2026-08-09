@@ -522,11 +522,13 @@ pub fn split_large_provinces_wh(
         let parent = &provinces[p];
         let cells = std::mem::take(&mut cells_of[p]);
         let marked = only.map_or(true, |s| s.contains(&parent.id));
-        // A MARKED province (explicit selection) is split regardless of size — the user
-        // asked for THIS one. The "affect all" path (no selection) still only splits the
-        // clearly-oversized. Polar is spared and a 1-cell province can't split either way.
-        let big_enough = only.is_some() || cells.len() as u32 > max_cells;
-        let do_split = marked && big_enough && !is_polar(parent.koppen) && cells.len() >= 2;
+        // A MARKED province (explicit selection) is split regardless of size OR climate —
+        // the user asked for THIS one, so the polar/size guards don't apply. The "affect
+        // all" path (no selection) still only splits the clearly-oversized non-polar ones
+        // (the arctic/antarctic ice is left uniform unless deliberately marked). A 1-cell
+        // province can never split either way.
+        let auto_ok = cells.len() as u32 > max_cells && !is_polar(parent.koppen);
+        let do_split = marked && cells.len() >= 2 && (only.is_some() || auto_ok);
         if !do_split {
             let id = next_id; next_id += 1;
             let mut pr = parent.clone();
