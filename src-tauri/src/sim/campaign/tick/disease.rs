@@ -323,6 +323,19 @@ impl CampaignSim {
             let e = comp_capital.entry(self.hubs[i].component).or_insert((f32::MIN, usize::MAX));
             if self.hubs[i].treasury > e.0 { *e = (self.hubs[i].treasury, i); }
         }
+        // The extra population-growth headroom (farming/medicine/birth advancement) exists
+        // to pair with the PROVINCE demography that feeds cities from a rural reservoir, and
+        // it moves the wealth-concentration feedback the runaway-wealth guard bounds. A world
+        // with NO province layer — the province-free dynamics reference the guard is
+        // calibrated against — therefore uses the conservative baseline (WORLD_AGE_DEV_CAP
+        // 2.0 / 400y, no health/colony/birth boost) that is documented safe; a real,
+        // provinced world (which every generated campaign is) gets the fuller growth.
+        let has_prov = !self.prov_cap.is_empty();
+        let world_age_cap = if has_prov { WORLD_AGE_DEV_CAP } else { 2.0 };
+        let world_age_ref = if has_prov { WORLD_AGE_DEV_REF_YEARS } else { 400.0 };
+        let health_dev = if has_prov { HEALTH_CAP_DEV } else { 0.0 };
+        let colony_dev = if has_prov { COLONY_CAP_DEV } else { 15.0 };
+        let birth_rate = if has_prov { BIRTH_RATE } else { 0.00006 };
         for h in 0..n {
             // A dead settlement stays dead — the founding-pop floor below must
             // never resurrect an abandoned ruin (or a collapsed colony).
@@ -474,7 +487,7 @@ impl CampaignSim {
             // own 40k "city" threshold — it can never structurally get there. Award
             // the same PROVEN bar colony_pass itself requires to advance a stage.
             let colony_cap_dev = if self.hubs[h].colony_kind == 1 && self.hubs[h].supply_years >= 5.0 {
-                COLONY_CAP_DEV
+                colony_dev
             } else { 0.0 };
             // EARNED age-of-world headroom: unlike trade_dev/primacy_dev (relative to
             // the world's busiest hub, so they plateau once relative shares settle),
@@ -484,15 +497,15 @@ impl CampaignSim {
             // (Originally keyed to tech_factor; see the const's doc comment for why
             // that doesn't actually grow in practice — a separate, pre-existing bug.)
             let world_years = self.tick as f32 / TICKS_PER_YEAR as f32;
-            let world_age_dev = WORLD_AGE_DEV_CAP
-                * (1.0 - (-world_years / WORLD_AGE_DEV_REF_YEARS).exp());
+            let world_age_dev = world_age_cap
+                * (1.0 - (-world_years / world_age_ref).exp());
             // Public health raises the ceiling — a city that fights disease (clean water,
             // hospitals) survives at a higher population instead of the urban graveyard
             // pinning it near ~20-25k. This is the "fighting disease grows the world" lever.
             let public_health = self.hubs[h].public_health.clamp(0.0, 1.0);
             let cap_mult = (0.35 + 2.0 * food_sec)
                 * (0.60 + 5.0 * prosperity * prosperity + trade_dev + primacy_dev
-                    + colony_cap_dev + world_age_dev + HEALTH_CAP_DEV * public_health);
+                    + colony_cap_dev + world_age_dev + health_dev * public_health);
             let capacity = (self.hubs[h].founding_pop * cap_mult)
                 .max(self.hubs[h].founding_pop * 0.15);
             // Logistic step: approach capacity from below, decline when above it.
@@ -516,7 +529,7 @@ impl CampaignSim {
             // a fixed pie). Applied only BELOW capacity and damped by remaining headroom
             // so it can't overshoot — total population stays bounded and finite.
             if pop < capacity {
-                let net = BIRTH_RATE * food_sec - DEATH_RATE_BASE;
+                let net = birth_rate * food_sec - DEATH_RATE_BASE;
                 new_pop += net * pop * (1.0 - pop / capacity);
             }
             // Famine empties a city faster than trade decline alone.

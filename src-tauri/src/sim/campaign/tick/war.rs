@@ -655,9 +655,20 @@ impl CampaignSim {
                         let w = if backer_hub == Some(a as u32) { b } else { a };
                         end = Some((Some(w), "its backer's ruin"));
                     } else if self.wars[wi].round >= WAR_ROUND_CAP {
-                        let w = if self.wars[wi].score.abs() < WAR_PRICE_REPARATIONS { None }
-                            else if self.wars[wi].score >= 0.0 { Some(a) } else { Some(b) };
-                        end = Some((w, "the round cap — neither side could finish it"));
+                        // Past the ordinary war length a war of attrition CONTINUES while
+                        // BOTH sides can still afford it — a natural long war between two
+                        // rich, determined states. It settles here once a side's chest runs
+                        // low, and can never grind past the absolute hard cap (rule 22: no
+                        // war is permanent). The exhaustion / weariness / decisive checks
+                        // above still end most wars well before either cap.
+                        let a_flush = self.war_affordable_treasury(a) >= WAR_ATTRITION_MIN_CHEST;
+                        let b_flush = self.war_affordable_treasury(b) >= WAR_ATTRITION_MIN_CHEST;
+                        if self.wars[wi].round >= WAR_ROUND_HARD_CAP || !(a_flush && b_flush) {
+                            let w = if self.wars[wi].score.abs() < WAR_PRICE_REPARATIONS { None }
+                                else if self.wars[wi].score >= 0.0 { Some(a) } else { Some(b) };
+                            end = Some((w, "the round cap — neither side could finish it"));
+                        }
+                        // else: both flush and under the hard cap → another round of attrition.
                     }
                 }
                 if end.is_some() { break; }

@@ -1558,9 +1558,22 @@ const WAR_SPEND_RATE: f32 = 0.30;
 // with faster, more legible paths expected to end most wars well before it.
 /// Ticks between quarterly rounds — identical cadence to `CRISIS_ROUND_TICKS`.
 const WAR_ROUND_TICKS: u32 = 90;
-/// Hard backstop: 3 years of quarterly rounds. A war older than this ends however
-/// the score currently reads, win, lose or stalemate.
+/// ORDINARY war length: 3 years of quarterly rounds. Past this a war does NOT end
+/// automatically — a war of attrition between two rich, determined states can grind on
+/// (which is natural). It only settles at this cap once a side's chest runs low (below
+/// `WAR_ATTRITION_MIN_CHEST`); otherwise it continues, up to `WAR_ROUND_HARD_CAP`.
 const WAR_ROUND_CAP: u16 = 12;
+/// The ABSOLUTE ceiling (8 years of rounds): a war can never grind past this, so rule
+/// 22's "no war is ever permanent" guarantee still holds no matter how flush both sides
+/// are. Most wars end far sooner via a decisive score, exhaustion or war-weariness (a
+/// long war saps morale below `WAR_MOOD_WEARY_FLOOR` on its own); this only backstops a
+/// genuine deadlock between two sides that both stay funded AND willing.
+const WAR_ROUND_HARD_CAP: u16 = 32;
+/// Past `WAR_ROUND_CAP`, a belligerent keeps fighting only while its war-affordable
+/// treasury stays above this floor (2× the declare floor). Below it the side is running
+/// its chest low — not yet fully exhausted, but no longer able to sustain a long war —
+/// so the war settles at the ordinary cap rather than dragging to the hard ceiling.
+const WAR_ATTRITION_MIN_CHEST: f32 = WAR_MIN_TREASURY * 2.0;
 /// |score| reaching this ends the war outright — a decisive victory.
 const WAR_SCORE_DECISIVE: f32 = 100.0;
 /// Rounds that must elapse before EXHAUSTION (any of the three non-decisive paths)
@@ -4368,11 +4381,16 @@ pub const REALM_YEAR_FLOOR: u32 = 50;
 /// only that the house has CAPTURED it (see `maybe_proclaim_realms`).
 pub const REALM_PROCLAIM_TIER_MAX: u8 = 2;
 /// The COST a house must SPEND to found a realm — a court, a standing retinue, the
-/// apparatus of a crown. It is deducted from the wealth that becomes the new crown's
-/// treasury (`promote_house_to_realm`), so founding is a real, deliberate outlay a house
-/// must have earned, not a free relabelling. At the house wealth scale this is a large
-/// commitment only a great, capturing house can afford — realms are meant to be rare.
-pub const REALM_PROCLAIM_COST: f32 = 200_000.0;
+/// apparatus of a crown — deducted from the wealth that becomes the new crown's treasury
+/// (`promote_house_to_realm`), so founding is a real, deliberate outlay, not a free
+/// relabelling. It is ADAPTIVE: this fraction of the WEALTHIEST live merchant house's
+/// fortune, so it is always "a great sum only a top house can pay" regardless of the
+/// world's absolute wealth scale — a flat figure was either trivial or unreachable
+/// depending on the world. The richest house can always afford it (its own wealth sets
+/// the bar), so a realm CAN always eventually form; poorer houses cannot.
+pub const REALM_PROCLAIM_COST_FRAC: f32 = 0.6;
+/// A floor so the founding cost is never degenerate in a very poor / empty world.
+pub const REALM_PROCLAIM_COST_FLOOR: f32 = 1_000.0;
 /// Base per-year chance once every other condition is met. Biased by the head's
 /// boldness (axis 0) and expansiveness (axis 3) — the same two axes `decide_fleets`
 /// and `update_guilds_and_offices` already read for a comparable "dare to commit"

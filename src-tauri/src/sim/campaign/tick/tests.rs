@@ -310,7 +310,7 @@
         let mut s = sim(hubs, goods);
         s.found_house_at(0);
         let hi = 0usize;
-        s.houses[hi].wealth = REALM_PROCLAIM_COST + 12_345.0;
+        s.houses[hi].wealth = 100_000.0; // single house → adaptive cost = 0.6 × this
         s.prov_holder = vec![0];       // this hub administers province 0
         s.prov_holder_house = vec![-1];
         s.prov_realm = vec![-1];
@@ -322,7 +322,8 @@
         assert_eq!(s.realms.len(), 1, "exactly one realm is created");
         let r = &s.realms[0];
         assert_eq!(r.id, id);
-        assert_eq!(r.treasury, 12_345.0, "the pot moves whole, MINUS the founding spend (wealth − 200k)");
+        assert_eq!(r.treasury, 100_000.0 * (1.0 - REALM_PROCLAIM_COST_FRAC),
+            "the pot moves whole, MINUS the adaptive founding spend (0.6 × 100,000)");
         assert_eq!(r.capital_hub, 0);
         assert_eq!(r.ruling_house, hi as u32);
         assert_eq!(r.provinces, vec![0], "the seat's administered province becomes sovereign territory");
@@ -356,7 +357,7 @@
             s.hubs[0].captor_house = 0;   // captured the settlement
             s.hubs[0].tier = 2;
             s.houses[0].tier = 2;         // at least tier 2
-            s.houses[0].wealth = REALM_PROCLAIM_COST + 100_000.0; // can afford the 200k spend
+            s.houses[0].wealth = 300_000.0; // the richest house — sets & clears the adaptive bar
             s.prov_holder = vec![0];      // holds a province (rule 25)
             s.prov_holder_house = vec![-1];
             s.prov_realm = vec![-1];
@@ -381,14 +382,17 @@
         s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
         assert!(s.realms.is_empty(), "a house that never captured the settlement never proclaims");
 
-        // Captor, but too poor to SPEND the founding cost: never.
+        // Captor, but too poor to SPEND the (adaptive) founding cost: never. A far richer
+        // second house raises the bar (0.6 × the richest) above the captor's own wealth.
         let mut s = sim(hubs.clone(), goods.clone());
         s.found_house_at(0);
         s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR;
         eligible(&mut s);
-        s.houses[0].wealth = REALM_PROCLAIM_COST - 1.0; // one short of the 200k
+        s.houses.push(house_at(0, vec![0], 2));
+        s.houses[1].wealth = 10_000_000.0; // the richest house → cost ≈ 6M
+        s.houses[0].wealth = 100_000.0;    // the captor, far below the bar
         s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
-        assert!(s.realms.is_empty(), "a house that cannot afford the founding cost never proclaims");
+        assert!(s.realms.is_empty(), "a house that cannot afford the adaptive founding cost never proclaims");
 
         // Captor and rich, but holds no province writ: never (rule 25).
         let mut s = sim(hubs.clone(), goods.clone());
@@ -410,8 +414,10 @@
             eligible(&mut s);
             s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
             if let Some(r) = s.realms.first() {
-                assert!((r.treasury - 100_000.0).abs() < 1.0,
-                    "the crown founds with wealth − the 200k spend (got {})", r.treasury);
+                // Single house → cost = 0.6 × its own wealth, so the crown keeps the rest.
+                let expected = 300_000.0 * (1.0 - REALM_PROCLAIM_COST_FRAC);
+                assert!((r.treasury - expected).abs() < 1.0,
+                    "the crown founds with wealth − the adaptive spend (got {}, want {})", r.treasury, expected);
                 fired = true;
                 break;
             }
@@ -1943,8 +1949,10 @@
     #[test]
     fn every_war_terminates_within_the_round_cap() {
         // §1.4/rule 22's discipline applied to war: an open war must never become the
-        // permanent state of a city, so the round cap is the guarantee of last resort
-        // even when neither side ever decisively wins, exhausts, or grows weary.
+        // permanent state of a city, so the HARD cap is the guarantee of last resort even
+        // for two sides that stay both funded AND willing (these hubs are flush with a
+        // high mood, so the ordinary cap deliberately does NOT stop them — only the hard
+        // ceiling does, which is exactly the guarantee under test).
         let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
         let mut s = sim(vec![
             hub(0, 10.0, 10.0, 10000.0, vec![100.0], 0),
@@ -1957,14 +1965,16 @@
         s.wars.push(War { a: 0, b: 1, start_tick: 0, chest_a: 0.0, chest_b: 0.0,
             levies: 0.0, levies_a: 0.0, levies_b: 0.0, battles: Vec::new(), cargo_lost: 0, cause: "test".into(), goal: WAR_GOAL_PLUNDER,
             score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1 });
-        for yr in 1..=(WAR_ROUND_CAP as u32 + 2) {
+        // Advance year by year (each year runs ~4 quarterly rounds of catch-up); the war
+        // must never exceed the HARD cap, and must be gone by the time we pass it.
+        for yr in 1..=(WAR_ROUND_HARD_CAP as u32 / 4 + 3) {
             s.tick = yr * 365;
             s.update_wars(yr);
-            assert!(s.wars.iter().all(|w| w.round <= WAR_ROUND_CAP),
-                "no war ever exceeds the round cap");
+            assert!(s.wars.iter().all(|w| w.round <= WAR_ROUND_HARD_CAP),
+                "no war ever exceeds the hard round cap");
             if s.wars.is_empty() { break; }
         }
-        assert!(s.wars.is_empty(), "the war ended by the round cap at the latest");
+        assert!(s.wars.is_empty(), "the war ended by the hard round cap at the latest");
         assert_eq!(s.war_log.len(), 1, "its resolution is recorded");
     }
 

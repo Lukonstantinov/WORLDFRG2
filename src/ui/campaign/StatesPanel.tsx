@@ -163,9 +163,9 @@ export function StatesPanel() {
           <EmptyNote>
             No realm has been proclaimed yet. A house must have CAPTURED a city's government (be its captor, not
             merely a council seat), be at least tier 2, hold at least one province's writ, and be able to SPEND the
-            realm's founding cost (200,000 — a great sum only the wealthiest houses ever hold) — and none of this
-            before year 50. The founding spend makes a crown a deliberate, rare act: on a young or modest-wealth
-            world, expect few or none.
+            realm's founding cost — a great sum scaled to this world (about 60% of the wealthiest house's fortune),
+            so only a house near the very top can afford a crown — and none of this before year 50. The richest
+            house can always eventually pay it, so realms DO form; but the spend keeps them deliberate and rare.
           </EmptyNote>
         )}
         {active && rows.length > 0 && (

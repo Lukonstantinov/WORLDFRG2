@@ -34,6 +34,9 @@ impl CampaignSim {
         if self.prov_holder.is_empty() { return; } // rule 25 — no province layer, no sovereignty
         let tick = self.tick;
         let n = self.hubs.len();
+        // ADAPTIVE founding cost (see `realm_founding_cost`) — scales to THIS world so it
+        // is always "a great sum only a top house can pay".
+        let cost = self.realm_founding_cost();
         for h in 0..n {
             if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
             if self.hubs[h].realm >= 0 { continue; } // already sovereign or a member
@@ -50,13 +53,25 @@ impl CampaignSim {
             if self.houses[hi].is_guild { continue; } // a civic office does not found a dynasty
             if self.houses[hi].tier == 0 || self.houses[hi].tier > REALM_PROCLAIM_TIER_MAX { continue; }
             if !self.prov_holder.contains(&(h as i32)) { continue; }
-            if self.houses[hi].wealth < REALM_PROCLAIM_COST { continue; } // must afford the 200k spend
+            if self.houses[hi].wealth < cost { continue; } // must afford the (adaptive) founding spend
             let bold = self.head_axis(hi, 0) as f32;
             let expansive = self.head_axis(hi, 3) as f32;
             let chance = (REALM_PROCLAIM_CHANCE * (1.0 + 0.15 * (bold + expansive))).max(0.0);
             if hash01(self.seed, tick as u64 ^ 0xC0_10A6, (h as u64) << 16 ^ yr as u64) > chance { continue; }
             self.promote_house_to_realm(hi, h, yr);
         }
+    }
+
+    /// The ADAPTIVE realm founding cost for THIS world: `REALM_PROCLAIM_COST_FRAC` of the
+    /// wealthiest live merchant house's fortune (floored), so a crown always costs "a
+    /// great sum only a top house can pay" regardless of the world's absolute wealth
+    /// scale. The richest house always clears its own bar, so a realm CAN always form.
+    pub(crate) fn realm_founding_cost(&self) -> f32 {
+        let max_wealth = self.houses.iter()
+            .filter(|h| h.is_merchant() && !h.is_guild)
+            .map(|h| h.wealth)
+            .fold(0.0f32, f32::max);
+        (REALM_PROCLAIM_COST_FRAC * max_wealth).max(REALM_PROCLAIM_COST_FLOOR)
     }
 
     /// Placeholder naming (see the module doc) — a culture-vocabulary namer that
@@ -107,11 +122,12 @@ impl CampaignSim {
 
         let (name, title) = self.generate_realm_name(seat, tick as u64);
 
-        // The house SPENDS the founding cost (a court, a retinue, a crown's apparatus) —
-        // deducted from the wealth that becomes the new crown's treasury, so proclaiming
-        // is a real outlay, not a free relabelling. Floored at 0 (the gate already
-        // required `wealth >= REALM_PROCLAIM_COST`, so this only guards a rounding edge).
-        let treasury = (self.houses[hi].wealth - REALM_PROCLAIM_COST).max(0.0);
+        // The house SPENDS the (adaptive) founding cost — a court, a retinue, a crown's
+        // apparatus — deducted from the wealth that becomes the new crown's treasury, so
+        // proclaiming is a real outlay, not a free relabelling. Floored at 0 (the gate
+        // already required `wealth >= cost`, so this only guards a rounding edge).
+        let cost = self.realm_founding_cost();
+        let treasury = (self.houses[hi].wealth - cost).max(0.0);
         let house_name = self.houses[hi].name.clone();
         let head_name = self.houses[hi].head_name.clone();
 
