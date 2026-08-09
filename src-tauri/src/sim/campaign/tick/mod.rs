@@ -4361,26 +4361,18 @@ pub const REALM_ROLE_OCCUPIED: u8 = 3;
 /// The hard floor on the first proclamation, in years. Not a trigger — after this
 /// date any house that meets the conditions may proclaim, and most never will.
 pub const REALM_YEAR_FLOOR: u32 = 50;
-/// Years a house must hold `captor_house` CONTINUOUSLY before it may proclaim. Reset
-/// by `TickHub.captor_since` on any change of captor (`update_government` step 4), so
-/// a house bribed out and back in cannot chain two half-tenures into one.
-pub const REALM_CAPTOR_YEARS: u32 = 8;
-/// Tier ceiling on BOTH the house and its city at the moment of proclamation — the
-/// gate applies only here (`REALM_AND_GOVERNMENT_PLAN.md` §3.1), never afterward,
+/// Tier ceiling on the founding HOUSE at proclamation — "at least tier 2" (tier 1 or 2).
+/// The gate applies only here (`REALM_AND_GOVERNMENT_PLAN.md` §3.1), never afterward,
 /// which is what lets a realm keep a small capital indefinitely (the Karakorum rule,
-/// plan §1.3/§4.3). Widened 2 → 3 so a strong-but-not-top house in a good regional
-/// city (a tier-3 "major" seat) can also crown itself — the original tier-≤2-on-BOTH
-/// conjunction was a large part of why a 560-year world proclaimed zero realms.
-pub const REALM_PROCLAIM_TIER_MAX: u8 = 3;
-/// A treasury floor so a proclamation is not immediately followed by a manufactured
-/// bankruptcy — the new realm must be able to survive its first shock. Comparable in
-/// spirit to `WAR_MIN_TREASURY` (a hub's own war-affordability floor) but sized to a
-/// HOUSE's wealth scale, which runs far higher.
-pub const REALM_PROCLAIM_TREASURY_MIN: f32 = 500.0;
-/// A prestige floor — proclaiming sovereignty is a claim the house must have already
-/// partly earned, not a first move. `SUCCESSION_PRESTIGE_CAP`/`FEUD_PRESTIGE_CAP` both
-/// ceiling prestige at 1.2, so this asks for roughly a third of a house's ceiling.
-pub const REALM_PROCLAIM_PRESTIGE_MIN: f32 = 0.4;
+/// plan §1.3/§4.3). Per the maintainer's rule the CITY's own tier is no longer gated —
+/// only that the house has CAPTURED it (see `maybe_proclaim_realms`).
+pub const REALM_PROCLAIM_TIER_MAX: u8 = 2;
+/// The COST a house must SPEND to found a realm — a court, a standing retinue, the
+/// apparatus of a crown. It is deducted from the wealth that becomes the new crown's
+/// treasury (`promote_house_to_realm`), so founding is a real, deliberate outlay a house
+/// must have earned, not a free relabelling. At the house wealth scale this is a large
+/// commitment only a great, capturing house can afford — realms are meant to be rare.
+pub const REALM_PROCLAIM_COST: f32 = 200_000.0;
 /// Base per-year chance once every other condition is met. Biased by the head's
 /// boldness (axis 0) and expansiveness (axis 3) — the same two axes `decide_fleets`
 /// and `update_guilds_and_offices` already read for a comparable "dare to commit"
@@ -4433,9 +4425,9 @@ pub const REALM_TAX_MAX: [f32; 2] = [0.015, 0.10];
 /// `decide_*` in this file already uses).
 pub const REALM_TAX_DRIFT: f32 = 0.15;
 /// Treasury level the crown is comfortable at — below it, rates drift up (toward
-/// `REALM_TAX_MAX`); at or above it, they ease back toward zero. Scaled like
-/// `REALM_PROCLAIM_TREASURY_MIN`, a few multiples of the floor a realm must have
-/// had to found in the first place.
+/// `REALM_TAX_MAX`); at or above it, they ease back toward zero. A realm founds with
+/// `wealth − REALM_PROCLAIM_COST` in the treasury, so this comfort level sits well
+/// below what a freshly crowned house is left holding.
 pub const REALM_TREASURY_COMFORT: f32 = 2000.0;
 /// Poll tax costs mood at the taxed city — regressive, and felt.
 pub const POLL_TAX_MOOD_COST: f32 = 0.35;

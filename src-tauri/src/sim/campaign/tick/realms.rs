@@ -38,37 +38,19 @@ impl CampaignSim {
             if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
             if self.hubs[h].realm >= 0 { continue; } // already sovereign or a member
             if self.hubs[h].tribute_to >= 0 { continue; } // a tributary makes no claims of its own
-            // The GOVERNING house may proclaim by EITHER path:
-            //  (a) a military CAPTOR that has held the seat continuously (`captor_since`);
-            //  (b) a merchant house that has long DOMINATED its OWN home city's council —
-            //      the Venetian/Genoese oligarchic city-state. Without (b) almost no realm
-            //      ever forms: a house is rarely a formal `captor` for a continuous decade,
-            //      so a real 560-year world proclaimed ZERO crowns. A dominant home council
-            //      held for the same tenure is an equally legitimate founding.
+            // The founder must have CAPTURED the settlement (be its `captor_house`, not a
+            // mere council seat), be at least TIER 2, hold a province (rule 25), and be
+            // able to SPEND the founding cost. Per the maintainer's rule these three are
+            // the whole gate — no continuous-tenure, city-tier, or prestige requirement.
             let captor = self.hubs[h].captor_house;
-            let (hi, tenure_ok) = if captor >= 0 {
-                (captor as usize,
-                 tick.saturating_sub(self.hubs[h].captor_since) >= REALM_CAPTOR_YEARS * TICKS_PER_YEAR)
-            } else {
-                let council = self.hubs[h].council_house;
-                if council < 0 { continue; }
-                let ci = council as usize;
-                let ok = ci < self.houses.len()
-                    && self.houses[ci].hub as usize == h        // its own home city
-                    && self.houses[ci].dominant_seat            // and it truly dominates it
-                    && tick.saturating_sub(self.houses[ci].founded_tick)
-                        >= REALM_CAPTOR_YEARS * TICKS_PER_YEAR; // long-established
-                (ci, ok)
-            };
+            if captor < 0 { continue; } // must have captured the city's government
+            let hi = captor as usize;
             if hi >= self.houses.len() { continue; }
             if !self.houses[hi].is_merchant() { continue; } // dead, or already crowned elsewhere
             if self.houses[hi].is_guild { continue; } // a civic office does not found a dynasty
-            if !tenure_ok { continue; }
             if self.houses[hi].tier == 0 || self.houses[hi].tier > REALM_PROCLAIM_TIER_MAX { continue; }
-            if self.hubs[h].tier == 0 || self.hubs[h].tier > REALM_PROCLAIM_TIER_MAX { continue; }
             if !self.prov_holder.contains(&(h as i32)) { continue; }
-            if self.houses[hi].wealth < REALM_PROCLAIM_TREASURY_MIN { continue; }
-            if self.houses[hi].prestige < REALM_PROCLAIM_PRESTIGE_MIN { continue; }
+            if self.houses[hi].wealth < REALM_PROCLAIM_COST { continue; } // must afford the 200k spend
             let bold = self.head_axis(hi, 0) as f32;
             let expansive = self.head_axis(hi, 3) as f32;
             let chance = (REALM_PROCLAIM_CHANCE * (1.0 + 0.15 * (bold + expansive))).max(0.0);
@@ -125,7 +107,11 @@ impl CampaignSim {
 
         let (name, title) = self.generate_realm_name(seat, tick as u64);
 
-        let treasury = self.houses[hi].wealth.max(0.0);
+        // The house SPENDS the founding cost (a court, a retinue, a crown's apparatus) —
+        // deducted from the wealth that becomes the new crown's treasury, so proclaiming
+        // is a real outlay, not a free relabelling. Floored at 0 (the gate already
+        // required `wealth >= REALM_PROCLAIM_COST`, so this only guards a rounding edge).
+        let treasury = (self.houses[hi].wealth - REALM_PROCLAIM_COST).max(0.0);
         let house_name = self.houses[hi].name.clone();
         let head_name = self.houses[hi].head_name.clone();
 

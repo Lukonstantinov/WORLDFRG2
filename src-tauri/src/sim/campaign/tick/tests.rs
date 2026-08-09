@@ -310,7 +310,7 @@
         let mut s = sim(hubs, goods);
         s.found_house_at(0);
         let hi = 0usize;
-        s.houses[hi].wealth = 12_345.0;
+        s.houses[hi].wealth = REALM_PROCLAIM_COST + 12_345.0;
         s.prov_holder = vec![0];       // this hub administers province 0
         s.prov_holder_house = vec![-1];
         s.prov_realm = vec![-1];
@@ -322,7 +322,7 @@
         assert_eq!(s.realms.len(), 1, "exactly one realm is created");
         let r = &s.realms[0];
         assert_eq!(r.id, id);
-        assert_eq!(r.treasury, 12_345.0, "the pot moves WHOLE — one pot, not two");
+        assert_eq!(r.treasury, 12_345.0, "the pot moves whole, MINUS the founding spend (wealth − 200k)");
         assert_eq!(r.capital_hub, 0);
         assert_eq!(r.ruling_house, hi as u32);
         assert_eq!(r.provinces, vec![0], "the seat's administered province becomes sovereign territory");
@@ -350,14 +350,14 @@
         let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
         let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
 
+        // The gate now: the house has CAPTURED the seat, is at least TIER 2, holds a
+        // province, and can afford the 200k founding spend.
         let eligible = |s: &mut CampaignSim| {
-            s.hubs[0].captor_house = 0;
-            s.hubs[0].captor_since = 0; // held since tick 0
+            s.hubs[0].captor_house = 0;   // captured the settlement
             s.hubs[0].tier = 2;
-            s.houses[0].tier = 2;
-            s.houses[0].wealth = 10_000.0;
-            s.houses[0].prestige = 1.0;
-            s.prov_holder = vec![0];
+            s.houses[0].tier = 2;         // at least tier 2
+            s.houses[0].wealth = REALM_PROCLAIM_COST + 100_000.0; // can afford the 200k spend
+            s.prov_holder = vec![0];      // holds a province (rule 25)
             s.prov_holder_house = vec![-1];
             s.prov_realm = vec![-1];
         };
@@ -367,40 +367,54 @@
         s.found_house_at(0);
         s.tick = (REALM_YEAR_FLOOR - 1) * TICKS_PER_YEAR;
         eligible(&mut s);
-        s.hubs[0].captor_since = s.tick.saturating_sub((REALM_CAPTOR_YEARS + 1) * TICKS_PER_YEAR);
         s.maybe_proclaim_realms(REALM_YEAR_FLOOR - 1);
         assert!(s.realms.is_empty(), "the hard floor is absolute");
 
-        // At/after the floor, but captured too recently: never.
+        // At/after the floor, but the house was never the CAPTOR (a mere council seat
+        // no longer qualifies): never.
         let mut s = sim(hubs.clone(), goods.clone());
         s.found_house_at(0);
         s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR;
         eligible(&mut s);
-        s.hubs[0].captor_since = s.tick; // captured THIS year — no tenure yet
+        s.hubs[0].captor_house = -1; // council-only, did not capture
+        s.hubs[0].council_house = 0;
         s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
-        assert!(s.realms.is_empty(), "captor tenure under REALM_CAPTOR_YEARS never proclaims");
+        assert!(s.realms.is_empty(), "a house that never captured the settlement never proclaims");
 
-        // At/after the floor, tenure satisfied, but no province writ: never.
+        // Captor, but too poor to SPEND the founding cost: never.
         let mut s = sim(hubs.clone(), goods.clone());
         s.found_house_at(0);
         s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR;
         eligible(&mut s);
-        s.hubs[0].captor_since = 0;
+        s.houses[0].wealth = REALM_PROCLAIM_COST - 1.0; // one short of the 200k
+        s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+        assert!(s.realms.is_empty(), "a house that cannot afford the founding cost never proclaims");
+
+        // Captor and rich, but holds no province writ: never (rule 25).
+        let mut s = sim(hubs.clone(), goods.clone());
+        s.found_house_at(0);
+        s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR;
+        eligible(&mut s);
         s.prov_holder = vec![-1]; // no city administers this province — the seat holds nothing
         s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
         assert!(s.realms.is_empty(), "no province writ ⇒ no proclamation, regardless of everything else");
 
         // Every condition satisfied — proclamation must be REACHABLE (rolled against
-        // a wide sweep of ticks so the assertion doesn't depend on one lucky seed).
+        // a wide sweep of ticks so the assertion doesn't depend on one lucky seed), and
+        // the founding SPENDS the cost (the crown starts with wealth − cost).
         let mut fired = false;
         for t in 0..400u32 {
             let mut s = sim(hubs.clone(), goods.clone());
             s.found_house_at(0);
             s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR + t;
             eligible(&mut s);
-            s.hubs[0].captor_since = 0;
             s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
-            if !s.realms.is_empty() { fired = true; break; }
+            if let Some(r) = s.realms.first() {
+                assert!((r.treasury - 100_000.0).abs() < 1.0,
+                    "the crown founds with wealth − the 200k spend (got {})", r.treasury);
+                fired = true;
+                break;
+            }
         }
         assert!(fired, "with every precondition met, a proclamation must be reachable");
     }
