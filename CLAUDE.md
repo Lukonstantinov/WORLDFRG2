@@ -979,14 +979,24 @@ canvas/
   projection.ts                 ← lat/lon ↔ world-cell projection helpers
   goodIcons.ts                  ← good → emoji/texture for overlays
 
-ui/SettingsPanel.tsx            ← ⚙ Appearance modal, two tabs: Overlay lines (the line
-                                  palette) and Map labels (typography theme + per-class
-                                  face/colour, each row set in its OWN style so the list
-                                  doubles as a live specimen sheet). See §8.11.
+ui/SettingsPanel.tsx            ← ⚙ Appearance modal, THREE tabs: Map plates (the
+                                  atlas-plate picker, §8.17 — the default tab),
+                                  Overlay lines (the line palette) and Map labels
+                                  (typography theme + per-class face/colour, each row
+                                  set in its OWN style so the list doubles as a live
+                                  specimen sheet). See §8.11/§8.17.
 
 ui/world/  — map & world
   MapCanvas.tsx                 ← PixiJS canvas, pointer events, painting, draws every overlay
-  Toolbar.tsx                   ← Tools, layer selector, overlay toggles (RIGHT side)
+  Toolbar.tsx                   ← Tools, PLATE picker (§8.17), layer selector, overlay
+                                  toggles (RIGHT side). `layerGroups` classifies the 25
+                                  render layers into SIX groups — Terrain · Ocean ·
+                                  Atmosphere · Climate & Biomes · Settlement · Hazards
+  mapThemes.ts                  ← MAP PLATES (§8.17): 11 named compositions of base
+                                  layer + overlays + label typography + line palette.
+                                  Display-only (rule 14); `MANAGED_OVERLAYS` is DERIVED
+                                  from the plates, so a plate can only ever clear an
+                                  overlay some plate uses
   StatusBar.tsx · WindowBar.tsx ← Bottom status / window chrome
   InfoPanel.tsx                 ← Right-click cell inspector
   ElevationLegend/Histogram.tsx ← Elevation legend + distribution chart
@@ -1704,6 +1714,55 @@ slice) in `docs/DEPOSITS_AND_MINING_PLAN.md` slice 3.
 > match on the good's name (`tick/mod.rs`) and is mechanically identical to a
 > farm — no mining capability, no depth gating, no mine-vs-quarry split. See
 > `docs/DEPOSITS_AND_MINING_PLAN.md` slice 4.
+
+---
+
+### 8.17 Map plates (`ui/world/mapThemes.ts`)
+
+A published atlas never shows one raster on its own. A climate plate is Köppen fill
+PLUS the circulation that produces it PLUS the graticule, set in the face that plate
+uses; a political plate is a province wash PLUS borders PLUS city dots sized by rank.
+What distinguishes one plate from another is the whole COMPOSITION, not the base
+colour. The app had 25 base layers and ~30 overlay toggles and no way to express that
+— every informative view had to be assembled by hand, from memory, every time.
+
+A `MapTheme` is that composition in state that already existed: one `ActiveLayer`, a
+set of overlay keys, and optionally a label-typography theme (§8.11) and an
+overlay-line preset. **Eleven plates ship**, ordered the way the pipeline builds the
+world: Physical · Relief & Height · Ocean & Currents · Climate · Hydrology · Ecology ·
+Settlement · Peoples · Political · Goods & Trade · Hazards.
+
+Four rules for anyone changing this:
+
+- **A plate is a VIEW, never a decision.** It sets what you SEE, never what the world
+  IS — rule 14 restated. Nothing here is persisted and nothing writes a generation
+  setting, so switching plates can never alter a world or invalidate a tile.
+- **`MANAGED_OVERLAYS` is DERIVED from the plates, never hand-listed.** Applying a
+  plate sets each managed key explicitly — on if the plate lists it, off otherwise —
+  so a plate lands in a KNOWN composition instead of washing additively over
+  leftovers. Deriving the set is what bounds the blast radius: per-good overlays,
+  campaign-only layers and anything else no plate mentions are never touched, so a
+  plate cannot silently clear work done in another panel.
+- **`activeMapTheme` is cleared by any manual change** (`setLayer`, `toggleOverlay`,
+  `setOverlayVisible`, `setOverlaysVisible`, `setWorkflowStep`). A chip that keeps
+  claiming a plate after the view stops being one is worse than no chip.
+- **A plate whose data isn't generated reads dimmed with the step it waits on**, not
+  hidden (`requires` + `themeReady`). Seeing what the finished world will offer is the
+  same logic the workflow panel already uses.
+
+The picker exists twice — a compact chip grid in the Toolbar and the full annotated
+list in ⚙ Appearance ▸ Map plates. Both read the same `MAP_THEMES`, so they cannot
+drift; only the presentation differs.
+
+**The layer taxonomy was fixed in the same change.** `layerGroups` misfiled in both
+directions: "Biosphere" held `climate` (Köppen is atmospheric), `soil` (pedosphere)
+and `habitability` (a human settlement score), while "Ocean" held four biological
+layers plus `storm`, which is a cyclone belt. The cause was under-population — only
+TWO layers are genuinely biological and non-hazard, so the group was padded to a
+plausible size with things that aren't biology. Six groups now: Terrain · Ocean ·
+Atmosphere · Climate & Biomes · Settlement · Hazards. `ridges` is reachable for the
+first time — it had always existed in `ActiveLayer` and in `render_tile`
+(`render_ridges`) but belonged to no group.
 
 ---
 
