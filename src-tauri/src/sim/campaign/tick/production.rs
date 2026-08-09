@@ -190,6 +190,36 @@ impl CampaignSim {
             }
         }
 
+        // #6b · HUB-AND-SPOKE MARKET LIFELINE (see the constant docs). A hub whose every
+        // reachable partner makes the same goods trades nothing; guarantee it a route to
+        // the nearest major MARKET (top hubs by population), where complementary goods
+        // aggregate, crossing the horizon/component but bounded to a regional-plus reach.
+        let mut markets = real.clone();
+        markets.sort_by(|&x, &y| {
+            self.hubs[y].population.partial_cmp(&self.hubs[x].population)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let n_market = ((real.len() as f32 * MARKET_TOP_FRAC).ceil() as usize).clamp(1, real.len());
+        markets.truncate(n_market);
+        let market_reach = self.world_w * MARKET_REACH_FRAC;
+        for &a in &real {
+            // Already able to reach a major market? Then it can already trade diverse goods.
+            if markets.iter().any(|&m| m != a && days[a * n + m].is_finite()) { continue; }
+            let mut cand: Vec<(f32, usize)> = markets.iter().filter(|&&m| m != a).map(|&m| {
+                let mut dx = (self.hubs[a].x - self.hubs[m].x).abs();
+                if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
+                let dy = self.hubs[a].y - self.hubs[m].y;
+                ((dx * dx + dy * dy).sqrt(), m)
+            }).filter(|&(d, _)| self.world_w <= 1.0 || d <= market_reach).collect();
+            cand.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+            for &(dist, m) in cand.iter().take(MARKET_LINKS) {
+                if days[a * n + m].is_finite() { continue; }
+                let d = (dist * self.days_per_cell).max(1.0);
+                days[a * n + m] = d;
+                days[m * n + a] = d;
+            }
+        }
+
         self.days = days;
         self.rebuild_neighbors();
         self.routes_dirty = false;

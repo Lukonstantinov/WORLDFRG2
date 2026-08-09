@@ -1324,6 +1324,22 @@ const TRADE_MAX_DIST_FRAC: f32 = 0.24;
 /// so it restores LOCAL/regional trade for a stranded town without reopening the
 /// trans-oceanic lanes the horizon exists to cut.
 const MIN_GUARANTEED_PARTNERS: usize = 4;
+/// #6b · HUB-AND-SPOKE MARKET LIFELINE. Being CONNECTED is not the same as being able
+/// to TRADE: a specialized town ringed by identical producers (a homogeneous coastal or
+/// tundra bubble) has no price gradient to export into, and the complementary goods it
+/// wants are produced beyond its regional horizon — so it shows partners but zero
+/// exports/imports. Real pre-modern trade is hub-and-spoke: such a town ships to, and
+/// imports through, a great MARKET where diverse goods aggregate. Every hub is therefore
+/// guaranteed a route to the nearest few major markets even across the horizon/component
+/// (a sea lane to the emporium), bounded so this restores diversity WITHOUT reopening
+/// blanket trans-oceanic trade. The top this fraction of hubs by population are "markets".
+const MARKET_TOP_FRAC: f32 = 0.15;
+/// How many nearest major markets a market-starved hub is linked to.
+const MARKET_LINKS: usize = 2;
+/// Regional-PLUS reach for the market lifeline, as a fraction of world width — wider than
+/// the ordinary trade horizon (a town reaches a great emporium farther than an everyday
+/// partner) but still bounded, so it is a lifeline to the nearest market, not a global net.
+const MARKET_REACH_FRAC: f32 = 0.5;
 /// Global ceiling on satellite production sites (estates + colonies). Estates are
 /// real hubs in `self.hubs`, so an uncapped count quadratically slows every tick.
 const MAX_TOTAL_ESTATES: usize = 220;

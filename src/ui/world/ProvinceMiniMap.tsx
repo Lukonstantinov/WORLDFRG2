@@ -454,30 +454,42 @@ export function ProvinceMiniMap({
             </g>
           );
         })}
-        {/* 6a · belt/surface goods (#9) — the GOODS plate. A belt good has no single
-            cell, so its BEST-QUALITY footprint is drawn as a filled AREA: every province
-            cell is tinted by the good that claims it (quality-weighted), giving each good
-            a contiguous patch rather than a scatter of loose squares. With a single good
-            selected the whole footprint reads as that one good's best-quality region. */}
-        {on("goods") && beltGoods.length > 0 && (() => {
-          const total = beltGoods.reduce((s, b) => s + Math.max(0.05, b.quality), 0);
-          const sq = Math.max(1.2, stride * 1.08); // ≈ one cell → the tints abut into areas
+        {/* 6a · belt/surface goods (#9) — the GOODS plate. IMPORTANT: the model holds ONE
+            quality for the WHOLE province (a belt good has no sub-province location), so we
+            must NOT paint an area — that would invent a spatial layout the model doesn't
+            hold (rule 17), and isolating a good would fill the entire province. Instead we
+            place a few SYMBOLIC markers reading "produced here", quality-faded. Isolating a
+            good shows a spread of just that good; showing all lays one marker per good like
+            a legend on the map. Real per-cell locations only exist for DEPOSITS (plate 6b). */}
+        {on("goods") && beltGoods.length > 0 && cells.length > 0 && (() => {
+          const isolated = beltGoods.length === 1;
+          const shown = beltGoods.slice(0, isolated ? 1 : 12);
+          const fs = Math.max(6, Math.min(14, stride * 2.6));
+          // A stable, well-spread cell for the k-th marker (Knuth multiplicative hash).
+          const pickCell = (k: number) => cells[Math.floor((k * 2654435761) % cells.length)];
           const out: React.ReactNode[] = [];
-          for (let ci = 0; ci < cells.length; ci++) {
-            const [rx, ry] = cells[ci];
-            // A per-cell hash picks ONE good weighted by quality; neighbouring cells that
-            // pick the same good merge visually into one best-quality area.
-            const t = cellHash(rx, ry, 7);
-            let acc = 0;
-            let pick = beltGoods[0];
-            for (const b of beltGoods) { acc += Math.max(0.05, b.quality) / total; if (t <= acc) { pick = b; break; } }
-            const col = GOOD_DEFS.find((g) => g.name === pick.name)?.color ?? "#56c8d8";
-            out.push(
-              <rect key={`bg${ci}`} x={rx - ox - sq / 2} y={ry - oy - sq / 2} width={sq} height={sq}
-                fill={col} opacity={0.22 + 0.68 * Math.max(0, Math.min(1, pick.quality))}>
-                <title>{pick.name} · quality {(pick.quality * 100).toFixed(0)}%</title>
-              </rect>,
+          const marker = (g: { name: string; quality: number }, key: string, rx: number, ry: number) => {
+            const emoji = GOOD_DEFS.find((d) => d.name === g.name)?.emoji ?? "•";
+            return (
+              <text key={key} x={rx - ox} y={ry - oy} fontSize={fs} textAnchor="middle"
+                dominantBaseline="central" opacity={0.5 + 0.5 * Math.max(0, Math.min(1, g.quality))}
+                style={{ paintOrder: "stroke", stroke: "#0a1620", strokeWidth: 0.6 }}>
+                <title>{g.name} · quality {(g.quality * 100).toFixed(0)}%</title>{emoji}
+              </text>
             );
+          };
+          if (isolated) {
+            const g = shown[0];
+            const marks = Math.max(3, Math.round(4 + 5 * g.quality));
+            for (let i = 0; i < marks; i++) {
+              const [rx, ry] = pickCell(i * 37 + 5);
+              out.push(marker(g, `bg${i}`, rx, ry));
+            }
+          } else {
+            shown.forEach((g, i) => {
+              const [rx, ry] = pickCell(i * 53 + 9);
+              out.push(marker(g, `bg${i}`, rx, ry));
+            });
           }
           return out;
         })()}
