@@ -88,7 +88,9 @@ export function LayerLegend() {
         <div style={{ ...barBase, background: rampGradient(sea) }} />
         <div style={ticks}><span>Shore</span><span>Shelf</span><span>Abyss</span></div>
         <div style={{ fontSize: 9, color: "#5a7390", marginTop: 6, lineHeight: 1.4 }}>
-          Metres above sea level. Breaks follow atlas convention, not even steps.
+          Metres above sea level; breaks follow atlas convention, not even steps.
+          Below 1200 m the tint also carries CLIMATE — desert lowland reads khaki,
+          rainforest green, tundra grey — converging on this ramp above it.
         </div>
       </div>
     );

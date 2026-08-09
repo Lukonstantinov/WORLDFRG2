@@ -1812,6 +1812,17 @@ Three rules:
 - **Position a legend's labels at each stop's TRUE value**, never at even intervals —
   even spacing is what made the old land key misreport by up to ~520 m.
 
+**Cross-blended hypsometric tints** (§8.18 companion, `lowland_tint`): below
+`LOWLAND_TINT_CEILING_M` (1200 m) the elevation/terrain tint also carries CLIMATE —
+desert lowland reads khaki, rainforest green, tundra grey — converging on the shared
+ramp above it (Patterson & Jenny, *Cartographic Perspectives* 69). The climate axes
+are **temperature and precipitation, both continuous**, never the categorical Köppen
+code: keying on Köppen would draw every class boundary as a hard colour edge and a
+reader would take those edges for terrain, which is the artefact the technique exists
+to avoid. Guarded by `cross_blended_tints_converge_with_height`, which asserts BOTH
+halves — that three climates differ at sea level, and that they are bit-identical
+above the ceiling. The legend must keep declaring this, or it misreports the lowland.
+
 `LayerLegend.tsx` covers the six layers with an exact key (elevation · terrain ·
 temperature · sst · precipitation · climate). The layers whose ramps are still
 written inline in Rust are **deliberately left without a key** rather than given an

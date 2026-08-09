@@ -76,7 +76,7 @@ fn render_elevation(tile: &TileData, rgba: &mut [u8]) {
         let offset = i * 4;
         if tile.terrain[i] == 1 {
             let e = tile.elevation[i].clamp(0.0, 1.0);
-            let (r, g, b) = elevation_color(e);
+            let (r, g, b) = elevation_color_climate(e, tile.temperature[i], tile.precipitation[i]);
             rgba[offset] = r;
             rgba[offset + 1] = g;
             rgba[offset + 2] = b;
@@ -173,6 +173,66 @@ pub const BATHYMETRY_STOPS: [(f32, (u8, u8, u8)); 5] = [
 
 fn bathymetry_color(depth: f32) -> (u8, u8, u8) {
     ramp_lookup(depth.clamp(0.0, 1.0), &BATHYMETRY_STOPS)
+}
+
+/// How far the lowland climate tint may pull the base ramp. A BLEND, never a
+/// replacement — the hypsometric sequence still has to read as height first.
+const LOWLAND_TINT_STRENGTH: f32 = 0.55;
+
+/// Above this height the climate tint is fully gone and every climate shares the
+/// same ramp: the eye reads rock and snow up there, not biome, and two ranges in
+/// different climates should stay directly comparable.
+const LOWLAND_TINT_CEILING_M: f32 = 1200.0;
+
+/// CROSS-BLENDED HYPSOMETRIC TINTS (Patterson & Jenny, *Cartographic Perspectives*
+/// 69, 2011).
+///
+/// A single green-to-brown ramp invites the reader to take LOWLAND GREEN FOR
+/// VEGETATION, which is simply wrong wherever the lowland is desert — the Sahara
+/// and the Congo basin are both "low", and one flat green says they look alike.
+/// Cross-blending makes the low end of the ramp depend on the local climate and
+/// converge on the shared yellow/brown/white as it climbs.
+///
+/// The climate axes here are TEMPERATURE AND PRECIPITATION — both continuous —
+/// rather than the categorical Köppen code. That is the whole trick: keying on
+/// Köppen would draw every class boundary as a hard colour edge, and a reader would
+/// take those edges for terrain, which is exactly the artefact this technique
+/// exists to avoid. Köppen is itself a discretisation of these same two fields, so
+/// this is the smoother form of the same information.
+///
+/// WorldForge is unusually well placed for this: the paper's authors had to
+/// hand-mask climate regions in Photoshop, and we have the fields per cell already.
+fn lowland_tint(temp_c: f32, precip_mm: f32) -> (u8, u8, u8) {
+    // sqrt keeps the resolution in the DRY half, where the arid/semi-arid
+    // distinction is what actually decides how the land looks.
+    let humid = (precip_mm / 1200.0).clamp(0.0, 1.0).sqrt();
+    let warm = ((temp_c + 5.0) / 30.0).clamp(0.0, 1.0);
+
+    let mix = |a: (f32, f32, f32), b: (f32, f32, f32), t: f32| {
+        (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t, a.2 + (b.2 - a.2) * t)
+    };
+
+    let cold_dry = (150.0, 150.0, 132.0); // steppe / tundra grey-green
+    let cold_wet = (86.0, 122.0, 100.0);  // boreal blue-green
+    let hot_dry = (198.0, 178.0, 126.0);  // desert khaki
+    let hot_wet = (74.0, 124.0, 62.0);    // tropical yellow-green
+
+    let dry = mix(cold_dry, hot_dry, warm);
+    let wet = mix(cold_wet, hot_wet, warm);
+    let c = mix(dry, wet, humid);
+    (c.0 as u8, c.1 as u8, c.2 as u8)
+}
+
+/// The hypsometric colour a LAND cell actually renders: the shared ramp, pulled
+/// toward its local lowland tint by a weight that fades out with height.
+fn elevation_color_climate(e: f32, temp_c: f32, precip_mm: f32) -> (u8, u8, u8) {
+    let base = elevation_color(e);
+    let m = e.clamp(0.0, 1.0) * ELEV_MAX_M;
+    let w = (1.0 - m / LOWLAND_TINT_CEILING_M).clamp(0.0, 1.0) * LOWLAND_TINT_STRENGTH;
+    if w <= 0.0 {
+        return base;
+    }
+    lerp_rgb(base, lowland_tint(temp_c, precip_mm), w)
 }
 
 fn render_climate(tile: &TileData, rgba: &mut [u8]) {
@@ -1141,7 +1201,7 @@ fn render_terrain_hillshade_halo(tile: &TileData, n: &TileNeighbors, rgba: &mut 
                 shade * (1.0 + 0.14 * shadow),
             );
 
-            let (br, bg, bb) = elevation_color(e);
+            let (br, bg, bb) = elevation_color_climate(e, tile.temperature[i], tile.precipitation[i]);
             rgba[offset] = (br as f32 * kr).clamp(0.0, 255.0) as u8;
             rgba[offset + 1] = (bg as f32 * kg).clamp(0.0, 255.0) as u8;
             rgba[offset + 2] = (bb as f32 * kb).clamp(0.0, 255.0) as u8;
@@ -1456,6 +1516,40 @@ mod tests {
             assert!(
                 mx - mn > 20,
                 "band below {upper}mm is near-neutral ({r},{g},{b}) — reads as 'no data'",
+            );
+        }
+    }
+
+    /// Cross-blended tints must VANISH with height, or two mountain ranges in
+    /// different climates stop being comparable and the reader mistakes a climate
+    /// boundary for terrain. Above the ceiling every climate shares one ramp.
+    #[test]
+    fn cross_blended_tints_converge_with_height() {
+        let desert = (35.0f32, 40.0f32);
+        let jungle = (27.0f32, 3200.0f32);
+        let tundra = (-15.0f32, 250.0f32);
+
+        // At sea level the three climates must be visibly different lowlands —
+        // that is the entire point of the technique.
+        let d0 = elevation_color_climate(0.0, desert.0, desert.1);
+        let j0 = elevation_color_climate(0.0, jungle.0, jungle.1);
+        let t0 = elevation_color_climate(0.0, tundra.0, tundra.1);
+        let spread = |a: (u8, u8, u8), b: (u8, u8, u8)| {
+            (a.0 as i32 - b.0 as i32).abs()
+                + (a.1 as i32 - b.1 as i32).abs()
+                + (a.2 as i32 - b.2 as i32).abs()
+        };
+        assert!(spread(d0, j0) > 40, "desert and jungle lowland look alike: {d0:?} vs {j0:?}");
+        assert!(spread(d0, t0) > 20, "desert and tundra lowland look alike: {d0:?} vs {t0:?}");
+
+        // Above the ceiling they must be IDENTICAL, and equal to the base ramp.
+        let high = (LOWLAND_TINT_CEILING_M + 1.0) / ELEV_MAX_M;
+        let base = elevation_color(high);
+        for (t, p) in [desert, jungle, tundra] {
+            assert_eq!(
+                elevation_color_climate(high, t, p),
+                base,
+                "climate still tints the plate above {LOWLAND_TINT_CEILING_M} m",
             );
         }
     }
