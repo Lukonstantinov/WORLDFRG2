@@ -1740,7 +1740,7 @@ CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next thre
                                     own caveat list (§5) — incl. that it REVERSES
                                     PROVINCE_SYSTEM_PLAN's "enclaves survive" decision —
                                     and its own "deliberately not built" list (§6)
-REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R4 BUILT, R5 NOT YET. THE FIRST
+REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R5 BUILT, each partially. THE FIRST
                                     COUNTRIES: a merchant house takes a city
                                     (`captor_house`), PROCLAIMS sovereignty after a
                                     hard year-50 floor + a decade holding it
@@ -1785,15 +1785,28 @@ REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R4 BUILT, R5 NOT YET. THE FIRST
                                     free-city war participation; annexing/
                                     vassalizing a realm's own CAPITAL (a full
                                     foreign-crown conquest, explicitly guarded off
-                                    in `apply_war_goal` pending its own design);
-                                    and FRAGMENTATION along the family — which will
-                                    make the shipped `InheritanceRule` decide
-                                    whether a people can hold an empire at all,
-                                    once R5 lands. REVERSES CITY_PROVINCE_WAR_PLAN
-                                    §6's deferral of a realm entity above cities.
-                                    Carries its own caveats (§5) and "deliberately
-                                    not built" list (§6); §7's order table records
-                                    exactly what each phase shipped
+                                    in `apply_war_goal` pending its own design).
+                                    FRAGMENTATION is real (R5) but only Path A — a
+                                    Partible culture's realm divides among eligible
+                                    sons at EVERY succession (`partition_realm`,
+                                    the same `partible_heirs` distribution
+                                    `divide_estate` already uses for a merchant
+                                    house), which is what finally makes the shipped
+                                    `InheritanceRule` decide whether a people can
+                                    hold an empire at all. Path B (contested-
+                                    succession civil war) and overseas merchant-
+                                    gated holdings (§3.5) remain unbuilt. The
+                                    autonomy axis (`Realm.autonomy`, dormant since
+                                    R1) got its first real readers — a centralized
+                                    crown collects more but loses more to distance,
+                                    an autonomous one the reverse. Capital moves are
+                                    a real, tested mechanism triggered ONLY by a
+                                    capital going abandoned (a defensive case, not
+                                    a speculative "chase prosperity" AI). REVERSES
+                                    CITY_PROVINCE_WAR_PLAN §6's deferral of a realm
+                                    entity above cities. Carries its own caveats (§5)
+                                    and "deliberately not built" list (§6); §7's
+                                    order table records exactly what each phase shipped
 IN_APP_VERIFICATION_CHECKLIST.md  ← Manual in-app verification checklist
 PORTING_REFERENCE.md              ← Porting reference
 ```

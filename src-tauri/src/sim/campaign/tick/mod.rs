@@ -4415,6 +4415,37 @@ pub const TAX_FARM_DISCOUNT: f32 = 0.65;
 /// distress sale, not a standing policy (plan §3.3's own framing).
 pub const REALM_FARM_TREASURY_FLOOR: f32 = 400.0;
 
+// ── R5 · the autonomy axis (`REALM_AND_GOVERNMENT_PLAN.md` §3.4) ──────────────
+// One policy tying revenue and cohesion-at-distance together — the DATA field
+// (`Realm.autonomy`) and its three values (`AUTONOMY_*`, mod.rs) shipped in R1;
+// this is where it first gets a real reader. Scoped to the two effects the
+// EXISTING R3 collection machinery already models cleanly (revenue, and how
+// efficiency falls off with distance); "annexed city keeps its own coin/market"
+// and "separate-peace risk" are the table's other two columns and are NOT wired
+// here — the first needs realm coin (deferred, R3), the second needs separate
+// peace itself (deferred, R4). Named, not silently skipped.
+/// Multiplies collected revenue (tithe + poll + customs) — a centralized crown
+/// squeezes harder, an autonomous one leaves more with its cities.
+pub fn autonomy_revenue_mult(autonomy: u8) -> f32 {
+    match autonomy {
+        AUTONOMY_CENTRALIZED => 1.25,
+        AUTONOMY_AUTONOMOUS => 0.60,
+        _ => 1.0, // core & periphery — the baseline R3 was already tuned against
+    }
+}
+/// Multiplies `REALM_DISTANCE_DECAY` in `realm_collection_efficiency` — a
+/// centralized realm feels distance HARDER (administration doesn't reach), an
+/// autonomous one is close to distance-insensitive (local elites collect for it
+/// regardless of how far the capital is), matching the table's own "Cohesion:
+/// low at distance / high, distance-insensitive" language.
+pub fn autonomy_distance_mult(autonomy: u8) -> f32 {
+    match autonomy {
+        AUTONOMY_CENTRALIZED => 1.6,
+        AUTONOMY_AUTONOMOUS => 0.3,
+        _ => 1.0,
+    }
+}
+
 /// One entry in a realm's own permanent record. Mirrors `HouseEvent`, and obeys the
 /// same discipline: milestones (founding, coronation, conquest, partition, fall) are
 /// never pruned — for an observation-only game the chronicle is the product (rule 20).
@@ -4442,6 +4473,12 @@ pub struct Realm {
     /// a "Republic".
     pub title: String,
     pub capital_hub: u32,
+    /// R5 · the realm this one split FROM at a partible succession, or −1 (an
+    /// original proclamation). Mirrors `House.origin_house` exactly — a pointer
+    /// to the parent, never a duplicated ancestor list, so a cadet realm's
+    /// pedigree stays provable without copying its parent's whole family into
+    /// every offshoot.
+    #[serde(default = "neg_one_i32")] pub origin_realm: i32,
     /// The dynasty. 1:1 with a `House` for the realm's whole life: a house that
     /// gains a second sovereignty merges it into the realm it already has.
     pub ruling_house: u32,

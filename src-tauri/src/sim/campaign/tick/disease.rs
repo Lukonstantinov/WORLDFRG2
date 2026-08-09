@@ -575,6 +575,10 @@ impl CampaignSim {
             // marriage, births. Runs AFTER proclamation so a realm founded this very
             // year already has its founding generation in place. No-op with no realms.
             self.realm_family_pass(self.tick / TICKS_PER_YEAR);
+            // R5 · a capital that's gone abandoned relocates (or the realm falls
+            // with it) BEFORE this year's collection, so the tithe/levies below
+            // read the realm's real, current seat.
+            self.maybe_relocate_abandoned_capitals(self.tick / TICKS_PER_YEAR);
             // R3 · poll + customs, at this year's rates, then next year's rates (and
             // whether to farm the tithe) are decided from what actually came in —
             // `tithe_last_year` was just filled in by `province_land_pass` above.

@@ -47,7 +47,7 @@ impl CampaignSim {
             if tick.saturating_sub(self.hubs[h].captor_since) < REALM_CAPTOR_YEARS * TICKS_PER_YEAR { continue; }
             if self.houses[hi].tier == 0 || self.houses[hi].tier > REALM_PROCLAIM_TIER_MAX { continue; }
             if self.hubs[h].tier == 0 || self.hubs[h].tier > REALM_PROCLAIM_TIER_MAX { continue; }
-            if !self.prov_holder.iter().any(|&ph| ph == h as i32) { continue; }
+            if !self.prov_holder.contains(&(h as i32)) { continue; }
             if self.houses[hi].wealth < REALM_PROCLAIM_TREASURY_MIN { continue; }
             if self.houses[hi].prestige < REALM_PROCLAIM_PRESTIGE_MIN { continue; }
             let bold = self.head_axis(hi, 0) as f32;
@@ -56,6 +56,19 @@ impl CampaignSim {
             if hash01(self.seed, tick as u64 ^ 0xC0_10A6, (h as u64) << 16 ^ yr as u64) > chance { continue; }
             self.promote_house_to_realm(hi, h, yr);
         }
+    }
+
+    /// Placeholder naming (see the module doc) — a culture-vocabulary namer that
+    /// reads `prov_culture` at the capital is real follow-up work, not built here.
+    /// Shared by every realm-CREATING path (a coronation, R5's partible division)
+    /// so a cadet realm is named by the same rule its parent was.
+    fn generate_realm_name(&self, capital: usize, salt: u64) -> (String, String) {
+        let city_name = self.hubs[capital].name.clone();
+        let name_seed = (capital as u64).wrapping_mul(2654435761) ^ salt;
+        let style = REALM_NAME_STYLES[(name_seed as usize) % REALM_NAME_STYLES.len()];
+        let name = style.replace("{c}", &city_name);
+        let title = REALM_TITLES[(name_seed.rotate_left(7) as usize) % REALM_TITLES.len()].to_string();
+        (name, title)
     }
 
     /// The house is ELEVATED — its wealth and trade assets become the crown's and it
@@ -91,13 +104,7 @@ impl CampaignSim {
             if p < self.prov_realm.len() { self.prov_realm[p] = id as i32; }
         }
 
-        let city_name = self.hubs[seat].name.clone();
-        // Placeholder naming (see the module doc) — a culture-vocabulary namer that
-        // reads `prov_culture` at the capital is real follow-up work, not built here.
-        let name_seed = (seat as u64).wrapping_mul(2654435761) ^ tick as u64;
-        let style = REALM_NAME_STYLES[(name_seed as usize) % REALM_NAME_STYLES.len()];
-        let name = style.replace("{c}", &city_name);
-        let title = REALM_TITLES[(name_seed.rotate_left(7) as usize) % REALM_TITLES.len()].to_string();
+        let (name, title) = self.generate_realm_name(seat, tick as u64);
 
         let treasury = self.houses[hi].wealth.max(0.0);
         let house_name = self.houses[hi].name.clone();
@@ -130,6 +137,7 @@ impl CampaignSim {
 
         let realm = Realm {
             id, name: name.clone(), title: title.clone(), capital_hub: seat as u32,
+            origin_realm: -1, // an original proclamation, not a partible offshoot
             ruling_house: hi as u32, rank: REALM_CITY_STATE, autonomy: AUTONOMY_CORE_PERIPHERY,
             provinces: provinces.clone(), vassals: Vec::new(),
             treasury, debts, legitimacy: REALM_FOUNDING_LEGITIMACY, cohesion: REALM_FOUNDING_COHESION,
@@ -137,7 +145,7 @@ impl CampaignSim {
             events: vec![RealmEvent {
                 tick, kind: "founded".into(),
                 text: format!("{} of House {} proclaims {}, {} of {}",
-                    title, house_name, name, head_name, city_name),
+                    title, house_name, name, head_name, self.hubs[seat].name),
             }],
             ruler: 0, regent: -1, family: vec![founder],
             tax_rates: [0.0; 2], tithe_last_year: 0.0, tax_farm: None,
@@ -246,12 +254,93 @@ impl CampaignSim {
     /// cleanly (never left pointing at a fallen realm) rather than the realm being
     /// left in an undefined state (the same "must always terminate" discipline
     /// rule 22 already holds a house crisis to).
+    /// The dynasty is gone and nothing can carry the realm forward — release
+    /// every province's sovereignty AND every member city's `hub.realm`/
+    /// `realm_role` (never leave state pointing at a fallen realm — rule 25),
+    /// mark `fallen_tick`, and chronicle it. The ONE place a realm's life ends,
+    /// reused by every path that can end one (no heir at succession, a capital
+    /// abandoned with nowhere left to relocate to). Keeping this in one place is
+    /// what stopped R4's capital-city release bug from becoming two separately-
+    /// drifting copies of the same fix.
+    fn dissolve_realm(&mut self, ri: usize, kind: &str, text: String) {
+        let tick = self.tick;
+        for p in self.realms[ri].provinces.clone() {
+            if (p as usize) < self.prov_realm.len() { self.prov_realm[p as usize] = -1; }
+        }
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].realm == ri as i32 {
+                self.hubs[h].realm = -1;
+                self.hubs[h].realm_role = 0;
+            }
+        }
+        self.realms[ri].fallen_tick = tick;
+        self.realms[ri].events.push(RealmEvent { tick, kind: kind.into(), text: text.clone() });
+        self.journal.push(JournalEntry {
+            tick, kind: "realm_fallen".into(), hub: self.realms[ri].capital_hub as i32,
+            good: -1, value: 0.0, text,
+        });
+    }
+
+    /// R5 · relocate a realm's capital to another of its own member cities —
+    /// reassigns `realm_role` (the old capital becomes a plain SUBJECT, the new
+    /// one SEAT), chronicles the move. The Karakorum rule cuts both ways: a
+    /// capital need not be the largest city, but when IT is lost, something has
+    /// to become the seat. Callers are responsible for `new_capital` actually
+    /// being a member (`hub.realm == ri`) — this does not re-check it, matching
+    /// every other realm-internal helper here.
+    pub(crate) fn move_realm_capital(&mut self, ri: usize, new_capital: usize) {
+        let tick = self.tick;
+        let old_capital = self.realms[ri].capital_hub as usize;
+        if old_capital == new_capital { return; }
+        self.hubs[old_capital].realm_role = REALM_ROLE_SUBJECT;
+        self.hubs[new_capital].realm_role = REALM_ROLE_SEAT;
+        self.realms[ri].capital_hub = new_capital as u32;
+        let (old_name, new_name) = (self.hubs[old_capital].name.clone(), self.hubs[new_capital].name.clone());
+        let realm_name = self.realms[ri].name.clone();
+        let text = format!("The capital of {} moves from {} to {}", realm_name, old_name, new_name);
+        self.realms[ri].events.push(RealmEvent { tick, kind: "capital_moved".into(), text: text.clone() });
+        self.journal.push(JournalEntry {
+            tick, kind: "capital_moved".into(), hub: new_capital as i32, good: -1, value: 0.0, text,
+        });
+    }
+
+    /// Yearly · the one capital-move TRIGGER this pass wires: a capital that has
+    /// been ABANDONED (the city-lifecycle system, Atlas 2.0 — famine/plague/war
+    /// can empty a city) can no longer serve as anyone's seat. A speculative
+    /// "chase prosperity" relocation policy is NOT built — this is a defensive
+    /// case, not an AI preference, and inventing the latter's trigger conditions
+    /// under time pressure would be exactly the kind of untested behaviour
+    /// change this project's culture (CLAUDE.md §2.4) warns against. Relocates to
+    /// the realm's largest surviving member city; with none left, the realm
+    /// follows its capital into extinction via the same `dissolve_realm` every
+    /// other ending uses.
+    pub(crate) fn maybe_relocate_abandoned_capitals(&mut self, yr: u32) {
+        let _ = yr;
+        for ri in 0..self.realms.len() {
+            if self.realms[ri].fallen_tick > 0 { continue; }
+            let capital = self.realms[ri].capital_hub as usize;
+            if capital >= self.hubs.len() || !self.hubs[capital].abandoned { continue; }
+            let next = (0..self.hubs.len())
+                .filter(|&h| h != capital && self.hubs[h].realm == ri as i32
+                    && !self.hubs[h].is_estate && !self.hubs[h].abandoned)
+                .max_by(|&a, &b| self.hubs[a].population.partial_cmp(&self.hubs[b].population).unwrap());
+            match next {
+                Some(nc) => self.move_realm_capital(ri, nc),
+                None => {
+                    let realm_name = self.realms[ri].name.clone();
+                    let text = format!("{} falls with its abandoned capital — no city remains to carry it", realm_name);
+                    self.dissolve_realm(ri, "dynasty_ended", text);
+                }
+            }
+        }
+    }
+
     pub(crate) fn resolve_realm_succession(&mut self, ri: usize, yr: u32) {
         let _ = yr;
         let tick = self.tick;
         let dead = self.realms[ri].ruler as usize;
         let capital = self.realms[ri].capital_hub as usize;
-        let (line, _rule) = self.rules_for_hub(capital);
+        let (line, rule) = self.rules_for_hub(capital);
 
         let reign_start = self.realms[ri].family[dead].reign_start;
         let reign_years = tick.saturating_sub(reign_start) / TICKS_PER_YEAR;
@@ -294,60 +383,36 @@ impl CampaignSim {
         }
 
         let Some(heir_idx) = heir else {
-            for p in self.realms[ri].provinces.clone() {
-                if (p as usize) < self.prov_realm.len() { self.prov_realm[p as usize] = -1; }
-            }
-            // R4 · release every city this realm ever claimed too — not just its
-            // provinces. `hub.realm` is authoritative membership (rule 25's own
-            // "cities" field was removed for exactly this reason); leaving it
-            // pointing at a fallen realm would permanently bar these cities from
-            // ever proclaiming their own (`maybe_proclaim_realms` refuses any hub
-            // with `realm >= 0`, with no notion of "but that realm is dead").
-            for h in 0..self.hubs.len() {
-                if self.hubs[h].realm == ri as i32 {
-                    self.hubs[h].realm = -1;
-                    self.hubs[h].realm_role = 0;
-                }
-            }
-            self.realms[ri].fallen_tick = tick;
             let text = format!("The line of {} ends — {} has no heir and dissolves", dead_name, realm_name);
-            self.realms[ri].events.push(RealmEvent { tick, kind: "dynasty_ended".into(), text: text.clone() });
-            self.journal.push(JournalEntry {
-                tick, kind: "realm_fallen".into(), hub: self.realms[ri].capital_hub as i32,
-                good: -1, value: 0.0, text,
-            });
+            self.dissolve_realm(ri, "dynasty_ended", text);
             return;
         };
 
-        let heir_age = tick.saturating_sub(self.realms[ri].family[heir_idx].born_tick) / TICKS_PER_YEAR;
-        self.realms[ri].ruler = heir_idx as i32;
-        self.realms[ri].family[heir_idx].reign_start = tick;
-
-        let mut regency_note = String::new();
-        if heir_age < PERSON_ADULT_AGE {
-            let mother = self.realms[ri].family[heir_idx].mother;
-            let regent = if mother >= 0 && (mother as usize) < self.realms[ri].family.len()
-                && self.realms[ri].family[mother as usize].died_tick == 0 {
-                Some(mother as usize)
-            } else {
-                self.realms[ri].family.iter().enumerate()
-                    .filter(|(i, p)| *i != heir_idx && p.died_tick == 0
-                        && tick.saturating_sub(p.born_tick) / TICKS_PER_YEAR >= PERSON_ADULT_AGE)
-                    .min_by_key(|(_, p)| p.born_tick)
-                    .map(|(i, _)| i)
-            };
-            self.realms[ri].regent = regent.map(|i| i as i32).unwrap_or(-1);
-            self.realms[ri].legitimacy = (self.realms[ri].legitimacy - REGENCY_LEGITIMACY_HIT).max(0.0);
-            if let Some(rg) = regent {
-                let rn = self.realms[ri].family[rg].name.clone();
-                regency_note = format!(" — too young to rule; {} governs as regent", rn);
-            } else {
-                regency_note = " — too young to rule, and no regent can be found".into();
+        // R5 · Path A — PARTIBLE division. Only when the dead ruler leaves
+        // MULTIPLE eligible living children of their OWN — a co-heir found only
+        // through the "widen to any living relative" fallback above is never
+        // split further; that fallback already means the direct line failed,
+        // and dividing a rescue heir's inheritance would compound a crisis
+        // rather than model the law. The number of co-heirs is capped by the
+        // SAME distribution `divide_estate` already uses for a merchant house
+        // (`partible_heirs` — two to four, weighted toward two), floored by how
+        // many eligible children actually survive.
+        if matches!(rule, InheritanceRule::Partible) {
+            let mut co_heirs: Vec<usize> = self.realms[ri].family.iter().enumerate()
+                .filter(|(_, p)| p.died_tick == 0 && (p.father == dead as i32 || p.mother == dead as i32))
+                .filter(|(_, p)| eligible(p))
+                .map(|(i, _)| i)
+                .collect();
+            co_heirs.sort_by_key(|&i| self.realms[ri].family[i].born_tick);
+            if co_heirs.len() >= 2 {
+                let roll = crate::sim::inheritance::partible_heirs(ri as u64 ^ tick as u64, self.seed) as usize;
+                co_heirs.truncate(roll.clamp(2, co_heirs.len()));
+                self.partition_realm(ri, &co_heirs, &dead_name, &realm_name);
+                return;
             }
-        } else {
-            self.realms[ri].regent = -1;
         }
 
+        let regency_note = self.install_ruler(ri, heir_idx);
         let heir_name = self.realms[ri].family[heir_idx].name.clone();
         let epithet_note = if epithet.is_empty() { String::new() } else { format!(" ({})", epithet) };
         let reign_note = if reign_years > 0 { format!(", after a reign of {} years", reign_years) } else { String::new() };
@@ -356,6 +421,169 @@ impl CampaignSim {
         self.realms[ri].events.push(RealmEvent { tick, kind: "succession".into(), text: text.clone() });
         self.journal.push(JournalEntry {
             tick, kind: "realm_succession".into(), hub: self.realms[ri].capital_hub as i32,
+            good: -1, value: 0.0, text,
+        });
+    }
+
+    /// Installs `heir_idx` as `ri`'s ruler, starting their reign and — if
+    /// they're a minor — a regency (their own living mother, else the eldest
+    /// other living adult), at the usual legitimacy cost. Shared by ordinary
+    /// succession and the eldest co-heir's share of a partible division, so the
+    /// two paths can never drift apart on how a regency is decided. Returns the
+    /// narration clause to append to whichever event text called it.
+    fn install_ruler(&mut self, ri: usize, heir_idx: usize) -> String {
+        let tick = self.tick;
+        let heir_age = tick.saturating_sub(self.realms[ri].family[heir_idx].born_tick) / TICKS_PER_YEAR;
+        self.realms[ri].ruler = heir_idx as i32;
+        self.realms[ri].family[heir_idx].reign_start = tick;
+        if heir_age >= PERSON_ADULT_AGE {
+            self.realms[ri].regent = -1;
+            return String::new();
+        }
+        let mother = self.realms[ri].family[heir_idx].mother;
+        let regent = if mother >= 0 && (mother as usize) < self.realms[ri].family.len()
+            && self.realms[ri].family[mother as usize].died_tick == 0 {
+            Some(mother as usize)
+        } else {
+            self.realms[ri].family.iter().enumerate()
+                .filter(|(i, p)| *i != heir_idx && p.died_tick == 0
+                    && tick.saturating_sub(p.born_tick) / TICKS_PER_YEAR >= PERSON_ADULT_AGE)
+                .min_by_key(|(_, p)| p.born_tick)
+                .map(|(i, _)| i)
+        };
+        self.realms[ri].regent = regent.map(|i| i as i32).unwrap_or(-1);
+        self.realms[ri].legitimacy = (self.realms[ri].legitimacy - REGENCY_LEGITIMACY_HIT).max(0.0);
+        match regent {
+            Some(rg) => {
+                let rn = self.realms[ri].family[rg].name.clone();
+                format!(" — too young to rule; {} governs as regent", rn)
+            }
+            None => " — too young to rule, and no regent can be found".into(),
+        }
+    }
+
+    /// R5 · the partible division itself. `heirs[0]` (the eldest) keeps the
+    /// ORIGINAL realm — its id, name, capital, full family history — shrunk to
+    /// its own share of the provinces; every other heir founds a BRAND NEW
+    /// realm, with a fresh, minimal family (a branch boundary, exactly
+    /// `House.origin_house` records inter-house lineage as a POINTER rather
+    /// than a duplicated ancestor list) and its own crowned house (`origin_
+    /// kind: ORIGIN_DIVISION`, mirroring the merchant `divide_estate`'s own "a
+    /// co-heir inherits capital and no fleet" discipline — nothing is invented
+    /// that wasn't actually earned). Provinces divide round-robin by index
+    /// (deterministic); the eldest's share always includes the ORIGINAL
+    /// capital's own province, so the parent realm's identity survives
+    /// coherently rather than landing in an arbitrary round-robin slot.
+    /// Treasury and debts divide in the SAME proportion as the land — no money
+    /// created or destroyed, the same accounting `divide_estate` already holds
+    /// a merchant division to.
+    fn partition_realm(&mut self, ri: usize, heirs: &[usize], dead_name: &str, realm_name: &str) {
+        let tick = self.tick;
+        let n = heirs.len();
+        let provinces = self.realms[ri].provinces.clone();
+        let total_provs = provinces.len().max(1) as f32;
+        let total_treasury = self.realms[ri].treasury;
+        let total_debts = self.realms[ri].debts;
+        let capital = self.realms[ri].capital_hub as usize;
+        let capital_prov = self.hub_province.get(capital).copied().unwrap_or(-1);
+
+        let mut shares: Vec<Vec<u32>> = vec![Vec::new(); n];
+        if capital_prov >= 0 { shares[0].push(capital_prov as u32); }
+        let rest: Vec<u32> = provinces.iter().copied()
+            .filter(|&p| capital_prov < 0 || p != capital_prov as u32).collect();
+        for (i, &p) in rest.iter().enumerate() { shares[i % n].push(p); }
+
+        for (k, &heir_idx) in heirs.iter().enumerate().skip(1) {
+            let heir_provs = shares[k].clone();
+            let new_capital = heir_provs.iter()
+                .filter_map(|&p| self.province_seat_hub(p as usize))
+                .max_by(|&a, &b| self.hubs[a].population.partial_cmp(&self.hubs[b].population).unwrap());
+            let Some(new_capital) = new_capital else {
+                // No city anywhere in this heir's share — nothing to found a
+                // realm ON. Their share stays part of the ORIGINAL realm rather
+                // than vanishing into an ownerless gap; a rare edge case, not
+                // the common path, so folding it back is honest rather than
+                // inventing a capital that isn't there.
+                shares[0].extend(heir_provs);
+                continue;
+            };
+            let new_id = self.realms.len() as u32;
+            let (new_name, new_title) = self.generate_realm_name(new_capital, tick as u64 ^ heir_idx as u64);
+            let heir_person = self.realms[ri].family[heir_idx].clone();
+            let frac = heir_provs.len() as f32 / total_provs;
+            let new_wealth = total_treasury * frac;
+            let new_debts = total_debts * frac;
+            let old_house = self.realms[ri].ruling_house as i32;
+
+            let new_house = House {
+                name: format!("House {}", heir_person.name), hub: new_capital as u32,
+                wealth: new_wealth, prestige: 0.0, spec: Vec::new(), monopoly: Vec::new(), rivals: Vec::new(),
+                generation: 1, events: Vec::new(), good_profit: Vec::new(), good_volume: Vec::new(),
+                mono50: Vec::new(), mono_ever: Vec::new(), dominant_seat: false, prev_wealth: new_wealth,
+                worst_loss: 0.0, fleet_sea: 0, fleet_river: 0, fleet_caravan: 0,
+                head_name: heir_person.name.clone(), head_since: tick, head_lifespan: 0,
+                founded_tick: tick, political_power: 0.0, volume: 0.0, defunct: false,
+                archetype: 0, charters: Vec::new(), is_guild: false, offices: Vec::new(),
+                trade_at: Vec::new(), debt_since: 0, wealth_history: Vec::new(), office_leases: Vec::new(),
+                influence: Vec::new(), bailos: Vec::new(), head_female: heir_person.female, head_age: 0,
+                line: Vec::new(), tier: 0, standing: 0.0, peak_wealth: new_wealth, peak_wealth_tick: tick,
+                wealth_last_check: new_wealth, golden_age_months: 0, golden_age_chronicled: false,
+                dynasty_chronicled: false, kin: Vec::new(), goals: Vec::new(), goal_history: Vec::new(),
+                crisis: None, crisis_immune_until: 0, crisis_history: Vec::new(), schism_cooldown_until: 0,
+                origin_house: old_house, origin_kind: ORIGIN_DIVISION, crowned: true, realm: new_id as i32,
+            };
+            let new_house_idx = self.houses.len() as u32;
+            self.houses.push(new_house);
+
+            let new_person = Person {
+                name: heir_person.name.clone(), female: heir_person.female,
+                born_tick: heir_person.born_tick, died_tick: 0,
+                father: -1, mother: -1, spouse: -1, // a branch boundary — ancestry doesn't carry over
+                character: heir_person.character, skill: heir_person.skill,
+                epithet: String::new(), reign_start: tick, reign_end: 0,
+            };
+            let text = format!("{} breaks from {} at the death of {} — a co-heir's share, by partible law",
+                new_name, realm_name, dead_name);
+            let new_realm = Realm {
+                id: new_id, name: new_name, title: new_title, capital_hub: new_capital as u32,
+                origin_realm: ri as i32, ruling_house: new_house_idx, rank: REALM_CITY_STATE,
+                autonomy: AUTONOMY_CORE_PERIPHERY, provinces: heir_provs.clone(), vassals: Vec::new(),
+                treasury: new_wealth, debts: new_debts,
+                legitimacy: REALM_FOUNDING_LEGITIMACY, cohesion: REALM_FOUNDING_COHESION,
+                founded_tick: tick, fallen_tick: 0,
+                events: vec![RealmEvent { tick, kind: "partitioned".into(), text: text.clone() }],
+                ruler: 0, regent: -1, family: vec![new_person],
+                tax_rates: [0.0; 2], tithe_last_year: 0.0, tax_farm: None,
+            };
+            self.realms.push(new_realm);
+            for &p in &heir_provs {
+                if (p as usize) < self.prov_realm.len() { self.prov_realm[p as usize] = new_id as i32; }
+                if let Some(seat) = self.province_seat_hub(p as usize) {
+                    self.hubs[seat].realm = new_id as i32;
+                    self.hubs[seat].realm_role = if seat == new_capital { REALM_ROLE_SEAT } else { REALM_ROLE_SUBJECT };
+                }
+            }
+            self.journal.push(JournalEntry {
+                tick, kind: "realm_partitioned".into(), hub: new_capital as i32, good: -1, value: 0.0, text,
+            });
+        }
+
+        // The eldest heir keeps the original realm, shrunk to its own share
+        // (which may have grown back if any sibling's share had no city to
+        // found on, above).
+        let kept = shares[0].clone();
+        let keep_frac = kept.len() as f32 / total_provs;
+        self.realms[ri].provinces = kept;
+        self.realms[ri].treasury = total_treasury * keep_frac;
+        self.realms[ri].debts = total_debts * keep_frac;
+        let eldest = heirs[0];
+        let regency_note = self.install_ruler(ri, eldest);
+        let eldest_name = self.realms[ri].family[eldest].name.clone();
+        let text = format!("{} dies — the realm of {} divides among {} heirs by partible law; {} keeps {}{}",
+            dead_name, realm_name, n, eldest_name, realm_name, regency_note);
+        self.realms[ri].events.push(RealmEvent { tick, kind: "partitioned".into(), text: text.clone() });
+        self.journal.push(JournalEntry {
+            tick, kind: "realm_partitioned".into(), hub: self.realms[ri].capital_hub as i32,
             good: -1, value: 0.0, text,
         });
     }
@@ -421,7 +649,7 @@ impl CampaignSim {
             else if self.realms[ri].family[spouse].female { (ruler, spouse) }
             else { return; }; // same-sex pairing: no birth in this minimal model
         let mother_age = tick.saturating_sub(self.realms[ri].family[mother].born_tick) / TICKS_PER_YEAR;
-        if mother_age < PERSON_FERTILE_MIN || mother_age > PERSON_FERTILE_MAX { return; }
+        if !(PERSON_FERTILE_MIN..=PERSON_FERTILE_MAX).contains(&mother_age) { return; }
 
         let salt = tick as u64 ^ (mother as u64) << 12 ^ (ri as u64) << 44;
         let roll = hash01(self.seed, salt, 0);
@@ -460,19 +688,23 @@ impl CampaignSim {
         (dx * dx + dy * dy).sqrt()
     }
 
-    /// `efficiency(cohesion, distance)` — R4/R5's per-province `integration` axis
-    /// isn't built yet (a founding-era province starts fully integrated by
-    /// construction, since it was never conquered), so this pass is honestly just
-    /// the two terms the plan's §3.3 formula names that already have real state
-    /// behind them. Distance is normalised by world width, so it reads the same on
-    /// any map size; a founding realm's own capital is at distance 0 (efficiency
-    /// ≈ cohesion), which is why R3 barely moves anything on its own — the term
+    /// `efficiency(cohesion, distance, autonomy)` — a per-province `integration`
+    /// axis (R4/R5's conquest-vs-founding distinction) still isn't built (a
+    /// founding-era province starts fully integrated by construction, since it
+    /// was never conquered), so this pass is honestly the terms the plan's §3.3
+    /// formula names that already have real state behind them, now including R5's
+    /// autonomy multiplier on the distance term (`autonomy_distance_mult` — a
+    /// centralized realm feels distance harder, an autonomous one barely does).
+    /// Distance is normalised by world width, so it reads the same on any map
+    /// size; a founding realm's own capital is at distance 0 (efficiency ≈
+    /// cohesion), which is why R3 barely moved anything on its own — the term
     /// only bites once a realm actually spans distance, R4/R5's job.
     pub(crate) fn realm_collection_efficiency(&self, ri: usize, seat: usize) -> f32 {
         let capital = self.realms[ri].capital_hub as usize;
         let dist = self.hub_distance_cells(capital, seat);
         let frac = if self.world_w > 0.0 { dist / self.world_w } else { 0.0 };
-        let distance_term = 1.0 / (1.0 + REALM_DISTANCE_DECAY * frac);
+        let decay = REALM_DISTANCE_DECAY * autonomy_distance_mult(self.realms[ri].autonomy);
+        let distance_term = 1.0 / (1.0 + decay * frac);
         self.realms[ri].cohesion.clamp(0.0, 1.0) * distance_term
     }
 
@@ -495,8 +727,9 @@ impl CampaignSim {
                 .collect();
             let poll_rate = self.realms[ri].tax_rates[TAX_POLL];
             let customs_rate = self.realms[ri].tax_rates[TAX_CUSTOMS];
+            let revenue_mult = autonomy_revenue_mult(self.realms[ri].autonomy);
             for h in member_cities {
-                let efficiency = self.realm_collection_efficiency(ri, h);
+                let efficiency = self.realm_collection_efficiency(ri, h) * revenue_mult;
 
                 if poll_rate > 0.0 {
                     let base = self.hubs[h].population.max(0.0);
@@ -531,11 +764,11 @@ impl CampaignSim {
         if self.realms[ri].fallen_tick > 0 { return; }
         let treasury = self.realms[ri].treasury;
         let need = ((REALM_TREASURY_COMFORT - treasury) / REALM_TREASURY_COMFORT).clamp(-1.0, 1.0);
-        for k in 0..2 {
+        for (k, &max) in REALM_TAX_MAX.iter().enumerate() {
             let cur = self.realms[ri].tax_rates[k];
-            let target = if need > 0.0 { REALM_TAX_MAX[k] } else { 0.0 };
+            let target = if need > 0.0 { max } else { 0.0 };
             self.realms[ri].tax_rates[k] = (cur + (target - cur) * REALM_TAX_DRIFT * need.abs())
-                .clamp(0.0, REALM_TAX_MAX[k]);
+                .clamp(0.0, max);
         }
         self.maybe_farm_tithe(ri, yr);
     }
@@ -573,7 +806,7 @@ impl CampaignSim {
         let Some(hi) = candidate else { return };
         let lump_sum = self.realms[ri].tithe_last_year * TAX_FARM_YEARS as f32 * TAX_FARM_DISCOUNT;
         if lump_sum <= 0.0 || self.houses[hi].wealth < lump_sum { return; }
-        let roll = hash01(self.seed, (ri as u64) << 8 | hi as u64, tick as u64 ^ 0x7A2F_A12);
+        let roll = hash01(self.seed, (ri as u64) << 8 | hi as u64, tick as u64 ^ 0x07A2_FA12);
         if roll > 0.5 { return; } // not every eligible year sells — a real decision, not automatic
         self.houses[hi].wealth -= lump_sum;
         self.realms[ri].treasury += lump_sum;

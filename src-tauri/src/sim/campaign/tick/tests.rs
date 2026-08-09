@@ -2206,6 +2206,219 @@
             "the crown's own treasury must count toward the capital's war-affordability");
     }
 
+    /// R5 · the autonomy axis's own "Revenue"/"Cohesion at distance" columns —
+    /// centralized squeezes harder up close but falls off faster with distance;
+    /// autonomous is the reverse, distance-insensitive per the plan's own table.
+    #[test]
+    fn autonomy_shapes_revenue_and_distance_falloff() {
+        assert!(autonomy_revenue_mult(AUTONOMY_CENTRALIZED) > autonomy_revenue_mult(AUTONOMY_AUTONOMOUS),
+            "a centralized crown must take a bigger cut than an autonomous one");
+        assert!(autonomy_distance_mult(AUTONOMY_CENTRALIZED) > autonomy_distance_mult(AUTONOMY_AUTONOMOUS),
+            "a centralized crown must feel distance HARDER — autonomous is distance-insensitive");
+
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 500.0, 0.0, 5000.0, vec![3000.0], 0), // far from the capital
+        ];
+        let mut s = sim(hubs, goods);
+        s.world_w = 1000.0;
+        s.found_house_at(0);
+        s.prov_holder = vec![0]; s.prov_holder_house = vec![-1]; s.prov_realm = vec![-1];
+        s.hub_province = vec![0]; s.prov_culture = vec!["Solo".into()];
+        let id = s.promote_house_to_realm(0, 0, 60);
+        let ri = id as usize;
+        s.realms[ri].cohesion = 1.0;
+
+        s.realms[ri].autonomy = AUTONOMY_CENTRALIZED;
+        let centralized_far = s.realm_collection_efficiency(ri, 1);
+        s.realms[ri].autonomy = AUTONOMY_AUTONOMOUS;
+        let autonomous_far = s.realm_collection_efficiency(ri, 1);
+        assert!(autonomous_far > centralized_far,
+            "an autonomous realm must collect MORE EFFICIENTLY at distance than a centralized one: {} vs {}",
+            autonomous_far, centralized_far);
+    }
+
+    /// R5 · `move_realm_capital` reassigns `realm_role` on both ends and updates
+    /// `capital_hub` — the mechanism the abandonment trigger (below) relies on.
+    #[test]
+    fn move_realm_capital_reassigns_seat_and_role() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 0.0, 0.0, 4000.0, vec![2000.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.found_house_at(0);
+        s.prov_holder = vec![0, 1]; s.prov_holder_house = vec![-1, -1]; s.prov_realm = vec![-1, -1];
+        s.hub_province = vec![0, 1]; s.prov_culture = vec!["Solo".into(), "Solo".into()];
+        let id = s.promote_house_to_realm(0, 0, 60);
+        let ri = id as usize;
+        s.hubs[1].realm = id as i32;
+        s.hubs[1].realm_role = REALM_ROLE_SUBJECT;
+
+        s.move_realm_capital(ri, 1);
+        assert_eq!(s.realms[ri].capital_hub, 1);
+        assert_eq!(s.hubs[1].realm_role, REALM_ROLE_SEAT, "the new capital becomes the seat");
+        assert_eq!(s.hubs[0].realm_role, REALM_ROLE_SUBJECT, "the old capital demotes to a plain member");
+    }
+
+    /// R5 · an abandoned capital must relocate to the realm's largest surviving
+    /// city, or — with none left — the realm follows it into extinction rather
+    /// than persisting with a dead seat forever.
+    #[test]
+    fn an_abandoned_capital_relocates_or_the_realm_falls_with_it() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 0.0, 0.0, 4000.0, vec![2000.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.found_house_at(0);
+        s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR; // realistic — tick 0 is the "never fallen" sentinel
+        s.prov_holder = vec![0, 0]; s.prov_holder_house = vec![-1, -1]; s.prov_realm = vec![-1, -1];
+        s.hub_province = vec![0, 1]; s.prov_culture = vec!["Solo".into(), "Solo".into()];
+        let id = s.promote_house_to_realm(0, 0, 60);
+        let ri = id as usize;
+        s.hubs[1].realm = id as i32;
+        s.hubs[1].realm_role = REALM_ROLE_SUBJECT;
+
+        // The capital is abandoned; hub 1 survives — relocation.
+        s.hubs[0].abandoned = true;
+        s.tick += TICKS_PER_YEAR;
+        s.maybe_relocate_abandoned_capitals(61);
+        assert_eq!(s.realms[ri].capital_hub, 1, "the realm relocates to its surviving member city");
+        assert_eq!(s.realms[ri].fallen_tick, 0, "the realm survives the move");
+
+        // Now the (new) capital is ALSO abandoned, and nothing else survives.
+        s.hubs[1].abandoned = true;
+        s.tick += TICKS_PER_YEAR;
+        s.maybe_relocate_abandoned_capitals(62);
+        assert!(s.realms[ri].fallen_tick > 0, "with no city left anywhere, the realm falls");
+        assert_eq!(s.hubs[1].realm, -1, "membership is released, same as any other dissolution");
+    }
+
+    /// R5 · Path A, partible division. A culture whose `InheritanceRule` is
+    /// `Partible` must split the realm among its eligible sons at succession:
+    /// the eldest keeps the ORIGINAL realm (shrunk to its own share), each
+    /// other heir founds a genuinely NEW realm with its own crowned house, and
+    /// the total treasury is conserved (no money created or destroyed) across
+    /// every share.
+    #[test]
+    fn partible_succession_divides_the_realm_among_eligible_sons() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 0.0, 0.0, 6000.0, vec![3000.0], 0),
+            hub(2, 0.0, 0.0, 4000.0, vec![2000.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["Splitters".into(), "Splitters".into(), "Splitters".into()];
+        s.culture_rules = vec![CultureRule {
+            culture: "Splitters".into(), line: LineRule::Agnatic.as_u8(), rule: InheritanceRule::Partible.as_u8(),
+        }];
+        s.found_house_at(0);
+        // All three provinces administered by the CAPITAL at the moment of
+        // coronation, so all three actually enter the realm's sovereignty —
+        // hub_province still maps each province to its own town for
+        // province_seat_hub to find later, when the split needs a new capital.
+        s.prov_holder = vec![0, 0, 0];
+        s.prov_holder_house = vec![-1, -1, -1];
+        s.prov_realm = vec![-1, -1, -1];
+        s.hub_province = vec![0, 1, 2];
+        s.prov_culture = vec!["Splitters".into(), "Splitters".into(), "Splitters".into()];
+        let id = s.promote_house_to_realm(0, 0, 60);
+        let ri = id as usize;
+        s.realms[ri].treasury = 900.0;
+        let realms_before = s.realms.len();
+        let houses_before = s.houses.len();
+
+        // Two eligible sons, born far enough apart to have a clean eldest/younger order.
+        let ruler_born = s.realms[ri].family[0].born_tick;
+        let son_a = Person {
+            name: "Elder Son".into(), female: false, born_tick: ruler_born.saturating_add(1),
+            died_tick: 0, father: 0, mother: -1, spouse: -1,
+            character: [0; 4], skill: 0.5, epithet: String::new(), reign_start: 0, reign_end: 0,
+        };
+        let son_b = Person {
+            name: "Younger Son".into(), female: false, born_tick: ruler_born.saturating_add(2),
+            died_tick: 0, father: 0, mother: -1, spouse: -1,
+            character: [0; 4], skill: 0.5, epithet: String::new(), reign_start: 0, reign_end: 0,
+        };
+        s.realms[ri].family.push(son_a);
+        s.realms[ri].family.push(son_b);
+
+        s.tick = 61 * TICKS_PER_YEAR;
+        s.realms[ri].family[0].died_tick = s.tick;
+        s.resolve_realm_succession(ri, 61);
+
+        assert!(s.realms.len() > realms_before, "a new realm must be founded for the second heir");
+        assert!(s.houses.len() > houses_before, "the new realm needs its OWN crowned house");
+        assert_eq!(s.realms[ri].ruler, 1, "the eldest son (index 1) keeps the ORIGINAL realm");
+        assert!(!s.realms[ri].provinces.is_empty(), "the original realm keeps a real share, not nothing");
+        assert!(s.realms[ri].provinces.len() < 3, "…but a SMALLER share than before the split");
+
+        let new_realm = s.realms.last().unwrap();
+        assert_eq!(new_realm.origin_realm, ri as i32, "the offshoot records where it split from");
+        assert!(!new_realm.provinces.is_empty(), "the younger son actually receives territory");
+        assert!(s.houses[new_realm.ruling_house as usize].crowned, "the offshoot's house is born crowned");
+        assert_eq!(s.houses[new_realm.ruling_house as usize].origin_kind, ORIGIN_DIVISION);
+
+        let total_after: f32 = std::iter::once(&s.realms[ri]).chain(std::iter::once(new_realm))
+            .map(|r| r.treasury).sum();
+        assert!((total_after - 900.0).abs() < 1.0, "treasury is CONSERVED across the split: got {}", total_after);
+
+        // Every province must land in EXACTLY one of the two realms' sovereignty.
+        for &p in &s.realms[ri].provinces {
+            assert_eq!(s.prov_realm[p as usize], ri as i32);
+        }
+        for &p in &new_realm.provinces {
+            assert_eq!(s.prov_realm[p as usize], new_realm.id as i32);
+        }
+    }
+
+    /// R5 · a NON-Partible culture must never split, even with multiple eligible
+    /// sons — the same succession that would divide a Partible realm must
+    /// concentrate normally under Primogeniture.
+    #[test]
+    fn non_partible_succession_never_splits_the_realm() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 0.0, 0.0, 6000.0, vec![3000.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["Keepers".into(), "Keepers".into()];
+        s.culture_rules = vec![CultureRule {
+            culture: "Keepers".into(), line: LineRule::Agnatic.as_u8(), rule: InheritanceRule::Primogeniture.as_u8(),
+        }];
+        s.found_house_at(0);
+        s.prov_holder = vec![0, 0]; s.prov_holder_house = vec![-1, -1]; s.prov_realm = vec![-1, -1];
+        s.hub_province = vec![0, 1]; s.prov_culture = vec!["Keepers".into(), "Keepers".into()];
+        let id = s.promote_house_to_realm(0, 0, 60);
+        let ri = id as usize;
+        let realms_before = s.realms.len();
+
+        let ruler_born = s.realms[ri].family[0].born_tick;
+        s.realms[ri].family.push(Person {
+            name: "Son A".into(), female: false, born_tick: ruler_born.saturating_add(1),
+            died_tick: 0, father: 0, mother: -1, spouse: -1,
+            character: [0; 4], skill: 0.5, epithet: String::new(), reign_start: 0, reign_end: 0,
+        });
+        s.realms[ri].family.push(Person {
+            name: "Son B".into(), female: false, born_tick: ruler_born.saturating_add(2),
+            died_tick: 0, father: 0, mother: -1, spouse: -1,
+            character: [0; 4], skill: 0.5, epithet: String::new(), reign_start: 0, reign_end: 0,
+        });
+
+        s.tick = 61 * TICKS_PER_YEAR;
+        s.realms[ri].family[0].died_tick = s.tick;
+        s.resolve_realm_succession(ri, 61);
+
+        assert_eq!(s.realms.len(), realms_before, "no new realm — concentration, not division");
+        assert_eq!(s.realms[ri].provinces.len(), 2, "the whole realm passes intact to the single heir");
+    }
+
     #[test]
     fn cutting_food_starves_a_dependent_hub() {
         let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];

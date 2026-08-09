@@ -4,12 +4,15 @@
 realm it founds holds provinces, taxes them, mints its own coin, conquers its
 neighbours, and eventually breaks apart along its own family tree.*
 
-**Status: R1-R4 built, each partially** (entity, proclamation, house→crown transfer,
+**Status: R1-R5 built, each partially** (entity, proclamation, house→crown transfer,
 `compute_states` reading real realms, genealogy/succession/regency, taxation +
-collection efficiency + tax farming, and the priced war-goal ladder with realm-aware
-resolution — see §7's order table for exactly what shipped in each, and what R3/R4
-explicitly deferred; R4 in particular ships the war GOALS, not yet the "one war, many
-cities" multi-city pooling its own headline names). **R5 not yet built.** Every
+collection efficiency + tax farming, the priced war-goal ladder with realm-aware
+resolution, and fragmentation Path A + the autonomy axis's revenue/distance effects +
+capital moves — see §7's order table for exactly what shipped in each, and what
+R3/R4/R5 explicitly deferred; R4 ships the war GOALS, not yet the "one war, many
+cities" multi-city pooling its own headline names; R5 ships Path A, not Path B or
+overseas holdings). **All five phases now have SOMETHING built; every phase also has a
+named, deliberate gap** — this is not a finished feature, it is a founded one. Every
 decision in §1 was made explicitly by the maintainer over the design conversation that
 produced this document; nothing here is a suggestion looking for approval. §7 lists
 what is deliberately NOT in the first build, and that list is as binding as the rest.
@@ -497,9 +500,64 @@ R4 ✅ Annex · vassalize · enthrone — the three new priced goals, realm-awar
      cities" pooling · separate peace · free-city participation · the two-war
      penalty · annexing/vassalizing a realm's own CAPITAL all DEFERRED — see
      below
-R5   Autonomy policy · overseas merchant-gated holdings · capital moves
-     · fragmentation, both paths
+R5 ✅ Fragmentation Path A (partible division, "the most important structural
+     claim in the plan") · the autonomy axis's revenue/distance effects ·
+     capital moves (an abandonment-triggered relocation, not a speculative
+     "chase prosperity" AI). Path B (contested succession/civil war) and
+     overseas merchant-gated holdings DEFERRED — see below
 ```
+
+**R5 shipped the centerpiece, not the whole phase.** Path A — a Partible
+culture's realm dividing among eligible sons at every succession — is exactly
+what the plan calls "the most important structural claim": the culture's
+already-shipped `InheritanceRule` now decides whether a people can hold an
+empire at all, using the SAME `partible_heirs` distribution `divide_estate`
+already applies to a merchant house's estate (two to four heirs, weighted
+toward two), with a cadet realm's dynasty built the same way a divided house's
+co-heir is — "inherits capital and no fleet," nothing invented that wasn't
+actually earned (§8.15). The eldest keeps the ORIGINAL realm (id, name,
+capital, full family history), shrunk to its own province share; every other
+heir founds a genuinely NEW realm with its own crowned house and a FRESH,
+minimal family (a branch boundary — `Realm.origin_realm` records the pedigree
+as a pointer, exactly as `House.origin_house` does, never a duplicated
+ancestor list). Treasury and debts divide in the same proportion as the land;
+nothing is created or destroyed.
+
+The autonomy axis (`Realm.autonomy`, shipped dormant in R1) got its first real
+readers: `autonomy_revenue_mult`/`autonomy_distance_mult` extend the EXISTING
+R3 collection machinery rather than inventing a parallel one — a centralized
+crown takes a bigger cut and feels distance harder, an autonomous one takes
+less but stays close to distance-insensitive, matching the plan's own table
+for the two columns (Revenue, Cohesion-at-distance) that already had real
+mechanism behind them. The other two columns — "what an annexed city keeps"
+and "separate-peace risk" — are NOT wired: the first needs realm coin
+(deferred, R3), the second needs separate peace itself (deferred, R4).
+
+Capital moves shipped as a MECHANISM plus exactly one motivated trigger:
+`move_realm_capital` is a real, tested function, called when a capital goes
+ABANDONED (the existing city-lifecycle system — famine/plague/war can empty a
+city) and relocates to the realm's largest surviving member city, or — with
+none left — the realm follows its capital into extinction via the SAME
+`dissolve_realm` every other ending now shares (factored out this pass
+specifically because R4's capital-release fix and R5's abandonment case would
+otherwise have been two separately-drifting copies of the same logic). A
+speculative "the AI chases prosperity" relocation policy was deliberately NOT
+built — inventing that trigger's conditions under time pressure is exactly the
+untested-behaviour-change risk CLAUDE.md §2.4 warns against; the defensive
+case is real and bounded, the preference-driven one is a separate design
+question for whoever wants to build it.
+
+**Deferred, named rather than dropped:**
+- **Path B — contested succession / civil war.** Two claimants fighting over a
+  disputed throne, reusing `crisis.rs`'s quarterly rounds at realm scale, is a
+  genuinely separate adaptation of existing machinery (not a reuse of Path A's
+  code) and its own design surface — how "backing" is computed, what a draw
+  looks like, whether the realm reunites or stays split. Real follow-up work.
+- **Overseas merchant-gated holdings** (§3.5). Needs bailo/office/estate
+  presence detection, a live trade-route check, naval reach, and a yearly
+  cohesion-decay pass when the link severs — four pieces of real machinery, not
+  a small extension of anything already built. Deferred whole, not
+  half-attempted.
 
 **R4 shipped the priced war-goal ladder, not the multi-city war itself.** §1.4's
 headline claim — "declaring on a realm brings every member city into a defensive
@@ -578,7 +636,7 @@ Additional per-phase gates:
 | R2 | direct unit tests on `resolve_realm_succession` (eldest-eligible-by-`LineRule`, regency, dynasty extinction) rather than `every_realm_succeeds_or_ends` as a single named gate — the mechanism is deterministic enough to test directly; dynamics run stays bit-identical (that sim carries no province layer, so no realm can ever be founded there) |
 | R3 | direct unit tests on `realm_collection_efficiency`/`collect_realm_levies`/`maybe_farm_tithe` (efficiency falls with distance and cohesion, levies never go negative, a farm redirects and reverts on schedule); `top-10% wealth share`/urbanisation NOT specially measured this pass — a founding-era realm's own capital sits at distance 0 from itself, so efficiency stays ≈cohesion until R4/R5 actually spread a realm out geographically, and the standing dynamics/econ_ suites carry no province layer so no realm ever forms in them either. The real fidelity question is deferred to whichever of R4/R5 first makes a realm span real distance |
 | R4 | direct unit tests on `apply_war_goal`'s three new goals + its realm-aware province/city transfer, and on `war_affordable_treasury`; `econ_measure_war_frequency` NOT re-run — declaration-time goal SELECTION is untouched (the new goals are reachable only via the existing score-based downgrade path), so war COUNT is not expected to move; the 45/century baseline and round-cap termination gate belong to whichever pass builds the multi-city pooling this phase deferred, since that is the change that would actually move frequency |
-| R5 | realm count is **non-monotonic** over 500 years (§5.6) |
+| R5 | direct unit tests on the partible split (province/treasury conservation, the offshoot's pedigree, non-Partible cultures never splitting), `move_realm_capital`, and the abandonment trigger (relocates, or falls with no city left). `realm count is non-monotonic over 500 years` (§5.6) is NOT specially measured this pass — Path A can only shrink a realm's territory (never grow the count of LIVE realms beyond what a genuine split produces) and this pass adds no NEW way for one to die beyond R2's dynasty extinction and this phase's own abandonment case; the full non-monotonic claim is really Path B's gate (a civil war that can also REUNITE two realms), still deferred |
 
 **R5 is deliberately last.** Fragmentation is the item most likely to disturb every
 measured number at once, and placing it after everything else means that when a number

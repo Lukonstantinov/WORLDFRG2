@@ -419,7 +419,10 @@ impl CampaignSim {
                     match realm_i {
                         Some(ri) => {
                             let efficiency = self.realm_collection_efficiency(ri, seat);
-                            let to_crown = collected * efficiency;
+                            // R5 · the autonomy axis's own "Revenue" column — a
+                            // centralized crown squeezes harder, an autonomous one
+                            // leaves more with its provinces.
+                            let to_crown = collected * efficiency * autonomy_revenue_mult(self.realms[ri].autonomy);
                             // A tax farm on the tithe redirects the crown's share to
                             // the farming house instead — it already paid up front.
                             let farmer = self.realms[ri].tax_farm.as_ref().map(|f| f.house);
