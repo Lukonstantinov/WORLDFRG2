@@ -82,6 +82,12 @@ interface UIStore {
    *  the ~19 layers that have no legend of their own (§8.18): rather than invent a
    *  colour scale for them, the bottom bar reports the real value under the cursor. */
   hoverInfo: CellInfo | null;
+  /** CLASS ISOLATION (§8.18): the class code kept in full colour on the active
+   *  classed layer, everything else desaturated. Rides in the layer key
+   *  ("biomes#iso=12") so the tile cache keys and invalidates correctly with no
+   *  change to the cache scheme. Cleared whenever the layer changes, since a code
+   *  means a different thing on each layer. */
+  isolateClass: number | null;
   /** When true, the world is stretched to fill the canvas (no letterbox bars,
    *  but distorts aspect). When false, fit proportionally (undistorted). */
   stretchToFit: boolean;
@@ -259,6 +265,7 @@ interface UIStore {
   toggleOverlay: (type: string) => void;
   setLayerOpacity: (opacity: number) => void;
   setHoverInfo: (c: CellInfo | null) => void;
+  setIsolateClass: (c: number | null) => void;
   setLandmassSource: (source: LandmassSource) => void;
   setStretchToFit: (v: boolean) => void;
   setTerrainParams: (p: Partial<TerrainParams>) => void;
@@ -378,6 +385,7 @@ export const useUIStore = create<UIStore>((set) => ({
   layerOpacity: 1,
   activeMapTheme: null,
   hoverInfo: null,
+  isolateClass: null,
   stretchToFit: true,
   landmassSource: "none",
   terrainParams: { density: 0.5, height: 0.5, spread: 0.5, roughness: 0.4, seed: null, mode: "shape" },
@@ -464,7 +472,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setTool: (tool) => set({ activeTool: tool }),
   // Picking a layer or an overlay by hand means the view is no longer the plate
   // that was applied — drop the label rather than let it go stale.
-  setLayer: (layer) => set({ activeLayer: layer, activeMapTheme: null }),
+  setLayer: (layer) => set({ activeLayer: layer, activeMapTheme: null, isolateClass: null }),
   setBrushRadius: (r) => set({ brushRadius: r }),
   setElevationValue: (v) => set({ elevationValue: v }),
   setStatus: (text) => set({ statusText: text }),
@@ -480,6 +488,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setSimRunning: (running) => set({ simRunning: running }),
   setLayerOpacity: (opacity) => set({ layerOpacity: opacity }),
   setHoverInfo: (c) => set({ hoverInfo: c }),
+  setIsolateClass: (c) => set({ isolateClass: c }),
 
   setOverlayVisible: (type, visible) =>
     set((state) => ({

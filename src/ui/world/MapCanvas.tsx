@@ -117,8 +117,12 @@ export function MapCanvas() {
   metaRef.current = meta;
   const stretchToFitRef = useRef(stretchToFit);
   stretchToFitRef.current = stretchToFit;
+  // The isolated class rides in the LAYER KEY, so the tile cache treats an
+  // isolated view as its own layer and invalidates correctly for free.
+  const isolateClass = useUIStore((s) => s.isolateClass);
   const activeLayerRef = useRef(activeLayer);
-  activeLayerRef.current = activeLayer;
+  activeLayerRef.current =
+    isolateClass === null ? activeLayer : (`${activeLayer}#iso=${isolateClass}` as typeof activeLayer);
   const activeToolRef = useRef(activeTool);
   activeToolRef.current = activeTool;
   const brushRadiusRef = useRef(brushRadius);
@@ -341,7 +345,7 @@ export function MapCanvas() {
   // switching back is instant. Just (re)load the now-active layer's visible tiles.
   useEffect(() => {
     refreshTiles();
-  }, [activeLayer, refreshTiles]);
+  }, [activeLayer, isolateClass, refreshTiles]);
 
   // Wipe the cache only when the world changes or its data changes (a sim step
   // bumps tileVersion) — every layer's rendered tiles are then stale.

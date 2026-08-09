@@ -1850,6 +1850,17 @@ written inline in Rust are **deliberately left without a key** rather than given
 invented one — a legend that guesses is how this broke the first time. They are
 served by the StatusBar hover readout, which reports the real value under the cursor.
 
+**Class isolation** (`RenderCtx.isolate`): clicking a class in the Köppen or biome
+key keeps that class in full colour and desaturates the rest. The selected code
+rides in the LAYER KEY (`"biomes#iso=12"`), which is why it needed no cache change —
+`TileManager` already keys by layer string, so an isolated view caches and
+invalidates as its own layer, and a client that knows nothing about isolation still
+asks for plain `"biomes"`. It is done in the RENDERER because only the renderer
+knows each cell's class; matching colours back in canvas would be slow and, now that
+the thematic plates carry relief shading, simply wrong. `split_isolate` degrades a
+malformed key to the plain layer rather than erroring — a bad key must never blank
+the map (`isolate_layer_keys_parse_or_degrade`).
+
 Guarded in Rust by `koppen_colors_are_distinct` (Dsc and Dsd shipped IDENTICAL, so
 two zones rendered as one), `elevation_ramp_is_monotone_in_lightness`,
 `bathymetry_darkens_with_depth`, `precipitation_bands_are_sequential_and_never_neutral`

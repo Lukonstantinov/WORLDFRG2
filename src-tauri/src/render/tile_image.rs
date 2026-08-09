@@ -15,9 +15,28 @@ pub fn render_tile_ctx(tile: &TileData, layer: &str, ctx: &RenderCtx) -> Vec<u8>
     render_tile_full(tile, layer, &TileNeighbors::default(), ctx)
 }
 
+/// Split a layer key into its base layer and any isolated class code.
+/// `"biomes#iso=12"` → `("biomes", Some(12))`; an unparsable code is ignored rather
+/// than failing the tile, since a bad key must never blank the map.
+pub fn split_isolate(layer: &str) -> (&str, Option<u8>) {
+    match layer.split_once("#iso=") {
+        Some((base, code)) => (base, code.parse::<u8>().ok()),
+        None => (layer, None),
+    }
+}
+
 /// The single dispatch. `n` is used by every layer that shades (the terrain
 /// hillshade and the four thematic plates); the rest ignore it.
 fn render_tile_full(tile: &TileData, layer: &str, n: &TileNeighbors, ctx: &RenderCtx) -> Vec<u8> {
+    // The isolated class rides in the LAYER KEY ("biomes#iso=12") rather than in a
+    // separate request field. The frontend's tile cache is keyed by layer string, so
+    // an isolated view caches and invalidates correctly with no cache-key change —
+    // and a client that knows nothing about isolation still asks for plain "biomes".
+    let (layer, ctx) = match split_isolate(layer) {
+        (base, Some(code)) => (base, RenderCtx { isolate: Some(code), ..*ctx }),
+        (base, None) => (base, *ctx),
+    };
+    let ctx = &ctx;
     let mut rgba = vec![0u8; PIXEL_COUNT * 4];
 
     match layer {
@@ -268,10 +287,15 @@ fn render_climate(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, rgba: &mu
             }
             continue;
         }
-        let (r, g, b) = koppen_color(tile.koppen[i]);
-        rgba[offset] = r;
-        rgba[offset + 1] = g;
-        rgba[offset + 2] = b;
+        let k = tile.koppen[i];
+        let (r, g, b) = match ctx.isolate {
+            Some(sel) if sel != k => dim_unselected(koppen_color(k)),
+            _ => koppen_color(k),
+        };
+        let m = thematic_relief(tile, n, ctx, i % SIZE, i / SIZE);
+        rgba[offset] = (r as f32 * m).clamp(0.0, 255.0) as u8;
+        rgba[offset + 1] = (g as f32 * m).clamp(0.0, 255.0) as u8;
+        rgba[offset + 2] = (b as f32 * m).clamp(0.0, 255.0) as u8;
         rgba[offset + 3] = 255;
     }
 }
@@ -450,10 +474,15 @@ fn render_soil(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, rgba: &mut [
             rgba[offset + 3] = 0;
             continue;
         }
-        let (r, g, b) = soil_color(tile.soil_type[i]);
-        rgba[offset] = r;
-        rgba[offset + 1] = g;
-        rgba[offset + 2] = b;
+        let st = tile.soil_type[i];
+        let (r, g, b) = match ctx.isolate {
+            Some(sel) if sel != st => dim_unselected(soil_color(st)),
+            _ => soil_color(st),
+        };
+        let m = thematic_relief(tile, n, ctx, i % SIZE, i / SIZE);
+        rgba[offset] = (r as f32 * m).clamp(0.0, 255.0) as u8;
+        rgba[offset + 1] = (g as f32 * m).clamp(0.0, 255.0) as u8;
+        rgba[offset + 2] = (b as f32 * m).clamp(0.0, 255.0) as u8;
         rgba[offset + 3] = 255;
     }
 }
@@ -485,9 +514,10 @@ fn render_fertility(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, rgba: &
         }
         let f = tile.fertility[i].clamp(0.0, 1.0);
         let (r, g, b) = lerp_rgb((180, 150, 100), (0, 120, 0), f);
-        rgba[offset] = r;
-        rgba[offset + 1] = g;
-        rgba[offset + 2] = b;
+        let m = thematic_relief(tile, n, ctx, i % SIZE, i / SIZE);
+        rgba[offset] = (r as f32 * m).clamp(0.0, 255.0) as u8;
+        rgba[offset + 1] = (g as f32 * m).clamp(0.0, 255.0) as u8;
+        rgba[offset + 2] = (b as f32 * m).clamp(0.0, 255.0) as u8;
         rgba[offset + 3] = 255;
     }
 }
@@ -514,6 +544,16 @@ fn render_plates(tile: &TileData, rgba: &mut [u8]) {
 /// renderer to know its own world coordinates. They are symbols, not surface
 /// texture: staying at a fixed pixel scale across the LOD pyramid is correct —
 /// it is exactly how a printed map's hatching behaves.
+/// Fade a non-selected cell toward a neutral ground, keeping a trace of its own
+/// value so context survives. Desaturation rather than an outline: an outline
+/// answers "where is the boundary", desaturation answers "where is this class",
+/// and the second is the question being asked.
+fn dim_unselected(c: (u8, u8, u8)) -> (u8, u8, u8) {
+    let lum = (0.2126 * c.0 as f32 + 0.7152 * c.1 as f32 + 0.0722 * c.2 as f32) * 0.55 + 40.0;
+    let g = lum.clamp(0.0, 255.0) as u8;
+    (g, g, g)
+}
+
 /// How far an attenuated hillshade may modulate a THEMATIC plate (climate, biomes,
 /// soil, fertility). Far below the terrain layer's own strength: the job here is to
 /// hint at form so a climate zone sits on the mountains that cause it, not to
@@ -567,7 +607,10 @@ fn render_biomes(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, rgba: &mut
         } else {
             koppen_fallback_biome(tile.koppen[i], tile.elevation[i])
         };
-        let (r, g, b_) = biome_color(b);
+        let (r, g, b_) = match ctx.isolate {
+            Some(sel) if sel != b => dim_unselected(biome_color(b)),
+            _ => biome_color(b),
+        };
 
         let lx = (i % SIZE) as u32;
         let ly = (i / SIZE) as u32;
@@ -1220,6 +1263,15 @@ pub struct RenderCtx {
     /// Base cells per rendered pixel: 1 at LOD 0, 2^lod on a supertile. Relief must
     /// not strengthen just because the pyramid samples more coarsely.
     pub step: u32,
+    /// CLASS ISOLATION: when set, cells of this class keep their colour and every
+    /// other cell is desaturated toward the ground. On a 41-class biome map where
+    /// adjacent greens are near-indistinguishable, this answers "where is THIS one"
+    /// without needing a palette that separates 41 classes — which may not exist.
+    ///
+    /// Isolation is done HERE rather than in the frontend because only the renderer
+    /// knows each cell's class; matching colours back in canvas would be both slow
+    /// and, now that the thematic plates carry relief shading, wrong.
+    pub isolate: Option<u8>,
 }
 
 impl RenderCtx {
@@ -1678,7 +1730,7 @@ mod tests {
     #[test]
     fn relief_z_factor_is_grid_and_lod_independent() {
         let at = |w: u32, step: u32| {
-            RenderCtx { grid_w: w, grid_h: w / 2, ty: 0, step }.z_factor()
+            RenderCtx { grid_w: w, grid_h: w / 2, ty: 0, step, isolate: None }.z_factor()
         };
         assert_eq!(at(3600, 1), RELIEF_Z, "the reference grid must be unchanged");
         assert_eq!(RenderCtx::default().z_factor(), RELIEF_Z, "unknown geometry = legacy");
@@ -1695,9 +1747,9 @@ mod tests {
     /// away from the equator and stay bounded at the pole.
     #[test]
     fn polar_cells_are_stretched_not_squared() {
-        let ctx = RenderCtx { grid_w: 3600, grid_h: 1800, ty: 0, step: 1 };
+        let ctx = RenderCtx { grid_w: 3600, grid_h: 1800, ty: 0, step: 1, isolate: None };
         // Row 0 of tile row 0 is the north pole; the equator is grid_h / 2.
-        let equator = RenderCtx { grid_w: 3600, grid_h: 1800, ty: 7, step: 1 }.lat_stretch(4);
+        let equator = RenderCtx { grid_w: 3600, grid_h: 1800, ty: 7, step: 1, isolate: None }.lat_stretch(4);
         let pole = ctx.lat_stretch(0);
         assert!((equator - 1.0).abs() < 0.02, "equator must be unstretched, got {equator}");
         assert!(pole > equator, "polar cells must stretch more than equatorial");
@@ -1843,6 +1895,34 @@ mod tests {
         }
     }
 
+    /// Class isolation rides in the layer key, so the parser is what stands between
+    /// a typo and a blank map. An unparsable code must degrade to the plain layer,
+    /// never to an error or to isolating class 0.
+    #[test]
+    fn isolate_layer_keys_parse_or_degrade() {
+        assert_eq!(split_isolate("biomes"), ("biomes", None));
+        assert_eq!(split_isolate("biomes#iso=12"), ("biomes", Some(12)));
+        assert_eq!(split_isolate("climate#iso=0"), ("climate", Some(0)));
+        // Garbage keeps the base layer and drops the isolation.
+        assert_eq!(split_isolate("soil#iso="), ("soil", None));
+        assert_eq!(split_isolate("soil#iso=abc"), ("soil", None));
+        assert_eq!(split_isolate("soil#iso=999"), ("soil", None));
+    }
+
+    /// An unselected class must be DIMMED, not erased: a reader still needs the rest
+    /// of the map for context, which is why this desaturates rather than blanking.
+    #[test]
+    fn isolation_dims_without_erasing() {
+        for code in 1..BIOME_COUNT as u8 {
+            let c = biome_color(code);
+            let d = dim_unselected(c);
+            assert_eq!(d.0, d.1, "dimmed colour must be neutral");
+            assert_eq!(d.1, d.2, "dimmed colour must be neutral");
+            assert!(d.0 > 20, "biome {code} dims to {d:?} — too dark to give context");
+            assert!(d.0 < 235, "biome {code} dims to {d:?} — too bright to recede");
+        }
+    }
+
     /// Thematic relief must stay a HINT. Above roughly a tenth it stops suggesting
     /// form and starts competing with the class colour it is modulating, which is
     /// the whole reason the terrain layer's own shading is not reused here.
@@ -1855,7 +1935,7 @@ mod tests {
         // Flat ground must be EXACTLY unshaded, or every plate shifts tone wholesale
         // — the same normalisation bug the terrain layer carried for years.
         let flat = TileData::new_sea();
-        let ctx = RenderCtx { grid_w: 3600, grid_h: 1800, ty: 4, step: 1 };
+        let ctx = RenderCtx { grid_w: 3600, grid_h: 1800, ty: 4, step: 1, isolate: None };
         let k = thematic_relief(&flat, &TileNeighbors::default(), &ctx, 40, 40);
         assert!((k - 1.0).abs() < 1e-4, "flat ground shades to {k}, not 1.0");
     }

@@ -1,7 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { usePaletteStore, rampGradient, bandGradient } from "@state/paletteStore";
 import { koppenName } from "./climate";
+import { getBiomeStats } from "@bridge";
+import type { BiomeStat } from "@types";
 import type { ActiveLayer } from "@types";
 
 /** THE MAP KEY, for every layer that has an exact one.
@@ -21,7 +23,8 @@ type LegendKind =
   | { kind: "elevation" }
   | { kind: "temperature" }
   | { kind: "precipitation" }
-  | { kind: "koppen" };
+  | { kind: "koppen" }
+  | { kind: "biomes" };
 
 const LAYER_LEGENDS: Partial<Record<ActiveLayer, LegendKind>> = {
   elevation: { kind: "elevation" },
@@ -30,6 +33,7 @@ const LAYER_LEGENDS: Partial<Record<ActiveLayer, LegendKind>> = {
   sst: { kind: "temperature" },
   precipitation: { kind: "precipitation" },
   climate: { kind: "koppen" },
+  biomes: { kind: "biomes" },
 };
 
 const box: React.CSSProperties = {
@@ -56,10 +60,21 @@ export function LayerLegend() {
   const activeLayer = useUIStore((s) => s.activeLayer);
   const palettes = usePaletteStore((s) => s.palettes);
   const load = usePaletteStore((s) => s.load);
+  const isolateClass = useUIStore((s) => s.isolateClass);
+  const setIsolateClass = useUIStore((s) => s.setIsolateClass);
+  const [biomes, setBiomes] = useState<BiomeStat[]>([]);
 
   useEffect(() => { void load(); }, [load]);
 
   const spec = LAYER_LEGENDS[activeLayer];
+
+  // Biome NAMES come from the world itself, so the list shows only the biomes this
+  // world actually has — a key listing 41 classes when 20 are present is noise.
+  useEffect(() => {
+    if (spec?.kind !== "biomes" || biomes.length > 0) return;
+    getBiomeStats().then(setBiomes).catch(() => {});
+  }, [spec?.kind, biomes.length]);
+
   if (!spec || !palettes) return null;
 
   if (spec.kind === "elevation") {
@@ -136,24 +151,61 @@ export function LayerLegend() {
     );
   }
 
-  // Köppen: a class list, not a ramp. Two columns keep 31 zones on screen.
-  const k = palettes.koppen;
+  // A CLASS list, not a ramp — and clickable. On a 41-class biome map where
+  // adjacent greens are near-indistinguishable, isolating one class answers
+  // "where is THIS one" without needing a palette that separates 41 classes,
+  // which may not be achievable at all.
+  const isBiome = spec.kind === "biomes";
+  const rows = isBiome
+    ? biomes.map((b) => ({
+        code: b.code,
+        label: b.name,
+        color: palettes.biome.find((c) => c.code === b.code)?.color ?? "#6e7660",
+      }))
+    : palettes.koppen.map((c) => ({ code: c.code, label: koppenName(c.code), color: c.color }));
+
   return (
-    <div style={{ ...box, maxWidth: 300, maxHeight: "46vh", overflow: "hidden" }}>
-      <div style={title}>Climate — Köppen</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1px 8px" }}>
-        {k.map((c) => (
-          <div key={c.code} style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0 }}>
-            <span style={{
-              width: 10, height: 10, flex: "0 0 auto", borderRadius: 2,
-              background: c.color, border: "1px solid rgba(0,0,0,0.4)",
-            }} />
-            <span style={{
-              fontSize: 9.5, color: "#a8bed4", whiteSpace: "nowrap",
-              overflow: "hidden", textOverflow: "ellipsis",
-            }}>{koppenName(c.code)}</span>
-          </div>
-        ))}
+    <div style={{ ...box, maxWidth: 320, maxHeight: "50vh", overflowY: "auto", pointerEvents: "auto" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <div style={{ ...title, marginBottom: 5, flex: 1 }}>
+          {isBiome ? "Biomes" : "Climate — Köppen"}
+        </div>
+        {isolateClass !== null && (
+          <span onClick={() => setIsolateClass(null)} title="Show all classes"
+            style={{ fontSize: 9, color: "#6db2d6", cursor: "pointer", whiteSpace: "nowrap" }}>
+            show all ×
+          </span>
+        )}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: isBiome ? "1fr" : "1fr 1fr", gap: "1px 8px" }}>
+        {rows.map((r) => {
+          const on = isolateClass === r.code;
+          const muted = isolateClass !== null && !on;
+          return (
+            <div key={r.code}
+              onClick={() => setIsolateClass(on ? null : r.code)}
+              title={on ? "Show all classes" : `Isolate ${r.label}`}
+              style={{
+                display: "flex", alignItems: "center", gap: 5, minWidth: 0,
+                cursor: "pointer", borderRadius: 3, padding: "1px 3px",
+                background: on ? "#1e3a58" : "transparent",
+                opacity: muted ? 0.45 : 1,
+              }}>
+              <span style={{
+                width: 10, height: 10, flex: "0 0 auto", borderRadius: 2,
+                background: r.color, border: "1px solid rgba(0,0,0,0.4)",
+              }} />
+              <span style={{
+                fontSize: 9.5, color: on ? "#cfe2f6" : "#a8bed4", whiteSpace: "nowrap",
+                overflow: "hidden", textOverflow: "ellipsis",
+                fontWeight: on ? 600 : 400,
+              }}>{r.label}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 9, color: "#5a7390", marginTop: 6, lineHeight: 1.4 }}>
+        Click a class to isolate it; the rest of the map dims but stays visible.
       </div>
     </div>
   );

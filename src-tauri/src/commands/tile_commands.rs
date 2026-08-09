@@ -131,7 +131,10 @@ fn render_full_res(
     // the four thematic plates, which now carry an attenuated relief modulation.
     let needs_neighbors = layers
         .iter()
-        .any(|l| matches!(l.as_str(), "terrain" | "climate" | "biomes" | "soil" | "fertility"));
+        .any(|l| {
+            let (base, _) = tile_image::split_isolate(l.as_str());
+            matches!(base, "terrain" | "climate" | "biomes" | "soil" | "fertility")
+        });
     let (gw, gh) = grid_dims(db);
 
     // Deduped set of tiles to fetch: the requested tiles, plus (for terrain) the
@@ -202,7 +205,7 @@ fn render_full_res(
                         tile,
                         layer,
                         &neighbors,
-                        &tile_image::RenderCtx { grid_w: gw, grid_h: gh, ty, step: 1 },
+                        &tile_image::RenderCtx { grid_w: gw, grid_h: gh, ty, step: 1, isolate: None },
                     ),
                 }
             }).collect::<Vec<_>>()
@@ -317,7 +320,7 @@ fn render_supertiles(
                     rgba: tile_image::render_tile_ctx(
                         tile,
                         layer,
-                        &tile_image::RenderCtx { grid_w: gw, grid_h: gh, ty: *ty, step: s as u32 },
+                        &tile_image::RenderCtx { grid_w: gw, grid_h: gh, ty: *ty, step: s as u32, isolate: None },
                     ),
                 }
             }).collect::<Vec<_>>()
