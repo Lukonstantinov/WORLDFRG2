@@ -185,6 +185,8 @@ export function Toolbar() {
   const activeMapTheme = useUIStore((s) => s.activeMapTheme);
   const stepCompleted = useUIStore((s) => s.stepCompleted);
   const activePlate = MAP_THEMES.find((t) => t.id === activeMapTheme);
+  const compareLayer = useUIStore((s) => s.compareLayer);
+  const setCompareLayer = useUIStore((s) => s.setCompareLayer);
   const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({});
   // Collapsible top-level sections (the big lists start collapsed to declutter).
   const [openSection, setOpenSection] = useState<Record<string, boolean>>({
@@ -367,6 +369,37 @@ export function Toolbar() {
             })}
           </div>
         ))}
+      </div>
+
+      {/* SWIPE COMPARE — every causal chain here is a two-layer question
+          (precipitation vs elevation for rain shadow, currents vs temperature,
+          biomes vs Köppen), and they used to be answered by flipping back and
+          forth from memory. Display-only, like everything else in this column. */}
+      <div style={section}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={sliderLabel}>Compare</span>
+          <select
+            value={compareLayer ?? ""}
+            onChange={(e) => setCompareLayer((e.target.value || null) as ActiveLayer | null)}
+            style={{
+              flex: 1, minWidth: 0, background: "#0e1826", color: "#a8bed4",
+              border: "1px solid #20304a", borderRadius: 4, fontSize: 10, padding: "2px 4px",
+            }}
+          >
+            <option value="">off</option>
+            {layerGroups.flatMap((g) =>
+              g.layers
+                .filter((l) => l.id !== activeLayer)
+                .map((l) => <option key={l.id} value={l.id}>{l.label}</option>)
+            )}
+          </select>
+        </div>
+        {compareLayer && (
+          <div style={{ fontSize: 9, color: "#5a7390", marginTop: 4, lineHeight: 1.4 }}>
+            Drag the divider on the map. {compareLayer} draws to its right, over the
+            same ground.
+          </div>
+        )}
       </div>
 
       {/* Layer opacity */}

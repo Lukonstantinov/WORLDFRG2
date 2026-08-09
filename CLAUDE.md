@@ -1850,6 +1850,18 @@ written inline in Rust are **deliberately left without a key** rather than given
 invented one — a legend that guesses is how this broke the first time. They are
 served by the StatusBar hover readout, which reports the real value under the cursor.
 
+**Swipe compare** (`uiStore.compareLayer`/`comparePos`): a second layer drawn over
+the same ground, clipped to the right of a draggable divider. Every causal chain in
+this app is a two-layer question — precipitation against elevation for rain shadow,
+currents against temperature, biomes against Köppen — and they were previously
+answered by flipping back and forth from memory. Two rules: the clip is computed in
+WORLD space by converting the divider's screen fraction back through the viewport
+(the canvas is mid-transform at that point, so a screen-space rect would be wrong),
+and the divider is its OWN DOM element with its own pointer handlers, so it cannot
+interfere with the canvas's pan/paint logic. The compare layer draws through the
+same tile cache and LOD as the base, so a swipe costs one extra blit per visible
+tile and nothing else.
+
 **Class isolation** (`RenderCtx.isolate`): clicking a class in the Köppen or biome
 key keeps that class in full colour and desaturates the rest. The selected code
 rides in the LAYER KEY (`"biomes#iso=12"`), which is why it needed no cache change —

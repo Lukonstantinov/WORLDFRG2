@@ -120,6 +120,11 @@ export function MapCanvas() {
   // The isolated class rides in the LAYER KEY, so the tile cache treats an
   // isolated view as its own layer and invalidates correctly for free.
   const isolateClass = useUIStore((s) => s.isolateClass);
+  const compareLayer = useUIStore((s) => s.compareLayer);
+  const comparePos = useUIStore((s) => s.comparePos);
+  const setComparePos = useUIStore((s) => s.setComparePos);
+  const compareRef = useRef<{ layer: string | null; pos: number }>({ layer: null, pos: 0.5 });
+  compareRef.current = { layer: compareLayer, pos: comparePos };
   const activeLayerRef = useRef(activeLayer);
   activeLayerRef.current =
     isolateClass === null ? activeLayer : (`${activeLayer}#iso=${isolateClass}` as typeof activeLayer);
@@ -200,7 +205,23 @@ export function MapCanvas() {
     }
 
     // Draw tiles (only those within the visible tile range).
-    tileManager.draw(ctx, viewport.getVisibleTileRange(w, h));
+    const visible = viewport.getVisibleTileRange(w, h);
+    tileManager.draw(ctx, visible);
+
+    // SWIPE COMPARE: the second layer over the same ground, clipped to the right
+    // of the divider. The clip is computed in WORLD space (the active transform),
+    // by converting the divider's screen fraction back through the viewport — the
+    // canvas is mid-transform here, so a screen-space rect would be wrong.
+    const cmp = compareRef.current;
+    if (cmp.layer && m) {
+      const dividerWorldX = (w * cmp.pos - viewport.x) / viewport.scaleX;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(dividerWorldX, 0, m.grid_width - dividerWorldX, m.grid_height);
+      ctx.clip();
+      tileManager.draw(ctx, visible, cmp.layer);
+      ctx.restore();
+    }
 
     // Draw overlays
     if (overlayManager) {
@@ -225,11 +246,21 @@ export function MapCanvas() {
 
     // viewport.scale picks the LOD: zoomed out → coarser supertiles, so the
     // request size stays bounded no matter how much of the world is visible.
-    tileManager.loadVisibleTiles(
-      txMin, txMax, tyMin, tyMax,
-      activeLayerRef.current, m.grid_width, m.grid_height,
-      viewport.scale,
-    ).then(() => requestRender());
+    const cmpLayer = compareRef.current.layer;
+    Promise.all([
+      tileManager.loadVisibleTiles(
+        txMin, txMax, tyMin, tyMax,
+        activeLayerRef.current, m.grid_width, m.grid_height,
+        viewport.scale,
+      ),
+      cmpLayer
+        ? tileManager.loadVisibleTiles(
+            txMin, txMax, tyMin, tyMax,
+            cmpLayer, m.grid_width, m.grid_height,
+            viewport.scale,
+          )
+        : Promise.resolve(),
+    ]).then(() => requestRender());
   }, [requestRender]);
 
   // Initialize Canvas 2D
@@ -345,7 +376,7 @@ export function MapCanvas() {
   // switching back is instant. Just (re)load the now-active layer's visible tiles.
   useEffect(() => {
     refreshTiles();
-  }, [activeLayer, isolateClass, refreshTiles]);
+  }, [activeLayer, isolateClass, compareLayer, refreshTiles]);
 
   // Wipe the cache only when the world changes or its data changes (a sim step
   // bumps tileVersion) — every layer's rendered tiles are then stale.
@@ -1821,6 +1852,36 @@ export function MapCanvas() {
       onPointerLeave={() => { clearPaintOverlay(); onPointerUp(); }}
       onContextMenu={(e) => e.preventDefault()}
     >
+      {compareLayer && (
+        <div
+          onPointerDown={(e) => {
+            e.currentTarget.setPointerCapture(e.pointerId);
+            e.stopPropagation();
+          }}
+          onPointerMove={(e) => {
+            if (e.buttons === 0) return;
+            const r = containerRef.current?.getBoundingClientRect();
+            if (r) setComparePos((e.clientX - r.left) / Math.max(1, r.width));
+            e.stopPropagation();
+          }}
+          onPointerUp={(e) => e.stopPropagation()}
+          title={`Drag to compare — ${compareLayer} on the right`}
+          style={{
+            position: "absolute", top: 0, bottom: 0,
+            left: `${comparePos * 100}%`, width: 14, marginLeft: -7,
+            cursor: "ew-resize", zIndex: 20, touchAction: "none",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <div style={{ position: "absolute", top: 0, bottom: 0, width: 2, background: "#cfe2f6", opacity: 0.85 }} />
+          <div style={{
+            width: 14, height: 34, borderRadius: 7, background: "#0e1826",
+            border: "1px solid #4a90d0", display: "flex", alignItems: "center",
+            justifyContent: "center", color: "#9fc4e0", fontSize: 9, letterSpacing: -1,
+          }}>◀▶</div>
+        </div>
+      )}
+
       {initError && (
         <div style={{
           position: "absolute", top: 10, left: 10, right: 10,

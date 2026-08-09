@@ -88,6 +88,13 @@ interface UIStore {
    *  change to the cache scheme. Cleared whenever the layer changes, since a code
    *  means a different thing on each layer. */
   isolateClass: number | null;
+  /** SWIPE COMPARE: a second layer drawn to the right of a draggable divider.
+   *  Every causal chain in this app is a two-layer question — precipitation against
+   *  elevation for rain shadow, currents against temperature, biomes against Köppen
+   *  — and they were previously answered by flipping back and forth from memory.
+   *  `comparePos` is the divider as a fraction of canvas width. */
+  compareLayer: ActiveLayer | null;
+  comparePos: number;
   /** When true, the world is stretched to fill the canvas (no letterbox bars,
    *  but distorts aspect). When false, fit proportionally (undistorted). */
   stretchToFit: boolean;
@@ -266,6 +273,8 @@ interface UIStore {
   setLayerOpacity: (opacity: number) => void;
   setHoverInfo: (c: CellInfo | null) => void;
   setIsolateClass: (c: number | null) => void;
+  setCompareLayer: (l: ActiveLayer | null) => void;
+  setComparePos: (p: number) => void;
   setLandmassSource: (source: LandmassSource) => void;
   setStretchToFit: (v: boolean) => void;
   setTerrainParams: (p: Partial<TerrainParams>) => void;
@@ -386,6 +395,8 @@ export const useUIStore = create<UIStore>((set) => ({
   activeMapTheme: null,
   hoverInfo: null,
   isolateClass: null,
+  compareLayer: null,
+  comparePos: 0.5,
   stretchToFit: true,
   landmassSource: "none",
   terrainParams: { density: 0.5, height: 0.5, spread: 0.5, roughness: 0.4, seed: null, mode: "shape" },
@@ -489,6 +500,8 @@ export const useUIStore = create<UIStore>((set) => ({
   setLayerOpacity: (opacity) => set({ layerOpacity: opacity }),
   setHoverInfo: (c) => set({ hoverInfo: c }),
   setIsolateClass: (c) => set({ isolateClass: c }),
+  setCompareLayer: (l) => set({ compareLayer: l }),
+  setComparePos: (p) => set({ comparePos: Math.max(0, Math.min(1, p)) }),
 
   setOverlayVisible: (type, visible) =>
     set((state) => ({

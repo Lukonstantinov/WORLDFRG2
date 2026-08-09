@@ -108,10 +108,13 @@ export class TileManager {
   draw(
     ctx: CanvasRenderingContext2D,
     range: { txMin: number; txMax: number; tyMin: number; tyMax: number },
+    layerOverride?: string,
   ) {
     ctx.imageSmoothingEnabled = false;
     const now = Date.now();
-    const layer = this.currentLayer;
+    // The COMPARE layer draws through the same cache and LOD as the base layer,
+    // so a swipe costs one extra blit per visible tile and nothing else.
+    const layer = layerOverride ?? this.currentLayer;
     const lod = this.currentLod;
     const S = 1 << lod;
     const size = TILE_SIZE * S;
