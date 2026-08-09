@@ -60,3 +60,30 @@ export function bandGradient(bands: { at: number; color: string }[]): string {
   });
   return `linear-gradient(to right, ${parts.join(", ")})`;
 }
+
+/** Sample a ramp at a position in its own units — used to colour the elevation
+ *  distribution bars from the SAME table the map draws, instead of the fourth
+ *  hand-copied palette the standalone histogram used to carry (it disagreed with
+ *  the map by ΔE 19–24 in the high bands). */
+export function rampAt(stops: { at: number; color: string }[], x: number): string {
+  if (stops.length === 0) return "#6e7660";
+  if (x <= stops[0].at) return stops[0].color;
+  const last = stops[stops.length - 1];
+  if (x >= last.at) return last.color;
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = stops[i];
+    const b = stops[i + 1];
+    if (x <= b.at) {
+      const t = b.at === a.at ? 0 : (x - a.at) / (b.at - a.at);
+      const pa = parseInt(a.color.slice(1), 16);
+      const pb = parseInt(b.color.slice(1), 16);
+      const mix = (sh: number) => {
+        const ca = (pa >> sh) & 255;
+        const cb = (pb >> sh) & 255;
+        return Math.round(ca + (cb - ca) * t);
+      };
+      return `rgb(${mix(16)}, ${mix(8)}, ${mix(0)})`;
+    }
+  }
+  return last.color;
+}

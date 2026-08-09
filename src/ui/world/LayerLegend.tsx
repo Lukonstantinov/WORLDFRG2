@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useUIStore } from "@state/uiStore";
-import { usePaletteStore, rampGradient, bandGradient } from "@state/paletteStore";
+import { usePaletteStore, rampGradient, bandGradient, rampAt } from "@state/paletteStore";
 import { koppenName } from "./climate";
-import { getBiomeStats } from "@bridge";
+import { getBiomeStats, getElevationDistribution, type ElevationBand } from "@bridge";
 import type { BiomeStat } from "@types";
 import type { ActiveLayer } from "@types";
 
@@ -63,6 +63,7 @@ export function LayerLegend() {
   const isolateClass = useUIStore((s) => s.isolateClass);
   const setIsolateClass = useUIStore((s) => s.setIsolateClass);
   const [biomes, setBiomes] = useState<BiomeStat[]>([]);
+  const [dist, setDist] = useState<ElevationBand[]>([]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -74,6 +75,14 @@ export function LayerLegend() {
     if (spec?.kind !== "biomes" || biomes.length > 0) return;
     getBiomeStats().then(setBiomes).catch(() => {});
   }, [spec?.kind, biomes.length]);
+
+  // The elevation DISTRIBUTION, folded into the key. A ramp without it cannot tell
+  // you that most of the world sits in its bottom band — which is precisely the
+  // fact that motivated re-spacing the ramp onto atlas breaks.
+  useEffect(() => {
+    if (spec?.kind !== "elevation" || dist.length > 0) return;
+    getElevationDistribution().then(setDist).catch(() => {});
+  }, [spec?.kind, dist.length]);
 
   if (!spec || !palettes) return null;
 
@@ -99,6 +108,32 @@ export function LayerLegend() {
             );
           })}
         </div>
+        {dist.length > 0 && (() => {
+          const maxPct = Math.max(...dist.map((d) => d.percentage), 1);
+          const top = palettes.elevation[palettes.elevation.length - 1].at;
+          return (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ display: "flex", alignItems: "flex-end", height: 26, gap: 1 }}>
+                {dist.map((d, i) => (
+                  <div key={d.label}
+                    title={`${d.label} — ${d.percentage.toFixed(1)}% of land`}
+                    style={{
+                      // Bars sit at their TRUE metric width on the ramp's own axis,
+                      // so the shape reads against the colours directly above it.
+                      flex: Math.min(1000, top - i * 1000) / top,
+                      height: `${Math.max(2, (d.percentage / maxPct) * 100)}%`,
+                      background: rampAt(palettes.elevation, i * 1000 + 500),
+                      opacity: 0.85,
+                    }} />
+                ))}
+              </div>
+              <div style={{ fontSize: 8.5, color: "#4d6480", marginTop: 2 }}>
+                share of land by height
+              </div>
+            </div>
+          );
+        })()}
+
         <div style={{ ...title, marginTop: 10 }}>Sea depth</div>
         <div style={{ ...barBase, background: rampGradient(sea) }} />
         <div style={ticks}><span>Shore</span><span>Shelf</span><span>Abyss</span></div>

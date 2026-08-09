@@ -39,7 +39,6 @@ import { DynastiesPanel } from "@ui/campaign/DynastiesPanel";
 import { GoodsMarketPanel } from "@ui/goods/GoodsMarketPanel";
 import { SettlementSearch } from "@ui/world/SettlementSearch";
 import { LayerLegend } from "@ui/world/LayerLegend";
-import { ElevationHistogram } from "@ui/world/ElevationHistogram";
 import { GoodsEditor } from "@ui/goods/GoodsEditor";
 import { GoodsChainReview } from "@ui/goods/GoodsChainReview";
 import { GoodDetailPanel } from "@ui/goods/GoodDetailPanel";
@@ -741,7 +740,6 @@ export default function App() {
           <WarehousesPanel />
           <TradeMatrixPanel />
           <LayerLegend />
-          <ElevationHistogram />
           </ErrorBoundary>
         </div>
 
