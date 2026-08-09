@@ -131,7 +131,7 @@ impl CampaignSim {
         let realm = Realm {
             id, name: name.clone(), title: title.clone(), capital_hub: seat as u32,
             ruling_house: hi as u32, rank: REALM_CITY_STATE, autonomy: AUTONOMY_CORE_PERIPHERY,
-            provinces: provinces.clone(), cities: vec![seat as u32], vassals: Vec::new(),
+            provinces: provinces.clone(), vassals: Vec::new(),
             treasury, debts, legitimacy: REALM_FOUNDING_LEGITIMACY, cohesion: REALM_FOUNDING_COHESION,
             founded_tick: tick, fallen_tick: 0,
             events: vec![RealmEvent {
@@ -296,6 +296,18 @@ impl CampaignSim {
         let Some(heir_idx) = heir else {
             for p in self.realms[ri].provinces.clone() {
                 if (p as usize) < self.prov_realm.len() { self.prov_realm[p as usize] = -1; }
+            }
+            // R4 · release every city this realm ever claimed too — not just its
+            // provinces. `hub.realm` is authoritative membership (rule 25's own
+            // "cities" field was removed for exactly this reason); leaving it
+            // pointing at a fallen realm would permanently bar these cities from
+            // ever proclaiming their own (`maybe_proclaim_realms` refuses any hub
+            // with `realm >= 0`, with no notion of "but that realm is dead").
+            for h in 0..self.hubs.len() {
+                if self.hubs[h].realm == ri as i32 {
+                    self.hubs[h].realm = -1;
+                    self.hubs[h].realm_role = 0;
+                }
             }
             self.realms[ri].fallen_tick = tick;
             let text = format!("The line of {} ends — {} has no heir and dissolves", dead_name, realm_name);

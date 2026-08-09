@@ -484,6 +484,13 @@
 
         assert!(s.realms[ri].fallen_tick > 0, "no heir anywhere ⇒ the dynasty ends");
         assert_eq!(s.prov_realm, vec![-1], "sovereignty is released, not left dangling");
+        // R4 · found while building war goals: the capital's OWN `hub.realm` must
+        // also be released, not just its provinces — otherwise it stays pointing
+        // at a fallen realm forever, permanently barring the hub from ever
+        // proclaiming a new one (`maybe_proclaim_realms` refuses any `realm >= 0`
+        // with no notion of "but that realm is dead").
+        assert_eq!(s.hubs[0].realm, -1, "the capital's own realm membership is released too");
+        assert_eq!(s.hubs[0].realm_role, 0);
     }
 
     /// R2 · the whole yearly pass (mortality → succession → marriage → births) must
@@ -2014,6 +2021,189 @@
         assert!(paid > 0.0, "tribute is paid");
         assert!(paid <= TRIBUTE_CAP * s.city_size_factor(1) + 1e-3, "tribute is capped");
         assert!((s.hubs[0].treasury - paid).abs() < 1e-2, "the overlord receives exactly the tribute");
+    }
+
+    /// R4 · HUMILIATE moves standing both ways with no land or coin changing
+    /// hands beyond ordinary reparations — a REALM's legitimacy when a capital is
+    /// involved, an ordinary house's prestige otherwise.
+    #[test]
+    fn humiliate_shifts_legitimacy_and_prestige_without_moving_land_or_coin() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 0.0, 0.0, 5000.0, vec![3000.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.found_house_at(0);
+        s.found_house_at(1);
+        s.prov_holder = vec![0]; s.prov_holder_house = vec![-1]; s.prov_realm = vec![-1];
+        s.hub_province = vec![0]; s.prov_culture = vec!["Solo".into()];
+        let id = s.promote_house_to_realm(0, 0, 60);
+        let ri = id as usize;
+        let legit0 = s.realms[ri].legitimacy;
+        let loser_prestige0 = s.houses[1].prestige;
+        let holder0 = s.prov_holder[0];
+
+        // The realm (hub 0) wins, humiliating the ordinary city hub 1.
+        s.apply_war_goal(0, 1, WAR_GOAL_HUMILIATE, 0, 0);
+        assert!(s.realms[ri].legitimacy > legit0, "the winning crown's legitimacy rises");
+        assert!(s.houses[1].prestige < loser_prestige0, "the losing house's prestige falls");
+        assert_eq!(s.prov_holder[0], holder0, "no territory changes hands");
+        assert_eq!(s.hubs[1].tribute_to, -1, "no tribute or subordination is created");
+
+        // Reversed: the ordinary city humiliates the realm.
+        let legit1 = s.realms[ri].legitimacy;
+        s.apply_war_goal(1, 0, WAR_GOAL_HUMILIATE, 0, 0);
+        assert!(s.realms[ri].legitimacy < legit1, "the losing crown's legitimacy falls");
+    }
+
+    /// R4 · ENTHRONE installs a LOCKED kin official (role 0, the head seat) at the
+    /// loser — a real, durable structural advantage, but the loser keeps its own
+    /// council mechanism otherwise (unlike ANNEX, nothing else about it changes).
+    #[test]
+    fn enthrone_installs_a_locked_kin_official_at_the_head_seat() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 10.0, 10.0, 10000.0, vec![100.0], 0),
+            hub(1, 14.0, 10.0, 9000.0, vec![90.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.houses.push(house_at(0, vec![0], 2));
+        s.hubs[0].council_house = 0;
+        assert!(s.hubs[1].officials.is_empty(), "sanity: no government seeded yet");
+
+        let clause = s.apply_war_goal(0, 1, WAR_GOAL_ENTHRONE, 0, 0);
+        assert!(!s.hubs[1].officials.is_empty(), "a government is seeded if none existed");
+        let head = s.hubs[1].officials.iter().find(|o| o.role == 0).expect("a head seat exists");
+        assert_eq!(head.house, 0, "the winner's house holds the head seat");
+        assert!(head.kin, "the seat is LOCKED — a kin official, not merely bribed");
+        assert_eq!(head.control, 1.0);
+        assert!(head.term_end > 0, "the puppet's term is finite, not permanent");
+        assert!(clause.contains("throne"), "the outcome is narrated");
+    }
+
+    /// R4 · VASSALIZE only produces the FULL relationship (Realm.vassals +
+    /// REALM_ROLE_TRIBUTARY) when the winner itself has a realm — otherwise it
+    /// downgrades quietly to plain tribute, the same idiom the province goal
+    /// already uses when nothing's actually there to take.
+    #[test]
+    fn vassalize_wires_realm_vassals_only_when_the_winner_has_a_crown() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 0.0, 0.0, 5000.0, vec![3000.0], 0),
+            hub(2, 0.0, 0.0, 4000.0, vec![2000.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.found_house_at(0);
+        s.found_house_at(1);
+        s.houses.push(house_at(2, vec![0], 1));
+        s.hubs[2].council_house = 2;
+        s.prov_holder = vec![0]; s.prov_holder_house = vec![-1]; s.prov_realm = vec![-1];
+        s.hub_province = vec![0]; s.prov_culture = vec!["Solo".into()];
+        let id = s.promote_house_to_realm(0, 0, 60);
+        let ri = id as usize;
+
+        // The realm (hub 0) vassalizes the ordinary city (hub 1) — full wiring.
+        s.apply_war_goal(0, 1, WAR_GOAL_VASSALIZE, 0, 0);
+        assert!(s.realms[ri].vassals.contains(&1), "the vassal is recorded on the realm");
+        assert_eq!(s.hubs[1].realm, id as i32);
+        assert_eq!(s.hubs[1].realm_role, REALM_ROLE_TRIBUTARY);
+        assert_eq!(s.hubs[1].tribute_to, 0, "a vassal also pays tribute");
+
+        // An ordinary city (hub 2, no realm) "vassalizing" hub 1 downgrades to
+        // plain tribute — there is no crown for hub 1 to actually answer to.
+        s.hubs[1].realm = -1; s.hubs[1].realm_role = 0; s.hubs[1].tribute_to = -1;
+        s.apply_war_goal(2, 1, WAR_GOAL_VASSALIZE, 0, 0);
+        assert_eq!(s.hubs[1].tribute_to, 2, "tribute alone still applies");
+        assert_eq!(s.hubs[1].realm, -1, "but no vassal relationship — hub 2 has no realm to join");
+    }
+
+    /// R4 · a ceded province must never keep pointing at its OLD sovereignty once
+    /// a war goal moves it — `prov_realm` releases to free land, or transfers to
+    /// the winner's own realm if it has one, exactly as the winner's council/bailo
+    /// effects already do for the city itself.
+    #[test]
+    fn a_ceded_province_transfers_sovereignty_with_the_land() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 0.0, 0.0, 5000.0, vec![3000.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.found_house_at(0);
+        s.houses.push(house_at(1, vec![0], 1));
+        s.hubs[1].council_house = 1;
+        s.prov_holder = vec![0, 1]; s.prov_holder_house = vec![-1, -1]; s.prov_realm = vec![-1, -1];
+        s.hub_province = vec![0, 1]; s.prov_culture = vec!["Solo".into(), "Solo".into()];
+        s.prov_rural = vec![100.0, 500.0]; // province 1 is the richer prize
+        let id = s.promote_house_to_realm(0, 0, 60);
+        let ri = id as usize;
+
+        // The realm (hub 0) takes hub 1's own province by war.
+        s.apply_war_goal(0, 1, WAR_GOAL_PROVINCE, 0, 0);
+        assert_eq!(s.prov_holder[1], 0, "the seat administering it changes");
+        assert_eq!(s.prov_realm[1], id as i32, "and sovereignty follows the winner's own realm");
+        let _ = ri;
+    }
+
+    /// R4 · ANNEX transfers realm membership for an ORDINARY member city, along
+    /// with the provinces it administered — but explicitly does NOT cascade when
+    /// the loser is itself a realm's own capital (a deliberately deferred case;
+    /// the existing council-install effect still applies, nothing else does).
+    #[test]
+    fn annex_transfers_realm_membership_for_a_member_city_but_not_a_capital() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0), // winner realm's capital
+            hub(1, 0.0, 0.0, 4000.0, vec![2000.0], 0), // an ordinary member city
+            hub(2, 0.0, 0.0, 3000.0, vec![1000.0], 0), // a RIVAL realm's own capital
+        ];
+        let mut s = sim(hubs, goods);
+        s.found_house_at(0);
+        s.found_house_at(2);
+        s.prov_holder = vec![0, 1, 2];
+        s.prov_holder_house = vec![-1, -1, -1];
+        s.prov_realm = vec![-1, -1, -1];
+        s.hub_province = vec![0, 1, 2];
+        s.prov_culture = vec!["Solo".into(), "Solo".into(), "Solo".into()];
+        let win_id = s.promote_house_to_realm(0, 0, 60);
+
+        // Hub 1 is an ordinary FREE city (not yet in any realm) administering
+        // province 1 — annexing it must pull both the city and its land in.
+        s.apply_war_goal(0, 1, WAR_GOAL_ANNEX, 0, 0);
+        assert_eq!(s.hubs[1].realm, win_id as i32, "the member city joins the winner's realm");
+        assert_eq!(s.hubs[1].realm_role, REALM_ROLE_SUBJECT);
+        assert_eq!(s.prov_realm[1], win_id as i32, "its administered province follows it in");
+
+        // Hub 2 is a RIVAL realm's own capital — annexing it must NOT silently
+        // fold a whole foreign crown's territory into the winner (deferred).
+        let rival_house = s.houses.len() - 1; // the house just founded at hub 2 (found_house_at(0) took index 0)
+        let rival_id = s.promote_house_to_realm(rival_house, 2, 60);
+        s.apply_war_goal(0, 2, WAR_GOAL_ANNEX, 0, 0);
+        assert_eq!(s.hubs[2].realm, rival_id as i32,
+            "annexing a realm's own capital must not silently transfer it (deferred, not built)");
+        assert_eq!(s.hubs[2].council_house, s.realms[win_id as usize].ruling_house as i32,
+            "the ordinary council-install effect still applies even in the deferred case");
+    }
+
+    /// R4 · a sovereign capital's own war-affordability must include its crown's
+    /// treasury — R3 redirected the tithe/poll/customs away from the capital's
+    /// OWN `hub.treasury` into `Realm.treasury`, so reading `hub.treasury` alone
+    /// would make every realm systematically too poor to ever fight.
+    #[test]
+    fn a_realm_capital_can_afford_war_from_its_crown_treasury() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.found_house_at(0);
+        s.prov_holder = vec![0]; s.prov_holder_house = vec![-1]; s.prov_realm = vec![-1];
+        s.hub_province = vec![0]; s.prov_culture = vec!["Solo".into()];
+        let id = s.promote_house_to_realm(0, 0, 60);
+        s.hubs[0].treasury = 0.0;
+        s.realms[id as usize].treasury = 1_000.0;
+        assert!(s.war_affordable_treasury(0) >= 1_000.0,
+            "the crown's own treasury must count toward the capital's war-affordability");
     }
 
     #[test]

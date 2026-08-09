@@ -4,13 +4,15 @@
 realm it founds holds provinces, taxes them, mints its own coin, conquers its
 neighbours, and eventually breaks apart along its own family tree.*
 
-**Status: R1-R3 built** (entity, proclamation, house→crown transfer, `compute_states`
-reading real realms, genealogy/succession/regency, taxation + collection efficiency +
-tax farming — see §7's order table for exactly what shipped in each, and what R3
-explicitly deferred). **R4-R5 not yet built.** Every decision in §1 was made explicitly
-by the maintainer over the design conversation that produced this document; nothing
-here is a suggestion looking for approval. §7 lists what is deliberately NOT in the
-first build, and that list is as binding as the rest.
+**Status: R1-R4 built, each partially** (entity, proclamation, house→crown transfer,
+`compute_states` reading real realms, genealogy/succession/regency, taxation +
+collection efficiency + tax farming, and the priced war-goal ladder with realm-aware
+resolution — see §7's order table for exactly what shipped in each, and what R3/R4
+explicitly deferred; R4 in particular ships the war GOALS, not yet the "one war, many
+cities" multi-city pooling its own headline names). **R5 not yet built.** Every
+decision in §1 was made explicitly by the maintainer over the design conversation that
+produced this document; nothing here is a suggestion looking for approval. §7 lists
+what is deliberately NOT in the first build, and that list is as binding as the rest.
 
 This document extends `CITY_PROVINCE_WAR_PLAN.md`, and **reverses one of its
 decisions**: §6 of that plan deferred "territorial empires — a `Realm` entity above
@@ -489,11 +491,53 @@ R2 ✅ Genealogy · births · child mortality · aging · succession · regency
      LineRule honoured (rule 23) · a flat read-only family list in the Realms
      panel (campaign_get_realm_family) — NOT yet the SVG tree §4.2 sketches
 R3 ✅ Taxes + collection efficiency + tax farming. Realm coin DEFERRED — see below
-R4   Annex · vassalize · enthrone · realm-vs-realm war · separate peace
-     · free-city participation · the two-war penalty
+R4 ✅ Annex · vassalize · enthrone — the three new priced goals, realm-aware
+     resolution (a sovereign hub's true ruler is its crown; a ceded province/
+     city carries its sovereignty with it). Realm-vs-realm "one war, many
+     cities" pooling · separate peace · free-city participation · the two-war
+     penalty · annexing/vassalizing a realm's own CAPITAL all DEFERRED — see
+     below
 R5   Autonomy policy · overseas merchant-gated holdings · capital moves
      · fragmentation, both paths
 ```
+
+**R4 shipped the priced war-goal ladder, not the multi-city war itself.** §1.4's
+headline claim — "declaring on a realm brings every member city into a defensive
+war, one war, one score, many cities" — needs force/levy pooling across every
+member city, separate peace, a realm-specific two-war penalty, and free cities as
+hireable/coercible participants: four genuinely separate mechanics, each its own
+design surface, none safely buildable to the standard this project holds without
+its own focused pass and (per §3.4f's own precedent) its own war-frequency
+measurement before tuning. Attempting all four under the same budget that had
+just gone through R1-R3 would have been exactly the "half-verified under time
+pressure" risk CLAUDE.md §2.4 warns against. What DID ship: `war_affordable_
+treasury` (a sovereign CAPITAL's own war-eligibility and exhaustion checks now
+read its crown treasury, not just `hub.treasury` — without this, R3's own tithe/
+poll/customs redirect would have made every realm systematically too poor to
+even declare a war, which is backwards for a phase about making them fight);
+three new priced goals (Humiliate 15, Enthrone 35, Vassalize 50) with full
+resolution effects; and realm-aware `WAR_GOAL_PROVINCE`/`WAR_GOAL_ANNEX` — a
+ceded province or an annexed ORDINARY member city now correctly carries its
+`prov_realm`/`hub.realm` sovereignty with it, a bug that would otherwise have
+silently corrupted rule 25 the moment any war touched sovereign territory.
+Annexing or vassalizing a realm's own CAPITAL — a full foreign-crown conquest,
+cascading through its dynasty, family and every other city it holds — is
+explicitly guarded and skipped in the code (`hub_is_realm_capital`), tested
+(`annex_transfers_realm_membership_for_a_member_city_but_not_a_capital`), and
+left for whichever future pass is willing to design what happens to the
+conquered dynasty rather than improvise it under this one's time pressure.
+
+**Two more R1-R3 bugs surfaced while building R4**, the same "audit every house/
+hub-iteration loop a new pass touches" discipline rule 25 already asks for:
+`Realm.cities` was dead weight (nothing had ever read it; membership is fully and
+correctly derivable from `hub.realm`) and was removed rather than left as a
+second, unsynced copy of the same fact. And a realm's dynasty ending
+(`resolve_realm_succession`'s no-heir branch, R2) released its provinces'
+`prov_realm` but never its member cities' `hub.realm` — leaving them pointing at
+a fallen realm forever, which would have permanently barred those cities from
+ever proclaiming a new one (`maybe_proclaim_realms` refuses any `hub.realm >= 0`
+with no notion of "but that realm is dead"). Both fixed here, both covered by
+tests.
 
 **Realm coin was scoped OUT of R3 on the day, not silently dropped.** The plan's own
 §3.3 names it in one line beside a five-row taxation table that took the actual weight
@@ -533,7 +577,7 @@ Additional per-phase gates:
 | R1 | dynamics test **bit-identical** — nothing in the tick reads a realm yet. Confirmed by grep, not assumed: the only non-comment reader of any new field in R1a was a `resize()` nothing downstream consumed |
 | R2 | direct unit tests on `resolve_realm_succession` (eldest-eligible-by-`LineRule`, regency, dynasty extinction) rather than `every_realm_succeeds_or_ends` as a single named gate — the mechanism is deterministic enough to test directly; dynamics run stays bit-identical (that sim carries no province layer, so no realm can ever be founded there) |
 | R3 | direct unit tests on `realm_collection_efficiency`/`collect_realm_levies`/`maybe_farm_tithe` (efficiency falls with distance and cohesion, levies never go negative, a farm redirects and reverts on schedule); `top-10% wealth share`/urbanisation NOT specially measured this pass — a founding-era realm's own capital sits at distance 0 from itself, so efficiency stays ≈cohesion until R4/R5 actually spread a realm out geographically, and the standing dynamics/econ_ suites carry no province layer so no realm ever forms in them either. The real fidelity question is deferred to whichever of R4/R5 first makes a realm span real distance |
-| R4 | war frequency against the 45/century baseline; every realm war terminates within the round cap |
+| R4 | direct unit tests on `apply_war_goal`'s three new goals + its realm-aware province/city transfer, and on `war_affordable_treasury`; `econ_measure_war_frequency` NOT re-run — declaration-time goal SELECTION is untouched (the new goals are reachable only via the existing score-based downgrade path), so war COUNT is not expected to move; the 45/century baseline and round-cap termination gate belong to whichever pass builds the multi-city pooling this phase deferred, since that is the change that would actually move frequency |
 | R5 | realm count is **non-monotonic** over 500 years (§5.6) |
 
 **R5 is deliberately last.** Fragmentation is the item most likely to disturb every

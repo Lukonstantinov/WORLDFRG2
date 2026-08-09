@@ -1740,7 +1740,7 @@ CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next thre
                                     own caveat list (§5) — incl. that it REVERSES
                                     PROVINCE_SYSTEM_PLAN's "enclaves survive" decision —
                                     and its own "deliberately not built" list (§6)
-REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R3 BUILT, R4-R5 NOT YET. THE FIRST
+REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R4 BUILT, R5 NOT YET. THE FIRST
                                     COUNTRIES: a merchant house takes a city
                                     (`captor_house`), PROCLAIMS sovereignty after a
                                     hard year-50 floor + a decade holding it
@@ -1766,17 +1766,34 @@ REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R3 BUILT, R4-R5 NOT YET. THE FIRST
                                     of tithe collection for cash now — `publicani`/
                                     *iltizam*). Realm coin deliberately deferred
                                     (§7 of the plan) rather than rushed into the
-                                    tuned `money.rs` coinage system. Surfaced in the
-                                    frontend Realms panel (relabelled from States).
-                                    STILL UNBUILT: realm coin, annex/vassalize/
-                                    enthrone by war, and FRAGMENTATION along the
-                                    family — which will make the shipped
-                                    `InheritanceRule` decide whether a people can
-                                    hold an empire at all, once R5 lands. REVERSES
-                                    CITY_PROVINCE_WAR_PLAN §6's deferral of a realm
-                                    entity above cities. Carries its own caveats (§5)
-                                    and "deliberately not built" list (§6); §7's
-                                    order table records exactly what each phase shipped
+                                    tuned `money.rs` coinage system. WAR gained three
+                                    priced goals — Humiliate/Enthrone/Vassalize —
+                                    and realm-aware resolution: a sovereign hub's
+                                    TRUE ruler is its crown, and a ceded province or
+                                    annexed member city now correctly carries its
+                                    sovereignty with it (`WAR_GOAL_PROVINCE`/
+                                    `WAR_GOAL_ANNEX`, previously silent corruptions
+                                    of rule 25 the moment either touched sovereign
+                                    territory). `war_affordable_treasury` fixes an
+                                    R3 side effect that would have made every realm
+                                    systematically too poor to declare war. Surfaced
+                                    in the frontend Realms panel (relabelled from
+                                    States). STILL UNBUILT: realm coin; the "one
+                                    war, one score, many cities" MULTI-CITY pooling
+                                    §1.4 itself names (R4 ships the war GOALS, not
+                                    this); separate peace; the two-war penalty;
+                                    free-city war participation; annexing/
+                                    vassalizing a realm's own CAPITAL (a full
+                                    foreign-crown conquest, explicitly guarded off
+                                    in `apply_war_goal` pending its own design);
+                                    and FRAGMENTATION along the family — which will
+                                    make the shipped `InheritanceRule` decide
+                                    whether a people can hold an empire at all,
+                                    once R5 lands. REVERSES CITY_PROVINCE_WAR_PLAN
+                                    §6's deferral of a realm entity above cities.
+                                    Carries its own caveats (§5) and "deliberately
+                                    not built" list (§6); §7's order table records
+                                    exactly what each phase shipped
 IN_APP_VERIFICATION_CHECKLIST.md  ← Manual in-app verification checklist
 PORTING_REFERENCE.md              ← Porting reference
 ```

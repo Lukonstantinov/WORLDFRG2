@@ -195,10 +195,29 @@ impl CampaignSim {
     /// Trade rights & annexation both work through the BAILO primitive (a foreign
     /// governing foothold), so the winner's house is seated on the loser's council
     /// by the ordinary yearly recompute and the control transfer sticks.
+    /// R4 · true when `h` is the CAPITAL of a still-standing realm — the one case
+    /// every goal below treats specially, since a capital's own sovereignty (and
+    /// its dynasty's provinces/family) is a bigger thing to move than a war goal
+    /// alone should cascade through. Reused by ANNEX and VASSALIZE to gate the
+    /// deliberately-deferred "conquer a whole realm" case (see their own comments).
+    fn hub_is_realm_capital(&self, h: usize) -> bool {
+        let ri = self.hubs[h].realm;
+        ri >= 0 && self.realms.get(ri as usize)
+            .map(|r| r.fallen_tick == 0 && r.capital_hub as usize == h).unwrap_or(false)
+    }
+
     pub(crate) fn apply_war_goal(&mut self, win: usize, lose: usize, goal: u8, tick: u32, _yr: u32) -> String {
         let (wn, ln) = (self.hubs[win].name.clone(), self.hubs[lose].name.clone());
-        // The victor's ruling family: its council head, else its richest resident.
-        let ruler = {
+        // R4 · the victor's TRUE ruler at a sovereign capital is its crown, not
+        // whichever house currently tops the ordinary civic-capture tally —
+        // `update_government`'s bribery loop does not yet know to stand aside for
+        // a realm's own seat (a real, narrow gap named here rather than silently
+        // worked around: a rival house could in principle still out-bribe the
+        // crown's own presence at its capital; fixing that is its own change).
+        let ruler = if self.hub_is_realm_capital(win) {
+            let ri = self.hubs[win].realm as usize;
+            Some(self.realms[ri].ruling_house as usize)
+        } else {
             let c = self.hubs[win].council_house;
             if c >= 0 && (c as usize) < self.houses.len() { Some(c as usize) }
             else { self.strongest_house_at(win) }
@@ -209,10 +228,76 @@ impl CampaignSim {
             }
         };
         match goal {
+            WAR_GOAL_HUMILIATE => {
+                // R4 · purely reputational: no land, no coin beyond the ordinary
+                // reparations already taken above this call. A realm's own
+                // legitimacy is what cracks; an ordinary house-led city's is its
+                // ruling house's prestige.
+                if self.hub_is_realm_capital(lose) {
+                    let ri = self.hubs[lose].realm as usize;
+                    self.realms[ri].legitimacy = (self.realms[ri].legitimacy - HUMILIATE_LEGITIMACY_HIT).max(0.0);
+                } else if let Some(hi) = self.strongest_house_at(lose) {
+                    self.houses[hi].prestige = (self.houses[hi].prestige - HUMILIATE_PRESTIGE_HIT).max(0.0);
+                }
+                if self.hub_is_realm_capital(win) {
+                    let ri = self.hubs[win].realm as usize;
+                    self.realms[ri].legitimacy = (self.realms[ri].legitimacy + HUMILIATE_LEGITIMACY_GAIN).min(1.0);
+                } else if let Some(hi) = ruler {
+                    self.houses[hi].prestige += HUMILIATE_PRESTIGE_GAIN;
+                }
+                format!("; {} is humiliated before {} — its standing visibly cracks", ln, wn)
+            }
+            WAR_GOAL_ENTHRONE => {
+                // R4 · a puppet, not a conquest: the winner's own kin takes the
+                // loser's head seat (`Official.kin`, already unbribable once set —
+                // `update_government` step 3 locks it at control 1.0) for
+                // `ENTHRONE_TERM_YEARS`, then the ordinary regime-change clock
+                // (`reseat_official`) takes back over with no special unwind
+                // needed. The loser keeps its coin, market and nominal standing.
+                let Some(hi) = ruler else { return String::new(); };
+                if self.hubs[lose].officials.is_empty() { self.seed_government(lose); }
+                let placed = self.hubs[lose].officials.iter_mut().find(|o| o.role == 0);
+                match placed {
+                    Some(head) => {
+                        head.house = hi as i32;
+                        head.control = 1.0;
+                        head.kin = true;
+                        head.term_end = tick + ENTHRONE_TERM_YEARS * TICKS_PER_YEAR;
+                        let hn = self.houses[hi].name.clone();
+                        format!("; {} seats a kinsman of {} on the throne of {}", wn, hn, ln)
+                    }
+                    None => String::new(),
+                }
+            }
             WAR_GOAL_TRIBUTE => {
                 self.hubs[lose].tribute_to = win as i32;
                 self.hubs[lose].tribute_until = tick + TRIBUTE_YEARS * TICKS_PER_YEAR;
                 format!("; {} is made a tributary of {} for {} years", ln, wn, TRIBUTE_YEARS)
+            }
+            WAR_GOAL_VASSALIZE => {
+                // R4 · stronger than tribute: the FULL relationship (fights in the
+                // overlord's wars, may not declare its own — `Realm.vassals` +
+                // `REALM_ROLE_TRIBUTARY`) only forms when the winner itself has a
+                // realm to be a vassal OF, and the loser is not itself a realm's
+                // own capital (conquering a whole foreign crown into vassalage is
+                // the same deferred cascade ANNEX defers below — a real design
+                // question about what happens to the loser's own dynasty/family,
+                // not a guard to improvise here). Otherwise this downgrades
+                // quietly to plain tribute, the same idiom `WAR_GOAL_PROVINCE`
+                // already uses when there's nothing to cede.
+                self.hubs[lose].tribute_to = win as i32;
+                self.hubs[lose].tribute_until = tick + TRIBUTE_YEARS * TICKS_PER_YEAR;
+                if self.hub_is_realm_capital(win) && !self.hub_is_realm_capital(lose) {
+                    let ri = self.hubs[win].realm as usize;
+                    if !self.realms[ri].vassals.contains(&(lose as u32)) {
+                        self.realms[ri].vassals.push(lose as u32);
+                    }
+                    self.hubs[lose].realm = ri as i32;
+                    self.hubs[lose].realm_role = REALM_ROLE_TRIBUTARY;
+                    format!("; {} becomes a vassal of {} — bound to its wars, its own voice silenced", ln, wn)
+                } else {
+                    format!("; {} has no crown to answer to — {} settles for tribute alone", wn, ln)
+                }
             }
             WAR_GOAL_TRADE_RIGHTS => {
                 if let Some(hi) = ruler {
@@ -236,6 +321,14 @@ impl CampaignSim {
                 match prize {
                     Some(p) => {
                         self.prov_holder[p] = win as i32;
+                        // R4 · a ceded province leaves its OLD sovereignty (if any)
+                        // and, if the WINNER has a realm, joins that one instead —
+                        // cession is a territorial transfer, and `prov_realm` must
+                        // never keep pointing at a realm that no longer wins or
+                        // administers this land (rule 25).
+                        if p < self.prov_realm.len() {
+                            self.prov_realm[p] = self.hubs[win].realm;
+                        }
                         let pn = self.province_name(p);
                         format!("; {} cedes {} to {}", ln, pn, wn)
                     }
@@ -249,15 +342,27 @@ impl CampaignSim {
                 }
             }
             WAR_GOAL_ANNEX => {
-                if let Some(hi) = ruler {
-                    grant_bailo(self, hi);
-                    self.hubs[lose].council_house = hi as i32;
-                    self.hubs[lose].coin_trust = (self.hubs[lose].coin_trust - 0.15).max(0.0);
-                    let hn = self.houses[hi].name.clone();
-                    format!("; {} is annexed by {} — {} installed on its council", ln, wn, hn)
-                } else {
-                    format!("; {} is annexed by {}", ln, wn)
+                let Some(hi) = ruler else { return format!("; {} is annexed by {}", ln, wn); };
+                grant_bailo(self, hi);
+                self.hubs[lose].council_house = hi as i32;
+                self.hubs[lose].coin_trust = (self.hubs[lose].coin_trust - 0.15).max(0.0);
+                let hn = self.houses[hi].name.clone();
+                // R4 · annexing a realm's own CAPITAL — a full conquest of another
+                // crown, its dynasty and its family — is deliberately NOT built in
+                // this pass (the same deferral `WAR_GOAL_VASSALIZE` names above).
+                // An ORDINARY member/subject city changing hands is: it leaves
+                // whatever realm held it (if any) and, if the WINNER has a realm,
+                // joins that one instead; the provinces IT administered move with
+                // it, exactly as a ceded province does above.
+                if !self.hub_is_realm_capital(lose) {
+                    self.hubs[lose].realm = self.hubs[win].realm;
+                    self.hubs[lose].realm_role = if self.hubs[win].realm >= 0 { REALM_ROLE_SUBJECT } else { 0 };
+                    for p in 0..self.prov_holder.len() {
+                        if self.prov_holder[p] != lose as i32 { continue; }
+                        if p < self.prov_realm.len() { self.prov_realm[p] = self.hubs[win].realm; }
+                    }
                 }
+                format!("; {} is annexed by {} — {} installed on its council", ln, wn, hn)
             }
             _ => String::new(),
         }
@@ -270,9 +375,15 @@ impl CampaignSim {
     /// private wealth both drained). Neither invents a troop-count field; both
     /// read state the tick already carries.
     fn war_side_exhaustion(&self, h: usize, peak_effort: f32, effort_this_year: f32) -> Option<&'static str> {
-        let treasury = self.hubs[h].treasury.max(0.0);
+        // R4 · a sovereign capital's crown treasury counts too (see `war_
+        // affordable_treasury`) — otherwise R3's redirect of dues away from
+        // `hub.treasury` would read every realm as permanently "treasury spent".
+        let treasury = self.war_affordable_treasury(h);
+        // rule 25 · a crowned house's wealth is frozen at 0 (it left the merchant
+        // world), so `is_merchant()` rather than `!defunct` alone keeps this a
+        // rank-of-live-merchants figure rather than counting a dynasty shell.
         let credit: f32 = self.houses.iter()
-            .filter(|house| !house.defunct && !house.is_guild && house.hub as usize == h)
+            .filter(|house| house.is_merchant() && house.hub as usize == h)
             .map(|house| house.wealth.max(0.0)).sum();
         if treasury < WAR_FINANCIAL_EPS && credit < WAR_FINANCIAL_EPS {
             return Some("treasury and credit spent");
@@ -322,8 +433,10 @@ impl CampaignSim {
                 // §3.4b · terms priced in score: the richest goal the FINAL score
                 // affords, capped by what was originally declared — overperforming
                 // never upgrades the war's own aim, it only guarantees reaching it.
-                let richest_affordable = [WAR_GOAL_ANNEX, WAR_GOAL_PROVINCE, WAR_GOAL_TRIBUTE, WAR_GOAL_TRADE_RIGHTS, WAR_GOAL_PLUNDER]
-                    .into_iter().find(|&g| war_goal_price(g) <= score_abs).unwrap_or(WAR_GOAL_PLUNDER);
+                let richest_affordable = [
+                    WAR_GOAL_ANNEX, WAR_GOAL_PROVINCE, WAR_GOAL_VASSALIZE, WAR_GOAL_TRIBUTE,
+                    WAR_GOAL_ENTHRONE, WAR_GOAL_TRADE_RIGHTS, WAR_GOAL_HUMILIATE, WAR_GOAL_PLUNDER,
+                ].into_iter().find(|&g| war_goal_price(g) <= score_abs).unwrap_or(WAR_GOAL_PLUNDER);
                 let awarded = if war_goal_price(declared_goal) <= score_abs { declared_goal } else { richest_affordable };
                 let spoils = self.apply_war_goal(win, lose, awarded, tick, yr);
                 // §3.4d · a defeat severe enough to have earned tribute (score ≥ 40)
@@ -566,6 +679,30 @@ impl CampaignSim {
     /// True when two seats are close enough (and same trade component) to wage a
     /// real war — see `WAR_MAX_DIST_FRAC`. Cylindrical in X. A pre-colonial city
     /// cannot fight one an ocean away, so this gates every path that starts a war.
+    /// R4 · a hub's own war-AFFORDABILITY, including its crown's treasury when the
+    /// hub is a sovereign CAPITAL. R3 redirected the tithe/poll/customs away from
+    /// a sovereign capital's own `hub.treasury` into `Realm.treasury` — reading
+    /// `hub.treasury` alone here would make every realm systematically too poor to
+    /// even DECLARE a war, which is exactly backwards for a phase whose whole job
+    /// is making realms fight. Scoped to ELIGIBILITY/EXHAUSTION checks only — it
+    /// does NOT redirect actual chest-SPENDING (`raise_war_levy`/`spend_war` still
+    /// draw only from `hub.treasury`, unchanged). Pooling the crown's money into
+    /// the actual war effort, and doing the same for non-capital member cities, is
+    /// "one war, one score, many cities" — real, named, deliberately deferred to a
+    /// later pass rather than attempted half-verified here (plan §7).
+    pub(crate) fn war_affordable_treasury(&self, h: usize) -> f32 {
+        let base = self.hubs[h].treasury.max(0.0);
+        let ri = self.hubs[h].realm;
+        if ri >= 0 {
+            if let Some(r) = self.realms.get(ri as usize) {
+                if r.fallen_tick == 0 && r.capital_hub as usize == h {
+                    return base + r.treasury.max(0.0);
+                }
+            }
+        }
+        base
+    }
+
     pub(crate) fn hubs_within_war_reach(&self, a: usize, b: usize) -> bool {
         if a >= self.hubs.len() || b >= self.hubs.len() { return false; }
         if self.hubs[a].component != self.hubs[b].component { return false; }
@@ -585,7 +722,7 @@ impl CampaignSim {
         let seats: Vec<usize> = (0..n).filter(|&h|
             !self.hubs[h].is_estate && self.hubs[h].war_with < 0
             && self.hubs[h].council_house >= 0 && self.hubs[h].population > 1.0
-            && self.hubs[h].treasury >= WAR_MIN_TREASURY
+            && self.war_affordable_treasury(h) >= WAR_MIN_TREASURY
             && self.hubs[h].war_cooldown_until <= self.tick
         ).collect();
         if seats.len() < 2 { return; }

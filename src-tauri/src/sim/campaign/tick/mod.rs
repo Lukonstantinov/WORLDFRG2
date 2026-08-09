@@ -1476,6 +1476,21 @@ const WAR_GOAL_ANNEX: u8 = 3;
 /// `prov_holder` exactly as a peacetime grant would; a house-held province
 /// (`prov_holder_house >= 0`, rule 24) is never up for grabs in a city-vs-city war.
 const WAR_GOAL_PROVINCE: u8 = 4;
+/// R4 (`REALM_AND_GOVERNMENT_PLAN.md` §1.5) · a purely reputational defeat — no
+/// land or coin changes hands beyond ordinary reparations, but the loser's own
+/// standing visibly cracks: a realm's `legitimacy`, or (for an ordinary house-led
+/// city) its ruling house's `prestige`.
+const WAR_GOAL_HUMILIATE: u8 = 5;
+/// R4 · the victor's own kin are seated in the loser's government — a real,
+/// LOCKED office (`Official.kin`), not merely a bailo. A puppet, not a conquest:
+/// the loser keeps its coin, its market, its nominal independence.
+const WAR_GOAL_ENTHRONE: u8 = 6;
+/// R4 · stronger than tribute: the loser also fights in its overlord's wars and
+/// may not declare its own. Only produces the FULL relationship (`Realm.vassals`,
+/// `REALM_ROLE_TRIBUTARY`) when the winner itself has a realm to be a vassal OF —
+/// downgrades to plain tribute otherwise, the same "richest thing actually
+/// available" idiom `WAR_GOAL_PROVINCE` already uses when there's no province.
+const WAR_GOAL_VASSALIZE: u8 = 7;
 /// Years a defeated city pays tribute to its overlord.
 const TRIBUTE_YEARS: u32 = 10;
 /// Yearly tribute as a fraction of the tributary's treasury (bounded — moves money,
@@ -1490,6 +1505,9 @@ pub fn war_goal_label(goal: u8) -> &'static str {
         WAR_GOAL_TRADE_RIGHTS => "for trade rights",
         WAR_GOAL_PROVINCE => "for a province",
         WAR_GOAL_ANNEX => "for annexation",
+        WAR_GOAL_HUMILIATE => "to humiliate",
+        WAR_GOAL_ENTHRONE => "to enthrone a puppet",
+        WAR_GOAL_VASSALIZE => "for vassalage",
         _ => "for plunder",
     }
 }
@@ -1614,10 +1632,13 @@ const WAR_PURGE_MAX_ESTATES: usize = 3;
 const WAR_PURGE_CONFISCATE_FRAC: f32 = 0.25;
 const WAR_PURGE_POWER_LOSS: f32 = 0.15;
 
-// ── §3.4b · terms priced in war score (§1.4's table, verbatim) ──────────────────
+// ── §3.4b · terms priced in war score (§1.4's table) — extended by R4's §1.5 ────
 const WAR_PRICE_REPARATIONS: f32 = 10.0;
+const WAR_PRICE_HUMILIATE: f32 = 15.0;
 const WAR_PRICE_TRADE_RIGHTS: f32 = 25.0;
+const WAR_PRICE_ENTHRONE: f32 = 35.0;
 const WAR_PRICE_TRIBUTE: f32 = 40.0;
+const WAR_PRICE_VASSALIZE: f32 = 50.0;
 const WAR_PRICE_PROVINCE: f32 = 55.0;
 const WAR_PRICE_ANNEX: f32 = 90.0;
 /// The war-score price of a goal — what the winner's final `|score|` must reach to
@@ -1626,13 +1647,27 @@ const WAR_PRICE_ANNEX: f32 = 90.0;
 /// overperforming does not let a trade dispute escalate into an annexation).
 fn war_goal_price(goal: u8) -> f32 {
     match goal {
+        WAR_GOAL_HUMILIATE => WAR_PRICE_HUMILIATE,
         WAR_GOAL_TRADE_RIGHTS => WAR_PRICE_TRADE_RIGHTS,
+        WAR_GOAL_ENTHRONE => WAR_PRICE_ENTHRONE,
         WAR_GOAL_TRIBUTE => WAR_PRICE_TRIBUTE,
+        WAR_GOAL_VASSALIZE => WAR_PRICE_VASSALIZE,
         WAR_GOAL_PROVINCE => WAR_PRICE_PROVINCE,
         WAR_GOAL_ANNEX => WAR_PRICE_ANNEX,
         _ => WAR_PRICE_REPARATIONS,
     }
 }
+// ── R4 · HUMILIATE / ENTHRONE / VASSALIZE tuning ────────────────────────────────
+const HUMILIATE_LEGITIMACY_HIT: f32 = 0.10;
+const HUMILIATE_LEGITIMACY_GAIN: f32 = 0.05;
+const HUMILIATE_PRESTIGE_HIT: f32 = 0.10;
+const HUMILIATE_PRESTIGE_GAIN: f32 = 0.05;
+/// A puppet's reign — between `TRIBUTE_YEARS` (10) and a vassal's own term, so
+/// Enthrone's middling price (35, between trade rights and tribute) is matched by
+/// a middling duration. `reseat_official`'s own regular regime-change logic takes
+/// over once it elapses — no special-case unwind needed, the SAME mechanism that
+/// would naturally replace any official on schedule.
+const ENTHRONE_TERM_YEARS: u32 = 15;
 /// §3.4c · a feud whose winner holds its city's council/captor seat may escalate
 /// its worst (vendetta) flare into a full state war instead of the ordinary
 /// property damage — "capturing a government is what lets a family spend a city's
@@ -4413,7 +4448,12 @@ pub struct Realm {
     pub rank: u8,
     pub autonomy: u8,
     pub provinces: Vec<u32>,
-    pub cities: Vec<u32>,
+    /// Cities under this realm's writ (subject and tributary alike) are NOT
+    /// tracked here — the authoritative membership is `TickHub.realm == this
+    /// realm's id`, exactly as `prov_realm` is authoritative for provinces. A
+    /// separate `cities` list would be a second copy of the same fact with no
+    /// mechanism keeping it in sync, and nothing has ever read one (removed
+    /// before anything started relying on it, R4).
     pub vassals: Vec<u32>,
     /// The crown's pot — the house's whole wealth at the coronation. There is no
     /// second pot: the dynasty's money IS the realm's money.
