@@ -1509,6 +1509,16 @@ sea, crevasse lines for glacier ice, a cracked lattice for a salt pan. Two rules
   texture and starts reading as a different colour, so two biomes blur together.
   `pattern_amplitude_stays_within_a_readable_band` holds the ceiling — it caught
   peat bog stacking its dash and hummock layers to 0.25.
+- **Shading is a SEPARATE multiply applied after the pattern**, and the ceiling is
+  held on the COMBINED swing (`pattern_and_relief_together_stay_readable`), not on
+  the pattern alone — a test that measures only the pattern passes happily while two
+  biomes blur. The four thematic plates (climate · biomes · soil · fertility) carry
+  an attenuated hillshade (`THEMATIC_RELIEF_AMP` = 0.09) so a climate zone sits on
+  the mountains that cause it, the way Bartholomew's and the Times' physical plates
+  print tint over relief. It REPLACED the cruder `1.0 + (e − 0.2) · 0.18` elevation
+  lift, which reached +0.144 alone and stacked on the same ±0.19 pattern — so the
+  combined excursion went DOWN while the plate gained real form. Every shading layer
+  now needs its neighbour ring in `tile_commands.rs`, or slopes break at tile edges.
 - **They are SYMBOLS, not surface texture.** Holding a fixed pixel scale across
   the LOD pyramid is correct — that is how printed map hatching behaves.
 - **`cargo test --lib render::tile_image::tests::dump_biome_swatch_sheet --

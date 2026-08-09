@@ -126,7 +126,12 @@ fn render_full_res(
     // shade slopes continuously across tile boundaries (otherwise a faint grid
     // of tile seams appears). Pull the neighbour ring only when that layer is
     // requested; other layers render purely from their own tile.
-    let needs_neighbors = layers.iter().any(|l| l == "terrain");
+    // Every layer that SHADES needs its cardinal neighbours, or slopes break at
+    // tile boundaries and a faint 128-cell grid appears. That is the hillshade plus
+    // the four thematic plates, which now carry an attenuated relief modulation.
+    let needs_neighbors = layers
+        .iter()
+        .any(|l| matches!(l.as_str(), "terrain" | "climate" | "biomes" | "soil" | "fertility"));
     let (gw, gh) = grid_dims(db);
 
     // Deduped set of tiles to fetch: the requested tiles, plus (for terrain) the

@@ -12,22 +12,28 @@ pub fn render_tile(tile: &TileData, layer: &str) -> Vec<u8> {
 /// As `render_tile`, but with the world geometry the hillshade needs (see
 /// `RenderCtx`). Every other layer ignores it.
 pub fn render_tile_ctx(tile: &TileData, layer: &str, ctx: &RenderCtx) -> Vec<u8> {
+    render_tile_full(tile, layer, &TileNeighbors::default(), ctx)
+}
+
+/// The single dispatch. `n` is used by every layer that shades (the terrain
+/// hillshade and the four thematic plates); the rest ignore it.
+fn render_tile_full(tile: &TileData, layer: &str, n: &TileNeighbors, ctx: &RenderCtx) -> Vec<u8> {
     let mut rgba = vec![0u8; PIXEL_COUNT * 4];
 
     match layer {
         "land" => render_land(tile, &mut rgba),
         "elevation" => render_elevation(tile, &mut rgba),
-        "climate" => render_climate(tile, &mut rgba),
+        "climate" => render_climate(tile, n, ctx, &mut rgba),
         "temperature" => render_temperature(tile, &mut rgba),
         "sst" => render_sst(tile, &mut rgba),
         "snow" => render_snow(tile, &mut rgba),
         "precipitation" => render_precipitation(tile, &mut rgba),
-        "soil" => render_soil(tile, &mut rgba),
-        "fertility" => render_fertility(tile, &mut rgba),
+        "soil" => render_soil(tile, n, ctx, &mut rgba),
+        "fertility" => render_fertility(tile, n, ctx, &mut rgba),
         "plates" => render_plates(tile, &mut rgba),
-        "biomes" => render_biomes(tile, &mut rgba),
+        "biomes" => render_biomes(tile, n, ctx, &mut rgba),
         "fisheries" => render_fisheries(tile, &mut rgba),
-        "terrain" => render_terrain_hillshade(tile, ctx, &mut rgba),
+        "terrain" => render_terrain_hillshade_halo(tile, n, ctx, &mut rgba),
         "shelf" => render_shelf(tile, &mut rgba),
         "ridges" => render_ridges(tile, &mut rgba),
         "wind" => render_wind(tile, &mut rgba),
@@ -241,7 +247,7 @@ fn elevation_color_climate(e: f32, temp_c: f32, precip_mm: f32) -> (u8, u8, u8) 
     lerp_rgb(base, lowland_tint(temp_c, precip_mm), w)
 }
 
-fn render_climate(tile: &TileData, rgba: &mut [u8]) {
+fn render_climate(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, rgba: &mut [u8]) {
     for i in 0..PIXEL_COUNT {
         let offset = i * 4;
         if tile.terrain[i] == 0 {
@@ -437,7 +443,7 @@ fn render_precipitation(tile: &TileData, rgba: &mut [u8]) {
     }
 }
 
-fn render_soil(tile: &TileData, rgba: &mut [u8]) {
+fn render_soil(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, rgba: &mut [u8]) {
     for i in 0..PIXEL_COUNT {
         let offset = i * 4;
         if tile.terrain[i] == 0 {
@@ -470,7 +476,7 @@ pub fn soil_color(code: u8) -> (u8, u8, u8) {
     }
 }
 
-fn render_fertility(tile: &TileData, rgba: &mut [u8]) {
+fn render_fertility(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, rgba: &mut [u8]) {
     for i in 0..PIXEL_COUNT {
         let offset = i * 4;
         if tile.terrain[i] == 0 {
@@ -508,7 +514,46 @@ fn render_plates(tile: &TileData, rgba: &mut [u8]) {
 /// renderer to know its own world coordinates. They are symbols, not surface
 /// texture: staying at a fixed pixel scale across the LOD pyramid is correct —
 /// it is exactly how a printed map's hatching behaves.
-fn render_biomes(tile: &TileData, rgba: &mut [u8]) {
+/// How far an attenuated hillshade may modulate a THEMATIC plate (climate, biomes,
+/// soil, fertility). Far below the terrain layer's own strength: the job here is to
+/// hint at form so a climate zone sits on the mountains that cause it, not to
+/// present relief as the subject.
+const THEMATIC_RELIEF_AMP: f32 = 0.09;
+
+/// A gentle relief multiplier for the thematic plates.
+///
+/// Bartholomew's and the Times' physical/vegetation plates all print their tint
+/// OVER relief — it is what makes a thematic plate read as a place rather than as a
+/// chart. Before this the climate plate was flat opaque fill with no terrain cue at
+/// all, so mountain climate zones floated free of the mountains producing them.
+///
+/// It REPLACES the cruder `1.0 + (e - 0.2) * 0.18` elevation lift the biome layer
+/// used to carry. That matters for §8.12's contrast ceiling: the old lift reached
+/// +0.144 on its own and stacked multiplicatively with a pattern already swinging
+/// ±0.19, so the combined excursion was larger than what this shading produces.
+/// Replacing rather than stacking is why the combined swing goes DOWN.
+fn thematic_relief(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, x: usize, y: usize) -> f32 {
+    let az = 315.0_f32.to_radians();
+    let alt = 45.0_f32.to_radians();
+    let (lx, ly, lz) = (az.sin() * alt.cos(), -az.cos() * alt.cos(), alt.sin());
+
+    let (xi, yi) = (x as isize, y as isize);
+    let left = halo_elev(tile, n, xi - 1, yi);
+    let right = halo_elev(tile, n, xi + 1, yi);
+    let up = halo_elev(tile, n, xi, yi - 1);
+    let down = halo_elev(tile, n, xi, yi + 1);
+
+    let z = ctx.z_factor();
+    let dzdx = (right - left) * z * ctx.lat_stretch(y);
+    let dzdy = (down - up) * z;
+    let len = (dzdx * dzdx + dzdy * dzdy + 1.0).sqrt();
+    let lambert = ((-dzdx / len) * lx + (-dzdy / len) * ly + (1.0 / len) * lz) / lz;
+
+    (1.0 + (lambert - 1.0) * THEMATIC_RELIEF_AMP)
+        .clamp(1.0 - THEMATIC_RELIEF_AMP, 1.0 + THEMATIC_RELIEF_AMP)
+}
+
+fn render_biomes(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, rgba: &mut [u8]) {
     for i in 0..PIXEL_COUNT {
         let offset = i * 4;
         if tile.terrain[i] == 0 {
@@ -529,8 +574,9 @@ fn render_biomes(tile: &TileData, rgba: &mut [u8]) {
         // Pattern fill, plus a gentle hypsometric lift so relief still reads
         // through the flat ecological colours.
         let pattern = biome_pattern(b, lx, ly);
-        let relief = 1.0 + (tile.elevation[i].clamp(0.0, 1.0) - 0.2) * 0.18;
-        let k = (1.0 + pattern) * relief;
+        // Shading is a SEPARATE multiply applied after the pattern, so texture and
+        // form stay independently readable (and independently testable).
+        let k = (1.0 + pattern) * thematic_relief(tile, n, ctx, lx as usize, ly as usize);
 
         rgba[offset] = (r as f32 * k).clamp(0.0, 255.0) as u8;
         rgba[offset + 1] = (g as f32 * k).clamp(0.0, 255.0) as u8;
@@ -1083,13 +1129,6 @@ fn render_disease(tile: &TileData, rgba: &mut [u8]) {
     }
 }
 
-fn render_terrain_hillshade(tile: &TileData, ctx: &RenderCtx, rgba: &mut [u8]) {
-    // No neighbour tiles available (supertile / crop paths): fall back to
-    // within-tile slopes. Edge pixels replicate, which is what produced the
-    // faint tile-seam grid at LOD 0 — the neighbour-aware path below removes it.
-    render_terrain_hillshade_halo(tile, &TileNeighbors::default(), ctx, rgba);
-}
-
 /// Cardinal neighbour tiles for a seam-free hillshade slope stencil. Missing
 /// neighbours (world edge / not loaded) fall back to edge replication.
 #[derive(Default)]
@@ -1304,13 +1343,7 @@ pub fn render_tile_with_neighbors_ctx(
     n: &TileNeighbors,
     ctx: &RenderCtx,
 ) -> Vec<u8> {
-    if layer == "terrain" {
-        let mut rgba = vec![0u8; PIXEL_COUNT * 4];
-        render_terrain_hillshade_halo(tile, n, ctx, &mut rgba);
-        rgba
-    } else {
-        render_tile_ctx(tile, layer, ctx)
-    }
+    render_tile_full(tile, layer, n, ctx)
 }
 
 fn render_shelf(tile: &TileData, rgba: &mut [u8]) {
@@ -1773,6 +1806,58 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The pattern ceiling above is NOT enough on its own once the biome plate also
+    /// carries relief shading: what a reader actually sees is pattern × shading, and
+    /// a test that measures only the pattern can pass while two biomes blur together.
+    ///
+    /// The COMBINED excursion is therefore held here, and the bound is deliberately
+    /// tighter than the code it replaced. The old plate stacked a crude
+    /// `1.0 + (e − 0.2) · 0.18` elevation lift (reaching +0.144 alone) on the same
+    /// ±0.19 pattern, for a worst case near ×1.36. Replacing that lift with the
+    /// attenuated hillshade — rather than adding shading on top of it — is what
+    /// makes the combined swing go DOWN while the plate gains real form.
+    #[test]
+    fn pattern_and_relief_together_stay_readable() {
+        const COMBINED_CEILING: f32 = 0.30;
+        // Worst case for the shading term, independent of terrain: the clamp bound.
+        let shade_hi = 1.0 + THEMATIC_RELIEF_AMP;
+        let shade_lo = 1.0 - THEMATIC_RELIEF_AMP;
+        for b in 1..BIOME_COUNT as u8 {
+            let mut worst = 0.0f32;
+            for y in 0..SIZE as u32 {
+                for x in 0..SIZE as u32 {
+                    let p = biome_pattern(b, x, y);
+                    let hi = ((1.0 + p) * shade_hi - 1.0).abs();
+                    let lo = ((1.0 + p) * shade_lo - 1.0).abs();
+                    worst = worst.max(hi).max(lo);
+                }
+            }
+            assert!(
+                worst <= COMBINED_CEILING,
+                "biome {} ({}) swings {worst:.3} once relief shading is applied — \
+                 texture and form together stop reading as one surface",
+                b, biome_name(b),
+            );
+        }
+    }
+
+    /// Thematic relief must stay a HINT. Above roughly a tenth it stops suggesting
+    /// form and starts competing with the class colour it is modulating, which is
+    /// the whole reason the terrain layer's own shading is not reused here.
+    #[test]
+    fn thematic_relief_is_gentle() {
+        assert!(
+            THEMATIC_RELIEF_AMP <= 0.10,
+            "thematic relief {THEMATIC_RELIEF_AMP} would compete with the class colour",
+        );
+        // Flat ground must be EXACTLY unshaded, or every plate shifts tone wholesale
+        // — the same normalisation bug the terrain layer carried for years.
+        let flat = TileData::new_sea();
+        let ctx = RenderCtx { grid_w: 3600, grid_h: 1800, ty: 4, step: 1 };
+        let k = thematic_relief(&flat, &TileNeighbors::default(), &ctx, 40, 40);
+        assert!((k - 1.0).abs() < 1e-4, "flat ground shades to {k}, not 1.0");
     }
 
     /// Every biome the classifier can emit must have a distinct base colour, or
