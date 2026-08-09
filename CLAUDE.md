@@ -1495,6 +1495,14 @@ sea, crevasse lines for glacier ice, a cracked lattice for a salt pan. Two rules
   (128/29.09 = 4.4), which would have drawn a seam across every sand sea. The
   corollary is that a fill's pseudo-random component REPEATS every 128 cells;
   that is correct for a cartographic hatch and invisible in practice.
+- **Two biomes must be PERCEPTUALLY distinct, not merely unequal.**
+  `biome_colors_are_distinct` used to check exact RGB equality, which passes
+  happily on colours no reader can separate: tropical seasonal forest vs temperate
+  deciduous shipped at ΔE 3.0 and thorn scrub vs chaparral at ΔE 3.8, and both
+  pairs share a `Pattern` kind, so texture did not rescue them either. It now
+  asserts a CIELAB floor (`MIN_DELTA_E`), set to what the palette already
+  satisfies rather than to an aspiration — raise it as the palette earns it. The
+  target for two biomes sharing a pattern is ΔE ≥ 8.
 - **Contrast has a floor and a ceiling.** Under about 0.15 between mark and
   ground a pattern is technically present and visually absent (the first cut of
   the scrub dots and the marsh dashes both were); over ~0.20 it stops reading as
@@ -1508,8 +1516,11 @@ sea, crevasse lines for glacier ice, a cracked lattice for a salt pan. Two rules
   `$BIOME_SHEET_DIR`, rendered through the real `render_tile` path. Use it to
   eyeball a palette or pattern change instead of guessing.
 
-`biome_color` (render) and `BIOME_SWATCH` (`StepSoilResources.tsx` legend) are
-two copies of the same palette — change one, change both, or the legend lies.
+`BIOME_SWATCH` is **gone**: the legend now reads biome colours from
+`get_render_palettes` (§8.18), so there is no second copy to keep in sync. Its
+old doc-comment asked future editors to mirror `biome_color` by hand — three
+colours changed in the very commit that deleted it, which is what that comment
+could never prevent.
 A world saved before this phase pads the column to zero and falls back to
 `koppen_fallback_biome`, so the layer is never blank.
 

@@ -542,12 +542,12 @@ pub fn biome_color(b: u8) -> (u8, u8, u8) {
         // Tropical forest
         B_TROPICAL_RAINFOREST => (13, 74, 31),
         B_TROPICAL_MOIST_FOREST => (28, 99, 44),
-        B_TROPICAL_SEASONAL_FOREST => (76, 124, 48),
+        B_TROPICAL_SEASONAL_FOREST => (108, 142, 54),
         B_CLOUD_FOREST => (46, 110, 92),
         B_MANGROVE => (44, 88, 74),
         // Tropical open
         B_SAVANNA => (168, 168, 84),
-        B_THORN_SCRUB => (150, 138, 82),
+        B_THORN_SCRUB => (170, 140, 76),
         // Temperate forest
         B_TEMPERATE_RAINFOREST => (32, 92, 66),
         B_TEMPERATE_DECIDUOUS => (74, 122, 52),
@@ -556,7 +556,7 @@ pub fn biome_color(b: u8) -> (u8, u8, u8) {
         B_SUBTROPICAL_MOIST_FOREST => (58, 116, 54),
         // Mediterranean
         B_MEDITERRANEAN_WOODLAND => (124, 134, 70),
-        B_CHAPARRAL => (146, 138, 88),
+        B_CHAPARRAL => (140, 142, 104),
         // Boreal
         B_TAIGA => (38, 76, 58),
         B_FOREST_TUNDRA => (86, 106, 82),
@@ -1433,6 +1433,30 @@ mod tests {
         0.2126 * f(c.0) + 0.7152 * f(c.1) + 0.0722 * f(c.2)
     }
 
+    /// CIE L*a*b* (D65), for perceptual colour distance. Two colours a reader
+    /// cannot separate are the same colour as far as a map is concerned, and RGB
+    /// distance does not model that — hence the conversion rather than a cheap
+    /// component compare.
+    fn to_lab(c: (u8, u8, u8)) -> (f32, f32, f32) {
+        let f = |v: u8| {
+            let v = v as f32 / 255.0;
+            if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        };
+        let (r, g, b) = (f(c.0), f(c.1), f(c.2));
+        let x = (r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047;
+        let y = r * 0.2126 + g * 0.7152 + b * 0.0722;
+        let z = (r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883;
+        let h = |t: f32| if t > 0.008856 { t.cbrt() } else { 7.787 * t + 16.0 / 116.0 };
+        let (fx, fy, fz) = (h(x), h(y), h(z));
+        (116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz))
+    }
+
+    fn delta_e(a: (u8, u8, u8), b: (u8, u8, u8)) -> f32 {
+        let (l1, a1, b1) = to_lab(a);
+        let (l2, a2, b2) = to_lab(b);
+        ((l1 - l2).powi(2) + (a1 - a2).powi(2) + (b1 - b2).powi(2)).sqrt()
+    }
+
     /// No two Köppen zones may share a colour.
     ///
     /// Dsc (20) and Dsd (31) shipped IDENTICAL at (150,50,150), so two distinct
@@ -1626,14 +1650,27 @@ mod tests {
     /// two different ecologies render identically and the map lies.
     #[test]
     fn biome_colors_are_distinct() {
-        let mut seen: Vec<(u8, (u8, u8, u8))> = Vec::new();
-        for b in 1..BIOME_COUNT as u8 {
-            let c = biome_color(b);
-            if let Some(&(other, oc)) = seen.iter().find(|&&(_, oc)| oc == c) {
-                panic!("biome {} ({}) shares colour {:?} with {} ({})",
-                    b, biome_name(b), c, other, biome_name(other));
+        // An EQUALITY check passes on colours a reader cannot tell apart: tropical
+        // seasonal forest and temperate deciduous shipped at dE 3.0, thorn scrub and
+        // chaparral at 3.8, and both pairs share a pattern kind, so texture did not
+        // rescue them either. A perceptual floor is the check that has meaning.
+        //
+        // The floor guards the palette the app ALREADY satisfies rather than
+        // encoding an aspiration — same discipline §2.5 uses for the economy bands.
+        // Raise it as the palette earns it; the goal for two biomes sharing a
+        // `Pattern` kind is dE >= 8.
+        const MIN_DELTA_E: f32 = 2.5;
+        let all: Vec<(u8, (u8, u8, u8))> =
+            (1..BIOME_COUNT as u8).map(|b| (b, biome_color(b))).collect();
+        for (i, &(a, ca)) in all.iter().enumerate() {
+            for &(b, cb) in all.iter().skip(i + 1) {
+                let d = delta_e(ca, cb);
+                assert!(
+                    d >= MIN_DELTA_E,
+                    "biome {} ({}) and {} ({}) are indistinguishable: dE {:.2} ({:?} vs {:?})",
+                    a, biome_name(a), b, biome_name(b), d, ca, cb,
+                );
             }
-            seen.push((b, c));
         }
     }
 
