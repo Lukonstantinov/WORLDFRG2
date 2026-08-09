@@ -162,6 +162,34 @@ impl CampaignSim {
                 days[b * n + a] = d;
             }
         }
+
+        // #6 · NO DEAD CITY. The horizon + cross-component gate above can leave a remote
+        // inland/lake town with too few reachable partners to ever trade (0 exports/
+        // imports, frozen population). Guarantee every real hub at least
+        // `MIN_GUARANTEED_PARTNERS` of its NEAREST partners via the straight-line
+        // estimate, even across the horizon/component — bounded to the closest hubs, so
+        // local trade always reaches a stranded town while the long-range lanes stay cut.
+        let real: Vec<usize> = (0..n)
+            .filter(|&i| !self.hubs[i].is_estate && !self.hubs[i].abandoned)
+            .collect();
+        for &a in &real {
+            let have = real.iter().filter(|&&b| b != a && days[a * n + b].is_finite()).count();
+            if have >= MIN_GUARANTEED_PARTNERS { continue; }
+            let mut cand: Vec<(f32, usize)> = real.iter().filter(|&&b| b != a).map(|&b| {
+                let mut dx = (self.hubs[a].x - self.hubs[b].x).abs();
+                if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
+                let dy = self.hubs[a].y - self.hubs[b].y;
+                ((dx * dx + dy * dy).sqrt(), b)
+            }).collect();
+            cand.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+            for &(dist, b) in cand.iter().take(MIN_GUARANTEED_PARTNERS) {
+                if days[a * n + b].is_finite() { continue; }
+                let d = (dist * self.days_per_cell).max(1.0);
+                days[a * n + b] = d;
+                days[b * n + a] = d;
+            }
+        }
+
         self.days = days;
         self.rebuild_neighbors();
         self.routes_dirty = false;

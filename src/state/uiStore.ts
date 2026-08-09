@@ -179,6 +179,9 @@ interface UIStore {
   /** Province selected on the map (id), or null. Drives the map highlight and the
    *  inspector; setting it opens the inspector. */
   selectedProvince: number | null;
+  /** Provinces MARKED for a batch merge/split (shift-click on the map, or the pin in the
+   *  Provinces panel). When non-empty, Merge/Split affect ONLY these; empty = affect all. */
+  markedProvinces: number[];
   /** Opacity of the province colour FILL, 0..1. Borders, names and the selection
    *  outline always draw at full strength, so winding this down leaves a clean
    *  political outline over the terrain rather than removing the layer. */
@@ -310,6 +313,9 @@ interface UIStore {
   setShowProvinces: (v: boolean) => void;
   setShowProvinceInspector: (v: boolean) => void;
   setSelectedProvince: (id: number | null) => void;
+  /** Toggle a province in the merge/split mark set. */
+  toggleMarkedProvince: (id: number) => void;
+  clearMarkedProvinces: () => void;
   setProvinceOpacity: (v: number) => void;
   setProvinceFillMode: (m: "distinct" | "single") => void;
   setProvinceSingleColor: (hex: string) => void;
@@ -439,6 +445,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showProvinces: false,
   showProvinceInspector: false,
   selectedProvince: null,
+  markedProvinces: [],
   provinceOpacity: 0.5,
   provinceFillMode: "distinct",
   provinceSingleColor: "#3a5a7c",
@@ -582,6 +589,11 @@ export const useUIStore = create<UIStore>((set) => ({
   // the window state alone so closing the inspector doesn't drop the map highlight.
   setSelectedProvince: (id) =>
     set(id === null ? { selectedProvince: null } : { selectedProvince: id, showProvinceInspector: true }),
+  toggleMarkedProvince: (id) =>
+    set((s) => ({ markedProvinces: s.markedProvinces.includes(id)
+      ? s.markedProvinces.filter((p) => p !== id)
+      : [...s.markedProvinces, id] })),
+  clearMarkedProvinces: () => set({ markedProvinces: [] }),
   setProvinceOpacity: (v) => set({ provinceOpacity: Math.max(0, Math.min(1, v)) }),
   setProvinceFillMode: (m) => set({ provinceFillMode: m }),
   setProvinceSingleColor: (hex) => set({ provinceSingleColor: hex }),

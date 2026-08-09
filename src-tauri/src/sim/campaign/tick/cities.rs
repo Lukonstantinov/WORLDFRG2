@@ -205,9 +205,16 @@ impl CampaignSim {
             for (i, h) in (start..self.hubs.len()).enumerate() { self.hub_province[h] = assigns[i]; }
         }
         self.prov_net_mig = vec![0.0; np];
-        // 1. Rural natural increase toward capacity (Malthusian check above it).
+        // Civilization advances over centuries: better FARMING raises the land's carrying
+        // capacity (food production) and MEDICINE eases the urban graveyard (fighting
+        // disease). A saturating function of campaign time, so the countryside keeps
+        // filling and cities keep surviving larger for centuries, but always bounded.
+        // Province-gated, so the province-FREE dynamics gate is unaffected by this.
+        let adv = (1.0 - (-(self.tick as f32 / TICKS_PER_YEAR as f32) / 250.0).exp()).clamp(0.0, 1.0);
+        let food_cap_mult = 1.0 + 0.9 * adv;         // up to ~+90% farm carrying capacity
+        // 1. Rural natural increase toward (advancing) capacity — Malthusian check above it.
         for p in 0..np {
-            let cap = self.prov_cap.get(p).copied().unwrap_or(0.0).max(1.0);
+            let cap = self.prov_cap.get(p).copied().unwrap_or(0.0).max(1.0) * food_cap_mult;
             let r = self.prov_rural[p];
             if r < cap {
                 self.prov_rural[p] = (r + RURAL_GROWTH * r * (1.0 - r / cap)).max(0.0);
@@ -218,13 +225,16 @@ impl CampaignSim {
         // 2. Urban graveyard: the biggest cities lose a little population naturally each
         //    year (crowding + disease), softened by public health. Migration (below) is
         //    what lets them hold and grow.
+        // Medicine pushes the "urban graveyard" floor UP and its mortality DOWN over the
+        // campaign, so a big city no longer decays back toward ~25k as readily.
+        let crowd_floor = URBAN_CROWD_FLOOR * (1.0 + 0.8 * adv);
         for h in 0..self.hubs.len() {
             if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
             let pop = self.hubs[h].population;
-            if pop <= URBAN_CROWD_FLOOR { continue; }
-            let crowd = ((pop - URBAN_CROWD_FLOOR) / 120_000.0).clamp(0.0, 1.0);
+            if pop <= crowd_floor { continue; }
+            let crowd = ((pop - crowd_floor) / 120_000.0).clamp(0.0, 1.0);
             let health = self.hubs[h].public_health.clamp(0.0, 1.0);
-            let mort = URBAN_CROWDING_MORTALITY * crowd * (1.0 - 0.6 * health);
+            let mort = URBAN_CROWDING_MORTALITY * crowd * (1.0 - 0.6 * health) * (1.0 - 0.5 * adv);
             self.hubs[h].population = (pop * (1.0 - mort)).max(1.0);
         }
         // 3. Rural → urban migration, per province, weighted by each city's OPPORTUNITY

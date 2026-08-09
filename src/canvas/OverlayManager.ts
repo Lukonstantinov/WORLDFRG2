@@ -445,6 +445,10 @@ export class OverlayManager {
   private selectedProvince: number | null = null;
   private selectedProvincePath: Path2D | null = null;
   private selectedProvinceSeat: { x: number; y: number } | null = null;
+  /** Provinces MARKED for a batch merge/split (shift-click). Their combined outline is
+   *  drawn in a distinct colour so the "affect only these" set is visible on the map. */
+  private markedProvinces: Set<number> = new Set();
+  private markedProvincePath: Path2D | null = null;
   /** Province name + label anchor (world cells) + inscribed radius for on-map labels. */
   private provinceLabels: { x: number; y: number; r: number; name: string }[] = [];
   /** Opacity of the province colour FILL only — borders, names and the selection
@@ -643,6 +647,7 @@ export class OverlayManager {
     // The raster may have been replaced (regenerate / world open) — re-cut the
     // selected outline against it rather than leaving a stale path on screen.
     if (this.selectedProvince !== null) this.buildSelectedProvince();
+    if (this.markedProvinces.size > 0) this.buildMarkedProvinces();
     // States are rendered on this raster, so a new raster invalidates them too.
     this.statesDirty = true;
   }
@@ -715,6 +720,40 @@ export class OverlayManager {
     }
     this.selectedProvincePath = path;
     this.selectedProvinceSeat = this.provinceSeats.get(id) ?? null;
+  }
+
+  /** Set the provinces MARKED for a batch merge/split; rebuilds their combined outline. */
+  setMarkedProvinces(ids: number[]) {
+    const next = new Set(ids);
+    if (next.size === this.markedProvinces.size &&
+        [...next].every((i) => this.markedProvinces.has(i))) return;
+    this.markedProvinces = next;
+    this.buildMarkedProvinces();
+  }
+
+  /** Cut the combined outline of every marked province out of the raster, in world cells. */
+  private buildMarkedProvinces() {
+    this.markedProvincePath = null;
+    const r = this.provinceRaster;
+    if (!r || this.markedProvinces.size === 0) return;
+    const { data, w, h, gridW, gridH } = r;
+    const sx = gridW / w, sy = gridH / h;
+    const marked = this.markedProvinces;
+    const path = new Path2D();
+    for (let ry = 0; ry < h; ry++) {
+      for (let rx = 0; rx < w; rx++) {
+        const id = data[ry * w + rx];
+        if (!marked.has(id)) continue;
+        const x0 = rx * sx, x1 = (rx + 1) * sx, y0 = ry * sy, y1 = (ry + 1) * sy;
+        // A border wherever a marked cell meets a cell of a DIFFERENT (or unmarked) id,
+        // so several marked provinces read as their own outlined regions.
+        if (rx === 0 || data[ry * w + rx - 1] !== id) { path.moveTo(x0, y0); path.lineTo(x0, y1); }
+        if (rx + 1 >= w || data[ry * w + rx + 1] !== id) { path.moveTo(x1, y0); path.lineTo(x1, y1); }
+        if (ry === 0 || data[(ry - 1) * w + rx] !== id) { path.moveTo(x0, y0); path.lineTo(x1, y0); }
+        if (ry + 1 >= h || data[(ry + 1) * w + rx] !== id) { path.moveTo(x0, y1); path.lineTo(x1, y1); }
+      }
+    }
+    this.markedProvincePath = path;
   }
 
   /** Rasterize province fills into an offscreen canvas ONCE (each cell one opaque
@@ -1667,6 +1706,18 @@ export class OverlayManager {
       ctx.strokeStyle = this.provinceBorderColor;
       ctx.lineWidth = 1 / this.currentScale;
       ctx.stroke(this.provinceBorderPath);
+    }
+
+    // Provinces marked for a batch merge/split: a distinct cyan outline (dark halo
+    // underneath), drawn UNDER the picked-province highlight so selection still reads.
+    if (this.markedProvincePath) {
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = "rgba(6, 12, 20, 0.8)";
+      ctx.lineWidth = 4 / this.currentScale;
+      ctx.stroke(this.markedProvincePath);
+      ctx.strokeStyle = "rgba(90, 220, 240, 0.95)";
+      ctx.lineWidth = 1.8 / this.currentScale;
+      ctx.stroke(this.markedProvincePath);
     }
 
     // The picked province: a bright outline (dark halo underneath so it reads over

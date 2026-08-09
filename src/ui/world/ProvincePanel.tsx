@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
+import { useCampaignStore } from "@state/campaignStore";
 import { simGenerateProvinces, simMergeSmallProvinces, simSplitLargeProvinces, campaignProvinceState, campaignProvinceDetail, campaignProvinceLandAll, getProvinceTerrainCrop } from "@bridge";
 import { GOOD_DEFS } from "@goods";
 import { koppenName } from "@ui/world/climate";
@@ -53,6 +54,15 @@ export function ProvincePanel() {
   const mapSelection = useUIStore((s) => s.selectedProvince);
   const setSelectedProvince = useUIStore((s) => s.setSelectedProvince);
   useEffect(() => { if (mapSelection !== null) setSelId(mapSelection); }, [mapSelection]);
+  // Provinces marked for the "affect only these" merge/split. Shift-click on the map or
+  // the pin in each list row toggles a mark; an empty set means affect ALL provinces.
+  const markedProvinces = useUIStore((s) => s.markedProvinces);
+  const toggleMarkedProvince = useUIStore((s) => s.toggleMarkedProvince);
+  const clearMarkedProvinces = useUIStore((s) => s.clearMarkedProvinces);
+  // A running campaign FREEZES the world: regenerating/merging/splitting provinces would
+  // recompact ids and desync the campaign's province/realm state, so those edits are
+  // locked (the backend refuses too). Generation is a pre-campaign, world-pipeline step.
+  const campaignActive = useCampaignStore((s) => s.snapshot?.active === true);
   const [granularity, setGranularity] = useState(0.5);
   const [busy, setBusy] = useState(false);
   const [live, setLive] = useState<Map<number, ProvinceLive> | null>(null);
@@ -187,14 +197,16 @@ export function ProvincePanel() {
     if (busy || provinces.length === 0) return;
     const before = provinces.length;
     setBusy(true);
-    setStatus("Merging small provinces…");
+    const sel = markedProvinces.length ? markedProvinces : undefined;
+    setStatus(sel ? `Merging ${sel.length} marked province${sel.length === 1 ? "" : "s"}…` : "Merging small provinces…");
     try {
-      const res = await simMergeSmallProvinces();
+      const res = await simMergeSmallProvinces(undefined, sel);
       setProvinces(res.provinces, decodeProvinceRaster(res));
       const removed = before - res.provinces.length;
       setSelId((id) => (res.provinces.some((p) => p.id === id) ? id : (res.provinces[0]?.id ?? null)));
-      setStatus(removed > 0 ? `Merged ${removed} small province${removed === 1 ? "" : "s"} away`
-                            : "No small provinces to merge");
+      clearMarkedProvinces(); // ids are recompacted after the operation → old marks are stale
+      setStatus(removed > 0 ? `Merged ${removed} province${removed === 1 ? "" : "s"} away`
+                            : "No provinces to merge");
     } catch (e) {
       setStatus(`Merge failed: ${e}`);
     } finally {
@@ -208,14 +220,16 @@ export function ProvincePanel() {
     if (busy || provinces.length === 0) return;
     const before = provinces.length;
     setBusy(true);
-    setStatus("Splitting large provinces…");
+    const sel = markedProvinces.length ? markedProvinces : undefined;
+    setStatus(sel ? `Splitting ${sel.length} marked province${sel.length === 1 ? "" : "s"}…` : "Splitting large provinces…");
     try {
-      const res = await simSplitLargeProvinces();
+      const res = await simSplitLargeProvinces(undefined, rivers, sel);
       setProvinces(res.provinces, decodeProvinceRaster(res));
       const added = res.provinces.length - before;
       setSelId((id) => (res.provinces.some((p) => p.id === id) ? id : (res.provinces[0]?.id ?? null)));
+      clearMarkedProvinces(); // ids are recompacted after the operation → old marks are stale
       setStatus(added > 0 ? `Split into ${added} more province${added === 1 ? "" : "s"}`
-                          : "No oversized non-polar provinces to split");
+                          : markedProvinces.length ? "Marked provinces too small to split" : "No oversized non-polar provinces to split");
     } catch (e) {
       setStatus(`Split failed: ${e}`);
     } finally {
@@ -253,22 +267,55 @@ export function ProvincePanel() {
         <span style={{ width: 74, opacity: 0.7, fontSize: 12 }}>
           {granularity < 0.34 ? "few · large" : granularity > 0.66 ? "many · small" : "balanced"}
         </span>
-        <button onClick={generate} disabled={busy} style={{ ...btn, background: busy ? "#1a2a38" : "#1d4d6b" }}>
+        <button onClick={generate} disabled={busy || campaignActive}
+          title={campaignActive ? "Locked: a campaign is running — provinces are frozen" : ""}
+          style={{ ...btn, background: busy || campaignActive ? "#1a2a38" : "#1d4d6b", opacity: campaignActive ? 0.5 : 1 }}>
           {busy ? "…" : provinces.length ? "Regenerate" : "Generate"}
         </button>
         {provinces.length > 0 && (
-          <button onClick={mergeSmall} disabled={busy} title="Absorb the tiniest sliver provinces (never islands) into their largest neighbour"
-            style={{ ...btn, background: busy ? "#1a2a38" : "#2a3d1d" }}>
-            Merge small
+          <button onClick={mergeSmall} disabled={busy || campaignActive}
+            title={campaignActive ? "Locked: a campaign is running — provinces are frozen"
+              : markedProvinces.length
+              ? `Merge the ${markedProvinces.length} marked province(s) into their neighbours`
+              : "Absorb the tiniest sliver provinces (never islands) into their largest neighbour"}
+            style={{ ...btn, background: busy || campaignActive ? "#1a2a38" : "#2a3d1d", opacity: campaignActive ? 0.5 : 1 }}>
+            {markedProvinces.length ? "Merge marked" : "Merge small"}
           </button>
         )}
         {provinces.length > 0 && (
-          <button onClick={splitLarge} disabled={busy} title="Split the oversized non-polar provinces (huge deserts/steppes) into smaller ones; arctic/antarctic left untouched"
-            style={{ ...btn, background: busy ? "#1a2a38" : "#3d2f1d" }}>
-            Split large
+          <button onClick={splitLarge} disabled={busy || campaignActive}
+            title={campaignActive ? "Locked: a campaign is running — provinces are frozen"
+              : markedProvinces.length
+              ? `Split the ${markedProvinces.length} marked province(s) — organic, feature-following`
+              : "Split the oversized non-polar provinces (huge deserts/steppes) into smaller ones; arctic/antarctic left untouched"}
+            style={{ ...btn, background: busy || campaignActive ? "#1a2a38" : "#3d2f1d", opacity: campaignActive ? 0.5 : 1 }}>
+            {markedProvinces.length ? "Split marked" : "Split large"}
           </button>
         )}
+        {campaignActive && (
+          <span style={{ fontSize: 11, opacity: 0.6, marginLeft: 4 }}>🔒 frozen during campaign</span>
+        )}
       </div>
+
+      {/* Marked-set bar: what the merge/split above will affect. Shift-click a province on
+          the map (or the 📌 in a row below) to mark it; empty = affect all. */}
+      {provinces.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 12px",
+          borderBottom: "1px solid #152535", background: "#0c1a24", fontSize: 12 }}>
+          {markedProvinces.length ? (
+            <>
+              <span style={{ color: "#5adcf0" }}>◈ {markedProvinces.length} marked</span>
+              <span style={{ opacity: 0.6 }}>— merge/split affect only these</span>
+              <div style={{ flex: 1 }} />
+              <button onClick={clearMarkedProvinces} style={btn}>Clear marks</button>
+            </>
+          ) : (
+            <span style={{ opacity: 0.55 }}>
+              Shift-click a province on the map (or 📌 a row) to mark it — merge/split then affect only marked.
+            </span>
+          )}
+        </div>
+      )}
 
       {provinces.length === 0 ? (
         <div style={{ padding: 20, opacity: 0.7 }}>
@@ -306,11 +353,15 @@ export function ProvincePanel() {
             <div style={{ width: 220, overflowY: "auto", borderRight: "1px solid #152535" }}>
               {rows.map((p) => {
                 const isSel = selected?.id === p.id;
+                const isMarked = markedProvinces.includes(p.id);
                 return (
                   <div key={p.id} onClick={() => { setSelId(p.id); setSelectedProvince(p.id); }}
-                    style={{ padding: "6px 10px", cursor: "pointer", display: "flex", gap: 6,
+                    style={{ padding: "6px 10px", cursor: "pointer", display: "flex", gap: 6, alignItems: "center",
                       background: isSel ? "#12293a" : "transparent",
-                      borderLeft: isSel ? "3px solid #3d9bd4" : "3px solid transparent" }}>
+                      borderLeft: isSel ? "3px solid #3d9bd4" : isMarked ? "3px solid #5adcf0" : "3px solid transparent" }}>
+                    <span onClick={(e) => { e.stopPropagation(); toggleMarkedProvince(p.id); }}
+                      title={isMarked ? "Marked for merge/split — click to unmark" : "Mark for merge/split"}
+                      style={{ cursor: "pointer", opacity: isMarked ? 1 : 0.3, fontSize: 12 }}>📌</span>
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {p.name}
                     </span>

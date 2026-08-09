@@ -274,7 +274,7 @@ const PRIMACY_DEV: f32 = 45.0;   // extra capacity-mult headroom for a qualifyin
 /// (`colonies.rs`), so a colony could never structurally reach it. Mirrors
 /// `colony_pass`'s own bar (`supply_years >= 5.0`, an unbroken 5-year lifeline)
 /// so the extra headroom is EARNED — a colony that keeps starving never gets it.
-const COLONY_CAP_DEV: f32 = 15.0;
+const COLONY_CAP_DEV: f32 = 22.0;
 /// ── EARNED age-of-world headroom (keeps population growing across centuries) ──
 /// `trade_dev`/`primacy_dev` are both RELATIVE to the world's own busiest hub each
 /// tick — once every hub's relative trade share stabilizes (the whole economy
@@ -317,12 +317,18 @@ const COLONY_CAP_DEV: f32 = 15.0;
 /// `econ_diagnose_population_growth` (economy_validation.rs) and
 /// docs/SCOREBOARD.md. Landed conservative on purpose; raising it further needs
 /// its own iteration against this same gate, not a one-shot guess.
-const WORLD_AGE_DEV_CAP: f32 = 2.0;
+const WORLD_AGE_DEV_CAP: f32 = 2.8;
 /// Years of campaign elapsed to earn ~63% of `WORLD_AGE_DEV_CAP`. Larger = slower
 /// ramp (population takes longer to feel this headroom, so it keeps room to grow
 /// later in a long campaign); smaller = faster ramp (saturates, and stops helping,
 /// earlier).
-const WORLD_AGE_DEV_REF_YEARS: f32 = 400.0;
+const WORLD_AGE_DEV_REF_YEARS: f32 = 260.0;
+/// PUBLIC HEALTH as a capacity lever — "fighting disease lets the city hold more
+/// people". A hub's `public_health` (0..1) adds up to this much to its capacity
+/// multiplier, so a city that invests in clean water / hospitals grows past the old
+/// ~20-25k ceiling instead of being pinned there by the urban graveyard. Modest on
+/// purpose: capacity feeds trade wealth, which the dynamics gate bounds.
+const HEALTH_CAP_DEV: f32 = 0.8;
 /// ── Trade GRAVITY ── how strongly a big / high-class hub PULLS trade from farther
 /// afield and is preferred by merchants. A hub's `hub_pull` ≥ 1; its EFFECTIVE distance
 /// to every other city = real distance ÷ pull, so a great entrepôt enters the partner
@@ -334,7 +340,7 @@ const HUB_PULL_MAX: f32 = 3.5;          // cap so one metropolis can't pull the 
 /// surplus so the TOTAL world population can actually grow (not just redistribute
 /// via migration); dearth turns it negative. Applied on top of the logistic
 /// approach-to-capacity, and only while below capacity, so wealth/pop stay bounded.
-const BIRTH_RATE: f32 = 0.00006;   // ~+2.2%/yr at full food security
+const BIRTH_RATE: f32 = 0.00009;   // ~+3.3%/yr at full food security (raised so a fed world grows)
 const DEATH_RATE_BASE: f32 = 0.00002; // ~-0.7%/yr baseline mortality
 // ── Provinces (Phase 2b · watershed demography) ─ all gated on a seeded province
 //    layer, so the dynamics test (which never seeds provinces) is untouched. ──
@@ -1309,6 +1315,15 @@ const NEIGHBOR_K: usize = 32;
 /// coast, overland — not on trans-oceanic lanes between continents. Generous enough
 /// to keep Mediterranean-/regional-scale sea trade while cutting the ocean crossings.
 const TRADE_MAX_DIST_FRAC: f32 = 0.24;
+/// #6 · NO DEAD CITY. The trade horizon + the cross-component gate above can strand a
+/// remote inland/lake town with only ONE reachable partner (or none), so it never has
+/// a price gradient to trade against — throughput/exports/imports sit at zero and its
+/// population freezes for the whole campaign (the "static province" bug). Every real
+/// hub is therefore guaranteed at least this many of its NEAREST partners regardless of
+/// the horizon, so neighbourhood trade always reaches it. Bounded to the closest hubs,
+/// so it restores LOCAL/regional trade for a stranded town without reopening the
+/// trans-oceanic lanes the horizon exists to cut.
+const MIN_GUARANTEED_PARTNERS: usize = 4;
 /// Global ceiling on satellite production sites (estates + colonies). Estates are
 /// real hubs in `self.hubs`, so an uncapped count quadratically slows every tick.
 const MAX_TOTAL_ESTATES: usize = 220;
@@ -4333,12 +4348,14 @@ pub const REALM_YEAR_FLOOR: u32 = 50;
 /// Years a house must hold `captor_house` CONTINUOUSLY before it may proclaim. Reset
 /// by `TickHub.captor_since` on any change of captor (`update_government` step 4), so
 /// a house bribed out and back in cannot chain two half-tenures into one.
-pub const REALM_CAPTOR_YEARS: u32 = 10;
+pub const REALM_CAPTOR_YEARS: u32 = 8;
 /// Tier ceiling on BOTH the house and its city at the moment of proclamation — the
 /// gate applies only here (`REALM_AND_GOVERNMENT_PLAN.md` §3.1), never afterward,
 /// which is what lets a realm keep a small capital indefinitely (the Karakorum rule,
-/// plan §1.3/§4.3).
-pub const REALM_PROCLAIM_TIER_MAX: u8 = 2;
+/// plan §1.3/§4.3). Widened 2 → 3 so a strong-but-not-top house in a good regional
+/// city (a tier-3 "major" seat) can also crown itself — the original tier-≤2-on-BOTH
+/// conjunction was a large part of why a 560-year world proclaimed zero realms.
+pub const REALM_PROCLAIM_TIER_MAX: u8 = 3;
 /// A treasury floor so a proclamation is not immediately followed by a manufactured
 /// bankruptcy — the new realm must be able to survive its first shock. Comparable in
 /// spirit to `WAR_MIN_TREASURY` (a hub's own war-affordability floor) but sized to a
@@ -4352,7 +4369,7 @@ pub const REALM_PROCLAIM_PRESTIGE_MIN: f32 = 0.4;
 /// boldness (axis 0) and expansiveness (axis 3) — the same two axes `decide_fleets`
 /// and `update_guilds_and_offices` already read for a comparable "dare to commit"
 /// decision.
-pub const REALM_PROCLAIM_CHANCE: f32 = 0.06;
+pub const REALM_PROCLAIM_CHANCE: f32 = 0.14;
 /// Starting legitimacy/cohesion for a freshly proclaimed realm — high but not
 /// perfect: the founding generation's own claim is the strongest a dynasty will ever
 /// have, and both gauges are designed to be spent down by real events (plan §5), not

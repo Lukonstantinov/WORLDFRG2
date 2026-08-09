@@ -497,17 +497,26 @@ export async function simGenerateProvinces(
  *  updated layer to reload in place. `minCells` overrides the adaptive default. */
 export async function simMergeSmallProvinces(
   minCells?: number,
+  selected?: number[],
 ): Promise<import("@types").SimProvincesResult> {
-  return invoke("sim_merge_small_provinces", { minCells });
+  return invoke("sim_merge_small_provinces", { minCells, selected });
 }
 
 /** Post-generation cleanup: split every NON-POLAR province larger than the threshold
- *  into compact sub-provinces (arctic/antarctic left untouched). Returns the full
- *  updated layer to reload in place. `maxCells` overrides the adaptive default. */
+ *  into compact sub-provinces (arctic/antarctic left untouched). The cut is an ORGANIC
+ *  cost-flood over the crest/river feature fields — pass `rivers` so it can follow the
+ *  channels. `selected` (province ids) limits the split to just those; omit for all.
+ *  Returns the full updated layer to reload in place. */
 export async function simSplitLargeProvinces(
   maxCells?: number,
+  rivers?: import("@types").RiverData[],
+  selected?: number[],
 ): Promise<import("@types").SimProvincesResult> {
-  return invoke("sim_split_large_provinces", { maxCells });
+  return invoke("sim_split_large_provinces", {
+    maxCells,
+    riversJson: rivers ? JSON.stringify(rivers) : undefined,
+    selected,
+  });
 }
 
 /** Read back the stored province list (reopening a world / panel refresh). */

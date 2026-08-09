@@ -75,10 +75,13 @@ function BuildingGlyph({ kind, s }: { kind: number; s: number }) {
 }
 
 /** The plates, bottom-up. `relief` is the ground everything else reads against. */
-export type PlateKey = "relief" | "water" | "landuse" | "tenure" | "holdings" | "borders" | "goods";
+export type PlateKey = "relief" | "water" | "landuse" | "tenure" | "holdings" | "borders" | "goods" | "deposits";
 export const PLATE_LABEL: Record<PlateKey, string> = {
   relief: "relief", water: "water", landuse: "land use",
-  tenure: "tenure", holdings: "holdings", borders: "borders", goods: "goods",
+  tenure: "tenure", holdings: "holdings", borders: "borders",
+  // Two DISTINCT plates: "goods" = the surface/belt produce (best-quality areas),
+  // "deposits" = the ore/mineral workings where they actually sit.
+  goods: "goods", deposits: "deposits",
 };
 export const DEFAULT_PLATES: PlateKey[] = ["relief", "water", "landuse", "holdings", "borders"];
 
@@ -451,36 +454,36 @@ export function ProvinceMiniMap({
             </g>
           );
         })}
-        {/* 6a · untapped belt goods (#9) — quality-weighted squares dithered across the
-            province (a belt good has no single cell), colour by good, fill by quality.
-            Drawn UNDER the ore dots so real workings still read on top. */}
+        {/* 6a · belt/surface goods (#9) — the GOODS plate. A belt good has no single
+            cell, so its BEST-QUALITY footprint is drawn as a filled AREA: every province
+            cell is tinted by the good that claims it (quality-weighted), giving each good
+            a contiguous patch rather than a scatter of loose squares. With a single good
+            selected the whole footprint reads as that one good's best-quality region. */}
         {on("goods") && beltGoods.length > 0 && (() => {
           const total = beltGoods.reduce((s, b) => s + Math.max(0.05, b.quality), 0);
-          // Bigger, sparser squares so each reads clearly (the belt/surface goods, as
-          // opposed to the smaller ore-working dots drawn on top).
-          const step = Math.max(2, Math.floor(cells.length / 26)); // ~26 squares
-          const sq = Math.max(1.4, stride * 1.7);
+          const sq = Math.max(1.2, stride * 1.08); // ≈ one cell → the tints abut into areas
           const out: React.ReactNode[] = [];
-          for (let ci = 0; ci < cells.length; ci += step) {
+          for (let ci = 0; ci < cells.length; ci++) {
             const [rx, ry] = cells[ci];
+            // A per-cell hash picks ONE good weighted by quality; neighbouring cells that
+            // pick the same good merge visually into one best-quality area.
             const t = cellHash(rx, ry, 7);
             let acc = 0;
             let pick = beltGoods[0];
             for (const b of beltGoods) { acc += Math.max(0.05, b.quality) / total; if (t <= acc) { pick = b; break; } }
             const col = GOOD_DEFS.find((g) => g.name === pick.name)?.color ?? "#56c8d8";
             out.push(
-              <rect key={`bg${ci}`} x={rx - ox - sq / 2} y={ry - oy - sq / 2} width={sq} height={sq} rx={0.5}
-                fill={col} opacity={0.3 + 0.6 * Math.max(0, Math.min(1, pick.quality))}
-                stroke="#0a1620" strokeWidth={0.4}>
+              <rect key={`bg${ci}`} x={rx - ox - sq / 2} y={ry - oy - sq / 2} width={sq} height={sq}
+                fill={col} opacity={0.22 + 0.68 * Math.max(0, Math.min(1, pick.quality))}>
                 <title>{pick.name} · quality {(pick.quality * 100).toFixed(0)}%</title>
               </rect>,
             );
           }
           return out;
         })()}
-        {/* 6b · deposits (#9) — ore workings where they actually sit, coloured by good
-            and sized by grade, so the richest workings read at a glance. */}
-        {on("goods") && deposits.map((d, i) => {
+        {/* 6b · deposits (#9) — the separate DEPOSITS plate: ore workings where they
+            actually sit, coloured by good and sized by grade, richest reading loudest. */}
+        {on("deposits") && deposits.map((d, i) => {
           const [lx, ly] = toLocal(d.x, d.y);
           const col = GOOD_DEFS.find((g) => g.name === d.good)?.color ?? "#56c8d8";
           const r = geo ? (0.9 + 1.6 * Math.min(1, Math.max(0, d.grade))) * Math.max(0.5, geo.stride * 0.5) : 2;
@@ -595,7 +598,7 @@ export function PlateToggles({ plates, setPlates, disabled = [] }: {
   /** Plates with no data behind them, shown greyed rather than hidden. */
   disabled?: PlateKey[];
 }) {
-  const keys: PlateKey[] = ["relief", "water", "landuse", "tenure", "holdings", "borders", "goods"];
+  const keys: PlateKey[] = ["relief", "water", "landuse", "tenure", "holdings", "borders", "goods", "deposits"];
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
       {keys.map((k) => {

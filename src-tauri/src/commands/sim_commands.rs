@@ -862,6 +862,10 @@ pub fn sim_generate_provinces(
 ) -> Result<SimProvincesResult, String> {
     db.clear_caches();
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    // Provinces are a FROZEN world layer (phase 7b). Regenerating them mid-campaign
+    // recompacts every province id and rewrites the raster the campaign's hub_province /
+    // prov_* / realm state was seeded from — so it is blocked once a campaign is running.
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?;
     let buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PROVINCES)?;
     let w = buf.width; let h = buf.height;
     if w == 0 || h == 0 { return Err("world grid not initialised".into()); }
@@ -949,10 +953,12 @@ pub fn get_province_layer(db: State<'_, WorldDb>) -> Result<SimProvincesResult, 
 #[tauri::command]
 pub fn sim_merge_small_provinces(
     min_cells: Option<u32>,
+    selected: Option<Vec<u32>>,
     db: State<'_, WorldDb>,
 ) -> Result<SimProvincesResult, String> {
     db.clear_caches();
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // frozen once a campaign starts (see sim_generate_provinces)
     let provinces: Vec<crate::sim::provinces::Province> =
         metadata::get_meta(&conn, "provinces").map_err(|e| e.to_string())?
             .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
@@ -991,8 +997,10 @@ pub fn sim_merge_small_provinces(
         ((median as f32 * 0.20) as u32).max(30)
     });
 
+    let only: Option<std::collections::HashSet<u32>> =
+        selected.filter(|v| !v.is_empty()).map(|v| v.into_iter().collect());
     let (new_provinces, new_pid) = crate::sim::provinces::merge_small_provinces_wh(
-        &province_id, &provinces, min_cells, w, h);
+        &province_id, &provinces, min_cells, w, h, only.as_ref());
 
     // Persist the merged partition (list + downsampled raster + full-res RLE), exactly
     // as `sim_generate_provinces` does, so a reload restores the cleaned layer.
@@ -1031,16 +1039,28 @@ pub fn sim_merge_small_provinces(
 #[tauri::command]
 pub fn sim_split_large_provinces(
     max_cells: Option<u32>,
+    rivers_json: Option<String>,
+    selected: Option<Vec<u32>>,
     db: State<'_, WorldDb>,
 ) -> Result<SimProvincesResult, String> {
     db.clear_caches();
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // frozen once a campaign starts (see sim_generate_provinces)
     let provinces: Vec<crate::sim::provinces::Province> =
         metadata::get_meta(&conn, "provinces").map_err(|e| e.to_string())?
             .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     if provinces.is_empty() {
         return Err("No provinces to split — generate the province layer first.".into());
     }
+    // The organic split floods over the crest/river feature fields, so it needs the
+    // world buffer + rivers/lakes (rivers passed from the frontend overlay state; lakes
+    // recomputed cheaply, exactly as `sim_generate_provinces` does).
+    let buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PROVINCES)?;
+    let river_data: Vec<rivers::River> =
+        rivers_json.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    let hydro = rivers::compute_hydrology(&buf);
+    let lake_max = (buf.total() / 2000).max(20);
+    let lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
     let (w, h, mut rle): (u32, u32, Vec<u32>) =
         metadata::get_meta(&conn, "province_raster_rle").map_err(|e| e.to_string())?
             .and_then(|s| serde_json::from_str(&s).ok())
@@ -1071,8 +1091,10 @@ pub fn sim_split_large_provinces(
         ((median as f32 * 2.5) as u32).max(median + 1)
     });
 
+    let only: Option<std::collections::HashSet<u32>> =
+        selected.filter(|v| !v.is_empty()).map(|v| v.into_iter().collect());
     let (new_provinces, new_pid) = crate::sim::provinces::split_large_provinces_wh(
-        &province_id, &provinces, max_cells, w, h);
+        &buf, &river_data, &lakes, &province_id, &provinces, max_cells, only.as_ref());
 
     metadata::set_meta(&conn, "provinces",
         &serde_json::to_string(&new_provinces).map_err(|e| e.to_string())?)

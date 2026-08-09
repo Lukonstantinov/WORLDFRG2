@@ -56,6 +56,7 @@ export function MapCanvas() {
   const provinces = useWorldStore((s) => s.provinces);
   const provinceRaster = useWorldStore((s) => s.provinceRaster);
   const selectedProvince = useUIStore((s) => s.selectedProvince);
+  const markedProvinces = useUIStore((s) => s.markedProvinces);
   const provinceOpacity = useUIStore((s) => s.provinceOpacity);
   const provinceFillMode = useUIStore((s) => s.provinceFillMode);
   const provinceSingleColor = useUIStore((s) => s.provinceSingleColor);
@@ -791,6 +792,14 @@ export function MapCanvas() {
     om.setSelectedProvince(selectedProvince);
     requestRender();
   }, [selectedProvince, provinceRaster, requestRender]);
+
+  // Provinces marked for a batch merge/split (shift-click) — a distinct outline set.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setMarkedProvinces(markedProvinces);
+    requestRender();
+  }, [markedProvinces, provinceRaster, requestRender]);
 
   // Province fill opacity (fill only — borders/names/selection stay full strength).
   useEffect(() => {
@@ -1598,7 +1607,13 @@ export function MapCanvas() {
       if (rect && overlayVisibilityRef.current.provinces) {
         const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
         const pid = overlayManagerRef.current?.provinceAt(wx, wy) ?? null;
-        if (pid !== null) { useUIStore.getState().setSelectedProvince(pid); return; }
+        if (pid !== null) {
+          // Shift-click MARKS a province for the batch merge/split "affect only these"
+          // set; a plain click selects it (and opens its dossier).
+          if (e.shiftKey) useUIStore.getState().toggleMarkedProvince(pid);
+          else useUIStore.getState().setSelectedProvince(pid);
+          return;
+        }
       }
     }
 

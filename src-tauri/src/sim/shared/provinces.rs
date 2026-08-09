@@ -199,6 +199,7 @@ pub fn merge_small_provinces_wh(
     min_cells: u32,
     w: u32,
     h: u32,
+    only: Option<&std::collections::HashSet<u32>>,
 ) -> (Vec<Province>, Vec<u32>) {
     let n = provinces.len();
     let total = (w as usize) * (h as usize);
@@ -269,8 +270,15 @@ pub fn merge_small_provinces_wh(
         let mut c = x; while u[c as usize] != r { let nx = u[c as usize]; u[c as usize] = r; c = nx; }
         r
     }
+    // When a selection is supplied, only the MARKED provinces are eligible to be folded
+    // away — the "affect only these" mode — and a marked province folds into its largest
+    // neighbour regardless of size (the user asked for it). `None` = the whole map, where
+    // the size gate (`is_small`) still decides. Island provinces are always spared.
+    let has_sel = only.is_some();
+    let marked = |p: u32| only.map_or(true, |s| s.contains(&provinces[p as usize].id));
     let mut small_ids: Vec<u32> = (0..n as u32)
-        .filter(|&p| is_small(p) && !own_island(p) && !neighbours[p as usize].is_empty())
+        .filter(|&p| marked(p) && (has_sel || is_small(p))
+            && !own_island(p) && !neighbours[p as usize].is_empty())
         .collect();
     small_ids.sort_unstable();
     for &p in &small_ids {
@@ -423,26 +431,66 @@ fn rebuild_neighbors_from_raster(out: &mut [Province], pid: &[u32], w: u32, h: u
 /// POST-GENERATION "split large" (the mirror of `merge_small_provinces_wh`): every
 /// province LARGER than `max_cells` that is NOT polar (Köppen ET/EF — the arctic and
 /// antarctic ice/tundra are left uniform and untouched, per the user's rule) is cut
-/// into `k` sub-provinces. `k` seeds are chosen by farthest-point sampling within the
-/// province and every cell joins its nearest seed (cylindrical), so a huge desert
-/// breaks into a handful of compact blocks. Children INHERIT the parent's climate,
-/// culture, goods and belt (a split desert is still desert) and get recomputed
-/// geometry (cells, area, population split by share, a centroid label anchor,
-/// neighbours). Deterministic. Returns `(provinces, province_id)`, recompacted.
+/// into `k` sub-provinces.
+///
+/// Unlike a plain nearest-seed Voronoi (which draws STRAIGHT bisector lines between
+/// the seeds), the cut is an **organic cost-flood** over the SAME feature fields the
+/// generator floods over — crest prominence (`compute_ridge`), navigable/major river
+/// crossings that DIVIDE, lesser rivers that UNITE, and a per-edge organic wobble — so
+/// a split border hugs a ridgeline or a channel and wanders like a natural frontier
+/// instead of a clean geometric line. `k` seeds are farthest-point sampled inside the
+/// province; a bounded Dijkstra confined to the province's own cells then assigns every
+/// cell to its cheapest seed.
+///
+/// Children INHERIT the parent's climate, culture, goods and belt (a split desert is
+/// still desert) and get recomputed geometry (cells, area, population split by share, a
+/// centroid label anchor, neighbours). The fragment that keeps the parent's SEAT keeps
+/// the parent's NAME and towns; the rest become seat-less frontier sub-provinces with
+/// their own DISTINCT names (`fragment_name`, e.g. "Dagon-ere" / "Dagon Vale"), never a
+/// repeated "Dagon II". When `only` is supplied, only the MARKED provinces are split
+/// (the "affect only these" mode); `None` = the whole map. Deterministic. Returns
+/// `(provinces, province_id)`, recompacted.
 pub fn split_large_provinces_wh(
+    buf: &WorldBuffer,
+    rivers: &[River],
+    lakes: &[Lake],
     province_id: &[u32],
     provinces: &[Province],
     max_cells: u32,
-    w: u32,
-    h: u32,
+    only: Option<&std::collections::HashSet<u32>>,
 ) -> (Vec<Province>, Vec<u32>) {
     use crate::sim::koppen as kp;
+    let w = buf.width;
+    let h = buf.height;
     let n = provinces.len();
     let total = (w as usize) * (h as usize);
     if n == 0 || province_id.len() != total || total == 0 {
         return (provinces.to_vec(), province_id.to_vec());
     }
     let wi = w as i32;
+    let hi = h as i32;
+
+    // ── Feature cost fields — the SAME dividers the generator uses, so a split border
+    //    follows crests and channels rather than a straight Voronoi bisector. ──
+    let ridge = compute_ridge(buf);
+    let mut river_divide = vec![0f32; total];
+    let mut river_unite = vec![false; total];
+    for r in rivers {
+        let divide = if r.navigable { RIVER_NAVIGABLE } else if r.major { RIVER_MAJOR } else { 0.0 };
+        for &(rx, ry) in &r.points {
+            let i = buf.idx(rx.min(w - 1), ry.min(h - 1));
+            if divide > 0.0 {
+                if divide > river_divide[i] { river_divide[i] = divide; }
+            } else {
+                river_unite[i] = true;
+            }
+        }
+    }
+    for i in 0..total { if river_divide[i] > 0.0 { river_unite[i] = false; } }
+    // Lakes are already NON-province (sea/lake) cells, so the intra-province flood
+    // never enters them; the argument is kept for parity with the generator.
+    let _ = lakes;
+
     // Cells per province.
     let mut cells_of: Vec<Vec<u32>> = vec![Vec::new(); n];
     for c in 0..total {
@@ -462,6 +510,10 @@ pub fn split_large_provinces_wh(
         (dx as i64) * (dx as i64) + (dy as i64) * (dy as i64)
     };
 
+    // Scratch reused across provinces (reset per province, only its own cells touched).
+    let mut dist = vec![f64::INFINITY; total];
+    let mut local = vec![u32::MAX; total];
+
     let mut new_pid = vec![NO_PROVINCE; total];
     let mut out: Vec<Province> = Vec::new();
     let mut next_id = 0u32;
@@ -469,7 +521,12 @@ pub fn split_large_provinces_wh(
     for p in 0..n {
         let parent = &provinces[p];
         let cells = std::mem::take(&mut cells_of[p]);
-        let do_split = cells.len() as u32 > max_cells && !is_polar(parent.koppen) && cells.len() >= 2;
+        let marked = only.map_or(true, |s| s.contains(&parent.id));
+        // A MARKED province (explicit selection) is split regardless of size — the user
+        // asked for THIS one. The "affect all" path (no selection) still only splits the
+        // clearly-oversized. Polar is spared and a 1-cell province can't split either way.
+        let big_enough = only.is_some() || cells.len() as u32 > max_cells;
+        let do_split = marked && big_enough && !is_polar(parent.koppen) && cells.len() >= 2;
         if !do_split {
             let id = next_id; next_id += 1;
             let mut pr = parent.clone();
@@ -478,6 +535,7 @@ pub fn split_large_provinces_wh(
             out.push(pr);
             continue;
         }
+        let pu = p as u32;
         let k = ((cells.len() as f32 / target as f32).ceil() as usize).clamp(2, 6);
         // Farthest-point seeds (deterministic): start at the lowest cell index, then
         // repeatedly take the cell farthest from all chosen seeds.
@@ -492,19 +550,61 @@ pub fn split_large_provinces_wh(
             if best_d <= 0 { break; }
             seeds.push(best);
         }
-        // Assign each cell to its nearest seed.
+        // ── Organic cost-flood (Dijkstra), confined to the parent's own cells. Each
+        //    step pays crest prominence + a trunk-river crossing, is discounted along a
+        //    lesser river, and carries a small per-edge wobble; two floods therefore
+        //    meet on the highest ground / mid-channel between their seeds. ──
+        let mut heap: BinaryHeap<HeapItem> = BinaryHeap::new();
+        for (si, &sc) in seeds.iter().enumerate() {
+            dist[sc as usize] = 0.0;
+            local[sc as usize] = si as u32;
+            heap.push(HeapItem { cost: 0.0, cell: sc, owner: si as u32 });
+        }
+        while let Some(HeapItem { cost, cell, owner: ow }) = heap.pop() {
+            let ci = cell as usize;
+            if cost > dist[ci] { continue; }
+            if local[ci] != ow { continue; }
+            let cx = (cell % w) as i32;
+            let cy = (cell / w) as i32;
+            for dy in -1i32..=1 {
+                let ny = cy + dy;
+                if ny < 0 || ny >= hi { continue; }
+                for dx in -1i32..=1 {
+                    if dx == 0 && dy == 0 { continue; }
+                    let ni = buf.widx(cx + dx, ny);
+                    if province_id[ni] != pu { continue; } // stay inside the parent
+                    let diag = dx != 0 && dy != 0;
+                    let base = if diag { std::f64::consts::SQRT_2 } else { 1.0 };
+                    let mult = if river_unite[ni] { RIVER_UNITE } else { 1.0 };
+                    let mut step = base * mult;
+                    step += ridge_cost(ridge[ni]);
+                    step += river_divide[ni] as f64;
+                    let noise = (hash2(cell as u64, ni as u64) & 0xFFFF) as f64 / 65535.0;
+                    step += 0.35 * noise;
+                    let nd = cost + step;
+                    if nd < dist[ni] {
+                        dist[ni] = nd;
+                        local[ni] = ow;
+                        heap.push(HeapItem { cost: nd, cell: ni as u32, owner: ow });
+                    }
+                }
+            }
+        }
+        // Gather children by their winning seed.
         let mut child: Vec<Vec<u32>> = vec![Vec::new(); seeds.len()];
         for &c in &cells {
-            let mut bi = 0usize;
-            let mut bd = i64::MAX;
-            for (si, &s) in seeds.iter().enumerate() {
-                let d = cyl_d2(c, s);
-                if d < bd { bd = d; bi = si; }
-            }
-            child[bi].push(c);
+            let o = local[c as usize];
+            let oi = if (o as usize) < seeds.len() { o as usize } else { 0 };
+            child[oi].push(c);
         }
+        // Reset scratch for this province's cells before the next province.
+        for &c in &cells { dist[c as usize] = f64::INFINITY; local[c as usize] = u32::MAX; }
+
         let parent_cells = cells.len().max(1) as f32;
-        for (sub, ccells) in child.iter().enumerate() {
+        let seat_cell = parent.seat_y * w + parent.seat_x;
+        let name_salt = hash2(parent.seat_x as u64, (parent.seat_y as u64) ^ (parent.cells as u64));
+        let mut frag = 0usize;
+        for ccells in child.iter() {
             if ccells.is_empty() { continue; }
             let id = next_id; next_id += 1;
             for &c in ccells { new_pid[c as usize] = id; }
@@ -528,16 +628,18 @@ pub fn split_large_provinces_wh(
             pr.label_x = anchor % w;
             pr.label_y = anchor / w;
             pr.label_r = (ccells.len() as f32 / std::f32::consts::PI).sqrt() * 0.6;
-            // The parent's seat stays with whichever child contains it; the rest become
-            // seat-less frontier sub-provinces (their seat falls on their own anchor).
-            let seat_cell = parent.seat_y * w + parent.seat_x;
-            if !ccells.contains(&seat_cell) {
+            // The fragment holding the parent's SEAT keeps the parent's identity (name +
+            // towns); the rest become seat-less frontier sub-provinces with a DISTINCT
+            // name grafted onto the parent's ("Dagon-ere", "Dagon Vale", …).
+            if ccells.contains(&seat_cell) {
+                // keeps parent.name, parent.seat_*, parent.settlements
+            } else {
                 pr.seat_x = pr.label_x;
                 pr.seat_y = pr.label_y;
                 pr.settlements = Vec::new();
+                pr.name = fragment_name(&parent.name, frag, name_salt);
+                frag += 1;
             }
-            // A distinct name per fragment so the map doesn't repeat one label k times.
-            pr.name = format!("{} {}", parent.name, roman(sub + 1));
             out.push(pr);
         }
     }
@@ -546,9 +648,32 @@ pub fn split_large_provinces_wh(
     (out, new_pid)
 }
 
-/// Tiny Roman numeral (1..=6) for naming province fragments.
-fn roman(n: usize) -> &'static str {
-    ["I", "II", "III", "IV", "V", "VI"].get(n.saturating_sub(1)).copied().unwrap_or("VII")
+/// A DISTINCT name for a split-off frontier fragment — an ending or a region-word
+/// grafted onto the parent's own name, so a divided "Dagon" yields "Dagon-ere",
+/// "Dagon-asias", "Dagon Vale", "Dagon Reach" rather than a repeated "Dagon II". The
+/// parent name + a per-province salt pick ONE style (hyphen-suffix vs. region-word) and
+/// a starting offset; the fragment index then walks that word list, so the several
+/// fragments of one parent never collide. Deterministic.
+fn fragment_name(parent: &str, frag: usize, salt: u64) -> String {
+    const SUFFIX: [&str; 16] = [
+        "ere", "asias", "agas", "eth", "ora", "une", "ael", "yr",
+        "ith", "ane", "ede", "ix", "oth", "arn", "esk", "ily",
+    ];
+    const REGION: [&str; 16] = [
+        "Vale", "March", "Reach", "Weald", "Hold", "Fen", "Wold", "Downs",
+        "Moor", "Heath", "Bight", "Marches", "Gard", "Mark", "Holt", "Combe",
+    ];
+    // Hash the parent's own name (FNV-1a) so the choice is stable per province.
+    let name_hash = parent.bytes().fold(0xcbf29ce484222325u64, |a, b| {
+        (a ^ b as u64).wrapping_mul(0x100000001b3)
+    });
+    let h = hash2(salt ^ name_hash, 0x9E37_79B9_7F4A_7C15);
+    let base = (h >> 3) as usize;
+    if h & 1 == 0 {
+        format!("{}-{}", parent, SUFFIX[(base + frag) % SUFFIX.len()])
+    } else {
+        format!("{} {}", parent, REGION[(base + frag) % REGION.len()])
+    }
 }
 
 // ── Partition tuning ──────────────────────────────────────────────────────────
@@ -2350,7 +2475,7 @@ mod tests {
         let min_cells = 40u32;
         let land_before = ids.iter().filter(|&&p| p != NO_PROVINCE).count();
 
-        let (merged, new_ids) = merge_small_provinces_wh(&ids, &provs, min_cells, w, h);
+        let (merged, new_ids) = merge_small_provinces_wh(&ids, &provs, min_cells, w, h, None);
 
         // Land coverage unchanged — the merge only relabels, never re-carves land/sea.
         let land_after = new_ids.iter().filter(|&&p| p != NO_PROVINCE).count();
@@ -2384,7 +2509,7 @@ mod tests {
         assert!(isle.neighbors.is_empty(), "an island province has no land neighbour");
 
         // Deterministic.
-        let (merged2, new_ids2) = merge_small_provinces_wh(&ids, &provs, min_cells, w, h);
+        let (merged2, new_ids2) = merge_small_provinces_wh(&ids, &provs, min_cells, w, h, None);
         assert_eq!(merged.len(), merged2.len());
         assert_eq!(new_ids, new_ids2);
     }
@@ -2410,13 +2535,12 @@ mod tests {
         // Coarse granularity → a few big provinces, so both a desert and a polar one
         // clear the split threshold.
         let (provs, ids) = generate_provinces(&buf, &[], &[], &towns, 0.0);
-        let w = buf.width; let h = buf.height;
         let land_before = ids.iter().filter(|&&p| p != NO_PROVINCE).count();
         let n_before = provs.len();
         let polar_before = provs.iter().filter(|p| p.koppen == kp::EF).count();
         let max_cells = 150u32;
 
-        let (split, new_ids) = split_large_provinces_wh(&ids, &provs, max_cells, w, h);
+        let (split, new_ids) = split_large_provinces_wh(&buf, &[], &[], &ids, &provs, max_cells, None);
 
         assert_eq!(land_before, new_ids.iter().filter(|&&p| p != NO_PROVINCE).count(),
             "split must not change which cells are land");
@@ -2432,7 +2556,7 @@ mod tests {
         }
         for pr in &split { assert_eq!(pr.cells, cnt[pr.id as usize]); }
         // Deterministic.
-        let (split2, new_ids2) = split_large_provinces_wh(&ids, &provs, max_cells, w, h);
+        let (split2, new_ids2) = split_large_provinces_wh(&buf, &[], &[], &ids, &provs, max_cells, None);
         assert_eq!(split.len(), split2.len());
         assert_eq!(new_ids, new_ids2);
     }

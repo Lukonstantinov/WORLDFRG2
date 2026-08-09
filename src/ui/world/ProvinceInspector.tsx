@@ -245,26 +245,28 @@ export function ProvinceInspector() {
             disabled={[
               ...(land ? [] : (["landuse", "tenure"] as PlateKey[])),
               ...((p.river_cells ?? 0) > 0 ? [] : (["water"] as PlateKey[])),
-              ...(((potential?.deposits.length ?? 0) > 0 || beltGoods.length > 0) ? [] : (["goods"] as PlateKey[])),
+              ...(beltGoods.length > 0 ? [] : (["goods"] as PlateKey[])),
+              ...((potential?.deposits.length ?? 0) > 0 ? [] : (["deposits"] as PlateKey[])),
             ]} />
         </div>
 
-        {/* #9 · goods legend + filter — the colour code of each good on the map, click
-            to show/hide it. Only when the "goods" plate is on and there are belt goods. */}
+        {/* #9 · goods legend + filter — the colour code of each surface good, click ONE
+            to ISOLATE it (see only that good's best-quality area); click it again to show
+            all. Only when the "goods" plate is on and there are belt goods. */}
         {plates.includes("goods") && beltGoods.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5, alignItems: "center" }}>
             <span style={{ fontSize: 10, opacity: 0.6, marginRight: 2 }}>Goods:</span>
             {beltGoods.map((g) => {
+              const isolated = !!goodFilter && goodFilter.size === 1 && goodFilter.has(g.name);
               const shown = !goodFilter || goodFilter.has(g.name);
               const col = GOOD_DEFS.find((d) => d.name === g.name)?.color ?? "#56c8d8";
               return (
                 <button key={g.name} onClick={() => setGoodFilter((prev) => {
-                  const all = new Set(beltGoods.map((b) => b.name));
-                  const next = new Set(prev ?? all);
-                  if (next.has(g.name)) next.delete(g.name); else next.add(g.name);
-                  return next.size === all.size ? null : next;
+                  // Click = isolate this good; click the already-isolated good = show all.
+                  if (prev && prev.size === 1 && prev.has(g.name)) return null;
+                  return new Set([g.name]);
                 })}
-                  title={`${goodLabel(g.good)} · quality ${Math.round(g.quality * 100)}% — click to ${shown ? "hide" : "show"}`}
+                  title={`${goodLabel(g.good)} · quality ${Math.round(g.quality * 100)}% — click to ${isolated ? "show all" : "show only this"}`}
                   style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, cursor: "pointer",
                     padding: "1px 5px", borderRadius: 10, border: "1px solid #24384a",
                     background: shown ? "#12202c" : "#0b141c", color: shown ? "#cfe0f4" : "#4a6076", opacity: shown ? 1 : 0.7 }}>

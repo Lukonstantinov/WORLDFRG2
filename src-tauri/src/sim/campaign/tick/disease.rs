@@ -486,8 +486,13 @@ impl CampaignSim {
             let world_years = self.tick as f32 / TICKS_PER_YEAR as f32;
             let world_age_dev = WORLD_AGE_DEV_CAP
                 * (1.0 - (-world_years / WORLD_AGE_DEV_REF_YEARS).exp());
+            // Public health raises the ceiling — a city that fights disease (clean water,
+            // hospitals) survives at a higher population instead of the urban graveyard
+            // pinning it near ~20-25k. This is the "fighting disease grows the world" lever.
+            let public_health = self.hubs[h].public_health.clamp(0.0, 1.0);
             let cap_mult = (0.35 + 2.0 * food_sec)
-                * (0.60 + 5.0 * prosperity * prosperity + trade_dev + primacy_dev + colony_cap_dev + world_age_dev);
+                * (0.60 + 5.0 * prosperity * prosperity + trade_dev + primacy_dev
+                    + colony_cap_dev + world_age_dev + HEALTH_CAP_DEV * public_health);
             let capacity = (self.hubs[h].founding_pop * cap_mult)
                 .max(self.hubs[h].founding_pop * 0.15);
             // Logistic step: approach capacity from below, decline when above it.
