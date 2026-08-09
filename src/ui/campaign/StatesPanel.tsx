@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useWorldStore } from "@state/worldStore";
-import { computeStates, campaignProvinceLandAll } from "@bridge";
-import type { StateRegion, ProvinceLand } from "@types";
+import { computeStates, campaignProvinceLandAll, campaignGetRealmFamily } from "@bridge";
+import type { StateRegion, ProvinceLand, PersonBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 import { T, FZ, SPACE } from "@ui/campaign/chronicleTheme";
 import { Panel, PanelHeader, PanelBody, Card, StatGrid, Stat, Badge, Chip, EmptyNote, FootNote } from "@ui/kit";
@@ -45,6 +45,44 @@ function GaugeBar({ label, v, tone }: { label: string; v: number; tone: "good" |
   );
 }
 
+/** R2 · a flat, read-only list of a realm's family — not yet the SVG tree
+ *  REALM_AND_GOVERNMENT_PLAN.md §4.2 sketches (laying out generations/marriages
+ *  legibly is its own design problem, real follow-up work), but enough to actually
+ *  see who rules, who's the heir apparent, and who was just born. `undefined` means
+ *  "not fetched yet"; `[]` means fetched and genuinely empty. */
+function GenealogyList({ family }: { family: PersonBrief[] | undefined }) {
+  if (family === undefined) {
+    return <div style={{ color: T.inkFaint, fontSize: FZ.tiny, fontStyle: "italic" }}>loading…</div>;
+  }
+  if (family.length === 0) {
+    return <div style={{ color: T.inkFaint, fontSize: FZ.tiny, fontStyle: "italic" }}>no record yet</div>;
+  }
+  const byIdx = new Map(family.map((p) => [p.idx, p]));
+  return (
+    <div style={{ marginBottom: 4 }}>
+      {family.map((p) => {
+        const relation = p.father >= 0 ? `child of ${byIdx.get(p.father)?.name ?? "?"}`
+          : p.spouse >= 0 && !p.is_ruler ? `spouse of ${byIdx.get(p.spouse)?.name ?? "?"}`
+          : "founder";
+        return (
+          <div key={p.idx} style={{ display: "flex", alignItems: "baseline", gap: 6, padding: "1px 0" }}>
+            <span style={{ color: T.inkFaint, fontSize: FZ.micro, width: 12 }}>{p.female ? "♀" : "♂"}</span>
+            <span style={{ flex: 1, minWidth: 0, color: p.alive ? T.inkMid : T.inkFaint, fontSize: FZ.small,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {p.name}{p.epithet && ` "${p.epithet}"`}
+            </span>
+            {p.is_ruler && <Badge tone="gold">ruler</Badge>}
+            {p.is_regent && <Badge tone="warn">regent</Badge>}
+            <span style={{ color: T.inkFaint, fontSize: FZ.micro, width: 78, textAlign: "right" }}>
+              {p.alive ? `age ${p.age}` : `d. age ${p.age}`} · {relation}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function StatesPanel() {
   const open = useUIStore((s) => s.showStates);
   const close = () => useUIStore.getState().setShowStates(false);
@@ -59,12 +97,24 @@ export function StatesPanel() {
   const [land, setLand] = useState<ProvinceLand[]>([]);
   const [sort, setSort] = useState<Sort>("territory");
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [families, setFamilies] = useState<Record<number, PersonBrief[]>>({});
 
   useEffect(() => {
     if (!open || !active) return;
     computeStates().then(setStates).catch(() => setStates([]));
     campaignProvinceLandAll().then(setLand).catch(() => setLand([]));
+    setFamilies({}); // the year turned — every realm's family may have changed
   }, [open, active, Math.floor(tick / 365)]);
+
+  // Fetch a realm's family lazily, the first time its card is opened (or on a new
+  // year, since the cache above was just cleared).
+  useEffect(() => {
+    for (const st of states) {
+      if (!expanded.has(st.capital_hub) || families[st.id] !== undefined) continue;
+      campaignGetRealmFamily(st.id).then((f) => setFamilies((prev) => ({ ...prev, [st.id]: f })))
+        .catch(() => setFamilies((prev) => ({ ...prev, [st.id]: [] })));
+    }
+  }, [expanded, states, families]);
 
   const provinceName = useMemo(() => {
     const m = new Map<number, string>();
@@ -163,6 +213,8 @@ export function StatesPanel() {
                       </StatGrid>
                       <GaugeBar label="Legitimacy" v={st.legitimacy} tone={st.legitimacy > 0.5 ? "good" : st.legitimacy > 0.25 ? "warn" : "bad"} />
                       <GaugeBar label="Cohesion" v={st.cohesion} tone={st.cohesion > 0.5 ? "good" : st.cohesion > 0.25 ? "warn" : "bad"} />
+                      <div style={{ color: T.inkDim, fontSize: FZ.tiny, margin: "6px 0 2px" }}>Dynasty</div>
+                      <GenealogyList family={families[st.id]} />
                       <div style={{ color: T.inkDim, fontSize: FZ.tiny, margin: "6px 0 2px" }}>Held provinces</div>
                       {held.length === 0 && <div style={{ color: T.inkFaint, fontSize: FZ.tiny, fontStyle: "italic" }}>none reporting yet</div>}
                       {held.map((p) => (

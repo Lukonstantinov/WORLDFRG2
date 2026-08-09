@@ -1740,26 +1740,33 @@ CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next thre
                                     own caveat list (§5) — incl. that it REVERSES
                                     PROVINCE_SYSTEM_PLAN's "enclaves survive" decision —
                                     and its own "deliberately not built" list (§6)
-REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ APPROVED, NOT YET BUILT. THE FIRST COUNTRIES:
-                                    a merchant house takes a city (`captor_house`,
-                                    already built), PROCLAIMS sovereignty after a
-                                    hard year-50 floor, and is elevated — its wealth
-                                    and trade assets become the crown's, the house
-                                    leaves the merchant world (`crowned`, never
-                                    `defunct` — §5.1) and becomes a dynasty with a
-                                    real GENEALOGY (persons, births, child mortality,
-                                    regency, succession by the culture's LineRule).
-                                    Realms hold provinces (`prov_realm`, a THIRD
-                                    authority layer above rule 24), tax them by
-                                    several historical kinds whose binding constraint
-                                    is COLLECTION not rates, mint coin, annex/
-                                    vassalize/enthrone by war, and FRAGMENT only
-                                    along their own family — which makes the shipped
+REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R2 BUILT, R3-R5 NOT YET. THE FIRST
+                                    COUNTRIES: a merchant house takes a city
+                                    (`captor_house`), PROCLAIMS sovereignty after a
+                                    hard year-50 floor + a decade holding it
+                                    (`maybe_proclaim_realms`), and is ELEVATED —
+                                    its wealth and trade assets become the crown's,
+                                    the house leaves the merchant world (`crowned`,
+                                    never `defunct` — §5.1) and becomes a dynasty
+                                    with a real GENEALOGY (`Realm.family` — persons,
+                                    births, child mortality, aging, succession by
+                                    the culture's LineRule, regency for a minor
+                                    heir; `tick/realms.rs`). Realms hold provinces
+                                    (`prov_realm`, a THIRD authority layer above
+                                    rule 24/25), and `compute_states` now reads
+                                    this real persisted state rather than deriving
+                                    one — a realm outlives its capital's tier later
+                                    dropping (the Karakorum rule). Surfaced in the
+                                    frontend Realms panel (relabelled from States).
+                                    STILL UNBUILT: taxes, realm coin, annex/
+                                    vassalize/enthrone by war, and FRAGMENTATION
+                                    along the family — which will make the shipped
                                     `InheritanceRule` decide whether a people can
-                                    hold an empire at all. REVERSES
+                                    hold an empire at all, once R5 lands. REVERSES
                                     CITY_PROVINCE_WAR_PLAN §6's deferral of a realm
                                     entity above cities. Carries its own caveats (§5)
-                                    and "deliberately not built" list (§6)
+                                    and "deliberately not built" list (§6); §7's
+                                    order table records exactly what each phase shipped
 IN_APP_VERIFICATION_CHECKLIST.md  ← Manual in-app verification checklist
 PORTING_REFERENCE.md              ← Porting reference
 ```
@@ -1909,3 +1916,18 @@ Three rules:
     province is released only when its OWN holder house dissolves; nothing else
     (a war, a rival) currently takes it away — that gap is deliberate and recorded,
     not an oversight to silently work around.
+25. **Sovereignty is never assumed to exist.** `prov_realm == -1` (free land) is the
+    default every province starts and most still end at — a genuine third authority
+    layer above rule 24 (`prov_holder` seat · `prov_holder_house` dues ·
+    `prov_realm` sovereignty), all three independent and all three legal at once
+    (`REALM_AND_GOVERNMENT_PLAN.md` R1, §5.9). Also: a house that proclaims a realm
+    is ELEVATED (`House.crowned`), never `defunct` — it is the dynasty, not dead —
+    and every pass that treats a house as a MERCHANT (tiers, goals, solvency,
+    wealth sinks, succession via `head_lifespan`, crisis) must filter on
+    `House::is_merchant()` rather than `!defunct` alone, or a crowned house either
+    gets manufactured into bankruptcy or has its identity overwritten by a
+    succession event that isn't the realm's own. Two guard fixes in R2
+    (`update_solvency`/`apply_wealth_sinks` in R1b, `succeed_house`/`update_house_
+    crises` in R2) were each the SAME mistake found through a different call site —
+    audit every house-iteration loop a new realm-facing pass touches, not just the
+    one it's adding.

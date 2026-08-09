@@ -4,10 +4,12 @@
 realm it founds holds provinces, taxes them, mints its own coin, conquers its
 neighbours, and eventually breaks apart along its own family tree.*
 
-**Status: approved, nothing built.** Every decision in §1 was made explicitly by the
-maintainer over the design conversation that produced this document; nothing here is a
-suggestion looking for approval. §7 lists what is deliberately NOT in the first build,
-and that list is as binding as the rest.
+**Status: R1 and R2 built** (entity, proclamation, house→crown transfer,
+`compute_states` reading real realms, genealogy/succession/regency — see §7's order
+table for exactly what shipped in each). **R3-R5 not yet built.** Every decision in §1
+was made explicitly by the maintainer over the design conversation that produced this
+document; nothing here is a suggestion looking for approval. §7 lists what is
+deliberately NOT in the first build, and that list is as binding as the rest.
 
 This document extends `CITY_PROVINCE_WAR_PLAN.md`, and **reverses one of its
 decisions**: §6 of that plan deferred "territorial empires — a `Realm` entity above
@@ -478,17 +480,33 @@ Stated rather than silently dropped:
 ## 7. Order
 
 ```
-R1   Realm entity · prov_realm · proclamation · house→crown transfer
-     compute_states reads realms · colour layers · Realms panel (read-only)
-     rule 25 + CLAUDE.md §5/§9 updated in the same commit
-R2   Genealogy · births · child mortality · aging · succession · regency
-     LineRule honoured (rule 23)
+R1 ✅ Realm entity · prov_realm · proclamation · house→crown transfer
+     compute_states reads realms · colour layers (StatesPanel relabelled → Realms)
+     rule 25 added (CLAUDE.md §10). Landed as R1a (schema, dormant) then R1b
+     (the proclamation trigger + transfer) then the compute_states rewire.
+R2 ✅ Genealogy · births · child mortality · aging · succession · regency
+     LineRule honoured (rule 23) · a flat read-only family list in the Realms
+     panel (campaign_get_realm_family) — NOT yet the SVG tree §4.2 sketches
 R3   Taxes + collection efficiency + tax farming + realm coin
 R4   Annex · vassalize · enthrone · realm-vs-realm war · separate peace
      · free-city participation · the two-war penalty
 R5   Autonomy policy · overseas merchant-gated holdings · capital moves
      · fragmentation, both paths
 ```
+
+**Two guard fixes R2 needed that weren't anticipated in R1's own caveats:** building
+the realm's own succession surfaced that a crowned house could still be pulled back
+into the MERCHANT succession/crisis machinery through two further paths —
+`succeed_house` via a stale `head_lifespan` countdown left over from before the
+coronation, and `update_house_crises` opening an ordinary discontent crisis on a
+house whose wealth is now permanently zero. Both would rewrite `head_name`/`kin` out
+from under the realm's own genealogy — the same identity-corruption trap §5.1 names
+for `dissolve_house` and `GOAL_OUTLAST_RIVAL`, found and closed via the same
+`House::is_merchant()` guard, a third and fourth path into a risk the plan had only
+named two instances of. Recorded here because it is exactly the shape §5.1 warns
+about repeating, and because whoever builds R3-R5 should expect more of the same
+each time a new realm-facing pass is added — audit every house-iteration loop it
+touches for the guard, not just the one it's adding.
 
 Gates on every step: `cargo test --lib econ_` · `simulate_decades_reports_dynamics` ·
 `cargo check` · `npx tsc --noEmit`. The Earth gate is not needed — nothing here touches
@@ -498,8 +516,8 @@ Additional per-phase gates:
 
 | Phase | Gate beyond the standard four |
 |---|---|
-| R1 | dynamics test **bit-identical** — nothing in the tick reads a realm yet |
-| R2 | `every_realm_succeeds_or_ends` (rule 22's shape); a matrilineal culture crowns a daughter (rule 23) |
+| R1 | dynamics test **bit-identical** — nothing in the tick reads a realm yet. Confirmed by grep, not assumed: the only non-comment reader of any new field in R1a was a `resize()` nothing downstream consumed |
+| R2 | direct unit tests on `resolve_realm_succession` (eldest-eligible-by-`LineRule`, regency, dynasty extinction) rather than `every_realm_succeeds_or_ends` as a single named gate — the mechanism is deterministic enough to test directly; dynamics run stays bit-identical (that sim carries no province layer, so no realm can ever be founded there) |
 | R3 | `top-10% wealth share` and urbanisation measured against §5.2; a printed finding is a finding, not a build failure |
 | R4 | war frequency against the 45/century baseline; every realm war terminates within the round cap |
 | R5 | realm count is **non-monotonic** over 500 years (§5.6) |

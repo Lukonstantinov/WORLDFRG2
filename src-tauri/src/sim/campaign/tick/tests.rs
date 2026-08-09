@@ -405,6 +405,151 @@
         assert!(fired, "with every precondition met, a proclamation must be reachable");
     }
 
+    /// R2 · succession picks the ELDEST ELIGIBLE living child, sex-filtered by the
+    /// capital's own `LineRule` — an older INeligible sibling must be passed over
+    /// for a younger eligible one (rule 23). A minor heir installs a regency (the
+    /// heir's mother, if alive) and the realm's legitimacy takes the hit.
+    #[test]
+    fn realm_succession_picks_the_eldest_eligible_heir_and_installs_regency() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.hub_culture = vec!["TestCulture".into()];
+        s.culture_rules = vec![CultureRule {
+            culture: "TestCulture".into(), line: LineRule::Agnatic.as_u8(), rule: InheritanceRule::Primogeniture.as_u8(),
+        }];
+        s.found_house_at(0);
+        s.prov_holder = vec![0]; s.prov_holder_house = vec![-1]; s.prov_realm = vec![-1];
+        s.hub_province = vec![0]; s.prov_culture = vec!["TestCulture".into()];
+        let id = s.promote_house_to_realm(0, 0, 60);
+        let ri = id as usize;
+
+        let ruler_born = s.realms[ri].family[0].born_tick;
+        // A wife, for the regent test.
+        let mother = Person {
+            name: "Mother".into(), female: true, born_tick: ruler_born,
+            died_tick: 0, father: -1, mother: -1, spouse: 0,
+            character: [0; 4], skill: 0.5, epithet: String::new(), reign_start: 0, reign_end: 0,
+        };
+        s.realms[ri].family.push(mother);
+        s.realms[ri].family[0].spouse = 1;
+        // Older daughter (born first) — INELIGIBLE under Agnatic law.
+        let daughter = Person {
+            name: "Elder Daughter".into(), female: true, born_tick: 100,
+            died_tick: 0, father: 0, mother: 1, spouse: -1,
+            character: [0; 4], skill: 0.5, epithet: String::new(), reign_start: 0, reign_end: 0,
+        };
+        s.realms[ri].family.push(daughter);
+        // Younger son (born later) — the only ELIGIBLE child, and a MINOR.
+        let son = Person {
+            name: "Young Son".into(), female: false, born_tick: s.tick.saturating_sub(5 * TICKS_PER_YEAR),
+            died_tick: 0, father: 0, mother: 1, spouse: -1,
+            character: [0; 4], skill: 0.5, epithet: String::new(), reign_start: 0, reign_end: 0,
+        };
+        s.realms[ri].family.push(son);
+        let son_idx = 3usize;
+
+        // Kill the ruler THIS tick and resolve.
+        s.realms[ri].family[0].died_tick = s.tick;
+        s.resolve_realm_succession(ri, 60);
+
+        assert_eq!(s.realms[ri].ruler, son_idx as i32,
+            "the younger ELIGIBLE son must be chosen over the older ineligible daughter");
+        assert_eq!(s.realms[ri].regent, 1, "the minor heir's living mother becomes regent");
+        assert!(s.realms[ri].legitimacy < REALM_FOUNDING_LEGITIMACY, "a regency costs legitimacy");
+        assert!(s.realms[ri].fallen_tick == 0, "the realm survives — it had an heir");
+    }
+
+    /// R2 · when NO ONE in the family is eligible or alive, the dynasty ends
+    /// cleanly: `fallen_tick` is set and sovereignty is released rather than left
+    /// pointing at a realm that no longer has anyone to rule it (the same
+    /// "must always terminate in a defined state" discipline rule 22 holds a house
+    /// crisis to).
+    #[test]
+    fn a_realm_with_no_heir_anywhere_dissolves_and_releases_its_provinces() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.found_house_at(0);
+        s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR; // realistic — a realm can't exist at tick 0
+        s.prov_holder = vec![0]; s.prov_holder_house = vec![-1]; s.prov_realm = vec![-1];
+        s.hub_province = vec![0]; s.prov_culture = vec!["Solo".into()];
+        let id = s.promote_house_to_realm(0, 0, 60);
+        let ri = id as usize;
+        assert_eq!(s.prov_realm, vec![id as i32], "sanity: the province starts sovereign");
+
+        s.tick += TICKS_PER_YEAR; // the ruler dies a year later — died_tick=0 is the "alive" sentinel
+        s.realms[ri].family[0].died_tick = s.tick; // the ONLY family member dies
+        s.resolve_realm_succession(ri, 60);
+
+        assert!(s.realms[ri].fallen_tick > 0, "no heir anywhere ⇒ the dynasty ends");
+        assert_eq!(s.prov_realm, vec![-1], "sovereignty is released, not left dangling");
+    }
+
+    /// R2 · the whole yearly pass (mortality → succession → marriage → births) must
+    /// run for decades without panicking and without ever leaving `ruler` pointing
+    /// past the end of `family` — the same "doesn't blow up" bar the standing
+    /// dynamics test holds the rest of the campaign to.
+    #[test]
+    fn realm_family_pass_runs_for_decades_without_breaking_invariants() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.found_house_at(0);
+        s.houses[0].head_age = 20; // young founder — plenty of years to marry/have children
+        s.prov_holder = vec![0]; s.prov_holder_house = vec![-1]; s.prov_realm = vec![-1];
+        s.hub_province = vec![0]; s.prov_culture = vec!["Solo".into()];
+        s.promote_house_to_realm(0, 0, 60);
+
+        for yr in 61..361u32 {
+            s.tick = yr * TICKS_PER_YEAR;
+            s.realm_family_pass(yr);
+            if s.realms.iter().all(|r| r.fallen_tick > 0) { break; } // every dynasty ended — fine
+            for r in &s.realms {
+                if r.fallen_tick > 0 { continue; }
+                if r.ruler >= 0 {
+                    assert!((r.ruler as usize) < r.family.len(), "ruler index must stay in bounds");
+                    assert_eq!(r.family[r.ruler as usize].died_tick, 0, "a dead person is never the ruler");
+                }
+                if r.regent >= 0 {
+                    assert!((r.regent as usize) < r.family.len(), "regent index must stay in bounds");
+                }
+            }
+        }
+        // Over 300 years a family that keeps succeeding should have grown beyond
+        // the single founder — not asserted on every run (mortality is stochastic),
+        // but the mechanism must be REACHABLE.
+        let grew = s.realms.iter().any(|r| r.family.len() > 1);
+        assert!(grew, "births/marriages must be reachable over 300 years");
+    }
+
+    /// R2 · a crowned house must never re-enter the MERCHANT succession/crisis
+    /// machinery — both would rewrite `head_name`/`kin` out from under the realm's
+    /// own genealogy, the same identity-corruption trap §5.1 names, through two
+    /// further paths (`succeed_house` via `head_lifespan`, and
+    /// `update_house_crises`).
+    #[test]
+    fn a_crowned_house_never_reenters_merchant_succession_or_crisis() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.found_house_at(0);
+        let original_name = s.houses[0].name.clone();
+        s.houses[0].crowned = true;
+        s.houses[0].head_lifespan = 1; // would fire almost immediately if not guarded
+        s.houses[0].head_since = 0;
+        s.tick = 2;
+
+        for hi in 0..s.houses.len() {
+            if !s.houses[hi].is_merchant() { continue; }
+            unreachable!("a crowned house must never pass is_merchant()");
+        }
+        // The actual guarded call sites: run the passes directly and confirm nothing moved.
+        s.update_house_crises();
+        assert_eq!(s.houses[0].name, original_name, "update_house_crises must not touch a crowned house");
+        assert!(s.houses[0].crisis.is_none(), "a crowned house never opens a merchant crisis");
+    }
+
     /// A land improvement must cost its funder real money, take years, and only then
     /// change the land. Guards the "instant free improvement" shape a control verb
     /// would otherwise drift into.

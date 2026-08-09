@@ -389,9 +389,16 @@ export async function campaignProvincePotential(id: number): Promise<import("@ty
   return invoke("campaign_province_potential", { id });
 }
 
-/** §3.3 · every state currently formed — one region per tier 1-2 city holding at
- *  least one province's writ. Pure derived read, empty with no campaign / no
- *  province layer / no city has yet risen to tier 1-2. */
+/** REALM_AND_GOVERNMENT_PLAN.md R1 · every realm currently standing. Reads real
+ *  persisted state (`sim.realms`), not a derivation — empty with no campaign, no
+ *  province layer, or no realm yet proclaimed (possible only from year 50). */
 export async function computeStates(): Promise<import("@types").StateRegion[]> {
   return invoke("compute_states");
+}
+
+/** R2 · one realm's family, in insertion order (the founder first). Empty for an
+ *  unknown realm id or one whose family hasn't been seeded (should not happen post-
+ *  coronation, but degrades rather than erroring). */
+export async function campaignGetRealmFamily(realmId: number): Promise<import("@types").PersonBrief[]> {
+  return invoke("campaign_get_realm_family", { realmId });
 }

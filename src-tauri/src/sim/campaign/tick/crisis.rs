@@ -85,7 +85,13 @@ impl CampaignSim {
     pub(crate) fn update_house_crises(&mut self) {
         let tick = self.tick;
         for hi in 0..self.houses.len() {
-            if self.houses[hi].defunct || self.houses[hi].is_guild { continue; }
+            // R2 · a crowned house is never eligible for a MERCHANT succession
+            // crisis — its `wealth`/`kin`/discontent inputs are frozen at the
+            // coronation, and a DEPOSED outcome would rewrite `head_name` out from
+            // under the realm's OWN genealogy (`Realm.family`/`ruler`), corrupting
+            // the very identity §5.1 exists to protect. A realm gets its own
+            // succession mechanic (`realm_family_pass`), not this one.
+            if !self.houses[hi].is_merchant() { continue; }
             if self.houses[hi].crisis.is_some() {
                 let opened = self.houses[hi].crisis.as_ref().unwrap().opened_tick;
                 if tick > opened && (tick - opened) % CRISIS_ROUND_TICKS == 0 {

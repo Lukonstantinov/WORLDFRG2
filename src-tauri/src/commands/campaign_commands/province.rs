@@ -539,6 +539,8 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
 
 #[derive(Serialize, Clone)]
 pub struct StateRegion {
+    /// Index into `sim.realms` — pass to `campaign_get_realm_family`.
+    pub id: u32,
     pub capital_hub: u32,
     pub name: String,
     /// The ruler's style — "King", "Sovereign" — drawn at proclamation (placeholder
@@ -641,6 +643,7 @@ pub fn compute_states(db: State<'_, WorldDb>) -> Result<Vec<StateRegion>, String
         let ruling_house = sim.houses.get(realm.ruling_house as usize)
             .map(|h| h.name.clone()).unwrap_or_default();
         out.push(StateRegion {
+            id: realm.id,
             capital_hub: realm.capital_hub,
             name: realm.name.clone(),
             title: realm.title.clone(),
@@ -661,5 +664,63 @@ pub fn compute_states(db: State<'_, WorldDb>) -> Result<Vec<StateRegion>, String
         });
     }
     out.sort_by(|a, b| b.cells.len().cmp(&a.cells.len()));
+    Ok(out)
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════
+//  GENEALOGY (R2, `REALM_AND_GOVERNMENT_PLAN.md` §3.7) — a flat, read-only list of
+//  a realm's family. Not yet the SVG family tree the plan's §4.2 sketches (that is
+//  real follow-up work — laying out generations/marriages legibly is its own
+//  design problem); this is the minimum that makes "who rules, who's next, who was
+//  born" actually visible in the app, which is the part with load-bearing risk.
+// ═════════════════════════════════════════════════════════════════════════════════
+
+#[derive(Serialize, Clone)]
+pub struct PersonBrief {
+    /// Index into the realm's `family` — stable for the realm's whole life, used
+    /// as the React key and to resolve `father`/`mother`/`spouse` client-side.
+    pub idx: u32,
+    pub name: String,
+    pub female: bool,
+    pub age: u32,
+    pub alive: bool,
+    pub father: i32,
+    pub mother: i32,
+    pub spouse: i32,
+    pub is_ruler: bool,
+    pub is_regent: bool,
+    pub epithet: String,
+    /// 0 if this person has never reigned.
+    pub reign_years: u32,
+}
+
+/// One realm's family, in the order it was built (the founder first, then whoever
+/// married in or was born, chronologically — `family` is append-only so this is
+/// also insertion order). Empty if the realm id is unknown or its family hasn't
+/// family hasn't been seeded yet (should not happen post-coronation — `promote_
+/// house_to_realm` always seeds the founder — but degrades rather than erroring,
+/// the same discipline every other campaign query here follows).
+#[tauri::command]
+pub fn campaign_get_realm_family(realm_id: u32, db: State<'_, WorldDb>) -> Result<Vec<PersonBrief>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let Some(realm) = sim.realms.get(realm_id as usize) else { return Ok(vec![]) };
+    let tick = sim.tick;
+    let ticks_per_year = crate::sim::tick::TICKS_PER_YEAR;
+    let out: Vec<PersonBrief> = realm.family.iter().enumerate().map(|(i, p)| {
+        let alive = p.died_tick == 0;
+        let age_at = if alive { tick } else { p.died_tick };
+        let reign_years = if p.reign_start == 0 { 0 } else {
+            let end = if p.reign_end == 0 { tick } else { p.reign_end };
+            end.saturating_sub(p.reign_start) / ticks_per_year
+        };
+        PersonBrief {
+            idx: i as u32, name: p.name.clone(), female: p.female,
+            age: age_at.saturating_sub(p.born_tick) / ticks_per_year, alive,
+            father: p.father, mother: p.mother, spouse: p.spouse,
+            is_ruler: realm.ruler == i as i32, is_regent: realm.regent == i as i32,
+            epithet: p.epithet.clone(), reign_years,
+        }
+    }).collect();
     Ok(out)
 }

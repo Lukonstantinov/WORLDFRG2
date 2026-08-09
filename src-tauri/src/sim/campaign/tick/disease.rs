@@ -571,6 +571,10 @@ impl CampaignSim {
             // fresh `prov_holder` (just set by the land pass above) to check "holds
             // a province writ". No-op before REALM_YEAR_FLOOR or without provinces.
             self.maybe_proclaim_realms(self.tick / TICKS_PER_YEAR);
+            // R2 · every standing realm's dynasty ages a year: mortality, succession,
+            // marriage, births. Runs AFTER proclamation so a realm founded this very
+            // year already has its founding generation in place. No-op with no realms.
+            self.realm_family_pass(self.tick / TICKS_PER_YEAR);
             // Yearly social mobility: strata shift with prosperity / hardship.
             self.update_society();
             // Then the people may stir: unrest builds, riots flare, revolts topple

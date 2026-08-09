@@ -2257,7 +2257,13 @@ impl CampaignSim {
         }
         // Succession: the head dies at the end of their lifespan; an heir takes over.
         for hi in 0..self.houses.len() {
-            if self.houses[hi].defunct { continue; }
+            // R2 · a crowned house's `head_lifespan` is a leftover from BEFORE the
+            // coronation and must never fire `succeed_house` here — that would
+            // rewrite `head_name`/`kin`/`line` out from under the realm's OWN
+            // genealogy (`Realm.family`/`ruler`, `realm_family_pass`), the same
+            // identity-corruption trap §5.1 names for `dissolve_house` and
+            // `GOAL_OUTLAST_RIVAL`, a fourth path into it.
+            if !self.houses[hi].is_merchant() { continue; }
             let h = &self.houses[hi];
             if h.head_lifespan > 0 && tick.saturating_sub(h.head_since) >= h.head_lifespan {
                 self.succeed_house(hi);

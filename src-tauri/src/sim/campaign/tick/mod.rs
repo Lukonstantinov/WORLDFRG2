@@ -4318,6 +4318,33 @@ pub const REALM_PROCLAIM_PRESTIGE_MIN: f32 = 0.4;
 /// and `update_guilds_and_offices` already read for a comparable "dare to commit"
 /// decision.
 pub const REALM_PROCLAIM_CHANCE: f32 = 0.06;
+/// Starting legitimacy/cohesion for a freshly proclaimed realm — high but not
+/// perfect: the founding generation's own claim is the strongest a dynasty will ever
+/// have, and both gauges are designed to be spent down by real events (plan §5), not
+/// to start at an artificial ceiling.
+pub const REALM_FOUNDING_LEGITIMACY: f32 = 0.70;
+pub const REALM_FOUNDING_COHESION: f32 = 1.0;
+
+// ── R2 · genealogy (`REALM_AND_GOVERNMENT_PLAN.md` §3.7) ──────────────────────
+/// Age a person is treated as an adult — mirrors `Kin`'s own "childhood → adult at
+/// 16" convention (CLAUDE.md §5, Phase 2.1), so a regency ends at the same age a
+/// house's own kin roster would call someone grown.
+pub const PERSON_ADULT_AGE: u32 = 16;
+/// A ruler with no spouse marries once past this age (a per-year roll, not instant).
+pub const PERSON_MARRY_AGE: u32 = 18;
+pub const PERSON_FERTILE_MIN: u32 = 16;
+pub const PERSON_FERTILE_MAX: u32 = 45;
+/// Per-year chance an eligible, unmarried ruler marries.
+pub const PERSON_MARRY_CHANCE: f32 = 0.35;
+/// Per-year chance a married, fertile-age mother bears a child.
+pub const PERSON_BIRTH_CHANCE: f32 = 0.30;
+/// Per-year mortality hazard under age 5 — chosen so cumulative under-5 mortality
+/// lands near 25% (`1 - (1 - x)^5 ≈ 0.25`), the engine of contested succession the
+/// plan's §3.8 fragmentation path B depends on.
+pub const PERSON_CHILD_MORTALITY: f32 = 0.057;
+/// Legitimacy cost of a regency — a minor on the throne is a real weakness, not a
+/// cosmetic footnote.
+pub const REGENCY_LEGITIMACY_HIT: f32 = 0.15;
 
 /// One entry in a realm's own permanent record. Mirrors `HouseEvent`, and obeys the
 /// same discipline: milestones (founding, coronation, conquest, partition, fall) are
@@ -4366,6 +4393,52 @@ pub struct Realm {
     /// the record is kept, exactly as a defunct house's is.
     #[serde(default)] pub fallen_tick: u32,
     #[serde(default)] pub events: Vec<RealmEvent>,
+    // ─────────────────────────────────────────────────────────────────────────
+    // R2 (`REALM_AND_GOVERNMENT_PLAN.md` §3.7) · genealogy. Appended and serde-
+    // defaulted so R1's already-founded realms still load — `realm_family_pass`
+    // seeds an empty `family` the first time it sees one (mirrors `ensure_
+    // province_land`'s own "backfill on demand" for a layer joined mid-campaign).
+    // ─────────────────────────────────────────────────────────────────────────
+    /// The current ruler — an index into `family`, or −1 before it is seeded.
+    #[serde(default = "neg_one_i32")] pub ruler: i32,
+    /// A living relative governing on a minor ruler's behalf, or −1. An index into
+    /// `family`, same as `ruler`.
+    #[serde(default = "neg_one_i32")] pub regent: i32,
+    /// The dynasty's own genealogy — REAL people with real ages, real parents, real
+    /// children, not a snapshot. This is what supersedes rule 19's tenure
+    /// approximation for a realm specifically (a merchant `House` still uses
+    /// `head_lifespan`; a realm has a family to draw a lifespan FROM). NEVER
+    /// shrinks — a dead person's entry stays (`died_tick` set), exactly as
+    /// `House.kin` never removes a dead kinsman, so every `father`/`mother`/
+    /// `spouse` index stays valid for the realm's whole life.
+    #[serde(default)] pub family: Vec<Person>,
+}
+
+/// R2 · one member of a realm's dynasty. Distinct from `Kin` (a merchant house's
+/// roster, regenerated wholesale at every succession) on purpose: a realm's
+/// genealogy is the point of R2, so it must persist, not snapshot.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Person {
+    pub name: String,
+    pub female: bool,
+    pub born_tick: u32,
+    /// 0 while alive.
+    #[serde(default)] pub died_tick: u32,
+    /// Index into the SAME realm's `family`, or −1 — the founding generation, or a
+    /// spouse married in from outside the dynasty (an in-law's own ancestry is
+    /// never tracked; cross-realm marriage is deferred, plan §6).
+    #[serde(default = "neg_one_i32")] pub father: i32,
+    #[serde(default = "neg_one_i32")] pub mother: i32,
+    #[serde(default = "neg_one_i32")] pub spouse: i32,
+    /// Four culture-derived axes, mirroring `Kin.character` exactly.
+    pub character: [i8; 4],
+    pub skill: f32,
+    /// Set at death, mirroring `HouseHead`'s own convention.
+    #[serde(default)] pub epithet: String,
+    /// 0 = never reigned.
+    #[serde(default)] pub reign_start: u32,
+    /// 0 = never reigned, or still reigning.
+    #[serde(default)] pub reign_end: u32,
 }
 
 /// One yearly sample of a province's mutable state — the series behind the province

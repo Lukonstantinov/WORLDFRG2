@@ -2289,6 +2289,8 @@ export interface ProvincePotential {
  *  + `prov_realm`) rather than deriving a "state" fresh from city tiers each call
  *  — a capital's tier later dropping no longer erases it from the map. */
 export interface StateRegion {
+  /** Index into the sim's realm list — pass to `campaignGetRealmFamily`. */
+  id: number;
   capital_hub: number;
   name: string;
   /** The ruler's style — "King", "Sovereign" — placeholder vocabulary; see the
@@ -2318,4 +2320,24 @@ export interface StateRegion {
   cohesion: number;
   treasury: number;
   debts: number;
+}
+
+/** R2 (`REALM_AND_GOVERNMENT_PLAN.md` §3.7) · one member of a realm's dynasty — a
+ *  REAL person with a real age, not a merchant house's regenerated `Kin` snapshot.
+ *  `idx` is a stable index into the realm's own family list; `father`/`mother`/
+ *  `spouse` are indices into that SAME list, or -1. */
+export interface PersonBrief {
+  idx: number;
+  name: string;
+  female: boolean;
+  age: number;
+  alive: boolean;
+  father: number;
+  mother: number;
+  spouse: number;
+  is_ruler: boolean;
+  is_regent: boolean;
+  epithet: string;
+  /** 0 if this person has never reigned. */
+  reign_years: number;
 }
