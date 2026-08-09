@@ -4,7 +4,7 @@ import { useGoodsStore } from "@state/goodsStore";
 import { useWorldStore } from "@state/worldStore";
 import type { ActiveTool, ActiveLayer } from "@types";
 import { GOOD_DEFS, goodOverlayKey, goodCategory, CATEGORY_ORDER } from "@goods";
-import { MAP_THEMES, applyMapTheme, themeReady } from "./mapThemes";
+import { MAP_THEMES, applyMapTheme, themeReady, layerReady, LAYER_REQUIRES } from "./mapThemes";
 /** Best-effort CSS colour → #rrggbb for an <input type="color"> (which only takes
  *  hex). Understands #rgb/#rrggbb and rgb()/rgba(); falls back to dark grey. */
 function hexOfBorder(css: string): string {
@@ -185,6 +185,8 @@ export function Toolbar() {
   const activeMapTheme = useUIStore((s) => s.activeMapTheme);
   const stepCompleted = useUIStore((s) => s.stepCompleted);
   const activePlate = MAP_THEMES.find((t) => t.id === activeMapTheme);
+  const compareLayer = useUIStore((s) => s.compareLayer);
+  const setCompareLayer = useUIStore((s) => s.setCompareLayer);
   const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({});
   // Collapsible top-level sections (the big lists start collapsed to declutter).
   const [openSection, setOpenSection] = useState<Record<string, boolean>>({
@@ -335,24 +337,69 @@ export function Toolbar() {
         {openSection.Layers && layerGroups.map((group) => (
           <div key={group.group} style={{ marginBottom: 4 }}>
             <div style={groupLabel}>{group.group}</div>
-            {group.layers.map((l) => (
-              <div
-                key={l.id}
-                onClick={() => setLayer(l.id)}
-                style={{
-                  padding: "3px 8px", borderRadius: 3, cursor: "pointer",
-                  fontSize: 11, marginBottom: 1,
-                  background: activeLayer === l.id ? "#1e3a58" : "transparent",
-                  color: activeLayer === l.id ? "#c0ddf0" : "#6880a0",
-                  fontWeight: activeLayer === l.id ? 600 : 400,
-                  borderLeft: activeLayer === l.id ? "2px solid #4a90d0" : "2px solid transparent",
-                }}
-              >
-                {l.label}
-              </div>
-            ))}
+            {group.layers.map((l) => {
+              // A layer whose phase hasn't run renders blank or stale with no
+              // explanation — the most confusing first-run moment in the app. Dim
+              // it and name the step instead of letting it look broken. Still
+              // clickable: seeing what the finished world will offer is the point.
+              const ready = layerReady(l.id, stepCompleted);
+              return (
+                <div
+                  key={l.id}
+                  onClick={() => setLayer(l.id)}
+                  title={ready ? undefined : `Needs step ${LAYER_REQUIRES[l.id]} — not generated yet`}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: "3px 8px", borderRadius: 3, cursor: "pointer",
+                    fontSize: 11, marginBottom: 1,
+                    background: activeLayer === l.id ? "#1e3a58" : "transparent",
+                    color: activeLayer === l.id ? "#c0ddf0" : ready ? "#6880a0" : "#3d4c5e",
+                    fontWeight: activeLayer === l.id ? 600 : 400,
+                    borderLeft: activeLayer === l.id ? "2px solid #4a90d0" : "2px solid transparent",
+                  }}
+                >
+                  <span style={{ flex: 1, minWidth: 0 }}>{l.label}</span>
+                  {!ready && (
+                    <span style={{ fontSize: 8.5, color: "#33445a", fontVariantNumeric: "tabular-nums" }}>
+                      step {LAYER_REQUIRES[l.id]}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         ))}
+      </div>
+
+      {/* SWIPE COMPARE — every causal chain here is a two-layer question
+          (precipitation vs elevation for rain shadow, currents vs temperature,
+          biomes vs Köppen), and they used to be answered by flipping back and
+          forth from memory. Display-only, like everything else in this column. */}
+      <div style={section}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={sliderLabel}>Compare</span>
+          <select
+            value={compareLayer ?? ""}
+            onChange={(e) => setCompareLayer((e.target.value || null) as ActiveLayer | null)}
+            style={{
+              flex: 1, minWidth: 0, background: "#0e1826", color: "#a8bed4",
+              border: "1px solid #20304a", borderRadius: 4, fontSize: 10, padding: "2px 4px",
+            }}
+          >
+            <option value="">off</option>
+            {layerGroups.flatMap((g) =>
+              g.layers
+                .filter((l) => l.id !== activeLayer)
+                .map((l) => <option key={l.id} value={l.id}>{l.label}</option>)
+            )}
+          </select>
+        </div>
+        {compareLayer && (
+          <div style={{ fontSize: 9, color: "#5a7390", marginTop: 4, lineHeight: 1.4 }}>
+            Drag the divider on the map. {compareLayer} draws to its right, over the
+            same ground.
+          </div>
+        )}
       </div>
 
       {/* Layer opacity */}

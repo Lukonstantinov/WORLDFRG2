@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useUIStore } from "@state/uiStore";
+import { usePaletteStore } from "@state/paletteStore";
 import { useWorldStore } from "@state/worldStore";
 import { simSoilFertility, simClassifyBiomes, getBiomeStats } from "@bridge";
 import type { BiomeStat } from "@types";
@@ -11,24 +12,19 @@ interface Props {
   invalidateTiles: () => void;
 }
 
-/** Swatch colours mirroring `render/tile_image.rs::biome_color`. Keep the two in
- *  sync — the legend is worthless if it disagrees with the map. */
-const BIOME_SWATCH: Record<number, string> = {
-  1: "#0d4a1f", 2: "#1c632c", 3: "#4c7c30", 4: "#2e6e5c", 5: "#2c584a",
-  6: "#a8a854", 7: "#968a52",
-  8: "#205c42", 9: "#4a7a34", 10: "#3e6c3c", 11: "#2c563e", 12: "#3a7436",
-  13: "#7c8646", 14: "#928a58",
-  15: "#264c3a", 16: "#566a52",
-  17: "#9ea458", 18: "#b0aa6c", 19: "#8c9460",
-  20: "#7e9a6e", 21: "#969c8c", 22: "#a69e92", 23: "#ced2d8",
-  24: "#d8bc82", 25: "#c4baa8", 26: "#bab094", 27: "#c0b27e", 28: "#e8e4de",
-  29: "#e4c68a", 30: "#b09878",
-  31: "#9aa698", 32: "#bcc0be", 33: "#eef4fa", 34: "#d6e6f4",
-  35: "#5e644a", 36: "#346c3a", 37: "#78944e", 38: "#628260", 39: "#305a3e",
-  40: "#808c6a", 41: "#3c8246",
-};
 
 export function StepSoilResources({ invalidateTiles }: Props) {
+  // Biome swatches come from the RENDERER's own table (§8.18), never a local copy.
+  // This legend used to keep a hand-maintained mirror of `biome_color` with a
+  // comment asking future editors to keep the two in sync; three colours changed
+  // in the same commit that removed it, which is exactly the drift the comment
+  // could not prevent.
+  const palettes = usePaletteStore((s) => s.palettes);
+  const loadPalettes = usePaletteStore((s) => s.load);
+  useEffect(() => { void loadPalettes(); }, [loadPalettes]);
+  const biomeSwatch = (code: number) =>
+    palettes?.biome.find((c) => c.code === code)?.color ?? "#6e7660";
+
   const simRunning = useUIStore((s) => s.simRunning);
   const setSimRunning = useUIStore((s) => s.setSimRunning);
   const setStatus = useUIStore((s) => s.setStatus);
@@ -182,7 +178,7 @@ export function StepSoilResources({ invalidateTiles }: Props) {
                   <div key={b.code} style={{ display: "flex", alignItems: "center", gap: 5, padding: "1px 0" }}>
                     <div style={{
                       width: 11, height: 11, borderRadius: 2, flexShrink: 0,
-                      background: BIOME_SWATCH[b.code] ?? "#6e7660",
+                      background: biomeSwatch(b.code),
                       border: "1px solid #00000060",
                     }} />
                     <span style={{ color: "#7f95ad", fontSize: 10, flex: 1 }}>{b.name}</span>

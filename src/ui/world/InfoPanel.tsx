@@ -47,7 +47,7 @@ const KOPPEN_NAMES: Record<number, string> = {
   32: "H - Alpine highland",
 };
 
-const SOIL_NAMES: Record<number, string> = {
+export const SOIL_NAMES: Record<number, string> = {
   0: "None",
   1: "Oxisol",
   2: "Ultisol",

@@ -835,6 +835,9 @@ commands/
                                   reject, never a silent drop
   import_commands.rs            ← import_world_layers (layered world import)
   preview_commands.rs           ← preview_zonal_profile / preview_coarse_climate (§8.14)
+  palette_commands.rs           ← get_render_palettes (§8.18) — serves the renderer's
+                                  OWN colour tables to the legend, so the key cannot
+                                  drift from the map. Read-only, touches no tile
   template_commands.rs          ← Image → land/sea detection (4-bit quantization)
   file_commands.rs              ← Save/open world (.worldforge), export heightmap/layers
 
@@ -959,6 +962,7 @@ state/  (Zustand)
   uiStore.ts                    ← tool, layer, workflow step, overlayVisibility, panel flags, bioParams
   goodsStore.ts                 ← goods spec being edited
   viewportStore.ts              ← camera state, tile invalidation
+  paletteStore.ts               ← The renderer's colour tables, fetched once (§8.18)
   settingsStore.ts              ← app appearance: the overlay-line palette AND the map
                                   label typography (§8.11). Presets + localStorage +
                                   per-world persistence via a VERSIONED envelope
@@ -997,9 +1001,19 @@ ui/world/  — map & world
                                   Display-only (rule 14); `MANAGED_OVERLAYS` is DERIVED
                                   from the plates, so a plate can only ever clear an
                                   overlay some plate uses
-  StatusBar.tsx · WindowBar.tsx ← Bottom status / window chrome
+  StatusBar.tsx · WindowBar.tsx ← Bottom status / window chrome. StatusBar carries the
+                                  HOVER READOUT (§8.18): lat/lon, cell and the ACTIVE
+                                  LAYER's own value with its unit, which is the map key
+                                  for every layer that has no exact legend
+  hoverReadout.ts               ← active layer + CellInfo → the readout string. Values
+                                  come from `get_cell_info`, never re-derived from a
+                                  pixel colour
   InfoPanel.tsx                 ← Right-click cell inspector
-  ElevationLegend/Histogram.tsx ← Elevation legend + distribution chart
+  LayerLegend.tsx               ← THE MAP KEY (§8.18) — exact, renderer-sourced keys
+                                  for elevation · terrain · temperature · sst ·
+                                  precipitation · climate. Colours come from
+                                  `get_render_palettes`, never a local copy
+  ElevationHistogram.tsx        ← Elevation distribution chart
   (LatitudeControl.tsx removed — see ui/workflow/PlanetControls.tsx)
   climate.ts                    ← Köppen → human phrase helpers
   HydrologyPanel.tsx            ← Rivers/lakes + aquatic (fish assemblage, limnology)
@@ -1481,12 +1495,30 @@ sea, crevasse lines for glacier ice, a cracked lattice for a salt pan. Two rules
   (128/29.09 = 4.4), which would have drawn a seam across every sand sea. The
   corollary is that a fill's pseudo-random component REPEATS every 128 cells;
   that is correct for a cartographic hatch and invisible in practice.
+- **Two biomes must be PERCEPTUALLY distinct, not merely unequal.**
+  `biome_colors_are_distinct` used to check exact RGB equality, which passes
+  happily on colours no reader can separate: tropical seasonal forest vs temperate
+  deciduous shipped at ΔE 3.0 and thorn scrub vs chaparral at ΔE 3.8, and both
+  pairs share a `Pattern` kind, so texture did not rescue them either. It now
+  asserts a CIELAB floor (`MIN_DELTA_E`), set to what the palette already
+  satisfies rather than to an aspiration — raise it as the palette earns it. The
+  target for two biomes sharing a pattern is ΔE ≥ 8.
 - **Contrast has a floor and a ceiling.** Under about 0.15 between mark and
   ground a pattern is technically present and visually absent (the first cut of
   the scrub dots and the marsh dashes both were); over ~0.20 it stops reading as
   texture and starts reading as a different colour, so two biomes blur together.
   `pattern_amplitude_stays_within_a_readable_band` holds the ceiling — it caught
   peat bog stacking its dash and hummock layers to 0.25.
+- **Shading is a SEPARATE multiply applied after the pattern**, and the ceiling is
+  held on the COMBINED swing (`pattern_and_relief_together_stay_readable`), not on
+  the pattern alone — a test that measures only the pattern passes happily while two
+  biomes blur. The four thematic plates (climate · biomes · soil · fertility) carry
+  an attenuated hillshade (`THEMATIC_RELIEF_AMP` = 0.09) so a climate zone sits on
+  the mountains that cause it, the way Bartholomew's and the Times' physical plates
+  print tint over relief. It REPLACED the cruder `1.0 + (e − 0.2) · 0.18` elevation
+  lift, which reached +0.144 alone and stacked on the same ±0.19 pattern — so the
+  combined excursion went DOWN while the plate gained real form. Every shading layer
+  now needs its neighbour ring in `tile_commands.rs`, or slopes break at tile edges.
 - **They are SYMBOLS, not surface texture.** Holding a fixed pixel scale across
   the LOD pyramid is correct — that is how printed map hatching behaves.
 - **`cargo test --lib render::tile_image::tests::dump_biome_swatch_sheet --
@@ -1494,8 +1526,11 @@ sea, crevasse lines for glacier ice, a cracked lattice for a salt pan. Two rules
   `$BIOME_SHEET_DIR`, rendered through the real `render_tile` path. Use it to
   eyeball a palette or pattern change instead of guessing.
 
-`biome_color` (render) and `BIOME_SWATCH` (`StepSoilResources.tsx` legend) are
-two copies of the same palette — change one, change both, or the legend lies.
+`BIOME_SWATCH` is **gone**: the legend now reads biome colours from
+`get_render_palettes` (§8.18), so there is no second copy to keep in sync. Its
+old doc-comment asked future editors to mirror `biome_color` by hand — three
+colours changed in the very commit that deleted it, which is what that comment
+could never prevent.
 A world saved before this phase pads the column to zero and falls back to
 `koppen_fallback_biome`, so the layer is never blank.
 
@@ -1763,6 +1798,85 @@ plausible size with things that aren't biology. Six groups now: Terrain · Ocean
 Atmosphere · Climate & Biomes · Settlement · Hazards. `ridges` is reachable for the
 first time — it had always existed in `ActiveLayer` and in `render_tile`
 (`render_ridges`) but belonged to no group.
+
+---
+
+### 8.18 The palette is served, not copied (`commands/palette_commands.rs`)
+
+The legend used to keep **hand-maintained copies** of the renderer's colour tables —
+four of them, across three files, none checked against the Rust that paints the
+pixels. §8.12 already warned about this for `biome_color`/`BIOME_SWATCH`. They
+drifted anyway, in two measured ways:
+
+- **The Elevation layer's sea key ran BACKWARDS.** `ElevationLegend.SEA_BANDS` was
+  copied from `render_land`'s bathymetry, but `render_elevation` drew its own ramp
+  `(10+d·10, 25+d·30, 70+d·100)` — dark shelf *brightening* to abyss. Reading a
+  deep-ocean colour off the map and looking it up in the key landed you on "Shelf".
+- **The land bands implied a linear scale the ramp never had.** Six equal blocks
+  labelled 0/1500/3000/5000/7000/8848 m described stops that actually fell at
+  1327/3097/5309/7521 m.
+
+`get_render_palettes` serves `ELEVATION_STOPS`, `BATHYMETRY_STOPS`,
+`TEMPERATURE_STOPS`, `PRECIP_BANDS` and the Köppen/biome/soil class colours straight
+out of `tile_image.rs`. **This removes the second copy rather than testing it** — the
+legend cannot be wrong about the map without the map being wrong about itself.
+
+Three rules:
+
+- **Never reintroduce a hand-copied colour table in the frontend.** If a legend needs
+  a colour, it comes through `usePaletteStore`. A test comparing two copies only
+  catches drift after someone remembers to write it; having one copy cannot drift.
+- **A ramp is DATA, not a chain of branches.** Every continuous ramp goes through
+  `ramp_lookup` over a `(position, colour)` stop table, which is exactly what lets the
+  same constants serve both the renderer and the legend. A ramp written as `if e <
+  0.15 { … } else if …` cannot be served, and that is how the old drift started.
+- **Position a legend's labels at each stop's TRUE value**, never at even intervals —
+  even spacing is what made the old land key misreport by up to ~520 m.
+
+**Cross-blended hypsometric tints** (§8.18 companion, `lowland_tint`): below
+`LOWLAND_TINT_CEILING_M` (1200 m) the elevation/terrain tint also carries CLIMATE —
+desert lowland reads khaki, rainforest green, tundra grey — converging on the shared
+ramp above it (Patterson & Jenny, *Cartographic Perspectives* 69). The climate axes
+are **temperature and precipitation, both continuous**, never the categorical Köppen
+code: keying on Köppen would draw every class boundary as a hard colour edge and a
+reader would take those edges for terrain, which is the artefact the technique exists
+to avoid. Guarded by `cross_blended_tints_converge_with_height`, which asserts BOTH
+halves — that three climates differ at sea level, and that they are bit-identical
+above the ceiling. The legend must keep declaring this, or it misreports the lowland.
+
+`LayerLegend.tsx` covers the six layers with an exact key (elevation · terrain ·
+temperature · sst · precipitation · climate). The layers whose ramps are still
+written inline in Rust are **deliberately left without a key** rather than given an
+invented one — a legend that guesses is how this broke the first time. They are
+served by the StatusBar hover readout, which reports the real value under the cursor.
+
+**Swipe compare** (`uiStore.compareLayer`/`comparePos`): a second layer drawn over
+the same ground, clipped to the right of a draggable divider. Every causal chain in
+this app is a two-layer question — precipitation against elevation for rain shadow,
+currents against temperature, biomes against Köppen — and they were previously
+answered by flipping back and forth from memory. Two rules: the clip is computed in
+WORLD space by converting the divider's screen fraction back through the viewport
+(the canvas is mid-transform at that point, so a screen-space rect would be wrong),
+and the divider is its OWN DOM element with its own pointer handlers, so it cannot
+interfere with the canvas's pan/paint logic. The compare layer draws through the
+same tile cache and LOD as the base, so a swipe costs one extra blit per visible
+tile and nothing else.
+
+**Class isolation** (`RenderCtx.isolate`): clicking a class in the Köppen or biome
+key keeps that class in full colour and desaturates the rest. The selected code
+rides in the LAYER KEY (`"biomes#iso=12"`), which is why it needed no cache change —
+`TileManager` already keys by layer string, so an isolated view caches and
+invalidates as its own layer, and a client that knows nothing about isolation still
+asks for plain `"biomes"`. It is done in the RENDERER because only the renderer
+knows each cell's class; matching colours back in canvas would be slow and, now that
+the thematic plates carry relief shading, simply wrong. `split_isolate` degrades a
+malformed key to the plain layer rather than erroring — a bad key must never blank
+the map (`isolate_layer_keys_parse_or_degrade`).
+
+Guarded in Rust by `koppen_colors_are_distinct` (Dsc and Dsd shipped IDENTICAL, so
+two zones rendered as one), `elevation_ramp_is_monotone_in_lightness`,
+`bathymetry_darkens_with_depth`, `precipitation_bands_are_sequential_and_never_neutral`
+and `temperature_ramp_pivots_on_freezing`.
 
 ---
 

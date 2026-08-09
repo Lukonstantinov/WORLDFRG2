@@ -10,7 +10,7 @@ import { useUIStore } from "@state/uiStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useSettingsStore } from "@state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates } from "@bridge";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo } from "@bridge";
 import type { MerchantRoute, FuturesLane, Toponym } from "@types";
 import { goodOverlayKey, GOOD_DEFS } from "@goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types";
@@ -117,8 +117,17 @@ export function MapCanvas() {
   metaRef.current = meta;
   const stretchToFitRef = useRef(stretchToFit);
   stretchToFitRef.current = stretchToFit;
+  // The isolated class rides in the LAYER KEY, so the tile cache treats an
+  // isolated view as its own layer and invalidates correctly for free.
+  const isolateClass = useUIStore((s) => s.isolateClass);
+  const compareLayer = useUIStore((s) => s.compareLayer);
+  const comparePos = useUIStore((s) => s.comparePos);
+  const setComparePos = useUIStore((s) => s.setComparePos);
+  const compareRef = useRef<{ layer: string | null; pos: number }>({ layer: null, pos: 0.5 });
+  compareRef.current = { layer: compareLayer, pos: comparePos };
   const activeLayerRef = useRef(activeLayer);
-  activeLayerRef.current = activeLayer;
+  activeLayerRef.current =
+    isolateClass === null ? activeLayer : (`${activeLayer}#iso=${isolateClass}` as typeof activeLayer);
   const activeToolRef = useRef(activeTool);
   activeToolRef.current = activeTool;
   const brushRadiusRef = useRef(brushRadius);
@@ -196,7 +205,23 @@ export function MapCanvas() {
     }
 
     // Draw tiles (only those within the visible tile range).
-    tileManager.draw(ctx, viewport.getVisibleTileRange(w, h));
+    const visible = viewport.getVisibleTileRange(w, h);
+    tileManager.draw(ctx, visible);
+
+    // SWIPE COMPARE: the second layer over the same ground, clipped to the right
+    // of the divider. The clip is computed in WORLD space (the active transform),
+    // by converting the divider's screen fraction back through the viewport — the
+    // canvas is mid-transform here, so a screen-space rect would be wrong.
+    const cmp = compareRef.current;
+    if (cmp.layer && m) {
+      const dividerWorldX = (w * cmp.pos - viewport.x) / viewport.scaleX;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(dividerWorldX, 0, m.grid_width - dividerWorldX, m.grid_height);
+      ctx.clip();
+      tileManager.draw(ctx, visible, cmp.layer);
+      ctx.restore();
+    }
 
     // Draw overlays
     if (overlayManager) {
@@ -221,11 +246,21 @@ export function MapCanvas() {
 
     // viewport.scale picks the LOD: zoomed out → coarser supertiles, so the
     // request size stays bounded no matter how much of the world is visible.
-    tileManager.loadVisibleTiles(
-      txMin, txMax, tyMin, tyMax,
-      activeLayerRef.current, m.grid_width, m.grid_height,
-      viewport.scale,
-    ).then(() => requestRender());
+    const cmpLayer = compareRef.current.layer;
+    Promise.all([
+      tileManager.loadVisibleTiles(
+        txMin, txMax, tyMin, tyMax,
+        activeLayerRef.current, m.grid_width, m.grid_height,
+        viewport.scale,
+      ),
+      cmpLayer
+        ? tileManager.loadVisibleTiles(
+            txMin, txMax, tyMin, tyMax,
+            cmpLayer, m.grid_width, m.grid_height,
+            viewport.scale,
+          )
+        : Promise.resolve(),
+    ]).then(() => requestRender());
   }, [requestRender]);
 
   // Initialize Canvas 2D
@@ -341,7 +376,7 @@ export function MapCanvas() {
   // switching back is instant. Just (re)load the now-active layer's visible tiles.
   useEffect(() => {
     refreshTiles();
-  }, [activeLayer, refreshTiles]);
+  }, [activeLayer, isolateClass, compareLayer, refreshTiles]);
 
   // Wipe the cache only when the world changes or its data changes (a sim step
   // bumps tileVersion) — every layer's rendered tiles are then stale.
@@ -1625,6 +1660,12 @@ export function MapCanvas() {
     }
   }, [applyBrush, setInspectedCell, setSelectedHub, setSelectedGood, refreshTiles, requestRender]);
 
+  // Hover-readout throttling state (see the block inside onPointerMove).
+  const lastHoverCellRef = useRef("");
+  const lastHoverAtRef = useRef(0);
+  const hoverSeqRef = useRef(0);
+  const setHoverInfo = useUIStore((s) => s.setHoverInfo);
+
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const viewport = viewportRef.current;
     const m = metaRef.current;
@@ -1636,6 +1677,25 @@ export function MapCanvas() {
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
     const { wx, wy } = viewport.screenToWorld(screenX, screenY);
+
+    // STATUSBAR HOVER READOUT (§8.18) — the map key for the layers that have no
+    // legend. De-duplicated by CELL and time-throttled, so a fast sweep costs one
+    // IPC every 60 ms rather than one per pixel; the sequence guard stops a slow
+    // reply from overwriting a newer cell's answer.
+    if (e.buttons === 0) {
+      const cx = Math.floor(wx);
+      const cy = Math.floor(wy);
+      const key = `${cx},${cy}`;
+      const now = performance.now();
+      if (key !== lastHoverCellRef.current && now - lastHoverAtRef.current > 60) {
+        lastHoverCellRef.current = key;
+        lastHoverAtRef.current = now;
+        const seq = ++hoverSeqRef.current;
+        getCellInfo(cx, cy)
+          .then((info) => { if (seq === hoverSeqRef.current) setHoverInfo(info); })
+          .catch(() => { /* off-grid or mid-regeneration: leave the last reading */ });
+      }
+    }
 
     // Hover shine: highlight the settlement under the cursor so it's clear what a
     // click will select (inspection tools, not while painting/panning).
@@ -1792,6 +1852,36 @@ export function MapCanvas() {
       onPointerLeave={() => { clearPaintOverlay(); onPointerUp(); }}
       onContextMenu={(e) => e.preventDefault()}
     >
+      {compareLayer && (
+        <div
+          onPointerDown={(e) => {
+            e.currentTarget.setPointerCapture(e.pointerId);
+            e.stopPropagation();
+          }}
+          onPointerMove={(e) => {
+            if (e.buttons === 0) return;
+            const r = containerRef.current?.getBoundingClientRect();
+            if (r) setComparePos((e.clientX - r.left) / Math.max(1, r.width));
+            e.stopPropagation();
+          }}
+          onPointerUp={(e) => e.stopPropagation()}
+          title={`Drag to compare — ${compareLayer} on the right`}
+          style={{
+            position: "absolute", top: 0, bottom: 0,
+            left: `${comparePos * 100}%`, width: 14, marginLeft: -7,
+            cursor: "ew-resize", zIndex: 20, touchAction: "none",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <div style={{ position: "absolute", top: 0, bottom: 0, width: 2, background: "#cfe2f6", opacity: 0.85 }} />
+          <div style={{
+            width: 14, height: 34, borderRadius: 7, background: "#0e1826",
+            border: "1px solid #4a90d0", display: "flex", alignItems: "center",
+            justifyContent: "center", color: "#9fc4e0", fontSize: 9, letterSpacing: -1,
+          }}>◀▶</div>
+        </div>
+      )}
+
       {initError && (
         <div style={{
           position: "absolute", top: 10, left: 10, right: 10,

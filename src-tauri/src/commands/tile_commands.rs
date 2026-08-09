@@ -101,6 +101,21 @@ fn render_tiles_raw(
     }
 }
 
+/// World grid dimensions, for the hillshade's z-factor and latitude correction
+/// (`RenderCtx`). Falls back to `(0, 0)` — "geometry unknown", i.e. legacy fixed
+/// shading — rather than failing a whole tile fetch over a missing metadata row.
+fn grid_dims(db: &State<'_, WorldDb>) -> (u32, u32) {
+    let Ok(conn) = db.conn.lock() else { return (0, 0) };
+    let g = |k: &str| {
+        crate::db::metadata::get_meta(&conn, k)
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(0)
+    };
+    (g("grid_width"), g("grid_height"))
+}
+
 /// LOD 0 fast path: each (tx, ty) is a base tile, rendered as-is.
 fn render_full_res(
     tiles: Vec<(i32, i32)>,
@@ -111,7 +126,16 @@ fn render_full_res(
     // shade slopes continuously across tile boundaries (otherwise a faint grid
     // of tile seams appears). Pull the neighbour ring only when that layer is
     // requested; other layers render purely from their own tile.
-    let needs_neighbors = layers.iter().any(|l| l == "terrain");
+    // Every layer that SHADES needs its cardinal neighbours, or slopes break at
+    // tile boundaries and a faint 128-cell grid appears. That is the hillshade plus
+    // the four thematic plates, which now carry an attenuated relief modulation.
+    let needs_neighbors = layers
+        .iter()
+        .any(|l| {
+            let (base, _) = tile_image::split_isolate(l.as_str());
+            matches!(base, "terrain" | "climate" | "biomes" | "soil" | "fertility")
+        });
+    let (gw, gh) = grid_dims(db);
 
     // Deduped set of tiles to fetch: the requested tiles, plus (for terrain) the
     // 4 cardinal neighbours of each so the halo has real edge data.
@@ -177,7 +201,12 @@ fn render_full_res(
                     ty,
                     layer_idx: li as u8,
                     version: *version,
-                    rgba: tile_image::render_tile_with_neighbors(tile, layer, &neighbors),
+                    rgba: tile_image::render_tile_with_neighbors_ctx(
+                        tile,
+                        layer,
+                        &neighbors,
+                        &tile_image::RenderCtx { grid_w: gw, grid_h: gh, ty, step: 1, isolate: None },
+                    ),
                 }
             }).collect::<Vec<_>>()
         })
@@ -198,6 +227,7 @@ fn render_supertiles(
     db: &State<'_, WorldDb>,
 ) -> Result<Vec<RawTileImage>, String> {
     let s = 1i32 << lod;
+    let (gw, gh) = grid_dims(db);
 
     // Probe the persisted LOD pyramid first: supertiles already downsampled are
     // one small blob each. Only misses need their base tiles fetched. (Pyramid
@@ -287,7 +317,11 @@ fn render_supertiles(
                     ty: *ty,
                     layer_idx: li as u8,
                     version: *version,
-                    rgba: tile_image::render_tile(tile, layer),
+                    rgba: tile_image::render_tile_ctx(
+                        tile,
+                        layer,
+                        &tile_image::RenderCtx { grid_w: gw, grid_h: gh, ty: *ty, step: s as u32, isolate: None },
+                    ),
                 }
             }).collect::<Vec<_>>()
         })
@@ -301,6 +335,22 @@ fn render_supertiles(
 /// output cell (lx, ly) reads global cell (tx·s·128 + lx·s, ty·s·128 + ly·s).
 /// Every columnar field is copied so `render_tile` works unchanged for any
 /// layer. Returns the tile plus the max version of the covered base tiles.
+/// One global cell's `(terrain, elevation)` out of the loaded base tiles, or `None`
+/// when that tile isn't in the set (world edge / not loaded). Used by the supertile
+/// elevation average, which reads a whole s×s block rather than a single cell.
+fn read_base_cell(
+    base: &HashMap<(i32, i32), (i64, TileData)>,
+    gx: i32,
+    gy: i32,
+    t: i32,
+) -> Option<(u8, f32)> {
+    let (btx, bty) = (gx.div_euclid(t), gy.div_euclid(t));
+    let (sx, sy) = (gx.rem_euclid(t), gy.rem_euclid(t));
+    let (_, src) = base.get(&(btx, bty))?;
+    let si = (sy * t + sx) as usize;
+    Some((src.terrain[si], src.elevation[si]))
+}
+
 fn sample_supertile(
     tx: i32,
     ty: i32,
@@ -343,7 +393,38 @@ fn sample_supertile(
             let di = (ly * t + lx) as usize;
 
             out.terrain[di] = src.terrain[si];
-            out.elevation[di] = src.elevation[si];
+            // ELEVATION IS AREA-AVERAGED, every other column point-sampled.
+            //
+            // Relief at zoom-out used to be hillshaded from a DECIMATED DEM (every
+            // s-th cell), so it aliased: ridges dropped out between samples and
+            // sampling noise appeared as relief that isn't there. Area-averaging is
+            // what generalisation means at small scale — the same majority-vote vs
+            // point-sample lesson §8.14 already records for the coarse climate
+            // preview.
+            //
+            // The average is restricted to cells of the SAME terrain class as this
+            // output cell, so a coastal block cannot drag land elevation down toward
+            // sea level. `terrain` itself must stay point-sampled — fractional land
+            // is meaningless. Elevation is the only column whose meaning survives
+            // averaging at all.
+            out.elevation[di] = if s > 1 {
+                let want = src.terrain[si];
+                let mut sum = 0.0f32;
+                let mut cnt = 0u32;
+                for oy in 0..s {
+                    for ox in 0..s {
+                        if let Some((ter, ev)) = read_base_cell(base, gx + ox, gy + oy, t) {
+                            if ter == want {
+                                sum += ev;
+                                cnt += 1;
+                            }
+                        }
+                    }
+                }
+                if cnt > 0 { sum / cnt as f32 } else { src.elevation[si] }
+            } else {
+                src.elevation[si]
+            };
             out.sea_depth[di] = src.sea_depth[si];
             out.is_shelf[di] = src.is_shelf[si];
             out.is_shelf_edge[di] = src.is_shelf_edge[si];
