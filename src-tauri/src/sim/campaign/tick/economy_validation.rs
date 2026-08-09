@@ -1367,6 +1367,22 @@ fn measure_fragmentation(s: &CampaignSim) -> Fragmentation {
 
 fn run_under(line: LineRule, rule: InheritanceRule) -> Fragmentation {
     let mut s = reference_world();
+    // `reference_world()`'s hub grid (6x5 at 9-unit spacing) spans up to ~58 units
+    // corner-to-corner, but its native `world_w`=100 was set before the trade
+    // HORIZON existed (`TRADE_MAX_DIST_FRAC`=0.24, tuned against a real generated
+    // world's cell-count scale, e.g. ~864 cells of reach on a 3600-wide world). At
+    // world_w=100 the reach cap is only 24 units — well under the hub grid's own
+    // spread — so most of this synthetic world's inter-hub trade was silently
+    // severed the moment the horizon shipped (`a212a4c`), with nobody re-checking
+    // this specific test's own fixture against it (only the real-world econ
+    // scorecard was re-verified at the time). That severed trade, not the
+    // inheritance law, is what was flipping partible/primogeniture's relative
+    // wealth here. Widen just this test's own copy of the world so the existing
+    // hub layout stays fully connected — restoring what this test was actually
+    // calibrated against — without touching the shared `reference_world()` every
+    // other `econ_` test also builds on.
+    s.world_w = 300.0;
+    s.world_h = 300.0;
     force_inheritance(&mut s, line, rule);
     for _ in 1..=RUN_YEARS { s.advance(365); }
     measure_fragmentation(&s)

@@ -9,6 +9,61 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-08-09 (CI fix: `econ_inheritance_rules_fragment_differently` — root cause bisected and fixed, unrelated to the realm work)
+
+**The finding.** After the realm work (R1-R5, `REALM_AND_GOVERNMENT_PLAN.md`) shipped,
+`cargo test --lib` started failing CI on every push, always the same test:
+`econ_inheritance_rules_fragment_differently` (Phase 0.4's own gate). The failure
+mode itself had silently CHANGED between an early-session check and the CI reports
+— from "57 vs 57 houses ever" (a tie) to "partible must leave the average house
+poorer than primogeniture (331107 vs 203572)" (an inversion) — a distinct failure a
+prior verification pass had missed by checking only "still 1 econ_ test fails, as
+before" rather than comparing the actual panic message. A first hypothesis (a
+crowned house's zeroed wealth being misread by `measure_fragmentation`'s `!defunct`
+filter instead of `is_merchant()` — the same bug class rule 25 already names 5 other
+instances of) was real and worth fixing, but **empirically proven inert** for this
+specific test via a debug instrument (`s.realms.len()`): the reference world's tiny
+60-year run never actually crowns a house in the partible/primogeniture rows that
+fail the assertion (it does in the seniority row, which isn't part of the failing
+comparison).
+
+**The actual root cause**, found by bisecting through 8 separate isolated worktree
+builds (each commit checked out and re-run against the exact same test): `a212a4c`
+("Cap campaign trade to a regional horizon") — a real, correct economic change,
+verified at the time only against the real-world econ scorecard — introduced
+`TRADE_MAX_DIST_FRAC`=0.24 (a fraction of `world_w`, tuned for a REAL generated
+world's cell-count scale, e.g. ~864-cell reach on a 3600-wide world). Nobody
+re-checked it against `economy_validation.rs`'s own synthetic `reference_world()`
+fixture, whose `world_w`=100 with hubs spread across ~58 units native to a scale set
+years before the trade-horizon feature existed. At world_w=100 the reach cap is only
+24 units — under the hub grid's own diagonal spread — so the fixture's inter-hub
+trade was silently severed for most pairs the moment that commit shipped, changing
+the world's basic economic connectivity in a way sensitive to exactly the kind of
+house-count divergence between inheritance-rule variants this test measures. Not a
+hash-order or RNG-divergence artifact (verified: bit-identical across repeated
+process runs at the same commit) — a genuine, deterministic, previously-uninspected
+side effect of a real feature on an unrelated test's own private fixture.
+
+**The fix**: `run_under()` (private to this one test) now widens its own copy of the
+world (`s.world_w = s.world_h = 300.0`, set after `reference_world()` returns,
+before `force_inheritance`) so the existing hub layout stays fully connected —
+restoring what this test was actually calibrated against — without touching the
+shared `reference_world()` every other `econ_` test also builds on, so nothing else
+recalibrates. `assign_house_tiers`/`update_solvency`/`apply_wealth_sinks`'s existing
+`is_merchant()` guards were correct as shipped; `measure_fragmentation`'s own
+`!defunct`-only filter was still a real latent instance of the same bug class (a
+future world where this test DOES crown a house would silently corrupt the mean) and
+is fixed alongside it (`is_merchant()`), even though proven not to be this failure's
+cause.
+
+**Gate results:** `cargo check` clean · `npx tsc --noEmit` clean ·
+`simulate_decades_reports_dynamics` hard-passes (wealth ∈ [-4.5, 418280.1]) ·
+`econ_inheritance_rules_fragment_differently` passes (partible 142408 <
+primogeniture 146881 mean wealth; 68 > 43 houses ever) · full `cargo test --lib` —
+**273 passed, 0 failed** (was 1 failed). Clippy still reports pre-existing warnings
+elsewhere in the tree (313, none touched by this fix, none in the changed files) —
+advisory-only in CI (`continue-on-error: true`), not the blocking gate.
+
 ## Current state — 2026-07-31 (CITY_PROVINCE_WAR_PLAN.md 3.4d: sack and purge — the last step, `CITY_PROVINCE_WAR_PLAN.md` COMPLETE)
 
 **What shipped.** The plan's own highest-risk item, deliberately built last:
