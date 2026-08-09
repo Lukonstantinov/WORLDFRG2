@@ -6,6 +6,12 @@ const PIXEL_COUNT: usize = SIZE * SIZE;
 
 /// Render a tile to RGBA pixel buffer for a given layer
 pub fn render_tile(tile: &TileData, layer: &str) -> Vec<u8> {
+    render_tile_ctx(tile, layer, &RenderCtx::default())
+}
+
+/// As `render_tile`, but with the world geometry the hillshade needs (see
+/// `RenderCtx`). Every other layer ignores it.
+pub fn render_tile_ctx(tile: &TileData, layer: &str, ctx: &RenderCtx) -> Vec<u8> {
     let mut rgba = vec![0u8; PIXEL_COUNT * 4];
 
     match layer {
@@ -21,7 +27,7 @@ pub fn render_tile(tile: &TileData, layer: &str) -> Vec<u8> {
         "plates" => render_plates(tile, &mut rgba),
         "biomes" => render_biomes(tile, &mut rgba),
         "fisheries" => render_fisheries(tile, &mut rgba),
-        "terrain" => render_terrain_hillshade(tile, &mut rgba),
+        "terrain" => render_terrain_hillshade(tile, ctx, &mut rgba),
         "shelf" => render_shelf(tile, &mut rgba),
         "ridges" => render_ridges(tile, &mut rgba),
         "wind" => render_wind(tile, &mut rgba),
@@ -1077,11 +1083,11 @@ fn render_disease(tile: &TileData, rgba: &mut [u8]) {
     }
 }
 
-fn render_terrain_hillshade(tile: &TileData, rgba: &mut [u8]) {
+fn render_terrain_hillshade(tile: &TileData, ctx: &RenderCtx, rgba: &mut [u8]) {
     // No neighbour tiles available (supertile / crop paths): fall back to
     // within-tile slopes. Edge pixels replicate, which is what produced the
     // faint tile-seam grid at LOD 0 — the neighbour-aware path below removes it.
-    render_terrain_hillshade_halo(tile, &TileNeighbors::default(), rgba);
+    render_terrain_hillshade_halo(tile, &TileNeighbors::default(), ctx, rgba);
 }
 
 /// Cardinal neighbour tiles for a seam-free hillshade slope stencil. Missing
@@ -1137,13 +1143,83 @@ fn halo_elev(tile: &TileData, n: &TileNeighbors, x: isize, y: isize) -> f32 {
 /// near-black multiply that destroyed hypsometric tint precisely on the mountains.
 const SHADOW_FLOOR: f32 = 0.55;
 
-fn render_terrain_hillshade_halo(tile: &TileData, n: &TileNeighbors, rgba: &mut [u8]) {
+/// Vertical exaggeration at the REFERENCE grid. Shaded relief is always
+/// exaggerated; what matters is that the exaggeration means the same thing on
+/// every world.
+const RELIEF_Z: f32 = 50.0;
+
+/// The grid this z-factor was originally tuned against (the default 3600×1800
+/// world). Keeping it explicit is what makes the new scaling BIT-IDENTICAL there
+/// while fixing every other size.
+const RELIEF_REF_GRID_W: f32 = 3600.0;
+
+/// Geometry the hillshade needs and a `TileData` cannot carry: how large a cell is
+/// on the ground, and where the tile sits in latitude.
+///
+/// Two defects come from not having it:
+///
+/// 1. **Relief strength tracked grid size.** The z-factor was the hard-coded
+///    constant 50, applied to a per-cell elevation difference. On a "Large" world
+///    (2× resolution) the difference between adjacent cells is half as big, so the
+///    same mountains rendered half as boldly — the map changed because the raster
+///    changed, which is exactly what a z-factor exists to prevent.
+/// 2. **Polar relief was under-shaded.** On a cylindrical grid east-west ground
+///    distance per cell shrinks with `cos(latitude)`, so at 60° a cell is half as
+///    wide as at the equator. Treating it as square made identical real slopes
+///    shade progressively flatter toward the poles.
+///
+/// `Default` means "geometry unknown" and falls back to the legacy fixed z-factor,
+/// so any call site that has not been converted keeps its exact current output.
+#[derive(Clone, Copy, Default)]
+pub struct RenderCtx {
+    /// World grid width in cells. 0 = unknown → legacy behaviour.
+    pub grid_w: u32,
+    /// World grid height in cells. 0 = unknown → no latitude correction.
+    pub grid_h: u32,
+    /// Tile row of the tile being rendered (for latitude).
+    pub ty: i32,
+    /// Base cells per rendered pixel: 1 at LOD 0, 2^lod on a supertile. Relief must
+    /// not strengthen just because the pyramid samples more coarsely.
+    pub step: u32,
+}
+
+impl RenderCtx {
+    /// Vertical exaggeration for this world and zoom level. Exactly `RELIEF_Z` on
+    /// the reference grid at LOD 0, which is what keeps the default world's
+    /// hillshade unchanged.
+    fn z_factor(&self) -> f32 {
+        if self.grid_w == 0 {
+            return RELIEF_Z;
+        }
+        let step = self.step.max(1) as f32;
+        RELIEF_Z * (self.grid_w as f32 / RELIEF_REF_GRID_W) / step
+    }
+
+    /// `1 / cos(latitude)` for a tile-local row — how much narrower a cell is here
+    /// than at the equator. Clamped, or the correction diverges at the pole.
+    fn lat_stretch(&self, y_in_tile: usize) -> f32 {
+        if self.grid_h == 0 {
+            return 1.0;
+        }
+        let step = self.step.max(1) as i64;
+        let gy = step * (self.ty as i64 * SIZE as i64 + y_in_tile as i64);
+        let frac = gy as f32 / self.grid_h as f32;
+        let lat_rad = ((0.5 - frac) * std::f32::consts::PI).clamp(
+            -std::f32::consts::FRAC_PI_2,
+            std::f32::consts::FRAC_PI_2,
+        );
+        1.0 / lat_rad.cos().max(0.15)
+    }
+}
+
+fn render_terrain_hillshade_halo(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, rgba: &mut [u8]) {
     // Directional light from NW (azimuth 315, altitude 45 degrees)
     let az = 315.0_f32.to_radians();
     let alt = 45.0_f32.to_radians();
     let light_x = az.sin() * alt.cos();
     let light_y = -az.cos() * alt.cos(); // negative because y increases downward
     let light_z = alt.sin();
+    let z = ctx.z_factor();
 
     for y in 0..SIZE {
         for x in 0..SIZE {
@@ -1169,8 +1245,12 @@ fn render_terrain_hillshade_halo(tile: &TileData, n: &TileNeighbors, rgba: &mut 
             let up = halo_elev(tile, n, xi, yi - 1);
             let down = halo_elev(tile, n, xi, yi + 1);
 
-            let dzdx = (right - left) * 50.0; // scale factor for visible relief
-            let dzdy = (down - up) * 50.0;
+            // Z-factor derived from real ground distance, so the same mountains
+            // shade the same on any grid size and at any LOD; the x-gradient is
+            // additionally stretched by 1/cos(lat) because an equirectangular
+            // cell narrows toward the poles.
+            let dzdx = (right - left) * z * ctx.lat_stretch(y);
+            let dzdy = (down - up) * z;
 
             // Surface normal
             let len = (dzdx * dzdx + dzdy * dzdy + 1.0).sqrt();
@@ -1214,12 +1294,22 @@ fn render_terrain_hillshade_halo(tile: &TileData, n: &TileNeighbors, rgba: &mut 
 /// cardinal neighbour tiles to compute seam-free slopes. All other layers ignore
 /// the neighbours and render identically to `render_tile`.
 pub fn render_tile_with_neighbors(tile: &TileData, layer: &str, n: &TileNeighbors) -> Vec<u8> {
+    render_tile_with_neighbors_ctx(tile, layer, n, &RenderCtx::default())
+}
+
+/// As `render_tile_with_neighbors`, plus the world geometry (see `RenderCtx`).
+pub fn render_tile_with_neighbors_ctx(
+    tile: &TileData,
+    layer: &str,
+    n: &TileNeighbors,
+    ctx: &RenderCtx,
+) -> Vec<u8> {
     if layer == "terrain" {
         let mut rgba = vec![0u8; PIXEL_COUNT * 4];
-        render_terrain_hillshade_halo(tile, n, &mut rgba);
+        render_terrain_hillshade_halo(tile, n, ctx, &mut rgba);
         rgba
     } else {
-        render_tile(tile, layer)
+        render_tile_ctx(tile, layer, ctx)
     }
 }
 
@@ -1542,6 +1632,45 @@ mod tests {
                 "band below {upper}mm is near-neutral ({r},{g},{b}) — reads as 'no data'",
             );
         }
+    }
+
+    /// The relief z-factor must mean the same thing on every world.
+    ///
+    /// Two properties, and the first is what makes the change safe to ship: on the
+    /// REFERENCE grid at LOD 0 the z-factor is still exactly the old hard-coded 50,
+    /// so the default world's hillshade is bit-identical. Everything else is the fix
+    /// — a 2× grid has half the per-cell elevation difference and so needs twice the
+    /// exaggeration to render the same mountains, and a supertile stepping over 2^L
+    /// cells needs correspondingly less.
+    #[test]
+    fn relief_z_factor_is_grid_and_lod_independent() {
+        let at = |w: u32, step: u32| {
+            RenderCtx { grid_w: w, grid_h: w / 2, ty: 0, step }.z_factor()
+        };
+        assert_eq!(at(3600, 1), RELIEF_Z, "the reference grid must be unchanged");
+        assert_eq!(RenderCtx::default().z_factor(), RELIEF_Z, "unknown geometry = legacy");
+
+        // Twice the resolution halves the per-cell delta, so it needs twice the z.
+        assert!((at(7200, 1) - 2.0 * RELIEF_Z).abs() < 1e-3);
+        // A supertile spans `step` base cells per pixel, so its delta is already
+        // larger by that factor and the exaggeration must come back down.
+        assert!((at(3600, 4) - RELIEF_Z / 4.0).abs() < 1e-3);
+    }
+
+    /// An equirectangular cell narrows toward the poles, so identical real slopes
+    /// used to shade progressively flatter with latitude. The correction must grow
+    /// away from the equator and stay bounded at the pole.
+    #[test]
+    fn polar_cells_are_stretched_not_squared() {
+        let ctx = RenderCtx { grid_w: 3600, grid_h: 1800, ty: 0, step: 1 };
+        // Row 0 of tile row 0 is the north pole; the equator is grid_h / 2.
+        let equator = RenderCtx { grid_w: 3600, grid_h: 1800, ty: 7, step: 1 }.lat_stretch(4);
+        let pole = ctx.lat_stretch(0);
+        assert!((equator - 1.0).abs() < 0.02, "equator must be unstretched, got {equator}");
+        assert!(pole > equator, "polar cells must stretch more than equatorial");
+        assert!(pole <= 1.0 / 0.15 + 1e-3, "stretch must stay bounded at the pole");
+        // Unknown geometry never stretches — legacy behaviour intact.
+        assert_eq!(RenderCtx::default().lat_stretch(0), 1.0);
     }
 
     /// Cross-blended tints must VANISH with height, or two mountain ranges in

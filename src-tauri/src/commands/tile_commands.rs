@@ -101,6 +101,21 @@ fn render_tiles_raw(
     }
 }
 
+/// World grid dimensions, for the hillshade's z-factor and latitude correction
+/// (`RenderCtx`). Falls back to `(0, 0)` — "geometry unknown", i.e. legacy fixed
+/// shading — rather than failing a whole tile fetch over a missing metadata row.
+fn grid_dims(db: &State<'_, WorldDb>) -> (u32, u32) {
+    let Ok(conn) = db.conn.lock() else { return (0, 0) };
+    let g = |k: &str| {
+        crate::db::metadata::get_meta(&conn, k)
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(0)
+    };
+    (g("grid_width"), g("grid_height"))
+}
+
 /// LOD 0 fast path: each (tx, ty) is a base tile, rendered as-is.
 fn render_full_res(
     tiles: Vec<(i32, i32)>,
@@ -112,6 +127,7 @@ fn render_full_res(
     // of tile seams appears). Pull the neighbour ring only when that layer is
     // requested; other layers render purely from their own tile.
     let needs_neighbors = layers.iter().any(|l| l == "terrain");
+    let (gw, gh) = grid_dims(db);
 
     // Deduped set of tiles to fetch: the requested tiles, plus (for terrain) the
     // 4 cardinal neighbours of each so the halo has real edge data.
@@ -177,7 +193,12 @@ fn render_full_res(
                     ty,
                     layer_idx: li as u8,
                     version: *version,
-                    rgba: tile_image::render_tile_with_neighbors(tile, layer, &neighbors),
+                    rgba: tile_image::render_tile_with_neighbors_ctx(
+                        tile,
+                        layer,
+                        &neighbors,
+                        &tile_image::RenderCtx { grid_w: gw, grid_h: gh, ty, step: 1 },
+                    ),
                 }
             }).collect::<Vec<_>>()
         })
@@ -198,6 +219,7 @@ fn render_supertiles(
     db: &State<'_, WorldDb>,
 ) -> Result<Vec<RawTileImage>, String> {
     let s = 1i32 << lod;
+    let (gw, gh) = grid_dims(db);
 
     // Probe the persisted LOD pyramid first: supertiles already downsampled are
     // one small blob each. Only misses need their base tiles fetched. (Pyramid
@@ -287,7 +309,11 @@ fn render_supertiles(
                     ty: *ty,
                     layer_idx: li as u8,
                     version: *version,
-                    rgba: tile_image::render_tile(tile, layer),
+                    rgba: tile_image::render_tile_ctx(
+                        tile,
+                        layer,
+                        &tile_image::RenderCtx { grid_w: gw, grid_h: gh, ty: *ty, step: s as u32 },
+                    ),
                 }
             }).collect::<Vec<_>>()
         })
