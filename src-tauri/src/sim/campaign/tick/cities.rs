@@ -303,6 +303,9 @@ impl CampaignSim {
         let np = self.prov_rural.len();
         if np == 0 { return; }
         self.ensure_province_land(np);
+        // R3 · this year's tithe-to-crown accumulator starts fresh; the per-
+        // province loop below fills it in as dues are delivered.
+        for r in self.realms.iter_mut() { r.tithe_last_year = 0.0; }
         let ng = self.goods.len();
         // The staple the countryside actually grows and the city actually eats.
         let food_good = (0..ng).find(|&g| self.goods[g].food);
@@ -404,7 +407,33 @@ impl CampaignSim {
                 if house_holds {
                     self.houses[house_holder as usize].wealth += collected;
                 } else {
-                    self.hubs[seat].treasury += collected;
+                    // R3 · a sovereign province's dues go to the CROWN, scaled by
+                    // collection efficiency (§3.3 — pre-modern states were limited
+                    // by what they could COLLECT, not what they charged). What
+                    // efficiency doesn't collect reaches neither crown nor city —
+                    // a real administrative loss, the same shape `evaded` already
+                    // has a few lines above, not money quietly retained locally.
+                    let realm_i = self.prov_realm.get(p).copied().unwrap_or(-1);
+                    let realm_i = if realm_i >= 0 { Some(realm_i as usize) } else { None }
+                        .filter(|&ri| ri < self.realms.len() && self.realms[ri].fallen_tick == 0);
+                    match realm_i {
+                        Some(ri) => {
+                            let efficiency = self.realm_collection_efficiency(ri, seat);
+                            let to_crown = collected * efficiency;
+                            // A tax farm on the tithe redirects the crown's share to
+                            // the farming house instead — it already paid up front.
+                            let farmer = self.realms[ri].tax_farm.as_ref().map(|f| f.house);
+                            match farmer {
+                                Some(hi) if (hi as usize) < self.houses.len()
+                                    && self.houses[hi as usize].is_merchant() => {
+                                    self.houses[hi as usize].wealth += to_crown;
+                                }
+                                _ => { self.realms[ri].treasury += to_crown; }
+                            }
+                            self.realms[ri].tithe_last_year += to_crown;
+                        }
+                        None => { self.hubs[seat].treasury += collected; }
+                    }
                 }
                 self.prov_holder[p] = seat as i32;
             } else {

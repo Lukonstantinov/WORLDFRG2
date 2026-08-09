@@ -140,6 +140,7 @@ impl CampaignSim {
                     title, house_name, name, head_name, city_name),
             }],
             ruler: 0, regent: -1, family: vec![founder],
+            tax_rates: [0.0; 2], tithe_last_year: 0.0, tax_farm: None,
         };
         self.realms.push(realm);
 
@@ -429,6 +430,151 @@ impl CampaignSim {
         let realm_name = self.realms[ri].name.clone();
         let text = format!("A child, {}, is born to the ruling house of {}", name, realm_name);
         self.realms[ri].events.push(RealmEvent { tick, kind: "birth".into(), text });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  R3 · TAXATION (`REALM_AND_GOVERNMENT_PLAN.md` §3.3). "Pre-modern states
+    //  were not limited by what they charged, but by what they could collect" —
+    //  `realm_collection_efficiency` is the whole mechanism; everything else here
+    //  is a levy that reads it or a decision about rates.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Wrap-aware straight-line distance between two hubs, in cells — the same
+    /// pattern `hubs_within_war_reach` already uses.
+    fn hub_distance_cells(&self, a: usize, b: usize) -> f32 {
+        let mut dx = (self.hubs[a].x - self.hubs[b].x).abs();
+        if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
+        let dy = self.hubs[a].y - self.hubs[b].y;
+        (dx * dx + dy * dy).sqrt()
+    }
+
+    /// `efficiency(cohesion, distance)` — R4/R5's per-province `integration` axis
+    /// isn't built yet (a founding-era province starts fully integrated by
+    /// construction, since it was never conquered), so this pass is honestly just
+    /// the two terms the plan's §3.3 formula names that already have real state
+    /// behind them. Distance is normalised by world width, so it reads the same on
+    /// any map size; a founding realm's own capital is at distance 0 (efficiency
+    /// ≈ cohesion), which is why R3 barely moves anything on its own — the term
+    /// only bites once a realm actually spans distance, R4/R5's job.
+    pub(crate) fn realm_collection_efficiency(&self, ri: usize, seat: usize) -> f32 {
+        let capital = self.realms[ri].capital_hub as usize;
+        let dist = self.hub_distance_cells(capital, seat);
+        let frac = if self.world_w > 0.0 { dist / self.world_w } else { 0.0 };
+        let distance_term = 1.0 / (1.0 + REALM_DISTANCE_DECAY * frac);
+        self.realms[ri].cohesion.clamp(0.0, 1.0) * distance_term
+    }
+
+    /// Yearly · poll tax + customs share, the crown's own two set-rate levies
+    /// (the tithe is efficiency-scaled automatically in `province_land_pass`,
+    /// never a realm-set rate — the province tax slider stays the player's verb).
+    /// Both drain the TAXED CITY's own treasury rather than inventing a new pool —
+    /// a pre-modern hearth/customs levy really was collected by the local
+    /// government and forwarded, so this is two further skims off money the city
+    /// already holds, exactly as the tithe skims off what the countryside grows.
+    pub(crate) fn collect_realm_levies(&mut self) {
+        if self.realms.is_empty() { return; }
+        for ri in 0..self.realms.len() {
+            if self.realms[ri].fallen_tick > 0 { continue; }
+            // Includes the capital itself — its own `hub.realm` was set at the
+            // coronation (`REALM_ROLE_SEAT`), so no separate case is needed.
+            let member_cities: Vec<usize> = (0..self.hubs.len())
+                .filter(|&h| self.hubs[h].realm == ri as i32 && !self.hubs[h].is_estate
+                    && !self.hubs[h].abandoned)
+                .collect();
+            let poll_rate = self.realms[ri].tax_rates[TAX_POLL];
+            let customs_rate = self.realms[ri].tax_rates[TAX_CUSTOMS];
+            for h in member_cities {
+                let efficiency = self.realm_collection_efficiency(ri, h);
+
+                if poll_rate > 0.0 {
+                    let base = self.hubs[h].population.max(0.0);
+                    let assessed = base * poll_rate * efficiency;
+                    let paid = assessed.min(self.hubs[h].treasury.max(0.0));
+                    if paid > 0.0 {
+                        self.hubs[h].treasury -= paid;
+                        self.realms[ri].treasury += paid;
+                        self.hubs[h].mood = (self.hubs[h].mood - POLL_TAX_MOOD_COST * poll_rate).max(0.0);
+                    }
+                }
+                if customs_rate > 0.0 {
+                    let base = self.hubs[h].trade_wealth.max(0.0);
+                    let assessed = base * customs_rate * efficiency;
+                    let paid = assessed.min(self.hubs[h].treasury.max(0.0));
+                    if paid > 0.0 {
+                        self.hubs[h].treasury -= paid;
+                        self.realms[ri].treasury += paid;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Yearly · sets next year's poll/customs rates and decides whether to farm
+    /// out the tithe. Cheap AI, not optimisation: a treasury below `REALM_
+    /// TREASURY_COMFORT` nudges rates UP (toward `REALM_TAX_MAX`); at or above it,
+    /// they ease back toward zero. Unrest is what actually punishes overreach —
+    /// via the mood cost each levy already carries and the province unrest a high
+    /// `prov_tax` already risks — so this needs no separate brake of its own.
+    pub(crate) fn decide_realm_taxes(&mut self, ri: usize, yr: u32) {
+        if self.realms[ri].fallen_tick > 0 { return; }
+        let treasury = self.realms[ri].treasury;
+        let need = ((REALM_TREASURY_COMFORT - treasury) / REALM_TREASURY_COMFORT).clamp(-1.0, 1.0);
+        for k in 0..2 {
+            let cur = self.realms[ri].tax_rates[k];
+            let target = if need > 0.0 { REALM_TAX_MAX[k] } else { 0.0 };
+            self.realms[ri].tax_rates[k] = (cur + (target - cur) * REALM_TAX_DRIFT * need.abs())
+                .clamp(0.0, REALM_TAX_MAX[k]);
+        }
+        self.maybe_farm_tithe(ri, yr);
+    }
+
+    /// A tax farm is a DISTRESS SALE, not standing policy — only considered when
+    /// the crown is genuinely short (`REALM_FARM_TREASURY_FLOOR`) and only ever
+    /// one active at a time. Priced off `tithe_last_year`, a real figure the crown
+    /// actually just collected, discounted the way `publicani`/*iltizam* both
+    /// were: the buyer pays less than the full expected value, because the whole
+    /// point of selling is cash NOW.
+    fn maybe_farm_tithe(&mut self, ri: usize, yr: u32) {
+        let tick = self.tick;
+        if self.realms[ri].tax_farm.is_some() {
+            // Expire a completed term — collection reverts to the crown.
+            let f = self.realms[ri].tax_farm.as_ref().unwrap();
+            if tick.saturating_sub(f.started_tick) >= f.years * TICKS_PER_YEAR {
+                let house = f.house;
+                self.realms[ri].tax_farm = None;
+                let realm_name = self.realms[ri].name.clone();
+                let hname = self.houses.get(house as usize).map(|h| h.name.clone()).unwrap_or_default();
+                let text = format!("{}'s tax farm over {} expires — the crown collects directly again", hname, realm_name);
+                self.realms[ri].events.push(RealmEvent { tick, kind: "farm_expired".into(), text });
+            }
+            return;
+        }
+        if self.realms[ri].treasury >= REALM_FARM_TREASURY_FLOOR { return; }
+        if self.realms[ri].tithe_last_year <= 0.0 { return; } // nothing worth farming
+        let capital = self.realms[ri].capital_hub as usize;
+        // A wealthy, willing house near the seat — reuses the same MERCHANT
+        // eligibility every other realm-facing pass filters on.
+        let candidate = self.houses.iter().enumerate()
+            .filter(|(_, h)| h.is_merchant() && !h.is_guild && h.wealth > REALM_FARM_TREASURY_FLOOR)
+            .max_by(|(_, a), (_, b)| a.wealth.partial_cmp(&b.wealth).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(hi, _)| hi);
+        let Some(hi) = candidate else { return };
+        let lump_sum = self.realms[ri].tithe_last_year * TAX_FARM_YEARS as f32 * TAX_FARM_DISCOUNT;
+        if lump_sum <= 0.0 || self.houses[hi].wealth < lump_sum { return; }
+        let roll = hash01(self.seed, (ri as u64) << 8 | hi as u64, tick as u64 ^ 0x7A2F_A12);
+        if roll > 0.5 { return; } // not every eligible year sells — a real decision, not automatic
+        self.houses[hi].wealth -= lump_sum;
+        self.realms[ri].treasury += lump_sum;
+        self.realms[ri].tax_farm = Some(TaxFarm { house: hi as u32, started_tick: tick, years: TAX_FARM_YEARS });
+        let realm_name = self.realms[ri].name.clone();
+        let hname = self.houses[hi].name.clone();
+        let text = format!("{} buys the tithe of {} for {} years, {:.0} paid to the crown up front",
+            hname, realm_name, TAX_FARM_YEARS, lump_sum);
+        self.realms[ri].events.push(RealmEvent { tick, kind: "tax_farmed".into(), text: text.clone() });
+        self.journal.push(JournalEntry {
+            tick, kind: "tax_farmed".into(), hub: capital as i32, good: -1, value: lump_sum, text,
+        });
+        let _ = yr;
     }
 }
 

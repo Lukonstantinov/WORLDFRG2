@@ -4,12 +4,13 @@
 realm it founds holds provinces, taxes them, mints its own coin, conquers its
 neighbours, and eventually breaks apart along its own family tree.*
 
-**Status: R1 and R2 built** (entity, proclamation, house→crown transfer,
-`compute_states` reading real realms, genealogy/succession/regency — see §7's order
-table for exactly what shipped in each). **R3-R5 not yet built.** Every decision in §1
-was made explicitly by the maintainer over the design conversation that produced this
-document; nothing here is a suggestion looking for approval. §7 lists what is
-deliberately NOT in the first build, and that list is as binding as the rest.
+**Status: R1-R3 built** (entity, proclamation, house→crown transfer, `compute_states`
+reading real realms, genealogy/succession/regency, taxation + collection efficiency +
+tax farming — see §7's order table for exactly what shipped in each, and what R3
+explicitly deferred). **R4-R5 not yet built.** Every decision in §1 was made explicitly
+by the maintainer over the design conversation that produced this document; nothing
+here is a suggestion looking for approval. §7 lists what is deliberately NOT in the
+first build, and that list is as binding as the rest.
 
 This document extends `CITY_PROVINCE_WAR_PLAN.md`, and **reverses one of its
 decisions**: §6 of that plan deferred "territorial empires — a `Realm` entity above
@@ -487,12 +488,25 @@ R1 ✅ Realm entity · prov_realm · proclamation · house→crown transfer
 R2 ✅ Genealogy · births · child mortality · aging · succession · regency
      LineRule honoured (rule 23) · a flat read-only family list in the Realms
      panel (campaign_get_realm_family) — NOT yet the SVG tree §4.2 sketches
-R3   Taxes + collection efficiency + tax farming + realm coin
+R3 ✅ Taxes + collection efficiency + tax farming. Realm coin DEFERRED — see below
 R4   Annex · vassalize · enthrone · realm-vs-realm war · separate peace
      · free-city participation · the two-war penalty
 R5   Autonomy policy · overseas merchant-gated holdings · capital moves
      · fragmentation, both paths
 ```
+
+**Realm coin was scoped OUT of R3 on the day, not silently dropped.** The plan's own
+§3.3 names it in one line beside a five-row taxation table that took the actual weight
+of the phase; wiring "member cities may adopt the capital's coin" would mean touching
+`money.rs`'s `decide_coinage`, a system with its own tuned constants and its own
+fidelity concerns, under the same time budget that had just spent itself on tithe
+efficiency, poll/customs and tax farming. Untested changes to a delicate, already-
+validated system are exactly the risk this project's own culture (CLAUDE.md §2.4) asks
+to be named rather than rushed. Real follow-up work, unclaimed.
+
+Vassal tribute (§3.3's fourth row) is designed but genuinely inert in R3 — no vassal
+can exist before R4 populates `Realm.vassals`, so there was nothing to build yet
+that could be tested; the collection code is the smallest addition once R4 lands.
 
 **Two guard fixes R2 needed that weren't anticipated in R1's own caveats:** building
 the realm's own succession surfaced that a crowned house could still be pulled back
@@ -518,7 +532,7 @@ Additional per-phase gates:
 |---|---|
 | R1 | dynamics test **bit-identical** — nothing in the tick reads a realm yet. Confirmed by grep, not assumed: the only non-comment reader of any new field in R1a was a `resize()` nothing downstream consumed |
 | R2 | direct unit tests on `resolve_realm_succession` (eldest-eligible-by-`LineRule`, regency, dynasty extinction) rather than `every_realm_succeeds_or_ends` as a single named gate — the mechanism is deterministic enough to test directly; dynamics run stays bit-identical (that sim carries no province layer, so no realm can ever be founded there) |
-| R3 | `top-10% wealth share` and urbanisation measured against §5.2; a printed finding is a finding, not a build failure |
+| R3 | direct unit tests on `realm_collection_efficiency`/`collect_realm_levies`/`maybe_farm_tithe` (efficiency falls with distance and cohesion, levies never go negative, a farm redirects and reverts on schedule); `top-10% wealth share`/urbanisation NOT specially measured this pass — a founding-era realm's own capital sits at distance 0 from itself, so efficiency stays ≈cohesion until R4/R5 actually spread a realm out geographically, and the standing dynamics/econ_ suites carry no province layer so no realm ever forms in them either. The real fidelity question is deferred to whichever of R4/R5 first makes a realm span real distance |
 | R4 | war frequency against the 45/century baseline; every realm war terminates within the round cap |
 | R5 | realm count is **non-monotonic** over 500 years (§5.6) |
 

@@ -4346,6 +4346,40 @@ pub const PERSON_CHILD_MORTALITY: f32 = 0.057;
 /// cosmetic footnote.
 pub const REGENCY_LEGITIMACY_HIT: f32 = 0.15;
 
+// ── R3 · taxation (`REALM_AND_GOVERNMENT_PLAN.md` §3.3) ───────────────────────
+/// Index into `Realm.tax_rates`.
+pub const TAX_POLL: usize = 0;
+pub const TAX_CUSTOMS: usize = 1;
+/// How fast collection efficiency falls off with distance from the capital, as a
+/// FRACTION of world width (resolution-independent, the same discipline
+/// `EFOLD_MID_KM` uses in km rather than cells). At one world-width of distance
+/// (an extreme a founding-era realm never reaches), efficiency is already roughly
+/// halved before `cohesion` is even applied.
+pub const REALM_DISTANCE_DECAY: f32 = 6.0;
+/// Ceiling on each realm-set rate — a fraction of the base each levy taxes
+/// (population for poll, `trade_wealth` for customs). Kept modest: these are
+/// levies ON TOP of the tithe and a member city's own taxes, not a replacement.
+pub const REALM_TAX_MAX: [f32; 2] = [0.015, 0.10];
+/// How fast a rate drifts toward its treasury-need target each year — slow, so a
+/// single bad year doesn't whipsaw rates (mirrors the smoothing every other AI
+/// `decide_*` in this file already uses).
+pub const REALM_TAX_DRIFT: f32 = 0.15;
+/// Treasury level the crown is comfortable at — below it, rates drift up (toward
+/// `REALM_TAX_MAX`); at or above it, they ease back toward zero. Scaled like
+/// `REALM_PROCLAIM_TREASURY_MIN`, a few multiples of the floor a realm must have
+/// had to found in the first place.
+pub const REALM_TREASURY_COMFORT: f32 = 2000.0;
+/// Poll tax costs mood at the taxed city — regressive, and felt.
+pub const POLL_TAX_MOOD_COST: f32 = 0.35;
+/// A tax farm's term, in years, and how much of the estimated future income the
+/// crown accepts up front (a real discount — the whole point of selling is CASH
+/// NOW, not the full expected value; `publicani`/*iltizam* both priced this way).
+pub const TAX_FARM_YEARS: u32 = 5;
+pub const TAX_FARM_DISCOUNT: f32 = 0.65;
+/// The crown only farms out the tithe when actually short of cash — a farm is a
+/// distress sale, not a standing policy (plan §3.3's own framing).
+pub const REALM_FARM_TREASURY_FLOOR: f32 = 400.0;
+
 /// One entry in a realm's own permanent record. Mirrors `HouseEvent`, and obeys the
 /// same discipline: milestones (founding, coronation, conquest, partition, fall) are
 /// never pruned — for an observation-only game the chronicle is the product (rule 20).
@@ -4412,6 +4446,36 @@ pub struct Realm {
     /// `House.kin` never removes a dead kinsman, so every `father`/`mother`/
     /// `spouse` index stays valid for the realm's whole life.
     #[serde(default)] pub family: Vec<Person>,
+    // ─────────────────────────────────────────────────────────────────────────
+    // R3 (`REALM_AND_GOVERNMENT_PLAN.md` §3.3) · taxation. Collection, not rates,
+    // is the constraint — see `realms.rs::realm_collection_efficiency`. The
+    // harvest tithe itself is NOT a realm-set rate (the province tax slider stays
+    // the player's verb, plan §3.3); only poll and customs are the crown's own
+    // levies, `tax_rates`-indexed by `TAX_POLL`/`TAX_CUSTOMS`.
+    // ─────────────────────────────────────────────────────────────────────────
+    #[serde(default)] pub tax_rates: [f32; 2],
+    /// This year's tithe income so far (crown share, after collection efficiency)
+    /// — reset to 0 at the START of each year's land pass, read by `decide_realm_
+    /// taxes` to price a tax farm against a real, current figure rather than a
+    /// stale or invented one.
+    #[serde(default)] pub tithe_last_year: f32,
+    /// A house currently collecting the tithe in the crown's place, having paid
+    /// for the right up front. `None` = the crown collects directly (the default,
+    /// and where most realms stay most of the time — a farm is a CASH-NOW
+    /// decision, not a steady-state policy).
+    #[serde(default)] pub tax_farm: Option<TaxFarm>,
+}
+
+/// R3 · one active tax farm — `publicani`/*iltizam*, sell N years of collection for
+/// cash now. Scoped to the harvest tithe only in this pass (the "universal land
+/// tax" anchor, and the simplest base to price against); poll/customs farming is
+/// real follow-up work, not built here.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct TaxFarm {
+    pub house: u32,
+    pub started_tick: u32,
+    /// Total term, in years.
+    pub years: u32,
 }
 
 /// R2 · one member of a realm's dynasty. Distinct from `Kin` (a merchant house's

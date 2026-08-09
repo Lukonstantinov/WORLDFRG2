@@ -1740,7 +1740,7 @@ CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next thre
                                     own caveat list (§5) — incl. that it REVERSES
                                     PROVINCE_SYSTEM_PLAN's "enclaves survive" decision —
                                     and its own "deliberately not built" list (§6)
-REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R2 BUILT, R3-R5 NOT YET. THE FIRST
+REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R3 BUILT, R4-R5 NOT YET. THE FIRST
                                     COUNTRIES: a merchant house takes a city
                                     (`captor_house`), PROCLAIMS sovereignty after a
                                     hard year-50 floor + a decade holding it
@@ -1756,11 +1756,21 @@ REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R2 BUILT, R3-R5 NOT YET. THE FIRST
                                     rule 24/25), and `compute_states` now reads
                                     this real persisted state rather than deriving
                                     one — a realm outlives its capital's tier later
-                                    dropping (the Karakorum rule). Surfaced in the
+                                    dropping (the Karakorum rule). TAXATION is real:
+                                    the harvest tithe redirects to the crown scaled
+                                    by COLLECTION EFFICIENCY (cohesion × distance
+                                    from the capital — "pre-modern states were
+                                    limited by what they could collect, not what
+                                    they charged"), plus two crown-set levies (poll,
+                                    customs) and TAX FARMING (a house buys N years
+                                    of tithe collection for cash now — `publicani`/
+                                    *iltizam*). Realm coin deliberately deferred
+                                    (§7 of the plan) rather than rushed into the
+                                    tuned `money.rs` coinage system. Surfaced in the
                                     frontend Realms panel (relabelled from States).
-                                    STILL UNBUILT: taxes, realm coin, annex/
-                                    vassalize/enthrone by war, and FRAGMENTATION
-                                    along the family — which will make the shipped
+                                    STILL UNBUILT: realm coin, annex/vassalize/
+                                    enthrone by war, and FRAGMENTATION along the
+                                    family — which will make the shipped
                                     `InheritanceRule` decide whether a people can
                                     hold an empire at all, once R5 lands. REVERSES
                                     CITY_PROVINCE_WAR_PLAN §6's deferral of a realm

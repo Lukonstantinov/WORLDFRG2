@@ -550,6 +550,178 @@
         assert!(s.houses[0].crisis.is_none(), "a crowned house never opens a merchant crisis");
     }
 
+    /// R3 · a sovereign province's dues must reach the CROWN, scaled by collection
+    /// efficiency, and never the seat city's own treasury — and a house-held writ
+    /// inside the same realm's borders must still bypass the crown entirely
+    /// (rule 24 — a house-held province is the house's, not the realm's, even
+    /// though the realm's border still legally contains it, plan §5.9).
+    #[test]
+    fn a_sovereign_provinces_dues_reach_the_crown_not_the_city() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 0.0, 0.0, 5000.0, vec![3000.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.found_house_at(0);
+        s.found_house_at(1);
+        s.prov_cap = vec![50_000.0, 40_000.0];
+        s.prov_rural = vec![30_000.0, 20_000.0];
+        s.prov_culture = vec!["Aiora".into(), "Aiora".into()];
+        s.prov_seat = vec![[0.0, 0.0], [0.0, 0.0]];
+        s.hub_province = vec![0, 1];
+        s.prov_net_mig = vec![0.0, 0.0];
+        s.ensure_province_land(2);
+        s.prov_tax = vec![0.30, 0.30];
+        s.prov_unrest = vec![0.0, 0.0];
+
+        // Province 0 becomes sovereign; province 1 stays a house-held writ (Stato
+        // da Mar) — even inside the same realm's borders once claimed, if it were.
+        s.prov_holder = vec![0, 1]; // each province's own seat administers it
+        s.prov_holder_house[1] = 1; // house 1 holds province 1's writ directly
+        let id = s.promote_house_to_realm(0, 0, 60);
+        let ri = id as usize;
+        s.realms[ri].cohesion = 1.0; // isolate the test from cohesion decay
+
+        let treasury0 = s.hubs[0].treasury;
+        let house1_wealth0 = s.houses[1].wealth;
+        s.province_land_pass(61);
+
+        assert!(s.realms[ri].treasury > 0.0, "the crown must actually receive tithe income");
+        assert_eq!(s.hubs[0].treasury, treasury0,
+            "the sovereign seat's OWN treasury must not also receive the same dues");
+        assert!(s.houses[1].wealth > house1_wealth0,
+            "a house-held province still pays its house, realm borders notwithstanding");
+        assert!(s.realms[ri].tithe_last_year > 0.0, "tithe_last_year tracks the crown's own share");
+
+        // Efficiency at zero distance and full cohesion is ~1.0 — the crown should
+        // have received close to the FULL assessed dues, not some small fraction.
+        let surplus = s.prov_surplus[0];
+        let assessed = surplus * 0.30;
+        assert!(s.realms[ri].treasury > assessed * 0.8,
+            "efficiency at distance 0 / cohesion 1.0 must be near-total: got {} of {}",
+            s.realms[ri].treasury, assessed);
+    }
+
+    /// R3 · collection efficiency must fall with distance and rise with cohesion —
+    /// the mechanism §3.3 exists to model ("collection, not rates, is the
+    /// constraint"), checked directly rather than through a full province pass.
+    #[test]
+    fn realm_collection_efficiency_falls_with_distance_and_cohesion() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 500.0, 0.0, 5000.0, vec![3000.0], 0), // far from the capital
+        ];
+        let mut s = sim(hubs, goods);
+        s.world_w = 1000.0;
+        s.found_house_at(0);
+        s.prov_holder = vec![0]; s.prov_holder_house = vec![-1]; s.prov_realm = vec![-1];
+        s.hub_province = vec![0]; s.prov_culture = vec!["Solo".into()];
+        let id = s.promote_house_to_realm(0, 0, 60);
+        let ri = id as usize;
+
+        s.realms[ri].cohesion = 1.0;
+        let near = s.realm_collection_efficiency(ri, 0);
+        let far = s.realm_collection_efficiency(ri, 1);
+        assert!(near > far, "a distant seat must collect less efficiently than the capital itself");
+        assert!(near > 0.95, "the capital's own efficiency should be near 1.0 at full cohesion");
+
+        s.realms[ri].cohesion = 0.2;
+        let near_low_cohesion = s.realm_collection_efficiency(ri, 0);
+        assert!(near_low_cohesion < near, "low cohesion must reduce efficiency even at distance 0");
+    }
+
+    /// R3 · poll and customs must drain the TAXED CITY's own treasury into the
+    /// crown's, never manufacture money, and never push a city's treasury
+    /// negative — the same "capped at what's actually there" discipline the
+    /// tithe's own evasion accounting already holds to.
+    #[test]
+    fn realm_levies_drain_the_city_treasury_into_the_crown_and_never_go_negative() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.found_house_at(0);
+        s.prov_holder = vec![0]; s.prov_holder_house = vec![-1]; s.prov_realm = vec![-1];
+        s.hub_province = vec![0]; s.prov_culture = vec!["Solo".into()];
+        let id = s.promote_house_to_realm(0, 0, 60);
+        let ri = id as usize;
+        s.realms[ri].cohesion = 1.0;
+        s.realms[ri].tax_rates = [REALM_TAX_MAX[TAX_POLL], REALM_TAX_MAX[TAX_CUSTOMS]];
+        s.hubs[0].population = 10_000.0;
+        s.hubs[0].trade_wealth = 5_000.0;
+        s.hubs[0].mood = 0.8;
+
+        // Case A: plenty of treasury — both levies collect in full.
+        s.hubs[0].treasury = 100_000.0;
+        s.collect_realm_levies();
+        assert!(s.realms[ri].treasury > 0.0, "levies must actually move money to the crown");
+        assert!(s.hubs[0].treasury < 100_000.0, "the city's own treasury must be drained, not duplicated");
+        assert!(s.hubs[0].mood < 0.8, "a poll tax is regressive and must cost mood");
+
+        // Case B: an empty treasury — levies must NEVER go negative.
+        let ri2_treasury = s.realms[ri].treasury;
+        s.hubs[0].treasury = 0.0;
+        s.collect_realm_levies();
+        assert!(s.hubs[0].treasury >= 0.0, "a levy must never push a city's treasury negative");
+        assert_eq!(s.realms[ri].treasury, ri2_treasury, "nothing to collect from an empty treasury");
+    }
+
+    /// R3 · a tax farm is a distress sale: it must only trigger when the crown is
+    /// genuinely short, must actually move a lump sum from house to crown up
+    /// front, and must REDIRECT the tithe to the farming house for its term,
+    /// reverting to the crown automatically once the term ends.
+    #[test]
+    fn tax_farming_redirects_the_tithe_for_its_term_then_reverts() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 0.0, 0.0, 5000.0, vec![3000.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.found_house_at(0);
+        s.found_house_at(1);
+        s.houses[1].wealth = 50_000.0; // the eligible farmer — far richer than house 0
+        s.prov_holder = vec![0]; s.prov_holder_house = vec![-1]; s.prov_realm = vec![-1];
+        s.hub_province = vec![0]; s.prov_culture = vec!["Solo".into()];
+        let id = s.promote_house_to_realm(0, 0, 60);
+        let ri = id as usize;
+        s.realms[ri].cohesion = 1.0;
+        s.realms[ri].tithe_last_year = 200.0; // a real prior year's collection to price against
+        s.realms[ri].treasury = 0.0; // genuinely short — the ONLY condition that allows a sale
+
+        // Sweep ticks until the farm actually sells (the decision itself is rolled).
+        let mut farmed = false;
+        for t in 0..200u32 {
+            s.tick = 61 * TICKS_PER_YEAR + t;
+            s.realms[ri].treasury = 0.0; // stay short every attempt
+            s.decide_realm_taxes(ri, 61);
+            if s.realms[ri].tax_farm.is_some() { farmed = true; break; }
+        }
+        assert!(farmed, "a tax farm must be reachable when the crown is genuinely short");
+        let farm_house = s.realms[ri].tax_farm.as_ref().unwrap().house;
+        assert!(s.realms[ri].treasury > 0.0, "the lump sum must actually reach the crown");
+        assert_eq!(farm_house, 1, "the wealthier eligible house wins the farm");
+
+        // While farmed, the tithe must go to the FARMING HOUSE, not the crown.
+        s.prov_cap = vec![50_000.0]; s.prov_rural = vec![30_000.0]; s.prov_net_mig = vec![0.0];
+        s.ensure_province_land(1);
+        s.prov_tax = vec![0.30]; s.prov_unrest = vec![0.0];
+        let crown_before = s.realms[ri].treasury;
+        let farmer_wealth_before = s.houses[farm_house as usize].wealth;
+        s.province_land_pass(62);
+        assert!(s.houses[farm_house as usize].wealth > farmer_wealth_before,
+            "a farmed tithe must credit the FARMING HOUSE");
+        assert_eq!(s.realms[ri].treasury, crown_before,
+            "the crown must receive nothing further while the farm is active");
+
+        // After the term, collection must revert to the crown automatically.
+        let farm_start = s.realms[ri].tax_farm.as_ref().unwrap().started_tick;
+        s.tick = farm_start + TAX_FARM_YEARS * TICKS_PER_YEAR;
+        s.decide_realm_taxes(ri, 61 + TAX_FARM_YEARS);
+        assert!(s.realms[ri].tax_farm.is_none(), "the farm must expire on schedule");
+    }
+
     /// A land improvement must cost its funder real money, take years, and only then
     /// change the land. Guards the "instant free improvement" shape a control verb
     /// would otherwise drift into.

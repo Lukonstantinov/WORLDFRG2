@@ -575,6 +575,11 @@ impl CampaignSim {
             // marriage, births. Runs AFTER proclamation so a realm founded this very
             // year already has its founding generation in place. No-op with no realms.
             self.realm_family_pass(self.tick / TICKS_PER_YEAR);
+            // R3 · poll + customs, at this year's rates, then next year's rates (and
+            // whether to farm the tithe) are decided from what actually came in —
+            // `tithe_last_year` was just filled in by `province_land_pass` above.
+            self.collect_realm_levies();
+            for ri in 0..self.realms.len() { self.decide_realm_taxes(ri, self.tick / TICKS_PER_YEAR); }
             // Yearly social mobility: strata shift with prosperity / hardship.
             self.update_society();
             // Then the people may stir: unrest builds, riots flare, revolts topple
