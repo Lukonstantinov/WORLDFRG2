@@ -1329,7 +1329,16 @@ struct Fragmentation {
 }
 
 fn measure_fragmentation(s: &CampaignSim) -> Fragmentation {
-    let live: Vec<&House> = s.houses.iter().filter(|h| !h.defunct && !h.is_guild).collect();
+    // `is_merchant()`, not `!defunct` alone (rule 25): a CROWNED house has left the
+    // merchant class — its wealth moved whole to `Realm.treasury` and its own
+    // `wealth` was zeroed at coronation. Counting it here as a live merchant house
+    // with ~0 wealth corrupts mean/top-share/gini for whichever run happened to
+    // crown a house inside the 60-year window this test runs (Phase R1b's
+    // `maybe_proclaim_realms` opens at year 50) — the exact same bug class already
+    // fixed at `update_solvency`/`apply_wealth_sinks`/`assign_house_tiers`/
+    // `update_house_crises`/`succeed_house`, missed here because this file predates
+    // the realm work.
+    let live: Vec<&House> = s.houses.iter().filter(|h| h.is_merchant() && !h.is_guild).collect();
     let wealths: Vec<f32> = live.iter().map(|h| h.wealth.max(0.0)).collect();
     let total: f32 = wealths.iter().sum();
     let top = wealths.iter().copied().fold(0.0f32, f32::max);
