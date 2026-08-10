@@ -1329,16 +1329,27 @@ const MIN_GUARANTEED_PARTNERS: usize = 4;
 /// tundra bubble) has no price gradient to export into, and the complementary goods it
 /// wants are produced beyond its regional horizon — so it shows partners but zero
 /// exports/imports. Real pre-modern trade is hub-and-spoke: such a town ships to, and
-/// imports through, a great MARKET where diverse goods aggregate. Every hub is therefore
-/// guaranteed a route to the nearest few major markets even across the horizon/component
-/// (a sea lane to the emporium), bounded so this restores diversity WITHOUT reopening
-/// blanket trans-oceanic trade. The top this fraction of hubs by population are "markets".
+/// imports through, a MARKET where diverse goods aggregate. Every market-starved hub is
+/// therefore guaranteed a route to the nearest few markets — but strictly WITHIN ITS OWN
+/// geographic COMPONENT, so a remote region (a far-arctic coast, an isolated sea) forms
+/// its OWN distinct trade network rather than being wired across an ocean to a foreign
+/// emporium. Markets are the top `MARKET_TOP_FRAC` of hubs by population IN EACH COMPONENT,
+/// rounded UP so every region — however small or poor — has at LEAST one of its own; that
+/// per-component guarantee is what actually gives a remote region its own distinct network.
+/// The fraction is left at its original value on purpose: the economy-fidelity gate's
+/// synthetic reference world is a SINGLE component, where per-component-top-15% equals the
+/// old global-top-15% and this whole restructure is bit-identical — raising the fraction
+/// there added market lanes that HALVED partible-inheritance fragmentation (82 → 46 houses
+/// ever), tripping `econ_inheritance_rules_fragment_differently`. On a real multi-component
+/// world the per-component rounding already makes markets more abundant than the old global
+/// top-15% (every landmass/sea now carries its own emporium).
 const MARKET_TOP_FRAC: f32 = 0.15;
 /// How many nearest major markets a market-starved hub is linked to.
 const MARKET_LINKS: usize = 2;
-/// Regional-PLUS reach for the market lifeline, as a fraction of world width — wider than
-/// the ordinary trade horizon (a town reaches a great emporium farther than an everyday
-/// partner) but still bounded, so it is a lifeline to the nearest market, not a global net.
+/// A secondary SANITY cap on the market lifeline's straight-line length, as a fraction of
+/// world width. The same-component gate is the real bound now (a link never crosses open
+/// ocean between two separate landmasses); this only stops a pathological line straight
+/// across a very large component's own gulf.
 const MARKET_REACH_FRAC: f32 = 0.5;
 /// Global ceiling on satellite production sites (estates + colonies). Estates are
 /// real hubs in `self.hubs`, so an uncapped count quadratically slows every tick.

@@ -67,11 +67,28 @@ impl CampaignSim {
     /// great sum only a top house can pay" regardless of the world's absolute wealth
     /// scale. The richest house always clears its own bar, so a realm CAN always form.
     pub(crate) fn realm_founding_cost(&self) -> f32 {
-        let max_wealth = self.houses.iter()
+        // Reference the wealth SCALE of the world's top houses — but ROBUSTLY. The single
+        // richest merchant is almost always a pure-trade dynasty that never bothered to
+        // capture a government; pinning the bar to its fortune (0.6 × the global max) set a
+        // sum no actual CAPTOR — a house that spent heavily bribing its way into a seat, and
+        // so sits well below that outlier — could ever reach, and NO realm ever formed on a
+        // real world (only the synthetic single-house test cleared it). Use a high
+        // PERCENTILE of merchant wealth instead: still "a great sum only a top house can
+        // pay" (and the gate already requires the captor be tier 1-2, i.e. exactly that top
+        // stratum), but a lone outlier can no longer veto every coronation.
+        let mut wealths: Vec<f32> = self.houses.iter()
             .filter(|h| h.is_merchant() && !h.is_guild)
-            .map(|h| h.wealth)
-            .fold(0.0f32, f32::max);
-        (REALM_PROCLAIM_COST_FRAC * max_wealth).max(REALM_PROCLAIM_COST_FLOOR)
+            .map(|h| h.wealth.max(0.0))
+            .collect();
+        if wealths.is_empty() { return REALM_PROCLAIM_COST_FLOOR; }
+        wealths.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        // 80th-percentile fortune: the scale of the world's top fifth of houses. With one
+        // house this is its own wealth (the test's happy path); with two it is still the
+        // richer (so "a far richer rival raises the bar" holds); at scale it tracks the top
+        // stratum without being pinned to a single anomalous fortune.
+        let idx = (((wealths.len() - 1) as f32) * 0.80).round() as usize;
+        let reference = wealths[idx.min(wealths.len() - 1)];
+        (REALM_PROCLAIM_COST_FRAC * reference).max(REALM_PROCLAIM_COST_FLOOR)
     }
 
     /// Placeholder naming (see the module doc) — a culture-vocabulary namer that

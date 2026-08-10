@@ -163,19 +163,26 @@ impl CampaignSim {
             }
         }
 
-        // #6 · NO DEAD CITY. The horizon + cross-component gate above can leave a remote
-        // inland/lake town with too few reachable partners to ever trade (0 exports/
-        // imports, frozen population). Guarantee every real hub at least
-        // `MIN_GUARANTEED_PARTNERS` of its NEAREST partners via the straight-line
-        // estimate, even across the horizon/component — bounded to the closest hubs, so
-        // local trade always reaches a stranded town while the long-range lanes stay cut.
+        // #6 · NO DEAD CITY. The horizon gate above can leave a remote inland/lake town
+        // with too few reachable partners to ever trade (0 exports/imports, frozen
+        // population). Guarantee every real hub at least `MIN_GUARANTEED_PARTNERS` of its
+        // NEAREST partners via the straight-line estimate — but ONLY within its own
+        // geographic COMPONENT (the same landmass / connected-sea network). Crossing the
+        // component by straight line was drawing dishonest trans-oceanic arrows between two
+        // separate continents (the base pass already refuses a cross-component pair with no
+        // real sea lane, for exactly this reason); `rescue_tiny_components` has already
+        // folded every lone/tiny component into its nearest substantial one, so a hub
+        // ALWAYS has same-component partners to reach here. Beyond the horizon is still
+        // allowed (a far-inland town reaching its own component's coast overland), the
+        // OCEAN is not.
         let real: Vec<usize> = (0..n)
             .filter(|&i| !self.hubs[i].is_estate && !self.hubs[i].abandoned)
             .collect();
         for &a in &real {
             let have = real.iter().filter(|&&b| b != a && days[a * n + b].is_finite()).count();
             if have >= MIN_GUARANTEED_PARTNERS { continue; }
-            let mut cand: Vec<(f32, usize)> = real.iter().filter(|&&b| b != a).map(|&b| {
+            let mut cand: Vec<(f32, usize)> = real.iter()
+                .filter(|&&b| b != a && self.hubs[b].component == self.hubs[a].component).map(|&b| {
                 let mut dx = (self.hubs[a].x - self.hubs[b].x).abs();
                 if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
                 let dy = self.hubs[a].y - self.hubs[b].y;
@@ -190,22 +197,32 @@ impl CampaignSim {
             }
         }
 
-        // #6b · HUB-AND-SPOKE MARKET LIFELINE (see the constant docs). A hub whose every
-        // reachable partner makes the same goods trades nothing; guarantee it a route to
-        // the nearest major MARKET (top hubs by population), where complementary goods
-        // aggregate, crossing the horizon/component but bounded to a regional-plus reach.
-        let mut markets = real.clone();
-        markets.sort_by(|&x, &y| {
-            self.hubs[y].population.partial_cmp(&self.hubs[x].population)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        let n_market = ((real.len() as f32 * MARKET_TOP_FRAC).ceil() as usize).clamp(1, real.len());
-        markets.truncate(n_market);
+        // #6b · HUB-AND-SPOKE MARKET LIFELINE. A hub whose every reachable partner makes
+        // the same goods trades nothing; guarantee it a route to a major MARKET where
+        // complementary goods aggregate — but WITHIN ITS OWN COMPONENT. A remote region
+        // (a far-arctic coast, an isolated sea) then forms its OWN distinct trade network
+        // around its OWN biggest towns rather than being wired across an ocean to a foreign
+        // emporium, which is both geographically honest and what most worlds look like.
+        // Markets are therefore the top `MARKET_TOP_FRAC` of hubs BY POPULATION IN EACH
+        // COMPONENT (not globally), so EVERY region — however poor — has at least its own
+        // local market; a homogeneous backwater simply trades among itself.
+        let mut by_comp: std::collections::HashMap<u32, Vec<usize>> = std::collections::HashMap::new();
+        for &a in &real { by_comp.entry(self.hubs[a].component).or_default().push(a); }
+        let mut markets: Vec<usize> = Vec::new();
+        for hubs_in in by_comp.values() {
+            let mut v = hubs_in.clone();
+            v.sort_by(|&x, &y| self.hubs[y].population.partial_cmp(&self.hubs[x].population)
+                .unwrap_or(std::cmp::Ordering::Equal));
+            let k = ((v.len() as f32 * MARKET_TOP_FRAC).ceil() as usize).clamp(1, v.len());
+            markets.extend(v.into_iter().take(k));
+        }
         let market_reach = self.world_w * MARKET_REACH_FRAC;
         for &a in &real {
-            // Already able to reach a major market? Then it can already trade diverse goods.
-            if markets.iter().any(|&m| m != a && days[a * n + m].is_finite()) { continue; }
-            let mut cand: Vec<(f32, usize)> = markets.iter().filter(|&&m| m != a).map(|&m| {
+            // Already able to reach a same-component market? Then it can already trade diverse goods.
+            if markets.iter().any(|&m| m != a
+                && self.hubs[m].component == self.hubs[a].component && days[a * n + m].is_finite()) { continue; }
+            let mut cand: Vec<(f32, usize)> = markets.iter()
+                .filter(|&&m| m != a && self.hubs[m].component == self.hubs[a].component).map(|&m| {
                 let mut dx = (self.hubs[a].x - self.hubs[m].x).abs();
                 if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
                 let dy = self.hubs[a].y - self.hubs[m].y;

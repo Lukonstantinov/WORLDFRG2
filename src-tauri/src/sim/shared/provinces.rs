@@ -1555,8 +1555,18 @@ pub fn generate_provinces(
                 let hist = &a.goods_hist[gd * GOOD_BINS..(gd + 1) * GOOD_BINS];
                 let n: u64 = hist.iter().map(|&c| c as u64).sum();
                 if n == 0 { return 0.0; }
+                // Bin 0 holds genuinely-ABSENT cells (belt byte 0..15/255). Scoring it
+                // by the bin CENTRE (bin_w/2 = 8) gave EVERY good a phantom ~0.031 belt
+                // floor in EVERY province — so a tropical good like pepper read as
+                // "producible" on an arctic province and passed the consumers'
+                // `belt <= 0.001` "the land can't yield this" gate. Represent bin 0 by 0
+                // so a good with no real belt here reads exactly 0; the higher bins keep
+                // their centre so a good that IS present is unaffected.
                 let sum: f64 = hist.iter().enumerate()
-                    .map(|(b, &c)| (b * bin_w + bin_w / 2) as f64 * c as f64)
+                    .map(|(b, &c)| {
+                        let rep = if b == 0 { 0.0 } else { (b * bin_w + bin_w / 2) as f64 };
+                        rep * c as f64
+                    })
                     .sum();
                 ((sum / n as f64) as f32 / 255.0).clamp(0.0, 1.0)
             })
