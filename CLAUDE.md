@@ -1913,6 +1913,26 @@ CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next thre
                                     own caveat list (§5) — incl. that it REVERSES
                                     PROVINCE_SYSTEM_PLAN's "enclaves survive" decision —
                                     and its own "deliberately not built" list (§6)
+GOODS_LOCALITIES_PLAN.md          ← ⭐ APPROVED, NOT YET BUILT. Trade goods get what
+                                    minerals already have (§8.16): belt → LOCALITY →
+                                    cell, persisted to `metadata["good_localities"]`
+                                    like `deposits`, with a size ladder in km (a
+                                    staple region is 900 km — the chernozem case —
+                                    against a 45 km ore district). Plus the three
+                                    things the measured findings turned up: placement
+                                    NEVER reads rivers (only `fertility`'s single
+                                    proximity scalar), marine goods use ONE gate with
+                                    no inshore/offshore-bank split, and the overlay
+                                    draws coarse 8-cell blocks that spill past the
+                                    coast. Splits the map into TWO layers per good —
+                                    coverage ("can it grow here") and quality ("is it
+                                    fine here") — off one u8 column, on one absolute
+                                    ramp shared by every good. Slice 0 is the COVERAGE
+                                    DIAGNOSTIC, built first so every later slice is
+                                    measured; the economy wiring goes LAST. Carries
+                                    its own risks (§5 — full modulation vs "goods must
+                                    keep reaching settlements") and "deliberately not
+                                    built" list (§6)
 REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R5 BUILT, each partially. THE FIRST
                                     COUNTRIES: a merchant house takes a city
                                     (`captor_house`), PROCLAIMS sovereignty after a
