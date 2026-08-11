@@ -5,6 +5,25 @@ use crate::sim::{plates, elevation, ocean, temperature, jets, precipitation, kop
 use crate::db::metadata;
 use crate::tile::coords::{TileCoord, TILE_SIZE};
 
+/// Persist the two placement records `compute_trade_goods` returns — the ORE
+/// WORKINGS (`sim::deposits`, §8.16) and, since GOODS_LOCALITIES_PLAN.md, every
+/// non-mineral good's LOCALITIES (`sim::localities`, Slice 3) — to world metadata
+/// exactly as before, just from one shared helper instead of four duplicated
+/// call sites.
+fn persist_goods_placement(
+    conn: &rusqlite::Connection,
+    ore: &[crate::sim::deposits::Deposit],
+    localities: &[crate::sim::localities::GoodLocality],
+) -> Result<(), String> {
+    metadata::set_meta(conn, "deposits",
+        &serde_json::to_string(ore).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    metadata::set_meta(conn, "good_localities",
+        &serde_json::to_string(localities).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Generate tectonic plates and derive landmass.
 /// Phase 1: Plate tectonics → terrain
 #[tauri::command]
@@ -275,10 +294,8 @@ pub fn sim_biological(
     // belt column cannot carry. Persisted alongside the tiles exactly as the
     // province list is — the belt stays the source of truth for production and
     // overlays; this is the record a mining industry and the quarry view read.
-    let ore = biological::compute_trade_goods(&mut buf, &river_data, seed, gem_deposits, climate_strictness, &goods);
-    metadata::set_meta(&conn, "deposits",
-        &serde_json::to_string(&ore).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    let (ore, localities) = biological::compute_trade_goods(&mut buf, &river_data, seed, gem_deposits, climate_strictness, &goods);
+    persist_goods_placement(&conn, &ore, &localities)?;
 
     // Terminal salt lakes → brine into the salinity column + inland salt-pan
     // production. Lakes are re-derived here (this phase does not receive them).
@@ -341,10 +358,8 @@ pub fn sim_refresh_hydrology_biology(
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
-    let ore = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, gem_deposits, climate_strictness, &goods);
-    metadata::set_meta(&conn, "deposits",
-        &serde_json::to_string(&ore).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    let (ore, localities) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, gem_deposits, climate_strictness, &goods);
+    persist_goods_placement(&conn, &ore, &localities)?;
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
 
     let modified = buf.save(&conn, "Refresh hydrology & biology")?;
@@ -448,10 +463,8 @@ pub fn sim_run_all(
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
-    let ore = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
-    metadata::set_meta(&conn, "deposits",
-        &serde_json::to_string(&ore).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    let (ore, localities) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
+    persist_goods_placement(&conn, &ore, &localities)?;
     // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
 
@@ -654,10 +667,8 @@ pub fn sim_run_all_from_terrain(
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
-    let ore = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
-    metadata::set_meta(&conn, "deposits",
-        &serde_json::to_string(&ore).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    let (ore, localities) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
+    persist_goods_placement(&conn, &ore, &localities)?;
     // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
 

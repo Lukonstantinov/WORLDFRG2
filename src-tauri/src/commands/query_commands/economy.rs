@@ -326,18 +326,47 @@ pub fn compute_economy(
         }
     }
 
-    // quality grade per hub/good: a deposit good reads its workings' mean grade; any
-    // other good keeps the old richer-territory-share formula. Both get a small
-    // deterministic jitter so equal inputs still differ between hubs/goods.
+    // GOODS_LOCALITIES_PLAN.md Slice 7 (D2) — the non-mineral counterpart of the
+    // deposit-grade read above. A locality's `grade` is a direct terroir-quality
+    // number (Slice 3), so a hub whose catchment holds a fine locality of a good
+    // should read finer than one that merely produces a lot of it.
+    let localities: Vec<crate::sim::localities::GoodLocality> = metadata::get_meta(&conn, "good_localities")
+        .ok()
+        .flatten()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let mut loc_grade_sum = vec![vec![0.0f32; gc]; nn];
+    let mut loc_grade_n = vec![vec![0u32; gc]; nn];
+    for l in &localities {
+        let Some(&g) = good_slot.get(l.good.as_str()) else { continue };
+        let key = (l.y as u64) * (grid_w as u64) + l.x as u64;
+        if let Some(&(_, hh)) = claim.get(&key) {
+            if hh != u32::MAX {
+                loc_grade_sum[hh as usize][g] += l.grade;
+                loc_grade_n[hh as usize][g] += 1;
+            }
+        }
+    }
+
+    // quality grade per hub/good: a deposit good reads its workings' mean grade; a
+    // good with a locality in the hub's catchment blends that terroir grade in
+    // (D2 — "feeds quality", not a replacement, since `share` below already partly
+    // reflects Slice 3's modulated belt values); everything else keeps the old
+    // richer-territory-share formula. All three get a small deterministic jitter so
+    // equal inputs still differ between hubs/goods.
     let mut quality = vec![vec![0.0f32; gc]; nn];
     for hh in 0..nn {
         for g in 0..gc {
             let share = prod[hh][g] / good_max[g];
             let jitter = hash01q((hh as u64).wrapping_mul(0x9E3779B1) ^ (g as u64).wrapping_mul(0x85EBCA77)) * 0.24 - 0.12;
+            let share_base = 0.30 + 0.62 * share;
             let base = if is_deposit[g] && grade_n[hh][g] > 0 {
                 grade_sum[hh][g] / grade_n[hh][g] as f32
+            } else if loc_grade_n[hh][g] > 0 {
+                let loc_mean = loc_grade_sum[hh][g] / loc_grade_n[hh][g] as f32;
+                0.5 * share_base + 0.5 * loc_mean
             } else {
-                0.30 + 0.62 * share
+                share_base
             };
             quality[hh][g] = (base + jitter).clamp(0.0, 1.0);
             // apply abundance scaling to production AFTER quality is read off share

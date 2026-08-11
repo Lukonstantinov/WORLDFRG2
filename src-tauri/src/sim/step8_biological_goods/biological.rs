@@ -14,7 +14,8 @@ use std::collections::VecDeque;
 use crate::sim::world_buffer::WorldBuffer;
 use crate::sim::rivers::River;
 use crate::sim::koppen::*;
-use super::goods_spec::{builtin_index_of, id_salt, Distribution, Domain, Envelope, GoodSpec};
+use super::goods_spec::{builtin_index_of, id_salt, Distribution, Domain, Envelope, GoodSpec, MarineBand};
+use super::deposits::{bfs_dist, near};
 use crate::tile::cell::GOODS_COUNT;
 
 // Salt mixed into the per-good seeded-homeland RNG (preserves the original
@@ -743,6 +744,109 @@ pub fn apply_salt_pans(buf: &mut WorldBuffer, lakes: &[crate::sim::rivers::Lake]
     }
 }
 
+// ── River placement factors (GOODS_LOCALITIES_PLAN.md Slice 1, F6) ─────────────
+//
+// `good_score`/`envelope_score` never read rivers at all before this — the only
+// river influence on goods placement was fertility's single 0.20 proximity
+// scalar. Built ONCE per world (a per-good BFS across 45 goods would be a real
+// cost, exactly the discipline `deposits::GeoContext` already applies) and reused
+// by every good's score arm.
+pub struct RiverContext {
+    /// Cells to the nearest river cell of ANY kind.
+    pub dist_any: Vec<u16>,
+    /// Cells to the nearest NAVIGABLE river cell — the good can reach market by water.
+    pub dist_navigable: Vec<u16>,
+    /// 1 = delta/floodplain membership (a major river's own delta cells, plus low
+    /// flat ground a short reach from a major river's course).
+    pub floodplain: Vec<u8>,
+}
+
+impl RiverContext {
+    pub fn build(buf: &WorldBuffer, rivers: &[River]) -> RiverContext {
+        let w = buf.width;
+        let h = buf.height;
+        let n = buf.total();
+        let mut any_seeds = Vec::new();
+        let mut nav_seeds = Vec::new();
+        let mut major_seeds = Vec::new();
+        let mut floodplain = vec![0u8; n];
+        for r in rivers {
+            for &(x, y) in &r.points {
+                if x >= w || y >= h { continue; }
+                let i = (y as usize) * (w as usize) + x as usize;
+                any_seeds.push(i);
+                if r.navigable { nav_seeds.push(i); }
+                if r.major { major_seeds.push(i); }
+            }
+            for &(x, y) in &r.delta {
+                if x >= w || y >= h { continue; }
+                floodplain[(y as usize) * (w as usize) + x as usize] = 1;
+            }
+        }
+        let dist_any = bfs_dist(&any_seeds, w, h);
+        let dist_navigable = bfs_dist(&nav_seeds, w, h);
+        let dist_major = bfs_dist(&major_seeds, w, h);
+        // Low flat ground within a short reach of a MAJOR river's course is a
+        // floodplain even outside a mapped delta (the mid-course alluvial plain,
+        // not just the river mouth).
+        for i in 0..n {
+            if floodplain[i] == 1 { continue; }
+            if buf.terrain.get(i).copied().unwrap_or(0) != 1 { continue; }
+            let dm = dist_major.get(i).copied().unwrap_or(u16::MAX);
+            let elev = buf.elevation.get(i).copied().unwrap_or(1.0);
+            if dm <= 3 && elev < 0.14 { floodplain[i] = 1; }
+        }
+        RiverContext { dist_any, dist_navigable, floodplain }
+    }
+}
+
+/// A MULTIPLIER on an existing score, never a replacement (§5.4) — every weight
+/// defaults to 0 (no effect) so a good that ignores rivers is untouched, and even
+/// at full weight this only ever scales a score the climate gate already allowed
+/// through zero. `w_irrig` only fires on arid (Köppen B) cells — river water
+/// reaching a desert is irrigation; the same proximity in a humid climate is not.
+#[inline]
+fn river_multiplier(
+    rc: Option<&RiverContext>, buf: &WorldBuffer, i: usize,
+    w_flood: f32, w_irrig: f32, w_bank: f32, w_float: f32,
+) -> f32 {
+    let Some(rc) = rc else { return 1.0 };
+    let mut m = 1.0f32;
+    if w_flood > 0.0 {
+        m += w_flood * (rc.floodplain.get(i).copied().unwrap_or(0) as f32);
+    }
+    if w_irrig > 0.0 {
+        let k = buf.koppen.get(i).copied().unwrap_or(0);
+        if matches!(k, BWH | BWK | BSH | BSK) {
+            m += w_irrig * near(rc.dist_any.get(i).copied().unwrap_or(u16::MAX), 6.0);
+        }
+    }
+    if w_bank > 0.0 {
+        m += w_bank * near(rc.dist_any.get(i).copied().unwrap_or(u16::MAX), 4.0);
+    }
+    if w_float > 0.0 {
+        m += w_float * near(rc.dist_navigable.get(i).copied().unwrap_or(u16::MAX), 10.0);
+    }
+    m.max(0.0)
+}
+
+/// GOODS_LOCALITIES_PLAN.md Slice 2 (F5) — the marine-band gate. `Either`
+/// reproduces the caller's own gate unchanged (the historical undifferentiated
+/// `sea_coastal` test); `Inshore`/`Bank` narrow it to a strict SUBSET of that same
+/// footprint, so an `Either` good's placement is byte-identical to before this
+/// slice and only the specifically-tagged goods (§2.1's default table) shrink.
+#[inline]
+fn marine_band_ok(buf: &WorldBuffer, x: u32, y: u32, marine_band: MarineBand) -> bool {
+    match marine_band {
+        MarineBand::Either => true,
+        MarineBand::Inshore => has_land_within(buf, x, y, 1),
+        MarineBand::Bank => {
+            let i = buf.idx(x, y);
+            buf.is_shelf.get(i).copied().unwrap_or(0) == 1 && !has_land_within(buf, x, y, 1)
+        }
+    }
+}
+
 /// Place every good's belt. Returns the discrete ORE WORKINGS (see `sim::deposits`)
 /// — the per-deposit grade / extent / depth that the u8 belt column cannot carry.
 /// The belt column is still written exactly as before, so every existing reader,
@@ -750,11 +854,21 @@ pub fn apply_salt_pans(buf: &mut WorldBuffer, lakes: &[crate::sim::rivers::Lake]
 pub fn compute_trade_goods(
     buf: &mut WorldBuffer, rivers: &[River], seed: u64, gem_deposits: u32,
     climate_strictness: f32, specs: &[GoodSpec],
-) -> Vec<crate::sim::deposits::Deposit> {
+) -> (Vec<crate::sim::deposits::Deposit>, Vec<super::localities::GoodLocality>) {
     use crate::sim::deposits::{self, DepositModel, GeoContext, MineralPlan};
     let w = buf.width;
     let h = buf.height;
     let n = buf.total();
+
+    // GOODS_LOCALITIES_PLAN.md Slice 1 (F6) — built ONCE for the whole world, the
+    // same discipline `GeoContext` already applies for deposit goods. `None` for
+    // every OTHER caller of `good_score`/`envelope_score` (the Goods Editor's live
+    // preview, which has no rivers to hand) — see `river_multiplier`'s neutral
+    // fallback.
+    let river_ctx = Some(RiverContext::build(buf, rivers));
+    // GOODS_LOCALITIES_PLAN.md Slice 3 — every locality placed this run, across
+    // every good, flattened for persistence exactly as the ore workings are.
+    let mut all_localities: Vec<super::localities::GoodLocality> = Vec::new();
 
     // Climate strictness sharpens (or softens) every good's suitability score
     // before placement: gamma > 1 tightens belts toward their ideal climate
@@ -857,9 +971,9 @@ pub fn compute_trade_goods(
                 for y in 0..h {
                     for x in 0..w {
                         let s = if let Some(env) = &spec.scoring {
-                            envelope_score(buf, env, spec.domain, x, y)
+                            envelope_score(buf, env, spec.domain, x, y, river_ctx.as_ref(), spec.marine_band)
                         } else if let Some(idx) = builtin_idx {
-                            good_score(buf, idx, x, y)
+                            good_score(buf, idx, x, y, river_ctx.as_ref(), spec.marine_band)
                         } else {
                             0.0
                         };
@@ -876,6 +990,14 @@ pub fn compute_trade_goods(
                     localize_good(buf, &score, marine, unlimited, spec.rarity, salt, seed, &placed_seeds);
                 // Remember a Local homeland so the next good is seeded elsewhere.
                 if !unlimited { if let Some(sc) = seed_cell { placed_seeds.push(sc); } }
+                // GOODS_LOCALITIES_PLAN.md Slice 3 (D1/D5/D6) — cluster the belt into
+                // real terroir patches and thin it between them (full modulation, with
+                // a floor so a producing cell never reaches literal zero). Runs BEFORE
+                // dilation so the trade-reach rings spread from the already-modulated
+                // belt, not the raw pre-locality one.
+                let localities = super::localities::place_localities(
+                    buf, &mut belt, spec, river_ctx.as_ref(), seed);
+                all_localities.extend(localities);
                 // Extra reach: trade carries a good a bit past its core homeland.
                 dilate_belt(buf, &mut belt, marine, 2, 0.72);
                 buf.goods[slot] = belt;
@@ -930,19 +1052,28 @@ pub fn compute_trade_goods(
     for (_, v) in placed_deposits {
         all.extend(v);
     }
-    all
+
+    // GOODS_LOCALITIES_PLAN.md Slice 4 (D8) — name the notable localities, now that
+    // Phase 7's culture map is active (see `sim_run_all`'s ordering).
+    super::localities::name_notable_localities(buf, &mut all_localities);
+
+    (all, all_localities)
 }
 
 /// Declarative envelope scorer for custom (and overridden) goods. Reproduces the
 /// house scoring style: domain gate Ã— climate Ã— temp/precip/elevation/lat bands Ã—
 /// fertility Ã— coast bonus. Absent terms contribute a neutral 1.0.
-fn envelope_score(buf: &WorldBuffer, env: &Envelope, domain: Domain, x: u32, y: u32) -> f32 {
+fn envelope_score(
+    buf: &WorldBuffer, env: &Envelope, domain: Domain, x: u32, y: u32,
+    rc: Option<&RiverContext>, marine_band: MarineBand,
+) -> f32 {
     let i = buf.idx(x, y);
     let land = buf.terrain[i] == 1;
     match domain {
         Domain::Marine => {
             if land { return 0.0; }
             if !(buf.is_shelf[i] == 1 || has_land_within(buf, x, y, 3)) { return 0.0; }
+            if !marine_band_ok(buf, x, y, marine_band) { return 0.0; }
         }
         Domain::Coastal => {
             if !land || buf.distance_to_ocean[i] >= 0.12 { return 0.0; }
@@ -974,9 +1105,10 @@ fn envelope_score(buf: &WorldBuffer, env: &Envelope, domain: Domain, x: u32, y: 
     if let Some([lo, hi, e]) = env.abs_lat { s *= band(abs_lat, lo, hi, e); }
     if env.fertility > 0.0 { s *= (1.0 - env.fertility) + env.fertility * fert; }
     if env.coast_bonus > 0.0 {
-        let near = if land { buf.distance_to_ocean[i] < 0.08 } else { true };
-        if near { s *= 1.0 + env.coast_bonus; }
+        let nearcoast = if land { buf.distance_to_ocean[i] < 0.08 } else { true };
+        if nearcoast { s *= 1.0 + env.coast_bonus; }
     }
+    s *= river_multiplier(rc, buf, i, env.floodplain, env.irrigation, env.riverbank, env.float_out);
     s.clamp(0.0, 1.0)
 }
 
@@ -997,12 +1129,16 @@ fn clim_base(k: u8) -> u8 {
 }
 
 /// Raw 0..1 suitability of good `g` at one cell (before localization).
-fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
+fn good_score(
+    buf: &WorldBuffer, g: usize, x: u32, y: u32,
+    rc: Option<&RiverContext>, marine_band: MarineBand,
+) -> f32 {
     let i = buf.idx(x, y);
     let land = buf.terrain[i] == 1;
     let marine = GOOD_MARINE[g];
     if marine && land { return 0.0; }
     if !marine && !land { return 0.0; }
+    if marine && !marine_band_ok(buf, x, y, marine_band) { return 0.0; }
 
     let k = clim_base(buf.koppen[i]);
     let t = buf.temperature[i];
@@ -1054,6 +1190,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
             let clim = match k { AF | AM => 1.0, AW | AS => 0.6, CWA => 0.4, _ => 0.0 };
             clim * smoothstep(20.0, 25.0, t) * smoothstep(900.0, 1400.0, p)
                 * (1.0 - smoothstep(0.18, 0.4, elev)) * (0.5 + 0.5 * fert)
+                * river_multiplier(rc, buf, i, 0.30, 0.35, 0.0, 0.0)
         }
         GOOD_FRANKINCENSE => {
             let clim = match k { BWH => 1.0, BSH => 0.8, BWK | BSK => 0.3, _ => 0.0 };
@@ -1076,6 +1213,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
         GOOD_FURS => {
             let clim = match k { DFC | DFD | DWC | DWD => 1.0, ET | DFB | DWB => 0.5, _ => 0.0 };
             clim * (1.0 - smoothstep(2.0, 10.0, t))
+                * river_multiplier(rc, buf, i, 0.0, 0.0, 0.0, 0.25)
         }
         GOOD_TIMBER => {
             let clim = match k {
@@ -1084,6 +1222,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
                 _ => 0.0,
             };
             clim * smoothstep(350.0, 800.0, p) * (0.4 + 0.6 * fert) * band(t, -5.0, 18.0, 8.0)
+                * river_multiplier(rc, buf, i, 0.0, 0.0, 0.0, 0.35)
         }
         GOOD_SALT => {
             // Arid coast solar salt pans (sebkhas). Land good.
@@ -1110,6 +1249,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
             let dryish = band(p, 300.0, 900.0, 450.0); // grain likes semi-arid to subhumid
             let low = 1.0 - smoothstep(0.45, 0.7, elev);
             clim * warm * dryish * low * (0.5 + 0.5 * fert)
+                * river_multiplier(rc, buf, i, 0.20, 0.0, 0.0, 0.0)
         }
         GOOD_IRON => {
             // Ore in hill country and mountain margins (not the highest peaks, not
@@ -1127,6 +1267,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
             let low = 1.0 - smoothstep(0.30, 0.55, elev);
             let watered = 0.35 + 0.65 * fert; // fertility carries river/alluvial moisture
             clim * warm * low * watered
+                * river_multiplier(rc, buf, i, 0.30, 0.40, 0.0, 0.0)
         }
         GOOD_HARDWOODS => {
             // Tropical rainforest export wood (ebony / mahogany / teak). Fills the
@@ -1134,6 +1275,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
             let clim = match k { AF | AM => 1.0, AW => 0.5, CWA => 0.3, _ => 0.0 };
             clim * smoothstep(800.0, 1800.0, p) * (0.4 + 0.6 * fert)
                 * (1.0 - smoothstep(0.40, 0.65, elev))
+                * river_multiplier(rc, buf, i, 0.0, 0.0, 0.0, 0.30)
         }
         GOOD_HORSES => {
             // Open semi-arid grassland / steppe horse country.
@@ -1201,7 +1343,8 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
                 // "civilisation" good): keyed on habitability, climate-independent.
                 smoothstep(0.50, 0.80, buf.habitability[i]) * 0.95
             };
-            papyrus.max(bamboo).max(manufactured)
+            (papyrus * river_multiplier(rc, buf, i, 0.0, 0.0, 0.30, 0.0))
+                .max(bamboo).max(manufactured)
         }
         GOOD_CERAMICS => {
             // Porcelain / fine pottery â€” a *manufactured* good of skilled cities
@@ -1234,6 +1377,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
             let clim = match k { AW | CWA => 1.0, AM | AF | CFA => 0.5, BSH => 0.3, _ => 0.0 };
             clim * smoothstep(19.0, 26.0, t) * band(p, 800.0, 2000.0, 600.0)
                 * (1.0 - smoothstep(0.35, 0.6, elev)) * (0.4 + 0.6 * fert)
+                * river_multiplier(rc, buf, i, 0.30, 0.0, 0.0, 0.0)
         }
         GOOD_DATES => {
             // Date palms â€” hot desert OASIS fruit: hot arid climate but locally
@@ -1242,6 +1386,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
             let oasis = 0.25 + 0.75 * fert;
             clim * smoothstep(18.0, 26.0, t) * band(abs_lat, 12.0, 34.0, 8.0)
                 * oasis * (1.0 - smoothstep(0.4, 0.65, elev))
+                * river_multiplier(rc, buf, i, 0.0, 0.45, 0.0, 0.0)
         }
         GOOD_RICE => {
             // Paddy rice: warm, wet, low alluvial land (monsoon river plains and
@@ -1251,6 +1396,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
             let wet = smoothstep(900.0, 1500.0, p);
             let low = 1.0 - smoothstep(0.18, 0.4, elev);
             clim * warm * wet * low * (0.3 + 0.7 * fert)
+                * river_multiplier(rc, buf, i, 0.40, 0.0, 0.20, 0.0)
         }
         GOOD_BARLEY => {
             // Barley & rye: the cool-belt bread grains â€” they ripen where wheat
@@ -1279,6 +1425,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
                 DFC => 0.3, _ => 0.0,
             };
             clim * band(t, 6.0, 20.0, 7.0) * smoothstep(400.0, 750.0, p) * (0.4 + 0.6 * fert)
+                * river_multiplier(rc, buf, i, 0.0, 0.0, 0.20, 0.0)
         }
         GOOD_HIDES => {
             // Hides & leather: pastoral grassland and savanna herds (and the
@@ -1289,6 +1436,7 @@ fn good_score(buf: &WorldBuffer, g: usize, x: u32, y: u32) -> f32 {
             };
             clim * band(p, 200.0, 750.0, 300.0) * (1.0 - smoothstep(0.5, 0.72, elev))
                 * band(t, 2.0, 24.0, 8.0)
+                * river_multiplier(rc, buf, i, 0.0, 0.0, 0.18, 0.0)
         }
         GOOD_BEER => {
             // Beer & ale: famed brewing towns in cool grain-and-water country
@@ -1531,9 +1679,9 @@ pub fn preview_score_grid(buf: &WorldBuffer, spec: &GoodSpec, pw: u32, ph: u32) 
             let x = (px * buf.width / pw).min(buf.width - 1);
             let y = (py * buf.height / ph).min(buf.height - 1);
             let s = if let Some(env) = &spec.scoring {
-                envelope_score(buf, env, spec.domain, x, y)
+                envelope_score(buf, env, spec.domain, x, y, None, spec.marine_band)
             } else if let Some(idx) = builtin_idx {
-                good_score(buf, idx, x, y)
+                good_score(buf, idx, x, y, None, spec.marine_band)
             } else { 0.0 };
             out[(py * pw + px) as usize] = q(s);
         }
@@ -1633,6 +1781,60 @@ mod tests {
         super::apply_salt_pans(&mut buf, &[fresh], &specs);
         assert_eq!(buf.goods[salt_slot][fi], 0, "no salt at a freshwater lake");
         assert_eq!(buf.salinity[fi], 0, "no brine at a freshwater lake");
+    }
+
+    /// GOODS_LOCALITIES_PLAN.md Slice 2 (F5) — a Bank good may never place a cell
+    /// adjacent to land, and an Inshore good may never place a cell that isn't
+    /// adjacent to land. `Either` is untouched (reproduces the old undifferentiated
+    /// `sea_coastal` gate) on both a shore cell and a bank cell.
+    #[test]
+    fn marine_band_splits_inshore_from_bank() {
+        use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
+        use crate::sim::goods_spec::MarineBand;
+
+        // A tiny world: a solid land column at x=5..7, sea either side. is_shelf=1
+        // everywhere at sea so the shelf test alone can't already do the sorting.
+        let (w, h) = (20u32, 10u32);
+        let n = (w * h) as usize;
+        let mut buf = WorldBuffer {
+            cols: ColumnSet::ALL, width: w, height: h, tiles_x: 1, tiles_y: 1,
+            equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0, obliquity: 23.44,
+            rotation_rate: 1.0, solar_lum: 1.0, greenhouse: 1.0, eccentricity: 0.0167, dryness: 1.0,
+            terrain: vec![0u8; n], elevation: vec![0.0f32; n], sea_depth: vec![0.3; n],
+            is_shelf: vec![1u8; n], is_shelf_edge: vec![0; n], locked_bits: Vec::new(),
+            plate_index: Vec::new(), boundary_type: Vec::new(), is_volcanic: Vec::new(),
+            temperature: Vec::new(), precipitation: Vec::new(),
+            koppen: vec![0u8; n],
+            soil_type: Vec::new(), fertility: Vec::new(), fishery: Vec::new(),
+            current_type: Vec::new(), wind_vx: Vec::new(), wind_vy: Vec::new(), wind_speed: Vec::new(),
+            current_vx: Vec::new(), current_vy: Vec::new(), distance_to_ocean: Vec::new(),
+            habitability: Vec::new(), salinity: Vec::new(), shark_risk: Vec::new(),
+            goods: Vec::new(), shipworm_risk: Vec::new(), storm_base: Vec::new(),
+            reef_risk: Vec::new(), disease_risk: Vec::new(), precip_summer_frac: Vec::new(),
+            seasonal_amp: Vec::new(), sst: Vec::new(), snow_frac: Vec::new(), biome: Vec::new(),
+        };
+        for y in 0..h {
+            for x in 5..8u32 {
+                buf.terrain[(y * w + x) as usize] = 1;
+            }
+        }
+        // (x=8, y=5) is the sea cell touching the land column at x=7.
+        let shore = (8u32, 5u32);
+        // (x=15, y=5) is far offshore (wrapped distance to the land column ~8 cells).
+        let bank = (15u32, 5u32);
+
+        assert!(super::has_land_within(&buf, shore.0, shore.1, 1), "x=8 must be adjacent to the land column");
+        assert!(!super::has_land_within(&buf, bank.0, bank.1, 1), "x=15 must NOT be adjacent to the land column");
+
+        assert!(super::marine_band_ok(&buf, shore.0, shore.1, MarineBand::Either));
+        assert!(super::marine_band_ok(&buf, shore.0, shore.1, MarineBand::Inshore));
+        assert!(!super::marine_band_ok(&buf, shore.0, shore.1, MarineBand::Bank),
+            "a Bank good must never place a cell adjacent to land");
+
+        assert!(super::marine_band_ok(&buf, bank.0, bank.1, MarineBand::Either));
+        assert!(super::marine_band_ok(&buf, bank.0, bank.1, MarineBand::Bank));
+        assert!(!super::marine_band_ok(&buf, bank.0, bank.1, MarineBand::Inshore),
+            "an Inshore good must never place a cell off the shore fringe");
     }
 }
 

@@ -255,6 +255,7 @@ mod tests {
             id: id.into(), name: id.into(), icon: "".into(), color: "#fff".into(),
             enabled: true, domain: Domain::Continental, distribution: Distribution::Local,
             rarity: 0.5, desire: 0.5, network_luxury: false, builtin: false, deposit: None,
+            marine_band: crate::sim::goods_spec::MarineBand::Either,
             scoring: None, category: "x".into(), need_tier: 1, base_value: 1.0,
             bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0, consumption_interval: 30.0,
         }

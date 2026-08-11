@@ -897,7 +897,14 @@ sim/                            ← organised into per-phase step folders; mod.r
                                     models scored from plate boundaries/volcanism,
                                     belt→district→working hierarchy, per-working
                                     grade/extent/depth — see §8.16)
-                                  · goods_spec.rs (GoodSpec, 45 belts + ~21 manufactured)
+                                  · localities.rs (THE AGRICULTURAL/BIOLOGICAL
+                                    counterpart of deposits.rs — belt→locality
+                                    hierarchy + full modulation for every
+                                    Global/Local good, see §8.19)
+                                  · goods_spec.rs (GoodSpec, 45 belts + ~21 manufactured;
+                                    `marine_band` — Inshore/Bank/Either, §8.19)
+                                  · goods_validation.rs (test-only — Slice 0's coverage
+                                    diagnostic, §8.19)
   shared/                       ← cultures.rs (organic peoples map + 14 traits + per-kit
                                     male AND female given names) · inheritance.rs (the LAW
                                     OF INHERITANCE — line rule + division rule per culture,
@@ -1877,6 +1884,88 @@ Guarded in Rust by `koppen_colors_are_distinct` (Dsc and Dsd shipped IDENTICAL, 
 two zones rendered as one), `elevation_ramp_is_monotone_in_lightness`,
 `bathymetry_darkens_with_depth`, `precipitation_bands_are_sequential_and_never_neutral`
 and `temperature_ramp_pivots_on_freezing`.
+
+---
+
+### 8.19 Goods localities — the agricultural/biological hierarchy (`docs/GOODS_LOCALITIES_PLAN.md`)
+
+Trade goods get what minerals already had (§8.16): belt → LOCALITY → cell, the
+same two-level structure `deposits.rs` uses, for every enabled `Global`/`Local`
+good (`Deposits`/`Manufactured` goods are out of scope — F2's whole premise is
+that minerals already have their own, better hierarchy).
+
+- **Rivers as a placement factor** (Slice 1, F6). `biological::RiverContext`
+  (built ONCE per world — the same discipline `deposits::GeoContext` already
+  applies) carries distance-to-any-river, distance-to-NAVIGABLE-river and
+  delta/floodplain membership, multi-source BFS (§8.9 rule 1). `river_multiplier`
+  is a MULTIPLIER on an existing score, never a replacement (§5.4 of the plan) —
+  `floodplain`/`irrigation`/`riverbank`/`float_out` weights, wired into the
+  specific built-in goods the plan names (rice, cotton, wheat, sugar, indigo,
+  dates, paper's papyrus branch, honey, hides, timber, hardwoods, furs) and
+  exposed as four new `Envelope` fields (serde-defaulted to 0 — no effect) for
+  custom goods. `good_score`/`envelope_score` both take `rc: Option<&RiverContext>`;
+  `None` (the Goods Editor's live preview, which has no rivers to hand) is a true
+  no-op, not an approximation.
+- **Marine inshore/bank split** (Slice 2, F5). `GoodSpec.marine_band`
+  (`Either`/`Inshore`/`Bank`, serde-defaulted to `Either`) narrows the old
+  undifferentiated `sea_coastal` gate to a STRICT SUBSET of itself —
+  `marine_band_ok` — so an `Either` good's placement is byte-identical to before
+  this slice. Shipped defaults (`default_marine_band_for`): inshore = pearls,
+  coral, bay_salt, tyrian_purple, amber; bank = stockfish, herring, whaling.
+- **The locality generator + full modulation** (Slice 3, D1/D5/D6,
+  `localities.rs`). `GoodLocality { good, x, y, radius_km, grade, extent, name,
+  river_fed }` — deliberately the same shape as `deposits::Deposit`. The size
+  ladder (§2.1 of the plan): luxury locality 175 km (wine, silk, spices, cacao,
+  cloves, pepper) · pastoral/secondary 400 km (wool, hides, horses, timber,
+  tobacco) · staple region 900 km (grain, rice, furs, barley, millet) — every
+  other good falls back to a tier from its own `Distribution`/rarity, so nothing
+  is left without an answer. Full modulation: `belt[i] = max(FLOOR, belt[i] *
+  (FRINGE + (1-FRINGE)*influence[i]))` — `FLOOR` is the entire safety mechanism
+  (D5's own risk 5.1): a belt cell already producing never falls to literal zero,
+  however far it sits from every locality core. Runs BEFORE `dilate_belt` so the
+  trade-reach rings spread from the already-modulated belt.
+- **Notable naming** (Slice 4, D8). Localities at/above a quality threshold draw
+  a deterministic name from `names::gen_name` — the SAME per-cell hearth lookup
+  settlements already use, so a locality's name is in the local culture for free,
+  no new naming machinery.
+- **Persistence.** `metadata["good_localities"]` (JSON), exactly parallel to
+  `metadata["deposits"]` — no tile-column change (rule 7). Written by
+  `commands::sim_commands::persist_goods_placement`, the one helper all four
+  `compute_trade_goods` call sites now share.
+- **Production wiring** (Slice 7, D2). `compute_economy`
+  (`commands/query_commands/economy.rs`) reads `good_localities` exactly the way
+  it already reads `deposits` — a hub's quality for a good blends toward the mean
+  grade of any locality inside its catchment (50% weight; `share`-based quality
+  still carries the other half, since Slice 3's modulated belt VALUES already
+  partly reflect locality quality — a blend, not a replacement, per D2).
+  `campaign_province_potential` (`campaign_commands/province.rs`) exposes
+  `ProvincePotential.localities: Vec<ProvinceLocalityDot>` alongside the existing
+  `.deposits`, and `ProvinceGoodPotential` gained `has_locality`/
+  `mean_locality_grade`/`locality_count`, mirrored in `types/campaign.ts`.
+- **Slice 0's own gate**: `sim::step8_biological_goods::goods_validation`
+  (test-only) builds a real, moderate-sized procedural world end-to-end (plates
+  through biological — NOT the synthetic `CampaignSim` fixture `economy_
+  validation.rs` uses) and asserts no enabled `Global`/`Local` good places a belt
+  that reaches zero settlements' catchments. `Deposits`-distribution goods are
+  explicitly OUT of that hard floor (F2 — they have their own, different
+  coverage guarantee, `no_shipped_mineral_places_nothing`); a handful of the
+  rarest deposit goods missing every settlement's catchment at this diagnostic's
+  deliberately modest world size is printed as a FINDING, not asserted. One
+  pre-existing belt good, `dyes` (murex purple, untouched by any Slice 1-4
+  change — verified), is named as an explicit, documented exception rather than
+  either silently loosening the floor or leaving the gate permanently red.
+  **Do not add a process-global `cultures::set_active` call to a test** — `cargo
+  test --lib` runs the suite in parallel within one process, and this diagnostic
+  originally raced `econ_inheritance_rules_fragment_differently` /
+  `econ_scorecard_is_deterministic` by mutating that exact global; it now relies
+  on `names::gen_name`'s legacy-culture-grid fallback instead, which is
+  deterministic on its own.
+
+**Still frontend work, tracked in `docs/GOODS_LOCALITIES_PLAN.md` itself**: Slice
+5 (the global map — full-res land-clipped coverage/quality overlay replacing
+`compute_good_regions`'s coarse blocks) and Slice 6 (the province survey plate's
+real locality squares, replacing plate 6a's hashed markers) — see the plan doc
+for current status.
 
 ---
 

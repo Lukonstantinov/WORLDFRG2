@@ -2267,6 +2267,11 @@ export interface ProvinceGoodPotential {
   mean_grade: number;    // deposit goods: mean working grade 0..1
   workings: number;      // deposit goods: number of ore workings in the province
   best_depth: number;    // deposit goods: deepest present (0 surface … 3 flooded)
+  /** GOODS_LOCALITIES_PLAN.md Slice 7 — the non-mineral counterpart of mean_grade/
+   *  workings: this good has at least one terroir LOCALITY in the province. */
+  has_locality: boolean;
+  mean_locality_grade: number; // 0..1, when has_locality
+  locality_count: number;
 }
 
 /** #9 · One ore working located in a province (real cell coords) for the minimap. */
@@ -2279,10 +2284,26 @@ export interface ProvinceDepositDot {
   depth: number;
 }
 
-/** #9 · A province's full goods picture: potential goods + ore workings. */
+/** GOODS_LOCALITIES_PLAN.md Slice 6 · one terroir locality located in a province
+ *  (real cell coords), for the survey-plate goods layer — the non-mineral
+ *  counterpart of `ProvinceDepositDot`. */
+export interface ProvinceLocalityDot {
+  good: string;
+  x: number;
+  y: number;
+  grade: number;
+  extent: number;
+  radius_km: number;
+  /** Empty unless the locality cleared the "notable" quality threshold. */
+  name: string;
+  river_fed: boolean;
+}
+
+/** #9 · A province's full goods picture: potential goods + ore workings + localities. */
 export interface ProvincePotential {
   goods: ProvinceGoodPotential[];
   deposits: ProvinceDepositDot[];
+  localities: ProvinceLocalityDot[];
 }
 
 /** REALM_AND_GOVERNMENT_PLAN.md R1 · one proclaimed realm, made into a territory

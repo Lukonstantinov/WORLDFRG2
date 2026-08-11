@@ -276,6 +276,7 @@ fn build_good(sec: &RawSection, report: &mut ImportReport) -> Option<GoodSpec> {
         network_luxury,
         builtin: false,
         deposit,
+        marine_band: crate::sim::goods_spec::default_marine_band_for(&sec.id),
         scoring: if distribution == Distribution::Deposits || distribution == Distribution::Manufactured {
             None
         } else {
@@ -417,6 +418,7 @@ mod tests {
             id: "iron".into(), name: "Iron (existing)".into(), icon: "x".into(), color: "#000".into(),
             enabled: true, domain: Domain::Continental, distribution: Distribution::Deposits,
             rarity: 0.5, desire: 0.5, network_luxury: false, builtin: true, deposit: None, scoring: None,
+            marine_band: crate::sim::goods_spec::MarineBand::Either,
             category: "metal".into(), need_tier: 1, base_value: 3.0, bulk: 1.0, perishable: 0.0,
             inputs: Vec::new(), labor: 1.0, consumption_interval: 45.0,
         }];
